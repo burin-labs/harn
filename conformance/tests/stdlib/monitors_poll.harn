@@ -1,0 +1,16 @@
+import { wait_for } from "std/monitors"
+
+pipeline test(harness: Harness, task) {
+  const result = wait_for(
+    harness.runtime,
+    {
+      wait_id: "conformance-monitor-poll",
+      timeout: 1ms,
+      poll_interval: 5ms,
+      source: {label: "conformance-poll", poll: { _ -> return {ready: true} }},
+      condition: { state -> state.ready },
+    },
+  )
+  harness.stdio.println(result.status == "matched")
+  harness.stdio.println(result.poll_count == 1)
+}

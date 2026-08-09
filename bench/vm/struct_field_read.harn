@@ -1,0 +1,17 @@
+pipeline default(harness: Harness, task) {
+  struct Point {
+    x: int
+    y: int
+    z: int
+  }
+  const point = Point {x: 3, y: 4, z: 5}
+  let i = 0
+  let total = 0
+  while i < 150000 {
+    total = total + point.x + point.y + point.z
+    i = i + 1
+  }
+  if total < 0 {
+    harness.stdio.log("unreachable")
+  }
+}

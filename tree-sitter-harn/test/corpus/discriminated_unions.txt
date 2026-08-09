@@ -1,0 +1,166 @@
+==================
+Tagged Shape Union With Type Field
+==================
+
+type Event = {type: "click", x: int, y: int} | {type: "scroll", dy: int}
+
+---
+
+(source_file
+  (type_declaration
+    name: (identifier)
+    type: (type_annotation
+      (type_annotation
+        (shape_type
+          (shape_field
+            name: (identifier)
+            type: (type_annotation
+              (string_literal
+                (string_delimiter)
+                (string_content)
+                (string_delimiter))))
+          (shape_field
+            name: (identifier)
+            type: (type_annotation
+              (identifier)))
+          (shape_field
+            name: (identifier)
+            type: (type_annotation
+              (identifier)))))
+      (type_annotation
+        (shape_type
+          (shape_field
+            name: (identifier)
+            type: (type_annotation
+              (string_literal
+                (string_delimiter)
+                (string_content)
+                (string_delimiter))))
+          (shape_field
+            name: (identifier)
+            type: (type_annotation
+              (identifier))))))))
+
+==================
+Pure Literal Union Type
+==================
+
+type Verdict = "pass" | "fail" | "unclear"
+
+---
+
+(source_file
+  (type_declaration
+    name: (identifier)
+    type: (type_annotation
+      (type_annotation
+        (type_annotation
+          (string_literal
+            (string_delimiter)
+            (string_content)
+            (string_delimiter)))
+        (type_annotation
+          (string_literal
+            (string_delimiter)
+            (string_content)
+            (string_delimiter))))
+      (type_annotation
+        (string_literal
+          (string_delimiter)
+          (string_content)
+          (string_delimiter))))))
+
+==================
+Intersection Type
+==================
+
+type Combined = {x: int} & {y: int}
+
+---
+
+(source_file
+  (type_declaration
+    name: (identifier)
+    type: (type_annotation
+      (type_annotation
+        (shape_type
+          (shape_field
+            name: (identifier)
+            type: (type_annotation
+              (identifier)))))
+      (type_annotation
+        (shape_type
+          (shape_field
+            name: (identifier)
+            type: (type_annotation
+              (identifier))))))))
+
+==================
+Intersection Binds Tighter Than Union
+==================
+
+type Tagged = A & B | C
+
+---
+
+(source_file
+  (type_declaration
+    name: (identifier)
+    type: (type_annotation
+      (type_annotation
+        (type_annotation
+          (identifier))
+        (type_annotation
+          (identifier)))
+      (type_annotation
+        (identifier)))))
+
+==================
+Optional Type Sugar
+==================
+
+type Maybe = string?
+
+---
+
+(source_file
+  (type_declaration
+    name: (identifier)
+    type: (type_annotation
+      (type_annotation
+        (identifier)))))
+
+==================
+Optional Type With Generic
+==================
+
+type MaybeList = list<int>?
+
+---
+
+(source_file
+  (type_declaration
+    name: (identifier)
+    type: (type_annotation
+      (type_annotation
+        (identifier)
+        (type_annotation
+          (identifier))))))
+
+==================
+Optional Binds Tighter Than Intersection
+==================
+
+type Tagged = A & B?
+
+---
+
+(source_file
+  (type_declaration
+    name: (identifier)
+    type: (type_annotation
+      (type_annotation
+        (identifier))
+      (type_annotation
+        (type_annotation
+          (identifier))))))

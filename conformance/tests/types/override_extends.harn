@@ -1,0 +1,8 @@
+pipeline base(harness: Harness, task) {
+  harness.stdio.println("base step 1")
+  harness.stdio.println("base step 2")
+}
+
+pipeline default(harness: Harness, task) extends base {
+  harness.stdio.println("child step 3")
+}

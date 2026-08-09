@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/opentrustgraph/v0/trust-chain.schema.json",
+  "title": "OpenTrustGraph TrustChainExport",
+  "description": "Ordered OpenTrustGraph records plus chain verification metadata.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "chain", "records"],
+  "properties": {
+    "schema": {
+      "const": "opentrustgraph-chain/v0"
+    },
+    "chain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "topic",
+        "total",
+        "root_hash",
+        "verified",
+        "generated_at",
+        "producer"
+      ],
+      "properties": {
+        "topic": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Canonical event-log topic or exported stream name."
+        },
+        "total": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of records in this ordered export."
+        },
+        "root_hash": {
+          "type": ["string", "null"],
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "description": "The final record's entry_hash, or null for an empty export."
+        },
+        "verified": {
+          "type": "boolean",
+          "description": "Whether the producer verified record contracts, required approval evidence, record hashes, and hash linkage before export."
+        },
+        "generated_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "producer": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "version"],
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "version": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    },
+    "records": {
+      "type": "array",
+      "items": {
+        "$ref": "trust-record.v0.schema.json"
+      }
+    }
+  }
+}

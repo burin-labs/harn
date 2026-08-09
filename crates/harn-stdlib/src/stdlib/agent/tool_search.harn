@@ -1,0 +1,447 @@
+import { agent_emit_event } from "std/agent/state"
+
+fn __tool_search_config(value) {
+  if value == nil {
+    return nil
+  }
+  if type_of(value) == "bool" {
+    if !value {
+      return nil
+    }
+    return {
+      variant: "bm25",
+      mode: "auto",
+      strategy: "bm25",
+      name: "__harn_tool_search",
+      always_loaded: [],
+    }
+  }
+  if type_of(value) == "string" {
+    return {
+      variant: value,
+      mode: "auto",
+      strategy: value,
+      name: "__harn_tool_search",
+      always_loaded: [],
+    }
+  }
+  if type_of(value) != "dict" {
+    return nil
+  }
+  const variant = value?.variant ?? "bm25"
+  return {
+    variant: variant,
+    mode: value?.mode ?? "auto",
+    strategy: value?.strategy ?? variant,
+    name: value?.name ?? "__harn_tool_search",
+    always_loaded: value?.always_loaded ?? [],
+    budget_tokens: value?.budget_tokens,
+  }
+}
+
+fn __tool_search_provider_has_native(llm: HarnessLlm, opts, cfg) {
+  if type_of(cfg?.strategy) != "string" {
+    return false
+  }
+  if cfg.variant == "hybrid" {
+    return false
+  }
+  const info = try {
+    if opts?.model != nil {
+      llm.model_info(opts.model)
+    } else if opts?.provider != nil {
+      llm.model_info(opts.provider)
+    } else {
+      nil
+    }
+  } catch (_e) {
+    nil
+  }
+  const caps = try {
+    if info != nil && info?.capabilities != nil {
+      info.capabilities
+    } else if info != nil {
+      llm.provider_capabilities(info.provider, info.id)
+    } else if opts?.provider != nil && opts?.model != nil {
+      llm.provider_capabilities(opts.provider, opts.model)
+    } else {
+      nil
+    }
+  } catch (_e) {
+    nil
+  }
+  return caps != nil && caps?.defer_loading && len(caps?.tool_search ?? []) > 0
+}
+
+fn __tool_search_client_requested(llm: HarnessLlm, opts) {
+  const cfg = __tool_search_config(opts?.tool_search)
+  if cfg == nil {
+    return false
+  }
+  if cfg.mode == "client" {
+    return true
+  }
+  if cfg.mode == "native" {
+    return false
+  }
+  return !__tool_search_provider_has_native(llm, opts, cfg)
+}
+
+fn __tool_search_tools(registry) {
+  if type_of(registry) == "dict" {
+    return registry?.tools ?? []
+  }
+  if type_of(registry) == "list" {
+    return registry
+  }
+  return []
+}
+
+fn __tool_search_registry_like(registry, tools) {
+  if type_of(registry) == "dict" {
+    return registry + {tools: tools}
+  }
+  return {tools: tools}
+}
+
+fn __tool_search_contains(list, name) {
+  for item in list {
+    if item == name {
+      return true
+    }
+  }
+  return false
+}
+
+fn __tool_search_find_tool(tools, name) {
+  for entry in tools {
+    if entry?.name == name {
+      return entry
+    }
+  }
+  return nil
+}
+
+fn __tool_search_estimate_tokens(entry) {
+  return len(json_stringify(entry)) / 4 + 1
+}
+
+fn __tool_search_strategy(cfg) {
+  const strategy = cfg?.strategy ?? cfg?.variant ?? "bm25"
+  if type_of(strategy) == "closure" {
+    return strategy
+  }
+  if type_of(strategy) == "dict" && type_of(strategy?.handler) == "closure" {
+    return strategy
+  }
+  if type_of(strategy) != "string" {
+    throw "tool_search.strategy: expected \"bm25\", \"regex\", \"hybrid\", a scorer closure, or {handler}"
+  }
+  if strategy != "bm25" && strategy != "regex" && strategy != "hybrid" {
+    throw "tool_search.strategy: Harn client mode supports \"bm25\", \"regex\", \"hybrid\", or custom scorers"
+  }
+  return strategy
+}
+
+fn __tool_search_strategy_label(strategy) {
+  if type_of(strategy) == "string" {
+    return strategy
+  }
+  if type_of(strategy) == "dict" && strategy?.name != nil {
+    return strategy.name
+  }
+  return "custom"
+}
+
+fn __tool_search_description(strategy) {
+  const label = __tool_search_strategy_label(strategy)
+  if label == "regex" {
+    return "Search for deferred tools. Pass `query` as a case-insensitive regex. The result is JSON with `tool_names` in rank order; only those tools will be visible next turn."
+  }
+  if label == "hybrid" {
+    return "Search for deferred tools. Pass `query` as natural-language keywords; Harn will fuse lexical and BM25 rankings. The result is JSON with `tool_names` in rank order; only those tools will be visible next turn."
+  }
+  return "Search for deferred tools. Pass `query` as natural-language keywords. The result is JSON with `tool_names` in rank order; only those tools will be visible next turn."
+}
+
+fn __tool_search_normalize_result(value) {
+  if type_of(value) == "string" {
+    const parsed = try {
+      json_parse(value)
+    }
+    if is_ok(parsed) {
+      return __tool_search_normalize_result(unwrap(parsed))
+    }
+    return {tool_names: []}
+  }
+  if type_of(value) == "dict" {
+    if value?.tool_names != nil {
+      return value
+    }
+    if value?.ranked != nil {
+      return __tool_search_normalize_result(value.ranked)
+    }
+    if value?.tool_name != nil {
+      return {tool_names: [value.tool_name], ranked: [value]}
+    }
+    if value?.name != nil {
+      return {tool_names: [value.name], ranked: [value + {tool_name: value.name}]}
+    }
+    return {tool_names: []}
+  }
+  if type_of(value) == "list" {
+    let names = []
+    let ranked = []
+    for item in value {
+      if type_of(item) == "string" {
+        names = names.appending(item)
+        ranked = ranked.appending({tool_name: item, score: nil, snippet: ""})
+      } else if type_of(item) == "dict" {
+        const name = item?.tool_name ?? item?.name
+        if name != nil {
+          names = names.appending(name)
+          ranked = ranked.appending(item + {tool_name: name})
+        }
+      }
+    }
+    return {tool_names: names, ranked: ranked}
+  }
+  return {tool_names: []}
+}
+
+fn __tool_search_run(args, state) {
+  const query = args?.query ?? ""
+  const raw_result = if type_of(state.strategy) == "closure" {
+    state.strategy(query, state.deferred_registry, {variant: state.variant})
+  } else if type_of(state.strategy) == "dict"
+    && type_of(state.strategy?.handler)
+    == "closure" {
+    state.strategy.handler(query, state.deferred_registry, state.strategy)
+  } else {
+    __host_tool_search_score(
+      query,
+      state.deferred_registry,
+      {strategy: state.strategy, variant: state.variant},
+    )
+  }
+  const normalized = __tool_search_normalize_result(raw_result)
+  const ranked = normalized?.ranked ?? []
+  let names = []
+  for name in normalized?.tool_names ?? [] {
+    names = names.appending(name)
+  }
+  const diagnostic = if len(names) == 0 {
+    "no deferred tools matched the query; try broader terms"
+  } else {
+    nil
+  }
+  return json_stringify({tool_names: names, ranked: ranked, diagnostic: diagnostic})
+}
+
+fn __tool_search_synthetic_tool(registry, state) {
+  return tool_define(
+    registry,
+    state.name,
+    __tool_search_description(state.strategy),
+    {
+      parameters: {query: {type: "string", description: "Search query for deferred tools"}},
+      handler: { args -> __tool_search_run(args, state) },
+    },
+  )
+}
+
+fn __tool_search_initial_state(opts) {
+  const cfg = __tool_search_config(opts?.tool_search)
+  const source_tools = __tool_search_tools(opts?.tools)
+  let eager = []
+  let deferred = []
+  for entry in source_tools {
+    const name = entry?.name ?? ""
+    const pinned = __tool_search_contains(cfg.always_loaded, name)
+    if entry?.defer_loading && !pinned {
+      deferred = deferred.appending(entry)
+    } else {
+      eager = eager.appending(entry)
+    }
+  }
+  if len(source_tools) > 0 && len(eager) == 0 {
+    throw "tool_search: all tools have defer_loading set. At least one tool must be non-deferred so the model has somewhere to start."
+  }
+  return {
+    enabled: true,
+    name: cfg.name,
+    variant: cfg.variant,
+    strategy: __tool_search_strategy(cfg),
+    strategy_label: __tool_search_strategy_label(__tool_search_strategy(cfg)),
+    budget_tokens: cfg.budget_tokens,
+    original_registry: opts?.tools,
+    eager_tools: eager,
+    deferred_tools: deferred,
+    deferred_registry: __tool_search_registry_like(opts?.tools, deferred),
+    promoted: [],
+  }
+}
+
+fn __tool_search_build_tools(opts, state) {
+  let visible = []
+  for entry in state.eager_tools {
+    visible = visible.appending(entry)
+  }
+  for name in state.promoted {
+    const entry = __tool_search_find_tool(state.deferred_tools, name)
+    if entry != nil {
+      visible = visible.appending(entry)
+    }
+  }
+  const registry = __tool_search_registry_like(state.original_registry, visible)
+  return __tool_search_synthetic_tool(registry, state)
+}
+
+/**
+ * agent_tool_search_inject_if_needed.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_tool_search_inject_if_needed(llm: HarnessLlm, opts) {
+  if !__tool_search_client_requested(llm, opts) {
+    return opts
+  }
+  const state = opts?._tool_search_client ?? __tool_search_initial_state(opts)
+  return opts + {_tool_search_client: state, tools: __tool_search_build_tools(opts, state)}
+}
+
+fn __tool_search_call_id(call) {
+  return call?.id ?? call?.tool_call_id ?? ""
+}
+
+/**
+ * agent_tool_search_emit_queries.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_tool_search_emit_queries(agent: HarnessAgent, session_id, tool_calls, opts) {
+  const state = opts?._tool_search_client
+  if state == nil {
+    return
+  }
+  for call in tool_calls {
+    if call?.name == state.name {
+      agent_emit_event(
+        agent,
+        session_id,
+        "tool_search_query",
+        {
+          tool_use_id: __tool_search_call_id(call),
+          name: "tool_search_tool_" + state.strategy_label,
+          query: call?.arguments ?? {},
+          strategy: state.strategy_label,
+          mode: "client",
+        },
+      )
+    }
+  }
+}
+
+fn __tool_search_parse_result(result) {
+  if type_of(result) == "dict" {
+    return result
+  }
+  if type_of(result) == "string" {
+    const parsed = try {
+      json_parse(result)
+    }
+    if is_ok(parsed) {
+      return unwrap(parsed)
+    }
+  }
+  return {tool_names: []}
+}
+
+fn __tool_search_apply_budget(state, names) {
+  let promoted = state.promoted
+  for name in names {
+    if !__tool_search_contains(promoted, name)
+      && __tool_search_find_tool(state.deferred_tools, name)
+      != nil {
+      promoted = promoted.appending(name)
+    }
+  }
+  const budget = state?.budget_tokens
+  if budget == nil {
+    return state + {promoted: promoted}
+  }
+  let total = 0
+  let kept = []
+  for name in promoted {
+    const entry = __tool_search_find_tool(state.deferred_tools, name)
+    if entry != nil {
+      const estimate = __tool_search_estimate_tokens(entry)
+      while total + estimate > budget && len(kept) > 0 {
+        const evicted = kept[0]
+        const evicted_tool = __tool_search_find_tool(state.deferred_tools, evicted)
+        total = total - __tool_search_estimate_tokens(evicted_tool)
+        kept = kept.slice(1)
+      }
+      if estimate <= budget {
+        kept = kept.appending(name)
+        total = total + estimate
+      }
+    }
+  }
+  return state + {promoted: kept}
+}
+
+fn __tool_search_promoted_names(state, names) {
+  let out = []
+  for name in names {
+    if __tool_search_contains(state.promoted, name) {
+      out = out.appending(name)
+    }
+  }
+  return out
+}
+
+/**
+ * agent_tool_search_record_results.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_tool_search_record_results(
+  agent: HarnessAgent,
+  session_id,
+  tool_calls,
+  dispatch,
+  opts,
+) {
+  let state = opts?._tool_search_client
+  if state == nil {
+    return opts
+  }
+  for (index, call) in iter(tool_calls).enumerate() {
+    if call?.name != state.name {
+      continue
+    }
+    const result = __tool_search_parse_result(dispatch[index]?.result)
+    const names = result?.tool_names ?? []
+    state = __tool_search_apply_budget(state, names)
+    const promoted = __tool_search_promoted_names(state, names)
+    agent_emit_event(
+      agent,
+      session_id,
+      "tool_search_result",
+      {
+        tool_use_id: __tool_search_call_id(call),
+        promoted: promoted,
+        strategy: state.strategy_label,
+        mode: "client",
+      },
+    )
+  }
+  return opts + {_tool_search_client: state}
+}

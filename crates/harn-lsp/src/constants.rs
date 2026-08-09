@@ -1,0 +1,1175 @@
+use std::collections::BTreeMap;
+use std::sync::OnceLock;
+
+/// Known builtin names with their signatures for completion.
+/// Each entry is (name, detail) where detail shows the parameter signature.
+pub(crate) const BUILTINS: &[(&str, &str)] = &[
+    // I/O
+    ("log", "log(msg) -> nil"),
+    // Type conversion
+    ("type_of", "type_of(value) -> string"),
+    ("to_string", "to_string(value) -> string"),
+    ("to_int", "to_int(value) -> int"),
+    ("to_float", "to_float(value) -> float"),
+    // JSON
+    ("json_parse", "json_parse(str) -> value"),
+    ("json_stringify", "json_stringify(value) -> string"),
+    ("json_validate", "json_validate(data, schema) -> bool"),
+    ("schema_check", "schema_check(data, schema) -> Result"),
+    ("schema_parse", "schema_parse(data, schema) -> Result"),
+    (
+        "schema_report",
+        "schema_report(data, schema, apply_defaults?) -> dict",
+    ),
+    (
+        "schema_to_json_schema",
+        "schema_to_json_schema(schema) -> dict",
+    ),
+    ("schema_extend", "schema_extend(base, overrides) -> dict"),
+    ("schema_partial", "schema_partial(schema) -> dict"),
+    ("schema_pick", "schema_pick(schema, keys) -> dict"),
+    ("schema_omit", "schema_omit(schema, keys) -> dict"),
+    ("json_extract", "json_extract(text, key?) -> value"),
+    // File system
+    ("read_file", "read_file(path) -> string"),
+    ("write_file", "write_file(path, content) -> nil"),
+    (
+        "replace_file",
+        "replace_file(path, content, options?) -> dict",
+    ),
+    (
+        "replace_file_result",
+        "replace_file_result(path, content, options?) -> Result<dict, dict>",
+    ),
+    (
+        "replace_file_bytes",
+        "replace_file_bytes(path, content, options?) -> dict",
+    ),
+    (
+        "replace_file_bytes_result",
+        "replace_file_bytes_result(path, content, options?) -> Result<dict, dict>",
+    ),
+    ("file_exists", "file_exists(path) -> bool"),
+    ("path_status", "path_status(path, access?) -> dict"),
+    ("delete_file", "delete_file(path) -> nil"),
+    ("list_dir", "list_dir(path) -> list"),
+    ("mkdir", "mkdir(path) -> nil"),
+    ("stat", "stat(path) -> dict"),
+    ("copy_file", "copy_file(src, dst) -> nil"),
+    ("append_file", "append_file(path, content) -> nil"),
+    ("path_join", "path_join(parts...) -> string"),
+    (
+        "path_workspace_info",
+        "path_workspace_info(path, workspace_root?) -> dict",
+    ),
+    (
+        "path_workspace_normalize",
+        "path_workspace_normalize(path, workspace_root?) -> string | nil",
+    ),
+    (
+        "path_workspace_canonicalize_existing",
+        "path_workspace_canonicalize_existing(path, workspace_root?) -> string | nil",
+    ),
+    ("temp_dir", "temp_dir() -> string"),
+    ("asset_root", "asset_root() -> string"),
+    ("execution_root", "execution_root() -> string"),
+    ("runtime_paths", "runtime_paths() -> dict"),
+    ("runtime_context", "runtime_context() -> dict"),
+    ("task_current", "task_current() -> dict"),
+    (
+        "runtime_context_get",
+        "runtime_context_get(key, default?) -> any",
+    ),
+    (
+        "runtime_context_set",
+        "runtime_context_set(key, value) -> any",
+    ),
+    ("runtime_context_clear", "runtime_context_clear(key) -> any"),
+    ("runtime_context_values", "runtime_context_values() -> dict"),
+    // Process
+    ("exec", "exec(cmd, args...) -> dict"),
+    ("exec_at", "exec_at(dir, cmd, args...) -> dict"),
+    ("shell", "shell(cmd) -> dict"),
+    ("shell_at", "shell_at(dir, cmd) -> dict"),
+    // Environment
+    ("env", "env(name) -> string"),
+    ("timestamp", "timestamp() -> float"),
+    ("exit", "exit(code) -> nil"),
+    // Regex
+    (
+        "regex_match",
+        "regex_match(pattern, text, flags?) -> list | nil",
+    ),
+    (
+        "regex_replace",
+        "regex_replace(pattern, replacement, text, flags?) -> string",
+    ),
+    (
+        "regex_captures",
+        "regex_captures(pattern, text, flags?) -> list",
+    ),
+    ("regex_split", "regex_split(text, pattern, flags?) -> list"),
+    // HTTP
+    ("http_get", "http_get(url) -> dict"),
+    ("http_post", "http_post(url, body, headers?) -> dict"),
+    ("http_put", "http_put(url, body, headers?) -> dict"),
+    ("http_patch", "http_patch(url, body, headers?) -> dict"),
+    ("http_delete", "http_delete(url) -> dict"),
+    (
+        "http_request",
+        "http_request(method, url, options?) -> dict",
+    ),
+    ("http_session", "http_session(options?) -> string"),
+    (
+        "http_session_request",
+        "http_session_request(session, method, url, options?) -> dict",
+    ),
+    ("http_session_close", "http_session_close(session) -> bool"),
+    (
+        "sse_connect",
+        "sse_connect(method, url, options?) -> string",
+    ),
+    (
+        "sse_receive",
+        "sse_receive(stream, timeout_ms?) -> dict | nil",
+    ),
+    ("sse_close", "sse_close(stream) -> bool"),
+    ("sse_event", "sse_event(event, options?) -> string"),
+    (
+        "sse_server_response",
+        "sse_server_response(options?) -> dict",
+    ),
+    (
+        "sse_server_send",
+        "sse_server_send(stream, event, options?) -> bool",
+    ),
+    (
+        "sse_server_heartbeat",
+        "sse_server_heartbeat(stream, comment?) -> bool",
+    ),
+    ("sse_server_flush", "sse_server_flush(stream) -> bool"),
+    ("sse_server_status", "sse_server_status(stream) -> dict"),
+    (
+        "sse_server_disconnected",
+        "sse_server_disconnected(stream) -> bool",
+    ),
+    (
+        "sse_server_cancelled",
+        "sse_server_cancelled(stream) -> bool",
+    ),
+    (
+        "sse_server_cancel",
+        "sse_server_cancel(stream, reason?) -> bool",
+    ),
+    ("sse_server_close", "sse_server_close(stream) -> bool"),
+    (
+        "sse_server_mock_receive",
+        "sse_server_mock_receive(stream) -> dict",
+    ),
+    (
+        "sse_server_mock_disconnect",
+        "sse_server_mock_disconnect(stream) -> bool",
+    ),
+    (
+        "websocket_accept",
+        "websocket_accept(server, timeout_ms?) -> dict | nil",
+    ),
+    (
+        "websocket_connect",
+        "websocket_connect(url, options?) -> string",
+    ),
+    (
+        "websocket_send",
+        "websocket_send(socket, message, options?) -> bool",
+    ),
+    (
+        "websocket_receive",
+        "websocket_receive(socket, timeout_ms?) -> dict | nil",
+    ),
+    ("websocket_close", "websocket_close(socket) -> bool"),
+    (
+        "websocket_route",
+        "websocket_route(server, path, options?) -> bool",
+    ),
+    (
+        "websocket_server",
+        "websocket_server(bind?, options?) -> dict",
+    ),
+    (
+        "websocket_server_close",
+        "websocket_server_close(server) -> bool",
+    ),
+    // Mock HTTP
+    (
+        "http_mock",
+        "http_mock(method, url_pattern, response) -> nil",
+    ),
+    ("http_mock_clear", "http_mock_clear() -> nil"),
+    ("http_mock_calls", "http_mock_calls() -> list"),
+    ("sse_mock", "sse_mock(url_pattern, events_or_config) -> nil"),
+    (
+        "websocket_mock",
+        "websocket_mock(url_pattern, messages_or_config) -> nil",
+    ),
+    ("transport_mock_calls", "transport_mock_calls() -> list"),
+    ("transport_mock_clear", "transport_mock_clear() -> nil"),
+    (
+        "host_mock",
+        "host_mock(capability, op, response_or_config, params?) -> nil",
+    ),
+    ("host_mock_clear", "host_mock_clear() -> nil"),
+    ("host_mock_calls", "host_mock_calls() -> list"),
+    // LLM
+    ("llm_call", "llm_call(prompt, system?, options?) -> dict"),
+    (
+        "llm_completion",
+        "llm_completion(prefix, suffix?, system?, options?) -> dict",
+    ),
+    // LLM cost tracking
+    (
+        "llm_cost",
+        "llm_cost(model, input_tokens, output_tokens) -> float",
+    ),
+    ("llm_session_cost", "llm_session_cost() -> dict"),
+    ("llm_budget", "llm_budget(max_cost) -> nil"),
+    ("llm_budget_remaining", "llm_budget_remaining() -> float"),
+    (
+        "llm_stream",
+        "llm_stream(prompt, system?, options?) -> string",
+    ),
+    (
+        "llm_stream_call",
+        "llm_stream_call(prompt, system?, options?) -> Stream<dict>",
+    ),
+    (
+        "agent_loop",
+        "agent_loop(prompt, system?, options?) -> dict",
+    ),
+    (
+        "agent_lifecycle_tools",
+        "agent_lifecycle_tools(agents, registry?, options?) -> dict",
+    ),
+    (
+        "suspend_agent",
+        "suspend_agent(worker, reason?, options?) -> dict",
+    ),
+    (
+        "resume_agent",
+        "resume_agent(worker_or_snapshot, resume_input?, continue_transcript?) -> dict",
+    ),
+    (
+        "parse_resume_conditions",
+        "parse_resume_conditions(conditions?) -> dict?",
+    ),
+    ("secret_scan", "secret_scan(content) -> list"),
+    ("vision_ocr", "vision_ocr(image, options?) -> dict"),
+    // MCP
+    ("mcp_connect", "mcp_connect(command, args?) -> client"),
+    ("mcp_list_tools", "mcp_list_tools(client) -> list"),
+    ("mcp_call", "mcp_call(client, name, args?) -> value"),
+    ("mcp_list_resources", "mcp_list_resources(client) -> list"),
+    (
+        "mcp_read_resource",
+        "mcp_read_resource(client, uri) -> string",
+    ),
+    (
+        "mcp_list_resource_templates",
+        "mcp_list_resource_templates(client) -> list",
+    ),
+    ("mcp_list_prompts", "mcp_list_prompts(client) -> list"),
+    (
+        "mcp_get_prompt",
+        "mcp_get_prompt(client, name, args?) -> dict",
+    ),
+    ("mcp_server_info", "mcp_server_info(client) -> dict"),
+    ("mcp_disconnect", "mcp_disconnect(client) -> nil"),
+    // MCP server
+    ("mcp_tools", "mcp_tools(registry) -> nil"),
+    ("mcp_serve", "mcp_serve(registry) -> nil"),
+    (
+        "mcp_resource",
+        "mcp_resource({uri, name, text, ...}) -> nil",
+    ),
+    (
+        "mcp_resource_template",
+        "mcp_resource_template({uri_template, name, handler, ...}) -> nil",
+    ),
+    ("mcp_prompt", "mcp_prompt({name, handler, ...}) -> nil"),
+    // Conversation management
+    ("conversation", "conversation() -> list"),
+    ("add_message", "add_message(conv, role, content) -> list"),
+    ("add_user", "add_user(conv, content) -> list"),
+    ("add_assistant", "add_assistant(conv, content) -> list"),
+    ("add_system", "add_system(conv, content) -> list"),
+    (
+        "add_tool_result",
+        "add_tool_result(conv, tool_use_id, content) -> list",
+    ),
+    // Concurrency
+    ("sleep", "sleep(duration) -> nil"),
+    ("channel", "channel(name?) -> channel"),
+    ("send", "send(ch, value) -> bool"),
+    ("receive", "receive(ch) -> value"),
+    ("try_receive", "try_receive(ch) -> value"),
+    ("close_channel", "close_channel(ch) -> nil"),
+    ("select", "select(channels...) -> value"),
+    ("atomic", "atomic(initial?) -> atomic"),
+    ("atomic_get", "atomic_get(a) -> value"),
+    ("atomic_set", "atomic_set(a, value) -> nil"),
+    ("atomic_add", "atomic_add(a, delta) -> value"),
+    ("atomic_cas", "atomic_cas(a, expected, new) -> bool"),
+    // Graceful cancellation
+    (
+        "cancel_graceful",
+        "cancel_graceful(handle, timeout?) -> Result",
+    ),
+    ("is_cancelled", "is_cancelled() -> bool"),
+    // Assertions
+    ("assert", "assert(condition, msg?) -> nil"),
+    ("assert_eq", "assert_eq(a, b, msg?) -> nil"),
+    ("assert_ne", "assert_ne(a, b, msg?) -> nil"),
+    // Math
+    ("abs", "abs(n) -> number"),
+    ("min", "min(a, b) -> number"),
+    ("max", "max(a, b) -> number"),
+    ("floor", "floor(n) -> int"),
+    ("ceil", "ceil(n) -> int"),
+    ("round", "round(n, digits?) -> number"),
+    ("sqrt", "sqrt(n) -> float"),
+    ("pow", "pow(base, exp) -> number"),
+    ("random", "random() -> float"),
+    ("random_int", "random_int(min, max) -> int"),
+    // Math: trig
+    ("sin", "sin(n) -> float"),
+    ("cos", "cos(n) -> float"),
+    ("tan", "tan(n) -> float"),
+    ("asin", "asin(n) -> float"),
+    ("acos", "acos(n) -> float"),
+    ("atan", "atan(n) -> float"),
+    ("atan2", "atan2(y, x) -> float"),
+    // Math: logarithms/exponentials
+    ("log2", "log2(n) -> float"),
+    ("log10", "log10(n) -> float"),
+    ("ln", "ln(n) -> float"),
+    ("exp", "exp(n) -> float"),
+    // Math: constants/utilities
+    ("pi", "pi: float"),
+    ("e", "e: float"),
+    ("sign", "sign(n) -> int"),
+    ("is_nan", "is_nan(n) -> bool"),
+    ("is_infinite", "is_infinite(n) -> bool"),
+    // Sets
+    ("set", "set(items?) -> set"),
+    ("set_add", "set_add(s, value) -> set"),
+    ("set_remove", "set_remove(s, value) -> set"),
+    ("set_contains", "set_contains(s, value) -> bool"),
+    ("set_union", "set_union(a, b) -> set"),
+    ("set_intersect", "set_intersect(a, b) -> set"),
+    ("set_difference", "set_difference(a, b) -> set"),
+    ("to_list", "to_list(s) -> list"),
+    // String
+    ("format", "format(template, args...) -> string"),
+    ("trim", "trim(str) -> string"),
+    ("lowercase", "lowercase(str) -> string"),
+    ("uppercase", "uppercase(str) -> string"),
+    ("split", "split(str, sep) -> list"),
+    // Date/time
+    ("date_now", "date_now() -> dict"),
+    ("date_now_iso", "date_now_iso() -> string"),
+    ("date_format", "date_format(ts, fmt?, tz?) -> string"),
+    ("date_parse", "date_parse(str) -> int|float"),
+    ("date_in_zone", "date_in_zone(ts, tz) -> dict"),
+    ("date_to_zone", "date_to_zone(ts, tz) -> string"),
+    (
+        "date_from_components",
+        "date_from_components(parts, tz?) -> int|float",
+    ),
+    ("date_add", "date_add(ts, duration) -> int|float"),
+    ("date_diff", "date_diff(a, b) -> duration"),
+    ("duration_ms", "duration_ms(n) -> duration"),
+    ("duration_seconds", "duration_seconds(n) -> duration"),
+    ("duration_minutes", "duration_minutes(n) -> duration"),
+    ("duration_hours", "duration_hours(n) -> duration"),
+    ("duration_days", "duration_days(n) -> duration"),
+    ("duration_to_seconds", "duration_to_seconds(d) -> int"),
+    ("duration_to_human", "duration_to_human(d) -> string"),
+    ("weekday_name", "weekday_name(ts, tz?) -> string"),
+    ("month_name", "month_name(ts, tz?) -> string"),
+    // Logging
+    ("log_debug", "log_debug(msg) -> nil"),
+    ("log_info", "log_info(msg) -> nil"),
+    ("log_warn", "log_warn(msg) -> nil"),
+    ("log_error", "log_error(msg) -> nil"),
+    ("log_set_level", "log_set_level(level) -> nil"),
+    // Tracing
+    ("trace_start", "trace_start(name) -> span"),
+    ("trace_end", "trace_end(span) -> nil"),
+    ("trace_id", "trace_id() -> string"),
+    ("enable_tracing", "enable_tracing(enabled?) -> nil"),
+    ("trace_spans", "trace_spans() -> list"),
+    ("trace_summary", "trace_summary() -> string"),
+    // Tool registry
+    ("tool_registry", "tool_registry() -> registry"),
+    ("tool_list", "tool_list(registry) -> list"),
+    ("tool_find", "tool_find(registry, name) -> dict"),
+    ("tool_select", "tool_select(registry, names) -> registry"),
+    ("tool_describe", "tool_describe(registry) -> string"),
+    ("tool_remove", "tool_remove(registry, name) -> nil"),
+    ("tool_count", "tool_count(registry) -> int"),
+    ("tool_schema", "tool_schema(registry) -> dict"),
+    ("tool_prompt", "tool_prompt(registry) -> string"),
+    ("tool_parse_call", "tool_parse_call(registry, text) -> dict"),
+    (
+        "tool_format_result",
+        "tool_format_result(name, result) -> string",
+    ),
+    // Host interop
+    ("host_call", "host_call(name, args) -> value"),
+    // LLM introspection
+    ("llm_info", "llm_info() -> dict"),
+    ("llm_usage", "llm_usage() -> dict"),
+    // LLM provider config
+    (
+        "llm_infer_provider",
+        "llm_infer_provider(model_id) -> string",
+    ),
+    (
+        "llm_complementary_reviewer",
+        "llm_complementary_reviewer(options) -> dict",
+    ),
+    ("llm_model_tier", "llm_model_tier(model_id) -> string"),
+    ("llm_pick_model", "llm_pick_model(target, options?) -> dict"),
+    ("llm_resolve_model", "llm_resolve_model(alias) -> dict"),
+    ("transcript", "transcript(metadata?) -> dict"),
+    ("transcript_reset", "transcript_reset(options?) -> dict"),
+    (
+        "transcript_archive",
+        "transcript_archive(transcript) -> dict",
+    ),
+    (
+        "transcript_abandon",
+        "transcript_abandon(transcript) -> dict",
+    ),
+    ("transcript_resume", "transcript_resume(transcript) -> dict"),
+    (
+        "transcript_compact",
+        "transcript_compact(transcript, options?) -> dict",
+    ),
+    (
+        "transcript_summarize",
+        "transcript_summarize(transcript, options?) -> dict",
+    ),
+    ("transcript_assets", "transcript_assets(transcript) -> list"),
+    (
+        "transcript_add_asset",
+        "transcript_add_asset(transcript, asset) -> dict",
+    ),
+    (
+        "transcript_auto_compact",
+        "transcript_auto_compact(messages, options?) -> dict",
+    ),
+    ("host_capabilities", "host_capabilities() -> dict"),
+    ("host_has", "host_has(capability, op?) -> bool"),
+    ("host_call", "host_call(name, args) -> value"),
+    (
+        "workflow_policy_report",
+        "workflow_policy_report(graph, ceiling?) -> dict",
+    ),
+    (
+        "artifact_workspace_file",
+        "artifact_workspace_file(path, content, extra?) -> dict",
+    ),
+    (
+        "artifact_workspace_snapshot",
+        "artifact_workspace_snapshot(paths, summary?, extra?) -> dict",
+    ),
+    (
+        "artifact_editor_selection",
+        "artifact_editor_selection(path, text, extra?) -> dict",
+    ),
+    (
+        "artifact_verification_result",
+        "artifact_verification_result(title, text, extra?) -> dict",
+    ),
+    (
+        "artifact_test_result",
+        "artifact_test_result(title, text, extra?) -> dict",
+    ),
+    (
+        "artifact_command_result",
+        "artifact_command_result(command, output, extra?) -> dict",
+    ),
+    (
+        "artifact_diff",
+        "artifact_diff(path, before, after, extra?) -> dict",
+    ),
+    (
+        "artifact_git_diff",
+        "artifact_git_diff(diff_text, extra?) -> dict",
+    ),
+    (
+        "artifact_diff_review",
+        "artifact_diff_review(target, summary?, extra?) -> dict",
+    ),
+    (
+        "artifact_review_decision",
+        "artifact_review_decision(target, decision, extra?) -> dict",
+    ),
+    (
+        "artifact_patch_proposal",
+        "artifact_patch_proposal(target, patch, extra?) -> dict",
+    ),
+    (
+        "artifact_verification_bundle",
+        "artifact_verification_bundle(title, checks, extra?) -> dict",
+    ),
+    (
+        "artifact_apply_intent",
+        "artifact_apply_intent(target, intent, extra?) -> dict",
+    ),
+    ("load_run_tree", "load_run_tree(path) -> dict"),
+    ("run_record_fixture", "run_record_fixture(run) -> dict"),
+    ("run_record_eval", "run_record_eval(run, fixture?) -> dict"),
+    (
+        "run_record_eval_suite",
+        "run_record_eval_suite(cases) -> dict",
+    ),
+    ("run_record_diff", "run_record_diff(left, right) -> dict"),
+    (
+        "eval_suite_manifest",
+        "eval_suite_manifest(payload) -> dict",
+    ),
+    ("eval_suite_run", "eval_suite_run(manifest) -> dict"),
+    ("eval_pack_manifest", "eval_pack_manifest(payload) -> dict"),
+    ("eval_pack_run", "eval_pack_run(manifest) -> dict"),
+    ("eval_metric", "eval_metric(name, value, metadata?) -> nil"),
+    ("eval_metrics", "eval_metrics() -> list"),
+    ("llm_providers", "llm_providers() -> list"),
+    ("llm_config", "llm_config(provider?) -> dict"),
+    (
+        "llm_healthcheck",
+        "llm_healthcheck(provider?, options?) -> dict",
+    ),
+    // Timers
+    ("timer_start", "timer_start(name?) -> dict"),
+    ("timer_end", "timer_end(timer) -> int"),
+    ("elapsed", "elapsed() -> int"),
+    // Structured logging
+    ("log_json", "log_json(key, value) -> nil"),
+    // Metadata
+    ("metadata_get", "metadata_get(dir, namespace?) -> dict"),
+    (
+        "metadata_resolve",
+        "metadata_resolve(dir, namespace?) -> dict",
+    ),
+    ("metadata_entries", "metadata_entries(namespace?) -> list"),
+    ("metadata_set", "metadata_set(dir, namespace, data) -> nil"),
+    ("metadata_save", "metadata_save() -> nil"),
+    ("metadata_stale", "metadata_stale(project) -> dict"),
+    ("metadata_status", "metadata_status(namespace?) -> dict"),
+    (
+        "metadata_refresh_hashes",
+        "metadata_refresh_hashes() -> nil",
+    ),
+    (
+        "path_metadata_get",
+        "path_metadata_get(path, namespace?, opts?) -> dict",
+    ),
+    (
+        "path_metadata_set",
+        "path_metadata_set(path, namespace, data, opts?) -> nil",
+    ),
+    (
+        "path_metadata_entries",
+        "path_metadata_entries(namespace?, opts?) -> list",
+    ),
+    (
+        "verification_profiles_get",
+        "verification_profiles_get(dir?) -> dict",
+    ),
+    (
+        "verification_profiles_set",
+        "verification_profiles_set(record_set, dir?) -> nil",
+    ),
+    (
+        "verification_profile_resolve",
+        "verification_profile_resolve(query, dir?) -> dict",
+    ),
+    (
+        "verification_profile_matches",
+        "verification_profile_matches(query, dir?) -> list",
+    ),
+    (
+        "verification_profile_record_run",
+        "verification_profile_record_run(row_id, observation, dir?) -> dict",
+    ),
+    (
+        "verification_diagnostic_classify",
+        "verification_diagnostic_classify(envelope, current_hashes) -> dict",
+    ),
+    (
+        "compute_content_hash",
+        "compute_content_hash(dir) -> string",
+    ),
+    ("invalidate_facts", "invalidate_facts(dir) -> nil"),
+    // Encoding
+    ("url_encode", "url_encode(str) -> string"),
+    ("url_decode", "url_decode(str) -> string"),
+    ("base64_encode", "base64_encode(str) -> string"),
+    ("base64_decode", "base64_decode(str) -> string"),
+    ("sha256", "sha256(str) -> string"),
+    ("md5", "md5(str) -> string"),
+    ("jwt_sign", "jwt_sign(alg, claims, private_key) -> string"),
+];
+
+#[derive(Debug)]
+pub(crate) struct BuiltinDetail {
+    pub(crate) name: String,
+    pub(crate) signature: String,
+    doc: Option<String>,
+}
+
+/// Authored `(signature_text, doc)` for one builtin, both optional because a
+/// `#[harn_builtin]` descriptor may omit either (e.g. `sig_expr`-defined or
+/// undocumented builtins).
+type DescriptorEntry = (Option<&'static str>, Option<&'static str>);
+
+/// Canonical signature + doc for one builtin, keyed by name.
+///
+/// Built once from the `#[harn_builtin]` descriptor slice
+/// ([`harn_vm::stdlib::all_builtin_defs`]) so it is immune to the
+/// registration-order race that motivated harn#2588: every `#[harn_builtin]`
+/// fn — including `runtime_only` ones — contributes its authored
+/// `signature_text` and doc regardless of how the VM happened to wire it up.
+fn canonical_builtin_descriptors() -> &'static BTreeMap<&'static str, DescriptorEntry> {
+    static CANONICAL: OnceLock<BTreeMap<&'static str, DescriptorEntry>> = OnceLock::new();
+    CANONICAL.get_or_init(|| {
+        let mut map = BTreeMap::new();
+        for def in harn_vm::stdlib::all_builtin_defs() {
+            for name in std::iter::once(def.sig.name).chain(def.aliases.iter().copied()) {
+                map.entry(name).or_insert((def.signature_text, def.doc));
+            }
+        }
+        map
+    })
+}
+
+pub(crate) fn builtin_details() -> &'static [BuiltinDetail] {
+    static DETAILS: OnceLock<Vec<BuiltinDetail>> = OnceLock::new();
+    DETAILS.get_or_init(|| {
+        // Signature precedence, highest to lowest:
+        //
+        //   1. The curated `BUILTINS` overrides below — hand-tuned strings
+        //      the maintainers want to win (e.g. simplified `llm_healthcheck`).
+        //   2. The `#[harn_builtin]` descriptor's authored `signature_text` —
+        //      the single source the macro emits for both the runtime handler
+        //      and the parser signature, so the LSP, typechecker, and
+        //      `harn explain` all agree.
+        //   3. The VM runtime metadata signature — fallback for builtins with
+        //      no `#[harn_builtin]` descriptor (legacy DSL-only registrations).
+        //
+        // Earlier this read the signature straight from VM runtime metadata,
+        // whose per-name entry is whatever code path registered last. A builtin
+        // carrying both a DSL registration and a typed descriptor could then
+        // surface either spelling depending on registration order, which
+        // differed between local `cargo test` and CI nextest runs. Anchoring
+        // on the descriptor slice removes that race (harn#2588).
+        let canonical = canonical_builtin_descriptors();
+        let mut details = BTreeMap::new();
+        for metadata in harn_vm::stdlib::stdlib_builtin_metadata() {
+            let name = metadata.name();
+            if name.starts_with("__") {
+                continue;
+            }
+            let descriptor = canonical.get(name);
+            let signature = descriptor
+                .and_then(|(sig, _)| *sig)
+                .or_else(|| metadata.signature())
+                .unwrap_or(name)
+                .to_string();
+            let doc = descriptor
+                .and_then(|(_, doc)| *doc)
+                .or_else(|| metadata.doc())
+                .map(str::to_string);
+            details.insert(
+                name.to_string(),
+                BuiltinDetail {
+                    name: name.to_string(),
+                    signature,
+                    doc,
+                },
+            );
+        }
+        for &(name, signature) in BUILTINS {
+            details
+                .entry(name.to_string())
+                .and_modify(|detail: &mut BuiltinDetail| {
+                    detail.signature = signature.to_string();
+                })
+                .or_insert_with(|| BuiltinDetail {
+                    name: name.to_string(),
+                    signature: signature.to_string(),
+                    doc: None,
+                });
+        }
+        details.into_values().collect()
+    })
+}
+
+pub(crate) fn builtin_signature(name: &str) -> Option<&'static str> {
+    builtin_details()
+        .iter()
+        .find(|detail| detail.name.as_str() == name)
+        .map(|detail| detail.signature.as_str())
+}
+
+pub(crate) fn is_builtin(name: &str) -> bool {
+    builtin_signature(name).is_some()
+}
+
+/// Known keywords for completion, owned by the lexer token table.
+pub(crate) use harn_lexer::KEYWORDS;
+
+/// String methods offered after `.` on a string value.
+pub(crate) const STRING_METHODS: &[&str] = &[
+    "count",
+    "empty",
+    "trim",
+    "split",
+    "contains",
+    "starts_with",
+    "ends_with",
+    "replace",
+    "uppercase",
+    "lowercase",
+    "substring",
+    "index_of",
+    "chars",
+    "repeat",
+    "reversed",
+    "pad_left",
+    "pad_right",
+];
+
+/// List methods offered after `.` on a list value.
+pub(crate) const LIST_METHODS: &[&str] = &[
+    "count",
+    "empty",
+    "appending",
+    "dropping_last",
+    "map",
+    "filter",
+    "reduce",
+    "find",
+    "any",
+    "all",
+    "contains",
+    "index_of",
+    "join",
+    "sorted",
+    "sorted_by",
+    "reversed",
+    "flat_map",
+    "flatten",
+    "slice",
+    "enumerate",
+    "zip",
+    "unique",
+    "take",
+    "skip",
+    "sum",
+    "min",
+    "max",
+];
+
+/// Dict methods offered after `.` on a dict value.
+pub(crate) const DICT_METHODS: &[&str] = &[
+    "keys",
+    "values",
+    "entries",
+    "count",
+    "has",
+    "merging",
+    "map_values",
+    "filter",
+    "removing",
+    "get",
+];
+
+/// Known type names used after `:` in type annotations.
+pub(crate) const TYPE_NAMES: &[&str] = &[
+    "int",
+    "float",
+    "decimal",
+    "string",
+    "bool",
+    "nil",
+    "list",
+    "dict",
+    "iter",
+    "Generator",
+    "generator",
+    "Stream",
+    "stream",
+    "any",
+    "void",
+    "channel",
+    "atomic",
+    "mutex",
+    "closure",
+];
+
+// Doc strings contain literal `${name}` and `$1` regex/template syntax that
+// clippy mistakes for unused format args.
+#[allow(clippy::literal_string_with_formatting_args)]
+pub(crate) fn builtin_doc(name: &str) -> Option<String> {
+    let doc = match name {
+        "log" => "**log(value)** — Print value to stdout with `[harn]` prefix",
+        "type_of" => "**type_of(value)** → string — Returns the type name",
+        "to_string" => "**to_string(value)** → string — Convert to string",
+        "to_int" => "**to_int(value)** → int — Convert to integer",
+        "to_float" => "**to_float(value)** → float — Convert to float",
+        "json_parse" => "**json_parse(text)** → value — Parse JSON string into Harn value",
+        "json_stringify" => "**json_stringify(value)** → string — Convert value to JSON string",
+        "env" => "**env(name)** → string | nil — Get environment variable",
+        "timestamp" => "**timestamp()** → float — Unix timestamp in seconds",
+        "sleep" => "**sleep(ms)** → nil — Async sleep for milliseconds",
+        "read_file" => "**read_file(path)** → string — Read file contents",
+        "write_file" => "**write_file(path, content)** → nil — Write string to file",
+        "replace_file" => "**replace_file(path, content, options?)** → receipt — Atomically replace text under an optional observed SHA-256 lease",
+        "replace_file_result" => "**replace_file_result(path, content, options?)** → Result<receipt, failure> — Non-throwing conditional text replacement",
+        "replace_file_bytes" => "**replace_file_bytes(path, content, options?)** → receipt — Conditional byte replacement",
+        "replace_file_bytes_result" => "**replace_file_bytes_result(path, content, options?)** → Result<receipt, failure> — Non-throwing conditional byte replacement",
+        "exit" => "**exit(code)** — Terminate process with exit code",
+        "regex_match" => "**regex_match(pattern, text, flags?)** → list | nil — Find all non-overlapping regex matches. Optional flags: `i`, `m`, `s`, `x`.",
+        "regex_replace" => {
+            "**regex_replace(pattern, replacement, text, flags?)** → string — Replace every regex match; supports `$1`, `$2`, `${name}` backrefs and optional `i`/`m`/`s`/`x` flags"
+        }
+        "regex_captures" => "**regex_captures(pattern, text, flags?)** → list — Find matches with `{match, groups, start, end, line}` plus named capture keys. Optional flags: `i`, `m`, `s`, `x`.",
+        "regex_split" => "**regex_split(text, pattern, flags?)** → list — Split text by regex matches. Optional flags: `i`, `m`, `s`, `x`.",
+        "http_get" => "**http_get(url)** → string — HTTP GET request",
+        "http_post" => "**http_post(url, body, headers?)** → string — HTTP POST request",
+        "llm_call" => "**llm_call(prompt, system?, options?)** → dict — Call an LLM API\n\nReturns: `{text, model, input_tokens, output_tokens, transcript?}`",
+        "llm_completion" => "**llm_completion(prefix, suffix?, system?, options?)** → dict — Text completion / fill-in-the-middle generation",
+        "agent_loop" => "**agent_loop(prompt, system?, options?)** → dict — Agent loop with tool dispatch\n\nReturns: `{status, text, iterations, duration_ms, tools_used, transcript}`\n\nOptions: `{provider, model, loop_until_done, max_iterations, max_nudges, nudge}`\n\nIn loop_until_done mode, loop continues until the completion sentinel is output: bare `##DONE##` in no-tool/native-tool stages, or `<done>##DONE##</done>` in tagged text-tool stages.",
+        "await" => "**await(handle)** → value — Wait for spawned task to complete",
+        "cancel" => "**cancel(handle)** → nil — Cancel a spawned task",
+        "abs" => "**abs(value)** → int | float — Absolute value",
+        "min" => "**min(a, b)** → int | float — Minimum of two values",
+        "max" => "**max(a, b)** → int | float — Maximum of two values",
+        "floor" => "**floor(value)** → int — Floor of a float",
+        "ceil" => "**ceil(value)** → int — Ceiling of a float",
+        "round" => "**round(value, digits?)** → number — Round to nearest integer (halves away from zero); with `digits`, round to that many decimal places (negative digits round to tens/hundreds)",
+        "sqrt" => "**sqrt(value)** → float — Square root",
+        "pow" => "**pow(base, exp)** → int | float — Exponentiation",
+        "random" => "**random()** → float — Random float in [0, 1)",
+        "random_int" => "**random_int(min, max)** → int — Random integer in [min, max]",
+        "sin" => "**sin(n)** → float — Sine (radians)",
+        "cos" => "**cos(n)** → float — Cosine (radians)",
+        "tan" => "**tan(n)** → float — Tangent (radians)",
+        "asin" => "**asin(n)** → float — Inverse sine",
+        "acos" => "**acos(n)** → float — Inverse cosine",
+        "atan" => "**atan(n)** → float — Inverse tangent",
+        "atan2" => "**atan2(y, x)** → float — Two-argument inverse tangent",
+        "log2" => "**log2(n)** → float — Base-2 logarithm",
+        "log10" => "**log10(n)** → float — Base-10 logarithm",
+        "ln" => "**ln(n)** → float — Natural logarithm",
+        "exp" => "**exp(n)** → float — e raised to the power n",
+        "pi" => "**pi** → float — The constant pi (3.14159...)",
+        "e" => "**e** → float — Euler's number (2.71828...)",
+        "sign" => "**sign(n)** → int — Sign of a number: -1, 0, or 1",
+        "is_nan" => "**is_nan(n)** → bool — Check if value is NaN",
+        "is_infinite" => "**is_infinite(n)** → bool — Check if value is infinite",
+        "set" => "**set(items?)** → set — Create a new set, optionally from a list",
+        "set_add" => "**set_add(s, value)** → set — Add a value to a set",
+        "set_remove" => "**set_remove(s, value)** → set — Remove a value from a set",
+        "set_contains" => "**set_contains(s, value)** → bool — Check if set contains a value",
+        "set_union" => "**set_union(a, b)** → set — Union of two sets",
+        "set_intersect" => "**set_intersect(a, b)** → set — Intersection of two sets",
+        "set_difference" => "**set_difference(a, b)** → set — Difference of two sets",
+        "to_list" => "**to_list(s)** → list — Convert a set to a sorted list",
+        "assert" => "**assert(condition, message?)** — Assert condition is truthy",
+        "assert_eq" => "**assert_eq(actual, expected, message?)** — Assert two values are equal",
+        "assert_ne" => "**assert_ne(actual, expected, message?)** — Assert two values are not equal",
+        "file_exists" => "**file_exists(path)** → bool — Check if file or directory exists",
+        "path_status" => "**path_status(path, access?)** → dict — Structured path visibility status without collapsing scope denial into absence",
+        "delete_file" => "**delete_file(path)** → nil — Delete a file or directory",
+        "list_dir" => "**list_dir(path?)** → list — List directory entries (sorted)",
+        "mkdir" => "**mkdir(path)** → nil — Create directory (and parents)",
+        "path_join" => "**path_join(parts...)** → string — Join path segments",
+        "path_workspace_info" => "**path_workspace_info(path, workspace_root?)** → dict — Classify a path as workspace-relative, host-absolute, or invalid",
+        "path_workspace_normalize" => "**path_workspace_normalize(path, workspace_root?)** → string | nil — Project a path into workspace-relative form when safe",
+        "copy_file" => "**copy_file(src, dst)** → nil — Copy a file",
+        "append_file" => "**append_file(path, content)** → nil — Append to a file",
+        "temp_dir" => "**temp_dir()** → string — System temp directory path",
+        "asset_root" => "**asset_root()** → string — Directory used for source-relative assets such as `render(...)` and `render_prompt(...)`",
+        "execution_root" => "**execution_root()** → string — Directory used for process execution helpers such as `exec_at(...)` and `shell_at(...)`",
+        "runtime_paths" => "**runtime_paths()** → dict — Runtime path model: `{execution_root, asset_root, state_root, run_root, worktree_root}`",
+        "runtime_context" => "**runtime_context()** → dict — Current logical task, workflow, trigger, agent, trace, and context-local values",
+        "task_current" => "**task_current()** → dict — Alias of `runtime_context()`",
+        "runtime_context_get" => "**runtime_context_get(key, default?)** → any — Read a task-local context value",
+        "runtime_context_set" => "**runtime_context_set(key, value)** → any — Set a task-local context value and return the previous value or nil",
+        "runtime_context_clear" => "**runtime_context_clear(key)** → any — Clear a task-local context value and return the previous value or nil",
+        "runtime_context_values" => "**runtime_context_values()** → dict — Return task-local context values for the current logical task",
+        "stat" => "**stat(path)** → dict — File metadata: size, is_file, is_dir, readonly, modified",
+        "exec" => "**exec(cmd, args...)** → dict — Run a command, returns {stdout, stderr, status, success}",
+        "shell" => "**shell(cmd)** → dict — Run shell command, returns {stdout, stderr, status, success}",
+        "date_now" => "**date_now()** → dict — Current UTC date: {year, month, day, hour, minute, second, weekday, timestamp, iso8601}",
+        "date_now_iso" => "**date_now_iso()** → string — Current UTC time as RFC 3339",
+        "date_format" => "**date_format(timestamp, fmt?, tz?)** → string — Format timestamp with chrono/strftime codes",
+        "date_parse" => "**date_parse(str)** → int | float — Parse RFC 3339, ISO 8601, or legacy numeric dates to Unix timestamp",
+        "date_in_zone" => "**date_in_zone(timestamp, tz)** → dict — Date components in an IANA timezone",
+        "date_to_zone" => "**date_to_zone(timestamp, tz)** → string — RFC 3339 timestamp in an IANA timezone",
+        "date_from_components" => "**date_from_components(parts, tz?)** → int | float — Build a Unix timestamp from date fields in a timezone",
+        "date_add" => "**date_add(timestamp, duration)** → int | float — Add a duration to a timestamp",
+        "date_diff" => "**date_diff(a, b)** → duration — Difference between timestamps (`a - b`)",
+        "duration_ms" => "**duration_ms(n)** → duration — Build a millisecond duration",
+        "duration_seconds" => "**duration_seconds(n)** → duration — Build a second duration",
+        "duration_minutes" => "**duration_minutes(n)** → duration — Build a minute duration",
+        "duration_hours" => "**duration_hours(n)** → duration — Build an hour duration",
+        "duration_days" => "**duration_days(n)** → duration — Build a day duration",
+        "duration_to_seconds" => "**duration_to_seconds(d)** → int — Convert duration to whole seconds",
+        "duration_to_human" => "**duration_to_human(d)** → string — Format a compact human duration",
+        "weekday_name" => "**weekday_name(timestamp, tz?)** → string — Weekday name for a timestamp",
+        "month_name" => "**month_name(timestamp, tz?)** → string — Month name for a timestamp",
+        "format" => "**format(template, args...)** → string — String formatting with {} placeholders",
+        "channel" => "**channel(name?, capacity?)** → channel — Create an async channel",
+        "send" => "**send(channel, value)** → bool — Send a value on a channel; throws `ChannelClosed` after close",
+        "receive" => "**receive(channel)** → value — Receive next value from channel; throws `ChannelClosed` once closed and drained",
+        "try_receive" => "**try_receive(channel)** → value | nil — Non-blocking receive",
+        "close_channel" => "**close_channel(channel)** → nil — Close a channel",
+        "atomic" => "**atomic(initial?)** → atomic — Create an atomic integer",
+        "atomic_get" => "**atomic_get(a)** → int — Read atomic value",
+        "atomic_set" => "**atomic_set(a, value)** → int — Set atomic value, returns old",
+        "atomic_add" => "**atomic_add(a, n)** → int — Atomically add, returns previous value",
+        "atomic_cas" => "**atomic_cas(a, expected, new)** → bool — Compare-and-swap",
+        "select" => "**select(ch1, ch2, ...)** → dict — Wait for first channel with data: {index, value, channel}",
+        "llm_info" => "**llm_info()** → dict — LLM configuration: {provider, model, api_key_set}",
+        "llm_usage" => "**llm_usage()** → dict — Cumulative LLM usage: {input_tokens, output_tokens, total_duration_ms, call_count, total_calls}",
+        "timer_start" => "**timer_start(name?)** → dict — Start a named timer, returns timer handle",
+        "timer_end" => "**timer_end(timer)** → int — Stop timer, prints elapsed, returns milliseconds",
+        "elapsed" => "**elapsed()** → int — Milliseconds since process start",
+        "log_json" => "**log_json(key, value)** → nil — Emit structured JSON log line with timestamp",
+        "metadata_get" => "**metadata_get(dir, namespace?)** → dict | nil — Read metadata with inheritance and flatten namespaces",
+        "metadata_resolve" => "**metadata_resolve(dir, namespace?)** → dict | nil — Read resolved metadata while preserving namespace structure",
+        "metadata_entries" => "**metadata_entries(namespace?)** → list — List local and resolved metadata for each stored directory",
+        "metadata_set" => "**metadata_set(dir, namespace, data)** → nil — Write metadata for a directory/namespace",
+        "path_metadata_get" => "**path_metadata_get(path, namespace?, opts?)** → dict | nil — Read metadata at an exact path. Files don't inherit; pass `{kind: \"dir\"}` for hierarchical directory resolution.",
+        "path_metadata_set" => "**path_metadata_set(path, namespace, data, opts?)** → nil — Write metadata at an exact path. Defaults to `{kind: \"file\"}`; pass `{kind: \"dir\"}` to mirror `metadata_set`.",
+        "path_metadata_entries" => "**path_metadata_entries(namespace?, opts?)** → list — List stored file entries (or `{kind: \"dir\"}`/`{kind: \"all\"}`) keyed by normalized relative path.",
+        "verification_profiles_get" => "**verification_profiles_get(dir?)** → dict | nil — Read the verification profile record set (`schemaVersion`, `rows`, unknown fields preserved) with hierarchical directory resolution.",
+        "verification_profiles_set" => "**verification_profiles_set(record_set, dir?)** → nil — Replace and persist the verification profile record set. Validates `schemaVersion`/`rows`; round-trips unknown fields.",
+        "verification_profile_resolve" => "**verification_profile_resolve(query, dir?)** → dict | nil — Most-specific matching profile row for `{repo?, path?, language?, task?}` (task > language > dir glob > repo).",
+        "verification_profile_matches" => "**verification_profile_matches(query, dir?)** → list — All matching profile rows for `{repo?, path?, language?, task?}`, ordered by selector specificity and stable row order as `{row, specificity, index}`.",
+        "verification_profile_record_run" => "**verification_profile_record_run(row_id, observation, dir?)** → dict | nil — Fold `{durationMs?, warm?, at?, exit?, failureSignature?, snapshot?}` into a row's timings/lastRun and persist.",
+        "verification_diagnostic_classify" => "**verification_diagnostic_classify(envelope, current_hashes)** → dict — Classify a diagnostic `{rung, rowId?, at, snapshot}` as `bound_fresh`/`bound_stale`/`unbound`; only `bound_fresh` may feed gates.",
+        "metadata_save" => "**metadata_save()** → nil — Flush metadata to .harn/metadata/ files",
+        "metadata_stale" => "**metadata_stale(project)** → dict — Check for stale metadata: {any_stale, tier1, tier2}",
+        "metadata_status" => "**metadata_status(namespace?)** → dict — Summarize metadata directories, namespaces, missing hashes, and stale state",
+        "transcript_assets" => "**transcript_assets(transcript)** → list — Return transcript asset descriptors used by multimodal messages",
+        "transcript_add_asset" => "**transcript_add_asset(transcript, asset)** → dict — Register a durable asset reference and return the updated transcript",
+        "metadata_refresh_hashes" => "**metadata_refresh_hashes()** → nil — Recompute content hashes",
+        "compute_content_hash" => "**compute_content_hash(dir)** → string — Hash of directory contents for staleness detection",
+        "invalidate_facts" => "**invalidate_facts(dir)** → nil — Mark cached facts as stale",
+        "secret_scan" => "**secret_scan(content)** → list — Scan text or diffs for redacted secret findings before commit or PR-open flows",
+        "vision_ocr" => "**vision_ocr(image, options?)** → dict — Run deterministic OCR over an image path or image payload and return structured text with blocks, lines, tokens, and source metadata",
+        "mcp_connect" => "**mcp_connect(command, args?)** → mcp_client — Spawn an MCP server and connect",
+        "mcp_list_tools" => "**mcp_list_tools(client)** → list — List available tools from MCP server",
+        "mcp_call" => "**mcp_call(client, name, arguments?)** → string | list — Call an MCP tool",
+        "mcp_list_resources" => "**mcp_list_resources(client)** → list — List resources from MCP server",
+        "mcp_list_resource_templates" => "**mcp_list_resource_templates(client)** → list — List resource templates from MCP server",
+        "mcp_read_resource" => "**mcp_read_resource(client, uri)** → string | list — Read a resource by URI",
+        "mcp_list_prompts" => "**mcp_list_prompts(client)** → list — List prompts from MCP server",
+        "mcp_get_prompt" => "**mcp_get_prompt(client, name, arguments?)** → dict — Get a prompt with optional arguments",
+        "mcp_server_info" => "**mcp_server_info(client)** → dict — Server info: `{name, connected}`",
+        "mcp_disconnect" => "**mcp_disconnect(client)** → nil — Disconnect and kill MCP server process",
+        // MCP server
+        "mcp_tools" => "**mcp_tools(registry)** → nil — Register a tool registry for the MCP server (used with `harn serve mcp`)",
+        "mcp_serve" => "**mcp_serve(registry)** → nil — Alias for `mcp_tools` (deprecated)",
+        "mcp_resource" => "**mcp_resource({uri, name, text, description?, mime_type?})** → nil — Register a static resource for the MCP server",
+        "mcp_resource_template" => "**mcp_resource_template({uri_template, name, handler, description?, mime_type?})** → nil — Register a parameterized resource template (RFC 6570 URI template)",
+        "mcp_prompt" => "**mcp_prompt({name, handler, description?, arguments?})** → nil — Register a prompt template for the MCP server",
+        // Conversation management
+        "conversation" => "**conversation()** → list — Create an empty conversation message list",
+        "add_message" => "**add_message(conv, role, content)** → list — Add a message with given role to conversation",
+        "add_user" => "**add_user(conv, content)** → list — Add a user message to conversation",
+        "add_assistant" => "**add_assistant(conv, content)** → list — Add an assistant message to conversation",
+        "add_system" => "**add_system(conv, content)** → list — Add a system message to conversation",
+        "add_tool_result" => "**add_tool_result(conv, tool_use_id, content)** → list — Add a tool result to conversation",
+        // LLM cost tracking
+        "llm_cost" => "**llm_cost(model, input_tokens, output_tokens)** → float — Estimate USD cost from embedded pricing table",
+        "llm_session_cost" => "**llm_session_cost()** → dict — Session totals: {total_cost, input_tokens, output_tokens, call_count}",
+        "llm_budget" => "**llm_budget(max_cost)** → nil — Set session budget in USD",
+        "llm_budget_remaining" => "**llm_budget_remaining()** → float — Remaining budget (nil if no budget set)",
+        // LLM provider config
+        "llm_complementary_reviewer" => "**llm_complementary_reviewer(options)** → dict — Pick a different-family reviewer model with fallback reason and estimated cost",
+        "llm_infer_provider" => "**llm_infer_provider(model_id)** → string — Infer provider name from model ID",
+        "llm_model_tier" => "**llm_model_tier(model_id)** → string — Get model tier (e.g. flagship, mid, small)",
+        "llm_pick_model" => "**llm_pick_model(target, options?)** → dict — Resolve a model alias or tier to `{id, provider, tier}`",
+        "llm_resolve_model" => "**llm_resolve_model(alias)** → dict — Resolve a model alias to full model info",
+        "llm_providers" => "**llm_providers()** → list — List all configured LLM providers",
+        "llm_config" => "**llm_config(provider?)** → dict — Get provider configuration",
+        "llm_healthcheck" => "**llm_healthcheck(provider?, options?)** → dict — Check provider health and connectivity; Ollama accepts `{model, warm}`",
+        "transcript" => "**transcript(metadata?)** → dict — Create a new transcript",
+        "transcript_compact" => "**transcript_compact(transcript, options?)** → dict — Compact a transcript with the runtime compaction engine",
+        "transcript_summarize" => "**transcript_summarize(transcript, options?)** → dict — Summarize and compact a transcript with an LLM",
+        "transcript_auto_compact" => "**transcript_auto_compact(messages, options?)** → dict — Apply the agent-loop compaction pipeline to a message list, returning { messages, archived, summary }",
+        "schema_check" => "**schema_check(data, schema)** → Result — Validate data against an extended Harn schema and return `Result.Ok(data)` without applying defaults",
+        "schema_parse" => "**schema_parse(data, schema)** → Result — Validate data against an extended Harn schema and return `Result.Ok(data)` with defaults applied",
+        "schema_report" => "**schema_report(data, schema, apply_defaults?)** → dict — Validate data and return `{ok, message, errors, issues, value?}` without throwing",
+        "schema_to_json_schema" => "**schema_to_json_schema(schema)** → dict — Convert an extended Harn schema into JSON Schema",
+        "schema_extend" => "**schema_extend(base, overrides)** → dict — Shallow-merge two schema dicts",
+        "schema_partial" => "**schema_partial(schema)** → dict — Make schema properties optional by removing `required` recursively",
+        "schema_pick" => "**schema_pick(schema, keys)** → dict — Keep only selected top-level properties from a schema",
+        "schema_omit" => "**schema_omit(schema, keys)** → dict — Remove selected top-level properties from a schema",
+        "host_capabilities" => "**host_capabilities()** → dict — Typed host capability manifest",
+        "host_has" => "**host_has(capability, op?)** → bool — Check host capability support",
+        "host_call" => "**host_call(name, args)** → any — Invoke a host capability operation using capability.operation naming",
+        "host_mock" => "**host_mock(capability, op, response_or_config, params?)** → nil — Register a typed host mock for tests. The third argument may be a direct result value or a config dict containing `result`, `params`, and/or `error`.",
+        "host_mock_clear" => "**host_mock_clear()** → nil — Clear typed host mocks and recorded mock invocations",
+        "host_mock_calls" => "**host_mock_calls()** → list — Return recorded typed host mock invocations",
+        "workflow_policy_report" => "**workflow_policy_report(graph, ceiling?)** → dict — Show effective workflow and node policies against a ceiling",
+        "artifact_workspace_file" => "**artifact_workspace_file(path, content, extra?)** → dict — Build a normalized workspace-file artifact with path provenance",
+        "artifact_workspace_snapshot" => "**artifact_workspace_snapshot(paths, summary?, extra?)** → dict — Build a workspace snapshot artifact for host/editor context handoff",
+        "artifact_editor_selection" => "**artifact_editor_selection(path, text, extra?)** → dict — Build an editor-selection artifact from host UI state",
+        "artifact_verification_result" => "**artifact_verification_result(title, text, extra?)** → dict — Build a verification-result artifact",
+        "artifact_test_result" => "**artifact_test_result(title, text, extra?)** → dict — Build a test-result artifact",
+        "artifact_command_result" => "**artifact_command_result(command, output, extra?)** → dict — Build a command-result artifact with structured output",
+        "artifact_diff" => "**artifact_diff(path, before, after, extra?)** → dict — Build a unified diff artifact from before/after text",
+        "artifact_git_diff" => "**artifact_git_diff(diff_text, extra?)** → dict — Build a git-diff artifact from host or tool output",
+        "artifact_diff_review" => "**artifact_diff_review(target, summary?, extra?)** → dict — Build a pending diff-review artifact linked to a diff or patch artifact",
+        "artifact_review_decision" => "**artifact_review_decision(target, decision, extra?)** → dict — Build an accept/reject review-decision artifact linked to a review target",
+        "artifact_patch_proposal" => "**artifact_patch_proposal(target, patch, extra?)** → dict — Build a proposed patch artifact linked to an existing review target",
+        "artifact_verification_bundle" => "**artifact_verification_bundle(title, checks, extra?)** → dict — Bundle multiple verification checks into one review-ready artifact",
+        "artifact_apply_intent" => "**artifact_apply_intent(target, intent, extra?)** → dict — Record an apply or merge intent linked to a reviewed artifact",
+        "load_run_tree" => "**load_run_tree(path)** → dict — Load a persisted run together with delegated child-run lineage",
+        "run_record_fixture" => "**run_record_fixture(run)** → dict — Derive a replay fixture from a run record",
+        "run_record_eval" => "**run_record_eval(run, fixture?)** → dict — Evaluate one run against a fixture",
+        "run_record_eval_suite" => "**run_record_eval_suite(cases)** → dict — Evaluate a list of run/fixture cases as a regression suite",
+        "run_record_diff" => "**run_record_diff(left, right)** → dict — Compare two run records by status, stages, artifacts, and checkpoints",
+        "eval_suite_manifest" => "**eval_suite_manifest(payload)** → dict — Normalize an eval-suite manifest for grouped regression runs",
+        "eval_suite_run" => "**eval_suite_run(manifest)** → dict — Run an eval-suite manifest, including optional baseline comparisons",
+        "eval_pack_manifest" => "**eval_pack_manifest(payload)** → dict — Normalize an eval-pack manifest with fixtures, rubrics, cases, and defaults",
+        "eval_pack_run" => "**eval_pack_run(manifest)** → dict — Evaluate an eval-pack manifest using the local deterministic runner",
+        "eval_metric" => "**eval_metric(name, value, metadata?)** → nil — Record a named metric into the eval metric store for inclusion in run records",
+        "eval_metrics" => "**eval_metrics()** → list — Return all recorded eval metrics as a list of `{name, value, metadata?}` dicts",
+        // Mock HTTP
+        "http_mock" => "**http_mock(method, url_pattern, response)** → nil — Register a mock HTTP response for testing",
+        "http_mock_clear" => "**http_mock_clear()** → nil — Clear all mocks and recorded calls",
+        "http_mock_calls" => "**http_mock_calls()** → list — Return recorded HTTP calls",
+        // Graceful cancellation
+        "cancel_graceful" => "**cancel_graceful(handle, timeout?)** → Result — Signal cancellation and wait for graceful shutdown",
+        "is_cancelled" => "**is_cancelled()** → bool — Check if current task has been cancelled",
+        _ => return runtime_builtin_doc(name),
+    };
+    Some(doc.to_string())
+}
+
+fn runtime_builtin_doc(name: &str) -> Option<String> {
+    builtin_details()
+        .iter()
+        .find(|detail| detail.name.as_str() == name)
+        .and_then(|detail| {
+            detail
+                .doc
+                .as_ref()
+                .map(|doc| format!("**{}** — {doc}", detail.signature))
+        })
+}
+
+pub(crate) fn keyword_doc(name: &str) -> Option<String> {
+    let doc = match name {
+        "pipeline" => "**pipeline** — Declare a named pipeline\n\n```harn\npipeline name(params) {\n  // body\n}\n```",
+        "fn" => "**fn** — Declare a function\n\n```harn\nfn name(params) -> return_type {\n  // body\n}\n```",
+        "const" => "**const** — Immutable variable binding\n\n```harn\nconst x: type = value\n```",
+        "let" => "**let** — Mutable variable binding\n\n```harn\nlet x: type = value\n```",
+        "if" => "**if** — Conditional expression\n\n```harn\nif condition {\n  // then\n} else {\n  // else\n}\n```",
+        "else" => "**else** — Else branch of an if expression",
+        "for" => "**for** — For-in loop\n\n```harn\nfor item in iterable {\n  // body\n}\n```",
+        "while" => "**while** — While loop\n\n```harn\nwhile condition {\n  // body\n}\n```",
+        "match" => "**match** — Pattern matching expression\n\n```harn\nmatch value {\n  pattern => body\n}\n```",
+        "require" => "**require** — Runtime precondition check\n\n```harn\nrequire condition, \"message\"\n```\n\nThrows if the condition is false.",
+        "return" => "**return** — Return a value from a function",
+        "try" => "**try** — Try-catch error handling\n\n```harn\ntry {\n  // body\n} catch e {\n  // handle\n}\n```",
+        "catch" => "**catch** — Catch block for error handling",
+        "throw" => "**throw** — Throw an error value",
+        "import" => "**import** — Import a module\n\n```harn\nimport \"path/to/module\"\n```",
+        "spawn" => "**spawn** — Spawn an async task\n\n```harn\nlet handle = spawn {\n  // async body\n}\n```",
+        "parallel" => "**parallel** — Parallel execution\n\n```harn\nparallel N { i -> ... }       // count mode\nparallel each list { x -> ... } // map mode\nparallel settle list { x -> ... } // settle mode\n```",
+        "defer" => "**defer** — Run body at scope exit\n\n```harn\ndefer {\n  cleanup()\n}\n```",
+        "retry" => "**retry** — Retry a block N times\n\n```harn\nretry N {\n  // body\n}\n```",
+        "extends" => "**extends** — Inherit from another pipeline",
+        "override" => "**override** — Override an inherited pipeline step",
+        "true" | "false" => "**bool** — Boolean literal",
+        "nil" => "**nil** — Nil value (absence of a value)",
+        "in" => "**in** — Used in `for x in collection`",
+        _ => return None,
+    };
+    Some(doc.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{builtin_doc, builtin_signature, is_builtin};
+
+    #[test]
+    fn lsp_registry_includes_runtime_metadata_only_llm_config_builtins() {
+        assert!(is_builtin("provider_capabilities"));
+        // `provider_capabilities` is `runtime_only`, so the LSP surfaces the
+        // signature the `#[harn_builtin]` descriptor authored — including the
+        // explicit `string|nil` on the optional `model` param — rather than a
+        // registration-order-dependent runtime-metadata spelling. See
+        // harn#2588.
+        assert_eq!(
+            builtin_signature("provider_capabilities"),
+            Some("provider_capabilities(provider: string, model?: string|nil) -> dict")
+        );
+        assert!(builtin_doc("provider_capabilities")
+            .expect("provider_capabilities doc")
+            .contains("capability metadata"),);
+
+        assert!(is_builtin("llm_available_providers"));
+        assert_eq!(
+            builtin_signature("llm_available_providers"),
+            Some("llm_available_providers() -> list")
+        );
+        assert!(builtin_doc("llm_available_providers")
+            .expect("llm_available_providers doc")
+            .contains("providers usable"),);
+    }
+
+    #[test]
+    fn lsp_registry_preserves_curated_overrides_for_existing_llm_config_builtins() {
+        assert_eq!(
+            builtin_signature("llm_healthcheck"),
+            Some("llm_healthcheck(provider?, options?) -> dict")
+        );
+        assert!(builtin_doc("llm_healthcheck")
+            .expect("llm_healthcheck doc")
+            .contains("Ollama accepts"),);
+    }
+
+    /// Every LSP-exposed builtin backed by a `#[harn_builtin]` descriptor must
+    /// surface that descriptor's authored `signature_text` verbatim — unless a
+    /// curated `BUILTINS` override deliberately replaces it. This pins the "one
+    /// canonical source" invariant from harn#2588 so the LSP can never drift
+    /// back to a registration-order-dependent runtime-metadata spelling.
+    #[test]
+    fn lsp_signature_matches_descriptor_text_except_curated_overrides() {
+        let curated: std::collections::HashSet<&str> =
+            super::BUILTINS.iter().map(|&(name, _)| name).collect();
+        let descriptors = super::canonical_builtin_descriptors();
+        for detail in super::builtin_details() {
+            if curated.contains(detail.name.as_str()) {
+                continue;
+            }
+            if let Some((Some(text), _)) = descriptors.get(detail.name.as_str()) {
+                assert_eq!(
+                    detail.signature, *text,
+                    "LSP signature for `{}` drifted from its #[harn_builtin] descriptor",
+                    detail.name
+                );
+            }
+        }
+    }
+}

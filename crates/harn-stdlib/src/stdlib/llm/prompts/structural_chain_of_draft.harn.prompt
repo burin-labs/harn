@@ -1,0 +1,3 @@
+{{ content }}
+
+Before the final answer, emit a terse scratch draft inside <draft>...</draft>. After the draft block, provide the final answer outside those tags.

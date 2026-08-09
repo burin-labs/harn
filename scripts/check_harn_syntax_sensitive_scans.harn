@@ -1,0 +1,384 @@
+import { help_requested, parse, parser } from "std/cli/argparse"
+import { find_files } from "std/fs"
+import { rules_search } from "std/rules"
+
+const LLM_POLICY_FILES = [
+  "crates/harn-stdlib/src/stdlib/agent/presets.harn",
+  "crates/harn-stdlib/src/stdlib/agent/sitrep.harn",
+  "crates/harn-stdlib/src/stdlib/llm/defaults.harn",
+]
+
+const SKIP_SEGMENTS = [
+  "/.git/",
+  "/.harn/",
+  "/.harn-runs/",
+  "/.harn-tmp/",
+  "/docs/dist/",
+  "/node_modules/",
+  "/target/",
+]
+
+const SCANNED_SUFFIXES = [".harn", ".json", ".md", ".prompt", ".rs", ".ts", ".tsx"]
+
+fn repo_root(fs: HarnessFs) -> string {
+  return path_normalize(path_join(fs.source_dir(), ".."))
+}
+
+fn rel_path(path: string, root: string) -> string {
+  const normalized = replace(path_normalize(path), "\\", "/")
+  const normalized_root = replace(path_normalize(root), "\\", "/")
+  const prefix = normalized_root + "/"
+  if normalized == normalized_root {
+    return "."
+  }
+  if normalized.starts_with(prefix) {
+    return normalized[len(prefix):]
+  }
+  return normalized
+}
+
+fn is_skipped(path: string) -> bool {
+  const wrapped = "/" + replace(path, "\\", "/") + "/"
+  for segment in SKIP_SEGMENTS {
+    if wrapped.contains(segment) {
+      return true
+    }
+  }
+  return false
+}
+
+pub fn harn_syntax_sensitive_files(fs: HarnessFs, root: string = "") -> list<string> {
+  const resolved_root = if root == "" {
+    repo_root(fs)
+  } else {
+    path_normalize(root)
+  }
+  let out: list<string> = []
+  for suffix in SCANNED_SUFFIXES {
+    const pattern = "**/*" + suffix
+    for path in find_files(fs, resolved_root, pattern) {
+      const rel = rel_path(path, resolved_root)
+      if !is_skipped(rel) {
+        out = out.appending(rel)
+      }
+    }
+  }
+  return out.unique().sorted()
+}
+
+fn git_candidate_files(process: HarnessProcess, root: string) -> list<string>? {
+  // `git -C` walks parent directories when `root` is not itself a repository.
+  // Test/temp trees nested inside a checkout must use the filesystem fallback;
+  // otherwise git reports candidates relative to the parent repository and the
+  // requested subtree is silently skipped.
+  const top_level = process.run(
+    {program: "git", args: ["-C", root, "rev-parse", "--show-toplevel"]},
+  )
+  if top_level.exit_code != 0
+    || path_normalize(top_level.stdout.trim()) != path_normalize(root) {
+    return nil
+  }
+  const args = [
+    "-C",
+    root,
+    "grep",
+    "-F",
+    "-Il",
+    "-e",
+    "let\\\\s",
+    "-e",
+    "tool_registry",
+    "-e",
+    "long_running",
+    "--",
+    "*.harn",
+    "*.json",
+    "*.md",
+    "*.prompt",
+    "*.rs",
+    "*.ts",
+    "*.tsx",
+  ]
+  const result = process.run({program: "git", args: args})
+  if result.exit_code != 0 && result.exit_code != 1 {
+    return nil
+  }
+  let files: list<string> = []
+  for path in result.stdout.lines() {
+    const rel = path.trim()
+    if rel != "" && !is_skipped(rel) {
+      files = files.appending(rel)
+    }
+  }
+  // `git grep` intentionally avoids walking ignored build output, but a local
+  // pre-commit check must still see newly authored source before it is staged.
+  const untracked = process.run(
+    {program: "git", args: ["-C", root, "ls-files", "--others", "--exclude-standard"]},
+  )
+  if untracked.exit_code != 0 {
+    return nil
+  }
+  for path in untracked.stdout.lines() {
+    const rel = path.trim()
+    if rel == "" || is_skipped(rel) {
+      continue
+    }
+    for suffix in SCANNED_SUFFIXES {
+      if rel.lower().ends_with(suffix) {
+        files = files.appending(rel)
+        break
+      }
+    }
+  }
+  return files.unique().sorted()
+}
+
+fn line_finding(path: string, line: int, kind: string, message: string) -> dict {
+  return {path: path, line: line, kind: kind, message: message}
+}
+
+pub fn line_has_let_only_harn_binding_regex(line: string) -> bool {
+  if !line.contains("let\\\\s") {
+    return false
+  }
+  const compact = replace(line, " ", "")
+  return !compact.contains("const|let")
+    && !compact.contains("let|const")
+    && !compact.contains("const\\\\s")
+}
+
+pub fn line_has_stale_var_tool_registry_example(line: string) -> bool {
+  // This guard runs across every line in the candidate corpus. Avoid compiling
+  // and executing the structural regex for the overwhelming majority of lines
+  // that cannot possibly match it.
+  if !line.contains("tool_registry") || !line.contains("var") {
+    return false
+  }
+  return len(
+    regex_captures(r"(^|[^A-Za-z0-9_])var\s+[A-Za-z_][A-Za-z0-9_]*\s*=\s*tool_registry\s*\(", line),
+  )
+    > 0
+}
+
+pub fn line_has_retired_long_running_option(path: string, line: string) -> bool {
+  const ignored = path == "scripts/check_harn_syntax_sensitive_scans.harn"
+    || path.starts_with(
+    "changelog/archive/",
+  )
+    || line.contains("retired-option-rejection")
+  if !line.contains("long_running") || ignored {
+    return false
+  }
+  const bare = len(regex_captures(r"(^|[^A-Za-z0-9_])long_running\s*:", line)) > 0
+    && !line.contains(
+    "long_running::",
+  )
+  const quoted_key = len(regex_captures(r#"["']long_running["']\s*:"#, line))
+    > 0
+  const parser_key = (line.contains("\"long_running\"") || line.contains("'long_running'"))
+    && (line
+    .contains("optional_")
+    || line.contains(".get(")
+    || line.contains("contains_key("))
+  const documented_key = path.ends_with(".md") && line.contains("`long_running")
+  return bare || quoted_key || parser_key || documented_key
+}
+
+pub fn text_has_syntax_sensitive_candidate(text: string) -> bool {
+  return text.contains("let\\\\s")
+    || text.contains("tool_registry")
+    || text.contains("long_running")
+}
+
+pub fn harn_syntax_sensitive_scan_text(path: string, text: string) -> list {
+  let findings = []
+  // Each detector below has one mandatory literal. Let the native regex engine
+  // select those lines in one linear pass instead of interpreting every line
+  // in Harn. `regex_captures` reports the 1-based match line, preserving exact
+  // diagnostics while keeping repository scans proportional to actual hits.
+  // Split the binding token so this guard does not diagnose its own pattern.
+  const binding_pattern = r"let\\\\" + "s"
+  const candidate_pattern = r"(?m)^.*(?:" + binding_pattern + r"|tool_registry|long_running).*$"
+  const candidate_lines = regex_captures(candidate_pattern, text)
+  for candidate in candidate_lines {
+    const line = candidate.match
+    const line_no = candidate.line
+    if line_has_let_only_harn_binding_regex(line) {
+      findings = findings.appending(
+        line_finding(
+          path,
+          line_no,
+          "let-only-harn-binding-regex",
+          "Harn binding regex matches `let` but not `const`; use a shared parser/codemod helper or accept both `const` and `let`.",
+        ),
+      )
+    }
+    if line_has_stale_var_tool_registry_example(line) {
+      findings = findings.appending(
+        line_finding(
+          path,
+          line_no,
+          "stale-var-tool-registry-example",
+          "Harn examples should not teach removed `var`; use `let` for mutable tool registries or `const` for immutable values.",
+        ),
+      )
+    }
+    if line_has_retired_long_running_option(path, line) {
+      findings = findings.appending(
+        line_finding(
+          path,
+          line_no,
+          "retired-long-running-option",
+          "The public async option is `background`; the retired alias is rejected.",
+        ),
+      )
+    }
+  }
+  return findings
+}
+
+pub fn check_harn_syntax_sensitive_scans(
+  fs: HarnessFs,
+  process: HarnessProcess,
+  root: string = "",
+) -> dict {
+  const resolved_root = if root == "" {
+    repo_root(fs)
+  } else {
+    path_normalize(root)
+  }
+  let findings = []
+  const candidates = git_candidate_files(process, resolved_root)
+    ?? harn_syntax_sensitive_files(
+    fs,
+    resolved_root,
+  )
+  for rel in candidates {
+    const path = path_join(resolved_root, rel)
+    const text = fs.read_text(path)
+    // The filesystem fallback intentionally enumerates every supported source
+    // file when process-backed git discovery is unavailable (for example in a
+    // restricted portable runtime). Preserve the same literal narrowing as the
+    // git fast path before invoking any regex-backed detector.
+    if !text_has_syntax_sensitive_candidate(text) {
+      continue
+    }
+    for finding in harn_syntax_sensitive_scan_text(rel, text) {
+      findings = findings.appending(finding)
+    }
+  }
+  return {root: resolved_root, findings: findings, violation_count: len(findings)}
+}
+
+/**
+ * Structurally reject volatile model/provider identity literals at the three
+ * stdlib policy seams retired by the LLM-stack cutover. The rule runs on Harn
+ * string-literal syntax nodes, so comments and prose examples do not create
+ * false positives. Capability, catalog, and provider adapter paths remain the
+ * explicit ownership boundary and are not scanned.
+ */
+pub fn llm_policy_identity_findings(fs: HarnessFs, rules: HarnessRules, root: string) -> list {
+  const rule_path = path_join(root, "scripts/rules/llm_policy_model_identity.toml")
+  const rule = fs.read_text(rule_path)
+  let findings = []
+  for rel in LLM_POLICY_FILES {
+    const path = path_join(root, rel)
+    if !fs.exists(path) {
+      continue
+    }
+    const result = rules_search(rules, {rule: rule, source: fs.read_text(path), language: "harn"})
+    if !result.ok {
+      throw "LLM policy ownership rule failed for " + rel + ": "
+        + to_string(result?.error ?? result)
+    }
+    for found in result.matches ?? [] {
+      findings = findings.appending(
+        line_finding(
+          rel,
+          found.start_row + 1,
+          "llm-policy-model-identity",
+          "Move volatile model/provider identity "
+            + found.text
+            + " to capability or catalog source data.",
+        ),
+      )
+    }
+  }
+  return findings
+}
+
+fn render_report(report: dict) -> string {
+  if report.violation_count == 0 {
+    return "harn syntax-sensitive scan check passed: no stale Harn binding regexes, removed syntax examples, or retired async options found."
+  }
+  let lines = [
+    "harn syntax-sensitive scan check failed: " + to_string(report.violation_count) + " finding(s)",
+    "",
+    "Use parser/codemod facts where possible. Keep examples and public option keys on the current canonical spelling.",
+  ]
+  for finding in report.findings {
+    lines = lines.appending(
+      "- "
+        + to_string(finding.path)
+        + ":"
+        + to_string(finding.line)
+        + " ["
+        + to_string(finding.kind)
+        + "] "
+        + to_string(finding.message),
+    )
+  }
+  return join(lines, "\n")
+}
+
+fn arg_spec() {
+  return parser(
+    {
+      name: "check_harn_syntax_sensitive_scans",
+      args: [
+        {kind: "flag", name: "root", long: "--root", parse: "string", default: ""},
+        {kind: "switch", name: "json", long: "--json", default: false},
+      ],
+    },
+  )
+}
+
+fn main(harness: Harness) {
+  if help_requested(argv) {
+    harness.stdio.println(
+      "usage: harn run scripts/check_harn_syntax_sensitive_scans.harn -- [--json] [--root PATH]",
+    )
+    return nil
+  }
+  const parsed_result = parse(arg_spec(), argv)
+  if is_err(parsed_result) {
+    harness.stdio.eprintln(unwrap_err(parsed_result).message)
+    harness.runtime.exit(2)
+  }
+  const parsed = unwrap(parsed_result).options
+  let report = check_harn_syntax_sensitive_scans(
+    harness.fs,
+    harness.process,
+    to_string(parsed?.root ?? ""),
+  )
+  const ownership_findings = llm_policy_identity_findings(harness.fs, harness.rules, report.root)
+  report = {
+    root: report.root,
+    findings: report.findings + ownership_findings,
+    violation_count: report.violation_count + len(ownership_findings),
+  }
+  if parsed?.json ?? false {
+    harness.stdio.println(json_stringify_pretty(report))
+  } else {
+    const out = render_report(report)
+    if report.violation_count == 0 {
+      harness.stdio.println(out)
+    } else {
+      harness.stdio.eprintln(out)
+    }
+  }
+  if report.violation_count > 0 {
+    harness.runtime.exit(1)
+  }
+  return nil
+}

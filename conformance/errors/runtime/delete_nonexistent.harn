@@ -1,0 +1,7 @@
+pipeline default(harness: Harness) {
+  // The point is the missing file, not its authority. Keep it under the
+  // case-owned scratch root so the delete reaches the missing-path branch.
+  harness.fs.delete(
+    path_join(harness.fs.workspace_temp_dir(), "harn_this_file_does_not_exist_9999"),
+  )
+}

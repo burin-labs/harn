@@ -1,0 +1,259 @@
+// Run: harn test tests/agent/stall_observation_recurrence_test.harn
+//
+// Regression coverage for cumulative observation recurrence. The action
+// detector must remember a byte-identical (tool, args, result) observation
+// across unrelated calls without turning genuinely changing polling results
+// into a stall.
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
+import { AgentLoopOptions } from "std/agent/options"
+import { agent_stall_initial_state, agent_stall_observe_completed_dispatch } from "std/agent/stall"
+import { llm_text, with_llm_script } from "std/testing"
+
+const CONFIG = {
+  enabled: true,
+  repair_aware: false,
+  repeat_same_observation: 3,
+  repeat_success: 99,
+  repeat_same_error: 99,
+  no_progress_messages: 99,
+  ping_pong_cycles: 99,
+  inject_feedback: false,
+  hard_stop_after_trips: 2,
+}
+
+const READ_ONLY_TOOLS = {
+  tools: [
+    {function: {name: "search"}, annotations: {kind: "search", side_effect_level: "read_only"}},
+  ],
+}
+
+fn _observe(agent: HarnessAgent, state, iteration, query, result) {
+  const call_id = "search-" + to_string(iteration)
+  return agent_stall_observe_completed_dispatch(
+    agent,
+    "unit-observation-recurrence",
+    [{id: call_id, name: "search", arguments: {query: query}}],
+    {results: [{tool_call_id: call_id, tool_name: "search", ok: true, result: result}]},
+    iteration,
+    CONFIG,
+    state,
+    READ_ONLY_TOOLS,
+  )
+}
+
+pipeline test_identical_dead_observation_accrues_across_interleaved_calls(harness: Harness, task) {
+  let state = agent_stall_initial_state()
+  let last = nil
+  let iteration = 0
+  for query in ["dead", "productive-1", "dead", "productive-2", "dead"] {
+    iteration += 1
+    const result = if query == "dead" {
+      {status: "no_matches", matches: []}
+    } else {
+      {status: "matches", matches: [query]}
+    }
+    last = _observe(harness.agent, state, iteration, query, result)
+    state = last.state
+  }
+  assert(last.warning != nil, "the third identical dead observation must be visible")
+  assert_eq(last.warning.pattern, "repeated_observation_recurrence")
+  assert_eq(last.warning.count, 3)
+  assert(last.no_information_gain, "the repeated-only turn must carry the budget fact")
+  const productive = _observe(
+    harness.agent,
+    last.state,
+    6,
+    "productive-3",
+    {status: "matches", matches: ["productive-3"]},
+  )
+  const fourth = _observe(
+    harness.agent,
+    productive.state,
+    7,
+    "dead",
+    {status: "no_matches", matches: []},
+  )
+  assert(fourth.warning == nil, "one cumulative signature emits one bounded advisory")
+  assert(fourth.no_information_gain, "later exact recurrences remain no-information turns")
+}
+
+pipeline test_changing_poll_observations_do_not_accrue(harness: Harness, task) {
+  let state = agent_stall_initial_state()
+  let last = nil
+  for version in [1, 2, 3, 4] {
+    last = _observe(harness.agent, state, version, "status", {status: "running", version: version})
+    state = last.state
+    assert(last.warning == nil)
+    assert(!last.no_information_gain, "a changing result must retain progress credit")
+  }
+}
+
+pipeline test_mixed_turn_requires_every_observation_to_be_repeated(harness: Harness, task) {
+  const first = _observe(
+    harness.agent,
+    agent_stall_initial_state(),
+    1,
+    "dead",
+    {status: "no_matches", matches: []},
+  )
+  const repeated_id = "mixed-repeated"
+  const novel_id = "mixed-novel"
+  const mixed = agent_stall_observe_completed_dispatch(
+    harness.agent,
+    "unit-observation-recurrence",
+    [
+      {id: repeated_id, name: "search", arguments: {query: "dead"}},
+      {id: novel_id, name: "search", arguments: {query: "novel"}},
+    ],
+    {
+      results: [
+        {
+          tool_call_id: repeated_id,
+          tool_name: "search",
+          ok: true,
+          result: {status: "no_matches", matches: []},
+        },
+        {
+          tool_call_id: novel_id,
+          tool_name: "search",
+          ok: true,
+          result: {status: "matches", matches: ["novel"]},
+        },
+      ],
+    },
+    2,
+    CONFIG,
+    first.state,
+    READ_ONLY_TOOLS,
+  )
+  assert(!mixed.no_information_gain, "one novel observation keeps the mixed turn productive")
+}
+
+pipeline test_unknown_or_failed_call_fails_closed_to_progress_credit(harness: Harness, task) {
+  const state = agent_stall_initial_state()
+  const call = {id: "unknown", name: "search", arguments: {query: "dead"}}
+  const result = {
+    results: [{tool_call_id: "unknown", tool_name: "search", ok: true, result: {matches: []}}],
+  }
+  const unknown = agent_stall_observe_completed_dispatch(
+    harness.agent,
+    "unit-observation-recurrence",
+    [call],
+    result,
+    1,
+    CONFIG,
+    state,
+    {tools: []},
+  )
+  assert(!unknown.no_information_gain, "missing annotations must not suppress an extension")
+  const failed = agent_stall_observe_completed_dispatch(
+    harness.agent,
+    "unit-observation-recurrence",
+    [call],
+    {results: [{tool_call_id: "unknown", tool_name: "search", ok: false, error: "temporary"}]},
+    2,
+    CONFIG,
+    unknown.state,
+    READ_ONLY_TOOLS,
+  )
+  assert(!failed.no_information_gain, "a failed observation must not claim a repeated answer")
+}
+
+fn _search_call(id: string, query: string) -> dict {
+  return {text: "", tool_calls: [{id: id, name: "search", arguments: {query: query}}]}
+}
+
+fn _search_tools() {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "search",
+    "Search the workspace.",
+    {
+      handler: { args ->
+        if args.query == "dead" {
+          return "no matches"
+        }
+        return "match: " + args.query
+      },
+      parameters: {query: {type: "string", description: "Query"}},
+      returns: {type: "string"},
+      annotations: {kind: "search", side_effect_level: "read_only"},
+    },
+  )
+  return tools
+}
+
+fn _assert_agent_loop_budget_guard(harness: Harness, stall_diagnostics, expected_warnings: int) {
+  with_llm_script(
+    harness.llm,
+    [
+      _search_call("dead-1", "dead"),
+      _search_call("productive", "productive"),
+      _search_call("dead-2", "dead"),
+      llm_text("This response must remain unused. ##DONE##"),
+    ],
+    { ->
+      const session = "observation-budget-" + harness.random.uuid()
+      const opts: AgentLoopOptions = {
+        provider: "mock",
+        session_id: session,
+        tools: _search_tools(),
+        tool_format: "native",
+        loop_until_done: true,
+        done_sentinel: "##DONE##",
+        done_judge: nil,
+        final_wrapup: false,
+        iteration_budget: {mode: "adaptive", initial: 3, max: 5, extend_by: 1},
+        stall_diagnostics: stall_diagnostics,
+      }
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(harness, "Find the target.", nil, opts) },
+      )
+      assert_eq(captured.result.status, "budget_exhausted")
+      const recurrence = captured.events.filter(
+        { event ->
+          event.type == "agent_loop_stall_warning"
+            && event?.warning?.pattern
+            == "repeated_observation_recurrence"
+        },
+      )
+      assert_eq(len(recurrence), expected_warnings)
+      const extensions = captured.events.filter(
+        { event ->
+          event.type == "loop_control_decision"
+            && event.action
+            == "extend"
+            && event.reason
+            == "recent turn made progress"
+        },
+      )
+      assert_eq(len(extensions), 0, "the repeated-only turn must not buy an extension")
+      assert_eq(len(harness.llm.mock_calls()), 3, "the unused fourth response proves the cap held")
+    },
+  )
+}
+
+pipeline test_agent_loop_withholds_extension_for_repeated_only_boundary(harness: Harness, task) {
+  _assert_agent_loop_budget_guard(
+    harness,
+    {
+      enabled: true,
+      repeat_same_observation: 2,
+      repeat_success: 99,
+      repeat_same_error: 99,
+      no_progress_messages: 99,
+      ping_pong_cycles: 99,
+      hard_stop_after_trips: 99,
+      inject_feedback: false,
+    },
+    1,
+  )
+}
+
+pipeline test_budget_guard_remains_on_when_stall_feedback_is_disabled(harness: Harness, task) {
+  _assert_agent_loop_budget_guard(harness, false, 0)
+}

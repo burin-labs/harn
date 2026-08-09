@@ -1,0 +1,24 @@
+// Verifies std/llm/safe::safe_structured_call applies judge-friendly
+// defaults, drives the structured retry loop, and surfaces a normalized
+// envelope with `value` (lowercase keys) and `status` populated.
+import { safe_structured_call } from "std/llm/safe"
+
+pipeline test(harness: Harness, task) {
+  const schema = {
+    type: "object",
+    required: ["verdict", "bullets"],
+    properties: {verdict: {type: "string"}, bullets: {type: "array", items: {type: "string"}}},
+  }
+  const envelope = safe_structured_call(
+    harness.llm,
+    "Grade this output.",
+    schema,
+    {provider: "mock", model: "mock-model", system: "you are a judge", max_tokens: 200},
+  )
+  harness.stdio.println(envelope.ok)
+  harness.stdio.println(envelope.status)
+  harness.stdio.println(envelope.value.verdict)
+  harness.stdio.println(len(envelope.value.bullets))
+  harness.stdio.println(envelope.value.bullets[0])
+  harness.stdio.println(envelope.attempts)
+}

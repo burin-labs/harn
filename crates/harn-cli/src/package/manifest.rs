@@ -1,0 +1,1893 @@
+use super::errors::PackageError;
+use super::*;
+mod check_config;
+mod connector_module;
+pub(crate) use check_config::absolutize_check_config_paths;
+pub use check_config::{load_check_config, CheckConfig, PreflightSeverity};
+pub use connector_module::is_declared_connector_module;
+pub use harn_modules::personas::{
+    PersonaAutonomyTier, PersonaManifestEntry, PersonaStageDecl, PersonaStageExit,
+    PersonaValidationError, ResolvedPersonaManifest,
+};
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct Manifest {
+    pub package: Option<PackageInfo>,
+    #[serde(default)]
+    pub dependencies: HashMap<String, Dependency>,
+    #[serde(default)]
+    pub mcp: Vec<McpServerConfig>,
+    #[serde(default)]
+    pub check: CheckConfig,
+    #[serde(default)]
+    pub workspace: WorkspaceConfig,
+    /// `[registry]` table — lightweight package discovery index
+    /// configuration. The CLI also honors `HARN_PACKAGE_REGISTRY` and
+    /// `--registry` flags for one-off overrides.
+    #[serde(default)]
+    pub registry: PackageRegistryConfig,
+    /// `[skills]` table — per-project skill discovery configuration
+    /// (paths, lookup_order, disable).
+    #[serde(default)]
+    pub skills: SkillsConfig,
+    /// `[[skill.source]]` array-of-tables — declared skill sources
+    /// (filesystem, git, reserved registry).
+    #[serde(default)]
+    pub skill: SkillTables,
+    /// `[capabilities]` section — per-provider-per-model override of
+    /// the shipped capability matrix (`defer_loading`, `tool_search`,
+    /// `prompt_caching`, etc.). Entries under `[[capabilities.provider.<name>]]`
+    /// are prepended to the built-in rules for the same provider so
+    /// early adopters can flag proxied endpoints as supporting tool
+    /// search without waiting for a Harn release. See
+    /// `harn_vm::llm::capabilities` for the rule schema.
+    #[serde(default)]
+    pub capabilities: Option<harn_vm::llm::capabilities::CapabilitiesFile>,
+    /// Stable exported package modules. Keys are the logical import
+    /// suffixes (e.g. `providers/openai`) and values are package-root-
+    /// relative file paths. Consumers import them via `<package>/<key>`.
+    #[serde(default)]
+    pub exports: HashMap<String, String>,
+    /// `[llm]` section — packaged provider definitions, aliases,
+    /// inference rules, tier rules, and model defaults. Uses the same
+    /// schema as `providers.toml`, but merges into the current run
+    /// instead of replacing the global config file.
+    #[serde(default)]
+    pub llm: harn_vm::llm_config::ProvidersConfig,
+    /// `[[hooks]]` array-of-tables — declarative runtime hooks installed
+    /// once per process/thread before execution starts. Matches the
+    /// manifest-extension ABI shape added by `[exports]` / `[llm]`, but
+    /// the handlers themselves live in Harn modules.
+    #[serde(default)]
+    pub hooks: Vec<HookConfig>,
+    /// `[[triggers]]` array-of-tables — declarative event-driven trigger
+    /// registrations that resolve local handlers and predicates from Harn
+    /// modules at load time and preserve remote URI schemes for later
+    /// dispatcher work.
+    #[serde(default)]
+    pub triggers: Vec<TriggerManifestEntry>,
+    /// `[[handoff_routes]]` array-of-tables — declarative handoff route data.
+    /// Route selection stays in Harn stdlib/persona code; the Rust manifest
+    /// loader makes these tenant routes available to that code.
+    #[serde(default)]
+    pub handoff_routes: Vec<harn_vm::HandoffRouteConfig>,
+    /// `[[providers]]` array-of-tables — provider-specific connector
+    /// overrides used by the orchestrator to load either builtin Rust
+    /// connectors or `.harn` modules as connector implementations.
+    #[serde(default)]
+    pub providers: Vec<ProviderManifestEntry>,
+    /// `[[personas]]` array-of-tables — durable, non-executing agent role
+    /// manifests. Personas bind an entry workflow to tools, capabilities,
+    /// autonomy, budgets, receipts, handoffs, evals, and rollout metadata.
+    #[serde(default)]
+    pub personas: Vec<PersonaManifestEntry>,
+    /// `[connector_contract]` table — deterministic package-local fixtures
+    /// consumed by `harn connector check` for pure-Harn connector packages.
+    #[serde(default, alias = "connector-contract")]
+    pub connector_contract: ConnectorContractConfig,
+    /// `[orchestrator]` table — listener-level controls shared by
+    /// manifest-driven ingress surfaces.
+    #[serde(default)]
+    pub orchestrator: OrchestratorConfig,
+    /// `[rules]` table — `sgconfig`-style structural-rule discovery. Lists the
+    /// directories `harn scan` / `harn codemod` load rules from when no
+    /// explicit `--rule`/`--rule-pack` is given.
+    #[serde(default)]
+    pub rules: RulesConfig,
+    /// `[[contributes]]` array-of-tables — host-surface extension
+    /// contributions (editor languages, preview panes, build profiles,
+    /// commands, themes, …). Harn treats `kind` as a host-owned, namespaced
+    /// string and validates only the envelope plus that each contribution's
+    /// declared `scopes` are covered by `[package].permissions`; the host
+    /// (e.g. a host) interprets the kind-specific payload. New contribution
+    /// kinds therefore need no Harn release. This is the editor-layer twin of
+    /// the agent-layer blocks (`[[providers]]`, `[[personas]]`, `[[hooks]]`):
+    /// one signed package may populate any mix of both.
+    #[serde(default)]
+    pub contributes: Vec<ContributionEntry>,
+}
+
+/// A single `[[contributes]]` host-surface contribution.
+///
+/// ```toml
+/// [[contributes]]
+/// kind = "editor.language"          # host-owned namespaced vocabulary
+/// id = "latex"                      # unique within the package
+/// title = "LaTeX"
+/// when = "*.tex"                    # optional activation predicate (host-interpreted)
+/// scopes = ["workspace:read_text"]  # MUST be a subset of [package].permissions
+/// platforms = ["macos", "linux"]    # optional support/parity matrix; empty = all
+/// # kind-specific keys are captured into `config` and interpreted by the host:
+/// languageId = "latex"
+/// extensions = [".tex", ".sty"]
+/// ```
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ContributionEntry {
+    /// Host-owned, namespaced contribution kind (e.g. `editor.language`,
+    /// `editor.preview`, `build.profile`, `editor.command`, `editor.theme`).
+    /// Harn does not enumerate kinds — new ones need no release; it only
+    /// requires the value be namespaced (`segment(.segment)+`).
+    pub kind: String,
+    /// Stable identifier, unique across the package's contributions.
+    pub id: String,
+    #[serde(default)]
+    pub title: Option<String>,
+    /// Optional activation predicate the host interprets (a glob, a
+    /// `languageId`, or a host-defined expression). Absent = always available.
+    #[serde(default)]
+    pub when: Option<String>,
+    /// Capability scopes this contribution exercises. Every entry MUST be
+    /// declared in `[package].permissions`; validation fails closed otherwise.
+    #[serde(default)]
+    pub scopes: Vec<String>,
+    /// Optional support/parity matrix — which surfaces/platforms this
+    /// contribution targets (e.g. `macos`, `linux`, `windows`, `ide`, `tui`).
+    /// Empty means "all".
+    #[serde(default)]
+    pub platforms: Vec<String>,
+    /// Kind-specific payload, captured verbatim and interpreted by the host.
+    #[serde(flatten)]
+    pub config: BTreeMap<String, toml::Value>,
+}
+
+impl ContributionEntry {
+    /// `true` when `kind` is a non-empty, dot-namespaced identifier such as
+    /// `editor.language`. Single-segment kinds are rejected so third parties
+    /// cannot squat unprefixed names.
+    pub fn has_namespaced_kind(&self) -> bool {
+        let mut segments = 0usize;
+        for segment in self.kind.split('.') {
+            if segment.is_empty()
+                || !segment
+                    .chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+                || !segment.starts_with(|c: char| c.is_ascii_lowercase())
+            {
+                return false;
+            }
+            segments += 1;
+        }
+        segments >= 2
+    }
+}
+
+/// `[rules]` table — project-local structural-rule discovery (#2843).
+///
+/// ```toml
+/// [rules]
+/// ruleDirs = ["rules", "vendor/rules"]
+/// utilDirs = ["rules/util"]
+/// testConfigs = ["rules/tests"]
+/// nativeRuleDirs = ["target/harn-native-rules"]
+/// ```
+///
+/// Paths are resolved relative to the manifest's directory.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct RulesConfig {
+    /// Directories of top-level rule `*.toml` files to load.
+    #[serde(default, alias = "rule-dirs", alias = "ruleDirs")]
+    pub rule_dirs: Vec<String>,
+    /// Directories of utility-rule `*.toml` files (referenced via `matches`).
+    #[serde(default, alias = "util-dirs", alias = "utilDirs")]
+    pub util_dirs: Vec<String>,
+    /// Directories holding rule-test fixtures (for `harn rule test`).
+    #[serde(default, alias = "test-configs", alias = "testConfigs")]
+    pub test_configs: Vec<String>,
+    /// Trusted directories of native lint-rule dynamic libraries.
+    #[serde(
+        default,
+        alias = "native-rule-dirs",
+        alias = "nativeRuleDirs",
+        alias = "native_rule_dirs"
+    )]
+    pub native_rule_dirs: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct OrchestratorConfig {
+    #[serde(default, alias = "allowed-origins")]
+    pub allowed_origins: Vec<String>,
+    #[serde(default, alias = "max-body-bytes")]
+    pub max_body_bytes: Option<usize>,
+    #[serde(default)]
+    pub budget: OrchestratorBudgetSpec,
+    #[serde(default)]
+    pub drain: OrchestratorDrainConfig,
+    #[serde(default)]
+    pub pumps: OrchestratorPumpConfig,
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OrchestratorBudgetSpec {
+    #[serde(default)]
+    pub daily_cost_usd: Option<f64>,
+    #[serde(default)]
+    pub hourly_cost_usd: Option<f64>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct OrchestratorDrainConfig {
+    #[serde(default = "default_orchestrator_drain_max_items", alias = "max-items")]
+    pub max_items: usize,
+    #[serde(
+        default = "default_orchestrator_drain_deadline_seconds",
+        alias = "deadline-seconds"
+    )]
+    pub deadline_seconds: u64,
+}
+
+impl Default for OrchestratorDrainConfig {
+    fn default() -> Self {
+        Self {
+            max_items: default_orchestrator_drain_max_items(),
+            deadline_seconds: default_orchestrator_drain_deadline_seconds(),
+        }
+    }
+}
+
+pub(crate) fn default_orchestrator_drain_max_items() -> usize {
+    1024
+}
+
+pub(crate) fn default_orchestrator_drain_deadline_seconds() -> u64 {
+    30
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct OrchestratorPumpConfig {
+    #[serde(
+        default = "default_orchestrator_pump_max_outstanding",
+        alias = "max-outstanding"
+    )]
+    pub max_outstanding: usize,
+}
+
+impl Default for OrchestratorPumpConfig {
+    fn default() -> Self {
+        Self {
+            max_outstanding: default_orchestrator_pump_max_outstanding(),
+        }
+    }
+}
+
+pub(crate) fn default_orchestrator_pump_max_outstanding() -> usize {
+    64
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct HookConfig {
+    pub event: harn_vm::orchestration::HookEvent,
+    #[serde(default = "default_hook_pattern")]
+    pub pattern: String,
+    pub handler: String,
+}
+
+pub(crate) fn default_hook_pattern() -> String {
+    "*".to_string()
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TriggerManifestEntry {
+    pub id: String,
+    #[serde(default)]
+    pub kind: Option<TriggerKind>,
+    #[serde(default)]
+    pub provider: Option<harn_vm::ProviderId>,
+    #[serde(default, alias = "tier")]
+    pub autonomy_tier: harn_vm::AutonomyTier,
+    #[serde(default, rename = "match")]
+    pub match_: Option<TriggerMatchExpr>,
+    #[serde(default)]
+    pub sources: Vec<TriggerSourceManifestEntry>,
+    #[serde(default)]
+    pub when: Option<String>,
+    #[serde(default)]
+    pub when_budget: Option<TriggerWhenBudgetSpec>,
+    pub handler: String,
+    #[serde(default)]
+    pub dedupe_key: Option<String>,
+    #[serde(default)]
+    pub retry: TriggerRetrySpec,
+    #[serde(default)]
+    pub priority: Option<TriggerPriorityField>,
+    #[serde(default)]
+    pub budget: TriggerBudgetSpec,
+    #[serde(default)]
+    pub concurrency: Option<TriggerConcurrencyManifestSpec>,
+    #[serde(default)]
+    pub throttle: Option<TriggerThrottleManifestSpec>,
+    #[serde(default)]
+    pub rate_limit: Option<TriggerRateLimitManifestSpec>,
+    #[serde(default)]
+    pub debounce: Option<TriggerDebounceManifestSpec>,
+    #[serde(default)]
+    pub singleton: Option<TriggerSingletonManifestSpec>,
+    #[serde(default)]
+    pub batch: Option<TriggerBatchManifestSpec>,
+    #[serde(default)]
+    pub window: Option<TriggerStreamWindowManifestSpec>,
+    #[serde(default, alias = "dlq-alerts")]
+    pub dlq_alerts: Vec<TriggerDlqAlertManifestSpec>,
+    #[serde(default)]
+    pub secrets: BTreeMap<String, String>,
+    #[serde(default)]
+    pub filter: Option<String>,
+    #[serde(flatten, default)]
+    pub kind_specific: BTreeMap<String, toml::Value>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TriggerSourceManifestEntry {
+    #[serde(default)]
+    pub id: Option<String>,
+    pub kind: TriggerKind,
+    pub provider: harn_vm::ProviderId,
+    #[serde(default, rename = "match")]
+    pub match_: Option<TriggerMatchExpr>,
+    #[serde(default)]
+    pub dedupe_key: Option<String>,
+    #[serde(default)]
+    pub retry: Option<TriggerRetrySpec>,
+    #[serde(default)]
+    pub priority: Option<TriggerPriorityField>,
+    #[serde(default)]
+    pub budget: Option<TriggerBudgetSpec>,
+    #[serde(default)]
+    pub concurrency: Option<TriggerConcurrencyManifestSpec>,
+    #[serde(default)]
+    pub throttle: Option<TriggerThrottleManifestSpec>,
+    #[serde(default)]
+    pub rate_limit: Option<TriggerRateLimitManifestSpec>,
+    #[serde(default)]
+    pub debounce: Option<TriggerDebounceManifestSpec>,
+    #[serde(default)]
+    pub singleton: Option<TriggerSingletonManifestSpec>,
+    #[serde(default)]
+    pub batch: Option<TriggerBatchManifestSpec>,
+    #[serde(default)]
+    pub window: Option<TriggerStreamWindowManifestSpec>,
+    #[serde(default)]
+    pub secrets: BTreeMap<String, String>,
+    #[serde(default)]
+    pub filter: Option<String>,
+    #[serde(flatten, default)]
+    pub kind_specific: BTreeMap<String, toml::Value>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum TriggerKind {
+    Webhook,
+    Cron,
+    Poll,
+    Stream,
+    Predicate,
+    A2aPush,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct TriggerMatchExpr {
+    #[serde(default)]
+    pub events: Vec<String>,
+    #[serde(flatten, default)]
+    pub extra: BTreeMap<String, toml::Value>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TriggerRetrySpec {
+    #[serde(default)]
+    pub max: u32,
+    #[serde(default)]
+    pub backoff: TriggerRetryBackoff,
+    #[serde(default = "default_trigger_retention_days")]
+    pub retention_days: u32,
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum TriggerRetryBackoff {
+    #[default]
+    Immediate,
+    Svix,
+}
+
+pub(crate) fn default_trigger_retention_days() -> u32 {
+    harn_vm::DEFAULT_INBOX_RETENTION_DAYS
+}
+
+impl Default for TriggerRetrySpec {
+    fn default() -> Self {
+        Self {
+            max: 0,
+            backoff: TriggerRetryBackoff::default(),
+            retention_days: default_trigger_retention_days(),
+        }
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TriggerDispatchPriority {
+    High,
+    #[default]
+    Normal,
+    Low,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum TriggerPriorityField {
+    Dispatch(TriggerDispatchPriority),
+    Flow(TriggerPriorityManifestSpec),
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TriggerBudgetSpec {
+    #[serde(default)]
+    pub max_cost_usd: Option<f64>,
+    #[serde(default, alias = "tokens_max")]
+    pub max_tokens: Option<u64>,
+    #[serde(default)]
+    pub daily_cost_usd: Option<f64>,
+    #[serde(default)]
+    pub hourly_cost_usd: Option<f64>,
+    #[serde(default)]
+    pub max_autonomous_decisions_per_hour: Option<u64>,
+    #[serde(default)]
+    pub max_autonomous_decisions_per_day: Option<u64>,
+    #[serde(default)]
+    pub max_concurrent: Option<u32>,
+    #[serde(default)]
+    pub on_budget_exhausted: harn_vm::TriggerBudgetExhaustionStrategy,
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TriggerWhenBudgetSpec {
+    #[serde(default)]
+    pub max_cost_usd: Option<f64>,
+    #[serde(default)]
+    pub tokens_max: Option<u64>,
+    #[serde(default)]
+    pub timeout: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TriggerConcurrencyManifestSpec {
+    #[serde(default)]
+    pub key: Option<String>,
+    pub max: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TriggerThrottleManifestSpec {
+    #[serde(default)]
+    pub key: Option<String>,
+    pub period: String,
+    pub max: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TriggerRateLimitManifestSpec {
+    #[serde(default)]
+    pub key: Option<String>,
+    pub period: String,
+    pub max: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TriggerDebounceManifestSpec {
+    pub key: String,
+    pub period: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TriggerSingletonManifestSpec {
+    #[serde(default)]
+    pub key: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TriggerBatchManifestSpec {
+    #[serde(default)]
+    pub key: Option<String>,
+    pub size: u32,
+    pub timeout: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TriggerPriorityManifestSpec {
+    pub key: String,
+    #[serde(default)]
+    pub order: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum TriggerStreamWindowMode {
+    Tumbling,
+    Sliding,
+    Session,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TriggerStreamWindowManifestSpec {
+    pub mode: TriggerStreamWindowMode,
+    #[serde(default)]
+    pub key: Option<String>,
+    #[serde(default)]
+    pub size: Option<String>,
+    #[serde(default)]
+    pub every: Option<String>,
+    #[serde(default)]
+    pub gap: Option<String>,
+    #[serde(default)]
+    pub max_items: Option<u32>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct TriggerDlqAlertManifestSpec {
+    #[serde(default)]
+    pub destinations: Vec<TriggerDlqAlertDestination>,
+    #[serde(default)]
+    pub threshold: TriggerDlqAlertThreshold,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct TriggerDlqAlertThreshold {
+    #[serde(default, alias = "entries-in-1h")]
+    pub entries_in_1h: Option<u32>,
+    #[serde(default, alias = "percent-of-dispatches")]
+    pub percent_of_dispatches: Option<f64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum TriggerDlqAlertDestination {
+    Slack {
+        channel: String,
+        #[serde(default)]
+        webhook_url_env: Option<String>,
+    },
+    Email {
+        address: String,
+    },
+    Webhook {
+        url: String,
+        #[serde(default)]
+        headers: BTreeMap<String, String>,
+    },
+}
+
+impl TriggerDlqAlertDestination {
+    pub fn label(&self) -> String {
+        match self {
+            Self::Slack { channel, .. } => format!("slack:{channel}"),
+            Self::Email { address } => format!("email:{address}"),
+            Self::Webhook { url, .. } => format!("webhook:{url}"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TriggerHandlerUri {
+    Local(TriggerFunctionRef),
+    A2a {
+        target: String,
+        allow_cleartext: bool,
+    },
+    Worker {
+        queue: String,
+    },
+    Persona {
+        name: String,
+    },
+    EvalPack {
+        target: String,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TriggerFunctionRef {
+    pub raw: String,
+    pub module_name: Option<String>,
+    pub function_name: String,
+}
+
+/// `[skills]` table body.
+#[derive(Debug, Default, Clone, Deserialize)]
+#[allow(dead_code)] // `defaults` is parsed per harn#73; default application remains staged.
+pub struct SkillsConfig {
+    /// Additional filesystem roots to scan. Each entry may be a
+    /// literal directory or a glob (`packages/*/skills`). Resolved
+    /// relative to the directory holding harn.toml.
+    #[serde(default)]
+    pub paths: Vec<String>,
+    /// Override priority order. Values are layer labels —
+    /// `cli`, `env`, `project`, `manifest`, `user`, `package`,
+    /// `system`, `host`. Unlisted layers fall through to default
+    /// priority after listed ones.
+    #[serde(default)]
+    pub lookup_order: Vec<String>,
+    /// Disable entire layers. Same label set as `lookup_order`.
+    #[serde(default)]
+    pub disable: Vec<String>,
+    /// Optional remote registry base URL used to resolve
+    /// `<fingerprint>.pub` when a signer is not installed locally.
+    #[serde(default)]
+    pub signer_registry_url: Option<String>,
+    /// `[skills.defaults]` inline sub-table — applied to every
+    /// discovered skill when the field is unset in its SKILL.md
+    /// frontmatter.
+    #[serde(default)]
+    pub defaults: SkillDefaults,
+}
+
+#[derive(Debug, Default, Clone, Deserialize)]
+#[allow(dead_code)] // Parsed per harn#73; loader default application is still staged.
+pub struct SkillDefaults {
+    #[serde(default)]
+    pub tool_search: Option<String>,
+    #[serde(default)]
+    pub always_loaded: Vec<String>,
+}
+
+/// Container for `[[skill.source]]` array-of-tables.
+#[derive(Debug, Default, Clone, Deserialize)]
+pub struct SkillTables {
+    #[serde(default, rename = "source")]
+    pub sources: Vec<SkillSourceEntry>,
+}
+
+/// One `[[skill.source]]` entry. The `registry` variant is accepted
+/// for forward-compat but inert — see issue #73 and `docs/src/skills.md`
+/// for the marketplace timeline.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "type", rename_all = "lowercase")]
+#[allow(dead_code)] // Git/registry skill sources are manifest-reserved by harn#73.
+pub enum SkillSourceEntry {
+    Fs {
+        path: String,
+        #[serde(default)]
+        namespace: Option<String>,
+    },
+    Git {
+        url: String,
+        #[serde(default)]
+        tag: Option<String>,
+        #[serde(default)]
+        namespace: Option<String>,
+    },
+    Registry {
+        #[serde(default)]
+        url: Option<String>,
+        #[serde(default)]
+        name: Option<String>,
+    },
+}
+
+#[derive(Debug, Default, Clone, Deserialize)]
+pub struct WorkspaceConfig {
+    /// Directory or file globs (repo-relative) that `harn check --workspace`
+    /// walks to collect the full pipeline tree in one invocation.
+    #[serde(default)]
+    pub pipelines: Vec<String>,
+}
+
+#[derive(Debug, Default, Clone, Deserialize)]
+pub struct PackageRegistryConfig {
+    /// URL or filesystem path to a TOML package index.
+    #[serde(default)]
+    pub url: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct McpServerConfig {
+    pub name: String,
+    #[serde(default)]
+    pub transport: Option<String>,
+    #[serde(default)]
+    pub command: String,
+    #[serde(default)]
+    pub args: Vec<String>,
+    #[serde(default)]
+    pub env: HashMap<String, String>,
+    #[serde(default)]
+    pub url: String,
+    #[serde(default)]
+    pub auth_token: Option<String>,
+    #[serde(default)]
+    pub token_exchange: Option<harn_vm::mcp_oauth::McpTokenExchangeConfig>,
+    #[serde(default)]
+    pub auth: Option<McpAuthConfig>,
+    #[serde(default)]
+    pub client_id: Option<String>,
+    #[serde(default)]
+    pub client_secret: Option<String>,
+    #[serde(default)]
+    pub scopes: Option<String>,
+    #[serde(default)]
+    pub protocol_version: Option<String>,
+    #[serde(default)]
+    pub proxy_server_name: Option<String>,
+    /// When `true`, the server is NOT booted up-front. It boots on the
+    /// first `mcp_call` or on skill activation that declares it in
+    /// `requires_mcp`. See harn#75.
+    #[serde(default)]
+    pub lazy: bool,
+    /// Optional pointer to a Server Card — either an HTTP(S) URL or a
+    /// local filesystem path. When set, `mcp_server_card("name")` reads
+    /// the card from this source (cached per-process with a TTL).
+    #[serde(default)]
+    pub card: Option<String>,
+    /// How long (milliseconds) to keep a lazy server's process alive
+    /// after its last binder releases. 0 / unset → disconnect
+    /// immediately. Ignored for non-lazy servers.
+    #[serde(default, alias = "keep-alive-ms", alias = "keep_alive")]
+    pub keep_alive_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+pub struct McpAuthConfig {
+    #[serde(default)]
+    pub mode: Option<harn_vm::mcp_auth::OAuthClientAuthMode>,
+    #[serde(default, alias = "client-id")]
+    pub client_id: Option<String>,
+    #[serde(
+        default,
+        alias = "client_secret_id",
+        alias = "client-secret-id",
+        alias = "client_secret_ref",
+        alias = "client-secret-ref"
+    )]
+    pub client_secret_id: Option<String>,
+    #[serde(
+        default,
+        alias = "secret_id",
+        alias = "secret-id",
+        alias = "token-secret-id"
+    )]
+    pub secret_id: Option<String>,
+    #[serde(default, alias = "scope")]
+    pub scopes: Option<String>,
+    #[serde(default, alias = "token_auth_method", alias = "token-auth-method")]
+    pub token_endpoint_auth_method: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)] // Package metadata feeds authoring/publish validation tracked in harn#471.
+pub struct PackageInfo {
+    pub name: Option<String>,
+    pub version: Option<String>,
+    #[serde(default)]
+    pub evals: Vec<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub license: Option<String>,
+    #[serde(default)]
+    pub repository: Option<String>,
+    #[serde(default, alias = "harn_version", alias = "harn_version_range")]
+    pub harn: Option<String>,
+    #[serde(default)]
+    pub docs_url: Option<String>,
+    #[serde(default)]
+    pub provenance: Option<String>,
+    /// Human-facing publisher / developer name shown in marketplace surfaces.
+    #[serde(default)]
+    pub publisher: Option<String>,
+    /// Publisher contact (email or URL) shown alongside the publisher name.
+    #[serde(default)]
+    pub contact: Option<String>,
+    /// Optional ISO-8601 authoring date. Mutation dates are better derived
+    /// from the registry/VCS, but a declared creation date is allowed.
+    #[serde(default)]
+    pub created: Option<String>,
+    #[serde(default)]
+    pub permissions: Vec<String>,
+    #[serde(default, alias = "host-requirements")]
+    pub host_requirements: Vec<String>,
+    #[serde(default)]
+    pub tools: Vec<PackageToolExport>,
+    #[serde(default)]
+    pub skills: Vec<PackageSkillExport>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+pub struct PackageToolExport {
+    pub name: String,
+    pub module: String,
+    #[serde(default = "default_package_tool_symbol")]
+    pub symbol: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub permissions: Vec<String>,
+    #[serde(default, alias = "host-requirements")]
+    pub host_requirements: Vec<String>,
+    #[serde(default, alias = "input-schema")]
+    pub input_schema: Option<toml::Value>,
+    #[serde(default, alias = "output-schema")]
+    pub output_schema: Option<toml::Value>,
+    #[serde(default)]
+    pub annotations: BTreeMap<String, toml::Value>,
+}
+
+pub(crate) fn default_package_tool_symbol() -> String {
+    "tools".to_string()
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct PackageSkillExport {
+    pub name: String,
+    pub path: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub permissions: Vec<String>,
+    #[serde(default, alias = "host-requirements")]
+    pub host_requirements: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum Dependency {
+    Table(Box<DepTable>),
+    Path(String),
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct DepTable {
+    pub git: Option<String>,
+    #[serde(default, alias = "archive-url", alias = "archive_url")]
+    pub archive: Option<String>,
+    pub tag: Option<String>,
+    pub rev: Option<String>,
+    pub branch: Option<String>,
+    pub version: Option<String>,
+    pub path: Option<String>,
+    pub package: Option<String>,
+    #[serde(default)]
+    pub checksum: Option<String>,
+    /// Registry index URL/path the dependency was originally added from.
+    /// Persisted in the manifest so registry provenance survives
+    /// round-trips and the lockfile can compare against the registry's
+    /// latest version.
+    #[serde(default)]
+    pub registry: Option<String>,
+    /// Registry-side package name (e.g. `@burin/notion-sdk`). May differ
+    /// from the alias and from the git URL's repo name.
+    #[serde(default, alias = "registry-name")]
+    pub registry_name: Option<String>,
+    /// Registry version specifier the dependency was added against.
+    #[serde(default, alias = "registry-version")]
+    pub registry_version: Option<String>,
+    /// Immutable commit recorded by registry v2 for a Git-backed version.
+    #[serde(default, alias = "registry-commit")]
+    pub registry_commit: Option<String>,
+    /// Registry-v2 evidence URL for the selected published version.
+    #[serde(default, alias = "registry-provenance")]
+    pub registry_provenance: Option<String>,
+}
+
+impl Dependency {
+    pub(crate) fn git_url(&self) -> Option<&str> {
+        match self {
+            Dependency::Table(t) => t.git.as_deref(),
+            Dependency::Path(_) => None,
+        }
+    }
+
+    pub(crate) fn archive_url(&self) -> Option<&str> {
+        match self {
+            Dependency::Table(t) => t.archive.as_deref(),
+            Dependency::Path(_) => None,
+        }
+    }
+
+    pub(crate) fn rev(&self) -> Option<&str> {
+        match self {
+            Dependency::Table(t) => t.rev.as_deref(),
+            Dependency::Path(_) => None,
+        }
+    }
+
+    pub(crate) fn tag(&self) -> Option<&str> {
+        match self {
+            Dependency::Table(t) => t.tag.as_deref(),
+            Dependency::Path(_) => None,
+        }
+    }
+
+    pub(crate) fn branch(&self) -> Option<&str> {
+        match self {
+            Dependency::Table(t) => t.branch.as_deref(),
+            Dependency::Path(_) => None,
+        }
+    }
+
+    pub(crate) fn version(&self) -> Option<&str> {
+        match self {
+            Dependency::Table(t) => t.version.as_deref(),
+            Dependency::Path(_) => None,
+        }
+    }
+
+    pub(crate) fn requires_git(&self) -> bool {
+        self.git_url().is_some()
+    }
+
+    pub(crate) fn local_path(&self) -> Option<&str> {
+        match self {
+            Dependency::Table(t) => t.path.as_deref(),
+            Dependency::Path(p) => Some(p.as_str()),
+        }
+    }
+}
+
+pub(crate) fn validate_package_alias(alias: &str) -> Result<(), PackageError> {
+    if harn_modules::package_snapshot::is_valid_package_name(alias) {
+        Ok(())
+    } else {
+        Err(PackageError::Validation(format!(
+            "invalid dependency alias {alias:?}; use ASCII letters, numbers, '.', '_' or '-'"
+        )))
+    }
+}
+
+pub(crate) fn toml_string_literal(value: &str) -> Result<String, PackageError> {
+    use std::fmt::Write as _;
+
+    let mut encoded = String::with_capacity(value.len() + 2);
+    encoded.push('"');
+    for ch in value.chars() {
+        match ch {
+            '\u{08}' => encoded.push_str("\\b"),
+            '\t' => encoded.push_str("\\t"),
+            '\n' => encoded.push_str("\\n"),
+            '\u{0C}' => encoded.push_str("\\f"),
+            '\r' => encoded.push_str("\\r"),
+            '"' => encoded.push_str("\\\""),
+            '\\' => encoded.push_str("\\\\"),
+            ch if ch <= '\u{1F}' || ch == '\u{7F}' => {
+                write!(&mut encoded, "\\u{:04X}", ch as u32).map_err(|error| {
+                    PackageError::Manifest(format!("failed to encode TOML string: {error}"))
+                })?;
+            }
+            ch => encoded.push(ch),
+        }
+    }
+    encoded.push('"');
+    Ok(encoded)
+}
+#[derive(Debug, Default, Clone)]
+pub struct RuntimeExtensions {
+    pub root_manifest: Option<Manifest>,
+    pub root_manifest_path: Option<PathBuf>,
+    pub root_manifest_dir: Option<PathBuf>,
+    pub(crate) runtime_personas: Vec<ResolvedRuntimePersona>,
+    pub llm: Option<harn_vm::llm_config::ProvidersConfig>,
+    pub capabilities: Option<harn_vm::llm::capabilities::CapabilitiesFile>,
+    pub hooks: Vec<ResolvedHookConfig>,
+    pub triggers: Vec<ResolvedTriggerConfig>,
+    pub handoff_routes: Vec<harn_vm::HandoffRouteConfig>,
+    pub provider_connectors: Vec<ResolvedProviderConnectorConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ProviderManifestEntry {
+    pub id: harn_vm::ProviderId,
+    pub connector: ProviderConnectorManifest,
+    #[serde(default)]
+    pub oauth: Option<ProviderOAuthManifest>,
+    #[serde(default)]
+    pub setup: Option<ProviderSetupManifest>,
+    #[serde(default)]
+    pub capabilities: ConnectorCapabilities,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ProviderConnectorManifest {
+    #[serde(default)]
+    pub harn: Option<String>,
+    #[serde(default)]
+    pub rust: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+pub struct ProviderOAuthManifest {
+    #[serde(default, alias = "auth_url", alias = "authorization-endpoint")]
+    pub authorization_endpoint: Option<String>,
+    #[serde(default, alias = "token_url", alias = "token-endpoint")]
+    pub token_endpoint: Option<String>,
+    #[serde(default, alias = "registration_url", alias = "registration-endpoint")]
+    pub registration_endpoint: Option<String>,
+    #[serde(default)]
+    pub resource: Option<String>,
+    #[serde(default, alias = "scope")]
+    pub scopes: Option<String>,
+    #[serde(default, alias = "client-id")]
+    pub client_id: Option<String>,
+    #[serde(default, alias = "client-secret")]
+    pub client_secret: Option<String>,
+    #[serde(default, alias = "token_auth_method", alias = "token-auth-method")]
+    pub token_endpoint_auth_method: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ProviderSetupManifest {
+    #[serde(default, alias = "auth-type")]
+    pub auth_type: Option<String>,
+    #[serde(default)]
+    pub flow: Option<String>,
+    #[serde(default, alias = "required-scopes", alias = "scopes")]
+    pub required_scopes: Vec<String>,
+    #[serde(default, alias = "required-secrets")]
+    pub required_secrets: Vec<String>,
+    #[serde(default, alias = "setup-command")]
+    pub setup_command: Vec<String>,
+    #[serde(default, alias = "validation-command")]
+    pub validation_command: Vec<String>,
+    #[serde(default, alias = "health-checks")]
+    pub health_checks: Vec<ConnectorHealthCheckManifest>,
+    #[serde(default)]
+    pub recovery: ConnectorRecoveryCopy,
+    #[serde(flatten, default)]
+    pub extra: BTreeMap<String, toml::Value>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConnectorHealthCheckManifest {
+    pub id: String,
+    pub kind: String,
+    #[serde(default)]
+    pub command: Vec<String>,
+    #[serde(default)]
+    pub secret: Option<String>,
+    #[serde(default)]
+    pub url: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConnectorRecoveryCopy {
+    #[serde(default, alias = "missing-install")]
+    pub missing_install: Option<String>,
+    #[serde(default, alias = "missing-auth")]
+    pub missing_auth: Option<String>,
+    #[serde(default, alias = "expired-credentials")]
+    pub expired_credentials: Option<String>,
+    #[serde(default, alias = "revoked-credentials")]
+    pub revoked_credentials: Option<String>,
+    #[serde(default, alias = "missing-scopes")]
+    pub missing_scopes: Option<String>,
+    #[serde(default, alias = "inaccessible-resource")]
+    pub inaccessible_resource: Option<String>,
+    #[serde(default, alias = "transient-provider-outage")]
+    pub transient_provider_outage: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub struct ConnectorCapabilities {
+    pub webhook: bool,
+    pub oauth: bool,
+    pub rate_limit: bool,
+    pub pagination: bool,
+    pub graphql: bool,
+    pub streaming: bool,
+}
+
+impl ConnectorCapabilities {
+    pub const FEATURES: [&'static str; 6] = [
+        "webhook",
+        "oauth",
+        "rate_limit",
+        "pagination",
+        "graphql",
+        "streaming",
+    ];
+
+    fn enable(&mut self, feature: &str) -> Result<(), String> {
+        match normalize_connector_capability(feature).as_str() {
+            "webhook" => self.webhook = true,
+            "oauth" => self.oauth = true,
+            "rate_limit" => self.rate_limit = true,
+            "pagination" => self.pagination = true,
+            "graphql" => self.graphql = true,
+            "streaming" => self.streaming = true,
+            other => {
+                return Err(format!(
+                    "unknown connector capability '{feature}' (normalized as '{other}')"
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct ConnectorCapabilitiesTable {
+    #[serde(default)]
+    webhook: bool,
+    #[serde(default)]
+    oauth: bool,
+    #[serde(default, alias = "rate-limit")]
+    rate_limit: bool,
+    #[serde(default)]
+    pagination: bool,
+    #[serde(default)]
+    graphql: bool,
+    #[serde(default)]
+    streaming: bool,
+}
+
+impl From<ConnectorCapabilitiesTable> for ConnectorCapabilities {
+    fn from(value: ConnectorCapabilitiesTable) -> Self {
+        Self {
+            webhook: value.webhook,
+            oauth: value.oauth,
+            rate_limit: value.rate_limit,
+            pagination: value.pagination,
+            graphql: value.graphql,
+            streaming: value.streaming,
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for ConnectorCapabilities {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum RawConnectorCapabilities {
+            List(Vec<String>),
+            Table(ConnectorCapabilitiesTable),
+        }
+
+        match RawConnectorCapabilities::deserialize(deserializer)? {
+            RawConnectorCapabilities::List(features) => {
+                let mut capabilities = ConnectorCapabilities::default();
+                for feature in features {
+                    capabilities
+                        .enable(&feature)
+                        .map_err(serde::de::Error::custom)?;
+                }
+                Ok(capabilities)
+            }
+            RawConnectorCapabilities::Table(table) => Ok(table.into()),
+        }
+    }
+}
+
+pub fn normalize_connector_capability(feature: &str) -> String {
+    feature.trim().to_lowercase().replace('-', "_")
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct ConnectorContractConfig {
+    #[serde(default)]
+    pub version: Option<u32>,
+    #[serde(default)]
+    pub fixtures: Vec<ConnectorContractFixture>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ConnectorContractFixture {
+    pub provider: harn_vm::ProviderId,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub kind: Option<String>,
+    #[serde(default)]
+    pub headers: BTreeMap<String, String>,
+    #[serde(default)]
+    pub query: BTreeMap<String, String>,
+    #[serde(default)]
+    pub metadata: Option<toml::Value>,
+    #[serde(default)]
+    pub body: Option<String>,
+    #[serde(default)]
+    pub body_json: Option<toml::Value>,
+    #[serde(default)]
+    pub expect_type: Option<String>,
+    #[serde(default)]
+    pub expect_kind: Option<String>,
+    #[serde(default)]
+    pub expect_dedupe_key: Option<String>,
+    #[serde(default)]
+    pub expect_signature_state: Option<String>,
+    #[serde(default)]
+    pub expect_payload_contains: Option<toml::Value>,
+    #[serde(default)]
+    pub expect_response_status: Option<u16>,
+    #[serde(default)]
+    pub expect_response_body: Option<toml::Value>,
+    #[serde(default)]
+    pub expect_event_count: Option<usize>,
+    #[serde(default)]
+    pub expect_error_contains: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ResolvedProviderConnectorKind {
+    Harn { module: String },
+    RustBuiltin,
+    Invalid(String),
+}
+
+#[derive(Debug, Clone)]
+pub struct ResolvedProviderConnectorConfig {
+    pub id: harn_vm::ProviderId,
+    pub manifest_dir: PathBuf,
+    pub connector: ResolvedProviderConnectorKind,
+    pub oauth: Option<ProviderOAuthManifest>,
+    pub setup: Option<ProviderSetupManifest>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ResolvedHookConfig {
+    pub event: harn_vm::orchestration::HookEvent,
+    pub pattern: String,
+    pub handler: String,
+    pub manifest_dir: PathBuf,
+    pub package_name: Option<String>,
+    pub exports: HashMap<String, String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ResolvedTriggerConfig {
+    pub id: String,
+    pub kind: TriggerKind,
+    pub provider: harn_vm::ProviderId,
+    pub autonomy_tier: harn_vm::AutonomyTier,
+    pub match_: TriggerMatchExpr,
+    pub when: Option<String>,
+    pub when_budget: Option<TriggerWhenBudgetSpec>,
+    pub handler: String,
+    pub dedupe_key: Option<String>,
+    pub retry: TriggerRetrySpec,
+    pub dispatch_priority: TriggerDispatchPriority,
+    pub budget: TriggerBudgetSpec,
+    pub concurrency: Option<TriggerConcurrencyManifestSpec>,
+    pub throttle: Option<TriggerThrottleManifestSpec>,
+    pub rate_limit: Option<TriggerRateLimitManifestSpec>,
+    pub debounce: Option<TriggerDebounceManifestSpec>,
+    pub singleton: Option<TriggerSingletonManifestSpec>,
+    pub batch: Option<TriggerBatchManifestSpec>,
+    pub window: Option<TriggerStreamWindowManifestSpec>,
+    pub priority_flow: Option<TriggerPriorityManifestSpec>,
+    pub secrets: BTreeMap<String, String>,
+    pub filter: Option<String>,
+    pub kind_specific: BTreeMap<String, toml::Value>,
+    pub manifest_dir: PathBuf,
+    pub manifest_path: PathBuf,
+    pub package_name: Option<String>,
+    pub exports: HashMap<String, String>,
+    pub execution_guard: Option<Arc<harn_modules::package_execution::PackageExecutionGuard>>,
+    pub table_index: usize,
+    pub shape_error: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+#[allow(dead_code)] // Collected bindings are validated now and consumed by harn#159 dispatcher work.
+pub struct CollectedManifestTrigger {
+    pub config: ResolvedTriggerConfig,
+    pub handler: CollectedTriggerHandler,
+    pub when: Option<CollectedTriggerPredicate>,
+    pub flow_control: harn_vm::TriggerFlowControlConfig,
+}
+
+#[derive(Debug, Clone)]
+#[allow(dead_code)] // Remote targets and closures are retained for harn#159 trigger execution.
+pub enum CollectedTriggerHandler {
+    Local {
+        reference: TriggerFunctionRef,
+        callable: harn_vm::VmCallable,
+    },
+    A2a {
+        target: String,
+        allow_cleartext: bool,
+    },
+    Worker {
+        queue: String,
+    },
+    Persona {
+        binding: harn_vm::PersonaRuntimeBinding,
+        callable: harn_vm::VmCallable,
+    },
+    EvalPack {
+        target: String,
+        manifest: Box<harn_vm::orchestration::EvalPackManifest>,
+        ledger_options: Option<serde_json::Value>,
+    },
+}
+#[derive(Debug, Clone)]
+#[allow(dead_code)] // Predicate callables are validated now and reused by harn#161 dispatch gating.
+pub struct CollectedTriggerPredicate {
+    pub reference: TriggerFunctionRef,
+    pub callable: harn_vm::VmCallable,
+}
+
+pub(crate) type ManifestModuleCacheKey = (PathBuf, Option<String>, Option<String>);
+pub(crate) type ManifestModuleExports = BTreeMap<String, Arc<harn_vm::VmClosure>>;
+
+static MANIFEST_PROVIDER_SCHEMA_LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+
+pub(crate) async fn lock_manifest_provider_schemas() -> tokio::sync::MutexGuard<'static, ()> {
+    MANIFEST_PROVIDER_SCHEMA_LOCK
+        .get_or_init(|| tokio::sync::Mutex::new(()))
+        .lock()
+        .await
+}
+
+fn llm_manifest_diagnostics(content: &str) -> Vec<harn_vm::llm_config::ProviderConfigDiagnostic> {
+    let Ok(value) = toml::from_str::<toml::Value>(content) else {
+        return Vec::new();
+    };
+    let Some(llm) = value.get("llm") else {
+        return Vec::new();
+    };
+    let Ok(llm_src) = toml::to_string(llm) else {
+        return Vec::new();
+    };
+    let Ok(parsed) = harn_vm::llm_config::parse_config_toml_with_diagnostics(&llm_src) else {
+        return Vec::new();
+    };
+    parsed
+        .diagnostics
+        .into_iter()
+        .map(|mut diagnostic| {
+            if !diagnostic.path.is_empty() {
+                diagnostic.path = format!("llm.{}", diagnostic.path);
+            }
+            diagnostic
+        })
+        .collect()
+}
+
+pub(crate) fn read_manifest_from_path(path: &Path) -> Result<Manifest, PackageError> {
+    let content = fs::read_to_string(path).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::NotFound {
+            PackageError::Manifest(format!(
+                "No {} found in {}.",
+                MANIFEST,
+                path.parent().unwrap_or_else(|| Path::new(".")).display()
+            ))
+        } else {
+            PackageError::Manifest(format!("failed to read {}: {error}", path.display()))
+        }
+    })?;
+    let manifest = toml::from_str::<Manifest>(&content).map_err(|error| {
+        PackageError::Manifest(format!("failed to parse {}: {error}", path.display()))
+    })?;
+    for diagnostic in llm_manifest_diagnostics(&content) {
+        eprintln!("[llm_config] warning in {}: {diagnostic}", path.display());
+    }
+    Ok(manifest)
+}
+
+/// Load the `[workspace]` config and the directory of the `harn.toml`
+/// it came from. Paths in the returned config are left as-is (callers
+/// resolve them against the returned `manifest_dir`).
+pub fn load_workspace_config(anchor: Option<&Path>) -> Option<(WorkspaceConfig, PathBuf)> {
+    let anchor = anchor
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+    let (manifest, dir) = nearest_manifest_or_warn(&anchor)?;
+    Some((manifest.workspace, dir))
+}
+
+pub fn load_package_eval_pack_paths(anchor: Option<&Path>) -> Result<Vec<PathBuf>, PackageError> {
+    let anchor = anchor
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+    let Some((manifest, dir)) = load_nearest_manifest(&anchor).into_result()? else {
+        return Err(PackageError::Manifest(
+            "no harn.toml found for package eval discovery".to_string(),
+        ));
+    };
+
+    let ctx = ManifestContext { manifest, dir };
+    let mut paths = eval_pack_paths_from_manifest(&ctx.manifest, &ctx.dir)?;
+    paths.extend(installed_package_eval_pack_paths(&ctx)?);
+    paths.sort();
+    paths.dedup();
+    if paths.is_empty() {
+        return Err(PackageError::Manifest(
+            "package declares no eval packs; add [package].evals, harn.eval.toml, or install a dependency that ships eval packs".to_string(),
+        ));
+    }
+    for path in &paths {
+        if !path.is_file() {
+            return Err(PackageError::Manifest(format!(
+                "eval pack does not exist: {}",
+                path.display()
+            )));
+        }
+    }
+    Ok(paths)
+}
+
+fn eval_pack_paths_from_manifest(
+    manifest: &Manifest,
+    manifest_dir: &Path,
+) -> Result<Vec<PathBuf>, PackageError> {
+    let declared = manifest
+        .package
+        .as_ref()
+        .map(|package| package.evals.clone())
+        .unwrap_or_default();
+    let paths = if declared.is_empty() {
+        let default_pack = manifest_dir.join("harn.eval.toml");
+        if default_pack.is_file() {
+            vec![default_pack]
+        } else {
+            Vec::new()
+        }
+    } else {
+        declared
+            .iter()
+            .map(|entry| {
+                let path = PathBuf::from(entry);
+                if path.is_absolute() {
+                    path
+                } else {
+                    manifest_dir.join(path)
+                }
+            })
+            .collect()
+    };
+    for path in &paths {
+        if !path.is_file() {
+            return Err(PackageError::Manifest(format!(
+                "eval pack does not exist: {}",
+                path.display()
+            )));
+        }
+    }
+    Ok(paths)
+}
+
+fn installed_package_eval_pack_paths(ctx: &ManifestContext) -> Result<Vec<PathBuf>, PackageError> {
+    let Some(snapshot) = dependency_package_snapshot(&ctx.manifest, &ctx.dir)? else {
+        return Ok(Vec::new());
+    };
+    let lock = LockFile::load(snapshot.lock_path())?.ok_or_else(|| {
+        PackageError::Lockfile(format!(
+            "published package generation is missing {}",
+            snapshot.lock_path().display()
+        ))
+    })?;
+    let mut paths = Vec::new();
+    let packages_dir = snapshot.packages_root();
+    for entry in &lock.packages {
+        validate_package_alias(&entry.name)?;
+        let package_dir = packages_dir.join(&entry.name);
+        if package_dir.is_dir() {
+            if let Some(manifest) = read_package_manifest_from_dir(&package_dir)? {
+                paths.extend(eval_pack_paths_from_manifest(&manifest, &package_dir)?);
+            }
+            continue;
+        }
+
+        let package_file = packages_dir.join(format!("{}.harn", entry.name));
+        if package_file.is_file() {
+            continue;
+        }
+
+        return Err(PackageError::Manifest(format!(
+            "installed package {} is missing under {}; run `harn install`",
+            entry.name,
+            packages_dir.display()
+        )));
+    }
+    Ok(paths)
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ManifestContext {
+    pub(crate) manifest: Manifest,
+    pub(crate) dir: PathBuf,
+}
+
+impl ManifestContext {
+    pub(crate) fn manifest_path(&self) -> PathBuf {
+        self.dir.join(MANIFEST)
+    }
+
+    pub(crate) fn lock_path(&self) -> PathBuf {
+        self.dir.join(LOCK_FILE)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::package::test_support::{current_packages_dir, TestWorkspace};
+
+    #[test]
+    fn rules_table_parses_camel_and_kebab_dir_keys() {
+        // The documented `ruleDirs` camelCase form and the kebab alias both map
+        // to `rule_dirs` (#2843).
+        let camel: Manifest =
+            toml::from_str("[rules]\nruleDirs = [\"rules\", \"vendor/rules\"]\n").unwrap();
+        assert_eq!(camel.rules.rule_dirs, vec!["rules", "vendor/rules"]);
+
+        let kebab: Manifest = toml::from_str("[rules]\nrule-dirs = [\"r\"]\n").unwrap();
+        assert_eq!(kebab.rules.rule_dirs, vec!["r"]);
+
+        let native: Manifest =
+            toml::from_str("[rules]\nnativeRuleDirs = [\"native-rules\"]\n").unwrap();
+        assert_eq!(native.rules.native_rule_dirs, vec!["native-rules"]);
+
+        let native_kebab: Manifest =
+            toml::from_str("[rules]\nnative-rule-dirs = [\"nr\"]\n").unwrap();
+        assert_eq!(native_kebab.rules.native_rule_dirs, vec!["nr"]);
+
+        // No `[rules]` table → empty discovery, never an error.
+        let none: Manifest = toml::from_str("[package]\nname = \"x\"\n").unwrap();
+        assert!(none.rules.rule_dirs.is_empty());
+        assert!(none.rules.native_rule_dirs.is_empty());
+    }
+
+    #[test]
+    fn llm_manifest_diagnostics_report_unknown_model_fields() {
+        let diagnostics = llm_manifest_diagnostics(
+            r#"
+[llm.models."demo/model"]
+name = "Demo"
+provider = "demo"
+context_window = 4096
+fast_mode = true
+"#,
+        );
+        let texts: Vec<String> = diagnostics
+            .into_iter()
+            .map(|diagnostic| diagnostic.to_string())
+            .collect();
+        assert!(
+            texts.iter().any(
+                |diagnostic| diagnostic.contains("llm.models.demo/model.fast_mode")
+                    && diagnostic.contains("serving_tiers")
+            ),
+            "expected manifest [llm] unknown-field diagnostic, got {texts:?}"
+        );
+    }
+
+    #[test]
+    fn package_eval_pack_paths_use_package_manifest_entries() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join(".git")).unwrap();
+        fs::create_dir_all(root.join("evals")).unwrap();
+        fs::write(
+            root.join(MANIFEST),
+            r#"
+    [package]
+    name = "demo"
+    version = "0.1.0"
+    evals = ["evals/webhook.toml"]
+    "#,
+        )
+        .unwrap();
+        fs::write(
+            root.join("evals/webhook.toml"),
+            "version = 1\n[[cases]]\nrun = \"run.json\"\n",
+        )
+        .unwrap();
+
+        let paths = load_package_eval_pack_paths(Some(&root.join("src/main.harn"))).unwrap();
+
+        assert_eq!(paths, vec![root.join("evals/webhook.toml")]);
+        assert!(
+            !root.join(".harn").exists(),
+            "loading project eval packs without dependencies must remain read-only"
+        );
+    }
+
+    #[test]
+    fn package_eval_pack_paths_include_installed_package_evals() {
+        let dependency_tmp = tempfile::tempdir().unwrap();
+        let dependency = dependency_tmp.path().join("coding-pack");
+        fs::create_dir_all(dependency.join("evals")).unwrap();
+        fs::write(
+            dependency.join(MANIFEST),
+            r#"
+[package]
+name = "coding-pack"
+version = "0.1.0"
+evals = ["evals/coding.toml"]
+"#,
+        )
+        .unwrap();
+        fs::write(
+            dependency.join("evals/run.json"),
+            serde_json::to_string_pretty(&serde_json::json!({
+                "_type": "workflow_run",
+                "id": "run_1",
+                "workflow_id": "workflow_1",
+                "status": "completed",
+                "usage": {
+                    "total_duration_ms": 12,
+                    "total_cost": 0.01,
+                    "input_tokens": 3,
+                    "output_tokens": 4,
+                    "call_count": 1,
+                    "models": ["mock"]
+                },
+                "replay_fixture": {
+                    "_type": "replay_fixture",
+                    "expected_status": "completed"
+                }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        fs::write(
+            dependency.join("evals/coding.toml"),
+            r#"
+version = 1
+id = "coding-pack"
+trials = 2
+
+[package]
+name = "coding-pack"
+version = "0.1.0"
+source = "path:test"
+templates = ["templates/rubric.harn.prompt"]
+
+[metadata]
+model = "mock-model"
+commit = "commit-a"
+
+[[cases]]
+id = "case-a"
+run = "run.json"
+rubrics = ["status"]
+
+[[rubrics]]
+id = "status"
+kind = "deterministic"
+
+[[rubrics.assertions]]
+kind = "run-status"
+expected = "completed"
+"#,
+        )
+        .unwrap();
+
+        let helper = dependency_tmp.path().join("helper-lib");
+        fs::create_dir_all(&helper).unwrap();
+        fs::write(
+            helper.join(MANIFEST),
+            r#"
+[package]
+name = "helper-lib"
+version = "0.1.0"
+"#,
+        )
+        .unwrap();
+
+        let project_tmp = tempfile::tempdir().unwrap();
+        let root = project_tmp.path();
+        let workspace = TestWorkspace::new(root);
+        fs::create_dir_all(root.join(".git")).unwrap();
+        fs::write(
+            root.join(MANIFEST),
+            format!(
+                r#"
+[package]
+name = "workspace"
+version = "0.1.0"
+
+[dependencies]
+coding-pack = {{ path = {} }}
+helper-lib = {{ path = {} }}
+"#,
+                crate::format::toml_basic_string_literal(&dependency.display().to_string()),
+                crate::format::toml_basic_string_literal(&helper.display().to_string())
+            ),
+        )
+        .unwrap();
+
+        install_packages_in(workspace.env(), false, None, false).unwrap();
+
+        let paths = load_package_eval_pack_paths(Some(&root.join("src/main.harn"))).unwrap();
+        assert_eq!(
+            paths,
+            vec![current_packages_dir(root)
+                .join("coding-pack")
+                .join("evals/coding.toml")]
+        );
+
+        harn_vm::event_log::reset_active_event_log();
+        let manifest = harn_vm::orchestration::load_eval_pack_manifest(&paths[0]).unwrap();
+        let package = manifest.package.as_ref().expect("package descriptor");
+        assert_eq!(package.name.as_deref(), Some("coding-pack"));
+        assert_eq!(package.templates, vec!["templates/rubric.harn.prompt"]);
+
+        let report = harn_vm::orchestration::evaluate_eval_pack_manifest_resumable(
+            &manifest,
+            Some(serde_json::json!({
+                "namespace": "installed-pack-evals",
+                "suite": "coding-pack",
+                "model": "mock-model",
+                "commit": "commit-a",
+                "branch": "main"
+            })),
+        )
+        .unwrap();
+        assert!(report.pass);
+        assert_eq!(report.trial_count, 2);
+        assert_eq!(report.run_state.ledger_rows_inserted, 2);
+        assert_eq!(report.stats_rows.len(), 1);
+        assert_eq!(report.stats_rows[0].trials, 2);
+        assert!(!report.stats_rows[0].case_fingerprint.is_empty());
+        assert_eq!(
+            report.harness_config_fingerprint,
+            report.stats_rows[0].harness_config_fingerprint
+        );
+
+        let ledger = harn_vm::orchestration::eval_ledger_read_report(Some(serde_json::json!({
+            "namespace": "installed-pack-evals",
+            "suite": "coding-pack",
+            "model": "mock-model",
+            "commit": "commit-a"
+        })))
+        .unwrap();
+        assert_eq!(ledger.rows.len(), 2);
+        harn_vm::event_log::reset_active_event_log();
+    }
+    #[test]
+    fn preflight_severity_parsing_accepts_synonyms() {
+        assert_eq!(
+            PreflightSeverity::from_opt(Some("warning")),
+            PreflightSeverity::Warning
+        );
+        assert_eq!(
+            PreflightSeverity::from_opt(Some("WARN")),
+            PreflightSeverity::Warning
+        );
+        assert_eq!(
+            PreflightSeverity::from_opt(Some("off")),
+            PreflightSeverity::Off
+        );
+        assert_eq!(
+            PreflightSeverity::from_opt(Some("allow")),
+            PreflightSeverity::Off
+        );
+        assert_eq!(
+            PreflightSeverity::from_opt(Some("error")),
+            PreflightSeverity::Error
+        );
+        assert_eq!(PreflightSeverity::from_opt(None), PreflightSeverity::Error);
+        // Unknown values fall back to the safe default (error).
+        assert_eq!(
+            PreflightSeverity::from_opt(Some("bogus")),
+            PreflightSeverity::Error
+        );
+    }
+
+    #[test]
+    fn load_check_config_walks_up_from_nested_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        // Mark root as project boundary so walk-up terminates here.
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        fs::write(
+            root.join(MANIFEST),
+            r#"
+    [check]
+    preflight_severity = "warning"
+    preflight_allow = ["custom.scan", "runtime.*"]
+    host_capabilities_path = "./schemas/host-caps.json"
+
+    [workspace]
+    pipelines = ["pipelines", "scripts"]
+    "#,
+        )
+        .unwrap();
+        let nested = root.join("src").join("deep");
+        std::fs::create_dir_all(&nested).unwrap();
+        let harn_file = nested.join("pipeline.harn");
+        fs::write(&harn_file, "pipeline main() {}\n").unwrap();
+
+        let cfg = load_check_config(Some(&harn_file));
+        assert_eq!(cfg.preflight_severity.as_deref(), Some("warning"));
+        assert_eq!(cfg.preflight_allow, vec!["custom.scan", "runtime.*"]);
+        let caps_path = cfg.host_capabilities_path.expect("host caps path");
+        assert!(
+            caps_path.ends_with("schemas/host-caps.json")
+                || caps_path.ends_with("schemas\\host-caps.json"),
+            "unexpected absolutized path: {caps_path}"
+        );
+
+        let (workspace, manifest_dir) =
+            load_workspace_config(Some(&harn_file)).expect("workspace manifest");
+        assert_eq!(workspace.pipelines, vec!["pipelines", "scripts"]);
+        // Walk-up lands on the directory containing the harn.toml.
+        assert_eq!(manifest_dir, root);
+    }
+
+    #[test]
+    fn toml_string_literal_escapes_all_basic_control_characters() {
+        let literal = toml_string_literal("a\u{08}\t\n\u{0C}\r\"\\\u{07}z").unwrap();
+        let parsed: toml::Value = toml::from_str(&format!("value = {literal}\n")).unwrap();
+        assert_eq!(
+            parsed.get("value").and_then(toml::Value::as_str),
+            Some("a\u{08}\t\n\u{0C}\r\"\\\u{07}z")
+        );
+    }
+
+    #[test]
+    fn orchestrator_drain_config_parses_defaults_and_overrides() {
+        let default_manifest: Manifest = toml::from_str(
+            r#"
+    [package]
+    name = "fixture"
+    "#,
+        )
+        .unwrap();
+        assert_eq!(default_manifest.orchestrator.drain.max_items, 1024);
+        assert_eq!(default_manifest.orchestrator.drain.deadline_seconds, 30);
+        assert_eq!(default_manifest.orchestrator.pumps.max_outstanding, 64);
+
+        let configured: Manifest = toml::from_str(
+            r#"
+    [package]
+    name = "fixture"
+
+    [orchestrator]
+    drain.max_items = 77
+    drain.deadline_seconds = 12
+    pumps.max_outstanding = 3
+    "#,
+        )
+        .unwrap();
+        assert_eq!(configured.orchestrator.drain.max_items, 77);
+        assert_eq!(configured.orchestrator.drain.deadline_seconds, 12);
+        assert_eq!(configured.orchestrator.pumps.max_outstanding, 3);
+    }
+
+    #[test]
+    fn load_check_config_stops_at_git_boundary() {
+        let tmp = tempfile::tempdir().unwrap();
+        // An ancestor harn.toml above .git must NOT be picked up.
+        fs::write(
+            tmp.path().join(MANIFEST),
+            "[check]\npreflight_severity = \"off\"\n",
+        )
+        .unwrap();
+        let project = tmp.path().join("project");
+        std::fs::create_dir_all(project.join(".git")).unwrap();
+        let inner = project.join("src");
+        std::fs::create_dir_all(&inner).unwrap();
+        let harn_file = inner.join("main.harn");
+        fs::write(&harn_file, "pipeline main() {}\n").unwrap();
+        let cfg = load_check_config(Some(&harn_file));
+        assert!(
+            cfg.preflight_severity.is_none(),
+            "must not inherit harn.toml from outside the .git boundary"
+        );
+    }
+}

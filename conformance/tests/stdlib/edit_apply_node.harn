@@ -1,0 +1,126 @@
+import "std/edit"
+
+/**
+ * End-to-end exercise of `edit_apply_node` (issue #2506). Drives
+ * `hostlib_ast_apply_node` through the std/edit wrapper across Rust,
+ * Python, TypeScript, and Go fixtures plus selector + validation modes.
+ */
+fn write_fixture(fs: HarnessFs, dir: string, name: string, body: string) -> string {
+  const path = path_join(dir, name)
+  fs.write_text(path, body)
+  return path
+}
+
+pipeline default(harness: Harness) {
+  // `hostlib_ast_apply_node` writes edited source to disk, so it requires
+  // the deterministic-tools feature gate (issue #2548).
+  const root = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn_edit_apply_node_" + to_string(harness.random.range(100000, 999999)),
+  )
+  harness.fs.mkdir(root)
+  // 1) Rust: rewrite the body of `beta`, leaving `alpha` alone.
+  const rs_path = write_fixture(
+    harness.fs,
+    root,
+    "rs_lib.rs",
+    "fn alpha() {\n    let x = 1;\n}\n\nfn beta() {\n    let y = 2;\n}\n",
+  )
+  const rs_result = edit_apply_node(
+    harness.ast,
+    {
+      path: rs_path,
+      query: "(function_item name: (identifier) @name (#eq? @name \"beta\") body: (block) @target)",
+      replacement: "{ let y = 42; }",
+    },
+  )
+  harness.stdio.println(rs_result.applied && rs_result.result == "applied")
+  const rs_after = harness.fs.read_text(rs_path)
+  harness.stdio.println(contains(rs_after, "let y = 42"))
+  harness.stdio.println(contains(rs_after, "alpha"))
+  harness.stdio.println(!contains(rs_after, "let y = 2"))
+  // 2) Python: rewrite a function body. Dry-run only — verify the file
+  //    is left untouched while `preview` carries the new text.
+  const py_path = write_fixture(
+    harness.fs,
+    root,
+    "py_lib.py",
+    "def greet(name):\n    return 'hi ' + name\n",
+  )
+  const py_before = harness.fs.read_text(py_path)
+  const py_result = edit_apply_node(
+    harness.ast,
+    {
+      path: py_path,
+      query:
+        "(function_definition name: (identifier) @name (#eq? @name \"greet\") body: (block) @target)",
+      replacement: "return f'hi {name}!'",
+      dry_run: true,
+    },
+  )
+  harness.stdio.println(py_result.applied && py_result.dry_run)
+  harness.stdio.println(contains(py_result.preview, "f'hi {name}!'"))
+  harness.stdio.println(harness.fs.read_text(py_path) == py_before)
+  // 3) TypeScript: select=all rewrites every match.
+  const ts_path = write_fixture(
+    harness.fs,
+    root,
+    "ts_lib.ts",
+    "function a() { return 1 }\nfunction b() { return 2 }\nfunction c() { return 3 }\n",
+  )
+  const ts_result = edit_apply_node(
+    harness.ast,
+    {
+      path: ts_path,
+      query: "(function_declaration body: (statement_block) @target)",
+      replacement: "{ return 0 }",
+      select: "all",
+    },
+  )
+  harness.stdio.println(ts_result.applied && ts_result.match_count == 3)
+  harness.stdio.println(contains(harness.fs.read_text(ts_path), "{ return 0 }"))
+  // 4) Go: select=nth rewrites the chosen match in document order.
+  const go_path = write_fixture(
+    harness.fs,
+    root,
+    "go_lib.go",
+    "package main\n\nfunc a() int { return 1 }\nfunc b() int { return 2 }\nfunc c() int { return 3 }\n",
+  )
+  const go_result = edit_apply_node(
+    harness.ast,
+    {
+      path: go_path,
+      query: "(function_declaration body: (block) @target)",
+      replacement: "{ return 7 }",
+      select: "nth",
+      nth: 2,
+    },
+  )
+  harness.stdio.println(go_result.applied && go_result.match_count == 1)
+  const go_after = harness.fs.read_text(go_path)
+  harness.stdio.println(contains(go_after, "func a() int { return 1 }"))
+  harness.stdio.println(contains(go_after, "func b() int { return 7 }"))
+  harness.stdio.println(contains(go_after, "func c() int { return 3 }"))
+  // 5) Selector=unique with multiple matches returns ambiguous.
+  const multi_path = write_fixture(harness.fs, root, "multi.rs", "fn a() { 1 }\nfn b() { 2 }\n")
+  const ambiguous = edit_apply_node(
+    harness.ast,
+    {path: multi_path, query: "(function_item body: (block) @target)", replacement: "{ 0 }"},
+  )
+  harness.stdio.println(
+    !ambiguous.applied && ambiguous.result == "ambiguous" && ambiguous.match_count == 2,
+  )
+  // 6) Validation rejects edits that produce a syntax error and leaves
+  //    the file untouched.
+  const broken_path = write_fixture(harness.fs, root, "broken.rs", "fn alpha() { 1 }\n")
+  const broken_before = harness.fs.read_text(broken_path)
+  const broken = edit_apply_node(
+    harness.ast,
+    {path: broken_path, query: "(function_item body: (block) @target)", replacement: "{ ( }"},
+  )
+  harness.stdio.println(!broken.applied && broken.result == "syntax_error")
+  harness.stdio.println(harness.fs.read_text(broken_path) == broken_before)
+  // 7) Invalid tree-sitter queries return a structured error.
+  const bad_query = edit_apply_node(harness.ast, {path: rs_path, query: "((((", replacement: "{ }"})
+  harness.stdio.println(!bad_query.applied && bad_query.result == "invalid_query")
+}

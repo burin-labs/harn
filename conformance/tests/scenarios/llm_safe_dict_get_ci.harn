@@ -1,0 +1,12 @@
+// std/llm/safe.dict_get_ci performs a single case-insensitive lookup.
+import { dict_get_ci } from "std/llm/safe"
+
+pipeline default(harness: Harness) {
+  const d = {Foo: 1, BAR: "x", baz: nil}
+  harness.stdio.println(dict_get_ci(d, "foo"))
+  harness.stdio.println(dict_get_ci(d, "FOO"))
+  harness.stdio.println(dict_get_ci(d, "bar"))
+  harness.stdio.println(dict_get_ci(d, "Baz") == nil)
+  harness.stdio.println(dict_get_ci(d, "missing") == nil)
+  harness.stdio.println(dict_get_ci(nil, "anything") == nil)
+}

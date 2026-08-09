@@ -1,0 +1,27 @@
+import { preset_run_command } from "std/tool_hooks"
+
+/**
+ * preset_hooks_no_match_passthrough (TH-07 #1900).
+ *
+ * No rule (registered, custom, or universal) matches the command. The
+ * wrapper bypasses mode dispatch entirely and runs `inner` with the
+ * original command. No audit entries are emitted because there is
+ * nothing to report.
+ */
+pipeline default(harness: Harness) {
+  harness.obs.pipeline_lifecycle_audit_log_take()
+  const inner = { args -> {ok: true, ran: args.command} }
+  const wrapper = preset_run_command(harness, {stacks: ["rust"], inner: inner})
+  const result = wrapper({command: "echo hello world"})
+  /* `inner` ran with the command unchanged. */
+  harness.stdio.println(result.ok)
+  harness.stdio.println(result.ran)
+  /* When `inner` is omitted the wrapper still returns a no-match
+   * passthrough envelope so callers can drive the executor themselves. */
+  const preview_wrapper = preset_run_command(harness, {stacks: ["rust"]})
+  const preview = preview_wrapper({command: "echo hello world"})
+  harness.stdio.println(preview.action)
+  harness.stdio.println(preview.command)
+  /* Either way, no rule matched so the lifecycle audit log stays empty. */
+  harness.stdio.println(len(harness.obs.pipeline_lifecycle_audit_log_take()))
+}

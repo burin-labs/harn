@@ -1,0 +1,47 @@
+/**
+ * Code librarian — quick exploratory walkthrough of std/code_librarian.
+ *
+ * Run from the repo root with:
+ *   cargo run --bin harn -- run examples/code_librarian_explore.harn
+ *
+ * The example rebuilds the code index over the corpus that ships with
+ * the typed symbol graph fixture (#2434), then exercises every public
+ * function in the library. Before the librarian landed each of these
+ * lines reached for a different `hostlib_code_index_*` builtin —
+ * compare with `crates/harn-hostlib/tests/harn_hostlib/smoke_harn_script.rs`.
+ */
+import "std/code_librarian"
+
+pipeline default(harness: Harness) {
+  const root = "crates/harn-hostlib/tests/fixtures/code_index_queries/corpus"
+  const _ = harness.code_index.rebuild({root: root})
+  // 1. Direct Cypher pass-through.
+  const alpha: LibrarianCypherResult = code_librarian_query(
+    harness.code_index,
+    "MATCH (f:Function {name: 'main'}) RETURN f.path AS path",
+  )
+  harness.stdio.println("functions named `main`: " + to_string(len(alpha.rows)))
+  // 2. Who calls a hot function?
+  const callers: list<LibrarianCallSite> = code_librarian_who_calls(harness.code_index, "fetchUser")
+  harness.stdio.println("fetchUser callers: " + to_string(len(callers)))
+  for c in callers {
+    harness.stdio.println("  " + c.path)
+  }
+  // 3. What imports `src/util.ts`?
+  const imps: list<LibrarianImport> = code_librarian_what_imports(harness.code_index, "src/util.ts")
+  harness.stdio.println("importers of src/util.ts: " + to_string(len(imps)))
+  // 4. Outline a file and read its symbol kinds.
+  const outline: LibrarianOutline = code_librarian_outline(harness.code_index, "src/util.ts")
+  harness.stdio.println("src/util.ts known? " + to_string(outline.known))
+  // 5. Freshness — pristine after rebuild.
+  const fresh: LibrarianFreshness = code_librarian_freshness(harness.code_index, "src/util.ts")
+  harness.stdio.println("src/util.ts stale? " + to_string(fresh.stale))
+  // 6. Change log from the start.
+  const changes: list<LibrarianFileChange> = code_librarian_recent_changes(harness.code_index, 0)
+  harness.stdio.println("recorded changes: " + to_string(len(changes)))
+  // 7. Activate a per-branch overlay, then deactivate.
+  const on: LibrarianOverlay = code_librarian_branch_overlay(harness.code_index, "topic/explore")
+  harness.stdio.println("overlay active: " + (on.active ?? "<base>"))
+  const off: LibrarianOverlay = code_librarian_branch_overlay(harness.code_index, nil)
+  harness.stdio.println("overlay active: " + (off.active ?? "<base>"))
+}

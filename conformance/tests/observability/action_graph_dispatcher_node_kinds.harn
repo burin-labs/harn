@@ -1,0 +1,199 @@
+import "std/triggers"
+import "../_common"
+
+fn pass_when(_harness: Harness, _event: TriggerEvent) -> bool {
+  return true
+}
+
+fn local_handler(harness: Harness, event: TriggerEvent) -> dict {
+  return {handled: true, trace_id: event.trace_id}
+}
+
+fn failing_handler(harness: Harness, event: TriggerEvent) -> any {
+  throw "graph-fail:" + event.kind
+}
+
+fn action_graph_has_node(runtime: HarnessRuntime, trace_id: string, kind: string) -> bool {
+  const records: list<TriggerActionGraphEvent> = runtime.trigger_inspect_action_graph(trace_id)
+  for entry in records {
+    for node in entry.payload?.observability?.action_graph_nodes ?? [] {
+      if node?.trace_id == trace_id && node?.kind == kind {
+        return true
+      }
+    }
+  }
+  return false
+}
+
+fn action_graph_has_edge(runtime: HarnessRuntime, trace_id: string, kind: string) -> bool {
+  const records: list<TriggerActionGraphEvent> = runtime.trigger_inspect_action_graph(trace_id)
+  for entry in records {
+    for edge in entry.payload?.observability?.action_graph_edges ?? [] {
+      if edge?.kind == kind {
+        return true
+      }
+    }
+  }
+  return false
+}
+
+pipeline test(harness: Harness, task) {
+  const unique = to_string(to_int(harness.clock.timestamp())) + "-"
+    + to_string(
+    harness.random.range(100000, 999999),
+  )
+  const root = path_join(harness.fs.workspace_temp_dir(), "harn-action-graph-dispatcher-" + unique)
+  harness.fs.mkdir(root)
+  harness.fs.write_text(
+    path_join(root, "receiver.harn"),
+    "pipeline default(harness: Harness, task) {\n  let envelope = json_parse(task)\n  harness.stdio.println(json_stringify({trace_id: envelope.event.trace_id, target_agent: envelope.target_agent}))\n}\n",
+  )
+  const repo_root = harness.process.exec("git", "rev-parse", "--show-toplevel").stdout.trim()
+  const harn_bin = harness.env.get_or(
+    "HARN_CONFORMANCE_HARN_BIN",
+    resolve_harn_bin(harness, repo_root),
+  )
+  assert(harness.fs.exists(harn_bin), "missing built harn binary at " + harn_bin)
+  const start = harness.process.shell_at(
+    root,
+    "nohup " + harn_bin + " serve --port 0"
+      + " receiver.harn >receiver.log 2>&1 </dev/null & echo $!",
+  )
+  const pid = start.stdout.trim()
+  assert(start.success, "failed to start A2A receiver")
+  assert(pid != "", "missing A2A receiver pid")
+  const receiver_url = wait_for_a2a_server_url(harness, path_join(root, "receiver.log"))
+  assert(receiver_url != nil, "A2A receiver did not start")
+  const port_matches = regex_captures(r":(\d+)$", receiver_url)
+  assert(len(port_matches) == 1, "A2A receiver URL did not include a port: " + receiver_url)
+  const port = port_matches[0].groups[0]
+  const local_trace = "trace-graph-local-" + unique
+  const worker_trace = "trace-graph-worker-" + unique
+  const retry_trace = "trace-graph-retry-" + unique
+  const a2a_trace = "trace-graph-a2a-" + unique
+  const local_handle: TriggerHandle = harness.runtime.trigger_register(
+    {
+      id: "graph-local-" + unique,
+      kind: "issue.opened",
+      provider: "webhook",
+      handler: local_handler,
+      when: pass_when,
+      retry: nil,
+      match: {events: ["issue.opened"]},
+      events: nil,
+      budget: nil,
+      dedupe_key: nil,
+      filter: nil,
+      manifest_path: nil,
+      package_name: "conformance",
+    },
+  )
+  const worker_handle: TriggerHandle = harness.runtime.trigger_register(
+    {
+      id: "graph-worker-" + unique,
+      kind: "issue.opened",
+      provider: "webhook",
+      handler: "worker://graph-" + unique,
+      when: nil,
+      retry: nil,
+      match: {events: ["issue.opened"]},
+      events: nil,
+      budget: nil,
+      dedupe_key: nil,
+      filter: nil,
+      manifest_path: nil,
+      package_name: "conformance",
+    },
+  )
+  const retry_handle: TriggerHandle = harness.runtime.trigger_register(
+    {
+      id: "graph-retry-" + unique,
+      kind: "issue.opened",
+      provider: "webhook",
+      handler: failing_handler,
+      when: nil,
+      retry: {max: 2, backoff: "immediate"},
+      match: {events: ["issue.opened"]},
+      events: nil,
+      budget: nil,
+      dedupe_key: nil,
+      filter: nil,
+      manifest_path: nil,
+      package_name: "conformance",
+    },
+  )
+  const a2a_handle: TriggerHandle = harness.runtime.trigger_register(
+    {
+      id: "graph-a2a-" + unique,
+      kind: "issue.opened",
+      provider: "webhook",
+      handler: "a2a://127.0.0.1:" + port + "/triage",
+      allow_cleartext: true,
+      when: nil,
+      retry: {max: 1, backoff: "immediate"},
+      match: {events: ["issue.opened"]},
+      events: nil,
+      budget: nil,
+      dedupe_key: nil,
+      filter: nil,
+      manifest_path: nil,
+      package_name: "conformance",
+    },
+  )
+  const local_fire: DispatchHandle = harness.runtime.trigger_fire(
+    local_handle,
+    {
+      provider: "webhook",
+      kind: "issue.opened",
+      trace_id: local_trace,
+      headers: {x_delivery: "evt-local-" + unique},
+    },
+  )
+  const worker_fire: DispatchHandle = harness.runtime.trigger_fire(
+    worker_handle,
+    {
+      provider: "webhook",
+      kind: "issue.opened",
+      trace_id: worker_trace,
+      headers: {x_delivery: "evt-worker-" + unique},
+    },
+  )
+  const retry_fire: DispatchHandle = harness.runtime.trigger_fire(
+    retry_handle,
+    {
+      provider: "webhook",
+      kind: "issue.opened",
+      trace_id: retry_trace,
+      headers: {x_delivery: "evt-retry-" + unique},
+    },
+  )
+  const a2a_fire: DispatchHandle = harness.runtime.trigger_fire(
+    a2a_handle,
+    {
+      provider: "webhook",
+      kind: "issue.opened",
+      trace_id: a2a_trace,
+      headers: {x_delivery: "evt-a2a-" + unique},
+    },
+  )
+  const _ = harness.process.shell("kill -TERM " + pid)
+  wait_for_exit(harness.clock, harness.process, pid)
+  harness.fs.delete(root)
+  harness.stdio.println(local_fire.status == "dispatched" && worker_fire.status == "dispatched")
+  harness.stdio.println(
+    retry_fire.status == "dlq" && contains(retry_fire.error ?? "", "graph-fail:issue.opened"),
+  )
+  harness.stdio.println(a2a_fire.status == "dispatched" && a2a_fire.result?.trace_id == a2a_trace)
+  harness.stdio.println(action_graph_has_node(harness.runtime, local_trace, "trigger"))
+  harness.stdio.println(action_graph_has_node(harness.runtime, local_trace, "predicate"))
+  harness.stdio.println(action_graph_has_node(harness.runtime, local_trace, "dispatch"))
+  harness.stdio.println(action_graph_has_node(harness.runtime, worker_trace, "worker_enqueue"))
+  harness.stdio.println(action_graph_has_node(harness.runtime, retry_trace, "retry"))
+  harness.stdio.println(action_graph_has_node(harness.runtime, retry_trace, "dlq"))
+  harness.stdio.println(action_graph_has_node(harness.runtime, a2a_trace, "a2a_hop"))
+  harness.stdio.println(action_graph_has_edge(harness.runtime, local_trace, "trigger_dispatch"))
+  harness.stdio.println(action_graph_has_edge(harness.runtime, local_trace, "predicate_gate"))
+  harness.stdio.println(action_graph_has_edge(harness.runtime, retry_trace, "retry"))
+  harness.stdio.println(action_graph_has_edge(harness.runtime, retry_trace, "dlq_move"))
+  harness.stdio.println(action_graph_has_edge(harness.runtime, a2a_trace, "a2a_dispatch"))
+}

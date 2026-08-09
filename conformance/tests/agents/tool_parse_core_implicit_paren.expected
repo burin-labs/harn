@@ -1,0 +1,21 @@
+# plain object arg, omitted paren
+  calls=1 errors=0 violations=0 stray=1
+  call run {"command":"go build ./..."}
+  prose=""
+  answer=null
+  done=null
+# heredoc edit, omitted paren
+  calls=1 errors=0 violations=0 stray=1
+  call edit {"action":"create","content":"package x\nfinal case class Y()","path":"a.scala"}
+  prose=""
+  answer=null
+  done=null
+# multiblock turn lands every call when the paren is omitted
+  calls=4 errors=0 violations=0 stray=0
+  call edit {"action":"create","content":"package rulekit\n\nsealed trait Rule","path":"src/main/scala/rulekit/Rule.scala"}
+  call edit {"action":"create","content":"package rulekit\n\nobject RuleSerializer","path":"src/main/scala/rulekit/RuleSerializer.scala"}
+  call edit {"action":"create","content":"package rulekit\n\nclass RuleSpec","path":"src/test/scala/rulekit/RuleSpec.scala"}
+  call run {"command":"sbt test"}
+  prose=""
+  answer=null
+  done=null

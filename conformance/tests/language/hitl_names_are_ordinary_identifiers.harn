@@ -1,0 +1,5 @@
+pipeline test(harness: Harness, task) {
+  const request_approval = "ordinary"
+  const ask_user = "identifier"
+  harness.stdio.println(request_approval + " " + ask_user)
+}

@@ -1,0 +1,11 @@
+catalog source=catalog_model
+input=3.0
+output=15.0
+cache_read=0.3
+cache_write=3.75
+provider source=provider_economics
+provider input=2.5
+provider cache_read=nil
+unknown nil=true
+single source=catalog_model
+single provider=openai

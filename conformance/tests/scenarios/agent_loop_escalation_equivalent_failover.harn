@@ -1,0 +1,85 @@
+import { agent_loop } from "std/agent/loop"
+/**
+ * Escalated agent-loop turns opt into Harn's provider-equivalent failover.
+ *
+ * Turn 1 runs on a real catalog primary route and dispatches a deterministic
+ * tool. The post-turn callback rebases the next LLM call to a real catalog
+ * stronger route. The custom caller inspects that second turn's options before
+ * returning the done sentinel, proving the loop injected equivalent_failover
+ * without live providers or timing-sensitive behavior.
+ */
+import { AgentLoopOptions } from "std/agent/options"
+
+fn tools() {
+  const r = tool_registry()
+  return tool_define(
+    r,
+    "echo",
+    "Echo back the message",
+    {
+      handler: { args -> return "echoed:" + to_string(args?.msg ?? "") },
+      parameters: {msg: {type: "string"}},
+    },
+  )
+}
+
+pipeline default(harness: Harness) {
+  const calls = harness.runtime.atomic(0)
+  const caller = { call ->
+    let _ = harness.runtime.atomic_add(calls, 1)
+    let n = harness.runtime.atomic_get(calls)
+    if n == 1 {
+      return {
+        ok: true,
+        value: {
+          text: "",
+          tool_calls: [{id: "c1", name: "echo", arguments: {msg: "first"}}],
+          provider: to_string(call.opts?.provider ?? ""),
+          model: to_string(call.opts?.model ?? ""),
+          stop_reason: "tool_calls",
+          input_tokens: 0,
+          output_tokens: 0,
+          usage: {input_tokens: 0, output_tokens: 0},
+        },
+      }
+    }
+    let failover = call.opts?.equivalent_failover ?? {}
+    harness.stdio.println("provider=" + to_string(call.opts?.provider ?? ""))
+    harness.stdio.println("model=" + to_string(call.opts?.model ?? ""))
+    harness.stdio.println("failover.max_routes=" + to_string(failover?.max_routes ?? "nil"))
+    harness.stdio.println("failover.on_no_dispatch=" + to_string(failover?.on_no_dispatch ?? false))
+    return {
+      ok: true,
+      value: {
+        text: "##DONE##",
+        provider: to_string(call.opts?.provider ?? ""),
+        model: to_string(call.opts?.model ?? ""),
+        input_tokens: 0,
+        output_tokens: 0,
+        usage: {input_tokens: 0, output_tokens: 0},
+      },
+    }
+  }
+  const opts: AgentLoopOptions = {
+    provider: "fireworks",
+    model: "gpt-oss-120b",
+    tools: tools(),
+    tool_format: "native",
+    max_iterations: 3,
+    loop_until_done: true,
+    done_sentinel: "##DONE##",
+    llm_caller: caller,
+    post_turn_callback: { info ->
+      if info?.iteration == 0 {
+        return {
+          message: "Escalating to the stronger route.",
+          llm_options: {provider: "anthropic", model: "claude-sonnet-4-6"},
+        }
+      }
+      return ""
+    },
+  }
+  const result = agent_loop(harness, "do it", nil, opts)
+  harness.stdio.println(result.status)
+  harness.stdio.println("visible=" + to_string(result.visible_text ?? ""))
+}

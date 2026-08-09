@@ -1,0 +1,240 @@
+import { help_requested } from "std/cli/argparse"
+pub import {
+  provider_tool_probe_campaign_behaviors,
+  provider_tool_probe_campaign_catalog_routes,
+  provider_tool_probe_campaign_catalog_snapshot,
+  provider_tool_probe_campaign_default_routes,
+  provider_tool_probe_campaign_filter_behavior_modes,
+  provider_tool_probe_campaign_modes,
+  provider_tool_probe_campaign_providers_config_text_error,
+  provider_tool_probe_campaign_routes,
+  provider_tool_probe_campaign_runtime_allows_live,
+  provider_tool_probe_campaign_runtime_receipt,
+  provider_tool_probe_campaign_runtime_revision_requirement_error,
+  provider_tool_probe_campaign_select_behaviors,
+} from "./provider_tool_probe_campaign/catalog"
+import {
+  __ensure_dir,
+  __load_env_file,
+  __target_runtime_context,
+} from "./provider_tool_probe_campaign/env"
+pub import {
+  provider_tool_probe_campaign_env_file,
+  provider_tool_probe_campaign_env_from_dotenv_text,
+  provider_tool_probe_campaign_parse_args,
+} from "./provider_tool_probe_campaign/env"
+pub import {
+  provider_tool_probe_campaign_artifact_path,
+  provider_tool_probe_campaign_case_status,
+  provider_tool_probe_campaign_missing_env_keys,
+  provider_tool_probe_campaign_probe_telemetry,
+  provider_tool_probe_campaign_scorecard_inputs,
+  provider_tool_probe_campaign_source_receipt,
+  provider_tool_probe_campaign_write_scorecard,
+} from "./provider_tool_probe_campaign/execute"
+pub import {
+  ProviderToolProbePlanRequest,
+  provider_tool_probe_campaign_planned_cells,
+  provider_tool_probe_campaign_planned_cells_sliced_with_options,
+  provider_tool_probe_campaign_planned_cells_with_options,
+} from "./provider_tool_probe_campaign/plan"
+import { __live_cells } from "./provider_tool_probe_campaign/report"
+pub import {
+  provider_tool_probe_campaign_markdown,
+  provider_tool_probe_campaign_observed_spend,
+  provider_tool_probe_campaign_report,
+} from "./provider_tool_probe_campaign/report"
+import "./provider_tool_probe_campaign/support"
+pub import {
+  ProviderToolProbeBehavior,
+  ProviderToolProbeCampaignReport,
+  ProviderToolProbeCatalogReceipt,
+  ProviderToolProbeCatalogStatus,
+  ProviderToolProbeCell,
+  ProviderToolProbeRoute,
+  ProviderToolProbeRuntimeReceipt,
+  ProviderToolProbeRuntimeStatus,
+  provider_tool_probe_campaign_command_env,
+  provider_tool_probe_campaign_providers_config,
+} from "./provider_tool_probe_campaign/types"
+
+const DEFAULT_OUTPUT_DIR = ".harn-runs/provider-tool-probe-campaign"
+
+fn main(harness: Harness) {
+  if help_requested(argv) {
+    harness.stdio.println(
+      "usage: harn run scripts/provider_tool_probe_campaign.harn -- [--route provider:model | --catalog-routes] [--providers-config PATH] [--require-runtime-revision REVISION] [--behavior ID|CATEGORY|RUNNER] [--mode both|non-streaming|streaming] [--repeat N] [--shard-count N --shard-index I] [--max-probes N] [--max-cost-usd USD] [--include-expensive] [--live] [--markdown]",
+    )
+    return nil
+  }
+  const parsed_result = provider_tool_probe_campaign_parse_args(argv)
+  if is_err(parsed_result) {
+    harness.stdio.eprintln(unwrap_err(parsed_result).message)
+    harness.runtime.exit(2)
+  }
+  const parsed = unwrap(parsed_result).options
+  const include_expensive = parsed?.include_expensive ?? false
+  const catalog_routes = parsed?.catalog_routes ?? false
+  const route_specs = __as_string_list(parsed?.route)
+  if catalog_routes && len(route_specs) > 0 {
+    harness.stdio.eprintln("--catalog-routes cannot be combined with --route")
+    harness.runtime.exit(2)
+  }
+  const requested_mode = to_string(parsed?.mode ?? "both")
+  if len(provider_tool_probe_campaign_modes(requested_mode)) == 0 {
+    harness.stdio.eprintln("--mode must be one of: both, non-streaming, streaming")
+    harness.runtime.exit(2)
+  }
+  const behaviors = provider_tool_probe_campaign_filter_behavior_modes(
+    provider_tool_probe_campaign_select_behaviors(__as_string_list(parsed?.behavior)),
+    requested_mode,
+  )
+  if len(behaviors) == 0 {
+    harness.stdio.eprintln("no provider behaviors selected")
+    harness.runtime.exit(2)
+  }
+  const live = parsed?.live ?? false
+  const repeat = parsed?.repeat ?? 1
+  const timeout_secs = parsed?.timeout_secs ?? 60
+  const shard_count = parsed?.shard_count ?? 1
+  const shard_index = parsed?.shard_index ?? 0
+  const max_probes = parsed?.max_probes ?? 0
+  const max_cost_usd = parsed?.max_cost_usd ?? 10.0
+  if repeat <= 0 {
+    harness.stdio.eprintln("--repeat must be >= 1")
+    harness.runtime.exit(2)
+  }
+  if timeout_secs <= 0 {
+    harness.stdio.eprintln("--timeout-secs must be >= 1")
+    harness.runtime.exit(2)
+  }
+  if shard_count <= 0 {
+    harness.stdio.eprintln("--shard-count must be >= 1")
+    harness.runtime.exit(2)
+  }
+  if shard_index < 0 || shard_index >= shard_count {
+    harness.stdio.eprintln("--shard-index must be >= 0 and < --shard-count")
+    harness.runtime.exit(2)
+  }
+  if max_probes < 0 {
+    harness.stdio.eprintln("--max-probes must be >= 0")
+    harness.runtime.exit(2)
+  }
+  if max_cost_usd <= 0.0 {
+    harness.stdio.eprintln("--max-cost-usd must be > 0")
+    harness.runtime.exit(2)
+  }
+  const target = __target_runtime_context(harness, parsed, live, catalog_routes)
+  const harn_bin = target.harn_bin
+  const providers_config = target.providers_config
+  const runtime = target.runtime
+  const catalog_receipt = target.catalog
+  const routes = if catalog_routes {
+    provider_tool_probe_campaign_catalog_routes(target.catalog_payload, include_expensive)
+  } else if len(route_specs) == 0 {
+    provider_tool_probe_campaign_default_routes(include_expensive)
+  } else {
+    provider_tool_probe_campaign_routes(route_specs)
+  }
+  if len(routes) == 0 {
+    harness.stdio.eprintln("no provider routes selected")
+    harness.runtime.exit(2)
+  }
+  const output_dir = to_string(parsed?.output_dir ?? DEFAULT_OUTPUT_DIR)
+  __ensure_dir(harness.fs, ".harn-runs")
+  __ensure_dir(harness.fs, output_dir)
+  const env_file_arg = trim(to_string(parsed?.env_file ?? ""))
+  const env_file_path = provider_tool_probe_campaign_env_file(
+    env_file_arg,
+    harness.env.get_or("HARN_PROVIDER_TOOL_PROBE_ENV_FILE", ""),
+  )
+  const env_load = __load_env_file(harness.fs, env_file_path)
+  const auth_env = env_load.env ?? {}
+  const command_env = provider_tool_probe_campaign_command_env(providers_config)
+  const env = auth_env + command_env
+  const cell_plan = if live {
+    __live_cells(
+      {
+        llm: harness.llm,
+        fs: harness.fs,
+        process: harness.process,
+        routes: routes,
+        behaviors: behaviors,
+        harn_bin: harn_bin,
+        env: env,
+        repeat: repeat,
+        timeout_secs: timeout_secs,
+        output_dir: output_dir,
+        shard_count: shard_count,
+        shard_index: shard_index,
+        max_probes: max_probes,
+        max_cost_usd: max_cost_usd,
+      },
+    )
+  } else {
+    provider_tool_probe_campaign_planned_cells_sliced_with_options(
+      {
+        llm: harness.llm,
+        routes: routes,
+        behaviors: behaviors,
+        harn_bin: harn_bin,
+        repeat: repeat,
+        timeout_secs: timeout_secs,
+        shard_count: shard_count,
+        shard_index: shard_index,
+        max_probes: max_probes,
+      },
+    )
+  }
+  const cells = cell_plan.cells ?? []
+  const scorecard_artifacts = if live {
+    provider_tool_probe_campaign_write_scorecard(
+      harness.fs,
+      harness.process,
+      harn_bin,
+      cells,
+      output_dir,
+      runtime,
+      catalog_receipt,
+      env,
+    )
+  } else {
+    {}
+  }
+  const report = provider_tool_probe_campaign_report(
+    routes,
+    behaviors,
+    cells,
+    live,
+    include_expensive,
+    output_dir,
+    repeat,
+    auth_env,
+    env_load.source ?? {},
+    runtime,
+    catalog_receipt,
+    cell_plan.slice ?? {},
+    max_cost_usd,
+    scorecard_artifacts,
+  )
+  harness.fs.write_text(report.artifacts.report_json, json_stringify_pretty(report) + "\n")
+  harness.fs.write_text(
+    report.artifacts.report_markdown,
+    provider_tool_probe_campaign_markdown(report),
+  )
+  if parsed?.markdown ?? false {
+    harness.stdio.println(provider_tool_probe_campaign_markdown(report))
+  } else {
+    harness.stdio.println(json_stringify_pretty(report))
+  }
+  const summary = report.summary
+  if live
+    && ((summary.fail ?? 0) > 0 || (summary.error ?? 0) > 0
+    || report.spend?.budget_status
+    == "stopped_unpriced"
+    || report.artifacts?.scorecard_status
+    != "complete") {
+    harness.runtime.exit(1)
+  }
+  return nil
+}

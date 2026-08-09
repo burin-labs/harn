@@ -1,0 +1,74 @@
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
+import { agent_session_messages } from "std/agent/state"
+import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
+import { llm_text, with_llm_script } from "std/testing"
+
+fn run_tools() {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "run",
+    "Run a verification command.",
+    {
+      parameters: {},
+      handler: { _args ->
+        return agent_tool_handler_result(
+          "Command wording is deliberately not machine-readable.",
+          {
+            command_status: "succeeded",
+            run_outcome: {
+              schema: "burin.tool_run_outcome.v1",
+              command_status: "succeeded",
+              exit_code: 0,
+            },
+          },
+        )
+      },
+    },
+  )
+  return tools
+}
+
+pipeline main(harness: Harness) {
+  with_llm_script(
+    harness.llm,
+    [{text: "", tool_calls: [{id: "run-1", name: "run", arguments: {}}]}, llm_text("Verified.")],
+    { ->
+      const session = "structured-tool-data-" + harness.random.uuid()
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(
+          harness,
+          "Verify the project.",
+          nil,
+          {
+            provider: "mock",
+            tools: run_tools(),
+            tool_format: "native",
+            loop_until_done: true,
+            done_judge: false,
+            max_iterations: 2,
+            session_id: session,
+          },
+        ) },
+      )
+      const terminal = captured.events.find(
+        { event ->
+          return event.type == "tool_call_update" && event.tool_name == "run"
+            && event.status
+            == "completed"
+        },
+      )
+      const message = agent_session_messages(harness.agent, session).find(
+        { entry -> return entry?.tool_call_id == terminal?.tool_call_id },
+      )
+      harness.stdio.println(terminal?.data?.command_status == "succeeded")
+      harness.stdio.println(terminal?.data?.run_outcome?.exit_code == 0)
+      harness.stdio.println(message?.data?.command_status == "succeeded")
+      harness.stdio.println(message?.data?.run_outcome?.exit_code == 0)
+      harness.stdio.println(captured.result.status == "done")
+    },
+  )
+}

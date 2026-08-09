@@ -1,0 +1,100 @@
+/*
+ * std/corrections - Replay-for-teaching correction records.
+ *
+ * Import with: `import "std/corrections"`.
+ */
+import "std/triggers"
+
+type CorrectionId = string
+
+type CorrectionScope = "this_run" | "this_persona" | "all"
+
+type CorrectionDecision = {
+  actor_id?: string,
+  actor?: string,
+  agent?: string,
+  action?: string,
+  event_kind?: string,
+  outcome?: string,
+  reason?: string,
+  metadata?: dict,
+  raw?: dict,
+}
+
+type CorrectionEvidenceRef = {
+  kind: string,
+  event_id?: string,
+  trace_id?: string,
+  uri?: string,
+  path?: string,
+  line?: int,
+  summary?: string,
+  raw?: dict,
+}
+
+type CorrectionRecord = {
+  schema: string,
+  correction_id: string,
+  from_decision: CorrectionDecision,
+  to_decision: CorrectionDecision,
+  reason: string,
+  applied_by: string,
+  scope: CorrectionScope,
+  timestamp: string,
+  actor_id: string?,
+  action: string?,
+  trace_id: string?,
+  step: string?,
+  evidence_refs: list<CorrectionEvidenceRef>,
+  metadata: dict,
+}
+
+type CorrectionInput = {
+  from_decision: CorrectionDecision,
+  to_decision: CorrectionDecision,
+  reason: string,
+  applied_by: string,
+  scope?: CorrectionScope,
+  actor_id?: string,
+  actor?: string,
+  agent?: string,
+  action?: string,
+  trace_id?: string,
+  step?: string,
+  evidence_refs?: list<CorrectionEvidenceRef>,
+  metadata?: dict,
+}
+
+type CorrectionQueryFilters = {
+  actor?: string,
+  actor_id?: string,
+  agent?: string,
+  action?: string,
+  scope?: CorrectionScope,
+  since?: string,
+  until?: string,
+  limit?: int,
+}
+
+/**
+ * record appends a typed replay correction and returns its CorrectionId.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn record(runtime: HarnessRuntime, correction: CorrectionInput) -> CorrectionId {
+  return runtime.corrections_record(correction)
+}
+
+/**
+ * query returns recorded replay corrections.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn query(
+  runtime: HarnessRuntime,
+  filters: CorrectionQueryFilters = {},
+) -> list<CorrectionRecord> {
+  return runtime.corrections_query(filters)
+}

@@ -1,0 +1,1023 @@
+import { agent_feedback_emit } from "std/agent/feedback"
+import {
+  __completion_gate_apply_budget,
+  __completion_gate_classify_writes,
+  __completion_gate_combine_verify,
+  __completion_gate_feedback_keys,
+  __completion_gate_ladder,
+  __judge_classify_verdict,
+  __judge_run_checkpoint,
+} from "std/agent/judge_internals"
+import { __with_prompt_fragment } from "std/agent/preflight"
+import { completion_judge_user_prompt } from "std/agent/prompts"
+import { agent_emit_event, agent_session_messages } from "std/agent/state"
+
+// Conservative default cap on how many times the completion-judge LLM may
+// veto a proposed completion within one session. Each veto is a paid model
+// call plus an injected feedback message, so a weak model that never satisfies
+// the judge can otherwise burn calls up to `max_verify_attempts` (default 20)
+// with no structured signal. Callers raise it via
+// `verify_completion_judge.max_invocations` (or `max_feedback`), or disable the
+// cap entirely with `0`.
+const __VERIFY_COMPLETION_JUDGE_DEFAULT_CAP = 5
+
+fn __unique_names(names) {
+  let unique = []
+  for name in names {
+    if name != "" && !contains(unique, name) {
+      unique = unique.appending(name)
+    }
+  }
+  return unique
+}
+
+fn __session_tool_names(messages) {
+  let names = []
+  for message in messages {
+    if message?.role == "tool" {
+      names = names.appending(message?.name ?? "")
+    }
+  }
+  return __unique_names(names)
+}
+
+fn __judge_tool_schemas(opts) {
+  const registry = opts?.tools
+  const entries = if type_of(registry) == "dict" {
+    registry?.tools ?? []
+  } else if type_of(registry) == "list" {
+    registry
+  } else {
+    []
+  }
+  let schemas = []
+  for entry in entries {
+    const function = entry?.function
+    const name = to_string(entry?.name ?? function?.name ?? "")
+    if name == "" {
+      continue
+    }
+    schemas = schemas.appending(
+      {
+        name: name,
+        description: to_string(entry?.description ?? function?.description ?? ""),
+        parameters: entry?.parameters ?? function?.parameters ?? {},
+        returns: entry?.returns ?? entry?.output_schema ?? {},
+      },
+    )
+  }
+  return schemas
+}
+
+fn __judge_knowledge_state(messages, text) -> string {
+  let tool_evidence = []
+  for message in messages {
+    if message?.role == "tool" {
+      tool_evidence = tool_evidence.appending(
+        {
+          name: message?.name ?? "",
+          content: message?.content ?? "",
+          tool_call_id: message?.tool_call_id ?? "",
+        },
+      )
+    }
+  }
+  return "sha256:" + sha256(json_stringify({latest_text: text, tool_evidence: tool_evidence}))
+}
+
+fn __judge_string_list(value) {
+  if value == nil {
+    return []
+  }
+  if type_of(value) == "list" {
+    let out = []
+    for item in value {
+      const text = trim(to_string(item ?? ""))
+      if text != "" {
+        out = out.appending(text)
+      }
+    }
+    return out
+  }
+  const text = trim(to_string(value))
+  if text == "" {
+    return []
+  }
+  return [text]
+}
+
+fn __judge_gap_feedback(gaps) {
+  if len(gaps) == 0 {
+    return ""
+  }
+  return "Address these specific gaps before finishing:\n- " + join(gaps, "\n- ")
+}
+
+fn __judge_recovery_feedback(next_step, specific_gaps, recovery_details, fallback) {
+  let parts = []
+  const step = trim(to_string(next_step ?? ""))
+  if step != "" {
+    parts = parts.appending(step)
+  }
+  const gap_feedback = __judge_gap_feedback(specific_gaps)
+  if gap_feedback != "" && !contains(parts, gap_feedback) {
+    parts = parts.appending(gap_feedback)
+  }
+  for detail in __judge_string_list(recovery_details) {
+    if !contains(parts, detail) {
+      parts = parts.appending(detail)
+    }
+  }
+  if len(parts) == 0 {
+    return fallback
+  }
+  return join(parts, "\n\n")
+}
+
+fn __judge_payload(agent: HarnessAgent, session, opts, stop_reason, text, iteration) {
+  const messages = agent_session_messages(agent, session.session_id)
+  const tool_names = __session_tool_names(messages)
+  return {
+    session_id: session.session_id,
+    task: session?.task ?? "",
+    stop_reason: stop_reason,
+    text: text,
+    visible_text: text,
+    last_text: text,
+    transcript: json_stringify(messages),
+    all_tools_used: join(tool_names, ", "),
+    successful_tools_used: join(tool_names, ", "),
+    iteration: iteration,
+    knowledge_state: __judge_knowledge_state(messages, text),
+  }
+}
+
+fn __judge_stable_prefix(judge_cfg, opts, payload, system, schema) -> string {
+  const rubric = trim(to_string(judge_cfg?.rubric ?? opts?.rubric ?? ""))
+  const rubric_block = if rubric == "" {
+    ""
+  } else {
+    "\n\nCompletion rubric:\n" + rubric
+  }
+  return system
+    + "\n\nStable completion goal:\n"
+    + payload.task
+    + rubric_block
+    + "\n\nAvailable tool schemas:\n"
+    + json_stringify(__judge_tool_schemas(opts))
+    + "\n\nRequired verdict schema:\n"
+    + json_stringify(schema)
+}
+
+fn __judge_invoke_closure(verify_completion, payload) {
+  const result = verify_completion(payload)
+  if result == nil || result == "" {
+    return {vetoed: false, confirm: true, source: "deterministic", trigger: "verify_completion"}
+  }
+  if type_of(result) == "bool" {
+    return {vetoed: !result, confirm: result, source: "deterministic", trigger: "verify_completion"}
+  }
+  if type_of(result) == "string" {
+    return {
+      vetoed: true,
+      feedback: result,
+      confirm: false,
+      source: "deterministic",
+      trigger: "verify_completion",
+    }
+  }
+  if type_of(result) == "dict" {
+    const confirm = result?.confirm ?? false
+    const message = result?.message ?? result?.feedback
+    return {
+      vetoed: !confirm,
+      feedback: message,
+      confirm: confirm,
+      source: "deterministic",
+      reason: result?.reason,
+      converted_from: result?.converted_from,
+      escalation_recommended: result?.escalation_recommended,
+      escalation_target: result?.escalation_target,
+      trigger: result?.trigger ?? "verify_completion",
+    }
+  }
+  return {vetoed: false, confirm: true, source: "deterministic", trigger: "verify_completion"}
+}
+
+fn __judge_invoke_structured(harness: Harness, judge_cfg, opts, payload) {
+  const system = judge_cfg?.system ?? ""
+  const schema = {
+    type: "object",
+    properties: {
+      verdict: {type: "string", description: "Use `done` or `continue`."},
+      reasoning: {type: "string"},
+      rationale: {
+        type: "string",
+        description: "Alias for reasoning; accepted for stricter contracts.",
+      },
+      diagnosis: {
+        type: "string",
+        description: "Concrete failure diagnosis; accepted as an alias for reasoning.",
+      },
+      next_step: {type: "string"},
+      specific_gaps: {
+        type: "list",
+        items: {type: "string"},
+        description: "Concrete gaps to repair when verdict is `continue`.",
+      },
+      accepted_evidence: {
+        type: "list",
+        items: {type: "string"},
+        description: "Evidence accepted when verdict is `done`.",
+      },
+    },
+    required: ["verdict"],
+  }
+  const stable_prefix = __judge_stable_prefix(judge_cfg, opts, payload, system, schema)
+  const user = completion_judge_user_prompt(harness.fs, payload)
+  const ran = __judge_run_checkpoint(
+    harness,
+    judge_cfg,
+    opts,
+    payload,
+    "agent.completion_judge",
+    stable_prefix,
+    user,
+    schema,
+  )
+  const checkpoint = ran.checkpoint
+  const duration_ms = ran.duration_ms
+  if !checkpoint.ok {
+    if judge_cfg?.fail_open_on_error ?? judge_cfg?.fail_open ?? false {
+      return {
+        vetoed: false,
+        verdict: "done",
+        reasoning: checkpoint.error,
+        next_step: "",
+        judge_duration_ms: duration_ms,
+        source: "llm",
+        typed_checkpoint: checkpoint,
+      }
+    }
+    return {
+      vetoed: true,
+      feedback: checkpoint.error,
+      verdict: "continue",
+      reasoning: checkpoint.error,
+      next_step: checkpoint.error,
+      judge_duration_ms: duration_ms,
+      source: "llm",
+      typed_checkpoint: checkpoint,
+    }
+  }
+  const result = checkpoint.data
+  const reasoning_candidates = __judge_string_list(
+    [result?.reasoning, result?.rationale, result?.diagnosis],
+  )
+  const reasoning = if len(reasoning_candidates) > 0 {
+    reasoning_candidates[0]
+  } else {
+    ""
+  }
+  const next_step = to_string(result?.next_step ?? result?.nextStep ?? "")
+  const specific_gaps = __judge_string_list(result?.specific_gaps ?? result?.specificGaps)
+  const accepted_evidence = __judge_string_list(
+    result?.accepted_evidence ?? result?.acceptedEvidence,
+  )
+  // The done-judge prompt only ever asks for `done` or `continue`. A reflexive
+  // `"yes"` from a cheap model usually means "yes, keep going" (continue), and
+  // a bare `"true"` is just as ambiguous — classifying either as DONE
+  // terminates incomplete work. Both are dropped from the allow-list.
+  const done_verdicts = [
+    "done",
+    "pass",
+    "passed",
+    "safe",
+    "yield",
+    "yield_to_user",
+    "complete",
+    "completed",
+  ]
+  const feedback_default = judge_cfg?.feedback_fallback ?? ""
+  const outcome = __judge_classify_verdict(
+    result?.verdict ?? "continue",
+    done_verdicts,
+    [__judge_recovery_feedback(next_step, specific_gaps, reasoning_candidates, feedback_default)],
+    feedback_default,
+  )
+  return outcome
+    + {
+    accepted_evidence: accepted_evidence,
+    reasoning: reasoning,
+    next_step: next_step,
+    judge_duration_ms: duration_ms,
+    source: "llm",
+    specific_gaps: specific_gaps,
+    typed_checkpoint: checkpoint,
+  }
+}
+
+/**
+ * Resolve the per-session veto cap for the completion judge. Returns nil when
+ * the cap is disabled (`max_invocations`/`max_feedback` set to 0), otherwise a
+ * positive integer ceiling on judge invocations.
+ */
+fn __verify_completion_judge_cap(judge_cfg) {
+  const configured = if type_of(judge_cfg) == "dict" {
+    judge_cfg?.max_invocations ?? judge_cfg?.max_feedback
+  } else {
+    nil
+  }
+  const cap = configured ?? __VERIFY_COMPLETION_JUDGE_DEFAULT_CAP
+  if cap <= 0 {
+    return nil
+  }
+  return cap
+}
+
+/**
+ * Resolve the optional top-level cap for `done_judge`. Unlike
+ * `done_judge.cadence.max_invocations`, this is a terminal veto-loop cap: the
+ * judge may fire up to the cap, then the loop finalizes instead of silently
+ * continuing until the iteration budget expires.
+ */
+fn __done_judge_cap(judge_cfg) {
+  if type_of(judge_cfg) != "dict" {
+    return nil
+  }
+  const cap = judge_cfg?.max_invocations ?? judge_cfg?.max_feedback
+  if cap == nil || cap <= 0 {
+    return nil
+  }
+  return cap
+}
+
+/**
+ * agent_verify_completion_judge_cap.
+ *
+ * Resolved completion-judge veto cap for a `verify_completion_judge` config,
+ * for surfacing in run records. Returns nil when the cap is disabled.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_verify_completion_judge_cap(opts?.verify_completion_judge)
+ */
+pub fn agent_verify_completion_judge_cap(judge_cfg) {
+  return __verify_completion_judge_cap(judge_cfg)
+}
+
+/**
+ * agent_done_judge_cap.
+ *
+ * Resolved terminal veto cap for a `done_judge` config. Returns nil when the
+ * cap is not configured or is disabled with 0.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_done_judge_cap(opts?.done_judge)
+ */
+pub fn agent_done_judge_cap(judge_cfg) {
+  return __done_judge_cap(judge_cfg)
+}
+
+fn __emit_judge_decision(agent: HarnessAgent, session_id, iteration, verdict) {
+  agent_emit_event(
+    agent,
+    session_id,
+    "judge_decision",
+    {
+      iteration: iteration,
+      verdict: verdict?.verdict
+        ?? if verdict.vetoed {
+        "continue"
+      } else {
+        "done"
+      },
+      reasoning: verdict?.reasoning ?? "",
+      next_step: verdict?.next_step ?? "",
+      judge_duration_ms: verdict?.judge_duration_ms ?? 0,
+      source: verdict?.source ?? "unknown",
+      trigger: verdict?.trigger,
+      reason: verdict?.reason,
+      confirm: verdict?.confirm ?? !verdict.vetoed,
+      converted_from: verdict?.converted_from,
+      escalation_recommended: verdict?.escalation_recommended,
+      escalation_target: verdict?.escalation_target,
+      specific_gaps: verdict?.specific_gaps ?? [],
+      accepted_evidence: verdict?.accepted_evidence ?? [],
+    },
+  )
+}
+
+fn __done_contract_primary_prompt(opts) {
+  const marker = to_string(opts?.done_sentinel ?? "the configured done sentinel")
+  return join(
+    [
+      "Before yielding as done, state a concise Done claim immediately before " + marker + ".",
+      "The claim must cover: requested work, evidence observed, files or artifacts changed, and anything deliberately not done.",
+      "Do not claim completion from a green self-authored check alone; connect the evidence back to the user's visible request.",
+    ],
+    "\n",
+  )
+}
+
+fn __done_contract_judge_system(opts) {
+  const extra = trim(to_string(opts?.rubric ?? ""))
+  let lines = [
+    "You are a strict done-contract judge for an autonomous agent.",
+    "Decide whether the latest completion claim is justified by the task, transcript, tool results, and changed artifacts.",
+    "Return `done` only when the claim covers the visible request and names adequate evidence.",
+    "Return `continue` when evidence is missing, self-authored tests are too weak, or visible requirements are unaddressed.",
+    "On `done`, provide `reasoning` and `accepted_evidence`.",
+    "On `continue`, provide `reasoning` and `specific_gaps`; each gap must be concrete enough to inject as repair feedback.",
+  ]
+  if extra != "" {
+    lines = lines.appending("Additional rubric:\n" + extra)
+  }
+  return join(lines, "\n")
+}
+
+/**
+ * agent_done_contract.
+ *
+ * Build an agent_loop option bundle for a bidirectional done contract:
+ * the primary agent must state a concise completion claim before yielding, and
+ * the done judge must return rationale plus `specific_gaps[]` on veto or
+ * `accepted_evidence[]` on approval. The helper rides the existing `done_judge`
+ * seam and context-profile prompt-fragment channel; it does not add a new loop
+ * hook. Compose it with base options:
+ *
+ * ```harn,ignore
+ * agent_loop(harness, task, nil, base_opts + agent_done_contract({max_invocations: 3}))
+ * ```
+ *
+ * @effects: []
+ * @errors: [runtime]
+ * @api_stability: experimental
+ */
+pub fn agent_done_contract(options = {}) {
+  const opts = if type_of(options) == "dict" {
+    options
+  } else {
+    {}
+  }
+  const judge = if type_of(opts?.judge) == "dict" {
+    opts.judge
+  } else {
+    {}
+  }
+  const max_invocations = opts?.max_invocations ?? opts?.max_feedback ?? judge?.max_invocations
+    ?? judge
+    ?.max_feedback
+    ?? 3
+  const bundle = {
+    done_judge: judge
+      + {
+      enabled: true,
+      fail_open: opts?.fail_open ?? judge?.fail_open ?? false,
+      fail_open_on_error: opts?.fail_open_on_error ?? judge?.fail_open_on_error,
+      feedback_fallback: opts?.feedback_fallback
+        ?? judge?.feedback_fallback
+        ?? "The done claim is not yet justified; address the specific gaps before finishing.",
+      max_invocations: max_invocations,
+      model: opts?.model ?? judge?.model,
+      provider: opts?.provider ?? judge?.provider,
+      system: opts?.system ?? judge?.system ?? __done_contract_judge_system(opts),
+    },
+    loop_until_done: opts?.loop_until_done ?? true,
+  }
+  return __with_prompt_fragment(
+    bundle,
+    {body: __done_contract_primary_prompt(opts), id: "done_contract", source: "std/agent/judge"},
+  )
+}
+
+/**
+ * agent_verify_or_continue.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_verify_or_continue(harness: Harness, session, opts, stop_reason, text, iteration = 0) {
+  const payload = __judge_payload(harness.agent, session, opts, stop_reason, text, iteration)
+  let verdict = {vetoed: false}
+  if opts?.verify_completion != nil {
+    verdict = __judge_invoke_closure(opts.verify_completion, payload)
+    __emit_judge_decision(harness.agent, session.session_id, iteration, verdict)
+  }
+  let completion_judge_invoked = false
+  let completion_judge_cap_reached = false
+  const prior_judge_invocations = opts?._verify_completion_judge_invocations ?? 0
+  if !verdict.vetoed && opts?.verify_completion_judge != nil {
+    const cap = __verify_completion_judge_cap(opts.verify_completion_judge)
+    if cap != nil && prior_judge_invocations >= cap {
+      // Cap reached: stop firing the judge (and injecting its feedback). The
+      // loop surfaces this as stop_reason `completion_judge_cap_reached` plus a
+      // structured `completion_judge` block in the run record. The prior
+      // `judge_decision` events already record each veto for loop counting, so
+      // no extra event type is needed here.
+      completion_judge_cap_reached = true
+    } else {
+      verdict = __judge_invoke_structured(harness, opts.verify_completion_judge, opts, payload)
+      verdict = verdict + {trigger: opts?._verify_completion_judge_trigger}
+      completion_judge_invoked = true
+      __emit_judge_decision(harness.agent, session.session_id, iteration, verdict)
+    }
+  }
+  const done_judge_due = opts?._done_judge_due ?? true
+  const done_judge_applies = opts?.done_judge != nil
+    && (stop_reason == "sentinel"
+    || stop_reason
+    == "natural"
+    || stop_reason == "stalled")
+    && done_judge_due
+  let done_judge_cap_reached = false
+  const prior_done_judge_invocations = opts?._done_judge_invocations ?? 0
+  if !verdict.vetoed && !completion_judge_cap_reached && done_judge_applies {
+    const cap = __done_judge_cap(opts.done_judge)
+    if cap != nil && prior_done_judge_invocations >= cap {
+      done_judge_cap_reached = true
+    } else {
+      verdict = __judge_invoke_structured(harness, opts.done_judge, opts, payload)
+      verdict = verdict + {done_judge_invoked: true, trigger: opts?._done_judge_trigger}
+      __emit_judge_decision(harness.agent, session.session_id, iteration, verdict)
+    }
+  }
+  let feedback_composition = nil
+  if verdict.vetoed
+    && verdict?.feedback != nil
+    && verdict.feedback != ""
+    && !(opts?._defer_judge_feedback ?? false) {
+    feedback_composition = agent_feedback_emit(
+      harness.agent,
+      session.session_id,
+      [
+        {
+          kind: "verify_completion",
+          content: verdict.feedback,
+          source: verdict?.trigger ?? "completion_judge",
+          reason: "judge_veto",
+          action: "continue",
+          next_step: verdict?.next_step ?? "",
+        },
+      ],
+      {history: opts?._feedback_history ?? {}, knowledge_state: payload.knowledge_state},
+    )
+  }
+  return verdict
+    + {
+    verify_completion_judge_invoked: completion_judge_invoked,
+    verify_completion_judge_cap_reached: completion_judge_cap_reached,
+    done_judge_cap_reached: done_judge_cap_reached,
+    feedback_history: feedback_composition?.history ?? opts?._feedback_history ?? {},
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+
+// completion_gate — a configured done-time gate built by composing the existing
+// `verify_completion` (deterministic) + `verify_completion_judge` / `done_judge`
+// (bounded LLM) seams. It generalizes burin-code's completion-verification
+// machinery (`lib/runtime/completion-judge.harn` — the veto arithmetic, the
+// source-vs-cosmetic write gate ⛔#5, the bounded judge budget) while keeping
+// every DOMAIN FACT (write classification, verifier verdict) a host CALLBACK.
+// The deterministic ladder rides `verify_completion` because that is the seam the
+// loop consults for a closure at done-time; the optional LLM judge rides the
+// existing capped `verify_completion_judge`/`done_judge` seam. No new loop seam
+// is added. Never keys any decision on a done-sentinel string (ledger ⛔#3).
+
+// -------------------------------------------------------------------------------------------------
+
+/**
+ * A host write-classification label. `"source"` and `"cosmetic"` are load-bearing; other kinds are treated as non-source.
+ */
+pub type WriteKind = string
+
+/** One host-supplied write fact. */
+pub type CompletionWriteFact = {path?: string, diff?: string, kind?: WriteKind}
+
+/** A host-supplied verifier verdict. `findings` is optional red-detail text. */
+pub type CompletionVerifyVerdict = {ok?: bool, findings?: string}
+
+/**
+ * Facts a host supplies (via the `facts` callback) for one gate evaluation.
+ * All fields optional: absent write facts disable the evidence gate for that
+ * turn (never a fabricated pass), absent `verify` falls back to the
+ * `verify_command` callback. Rust twin: none — stdlib-owned.
+ */
+pub type CompletionFacts = {
+  consecutive_failed_after_write?: int,
+  source_write_count?: int,
+  cosmetic_write_count?: int,
+  writes?: list<CompletionWriteFact>,
+  verify?: CompletionVerifyVerdict | list<CompletionVerifyVerdict>,
+  verification_failures_converging?: bool,
+  requires_write?: bool,
+}
+
+/**
+ * Options for `completion_gate`. Domain facts enter as callbacks; policy knobs
+ * are plain data. Rust twin: none — stdlib-owned.
+ *
+ * Host-fact callbacks (all optional):
+ * - `facts(ctx) -> CompletionFacts` — the primary fact supplier. `ctx` carries
+ *   `{session_id, task, stop_reason, text, messages}`.
+ * - `classify_write(path, diff?) -> WriteKind` — classifies a single write when
+ *   `facts` returns a `writes` list without counts.
+ * - `verify_command() -> CompletionVerifyVerdict` — runs the verifier oracle when
+ *   `facts` does not carry a `verify` verdict.
+ * - `feedback_decorator(reason, feedback, verdict) -> string` — decorates a
+ *   veto message after the ladder and budget resolve it. `reason` is the stable
+ *   ladder key; `verdict` carries the structured escalation fields.
+ *
+ * Policy knobs:
+ * - `require_source_write` (default true) — enforce the evidence gate ⛔#5.
+ * - `requires_write` — override the per-task "needs a source change" fact.
+ * - `max_vetoes` (default 3, burin `COMPLETION_GATE_MAX_VETOES`) — per-session
+ *   soft-veto budget; 0 disables.
+ * - `veto_combine(verdicts) -> CompletionVerifyVerdict` — override the default
+ *   AND-of-oracles arithmetic for combining multiple verifier verdicts.
+ * - `judge` (default off) — attach a bounded LLM completion judge (`true` or a
+ *   JudgeConfig-shaped dict); defaults its cap to burin's 5.
+ * - `judge_seam` (default `"verify_completion_judge"`) — which capped LLM seam
+ *   the judge rides (`"verify_completion_judge"` or `"done_judge"`).
+ * - `feedback_templates` (optional) — a dict overriding the rendered veto feedback
+ *   strings per ladder rule (the coding-domain prose is host content, not
+ *   mechanism). Keys are the recognized rules (`__completion_gate_feedback_keys`):
+ *   `no_source_write_cosmetic`, `no_source_write_absent`,
+ *   `verification_after_write_red` and `failed_verification` (support a
+ *   `{findings}` token), `repeated_verification_failures` (supports `{attempts}`
+ *   and `{findings}`), and `missing_verification`. Values must be strings.
+ *   Absent keys keep the defaults.
+ * - `escalation_threshold` (default 3) — consecutive failed verifications needed
+ *   before the streak-aware ladder recommends escalation.
+ * - `escalation_target` (optional) — a host routing channel copied onto an
+ *   escalated verdict and its `judge_decision` event.
+ */
+pub type CompletionGateOptions = {
+  facts?: any,
+  classify_write?: any,
+  verify_command?: any,
+  feedback_decorator?: any,
+  require_source_write?: bool,
+  requires_write?: bool,
+  max_vetoes?: int,
+  veto_combine?: any,
+  judge?: any,
+  judge_seam?: string,
+  feedback_templates?: dict,
+  escalation_threshold?: int,
+  escalation_target?: string,
+}
+
+/**
+ * A host-fact callback may be an anonymous closure or a named `fn`; the runtime
+ * reports these as "closure", "function", or "fn" (mirrors std/agent/goal's
+ * `__goal_callable`). Gating on "closure" alone would reject named-fn callbacks.
+ */
+fn __completion_gate_callable(value) -> bool {
+  const kind = type_of(value)
+  return kind == "closure" || kind == "function" || kind == "fn"
+}
+
+/**
+ * Validate a CompletionGateOptions at config time so a mistyped seam fails LOUDLY
+ * here — mirroring `__agent_stall_closure` in std/agent/stall — rather than blowing
+ * up deep inside an agent_loop run when the gate closure first invokes the callback
+ * at done-time, or silently ignoring a typo'd knob. Throws on:
+ *   - any host-fact callback (`facts` / `classify_write` / `verify_command` /
+ *     `veto_combine`) that is set but not callable;
+ *   - a `classify_write` set without `facts` — `classify_write` only classifies the
+ *     writes `facts` returns, so alone it is a silently-dead config that also never
+ *     lets the deterministic gate assert anything (`facts_available` would be true
+ *     but every evaluation abstains with `source_known: false`);
+ *   - a `judge_seam` that is neither `"verify_completion_judge"` nor `"done_judge"`
+ *     (any other string is a key `agent_loop` ignores — a silently dead judge).
+ */
+fn __completion_gate_validate_options(opts) {
+  for field in ["facts", "classify_write", "verify_command", "veto_combine", "feedback_decorator"] {
+    const value = opts[field]
+    if value != nil && !__completion_gate_callable(value) {
+      throw "agent_completion_gate: `" + field + "` must be a callable or nil; got "
+        + type_of(value)
+    }
+  }
+  if opts?.classify_write != nil && opts?.facts == nil {
+    throw "agent_completion_gate: `classify_write` only classifies the writes `facts` returns, so it does nothing without `facts` — set `facts` too or remove `classify_write`."
+  }
+  if opts?.escalation_threshold != nil
+    && (type_of(opts.escalation_threshold) != "int"
+    || opts
+    .escalation_threshold
+    < 1) {
+    throw "agent_completion_gate: `escalation_threshold` must be a positive int; got "
+      + to_string(
+      opts.escalation_threshold,
+    )
+  }
+  if opts?.escalation_target != nil
+    && (type_of(opts.escalation_target) != "string"
+    || trim(
+    opts.escalation_target,
+  )
+    == "") {
+    throw "agent_completion_gate: `escalation_target` must be a non-empty string; got "
+      + to_string(
+      opts.escalation_target,
+    )
+  }
+  if opts?.judge_seam != nil
+    && opts.judge_seam != "verify_completion_judge"
+    && opts.judge_seam != "done_judge" {
+    throw "agent_completion_gate: `judge_seam` must be \"verify_completion_judge\" or \"done_judge\"; got "
+      + to_string(
+      opts.judge_seam,
+    )
+  }
+  const templates = opts?.feedback_templates
+  if templates != nil {
+    if type_of(templates) != "dict" {
+      throw "agent_completion_gate: `feedback_templates` must be a dict; got " + type_of(templates)
+    }
+    const known = __completion_gate_feedback_keys()
+    for key in keys(templates) {
+      if !contains(known, key) {
+        throw "agent_completion_gate: unknown `feedback_templates` key `" + key
+          + "`; expected one of "
+          + join(known, ", ")
+      }
+      if type_of(templates[key]) != "string" {
+        throw "agent_completion_gate: `feedback_templates." + key + "` must be a string; got "
+          + type_of(
+          templates[key],
+        )
+      }
+    }
+  }
+}
+
+/**
+ * Run the host feedback decorator only for a veto that will actually be
+ * delivered. The callback receives the stable ladder reason, the default or
+ * templated feedback, and the complete resolved verdict (including escalation
+ * fields). A non-string result fails loudly at the callback boundary.
+ */
+fn __completion_gate_decorate_feedback(verdict, decorator) {
+  if decorator == nil || (verdict?.ok ?? false) {
+    return verdict
+  }
+  const decorated = decorator(
+    to_string(verdict?.reason ?? ""),
+    to_string(verdict?.feedback ?? ""),
+    verdict,
+  )
+  if type_of(decorated) != "string" {
+    throw "agent_completion_gate: `feedback_decorator` must return a string; got "
+      + type_of(decorated)
+  }
+  return verdict + {feedback: decorated}
+}
+
+/** Session-store key for the completion-gate per-session veto counter. */
+fn __completion_gate_veto_key(session_id) {
+  return "harn.completion_gate." + session_id + ".veto_count"
+}
+
+/**
+ * Session-store key for the per-CLASS veto counter, keyed by the ladder rule id
+ * that vetoed (the verdict `reason`). Shares the `harn.completion_gate.<session>`
+ * namespace with the flat counter so both persist through the same mechanism.
+ */
+fn __completion_gate_veto_class_key(session_id, reason) {
+  return "harn.completion_gate." + session_id + ".veto_count." + reason
+}
+
+/**
+ * The ladder rule ids (`reason`s) that a CHARGED veto can carry — the classes a
+ * host may read a per-class count for. Only the vetoing rules that actually reach
+ * the budget-charge path are counted; the abstain/allow reasons never charge.
+ */
+const __COMPLETION_GATE_VETO_CLASSES = [
+  "failed_verification",
+  "missing_verification",
+  "no_source_write",
+  "repeated_verification_failures",
+  "verification_after_write_red",
+]
+
+/** Per-session vetoes charged so far (0 without a session id). */
+fn __completion_gate_vetoes_used(runtime: HarnessRuntime, session_id) {
+  if session_id == "" {
+    return 0
+  }
+  return to_int(runtime.store_get(__completion_gate_veto_key(session_id)) ?? 0) ?? 0
+}
+
+/** Per-class vetoes charged so far for one ladder rule id (0 without a session id). */
+fn __completion_gate_class_vetoes_used(runtime: HarnessRuntime, session_id, reason) {
+  if session_id == "" {
+    return 0
+  }
+  return to_int(runtime.store_get(__completion_gate_veto_class_key(session_id, reason)) ?? 0) ?? 0
+}
+
+/**
+ * agent_completion_gate_veto_counts.
+ *
+ * Read the completion-gate veto counters for a session: the flat `total` plus a
+ * per-class `by_class` map keyed by the ladder rule id that vetoed. A host adopts
+ * this to replace a locally-maintained class-specific counter — the counts are
+ * persisted by the gate itself in the session store, so a caller need only read
+ * them here. `by_class` names every chargeable class (0 when a class has never
+ * vetoed this session), so the shape is stable regardless of what fired.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_completion_gate_veto_counts(session_id).by_class.no_source_write
+ */
+pub fn agent_completion_gate_veto_counts(runtime: HarnessRuntime, session_id) {
+  const sid = to_string(session_id ?? "")
+  let by_class = {}
+  for reason in __COMPLETION_GATE_VETO_CLASSES {
+    by_class = by_class + {[reason]: __completion_gate_class_vetoes_used(runtime, sid, reason)}
+  }
+  return {by_class: by_class, total: __completion_gate_vetoes_used(runtime, sid)}
+}
+
+/**
+ * Derive `{source_write_count?, cosmetic_write_count?, source_known}` from host
+ * facts. `source_known` is false only when the host supplied neither counts nor a
+ * `writes` list — in which case the evidence gate abstains for that turn.
+ */
+fn __completion_gate_write_counts(raw, classify_write) {
+  if raw?.source_write_count != nil {
+    return {
+      source_write_count: to_int(raw.source_write_count) ?? 0,
+      cosmetic_write_count: to_int(raw?.cosmetic_write_count ?? 0) ?? 0,
+      source_known: true,
+    }
+  }
+  if raw?.writes != nil {
+    const counts = __completion_gate_classify_writes(raw.writes, classify_write)
+    return counts + {source_known: true}
+  }
+  return {source_write_count: 0, cosmetic_write_count: 0, source_known: false}
+}
+
+/**
+ * The deterministic gate closure body: turn a `__judge_payload` payload into a
+ * `verify_completion` verdict (`{confirm, message?, reason}` — nil-safe for the
+ * `__judge_invoke_closure` contract). Degrades to judge-only (abstain), surfacing
+ * the degraded mode via the bundle's `_completion_gate.facts_available = false`
+ * flag and a `facts_unavailable` verdict reason, when the host supplied no facts
+ * at all (never a silent fabricated pass).
+ */
+fn __completion_gate_evaluate(runtime: HarnessRuntime, payload, opts, facts_available) {
+  const session_id = to_string(payload?.session_id ?? "")
+  const classify_write = opts?.classify_write
+  const verify_command = opts?.verify_command
+  const facts = opts?.facts
+  const max_vetoes = to_int(opts?.max_vetoes ?? 3) ?? 3
+  if !facts_available {
+    // No host facts: the deterministic gate cannot assert anything, so it
+    // abstains (allow). Any configured LLM judge still runs — judge-only mode.
+    // The degraded mode is NOT silent: the bundle carries
+    // `_completion_gate.facts_available = false` and the verdict names the
+    // `facts_unavailable` reason, so a harness never mistakes it for a real pass.
+    return {confirm: true, reason: "facts_unavailable"}
+  }
+  const messages = json_parse(to_string(payload?.transcript ?? "[]")) ?? []
+  const ctx = {
+    session_id: session_id,
+    task: to_string(payload?.task ?? ""),
+    stop_reason: to_string(payload?.stop_reason ?? ""),
+    text: to_string(payload?.text ?? ""),
+    messages: messages,
+  }
+  const raw = if facts != nil {
+    facts(ctx) ?? {}
+  } else {
+    {}
+  }
+  const counts = __completion_gate_write_counts(raw, classify_write)
+  const verify_raw = if raw?.verify != nil {
+    raw.verify
+  } else if verify_command != nil {
+    verify_command()
+  } else {
+    nil
+  }
+  const verify = __completion_gate_combine_verify(verify_raw, opts?.veto_combine)
+  const requires_write = if opts?.requires_write != nil {
+    opts.requires_write
+  } else if raw?.requires_write != nil {
+    raw.requires_write
+  } else {
+    opts?.require_source_write ?? true
+  }
+  const derived = {
+    consecutive_failed_after_write: raw?.consecutive_failed_after_write,
+    source_known: counts.source_known,
+    source_write_count: counts.source_write_count,
+    cosmetic_write_count: counts.cosmetic_write_count,
+    requires_write: requires_write,
+    verify: verify,
+    verification_failures_converging: raw?.verification_failures_converging ?? false,
+    oracle_expected: verify_command != nil || raw?.verify != nil,
+    escalation_threshold: opts?.escalation_threshold ?? 3,
+    escalation_target: opts?.escalation_target,
+  }
+  const verdict = __completion_gate_ladder(derived, opts?.feedback_templates)
+  const vetoes_used = __completion_gate_vetoes_used(runtime, session_id)
+  const budgeted = __completion_gate_apply_budget(verdict, vetoes_used, max_vetoes)
+  if budgeted.charge && session_id != "" {
+    runtime.store_set(__completion_gate_veto_key(session_id), vetoes_used + 1)
+    // Per-class counter (keyed by the vetoing ladder rule id) alongside the flat
+    // count, persisted in the same session-store namespace. A charged veto's
+    // verdict is the un-converted ladder verdict, so `reason` is the rule id.
+    const reason = to_string(verdict?.reason ?? "")
+    if reason != "" {
+      const class_used = __completion_gate_class_vetoes_used(runtime, session_id, reason)
+      runtime.store_set(__completion_gate_veto_class_key(session_id, reason), class_used + 1)
+    }
+  }
+  const resolved = __completion_gate_decorate_feedback(budgeted.verdict, opts?.feedback_decorator)
+  if resolved?.ok ?? false {
+    return {
+      confirm: true,
+      reason: resolved?.reason ?? "",
+      converted_from: resolved?.converted_from,
+      escalation_recommended: resolved?.escalation_recommended,
+      escalation_target: resolved?.escalation_target,
+    }
+  }
+  return {
+    confirm: false,
+    message: to_string(resolved?.feedback ?? ""),
+    reason: resolved?.reason ?? "",
+    escalation_recommended: resolved?.escalation_recommended,
+    escalation_target: resolved?.escalation_target,
+  }
+}
+
+/**
+ * agent_completion_gate.
+ *
+ * Build a completion-gate option bundle to spread into `agent_loop` options. The
+ * returned dict configures the done-time gate: a deterministic `verify_completion`
+ * closure implementing the ported veto arithmetic + source-write evidence
+ * requirement + per-session veto budget, plus (when `judge` is set) a bounded LLM
+ * judge on the existing capped seam. Compose it with base options:
+ *
+ * ```harn,ignore
+ * agent_loop(harness, task, system, base_opts + agent_completion_gate(harness.runtime, {
+ *   facts: fn(ctx) { return host_completion_facts(ctx.session_id) },
+ *   verify_command: fn() { return host_run_verify() },
+ * }))
+ * ```
+ *
+ * With no host-fact callbacks the gate degrades to judge-only mode and surfaces
+ * the degraded state on the returned bundle (`_completion_gate.facts_available =
+ * false`) rather than fabricating a pass.
+ *
+ * @effects: [store]
+ * @errors: [runtime]
+ * @api_stability: experimental
+ * @example: agent_completion_gate(harness.runtime, {facts: host_facts, verify_command: host_verify})
+ */
+pub fn agent_completion_gate(runtime: HarnessRuntime, options: CompletionGateOptions = {}) {
+  const opts = options ?? {}
+  __completion_gate_validate_options(opts)
+  // `classify_write` only refines the write counts `facts` returns, so it never
+  // makes facts available on its own (a `classify_write`-without-`facts` config is
+  // rejected in __completion_gate_validate_options). Facts are available only when
+  // the host wired `facts` or a `verify_command` oracle.
+  const facts_available = opts.facts != nil || opts.verify_command != nil
+  const gate =
+    fn(payload) { return __completion_gate_evaluate(runtime, payload, opts, facts_available) }
+  let out = {
+    verify_completion: gate,
+    _completion_gate: {
+      facts_available: facts_available,
+      max_vetoes: to_int(opts.max_vetoes ?? 3) ?? 3,
+      require_source_write: opts.require_source_write ?? true,
+    },
+  }
+  const judge = opts.judge
+  if judge != nil && judge {
+    const judge_cfg = if type_of(judge) == "dict" {
+      judge
+    } else {
+      {}
+    }
+    const seam = opts.judge_seam ?? "verify_completion_judge"
+    const cap = judge_cfg?.max_invocations ?? judge_cfg?.max_feedback
+      ?? __VERIFY_COMPLETION_JUDGE_DEFAULT_CAP
+    out = out + {[seam]: judge_cfg + {max_invocations: cap}}
+  }
+  return out
+}

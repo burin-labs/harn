@@ -1,0 +1,27 @@
+pipeline main(harness: Harness) {
+  const base = transcript_from_messages(
+    [
+      {role: "user", content: "one"},
+      {role: "assistant", content: "two"},
+      {role: "user", content: "three"},
+      {role: "assistant", content: "four"},
+    ],
+  )
+  const kept = harness.agent.transcript_inject_reminder(
+    base,
+    {body: "keep me", dedupe_key: "keep", ttl_turns: 2, preserve_on_compact: true},
+  ).transcript
+  const mixed = harness.agent.transcript_inject_reminder(
+    kept,
+    {body: "drop me", dedupe_key: "drop", ttl_turns: 2, preserve_on_compact: false},
+  ).transcript
+  const compacted = harness.agent.compact_transcript(
+    mixed,
+    {strategy: "truncate", keep_last: 1, target_tokens: 1},
+  )
+  const reminders = transcript_events_by_kind(compacted, "system_reminder")
+  harness.stdio.println(len(reminders))
+  harness.stdio.println(reminders[0].reminder.body)
+  harness.stdio.println(reminders[0].reminder.ttl_turns)
+  harness.stdio.println(transcript_summary(compacted)?.contains("auto-compacted"))
+}

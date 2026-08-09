@@ -1,0 +1,67 @@
+import { agent_loop } from "std/agent/loop"
+import { with_llm_script } from "std/testing"
+
+fn note_tools() {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "read_note",
+    "Read a note",
+    {
+      handler: { args -> "read " + args.path },
+      parameters: {path: {type: "string"}},
+      returns: {type: "string"},
+    },
+  )
+  tools = tool_define(
+    tools,
+    "write_note",
+    "Write a note",
+    {
+      handler: { args -> "wrote " + args.path },
+      parameters: {path: {type: "string"}},
+      returns: {type: "string"},
+    },
+  )
+  return tools
+}
+
+pipeline main(harness: Harness) {
+  with_llm_script(
+    harness.llm,
+    [
+      {
+        tool_calls: [
+          {id: "read_1", name: "read_note", arguments: {path: "/workspace/a.txt"}},
+          {id: "write_1", name: "write_note", arguments: {path: "/workspace/a.txt"}},
+        ],
+      },
+    ],
+    { ->
+      const result = agent_loop(
+        harness,
+        "Read then write.",
+        "Use tools.",
+        {
+          provider: "mock",
+          tools: note_tools(),
+          tool_format: "native",
+          max_iterations: 1,
+          permissions: {
+            allow: {read_note: { args -> args.path.starts_with("/workspace/") }},
+            deny: {write_note: { args -> true }},
+          },
+        },
+      )
+      const events = transcript_events(result?.transcript)
+      harness.stdio.println(
+        len(transcript_events_by_kind(result?.transcript, "PermissionGrant")) == 1,
+      )
+      harness.stdio.println(
+        len(transcript_events_by_kind(result?.transcript, "PermissionDeny")) == 1,
+      )
+      harness.stdio.println(result?.tools?.rejected[0] == "write_note")
+      harness.stdio.println(json_stringify(events).contains("/workspace/a.txt"))
+    },
+  )
+}

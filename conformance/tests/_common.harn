@@ -1,0 +1,169 @@
+import { poll_until } from "std/poll"
+
+/** Shared conformance helper for fixtures that exec the built `harn` binary. */
+fn first_group(pattern, text) {
+  const matches = regex_captures(pattern, text)
+  if len(matches) == 0 {
+    return nil
+  }
+  return matches[0].groups[0]
+}
+
+/** Resolve the built Harn CLI for conformance fixtures that spawn subprocesses. */
+pub fn resolve_harn_bin(harness: Harness, repo_root) {
+  const conformance_bin = harness.env.get("HARN_CONFORMANCE_HARN_BIN")
+  if conformance_bin && harness.fs.exists(conformance_bin) {
+    return conformance_bin
+  }
+  const env_bin = harness.env.get("HARN_BIN")
+  if env_bin && harness.fs.exists(env_bin) {
+    return env_bin
+  }
+  const worktree_bin = path_join(repo_root, "target/debug/harn")
+  if harness.fs.exists(worktree_bin) {
+    return worktree_bin
+  }
+  const env_target_dir = harness.env.get("CARGO_TARGET_DIR")
+  if env_target_dir {
+    const candidate = path_join(env_target_dir, "debug/harn")
+    if harness.fs.exists(candidate) {
+      return candidate
+    }
+  }
+  const cargo_config = path_join(repo_root, ".cargo/config.toml")
+  if harness.fs.exists(cargo_config) {
+    const config = harness.process.exec("cat", cargo_config).stdout
+    const configured = first_group("(?m)^target-dir\\s*=\\s*\\\"([^\\\"]+)\\\"", config)
+    if configured {
+      return path_join(configured, "debug/harn")
+    }
+  }
+  return worktree_bin
+}
+
+/** Return whether a subprocess still exists according to the platform shell. */
+pub fn process_alive(process: HarnessProcess, pid) {
+  const probe = process.shell("kill -0 " + pid + " >/dev/null 2>&1")
+  return probe.success
+}
+
+/** Poll a subprocess log for a regex match and return the first capture group. */
+pub fn wait_for_log_match(harness: Harness, log_path, pattern) {
+  return poll_until(
+    harness.clock,
+    { ->
+      if !harness.fs.exists(log_path) {
+        return nil
+      }
+      const log = harness.process.exec("cat", log_path).stdout
+      const matches = regex_captures(pattern, log)
+      if len(matches) > 0 {
+        return matches[0].groups[0]
+      }
+      return nil
+    },
+    {timeout_ms: 15000, interval_ms: 50},
+  )
+}
+
+/**
+ * Poll a file until `check(content)` returns a non-nil value, then return
+ * that value. `check` receives the file's current text and returns nil to keep
+ * waiting or any value to stop.
+ *
+ * This closes the wait-for-existence / read-for-content race: a file written
+ * incrementally — an NDJSON state log, a JSON document flushed in parts, a
+ * port file — exists on disk before its content is complete, so a caller that
+ * reads content must wait on the content it actually needs, not merely on the
+ * inode. A bare existence wait releases as soon as the first byte lands and
+ * the later read then observes a half-written file (a missing NDJSON line, an
+ * unparseable object). State the real precondition in `check` instead, and the
+ * timeout is reported against that condition rather than mere existence.
+ *
+ * Polls every 50ms for up to 15s (like [[wait_for_log_match]]): the content is
+ * written while the already-ready server handles the request, so it lands fast,
+ * and staying below the per-scenario harness timeout means a genuine stall
+ * surfaces the caller's descriptive `require` rather than a generic scenario
+ * timeout. Returns nil on timeout; callers that need the content as a hard
+ * prereq should follow with a descriptive `require`.
+ */
+pub fn wait_for_file_content(clock: HarnessClock, fs: HarnessFs, path, check) {
+  return poll_until(
+    clock,
+    { ->
+      if !fs.exists(path) {
+        return nil
+      }
+      return check(fs.read_text(path))
+    },
+    {timeout_ms: 15000, interval_ms: 50},
+  )
+}
+
+fn log_contains(fs: HarnessFs, process: HarnessProcess, log_path, needle) {
+  if fs.exists(log_path) {
+    const log = process.exec("cat", log_path).stdout
+    if contains(log, needle) {
+      return true
+    }
+  }
+  return nil
+}
+
+/**
+ * Poll a subprocess log until it contains the expected text.
+ *
+ * Polls every 50ms for up to 30s. The upper bound matches
+ * [[wait_for_exit]] and exists for the same reason: under heavy
+ * concurrent load (the full conformance suite spawns many parallel
+ * cargo / harn invocations), the freshly-spawned child can take 5–15
+ * seconds to even reach its "ready" log line. The previous 15s budget
+ * was tight enough that signal_process_sigterm /
+ * agent_state_resume_process / durable_step_run / agent_probe
+ * intermittently failed under full-suite load while passing in
+ * isolation. Returns false on timeout; callers that need the readiness
+ * signal as a hard prereq should fail with a descriptive `require`.
+ */
+pub fn wait_for_log_contains(harness: Harness, log_path, needle) {
+  return poll_until(
+    harness.clock,
+    { -> log_contains(harness.fs, harness.process, log_path, needle) },
+    {timeout_ms: 30000, interval_ms: 50},
+  )
+    ?? false
+}
+
+/** Wait for the orchestrator HTTP listener readiness line and return its URL. */
+pub fn wait_for_listener_url(harness: Harness, log_path) {
+  return wait_for_log_match(harness, log_path, "\\[harn\\] HTTP listener ready on (\\S+)")
+}
+
+/** Wait for the A2A server readiness line and return its advertised URL. */
+pub fn wait_for_a2a_server_url(harness: Harness, log_path) {
+  return wait_for_log_match(harness, log_path, "Harn A2A server listening on (\\S+)")
+}
+
+/**
+ * Wait for a subprocess to exit after the test has requested shutdown.
+ *
+ * Polls every 50ms for up to 30s. The upper bound is generous so the
+ * helper stays reliable when the conformance suite runs alongside other
+ * cargo audit lanes (e.g. release-harn's parallel rust-audit / harn-audit
+ * / grammar-audit / smoke-audit lanes), where the async runtime
+ * scheduling the doomed subprocess can be starved long past the
+ * single-suite baseline. Returns false on timeout; callers that need the
+ * process gone for subsequent steps should pair this with `kill -KILL`.
+ */
+pub fn wait_for_exit(clock: HarnessClock, process: HarnessProcess, pid) {
+  return poll_until(
+    clock,
+    { ->
+      if !process_alive(process, pid) {
+        return true
+      }
+      return nil
+    },
+    {timeout_ms: 30000, interval_ms: 50},
+  )
+    ?? false
+}

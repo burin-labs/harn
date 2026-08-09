@@ -1,0 +1,13 @@
+/**
+ * Calls `harness.clock.date_iso()` twice under a receiver-owned paused clock.
+ * The builtin must use that exact clock rather than escape to the OS wall
+ * clock, so the testbench leak audit remains empty.
+ */
+pipeline test(harness: Harness, task) {
+  harness.testing.clock_set(1767225600000)
+  const _stamp = harness.clock.date_iso()
+  const _stamp_again = harness.clock.date_iso()
+  const leaks = harness.testing.clock_leaks()
+  harness.stdio.println(len(leaks) == 0)
+  harness.testing.clock_reset()
+}

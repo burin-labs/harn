@@ -1,0 +1,224 @@
+# Reusable "bump Harn runtime" workflow (harn#5299).
+#
+# One published, immutable-ref workflow that every Harn package repo calls to
+# roll its pinned Harn runtime forward. The orchestration is Harn code
+# (`scripts/bump-driver` -> `std/bump/runtime`), not shell. This file is limited
+# to bootstrap and package installation.
+#
+# A consuming repo needs only a tiny trigger wrapper (schedule/dispatch) plus
+# its own declared refresh and validation commands. See
+# docs/src/dev/reusable-bump-harn-runtime.md for the minimal caller and the
+# security boundary.
+name: Bump Harn Runtime (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: "Optional Harn tag to bump to (vX.Y.Z). Defaults to the latest published release."
+        required: false
+        type: string
+      refresh-command:
+        description: "Repository-owned regeneration command run after the standard version-file write. Defaults to refreshing the Harn package lock."
+        required: false
+        type: string
+        default: "harn install --locked || harn install"
+      node-version:
+        description: "Optional Node.js version installed before refresh and validation commands."
+        required: false
+        type: string
+        default: ""
+      validate-command:
+        description: "Repository-owned verification command run after all refresh mutations and before the signed commit."
+        required: false
+        type: string
+        default: ""
+      branch:
+        description: "Bump branch name."
+        required: false
+        type: string
+        default: "automation/bump-harn-runtime"
+      base:
+        description: "Base branch the PR targets."
+        required: false
+        type: string
+        default: "main"
+      enable-auto-merge:
+        description: "Arm auto-merge on the bump PR (the merge queue owns the strategy)."
+        required: false
+        type: boolean
+        default: true
+    secrets:
+      app-client-id:
+        description: "GitHub App client id used to mint a signed-commit-capable installation token."
+        required: true
+      app-private-key:
+        description: "GitHub App private key."
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  # Serialize reruns per calling repo so a scheduled tick can't race a manual
+  # dispatch onto the same bump branch. cancel-in-progress stays false: a
+  # half-finished branch reset must not be interrupted.
+  group: bump-harn-runtime-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mint GitHub App installation token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.app-client-id }}
+          private-key: ${{ secrets.app-private-key }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Checkout package repo
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          path: package
+          # workflow_dispatch may run the caller from a maintenance or feature
+          # ref. The declared PR base, not the caller ref, owns bump ancestry.
+          ref: ${{ inputs.base }}
+          token: ${{ steps.app-token.outputs.token }}
+          # The Harn driver owns signed publication through HARN_BUMP_TOKEN.
+          # Persisted checkout credentials leave a runner-temporary includeIf
+          # in .git/config that caller-owned git probes cannot safely traverse.
+          persist-credentials: false
+
+      - name: Install caller Node.js toolchain
+        if: inputs.node-version != ''
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ inputs.node-version }}
+
+      - name: Activate caller Node.js package manager
+        if: inputs.node-version != ''
+        working-directory: package
+        shell: bash
+        run: |
+          set -euo pipefail
+          manager_spec="$(node -e 'const value = require("./package.json").packageManager ?? ""; process.stdout.write(value)')"
+          if [ -z "${manager_spec}" ]; then
+            echo "Caller has no packageManager declaration; Node.js alone is ready."
+            exit 0
+          fi
+          manager="${manager_spec%%@*}"
+          expected_version="${manager_spec#*@}"
+          expected_version="${expected_version%%+*}"
+          case "${manager}" in
+            npm|pnpm|yarn) ;;
+            *)
+              echo "Unsupported packageManager '${manager_spec}'; expected npm, pnpm, or yarn." >&2
+              exit 1
+              ;;
+          esac
+          if [[ ! "${expected_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "packageManager must pin an exact version, got '${manager_spec}'." >&2
+            exit 1
+          fi
+          corepack enable "${manager}"
+          actual_version="$("${manager}" --version)"
+          if [ "${actual_version}" != "${expected_version}" ]; then
+            echo "Expected ${manager} ${expected_version}, got ${actual_version}." >&2
+            exit 1
+          fi
+
+      # Resolve which Harn to INSTALL *before* checking out the orchestration,
+      # so we can pin that checkout to the exact target release tag. This must
+      # precede the orchestration checkout — an external caller cannot reference
+      # this reusable workflow's own commit (github.workflow_sha resolves to the
+      # CALLER's commit, which does not exist in burin-labs/harn), so the ref has
+      # to be a burin-labs/harn ref we can compute here.
+      - name: Resolve target and short-circuit when already current
+        id: resolve
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          INPUT_VERSION: ${{ inputs.version }}
+        shell: bash
+        # Bootstrap only: resolve which Harn to INSTALL. The target release
+        # embeds std/bump/*, so the orchestration (including the already-current
+        # no-op) runs under it — this step decides the install version, it does
+        # not duplicate any orchestration/no-op logic, which lives in the Harn
+        # harness.
+        run: |
+          set -euo pipefail
+          VERSION="${INPUT_VERSION:-}"
+          if [ -z "${VERSION}" ]; then
+            VERSION="$(gh api repos/burin-labs/harn/releases/latest --jq '.tag_name')"
+          fi
+          if [[ ! "${VERSION}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Expected tag like vX.Y.Z, got '${VERSION}'" >&2
+            exit 1
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      # The orchestration script and the checksum-verifying setup-harn action
+      # both live in burin-labs/harn. Pin this checkout to the resolved target
+      # release tag: it is always a valid burin-labs/harn ref (works for every
+      # external caller) and keeps the orchestration + setup-harn code
+      # version-consistent with the Harn being installed below.
+      - name: Checkout Harn runtime orchestration
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: burin-labs/harn
+          ref: ${{ steps.resolve.outputs.version }}
+          path: .harn-runtime
+          persist-credentials: false
+
+      # Install the TARGET Harn through the checksum-verifying setup-harn
+      # action. The target release embeds std/bump/*, so the orchestration runs
+      # under it and the lockfile refresh + validation use the version we are
+      # bumping to. setup-harn's bounded retry absorbs still-publishing assets.
+      - name: Install target Harn
+        uses: ./.harn-runtime/.github/actions/setup-harn
+        with:
+          version: ${{ steps.resolve.outputs.version }}
+
+      # std/bump/live deliberately has no provider transport. Install the
+      # target release's locked driver package so one reviewed connector owns
+      # GitHub REST/GraphQL, leases, worktree encoding, and signed publication.
+      - name: Install bump driver dependencies
+        working-directory: .harn-runtime/scripts/bump-driver
+        shell: bash
+        run: harn install --locked
+
+      - name: Run bump orchestration
+        working-directory: package
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          HARN_BUMP_TOKEN: ${{ steps.app-token.outputs.token }}
+          HARN_BUMP_TARGET_TAG: ${{ steps.resolve.outputs.version }}
+          HARN_BUMP_REFRESH_COMMAND: ${{ inputs.refresh-command }}
+          HARN_BUMP_VALIDATE_COMMAND: ${{ inputs.validate-command }}
+          HARN_BUMP_REFRESH_SENTINEL: ${{ runner.temp }}/harn-bump-refresh-${{ github.run_id }}-${{ github.run_attempt }}.ok
+          HARN_BUMP_BRANCH: ${{ inputs.branch }}
+          HARN_BUMP_BASE: ${{ inputs.base }}
+          HARN_BUMP_ENABLE_AUTOMERGE: ${{ inputs.enable-auto-merge }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The target release owns std/bump/*. A caller can therefore use a
+          # newer workflow contract with an older compatible target runtime.
+          # The sentinel preserves fail-closed refresh semantics across that
+          # skew: runtimes with BumpApplyOutcome.ok return refresh_failed
+          # directly; older runtimes reach validation, whose first operation
+          # fails unless refresh completed successfully.
+          # shellcheck disable=SC2016 # expand in the child shell, not here
+          # The target runtime owns its capability migration registry. Apply
+          # that deterministic codemod before the caller-owned refresh so a
+          # runtime bump can carry source compatibility forward in the same
+          # signed PR. This callback is reached only after a real version
+          # change; the already-current path remains mutation-free.
+          export HARN_BUMP_REFRESH='set -euo pipefail; harn fix --apply --safety surface-changing --capability-migrations-only .; eval "$HARN_BUMP_REFRESH_COMMAND"; printf "ok\n" > "$HARN_BUMP_REFRESH_SENTINEL"'
+          # shellcheck disable=SC2016 # expand in the child shell, not here
+          export HARN_BUMP_VALIDATE='set -euo pipefail; test -f "$HARN_BUMP_REFRESH_SENTINEL"; eval "$HARN_BUMP_VALIDATE_COMMAND"'
+          harn --version
+          harn run --no-sandbox ../.harn-runtime/scripts/bump-driver/bump_harn_runtime.harn

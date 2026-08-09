@@ -1,0 +1,313 @@
+/** Pure checkout transaction used by the `std/git` facade. */
+pub type GitCheckoutDirtyPolicy = "refuse" | "preserve" | "stash"
+
+pub type GitCheckoutStep = {kind: string, label: string, argv: list<string>, when: string}
+
+pub type GitCheckoutOptions = {
+  repo?: string,
+  remote?: string,
+  base_branch: string,
+  exact_refspec?: string,
+  dirty_policy?: GitCheckoutDirtyPolicy,
+  stash_name?: string,
+  runner?: fn(GitCheckoutStep) -> dict,
+}
+
+pub type GitCheckoutStepReceipt = GitCheckoutStep \
+  & {success: bool, status: string, exit_code: int?, stdout: string, stderr: string}
+
+pub type GitCheckoutReceipt = {
+  schema: "harn-stdlib-git-checkout-v1",
+  success: bool,
+  status: "completed" | "skipped" | "failed",
+  skipped: bool,
+  failure_kind: string?,
+  repo: string,
+  remote: string,
+  base_branch: string,
+  exact_refspec: string,
+  original_branch: string,
+  final_branch: string,
+  dirty: bool,
+  stashed: bool,
+  stash_name: string?,
+  steps: list<GitCheckoutStepReceipt>,
+  recovery: string,
+}
+
+fn __checkout_arg(value, label) -> string {
+  if type_of(value) != "string" || value == "" {
+    throw "std/git: " + label + " must be a non-empty string"
+  }
+  if starts_with(value, "-") || contains(value, "\n") || contains(value, "\r") {
+    throw "std/git: invalid " + label
+  }
+  return value
+}
+
+fn __checkout_config(options) {
+  const remote = __checkout_arg(options.remote ?? "origin", "remote")
+  const base = __checkout_arg(options.base_branch, "base_branch")
+  const refspec = options.exact_refspec
+    ?? "+refs/heads/${base}:refs/remotes/${remote}/${base}"
+  __checkout_arg(refspec, "exact_refspec")
+  if !ends_with(refspec, ":refs/remotes/${remote}/${base}") {
+    throw "std/git: exact_refspec must update refs/remotes/${remote}/${base}"
+  }
+  const policy = options.dirty_policy ?? "refuse"
+  if policy != "refuse" && policy != "preserve" && policy != "stash" {
+    throw "std/git: dirty_policy must be refuse, preserve, or stash"
+  }
+  const stash_name = if policy == "stash" {
+    __checkout_arg(options.stash_name, "stash_name")
+  } else {
+    nil
+  }
+  return {
+    repo: options.repo ?? ".",
+    remote: remote,
+    base: base,
+    refspec: refspec,
+    policy: policy,
+    stash_name: stash_name,
+  }
+}
+
+/**
+ * Return the canonical command plan used by `git_checkout_sync`.
+ *
+ * @effects: []
+ * @errors: [ValueError]
+ */
+pub fn git_checkout_plan(options: GitCheckoutOptions) -> list<GitCheckoutStep> {
+  const cfg = __checkout_config(options)
+  return [
+    {
+      kind: "status",
+      label: "inspect working tree",
+      argv: ["git", "status", "--porcelain", "--untracked-files=normal"],
+      when: "always",
+    },
+    {
+      kind: "stash",
+      label: "stash dirty working tree",
+      argv: ["git", "stash", "push", "--include-untracked", "-m", cfg.stash_name ?? "unused"],
+      when: "dirty_policy=stash and dirty",
+    },
+    {
+      kind: "current_branch",
+      label: "read current branch",
+      argv: ["git", "branch", "--show-current"],
+      when: "not skipped",
+    },
+    {
+      kind: "fetch",
+      label: "fetch exact base ref",
+      argv: ["git", "fetch", cfg.remote, "--no-tags", "--quiet", cfg.refspec],
+      when: "not skipped",
+    },
+    {
+      kind: "local_base",
+      label: "inspect local base branch",
+      argv: ["git", "show-ref", "--verify", "--quiet", "refs/heads/${cfg.base}"],
+      when: "current branch differs",
+    },
+    {
+      kind: "switch",
+      label: "switch to local base branch",
+      argv: ["git", "switch", cfg.base],
+      when: "local base exists",
+    },
+    {
+      kind: "create",
+      label: "create base from fetched ref",
+      argv: ["git", "switch", "-c", cfg.base, "refs/remotes/${cfg.remote}/${cfg.base}"],
+      when: "local base is absent",
+    },
+    {
+      kind: "fast_forward",
+      label: "fast-forward base to fetched ref",
+      argv: ["git", "merge", "--ff-only", "refs/remotes/${cfg.remote}/${cfg.base}"],
+      when: "on base branch",
+    },
+    {
+      kind: "verify_branch",
+      label: "verify final branch",
+      argv: ["git", "branch", "--show-current"],
+      when: "after fast-forward",
+    },
+    {
+      kind: "verify_status",
+      label: "verify final working tree",
+      argv: ["git", "status", "--porcelain", "--untracked-files=normal"],
+      when: "after fast-forward",
+    },
+  ]
+}
+
+fn __checkout_find(plan, kind) {
+  for step in plan {
+    if step.kind == kind {
+      return step
+    }
+  }
+  throw "std/git: checkout plan missing step " + kind
+}
+
+fn __checkout_record(step, result) -> GitCheckoutStepReceipt {
+  return step
+    + {
+    success: result?.success ?? result?.ok ?? false,
+    status: result?.status ?? "failed",
+    exit_code: result?.exit_code,
+    stdout: result?.stdout ?? "",
+    stderr: result?.stderr ?? "",
+  }
+}
+
+fn __checkout_recovery(cfg, stashed, failure_kind) -> string {
+  if stashed {
+    return "changes remain in git stash list under '" + cfg.stash_name
+      + "'; inspect and apply them manually"
+  }
+  if failure_kind == "dirty_refused" || failure_kind == "dirty_preserved" {
+    return "commit, stash, or move local changes before synchronizing the checkout"
+  }
+  return "inspect the failed step receipt and leave the checkout unchanged until its state is understood"
+}
+
+fn __checkout_receipt(cfg, state) -> GitCheckoutReceipt {
+  return {
+    schema: "harn-stdlib-git-checkout-v1",
+    success: state.success,
+    status: state.status,
+    skipped: state.skipped,
+    failure_kind: state.failure_kind,
+    repo: cfg.repo,
+    remote: cfg.remote,
+    base_branch: cfg.base,
+    exact_refspec: cfg.refspec,
+    original_branch: state.original_branch,
+    final_branch: state.final_branch,
+    dirty: state.dirty,
+    stashed: state.stashed,
+    stash_name: if state.stashed {
+      cfg.stash_name
+    } else {
+      nil
+    },
+    steps: state.steps,
+    recovery: __checkout_recovery(cfg, state.stashed, state.failure_kind),
+  }
+}
+
+fn __checkout_fail(cfg, state, kind) {
+  return __checkout_receipt(cfg, state + {success: false, status: "failed", failure_kind: kind})
+}
+
+fn __checkout_run_step(runner, plan, kind, steps) {
+  const step = __checkout_find(plan, kind)
+  const result = __checkout_record(step, runner(step))
+  return {result: result, steps: steps + [result]}
+}
+
+/**
+ * Execute a canonical checkout plan with the facade-provided runner.
+ *
+ * @effects: [process]
+ * @errors: [ValueError]
+ */
+pub fn git_checkout_run(options: GitCheckoutOptions) -> GitCheckoutReceipt {
+  const cfg = __checkout_config(options)
+  const runner = options.runner
+  if runner == nil {
+    throw "std/git: checkout runner must be a function"
+  }
+  const plan = git_checkout_plan(options)
+  let state = {
+    success: false,
+    status: "failed",
+    skipped: false,
+    failure_kind: nil,
+    original_branch: "",
+    final_branch: "",
+    dirty: false,
+    stashed: false,
+    steps: [],
+  }
+  let ran = __checkout_run_step(runner, plan, "status", state.steps)
+  state = state + {steps: ran.steps}
+  if !ran.result.success {
+    return __checkout_fail(cfg, state, "status_failed")
+  }
+  state = state + {dirty: trim(ran.result.stdout) != ""}
+  if state.dirty && cfg.policy == "refuse" {
+    return __checkout_fail(cfg, state, "dirty_refused")
+  }
+  if state.dirty && cfg.policy == "preserve" {
+    return __checkout_receipt(
+      cfg,
+      state + {success: true, status: "skipped", skipped: true, failure_kind: "dirty_preserved"},
+    )
+  }
+  if state.dirty {
+    ran = __checkout_run_step(runner, plan, "stash", state.steps)
+    state = state + {steps: ran.steps}
+    if !ran.result.success {
+      return __checkout_fail(cfg, state, "stash_failed")
+    }
+    state = state + {stashed: true}
+  }
+  ran = __checkout_run_step(runner, plan, "current_branch", state.steps)
+  state = state + {steps: ran.steps}
+  if !ran.result.success {
+    return __checkout_fail(cfg, state, "current_branch_failed")
+  }
+  const original = trim(ran.result.stdout)
+  state = state + {original_branch: original, final_branch: original}
+  ran = __checkout_run_step(runner, plan, "fetch", state.steps)
+  state = state + {steps: ran.steps}
+  if !ran.result.success {
+    return __checkout_fail(cfg, state, "fetch_failed")
+  }
+  if original != cfg.base {
+    ran = __checkout_run_step(runner, plan, "local_base", state.steps)
+    state = state + {steps: ran.steps}
+    const local_status = ran.result.exit_code
+      ?? if ran.result.success {
+      0
+    } else {
+      2
+    }
+    if !ran.result.success && local_status != 1 {
+      return __checkout_fail(cfg, state, "local_base_failed")
+    }
+    const switch_kind = if ran.result.success {
+      "switch"
+    } else {
+      "create"
+    }
+    ran = __checkout_run_step(runner, plan, switch_kind, state.steps)
+    state = state + {steps: ran.steps}
+    if !ran.result.success {
+      return __checkout_fail(cfg, state, switch_kind + "_failed")
+    }
+    state = state + {final_branch: cfg.base}
+  }
+  ran = __checkout_run_step(runner, plan, "fast_forward", state.steps)
+  state = state + {steps: ran.steps}
+  if !ran.result.success {
+    return __checkout_fail(cfg, state, "fast_forward_failed")
+  }
+  ran = __checkout_run_step(runner, plan, "verify_branch", state.steps)
+  state = state + {steps: ran.steps, final_branch: trim(ran.result.stdout)}
+  if !ran.result.success || state.final_branch != cfg.base {
+    return __checkout_fail(cfg, state, "branch_postcondition_failed")
+  }
+  ran = __checkout_run_step(runner, plan, "verify_status", state.steps)
+  state = state + {steps: ran.steps}
+  if !ran.result.success || trim(ran.result.stdout) != "" {
+    return __checkout_fail(cfg, state, "status_postcondition_failed")
+  }
+  return __checkout_receipt(cfg, state + {success: true, status: "completed"})
+}

@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/ast/insert_at_anchor.request.json",
+  "title": "ast.insert_at_anchor request",
+  "description": "Locate a unique AST anchor in `path` via a Tree-Sitter query, then splice `content` into the file relative to that anchor. `position` picks the sibling/child slot. Reads and writes route through staged-fs (#1722) when `session_id` is supplied. Companion to `ast.apply_node`: where `apply_node` replaces a span, this primitive adds one.",
+  "type": "object",
+  "properties": {
+    "path": {
+      "type": "string",
+      "description": "File to mutate. Required."
+    },
+    "query": {
+      "type": "string",
+      "description": "Tree-Sitter S-expression query. Must declare at least one capture; the capture named by `target_capture` (default `anchor`) names the anchor. Single-capture queries are accepted regardless of capture name. The query MUST match exactly one node — multi-match returns `ambiguous`."
+    },
+    "position": {
+      "type": "string",
+      "enum": ["before", "after", "first_child", "last_child"],
+      "description": "Where to splice relative to the anchor. `before`/`after` insert siblings at the anchor's indent depth. `first_child`/`last_child` insert inside the anchor (just past the opening or just before the closing delimiter) at the inferred child depth."
+    },
+    "content": {
+      "type": "string",
+      "description": "Text to insert. Re-indented to the target depth on each line unless `reindent` is false."
+    },
+    "language": {
+      "type": "string",
+      "description": "Optional language hint; otherwise inferred from the file extension."
+    },
+    "target_capture": {
+      "type": "string",
+      "description": "Capture name to treat as the anchor. Defaults to `anchor`.",
+      "default": "anchor"
+    },
+    "indent": {
+      "type": "string",
+      "description": "Optional indent unit override for `first_child`/`last_child` (e.g. `\"  \"` or `\"\\t\"`). When unset the unit is detected from existing indentation in the file, falling back to a language default."
+    },
+    "reindent": {
+      "type": "boolean",
+      "default": true,
+      "description": "When true (default) each line of `content` is prefixed with the inferred target indentation. Set false to splice the text exactly as supplied."
+    },
+    "dry_run": {
+      "type": "boolean",
+      "default": false,
+      "description": "When true, the file is left untouched but `preview` carries the splice the call would produce."
+    },
+    "validate": {
+      "type": "boolean",
+      "default": true,
+      "description": "When true (default), the post-edit source is re-parsed and any ERROR/MISSING node aborts the edit with `result = \"syntax_error\"`."
+    },
+    "session_id": {
+      "type": "string",
+      "description": "Hostlib session id for staged-fs routing. Reads and writes consult the staged overlay when staging is active for this session."
+    },
+    "max_bytes": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 0,
+      "description": "Optional read cap. `0` means unlimited."
+    }
+  },
+  "required": ["path", "query", "position", "content"],
+  "additionalProperties": false
+}

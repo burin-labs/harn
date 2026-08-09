@@ -1,0 +1,2 @@
+Hello, Alice! Welcome to Harn.
+Hello, {{name}}! Welcome to {{place}}.

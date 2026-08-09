@@ -1,0 +1,17 @@
+pipeline test(harness: Harness, task) {
+  const string_schema = {type: "string"}
+  const x: string | int | nil = "hello"
+  if schema_is(x, string_schema) {
+    harness.stdio.println(x.upper())
+  }
+  const user_schema = {type: "dict", properties: {name: {type: "string"}}, required: ["name"]}
+  const y: dict? = {name: "Ada"}
+  if schema_is(y, user_schema) {
+    harness.stdio.println(y.name)
+  }
+  const list_schema = {type: "list", items: {type: "string"}}
+  const z: list<string> | string | nil = ["a", "b"]
+  if schema_is(z, list_schema) {
+    harness.stdio.println(z[1])
+  }
+}

@@ -1,0 +1,445 @@
+// std/semver — Semantic-version helpers used by release tooling, bump
+// orchestrators, and any harness that needs to parse, compare, or emit
+// SemVer (https://semver.org/) version strings.
+//
+// Scope: parse canonical stable and prerelease versions (never build metadata),
+// strip/add the canonical leading `v`, compare stable release tags, compute
+// stable and prerelease bumps, classify which stable bump separates two
+// versions, and unpack release branches / tags.
+// Keep release-tooling repos on this stdlib implementation so SemVer parsing,
+// bump detection, and error messages do not drift between repos.
+//
+// Import with:
+//   import {
+//     Version, ReleaseVersion, StableBumpKind, BumpKind,
+//     strip_v, add_v, is_v_semver, is_v_release_semver,
+//     parse, parse_release, is_prerelease_identifier, is_prerelease, compare_release,
+//     max_canonical_tag, next, bump_type,
+//     version_from_release_branch, version_from_tag,
+//   } from "std/semver"
+/** Parsed "MAJOR.MINOR.PATCH" triple. All three fields are non-negative ints. */
+pub type Version = {major: int, minor: int, patch: int}
+
+/** Parsed release SemVer. Build metadata is intentionally outside this contract. */
+pub type ReleaseVersion = {major: int, minor: int, patch: int, prerelease: string?}
+
+/** One canonical stable semantic-version increment. */
+pub type StableBumpKind = "major" | "minor" | "patch"
+
+/** One stable or prerelease semantic-version increment. */
+pub type BumpKind = "major" \
+  | "minor" \
+  | "patch" \
+  | "premajor" \
+  | "preminor" \
+  | "prepatch" \
+  | "prerelease"
+
+/**
+ * Strip an optional leading `v` from a version string. Returns the empty
+ * string for `nil` input so callers can `strip_v(maybe_tag)` without a
+ * separate nil guard.
+ *
+ * @effects: []
+ * @errors: []
+ * @example: strip_v("v1.2.3")
+ */
+pub fn strip_v(version: string?) -> string {
+  const text = version ?? ""
+  if starts_with(text, "v") {
+    return substring(text, 1, len(text))
+  }
+  return text
+}
+
+/**
+ * Add a leading `v` to a bare semver string. No-op if already prefixed.
+ * Returns the empty string for `nil` input.
+ *
+ * @effects: []
+ * @errors: []
+ * @example: add_v("1.2.3")
+ */
+pub fn add_v(version: string?) -> string {
+  const text = version ?? ""
+  if text == "" || starts_with(text, "v") {
+    return text
+  }
+  return "v" + text
+}
+
+/**
+ * Return true for canonical release tags like `v1.2.3`. Rejects prerelease
+ * tails (`v1.2.3-rc.1`) and build metadata (`v1.2.3+ci.42`) — release
+ * tooling that cares about those forms should match its own regex.
+ *
+ * @effects: []
+ * @errors: []
+ * @example: is_v_semver("v1.2.3")
+ */
+pub fn is_v_semver(value: string?) -> bool {
+  const text = value ?? ""
+  return starts_with(text, "v") && parse(text) != nil
+}
+
+/**
+ * Return true for canonical stable or prerelease release tags. Build metadata
+ * remains invalid because release refs and package versions need one identity.
+ *
+ * @effects: []
+ * @errors: []
+ * @example: is_v_release_semver("v1.2.3-rc.1")
+ */
+pub fn is_v_release_semver(value: string?) -> bool {
+  const text = value ?? ""
+  return starts_with(text, "v") && parse_release(text) != nil
+}
+
+/**
+ * Parse a canonical "MAJOR.MINOR.PATCH" string into a `Version` dict. Accepts
+ * an optional leading `v`. Each component is either `0` or begins with a
+ * non-zero digit. Returns `nil` (not an exception) for non-canonical input or
+ * components outside the integer range, so callers can match-on-nil for soft
+ * validation. Use `next` / `bump_type` when a throwing variant is more
+ * ergonomic.
+ *
+ * @effects: []
+ * @errors: []
+ * @example: parse("v1.2.3")
+ */
+pub fn parse(version: string?) -> Version? {
+  const text = strip_v(version)
+  if regex_match("^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$", text) == nil {
+    return nil
+  }
+  const parts = split(text, ".")
+  const major = to_int(parts[0])
+  const minor = to_int(parts[1])
+  const patch = to_int(parts[2])
+  if major == nil || minor == nil || patch == nil {
+    return nil
+  }
+  return {major: major, minor: minor, patch: patch}
+}
+
+/**
+ * Return true when `value` is a canonical dot-separated SemVer prerelease identifier.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn is_prerelease_identifier(value: string?) -> bool {
+  const text = value ?? ""
+  if regex_match("^[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*$", text) == nil {
+    return false
+  }
+  for identifier in split(text, ".") {
+    if regex_match("^[0-9]+$", identifier) != nil
+      && len(identifier) > 1
+      && starts_with(identifier, "0") {
+      return false
+    }
+  }
+  return true
+}
+
+/**
+ * Parse canonical stable or prerelease SemVer, with an optional leading `v`.
+ * Build metadata is rejected so tags, branches, Cargo versions, and changelog
+ * headings always share one release identity.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn parse_release(version: string?) -> ReleaseVersion? {
+  const text = strip_v(version)
+  const stable = parse(text)
+  if stable != nil {
+    return {major: stable.major, minor: stable.minor, patch: stable.patch, prerelease: nil}
+  }
+  const matches = regex_captures(
+    "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)-([0-9A-Za-z.-]+)$",
+    text,
+  )
+  if matches.count != 1 || !is_prerelease_identifier(matches[0].groups[3]) {
+    return nil
+  }
+  const major = to_int(matches[0].groups[0])
+  const minor = to_int(matches[0].groups[1])
+  const patch = to_int(matches[0].groups[2])
+  if major == nil || minor == nil || patch == nil {
+    return nil
+  }
+  return {major: major, minor: minor, patch: patch, prerelease: matches[0].groups[3]}
+}
+
+/**
+ * Return true only for a valid release version carrying prerelease metadata.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn is_prerelease(version: string?) -> bool {
+  const parsed = parse_release(version)
+  return parsed != nil && parsed.prerelease != nil
+}
+
+fn __lex_compare(left: string, right: string) -> int {
+  if left == right {
+    return 0
+  }
+  return [left, right].sorted()[0] == left ? -1 : 1
+}
+
+fn __compare_prerelease(left: string?, right: string?) -> int {
+  if left == nil || right == nil {
+    if left == right {
+      return 0
+    }
+    return left == nil ? 1 : -1
+  }
+  const left_parts = split(left, ".")
+  const right_parts = split(right, ".")
+  let index = 0
+  while index < len(left_parts) && index < len(right_parts) {
+    const a = left_parts[index]
+    const b = right_parts[index]
+    const a_numeric = regex_match("^[0-9]+$", a) != nil
+    const b_numeric = regex_match("^[0-9]+$", b) != nil
+    if a_numeric != b_numeric {
+      return a_numeric ? -1 : 1
+    }
+    if a_numeric && len(a) != len(b) {
+      return len(a) < len(b) ? -1 : 1
+    }
+    const order = __lex_compare(a, b)
+    if order != 0 {
+      return order
+    }
+    index = index + 1
+  }
+  if len(left_parts) == len(right_parts) {
+    return 0
+  }
+  return len(left_parts) < len(right_parts) ? -1 : 1
+}
+
+/**
+ * Compare canonical release versions using SemVer precedence.
+ *
+ * @effects: []
+ * @errors: ["std/semver: left/right version is not release semver"]
+ */
+pub fn compare_release(left: string, right: string) -> int {
+  const a = parse_release(left)
+  const b = parse_release(right)
+  if a == nil {
+    throw "std/semver: left version is not release semver: " + left
+  }
+  if b == nil {
+    throw "std/semver: right version is not release semver: " + right
+  }
+  if a.major != b.major {
+    return a.major < b.major ? -1 : 1
+  }
+  if a.minor != b.minor {
+    return a.minor < b.minor ? -1 : 1
+  }
+  if a.patch != b.patch {
+    return a.patch < b.patch ? -1 : 1
+  }
+  return __compare_prerelease(a.prerelease, b.prerelease)
+}
+
+fn __format_release(parsed: ReleaseVersion, prerelease: string? = nil) -> string {
+  const core = "${parsed.major}.${parsed.minor}.${parsed.patch}"
+  if prerelease == nil || prerelease == "" {
+    return core
+  }
+  return core + "-" + prerelease
+}
+
+fn __new_prerelease(parsed: ReleaseVersion, bump: BumpKind, identifier: string) -> string {
+  if bump == "premajor" {
+    return "${parsed.major + 1}.0.0-${identifier}.0"
+  }
+  if bump == "preminor" {
+    return "${parsed.major}.${parsed.minor + 1}.0-${identifier}.0"
+  }
+  return "${parsed.major}.${parsed.minor}.${parsed.patch + 1}-${identifier}.0"
+}
+
+fn __increment_prerelease(prerelease: string, identifier: string) -> string {
+  if prerelease != identifier && !starts_with(prerelease, identifier + ".") {
+    return identifier + ".0"
+  }
+  const parts = split(prerelease, ".")
+  const last = parts[len(parts) - 1]
+  if regex_match("^[0-9]+$", last) != nil {
+    const number = to_int(last)
+    if number == nil {
+      throw "std/semver: prerelease numeric identifier is outside the integer range: " + last
+    }
+    return join(parts.slice(0, len(parts) - 1) + [to_string(number + 1)], ".")
+  }
+  return prerelease + ".0"
+}
+
+/**
+ * Return the numerically greatest canonical `vX.Y.Z` release tag. Input order
+ * does not affect the result. Bare versions, malformed tags, leading-zero
+ * components, prereleases, build metadata, and integer overflow are ignored.
+ * Returns `nil` when no canonical tag remains.
+ *
+ * @effects: []
+ * @errors: []
+ * @example: max_canonical_tag(["v2.9.0", "v2.10.0"])
+ */
+pub fn max_canonical_tag(tags: list<string>) -> string? {
+  let best_tag: string? = nil
+  let best_major = -1
+  let best_minor = -1
+  let best_patch = -1
+  for tag in tags {
+    const parsed = parse(tag)
+    if parsed == nil || !starts_with(tag, "v") {
+      continue
+    }
+    if parsed.major > best_major
+      || (parsed.major == best_major && parsed.minor > best_minor)
+      || (parsed.major == best_major
+      && parsed
+      .minor
+      == best_minor
+      && parsed.patch > best_patch) {
+      best_tag = tag
+      best_major = parsed.major
+      best_minor = parsed.minor
+      best_patch = parsed.patch
+    }
+  }
+  return best_tag
+}
+
+/**
+ * Return the next release version for a stable or prerelease bump. Prerelease
+ * bumps require a canonical identifier such as `rc` or `beta`. A stable bump
+ * promotes a matching prerelease base before advancing to a later core.
+ * The returned string never carries a leading `v` — wrap with `add_v` if
+ * the caller wants the tag-shaped form.
+ *
+ * @effects: []
+ * @errors: ["std/semver: current version is not release semver", "std/semver: prerelease identifier is required"]
+ * @example: next("1.2.3", "minor")
+ */
+pub fn next(current: string, bump: BumpKind, prerelease_identifier: string = "") -> string {
+  const parsed = parse_release(current)
+  if parsed == nil {
+    throw "std/semver: current version is not release semver: " + current
+  }
+  if bump == "major" {
+    if parsed.prerelease != nil && parsed.minor == 0 && parsed.patch == 0 {
+      return __format_release(parsed)
+    }
+    return to_string(parsed.major + 1) + ".0.0"
+  }
+  if bump == "minor" {
+    if parsed.prerelease != nil && parsed.patch == 0 {
+      return __format_release(parsed)
+    }
+    return to_string(parsed.major) + "." + to_string(parsed.minor + 1) + ".0"
+  }
+  if bump == "patch" {
+    if parsed.prerelease != nil {
+      return __format_release(parsed)
+    }
+    return to_string(parsed.major) + "." + to_string(parsed.minor) + "."
+      + to_string(parsed.patch + 1)
+  }
+  if !is_prerelease_identifier(prerelease_identifier) {
+    const detail = prerelease_identifier == "" ? "<empty>" : prerelease_identifier
+    throw "std/semver: prerelease identifier is required and must be canonical: "
+      + detail
+  }
+  if bump == "premajor" || bump == "preminor" || bump == "prepatch" {
+    return __new_prerelease(parsed, bump, prerelease_identifier)
+  }
+  if bump == "prerelease" {
+    if parsed.prerelease == nil {
+      return __new_prerelease(parsed, "prepatch", prerelease_identifier)
+    }
+    return __format_release(
+      parsed,
+      __increment_prerelease(parsed.prerelease, prerelease_identifier),
+    )
+  }
+  throw "std/semver: bump must be major, minor, patch, premajor, preminor, prepatch, or prerelease, got: ${bump}"
+}
+
+/**
+ * Classify the single step that takes `current` to `target`. Returns
+ * `"major"`, `"minor"`, `"patch"`, or `nil` when the gap is not exactly
+ * one bump (downgrades, two-step jumps, or equal versions all yield
+ * `nil`). Throws when either side is not parseable as semver — that's a
+ * programmer-error condition, not user input drift.
+ *
+ * @effects: []
+ * @errors: ["std/semver: current/target version is not semver"]
+ * @example: bump_type("1.2.3", "1.2.4")
+ */
+pub fn bump_type(current: string, target: string) -> StableBumpKind? {
+  const cur = parse(current)
+  const tgt = parse(target)
+  if cur == nil {
+    throw "std/semver: current version is not semver: " + current
+  }
+  if tgt == nil {
+    throw "std/semver: target version is not semver: " + target
+  }
+  if tgt.major == cur.major + 1 && tgt.minor == 0 && tgt.patch == 0 {
+    return "major"
+  }
+  if tgt.major == cur.major && tgt.minor == cur.minor + 1 && tgt.patch == 0 {
+    return "minor"
+  }
+  if tgt.major == cur.major && tgt.minor == cur.minor && tgt.patch == cur.patch + 1 {
+    return "patch"
+  }
+  return nil
+}
+
+/**
+ * Extract a stable or prerelease version from a `release/v<version>` branch. Returns
+ * the empty string for branches that don't match the canonical shape —
+ * including `release/X.Y.Z` without the `v` and `release/v1.2` with a
+ * truncated triple. Use the empty-string sentinel to gate
+ * release-only code paths.
+ *
+ * @effects: []
+ * @errors: []
+ * @example: version_from_release_branch("release/v1.2.3")
+ */
+pub fn version_from_release_branch(branch: string?) -> string {
+  const text = branch ?? ""
+  if !starts_with(text, "release/v") {
+    return ""
+  }
+  const candidate = substring(text, 9, len(text))
+  if starts_with(candidate, "v") || parse_release(candidate) == nil {
+    return ""
+  }
+  return candidate
+}
+
+/**
+ * Extract `X.Y.Z` from a `vX.Y.Z` tag. Non-`v` tags pass through unchanged
+ * (this is just `strip_v` named in a domain-specific way so callers reading
+ * release pipelines can grep for it).
+ *
+ * @effects: []
+ * @errors: []
+ * @example: version_from_tag("v1.2.3")
+ */
+pub fn version_from_tag(tag: string?) -> string {
+  return strip_v(tag)
+}

@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/code_index/imports_for.response.json",
+  "title": "code_index.imports_for response",
+  "type": "object",
+  "properties": {
+    "path": { "type": "string" },
+    "imports": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/Import" }
+    }
+  },
+  "required": ["path", "imports"],
+  "additionalProperties": false,
+  "$defs": {
+    "Import": {
+      "type": "object",
+      "properties": {
+        "module": { "type": "string" },
+        "resolved_path": { "type": ["string", "null"] },
+        "kind": {
+          "type": "string",
+          "description": "Language-specific kind (e.g. \"use\", \"import\", \"require\", \"include\")."
+        }
+      },
+      "required": ["module", "kind"],
+      "additionalProperties": false
+    }
+  }
+}

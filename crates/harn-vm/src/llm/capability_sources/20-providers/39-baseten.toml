@@ -1,0 +1,125 @@
+# ---------- Baseten Model APIs -----------------------------------------------
+#
+# Baseten serves current open-weight frontier models through an
+# OpenAI-compatible /v1/chat/completions surface. The endpoint advertises
+# tools/JSON/structured-output broadly, but live Harn probes on 2026-06-23
+# found GLM-5.2 returns visible `<tool_call><arg_key>...` content instead of
+# OpenAI `message.tool_calls` on the native channel. Harn's text-tool grammar
+# did produce parseable calls, so pin GLM to text while keeping native tools for
+# the Kimi, DeepSeek, GPT-OSS, and Nemotron routes that returned clean native
+# calls in the same probe set.
+
+[[provider.baseten]]
+model_match = "*glm-5*"
+native_tools = true
+preferred_tool_format = "text"
+tool_mode_parity = "native_unreliable"
+tool_mode_parity_notes = "2026-06-23 live Baseten probe: forced native/off emitted visible `<tool_call><arg_key>...` content with no provider-native tool_calls; Harn heredoc text tools emitted parseable `<tool_call>\\nadd({ ... })\\n</tool_call>`."
+structured_output = "native"
+thinking_modes = ["enabled"]
+auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
+prompt_caching = true
+honors_chat_template_kwargs = true
+chat_template_options_field = "chat_template_args"
+reasoning_text_promotable = false
+top_p_supported = true
+top_k_supported = true
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+[[provider.baseten]]
+model_match = "*kimi-k2*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled"]
+prompt_caching = true
+honors_chat_template_kwargs = true
+chat_template_options_field = "chat_template_args"
+vision = true
+vision_supported = true
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+[[provider.baseten]]
+model_match = "*deepseek-v4*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["effort"]
+reasoning_effort_supported = true
+reasoning_effort_levels = ["low", "medium", "high"]
+prompt_caching = true
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "reasoning_summary"
+
+[[provider.baseten]]
+model_match = "*gpt-oss*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["effort"]
+reasoning_effort_supported = true
+reasoning_effort_levels = ["low", "medium", "high"]
+reasoning_required_for_tools = true
+prompt_caching = true
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "reasoning_summary"
+
+[[provider.baseten]]
+model_match = "*nemotron*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled"]
+prompt_caching = true
+honors_chat_template_kwargs = true
+chat_template_options_field = "chat_template_args"
+top_p_supported = true
+top_k_supported = true
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+[[provider.baseten]]
+model_match = "*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "none"

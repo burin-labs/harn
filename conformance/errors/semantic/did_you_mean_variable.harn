@@ -1,0 +1,4 @@
+pipeline default(harness: Harness) {
+  const response = "hello"
+  harness.stdio.log(reponse)
+}

@@ -1,0 +1,50 @@
+{
+  "schema_version": "1",
+  "objective": "Add a token-bucket rate limiter around the existing auth middleware",
+  "entry": "discover",
+  "nodes": {
+    "discover": {
+      "kind": "read_fact",
+      "purpose": "Map auth middleware and find the request handler entry",
+      "prompt": "Read middleware/auth/*.rs and list functions that handle inbound requests. Report file paths and function signatures only — no rewrites yet.",
+      "tools": ["read", "grep"]
+    },
+    "plan_changes": {
+      "kind": "context_pack",
+      "purpose": "Assemble the change context",
+      "prompt": "From the discovered facts, draft a one-paragraph change plan that names the limiter crate, the wrap point, and the error path. No code yet.",
+      "tools": ["read"]
+    },
+    "implement": {
+      "kind": "agent_loop",
+      "purpose": "Add limiter + tests",
+      "prompt": "Implement the change plan. Update tests in middleware/auth/tests.rs. Run `cargo test -p auth` after each meaningful edit.",
+      "tools": ["read", "edit", "run"],
+      "effects": ["writes_files"],
+      "agent_loop": {"max_iterations": 12, "done_sentinel": "DONE"}
+    },
+    "verify": {
+      "kind": "verify",
+      "purpose": "Final gate",
+      "verify": {
+        "command": "cargo test -p auth",
+        "expect_status": 0
+      }
+    }
+  },
+  "edges": [
+    {"from": "discover", "to": "plan_changes"},
+    {"from": "plan_changes", "to": "implement"},
+    {"from": "implement", "to": "verify"}
+  ],
+  "capabilities": {
+    "tools": ["read", "edit", "grep", "run"],
+    "side_effect_level": "writes_files"
+  },
+  "verification": {"primary": "verify", "required_paths": ["middleware/auth"]},
+  "unknowns": [
+    {"id": "limiter_crate", "question": "Which token-bucket crate?", "resolved_by_node": "discover"}
+  ],
+  "compaction_policy": {"threshold_tokens": 8000, "preserve_recent": 8},
+  "promotion_policy": {"shadow_runs_required": 3, "human_review_required": true, "min_pass_rate": 0.8}
+}

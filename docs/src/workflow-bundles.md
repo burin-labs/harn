@@ -1,0 +1,338 @@
+# Portable workflow bundles
+
+A workflow bundle is Harn's local-first artifact for durable engineering
+automations. It is designed to run on a trusted laptop under your editor or the
+CLI and to remain importable into a cloud platform later without changing the
+workflow's durable identity, graph, policy, or replay metadata.
+
+The canonical package format is `.harnpack`: a deterministic `tar.zst` archive
+with `harnpack.json` and `sbom.spdx.json` at the archive root. The manifest can
+also be read as plain JSON during authoring. The current schema version is `3`.
+Harn continues to read schema-v2 archives.
+
+For an end-to-end walkthrough that authors a bundle, validates it,
+previews the graph, and runs a deterministic local receipt — all
+without paid credentials — see the
+[workflow authoring quickstart](./workflow-authoring-quickstart.md).
+
+```bash
+harn workflow validate --bundle docs/fixtures/workflow-bundles/github-pr-monitor.bundle.json --json
+harn workflow preview --bundle docs/fixtures/workflow-bundles/github-pr-monitor.bundle.json --json
+harn workflow preview --bundle docs/fixtures/workflow-bundles/github-pr-monitor.bundle.json --mermaid
+harn workflow run --bundle docs/fixtures/workflow-bundles/github-pr-monitor.bundle.json --json
+```
+
+## Contract
+
+Top-level bundle fields:
+
+| Field | Purpose |
+|---|---|
+| `schema_version` | Bundle schema version. Current writers emit `3`; readers also accept legacy `2`. |
+| `entrypoint` | Relative path to the entry Harn module inside the package. |
+| `execution_artifact` | Schema-v3 linked program, its graph and content hashes, compatibility policy, and link report. |
+| `transitive_modules` | Sorted module manifest entries with source hashes. Legacy v2 entries also carry per-module bytecode hashes. |
+| `stdlib_version` / `harn_version` | Runtime and standard library versions used to build the package. |
+| `provider_catalog_hash` | BLAKE3 hash of the provider catalog used at build time. |
+| `tool_manifest` | Tool names, providers, optional annotations, and schema hashes captured for review. |
+| `sbom` | SBOM document for package dependencies. |
+| `signature` | Optional Ed25519 signature over the canonical bundle hash. |
+| `parent_trust_record_id` | Optional link into a parent OpenTrustGraph chain. |
+| `id` / `version` | Stable bundle identity for hosts and importers. |
+| `triggers` | Declarations for GitHub, cron, delay, manual, webhook, or MCP wakeups. |
+| `workflow` | A normalized Harn `WorkflowGraph` with stable node ids. |
+| `prompt_capsules` | Self-contained continuation prompts keyed by capsule id. |
+| `policy` | Autonomy tier, tool policy, approval, retry, and catchup behavior. |
+| `connectors` | Provider ids, scopes, and setup/status requirements. |
+| `environment` | Repo setup profile, worktree policy, and command gates. |
+| `receipts` | Replay metadata such as run id, event ids, workflow version, and graph digest. |
+
+Trigger kinds:
+
+| Kind | Required fields |
+|---|---|
+| `github` | `provider: "github"` and one or more `events`. |
+| `cron` | `schedule`. |
+| `delay` | `delay`. |
+| `manual` | No additional fields. |
+| `webhook` | `webhook_path`. |
+| `mcp` | `mcp_tool`. |
+
+`harn workflow validate` checks schema version, manifest metadata, relative
+package paths, BLAKE3 hash syntax, stable workflow/node ids, workflow graph
+validity, trigger references, prompt capsule references, policy values,
+connector identity, and environment worktree policy. The validation report
+includes a stable `graph_digest` over canonical graph JSON so receipts and
+replay runs can pin the exact workflow graph.
+
+Bundle identity for schema-v3 `.harnpack` archives is BLAKE3 over the canonical
+manifest plus each normalized archive path, file mode, and content hash. This
+binds bytes to their names and rejects duplicate normalized paths. Re-packing
+the same manifest and content produces the same bundle hash. Schema-v2
+verification preserves its historical path-independent hash so existing
+signatures remain valid, then applies path checks before execution.
+
+`harn pack --sign --key <private.pem>` signs the canonical bundle hash with an
+Ed25519 PKCS#8 PEM key, embeds the signature in `harnpack.json`, and appends an
+OpenTrustGraph `release` record. `harn pack --unsigned` skips the manifest
+signature but still appends the release record at autonomy tier `suggest`.
+`harn pack --json` emits a `JsonEnvelope` summary with the bundle hash, output
+path, archive size, signature presence, SBOM counts, the full manifest, and a
+`link_report`. The report names the linker version and graph identity, input
+and output byte counts, retained and removed symbols with reasons, conservative
+widening, and user-versus-standard-library totals. Module initializers remain
+in the artifact because their effects are observable.
+
+Schema v3 stores one `artifacts/program.harnlink` execution payload instead of
+parallel `.harnbc` and `.harnmod` files. The linker keeps only modules reachable
+from the entrypoint. For a static namespace use such as `ui.render(...)`, it
+keeps `render`, the private callables and type schemas it needs, and module
+initialization. If the namespace escapes, is indexed dynamically, or is
+publicly re-exported, the report records why that module stayed whole.
+
+`harn pack --exclude-secrets` refuses to bundle entrypoints and skips imported
+non-Harn assets that match a conservative secret-bearing glob: `.env`,
+`.env.*`, `*.pem`, `*.key`, `credentials*`, and any path under a `secrets/`
+directory. Skipped assets are reported as structured JSON warnings and in
+`manifest.metadata.skipped_assets`. Pass `--include-secrets` to be explicit
+about the default behavior in release pipelines.
+
+### Verifying a `.harnpack`
+
+`harn pack verify <bundle.harnpack>` reads a bundle back, recomputes the
+canonical bundle hash, verifies the embedded Ed25519 signature (if any), and
+cross-checks every source hash. For schema v3 it also checks the linked-artifact
+hash, exact runtime/compiler identity, embedded report, and graph digest rebuilt
+from the verified user sources and the current embedded standard library. For
+schema v2 it checks each recorded `.harnbc` hash. The command exits non-zero on
+any mismatch.
+
+Pass `--strict` to additionally cross-check SBOM package hashes against the
+archive payloads they describe when the bundle format carries a corresponding
+entry. Today that primarily hardens `module:*` SBOM rows and surfaces drift as
+`verify.sbom_mismatch`.
+
+By default, unsigned bundles fail verification. Pass `--allow-unsigned` to
+accept a bundle without an Ed25519 signature (useful in local development).
+
+For compliance gates, pass `--require-trusted-signer` to require that the
+bundle signer resolve from the trusted signer registry. Add
+`--trust-policy policy.json` to layer a JSON allowlist on top:
+
+```json
+{
+  "signer_registry_url": "./signers",
+  "trusted_signers": ["<sha256-fingerprint>"]
+}
+```
+
+When that gate fails, the verifier exits with `verify.untrusted_signer`.
+
+`harn pack verify --json` emits a `JsonEnvelope` with the recomputed
+`bundle_hash`, signature presence/verification flags, signing key fingerprint,
+per-bundle counts, and the schema-v3 `link_report`. The schema is
+`harn --json-schemas --command "pack verify"`.
+
+`harn run <bundle.harnpack>` applies the same verification before replaying into
+the content-addressed pack cache. Schema v3 decodes the linked entry chunk and
+program-scoped module repository directly. Missing, corrupt, incomplete, or
+incompatible artifacts fail closed unless the signed descriptor explicitly
+allows exact-source fallback; the `pack_run` event reports `linked`,
+`legacy_v2`, or `source_fallback`, the fallback reason, and decode time.
+
+Schema v2 keeps one authoritative copy of generated artifacts under
+`bytecode/`; replay projects those bytes beside their matching files under
+`sources/`, where Harn's canonical loaders look. On every run Harn compares all
+replayed files and the cached manifest with the verified archive bytes,
+atomically repairs a partial or locally modified cache slot, and rejects
+symlinked cache parents. A cache mismatch recompiles from bundled source rather
+than weakening validation.
+
+Packs built by current Harn use a root-relative dependency identity for entry
+bytecode, so an unchanged source tree can move from the build checkout into the
+replay cache without a false miss. Older packs remain readable. Their module
+artifacts and entrypoints without user imports can still hit after replay; an
+older imported entrypoint carries its original absolute-path identity and
+therefore recompiles once rather than weakening validation. `harn pack verify`
+is the standalone verification equivalent for CI and supply-chain audits.
+
+Legacy v2 signatures bind payload hashes but not their archive paths. Runtime
+and standalone verification supply that path binding from module manifest
+entries and SBOM asset rows. A signed v2 bundle containing an extension-only
+payload without either identity is refused; rebuild it after adding the file as
+an imported asset. Unsigned local-development packs retain the explicit
+`--allow-unsigned` escape hatch.
+
+## Preview
+
+`harn workflow preview --json` emits the contract Burin GUI/TUI surfaces need
+before committing autonomous resources:
+
+- bundle and workflow identity
+- graph digest
+- validation diagnostics
+- trigger declarations
+- connector requirements
+- environment requirements
+- normalized `graph.nodes` for triggers, actions, agents/subagents, waits,
+  approvals, connector calls, notifications, catchup/DLQ branches, and terminal
+  states
+- normalized `graph.edges` connecting connector bindings, trigger dispatch,
+  workflow control flow, catchup, DLQ, and terminal outcomes
+- node-scoped `graph.diagnostics` so hosts can annotate the exact workflow node
+  instead of showing opaque bundle errors
+- `graph.editable_fields` JSON pointers for trigger config, prompt capsules,
+  model/tool/approval/retry policy, catchup policy, and connector binding
+  surfaces
+- `graph.mermaid` plus the top-level `mermaid` string for a low-cost debug
+  rendering
+
+JSON is the product contract. `--mermaid` prints only the Mermaid view for
+quick debugging and docs snippets; hosts should use `--json` for editing and
+validation.
+
+## Local run receipts
+
+`harn workflow run --bundle <path> --json` materializes a deterministic local
+receipt for the current bundle. The MVP runner walks the reachable graph from
+the entry node, records completed node receipts, attaches trigger/event ids, and
+emits the connector, policy, environment, workflow version, and graph digest
+needed for replay.
+
+The command does not call cloud services or run mutating tools by itself. Hosts
+remain responsible for approval UX, concrete file mutations, and notifications;
+Harn owns the portable contract, graph digest, deterministic receipt shape, and
+replay metadata.
+
+Use `--event-id` and `--trigger-id` to pin a replayed event:
+
+```bash
+harn workflow run \
+  --bundle docs/fixtures/workflow-bundles/github-pr-monitor.bundle.json \
+  --trigger-id github-pr-updated \
+  --event-id github:event:42 \
+  --json
+```
+
+The same bundle and replayed event produce the same receipt bytes, which lets
+Burin compare local executions and later cloud imports against one stable
+artifact.
+
+## Authoring skill pack
+
+The `examples/skill-packs/workflow-authoring/` directory ships a Harn skill
+pack that teaches an agent (including 4–8B local models such as qwen, gemma,
+or llama.cpp) how to author bundles that pass `harn workflow validate`. It
+contains:
+
+- `SKILL.md` — a Claude Code / Agent Skills compatible card the model loads
+  before responding.
+- `prompting.md` — explicit XML output envelope (`<bundle>`, `<rationale>`,
+  `<verify>`), a hard-rule checklist that mirrors the validator, and a
+  validation-and-retry loop.
+- `recipes/{pr-monitor,pr-repair}/bundle.json` — validated golden bundles for
+  the two steel-thread workflows from the parent epic.
+- `cases/*.case.json` — eval cases pinning each prompt to its golden bundle
+  and a list of structural assertions (entry node id, required trigger kinds,
+  required approval nodes, etc.).
+- `eval.harn` — a Harn driver that feeds a case to any provider/model,
+  extracts the `<bundle>` block, runs the validate → preview → run pipeline,
+  and emits a JSON report.
+
+Run the offline eval (no network — replays the golden):
+
+```bash
+harn run examples/skill-packs/workflow-authoring/eval.harn -- \
+  --case examples/skill-packs/workflow-authoring/cases/pr-monitor.case.json
+```
+
+Run a live eval against any provider / model (point `HARN_BIN` at the binary
+under test if it is not on `PATH`):
+
+```bash
+harn run examples/skill-packs/workflow-authoring/eval.harn -- \
+  --case examples/skill-packs/workflow-authoring/cases/pr-monitor.case.json \
+  --provider ollama --model qwen3:4b
+```
+
+`crates/harn-cli/tests/harn_cli_e2e/workflow_authoring_eval.rs` is the CI regression gate.
+It validates every recipe golden and every case's structural assertions, so a
+new case automatically extends the gate.
+
+## Workflow patch proposals
+
+Once a bundle exists, agents can propose **bounded, auditable edits** with a
+workflow patch instead of regenerating the whole bundle. A patch is a flat
+list of operations Harn applies to a copy of the bundle, then re-runs the
+validator and computes a structural diff plus a capability-ceiling delta.
+The patch contract is intentionally small — each op maps directly onto an
+"insert a verifier here" or "narrow this node's tool policy" intent.
+
+| `op` | What it does |
+|---|---|
+| `insert_node` | Inserts a workflow node (`agent`, `action`, `approval`, `notification`, …). |
+| `add_edge` | Adds an edge between two existing nodes. |
+| `upsert_prompt_capsule` | Inserts or replaces a prompt capsule for a node. |
+| `update_node_policy` | Patches `task_label` / `prompt` / `system` / `tools` / `model_policy` / `capability_policy` / `approval_policy` on an existing node. |
+| `update_bundle_policy` | Patches `autonomy_tier` / `tool_policy` / `approval_required` / `retry` / `catchup` at the bundle level. |
+
+```bash
+harn workflow patch validate \
+  --bundle docs/fixtures/workflow-bundles/github-pr-monitor.bundle.json \
+  --patch  docs/fixtures/workflow-bundles/pr-monitor-verifier.patch.json \
+  --parent-ceiling docs/fixtures/workflow-bundles/parent-act-with-approval.policy.json \
+  --json
+
+harn workflow patch apply --bundle ... --patch ... --out ...
+harn workflow patch preview --bundle ... --patch ... --mermaid
+```
+
+Failure modes the validator enforces:
+
+- Empty `operations` list (patches must do something — silent no-ops are
+  rejected).
+- Duplicate `insert_node` ids; unknown endpoints in `add_edge`; duplicate
+  edges; collisions on `upsert_prompt_capsule.node_id`.
+- Any patch that **widens** the parent ceiling along *tools*,
+  *capabilities*, *side-effect level*, *workspace roots*, *connector scopes*,
+  *command gates*, or *autonomy tier*. Each violation lands in the report's
+  `capability_delta.widening` array with a stable `kind` discriminator.
+
+### Safe Harn function tools
+
+`harn workflow function-tools --json` enumerates the allowlisted Harn
+functions an agent may call from inside the patch-authoring loop. Each
+descriptor carries an ACP-aligned `ToolAnnotations` block (kind +
+side-effect level + capability requirements) so a host can wire the tool
+straight into a model surface. The current allowlist is read-only or
+pure-think only:
+
+- `workflow_bundle_validate` / `workflow_bundle_preview` /
+  `workflow_bundle_capability_ceiling` — inspect a bundle on disk.
+- `workflow_patch_validate` — apply + validate a patch in memory and return
+  the report.
+
+Adding a function to the allowlist is a deliberate, reviewed change in
+`crates/harn-vm/src/orchestration/safe_function_tools.rs`. Anything outside
+the list is not exposed to agents.
+
+### Nested invocation ceiling
+
+When a script or host launches another Harn invocation (`harn run`,
+`harn workflow run`, `harn supervisor fire/replay`, a Burin harness),
+Harn projects the target's requested ceiling and rejects launches that
+would widen the parent's. `harn workflow nested-ceiling --bundle <path>
+--parent <policy>` exposes the same scanner so hosts can sanity-check
+before launch:
+
+```bash
+harn workflow nested-ceiling \
+  --bundle docs/fixtures/workflow-bundles/github-pr-monitor.bundle.json \
+  --parent docs/fixtures/workflow-bundles/parent-act-with-approval.policy.json
+```
+
+The scanner also accepts a Harn script source (token-level capability
+projection) and a Burin harness manifest (explicit `capability_ceiling`
+block, falling back to "request everything" if the manifest is silent —
+silence is treated as the most invasive request, so the parent rejects
+rather than rubber-stamps).

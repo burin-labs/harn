@@ -1,0 +1,15 @@
+struct User {
+  name: string
+}
+
+fn build(payload: any) -> User {
+  return User {name: payload.name}
+}
+
+pipeline test(harness: Harness, task) {
+  // A declared struct field is checked where the instance is constructed,
+  // exactly as a declared binding type is checked where it is written. The
+  // payload's `name` is an int; construction must reject it.
+  const bad = build(json_parse("{\"name\": 12345}"))
+  harness.stdio.log(bad.name)
+}

@@ -1,0 +1,557 @@
+// Audit that the generated-artifact registry agrees with its consumers.
+//
+// scripts/generated_artifacts.toml is the single source of truth for every
+// "source of truth -> generated/mirrored file + drift check" pair in the
+// repo. This script (run via `make check-generated-registry`) fails the
+// build when the registry and the things that are supposed to track it have
+// drifted:
+//
+//   - a gen-* / sync-* Makefile target with no registry entry
+//     (someone added a generated artifact but never registered it);
+//   - a check-* Makefile target that is neither registered nor explicitly
+//     exempted (a new drift guard that could silently escape the audit);
+//   - a registry entry naming a Makefile target that does not exist;
+//   - a registry entry flagged ci = true whose check is not reachable from
+//     any .github/workflows/*.yml OR the CI-invoked audit gate runner
+//     scripts/audit_gates.sh through the Make dependency graph (drift would
+//     not fail any PR);
+//   - a registry entry flagged make_all = true whose check is missing from
+//     the all: recipe (so `make all` would not catch it);
+//   - a source-owned declared output file that does not exist on disk;
+//   - a check-* Makefile target missing from the [preflight.dispatch] table,
+//     or a dispatch entry naming a nonexistent target / an invalid tier (so
+//     `make check-drift` / `check-drift-binary`, derived from that table,
+//     cannot silently omit a guard).
+//
+// Most artifacts use the default `lifecycle = "source"`: their generated
+// outputs are tracked and must be present in every checkout. A
+// `lifecycle = "release-package"` payload is deliberately untracked, produced
+// immediately before package/release assembly, and therefore has no checkout
+// presence requirement. Its CI check still must be wired like every other
+// drift guard.
+//
+// Pure validation logic lives in the pub fns; main does the filesystem reads.
+const REGISTRY = "scripts/generated_artifacts.toml"
+
+const MAKEFILE = "Makefile"
+
+const WORKFLOWS_GLOB = ".github/workflows/*.yml"
+
+// The "Harn conformance + audit" CI lane delegates its gate battery to this
+// runner (see ci.yml), so a `make check-*` reference here counts as "runs in
+// CI" for the ci = true invariant just like a direct workflow reference.
+const AUDIT_GATE_RUNNER = "scripts/audit_gates.sh"
+
+/**
+ * True when `c` is a word character ([A-Za-z0-9_]) or a hyphen — the set
+ * a whole-target suffix guard forbids immediately after a target name.
+ */
+fn is_word_or_hyphen(c: string) -> bool {
+  return c == "-" || c == "_"
+    || "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+    .contains(c)
+}
+
+/**
+ * Match `target` as a token not adjacent to another word char or hyphen.
+ * Prevents `all` from matching inside `install` and
+ * `check-provider-catalog` from matching inside
+ * `check-provider-catalog-drift`.
+ */
+pub fn whole_target_search(target: string, text: string) -> bool {
+  if target == "" {
+    return false
+  }
+  let pos = 0
+  const total = text.len()
+  while pos <= total {
+    const rest = text.substring(pos, total)
+    const idx = rest.index_of(target)
+    if idx == -1 {
+      return false
+    }
+    const abs_start = pos + idx
+    const abs_end = abs_start + target.len()
+    const starts_at_boundary = abs_start == 0
+      || !is_word_or_hyphen(text.char_at(abs_start - 1))
+    const ends_at_boundary = abs_end >= total
+      || !is_word_or_hyphen(text.char_at(abs_end))
+    if starts_at_boundary && ends_at_boundary {
+      return true
+    }
+    pos = abs_start + 1
+  }
+  return false
+}
+
+/**
+ * The set of Makefile rule names: lines at column 0 (not tab/space
+ * indented) matching `^([A-Za-z][A-Za-z0-9_-]*):`. Returns a sorted,
+ * deduplicated list.
+ */
+pub fn makefile_targets(text: string) -> list {
+  let targets = []
+  for line in text.lines() {
+    if line.starts_with("\t") || line.starts_with(" ") {
+      continue
+    }
+    const m = regex_captures(r"^([A-Za-z][A-Za-z0-9_-]*):", line)
+    if m.count > 0 {
+      const name = m[0].groups[0]
+      if !targets.contains(name) {
+        targets = targets + [name]
+      }
+    }
+  }
+  return targets.sorted()
+}
+
+fn target_references(targets: list, text: string) -> list {
+  let referenced = []
+  for target in targets {
+    if whole_target_search(target, text) {
+      referenced = referenced + [target]
+    }
+  }
+  return referenced
+}
+
+fn non_comment_lines(text: string) -> string {
+  let lines = []
+  for line in text.lines() {
+    if !line.trim().starts_with("#") {
+      lines = lines + [line]
+    }
+  }
+  return lines.join("\n")
+}
+
+/**
+ * Make targets explicitly passed to `make`/`$(MAKE)` command lines. Continued
+ * commands remain active until the final line. Comments never seed the graph.
+ */
+pub fn make_invocation_targets(targets: list, text: string) -> list {
+  let referenced = []
+  let continued = false
+  for line in text.lines() {
+    const trimmed = line.trim()
+    if trimmed.starts_with("#") {
+      continued = false
+      continue
+    }
+    const starts = whole_target_search("make", trimmed) || trimmed.contains("$(MAKE)")
+    if starts || continued {
+      for target in target_references(targets, trimmed) {
+        if !referenced.contains(target) {
+          referenced = referenced + [target]
+        }
+      }
+      continued = trimmed.ends_with("\\")
+    }
+  }
+  return referenced
+}
+
+/**
+ * Expand explicit Make invocations through rule prerequisites and
+ * recursive-Make recipe lines. The returned text is suitable for
+ * `whole_target_search`: a check counts as wired when CI names it directly or
+ * reaches it through an aggregate target such as `wasm-check` or `all`.
+ *
+ * This intentionally derives coverage from the Make graph instead of forcing
+ * workflows to repeat leaf checks. `seen` also makes cyclic rules terminate.
+ */
+pub fn expand_make_target_references(make_text: string, invocation_text: string) -> string {
+  const targets = makefile_targets(make_text)
+  let prerequisites: dict<string, string> = {}
+  let recipes: dict<string, string> = {}
+  let current = ""
+  for line in make_text.lines() {
+    const rule = regex_captures(r"^([A-Za-z][A-Za-z0-9_-]*):(.*)$", line)
+    if rule.count > 0 {
+      current = rule[0].groups[0]
+      prerequisites[current] = rule[0].groups[1]
+      recipes[current] = ""
+      continue
+    }
+    if current != "" && line.starts_with("\t") {
+      recipes[current] = (recipes[current] ?? "") + "\n" + line
+      continue
+    }
+    if line.trim() != "" {
+      current = ""
+    }
+  }
+  let queue = make_invocation_targets(targets, invocation_text)
+  let seen = []
+  let index = 0
+  while index < queue.count {
+    const target = queue[index]
+    index = index + 1
+    if seen.contains(target) {
+      continue
+    }
+    seen = seen + [target]
+    const dependencies = target_references(targets, prerequisites[target] ?? "")
+      + make_invocation_targets(
+      targets,
+      recipes[target] ?? "",
+    )
+    for dependency in dependencies {
+      if !seen.contains(dependency) && !queue.contains(dependency) {
+        queue = queue + [dependency]
+      }
+    }
+  }
+  return non_comment_lines(invocation_text) + "\n" + seen.join("\n")
+}
+
+/**
+ * Return the recipe body of the `all:` target (its tab-indented lines),
+ * joined by newlines.
+ */
+pub fn make_all_recipe(text: string) -> string {
+  let body = []
+  let in_all = false
+  for line in text.lines() {
+    if !in_all {
+      if line.starts_with("all:") {
+        in_all = true
+      }
+      continue
+    }
+    if line.starts_with("\t") {
+      body = body + [line]
+    } else if line.trim() == "" {
+      continue
+    } else {
+      break
+    }
+  }
+  return body.join("\n")
+}
+
+/**
+ * Per-artifact errors that depend only on the artifact itself plus the
+ * scanned Makefile/workflow facts (ci / make_all flags + declared outputs).
+ * Split out of `validate` to keep each function's branching local.
+ */
+pub fn artifact_flag_errors(
+  art,
+  check: string,
+  all_recipe: string,
+  workflow_text: string,
+  missing_outputs: list,
+) -> list {
+  const aid = art?.id ?? "<missing id>"
+  let errors = []
+  // ci flag follows registry truthiness: nil or false both skip.
+  if art?.ci && check != "" && !whole_target_search(check, workflow_text) {
+    errors = errors
+      + [
+      "[${aid}] ci = true but `${check}` is not reachable from any .github/workflows/*.yml through the Make dependency graph — drift here would not fail a PR. Add it to a CI-invoked Make target or set ci = false (with a note).",
+    ]
+  }
+  // Defensive: only an explicit false, not a missing key, means "should not be
+  // in CI".
+  if art?.ci != nil && !art?.ci && check != "" && whole_target_search(check, workflow_text) {
+    errors = errors
+      + [
+      "[${aid}] ci = false but `${check}` IS referenced in a workflow. Flip ci = true in the registry to reflect reality.",
+    ]
+  }
+  // make_all flag must be honoured by the all: recipe.
+  if art?.make_all && check != "" && !whole_target_search(check, all_recipe) {
+    errors = errors
+      + [
+      "[${aid}] make_all = true but `${check}` is missing from the `all:` recipe in the Makefile.",
+    ]
+  }
+  // Source-owned outputs must exist in the checkout. Release/package payloads
+  // are intentionally absent until their serial producer runs.
+  if (art?.lifecycle ?? "source") != "release-package" {
+    for out in art?.outputs ?? [] {
+      if missing_outputs.contains(out) {
+        errors = errors + ["[${aid}] declared output does not exist: ${out}"]
+      }
+    }
+  }
+  return errors
+}
+
+/**
+ * Validate the closed artifact lifecycle vocabulary. Keeping this contract in
+ * the Harn registry checker prevents a misspelled lifecycle from silently
+ * weakening checkout-presence validation.
+ */
+pub fn artifact_lifecycle_errors(art) -> list {
+  const aid = art?.id ?? "<missing id>"
+  const lifecycle = art?.lifecycle ?? "source"
+  if lifecycle == "source" {
+    return []
+  }
+  if lifecycle == "release-package" {
+    let errors = []
+    if art?.ci != true {
+      errors = errors
+        + [
+        "[${aid}] release-package artifacts must set ci = true for their serialized producer/check.",
+      ]
+    }
+    if art?.make_all != false {
+      errors = errors
+        + [
+        "[${aid}] release-package artifacts must set make_all = false; a source checkout has no payload to check.",
+      ]
+    }
+    return errors
+  }
+  return ["[${aid}] unsupported lifecycle `${lifecycle}`; expected `source` or `release-package`."]
+}
+
+pub type GeneratedRegistryCompletenessRequest = {
+  targets: list,
+  registered_gens: list,
+  registered_checks: list,
+  exempt: list,
+}
+
+/**
+ * Completeness: no gen-/sync- or check- Makefile target may escape the
+ * registry. `targets` must already be sorted for deterministic diagnostics.
+ */
+pub fn completeness_errors(request: GeneratedRegistryCompletenessRequest) -> list {
+  const targets = request.targets
+  const registered_gens = request.registered_gens
+  const registered_checks = request.registered_checks
+  const exempt = request.exempt
+  let errors = []
+  for target in targets {
+    if target.starts_with("gen-") || target.starts_with("sync-") {
+      if !registered_gens.contains(target) {
+        errors = errors
+          + [
+          "Makefile target `${target}` generates an artifact but is not registered in scripts/generated_artifacts.toml (add an [[artifact]] block with gen = \"${target}\").",
+        ]
+      }
+    } else if target.starts_with("check-") && !registered_checks.contains(target)
+      && !exempt.contains(target) {
+      errors = errors
+        + [
+        "Makefile target `${target}` is a check but is neither registered as an [[artifact]].check nor listed in [meta].exempt_checks in scripts/generated_artifacts.toml.",
+      ]
+    }
+  }
+  return errors
+}
+
+/**
+ * Exempt-list hygiene: don't exempt a check that is also a registered
+ * artifact check. Report overlap in sorted order.
+ */
+pub fn exempt_hygiene_errors(exempt: list, registered_checks: list) -> list {
+  let both = []
+  for ex in exempt.sorted() {
+    if registered_checks.contains(ex) && !both.contains(ex) {
+      both = both + [ex]
+    }
+  }
+  let errors = []
+  for ex in both {
+    errors = errors
+      + [
+      "`${ex}` is both registered as an artifact check and listed in [meta].exempt_checks — remove it from exempt_checks.",
+    ]
+  }
+  return errors
+}
+
+/**
+ * Preflight-dispatch completeness + hygiene. Every `^check-*:` Makefile target
+ * (except the umbrella `check`, which has no hyphen) must be classified in the
+ * `[preflight.dispatch]` table, and every classified name must be a real
+ * Makefile target with a known tier. This keeps `make check-drift` /
+ * `check-drift-binary` — whose member lists are DERIVED from the table — from
+ * silently omitting a guard or naming a dead target. `dispatch` maps a target
+ * name to its tier string ("source" | "binary" | "excluded").
+ */
+pub fn preflight_dispatch_errors(targets: list, dispatch: dict) -> list {
+  const valid_tiers = ["source", "binary", "excluded"]
+  const classified = dispatch.keys()
+  let errors = []
+  // Completeness: every check-* target must be classified.
+  for target in targets {
+    if target.starts_with("check-") && !classified.contains(target) {
+      errors = errors
+        + [
+        "Makefile target `${target}` is not classified in [preflight.dispatch] in scripts/generated_artifacts.toml (add it with tier source|binary|excluded).",
+      ]
+    }
+  }
+  // Hygiene: every classified name must be a real target with a valid tier.
+  for name in classified.sorted() {
+    if !targets.contains(name) {
+      errors = errors
+        + [
+        "[preflight.dispatch] classifies `${name}` but no such Makefile target exists — remove it or fix the name.",
+      ]
+    }
+    if !valid_tiers.contains(dispatch[name]) {
+      errors = errors
+        + [
+        "[preflight.dispatch] `${name}` has invalid tier `${dispatch[name]}` (expected source|binary|excluded).",
+      ]
+    }
+  }
+  return errors
+}
+
+pub type GeneratedRegistryValidationRequest = {
+  artifacts: list,
+  exempt: list,
+  targets: list,
+  all_recipe: string,
+  workflow_text: string,
+  missing_outputs: list,
+}
+
+/**
+ * Pure validation. Given the parsed registry pieces and the scanned
+ * Makefile / workflow facts, return the ordered list of error strings
+ * (empty = OK). `missing_outputs` is the subset of declared output paths
+ * that do not exist on disk (computed by main, so this stays filesystem
+ * free and testable).
+ */
+pub fn validate(request: GeneratedRegistryValidationRequest) -> list {
+  const artifacts = request.artifacts
+  const exempt = request.exempt
+  const targets = request.targets
+  const all_recipe = request.all_recipe
+  const workflow_text = request.workflow_text
+  const missing_outputs = request.missing_outputs
+  let errors = []
+  let seen_ids = []
+  let registered_checks = []
+  let registered_gens = []
+  for art in artifacts {
+    const aid = art?.id ?? "<missing id>"
+    if seen_ids.contains(aid) {
+      errors = errors + ["duplicate artifact id: ${aid}"]
+    }
+    if !seen_ids.contains(aid) {
+      seen_ids = seen_ids + [aid]
+    }
+    errors = errors + artifact_lifecycle_errors(art)
+    const check = art?.check ?? ""
+    const gen = art?.gen ?? ""
+    if check == "" {
+      errors = errors + ["[${aid}] missing required `check` target"]
+    } else {
+      if !registered_checks.contains(check) {
+        registered_checks = registered_checks + [check]
+      }
+      if !targets.contains(check) {
+        errors = errors + ["[${aid}] check target `${check}` is not defined in the Makefile"]
+      }
+    }
+    if gen != "" {
+      if !registered_gens.contains(gen) {
+        registered_gens = registered_gens + [gen]
+      }
+      if !targets.contains(gen) {
+        errors = errors + ["[${aid}] gen target `${gen}` is not defined in the Makefile"]
+      }
+    }
+    errors = errors + artifact_flag_errors(art, check, all_recipe, workflow_text, missing_outputs)
+  }
+  errors = errors
+    + completeness_errors(
+    {
+      targets: targets,
+      registered_gens: registered_gens,
+      registered_checks: registered_checks,
+      exempt: exempt,
+    },
+  )
+  errors = errors + exempt_hygiene_errors(exempt, registered_checks)
+  return errors
+}
+
+/**
+ * Concatenate the workflow file contents in sorted repo-relative order
+ * (each followed by a newline).
+ */
+fn read_workflows(fs: HarnessFs) -> string {
+  const globbed = fs.glob(WORKFLOWS_GLOB)
+  let rels = []
+  for g in globbed {
+    const idx = g.index_of("/./")
+    const rel = if idx == -1 {
+      g
+    } else {
+      g.substring(idx + 3, g.len())
+    }
+    rels = rels + [rel]
+  }
+  let text = ""
+  for rel in rels.sorted() {
+    text = text + fs.read_text(rel) + "\n"
+  }
+  // The audit CI lane runs its gate battery through this script, so a check
+  // named there is just as CI-enforced as one named directly in a workflow.
+  if fs.exists(AUDIT_GATE_RUNNER) {
+    text = text + fs.read_text(AUDIT_GATE_RUNNER) + "\n"
+  }
+  return text
+}
+
+pipeline main(harness: Harness, task) {
+  const registry = try {
+    toml_parse(harness.fs.read_text(REGISTRY))
+  } catch (err) {
+    harness.stdio.eprintln("error: failed to parse ${REGISTRY}: ${err}")
+    return 1
+  }
+  const artifacts = registry?.artifact ?? []
+  const exempt = registry?.meta?.exempt_checks ?? []
+  const dispatch = registry?.preflight?.dispatch ?? {}
+  const make_text = harness.fs.read_text(MAKEFILE)
+  const targets = makefile_targets(make_text)
+  const all_recipe = expand_make_target_references(make_text, make_all_recipe(make_text))
+  const workflow_text = expand_make_target_references(make_text, read_workflows(harness.fs))
+  // Precompute which declared outputs are missing on disk so validate stays
+  // filesystem free (preserving exact per-artifact error ordering).
+  let missing_outputs = []
+  for art in artifacts {
+    for out in art?.outputs ?? [] {
+      if !harness.fs.exists(out) && !missing_outputs.contains(out) {
+        missing_outputs = missing_outputs + [out]
+      }
+    }
+  }
+  const errors = validate(
+    {
+      artifacts: artifacts,
+      exempt: exempt,
+      targets: targets,
+      all_recipe: all_recipe,
+      workflow_text: workflow_text,
+      missing_outputs: missing_outputs,
+    },
+  )
+    + preflight_dispatch_errors(targets, dispatch)
+  if errors.count > 0 {
+    harness.stdio.eprintln("error: generated-artifact registry is out of sync:\n")
+    for e in errors {
+      harness.stdio.eprintln("  - ${e}")
+    }
+    harness.stdio.eprintln(
+      "\nhint: edit scripts/generated_artifacts.toml (and the Makefile / workflows it points at) until they agree. See the header of that file for the add-a-new-artifact checklist.",
+    )
+    return 1
+  }
+  harness.stdio.println(
+    "    Generated-artifact registry OK (${artifacts.count} artifacts, ${exempt.count} exempt checks, ${dispatch.keys().count} preflight-classified targets).",
+  )
+  return 0
+}

@@ -1,0 +1,205 @@
+use crate::value::VmValue;
+
+mod api;
+mod canonicalize;
+mod jsonschema_validate;
+mod limits;
+mod result;
+mod transform;
+mod type_check;
+mod validate;
+
+pub(crate) use api::{
+    canonical_param_schema, schema_assert_canonical_param, schema_assert_param,
+    schema_expect_value, schema_extend_value, schema_from_json_schema_value,
+    schema_from_openapi_schema_value, schema_is_value, schema_omit_value, schema_partial_value,
+    schema_pick_value, schema_report_value, schema_result_value, schema_to_json_schema_value,
+    schema_to_openapi_schema_value, CanonicalParamSchema,
+};
+pub use canonicalize::json_to_vm_value;
+
+/// Rewrite Harn type vocabulary inside a JSON-Schema-shaped value without
+/// canonicalizing or dropping any other keyword.
+pub(crate) fn normalize_json_schema_type_names(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Object(object) => {
+            if let Some(serde_json::Value::String(kind)) = object.get_mut("type") {
+                if let Some(normalized) = json_schema_type_name(kind) {
+                    *kind = normalized.to_string();
+                }
+            }
+            if let Some(serde_json::Value::Array(kinds)) = object.get_mut("type") {
+                for kind in kinds {
+                    if let serde_json::Value::String(kind) = kind {
+                        if let Some(normalized) = json_schema_type_name(kind) {
+                            *kind = normalized.to_string();
+                        }
+                    }
+                }
+            }
+            for child in object.values_mut() {
+                normalize_json_schema_type_names(child);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                normalize_json_schema_type_names(item);
+            }
+        }
+        _ => {}
+    }
+}
+
+pub(crate) fn json_schema_type_name(harn_type: &str) -> Option<&'static str> {
+    match harn_type {
+        "str" | "string" => Some("string"),
+        "int" | "integer" => Some("integer"),
+        "long" | "float" | "double" | "number" => Some("number"),
+        "bool" | "boolean" => Some("boolean"),
+        "nil" | "null" | "none" => Some("null"),
+        "list" | "array" | "unknown[]" => Some("array"),
+        "dict" | "map" | "object" => Some("object"),
+        _ => None,
+    }
+}
+
+/// Canonicalize a JSON-Schema-shaped value for use as an MCP elicitation
+/// `requestedSchema`. Reuses the same canonicalizer the rest of the
+/// language uses for `schema_from_json_schema(...)` so behavior is
+/// identical between user-facing schema builtins and elicitation.
+pub fn elicitation_validate_schema(schema: &VmValue) -> Result<VmValue, crate::value::VmError> {
+    schema_from_json_schema_value(schema)
+}
+
+/// Validate `data` against a canonicalized schema. Mirrors the
+/// `schema_expect` semantics — returns the (possibly defaulted) value
+/// on success and a thrown error string on failure.
+pub fn elicitation_validate(
+    data: &VmValue,
+    schema: &VmValue,
+) -> Result<VmValue, crate::value::VmError> {
+    schema_expect_value(data, schema, false)
+}
+
+/// Canonicalize a JSON-Schema-shaped value for repeated validation.
+///
+/// This is the Rust-side sibling of `schema_from_json_schema(...)` in the
+/// Harn stdlib. Embedders use it when a stable boundary schema should be
+/// compiled once and applied to many VM values.
+pub fn canonicalize_json_schema(schema: &VmValue) -> Result<VmValue, String> {
+    canonicalize::canonicalize_schema_value(schema)
+}
+
+/// Validate `data` against a canonical Harn schema or JSON Schema value.
+///
+/// When `apply_defaults` is true, returned values include defaults declared by
+/// the schema. The error string is the same human-readable issue list surfaced
+/// by `schema_expect`, which keeps Rust boundary validators aligned with Harn
+/// script behavior.
+pub fn validate_value_against_schema(
+    data: &VmValue,
+    schema: &VmValue,
+    apply_defaults: bool,
+) -> Result<VmValue, String> {
+    let normalized = canonicalize_json_schema(schema)?;
+    validate_value_against_canonical_schema(data, &normalized, apply_defaults)
+}
+
+/// Validate `data` against a schema that was already canonicalized with
+/// [`canonicalize_json_schema`].
+pub fn validate_value_against_canonical_schema(
+    data: &VmValue,
+    schema: &VmValue,
+    apply_defaults: bool,
+) -> Result<VmValue, String> {
+    let result = validate::validate_schema_value(
+        data,
+        schema,
+        validate::ValidationOptions { apply_defaults },
+    );
+    if result.errors.is_empty() {
+        Ok(result.value)
+    } else {
+        Err(result::issue_messages(&result.errors).join("; "))
+    }
+}
+
+pub(crate) const BYTES_B64_TAG: &str = "$bytes_b64";
+
+pub(crate) fn tagged_bytes_json(bytes: &[u8]) -> serde_json::Value {
+    use base64::Engine;
+
+    serde_json::json!({
+        BYTES_B64_TAG: base64::engine::general_purpose::STANDARD.encode(bytes),
+    })
+}
+
+pub(super) fn vm_value_to_serde_json(value: &VmValue) -> serde_json::Value {
+    match value {
+        VmValue::Nil => serde_json::Value::Null,
+        VmValue::Bool(value) => serde_json::Value::Bool(*value),
+        VmValue::Int(value) => serde_json::json!(value),
+        VmValue::Float(value) => serde_json::json!(value),
+        VmValue::String(value) => serde_json::Value::String(value.to_string()),
+        VmValue::Bytes(bytes) => tagged_bytes_json(bytes),
+        VmValue::List(items) => {
+            serde_json::Value::Array(items.iter().map(vm_value_to_serde_json).collect())
+        }
+        VmValue::Set(set) => {
+            serde_json::Value::Array(set.iter().map(vm_value_to_serde_json).collect())
+        }
+        VmValue::Dict(items) => serde_json::Value::Object(
+            items
+                .iter()
+                .map(|(key, value)| (key.to_string(), vm_value_to_serde_json(value)))
+                .collect(),
+        ),
+        VmValue::StructInstance(_) => serde_json::Value::Object(
+            value
+                .struct_fields_map()
+                .unwrap_or_default()
+                .iter()
+                .map(|(key, value)| (key.to_string(), vm_value_to_serde_json(value)))
+                .collect(),
+        ),
+        _ => serde_json::Value::String(value.display()),
+    }
+}
+
+fn schema_bool(schema: &crate::value::DictMap, key: &str) -> bool {
+    matches!(schema.get(key), Some(VmValue::Bool(true)))
+}
+
+fn schema_i64(schema: &crate::value::DictMap, key: &str) -> Option<i64> {
+    match schema.get(key) {
+        Some(VmValue::Int(value)) => Some(*value),
+        _ => None,
+    }
+}
+
+fn schema_number(schema: &crate::value::DictMap, key: &str) -> Option<f64> {
+    match schema.get(key) {
+        Some(VmValue::Int(value)) => Some(*value as f64),
+        Some(VmValue::Float(value)) => Some(*value),
+        _ => None,
+    }
+}
+
+fn child_path(path: &str, key: &str) -> String {
+    if path.is_empty() {
+        key.to_string()
+    } else {
+        format!("{path}.{key}")
+    }
+}
+
+fn index_path(path: &str, index: usize) -> String {
+    if path.is_empty() {
+        format!("[{index}]")
+    } else {
+        format!("{path}[{index}]")
+    }
+}
+
+#[cfg(test)]
+mod tests;

@@ -1,0 +1,35 @@
+{
+  "schema_version": "harn.orchestration.replay_trace.v1",
+  "name": "meaningful_dispatch_drift_mutation",
+  "description": "Mutation fixture used to prove the oracle fails loudly when canonical replay output drifts.",
+  "expect": "match",
+  "allowlist": [
+    {"path": "/run_id", "reason": "run ids are allocated per execution"},
+    {"path": "/event_log_entries/*/event_id", "reason": "EventLog offsets are backend-local"},
+    {"path": "/event_log_entries/*/occurred_at_ms", "reason": "append timestamps are wall-clock observations"}
+  ],
+  "first_run": {
+    "run_id": "run_live_mutation",
+    "event_log_entries": [
+      {
+        "event_id": 201,
+        "topic": "trigger.outbox",
+        "kind": "dispatch_succeeded",
+        "occurred_at_ms": 1770000001200,
+        "payload": {"binding_id": "mutation", "result": {"status": "dispatched"}}
+      }
+    ]
+  },
+  "second_run": {
+    "run_id": "run_replay_mutation",
+    "event_log_entries": [
+      {
+        "event_id": 301,
+        "topic": "trigger.outbox",
+        "kind": "dispatch_succeeded",
+        "occurred_at_ms": 1770001001200,
+        "payload": {"binding_id": "mutation", "result": {"status": "dlq"}}
+      }
+    ]
+  }
+}

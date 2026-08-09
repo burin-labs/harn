@@ -1,0 +1,19 @@
+[package]
+name = "harn-ir"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "CFG and invariant analysis for the Harn programming language"
+
+[dependencies]
+harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.65" }
+harn-builtin-registry = { path = "../harn-builtin-registry", version = "=0.10.65" }
+harn-glob = { path = "../harn-glob", version = "=0.10.65", default-features = false }
+harn-lexer = { path = "../harn-lexer", version = "=0.10.65" }
+harn-parser = { path = "../harn-parser", version = "=0.10.65" }
+
+[lints]
+workspace = true

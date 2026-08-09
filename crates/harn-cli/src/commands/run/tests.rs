@@ -1,0 +1,1460 @@
+use super::harnpack::HarnpackRunOptions;
+use super::{
+    build_denied_builtins, default_run_capability_policy, default_run_workspace_root,
+    eval_source_for_code, execute_explain_cost, execute_run,
+    execute_run_with_harnpack_and_sandbox_options, install_cli_llm_mock_mode,
+    persist_cli_llm_mock_recording, run_sandbox_attestation, split_eval_header, CliLlmMockMode,
+    RunProfileOptions, RunSandboxOptions, StdoutPassthroughGuard,
+};
+// Both users are `#[cfg(unix)]` tests (they assert on subprocess env handed to
+// a forked child), so an unconditional import is dead on Windows and trips
+// `-D warnings`. Mirrors the local `use super::EnvironmentPolicyArg;` already
+// inside one of those tests.
+#[cfg(unix)]
+use super::EnvironmentPolicyConfig;
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
+
+mod network;
+
+fn write_manifest_trigger_project(root: &Path, main_source: &str) -> PathBuf {
+    std::fs::write(
+        root.join("harn.toml"),
+        r#"
+[package]
+name = "manifest-trigger-policy-fixture"
+
+[exports]
+trigger_handlers = "trigger_handlers.harn"
+hook_handlers = "hook_handlers.harn"
+
+[[triggers]]
+id = "cron-handler"
+kind = "cron"
+provider = "cron"
+schedule = "* * * * *"
+match = { events = ["cron.tick"] }
+handler = "trigger_handlers::on_tick"
+
+[[hooks]]
+event = "PostTurn"
+handler = "hook_handlers::after_turn"
+"#,
+    )
+    .expect("write manifest");
+    std::fs::write(
+        root.join("trigger_handlers.harn"),
+        r#"
+let trigger_initializer = hex_decode("00")
+let eager_validation_failure = 1 / 0
+
+pub fn on_tick(_event) -> nil {
+  return nil
+}
+"#,
+    )
+    .expect("write trigger handler");
+    std::fs::write(
+        root.join("hook_handlers.harn"),
+        r#"
+let hook_initializer = hex_decode("00")
+
+pub fn after_turn(_event) -> nil {
+  return nil
+}
+"#,
+    )
+    .expect("write hook handler");
+    let script = root.join("main.harn");
+    std::fs::write(&script, main_source).expect("write main script");
+    script
+}
+
+#[test]
+fn split_eval_header_no_imports_returns_full_body() {
+    let (header, body) = split_eval_header("log(1 + 2)");
+    assert_eq!(header, "");
+    assert_eq!(body, "log(1 + 2)");
+}
+
+#[test]
+fn split_eval_header_lifts_leading_imports() {
+    let code = "import \"./lib\"\nimport { x } from \"std/math\"\nlog(x)";
+    let (header, body) = split_eval_header(code);
+    assert_eq!(header, "import \"./lib\"\nimport { x } from \"std/math\"");
+    assert_eq!(body, "log(x)");
+}
+
+#[test]
+fn split_eval_header_keeps_pub_import_and_comments_in_header() {
+    let code = "// header comment\npub import { y } from \"./lib\"\n\nfoo()";
+    let (header, body) = split_eval_header(code);
+    assert_eq!(
+        header,
+        "// header comment\npub import { y } from \"./lib\"\n"
+    );
+    assert_eq!(body, "foo()");
+}
+
+#[test]
+fn split_eval_header_does_not_lift_imports_after_other_statements() {
+    let code = "const a = 1\nimport \"./lib\"";
+    let (header, body) = split_eval_header(code);
+    assert_eq!(header, "");
+    assert_eq!(body, "const a = 1\nimport \"./lib\"");
+}
+
+#[test]
+fn eval_source_wraps_pipeline_body_snippets() {
+    assert_eq!(
+        eval_source_for_code("let x = 1\n__io_println(x)"),
+        "pipeline main(harness: Harness, task) {\nlet x = 1\n__io_println(x)\n}"
+    );
+}
+
+#[test]
+fn eval_source_keeps_full_harn_programs_unnested() {
+    let code = "pipeline default(harness: Harness) {\n  harness.stdio.println(\"ok\")\n}\n";
+    assert_eq!(eval_source_for_code(code), code);
+}
+
+#[test]
+fn eval_source_keeps_imported_full_harn_programs_unnested() {
+    let code =
+        "import { x } from \"./lib\"\n\npipeline default(harness: Harness) {\n  harness.stdio.println(x)\n}\n";
+    assert_eq!(eval_source_for_code(code), code);
+}
+
+#[test]
+fn cli_llm_mock_roundtrips_logprobs() {
+    let mock = harn_vm::llm::parse_llm_mock_value(&serde_json::json!({
+        "text": "visible",
+        "logprobs": [{"token": "visible", "logprob": 0.0}]
+    }))
+    .expect("parse mock");
+    assert_eq!(mock.logprobs.len(), 1);
+
+    let line = harn_vm::llm::serialize_llm_mock(mock).expect("serialize mock");
+    let value: serde_json::Value = serde_json::from_str(&line).expect("json line");
+    assert_eq!(value["logprobs"][0]["token"].as_str(), Some("visible"));
+
+    let reparsed = harn_vm::llm::parse_llm_mock_value(&value).expect("reparse mock");
+    assert_eq!(reparsed.logprobs.len(), 1);
+    assert_eq!(reparsed.logprobs[0]["logprob"].as_f64(), Some(0.0));
+}
+
+#[test]
+fn cli_llm_mock_recording_writes_a_parseable_v1_document_atomically() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let path = temp.path().join("recorded.jsonl");
+    let mode = CliLlmMockMode::Record {
+        fixture_path: path.clone(),
+    };
+
+    install_cli_llm_mock_mode(&mode).expect("enable recording");
+    persist_cli_llm_mock_recording(&mode).expect("persist recording");
+
+    let body = std::fs::read_to_string(&path).expect("recorded fixture");
+    let fixture = harn_vm::llm::parse_llm_mocks_jsonl(&body).expect("parse recorded fixture");
+    assert_eq!(fixture.schema_version, 1);
+    assert!(!fixture.strict_scopes);
+    assert!(fixture.mocks.is_empty());
+}
+
+#[test]
+fn stdout_passthrough_guard_restores_previous_state() {
+    let original = harn_vm::set_stdout_passthrough(false);
+    {
+        let _guard = StdoutPassthroughGuard::enable();
+        assert!(harn_vm::set_stdout_passthrough(true));
+    }
+    assert!(!harn_vm::set_stdout_passthrough(original));
+}
+
+#[test]
+fn execute_explain_cost_does_not_execute_script() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let script = temp.path().join("main.harn");
+    std::fs::write(
+        &script,
+        r#"
+pipeline main(harness: Harness) {
+  harness.fs.write_text("executed.txt", "bad")
+  harness.llm.call("hello", nil, {provider: "mock", model: "mock"})
+}
+"#,
+    )
+    .expect("write script");
+
+    let outcome = execute_explain_cost(&script.to_string_lossy());
+
+    assert_eq!(outcome.exit_code, 0, "stderr:\n{}", outcome.stderr);
+    assert!(outcome.stdout.contains("LLM cost estimate"));
+    assert!(
+        !temp.path().join("executed.txt").exists(),
+        "--explain-cost must not execute pipeline side effects"
+    );
+}
+
+#[test]
+fn execute_explain_cost_reports_parse_errors() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let script = temp.path().join("invalid.harn");
+    std::fs::write(&script, "pipeline main( {").expect("write script");
+
+    let outcome = execute_explain_cost(&script.to_string_lossy());
+
+    assert_eq!(outcome.exit_code, 1);
+    assert!(outcome.stderr.contains("HARN-PAR-"), "{}", outcome.stderr);
+}
+
+#[test]
+fn default_run_workspace_root_prefers_manifest_root_then_cwd() {
+    let _cwd_guard = crate::tests::common::cwd_lock::lock_cwd();
+    let project = tempfile::TempDir::new().expect("project");
+    let source_parent = project.path().join("scripts");
+    let cwd = std::env::current_dir().expect("cwd");
+
+    assert_eq!(
+        default_run_workspace_root(Some(project.path()), &source_parent),
+        project.path()
+    );
+    assert_eq!(default_run_workspace_root(None, Path::new("scripts")), cwd);
+}
+
+#[test]
+fn default_run_policy_only_raises_the_requested_side_effect_ceiling() {
+    let workspace = Path::new("/tmp/workspace");
+    let default = default_run_capability_policy(workspace, &[], &[], &[], &[], false);
+    let network = default_run_capability_policy(workspace, &[], &[], &[], &[], true);
+
+    assert_eq!(default.side_effect_level.as_deref(), Some("process_exec"));
+    assert_eq!(network.side_effect_level.as_deref(), Some("network"));
+    assert_eq!(network.workspace_roots, default.workspace_roots);
+    assert_eq!(network.read_only_roots, default.read_only_roots);
+    assert_eq!(network.capabilities, default.capabilities);
+    assert_eq!(network.sandbox_profile, default.sandbox_profile);
+    assert_eq!(network.process_sandbox, default.process_sandbox);
+}
+
+#[test]
+fn run_sandbox_attestation_reports_effective_policy() {
+    harn_vm::reset_thread_local_state();
+    // Real dirs so the attestation's canonicalization is deterministic across
+    // platforms (a symlinked `/tmp` on macOS vs a plain `/tmp` on Linux would
+    // make a hardcoded literal non-portable).
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let workspace = temp.path().join("workspace");
+    let shared = temp.path().join("shared");
+    std::fs::create_dir(&workspace).expect("workspace");
+    std::fs::create_dir(&shared).expect("shared");
+    let policy = harn_vm::orchestration::CapabilityPolicy {
+        workspace_roots: vec![workspace.display().to_string()],
+        read_only_roots: vec![shared.display().to_string()],
+        sandbox_profile: harn_vm::orchestration::SandboxProfile::OsHardened,
+        ..harn_vm::orchestration::CapabilityPolicy::default()
+    };
+    harn_vm::orchestration::push_execution_policy(policy);
+
+    let metadata = run_sandbox_attestation(&RunSandboxOptions::disabled());
+
+    assert_eq!(metadata["run_default_enabled"], false);
+    assert_eq!(metadata["active"], true);
+    // The attestation reports the enforced jail path (canonicalized through the
+    // runtime's single normalization owner), matching the disclosure surface.
+    assert_eq!(
+        metadata["workspace_roots"][0],
+        harn_vm::process_sandbox::render_policy_root(&workspace.display().to_string())
+            .display()
+            .to_string()
+    );
+    assert_eq!(metadata["write_roots"].as_array().unwrap().len(), 0);
+    assert_eq!(
+        metadata["read_only_roots"][0],
+        harn_vm::process_sandbox::render_policy_root(&shared.display().to_string())
+            .display()
+            .to_string()
+    );
+    assert_eq!(metadata["profile"], "os_hardened");
+    assert_eq!(metadata["process_network_requested"], false);
+    assert_eq!(metadata["process_network_enabled"], true);
+    assert_eq!(metadata["side_effect_level"], "desktop_control");
+    assert_eq!(metadata["egress"], "host_policy");
+    harn_vm::reset_thread_local_state();
+}
+
+#[tokio::test]
+async fn execute_run_exit_flushes_stdio_and_bypasses_catch() {
+    harn_vm::reset_thread_local_state();
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let script = temp.path().join("main.harn");
+    std::fs::write(
+        &script,
+        r#"
+fn main(harness: Harness) -> int {
+  harness.stdio.print("before ")
+  harness.stdio.println("exit")
+  try {
+    harness.runtime.exit(2)
+  } catch (error) {
+    harness.stdio.eprintln("caught")
+  }
+  harness.stdio.eprintln("after")
+  return 0
+}
+"#,
+    )
+    .expect("write script");
+
+    let outcome = execute_run(
+        &script.to_string_lossy(),
+        false,
+        HashSet::new(),
+        Vec::new(),
+        Vec::new(),
+        CliLlmMockMode::Off,
+        None,
+        RunProfileOptions::default(),
+    )
+    .await;
+
+    assert_eq!(outcome.exit_code, 2, "stderr:\n{}", outcome.stderr);
+    assert_eq!(outcome.stdout, "before exit\n");
+    harn_vm::reset_thread_local_state();
+}
+
+#[tokio::test]
+async fn execute_run_allows_read_from_explicit_read_only_root_but_denies_write() {
+    harn_vm::reset_thread_local_state();
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let project = temp.path().join("project");
+    let read_only_root = temp.path().join("shared");
+    std::fs::create_dir(&project).expect("create project");
+    std::fs::create_dir(&read_only_root).expect("create read-only root");
+    std::fs::write(project.join("harn.toml"), "").expect("write manifest");
+    let secret = read_only_root.join("payload.txt");
+    let protected = read_only_root.join("prohibited.txt");
+    std::fs::write(&secret, "payload").expect("write payload");
+
+    let script = project.join("main.harn");
+    let secret_literal = secret.to_string_lossy().replace('\\', "\\\\");
+    let prohibited_literal = protected.to_string_lossy().replace('\\', "\\\\");
+    std::fs::write(
+        &script,
+        format!(
+            r#"
+pipeline main(harness: Harness) {{
+  harness.stdio.println(harness.fs.read_text("{secret_literal}"))
+}}
+"#,
+        ),
+    )
+    .expect("write read script");
+
+    let sandbox_options =
+        || RunSandboxOptions::default().with_read_only_roots(vec![read_only_root.clone()]);
+    let read_outcome = execute_run_with_harnpack_and_sandbox_options(
+        &script.to_string_lossy(),
+        false,
+        HashSet::new(),
+        Vec::new(),
+        Vec::new(),
+        CliLlmMockMode::Off,
+        None,
+        RunProfileOptions::default(),
+        sandbox_options(),
+        HarnpackRunOptions::default(),
+    )
+    .await;
+
+    assert_eq!(
+        read_outcome.exit_code, 0,
+        "stderr:\n{}",
+        read_outcome.stderr
+    );
+    assert_eq!(read_outcome.stdout.trim(), "payload");
+
+    std::fs::write(
+        &script,
+        format!(
+            r#"
+pipeline main(harness: Harness) {{
+  harness.fs.write_text("{prohibited_literal}", "should be denied")
+}}
+"#,
+        ),
+    )
+    .expect("write denial script");
+
+    let outcome = execute_run_with_harnpack_and_sandbox_options(
+        &script.to_string_lossy(),
+        false,
+        HashSet::new(),
+        Vec::new(),
+        Vec::new(),
+        CliLlmMockMode::Off,
+        None,
+        RunProfileOptions::default(),
+        sandbox_options(),
+        HarnpackRunOptions::default(),
+    )
+    .await;
+
+    assert_eq!(outcome.exit_code, 1, "stderr:\n{}", outcome.stderr);
+    assert!(
+        outcome.stderr.contains("under a read-only workspace root"),
+        "stderr:\n{}",
+        outcome.stderr
+    );
+    assert!(
+        !protected.exists(),
+        "write under read-only root must be denied"
+    );
+    harn_vm::reset_thread_local_state();
+}
+
+#[tokio::test]
+async fn execute_run_allows_write_to_explicit_write_root() {
+    harn_vm::reset_thread_local_state();
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let project = temp.path().join("project");
+    let write_root = temp.path().join("external-receipts");
+    std::fs::create_dir(&project).expect("create project");
+    std::fs::create_dir(&write_root).expect("create write root");
+    std::fs::write(project.join("harn.toml"), "").expect("write manifest");
+
+    let target = write_root.join("2026-07-06 Example 5.00.pdf");
+    let target_literal = target.to_string_lossy().replace('\\', "\\\\");
+    let script = project.join("main.harn");
+    std::fs::write(
+        &script,
+        format!(
+            r#"
+pipeline main(harness: Harness) {{
+  harness.fs.write_text("{target_literal}", "%PDF-1.4\n")
+  harness.stdio.println(harness.fs.read_text("{target_literal}"))
+}}
+"#,
+        ),
+    )
+    .expect("write script");
+
+    let outcome = execute_run_with_harnpack_and_sandbox_options(
+        &script.to_string_lossy(),
+        false,
+        HashSet::new(),
+        Vec::new(),
+        Vec::new(),
+        CliLlmMockMode::Off,
+        None,
+        RunProfileOptions::default(),
+        RunSandboxOptions::default().with_write_roots(vec![write_root.clone()]),
+        HarnpackRunOptions::default(),
+    )
+    .await;
+
+    assert_eq!(outcome.exit_code, 0, "stderr:\n{}", outcome.stderr);
+    assert_eq!(outcome.stdout.trim(), "%PDF-1.4");
+    assert_eq!(
+        std::fs::read_to_string(&target).expect("read generated target"),
+        "%PDF-1.4\n"
+    );
+    // The grant discloses exactly the delta on one line, and the blanket
+    // `--no-sandbox` warning stays suppressed for a scoped, still-sandboxed run.
+    // The disclosure names the enforced jail path (the temp dir canonicalizes
+    // through the runtime's normalization owner), not the raw grant string.
+    let jailed_write_root = write_root.canonicalize().expect("canonical write root");
+    assert!(
+        outcome.stderr.contains(&format!(
+            "sandbox active; extra write root: {}",
+            jailed_write_root.display()
+        )),
+        "granted run should disclose the canonicalized extra write root: {}",
+        outcome.stderr
+    );
+    assert!(
+        !outcome.stderr.contains("--no-sandbox disables"),
+        "a scoped grant must not print the blanket no-sandbox warning: {}",
+        outcome.stderr
+    );
+    harn_vm::reset_thread_local_state();
+}
+
+#[test]
+fn write_grant_keeps_process_and_egress_defaults_armed() {
+    // A write grant widens the write jail only. It must not raise the
+    // side-effect ceiling (so subprocess network stays denied) and must not
+    // relax the egress posture: the run still requires an explicit egress
+    // policy. This is the policy-level proof that `--write-root` composes with
+    // the defaults instead of loosening them like `--no-sandbox` would.
+    harn_vm::reset_thread_local_state();
+    let workspace = Path::new("/tmp/workspace");
+    let grant = PathBuf::from("/tmp/out/coordination");
+    let policy = default_run_capability_policy(
+        workspace,
+        std::slice::from_ref(&grant),
+        &[],
+        &[],
+        &[],
+        false,
+    );
+
+    assert_eq!(policy.side_effect_level.as_deref(), Some("process_exec"));
+    assert_eq!(
+        policy.sandbox_profile,
+        harn_vm::orchestration::SandboxProfile::Worktree
+    );
+    // On Unix the grant is already absolute, so the write jail lists it
+    // verbatim. On Windows a POSIX-style `/tmp/...` grant is not absolute and
+    // is anchored to the current drive, so the stored root differs by design;
+    // the enforced/rendered form is asserted portably through the attestation
+    // below.
+    #[cfg(unix)]
+    assert!(
+        policy
+            .workspace_roots
+            .iter()
+            .any(|root| root == &grant.display().to_string()),
+        "the write grant should join the workspace write jail: {:?}",
+        policy.workspace_roots
+    );
+    // Portable invariant: the grant widens the jail with exactly one extra root
+    // beyond the base workspace root, on every platform.
+    assert_eq!(
+        policy.workspace_roots.len(),
+        2,
+        "the write grant should add exactly one workspace root: {:?}",
+        policy.workspace_roots
+    );
+
+    harn_vm::orchestration::push_execution_policy(policy);
+    let metadata = run_sandbox_attestation(
+        &RunSandboxOptions::default().with_write_roots(vec![grant.clone()]),
+    );
+    assert_eq!(metadata["run_default_enabled"], true);
+    assert_eq!(metadata["egress"], "explicit_policy_required");
+    assert_eq!(metadata["process_network_requested"], false);
+    // The receipt reports the enforced jail path, not the raw grant string.
+    assert_eq!(
+        metadata["write_roots"][0],
+        harn_vm::process_sandbox::render_policy_root(&grant.display().to_string())
+            .display()
+            .to_string()
+    );
+    harn_vm::reset_thread_local_state();
+}
+
+#[cfg(all(feature = "hostlib", unix))]
+#[tokio::test]
+async fn execute_run_allows_command_run_read_from_process_only_root() {
+    harn_vm::reset_thread_local_state();
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let project = temp.path().join("project");
+    let read_only_root = temp.path().join("shared");
+    std::fs::create_dir(&project).expect("create project");
+    std::fs::create_dir(&read_only_root).expect("create read-only root");
+    std::fs::write(project.join("harn.toml"), "").expect("write manifest");
+    let secret = read_only_root.join("payload.txt");
+    std::fs::write(&secret, "payload").expect("write payload");
+
+    let script = project.join("main.harn");
+    let secret_literal = secret.to_string_lossy().replace('\\', "\\\\");
+    std::fs::write(
+        &script,
+        format!(
+            r#"
+import {{ command_run }} from "std/command"
+
+pipeline main(harness: Harness) {{
+  const result = command_run(
+    harness.tools,
+    {{argv: ["cat", "{secret_literal}"]}},
+    {{capture: {{max_inline_bytes: 8}}, timeout_ms: 5000}},
+  )
+  if !result.success {{
+    throw "command_run failed: exit_code=${{result.exit_code}} stderr=${{result.stderr}}"
+  }}
+  harness.stdio.println(result.stdout)
+}}
+"#
+        ),
+    )
+    .expect("write script");
+
+    let outcome = execute_run_with_harnpack_and_sandbox_options(
+        &script.to_string_lossy(),
+        false,
+        HashSet::new(),
+        Vec::new(),
+        Vec::new(),
+        CliLlmMockMode::Off,
+        None,
+        RunProfileOptions::default(),
+        RunSandboxOptions::default().with_process_read_roots(vec![read_only_root.clone()]),
+        HarnpackRunOptions::default(),
+    )
+    .await;
+
+    assert_eq!(outcome.exit_code, 0, "stderr:\n{}", outcome.stderr);
+    assert_eq!(outcome.stdout.trim(), "payload");
+    assert!(
+        outcome
+            .stderr
+            .contains("sandbox active; extra subprocess read root:"),
+        "process-only grant should be disclosed: {}",
+        outcome.stderr
+    );
+    harn_vm::reset_thread_local_state();
+}
+
+/// The runtime's implicit file-scoped process grant must survive an
+/// intermediate wrapper. This is the canonical shape used by performance
+/// checks (`sh` -> `/usr/bin/time` -> `harn`) and is materially different from
+/// naming Harn as the immediate `process.run` program.
+#[cfg(unix)]
+#[tokio::test]
+async fn execute_run_allows_transitive_runtime_reexecution() {
+    harn_vm::reset_thread_local_state();
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let project = temp.path().join("project");
+    std::fs::create_dir(&project).expect("create project");
+    std::fs::write(project.join("harn.toml"), "").expect("write manifest");
+
+    // During this integration test the current executable is the harn-cli
+    // test binary. It lives outside `project`, so the wrapper can execute it
+    // only if default_run_capability_policy supplied the exact implicit root.
+    let runtime = std::env::current_exe()
+        .expect("current executable")
+        .to_string_lossy()
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"");
+    let script = project.join("main.harn");
+    std::fs::write(
+        &script,
+        format!(
+            r#"
+pipeline main(harness: Harness) {{
+  const result = harness.process.run({{
+    program: "sh",
+    args: ["-c", "\"$1\" --help >/dev/null", "_", "{runtime}"],
+  }})
+  if !result.success {{
+    throw "transitive runtime execution failed: exit=${{result.exit_code}} stderr=${{result.stderr}}"
+  }}
+}}
+"#
+        ),
+    )
+    .expect("write script");
+
+    let outcome = execute_run_with_harnpack_and_sandbox_options(
+        &script.to_string_lossy(),
+        false,
+        HashSet::new(),
+        Vec::new(),
+        Vec::new(),
+        CliLlmMockMode::Off,
+        None,
+        RunProfileOptions::default(),
+        RunSandboxOptions::default(),
+        HarnpackRunOptions::default(),
+    )
+    .await;
+
+    assert_eq!(outcome.exit_code, 0, "stderr:\n{}", outcome.stderr);
+    harn_vm::reset_thread_local_state();
+}
+
+/// A `--grant NAME=env:SRC,expose=CHILD,for=sh` granted policy must inject the
+/// snapshotted value into a matching subprocess only — the least-privilege
+/// surface that lets a headless lane open its PR (`GH_TOKEN` for `gh`) without
+/// ambient exposure to every `process.exec`. The parent process holds `SRC`
+/// but not `CHILD`, so the child seeing `CHILD` proves the grant injected it
+/// rather than ambient inheritance.
+#[cfg(unix)]
+#[tokio::test]
+async fn execute_run_granted_policy_injects_into_subprocess_env() {
+    harn_vm::reset_thread_local_state();
+    let src = "HARN_TEST_LANE_GRANT_SRC";
+    // SAFETY: this test process mutates its own env; the vars are unique to it
+    // and removed before returning.
+    std::env::set_var(src, "granted-secret-value");
+    std::env::remove_var("HARN_TEST_CHILD_VAR");
+
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let project = temp.path().join("project");
+    std::fs::create_dir(&project).expect("create project");
+    std::fs::write(project.join("harn.toml"), "").expect("write manifest");
+    let script = project.join("main.harn");
+    std::fs::write(
+        &script,
+        r#"
+import { command_run } from "std/command"
+
+pipeline main(harness: Harness) {
+  const result = command_run(
+    harness.tools,
+    {argv: ["sh", "-c", "printf %s \"$HARN_TEST_CHILD_VAR\""]},
+    {capture: {max_inline_bytes: 64}, timeout_ms: 5000},
+  )
+  if !result.success {
+    throw "command_run failed: exit_code=${result.exit_code} stderr=${result.stderr}"
+  }
+  harness.stdio.println(result.stdout)
+}
+"#,
+    )
+    .expect("write script");
+
+    let config = EnvironmentPolicyConfig::from_flags(
+        None,
+        &[format!(
+            "grant_source=env:{src},expose=HARN_TEST_CHILD_VAR,for=sh"
+        )],
+    )
+    .expect("valid grant");
+
+    let outcome = execute_run_with_harnpack_and_sandbox_options(
+        &script.to_string_lossy(),
+        false,
+        HashSet::new(),
+        Vec::new(),
+        Vec::new(),
+        CliLlmMockMode::Off,
+        None,
+        RunProfileOptions::default(),
+        RunSandboxOptions::default().with_environment_policy(config),
+        HarnpackRunOptions::default(),
+    )
+    .await;
+
+    std::env::remove_var(src);
+
+    assert_eq!(outcome.exit_code, 0, "stderr:\n{}", outcome.stderr);
+    assert_eq!(outcome.stdout.trim(), "granted-secret-value");
+    assert!(
+        outcome.stderr.contains("environment policy: granted"),
+        "the grant must be disclosed; stderr:\n{}",
+        outcome.stderr
+    );
+    harn_vm::reset_thread_local_state();
+}
+
+/// A command-bound grant must not reach a spawn whose basename does not match.
+#[cfg(unix)]
+#[tokio::test]
+async fn execute_run_command_bound_grant_skips_non_matching_exec() {
+    harn_vm::reset_thread_local_state();
+    let src = "HARN_TEST_LANE_GRANT_SRC_MISMATCH";
+    std::env::set_var(src, "granted-secret-value");
+    std::env::remove_var("HARN_TEST_CHILD_VAR");
+
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let project = temp.path().join("project");
+    std::fs::create_dir(&project).expect("create project");
+    std::fs::write(project.join("harn.toml"), "").expect("write manifest");
+    let script = project.join("main.harn");
+    std::fs::write(
+        &script,
+        r#"
+import { command_run } from "std/command"
+
+pipeline main(harness: Harness) {
+  const result = command_run(
+    harness.tools,
+    {argv: ["env"]},
+    {capture: {max_inline_bytes: 65536}, timeout_ms: 5000},
+  )
+  if !result.success {
+    throw "command_run failed: exit_code=${result.exit_code} stderr=${result.stderr}"
+  }
+  harness.stdio.println(result.stdout.contains("HARN_TEST_CHILD_VAR=") ? "leaked" : "absent")
+}
+"#,
+    )
+    .expect("write script");
+
+    let config = EnvironmentPolicyConfig::from_flags(
+        None,
+        &[format!(
+            "grant_source=env:{src},expose=HARN_TEST_CHILD_VAR,for=gh"
+        )],
+    )
+    .expect("valid grant");
+
+    let outcome = execute_run_with_harnpack_and_sandbox_options(
+        &script.to_string_lossy(),
+        false,
+        HashSet::new(),
+        Vec::new(),
+        Vec::new(),
+        CliLlmMockMode::Off,
+        None,
+        RunProfileOptions::default(),
+        RunSandboxOptions::default().with_environment_policy(config),
+        HarnpackRunOptions::default(),
+    )
+    .await;
+
+    std::env::remove_var(src);
+
+    assert_eq!(outcome.exit_code, 0, "stderr:\n{}", outcome.stderr);
+    assert_eq!(outcome.stdout.trim(), "absent");
+    harn_vm::reset_thread_local_state();
+}
+
+/// The counterpart to the injection test: an isolated policy closes the child
+/// environment, so a secret-shaped variable set in the launcher must NOT reach
+/// a subprocess. Proves `--environment-policy isolated` is the strict-empty
+/// posture, not just a label.
+#[cfg(unix)]
+#[tokio::test]
+async fn execute_run_isolated_policy_closes_subprocess_env() {
+    use super::EnvironmentPolicyArg;
+    harn_vm::reset_thread_local_state();
+    let secret = "HARN_TEST_ISOLATED_SECRET";
+    // SAFETY: unique to this test; removed before returning.
+    std::env::set_var(secret, "must-not-cross");
+
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let project = temp.path().join("project");
+    std::fs::create_dir(&project).expect("create project");
+    std::fs::write(project.join("harn.toml"), "").expect("write manifest");
+    let script = project.join("main.harn");
+    std::fs::write(
+        &script,
+        r#"
+import { command_run } from "std/command"
+
+pipeline main(harness: Harness) {
+  const result = command_run(
+    harness.tools,
+    {argv: ["sh", "-c", "printf %s \"$HARN_TEST_ISOLATED_SECRET\""]},
+    {capture: {max_inline_bytes: 64}, timeout_ms: 5000},
+  )
+  harness.stdio.println(result.stdout == "" ? "CLOSED" : "LEAKED")
+}
+"#,
+    )
+    .expect("write script");
+
+    let config = EnvironmentPolicyConfig::from_flags(Some(EnvironmentPolicyArg::Isolated), &[])
+        .expect("valid posture");
+
+    let outcome = execute_run_with_harnpack_and_sandbox_options(
+        &script.to_string_lossy(),
+        false,
+        HashSet::new(),
+        Vec::new(),
+        Vec::new(),
+        CliLlmMockMode::Off,
+        None,
+        RunProfileOptions::default(),
+        RunSandboxOptions::default().with_environment_policy(config),
+        HarnpackRunOptions::default(),
+    )
+    .await;
+
+    std::env::remove_var(secret);
+
+    assert_eq!(outcome.exit_code, 0, "stderr:\n{}", outcome.stderr);
+    assert_eq!(outcome.stdout.trim(), "CLOSED");
+    assert!(
+        outcome.stderr.contains("environment policy: isolated"),
+        "the isolated policy must be disclosed; stderr:\n{}",
+        outcome.stderr
+    );
+    harn_vm::reset_thread_local_state();
+}
+
+#[tokio::test]
+async fn execute_run_default_sandbox_reports_worktree_profile() {
+    harn_vm::reset_thread_local_state();
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let script = temp.path().join("main.harn");
+    std::fs::write(
+        &script,
+        r"
+pipeline main(harness: Harness) {
+  harness.stdio.println(harness.system.sandbox_active_profile())
+}
+",
+    )
+    .expect("write script");
+
+    let outcome = execute_run(
+        &script.to_string_lossy(),
+        false,
+        HashSet::new(),
+        Vec::new(),
+        Vec::new(),
+        CliLlmMockMode::Off,
+        None,
+        RunProfileOptions::default(),
+    )
+    .await;
+
+    assert_eq!(outcome.exit_code, 0, "stderr:\n{}", outcome.stderr);
+    assert_eq!(outcome.stdout.trim(), "worktree");
+    harn_vm::reset_thread_local_state();
+}
+
+#[tokio::test]
+async fn execute_run_default_sandbox_blocks_outside_workspace_read() {
+    harn_vm::reset_thread_local_state();
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let project = temp.path().join("project");
+    let outside = temp.path().join("outside.txt");
+    std::fs::create_dir(&project).expect("create project");
+    std::fs::write(project.join("harn.toml"), "").expect("write manifest");
+    std::fs::write(&outside, "secret").expect("write outside");
+    let script = project.join("main.harn");
+    let outside_literal = outside.to_string_lossy().replace('\\', "\\\\");
+    std::fs::write(
+        &script,
+        format!(
+            r#"
+pipeline main(harness: Harness) {{
+  harness.stdio.println(harness.system.sandbox_active_profile())
+  const _ = harness.fs.read_text("{outside_literal}")
+}}
+"#
+        ),
+    )
+    .expect("write script");
+
+    let outcome = execute_run(
+        &script.to_string_lossy(),
+        false,
+        HashSet::new(),
+        Vec::new(),
+        Vec::new(),
+        CliLlmMockMode::Off,
+        None,
+        RunProfileOptions::default(),
+    )
+    .await;
+
+    assert_eq!(outcome.exit_code, 1, "stdout:\n{}", outcome.stdout);
+    assert!(
+        outcome.stderr.contains("sandbox violation"),
+        "stderr:\n{}",
+        outcome.stderr
+    );
+    harn_vm::reset_thread_local_state();
+}
+
+#[tokio::test]
+async fn execute_run_no_sandbox_allows_outside_workspace_read() {
+    harn_vm::reset_thread_local_state();
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let project = temp.path().join("project");
+    let outside = temp.path().join("outside.txt");
+    std::fs::create_dir(&project).expect("create project");
+    std::fs::write(&outside, "secret").expect("write outside");
+    let script = project.join("main.harn");
+    let outside_literal = outside.to_string_lossy().replace('\\', "\\\\");
+    std::fs::write(
+        &script,
+        format!(
+            r#"
+pipeline main(harness: Harness) {{
+  harness.stdio.println(harness.system.sandbox_active_profile())
+  harness.stdio.println(harness.fs.read_text("{outside_literal}"))
+}}
+"#
+        ),
+    )
+    .expect("write script");
+
+    let outcome = execute_run_with_harnpack_and_sandbox_options(
+        &script.to_string_lossy(),
+        false,
+        HashSet::new(),
+        Vec::new(),
+        Vec::new(),
+        CliLlmMockMode::Off,
+        None,
+        RunProfileOptions::default(),
+        RunSandboxOptions::disabled(),
+        HarnpackRunOptions::default(),
+    )
+    .await;
+
+    assert_eq!(outcome.exit_code, 0, "stderr:\n{}", outcome.stderr);
+    assert_eq!(outcome.stdout.trim(), "unrestricted\nsecret");
+    assert!(outcome.stderr.contains("--no-sandbox"));
+    harn_vm::reset_thread_local_state();
+}
+
+#[tokio::test]
+async fn execute_run_builtin_policy_defers_unrelated_manifest_handler_initialization() {
+    harn_vm::reset_thread_local_state();
+    let project = tempfile::tempdir().expect("temp project");
+    let script = write_manifest_trigger_project(
+        project.path(),
+        r#"
+fn main(harness: Harness) {
+  harness.stdio.print("target-ran")
+}
+"#,
+    );
+
+    let outcome = execute_run(
+        &script.to_string_lossy(),
+        false,
+        build_denied_builtins(None, Some("command_run")),
+        Vec::new(),
+        Vec::new(),
+        CliLlmMockMode::Off,
+        None,
+        RunProfileOptions::default(),
+    )
+    .await;
+
+    assert_eq!(outcome.exit_code, 0, "stderr:\n{}", outcome.stderr);
+    assert_eq!(outcome.stdout.trim(), "target-ran");
+    harn_vm::reset_thread_local_state();
+}
+
+#[tokio::test]
+async fn execute_run_without_builtin_policy_eagerly_validates_manifest_handlers() {
+    harn_vm::reset_thread_local_state();
+    let project = tempfile::tempdir().expect("temp project");
+    let script = write_manifest_trigger_project(
+        project.path(),
+        r#"
+pipeline main(harness: Harness) {
+  harness.stdio.println("target-ran")
+}
+"#,
+    );
+
+    let outcome = execute_run(
+        &script.to_string_lossy(),
+        false,
+        HashSet::new(),
+        Vec::new(),
+        Vec::new(),
+        CliLlmMockMode::Off,
+        None,
+        RunProfileOptions::default(),
+    )
+    .await;
+
+    assert_eq!(outcome.exit_code, 1, "stdout:\n{}", outcome.stdout);
+    assert!(
+        outcome
+            .stderr
+            .contains("failed to install manifest triggers"),
+        "stderr:\n{}",
+        outcome.stderr
+    );
+    harn_vm::reset_thread_local_state();
+}
+
+#[tokio::test]
+async fn execute_run_denies_network_by_default() {
+    harn_vm::reset_thread_local_state();
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let script = temp.path().join("main.harn");
+    std::fs::write(
+        &script,
+        r#"
+pipeline main(harness: Harness) {
+  const _ = harness.net.get("https://example.com/")
+}
+"#,
+    )
+    .expect("write script");
+
+    let outcome = execute_run(
+        &script.to_string_lossy(),
+        false,
+        HashSet::new(),
+        Vec::new(),
+        Vec::new(),
+        CliLlmMockMode::Off,
+        None,
+        RunProfileOptions::default(),
+    )
+    .await;
+
+    assert_eq!(outcome.exit_code, 1, "stdout:\n{}", outcome.stdout);
+    assert!(
+        outcome
+            .stderr
+            .contains("exceeds the active effect ceiling: net:read"),
+        "stderr:\n{}",
+        outcome.stderr
+    );
+    harn_vm::reset_thread_local_state();
+}
+
+#[cfg(feature = "hostlib")]
+#[tokio::test]
+async fn execute_run_installs_root_harness() {
+    let temp = tempfile::NamedTempFile::new().expect("temp file");
+    std::fs::write(
+        temp.path(),
+        r#"
+pipeline main(harness: Harness) {
+  harness.stdio.println("enabled")
+}
+"#,
+    )
+    .expect("write script");
+
+    let outcome = execute_run(
+        &temp.path().to_string_lossy(),
+        false,
+        HashSet::new(),
+        Vec::new(),
+        Vec::new(),
+        CliLlmMockMode::Off,
+        None,
+        RunProfileOptions::default(),
+    )
+    .await;
+
+    assert_eq!(outcome.exit_code, 0, "stderr:\n{}", outcome.stderr);
+    assert_eq!(outcome.stdout.trim(), "enabled");
+}
+
+#[cfg(all(feature = "hostlib", unix))]
+#[tokio::test]
+async fn execute_run_can_read_hostlib_command_artifacts() {
+    let temp = tempfile::NamedTempFile::new().expect("temp file");
+    std::fs::write(
+        temp.path(),
+        r#"
+pipeline main(harness: Harness) {
+  const result = harness.tools.run_command({
+argv: ["sh", "-c", "i=0; while [ $i -lt 2000 ]; do printf x; i=$((i+1)); done"],
+capture: {max_inline_bytes: 8},
+timeout_ms: 5000,
+  })
+  harness.stdio.println(starts_with(result.command_id, "cmd_"))
+  harness.stdio.println(len(result.stdout))
+  harness.stdio.println(result.byte_count)
+  const window = harness.tools.read_command_output({
+command_id: result.command_id,
+offset: 1990,
+length: 20,
+  })
+  harness.stdio.println(len(window.content))
+  harness.stdio.println(window.eof)
+}
+"#,
+    )
+    .expect("write script");
+
+    let outcome = execute_run_with_harnpack_and_sandbox_options(
+        &temp.path().to_string_lossy(),
+        false,
+        HashSet::new(),
+        Vec::new(),
+        Vec::new(),
+        CliLlmMockMode::Off,
+        None,
+        RunProfileOptions::default(),
+        RunSandboxOptions::disabled(),
+        HarnpackRunOptions::default(),
+    )
+    .await;
+
+    assert_eq!(outcome.exit_code, 0, "stderr:\n{}", outcome.stderr);
+    assert_eq!(outcome.stdout.trim(), "true\n8\n2000\n10\ntrue");
+}
+
+fn install_dependency_connector_fixture(
+    project: &Path,
+    root_manifest: &str,
+    dependency_alias: &str,
+    provider_id: &str,
+    connector_module: &str,
+) {
+    let dependency = project.join("vendor").join(dependency_alias);
+    std::fs::create_dir_all(dependency.join("src")).expect("dependency src dir");
+    std::fs::write(
+        dependency.join("harn.toml"),
+        format!(
+            "[package]\nname = {dependency_alias:?}\nversion = \"0.1.0\"\n\n\
+             [[providers]]\nid = {provider_id:?}\n\
+             connector = {{ harn = \"src/lib.harn\" }}\n"
+        ),
+    )
+    .expect("write dependency manifest");
+    std::fs::write(dependency.join("src").join("lib.harn"), connector_module)
+        .expect("write dependency connector module");
+
+    let installed = crate::package::test_support::create_test_package_generation(project)
+        .join(dependency_alias);
+    std::fs::create_dir_all(installed.join("src")).expect("installed dependency src dir");
+    std::fs::copy(dependency.join("harn.toml"), installed.join("harn.toml"))
+        .expect("install dependency manifest");
+    std::fs::copy(
+        dependency.join("src").join("lib.harn"),
+        installed.join("src").join("lib.harn"),
+    )
+    .expect("install dependency connector module");
+
+    let dependency_path = dependency
+        .canonicalize()
+        .expect("canonical dependency path");
+    let dependency_literal =
+        crate::format::toml_basic_string_literal(&dependency_path.to_string_lossy());
+    std::fs::write(
+        project.join("harn.toml"),
+        format!(
+            "{root_manifest}\n[dependencies]\n\
+             {dependency_alias} = {{ path = {dependency_literal} }}\n"
+        ),
+    )
+    .expect("write project manifest");
+
+    let source = crate::package::path_source_uri(&dependency_path).expect("dependency source URI");
+    let lock = format!(
+        "version = 5\ngenerator_version = \"test\"\n\
+         protocol_artifact_version = \"test\"\n\n\
+         [[package]]\nname = {dependency_alias:?}\nsource = {}\n",
+        crate::format::toml_basic_string_literal(&source)
+    );
+    std::fs::write(project.join("harn.lock"), &lock).expect("write lockfile");
+    crate::package::test_support::write_test_generation_lock(project, &lock);
+}
+
+/// End-to-end regression for the dependency-package source-dir leak.
+///
+/// A project whose entry pipeline renders a top-level `@alias/...` asset, WITH
+/// a materialized path-dependency provider connector in the current package
+/// generation, is run the way a user runs it: `cd project && harn
+/// run main.harn` (a bare filename, so the entry path has an empty parent).
+///
+/// `harn run` startup loads the dependency's provider-connector contract to
+/// build the manifest provider catalog. That load used to leak its own source
+/// dir into the caller's resting thread-local, so the entry pipeline's first
+/// `render("@promptdir/...")` resolved against the dependency's `harn.toml`
+/// (which lacks the alias) and threw `asset alias 'promptdir' is not defined in
+/// [asset_roots] of the dependency generation's `dep-connector/harn.toml`.
+///
+/// Red before the fix (exit 1 + asset-alias error), green after (exit 0): the
+/// entry asset resolves against the PROJECT root even though a `[dependencies]`
+/// provider connector is present.
+#[tokio::test]
+async fn execute_run_entry_asset_alias_resolves_against_project_not_dependency() {
+    let _cwd_guard = crate::tests::common::cwd_lock::lock_cwd_async().await;
+    // Loading the dependency's package contributes its provider to the
+    // process-global catalog, which outlives this test.
+    let _state_guard = crate::tests::common::harn_state_lock::lock_harn_state_async().await;
+    harn_vm::reset_thread_local_state();
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let project = temp.path();
+
+    install_dependency_connector_fixture(
+        project,
+        "[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n\
+         [asset_roots]\npromptdir = \"prompts\"\n",
+        "dep_connector",
+        "depassetwebhook",
+        "pub fn provider_id() { return \"depassetwebhook\" }\n\
+         pub fn kinds() { return [\"webhook\"] }\n\
+         pub fn payload_schema() { return \"GenericWebhookPayload\" }\n",
+    );
+
+    // The asset the entry pipeline renders.
+    std::fs::create_dir_all(project.join("prompts")).expect("prompts dir");
+    std::fs::write(
+        project.join("prompts").join("greeting.harn.prompt"),
+        "hello from the project prompt\n",
+    )
+    .expect("write prompt");
+
+    // Entry pipeline at the PROJECT ROOT, rendering a top-level `@alias`.
+    std::fs::write(
+        project.join("main.harn"),
+        "pipeline main(harness: Harness) {\n  let _ = harness.fs.render_prompt(\"@promptdir/greeting.harn.prompt\", {})\n}\n",
+    )
+    .expect("write entry");
+
+    let extensions =
+        crate::package::try_load_runtime_extensions(project.join("main.harn").as_path())
+            .expect("dependency package must resolve before source-dir regression");
+    assert_eq!(
+        extensions
+            .provider_connectors
+            .iter()
+            .map(|connector| connector.id.as_str())
+            .collect::<Vec<_>>(),
+        ["depassetwebhook"]
+    );
+
+    // Run it exactly like `cd project && harn run main.harn`: a bare filename
+    // whose parent is empty is what left the resting source dir unestablished.
+    let original_cwd = std::env::current_dir().expect("cwd");
+    std::env::set_current_dir(project).expect("chdir into project");
+    let outcome = execute_run_with_harnpack_and_sandbox_options(
+        "main.harn",
+        false,
+        HashSet::new(),
+        Vec::new(),
+        Vec::new(),
+        CliLlmMockMode::Off,
+        None,
+        RunProfileOptions::default(),
+        RunSandboxOptions::disabled(),
+        HarnpackRunOptions::default(),
+    )
+    .await;
+    std::env::set_current_dir(&original_cwd).expect("restore cwd");
+    harn_vm::reset_thread_local_state();
+
+    assert!(
+        !outcome.stderr.contains("is not defined in [asset_roots]"),
+        "entry `@promptdir` render leaked onto the dependency's harn.toml; stderr:\n{}",
+        outcome.stderr
+    );
+    assert_eq!(
+        outcome.exit_code, 0,
+        "entry `@alias` render must resolve against the project root even with a \
+         dependency provider connector present; stderr:\n{}",
+        outcome.stderr
+    );
+}
+
+/// `harn run` must expose installed package connectors to the script's
+/// `harness.net.connector_call` boundary, not only load their metadata.
+#[tokio::test]
+async fn execute_run_installs_dependency_package_connector_client() {
+    let _cwd_guard = crate::tests::common::cwd_lock::lock_cwd_async().await;
+    // Same as the sibling above: the provider this loads is process-global.
+    let _state_guard = crate::tests::common::harn_state_lock::lock_harn_state_async().await;
+    harn_vm::reset_thread_local_state();
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let project = temp.path();
+
+    install_dependency_connector_fixture(
+        project,
+        "[package]\nname = \"connector-consumer\"\nversion = \"0.1.0\"\n",
+        "dep_connector",
+        "depcallwebhook",
+        r#"
+pub fn provider_id() { return "depcallwebhook" }
+pub fn kinds() { return ["webhook"] }
+pub fn payload_schema() { return "DependencyEventPayload" }
+pub fn call(_harness: Harness, method, args) {
+  return {method: method, value: args.value}
+}
+"#,
+    );
+    std::fs::write(
+        project.join("main.harn"),
+        r#"
+pipeline main(harness: Harness) {
+  const response = harness.net.connector_call("depcallwebhook", "ping", {value: "active"})
+  harness.stdio.log(response.method + ":" + response.value)
+}
+"#,
+    )
+    .expect("write entry");
+
+    let extensions =
+        crate::package::try_load_runtime_extensions(project.join("main.harn").as_path())
+            .expect("dependency package must resolve before runtime activation");
+    assert_eq!(
+        extensions
+            .provider_connectors
+            .iter()
+            .map(|connector| connector.id.as_str())
+            .collect::<Vec<_>>(),
+        ["depcallwebhook"]
+    );
+
+    let original_cwd = std::env::current_dir().expect("cwd");
+    std::env::set_current_dir(project).expect("chdir into project");
+    let outcome = execute_run_with_harnpack_and_sandbox_options(
+        "main.harn",
+        false,
+        HashSet::new(),
+        Vec::new(),
+        Vec::new(),
+        CliLlmMockMode::Off,
+        None,
+        RunProfileOptions::default(),
+        RunSandboxOptions::disabled(),
+        HarnpackRunOptions::default(),
+    )
+    .await;
+    std::env::set_current_dir(&original_cwd).expect("restore cwd");
+    harn_vm::reset_thread_local_state();
+
+    assert_eq!(
+        outcome.exit_code, 0,
+        "dependency package connector must be active during plain `harn run`; stderr:\n{}",
+        outcome.stderr
+    );
+    assert_eq!(outcome.stdout.trim(), "[harn] ping:active");
+}
+
+/// Write a project whose trigger handler module carries a `host_call`, with
+/// `[check].trusted_host_dispatch` set to `declared`.
+///
+/// The call sits in a function nothing invokes: the refusal under test is a
+/// compile-time one raised while the manifest installs its triggers, which
+/// happens before any script body runs.
+fn write_host_dispatch_trigger_project(root: &Path, declared: bool) -> PathBuf {
+    // The `host_call` lives one import away from the handler, matching a real
+    // host-adapter layout. Trigger installation compiles the handler's whole
+    // import closure, so this is where the refusal actually lands.
+    std::fs::write(
+        root.join("host_adapter.harn"),
+        r#"
+pub fn unreachable_host_read() -> any {
+  return host_call("runtime.pipeline_input", {})
+}
+"#,
+    )
+    .expect("write host adapter");
+    crate::tests::common::host_dispatch_project::write_host_dispatch_trigger_project(
+        root,
+        declared,
+        r#"
+import { unreachable_host_read } from "./host_adapter"
+
+pub fn on_tick(_event) -> nil {
+  const _ = unreachable_host_read
+  return nil
+}
+"#,
+    )
+}
+
+async fn run_host_dispatch_fixture(declared: bool) -> crate::commands::run::RunOutcome {
+    harn_vm::reset_thread_local_state();
+    let project = tempfile::tempdir().expect("temp project");
+    let script = write_host_dispatch_trigger_project(project.path(), declared);
+    let outcome = execute_run(
+        &script.to_string_lossy(),
+        false,
+        HashSet::new(),
+        Vec::new(),
+        Vec::new(),
+        CliLlmMockMode::Off,
+        None,
+        RunProfileOptions::default(),
+    )
+    .await;
+    harn_vm::reset_thread_local_state();
+    outcome
+}
+
+#[tokio::test]
+async fn execute_run_honors_manifest_trusted_host_dispatch() {
+    let outcome = run_host_dispatch_fixture(true).await;
+    assert_eq!(
+        outcome.exit_code, 0,
+        "stderr:\n{}\nstdout:\n{}",
+        outcome.stderr, outcome.stdout
+    );
+    assert_eq!(outcome.stdout.trim(), "target-ran");
+}

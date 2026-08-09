@@ -1,0 +1,1 @@
+{"action":"create","type":"CustomerRequest","organizationId":"org_123","webhookTimestamp":1776859200000,"webhookId":"wh_customer_request","actor":{"id":"usr_1","name":"Ada"},"data":{"id":"REQ-1","title":"Need this shipped"}}

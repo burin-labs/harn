@@ -1,0 +1,130 @@
+# ---------- Moonshot AI — direct Kimi K2 (OpenAI-compatible /v1) -------------
+# Moonshot's first-party API serves the Kimi K2 family with native tool calls,
+# an inline thinking mode, prompt caching, and multimodal input. K2.7 Code
+# additionally accepts video. Catalog keys are `moonshot/<wire>` (e.g.
+# `moonshot/kimi-k2.6`), so the patterns match the `*kimi*` substring to cover
+# both the prefixed catalog key and the bare wire id.
+#
+# TOOL-CHANNEL CAVEAT (credentialed probe 2026-07-18, harn 0.10.23 binary,
+# direct Moonshot /v1, N=2 per case). The whole Kimi family reasons, and that
+# interacts with tool calling two ways:
+#   1. FORCED tool_choice (`required` or a named function) returns HTTP 400
+#      "tool_choice '...' is incompatible with thinking enabled". This is the
+#      likely cause of the "empty completion, end_turn, 0 tokens, $0" agent-loop
+#      drops reported on Kimi (a 400 bills nothing) — NOT a native-emission
+#      drop. Keep `allowed_tool_choice_modes` to `["auto", "none"]` for every
+#      Kimi route; never advertise `required`.
+#   2. With `tool_choice: auto` the native channel is reliable — k2.6 and k3
+#      both carried a backslash/quote/unicode large-string argument byte-exact
+#      2/2. The TEXT channel is model-dependent: k3 parsed byte-exact, but k2.6
+#      burned its whole budget in the reasoning channel (finish_reason=length,
+#      empty content) and never emitted the `<tool_call>` — so do NOT flip the
+#      general (k2.5/k2.6) Kimi rule to json/text; native+auto is its reliable
+#      path.
+
+[[provider.moonshot]]
+model_match = "*kimi-k3*"
+# K3 credentialed probe (2026-07-18, harn 0.10.23 binary, direct Moonshot
+# /v1, N=2): with `tool_choice: auto` the native channel carried the
+# echo_marker call's backslash/quote/unicode large-string argument byte-exact
+# (2/2), and the Harn text-tool channel emitted a parseable `<tool_call>`
+# block byte-exact (2/2) with no reasoning-channel over-run — native and text
+# are interchangeable here. FORCED tool_choice is the footgun: K3 always
+# reasons (`reasoning_effort: max`), and Moonshot rejects `tool_choice:
+# "required"` / a named function with HTTP 400 "tool_choice '...' is
+# incompatible with thinking enabled". So `required` is dropped from
+# allowed_tool_choice_modes below; only `auto`/`none` are real modes.
+native_tools = true
+preferred_tool_format = "native"
+tool_mode_parity = "interchangeable"
+tool_mode_parity_notes = "2026-07-18 credentialed probe (harn 0.10.23, direct Moonshot /v1, tool_choice=auto, N=2): native carried the large backslash/quote/unicode string argument byte-exact 2/2, and the Harn text-tool channel parsed byte-exact 2/2 with no reasoning over-run. Forced tool_choice (required/specified) returns HTTP 400 'incompatible with thinking enabled' and is not an available mode."
+structured_output = "native"
+# K3 always reasons through the OpenAI-compatible `reasoning_effort` field;
+# it accepts only the `max` effort below, rather than a generic enabled mode.
+thinking_modes = ["effort"]
+vision = true
+vision_supported = true
+prompt_caching = true
+# Forced tool_choice (`required` / a named function) returns HTTP 400
+# "incompatible with thinking enabled" on K3's mandatory reasoning (measured
+# 2026-07-18); only `auto`/`none` are real modes.
+allowed_tool_choice_modes = ["auto", "none"]
+requires_tool_result_adjacency = true
+# K3 always reasons, accepts only `reasoning_effort: max`, requires
+# `max_completion_tokens`, and rejects fixed sampling/penalty knobs.
+requires_completion_tokens = true
+reasoning_effort_supported = true
+reasoning_effort_levels = ["max"]
+reasoning_none_supported = false
+reasoning_disable_supported = false
+reasoning_history_wire_field = "reasoning_content"
+reasoning_round_trip = "echo_same_key"
+temperature_supported = false
+top_p_supported = false
+frequency_penalty_supported = false
+presence_penalty_supported = false
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+[[provider.moonshot]]
+model_match = "*kimi-k2.7-code*"
+native_tools = true
+preferred_tool_format = "json"
+tool_mode_parity = "native_unreliable"
+tool_mode_parity_notes = "2026-06-20 Harn agent-loop smoke after parser fix: forced native/off emitted no dispatchable tool_calls and claimed the tool was unavailable. Harn JSON tools completed the loop; text tools also pass after fixing text-mode history projection."
+structured_output = "native"
+thinking_modes = ["enabled"]
+vision = true
+vision_supported = true
+video_supported = true
+prompt_caching = true
+allowed_tool_choice_modes = ["auto", "none"]
+requires_tool_result_adjacency = true
+temperature_supported = false
+top_p_supported = false
+frequency_penalty_supported = false
+presence_penalty_supported = false
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+[[provider.moonshot]]
+model_match = "*kimi*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled"]
+vision = true
+vision_supported = true
+prompt_caching = true
+requires_tool_result_adjacency = true
+allowed_tool_choice_modes = ["auto", "none"]
+# Every Kimi model pins these sampling fields to a single server-side value and
+# rejects any other with HTTP 400 ("invalid temperature: only 1 is allowed for
+# this model" / "invalid top_p: only 0.95 is allowed"); confirmed by live probe
+# on kimi-k2.5, k2.6, k2.7-code, and k2.7-code-highspeed (2026-07-14). Gating
+# them here strips the fields so the server default (the sole allowed value)
+# applies. The more specific k2.7-code rule sets these too; rules are
+# first-match, so this general rule is what covers k2.5/k2.6. The non-kimi
+# moonshot-v1-* models accept both and are correctly not matched here.
+temperature_supported = false
+top_p_supported = false
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"

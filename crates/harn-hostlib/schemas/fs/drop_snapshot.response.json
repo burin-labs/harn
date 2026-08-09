@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/fs/drop_snapshot.response.json",
+  "title": "fs.drop_snapshot response",
+  "type": "object",
+  "properties": {
+    "snapshot_id": { "type": "string", "minLength": 1 },
+    "dropped": {
+      "type": "boolean",
+      "description": "True when an existing snapshot was removed; false when no snapshot with that id was registered."
+    }
+  },
+  "required": ["snapshot_id", "dropped"],
+  "additionalProperties": false
+}

@@ -1,0 +1,5 @@
+import { x_render } from "cyclic_import_call_x"
+
+pub fn m_fn() -> string {
+  return x_render()
+}

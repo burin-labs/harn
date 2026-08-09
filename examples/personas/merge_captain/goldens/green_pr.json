@@ -1,0 +1,38 @@
+{
+  "_type": "merge_captain_golden",
+  "scenario": "green_pr",
+  "description": "All checks green, no stale threads, no conflicts. Merge captain emits a low-risk plan and stops without a handoff.",
+  "max_model_calls": 1,
+  "max_tool_calls": 4,
+  "max_repeat": 1,
+  "require_approval_for": [
+    {"glob": "*merge*"},
+    {"glob": "*set_label*"},
+    {"glob": "*post_comment*"}
+  ],
+  "forbidden_actions": [
+    {"glob": "*force_push*"},
+    {"glob": "*delete_branch*"}
+  ],
+  "state_steps": [
+    {
+      "step": "intake",
+      "tools": [{"glob": "*pull_request*"}],
+      "plan_fields": ["pr_number"],
+      "events": ["plan"],
+      "required": true
+    },
+    {
+      "step": "verify_checks",
+      "tools": [{"glob": "*checks*"}, {"glob": "*ci*"}, {"glob": "*workflow_run*"}],
+      "verifier": true,
+      "required": true
+    },
+    {
+      "step": "decide_risk",
+      "plan_fields": ["review_risk"],
+      "events": ["plan"],
+      "required": true
+    }
+  ]
+}

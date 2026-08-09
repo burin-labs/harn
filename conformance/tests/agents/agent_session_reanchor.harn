@@ -1,0 +1,60 @@
+pipeline main(harness: Harness, task) {
+  const session = harness.agent.open(
+    "reanchor-conformance",
+    {workspace_anchor: {primary: "/workspace/main", anchored_at: "2026-05-23T00:00:00Z"}},
+  )
+  const res = harness.agent.reanchor(
+    session,
+    {primary: "/workspace/lib", anchored_at: "2026-05-23T00:00:10Z"},
+    {reason: "switch to lib"},
+  )
+  assert(res.ok, "reanchor returns ok")
+  assert(res.changed, "reanchor reports change")
+  assert(res.anchor.primary == "/workspace/lib", "anchor updated")
+  assert(!res.compacted, "compaction off by default")
+  assert(res.session_id == session, "same session id when carry_transcript=true")
+  const live = harness.agent.workspace_anchor(session)
+  assert(live?.primary == "/workspace/lib", "session sees the new anchor")
+  const snap = harness.agent.snapshot(session)
+  const events = snap.events
+  const anchor_changed = events.filter({ ev -> ev?.kind == "AnchorChanged" })
+  assert(len(anchor_changed) == 1, "AnchorChanged transcript event emitted exactly once")
+  assert(
+    anchor_changed[0]?.metadata?.current?.primary == "/workspace/lib",
+    "AnchorChanged records new primary",
+  )
+  const unchanged = harness.agent.reanchor(
+    session,
+    {primary: "/workspace/lib", anchored_at: "2026-05-23T00:00:10Z"},
+  )
+  assert(unchanged.ok, "second reanchor reports ok")
+  assert(!unchanged.changed, "no-op reanchor reports unchanged")
+  const snap2 = harness.agent.snapshot(session)
+  const events2 = snap2.events
+  const anchor_changed2 = events2.filter({ ev -> ev?.kind == "AnchorChanged" })
+  assert(len(anchor_changed2) == 1, "no-op reanchor does not emit another event")
+  const invalid = try {
+    harness.agent.reanchor(
+      session,
+      {primary: "/workspace/foo"},
+      {carry_transcript: false, compact: true},
+    )
+  }
+  assert(is_err(invalid), "compact+drop-transcript is rejected")
+  const forked = harness.agent.reanchor(
+    session,
+    {primary: "/workspace/forked", anchored_at: "2026-05-23T00:00:20Z"},
+    {carry_transcript: false},
+  )
+  assert(forked.ok, "carry_transcript=false succeeds")
+  assert(forked.session_id != session, "carry_transcript=false returns a fresh session id")
+  assert(
+    harness.agent.workspace_anchor(forked.session_id)?.primary == "/workspace/forked",
+    "forked session carries the new anchor",
+  )
+  assert(
+    harness.agent.length(forked.session_id) == 0,
+    "forked session starts with an empty transcript",
+  )
+  harness.stdio.log("agent_session_reanchor tests passed")
+}

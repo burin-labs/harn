@@ -1,0 +1,139 @@
+import {
+  RemoteFanoutCatalog,
+  RemoteFanoutOptions,
+  RemoteFanoutPlan,
+  RemoteFanoutShard,
+  remote_eval_fanout_artifact_manifest,
+  remote_eval_fanout_plan,
+  remote_eval_fanout_rejoin_receipt,
+  remote_eval_fanout_trial_receipt,
+} from "std/eval/remote_fanout"
+
+fn neutral_catalog() -> RemoteFanoutCatalog {
+  return {
+    evals: {"case/a": {}, "case-b": {}, "case-c": {}},
+    groups: {smoke: ["case/a", "case-b"], repeated: ["case/a", "case/a", "case-c"]},
+  }
+}
+
+fn options() -> RemoteFanoutOptions {
+  return {
+    cells: ["smoke"],
+    trials: 1,
+    max_concurrency: 2,
+    max_escalating: 1,
+    model: "neutral-model",
+    split: "neutral-split",
+    runner_argv_template: [
+      "neutral-runner",
+      "--case",
+      "{case}",
+      "--model",
+      "{model}",
+      "--split",
+      "{split}",
+      "--trial",
+      "{trial}",
+      "--seed",
+      "{seed}",
+    ],
+    backend: "fake",
+    backend_metadata: {queue: "cpu-only"},
+    artifact_limits: {raw_file_max_bytes: 2048, compressed_bundle_max_bytes: 1024},
+    base_seed: 17,
+  }
+}
+
+fn shard_at(plan: RemoteFanoutPlan, index: int) -> RemoteFanoutShard {
+  const shard = plan.shards[index]
+  if shard == nil {
+    throw "fixture expected shard at index " + to_string(index)
+  }
+  return shard
+}
+
+/**
+ * The fake adapter sees the exact Harn plan and only returns payloads keyed by
+ * Harn shard id. It deliberately reverses transport order.
+ */
+fn fake_adapter(plan: RemoteFanoutPlan) -> list<unknown> {
+  const first_shard = shard_at(plan, 0)
+  const second_shard = shard_at(plan, 1)
+  const second = remote_eval_fanout_trial_receipt(
+    plan,
+    second_shard.id,
+    {status: "passed", passed: true, payload: "second"},
+  )
+  const first = remote_eval_fanout_trial_receipt(
+    plan,
+    first_shard.id,
+    {status: "passed", passed: true, payload: "first"},
+  )
+  return [second, first]
+}
+
+pipeline test(harness: Harness, task) {
+  const plan = remote_eval_fanout_plan(options(), neutral_catalog())
+  const first_shard = shard_at(plan, 0)
+  const second_shard = shard_at(plan, 1)
+  assert_eq(plan.schema, "harn.eval.remote_fanout.plan.v1")
+  assert_eq(plan.cells, ["case/a", "case-b"])
+  assert_eq(plan.shard_count, 2)
+  assert_eq(first_shard.seed, 17)
+  assert_eq(first_shard.runner_argv[2], "case/a")
+  assert_eq(first_shard.runner_argv[10], "17")
+  assert(starts_with(plan.plan_checksum, "sha256:"), "plan checksum is version-bound")
+  const repeated = remote_eval_fanout_plan(options() + {cells: ["repeated"]}, neutral_catalog())
+  assert_eq(repeated.cells, ["case/a", "case-c"])
+  const bad_budget = try {
+    remote_eval_fanout_plan(
+      options()
+        + {artifact_limits: {raw_file_max_bytes: 1024, compressed_bundle_max_bytes: 2048}},
+      neutral_catalog(),
+    )
+    "accepted"
+  } catch (err) {
+    to_string(err)
+  }
+  assert_eq(
+    bad_budget,
+    "std/eval/remote_fanout: compressed artifact budget cannot exceed raw file budget",
+  )
+  const manifest = remote_eval_fanout_artifact_manifest(plan, "fake/run", ".harn/evals/run")
+  assert_eq(manifest.plan_checksum, plan.plan_checksum)
+  assert_eq(manifest.path_rewrite_map[0]?.remote_prefix, "fake/run/" + first_shard.id)
+  assert(starts_with(manifest.path_rewrite_checksum, "sha256:"), "rewrite map is checksummed")
+  assert(starts_with(manifest.manifest_checksum, "sha256:"), "manifest is checksummed")
+  // CPU-only steel thread: plan -> fake adapter -> shuffled receipts -> readiness.
+  const receipts = fake_adapter(plan)
+  const ready = remote_eval_fanout_rejoin_receipt(plan, receipts)
+  assert_eq(ready.readiness.status, "ready")
+  assert_eq(ready.readiness.ingest_ready, true)
+  assert_eq(ready.readiness.accepted_shard_count, 2)
+  assert_eq(ready.accepted_shard_ids, [second_shard.id, first_shard.id])
+  const missing = remote_eval_fanout_rejoin_receipt(plan, [receipts[0]])
+  assert_eq(missing.readiness.ingest_ready, false)
+  assert_eq(missing.quarantine.missing_shard_ids, [first_shard.id])
+  const duplicate = remote_eval_fanout_rejoin_receipt(plan, [receipts[0], receipts[0], receipts[1]])
+  assert_eq(duplicate.readiness.ingest_ready, false)
+  assert_eq(duplicate.quarantine.duplicate_shard_ids, [second_shard.id])
+  const failed_receipt = remote_eval_fanout_trial_receipt(
+    plan,
+    first_shard.id,
+    {status: "failed", passed: false},
+  )
+  const failed = remote_eval_fanout_rejoin_receipt(plan, [receipts[0], failed_receipt])
+  assert_eq(failed.readiness.ingest_ready, false)
+  assert_eq(failed.quarantine.failed_shards[0]?.shard_id, first_shard.id)
+  const malformed_receipt = receipts[1] + {receipt_checksum: "sha256:tampered"}
+  const malformed = remote_eval_fanout_rejoin_receipt(plan, [receipts[0], malformed_receipt])
+  assert_eq(malformed.readiness.ingest_ready, false)
+  assert_eq(malformed.quarantine.malformed_receipts[0]?.shard_id, first_shard.id)
+  assert_eq(malformed.quarantine.malformed_receipts[0]?.reason, "receipt checksum mismatch")
+  const wrong_seed_receipt = receipts[1] + {seed: 999}
+  const wrong_seed = remote_eval_fanout_rejoin_receipt(plan, [receipts[0], wrong_seed_receipt])
+  assert_eq(wrong_seed.readiness.ingest_ready, false)
+  assert_eq(wrong_seed.quarantine.malformed_receipts[0]?.shard_id, first_shard.id)
+  assert_eq(wrong_seed.quarantine.malformed_receipts[0]?.reason, "receipt contract mismatch")
+  harness.stdio.log("stdlib remote fanout plan -> fake adapter -> rejoin readiness ok")
+}

@@ -1,0 +1,81 @@
+# Parallel test-case performance baselines. Values are observations, not
+# aspirational ceilings. A platform row is added only from a successful run on
+# that platform; the checker fails closed when its platform is uncalibrated.
+schema_version = 1
+workload_version = 1
+
+[platform.macos]
+measured_at = "2026-07-19T11:48:02Z"
+source_commit = "c7e314af4d8ab32d32a943c83b974877868e4807"
+host = "macOS 26.5.1 arm64"
+sample_count = 1
+regression_x = 2.0
+warn_utilization = 0.8
+telemetry_warn_x = 4.0
+max_child_wall_ms = 330.0
+sum_user_ms = 4000.0
+sum_sys_ms = 160.0
+setup_p50_ms = 5.0
+setup_p90_ms = 7.0
+execute_p90_ms = 249.0
+
+[platform.macos.telemetry]
+max_rss_kb = 98896
+major_faults = 323
+minor_faults = 31055
+voluntary_context_switches = 122
+involuntary_context_switches = 6475
+fs_inputs = 0
+fs_outputs = 0
+
+# GitHub's macos-26-arm64 hosted image is materially slower than the local
+# Apple Silicon workstation above. Keep a separate observed profile so hosted
+# release certification is sensitive to regressions without weakening local
+# development feedback.
+[platform.macos_hosted_arm64]
+measured_at = "2026-08-01T15:20:25Z"
+source_commit = "ca8231f95204513b7c7b95a1b3911f90a9b1fbcc"
+host = "GitHub Actions macos-26-arm64 hosted"
+sample_count = 1
+regression_x = 2.0
+warn_utilization = 0.8
+telemetry_warn_x = 4.0
+max_child_wall_ms = 1440.0
+sum_user_ms = 3870.0
+sum_sys_ms = 150.0
+setup_p50_ms = 23.0
+setup_p90_ms = 47.0
+execute_p90_ms = 27.0
+
+[platform.macos_hosted_arm64.telemetry]
+max_rss_kb = 95936
+major_faults = 314
+minor_faults = 26259
+voluntary_context_switches = 0
+involuntary_context_switches = 2683
+fs_inputs = 0
+fs_outputs = 0
+
+[platform.linux]
+measured_at = "2026-07-20T03:13:23Z"
+source_commit = "036d453d0747db0acb0dcbba7356ef4df5ada56c"
+host = "GitHub Actions ubuntu-24.04 hosted amd64"
+sample_count = 1
+regression_x = 2.0
+warn_utilization = 0.8
+telemetry_warn_x = 4.0
+max_child_wall_ms = 2770.0
+sum_user_ms = 10670.0
+sum_sys_ms = 150.0
+setup_p50_ms = 61.0
+setup_p90_ms = 80.0
+execute_p90_ms = 2314.0
+
+[platform.linux.telemetry]
+max_rss_kb = 194248
+major_faults = 8
+minor_faults = 29398
+voluntary_context_switches = 288
+involuntary_context_switches = 3914
+fs_inputs = 0
+fs_outputs = 96

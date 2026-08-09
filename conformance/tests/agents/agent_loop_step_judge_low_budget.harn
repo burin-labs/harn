@@ -1,0 +1,47 @@
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
+import { llm_text, with_llm_script } from "std/testing"
+
+fn events_of(events, kind) {
+  return events.filter({ event -> event.type == kind })
+}
+
+pipeline default(harness: Harness) {
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text("<user_response>safe answer</user_response>\n<done>##DONE##</done>"),
+      llm_text(
+        "{\"verdict\":\"revise\",\"reasoning\":\"force a regression\",\"critique\":\"try again\"}",
+      ),
+    ],
+    { ->
+      const session = "step-judge-low-budget-" + harness.random.uuid()
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(
+          harness,
+          "Answer once.",
+          nil,
+          {
+            provider: "mock",
+            loop_until_done: true,
+            max_iterations: 1,
+            session_id: session,
+            step_judge: {provider: "mock", on_veto: "replace"},
+          },
+        ) },
+      )
+      const decisions = events_of(captured.events, "step_judge_decision")
+      require len(decisions) == 1, "low-budget step_judge skip should emit one decision event"
+      harness.stdio.println(captured.result.status)
+      harness.stdio.println(captured.result.visible_text)
+      harness.stdio.println(len(harness.llm.mock_calls()))
+      harness.stdio.println(len(decisions))
+      harness.stdio.println(decisions[0].skipped)
+      harness.stdio.println(decisions[0].reason)
+      harness.stdio.println(decisions[0].vetoed)
+    },
+  )
+}

@@ -1,0 +1,8 @@
+pipeline test(harness: Harness, task) {
+  const x = "outer"
+  if true {
+    const y = "inner"
+    harness.stdio.log(y)
+  }
+  harness.stdio.log(x)
+}

@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/ast/changeset_summary.request.json",
+  "title": "ast.changeset_summary request",
+  "description": "Explicit before/after source images to summarize above a text diff. Null or omission means that side of the file did not exist.",
+  "type": "object",
+  "properties": {
+    "files": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": { "type": "string", "minLength": 1 },
+          "before": { "type": ["string", "null"] },
+          "after": { "type": ["string", "null"] }
+        },
+        "required": ["path"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["files"],
+  "additionalProperties": false
+}

@@ -1,0 +1,8 @@
+/** count_to. A generator body that lives in this module, not the caller's. */
+pub gen fn count_to(limit: int) -> Stream<int> {
+  let i = 0
+  while i < limit {
+    emit i
+    i = i + 1
+  }
+}

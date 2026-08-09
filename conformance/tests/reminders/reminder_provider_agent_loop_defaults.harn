@@ -1,0 +1,44 @@
+import { agent_loop } from "std/agent/loop"
+import { with_llm_script } from "std/testing"
+
+pipeline main(harness: Harness) {
+  with_llm_script(
+    harness.llm,
+    [
+      {text: "done", input_tokens: 80, output_tokens: 0, model: "mock"},
+      {text: "done", input_tokens: 80, output_tokens: 0, model: "mock"},
+    ],
+    { ->
+      const enabled = agent_loop(
+        harness,
+        "token pressure default",
+        nil,
+        {
+          provider: "mock",
+          model: "mock",
+          session_id: "reminder-provider-loop-defaults-enabled",
+          reminders: {config: {token_pressure: {context_window: 100}}},
+        },
+      )
+      const enabled_reminders = transcript_events_by_kind(enabled.transcript, "system_reminder")
+      const disabled = agent_loop(
+        harness,
+        "token pressure disabled",
+        nil,
+        {
+          provider: "mock",
+          model: "mock",
+          session_id: "reminder-provider-loop-defaults-disabled",
+          reminders: {
+            providers: ["-token_pressure"],
+            config: {token_pressure: {context_window: 100}},
+          },
+        },
+      )
+      const disabled_reminders = transcript_events_by_kind(disabled.transcript, "system_reminder")
+      harness.stdio.println(len(enabled_reminders))
+      harness.stdio.println(enabled_reminders[0].reminder.tags[0])
+      harness.stdio.println(len(disabled_reminders))
+    },
+  )
+}

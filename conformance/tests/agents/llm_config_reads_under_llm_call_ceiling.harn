@@ -1,0 +1,49 @@
+/**
+ * harn#6314: an execution policy granting `llm.call` but not `state.read`
+ * admits Harn-owned read-only LLM configuration resolution (reasoning-policy
+ * lowering, catalog reads) and the runtime's own task-attribution context,
+ * while unrelated Harness state reads and un-granted configuration reads
+ * stay denied.
+ */
+pipeline main(harness: Harness) {
+  const llm_call_only = {capabilities: {llm: ["call"]}, side_effect_level: "read_only"}
+  const normalized = harness.runtime.with_execution_policy(
+    llm_call_only,
+    fn() { return harness.llm.apply_reasoning_policy(
+      {provider: "anthropic", model: "claude-sonnet-4", reasoning_policy: "auto"},
+    ) },
+  )
+  harness.stdio.println(normalized?.model == "claude-sonnet-4")
+  const catalog = harness.runtime.with_execution_policy(
+    llm_call_only,
+    fn() { return harness.llm.known_models() },
+  )
+  harness.stdio.println(type_of(catalog) == "list")
+  const context = harness.runtime.with_execution_policy(
+    llm_call_only,
+    fn() { return harness.runtime.context() },
+  )
+  harness.stdio.println(type_of(context?.task_id) == "string")
+  const unrelated_state_read_denied = try {
+    harness.runtime.with_execution_policy(
+      llm_call_only,
+      fn() { return harness.runtime.context_values() },
+    )
+    false
+  } catch (e) {
+    contains(json_stringify(e), "effect ceiling")
+  }
+  harness.stdio.println(unrelated_state_read_denied)
+  const no_llm_grant_denied = try {
+    harness.runtime.with_execution_policy(
+      {capabilities: {workspace: ["read_text"]}, side_effect_level: "read_only"},
+      fn() { return harness.llm.apply_reasoning_policy(
+        {provider: "anthropic", model: "claude-sonnet-4"},
+      ) },
+    )
+    false
+  } catch (e) {
+    contains(json_stringify(e), "effect ceiling")
+  }
+  harness.stdio.println(no_llm_grant_denied)
+}

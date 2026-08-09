@@ -1,0 +1,10 @@
+pipeline main(harness: Harness) {
+  const result = harness.llm.call("hello world", nil, {provider: "mock"})
+  harness.stdio.println(result.provider)
+  harness.stdio.println(result.visible_text != "")
+  harness.stdio.println(result.thinking == nil)
+  harness.stdio.println(len(result.blocks) >= 1)
+  harness.stdio.println(len(transcript_events(result.transcript)) >= 2)
+  harness.stdio.println(contains(transcript_render_visible(result.transcript), "assistant:"))
+  harness.stdio.println(contains(transcript_render_full(result.transcript), "[public]"))
+}

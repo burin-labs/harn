@@ -1,0 +1,130 @@
+//! Does an isolated session environment actually close every child environment?
+//!
+//! `security::environment_policy` documents `resolve_env` as "the *single* code path
+//! that builds a child environment", and the isolated policy's contract is
+//! that no credential crosses into a spawned child. That contract is only as
+//! strong as its weakest spawn seam, so this probes each process builtin
+//! directly with a secret-shaped variable set in the parent environment.
+//!
+//! Every probe spawns the `harn-test-echo-env` helper binary directly,
+//! so the same resolver and sandbox-funnel coverage runs on every target.
+
+use crate::support;
+
+use harn_vm::security::session_environment::SessionEnvironment;
+
+const SECRET: &str = "HARN_PROBE_FAKE_API_KEY";
+const SECRET_VALUE: &str = "sk-probe-must-not-cross";
+
+#[test]
+fn harness_env_uses_the_same_isolated_environment() {
+    let _secret = support::EnvironmentGuard::set(SECRET, SECRET_VALUE);
+    let out = support::logged_isolated(&format!(
+        r#"fn main(harness: Harness) {{
+  harness.stdio.log(harness.env.get("{SECRET}") == nil ? "CLOSED" : "LEAKED")
+}}"#,
+    ))
+    .expect("harness.env result");
+    assert_eq!(out, vec!["CLOSED".to_string()]);
+}
+
+/// Baseline: the governed seam (`exec`, via `process_command_config`) must not
+/// leak. If this fails the probe itself is wrong, not the runtime.
+#[test]
+fn exec_does_not_leak_the_secret() {
+    let _secret = support::EnvironmentGuard::set(SECRET, SECRET_VALUE);
+    let out = support::logged_isolated(&format!(
+        r#"fn main(harness: Harness) {{
+  const r = harness.process.exec({}, "{}")
+  harness.stdio.log(r.stdout == "" ? "CLOSED" : "LEAKED:" + r.stdout)
+}}"#,
+        support::harn_quote(&support::process_helper()),
+        SECRET,
+    ))
+    .expect("exec result");
+    assert_eq!(out, vec!["CLOSED".to_string()], "governed seam leaked");
+}
+
+#[test]
+fn process_run_with_options_does_not_leak_the_secret() {
+    let _secret = support::EnvironmentGuard::set(SECRET, SECRET_VALUE);
+    let out = support::logged_isolated(&format!(
+        r#"fn main(harness: Harness) {{
+  const r = harness.process.run({{program: {}, args: ["{}"], env: {{}}}})
+  harness.stdio.log(r.stdout == "" ? "CLOSED" : "LEAKED:" + r.stdout)
+}}"#,
+        support::harn_quote(&support::process_helper()),
+        SECRET,
+    ))
+    .expect("process.run options result");
+    assert_eq!(
+        out,
+        vec!["CLOSED".to_string()],
+        "process.run options leaked"
+    );
+}
+
+#[test]
+fn harness_process_run_does_not_leak_the_secret() {
+    let _secret = support::EnvironmentGuard::set(SECRET, SECRET_VALUE);
+    let out = support::logged_isolated(&format!(
+        r#"fn main(harness: Harness) {{
+  const r = harness.process.run({{ program: {}, args: ["{}"] }})
+  harness.stdio.log(r.stdout == "" ? "CLOSED" : "LEAKED:" + r.stdout)
+}}"#,
+        support::harn_quote(&support::process_helper()),
+        SECRET,
+    ))
+    .expect("harness.process.run result");
+    assert_eq!(
+        out,
+        vec!["CLOSED".to_string()],
+        "harness.process.run leaked"
+    );
+}
+
+/// The variadic `HarnessProcess.exec` adapter uses the same governed process
+/// funnel as structured `run`; pin both public shapes against environment
+/// leakage.
+#[test]
+fn harness_process_exec_does_not_leak_the_secret() {
+    let _secret = support::EnvironmentGuard::set(SECRET, SECRET_VALUE);
+    let out = support::logged_isolated(&format!(
+        r#"fn main(harness: Harness) {{
+  const r = harness.process.exec({}, "{}")
+  harness.stdio.log(r.stdout == "" ? "CLOSED" : "LEAKED:" + r.stdout)
+}}"#,
+        support::harn_quote(&support::process_helper()),
+        SECRET,
+    ))
+    .expect("host process result");
+    assert_eq!(
+        out,
+        vec!["CLOSED".to_string()],
+        "process.exec host op leaked"
+    );
+}
+
+/// The funnel itself. `harn-hostlib`'s `prepare_command` — the spawner behind
+/// the agent's own `run_command` tool — builds its child through
+/// `std_command_for`, as do several orchestration seams. Pinning the funnel
+/// directly covers all of them, including callers outside this crate that a
+/// Harn-level probe in `harn-vm` cannot reach.
+#[test]
+fn std_command_for_returns_a_closed_command() {
+    let _secret = support::EnvironmentGuard::set(SECRET, SECRET_VALUE);
+    harn_vm::reset_thread_local_state();
+    harn_vm::stdlib::process::set_session_environment(Some(SessionEnvironment::isolated()));
+    let mut command = harn_vm::process_sandbox::std_command_for(
+        &support::process_helper(),
+        &[SECRET.to_string()],
+    )
+    .expect("build command");
+    let out = command.output().expect("spawn");
+    harn_vm::stdlib::process::set_session_environment(None);
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout),
+        "",
+        "std_command_for handed the child an open environment"
+    );
+}

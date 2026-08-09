@@ -1,0 +1,1 @@
+pub import { alpha, beta } from "pub_import_selective_lib"

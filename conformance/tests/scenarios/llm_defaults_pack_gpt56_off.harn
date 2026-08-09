@@ -1,0 +1,14 @@
+// GPT-5.6 removed the older GPT-5 `minimal` effort. The catalog-backed
+// capability resolver lowers `off` to the supported canonical `none` level.
+import { pack_for } from "std/llm/defaults"
+
+pipeline test(harness: Harness, task) {
+  const result = pack_for(
+    harness.agent,
+    harness.llm,
+    {model: "gpt-5.6-sol", reasoning_policy: "off"},
+  )
+  assert_eq(result.thinking.mode, "effort")
+  assert_eq(result.thinking.level, "none")
+  harness.stdio.log("llm_defaults_pack_gpt56_off passed")
+}

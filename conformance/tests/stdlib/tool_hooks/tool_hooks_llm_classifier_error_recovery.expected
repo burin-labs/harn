@@ -1,0 +1,7 @@
+true
+echo hi
+1
+tool_hook_classifier_verdict
+error
+passthrough
+true

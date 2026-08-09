@@ -1,0 +1,64 @@
+import { agent_loop } from "std/agent/loop"
+
+/**
+ * S-11 (#1847): the daemon-loop suspend path (S-07) produces the
+ * same persisted snapshot shape that the agent_loop suspend path
+ * does. The pre-refactor baseline emitted `{daemon_state, total_iterations,
+ * transcript_summary?}` fields on the daemon snapshot. This fixture
+ * pins the field set so any future divergence between
+ * `agent_daemon_snapshot` (the snapshot writer) and the agent_loop's
+ * own snapshot writer fails conformance.
+ *
+ * The test runs `agent_loop` in daemon mode for two iterations with
+ * an `auto_compact` callback that injects a deterministic summary,
+ * then asserts the snapshot fields directly.
+ */
+pipeline main(harness: Harness) {
+  const unique = to_string(to_int(harness.clock.timestamp())) + "-"
+    + to_string(
+    harness.random.range(100000, 999999),
+  )
+  const dir = path_join(harness.fs.workspace_temp_dir(), "harn-daemon-parity-" + unique)
+  harness.fs.mkdir(dir)
+  const snapshot_path = path_join(dir, "daemon.json")
+  const result = agent_loop(
+    harness,
+    "Poll for background work",
+    "You are helpful",
+    {
+      provider: "mock",
+      daemon: true,
+      max_iterations: 2,
+      wake_interval_ms: 1,
+      persist_path: snapshot_path,
+      consolidate_on_idle: true,
+      auto_compact: true,
+      compact_threshold: 1,
+      compact_keep_last: 1,
+      compact_strategy: "custom",
+      compact_callback: { archived ->
+        {summary: "daemon parity summary " + to_string(len(archived))}
+      },
+    },
+  )
+  const saved = json_parse(harness.fs.read_text(snapshot_path))
+  // Loop-level shape parity (matches the existing daemon test).
+  harness.stdio.println("loop_status=" + result.status)
+  harness.stdio.println("loop_daemon_state=" + result.daemon_state)
+  harness.stdio.println(
+    "loop_snapshot_matches=" + to_string(result.daemon_snapshot_path == snapshot_path),
+  )
+  // Snapshot-level field-set parity: each of these fields must be
+  // populated by the post-S-07 writer the same way the pre-refactor
+  // writer populated them. Any add/remove/rename trips this fixture.
+  harness.stdio.println("snap_daemon_state=" + saved.daemon_state)
+  harness.stdio.println("snap_has_iterations=" + to_string(saved.total_iterations >= 1))
+  harness.stdio.println(
+    "snap_summary_seeded="
+      + to_string(
+      contains(saved.transcript_summary ?? "", "daemon parity summary"),
+    ),
+  )
+  harness.stdio.println("snap_has_summary_field=" + to_string(saved.transcript_summary != nil))
+  harness.fs.delete(dir)
+}

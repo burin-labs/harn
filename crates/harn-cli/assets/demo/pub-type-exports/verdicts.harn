@@ -1,0 +1,13 @@
+/**
+ * Shared wire types for the pub-type-exports demo. `pub type` makes these
+ * aliases part of the module's export surface, so importers bind the exact
+ * shape the grader validates against — no per-consumer re-declaration.
+ */
+pub type Verdict = "pass" | "fail" | "unclear"
+
+pub type GradeReport = {verdict: Verdict, score: int, summary: string}
+
+/** Render one line for a report; the exported alias is the parameter type. */
+pub fn describe(report: GradeReport) -> string {
+  return "${report.verdict} (score ${to_string(report.score)}) — ${report.summary}"
+}

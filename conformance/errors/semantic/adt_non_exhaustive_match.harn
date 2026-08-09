@@ -1,0 +1,15 @@
+// Phase C: missing-variant `match` is a hard error, not a warning.
+// `Edit` is unmatched and there is no wildcard arm.
+enum Action {
+  Create
+  Edit
+  Delete
+}
+
+pipeline test(harness: Harness, task) {
+  const a = Action.Create
+  match a.variant {
+    "Create" -> { harness.stdio.log("c") }
+    "Delete" -> { harness.stdio.log("d") }
+  }
+}

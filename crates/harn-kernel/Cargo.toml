@@ -1,0 +1,27 @@
+[package]
+name = "harn-kernel"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Portable compiler, program artifact, and deterministic execution kernel for Harn"
+
+[dependencies]
+arcstr = "1"
+blake3 = "1"
+harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.65" }
+harn-builtin-registry = { path = "../harn-builtin-registry", version = "=0.10.65" }
+harn-capability-contracts = { path = "../harn-capability-contracts", version = "=0.10.65" }
+harn-lexer = { path = "../harn-lexer", version = "=0.10.65" }
+harn-parser = { path = "../harn-parser", version = "=0.10.65" }
+harn-secret-catalog = { path = "../harn-secret-catalog", version = "=0.10.65" }
+hex = "0.4"
+regex = "1"
+serde = { version = "1", features = ["derive", "rc"] }
+serde_json = "1"
+sha2 = "0.11"
+
+[lints]
+workspace = true

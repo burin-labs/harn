@@ -1,0 +1,58 @@
+/** Portable, read-only ambient host-condition observations. */
+pub type HostContentionQuestion = "promised_cpu" \
+  | "nominal_speed" \
+  | "accelerator_shared" \
+  | "memory_or_io_contended"
+
+pub type HostEnvironment = "bare_metal" | "virtualized" | "containerized" | "unknown"
+
+pub type HostConditionObserved = {
+  question: HostContentionQuestion,
+  status: "observed",
+  contention: float,
+  reason?: string,
+}
+
+pub type HostConditionUnavailable = {
+  question: HostContentionQuestion,
+  status: "unavailable",
+  contention?: float,
+  reason: string,
+}
+
+pub type HostConditionNotObservable = {
+  question: HostContentionQuestion,
+  status: "not_observable",
+  contention?: float,
+  reason: string,
+}
+
+pub type HostConditionObservation = HostConditionObserved \
+  | HostConditionUnavailable \
+  | HostConditionNotObservable
+
+pub type HostConditionsSnapshot = {
+  schema_version: int,
+  observed_at_ms: int,
+  environment: HostEnvironment,
+  sample_cost_us: int,
+  questions: list<HostConditionObservation>,
+}
+
+/**
+ * Sample ambient host contention without acquiring or mutating anything.
+ *
+ * A contention value of zero is a genuinely observed quiet reading. Missing
+ * facts stay distinguishable as `unavailable` (retryable read failure) or
+ * `not_observable` (structural environment limit).
+ *
+ * Randomized assignment plus blocking on host is the correctness guarantee
+ * for comparisons. These readings only avoid waste and attribute suspicious
+ * results; they never substitute for randomized assignment.
+ *
+ * @effects: [host]
+ * @errors: [backend_error, invalid_parameter, missing_parameter]
+ */
+pub fn host_conditions_sample(system: HarnessSystem) -> HostConditionsSnapshot {
+  return system.host_conditions({schema_version: 1})
+}

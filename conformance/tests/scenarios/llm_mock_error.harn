@@ -1,0 +1,46 @@
+import { with_llm_script } from "std/testing"
+
+/**
+ * `llm_call`'s catch value is a dict `{kind, reason, category,
+ * message, retry_after_ms?, provider, model}` — the same shape
+ * `llm_call_safe` returns inside its `error` envelope.
+ * `error_category(e)` and `is_rate_limited(e)` still work (they accept
+ * dict or string); scripts can dispatch directly on `e.kind`/`e.reason`.
+ */
+pipeline default(harness: Harness, task) {
+  // llm_call is fail-fast on transient errors, so a single injected error
+  // surfaces as a throw on the first attempt.
+  with_llm_script(
+    harness.llm,
+    [{error: {category: "rate_limit", message: "429 Too Many Requests", retry_after_ms: 2500}}],
+    { ->
+      try {
+        harness.llm.call("hello", nil, {provider: "mock", model: "mock-model"})
+      } catch (e) {
+        harness.stdio.println(error_category(e))
+        harness.stdio.println(is_rate_limited(e))
+        harness.stdio.println(e.kind)
+        harness.stdio.println(e.reason)
+        harness.stdio.println(e.category)
+        harness.stdio.println(e.retry_after_ms)
+        harness.stdio.println(e.provider)
+        harness.stdio.println(e.model)
+      }
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [{error: {category: "overloaded", message: "529 overloaded"}}],
+    { ->
+      try {
+        harness.llm.call("hello again", nil, {provider: "mock"})
+      } catch (e2) {
+        harness.stdio.println(error_category(e2))
+        harness.stdio.println(e2.kind)
+        harness.stdio.println(e2.reason)
+        harness.stdio.println(e2.retry_after_ms == nil)
+      }
+    },
+  )
+}
+// retry_after_ms is omitted when the provider didn't surface one.

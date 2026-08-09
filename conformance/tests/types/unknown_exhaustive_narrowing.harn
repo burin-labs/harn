@@ -1,0 +1,94 @@
+/**
+ * Exhaustive narrowing on `unknown`: when all nine concrete `type_of`
+ * variants are covered before an `unreachable()` fallback, the type
+ * checker emits no warning and the program runs end-to-end.
+ */
+pipeline test(harness: Harness, task) {
+  fn describe(v: unknown) -> string {
+    if type_of(v) == "string" {
+      return "string:${v.upper()}"
+    }
+    if type_of(v) == "int" {
+      return "int:${v + 1}"
+    }
+    if type_of(v) == "float" {
+      return "float:${v}"
+    }
+    if type_of(v) == "bool" {
+      return "bool:${v}"
+    }
+    if type_of(v) == "nil" {
+      return "nil"
+    }
+    if type_of(v) == "list" {
+      return "list:${len(v)}"
+    }
+    if type_of(v) == "dict" {
+      return "dict:${len(v.keys())}"
+    }
+    if type_of(v) == "closure" {
+      return "closure"
+    }
+    if type_of(v) == "bytes" {
+      return "bytes:${bytes_len(v)}"
+    }
+    unreachable("unknown type_of variant")
+  }
+  harness.stdio.log(describe("hi"))
+  harness.stdio.log(describe(41))
+  harness.stdio.log(describe(nil))
+  harness.stdio.log(describe([1, 2, 3]))
+  harness.stdio.log(describe({a: 1}))
+  harness.stdio.log(describe(true))
+  harness.stdio.log(describe(bytes_from_string("ab")))
+  // Partial narrowing with a plain `return` fallback is NOT an
+  // exhaustiveness claim — it compiles silently and runs fine.
+  fn categorize(v: unknown) -> string {
+    if type_of(v) == "string" {
+      return "str"
+    }
+    if type_of(v) == "int" {
+      return "int"
+    }
+    return "other"
+  }
+  harness.stdio.log(categorize("x"))
+  harness.stdio.log(categorize(1))
+  harness.stdio.log(categorize([1]))
+  // Nested narrowing inside a covered branch doesn't leak coverage out.
+  fn shape(v: unknown) -> string {
+    if type_of(v) == "string" {
+      return "s:${v}"
+    }
+    if type_of(v) == "int" {
+      return "i:${v}"
+    }
+    if type_of(v) == "float" {
+      return "f"
+    }
+    if type_of(v) == "bool" {
+      return "b"
+    }
+    if type_of(v) == "nil" {
+      return "n"
+    }
+    if type_of(v) == "list" {
+      if len(v) == 0 {
+        return "empty-list"
+      }
+      return "list"
+    }
+    if type_of(v) == "dict" {
+      return "d"
+    }
+    if type_of(v) == "closure" {
+      return "c"
+    }
+    if type_of(v) == "bytes" {
+      return "bytes"
+    }
+    unreachable("unknown type_of variant")
+  }
+  harness.stdio.log(shape([]))
+  harness.stdio.log(shape([1, 2]))
+}

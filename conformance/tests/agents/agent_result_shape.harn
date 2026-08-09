@@ -1,0 +1,47 @@
+import { agent_loop } from "std/agent/loop"
+import { llm_text, with_llm_script } from "std/testing"
+
+/**
+ * Asserts the namespaced `agent_loop` result shape introduced in
+ * burin-labs/harn#532. The flat keys (`iterations`, `duration_ms`,
+ * `tools_used`, `successful_tools`, `rejected_tools`, `tool_calling_mode`)
+ * were removed; callers read them via `result.llm.*` and `result.tools.*`.
+ */
+pipeline test(harness: Harness, task) {
+  with_llm_script(
+    harness.llm,
+    [llm_text("still working")],
+    { ->
+      const result = agent_loop(
+        harness,
+        "Just keep replying",
+        "You are helpful",
+        {
+          provider: "mock",
+          loop_until_done: true,
+          done_sentinel: "##DONE##",
+          max_iterations: 1,
+          max_nudges: 1,
+        },
+      )
+      harness.stdio.println(result.status == "budget_exhausted")
+      harness.stdio.println(type_of(result.llm) == "dict")
+      harness.stdio.println(type_of(result.tools) == "dict")
+      harness.stdio.println(result.llm.iterations >= 1)
+      harness.stdio.println(result.llm.duration_ms >= 0)
+      harness.stdio.println(result.llm.input_tokens >= 0)
+      harness.stdio.println(result.llm.output_tokens >= 0)
+      harness.stdio.println(type_of(result.tools.calls) == "list")
+      harness.stdio.println(type_of(result.tools.successful) == "list")
+      harness.stdio.println(type_of(result.tools.rejected) == "list")
+      harness.stdio.println(type_of(result.tools.mode) == "string")
+      harness.stdio.println(result.iterations == nil)
+      harness.stdio.println(result.duration_ms == nil)
+      harness.stdio.println(result.tools_used == nil)
+      harness.stdio.println(result.successful_tools == nil)
+      harness.stdio.println(result.rejected_tools == nil)
+      harness.stdio.println(result.tool_calling_mode == nil)
+    },
+  )
+}
+// The retired flat keys must not resurface as siblings.

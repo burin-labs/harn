@@ -1,0 +1,49 @@
+import { workflow_execute } from "std/workflow/execute"
+
+pipeline main(harness: Harness) {
+  const all_flow = workflow_graph(
+    {
+      entry: "map",
+      nodes: {
+        map: {
+          kind: "map",
+          map_policy: {items: ["a", "b", "c"], output_kind: "summary", max_concurrent: 2},
+          join_policy: {strategy: "all"},
+        },
+      },
+      edges: [],
+    },
+  )
+  const all_result = workflow_execute(harness, "map all", all_flow, [], {max_steps: 1})
+  harness.stdio.println(len(all_result?.artifacts))
+  const first_flow = workflow_graph(
+    {
+      entry: "map",
+      nodes: {
+        map: {
+          kind: "map",
+          map_policy: {items: ["a", "b", "c"], output_kind: "summary", max_concurrent: 2},
+          join_policy: {strategy: "first"},
+        },
+      },
+      edges: [],
+    },
+  )
+  const first_result = workflow_execute(harness, "map first", first_flow, [], {max_steps: 1})
+  harness.stdio.println(len(first_result?.artifacts))
+  const quorum_flow = workflow_graph(
+    {
+      entry: "map",
+      nodes: {
+        map: {
+          kind: "map",
+          map_policy: {items: ["a", "b", "c"], output_kind: "summary", max_concurrent: 2},
+          join_policy: {strategy: "quorum", min_completed: 2},
+        },
+      },
+      edges: [],
+    },
+  )
+  const quorum_result = workflow_execute(harness, "map quorum", quorum_flow, [], {max_steps: 1})
+  harness.stdio.println(len(quorum_result?.artifacts))
+}

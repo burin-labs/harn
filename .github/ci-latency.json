@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "repository": "burin-labs/harn",
+  "workflow": "ci.yml",
+  "event": "merge_group",
+  "topology_epoch": "2026-08-09T02:24:48Z",
+  "full_run_jobs": [
+    { "name": "Verify publishable crates", "match": "exact" },
+    { "name": "Rust workspace tests", "match": "exact" },
+    { "name": "Run Linux sandbox tests", "match": "exact" },
+    { "name": "Run Harn conformance tests", "match": "exact" },
+    { "name": "Check Harn sources and generated files", "match": "exact" },
+    { "name": "Check repository policies", "match": "exact" }
+  ],
+  "slo": {
+    "warning_ms": 540000,
+    "p90_ms": 600000,
+    "hard_max_ms": 900000,
+    "min_samples": 5,
+    "window_samples": 5
+  },
+  "required": {
+    "aggregate_job": "ci-status",
+    "critical_path_allowance_ms": 600000,
+    "jobs": {
+      "changes": { "budget_ms": 30000 },
+      "fmt": { "budget_ms": 60000 },
+      "package-audit": { "budget_ms": 590000 },
+      "lint-md": { "budget_ms": 30000 },
+      "rust-checks": { "budget_ms": 470000 },
+      "rust-check-inputs": { "budget_ms": 600000 },
+      "rust-artifacts-ready": { "budget_ms": 240000 },
+      "security-tests-ready": { "budget_ms": 420000 },
+      "rust-cache-refresh": { "budget_ms": 600000 },
+      "rust-test": { "budget_ms": 600000 },
+      "rust-security": { "budget_ms": 120000 },
+      "harn-audit": { "budget_ms": 430000 },
+      "ci-walltime-report": { "budget_ms": 120000 },
+      "audit-scripts": { "budget_ms": 390000 },
+      "windows-plan": { "budget_ms": 30000 },
+      "windows": { "budget_ms": 600000 },
+      "windows-cross-check": { "budget_ms": 360000 },
+      "macos-plan": { "budget_ms": 30000 },
+      "macos": { "budget_ms": 600000 },
+      "portal": { "budget_ms": 30000 },
+      "vscode": { "budget_ms": 90000 },
+      "docs-site": { "budget_ms": 60000 },
+      "actions": { "budget_ms": 30000 },
+      "setup-harn-action": { "budget_ms": 60000 }
+    }
+  }
+}

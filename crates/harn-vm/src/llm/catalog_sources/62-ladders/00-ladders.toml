@@ -1,0 +1,51 @@
+# ── Model ladders ────────────────────────────────────────────────────────────
+# Named model-fallback ladders resolved by a `ladder: "<name>"` option on
+# `llm_call`. A ladder lowers onto the first-class routing chain: each step is
+# one transport attempt, and the loop advances to the NEXT step only on a
+# transport-class failure (connection / timeout / 429 / 5xx / throttled-empty).
+# Schema-validation failures never advance — they re-ask the same step's model.
+#
+# Steps are ordered cheapest/first to most-capable/last. `provider` is optional
+# and inferred from the model id (or the call's base provider) when omitted.
+# Model aliases (haiku / sonnet / opus, resolved via `[aliases]`) are allowed.
+
+[model_ladders.frugal]
+label = "frugal: cheap-first with frontier escalation"
+steps = [
+  { model = "haiku", label = "cheap" },
+  { model = "sonnet", label = "mid" },
+  { model = "opus", label = "frontier" },
+]
+
+# Canonical route policies consumed by std/agent presets. Volatile model
+# identity belongs here; preset code carries only these stable policy names.
+[model_ladders.agent_frontier]
+label = "agent frontier route with transport fallback"
+steps = [
+  { model = "claude-opus-5", provider = "anthropic", label = "frontier" },
+  { model = "claude-sonnet-5", provider = "anthropic", label = "fallback" },
+]
+
+[model_ladders.agent_cheap]
+label = "low-cost agent summary and verification route"
+steps = [
+  { model = "gpt-4o-mini", provider = "openai", label = "cheap" },
+]
+
+# Reverse-chronological cheap summarizers used by std/agent/sitrep. The stdlib
+# filters these routes by provider availability but never owns their model IDs.
+[model_ladders.sitrep]
+label = "sitrep summarizers, newest and strongest first"
+steps = [
+  { provider = "anthropic", model = "claude-haiku-4-5-20251001" },
+  { provider = "openai", model = "gpt-4o-mini" },
+  { provider = "gemini", model = "gemini-2.5-flash" },
+  { provider = "openrouter", model = "google/gemini-2.5-flash" },
+  { provider = "deepseek", model = "deepseek-v4-flash" },
+  { provider = "groq", model = "llama-3.3-70b" },
+  { provider = "cerebras", model = "gpt-oss-120b" },
+  { provider = "together", model = "Qwen/Qwen3-Coder-Next-FP8" },
+  { provider = "ollama", model = "llama3.2" },
+  { provider = "local", model = "gemma-4-e4b-it" },
+  { provider = "mock", model = "mock" },
+]

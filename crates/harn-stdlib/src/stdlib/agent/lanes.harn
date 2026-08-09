@@ -1,0 +1,834 @@
+// Lanes: tool-surface narrowing keyed off a data-driven classification of
+// the task, generalizing burin-code's `agent_lane_for_task`
+// (`lib/runtime/agent-loop.harn`). Burin classifies a task ONCE, before the
+// run starts, into a named lane (`"general"` vs a narrow `"explicit_patch"`
+// lane keyed off detected target-file mentions) and hands that lane's tool
+// allowlist to the whole agent_loop call — deliberately NOT reclassifying
+// mid-transcript, because narrowing tool NAMES turn-to-turn risks the model
+// hallucinating a call to a tool it remembers offering but that has since
+// been hidden (burin's own design rationale). `lane_policy` ports that
+// same one-shot-per-task shape.
+//
+// Enforcement reuses the EXISTING tool-surface-narrowing primitives shared
+// with `std/agent/stance` (`__tool_surface_filter_registry` /
+// `__tool_surface_policy_tools`) — no new Rust, no new hook surface. That
+// shared seam is also why a tool a lane hides is never NAMED to the model:
+// narrowing via `policy.tools` means a denied call is rejected by harn-vm's
+// native tool-ceiling check, which reports only the ONE tool name the model
+// just attempted — it never enumerates what else is unavailable.
+//
+// `lane_scope_classifier` additionally lowers lane rows onto the EXISTING
+// `pre_turn_scope_classifier` seam (`std/llm/scope_classifier`, consulted by
+// `agent_loop` every turn) — but purely for per-turn observability/telemetry
+// over a long-running lane-scoped session. It always reports `in_scope` and
+// `skip_main_turn: false`, so it never affects loop control; the tool
+// surface is narrowed exclusively by `lane_policy`. Keeping the two apart
+// avoids a dead mechanism: a `pre_turn_scope_classifier` verdict has no live
+// wiring in `agent_loop` beyond the scope-alert skip check, so a lane
+// classifier that ONLY lived there would never actually narrow anything.
+// The classified lane rides the verdict's `evidence` string, not a custom
+// field: the native `scope_classifier_verdict` event has a fixed shape and
+// silently drops keys it does not recognize.
+import { __tool_surface_filter_registry, __tool_surface_policy_tools } from "std/agent/postturn"
+import { agent_tool_annotations } from "std/agent/tool_annotations"
+
+/**
+ * A single lane row. `tool_names` and `tool_kinds` are unioned to compute
+ * the lane's allowed tool set (`tool_kinds` resolved against the registry's
+ * `annotations.kind`/`annotations.tool_kind`, the same fail-safe annotation
+ * lookup `std/agent/stance` uses). `match` declares which classification
+ * strategies apply — `keywords` (case-insensitive substring OR-match against
+ * the task) and/or `explicit_target_paths` (`{min?, max?}` bounds on the
+ * count of detected file-path-like tokens in the task, mirroring burin's
+ * target-count ladder). Exactly one row must set `default: true`; it is the
+ * fallback used when no other row matches (and it never itself needs a
+ * `match`).
+ */
+pub type LaneRow = {
+  name: string,
+  tool_names?: list<string>,
+  tool_kinds?: list<string>,
+  match?: dict,
+  default?: bool,
+}
+
+/**
+ * default_lane_rows() — the built-in two-lane table ported from burin's
+ * `agent_lane_for_task`: `explicit_patch` (narrow: look/search/edit/run/
+ * poll_command/wait_command/kill_command/read_command_output) when the task
+ * names 1-4 explicit file targets, `general` (unrestricted) otherwise.
+ *
+ * NOTE: the `explicit_patch` `tool_names` here are a REFERENCE/example set drawn
+ * from burin-code's product tool surface (`poll_command`/`wait_command`/
+ * `kill_command`/`read_command_output` are burin tool names, not stdlib
+ * primitives). A host with a different tool registry should NOT rely on these
+ * exact names — supply your own rows to `lane_policy` (see `LaneRow`) naming the
+ * tools your registry actually exposes. These defaults are retained as a
+ * released, working out-of-the-box example.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: stable
+ */
+pub fn default_lane_rows() {
+  return [
+    {
+      match: {explicit_target_paths: {max: 4, min: 1}},
+      name: "explicit_patch",
+      tool_names: [
+        "look",
+        "search",
+        "edit",
+        "run",
+        "poll_command",
+        "wait_command",
+        "kill_command",
+        "read_command_output",
+      ],
+    },
+    {default: true, name: "general"},
+  ]
+}
+
+fn __lane_row_name(row) {
+  return to_string(row?.name ?? "")
+}
+
+fn __lane_validate_rows(rows) {
+  if type_of(rows) != "list" || len(rows) == 0 {
+    throw "lane_policy: rows must be a non-empty list of lane rows"
+  }
+  let seen_default = false
+  let names = []
+  for row in rows {
+    if type_of(row) != "dict" {
+      throw "lane_policy: each lane row must be a dict"
+    }
+    const name = __lane_row_name(row)
+    if name == "" {
+      throw "lane_policy: each lane row needs a non-empty `name`"
+    }
+    if contains(names, name) {
+      throw "lane_policy: duplicate lane row name \"" + name + "\""
+    }
+    names = names.appending(name)
+    if row?.default ?? false {
+      seen_default = true
+    }
+  }
+  if !seen_default {
+    throw "lane_policy: exactly one lane row must set `default: true` (the fallback lane)"
+  }
+  return rows
+}
+
+/**
+ * agent_lane_explicit_target_paths(task) — detect file-path-like tokens in
+ * `task` (a word containing a dot-extension, optionally with slashes), the
+ * same signal burin's `explicit_lane_targets_for_task_with_options` uses to
+ * decide whether a task is a bounded, single-area patch. Exposed for tests
+ * and custom classifiers.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: stable
+ */
+pub fn agent_lane_explicit_target_paths(task) {
+  const found = regex_match("[\\w][\\w./-]*\\.[A-Za-z]{1,5}\\b", to_string(task ?? ""))
+  if type_of(found) != "list" {
+    return []
+  }
+  let out = []
+  for token in found {
+    if !contains(out, token) {
+      out = out.appending(token)
+    }
+  }
+  return out
+}
+
+fn __lane_row_matches(row, task, task_lower) {
+  const match_spec = row?.match
+  if type_of(match_spec) != "dict" {
+    return false
+  }
+  const keywords = match_spec?.keywords
+  if type_of(keywords) == "list" && len(keywords) > 0 {
+    for kw in keywords {
+      if contains(task_lower, lowercase(to_string(kw))) {
+        return true
+      }
+    }
+  }
+  const target_rule = match_spec?.explicit_target_paths
+  if type_of(target_rule) == "dict" {
+    const count = len(agent_lane_explicit_target_paths(task))
+    const min_count = target_rule?.min ?? 1
+    const max_count = target_rule?.max ?? 999999999
+    if count >= min_count && count <= max_count {
+      return true
+    }
+  }
+  return false
+}
+
+/**
+ * agent_lane_match(rows, task) — pure heuristic classification: walks
+ * `rows` IN ORDER and returns the first non-default row whose `match`
+ * strategy accepts `task`; falls back to the row marked `default: true`
+ * when nothing matches. Lanes are DATA rows, not `if` branches — add a
+ * lane by appending a row.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: stable
+ */
+pub fn agent_lane_match(rows, task) {
+  const task_lower = lowercase(to_string(task ?? ""))
+  let fallback = nil
+  for row in rows {
+    if row?.default ?? false {
+      fallback = row
+      continue
+    }
+    if __lane_row_matches(row, task, task_lower) {
+      return row
+    }
+  }
+  return fallback ?? rows[0]
+}
+
+fn __lane_normalize_verdict(row, reason) {
+  return {lane: __lane_row_name(row), matched: true, reason: reason}
+}
+
+/**
+ * agent_lane_classify(rows, task, options?) — classify `task` into a lane.
+ * `options.classifier` may override the heuristic with a custom callable
+ * `(task, rows) -> lane_name_string | nil`; an unrecognized or `nil` result
+ * falls back to `agent_lane_match`. Returns `{lane, matched, reason}`.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: stable
+ */
+pub fn agent_lane_classify(rows, task, options = nil) {
+  const opts = options ?? {}
+  const classifier = opts?.classifier
+  if classifier != nil {
+    const picked = try {
+      classifier(task, rows)
+    } catch (e) {
+      nil
+    }
+    if picked != nil {
+      for row in rows {
+        if __lane_row_name(row) == to_string(picked) {
+          return __lane_normalize_verdict(row, "custom_classifier")
+        }
+      }
+    }
+  }
+  const row = agent_lane_match(rows, task)
+  return __lane_normalize_verdict(
+    row,
+    if row?.default ?? false {
+      "default_lane"
+    } else {
+      "matched_row"
+    },
+  )
+}
+
+fn __lane_registry_entries(registry) {
+  if registry == nil {
+    return []
+  }
+  if type_of(registry) == "dict" {
+    return registry?.tools ?? []
+  }
+  if type_of(registry) == "list" {
+    return registry
+  }
+  return []
+}
+
+fn __lane_entry_name(entry) {
+  return to_string(entry?.name ?? entry?.function?.name ?? "")
+}
+
+fn __lane_entry_kind(entry, policy) {
+  const annotations = agent_tool_annotations(entry, policy, __lane_entry_name(entry))
+  return to_string(annotations?.kind ?? annotations?.tool_kind ?? "")
+}
+
+fn __lane_push_unique(names, value) {
+  const n = to_string(value)
+  if n != "" && !contains(names, n) {
+    return names.appending(n)
+  }
+  return names
+}
+
+/**
+ * The lane's OWN allowed tool set: the union of its explicit `tool_names` and
+ * the registry entries matching its `tool_kinds`. Deliberately does NOT fold
+ * in `hard_keep` — an empty result here means the lane performs no narrowing
+ * (the `general`/default case), and `hard_keep` must not turn that
+ * non-narrowing lane into a restricted one. `lane_policy` unions `hard_keep`
+ * only after confirming the lane actually narrows.
+ */
+fn __lane_own_tool_names(row, registry, policy) {
+  let names = []
+  const explicit = row?.tool_names
+  if type_of(explicit) == "list" {
+    for raw in explicit {
+      names = __lane_push_unique(names, raw)
+    }
+  }
+  const kinds = row?.tool_kinds
+  if type_of(kinds) == "list" && len(kinds) > 0 {
+    for entry in __lane_registry_entries(registry) {
+      const kind = __lane_entry_kind(entry, policy)
+      if kind != "" && contains(kinds, kind) {
+        names = __lane_push_unique(names, __lane_entry_name(entry))
+      }
+    }
+  }
+  return names
+}
+
+/**
+ * lane_policy(rows, task, agent_options?, options?) — classify `task` into a
+ * lane from `rows` (DATA, see `LaneRow`), then narrow
+ * `agent_options.tools`/`agent_options.policy` down to that lane's allowed
+ * tool set for the WHOLE `agent_loop` run — a one-shot decision, matching
+ * burin's `agent_lane_for_task` (see module docs for why lanes are not
+ * reclassified per turn).
+ *
+ * A row with neither `tool_names` nor `tool_kinds` performs no narrowing —
+ * this is how the built-in `general` lane stays unrestricted, and it stays
+ * unrestricted even when `options.hard_keep` is set. `options.hard_keep`
+ * names tools that additionally survive a lane that IS narrowing (a union
+ * with the matched lane's own tools); it never itself causes narrowing, so a
+ * non-narrowing lane is not turned into a restricted one. `options.classifier`
+ * is forwarded to `agent_lane_classify`.
+ *
+ * The result carries `_lane_verdict` (`{lane, matched, reason, tool_names?}`)
+ * for tests/telemetry; it is metadata only, harmless to leave on `agent_loop`
+ * options.
+ *
+ * @effects: []
+ * @errors: [runtime]
+ * @api_stability: stable
+ * @example: agent_loop(harness, task, nil, lane_policy(default_lane_rows(), task, {provider: "anthropic", tools: my_tools}))
+ */
+pub fn lane_policy(rows, task, agent_options = nil, options = nil) {
+  const validated = __lane_validate_rows(rows)
+  const opts = if type_of(agent_options) == "dict" {
+    agent_options
+  } else {
+    {}
+  }
+  const extra = options ?? {}
+  const hard_keep = extra?.hard_keep ?? []
+  const verdict = agent_lane_classify(validated, task, extra)
+  let matched_row = nil
+  for row in validated {
+    if __lane_row_name(row) == verdict.lane {
+      matched_row = row
+    }
+  }
+  const resolved_row = matched_row ?? validated[0]
+  const lane_names = __lane_own_tool_names(resolved_row, opts?.tools, opts?.policy)
+  // A lane that contributes no tools of its own performs NO narrowing (the
+  // `general`/default case) — leave the surface untouched. hard_keep only
+  // augments a lane that IS narrowing; with nothing narrowed there is nothing
+  // to keep relative to, so it must not restrict an otherwise-open surface.
+  if len(lane_names) == 0 {
+    return opts + {_lane_verdict: verdict}
+  }
+  let names = lane_names
+  for raw in hard_keep {
+    names = __lane_push_unique(names, raw)
+  }
+  return opts
+    + {
+    _lane_verdict: verdict + {tool_names: names},
+    policy: __tool_surface_policy_tools(opts?.policy, names),
+    tools: __tool_surface_filter_registry(opts?.tools, names),
+  }
+}
+
+/**
+ * lane_scope_classifier(rows, options?) — build a `pre_turn_scope_classifier`
+ * config (see `std/llm/scope_classifier`) that reclassifies the current
+ * message into a lane EVERY turn purely for observability: it emits the
+ * standard `scope_classifier_verdict` event on every turn, and always
+ * returns `label: "in_scope"`/`skip_main_turn: false` — it never skips a
+ * turn and never narrows the tool surface (that is `lane_policy`'s job).
+ * The classified lane surfaces in the verdict's free-text `evidence` field
+ * (`"lane=<name> reason=<reason>"`) rather than a dedicated `lane` key: the
+ * native `scope_classifier_verdict` event has a fixed Rust-side shape and
+ * silently drops unrecognized keys, so `evidence` (already part of that
+ * shape) is the only channel a custom classifier can use to carry extra
+ * information through live. Spread the result into `agent_loop` options
+ * alongside `lane_policy` when a caller wants a live per-turn audit trail
+ * of lane drift over a long-running lane-scoped session.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: stable
+ * @example: agent_loop(harness, task, nil, lane_policy(rows, task, opts) + lane_scope_classifier(rows))
+ */
+pub fn lane_scope_classifier(rows, options = nil) {
+  const validated = __lane_validate_rows(rows)
+  const extra = options ?? {}
+  const classifier = { payload ->
+    const observed_task = to_string(payload?.user_message ?? payload?.task ?? "")
+    const verdict = agent_lane_classify(validated, observed_task, extra)
+    return {
+      confidence: 1.0,
+      evidence: "lane=" + verdict.lane + " reason=" + verdict.reason,
+      label: "in_scope",
+      skip_main_turn: false,
+    }
+  }
+  return {pre_turn_scope_classifier: classifier}
+}
+
+// -------------------------------------------------------------------------------------------------
+
+// Per-stage tool-gate (ADDITIVE, default-off). Absorbs the generic core of
+// burin-code's `tool-gating.harn`. Where `lane_policy` above is a per-TASK
+// one-shot ceiling that HIDES tools silently at loop start (#2506) and never
+// reclassifies mid-transcript, this seam is a per-(lane, STAGE) gate whose
+// scope rides a machine-readable marker in the workflow node's task LABEL, is
+// recovered MID-TRANSCRIPT (from the latest user prompt, not only at loop
+// start), and DENIES a disallowed tool call with a suggestion instead of
+// hiding it. It is wholly separate from `lane_policy` and the classifier: a
+// caller that never renders a gate marker sees byte-identical behavior.
+//
+// Division of labor with burin: the lane×stage capability TABLE (which kinds a
+// `grounded_patch:implement` stage may run) and the tool->kind resolver stay in
+// the harness — they are its domain. This module owns the generic mechanism:
+// marker ENCODE (`stage_gate_label`), marker DECODE (`stage_gate_parse` /
+// `stage_gate_from_session`), the allow DECISION (`stage_gate_allows`), and the
+// denial-with-suggestion UX text (`stage_gate_denial`). Kind resolution is
+// injected via an `options.kind_of` callback so the seam never hardwires a
+// particular tool registry.
+
+// -------------------------------------------------------------------------------------------------
+
+const __STAGE_GATE_PREFIX = "[lane_gate "
+
+// The marker is space-delimited (`lane=… stage=… kinds=… tools=…`), token lists
+// are comma-joined, `=` separates key from value, and `]` terminates the marker.
+// A component carrying any of these four bytes would silently truncate or split
+// on `stage_gate_parse`, so `stage_gate_label` rejects it loudly instead.
+const __STAGE_GATE_DELIMITERS = [" ", "=", ",", "]"]
+
+fn __stage_gate_reject_delimiters(field, value) {
+  for delimiter in __STAGE_GATE_DELIMITERS {
+    if value.index_of(delimiter) >= 0 {
+      throw "stage_gate_label: " + field + " may not contain the marker delimiter '"
+        + delimiter
+        + "' (it would corrupt the stage_gate_parse round-trip); got: \""
+        + value
+        + "\""
+    }
+  }
+}
+
+fn __stage_gate_token_list(values) {
+  let out = []
+  for value in values ?? [] {
+    const rendered = to_string(value ?? "").trim()
+    if rendered != "" && !contains(out, rendered) {
+      out = out.appending(rendered)
+    }
+  }
+  return out
+}
+
+fn __stage_gate_token_string(values) {
+  const normalized = __stage_gate_token_list(values)
+  if len(normalized) == 0 {
+    return "-"
+  }
+  return join(normalized, ",")
+}
+
+fn __stage_gate_parse_token_list(raw) {
+  const normalized = to_string(raw ?? "").trim()
+  if normalized == "" || normalized == "-" {
+    return []
+  }
+  // Split on the shared comma delimiter (__STAGE_GATE_DELIMITERS[2]) rather than a
+  // re-hardcoded literal, so the parser can never drift from the delimiter set the
+  // encoder rejects components against.
+  return __stage_gate_token_list(normalized.split(__STAGE_GATE_DELIMITERS[2]))
+}
+
+/**
+ * Resolve and validate the marker prefix for a stage-gate op. Defaults to the
+ * built-in `__STAGE_GATE_PREFIX`. A host may inject its own (e.g. burin-code's
+ * `"[burin_gate "`) via the `prefix` option so its existing markers round-trip
+ * without an adapter. A custom prefix must be a well-formed marker opener: it must
+ * start with `"["` and end with a space, and must not contain any of the structural
+ * delimiters the parser splits on (`"="`, `","`, `"]"`), which would corrupt the
+ * stage_gate_parse round-trip. Validated loudly at call time so a mistyped prefix
+ * fails here rather than silently producing an unparseable marker. The trailing
+ * space is deliberately NOT rejected even though it is a marker delimiter — it is
+ * the required separator between the prefix and the first `key=value` token.
+ */
+fn __stage_gate_prefix(options) -> string {
+  const raw = options?.prefix
+  if raw == nil {
+    return __STAGE_GATE_PREFIX
+  }
+  const prefix = to_string(raw)
+  if !starts_with(prefix, "[") {
+    throw "stage_gate: `prefix` must start with '[' (got: \"" + prefix + "\")"
+  }
+  if !ends_with(prefix, " ") {
+    throw "stage_gate: `prefix` must end with a space (got: \"" + prefix + "\")"
+  }
+  for delimiter in [
+    __STAGE_GATE_DELIMITERS[1],
+    __STAGE_GATE_DELIMITERS[2],
+    __STAGE_GATE_DELIMITERS[3],
+  ] {
+    if prefix.index_of(delimiter) >= 0 {
+      throw "stage_gate: `prefix` may not contain the marker delimiter '" + (delimiter ?? "")
+        + "' (it would corrupt the stage_gate_parse round-trip); got: \""
+        + prefix
+        + "\""
+    }
+  }
+  return prefix
+}
+
+fn __stage_gate_callable(value) {
+  const kind = type_of(value)
+  return kind == "closure" || kind == "function" || kind == "fn"
+}
+
+fn __stage_gate_validate_options(options) {
+  const kind_of = options?.kind_of
+  if kind_of != nil && !__stage_gate_callable(kind_of) {
+    throw "stage_gate: `kind_of` must be a callable (tool_name) -> kind string"
+  }
+  const suggest = options?.suggest
+  if suggest != nil && !__stage_gate_callable(suggest) && type_of(suggest) != "string" {
+    throw "stage_gate: `suggest` must be a string or a callable (gate) -> string"
+  }
+  return options
+}
+
+fn __stage_gate_kind_of(options, tool_name) {
+  const resolver = options?.kind_of
+  if resolver == nil {
+    return ""
+  }
+  const kind = try {
+    resolver(tool_name)
+  } catch (e) {
+    ""
+  }
+  return to_string(kind ?? "")
+}
+
+/**
+ * stage_gate_label(base_label, gate, options?) — encode a lane/stage gate into a
+ * task label so a downstream PreToolUse enforcement seam can recover the active
+ * workflow scope from the prompt itself. `gate` is `{lane, stage,
+ * allowed_kinds?, allowed_tools?}`. Returns `base_label` UNCHANGED when either
+ * `lane` or `stage` is blank — so an ungated node's label is byte-identical to
+ * what it would be without this seam. Throws when any component (`lane`,
+ * `stage`, or an `allowed_kinds`/`allowed_tools` token) contains a marker
+ * delimiter (space, `=`, `,`, `]`) that `stage_gate_parse` could not recover.
+ * `options.prefix` overrides the default `"[lane_gate "` marker prefix (a host
+ * must pass the SAME prefix to `stage_gate_parse`/`stage_gate_from_session`);
+ * omitting it renders the byte-identical default marker.
+ *
+ * @effects: []
+ * @errors: [runtime]
+ * @api_stability: stable
+ * @example: stage_gate_label(task, {lane: "repair_local", stage: "repair", allowed_tools: ["edit", "look"]})
+ */
+pub fn stage_gate_label(base_label, gate, options = nil) {
+  const prefix = __stage_gate_prefix(options ?? {})
+  const base = to_string(base_label ?? "").trim()
+  const spec = if type_of(gate) == "dict" {
+    gate
+  } else {
+    {}
+  }
+  const lane = to_string(spec?.lane ?? "").trim()
+  const stage = to_string(spec?.stage ?? "").trim()
+  if lane == "" || stage == "" {
+    return base
+  }
+  __stage_gate_reject_delimiters("lane", lane)
+  __stage_gate_reject_delimiters("stage", stage)
+  const kinds = __stage_gate_token_list(spec?.allowed_kinds ?? [])
+  const tools = __stage_gate_token_list(spec?.allowed_tools ?? [])
+  for kind_token in kinds {
+    __stage_gate_reject_delimiters("allowed_kinds token", kind_token)
+  }
+  for tool_token in tools {
+    __stage_gate_reject_delimiters("allowed_tools token", tool_token)
+  }
+  const marker = prefix + "lane=" + lane + " stage=" + stage + " kinds="
+    + __stage_gate_token_string(
+    kinds,
+  )
+    + " tools="
+    + __stage_gate_token_string(tools)
+    + "]"
+  if base == "" {
+    return marker
+  }
+  return base + " " + marker
+}
+
+/**
+ * stage_gate_parse(text, options?) — recover a gate from any text carrying a
+ * marker rendered by `stage_gate_label`. Returns `{lane, stage, allowed_kinds,
+ * allowed_tools}`, or an EMPTY dict `{}` when no well-formed marker is present.
+ * An empty gate never denies anything (see `stage_gate_allows`), so text
+ * without a marker is inert. `options.prefix` must match the prefix passed to
+ * `stage_gate_label` (default `"[lane_gate "`); a marker under a different prefix
+ * is not recognized.
+ *
+ * @effects: []
+ * @errors: [runtime]
+ * @api_stability: stable
+ */
+pub fn stage_gate_parse(text, options = nil) {
+  const prefix = __stage_gate_prefix(options ?? {})
+  // Scan with the SAME structural delimiter set the encoder rejects components
+  // against (__STAGE_GATE_DELIMITERS = [space, "=", ",", "]"]), referenced by
+  // index rather than re-hardcoded, so encoder and parser can never drift.
+  const delim_space = __STAGE_GATE_DELIMITERS[0]
+  const delim_eq = __STAGE_GATE_DELIMITERS[1]
+  const delim_close = __STAGE_GATE_DELIMITERS[3]
+  const body = to_string(text ?? "")
+  const start = body.index_of(prefix)
+  if start < 0 {
+    return {}
+  }
+  const body_start = start + len(prefix)
+  const tail = body.substring(body_start, len(body))
+  const end = tail.index_of(delim_close)
+  if end < 0 {
+    return {}
+  }
+  const marker = tail.substring(0, end).trim()
+  let lane = ""
+  let stage = ""
+  let kinds = []
+  let tools = []
+  for token in marker.split(delim_space) {
+    const piece = token.trim()
+    const eq = piece.index_of(delim_eq)
+    if eq <= 0 {
+      continue
+    }
+    const key = piece.substring(0, eq).trim()
+    const value = piece.substring(eq + 1, len(piece)).trim()
+    if key == "lane" {
+      lane = value
+    }
+    if key == "stage" {
+      stage = value
+    }
+    if key == "kinds" {
+      kinds = __stage_gate_parse_token_list(value)
+    }
+    if key == "tools" {
+      tools = __stage_gate_parse_token_list(value)
+    }
+  }
+  if lane == "" || stage == "" {
+    return {}
+  }
+  return {allowed_kinds: kinds, allowed_tools: tools, lane: lane, stage: stage}
+}
+
+fn __stage_gate_latest_user_prompt(messages) {
+  let prompt = ""
+  for message in messages ?? [] {
+    if to_string(message?.role ?? "") != "user" {
+      continue
+    }
+    const content = to_string(message?.content ?? "").trim()
+    if content != "" {
+      prompt = content
+    }
+  }
+  return prompt
+}
+
+/**
+ * stage_gate_from_session(harness.agent, session_id, options?) — recover the active gate
+ * MID-TRANSCRIPT by inspecting the latest user prompt in a live session's
+ * transcript (the marker-recovery half of the PreToolUse enforcement seam). Reads
+ * the existing `agent_session_snapshot`/`transcript_messages` seam — no new host
+ * surface. Returns an empty dict `{}` when the session is unknown or carries no
+ * marker. `options.prefix` is forwarded to `stage_gate_parse` and must match the
+ * prefix the label was rendered with (default `"[lane_gate "`).
+ *
+ * @effects: [host]
+ * @errors: [runtime]
+ * @api_stability: stable
+ */
+pub fn stage_gate_from_session(agent: HarnessAgent, session_id, options = nil) {
+  const sid = to_string(session_id ?? "").trim()
+  if sid == "" {
+    return {}
+  }
+  const snapshot = agent.snapshot(sid)
+  if snapshot == nil {
+    return {}
+  }
+  const messages = try {
+    transcript_messages(snapshot)
+  } catch (e) {
+    snapshot?.messages ?? []
+  }
+  const prompt = __stage_gate_latest_user_prompt(messages)
+  if prompt == "" {
+    return {}
+  }
+  return stage_gate_parse(prompt, options)
+}
+
+/**
+ * stage_gate_allows(gate, tool_name, options?) — the allow DECISION for a
+ * per-(lane, stage) gate. Returns `true` (never denies) when `gate` carries no
+ * lane/stage or no tool is named — so an inactive gate is default-off. A tool
+ * named in `allowed_tools` always passes. A gate with `allowed_kinds` consults
+ * `options.kind_of` (a `(tool_name) -> kind` callback) and passes when the
+ * resolved kind is allowed; when no `kind_of` is supplied the gate FAILS OPEN
+ * (a gate must never silently block on missing wiring). A tools-only gate with
+ * an empty tool list gates nothing.
+ *
+ * @effects: []
+ * @errors: [runtime]
+ * @api_stability: stable
+ */
+pub fn stage_gate_allows(gate, tool_name, options = nil) {
+  const spec = if type_of(gate) == "dict" {
+    gate
+  } else {
+    {}
+  }
+  const opts = __stage_gate_validate_options(options ?? {})
+  const name = to_string(tool_name ?? "").trim()
+  if to_string(spec?.lane ?? "") == "" || to_string(spec?.stage ?? "") == "" || name == "" {
+    return true
+  }
+  const allowed_tools = __stage_gate_token_list(spec?.allowed_tools ?? [])
+  if contains(allowed_tools, name) {
+    return true
+  }
+  const allowed_kinds = __stage_gate_token_list(spec?.allowed_kinds ?? [])
+  if len(allowed_kinds) == 0 {
+    return len(allowed_tools) == 0
+  }
+  const kind = __stage_gate_kind_of(opts, name)
+  if kind == "" {
+    return true
+  }
+  return contains(allowed_kinds, kind)
+}
+
+fn __stage_gate_render_allowed(gate) {
+  const kinds = __stage_gate_token_list(gate?.allowed_kinds ?? [])
+  const tools = __stage_gate_token_list(gate?.allowed_tools ?? [])
+  let parts = []
+  if len(kinds) > 0 {
+    parts = parts.appending("kinds=" + join(kinds, ","))
+  }
+  if len(tools) > 0 {
+    parts = parts.appending("tools=" + join(tools, ","))
+  }
+  if len(parts) == 0 {
+    return "none"
+  }
+  return join(parts, " ")
+}
+
+fn __stage_gate_default_suggestion(gate) {
+  const tools = __stage_gate_token_list(gate?.allowed_tools ?? [])
+  if len(tools) > 0 {
+    return "use " + join(tools, " or ")
+  }
+  const kinds = __stage_gate_token_list(gate?.allowed_kinds ?? [])
+  if len(kinds) > 0 {
+    return "use one of the declared " + join(kinds, "/") + " tools for this stage"
+  }
+  return "use one of the declared tools for this stage"
+}
+
+fn __stage_gate_suggestion_text(gate, options) {
+  const suggest_override = options?.suggest
+  if type_of(suggest_override) == "string" && suggest_override != "" {
+    return suggest_override
+  }
+  if __stage_gate_callable(suggest_override) {
+    const custom = try {
+      suggest_override(gate)
+    } catch (e) {
+      nil
+    }
+    if type_of(custom) == "string" && custom != "" {
+      return custom
+    }
+  }
+  return __stage_gate_default_suggestion(gate)
+}
+
+/**
+ * stage_gate_denial(gate, tool_name, options?) — the denial-with-suggestion UX
+ * text a PreToolUse hook surfaces when `stage_gate_allows` rejects a call
+ * (rather than the tool being silently hidden). Names the lane, stage, tool,
+ * resolved kind, the allowed set, and a recovery suggestion. `options.kind_of`
+ * resolves the tool kind for the report; `options.suggest` (a string or a
+ * `(gate) -> string` callback) overrides the default suggestion.
+ *
+ * @effects: []
+ * @errors: [runtime]
+ * @api_stability: stable
+ * @example: stage_gate_denial(gate, "git", {kind_of: { name -> tool_kind(name) }})
+ */
+pub fn stage_gate_denial(gate, tool_name, options = nil) {
+  const spec = if type_of(gate) == "dict" {
+    gate
+  } else {
+    {}
+  }
+  const opts = __stage_gate_validate_options(options ?? {})
+  const name = to_string(tool_name ?? "").trim()
+  const lane = if to_string(spec?.lane ?? "") != "" {
+    to_string(spec.lane)
+  } else {
+    "unknown"
+  }
+  const stage = if to_string(spec?.stage ?? "") != "" {
+    to_string(spec.stage)
+  } else {
+    "unknown"
+  }
+  const kind = __stage_gate_kind_of(opts, name)
+  const allowed = __stage_gate_render_allowed(spec)
+  const suggestion = __stage_gate_suggestion_text(spec, opts)
+  return "tool_not_available_in_stage lane=" + lane + " stage=" + stage + " tool=" + name + " kind="
+    + kind
+    + " allowed="
+    + allowed
+    + " suggestion="
+    + suggestion
+}

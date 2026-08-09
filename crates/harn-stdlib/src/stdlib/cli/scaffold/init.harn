@@ -1,0 +1,768 @@
+/**
+ * `harn init` and `harn new` ported to .harn — see harn#2308 (W8).
+ *
+ * Renders the eight project starter templates (basic, agent, chat,
+ * mcp-server, eval, pipeline-lab, package, connector) and writes each
+ * template file to disk, skipping files that already exist (mirrors the
+ * Rust `write_if_new` semantics). The dispatch shim in
+ * crates/harn-cli/src/commands/init.rs resolves args, creates the
+ * destination dir, and hands the rendered project name + template
+ * identifier to this script via env vars.
+ *
+ * Inputs (set by the shim before dispatch):
+ *   HARN_INIT_NAME           — optional human project name shown by "cd"
+ *   HARN_INIT_PROJECT_NAME   — sanitized project name embedded in
+ *                              manifests and README headers
+ *   HARN_INIT_DIR            — destination directory (already created)
+ *   HARN_INIT_TEMPLATE       — one of: basic, agent, chat, mcp-server,
+ *                              eval, pipeline-lab, package, connector
+ *   HARN_INIT_HARN_RANGE     — current harn version range (e.g. ">=0.7,<0.8")
+ *   HARN_INIT_HARN_VERSION   — exact harn version for generated CI
+ *   HARN_INIT_MODE           — "init" or "new" (informational, not currently
+ *                              branched on but kept for future divergence)
+ */
+fn __basic_manifest(project_name: string) -> string {
+  return "[package]\n"
+    + "name = \""
+    + project_name
+    + "\"\n"
+    + "version = \"0.1.0\"\n"
+    + "\n"
+    + "[dependencies]\n"
+}
+
+fn __agent_manifest(project_name: string) -> string {
+  return "[package]\n"
+    + "name = \""
+    + project_name
+    + "\"\n"
+    + "version = \"0.1.0\"\n"
+    + "\n"
+    + "[skills]\n"
+    + "paths = [\"agent/skills\"]\n"
+    + "\n"
+    + "[dependencies]\n"
+}
+
+fn __chat_manifest(project_name: string) -> string {
+  return "[package]\n"
+    + "name = \""
+    + project_name
+    + "\"\n"
+    + "version = \"0.1.0\"\n"
+    + "\n"
+    + "[dependencies]\n"
+    + "\n"
+    + "[llm.aliases]\n"
+    + "chat = { id = \"llama3.2\", provider = \"ollama\" }\n"
+}
+
+fn __package_manifest(project_name: string, harn_range: string) -> string {
+  return "[package]\n"
+    + "name = \""
+    + project_name
+    + "\"\n"
+    + "version = \"0.1.0\"\n"
+    + "description = \"Reusable Harn package.\"\n"
+    + "license = \"MIT OR Apache-2.0\"\n"
+    + "repository = \"https://github.com/OWNER/"
+    + project_name
+    + "\"\n"
+    + "harn = \""
+    + harn_range
+    + "\"\n"
+    + "docs_url = \"docs/api.md\"\n"
+    + "\n"
+    + "[exports]\n"
+    + "lib = \"lib/main.harn\"\n"
+    + "\n"
+    + "[dependencies]\n"
+}
+
+fn __connector_manifest(project_name: string, harn_range: string) -> string {
+  return "[package]\n"
+    + "name = \""
+    + project_name
+    + "\"\n"
+    + "version = \"0.1.0\"\n"
+    + "description = \"Pure-Harn connector package.\"\n"
+    + "license = \"MIT OR Apache-2.0\"\n"
+    + "repository = \"https://github.com/OWNER/"
+    + project_name
+    + "\"\n"
+    + "harn = \""
+    + harn_range
+    + "\"\n"
+    + "docs_url = \"docs/api.md\"\n"
+    + "\n"
+    + "[exports]\n"
+    + "connector = \"connectors/echo.harn\"\n"
+    + "\n"
+    + "[[providers]]\n"
+    + "id = \"echo\"\n"
+    + "connector = { harn = \"connectors/echo\" }\n"
+    + "\n"
+    + "[providers.setup]\n"
+    + "auth_type = \"none\"\n"
+    + "flow = \"none\"\n"
+    + "setup_command = [\"harn\", \"connect\", \"echo\"]\n"
+    + "validation_command = [\"harn\", \"connector\", \"check\", \".\"]\n"
+    + "\n"
+    + "[[providers.setup.health_checks]]\n"
+    + "id = \"contract\"\n"
+    + "kind = \"command\"\n"
+    + "command = [\"harn\", \"connector\", \"check\", \".\"]\n"
+    + "\n"
+    + "[providers.setup.recovery]\n"
+    + "missing_auth = \"This connector does not require authentication.\"\n"
+    + "expired_credentials = \"This connector does not use credentials.\"\n"
+    + "revoked_credentials = \"This connector does not use credentials.\"\n"
+    + "missing_scopes = \"This connector does not require scopes.\"\n"
+    + "inaccessible_resource = \"Verify the local connector package path.\"\n"
+    + "transient_provider_outage = \"Retry after the local runtime is available.\"\n"
+    + "\n"
+    + "[connector_contract]\n"
+    + "version = 1\n"
+    + "\n"
+    + "[[connector_contract.fixtures]]\n"
+    + "provider = \"echo\"\n"
+    + "name = \"message\"\n"
+    + "kind = \"webhook\"\n"
+    + "body_json = { message = \"hello\" }\n"
+    + "expect_type = \"event\"\n"
+    + "expect_kind = \"webhook\"\n"
+    + "expect_event_count = 1\n"
+    + "\n"
+    + "[dependencies]\n"
+}
+
+fn __basic_files(project_name: string, harn_range: string) -> list {
+  return [
+    ["harn.toml", __basic_manifest(project_name)],
+    [
+      "main.harn",
+      "import \"lib/helpers\"\n"
+        + "\n"
+        + "pipeline default(harness: Harness, task) {\n"
+        + "  const greeting = greet(\"world\")\n"
+        + "  harness.stdio.log(greeting)\n"
+        + "}\n",
+    ],
+    [
+      "lib/helpers.harn",
+      "pub fn greet(name) {\n"
+        + "  return \"Hello, \" + name + \"!\"\n"
+        + "}\n"
+        + "\n"
+        + "pub fn add(a, b) {\n"
+        + "  return a + b\n"
+        + "}\n",
+    ],
+    [
+      "tests/test_main.harn",
+      "import \"../lib/helpers\"\n"
+        + "\n"
+        + "pipeline test_greet(task) {\n"
+        + "  assert_eq(greet(\"world\"), \"Hello, world!\")\n"
+        + "  assert_eq(greet(\"Harn\"), \"Hello, Harn!\")\n"
+        + "}\n"
+        + "\n"
+        + "pipeline test_add(task) {\n"
+        + "  assert_eq(add(2, 3), 5)\n"
+        + "  assert_eq(add(-1, 1), 0)\n"
+        + "  assert_eq(add(0, 0), 0)\n"
+        + "}\n",
+    ],
+  ]
+}
+
+fn __agent_files(project_name: string, harn_range: string) -> list {
+  const main_harn = "import { run_agent_app } from \"agent/app\"\n"
+    + "\n"
+    + "fn main(harness: Harness) {\n"
+    + "  run_agent_app(harness)\n"
+    + "}\n"
+  const app_harn = "import { agent_host_tools } from \"std/agent/host_tools\"\n"
+    + "import { agent_preset } from \"std/agent/presets\"\n" + "\n"
+    + "pub fn load_instructions(harness: Harness) -> string {\n"
+    + "  const path = path_join(harness.fs.cwd(), \"agent\", \"instructions.md\")\n"
+    + "  if harness.fs.exists(path) {\n" + "    return harness.fs.read_text(path)\n" + "  }\n"
+    + "  return \"Review the workspace carefully.\"\n" + "}\n" + "\n"
+    + "pub fn agent_app_tools(root) {\n" + "  return agent_host_tools(harness, \n" + "    nil,\n"
+    + "    {\n" + "      root: root,\n" + "      cwd: root,\n"
+    + "      enabled_tools: [\"list_directory\", \"read_file\", \"search_files\"],\n"
+    + "      max_inline_bytes: 6000,\n"
+    + "      search_exclude_globs: [\".git/**\", \".harn/**\", \"target/**\", \"node_modules/**\"],\n"
+    + "    },\n" + "  )\n" + "}\n" + "\n"
+    + "// Agent-loop failures are values, so diagnostics and process status must derive\n"
+    + "// from the same terminal status.\n" + "pub fn agent_result_exit_code(result) -> int {\n"
+    + "  if (result?.status ?? \"\") == \"done\" {\n" + "    return 0\n" + "  }\n" + "  return 1\n"
+    + "}\n" + "\n" + "pub fn emit_agent_result(harness: Harness, result) -> int {\n"
+    + "  const text = result?.visible_text ?? result?.text ?? \"\"\n" + "  if text != \"\" {\n"
+    + "    harness.stdio.println(text)\n" + "  }\n"
+    + "  const exit_code = agent_result_exit_code(result)\n"
+    + "  const status = result?.status ?? \"unknown\"\n" + "  if exit_code == 0 {\n"
+    + "    return exit_code\n" + "  }\n"
+    + "  harness.stdio.eprintln(\"agent did not complete (status: \" + status + \")\")\n"
+    + "  const message = result?.error?.message ?? \"\"\n" + "  if message != \"\" {\n"
+    + "    harness.stdio.eprintln(message)\n" + "  }\n" + "  return exit_code\n" + "}\n" + "\n"
+    + "pub fn run_agent_app_with_options(harness: Harness, options = nil) {\n"
+    + "  const opts = options ?? {}\n"
+    + "  const task = opts?.task ?? harness.env.get_or(\"HARN_TASK\", \"Review this workspace\")\n"
+    + "  const instructions = opts?.instructions ?? load_instructions(harness)\n"
+    + "  const tools = opts?.tools ?? agent_app_tools(harness.fs.cwd())\n"
+    + "  const audit_opts = agent_preset(\n" + "    \"audit\",\n" + "    {\n"
+    + "      system: instructions,\n" + "      tools: tools,\n"
+    + "      max_iterations: opts?.max_iterations ?? 6,\n"
+    + "      loop_until_done: opts?.loop_until_done ?? true,\n"
+    + "      llm_options: opts?.llm_options ?? {temperature: 0},\n" + "    },\n" + "  )\n"
+    + "  const result = agent_loop(harness, task, audit_opts?.system, audit_opts)\n"
+    + "  if opts?.emit_result ?? true {\n" + "    emit_agent_result(harness, result)\n" + "  }\n"
+    + "  return result\n" + "}\n" + "\n" + "pub fn run_agent_app(harness: Harness) {\n"
+    + "  const result = run_agent_app_with_options(harness, {emit_result: false})\n"
+    + "  const exit_code = emit_agent_result(harness, result)\n" + "  if exit_code != 0 {\n"
+    + "    harness.runtime.exit(exit_code)\n" + "  }\n" + "  return result\n" + "}\n"
+  const instructions = "# Agent Instructions\n"
+    + "\n"
+    + "You are a careful workspace agent. Inspect before answering, keep changes scoped,\n"
+    + "and prefer deterministic tools and task-plan stages over ad hoc prose protocols.\n"
+    + "\n"
+    + "Use skills from `agent/skills` when they match the task. Keep subagent work\n"
+    + "small, typed, and easy to replay.\n"
+  const skill_doc = "---\n"
+    + "name: repository-review\n"
+    + "short: Review repository context and risks.\n"
+    + "description: Use when reviewing repository structure, risks, and next actions.\n"
+    + "---\n"
+    + "\n"
+    + "# Repository Review\n"
+    + "\n"
+    + "Start by listing the relevant files, then inspect the narrowest source files\n"
+    + "needed to answer. Report facts with file paths and keep recommendations small.\n"
+  const test_harn =
+    "import { agent_result_exit_code, run_agent_app_with_options } from \"../agent/app\"\n"
+    + "\n"
+    + "pipeline test_agent_smoke(task) {\n"
+    + "  harness.llm.mock_clear()\n"
+    + "  harness.llm.mock_enqueue({text: \"<user_response>Repository looks healthy.</user_response>\"})\n"
+    + "  const result = run_agent_app_with_options(\n"
+    + "    harness,\n"
+    + "    {\n"
+    + "      task: \"Review the repository\",\n"
+    + "      instructions: \"Return a concise repository health note.\",\n"
+    + "      tools: tool_registry(),\n"
+    + "      max_iterations: 1,\n"
+    + "      loop_until_done: false,\n"
+    + "      llm_options: {provider: \"mock\", model: \"mock\", temperature: 0},\n"
+    + "      emit_result: false,\n"
+    + "    },\n"
+    + "  )\n"
+    + "  assert_eq(result.status, \"done\")\n"
+    + "  assert_eq(agent_result_exit_code(result), 0)\n"
+    + "  assert_eq(agent_result_exit_code({status: \"error\"}), 1)\n"
+    + "  assert_eq(agent_result_exit_code({}), 1)\n"
+    + "}\n"
+  const readme = "# " + project_name + "\n"
+    + "\n"
+    + "Opinionated Harn agent app starter.\n"
+    + "\n"
+    + "## Layout\n"
+    + "\n"
+    + "- `main.harn` is the entrypoint.\n"
+    + "- `agent/instructions.md` is the default system instruction source.\n"
+    + "- `agent/app.harn` wires the instructions and scoped tools into existing Harn agent primitives.\n"
+    + "- `agent/skills/` is enabled in `harn.toml` for progressive skill loading.\n"
+    + "- `agent/tools/`, `agent/subagents/`, `agent/channels/`, `agent/sandbox/`, and `agent/schedules/` are convention folders for app-specific capabilities and manifests.\n"
+    + "\n"
+    + "## Run\n"
+    + "\n"
+    + "```bash\n"
+    + "HARN_TASK=\"Summarize this repository\" harn run main.harn\n"
+    + "```\n"
+    + "\n"
+    + "Run `harn quickstart` first if this project does not already have an LLM\n"
+    + "provider configured. The starter uses scoped read-only tools by default; add\n"
+    + "write or command tools only when the task needs them.\n"
+  return [
+    ["harn.toml", __agent_manifest(project_name)],
+    ["main.harn", main_harn],
+    ["agent/app.harn", app_harn],
+    ["agent/instructions.md", instructions],
+    ["agent/tools/README.md", "# Tools\n\nPut app-specific tool helpers or manifests here.\n"],
+    ["agent/subagents/README.md", "# Subagents\n\nPut focused worker/subagent definitions here.\n"],
+    ["agent/channels/README.md", "# Channels\n\nPut channel trigger or connector notes here.\n"],
+    ["agent/sandbox/README.md", "# Sandbox\n\nPut sandbox policy notes or fixtures here.\n"],
+    ["agent/schedules/README.md", "# Schedules\n\nPut durable schedule definitions here.\n"],
+    ["agent/skills/repository-review/SKILL.md", skill_doc],
+    ["tests/test_agent.harn", test_harn],
+    ["README.md", readme],
+  ]
+}
+
+fn __chat_files(project_name: string, harn_range: string) -> list {
+  const main_harn = "import { read_line } from \"std/io\"\n"
+    + "\n"
+    + "fn build_chat_prompt(history, message) {\n"
+    + "  if history == \"\" {\n"
+    + "    return \"User: \" + message\n"
+    + "  }\n"
+    + "  return history + \"\\nUser: \" + message\n"
+    + "}\n"
+    + "\n"
+    + "fn stream_reply(harness: Harness, prompt, system, options) {\n"
+    + "  let answer = \"\"\n"
+    + "  const chunks = harness.llm.stream_call(prompt, system, options)\n"
+    + "  for chunk in chunks {\n"
+    + "    harness.stdio.print(chunk.visible_delta)\n"
+    + "    answer = chunk.partial\n"
+    + "  }\n"
+    + "  harness.stdio.println(\"\")\n"
+    + "  return answer\n"
+    + "}\n"
+    + "\n"
+    + "fn main(harness: Harness) {\n"
+    + "  const system = env_or(harness, \"HARN_CHAT_SYSTEM\", \"You are a concise, helpful assistant.\")\n"
+    + "  const model = env_or(harness, \"HARN_CHAT_MODEL\", \"chat\")\n"
+    + "  const options = {model: model, max_tokens: 2048, temperature: 0.7}\n"
+    + "  let history = \"\"\n"
+    + "  harness.stdio.println(\"Harn chat. Type /clear to reset history or /exit to quit.\")\n"
+    + "  while true {\n"
+    + "    harness.stdio.print(\"you> \")\n"
+    + "    const raw = read_line()\n"
+    + "    if !raw.ok {\n"
+    + "      break\n"
+    + "    }\n"
+    + "    const message = trim(raw.value)\n"
+    + "    if message == \"\" {\n"
+    + "      continue\n"
+    + "    }\n"
+    + "    if message == \"/exit\" || message == \"/quit\" {\n"
+    + "      break\n"
+    + "    }\n"
+    + "    if message == \"/clear\" {\n"
+    + "      history = \"\"\n"
+    + "      harness.stdio.println(\"history cleared\")\n"
+    + "      continue\n"
+    + "    }\n"
+    + "    const prompt = build_chat_prompt(history, message)\n"
+    + "    harness.stdio.print(\"assistant> \")\n"
+    + "    const answer = stream_reply(harness, prompt, system, options)\n"
+    + "    history = prompt + \"\\nAssistant: \" + answer + \"\\n\"\n"
+    + "  }\n"
+    + "}\n"
+  const readme = "# " + project_name + "\n"
+    + "\n"
+    + "Streaming chat starter for Harn.\n"
+    + "\n"
+    + "## Provider\n"
+    + "\n"
+    + "`harn.toml` defines a `chat` model alias backed by Ollama's `llama3.2` model:\n"
+    + "\n"
+    + "```toml\n"
+    + "[llm.aliases]\n"
+    + "chat = { id = \"llama3.2\", provider = \"ollama\" }\n"
+    + "```\n"
+    + "\n"
+    + "Edit that alias to use any configured provider, or set `HARN_CHAT_MODEL` when\n"
+    + "running the project.\n"
+    + "\n"
+    + "## Run\n"
+    + "\n"
+    + "```bash\n"
+    + "harn run main.harn\n"
+    + "```\n"
+    + "\n"
+    + "Inside the chat loop, type `/clear` to reset local history and `/exit` to quit.\n"
+  return [
+    ["harn.toml", __chat_manifest(project_name)],
+    ["main.harn", main_harn],
+    ["README.md", readme],
+  ]
+}
+
+fn __mcp_files(project_name: string, harn_range: string) -> list {
+  const main_harn = "pipeline default(harness: Harness, task) {\n"
+    + "  let tools = tool_registry()\n"
+    + "  tools = tool_define(tools, \"ping\", \"Return a pong response\", {\n"
+    + "    parameters: {\n"
+    + "      type: \"object\",\n"
+    + "      properties: {\n"
+    + "        message: {type: \"string\"}\n"
+    + "      },\n"
+    + "      required: [\"message\"]\n"
+    + "    },\n"
+    + "    returns: {\n"
+    + "      type: \"object\",\n"
+    + "      properties: {\n"
+    + "        message: {type: \"string\"},\n"
+    + "        echoed: {type: \"string\"}\n"
+    + "      }\n"
+    + "    },\n"
+    + "    handler: fn(args) {\n"
+    + "      return {\n"
+    + "        message: \"pong\",\n"
+    + "        echoed: args.message\n"
+    + "      }\n"
+    + "    }\n"
+    + "  })\n"
+    + "\n"
+    + "  harness.tools.mcp_tools(tools)\n"
+    + "  harness.tools.mcp_resource({\n"
+    + "    uri: \"info://server\",\n"
+    + "    name: \"server-info\",\n"
+    + "    text: \"Harn MCP starter server\"\n"
+    + "  })\n"
+    + "}\n"
+  return [["harn.toml", __basic_manifest(project_name)], ["main.harn", main_harn]]
+}
+
+fn __eval_files(project_name: string, harn_range: string) -> list {
+  const main_harn = "pipeline default(harness: Harness, task) {\n"
+    + "  const input = \"hello world\"\n"
+    + "  const output = input.upper()\n"
+    + "  const passed = output == \"HELLO WORLD\"\n"
+    + "\n"
+    + "  eval_metric(\"passed\", passed)\n"
+    + "  eval_metric(\"output_length\", len(output))\n"
+    + "\n"
+    + "  harness.stdio.log(json_stringify({\n"
+    + "    input: input,\n"
+    + "    output: output,\n"
+    + "    passed: passed\n"
+    + "  }))\n"
+    + "}\n"
+  const test_harn = "pipeline test_eval_metrics(task) {\n"
+    + "  eval_metric(\"accuracy\", 1.0, {suite: \"smoke\"})\n"
+    + "  const metrics = eval_metrics()\n"
+    + "\n"
+    + "  assert_eq(len(metrics), 1)\n"
+    + "  assert_eq(metrics[0].name, \"accuracy\")\n"
+    + "}\n"
+  const suite = "{\n"
+    + "  \"_type\": \"eval_suite_manifest\",\n"
+    + "  \"id\": \"sample-suite\",\n"
+    + "  \"name\": \"Sample Eval Suite\",\n"
+    + "  \"base_dir\": \".\",\n"
+    + "  \"cases\": [\n"
+    + "    {\n"
+    + "      \"label\": \"replace-with-a-run-record\",\n"
+    + "      \"run_path\": \".harn-runs/sample-run.json\"\n"
+    + "    }\n"
+    + "  ]\n"
+    + "}\n"
+  return [
+    ["harn.toml", __basic_manifest(project_name)],
+    ["main.harn", main_harn],
+    ["tests/test_eval.harn", test_harn],
+    ["eval-suite.json", suite],
+  ]
+}
+
+fn __pipeline_lab_files(project_name: string, harn_range: string) -> list {
+  const host_harn = "pub fn build_context(task) {\n"
+    + "  return {\n"
+    + "    task: task,\n"
+    + "    cwd: harness.fs.cwd(),\n"
+    + "  }\n"
+    + "}\n"
+    + "\n"
+    + "pub fn request_permission(tool_name, request_args) -> bool {\n"
+    + "  return true\n"
+    + "}\n"
+  const pipeline_harn = "pipeline default(harness: Harness, task) {\n"
+    + "  const context = build_context(env_or(harness, \"HARN_TASK\", \"\"))\n"
+    + "  const result = harness.llm.call(\n"
+    + "    \"Task: \" + context.task + \"\\nWorkspace: \" + context.cwd,\n"
+    + "    \"You are a concise coding assistant. Reply in 3 bullets max.\",\n"
+    + "  )\n"
+    + "  harness.stdio.log(result.text)\n"
+    + "}\n"
+  const readme = "# Pipeline Lab\n"
+    + "\n"
+    + "Use this project to iterate on a Harn workflow against a local Harn-native host module.\n"
+    + "\n"
+    + "## Run\n"
+    + "\n"
+    + "```bash\n"
+    + "harn playground --task \"Explain this repository\"\n"
+    + "```\n"
+    + "\n"
+    + "## Watch mode\n"
+    + "\n"
+    + "```bash\n"
+    + "harn playground --watch --task \"Tighten the workflow prompt\"\n"
+    + "```\n"
+    + "\n"
+    + "Edit `host.harn` or `pipeline.harn` and the playground will re-run automatically.\n"
+  return [
+    ["harn.toml", __basic_manifest(project_name)],
+    ["host.harn", host_harn],
+    ["pipeline.harn", pipeline_harn],
+    ["README.md", readme],
+  ]
+}
+
+fn __package_workflow() -> string {
+  return "name: CI\n"
+    + "\n"
+    + "on:\n"
+    + "  pull_request:\n"
+    + "  push:\n"
+    + "    branches: [main]\n"
+    + "  merge_group:\n"
+    + "  workflow_dispatch:\n"
+    + "\n"
+    + "permissions:\n"
+    + "  contents: read\n"
+    + "\n"
+    + "jobs:\n"
+    + "  package:\n"
+    + "    uses: burin-labs/.github/.github/workflows/harn-package.yml@bcdcf64e5c7021f649432b77fe2e1f9f489c4824\n"
+    + "\n"
+    + "  status:\n"
+    + "    name: CI status\n"
+    + "    if: always()\n"
+    + "    needs: [package]\n"
+    + "    runs-on: ubuntu-latest\n"
+    + "    steps:\n"
+    + "      - name: Enforce required jobs\n"
+    + "        env:\n"
+    + "          PACKAGE_RESULT: $"
+    + "{{ needs.package.result }}\n"
+    + "        run: test \"$PACKAGE_RESULT\" = success\n"
+}
+
+fn __package_lock(harn_version: string) -> string {
+  return "# This file is auto-generated by Harn. Do not edit.\n"
+    + "\n"
+    + "version = 4\n"
+    + "generator_version = \""
+    + harn_version
+    + "\"\n"
+    + "protocol_artifact_version = \""
+    + harn_version
+    + "\"\n"
+}
+
+fn __package_files(project_name: string, harn_range: string, harn_version: string) -> list {
+  const lib_main = "/** Return a greeting for `name`. */\n"
+    + "pub fn greet(name: string) -> string {\n"
+    + "  return \"Hello, \" + name + \"!\"\n"
+    + "}\n"
+  const main_harn = "import \"lib/main\"\n"
+    + "\n"
+    + "pipeline default(harness: Harness, task) {\n"
+    + "  harness.stdio.log(greet(\"world\"))\n"
+    + "}\n"
+  const test_harn = "import \"../lib/main\"\n"
+    + "\n"
+    + "pipeline test_greet(task) {\n"
+    + "  assert_eq(greet(\"Harn\"), \"Hello, Harn!\")\n"
+    + "}\n"
+  const workflow = __package_workflow()
+  const readme = "# " + project_name + "\n"
+    + "\n"
+    + "Reusable Harn package.\n"
+    + "\n"
+    + "## Quickstart\n"
+    + "\n"
+    + "```bash\n"
+    + "harn add ../"
+    + project_name
+    + "\n"
+    + "harn package verify\n"
+    + "harn package docs\n"
+    + "harn package pack\n"
+    + "```\n"
+    + "\n"
+    + "Consumers import stable modules through the `[exports]` entries in `harn.toml`.\n"
+  return [
+    ["harn.toml", __package_manifest(project_name, harn_range)],
+    ["harn.lock", __package_lock(harn_version)],
+    [".harn-version", harn_version + "\n"],
+    ["lib/main.harn", lib_main],
+    ["main.harn", main_harn],
+    ["tests/test_main.harn", test_harn],
+    [".github/workflows/ci.yml", workflow],
+    ["README.md", readme],
+    ["LICENSE", "MIT OR Apache-2.0\n"],
+  ]
+}
+
+fn __connector_files(project_name: string, harn_range: string, harn_version: string) -> list {
+  const echo_harn = "/** Connector provider id. */\n"
+    + "pub fn provider_id() -> string {\n"
+    + "  return \"echo\"\n"
+    + "}\n"
+    + "\n"
+    + "/** Trigger kinds emitted by this connector. */\n"
+    + "pub fn kinds() -> list<string> {\n"
+    + "  return [\"webhook\"]\n"
+    + "}\n"
+    + "\n"
+    + "/** JSON payload schema for normalized inbound events. */\n"
+    + "pub fn payload_schema() -> dict {\n"
+    + "  return {\n"
+    + "    harn_schema_name: \"EchoEventPayload\",\n"
+    + "    json_schema: {type: \"object\", additionalProperties: true},\n"
+    + "  }\n"
+    + "}\n"
+    + "\n"
+    + "/** Convert one inbound request into Harn trigger events. */\n"
+    + "pub fn normalize_inbound(_harness: Harness, raw) -> dict {\n"
+    + "  const body = raw.body_json ?? json_parse(raw.body_text)\n"
+    + "  return {\n"
+    + "    type: \"event\",\n"
+    + "    event: {kind: \"webhook\", dedupe_key: \"echo:\" + (body.message ?? \"message\"), payload: body},\n"
+    + "  }\n"
+    + "}\n"
+  const main_harn = "import \"connectors/echo\"\n"
+    + "\n"
+    + "pipeline default(harness: Harness, task) {\n"
+    + "  harness.stdio.log(provider_id())\n"
+    + "}\n"
+  const test_harn = "import \"../connectors/echo\"\n"
+    + "\n"
+    + "pipeline test_provider_id(task) {\n"
+    + "  assert_eq(provider_id(), \"echo\")\n"
+    + "  assert_eq(kinds(), [\"webhook\"])\n"
+    + "}\n"
+  const workflow = __package_workflow()
+  const readme = "# " + project_name + "\n"
+    + "\n"
+    + "Pure-Harn connector package.\n"
+    + "\n"
+    + "## Quickstart\n"
+    + "\n"
+    + "```bash\n"
+    + "harn package verify .\n"
+    + "harn package docs\n"
+    + "harn package pack\n"
+    + "```\n"
+    + "\n"
+    + "Consumers import the connector through the stable `[exports]` entry in `harn.toml`.\n"
+  return [
+    ["harn.toml", __connector_manifest(project_name, harn_range)],
+    ["harn.lock", __package_lock(harn_version)],
+    [".harn-version", harn_version + "\n"],
+    ["connectors/echo.harn", echo_harn],
+    ["main.harn", main_harn],
+    ["tests/test_connector.harn", test_harn],
+    [".github/workflows/ci.yml", workflow],
+    ["README.md", readme],
+    ["LICENSE", "MIT OR Apache-2.0\n"],
+  ]
+}
+
+fn __template_files(
+  template: string,
+  project_name: string,
+  harn_range: string,
+  harn_version: string,
+) -> list {
+  if template == "basic" {
+    return __basic_files(project_name, harn_range)
+  }
+  if template == "agent" {
+    return __agent_files(project_name, harn_range)
+  }
+  if template == "chat" {
+    return __chat_files(project_name, harn_range)
+  }
+  if template == "mcp-server" {
+    return __mcp_files(project_name, harn_range)
+  }
+  if template == "eval" {
+    return __eval_files(project_name, harn_range)
+  }
+  if template == "pipeline-lab" {
+    return __pipeline_lab_files(project_name, harn_range)
+  }
+  if template == "package" {
+    return __package_files(project_name, harn_range, harn_version)
+  }
+  if template == "connector" {
+    return __connector_files(project_name, harn_range, harn_version)
+  }
+  throw "unknown template: " + template
+}
+
+fn __write_if_new(fs: HarnessFs, stdio: HarnessStdio, dir: string, rel: string, content: string) {
+  const path = path_join(dir, rel)
+  const parent = dirname(path)
+  if parent != "" && !fs.exists(parent) {
+    try {
+      fs.mkdir(parent)
+    } catch (e) {
+      stdio.eprintln("Failed to create " + parent + ": " + to_string(e))
+      return
+    }
+  }
+  if fs.exists(path) {
+    stdio.println("  skip  " + path + " (already exists)")
+    return
+  }
+  try {
+    fs.write_text(path, content)
+  } catch (e) {
+    stdio.eprintln("Failed to write " + path + ": " + to_string(e))
+    return
+  }
+  stdio.println("  create  " + path)
+}
+
+fn __print_next_steps(stdio: HarnessStdio, name: string, template: string) {
+  stdio.println("")
+  if name != "" {
+    stdio.println("  cd " + name)
+  }
+  if template == "chat" {
+    stdio.println("  harn run main.harn       # run the program")
+  } else if template == "mcp-server" {
+    stdio.println("  harn serve mcp main.harn # expose the starter MCP server")
+  } else if template == "pipeline-lab" {
+    stdio.println("  harn playground --task \"Explain this repo\"    # run the lab")
+    stdio.println("  harn playground --watch --task \"Refine the prompt\"  # live iteration")
+  } else {
+    // basic | agent | eval | package | connector
+    stdio.println("  harn run main.harn       # run the program")
+    stdio.println("  harn package verify      # run the canonical package gate")
+  }
+  stdio.println("  harn fmt main.harn       # format code")
+  stdio.println("  harn lint main.harn      # lint code")
+  if template == "package" || template == "connector" {
+    stdio.println("  harn package docs        # generate API docs")
+    stdio.println("  harn package pack        # build an inspectable artifact")
+  }
+  stdio.println("  harn doctor              # verify the local environment")
+}
+
+fn main(harness: Harness) {
+  const name = harness.env.get_or("HARN_INIT_NAME", "")
+  const project_name = harness.env.get_or("HARN_INIT_PROJECT_NAME", "my-project")
+  const dir = harness.env.get_or("HARN_INIT_DIR", "")
+  const template = harness.env.get_or("HARN_INIT_TEMPLATE", "basic")
+  const harn_range = harness.env.get_or("HARN_INIT_HARN_RANGE", "")
+  const harn_version = harness.env.get_or("HARN_INIT_HARN_VERSION", "")
+  if dir == "" || harn_range == "" || harn_version == "" {
+    harness.stdio.eprintln(
+      "init: HARN_INIT_DIR, HARN_INIT_HARN_RANGE, and HARN_INIT_HARN_VERSION must be set",
+    )
+    harness.runtime.exit(2)
+  }
+  if name != "" {
+    harness.stdio.println("Creating project '" + name + "'...")
+  } else {
+    harness.stdio.println("Initializing harn project in current directory...")
+  }
+  const files = try {
+    __template_files(template, project_name, harn_range, harn_version)
+  } catch (e) {
+    harness.stdio.eprintln(to_string(e))
+    harness.runtime.exit(2)
+  }
+  for entry in files {
+    __write_if_new(harness.fs, harness.stdio, dir, entry[0], entry[1])
+  }
+  __print_next_steps(harness.stdio, name, template)
+}

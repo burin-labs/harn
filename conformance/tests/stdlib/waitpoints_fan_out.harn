@@ -1,0 +1,25 @@
+import "std/waitpoint"
+
+pipeline test(harness: Harness, task) {
+  harness.runtime.waitpoint_create("fan-out-a")
+  harness.runtime.waitpoint_create("fan-out-b")
+  harness.runtime.waitpoint_create("fan-out-c")
+  harness.runtime.waitpoint_create("fan-out-d")
+  harness.runtime.waitpoint_create("fan-out-e")
+  const completer = spawn {
+    harness.clock.sleep_ms(20ms)
+    harness.runtime.waitpoint_complete("fan-out-a")
+    harness.runtime.waitpoint_complete("fan-out-b")
+    harness.runtime.waitpoint_complete("fan-out-c")
+    harness.runtime.waitpoint_complete("fan-out-d")
+    harness.runtime.waitpoint_complete("fan-out-e")
+  }
+  const result = harness.runtime.waitpoint_wait(
+    ["fan-out-a", "fan-out-b", "fan-out-c", "fan-out-d", "fan-out-e"],
+    {wait_id: "fan-out-wait"},
+  )
+  await(completer)
+  harness.stdio.println(len(result) == 5)
+  harness.stdio.println(result[0].status == "completed")
+  harness.stdio.println(result[4].status == "completed")
+}

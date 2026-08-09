@@ -1,0 +1,33 @@
+import { agent_loop } from "std/agent/loop"
+import { llm_text, with_llm_script } from "std/testing"
+
+/**
+ * `post_turn` hooks fire after a model/tool turn has been recorded and
+ * before post-turn control logic decides whether the loop should continue.
+ * They are advisory and are meant for enqueueing background work.
+ */
+pipeline default(harness: Harness) {
+  const post_seen = harness.runtime.atomic(0)
+  harness.agent.clear_session_hooks()
+  harness.agent.register_session_hook(
+    "post_turn",
+    { _hook_harness, event ->
+      if event?.session_id == event?.session?.id
+        && type_of(event?.iteration) == "int"
+        && type_of(event?.tool_count) == "int" {
+        harness.runtime.atomic_add(post_seen, 1)
+      }
+      return nil
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [llm_text("ok")],
+    { ->
+      const result = agent_loop(harness, "hi", nil, {provider: "mock"})
+      harness.stdio.println(result.status)
+      harness.stdio.println(harness.runtime.atomic_get(post_seen))
+      harness.agent.clear_session_hooks()
+    },
+  )
+}

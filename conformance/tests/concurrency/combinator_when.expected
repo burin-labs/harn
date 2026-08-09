@@ -1,0 +1,4 @@
+truthy=seed_handled
+truthy_audit_kind=ran
+falsy=seed
+falsy_audit_count=0

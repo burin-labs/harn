@@ -1,0 +1,13 @@
+pipeline default(harness: Harness) {
+  const name = "world"
+  const age = 42
+  harness.stdio.println(format("Hello, {}!", name))
+  harness.stdio.println(format("{} is {} years old", name, age))
+  harness.stdio.println(format("no placeholders"))
+  harness.stdio.println(format("{} + {} = {}", 1, 2, 3))
+  // Named placeholders with dict
+  harness.stdio.println(format("Hello {name} from {city}", {name: "Alice", city: "NYC"}))
+  harness.stdio.println(format("{greeting}, {who}!", {greeting: "Hi", who: "Bob"}))
+  harness.stdio.println(format("no named placeholders here", {x: 1}))
+  harness.stdio.println(format("{a} + {b} = {c}", {a: 1, b: 2, c: 3}))
+}

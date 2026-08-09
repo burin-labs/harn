@@ -1,0 +1,54 @@
+{
+  "task_id": "rate_limit_auth",
+  "task": "Add rate limiting middleware to the auth module",
+  "run_path": "",
+  "verdict": "pass",
+  "workflow_status": "completed",
+  "plan": {
+    "ready": true,
+    "plan_summary": "Create packages/server/src/middleware/rate-limit.ts, export rateLimit from packages/server/src/middleware/index.ts, preserve withMiddleware in packages/server/src/routes/api.ts, then verify with ./scripts/verify-rate-limit.sh."
+  },
+  "action_graph": {
+    "actions": [
+      {
+        "id": "create_rate_limit",
+        "target_paths": [
+          "packages/server/src/middleware/rate-limit.ts"
+        ]
+      },
+      {
+        "id": "export_rate_limit",
+        "target_paths": [
+          "packages/server/src/middleware/index.ts"
+        ]
+      },
+      {
+        "id": "wire_routes",
+        "target_paths": [
+          "packages/server/src/routes/api.ts"
+        ]
+      },
+      {
+        "id": "verify_rate_limit",
+        "command": "./scripts/verify-rate-limit.sh"
+      }
+    ]
+  },
+  "research": [
+    {
+      "answer": "The middleware index exports reusable middleware from packages/server/src/middleware/index.ts."
+    },
+    {
+      "answer": "The API route uses withMiddleware in packages/server/src/routes/api.ts."
+    }
+  ],
+  "verification_contract": {
+    "command": "./scripts/verify-rate-limit.sh",
+    "required_paths": [
+      "packages/server/src/middleware/rate-limit.ts",
+      "packages/server/src/middleware/index.ts",
+      "packages/server/src/routes/api.ts"
+    ]
+  },
+  "final_response": "Added rateLimit middleware, exported it, kept the existing withMiddleware architecture, and ran verify successfully."
+}

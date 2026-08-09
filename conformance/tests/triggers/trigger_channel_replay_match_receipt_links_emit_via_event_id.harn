@@ -1,0 +1,46 @@
+import "std/triggers"
+
+fn handle_channel(harness: Harness, event) {
+  return event.provider_payload.name
+}
+
+pipeline default(harness: Harness) {
+  const audit = harness.obs.event_log_subscribe({topic: "lifecycle.channel.audit"})
+  const unique = to_string(to_int(harness.clock.timestamp())) + "-"
+    + to_string(
+    harness.random.range(100000, 999999),
+  )
+  const _ = harness.runtime.trigger_register(
+    {
+      id: "channel-replay-match-" + unique,
+      kind: "channel.emit",
+      provider: "channel",
+      autonomy_tier: "act_auto",
+      handler: handle_channel,
+      when: nil,
+      retry: nil,
+      match: {events: ["channel:ch.replay.match.input"]},
+      events: nil,
+      dedupe_key: nil,
+      filter: nil,
+      budget: nil,
+      manifest_path: nil,
+      package_name: "conformance",
+    },
+  )
+  const _ = harness.channels.append("ch.replay.match.input", {repo: "harn"})
+  const emit_entry = audit.next().value
+  const match_entry = audit.next().value
+  harness.stdio.println(emit_entry.kind)
+  harness.stdio.println(match_entry.kind)
+  harness.stdio.println(match_entry.headers.schema)
+  harness.stdio.println(emit_entry.payload.event_id == match_entry.payload.event_id)
+  harness.stdio.println(match_entry.payload.name_resolved)
+  harness.stdio.println(match_entry.payload.scope)
+  harness.stdio.println(starts_with(match_entry.payload.trigger_id, "channel-replay-match-"))
+  harness.stdio.println(match_entry.payload.handler_kind)
+  harness.stdio.println(match_entry.payload.handler_result.status)
+  harness.stdio.println(match_entry.payload.matched_at.algorithm)
+  harness.stdio.println(match_entry.payload.matched_at.key_id)
+  harness.stdio.println(starts_with(match_entry.payload.matched_at.signature, "sha256:"))
+}

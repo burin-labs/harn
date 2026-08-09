@@ -1,0 +1,5 @@
+# Public release-signing identities trusted by Harn's artifact publication
+# policy. Public keys are not secrets; the private release-bot key remains only
+# in harn-bump-fleet's protected `release` environment.
+harn-release-bot[bot]@users.noreply.github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFcy4Tr/pG8YQyxZnSW/Y1NG6RVgS/0NLisBAZBBqgzo harn-release-bot
+kennethsinder@gmail.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIALiGUi5b6TVIbzfFNniz7bfPbXJcbzWjLguThg5EpKw kennethsinder@gmail.com

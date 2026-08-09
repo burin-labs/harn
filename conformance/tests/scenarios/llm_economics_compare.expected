@@ -1,0 +1,6 @@
+gpt-4o-mini known=true cost=0.00027
+gpt-4o known=true cost=0.0045
+claude-sonnet-4-20250514 known=true cost=0.006
+ghost-model known=false cost=nil
+scaled calls=10
+scaled cheapest=gpt-4o-mini

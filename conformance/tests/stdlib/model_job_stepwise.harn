@@ -1,0 +1,117 @@
+import {
+  ModelBackend,
+  ModelJobObservation,
+  ModelJobOutput,
+  ModelJobRequest,
+  ModelJobRunOptions,
+  ModelJobState,
+  ModelOutputSpec,
+  ModelTask,
+  model_job_cancel_run_result,
+  model_job_fake_backend,
+  model_job_finish_result,
+  model_job_step_result,
+  model_job_submit_result,
+} from "std/model_job"
+
+pipeline test(harness: Harness, task) {
+  const task_kind: ModelTask = "image.generate"
+  const output_spec: ModelOutputSpec = {mime_type: "image/png", width: 1, height: 1}
+  const request: ModelJobRequest = {
+    id: "stepwise-1",
+    task: task_kind,
+    prompt: "blue mark",
+    output: output_spec,
+  }
+  const output: ModelJobOutput = {
+    name: "mark.png",
+    mime_type: "image/png",
+    bytes: bytes_from_base64("iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB"),
+  }
+  const queued_state: ModelJobState = "queued"
+  const running_state: ModelJobState = "running"
+  const succeeded_state: ModelJobState = "succeeded"
+  const queued: ModelJobObservation = {job_id: "job-step", state: queued_state}
+  const running_observation: ModelJobObservation = {
+    job_id: "job-step",
+    state: running_state,
+    progress: 0.5,
+  }
+  const succeeded_observation: ModelJobObservation = {
+    job_id: "job-step",
+    state: succeeded_state,
+    progress: 1.0,
+    outputs: [output],
+  }
+  const observations: list<ModelJobObservation> = [
+    queued,
+    running_observation,
+    succeeded_observation,
+  ]
+  const backend = model_job_fake_backend("step-fixture", observations)
+  const root = harness.fs.mkdtemp_in_workspace("stepwise-assets-")
+  const options: ModelJobRunOptions = {asset_root: root}
+  const submitted = unwrap(model_job_submit_result(harness, backend, request, options))
+  harness.stdio.println(submitted.schema)
+  harness.stdio.println(submitted.job.state)
+  const running = unwrap(model_job_step_result(harness, backend, submitted, options))
+  harness.stdio.println(running.job.state)
+  harness.stdio.println(running.attempts)
+  const attempts_exhausted = model_job_step_result(
+    harness,
+    backend,
+    running,
+    {asset_root: root, max_attempts: 1},
+  )
+  harness.stdio.println(unwrap_err(attempts_exhausted).kind)
+  harness.stdio.println(unwrap_err(attempts_exhausted).message)
+  const deadline_exhausted = model_job_step_result(
+    harness,
+    backend,
+    running + {started_at_ms: harness.clock.now_ms() - 1},
+    {asset_root: root, timeout_ms: 1},
+  )
+  harness.stdio.println(unwrap_err(deadline_exhausted).kind)
+  harness.stdio.println(unwrap_err(deadline_exhausted).message)
+  const succeeded = unwrap(model_job_step_result(harness, backend, running, options))
+  harness.stdio.println(succeeded.job.state)
+  const stable = unwrap(model_job_step_result(harness, backend, succeeded, options))
+  harness.stdio.println(stable.attempts)
+  const receipt = unwrap(model_job_finish_result(harness, stable, options))
+  harness.stdio.println(receipt.job.state)
+  harness.stdio.println(len(receipt.assets))
+  const cancel_observation: ModelJobObservation = {job_id: "job-cancel", state: queued_state}
+  const cancel_backend = model_job_fake_backend("cancel-fixture", [cancel_observation])
+  const empty_options: ModelJobRunOptions = {}
+  const cancel_run = unwrap(
+    model_job_submit_result(harness, cancel_backend, request, empty_options),
+  )
+  const canceled = unwrap(
+    model_job_cancel_run_result(harness, cancel_backend, cancel_run, empty_options),
+  )
+  harness.stdio.println(canceled.job.state)
+  harness.stdio.println(canceled.events[len(canceled.events) - 1].kind)
+  const no_observations: list<ModelJobObservation> = []
+  const wrong_backend = model_job_step_result(
+    harness,
+    model_job_fake_backend("other", no_observations),
+    cancel_run,
+    empty_options,
+  )
+  harness.stdio.println(unwrap_err(wrong_backend).kind)
+  const throwing_backend: ModelBackend = {
+    id: "throw-fixture",
+    submit: fn(_harness, _request) {
+      throw "connection refused"
+    },
+    inspect: fn(_harness, _job) {
+      throw "not reached"
+    },
+    cancel: fn(_harness, _job) {
+      throw "not reached"
+    },
+  }
+  const thrown = model_job_submit_result(harness, throwing_backend, request, empty_options)
+  harness.stdio.println(unwrap_err(thrown).kind)
+  harness.stdio.println(unwrap_err(thrown).message)
+}

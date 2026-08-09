@@ -1,0 +1,176 @@
+# OpenAI-compatible providers whose per-model catalogs are refreshed live when
+# callers provide API keys. These wildcard rules are conservative transport
+# defaults: model-family overrides can still be added as empirical probes find
+# provider-specific reasoning/tool quirks.
+
+[[provider.nebius]]
+model_match = "*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+structured_output_mode = "native_json"
+text_tool_wire_format_supported = true
+tool_mode_parity = "unknown"
+tool_mode_parity_notes = "Nebius documents function calling and structured JSON output; Harn has not yet run model-family probes for every Token Factory route."
+
+[[provider.flexai]]
+model_match = "*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+structured_output_mode = "native_json"
+text_tool_wire_format_supported = true
+tool_mode_parity = "unknown"
+tool_mode_parity_notes = "FlexAI exposes model-level support flags through discovery; use live refresh/probes to tighten route-specific tool preferences."
+
+[[provider.hyperbolic]]
+model_match = "*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+structured_output_mode = "native_json"
+text_tool_wire_format_supported = true
+tool_mode_parity = "unknown"
+tool_mode_parity_notes = "Hyperbolic documents tool calling for selected Qwen/Llama routes; model-specific probes should override this wildcard if needed."
+
+[[provider.siliconflow]]
+model_match = "*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+structured_output_mode = "native_json"
+text_tool_wire_format_supported = true
+tool_mode_parity = "unknown"
+tool_mode_parity_notes = "SiliconFlow is OpenAI-compatible, but thinking controls are provider-specific on some model families; prefer live model probes before pinning reasoning-heavy agents."
+
+[[provider.parasail]]
+model_match = "*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+structured_output_mode = "native_json"
+text_tool_wire_format_supported = true
+tool_mode_parity = "unknown"
+tool_mode_parity_notes = "Parasail exposes an OpenAI-compatible serverless/batch API; use model-specific probes before relying on native tools for long agent loops."
+
+[[provider.atlas]]
+model_match = "*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+structured_output_mode = "native_json"
+text_tool_wire_format_supported = true
+tool_mode_parity = "unknown"
+tool_mode_parity_notes = "Atlas is a coding-plan OpenAI-compatible route; Harn has no route-specific tool parity probes yet."
+
+[[provider.github_models]]
+model_match = "*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+structured_output_mode = "native_json"
+text_tool_wire_format_supported = true
+tool_mode_parity = "unknown"
+tool_mode_parity_notes = "GitHub Models publishes capability flags per catalog model; Harn needs route-specific probes before assuming native/text tool parity."
+
+[[provider.vercel_ai_gateway]]
+model_match = "google/gemini-3.1*"
+extends = true
+native_tools = true
+preferred_tool_format = "native"
+thinking_modes = ["enabled", "adaptive"]
+prompt_caching = true
+cache_breakpoint_style = "last_block"
+vision_supported = true
+vision = true
+audio_supported = true
+pdf_supported = true
+structured_output = "native"
+structured_output_mode = "native_json"
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "reasoning_summary"
+
+[[provider.vercel_ai_gateway]]
+model_match = "*"
+extends = true
+responses_api = true
+
+[[provider.cloudflare_ai_gateway]]
+model_match = "*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+structured_output_mode = "native_json"
+text_tool_wire_format_supported = true
+tool_mode_parity = "unknown"
+tool_mode_parity_notes = "Cloudflare exposes OpenAI-compatible Workers AI and AI Gateway routes, but capabilities depend on the routed model."
+
+[[provider.inception]]
+model_match = "mercury-2"
+native_tools = true
+preferred_tool_format = "native"
+thinking_modes = ["effort"]
+reasoning_effort_supported = true
+reasoning_effort_levels = ["low", "medium", "high"]
+structured_output = "native"
+structured_output_mode = "native_json"
+thinking_block_style = "reasoning_summary"
+text_tool_wire_format_supported = true
+tool_mode_parity = "unknown"
+tool_mode_parity_notes = "Inception documents OpenAI-compatible tool use for Mercury 2; no Harn parity probe has run yet."
+
+[[provider.inception]]
+model_match = "mercury-coder-*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "delimited"
+structured_output_mode = "delimited"
+thinking_block_style = "none"
+text_tool_wire_format_supported = true
+tool_mode_parity = "unknown"
+tool_mode_parity_notes = "Mercury Coder Small supports tool use on the OpenAI-compatible API; structured object generation was not documented as GA in the source pass."
+
+[[provider.friendli]]
+model_match = "*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+structured_output_mode = "native_json"
+text_tool_wire_format_supported = true
+tool_mode_parity = "unknown"
+tool_mode_parity_notes = "Friendli serverless endpoints are OpenAI-compatible; model-specific capability probes should narrow this wildcard."
+
+[[provider.volcengine_ark]]
+model_match = "*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+structured_output_mode = "native_json"
+text_tool_wire_format_supported = true
+tool_mode_parity = "unknown"
+tool_mode_parity_notes = "Volcengine Ark exposes OpenAI-compatible chat completions; routed model families still need native-vs-text tool probes."
+
+[[provider.hunyuan]]
+model_match = "*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+structured_output_mode = "native_json"
+text_tool_wire_format_supported = true
+tool_mode_parity = "unknown"
+tool_mode_parity_notes = "Tencent Hunyuan documents OpenAI-compatible function calling; Harn has not yet probed every Hunyuan model family."
+
+[[provider.qianfan]]
+model_match = "*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+structured_output_mode = "native_json"
+text_tool_wire_format_supported = true
+tool_mode_parity = "unknown"
+tool_mode_parity_notes = "Baidu Qianfan v2 documents OpenAI-compatible tool calls; model-specific parity remains unprobed."

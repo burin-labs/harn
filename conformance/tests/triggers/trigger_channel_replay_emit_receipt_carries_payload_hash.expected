@@ -1,0 +1,13 @@
+channel_emit_receipt
+harn.channel_emit_receipt.v1
+tenant:default:ch.replay.input
+tenant
+default
+harn
+1
+true
+true
+true
+hmac-sha256
+local-session
+true

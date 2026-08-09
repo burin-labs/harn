@@ -1,0 +1,54 @@
+//! Harn Flow — agent-native shipping substrate.
+//!
+//! See parent epic #571 for the four-primitive model (atoms, intents, slices,
+//! streams). This module currently implements the foundational primitives,
+//! [`Atom`](atom::Atom), [`Intent`](intent::Intent), and [`Slice`](slice::Slice).
+
+pub mod atom;
+pub mod audit;
+pub mod backend;
+pub mod fixer;
+pub mod intent;
+pub mod predicates;
+pub mod slice;
+pub mod store;
+
+pub use atom::{Atom, AtomError, AtomId, AtomSignature, Provenance, TextOp};
+pub use audit::{
+    audit_slice_against_current_predicates, replay_audit_report, ReplayAuditPredicate,
+    ReplayAuditReport, SliceReplayAudit,
+};
+pub use backend::{
+    AtomRef, FlowNativeBackend, FlowSlice, GitExportReceipt, ShadowGitBackend, ShipReceipt,
+    VcsBackend, VcsBackendError,
+};
+pub use fixer::{
+    propose_follow_up_slice, FixerError, FixerFollowUpProposal, FixerProposalInput, FixerReceipt,
+    FixerSigningContext, FIXER_PERSONA_NAME, FIXER_TRIGGER,
+};
+pub use intent::{
+    Intent, IntentBoundaryClassifier, IntentBoundaryDecision, IntentBoundaryDispute,
+    IntentClusterOptions, IntentClusterer, IntentError, IntentId, ObservedAtom, SealedIntent,
+    TranscriptSpan,
+};
+pub use predicates::{
+    compose_predicate_results, discover_bootstrap_policy, discover_invariants,
+    enforce_predicate_ceiling, parse_invariants_source, resolve_predicates,
+    resolve_predicates_for_touched_directories, validate_bootstrap_edit, validate_predicate_edit,
+    Approver, ArchivistMetadata, BootstrapPolicy, BootstrapValidation, BootstrapViolation,
+    ByteSpan, CheapJudge, CheapJudgeRequest, CheapJudgeResponse, ComposedPredicateEvaluation,
+    DirectoryContribution, DiscoveredBootstrapPolicy, DiscoveredInvariantFile, DiscoveredPredicate,
+    DiscoveryDiagnostic, DiscoveryDiagnosticSeverity, EditAuthor, EvidenceItem,
+    InvariantBlockError, InvariantResult, ParsedInvariantFile, PredicateCeiling,
+    PredicateCeilingLevel, PredicateCeilingOutcome, PredicateCeilingViolation, PredicateContext,
+    PredicateEvaluation, PredicateExecutionRecord, PredicateExecutionReport,
+    PredicateExecutionSkip, PredicateExecutor, PredicateExecutorConfig, PredicateKind,
+    PredicateRunner, PredicateSchedulerConfig, PredicateSource, Remediation, ResolvedPredicate,
+    SemanticFallbackPolicy, SemanticReplayAuditMetadata, Verdict, VerdictStrictness,
+    DEFAULT_MAINTAINER_ROLE, INVARIANTS_FILE, META_INVARIANTS_FILE, PREDICATE_COUNT_EXPLOSION_CODE,
+};
+pub use slice::{
+    derive_slice, Approval, CoverageMap, PredicateHash, Slice, SliceDerivationError,
+    SliceDerivationInput, SliceId, SliceStatus, TestId, UnresolvedParent,
+};
+pub use store::{AtomDelta, SqliteFlowStore, StateVector, StoredDerivedSlice};

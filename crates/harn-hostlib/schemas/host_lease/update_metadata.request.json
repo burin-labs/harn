@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/host_lease/update_metadata.request.json",
+  "title": "host_lease.update_metadata request",
+  "description": "Atomically replace metadata when the token owns the exact local host resource.",
+  "type": "object",
+  "properties": {
+    "host": {"type": "string", "minLength": 1},
+    "resource_class": {"type": "string", "enum": ["whole-machine", "rust-heavy"]},
+    "domain": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9._-]+$"},
+    "lease_id": {"type": "string", "minLength": 1},
+    "metadata": {"type": "object", "additionalProperties": {"type": "string"}}
+  },
+  "required": ["host", "resource_class", "domain", "lease_id", "metadata"],
+  "additionalProperties": false
+}

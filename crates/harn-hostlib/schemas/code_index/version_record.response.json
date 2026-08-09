@@ -1,0 +1,8 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/code_index/version_record.response.json",
+  "title": "code_index.version_record response",
+  "description": "Sequence number assigned to the new entry.",
+  "type": "integer",
+  "minimum": 1
+}

@@ -1,0 +1,285 @@
+// std/agent/sitrep — concise post-turn summaries for end users.
+import { ModelLadderStep } from "std/llm/options"
+
+//
+// The TUI / IDE wants a tiny "what just happened" note at the end of each
+// turn (or at the end of a conversation). This module owns the prompt
+// engineering and provider selection so harness authors don't have to
+// reinvent it.
+//
+// Public surface:
+//   agent_sitrep(harness.fs, harness.llm, transcript_or_messages, opts?)
+//       -> {summary, lines, model_used, provider_used}
+//   agent_sitrep_append(harness.fs, harness.llm, transcript_or_messages, opts?)
+//       -> transcript with a system-role summary message appended
+//   agent_sitrep_preferred_routes(harness.llm)
+//       -> the default reverse-chronological route list (newest/best first)
+//
+// Routes are tried in order; the first one whose provider has resolvable
+// credentials wins. Callers can override the list via opts.routes — that
+// is the documented seam for picking a host's preferred provider/model
+// without having to know the prompt or capability quirks.
+//
+// Cost: a sitrep is typically 200-600 input tokens and emits ≤ 100 output
+// tokens. The default routes pick small, fast, cheap models tuned for
+// summarization.
+// Reverse-chronological order: newest / strongest summarizers first, then
+// progressively cheaper / more local fallbacks. The `sitrep` model ladder in
+// the runtime catalog owns the provider/model rows; this module only filters
+// the projected steps by credential availability.
+const __SITREP_LADDER = "sitrep"
+
+const __SITREP_SYSTEM_PROMPT =
+  "You distill agent transcripts into concise 3-sentence situation reports for end users. Be specific, factual, and never invent details the transcript does not contain. Treat tool calls and tool results as authoritative when they conflict with surrounding prose."
+
+const __SITREP_DEFAULT_MAX_TOKENS = 400
+
+const __SITREP_DEFAULT_TEMPERATURE = 0.2
+
+fn __sitrep_available_providers(llm: HarnessLlm) {
+  const status = llm.providers()
+  let available = {}
+  for entry in status {
+    if entry?.available {
+      available[entry.name] = true
+    }
+  }
+  return available
+}
+
+fn __sitrep_messages_from(input) {
+  if input == nil {
+    return []
+  }
+  if type_of(input) == "list" {
+    return input
+  }
+  if type_of(input) == "dict" && input?._type == "transcript" {
+    return transcript_messages(input)
+  }
+  if type_of(input) == "dict" && type_of(input?.messages) == "list" {
+    return input.messages
+  }
+  throw "agent_sitrep: expected a message list, transcript, or {messages} dict"
+}
+
+fn __sitrep_message_text(value) {
+  if value == nil {
+    return ""
+  }
+  if type_of(value) == "string" {
+    return value
+  }
+  if type_of(value) == "list" {
+    let parts = []
+    for chunk in value {
+      const chunk_text = if type_of(chunk) == "string" {
+        chunk
+      } else {
+        to_string(chunk?.text ?? chunk?.content ?? "")
+      }
+      if chunk_text != "" {
+        parts = parts + [chunk_text]
+      }
+    }
+    return join(parts, "\n")
+  }
+  return to_string(value)
+}
+
+fn __sitrep_truncate(text, max_chars) {
+  if max_chars == nil || max_chars <= 0 || len(text) <= max_chars {
+    return text
+  }
+  // Keep both ends: a head-only clip drops the tail, which for tool/command
+  // output is usually where the error lives. Preserve a head + tail with an
+  // explicit elision marker so the cut is visible and the failing detail
+  // survives.
+  const total = len(text)
+  const tail_chars = max_chars / 3
+  const head_chars = max_chars - tail_chars
+  const omitted = total - head_chars - tail_chars
+  return substring(text, 0, head_chars)
+    + " …["
+    + to_string(omitted)
+    + " chars elided]… "
+    + substring(text, total - tail_chars, total)
+}
+
+fn __sitrep_format_messages(messages, max_chars_per_message) {
+  let rendered = []
+  for message in messages {
+    const role = uppercase(to_string(message?.role ?? "user"))
+    const body = __sitrep_truncate(__sitrep_message_text(message?.content), max_chars_per_message)
+    if trim(body) == "" {
+      continue
+    }
+    rendered = rendered + ["[" + role + "] " + body]
+  }
+  return join(rendered, "\n\n")
+}
+
+fn __sitrep_route_is_available(route, available) {
+  const provider = route?.provider
+  if provider == nil || provider == "" {
+    return false
+  }
+  return available[provider]
+}
+
+fn __sitrep_resolved_routes(llm: HarnessLlm, opts) {
+  const explicit = opts?.routes
+  if type_of(explicit) == "list" && len(explicit) > 0 {
+    return explicit
+  }
+  return llm.model_ladder(__SITREP_LADDER)?.steps ?? []
+}
+
+fn __sitrep_pick_route(llm: HarnessLlm, opts) -> {provider: string, model: string}? {
+  if opts?.provider != nil && opts?.model != nil {
+    return {provider: to_string(opts.provider), model: to_string(opts.model)}
+  }
+  const available = __sitrep_available_providers(llm)
+  for candidate in __sitrep_resolved_routes(llm, opts) {
+    if __sitrep_route_is_available(candidate, available) {
+      const resolved_model = candidate?.model ?? llm.qc_default_model(candidate.provider)
+      if resolved_model != nil && resolved_model != "" {
+        return {provider: to_string(candidate.provider), model: to_string(resolved_model)}
+      }
+    }
+  }
+  return nil
+}
+
+fn __sitrep_user_prompt(fs: HarnessFs, messages, opts) {
+  const max_chars_per_message = opts?.max_chars_per_message ?? 1200
+  const formatted = __sitrep_format_messages(messages, max_chars_per_message)
+  return fs.render_prompt(
+    "std/llm/prompts/sitrep_user.harn.prompt",
+    {
+      formatted: formatted,
+      extra_instructions: opts?.extra_instructions ?? "",
+      audience: opts?.audience ?? "",
+    },
+  )
+}
+
+fn __sitrep_normalize_lines(text) {
+  if text == nil || trim(text) == "" {
+    return []
+  }
+  let lines = []
+  for raw in split(text, "\n") {
+    const cleaned = trim(raw)
+    if cleaned != "" {
+      lines = lines + [cleaned]
+    }
+  }
+  return lines
+}
+
+fn __sitrep_empty_result(reason) {
+  return {
+    summary: "",
+    lines: [],
+    model_used: nil,
+    provider_used: nil,
+    skipped: true,
+    reason: reason,
+  }
+}
+
+/**
+ * Produce a 3-sentence situation report for the current agent state.
+ *
+ * Accepts a transcript, a list of role/content messages, or a {messages}
+ * dict. Returns {summary, lines, model_used, provider_used} where
+ * `summary` is the full text the LLM produced and `lines` is `summary`
+ * split into one entry per non-empty line (typically 3).
+ *
+ * If no preferred provider has credentials and no `routes` override
+ * lands on an available one, the function returns
+ * {summary: "", skipped: true, reason: "no_available_provider"} rather
+ * than throwing — callers can render that as "(sitrep unavailable)" and
+ * carry on without crashing the turn.
+ *
+ * agent_sitrep.
+ *
+ * @effects: [llm.call]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_sitrep(fs: HarnessFs, llm: HarnessLlm, input, opts = nil) {
+  const messages = __sitrep_messages_from(input)
+  if len(messages) == 0 {
+    return __sitrep_empty_result("empty_transcript")
+  }
+  const route = __sitrep_pick_route(llm, opts)
+  if route == nil {
+    return __sitrep_empty_result("no_available_provider")
+  }
+  const user_prompt = __sitrep_user_prompt(fs, messages, opts)
+  const llm_opts = {
+    provider: route.provider,
+    model: route.model,
+    temperature: opts?.temperature ?? __SITREP_DEFAULT_TEMPERATURE,
+    max_tokens: opts?.max_tokens ?? __SITREP_DEFAULT_MAX_TOKENS,
+    stream: false,
+  }
+  const system = opts?.system ?? __SITREP_SYSTEM_PROMPT
+  const response = llm.call(user_prompt, system, llm_opts)
+  const text = trim(response.text ?? "")
+  return {
+    summary: text,
+    lines: __sitrep_normalize_lines(text),
+    model_used: route.model,
+    provider_used: route.provider,
+    skipped: false,
+    reason: nil,
+  }
+}
+
+/**
+ * Run agent_sitrep and return the input transcript (or message list)
+ * with the summary appended as a system-role message tagged as a
+ * sitrep so a successor agent can recognize it.
+ *
+ * When the sitrep is skipped (no available provider, empty transcript),
+ * the input is returned unchanged.
+ *
+ * agent_sitrep_append.
+ *
+ * @effects: [llm.call]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_sitrep_append(fs: HarnessFs, llm: HarnessLlm, input, opts = nil) {
+  const result = agent_sitrep(fs, llm, input, opts)
+  if result.skipped || result.summary == "" {
+    return input
+  }
+  const tag = opts?.tag ?? "sitrep"
+  const payload = "<" + tag + ">\n" + result.summary + "\n</" + tag + ">"
+  if type_of(input) == "list" {
+    return input + [{role: "system", content: payload}]
+  }
+  if type_of(input) == "dict" && input?._type == "transcript" {
+    return add_system(input, [{type: "text", text: payload, visibility: "public"}])
+  }
+  return input
+}
+
+/**
+ * Return the built-in reverse-chronological preferred route list.
+ * Useful as a starting point for callers that want to prepend a
+ * host-specific override before passing the result back as opts.routes.
+ *
+ * agent_sitrep_preferred_routes.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_sitrep_preferred_routes(llm: HarnessLlm) -> list<ModelLadderStep> {
+  return __sitrep_resolved_routes(llm, {})
+}

@@ -1,0 +1,31 @@
+/**
+ * One owner for "a guard that inspected nothing must not report clean".
+ *
+ * Every check in `scripts/` that derives its scope from a glob has the same
+ * latent failure: if the pattern matches nothing — wrong invocation root, a
+ * directory renamed out from under it, a sandbox root that is not the
+ * repository — the violation list is empty for a reason that has nothing to do
+ * with compliance, and the guard exits 0. The clean exit is the whole problem:
+ * it is indistinguishable from a real pass, so nothing downstream ever learns
+ * the check stopped running.
+ *
+ * Keeping the wording in one place also keeps the remedy in one place. An
+ * operator who hits this in CI needs to know which pattern matched nothing,
+ * not just that a check failed.
+ */
+/**
+ * Empty string when `inspected` is positive; otherwise the failure message the
+ * guard should print before exiting non-zero.
+ *
+ * `source` is the pattern or population the guard walked, quoted back to the
+ * reader so they can check it themselves.
+ */
+pub fn empty_scope_failure(check: string, inspected: int, source: string) -> string {
+  if inspected > 0 {
+    return ""
+  }
+  return check + " inspected nothing: `" + source + "` matched no file."
+    + " Every finding below it would be vacuous, so this is a failure rather"
+    + " than a clean report. Run the check from the repository root, or fix the"
+    + " pattern if the paths it names have moved."
+}

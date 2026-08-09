@@ -1,0 +1,48 @@
+import { llm_text, with_llm_script } from "std/testing"
+import { preset_run_command } from "std/tool_hooks"
+
+/**
+ * LLM classifier — confident `deny` verdict above threshold (TH-05 #1898).
+ *
+ * The classifier returns kind=deny with confidence > threshold. The wrapper
+ * dispatches via the deny-with-explanation mode, returns the denial envelope
+ * without ever calling `inner`, and records the verdict + the `tool_denied`
+ * lifecycle audit.
+ */
+pipeline default(harness: Harness) {
+  harness.obs.pipeline_lifecycle_audit_log_take()
+  harness.tools.classifier_cache_clear()
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text(
+        "{\"kind\": \"deny\", \"confidence\": 0.95,"
+          + " \"explanation\": \"rm against /etc is dangerous\"}",
+      ),
+    ],
+    { ->
+      const inner = { args -> {ok: true, ran: args.command} }
+      const wrapper = preset_run_command(
+        harness,
+        {llm_classifier: {model: "haiku", provider: "mock", threshold: 0.7}, inner: inner},
+      )
+      const result = wrapper({command: "rm -rf /etc/foo"})
+      harness.stdio.println(result.action)
+      harness.stdio.println(result.catalogue_id)
+      harness.stdio.println(result.severity)
+      harness.stdio.println(result.explanation)
+      harness.stdio.println(result.original_command)
+      harness.stdio.println(result.command)
+      harness.stdio.println(result?.result == nil)
+      const log = harness.obs.pipeline_lifecycle_audit_log_take()
+      harness.stdio.println(len(log))
+      harness.stdio.println(log[0].kind)
+      harness.stdio.println(log[0].payload.kind)
+      harness.stdio.println(log[0].payload.action)
+      harness.stdio.println(log[1].kind)
+    },
+  )
+}
+/* `inner` would record ran; we expect it to stay silent because the
+       * deny mode never invokes the underlying executor. */
+/* `result.result` should be absent on deny since `inner` was not run. */

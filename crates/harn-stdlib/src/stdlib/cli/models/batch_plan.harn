@@ -1,0 +1,1311 @@
+import { __batch_artifact_read, __batch_request_rows_read } from "std/cli/models/batch_artifacts"
+import { __run_cancel } from "std/cli/models/batch_cancel"
+import { __run_download } from "std/cli/models/batch_download"
+import { __batch_receipt_lifecycle, __with_batch_lifecycle } from "std/cli/models/batch_lifecycle"
+import { __run_rejoin } from "std/cli/models/batch_rejoin"
+import { __run_status } from "std/cli/models/batch_status"
+import { __run_submit } from "std/cli/models/batch_submit"
+import {
+  BatchLiveAdapter,
+  __batch_create_recovery,
+  __filter_int,
+  __has_string,
+  __live_batch_adapter,
+  __mkdirp,
+  __safe_int,
+} from "std/cli/models/batch_transport"
+/**
+ * `harn models batch` renderer.
+ *
+ * Batch APIs are for latency-tolerant, provider-billed work. Interactive
+ * agent turns stay synchronous; this planner only reports catalog routes
+ * whose provider capabilities advertise async batch support, then derives
+ * manifests and provider-native request artifacts from that catalog data.
+ * Provider transport and live lifecycle commands live in the sibling
+ * `batch_*` modules imported above.
+ *
+ * Inputs (from the dispatch shim):
+ *   HARN_MODELS_BATCH_PROVIDER                  - optional provider filter.
+ *   HARN_MODELS_BATCH_MODEL                     - optional model/alias filter.
+ *   HARN_MODELS_BATCH_WORKLOAD                  - eval, judge, corpus, or generic.
+ *   HARN_MODELS_BATCH_MIN_DISCOUNT_PERCENT      - optional integer filter.
+ *   HARN_MODELS_BATCH_MAX_TURNAROUND_HOURS      - optional integer filter.
+ *   HARN_MODELS_BATCH_MODE                      - plan, manifest, prepare, submit, status, cancel, or download.
+ *   HARN_MODELS_BATCH_REQUESTS                  - manifest-mode input JSONL path.
+ *   HARN_MODELS_BATCH_OUT                       - manifest-mode output JSON path.
+ *   HARN_MODELS_BATCH_MANIFEST                  - prepare-mode manifest JSON path.
+ *   HARN_MODELS_BATCH_OUT_DIR                   - prepare-mode artifact directory.
+ *   HARN_MODELS_BATCH_RECEIPT                   - submit-mode prepare receipt path.
+ *   HARN_MODELS_BATCH_SUBMIT_OUT                - submit-mode submission receipt path.
+ *   HARN_MODELS_BATCH_SUBMISSION                - status-mode submission receipt path.
+ *   HARN_MODELS_BATCH_STATUS_OUT                - status-mode status receipt path.
+ *   HARN_MODELS_BATCH_CANCEL_RECEIPT            - cancel-mode submission or status receipt path.
+ *   HARN_MODELS_BATCH_CANCEL_OUT                - cancel-mode cancellation receipt path.
+ *   HARN_MODELS_BATCH_STATUS                    - download-mode status receipt path.
+ *   HARN_MODELS_BATCH_RESULTS_OUT_DIR           - download-mode result artifact directory.
+ *   HARN_MODELS_BATCH_MAX_DOWNLOAD_BYTES        - download-mode per-file response cap.
+ *   HARN_MODELS_BATCH_DRY_RUN                   - "1" to validate without provider calls.
+ *   HARN_MODELS_BATCH_TOOL_FORMAT               - manifest-mode default tool format.
+ *   HARN_MODELS_BATCH_ID_PREFIX                 - manifest-mode generated id prefix.
+ *   HARN_OUTPUT_JSON                            - "1" for JSON, else human text.
+ */
+import {
+  cli_json_envelope,
+  print_list,
+  safe_bool,
+  safe_dict,
+  safe_int_string,
+  safe_list,
+  safe_string,
+} from "std/cli/render"
+
+const SUPPORTED_WORKLOADS: list<string> = ["eval", "judge", "corpus", "generic"]
+
+const BATCH_ROW_META_FIELDS: list<string> = [
+  "provider",
+  "model",
+  "tool_format",
+  "endpoint",
+  "custom_id",
+  "id",
+  "metadata",
+  "body",
+  "params",
+  "request",
+  "provider_policy",
+]
+
+/**
+ * Internal record shapes this planner constructs and threads. Only the
+ * shapes Harn builds itself are typed here; provider HTTP response bodies
+ * and user-supplied request/metadata JSON stay `dict` (open boundary
+ * data). The per-job lifecycle shape is deliberately left `dict`: it is
+ * merged with provider-native response fields across submit/status/cancel
+ * and is not a single fixed record.
+ */
+type BatchModelCapability = {
+  api: bool,
+  wire_format: string,
+  input_mode: string,
+  discount_percent: int?,
+  turnaround_hours: int?,
+  max_requests: int?,
+  max_input_bytes: int?,
+  result_retention_days: int?,
+  result_ordering: string,
+  partial_failure: string,
+  cancellation: string,
+  security_notes: list,
+  operational_notes: list,
+  regions: list,
+  harn_live_adapter: BatchLiveAdapter,
+}
+
+type BatchCandidate = {
+  provider: string,
+  id: string,
+  name: string,
+  capabilities: list,
+  batch: BatchModelCapability,
+  workload: string,
+  recommended: bool,
+  recommendation: string,
+  constraints: list,
+}
+
+/**
+ * A parsed input row lifted into a request entry. `metadata` and
+ * `request` carry the caller's opaque JSON, so they stay `dict`.
+ */
+type BatchRequestEntry = {
+  custom_id: string,
+  source_line: int,
+  source_sha256: string,
+  metadata: dict,
+  request: dict,
+}
+
+type BatchGroupSummary = {
+  id: string,
+  provider: string,
+  model: string,
+  tool_format: string,
+  endpoint: string,
+  request_count: int,
+}
+
+/**
+ * Either-shaped resolution result. `candidate` is a BatchCandidate lifted
+ * back through `safe_dict`, so it is threaded as an open `dict`.
+ */
+type BatchCandidateResolution = {ok: bool, error?: string, candidate?: dict}
+
+fn __normalize_workload(value: string) -> string {
+  const workload = trim(value)
+  if __has_string(SUPPORTED_WORKLOADS, workload) {
+    return workload
+  }
+  return "generic"
+}
+
+fn __model_matches(entry: dict, filter: string) -> bool {
+  const model_filter = trim(filter)
+  if model_filter == "" {
+    return true
+  }
+  const provider = safe_string(entry["provider"], "")
+  const id = safe_string(entry["id"], "")
+  const name = safe_string(entry["name"], "")
+  if model_filter == id || model_filter == name || model_filter == provider + "/" + id {
+    return true
+  }
+  const provider_prefix = provider + "/"
+  if len(id) >= len(provider_prefix) && id[0:len(provider_prefix)] == provider_prefix {
+    const unprefixed = id[len(provider_prefix):len(id)]
+    if model_filter == unprefixed || model_filter == provider + "/" + unprefixed {
+      return true
+    }
+  }
+  return false
+}
+
+fn __sorted_strings(items: list) -> list<string> {
+  let out: list<string> = []
+  for item in items {
+    if type_of(item) != "string" {
+      continue
+    }
+    let idx = 0
+    while idx < len(out) && out[idx] < item {
+      idx = idx + 1
+    }
+    out = out[0:idx].appending(item) + out[idx:len(out)]
+  }
+  return out
+}
+
+fn __sort_models_by_provider_id(models: list) -> list {
+  let out = []
+  for model in models {
+    const m = safe_dict(model)
+    const key = safe_string(m["provider"], "") + "/" + safe_string(m["id"], "")
+    let idx = 0
+    while idx < len(out) {
+      const other = safe_dict(out[idx])
+      const other_key = safe_string(other["provider"], "") + "/" + safe_string(other["id"], "")
+      if other_key >= key {
+        break
+      }
+      idx = idx + 1
+    }
+    out = out[0:idx].appending(model) + out[idx:len(out)]
+  }
+  return out
+}
+
+fn __workload_recommendation(workload: string) -> string {
+  if workload == "eval" {
+    return "Use for lower-priority eval gauntlets, judge calibration sweeps, and nightly comparisons."
+  }
+  if workload == "judge" {
+    return "Use for asynchronous rubric calibration, transcript mining, and label generation."
+  }
+  if workload == "corpus" {
+    return "Use for corpus refresh, distillation, and large synthetic-data review passes."
+  }
+  return "Use for latency-tolerant bulk inference with stable request ids."
+}
+
+fn __constraints(workload: string) -> list<string> {
+  return [
+    "Use batch only for offline work; interactive agent turns and escalation repairs stay synchronous.",
+    "Group requests by provider, model, batch wire format, and tool-call convention before submission.",
+    "Persist a stable custom id per request so provider results can rejoin eval/corpus rows deterministically.",
+    "Treat provider subscription-plan CLI auth as separate from API/batch credentials; batch jobs need provider API billing.",
+    __workload_recommendation(workload),
+  ]
+}
+
+fn __provider_group(models: list) -> dict {
+  let groups = {}
+  for model in models {
+    const m = safe_dict(model)
+    const provider = safe_string(m["provider"], "")
+    if provider == "" {
+      continue
+    }
+    const prior = if groups[provider] == nil {
+      []
+    } else {
+      groups[provider]
+    }
+    groups = groups + {[provider]: prior.appending(m)}
+  }
+  return groups
+}
+
+fn __candidate(entry: dict, workload: string) -> BatchCandidate {
+  const provider = safe_string(entry["provider"], "")
+  const id = safe_string(entry["id"], "")
+  const batch_entry = safe_dict(entry["batch"])
+  const typed_discount = __safe_int(batch_entry["discount_percent"])
+  const typed_turnaround = __safe_int(batch_entry["turnaround_hours"])
+  const discount = if typed_discount == nil {
+    __safe_int(entry["batch_discount_percent"])
+  } else {
+    typed_discount
+  }
+  const turnaround = if typed_turnaround == nil {
+    __safe_int(entry["batch_turnaround_hours"])
+  } else {
+    typed_turnaround
+  }
+  const wire_format = safe_string(
+    batch_entry["wire_format"],
+    safe_string(entry["batch_wire_format"], ""),
+  )
+  const input_mode = safe_string(
+    batch_entry["input_mode"],
+    safe_string(entry["batch_input_mode"], ""),
+  )
+  const live_adapter = __live_batch_adapter(provider, wire_format)
+  const recommended = discount != nil && discount > 0 && (turnaround == nil || turnaround <= 24)
+  let constraints: list<string> = []
+  if wire_format == "" {
+    constraints = constraints.appending(
+      "Provider catalog omits batch wire format; submission must probe before enqueue.",
+    )
+  }
+  if input_mode == "" {
+    constraints = constraints.appending(
+      "Provider catalog omits batch input mode; submission must choose a provider-native packer.",
+    )
+  }
+  if discount == nil {
+    constraints = constraints.appending(
+      "Provider catalog does not publish a discount; cost planner must price from live usage tables.",
+    )
+  }
+  if turnaround == nil {
+    constraints = constraints.appending(
+      "Provider catalog does not publish a turnaround bound; schedule as best-effort offline work.",
+    )
+  }
+  if !safe_bool(live_adapter["submit"], false)
+    || !safe_bool(live_adapter["status"], false)
+    || !safe_bool(live_adapter["download"], false) {
+    constraints = constraints.appending(
+      "Harn can prepare this provider's batch request files, but live submit/status/download is not implemented; use --dry-run or add a provider adapter.",
+    )
+  }
+  if !safe_bool(live_adapter["cancel"], false) {
+    constraints = constraints.appending(
+      "Harn cannot live-cancel this provider's batch jobs; use provider tooling if cancellation is required.",
+    )
+  }
+  return {
+    provider: provider,
+    id: id,
+    name: safe_string(entry["name"], ""),
+    capabilities: safe_list(entry["capabilities"]),
+    batch: {
+      api: true,
+      wire_format: wire_format,
+      input_mode: input_mode,
+      discount_percent: discount,
+      turnaround_hours: turnaround,
+      max_requests: __safe_int(batch_entry["max_requests"]),
+      max_input_bytes: __safe_int(batch_entry["max_input_bytes"]),
+      result_retention_days: __safe_int(batch_entry["result_retention_days"]),
+      result_ordering: safe_string(batch_entry["result_ordering"], "unknown"),
+      partial_failure: safe_string(batch_entry["partial_failure"], "unknown"),
+      cancellation: safe_string(batch_entry["cancellation"], "unknown"),
+      security_notes: safe_list(batch_entry["security_notes"]),
+      operational_notes: safe_list(batch_entry["operational_notes"]),
+      regions: safe_list(batch_entry["regions"]),
+      harn_live_adapter: live_adapter,
+    },
+    workload: workload,
+    recommended: recommended,
+    recommendation: __workload_recommendation(workload),
+    constraints: constraints,
+  }
+}
+
+fn __collect(
+  catalog: list,
+  provider_filter: string,
+  model_filter: string,
+  workload: string,
+  min_discount: int?,
+  max_turnaround: int?,
+) -> list {
+  let out = []
+  for raw_entry in catalog {
+    const entry = safe_dict(raw_entry)
+    const provider = safe_string(entry["provider"], "")
+    const id = safe_string(entry["id"], "")
+    if provider == "" || id == "" {
+      continue
+    }
+    if trim(provider_filter) != "" && provider != trim(provider_filter) {
+      continue
+    }
+    if !__model_matches(entry, model_filter) {
+      continue
+    }
+    const capabilities = safe_list(entry["capabilities"])
+    if !safe_bool(entry["batch_api"], false) && !__has_string(capabilities, "batch") {
+      continue
+    }
+    const discount = __safe_int(entry["batch_discount_percent"])
+    if min_discount != nil && (discount == nil || discount < min_discount) {
+      continue
+    }
+    const turnaround = __safe_int(entry["batch_turnaround_hours"])
+    if max_turnaround != nil && (turnaround == nil || turnaround > max_turnaround) {
+      continue
+    }
+    out = out.appending(__candidate(entry, workload))
+  }
+  return __sort_models_by_provider_id(out)
+}
+
+fn __render_batch_value(value, suffix: string, fallback: string) -> string {
+  const parsed = __safe_int(value)
+  if parsed == nil {
+    return fallback
+  }
+  return to_string(parsed) + suffix
+}
+
+fn __render_model_line(model: dict) -> string {
+  const batch = safe_dict(model["batch"])
+  const wire = safe_string(batch["wire_format"], "unknown_wire")
+  const input = safe_string(batch["input_mode"], "unknown_input")
+  const discount = __render_batch_value(batch["discount_percent"], "%", "unknown discount")
+  const turnaround = __render_batch_value(batch["turnaround_hours"], "h", "unknown turnaround")
+  const live = if safe_bool(safe_dict(batch["harn_live_adapter"])["submit"], false) {
+    "live submit"
+  } else {
+    "dry-run only"
+  }
+  return "  "
+    + safe_string(model["id"], "")
+    + "  "
+    + wire
+    + "/"
+    + input
+    + "  discount "
+    + discount
+    + "  turnaround "
+    + turnaround
+    + "  "
+    + live
+}
+
+fn __render_human(stdio: HarnessStdio, report: dict) {
+  const workload = safe_string(report["workload"], "generic")
+  const models = safe_list(report["models"])
+  if len(models) == 0 {
+    stdio.println("(no batch-capable models match)")
+  } else {
+    stdio.println("Batch-capable models for " + workload)
+    const groups = __provider_group(models)
+    for provider in __sorted_strings(keys(groups)) {
+      stdio.println(provider)
+      for model in groups[provider] {
+        stdio.println(__render_model_line(safe_dict(model)))
+        print_list(stdio, "constraints", safe_list(safe_dict(model)["constraints"]))
+      }
+      stdio.println("")
+    }
+  }
+  print_list(stdio, "planner constraints", safe_list(report["constraints"]))
+  print_list(stdio, "warnings", safe_list(report["warnings"]))
+}
+
+fn __render_json(report: dict) -> string {
+  return json_stringify_pretty(cli_json_envelope({schema_version: 1, ok: true, data: report}))
+}
+
+fn __resolve_candidate(
+  catalog: list,
+  provider_filter: string,
+  model_filter: string,
+  workload: string,
+) -> BatchCandidateResolution {
+  const matches = __collect(catalog, provider_filter, model_filter, workload, nil, nil)
+  if len(matches) == 0 {
+    return {
+      ok: false,
+      error: "no batch-capable model matches provider='" + provider_filter + "' model='"
+        + model_filter
+        + "'",
+    }
+  }
+  if len(matches) > 1 && trim(provider_filter) == "" {
+    return {
+      ok: false,
+      error: "model '" + model_filter + "' matches multiple batch-capable providers; set provider",
+    }
+  }
+  return {ok: true, candidate: safe_dict(matches[0])}
+}
+
+fn __row_string(row: dict, key: string, fallback: string) -> string {
+  const value = safe_string(row[key], "")
+  if trim(value) == "" {
+    return fallback
+  }
+  return trim(value)
+}
+
+fn __custom_id(row: dict, line_no: int, id_prefix: string) -> string {
+  const explicit = __row_string(row, "custom_id", __row_string(row, "id", ""))
+  if explicit != "" {
+    return explicit
+  }
+  return id_prefix + "-" + to_string(line_no) + "-" + sha256(json_stringify(row)).substring(0, 12)
+}
+
+fn __request_entry(row: dict, line_no: int, id_prefix: string) -> BatchRequestEntry {
+  const custom_id = __custom_id(row, line_no, id_prefix)
+  return {
+    custom_id: custom_id,
+    source_line: line_no,
+    source_sha256: sha256(json_stringify(row)),
+    metadata: safe_dict(row["metadata"]),
+    request: row,
+  }
+}
+
+fn __group_key(
+  provider: string,
+  model: string,
+  batch: dict,
+  tool_format: string,
+  endpoint: string,
+  provider_policy: dict,
+) -> string {
+  return provider
+    + "\t"
+    + model
+    + "\t"
+    + safe_string(batch["wire_format"], "")
+    + "\t"
+    + safe_string(batch["input_mode"], "")
+    + "\t"
+    + tool_format
+    + "\t"
+    + endpoint
+    + "\t"
+    + json_stringify(provider_policy)
+}
+
+fn __group_summary(group: dict) -> BatchGroupSummary {
+  return {
+    id: safe_string(group["id"], ""),
+    provider: safe_string(group["provider"], ""),
+    model: safe_string(group["model"], ""),
+    tool_format: safe_string(group["tool_format"], ""),
+    endpoint: safe_string(group["endpoint"], ""),
+    request_count: len(safe_list(group["requests"])),
+  }
+}
+
+fn __dict_without_batch_fields(row: dict) -> dict {
+  let out = {}
+  for key in row.keys().sorted() {
+    if !__has_string(BATCH_ROW_META_FIELDS, key) {
+      out = out + {[key]: row[key]}
+    }
+  }
+  return out
+}
+
+fn __body_from_row(row: dict, model: string, include_model: bool) -> dict {
+  let body = safe_dict(row["params"])
+  if body == {} {
+    body = safe_dict(row["body"])
+  }
+  if body == {} {
+    body = safe_dict(row["request"])
+  }
+  if body == {} {
+    body = __dict_without_batch_fields(row)
+  }
+  if include_model && body["model"] == nil && model != "" {
+    body = body + {model: model}
+  }
+  return body
+}
+
+fn __include_model_for_batch_wire(wire: string) -> bool {
+  return wire != "gemini" && wire != "fireworks" && wire != "bedrock"
+}
+
+fn __body_from_row_for_batch_wire(row: dict, model: string, wire: string) -> dict {
+  return __body_from_row(row, model, __include_model_for_batch_wire(wire))
+}
+
+fn __batch_request_location(prefix: string, custom_id: string, line_no: int) -> string {
+  let out = prefix
+  if line_no > 0 {
+    out = out + " line " + to_string(line_no)
+  }
+  if custom_id != "" {
+    out = out + " custom_id=" + custom_id
+  }
+  return trim(out)
+}
+
+fn __non_streaming_batch_errors(location: string, row: dict, body: dict) -> list {
+  if safe_bool(row["stream"], false) || safe_bool(body["stream"], false) {
+    return [
+      location
+        + ": batch request bodies must not set stream: true; batch APIs return results asynchronously through provider result files",
+    ]
+  }
+  return []
+}
+
+fn __batch_endpoint(group: dict) -> string {
+  const endpoint = trim(safe_string(group["endpoint"], ""))
+  if starts_with(endpoint, "/") {
+    return endpoint
+  }
+  const wire = safe_string(safe_dict(group["batch"])["wire_format"], "")
+  if wire == "anthropic_messages" {
+    return "/v1/messages/batches"
+  }
+  if wire == "openai" || wire == "mistral" || wire == "fireworks" || wire == "xai" {
+    return "/v1/chat/completions"
+  }
+  if wire == "gemini" {
+    return "batchGenerateContent"
+  }
+  if endpoint != "" {
+    return endpoint
+  }
+  return "provider_default"
+}
+
+fn __prepare_file_stem(group: dict) -> string {
+  const seed = safe_string(group["id"], "") + ":" + safe_string(group["provider"], "") + ":"
+    + safe_string(
+    group["model"],
+    "",
+  )
+  return "batch_group_" + substring(sha256(seed), 0, 16)
+}
+
+fn __provider_request_record(group: dict, request: dict, endpoint: string, body: dict) -> dict {
+  const wire = safe_string(safe_dict(group["batch"])["wire_format"], "")
+  const custom_id = safe_string(request["custom_id"], "")
+  if wire == "anthropic_messages" {
+    return {custom_id: custom_id, params: body}
+  }
+  if wire == "gemini" {
+    return {key: custom_id, request: body}
+  }
+  if wire == "fireworks" {
+    return {custom_id: custom_id, body: body}
+  }
+  if wire == "bedrock" {
+    return {recordId: custom_id, modelInput: body}
+  }
+  return {custom_id: custom_id, method: "POST", url: endpoint, body: body}
+}
+
+fn __supported_prepare_wire(wire: string) -> bool {
+  return wire == "openai"
+    || wire == "mistral"
+    || wire == "fireworks"
+    || wire == "xai"
+    || wire == "gemini"
+    || wire == "anthropic_messages"
+    || wire == "bedrock"
+}
+
+fn __request_file_text(wire: string, records: list) -> string {
+  if wire == "anthropic_messages" {
+    return json_stringify_pretty({requests: records}) + "\n"
+  }
+  let lines = []
+  for record in records {
+    lines = lines.appending(json_stringify(record))
+  }
+  return join(lines, "\n") + "\n"
+}
+
+fn __submit_contract(group: dict, request_path: string, endpoint: string) -> dict {
+  const provider = safe_string(group["provider"], "")
+  const model = safe_string(group["model"], "")
+  const batch = safe_dict(group["batch"])
+  const wire = safe_string(batch["wire_format"], "")
+  if wire == "anthropic_messages" {
+    return {
+      provider: provider,
+      operation: "POST /v1/messages/batches",
+      request_body: "Use the prepared JSON file as the request body.",
+      request_file: request_path,
+      result_stream: "GET results_url after processing_status becomes ended",
+    }
+  }
+  if wire == "gemini" {
+    return {
+      provider: provider,
+      operation: "batches.create",
+      model: model,
+      input: {mode: "file_api_jsonl", file: request_path},
+      request_line_shape: "{key, request}",
+    }
+  }
+  if wire == "fireworks" {
+    return {
+      provider: provider,
+      operation: "POST /v1/accounts/{account_id}/batchInferenceJobs",
+      model: model,
+      upload: {
+        create_dataset: "POST /v1/accounts/{account_id}/datasets",
+        upload_dataset: "POST /v1/accounts/{account_id}/datasets/{dataset_id}:upload",
+        file: request_path,
+      },
+      create_batch: {
+        input_dataset_id: "<input-dataset-id>",
+        output_dataset_id: "<output-dataset-id>",
+      },
+      request_line_shape: "{custom_id, body}",
+      result_stream:
+        "GET /v1/accounts/{account_id}/datasets/{output_dataset_id}:getDownloadEndpoint",
+    }
+  }
+  if wire == "mistral" {
+    return {
+      provider: provider,
+      operation: "POST /v1/batch/jobs",
+      upload: {purpose: "batch", file: request_path},
+      create_job: {endpoint: endpoint, model: model, input_files: ["<uploaded-file-id>"]},
+    }
+  }
+  if wire == "xai" {
+    return {
+      provider: provider,
+      operation: "POST /v1/batches",
+      upload: {file: request_path},
+      create_batch: {name: safe_string(group["id"], ""), input_file_id: "<uploaded-file-id>"},
+      result_stream: "GET /v1/batches/{batch_id}/results after state.num_pending reaches 0",
+    }
+  }
+  if wire == "bedrock" {
+    const policy = safe_dict(group["provider_policy"])
+    return {
+      provider: provider,
+      operation: "CreateModelInvocationJob",
+      model: model,
+      input: {
+        mode: "s3_jsonl",
+        file: request_path,
+        s3_uri: safe_string(policy["input_s3_uri"], ""),
+      },
+      output_s3_uri: safe_string(policy["output_s3_uri"], ""),
+      role_arn: "<redacted>",
+      request_line_shape: "{recordId, modelInput}",
+    }
+  }
+  if provider == "together" && wire == "openai" {
+    return {
+      provider: provider,
+      operation: "POST /v1/batches",
+      upload: {purpose: "batch-api", file: request_path},
+      create_batch: {endpoint: endpoint, input_file_id: "<uploaded-file-id>"},
+    }
+  }
+  return {
+    provider: provider,
+    operation: "POST /v1/batches",
+    upload: {purpose: "batch", file: request_path},
+    create_batch: {
+      endpoint: endpoint,
+      completion_window: "24h",
+      input_file_id: "<uploaded-file-id>",
+    },
+  }
+}
+
+fn __prepare_artifact(out_dir: string, group: dict) -> dict {
+  const batch = safe_dict(group["batch"])
+  const wire = safe_string(batch["wire_format"], "")
+  let errors = []
+  if !__supported_prepare_wire(wire) {
+    errors = errors.appending("unsupported batch wire format for prepare: " + wire)
+    return {ok: false, errors: errors}
+  }
+  const requests = safe_list(group["requests"])
+  if len(requests) == 0 {
+    errors = errors.appending("group " + safe_string(group["id"], "") + " contains no requests")
+    return {ok: false, errors: errors}
+  }
+  const endpoint = __batch_endpoint(group)
+  let records = []
+  for request in requests {
+    const req = safe_dict(request)
+    const raw_row = safe_dict(req["request"])
+    const body = __body_from_row_for_batch_wire(raw_row, safe_string(group["model"], ""), wire)
+    errors = errors
+      + __non_streaming_batch_errors(
+      __batch_request_location(
+        "group " + safe_string(group["id"], ""),
+        safe_string(req["custom_id"], ""),
+        __safe_int(req["source_line"]) ?? 0,
+      ),
+      raw_row,
+      body,
+    )
+    records = records.appending(__provider_request_record(group, req, endpoint, body))
+  }
+  if len(errors) > 0 {
+    return {ok: false, errors: errors}
+  }
+  const ext = if wire == "anthropic_messages" {
+    ".json"
+  } else {
+    ".jsonl"
+  }
+  const request_path = path_join(out_dir, __prepare_file_stem(group) + ext)
+  const text = __request_file_text(wire, records)
+  const job = {
+    id: safe_string(group["id"], ""),
+    provider: safe_string(group["provider"], ""),
+    model: safe_string(group["model"], ""),
+    workload: safe_string(group["workload"], ""),
+    endpoint: endpoint,
+    tool_format: safe_string(group["tool_format"], ""),
+    batch: batch,
+    provider_policy: safe_dict(group["provider_policy"]),
+    create_recovery: __batch_create_recovery(safe_string(group["provider"], ""), wire),
+    input_mode: safe_string(batch["input_mode"], ""),
+    request_count: len(records),
+    request_file: request_path,
+    request_file_sha256: sha256(text),
+    request_format: if wire == "anthropic_messages" {
+      "json_requests"
+    } else {
+      "jsonl"
+    },
+    status: "prepared",
+    submit: __submit_contract(group, request_path, endpoint),
+  }
+  return {ok: true, job: job, path: request_path, text: text, errors: []}
+}
+
+fn __build_manifest(
+  catalog: list,
+  request_rows: list,
+  source_path: string,
+  source_sha256: string,
+  out_path: string,
+  provider_filter: string,
+  model_filter: string,
+  workload: string,
+  default_tool_format: string,
+  id_prefix: string,
+  min_discount: int?,
+  max_turnaround: int?,
+) -> dict {
+  let errors = []
+  let warnings = []
+  let groups = {}
+  let group_keys = []
+  let request_count = 0
+  for item in request_rows {
+    const entry = safe_dict(item)
+    const line_no = __safe_int(entry["line_no"]) ?? 0
+    const row = safe_dict(entry["row"])
+    const provider = __row_string(row, "provider", provider_filter)
+    const model = __row_string(row, "model", model_filter)
+    if provider == "" && model == "" {
+      errors = errors.appending("line " + to_string(line_no) + ": provider/model missing")
+      continue
+    }
+    if model == "" {
+      errors = errors.appending("line " + to_string(line_no) + ": model missing")
+      continue
+    }
+    const resolved = __resolve_candidate(catalog, provider, model, workload)
+    if !safe_bool(resolved["ok"], false) {
+      errors = errors.appending(
+        "line " + to_string(line_no) + ": " + safe_string(resolved["error"], "unresolved model"),
+      )
+      continue
+    }
+    const candidate = safe_dict(resolved["candidate"])
+    const batch = safe_dict(candidate["batch"])
+    const discount = __safe_int(batch["discount_percent"])
+    if min_discount != nil && (discount == nil || discount < min_discount) {
+      errors = errors.appending(
+        "line "
+          + to_string(line_no)
+          + ": model discount below --min-discount-percent for "
+          + safe_string(
+          candidate["provider"],
+          "",
+        )
+          + "/"
+          + safe_string(candidate["id"], ""),
+      )
+      continue
+    }
+    const turnaround = __safe_int(batch["turnaround_hours"])
+    if max_turnaround != nil && (turnaround == nil || turnaround > max_turnaround) {
+      errors = errors.appending(
+        "line "
+          + to_string(line_no)
+          + ": model turnaround exceeds --max-turnaround-hours for "
+          + safe_string(
+          candidate["provider"],
+          "",
+        )
+          + "/"
+          + safe_string(candidate["id"], ""),
+      )
+      continue
+    }
+    const tool_format = __row_string(row, "tool_format", default_tool_format)
+    const endpoint = __row_string(
+      row,
+      "endpoint",
+      safe_string(batch["wire_format"], "provider_default"),
+    )
+    const request = __request_entry(row, line_no, id_prefix)
+    const wire = safe_string(batch["wire_format"], "")
+    const provider_policy = safe_dict(row["provider_policy"])
+    if wire == "bedrock" {
+      const region = safe_string(provider_policy["region"], "")
+      const role_arn = safe_string(provider_policy["role_arn"], "")
+      const input_s3_uri = safe_string(provider_policy["input_s3_uri"], "")
+      const output_s3_uri = safe_string(provider_policy["output_s3_uri"], "")
+      if region == "" || !safe_list(batch["regions"]).contains(region) {
+        errors = errors.appending(
+          "line " + to_string(line_no) + ": unsupported Bedrock batch region '" + region
+            + "' for model "
+            + safe_string(candidate["id"], ""),
+        )
+        continue
+      }
+      if !starts_with(role_arn, "arn:aws:iam::") || !contains(role_arn, ":role/") {
+        errors = errors.appending("line " + to_string(line_no) + ": invalid Bedrock role_arn")
+        continue
+      }
+      if !starts_with(input_s3_uri, "s3://") || !starts_with(output_s3_uri, "s3://") {
+        errors = errors.appending(
+          "line " + to_string(line_no)
+            + ": Bedrock input_s3_uri and output_s3_uri must use s3://",
+        )
+        continue
+      }
+    }
+    const body = __body_from_row_for_batch_wire(row, safe_string(candidate["id"], ""), wire)
+    const body_errors = __non_streaming_batch_errors(
+      __batch_request_location("", safe_string(request["custom_id"], ""), line_no),
+      row,
+      body,
+    )
+    if len(body_errors) > 0 {
+      errors = errors + body_errors
+      continue
+    }
+    const key = __group_key(
+      safe_string(candidate["provider"], ""),
+      safe_string(candidate["id"], ""),
+      batch,
+      tool_format,
+      endpoint,
+      provider_policy,
+    )
+    const current = safe_dict(groups[key])
+    if current == {} {
+      const group_id = "batch_group_" + sha256(key).substring(0, 16)
+      const group = {
+        id: group_id,
+        provider: safe_string(candidate["provider"], ""),
+        model: safe_string(candidate["id"], ""),
+        model_name: safe_string(candidate["name"], ""),
+        workload: workload,
+        endpoint: endpoint,
+        tool_format: tool_format,
+        batch: batch,
+        provider_policy: provider_policy,
+        requests: [request],
+      }
+      groups = groups + {[key]: group}
+      group_keys = group_keys.appending(key)
+    } else {
+      const updated = current + {requests: safe_list(current["requests"]).appending(request)}
+      groups = groups + {[key]: updated}
+    }
+    request_count = request_count + 1
+  }
+  let group_list = []
+  for key in group_keys {
+    const group = safe_dict(groups[key])
+    group_list = group_list.appending(group + {request_count: len(safe_list(group["requests"]))})
+  }
+  if len(request_rows) == 0 {
+    errors = errors.appending("request JSONL contains no request rows")
+  }
+  if out_path == "" {
+    errors = errors.appending("--out is required")
+  }
+  const manifest = {
+    schemaVersion: 1,
+    kind: "harn.model_batch_manifest",
+    producer: "harn models batch manifest",
+    workload: workload,
+    source: {path: source_path, sha256: source_sha256, row_count: len(request_rows)},
+    constraints: __constraints(workload),
+    requestCount: request_count,
+    groupCount: len(group_list),
+    groups: group_list,
+    warnings: warnings,
+  }
+  return {manifest: manifest, errors: errors, warnings: warnings}
+}
+
+fn __render_manifest_human(stdio: HarnessStdio, report: dict) {
+  if !safe_bool(report["ok"], false) {
+    stdio.eprintln("Batch manifest failed")
+    print_list(stdio, "errors", safe_list(report["errors"]))
+    print_list(stdio, "warnings", safe_list(report["warnings"]))
+    return
+  }
+  stdio.println("Batch manifest written: " + safe_string(report["out"], ""))
+  stdio.println("  requests: " + safe_int_string(report["request_count"], "0"))
+  stdio.println("  groups: " + safe_int_string(report["group_count"], "0"))
+  stdio.println("  manifest sha256: " + safe_string(report["manifest_sha256"], ""))
+  for group in safe_list(report["groups"]) {
+    const g = safe_dict(group)
+    stdio.println(
+      "  "
+        + safe_string(g["id"], "")
+        + " "
+        + safe_string(g["provider"], "")
+        + "/"
+        + safe_string(g["model"], "")
+        + " "
+        + safe_string(g["tool_format"], "")
+        + " requests="
+        + safe_int_string(g["request_count"], "0"),
+    )
+  }
+  print_list(stdio, "warnings", safe_list(report["warnings"]))
+}
+
+fn __render_manifest_json(report: dict) -> string {
+  if safe_bool(report["ok"], false) {
+    return json_stringify_pretty(cli_json_envelope({schema_version: 1, ok: true, data: report}))
+  }
+  return json_stringify_pretty(
+    cli_json_envelope(
+      {
+        schema_version: 1,
+        ok: false,
+        error: {
+          code: "batch_manifest_failed",
+          message: "Batch manifest request rows could not be resolved into provider batch groups.",
+          details: report,
+        },
+        warnings: safe_list(report["warnings"]),
+      },
+    ),
+  )
+}
+
+fn __run_manifest(
+  harness: Harness,
+  catalog: list,
+  provider_filter: string,
+  model_filter: string,
+  workload: string,
+  min_discount: int?,
+  max_turnaround: int?,
+  planner_warnings: list,
+) -> int {
+  const requests_path = trim(harness.env.get_or("HARN_MODELS_BATCH_REQUESTS", ""))
+  const out_path = trim(harness.env.get_or("HARN_MODELS_BATCH_OUT", ""))
+  const default_tool_format = trim(harness.env.get_or("HARN_MODELS_BATCH_TOOL_FORMAT", "auto"))
+  const id_prefix_raw = trim(harness.env.get_or("HARN_MODELS_BATCH_ID_PREFIX", "harn-batch"))
+  const id_prefix = if id_prefix_raw == "" {
+    "harn-batch"
+  } else {
+    id_prefix_raw
+  }
+  const loaded = __batch_request_rows_read(harness.fs, requests_path)
+  const built = __build_manifest(
+    catalog,
+    loaded.rows,
+    requests_path,
+    loaded.source_sha256,
+    out_path,
+    provider_filter,
+    model_filter,
+    workload,
+    default_tool_format,
+    id_prefix,
+    min_discount,
+    max_turnaround,
+  )
+  const errors = loaded.errors + safe_list(built["errors"])
+  const warnings = safe_list(planner_warnings) + safe_list(built["warnings"])
+  const manifest = safe_dict(built["manifest"]) + {warnings: warnings}
+  let report = {
+    schema_version: 1,
+    ok: len(errors) == 0,
+    out: out_path,
+    source: safe_dict(manifest["source"]),
+    workload: workload,
+    request_count: __safe_int(manifest["requestCount"]) ?? 0,
+    group_count: __safe_int(manifest["groupCount"]) ?? 0,
+    groups: safe_list(manifest["groups"]).map({ group -> __group_summary(safe_dict(group)) }),
+    errors: errors,
+    warnings: warnings,
+  }
+  if len(errors) == 0 {
+    const manifest_text = json_stringify_pretty(manifest) + "\n"
+    harness.fs.write_text(out_path, manifest_text)
+    report = report + {manifest_sha256: sha256(manifest_text)}
+  }
+  if harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1" {
+    harness.stdio.println(__render_manifest_json(report))
+  } else {
+    __render_manifest_human(harness.stdio, report)
+  }
+  if len(errors) == 0 {
+    return 0
+  }
+  return 1
+}
+
+fn __render_prepare_human(stdio: HarnessStdio, report: dict) {
+  if !safe_bool(report["ok"], false) {
+    stdio.eprintln("Batch prepare failed")
+    print_list(stdio, "errors", safe_list(report["errors"]))
+    print_list(stdio, "warnings", safe_list(report["warnings"]))
+    return
+  }
+  stdio.println("Batch prepare receipt written: " + safe_string(report["receipt"], ""))
+  stdio.println("  jobs: " + safe_int_string(report["job_count"], "0"))
+  stdio.println("  requests: " + safe_int_string(report["request_count"], "0"))
+  stdio.println("  receipt sha256: " + safe_string(report["receipt_sha256"], ""))
+  for job in safe_list(report["jobs"]) {
+    const j = safe_dict(job)
+    stdio.println(
+      "  "
+        + safe_string(j["id"], "")
+        + " "
+        + safe_string(j["provider"], "")
+        + "/"
+        + safe_string(j["model"], "")
+        + " "
+        + safe_string(safe_dict(j["batch"])["wire_format"], "")
+        + " requests="
+        + safe_int_string(j["request_count"], "0")
+        + " file="
+        + safe_string(j["request_file"], ""),
+    )
+  }
+  print_list(stdio, "warnings", safe_list(report["warnings"]))
+}
+
+fn __render_prepare_json(report: dict) -> string {
+  if safe_bool(report["ok"], false) {
+    return json_stringify_pretty(cli_json_envelope({schema_version: 1, ok: true, data: report}))
+  }
+  return json_stringify_pretty(
+    cli_json_envelope(
+      {
+        schema_version: 1,
+        ok: false,
+        error: {
+          code: "batch_prepare_failed",
+          message: "Batch manifest could not be prepared into provider request files.",
+          details: report,
+        },
+        warnings: safe_list(report["warnings"]),
+      },
+    ),
+  )
+}
+
+fn __run_prepare(harness: Harness) -> int {
+  const manifest_path = trim(harness.env.get_or("HARN_MODELS_BATCH_MANIFEST", ""))
+  const out_dir = trim(harness.env.get_or("HARN_MODELS_BATCH_OUT_DIR", ""))
+  const loaded = __batch_artifact_read(harness.fs, manifest_path, "manifest")
+  let errors = loaded.errors
+  let warnings = []
+  if out_dir == "" {
+    errors = errors.appending("--out-dir is required")
+  }
+  const manifest = loaded.artifact
+  let artifacts = []
+  let jobs = []
+  let request_count = 0
+  if len(errors) == 0 {
+    for group in safe_list(manifest["groups"]) {
+      const artifact = __prepare_artifact(out_dir, safe_dict(group))
+      errors = errors + safe_list(artifact["errors"])
+      if safe_bool(artifact["ok"], false) {
+        artifacts = artifacts.appending(artifact)
+        const job = safe_dict(artifact["job"])
+        jobs = jobs.appending(__with_batch_lifecycle(job, "prepare", false))
+        request_count = request_count + (__safe_int(job["request_count"]) ?? 0)
+      }
+    }
+  }
+  const receipt_path = if out_dir == "" {
+    ""
+  } else {
+    path_join(out_dir, "receipt.json")
+  }
+  const status = if len(errors) == 0 {
+    "prepared"
+  } else {
+    "failed"
+  }
+  let receipt = {
+    schemaVersion: 1,
+    kind: "harn.model_batch_prepare_receipt",
+    producer: "harn models batch prepare",
+    manifest: {
+      path: manifest_path,
+      sha256: loaded.source_sha256,
+      source: safe_dict(manifest["source"]),
+      request_count: __safe_int(manifest["requestCount"]) ?? 0,
+      group_count: __safe_int(manifest["groupCount"]) ?? 0,
+    },
+    outDir: out_dir,
+    jobCount: len(jobs),
+    requestCount: request_count,
+    jobs: jobs,
+    status: status,
+    lifecycle: __batch_receipt_lifecycle(status, jobs, false, "prepare"),
+    warnings: warnings,
+    errors: errors,
+  }
+  let report = {
+    schema_version: 1,
+    ok: len(errors) == 0,
+    manifest: receipt["manifest"],
+    out_dir: out_dir,
+    receipt: receipt_path,
+    job_count: len(jobs),
+    request_count: request_count,
+    jobs: jobs,
+    lifecycle: __batch_receipt_lifecycle(status, jobs, false, "prepare"),
+    errors: errors,
+    warnings: warnings,
+  }
+  if len(errors) == 0 {
+    __mkdirp(harness.fs, out_dir)
+    for artifact in artifacts {
+      harness.fs.write_text(safe_string(artifact["path"], ""), safe_string(artifact["text"], ""))
+    }
+    const receipt_text = json_stringify_pretty(receipt) + "\n"
+    harness.fs.write_text(receipt_path, receipt_text)
+    receipt = receipt + {receipt_sha256: sha256(receipt_text)}
+    report = report + {receipt_sha256: sha256(receipt_text)}
+  }
+  if harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1" {
+    harness.stdio.println(__render_prepare_json(report))
+  } else {
+    __render_prepare_human(harness.stdio, report)
+  }
+  if len(errors) == 0 {
+    return 0
+  }
+  return 1
+}
+
+fn main(harness: Harness) -> int {
+  const provider_filter = trim(harness.env.get_or("HARN_MODELS_BATCH_PROVIDER", ""))
+  const model_filter = trim(harness.env.get_or("HARN_MODELS_BATCH_MODEL", ""))
+  const workload_raw = trim(harness.env.get_or("HARN_MODELS_BATCH_WORKLOAD", "eval"))
+  const workload = __normalize_workload(workload_raw)
+  const min_discount = __filter_int(
+    harness.env.get_or("HARN_MODELS_BATCH_MIN_DISCOUNT_PERCENT", ""),
+  )
+  const max_turnaround = __filter_int(
+    harness.env.get_or("HARN_MODELS_BATCH_MAX_TURNAROUND_HOURS", ""),
+  )
+  const catalog = harness.llm.catalog()
+  const models = __collect(
+    catalog,
+    provider_filter,
+    model_filter,
+    workload,
+    min_discount,
+    max_turnaround,
+  )
+  let warnings = []
+  if workload != workload_raw && workload_raw != "" {
+    warnings = warnings.appending("unknown workload '" + workload_raw + "'; using generic policy")
+  }
+  if min_discount == nil && harness.env.get_or("HARN_MODELS_BATCH_MIN_DISCOUNT_PERCENT", "") != "" {
+    warnings = warnings.appending("ignored non-integer --min-discount-percent")
+  }
+  if max_turnaround == nil
+    && harness.env.get_or("HARN_MODELS_BATCH_MAX_TURNAROUND_HOURS", "") != "" {
+    warnings = warnings.appending("ignored non-integer --max-turnaround-hours")
+  }
+  const mode = harness.env.get_or("HARN_MODELS_BATCH_MODE", "plan")
+  if mode == "prepare" {
+    return __run_prepare(harness)
+  }
+  if mode == "submit" {
+    return __run_submit(harness)
+  }
+  if mode == "status" {
+    return __run_status(harness)
+  }
+  if mode == "cancel" {
+    return __run_cancel(harness)
+  }
+  if mode == "download" {
+    return __run_download(harness)
+  }
+  if mode == "rejoin" {
+    return __run_rejoin(harness)
+  }
+  if mode == "manifest" {
+    return __run_manifest(
+      harness,
+      catalog,
+      provider_filter,
+      model_filter,
+      workload,
+      min_discount,
+      max_turnaround,
+      warnings,
+    )
+  }
+  const report = {
+    schema_version: 1,
+    workload: workload,
+    filters: {
+      provider: provider_filter,
+      model: model_filter,
+      min_discount_percent: min_discount,
+      max_turnaround_hours: max_turnaround,
+    },
+    models: models,
+    constraints: __constraints(workload),
+    warnings: warnings,
+  }
+  if harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1" {
+    harness.stdio.println(__render_json(report))
+  } else {
+    __render_human(harness.stdio, report)
+  }
+  return 0
+}

@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/code_index/extract_trigrams.request.json",
+  "title": "code_index.extract_trigrams request",
+  "description": "Decompose a query string into the set of packed trigrams the indexer would record.",
+  "type": "object",
+  "properties": {
+    "query": { "type": "string" }
+  },
+  "required": ["query"],
+  "additionalProperties": false
+}

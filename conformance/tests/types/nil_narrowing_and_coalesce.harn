@@ -1,0 +1,15 @@
+type Opts = {label?: string, tags?: list<string>}?
+
+fn describe(options: Opts = nil) -> string {
+  const opts = options ?? {}
+  let out = "base"
+  if opts?.label != nil {
+    out = opts.label
+  }
+  return out
+}
+
+pipeline main(harness: Harness) {
+  harness.stdio.println(describe({label: "hello"}))
+  harness.stdio.println(describe(nil))
+}

@@ -1,0 +1,21 @@
+pipeline test(harness: Harness, task) {
+  // metadata_get on empty store returns nil
+  const result = harness.project.metadata_get({dir: ".", namespace: "test_ns"})
+  assert_eq(result, nil)
+  // metadata_set and metadata_get roundtrip
+  harness.project.metadata_set({dir: ".", namespace: "test_ns", value: {key1: "value1", key2: 42}})
+  const data = harness.project.metadata_get({dir: ".", namespace: "test_ns"})
+  assert_eq(data.key1, "value1")
+  assert_eq(data.key2, 42)
+  // metadata_stale returns expected shape
+  const stale = harness.project.metadata_stale({dir: "."})
+  assert_eq(stale.any_stale, false)
+  assert_eq(type_of(stale.tier1), "list")
+  assert_eq(type_of(stale.tier2), "list")
+  // compute_content_hash returns a string
+  const hash = harness.project.content_hash(".")
+  assert_eq(type_of(hash), "string")
+  assert(len(hash) > 0)
+  harness.project.metadata_refresh_hashes({})
+  harness.stdio.log("metadata ok")
+}
