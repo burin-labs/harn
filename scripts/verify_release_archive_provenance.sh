@@ -13,6 +13,7 @@ usage() {
   cat <<'EOF'
 Usage: scripts/verify_release_archive_provenance.sh \
   --artifacts-dir DIR --tag vX.Y.Z --repo OWNER/REPO \
+  [--allowed-signers FILE] \
   [--legacy-override JSON]
 
 Verifies every release archive against its GitHub artifact attestation before
@@ -27,12 +28,14 @@ EOF
 artifacts_dir=""
 tag=""
 repo=""
+allowed_signers=""
 legacy_override=""
 while (($#)); do
   case "$1" in
     --artifacts-dir) artifacts_dir="${2:-}"; shift 2 ;;
     --tag) tag="${2:-}"; shift 2 ;;
     --repo) repo="${2:-}"; shift 2 ;;
+    --allowed-signers) allowed_signers="${2:-}"; shift 2 ;;
     --legacy-override) legacy_override="${2:-}"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "error: unknown argument: $1" >&2; usage >&2; exit 2 ;;
@@ -100,9 +103,29 @@ fi
 tag_object_json="$(gh api "repos/$repo/git/tags/$tag_object_sha")"
 source_commit="$(jq -r '.object.sha // empty' <<<"$tag_object_json")"
 if [[ "$(jq -r '.object.type // empty' <<<"$tag_object_json")" != "commit" ||
-      ! "$source_commit" =~ ^[0-9a-f]{40}$ ||
-      "$(jq -r '.verification.verified // false' <<<"$tag_object_json")" != "true" ]]; then
-  echo "error: $tag is not a GitHub-verified signed tag pointing directly to a commit" >&2
+      ! "$source_commit" =~ ^[0-9a-f]{40}$ ]]; then
+  echo "error: $tag is not an annotated tag pointing directly to a commit" >&2
+  exit 1
+fi
+
+tag_signature_verified=false
+if [[ "$(jq -r '.verification.verified // false' <<<"$tag_object_json")" == "true" ]]; then
+  tag_signature_verified=true
+elif [[ -n "$allowed_signers" ]]; then
+  if [[ ! -f "$allowed_signers" ]]; then
+    echo "error: allowed-signers file does not exist: $allowed_signers" >&2
+    exit 1
+  fi
+  local_tag_object="$(git rev-parse "refs/tags/$tag^{tag}" 2>/dev/null || true)"
+  local_source_commit="$(git rev-parse "refs/tags/$tag^{commit}" 2>/dev/null || true)"
+  if [[ "$local_tag_object" == "$tag_object_sha" &&
+        "$local_source_commit" == "$source_commit" ]] &&
+      git -c "gpg.ssh.allowedSignersFile=$allowed_signers" verify-tag "$tag" >/dev/null 2>&1; then
+    tag_signature_verified=true
+  fi
+fi
+if [[ "$tag_signature_verified" != "true" ]]; then
+  echo "error: $tag has no trusted signature (GitHub verification or repository allowed-signers)" >&2
   exit 1
 fi
 
