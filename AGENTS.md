@@ -202,8 +202,8 @@ live in [Engineering principles](docs/src/dev/engineering-principles.md):
 - Rare founder overrides for CI incidents, merge-queue cost spikes, or
   fix-forward lands use the org-admin labels `bypass-ci`,
   `bypass-merge-queue`, and `force-merge`.
-- Labels are a trigger only. The workflow re-checks organization-admin
-  membership and refuses fork PRs. See
+- Labels are a trigger only. The workflow re-checks organization or repository
+  admin permission and refuses fork PRs. See
   [Merge overrides](docs/src/dev/merge-overrides.md) and the
   [`burin-labs/.github` README](https://github.com/burin-labs/.github#merge-overrides).
 - Prefer the normal merge queue whenever it is cheap enough.

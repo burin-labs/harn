@@ -9,7 +9,8 @@ section for the full contract. This page is the Harn-facing how-to.
 
 ## Prerequisites
 
-- You are an organization owner/admin on `burin-labs`.
+- You are an organization owner/admin on `burin-labs`, or a repository admin
+  on `burin-labs/harn`.
 - The pull request head lives in `burin-labs/harn` (not a fork).
 - You can fix forward on `main` if the land is wrong.
 
@@ -23,8 +24,9 @@ section for the full contract. This page is the Harn-facing how-to.
   Skips CI proof and the merge queue.
 
 Labels are only a trigger. The reusable workflow re-checks that the actor is an
-organization admin and refuses fork pull requests. Privileged merges use the
-`harn-release-bot` installation token, which is a ruleset bypass actor.
+organization or repository admin and refuses fork pull requests. Privileged
+merges use the `harn-release-bot` installation token, which is a ruleset bypass
+actor.
 
 ## When to use an override
 
