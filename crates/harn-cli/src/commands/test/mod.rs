@@ -68,6 +68,9 @@ pub(crate) async fn run_command(args: TestArgs) {
             "`harn test --watch` cannot combine with --junit or --json-out; the watch loop never terminates so the report would never be written",
         );
     }
+    if args.watch && !args.test_paths.is_empty() {
+        command_error("`harn test --watch` does not support --test-path");
+    }
 
     if args.coverage || args.coverage_out.is_some() {
         if args.watch {
@@ -98,6 +101,9 @@ pub(crate) async fn run_command(args: TestArgs) {
         return;
     }
     if args.evals {
+        if !args.test_paths.is_empty() {
+            command_error("`harn test package --evals` does not support --test-path");
+        }
         if shard_requested {
             command_error("--evals cannot be combined with test sharding");
         }
@@ -118,6 +124,9 @@ pub(crate) async fn run_command(args: TestArgs) {
 }
 
 async fn run_agents_conformance_command(args: TestArgs, shard_requested: bool) {
+    if !args.test_paths.is_empty() {
+        command_error("`harn test agents-conformance` does not support --test-path");
+    }
     if args.selection.is_some() {
         command_error(
             "`harn test agents-conformance` does not accept a second positional target; use --category instead",
@@ -147,6 +156,9 @@ async fn run_agents_conformance_command(args: TestArgs, shard_requested: bool) {
 }
 
 fn run_protocols_command(args: TestArgs, shard_requested: bool) {
+    if !args.test_paths.is_empty() {
+        command_error("`harn test protocols` does not support --test-path");
+    }
     if args.evals || args.determinism || args.record || args.replay || args.watch {
         command_error(
             "`harn test protocols` cannot be combined with --evals, --determinism, --record, --replay, or --watch",
@@ -177,6 +189,9 @@ fn run_protocols_command(args: TestArgs, shard_requested: bool) {
 }
 
 async fn run_determinism_command(args: TestArgs, shard_requested: bool) {
+    if !args.test_paths.is_empty() {
+        command_error("`harn test --determinism` does not support --test-path");
+    }
     if shard_requested {
         command_error("--determinism cannot be combined with test sharding");
     }
@@ -189,6 +204,9 @@ async fn run_determinism_command(args: TestArgs, shard_requested: bool) {
     }
     if let Some(t) = args.target.as_deref() {
         if t == "conformance" {
+            if !args.test_paths.is_empty() {
+                command_error("`harn test conformance` does not support --test-path");
+            }
             run_conformance_determinism_tests(
                 t,
                 args.selection.as_deref(),
@@ -230,6 +248,9 @@ async fn run_standard_command(
 
     if let Some(t) = args.target.as_deref() {
         if t == "conformance" {
+            if !args.test_paths.is_empty() {
+                command_error("`harn test conformance` does not support --test-path");
+            }
             let shard = resolve_test_shard(args.shard_index, args.shard_total);
             if args.parallel && shard.is_some() {
                 command_error(
@@ -273,19 +294,25 @@ async fn run_standard_command(
         } else if args.selection.is_some() {
             command_error("only `harn test conformance` accepts a second positional target");
         } else {
-            run_user_test_target(t, &args, &cli_skill_dirs, operator_approval_grant).await;
+            let mut paths = vec![t.to_string()];
+            paths.extend(args.test_paths.iter().cloned());
+            run_user_test_targets(&paths, &args, &cli_skill_dirs, operator_approval_grant).await;
         }
     } else {
-        let test_dir = default_test_dir_or_exit();
         if args.selection.is_some() {
             command_error("only `harn test conformance` accepts a second positional target");
         }
-        run_user_test_target(&test_dir, &args, &cli_skill_dirs, operator_approval_grant).await;
+        let paths = if args.test_paths.is_empty() {
+            vec![default_test_dir_or_exit()]
+        } else {
+            args.test_paths.clone()
+        };
+        run_user_test_targets(&paths, &args, &cli_skill_dirs, operator_approval_grant).await;
     }
 }
 
-async fn run_user_test_target(
-    path: &str,
+async fn run_user_test_targets(
+    paths: &[String],
     args: &TestArgs,
     cli_skill_dirs: &[PathBuf],
     operator_approval_grant: Option<harn_vm::orchestration::OperatorApprovalGrant>,
@@ -307,13 +334,13 @@ async fn run_user_test_target(
         trusted_host_dispatch: args.trusted_host_dispatch,
     };
     if args.watch {
-        watch::run(path, run_args).await;
+        watch::run(&paths[0], run_args).await;
     } else {
         let coverage = (args.coverage || args.coverage_out.is_some()).then(|| CoverageOptions {
             out: args.coverage_out.clone(),
         });
         run_user_tests(
-            path,
+            paths,
             run_args,
             UserTestReportConfig {
                 junit_path: args.junit.as_deref(),
@@ -522,12 +549,16 @@ struct UserTestOutputOptions {
     progress: bool,
 }
 
-async fn run_user_tests_once(path: &Path, args: UserTestRunArgs<'_>) -> test_runner::TestSummary {
-    run_user_tests_once_with_session(path, args, &test_runner::TestRunSession::default()).await
+async fn run_user_test_paths_once(
+    paths: &[PathBuf],
+    args: UserTestRunArgs<'_>,
+) -> test_runner::TestSummary {
+    run_user_test_paths_once_with_session(paths, args, &test_runner::TestRunSession::default())
+        .await
 }
 
-async fn run_user_tests_once_with_session(
-    path: &Path,
+async fn run_user_test_paths_once_with_session(
+    paths: &[PathBuf],
     args: UserTestRunArgs<'_>,
     session: &test_runner::TestRunSession,
 ) -> test_runner::TestSummary {
@@ -545,8 +576,8 @@ async fn run_user_tests_once_with_session(
         diagnose: args.diagnose,
         trusted_host_dispatch: args.trusted_host_dispatch,
     };
-    let summary = test_runner::run_tests_with_session_and_operator_grant(
-        path,
+    let summary = test_runner::run_tests_with_paths_and_operator_grant(
+        paths,
         &options,
         session,
         args.operator_approval_grant.as_ref(),
@@ -561,16 +592,27 @@ async fn run_user_tests_once_with_session(
     );
     summary
 }
+
+async fn run_user_tests_once_with_session(
+    path: &Path,
+    args: UserTestRunArgs<'_>,
+    session: &test_runner::TestRunSession,
+) -> test_runner::TestSummary {
+    let paths = [path.to_path_buf()];
+    run_user_test_paths_once_with_session(&paths, args, session).await
+}
 pub(crate) async fn run_user_tests(
-    path_str: &str,
+    path_strs: &[String],
     args: UserTestRunArgs<'_>,
     report_config: UserTestReportConfig<'_>,
     coverage: Option<CoverageOptions>,
 ) {
-    let path = PathBuf::from(path_str);
-    if !path.exists() {
-        eprintln!("Path not found: {path_str}");
-        process::exit(1);
+    let paths = path_strs.iter().map(PathBuf::from).collect::<Vec<_>>();
+    for (path_str, path) in path_strs.iter().zip(&paths) {
+        if !path.exists() {
+            eprintln!("Path not found: {path_str}");
+            process::exit(1);
+        }
     }
     if !report_config.is_empty() {
         if let Some(p) = report_config.junit_path {
@@ -589,10 +631,10 @@ pub(crate) async fn run_user_tests(
         harn_vm::coverage::begin_session();
     }
 
-    let summary = run_user_tests_once(&path, args).await;
+    let summary = run_user_test_paths_once(&paths, args).await;
 
     if !report_config.is_empty() {
-        let suite_root = path.canonicalize().unwrap_or(path.clone());
+        let suite_root = paths[0].canonicalize().unwrap_or_else(|_| paths[0].clone());
         let report = user_test_report_from_summary(&suite_root, &summary);
         if let Some(p) = report_config.junit_path {
             write_junit_xml_or_exit(p, &report, true);

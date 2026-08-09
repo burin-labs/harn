@@ -133,4 +133,8 @@ pub(crate) struct TestArgs {
     pub target: Option<String>,
     /// Optional file or directory under conformance/ or conformance/protocols/.
     pub selection: Option<String>,
+    /// Additional user-test file or directory. Repeat to run a curated suite
+    /// in one compile-once scheduler invocation.
+    #[arg(long = "test-path", value_name = "PATH")]
+    pub test_paths: Vec<String>,
 }
