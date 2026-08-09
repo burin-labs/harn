@@ -283,7 +283,10 @@ impl SiteAuthOutcome {
 /// The two markers differ only on the *request* body: `@stream` never
 /// reads one (`body` is `None`), while `@raw` buffers it up to the
 /// configured limit and hands the exact bytes over (`body` is `Some`)
-/// — the channel for binary/multipart uploads.
+/// — the channel for every body-bearing provider route, including JSON
+/// POST endpoints whose provider returns SSE. Choose the marker from the
+/// request contract, not the response type: either marker may return an
+/// unbuffered streaming [`Response`].
 ///
 /// The `.harn` function under a `@stream`/`@raw` route is a
 /// declaration-only stub — it owns the route, its `@scopes`, and its

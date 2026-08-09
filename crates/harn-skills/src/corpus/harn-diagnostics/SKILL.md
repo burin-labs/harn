@@ -122,13 +122,15 @@ resolves any individual code.
 
 ## Verify
 
-- Parser/typechecker changes: `cargo test -p harn-parser <filter>`.
-- Lint changes: `cargo test -p harn-lint <filter>`.
-- CLI explain changes: `cargo test -p harn-cli --test <test-name>`.
+- Parser/typechecker changes: `make test ARGS='-p harn-parser <filter>'`.
+- Lint changes: `make test ARGS='-p harn-lint <filter>'`.
+- CLI explain changes: `make test ARGS='-p harn-cli --test <test-name>'`.
 - Repair changes: targeted `harn fix` tests and `make lint-test-patterns`.
-- Intentional failure fixtures: `cargo run --quiet --bin harn -- test conformance --filter <name>`.
-- Rendered lint smoke: `cargo run --quiet --bin harn -- lint <path>`.
+- Intentional failure fixtures:
+  `HARN_BIN_NO_BUILD=1 ./scripts/harn_bin.sh -- test conformance --filter <name>`.
+- Rendered lint smoke:
+  `HARN_BIN_NO_BUILD=1 ./scripts/harn_bin.sh -- lint <path>`.
 - JSON diagnostics smoke: use the relevant `--json` command when available.
-- LSP changes: targeted `cargo test -p harn-lsp <filter>`.
+- LSP changes: targeted `make test ARGS='-p harn-lsp <filter>'`.
 - Catalog drift: run the generator/check command documented by the touched catalog.
 - Broad gate for shared diagnostic changes: `make test`.

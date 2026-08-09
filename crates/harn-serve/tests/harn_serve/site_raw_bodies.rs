@@ -19,6 +19,7 @@
 //! to build. All cases drive the router through
 //! `tower::ServiceExt::oneshot`, mirroring `tests/site_streaming.rs`.
 
+use std::convert::Infallible;
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -27,6 +28,7 @@ use axum::body::{to_bytes, Body, Bytes};
 use axum::http::header::{CONTENT_DISPOSITION, CONTENT_TYPE};
 use axum::http::request::Parts;
 use axum::http::{Request, StatusCode};
+use axum::response::sse::{Event, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::{Json, Router};
 use harn_serve::{
@@ -53,6 +55,13 @@ pub fn pack_download(req: dict) -> dict {
 @scopes("packs:write")
 @route("POST", "/packs/publish")
 pub fn pack_publish(req: dict) -> dict {
+  return http_ok({ "buffered_stub": true })
+}
+
+@raw
+@scopes("chat:write")
+@route("POST", "/chat/completions")
+pub fn chat_completions(req: dict) -> dict {
   return http_ok({ "buffered_stub": true })
 }
 "#;
@@ -131,6 +140,14 @@ impl SiteStreamProvider for PackProvider {
                 pack_bytes(),
             )
                 .into_response();
+        }
+        if route.path.ends_with("/chat/completions") {
+            let events = vec![
+                Event::default().data(r#"{"choices":[{"delta":{"content":"hello"}}]}"#),
+                Event::default().data("[DONE]"),
+            ];
+            let stream = futures::stream::iter(events.into_iter().map(Ok::<_, Infallible>));
+            return Sse::new(stream).into_response();
         }
         (
             StatusCode::CREATED,
@@ -214,6 +231,15 @@ fn publish_request(body: Vec<u8>) -> Request<Body> {
         .method("POST")
         .uri("/packs/publish")
         .header("content-type", "multipart/form-data; boundary=BOUNDARY")
+        .body(Body::from(body))
+        .unwrap()
+}
+
+fn chat_request(body: Vec<u8>) -> Request<Body> {
+    Request::builder()
+        .method("POST")
+        .uri("/chat/completions")
+        .header("content-type", "application/json")
         .body(Body::from(body))
         .unwrap()
 }
@@ -306,6 +332,56 @@ async fn raw_route_hands_exact_request_bytes_to_provider() {
     // head dict never carries (a lossy view of) the payload.
     assert_eq!(request["body"], "");
     assert_eq!(request["body_base64"], "");
+}
+
+/// A body-bearing endpoint selects `@raw` from its request contract even when
+/// its response is SSE. This is the canonical JSON POST -> streamed response
+/// shape used by model gateways: exact JSON bytes reach the provider, and its
+/// event stream is forwarded verbatim rather than dispatched through the VM or
+/// wrapped in Harn's JSON response envelope.
+#[tokio::test]
+async fn raw_json_post_can_return_provider_sse_verbatim() {
+    let payload =
+        br#"{"model":"demo","messages":[{"role":"user","content":"hi"}],"stream":true}"#.to_vec();
+    let hook = Arc::new(AllowAuth {
+        scopes: &["chat:write"],
+    });
+    let (_dir, router, calls, seen) = pack_router(Some(hook));
+
+    let response = router.oneshot(chat_request(payload.clone())).await.unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers()[CONTENT_TYPE],
+        "text/event-stream",
+        "the provider's streaming response must pass through"
+    );
+    let response_body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let response_text = String::from_utf8(response_body.to_vec()).unwrap();
+    assert!(
+        response_text.contains(r#"data: {"choices":[{"delta":{"content":"hello"}}]}"#),
+        "missing provider event: {response_text}"
+    );
+    assert!(
+        response_text.contains("data: [DONE]"),
+        "missing terminal provider event: {response_text}"
+    );
+    assert!(
+        !response_text.contains("buffered_stub"),
+        "the declaration-only .harn stub must never dispatch"
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+
+    let seen = seen.lock().unwrap();
+    assert_eq!(
+        seen.body.as_deref(),
+        Some(payload.as_slice()),
+        "@raw must preserve the JSON request bytes"
+    );
+    assert_eq!(
+        seen.request.as_ref().unwrap()["headers"]["content-type"],
+        "application/json"
+    );
 }
 
 /// A `SiteAuth` `Deny` gates a `@raw` route exactly as it gates every

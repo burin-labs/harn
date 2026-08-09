@@ -566,6 +566,35 @@ mod tests {
     }
 
     #[test]
+    fn skills_use_repository_owned_command_and_policy_seams() {
+        for skill in list_embedded_skills() {
+            for bypass in [
+                "`cargo run",
+                "`cargo test",
+                "`cargo check",
+                "`cargo fmt",
+                "`cargo clippy",
+            ] {
+                assert!(
+                    !skill.body.contains(bypass),
+                    "{} recommends guarded raw Cargo command `{bypass}`",
+                    skill.name
+                );
+            }
+        }
+
+        let language = get_embedded_skill("harn-language").expect("language skill");
+        assert!(language.body.contains("HARN_BIN_NO_BUILD=1"));
+        assert!(language.body.contains("typed data-only module"));
+
+        let testing = get_embedded_skill("harn-testing").expect("testing skill");
+        assert!(testing.body.contains("free worktree-local resource lane"));
+        assert!(testing
+            .body
+            .contains("report the skipped local umbrella gate"));
+    }
+
+    #[test]
     fn skill_cross_links_resolve_to_embedded_skills() {
         let names: BTreeSet<&str> = list_embedded_skills()
             .iter()

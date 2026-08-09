@@ -132,7 +132,7 @@ is a published-version concern, not a developer-loop concern.
 
 ## Verify
 
-- The release bump compiles: `cargo check --workspace`.
+- The release bump passes the repository check seam: `make check`.
 - Conformance still passes: `make conformance`.
 - Catalog artifacts are in sync: `harn provider catalog generate --check`.
 - The CHANGELOG entry is non-empty and cites the issue / PR numbers

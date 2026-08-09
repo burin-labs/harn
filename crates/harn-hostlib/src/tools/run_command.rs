@@ -127,6 +127,7 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let stdin = optional_string(NAME, &map, "stdin")?;
     let timeout = optional_timeout(NAME, &map, "timeout_ms")?;
     let capture = parse_capture(&map)?;
+    let sandbox_profile = optional_string(NAME, &map, "sandbox_profile")?;
     let sandbox_scope = parse_sandbox_scope(&map)?;
     let env_mode = optional_env_mode(NAME, &map, !env.is_empty())?;
     let background = optional_bool(NAME, &map, "background")?.unwrap_or(false);
@@ -148,6 +149,11 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         });
     }
 
+    let _sandbox_profile_guard = sandbox_profile
+        .as_deref()
+        .map(harn_vm::process_sandbox::push_sandbox_profile_override)
+        .transpose()
+        .map_err(sandbox_profile_error_to_hostlib)?;
     let _sandbox_guard = harn_vm::process_sandbox::push_process_sandbox_scope(sandbox_scope)
         .map_err(sandbox_scope_error_to_hostlib)?;
     if background || background_after_ms.is_some() {
@@ -408,6 +414,14 @@ fn sandbox_scope_error_to_hostlib(error: harn_vm::VmError) -> HostlibError {
             builtin: NAME,
             message: other.to_string(),
         },
+    }
+}
+
+fn sandbox_profile_error_to_hostlib(error: harn_vm::VmError) -> HostlibError {
+    HostlibError::InvalidParameter {
+        builtin: NAME,
+        param: "sandbox_profile",
+        message: error.to_string(),
     }
 }
 

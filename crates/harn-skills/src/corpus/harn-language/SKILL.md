@@ -14,6 +14,10 @@ Pair it with [[harn-testing]] for fixtures and [[harn-diagnostics]] for user-fac
 ## Start here
 
 - Read `docs/llm/harn-quickref.md` before editing `.harn` files.
+- In a Harn worktree, run `make setup` once and use
+  `HARN_BIN_NO_BUILD=1 ./scripts/harn_bin.sh -- <command>` for narrow CLI
+  checks. This resolves the lane-local binary without starting a hidden Cargo
+  build. Outside the repository, use the installed, pinned `harn` executable.
 - Use `docs/llm/harn-triggers-quickref.md` when trigger manifests are involved.
 - Read `spec/HARN_SPEC.md` as the assembled language reference.
 - Default new script entrypoints to `fn main(harness: Harness) { ... }` and
@@ -34,6 +38,9 @@ Pair it with [[harn-testing]] for fixtures and [[harn-diagnostics]] for user-fac
 - Check user-visible behavior with conformance fixtures under `conformance/tests/`.
 - Keep examples small enough for agents to copy without hidden setup.
 - Prefer existing syntax and stdlib helpers over new host-side shortcuts.
+- Put platform spellings, policy rows, and other closed configuration in one
+  typed data-only module. Import that value into the evaluator and mechanically
+  project it downstream instead of duplicating lists or host branches.
 
 ## Syntax checklist
 
@@ -145,13 +152,18 @@ Pair it with [[harn-testing]] for fixtures and [[harn-diagnostics]] for user-fac
 
 ## Verify
 
-- Narrow script check: `cargo run --quiet --bin harn -- check <path>`.
-- Narrow lint check: `cargo run --quiet --bin harn -- lint <path>`.
-- Narrow format check: `cargo run --quiet --bin harn -- fmt --check <path>`.
-- Narrow conformance case: `cargo run --quiet --bin harn -- test conformance --filter <name>`.
-- Parser changes: `cargo test -p harn-parser <filter>`.
-- Formatter changes: `cargo test -p harn-fmt <filter>`.
-- Linter changes: `cargo test -p harn-lint <filter>`.
+- Narrow script check:
+  `HARN_BIN_NO_BUILD=1 ./scripts/harn_bin.sh -- check <path>`.
+- Narrow lint check:
+  `HARN_BIN_NO_BUILD=1 ./scripts/harn_bin.sh -- lint <path>`.
+- Narrow format check:
+  `HARN_BIN_NO_BUILD=1 ./scripts/harn_bin.sh -- fmt --check <path>` (`fmt`,
+  never `format`).
+- Narrow conformance case:
+  `HARN_BIN_NO_BUILD=1 ./scripts/harn_bin.sh -- test conformance --filter <name>`.
+- Parser changes: `make test ARGS='-p harn-parser <filter>'`.
+- Formatter changes: `make test ARGS='-p harn-fmt <filter>'`.
+- Linter changes: `make test ARGS='-p harn-lint <filter>'`.
 - Syntax or keyword changes: `make conformance`.
 - Harn fixture changes: `make lint-harn` and `make fmt-harn`.
 - Tree-sitter changes: `(cd tree-sitter-harn && npm test)`.

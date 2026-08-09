@@ -57,8 +57,7 @@ use tokio::sync::Notify;
 use crate::value::{VmError, VmValue};
 
 use super::host::{
-    audited_utc_now_rfc3339, build_sandboxed_command, optional_i64, optional_string,
-    push_sandbox_profile_override, require_param,
+    audited_utc_now_rfc3339, build_sandboxed_command, optional_i64, optional_string, require_param,
 };
 
 /// Maximum number of live spawned-process entries retained at once. Terminal
@@ -400,7 +399,9 @@ async fn spawn(
     // Honor an optional per-call sandbox_profile override identically to
     // process.exec — the guard must be live across the command build.
     let profile_guard = match optional_string(params, "sandbox_profile") {
-        Some(value) => Some(push_sandbox_profile_override(&value)?),
+        Some(value) => Some(crate::process_sandbox::push_sandbox_profile_override(
+            &value,
+        )?),
         None => None,
     };
     let mut cmd = build_sandboxed_command(params, "process.spawn")?;
