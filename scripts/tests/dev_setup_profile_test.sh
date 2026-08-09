@@ -3,7 +3,20 @@ set -euo pipefail
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 tmp_root=$(mktemp -d)
-trap 'rm -rf "$tmp_root"' EXIT
+cleanup() {
+  local status=$?
+  if [[ "$status" -ne 0 ]]; then
+    local output
+    for output in "$tmp_root"/*output.txt; do
+      [[ -f "$output" ]] || continue
+      printf '\n--- %s ---\n' "$(basename "$output")" >&2
+      cat "$output" >&2
+    done
+  fi
+  rm -rf "$tmp_root"
+  exit "$status"
+}
+trap cleanup EXIT
 
 # Every case below decides for itself whether a per-worktree target dir is
 # configured, so neither worktree-path variable may reach a fixture from the
@@ -18,21 +31,30 @@ make_fixture_repo() {
   local name="$1"
   local repo="$tmp_root/$name"
 
-  mkdir -p "$repo/scripts" "$repo/bin"
+  mkdir -p "$repo/scripts/lib" "$repo/bin"
   cp "$repo_root/scripts/dev_setup.sh" "$repo/scripts/dev_setup.sh"
+  cp "$repo_root/scripts/lib/file_time.sh" "$repo/scripts/lib/file_time.sh"
   chmod +x "$repo/scripts/dev_setup.sh"
   printf '[package]\nname = "setup-fixture"\nversion = "0.1.0"\n' > "$repo/Cargo.toml"
   printf '#!/usr/bin/env bash\nset -euo pipefail\n' > "$repo/scripts/configure_merge_drivers.sh"
   printf '#!/usr/bin/env bash\nset -euo pipefail\n' > "$repo/scripts/sign_local_macos.sh"
+  printf '#!/usr/bin/env bash\nset -euo pipefail\nexec cargo "$@"\n' \
+    > "$repo/scripts/cargo_with_worktree_build_dir.sh"
   {
     printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail'
     printf '%s\n' 'printf "%s\\n" "$PWD" >> "$DEV_SETUP_TEST_PRUNE_RECORD"'
   } > "$repo/scripts/prune_stale_targets.sh"
   chmod +x "$repo/scripts/configure_merge_drivers.sh" "$repo/scripts/sign_local_macos.sh" \
-    "$repo/scripts/prune_stale_targets.sh"
+    "$repo/scripts/prune_stale_targets.sh" "$repo/scripts/cargo_with_worktree_build_dir.sh"
   {
     printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail'
     printf '%s\n' 'printf "%s\\n" "$*" >> "$DEV_SETUP_TEST_CARGO_RECORD"'
+    printf '%s\n' 'if [[ "${1:-}" == build ]]; then'
+    printf '%s\n' '  target_dir=$(sed -n '\''s/^[[:space:]]*target-dir = "\([^\"]*\)".*/\1/p'\'' .cargo/config.toml)'
+    printf '%s\n' '  mkdir -p "$target_dir/debug"'
+    printf '%s\n' '  printf '\''#!/usr/bin/env bash\n'\'' > "$target_dir/debug/harn"'
+    printf '%s\n' '  chmod +x "$target_dir/debug/harn"'
+    printf '%s\n' 'fi'
   } > "$repo/bin/cargo"
   for tool in git go; do
     printf '#!/usr/bin/env bash\nset -euo pipefail\nexit 0\n' > "$repo/bin/$tool"
@@ -78,8 +100,14 @@ add_available_cargo_tools "$rust_repo"
 rust_cargo="$tmp_root/rust-cargo.txt"
 run_setup "$rust_repo" rust "$tmp_root/rust-output.txt" "$rust_cargo"
 
-if ! grep -Fxq 'check --locked --workspace' "$rust_cargo"; then
-  echo "rust setup did not run the locked workspace check" >&2
+if ! grep -Fxq 'build --locked -p harn-cli --bin harn' "$rust_cargo"; then
+  echo "rust setup did not build the canonical linked Harn CLI" >&2
+  exit 1
+fi
+rust_target_dir="$tmp_root/cache-rust/harn/dev-setup/harn-target/$(basename "$tmp_root")-rust"
+rust_harn_bin="$rust_target_dir/debug/harn"
+if [[ ! -x "$rust_harn_bin" ]]; then
+  echo "rust setup did not leave an executable production Harn binary" >&2
   exit 1
 fi
 if grep -Fq 'install ' "$rust_cargo"; then
@@ -88,6 +116,57 @@ if grep -Fq 'install ' "$rust_cargo"; then
 fi
 if [[ -e "$rust_repo/node_modules" || -e "$rust_repo/crates/harn-cli/portal/node_modules" ]]; then
   echo "rust setup installed frontend dependencies" >&2
+  exit 1
+fi
+
+# A successful stat invocation is not necessarily a timestamp: GNU stat accepts
+# BSD's `-f` as a different operation and prints a filesystem report. Exercise
+# that ambiguous-success shape on every platform so setup validates output
+# before using it in arithmetic.
+{
+  printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail'
+  printf '%s\n' 'if [[ "${1:-}" == "-c" ]]; then'
+  printf '%s\n' '  printf '\''File: ambiguous stat output\n'\'''
+  printf '%s\n' '  exit 0'
+  printf '%s\n' 'fi'
+  printf '%s\n' 'printf '\''1\n'\'''
+} > "$rust_repo/bin/stat"
+chmod +x "$rust_repo/bin/stat"
+
+# A valid stamp is useful only while its concrete production artifact remains
+# executable. Re-running setup should be free when it is present and should
+# rebuild when the binary was removed or replaced by a non-executable file.
+cached_cargo="$tmp_root/rust-cached-cargo.txt"
+PATH="$rust_repo/bin:/usr/bin:/bin" \
+  HOME="$tmp_root/home-rust" \
+  XDG_CACHE_HOME="$tmp_root/cache-rust" \
+  TMPDIR="$tmp_root/tmp-rust" \
+  HARN_DEV_SETUP_PROFILE=rust \
+  HARN_DEV_SETUP_STATE_DIR="$tmp_root/state-rust" \
+  HARN_DEV_TARGET_WORKTREE_PATH="$rust_repo" \
+  DEV_SETUP_TEST_CARGO_RECORD="$cached_cargo" \
+  DEV_SETUP_TEST_PRUNE_RECORD="$tmp_root/prune-rust.txt" \
+  "$rust_repo/scripts/dev_setup.sh" > "$tmp_root/rust-cached-output.txt" 2>&1
+if [[ -s "$cached_cargo" ]]; then
+  echo "idempotent rust setup rebuilt an existing canonical Harn binary" >&2
+  cat "$cached_cargo" >&2
+  exit 1
+fi
+
+chmod -x "$rust_harn_bin"
+missing_artifact_cargo="$tmp_root/rust-missing-artifact-cargo.txt"
+PATH="$rust_repo/bin:/usr/bin:/bin" \
+  HOME="$tmp_root/home-rust" \
+  XDG_CACHE_HOME="$tmp_root/cache-rust" \
+  TMPDIR="$tmp_root/tmp-rust" \
+  HARN_DEV_SETUP_PROFILE=rust \
+  HARN_DEV_SETUP_STATE_DIR="$tmp_root/state-rust" \
+  HARN_DEV_TARGET_WORKTREE_PATH="$rust_repo" \
+  DEV_SETUP_TEST_CARGO_RECORD="$missing_artifact_cargo" \
+  DEV_SETUP_TEST_PRUNE_RECORD="$tmp_root/prune-rust.txt" \
+  "$rust_repo/scripts/dev_setup.sh" > "$tmp_root/rust-missing-artifact-output.txt" 2>&1
+if ! grep -Fxq 'build --locked -p harn-cli --bin harn' "$missing_artifact_cargo"; then
+  echo "rust setup trusted a stamp whose Harn binary was not executable" >&2
   exit 1
 fi
 
@@ -261,12 +340,15 @@ fi
 
 user_repo=$(make_fixture_repo user-config)
 mkdir -p "$user_repo/.cargo"
+user_target_dir="$tmp_root/team/harn-target/release"
+user_build_dir="$tmp_root/team/cargo-build-shared"
+user_sccache_base="$tmp_root/team/source"
 printf '%s\n' \
   '[build]' \
-  'target-dir = "/mnt/team/harn-target/release"' \
-  'build-dir = "/mnt/team/cargo-build-shared"' \
+  "target-dir = \"$user_target_dir\"" \
+  "build-dir = \"$user_build_dir\"" \
   '[env]' \
-  'SCCACHE_BASEDIRS = "/mnt/team/source"' \
+  "SCCACHE_BASEDIRS = \"$user_sccache_base\"" \
   > "$user_repo/.cargo/config.toml"
 add_available_cargo_tools "$user_repo"
 mkdir -p "$tmp_root/tmp-user-config"
@@ -281,15 +363,15 @@ PATH="$user_repo/bin:/usr/bin:/bin" \
   HARN_DEV_SETUP_STATE_DIR="$tmp_root/state-user-config" \
   DEV_SETUP_TEST_CARGO_RECORD="$tmp_root/user-config-cargo.txt" \
   "$user_repo/scripts/dev_setup.sh" > "$tmp_root/user-config-output.txt" 2>&1
-if ! grep -Fxq 'target-dir = "/mnt/team/harn-target/release"' "$user_repo/.cargo/config.toml"; then
+if ! grep -Fxq "target-dir = \"$user_target_dir\"" "$user_repo/.cargo/config.toml"; then
   echo "setup rewrote a user-owned target directory" >&2
   exit 1
 fi
-if ! grep -Fxq 'build-dir = "/mnt/team/cargo-build-shared"' "$user_repo/.cargo/config.toml"; then
+if ! grep -Fxq "build-dir = \"$user_build_dir\"" "$user_repo/.cargo/config.toml"; then
   echo "setup rewrote a user-owned build directory" >&2
   exit 1
 fi
-if ! grep -Fxq 'SCCACHE_BASEDIRS = "/mnt/team/source"' "$user_repo/.cargo/config.toml"; then
+if ! grep -Fxq "SCCACHE_BASEDIRS = \"$user_sccache_base\"" "$user_repo/.cargo/config.toml"; then
   echo "setup rewrote a user-owned sccache base directory" >&2
   exit 1
 fi

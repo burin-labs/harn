@@ -29,6 +29,10 @@
 #                               both the legacy $TMPDIR and durable cache roots
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/file_time.sh
+source "$SCRIPT_DIR/lib/file_time.sh"
+
 dry_run=0
 [[ "${1:-}" == "--dry-run" ]] && dry_run=1
 
@@ -103,22 +107,6 @@ discover_repo_roots() {
   done | sort -u || true
 }
 
-mtime_epoch() {
-  local value
-
-  # GNU `stat -f` means "filesystem status" and can succeed with a multiline
-  # report, so probe GNU's epoch form first and only then fall back to macOS.
-  if value="$(stat -c %Y "$1" 2>/dev/null)" && [[ "$value" =~ ^[0-9]+$ ]]; then
-    printf '%s\n' "$value"
-    return
-  fi
-  if value="$(stat -f %m "$1" 2>/dev/null)" && [[ "$value" =~ ^[0-9]+$ ]]; then
-    printf '%s\n' "$value"
-    return
-  fi
-  return 1
-}
-
 removed=0; kept=0; summary_printed=0
 # Every root actually walked, so the summary cannot claim narrower coverage
 # than the run had.
@@ -169,7 +157,7 @@ prune_root() {
     [ -d "$d" ] || continue
     name="$(basename "$d")"
     if grep -qxF "$name" "$keep"; then kept=$((kept+1)); continue; fi
-    if ! m="$(mtime_epoch "$d")"; then
+    if ! m="$(file_mtime_epoch "$d")"; then
       echo "skip (mtime unavailable): $name"; kept=$((kept+1)); continue
     fi
     if [ "$m" -ge "$cutoff" ]; then
