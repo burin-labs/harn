@@ -112,6 +112,9 @@ fn __validate_observation_admission(
   if observation_ids[observation.observation_id] ?? false {
     throw "hypothesis ledger: observation identity is already registered"
   }
+  if observation.operation_receipt_id != nil {
+    __non_empty(observation.operation_receipt_id, "observation operation_receipt_id")
+  }
   const spend = snapshot.total_spend_usd + observation.spend_delta_usd
   if spend > plan.design.budget.max_spend_usd
     || snapshot.total_compute_ms
@@ -529,6 +532,8 @@ pub fn hypothesis_ledger_snapshot(
       last_hash: state.last_hash,
     },
     snapshot: state.snapshot,
+    observations: state.observations,
+    observed_cells: state.observed_cells,
   }
 }
 
@@ -560,6 +565,7 @@ fn __empty_snapshot(hypothesis_id: string) -> HypothesisLedgerSnapshot {
     hypothesis_id: hypothesis_id,
     event_count: 0,
     latest_cursor: nil,
+    latest_event_fingerprint: nil,
     plan: nil,
     active_run_id: nil,
     approval_status: nil,
@@ -588,7 +594,11 @@ fn __apply_record(
 ) -> HypothesisLedgerSnapshot {
   const payload = record.event.content.payload
   const updated = snapshot
-    + {event_count: snapshot.event_count + 1, latest_cursor: record.cursor}
+    + {
+    event_count: snapshot.event_count + 1,
+    latest_cursor: record.cursor,
+    latest_event_fingerprint: record.event.fingerprint,
+  }
   if payload.kind == "plan_registered" {
     const registered: HypothesisPlanRegistered = payload
     return updated + {plan: registered.plan}
@@ -707,6 +717,12 @@ fn __fold_records(records: list<HypothesisLedgerRecord>, hypothesis_id: string) 
           receipt_ids = receipt_ids + [receipt_id]
           receipt_id_set = receipt_id_set + {[receipt_id]: true}
         }
+      }
+      if evidence.operation_receipt_id != nil
+        && !(receipt_id_set[evidence.operation_receipt_id]
+        ?? false) {
+        receipt_ids = receipt_ids + [evidence.operation_receipt_id]
+        receipt_id_set = receipt_id_set + {[evidence.operation_receipt_id]: true}
       }
     }
     previous_fingerprint = record.event.fingerprint

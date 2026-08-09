@@ -85,6 +85,7 @@ pub type HypothesisRunTransition = {
 pub type HypothesisObservationRecorded = {
   kind: "observation_recorded",
   observation_id: string,
+  operation_receipt_id?: string,
   observation: PairedObservation,
   spend_delta_usd: float,
   compute_delta_ms: int,
@@ -184,6 +185,7 @@ pub type HypothesisLedgerSnapshot = {
   hypothesis_id: string,
   event_count: int,
   latest_cursor: int?,
+  latest_event_fingerprint?: string,
   plan: HypothesisPlan?,
   active_run_id: string?,
   approval_status: "approved" | "denied" | nil,
@@ -216,6 +218,8 @@ pub type HypothesisLedgerSnapshotRead = {
   schema: "harn.hypothesis.ledger_snapshot.v1",
   integrity: HypothesisLedgerIntegrity,
   snapshot: HypothesisLedgerSnapshot,
+  observations?: list<PairedObservation>,
+  observed_cells?: dict<string, bool>,
 }
 
 /**

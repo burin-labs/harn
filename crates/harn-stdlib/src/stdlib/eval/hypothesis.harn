@@ -88,16 +88,27 @@ pub import { resolve_evidence_policy } from "std/eval/hypothesis/policies"
 pub import { HypothesisReport, hypothesis_report } from "std/eval/hypothesis/report"
 pub import { hypothesis_workflow } from "std/eval/hypothesis/workflow"
 pub import {
+  HypothesisNativeApprovalResult,
+  HypothesisNativeArmObservation,
+  HypothesisNativeOperationAccepted,
+  HypothesisNativeOperationDenied,
+  HypothesisNativeOperationRequest,
+  HypothesisNativeOperationResult,
   HypothesisWorkflowAction,
   HypothesisWorkflowAdapterUnavailable,
+  HypothesisWorkflowAdvance,
+  HypothesisWorkflowApplied,
+  HypothesisWorkflowDenied,
   HypothesisWorkflowInspect,
   HypothesisWorkflowInspection,
   HypothesisWorkflowNotActionable,
   HypothesisWorkflowNotActionableReason,
+  HypothesisWorkflowPause,
   HypothesisWorkflowRequest,
   HypothesisWorkflowResult,
   HypothesisWorkflowResume,
   HypothesisWorkflowStandDown,
   HypothesisWorkflowStart,
   HypothesisWorkflowState,
+  hypothesis_native_operation_result_contract,
 } from "std/eval/hypothesis/workflow_contracts"

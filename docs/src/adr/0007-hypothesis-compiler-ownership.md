@@ -54,6 +54,31 @@ slice:
 If a falsifier is observed, revisit the owning contract. Do not hide the mismatch
 behind a host-only compatibility model.
 
+### Native execution slice falsifiers
+
+The first registered-adapter slice is wrong if any of these conditions is
+necessary:
+
+1. A host chooses the candidate, case, trial, or randomized order instead of
+   consuming the assignment block produced by `std/eval/experiment`.
+2. A host must reimplement ledger admission, evidence-budget accounting,
+   sequential inference, or the terminal decision to execute an intervention.
+3. An unavailable or denied adapter can append a plan, approval, lifecycle, or
+   observation event.
+4. Retrying after native completion requires executing the intervention again,
+   loses a previously completed observation, or inserts a duplicate event.
+5. One operation receipt can attest an event whose aggregate, plan, run,
+   authority kind, or content differs from the native result it records.
+6. Pausing, cancellation, or budget exhaustion is represented only in host
+   state and cannot be recovered from the portable event history.
+7. A script fixture, serialized dictionary, connector grant, or generic host
+   call can substitute for the registered native adapter on the canonical
+   mutation path.
+
+The acceptance path must exercise a real registered adapter, one
+case-and-trial-scoped randomized block, exact replay after reopening SQLite,
+and fail-closed unavailable, denial, stale-head, and receipt-mismatch cases.
+
 ## Decision
 
 ### One portable compiler boundary

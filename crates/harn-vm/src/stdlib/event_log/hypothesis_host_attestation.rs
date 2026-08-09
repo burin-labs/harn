@@ -2,13 +2,48 @@ use super::*;
 
 const HOST_CAPABILITY: &str = "hypothesis";
 const HOST_OPERATION: &str = "attest_event";
+const HOST_WORKFLOW_OPERATION: &str = "operation";
 const HOST_RESULT_SCHEMA: &str = "harn.host-result.v1";
 const HOST_RESULT_KIND: &str = "hypothesis_native_attestation";
 
 #[harn_builtin(
+    exposure = "harness.obs.hypothesis_operation_request",
+    effects = ["authority.write@const=hypothesis.operation"],
+    sig = "event_log.hypothesis_operation_request(request: dict) -> dict?",
+    kind = "async",
+    category = "event_log"
+)]
+pub(super) async fn hypothesis_operation_request_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    let builtin = "event_log.hypothesis_operation_request";
+    if args.len() != 1 {
+        return Err(VmError::TypeError(format!(
+            "{builtin}: expected exactly 1 argument, got {}",
+            args.len()
+        )));
+    }
+    let request = args
+        .first()
+        .and_then(VmValue::as_dict)
+        .ok_or_else(|| VmError::TypeError(format!("{builtin}: request must be a dict")))?;
+    match crate::stdlib::host::dispatch_host_call_bridge(
+        HOST_CAPABILITY,
+        HOST_WORKFLOW_OPERATION,
+        request,
+    )
+    .await
+    {
+        Some(result) => result,
+        None => Ok(VmValue::Nil),
+    }
+}
+
+#[harn_builtin(
     exposure = "harness.obs.hypothesis_event_authority_request",
     effects = ["authority.write@arg0"],
-    sig = "event_log.hypothesis_authority_request(authority_kind: string, event_fingerprint: string, plan_fingerprint: string, hypothesis_id: string, operation_receipt_id: string, run_id?: string) -> resource",
+    sig = "event_log.hypothesis_authority_request(authority_kind: string, event_fingerprint: string, plan_fingerprint: string, hypothesis_id: string, operation_receipt_id: string, run_id?: string, event?: any) -> resource",
     kind = "async",
     category = "event_log"
 )]
@@ -25,9 +60,10 @@ pub(super) async fn hypothesis_event_authority_request_impl(
     let operation_receipt_id =
         required_non_empty_string(args.get(4), builtin, "operation_receipt_id")?;
     let run_id = optional_non_empty_string(args.get(5), builtin, "run_id")?;
-    if args.len() > 6 {
+    let event = args.get(6).cloned().unwrap_or(VmValue::Nil);
+    if args.len() > 7 {
         return Err(VmError::TypeError(format!(
-            "{builtin}: expected at most 6 arguments, got {}",
+            "{builtin}: expected at most 7 arguments, got {}",
             args.len()
         )));
     }
@@ -57,6 +93,7 @@ pub(super) async fn hypothesis_event_authority_request_impl(
             crate::value::intern_key("run_id"),
             run_id.as_deref().map(string_value).unwrap_or(VmValue::Nil),
         ),
+        (crate::value::intern_key("event"), event),
     ]);
     let response = crate::stdlib::host::dispatch_host_call_bridge(
         HOST_CAPABILITY,
@@ -153,6 +190,17 @@ mod tests {
         response: Mutex<BridgeResponse>,
     }
 
+    struct WorkflowBridge {
+        calls: AtomicUsize,
+        response: Mutex<BridgeResponse>,
+    }
+
+    struct LifecycleBridge {
+        operation_calls: AtomicUsize,
+        attestation_calls: AtomicUsize,
+        fail_decision_attestation_once: std::sync::atomic::AtomicBool,
+    }
+
     impl RecordingBridge {
         fn new(response: BridgeResponse) -> Arc<Self> {
             Arc::new(Self {
@@ -178,6 +226,218 @@ mod tests {
                 BridgeResponse::Error(message) => Err(VmError::Runtime(message.clone())),
             };
             Box::pin(async move { result })
+        }
+    }
+
+    impl WorkflowBridge {
+        fn new(response: BridgeResponse) -> Arc<Self> {
+            Arc::new(Self {
+                calls: AtomicUsize::new(0),
+                response: Mutex::new(response),
+            })
+        }
+    }
+
+    impl HostCallBridge for WorkflowBridge {
+        fn dispatch<'a>(
+            &'a self,
+            capability: &'a str,
+            operation: &'a str,
+            _params: &'a crate::value::DictMap,
+        ) -> crate::stdlib::host::HostCallDispatchFuture<'a> {
+            assert_eq!(capability, HOST_CAPABILITY);
+            assert_eq!(operation, HOST_WORKFLOW_OPERATION);
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            let result = match &*self.response.lock().expect("bridge response lock") {
+                BridgeResponse::Value(value) => Ok(Some(value.clone())),
+                BridgeResponse::Decline => Ok(None),
+                BridgeResponse::Error(message) => Err(VmError::Runtime(message.clone())),
+            };
+            Box::pin(async move { result })
+        }
+    }
+
+    impl LifecycleBridge {
+        fn new() -> Arc<Self> {
+            Arc::new(Self {
+                operation_calls: AtomicUsize::new(0),
+                attestation_calls: AtomicUsize::new(0),
+                fail_decision_attestation_once: std::sync::atomic::AtomicBool::new(false),
+            })
+        }
+
+        fn with_decision_attestation_failure() -> Arc<Self> {
+            Arc::new(Self {
+                operation_calls: AtomicUsize::new(0),
+                attestation_calls: AtomicUsize::new(0),
+                fail_decision_attestation_once: std::sync::atomic::AtomicBool::new(true),
+            })
+        }
+    }
+
+    impl HostCallBridge for LifecycleBridge {
+        fn dispatch<'a>(
+            &'a self,
+            capability: &'a str,
+            operation: &'a str,
+            params: &'a crate::value::DictMap,
+        ) -> crate::stdlib::host::HostCallDispatchFuture<'a> {
+            assert_eq!(capability, HOST_CAPABILITY);
+            let result = match operation {
+                HOST_WORKFLOW_OPERATION => {
+                    self.operation_calls.fetch_add(1, Ordering::SeqCst);
+                    let action = params
+                        .get("action")
+                        .cloned()
+                        .expect("workflow request has an action");
+                    let operation_receipt_id = params
+                        .get("operation_receipt_id")
+                        .cloned()
+                        .expect("workflow request has a receipt id");
+                    let mut entries = vec![
+                        (
+                            "schema",
+                            string_value("harn.hypothesis.operation_result.v1"),
+                        ),
+                        ("kind", string_value("accepted")),
+                        ("action", action.clone()),
+                        ("operation_receipt_id", operation_receipt_id),
+                        ("occurred_at", string_value("2026-08-09T00:00:00Z")),
+                        ("actor", string_value("native-test-adapter")),
+                        ("source", string_value("harn-vm-test")),
+                    ];
+                    if matches!(&action, VmValue::String(value) if value.as_str() == "advance") {
+                        let assignment_plan = params
+                            .get("assignment_plan")
+                            .and_then(VmValue::as_dict)
+                            .expect("advance request has an assignment plan");
+                        let plan = params
+                            .get("plan")
+                            .and_then(VmValue::as_dict)
+                            .expect("advance request has the registered plan");
+                        let registration = plan
+                            .get("registration")
+                            .and_then(VmValue::as_dict)
+                            .expect("registered plan has its experiment registration");
+                        let baseline_id = registration
+                            .get("baseline")
+                            .and_then(VmValue::as_dict)
+                            .and_then(|baseline| baseline.get("id"))
+                            .and_then(|value| match value {
+                                VmValue::String(value) => Some(value.as_str()),
+                                _ => None,
+                            })
+                            .expect("registration has a baseline id");
+                        let primary_metric = registration
+                            .get("metrics")
+                            .and_then(VmValue::as_dict)
+                            .and_then(|metrics| metrics.get("primary"))
+                            .and_then(VmValue::as_dict)
+                            .and_then(|metric| metric.get("id"))
+                            .and_then(|value| match value {
+                                VmValue::String(value) => Some(value.as_str()),
+                                _ => None,
+                            })
+                            .expect("registration has a primary metric");
+                        let assignments = match assignment_plan.get("assignments") {
+                            Some(VmValue::List(assignments)) => assignments,
+                            _ => panic!("assignment plan has its randomized arm order"),
+                        };
+                        let arm_observations = assignments
+                            .iter()
+                            .map(|assignment| {
+                                let assignment = assignment
+                                    .as_dict()
+                                    .expect("planned assignment is a dict");
+                                let arm_id = assignment
+                                    .get("arm_id")
+                                    .cloned()
+                                    .expect("planned assignment has an arm id");
+                                let is_baseline = matches!(&arm_id, VmValue::String(value) if value.as_str() == baseline_id);
+                                dict([
+                                    ("arm_id", arm_id),
+                                    (
+                                        "metrics",
+                                        VmValue::dict(crate::value::DictMap::from_iter([(
+                                            crate::value::intern_key(primary_metric),
+                                            VmValue::Float(if is_baseline { 0.0 } else { 1.0 }),
+                                        )])),
+                                    ),
+                                    ("spend_delta_usd", VmValue::Float(0.0)),
+                                    ("compute_delta_ms", VmValue::Int(1)),
+                                    ("token_delta", VmValue::Int(0)),
+                                    ("api_call_delta", VmValue::Int(0)),
+                                    ("telemetry_status", string_value("observed")),
+                                    (
+                                        "capability_degradations",
+                                        VmValue::List(Arc::new(vec![])),
+                                    ),
+                                ])
+                            })
+                            .collect();
+                        entries.extend([
+                            (
+                                "assignment_plan_id",
+                                assignment_plan
+                                    .get("plan_id")
+                                    .cloned()
+                                    .expect("assignment plan has an id"),
+                            ),
+                            (
+                                "observed_blocking_values",
+                                assignment_plan
+                                    .get("blocking_values")
+                                    .cloned()
+                                    .expect("assignment plan has frozen blocking values"),
+                            ),
+                            (
+                                "arm_observations",
+                                VmValue::List(Arc::new(arm_observations)),
+                            ),
+                            ("elapsed_ms", VmValue::Int(1_000)),
+                        ]);
+                    }
+                    dict(entries)
+                }
+                HOST_OPERATION => {
+                    self.attestation_calls.fetch_add(1, Ordering::SeqCst);
+                    let Some(VmValue::String(event_fingerprint)) = params.get("event_fingerprint")
+                    else {
+                        panic!("attestation request has an event fingerprint");
+                    };
+                    let event = params
+                        .get("event")
+                        .and_then(VmValue::as_dict)
+                        .expect("attestation request carries the canonical event");
+                    assert!(
+                        matches!(event.get("fingerprint"), Some(VmValue::String(value)) if value == event_fingerprint),
+                        "the adapter receives the exact event that will be appended"
+                    );
+                    let is_decision = event
+                        .get("content")
+                        .and_then(VmValue::as_dict)
+                        .and_then(|content| content.get("payload"))
+                        .and_then(VmValue::as_dict)
+                        .and_then(|payload| payload.get("kind"))
+                        .is_some_and(
+                            |kind| matches!(kind, VmValue::String(value) if value.as_str() == "decision_recorded"),
+                        );
+                    if is_decision
+                        && self
+                            .fail_decision_attestation_once
+                            .swap(false, Ordering::SeqCst)
+                    {
+                        return Box::pin(async {
+                            Err(VmError::Runtime(
+                                "injected decision attestation boundary failure".to_string(),
+                            ))
+                        });
+                    }
+                    host_result()
+                }
+                other => panic!("unexpected hypothesis host operation: {other}"),
+            };
+            Box::pin(async move { Ok(Some(result)) })
         }
     }
 
@@ -230,6 +490,307 @@ mod tests {
         assert_eq!(effects[0].kind, EffectKind::Authority);
         assert_eq!(effects[0].access, EffectAccess::Write);
         assert_eq!(effects[0].resources, &[ResourceSelector::Argument(0)]);
+    }
+
+    #[test]
+    fn operation_contract_has_one_scoped_native_authority_effect() {
+        use crate::stdlib::macros::{EffectAccess, EffectKind, ResourceSelector};
+
+        let effects = HYPOTHESIS_OPERATION_REQUEST_IMPL_DEF.contract.effects;
+        assert_eq!(effects.len(), 1);
+        assert_eq!(effects[0].kind, EffectKind::Authority);
+        assert_eq!(effects[0].access, EffectAccess::Write);
+        assert_eq!(
+            effects[0].resources,
+            &[ResourceSelector::Constant("hypothesis.operation")]
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn operation_request_is_unavailable_without_a_native_adapter() {
+        clear_host_call_bridge();
+        let request = dict([(
+            "schema",
+            string_value("harn.hypothesis.operation_request.v1"),
+        )]);
+        let absent = hypothesis_operation_request_impl(ctx(), vec![request.clone()])
+            .await
+            .expect("an absent adapter is a typed unavailable result");
+        assert!(matches!(absent, VmValue::Nil));
+
+        let bridge = WorkflowBridge::new(BridgeResponse::Decline);
+        set_host_call_bridge(bridge.clone());
+        let declined = hypothesis_operation_request_impl(ctx(), vec![request])
+            .await
+            .expect("a declining adapter is a typed unavailable result");
+        assert!(matches!(declined, VmValue::Nil));
+        assert_eq!(bridge.calls.load(Ordering::SeqCst), 1);
+        clear_host_call_bridge();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn every_operation_request_reaches_the_native_adapter() {
+        clear_host_call_bridge();
+        let response = dict([
+            (
+                "schema",
+                string_value("harn.hypothesis.operation_result.v1"),
+            ),
+            ("kind", string_value("denied")),
+        ]);
+        let bridge = WorkflowBridge::new(BridgeResponse::Value(response.clone()));
+        set_host_call_bridge(bridge.clone());
+        let request = dict([(
+            "schema",
+            string_value("harn.hypothesis.operation_request.v1"),
+        )]);
+
+        for _ in 0..2 {
+            let actual = hypothesis_operation_request_impl(ctx(), vec![request.clone()])
+                .await
+                .expect("native workflow response");
+            assert_eq!(actual.display(), response.display());
+        }
+        assert_eq!(
+            bridge.calls.load(Ordering::SeqCst),
+            2,
+            "native operations must never use the turn-stable read memo"
+        );
+        clear_host_call_bridge();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn native_adapter_drives_the_portable_lifecycle_without_host_owned_state_logic() {
+        crate::event_log::reset_active_event_log();
+        install_memory_for_current_thread(EVENT_LOG_QUEUE_DEPTH);
+        clear_host_call_bridge();
+        let bridge = LifecycleBridge::new();
+        set_host_call_bridge(bridge.clone());
+        let _scope = enter_execution_scope(mint_execution_scope());
+
+        let temp = tempfile::tempdir().expect("temporary workflow module directory");
+        let helper = temp.path().join("hypothesis_fixture_lib.harn");
+        std::fs::copy(
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../conformance/tests/stdlib/hypothesis_fixture_lib.harn"
+            ),
+            &helper,
+        )
+        .expect("copy canonical hypothesis fixture helpers");
+        let entry = temp.path().join("workflow_native.harn");
+        std::fs::write(
+            &entry,
+            r#"
+import {
+  compile_experiment_intent,
+  hypothesis_workflow,
+} from "std/eval/hypothesis"
+import {
+  hypothesis_fixture_context,
+  hypothesis_fixture_intent,
+} from "./hypothesis_fixture_lib.harn"
+
+pub fn run(harness: Harness) {
+  const compiled = compile_experiment_intent(
+    hypothesis_fixture_intent(),
+    hypothesis_fixture_context(),
+  )
+  if compiled.plan == nil || compiled.plan.kind != "registered_experiment" {
+    throw "native workflow fixture did not compile"
+  }
+  const plan = compiled.plan
+  const started = hypothesis_workflow(
+    harness.obs,
+    {kind: "start", plan: plan, run_id: "native-workflow-run"},
+  )
+  require started.kind == "applied"
+    && started.state == "running"
+    && len(started.appends) == 3,
+    "native start registers, schedules, and starts the run"
+  const paused = hypothesis_workflow(
+    harness.obs,
+    {kind: "pause", hypothesis_id: plan.hypothesis_id, reason: "operator hold"},
+  )
+  require paused.kind == "applied" && paused.state == "paused",
+    "native pause records the portable paused state"
+  const resumed = hypothesis_workflow(
+    harness.obs,
+    {kind: "resume", hypothesis_id: plan.hypothesis_id},
+  )
+  require resumed.kind == "applied" && resumed.state == "running",
+    "native resume records the portable running state"
+  const stopped = hypothesis_workflow(
+    harness.obs,
+    {kind: "stand_down", hypothesis_id: plan.hypothesis_id, reason: "bounded stop"},
+  )
+  require stopped.kind == "applied"
+    && stopped.state == "cancelled"
+    && stopped.ledger.snapshot.event_count == 6,
+    "native stand-down records the terminal state on the canonical ledger"
+  return stopped
+}
+"#,
+        )
+        .expect("write native workflow test module");
+
+        let mut vm = Vm::new();
+        crate::register_vm_stdlib(&mut vm);
+        let (harness, _clock) = crate::Harness::test();
+        vm.set_harness(harness.clone());
+        let exports = vm
+            .load_module_exports(&entry)
+            .await
+            .expect("native workflow module loads");
+        let run = exports.get("run").expect("workflow exports run");
+        let stopped = vm
+            .call_closure_pub(run, &[harness.into_vm_value()])
+            .await
+            .expect("native lifecycle completes through the public Harn workflow");
+        let stopped: serde_json::Value =
+            serde_json::from_str(&crate::stdlib::json::vm_value_to_json(&stopped))
+                .expect("workflow result is JSON-shaped");
+        assert_eq!(stopped["kind"], "applied");
+        assert_eq!(stopped["state"], "cancelled");
+        assert_eq!(bridge.operation_calls.load(Ordering::SeqCst), 4);
+        assert_eq!(
+            bridge.attestation_calls.load(Ordering::SeqCst),
+            6,
+            "every canonical lifecycle event requires a fresh native attestation"
+        );
+
+        clear_host_call_bridge();
+        crate::event_log::reset_active_event_log();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn native_adapter_recovers_a_decision_after_its_first_attestation_fails() {
+        crate::event_log::reset_active_event_log();
+        install_memory_for_current_thread(EVENT_LOG_QUEUE_DEPTH);
+        clear_host_call_bridge();
+        let bridge = LifecycleBridge::with_decision_attestation_failure();
+        set_host_call_bridge(bridge.clone());
+        let _scope = enter_execution_scope(mint_execution_scope());
+
+        let temp = tempfile::tempdir().expect("temporary experiment workflow directory");
+        let helper = temp.path().join("hypothesis_fixture_lib.harn");
+        std::fs::copy(
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../conformance/tests/stdlib/hypothesis_fixture_lib.harn"
+            ),
+            &helper,
+        )
+        .expect("copy canonical hypothesis fixture helpers");
+        let entry = temp.path().join("workflow_experiment.harn");
+        std::fs::write(
+            &entry,
+            r#"
+import {
+  compile_experiment_intent,
+  hypothesis_workflow,
+} from "std/eval/hypothesis"
+import {
+  hypothesis_fixture_context,
+  hypothesis_fixture_intent,
+} from "./hypothesis_fixture_lib.harn"
+
+pub fn run(harness: Harness) {
+  const compiled = compile_experiment_intent(
+    hypothesis_fixture_intent(),
+    hypothesis_fixture_context(),
+  )
+  if compiled.plan == nil || compiled.plan.kind != "registered_experiment" {
+    throw "native experiment fixture did not compile"
+  }
+  const plan = compiled.plan
+  let result = hypothesis_workflow(
+    harness.obs,
+    {kind: "start", plan: plan, run_id: "native-experiment-run"},
+  )
+  let advances = 0
+  while result.state == "running" && advances < 64 {
+    result = hypothesis_workflow(
+      harness.obs,
+      {
+        kind: "advance",
+        hypothesis_id: plan.hypothesis_id,
+        blocking_values: {host: "native-test-host", time_slot: "frozen-slot"},
+      },
+    )
+    advances = advances + 1
+  }
+  require result.kind == "applied"
+    && result.state == "completed"
+    && result.ledger.snapshot.decision
+    != nil,
+    "randomized native blocks terminate only through the canonical Harn decision"
+  require result.ledger.snapshot.decision.decision.verdict == "ITERATE_WINNER",
+    "the deterministic all-better candidate wins the iterate phase"
+  return {result: result, advances: advances}
+}
+
+pub fn recover(harness: Harness) {
+  const compiled = compile_experiment_intent(
+    hypothesis_fixture_intent(),
+    hypothesis_fixture_context(),
+  )
+  if compiled.plan == nil || compiled.plan.kind != "registered_experiment" {
+    throw "native recovery fixture did not compile"
+  }
+  return hypothesis_workflow(
+    harness.obs,
+    {
+      kind: "advance",
+      hypothesis_id: compiled.plan.hypothesis_id,
+      blocking_values: {host: "ignored-after-freeze", time_slot: "ignored-after-freeze"},
+    },
+  )
+}
+"#,
+        )
+        .expect("write native experiment test module");
+
+        let mut vm = Vm::new();
+        crate::register_vm_stdlib(&mut vm);
+        let (harness, _clock) = crate::Harness::test();
+        vm.set_harness(harness.clone());
+        let exports = vm
+            .load_module_exports(&entry)
+            .await
+            .expect("native experiment module loads");
+        let run = exports.get("run").expect("experiment exports run");
+        let error = vm
+            .call_closure_pub(run, &[harness.clone().into_vm_value()])
+            .await
+            .expect_err("the injected decision attestation fails after completion");
+        assert!(
+            error
+                .to_string()
+                .contains("injected decision attestation boundary failure"),
+            "{error}"
+        );
+        let recover = exports.get("recover").expect("experiment exports recovery");
+        let outcome = vm
+            .call_closure_pub(recover, &[harness.into_vm_value()])
+            .await
+            .expect("retry appends the pending canonical decision");
+        let outcome: serde_json::Value =
+            serde_json::from_str(&crate::stdlib::json::vm_value_to_json(&outcome))
+                .expect("experiment result is JSON-shaped");
+        assert_eq!(outcome["state"], "completed");
+        assert_eq!(
+            outcome["ledger"]["snapshot"]["decision"]["decision"]["verdict"],
+            "ITERATE_WINNER"
+        );
+        assert!(
+            bridge.attestation_calls.load(Ordering::SeqCst)
+                > bridge.operation_calls.load(Ordering::SeqCst),
+            "registration, lifecycle, observations, completion, and decision are all attested"
+        );
+
+        clear_host_call_bridge();
+        crate::event_log::reset_active_event_log();
     }
 
     #[tokio::test(flavor = "current_thread")]

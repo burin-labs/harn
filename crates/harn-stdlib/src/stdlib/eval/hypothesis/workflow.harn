@@ -1,20 +1,62 @@
-/** Read-first state machine for hypothesis workflow control. */
+/** Registered-adapter state machine for portable hypothesis workflow control. */
+import { check_versioned } from "std/artifacts/typed"
+import {
+  AssignmentPlan,
+  RealizedAssignment,
+  plan_assignments,
+  realize_assignment,
+} from "std/eval/experiment/assignment"
+import { ExperimentRegistration } from "std/eval/experiment/contracts"
+import {
+  ExperimentDecision,
+  MetricPair,
+  PairedObservation,
+  decide_experiment,
+} from "std/eval/experiment/decision"
 import { validate_compiled_hypothesis_plan } from "std/eval/hypothesis/compiler"
-import { hypothesis_ledger_snapshot } from "std/eval/hypothesis/ledger"
-import { HypothesisLedgerSnapshotRead } from "std/eval/hypothesis/ledger_contracts"
+import { HypothesisPlan } from "std/eval/hypothesis/contracts"
+import {
+  hypothesis_event,
+  hypothesis_ledger_append,
+  hypothesis_ledger_snapshot,
+} from "std/eval/hypothesis/ledger"
+import {
+  HypothesisDecisionRecorded,
+  HypothesisLedgerAppendReceipt,
+  HypothesisLedgerEvent,
+  HypothesisLedgerSnapshotRead,
+  HypothesisObservationRecorded,
+  HypothesisRunCompletion,
+  HypothesisRunTransition,
+} from "std/eval/hypothesis/ledger_contracts"
 import { hypothesis_report } from "std/eval/hypothesis/report"
 import {
+  HypothesisNativeArmObservation,
+  HypothesisNativeOperationAccepted,
+  HypothesisNativeOperationRequest,
+  HypothesisNativeOperationResult,
   HypothesisWorkflowNotActionableReason,
   HypothesisWorkflowRequest,
   HypothesisWorkflowResult,
   HypothesisWorkflowState,
+  hypothesis_native_operation_result_contract,
 } from "std/eval/hypothesis/workflow_contracts"
+
+type NativeAction = "start" | "advance" | "pause" | "resume" | "stand_down"
+
+type NextBlock = {plan: AssignmentPlan, all_cells_observed: bool}
 
 fn __state(read: HypothesisLedgerSnapshotRead) -> HypothesisWorkflowState {
   if read.snapshot.plan == nil {
     return "unregistered"
   }
   return read.snapshot.run_state ?? "registered"
+}
+
+fn __non_empty(value: string, field: string) {
+  if trim(value) == "" {
+    throw "hypothesis workflow: native adapter returned an empty " + field
+  }
 }
 
 fn __inspection(
@@ -33,7 +75,7 @@ fn __inspection(
 }
 
 fn __adapter_unavailable(
-  action: "start" | "resume" | "stand_down",
+  action: NativeAction,
   hypothesis_id: string,
   read: HypothesisLedgerSnapshotRead,
 ) -> HypothesisWorkflowResult {
@@ -52,7 +94,7 @@ fn __adapter_unavailable(
 }
 
 fn __not_actionable(
-  action: "start" | "resume" | "stand_down",
+  action: NativeAction,
   hypothesis_id: string,
   reason: HypothesisWorkflowNotActionableReason,
   read: HypothesisLedgerSnapshotRead,
@@ -69,14 +111,862 @@ fn __not_actionable(
   }
 }
 
+fn __denied(
+  action: NativeAction,
+  hypothesis_id: string,
+  native: HypothesisNativeOperationResult,
+  read: HypothesisLedgerSnapshotRead,
+) -> HypothesisWorkflowResult {
+  if native.kind != "denied" {
+    throw "hypothesis workflow: expected a denied native operation"
+  }
+  return {
+    schema: "harn.hypothesis.workflow_result.v1",
+    kind: "denied",
+    action: action,
+    hypothesis_id: hypothesis_id,
+    state: __state(read),
+    operation_receipt_id: native.operation_receipt_id,
+    code: native.code,
+    message: native.message,
+    ledger: read,
+    report: hypothesis_report(read.snapshot),
+  }
+}
+
+fn __applied(
+  action: NativeAction,
+  hypothesis_id: string,
+  operation_receipt_id: string,
+  appends: list<HypothesisLedgerAppendReceipt>,
+  read: HypothesisLedgerSnapshotRead,
+) -> HypothesisWorkflowResult {
+  return {
+    schema: "harn.hypothesis.workflow_result.v1",
+    kind: "applied",
+    action: action,
+    hypothesis_id: hypothesis_id,
+    state: __state(read),
+    operation_receipt_id: operation_receipt_id,
+    appends: appends,
+    ledger: read,
+    report: hypothesis_report(read.snapshot),
+  }
+}
+
+fn __operation_id(
+  plan_fingerprint: string,
+  run_id: string,
+  action: NativeAction,
+  qualifier: string,
+) -> string {
+  return "hypop-"
+    + sha256(
+    plan_fingerprint
+      + "\\u0000"
+      + run_id
+      + "\\u0000"
+      + to_string(action)
+      + "\\u0000"
+      + qualifier,
+  )
+}
+
+fn __cell_key(arm_id: string, case_id: string, trial_index: int) -> string {
+  return arm_id + "\n" + case_id + "\n" + to_string(trial_index)
+}
+
+fn __metric_ids(registration: ExperimentRegistration) -> list<string> {
+  let ids: list<string> = [registration.metrics.primary.id]
+  for guardrail in registration.metrics.guardrails {
+    ids = ids + [guardrail.id]
+  }
+  return ids
+}
+
+fn __native_arm(
+  arm_observations: list<HypothesisNativeArmObservation>,
+  index: int,
+) -> HypothesisNativeArmObservation {
+  const result = arm_observations[index]
+  if result == nil {
+    throw "hypothesis workflow: native block omitted a planned arm"
+  }
+  return result
+}
+
+fn __validate_native_arm(
+  registration: ExperimentRegistration,
+  result: HypothesisNativeArmObservation,
+) {
+  if result.spend_delta_usd < 0.0
+    || result.compute_delta_ms
+    < 0
+    || result.token_delta
+    < 0
+    || result.api_call_delta
+    < 0 {
+    throw "hypothesis workflow: native block returned a negative resource delta"
+  }
+  const metric_ids = __metric_ids(registration)
+  if len(result.metrics) != len(metric_ids) {
+    throw "hypothesis workflow: native block returned an unexpected metric set"
+  }
+  for metric_id in metric_ids {
+    if result.metrics[metric_id] == nil {
+      throw "hypothesis workflow: native block omitted metric '" + metric_id + "'"
+    }
+  }
+}
+
+fn __frozen_blocking_values(
+  observations: list<PairedObservation>,
+  case_id: string,
+  trial_index: int,
+  requested: dict<string, string>,
+) -> dict<string, string> {
+  for observation in observations {
+    if observation.case_id == case_id
+      && observation.trial_index
+      == trial_index {
+      return observation.baseline_assignment.blocking_values
+    }
+  }
+  return requested
+}
+
+fn __next_block(
+  registration: ExperimentRegistration,
+  observations: list<PairedObservation>,
+  observed_cells: dict<string, bool>,
+  requested_blocking_values: dict<string, string>,
+) -> NextBlock {
+  let last: AssignmentPlan? = nil
+  for trial_index in range(0, registration.budget.max_trials_per_case) {
+    for case_id in registration.case_set.cases {
+      const blocking_values = __frozen_blocking_values(
+        observations,
+        case_id,
+        trial_index,
+        requested_blocking_values,
+      )
+      const planned = plan_assignments(registration, case_id, trial_index, blocking_values)
+      last = planned
+      let missing = false
+      for candidate in registration.candidates {
+        if !(observed_cells[__cell_key(candidate.id, case_id, trial_index)] ?? false) {
+          missing = true
+        }
+      }
+      if missing {
+        for observation in observations {
+          if observation.case_id == case_id
+            && observation.trial_index
+            == trial_index
+            && observation.baseline_assignment.plan_id
+            != planned.plan_id {
+            throw "hypothesis workflow: a partial block differs from its frozen assignment plan"
+          }
+        }
+        return {plan: planned, all_cells_observed: false}
+      }
+    }
+  }
+  if last == nil {
+    throw "hypothesis workflow: registered experiment has no executable cells"
+  }
+  return {plan: last, all_cells_observed: true}
+}
+
+fn __decision_recovery_block(
+  registration: ExperimentRegistration,
+  observations: list<PairedObservation>,
+) -> NextBlock {
+  let last: PairedObservation? = nil
+  for observation in observations {
+    last = observation
+  }
+  if last == nil {
+    throw "hypothesis workflow: completed decision recovery has no observation block"
+  }
+  const planned = plan_assignments(
+    registration,
+    last.case_id,
+    last.trial_index,
+    last.baseline_assignment.blocking_values,
+  )
+  if planned.plan_id != last.baseline_assignment.plan_id {
+    throw "hypothesis workflow: completed decision recovery differs from its frozen block"
+  }
+  return {plan: planned, all_cells_observed: true}
+}
+
+fn __telemetry_status(
+  baseline: HypothesisNativeArmObservation,
+  candidate: HypothesisNativeArmObservation,
+) -> "observed" | "unavailable" | "not_observable" {
+  if baseline.telemetry_status == "not_observable"
+    || candidate.telemetry_status
+    == "not_observable" {
+    return "not_observable"
+  }
+  if baseline.telemetry_status == "unavailable"
+    || candidate.telemetry_status
+    == "unavailable" {
+    return "unavailable"
+  }
+  return "observed"
+}
+
+fn __metric_pairs(
+  registration: ExperimentRegistration,
+  baseline: HypothesisNativeArmObservation,
+  candidate: HypothesisNativeArmObservation,
+) -> list<MetricPair> {
+  let pairs: list<MetricPair> = []
+  for metric_id in __metric_ids(registration) {
+    const baseline_value = baseline.metrics[metric_id]
+    const candidate_value = candidate.metrics[metric_id]
+    if baseline_value == nil || candidate_value == nil {
+      throw "hypothesis workflow: native block omitted a registered metric"
+    }
+    pairs = pairs + [{id: metric_id, baseline: baseline_value, treatment: candidate_value}]
+  }
+  return pairs
+}
+
+fn __decision_payload(decision: ExperimentDecision, elapsed_ms: int) -> HypothesisDecisionRecorded {
+  return {
+    kind: "decision_recorded",
+    decision: decision,
+    summary: "Canonical experiment verdict: " + decision.verdict,
+    belief_before: nil,
+    belief_after: nil,
+    decision_utility: nil,
+    elapsed_ms: elapsed_ms,
+    can_conclude: ["The registered stopping rule produced verdict " + decision.verdict + "."],
+    cannot_conclude: ["The result does not generalize beyond the frozen population and adapters."],
+    follow_up: nil,
+  }
+}
+
+fn __native_operation(
+  obs: HarnessObs,
+  request: HypothesisNativeOperationRequest,
+) -> HypothesisNativeOperationResult? {
+  const raw = obs.hypothesis_operation_request(request)
+  if raw == nil {
+    return nil
+  }
+  const checked = check_versioned(raw, hypothesis_native_operation_result_contract())
+  if !is_ok(checked) {
+    throw "hypothesis workflow: native adapter returned an invalid operation result"
+  }
+  const native: HypothesisNativeOperationResult = unwrap(checked).value
+  if native.action != request.action
+    || native.operation_receipt_id
+    != request.operation_receipt_id {
+    throw "hypothesis workflow: native operation result does not match its request"
+  }
+  __non_empty(native.operation_receipt_id, "operation_receipt_id")
+  if native.kind == "denied" {
+    __non_empty(native.code, "denial code")
+    __non_empty(native.message, "denial message")
+    return native
+  }
+  __non_empty(native.occurred_at, "occurred_at")
+  __non_empty(native.actor, "actor")
+  __non_empty(native.source, "source")
+  return native
+}
+
+fn __event(
+  plan: HypothesisPlan,
+  run_id: string?,
+  predecessor_fingerprint: string?,
+  operation_receipt_id: string,
+  event_key: string,
+  native: HypothesisNativeOperationAccepted,
+  payload: unknown,
+) -> HypothesisLedgerEvent {
+  return hypothesis_event(
+    {
+      schema: "harn.hypothesis.event.v1",
+      schema_version: 1,
+      event_id: "hypevent-" + sha256(operation_receipt_id + "\\u0000" + event_key),
+      hypothesis_id: plan.hypothesis_id,
+      plan_id: plan.plan_id,
+      run_id: run_id,
+      predecessor_fingerprint: predecessor_fingerprint,
+      occurred_at: native.occurred_at,
+      actor: native.actor,
+      source: native.source,
+      payload: payload,
+    },
+  )
+}
+
+fn __authority_kind(event: HypothesisLedgerEvent) -> string {
+  if event.content.payload.kind == "plan_registered" {
+    return "plan_admission"
+  }
+  if event.content.payload.kind == "approval_recorded" {
+    return "native_approval"
+  }
+  if event.content.payload.kind == "observation_recorded" {
+    return "native_observation"
+  }
+  return "lifecycle_audit"
+}
+
+fn __append(
+  obs: HarnessObs,
+  plan: HypothesisPlan,
+  event: HypothesisLedgerEvent,
+  operation_receipt_id: string,
+) -> HypothesisLedgerAppendReceipt {
+  const proof = obs.hypothesis_event_authority_request(
+    __authority_kind(event),
+    event.fingerprint,
+    plan.fingerprint,
+    plan.hypothesis_id,
+    operation_receipt_id,
+    event.content.run_id,
+    event,
+  )
+  return hypothesis_ledger_append(obs, event, proof)
+}
+
+fn __start(
+  obs: HarnessObs,
+  request: HypothesisWorkflowRequest,
+  read: HypothesisLedgerSnapshotRead,
+) -> HypothesisWorkflowResult {
+  if request.kind != "start" {
+    throw "hypothesis workflow: expected a start request"
+  }
+  const plan = request.plan
+  const state = __state(read)
+  if read.snapshot.active_run_id != nil
+    && read.snapshot.active_run_id
+    != request.run_id {
+    throw "hypothesis workflow: start run_id differs from the active run"
+  }
+  if read.snapshot.approval_status == "denied" {
+    return __not_actionable("start", plan.hypothesis_id, "already_terminal", read)
+  }
+  if contains(["completed", "cancelled", "failed", "invalid"], state) {
+    return __not_actionable("start", plan.hypothesis_id, "already_terminal", read)
+  }
+  if contains(["running", "paused"], state) {
+    return __not_actionable("start", plan.hypothesis_id, "already_started", read)
+  }
+  const operation_receipt_id = __operation_id(plan.fingerprint, request.run_id, "start", "v1")
+  const native_request: HypothesisNativeOperationRequest = {
+    schema: "harn.hypothesis.operation_request.v1",
+    action: "start",
+    operation_receipt_id: operation_receipt_id,
+    hypothesis_id: plan.hypothesis_id,
+    plan_fingerprint: plan.fingerprint,
+    run_id: request.run_id,
+    state: state,
+    plan: plan,
+  }
+  const native_result = __native_operation(obs, native_request)
+  if native_result == nil {
+    return __adapter_unavailable("start", plan.hypothesis_id, read)
+  }
+  if native_result.kind == "denied" {
+    return __denied("start", plan.hypothesis_id, native_result, read)
+  }
+  const native: HypothesisNativeOperationAccepted = native_result
+  if plan.design.approval_required
+    && read.snapshot.approval_status
+    == nil
+    && native.approval
+    == nil {
+    throw "hypothesis workflow: native start omitted the required approval result"
+  }
+  if !plan.design.approval_required && native.approval != nil {
+    throw "hypothesis workflow: native start invented an approval for an approval-free plan"
+  }
+  let predecessor = read.snapshot.latest_event_fingerprint
+  let appends: list<HypothesisLedgerAppendReceipt> = []
+  if read.snapshot.plan == nil {
+    const registered = __event(
+      plan,
+      nil,
+      predecessor,
+      operation_receipt_id,
+      "plan_registered",
+      native,
+      {kind: "plan_registered", plan: plan},
+    )
+    appends = appends + [__append(obs, plan, registered, operation_receipt_id)]
+    predecessor = registered.fingerprint
+  }
+  if plan.design.approval_required && read.snapshot.approval_status == nil {
+    const approval = native.approval
+    if approval == nil {
+      throw "hypothesis workflow: native start omitted the required approval result"
+    }
+    __non_empty(approval.rationale, "approval rationale")
+    const approved = __event(
+      plan,
+      nil,
+      predecessor,
+      operation_receipt_id,
+      "approval_recorded",
+      native,
+      {
+        kind: "approval_recorded",
+        approval_id: plan.design.approval_id,
+        plan_fingerprint: plan.fingerprint,
+        decision: approval.decision,
+        rationale: approval.rationale,
+      },
+    )
+    appends = appends + [__append(obs, plan, approved, operation_receipt_id)]
+    predecessor = approved.fingerprint
+    if approval.decision == "denied" {
+      const after_denial = hypothesis_ledger_snapshot(obs, plan.hypothesis_id)
+      return __applied("start", plan.hypothesis_id, operation_receipt_id, appends, after_denial)
+    }
+  }
+  if state != "scheduled" {
+    const scheduled = __event(
+      plan,
+      request.run_id,
+      predecessor,
+      operation_receipt_id,
+      "scheduled",
+      native,
+      {
+        kind: "run_transition",
+        state: "scheduled",
+        reason: nil,
+        receipt_ids: [operation_receipt_id],
+      },
+    )
+    appends = appends + [__append(obs, plan, scheduled, operation_receipt_id)]
+    predecessor = scheduled.fingerprint
+  }
+  const running = __event(
+    plan,
+    request.run_id,
+    predecessor,
+    operation_receipt_id,
+    "running",
+    native,
+    {kind: "run_transition", state: "running", reason: nil, receipt_ids: [operation_receipt_id]},
+  )
+  appends = appends + [__append(obs, plan, running, operation_receipt_id)]
+  const after = hypothesis_ledger_snapshot(obs, plan.hypothesis_id)
+  return __applied("start", plan.hypothesis_id, operation_receipt_id, appends, after)
+}
+
 /**
- * Inspect or request a native hypothesis workflow operation.
+ * Advance is the single append/recovery transaction for one randomized block.
+ * Its branches correspond to closed native-result, budget, partial-replay, and
+ * stopping-rule variants; splitting them across callable owners would make it
+ * possible to bypass the pre-append validation boundary.
+ */
+@complexity(allow)
+fn __advance(
+  obs: HarnessObs,
+  request: HypothesisWorkflowRequest,
+  hypothesis_id: string,
+  read: HypothesisLedgerSnapshotRead,
+) -> HypothesisWorkflowResult {
+  if request.kind != "advance" {
+    throw "hypothesis workflow: expected an advance request"
+  }
+  const initial_state = __state(read)
+  const recovering_decision = initial_state == "completed"
+    && read.snapshot.completion
+    != nil
+    && read.snapshot.decision
+    == nil
+  if initial_state != "running" && !recovering_decision {
+    return __not_actionable("advance", hypothesis_id, "not_running", read)
+  }
+  const plan = read.snapshot.plan
+  const run_id = read.snapshot.active_run_id
+  if plan == nil || plan.kind != "registered_experiment" || run_id == nil {
+    throw "hypothesis workflow: a running advance requires its registered plan and run id"
+  }
+  const observations = read.observations ?? []
+  const observed_cells = read.observed_cells ?? {}
+  const next = if recovering_decision {
+    __decision_recovery_block(plan.registration, observations)
+  } else {
+    __next_block(plan.registration, observations, observed_cells, request.blocking_values)
+  }
+  const operation_receipt_id = __operation_id(
+    plan.fingerprint,
+    run_id,
+    "advance",
+    next.plan.plan_id,
+  )
+  const native_request: HypothesisNativeOperationRequest = {
+    schema: "harn.hypothesis.operation_request.v1",
+    action: "advance",
+    operation_receipt_id: operation_receipt_id,
+    hypothesis_id: hypothesis_id,
+    plan_fingerprint: plan.fingerprint,
+    run_id: run_id,
+    state: initial_state,
+    plan: plan,
+    assignment_plan: next.plan,
+  }
+  const native_result = __native_operation(obs, native_request)
+  if native_result == nil {
+    return __adapter_unavailable("advance", hypothesis_id, read)
+  }
+  if native_result.kind == "denied" {
+    return __denied("advance", hypothesis_id, native_result, read)
+  }
+  if native_result.action != "advance" {
+    throw "hypothesis workflow: native advance returned a control result"
+  }
+  const native: HypothesisNativeOperationAccepted = native_result
+  if native.assignment_plan_id == nil
+    || native.observed_blocking_values
+    == nil
+    || native.arm_observations
+    == nil
+    || native.elapsed_ms
+    == nil {
+    throw "hypothesis workflow: native advance omitted its block result"
+  }
+  const assignment_plan_id = native.assignment_plan_id
+  const observed_blocking_values = native.observed_blocking_values
+  const arm_observations = native.arm_observations
+  const elapsed_ms = native.elapsed_ms
+  if assignment_plan_id != next.plan.plan_id
+    || len(arm_observations)
+    != len(next.plan.assignments) {
+    throw "hypothesis workflow: native block does not match the frozen assignment plan"
+  }
+  if elapsed_ms < 0 || elapsed_ms > plan.design.budget.max_wall_clock_ms {
+    throw "hypothesis workflow: native block exceeds the registered wall-clock budget"
+  }
+  let arm_results: dict<string, HypothesisNativeArmObservation> = {}
+  let realized: dict<string, RealizedAssignment> = {}
+  for index in range(0, len(next.plan.assignments)) {
+    const assignment = next.plan.assignments[index]
+    if assignment == nil {
+      throw "hypothesis workflow: frozen assignment plan contains a gap"
+    }
+    const result = __native_arm(arm_observations, index)
+    if result.arm_id != assignment.arm_id || arm_results[result.arm_id] != nil {
+      throw "hypothesis workflow: native block reordered or duplicated a planned arm"
+    }
+    __validate_native_arm(plan.registration, result)
+    arm_results = arm_results + {[result.arm_id]: result}
+    realized = realized
+      + {
+      [result.arm_id]: realize_assignment(next.plan, result.arm_id, observed_blocking_values),
+    }
+  }
+  const baseline = arm_results[plan.registration.baseline.id]
+  const baseline_assignment = realized[plan.registration.baseline.id]
+  if baseline == nil || baseline_assignment == nil {
+    throw "hypothesis workflow: native block omitted the registered baseline"
+  }
+  let block_already_observed = false
+  for candidate in plan.registration.candidates {
+    if observed_cells[__cell_key(candidate.id, next.plan.case_id, next.plan.trial_index)] ?? false {
+      block_already_observed = true
+    }
+  }
+  let charge_baseline = !block_already_observed
+  let pending_spend = 0.0
+  let pending_compute = 0
+  let pending_tokens = 0
+  let pending_api_calls = 0
+  for candidate in plan.registration.candidates {
+    const cell = __cell_key(candidate.id, next.plan.case_id, next.plan.trial_index)
+    if !(observed_cells[cell] ?? false) {
+      const result = arm_results[candidate.id]
+      if result == nil {
+        throw "hypothesis workflow: native block omitted a registered candidate"
+      }
+      pending_spend = pending_spend + result.spend_delta_usd
+      pending_compute = pending_compute + result.compute_delta_ms
+      pending_tokens = pending_tokens + result.token_delta
+      pending_api_calls = pending_api_calls + result.api_call_delta
+      if charge_baseline {
+        pending_spend = pending_spend + baseline.spend_delta_usd
+        pending_compute = pending_compute + baseline.compute_delta_ms
+        pending_tokens = pending_tokens + baseline.token_delta
+        pending_api_calls = pending_api_calls + baseline.api_call_delta
+        charge_baseline = false
+      }
+    }
+  }
+  if read.snapshot.total_spend_usd + pending_spend > plan.design.budget.max_spend_usd
+    || read.snapshot
+    .total_compute_ms
+    + pending_compute
+    > plan.design.budget.max_compute_ms
+    || read.snapshot.total_tokens
+    + pending_tokens
+    > plan.design.budget.max_tokens
+    || read.snapshot.total_api_calls
+    + pending_api_calls
+    > plan.design.budget.max_api_calls {
+    throw "hypothesis workflow: native block exceeds the registered resource budget"
+  }
+  let predecessor = read.snapshot.latest_event_fingerprint
+  let appends: list<HypothesisLedgerAppendReceipt> = []
+  charge_baseline = !block_already_observed
+  for candidate in plan.registration.candidates {
+    const cell = __cell_key(candidate.id, next.plan.case_id, next.plan.trial_index)
+    if !(observed_cells[cell] ?? false) {
+      const result = arm_results[candidate.id]
+      const candidate_assignment = realized[candidate.id]
+      if result == nil || candidate_assignment == nil {
+        throw "hypothesis workflow: native block omitted a registered candidate"
+      }
+      let spend_delta = result.spend_delta_usd
+      let compute_delta = result.compute_delta_ms
+      let token_delta = result.token_delta
+      let api_call_delta = result.api_call_delta
+      if charge_baseline {
+        spend_delta = spend_delta + baseline.spend_delta_usd
+        compute_delta = compute_delta + baseline.compute_delta_ms
+        token_delta = token_delta + baseline.token_delta
+        api_call_delta = api_call_delta + baseline.api_call_delta
+        charge_baseline = false
+      }
+      const observation: PairedObservation = {
+        arm_id: candidate.id,
+        case_id: next.plan.case_id,
+        trial_index: next.plan.trial_index,
+        metrics: __metric_pairs(plan.registration, baseline, result),
+        baseline_assignment: baseline_assignment,
+        candidate_assignment: candidate_assignment,
+      }
+      const payload: HypothesisObservationRecorded = {
+        kind: "observation_recorded",
+        observation_id: "hypobs-"
+          + sha256(operation_receipt_id + "\\u0000" + candidate.id),
+        operation_receipt_id: operation_receipt_id,
+        observation: observation,
+        spend_delta_usd: spend_delta,
+        compute_delta_ms: compute_delta,
+        token_delta: token_delta,
+        api_call_delta: api_call_delta,
+        telemetry_status: __telemetry_status(baseline, result),
+        capability_degradations: unique(
+          baseline.capability_degradations + result.capability_degradations,
+        ),
+      }
+      const event = __event(
+        plan,
+        run_id,
+        predecessor,
+        operation_receipt_id,
+        "observation:" + candidate.id,
+        native,
+        payload,
+      )
+      appends = appends + [__append(obs, plan, event, operation_receipt_id)]
+      predecessor = event.fingerprint
+    }
+  }
+  let after = hypothesis_ledger_snapshot(obs, hypothesis_id)
+  const all_observations = after.observations ?? []
+  if after.snapshot.run_state == "completed" {
+    const existing_completion = after.snapshot.completion
+    if existing_completion == nil || after.snapshot.decision != nil {
+      throw "hypothesis workflow: completed recovery has no pending canonical decision"
+    }
+    const recovered_decision = decide_experiment(
+      plan.registration,
+      {
+        observations: all_observations,
+        phase_spend_usd: after.snapshot.total_spend_usd,
+        budget_spent: existing_completion.kind != "statistical",
+      },
+    )
+    const recovered_event = __event(
+      plan,
+      run_id,
+      after.snapshot.latest_event_fingerprint,
+      operation_receipt_id,
+      "decision",
+      native,
+      __decision_payload(recovered_decision, elapsed_ms),
+    )
+    appends = appends + [__append(obs, plan, recovered_event, operation_receipt_id)]
+    after = hypothesis_ledger_snapshot(obs, hypothesis_id)
+    return __applied("advance", hypothesis_id, operation_receipt_id, appends, after)
+  }
+  let decision = decide_experiment(
+    plan.registration,
+    {
+      observations: all_observations,
+      phase_spend_usd: after.snapshot.total_spend_usd,
+      budget_spent: false,
+    },
+  )
+  let completion: HypothesisRunCompletion? = nil
+  if decision.verdict != "RUNNING" {
+    completion = {kind: "statistical"}
+  } else {
+    const expected = len(plan.registration.candidates)
+      * len(plan.registration.case_set.cases)
+      * plan.registration.budget.max_trials_per_case
+    if after.snapshot.observation_count == expected {
+      completion = {kind: "max_trials"}
+      decision = decide_experiment(
+        plan.registration,
+        {
+          observations: all_observations,
+          phase_spend_usd: after.snapshot.total_spend_usd,
+          budget_spent: true,
+        },
+      )
+    }
+  }
+  if completion == nil {
+    return __applied("advance", hypothesis_id, operation_receipt_id, appends, after)
+  }
+  const completed_payload: HypothesisRunTransition = {
+    kind: "run_transition",
+    state: "completed",
+    reason: "canonical experiment stopping rule reached",
+    receipt_ids: [operation_receipt_id],
+    completion: completion,
+  }
+  const completed = __event(
+    plan,
+    run_id,
+    predecessor,
+    operation_receipt_id,
+    "completed",
+    native,
+    completed_payload,
+  )
+  appends = appends + [__append(obs, plan, completed, operation_receipt_id)]
+  predecessor = completed.fingerprint
+  const decided = __event(
+    plan,
+    run_id,
+    predecessor,
+    operation_receipt_id,
+    "decision",
+    native,
+    __decision_payload(decision, elapsed_ms),
+  )
+  appends = appends + [__append(obs, plan, decided, operation_receipt_id)]
+  after = hypothesis_ledger_snapshot(obs, hypothesis_id)
+  return __applied("advance", hypothesis_id, operation_receipt_id, appends, after)
+}
+
+fn __control(
+  obs: HarnessObs,
+  request: HypothesisWorkflowRequest,
+  hypothesis_id: string,
+  read: HypothesisLedgerSnapshotRead,
+) -> HypothesisWorkflowResult {
+  if request.kind == "start" || request.kind == "advance" || request.kind == "inspect" {
+    throw "hypothesis workflow: expected a native control request"
+  }
+  if request.kind == "pause" && trim(request.reason) == "" {
+    throw "hypothesis workflow: pause reason must be non-empty"
+  }
+  if request.kind == "stand_down" && trim(request.reason) == "" {
+    throw "hypothesis workflow: stand_down reason must be non-empty"
+  }
+  const state = __state(read)
+  if state == "unregistered" || state == "registered" {
+    return __not_actionable(request.kind, hypothesis_id, "not_started", read)
+  }
+  if contains(["completed", "cancelled", "failed", "invalid"], state) {
+    return __not_actionable(request.kind, hypothesis_id, "already_terminal", read)
+  }
+  if request.kind == "pause" && state != "running" {
+    return __not_actionable("pause", hypothesis_id, "not_running", read)
+  }
+  if request.kind == "resume" && state != "paused" {
+    return __not_actionable("resume", hypothesis_id, "not_paused", read)
+  }
+  const plan = read.snapshot.plan
+  const run_id = read.snapshot.active_run_id
+  if plan == nil || run_id == nil {
+    throw "hypothesis workflow: active control state is missing its plan or run id"
+  }
+  const action: NativeAction = request.kind
+  const reason = if request.kind == "pause" || request.kind == "stand_down" {
+    request.reason
+  } else {
+    ""
+  }
+  const qualifier = (read.snapshot.latest_event_fingerprint ?? "") + "\\u0000" + reason
+  const operation_receipt_id = __operation_id(plan.fingerprint, run_id, action, qualifier)
+  const native_request: HypothesisNativeOperationRequest = {
+    schema: "harn.hypothesis.operation_request.v1",
+    action: action,
+    operation_receipt_id: operation_receipt_id,
+    hypothesis_id: hypothesis_id,
+    plan_fingerprint: plan.fingerprint,
+    run_id: run_id,
+    state: state,
+    reason: reason,
+  }
+  const native_result = __native_operation(obs, native_request)
+  if native_result == nil {
+    return __adapter_unavailable(action, hypothesis_id, read)
+  }
+  if native_result.kind == "denied" {
+    return __denied(action, hypothesis_id, native_result, read)
+  }
+  const native: HypothesisNativeOperationAccepted = native_result
+  if native.approval != nil {
+    throw "hypothesis workflow: a control operation returned an approval result"
+  }
+  const next_state = if action == "pause" {
+    "paused"
+  } else if action == "resume" {
+    "running"
+  } else {
+    "cancelled"
+  }
+  const payload: HypothesisRunTransition = {
+    kind: "run_transition",
+    state: next_state,
+    reason: if reason == "" {
+      nil
+    } else {
+      reason
+    },
+    receipt_ids: [operation_receipt_id],
+  }
+  const event = __event(
+    plan,
+    run_id,
+    read.snapshot.latest_event_fingerprint,
+    operation_receipt_id,
+    action,
+    native,
+    payload,
+  )
+  const append = __append(obs, plan, event, operation_receipt_id)
+  const after = hypothesis_ledger_snapshot(obs, hypothesis_id)
+  return __applied(action, hypothesis_id, operation_receipt_id, [append], after)
+}
+
+/**
+ * Inspect or execute a bounded native hypothesis workflow control operation.
  *
- * This module does not simulate execution and this slice has no native
- * operation adapter. Mutating actions return `adapter_unavailable` before
- * append.
+ * Harn owns state classification, event construction, admission, and replay.
+ * The registered host adapter owns concrete approval and product mutation. A
+ * missing or denied adapter returns before any event append.
  *
- * @effects: [state.read@harness.runtime]
+ * @effects: [state.read@harness.runtime, authority.write@hypothesis.operation]
  * @errors: [backend, validation]
  * @api_stability: experimental
  */
@@ -98,14 +988,7 @@ pub fn hypothesis_workflow(
     if request.plan.kind == "observe_only" {
       return __not_actionable("start", request.plan.hypothesis_id, "observe_only", read)
     }
-    const state = __state(read)
-    if contains(["completed", "cancelled", "failed", "invalid"], state) {
-      return __not_actionable("start", request.plan.hypothesis_id, "already_terminal", read)
-    }
-    if contains(["scheduled", "running", "paused"], state) {
-      return __not_actionable("start", request.plan.hypothesis_id, "already_started", read)
-    }
-    return __adapter_unavailable("start", request.plan.hypothesis_id, read)
+    return __start(obs, request, read)
   }
   const hypothesis_id = request.hypothesis_id
   if trim(hypothesis_id) == "" {
@@ -115,21 +998,11 @@ pub fn hypothesis_workflow(
   if request.kind == "inspect" {
     return __inspection(hypothesis_id, read)
   }
-  if request.kind == "stand_down" && trim(request.reason) == "" {
-    throw "hypothesis workflow: stand_down reason must be non-empty"
-  }
   if read.snapshot.plan?.kind == "observe_only" {
     return __not_actionable(request.kind, hypothesis_id, "observe_only", read)
   }
-  const state = __state(read)
-  if state == "unregistered" || state == "registered" {
-    return __not_actionable(request.kind, hypothesis_id, "not_started", read)
+  if request.kind == "advance" {
+    return __advance(obs, request, hypothesis_id, read)
   }
-  if contains(["completed", "cancelled", "failed", "invalid"], state) {
-    return __not_actionable(request.kind, hypothesis_id, "already_terminal", read)
-  }
-  if request.kind == "resume" && state != "paused" {
-    return __not_actionable("resume", hypothesis_id, "not_paused", read)
-  }
-  return __adapter_unavailable(request.kind, hypothesis_id, read)
+  return __control(obs, request, hypothesis_id, read)
 }

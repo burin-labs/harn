@@ -81,6 +81,22 @@ pipeline default(harness: Harness, _task) {
   )
   require resumed.kind == "not_actionable" && resumed.reason == "not_started",
     "resume refuses an aggregate that was never started"
+  const paused = hypothesis_workflow(
+    harness.obs,
+    {kind: "pause", hypothesis_id: plan.hypothesis_id, reason: "operator hold"},
+  )
+  require paused.kind == "not_actionable" && paused.reason == "not_started",
+    "pause refuses an aggregate that was never started"
+  const advanced = hypothesis_workflow(
+    harness.obs,
+    {
+      kind: "advance",
+      hypothesis_id: plan.hypothesis_id,
+      blocking_values: {host: "fixture-host", time_slot: "fixture-slot"},
+    },
+  )
+  require advanced.kind == "not_actionable" && advanced.reason == "not_running",
+    "advance refuses an aggregate without a running native operation"
   const stood_down = hypothesis_workflow(
     harness.obs,
     {kind: "stand_down", hypothesis_id: plan.hypothesis_id, reason: "operator request"},

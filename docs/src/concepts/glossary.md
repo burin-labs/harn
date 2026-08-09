@@ -159,9 +159,11 @@ edit of accumulated evidence.
 frozen policy. It does not itself mutate a product default.
 
 **Hypothesis workflow.** A read-first state machine over the canonical
-hypothesis ledger. It inspects current state and classifies start, resume, and
-stand-down requests. Without a registered native operation adapter, a mutating
-request returns `adapter_unavailable` and records no lifecycle event.
+hypothesis ledger. It inspects current state; controls start, pause, resume, and
+stand-down transitions; and advances one Harn-randomized case/trial block at a
+time through a registered native adapter. Harn owns assignment, admission,
+stopping, and decision. Without the adapter, a mutating request returns
+`adapter_unavailable` and records no lifecycle event.
 
 **Promotion proposal.** A decision-bound request for a host-owned product
 change. Approval and application are separate events with separate receipts.
