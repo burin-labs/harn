@@ -25,7 +25,11 @@ include = [
 # Lean in-process clients depend on the crate with `default-features =
 # false` and opt into only the modules/grammars they need.
 default = ["full"]
-full = ["ast", "terminal-session"]
+# Distributed product surface: AST mechanism + PTY sessions + every grammar
+# family. Grammar families used to ride on `ast`; they live on `full` now so
+# lean embedders can enable `ast` (and pick families) without compiling ~27
+# C grammars (#6416 / burin-code#4067).
+full = ["ast", "terminal-session", "grammars-all"]
 
 # Typed pseudo-terminal sessions. The implementation is linked into full
 # embedders; script authority is carried by the `HarnessTerminalSession`
@@ -48,19 +52,19 @@ computer-local = ["computer", "dep:xcap", "dep:enigo", "dep:image"]
 # it (`code_index`). The two modules reference each other's types — the
 # index is projected from the AST and the AST dry-run path drives rename
 # through the index — so they compile as one unit behind a single feature.
-# Enabling it pulls tree-sitter and (via `grammars-all`) every grammar
-# family. Deterministic-tool-only clients leave it off.
+# This feature does **not** pull language grammars; enable `grammars-all` or
+# individual `grammar-*` families (or depend on `full`) for bindings.
+# Deterministic-tool-only clients leave it off.
 ast = [
     "dep:tree-sitter",
     "dep:streaming-iterator",
-    "grammars-all",
 ]
 
 # Language grammar families. Each enables a set of C-compiled tree-sitter
 # grammar crates; the `ast` module's `Language::ts_language` match arms are
 # gated on the matching feature, so a family that is off simply has no
 # grammar binding (parse/edit for those languages degrades to the text
-# fallback). `grammars-all` is the umbrella the `ast` feature turns on for
+# fallback). `grammars-all` is the umbrella `full` turns on for product
 # parity; pick individual families instead for a trimmed grammar set.
 grammars-all = [
     "grammar-harn",
