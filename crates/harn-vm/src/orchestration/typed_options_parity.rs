@@ -60,22 +60,35 @@ const AGENT_SPEC_PARTS: [&str; 6] = [
 ];
 
 fn agent_spec_keys_from(source: &str) -> BTreeSet<String> {
-    let declaration = concat!(
-        "pub type AgentSpec = AgentModelSpec \\\n",
-        "  & AgentExecutionSpec \\\n",
-        "  & AgentCapabilitySpec \\\n",
-        "  & AgentLifecycleSpec \\\n",
-        "  & AgentContextSpec \\\n",
-        "  & AgentObservabilitySpec",
-    );
-    assert!(
-        source.contains(declaration),
+    let declaration = harn_declaration_rhs(source, "AgentSpec");
+    let members: Vec<&str> = declaration
+        .split('&')
+        .map(|part| part.trim().trim_end_matches('\\').trim())
+        .collect();
+    assert_eq!(
+        members, AGENT_SPEC_PARTS,
         "AgentSpec must compose exactly the six named agent contract records"
     );
     AGENT_SPEC_PARTS
         .into_iter()
         .flat_map(|name| harn_alias_keys(source, name))
         .collect()
+}
+
+/// Return one Harn type declaration's right-hand side, independent of the
+/// checkout's newline convention. Embedded stdlib source preserves repository
+/// bytes, so tests that inspect it must accept both LF and CRLF rather than
+/// treating platform line endings as contract syntax.
+fn harn_declaration_rhs(source: &str, name: &str) -> String {
+    let marker = format!("type {name} =");
+    let (_, declaration) = source
+        .split_once(&marker)
+        .unwrap_or_else(|| panic!("alias `{name}` not found in Harn source"));
+    declaration
+        .lines()
+        .take_while(|line| !line.trim().is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn agent_spec_keys() -> BTreeSet<String> {
@@ -158,20 +171,33 @@ fn harn_alias_keys(source: &str, name: &str) -> BTreeSet<String> {
 }
 
 fn harn_string_union_values(source: &str, name: &str) -> BTreeSet<String> {
-    let marker = format!("type {name} =");
-    let (_, declaration) = source
-        .split_once(&marker)
-        .unwrap_or_else(|| panic!("alias `{name}` not found in Harn source"));
-    declaration
-        .split("\n\n")
-        .next()
-        .expect("union declaration")
+    harn_declaration_rhs(source, name)
         .split('|')
         .filter_map(|part| {
             let value = part.trim().trim_end_matches('\\').trim().trim_matches('"');
             (!value.is_empty()).then(|| value.to_string())
         })
         .collect()
+}
+
+#[test]
+fn contract_source_parsers_are_newline_agnostic() {
+    let options_lf = agent_options_harn();
+    let options_crlf = options_lf.replace('\n', "\r\n");
+    assert_eq!(
+        agent_spec_keys_from(options_lf),
+        agent_spec_keys_from(&options_crlf)
+    );
+
+    let contracts_lf = agent_contracts_harn();
+    let contracts_crlf = contracts_lf.replace('\n', "\r\n");
+    for name in ["AgentTerminalKind", "AgentTerminalOwner"] {
+        assert_eq!(
+            harn_string_union_values(contracts_lf, name),
+            harn_string_union_values(&contracts_crlf, name),
+            "`{name}` changed under CRLF"
+        );
+    }
 }
 
 /// Serialize a struct's `Default` and return the top-level JSON object keys.
