@@ -1080,7 +1080,7 @@ pub enum AgentEvent {
         session_id: String,
         run: CompositionRunEnvelope,
     },
-    /// Emitted once per `__agent_loop_checkpoint(...)` pass. The single
+    /// Emitted once per `agent_stage(...)` pass. The single
     /// named seam through which the agent loop drains queued bridge
     /// injections and inbox feedback. Hosts use it to debug "did the
     /// loop check for steering at the expected boundary" without having

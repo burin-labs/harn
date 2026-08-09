@@ -2928,7 +2928,7 @@ async fn drain_bridge_injections_for_checkpoint(
 
 /// Drain `interrupt_immediate` injections on behalf of the daemon idle
 /// path and emit a `LoopCheckpoint` so the rest of the seam catalog
-/// (Harn-side `__agent_loop_checkpoint`, ACP `loop_checkpoint`
+/// (Harn-side `agent_stage`, ACP `loop_checkpoint`
 /// notifications, debugger views) sees daemon-side activity through the
 /// same surface. The actual drain reuses the bridge primitive; this
 /// wrapper adds daemon-specific observability while preserving the

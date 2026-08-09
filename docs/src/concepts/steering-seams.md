@@ -3,9 +3,9 @@
 A *steering seam* is a point during a running agent loop where the runtime
 checks for pending out-of-band influence: a queued user message, a system
 reminder, an inbox feedback note, or a revocation. Every drain in the agent
-loop now routes through a single named helper — `__agent_loop_checkpoint(kind)`
-— so the set of seams is a closed catalog rather than a grep across the loop
-body.
+loop routes through `agent_stage(agent, session_id, stage, input?)`. Its
+`AgentStage` argument is a closed vocabulary, so the seam catalog is checked by
+the type system rather than recovered by grepping the loop body.
 
 ## What you can inject
 
@@ -13,8 +13,8 @@ Three orthogonal channels feed into the loop:
 
 | Channel | Producer | Drained from | Renders as |
 |---|---|---|---|
-| **Bridge injections** | `session/inject` and `session/remind` over ACP; `agent_session_push_bridge_injection` for Harn-driven hosts | `__agent_loop_checkpoint` at every bridge seam (see below) | New user message or system reminder in the transcript |
-| **Inbox feedback** | In-pipeline `agent_session_inject_feedback`, `agent_session_post_event`, command policy, MCP server hooks, stall diagnostics | `__agent_loop_checkpoint` at `pre_compact` / `post_compact` | User-role messages |
+| **Bridge injections** | `session/inject` and `session/remind` over ACP; `agent_session_push_bridge_injection` for Harn-driven hosts | `agent_stage` at every bridge seam (see below) | New user message or system reminder in the transcript |
+| **Inbox feedback** | In-pipeline `agent_session_inject_feedback`, `agent_session_post_event`, command policy, MCP server hooks, stall diagnostics | `agent_stage` at `pre_compact` / `post_compact` | User-role messages |
 | **Direct transcript inject** | `transcript.inject_reminder`, internal `agent_session_inject` | Appended directly when called | Whatever shape the caller built |
 
 Bridge injections carry a **mode** — `interrupt_immediate`, `finish_step`,
@@ -29,8 +29,8 @@ Bridge injections carry a **mode** — `interrupt_immediate`, `finish_step`,
 
 ## The seam catalog
 
-`__agent_loop_checkpoint(kind, ...)` fires at exactly these `kind` values, in
-this order, per iteration:
+`agent_stage` receives exactly these `AgentStage` values, in this order, per
+iteration:
 
 | Kind | Where | Bridge modes drained | Inbox? |
 |---|---|---|---|
@@ -44,7 +44,7 @@ this order, per iteration:
 | `daemon_idle_post` | Daemon idle wait, after sleep | `interrupt_immediate` only | no |
 | `loop_exit` | After the loop body exits, before finalize | `audit_only` only (transcript audit, never rendered) | no |
 
-Every checkpoint pass emits a `LoopCheckpoint` event carrying `iteration`,
+Every stage pass emits a `LoopCheckpoint` event carrying `iteration`,
 `kind`, `delivered` (bridge injections drained at this seam),
 `inbox_delivered` (feedback notes drained), and `dispatch_skipped`.
 
@@ -73,12 +73,12 @@ The same `interrupt_immediate` injection arriving at `iteration_start` or
 where no tool is pending — there's nothing to skip, the injection just lands in
 the transcript and the next prompt sees it.
 
-## `register_checkpoint_hook`
+## Observe stage events
 
 Plugin authors observe seams through one canonical builtin:
 
 ```harn,ignore
-register_checkpoint_hook(["pre_tool_dispatch", "iteration_end"], { event ->
+harness.agent.register_checkpoint_hook(["pre_tool_dispatch", "iteration_end"], { event ->
   harness.stdio.log("seam fired:", event.kind, "delivered:", event.delivered)
 })
 ```
@@ -94,16 +94,15 @@ works too, with explicit pattern syntax (`kind=="pre_tool_dispatch"`,
 ## Migration from the old drain sites
 
 Pre-#2211 code called `harness.agent.drain_bridge_injections(session_id,
-checkpoint)` directly at several sites. Those calls still work — the
-checkpoint helper is implemented on top of them — but they bypass the
-`LoopCheckpoint` event and the hook fan-out. Prefer
-`__agent_loop_checkpoint` inside the loop body and `register_checkpoint_hook`
-outside it.
+checkpoint)` directly at several sites. Those low-level calls bypass the
+`AgentStage` contract, `LoopCheckpoint` event, and hook fan-out. Runtime loop
+code should cross `agent_stage`; hosts and plugins should observe the projected
+event through `harness.agent.register_checkpoint_hook`.
 
 For one-off hooks on a single seam the
 `register_session_hook("loop_checkpoint", pattern, ...)` plumbing is still
-available, but `register_checkpoint_hook` covers every seam in one call and
-exposes the `dispatch_skipped` signal that per-event hooks never see.
+available, but `harness.agent.register_checkpoint_hook` covers every seam in one
+call and exposes the `dispatch_skipped` signal that per-event hooks never see.
 
 ## Mid-tool preemption
 

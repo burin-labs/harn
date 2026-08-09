@@ -37,6 +37,21 @@ standardized.
 contains a local structural copy. The typechecker and conformance suite verify
 that registries cross package boundaries and remain assignable to `AgentSpec`.
 
+## Package boundary
+
+The agent contracts, LLM dialects, and provider catalog remain in `harn-vm`.
+They share normalization, dispatch, replay, and terminal semantics with the
+runtime, and every current Rust consumer needs that complete behavior. Harn
+Cloud links `harn-vm` and `harn-serve`; Burin and 20eq consume the versioned
+Harn toolchain rather than a dialect-only library.
+
+Extracting a catalog or dialect crate would create another versioned projection
+without an independent consumer or release cadence. The deeper boundary is the
+small typed interface inside `harn-vm`: capability data selects one dialect,
+`AgentSpec` configures one loop, `ToolRegistry` supplies its tools, and
+`AgentResult` reports its terminal state. Generated catalog artifacts and drift
+checks keep external projections aligned with the same release.
+
 ## Completion judge isolation
 
 `done_judge` and `verify_completion_judge` run on a transcript projection. The
