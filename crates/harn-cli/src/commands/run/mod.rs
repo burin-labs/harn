@@ -950,7 +950,11 @@ async fn execute_run_inner_scoped(
         .unwrap_or("default");
     harn_vm::register_checkpoint_builtins(&mut vm, store_base, pipeline_name);
     vm.set_source_info(path, &source);
-    let defer_manifest_handlers = !eager_project_handlers;
+    let handler_initialization = if eager_project_handlers {
+        package::ManifestHandlerInitialization::Eager
+    } else {
+        package::ManifestHandlerInitialization::OnDispatch
+    };
     if !denied_builtins.is_empty() {
         vm.set_denied_builtins(denied_builtins);
     }
@@ -1022,7 +1026,7 @@ async fn execute_run_inner_scoped(
         Path::new(path),
         store_base,
         &mut vm,
-        defer_manifest_handlers,
+        handler_initialization,
     )
     .await
     {

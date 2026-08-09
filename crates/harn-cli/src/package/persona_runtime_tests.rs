@@ -442,7 +442,7 @@ async fn activated_trigger_lazy_predicate_rechecks_content_at_invocation() {
     let tmp = tempfile::tempdir().unwrap();
     let (_anchor, extensions) = activated_persona_predicate_extensions(tmp.path());
     let mut vm = test_vm();
-    let collected = collect_manifest_triggers_with_mode(&mut vm, &extensions, true)
+    let collected = collect_manifest_triggers(&mut vm, &extensions)
         .await
         .expect("pristine activated predicate should collect lazily");
     let predicate = collected[0].when.as_ref().expect("predicate collected");

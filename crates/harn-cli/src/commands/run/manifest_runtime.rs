@@ -59,7 +59,7 @@ pub(crate) async fn install_manifest_runtime(
     path: &Path,
     store_base: &Path,
     vm: &mut harn_vm::Vm,
-    defer_handlers: bool,
+    handler_initialization: package::ManifestHandlerInitialization,
 ) -> Result<crate::ActiveConnectorClientsGuard, ManifestRuntimeSetupError> {
     let extensions = package::load_runtime_extensions(path);
     package::install_runtime_extensions(&extensions);
@@ -72,10 +72,10 @@ pub(crate) async fn install_manifest_runtime(
             connect_mcp_servers(&manifest.mcp, vm).await;
         }
     }
-    package::install_manifest_triggers_with_mode(vm, &extensions, defer_handlers)
+    package::install_manifest_triggers_with_initialization(vm, &extensions, handler_initialization)
         .await
         .map_err(ManifestRuntimeSetupError::triggers)?;
-    package::install_manifest_hooks_with_mode(vm, &extensions, defer_handlers)
+    package::install_manifest_hooks_with_initialization(vm, &extensions, handler_initialization)
         .await
         .map_err(ManifestRuntimeSetupError::hooks)?;
     Ok(connector_clients)

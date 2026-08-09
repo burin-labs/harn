@@ -225,17 +225,35 @@ pub async fn install_manifest_hooks(
     vm: &mut harn_vm::Vm,
     extensions: &RuntimeExtensions,
 ) -> Result<(), PackageError> {
-    install_manifest_hooks_with_mode(vm, extensions, false).await
+    install_manifest_hooks_with_initialization(
+        vm,
+        extensions,
+        ManifestHandlerInitialization::OnDispatch,
+    )
+    .await
 }
 
-/// Install manifest hooks. When `lazy` is set, each hook's handler closure is
-/// resolved on first fire against the firing VM. Declarations, exports, and
-/// callable signatures are still validated before installation. Callers can
-/// request eager resolution when diagnosing top-level module initialization.
-pub async fn install_manifest_hooks_with_mode(
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum ManifestHandlerInitialization {
+    /// Validate the handler contract now and initialize its module on first use.
+    #[default]
+    OnDispatch,
+    /// Validate and initialize every handler module during installation.
+    Eager,
+}
+
+impl ManifestHandlerInitialization {
+    fn is_on_dispatch(self) -> bool {
+        self == Self::OnDispatch
+    }
+}
+
+/// Install manifest hooks with an explicit module-initialization policy.
+/// Declarations, exports, and callable signatures are validated in both modes.
+pub async fn install_manifest_hooks_with_initialization(
     vm: &mut harn_vm::Vm,
     extensions: &RuntimeExtensions,
-    lazy: bool,
+    initialization: ManifestHandlerInitialization,
 ) -> Result<(), PackageError> {
     harn_vm::orchestration::clear_runtime_hooks();
     let mut loaded_exports: HashMap<ManifestModuleCacheKey, ManifestModuleExports> = HashMap::new();
@@ -266,7 +284,7 @@ pub async fn install_manifest_hooks_with_mode(
             )
             .into());
         }
-        if lazy {
+        if initialization.is_on_dispatch() {
             harn_vm::orchestration::register_vm_hook_lazy(
                 hook.event,
                 hook.pattern.clone(),
@@ -314,13 +332,18 @@ pub async fn collect_manifest_triggers(
     vm: &mut harn_vm::Vm,
     extensions: &RuntimeExtensions,
 ) -> Result<Vec<CollectedManifestTrigger>, PackageError> {
-    collect_manifest_triggers_with_mode(vm, extensions, false).await
+    collect_manifest_triggers_with_initialization(
+        vm,
+        extensions,
+        ManifestHandlerInitialization::OnDispatch,
+    )
+    .await
 }
 
-async fn collect_manifest_triggers_with_mode(
+async fn collect_manifest_triggers_with_initialization(
     vm: &mut harn_vm::Vm,
     extensions: &RuntimeExtensions,
-    lazy_vm_callables: bool,
+    initialization: ManifestHandlerInitialization,
 ) -> Result<Vec<CollectedManifestTrigger>, PackageError> {
     let _provider_schema_guard = lock_manifest_provider_schemas().await;
     let provider_schemas = build_manifest_provider_schemas(extensions).await?;
@@ -352,7 +375,7 @@ async fn collect_manifest_triggers_with_mode(
                     trigger,
                     &reference,
                     &module_path,
-                    lazy_vm_callables,
+                    initialization,
                     "handler",
                 )
                 .await?;
@@ -394,7 +417,7 @@ async fn collect_manifest_triggers_with_mode(
                 trigger,
                 &reference,
                 &source_path,
-                lazy_vm_callables,
+                initialization,
                 "when predicate",
             )
             .await?;
@@ -544,7 +567,7 @@ async fn collect_manifest_vm_callable(
     trigger: &ResolvedTriggerConfig,
     reference: &TriggerFunctionRef,
     module_path: &Path,
-    lazy: bool,
+    initialization: ManifestHandlerInitialization,
     role: &str,
 ) -> Result<harn_vm::VmCallable, PackageError> {
     let mut deferred =
@@ -552,7 +575,7 @@ async fn collect_manifest_vm_callable(
     if let Some(guard) = &trigger.execution_guard {
         deferred = deferred.with_package_execution_guard(Arc::clone(guard));
     }
-    if lazy {
+    if initialization.is_on_dispatch() {
         return Ok(harn_vm::VmCallable::Lazy(deferred));
     }
     if trigger.execution_guard.is_some() {
@@ -1080,19 +1103,25 @@ pub async fn install_manifest_triggers(
     vm: &mut harn_vm::Vm,
     extensions: &RuntimeExtensions,
 ) -> Result<(), PackageError> {
-    install_manifest_triggers_with_mode(vm, extensions, false).await
+    install_manifest_triggers_with_initialization(
+        vm,
+        extensions,
+        ManifestHandlerInitialization::OnDispatch,
+    )
+    .await
 }
 
-/// Install manifest triggers, optionally deferring VM-backed handlers and
-/// predicates until dispatch. Both modes validate declarations, exports, and
-/// callable signatures before installation.
-pub async fn install_manifest_triggers_with_mode(
+/// Install manifest triggers with an explicit module-initialization policy.
+/// Both modes validate declarations, exports, and callable signatures before
+/// installation.
+pub async fn install_manifest_triggers_with_initialization(
     vm: &mut harn_vm::Vm,
     extensions: &RuntimeExtensions,
-    lazy_vm_callables: bool,
+    initialization: ManifestHandlerInitialization,
 ) -> Result<(), PackageError> {
     install_orchestrator_budget(extensions);
-    let collected = collect_manifest_triggers_with_mode(vm, extensions, lazy_vm_callables).await?;
+    let collected =
+        collect_manifest_triggers_with_initialization(vm, extensions, initialization).await?;
     let mut bindings: Vec<_> = collected
         .iter()
         .cloned()

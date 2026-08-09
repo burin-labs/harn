@@ -303,16 +303,13 @@ async fn execute_compiled(
                 .map_err(|error| format!("failed to load runtime extensions: {error}"))?;
             register_manifest_host_operations(&extensions);
             crate::package::install_runtime_extensions(&extensions);
-            crate::package::install_manifest_triggers_with_mode(&mut vm, &extensions, true)
+            crate::package::install_manifest_triggers(&mut vm, &extensions)
                 .await
                 .map_err(|error| format!("failed to install manifest triggers: {error}"))?;
-            // Install manifest hooks lazily: a pure-logic unit test that
-            // never fires a hook must not pay the ~1s cost of instantiating
-            // the handler module's whole import graph during setup. Lazy
-            // hooks resolve on first fire against the firing VM (a cache hit
-            // when the test already imported the graph), preserving per-test
-            // module-state isolation.
-            crate::package::install_manifest_hooks_with_mode(&mut vm, &extensions, true)
+            // A pure-logic unit test does not initialize unrelated handler
+            // graphs. First dispatch resolves against the firing VM and keeps
+            // per-test module state isolated.
+            crate::package::install_manifest_hooks(&mut vm, &extensions)
                 .await
                 .map_err(|error| format!("failed to install manifest hooks: {error}"))?;
             vm.set_harness(harn_vm::Harness::real());
