@@ -1,5 +1,58 @@
 use std::path::Path;
 
+/// Manifest-derived authority shared by every compilation product for one
+/// source file.
+///
+/// Resolving this once keeps the typechecker, entry chunk, and importable
+/// module on the same authority boundary.
+#[derive(Clone, Copy)]
+pub(crate) struct SourceCompilerAuthority {
+    trusted_host_dispatch: bool,
+}
+
+impl SourceCompilerAuthority {
+    pub(crate) fn for_source(path: &Path) -> Self {
+        Self {
+            trusted_host_dispatch: trusted_host_dispatch_for_source(path),
+        }
+    }
+
+    pub(crate) fn typechecker(self) -> harn_parser::TypeChecker {
+        harn_parser::TypeChecker::new().with_privileged_wire_builtins(self.trusted_host_dispatch)
+    }
+
+    pub(crate) fn compiler_with_imported_enums(
+        self,
+        candidates: impl IntoIterator<Item = String>,
+    ) -> harn_vm::Compiler {
+        let compiler = if self.trusted_host_dispatch {
+            harn_vm::Compiler::new_trusted_host_dispatch()
+        } else {
+            harn_vm::Compiler::new()
+        };
+        compiler.with_imported_enum_candidates(candidates)
+    }
+
+    pub(crate) fn compile_module_with_imported_enums(
+        self,
+        source_path: &Path,
+        source: &str,
+        candidates: impl IntoIterator<Item = String>,
+    ) -> Result<harn_vm::module_artifact::ModuleArtifact, harn_vm::VmError> {
+        if self.trusted_host_dispatch {
+            harn_vm::module_artifact::compile_trusted_host_dispatch_module_artifact_from_source_with_imported_enums(
+                source_path, source, candidates,
+            )
+        } else {
+            harn_vm::module_artifact::compile_module_artifact_from_source_with_imported_enums(
+                source_path,
+                source,
+                candidates,
+            )
+        }
+    }
+}
+
 /// Install the macro-emitted builtin signature slice into the
 /// `harn_parser` registry the first time any harn-cli entry point parses
 /// or typechecks a script.
@@ -22,12 +75,8 @@ pub(crate) fn ensure_builtin_signatures_installed() {
 /// lowering, so every file-backed CLI compile must use the same export
 /// contract as typechecking and module-artifact compilation.
 pub(crate) fn compiler_for_source(path: &Path, source: &str) -> harn_vm::Compiler {
-    let base = if trusted_host_dispatch_for_source(path) {
-        harn_vm::Compiler::new_trusted_host_dispatch()
-    } else {
-        harn_vm::Compiler::new()
-    };
-    base.with_imported_enum_candidates(imported_enum_candidates_for_source(path, source))
+    SourceCompilerAuthority::for_source(path)
+        .compiler_with_imported_enums(imported_enum_candidates_for_source(path, source))
 }
 
 /// Read the project's own `[check].trusted_host_dispatch` declaration for the
