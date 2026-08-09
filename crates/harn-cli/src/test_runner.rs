@@ -26,7 +26,8 @@ use harn_test_runner::{
     seed_imported_enum_candidates, FixtureScope, TestCase, TestFixture,
 };
 pub use harn_test_runner::{
-    AggregateTimings, PhaseTimings, TestPhase, TestResult, TestSummary, TestTimeout,
+    AggregateTimings, PhaseTimings, SuiteCallablePreparation, TestPhase, TestResult, TestSummary,
+    TestTimeout,
 };
 pub use harn_test_runner::{TestRunSession, TestRunSessionStats};
 use skill_context::PreparedSkillContexts;
