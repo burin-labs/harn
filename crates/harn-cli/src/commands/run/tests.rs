@@ -1,10 +1,10 @@
 use super::harnpack::HarnpackRunOptions;
 use super::{
     build_denied_builtins, default_run_capability_policy, default_run_workspace_root,
-    eval_source_for_code, execute_explain_cost, execute_run,
+    eval_source_for_code, execute_explain_cost, execute_run, execute_run_inner,
     execute_run_with_harnpack_and_sandbox_options, install_cli_llm_mock_mode,
     persist_cli_llm_mock_recording, run_sandbox_attestation, split_eval_header, CliLlmMockMode,
-    RunProfileOptions, RunSandboxOptions, StdoutPassthroughGuard,
+    ExecuteRunInputs, RunAuxOptions, RunProfileOptions, RunSandboxOptions, StdoutPassthroughGuard,
 };
 // Both users are `#[cfg(unix)]` tests (they assert on subprocess env handed to
 // a forked child), so an unconditional import is dead on Windows and trips
@@ -68,6 +68,28 @@ pub fn after_turn(_event) -> nil {
     let script = root.join("main.harn");
     std::fs::write(&script, main_source).expect("write main script");
     script
+}
+
+async fn execute_run_with_eager_project_handlers(path: &str) -> super::RunOutcome {
+    crate::ensure_builtin_signatures_installed();
+    execute_run_inner(ExecuteRunInputs {
+        path,
+        trace: false,
+        denied_builtins: HashSet::new(),
+        script_argv: Vec::new(),
+        skill_dirs_raw: Vec::new(),
+        llm_mock_mode: CliLlmMockMode::Off,
+        attestation: None,
+        profile: RunProfileOptions::default(),
+        sandbox: RunSandboxOptions::default(),
+        interrupt_tokens: None,
+        json: None,
+        aux: RunAuxOptions::default(),
+        timing: None,
+        harnpack: HarnpackRunOptions::default(),
+        eager_project_handlers: true,
+    })
+    .await
 }
 
 #[test]
@@ -1018,7 +1040,7 @@ fn main(harness: Harness) {
 }
 
 #[tokio::test]
-async fn execute_run_without_builtin_policy_eagerly_validates_manifest_handlers() {
+async fn execute_run_defaults_to_lazy_handlers_and_supports_eager_validation() {
     harn_vm::reset_thread_local_state();
     let project = tempfile::tempdir().expect("temp project");
     let script = write_manifest_trigger_project(
@@ -1041,6 +1063,11 @@ pipeline main(harness: Harness) {
         RunProfileOptions::default(),
     )
     .await;
+
+    assert_eq!(outcome.exit_code, 0, "stderr:\n{}", outcome.stderr);
+    assert_eq!(outcome.stdout.trim(), "target-ran");
+
+    let outcome = execute_run_with_eager_project_handlers(&script.to_string_lossy()).await;
 
     assert_eq!(outcome.exit_code, 1, "stdout:\n{}", outcome.stdout);
     assert!(

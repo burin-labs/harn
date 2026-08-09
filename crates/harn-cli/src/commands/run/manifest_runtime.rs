@@ -52,14 +52,14 @@ impl fmt::Display for ManifestRuntimeSetupError {
 
 /// Install runtime extensions declared by the entry package.
 ///
-/// Callers can defer manifest handler module initialization until those
-/// handlers fire. An explicit builtin policy continues to imply that mode for
-/// compatibility.
+/// Callers choose whether manifest handler modules initialize during startup
+/// or when their handler first fires. Both modes validate the manifest handler
+/// contract during startup.
 pub(crate) async fn install_manifest_runtime(
     path: &Path,
     store_base: &Path,
     vm: &mut harn_vm::Vm,
-    defer_handlers: bool,
+    handler_initialization: package::ManifestHandlerInitialization,
 ) -> Result<crate::ActiveConnectorClientsGuard, ManifestRuntimeSetupError> {
     let extensions = package::load_runtime_extensions(path);
     package::install_runtime_extensions(&extensions);
@@ -72,10 +72,10 @@ pub(crate) async fn install_manifest_runtime(
             connect_mcp_servers(&manifest.mcp, vm).await;
         }
     }
-    package::install_manifest_triggers_with_mode(vm, &extensions, defer_handlers)
+    package::install_manifest_triggers_with_initialization(vm, &extensions, handler_initialization)
         .await
         .map_err(ManifestRuntimeSetupError::triggers)?;
-    package::install_manifest_hooks_with_mode(vm, &extensions, defer_handlers)
+    package::install_manifest_hooks_with_initialization(vm, &extensions, handler_initialization)
         .await
         .map_err(ManifestRuntimeSetupError::hooks)?;
     Ok(connector_clients)

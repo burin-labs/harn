@@ -126,19 +126,23 @@ pub fn on_new_issue(harness: Harness, event: TriggerEvent) -> string {
     assert!(extensions.triggers[0].execution_guard.is_none());
     let mut vm = test_vm();
 
-    let collected = collect_manifest_triggers_with_mode(&mut vm, &extensions, true)
+    let collected = collect_manifest_triggers(&mut vm, &extensions)
         .await
-        .expect("lazy collection must not initialize the handler module");
+        .expect("default collection must not initialize the handler module");
     let CollectedTriggerHandler::Local { callable, .. } = &collected[0].handler else {
         panic!("expected local handler");
     };
     assert!(matches!(callable, harn_vm::VmCallable::Lazy(_)));
 
     assert!(
-        collect_manifest_triggers(&mut vm, &extensions)
-            .await
-            .is_err(),
-        "eager production collection must still initialize and validate the handler module"
+        collect_manifest_triggers_with_initialization(
+            &mut vm,
+            &extensions,
+            ManifestHandlerInitialization::Eager,
+        )
+        .await
+        .is_err(),
+        "explicit eager collection must initialize and validate the handler module"
     );
 }
 
@@ -159,19 +163,26 @@ async fn eager_and_lazy_manifest_trigger_collection_reject_missing_and_private_h
             write_local_trigger_project(tmp.path(), "handlers::on_new_issue", module_source);
         let extensions = load_runtime_extensions(&harn_file);
 
-        for lazy in [false, true] {
-            let result =
-                collect_manifest_triggers_with_mode(&mut test_vm(), &extensions, lazy).await;
+        for initialization in [
+            ManifestHandlerInitialization::Eager,
+            ManifestHandlerInitialization::OnDispatch,
+        ] {
+            let result = collect_manifest_triggers_with_initialization(
+                &mut test_vm(),
+                &extensions,
+                initialization,
+            )
+            .await;
             assert!(
                 result.is_err(),
-                "{case} trigger handler unexpectedly collected in lazy={lazy} mode"
+                "{case} trigger handler unexpectedly collected in {initialization:?} mode"
             );
             assert!(
                 result
                     .unwrap_err()
                     .to_string()
                     .contains("handler 'handlers::on_new_issue' is not exported"),
-                "{case} trigger handler must fail the export boundary in lazy={lazy} mode"
+                "{case} trigger handler must fail the export boundary in {initialization:?} mode"
             );
         }
     }
@@ -198,15 +209,22 @@ pub fn should_handle(event: TriggerEvent) -> string {
     );
     let extensions = load_runtime_extensions(&harn_file);
 
-    for lazy in [false, true] {
-        let error = collect_manifest_triggers_with_mode(&mut test_vm(), &extensions, lazy)
-            .await
-            .expect_err("invalid predicate must fail before module initialization");
+    for initialization in [
+        ManifestHandlerInitialization::Eager,
+        ManifestHandlerInitialization::OnDispatch,
+    ] {
+        let error = collect_manifest_triggers_with_initialization(
+            &mut test_vm(),
+            &extensions,
+            initialization,
+        )
+        .await
+        .expect_err("invalid predicate must fail before module initialization");
         assert!(
             error
                 .to_string()
                 .contains("must have signature fn(TriggerEvent) -> bool or Result<bool, _>"),
-            "predicate signature must win over initialization in lazy={lazy}: {error}"
+            "predicate signature must win over {initialization:?} initialization: {error}"
         );
     }
 }
@@ -232,17 +250,22 @@ pub fn should_handle(event: TriggerEvent) -> string {
     );
     let extensions = load_runtime_extensions(&harn_file);
 
-    for lazy in [false, true] {
-        let error = collect_manifest_triggers_with_mode(&mut test_vm(), &extensions, lazy)
-            .await
-            .expect_err(
-                "the second trigger predicate must fail before the first module initializes",
-            );
+    for initialization in [
+        ManifestHandlerInitialization::Eager,
+        ManifestHandlerInitialization::OnDispatch,
+    ] {
+        let error = collect_manifest_triggers_with_initialization(
+            &mut test_vm(),
+            &extensions,
+            initialization,
+        )
+        .await
+        .expect_err("the second trigger predicate must fail before the first module initializes");
         assert!(
             error
                 .to_string()
                 .contains("must have signature fn(TriggerEvent) -> bool or Result<bool, _>"),
-            "whole-set predicate validation must win over initialization in lazy={lazy}: {error}"
+            "whole-set predicate validation must win over {initialization:?} initialization: {error}"
         );
     }
 }
@@ -258,18 +281,26 @@ async fn eager_and_lazy_hook_installation_reject_missing_and_private_handlers() 
         let extensions = load_runtime_extensions(&harn_file);
         assert_eq!(extensions.hooks.len(), 1, "{case} hook fixture must load");
 
-        for lazy in [false, true] {
-            let result = install_manifest_hooks_with_mode(&mut test_vm(), &extensions, lazy).await;
+        for initialization in [
+            ManifestHandlerInitialization::Eager,
+            ManifestHandlerInitialization::OnDispatch,
+        ] {
+            let result = install_manifest_hooks_with_initialization(
+                &mut test_vm(),
+                &extensions,
+                initialization,
+            )
+            .await;
             assert!(
                 result.is_err(),
-                "{case} handler unexpectedly installed in lazy={lazy} mode"
+                "{case} handler unexpectedly installed in {initialization:?} mode"
             );
             let error = result.unwrap_err();
             assert!(
                 error
                     .to_string()
                     .contains("hook handler 'handle' is not exported by module 'handlers'"),
-                "{case} handler must be rejected in lazy={lazy} mode: {error}"
+                "{case} handler must be rejected in {initialization:?} mode: {error}"
             );
         }
     }

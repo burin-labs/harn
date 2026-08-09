@@ -66,6 +66,25 @@ fn test_run_rejects_deny_allow_conflict() {
 }
 
 #[test]
+fn test_run_project_handler_initialization_mode_is_a_clean_cutover() {
+    let cli = Cli::parse_from(["harn", "run", "main.harn"]);
+    let Command::Run(args) = cli.command.unwrap() else {
+        panic!("expected run command");
+    };
+    assert!(!args.eager_project_handlers);
+
+    let cli = Cli::parse_from(["harn", "run", "--eager-project-handlers", "main.harn"]);
+    let Command::Run(args) = cli.command.unwrap() else {
+        panic!("expected run command");
+    };
+    assert!(args.eager_project_handlers);
+
+    let error = Cli::try_parse_from(["harn", "run", "--defer-project-handlers", "main.harn"])
+        .expect_err("removed defer flag must not preserve a second policy path");
+    assert_eq!(error.kind(), clap::error::ErrorKind::UnknownArgument);
+}
+
+#[test]
 fn test_parses_explicit_risky_operation_grants() {
     let cli = Cli::parse_from([
         "harn",
