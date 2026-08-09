@@ -409,7 +409,7 @@ handler = "worker://review-queue"
             .when
             .as_ref()
             .map(|predicate| &predicate.callable),
-        Some(harn_vm::VmCallable::Eager(_))
+        Some(harn_vm::VmCallable::Lazy(_))
     ));
     assert_eq!(
         collected[0].flow_control.concurrency.as_ref().unwrap().max,
@@ -422,7 +422,7 @@ handler = "worker://review-queue"
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn activated_trigger_eager_collection_rejects_mutated_predicate_source() {
+async fn activated_trigger_collection_rejects_mutated_predicate_source() {
     let tmp = tempfile::tempdir().unwrap();
     let (_anchor, extensions) = activated_persona_predicate_extensions(tmp.path());
     fs::write(
@@ -433,7 +433,7 @@ async fn activated_trigger_eager_collection_rejects_mutated_predicate_source() {
 
     let error = collect_manifest_triggers(&mut test_vm(), &extensions)
         .await
-        .expect_err("eager collection must reject post-activation mutation");
+        .expect_err("collection must reject post-activation mutation");
     assert!(error.to_string().contains("content changed"), "{error}");
 }
 
