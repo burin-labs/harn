@@ -5,26 +5,44 @@ lives in [CLI reference](./cli-reference.md).
 
 ## Standard flow
 
-Once release content lands on `main` through the merge queue, open the
-automated version-bump PR:
+Live releases run from the protected hosted workflow owned by
+`burin-labs/harn-bump-fleet`. Start from an up-to-date Harn checkout, freeze the
+exact remote source SHA, and dispatch the Fleet workflow:
 
 ```bash
-./scripts/release_ship.sh --bump patch
+git fetch origin main
+HARN_RELEASE_SHA="$(git rev-parse origin/main)"
+gh workflow run hosted-release.yml \
+  --repo burin-labs/harn-bump-fleet \
+  -f bump=patch \
+  -f mode=ship-pr \
+  -f at_sha="${HARN_RELEASE_SHA}"
 ```
 
-After that PR lands through the merge queue, finalize from an up-to-date
-`main`:
+Approve the run's protected `release` environment, then follow the exact run
+until it hands off the immutable tag and release PR. Once the tag is known,
+resume Fleet's durable post-tag watcher from a `harn-bump-fleet` checkout:
 
 ```bash
-./scripts/release_ship.sh --finalize
+scripts/watch_harn_release.sh \
+  --tag vX.Y.Z \
+  --repo ../harn \
+  --yes-live-release
 ```
 
-The bump command runs audit, dry-run publish, version bump, commit, push to
-`release/vX.Y.Z`, and PR creation. Finalize runs audit, dry-run publish, tag
-creation, tag push, crate publishing, and GitHub release creation.
+The hosted workflow owns source freezing, audits, hosted platform
+certification, the GitHub-signed release commit, immutable tag, release PR, and
+auto-merge. The watcher is resumable by exact receipt and owns missing-asset
+recovery, PR re-arming, release finalization, main-cache warming, and transient
+ref cleanup. A visible tag or prerelease is an intermediate state, not release
+completion.
 
-The tag is pushed before crate publishing so release-binary workflows and other
-downstream automation can start in parallel with crates.io publication.
+Do not invoke `scripts/release_ship.sh` or the local `release_harn.harn` harness
+for a normal live release. They are implementation and development surfaces;
+the hosted workflow is the authority boundary for release credentials,
+signatures, and protected-environment approval. If a run stops after the tag is
+published, rerun the watcher first: it reuses the immutable attempt and avoids
+duplicating accepted builds or publication work.
 
 Before cutting a release that adds a new hard preflight requirement, verify its
 user-facing documentation includes an equivalent migration note: the exact
@@ -58,8 +76,8 @@ If the branch moved, discard both platform receipts and freeze the new SHA.
 
 ## Piecewise gates
 
-Use the lower-level gates when you need to audit or dry-run without opening a
-release PR:
+Use the repository-local gates only when you need to audit or dry-run without
+opening a release PR:
 
 ```bash
 ./scripts/release_gate.sh audit
