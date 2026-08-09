@@ -808,6 +808,64 @@ The provider files in steps 2-3 are overlays, so a starter file can set
 definition. Project manifests can therefore configure provider adapters and
 model aliases without editing Rust-side registration code.
 
+### Managed provider supply
+
+A product or hosted gateway that supplies provider credentials can declare an
+OpenAI-compatible transport as managed supply without inventing a synthetic
+model catalog:
+
+```toml
+[providers.product_gateway]
+base_url = "https://gateway.example.com/v1"
+chat_endpoint = "/chat/completions"
+auth_style = "bearer"
+auth_env = "PRODUCT_INFERENCE_GRANT"
+managed_supply = { version = 1 }
+```
+
+Callers still select an ordinary Harn catalog model. Harn uses that model's
+owning provider for prompt, tool, sampling, context-window, and streaming
+capabilities, while `product_gateway` owns only HTTP framing and auth. Before
+egress Harn adds this versioned request extension:
+
+```json
+{
+  "harn_managed_supply": {
+    "version": 1,
+    "logical_route": {
+      "provider": "openai",
+      "model": "gpt-4o-mini",
+      "capability_fingerprint": "<64 hex characters>"
+    }
+  }
+}
+```
+
+The fingerprint covers Harn's complete resolved live capability projection
+(route identity and batch-only fields are deliberately excluded). A gateway
+pinned to the same Harn release verifies it before selecting a physical route
+with the same fingerprint; this makes Harn's catalog the contract instead of
+requiring products to copy capability tables.
+
+Every successful JSON response, or the terminal SSE frame of a streaming
+response, must contain a `harn_managed_supply` receipt with `version`,
+`request_id`, `served_route`, non-negative `input_tokens` and `output_tokens`,
+decimal-string `cost_usd`, `cost_basis`, `capability_mode`, and typed
+`routing_attempts`. Managed supply v1 requires `capability_mode = "exact"`;
+each attempt reports only its route, typed outcome, elapsed time, optional HTTP
+status, and a safe gateway detail code. Provider payloads and credential names
+do not cross this audit boundary. The served route carries its own capability
+fingerprint.
+Harn rejects a nominal HTTP success when the receipt is absent or invalid and
+uses a valid receipt as the authoritative served model, token count, and cost
+for normal usage/transcript accounting. Direct providers neither send nor
+require this extension.
+
+The public Rust DTOs, fingerprint implementation, request validator, and
+compatible-served-route constructor live in `harn_vm::llm::managed_supply`, so
+Rust gateways consume the owning types and policy directly instead of copying
+catalog checks.
+
 ### Field-wise catalog patches with `[patch.models]`
 
 An overlay's `[models.<id>]` table replaces the whole model row, which is

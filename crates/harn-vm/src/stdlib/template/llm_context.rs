@@ -46,13 +46,15 @@ impl LlmRenderContext {
     /// Build a context from resolved provider/model strings, looking up
     /// the capability snapshot and deriving the canonical model family.
     pub fn resolve(provider: &str, model: &str) -> Self {
-        let caps = crate::llm::capabilities::lookup(provider, model);
+        let (provider, model) = crate::llm::managed_supply::logical_route(provider, model)
+            .unwrap_or_else(|_| (provider.to_string(), model.to_string()));
+        let caps = crate::llm::capabilities::lookup(&provider, &model);
         let capabilities =
-            crate::llm::config_builtins::capabilities_to_vm_value(provider, model, &caps);
+            crate::llm::config_builtins::capabilities_to_vm_value(&provider, &model, &caps);
         Self {
-            provider: provider.to_string(),
-            model: model.to_string(),
-            family: crate::llm_config::model_family(provider, model),
+            family: crate::llm_config::model_family(&provider, &model),
+            provider,
+            model,
             capabilities,
         }
     }

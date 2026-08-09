@@ -424,7 +424,8 @@ pub(super) fn message_is_stream_transport_failure(msg: &str) -> bool {
 
 pub(super) fn can_degrade_stream_transport(opts: &super::api::LlmCallOptions) -> bool {
     opts.stream
-        && !crate::llm::capabilities::lookup(&opts.provider, &opts.model).requires_streaming
+        && !crate::llm::managed_supply::capabilities_for(&opts.provider, &opts.model)
+            .requires_streaming
         && !crate::llm::provider::provider_uses_ollama_messages(&opts.provider, &opts.model)
 }
 
