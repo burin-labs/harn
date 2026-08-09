@@ -27,7 +27,7 @@ run_with_retry() {
     # correct for normal scripts, so this explicitly network-enabled CI audit
     # uses the narrow, visible CLI escape hatch.
     if "$harn_bin" run --no-sandbox scripts/ci_walltime_report.harn -- \
-      --limit 50 "$@" > "$output_path" \
+      --policy .github/ci-latency.json --limit 50 "$@" > "$output_path" \
       && [ -s "$output_path" ]; then
       return 0
     fi

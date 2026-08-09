@@ -149,7 +149,9 @@ const EXECUTION_ONLY_TIMEOUT_MINUTES = "35"
 
 const ARTIFACT_READY_JOB = "rust-artifacts-ready"
 
-const LIVE_ARTIFACT_CONSUMERS = ["harn-audit", "audit-scripts", "ci-walltime-report"]
+const SECURITY_READY_JOB = "security-tests-ready"
+
+const LIVE_ARTIFACT_CONSUMERS = ["audit-scripts", "ci-walltime-report"]
 
 const WORKFLOW_GLOB = ".github/workflows/*.yml"
 
@@ -1502,19 +1504,80 @@ fn artifact_ready_barrier_errors(workflow) -> list<string> {
   return []
 }
 
+fn security_ready_barrier_errors(workflow) -> list<string> {
+  const ready_job = workflow?.jobs?.[SECURITY_READY_JOB]
+  const ready_needs = ready_job?.needs ?? []
+  const ready_step = step_by_name(ready_job?.steps ?? [], "Wait for Linux security tests")
+  const ready_command = trim(ready_step?.run ?? "")
+  if trim(ready_job?.["runs-on"] ?? "") != HOSTED_LINUX_RUNNER
+    || trim(
+    to_string(ready_job?.["timeout-minutes"] ?? ""),
+  )
+    != "12"
+    || ready_needs != ["changes"]
+    || trim(ready_job?.permissions?.actions ?? "") != "read"
+    || trim(
+    ready_job?.permissions?.contents ?? "",
+  )
+    != "read"
+    || !contains(ready_command, "./scripts/ci/wait_for_run_artifacts.sh")
+    || !contains(
+    ready_command,
+    "harn-security.tar.zst",
+  )
+    || contains(ready_command, "harn-cli.tar.zst")
+    || len(
+    matching_steps(ready_job, PERSISTENT_SCCACHE_ACTION),
+  )
+    > 0
+    || len(matching_steps(ready_job, RUST_CACHE_ACTION)) > 0 {
+    return ["ci.yml:security-tests-ready must be the bounded free-hosted security artifact barrier"]
+  }
+  return []
+}
+
+fn harn_audit_overlap_errors(workflow) -> list<string> {
+  const audit = workflow?.jobs?.["harn-audit"]
+  const steps = audit?.steps ?? []
+  const wait_index = step_index_by_name(steps, "Wait for shared Harn binary")
+  const download_index = step_index_by_name(steps, "Download shared Harn binary")
+  const verify_index = step_index_by_name(steps, "Verify shared Harn binary")
+  const grammar_index = step_index_by_name(steps, "Build tree-sitter grammar for the parse sweep")
+  const wait_command = trim(step_by_name(steps, "Wait for shared Harn binary")?.run ?? "")
+  if (audit?.needs ?? []) != ["changes"]
+    || trim(audit?.if ?? "")
+    != "needs.changes.outputs.rust == 'true'"
+    || wait_index < 0
+    || download_index < 0
+    || verify_index < 0
+    || grammar_index < 0
+    || grammar_index >= wait_index
+    || wait_index >= download_index
+    || download_index >= verify_index
+    || !contains(
+    wait_command,
+    "wait_for_run_artifacts.sh harn-cli.tar.zst",
+  ) {
+    return [
+      "ci.yml:harn-audit must overlap CLI-independent setup, then wait for and verify the exact shared Harn binary",
+    ]
+  }
+  return []
+}
+
 fn artifact_consumer_handoff_errors(workflow) -> list<string> {
   let errors: list<string> = []
   const rust_security = workflow?.jobs?.["rust-security"]
   const rust_security_needs = rust_security?.needs ?? []
   const rust_security_if = trim(rust_security?.if ?? "")
-  if !rust_security_needs.contains("rust-check-inputs")
+  if !rust_security_needs.contains(SECURITY_READY_JOB)
     || rust_security_needs.contains(
-    ARTIFACT_READY_JOB,
+    "rust-check-inputs",
   )
-    || !contains(rust_security_if, "needs.rust-check-inputs.result == 'success'") {
+    || !contains(rust_security_if, "needs.security-tests-ready.result == 'success'") {
     errors = errors
       + [
-      "ci.yml:rust-security must wait for the producer-owned security archive without delaying CLI consumers",
+      "ci.yml:rust-security must consume the live exact-commit security archive without waiting for producer completion",
     ]
   }
   for consumer_name in LIVE_ARTIFACT_CONSUMERS {
@@ -1540,11 +1603,16 @@ fn artifact_consumer_handoff_errors(workflow) -> list<string> {
   const status_command = trim(status_step?.run ?? "")
   const status_needs = workflow?.jobs?.["ci-status"]?.needs ?? []
   if !status_needs.contains(ARTIFACT_READY_JOB)
+    || !status_needs.contains(SECURITY_READY_JOB)
     || !contains(
     status_command,
     "needs['rust-artifacts-ready'].result",
   )
-    || !contains(status_command, "Rust artifact handoff failed or skipped") {
+    || !contains(status_command, "needs['security-tests-ready'].result")
+    || !contains(
+    status_command,
+    "Rust artifact handoff failed or skipped",
+  ) {
     errors = errors + ["ci.yml:ci-status must fail closed on live artifact handoff"]
   }
   return errors
@@ -1553,6 +1621,8 @@ fn artifact_consumer_handoff_errors(workflow) -> list<string> {
 fn live_artifact_handoff_errors(workflow) -> list<string> {
   return producer_artifact_order_errors(workflow)
     + artifact_ready_barrier_errors(workflow)
+    + security_ready_barrier_errors(workflow)
+    + harn_audit_overlap_errors(workflow)
     + artifact_consumer_handoff_errors(workflow)
 }
 

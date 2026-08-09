@@ -8,7 +8,7 @@ trap 'rm -rf "$tmp_root"' EXIT
 cat > "$tmp_root/harn" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
-[[ "$*" == "run --no-sandbox scripts/ci_walltime_report.harn -- --limit 50 --json" ]] || exit 2
+[[ "$*" == "run --no-sandbox scripts/ci_walltime_report.harn -- --policy .github/ci-latency.json --limit 50 --json" ]] || exit 2
 count_file="${FAKE_HARN_COUNT:?}"
 count=0
 if [ -f "$count_file" ]; then

@@ -20,6 +20,66 @@ type CiWalltimeReport = {
   jobs: list<CiJobGroup>,
 }
 
+type CiSentinel = {name: string, match: string}
+
+type CiLatencySlo = {
+  warning_ms: int,
+  p90_ms: int,
+  hard_max_ms: int,
+  min_samples: int,
+  window_samples: int,
+}
+
+type CiLatencyPolicy = {
+  schema_version: int,
+  repository: string,
+  workflow: string,
+  event: string,
+  topology_epoch: string,
+  full_run_jobs: list<CiSentinel>,
+  slo: CiLatencySlo,
+}
+
+type CiStepSample = {run_id: int, job: string, name: string, duration_ms: int}
+
+type CiDetailedJobSample = {
+  run_id: int,
+  name: string,
+  conclusion: string,
+  duration_ms: int,
+  start_delay_ms: int,
+  runner: string,
+  steps: list<CiStepSample>,
+}
+
+type CiDetailedRunSample = {id: int, duration_ms: int, url: string, created_at: string}
+
+type CiMetricGroup = {name: string, stats: DurationStats}
+
+type CiLatencyEvaluation = {
+  status: string,
+  ok: bool,
+  current: DurationStats,
+  previous: DurationStats,
+  warning: bool,
+  p90_breach: bool,
+  sustained_breach: bool,
+  hard_max_breach: bool,
+}
+
+type CiLatencyReport = {
+  schema_version: int,
+  policy: CiLatencyPolicy,
+  candidate_runs: int,
+  qualifying_runs: list<CiDetailedRunSample>,
+  wall: DurationStats,
+  jobs: list<CiMetricGroup>,
+  start_delay: list<CiMetricGroup>,
+  steps: list<CiMetricGroup>,
+  runners: dict<string, int>,
+  evaluation: CiLatencyEvaluation,
+}
+
 const DEFAULT_REPOSITORY = "burin-labs/harn"
 
 const DEFAULT_WORKFLOW = "ci.yml"
@@ -30,9 +90,10 @@ const DEFAULT_LIMIT = 50
 
 fn usage() -> string {
   return [
-    "usage: harn run scripts/ci_walltime_report.harn -- [--repo OWNER/NAME] [--workflow FILE] [--event NAME] [--limit N] [--json]",
+    "usage: harn run scripts/ci_walltime_report.harn -- [--policy PATH] [--repo OWNER/NAME] [--workflow FILE] [--event NAME] [--limit N] [--json] [--check]",
     "",
     "Summarize successful GitHub Actions workflow wall time and critical jobs.",
+    "A policy excludes fast lanes and evaluates two adjacent p90 windows.",
   ]
     .join("\n")
 }
@@ -42,6 +103,7 @@ fn arg_spec() {
     {
       name: "ci_walltime_report",
       args: [
+        {kind: "flag", name: "policy", long: "--policy", parse: "string", default: ""},
         {kind: "flag", name: "repo", long: "--repo", parse: "string", default: DEFAULT_REPOSITORY},
         {
           kind: "flag",
@@ -53,6 +115,7 @@ fn arg_spec() {
         {kind: "flag", name: "event", long: "--event", parse: "string", default: DEFAULT_EVENT},
         {kind: "flag", name: "limit", long: "--limit", parse: "int", default: DEFAULT_LIMIT},
         {kind: "switch", name: "json", long: "--json", default: false},
+        {kind: "switch", name: "check", long: "--check", default: false},
       ],
     },
   )
@@ -105,6 +168,7 @@ pub fn duration_stats(values: list<int>) -> DurationStats {
   }
 }
 
+/** Legacy normalization remains stable for the in-workflow rolling artifact. */
 pub fn run_samples_from_api(data) -> list<CiRunSample> {
   let samples: list<CiRunSample> = []
   for raw in data?.workflow_runs ?? [] {
@@ -163,6 +227,255 @@ pub fn build_report(
   }
 }
 
+fn positive_int(raw, field: string) -> int {
+  const value = to_int(raw)
+  if value == nil || value <= 0 {
+    throw "CI latency policy ${field} must be a positive integer"
+  }
+  return value
+}
+
+pub fn parse_ci_latency_policy(text: string) -> CiLatencyPolicy {
+  const raw = json_parse(text)
+  if to_int(raw?.schema_version) != 1 {
+    throw "CI latency policy schema_version must be 1"
+  }
+  const repository = to_string(raw?.repository ?? "")
+  const workflow = to_string(raw?.workflow ?? "")
+  const event = to_string(raw?.event ?? "")
+  const topology_epoch = to_string(raw?.topology_epoch ?? "")
+  if repository == "" || workflow == "" || event == "" || timestamp_ms(topology_epoch) == nil {
+    throw "CI latency policy must name repository, workflow, event, and a valid topology_epoch"
+  }
+  let sentinels: list<CiSentinel> = []
+  for raw_sentinel in raw?.full_run_jobs ?? [] {
+    const name = to_string(raw_sentinel?.name ?? "")
+    const match_mode = to_string(raw_sentinel?.match ?? "exact")
+    if name == "" || (match_mode != "exact" && match_mode != "prefix") {
+      throw "CI latency full_run_jobs entries require a name and exact|prefix match"
+    }
+    sentinels = sentinels + [{name: name, match: match_mode}]
+  }
+  if sentinels.count == 0 {
+    throw "CI latency policy must declare at least one full-run sentinel job"
+  }
+  const slo: CiLatencySlo = {
+    warning_ms: positive_int(raw?.slo?.warning_ms, "slo.warning_ms"),
+    p90_ms: positive_int(raw?.slo?.p90_ms, "slo.p90_ms"),
+    hard_max_ms: positive_int(raw?.slo?.hard_max_ms, "slo.hard_max_ms"),
+    min_samples: positive_int(raw?.slo?.min_samples, "slo.min_samples"),
+    window_samples: positive_int(raw?.slo?.window_samples, "slo.window_samples"),
+  }
+  if slo.warning_ms >= slo.p90_ms || slo.p90_ms >= slo.hard_max_ms {
+    throw "CI latency policy requires warning_ms < p90_ms < hard_max_ms"
+  }
+  if slo.min_samples > slo.window_samples {
+    throw "CI latency policy min_samples cannot exceed window_samples"
+  }
+  return {
+    schema_version: 1,
+    repository: repository,
+    workflow: workflow,
+    event: event,
+    topology_epoch: topology_epoch,
+    full_run_jobs: sentinels,
+    slo: slo,
+  }
+}
+
+fn detailed_run_samples_from_api(data, topology_epoch: string) -> list<CiDetailedRunSample> {
+  const epoch_ms = timestamp_ms(topology_epoch) ?? 0
+  let samples: list<CiDetailedRunSample> = []
+  for raw in data?.workflow_runs ?? [] {
+    const id = to_int(raw?.id)
+    const created_at = to_string(raw?.created_at ?? "")
+    const created_ms = timestamp_ms(created_at)
+    const duration_ms = elapsed_ms(created_at, raw?.updated_at)
+    if id == nil || created_ms == nil || created_ms < epoch_ms || duration_ms == nil {
+      continue
+    }
+    samples = samples
+      + [
+      {
+        id: id,
+        duration_ms: duration_ms,
+        url: to_string(raw?.html_url ?? ""),
+        created_at: created_at,
+      },
+    ]
+  }
+  return samples
+}
+
+fn detailed_job_samples_from_api(
+  run_id: int,
+  run_created_at: string,
+  data,
+) -> list<CiDetailedJobSample> {
+  let samples: list<CiDetailedJobSample> = []
+  for raw in data?.jobs ?? [] {
+    const name = to_string(raw?.name ?? "")
+    const duration_ms = elapsed_ms(raw?.started_at, raw?.completed_at)
+    const start_delay_ms = elapsed_ms(run_created_at, raw?.started_at)
+    if name == "" || duration_ms == nil || start_delay_ms == nil {
+      continue
+    }
+    let steps: list<CiStepSample> = []
+    for raw_step in raw?.steps ?? [] {
+      const step_name = to_string(raw_step?.name ?? "")
+      const step_duration_ms = elapsed_ms(raw_step?.started_at, raw_step?.completed_at)
+      if step_name != "" && step_duration_ms != nil {
+        steps = steps
+          + [{run_id: run_id, job: name, name: step_name, duration_ms: step_duration_ms}]
+      }
+    }
+    const runner_name = to_string(raw?.runner_name ?? "")
+    const labels = raw?.labels ?? []
+    const runner = if runner_name.starts_with("blacksmith-")
+      || labels.any(
+      { label -> to_string(label).starts_with("blacksmith-") },
+    ) {
+      "blacksmith"
+    } else if labels.contains("self-hosted") {
+      "self-hosted"
+    } else if runner_name.starts_with("GitHub Actions ")
+      || labels.contains(
+      "ubuntu-latest",
+    )
+      || labels.contains("macos-latest")
+      || labels.contains("windows-latest") {
+      "github-hosted"
+    } else {
+      "unassigned"
+    }
+    samples = samples
+      + [
+      {
+        run_id: run_id,
+        name: name,
+        conclusion: to_string(raw?.conclusion ?? ""),
+        duration_ms: duration_ms,
+        start_delay_ms: start_delay_ms,
+        runner: runner,
+        steps: steps,
+      },
+    ]
+  }
+  return samples
+}
+
+fn sentinel_matches_job(sentinel: CiSentinel, job: CiDetailedJobSample) -> bool {
+  const name_matches = if sentinel.match == "prefix" {
+    job.name.starts_with(sentinel.name)
+  } else {
+    job.name == sentinel.name
+  }
+  return name_matches && job.conclusion == "success"
+}
+
+pub fn run_has_full_coverage(
+  run_id: int,
+  jobs: list<CiDetailedJobSample>,
+  sentinels: list<CiSentinel>,
+) -> bool {
+  const run_jobs = jobs.filter({ job -> job.run_id == run_id }).to_list()
+  return sentinels.all({ sentinel -> run_jobs.any({ job -> sentinel_matches_job(sentinel, job) }) })
+}
+
+fn group_metrics(samples) -> list<CiMetricGroup> {
+  let durations_by_name: dict<string, list<int>> = {}
+  for sample in samples {
+    const previous = durations_by_name[sample.name] ?? []
+    durations_by_name = durations_by_name + {[sample.name]: previous + [sample.duration_ms]}
+  }
+  let groups: list<CiMetricGroup> = []
+  for entry in durations_by_name {
+    groups = groups + [{name: entry.key, stats: duration_stats(entry.value)}]
+  }
+  return groups.sorted_by({ group -> 0 - group.stats.p90_ms })
+}
+
+pub fn evaluate_ci_latency(
+  runs: list<CiDetailedRunSample>,
+  slo: CiLatencySlo,
+) -> CiLatencyEvaluation {
+  const current_end = min(runs.count, slo.window_samples)
+  const previous_end = min(runs.count, slo.window_samples * 2)
+  const current = duration_stats(runs[0:current_end].map({ run -> run.duration_ms }).to_list())
+  const previous = duration_stats(
+    runs[current_end:previous_end].map({ run -> run.duration_ms }).to_list(),
+  )
+  const enough = current.count >= slo.min_samples
+  const previous_enough = previous.count >= slo.min_samples
+  const warning = enough && current.p90_ms >= slo.warning_ms
+  const p90_breach = enough && current.p90_ms >= slo.p90_ms
+  const sustained_breach = p90_breach && previous_enough && previous.p90_ms >= slo.p90_ms
+  const hard_max_breach = current.count > 0 && current.max_ms >= slo.hard_max_ms
+  const status = if hard_max_breach {
+    "hard_max_breach"
+  } else if !enough {
+    "insufficient_samples"
+  } else if sustained_breach {
+    "sustained_p90_breach"
+  } else if p90_breach {
+    "single_window_p90_breach"
+  } else if warning {
+    "warning"
+  } else {
+    "healthy"
+  }
+  return {
+    status: status,
+    ok: enough && !hard_max_breach && !sustained_breach,
+    current: current,
+    previous: previous,
+    warning: warning,
+    p90_breach: p90_breach,
+    sustained_breach: sustained_breach,
+    hard_max_breach: hard_max_breach,
+  }
+}
+
+fn build_latency_report(
+  policy: CiLatencyPolicy,
+  candidates: list<CiDetailedRunSample>,
+  all_jobs: list<CiDetailedJobSample>,
+) -> CiLatencyReport {
+  const qualifying = candidates.filter(
+    { run -> run_has_full_coverage(run.id, all_jobs, policy.full_run_jobs) },
+  )
+    .to_list()
+  const qualifying_ids = qualifying.map({ run -> run.id }).to_list()
+  const jobs = all_jobs.filter(
+    { job -> qualifying_ids.contains(job.run_id) && job.conclusion == "success" },
+  )
+    .to_list()
+  const start_delay_samples = jobs.map({ job -> {name: job.name, duration_ms: job.start_delay_ms} })
+    .to_list()
+  let step_samples = []
+  let runners: dict<string, int> = {}
+  for job in jobs {
+    step_samples = step_samples
+      + job.steps.map(
+      { step -> {name: "${step.job} / ${step.name}", duration_ms: step.duration_ms} },
+    )
+      .to_list()
+    runners = runners + {[job.runner]: (runners[job.runner] ?? 0) + 1}
+  }
+  return {
+    schema_version: 2,
+    policy: policy,
+    candidate_runs: candidates.count,
+    qualifying_runs: qualifying,
+    wall: duration_stats(qualifying.map({ run -> run.duration_ms }).to_list()),
+    jobs: group_metrics(jobs),
+    start_delay: group_metrics(start_delay_samples),
+    steps: group_metrics(step_samples),
+    runners: runners,
+    evaluation: evaluate_ci_latency(qualifying, policy.slo),
+  }
+}
+
 fn gh_api_json(process: HarnessProcess, path: string) {
   const result = process.run({program: "gh", args: ["api", path]})
   if !result.success {
@@ -176,16 +489,12 @@ fn format_seconds(duration_ms: int) -> string {
   return "${tenths / 10}.${tenths % 10}s"
 }
 
-fn render_report(report: CiWalltimeReport) -> string {
-  const wall = report.wall
-  const summary =
-    "${report.repository} ${report.workflow} ${report.event}: n=${wall.count} mean=${format_seconds(wall.mean_ms)} p50=${format_seconds(wall.p50_ms)} p90=${format_seconds(wall.p90_ms)} max=${format_seconds(wall.max_ms)}"
-  const rows = report.jobs.map(
+fn render_groups(groups, empty: string) -> string {
+  const rows = groups[0:min(groups.count, 12)].map(
     { group ->
       {
-        job: group.name,
+        name: group.name,
         n: group.stats.count,
-        mean: format_seconds(group.stats.mean_ms),
         p50: format_seconds(group.stats.p50_ms),
         p90: format_seconds(group.stats.p90_ms),
         max: format_seconds(group.stats.max_ms),
@@ -193,22 +502,43 @@ fn render_report(report: CiWalltimeReport) -> string {
     },
   )
     .to_list()
-  return summary
-    + "\n\n"
-    + render_table(
+  return render_table(
     rows,
     {
       columns: [
-        {key: "job", header: "job"},
+        {key: "name", header: "name"},
         {key: "n", header: "n", align: "right"},
-        {key: "mean", header: "mean", align: "right"},
         {key: "p50", header: "p50", align: "right"},
         {key: "p90", header: "p90", align: "right"},
         {key: "max", header: "max", align: "right"},
       ],
-      empty: "No completed jobs found.",
+      empty: empty,
     },
   )
+}
+
+fn render_report(report: CiWalltimeReport) -> string {
+  const wall = report.wall
+  const summary =
+    "${report.repository} ${report.workflow} ${report.event}: n=${wall.count} mean=${format_seconds(wall.mean_ms)} p50=${format_seconds(wall.p50_ms)} p90=${format_seconds(wall.p90_ms)} max=${format_seconds(wall.max_ms)}"
+  return summary + "\n\n" + render_groups(report.jobs, "No completed jobs found.")
+}
+
+fn render_latency_report(report: CiLatencyReport) -> string {
+  const wall = report.wall
+  const evaluation = report.evaluation
+  const summary =
+    "${report.policy.repository} ${report.policy.workflow} ${report.policy.event}: ${evaluation.status}; full runs=${wall.count}/${report.candidate_runs}; p50=${format_seconds(wall.p50_ms)} p90=${format_seconds(wall.p90_ms)} max=${format_seconds(wall.max_ms)}"
+  return summary
+    + "\n\nCritical job duration\n"
+    + render_groups(report.jobs, "No qualifying jobs found.")
+    + "\n\nStart delay (dependencies plus runner queue)\n"
+    + render_groups(
+    report.start_delay,
+    "No start-delay observations found.",
+  )
+    + "\n\nSlowest steps\n"
+    + render_groups(report.steps, "No step observations found.")
 }
 
 pipeline main(harness: Harness, task) {
@@ -223,28 +553,59 @@ pipeline main(harness: Harness, task) {
     return 2
   }
   const parsed = unwrap(parsed_result).options
-  const repository = to_string(parsed.repo)
-  const workflow = to_string(parsed.workflow)
-  const event = to_string(parsed.event)
+  const policy_path = to_string(parsed.policy)
+  const policy = if policy_path == "" {
+    nil
+  } else {
+    parse_ci_latency_policy(harness.fs.read_text(policy_path))
+  }
+  const repository = policy?.repository ?? to_string(parsed.repo)
+  const workflow = policy?.workflow ?? to_string(parsed.workflow)
+  const event = policy?.event ?? to_string(parsed.event)
   const limit = min(100, max(1, to_int(parsed.limit) ?? DEFAULT_LIMIT))
   const runs_data = gh_api_json(
     harness.process,
     "/repos/${repository}/actions/workflows/${workflow}/runs?event=${event}&status=success&per_page=${limit}",
   )
-  const runs = run_samples_from_api(runs_data)
-  let jobs: list<CiJobSample> = []
-  for run in runs {
-    jobs = jobs
-      + job_samples_from_api(
+  if policy == nil {
+    const runs = run_samples_from_api(runs_data)
+    let jobs: list<CiJobSample> = []
+    for run in runs {
+      jobs = jobs
+        + job_samples_from_api(
+        run.id,
+        gh_api_json(
+          harness.process,
+          "/repos/${repository}/actions/runs/${run.id}/jobs?per_page=100",
+        ),
+      )
+    }
+    const report = build_report(repository, workflow, event, runs, jobs)
+    if parsed.json {
+      harness.stdio.println(json_stringify_pretty(report))
+    } else {
+      harness.stdio.println(render_report(report))
+    }
+    return 0
+  }
+  const candidates = detailed_run_samples_from_api(runs_data, policy.topology_epoch)
+  let detailed_jobs: list<CiDetailedJobSample> = []
+  for run in candidates {
+    detailed_jobs = detailed_jobs
+      + detailed_job_samples_from_api(
       run.id,
+      run.created_at,
       gh_api_json(harness.process, "/repos/${repository}/actions/runs/${run.id}/jobs?per_page=100"),
     )
   }
-  const report = build_report(repository, workflow, event, runs, jobs)
+  const report = build_latency_report(policy, candidates, detailed_jobs)
   if parsed.json {
     harness.stdio.println(json_stringify_pretty(report))
   } else {
-    harness.stdio.println(render_report(report))
+    harness.stdio.println(render_latency_report(report))
+  }
+  if parsed.check && !report.evaluation.ok {
+    return 1
   }
   return 0
 }
