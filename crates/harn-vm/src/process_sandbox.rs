@@ -25,6 +25,49 @@ pub use crate::stdlib::sandbox::{
     ProcessSandboxScopeGuard, SandboxViolation, MESSAGE_LOCALE_OVERRIDE_ENV,
 };
 
+/// Push a transient execution policy with `sandbox_profile` replaced by the
+/// requested profile. The returned guard restores the surrounding policy on
+/// drop.
+///
+/// This is the single per-process override seam used by both the typed
+/// `HarnessProcess` capability and hostlib command tools. It deliberately
+/// changes only the profile: workspace roots, capability ceilings, and every
+/// other policy field continue to come from the surrounding execution.
+pub fn push_sandbox_profile_override(
+    value: &str,
+) -> Result<SandboxProfileOverrideGuard, crate::VmError> {
+    let profile = crate::orchestration::SandboxProfile::parse(value).ok_or_else(|| {
+        let expected = crate::orchestration::SandboxProfile::all()
+            .iter()
+            .map(|profile| format!("{:?}", profile.as_str()))
+            .collect::<Vec<_>>()
+            .join(", ");
+        crate::VmError::Thrown(crate::VmValue::String(arcstr::ArcStr::from(format!(
+            "unknown sandbox_profile {value:?}; expected one of {expected}"
+        ))))
+    })?;
+    let mut policy = crate::orchestration::current_execution_policy().unwrap_or_default();
+    policy.sandbox_profile = profile;
+    crate::orchestration::push_execution_policy(policy);
+    Ok(SandboxProfileOverrideGuard {
+        _private: std::marker::PhantomData,
+    })
+}
+
+/// Restores the execution policy active before
+/// [`push_sandbox_profile_override`] when dropped.
+#[must_use = "dropping the guard immediately restores the surrounding sandbox profile"]
+#[derive(Debug)]
+pub struct SandboxProfileOverrideGuard {
+    _private: std::marker::PhantomData<*const ()>,
+}
+
+impl Drop for SandboxProfileOverrideGuard {
+    fn drop(&mut self) {
+        crate::orchestration::pop_execution_policy();
+    }
+}
+
 /// Recognize an OS-sandbox wrapper that started but could not exec the
 /// requested program. Inline-confinement backends return `None`; macOS uses
 /// this after `sandbox-exec` exits so callers do not mistake its status for the
@@ -77,5 +120,56 @@ mod tests {
     fn genuine_exit_71_is_not_a_wrapper_failure() {
         assert!(macos_wrapped_spawn_io_error(71, b"").is_none());
         assert!(macos_wrapped_spawn_io_error(71, b"application failed\n").is_none());
+    }
+}
+
+#[cfg(test)]
+mod profile_override_tests {
+    use crate::orchestration::{
+        current_execution_policy, pop_execution_policy, push_execution_policy, CapabilityPolicy,
+        SandboxProfile,
+    };
+
+    use super::push_sandbox_profile_override;
+
+    #[test]
+    fn per_call_override_changes_only_the_profile_and_restores_the_parent() {
+        let parent = CapabilityPolicy {
+            sandbox_profile: SandboxProfile::OsHardened,
+            workspace_roots: vec!["/workspace".to_string()],
+            tools: vec!["run_command".to_string()],
+            ..CapabilityPolicy::default()
+        };
+        push_execution_policy(parent.clone());
+
+        {
+            let _guard = push_sandbox_profile_override("workspace_paths")
+                .expect("workspace_paths is a supported profile");
+            let current = current_execution_policy().expect("override policy");
+            assert_eq!(current.sandbox_profile, SandboxProfile::WorkspacePaths);
+            assert_eq!(current.workspace_roots, parent.workspace_roots);
+            assert_eq!(current.tools, parent.tools);
+        }
+
+        assert_eq!(current_execution_policy().expect("restored parent"), parent);
+        pop_execution_policy();
+    }
+
+    #[test]
+    fn per_call_override_rejects_unknown_profiles_without_mutating_policy() {
+        let parent = CapabilityPolicy {
+            sandbox_profile: SandboxProfile::Worktree,
+            ..CapabilityPolicy::default()
+        };
+        push_execution_policy(parent.clone());
+
+        let error = push_sandbox_profile_override("wide_open")
+            .expect_err("unknown profiles must fail closed");
+        assert!(error.to_string().contains("unknown sandbox_profile"));
+        assert_eq!(
+            current_execution_policy().expect("unchanged parent"),
+            parent
+        );
+        pop_execution_policy();
     }
 }

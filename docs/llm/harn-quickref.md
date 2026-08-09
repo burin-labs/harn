@@ -373,6 +373,12 @@ start the program. Check `error.kind == "not_found"` for an optional executable;
 do not treat other kinds, policy errors, timeouts, or nonzero exit results as
 absence.
 
+- `sandbox_profile` in the command spec or options selects one command's
+  profile. Use `workspace_paths` only for trusted toolchain or nested-Harn
+  commands that need path enforcement without recursive OS confinement;
+  untrusted children still require `worktree` or `os_hardened`. The override
+  preserves the surrounding workspace roots and capability ceilings.
+
 - `shell_command_from_argv(argv)` renders argv as safe shell text and unwraps
   `["bash", "-lc", "cmd"]`-style shell wrappers to the script payload.
 - `shell_command_from_value(value)` accepts string, argv-list, or dict-shaped
