@@ -34,6 +34,14 @@ pipeline test_program_of_sees_through_env_prefixes(harness: Harness, task) {
 }
 
 @test
+pipeline test_shell_words_preserves_quoted_and_escaped_paths(harness: Harness, task) {
+  assert_eq(
+    shell_words("trash '/tmp/probe output' \"./target/debug cache\" escaped\\ path"),
+    ["trash", "/tmp/probe output", "./target/debug cache", "escaped path"],
+  )
+}
+
+@test
 pipeline test_cargo_verbs_with_a_makefile_owner_are_denied(harness: Harness, task) {
   for verb in ["build", "check", "clippy", "fmt", "test", "nextest", "bench"] {
     assert(
@@ -108,12 +116,75 @@ pipeline test_fast_commands_may_pipe_freely(harness: Harness, task) {
 }
 
 @test
+pipeline test_disposable_paths_never_enter_user_trash(harness: Harness, task) {
+  // Exact commands recovered from the two sessions that produced the leaked
+  // Trash entries in burin-labs/harn#6418.
+  for command in [
+    "trash /tmp/burin-bench-baseline.out /tmp/burin-bench-check.out /tmp/burin-bench-measure.out",
+    "trash /private/tmp/burin-bench-probe.iM1F3P",
+    "trash '/tmp/burin bench output'",
+    "/usr/bin/trash .build/arm64-apple-macosx/debug/ModuleCache",
+  ] {
+    const violation = disposable_trash_violation(command)
+    assert(violation != "", command + " should keep generated data out of Trash")
+    assert(violation.contains("exact, validated permanent cleanup"))
+  }
+}
+
+@test
+pipeline test_disposable_path_policy_covers_temp_and_generated_roots(harness: Harness, task) {
+  for path in [
+    "/tmp/output.log",
+    "/private/tmp/probe",
+    "/var/tmp/output.log",
+    "/private/var/tmp/output.log",
+    "$TMPDIR/output.log",
+    "\${TMPDIR}/output.log",
+    "$TMP/output.log",
+    "\${TEMP}/output.log",
+    "%TEMP%/output.log",
+    "/var/folders/ab/cd/T/output.log",
+    "/private/var/folders/ab/cd/T/output.log",
+    ".build/debug/ModuleCache",
+    "./target/debug",
+    "/workspace/.harn-runs/check.log",
+    ".burin-evals/trial.json",
+    ".burin-live-evals/trial.json",
+  ] {
+    assert(is_disposable_path(path), path + " should be classified as disposable")
+  }
+  for path in [
+    "/Users/alice/Documents/report.txt",
+    "notes/target-audience.md",
+    "/var/folders/ab/cd/not-temp/output.log",
+  ] {
+    assert(!is_disposable_path(path), path + " should remain recoverable through Trash")
+  }
+}
+
+@test
+pipeline test_user_files_keep_recoverable_trash_path(harness: Harness, task) {
+  for command in [
+    "trash /Users/alice/Documents/report.txt",
+    "/usr/bin/trash './draft notes.txt'",
+    "echo 'trash /tmp/example'",
+  ] {
+    assert_eq(disposable_trash_violation(command), "", command + " should not be denied")
+  }
+}
+
+@test
 pipeline test_codex_and_claude_share_one_decision(harness: Harness, task) {
   for encode in [claude_payload, codex_payload] {
     assert(!decision(encode("cargo test")).allow)
     assert(decision(encode("HARN_ALLOW_RAW_CARGO=1 cargo test")).allow)
     assert(decision(encode("make test")).allow)
     assert(decision(encode("cargo tree -p harn-vm")).allow)
+    assert(!decision(encode("trash /tmp/generated.log")).allow)
+    assert(!decision(encode("/usr/bin/trash .build/debug/ModuleCache")).allow)
+    assert(decision(encode("trash /Users/alice/Documents/report.txt")).allow)
+    // The Cargo-only escape must not bypass unrelated command policy.
+    assert(!decision(encode("HARN_ALLOW_RAW_CARGO=1 trash /tmp/generated.log")).allow)
   }
   // Non-Bash tools and unparseable payloads never deny — a broken guard must
   // not read as a rejection.

@@ -47,6 +47,22 @@ make test 2>&1 | tee .harn-runs/test.log
 This preserves the evidence needed to investigate a failure without repeating
 the expensive command.
 
+## Keep generated output out of Trash
+
+Trash is reserved for user-authored or uncertain data that may need recovery.
+Do not move temporary files, benchmark output, compiler caches, or other
+reproducible build artifacts there: that turns cleanup into visible Trash
+clutter. The guard rejects `trash` and `trash-put` when an argument resolves to
+an OS temporary root or a repository-generated root such as `.build/`,
+`target/`, `.harn-runs/`, or the Burin eval roots. It still allows Trash for
+ordinary user files.
+
+Prefer leaving a rebuildable cache in place. Put one-off output beneath an OS
+temporary directory, and permanently remove it only through an exact,
+validated path and a mechanism accepted by the host. If the host refuses that
+cleanup, leave the data in its temporary/build root and report it instead of
+using Trash as a fallback.
+
 ## Enable the hooks
 
 The repository already carries both host adapters:

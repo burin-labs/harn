@@ -19,6 +19,17 @@
 // pipe without a redirect is what forces a rerun.
 const SLOW_COMMANDS = ["cargo", "make", "nextest", "swift", "pnpm", "npm", "xcodebuild"]
 
+// Trash is a recovery surface for user-authored data, not a garbage collector
+// for generated output. These are the roots that the repository contracts
+// already define as disposable and reproducible.
+const DISPOSABLE_RELATIVE_ROOTS = [
+  ".build",
+  "target",
+  ".harn-runs",
+  ".burin-evals",
+  ".burin-live-evals",
+]
+
 // `cargo <verb>` calls that have a Makefile owner. Anything not listed here is
 // a one-off (`cargo tree`, `cargo add`) and passes through.
 const CARGO_VERB_TARGETS = {
@@ -32,6 +43,44 @@ const CARGO_VERB_TARGETS = {
 }
 
 pub type ShellGuardDecision = {allow: bool, reason: string}
+
+/** Tokenize one shell stage without mistaking whitespace inside quotes for argv boundaries. */
+pub fn shell_words(stage: string) -> list<string> {
+  let words = []
+  let current = ""
+  let quote = ""
+  let escaped = false
+  for character in stage.chars() {
+    if escaped {
+      current = current + character
+      escaped = false
+    } else if character == "\\" && quote != "'" {
+      escaped = true
+    } else if quote != "" {
+      if character == quote {
+        quote = ""
+      } else {
+        current = current + character
+      }
+    } else if character == "\"" || character == "'" {
+      quote = character
+    } else if character == " " || character == "\t" {
+      if current != "" {
+        words = words + [current]
+        current = ""
+      }
+    } else {
+      current = current + character
+    }
+  }
+  if escaped {
+    current = current + "\\"
+  }
+  if current != "" {
+    words = words + [current]
+  }
+  return words
+}
 
 pub fn strip_shell_prefix(words: list<string>) -> list<string> {
   // Skip shell wrappers and environment settings so the guard sees the real
@@ -55,7 +104,7 @@ pub fn strip_shell_prefix(words: list<string>) -> list<string> {
 }
 
 pub fn program_of(segment: string) -> string {
-  const words = segment.trim().split(" ").filter(fn(word: string) { return word != "" }).to_list()
+  const words = shell_words(segment)
   const stripped = strip_shell_prefix(words)
   if len(stripped) == 0 {
     return ""
@@ -88,9 +137,7 @@ pub fn cargo_violation(command: string) -> string {
     if program_of(segment) != "cargo" {
       continue
     }
-    const words = strip_shell_prefix(
-      segment.trim().split(" ").filter(fn(word: string) { return word != "" }).to_list(),
-    )
+    const words = strip_shell_prefix(shell_words(segment))
     const verb_index = if (words[1] ?? "").starts_with("+") {
       2
     } else {
@@ -110,6 +157,74 @@ pub fn cargo_violation(command: string) -> string {
       + target
       + "` instead. "
       + "For a genuine one-off, set HARN_ALLOW_RAW_CARGO=1 in the command."
+  }
+  return ""
+}
+
+/** True only for a path rooted in an OS-temp or known generated-output tree. */
+pub fn is_disposable_path(token: string) -> bool {
+  const path = token.trim()
+  if path == "/tmp" || path.starts_with("/tmp/") {
+    return true
+  }
+  if path == "/private/tmp" || path.starts_with("/private/tmp/") {
+    return true
+  }
+  if path == "/var/tmp"
+    || path.starts_with("/var/tmp/")
+    || path == "/private/var/tmp"
+    || path.starts_with("/private/var/tmp/") {
+    return true
+  }
+  for variable in ["$TMPDIR", "\${TMPDIR}", "$TMP", "\${TMP}", "$TEMP", "\${TEMP}"] {
+    if path == variable || path.starts_with(variable + "/") {
+      return true
+    }
+  }
+  if path.starts_with("%TEMP%/") || path.starts_with("%TMP%/") {
+    return true
+  }
+  // macOS expands TMPDIR beneath /var/folders/.../T (or /private/var/folders).
+  if (path.starts_with("/var/folders/") || path.starts_with("/private/var/folders/"))
+    && path.contains(
+    "/T/",
+  ) {
+    return true
+  }
+  for root in DISPOSABLE_RELATIVE_ROOTS {
+    if path == root
+      || path == "./" + root
+      || path.starts_with(root + "/")
+      || path.starts_with("./" + root + "/")
+      || path.ends_with("/" + root)
+      || path.contains("/" + root + "/") {
+      return true
+    }
+  }
+  return false
+}
+
+/** Reject Trash as a cleanup backend only when an argv path is disposable. */
+pub fn disposable_trash_violation(command: string) -> string {
+  for segment in segments_of(command) {
+    const program = program_of(segment)
+    if program != "trash" && program != "trash-put" {
+      continue
+    }
+    const words = strip_shell_prefix(shell_words(segment))
+    for token in words.slice(1, len(words)) {
+      if token == "--" || token.starts_with("-") {
+        continue
+      }
+      if is_disposable_path(token) {
+        return "`" + program
+          + "` would move disposable generated data into the user's visible Trash. "
+          + "Keep rebuildable caches in place unless invalidation is required. For temporary output, "
+          + "use an OS temporary directory and an exact, validated permanent cleanup accepted by the host. "
+          + "If permanent cleanup is refused, leave the artifact in its temporary/build root and report it; "
+          + "reserve Trash for user-authored or uncertain data."
+      }
+    }
   }
   return ""
 }
@@ -180,12 +295,18 @@ pub fn decision(payload: string) -> ShellGuardDecision {
     return {allow: true, reason: ""}
   }
   const command = to_string(parsed?.tool_input?.command ?? "")
-  if command == "" || command.contains("HARN_ALLOW_RAW_CARGO=1") {
+  if command == "" {
     return {allow: true, reason: ""}
   }
-  const cargo = cargo_violation(command)
-  if cargo != "" {
-    return {allow: false, reason: cargo}
+  if !command.contains("HARN_ALLOW_RAW_CARGO=1") {
+    const cargo = cargo_violation(command)
+    if cargo != "" {
+      return {allow: false, reason: cargo}
+    }
+  }
+  const disposable_trash = disposable_trash_violation(command)
+  if disposable_trash != "" {
+    return {allow: false, reason: disposable_trash}
   }
   const discarded = discarded_output_violation(command)
   if discarded != "" {
