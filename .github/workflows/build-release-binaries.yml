@@ -151,6 +151,8 @@ jobs:
       build_matrix: ${{ steps.resolve.outputs.build_matrix }}
       build_mode: ${{ steps.resolve.outputs.build_mode }}
       runner_profile: ${{ steps.resolve.outputs.runner_profile }}
+      cli_aot_primary_runner: ${{ steps.resolve.outputs.cli_aot_primary_runner }}
+      cli_aot_standard_runner: ${{ steps.resolve.outputs.cli_aot_standard_runner }}
       binary_size_fuse_bytes: ${{ steps.binary-size-policy.outputs.fuse_bytes }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -232,6 +234,8 @@ jobs:
           BUILD_MODE=""
           RUNNER_PROFILE="${INPUT_RUNNER_PROFILE:-policy}"
           FULL_BUILD_MATRIX='[]'
+          CLI_AOT_PRIMARY_RUNNER="$(jq -er '.jobs.cli_aot.primary | select(type == "string" and length > 0)' .github/release-runner-policy.json)"
+          CLI_AOT_STANDARD_RUNNER="$(jq -er '.jobs.cli_aot.standard | select(type == "string" and length > 0)' .github/release-runner-policy.json)"
 
           active_tag_release_runs() {
             local status
@@ -650,6 +654,8 @@ jobs:
             echo "make_latest=$MAKE_LATEST"
             echo "build_mode=$BUILD_MODE"
             echo "runner_profile=$RUNNER_PROFILE"
+            echo "cli_aot_primary_runner=$CLI_AOT_PRIMARY_RUNNER"
+            echo "cli_aot_standard_runner=$CLI_AOT_STANDARD_RUNNER"
             echo "build_matrix<<__JSON__"
             echo "$BUILD_MATRIX"
             echo "__JSON__"
@@ -728,7 +734,12 @@ jobs:
     # Match build's top-level condition so a warm-cache build is never skipped
     # merely because this release/benchmark payload job had no work to do.
     if: needs.setup.outputs.should_build_binaries == 'true'
-    runs-on: ubuntu-latest
+    # The generator compiles the complete Rust workspace and sits on every
+    # shipping target's critical path. Use bounded paid capacity only when it
+    # has real work; warm-cache runs retain the standard public runner. The
+    # repository variable is an immediate hosted fallback if Blacksmith is
+    # unhealthy, without changing release source or credentials.
+    runs-on: ${{ ((needs.setup.outputs.is_release == 'true' || needs.setup.outputs.build_mode == 'benchmark') && vars.HARN_RELEASE_FORCE_STANDARD_LINUX != 'true') && needs.setup.outputs.cli_aot_primary_runner || needs.setup.outputs.cli_aot_standard_runner }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

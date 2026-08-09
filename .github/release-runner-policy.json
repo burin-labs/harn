@@ -1,9 +1,20 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "pricing": {
-    "as_of": "2026-07-13",
-    "source": "https://docs.github.com/en/enterprise-cloud@latest/billing/reference/actions-runner-pricing",
-    "macos_large_usd_per_minute": 0.077
+    "as_of": "2026-08-09",
+    "sources": {
+      "blacksmith": "https://www.blacksmith.sh/pricing",
+      "github": "https://docs.github.com/en/billing/reference/actions-runner-pricing"
+    },
+    "blacksmith_linux_16vcpu_usd_per_minute": 0.032,
+    "blacksmith_macos_12vcpu_usd_per_minute": 0.16,
+    "github_macos_xlarge_usd_per_minute": 0.102
+  },
+  "jobs": {
+    "cli_aot": {
+      "primary": "blacksmith-16vcpu-ubuntu-2404",
+      "standard": "ubuntu-latest"
+    }
   },
   "targets": [
     {
@@ -12,10 +23,10 @@
       "use_sccache": "false",
       "runners": {
         "warm": "macos-15-intel",
-        "primary": "macos-15-large",
-        "recovery": "macos-15-large",
+        "primary": "blacksmith-12vcpu-macos-15",
+        "recovery": "macos-15-xlarge",
         "standard": "macos-15-intel",
-        "fast": "macos-15-large"
+        "fast": "blacksmith-12vcpu-macos-15"
       }
     },
     {

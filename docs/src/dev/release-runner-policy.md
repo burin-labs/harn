@@ -27,55 +27,81 @@ gh workflow run build-release-binaries.yml \
   -f targets=x86_64-apple-darwin
 ```
 
-The policy records the pricing source and effective date beside the labels.
-GitHub currently lists the 12-core Intel macOS Large runner at $0.077 per
-rounded-up minute; larger runners are billed for public repositories. See
-[Actions runner pricing](https://docs.github.com/en/enterprise-cloud@latest/billing/reference/actions-runner-pricing)
-and the [larger runner reference](https://docs.github.com/en/actions/reference/runners/larger-runners).
+The policy is also the source of truth for metered runner rates, source URLs,
+and their effective date; the approximate costs below are projections from
+that data. GitHub rounds each job to a whole minute. See
+[Actions runner pricing](https://docs.github.com/en/billing/reference/actions-runner-pricing),
+the [larger runner reference](https://docs.github.com/en/actions/reference/runners/larger-runners),
+and [Blacksmith pricing](https://www.blacksmith.sh/pricing).
 
 ## Current decision
 
-Use `macos-15-large` for primary and recovery `x86_64-apple-darwin`
-builds. Keep `warm` and `standard` on `macos-15-intel`. Routine main pushes and
-scheduled cache refreshes therefore stay free; only a shipping or recovery job
-uses paid capacity.
+Use `blacksmith-12vcpu-macos-15` for primary `x86_64-apple-darwin` builds and
+the independent GitHub-hosted `macos-15-xlarge` runner for recovery. Keep
+`warm` and `standard` on `macos-15-intel`. Routine main pushes and scheduled
+cache refreshes therefore stay free; only shipping and recovery use paid
+capacity.
 
 Set the repository Actions variable `HARN_RELEASE_FORCE_STANDARD_MACOS=true`
 to route policy-selected primary and recovery Intel builds back to
 `macos-15-intel` without a code change. Unset the variable, or set it to
 `false`, to restore the checked-in policy. Explicit `standard` and `fast`
 recovery or benchmark profiles still honor the operator's selected profile.
+Set `HARN_RELEASE_FORCE_STANDARD_LINUX=true` to move release and benchmark CLI
+AOT preparation from Blacksmith back to `ubuntu-latest`; warm-cache runs use
+`ubuntu-latest` regardless. These variables are kill switches, not routine
+profile selectors.
 
-The policy is based on the cache-hit pair below. Both benchmark runs used
-v0.10.67 commit `64321c120a119ac32cae267831a3e54cd56a6ec8`, the same
-target, AOT payload, thin-LTO profile, and 16 codegen units. Both reported
-`Swatinem cache hit: true`.
+The primary and recovery choice is based on a same-source cold-cache pair.
+Both runs used Harn source commit
+`34e00360c1f310b364b92dd2e4aeabeddde46528`, the same target, AOT payload,
+thin-LTO profile, and 16 codegen units. The branches differed only in runner
+policy, and both reported `Swatinem cache hit: false`.
 
-| Receipt | Runner | Cargo duration | Job duration | Larger-runner cost |
+| Receipt | Runner | Cargo duration | Job duration | Cost |
 | --- | --- | ---: | ---: | ---: |
-| [Standard benchmark](https://github.com/burin-labs/harn/actions/runs/31319356648) | `macos-15-intel` | 36m38s | 38m13s | $0 |
-| [Large benchmark](https://github.com/burin-labs/harn/actions/runs/31317916273) | `macos-15-large` | 23m25s | 24m32s | about $1.93 |
+| [GitHub M2 benchmark](https://github.com/burin-labs/harn/actions/runs/31321615097) | `macos-15-xlarge` | 10m01s | 10m25s | about $1.12 before credits |
+| [Blacksmith M4 benchmark](https://github.com/burin-labs/harn/actions/runs/31321636531) | `blacksmith-12vcpu-macos-15` | 5m30s | 5m53s | about $0.96 |
 
-Large saved 13m13s of Cargo time, or 36.1%, and 13m41s of job wall time. This
-clears the adoption threshold of both 10 minutes and 30% under equivalent cache
-state. Harn published 60 v0.10.x releases in the 30 days ending 2026-08-09. At
-that unusually high cadence, the measured job projects to about $116 per month
-and removes about 13.7 hours of aggregate release critical-path waiting.
+Blacksmith saved 4m31s of Cargo time, or 45.1%, and 4m32s of job wall time over
+the credit-eligible GitHub M2 recovery. More importantly, it cut 18m39s from
+the previously selected cache-hit Intel Large job. Harn published 60 v0.10.x
+releases in the 30 days ending 2026-08-09. At that unusually high cadence, the
+measured Blacksmith macOS job projects to about $58 per month. The 16-vCPU
+Blacksmith AOT job adds about $6 per month at the same cadence.
+
+A second [Blacksmith validation run](https://github.com/burin-labs/harn/actions/runs/31322262014)
+identified the cross-compiled output as an x86_64 Mach-O and executed
+`harn --version` under Rosetta. The downloaded artifact independently passed
+the same execution check, then passed ad-hoc signing, strict signature
+verification, and another x86_64 execution on an Apple Silicon host.
+
+CLI AOT preparation used to take 4m57s on standard Linux in the same benchmark
+cohort. A controlled
+[16-vCPU Blacksmith run](https://github.com/burin-labs/harn/actions/runs/31322214994)
+finished that job in 2m26s. A GitHub 16-core trial was abandoned after five
+minutes without runner assignment, so it is not a production fallback. The
+measured AOT plus primary macOS job is about 8m19s before the sub-minute signing
+and notarization tail; this is a component-path estimate, not a completed
+release SLO claim.
 
 Cache availability remains the larger lever. The v0.10.67 release
 [missed its cache](https://github.com/burin-labs/harn/actions/runs/31312058230)
 and spent 79m05s in Cargo on standard Intel. A warm standard runner cut that to
-36m38s without paid capacity; Large removes the remaining capacity-sensitive
-tail. Cache warms therefore stay on the free standard runner and retain the
-repository's existing storage budgets and pruning.
+36m38s without paid capacity. The ARM runners complete cold builds faster than
+that warm Intel path, so primary release latency no longer depends on an x86
+cache hit. Intel cache warms remain useful for the emergency standard fallback
+and retain the repository's existing storage budgets and pruning.
 
 An earlier cold-cache benchmark saved only 55 seconds on Large. That result
 correctly blocked adoption at the time, but cold dependency compilation is not
-the intended steady-state release path. The cache-hit pair above changes one
-variable and measures the path the default-branch warmer exists to provide.
+the intended steady-state Intel release path. The later cache-hit pair showed a
+36.1% Intel Large advantage and justified the first paid default; the controlled
+ARM pair above supersedes it with a faster and cheaper primary.
 
 Update this table and any `primary` label change only from an observed
-workflow/job receipt. Revert to standard if two controlled cache-hit pairs show
-less than a 10-minute or 30% Cargo advantage, or if projected larger-runner
-spend exceeds $150 per month without a matching release cadence. Do not infer a
-capacity win from runner specifications alone.
+workflow/job receipt. Force standard capacity if Blacksmith has two consecutive
+runner/platform failures, if the primary job p95 exceeds 10 minutes over five
+releases, or if projected release-runner spend exceeds $150 per month without a
+matching release cadence. Do not infer a capacity win from runner
+specifications alone.

@@ -65,12 +65,27 @@ case "$FORCE_STANDARD_MACOS" in
 esac
 
 jq -e '
-  (keys == ["pricing", "schema_version", "targets"]) and
-  .schema_version == 1 and
-  (.pricing | keys == ["as_of", "macos_large_usd_per_minute", "source"]) and
+  (keys == ["jobs", "pricing", "schema_version", "targets"]) and
+  .schema_version == 2 and
+  (.jobs | keys == ["cli_aot"]) and
+  (.jobs.cli_aot | keys == ["primary", "standard"]) and
+  all(.jobs.cli_aot[]; type == "string" and length > 0) and
+  (.pricing | keys == [
+    "as_of",
+    "blacksmith_linux_16vcpu_usd_per_minute",
+    "blacksmith_macos_12vcpu_usd_per_minute",
+    "github_macos_xlarge_usd_per_minute",
+    "sources"
+  ]) and
   (.pricing.as_of | type == "string" and length > 0) and
-  (.pricing.source | type == "string" and startswith("https://docs.github.com/")) and
-  (.pricing.macos_large_usd_per_minute | type == "number" and . > 0) and
+  (.pricing.sources | keys == ["blacksmith", "github"]) and
+  (.pricing.sources.blacksmith | type == "string" and startswith("https://www.blacksmith.sh/")) and
+  (.pricing.sources.github | type == "string" and startswith("https://docs.github.com/")) and
+  all([
+    .pricing.blacksmith_linux_16vcpu_usd_per_minute,
+    .pricing.blacksmith_macos_12vcpu_usd_per_minute,
+    .pricing.github_macos_xlarge_usd_per_minute
+  ][]; type == "number" and . > 0) and
   (.targets | type == "array" and length > 0) and
   ([.targets[].target] | length == (unique | length)) and
   all(.targets[];

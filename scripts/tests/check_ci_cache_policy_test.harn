@@ -2,6 +2,7 @@ import {
   ci_cache_policy_errors,
   ci_cache_policy_parse,
   macos_shared_cache_errors,
+  release_aot_runner_errors,
   release_warm_cache_concurrency_errors,
   release_warm_cache_path_matches,
   release_warm_cache_path_policy_errors,
@@ -105,6 +106,10 @@ fn release_binary_workflow() {
     },
     jobs: {
       setup: {
+        outputs: {
+          cli_aot_primary_runner: gha_expression("steps.resolve.outputs.cli_aot_primary_runner"),
+          cli_aot_standard_runner: gha_expression("steps.resolve.outputs.cli_aot_standard_runner"),
+        },
         steps: [
           release_setup_checkout(),
           {
@@ -126,6 +131,11 @@ fn release_binary_workflow() {
               + ")",
           },
         ],
+      },
+      prepare_cli_aot: {
+        "runs-on": gha_expression(
+          "vars.HARN_RELEASE_FORCE_STANDARD_LINUX != 'true' && needs.setup.outputs.cli_aot_primary_runner || needs.setup.outputs.cli_aot_standard_runner",
+        ),
       },
       build: {
         if: "needs.setup.outputs.should_build_binaries == 'true'",
@@ -367,6 +377,7 @@ pipeline test_release_warm_cache_policy_accepts_build_inputs_and_typed_workflow_
   const workflow = release_binary_workflow()
   assert_eq(release_warm_cache_path_policy_errors(policy, workflow), [])
   assert_eq(release_warm_cache_concurrency_errors(workflow), [])
+  assert_eq(release_aot_runner_errors(workflow), [])
   assert_eq(release_warm_cache_prune_errors(workflow), [])
 }
 
@@ -560,13 +571,15 @@ pipeline test_release_warm_cache_concurrency_rejects_dispatch_as_release(harness
       ...workflow.jobs,
       setup: {
         ...workflow.jobs.setup,
-        steps: workflow.jobs.setup.steps.map({ step ->
-          if step?.id == "resolve" {
-            {...resolve, run: resolve.run + "\nselect((.event == \"workflow_dispatch\"))"}
-          } else {
-            step
-          }
-        }),
+        steps: workflow.jobs.setup.steps.map(
+          { step ->
+            if step?.id == "resolve" {
+              {...resolve, run: resolve.run + "\nselect((.event == \"workflow_dispatch\"))"}
+            } else {
+              step
+            }
+          },
+        ),
       },
     },
   }
@@ -574,6 +587,28 @@ pipeline test_release_warm_cache_concurrency_rejects_dispatch_as_release(harness
     release_warm_cache_concurrency_errors(invalid),
     [
       "build-release-binaries.yml:setup must not misclassify benchmark or warm dispatches as releases",
+    ],
+  )
+}
+
+pipeline test_release_aot_runner_requires_hosted_fallback_switch(harness: Harness, task) {
+  const workflow = release_binary_workflow()
+  const invalid = {
+    ...workflow,
+    jobs: {
+      ...workflow.jobs,
+      prepare_cli_aot: {
+        ...workflow.jobs.prepare_cli_aot,
+        "runs-on": gha_expression(
+          "needs.setup.outputs.cli_aot_primary_runner || needs.setup.outputs.cli_aot_standard_runner",
+        ),
+      },
+    },
+  }
+  assert_eq(
+    release_aot_runner_errors(invalid),
+    [
+      "build-release-binaries.yml:prepare_cli_aot runner selection must include vars.HARN_RELEASE_FORCE_STANDARD_LINUX != 'true'",
     ],
   )
 }

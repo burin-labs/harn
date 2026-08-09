@@ -62,9 +62,12 @@ pipeline test_release_runner_policy_pins_every_mode(harness: Harness, task) {
     "x86_64-pc-windows-msvc=windows-latest",
   ]
   assert_eq(runners(matrix(harness.fs, harness.process, "--mode warm")), standard)
-  const release = ["x86_64-apple-darwin=macos-15-large"] + standard.slice(1, len(standard))
-  assert_eq(runners(matrix(harness.fs, harness.process, "--mode primary")), release)
-  assert_eq(runners(matrix(harness.fs, harness.process, "--mode recovery")), release)
+  const primary = ["x86_64-apple-darwin=blacksmith-12vcpu-macos-15"]
+    + standard.slice(1, len(standard))
+  const recovery = ["x86_64-apple-darwin=macos-15-xlarge"]
+    + standard.slice(1, len(standard))
+  assert_eq(runners(matrix(harness.fs, harness.process, "--mode primary")), primary)
+  assert_eq(runners(matrix(harness.fs, harness.process, "--mode recovery")), recovery)
   assert_eq(
     runners(
       matrix_with_env(
@@ -108,7 +111,7 @@ pipeline test_release_runner_policy_selects_targeted_fast_capacity(harness: Harn
     [
       {
         target: "x86_64-apple-darwin",
-        runner: "macos-15-large",
+        runner: "blacksmith-12vcpu-macos-15",
         rust_cache_broad_restore_prefix: "v0-rust-release-x86_64-apple-darwin-Darwin-x64-",
         release_codegen_units: 16,
         use_sccache: "false",
@@ -139,12 +142,10 @@ pipeline test_release_runner_policy_rejects_unsafe_requests(harness: Harness, ta
   )
   assert_eq(run_matrix(harness.fs, harness.process, "--mode warm --profile fast").success, false)
   assert_eq(
-    harness.process
-      .shell_at(
-        root,
-        "HARN_RELEASE_FORCE_STANDARD_MACOS=maybe bash scripts/release_runner_matrix.sh --mode primary",
-      )
-      .success,
+    harness.process.shell_at(
+      root,
+      "HARN_RELEASE_FORCE_STANDARD_MACOS=maybe bash scripts/release_runner_matrix.sh --mode primary",
+    ).success,
     false,
   )
   assert_eq(
