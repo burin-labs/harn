@@ -172,6 +172,12 @@ const LIVE_ARTIFACT_CONSUMERS = ["audit-scripts", "ci-walltime-report"]
 
 const WORKFLOW_GLOB = ".github/workflows/*.yml"
 
+const CI_WORKFLOW_CONCURRENCY_GROUP = "$"
+  + "{{ github.workflow }}-$"
+  + "{{ github.event.pull_request.number || github.event.merge_group.head_sha || (github.ref == 'refs/heads/main' && github.sha) || github.ref }}"
+
+const CI_WORKFLOW_CANCEL_POLICY = "$" + "{{ github.event_name == 'pull_request' }}"
+
 const UPSTREAM_CACHE_PREFIX = "Swatinem/rust-cache@"
 
 const UPSTREAM_CACHE_RESTORE_PREFIX = "actions/cache/restore@"
@@ -1970,6 +1976,26 @@ pub fn ci_cache_policy_errors(
 }
 
 /**
+ * Main pushes are immutable integration proofs, so each commit needs its own
+ * concurrency key. Grouping every push under `refs/heads/main` allows GitHub's
+ * one-pending-run rule to evict an older commit before any job starts.
+ */
+pub fn ci_workflow_concurrency_errors(workflow) -> list<string> {
+  let errors: list<string> = []
+  if trim(workflow?.concurrency?.group ?? "") != CI_WORKFLOW_CONCURRENCY_GROUP {
+    errors = errors
+      + [
+      "ci.yml concurrency.group must key main pushes by github.sha while preserving PR, merge-group, and ref keys",
+    ]
+  }
+  if trim(workflow?.concurrency?.["cancel-in-progress"] ?? "") != CI_WORKFLOW_CANCEL_POLICY {
+    errors = errors
+      + ["ci.yml may cancel superseded pull-request runs only"]
+  }
+  return errors
+}
+
+/**
  * The pin is load-bearing, not hygiene. sccache allows one server per user and
  * a client whose version differs from the running server shuts it down, so an
  * unpinned install on a many-worker self-hosted host kills the shared server
@@ -2046,6 +2072,7 @@ fn main(harness: Harness) {
     release_warm_cache_prune_errors(workflows[RELEASE_BINARY_WORKFLOW]),
     setup_harn_cache_action_errors(setup_harn_action),
     sccache_install_action_errors(sccache_install_action),
+    ci_workflow_concurrency_errors(workflows["ci.yml"]),
     ci_linux_lane_policy_errors(workflows["ci.yml"]),
     windows_shared_cache_errors(workflows["ci.yml"], workflows["windows-nightly.yml"]),
     macos_shared_cache_errors(workflows["ci.yml"], workflows["macos-nightly.yml"]),

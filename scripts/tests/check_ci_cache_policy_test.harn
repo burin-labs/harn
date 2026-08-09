@@ -1,6 +1,7 @@
 import {
   ci_cache_policy_errors,
   ci_cache_policy_parse,
+  ci_workflow_concurrency_errors,
   macos_shared_cache_errors,
   release_aot_runner_errors,
   release_warm_cache_concurrency_errors,
@@ -14,6 +15,37 @@ import {
 
 fn gha_expression(body: string) -> string {
   return "$" + "{{ " + body + " }}"
+}
+
+fn ci_concurrency() {
+  return {
+    group: gha_expression("github.workflow")
+      + "-"
+      + gha_expression(
+      "github.event.pull_request.number || github.event.merge_group.head_sha || (github.ref == 'refs/heads/main' && github.sha) || github.ref",
+    ),
+    "cancel-in-progress": gha_expression("github.event_name == 'pull_request'"),
+  }
+}
+
+@test
+pipeline test_ci_concurrency_preserves_every_main_commit(harness: Harness, task) {
+  assert_eq(ci_workflow_concurrency_errors({concurrency: ci_concurrency()}), [])
+}
+
+@test
+pipeline test_ci_concurrency_rejects_shared_main_ref(harness: Harness, task) {
+  const invalid = {
+    concurrency: {
+      group: gha_expression("github.workflow")
+        + "-"
+        + gha_expression(
+        "github.event.pull_request.number || github.event.merge_group.head_sha || github.ref",
+      ),
+      "cancel-in-progress": gha_expression("github.event_name == 'pull_request'"),
+    },
+  }
+  assert_eq(len(ci_workflow_concurrency_errors(invalid)), 1)
 }
 
 fn native_source_key() -> string {
