@@ -1,0 +1,38 @@
+{
+  "provider": "openai",
+  "model": "fixture-openai",
+  "wire": "openai",
+  "stream_protocol": "openai_sse",
+  "request": {
+    "messages": [{"role": "user", "content": "hello"}],
+    "max_tokens": 64
+  },
+  "wire_request": {
+    "max_tokens": 64,
+    "messages": [{"content": "hello", "role": "user"}],
+    "model": "fixture-openai"
+  },
+  "wire_response": {
+    "id": "chatcmpl-golden",
+    "choices": [{
+      "message": {"role": "assistant", "content": "hello back"},
+      "finish_reason": "stop"
+    }],
+    "usage": {"prompt_tokens": 3, "completion_tokens": 2}
+  },
+  "wire_events": "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hello back\"}}]}\ndata: {\"choices\":[{\"index\":0,\"finish_reason\":\"stop\",\"delta\":{}}],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":2}}\n",
+  "result": {
+    "text": "hello back",
+    "input_tokens": 3,
+    "output_tokens": 2,
+    "stop_reason": "stop"
+  },
+  "error": {
+    "status": 429,
+    "retry_after": "3",
+    "body": "{\"error\":{\"type\":\"rate_limit_error\",\"message\":\"slow down\"}}",
+    "kind": "transient",
+    "reason": "rate_limit",
+    "message_contains": "openai HTTP 429"
+  }
+}

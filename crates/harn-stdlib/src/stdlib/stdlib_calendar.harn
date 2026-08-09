@@ -1,0 +1,527 @@
+/**
+ * std/calendar — civil date, timezone, country, and business-calendar helpers.
+ *
+ * Import with: import { add_business_days, country_info, start_of_week } from "std/calendar"
+ */
+type CalendarInstant = int | float | string | dict
+
+type CalendarTimestamp = int | float
+
+type CalendarUnit = "day" | "week" | "month" | "quarter" | "year"
+
+type CalendarBoundaryEdge = "start" | "end"
+
+type CalendarDisambiguation = "earlier" | "later" | "reject"
+
+type CalendarWeekday = int | string
+
+type CalendarWeekends = list<int> | list<string> | list<CalendarWeekday>
+
+type CalendarParts = {
+  year: int,
+  month: int,
+  day: int,
+  hour: int,
+  minute: int,
+  second: int,
+  weekday: int,
+  iso_weekday: int,
+  iso_week: int,
+  iso_week_year: int,
+  ordinal: int,
+  quarter: int,
+  timezone: string,
+  offset_seconds: int,
+  timestamp: CalendarTimestamp,
+  iso8601: string,
+  date: string,
+}
+
+type CalendarIsoWeek = {year: int, week: int}
+
+type CalendarLocalDateTime = {
+  year: int,
+  month: int,
+  day: int,
+  hour?: int,
+  minute?: int,
+  second?: int,
+}
+
+type CalendarDateRangeOptions = {
+  max_items?: int,
+  include_end?: bool,
+  disambiguation?: CalendarDisambiguation,
+}
+
+type CalendarCountry = {
+  code: string,
+  name: string,
+  timezones: list<string>,
+  default_timezone?: string,
+  default_timezone_ambiguous: bool,
+  currency_code: string,
+  currency_name: string,
+  holiday_calendars: list<string>,
+}
+
+type CalendarHolidayCalendarInfo = {
+  name: string,
+  country: string,
+  timezone: string,
+  description: string,
+}
+
+type CalendarHoliday = {date: string, actual_date: string, name: string, observed: bool}
+
+type CalendarCustomHoliday = string | {date: string, name?: string}
+
+type CalendarCustomHolidays = list<string> \
+  | list<{date: string, name?: string}> \
+  | list<CalendarCustomHoliday>
+
+type CalendarBusinessCalendar = string \
+  | {
+  name?: string,
+  timezone?: string,
+  weekends?: CalendarWeekends,
+  holiday_calendar?: string,
+  holidays?: CalendarCustomHolidays,
+}
+
+type CalendarBusinessWindowOptions = {
+  timezone?: string,
+  start?: string,
+  start_hour?: int,
+  end?: string,
+  end_hour?: int,
+}
+
+type CalendarBusinessWindowReason = "inside" | "non_business_day" | "before_window" | "after_window"
+
+type CalendarBusinessWindow = {
+  inside: bool,
+  business_day: bool,
+  reason: CalendarBusinessWindowReason,
+  timezone: string,
+  calendar: string,
+  local_date: string,
+  starts_at: CalendarTimestamp,
+  ends_at: CalendarTimestamp,
+}
+
+/**
+ * Return timezone-local calendar fields, including ISO week and quarter.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn parts(timestamp: CalendarInstant, timezone: string = "UTC") -> CalendarParts {
+  return __calendar_parts(timestamp, timezone)
+}
+
+/**
+ * Return true when `expression` is accepted by the runtime cron parser.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn is_valid_cron(expression: string) -> bool {
+  return __cron_is_valid(expression)
+}
+
+/**
+ * Return `{year, week}` for the timestamp's ISO week in `timezone`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn iso_week(timestamp: CalendarInstant, timezone: string = "UTC") -> CalendarIsoWeek {
+  const p = parts(timestamp, timezone)
+  return {year: p.iso_week_year, week: p.iso_week}
+}
+
+/**
+ * Return the calendar quarter number, 1-4, in `timezone`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn quarter(timestamp: CalendarInstant, timezone: string = "UTC") -> int {
+  return parts(timestamp, timezone).quarter
+}
+
+/**
+ * Build a timestamp from local civil components.
+ *
+ * `disambiguation` controls repeated fall-back times: `"earlier"`, `"later"`,
+ * or `"reject"`. Spring-forward gaps always reject.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn local_datetime(
+  parts: CalendarLocalDateTime,
+  timezone: string = "UTC",
+  disambiguation: CalendarDisambiguation = "earlier",
+) -> CalendarTimestamp {
+  return __calendar_from_local(parts, timezone, disambiguation)
+}
+
+/**
+ * Add calendar units in a timezone, preserving local clock fields.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn add_calendar_units(
+  timestamp: CalendarInstant,
+  amount: int,
+  unit: CalendarUnit,
+  timezone: string = "UTC",
+  disambiguation: CalendarDisambiguation = "earlier",
+) -> CalendarTimestamp {
+  return __calendar_add(timestamp, amount, unit, timezone, disambiguation)
+}
+
+/**
+ * Return the start or end timestamp for a civil calendar unit.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn boundary(
+  timestamp: CalendarInstant,
+  unit: CalendarUnit,
+  edge: CalendarBoundaryEdge = "start",
+  timezone: string = "UTC",
+) -> CalendarTimestamp {
+  return __calendar_boundary(timestamp, unit, edge, timezone)
+}
+
+/**
+ * Return the local start of the day that contains `timestamp`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn start_of_day(timestamp: CalendarInstant, timezone: string = "UTC") -> CalendarTimestamp {
+  return boundary(timestamp, "day", "start", timezone)
+}
+
+/**
+ * Return the local end of the day that contains `timestamp`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn end_of_day(timestamp: CalendarInstant, timezone: string = "UTC") -> CalendarTimestamp {
+  return boundary(timestamp, "day", "end", timezone)
+}
+
+/**
+ * Return the Monday-local start of the week that contains `timestamp`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn start_of_week(timestamp: CalendarInstant, timezone: string = "UTC") -> CalendarTimestamp {
+  return boundary(timestamp, "week", "start", timezone)
+}
+
+/**
+ * Return the Sunday-local end of the week that contains `timestamp`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn end_of_week(timestamp: CalendarInstant, timezone: string = "UTC") -> CalendarTimestamp {
+  return boundary(timestamp, "week", "end", timezone)
+}
+
+/**
+ * Return the local start of the month that contains `timestamp`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn start_of_month(timestamp: CalendarInstant, timezone: string = "UTC") -> CalendarTimestamp {
+  return boundary(timestamp, "month", "start", timezone)
+}
+
+/**
+ * Return the local end of the month that contains `timestamp`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn end_of_month(timestamp: CalendarInstant, timezone: string = "UTC") -> CalendarTimestamp {
+  return boundary(timestamp, "month", "end", timezone)
+}
+
+/**
+ * Return the local start of the quarter that contains `timestamp`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn start_of_quarter(timestamp: CalendarInstant, timezone: string = "UTC") -> CalendarTimestamp {
+  return boundary(timestamp, "quarter", "start", timezone)
+}
+
+/**
+ * Return the local end of the quarter that contains `timestamp`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn end_of_quarter(timestamp: CalendarInstant, timezone: string = "UTC") -> CalendarTimestamp {
+  return boundary(timestamp, "quarter", "end", timezone)
+}
+
+/**
+ * Return the local start of the year that contains `timestamp`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn start_of_year(timestamp: CalendarInstant, timezone: string = "UTC") -> CalendarTimestamp {
+  return boundary(timestamp, "year", "start", timezone)
+}
+
+/**
+ * Return the local end of the year that contains `timestamp`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn end_of_year(timestamp: CalendarInstant, timezone: string = "UTC") -> CalendarTimestamp {
+  return boundary(timestamp, "year", "end", timezone)
+}
+
+/**
+ * Return local calendar-unit ticks in the half-open range `[start, end)`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn date_range(
+  start: CalendarInstant,
+  end: CalendarInstant,
+  unit: CalendarUnit = "day",
+  timezone: string = "UTC",
+  options: CalendarDateRangeOptions = {},
+) -> list<CalendarTimestamp> {
+  return __calendar_date_range(start, end, unit, timezone, options)
+}
+
+/**
+ * Return the next matching weekday. Weekdays are ISO 1-7 or names.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn next_weekday(
+  timestamp: CalendarInstant,
+  weekday: CalendarWeekday,
+  timezone: string = "UTC",
+  include_today: bool = false,
+) -> CalendarTimestamp {
+  return __calendar_next_weekday(timestamp, weekday, "next", timezone, include_today)
+}
+
+/**
+ * Return the previous matching weekday. Weekdays are ISO 1-7 or names.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn previous_weekday(
+  timestamp: CalendarInstant,
+  weekday: CalendarWeekday,
+  timezone: string = "UTC",
+  include_today: bool = false,
+) -> CalendarTimestamp {
+  return __calendar_next_weekday(timestamp, weekday, "previous", timezone, include_today)
+}
+
+/**
+ * Return supported country metadata records.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn countries() -> list<CalendarCountry> {
+  return __calendar_countries()
+}
+
+/**
+ * Return country metadata for an ISO alpha-2 code, or nil when unsupported.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn country_info(code: string) -> CalendarCountry? {
+  return __calendar_country_info(code)
+}
+
+/**
+ * Return known IANA timezones for a supported country code, or nil.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn country_timezones(code: string) -> list<string>? {
+  const info = country_info(code)
+  if info == nil {
+    return nil
+  }
+  return info.timezones
+}
+
+/**
+ * Return the only safe default timezone for a country, or nil when the country
+ * is unsupported or has multiple plausible timezones.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn default_timezone_for_country(code: string) -> string? {
+  const info = country_info(code)
+  if info == nil || info.default_timezone_ambiguous {
+    return nil
+  }
+  return info.default_timezone
+}
+
+/**
+ * Return explicit v1 holiday calendars.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn supported_holiday_calendars() -> list<CalendarHolidayCalendarInfo> {
+  return __calendar_supported_holiday_calendars()
+}
+
+/**
+ * Return observed holidays for `calendar` in `year`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn holidays(year: int, calendar: string = "US-FEDERAL") -> list<CalendarHoliday> {
+  return __calendar_holidays(calendar, year)
+}
+
+/**
+ * Return true when `timestamp` falls on a supported or custom holiday.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn is_holiday(
+  timestamp: CalendarInstant,
+  calendar: CalendarBusinessCalendar = "US-FEDERAL",
+  timezone = nil,
+) -> bool {
+  return __calendar_is_holiday(timestamp, calendar, timezone)
+}
+
+/**
+ * Return true for Saturday or Sunday in `timezone`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn is_weekend(timestamp: CalendarInstant, timezone: string = "UTC") -> bool {
+  const weekday = parts(timestamp, timezone).iso_weekday
+  return weekday == 6 || weekday == 7
+}
+
+/**
+ * Return true when the local date is neither weekend nor holiday.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn is_business_day(
+  timestamp: CalendarInstant,
+  calendar: CalendarBusinessCalendar = "US-FEDERAL",
+  timezone = nil,
+) -> bool {
+  return __calendar_is_business_day(timestamp, calendar, timezone)
+}
+
+/**
+ * Return the next business day, preserving the local time.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn next_business_day(
+  timestamp: CalendarInstant,
+  calendar: CalendarBusinessCalendar = "US-FEDERAL",
+  timezone = nil,
+  include_today: bool = false,
+) -> CalendarTimestamp {
+  return __calendar_next_business_day(timestamp, calendar, timezone, include_today)
+}
+
+/**
+ * Add signed business days, skipping weekends and holidays.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn add_business_days(
+  timestamp: CalendarInstant,
+  days: int,
+  calendar: CalendarBusinessCalendar = "US-FEDERAL",
+  timezone = nil,
+) -> CalendarTimestamp {
+  return __calendar_add_business_days(timestamp, days, calendar, timezone)
+}
+
+/**
+ * Count business days in the half-open local date range `[start, end)`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn business_days_between(
+  start: CalendarInstant,
+  end: CalendarInstant,
+  calendar: CalendarBusinessCalendar = "US-FEDERAL",
+  timezone = nil,
+) -> int {
+  return __calendar_business_days_between(start, end, calendar, timezone)
+}
+
+/**
+ * Return a business-hours envelope for the timestamp.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn business_window(
+  timestamp: CalendarInstant,
+  calendar: CalendarBusinessCalendar = "US-FEDERAL",
+  options: CalendarBusinessWindowOptions = {},
+) -> CalendarBusinessWindow {
+  return __calendar_business_window(timestamp, calendar, options)
+}
+
+/**
+ * Return true when the timestamp is inside the configured business window.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn is_business_time(
+  timestamp: CalendarInstant,
+  calendar: CalendarBusinessCalendar = "US-FEDERAL",
+  options: CalendarBusinessWindowOptions = {},
+) -> bool {
+  return business_window(timestamp, calendar, options).inside
+}

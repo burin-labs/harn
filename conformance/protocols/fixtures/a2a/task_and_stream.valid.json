@@ -1,0 +1,103 @@
+{
+  "name": "a2a.task_and_stream.messages",
+  "protocol": "a2a",
+  "schema": "schemas/a2a-0.3.0.schema.json",
+  "expect": "valid",
+  "documents": [
+    {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "method": "message/send",
+      "params": {
+        "message": {
+          "id": "msg-1",
+          "role": "user",
+          "parts": [
+            {
+              "text": "Review this patch"
+            },
+            {
+              "type": "file",
+              "file": {
+                "bytes": "AAEC/w==",
+                "mimeType": "application/octet-stream",
+                "name": "payload.bin"
+              }
+            },
+            {
+              "type": "data",
+              "data": {
+                "ticket": "HARN-891",
+                "priority": 2
+              }
+            }
+          ]
+        },
+        "configuration": {
+          "returnImmediately": true
+        }
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": {
+        "id": "task-1",
+        "contextId": "ctx-1",
+        "status": {
+          "state": "working"
+        },
+        "history": [
+          {
+            "id": "msg-1",
+            "role": "user",
+            "parts": [
+              {
+                "type": "text",
+                "text": "Review this patch"
+              },
+              {
+                "type": "file",
+                "file": {
+                  "bytes": "AAEC/w==",
+                  "mimeType": "application/octet-stream",
+                  "name": "payload.bin"
+                }
+              },
+              {
+                "type": "data",
+                "data": {
+                  "ticket": "HARN-891",
+                  "priority": 2
+                }
+              }
+            ]
+          }
+        ],
+        "artifacts": []
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": null,
+      "result": {
+        "statusUpdate": {
+          "taskId": "task-1",
+          "contextId": "ctx-1",
+          "status": {
+            "state": "completed"
+          }
+        }
+      }
+    }
+  ],
+  "matrix": {
+    "version": "0.3.0",
+    "family": "task_and_stream",
+    "case": "success",
+    "source": {
+      "kind": "hand_authored",
+      "description": "Protocol matrix fixture maintained from the pinned Harn adapter profile and upstream protocol semantics."
+    }
+  }
+}

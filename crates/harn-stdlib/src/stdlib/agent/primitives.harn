@@ -1,0 +1,60 @@
+// @harn-entrypoint-category agent.stdlib
+import { typed_output_checkpoint } from "std/checkpoint"
+
+/**
+ * agent_typed_output_checkpoint.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_typed_output_checkpoint(
+  agent: HarnessAgent,
+  llm: HarnessLlm,
+  name,
+  prompt,
+  schema,
+  options = nil,
+  validator = nil,
+) {
+  return typed_output_checkpoint(agent, llm, name, prompt, schema, options, validator)
+}
+
+/**
+ * agent_parse_tool_calls.
+ *
+ * tool_format selects the text-channel grammar: pass "json" to parse the
+ * fenced-JSON protocol, anything else (or nil) parses the canonical
+ * tagged/heredoc text protocol. The returned record shape is identical for
+ * both grammars.
+ *
+ * @effects: [host]
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_parse_tool_calls(harness.agent, text, tools, "json")
+ */
+pub fn agent_parse_tool_calls(agent: HarnessAgent, text, tools = nil, tool_format = nil) {
+  return agent.parse_tool_calls(text, tools, tool_format)
+}
+
+/**
+ * agent_dispatch_tool_call.
+ *
+ * @effects: [host]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_dispatch_tool_call(tool_runtime: HarnessTools, call, registry = nil, options = nil) {
+  return tool_runtime.dispatch_agent_call(call, registry, options ?? {})
+}
+
+/**
+ * agent_dispatch_tool_batch.
+ *
+ * @effects: [host]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_dispatch_tool_batch(tool_runtime: HarnessTools, calls, registry = nil, options = nil) {
+  return tool_runtime.dispatch_agent_batch(calls, registry, options ?? {})
+}

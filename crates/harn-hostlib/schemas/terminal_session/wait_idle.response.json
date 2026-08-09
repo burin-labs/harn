@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/terminal_session/wait_idle.response.json",
+  "title": "terminal_session.wait_idle response",
+  "type": "object",
+  "properties": {
+    "session_id": { "type": "string" },
+    "revision": { "type": "integer", "minimum": 0 },
+    "quiet_ms": { "type": "integer", "minimum": 0, "maximum": 30000 },
+    "status": { "$ref": "#/$defs/status" }
+  },
+  "required": ["session_id", "revision", "quiet_ms", "status"],
+  "additionalProperties": false,
+  "$defs": {
+    "status": {
+      "oneOf": [
+        { "type": "object", "properties": { "state": { "const": "running" } }, "required": ["state"], "additionalProperties": false },
+        { "type": "object", "properties": { "state": { "const": "exited" }, "code": { "type": ["integer", "null"] }, "signal": { "type": ["string", "null"] } }, "required": ["state", "code", "signal"], "additionalProperties": false },
+        { "type": "object", "properties": { "state": { "const": "failed" }, "message": { "type": "string" } }, "required": ["state", "message"], "additionalProperties": false }
+      ]
+    }
+  }
+}

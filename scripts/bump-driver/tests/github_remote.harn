@@ -1,0 +1,130 @@
+import { assert_eq } from "std/testing"
+import { github_bump_remote } from "../github_remote"
+
+const API = "https://api.github.com"
+
+fn remote(harness: Harness) {
+  return github_bump_remote(
+    harness,
+    {
+      repo: "octo-org/octo-repo",
+      release_repo: "burin-labs/harn",
+      token: "github-app-installation-token",
+      branch: "automation/bump-harn-runtime",
+      base: "main",
+    },
+  )
+}
+
+pipeline test_release_projection_is_closed_and_exact(harness: Harness, task) {
+  harness.testing.http_mock_clear()
+  const tag = "v0.10.53"
+  harness.testing.http_mock(
+    "GET",
+    API + "/repos/burin-labs/harn/releases/tags/" + tag,
+    {
+      status: 200,
+      body: json_stringify(
+        {
+          id: 701,
+          tag_name: tag,
+          name: "Harn " + tag,
+          draft: false,
+          prerelease: false,
+          html_url: "https://github.com/burin-labs/harn/releases/tag/" + tag,
+          target_commitish: "main",
+          body: "Release notes",
+          published_at: "2026-08-02T00:00:00Z",
+          assets: [
+            {id: 11, name: "SHA256SUMS", size: 100, state: "uploaded"},
+            {id: 12, name: "release-assets.json", size: 200, state: "uploaded"},
+          ],
+        },
+      ),
+    },
+  )
+  harness.testing.http_mock(
+    "GET",
+    API + "/repos/burin-labs/harn/git/ref/tags/" + tag,
+    {
+      status: 200,
+      body: json_stringify(
+        {
+          ref: "refs/tags/" + tag,
+          object: {type: "commit", sha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+        },
+      ),
+    },
+  )
+  assert_eq(
+    remote(harness).release_view(tag),
+    {
+      found: true,
+      draft: false,
+      prerelease: false,
+      asset_names: ["SHA256SUMS", "release-assets.json"],
+    },
+  )
+  const calls = harness.testing.http_mock_calls()
+  assert_eq(
+    calls.map({ call -> {method: call.method, url: call.url} }).to_list(),
+    [
+      {method: "GET", url: API + "/repos/burin-labs/harn/releases/tags/" + tag},
+      {method: "GET", url: API + "/repos/burin-labs/harn/git/ref/tags/" + tag},
+    ],
+  )
+  harness.testing.http_mock_clear()
+}
+
+pipeline test_open_pull_projection_retains_publication_leases(harness: Harness, task) {
+  harness.testing.http_mock_clear()
+  const url = API
+    + "/repos/octo-org/octo-repo/pulls?state=open&head=octo-org%3Aautomation%2Fbump-harn-runtime&base=main"
+  harness.testing.http_mock(
+    "GET",
+    url,
+    {
+      status: 200,
+      body: json_stringify(
+        [
+          {
+            number: 42,
+            title: "Bump Harn runtime",
+            state: "open",
+            html_url: "https://github.com/octo-org/octo-repo/pull/42",
+            base: {
+              ref: "main",
+              sha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              repo: {full_name: "octo-org/octo-repo", owner: {login: "octo-org"}},
+            },
+            head: {
+              ref: "automation/bump-harn-runtime",
+              sha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              repo: {full_name: "octo-org/octo-repo", owner: {login: "octo-org"}},
+            },
+            auto_merge: {merge_method: "squash"},
+          },
+        ],
+      ),
+    },
+  )
+  assert_eq(
+    remote(harness).find_bump_pr(),
+    {
+      number: 42,
+      head_oid: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      base_ref: "main",
+      base_oid: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      auto_merge_enabled: true,
+      auto_merge_method: "SQUASH",
+      url: "https://github.com/octo-org/octo-repo/pull/42",
+      state: "open",
+    },
+  )
+  assert_eq(
+    harness.testing.http_mock_calls().map({ call -> {method: call.method, url: call.url} })
+      .to_list(),
+    [{method: "GET", url: url}],
+  )
+  harness.testing.http_mock_clear()
+}

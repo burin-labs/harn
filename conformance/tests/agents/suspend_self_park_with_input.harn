@@ -1,0 +1,103 @@
+/**
+ * S-11 (#1847): a self-parked subagent resumed with a non-nil
+ * `input` observes that input via the single-shot resume-continuity
+ * reminder on the next turn's system prompt.
+ *
+ * The reminder line is the documented "The resumer provided input: ..."
+ * sentence (also exercised by `agent_resume_continuity_reminder`); this
+ * fixture pins the contract specifically for the self-park entry path
+ * where `agent_await_resumption(harness.agent, reason)` (no conditions) produced the
+ * suspension.
+ *
+ * Asserts:
+ *   - The reminder embeds the verbatim resume input string.
+ *   - The reminder also carries the suspend reason (so the model has
+ *     context for why it parked).
+ *   - The reminder is consumed on the very next turn — the turn after
+ *     the resumed one does not see it.
+ *   - Final loop status is `completed` with transcript continuity
+ *     preserved (default `continue_transcript: true`).
+ */
+import "std/agents"
+import { llm_text, with_llm_script } from "std/testing"
+
+fn resume_tools() {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "noop",
+    "Return a short observation.",
+    {handler: { _args -> "ok" }, parameters: {}, returns: {type: "string"}},
+  )
+  return tools
+}
+
+pipeline main(harness: Harness) {
+  with_llm_script(
+    harness.llm,
+    [
+      {
+        tool_calls: [
+          {
+            id: "park_input",
+            name: "agent_await_resumption",
+            arguments: {reason: "needs operator brief"},
+          },
+        ],
+        input_tokens: 7,
+        output_tokens: 3,
+      },
+      {tool_calls: [{id: "noop_1", name: "noop", arguments: {}}]},
+      llm_text("operator brief acknowledged"),
+    ],
+    { ->
+      const session_id = "self-park-with-input-" + harness.random.uuid()
+      const handle = sub_agent_run(
+        harness,
+        "Park then wait for an operator brief.",
+        {
+          provider: "mock",
+          background: true,
+          session_id: session_id,
+          tools: resume_tools(),
+          tool_format: "native",
+          max_iterations: 3,
+        },
+      )
+      const suspended = wait_agent(harness.agent, handle)
+      const resumed = resume_agent(harness.agent, handle, "operator brief: ship the patch", true)
+      const done = wait_agent(harness.agent, handle)
+      const calls = harness.llm.mock_calls()
+      const resumed_msgs = calls[1].messages
+      const resumed_tail = resumed_msgs[len(resumed_msgs) - 1].content
+      const next_msgs = calls[2].messages
+      const next_tail = next_msgs[len(next_msgs) - 1].content
+      harness.stdio.println("suspended_status=" + suspended.status)
+      harness.stdio.println("resume_status=" + resumed.status)
+      harness.stdio.println("final_status=" + done.status)
+      harness.stdio.println(
+        "input_in_reminder="
+          + to_string(contains(resumed_tail, "operator brief: ship the patch")),
+      )
+      harness.stdio.println(
+        "reason_in_reminder=" + to_string(contains(resumed_tail, "needs operator brief")),
+      )
+      harness.stdio.println(
+        "reminder_present_on_resumed_turn="
+          + to_string(
+          contains(resumed_tail, "You were suspended at turn"),
+        ),
+      )
+      harness.stdio.println(
+        "reminder_consumed_after_one_turn="
+          + to_string(
+          !contains(next_tail, "You were suspended at turn"),
+        ),
+      )
+    },
+  )
+}
+// The resume-continuity reminder is a SystemText reminder, now delivered
+// as the trailing user message rather than folded into the system string
+// (keeps the system string byte-stable across turns). Its body and
+// single-shot lifecycle are unchanged at the new position.

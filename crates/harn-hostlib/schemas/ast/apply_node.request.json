@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/ast/apply_node.request.json",
+  "title": "ast.apply_node request",
+  "description": "Locate AST node(s) in `path` via a Tree-Sitter query and replace each match's bytes with `replacement`. Byte-splice preserves the leading indentation, trailing trivia, and any whitespace outside the matched span. Reads and writes route through staged-fs (#1722) when `session_id` is supplied.",
+  "type": "object",
+  "properties": {
+    "path": {
+      "type": "string",
+      "description": "File to mutate. Required."
+    },
+    "query": {
+      "type": "string",
+      "description": "Tree-Sitter S-expression query. Must declare at least one capture; the capture named by `target_capture` (default `target`) is the replaceable span. Single-capture queries are accepted regardless of capture name."
+    },
+    "replacement": {
+      "type": "string",
+      "description": "Replacement text. Spliced in for each selected node's byte range."
+    },
+    "language": {
+      "type": "string",
+      "description": "Optional language hint; otherwise inferred from the file extension."
+    },
+    "target_capture": {
+      "type": "string",
+      "description": "Capture name to treat as the replaceable span. Defaults to `target`.",
+      "default": "target"
+    },
+    "select": {
+      "type": "string",
+      "enum": ["unique", "first", "all", "nth"],
+      "default": "unique",
+      "description": "Multi-match policy. `unique` requires exactly one match (else `ambiguous`); `first` picks the lowest byte offset; `all` rewrites every match; `nth` picks the 1-based index in document order."
+    },
+    "nth": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "1-based match index. Required when `select` is `\"nth\"`."
+    },
+    "dry_run": {
+      "type": "boolean",
+      "default": false,
+      "description": "When true, the file is left untouched but `preview` carries the splice the call would produce."
+    },
+    "validate": {
+      "type": "boolean",
+      "default": true,
+      "description": "When true (default), the post-edit source is re-parsed and any ERROR/MISSING node aborts the edit with `result = \"syntax_error\"`."
+    },
+    "session_id": {
+      "type": "string",
+      "description": "Hostlib session id for staged-fs routing. Reads and writes consult the staged overlay when staging is active for this session."
+    },
+    "max_bytes": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 0,
+      "description": "Optional read cap. `0` means unlimited."
+    }
+  },
+  "required": ["path", "query", "replacement"],
+  "additionalProperties": false
+}

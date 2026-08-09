@@ -1,0 +1,31 @@
+// Conformance test for std/llm/handlers::compose — wrappers apply
+// outer-first: compose([a, b, c])(base) == a(b(c(base))).
+import { compose } from "std/llm/handlers"
+
+fn make_tagger(tag) {
+  return { next ->
+    return { call ->
+      const env = next(call)
+      const txt = env.value.text + ":" + tag
+      return env + {value: env.value + {text: txt}}
+    }
+  }
+}
+
+pipeline default(harness: Harness) {
+  const base = { _call ->
+    {
+      ok: true,
+      value: {text: "base", model: "mock", provider: "mock", input_tokens: 0, output_tokens: 0},
+    }
+  }
+  const a = make_tagger("a")
+  const b = make_tagger("b")
+  const c = make_tagger("c")
+  const composed = compose([a, b, c])(base)
+  const env = composed(
+    {prompt: "p", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}},
+  )
+  // Order: c is innermost, runs first, then b, then a appends last.
+  harness.stdio.println(env.value.text)
+}

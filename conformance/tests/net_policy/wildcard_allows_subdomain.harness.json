@@ -1,0 +1,11 @@
+{
+  "mode": "mock",
+  "net_gets": {"https://api.github.com/v1/users": "subdomain-body"},
+  "expect_stdio": "api=subdomain-body\napex_blocked=true\napex_host=github.com\n",
+  "expect_calls": [
+    {"sub_handle": "net", "method": "get", "args": ["https://api.github.com/v1/users"]},
+    {"sub_handle": "stdio", "method": "println", "args": ["api=subdomain-body"]},
+    {"sub_handle": "stdio", "method": "println", "args": ["apex_blocked=true"]},
+    {"sub_handle": "stdio", "method": "println", "args": ["apex_host=github.com"]}
+  ]
+}

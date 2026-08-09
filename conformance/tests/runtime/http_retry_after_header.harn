@@ -1,0 +1,16 @@
+pipeline test(harness: Harness, task) {
+  harness.testing.http_mock(
+    "GET",
+    "https://api.example.com/retry-after",
+    {responses: [{status: 429, headers: {"retry-after": "0"}}, {status: 200, body: "ok"}]},
+  )
+  const resp = harness.net.get(
+    "https://api.example.com/retry-after",
+    {retry: {max: 1, backoff_ms: 0}},
+  )
+  const calls = harness.testing.http_mock_calls()
+  assert_eq(resp.status, 200)
+  assert_eq(len(calls), 2)
+  harness.stdio.log("retry-after status: " + to_string(resp.status))
+  harness.stdio.log("retry-after calls: " + to_string(len(calls)))
+}

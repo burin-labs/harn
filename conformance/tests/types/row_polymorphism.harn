@@ -1,0 +1,13 @@
+import { merge } from "std/json"
+
+fn needs_id(x: {id: string, ...rest}) -> string {
+  return x.id
+}
+
+pipeline main(harness: Harness) {
+  const combined = merge({a: 1, b: 2}, {b: "override", c: true})
+  harness.stdio.println(combined.a)
+  harness.stdio.println(combined.b)
+  harness.stdio.println(combined.c)
+  harness.stdio.println(needs_id({id: "u1", name: "Ann", age: 3}))
+}

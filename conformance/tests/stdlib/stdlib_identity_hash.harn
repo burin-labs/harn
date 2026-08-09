@@ -1,0 +1,27 @@
+pipeline test(harness: Harness, task) {
+  // Structural equality vs identity
+  const a = [1, 2, 3]
+  const b = [1, 2, 3]
+  const c = a
+  harness.stdio.log(a == b)
+  harness.stdio.log(is_same(a, b))
+  harness.stdio.log(is_same(a, c))
+  harness.stdio.log(is_same(a, a))
+  // Primitives: identity == structural equality
+  harness.stdio.log(is_same(42, 42))
+  harness.stdio.log(is_same("hi", "hi"))
+  harness.stdio.log(is_same(nil, nil))
+  // addr_of produces stable identity string
+  harness.stdio.log(addr_of(42))
+  const d = {k: 1}
+  harness.stdio.log(is_same(addr_of(d), addr_of(d)))
+  // hash_value is stable for equal values
+  harness.stdio.log(hash_value(42) == hash_value(42))
+  harness.stdio.log(hash_value("foo") == hash_value("foo"))
+  harness.stdio.log(hash_value([1, 2, 3]) == hash_value([1, 2, 3]))
+  harness.stdio.log(hash_value({a: 1, b: 2}) == hash_value({a: 1, b: 2}))
+  harness.stdio.log(hash_value(42) == hash_value("42"))
+  // sha variants
+  harness.stdio.log(sha256("abc"))
+  harness.stdio.log(sha512("abc"))
+}

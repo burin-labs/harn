@@ -1,0 +1,92 @@
+import { agent_loop } from "std/agent/loop"
+import { llm_text, with_llm_script } from "std/testing"
+
+fn audit_tools() {
+  const registry = tool_registry()
+  return tool_define(
+    registry,
+    "audit_tool",
+    "Return an audit marker",
+    {parameters: {}, handler: { _args -> "audit-output-that-should-be-compacted" }},
+  )
+}
+
+@persona(name: "merge_captain")
+fn merge_captain(harness: Harness, ctx) -> string {
+  const merged = admin_merge(harness, ctx)
+  return "persona:" + merged
+}
+
+@step(name: "admin_merge")
+fn admin_merge(harness: Harness, ctx) -> string {
+  return with_llm_script(
+    harness.llm,
+    [
+      {tool_calls: [{id: "audit_1", name: "audit_tool", arguments: {}}]},
+      llm_text("<done>##DONE##</done>"),
+    ],
+    { ->
+      const result = agent_loop(
+        harness,
+        "Run the audit tool",
+        nil,
+        {
+          provider: "mock",
+          tools: audit_tools(),
+          tool_format: "native",
+          max_iterations: 2,
+          loop_until_done: true,
+          session_id: "persona-hooks-composition",
+        },
+      )
+      const saw_tool_hook = json_stringify(transcript_messages(result.transcript)).contains(
+        "permission_denied",
+      )
+      return "merge:" + ctx + ":" + to_string(saw_tool_hook)
+    },
+  )
+}
+
+pipeline default(harness: Harness) {
+  const hook_order = harness.runtime.atomic(0)
+  harness.agent.clear_persona_hooks()
+  harness.tools.clear_hooks()
+  harness.tools.register_hook({pattern: "audit_tool", deny: "audit blocked by tool hook"})
+  harness.agent.register_persona_hook(
+    "merge_*",
+    "PreStep",
+    { ctx ->
+      if ctx.step.name == "admin_merge" {
+        harness.runtime.atomic_add(hook_order, 1)
+      }
+      return nil
+    },
+  )
+  harness.agent.register_step_hook(
+    "merge_captain",
+    "admin_merge",
+    "PreStep",
+    { ctx ->
+      if ctx.step.args[0] == "PR-7" && harness.runtime.atomic_get(hook_order) == 1 {
+        harness.runtime.atomic_add(hook_order, 10)
+      }
+      return {args: [ctx.step.args[0] + ":modified"]}
+    },
+  )
+  harness.agent.register_step_hook(
+    "merge_captain",
+    "admin_merge",
+    "PostStep",
+    { ctx ->
+      if ctx.output == "merge:PR-7:modified:true" && harness.runtime.atomic_get(hook_order) == 11 {
+        harness.runtime.atomic_add(hook_order, 100)
+      }
+      return {output: ctx.output + ":post"}
+    },
+  )
+  const result = merge_captain(harness, "PR-7")
+  harness.stdio.println(result)
+  harness.stdio.println(harness.runtime.atomic_get(hook_order))
+  harness.agent.clear_persona_hooks()
+  harness.tools.clear_hooks()
+}

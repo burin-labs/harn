@@ -1,0 +1,44 @@
+pipeline test(harness: Harness, task) {
+  // Test tool_define builtin for ergonomic tool registration.
+  let registry = tool_registry()
+  registry = tool_define(
+    registry,
+    "search_code",
+    "Search for code patterns",
+    {
+      parameters: {
+        query: {type: "string", description: "Search query"},
+        path: {type: "string", description: "Optional path scope"},
+      },
+      returns: {type: "object", properties: {matches: {type: "array"}}},
+      handler: { args -> "found: " + args.query },
+    },
+  )
+  registry = tool_define(
+    registry,
+    "read",
+    "Read file contents",
+    {
+      parameters: {path: {type: "string", description: "Path to read"}},
+      returns: {type: "string"},
+      handler: { args -> "content of " + args.path },
+    },
+  )
+  // Verify tools registered
+  assert(tool_count(registry) == 2, "should have 2 tools")
+  // Find specific tool
+  const search = tool_find(registry, "search_code")
+  assert(search != nil, "should find search_code tool")
+  assert(search.name == "search_code", "tool name should match")
+  assert(search.description == "Search for code patterns", "description should match")
+  assert(
+    search.parameters.query.type == "string",
+    "parameters should be normalized on the tool entry",
+  )
+  assert(search.params == nil, "legacy params key should not appear on the normalized tool entry")
+  assert(search.outputSchema.type == "object", "tool output schema should be preserved")
+  // Tool list
+  const tools = tool_list(registry)
+  assert(len(tools) == 2, "tool_list should return 2 tools")
+  harness.stdio.log("tool_define tests passed")
+}

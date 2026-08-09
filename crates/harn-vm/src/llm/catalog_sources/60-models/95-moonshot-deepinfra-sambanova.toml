@@ -1,0 +1,348 @@
+# Direct first-party / fast-inference routes for models also available through
+# aggregator providers.
+#
+# Each row is keyed by a `provider/<wire-id>` selector so it stays
+# collision-free with the same weights hosted elsewhere (e.g. the
+# OpenRouter/Together `moonshotai/kimi-k2.6` rows). `normalize_model_id`
+# strips the leading known-provider segment, and `wire_model` records the
+# exact id sent on the wire for clarity.
+#
+# Structure note: this fragment opens with a `[models.X]` header (not a
+# bare defaults block) so it does not collide with the trailing defaults
+# block of the preceding fragment. Each model's `tier`/`open_weight`/
+# `strengths`/`complementary_with` defaults trail its own table.
+
+# ---------- Moonshot AI — direct Kimi K2 routes -------------------------------
+[models."moonshot/kimi-k2.6"]
+name = "Kimi K2.6 (Moonshot direct)"
+provider = "moonshot"
+wire_model = "kimi-k2.6"
+logical_model = "moonshot-kimi-k2.6"
+equivalence_group = "moonshot-kimi-k2.6"
+served_variant = "moonshot-direct"
+api_dialect = "openai_chat"
+context_window = 262144
+capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.60, output_per_mtok = 2.50, cache_read_per_mtok = 0.15 }
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "agentic", "long_context", "tool_use", "reasoning", "vision"]
+complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "deepseek"]
+
+[models."moonshot/kimi-k3"]
+name = "Kimi K3 (Moonshot direct)"
+provider = "moonshot"
+wire_model = "kimi-k3"
+logical_model = "moonshot-kimi-k3"
+equivalence_group = "moonshot-kimi-k3"
+served_variant = "moonshot-direct"
+api_dialect = "openai_chat"
+context_window = 1048576
+capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
+# Moonshot K3 tariff: $0.30 cache hit / $3.00 cache miss input and $15.00
+# output per MTok. This frontier route is catalogued but intentionally has no
+# automatic/QC/eval placement.
+pricing = { input_per_mtok = 3.00, output_per_mtok = 15.00, cache_read_per_mtok = 0.30 }
+tier = "frontier"
+open_weight = false
+strengths = ["coding", "agentic", "long_context", "tool_use", "reasoning", "vision"]
+complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "deepseek"]
+
+[models."moonshot/kimi-k2.7-code"]
+name = "Kimi K2.7 Code (Moonshot direct)"
+provider = "moonshot"
+wire_model = "kimi-k2.7-code"
+logical_model = "moonshot-kimi-k2.7-code"
+equivalence_group = "moonshot-kimi-k2.7-code"
+served_variant = "moonshot-direct"
+api_dialect = "openai_chat"
+context_window = 262144
+capabilities = ["tools", "vision", "video", "streaming", "thinking", "prompt_caching"]
+# First-party tariff verified 2026-07-02: $0.95 / $4.00 per MTok
+# (cache hit $0.19), matching the Fireworks/Baseten/Together list rate
+# for the same weights. The prior 0.80/3.20 row was stale.
+pricing = { input_per_mtok = 0.95, output_per_mtok = 4.00, cache_read_per_mtok = 0.19 }
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "agentic", "long_context", "tool_use", "reasoning", "vision"]
+complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "deepseek"]
+
+# Highspeed tariff not published on the per-model pricing page as of
+# 2026-07-02; the row below keeps the last-known figures.
+[models."moonshot/kimi-k2.7-code-highspeed"]
+name = "Kimi K2.7 Code Highspeed (Moonshot direct)"
+provider = "moonshot"
+wire_model = "kimi-k2.7-code-highspeed"
+logical_model = "moonshot-kimi-k2.7-code"
+equivalence_group = "moonshot-kimi-k2.7-code"
+served_variant = "moonshot-direct-highspeed"
+api_dialect = "openai_chat"
+context_window = 262144
+capabilities = ["tools", "vision", "video", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.80, output_per_mtok = 3.20, cache_read_per_mtok = 0.20 }
+tier = "frontier"
+open_weight = true
+strengths = ["speed", "coding", "agentic", "long_context", "tool_use", "reasoning", "vision"]
+complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "deepseek"]
+
+# ---------- DeepInfra — open-weight OpenAI-compatible host --------------------
+[models."deepinfra/deepseek-ai/DeepSeek-V4-Pro"]
+name = "DeepSeek V4 Pro (DeepInfra)"
+provider = "deepinfra"
+wire_model = "deepseek-ai/DeepSeek-V4-Pro"
+logical_model = "deepseek-v4-pro"
+equivalence_group = "deepseek-v4-pro"
+served_variant = "deepinfra"
+api_dialect = "openai_chat"
+context_window = 163840
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+# DeepInfra catalog rate verified 2026-07-02 (fp4 serving): $1.30/$2.60.
+# The prior 0.50/1.50 figures matched no published DeepInfra tariff.
+pricing = { input_per_mtok = 1.30, output_per_mtok = 2.60 }
+tier = "frontier"
+open_weight = true
+strengths = ["reasoning", "coding", "tool_use", "long_context"]
+complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "kimi"]
+
+# DeepSeek V4 Flash on DeepInfra — the budget 1M-context agent route
+# (fp4). Catalog rate verified 2026-07-02: $0.09/$0.18 vs $0.14/$0.28
+# first-party.
+[models."deepinfra/deepseek-ai/DeepSeek-V4-Flash"]
+name = "DeepSeek V4 Flash (DeepInfra)"
+provider = "deepinfra"
+wire_model = "deepseek-ai/DeepSeek-V4-Flash"
+logical_model = "deepseek-v4-flash"
+equivalence_group = "deepseek-v4-flash"
+served_variant = "deepinfra"
+api_dialect = "openai_chat"
+context_window = 1000000
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.09, output_per_mtok = 0.18 }
+architecture = { parameter_count_b = 284.0, active_parameter_count_b = 13.0, moe = true, quantization = "fp4", license = "MIT", source_url = "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash", last_verified = "2026-07-02" }
+# tier matches the deepseek-v4-flash equivalence group (mid across hosts).
+tier = "mid"
+open_weight = true
+strengths = ["reasoning", "coding", "tool_use", "long_context", "cheap"]
+complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "kimi"]
+
+[models."deepinfra/Qwen/Qwen3.6-35B-A3B"]
+name = "Qwen3.6 35B A3B (DeepInfra)"
+provider = "deepinfra"
+wire_model = "Qwen/Qwen3.6-35B-A3B"
+logical_model = "qwen3.6-35b-a3b"
+equivalence_group = "qwen3.6-35b-a3b"
+served_variant = "deepinfra"
+api_dialect = "openai_chat"
+context_window = 262144
+capabilities = ["tools", "vision", "streaming", "thinking"]
+pricing = { input_per_mtok = 0.10, output_per_mtok = 0.30 }
+tier = "mid"
+open_weight = true
+strengths = ["coding", "agentic", "tool_use", "long_context", "cheap", "vision"]
+complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "deepseek", "kimi"]
+
+[models."deepinfra/deepseek-ai/DeepSeek-V3.2"]
+name = "DeepSeek V3.2 (DeepInfra)"
+provider = "deepinfra"
+wire_model = "deepseek-ai/DeepSeek-V3.2"
+logical_model = "deepseek-v3.2"
+equivalence_group = "deepseek-v3.2"
+served_variant = "deepinfra"
+api_dialect = "openai_chat"
+context_window = 163840
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.50, output_per_mtok = 1.50 }
+tier = "frontier"
+open_weight = true
+strengths = ["reasoning", "coding", "tool_use", "long_context", "cheap"]
+complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "kimi"]
+
+[models."deepinfra/zai-org/GLM-5.2"]
+name = "GLM 5.2 (DeepInfra)"
+provider = "deepinfra"
+wire_model = "zai-org/GLM-5.2"
+logical_model = "glm-5.2"
+equivalence_group = "glm-5.2"
+served_variant = "deepinfra"
+api_dialect = "openai_chat"
+context_window = 1048576
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+# DeepInfra's published GLM-5.2 rate, verified 2026-06-28 against their pricing
+# API (cents_per_input_token 9.5e-05 -> $0.95/MTok; cents_per_output_token
+# 3e-04 -> $3.00/MTok; cached-read ratio -> $0.18/MTok) and reconciled against a
+# live chat-completion `estimated_cost` (175 in + 36 out billed $0.00027425,
+# exact). OpenRouter's z-ai/glm-5.2 listing agrees ($0.95/$3.00/$0.18). The prior
+# 1.40/4.40/0.26 was the together/baseten placeholder, not DeepInfra's rate.
+pricing = { input_per_mtok = 0.95, output_per_mtok = 3.00, cache_read_per_mtok = 0.18 }
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
+complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "deepseek"]
+
+[models."deepinfra/Qwen/Qwen3.7-Max"]
+name = "Qwen3.7 Max (DeepInfra)"
+provider = "deepinfra"
+wire_model = "Qwen/Qwen3.7-Max"
+logical_model = "qwen3.7-max"
+equivalence_group = "qwen3.7-max"
+served_variant = "deepinfra"
+api_dialect = "openai_chat"
+context_window = 1000000
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 1.25, output_per_mtok = 3.75, cache_read_per_mtok = 0.125 }
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "agentic", "tool_use", "long_context", "cheap"]
+complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "deepseek", "kimi"]
+
+[models."deepinfra/moonshotai/Kimi-K2.7-Code"]
+name = "Kimi K2.7 Code (DeepInfra)"
+provider = "deepinfra"
+wire_model = "moonshotai/Kimi-K2.7-Code"
+logical_model = "moonshot-kimi-k2.7-code"
+equivalence_group = "moonshot-kimi-k2.7-code"
+served_variant = "deepinfra"
+api_dialect = "openai_chat"
+context_window = 262144
+capabilities = ["tools", "vision", "video", "streaming", "thinking", "prompt_caching"]
+# DeepInfra undercuts the first-party $0.95/$4.00 list; verified
+# 2026-07-02 (int4-native weights).
+pricing = { input_per_mtok = 0.74, output_per_mtok = 3.50 }
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "agentic", "long_context", "tool_use", "reasoning", "vision"]
+complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "deepseek"]
+
+[models."deepinfra/openai/gpt-oss-120b"]
+name = "GPT-OSS 120B (DeepInfra)"
+provider = "deepinfra"
+wire_model = "openai/gpt-oss-120b"
+logical_model = "openai-gpt-oss-120b"
+equivalence_group = "openai-gpt-oss-120b"
+served_variant = "deepinfra"
+api_dialect = "openai_chat"
+context_window = 131072
+capabilities = ["tools", "streaming", "thinking"]
+pricing = { input_per_mtok = 0.15, output_per_mtok = 0.60 }
+architecture = { parameter_count_b = 117.0, active_parameter_count_b = 5.1, moe = true, license = "Apache-2.0", source_url = "https://developers.openai.com/api/docs/models/gpt-oss-120b", last_verified = "2026-06-20" }
+tier = "mid"
+open_weight = true
+strengths = ["speed", "cheap", "tool_use", "reasoning"]
+
+# ---------- SambaNova Cloud — fast RDU inference ------------------------------
+[models."sambanova/DeepSeek-V4-Pro"]
+name = "DeepSeek V4 Pro (SambaNova)"
+provider = "sambanova"
+wire_model = "DeepSeek-V4-Pro"
+logical_model = "deepseek-v4-pro"
+equivalence_group = "deepseek-v4-pro"
+served_variant = "sambanova-rdu"
+api_dialect = "openai_chat"
+context_window = 163840
+capabilities = ["tools", "streaming", "thinking"]
+pricing = { input_per_mtok = 0.60, output_per_mtok = 1.20 }
+deprecated = true
+deprecation_note = "Not returned from SambaNova /v1/models on 2026-06-20. Use sambanova/DeepSeek-V3.2 or another DeepSeek V4 Pro host."
+superseded_by = "sambanova/DeepSeek-V3.2"
+tier = "frontier"
+open_weight = true
+strengths = ["speed", "reasoning", "coding", "tool_use", "long_context"]
+complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "kimi"]
+
+[models."sambanova/DeepSeek-V3.2"]
+name = "DeepSeek V3.2 (SambaNova)"
+provider = "sambanova"
+wire_model = "DeepSeek-V3.2"
+logical_model = "deepseek-v3.2"
+equivalence_group = "deepseek-v3.2"
+served_variant = "sambanova-rdu"
+api_dialect = "openai_chat"
+context_window = 32768
+capabilities = ["tools", "streaming", "thinking"]
+pricing = { input_per_mtok = 3.00, output_per_mtok = 4.50 }
+tier = "frontier"
+open_weight = true
+strengths = ["speed", "reasoning", "coding", "tool_use"]
+complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "kimi"]
+
+[models."sambanova/MiniMax-M2.7"]
+name = "MiniMax M2.7 (SambaNova)"
+provider = "sambanova"
+wire_model = "MiniMax-M2.7"
+logical_model = "minimax-m2.7"
+equivalence_group = "minimax-m2.7"
+served_variant = "sambanova-rdu"
+api_dialect = "openai_chat"
+context_window = 196608
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.60, output_per_mtok = 2.40 }
+tier = "frontier"
+open_weight = true
+strengths = ["speed", "coding", "agentic", "tool_use", "reasoning", "long_context"]
+complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "deepseek"]
+
+[models."sambanova/gpt-oss-120b"]
+name = "GPT-OSS 120B (SambaNova)"
+provider = "sambanova"
+wire_model = "gpt-oss-120b"
+logical_model = "openai-gpt-oss-120b"
+equivalence_group = "openai-gpt-oss-120b"
+served_variant = "sambanova-rdu"
+api_dialect = "openai_chat"
+context_window = 131072
+capabilities = ["tools", "streaming", "thinking"]
+pricing = { input_per_mtok = 0.22, output_per_mtok = 0.59 }
+architecture = { parameter_count_b = 117.0, active_parameter_count_b = 5.1, moe = true, license = "Apache-2.0", source_url = "https://developers.openai.com/api/docs/models/gpt-oss-120b", last_verified = "2026-06-20" }
+tier = "mid"
+open_weight = true
+strengths = ["speed", "cheap", "tool_use", "reasoning"]
+
+[models."sambanova/gemma-4-31B-it"]
+name = "Gemma 4 31B (SambaNova)"
+provider = "sambanova"
+wire_model = "gemma-4-31B-it"
+logical_model = "gemma-4-31b-it"
+equivalence_group = "gemma-4-31b-it"
+served_variant = "sambanova-rdu"
+api_dialect = "openai_chat"
+context_window = 131072
+capabilities = ["tools", "vision", "streaming", "thinking"]
+pricing = { input_per_mtok = 0.38, output_per_mtok = 1.15 }
+tier = "frontier"
+open_weight = true
+strengths = ["speed", "vision", "reasoning", "coding", "cheap"]
+
+[models."sambanova/Llama-4-Maverick"]
+name = "Llama 4 Maverick (SambaNova)"
+provider = "sambanova"
+wire_model = "Llama-4-Maverick-17B-128E-Instruct"
+logical_model = "llama-4-maverick"
+equivalence_group = "llama-4-maverick"
+served_variant = "sambanova-rdu"
+api_dialect = "openai_chat"
+context_window = 131072
+capabilities = ["tools", "vision", "streaming"]
+pricing = { input_per_mtok = 0.63, output_per_mtok = 1.80 }
+deprecated = true
+deprecation_note = "Not returned from SambaNova /v1/models on 2026-06-20. Use sambanova/Meta-Llama-3.3-70B-Instruct for the live Llama route."
+superseded_by = "sambanova/Meta-Llama-3.3-70B-Instruct"
+tier = "mid"
+open_weight = true
+strengths = ["speed", "vision", "tool_use", "long_context", "cheap"]
+complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "deepseek", "kimi"]
+
+[models."sambanova/Meta-Llama-3.3-70B-Instruct"]
+name = "Llama 3.3 70B Instruct (SambaNova)"
+provider = "sambanova"
+wire_model = "Meta-Llama-3.3-70B-Instruct"
+logical_model = "llama-3.3-70b-instruct"
+equivalence_group = "llama-3.3-70b-instruct"
+served_variant = "sambanova-rdu"
+api_dialect = "openai_chat"
+context_window = 131072
+capabilities = ["tools", "streaming"]
+pricing = { input_per_mtok = 0.60, output_per_mtok = 1.20 }
+tier = "mid"
+open_weight = true
+strengths = ["speed", "tool_use", "cheap"]
+complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "deepseek", "kimi"]

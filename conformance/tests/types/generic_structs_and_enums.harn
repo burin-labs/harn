@@ -1,0 +1,18 @@
+pipeline test(harness: Harness, task) {
+  struct Pair<A, B> {
+    first: A
+    second: B
+  }
+  enum Option<T> {
+    Some(value: T)
+    None
+  }
+  const pair: Pair<int, string> = Pair {first: 1, second: "two"}
+  const maybe: Option<int> = Option.Some(pair.first)
+  harness.stdio.log(pair.first)
+  harness.stdio.log(pair.second)
+  match maybe {
+    Option.Some(value) -> { harness.stdio.log(value) }
+    Option.None -> { harness.stdio.log("none") }
+  }
+}

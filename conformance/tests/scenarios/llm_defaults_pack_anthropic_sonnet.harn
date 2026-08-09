@@ -1,0 +1,28 @@
+// pack_for(claude-sonnet-4-5, agent, reasoning_policy="medium") composes
+// catalog defaults, task defaults, and capability-backed reasoning policy.
+import { pack_for } from "std/llm/defaults"
+
+pipeline test(harness: Harness, task) {
+  const r = pack_for(
+    harness.agent,
+    harness.llm,
+    {model: "claude-sonnet-4-5", reasoning_policy: "medium", reasoning_task: "agent"},
+  )
+  assert_eq(type_of(r), "dict")
+  assert_eq(r.model, "claude-sonnet-4-5")
+  assert_eq(r.provider, "anthropic")
+  // The caller-facing result stays provider-neutral. The Anthropic adapter
+  // owns conversion to its wire-level thinking object.
+  assert_eq(type_of(r.thinking), "dict")
+  assert_eq(r.thinking.mode, "enabled")
+  assert_eq(r.thinking.budget_tokens, 4096)
+  // The agent task overlay owns its generic sampling defaults.
+  assert_eq(r.temperature, 0.5)
+  assert_eq(r.top_p, 0.95)
+  assert_eq(r.schema_retries, 0)
+  assert_eq(r.output, "text")
+  // Canonical policy fields survive for introspection.
+  assert_eq(r.reasoning_policy, "medium")
+  assert_eq(r.reasoning_task, "agent")
+  harness.stdio.log("llm_defaults_pack_anthropic_sonnet passed")
+}

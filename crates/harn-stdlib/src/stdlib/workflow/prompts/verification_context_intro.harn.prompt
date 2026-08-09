@@ -1,0 +1,1 @@
+Treat this verifier contract as the source of truth for exact identifiers, file paths, and required wiring. Prefer the exact strings below over guessed synonyms.

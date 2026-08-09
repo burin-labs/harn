@@ -1,0 +1,25 @@
+// Demo: std/llm/ensemble — best_of_n with the structured judge.
+//
+// Seeds 3 mock candidate responses + 1 structured judge response that picks
+// index 1. Prints the chosen winner.
+//
+// Run with: cargo run --quiet --bin harn -- run examples/llm_best_of_n.harn
+import { best_of_n } from "std/llm/ensemble"
+
+pipeline default(harness: Harness) {
+  harness.llm.mock_clear()
+  harness.llm.mock_enqueue({text: "candidate-A"})
+  harness.llm.mock_enqueue({text: "candidate-B"})
+  harness.llm.mock_enqueue({text: "candidate-C"})
+  // Structured judge response — JSON, picks index 1.
+  harness.llm.mock_enqueue(
+    {text: "{\"best_index\": 1, \"scores\": [0.2, 0.9, 0.3], \"reasoning\": \"B is clearest\"}"},
+  )
+  const result = best_of_n(
+    harness.llm,
+    "Pick the best.",
+    "",
+    {n: 3, parallel: false, call_opts: {provider: "mock"}, judge_opts: {provider: "mock"}},
+  )
+  harness.stdio.println("winner: " + result.best.text)
+}

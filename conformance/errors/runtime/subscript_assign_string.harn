@@ -1,0 +1,4 @@
+pipeline test(harness: Harness, task) {
+  let s = "ab"
+  s[0] = "Z"
+}

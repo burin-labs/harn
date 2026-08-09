@@ -1,0 +1,331 @@
+/**
+ * Portable contracts for hypothesis intake and deterministic experiment design.
+ *
+ * Model-authored intent contains registry references and research context, but
+ * no executable code or authority. The compiler resolves those references
+ * against a host-supplied catalog and lowers accepted randomized designs into
+ * `std/eval/experiment` registration. A registered host adapter remains the
+ * execution authority.
+ */
+import { VersionedContract, versioned_contract, versioned_descriptor } from "std/artifacts/typed"
+import { CaseSet, ExperimentManifest, ExperimentRegistration } from "std/eval/experiment/contracts"
+import { ArtifactDescriptor } from "std/run_artifacts"
+import { schema_contract } from "std/schema"
+
+pub type ExperimentLane = "randomized_online" \
+  | "randomized_offline" \
+  | "replay_simulation" \
+  | "deterministic_benchmark" \
+  | "human_study" \
+  | "sequential_agent" \
+  | "observational" \
+  | "exploratory_instrumentation" \
+  | "non_experimental_research"
+
+pub type RequestedExperimentLane = "auto" | ExperimentLane
+
+pub type EvidenceMode = "scout" | "standard_sequential" | "confirmatory" | "observational"
+
+pub type ClaimStrength = "randomized_causal" \
+  | "bounded_simulation" \
+  | "associational" \
+  | "descriptive" \
+  | "none"
+
+pub type HypothesisCitation = {id: string, title: string, url: string, supports: string}
+
+pub type HypothesisPrior = {probability?: float, rationale: string}
+
+pub type ExperimentAdapterRef = {adapter_id: string, variant_id: string}
+
+pub type ExperimentIntentRisk = {
+  touches_people: bool,
+  touches_customer_data: bool,
+  touches_money: bool,
+  touches_production: bool,
+  irreversible: bool,
+}
+
+pub type ExperimentIntent = {
+  schema: "harn.experiment.intent.v1",
+  schema_version: 1,
+  question: string,
+  hypothesis: string,
+  null_hypothesis: string,
+  decision: string,
+  domain: string,
+  requested_lane: RequestedExperimentLane,
+  requested_evidence: EvidenceMode,
+  intervention: ExperimentAdapterRef?,
+  comparator: ExperimentAdapterRef?,
+  assignment_unit: string?,
+  population_id: string?,
+  outcome_ids: list<string>,
+  assumptions: list<string>,
+  threats: list<string>,
+  prior: HypothesisPrior?,
+  citations: list<HypothesisCitation>,
+  risk: ExperimentIntentRisk,
+}
+
+pub type ProcessCapability = {
+  commands: list<string>,
+  read_roots: list<string>,
+  write_roots: list<string>,
+}
+
+pub type NetworkCapability = {domains: list<string>, allow_private: bool}
+
+pub type MutationCapability = {
+  reversible: bool,
+  rollback_adapter_id: string?,
+  requires_approval: bool,
+}
+
+pub type ExperimentCapabilityManifest = {
+  tools: list<string>,
+  capabilities: dict<string, list<string>>,
+  workspace_roots: list<string>,
+  read_only_roots: list<string>,
+  side_effect_level: "none" \
+    | "read_only" \
+    | "workspace_write" \
+    | "process_exec" \
+    | "network" \
+    | "desktop_control",
+  sandbox_profile: "unsandboxed" | "worktree" | "os_hardened",
+  process: ProcessCapability,
+  network: NetworkCapability,
+  connectors: list<string>,
+  database_scopes: list<string>,
+  provider_ids: list<string>,
+  secret_refs: list<string>,
+  mutation: MutationCapability,
+}
+
+pub type InterventionAdapter = {
+  id: string,
+  variant_id: string,
+  domain: string,
+  description: string,
+  supported_lanes: list<ExperimentLane>,
+  config: dict<string, unknown>,
+  complexity: int,
+  executable: bool,
+  randomizable: bool,
+  reversible: bool,
+  contamination_risk: "none" | "bounded" | "uncontrolled",
+  carryover_risk: "none" | "bounded" | "uncontrolled",
+  interference_risk: "none" | "bounded" | "uncontrolled",
+  capabilities: ExperimentCapabilityManifest,
+}
+
+pub type OutcomeAdapter = {
+  id: string,
+  domain: string,
+  description: string,
+  direction: "up" | "down",
+  bounds: {lo: float, hi: float},
+  observation_delay_ms: int,
+  observable: bool,
+  grader_id?: string,
+  guardrail: bool,
+  alarm?: {kind: "absolute" | "percentage", threshold: float},
+}
+
+pub type PopulationAdapter = {
+  id: string,
+  domain: string,
+  assignment_unit: string,
+  iterate: CaseSet,
+  gate: CaseSet,
+  blocking_factors: list<string>,
+  independent_enough: bool,
+}
+
+pub type ExperimentAdapterCatalog = {
+  schema: "harn.experiment.adapter_catalog.v1",
+  interventions: list<InterventionAdapter>,
+  outcomes: list<OutcomeAdapter>,
+  populations: list<PopulationAdapter>,
+}
+
+pub type ExperimentResourceBudget = {
+  min_trials_per_case: int,
+  max_trials_per_case: int,
+  max_wall_clock_ms: int,
+  max_compute_ms: int,
+  max_tokens: int,
+  max_api_calls: int,
+  max_spend_usd: float,
+  max_concurrency: int,
+}
+
+pub type EvidencePolicy = {
+  schema: "harn.evidence.policy.v1",
+  id: string,
+  mode: EvidenceMode,
+  claim_ceiling: ClaimStrength,
+  delta: float?,
+  epsilon: float?,
+  ladder: list<int>,
+  adaptive: bool,
+  promotion: "explicit_gate" | "none",
+}
+
+pub type ExperimentCompileContext = {
+  owner: string,
+  seed: string,
+  catalog: ExperimentAdapterCatalog,
+  trusted_citations: list<HypothesisCitation>,
+  risk_floor: ExperimentIntentRisk,
+  capability_ceiling: ExperimentCapabilityManifest,
+  supported_blocking_factors: list<string>,
+  host_identity_available: bool,
+  budget_request: ExperimentResourceBudget,
+  budget_ceiling: ExperimentResourceBudget,
+  approval_id?: string,
+  provenance: {source: string, actor: string, created_at: string},
+}
+
+pub type ExperimentDesign = {
+  schema: "harn.experiment.design.v1",
+  hypothesis_id: string,
+  intent_fingerprint: string,
+  lane: ExperimentLane,
+  claim_strength: ClaimStrength,
+  intervention: InterventionAdapter?,
+  comparator: InterventionAdapter?,
+  population: PopulationAdapter?,
+  primary_outcome: OutcomeAdapter?,
+  guardrails: list<OutcomeAdapter>,
+  evidence: EvidencePolicy,
+  budget: ExperimentResourceBudget,
+  capabilities: ExperimentCapabilityManifest,
+  capability_enforcement: "deferred_to_registered_host_adapter",
+  approval_required: bool,
+  approval_id: string?,
+  assumptions: list<string>,
+  threats: list<string>,
+}
+
+pub type PlanProvenance = {
+  source: string,
+  actor: string,
+  created_at: string,
+  intent_fingerprint: string,
+  catalog_fingerprint: string,
+}
+
+pub type RegisteredExperimentPlan = {
+  schema: "harn.hypothesis.plan.v1",
+  schema_version: 1,
+  kind: "registered_experiment",
+  plan_id: string,
+  version: int,
+  fingerprint: string,
+  hypothesis_id: string,
+  intent: ExperimentIntent,
+  design: ExperimentDesign,
+  manifest: ExperimentManifest,
+  registration: ExperimentRegistration,
+  execution_status: "requires_registered_host_adapter",
+  provenance: PlanProvenance,
+  checkback_after_ms: int,
+}
+
+pub type ObserveOnlyHypothesisPlan = {
+  schema: "harn.hypothesis.plan.v1",
+  schema_version: 1,
+  kind: "observe_only",
+  plan_id: string,
+  version: int,
+  fingerprint: string,
+  hypothesis_id: string,
+  intent: ExperimentIntent,
+  design: ExperimentDesign,
+  instrumentation_questions: list<string>,
+  provenance: PlanProvenance,
+  checkback_after_ms: int,
+}
+
+pub type HypothesisPlan = RegisteredExperimentPlan | ObserveOnlyHypothesisPlan
+
+pub type ExperimentCompileDiagnostic = {
+  code: string,
+  path: string,
+  message: string,
+  severity: "error" | "warning",
+}
+
+pub type ExperimentCompileFailure = {
+  schema: "harn.experiment.compile_failure.v1",
+  kind: "invalid_intent" | "unsupported_design" | "unsafe_plan" | "invalid_lowering",
+  diagnostics: list<ExperimentCompileDiagnostic>,
+}
+
+pub type ExperimentCompileReceipt = {
+  schema: "harn.experiment.compile_receipt.v1",
+  ok: bool,
+  intent_fingerprint: string,
+  catalog_fingerprint: string,
+  plan_fingerprint?: string,
+  plan?: HypothesisPlan,
+  failure?: ExperimentCompileFailure,
+}
+
+/**
+ * Return the strict, versioned contract for model- or human-authored intent.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn experiment_intent_contract() -> VersionedContract<ExperimentIntent> {
+  return versioned_contract(
+    "harn.experiment.intent",
+    1,
+    schema_contract(schema_of(ExperimentIntent), []),
+  )
+}
+
+/**
+ * Create a typed run-artifact descriptor for an experiment intent.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn experiment_intent_descriptor(
+  name: string = "experiment-intent.json",
+) -> ArtifactDescriptor<ExperimentIntent> {
+  return versioned_descriptor(name, experiment_intent_contract())
+}
+
+/**
+ * Return the strict, versioned contract for registered and observe-only plans.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn hypothesis_plan_contract() -> VersionedContract<HypothesisPlan> {
+  return versioned_contract(
+    "harn.hypothesis.plan",
+    1,
+    schema_contract(schema_of(HypothesisPlan), []),
+  )
+}
+
+/**
+ * Create a typed run-artifact descriptor for a compiled hypothesis plan.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn hypothesis_plan_descriptor(
+  name: string = "hypothesis-plan.json",
+) -> ArtifactDescriptor<HypothesisPlan> {
+  return versioned_descriptor(name, hypothesis_plan_contract())
+}

@@ -1,0 +1,206 @@
+/** Strict natural-language intake; deterministic compilation remains authoritative. */
+import { typed_output_checkpoint } from "std/checkpoint"
+import { compile_experiment_intent } from "std/eval/hypothesis/compiler"
+import {
+  ExperimentCompileContext,
+  ExperimentCompileReceipt,
+  ExperimentIntent,
+} from "std/eval/hypothesis/contracts"
+
+pub type HypothesisPlannerOptions = {
+  provider?: string,
+  model?: string,
+  model_tier?: string,
+  max_tokens?: int,
+  validator_retries?: int,
+}
+
+pub type HypothesisPlannerReceipt = {
+  schema: "harn.hypothesis.planner_receipt.v1",
+  ok: bool,
+  request_fingerprint: string,
+  catalog_fingerprint: string,
+  intent: ExperimentIntent?,
+  compilation: ExperimentCompileReceipt?,
+  usage: dict<string, unknown>,
+  attempts: int,
+  error: string?,
+}
+
+fn __fingerprint(value: unknown) -> string {
+  return "sha256:" + sha256(json_stringify(value))
+}
+
+fn __catalog_for_prompt(context: ExperimentCompileContext) {
+  return {
+    interventions: context.catalog.interventions.map(
+      { adapter ->
+        {
+          id: adapter.id,
+          variant_id: adapter.variant_id,
+          domain: adapter.domain,
+          description: adapter.description,
+          supported_lanes: adapter.supported_lanes,
+          executable: adapter.executable,
+          randomizable: adapter.randomizable,
+          reversible: adapter.reversible,
+          contamination_risk: adapter.contamination_risk,
+          carryover_risk: adapter.carryover_risk,
+          interference_risk: adapter.interference_risk,
+        }
+      },
+    ),
+    outcomes: context.catalog.outcomes.map(
+      { outcome ->
+        {
+          id: outcome.id,
+          domain: outcome.domain,
+          description: outcome.description,
+          direction: outcome.direction,
+          bounds: outcome.bounds,
+          observation_delay_ms: outcome.observation_delay_ms,
+          observable: outcome.observable,
+          guardrail: outcome.guardrail,
+        }
+      },
+    ),
+    populations: context.catalog.populations.map(
+      { population ->
+        {
+          id: population.id,
+          domain: population.domain,
+          assignment_unit: population.assignment_unit,
+          blocking_factors: population.blocking_factors,
+          independent_enough: population.independent_enough,
+        }
+      },
+    ),
+  }
+}
+
+fn __examples() {
+  return [
+    {
+      input: "Does a concise system prompt improve frozen-fixture task success?",
+      lesson: "Use registered prompt arms, randomized offline assignment, and a bounded outcome.",
+    },
+    {
+      input: "Is this undocumented process causing abandonment? No comparator or telemetry exists.",
+      lesson:
+        "Choose exploratory instrumentation or non-experimental research; do not invent an A/B test.",
+    },
+    {
+      input: "Change the production approval flow and see whether customers stay.",
+      lesson:
+        "Mark people, customer-data, and production risk. The compiler must require host approval before execution.",
+    },
+  ]
+}
+
+fn __compiler_errors(candidate, context: ExperimentCompileContext) {
+  const compilation = compile_experiment_intent(candidate, context)
+  if compilation.ok {
+    return {ok: true, errors: []}
+  }
+  return {
+    ok: false,
+    errors: (compilation.failure?.diagnostics ?? []).map(
+      { diagnostic -> diagnostic.path + ": " + diagnostic.message },
+    ),
+  }
+}
+
+/**
+ * Produce one constrained intent with at most one compiler-guided repair, then
+ * run the deterministic compiler. The model never emits executable authority.
+ *
+ * @effects: [llm.call]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn design_hypothesis(
+  harness: Harness,
+  request: string,
+  context: ExperimentCompileContext,
+  options: HypothesisPlannerOptions? = nil,
+) -> HypothesisPlannerReceipt {
+  const opts: HypothesisPlannerOptions = options ?? {}
+  const prompt_catalog = __catalog_for_prompt(context)
+  const request_fingerprint = __fingerprint(trim(request))
+  const catalog_fingerprint = __fingerprint(prompt_catalog)
+  if trim(request) == "" {
+    return {
+      schema: "harn.hypothesis.planner_receipt.v1",
+      ok: false,
+      request_fingerprint: request_fingerprint,
+      catalog_fingerprint: catalog_fingerprint,
+      intent: nil,
+      compilation: nil,
+      usage: {},
+      attempts: 0,
+      error: "hypothesis request must be non-empty",
+    }
+  }
+  const retries = min(1, max(0, opts.validator_retries ?? 1))
+  const prompt = harness.fs.render_prompt(
+    "std/eval/hypothesis/prompts/intake.harn.prompt",
+    {
+      request: trim(request),
+      catalog: json_stringify(prompt_catalog),
+      research: json_stringify(context.trusted_citations),
+      examples: json_stringify(__examples()),
+    },
+  )
+  const checkpoint = typed_output_checkpoint(
+    harness.agent,
+    harness.llm,
+    "hypothesis.design",
+    prompt,
+    schema_of(ExperimentIntent),
+    {
+      provider: opts.provider,
+      model: opts.model,
+      model_tier: opts.model_tier
+        ?? if opts.provider == nil && opts.model == nil {
+        "mid"
+      } else {
+        nil
+      },
+      max_tokens: opts.max_tokens ?? 1600,
+      schema_retries: 0,
+      validator_retries: retries,
+      repair: {enabled: false},
+    },
+    fn(candidate) { return __compiler_errors(candidate, context) },
+  )
+  if !checkpoint.ok {
+    return {
+      schema: "harn.hypothesis.planner_receipt.v1",
+      ok: false,
+      request_fingerprint: request_fingerprint,
+      catalog_fingerprint: catalog_fingerprint,
+      intent: nil,
+      compilation: nil,
+      usage: checkpoint.usage ?? {},
+      attempts: checkpoint.attempts ?? 0,
+      error: checkpoint.error ?? "hypothesis intent generation failed",
+    }
+  }
+  const intent: ExperimentIntent = checkpoint.data
+  const compilation = compile_experiment_intent(intent, context)
+  return {
+    schema: "harn.hypothesis.planner_receipt.v1",
+    ok: compilation.ok,
+    request_fingerprint: request_fingerprint,
+    catalog_fingerprint: catalog_fingerprint,
+    intent: intent,
+    compilation: compilation,
+    usage: checkpoint.usage ?? {},
+    attempts: checkpoint.attempts ?? 0,
+    error: if compilation.ok {
+      nil
+    } else {
+      "deterministic compilation failed"
+    },
+  }
+}

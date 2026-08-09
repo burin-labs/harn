@@ -1,0 +1,5 @@
+{"match":"*[task=smoke]*","consume_match":true,"text":"OK","model":"mock-cheap","provider":"mock","input_tokens":12,"output_tokens":1}
+{"match":"*[task=rate-lim]*","consume_match":true,"error":{"category":"rate_limit","message":"HTTP 429 rate limit","retry_after_ms":100},"model":"mock-cheap","provider":"mock"}
+{"match":"*[task=rate-lim]*","consume_match":true,"text":"It signals the upstream provider is throttling our request because we exceeded a rate limit.","model":"mock-strong","provider":"mock","input_tokens":18,"output_tokens":22}
+{"match":"*[task=lint-fail]*","consume_match":true,"text":"answer: TODO finish later","model":"mock-cheap","provider":"mock","input_tokens":14,"output_tokens":6}
+{"match":"*[task=lint-fail]*","consume_match":true,"text":"Replay determinism means re-executing a recorded agent trace produces byte-identical outputs.","model":"mock-strong","provider":"mock","input_tokens":14,"output_tokens":18}

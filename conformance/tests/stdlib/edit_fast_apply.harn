@@ -1,0 +1,145 @@
+import { edit_fast_apply, fast_apply } from "std/edit"
+import { llm_text, with_llm_script } from "std/testing"
+
+fn write_fixture(fs: HarnessFs, dir: string, name: string, body: string) -> string {
+  const path = path_join(dir, name)
+  fs.write_text(path, body)
+  return path
+}
+
+pipeline default(harness: Harness) {
+  const root = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn_edit_fast_apply_" + to_string(harness.random.range(100000, 999999)),
+  )
+  harness.fs.mkdir(root)
+  const path = write_fixture(harness.fs, root, "lib.rs", "fn answer() -> i32 {\n    1\n}\n")
+  const before = harness.fs.read_text(path)
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text("{\"content\":\"fn answer() -> i32 {\\n    2\\n}\\n\",\"summary\":\"bump answer\"}"),
+      llm_text("{\"content\":\"fn answer() -> i32 {\\n    3\\n}\\n\"}"),
+      llm_text("{\"content\":\"def answer():\\n    return 4\\n\"}"),
+      llm_text("{\"content\":\"export function answer(): number {\\n  return 5;\\n}\\n\"}"),
+      llm_text("{\"content\":\"fn broken( {\\n\"}"),
+      llm_text("{\"content\":\"updated but unsupported\\n\"}"),
+      llm_text("{\"content\":123}"),
+    ],
+    { ->
+      const dry = edit_fast_apply(
+        harness.fs,
+        harness.random,
+        harness.ast,
+        harness.llm,
+        {
+          path: path,
+          intent: "Change answer to return 2.",
+          dry_run: true,
+          llm_options: {provider: "mock", model: "mock"},
+        },
+      )
+      harness.stdio.println(dry.result)
+      harness.stdio.println(dry.applied)
+      harness.stdio.println(dry.dry_run)
+      harness.stdio.println(dry.telemetry.apply_path)
+      harness.stdio.println(dry.telemetry.success)
+      harness.stdio.println(dry.telemetry.dry_run)
+      harness.stdio.println(contains(dry.per_file_unified_diff[0].diff, "    2"))
+      harness.stdio.println(harness.fs.read_text(path) == before)
+      const calls = harness.llm.mock_calls()
+      harness.stdio.println(contains(calls[0].messages[0].content, "Preimage: sha256:"))
+      const applied = fast_apply(
+        harness.fs,
+        harness.random,
+        harness.ast,
+        harness.llm,
+        path,
+        "Change answer to return 3.",
+        {llm_options: {provider: "mock", model: "mock"}},
+      )
+      harness.stdio.println(applied.result)
+      harness.stdio.println(applied.applied)
+      harness.stdio.println(applied.telemetry.applied)
+      harness.stdio.println(applied.safe_text_patch.telemetry.applied)
+      harness.stdio.println(contains(harness.fs.read_text(path), "    3"))
+      const py_path = write_fixture(harness.fs, root, "calc.py", "def answer():\n    return 1\n")
+      const py = fast_apply(
+        harness.fs,
+        harness.random,
+        harness.ast,
+        harness.llm,
+        py_path,
+        "Change answer to return 4.",
+        {llm_options: {provider: "mock", model: "mock"}},
+      )
+      harness.stdio.println(py.result)
+      harness.stdio.println(py.telemetry.apply_path)
+      harness.stdio.println(contains(harness.fs.read_text(py_path), "return 4"))
+      const ts_path = write_fixture(
+        harness.fs,
+        root,
+        "widget.ts",
+        "export function answer(): number {\n  return 1;\n}\n",
+      )
+      const ts = fast_apply(
+        harness.fs,
+        harness.random,
+        harness.ast,
+        harness.llm,
+        ts_path,
+        "Change answer to return 5.",
+        {llm_options: {provider: "mock", model: "mock"}},
+      )
+      harness.stdio.println(ts.result)
+      harness.stdio.println(ts.telemetry.apply_path)
+      harness.stdio.println(contains(harness.fs.read_text(ts_path), "return 5"))
+      const bad_path = write_fixture(harness.fs, root, "bad.rs", "fn broken() -> i32 {\n    1\n}\n")
+      const bad_before = harness.fs.read_text(bad_path)
+      const rejected = edit_fast_apply(
+        harness.fs,
+        harness.random,
+        harness.ast,
+        harness.llm,
+        {
+          path: bad_path,
+          intent: "Introduce invalid syntax.",
+          llm_options: {provider: "mock", model: "mock"},
+        },
+      )
+      harness.stdio.println(rejected.result)
+      harness.stdio.println(rejected.ok)
+      harness.stdio.println(rejected.telemetry.validation_rejected)
+      harness.stdio.println(harness.fs.read_text(bad_path) == bad_before)
+      const unavailable_path = write_fixture(harness.fs, root, "notes.unknown", "original\n")
+      const unavailable = edit_fast_apply(
+        harness.fs,
+        harness.random,
+        harness.ast,
+        harness.llm,
+        {
+          path: unavailable_path,
+          intent: "Update the note.",
+          llm_options: {provider: "mock", model: "mock"},
+        },
+      )
+      harness.stdio.println(unavailable.result)
+      harness.stdio.println(unavailable.validation.health.coverage)
+      harness.stdio.println(harness.fs.read_text(unavailable_path) == "original\n")
+      const invalid_output = edit_fast_apply(
+        harness.fs,
+        harness.random,
+        harness.ast,
+        harness.llm,
+        {
+          path: bad_path,
+          intent: "Return a non-string content field.",
+          llm_options: {provider: "mock", model: "mock"},
+        },
+      )
+      harness.stdio.println(invalid_output.result)
+      harness.stdio.println(invalid_output.errors[0].code)
+      harness.stdio.println(harness.fs.read_text(bad_path) == bad_before)
+    },
+  )
+}

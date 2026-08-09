@@ -1,0 +1,19 @@
+// Opus 4.7 supports the catalog-declared adaptive and effort modes. A medium
+// agent request resolves to canonical effort mode; the Anthropic adapter owns
+// its eventual wire representation.
+import { pack_for } from "std/llm/defaults"
+
+pipeline test(harness: Harness, task) {
+  const model = "claude-opus-4-7-20260101"
+  const r = pack_for(
+    harness.agent,
+    harness.llm,
+    {model: model, reasoning_policy: "medium", reasoning_task: "agent"},
+  )
+  assert_eq(type_of(r), "dict")
+  assert_eq(r.model, model)
+  assert_eq(r.provider, "anthropic")
+  assert_eq(r.thinking.mode, "effort")
+  assert_eq(r.thinking.level, "medium")
+  harness.stdio.log("llm_defaults_pack_opus_47_effort passed")
+}

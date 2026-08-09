@@ -1,0 +1,57 @@
+// @harn-entrypoint-category agent.stdlib
+import { AgentResult } from "std/agent/contracts"
+import { __agent_loop_run } from "std/agent/loop_run"
+import "std/agent/loop_support"
+import {
+  __agent_loop_fire_resume_continuity,
+  __loop_progress_nudge_text,
+} from "std/agent/loop_turn_options"
+
+pub fn __progress_nudge_text(depth, has_tools, paradigm, made_tool_calls = false) {
+  return __loop_progress_nudge_text(depth, has_tools, paradigm, made_tool_calls)
+}
+
+/**
+ * agent_loop.
+ *
+ * @effects: [host, agent]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_loop(harness: Harness, message, system_prompt = nil, options = nil) -> AgentResult {
+  let opts = agent_loop_options(harness, agent_progress_apply_options(harness.agent, options))
+  opts = opts + {tools: agent_lifecycle_tools(harness.agent, opts?.tools, opts)}
+  if system_prompt != nil && system_prompt != "" {
+    opts = opts + {_primary_system: system_prompt}
+  }
+  const session = agent_session_init(harness.agent, message, system_prompt, opts)
+  if session?.done {
+    return session.result
+  }
+  agent_scratchpad_init(harness.agent, session, opts)
+  if opts?._tool_format_override != nil {
+    agent_emit_event(
+      harness.agent,
+      session.session_id,
+      "tool_format_override",
+      opts._tool_format_override,
+    )
+  }
+  if opts?._tool_format_capability_gap != nil {
+    agent_emit_event(
+      harness.agent,
+      session.session_id,
+      "capability_gap",
+      opts._tool_format_capability_gap,
+    )
+  }
+  defer {
+    try {
+      __host_mcp_disconnect(session.session_id)
+    } catch (e) {
+    }
+  }
+  opts = __agent_loop_fire_resume_continuity(harness.agent, session, opts)
+  opts = agent_stance_prepare(harness, session, message, opts)
+  return __agent_loop_run(harness, message, session, opts)
+}

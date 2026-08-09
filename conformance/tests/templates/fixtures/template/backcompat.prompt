@@ -1,0 +1,3 @@
+Hello, {{name}}!
+{{if greeting}}greeting: {{greeting}}
+{{end}}{{if missing_flag}}should not appear{{end}}Done.

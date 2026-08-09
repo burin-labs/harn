@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "ok": false,
+  "data": {
+    "files": [
+      {
+        "path": "src/api.harn",
+        "status": "error",
+        "diagnostics": [
+          {
+            "source": "lint",
+            "severity": "error",
+            "code": "HARN-LNT-067",
+            "message": "public function parameter is missing a type",
+            "span": { "start": 8, "end": 11 }
+          }
+        ],
+        "fixable": 0,
+        "fixed": 0
+      }
+    ],
+    "summary": {
+      "ok": 0,
+      "warnings": 0,
+      "errors": 1,
+      "diagnostics": 1,
+      "fixable": 0,
+      "fixed": 0
+    }
+  },
+  "error": {
+    "code": "lint_failed",
+    "message": "one or more files failed `harn lint`",
+    "details": null
+  },
+  "warnings": []
+}

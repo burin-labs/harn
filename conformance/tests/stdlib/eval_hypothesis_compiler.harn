@@ -1,0 +1,155 @@
+import { compile_experiment_intent } from "std/eval/hypothesis"
+import {
+  hypothesis_fixture_budget,
+  hypothesis_fixture_capabilities,
+  hypothesis_fixture_context,
+  hypothesis_fixture_intent,
+  hypothesis_fixture_intervention,
+} from "./hypothesis_fixture_lib.harn"
+
+fn test_executable_compile() {
+  const first = compile_experiment_intent(hypothesis_fixture_intent(), hypothesis_fixture_context())
+  require first.ok, "a registered randomized design compiles"
+  if first.plan == nil || first.plan.kind != "registered_experiment" {
+    throw "the compiler did not emit a registered experiment"
+  }
+  const plan = first.plan
+  require plan.design.lane == "randomized_offline", "auto chooses the preferred common lane"
+  require plan.design.claim_strength == "randomized_causal", "the claim ceiling follows the design"
+  require plan.manifest.assignment.mode == "randomized_block",
+    "lowering uses the canonical experiment assignment owner"
+  require plan.execution_status == "requires_registered_host_adapter",
+    "registration does not pretend a host intervention already exists"
+  require plan.design.evidence.delta == 0.05,
+    "a named evidence mode resolves to transparent thresholds"
+  require plan.design.evidence.promotion == "explicit_gate",
+    "the evidence policy preserves canonical explicit gate promotion"
+  const reordered = compile_experiment_intent(
+    hypothesis_fixture_intent(),
+    hypothesis_fixture_context(true),
+  )
+  require reordered.plan_fingerprint == first.plan_fingerprint,
+    "catalog ordering cannot change plan identity"
+}
+
+fn test_honest_non_experimental_compile() {
+  const research = hypothesis_fixture_intent()
+    + {
+    requested_lane: "non_experimental_research",
+    requested_evidence: "observational",
+    intervention: nil,
+    comparator: nil,
+    assignment_unit: nil,
+    population_id: nil,
+    outcome_ids: [],
+  }
+  const receipt = compile_experiment_intent(research, hypothesis_fixture_context())
+  require receipt.ok, "a non-experimental question still compiles"
+  if receipt.plan == nil || receipt.plan.kind != "observe_only" {
+    throw "the compiler manufactured an A/B test"
+  }
+  const plan = receipt.plan
+  require plan.design.claim_strength == "none",
+    "research without observations makes no evidence claim"
+  require len(plan.instrumentation_questions) >= 4, "the plan names missing instrumentation"
+}
+
+fn test_fail_closed_boundaries() {
+  const trusted_risk = hypothesis_fixture_context()
+    + {
+    risk_floor: hypothesis_fixture_context().risk_floor + {touches_production: true},
+    approval_id: "approval-native-1",
+  }
+  const approval = compile_experiment_intent(hypothesis_fixture_intent(), trusted_risk)
+  require approval.ok, "risk escalation still compiles for review"
+  if approval.plan == nil || approval.plan.kind != "registered_experiment" {
+    throw "high-risk intent did not compile to a registered review plan"
+  }
+  require approval.plan.design.approval_required, "risk escalation requires approval"
+  require approval.plan.design.approval_id == "approval-native-1",
+    "the compiler preserves the host approval identity"
+  require approval.plan.execution_status == "requires_registered_host_adapter",
+    "approval remains an external execution precondition"
+  const unknown = compile_experiment_intent(
+    hypothesis_fixture_intent()
+      + {intervention: {adapter_id: "prompt", variant_id: "missing"}},
+    hypothesis_fixture_context(),
+  )
+  require !unknown.ok, "unregistered executable references fail closed"
+  if unknown.failure == nil {
+    throw "unknown adapter failure omitted diagnostics"
+  }
+  const unknown_diagnostic = unknown.failure.diagnostics[0]
+  if unknown_diagnostic == nil {
+    throw "unknown adapter failure emitted no diagnostic"
+  }
+  require unknown_diagnostic.code == "experiment.unknown_intervention",
+    "the deterministic diagnostic supports bounded planner repair"
+  const over_budget = hypothesis_fixture_context()
+    + {
+    budget_request: hypothesis_fixture_budget() + {max_spend_usd: 3.0},
+  }
+  const budget_receipt = compile_experiment_intent(hypothesis_fixture_intent(), over_budget)
+  require !budget_receipt.ok, "host budget ceilings are enforced during compilation"
+  if budget_receipt.failure == nil {
+    throw "budget failure omitted diagnostics"
+  }
+  const budget_diagnostic = budget_receipt.failure.diagnostics[0]
+  if budget_diagnostic == nil {
+    throw "budget failure emitted no diagnostic"
+  }
+  require budget_diagnostic.code == "experiment.budget_ceiling",
+    "budget rejection is machine-readable"
+  const missing_capability = hypothesis_fixture_context()
+    + {
+    capability_ceiling: hypothesis_fixture_capabilities() + {tools: []},
+  }
+  const capability_receipt = compile_experiment_intent(
+    hypothesis_fixture_intent(),
+    missing_capability,
+  )
+  require !capability_receipt.ok, "unenforceable host capabilities fail closed"
+  if capability_receipt.failure == nil {
+    throw "capability failure omitted diagnostics"
+  }
+  require capability_receipt.failure.kind == "unsafe_plan",
+    "capability refusal is distinct from invalid model data"
+  const baseline = hypothesis_fixture_intervention("baseline", 0)
+  const candidate = hypothesis_fixture_intervention("candidate", 1)
+  const rollback_context = hypothesis_fixture_context()
+    + {
+    catalog: hypothesis_fixture_context().catalog
+      + {
+      interventions: [
+        baseline
+          + {
+          capabilities: baseline.capabilities
+            + {
+            mutation: baseline.capabilities.mutation
+              + {rollback_adapter_id: "rollback-baseline"},
+          },
+        },
+        candidate
+          + {
+          capabilities: candidate.capabilities
+            + {
+            mutation: candidate.capabilities.mutation
+              + {rollback_adapter_id: "rollback-candidate"},
+          },
+        },
+      ],
+    },
+  }
+  const rollback_receipt = compile_experiment_intent(hypothesis_fixture_intent(), rollback_context)
+  require !rollback_receipt.ok, "different rollback owners fail closed"
+  require rollback_receipt.failure?.diagnostics?.[0]?.code
+    == "experiment.rollback_owner_mismatch",
+    "rollback-owner rejection is machine-readable"
+}
+
+pipeline default(harness: Harness, _task) {
+  test_executable_compile()
+  test_honest_non_experimental_compile()
+  test_fail_closed_boundaries()
+  harness.stdio.println("hypothesis-compiler-ok")
+}

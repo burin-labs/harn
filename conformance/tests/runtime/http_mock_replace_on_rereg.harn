@@ -1,0 +1,23 @@
+/**
+ * Re-registering http_mock with the same (method, url_pattern) replaces
+ * the prior mock. Lets tests override per-case responses without first
+ * calling harness.testing.http_mock_clear().
+ */
+pipeline default(harness: Harness, task) {
+  harness.testing.http_mock("GET", "https://api.example.com/x", {status: 200, body: "first"})
+  harness.testing.http_mock("GET", "https://api.example.com/x", {status: 429, body: "second"})
+  const r = harness.net.get("https://api.example.com/x")
+  harness.stdio.println(r.status)
+  harness.stdio.println(r.body)
+  // Different URL is unaffected by the replace above.
+  harness.testing.http_mock("GET", "https://api.example.com/y", {status: 201, body: "y-only"})
+  const other = harness.net.get("https://api.example.com/y")
+  harness.stdio.println(other.status)
+  harness.stdio.println(other.body)
+  // Different method on the same path is also independent.
+  harness.testing.http_mock("POST", "https://api.example.com/x", {status: 202, body: "post-x"})
+  const posted = harness.net.post("https://api.example.com/x", "{}", {})
+  harness.stdio.println(posted.status)
+  harness.stdio.println(posted.body)
+  harness.testing.http_mock_clear()
+}

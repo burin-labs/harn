@@ -1,0 +1,447 @@
+//! LLM provider trait and registry.
+//!
+//! Defines the `LlmProvider` trait that all LLM backends implement, plus a
+//! thread-local registry that tracks which providers are available. Provider
+//! dispatch happens in `api.rs` via `dispatch_to_registered_provider()`.
+
+use std::cell::RefCell;
+use std::collections::HashSet;
+
+use super::api::{DeltaSender, LlmRequestPayload, LlmResult};
+use crate::value::VmError;
+
+pub(crate) const FORCE_NATIVE_TOOL_SEARCH_OVERRIDE: &str = "force_native_tool_search";
+
+/// Source of an automatic provider inference decision.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ProviderInferenceSource {
+    /// The model id matched a transport/model prefix that Harn knows natively.
+    BuiltinRule,
+    /// No rule matched and the configured default provider was used.
+    DefaultFallback,
+}
+
+/// Result of resolving `provider: "auto"` from a model id.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ProviderInference {
+    pub provider: String,
+    pub source: ProviderInferenceSource,
+}
+
+impl ProviderInference {
+    pub(crate) fn builtin(provider: impl Into<String>) -> Self {
+        Self {
+            provider: provider.into(),
+            source: ProviderInferenceSource::BuiltinRule,
+        }
+    }
+
+    pub(crate) fn default(provider: impl Into<String>) -> Self {
+        Self {
+            provider: provider.into(),
+            source: ProviderInferenceSource::DefaultFallback,
+        }
+    }
+}
+
+/// Infer a provider from well-known provider/model id shapes.
+///
+/// This is the built-in rule set used after user-configured inference rules.
+/// It deliberately matches only one `/` for OpenRouter so provider-native paths
+/// with deeper resource hierarchies can fall through to explicit config rules
+/// or the default provider instead of being swallowed by OpenRouter.
+pub(crate) fn infer_provider_from_model_id(
+    model_id: &str,
+    default_provider: &str,
+) -> ProviderInference {
+    if model_id.starts_with("local:") || model_id.starts_with("ollama:") {
+        return ProviderInference::builtin("ollama");
+    }
+    if model_id.starts_with("huggingface:") || model_id.starts_with("hf:") {
+        return ProviderInference::builtin("huggingface");
+    }
+    if model_id.matches('/').count() == 1 {
+        return ProviderInference::builtin("openrouter");
+    }
+    if model_id.starts_with("claude-") {
+        return ProviderInference::builtin("anthropic");
+    }
+    if model_id.starts_with("gpt-")
+        || model_id.starts_with("o1")
+        || model_id.starts_with("o3")
+        || model_id.starts_with("o4")
+    {
+        return ProviderInference::builtin("openai");
+    }
+    if model_id.starts_with("gemini-") {
+        return ProviderInference::builtin("gemini");
+    }
+    if model_id.contains(':') {
+        return ProviderInference::builtin("ollama");
+    }
+    ProviderInference::default(default_provider)
+}
+
+/// Trait that all LLM providers implement.
+///
+/// Dispatch currently goes through concrete types in
+/// `api::dispatch_to_registered_provider`. The trait exists so that
+/// custom/external providers can be registered at runtime once the
+/// `provider_register()` Harn builtin is exposed.
+#[allow(dead_code)]
+pub(crate) trait LlmProvider {
+    /// Provider name (e.g. "anthropic", "openai", "ollama", "mock").
+    fn name(&self) -> &str;
+
+    /// Whether this provider/model supports any thinking mode.
+    fn supports_thinking(&self, model: &str) -> bool {
+        !super::capabilities::lookup(self.name(), model)
+            .thinking_modes
+            .is_empty()
+    }
+
+    /// Whether this is the mock provider (deterministic test responses, no API).
+    fn is_mock(&self) -> bool {
+        false
+    }
+
+    /// Whether this is a local provider (e.g. Ollama) that uses NDJSON streaming.
+    fn is_local(&self) -> bool {
+        false
+    }
+
+    /// Whether the provider requires a model to be specified.
+    fn requires_model(&self) -> bool {
+        true
+    }
+
+    /// Apply provider-specific transformations to the request body after it has
+    /// been built by `build_request_body()`. Default is a no-op.
+    fn transform_request(&self, _body: &mut serde_json::Value) {}
+
+    /// Whether this provider's native API accepts a `defer_loading: true`
+    /// flag on tool definitions — keeping their schema out of the model's
+    /// context until a tool-search call surfaces them. See Anthropic's tool
+    /// search docs and OpenAI's Responses API `tool_search` guide.
+    ///
+    /// Default impl reads from `capabilities.toml` so new providers and
+    /// new model generations ship as data, not code. Override only to
+    /// short-circuit the lookup (e.g. the mock provider, which the
+    /// capability layer already handles specially).
+    fn supports_defer_loading(&self, model: &str) -> bool {
+        super::capabilities::lookup(self.name(), model).defer_loading
+    }
+
+    /// Native tool-search variants this provider supports at the given
+    /// model. Reads the capabilities matrix:
+    ///   - `[]` — no native support; callers fall back to the client-
+    ///     executed search (harn#70).
+    ///   - `["bm25", "regex"]` — Anthropic's two
+    ///     `tool_search_tool_*_20251119` types.
+    ///   - `["hosted", "client"]` — OpenAI Responses API `tool_search`
+    ///     execution modes.
+    ///
+    /// Ordering is the provider's recommended default first. Callers
+    /// that don't care which variant they get pick element 0.
+    fn native_tool_search_variants(&self, model: &str) -> Vec<String> {
+        super::capabilities::lookup(self.name(), model).tool_search
+    }
+}
+
+/// Async chat operation. Uses explicit lifetime parameters because providers
+/// are constructed on-the-fly, to avoid RefCell-across-await issues.
+#[allow(dead_code)]
+pub(crate) trait LlmProviderChat: LlmProvider {
+    /// Execute an LLM chat call, optionally streaming text deltas.
+    fn chat<'a>(
+        &'a self,
+        request: &'a LlmRequestPayload,
+        delta_tx: Option<DeltaSender>,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<LlmResult, VmError>> + 'a>>;
+}
+
+thread_local! {
+    /// Thread-local for !Send VM compatibility. Provider objects are
+    /// constructed on-the-fly to avoid RefCell-across-await issues.
+    static PROVIDER_NAMES: RefCell<HashSet<String>> = RefCell::new(HashSet::new());
+    /// Whether the built-in roster has been installed on THIS thread.
+    ///
+    /// Tracked separately from `PROVIDER_NAMES` being non-empty: a thread that
+    /// registered a custom provider first would otherwise look "already
+    /// registered" and never receive the built-ins, silently demoting every
+    /// native route on that thread to the OpenAI-compatible fallback.
+    static DEFAULTS_REGISTERED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Register all built-in providers on the current thread.
+///
+/// Idempotent and cheap after the first call, so dispatch can self-heal rather
+/// than depend on a startup hook having run on whichever thread ends up serving
+/// a call.
+pub(crate) fn register_default_providers() {
+    if DEFAULTS_REGISTERED.with(std::cell::Cell::get) {
+        return;
+    }
+    DEFAULTS_REGISTERED.with(|flag| flag.set(true));
+    PROVIDER_NAMES.with(|names| {
+        let mut names = names.borrow_mut();
+        names.insert("mock".to_string());
+        names.insert("fake".to_string());
+        names.insert("anthropic".to_string());
+        names.insert("gemini".to_string());
+        names.insert("azure_openai".to_string());
+        names.insert("bedrock".to_string());
+        names.insert("ollama".to_string());
+        names.insert("vertex".to_string());
+        for name in [
+            "openai",
+            "openrouter",
+            "together",
+            "groq",
+            "cerebras",
+            "deepseek",
+            "fireworks",
+            "huggingface",
+            "mistral",
+            "cohere",
+            "xai",
+            "local",
+            "mlx",
+            "vllm",
+            "tgi",
+            "dashscope",
+            "minimax",
+            "zai",
+            "moonshot",
+            "baseten",
+            "deepinfra",
+            "sambanova",
+            "nebius",
+            "flexai",
+            "hyperbolic",
+            "siliconflow",
+            "parasail",
+            "atlas",
+        ] {
+            names.insert(name.to_string());
+        }
+    });
+}
+
+/// Register a custom provider name at runtime.
+#[allow(dead_code)]
+pub(crate) fn register_provider_name(name: &str) {
+    PROVIDER_NAMES.with(|names| {
+        names.borrow_mut().insert(name.to_string());
+    });
+}
+
+/// Check whether a named provider is registered.
+///
+/// Installs the built-in roster first. Registration is thread-local, and the
+/// thread that serves an `llm_call` is not necessarily the one that ran VM
+/// startup — without this, a built-in native route (Gemini, Vertex, Bedrock,
+/// Azure) answers "unregistered" and falls through to the OpenAI-compatible
+/// transport, which sends an OpenAI body to the native provider's URL.
+pub(crate) fn is_provider_registered(name: &str) -> bool {
+    register_default_providers();
+    PROVIDER_NAMES.with(|names| names.borrow().contains(name))
+}
+
+/// Return all registered provider names (used by diagnostics and tests).
+#[allow(dead_code)]
+pub(crate) fn registered_provider_names() -> Vec<String> {
+    PROVIDER_NAMES.with(|names| names.borrow().iter().cloned().collect())
+}
+
+/// Module-level dispatch for `LlmProvider::supports_defer_loading`.
+///
+/// Thin wrapper over `capabilities::lookup`. Kept as a named export
+/// because `options.rs` reads better with the predicate form than with
+/// an inline `.defer_loading` field access, and because custom
+/// providers registered at runtime (via `provider_register`) still
+/// flow through this function rather than carrying a trait object.
+pub(crate) fn provider_supports_defer_loading(provider: &str, model: &str) -> bool {
+    super::capabilities::lookup(provider, model).defer_loading
+}
+
+/// Module-level dispatch for `LlmProvider::native_tool_search_variants`.
+/// Reads the capability matrix — the single source of truth since
+/// `capabilities.toml` replaced the per-provider hard-coded gates.
+pub(crate) fn provider_tool_search_variants(provider: &str, model: &str) -> Vec<String> {
+    super::capabilities::lookup(provider, model).tool_search
+}
+
+/// Whether an OpenAI-shape request may emit per-tool search extensions.
+/// Capability support alone is insufficient: ordinary function-tool requests
+/// must stay free of these fields unless the request also carries the provider's
+/// `tool_search` meta-tool.
+pub(crate) fn openai_tool_search_wire_extensions_enabled(
+    provider: &str,
+    model: &str,
+    tools: &[serde_json::Value],
+    provider_overrides: Option<&serde_json::Value>,
+) -> bool {
+    let caps = super::capabilities::lookup(provider, model);
+    let route_supports_extensions =
+        caps.defer_loading && caps.tool_search.iter().any(|variant| variant == "hosted");
+    let native_search_forced = provider_overrides
+        .and_then(serde_json::Value::as_object)
+        .and_then(|overrides| overrides.get(FORCE_NATIVE_TOOL_SEARCH_OVERRIDE))
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    (route_supports_extensions || native_search_forced)
+        && tools
+            .iter()
+            .any(|tool| tool.get("type").and_then(serde_json::Value::as_str) == Some("tool_search"))
+}
+
+/// Apply caller-supplied provider body fields without serializing Harn controls.
+pub(crate) fn apply_provider_wire_overrides(
+    body: &mut serde_json::Value,
+    provider_overrides: Option<&serde_json::Value>,
+) {
+    let Some(overrides) = provider_overrides.and_then(serde_json::Value::as_object) else {
+        return;
+    };
+    for (key, value) in overrides {
+        if key != FORCE_NATIVE_TOOL_SEARCH_OVERRIDE {
+            body[key] = value.clone();
+        }
+    }
+}
+
+/// Shared helper message/request/response wire format. This is a model
+/// capability rather than a provider-name check so mock/proxy routes can
+/// exercise the same behavior as the hosted model family they emulate.
+pub(crate) fn provider_uses_anthropic_messages(provider: &str, model: &str) -> bool {
+    super::capabilities::lookup(provider, model)
+        .message_wire_format
+        .is_anthropic()
+}
+
+/// Whether shared helpers should preserve Google `generateContent` message
+/// parts, including native function calls and thought signatures.
+pub(crate) fn provider_uses_gemini_messages(provider: &str, model: &str) -> bool {
+    super::capabilities::lookup(provider, model)
+        .message_wire_format
+        .is_gemini()
+}
+
+/// Whether shared helpers should use Ollama's chat message quirks.
+pub(crate) fn provider_uses_ollama_messages(provider: &str, model: &str) -> bool {
+    super::capabilities::lookup(provider, model)
+        .message_wire_format
+        .is_ollama()
+}
+
+/// Whether native tool definitions should use Anthropic's `input_schema`
+/// shape instead of OpenAI-compatible `function.parameters`.
+pub(crate) fn provider_uses_anthropic_native_tools(provider: &str, model: &str) -> bool {
+    super::capabilities::lookup(provider, model).native_tool_wire_format == "anthropic"
+}
+
+/// Whether image content blocks may contain remote URLs for this route.
+pub(crate) fn provider_supports_image_urls(provider: &str, model: &str) -> bool {
+    super::capabilities::lookup(provider, model).image_url_input_supported
+}
+
+/// File upload API family for `std/files.upload`, when supported.
+pub(crate) fn provider_file_upload_wire_format(provider: &str) -> Option<String> {
+    super::capabilities::lookup(provider, "").file_upload_wire_format
+}
+
+/// Module-level dispatch for `LlmProvider::supports_thinking`.
+#[allow(dead_code)]
+pub(crate) fn provider_thinking_modes(provider: &str, model: &str) -> Vec<String> {
+    super::capabilities::lookup(provider, model).thinking_modes
+}
+
+/// Which wire shape to emit for the native tool-search meta-tool. Kept
+/// in one place so the options layer, the tools builder, and the
+/// response parser all agree on who emits what. Anthropic emits
+/// `tool_search_tool_*_20251119` meta-tools; OpenAI-shape providers
+/// emit `{"type": "tool_search"}`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum NativeToolSearchShape {
+    /// Anthropic's `{"type": "tool_search_tool_{bm25,regex}_20251119"}`.
+    Anthropic,
+    /// OpenAI Responses API's `{"type": "tool_search"}`.
+    OpenAi,
+}
+
+/// Native tool-search meta-tool shape, derived from capability flags.
+pub(crate) fn provider_native_tool_search_shape(
+    provider: &str,
+    model: &str,
+) -> NativeToolSearchShape {
+    let caps = super::capabilities::lookup(provider, model);
+    if caps.native_tool_wire_format == "anthropic"
+        || caps
+            .tool_search
+            .iter()
+            .any(|variant| variant == "bm25" || variant == "regex")
+    {
+        NativeToolSearchShape::Anthropic
+    } else {
+        NativeToolSearchShape::OpenAi
+    }
+}
+
+#[cfg(test)]
+mod registration_tests {
+    use super::*;
+
+    /// Provider registration is thread-local, but the thread that serves an
+    /// `llm_call` is not necessarily the one that ran VM startup. When a
+    /// built-in native provider answered "unregistered", dispatch fell through
+    /// to the OpenAI-compatible transport and sent an OpenAI-shaped body to the
+    /// native provider's base URL — observed live as `POST /v1beta/models` with
+    /// `{"messages": [...]}` for a `gemini` route. A fresh `std::thread` has
+    /// fresh thread-locals and has never run startup, so it reproduces exactly
+    /// that condition.
+    #[test]
+    fn builtin_providers_resolve_on_a_thread_that_never_ran_vm_startup() {
+        let unresolved: Vec<&str> = std::thread::spawn(|| {
+            [
+                "gemini",
+                "vertex",
+                "bedrock",
+                "azure_openai",
+                "anthropic",
+                "ollama",
+                "openai",
+            ]
+            .into_iter()
+            .filter(|name| !is_provider_registered(name))
+            .collect()
+        })
+        .join()
+        .expect("probe thread");
+        assert!(
+            unresolved.is_empty(),
+            "built-in providers must resolve on any dispatching thread; missing: {unresolved:?}"
+        );
+    }
+
+    /// The roster used to be installed only when the registry was empty, so a
+    /// thread that registered a custom provider first kept every built-in
+    /// unregistered for its whole life.
+    #[test]
+    fn a_custom_provider_registered_first_does_not_suppress_the_builtins() {
+        let (custom, builtin) = std::thread::spawn(|| {
+            register_provider_name("acme-proxy");
+            (
+                is_provider_registered("acme-proxy"),
+                is_provider_registered("gemini"),
+            )
+        })
+        .join()
+        .expect("probe thread");
+        assert!(custom, "custom provider registration must survive");
+        assert!(
+            builtin,
+            "registering a custom provider must not suppress the built-in roster"
+        );
+    }
+}

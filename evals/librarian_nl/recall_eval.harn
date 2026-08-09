@@ -1,0 +1,137 @@
+// Recall + p95 latency eval for std/code_librarian::code_librarian_query_nl (#2439).
+//
+// Public surface: `code_librarian_query_nl(harness, text, options?) -> dict`.
+//
+// Drives the 30-question NL fixture under the same canonical-Cypher
+// mock the unit test uses (so the eval is deterministic and adds zero
+// inference spend), and emits a per-question + aggregate JSON report:
+//
+//   {
+//     summary: {
+//       recall:           <ratio>,
+//       per_question:     {hits, expected},
+//       fallback_rate:    <ratio of MCTS-path responses>,
+//       latency_ms:       {p50, p95, p99, max},
+//       cache_hit_ratio:  <ratio when re-run on every NL>,
+//     },
+//     questions: [{id, nl, path, hits, expected, elapsed_ms, ...}, …],
+//   }
+//
+// Invoke via `npm run eval:librarian-nl` or directly:
+//   harn run evals/librarian_nl/recall_eval.harn
+import { code_librarian_query_nl } from "std/code_librarian"
+
+const CORPUS_ROOT = "crates/harn-hostlib/tests/fixtures/code_index_queries/corpus"
+
+// Path is resolved against `harn run`'s working directory (the worktree
+// root). Run via `npm run eval:librarian-nl` so the cwd is fixed.
+const FIXTURE_PATH = "crates/harn-hostlib/tests/fixtures/code_index_queries/queries_nl.json"
+
+fn _row_value(row, key) {
+  if type_of(row) != "dict" {
+    return ""
+  }
+  const v = row[key]
+  if v == nil {
+    return ""
+  }
+  return to_string(v)
+}
+
+fn _hits(rows, expected, match_key) {
+  let n = 0
+  for want in expected {
+    let hit = false
+    for r in rows {
+      if !hit {
+        if _row_value(r, match_key) == want {
+          hit = true
+        }
+      }
+    }
+    if hit {
+      n = n + 1
+    }
+  }
+  return n
+}
+
+fn _percentile(sorted_ms, p) {
+  const n = len(sorted_ms)
+  if n == 0 {
+    return 0
+  }
+  const idx = to_int(to_float(n - 1) * p)
+  return sorted_ms[idx]
+}
+
+pipeline run(harness: Harness, task) {
+  const _ = harness.code_index.rebuild({root: CORPUS_ROOT})
+  const fixture = json_parse(harness.fs.read_text(FIXTURE_PATH))
+  const questions = fixture.questions
+  let per_question = []
+  let latencies = []
+  let total_expected = 0
+  let total_found = 0
+  let fallback_count = 0
+  let cache_hit_count = 0
+  for q in questions {
+    harness.llm.mock_push_scope()
+    const mock_text = "{\"cypher\": \"" + q.cypher + "\"}"
+    harness.llm.mock_enqueue(
+      {data: {cypher: q.cypher}, model: "mock", provider: "mock", text: mock_text},
+    )
+    const r1 = code_librarian_query_nl(harness, q.nl)
+    // Second invocation tests cache; the cache key is the NL text and
+    // the namespace TTL is 5m so this hits.
+    const r2 = code_librarian_query_nl(harness, q.nl)
+    harness.llm.mock_pop_scope()
+    const hits = _hits(r1.rows, q.expected, q.match_key)
+    total_expected = total_expected + len(q.expected)
+    total_found = total_found + hits
+    if r1.path == "mcts" {
+      fallback_count = fallback_count + 1
+    }
+    if r2.cache_hit {
+      cache_hit_count = cache_hit_count + 1
+    }
+    latencies = latencies + [r1.elapsed_ms]
+    per_question = per_question
+      + [
+      {
+        cache_hit_on_replay: r2.cache_hit,
+        elapsed_ms: r1.elapsed_ms,
+        expected: len(q.expected),
+        hits: hits,
+        id: q.id,
+        mcts_depth: r1.mcts_depth,
+        mcts_expansions: r1.mcts_expansions,
+        nl: q.nl,
+        path: r1.path,
+      },
+    ]
+  }
+  const sorted_ms = latencies.sorted()
+  const p50 = _percentile(sorted_ms, 0.5)
+  const p95 = _percentile(sorted_ms, 0.95)
+  const p99 = _percentile(sorted_ms, 0.99)
+  let max_ms = 0
+  for ms in sorted_ms {
+    max_ms = max(max_ms, ms)
+  }
+  const recall = to_float(total_found) / to_float(total_expected)
+  const fallback_rate = to_float(fallback_count) / to_float(len(questions))
+  const cache_hit_ratio = to_float(cache_hit_count) / to_float(len(questions))
+  const report = {
+    questions: per_question,
+    summary: {
+      cache_hit_ratio: cache_hit_ratio,
+      fallback_rate: fallback_rate,
+      latency_ms: {max: max_ms, p50: p50, p95: p95, p99: p99},
+      per_question: {expected: total_expected, hits: total_found},
+      recall: recall,
+    },
+  }
+  harness.stdio.println(json_stringify(report))
+  return report
+}

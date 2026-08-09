@@ -1,0 +1,493 @@
+import { plan_assignments, realize_assignment } from "std/eval/experiment/assignment"
+import { decide_experiment } from "std/eval/experiment/decision"
+import {
+  HypothesisEventAuthorityKind,
+  HypothesisLedgerEvent,
+  HypothesisLedgerRecord,
+  compile_experiment_intent,
+  hypothesis_event,
+  hypothesis_ledger_project,
+  hypothesis_report,
+} from "std/eval/hypothesis"
+import {
+  hypothesis_fixture_context,
+  hypothesis_fixture_intent,
+} from "./hypothesis_fixture_lib.harn"
+
+fn content(
+  event_id: string,
+  hypothesis_id: string,
+  plan_id: string?,
+  run_id: string?,
+  predecessor_fingerprint: string?,
+  payload,
+) {
+  return {
+    schema: "harn.hypothesis.event.v1",
+    schema_version: 1,
+    event_id: event_id,
+    hypothesis_id: hypothesis_id,
+    plan_id: plan_id,
+    run_id: run_id,
+    predecessor_fingerprint: predecessor_fingerprint,
+    occurred_at: "2026-08-08T00:00:00Z",
+    actor: "conformance",
+    source: "local",
+    payload: payload,
+  }
+}
+
+fn authority_kind(event: HypothesisLedgerEvent) -> HypothesisEventAuthorityKind {
+  if event.content.payload.kind == "plan_registered" {
+    return "plan_admission"
+  }
+  if event.content.payload.kind == "approval_recorded" {
+    return "native_approval"
+  }
+  if event.content.payload.kind == "observation_recorded" {
+    return "native_observation"
+  }
+  return "lifecycle_audit"
+}
+
+fn record(
+  cursor: int,
+  event: HypothesisLedgerEvent,
+  plan_fingerprint: string,
+) -> HypothesisLedgerRecord {
+  return {
+    cursor: cursor,
+    record_hash: "sha256:" + sha256(event.fingerprint + ":" + to_string(cursor)),
+    authority_kind: authority_kind(event),
+    authority_plan_fingerprint: plan_fingerprint,
+    event: event,
+  }
+}
+
+fn append_checked(
+  records: list<HypothesisLedgerRecord>,
+  event: HypothesisLedgerEvent,
+  plan_fingerprint: string,
+) -> list<HypothesisLedgerRecord> {
+  const updated = records + [record(len(records) + 1, event, plan_fingerprint)]
+  const _ = hypothesis_ledger_project(updated, event.content.hypothesis_id)
+  return updated
+}
+
+fn verify_approval_gate() {
+  const intent = hypothesis_fixture_intent()
+    + {
+    question: "Does the production candidate improve bounded success?",
+    hypothesis: "The production candidate improves bounded success.",
+    null_hypothesis: "The production candidate does not improve bounded success.",
+  }
+  const context = hypothesis_fixture_context()
+    + {
+    approval_id: "approval-production-1",
+    risk_floor: hypothesis_fixture_context().risk_floor + {touches_production: true},
+  }
+  const compiled = compile_experiment_intent(intent, context)
+  if compiled.plan == nil || compiled.plan.kind != "registered_experiment" {
+    throw "approval fixture did not compile to a registered experiment"
+  }
+  const plan = compiled.plan
+  const registered = hypothesis_event(
+    content(
+      "approval-plan",
+      plan.hypothesis_id,
+      plan.plan_id,
+      nil,
+      nil,
+      {kind: "plan_registered", plan: plan},
+    ),
+  )
+  let records = append_checked([], registered, plan.fingerprint)
+  const scheduled_without_approval = hypothesis_event(
+    content(
+      "approval-schedule-without-review",
+      plan.hypothesis_id,
+      plan.plan_id,
+      "approval-run",
+      registered.fingerprint,
+      {kind: "run_transition", state: "scheduled", reason: nil, receipt_ids: []},
+    ),
+  )
+  require is_err(
+    try {
+      append_checked(records, scheduled_without_approval, plan.fingerprint)
+    },
+  ),
+    "a risk-bearing plan cannot schedule before host approval"
+  const approval = hypothesis_event(
+    content(
+      "approval-recorded",
+      plan.hypothesis_id,
+      plan.plan_id,
+      nil,
+      registered.fingerprint,
+      {
+        kind: "approval_recorded",
+        approval_id: "approval-production-1",
+        plan_fingerprint: plan.fingerprint,
+        decision: "approved",
+        rationale: "Native host approval granted for this exact plan fingerprint.",
+      },
+    ),
+  )
+  records = append_checked(records, approval, plan.fingerprint)
+  const scheduled = hypothesis_event(
+    content(
+      "approval-scheduled",
+      plan.hypothesis_id,
+      plan.plan_id,
+      "approval-run",
+      approval.fingerprint,
+      {kind: "run_transition", state: "scheduled", reason: nil, receipt_ids: []},
+    ),
+  )
+  const _ = append_checked(records, scheduled, plan.fingerprint)
+}
+
+fn verify_observe_only_gate() {
+  const intent = hypothesis_fixture_intent()
+    + {
+    question: "Which instrumentation should precede an experiment?",
+    hypothesis: "The missing instrumentation can be identified.",
+    null_hypothesis: "No useful instrumentation can be identified.",
+    requested_lane: "non_experimental_research",
+    requested_evidence: "observational",
+    intervention: nil,
+    comparator: nil,
+    assignment_unit: nil,
+    population_id: nil,
+    outcome_ids: [],
+  }
+  const compiled = compile_experiment_intent(intent, hypothesis_fixture_context())
+  if compiled.plan == nil || compiled.plan.kind != "observe_only" {
+    throw "observe-only lifecycle fixture did not compile"
+  }
+  const plan = compiled.plan
+  const registered = hypothesis_event(
+    content(
+      "observe-only-plan",
+      plan.hypothesis_id,
+      plan.plan_id,
+      nil,
+      nil,
+      {kind: "plan_registered", plan: plan},
+    ),
+  )
+  const records = append_checked([], registered, plan.fingerprint)
+  const scheduled = hypothesis_event(
+    content(
+      "observe-only-scheduled",
+      plan.hypothesis_id,
+      plan.plan_id,
+      "observe-only-run",
+      registered.fingerprint,
+      {kind: "run_transition", state: "scheduled", reason: nil, receipt_ids: []},
+    ),
+  )
+  require is_err(
+    try {
+      append_checked(records, scheduled, plan.fingerprint)
+    },
+  ),
+    "observe-only plans cannot enter executable run states"
+}
+
+fn verify_bounded_observation_scale() {
+  const base_context = hypothesis_fixture_context()
+  const budget = base_context.budget_request
+  const compiled = compile_experiment_intent(
+    hypothesis_fixture_intent(),
+    base_context + {budget_request: budget, budget_ceiling: budget},
+  )
+  if compiled.plan == nil || compiled.plan.kind != "registered_experiment" {
+    throw "scale fixture did not compile to a registered experiment"
+  }
+  const plan = compiled.plan
+  const hypothesis_id = plan.hypothesis_id
+  const registered = hypothesis_event(
+    content(
+      "scale-plan",
+      hypothesis_id,
+      plan.plan_id,
+      nil,
+      nil,
+      {kind: "plan_registered", plan: plan},
+    ),
+  )
+  let records = append_checked([], registered, plan.fingerprint)
+  const scheduled = hypothesis_event(
+    content(
+      "scale-scheduled",
+      hypothesis_id,
+      plan.plan_id,
+      "scale-run",
+      registered.fingerprint,
+      {kind: "run_transition", state: "scheduled", reason: nil, receipt_ids: []},
+    ),
+  )
+  records = append_checked(records, scheduled, plan.fingerprint)
+  const running = hypothesis_event(
+    content(
+      "scale-running",
+      hypothesis_id,
+      plan.plan_id,
+      "scale-run",
+      scheduled.fingerprint,
+      {kind: "run_transition", state: "running", reason: nil, receipt_ids: []},
+    ),
+  )
+  records = append_checked(records, running, plan.fingerprint)
+  let predecessor = running.fingerprint
+  for trial_index in range(0, 32) {
+    const assignment = plan_assignments(
+      plan.registration,
+      "a",
+      trial_index,
+      {host: "host-a", time_slot: "scale-slot"},
+    )
+    const observation = {
+      arm_id: "candidate",
+      case_id: "a",
+      trial_index: trial_index,
+      metrics: [{id: "success", baseline: 0.0, treatment: 1.0}],
+      baseline_assignment: realize_assignment(assignment, "baseline", assignment.blocking_values),
+      candidate_assignment: realize_assignment(assignment, "candidate", assignment.blocking_values),
+    }
+    const observed = hypothesis_event(
+      content(
+        "scale-observation-" + to_string(trial_index),
+        hypothesis_id,
+        plan.plan_id,
+        "scale-run",
+        predecessor,
+        {
+          kind: "observation_recorded",
+          observation_id: "scale-observation-" + to_string(trial_index),
+          observation: observation,
+          spend_delta_usd: 0.0,
+          compute_delta_ms: 0,
+          token_delta: 0,
+          api_call_delta: 0,
+          telemetry_status: "observed",
+          capability_degradations: [],
+        },
+      ),
+    )
+    records = append_checked(records, observed, plan.fingerprint)
+    predecessor = observed.fingerprint
+  }
+  const snapshot = hypothesis_ledger_project(records, hypothesis_id)
+  require snapshot.observation_count == 32 && len(snapshot.receipt_ids) == 64,
+    "the bounded maximum observation history projects each unique assignment receipt"
+  require snapshot.observed_arms == ["baseline", "candidate"],
+    "scaled projection preserves stable first-seen arm ordering"
+}
+
+pipeline default(harness: Harness, _task) {
+  const compiled = compile_experiment_intent(
+    hypothesis_fixture_intent(),
+    hypothesis_fixture_context(),
+  )
+  if compiled.plan == nil || compiled.plan.kind != "registered_experiment" {
+    throw "fixture did not compile to a registered experiment"
+  }
+  const plan = compiled.plan
+  const hypothesis_id = plan.hypothesis_id
+  const registered = hypothesis_event(
+    content(
+      "event-plan",
+      hypothesis_id,
+      plan.plan_id,
+      nil,
+      nil,
+      {kind: "plan_registered", plan: plan},
+    ),
+  )
+  let records = append_checked([], registered, plan.fingerprint)
+  const scheduled = hypothesis_event(
+    content(
+      "event-scheduled",
+      hypothesis_id,
+      plan.plan_id,
+      "run-1",
+      registered.fingerprint,
+      {kind: "run_transition", state: "scheduled", reason: nil, receipt_ids: []},
+    ),
+  )
+  records = append_checked(records, scheduled, plan.fingerprint)
+  const running = hypothesis_event(
+    content(
+      "event-running",
+      hypothesis_id,
+      plan.plan_id,
+      "run-1",
+      scheduled.fingerprint,
+      {kind: "run_transition", state: "running", reason: nil, receipt_ids: ["receipt-start"]},
+    ),
+  )
+  records = append_checked(records, running, plan.fingerprint)
+  const assignment = plan_assignments(
+    plan.registration,
+    "a",
+    0,
+    {host: "host-a", time_slot: "slot-1"},
+  )
+  const observation = {
+    arm_id: "candidate",
+    case_id: "a",
+    trial_index: 0,
+    metrics: [{id: "success", baseline: 0.0, treatment: 1.0}],
+    baseline_assignment: realize_assignment(assignment, "baseline", assignment.blocking_values),
+    candidate_assignment: realize_assignment(assignment, "candidate", assignment.blocking_values),
+  }
+  const observed = hypothesis_event(
+    content(
+      "event-observation",
+      hypothesis_id,
+      plan.plan_id,
+      "run-1",
+      running.fingerprint,
+      {
+        kind: "observation_recorded",
+        observation_id: "observation-1",
+        observation: observation,
+        spend_delta_usd: 0.02,
+        compute_delta_ms: 100,
+        token_delta: 40,
+        api_call_delta: 1,
+        telemetry_status: "observed",
+        capability_degradations: [],
+      },
+    ),
+  )
+  records = append_checked(records, observed, plan.fingerprint)
+  const duplicate = hypothesis_event(
+    content(
+      "event-observation-duplicate",
+      hypothesis_id,
+      plan.plan_id,
+      "run-1",
+      observed.fingerprint,
+      observed.content.payload,
+    ),
+  )
+  require is_err(
+    try {
+      append_checked(records, duplicate, plan.fingerprint)
+    },
+  ),
+    "an observation identity is admitted once"
+  const duplicate_cell = hypothesis_event(
+    content(
+      "event-observation-duplicate-cell",
+      hypothesis_id,
+      plan.plan_id,
+      "run-1",
+      observed.fingerprint,
+      {
+        kind: "observation_recorded",
+        observation_id: "observation-2",
+        observation: observation,
+        spend_delta_usd: 0.02,
+        compute_delta_ms: 100,
+        token_delta: 40,
+        api_call_delta: 1,
+        telemetry_status: "observed",
+        capability_degradations: [],
+      },
+    ),
+  )
+  require is_err(
+    try {
+      append_checked(records, duplicate_cell, plan.fingerprint)
+    },
+  ),
+    "an immutable arm/case/trial cell is admitted once even under a new observation id"
+  const completed = hypothesis_event(
+    content(
+      "event-completed",
+      hypothesis_id,
+      plan.plan_id,
+      "run-1",
+      observed.fingerprint,
+      {kind: "run_transition", state: "completed", reason: "budget", receipt_ids: []},
+    ),
+  )
+  records = append_checked(records, completed, plan.fingerprint)
+  const canonical_decision = decide_experiment(
+    plan.registration,
+    {observations: [observation], phase_spend_usd: 0.02, budget_spent: true},
+  )
+  const decision = hypothesis_event(
+    content(
+      "event-decision",
+      hypothesis_id,
+      plan.plan_id,
+      "run-1",
+      completed.fingerprint,
+      {
+        kind: "decision_recorded",
+        decision: canonical_decision,
+        summary: "The registered evidence did not resolve the decision.",
+        belief_before: 0.5,
+        belief_after: 0.55,
+        decision_utility: 0.0,
+        elapsed_ms: 100,
+        can_conclude: ["one assigned paired observation was recorded"],
+        cannot_conclude: ["the candidate is better"],
+        follow_up: "Run the remaining registered trial budget.",
+      },
+    ),
+  )
+  records = append_checked(records, decision, plan.fingerprint)
+  const drift = hypothesis_event(
+    content(
+      "event-drift",
+      hypothesis_id,
+      plan.plan_id,
+      "run-1",
+      decision.fingerprint,
+      {
+        kind: "execution_drift",
+        path: "placement.host_identity",
+        planned: "observed",
+        actual: "unavailable",
+        severity: "warning",
+        reason: "host telemetry was not exposed <script>alert('x')</script>",
+      },
+    ),
+  )
+  records = append_checked(records, drift, plan.fingerprint)
+  const snapshot = hypothesis_ledger_project(records, hypothesis_id)
+  require snapshot.event_count == 7 && snapshot.observation_count == 1,
+    "the single-pass projection preserves every admitted lifecycle fact"
+  require snapshot.total_spend_usd == 0.02 && snapshot.run_state == "completed",
+    "the projection preserves spend and terminal state"
+  const report = hypothesis_report(snapshot)
+  require contains(report.markdown, "## What actually executed")
+    && contains(
+    report.markdown,
+    "Cannot conclude:",
+  ),
+    "the report separates execution from claim limits"
+  require !contains(report.markdown, "<script>") && contains(report.markdown, "&lt;script&gt;"),
+    "persisted narrative cannot inject raw HTML into the report"
+  verify_approval_gate()
+  verify_observe_only_gate()
+  verify_bounded_observation_scale()
+  const bypass = try {
+    harness.obs.event_log_emit_idempotent(
+      "hypotheses.events.v1",
+      "hypothesis.run_transition",
+      "raw-writer-bypass",
+      {},
+      {},
+    )
+  }
+  require is_err(bypass), "the reserved hypothesis topic rejects generic writers"
+  harness.stdio.println("hypothesis-ledger-ok")
+}

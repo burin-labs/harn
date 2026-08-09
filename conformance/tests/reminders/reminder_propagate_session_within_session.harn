@@ -1,0 +1,31 @@
+import { agent_session_apply_reminder_post_turn } from "std/agent/state"
+
+pipeline main(harness: Harness) {
+  const session = harness.agent.open("reminder-propagate-session-within-session")
+  harness.agent.reset(session)
+  harness.agent.inject(
+    session,
+    transcript_reminder_event(
+      {
+        body: "stays in session",
+        tags: ["session"],
+        dedupe_key: "session",
+        propagate: "session",
+        ttl_turns: 5,
+      },
+    ),
+  )
+  const after_inject = transcript_events_by_kind(harness.agent.snapshot(session), "system_reminder")
+  // Advance two turns. Session-scoped reminders survive within the same
+  // session as long as their TTL has not lapsed.
+  agent_session_apply_reminder_post_turn(harness.agent, session, 1)
+  agent_session_apply_reminder_post_turn(harness.agent, session, 2)
+  const after_turns = transcript_events_by_kind(harness.agent.snapshot(session), "system_reminder")
+  harness.stdio.println(len(after_inject))
+  harness.stdio.println(after_inject[0].reminder.propagate)
+  harness.stdio.println(after_inject[0].reminder.ttl_turns)
+  harness.stdio.println(len(after_turns))
+  harness.stdio.println(after_turns[0].reminder.body)
+  // Two post-turn decrements should leave the TTL at 3.
+  harness.stdio.println(after_turns[0].reminder.ttl_turns)
+}

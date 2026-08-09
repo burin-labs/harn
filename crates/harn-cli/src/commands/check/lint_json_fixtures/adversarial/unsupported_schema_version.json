@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 2,
+  "ok": true,
+  "data": {
+    "files": [],
+    "summary": {
+      "ok": 0,
+      "warnings": 0,
+      "errors": 0,
+      "diagnostics": 0,
+      "fixable": 0,
+      "fixed": 0
+    }
+  },
+  "error": null,
+  "warnings": []
+}

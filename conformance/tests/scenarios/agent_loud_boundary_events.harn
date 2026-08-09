@@ -1,0 +1,122 @@
+import { agent_loop } from "std/agent/loop"
+// Every boundary between model bytes and executed action is loud (harn#5142).
+//
+// The class this pins: a dialect the parser does not recognize used to degrade
+// to prose with zero calls, zero violations, and zero events, so stall
+// detection and the rate governor read a harness failure as model pathology.
+// The invariant is that such a loss always produces a typed `boundary_failure`
+// carrying WHERE it happened and WHO owns it — never silence.
+//
+// The negative cases matter as much as the positive ones: a funnel that fires
+// on ordinary prose gets muted, and a muted funnel is the silence it replaced.
+import { llm_text, with_llm_script } from "std/testing"
+
+fn echo_tools() {
+  const registry = tool_registry()
+  return tool_define(
+    registry,
+    "echo",
+    "Echo a message",
+    {
+      parameters: {msg: {type: "string"}},
+      handler: { args -> "echoed: " + to_string(args?.msg ?? "") },
+    },
+  )
+}
+
+/** Count `boundary_failure` events for one boundary, and remember one owner. */
+fn observe_boundary(
+  agent: HarnessAgent,
+  runtime: HarnessRuntime,
+  session_id: string,
+  boundary: string,
+) -> dict {
+  const seen = runtime.atomic(0)
+  const owner_is_harness = runtime.atomic(0)
+  const owner_is_policy = runtime.atomic(0)
+  const carried_excerpt = runtime.atomic(0)
+  agent.subscribe(
+    session_id,
+    { ev ->
+      if ev?.type == "boundary_failure" && ev?.boundary == boundary {
+        const _ = runtime.atomic_add(seen, 1)
+        if ev?.owner == "harness" {
+          const _ = runtime.atomic_set(owner_is_harness, 1)
+        }
+        if ev?.owner == "policy" {
+          const _ = runtime.atomic_set(owner_is_policy, 1)
+        }
+        if to_string(ev?.excerpt ?? "") != "" {
+          const _ = runtime.atomic_set(carried_excerpt, 1)
+        }
+      }
+    },
+  )
+  return {
+    seen: seen,
+    owner_is_harness: owner_is_harness,
+    owner_is_policy: owner_is_policy,
+    carried_excerpt: carried_excerpt,
+  }
+}
+
+fn run_text_turn(harness: Harness, session_id: string, reply: string) {
+  with_llm_script(
+    harness.llm,
+    [llm_text(reply), llm_text("##DONE##")],
+    { ->
+      const _ = agent_loop(
+        harness,
+        "Call echo once.",
+        nil,
+        {
+          provider: "mock",
+          session_id: session_id,
+          tools: echo_tools(),
+          tool_format: "text",
+          loop_until_done: true,
+          done_sentinel: "##DONE##",
+          max_iterations: 3,
+        },
+      )
+    },
+  )
+}
+
+pipeline test(harness: Harness, task) {
+  // 1. The #5142 case. `<tool>` is not in the grammar, so the turn produces no
+  //    calls. It must not produce silence either.
+  const unknown_session = "loud-boundary-unknown-" + harness.random.uuid()
+  const unknown = observe_boundary(
+    harness.agent,
+    harness.runtime,
+    unknown_session,
+    "text_tool_parse",
+  )
+  run_text_turn(harness, unknown_session, "<tool>\necho({ msg: \"hi\" })\n</tool>")
+  assert(
+    harness.runtime.atomic_get(unknown.seen) >= 1,
+    "an unrecognized tool dialect must emit a text_tool_parse boundary_failure",
+  )
+  assert(
+    harness.runtime.atomic_get(unknown.owner_is_harness) == 1,
+    "a parse loss is owned by the harness, never attributed to the model",
+  )
+  assert(
+    harness.runtime.atomic_get(unknown.carried_excerpt) == 1,
+    "the event carries the bytes that died",
+  )
+  // 2. A well-formed call in the SAME grammar dispatches, so there is no loss
+  //    and no event. This is the control that keeps the funnel from crying wolf.
+  const good_session = "loud-boundary-good-" + harness.random.uuid()
+  const good = observe_boundary(harness.agent, harness.runtime, good_session, "text_tool_parse")
+  run_text_turn(harness, good_session, "<tool_call>\necho({ msg: \"hi\" })\n</tool_call>")
+  assert(harness.runtime.atomic_get(good.seen) == 0, "a parsed turn must not emit boundary noise")
+  // 3. Plain prose is consumed by the parser too, but consuming narration is
+  //    not a loss. Only the shape verdict can tell the two apart, which is why
+  //    the event is emitted above the parser rather than inside it.
+  const prose_session = "loud-boundary-prose-" + harness.random.uuid()
+  const prose = observe_boundary(harness.agent, harness.runtime, prose_session, "text_tool_parse")
+  run_text_turn(harness, prose_session, "Let me think about this before acting. ##DONE##")
+  assert(harness.runtime.atomic_get(prose.seen) == 0, "ordinary prose must not emit boundary noise")
+}

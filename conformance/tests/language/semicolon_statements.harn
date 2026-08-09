@@ -1,0 +1,23 @@
+fn first() {
+  return "one"
+}
+
+fn second() {
+  return "two"
+}
+
+skill deploy {
+  description "Ship it"
+  prompt "Follow the runbook."
+}
+
+pipeline test(harness: Harness, task) {
+  const x = 1
+  const y = 2
+  const meta = skill_find(deploy, "deploy")
+  assert(first() == "one", "first function should parse on one line")
+  assert(second() == "two", "second function should parse on one line")
+  assert(x + y == 3, "semicolon should separate let bindings")
+  assert(meta.prompt == "Follow the runbook.", "skill fields should accept semicolons")
+  harness.stdio.log("semicolon statements passed")
+}

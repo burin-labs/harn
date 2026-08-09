@@ -1,0 +1,55 @@
+pub fn provider_id() {
+  return "slack"
+}
+
+pub fn kinds() {
+  return ["webhook"]
+}
+
+pub fn payload_schema() {
+  return {
+    harn_schema_name: "SlackEventPayload",
+    json_schema: {type: "object", additionalProperties: true},
+  }
+}
+
+pub fn init(_harness: Harness, ctx) {
+  if ctx.provider_id != "slack" {
+    throw "unexpected provider id"
+  }
+}
+
+pub fn activate(harness: Harness, bindings) {
+  harness.obs.metrics_inc("slack_contract_activations", len(bindings))
+}
+
+pub fn normalize_inbound(_harness: Harness, raw) {
+  const body = raw.body_json ?? json_parse(raw.body_text)
+  if body.type == "url_verification" {
+    return {
+      type: "immediate_response",
+      immediate_response: {
+        status: 200,
+        headers: {"content-type": "text/plain; charset=utf-8"},
+        body: body.challenge,
+      },
+    }
+  }
+  return {
+    type: "event",
+    event: {
+      kind: if body.event.type == "message" && body.event.channel_type == "channel" {
+        "message.channels"
+      } else {
+        body.event.type
+      },
+      dedupe_key: body.event_id,
+      payload: body,
+      signature_status: {state: "verified"},
+    },
+  }
+}
+
+pub fn call(_harness: Harness, method, _args) {
+  throw "method_not_found:" + method
+}

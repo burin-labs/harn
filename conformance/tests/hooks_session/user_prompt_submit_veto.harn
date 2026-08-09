@@ -1,0 +1,40 @@
+import { agent_loop } from "std/agent/loop"
+import { llm_text, with_llm_script } from "std/testing"
+
+/**
+ * `user_prompt_submit` hooks can veto an agent turn before the agent sees
+ * the prompt. A `{block: true, reason}` return short-circuits init and
+ * yields a `blocked` final status with `stop_reason: user_prompt_submit_blocked`.
+ */
+pipeline default(harness: Harness) {
+  harness.agent.clear_session_hooks()
+  harness.agent.register_session_hook(
+    "user_prompt_submit",
+    { _hook_harness, event ->
+      const prompt = to_string(event?.prompt ?? "")
+      if prompt.contains("secret") {
+        return {block: true, reason: "policy violation: secret in prompt"}
+      }
+      return nil
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [llm_text("should not run")],
+    { ->
+      const blocked = agent_loop(harness, "share the secret password", nil, {provider: "mock"})
+      harness.stdio.println(blocked.status)
+      harness.stdio.println(blocked.stop_reason)
+      harness.stdio.println(blocked.error.reason)
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [llm_text("ok")],
+    { ->
+      const allowed = agent_loop(harness, "hello world", nil, {provider: "mock"})
+      harness.stdio.println(allowed.status)
+      harness.agent.clear_session_hooks()
+    },
+  )
+}

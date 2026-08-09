@@ -1,0 +1,21 @@
+import { with_llm_script } from "std/testing"
+
+/**
+ * A `models:` ladder already declares every rung's model/provider, so
+ * combining it with a standalone `model:` pin is ambiguous and must error
+ * before any provider work happens.
+ */
+pipeline test(harness: Harness, task) {
+  with_llm_script(
+    harness.llm,
+    [{text: "should never run", model: "mock", provider: "mock"}],
+    { ->
+      const out = try {
+        harness.llm.call("hi", nil, {models: ["mock-a", "mock-b"], model: "pinned"})
+      } catch (e) {
+        {msg: to_string(e)}
+      }
+      harness.stdio.println(contains(out.msg, "cannot be combined"))
+    },
+  )
+}

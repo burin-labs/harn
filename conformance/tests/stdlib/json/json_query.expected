@@ -1,0 +1,15 @@
+Ada
+9
+["ada@example.com","bob@example.com","cy@example.com"]
+["Bob","Cy"]
+3
+["count","next"]
+[true,36,"ada@example.com","Ada",9]
+array
+["Ada","Bob","Cy"]
+["ada@example.com","cy@example.com"]
+["Ada","Cy"]
+["Bob"]
+{"age":36,"name":"Ada"}
+[3,null]
+["ada@example.com","bob@example.com","cy@example.com"]

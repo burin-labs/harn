@@ -1,0 +1,9 @@
+pipeline test(harness: Harness, task) {
+  // Register a deny hook for a specific pattern
+  harness.tools.register_hook({pattern: "blocked_*", deny: "this tool is blocked"})
+  // Register a post-hook that limits output size
+  harness.tools.register_hook({pattern: "*", max_output: 100})
+  // Clear hooks should work without error
+  harness.tools.clear_hooks()
+  harness.stdio.log("hooks registered and cleared")
+}

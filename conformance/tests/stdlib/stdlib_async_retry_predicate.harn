@@ -1,0 +1,10 @@
+import { retry_predicate_with_backoff } from "std/async"
+
+pipeline default(harness: Harness) {
+  const ok = retry_predicate_with_backoff(harness.clock, 1, 0, fn() { return "ready" })
+  const exhausted = retry_predicate_with_backoff(harness.clock, 2, 0, fn() { return false })
+  harness.stdio.println(is_ok(ok))
+  harness.stdio.println(unwrap(ok))
+  harness.stdio.println(is_ok(exhausted))
+  harness.stdio.println(unwrap_err(exhausted))
+}

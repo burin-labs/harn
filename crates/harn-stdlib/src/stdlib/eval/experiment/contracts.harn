@@ -1,0 +1,600 @@
+/**
+ * Closed contracts and frozen registration for generic controlled experiments.
+ *
+ * Arm configuration is deliberately opaque: Harn freezes it, while the
+ * executing host validates and interprets its keys. Metric observations remain
+ * in declared units; bounded ranges make anytime-valid inference possible.
+ */
+import { VersionedContract, versioned_contract, versioned_descriptor } from "std/artifacts/typed"
+import { ArtifactDescriptor } from "std/run_artifacts"
+import {
+  SchemaContract,
+  SchemaContractFailure,
+  ValidationIssue,
+  schema_any,
+  schema_closed_object,
+  schema_contract,
+  schema_contract_check,
+  schema_dict,
+  schema_enum,
+  schema_float,
+  schema_int,
+  schema_list,
+  schema_literal,
+  schema_string,
+  validation_issue,
+  validation_rule,
+} from "std/schema"
+
+pub type MetricDirection = "up" | "down"
+
+pub type AlarmKind = "absolute" | "percentage"
+
+pub type ExperimentPhase = "iterate" | "gate"
+
+pub type ExperimentArm = {id: string, config: dict<string, unknown>, complexity: int}
+
+pub type MetricBounds = {lo: float, hi: float}
+
+pub type ExperimentMetric = {id: string, direction: MetricDirection, bounds: MetricBounds}
+
+pub type GuardrailAlarm = {kind: AlarmKind, threshold: float}
+
+pub type ExperimentGuardrail = {
+  id: string,
+  direction: MetricDirection,
+  bounds: MetricBounds,
+  alarm: GuardrailAlarm,
+}
+
+pub type ExperimentMetrics = {primary: ExperimentMetric, guardrails: list<ExperimentGuardrail>}
+
+pub type ExperimentDecisionPolicy = {delta: float, epsilon: float, ladder: list<int>}
+
+pub type ExperimentBudget = {max_spend_usd: float, max_trials_per_case: int}
+
+pub type AssignmentPolicy = {mode: "randomized_block", seed: string, blocking_factors: list<string>}
+
+pub type CaseSet = {id: string, digest: string, cases: list<string>}
+
+pub type ExperimentSplitPolicy = {iterate: CaseSet, gate: CaseSet, promotion: "explicit"}
+
+pub type ExperimentManifest = {
+  schema: "harn.experiment.v1",
+  experiment_id: string,
+  hypothesis: string,
+  owner: string,
+  baseline: ExperimentArm,
+  candidates: list<ExperimentArm>,
+  decision: ExperimentDecisionPolicy,
+  metrics: ExperimentMetrics,
+  assignment: AssignmentPolicy,
+  splits: ExperimentSplitPolicy,
+  budget: ExperimentBudget,
+}
+
+pub type ExperimentValidationContext = {
+  supported_blocking_factors: list<string>,
+  host_identity_available: bool,
+}
+
+pub type ExperimentRegistration = {
+  schema: "harn.experiment.registration.v1",
+  schema_version: int,
+  registration_id: string,
+  manifest_digest: string,
+  phase: ExperimentPhase,
+  experiment_id: string,
+  hypothesis: string,
+  owner: string,
+  baseline: ExperimentArm,
+  candidates: list<ExperimentArm>,
+  decision: ExperimentDecisionPolicy,
+  metrics: ExperimentMetrics,
+  assignment: AssignmentPolicy,
+  case_set: CaseSet,
+  gate_case_set: CaseSet,
+  budget: ExperimentBudget,
+  min_trials_per_case: int,
+  prior_spend_usd: float,
+  promoted_from?: string,
+  promoted_arm?: string,
+}
+
+pub type PromotionReceipt = {
+  schema: "harn.experiment.promotion.v1",
+  promotion_id: string,
+  source_registration_id: string,
+  source_decision_id: string,
+  promoted_arm: string,
+  gate_registration_id: string,
+}
+
+fn __opaque_config_schema() -> dict {
+  return schema_dict(schema_any())
+}
+
+fn __arm_schema() -> dict {
+  return schema_closed_object(
+    {id: schema_string(), config: __opaque_config_schema(), complexity: schema_int()},
+  )
+}
+
+fn __bounds_schema() -> dict {
+  return schema_closed_object({lo: schema_float(), hi: schema_float()})
+}
+
+fn __metric_schema() -> dict {
+  return schema_closed_object(
+    {id: schema_string(), direction: schema_enum(["up", "down"]), bounds: __bounds_schema()},
+  )
+}
+
+fn __guardrail_schema() -> dict {
+  return schema_closed_object(
+    {
+      id: schema_string(),
+      direction: schema_enum(["up", "down"]),
+      bounds: __bounds_schema(),
+      alarm: schema_closed_object(
+        {kind: schema_enum(["absolute", "percentage"]), threshold: schema_float()},
+      ),
+    },
+  )
+}
+
+fn __case_set_schema() -> dict {
+  return schema_closed_object(
+    {id: schema_string(), digest: schema_string(), cases: schema_list(schema_string())},
+  )
+}
+
+fn __manifest_schema() -> Schema<ExperimentManifest> {
+  return schema_closed_object(
+    {
+      schema: schema_literal("harn.experiment.v1"),
+      experiment_id: schema_string(),
+      hypothesis: schema_string(),
+      owner: schema_string(),
+      baseline: __arm_schema(),
+      candidates: schema_list(__arm_schema()),
+      decision: schema_closed_object(
+        {delta: schema_float(), epsilon: schema_float(), ladder: schema_list(schema_int())},
+      ),
+      metrics: schema_closed_object(
+        {primary: __metric_schema(), guardrails: schema_list(__guardrail_schema())},
+      ),
+      assignment: schema_closed_object(
+        {
+          mode: schema_literal("randomized_block"),
+          seed: schema_string(),
+          blocking_factors: schema_list(schema_string()),
+        },
+      ),
+      splits: schema_closed_object(
+        {
+          iterate: __case_set_schema(),
+          gate: __case_set_schema(),
+          promotion: schema_literal("explicit"),
+        },
+      ),
+      budget: schema_closed_object(
+        {max_spend_usd: schema_float(), max_trials_per_case: schema_int()},
+      ),
+    },
+  )
+}
+
+fn __nonempty_issue(value: string, path: string) -> ValidationIssue? {
+  if trim(value) != "" {
+    return nil
+  }
+  return validation_issue("experiment.required", path + " must be non-empty", path)
+}
+
+fn __append_issue(issues: list<ValidationIssue>, issue: ValidationIssue?) -> list<ValidationIssue> {
+  if issue == nil {
+    return issues
+  }
+  return issues + [issue]
+}
+
+fn __bounds_issues(bounds: MetricBounds, path: string) -> list<ValidationIssue> {
+  if bounds.lo < bounds.hi {
+    return []
+  }
+  return [
+    validation_issue(
+      "experiment.metric_bounds",
+      path + ".lo must be less than " + path + ".hi",
+      path,
+    ),
+  ]
+}
+
+fn __metric_issues(manifest: ExperimentManifest) -> list<ValidationIssue> {
+  let issues: list<ValidationIssue> = []
+  issues = __append_issue(
+    issues,
+    __nonempty_issue(manifest.metrics.primary.id, "metrics.primary.id"),
+  )
+  issues = issues + __bounds_issues(manifest.metrics.primary.bounds, "metrics.primary.bounds")
+  let seen: dict<string, bool> = {[manifest.metrics.primary.id]: true}
+  let index = 0
+  for guardrail in manifest.metrics.guardrails {
+    const path = "metrics.guardrails[" + to_string(index) + "]"
+    issues = __append_issue(issues, __nonempty_issue(guardrail.id, path + ".id"))
+    issues = issues + __bounds_issues(guardrail.bounds, path + ".bounds")
+    if seen[guardrail.id] ?? false {
+      issues = issues
+        + [
+        validation_issue("experiment.duplicate_metric", "metric ids must be unique", path + ".id"),
+      ]
+    }
+    seen = seen + {[guardrail.id]: true}
+    if guardrail.alarm.threshold <= 0.0 {
+      issues = issues
+        + [
+        validation_issue(
+          "experiment.alarm_threshold",
+          "guardrail alarm thresholds must be positive",
+          path + ".alarm.threshold",
+        ),
+      ]
+    }
+    index = index + 1
+  }
+  return issues
+}
+
+fn __arm_issues(manifest: ExperimentManifest) -> list<ValidationIssue> {
+  let issues: list<ValidationIssue> = []
+  issues = __append_issue(issues, __nonempty_issue(manifest.baseline.id, "baseline.id"))
+  if manifest.baseline.complexity < 0 {
+    issues = issues
+      + [
+      validation_issue(
+        "experiment.arm_complexity",
+        "arm complexity must be nonnegative",
+        "baseline.complexity",
+      ),
+    ]
+  }
+  if len(manifest.candidates) == 0 {
+    issues = issues
+      + [
+      validation_issue(
+        "experiment.candidates",
+        "at least one candidate arm is required",
+        "candidates",
+      ),
+    ]
+  }
+  let seen: dict<string, bool> = {[manifest.baseline.id]: true}
+  let index = 0
+  for arm in manifest.candidates {
+    const path = "candidates[" + to_string(index) + "]"
+    issues = __append_issue(issues, __nonempty_issue(arm.id, path + ".id"))
+    if seen[arm.id] ?? false {
+      issues = issues
+        + [
+        validation_issue(
+          "experiment.duplicate_arm",
+          "baseline and candidate arm ids must be unique",
+          path + ".id",
+        ),
+      ]
+    }
+    seen = seen + {[arm.id]: true}
+    if arm.complexity < 0 {
+      issues = issues
+        + [
+        validation_issue(
+          "experiment.arm_complexity",
+          "arm complexity must be nonnegative",
+          path + ".complexity",
+        ),
+      ]
+    }
+    index = index + 1
+  }
+  return issues
+}
+
+fn __policy_issues(manifest: ExperimentManifest) -> list<ValidationIssue> {
+  let issues: list<ValidationIssue> = []
+  if manifest.decision.delta <= 0.0 || manifest.decision.delta >= 1.0 {
+    issues = issues
+      + [
+      validation_issue("experiment.delta", "decision.delta must be in (0, 1)", "decision.delta"),
+    ]
+  }
+  const primary_width = manifest.metrics.primary.bounds.hi
+  -manifest.metrics.primary.bounds.lo
+  if manifest.decision.epsilon <= 0.0 || manifest.decision.epsilon >= primary_width {
+    issues = issues
+      + [
+      validation_issue(
+        "experiment.epsilon",
+        "decision.epsilon must be positive and smaller than the primary metric range",
+        "decision.epsilon",
+      ),
+    ]
+  }
+  let previous = 0
+  for rung in manifest.decision.ladder {
+    if rung <= previous {
+      issues = issues
+        + [
+        validation_issue(
+          "experiment.ladder",
+          "decision.ladder must be non-empty, positive, and strictly increasing",
+          "decision.ladder",
+        ),
+      ]
+      break
+    }
+    previous = rung
+  }
+  if len(manifest.decision.ladder) == 0 {
+    issues = issues
+      + [
+      validation_issue("experiment.ladder", "decision.ladder must be non-empty", "decision.ladder"),
+    ]
+  }
+  if manifest.budget.max_spend_usd <= 0.0 {
+    issues = issues
+      + [
+      validation_issue(
+        "experiment.spend_budget",
+        "budget.max_spend_usd must be positive",
+        "budget.max_spend_usd",
+      ),
+    ]
+  }
+  if manifest.budget.max_trials_per_case < previous {
+    issues = issues
+      + [
+      validation_issue(
+        "experiment.trial_ceiling",
+        "budget.max_trials_per_case must cover the deepest ladder rung",
+        "budget.max_trials_per_case",
+      ),
+    ]
+  }
+  return issues
+}
+
+fn __case_set_issues(case_set: CaseSet, path: string) -> list<ValidationIssue> {
+  let issues: list<ValidationIssue> = []
+  issues = __append_issue(issues, __nonempty_issue(case_set.id, path + ".id"))
+  issues = __append_issue(issues, __nonempty_issue(case_set.digest, path + ".digest"))
+  if len(case_set.cases) == 0 {
+    issues = issues
+      + [
+      validation_issue("experiment.case_set", path + ".cases must be non-empty", path + ".cases"),
+    ]
+  }
+  let seen: dict<string, bool> = {}
+  let index = 0
+  for case_id in case_set.cases {
+    if trim(case_id) == "" || (seen[case_id] ?? false) {
+      issues = issues
+        + [
+        validation_issue(
+          "experiment.case_set",
+          path + ".cases must contain unique non-empty ids",
+          path + ".cases[" + to_string(index) + "]",
+        ),
+      ]
+    }
+    seen = seen + {[case_id]: true}
+    index = index + 1
+  }
+  return issues
+}
+
+fn __manifest_rules(manifest: ExperimentManifest) -> list<ValidationIssue> {
+  let issues: list<ValidationIssue> = []
+  issues = __append_issue(issues, __nonempty_issue(manifest.experiment_id, "experiment_id"))
+  issues = __append_issue(issues, __nonempty_issue(manifest.hypothesis, "hypothesis"))
+  issues = __append_issue(issues, __nonempty_issue(manifest.owner, "owner"))
+  issues = issues + __arm_issues(manifest)
+  issues = issues + __metric_issues(manifest)
+  issues = issues + __policy_issues(manifest)
+  issues = issues + __case_set_issues(manifest.splits.iterate, "splits.iterate")
+  issues = issues + __case_set_issues(manifest.splits.gate, "splits.gate")
+  if manifest.splits.iterate.digest == manifest.splits.gate.digest {
+    issues = issues
+      + [
+      validation_issue(
+        "experiment.split_alias",
+        "iterate and gate case sets must have different digests",
+        "splits",
+      ),
+    ]
+  }
+  for case_id in manifest.splits.iterate.cases {
+    if manifest.splits.gate.cases.contains(case_id) {
+      issues = issues
+        + [
+        validation_issue(
+          "experiment.split_overlap",
+          "iterate and gate case sets must be disjoint",
+          "splits",
+        ),
+      ]
+      break
+    }
+  }
+  return issues
+}
+
+/**
+ * Closed structural contract for `harn.experiment.v1`.
+ *
+ * Opaque arm config maps are the sole open objects. Every experiment-owned
+ * record rejects unknown fields.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn experiment_manifest_contract() -> SchemaContract<ExperimentManifest> {
+  return schema_contract(
+    __manifest_schema(),
+    [validation_rule("experiment_manifest", __manifest_rules)],
+  )
+}
+
+fn __blocking_issues(
+  manifest: ExperimentManifest,
+  context: ExperimentValidationContext,
+) -> list<ValidationIssue> {
+  let issues: list<ValidationIssue> = []
+  let seen: dict<string, bool> = {}
+  let index = 0
+  for factor in manifest.assignment.blocking_factors {
+    if trim(factor) == "" || (seen[factor] ?? false) {
+      issues = issues
+        + [
+        validation_issue(
+          "experiment.blocking_factor",
+          "blocking factors must be unique non-empty ids",
+          "assignment.blocking_factors[" + to_string(index) + "]",
+        ),
+      ]
+    } else if !context.supported_blocking_factors.contains(factor) {
+      issues = issues
+        + [
+        validation_issue(
+          "experiment.unknown_blocking_factor",
+          "the executing host does not support blocking factor '" + factor + "'",
+          "assignment.blocking_factors[" + to_string(index) + "]",
+        ),
+      ]
+    }
+    seen = seen + {[factor]: true}
+    index = index + 1
+  }
+  if context.host_identity_available && !manifest.assignment.blocking_factors.contains("host") {
+    issues = issues
+      + [
+      validation_issue(
+        "experiment.host_block_required",
+        "host must be a blocking factor when host identity is available",
+        "assignment.blocking_factors",
+      ),
+    ]
+  }
+  return issues
+}
+
+/**
+ * Validate an untrusted manifest once at its owning boundary.
+ *
+ * The context is host capability, not experiment policy. It lets a portable
+ * host reject factors it cannot realize without teaching Harn machine topology.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn validate_experiment_manifest(
+  value: unknown,
+  context: ExperimentValidationContext,
+) -> Result<ExperimentManifest, SchemaContractFailure> {
+  const checked = schema_contract_check(value, experiment_manifest_contract())
+  if !is_ok(checked) {
+    return checked
+  }
+  const manifest = unwrap(checked)
+  const issues = __blocking_issues(manifest, context)
+  if len(issues) > 0 {
+    return Err(
+      {
+        kind: "rule_failed",
+        detail: to_string(len(issues)) + " validation issue(s)",
+        issues: issues,
+      },
+    )
+  }
+  return Ok(manifest)
+}
+
+fn __digest(value: unknown) -> string {
+  return "harn-value-v1:" + to_string(hash_value(value))
+}
+
+fn __case_set_for_phase(manifest: ExperimentManifest, phase: ExperimentPhase) -> CaseSet {
+  if phase == "gate" {
+    return manifest.splits.gate
+  }
+  return manifest.splits.iterate
+}
+
+/**
+ * Freeze a validated manifest into immutable run state.
+ *
+ * The editable source manifest is never reread. `phase = "gate"` is rejected:
+ * only `promote_experiment` can construct a gate registration.
+ *
+ * @effects: []
+ * @errors: [validation]
+ */
+pub fn register_experiment(manifest: ExperimentManifest) -> ExperimentRegistration {
+  const minimum_trials = manifest.decision.ladder[0]
+  if minimum_trials == nil {
+    throw "std/eval/experiment: validated decision ladder is empty"
+  }
+  const manifest_digest = __digest(manifest)
+  const identity = {
+    manifest_digest: manifest_digest,
+    phase: "iterate",
+    case_set: manifest.splits.iterate,
+  }
+  return {
+    schema: "harn.experiment.registration.v1",
+    schema_version: 1,
+    registration_id: "expreg-" + to_string(hash_value(identity)),
+    manifest_digest: manifest_digest,
+    phase: "iterate",
+    experiment_id: manifest.experiment_id,
+    hypothesis: manifest.hypothesis,
+    owner: manifest.owner,
+    baseline: manifest.baseline,
+    candidates: manifest.candidates,
+    decision: manifest.decision,
+    metrics: manifest.metrics,
+    assignment: manifest.assignment,
+    case_set: __case_set_for_phase(manifest, "iterate"),
+    gate_case_set: manifest.splits.gate,
+    budget: manifest.budget,
+    min_trials_per_case: minimum_trials,
+    prior_spend_usd: 0.0,
+  }
+}
+
+/**
+ * Durable typed contract for frozen registrations.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn experiment_registration_contract() -> VersionedContract<ExperimentRegistration> {
+  return versioned_contract(
+    "harn.experiment.registration",
+    1,
+    schema_contract(schema_of(ExperimentRegistration), []),
+  )
+}
+
+/**
+ * Reusable descriptor for a frozen registration artifact.
+ *
+ * @effects: []
+ * @errors: [validation]
+ */
+pub fn experiment_registration_descriptor(
+  name: string = "experiment-registration.json",
+) -> ArtifactDescriptor<ExperimentRegistration> {
+  return versioned_descriptor(name, experiment_registration_contract())
+}

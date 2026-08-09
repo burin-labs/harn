@@ -1,0 +1,29 @@
+import { agent_loop } from "std/agent/loop"
+import { llm_text, with_llm_script } from "std/testing"
+
+pipeline default(harness: Harness) {
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text("<user_response>The answer is 4.</user_response>\n<done>##DONE##</done>"),
+      {error: {category: "generic", message: "structured output is unavailable"}},
+    ],
+    { ->
+      const result = agent_loop(
+        harness,
+        "What is 2 + 2?",
+        nil,
+        {
+          provider: "mock",
+          loop_until_done: true,
+          max_iterations: 2,
+          done_judge: {fail_open_on_error: true},
+        },
+      )
+      harness.stdio.println(result.status)
+      harness.stdio.println(result.visible_text)
+      harness.stdio.println(result.llm.iterations)
+      harness.stdio.println(len(harness.llm.mock_calls()))
+    },
+  )
+}

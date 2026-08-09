@@ -1,0 +1,45 @@
+import { agent_loop } from "std/agent/loop"
+import { AgentSpec } from "std/agent/options"
+import { llm_text, llm_tool_call, with_llm_script } from "std/testing"
+
+fn on_delta_tools() {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "note",
+    "Record a note",
+    {
+      handler: { _args -> "noted" },
+      parameters: {text: {type: "string", description: "Note text"}},
+      returns: {type: "string"},
+    },
+  )
+  return tools
+}
+
+pipeline default(harness: Harness) {
+  with_llm_script(
+    harness.llm,
+    [llm_tool_call("note", {text: "remember"}), llm_text("All done.")],
+    { ->
+      const opts: AgentSpec = {
+        provider: "mock",
+        tools: on_delta_tools(),
+        tool_format: "native",
+        loop_until_done: true,
+        max_iterations: 3,
+        on_delta: { delta -> harness.stdio.println("delta=[" + delta + "]") },
+      }
+      const result = agent_loop(harness, "take a note then finish", nil, opts)
+      const calls = harness.llm.mock_calls()
+      harness.stdio.println(result.status)
+      harness.stdio.println(len(calls))
+      harness.stdio.println(contains(json_stringify(calls[1].messages), "noted"))
+    },
+  )
+}
+// `on_delta` must not perturb tool dispatch. The streaming seam preserves the
+// full turn result (native tool calls + usage), so the first turn's native tool
+// call is dispatched normally and its result feeds the second turn. The
+// tool-call turn carries no visible text, so it fires no delta; the closing text
+// turn streams its one delta.

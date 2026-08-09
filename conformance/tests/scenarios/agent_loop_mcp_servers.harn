@@ -1,0 +1,81 @@
+import { agent_loop } from "std/agent/loop"
+import { AgentSpec } from "std/agent/options"
+import { parse_jsonl } from "std/jsonl"
+import { process_shell } from "std/runtime"
+import { llm_text, with_llm_script } from "std/testing"
+import { resolve_harn_bin, wait_for_file_content, wait_for_log_match } from "../_common.harn"
+
+pipeline default(harness: Harness) {
+  const root = harness.fs.workspace_root()
+  const helper_dir = path_join(root, "conformance/helpers")
+  const server_script = path_join(helper_dir, "mcp_echo_server.harn")
+  const harn_bin = harness.env.get_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(harness, root))
+  const state_dir = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-agent-loop-mcp-" + harness.random.uuid(),
+  )
+  const state_path = path_join(state_dir, "state.jsonl")
+  const pid_path = path_join(state_dir, "server.pid")
+  const log_path = path_join(state_dir, "server.log")
+  harness.fs.mkdir(state_dir)
+  const start = process_shell(
+    harness.process,
+    "HARN_MCP_ECHO_STATE_FILE=\"" + state_path + "\" \"" + harn_bin
+      + "\" serve mcp --transport http --bind 127.0.0.1:0 \""
+      + server_script
+      + "\" >\""
+      + log_path
+      + "\" 2>&1 & echo $! > \""
+      + pid_path
+      + "\"",
+  )
+  require start?.success, "MCP mock server started"
+  const url = wait_for_log_match(harness, log_path, "MCP workflow server ready on (http://[^\\s]+)")
+  require url != nil, "timed out waiting for MCP server readiness"
+  with_llm_script(
+    harness.llm,
+    [
+      {
+        text: "Calling MCP tools.",
+        tool_calls: [
+          {id: "mcp1", name: "remote__echo", arguments: {message: "hello from remote"}},
+          {id: "mcp2", name: "mirror__echo", arguments: {message: "hello from mirror"}},
+        ],
+      },
+      llm_text("<done>##DONE##</done>"),
+    ],
+    { ->
+      const opts: AgentSpec = {
+        provider: "mock",
+        tool_format: "native",
+        max_iterations: 3,
+        mcp_servers: [
+          {name: "remote", transport: "http", url: url},
+          {name: "mirror", transport: "http", url: url},
+        ],
+      }
+      const result = agent_loop(harness, "Use both MCP echo tools", nil, opts)
+      const calls = wait_for_file_content(
+        harness.clock,
+        harness.fs,
+        state_path,
+        { text ->
+          const parsed = parse_jsonl(text)
+          if len(parsed) >= 2 {
+            return parsed
+          }
+          return nil
+        },
+      )
+      require calls != nil, "timed out waiting for MCP server to record both echo tool calls"
+      process_shell(harness.process, "kill $(cat \"" + pid_path + "\") >/dev/null 2>&1 || true")
+      harness.stdio.println(result.tools.successful[0])
+      harness.stdio.println(result.tools.successful[1])
+      harness.stdio.println(len(calls))
+      harness.stdio.println(calls[0].name)
+      harness.stdio.println(calls[0].arguments.message)
+      harness.stdio.println(calls[1].name)
+      harness.stdio.println(calls[1].arguments.message)
+    },
+  )
+}

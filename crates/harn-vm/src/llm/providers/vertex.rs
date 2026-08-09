@@ -1,0 +1,561 @@
+//! Google Vertex AI Gemini provider.
+//!
+//! Vertex exposes Gemini through `projects/{project}/locations/{location}/...`
+//! routes and Google OAuth bearer tokens. The request mapper keeps Harn's
+//! canonical OpenAI-like message list at the boundary and emits Vertex
+//! `generateContent` JSON.
+
+use crate::llm::api::{DeltaSender, LlmRequestPayload, LlmResult};
+use crate::llm::provider::{LlmProvider, LlmProviderChat};
+use crate::llm::providers::common::{apply_provider_overrides, maybe_emit_delta, vm_err};
+use crate::url_encoding::percent_encode_component;
+use crate::value::VmError;
+
+pub(crate) struct VertexProvider;
+
+#[derive(Debug, serde::Deserialize)]
+struct ServiceAccountKey {
+    client_email: String,
+    private_key: String,
+    #[serde(default)]
+    token_uri: Option<String>,
+    #[serde(default)]
+    project_id: Option<String>,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct ServiceAccountClaims<'a> {
+    iss: &'a str,
+    scope: &'a str,
+    aud: &'a str,
+    exp: usize,
+    iat: usize,
+}
+
+impl VertexProvider {
+    fn dialect() -> crate::llm::api::DialectContract {
+        crate::llm::api::DialectContract::new(
+            crate::llm::capabilities::WireDialect::Gemini,
+            Some(crate::llm::capabilities::LiveEndpointFamily::GeminiGenerateContent),
+        )
+    }
+
+    pub(crate) fn build_request_body(request: &LlmRequestPayload) -> serde_json::Value {
+        // Vertex speaks the same generateContent dialect as the Gemini API, so
+        // delegate the body shaping (multimodal parts, tool-call history,
+        // generationConfig sampling params, tools/toolConfig) to the canonical
+        // Gemini builder — mirroring how Azure delegates to the OpenAI builder.
+        // The previous hand-rolled copy here silently flattened messages to
+        // text (dropping image/pdf/audio parts and function-call history) and
+        // omitted seed/penalty/logprobs params. Only the genuinely
+        // vertex-specific envelope differences are adjusted below.
+        let mut body = Self::dialect().build_request_body(request);
+
+        // Vertex-specific: assistant prefill is emulated with a trailing
+        // `model` turn. The shared builder never emits one (the gemini
+        // capability rows declare no prefill support).
+        if let Some(prefill) = request.prefill.as_deref().filter(|text| !text.is_empty()) {
+            if let Some(contents) = body["contents"].as_array_mut() {
+                contents.push(serde_json::json!({
+                    "role": "model",
+                    "parts": [{"text": prefill}],
+                }));
+            }
+        }
+
+        // Vertex-specific: structured output rides `responseSchema` (the
+        // OpenAPI-subset field Vertex documents) rather than the Gemini API's
+        // `responseJsonSchema`.
+        if let Some(config) = body["generationConfig"].as_object_mut() {
+            if let Some(schema) = config.remove("responseJsonSchema") {
+                config.insert("responseSchema".to_string(), schema);
+            }
+        }
+
+        body
+    }
+
+    pub(crate) fn endpoint_url(request: &LlmRequestPayload) -> Result<String, VmError> {
+        let project = crate::stdlib::process::session_env_var("VERTEX_AI_PROJECT")?
+            .or(crate::stdlib::process::session_env_var(
+                "GOOGLE_CLOUD_PROJECT",
+            )?)
+            .map(Ok)
+            .unwrap_or_else(service_account_project)
+            .map_err(|_| vm_err("Vertex AI project is not configured; set VERTEX_AI_PROJECT"))?;
+        let location = crate::stdlib::process::session_env_var("VERTEX_AI_LOCATION")?
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| "us-central1".to_string());
+        let pdef = crate::llm_config::provider_config("vertex");
+        let base_url = pdef
+            .as_ref()
+            .map(crate::llm_config::resolve_base_url)
+            .unwrap_or_else(|| "https://aiplatform.googleapis.com/v1".to_string());
+        let base_url = base_url.trim_end_matches('/');
+        let wire_model = crate::llm_config::wire_model_id(&request.model);
+        let model = if wire_model.starts_with("projects/") {
+            wire_model
+        } else {
+            format!(
+                "projects/{}/locations/{}/publishers/google/models/{}",
+                percent_encode_component(&project),
+                percent_encode_component(&location),
+                percent_encode_component(&wire_model)
+            )
+        };
+        Ok(format!("{base_url}/{model}:generateContent"))
+    }
+
+    async fn bearer_token(api_key: &str) -> Result<String, VmError> {
+        for env_name in ["VERTEX_AI_ACCESS_TOKEN", "GOOGLE_OAUTH_ACCESS_TOKEN"] {
+            if let Some(token) = crate::stdlib::process::session_env_var(env_name)? {
+                if !token.trim().is_empty() {
+                    return Ok(token);
+                }
+            }
+        }
+        if !api_key.trim().is_empty() && !api_key.trim().starts_with('/') {
+            return Ok(api_key.to_string());
+        }
+        let key_path =
+            crate::stdlib::process::session_env_var("GOOGLE_APPLICATION_CREDENTIALS")?
+            .filter(|value| !value.trim().is_empty())
+            .or_else(|| (!api_key.trim().is_empty()).then(|| api_key.to_string()))
+            .ok_or_else(|| {
+                vm_err(
+                    "Missing Vertex AI credentials: set VERTEX_AI_ACCESS_TOKEN or GOOGLE_APPLICATION_CREDENTIALS",
+                )
+            })?;
+        exchange_service_account_token(&key_path).await
+    }
+
+    pub(crate) async fn chat_impl(
+        &self,
+        request: &LlmRequestPayload,
+        delta_tx: Option<DeltaSender>,
+    ) -> Result<LlmResult, VmError> {
+        let dialect = Self::dialect();
+        let url = Self::endpoint_url(request)?;
+        let token = Self::bearer_token(&request.api_key).await?;
+        let mut body = Self::build_request_body(request);
+        apply_provider_overrides(&mut body, request.provider_overrides.as_ref());
+        let response = crate::llm::blocking_client_for_base_url(&url)
+            .post(url)
+            .header("Content-Type", "application/json")
+            .header("Authorization", format!("Bearer {token}"))
+            .timeout(std::time::Duration::from_secs(request.resolve_timeout()))
+            .json(&body)
+            .send()
+            .await
+            .map_err(|error| {
+                vm_err(format!(
+                    "vertex API error: {}",
+                    crate::egress::redact_reqwest_error(&error)
+                ))
+            })?;
+        if !response.status().is_success() {
+            return Err(crate::llm::api::err_for_non_success_with_dialect(
+                dialect, "vertex", response,
+            )
+            .await);
+        }
+        let json: serde_json::Value = response
+            .json()
+            .await
+            .map_err(|error| vm_err(format!("vertex response parse error: {error}")))?;
+        let result = dialect.parse_response(&json, request, false)?;
+        maybe_emit_delta(delta_tx, &result.text);
+        Ok(result)
+    }
+}
+
+impl LlmProvider for VertexProvider {
+    fn name(&self) -> &'static str {
+        "vertex"
+    }
+}
+
+impl LlmProviderChat for VertexProvider {
+    fn chat<'a>(
+        &'a self,
+        request: &'a LlmRequestPayload,
+        delta_tx: Option<DeltaSender>,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<LlmResult, VmError>> + 'a>> {
+        Box::pin(self.chat_impl(request, delta_tx))
+    }
+}
+
+fn service_account_project() -> Result<String, VmError> {
+    let path = crate::stdlib::process::session_env_var("GOOGLE_APPLICATION_CREDENTIALS")?
+        .ok_or_else(|| vm_err("GOOGLE_APPLICATION_CREDENTIALS is not set"))?;
+    let key = read_service_account_key(&path)?;
+    key.project_id
+        .filter(|project| !project.trim().is_empty())
+        .ok_or_else(|| vm_err("service account JSON does not contain project_id"))
+}
+
+fn read_service_account_key(path: &str) -> Result<ServiceAccountKey, VmError> {
+    let text = std::fs::read_to_string(path)
+        .map_err(|error| vm_err(format!("failed to read service account JSON: {error}")))?;
+    serde_json::from_str(&text)
+        .map_err(|error| vm_err(format!("failed to parse service account JSON: {error}")))
+}
+
+async fn exchange_service_account_token(path: &str) -> Result<String, VmError> {
+    let key = read_service_account_key(path)?;
+    let token_uri = key
+        .token_uri
+        .as_deref()
+        .unwrap_or("https://oauth2.googleapis.com/token");
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|error| vm_err(format!("system clock error: {error}")))?
+        .as_secs() as usize;
+    let claims = ServiceAccountClaims {
+        iss: &key.client_email,
+        scope: "https://www.googleapis.com/auth/cloud-platform",
+        aud: token_uri,
+        iat: now,
+        exp: now + 3600,
+    };
+    let jwt = jsonwebtoken::encode(
+        &jsonwebtoken::Header::new(jsonwebtoken::Algorithm::RS256),
+        &claims,
+        &jsonwebtoken::EncodingKey::from_rsa_pem(key.private_key.as_bytes())
+            .map_err(|error| vm_err(format!("invalid service account private key: {error}")))?,
+    )
+    .map_err(|error| vm_err(format!("failed to sign service account JWT: {error}")))?;
+    let response = crate::llm::shared_utility_client()
+        .post(token_uri)
+        .form(&[
+            ("grant_type", "urn:ietf:params:oauth:grant-type:jwt-bearer"),
+            ("assertion", jwt.as_str()),
+        ])
+        .send()
+        .await
+        .map_err(|error| {
+            vm_err(format!(
+                "service account token exchange failed: {}",
+                crate::egress::redact_reqwest_error(&error)
+            ))
+        })?;
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        return Err(vm_err(format!(
+            "service account token exchange HTTP {status}: {body}"
+        )));
+    }
+    let json: serde_json::Value = response.json().await.map_err(|error| {
+        vm_err(format!(
+            "service account token response parse error: {error}"
+        ))
+    })?;
+    json["access_token"]
+        .as_str()
+        .map(str::to_string)
+        .ok_or_else(|| vm_err("service account token response did not include access_token"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::llm::api::{LlmRequestPayload, ThinkingConfig};
+    use serde_json::json;
+
+    #[test]
+    fn build_request_maps_messages_to_generate_content() {
+        let body = VertexProvider::build_request_body(&base_request());
+        assert_eq!(body["systemInstruction"]["parts"][0]["text"], "be brief");
+        assert_eq!(body["contents"][0]["role"], "user");
+        assert_eq!(body["contents"][0]["parts"][0]["text"], "hello");
+        assert_eq!(body["generationConfig"]["maxOutputTokens"], 32);
+    }
+
+    #[test]
+    fn build_request_honors_modern_output_format_json_schema() {
+        // Regression: Vertex read only the legacy response_format/json_schema
+        // mirror, so a modern `output_format` was silently dropped.
+        let mut request = base_request();
+        request.output_format = crate::llm::api::OutputFormat::JsonSchema {
+            schema: json!({"type": "object", "properties": {"answer": {"type": "string"}}}),
+            strict: true,
+        };
+        let body = VertexProvider::build_request_body(&request);
+        assert_eq!(
+            body["generationConfig"]["responseMimeType"],
+            "application/json"
+        );
+        assert_eq!(
+            body["generationConfig"]["responseSchema"]["properties"]["answer"]["type"],
+            "string"
+        );
+    }
+
+    #[test]
+    fn build_request_preserves_multimodal_parts_and_tool_history() {
+        // Regression: the hand-rolled Vertex builder flattened every message
+        // to text, silently dropping image parts and functionCall /
+        // functionResponse history. Delegating to the Gemini builder keeps
+        // them.
+        let mut request = base_request();
+        request.messages = vec![
+            json!({
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "caption"},
+                    {"type": "image", "base64": "iVBORw0KGgo=", "media_type": "image/png"}
+                ],
+            }),
+            json!({
+                "role": "assistant",
+                "content": [
+                    {"functionCall": {"id": "call_1", "name": "lookup", "args": {"q": "harn"}}}
+                ]
+            }),
+            json!({
+                "role": "tool",
+                "name": "lookup",
+                "tool_call_id": "call_1",
+                "content": "{\"result\":\"ok\"}"
+            }),
+        ];
+        let body = VertexProvider::build_request_body(&request);
+        assert_eq!(body["contents"][0]["parts"][0]["text"], "caption");
+        assert_eq!(
+            body["contents"][0]["parts"][1]["inline_data"],
+            json!({"mime_type": "image/png", "data": "iVBORw0KGgo="})
+        );
+        assert_eq!(body["contents"][1]["role"], "model");
+        assert_eq!(
+            body["contents"][1]["parts"][0]["functionCall"]["name"],
+            "lookup"
+        );
+        assert_eq!(body["contents"][2]["role"], "user");
+        assert_eq!(
+            body["contents"][2]["parts"][0]["functionResponse"],
+            json!({"id": "call_1", "name": "lookup", "response": {"result": "ok"}})
+        );
+    }
+
+    #[test]
+    fn build_request_appends_prefill_as_trailing_model_turn() {
+        let mut request = base_request();
+        request.prefill = Some("{\"answer\":".to_string());
+        let body = VertexProvider::build_request_body(&request);
+        let contents = body["contents"].as_array().expect("contents");
+        let last = contents.last().expect("at least one turn");
+        assert_eq!(last["role"], "model");
+        assert_eq!(last["parts"][0]["text"], "{\"answer\":");
+    }
+
+    #[test]
+    fn build_request_maps_sampling_params_and_tool_choice() {
+        // Inherited from the shared Gemini builder: seed / penalties and
+        // toolConfig, which the hand-rolled Vertex copy dropped.
+        let mut request = base_request();
+        request.seed = Some(7);
+        request.frequency_penalty = Some(0.25);
+        request.presence_penalty = Some(-0.5);
+        request.tool_choice = Some(json!({"type": "function", "function": {"name": "lookup"}}));
+        let body = VertexProvider::build_request_body(&request);
+        assert_eq!(body["generationConfig"]["seed"], 7);
+        assert_eq!(body["generationConfig"]["frequencyPenalty"], 0.25);
+        assert_eq!(body["generationConfig"]["presencePenalty"], -0.5);
+        assert_eq!(
+            body["toolConfig"]["functionCallingConfig"],
+            json!({"mode": "ANY", "allowedFunctionNames": ["lookup"]})
+        );
+    }
+
+    #[test]
+    fn build_request_honors_legacy_response_format_json_mirror() {
+        // Callers that only set the legacy `response_format`/`json_schema`
+        // The typed output contract must reach Vertex's structured-output
+        // directive through the shared Gemini request grammar.
+        let mut request = base_request();
+        request.output_format = crate::llm::api::OutputFormat::JsonSchema {
+            schema: json!({"type": "object"}),
+            strict: true,
+        };
+        let body = VertexProvider::build_request_body(&request);
+        assert_eq!(
+            body["generationConfig"]["responseMimeType"],
+            "application/json"
+        );
+        assert_eq!(
+            body["generationConfig"]["responseSchema"],
+            json!({"type": "object"})
+        );
+    }
+
+    #[test]
+    fn parse_response_extracts_text_usage_and_function_calls() {
+        // Vertex delegates parsing to the shared Gemini parser; the result
+        // still carries the Vertex provider identity from the request.
+        let response = json!({
+            "candidates": [{
+                "content": {"parts": [
+                    {"text": "hi"},
+                    {"functionCall": {"name": "lookup", "args": {"q": "x"}}}
+                ]},
+                "finishReason": "STOP"
+            }],
+            "usageMetadata": {"promptTokenCount": 3, "candidatesTokenCount": 4}
+        });
+        let result = crate::llm::providers::parse_gemini_response(&response, &base_request())
+            .expect("result");
+        assert_eq!(result.provider, "vertex");
+        assert_eq!(result.text, "hi");
+        assert_eq!(result.input_tokens, 3);
+        assert_eq!(result.output_tokens, 4);
+        assert_eq!(result.tool_calls[0]["name"], "lookup");
+        // Telemetry is populated from usageMetadata via the shared parser
+        // (the old hand-rolled Vertex parser left it defaulted).
+        assert_eq!(
+            result.telemetry.source,
+            crate::llm::api::telemetry_source::GEMINI_USAGE
+        );
+    }
+
+    #[test]
+    fn parse_response_folds_thinking_and_cache_tokens() {
+        let response = json!({
+            "candidates": [{
+                "content": {"parts": [{"text": "done"}]},
+                "finishReason": "STOP"
+            }],
+            "usageMetadata": {
+                "promptTokenCount": 12,
+                "candidatesTokenCount": 4,
+                "thoughtsTokenCount": 9,
+                "cachedContentTokenCount": 6
+            }
+        });
+        let result = crate::llm::providers::parse_gemini_response(&response, &base_request())
+            .expect("result");
+        assert_eq!(result.input_tokens, 12);
+        // candidates(4) + thoughts(9) so thinking tokens are billed as output.
+        assert_eq!(result.output_tokens, 13);
+        assert_eq!(result.cache_read_tokens, 6);
+    }
+
+    #[test]
+    fn parse_response_skips_empty_name_function_calls() {
+        // Regression: the hand-rolled Vertex parser used `unwrap_or("")`, which
+        // emitted a tool call with an empty name. The shared Gemini parser
+        // skips it, matching the Gemini path.
+        let response = json!({
+            "candidates": [{
+                "content": {"parts": [
+                    {"functionCall": {"name": "", "args": {}}},
+                    {"functionCall": {"name": "lookup", "args": {"q": "x"}}}
+                ]},
+                "finishReason": "STOP"
+            }],
+            "usageMetadata": {"promptTokenCount": 1, "candidatesTokenCount": 1}
+        });
+        let result = crate::llm::providers::parse_gemini_response(&response, &base_request())
+            .expect("result");
+        assert_eq!(result.tool_calls.len(), 1);
+        assert_eq!(result.tool_calls[0]["name"], "lookup");
+    }
+
+    #[test]
+    fn function_call_thought_signature_round_trips_through_request_build() {
+        // Regression: the hand-rolled Vertex parser dropped `thoughtSignature`
+        // from functionCall parts, so Gemini 2.5 thinking + function-calling
+        // over Vertex lost the signature it must replay next turn. Delegating
+        // to the Gemini parser captures it; the shared Gemini request builder
+        // (which Vertex also delegates to) echoes it back on the wire.
+        let response = json!({
+            "candidates": [{
+                "content": {"parts": [
+                    {
+                        "functionCall": {"name": "lookup", "args": {"q": "harn"}},
+                        "thoughtSignature": "sig-vertex"
+                    }
+                ]},
+                "finishReason": "STOP"
+            }],
+            "usageMetadata": {"promptTokenCount": 3, "candidatesTokenCount": 4}
+        });
+        let result = crate::llm::providers::parse_gemini_response(&response, &base_request())
+            .expect("result");
+        assert_eq!(result.tool_calls[0]["thought_signature"], "sig-vertex");
+
+        // Feed the parsed tool call back as assistant history and confirm the
+        // Vertex request builder replays the signature on the next-turn body.
+        let mut request = base_request();
+        request.messages = vec![json!({
+            "role": "assistant",
+            "tool_calls": [result.tool_calls[0].clone()],
+        })];
+        let body = VertexProvider::build_request_body(&request);
+        assert_eq!(
+            body["contents"][0]["parts"][0]["functionCall"]["name"],
+            "lookup"
+        );
+        assert_eq!(
+            body["contents"][0]["parts"][0]["thoughtSignature"],
+            "sig-vertex"
+        );
+    }
+
+    fn base_request() -> LlmRequestPayload {
+        LlmRequestPayload {
+            provider: "vertex".to_string(),
+            model: "gemini-1.5-pro-002".to_string(),
+            region: None,
+            api_key: String::new(),
+            api_mode: crate::llm::api::LlmApiMode::ChatCompletions,
+            messages: vec![json!({"role": "user", "content": "hello"})],
+            system: Some("be brief".to_string()),
+            max_tokens: 32,
+            temperature: Some(0.2),
+            top_p: None,
+            top_k: None,
+            logprobs: false,
+            top_logprobs: None,
+            stop: None,
+            seed: None,
+            frequency_penalty: None,
+            presence_penalty: None,
+            fast: false,
+            output_format: crate::llm::api::OutputFormat::Text,
+            output_schema: None,
+            schema_stream_abort: false,
+            thinking: ThinkingConfig::Disabled,
+            anthropic_beta_features: Vec::new(),
+            vision: false,
+            native_tools: Some(vec![json!({
+                "type": "function",
+                "function": {
+                    "name": "lookup",
+                    "description": "Lookup",
+                    "parameters": {"type": "object"}
+                }
+            })]),
+            provider_tools: Vec::new(),
+            tool_choice: None,
+            cache: false,
+            prompt_cache_ttl: None,
+            timeout: None,
+            idle_timeout: None,
+            stream: false,
+            provider_overrides: None,
+            previous_response_id: None,
+            store: None,
+            background: None,
+            truncation: None,
+            compact: None,
+            include: None,
+            max_tool_calls: None,
+            prefill: None,
+            session_id: None,
+            reminder_lifecycle: Vec::new(),
+            cli_llm_mock_scope: None,
+            mock_scope: None,
+        }
+    }
+}

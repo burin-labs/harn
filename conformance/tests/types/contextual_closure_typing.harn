@@ -1,0 +1,9 @@
+fn apply_once(value: int, f: fn(int) -> int) -> int {
+  return f(value)
+}
+
+pipeline default(harness: Harness) {
+  const inc: fn(int) -> int = { x -> x + 1 }
+  harness.stdio.println(inc(5))
+  harness.stdio.println(apply_once(6, { x -> x + 1 }))
+}

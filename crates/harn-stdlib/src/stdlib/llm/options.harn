@@ -1,0 +1,306 @@
+// @harn-entrypoint-category llm.stdlib
+import { pick_keys } from "std/collections"
+
+// -------------------------------------------------------------------------------------------------
+
+// Typed option aliases (the documented way to build llm_call options).
+//
+// These structural aliases are co-located with the option normalizers below
+// so the alias, the accepted-key list, and the projection logic stay in one
+// file. Rust twins live in `crates/harn-vm/src/llm/cost.rs`
+// (`LlmBudgetEnvelope`) and — for the workflow-facing policies — in
+// `crates/harn-vm/src/orchestration/policy/types.rs`; key parity is pinned by
+// `crates/harn-vm/tests/typed_options_parity.rs`.
+
+// -------------------------------------------------------------------------------------------------
+
+/**
+ * Pre-flight LLM budget envelope accepted by the `budget:` option on
+ * `llm_call` and `agent_loop`.
+ *
+ * Rust twin: `LlmBudgetEnvelope` in `crates/harn-vm/src/llm/cost.rs`.
+ */
+pub type LlmBudget = {
+  max_cost_usd?: float,
+  max_input_tokens?: int,
+  max_output_tokens?: int,
+  total_budget_usd?: float,
+}
+
+/**
+ * One explicit step of a model ladder. String entries in a `ModelLadder`
+ * are shorthand for `{model: <string>}` (or `provider:model` selectors).
+ *
+ * Rust twin: `LadderSpec` (ships with the `models:` / `ladder:` llm_call
+ * option; the alias is defined ahead of that option so downstream schemas
+ * can converge on one shape).
+ */
+pub type ModelLadderStep = {
+  provider?: string,
+  model?: string,
+  when?: string,
+  options?: dict,
+  label?: string,
+  family?: string,
+  capabilities?: list,
+}
+
+/**
+ * Ordered fallback ladder for `llm_call` model routing. Advance happens on
+ * route failures (transport classes or an empty generation after its bounded
+ * same-route retry), never on schema-validation failures.
+ */
+pub type ModelLadder = list<string | ModelLadderStep>
+
+/**
+ * One fragment of a composed system prompt. String entries in the `system`
+ * list are shorthand for `{content: <string>}` (position "before").
+ */
+pub type SystemFragment = {
+  content: string,
+  title?: string,
+  position?: "before" | "after",
+  enabled?: bool,
+}
+
+/**
+ * Exclusive system-prompt assembly root. `content` is served byte-for-byte;
+ * positional system text, fragment lists, context-profile fragments, tool
+ * guidance, and system/developer conversation messages are suppressed.
+ */
+pub type SystemReplacement = {mode: "replace", content: string}
+
+/**
+ * The single structured-output contract accepted by the `output:` option:
+ * "text" (default), "json" (provider JSON mode), a JSON-Schema dict, or the
+ * config form `{schema, strict?, validation?, stream_abort?}`.
+ */
+pub type OutputSpec = "text" | "json" | dict
+
+/**
+ * The public `llm_call` options surface — one spelling per option, no
+ * synonyms. The runtime registry (`__llm_call_option_registry()`, backed by
+ * `crates/harn-builtin-meta/src/llm_options.rs`) is the single source of
+ * truth; this alias mirrors it for `harn check` and is parity-pinned by
+ * `typed_options_parity.rs`. Unknown or removed keys are hard runtime errors.
+ */
+pub type LlmCallOptions = {
+  // Routing and model selection.
+  provider?: string,
+  model?: string,
+  model_role?: string,
+  model_tier?: string,
+  api_mode?: "chat_completions" | "responses",
+  route_policy?: string | dict,
+  fallback_chain?: list<string>,
+  routing?: dict,
+  equivalent_failover?: bool | {enabled?: bool, max_routes?: int, on_no_dispatch?: bool},
+  models?: ModelLadder,
+  ladder?: string,
+  // Conversation and system prompt.
+  system?: string | list<string | SystemFragment> | SystemReplacement,
+  messages?: list,
+  session_id?: string,
+  call_role?: string,
+  rate_limit_consumer_id?: string,
+  mock_scope?: string,
+  context_profile?: dict,
+  capabilities?: any,
+  prefill?: string,
+  previous_response_id?: string,
+  // Generation.
+  max_tokens?: int,
+  temperature?: float,
+  top_p?: float,
+  top_k?: int,
+  logprobs?: bool,
+  top_logprobs?: int,
+  stop?: list<string>,
+  stop_at_tool_call?: bool,
+  seed?: int,
+  frequency_penalty?: float,
+  presence_penalty?: float,
+  // Output contract (wrapper-plane retry knobs alongside).
+  output?: OutputSpec,
+  schema_retries?: int,
+  schema_retry_nudge?: bool | string,
+  retries?: int,
+  schema_recover?: any,
+  repair?: bool | dict,
+  // Reasoning and modalities.
+  thinking?: bool | "adaptive" | dict,
+  effort?: string,
+  reasoning_policy?: string | bool,
+  reasoning_scale?: string,
+  reasoning_task?: string,
+  interleaved_thinking?: bool,
+  anthropic_beta_features?: string | list<string>,
+  vision?: bool,
+  audio?: bool,
+  pdf?: bool,
+  video?: bool,
+  // Tools. Structural twin of `std/tools.ToolRegistry` (inline for the same
+  // cross-module option-field resolution reason as AgentSpec.tools).
+  tools?: list | {_type: "tool_registry", tools: list},
+  provider_tools?: list | dict,
+  tool_choice?: string | dict,
+  tool_search?: bool | string | dict,
+  tool_format?: string,
+  // Caching, budgets, transport.
+  cache?: bool,
+  prompt_cache_ttl?: "5m" | "1h",
+  budget?: LlmBudget | float,
+  timeout_ms?: int,
+  idle_timeout_ms?: int,
+  stream?: bool,
+  speed?: "standard" | "fast",
+  // OpenAI Responses surface (requires api_mode: "responses").
+  store?: any,
+  background?: bool,
+  truncation?: string,
+  compact?: bool,
+  include?: list,
+  max_tool_calls?: int,
+  // Provider escape hatch — namespaced per provider, never silently dropped.
+  provider_options?: dict,
+  // Observability and experiments.
+  metadata?: dict,
+  reminders?: any,
+  structural_experiment?: any,
+}
+
+/**
+ * llm_call_options projects a broader runtime options dict (e.g. the agent
+ * loop's bag) onto the public llm_call option surface plus the `_`-prefixed
+ * host plumbing channels. The accepted-key list comes from the canonical
+ * registry builtin — there is no hand-maintained list in stdlib.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn llm_call_options(options = nil) {
+  const base = options ?? {}
+  let allowed = __llm_call_option_registry().keys
+  for key in keys(base) {
+    if starts_with(key, "_") {
+      allowed = allowed.appending(key)
+    }
+  }
+  return pick_keys(base, allowed, {drop_nil: true})
+}
+
+const __LLM_EXPLICIT_ROUTING_KEYS = [
+  "routing",
+  "models",
+  "ladder",
+  "route_policy",
+  "fallback_chain",
+]
+
+/**
+ * Return whether options delegate route selection to an explicit routing
+ * owner. This does not include `equivalent_failover`, whose presence is a
+ * separate direct transport policy.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn llm_has_explicit_routing_owner(options = nil) -> bool {
+  const base = if type_of(options) == "dict" {
+    options
+  } else {
+    {}
+  }
+  for key in __LLM_EXPLICIT_ROUTING_KEYS {
+    if base[key] != nil {
+      return true
+    }
+  }
+  return false
+}
+
+/**
+ * Add the agent loop's default equivalent-route failover unless a caller or an
+ * outer routing owner already decided the topology. `suppressed` covers
+ * lifecycle-sensitive requests that must remain on one physical route.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn llm_enable_equivalent_failover(options = nil, suppressed = false) -> dict {
+  const base = if type_of(options) == "dict" {
+    options
+  } else {
+    {}
+  }
+  if suppressed || llm_has_explicit_routing_owner(base) || base?.equivalent_failover != nil {
+    return base
+  }
+  return base + {equivalent_failover: {max_routes: 3, on_no_dispatch: true}}
+}
+
+fn __llm_one_shot_prefill_options(options) -> dict {
+  if type_of(options) == "dict" {
+    return options
+  }
+  return {}
+}
+
+/**
+ * Arm `prefill` for one logical LLM request. The marker is intentionally
+ * private to the runtime; `llm_clear_one_shot_prefill` is the only supported
+ * way for retry/recovery code to consume it without disturbing ordinary
+ * caller-supplied prefills.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn llm_arm_one_shot_prefill(prefill: string, options = nil) -> dict {
+  const base = __llm_one_shot_prefill_options(options)
+  if prefill == "" {
+    return base
+  }
+  return base + {prefill: prefill, _harn_one_shot_prefill: true}
+}
+
+/**
+ * Clear only an armed Harn one-shot prefill. This is the retry/recovery
+ * boundary: regular prefills retain their existing multi-attempt behavior.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn llm_clear_one_shot_prefill(options = nil) -> dict {
+  const base = __llm_one_shot_prefill_options(options)
+  if base?._harn_one_shot_prefill != true {
+    return base
+  }
+  return base.removing("prefill").removing("_harn_one_shot_prefill")
+}
+
+/**
+ * llm_options is the typed constructor for `llm_call` options. Direct dict
+ * literals are checked against `LlmCallOptions`, so option typos fail at
+ * check time instead of being silently ignored at the provider boundary.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn llm_options(options: LlmCallOptions = {}) -> LlmCallOptions {
+  return options
+}
+
+/**
+ * model_ladder is the typed constructor for ordered model-fallback ladders.
+ * Entries are model selector strings or `ModelLadderStep` dicts.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn model_ladder(ladder: ModelLadder = []) -> ModelLadder {
+  return ladder
+}

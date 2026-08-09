@@ -1,0 +1,161 @@
+import {
+  coord_acquire_dir_lock,
+  coord_dir_lock_path,
+  coord_dir_lock_reaper_path,
+  coord_dir_lock_record_path,
+  coord_release_dir_lock,
+  coord_with_dir_lock,
+} from "std/coordination"
+
+pipeline default(harness: Harness) {
+  harness.testing.clock_set(1000)
+  const root = path_join(
+    harness.fs.workspace_temp_dir(),
+    "coord-dir-lock-" + harness.random.uuid_v7(),
+  )
+  const resource = path_join(root, "release-owner.json")
+  const first = coord_acquire_dir_lock(
+    harness.runtime,
+    harness.fs,
+    harness.clock,
+    harness.random,
+    resource,
+    {id: "run-A", run_id: "release-A"},
+    {ttl_ms: 100, token: "token-A", reason: "release"},
+  )
+  harness.stdio.println(first.acquired)
+  harness.stdio.println(first.lock_path == coord_dir_lock_path(resource))
+  harness.stdio.println(harness.fs.exists(first.lock_path))
+  harness.stdio.println(first.record.owner.id)
+  harness.stdio.println(first.record.expires_at_ms)
+  const blocked = coord_acquire_dir_lock(
+    harness.runtime,
+    harness.fs,
+    harness.clock,
+    harness.random,
+    resource,
+    {id: "run-B", run_id: "release-B"},
+    {ttl_ms: 100, token: "token-B", throw_on_conflict: false},
+  )
+  harness.stdio.println(blocked.acquired)
+  harness.stdio.println(blocked.reason)
+  harness.stdio.println(blocked.holder.owner.run_id)
+  harness.testing.clock_advance(101)
+  const second = coord_acquire_dir_lock(
+    harness.runtime,
+    harness.fs,
+    harness.clock,
+    harness.random,
+    resource,
+    {id: "run-B", run_id: "release-B"},
+    {ttl_ms: 100, token: "token-B", throw_on_conflict: false},
+  )
+  harness.stdio.println(second.acquired)
+  harness.stdio.println(second.stale_removed.owner.run_id)
+  harness.stdio.println(second.record.owner.id)
+  const wrong_release = try {
+    coord_release_dir_lock(harness.fs, harness.clock, first)
+    "released"
+  } catch (e) {
+    contains(to_string(e), "another token")
+  }
+  harness.stdio.println(wrong_release)
+  const released = coord_release_dir_lock(harness.fs, harness.clock, second)
+  harness.stdio.println(released.released)
+  const reaper_path = coord_dir_lock_reaper_path(second.lock_path)
+  const reaper = coord_acquire_dir_lock(
+    harness.runtime,
+    harness.fs,
+    harness.clock,
+    harness.random,
+    resource,
+    {id: "reaper", run_id: "cleanup"},
+    {lock_path: reaper_path, ttl_ms: 100, token: "reaper-token"},
+  )
+  const during_reap = coord_acquire_dir_lock(
+    harness.runtime,
+    harness.fs,
+    harness.clock,
+    harness.random,
+    resource,
+    {id: "run-C", run_id: "release-C"},
+    {ttl_ms: 100, token: "token-C", throw_on_conflict: false},
+  )
+  harness.stdio.println(during_reap.acquired)
+  harness.stdio.println(during_reap.reason)
+  harness.stdio.println(during_reap.lock_path == reaper.lock_path)
+  const _ = coord_release_dir_lock(harness.fs, harness.clock, reaper)
+  harness.stdio.println(harness.fs.exists(second.lock_path))
+  const scoped_value = coord_with_dir_lock(
+    harness.runtime,
+    harness.fs,
+    harness.clock,
+    harness.random,
+    resource,
+    { lock ->
+      harness.stdio.println(lock.acquired)
+      harness.stdio.println(harness.fs.exists(lock.lock_path))
+      "done-" + lock.record.owner.id
+    },
+    {id: "run-D", run_id: "release-D"},
+    {ttl_ms: 100, token: "token-D"},
+  )
+  harness.stdio.println(scoped_value)
+  harness.stdio.println(harness.fs.exists(coord_dir_lock_path(resource)))
+  const scoped_throw = try {
+    coord_with_dir_lock(
+      harness.runtime,
+      harness.fs,
+      harness.clock,
+      harness.random,
+      resource,
+      { lock ->
+        harness.stdio.println(harness.fs.exists(lock.lock_path))
+        throw "scoped-boom"
+      },
+      {id: "run-E", run_id: "release-E"},
+      {ttl_ms: 100, token: "token-E"},
+    )
+    false
+  } catch (e) {
+    contains(to_string(e), "scoped-boom")
+  }
+  harness.stdio.println(scoped_throw)
+  harness.stdio.println(harness.fs.exists(coord_dir_lock_path(resource)))
+  const malformed_resource = path_join(root, "malformed.json")
+  const malformed_lock = coord_dir_lock_path(malformed_resource)
+  harness.fs.mkdir(malformed_lock)
+  harness.fs.write_text(coord_dir_lock_record_path(malformed_lock), "{bad")
+  const malformed = coord_acquire_dir_lock(
+    harness.runtime,
+    harness.fs,
+    harness.clock,
+    harness.random,
+    malformed_resource,
+    {id: "run-malformed"},
+    {throw_on_conflict: false},
+  )
+  harness.stdio.println(malformed.acquired)
+  harness.stdio.println(malformed.reason)
+  harness.stdio.println(malformed.failure.kind)
+  harness.stdio.println(harness.fs.exists(malformed_lock))
+  harness.fs.delete(malformed_lock)
+  const unreadable_resource = path_join(root, "unreadable.json")
+  const unreadable_lock = coord_dir_lock_path(unreadable_resource)
+  harness.fs.mkdir(coord_dir_lock_record_path(unreadable_lock))
+  const unreadable = coord_acquire_dir_lock(
+    harness.runtime,
+    harness.fs,
+    harness.clock,
+    harness.random,
+    unreadable_resource,
+    {id: "run-unreadable"},
+    {throw_on_conflict: false},
+  )
+  harness.stdio.println(unreadable.acquired)
+  harness.stdio.println(unreadable.reason)
+  harness.stdio.println(unreadable.failure.kind)
+  harness.stdio.println(harness.fs.exists(unreadable_lock))
+  harness.fs.delete(unreadable_lock)
+  harness.testing.clock_reset()
+}

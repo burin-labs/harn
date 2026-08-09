@@ -1,0 +1,68 @@
+import "std/project"
+
+pipeline test(harness: Harness, task) {
+  const base_dir = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-project-enrich-invalidation-" + harness.random.uuid(),
+  )
+  harness.fs.mkdir(path_join(base_dir, "src"))
+  harness.fs.write_text(
+    path_join(base_dir, "Cargo.toml"),
+    "[package]\nname = \"project-enrich-invalidation\"\nversion = \"0.1.0\"\n",
+  )
+  harness.fs.write_text(path_join(base_dir, "Cargo.lock"), "# lock\n")
+  harness.fs.write_text(
+    path_join(base_dir, "src/lib.rs"),
+    "pub struct FirstName;\npub fn greet_name() -> &'static str { \"hi\" }\n",
+  )
+  const base = project_scan(harness.project, base_dir, {tiers: ["ambient", "config"]})
+  const prompt =
+    "Project path: {{path}}\n{{ for file in files }}FILE {{file.path}}\n{{file.content}}\n{{ end }}\nReturn JSON."
+  const schema = {
+    type: "object",
+    required: ["framework", "indent_style", "naming_conventions", "test_runner"],
+    properties: {
+      framework: {type: "string"},
+      indent_style: {type: "string"},
+      naming_conventions: {type: "array", items: {type: "string"}},
+      test_runner: {type: "string"},
+    },
+  }
+  const first = project_enrich(
+    harness.project,
+    base_dir,
+    {
+      base_evidence: base,
+      prompt: prompt,
+      schema: schema,
+      budget_tokens: 4000,
+      provider: "mock",
+      model: "mock-model",
+      cache_key: "cache-v1",
+      include_operator_meta: false,
+    },
+  )
+  harness.fs.write_text(
+    path_join(base_dir, "src/lib.rs"),
+    "pub struct ChangedName;\npub fn greet_name() -> &'static str { \"hello\" }\n",
+  )
+  const second = project_enrich(
+    harness.project,
+    base_dir,
+    {
+      base_evidence: base,
+      prompt: prompt,
+      schema: schema,
+      budget_tokens: 4000,
+      provider: "mock",
+      model: "mock-model",
+      cache_key: "cache-v1",
+      include_operator_meta: false,
+    },
+  )
+  harness.stdio.println(first.framework == "axum")
+  harness.stdio.println(second.framework == "tokio")
+  harness.stdio.println(!first._provenance.cached)
+  harness.stdio.println(!second._provenance.cached)
+  harness.stdio.println(len(harness.llm.mock_calls()) == 2)
+}

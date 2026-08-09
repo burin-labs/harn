@@ -1,0 +1,8 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/session/append.response.json",
+  "title": "session.append response",
+  "type": "object",
+  "required": ["session_id", "event_id", "record_hash"],
+  "additionalProperties": true
+}

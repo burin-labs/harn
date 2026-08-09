@@ -1,0 +1,65 @@
+import {
+  AgentFutilityDecision,
+  agent_action_identity,
+  agent_futility_decide,
+  agent_futility_verdict,
+  agent_observation_fingerprint,
+} from "std/agent/stall"
+
+pipeline test(harness: Harness, _task) {
+  const action = agent_action_identity("edit", {path: "src/lib.rs", replacement: "fixed"})
+  const same_action = agent_action_identity("edit", {path: "src/lib.rs", replacement: "fixed"})
+  const different_action = agent_action_identity("edit", {path: "src/lib.rs", replacement: "other"})
+  const before = agent_observation_fingerprint(
+    [
+      {name: "workspace", value: {hash: "abc"}, evidence: "workspace tree"},
+      {name: "tests", value: {failed: 1}, evidence: "test receipt"},
+    ],
+  )
+  const unchanged_after = agent_observation_fingerprint(
+    [
+      {name: "workspace", value: {hash: "abc"}, evidence: "workspace tree"},
+      {name: "tests", value: {failed: 1}, evidence: "test receipt"},
+    ],
+  )
+  const changed_after = agent_observation_fingerprint(
+    [
+      {name: "workspace", value: {hash: "def"}, evidence: "workspace tree"},
+      {name: "tests", value: {failed: 1}, evidence: "test receipt"},
+    ],
+  )
+  const unavailable_after = agent_observation_fingerprint(
+    [{name: "workspace", observable: false, evidence: "host did not report state"}],
+  )
+  const partial_after = agent_observation_fingerprint(
+    [{name: "workspace", value: {hash: "abc"}, evidence: "workspace tree"}],
+  )
+  const unchanged = agent_futility_verdict(before, unchanged_after, action, same_action)
+  assert(unchanged.kind == "unchanged", "equal observed surfaces are unchanged")
+  assert(unchanged.repeated_action, "same name and arguments identify a repeated action")
+  assert(len(unchanged.compared_surfaces) == 2, "verdict names every compared surface")
+  assert(len(unchanged.evidence) == 2, "verdict carries per-surface evidence")
+  const changed = agent_futility_verdict(before, changed_after, action, same_action)
+  assert(changed.kind == "changed", "one changed observed surface changes the verdict")
+  const unobservable = agent_futility_verdict(before, unavailable_after, action, same_action)
+  assert(unobservable.kind == "unobservable", "missing overlap is not mislabeled unchanged")
+  assert(len(unobservable.compared_surfaces) == 0, "unobservable verdict compared no surfaces")
+  const partial = agent_futility_verdict(before, partial_after, action, same_action)
+  assert(
+    partial.kind == "unobservable",
+    "partial observations are not unchanged evidence: " + json_stringify(partial),
+  )
+  const not_repeated = agent_futility_verdict(before, unchanged_after, action, different_action)
+  assert(!not_repeated.repeated_action, "different arguments produce a different action identity")
+  const reformulate: AgentFutilityDecision = agent_futility_decide(unchanged, 2, 2)
+  assert(reformulate.action == "reformulate", "repeated unchanged action reformulates at threshold")
+  assert(reformulate.blocked, "reformulation blocks the identical retry")
+  const below_threshold = agent_futility_decide(unchanged, 1, 2)
+  assert(below_threshold.action == "retry", "caller threshold permits an early retry")
+  assert(below_threshold.retry_allowed, "retry policy explicitly allows retry")
+  const stopped = agent_futility_decide(unchanged, 1, 1, { _context -> "stop" })
+  assert(stopped.action == "stop" && stopped.blocked, "policy hook can stop deterministically")
+  const escalated = agent_futility_decide(unobservable)
+  assert(escalated.action == "escalate", "unobservable state escalates by default")
+  harness.stdio.log("ok")
+}

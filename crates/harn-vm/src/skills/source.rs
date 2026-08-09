@@ -1,0 +1,843 @@
+//! `SkillSource` trait + concrete filesystem / host implementations.
+//!
+//! A `SkillSource` is anything that can enumerate skills (metadata-only)
+//! and fetch a fully-populated [`Skill`] on demand. The layered
+//! discovery code ([`super::discovery::LayeredDiscovery`]) stacks
+//! multiple sources on top of each other — filesystem walks for
+//! `--skill-dir`, `$HARN_SKILLS_PATH`, `.harn/skills/`, `harn.toml`,
+//! `~/.harn/skills`, installed package-generation skills, `/etc/harn/skills`,
+//! `$XDG_CONFIG_HOME/harn/skills`, plus a host-backed source for
+//! bridge-mode runs. Each layer tags every manifest with the layer
+//! label so higher-priority layers can shadow lower ones cleanly and
+//! `harn doctor` can report where each skill came from.
+
+use crate::value::VmDictExt;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+use super::frontmatter::{parse_frontmatter, split_frontmatter, SkillManifest};
+
+/// A single layer label. Top-level layer numbering matches the priority
+/// table in the spec: `Cli` (1) wins over `Env` (2) which wins over
+/// `Project` (3) and so on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum Layer {
+    Cli,
+    Env,
+    Project,
+    Manifest,
+    User,
+    Package,
+    System,
+    Host,
+}
+
+impl Layer {
+    pub fn label(self) -> &'static str {
+        match self {
+            Layer::Cli => "cli",
+            Layer::Env => "env",
+            Layer::Project => "project",
+            Layer::Manifest => "manifest",
+            Layer::User => "user",
+            Layer::Package => "package",
+            Layer::System => "system",
+            Layer::Host => "host",
+        }
+    }
+
+    pub fn from_label(label: &str) -> Option<Layer> {
+        match label {
+            "cli" => Some(Layer::Cli),
+            "env" => Some(Layer::Env),
+            "project" => Some(Layer::Project),
+            "manifest" => Some(Layer::Manifest),
+            "user" => Some(Layer::User),
+            "package" => Some(Layer::Package),
+            "system" => Some(Layer::System),
+            "host" => Some(Layer::Host),
+            _ => None,
+        }
+    }
+
+    pub const fn all() -> &'static [Layer] {
+        &[
+            Layer::Cli,
+            Layer::Env,
+            Layer::Project,
+            Layer::Manifest,
+            Layer::User,
+            Layer::Package,
+            Layer::System,
+            Layer::Host,
+        ]
+    }
+}
+
+/// The fully loaded form of a skill: manifest + markdown body + context
+/// needed to substitute `${HARN_SKILL_DIR}` and surface diagnostics.
+#[derive(Debug, Clone)]
+pub struct Skill {
+    pub manifest: SkillManifest,
+    /// SKILL.md body after the closing frontmatter delimiter. Not yet
+    /// substituted — callers apply [`super::substitute::substitute_skill_body`]
+    /// at invocation time so per-run args / session ids can vary.
+    pub body: String,
+    /// Absolute directory the SKILL.md lives in. `None` for host-provided
+    /// skills where the host owns the underlying storage.
+    pub skill_dir: Option<PathBuf>,
+    /// Which layer produced this skill.
+    pub layer: Layer,
+    /// If set, points to the fully-qualified skill id (e.g. `acme/ops`).
+    pub namespace: Option<String>,
+    /// Field names found in the frontmatter but not recognized by the
+    /// current build. Displayed as warnings by `harn doctor`.
+    pub unknown_fields: Vec<String>,
+}
+
+impl Skill {
+    /// `"<namespace>/<name>"` when the skill has a namespace, otherwise
+    /// just `name`. This is the key layered discovery uses for collision
+    /// detection.
+    pub fn id(&self) -> String {
+        match &self.namespace {
+            Some(ns) if !ns.is_empty() => format!("{ns}/{}", self.manifest.name),
+            _ => self.manifest.name.clone(),
+        }
+    }
+}
+
+/// Abstract skill source. Implementations are [`Send`] so we can hand
+/// them to async code paths in the future; today everything is sync.
+pub trait SkillSource: Send + Sync {
+    /// Enumerate skills without loading bodies. Callers use this to
+    /// produce the shadowing table before paying to read every file.
+    fn list(&self) -> Vec<SkillManifestRef>;
+
+    /// Load a specific skill by id. Must be deterministic for the id
+    /// returned by `list()`.
+    fn fetch(&self, id: &str) -> Result<Skill, String>;
+
+    /// Layer this source represents. Used for shadowing + provenance.
+    fn layer(&self) -> Layer;
+
+    /// Human-readable label for diagnostics (e.g. the root directory).
+    fn describe(&self) -> String;
+}
+
+/// Light-weight handle returned by `list()` so callers can decide which
+/// layer wins before re-reading the SKILL.md.
+#[derive(Debug, Clone)]
+pub struct SkillManifestRef {
+    pub id: String,
+    pub manifest: SkillManifest,
+    pub layer: Layer,
+    pub namespace: Option<String>,
+    pub origin: String,
+    pub unknown_fields: Vec<String>,
+}
+
+const COMMAND_FRONTMATTER_FIELDS: &[&str] = &["hooks", "command", "run"];
+
+/// Remove frontmatter fields that downstream hosts may execute as
+/// commands when the registry entry carries failed provenance.
+pub fn strip_untrusted_command_frontmatter(entry: &mut crate::value::DictMap) -> bool {
+    if !has_failed_provenance(entry) {
+        return false;
+    }
+    let mut stripped = false;
+    for key in COMMAND_FRONTMATTER_FIELDS {
+        stripped |= entry.remove(*key).is_some();
+    }
+    stripped
+}
+
+fn has_failed_provenance(entry: &crate::value::DictMap) -> bool {
+    let Some(provenance) = entry
+        .get("provenance")
+        .and_then(crate::value::VmValue::as_dict)
+    else {
+        return false;
+    };
+    let signed = matches!(
+        provenance.get("signed"),
+        Some(crate::value::VmValue::Bool(true))
+    );
+    let trusted = matches!(
+        provenance.get("trusted"),
+        Some(crate::value::VmValue::Bool(true))
+    );
+    let verified_status = match provenance.get("status") {
+        Some(crate::value::VmValue::String(status)) => &**status == "verified",
+        Some(_) => false,
+        None => signed && trusted,
+    };
+    !(signed && trusted && verified_status)
+}
+
+/// Filesystem source — walks one root directory looking for
+/// `SKILL.md` files two levels deep (`<root>/<name>/SKILL.md`) or a
+/// single flat file (`<root>/SKILL.md` when `<root>` itself is the
+/// skill dir). The single-root shape keeps CLI `--skill-dir`
+/// behavior predictable; users who want multi-root share-pools layer
+/// them via the manifest `[skills] paths`.
+#[derive(Debug, Clone)]
+pub struct FsSkillSource {
+    pub root: PathBuf,
+    pub layer: Layer,
+    /// Optional namespace prefix. When set, every discovered skill is
+    /// registered as `<namespace>/<name>` and shadowing only happens on
+    /// the fully-qualified id. Powers the `[[skill.source]] name =
+    /// "acme/ops"` escape hatch for multi-tenant setups.
+    pub namespace: Option<String>,
+}
+
+impl FsSkillSource {
+    pub fn new(root: impl Into<PathBuf>, layer: Layer) -> Self {
+        Self {
+            root: root.into(),
+            layer,
+            namespace: None,
+        }
+    }
+
+    pub fn with_namespace(mut self, namespace: impl Into<String>) -> Self {
+        let ns = namespace.into();
+        self.namespace = if ns.is_empty() { None } else { Some(ns) };
+        self
+    }
+
+    fn iter_skill_dirs(&self) -> Vec<PathBuf> {
+        let mut results = Vec::new();
+        if !self.root.is_dir() {
+            return results;
+        }
+        // Accept `<root>/SKILL.md` as a single-skill bundle (unusual but
+        // convenient for `--skill-dir /path/to/one-skill`).
+        if self.root.join("SKILL.md").is_file() {
+            results.push(self.root.clone());
+            return results;
+        }
+        // Otherwise walk one level deep.
+        let Ok(entries) = fs::read_dir(&self.root) else {
+            return results;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            if path.join("SKILL.md").is_file() {
+                results.push(path);
+            }
+        }
+        results.sort();
+        results
+    }
+
+    fn finalize_manifest(
+        &self,
+        dir: &Path,
+        skill_file: &Path,
+        manifest: &mut SkillManifest,
+    ) -> Result<(), String> {
+        if manifest.name.is_empty() {
+            if let Some(name) = dir.file_name().and_then(|n| n.to_str()) {
+                manifest.name = name.to_string();
+            }
+        }
+        if manifest.name.is_empty() {
+            return Err(format!(
+                "{}: SKILL.md has no `name` field and directory has no basename",
+                skill_file.display()
+            ));
+        }
+        if manifest.short.trim().is_empty() {
+            return Err(format!(
+                "{}: SKILL.md requires a non-empty `short` field",
+                skill_file.display()
+            ));
+        }
+        Ok(())
+    }
+
+    fn load_manifest_from_dir(&self, dir: &Path) -> Result<SkillManifestRef, String> {
+        let skill_file = dir.join("SKILL.md");
+        let source = fs::read_to_string(&skill_file)
+            .map_err(|e| format!("failed to read {}: {e}", skill_file.display()))?;
+        let (fm, _) = split_frontmatter(&source);
+        let parsed = parse_frontmatter(fm).map_err(|e| format!("{}: {e}", skill_file.display()))?;
+        let mut manifest = parsed.manifest;
+        self.finalize_manifest(dir, &skill_file, &mut manifest)?;
+        let id = match &self.namespace {
+            Some(ns) if !ns.is_empty() => format!("{ns}/{}", manifest.name),
+            _ => manifest.name.clone(),
+        };
+        Ok(SkillManifestRef {
+            id,
+            manifest,
+            layer: self.layer,
+            namespace: self.namespace.clone(),
+            origin: dir.display().to_string(),
+            unknown_fields: parsed.unknown_fields,
+        })
+    }
+
+    fn load_from_dir(&self, dir: &Path) -> Result<Skill, String> {
+        let skill_file = dir.join("SKILL.md");
+        let source = fs::read_to_string(&skill_file)
+            .map_err(|e| format!("failed to read {}: {e}", skill_file.display()))?;
+        let (fm, body) = split_frontmatter(&source);
+        let parsed = parse_frontmatter(fm).map_err(|e| format!("{}: {e}", skill_file.display()))?;
+        let mut manifest = parsed.manifest;
+        self.finalize_manifest(dir, &skill_file, &mut manifest)?;
+        let skill = Skill {
+            body: body.to_string(),
+            skill_dir: Some(dir.to_path_buf()),
+            layer: self.layer,
+            namespace: self.namespace.clone(),
+            unknown_fields: parsed.unknown_fields,
+            manifest,
+        };
+        Ok(skill)
+    }
+}
+
+impl SkillSource for FsSkillSource {
+    fn list(&self) -> Vec<SkillManifestRef> {
+        let mut out = Vec::new();
+        for dir in self.iter_skill_dirs() {
+            match self.load_manifest_from_dir(&dir) {
+                Ok(skill) => {
+                    out.push(skill);
+                }
+                Err(err) => {
+                    eprintln!("warning: skills: {err}");
+                }
+            }
+        }
+        out
+    }
+
+    fn fetch(&self, id: &str) -> Result<Skill, String> {
+        for dir in self.iter_skill_dirs() {
+            let skill = self.load_from_dir(&dir)?;
+            if skill.id() == id || (self.namespace.is_none() && skill.manifest.name == id) {
+                return Ok(skill);
+            }
+        }
+        Err(format!(
+            "skill '{id}' not found under {}",
+            self.root.display()
+        ))
+    }
+
+    fn layer(&self) -> Layer {
+        self.layer
+    }
+
+    fn describe(&self) -> String {
+        match &self.namespace {
+            Some(ns) => format!("{} [{}] ns={ns}", self.root.display(), self.layer.label()),
+            None => format!("{} [{}]", self.root.display(), self.layer.label()),
+        }
+    }
+}
+
+/// Parse and validate one skill bundle through the same boundary used by
+/// layered discovery. `path` may name the bundle directory or its SKILL.md.
+pub fn validate_skill_bundle(path: impl AsRef<Path>) -> Result<Skill, String> {
+    let candidate = path.as_ref();
+    let dir = if candidate.is_file() {
+        if candidate.file_name().and_then(|name| name.to_str()) != Some("SKILL.md") {
+            return Err(format!(
+                "{} is a file; expected SKILL.md or a skill directory",
+                candidate.display(),
+            ));
+        }
+        candidate
+            .parent()
+            .ok_or_else(|| format!("{} has no containing skill directory", candidate.display()))?
+    } else {
+        candidate
+    };
+    if !dir.is_dir() {
+        return Err(format!("skill directory does not exist: {}", dir.display()));
+    }
+    FsSkillSource::new(dir, Layer::Cli).load_from_dir(dir)
+}
+
+/// Callable the bridge adapter hands to [`HostSkillSource`] to
+/// enumerate skills via `skills/list`.
+pub type HostSkillLister = Arc<dyn Fn() -> Vec<SkillManifestRef> + Send + Sync>;
+
+/// Callable the bridge adapter hands to [`HostSkillSource`] to fetch
+/// one skill via `skills/fetch`.
+pub type HostSkillFetcher = Arc<dyn Fn(&str) -> Result<Skill, String> + Send + Sync>;
+
+/// Bridge-backed skill source. Calls the `skills/list` / `skills/fetch`
+/// RPCs defined in `crates/harn-vm/src/bridge.rs` so a host can expose
+/// its own managed skill store to the VM.
+pub struct HostSkillSource {
+    loader: HostSkillLister,
+    fetcher: HostSkillFetcher,
+}
+
+impl HostSkillSource {
+    pub fn new<L, F>(loader: L, fetcher: F) -> Self
+    where
+        L: Fn() -> Vec<SkillManifestRef> + Send + Sync + 'static,
+        F: Fn(&str) -> Result<Skill, String> + Send + Sync + 'static,
+    {
+        Self {
+            loader: Arc::new(loader),
+            fetcher: Arc::new(fetcher),
+        }
+    }
+}
+
+impl std::fmt::Debug for HostSkillSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HostSkillSource").finish_non_exhaustive()
+    }
+}
+
+impl SkillSource for HostSkillSource {
+    fn list(&self) -> Vec<SkillManifestRef> {
+        (self.loader)()
+    }
+
+    fn fetch(&self, id: &str) -> Result<Skill, String> {
+        (self.fetcher)(id)
+    }
+
+    fn layer(&self) -> Layer {
+        Layer::Host
+    }
+
+    fn describe(&self) -> String {
+        "host-provided [host]".to_string()
+    }
+}
+
+/// Convert a [`Skill`] into the `{_type: "skill_registry", skills: [...]}`
+/// dict form used by the existing skill_* VM builtins. Returns the entry
+/// dict only — callers assemble the outer registry.
+pub fn skill_entry_to_vm(skill: &Skill) -> crate::value::VmValue {
+    use crate::value::VmValue;
+
+    let mut entry: crate::value::DictMap = crate::value::DictMap::new();
+    entry.put_str("name", skill.manifest.name.as_str());
+    entry.put_str("short", skill.manifest.short.as_str());
+    entry.put_str(
+        "description",
+        if skill.manifest.description.is_empty() {
+            skill.manifest.short.as_str()
+        } else {
+            skill.manifest.description.as_str()
+        },
+    );
+    entry.put_opt_str("when_to_use", skill.manifest.when_to_use.as_deref());
+    if skill.manifest.disable_model_invocation {
+        entry.insert(
+            crate::value::intern_key("disable_model_invocation"),
+            VmValue::Bool(true),
+        );
+    }
+    if !skill.manifest.allowed_tools.is_empty() {
+        entry.insert(
+            crate::value::intern_key("allowed_tools"),
+            VmValue::List(std::sync::Arc::new(
+                skill
+                    .manifest
+                    .allowed_tools
+                    .iter()
+                    .map(|t| VmValue::String(arcstr::ArcStr::from(t.as_str())))
+                    .collect(),
+            )),
+        );
+    }
+    if skill.manifest.user_invocable {
+        entry.insert(
+            crate::value::intern_key("user_invocable"),
+            VmValue::Bool(true),
+        );
+    }
+    if !skill.manifest.paths.is_empty() {
+        entry.insert(
+            crate::value::intern_key("paths"),
+            VmValue::List(std::sync::Arc::new(
+                skill
+                    .manifest
+                    .paths
+                    .iter()
+                    .map(|p| VmValue::String(arcstr::ArcStr::from(p.as_str())))
+                    .collect(),
+            )),
+        );
+    }
+    entry.put_opt_str("context", skill.manifest.context.as_deref());
+    entry.put_opt_str("agent", skill.manifest.agent.as_deref());
+    if !skill.manifest.hooks.is_empty() {
+        let mut hooks: crate::value::DictMap = crate::value::DictMap::new();
+        for (k, v) in &skill.manifest.hooks {
+            hooks.insert(
+                crate::value::intern_key(k),
+                VmValue::String(arcstr::ArcStr::from(v.as_str())),
+            );
+        }
+        entry.insert(crate::value::intern_key("hooks"), VmValue::dict(hooks));
+    }
+    entry.put_opt_str("model", skill.manifest.model.as_deref());
+    entry.put_opt_str("effort", skill.manifest.effort.as_deref());
+    if skill.manifest.require_signature {
+        entry.insert(
+            crate::value::intern_key("require_signature"),
+            VmValue::Bool(true),
+        );
+    }
+    if !skill.manifest.trusted_signers.is_empty() {
+        entry.insert(
+            crate::value::intern_key("trusted_signers"),
+            VmValue::List(std::sync::Arc::new(
+                skill
+                    .manifest
+                    .trusted_signers
+                    .iter()
+                    .map(|fingerprint| VmValue::String(arcstr::ArcStr::from(fingerprint.as_str())))
+                    .collect(),
+            )),
+        );
+    }
+    entry.put_opt_str("shell", skill.manifest.shell.as_deref());
+    entry.put_opt_str("argument_hint", skill.manifest.argument_hint.as_deref());
+    entry.put_opt_str("targets", skill.manifest.targets.as_deref());
+    if !skill.manifest.mcp.is_empty() {
+        entry.insert(
+            crate::value::intern_key("mcp"),
+            VmValue::List(std::sync::Arc::new(
+                skill
+                    .manifest
+                    .mcp
+                    .iter()
+                    .map(crate::json_to_vm_value)
+                    .collect(),
+            )),
+        );
+    }
+    entry.put_str("body", skill.body.as_str());
+    if let Some(dir) = &skill.skill_dir {
+        entry.put_str("skill_dir", dir.display().to_string());
+    }
+    entry.put_str("source", skill.layer.label());
+    entry.put_opt_str("namespace", skill.namespace.as_deref());
+    VmValue::dict(entry)
+}
+
+pub fn skill_manifest_ref_to_vm(skill: &SkillManifestRef) -> crate::value::VmValue {
+    use crate::value::VmValue;
+
+    let mut entry: crate::value::DictMap = crate::value::DictMap::new();
+    entry.put_str("name", skill.manifest.name.as_str());
+    entry.put_str("short", skill.manifest.short.as_str());
+    entry.put_str(
+        "description",
+        if skill.manifest.description.is_empty() {
+            skill.manifest.short.as_str()
+        } else {
+            skill.manifest.description.as_str()
+        },
+    );
+    entry.put_opt_str("when_to_use", skill.manifest.when_to_use.as_deref());
+    if skill.manifest.disable_model_invocation {
+        entry.insert(
+            crate::value::intern_key("disable_model_invocation"),
+            VmValue::Bool(true),
+        );
+    }
+    if !skill.manifest.allowed_tools.is_empty() {
+        entry.insert(
+            crate::value::intern_key("allowed_tools"),
+            VmValue::List(std::sync::Arc::new(
+                skill
+                    .manifest
+                    .allowed_tools
+                    .iter()
+                    .map(|tool| VmValue::String(arcstr::ArcStr::from(tool.as_str())))
+                    .collect(),
+            )),
+        );
+    }
+    if skill.manifest.user_invocable {
+        entry.insert(
+            crate::value::intern_key("user_invocable"),
+            VmValue::Bool(true),
+        );
+    }
+    if !skill.manifest.paths.is_empty() {
+        entry.insert(
+            crate::value::intern_key("paths"),
+            VmValue::List(std::sync::Arc::new(
+                skill
+                    .manifest
+                    .paths
+                    .iter()
+                    .map(|path| VmValue::String(arcstr::ArcStr::from(path.as_str())))
+                    .collect(),
+            )),
+        );
+    }
+    entry.put_opt_str("context", skill.manifest.context.as_deref());
+    entry.put_opt_str("agent", skill.manifest.agent.as_deref());
+    if !skill.manifest.hooks.is_empty() {
+        let mut hooks: crate::value::DictMap = crate::value::DictMap::new();
+        for (key, value) in &skill.manifest.hooks {
+            hooks.insert(
+                crate::value::intern_key(key),
+                VmValue::String(arcstr::ArcStr::from(value.as_str())),
+            );
+        }
+        entry.insert(crate::value::intern_key("hooks"), VmValue::dict(hooks));
+    }
+    entry.put_opt_str("model", skill.manifest.model.as_deref());
+    entry.put_opt_str("effort", skill.manifest.effort.as_deref());
+    entry.put_opt_str("shell", skill.manifest.shell.as_deref());
+    entry.put_opt_str("argument_hint", skill.manifest.argument_hint.as_deref());
+    entry.put_opt_str("targets", skill.manifest.targets.as_deref());
+    if !skill.manifest.mcp.is_empty() {
+        entry.insert(
+            crate::value::intern_key("mcp"),
+            VmValue::List(std::sync::Arc::new(
+                skill
+                    .manifest
+                    .mcp
+                    .iter()
+                    .map(crate::json_to_vm_value)
+                    .collect(),
+            )),
+        );
+    }
+    entry.put_str("source", skill.layer.label());
+    entry.put_opt_str("namespace", skill.namespace.as_deref());
+    VmValue::dict(entry)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    fn write(tmp: &Path, rel: &str, body: &str) {
+        let p = tmp.join(rel);
+        fs::create_dir_all(p.parent().unwrap()).unwrap();
+        fs::write(p, body).unwrap();
+    }
+
+    #[test]
+    fn fs_source_walks_one_level_deep() {
+        let tmp = tempfile::tempdir().unwrap();
+        write(
+            tmp.path(),
+            "deploy/SKILL.md",
+            "---\nname: deploy\nshort: deploy the service\ndescription: ship it\n---\nrun deploy",
+        );
+        write(
+            tmp.path(),
+            "review/SKILL.md",
+            "---\nname: review\nshort: review a pull request\n---\nbody",
+        );
+        write(tmp.path(), "not-a-skill.txt", "no");
+
+        let src = FsSkillSource::new(tmp.path(), Layer::Project);
+        let listed = src.list();
+        assert_eq!(listed.len(), 2);
+        let names: Vec<_> = listed.iter().map(|s| s.manifest.name.clone()).collect();
+        assert!(names.contains(&"deploy".to_string()));
+        assert!(names.contains(&"review".to_string()));
+
+        let skill = src.fetch("deploy").unwrap();
+        assert_eq!(skill.manifest.short, "deploy the service");
+        assert_eq!(skill.manifest.description, "ship it");
+        assert_eq!(skill.body, "run deploy");
+    }
+
+    #[test]
+    fn mcp_servers_surface_on_the_vm_entry() {
+        // A skill declaring MCP servers must expose them on its registry entry
+        // as `mcp` so the agent loop can mount them mid-conversation.
+        let tmp = tempfile::tempdir().unwrap();
+        write(
+            tmp.path(),
+            "weather/SKILL.md",
+            "---\nname: weather\nshort: Weather lookups\nmcp-servers:\n  - name: weather-mcp\n    command: node\n---\nbody",
+        );
+        let src = FsSkillSource::new(tmp.path(), Layer::Project);
+        let skill = src.fetch("weather").unwrap();
+        assert_eq!(skill.manifest.mcp.len(), 1);
+
+        let entry = skill_entry_to_vm(&skill);
+        let dict = entry.as_dict().expect("entry is a dict");
+        let crate::value::VmValue::List(servers) = dict.get("mcp").expect("entry carries mcp")
+        else {
+            panic!("mcp must be a list");
+        };
+        assert_eq!(servers.len(), 1);
+        let name = servers[0]
+            .as_dict()
+            .and_then(|d| d.get("name"))
+            .map(crate::value::VmValue::display);
+        assert_eq!(name.as_deref(), Some("weather-mcp"));
+    }
+
+    #[test]
+    fn fs_source_accepts_root_as_single_skill() {
+        let tmp = tempfile::tempdir().unwrap();
+        write(
+            tmp.path(),
+            "SKILL.md",
+            "---\nname: solo\nshort: single skill bundle\n---\n(body)",
+        );
+        let src = FsSkillSource::new(tmp.path(), Layer::Cli);
+        let listed = src.list();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].manifest.name, "solo");
+    }
+
+    #[test]
+    fn fs_source_defaults_name_to_directory() {
+        let tmp = tempfile::tempdir().unwrap();
+        write(
+            tmp.path(),
+            "nameless/SKILL.md",
+            "---\nshort: fallback to the directory name\n---\nbody only",
+        );
+        let src = FsSkillSource::new(tmp.path(), Layer::User);
+        let skill = src.fetch("nameless").unwrap();
+        assert_eq!(skill.manifest.name, "nameless");
+    }
+
+    #[test]
+    fn fs_source_namespace_prefixes_id() {
+        let tmp = tempfile::tempdir().unwrap();
+        write(
+            tmp.path(),
+            "deploy/SKILL.md",
+            "---\nname: deploy\nshort: deploy the service\n---\nbody",
+        );
+        let src = FsSkillSource::new(tmp.path(), Layer::Manifest).with_namespace("acme/ops");
+        let listed = src.list();
+        assert_eq!(listed[0].id, "acme/ops/deploy");
+        let skill = src.fetch("acme/ops/deploy").unwrap();
+        assert_eq!(skill.id(), "acme/ops/deploy");
+    }
+
+    #[test]
+    fn fs_source_namespaced_fetch_requires_qualified_id() {
+        let tmp = tempfile::tempdir().unwrap();
+        write(
+            tmp.path(),
+            "deploy/SKILL.md",
+            "---\nname: deploy\nshort: deploy the service\n---\nbody",
+        );
+        let src = FsSkillSource::new(tmp.path(), Layer::Manifest).with_namespace("acme/ops");
+
+        assert!(src.fetch("deploy").is_err());
+        assert!(src.fetch("other/deploy").is_err());
+        assert_eq!(
+            src.fetch("acme/ops/deploy").unwrap().id(),
+            "acme/ops/deploy"
+        );
+    }
+
+    #[test]
+    fn fs_source_missing_root_is_empty_not_error() {
+        let src = FsSkillSource::new("/does/not/exist/anywhere", Layer::System);
+        assert!(src.list().is_empty());
+        assert!(src.fetch("nope").is_err());
+    }
+
+    #[test]
+    fn fs_source_requires_short_card() {
+        let tmp = tempfile::tempdir().unwrap();
+        write(
+            tmp.path(),
+            "broken/SKILL.md",
+            "---\nname: broken\n---\nbody",
+        );
+        let src = FsSkillSource::new(tmp.path(), Layer::Project);
+        assert!(src.list().is_empty());
+        let err = src.fetch("broken").unwrap_err();
+        assert!(err.contains("`short`"), "{err}");
+    }
+
+    #[test]
+    fn validate_skill_bundle_accepts_directory_or_manifest_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        write(
+            tmp.path(),
+            "review/SKILL.md",
+            "---\nshort: Review developer docs\nfuture-field: retained\n---\nbody",
+        );
+        let dir = tmp.path().join("review");
+        let from_dir = validate_skill_bundle(&dir).expect("directory validates");
+        let from_file =
+            validate_skill_bundle(dir.join("SKILL.md")).expect("manifest path validates");
+        assert_eq!(from_dir.id(), "review");
+        assert_eq!(from_file.id(), "review");
+        assert_eq!(from_dir.unknown_fields, vec!["future-field"]);
+    }
+
+    #[test]
+    fn validate_skill_bundle_rejects_non_manifest_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        write(tmp.path(), "notes.md", "not a skill");
+        let error = validate_skill_bundle(tmp.path().join("notes.md")).unwrap_err();
+        assert!(error.contains("expected SKILL.md"), "{error}");
+    }
+
+    #[test]
+    fn host_source_wraps_closures() {
+        let host = HostSkillSource::new(
+            || {
+                vec![SkillManifestRef {
+                    id: "h1".into(),
+                    manifest: SkillManifest {
+                        name: "h1".into(),
+                        short: "host-provided skill".into(),
+                        ..Default::default()
+                    },
+                    layer: Layer::Host,
+                    namespace: None,
+                    origin: "host".into(),
+                    unknown_fields: Vec::new(),
+                }]
+            },
+            |id| {
+                Ok(Skill {
+                    manifest: SkillManifest {
+                        name: id.to_string(),
+                        short: "host-provided skill".into(),
+                        ..Default::default()
+                    },
+                    body: "host body".into(),
+                    skill_dir: None,
+                    layer: Layer::Host,
+                    namespace: None,
+                    unknown_fields: Vec::new(),
+                })
+            },
+        );
+        assert_eq!(host.list().len(), 1);
+        let s = host.fetch("h1").unwrap();
+        assert_eq!(s.body, "host body");
+        assert_eq!(s.layer, Layer::Host);
+    }
+
+    #[test]
+    fn layer_label_roundtrips() {
+        for layer in Layer::all() {
+            assert_eq!(Layer::from_label(layer.label()), Some(*layer));
+        }
+    }
+}

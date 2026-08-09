@@ -1,0 +1,99 @@
+/*
+ * `result.trace` and `result.tools` must describe the same run.
+ *
+ * They did not. `ToolExecution`, `ToolRejected`, and `LoopComplete` were
+ * declared as agent trace events but nothing ever emitted them, so the
+ * rollup they fed reported `tool_executions=0`, `tools_used=[]`,
+ * `status="unknown"`, and `iterations=0` for every run — including runs whose
+ * transcript and `result.tools` recorded real calls (harn#5997).
+ *
+ * This drives one loop that runs a tool successfully AND has one rejected by
+ * its handler, then asserts the two projections agree. `loop_facts` states
+ * that the counters came from the session that owns them.
+ */
+import { agent_loop } from "std/agent/loop"
+import { llm_text, with_llm_script } from "std/testing"
+
+fn mixed_tools() {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "lookup",
+    "Return evidence",
+    {
+      handler: { _args -> "evidence" },
+      parameters: {query: {type: "string"}},
+      returns: {type: "string"},
+      annotations: {kind: "read"},
+    },
+  )
+  tools = tool_define(
+    tools,
+    "explode",
+    "Throw from a Harn-side handler",
+    {
+      handler: { _args ->
+        throw "boom from tool handler"
+      },
+      parameters: {},
+      returns: {type: "string"},
+      annotations: {kind: "read"},
+    },
+  )
+  return tools
+}
+
+pipeline main(harness: Harness) {
+  with_llm_script(
+    harness.llm,
+    [
+      {text: "", tool_calls: [{id: "ok1", name: "lookup", arguments: {query: "x"}}]},
+      {text: "", tool_calls: [{id: "bad1", name: "explode", arguments: {}}]},
+      llm_text("Finished."),
+    ],
+    { ->
+      const result = agent_loop(
+        harness,
+        "Use both tools.",
+        nil,
+        {
+          provider: "mock",
+          tools: mixed_tools(),
+          tool_format: "native",
+          loop_until_done: true,
+          max_iterations: 4,
+          done_judge: nil,
+        },
+      )
+      const trace = result.trace
+      const tools = result.tools
+      // The counters were derived from a session, not defaulted.
+      harness.stdio.println("loop_facts=" + to_string(trace.loop_facts))
+      // Parity with `result.tools`, which reads the same session state.
+      harness.stdio.println(
+        "executions_match=" + to_string(trace.tool_executions == len(tools.successful)),
+      )
+      harness.stdio.println(
+        "rejections_match=" + to_string(trace.tool_rejections == len(tools.rejected)),
+      )
+      harness.stdio.println("tools_used=" + json_stringify(trace.tools_used))
+      // The specific numbers, so a regression that made both sides equally
+      // wrong could not pass the parity checks above.
+      harness.stdio.println("executions=" + to_string(trace.tool_executions))
+      harness.stdio.println("rejections=" + to_string(trace.tool_rejections))
+      harness.stdio.println("successful=" + json_stringify(tools.successful))
+      harness.stdio.println("rejected=" + json_stringify(tools.rejected))
+      // Loop lifecycle: no longer the structural "unknown"/0 of a rollup with
+      // no producer.
+      harness.stdio.println("status=" + to_string(trace.status))
+      harness.stdio.println(
+        "iterations_match=" + to_string(trace.iterations == result.llm.iterations),
+      )
+      // Token scopes are named on both sides, because the two counts
+      // legitimately differ: `llm` counts one accepted result per turn while
+      // the trace counts every provider call.
+      harness.stdio.println("trace_token_scope=" + to_string(trace.token_scope))
+      harness.stdio.println("llm_token_scope=" + to_string(result.llm.token_scope))
+    },
+  )
+}

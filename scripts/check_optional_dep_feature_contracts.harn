@@ -1,0 +1,181 @@
+// Structural contracts for optional dependency feature sets.
+//
+// Catches incomplete feature subsets when a crate disables upstream defaults —
+// for example `ort` with `download-binaries` but no TLS feature (#5690). That
+// failure mode only appears under `--features neural` / `--all-features`, which
+// default CI does not compile, so a cheap TOML contract is the durable ratchet.
+const ORT_TLS_FEATURES = [
+  "tls-rustls",
+  "tls-rustls-no-provider",
+  "tls-native",
+  "tls-native-vendored",
+]
+
+const MANIFEST_GLOBS = ["Cargo.toml", "crates/*/Cargo.toml", "bench/*/Cargo.toml"]
+
+const DEP_SECTIONS = ["dependencies", "build-dependencies", "dev-dependencies"]
+
+pub fn ort_download_tls_violations(path: string, dep: any) -> list<string> {
+  if type_of(dep) != "dict" {
+    return []
+  }
+  const features = dep.get("features")
+  if type_of(features) != "list" {
+    return []
+  }
+  let feature_names: list<string> = []
+  for item in features {
+    feature_names = feature_names + [to_string(item)]
+  }
+  if !feature_names.contains("download-binaries") {
+    return []
+  }
+  // Omitted default-features means true; only explicit false drops ort's
+  // bundled tls-native default.
+  const default_features = dep.get("default-features")
+  if !(type_of(default_features) == "bool" && !default_features) {
+    return []
+  }
+  let tls: list<string> = []
+  for name in ORT_TLS_FEATURES {
+    if feature_names.contains(name) {
+      tls = tls + [name]
+    }
+  }
+  if tls.count == 1 {
+    return []
+  }
+  if tls.count == 0 {
+    return [
+      path
+        + ": ort enables download-binaries with default-features=false but no TLS feature; add exactly one of "
+        + ORT_TLS_FEATURES
+        .join(", "),
+    ]
+  }
+  return [
+    path
+      + ": ort enables download-binaries with multiple TLS features ("
+      + tls.join(", ")
+      + "); keep exactly one",
+  ]
+}
+
+pub fn optional_dep_feature_contract_violations_from_text(
+  path: string,
+  text: string,
+) -> list<string> {
+  const doc = toml_parse(text)
+  let violations: list<string> = []
+  for section in DEP_SECTIONS {
+    const table = doc.get(section)
+    if type_of(table) != "dict" {
+      continue
+    }
+    const ort = table.get("ort")
+    if ort == nil {
+      continue
+    }
+    violations = violations + ort_download_tls_violations(path, ort)
+  }
+  if path == "crates/harn-vm/Cargo.toml" {
+    const features = doc.get("features")
+    const defaults = features.get("default")
+    const full = features.get("full")
+    if type_of(defaults) != "list"
+      || defaults.count != 1
+      || defaults[0] != "full" {
+      violations = violations
+        + [
+        path + ": default VM capabilities must be owned by the single `full` feature",
+      ]
+    }
+    const required = [
+      "postgres",
+      "sqlite",
+      "content",
+      "compression",
+      "http-compression",
+      "cloud-aws",
+      "native-keyring",
+    ]
+    if type_of(full) != "list" || full.count != required.count {
+      violations = violations
+        + [
+        path + ": `full` must enumerate the canonical distributed VM capability families",
+      ]
+    } else {
+      for feature in required {
+        if !full.contains(feature) {
+          violations = violations
+            + [
+            path + ": `full` is missing VM capability family `" + feature + "`",
+          ]
+        }
+      }
+    }
+  }
+  if path == "crates/harn-cli/Cargo.toml" {
+    const vm = doc.get("dependencies").get("harn-vm")
+    const vm_features = vm.get("features")
+    if type_of(vm.get("default-features")) != "bool"
+      || vm.get("default-features")
+      || type_of(vm_features) != "list"
+      || vm_features.count != 2
+      || !vm_features.contains("full")
+      || !vm_features.contains("otel") {
+      violations = violations
+        + [
+        path
+          + ": distributed CLI must explicitly select the canonical `full` VM surface plus `otel`",
+      ]
+    }
+  }
+  if path == "crates/harn-test-runner/Cargo.toml" {
+    const vm = doc.get("dependencies").get("harn-vm")
+    if type_of(vm.get("default-features")) != "bool"
+      || vm.get("default-features")
+      || vm.get("features") != nil {
+      violations = violations
+        + [
+        path + ": test engine must keep the VM capability closure lean and explicit",
+      ]
+    }
+  }
+  return violations
+}
+
+fn checked_manifest_paths(fs: HarnessFs) -> list<string> {
+  let paths: list<string> = []
+  for pattern in MANIFEST_GLOBS {
+    for path in fs.glob(pattern) {
+      paths = paths + [path]
+    }
+  }
+  return paths.sorted()
+}
+
+pipeline main(harness: Harness, task) {
+  const paths = checked_manifest_paths(harness.fs)
+  let violations: list<string> = []
+  for path in paths {
+    violations = violations
+      + optional_dep_feature_contract_violations_from_text(
+      path,
+      harness.fs.read_text(path),
+    )
+  }
+  if violations.count > 0 {
+    harness.stdio.eprintln("optional dependency feature contract violations:")
+    for item in violations {
+      harness.stdio.eprintln("  - " + item)
+    }
+    return 1
+  }
+  harness.stdio.println(
+    "optional dependency feature contracts ok ("
+      + to_string(paths.count)
+      + " manifest(s))",
+  )
+  return 0
+}

@@ -1,0 +1,10 @@
+import { build_prompt } from "./host"
+
+pipeline default(harness: Harness, task) {
+  const prompt = build_prompt(harness.env.get_or("HARN_TASK", "say hi"))
+  const result = harness.llm.call(
+    prompt,
+    "You are concise. Reply with a single sentence that acknowledges the task.",
+  )
+  harness.stdio.println(result.text)
+}

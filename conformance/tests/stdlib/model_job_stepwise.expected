@@ -1,0 +1,17 @@
+harn.model_job_run.v1
+queued
+running
+1
+timeout
+model job exceeded max_attempts
+timeout
+model job timed out
+succeeded
+2
+succeeded
+1
+canceled
+state_changed
+invalid_request
+backend
+model backend submit failed

@@ -1,0 +1,188 @@
+# Loud-boundary registry — every place model-produced bytes become, or fail to
+# become, executed action.
+#
+# WHY THIS FILE EXISTS
+# --------------------
+# harn#5142: the text tool-call parser recognized tool syntax only for a fixed
+# set of literal tags, and everything else degraded to prose with zero calls,
+# zero violations, and zero events. Downstream — stall feedback, the rate
+# governor, the verdict layer — that reads exactly like a model that produced
+# nothing, so a harness bug was attributed to the model. The same shape existed
+# at five other boundaries.
+#
+# Adding `<tool>` to the allowlist would have fixed one instance. The invariant
+# is the class kill: EVERY boundary that can drop, truncate, or kill model
+# output emits a typed `AgentEvent::BoundaryFailure`, and this registry is the
+# enumeration that keeps that promise from rotting.
+#
+# HOW IT IS ENFORCED
+# ------------------
+# `make check-loud-boundaries` (scripts/check_loud_boundaries.harn) fails when:
+#   1. the `BoundaryId` enum in crates/harn-vm/src/boundary.rs and the `id`s
+#      below are not in exact 1:1 correspondence, wire strings included;
+#   2. a registered `anchor` file is missing, or no longer constructs the
+#      boundary it claims (a stale entry);
+#   3. a file OUTSIDE an entry's anchors constructs that boundary (an
+#      unregistered drop path — the case the gate exists for);
+#   4. a `.harn` boundary emits `boundary_failure` with an id nobody registered;
+#   5. a registered `test` file is missing or does not exercise its boundary.
+#
+# HOW TO ADD A BOUNDARY
+# ---------------------
+#   1. Add a variant to `BoundaryId` (+ `ALL` + `as_str`) in
+#      crates/harn-vm/src/boundary.rs.
+#   2. Report the loss at the drop site with `BoundaryFailure::new(...).report()`
+#      (Rust) or `agent_emit_event(session, "boundary_failure", {...})` (Harn).
+#   3. Add a `[[boundary]]` block here naming the anchor and the test.
+#   4. Write the test that proves the event fires.
+#   5. Run `make check-loud-boundaries`.
+
+[[boundary]]
+id = "text_tool_parse"
+title = "Batch text tool-call parsing"
+drops = "Spans the grammar consumed without producing a call (an unrecognized dialect salvaged as prose, narration inside a closed fence), and recorded protocol violations."
+was_silent = true
+event = "agent_event:boundary_failure"
+anchors = [
+  "crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn",
+  "crates/harn-vm/src/llm/tools/parse/streaming.rs",
+]
+test = "conformance/tests/scenarios/agent_loud_boundary_events.harn"
+notes = "Batch parsing emits above the parser, where std/llm/tool_shape can distinguish narration from an unrecognized dialect. The streaming detector has stronger evidence—an opened known-tool or tagged candidate—and reports its exact aborted span through the same boundary."
+
+[[boundary]]
+id = "response_content_extraction"
+title = "Provider response ingestion"
+drops = "Content blocks, output items, and message parts with no handler (redacted_thinking, hosted-tool items, non-text parts), plus completions past choices[0]."
+was_silent = true
+event = "agent_event:boundary_failure"
+anchors = [
+  "crates/harn-vm/src/llm/api/response/boundary.rs",
+  "crates/harn-vm/src/llm/api/response.rs",
+]
+test = "crates/harn-vm/src/llm/api/response/boundary/tests.rs"
+notes = "The only prior signal was empty_generation_error, which fires only when EVERY block was dropped; one recognized text block alongside ten dropped ones passed as a complete answer."
+
+[[boundary]]
+id = "visible_text_sanitize"
+title = "Visible assistant text sanitization"
+drops = "Assistant prose superseded by a <user_response> block, which no host renders."
+was_silent = true
+event = "agent_event:boundary_failure"
+anchors = ["crates/harn-vm/src/visible_text.rs"]
+test = "crates/harn-vm/src/visible_text.rs"
+notes = "Reported by `project_visible_assistant_text` only, which has exactly one caller: the LLM result projection, the single place that sees a turn's reply once, as it is produced. `sanitize_visible_assistant_text` has no reporting path at all, so the three re-derivation consumers (session-finalize transcript walk, sub-agent result synthesis, sub-agent transcript fallback walk) and every replay over historical turns are structurally unable to emit. Streamed partial passes cannot report either."
+
+[[boundary]]
+id = "host_event_ingest"
+title = "__host_agent_emit_event ingress"
+drops = "Host events whose type is not allowlisted or whose payload does not deserialize into an AgentEvent."
+was_silent = true
+event = "agent_event:boundary_failure"
+anchors = ["crates/harn-vm/src/agent_events/from_host.rs"]
+test = "crates/harn-vm/src/agent_events/from_host_tests.rs"
+notes = "The VmError alone was not enough: every stdlib emit site wraps agent_emit_event in `try { }` and discards the result, so a rejected event vanished. The funnel emission is not swallowable by a caller's try."
+
+[[boundary]]
+id = "provider_admission_gate"
+title = "Rate governor admission gate"
+drops = "The governor's back-pressure guarantee: after the admission-wait cap the call proceeds with no reservation."
+was_silent = true
+event = "agent_event:boundary_failure"
+anchors = ["crates/harn-vm/src/llm/agent_observe/provider_errors.rs"]
+test = "crates/harn-vm/src/llm/agent_observe/provider_errors_boundary_tests.rs"
+notes = "Without this, the 429 storm that follows reads as a provider problem rather than as the governor having given up."
+
+[[boundary]]
+id = "post_tool_output"
+title = "PostToolUse output shaping"
+drops = "Bytes a PostToolUse hook explicitly reports removing before the rendered tool result reaches the next model turn."
+was_silent = true
+event = "agent_event:boundary_failure"
+anchors = [
+  "crates/harn-vm/src/orchestration/hooks.rs",
+  "crates/harn-vm/src/stdlib/workflow/hooks.rs",
+  "crates/harn-vm/src/llm/agent_host_primitives.rs",
+]
+test = "crates/harn-vm/src/llm/agent_host_primitives/tool_output_truncation_tests.rs"
+notes = "The hook result carries cumulative dropped_bytes structurally. A later hook can append enough text to restore the original length without erasing the earlier truncation fact; legacy string/result rewrites remain modifications and never guess at data loss."
+
+[[boundary]]
+id = "transcript_seed"
+title = "Transcript JSONL seed cap"
+drops = "Oldest reconstructed messages omitted by agent_session_seed_from_jsonl truncate_to_last."
+was_silent = true
+event = "agent_event:boundary_failure"
+anchors = ["crates/harn-vm/src/llm/transcript_seed.rs"]
+test = "crates/harn-vm/src/llm/transcript_seed.rs"
+notes = "The event carries the number of omitted messages and their serialized byte count. It fires before the destination session exists, so the event has no session id."
+
+[[boundary]]
+id = "session_transcript"
+title = "Live session transcript truncate and trim"
+drops = "Message content removed by explicit prefix-retaining truncate or suffix-retaining trim operations."
+was_silent = true
+event = "agent_event:boundary_failure"
+anchors = ["crates/harn-vm/src/agent_sessions/truncation.rs"]
+test = "crates/harn-vm/src/agent_sessions_tests/truncation_boundary_tests.rs"
+notes = "Reports only after the replacement transcript is accepted by the budget boundary, outside the session RefCell borrow. Public truncate/trim operations propagate budget rejection as an error rather than confusing it with data loss or an unknown session."
+
+[[boundary]]
+id = "grounded_review"
+title = "Grounded-review evidence shaping"
+drops = "Verifier text beyond the scan byte cap, finding summaries beyond the summary cap, and findings beyond the configured count cap."
+was_silent = true
+event = "agent_event:boundary_failure"
+anchors = ["crates/harn-vm/src/llm/reminder_providers.rs"]
+test = "crates/harn-vm/src/llm/reminder_providers/tests/grounded_review_truncation_tests.rs"
+notes = "One coalesced event per provider evaluation carries the cumulative exact byte count across all caps."
+
+[[boundary]]
+id = "agent_prompt_content"
+title = "Agent stdlib prompt-content caps"
+drops = "Command stdout/stderr and parse tails, probe evidence, pin reminder bodies, verification summaries, and simulated-user transcript context clipped before an agent consumes them."
+was_silent = true
+event = "agent_event:boundary_failure"
+anchors = [
+  "crates/harn-stdlib/src/stdlib/agent/truncation.harn",
+  "crates/harn-stdlib/src/stdlib/stdlib_command.harn",
+  "crates/harn-stdlib/src/stdlib/verification_core.harn",
+  "crates/harn-stdlib/src/stdlib/agent/probe.harn",
+  "crates/harn-stdlib/src/stdlib/agent/pins.harn",
+  "crates/harn-stdlib/src/stdlib/agent/user.harn",
+]
+test = "conformance/tests/scenarios/agent_truncation_boundaries.harn"
+notes = "Pure truncate_text remains side-effect free for non-agent consumers. Each model-facing owner reports through boundary_failure at the point it chooses the cap."
+
+# Boundaries audited under #5142 and found already loud. They do not construct
+# BoundaryFailure — they carry their own typed event, which is the older half of
+# the same invariant — so they are recorded here rather than registered above.
+# The gate checks that each anchor still exists and still emits its event.
+
+[[audited]]
+id = "agent_loop_budget"
+title = "Agent-loop iteration / cost / wall-clock caps"
+event = "agent_event:budget_exhausted"
+anchors = ["crates/harn-stdlib/src/stdlib/agent/loop_turn_options.harn"]
+marker = "budget_exhausted"
+
+[[audited]]
+id = "agent_loop_stall"
+title = "Stall detection and hard stop"
+event = "agent_event:agent_loop_stall_warning"
+anchors = ["crates/harn-stdlib/src/stdlib/agent/stall_observation.harn"]
+marker = "agent_loop_stall_warning"
+
+[[audited]]
+id = "llm_transport"
+title = "Provider transport failure"
+event = "vm_error:thrown(build_llm_error_dict)"
+anchors = ["crates/harn-vm/src/llm/call.rs"]
+marker = "build_llm_error_dict"
+
+[[audited]]
+id = "acp_prompt_ingest"
+title = "ACP inbound prompt content blocks"
+event = "typed_error:unsupported content block type"
+anchors = ["crates/harn-serve/src/adapters/acp/schema.rs"]
+marker = "unsupported content block type"

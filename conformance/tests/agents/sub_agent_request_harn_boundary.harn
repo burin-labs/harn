@@ -1,0 +1,50 @@
+import { sub_agent_request } from "std/agent/workers"
+
+fn worker_tools() {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "read_note",
+    "Read a note",
+    {handler: { args -> "read " + args.path }, parameters: {path: {type: "string"}}},
+  )
+  tools = tool_define(
+    tools,
+    "write_note",
+    "Write a note",
+    {handler: { args -> "wrote " + args.path }, parameters: {path: {type: "string"}}},
+  )
+  return tools
+}
+
+pipeline main(harness: Harness) {
+  const tools = worker_tools()
+  tool_bind(tools)
+  const request = sub_agent_request(
+    harness,
+    "Inspect notes.",
+    {
+      name: "note-reader",
+      system: "Stay terse.",
+      provider: "mock",
+      allowed_tools: ["read_note", "read_note"],
+      background: true,
+      returns: {schema: {type: "object"}},
+      policy: {tools: ["read_note", "write_note"]},
+    },
+  )
+  harness.stdio.println(request?._type)
+  harness.stdio.println(request?.name)
+  harness.stdio.println(request?.system)
+  harness.stdio.println(request?.background)
+  harness.stdio.println(request?.options?.provider)
+  harness.stdio.println(starts_with(request?.session_id, "sub_agent_session_"))
+  harness.stdio.println(len(request?.allowed_tools) == 1)
+  harness.stdio.println(tool_count(request?.options?.tools))
+  harness.stdio.println(tool_find(request?.options?.tools, "read_note")?.name)
+  harness.stdio.println(tool_find(request?.options?.tools, "write_note") == nil)
+  harness.stdio.println(request?.options?.policy == nil)
+  harness.stdio.println(request?.policy?.tools[0])
+  harness.stdio.println(request?.returns_schema?.type)
+  tool_bind(nil)
+}

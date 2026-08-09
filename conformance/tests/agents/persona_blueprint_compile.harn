@@ -1,0 +1,95 @@
+import { persona_blueprint_compile, persona_blueprint_validate } from "std/personas/compiler"
+
+pipeline main(harness: Harness) {
+  const digest = persona_blueprint_compile(
+    harness.llm,
+    {
+      schema_version: "1",
+      name: "reply_digest",
+      description: "Summarizes follow-up work.",
+      goal: "Surface replies and follow-ups every four hours.",
+      template: "deterministic-sweeper",
+      cron: {cron: "0 */4 * * *", timezone: "America/Los_Angeles"},
+    },
+  )
+  harness.stdio.println(is_ok(digest))
+  const digest_lowering = unwrap(digest)
+  harness.stdio.println(digest_lowering.profile)
+  harness.stdio.println(digest_lowering.template)
+  harness.stdio.println(digest_lowering.policy.autonomy_tier)
+  harness.stdio.println(digest_lowering.policy.receipt_policy)
+  harness.stdio.println(digest_lowering.triggers[0].kind)
+  harness.stdio.println(digest_lowering.triggers[0].events[0])
+  harness.stdio.println(digest_lowering.triggers[0].handler)
+  harness.stdio.println(digest_lowering.triggers[0].schedule)
+  const slack_catalog = [
+    {
+      provider: "slack",
+      kinds: ["webhook"],
+      schema_name: "SlackEventPayload",
+      outbound_methods: [],
+      secret_requirements: [{name: "signing_secret", required: true, namespace: "slack"}],
+      signature_verification: {kind: "none"},
+      runtime: {kind: "placeholder"},
+    },
+  ]
+  const triage = persona_blueprint_compile(
+    harness.llm,
+    {
+      schema_version: "1",
+      name: "alerts_triage",
+      description: "Sorts incoming alerts.",
+      goal: "Classify alert messages for follow-up.",
+      template: "hybrid-classify-then-act",
+      external: {provider: "slack", event: "slack.message"},
+    },
+    slack_catalog,
+  )
+  harness.stdio.println(is_ok(triage))
+  const triage_lowering = unwrap(triage)
+  harness.stdio.println(triage_lowering.triggers[0].kind)
+  harness.stdio.println(triage_lowering.triggers[0].provider)
+  harness.stdio.println(triage_lowering.triggers[0].events[0])
+  harness.stdio.println(triage_lowering.triggers[0].handler)
+  harness.stdio.println(triage_lowering.triggers[0].secrets.signing_secret)
+  const mixed_sources = persona_blueprint_validate(
+    harness.llm,
+    {
+      schema_version: "1",
+      name: "too_many_sources",
+      description: "Invalid source shape.",
+      goal: "Must not lower two routes.",
+      template: "deterministic-sweeper",
+      cron: {cron: "0 * * * *", timezone: "UTC"},
+      external: {provider: "slack", event: "slack.message"},
+    },
+    slack_catalog,
+  )
+  harness.stdio.println(mixed_sources.valid)
+  harness.stdio.println(mixed_sources.errors.any({ error -> error.code == "source_count" }))
+  const missing_source = persona_blueprint_validate(
+    harness.llm,
+    {
+      schema_version: "1",
+      name: "missing_source",
+      description: "Invalid source shape.",
+      goal: "Must not lower without a route.",
+      template: "deterministic-sweeper",
+    },
+    slack_catalog,
+  )
+  harness.stdio.println(missing_source.valid)
+  harness.stdio.println(missing_source.errors.any({ error -> error.code == "source_count" }))
+  const malformed_without_source = persona_blueprint_validate(
+    harness.llm,
+    {
+      schema_version: "1",
+      name: "bad-name",
+      description: " ",
+      goal: "",
+      template: "deterministic-sweeper",
+    },
+    slack_catalog,
+  )
+  harness.stdio.println(json_stringify(malformed_without_source))
+}

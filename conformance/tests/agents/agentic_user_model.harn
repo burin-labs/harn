@@ -1,0 +1,40 @@
+import { agentic_user, simulated_user_respond, simulated_user_status } from "std/agent/user"
+import { llm_text, with_llm_script } from "std/testing"
+
+pipeline main(harness: Harness) {
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text(
+        "{\"action\":\"reply\",\"message\":\"Use node:test.\",\"reason\":\"no extra deps\"}",
+      ),
+    ],
+    { ->
+      const answerer = agentic_user(
+        harness,
+        {
+          task: "Help a coding agent create a focused test file.",
+          behavior: "Answer clarification questions with plausible project preferences.",
+          provider: "mock",
+          max_replies: 2,
+          max_llm_calls: 2,
+        },
+      )
+      const decision = simulated_user_respond(
+        answerer,
+        {
+          question: "Which test runner should I use?",
+          context: "The package has no explicit test framework.",
+        },
+      )
+      const status = simulated_user_status(harness.runtime, answerer)
+      const calls = harness.llm.mock_calls()
+      harness.stdio.println(decision.action)
+      harness.stdio.println(decision.message)
+      harness.stdio.println(status.state.replies)
+      harness.stdio.println(status.state.llm_calls)
+      harness.stdio.println(contains(calls[0].system, "simulating the user"))
+      harness.stdio.println(contains(json_stringify(calls[0].messages), "Which test runner"))
+    },
+  )
+}

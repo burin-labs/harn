@@ -1,0 +1,6 @@
+import { add, greet } from "selective_import_lib"
+
+pipeline default(harness: Harness) {
+  harness.stdio.println(greet("World"))
+  harness.stdio.println(add(3, 4))
+}

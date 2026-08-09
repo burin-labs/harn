@@ -1,0 +1,22 @@
+// Conformance test for std/llm/handlers::with_fallback — tries callers in
+// order and stamps {fallback_index, fallback_total} on the first success.
+import { with_fallback } from "std/llm/handlers"
+
+pipeline default(harness: Harness) {
+  const a = { _call -> {ok: false, status: "auth", error: "no key"} }
+  const b = { _call -> {ok: false, status: "transient", error: "blip"} }
+  const c = { _call ->
+    {
+      ok: true,
+      value: {text: "C-text", model: "mock", provider: "mock", input_tokens: 0, output_tokens: 0},
+    }
+  }
+  const caller = with_fallback(harness.agent, [a, b, c])
+  const env = caller(
+    {prompt: "p", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}},
+  )
+  harness.stdio.println(env.ok)
+  harness.stdio.println(env.value.text)
+  harness.stdio.println(env.fallback_index)
+  harness.stdio.println(env.fallback_total)
+}

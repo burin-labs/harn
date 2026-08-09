@@ -1,0 +1,47 @@
+import { register_guardrail } from "std/channel_guardrails"
+
+/**
+ * CH-11 (#1911): a custom guardrail (Harn closure) is invoked on
+ * every emit and its returned verdict is honored. Exercises all three
+ * return shapes (dict, string, nil) and verifies that the warn audit
+ * is written before the durable append while the emit proceeds.
+ */
+pipeline default(harness: Harness) {
+  harness.obs.pipeline_lifecycle_audit_log_take()
+  harness.channels.guardrail_clear()
+  /* Closure scanner: blocks payloads with `secret_key`, warns when
+   * the channel is `panic`, allows everything else. */
+  const scan = { payload, ctx ->
+    if payload?.secret_key != nil {
+      return {verdict: "block", reason: "secret_key field is reserved"}
+    }
+    if ctx?.name_resolved != nil && contains(to_string(ctx.name_resolved), "panic") {
+      return {verdict: "warn", reason: "panic channel under review"}
+    }
+    return "allow"
+  }
+  const id = register_guardrail(harness.channels, {id: "policy", scan_fn: scan})
+  harness.stdio.println(id)
+  /* Block path: dict verdict drops the emit + writes blocked audit. */
+  const denied = harness.channels.append(
+    "ch.guardrail.policy",
+    {ok: false, secret_key: "exfil-payload"},
+  )
+  harness.stdio.println(denied?.blocked)
+  harness.stdio.println(denied?.block_reason)
+  /* Warn path: emit proceeds + writes a warning audit. */
+  const warned = harness.channels.append("ch.guardrail.panic", {reason: "drain timeout"})
+  harness.stdio.println(warned?.inserted)
+  harness.stdio.println(warned?.blocked ?? false)
+  /* Allow path: emit proceeds silently. */
+  const normal = harness.channels.append("ch.guardrail.policy", {reason: "normal"})
+  harness.stdio.println(normal?.inserted)
+  harness.stdio.println(normal?.blocked ?? false)
+  /* Audit log: block then warn (in registration order). */
+  const audit = harness.obs.pipeline_lifecycle_audit_log_take()
+  harness.stdio.println(len(audit))
+  harness.stdio.println(audit[0].kind)
+  harness.stdio.println(audit[0].payload.fired[0].reason)
+  harness.stdio.println(audit[1].kind)
+  harness.stdio.println(audit[1].payload.fired[0].reason)
+}

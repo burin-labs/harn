@@ -1,0 +1,33 @@
+{
+  "name": "a2a.message_send.missing_id",
+  "protocol": "a2a",
+  "schema": "schemas/a2a-0.3.0.schema.json",
+  "expect": "invalid",
+  "documents": [
+    {
+      "jsonrpc": "2.0",
+      "method": "message/send",
+      "params": {
+        "message": {
+          "id": "msg-1",
+          "role": "user",
+          "parts": [
+            {
+              "type": "text",
+              "text": "hello"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "matrix": {
+    "version": "0.3.0",
+    "family": "message_send",
+    "case": "malformed_payload_negative",
+    "source": {
+      "kind": "hand_authored",
+      "description": "Negative JSON-RPC request fixture for the required request id field."
+    }
+  }
+}

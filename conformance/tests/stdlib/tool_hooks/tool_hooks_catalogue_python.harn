@@ -1,0 +1,33 @@
+import { tool_hooks_seed_registry } from "std/tool_hooks_catalogues"
+
+/**
+ * Python seed catalogue (TH-04 #1897). Verifies find/pip/pytest rules
+ * fire on real-world invocations and stay quiet on already-corrected
+ * variants.
+ */
+fn probe(stdio: HarnessStdio, tools: HarnessTools, reg, cmd) {
+  const m = tools.hooks_match(reg, cmd, {stacks: ["python"]})
+  if len(m) > 0 {
+    stdio.println(m[0].rule_id + " " + m[0].severity)
+  } else {
+    stdio.println("miss")
+  }
+}
+
+pipeline default(harness: Harness) {
+  const reg = tool_hooks_seed_registry(harness.env, harness.tools, ["python"])
+  /* find_versus_rg: quoted and unquoted *.py patterns. */
+  probe(harness.stdio, harness.tools, reg, "find . -name '*.py'")
+  probe(harness.stdio, harness.tools, reg, "find . -name *.py")
+  /* Negative: a non-.py extension on the python stack doesn't match. */
+  probe(harness.stdio, harness.tools, reg, "find . -name '*.txt'")
+  /* pip_install_no_user: bare install fires; --user / -e . suppress. */
+  probe(harness.stdio, harness.tools, reg, "pip install requests")
+  probe(harness.stdio, harness.tools, reg, "pip3 install --user requests")
+  probe(harness.stdio, harness.tools, reg, "python -m pip install -e .")
+  /* pytest_no_capture: bare pytest fires; -s suppresses. */
+  probe(harness.stdio, harness.tools, reg, "pytest tests/integration")
+  probe(harness.stdio, harness.tools, reg, "pytest -s tests/")
+  /* Negative: pytest-cov sub-binary shouldn't trip. */
+  probe(harness.stdio, harness.tools, reg, "pytest-cov --version")
+}

@@ -1,0 +1,104 @@
+import { agent_loop } from "std/agent/loop"
+import { llm_text, with_llm_script } from "std/testing"
+
+/**
+ * Verifies the `verify_completion` stop-hook contract end-to-end:
+ * - the closure fires when the loop is about to yield,
+ * - returning a string vetoes the stop and injects feedback,
+ * - returning `nil`/`true` confirms the stop and the loop yields,
+ * - `max_verify_attempts` caps the veto loop with status `verify_exhausted`,
+ * - `done_sentinel: "##DONE##"` keeps sentinel completion explicit for this mock provider.
+ * Decisions are keyed on `info.iteration` rather than captured `var` state
+ * so the test stays deterministic without depending on closure mutation
+ * semantics.
+ */
+fn scenario_veto_then_confirm(harness: Harness) {
+  with_llm_script(
+    harness.llm,
+    [llm_text("Round 1. ##DONE##"), llm_text("Round 2. ##DONE##")],
+    { ->
+      const cb = { info ->
+        if info.iteration == 0 {
+          return "not yet — try once more"
+        }
+        nil
+      }
+      const result = agent_loop(
+        harness,
+        "do work",
+        "you are an agent.",
+        {
+          provider: "mock",
+          loop_until_done: true,
+          max_iterations: 5,
+          done_sentinel: "##DONE##",
+          verify_completion: cb,
+        },
+      )
+      harness.stdio.println("scenario1.status=${result.status}")
+      harness.stdio.println("scenario1.iters=${result.llm.iterations}")
+      harness.stdio.println("scenario1.calls=${len(harness.llm.mock_calls())}")
+    },
+  )
+}
+
+fn scenario_max_verify_exhausted(harness: Harness) {
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text("Trying. ##DONE##"),
+      llm_text("Trying. ##DONE##"),
+      llm_text("Trying. ##DONE##"),
+      llm_text("Trying. ##DONE##"),
+      llm_text("Trying. ##DONE##"),
+    ],
+    { ->
+      const always_veto = { _info -> "still not good enough" }
+      const result = agent_loop(
+        harness,
+        "do work",
+        "you are an agent.",
+        {
+          provider: "mock",
+          loop_until_done: true,
+          max_iterations: 10,
+          done_sentinel: "##DONE##",
+          verify_completion: always_veto,
+          max_verify_attempts: 2,
+        },
+      )
+      harness.stdio.println("scenario2.status=${result.status}")
+      harness.stdio.println("scenario2.calls=${len(harness.llm.mock_calls())}")
+    },
+  )
+}
+
+fn scenario_confirm_immediately(harness: Harness) {
+  with_llm_script(
+    harness.llm,
+    [llm_text("First and final. ##DONE##")],
+    { ->
+      const always_confirm = { _info -> nil }
+      const result = agent_loop(
+        harness,
+        "do work",
+        "you are an agent.",
+        {
+          provider: "mock",
+          loop_until_done: true,
+          max_iterations: 5,
+          done_sentinel: "##DONE##",
+          verify_completion: always_confirm,
+        },
+      )
+      harness.stdio.println("scenario3.status=${result.status}")
+      harness.stdio.println("scenario3.iters=${result.llm.iterations}")
+    },
+  )
+}
+
+pipeline default(harness: Harness) {
+  scenario_veto_then_confirm(harness)
+  scenario_max_verify_exhausted(harness)
+  scenario_confirm_immediately(harness)
+}

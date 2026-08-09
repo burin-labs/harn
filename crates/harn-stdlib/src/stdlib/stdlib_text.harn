@@ -1,0 +1,445 @@
+// std/text — Text processing utilities for LLM output and code analysis.
+// Convert an integer-compatible value into a decimal string with explicit
+// stdlib import ergonomics for Harn-authored libraries.
+/**
+ * int_to_string.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn int_to_string(value) {
+  const parsed = to_int(value)
+  require parsed != nil, "int_to_string expects an integer-compatible value"
+  return to_string(parsed)
+}
+
+// Convert a float-compatible value into a string.
+/**
+ * float_to_string.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn float_to_string(value) {
+  const parsed = to_float(value)
+  require parsed != nil, "float_to_string expects a float-compatible value"
+  return to_string(parsed)
+}
+
+// Parse an integer-like value, returning fallback when conversion fails.
+/**
+ * parse_int_or.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn parse_int_or(value, fallback) {
+  return to_int(value) ?? fallback
+}
+
+// Parse a float-like value, returning fallback when conversion fails.
+/**
+ * parse_float_or.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn parse_float_or(value, fallback) {
+  return to_float(value) ?? fallback
+}
+
+// Extract file paths from text.
+// Splits on newlines, skips comment lines, extracts path-like words,
+// validates extensions, and deduplicates.
+/**
+ * extract_paths.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn extract_paths(text) {
+  const lines = split(text, "\n").filter(
+    { line ->
+      let t = trim(line)
+      return contains(t, "/")
+        && !starts_with(t, "//")
+        && !starts_with(t, "#")
+    },
+  )
+  let seen = []
+  return lines.flat_map(
+    { line ->
+      return split(trim(line), " ").map(
+        { word ->
+          let clean = regex_replace(
+            "^[\"'`,;:()\\[\\]{}><]+|[\"'`,;:()\\[\\]{}><]+$",
+            "",
+            trim(word),
+          )
+          while ends_with(clean, ".") || ends_with(clean, ",") || ends_with(clean, ":")
+            || ends_with(
+            clean,
+            ";",
+          ) {
+            clean = substring(clean, 0, len(clean) - 1)
+          }
+          return clean
+        },
+      )
+        .filter(
+          { clean ->
+            if !contains(clean, "/") && !contains(clean, ".") {
+              return false
+            }
+            const ext = extname(clean)
+            return ext != "" && len(ext) <= 11
+          },
+        )
+    },
+  )
+    .filter(
+      { p ->
+        if seen.contains(p) {
+          return false
+        }
+        seen = seen + [p]
+        return true
+      },
+    )
+    .sorted()
+}
+
+// Parse fenced code blocks from LLM response text.
+// Returns list of {type: "code"|"call", lang: string|nil, code: string}.
+// State machine — not easily expressed as pure map/filter.
+/**
+ * parse_cells.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn parse_cells(response) {
+  const lines = split(response, "\n")
+  let cells = []
+  let in_block = false
+  let block_type = "code"
+  let block_lang = nil
+  let current_lines = []
+  let trimmed = ""
+  let lang_part = ""
+  for line in lines {
+    trimmed = trim(line)
+    if starts_with(trimmed, "```") && in_block {
+      cells = cells + [{type: block_type, lang: block_lang, code: join(current_lines, "\n")}]
+      in_block = false
+      current_lines = []
+    } else if starts_with(trimmed, "```") && !in_block {
+      lang_part = trim(substring(trimmed, 3))
+      if lang_part == "call" || starts_with(lang_part, "call ") {
+        block_type = "call"
+        if starts_with(lang_part, "call ") {
+          block_lang = trim(substring(lang_part, 5))
+        } else {
+          block_lang = nil
+        }
+      } else {
+        block_type = "code"
+        if lang_part == "" {
+          block_lang = nil
+        } else {
+          block_lang = lang_part
+        }
+      }
+      in_block = true
+      current_lines = []
+    } else if in_block {
+      current_lines = current_lines + [line]
+    }
+  }
+  return cells
+}
+
+// Filter parsed cells to keep test-relevant ones.
+// Keeps type="code" cells and type="call" cells containing "write_file".
+// If target_file is provided, only write_file calls mentioning that file are kept.
+/**
+ * filter_test_cells.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn filter_test_cells(cells, target_file) {
+  return cells.filter(
+    { cell ->
+      if cell.type == "call" && contains(cell.code, "write_file") {
+        if target_file != nil {
+          return contains(cell.code, target_file)
+        }
+        return true
+      }
+      return cell.type == "code"
+    },
+  )
+}
+
+// Keep first n and last n lines of text, with an omission marker in between.
+/**
+ * truncate_head_tail.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn truncate_head_tail(text, n) {
+  const lines = split(text, "\n")
+  if len(lines) <= n * 2 {
+    return text
+  }
+  const skipped = len(lines) - n * 2
+  return join(lines[:n], "\n")
+    + "\n... ("
+    + to_string(skipped)
+    + " lines omitted) ...\n"
+    + join(lines[-n:], "\n")
+}
+
+/**
+ * Truncate text to `max_chars`, appending a deterministic marker when clipped.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn truncate_text(text, max_chars = 4000, marker = nil) {
+  const value = text ?? ""
+  const limit = max_chars ?? 4000
+  if limit <= 0 || len(value) <= limit {
+    return value
+  }
+  const suffix = marker ?? ("\n... truncated " + to_string(len(value) - limit) + " chars ...")
+  return substring(value, 0, limit) + suffix
+}
+
+/**
+ * Keep both ends of long text, with a marker in the middle.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn truncate_middle(text, max_chars = 4000, marker = "...") {
+  const value = text ?? ""
+  const limit = max_chars ?? 4000
+  if limit <= 0 || len(value) <= limit {
+    return value
+  }
+  const suffix = marker ?? "..."
+  if limit <= len(suffix) {
+    return substring(suffix, 0, limit)
+  }
+  const keep = limit - len(suffix)
+  // Bias the head larger when `keep` is odd. Plain `ceil(keep / 2)` would
+  // be a no-op here because integer `/` already truncates, so the head
+  // landed smaller than the tail — the opposite of the intent.
+  const head = (keep + 1) / 2
+  const tail = keep - head
+  return substring(value, 0, head) + suffix + substring(value, len(value) - tail)
+}
+
+/**
+ * Collapse whitespace for one-line report fields, returning fallback for blank input.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn single_line_or(value, fallback = "") {
+  const text = trim(value ?? "")
+  if text == "" {
+    return fallback
+  }
+  return regex_replace("\\s+", " ", text)
+}
+
+/**
+ * Prefix each line in text.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn prefix_lines(text, prefix = "  ") {
+  const p = prefix ?? ""
+  return split(text ?? "", "\n").map({ line -> p + line }).join("\n")
+}
+
+/**
+ * Indent text by `spaces` spaces.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn indent(text, spaces = 2) {
+  return prefix_lines(text, " ".repeat(max(spaces ?? 0, 0)))
+}
+
+// Check if compiler/build output contains compile error indicators.
+// Case-sensitive match; recognises Python, Rust, Go, and generic patterns.
+/**
+ * detect_compile_error.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn detect_compile_error(output) {
+  return contains(output, "SyntaxError")
+    || contains(output, "IndentationError")
+    || contains(output, "ImportError")
+    || contains(output, "ModuleNotFoundError")
+    || contains(output, "compile error")
+    || contains(output, "cannot find")
+}
+
+// Check if test output contains both got/actual AND want/expected indicators.
+// Returns true only if BOTH sides are present.
+/**
+ * has_got_want.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn has_got_want(output) {
+  const has_got = contains(output, "got:")
+    || contains(output, "Got:")
+    || contains(output, "actual:")
+    || contains(output, "Actual:")
+  const has_want = contains(output, "want:")
+    || contains(output, "Want:")
+    || contains(output, "expected:")
+    || contains(output, "Expected:")
+  return has_got && has_want
+}
+
+// Extract error-relevant lines from test output.
+// Filters for lines containing error keywords, returns first 20 joined with newlines.
+/**
+ * format_test_errors.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn format_test_errors(output) {
+  const error_lines = split(output, "\n").filter(
+    { line ->
+      return contains(line, "FAIL")
+        || contains(line, "Error")
+        || contains(line, "error")
+        || contains(line, "AssertionError")
+        || contains(line, "assert")
+    },
+  )
+  if len(error_lines) > 20 {
+    return join(error_lines[:20], "\n")
+  }
+  return join(error_lines, "\n")
+}
+
+/**
+ * Right-pad `value` with `fill` until the rendered length reaches `width`.
+ * Values already at or beyond `width` are returned unchanged. `fill`
+ * defaults to a single space; multi-character fills use the first
+ * grapheme. Coerces `value` to a string, so callers don't need to wrap
+ * numbers or nil with `to_string`.
+ *
+ * @effects: []
+ * @errors: []
+ * @example: pad_right("api", 6)
+ */
+pub fn pad_right(value, width: int, fill: string = " ") -> string {
+  return to_string(value ?? "").pad_right(width, fill ?? " ")
+}
+
+/**
+ * Left-pad `value` with `fill` until the rendered length reaches `width`.
+ * The common cases are zero-padded numeric sort keys (`pad_left(rev, 18,
+ * "0")`) and right-aligned table cells. Coerces `value` to a string.
+ *
+ * @effects: []
+ * @errors: []
+ * @example: pad_left(7, 4, "0")
+ */
+pub fn pad_left(value, width: int, fill: string = " ") -> string {
+  return to_string(value ?? "").pad_left(width, fill ?? " ")
+}
+
+/**
+ * Repeat `text` `count` times. Negative or zero counts return the empty
+ * string. Useful for table separators (`repeat_string("-", width)`) where
+ * the call site is clearer than `" ".repeat(width)` or a `while` loop.
+ *
+ * @effects: []
+ * @errors: []
+ * @example: repeat_string("-", 5)
+ */
+pub fn repeat_string(text, count: int) -> string {
+  if count == nil || count <= 0 {
+    return ""
+  }
+  return to_string(text ?? "").repeat(count)
+}
+
+/**
+ * Return the first capture group of the first match of `pattern` against
+ * `text`, or `nil` when the pattern doesn't match or has no groups. This
+ * is the most common regex shape in reporting and parsing scripts; it
+ * replaces the four-line `regex_captures + len-check + group-index`
+ * dance per call site.
+ *
+ * @effects: []
+ * @errors: []
+ * @example: regex_first_capture("v(\\d+\\.\\d+\\.\\d+)", tag)
+ */
+pub fn regex_first_capture(pattern: string, text) {
+  const captures = regex_captures(pattern, to_string(text ?? "")) ?? []
+  if len(captures) == 0 {
+    return nil
+  }
+  const groups = captures[0]?.groups ?? []
+  if len(groups) == 0 {
+    return nil
+  }
+  return groups[0]
+}
+
+/**
+ * Return every capture group of the first match of `pattern` against
+ * `text`. Returns the empty list when the pattern doesn't match or has
+ * no groups. Useful when several groups need to be destructured at once.
+ *
+ * @effects: []
+ * @errors: []
+ * @example: regex_capture_groups("(\\d+)\\.(\\d+)\\.(\\d+)", "1.2.3")
+ */
+pub fn regex_capture_groups(pattern: string, text) -> list {
+  const captures = regex_captures(pattern, to_string(text ?? "")) ?? []
+  if len(captures) == 0 {
+    return []
+  }
+  return captures[0]?.groups ?? []
+}
+
+/**
+ * Return the first capture group of every match of `pattern` against
+ * `text`. Returns the empty list when the pattern doesn't match. Common
+ * for sweep-and-extract patterns like pulling every `#NNNN` issue
+ * reference out of a changelog.
+ *
+ * @effects: []
+ * @errors: []
+ * @example: regex_all_first_captures("#(\\d+)", "fixes #12 and #34")
+ */
+pub fn regex_all_first_captures(pattern: string, text) -> list {
+  let out = []
+  for capture in regex_captures(pattern, to_string(text ?? "")) ?? [] {
+    const groups = capture?.groups ?? []
+    if len(groups) > 0 {
+      out = out + [groups[0]]
+    }
+  }
+  return out
+}

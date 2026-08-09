@@ -1,0 +1,507 @@
+/**
+ * Backfill the required @effects/@errors metadata fields on every
+ * `pub fn` under `crates/harn-stdlib/src/stdlib/`.
+ *
+ * Mutating script: rewrites stdlib .harn files in place to append missing
+ * canonical metadata fields. The optional `@api_stability`/`@example`
+ * tags are never backfilled — absent stability means stable, and tooling
+ * derives examples from type signatures.
+ *
+ * Behavior:
+ *   - Functions that already carry every field are skipped.
+ *   - Functions with an existing `/** ... */` block but partial metadata
+ *     get the missing fields appended inside the block.
+ *   - Functions without a doc block at all are skipped.
+ *
+ * The pure transform lives in process_file(text, path) -> {text, stats} so
+ * tests can hand-verify the rewrite without touching disk.
+ *
+ * Run from the repo root: harn run scripts/backfill_stdlib_metadata.harn
+ */
+const META_KEYS = ["effects", "errors"]
+
+/** Each rule is [pattern, label]. Order is significant for effect ordering. */
+fn _effect_rules() -> list {
+  return [
+    ["\\bprint\\(", "stdio.write"],
+    ["\\bprintln\\(", "stdio.write"],
+    ["\\beprintln?\\(", "stdio.write"],
+    ["\\bread_to_string\\(", "fs.read"],
+    ["\\bread_lines\\(", "fs.read"],
+    ["\\bread_bytes\\(", "fs.read"],
+    ["\\bwrite_to_file\\(", "fs.write"],
+    ["\\bwrite_bytes\\(", "fs.write"],
+    ["\\bappend_to_file\\(", "fs.write"],
+    ["\\bmake_dirs\\(", "fs.write"],
+    ["\\b__fs_[a-z_]*read", "fs.read"],
+    ["\\b__fs_[a-z_]*write", "fs.write"],
+    ["\\b__fs_remove", "fs.write"],
+    ["\\b__fs_[a-z_]*list", "fs.read"],
+    ["\\b__fs_[a-z_]*walk", "fs.read"],
+    ["\\bfs::", "fs.read"],
+    [
+      "\\bharness\\.fs\\.(read|read_text|read_bytes|read_lines|list|glob|walk|exists|metadata|source_dir)\\b",
+      "fs.read",
+    ],
+    [
+      "\\bharness\\.fs\\.(write|write_text|write_bytes|append|delete|remove|rename|copy|mkdir|mkdtemp)\\b",
+      "fs.write",
+    ],
+    ["\\bllm_call\\(", "llm.call"],
+    ["\\bllm_complete\\(", "llm.call"],
+    ["\\bllm_judge\\(", "llm.call"],
+    ["\\b__llm_", "llm.call"],
+    ["\\bharness\\.llm\\.", "llm.call"],
+    ["\\bhttp_get\\(", "net"],
+    ["\\bhttp_post\\(", "net"],
+    ["\\bhttp_put\\(", "net"],
+    ["\\bhttp_delete\\(", "net"],
+    ["\\bhttp_request\\(", "net"],
+    ["\\bweb_fetch\\(", "net"],
+    ["\\bweb_get\\(", "net"],
+    ["\\b__net_", "net"],
+    ["\\bharness\\.net\\.", "net"],
+    ["\\bcommand_run\\(", "process"],
+    ["\\bshell\\(", "process"],
+    ["\\b__shell_", "process"],
+    ["\\b__process_", "process"],
+    ["\\bgit_run\\b", "process"],
+    ["\\bharness\\.(process|tools)\\.", "process"],
+    ["\\bcrypto_", "crypto"],
+    ["\\b__crypto_", "crypto"],
+    ["\\bhash_", "crypto"],
+    ["\\bharness\\.crypto\\.", "crypto"],
+    ["\\btimestamp\\(", "time"],
+    ["\\bnow\\(", "time"],
+    ["\\b__time_", "time"],
+    ["\\bharness\\.clock\\.", "time"],
+    ["\\bgetenv\\(", "env"],
+    ["\\b__env_", "env"],
+    ["\\bharness\\.env\\.", "env"],
+    ["\\bstore_get\\(", "store.read"],
+    ["\\bstore_set\\(", "store.write"],
+    ["\\b__store_", "store.read"],
+    ["\\bharness\\.store\\.(get|read|list|exists)\\b", "store.read"],
+    ["\\bharness\\.store\\.(set|write|delete|remove)\\b", "store.write"],
+    ["\\bemit\\(", "transcript.write"],
+    ["\\b__transcript_", "transcript.write"],
+    ["\\bhost_call\\(", "host"],
+    ["\\b__host_", "host"],
+    ["\\bharness\\.host\\.", "host"],
+    ["\\bagent_call\\(", "agent"],
+    ["\\bagent_spawn\\(", "agent"],
+    ["\\b__agent_", "agent"],
+    ["\\bharness\\.agent\\.", "agent"],
+    ["\\bnotion_", "net"],
+    ["\\bslack_", "net"],
+    ["\\blinear_", "net"],
+    ["\\bgithub_", "net"],
+    ["\\bmcp_", "mcp"],
+    ["\\b__mcp_", "mcp"],
+    ["\\bharness\\.mcp\\.", "mcp"],
+    ["\\bharness\\.stdio\\.", "stdio.write"],
+  ]
+}
+
+/** Whitespace set matching Python str.strip(): space, tab, CR, FF, VT, NL. */
+fn _is_ws(c) -> bool {
+  return c == " " || c == "\t" || c == "\r" || c == "\n"
+}
+
+/** Strip leading whitespace (Python str.lstrip). */
+pub fn lstrip_ws(s) -> string {
+  const n = s.len()
+  let i = 0
+  while i < n {
+    if _is_ws(s.char_at(i)) {
+      i = i + 1
+    } else {
+      break
+    }
+  }
+  return s.substring(i, n)
+}
+
+/** Strip trailing whitespace (Python str.rstrip). */
+pub fn rstrip_ws(s) -> string {
+  let n = s.len()
+  while n > 0 {
+    if _is_ws(s.char_at(n - 1)) {
+      n = n - 1
+    } else {
+      break
+    }
+  }
+  return s.substring(0, n)
+}
+
+/** Strip leading and trailing whitespace (Python str.strip). */
+pub fn strip_ws(s) -> string {
+  return rstrip_ws(lstrip_ws(s))
+}
+
+/** Strip leading occurrences of a single char `ch` (Python lstrip("*")). */
+pub fn lstrip_char(s, ch) -> string {
+  const n = s.len()
+  let i = 0
+  while i < n {
+    if s.char_at(i) == ch {
+      i = i + 1
+    } else {
+      break
+    }
+  }
+  return s.substring(i, n)
+}
+
+/** Leading-whitespace prefix of a line (its indentation). */
+pub fn leading_indent(s) -> string {
+  return s.substring(0, s.len() - lstrip_ws(s).len())
+}
+
+/**
+ * Match `^pub fn NAME` where NAME is followed (after optional ws) by < or (.
+ * Returns the function name, or "" when the line is not a pub fn header.
+ */
+pub fn match_pub_fn(line) -> string {
+  const prefix = "pub fn "
+  if !line.starts_with(prefix) {
+    return ""
+  }
+  const rest = line.substring(prefix.len(), line.len())
+  const n = rest.len()
+  if n == 0 {
+    return ""
+  }
+  const c0 = rest.char_at(0)
+  if !_is_ident_start(c0) {
+    return ""
+  }
+  let i = 1
+  while i < n {
+    const c = rest.char_at(i)
+    if _is_ident_part(c) {
+      i = i + 1
+    } else {
+      break
+    }
+  }
+  const name = rest.substring(0, i)
+  /* Skip optional whitespace, then require `<` or `(`. */
+  let j = i
+  while j < n {
+    if _is_ws(rest.char_at(j)) {
+      j = j + 1
+    } else {
+      break
+    }
+  }
+  if j >= n {
+    return ""
+  }
+  const nxt = rest.char_at(j)
+  if nxt == "<" || nxt == "(" {
+    return name
+  }
+  return ""
+}
+
+fn _is_ident_start(c) -> bool {
+  return _is_alpha(c) || c == "_"
+}
+
+fn _is_ident_part(c) -> bool {
+  return _is_alpha(c) || _is_digit(c) || c == "_"
+}
+
+fn _is_alpha(c) -> bool {
+  return (c >= "a" && c <= "z") || (c >= "A" && c <= "Z")
+}
+
+fn _is_digit(c) -> bool {
+  return c >= "0" && c <= "9"
+}
+
+/**
+ * Walk backward over `out` to find the start index of a canonical doc block
+ * immediately above the next line. Returns -1 when none is adjacent.
+ */
+pub fn find_doc_block_start(out) -> int {
+  const total = len(out)
+  if total == 0 {
+    return -1
+  }
+  let j = total - 1
+  if strip_ws(out[j]) == "" {
+    j = j - 1
+    if j < 0 {
+      return -1
+    }
+  }
+  const last_line = rstrip_ws(out[j])
+  if !last_line.ends_with("*/") {
+    return -1
+  }
+  if lstrip_ws(last_line).starts_with("/**") {
+    return j
+  }
+  while j >= 0 {
+    const s = lstrip_ws(out[j])
+    if s.starts_with("/**") {
+      return j
+    }
+    if !(s.starts_with("*") || strip_ws(out[j]) == "") {
+      return -1
+    }
+    j = j - 1
+  }
+  return -1
+}
+
+/**
+ * Parse `@key: value` metadata pairs out of a doc-block slice. Returns a
+ * dict of recognized keys -> value (stripped).
+ */
+pub fn parse_existing_metadata(block_lines) -> dict {
+  let out = {}
+  for raw in block_lines {
+    let s = strip_ws(raw)
+    if s.starts_with("/**") {
+      s = lstrip_ws(s.substring(3, s.len()))
+    }
+    if s.ends_with("*/") {
+      s = rstrip_ws(s.substring(0, s.len() - 2))
+    }
+    s = strip_ws(lstrip_char(s, "*"))
+    if !s.starts_with("@") {
+      continue
+    }
+    const rest = s.substring(1, s.len())
+    const ci = rest.index_of(":")
+    if ci == -1 {
+      continue
+    }
+    const key = strip_ws(rest.substring(0, ci))
+    const value = strip_ws(rest.substring(ci + 1, rest.len()))
+    if META_KEYS.contains(key) {
+      out[key] = value
+    }
+  }
+  return out
+}
+
+/**
+ * Insert `@key: value` lines for new_fields inside an existing doc block,
+ * immediately before the closing terminator. Returns the rebuilt lines.
+ */
+pub fn inject_metadata(block_lines, new_fields) -> list {
+  if len(block_lines) == 0 {
+    return block_lines
+  }
+  let lines = block_lines
+  let last_idx = len(lines) - 1
+  const last_line = lines[last_idx]
+  const indent = leading_indent(lines[0])
+  if lstrip_ws(last_line).starts_with("/**") && rstrip_ws(last_line).ends_with("*/") {
+    /* Expand single-line block into multi-line. inner has no newlines here
+       (a line never contains \n), so the inner split is just one token. */
+    const trimmed = strip_ws(last_line)
+    const inner = strip_ws(trimmed.substring(3, trimmed.len() - 2))
+    let rebuilt = ["${indent}/**"]
+    if inner != "" {
+      /* Python splits inner on "\n"; a single line has no newline. */
+      const token = strip_ws(inner)
+      if token != "" {
+        rebuilt = rebuilt + ["${indent} * ${token}"]
+      }
+    }
+    rebuilt = rebuilt + ["${indent} */"]
+    lines = rebuilt
+    last_idx = len(lines) - 1
+  }
+  const insertion_pos = last_idx
+  const inner_indent = "${indent} *"
+  const prev_stripped = strip_ws(lines[insertion_pos - 1])
+  const needs_separator = insertion_pos > 1 && prev_stripped != "*" && prev_stripped != ""
+  let inserted = []
+  if needs_separator {
+    inserted = inserted + [inner_indent]
+  }
+  for key in META_KEYS {
+    if new_fields.keys().contains(key) {
+      const value = new_fields[key]
+      inserted = inserted + ["${inner_indent} @${key}: ${value}"]
+    }
+  }
+  return lines.slice(0, insertion_pos) + inserted + lines.slice(insertion_pos, len(lines))
+}
+
+/**
+ * Collect the function body (brace-balanced) starting at line `start`.
+ * Returns the joined body text.
+ */
+pub fn collect_body(lines, start) -> string {
+  let depth = 0
+  let seen_open = false
+  let body_lines = []
+  let i = start
+  const n = len(lines)
+  while i < n {
+    const line = lines[i]
+    const m = line.len()
+    let k = 0
+    while k < m {
+      const ch = line.char_at(k)
+      if ch == "{" {
+        depth = depth + 1
+        seen_open = true
+      } else if ch == "}" {
+        depth = depth - 1
+      }
+      k = k + 1
+    }
+    if seen_open {
+      body_lines = body_lines + [line]
+    }
+    i = i + 1
+    if seen_open && depth == 0 {
+      return body_lines.join("\n")
+    }
+  }
+  return body_lines.join("\n")
+}
+
+/** Infer effects list label set, in rule order, from the body text. */
+pub fn infer_effects(body) -> string {
+  let effects = []
+  for rule in _effect_rules() {
+    const pattern = rule[0]
+    const label = rule[1]
+    if len(regex_captures(pattern, body)) > 0 && !effects.contains(label) {
+      effects = effects + [label]
+    }
+  }
+  return "[${effects.join(", ")}]"
+}
+
+/** Build the inferred metadata dict for the missing keys. */
+pub fn build_inferred(keys, body) -> dict {
+  let out = {}
+  if keys.contains("effects") {
+    out = out + {effects: infer_effects(body)}
+  }
+  if keys.contains("errors") {
+    out = out + {errors: "[]"}
+  }
+  return out
+}
+
+/** Pure transform: text + path -> {text, stats}. */
+pub fn process_file(text, path) -> dict {
+  let total = 0
+  let backfilled = 0
+  let skipped_no_block = 0
+  let already_complete = 0
+  const lines = text.split("\n")
+  let out = []
+  let i = 0
+  const n = len(lines)
+  while i < n {
+    const line = lines[i]
+    const name = match_pub_fn(line)
+    if name == "" {
+      out = out + [line]
+      i = i + 1
+      continue
+    }
+    total = total + 1
+    const block_end = len(out)
+    const block_start = find_doc_block_start(out)
+    if block_start == -1 {
+      skipped_no_block = skipped_no_block + 1
+      out = out + [line]
+      i = i + 1
+      continue
+    }
+    const block = out.slice(block_start, block_end)
+    const existing = parse_existing_metadata(block)
+    let have_all = true
+    for k in META_KEYS {
+      if !existing.keys().contains(k) {
+        have_all = false
+      }
+    }
+    if have_all {
+      already_complete = already_complete + 1
+      out = out + [line]
+      i = i + 1
+      continue
+    }
+    const body = collect_body(lines, i)
+    let missing = []
+    for k in META_KEYS {
+      if !existing.keys().contains(k) {
+        missing = missing + [k]
+      }
+    }
+    const inferred = build_inferred(missing, body)
+    const new_block = inject_metadata(block, inferred)
+    out = out.slice(0, block_start) + new_block + out.slice(block_end, len(out))
+    out = out + [line]
+    i = i + 1
+    backfilled = backfilled + 1
+  }
+  return {
+    text: out.join("\n"),
+    stats: {
+      total: total,
+      backfilled: backfilled,
+      skipped_no_block: skipped_no_block,
+      already_complete: already_complete,
+    },
+  }
+}
+
+/** Format a ratio as a one-decimal percent, matching Python f"{n/max(d,1):.1%}". */
+pub fn pct(num, den) -> string {
+  const d = if den < 1 {
+    1
+  } else {
+    den
+  }
+  /* value * 1000, rounded to nearest, gives tenths of a percent. */
+  const scaled = num * 1000.0 / d
+  const rounded = floor(scaled + 0.5)
+  const whole = to_int(floor(rounded / 10.0))
+  const tenth = to_int(rounded - whole * 10)
+  return "${whole}.${tenth}%"
+}
+
+pipeline main(harness: Harness, task) {
+  const stdlib = "crates/harn-stdlib/src/stdlib"
+  let total = 0
+  let backfilled = 0
+  let skipped_no_block = 0
+  let already_complete = 0
+  /* rglob("*.harn") sorted: glob returns abs workspace paths; sort for
+     determinism. */
+  const files = harness.fs.glob("${stdlib}/**/*.harn").sorted()
+  for path in files {
+    const text = harness.fs.read_text(path)
+    const result = process_file(text, path)
+    const st = result["stats"]
+    total = total + st["total"]
+    backfilled = backfilled + st["backfilled"]
+    skipped_no_block = skipped_no_block + st["skipped_no_block"]
+    already_complete = already_complete + st["already_complete"]
+    const new_text = result["text"]
+    if new_text != text {
+      harness.fs.write_text(path, new_text)
+    }
+  }
+  const coverage = pct(already_complete + backfilled, total)
+  harness.stdio.println(
+    "public fns: ${total}; already complete: ${already_complete}; backfilled: ${backfilled}; skipped (no /** */ block): ${skipped_no_block}; final coverage: ${coverage}",
+  )
+  return 0
+}

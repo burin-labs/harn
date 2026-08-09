@@ -1,0 +1,74 @@
+// A provider-call receipt must resolve to a retained, typed system-prompt bill
+// of materials from the same real agent transcript. The explain projection and
+// journal projection come from the same assembly value.
+import { agent_loop } from "std/agent/loop"
+import { AgentSpec } from "std/agent/options"
+import { read_jsonl } from "std/jsonl"
+import { SystemReplacement } from "std/llm/options"
+import { llm_text, with_llm_script } from "std/testing"
+
+const REPLACEMENT = "Only the manifest sentinel reaches the system channel."
+
+pipeline main(harness: Harness) {
+  with_llm_script(
+    harness.llm,
+    [llm_text("done ##DONE##")],
+    { ->
+      const transcript_dir = path_join(
+        harness.fs.workspace_temp_dir(),
+        "harn-context-assembly-manifest-" + harness.random.uuid(),
+      )
+      const replacement: SystemReplacement = {mode: "replace", content: REPLACEMENT}
+      const explained = harness.agent.prompt_explain(
+        {system: replacement, call_role: "model.router"},
+      )
+      const opts: AgentSpec = {
+        provider: "mock",
+        model: "mock",
+        system: replacement,
+        call_role: "model.router",
+        loop_until_done: true,
+        done_sentinel: "##DONE##",
+        max_iterations: 1,
+        llm_transcript_dir: transcript_dir,
+      }
+      const result = agent_loop(harness, "Complete the task.", "must not leak", opts)
+      const records = read_jsonl(
+        harness.fs,
+        path_join(transcript_dir, "llm_transcript.jsonl"),
+        {strict: true},
+      )
+      const manifests = records.filter({ record -> record.type == "context_manifest" })
+      const requests = records.filter({ record -> record.type == "provider_call_request" })
+      require len(manifests) == 1
+      require len(requests) == 1
+      const event = manifests[0]
+      const manifest = event.manifest
+      const request = requests[0]
+      harness.stdio.println(result.status == "done")
+      harness.stdio.println(request.call_role == "model.router")
+      harness.stdio.println(request.served_context.call_role == request.call_role)
+      harness.stdio.println(request.served_context.manifest_content_hash == event.content_hash)
+      harness.stdio.println(manifest.schema == "harn.llm.context_manifest.v1")
+      harness.stdio.println(manifest.scope == "system_prompt")
+      harness.stdio.println(manifest.boundary == "llm_request_payload_egress")
+      harness.stdio.println(manifest.messages == "served_context_digest_only")
+      harness.stdio.println(manifest.root == "replacement")
+      harness.stdio.println(len(manifest.segments) == 1)
+      harness.stdio.println(manifest.segments[0].id == "replacement")
+      harness.stdio.println(manifest.segments[0].producer == "caller")
+      harness.stdio.println(manifest.segments[0].included)
+      harness.stdio.println(manifest.segments[0].bytes == len(REPLACEMENT))
+      harness.stdio.println(manifest.segments[0].digest == explained.fragments[0].digest)
+      harness.stdio.println(manifest.whole_prompt_digest == explained.whole_prompt_digest)
+      harness.stdio.println(manifest.system_prompt_bytes == explained.system_prompt_bytes)
+      harness.stdio.println(
+        manifest.whole_prompt_digest == request.served_context.system_prompt_content_hash,
+      )
+      harness.stdio.println(
+        manifest.system_prompt_bytes == request.served_context.system_prompt_bytes,
+      )
+      harness.fs.delete(transcript_dir)
+    },
+  )
+}

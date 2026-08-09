@@ -1,0 +1,16 @@
+[package]
+name = "harn-postgres-perf"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+harn-vm = { path = "../../crates/harn-vm" }
+tokio = { version = "1", features = ["rt", "time"] }
+
+[[bin]]
+name = "harn-postgres-loadgen"
+path = "src/main.rs"
+
+[lints]
+workspace = true

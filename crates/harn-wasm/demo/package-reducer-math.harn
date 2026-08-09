@@ -1,0 +1,3 @@
+pub fn increment(amount) {
+  return amount
+}

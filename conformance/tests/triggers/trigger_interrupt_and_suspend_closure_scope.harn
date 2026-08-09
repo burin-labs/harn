@@ -1,0 +1,72 @@
+import { lifecycle_audit_log_take } from "std/lifecycle"
+import "std/triggers"
+
+/**
+ * Verifies the InterruptAndSuspend (#1910) handler's closure-form
+ * `target_agents` resolution: when `target_agents` is a closure, the
+ * dispatcher runs it with the trigger event and uses the returned list of
+ * worker ids as the broadcast scope. This lets a single trigger
+ * registration pick targets dynamically from the event payload (e.g.
+ * "suspend every worker whose org matches the panic origin"). Stale ids
+ * returned by the closure are skipped as `unknown` rather than failing the
+ * dispatch.
+ */
+pipeline test(harness: Harness, task) {
+  const _ = lifecycle_audit_log_take(harness.obs)
+  const unique = to_string(to_int(harness.clock.timestamp())) + "-"
+    + to_string(
+    harness.random.range(100000, 999999),
+  )
+  const handle: TriggerHandle = harness.runtime.trigger_register(
+    {
+      id: "trigger-interrupt-closure-" + unique,
+      kind: "issue.opened",
+      provider: "webhook",
+      handler: InterruptAndSuspend(
+        {
+          target_agents: { event ->
+            return ["stale-worker-A-" + unique, "stale-worker-B-" + unique]
+          },
+          reason: "scoped_panic",
+        },
+      ),
+      when: nil,
+      retry: nil,
+      match: {events: ["issue.opened"]},
+      events: nil,
+      dedupe_key: nil,
+      filter: nil,
+      budget: nil,
+      manifest_path: nil,
+      package_name: "conformance",
+    },
+  )
+  const dispatch = harness.runtime.trigger_fire(
+    handle,
+    {provider: "webhook", kind: "issue.opened", headers: {x_delivery: "evt-" + unique}},
+  )
+  harness.stdio.println(dispatch.status == "dispatched")
+  harness.stdio.println(dispatch.result?.status == "broadcast")
+  harness.stdio.println(dispatch.result?.scope_kind == "closure")
+  harness.stdio.println(dispatch.result?.target_count)
+  harness.stdio.println(dispatch.result?.suspended_count)
+  harness.stdio.println(dispatch.result?.skipped_count)
+  harness.stdio.println(dispatch.result?.reason == "scoped_panic")
+  harness.stdio.println(len(dispatch.result?.targets))
+  harness.stdio.println(dispatch.result?.targets[0]?.outcome == "unknown")
+  harness.stdio.println(dispatch.result?.targets[1]?.outcome == "unknown")
+  const audits = lifecycle_audit_log_take(harness.obs)
+  let summary_audits = 0
+  let per_worker_audits = 0
+  for audit in audits {
+    if audit.kind == "triggers.interrupt_and_suspend.audit" {
+      if audit.payload?.target_count != nil {
+        summary_audits = summary_audits + 1
+      } else {
+        per_worker_audits = per_worker_audits + 1
+      }
+    }
+  }
+  harness.stdio.println(summary_audits)
+  harness.stdio.println(per_worker_audits)
+}

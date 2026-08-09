@@ -1,0 +1,15 @@
+pipeline default(harness: Harness, _task) {
+  const requested = try {
+    harness.obs.hypothesis_event_authority_request(
+      "plan_admission",
+      "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "hyp-1",
+      "receipt-1",
+      nil,
+    )
+  }
+  require is_err(requested),
+    "authority requests fail closed when no registered native adapter handles them"
+  harness.stdio.println("hypothesis-authority-request-ok")
+}

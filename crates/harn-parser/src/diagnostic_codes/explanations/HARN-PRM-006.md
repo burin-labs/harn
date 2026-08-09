@@ -1,0 +1,14 @@
+# HARN-PRM-006 — prompt references a deferred tool without tool search
+
+deferred reference)
+
+## What it means
+
+A prompt template (`.harn.prompt` / `.prompt`) failed validation, either because
+the template body is malformed or because it references the model surface in a
+way that violates Harn's prompt safety rules.
+
+## How to fix
+
+- Fix the template syntax (`{{ }}`, `{% %}` are the only structural delimiters).
+- Replace identity-based branching with capability flags from the LLM call options.

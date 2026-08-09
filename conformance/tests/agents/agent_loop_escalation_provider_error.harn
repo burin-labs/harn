@@ -1,0 +1,286 @@
+// C13: a smart-escalation turn whose escalated provider fails fast
+// (pre-dispatch `provider_error`) must NOT silently break the loop and let a
+// stale cheap-model turn masquerade as success. The non-tracked provider-error
+// branch (no `consecutive_failures` budget configured) must:
+//   (a) EMIT an observable `iteration_end` provider_error event carrying the
+//       failed provider/model/status — never an invisible `break`;
+//   (b) NOT terminate as a fake success;
+//   (c) DEGRADE the failed escalation back to the PRIMARY route for one more
+//       turn (provider/model/tool_format primary-retry fallback) so the run
+//       continues with the cheap model instead of dying.
+//
+// A second case pins the regression guard: a plain primary provider_error with
+// NO escalation in effect still surfaces an event and stops with provider_error
+// (no spurious retry), so normal handling is preserved.
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
+
+/**
+ * The provider_error path stamps a `skip_reason` of "provider_failure" or
+ * "escalation_provider_failure" onto its `iteration_end` event; an ordinary
+ * (successful) turn end carries an empty skip_reason. Find the failure event.
+ */
+fn first_provider_error_event(events) {
+  for event in events {
+    if event.type == "iteration_end" {
+      const reason = to_string(event?.iteration_info?.skip_reason ?? "")
+      if reason == "provider_failure"
+        || reason == "escalation_provider_failure"
+        || reason == "escalation_aborted_provider_transport" {
+        return event
+      }
+    }
+  }
+  return nil
+}
+
+fn count_events(events, event_type) {
+  let n = 0
+  for event in events {
+    if event.type == event_type {
+      n = n + 1
+    }
+  }
+  return n
+}
+
+// -------------------------------------------------------------------------------------------------
+// Case 1: failed escalation degrades to the primary provider.
+// -------------------------------------------------------------------------------------------------
+
+fn escalation_fallback_case(harness: Harness) {
+  // Records the provider/tool_format route seen on every LLM call, in order,
+  // so we can prove the escalated call fired then the loop retried the PRIMARY
+  // route. The tool_format clause prevents native escalations from leaking
+  // back into text-only primaries after an escalation provider error.
+  const seen = harness.runtime.shared_cell({scope: "task_group", key: "esc-providers", initial: ""})
+  const formats = harness.runtime.shared_cell(
+    {scope: "task_group", key: "esc-formats", initial: ""},
+  )
+  const turn = harness.runtime.shared_cell({scope: "task_group", key: "esc-turn", initial: 0})
+  const caller = { call ->
+    let provider = to_string(call?.opts?.provider ?? "")
+    let tool_format = to_string(call?.opts?.tool_format ?? "")
+    let snap = harness.runtime.shared_snapshot(seen)
+    harness.runtime.shared_set(seen, snap.value + provider + ",")
+    let format_snap = harness.runtime.shared_snapshot(formats)
+    harness.runtime.shared_set(formats, format_snap.value + tool_format + ",")
+    if provider == "escalated" {
+      return {
+        ok: false,
+        status: "provider_error",
+        stop_reason: "provider_error",
+        error: {
+          status: 503,
+          message: "escalated provider unavailable",
+          provider: "escalated",
+          model: "frontier",
+        },
+      }
+    }
+    let count = harness.runtime.shared_snapshot(turn)
+    if count.value >= 2 {
+      return {
+        ok: true,
+        value: {text: "wrapping up DONE", tool_calls: [], provider: "mock", model: "cheap"},
+      }
+    }
+    return {
+      ok: true,
+      value: {text: "still working on it", tool_calls: [], provider: "mock", model: "cheap"},
+    }
+  }
+  // Escalate exactly once: after the FIRST turn, switch the provider to the
+  // escalation target. Subsequent turns leave the provider as-is, so the
+  // primary-retry fallback is not re-escalated.
+  const post_turn = { _payload ->
+    let count = harness.runtime.shared_snapshot(turn)
+    harness.runtime.shared_set(turn, count.value + 1)
+    if count.value == 0 {
+      return {next_options: {provider: "escalated", model: "frontier", tool_format: "native"}}
+    }
+    return nil
+  }
+  const session = "esc-fallback-" + harness.random.uuid()
+  const captured = agent_capture_events(
+    harness.agent,
+    session,
+    fn() { return agent_loop(
+      harness,
+      "do the task",
+      nil,
+      {
+        session_id: session,
+        provider: "mock",
+        model: "cheap",
+        tool_format: "text",
+        llm_caller: caller,
+        post_turn_callback: post_turn,
+        loop_until_done: true,
+        done_sentinel: "DONE",
+        max_iterations: 6,
+      },
+    ) },
+  )
+  // (a) An observable provider_error iteration_end event was emitted carrying
+  //     the failed escalated provider/model/status — not a silent break.
+  const perr = first_provider_error_event(captured.events)
+  harness.stdio.println("esc_event_present=" + to_string(perr != nil))
+  harness.stdio.println(
+    "esc_event_skip_reason=" + to_string(perr?.iteration_info?.skip_reason ?? ""),
+  )
+  harness.stdio.println("esc_event_provider=" + to_string(perr?.iteration_info?.provider ?? ""))
+  harness.stdio.println("esc_event_model=" + to_string(perr?.iteration_info?.model ?? ""))
+  harness.stdio.println(
+    "esc_event_status=" + to_string(perr?.iteration_info?.provider_status ?? ""),
+  )
+  harness.stdio.println(
+    "esc_event_fallback=" + to_string(perr?.iteration_info?.escalation_fallback ?? false),
+  )
+  // (c) The provider/tool_format call sequence proves:
+  //     primary:text -> escalated:native (failed) -> primary:text again
+  //     (the fallback retry) -> primary:text (completion).
+  harness.stdio.println("esc_providers=" + harness.runtime.shared_get(seen))
+  harness.stdio.println("esc_tool_formats=" + harness.runtime.shared_get(formats))
+  // (b) The run did NOT terminate as a fake success on the failed escalation:
+  //     it converged via the primary fallback to a real "done".
+  harness.stdio.println("esc_status=" + captured.result.status)
+}
+
+// Fast pre-dispatch escalation failure — the C13 trigger.
+// Primary (cheap) provider. The first primary turn produces ordinary text
+// (no completion); after the escalation has failed and the primary has been
+// retried, complete so the loop terminates deterministically.
+
+// -------------------------------------------------------------------------------------------------
+
+// Case 2: regression guard — a plain primary provider_error (no escalation)
+// still surfaces an event and stops, with no spurious primary-retry.
+
+// -------------------------------------------------------------------------------------------------
+
+fn primary_provider_error_case(harness: Harness) {
+  const caller = { _call ->
+    return {
+      ok: false,
+      status: "provider_error",
+      stop_reason: "provider_error",
+      error: {status: 500, message: "primary down", provider: "mock", model: "cheap"},
+    }
+  }
+  const session = "esc-primary-err-" + harness.random.uuid()
+  const captured = agent_capture_events(
+    harness.agent,
+    session,
+    fn() { return agent_loop(
+      harness,
+      "do the task",
+      nil,
+      {
+        session_id: session,
+        provider: "mock",
+        model: "cheap",
+        llm_caller: caller,
+        loop_until_done: true,
+        done_sentinel: "DONE",
+        max_iterations: 6,
+      },
+    ) },
+  )
+  const perr = first_provider_error_event(captured.events)
+  harness.stdio.println("primary_event_present=" + to_string(perr != nil))
+  harness.stdio.println(
+    "primary_event_skip_reason=" + to_string(perr?.iteration_info?.skip_reason ?? ""),
+  )
+  harness.stdio.println(
+    "primary_event_fallback=" + to_string(perr?.iteration_info?.escalation_fallback ?? false),
+  )
+  // Exactly one failing turn — no escalation fallback means no spurious retry.
+  harness.stdio.println(
+    "primary_event_count=" + to_string(count_events(captured.events, "iteration_end")),
+  )
+  harness.stdio.println("primary_status=" + captured.result.status)
+}
+
+// -------------------------------------------------------------------------------------------------
+// Case 3: tracked transient transport failures during escalation are infra, not model failures.
+// -------------------------------------------------------------------------------------------------
+
+fn escalation_transient_transport_abort_case(harness: Harness) {
+  const seen = harness.runtime.shared_cell(
+    {scope: "task_group", key: "esc-transport-providers", initial: ""},
+  )
+  const turn = harness.runtime.shared_cell(
+    {scope: "task_group", key: "esc-transport-turn", initial: 0},
+  )
+  const caller = { call ->
+    let provider = to_string(call?.opts?.provider ?? "")
+    let snap = harness.runtime.shared_snapshot(seen)
+    harness.runtime.shared_set(seen, snap.value + provider + ",")
+    if provider == "escalated" {
+      return {
+        ok: false,
+        status: "provider_error",
+        stop_reason: "provider_error",
+        error: {
+          category: "transient_network",
+          kind: "transient",
+          reason: "timeout",
+          message: "anthropic stream error (mid-stream read): error decoding response body",
+          provider: "escalated",
+          model: "frontier",
+        },
+      }
+    }
+    return {
+      ok: true,
+      value: {text: "still working", tool_calls: [], provider: "mock", model: "cheap"},
+    }
+  }
+  const post_turn = { _payload ->
+    let count = harness.runtime.shared_snapshot(turn)
+    harness.runtime.shared_set(turn, count.value + 1)
+    if count.value == 0 {
+      return {next_options: {provider: "escalated", model: "frontier"}}
+    }
+    return nil
+  }
+  const session = "esc-transport-" + harness.random.uuid()
+  const captured = agent_capture_events(
+    harness.agent,
+    session,
+    fn() { return agent_loop(
+      harness,
+      "do the task",
+      nil,
+      {
+        session_id: session,
+        provider: "mock",
+        model: "cheap",
+        llm_caller: caller,
+        post_turn_callback: post_turn,
+        loop_until_done: true,
+        done_sentinel: "DONE",
+        max_iterations: 5,
+        iteration_budget: {mode: "fixed", max: 5, consecutive_failures: {max: 2}},
+      },
+    ) },
+  )
+  const perr = first_provider_error_event(captured.events)
+  harness.stdio.println("transport_event_present=" + to_string(perr != nil))
+  harness.stdio.println(
+    "transport_skip_reason=" + to_string(perr?.iteration_info?.skip_reason ?? ""),
+  )
+  harness.stdio.println("transport_status=" + captured.result.status)
+  harness.stdio.println("transport_stop_reason=" + captured.result.stop_reason)
+  harness.stdio.println(
+    "transport_breaker_count=" + to_string(count_events(captured.events, "budget_circuit_breaker")),
+  )
+  harness.stdio.println("transport_providers=" + harness.runtime.shared_get(seen))
+}
+
+pipeline default(harness: Harness) {
+  escalation_fallback_case(harness)
+  primary_provider_error_case(harness)
+  escalation_transient_transport_abort_case(harness)
+}

@@ -1,0 +1,7 @@
+pipeline test(harness: Harness, task) {
+  const ch = harness.runtime.channel("full", 1)
+  harness.runtime.send(ch, "buffered")
+  parallel 1 { _ ->
+    harness.runtime.send(ch, "blocked")
+  }
+}

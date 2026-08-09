@@ -1,0 +1,26 @@
+/** Test new string methods */
+pipeline default(harness: Harness, task) {
+  // trim_start / trim_end — verify by measuring length
+  const s = "  hello world  "
+  harness.stdio.println(len(s.trim_start()))
+  harness.stdio.println(len(s.trim_end()))
+  harness.stdio.println(len(s.trim()))
+  // lines
+  const multi = "line1\nline2\nline3"
+  const lines = multi.lines()
+  harness.stdio.println(len(lines))
+  harness.stdio.println(lines.first())
+  harness.stdio.println(lines.last())
+  // char_at
+  const word = "hello"
+  harness.stdio.println(word.char_at(0))
+  harness.stdio.println(word.char_at(4))
+  harness.stdio.println(word.char_at(99))
+  // last_index_of
+  const path = "src/lib/utils/lib.rs"
+  harness.stdio.println(path.index_of("lib"))
+  harness.stdio.println(path.last_index_of("lib"))
+  harness.stdio.println(path.rfind("lib"))
+  // len method (on string)
+  harness.stdio.println("cafe".len())
+}

@@ -1,0 +1,45 @@
+import { llm_text, with_llm_script } from "std/testing"
+
+/**
+ * `harness.llm.call_structured_safe(prompt, schema, options?)` returns the
+ * `{ok, data, error}` envelope on both success and failure. Mirrors
+ * `llm_call_safe` but with `.data` pre-unwrapped.
+ */
+pipeline default(harness: Harness) {
+  const schema = {type: "object", required: ["verdict"], properties: {verdict: {type: "string"}}}
+  // Success path: parsed data surfaces in `.data`, error is nil.
+  with_llm_script(
+    harness.llm,
+    [llm_text("{\"verdict\": \"PASS\"}")],
+    { ->
+      const ok = harness.llm.call_structured_safe("Grade", schema, {provider: "mock"})
+      harness.stdio.println(ok.ok)
+      harness.stdio.println(ok.data.verdict)
+      harness.stdio.println(ok.error == nil)
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [llm_text("{\"other\": \"nope\"}")],
+    { ->
+      const bad = harness.llm.call_structured_safe("Grade", schema, {provider: "mock", retries: 0})
+      harness.stdio.println(bad.ok)
+      harness.stdio.println(bad.data == nil)
+      harness.stdio.println(bad.error.category)
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [{error: {category: "rate_limit", message: "429 slow down"}}],
+    { ->
+      const rate = harness.llm.call_structured_safe("Grade", schema, {provider: "mock"})
+      harness.stdio.println(rate.ok)
+      harness.stdio.println(rate.error.category)
+      harness.stdio.println(contains(rate.error.message, "429"))
+    },
+  )
+}
+// Schema-validation failure: after `retries: 0` the categorized
+// schema error is captured in the envelope instead of thrown.
+// Transport-level failure: injected error bubbles up into
+// `.error.category` / `.error.message`.

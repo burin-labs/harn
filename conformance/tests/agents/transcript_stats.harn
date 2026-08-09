@@ -1,0 +1,73 @@
+import { workflow_execute } from "std/workflow/execute"
+
+pipeline main(harness: Harness) {
+  // --- Unit shape: transcript_stats on a hand-crafted transcript ---
+  const crafted = {
+    _type: "transcript",
+    messages: [
+      {role: "user", content: "hi"},
+      {role: "assistant", content: "hey"},
+      {role: "assistant", content: "", tool_calls: [{id: "a"}, {id: "b"}]},
+      {role: "tool", content: "ok", tool_use_id: "a"},
+      {role: "tool_result", content: "ok", tool_use_id: "b"},
+      {role: "system", content: "ignore"},
+    ],
+    events: [
+      {kind: "message", visibility: "visible"},
+      {kind: "tool_result", visibility: "hidden"},
+      {kind: "message", visibility: "visible"},
+    ],
+  }
+  const stats = transcript_stats(crafted)
+  harness.stdio.println(stats?.message_count == 6)
+  harness.stdio.println(stats?.user_message_count == 1)
+  harness.stdio.println(stats?.assistant_message_count == 2)
+  harness.stdio.println(stats?.user_facing_message_count == 3)
+  harness.stdio.println(stats?.tool_result_message_count == 2)
+  harness.stdio.println(stats?.tool_call_count == 2)
+  harness.stdio.println(stats?.visible_event_count == 2)
+  // --- Events-by-kind filter ---
+  const visible_messages = transcript_events_by_kind(crafted, "message")
+  harness.stdio.println(len(visible_messages) == 2)
+  const tool_results = transcript_events_by_kind(crafted, "tool_result")
+  harness.stdio.println(len(tool_results) == 1)
+  // --- Nil transcript returns zero stats rather than erroring ---
+  const empty_stats = transcript_stats(nil)
+  harness.stdio.println(empty_stats?.message_count == 0)
+  harness.stdio.println(empty_stats?.user_facing_message_count == 0)
+  // --- Integration: transcript continuity across a persistent 2-stage workflow ---
+  const flow = workflow_graph(
+    {
+      name: "continuity_demo",
+      entry: "act",
+      loop_until_done: true,
+      nodes: {
+        act: {
+          kind: "stage",
+          mode: "llm",
+          model_policy: {provider: "mock", session_id: "transcript-stats-demo"},
+        },
+        review: {
+          kind: "stage",
+          mode: "llm",
+          model_policy: {provider: "mock", session_id: "transcript-stats-demo"},
+        },
+      },
+      edges: [{from: "act", to: "review"}],
+    },
+  )
+  // Both stages share a session id, so their transcripts
+  // automatically flow together via the session store.
+  const result = workflow_execute(harness, "Write a note", flow, [], {max_steps: 4})
+  harness.stdio.println(result?.status == "completed")
+  const stage_act = result?.run?.stages[0]
+  const stage_review = result?.run?.stages[1]
+  const act_stats = transcript_stats(stage_act?.transcript)
+  const review_stats = transcript_stats(stage_review?.transcript)
+  harness.stdio.println(act_stats?.message_count >= 1)
+  harness.stdio.println(review_stats?.message_count >= act_stats?.message_count)
+  harness.stdio.println(
+    review_stats?.user_facing_message_count >= act_stats?.user_facing_message_count,
+  )
+  harness.stdio.println(review_stats?.assistant_message_count >= 1)
+}

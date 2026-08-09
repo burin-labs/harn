@@ -1,0 +1,405 @@
+import { pick_keys } from "std/collections"
+
+// -------------------------------------------------------------------------------------------------
+
+// Typed option aliases (the documented way to build workflow stage specs).
+//
+// Co-located with the stage-option normalizers below so the alias and the
+// normalization logic stay in one file. Rust twins live in
+// `crates/harn-vm/src/orchestration/policy/types.rs` (`RetryPolicy`,
+// `ModelPolicy`, `StageContract`) and
+// `crates/harn-vm/src/orchestration/workflow.rs` (`WorkflowNode`); key
+// parity is pinned by `crates/harn-vm/tests/typed_options_parity.rs`.
+
+// -------------------------------------------------------------------------------------------------
+
+/**
+ * Per-stage retry policy (`retry_policy:` on a stage spec).
+ *
+ * Rust twin: `RetryPolicy` in
+ * `crates/harn-vm/src/orchestration/policy/types.rs`. The
+ * `repair_prompt_builder` and `feedback` keys are the retry-with-feedback
+ * surface: a builder callback (or bounded template) that threads the prior
+ * attempt's verification findings into the next attempt's prompt. They are
+ * typed ahead of the stage-loop inversion that executes them.
+ */
+pub type WorkflowRetryPolicy = {
+  max_attempts?: int,
+  verify?: bool,
+  repair?: bool,
+  backoff_ms?: int,
+  backoff_multiplier?: float,
+  repair_prompt_builder?: any,
+  feedback?: bool | {max_chars?: int},
+}
+
+/**
+ * Stage input/output artifact contract (`input_contract:` /
+ * `output_contract:` on a stage spec).
+ *
+ * Rust twin: `StageContract` in
+ * `crates/harn-vm/src/orchestration/policy/types.rs`.
+ */
+pub type StageContract = {
+  input_kinds?: list<string>,
+  output_kinds?: list<string>,
+  min_inputs?: int,
+  max_inputs?: int,
+  require_transcript?: bool,
+  schema?: dict,
+}
+
+/**
+ * Per-stage model and tool-loop policy (`model_policy:` on a stage spec).
+ * Mirrors the Rust struct field-for-field; the broader normalizer input
+ * shape (which also accepts reasoning/thinking hints) is
+ * `WorkflowModelPolicy` below.
+ *
+ * Rust twin: `ModelPolicy` in
+ * `crates/harn-vm/src/orchestration/policy/types.rs`.
+ */
+type WorkflowTurnPolicy = {
+  require_action_or_yield?: bool,
+  allow_done_sentinel?: bool,
+  max_prose_chars?: int,
+}
+
+pub type ModelPolicySpec = {
+  provider?: string,
+  model?: string,
+  model_tier?: string,
+  temperature?: float,
+  max_tokens?: int,
+  max_iterations?: int,
+  iteration_budget?: string | dict,
+  max_nudges?: int,
+  nudge?: string,
+  tool_examples?: string,
+  post_turn_callback?: any,
+  stop_after_successful_tools?: list<string>,
+  require_successful_tools?: list,
+  turn_policy?: WorkflowTurnPolicy,
+  tool_format?: string,
+  native_tool_fallback?: string,
+}
+
+// Inline copy of `TurnPolicy` (std/agent/options) — cross-module type
+// references do not structurally resolve for importing consumers yet.
+/**
+ * One workflow stage node as accepted by `workflow_execute` graphs.
+ *
+ * Rust twin: `WorkflowNode` in
+ * `crates/harn-vm/src/orchestration/workflow.rs`. `context_assembler` has
+ * no serde twin (it can carry closures and is preserved as a raw value on
+ * the Rust side).
+ */
+pub type StageSpec = {
+  id?: string,
+  kind?: string,
+  mode?: string,
+  prompt?: string,
+  system?: string,
+  task_label?: string,
+  done_sentinel?: string,
+  tools?: any,
+  model_policy?: ModelPolicySpec,
+  auto_compact?: bool | dict,
+  output_visibility?: string,
+  context_policy?: dict,
+  retry_policy?: WorkflowRetryPolicy,
+  capability_policy?: dict,
+  approval_policy?: any,
+  input_contract?: StageContract,
+  output_contract?: StageContract,
+  branch_semantics?: dict,
+  map_policy?: dict,
+  join_policy?: dict,
+  reduce_policy?: dict,
+  escalation_policy?: dict,
+  verify?: any,
+  exit_when_verified?: bool,
+  metadata?: dict,
+  context_assembler?: dict,
+}
+
+/**
+ * Run-level options accepted by `workflow_execute(harness, task, graph, artifacts?,
+ * options?)`. See `docs/src/workflow-runtime.md` for semantics.
+ *
+ * Rust twin: none — these are consumed by the workflow driver in
+ * `std/workflow/execute` and the persistence layer key-by-key.
+ */
+pub type WorkflowExecuteOptions = {
+  max_steps?: int,
+  persist_path?: string,
+  resume_path?: string,
+  resume_run?: any,
+  replay_path?: string,
+  replay_run?: any,
+  replay_mode?: string,
+  audit?: bool | dict,
+  mutation_scope?: string | dict,
+  approval_policy?: any,
+}
+
+/**
+ * workflow_execute_options is the typed constructor for `workflow_execute`
+ * run options. Direct dict literals are checked against
+ * `WorkflowExecuteOptions`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn workflow_execute_options(options: WorkflowExecuteOptions = {}) -> WorkflowExecuteOptions {
+  return options
+}
+
+/**
+ * Concise spec accepted by `workflow_stages` (std/workflow/patterns) — the
+ * ergonomic builder that expands a linear list of `StageSpec`s into the
+ * `{entry, nodes, edges}` graph shape `workflow_execute` consumes. `stages`
+ * are wired head-to-tail (each stage's `success`/default branch flows to the
+ * next) unless explicit `edges` are supplied; `entry` defaults to the first
+ * stage's id. Pure sugar: the result is byte-identical to the equivalent
+ * hand-authored `workflow_graph({...})`.
+ */
+pub type WorkflowStagesSpec = {
+  stages: list<StageSpec>,
+  name?: string,
+  entry?: string,
+  edges?: list<dict>,
+}
+
+/** Allowed values for `WorkflowAutonomyPolicyConfig.autonomy_tier`. */
+type WorkflowAutonomyTier = "shadow" | "suggest" | "act_with_approval" | "act_auto"
+
+/** Caller-supplied config consumed by `workflow_autonomy_policy`. */
+type WorkflowAutonomyPolicyConfig = {
+  agent_id?: string,
+  agent?: string,
+  autonomy_tier?: WorkflowAutonomyTier,
+  tier?: WorkflowAutonomyTier,
+  action_tiers?: dict,
+  agent_tiers?: dict,
+  agent_action_tiers?: dict,
+  reviewers?: list<string>,
+}
+
+/** Normalized autonomy policy returned by `workflow_autonomy_policy`. */
+type WorkflowAutonomyPolicy = {
+  agent_id: string?,
+  autonomy_tier: WorkflowAutonomyTier,
+  action_tiers: dict,
+  agent_tiers: dict,
+  agent_action_tiers: dict,
+  reviewers: list<string>,
+}
+
+/**
+ * Per-stage model and tool-loop policy. Open shape — every field is optional
+ * so callers can supply only the dimensions they care about.
+ */
+type WorkflowModelPolicy = {
+  provider?: string,
+  model?: string,
+  model_tier?: string,
+  temperature?: float,
+  top_p?: float,
+  top_k?: int,
+  max_tokens?: int,
+  thinking?: any,
+  effort?: string,
+  reasoning_policy?: any,
+  reasoning_scale?: any,
+  reasoning_task?: string,
+  nudge?: any,
+  tool_examples?: string,
+  turn_policy?: WorkflowTurnPolicy,
+  stop_after_successful_tools?: list<string>,
+  require_successful_tools?: list<string | list<string>>,
+  max_iterations?: int,
+  iteration_budget?: any,
+  max_nudges?: int,
+  tool_format?: string,
+  native_tool_fallback?: string,
+}
+
+/** Host-supplied tool-format defaults consumed when normalizing a stage. */
+type WorkflowStageHostConfig = {env_tool_format?: string, default_tool_format?: string}
+
+/** Caller-supplied config consumed by `workflow_stage_agent_options`. */
+type WorkflowStageOptionsConfig = {
+  model_policy?: WorkflowModelPolicy,
+  host?: WorkflowStageHostConfig,
+  session_id?: string,
+  done_sentinel?: any,
+  exit_when_verified?: bool,
+  mode?: string,
+  has_tools?: bool,
+}
+
+/** Normalized stage options returned by `workflow_stage_agent_options`. */
+type WorkflowStageAgentOptions = {
+  run_agent_loop: bool,
+  tool_format: string,
+  llm_options: dict,
+  agent_loop_options: dict,
+}
+
+fn __workflow_non_empty_string(value) {
+  if type_of(value) != "string" {
+    return nil
+  }
+  const trimmed = trim(value)
+  if trimmed == "" {
+    return nil
+  }
+  return trimmed
+}
+
+fn __workflow_stage_tool_format(
+  model_policy: WorkflowModelPolicy,
+  host: WorkflowStageHostConfig,
+) -> string {
+  const explicit = __workflow_non_empty_string(model_policy.tool_format)
+  if explicit != nil {
+    return explicit
+  }
+  const env = __workflow_non_empty_string(host.env_tool_format)
+  if env != nil {
+    return env
+  }
+  const default_format = __workflow_non_empty_string(host.default_tool_format)
+  if default_format != nil {
+    return default_format
+  }
+  return "text"
+}
+
+fn __workflow_native_tool_fallback(value) -> string {
+  const policy = __workflow_non_empty_string(value)
+  if policy != nil {
+    return policy
+  }
+  return "reject"
+}
+
+fn __workflow_autonomy_tier(value) -> WorkflowAutonomyTier {
+  const tier = value ?? "act_auto"
+  if tier == "shadow" || tier == "suggest" || tier == "act_with_approval" || tier == "act_auto" {
+    return tier
+  }
+  throw "workflow_autonomy_policy: tier must be one of shadow, suggest, act_with_approval, act_auto"
+}
+
+/**
+ * workflow_autonomy_policy normalizes tier policy for with_autonomy_policy.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn workflow_autonomy_policy(
+  config: WorkflowAutonomyPolicyConfig = {},
+) -> WorkflowAutonomyPolicy {
+  return {
+    agent_id: config.agent_id ?? config.agent,
+    autonomy_tier: __workflow_autonomy_tier(config.autonomy_tier ?? config.tier),
+    action_tiers: config.action_tiers ?? {},
+    agent_tiers: config.agent_tiers ?? {},
+    agent_action_tiers: config.agent_action_tiers ?? {},
+    reviewers: config.reviewers ?? [],
+  }
+}
+
+fn __workflow_llm_options(
+  config: WorkflowStageOptionsConfig,
+  model_policy: WorkflowModelPolicy,
+  tool_format: string,
+) -> dict {
+  const model_option_keys = __llm_call_option_registry().keys
+  let options = pick_keys(model_policy, model_option_keys, {drop_nil: true})
+    + {
+    tool_format: tool_format,
+  }
+  if __workflow_non_empty_string(config.session_id) != nil {
+    options = options + {session_id: __workflow_non_empty_string(config.session_id)}
+  }
+  return options
+}
+
+fn __workflow_agent_loop_options(
+  config: WorkflowStageOptionsConfig,
+  model_policy: WorkflowModelPolicy,
+  tool_format: string,
+) -> dict {
+  const loop_option_keys = [
+    "nudge",
+    "tool_examples",
+    "turn_policy",
+    "stop_after_successful_tools",
+    "require_successful_tools",
+    "iteration_budget",
+    "reasoning_policy",
+    "reasoning_scale",
+    "reasoning_task",
+  ]
+  let options = {
+    loop_until_done: true,
+    max_iterations: model_policy.max_iterations ?? 16,
+    max_nudges: model_policy.max_nudges ?? 3,
+    tool_retries: 0,
+    tool_backoff_ms: 1000,
+    schema_retries: 0,
+    tool_format: tool_format,
+    native_tool_fallback: __workflow_native_tool_fallback(model_policy.native_tool_fallback),
+    daemon: false,
+    exit_when_verified: config.exit_when_verified ?? false,
+    loop_detect_warn: 2,
+    loop_detect_block: 3,
+    loop_detect_skip: 4,
+  }
+  if __workflow_non_empty_string(config.session_id) != nil {
+    options = options + {session_id: __workflow_non_empty_string(config.session_id)}
+  }
+  if config.done_sentinel != nil {
+    options = options + {done_sentinel: config.done_sentinel}
+  }
+  return options + pick_keys(model_policy, loop_option_keys, {drop_nil: true})
+}
+
+/**
+ * workflow_stage_spec is the typed constructor for one workflow stage node.
+ * Direct dict literals are checked against `StageSpec`, so stage-spec typos
+ * fail at check time instead of being silently dropped by graph
+ * normalization.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn workflow_stage_spec(spec: StageSpec = {}) -> StageSpec {
+  return spec
+}
+
+/**
+ * workflow_stage_agent_options.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn workflow_stage_agent_options(
+  config: WorkflowStageOptionsConfig = {},
+) -> WorkflowStageAgentOptions {
+  const model_policy: WorkflowModelPolicy = config.model_policy ?? {}
+  const host: WorkflowStageHostConfig = config.host ?? {}
+  const tool_format: string = __workflow_stage_tool_format(model_policy, host)
+  const llm_options = __workflow_llm_options(config, model_policy, tool_format)
+  const loop_options = __workflow_agent_loop_options(config, model_policy, tool_format)
+  return {
+    run_agent_loop: config.mode == "agent" || (config.has_tools ?? false),
+    tool_format: tool_format,
+    llm_options: llm_options,
+    agent_loop_options: llm_options + loop_options,
+  }
+}

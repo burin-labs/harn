@@ -1,0 +1,39 @@
+[provider_family]
+openrouter = "openai"
+together = "openai"
+groq = "openai"
+cerebras = "openai"
+deepseek = "openai"
+fireworks = "openai"
+huggingface = "openai"
+local = "openai"
+# New April 2026 routes for Qwen3.6:
+dashscope = "openai"
+llamacpp = "openai"
+mlx = "openai"
+tgi = "openai"
+vllm = "openai"
+# New 2026-05 routes (open-weight frontier additions). MiniMax + Z.AI
+# both speak the OpenAI chat-completions wire format on their
+# advertised compat endpoints, so the openai family rules cover the
+# baseline. Model-specific tweaks live in `[[provider.minimax]]` /
+# `[[provider.zai]]` blocks above.
+minimax = "openai"
+zai = "openai"
+nvidia = "openai"
+nebius = "openai"
+flexai = "openai"
+hyperbolic = "openai"
+siliconflow = "openai"
+parasail = "openai"
+atlas = "openai"
+github_models = "openai"
+# Creator/model slugs need the same routed-model capability rows as OpenRouter
+# before falling through to the shared OpenAI-compatible transport defaults.
+vercel_ai_gateway = "openrouter"
+cloudflare_ai_gateway = "openai"
+inception = "openai"
+friendli = "openai"
+volcengine_ark = "openai"
+hunyuan = "openai"
+qianfan = "openai"

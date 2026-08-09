@@ -1,0 +1,51 @@
+import "std/triggers"
+
+/**
+ * CH-04 (#1875): after a successful fire, the buffer resets so the next
+ * matching event starts a fresh window. Counter increments cleanly from
+ * 0 again.
+ */
+fn handle_batch(harness: Harness, event) {
+  const batch_len = if event.batch == nil {
+    0
+  } else {
+    len(event.batch)
+  }
+  harness.channels.append("batch.btb.fired", {batch_size: batch_len})
+}
+
+pipeline test(harness: Harness, task) {
+  const unique = to_string(to_int(harness.clock.timestamp())) + "-"
+    + to_string(
+    harness.random.range(100000, 999999),
+  )
+  const _ = harness.runtime.trigger_register(
+    {
+      id: "batch-btb-" + unique,
+      kind: "channel.emit",
+      provider: "channel",
+      autonomy_tier: "act_auto",
+      handler: handle_batch,
+      when: nil,
+      retry: nil,
+      match: {events: ["channel:batch.btb.input"]},
+      events: nil,
+      dedupe_key: nil,
+      filter: nil,
+      batch: {count: 2, window: "10m"},
+      budget: nil,
+      manifest_path: nil,
+      package_name: "conformance",
+    },
+  )
+  const _ = harness.channels.append("batch.btb.input", {seq: 1})
+  const _ = harness.channels.append("batch.btb.input", {seq: 2})
+  const first = harness.channels.events("batch.btb.fired")
+  harness.stdio.println("after-first-pair:" + to_string(len(first)))
+  const _ = harness.channels.append("batch.btb.input", {seq: 3})
+  const mid = harness.channels.events("batch.btb.fired")
+  harness.stdio.println("after-third:" + to_string(len(mid)))
+  const _ = harness.channels.append("batch.btb.input", {seq: 4})
+  const second = harness.channels.events("batch.btb.fired")
+  harness.stdio.println("after-second-pair:" + to_string(len(second)))
+}

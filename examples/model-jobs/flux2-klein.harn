@@ -1,0 +1,54 @@
+import {
+  ComfyWorkflowBuilder,
+  ModelJobEvent,
+  ModelJobRequest,
+  ModelJobRunOptions,
+  ModelOutputSpec,
+  ModelTask,
+  comfyui_backend,
+  comfyui_flux2_klein_workflow,
+  model_job_run_result,
+} from "std/model_job"
+
+fn main(harness: Harness) {
+  const task: ModelTask = "image.generate"
+  const output: ModelOutputSpec = {
+    mime_type: "image/png",
+    width: to_int(harness.env.get_or("MODEL_JOB_IMAGE_WIDTH", "1024")) ?? 1024,
+    height: to_int(harness.env.get_or("MODEL_JOB_IMAGE_HEIGHT", "1024")) ?? 1024,
+  }
+  const request: ModelJobRequest = {
+    id: harness.random.uuid_v7(),
+    task: task,
+    prompt: harness.env.get_or(
+      "MODEL_JOB_IMAGE_PROMPT",
+      "A clean cornflower-blue botanical emblem on a warm cream background, no text",
+    ),
+    output: output,
+    model: "black-forest-labs/FLUX.2-klein-4B",
+    seed: to_int(harness.env.get_or("MODEL_JOB_IMAGE_SEED", "42")) ?? 42,
+  }
+  const options: ModelJobRunOptions = {
+    timeout_ms: 600000,
+    interval_ms: 500,
+    on_event: fn(event: ModelJobEvent) {
+      harness.stdio.eprintln(
+        to_string(event.kind) + ": " + to_string(event.state) + " (" + event.job_id + ")",
+      )
+      return nil
+    },
+  }
+  const build: ComfyWorkflowBuilder =
+    fn(job: ModelJobRequest) { return comfyui_flux2_klein_workflow(
+    job,
+  ) }
+  const backend = comfyui_backend(harness.env.get_or("COMFYUI_URL", "http://127.0.0.1:8188"), build)
+  const result = model_job_run_result(harness, backend, request, options)
+  if !is_ok(result) {
+    harness.stdio.eprintln(json_stringify(unwrap_err(result)))
+    return 1
+  }
+  const receipt = unwrap(result)
+  harness.stdio.println(json_stringify(receipt))
+  return 0
+}

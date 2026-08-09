@@ -1,0 +1,439 @@
+//! Ed25519 signing for session event chains.
+//!
+//! The store stamps each event with a sha256 `record_hash` linking
+//! back to its predecessor's hash. The `SessionSigner` finalises a
+//! session by emitting a `Receipt` event whose signature covers the
+//! entire chain. The same key also signs individual events when the
+//! caller opts in (`append_signed`) — useful for cross-tenant audit
+//! trails where every event needs independent verification.
+//!
+//! Key material is deterministically derived from a 32-byte seed
+//! supplied by the host. In production the seed comes from the
+//! configured secret store ([`harn_vm::provenance::load_or_generate_agent_signing_key`]
+//! is the long-form helper); for tests we accept a literal seed so
+//! the verifier can be exercised without a real KMS.
+
+use base64::Engine as _;
+use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
+use sha2::{Digest, Sha256};
+
+use super::event::{
+    canonical_event_bytes, canonical_json_bytes, EventId, EventSignature, SessionEventKind,
+    StoredEvent,
+};
+use super::store::{SessionMeta, VerifyFailure, VerifyReport};
+
+pub const ALGORITHM: &str = "ed25519";
+
+#[derive(Clone)]
+pub struct SessionSigner {
+    inner: std::sync::Arc<SigningKey>,
+    key_id: String,
+}
+
+impl SessionSigner {
+    /// Build a signer from a 32-byte seed. The verifying key id is
+    /// computed as `"sha256:" + hex(sha256(verifying_key_bytes))[..32]`
+    /// so the same seed always produces the same `signed_by.key_id`.
+    pub fn from_seed(seed: [u8; 32]) -> Self {
+        let key = SigningKey::from_bytes(&seed);
+        let key_id = key_id_for(&key.verifying_key());
+        Self {
+            inner: std::sync::Arc::new(key),
+            key_id,
+        }
+    }
+
+    pub fn key_id(&self) -> &str {
+        &self.key_id
+    }
+
+    pub fn verifying_key(&self) -> VerifyingKey {
+        self.inner.verifying_key()
+    }
+
+    pub fn sign_event(&self, event: &StoredEvent) -> EventSignature {
+        let bytes = canonical_event_bytes(event);
+        sign_bytes(&self.inner, &self.key_id, &bytes)
+    }
+
+    /// Sign a finalisation receipt over the full event-root hash. The
+    /// payload bytes are folded into the receipt event so a verifier
+    /// can recompute them from the stored chain alone.
+    pub fn sign_receipt(&self, receipt_root_hash: &str) -> EventSignature {
+        let material = receipt_signing_material(receipt_root_hash);
+        sign_bytes(&self.inner, &self.key_id, material.as_bytes())
+    }
+}
+
+fn sign_bytes(key: &SigningKey, key_id: &str, bytes: &[u8]) -> EventSignature {
+    let signature: Signature = key.sign(bytes);
+    EventSignature {
+        algorithm: ALGORITHM.to_string(),
+        key_id: key_id.to_string(),
+        signature: base64::engine::general_purpose::STANDARD.encode(signature.to_bytes()),
+    }
+}
+
+fn receipt_signing_material(receipt_root_hash: &str) -> String {
+    format!("harn.session.receipt.v1\nroot={receipt_root_hash}\n")
+}
+
+#[expect(clippy::string_slice, reason = "hex::encode output is ASCII")]
+pub fn key_id_for(verifying_key: &VerifyingKey) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(verifying_key.as_bytes());
+    let digest = hasher.finalize();
+    format!("sha256:{}", &hex::encode(digest)[..32])
+}
+
+/// Compute the canonical record hash for an event with `prev_hash`
+/// already populated. Result is `"sha256:<hex>"`.
+pub fn compute_record_hash(event: &StoredEvent) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(canonical_event_bytes(event));
+    finalize_sha256(hasher)
+}
+
+/// Wrap a finalised SHA-256 in the canonical `"sha256:<hex>"` label
+/// every chain primitive prints. Centralising the format keeps the
+/// algorithm tag in one place so a future cutover to a different hash
+/// doesn't fan out across the module.
+fn finalize_sha256(hasher: Sha256) -> String {
+    format!("sha256:{}", hex::encode(hasher.finalize()))
+}
+
+/// Verify a per-event signature.
+#[derive(Debug)]
+pub enum VerifyError {
+    NotSigned,
+    UnsupportedAlgorithm(String),
+    DecodeError(String),
+    InvalidShape(String),
+    BadSignature,
+    HashMismatch { stored: String, computed: String },
+}
+
+impl std::fmt::Display for VerifyError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NotSigned => write!(f, "event is not signed"),
+            Self::UnsupportedAlgorithm(algorithm) => {
+                write!(f, "unsupported signature algorithm '{algorithm}'")
+            }
+            Self::DecodeError(message) => {
+                write!(f, "signature base64 decode failed: {message}")
+            }
+            Self::InvalidShape(message) => write!(f, "signature shape invalid: {message}"),
+            Self::BadSignature => write!(f, "signature did not verify against the key"),
+            Self::HashMismatch { stored, computed } => {
+                write!(
+                    f,
+                    "record_hash mismatch: stored '{stored}' vs computed '{computed}'"
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for VerifyError {}
+
+pub fn verify_event(event: &StoredEvent, verifying_key: &VerifyingKey) -> Result<(), VerifyError> {
+    if event.is_redacted_projection() {
+        return Err(VerifyError::InvalidShape(format!(
+            "redacted projection cannot authenticate canonical source hash '{}'",
+            event.source_record_hash()
+        )));
+    }
+    let computed = compute_record_hash(event);
+    if computed != event.record_hash {
+        return Err(VerifyError::HashMismatch {
+            stored: event.record_hash.clone(),
+            computed,
+        });
+    }
+    let Some(signed_by) = event.signed_by.as_ref() else {
+        return Err(VerifyError::NotSigned);
+    };
+    verify_signature(signed_by, verifying_key, &canonical_event_bytes(event))
+}
+
+pub fn verify_receipt_root(
+    signed_by: &EventSignature,
+    verifying_key: &VerifyingKey,
+    receipt_root_hash: &str,
+) -> Result<(), VerifyError> {
+    let material = receipt_signing_material(receipt_root_hash);
+    verify_signature(signed_by, verifying_key, material.as_bytes())
+}
+
+fn verify_signature(
+    signed_by: &EventSignature,
+    verifying_key: &VerifyingKey,
+    bytes: &[u8],
+) -> Result<(), VerifyError> {
+    if signed_by.algorithm != ALGORITHM {
+        return Err(VerifyError::UnsupportedAlgorithm(
+            signed_by.algorithm.clone(),
+        ));
+    }
+    let signature_bytes = base64::engine::general_purpose::STANDARD
+        .decode(&signed_by.signature)
+        .map_err(|error| VerifyError::DecodeError(error.to_string()))?;
+    let signature = Signature::from_slice(&signature_bytes)
+        .map_err(|error| VerifyError::InvalidShape(error.to_string()))?;
+    verifying_key
+        .verify(bytes, &signature)
+        .map_err(|_| VerifyError::BadSignature)
+}
+
+/// Verify an entire stored event chain in one pass. For each event this
+/// checks the record-hash link, then verifies its signature (when
+/// present) against the appropriate key:
+///
+/// - A [`SessionEventKind::Receipt`] event's signature attests the
+///   *pre-receipt chain root* (see [`SessionSigner::sign_receipt`]), not
+///   the receipt event's own canonical bytes. It is verified with
+///   [`verify_receipt_root`] against the chain root recomputed over every
+///   event preceding it, using `receipt_verifier`.
+/// - Every other signed event is verified with [`verify_event`] against
+///   its own canonical bytes, using `event_verifier`.
+///
+/// When the relevant verifier is `None` a present signature is counted as
+/// signed-but-unverified, matching the historical behaviour of a store
+/// that persisted signatures but was reopened without the signing key.
+///
+/// Returns `(signed_event_count, failures)` where each failure is
+/// `(event_id, reason)`. Both backends map that into their `VerifyReport`.
+pub fn verify_event_chain(
+    events: &[StoredEvent],
+    event_verifier: Option<&VerifyingKey>,
+    receipt_verifier: Option<&VerifyingKey>,
+) -> (usize, Vec<(EventId, String)>) {
+    let (signed, failures) = verify_event_chain_detailed(events, event_verifier, receipt_verifier);
+    (
+        signed,
+        failures
+            .into_iter()
+            .map(|failure| (failure.event_id, failure.reason))
+            .collect(),
+    )
+}
+
+struct ChainFailure {
+    event_id: EventId,
+    reason: String,
+}
+
+fn verify_event_chain_detailed(
+    events: &[StoredEvent],
+    event_verifier: Option<&VerifyingKey>,
+    receipt_verifier: Option<&VerifyingKey>,
+) -> (usize, Vec<ChainFailure>) {
+    let mut signed = 0usize;
+    let mut failures = Vec::new();
+    let mut expected_prev_hash: Option<&str> = None;
+    for (index, event) in events.iter().enumerate() {
+        let expected_event_id = index as EventId + 1;
+        if event.event_id != expected_event_id {
+            failures.push(ChainFailure {
+                event_id: event.event_id,
+                reason: format!(
+                    "event_id sequence gap: expected {expected_event_id}, found {}",
+                    event.event_id
+                ),
+            });
+        }
+        if event.prev_hash.as_deref() != expected_prev_hash {
+            failures.push(ChainFailure {
+                event_id: event.event_id,
+                reason: "prev_hash chain break".to_string(),
+            });
+        }
+        if event.is_redacted_projection() {
+            failures.push(ChainFailure {
+                event_id: event.event_id,
+                reason: format!(
+                    "redacted projection cannot authenticate canonical source hash '{}'",
+                    event.source_record_hash()
+                ),
+            });
+            expected_prev_hash = Some(event.source_record_hash());
+            continue;
+        }
+        let recomputed = compute_record_hash(event);
+        if recomputed != event.record_hash {
+            failures.push(ChainFailure {
+                event_id: event.event_id,
+                reason: format!(
+                    "record_hash mismatch: stored '{stored}' vs computed '{recomputed}'",
+                    stored = event.record_hash
+                ),
+            });
+            expected_prev_hash = Some(event.record_hash.as_str());
+            continue;
+        }
+        expected_prev_hash = Some(event.record_hash.as_str());
+        let Some(signed_by) = event.signed_by.as_ref() else {
+            continue;
+        };
+        let is_receipt = matches!(event.kind, SessionEventKind::Receipt);
+        let verifier = if is_receipt {
+            receipt_verifier
+        } else {
+            event_verifier
+        };
+        let Some(verifier) = verifier else {
+            signed += 1;
+            continue;
+        };
+        let result = if is_receipt {
+            let pre_receipt_root = chain_root_hash(&events[..index]);
+            verify_receipt_root(signed_by, verifier, &pre_receipt_root)
+        } else {
+            verify_event(event, verifier)
+        };
+        match result {
+            Ok(()) => signed += 1,
+            Err(error) => failures.push(ChainFailure {
+                event_id: event.event_id,
+                reason: error.to_string(),
+            }),
+        }
+    }
+    (signed, failures)
+}
+
+/// Verify event bytes, sequence/linkage, signatures, and the persisted session
+/// counters/root as one contract shared by every backend.
+pub fn verify_session_chain(
+    meta: &SessionMeta,
+    events: &[StoredEvent],
+    event_verifier: Option<&VerifyingKey>,
+    receipt_verifier: Option<&VerifyingKey>,
+) -> VerifyReport {
+    let chain_root = chain_root_hash(events);
+    let (signed_event_count, mut failures) =
+        verify_event_chain_detailed(events, event_verifier, receipt_verifier);
+    let tail_id = events.last().map(|event| event.event_id).unwrap_or(0);
+    if meta.event_count != events.len() {
+        failures.push(ChainFailure {
+            event_id: tail_id,
+            reason: format!(
+                "session event_count mismatch: stored {}, found {}",
+                meta.event_count,
+                events.len()
+            ),
+        });
+    }
+    if meta.last_event_id != events.last().map(|event| event.event_id) {
+        failures.push(ChainFailure {
+            event_id: tail_id,
+            reason: "session last_event_id mismatch".to_string(),
+        });
+    }
+    let expected_root = if events.is_empty() {
+        None
+    } else {
+        Some(chain_root.as_str())
+    };
+    if meta.chain_root_hash.as_deref() != expected_root {
+        failures.push(ChainFailure {
+            event_id: tail_id,
+            reason: "session chain_root_hash mismatch".to_string(),
+        });
+    }
+    VerifyReport {
+        session_id: meta.id.clone(),
+        chain_root_hash: chain_root,
+        event_count: events.len(),
+        signed_event_count,
+        failures: failures
+            .into_iter()
+            .map(|failure| VerifyFailure {
+                event_id: failure.event_id,
+                reason: failure.reason,
+            })
+            .collect(),
+    }
+}
+
+/// Initial chain root before any events have been appended. The prefix
+/// is versioned so a future schema change doesn't silently re-validate
+/// against an old chain.
+pub fn chain_root_init() -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(b"harn.session.chain.v2");
+    finalize_sha256(hasher)
+}
+
+/// Fold a single event's `record_hash` into the running chain root.
+/// Composing folds in sequence reproduces [`chain_root_hash`] without
+/// re-hashing the entire history on every append.
+pub fn chain_root_fold(prev_root: &str, record_hash: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(prev_root.as_bytes());
+    hasher.update(b"\n");
+    hasher.update(record_hash.as_bytes());
+    finalize_sha256(hasher)
+}
+
+/// Build the canonical source-chain root for stored events or redacted
+/// retrieval projections. Projection markers retain the canonical source
+/// hash, so snapshot metadata and valid receipt signatures do not become
+/// false corruption reports merely because presentation bytes were scrubbed.
+/// The hot append path uses [`chain_root_fold`] directly.
+pub fn chain_root_hash(events: &[StoredEvent]) -> String {
+    events.iter().fold(chain_root_init(), |root, event| {
+        chain_root_fold(&root, event.source_record_hash())
+    })
+}
+
+/// Re-anchor a chain of events on a new owning session id. The
+/// `session_id` field is rewritten on each event and `prev_hash` +
+/// `record_hash` are recomputed sequentially, so the resulting chain
+/// is bytewise-verifiable as a standalone session. Used by
+/// [`crate::SessionStore::fork`] to give the child session
+/// a chain that `verify` can attest without the parent.
+pub fn re_anchor_events(events: &[StoredEvent], new_session_id: &str) -> Vec<StoredEvent> {
+    let mut rewritten = Vec::with_capacity(events.len());
+    let mut prev_hash: Option<String> = None;
+    for event in events {
+        let mut copied = event.clone();
+        copied.session_id = new_session_id.to_string();
+        copied.prev_hash = prev_hash.clone();
+        copied.record_hash = compute_record_hash(&copied);
+        // Per-event signatures are detached over the canonical bytes;
+        // since both session_id and prev_hash changed, the parent's
+        // signature no longer attests this event. Drop it — the
+        // session-close path will mint a fresh receipt covering the
+        // re-anchored chain.
+        copied.signed_by = None;
+        prev_hash = Some(copied.record_hash.clone());
+        rewritten.push(copied);
+    }
+    rewritten
+}
+
+/// Helper for receipt payloads built outside the signer.
+pub fn canonical_receipt_payload(
+    session_id: &str,
+    last_event_id: super::event::EventId,
+    chain_root: &str,
+) -> serde_json::Value {
+    serde_json::json!({
+        "schema": "harn.session.receipt.v1",
+        "session_id": session_id,
+        "last_event_id": last_event_id,
+        "chain_root": chain_root,
+    })
+}
+
+/// Canonicalise a [`serde_json::Value`] for use in tests that compare
+/// hashing inputs. Public surface kept tight; mostly used by the
+/// integration tests that round-trip events.
+pub fn canonical_value_hash(value: &serde_json::Value) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(canonical_json_bytes(value));
+    finalize_sha256(hasher)
+}

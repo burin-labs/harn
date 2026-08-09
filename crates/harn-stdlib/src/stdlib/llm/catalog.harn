@@ -1,0 +1,973 @@
+import { ModelLadderStep } from "std/llm/options"
+// @harn-entrypoint-category llm.stdlib
+//
+// std/llm/catalog — thin Harn wrappers over the runtime model catalog.
+//
+// The wrapper functions intentionally use shorter, idiomatic names
+// (`model_info`, `resolved_options`) instead of the underlying builtin
+// names (`llm_model_info`, `llm_resolved_options`) so that wrapping
+// does not shadow the builtin and recurse infinitely.
+import { render_table } from "std/table"
+
+pub type NamedModelLadder = {label?: string, steps: list<ModelLadderStep>}
+
+/**
+ * Wraps the harness.llm.model_info(selector) Rust builtin. The runtime always
+ * returns a dict; when the selector is unknown, the dict's `catalog`
+ * field will be nil and the inferred provider will be the default.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn model_info(llm: HarnessLlm, selector) {
+  return llm.model_info(selector)
+}
+
+/**
+ * Return the resolved model-route facts that are safe to persist in eval,
+ * replay, cost, and audit receipts. The runtime omits arbitrary
+ * operator-specific route overlay fields; `generation_defaults` contains only
+ * Harn's validated generation-default schema.
+ *
+ * @effects: []
+ * @errors: ["llm_execution_contract: selector is required"]
+ */
+pub fn execution_contract(llm: HarnessLlm, selector) -> dict {
+  return llm.execution_contract(selector)
+}
+
+/**
+ * Wraps harness.llm.resolved_options(opts). opts.model is required; throws otherwise.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn resolved_options(llm: HarnessLlm, opts) {
+  if type_of(opts) != "dict" {
+    throw "resolved_options: opts must be a dict"
+  }
+  if opts?.model == nil || opts.model == "" {
+    throw "resolved_options: opts.model is required"
+  }
+  return llm.resolved_options(opts)
+}
+
+/**
+ * Return a named `[model_ladders.<name>]` catalog row as
+ * `{label?, steps: [{model, provider?, label?, ...}]}`, or nil when the name
+ * is not declared. Route consumers should keep stable ladder names in policy
+ * code and leave volatile provider/model identity in catalog source data.
+ *
+ * @effects: []
+ * @errors: ["llm_model_ladder: ladder name is required"]
+ */
+pub fn named_model_ladder(llm: HarnessLlm, name: string) -> NamedModelLadder? {
+  return llm.model_ladder(name)
+}
+
+fn __capability_field(caps, capability) {
+  if capability == "thinking" {
+    const direct = caps?.thinking ?? false
+    const modes = caps?.thinking_modes ?? []
+    return direct || len(modes) > 0
+  }
+  if capability == "tool_search" {
+    return len(caps?.tool_search ?? []) > 0
+  }
+  if capability == "vision" {
+    return caps?.vision_supported ?? false
+  }
+  if capability == "files_api" {
+    return caps?.files_api_supported ?? false
+  }
+  if capability == "reasoning_effort" {
+    return caps?.reasoning_effort_supported ?? false
+  }
+  if capability == "interleaved_thinking" {
+    return caps?.interleaved_thinking_supported ?? false
+  }
+  if capability == "prompt_caching" {
+    return caps?.prompt_caching ?? false
+  }
+  if capability == "native_tools" {
+    return caps?.native_tools ?? false
+  }
+  if capability == "audio" {
+    return caps?.audio ?? false
+  }
+  if capability == "pdf" {
+    return caps?.pdf ?? false
+  }
+  if capability == "video" {
+    return caps?.video ?? false
+  }
+  return false
+}
+
+/**
+ * True if (model, capability) is supported per the runtime catalog.
+ * capability is one of: "thinking", "tool_search", "interleaved_thinking",
+ * "prompt_caching", "vision", "audio", "pdf", "video", "files_api",
+ * "reasoning_effort", "native_tools". Returns false on unknown model.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn has_capability(llm: HarnessLlm, model, capability) {
+  const info = llm.model_info(model)
+  if type_of(info) != "dict" {
+    return false
+  }
+  const caps = info?.capabilities
+  if type_of(caps) != "dict" {
+    return false
+  }
+  return __capability_field(caps, capability)
+}
+
+/**
+ * Returns the normalized model-family token from the runtime catalog.
+ * Family is a diversity signal for review/routing; it is distinct from
+ * provider and preserves hosted lineage where known.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn family_of(llm: HarnessLlm, model_id) {
+  const info = llm.model_info(model_id)
+  if type_of(info) != "dict" {
+    return "unknown"
+  }
+  return to_string(info?.family ?? info?.catalog?.family ?? "unknown")
+}
+
+/**
+ * Return provider/model route-decision rows from the runtime catalog.
+ * Rows carry provider/model/family/capability/timeout metadata and credential
+ * env var names, never resolved secret values.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn routing_routes(llm: HarnessLlm) {
+  const catalog = llm.provider_catalog()
+  return catalog?.routing_routes ?? []
+}
+
+/**
+ * Returns the narrower catalog lineage token used by model-aware option
+ * packs. Falls back to family when a catalog row has no lineage.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn lineage_of(llm: HarnessLlm, model_id) {
+  const info = llm.model_info(model_id)
+  if type_of(info) != "dict" {
+    return "unknown"
+  }
+  return to_string(info?.lineage ?? info?.catalog?.lineage ?? info?.family ?? "unknown")
+}
+
+/**
+ * Pick a complementary reviewer model from a different family.
+ * Options: `{author_model, author_provider?, intent?, max_price_multiplier?}`.
+ * `intent` is `"review"`, `"critique"`, or `"plan_review"`.
+ *
+ * Returns `{intent, author, reviewer, fallback, reason, ...}`. When no priced
+ * different-family reviewer is available the selector does NOT fail; it returns
+ * `fallback == true` with `reviewer == author` (self-review). A caller that
+ * needs structural independence must check `fallback` and refuse to proceed,
+ * branching on the machine-readable `fallback_code` rather than parsing the
+ * human-readable `reason`/`fallback_reason`. `fallback_code` is one of:
+ *   - `"unknown_author_family"`       — author family unresolved
+ *   - `"no_diff_family_within_price"` — a peer exists but exceeds max_price_multiplier
+ *   - `"no_diff_family_serverless"`   — no active serverless cross-family peer cataloged
+ *   - `"all_diff_family_excluded"`    — peers exist but were all excluded
+ * It is absent on the success path (`fallback == false`).
+ *
+ * @effects: []
+ * @errors: ["llm_complementary_reviewer: ..."]
+ * @api_stability: experimental
+ * @example: complementary_reviewer({author_model: "claude-sonnet-4-6", intent: "plan_review"})
+ */
+pub fn complementary_reviewer(llm: HarnessLlm, opts) {
+  return llm.complementary_reviewer(opts)
+}
+
+/**
+ * Return same-logical-model provider routes for explicit failover or
+ * side-by-side experiments. Equivalence is not wire identity: callers must
+ * still let Harn re-render messages/tools for the selected provider.
+ *
+ * @effects: []
+ * @errors: ["llm_equivalent_models: ..."]
+ * @api_stability: experimental
+ * @example: equivalent_models("cerebras/gpt-oss-120b")
+ */
+pub fn equivalent_models(llm: HarnessLlm, selector) {
+  return llm.equivalent_models(selector)
+}
+
+/**
+ * ── Selector helpers ─────────────────────────────────────────────────
+ *
+ * `models_with({tier, strengths, min_benchmark, open_weight, provider,
+ *               max_input_per_mtok, exclude_deprecated, available_only})`
+ * returns every catalog model whose row satisfies *all* supplied
+ * constraints, ranked from "most relevant" to "least" (open-weight +
+ * strength count + benchmark score weighted; see __score_model).
+ *
+ * `best_available_model(opts)` is the degenerate-case sibling: it tries
+ * `models_with(opts)` first, then progressively drops constraints until
+ * something matches. Never returns nil unless the entire catalog is
+ * empty (which would mean the VM was set up without providers.toml).
+ *
+ * `pick_model(opts)` is the one-shot convenience: returns the top
+ * candidate from `best_available_model`, or nil if there is none.
+ */
+fn __available_provider_set(llm: HarnessLlm) {
+  const status = llm.providers()
+  let available = {}
+  for entry in status {
+    if entry?.available {
+      available[entry.name] = true
+    }
+  }
+  return available
+}
+
+fn __strengths_match(model_strengths, required) {
+  if required == nil || len(required) == 0 {
+    return true
+  }
+  const actual = model_strengths ?? []
+  for tag in required {
+    if !actual.contains(tag) {
+      return false
+    }
+  }
+  return true
+}
+
+fn __benchmark_match(model_benchmarks, required) {
+  if required == nil || len(required) == 0 {
+    return true
+  }
+  const actual = model_benchmarks ?? {}
+  for entry in required {
+    const key = entry.key
+    const min_value = to_float(entry.value)
+    const actual_value = actual[key]
+    if actual_value == nil {
+      return false
+    }
+    if to_float(actual_value) < min_value {
+      return false
+    }
+  }
+  return true
+}
+
+fn __score_model(model) {
+  // Higher is better. Compose: tier weight + strength count + best
+  // benchmark + open-weight bonus + non-deprecated bonus.
+  let score = 0.0
+  const tier = to_string(model?.tier ?? "")
+  if tier == "frontier" {
+    score = score + 40.0
+  } else if tier == "reasoning" {
+    score = score + 35.0
+  } else if tier == "mid" {
+    score = score + 20.0
+  } else if tier == "small" {
+    score = score + 5.0
+  }
+  score = score + len(model?.strengths ?? []) * 2.0
+  if model?.open_weight {
+    score = score + 5.0
+  }
+  if !(model?.deprecated ?? false) {
+    score = score + 10.0
+  }
+  const benchmarks = model?.benchmarks ?? {}
+  for entry in benchmarks {
+    const value = to_float(entry.value)
+    if value > score / 2.0 {
+      score = score + value / 10.0
+    }
+  }
+  return score
+}
+
+fn __model_matches_identity_filters(model, opts) {
+  const want_tier = opts?.tier
+  const want_provider = opts?.provider
+  const want_equivalence = opts?.equivalence_group
+  const want_logical_model = opts?.logical_model
+  const want_api_dialect = opts?.api_dialect
+  if want_tier != nil && to_string(model?.tier ?? "") != to_string(want_tier) {
+    return false
+  }
+  if want_provider != nil && to_string(model?.provider ?? "") != to_string(want_provider) {
+    return false
+  }
+  if want_equivalence != nil
+    && to_string(model?.equivalence_group ?? "")
+    != to_string(want_equivalence) {
+    return false
+  }
+  if want_logical_model != nil
+    && to_string(model?.logical_model ?? "")
+    != to_string(want_logical_model) {
+    return false
+  }
+  if want_api_dialect != nil && to_string(model?.api_dialect ?? "") != to_string(want_api_dialect) {
+    return false
+  }
+  return true
+}
+
+fn __model_matches_catalog_constraints(model, opts, available) {
+  const want_open_weight = opts?.open_weight
+  if want_open_weight != nil && model?.open_weight != want_open_weight {
+    return false
+  }
+  const min_tpm = opts?.min_tpm
+  if min_tpm != nil {
+    const tpm = model?.rate_limits?.tpm
+    if tpm == nil || to_float(tpm) < to_float(min_tpm) {
+      return false
+    }
+  }
+  if (opts?.exclude_deprecated ?? true) && (model?.deprecated ?? false) {
+    return false
+  }
+  const max_input = opts?.max_input_per_mtok
+  if max_input != nil {
+    const price = model?.pricing?.input_per_mtok
+    if price != nil && to_float(price) > to_float(max_input) {
+      return false
+    }
+  }
+  if !__strengths_match(model?.strengths, opts?.strengths ?? []) {
+    return false
+  }
+  if !__benchmark_match(model?.benchmarks, opts?.min_benchmark ?? {}) {
+    return false
+  }
+  if available != nil && !available[to_string(model?.provider ?? "")] {
+    return false
+  }
+  return true
+}
+
+fn __filter_models(llm: HarnessLlm, opts) {
+  const catalog = llm.catalog()
+  const available = if opts?.available_only ?? false {
+    __available_provider_set(llm)
+  } else {
+    nil
+  }
+  let out = []
+  for model in catalog {
+    if !__model_matches_identity_filters(model, opts) {
+      continue
+    }
+    if !__model_matches_catalog_constraints(model, opts, available) {
+      continue
+    }
+    out = out + [model + {_score: __score_model(model)}]
+  }
+  // Sort descending by score: sort_by gives ascending, so negate the key.
+  return out.sorted_by({ m -> -m._score })
+}
+
+/**
+ * Return every catalog model that satisfies the constraints, ranked by
+ * a composite quality/availability score (descending).
+ *
+ * Supported opts keys (all optional):
+ *   tier              — "small" | "mid" | "frontier" | "reasoning"
+ *   strengths         — list of required strength tags (e.g. ["coding"])
+ *   min_benchmark     — dict of {benchmark_key: minimum_score}
+ *   open_weight       — true | false (None means "no claim")
+ *   provider          — provider id (e.g. "anthropic")
+ *   equivalence_group — logical failover group id
+ *   logical_model     — provider-independent model identity
+ *   api_dialect       — preferred API dialect for the route
+ *   min_tpm           — minimum published tokens/minute quota
+ *   max_input_per_mtok — cap on pricing.input_per_mtok
+ *   exclude_deprecated — defaults to true
+ *   available_only    — true means filter to providers whose env keys
+ *                       resolve (per llm_provider_status). Defaults false.
+ *
+ * Returns: list of model dicts (catalog shape) with a synthetic `_score`
+ * field. Empty list if nothing matches.
+ *
+ * Strong typing: opts is `Dict<string, any>`; the return is a
+ * `List<ModelCatalogEntry>` per the runtime catalog schema.
+ *
+ * models_with.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ * @example: models_with({tier: "frontier", strengths: ["coding"], available_only: true})
+ */
+pub fn models_with(llm: HarnessLlm, opts = nil) {
+  return __filter_models(llm, opts ?? {})
+}
+
+fn __relax_step(opts, step) {
+  // Each relaxation step drops one constraint, from least to most
+  // important. Returns nil when no further relaxations are possible
+  // (i.e. the empty filter has been reached).
+  if step == 0 {
+    return opts
+  }
+  let relaxed = opts
+  // Step 1: drop min_benchmark.
+  if step >= 1 && relaxed?.min_benchmark != nil {
+    relaxed = relaxed + {min_benchmark: nil}
+  }
+  // Step 2: drop max_input_per_mtok.
+  if step >= 2 && relaxed?.max_input_per_mtok != nil {
+    relaxed = relaxed + {max_input_per_mtok: nil}
+  }
+  // Step 3: drop strengths.
+  if step >= 3 && relaxed?.strengths != nil {
+    relaxed = relaxed + {strengths: nil}
+  }
+  // Step 4: drop tier.
+  if step >= 4 && relaxed?.tier != nil {
+    relaxed = relaxed + {tier: nil}
+  }
+  // Step 5: drop open_weight constraint.
+  if step >= 5 && relaxed?.open_weight != nil {
+    relaxed = relaxed + {open_weight: nil}
+  }
+  // Step 6: drop provider pin.
+  if step >= 6 && relaxed?.provider != nil {
+    relaxed = relaxed + {provider: nil}
+  }
+  // Step 7+: stop relaxing — caller gets the unconstrained catalog
+  // (filtered only by `available_only` and `exclude_deprecated`).
+  return relaxed
+}
+
+/**
+ * Like models_with(), but progressively relaxes constraints until at
+ * least one candidate matches. Returns {models, relaxed_from} where
+ * `relaxed_from` is the original opts dict that produced the result —
+ * an empty `relaxed_from` means the strict filter already matched.
+ *
+ * Drop order: min_benchmark → max_input_per_mtok → strengths → tier →
+ * open_weight → provider. `available_only` and `exclude_deprecated` are
+ * preserved through every relaxation so callers don't silently fall
+ * through to providers they can't reach.
+ *
+ * best_available_models.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ * @example: best_available_models({tier: "frontier", strengths: ["vision"]})
+ */
+pub fn best_available_models(llm: HarnessLlm, opts = nil) {
+  const original = opts ?? {}
+  let step = 0
+  while step <= 7 {
+    const attempt = __relax_step(original, step)
+    const candidates = __filter_models(llm, attempt)
+    if len(candidates) > 0 {
+      return {models: candidates, relaxed_from: original, relaxed_step: step, relaxed_opts: attempt}
+    }
+    step = step + 1
+  }
+  return {models: [], relaxed_from: original, relaxed_step: -1, relaxed_opts: original}
+}
+
+/**
+ * One-shot selector: returns the top model dict from
+ * best_available_models(opts), or nil if the catalog is empty. Carries
+ * `_score`, `_relaxed_step`, and `_relaxed_opts` fields so callers can
+ * see how much the filter had to relax.
+ *
+ * pick_model.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ * @example: pick_model({tier: "frontier", strengths: ["coding"], available_only: true})
+ */
+pub fn pick_model(llm: HarnessLlm, opts = nil) {
+  const result = best_available_models(llm, opts)
+  if len(result.models) == 0 {
+    return nil
+  }
+  return result.models[0] + {_relaxed_step: result.relaxed_step, _relaxed_opts: result.relaxed_opts}
+}
+
+/**
+ * Stable sort fields for catalog query consumers. Numeric sorts are ascending
+ * with missing metadata last; provider and id sorts use the model id as a
+ * deterministic tie-breaker.
+ */
+pub type ModelCatalogSort = "provider" \
+  | "id" \
+  | "pricing.input" \
+  | "pricing.output" \
+  | "pricing.cache_read" \
+  | "context_window"
+
+/**
+ * Named presentation columns for model catalog queries. These are deliberately
+ * an allowlist rather than arbitrary paths so the CLI and script callers share
+ * one auditable, typed projection contract.
+ */
+pub type ModelCatalogColumn = "id" \
+  | "provider" \
+  | "tier" \
+  | "strengths" \
+  | "open_weight" \
+  | "installed" \
+  | "context_window" \
+  | "pricing.input" \
+  | "pricing.output" \
+  | "pricing.cache_read" \
+  | "tool_support.parity" \
+  | "tool_support.parity_notes"
+
+/**
+ * Reusable model-catalog query. `strengths` uses exact all-of membership;
+ * `tool_parity` is the runtime catalog's tool-mode parity fact, not an
+ * inference from provider identity. The CLI normalizes its string flags into
+ * this contract before querying.
+ */
+pub type ModelCatalogQuery = {
+  provider?: string,
+  tier?: string,
+  strengths?: list<string>,
+  tool_parity?: string,
+  open_weight?: bool,
+  installed_only?: bool,
+  sort?: ModelCatalogSort,
+  columns?: list<ModelCatalogColumn>,
+}
+
+const MODEL_CATALOG_QUERY_SCHEMA_VERSION = 1
+
+const MODEL_CATALOG_DEFAULT_COLUMNS = ["provider", "id", "tier", "strengths", "tool_support.parity"]
+
+const MODEL_CATALOG_SORT_FIELDS = [
+  "provider",
+  "id",
+  "pricing.input",
+  "pricing.output",
+  "pricing.cache_read",
+  "context_window",
+]
+
+const MODEL_CATALOG_COLUMNS = [
+  "id",
+  "provider",
+  "tier",
+  "strengths",
+  "open_weight",
+  "installed",
+  "context_window",
+  "pricing.input",
+  "pricing.output",
+  "pricing.cache_read",
+  "tool_support.parity",
+  "tool_support.parity_notes",
+]
+
+fn __catalog_query_text(value, label) {
+  if type_of(value) != "string" {
+    throw "model_catalog_query: " + label + " must be a non-empty string"
+  }
+  const text = trim(value)
+  if text == "" {
+    throw "model_catalog_query: " + label + " must be a non-empty string"
+  }
+  return text
+}
+
+fn __catalog_query_string(query, key, value) {
+  const existing = query[key]
+  if existing != nil && existing != value {
+    throw "model_catalog_query: conflicting values for " + key
+  }
+  return query + {[key]: value}
+}
+
+fn __catalog_query_bool(query, key, value) {
+  const existing = query[key]
+  if existing != nil && existing != value {
+    throw "model_catalog_query: conflicting values for " + key
+  }
+  return query + {[key]: value}
+}
+
+fn __catalog_query_strengths(query, value) {
+  const existing = query.strengths ?? []
+  if existing.contains(value) {
+    return query
+  }
+  return query + {strengths: existing.appending(value)}
+}
+
+fn __catalog_query_where_values(raw) {
+  if raw == nil {
+    return []
+  }
+  if type_of(raw) == "string" {
+    return [raw]
+  }
+  if type_of(raw) != "list" {
+    throw "model_catalog_query: where must be a string or list of strings"
+  }
+  let values = []
+  for value in raw {
+    if type_of(value) != "string" {
+      throw "model_catalog_query: where values must be strings"
+    }
+    values = values.appending(value)
+  }
+  return values
+}
+
+fn __catalog_query_apply_where(query, raw) {
+  let out = query
+  for expression in __catalog_query_where_values(raw) {
+    for part in split(expression, ",") {
+      const pieces = split(part, "=")
+      if len(pieces) != 2 {
+        throw "model_catalog_query: --where entries must be key=value"
+      }
+      const key = trim(pieces[0])
+      const value = __catalog_query_text(pieces[1], "where value")
+      if key == "provider" || key == "tier" {
+        out = __catalog_query_string(out, key, value)
+      } else if key == "strengths" {
+        out = __catalog_query_strengths(out, value)
+      } else if key == "tool_support.parity" {
+        out = __catalog_query_string(out, "tool_parity", value)
+      } else if key == "open_weight" {
+        const lowered = lowercase(value)
+        if lowered != "true" && lowered != "false" {
+          throw "model_catalog_query: open_weight must be true or false"
+        }
+        out = __catalog_query_bool(out, "open_weight", lowered == "true")
+      } else {
+        throw "model_catalog_query: unknown where field '" + key
+          + "' (allowed: provider, tier, strengths, tool_support.parity, open_weight)"
+      }
+    }
+  }
+  return out
+}
+
+fn __catalog_query_columns(raw) {
+  if raw == nil {
+    return []
+  }
+  const source = if type_of(raw) == "string" {
+    split(raw, ",")
+  } else if type_of(raw) == "list" {
+    raw
+  } else {
+    throw "model_catalog_query: columns must be a comma-separated string or list of strings"
+  }
+  let columns = []
+  for item in source {
+    const column = __catalog_query_text(item, "column")
+    if !MODEL_CATALOG_COLUMNS.contains(column) {
+      throw "model_catalog_query: unknown column '" + column + "'"
+    }
+    if !columns.contains(column) {
+      columns = columns.appending(column)
+    }
+  }
+  if len(columns) == 0 {
+    throw "model_catalog_query: columns must not be empty"
+  }
+  return columns
+}
+
+/**
+ * Normalize untyped boundary input into a ModelCatalogQuery. This is the one
+ * parser for CLI `--where` / `--columns` strings and makes malformed or
+ * conflicting filters fail before any catalog row is selected.
+ *
+ * @effects: []
+ * @errors: [validation]
+ */
+pub fn normalize_model_catalog_query(raw = nil) -> ModelCatalogQuery {
+  if raw != nil && type_of(raw) != "dict" {
+    throw "model_catalog_query: query must be a dict"
+  }
+  const input = raw ?? {}
+  let query = {}
+  if input?.provider != nil {
+    query = __catalog_query_string(
+      query,
+      "provider",
+      __catalog_query_text(input.provider, "provider"),
+    )
+  }
+  if input?.tier != nil {
+    query = __catalog_query_string(query, "tier", __catalog_query_text(input.tier, "tier"))
+  }
+  if input?.installed_only != nil {
+    if type_of(input.installed_only) != "bool" {
+      throw "model_catalog_query: installed_only must be a bool"
+    }
+    query = query + {installed_only: input.installed_only}
+  }
+  // `where` is a language keyword, so access this externally supplied JSON
+  // key through the dict boundary rather than member syntax.
+  query = __catalog_query_apply_where(query, input["where"])
+  const sort = if input?.sort == nil {
+    "provider"
+  } else {
+    __catalog_query_text(input.sort, "sort")
+  }
+  if !MODEL_CATALOG_SORT_FIELDS.contains(sort) {
+    throw "model_catalog_query: unknown sort '" + sort + "'"
+  }
+  query = query + {sort: sort}
+  const columns = __catalog_query_columns(input?.columns)
+  if len(columns) > 0 {
+    query = query + {columns: columns}
+  }
+  return query
+}
+
+fn __catalog_row_string(row, key) {
+  const value = row[key]
+  if type_of(value) == "string" {
+    return value
+  }
+  return ""
+}
+
+fn __catalog_row_number(row, key) {
+  const value = row[key]
+  if type_of(value) == "int" || type_of(value) == "float" {
+    return to_float(value)
+  }
+  return nil
+}
+
+fn __catalog_pricing_value(row, key) {
+  const pricing = row?.pricing
+  if type_of(pricing) != "dict" {
+    return nil
+  }
+  return __catalog_row_number(pricing, key)
+}
+
+fn __catalog_row_matches(row, query) {
+  if query?.provider != nil && __catalog_row_string(row, "provider") != query.provider {
+    return false
+  }
+  if query?.tier != nil && __catalog_row_string(row, "tier") != query.tier {
+    return false
+  }
+  if query?.tool_parity != nil
+    && __catalog_row_string(row, "tool_mode_parity") != query.tool_parity {
+    return false
+  }
+  if query?.open_weight != nil && row?.open_weight != query.open_weight {
+    return false
+  }
+  if query?.installed_only ?? false {
+    if row?.installed != true {
+      return false
+    }
+  }
+  for strength in query?.strengths ?? [] {
+    const strengths = row?.strengths ?? []
+    if type_of(strengths) != "list" || !strengths.contains(strength) {
+      return false
+    }
+  }
+  return true
+}
+
+fn __catalog_numeric_sort_key(value, id) {
+  if value == nil {
+    return pair(pair(1, 0.0), id)
+  }
+  return pair(pair(0, value), id)
+}
+
+fn __catalog_sort_key(row, sort) {
+  const id = __catalog_row_string(row, "id")
+  if sort == "pricing.input" {
+    return __catalog_numeric_sort_key(__catalog_pricing_value(row, "input_per_mtok"), id)
+  }
+  if sort == "pricing.output" {
+    return __catalog_numeric_sort_key(__catalog_pricing_value(row, "output_per_mtok"), id)
+  }
+  if sort == "pricing.cache_read" {
+    return __catalog_numeric_sort_key(__catalog_pricing_value(row, "cache_read_per_mtok"), id)
+  }
+  if sort == "context_window" {
+    return __catalog_numeric_sort_key(__catalog_row_number(row, "context_window"), id)
+  }
+  if sort == "id" {
+    return pair(id, __catalog_row_string(row, "provider"))
+  }
+  return pair(__catalog_row_string(row, "provider"), id)
+}
+
+/**
+ * Add local-installation facts to the catalog without inventing a second
+ * catalog. Curated Ollama rows gain `installed` / `cataloged`; installed but
+ * uncurated ids remain visible as minimal local rows.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn catalog_with_installed_ollama_models(
+  catalog: list,
+  installed_ollama_models: list = [],
+) -> list {
+  let installed = {}
+  for raw_id in installed_ollama_models {
+    if type_of(raw_id) == "string" && trim(raw_id) != "" {
+      installed = installed + {[raw_id]: true}
+    }
+  }
+  let known_ollama = {}
+  let rows = []
+  for raw in catalog {
+    if type_of(raw) != "dict" {
+      continue
+    }
+    const id = __catalog_row_string(raw, "id")
+    const provider = __catalog_row_string(raw, "provider")
+    if id == "" || provider == "" {
+      continue
+    }
+    if provider == "ollama" {
+      known_ollama = known_ollama + {[id]: true}
+    }
+    rows = rows.appending(
+      raw + {installed: provider == "ollama" && (installed[id] ?? false), cataloged: true},
+    )
+  }
+  for raw_id in installed_ollama_models {
+    if type_of(raw_id) != "string" || trim(raw_id) == "" || (known_ollama[raw_id] ?? false) {
+      continue
+    }
+    rows = rows.appending(
+      {
+        id: raw_id,
+        provider: "ollama",
+        capabilities: ["local"],
+        strengths: [],
+        installed: true,
+        cataloged: false,
+      },
+    )
+  }
+  return rows
+}
+
+/**
+ * Query authoritative runtime catalog rows. The returned `models` entries are
+ * the original full rows, never a lossy display projection; renderers choose
+ * columns separately.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn model_catalog_query(catalog: list, query: ModelCatalogQuery = {}) -> dict {
+  // Callers receive a ModelCatalogQuery from normalize_model_catalog_query at
+  // the untyped boundary. Re-parsing it here would discard normalized fields
+  // such as strengths and tool_parity because they are no longer raw `where`
+  // expressions.
+  const normalized = query + {sort: query.sort ?? "provider"}
+  let models = []
+  for row in catalog {
+    if type_of(row) == "dict" && __catalog_row_matches(row, normalized) {
+      models = models.appending(row)
+    }
+  }
+  const sorted = models.sorted_by({ row -> __catalog_sort_key(row, normalized.sort ?? "provider") })
+  return {schemaVersion: MODEL_CATALOG_QUERY_SCHEMA_VERSION, query: normalized, models: sorted}
+}
+
+fn __catalog_column_value(row, column) {
+  if column == "pricing.input" {
+    return __catalog_pricing_value(row, "input_per_mtok") ?? ""
+  }
+  if column == "pricing.output" {
+    return __catalog_pricing_value(row, "output_per_mtok") ?? ""
+  }
+  if column == "pricing.cache_read" {
+    return __catalog_pricing_value(row, "cache_read_per_mtok") ?? ""
+  }
+  if column == "tool_support.parity" {
+    return __catalog_row_string(row, "tool_mode_parity")
+  }
+  if column == "tool_support.parity_notes" {
+    return __catalog_row_string(row, "tool_mode_parity_notes")
+  }
+  if column == "strengths" {
+    const strengths = row?.strengths
+    if type_of(strengths) == "list" {
+      return join(strengths, ",")
+    }
+    return ""
+  }
+  const value = row[column]
+  if value == nil {
+    return ""
+  }
+  return to_string(value)
+}
+
+fn __catalog_column_specs(columns) {
+  let specs = []
+  for column in columns {
+    const header = if column == "tool_support.parity" {
+      "tool parity"
+    } else if column == "tool_support.parity_notes" {
+      "parity notes"
+    } else {
+      column
+    }
+    specs = specs.appending({key: column, header: header, align: "left"})
+  }
+  return specs
+}
+
+/**
+ * Render selected catalog fields with the shared deterministic table renderer.
+ * Use `model_catalog_query` for the full machine-readable rows; this function
+ * intentionally performs only the human display projection.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn render_model_catalog_table(models: list, query: ModelCatalogQuery = {}) -> string {
+  const columns = query.columns ?? MODEL_CATALOG_DEFAULT_COLUMNS
+  let rows = []
+  for model in models {
+    if type_of(model) != "dict" {
+      continue
+    }
+    let row = {}
+    for column in columns {
+      row = row + {[column]: __catalog_column_value(model, column)}
+    }
+    rows = rows.appending(row)
+  }
+  return render_table(rows, {columns: __catalog_column_specs(columns), empty: "(no models match)"})
+}

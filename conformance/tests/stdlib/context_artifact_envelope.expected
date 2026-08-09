@@ -1,0 +1,39 @@
+2
+parser-conventions
+1
+true
+scan
+sha256:parser,sha256:other
+true
+true
+true
+true
+parser-conventions
+2
+1
+true
+parser-conventions
+## Context Artifacts
+### Parser conventions
+`kind=convention_fact` `path=crates/harn-parser/src/lib.rs` `language=rust` `freshness=fresh` `confidence=0.91` `source=burin:typed-evidence` `sensitivity=internal` `hash=sha256:parser`
+
+Parser diagnostics should preserve source spans.
+<context_artifacts>
+<context_artifact id="parser-conventions" kind="convention_fact">
+<title>Parser conventions</title>
+<path>crates/harn-parser/src/lib.rs</path>
+<language>rust</language>
+<freshness>fresh</freshness>
+<confidence>0.91</confidence>
+<source>burin:typed-evidence</source>
+<source_hash>sha256:parser</source_hash>
+<sensitivity>internal</sensitivity>
+<body>
+Parser diagnostics should preserve source spans.
+</body>
+</context_artifact>
+</context_artifacts>
+[kind=convention_fact path=crates/harn-parser/src/lib.rs language=rust freshness=fresh confidence=0.91 source=burin:typed-evidence sensitivity=internal hash=sha256:parser] Parser diagnostics should preserve source spans.
+[kind=context_digest path=.burin/context-digests/parser.md language=markdown freshness=unknown confidence=0.75 source=.burin/context-digests sensitivity=internal hash=sha256:digest] # Parser digest Use Pratt parsing for expressions.
+true
+true

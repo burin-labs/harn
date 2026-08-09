@@ -1,0 +1,40 @@
+/**
+ * Or-patterns in match arms: `p1 | p2 | ... -> body` shares one arm
+ * body across multiple alternative values. Covers literal unions,
+ * mixed int/string arms on an int/string-tagged value, and guarded
+ * or-pattern arms.
+ */
+pipeline default(harness: Harness) {
+  fn classify(n: int) -> string {
+    return match n {
+      0 | 1 | 2 -> { "small" }
+      3 | 4 | 5 -> { "medium" }
+      _ -> { "large" }
+    }
+  }
+  harness.stdio.println(classify(0))
+  harness.stdio.println(classify(2))
+  harness.stdio.println(classify(4))
+  harness.stdio.println(classify(100))
+  fn verdict(v: "pass" | "fail" | "unclear" | "skip") -> string {
+    return match v {
+      "pass" -> { "ok" }
+      "fail" | "unclear" | "skip" -> { "not ok" }
+    }
+  }
+  harness.stdio.println(verdict("pass"))
+  harness.stdio.println(verdict("fail"))
+  harness.stdio.println(verdict("unclear"))
+  harness.stdio.println(verdict("skip"))
+  // Or-pattern with a guard applies the guard once per match.
+  fn describe(n: int) -> string {
+    return match n {
+      1 | 2 | 3 if n > 2 -> { "three" }
+      1 | 2 | 3 -> { "one or two" }
+      _ -> { "other" }
+    }
+  }
+  harness.stdio.println(describe(1))
+  harness.stdio.println(describe(3))
+  harness.stdio.println(describe(10))
+}

@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/terminal_session/resize.request.json",
+  "title": "terminal_session.resize request",
+  "type": "object",
+  "properties": {
+    "session_id": { "type": "string", "minLength": 1 },
+    "rows": { "type": "integer", "minimum": 1, "maximum": 512 },
+    "columns": { "type": "integer", "minimum": 1, "maximum": 512 }
+  },
+  "required": ["session_id", "rows", "columns"],
+  "additionalProperties": false
+}

@@ -1,0 +1,18 @@
+{
+  "data": [
+    {
+      "id": "claude-haiku-4-5-20251001",
+      "provider": "anthropic",
+      "name": "Claude Haiku 4.5",
+      "context_length": 200000,
+      "pricing": {"prompt": "0.0000015", "completion": "0.0000075"}
+    },
+    {
+      "id": "x-ai/grok-4-fast",
+      "provider": "x-ai",
+      "name": "Grok 4 Fast",
+      "context_length": 131072,
+      "pricing": {"prompt": "0.0000002", "completion": "0.0000008"}
+    }
+  ]
+}

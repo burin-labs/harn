@@ -1,0 +1,220 @@
+import { agent_loop } from "std/agent/loop"
+import { llm_text, with_llm_script } from "std/testing"
+
+fn echo_tools() {
+  const registry = tool_registry()
+  return tool_define(
+    registry,
+    "echo",
+    "Echo a message",
+    {
+      parameters: {msg: {type: "string"}},
+      handler: { args -> "echoed: " + to_string(args?.msg ?? "") },
+    },
+  )
+}
+
+fn mutation_status_code(status) -> int {
+  if status == "applied" {
+    return 1
+  }
+  if status == "not_applied" {
+    return 2
+  }
+  return 0
+}
+
+fn observe_lifecycle(
+  agent: HarnessAgent,
+  runtime: HarnessRuntime,
+  session_id: string,
+  expected_msg: string,
+) -> dict {
+  const pending = runtime.atomic(0)
+  const in_progress = runtime.atomic(0)
+  const completed = runtime.atomic(0)
+  const failed = runtime.atomic(0)
+  const saw_error_category = runtime.atomic(0)
+  const saw_args = runtime.atomic(0)
+  const mutation_status = runtime.atomic(0)
+  agent.subscribe(
+    session_id,
+    { ev ->
+      if ev?.type == "tool_call" && ev?.tool_name == "echo" && ev?.status == "pending" {
+        const _ = runtime.atomic_add(pending, 1)
+        if ev?.raw_input?.msg == expected_msg {
+          const _ = runtime.atomic_set(saw_args, 1)
+        }
+      }
+      if ev?.type == "tool_call_update" && ev?.tool_name == "echo" && ev?.status == "in_progress" {
+        const _ = runtime.atomic_add(in_progress, 1)
+        assert(ev?.mutation_status == "unknown", "nonterminal mutation status is unknown")
+      }
+      if ev?.type == "tool_call_update" && ev?.tool_name == "echo" && ev?.status == "completed" {
+        const _ = runtime.atomic_add(completed, 1)
+        const _ = runtime.atomic_set(mutation_status, mutation_status_code(ev?.mutation_status))
+      }
+      if ev?.type == "tool_call_update" && ev?.tool_name == "echo" && ev?.status == "failed" {
+        const _ = runtime.atomic_add(failed, 1)
+        const _ = runtime.atomic_set(mutation_status, mutation_status_code(ev?.mutation_status))
+        if ev?.error_category == "tool_error" {
+          const _ = runtime.atomic_set(saw_error_category, 1)
+        }
+      }
+    },
+  )
+  return {
+    pending: pending,
+    in_progress: in_progress,
+    completed: completed,
+    failed: failed,
+    saw_error_category: saw_error_category,
+    saw_args: saw_args,
+    mutation_status: mutation_status,
+  }
+}
+
+fn assert_counts(runtime: HarnessRuntime, label: string, counters: dict) {
+  assert(runtime.atomic_get(counters.pending) == 1, label + " pending event")
+  assert(runtime.atomic_get(counters.in_progress) == 1, label + " in-progress event")
+  assert(runtime.atomic_get(counters.completed) == 1, label + " completed event")
+  assert(runtime.atomic_get(counters.saw_args) == 1, label + " raw input")
+}
+
+pipeline test(harness: Harness, task) {
+  const text_session = "tool-lifecycle-text-" + harness.random.uuid()
+  const text_events = observe_lifecycle(harness.agent, harness.runtime, text_session, "text")
+  with_llm_script(
+    harness.llm,
+    [llm_text("<tool_call>\necho({ msg: \"text\" })\n</tool_call>"), llm_text("##DONE##")],
+    { ->
+      const result = agent_loop(
+        harness,
+        "Call echo once.",
+        nil,
+        {
+          provider: "mock",
+          session_id: text_session,
+          tools: echo_tools(),
+          tool_format: "text",
+          loop_until_done: true,
+          done_sentinel: "##DONE##",
+          max_iterations: 3,
+        },
+      )
+      assert(result.status == "done", "text loop completes")
+    },
+  )
+  assert_counts(harness.runtime, "text tool", text_events)
+  assert(
+    harness.runtime.atomic_get(text_events.mutation_status) == 0,
+    "opaque result mutation status",
+  )
+  const middleware_session = "tool-lifecycle-middleware-" + harness.random.uuid()
+  const middleware_events = observe_lifecycle(
+    harness.agent,
+    harness.runtime,
+    middleware_session,
+    "short",
+  )
+  with_llm_script(
+    harness.llm,
+    [
+      {tool_calls: [{id: "short-1", name: "echo", arguments: {msg: "short"}}]},
+      llm_text("##DONE##"),
+    ],
+    { ->
+      const short_circuit = { envelope, _next ->
+        return {
+          ok: true,
+          status: "ok",
+          tool_name: envelope.tool_name,
+          tool_call_id: envelope.call_id,
+          arguments: envelope.tool_args,
+          result: {short_circuited: true},
+          rendered_result: "short-circuited",
+          observation: "[result of echo]\nshort-circuited\n[end of echo result]\n",
+          executor: "harn",
+          mutation_status: "applied",
+        }
+      }
+      const result = agent_loop(
+        harness,
+        "Call echo once.",
+        nil,
+        {
+          provider: "mock",
+          session_id: middleware_session,
+          tools: echo_tools(),
+          tool_format: "native",
+          loop_until_done: true,
+          done_sentinel: "##DONE##",
+          max_iterations: 3,
+          tool_caller: short_circuit,
+        },
+      )
+      assert(result.status == "done", "middleware loop completes")
+    },
+  )
+  assert_counts(harness.runtime, "middleware short-circuit", middleware_events)
+  assert(
+    harness.runtime.atomic_get(middleware_events.mutation_status) == 1,
+    "structured applied outcome",
+  )
+  const failed_session = "tool-lifecycle-failed-" + harness.random.uuid()
+  const failed_events = observe_lifecycle(harness.agent, harness.runtime, failed_session, "failed")
+  with_llm_script(
+    harness.llm,
+    [
+      {tool_calls: [{id: "failed-1", name: "echo", arguments: {msg: "failed"}}]},
+      llm_text("##DONE##"),
+    ],
+    { ->
+      const failed_caller = { envelope, _next ->
+        return {
+          ok: false,
+          status: "error",
+          tool_name: envelope.tool_name,
+          tool_call_id: envelope.call_id,
+          arguments: envelope.tool_args,
+          error: "failed on purpose",
+          error_category: "generic",
+          observation: "[result of echo]\nerror: failed on purpose\n[end of echo result]\n",
+          executor: "harn",
+          mutation_status: "not_applied",
+        }
+      }
+      const result = agent_loop(
+        harness,
+        "Call echo once.",
+        nil,
+        {
+          provider: "mock",
+          session_id: failed_session,
+          tools: echo_tools(),
+          tool_format: "native",
+          loop_until_done: true,
+          done_sentinel: "##DONE##",
+          max_iterations: 3,
+          tool_caller: failed_caller,
+        },
+      )
+      assert(result.status == "done", "failed middleware loop completes")
+    },
+  )
+  assert(harness.runtime.atomic_get(failed_events.pending) == 1, "failed tool pending event")
+  assert(
+    harness.runtime.atomic_get(failed_events.in_progress) == 1,
+    "failed tool in-progress event",
+  )
+  assert(harness.runtime.atomic_get(failed_events.failed) == 1, "failed tool terminal event")
+  assert(harness.runtime.atomic_get(failed_events.saw_args) == 1, "failed tool raw input")
+  assert(
+    harness.runtime.atomic_get(failed_events.saw_error_category) == 1,
+    "failed tool canonical error category",
+  )
+  assert(
+    harness.runtime.atomic_get(failed_events.mutation_status) == 2,
+    "structured rejected outcome",
+  )
+}

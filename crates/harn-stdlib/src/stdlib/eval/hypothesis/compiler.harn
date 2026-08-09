@@ -1,0 +1,1406 @@
+/** Deterministic hypothesis classifier, validator, and experiment lowerer. */
+import { check_versioned } from "std/artifacts/typed"
+import {
+  ExperimentGuardrail,
+  ExperimentManifest,
+  ExperimentMetric,
+  ExperimentValidationContext,
+  register_experiment,
+  validate_experiment_manifest,
+} from "std/eval/experiment/contracts"
+import {
+  ClaimStrength,
+  EvidenceMode,
+  ExperimentAdapterCatalog,
+  ExperimentCapabilityManifest,
+  ExperimentCompileContext,
+  ExperimentCompileDiagnostic,
+  ExperimentCompileFailure,
+  ExperimentCompileReceipt,
+  ExperimentDesign,
+  ExperimentIntent,
+  ExperimentIntentRisk,
+  ExperimentLane,
+  ExperimentResourceBudget,
+  HypothesisCitation,
+  HypothesisPlan,
+  InterventionAdapter,
+  ObserveOnlyHypothesisPlan,
+  OutcomeAdapter,
+  PlanProvenance,
+  PopulationAdapter,
+  RegisteredExperimentPlan,
+  RequestedExperimentLane,
+  experiment_intent_contract,
+} from "std/eval/hypothesis/contracts"
+import { resolve_evidence_policy } from "std/eval/hypothesis/policies"
+
+type ResolvedIntentAdapters = {
+  baseline: InterventionAdapter?,
+  candidate: InterventionAdapter?,
+  population: PopulationAdapter?,
+  primary: OutcomeAdapter?,
+  guardrails: list<OutcomeAdapter>,
+  diagnostics: list<ExperimentCompileDiagnostic>,
+}
+
+fn __fingerprint(value: unknown) -> string {
+  return "sha256:" + sha256(json_stringify(value))
+}
+
+fn __diagnostic(
+  code: string,
+  path: string,
+  message: string,
+  severity: "error" | "warning" = "error",
+) -> ExperimentCompileDiagnostic {
+  return {code: code, path: path, message: message, severity: severity}
+}
+
+fn __failure(
+  kind: "invalid_intent" | "unsupported_design" | "unsafe_plan" | "invalid_lowering",
+  diagnostics: list<ExperimentCompileDiagnostic>,
+) -> ExperimentCompileFailure {
+  return {schema: "harn.experiment.compile_failure.v1", kind: kind, diagnostics: diagnostics}
+}
+
+fn __receipt_failure(
+  intent_fingerprint: string,
+  catalog_fingerprint: string,
+  failure: ExperimentCompileFailure,
+) -> ExperimentCompileReceipt {
+  return {
+    schema: "harn.experiment.compile_receipt.v1",
+    ok: false,
+    intent_fingerprint: intent_fingerprint,
+    catalog_fingerprint: catalog_fingerprint,
+    failure: failure,
+  }
+}
+
+fn __catalog_normalized(catalog: ExperimentAdapterCatalog) -> ExperimentAdapterCatalog {
+  return catalog
+    + {
+    interventions: catalog.interventions.sorted_by(
+      { adapter -> adapter.id + "\\u0000" + adapter.variant_id },
+    ),
+    outcomes: catalog.outcomes.sorted_by({ outcome -> outcome.id }),
+    populations: catalog.populations.sorted_by({ population -> population.id }),
+  }
+}
+
+fn __find_intervention(
+  catalog: ExperimentAdapterCatalog,
+  id: string,
+  variant_id: string,
+) -> InterventionAdapter? {
+  for adapter in catalog.interventions {
+    if adapter.id == id && adapter.variant_id == variant_id {
+      return adapter
+    }
+  }
+  return nil
+}
+
+fn __find_outcome(catalog: ExperimentAdapterCatalog, id: string) -> OutcomeAdapter? {
+  for outcome in catalog.outcomes {
+    if outcome.id == id {
+      return outcome
+    }
+  }
+  return nil
+}
+
+fn __find_population(catalog: ExperimentAdapterCatalog, id: string) -> PopulationAdapter? {
+  for population in catalog.populations {
+    if population.id == id {
+      return population
+    }
+  }
+  return nil
+}
+
+fn __sorted_union(left: list<string>, right: list<string>) -> list<string> {
+  let seen: dict<string, bool> = {}
+  let values: list<string> = []
+  for value in (left ?? []) + (right ?? []) {
+    if !(seen[value] ?? false) {
+      seen = seen + {[value]: true}
+      values = values + [value]
+    }
+  }
+  return values.sorted_by({ value -> value })
+}
+
+fn __merge_named_capabilities(
+  left: dict<string, list<string>>,
+  right: dict<string, list<string>>,
+) -> dict<string, list<string>> {
+  let merged: dict<string, list<string>> = {}
+  for entry in left {
+    merged = merged + {[entry.key]: __sorted_union(entry.value, right[entry.key] ?? [])}
+  }
+  for entry in right {
+    if merged[entry.key] == nil {
+      merged = merged + {[entry.key]: __sorted_union([], entry.value)}
+    }
+  }
+  return merged
+}
+
+fn __side_effect_rank(value: string) -> int {
+  if value == "read_only" {
+    return 1
+  }
+  if value == "workspace_write" {
+    return 2
+  }
+  if value == "process_exec" {
+    return 3
+  }
+  if value == "network" {
+    return 4
+  }
+  if value == "desktop_control" {
+    return 5
+  }
+  return 0
+}
+
+fn __max_side_effect(left: string, right: string) -> string {
+  if __side_effect_rank(left) >= __side_effect_rank(right) {
+    return left
+  }
+  return right
+}
+
+fn __sandbox_rank(value: string) -> int {
+  if value == "os_hardened" {
+    return 2
+  }
+  if value == "worktree" {
+    return 1
+  }
+  return 0
+}
+
+fn __strictest_sandbox(left: string, right: string) -> string {
+  if __sandbox_rank(left) >= __sandbox_rank(right) {
+    return left
+  }
+  return right
+}
+
+fn __merge_capabilities(
+  baseline: ExperimentCapabilityManifest,
+  candidate: ExperimentCapabilityManifest,
+) -> ExperimentCapabilityManifest {
+  const rollback = if baseline.mutation.rollback_adapter_id
+    == candidate.mutation.rollback_adapter_id {
+    baseline.mutation.rollback_adapter_id
+  } else {
+    nil
+  }
+  return {
+    tools: __sorted_union(baseline.tools, candidate.tools),
+    capabilities: __merge_named_capabilities(baseline.capabilities, candidate.capabilities),
+    workspace_roots: __sorted_union(baseline.workspace_roots, candidate.workspace_roots),
+    read_only_roots: __sorted_union(baseline.read_only_roots, candidate.read_only_roots),
+    side_effect_level: __max_side_effect(baseline.side_effect_level, candidate.side_effect_level),
+    sandbox_profile: __strictest_sandbox(baseline.sandbox_profile, candidate.sandbox_profile),
+    process: {
+      commands: __sorted_union(baseline.process.commands, candidate.process.commands),
+      read_roots: __sorted_union(baseline.process.read_roots, candidate.process.read_roots),
+      write_roots: __sorted_union(baseline.process.write_roots, candidate.process.write_roots),
+    },
+    network: {
+      domains: __sorted_union(baseline.network.domains, candidate.network.domains),
+      allow_private: baseline.network.allow_private || candidate.network.allow_private,
+    },
+    connectors: __sorted_union(baseline.connectors, candidate.connectors),
+    database_scopes: __sorted_union(baseline.database_scopes, candidate.database_scopes),
+    provider_ids: __sorted_union(baseline.provider_ids, candidate.provider_ids),
+    secret_refs: __sorted_union(baseline.secret_refs, candidate.secret_refs),
+    mutation: {
+      reversible: baseline.mutation.reversible && candidate.mutation.reversible,
+      rollback_adapter_id: rollback,
+      requires_approval: baseline.mutation.requires_approval
+        || candidate.mutation.requires_approval,
+    },
+  }
+}
+
+fn __budget_diagnostics(
+  request: ExperimentResourceBudget,
+  ceiling: ExperimentResourceBudget,
+) -> list<ExperimentCompileDiagnostic> {
+  let diagnostics: list<ExperimentCompileDiagnostic> = []
+  if request.min_trials_per_case < 1
+    || request.max_trials_per_case < request.min_trials_per_case {
+    diagnostics = diagnostics
+      + [
+      __diagnostic(
+        "experiment.invalid_trial_budget",
+        "budget_request",
+        "trial budgets must be positive and min_trials_per_case must not exceed max_trials_per_case",
+      ),
+    ]
+  }
+  if request.max_trials_per_case > ceiling.max_trials_per_case
+    || request.max_wall_clock_ms
+    > ceiling
+    .max_wall_clock_ms
+    || request.max_compute_ms > ceiling.max_compute_ms
+    || request.max_tokens > ceiling.max_tokens
+    || request.max_api_calls > ceiling.max_api_calls
+    || request.max_spend_usd > ceiling.max_spend_usd
+    || request.max_concurrency
+    > ceiling.max_concurrency {
+    diagnostics = diagnostics
+      + [
+      __diagnostic(
+        "experiment.budget_ceiling",
+        "budget_request",
+        "requested resources exceed the host ceiling",
+      ),
+    ]
+  }
+  if request.max_spend_usd <= 0.0
+    || request.max_wall_clock_ms <= 0
+    || request.max_compute_ms <= 0
+    || request.max_tokens < 0
+    || request.max_api_calls < 0
+    || request.max_concurrency < 1 {
+    diagnostics = diagnostics
+      + [
+      __diagnostic(
+        "experiment.invalid_resource_budget",
+        "budget_request",
+        "resource ceilings must be positive (token and API ceilings may be zero)",
+      ),
+    ]
+  }
+  return diagnostics
+}
+
+fn __missing_values(required: list<string>, allowed: list<string>) -> list<string> {
+  let missing: list<string> = []
+  for value in required {
+    if !allowed.contains(value) {
+      missing = missing + [value]
+    }
+  }
+  return missing
+}
+
+fn __capability_ceiling_diagnostics(
+  required: ExperimentCapabilityManifest,
+  ceiling: ExperimentCapabilityManifest,
+) -> list<ExperimentCompileDiagnostic> {
+  let missing = __missing_values(required.tools, ceiling.tools)
+  missing = missing + __missing_values(required.workspace_roots, ceiling.workspace_roots)
+  missing = missing + __missing_values(required.read_only_roots, ceiling.read_only_roots)
+  missing = missing + __missing_values(required.process.commands, ceiling.process.commands)
+  missing = missing + __missing_values(required.process.read_roots, ceiling.process.read_roots)
+  missing = missing + __missing_values(required.process.write_roots, ceiling.process.write_roots)
+  missing = missing + __missing_values(required.network.domains, ceiling.network.domains)
+  missing = missing + __missing_values(required.connectors, ceiling.connectors)
+  missing = missing + __missing_values(required.database_scopes, ceiling.database_scopes)
+  missing = missing + __missing_values(required.provider_ids, ceiling.provider_ids)
+  missing = missing + __missing_values(required.secret_refs, ceiling.secret_refs)
+  for entry in required.capabilities {
+    missing = missing + __missing_values(entry.value, ceiling.capabilities[entry.key] ?? [])
+  }
+  if __side_effect_rank(required.side_effect_level)
+    > __side_effect_rank(ceiling.side_effect_level)
+    || __sandbox_rank(required.sandbox_profile)
+    > __sandbox_rank(
+    ceiling.sandbox_profile,
+  )
+    || (required.network.allow_private && !ceiling.network.allow_private)
+    || (required.mutation
+    .requires_approval
+    && !ceiling.mutation.requires_approval)
+    || (!required.mutation.reversible
+    && ceiling.mutation.reversible)
+    || (required.mutation.rollback_adapter_id != nil
+    && required.mutation
+    .rollback_adapter_id
+    != ceiling.mutation.rollback_adapter_id)
+    || len(missing) > 0 {
+    return [
+      __diagnostic(
+        "experiment.capability_ceiling",
+        "capability_ceiling",
+        "required capabilities cannot be enforced by the registered host ceiling",
+      ),
+    ]
+  }
+  return []
+}
+
+fn __catalog_diagnostics(catalog: ExperimentAdapterCatalog) -> list<ExperimentCompileDiagnostic> {
+  let diagnostics: list<ExperimentCompileDiagnostic> = []
+  let seen_interventions: dict<string, bool> = {}
+  for adapter in catalog.interventions {
+    const key = adapter.id + "\\u0000" + adapter.variant_id
+    if seen_interventions[key] ?? false {
+      diagnostics = diagnostics
+        + [
+        __diagnostic("experiment.duplicate_intervention", "catalog.interventions", key),
+      ]
+    }
+    seen_interventions = seen_interventions + {[key]: true}
+    if adapter.reversible != adapter.capabilities.mutation.reversible {
+      diagnostics = diagnostics
+        + [
+        __diagnostic(
+          "experiment.reversibility_mismatch",
+          "catalog.interventions",
+          "adapter and capability mutation reversibility must agree for '" + adapter.id + "'",
+        ),
+      ]
+    }
+  }
+  let seen_outcomes: dict<string, bool> = {}
+  for outcome in catalog.outcomes {
+    if seen_outcomes[outcome.id] ?? false {
+      diagnostics = diagnostics
+        + [
+        __diagnostic("experiment.duplicate_outcome", "catalog.outcomes", outcome.id),
+      ]
+    }
+    seen_outcomes = seen_outcomes + {[outcome.id]: true}
+  }
+  let seen_populations: dict<string, bool> = {}
+  for population in catalog.populations {
+    if seen_populations[population.id] ?? false {
+      diagnostics = diagnostics
+        + [
+        __diagnostic("experiment.duplicate_population", "catalog.populations", population.id),
+      ]
+    }
+    seen_populations = seen_populations + {[population.id]: true}
+  }
+  return diagnostics
+}
+
+fn __citation_diagnostics(
+  intent: ExperimentIntent,
+  trusted: list<HypothesisCitation>,
+) -> list<ExperimentCompileDiagnostic> {
+  let allowed: dict<string, string> = {}
+  for citation in trusted {
+    if citation.id != "" {
+      allowed = allowed + {[citation.id]: __fingerprint(citation)}
+    }
+  }
+  let diagnostics: list<ExperimentCompileDiagnostic> = []
+  for citation in intent.citations {
+    if allowed[citation.id] != __fingerprint(citation) || !starts_with(citation.url, "https://") {
+      diagnostics = diagnostics
+        + [
+        __diagnostic(
+          "experiment.untrusted_citation",
+          "citations",
+          "citations must exactly match a host-supplied HTTPS research record",
+        ),
+      ]
+    }
+  }
+  return diagnostics
+}
+
+fn __common_lane(
+  requested: RequestedExperimentLane,
+  baseline: InterventionAdapter,
+  candidate: InterventionAdapter,
+) -> ExperimentLane? {
+  if requested != "auto" {
+    const resolved = __observe_lane(requested)
+    if baseline.supported_lanes.contains(resolved)
+      && candidate.supported_lanes.contains(resolved) {
+      return resolved
+    }
+    return nil
+  }
+  const preferred: list<ExperimentLane> = [
+    "randomized_offline",
+    "replay_simulation",
+    "deterministic_benchmark",
+    "sequential_agent",
+    "randomized_online",
+  ]
+  for lane in preferred {
+    if baseline.supported_lanes.contains(lane) && candidate.supported_lanes.contains(lane) {
+      return lane
+    }
+  }
+  return nil
+}
+
+fn __observe_lane(requested: RequestedExperimentLane) -> ExperimentLane {
+  if requested == "randomized_online" {
+    return "randomized_online"
+  }
+  if requested == "randomized_offline" {
+    return "randomized_offline"
+  }
+  if requested == "replay_simulation" {
+    return "replay_simulation"
+  }
+  if requested == "deterministic_benchmark" {
+    return "deterministic_benchmark"
+  }
+  if requested == "human_study" {
+    return "human_study"
+  }
+  if requested == "sequential_agent" {
+    return "sequential_agent"
+  }
+  if requested == "observational" {
+    return "observational"
+  }
+  if requested == "exploratory_instrumentation" {
+    return "exploratory_instrumentation"
+  }
+  if requested == "non_experimental_research" {
+    return "non_experimental_research"
+  }
+  return "non_experimental_research"
+}
+
+fn __lane_claim(lane: ExperimentLane, evidence_mode: EvidenceMode) -> ClaimStrength {
+  if lane == "non_experimental_research" {
+    return "none"
+  }
+  if lane == "exploratory_instrumentation" {
+    return "descriptive"
+  }
+  if lane == "observational" {
+    return "associational"
+  }
+  if evidence_mode == "observational" {
+    return "descriptive"
+  }
+  if evidence_mode == "scout" {
+    return if lane == "replay_simulation" {
+      "bounded_simulation"
+    } else {
+      "descriptive"
+    }
+  }
+  if lane == "randomized_online" || lane == "randomized_offline" || lane == "sequential_agent" {
+    return "randomized_causal"
+  }
+  if lane == "replay_simulation" {
+    return "bounded_simulation"
+  }
+  if lane == "deterministic_benchmark" {
+    return "descriptive"
+  }
+  return "none"
+}
+
+fn __intent_blank_diagnostics(intent: ExperimentIntent) -> list<ExperimentCompileDiagnostic> {
+  let diagnostics: list<ExperimentCompileDiagnostic> = []
+  for field in [
+    {path: "question", value: intent.question},
+    {path: "hypothesis", value: intent.hypothesis},
+    {path: "null_hypothesis", value: intent.null_hypothesis},
+    {path: "decision", value: intent.decision},
+    {path: "domain", value: intent.domain},
+  ] {
+    if trim(field.value) == "" {
+      diagnostics = diagnostics
+        + [
+        __diagnostic("experiment.required", field.path, field.path + " must be non-empty"),
+      ]
+    }
+  }
+  return diagnostics
+}
+
+fn __approval_required(
+  intent: ExperimentIntent,
+  risk_floor: ExperimentIntentRisk,
+  capabilities: ExperimentCapabilityManifest,
+  baseline: InterventionAdapter,
+  candidate: InterventionAdapter,
+) -> bool {
+  return risk_floor.touches_people
+    || risk_floor.touches_customer_data
+    || risk_floor.touches_money
+    || risk_floor.touches_production
+    || risk_floor.irreversible
+    || intent.risk.touches_people
+    || intent.risk.touches_customer_data
+    || intent.risk.touches_money
+    || intent.risk.touches_production
+    || intent.risk.irreversible
+    || capabilities.mutation.requires_approval
+    || !capabilities.mutation.reversible
+    || !baseline.reversible
+    || !candidate.reversible
+}
+
+fn __instrumentation_questions(intent: ExperimentIntent) -> list<string> {
+  let questions: list<string> = []
+  if intent.intervention == nil {
+    questions = questions + ["What executable intervention is available?"]
+  }
+  if intent.comparator == nil {
+    questions = questions + ["What meaningful comparator is available?"]
+  }
+  if intent.assignment_unit == nil {
+    questions = questions + ["What is the unit of assignment or replication?"]
+  }
+  if intent.population_id == nil {
+    questions = questions + ["Which population or fixture set is in scope?"]
+  }
+  if len(intent.outcome_ids) == 0 {
+    questions = questions + ["Which observable bounded outcome informs the decision?"]
+  }
+  if len(questions) == 0 {
+    questions = questions
+      + [
+      "Which assumption or source of confounding must be resolved before a causal experiment is valid?",
+    ]
+  }
+  return questions
+}
+
+fn __arm_relation_diagnostics(
+  intent: ExperimentIntent,
+  baseline: InterventionAdapter?,
+  candidate: InterventionAdapter?,
+) -> list<ExperimentCompileDiagnostic> {
+  let diagnostics: list<ExperimentCompileDiagnostic> = []
+  if baseline != nil && baseline.domain != intent.domain {
+    diagnostics = diagnostics
+      + [
+      __diagnostic(
+        "experiment.domain_mismatch",
+        "comparator",
+        "comparator domain differs from intent",
+      ),
+    ]
+  }
+  if candidate != nil && candidate.domain != intent.domain {
+    diagnostics = diagnostics
+      + [
+      __diagnostic(
+        "experiment.domain_mismatch",
+        "intervention",
+        "intervention domain differs from intent",
+      ),
+    ]
+  }
+  if baseline != nil && candidate != nil
+    && baseline.id == candidate.id
+    && baseline.variant_id == candidate.variant_id {
+    diagnostics = diagnostics
+      + [
+      __diagnostic(
+        "experiment.identical_arms",
+        "comparator",
+        "intervention and comparator must differ",
+      ),
+    ]
+  }
+  return diagnostics
+}
+
+fn __population_relation_diagnostics(
+  intent: ExperimentIntent,
+  population: PopulationAdapter?,
+) -> list<ExperimentCompileDiagnostic> {
+  let diagnostics: list<ExperimentCompileDiagnostic> = []
+  if population != nil && population.domain != intent.domain {
+    diagnostics = diagnostics
+      + [
+      __diagnostic(
+        "experiment.domain_mismatch",
+        "population_id",
+        "population domain differs from intent",
+      ),
+    ]
+  }
+  if population != nil && intent.assignment_unit != nil
+    && population.assignment_unit
+    != intent
+    .assignment_unit {
+    diagnostics = diagnostics
+      + [
+      __diagnostic(
+        "experiment.assignment_unit_mismatch",
+        "assignment_unit",
+        "intent assignment unit differs from the registered population",
+      ),
+    ]
+  }
+  return diagnostics
+}
+
+fn __resolve_intent_adapters(
+  intent: ExperimentIntent,
+  catalog: ExperimentAdapterCatalog,
+) -> ResolvedIntentAdapters {
+  let diagnostics: list<ExperimentCompileDiagnostic> = []
+  let baseline: InterventionAdapter? = nil
+  let candidate: InterventionAdapter? = nil
+  if intent.comparator != nil {
+    baseline = __find_intervention(
+      catalog,
+      intent.comparator.adapter_id,
+      intent.comparator.variant_id,
+    )
+    if baseline == nil {
+      diagnostics = diagnostics
+        + [
+        __diagnostic("experiment.unknown_comparator", "comparator", "comparator is not registered"),
+      ]
+    }
+  }
+  if intent.intervention != nil {
+    candidate = __find_intervention(
+      catalog,
+      intent.intervention.adapter_id,
+      intent.intervention.variant_id,
+    )
+    if candidate == nil {
+      diagnostics = diagnostics
+        + [
+        __diagnostic(
+          "experiment.unknown_intervention",
+          "intervention",
+          "intervention is not registered",
+        ),
+      ]
+    }
+  }
+  diagnostics = diagnostics + __arm_relation_diagnostics(intent, baseline, candidate)
+  let population: PopulationAdapter? = nil
+  if intent.population_id != nil {
+    population = __find_population(catalog, intent.population_id)
+    if population == nil {
+      diagnostics = diagnostics
+        + [
+        __diagnostic(
+          "experiment.unknown_population",
+          "population_id",
+          "population is not registered",
+        ),
+      ]
+    }
+  }
+  diagnostics = diagnostics + __population_relation_diagnostics(intent, population)
+  let primary: OutcomeAdapter? = nil
+  let guardrails: list<OutcomeAdapter> = []
+  let seen_outcome_ids: dict<string, bool> = {}
+  for outcome_id in intent.outcome_ids {
+    if seen_outcome_ids[outcome_id] ?? false {
+      diagnostics = diagnostics
+        + [
+        __diagnostic("experiment.duplicate_outcome_ref", "outcome_ids", outcome_id),
+      ]
+    }
+    seen_outcome_ids = seen_outcome_ids + {[outcome_id]: true}
+    const outcome = __find_outcome(catalog, outcome_id)
+    if outcome == nil {
+      diagnostics = diagnostics
+        + [
+        __diagnostic(
+          "experiment.unknown_outcome",
+          "outcome_ids",
+          "outcome '" + outcome_id + "' is not registered",
+        ),
+      ]
+    } else if !outcome.observable {
+      diagnostics = diagnostics
+        + [
+        __diagnostic(
+          "experiment.unobservable_outcome",
+          "outcome_ids",
+          "outcome '" + outcome_id + "' is not observable",
+        ),
+      ]
+    } else if outcome.domain != intent.domain {
+      diagnostics = diagnostics
+        + [
+        __diagnostic(
+          "experiment.domain_mismatch",
+          "outcome_ids",
+          "outcome domain differs from intent",
+        ),
+      ]
+    } else if outcome.guardrail {
+      if outcome.alarm == nil {
+        diagnostics = diagnostics
+          + [
+          __diagnostic(
+            "experiment.guardrail_alarm",
+            "outcome_ids",
+            "guardrail '" + outcome_id + "' has no alarm",
+          ),
+        ]
+      }
+      guardrails = guardrails + [outcome]
+    } else if primary == nil {
+      primary = outcome
+    } else {
+      diagnostics = diagnostics
+        + [
+        __diagnostic(
+          "experiment.multiple_primary",
+          "outcome_ids",
+          "exactly one non-guardrail outcome is allowed",
+        ),
+      ]
+    }
+  }
+  return {
+    baseline: baseline,
+    candidate: candidate,
+    population: population,
+    primary: primary,
+    guardrails: guardrails,
+    diagnostics: diagnostics,
+  }
+}
+
+fn __must_observe_only(intent: ExperimentIntent, resolved: ResolvedIntentAdapters) -> bool {
+  return intent.requested_evidence == "observational"
+    || intent.requested_lane == "observational"
+    || intent.requested_lane
+    == "exploratory_instrumentation"
+    || intent.requested_lane == "non_experimental_research"
+    || resolved.baseline == nil
+    || resolved.candidate == nil
+    || resolved.population == nil
+    || resolved.primary == nil
+}
+
+fn __observe_only_lane(intent: ExperimentIntent) -> ExperimentLane {
+  if intent.requested_lane == "observational" {
+    return "observational"
+  }
+  if intent.requested_lane == "non_experimental_research" {
+    return "non_experimental_research"
+  }
+  return "exploratory_instrumentation"
+}
+
+fn __unsupported_randomized_design(
+  baseline: InterventionAdapter,
+  candidate: InterventionAdapter,
+  population: PopulationAdapter,
+) -> bool {
+  return !baseline.executable
+    || !candidate.executable
+    || !baseline.randomizable
+    || !candidate.randomizable
+    || !population.independent_enough
+    || baseline.contamination_risk == "uncontrolled"
+    || candidate.contamination_risk == "uncontrolled"
+    || baseline.carryover_risk == "uncontrolled"
+    || candidate.carryover_risk == "uncontrolled"
+    || baseline.interference_risk == "uncontrolled"
+    || candidate.interference_risk == "uncontrolled"
+}
+
+fn __observe_only_plan(
+  intent: ExperimentIntent,
+  context: ExperimentCompileContext,
+  intent_fingerprint: string,
+  catalog_fingerprint: string,
+  lane: ExperimentLane,
+  primary: OutcomeAdapter?,
+  population: PopulationAdapter?,
+  baseline: InterventionAdapter?,
+  candidate: InterventionAdapter?,
+) -> ObserveOnlyHypothesisPlan {
+  const hypothesis_id = "hyp-" + sha256(intent_fingerprint)
+  const evidence = resolve_evidence_policy("observational", primary, context.budget_request)
+  const empty_capabilities: ExperimentCapabilityManifest = {
+    tools: [],
+    capabilities: {},
+    workspace_roots: [],
+    read_only_roots: [],
+    side_effect_level: "none",
+    sandbox_profile: "os_hardened",
+    process: {commands: [], read_roots: [], write_roots: []},
+    network: {domains: [], allow_private: false},
+    connectors: [],
+    database_scopes: [],
+    provider_ids: [],
+    secret_refs: [],
+    mutation: {reversible: true, rollback_adapter_id: nil, requires_approval: false},
+  }
+  const design: ExperimentDesign = {
+    schema: "harn.experiment.design.v1",
+    hypothesis_id: hypothesis_id,
+    intent_fingerprint: intent_fingerprint,
+    lane: lane,
+    claim_strength: __lane_claim(lane, "observational"),
+    intervention: candidate,
+    comparator: baseline,
+    population: population,
+    primary_outcome: primary,
+    guardrails: [],
+    evidence: evidence,
+    budget: context.budget_request,
+    capabilities: empty_capabilities,
+    capability_enforcement: "deferred_to_registered_host_adapter",
+    approval_required: false,
+    approval_id: nil,
+    assumptions: intent.assumptions,
+    threats: intent.threats,
+  }
+  const provenance: PlanProvenance = context.provenance
+    + {
+    intent_fingerprint: intent_fingerprint,
+    catalog_fingerprint: catalog_fingerprint,
+  }
+  const identity = {
+    kind: "observe_only",
+    hypothesis_id: hypothesis_id,
+    design: design,
+    provenance: provenance,
+  }
+  const fingerprint = __fingerprint(identity)
+  return {
+    schema: "harn.hypothesis.plan.v1",
+    schema_version: 1,
+    kind: "observe_only",
+    plan_id: "hypplan-" + sha256(fingerprint),
+    version: 1,
+    fingerprint: fingerprint,
+    hypothesis_id: hypothesis_id,
+    intent: intent,
+    design: design,
+    instrumentation_questions: __instrumentation_questions(intent),
+    provenance: provenance,
+    checkback_after_ms: context.budget_request.max_wall_clock_ms,
+  }
+}
+
+fn __guardrail(outcome: OutcomeAdapter) -> ExperimentGuardrail? {
+  if outcome.alarm == nil {
+    return nil
+  }
+  return {
+    id: outcome.id,
+    direction: outcome.direction,
+    bounds: outcome.bounds,
+    alarm: outcome.alarm,
+  }
+}
+
+/**
+ * Compile a schema-bound intent into a registered experiment or an honest
+ * observe-only plan. Execution still requires a registered host adapter.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn compile_experiment_intent(
+  value: unknown,
+  context: ExperimentCompileContext,
+) -> ExperimentCompileReceipt {
+  const normalized_catalog = __catalog_normalized(context.catalog)
+  const catalog_fingerprint = __fingerprint(normalized_catalog)
+  let intent_fingerprint = __fingerprint(value)
+  const checked = check_versioned(value, experiment_intent_contract())
+  if !is_ok(checked) {
+    return __receipt_failure(
+      intent_fingerprint,
+      catalog_fingerprint,
+      __failure(
+        "invalid_intent",
+        [__diagnostic("experiment.intent_schema", "", unwrap_err(checked).detail)],
+      ),
+    )
+  }
+  const intent: ExperimentIntent = unwrap(checked).value
+  intent_fingerprint = __fingerprint(intent)
+  let diagnostics = __catalog_diagnostics(normalized_catalog)
+  diagnostics = diagnostics + __intent_blank_diagnostics(intent)
+  diagnostics = diagnostics + __citation_diagnostics(intent, context.trusted_citations)
+  diagnostics = diagnostics + __budget_diagnostics(context.budget_request, context.budget_ceiling)
+  if len(diagnostics) > 0 {
+    return __receipt_failure(
+      intent_fingerprint,
+      catalog_fingerprint,
+      __failure("invalid_intent", diagnostics),
+    )
+  }
+  const resolved = __resolve_intent_adapters(intent, normalized_catalog)
+  diagnostics = diagnostics + resolved.diagnostics
+  if len(diagnostics) > 0 {
+    return __receipt_failure(
+      intent_fingerprint,
+      catalog_fingerprint,
+      __failure("invalid_intent", diagnostics),
+    )
+  }
+  const baseline = resolved.baseline
+  const candidate = resolved.candidate
+  const population = resolved.population
+  const primary = resolved.primary
+  const guardrails = resolved.guardrails
+  if __must_observe_only(intent, resolved) {
+    const lane = __observe_only_lane(intent)
+    const plan: HypothesisPlan = __observe_only_plan(
+      intent,
+      context,
+      intent_fingerprint,
+      catalog_fingerprint,
+      lane,
+      primary,
+      population,
+      baseline,
+      candidate,
+    )
+    return {
+      schema: "harn.experiment.compile_receipt.v1",
+      ok: true,
+      intent_fingerprint: intent_fingerprint,
+      catalog_fingerprint: catalog_fingerprint,
+      plan_fingerprint: plan.fingerprint,
+      plan: plan,
+    }
+  }
+  if baseline == nil || candidate == nil || population == nil || primary == nil {
+    return __receipt_failure(
+      intent_fingerprint,
+      catalog_fingerprint,
+      __failure(
+        "invalid_lowering",
+        [
+          __diagnostic(
+            "experiment.adapter_resolution_invariant",
+            "",
+            "an executable design reached lowering without complete registered adapters",
+          ),
+        ],
+      ),
+    )
+  }
+  const lane = __common_lane(intent.requested_lane, baseline, candidate)
+  if lane == nil {
+    const plan: HypothesisPlan = __observe_only_plan(
+      intent,
+      context,
+      intent_fingerprint,
+      catalog_fingerprint,
+      "exploratory_instrumentation",
+      primary,
+      population,
+      baseline,
+      candidate,
+    )
+    return {
+      schema: "harn.experiment.compile_receipt.v1",
+      ok: true,
+      intent_fingerprint: intent_fingerprint,
+      catalog_fingerprint: catalog_fingerprint,
+      plan_fingerprint: plan.fingerprint,
+      plan: plan,
+    }
+  }
+  if __unsupported_randomized_design(baseline, candidate, population) {
+    const plan: HypothesisPlan = __observe_only_plan(
+      intent,
+      context,
+      intent_fingerprint,
+      catalog_fingerprint,
+      "exploratory_instrumentation",
+      primary,
+      population,
+      baseline,
+      candidate,
+    )
+    return {
+      schema: "harn.experiment.compile_receipt.v1",
+      ok: true,
+      intent_fingerprint: intent_fingerprint,
+      catalog_fingerprint: catalog_fingerprint,
+      plan_fingerprint: plan.fingerprint,
+      plan: plan,
+    }
+  }
+  if baseline.capabilities.mutation.rollback_adapter_id
+    != candidate.capabilities.mutation
+    .rollback_adapter_id {
+    return __receipt_failure(
+      intent_fingerprint,
+      catalog_fingerprint,
+      __failure(
+        "unsafe_plan",
+        [
+          __diagnostic(
+            "experiment.rollback_owner_mismatch",
+            "catalog.interventions",
+            "baseline and candidate must name the same rollback adapter before their mutation capabilities can be merged",
+          ),
+        ],
+      ),
+    )
+  }
+  const capabilities = __merge_capabilities(baseline.capabilities, candidate.capabilities)
+  diagnostics = __capability_ceiling_diagnostics(capabilities, context.capability_ceiling)
+  if len(diagnostics) > 0 {
+    return __receipt_failure(
+      intent_fingerprint,
+      catalog_fingerprint,
+      __failure("unsafe_plan", diagnostics),
+    )
+  }
+  const approval_required = __approval_required(
+    intent,
+    context.risk_floor,
+    capabilities,
+    baseline,
+    candidate,
+  )
+  const approval_id: string? = if approval_required {
+    context.approval_id
+      ?? ("approval-" + sha256(intent_fingerprint + "\\u0000" + catalog_fingerprint))
+  } else {
+    nil
+  }
+  const evidence = resolve_evidence_policy(
+    intent.requested_evidence,
+    primary,
+    context.budget_request,
+  )
+  if evidence.delta == nil || evidence.epsilon == nil {
+    return __receipt_failure(
+      intent_fingerprint,
+      catalog_fingerprint,
+      __failure(
+        "invalid_lowering",
+        [
+          __diagnostic(
+            "experiment.sequential_thresholds_missing",
+            "requested_evidence",
+            "an executable randomized experiment requires registered delta and epsilon thresholds",
+          ),
+        ],
+      ),
+    )
+  }
+  const delta: float = evidence.delta
+  const epsilon: float = evidence.epsilon
+  let compiled_guardrails: list<ExperimentGuardrail> = []
+  for outcome in guardrails {
+    const guardrail = __guardrail(outcome)
+    if guardrail != nil {
+      compiled_guardrails = compiled_guardrails + [guardrail]
+    }
+  }
+  const primary_metric: ExperimentMetric = {
+    id: primary.id,
+    direction: primary.direction,
+    bounds: primary.bounds,
+  }
+  const hypothesis_id = "hyp-" + sha256(intent_fingerprint)
+  const manifest: ExperimentManifest = {
+    schema: "harn.experiment.v1",
+    experiment_id: hypothesis_id,
+    hypothesis: intent.hypothesis,
+    owner: context.owner,
+    baseline: {id: baseline.variant_id, config: baseline.config, complexity: baseline.complexity},
+    candidates: [
+      {id: candidate.variant_id, config: candidate.config, complexity: candidate.complexity},
+    ],
+    decision: {delta: delta, epsilon: epsilon, ladder: evidence.ladder},
+    metrics: {primary: primary_metric, guardrails: compiled_guardrails},
+    assignment: {
+      mode: "randomized_block",
+      seed: context.seed,
+      blocking_factors: population.blocking_factors,
+    },
+    splits: {iterate: population.iterate, gate: population.gate, promotion: "explicit"},
+    budget: {
+      max_spend_usd: context.budget_request.max_spend_usd,
+      max_trials_per_case: context.budget_request.max_trials_per_case,
+    },
+  }
+  const validation_context: ExperimentValidationContext = {
+    supported_blocking_factors: context.supported_blocking_factors,
+    host_identity_available: context.host_identity_available,
+  }
+  const validated = validate_experiment_manifest(manifest, validation_context)
+  if !is_ok(validated) {
+    return __receipt_failure(
+      intent_fingerprint,
+      catalog_fingerprint,
+      __failure(
+        "invalid_lowering",
+        [__diagnostic("experiment.manifest_invalid", "manifest", unwrap_err(validated).detail)],
+      ),
+    )
+  }
+  const registration = register_experiment(unwrap(validated))
+  const design: ExperimentDesign = {
+    schema: "harn.experiment.design.v1",
+    hypothesis_id: hypothesis_id,
+    intent_fingerprint: intent_fingerprint,
+    lane: lane,
+    claim_strength: __lane_claim(lane, intent.requested_evidence),
+    intervention: candidate,
+    comparator: baseline,
+    population: population,
+    primary_outcome: primary,
+    guardrails: guardrails,
+    evidence: evidence,
+    budget: context.budget_request,
+    capabilities: capabilities,
+    capability_enforcement: "deferred_to_registered_host_adapter",
+    approval_required: approval_required,
+    approval_id: approval_id,
+    assumptions: intent.assumptions,
+    threats: intent.threats,
+  }
+  const provenance: PlanProvenance = context.provenance
+    + {
+    intent_fingerprint: intent_fingerprint,
+    catalog_fingerprint: catalog_fingerprint,
+  }
+  const identity = {
+    kind: "registered_experiment",
+    hypothesis_id: hypothesis_id,
+    design: design,
+    manifest: manifest,
+    registration: registration,
+    provenance: provenance,
+  }
+  const fingerprint = __fingerprint(identity)
+  const plan: HypothesisPlan = {
+    schema: "harn.hypothesis.plan.v1",
+    schema_version: 1,
+    kind: "registered_experiment",
+    plan_id: "hypplan-" + sha256(fingerprint),
+    version: 1,
+    fingerprint: fingerprint,
+    hypothesis_id: hypothesis_id,
+    intent: intent,
+    design: design,
+    manifest: manifest,
+    registration: registration,
+    execution_status: "requires_registered_host_adapter",
+    provenance: provenance,
+    checkback_after_ms: context.budget_request.max_wall_clock_ms,
+  }
+  return {
+    schema: "harn.experiment.compile_receipt.v1",
+    ok: true,
+    intent_fingerprint: intent_fingerprint,
+    catalog_fingerprint: catalog_fingerprint,
+    plan_fingerprint: fingerprint,
+    plan: plan,
+  }
+}
+
+fn __same(left: unknown, right: unknown) -> bool {
+  return json_stringify(left) == json_stringify(right)
+}
+
+fn __require_plan(condition: bool, detail: string) {
+  if !condition {
+    throw "hypothesis compiler: invalid compiled plan: " + detail
+  }
+}
+
+fn __validate_plan_identity(plan: HypothesisPlan) -> string {
+  const intent_fingerprint = __fingerprint(plan.intent)
+  const hypothesis_id = "hyp-" + sha256(intent_fingerprint)
+  __require_plan(plan.hypothesis_id == hypothesis_id, "hypothesis identity differs from intent")
+  __require_plan(
+    plan.design.hypothesis_id == hypothesis_id
+      && plan.design.intent_fingerprint == intent_fingerprint
+      && plan.provenance.intent_fingerprint
+      == intent_fingerprint,
+    "intent identity is inconsistent",
+  )
+  __require_plan(trim(plan.provenance.catalog_fingerprint) != "", "catalog fingerprint is empty")
+  const expected_evidence = resolve_evidence_policy(
+    plan.intent.requested_evidence,
+    plan.design.primary_outcome,
+    plan.design.budget,
+  )
+  __require_plan(__same(plan.design.evidence, expected_evidence), "evidence policy was modified")
+  __require_plan(
+    plan.design.claim_strength == __lane_claim(plan.design.lane, plan.intent.requested_evidence),
+    "claim ceiling differs from lane and evidence mode",
+  )
+  return hypothesis_id
+}
+
+fn __validate_observe_only_plan(plan: ObserveOnlyHypothesisPlan, hypothesis_id: string) {
+  __require_plan(
+    plan.design.capabilities.side_effect_level == "none"
+      && len(plan.design.capabilities.tools) == 0
+      && len(plan.design.capabilities.capabilities) == 0
+      && len(
+      plan.design.capabilities.workspace_roots,
+    )
+      == 0
+      && len(plan.design.capabilities.read_only_roots) == 0
+      && len(
+      plan.design.capabilities.process.commands,
+    )
+      == 0
+      && len(plan.design.capabilities.process.read_roots) == 0
+      && len(
+      plan.design.capabilities.process.write_roots,
+    )
+      == 0
+      && len(plan.design.capabilities.network.domains) == 0
+      && !plan.design.capabilities.network
+      .allow_private
+      && len(plan.design.capabilities.connectors) == 0
+      && len(plan.design.capabilities.database_scopes)
+      == 0
+      && len(plan.design.capabilities.provider_ids) == 0
+      && len(plan.design.capabilities.secret_refs)
+      == 0
+      && !plan.design.approval_required
+      && plan.design.approval_id == nil,
+    "observe-only plan carries executable authority",
+  )
+  __require_plan(
+    __same(plan.instrumentation_questions, __instrumentation_questions(plan.intent)),
+    "instrumentation questions were modified",
+  )
+  const identity = {
+    kind: "observe_only",
+    hypothesis_id: hypothesis_id,
+    design: plan.design,
+    provenance: plan.provenance,
+  }
+  const fingerprint = __fingerprint(identity)
+  __require_plan(
+    plan.fingerprint == fingerprint && plan.plan_id == "hypplan-" + sha256(fingerprint),
+    "plan fingerprint or ID is invalid",
+  )
+}
+
+fn __validate_registered_plan(plan: RegisteredExperimentPlan, hypothesis_id: string) {
+  const baseline = plan.design.comparator
+  const candidate = plan.design.intervention
+  const population = plan.design.population
+  const primary = plan.design.primary_outcome
+  if baseline == nil || candidate == nil || population == nil || primary == nil {
+    throw "hypothesis compiler: invalid compiled plan: registered plan omits an adapter"
+  }
+  const required = __merge_capabilities(baseline.capabilities, candidate.capabilities)
+  __require_plan(__same(plan.design.capabilities, required), "capability manifest was modified")
+  const no_risk_floor: ExperimentIntentRisk = {
+    touches_people: false,
+    touches_customer_data: false,
+    touches_money: false,
+    touches_production: false,
+    irreversible: false,
+  }
+  const minimum_approval = __approval_required(
+    plan.intent,
+    no_risk_floor,
+    required,
+    baseline,
+    candidate,
+  )
+  __require_plan(
+    !minimum_approval || (plan.design.approval_required && plan.design.approval_id != nil),
+    "required approval was removed",
+  )
+  const validated = validate_experiment_manifest(
+    plan.manifest,
+    {
+      supported_blocking_factors: plan.manifest.assignment.blocking_factors,
+      host_identity_available: true,
+    },
+  )
+  __require_plan(is_ok(validated), "registered manifest is invalid")
+  const expected_registration = register_experiment(unwrap(validated))
+  __require_plan(
+    __same(plan.registration, expected_registration),
+    "registration differs from the frozen manifest",
+  )
+  __require_plan(
+    plan.manifest.experiment_id == hypothesis_id
+      && plan.manifest.hypothesis == plan.intent.hypothesis
+      && plan.manifest.baseline.id
+      == baseline
+      .variant_id
+      && __same(plan.manifest.baseline.config, baseline.config)
+      && plan.manifest.baseline.complexity
+      == baseline
+      .complexity
+      && len(plan.manifest.candidates) == 1
+      && plan.manifest.candidates[0]?.id == candidate.variant_id
+      && __same(
+      plan.manifest.candidates[0]?.config,
+      candidate.config,
+    )
+      && plan.manifest.candidates[0]?.complexity == candidate.complexity
+      && plan.manifest.metrics
+      .primary.id
+      == primary.id
+      && plan.manifest.metrics.primary.direction == primary.direction
+      && __same(
+      plan.manifest.metrics.primary.bounds,
+      primary.bounds,
+    )
+      && plan.manifest.decision.delta == plan.design.evidence.delta
+      && plan.manifest.decision.epsilon
+      == plan
+      .design.evidence.epsilon
+      && __same(plan.manifest.decision.ladder, plan.design.evidence.ladder)
+      && plan.manifest.budget
+      .max_spend_usd
+      == plan.design.budget.max_spend_usd
+      && plan.manifest.budget.max_trials_per_case
+      == plan.design.budget
+      .max_trials_per_case,
+    "manifest differs from the compiled design",
+  )
+  const identity = {
+    kind: "registered_experiment",
+    hypothesis_id: hypothesis_id,
+    design: plan.design,
+    manifest: plan.manifest,
+    registration: plan.registration,
+    provenance: plan.provenance,
+  }
+  const fingerprint = __fingerprint(identity)
+  __require_plan(
+    plan.fingerprint == fingerprint && plan.plan_id == "hypplan-" + sha256(fingerprint),
+    "plan fingerprint or ID is invalid",
+  )
+}
+
+/**
+ * Recompute the deterministic, context-independent invariants of a compiled plan.
+ *
+ * Host ceilings, trusted citations, and risk floors still require the compiler
+ * receipt's host attestation at the persistence boundary. This check prevents a
+ * schema-valid plan from weakening its own internal registration, evidence,
+ * capability, approval, or identity relationships.
+ *
+ * @effects: []
+ * @errors: [validation]
+ * @api_stability: experimental
+ */
+pub fn validate_compiled_hypothesis_plan(plan: HypothesisPlan) -> bool {
+  const hypothesis_id = __validate_plan_identity(plan)
+  if plan.kind == "observe_only" {
+    __validate_observe_only_plan(plan, hypothesis_id)
+  } else {
+    __validate_registered_plan(plan, hypothesis_id)
+  }
+  return true
+}

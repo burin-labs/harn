@@ -1,0 +1,5 @@
+{
+  "mode": "mock",
+  "net_gets": {"https://api.anthropic.com/v1/messages": "messages-body"},
+  "expect_stdio": "ok=messages-body\nplaintext_blocked=true\nplaintext_port=80\n"
+}

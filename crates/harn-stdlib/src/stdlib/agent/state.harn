@@ -1,0 +1,557 @@
+import { AgentResult } from "std/agent/contracts"
+
+// Thin Harn wrappers over host session-state primitives. These are CRUD only;
+// no decision logic lives here. The agent loop holds the session dict locally
+// and passes session_id into the host for any mutation.
+/**
+ * agent_session_init.
+ *
+ * @effects: [host]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_session_init(
+  agent: HarnessAgent,
+  message,
+  system_prompt,
+  opts,
+) -> {
+  session_id: string,
+  run_id: string,
+  task: string,
+  system: string?,
+  max_iterations: int,
+  max_verify_attempts: int,
+  done: bool,
+  result?: any,
+} {
+  return agent.session_init(message, system_prompt, opts)
+}
+
+/**
+ * agent_session_finalize.
+ *
+ * @effects: [host]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_session_finalize(agent: HarnessAgent, session_id, status) -> AgentResult {
+  return agent.session_finalize(session_id, status)
+}
+
+/**
+ * Persist the session's queued canonical transcript mutations.
+ *
+ * @effects: [host]
+ * @errors: [runtime]
+ * @api_stability: experimental
+ */
+pub fn agent_session_flush(agent: HarnessAgent, session_id) -> nil {
+  return agent.session_flush(session_id)
+}
+
+/**
+ * agent_session_messages.
+ *
+ * @effects: [host]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_session_messages(agent: HarnessAgent, session_id) {
+  return agent.session_messages(session_id)
+}
+
+/**
+ * Project the session through the canonical provider-visible directive slot
+ * without mutating durable transcript history.
+ *
+ * @effects: [host]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_session_visible_messages(agent: HarnessAgent, session_id, messages = nil) -> list {
+  return agent.session_visible_messages(session_id, messages)
+}
+
+/**
+ * agent_session_record_assistant.
+ *
+ * @effects: [host]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_session_record_assistant(agent: HarnessAgent, session_id, llm_result) {
+  return agent.session_record_assistant(session_id, llm_result)
+}
+
+/**
+ * agent_session_record_tool_results.
+ *
+ * @effects: [host]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_session_record_tool_results(agent: HarnessAgent, session_id, dispatch) {
+  return agent.session_record_tool_results(session_id, dispatch)
+}
+
+/**
+ * agent_session_pair_orphaned_tool_use. Repair the transcript invariant that
+ * every assistant `tool_use`/`tool_call` block is immediately followed by a
+ * matching `tool_result` before the next provider request. Synthesizes a
+ * tool_result (carrying `feedback` as the observation) for each orphaned block
+ * on the trailing assistant turn. Returns the number of blocks repaired; `0` is
+ * a strict no-op (trailing message is not an assistant turn, carries no
+ * structured tool calls, or every block already has a paired result). Called by
+ * the agent loop at every inject site that declines to dispatch an assistant
+ * turn's tool calls.
+ *
+ * @effects: [host]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_session_pair_orphaned_tool_use(agent: HarnessAgent, session_id, feedback) {
+  return agent.session_pair_orphaned_tool_use(session_id, feedback)
+}
+
+/**
+ * Record placeholder tool_results for calls that were persisted as part of an
+ * assistant tool_use turn but will never be dispatched (pre-dispatch
+ * interrupt, agent_await_resumption suspension, skipped siblings). Anthropic
+ * rejects any transcript whose assistant tool_use has no adjacent tool_result
+ * (HTTP 400), so every skip path must close out its pending calls before the
+ * next LLM call or resume.
+ *
+ * @effects: [host]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_session_record_undispatched_tool_results(
+  agent: HarnessAgent,
+  session_id,
+  tool_calls,
+  status,
+  reason,
+) {
+  if len(tool_calls ?? []) == 0 {
+    return nil
+  }
+  const results = __host_agent_undispatched_tool_results(tool_calls, status, reason)
+  return agent.session_record_tool_results(session_id, results)
+}
+
+fn __agent_usage_int(value) {
+  if type_of(value) == "int" {
+    return value
+  }
+  if type_of(value) == "float" {
+    return to_int(value)
+  }
+  return 0
+}
+
+/**
+ * agent_reminder_providers_fire.
+ *
+ * @effects: [host]
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_reminder_providers_fire(harness.agent, session_id, "post_compact", payload, opts)
+ */
+pub fn agent_reminder_providers_fire(
+  agent: HarnessAgent,
+  session_id,
+  event,
+  payload = nil,
+  opts = nil,
+) {
+  return agent.reminder_providers_fire(session_id, event, payload ?? {}, opts ?? {})
+}
+
+/**
+ * agent_session_record_usage.
+ *
+ * @effects: [host]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_session_record_usage(
+  agent: HarnessAgent,
+  session_id,
+  llm_result,
+  opts = nil,
+  iteration = 0,
+) {
+  const totals = agent.session_record_usage(session_id, llm_result)
+  const llm = llm_result?.llm ?? {}
+  const input_tokens = __agent_usage_int(llm?.input_tokens ?? llm_result?.usage?.input_tokens)
+  const output_tokens = __agent_usage_int(llm?.output_tokens ?? llm_result?.usage?.output_tokens)
+  agent_reminder_providers_fire(
+    agent,
+    session_id,
+    "on_budget_threshold",
+    {
+      session: {id: session_id},
+      iteration: iteration,
+      input_tokens: input_tokens,
+      output_tokens: output_tokens,
+      tokens_used: totals?.tokens_used ?? 0,
+      cost_usd: totals?.cost_usd ?? 0.0,
+      provider: llm_result?.provider ?? opts?.provider ?? "",
+      model: llm_result?.model ?? opts?.model ?? "",
+    },
+    opts ?? {},
+  )
+  return totals
+}
+
+/**
+ * agent_session_drain_feedback.
+ *
+ * @effects: [host]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_session_drain_feedback(agent: HarnessAgent, session_id) {
+  return agent.session_drain_feedback(session_id)
+}
+
+/**
+ * agent_session_await_inbox.
+ *
+ * Park the calling turn until the session has a queued `agent_inbox` entry OR
+ * `timeout_ms` elapses on the harness clock. Returns `true` when woken by an
+ * entry, `false` on the deadline. The command-hold's re-entry primitive: the
+ * loop parks here (zero inference) between decision re-entries. The wake set is
+ * INCLUSIVE — any queued entry (progress, terminal, user interrupt, peer
+ * message) wakes it; kind-filtering happens only where the ledger BUILDS its
+ * digest, never here.
+ *
+ * @effects: [host]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_session_await_inbox(agent: HarnessAgent, session_id, timeout_ms) -> bool {
+  return agent.session_await_inbox(session_id, timeout_ms)
+}
+
+/**
+ * agent_session_drain_command_updates.
+ *
+ * Drain the session's queued long-running-command update entries
+ * (`tool_progress` / `tool_result` pushed by the hostlib background waiter),
+ * leaving every other inbox entry (user interrupts, peer messages, plain
+ * feedback) untouched for the normal feedback path. Each returned entry is
+ * `{kind, content, sequence, ts_ms}`; `content` is the JSON snapshot the ledger
+ * parses. This is the ONLY consumer of command-update kinds, so the ledger owns
+ * per-handle coalescing and the wake set stays inclusive.
+ *
+ * @effects: [host]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_session_drain_command_updates(agent: HarnessAgent, session_id) -> list {
+  return agent.session_drain_command_updates(session_id)
+}
+
+/**
+ * agent_session_drain_host_injections.
+ *
+ * @effects: [host]
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_session_drain_host_injections(harness.agent, session_id, "turn_boundary", "iteration_start")
+ */
+pub fn agent_session_drain_host_injections(agent: HarnessAgent, session_id, delivery, seam) {
+  return agent.session_drain_host_injections(session_id, delivery, seam)
+}
+
+/**
+ * agent_session_drain_bridge_injections.
+ *
+ * @effects: [host]
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_session_drain_bridge_injections(harness.agent, session_id, "finish_step")
+ */
+pub fn agent_session_drain_bridge_injections(agent: HarnessAgent, session_id, checkpoint) {
+  return agent.session_drain_bridge_injections(session_id, checkpoint)
+}
+
+/**
+ * agent_session_push_bridge_injection.
+ *
+ * Push a system-reminder onto the session's host bridge queue. The
+ * reminder is held until the agent loop's next eligible checkpoint
+ * drains it (gated by `options.mode`). Returns the reminder id.
+ *
+ * `options` mirrors the ACP `session/remind` JSON-RPC params:
+ * `{body, mode?, tags?, dedupe_key?, ttl_turns?, role_hint?,
+ * propagate?, preserve_on_compact?}`.
+ *
+ * `mode` defaults to `"audit_only"`:
+ *
+ *   - `"interrupt_immediate"` — skip the next pending tool batch at the
+ *     `pre_tool_dispatch` checkpoint.
+ *   - `"finish_step"` — drained at every iteration boundary; the
+ *     reminder renders into the model's next prompt.
+ *   - `"audit_only"` — drained only at `loop_exit`. The reminder lands
+ *     in the transcript audit but is NEVER rendered into a model
+ *     prompt (no further LLM call runs after `loop_exit`). Use this
+ *     for record-keeping; use `finish_step` if the model must see it
+ *     before the loop terminates (harn#2212).
+ *
+ * @effects: [host]
+ * @errors: [HARN-RMD-002]
+ * @api_stability: experimental
+ * @example: agent_session_push_bridge_injection(harness.agent, session_id, {body: "stop", mode: "interrupt_immediate"})
+ */
+pub fn agent_session_push_bridge_injection(agent: HarnessAgent, session_id, options) {
+  return agent.session_push_bridge_injection(session_id, options)
+}
+
+/**
+ * agent_session_push_user_message.
+ *
+ * Queue a user-role message onto the session's host bridge. The in-VM
+ * equivalent of the ACP `session/inject` method (the user-message
+ * sibling of `agent_session_push_bridge_injection`, which mirrors
+ * `session/remind`). The message is spliced into the transcript
+ * CHRONOLOGICALLY — after the in-flight tool_result and before the next
+ * model call — at the loop checkpoint selected by `options.mode`.
+ *
+ * `options` is `{content, mode?}`. `content` is required and non-empty.
+ * `mode` defaults to `"finish_step"`:
+ *
+ *   - `"finish_step"` / `"steer"` — STEER: delivered at the next loop
+ *     harness.runtime.checkpoint(tool boundary / iteration boundary). The model sees
+ *     the message before its next call, mid-turn. This is the default
+ *     and the canonical steer path.
+ *   - `"interrupt_immediate"` — preempt the next pending tool batch at
+ *     the `pre_tool_dispatch` checkpoint.
+ *   - `"audit_only"` / `"queue"` — drained only at `loop_exit`; lands in
+ *     the transcript audit but is never rendered into a model prompt.
+ *
+ * Returns the message id so callers can correlate later events.
+ *
+ * @effects: [host]
+ * @errors: [runtime]
+ * @api_stability: experimental
+ * @example: agent_session_push_user_message(harness.agent, session_id, {content: "use auth_v2.go", mode: "steer"})
+ */
+pub fn agent_session_push_user_message(agent: HarnessAgent, session_id, options) {
+  return agent.session_push_user_message(session_id, options)
+}
+
+/**
+ * agent_session_pending_injections.
+ *
+ * Return a FIFO snapshot of queued bridge injections for `session_id`.
+ * The result shape is `{pendingCount, injections}` where each row has
+ * `kind: "user"` or `kind: "reminder"`, stable `id`, `mode`, and
+ * kind-specific fields such as `messageId`, `reminderId`, or `body`.
+ *
+ * @effects: [host]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_session_pending_injections(agent: HarnessAgent, session_id) {
+  return agent.session_pending_injections(session_id)
+}
+
+/**
+ * agent_session_revoke_reminder.
+ *
+ * Revoke a pending bridge reminder before it is drained by an agent
+ * checkpoint. Returns `{status, reminderId}` where `status` is one of
+ * `"revoked"`, `"already_revoked"`, `"already_delivered"`, or
+ * `"unknown_reminder_id"`.
+ *
+ * @effects: [host]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_session_revoke_reminder(agent: HarnessAgent, session_id, reminder_id) {
+  return agent.session_revoke_reminder(session_id, reminder_id)
+}
+
+/**
+ * agent_session_totals.
+ *
+ * @effects: [host]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_session_totals(agent: HarnessAgent, session_id) {
+  return agent.session_totals(session_id)
+}
+
+/**
+ * agent_session_inject_feedback. Persist one corrective directive in the
+ * model-facing context envelope. Equivalent feedback is deduplicated with
+ * structural directives at the typed reminder boundary.
+ *
+ * @effects: [host]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_session_inject_feedback(agent: HarnessAgent, session_id, kind, content) {
+  return agent.session_inject_feedback(session_id, kind, content)
+}
+
+/**
+ * agent_session_inject_reminder. Inject a single typed system reminder
+ * directly into a live session's transcript event stream, bridge-free —
+ * the in-process sibling of the `push_bridge_injection`/`drain` reminder
+ * path for hosts that drive the loop without an ACP HostBridge. `options`
+ * mirrors `transcript.inject_reminder` (`body` required; optional `tags`,
+ * `dedupe_key`, `ttl_turns`, `preserve_on_compact`, `propagate`,
+ * `role_hint`, `authority`). Returns the reminder id.
+ *
+ * @effects: [host]
+ * @errors: [runtime]
+ * @api_stability: experimental
+ * @example: agent_session_inject_reminder(harness.agent, session_id, {body: "re-read auth.go", ttl_turns: 1})
+ */
+pub fn agent_session_inject_reminder(agent: HarnessAgent, session_id, options) {
+  return agent.session_inject_reminder(session_id, options)
+}
+
+/**
+ * agent_session_pop_last_assistant. Discard the trailing assistant
+ * turn from a session transcript. Used by `agent_step_judge` in
+ * `replace` (pop-and-regen) mode to remove a vetoed assistant
+ * response before the next iteration regenerates. Returns true if a
+ * turn was popped, false if the transcript was empty. Errors if the
+ * trailing message is not an assistant turn — signals a call-site
+ * discipline bug, not a runtime condition.
+ *
+ * @effects: [host]
+ * @errors: [runtime]
+ * @api_stability: experimental
+ */
+pub fn agent_session_pop_last_assistant(agent: HarnessAgent, session_id) {
+  return agent.session_pop_last_assistant(session_id)
+}
+
+/**
+ * agent_session_post_event. Post an event into a running session's
+ * inbox from outside the loop (triggers, connectors, host
+ * integrations). The next turn boundary — including the post-
+ * compaction drain — surfaces the entry as feedback.
+ *
+ * @effects: [host]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_session_post_event(agent: HarnessAgent, session_id, kind, content, source = nil) {
+  return agent.session_post_event(session_id, kind, content, source)
+}
+
+/**
+ * agent_session_apply_reminder_post_turn.
+ *
+ * @effects: [host]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_session_apply_reminder_post_turn(agent: HarnessAgent, session_id, turn = 0) {
+  return agent.session_apply_reminder_post_turn(session_id, turn)
+}
+
+/**
+ * agent_session_set_active_skills.
+ *
+ * @effects: [host]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_session_set_active_skills(agent: HarnessAgent, session_id, skills) {
+  return agent.session_set_active_skills(session_id, skills)
+}
+
+/**
+ * agent_session_active_skills.
+ *
+ * @effects: [host]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_session_active_skills(agent: HarnessAgent, session_id) {
+  return agent.session_active_skills(session_id)
+}
+
+/**
+ * agent_session_record_skill_event.
+ *
+ * @effects: [host]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_session_record_skill_event(agent: HarnessAgent, session_id, kind, metadata) {
+  return agent.session_record_skill_event(session_id, kind, metadata)
+}
+
+/**
+ * agent_session_claim_tool_format_internal.
+ *
+ * @effects: [host]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_session_claim_tool_format_internal(agent: HarnessAgent, session_id, tool_format) {
+  return agent.session_claim_tool_format(session_id, tool_format)
+}
+
+/**
+ * agent_emit_event.
+ *
+ * @effects: [host]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_emit_event(agent: HarnessAgent, session_id, event_type, payload) {
+  return agent.emit_event(session_id, event_type, payload)
+}
+
+/**
+ * agent_record_native_tool_fallback.
+ *
+ * @effects: [host]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_record_native_tool_fallback(agent: HarnessAgent, session_id, payload) {
+  return agent.record_native_tool_fallback(session_id, payload)
+}
+
+/**
+ * agent_record_compaction.
+ *
+ * @effects: [host]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_record_compaction(agent: HarnessAgent, session_id, payload) {
+  return agent.record_compaction(session_id, payload)
+}
+
+/**
+ * agent_session_project_turn projects the session transcript through a
+ * policy, appends a `transcript.projection` event into the raw
+ * transcript, emits a typed `TranscriptProjected` agent event, and
+ * returns the projected messages with metadata.
+ *
+ * The persisted message list is never mutated — projection only
+ * controls what the next provider request will see. Supported policies:
+ * "raw", "clean_tool_repair", "squash_failed_calls", "summary_prefix",
+ * "reachability_gc", and "custom" (with a `projector` closure).
+ *
+ * @effects: [host]
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_session_project_turn(harness.agent, session_id, {policy: "clean_tool_repair"})
+ */
+pub fn agent_session_project_turn(agent: HarnessAgent, session_id, options = nil) {
+  return agent.session_project_turn(session_id, options ?? {})
+}

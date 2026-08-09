@@ -1,0 +1,122 @@
+/**
+ * One Harn reducer, executed by the browser worker or the standard MCP tool
+ * fallback. No app-specific Rust or JavaScript is involved.
+ *
+ * Run with: harn app run examples/apps/portable-counter.harn
+ */
+import * as portable from "std/portable"
+import * as ui from "std/ui"
+
+const REDUCER = """
+fn reduce(harness: Harness, input) {
+  const event = input.event
+  let count = input.state.count
+  let tool_calls = input.state.tool_calls
+  if event.kind == "click" && event.target == "subtract" {
+    count = count - 1
+  } else if event.kind == "click" && event.target == "add" {
+    count = count + 1
+  } else if event.kind == "click" && event.target == "double" {
+    const result = harness.tools.invoke("counter.double", {value: count})
+    count = result.value
+    tool_calls = result.calls
+  }
+  const revision = input.state.revision + 1
+  const state = {count: count, revision: revision, tool_calls: tool_calls}
+  const document = {
+    schema: "harn.ui_document.v1",
+    title: "Portable counter",
+    revision: revision,
+    elements: [
+      {id: "card", kind: "column", variant: "panel"},
+      {id: "title", kind: "heading", parent: "card", text: "Portable counter", level: 1},
+      {id: "value", kind: "status", parent: "card", text: "Count: " + string(count)},
+      {
+        id: "tool-calls",
+        kind: "status",
+        parent: "card",
+        text: "Tool calls: " + string(tool_calls),
+      },
+      {id: "actions", kind: "row", parent: "card"},
+      {id: "subtract", kind: "button", parent: "actions", label: "Subtract"},
+      {id: "add", kind: "button", parent: "actions", label: "Add", variant: "primary"},
+      {id: "double", kind: "button", parent: "actions", label: "Double through tool"},
+    ],
+  }
+  return {
+    state: state,
+    update: {schema: "harn.ui_update.v1", document: document, effects: []},
+  }
+}
+"""
+
+pipeline main(harness: Harness, task) {
+  const compiled = portable.compile(REDUCER, "reduce")
+  if !is_ok(compiled) {
+    throw "portable counter did not compile: " + json_stringify(unwrap_err(compiled))
+  }
+  const program = unwrap(compiled)
+  let state = {count: 0, revision: 0, tool_calls: 0}
+  const native_grants = portable.grants(["tools.invoke"], harness.random.bytes(32))
+  let double_calls = 0
+  fn double(raw) {
+    double_calls = double_calls + 1
+    return {value: raw.value * 2, calls: double_calls}
+  }
+  fn service(request) {
+    const args = request.arguments
+    if request.capability == "tools" && request.operation == "invoke"
+      && args[0] == "counter.double" {
+      return portable.accept(request, double(args[1]))
+    }
+    return portable.reject(request, "unsupported_tool", "portable counter supports counter.double")
+  }
+  fn handle_event(raw) {
+    const input_state = raw.state ?? state
+    const execution = portable.run(
+      program,
+      {state: input_state, event: raw.event},
+      native_grants,
+      service,
+    )
+    if execution.status != "completed" {
+      throw "portable counter failed: " + json_stringify(execution)
+    }
+    state = execution.value.state
+    return execution.value
+  }
+  const resource = ui.portable_app_resource(
+    "ui://harn/examples/portable-counter",
+    "Portable counter",
+    "counter.handle_event",
+    program,
+    state,
+    ["tools.invoke"],
+    {description: "Run one Harn reducer in the browser worker or native fallback"},
+  )
+  const meta = ui.tool_metadata(resource, {visibility: ["app"]})
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "counter.double",
+    "Double one counter value",
+    {
+      parameters: {value: {type: "integer", required: true}},
+      returns: {type: "object"},
+      handler: double,
+    },
+  )
+  tools = tool_define(
+    tools,
+    "counter.handle_event",
+    "Apply one event to the portable counter",
+    {
+      parameters: {event: {type: "object", required: true}},
+      returns: {type: "object"},
+      handler: handle_event,
+      meta: meta,
+    },
+  )
+  harness.tools.mcp_tools(tools)
+  harness.tools.mcp_resource(ui.mcp_resource(resource, {prefers_border: true}))
+}

@@ -1,0 +1,242 @@
+import {
+  build_report,
+  duration_stats,
+  evaluate_ci_latency,
+  group_job_samples,
+  job_samples_from_api,
+  parse_ci_latency_policy,
+  run_has_full_coverage,
+  run_samples_from_api,
+} from "../ci_walltime_report.harn"
+
+pipeline test_duration_stats_use_shared_percentile_contract(harness: Harness, task) {
+  assert_eq(
+    duration_stats([10000, 20000, 30000, 40000, 50000, 60000, 70000, 80000, 90000, 100000]),
+    {count: 10, mean_ms: 55000, p50_ms: 55000, p90_ms: 91000, max_ms: 100000},
+  )
+  assert_eq(duration_stats([]), {count: 0, mean_ms: 0, p50_ms: 0, p90_ms: 0, max_ms: 0})
+}
+
+pipeline test_run_boundary_normalizes_once_and_rejects_invalid_intervals(harness: Harness, task) {
+  const samples = run_samples_from_api(
+    {
+      workflow_runs: [
+        {
+          id: 12,
+          created_at: "2026-07-18T00:00:00Z",
+          updated_at: "2026-07-18T00:12:30Z",
+          html_url: "https://example.test/run/12",
+        },
+        {id: 13, created_at: "2026-07-18T00:01:00Z", updated_at: "2026-07-18T00:00:00Z"},
+        {id: 14, created_at: "bad", updated_at: "also-bad"},
+      ],
+    },
+  )
+  assert_eq(samples, [{id: 12, duration_ms: 750000, url: "https://example.test/run/12"}])
+}
+
+pipeline test_job_groups_are_typed_and_ordered_by_p90(harness: Harness, task) {
+  const first = job_samples_from_api(
+    12,
+    {
+      jobs: [
+        {
+          name: "Rust test",
+          started_at: "2026-07-18T00:00:00Z",
+          completed_at: "2026-07-18T00:10:00Z",
+        },
+        {
+          name: "Audit scripts",
+          started_at: "2026-07-18T00:00:00Z",
+          completed_at: "2026-07-18T00:04:00Z",
+        },
+        {name: "", started_at: "2026-07-18T00:00:00Z", completed_at: "2026-07-18T00:01:00Z"},
+      ],
+    },
+  )
+  const second = job_samples_from_api(
+    13,
+    {
+      jobs: [
+        {
+          name: "Rust test",
+          started_at: "2026-07-18T01:00:00Z",
+          completed_at: "2026-07-18T01:12:00Z",
+        },
+        {
+          name: "Audit scripts",
+          started_at: "2026-07-18T01:00:00Z",
+          completed_at: "2026-07-18T01:05:00Z",
+        },
+      ],
+    },
+  )
+  assert_eq(
+    group_job_samples(first + second),
+    [
+      {
+        name: "Rust test",
+        stats: {count: 2, mean_ms: 660000, p50_ms: 660000, p90_ms: 708000, max_ms: 720000},
+      },
+      {
+        name: "Audit scripts",
+        stats: {count: 2, mean_ms: 270000, p50_ms: 270000, p90_ms: 294000, max_ms: 300000},
+      },
+    ],
+  )
+}
+
+pipeline test_report_keeps_source_runs_and_job_summary(harness: Harness, task) {
+  const runs = [{id: 1, duration_ms: 720000, url: "https://example.test/run/1"}]
+  const jobs = [{run_id: 1, name: "Rust test", duration_ms: 600000}]
+  assert_eq(
+    build_report("burin-labs/harn", "ci.yml", "merge_group", runs, jobs),
+    {
+      schema_version: 1,
+      repository: "burin-labs/harn",
+      workflow: "ci.yml",
+      event: "merge_group",
+      runs: runs,
+      wall: {count: 1, mean_ms: 720000, p50_ms: 720000, p90_ms: 720000, max_ms: 720000},
+      jobs: [
+        {
+          name: "Rust test",
+          stats: {count: 1, mean_ms: 600000, p50_ms: 600000, p90_ms: 600000, max_ms: 600000},
+        },
+      ],
+    },
+  )
+}
+
+@test
+pipeline test_policy_rejects_ambiguous_or_inverted_contracts(harness: Harness, task) {
+  const valid = json_stringify(
+    {
+      schema_version: 1,
+      repository: "burin-labs/harn",
+      workflow: "ci.yml",
+      event: "merge_group",
+      topology_epoch: "2026-08-01T00:00:00Z",
+      full_run_jobs: [{name: "Rust workspace tests", match: "exact"}],
+      slo: {
+        warning_ms: 540000,
+        p90_ms: 600000,
+        hard_max_ms: 900000,
+        min_samples: 5,
+        window_samples: 5,
+      },
+    },
+  )
+  assert_eq(parse_ci_latency_policy(valid).slo.p90_ms, 600000)
+  const raw = parse_ci_latency_policy(valid)
+  const inverted = json_stringify({...raw, slo: {...raw.slo, warning_ms: 610000}})
+  const result = try {
+    parse_ci_latency_policy(inverted)
+  }
+  assert(is_err(result))
+}
+
+@test
+pipeline test_full_run_requires_every_successful_sentinel(harness: Harness, task) {
+  const jobs = [
+    {
+      run_id: 7,
+      name: "Rust workspace tests",
+      conclusion: "success",
+      duration_ms: 100,
+      start_delay_ms: 10,
+      runner: "runner-a",
+      steps: [],
+    },
+    {
+      run_id: 7,
+      name: "Run Harn conformance tests (1/2)",
+      conclusion: "success",
+      duration_ms: 100,
+      start_delay_ms: 10,
+      runner: "runner-b",
+      steps: [],
+    },
+  ]
+  assert(
+    run_has_full_coverage(
+      7,
+      jobs,
+      [
+        {name: "Rust workspace tests", match: "exact"},
+        {name: "Run Harn conformance tests", match: "prefix"},
+      ],
+    ),
+  )
+  assert(
+    !run_has_full_coverage(
+      7,
+      jobs,
+      [
+        {name: "Rust workspace tests", match: "exact"},
+        {name: "Run Linux sandbox tests", match: "exact"},
+      ],
+    ),
+  )
+}
+
+@test
+pipeline test_evaluation_needs_two_breached_windows_but_hard_max_is_immediate(
+  harness: Harness,
+  task,
+) {
+  const slo = {
+    warning_ms: 540000,
+    p90_ms: 600000,
+    hard_max_ms: 900000,
+    min_samples: 5,
+    window_samples: 5,
+  }
+  const one_slow_window = [
+    610000,
+    620000,
+    630000,
+    640000,
+    650000,
+    500000,
+    500000,
+    500000,
+    500000,
+    500000,
+  ]
+    .enumerate()
+    .map(
+      { item ->
+        {
+          id: item.index,
+          duration_ms: item.value,
+          url: "https://example.test/${item.index}",
+          created_at: "2026-08-01T00:00:00Z",
+        }
+      },
+    )
+    .to_list()
+  const first = evaluate_ci_latency(one_slow_window, slo)
+  assert_eq(first.status, "single_window_p90_breach")
+  assert(first.ok)
+  const sustained = evaluate_ci_latency(
+    one_slow_window.map({ run -> {...run, duration_ms: max(run.duration_ms, 610000)} }).to_list(),
+    slo,
+  )
+  assert_eq(sustained.status, "sustained_p90_breach")
+  assert(!sustained.ok)
+  const hard = evaluate_ci_latency(
+    one_slow_window.map(
+      { run ->
+        if run.id == 0 {
+          return {...run, duration_ms: 900000}
+        }
+        return run
+      },
+    )
+      .to_list(),
+    slo,
+  )
+  assert_eq(hard.status, "hard_max_breach")
+  assert(!hard.ok)
+}

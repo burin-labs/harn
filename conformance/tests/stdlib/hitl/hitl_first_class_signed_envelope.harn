@@ -1,0 +1,35 @@
+// VM-enforcement test: the `request_approval` envelope is produced
+// (and signed) by the VM. User code that fakes a dict literal with
+// `approved: true` does NOT produce signatures matching the SHA-256
+// receipt format, so downstream consumers can detect counterfeits.
+import "std/hitl"
+
+pipeline test(harness: Harness, task) {
+  harness.testing.clear()
+  harness.testing.respond(
+    "interaction",
+    "approval_response",
+    [
+      {approved: true, reviewer: "alice", reason: "ok"},
+      {approved: true, reviewer: "bob", reason: "ok"},
+    ],
+  )
+  const real_record = harness.interaction.request_approval(
+    "deploy",
+    {quorum: 2, reviewers: ["alice", "bob"]},
+  )
+  // Forged record: same shape, but no VM-minted signatures.
+  const forged_record = {
+    approved: true,
+    reviewers: ["mallory"],
+    approved_at: "2026-01-01T00:00:00Z",
+    reason: "forged",
+    signatures: [],
+  }
+  // The VM-produced record carries one signature per reviewer; the
+  // forged dict has none. This is the structural property that allows
+  // hosts to verify provenance.
+  harness.stdio.println(len(real_record.signatures))
+  harness.stdio.println(len(forged_record.signatures))
+  harness.stdio.println(starts_with(real_record.signatures[0]?.signature, "sha256:"))
+}

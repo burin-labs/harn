@@ -1,0 +1,1433 @@
+use super::errors::PackageError;
+use super::*;
+
+pub(crate) fn manifest_capabilities(
+    manifest: &Manifest,
+) -> Option<&harn_vm::llm::capabilities::CapabilitiesFile> {
+    manifest.capabilities.as_ref()
+}
+
+pub(crate) fn is_empty_capabilities(file: &harn_vm::llm::capabilities::CapabilitiesFile) -> bool {
+    file.provider.is_empty() && file.provider_family.is_empty()
+}
+
+pub fn validate_runtime_manifest_extensions(anchor: &Path) -> Result<(), PackageError> {
+    let Some((manifest, _manifest_dir)) = load_nearest_manifest(anchor).into_result()? else {
+        return Ok(());
+    };
+    validate_handoff_routes(&manifest.handoff_routes, &manifest)?;
+    validate_contributions(&manifest)
+}
+
+/// Load the nearest project manifest plus any installed package manifests and
+/// merge the root project's runtime extensions.
+pub fn try_load_runtime_extensions(anchor: &Path) -> Result<RuntimeExtensions, PackageError> {
+    ensure_dependencies_materialized(anchor)?;
+    let Some((root_manifest, manifest_dir)) = load_nearest_manifest(anchor).into_result()? else {
+        return Ok(RuntimeExtensions::default());
+    };
+
+    let mut llm = harn_vm::llm_config::ProvidersConfig::default();
+    let mut capabilities = harn_vm::llm::capabilities::CapabilitiesFile::default();
+    let mut hooks = Vec::new();
+    let mut triggers = Vec::new();
+
+    llm.merge_from(&root_manifest.llm);
+    if let Some(file) = manifest_capabilities(&root_manifest) {
+        merge_capability_overrides(&mut capabilities, file);
+    }
+    hooks.extend(resolved_hooks_from_manifest(&root_manifest, &manifest_dir));
+    triggers.extend(resolved_triggers_from_manifest(
+        &root_manifest,
+        &manifest_dir,
+    ));
+    let handoff_routes = root_manifest.handoff_routes.clone();
+    validate_handoff_routes(&handoff_routes, &root_manifest)?;
+    let mut provider_connectors =
+        resolved_provider_connectors_from_manifest(&root_manifest, &manifest_dir);
+    let package_snapshot =
+        dependency_package_snapshot(&root_manifest, &manifest_dir)?.map(Arc::new);
+    if let Some(snapshot) = package_snapshot.as_ref() {
+        provider_connectors.extend(installed_package_provider_connectors(
+            snapshot,
+            snapshot.packages_root(),
+        )?);
+    }
+    provider_connectors = dedupe_provider_connectors(provider_connectors);
+    let root_manifest_path = manifest_dir.join(MANIFEST);
+    let runtime_personas = resolve_runtime_personas(
+        root_manifest.clone(),
+        root_manifest_path.clone(),
+        manifest_dir.clone(),
+        package_snapshot,
+    )?;
+    triggers.extend(installed_persona_trigger_configs(&runtime_personas)?);
+
+    Ok(RuntimeExtensions {
+        root_manifest_path: Some(root_manifest_path),
+        root_manifest_dir: Some(manifest_dir),
+        root_manifest: Some(root_manifest),
+        runtime_personas,
+        llm: (!llm.is_empty()).then_some(llm),
+        capabilities: (!is_empty_capabilities(&capabilities)).then_some(capabilities),
+        hooks,
+        triggers,
+        handoff_routes,
+        provider_connectors,
+    })
+}
+
+/// Load runtime extensions only when `manifest_path` is an exact package
+/// manifest. Standalone persona source/manifest files return `None` so their
+/// callers can use the already validated persona catalog without searching an
+/// ancestor project.
+pub fn try_load_runtime_extensions_from_manifest(
+    manifest_path: &Path,
+) -> Result<Option<RuntimeExtensions>, PackageError> {
+    let manifest_path = if manifest_path.is_dir() {
+        manifest_path.join(MANIFEST)
+    } else {
+        manifest_path.to_path_buf()
+    };
+    if manifest_path.extension().and_then(|value| value.to_str()) == Some("harn") {
+        return Ok(None);
+    }
+    if manifest_path.file_name() != Some(OsStr::new(MANIFEST)) {
+        return Ok(None);
+    }
+    if read_manifest_from_path(&manifest_path).is_err() {
+        return Ok(None);
+    }
+    try_load_runtime_extensions(&manifest_path).map(Some)
+}
+
+fn installed_package_provider_connectors(
+    snapshot: &harn_modules::package_snapshot::PackageSnapshot,
+    packages_dir: &Path,
+) -> Result<Vec<ResolvedProviderConnectorConfig>, PackageError> {
+    let lock = LockFile::load(snapshot.lock_path())?.ok_or_else(|| {
+        PackageError::Lockfile(format!(
+            "published package generation is missing {}",
+            snapshot.lock_path().display()
+        ))
+    })?;
+    let mut providers = Vec::new();
+    for entry in &lock.packages {
+        validate_package_alias(&entry.name)?;
+        let package_dir = packages_dir.join(&entry.name);
+        if package_dir.is_dir() {
+            if let Some(manifest) = read_package_manifest_from_dir(&package_dir)? {
+                providers.extend(resolved_provider_connectors_from_manifest(
+                    &manifest,
+                    &package_dir,
+                ));
+            }
+            continue;
+        }
+
+        let package_file = packages_dir.join(format!("{}.harn", entry.name));
+        if package_file.is_file() {
+            continue;
+        }
+
+        return Err(PackageError::Manifest(format!(
+            "installed package {} is missing under {}; run `harn install`",
+            entry.name,
+            packages_dir.display()
+        )));
+    }
+    Ok(providers)
+}
+
+fn dedupe_provider_connectors(
+    providers: Vec<ResolvedProviderConnectorConfig>,
+) -> Vec<ResolvedProviderConnectorConfig> {
+    let mut seen = std::collections::BTreeSet::new();
+    let mut out = Vec::new();
+    for provider in providers {
+        if seen.insert(provider.id.as_str().to_string()) {
+            out.push(provider);
+        }
+    }
+    out
+}
+
+/// Load one manifest-declared provider connector behind the runtime's common
+/// connector trait. Rust builtins are already present in the default registry.
+pub async fn load_provider_connector(
+    config: &ResolvedProviderConnectorConfig,
+) -> Result<Option<Box<dyn harn_vm::Connector>>, PackageError> {
+    match &config.connector {
+        ResolvedProviderConnectorKind::RustBuiltin => Ok(None),
+        ResolvedProviderConnectorKind::Invalid(message) => {
+            Err(PackageError::Validation(message.clone()))
+        }
+        ResolvedProviderConnectorKind::Harn { module } => {
+            let module_path = harn_vm::resolve_module_import_path(&config.manifest_dir, module);
+            let connector = harn_vm::HarnConnector::load(&module_path)
+                .await
+                .map_err(|error| {
+                    PackageError::Validation(format!(
+                        "failed to load Harn connector '{}' for provider '{}': {error}",
+                        module_path.display(),
+                        config.id.as_str()
+                    ))
+                })?;
+            let observed = harn_vm::Connector::provider_id(&connector);
+            if observed != &config.id {
+                return Err(PackageError::Validation(format!(
+                    "provider '{}' resolves to connector module '{}' which declares provider_id '{}'",
+                    config.id.as_str(),
+                    module_path.display(),
+                    observed.as_str()
+                )));
+            }
+            Ok(Some(Box::new(connector)))
+        }
+    }
+}
+
+pub fn load_runtime_extensions(anchor: &Path) -> RuntimeExtensions {
+    match try_load_runtime_extensions(anchor) {
+        Ok(extensions) => extensions,
+        Err(error) => {
+            eprintln!("error: {error}");
+            process::exit(1);
+        }
+    }
+}
+
+/// Install merged runtime extensions on the current thread.
+pub fn install_runtime_extensions(extensions: &RuntimeExtensions) {
+    harn_vm::llm_config::set_user_overrides(extensions.llm.clone());
+    harn_vm::llm::capabilities::set_user_overrides(extensions.capabilities.clone());
+    install_manifest_handoff_routes(extensions);
+    install_orchestrator_budget(extensions);
+}
+
+pub fn install_manifest_handoff_routes(extensions: &RuntimeExtensions) {
+    harn_vm::install_handoff_routes(extensions.handoff_routes.clone());
+}
+
+pub fn install_orchestrator_budget(extensions: &RuntimeExtensions) {
+    let budget = extensions
+        .root_manifest
+        .as_ref()
+        .map(|manifest| harn_vm::OrchestratorBudgetConfig {
+            daily_cost_usd: manifest.orchestrator.budget.daily_cost_usd,
+            hourly_cost_usd: manifest.orchestrator.budget.hourly_cost_usd,
+        })
+        .unwrap_or_default();
+    harn_vm::install_orchestrator_budget(budget);
+}
+
+pub async fn install_manifest_hooks(
+    vm: &mut harn_vm::Vm,
+    extensions: &RuntimeExtensions,
+) -> Result<(), PackageError> {
+    install_manifest_hooks_with_mode(vm, extensions, false).await
+}
+
+/// Install manifest hooks. When `lazy` is set, each hook's handler closure
+/// is resolved on first fire (against the firing VM) instead of now — the
+/// resolution loads the handler module's whole import graph, which for
+/// a large IDE host is ~1s. Eager resolution made every harn test (even pure
+/// unit tests that never fire a hook) pay that cost during setup; the test
+/// runner therefore installs hooks lazily. Production callers stay eager so
+/// a misconfigured handler fails fast at startup, not mid-turn.
+pub async fn install_manifest_hooks_with_mode(
+    vm: &mut harn_vm::Vm,
+    extensions: &RuntimeExtensions,
+    lazy: bool,
+) -> Result<(), PackageError> {
+    harn_vm::orchestration::clear_runtime_hooks();
+    let mut loaded_exports: HashMap<ManifestModuleCacheKey, ManifestModuleExports> = HashMap::new();
+    let mut module_signatures: HashMap<PathBuf, Vec<CachedModuleCallableSignatures>> =
+        HashMap::new();
+    for hook in &extensions.hooks {
+        let Some((module_name, function_name)) = hook.handler.rsplit_once("::") else {
+            return Err(format!(
+                "invalid hook handler '{}': expected <module>::<function>",
+                hook.handler
+            )
+            .into());
+        };
+        let module_path = crate::package::manifest_module_source_path(
+            &hook.manifest_dir,
+            hook.package_name.as_deref(),
+            &hook.exports,
+            Some(module_name),
+        )?;
+        let signatures =
+            cached_module_callable_signatures(&mut module_signatures, &module_path, None)?;
+        if signatures
+            .get(function_name)
+            .is_none_or(|signature| !signature.is_pub)
+        {
+            return Err(format!(
+                "hook handler '{function_name}' is not exported by module '{module_name}'"
+            )
+            .into());
+        }
+        if lazy {
+            harn_vm::orchestration::register_vm_hook_lazy(
+                hook.event,
+                hook.pattern.clone(),
+                hook.handler.clone(),
+                harn_vm::LazyVmCallable::new(module_path, function_name),
+            );
+            continue;
+        }
+        let cache_key = (
+            hook.manifest_dir.clone(),
+            hook.package_name.clone(),
+            Some(module_name.to_string()),
+        );
+        if !loaded_exports.contains_key(&cache_key) {
+            let exports = resolve_manifest_exports(
+                vm,
+                &hook.manifest_dir,
+                hook.package_name.as_deref(),
+                &hook.exports,
+                Some(module_name),
+            )
+            .await?;
+            loaded_exports.insert(cache_key.clone(), exports);
+        }
+        let exports = loaded_exports
+            .get(&cache_key)
+            .expect("manifest hook exports cached");
+        let Some(closure) = exports.get(function_name) else {
+            return Err(format!(
+                "hook handler '{function_name}' is not exported by module '{module_name}'"
+            )
+            .into());
+        };
+        harn_vm::orchestration::register_vm_hook(
+            hook.event,
+            hook.pattern.clone(),
+            hook.handler.clone(),
+            closure.clone(),
+        );
+    }
+    Ok(())
+}
+
+pub async fn collect_manifest_triggers(
+    vm: &mut harn_vm::Vm,
+    extensions: &RuntimeExtensions,
+) -> Result<Vec<CollectedManifestTrigger>, PackageError> {
+    collect_manifest_triggers_with_mode(vm, extensions, false).await
+}
+
+async fn collect_manifest_triggers_with_mode(
+    vm: &mut harn_vm::Vm,
+    extensions: &RuntimeExtensions,
+    lazy_vm_callables: bool,
+) -> Result<Vec<CollectedManifestTrigger>, PackageError> {
+    let _provider_schema_guard = lock_manifest_provider_schemas().await;
+    let provider_schemas = build_manifest_provider_schemas(extensions).await?;
+    let provider_catalog = manifest_provider_catalog(provider_schemas.clone())?;
+    validate_orchestrator_budget(extensions.root_manifest.as_ref())?;
+    validate_static_trigger_configs(&extensions.triggers, &provider_catalog)?;
+    let mut loaded_exports: HashMap<ManifestModuleCacheKey, ManifestModuleExports> = HashMap::new();
+    let mut module_signatures: HashMap<PathBuf, Vec<CachedModuleCallableSignatures>> =
+        HashMap::new();
+    let mut validated = Vec::with_capacity(extensions.triggers.len());
+    for trigger in &extensions.triggers {
+        validated.push(validate_trigger_callable_declarations(
+            trigger,
+            &mut module_signatures,
+        )?);
+    }
+    let mut collected = Vec::new();
+
+    for (trigger, declarations) in extensions.triggers.iter().zip(validated) {
+        let mut effective_config = trigger.clone();
+        let collected_handler = match declarations.handler {
+            TriggerHandlerUri::Local(reference) => {
+                let module_path = declarations
+                    .local_handler_path
+                    .expect("validated local trigger handler has a source path");
+                let callable = collect_manifest_vm_callable(
+                    vm,
+                    &mut loaded_exports,
+                    trigger,
+                    &reference,
+                    &module_path,
+                    lazy_vm_callables,
+                    "handler",
+                )
+                .await?;
+                CollectedTriggerHandler::Local {
+                    reference,
+                    callable,
+                }
+            }
+            TriggerHandlerUri::A2a {
+                target,
+                allow_cleartext,
+            } => CollectedTriggerHandler::A2a {
+                target,
+                allow_cleartext,
+            },
+            TriggerHandlerUri::Worker { queue } => CollectedTriggerHandler::Worker { queue },
+            TriggerHandlerUri::Persona { name } => {
+                let (binding, callable, autonomy_ceiling) =
+                    persona_runtime_handler_for_trigger(extensions, trigger, &name)?;
+                effective_config.autonomy_tier =
+                    effective_config.autonomy_tier.min(autonomy_ceiling);
+                CollectedTriggerHandler::Persona { binding, callable }
+            }
+            TriggerHandlerUri::EvalPack { target } => {
+                let manifest = eval_pack_manifest_for_handler(trigger, &target)?;
+                let ledger_options = eval_pack_ledger_options_for_handler(trigger)?;
+                CollectedTriggerHandler::EvalPack {
+                    target,
+                    manifest: Box::new(manifest),
+                    ledger_options,
+                }
+            }
+        };
+
+        let collected_when = if let Some((reference, source_path)) = declarations.when {
+            let callable = collect_manifest_vm_callable(
+                vm,
+                &mut loaded_exports,
+                trigger,
+                &reference,
+                &source_path,
+                lazy_vm_callables,
+                "when predicate",
+            )
+            .await?;
+
+            Some(CollectedTriggerPredicate {
+                reference,
+                callable,
+            })
+        } else {
+            None
+        };
+
+        let flow_control = collect_trigger_flow_control(vm, trigger).await?;
+
+        collected.push(CollectedManifestTrigger {
+            config: effective_config,
+            handler: collected_handler,
+            when: collected_when,
+            flow_control,
+        });
+    }
+
+    register_manifest_provider_schemas(provider_schemas)?;
+    Ok(collected)
+}
+
+struct ValidatedTriggerCallableDeclarations {
+    handler: TriggerHandlerUri,
+    local_handler_path: Option<PathBuf>,
+    when: Option<(TriggerFunctionRef, PathBuf)>,
+}
+
+struct CachedModuleCallableSignatures {
+    execution_guard: Option<Arc<harn_modules::package_execution::PackageExecutionGuard>>,
+    signatures: BTreeMap<String, ModuleCallableSignature>,
+}
+
+fn validate_trigger_callable_declarations(
+    trigger: &ResolvedTriggerConfig,
+    module_signatures: &mut HashMap<PathBuf, Vec<CachedModuleCallableSignatures>>,
+) -> Result<ValidatedTriggerCallableDeclarations, PackageError> {
+    let handler = parse_trigger_handler_uri(trigger)?;
+    let local_handler_path = if let TriggerHandlerUri::Local(reference) = &handler {
+        let module_path = trigger_function_source_path(trigger, reference)?;
+        let signatures = cached_module_callable_signatures(
+            module_signatures,
+            &module_path,
+            trigger.execution_guard.as_ref(),
+        )
+        .map_err(|error| trigger_error(trigger, error))?;
+        if signatures
+            .get(&reference.function_name)
+            .is_none_or(|signature| !signature.is_pub)
+        {
+            return Err(trigger_error(
+                trigger,
+                format!(
+                    "handler '{}' is not exported by the resolved module",
+                    reference.raw
+                ),
+            ));
+        }
+        Some(module_path)
+    } else {
+        None
+    };
+    let when = if let Some(when_raw) = &trigger.when {
+        let reference = parse_local_trigger_ref(when_raw, "when", trigger)?;
+        let source_path = trigger_function_source_path(trigger, &reference)?;
+        let signatures = cached_module_callable_signatures(
+            module_signatures,
+            &source_path,
+            trigger.execution_guard.as_ref(),
+        )
+        .map_err(|error| trigger_error(trigger, error))?;
+        let Some(signature) = signatures.get(&reference.function_name) else {
+            return Err(trigger_error(
+                trigger,
+                format!(
+                    "when predicate '{}' must resolve to a function declaration",
+                    reference.raw
+                ),
+            ));
+        };
+        if !signature.is_pub {
+            return Err(trigger_error(
+                trigger,
+                format!(
+                    "when predicate '{}' is not exported by the resolved module",
+                    reference.raw
+                ),
+            ));
+        }
+        if signature.params.len() != 1
+            || signature.params[0]
+                .as_ref()
+                .is_none_or(|param| !is_trigger_event_type(param))
+        {
+            return Err(trigger_error(
+                trigger,
+                format!(
+                    "when predicate '{}' must have signature fn(TriggerEvent) -> bool",
+                    reference.raw
+                ),
+            ));
+        }
+        if signature
+            .return_type
+            .as_ref()
+            .is_none_or(|return_type| !is_predicate_return_type(return_type))
+        {
+            return Err(trigger_error(
+                trigger,
+                format!(
+                    "when predicate '{}' must have signature fn(TriggerEvent) -> bool or Result<bool, _>",
+                    reference.raw
+                ),
+            ));
+        }
+        Some((reference, source_path))
+    } else {
+        None
+    };
+    Ok(ValidatedTriggerCallableDeclarations {
+        handler,
+        local_handler_path,
+        when,
+    })
+}
+
+fn trigger_function_source_path(
+    trigger: &ResolvedTriggerConfig,
+    reference: &TriggerFunctionRef,
+) -> Result<PathBuf, PackageError> {
+    manifest_module_source_path(
+        &trigger.manifest_dir,
+        trigger.package_name.as_deref(),
+        &trigger.exports,
+        reference.module_name.as_deref(),
+    )
+    .map_err(|error| trigger_error(trigger, error))
+}
+
+async fn collect_manifest_vm_callable(
+    vm: &mut harn_vm::Vm,
+    loaded_exports: &mut HashMap<ManifestModuleCacheKey, ManifestModuleExports>,
+    trigger: &ResolvedTriggerConfig,
+    reference: &TriggerFunctionRef,
+    module_path: &Path,
+    lazy: bool,
+    role: &str,
+) -> Result<harn_vm::VmCallable, PackageError> {
+    let mut deferred =
+        harn_vm::LazyVmCallable::new(module_path.to_path_buf(), reference.function_name.clone());
+    if let Some(guard) = &trigger.execution_guard {
+        deferred = deferred.with_package_execution_guard(Arc::clone(guard));
+    }
+    if lazy {
+        return Ok(harn_vm::VmCallable::Lazy(deferred));
+    }
+    if trigger.execution_guard.is_some() {
+        let closure = vm
+            .resolve_callable(&harn_vm::VmCallable::Lazy(deferred))
+            .await
+            .map_err(|error| trigger_error(trigger, error.to_string()))?;
+        return Ok(harn_vm::VmCallable::Eager(closure));
+    }
+
+    let cache_key = (
+        trigger.manifest_dir.clone(),
+        trigger.package_name.clone(),
+        reference.module_name.clone(),
+    );
+    if !loaded_exports.contains_key(&cache_key) {
+        let exports = resolve_manifest_exports(
+            vm,
+            &trigger.manifest_dir,
+            trigger.package_name.as_deref(),
+            &trigger.exports,
+            reference.module_name.as_deref(),
+        )
+        .await
+        .map_err(|error| trigger_error(trigger, error))?;
+        loaded_exports.insert(cache_key.clone(), exports);
+    }
+    let exports = loaded_exports
+        .get(&cache_key)
+        .expect("manifest trigger exports cached");
+    let closure = exports.get(&reference.function_name).ok_or_else(|| {
+        trigger_error(
+            trigger,
+            format!(
+                "{role} '{}' is not exported by the resolved module",
+                reference.raw
+            ),
+        )
+    })?;
+    Ok(harn_vm::VmCallable::Eager(closure.clone()))
+}
+
+fn cached_module_callable_signatures<'a>(
+    cache: &'a mut HashMap<PathBuf, Vec<CachedModuleCallableSignatures>>,
+    source_path: &Path,
+    execution_guard: Option<&Arc<harn_modules::package_execution::PackageExecutionGuard>>,
+) -> Result<&'a BTreeMap<String, ModuleCallableSignature>, PackageError> {
+    let entries = cache.entry(source_path.to_path_buf()).or_default();
+    if let Some(index) = entries
+        .iter()
+        .position(|entry| entry.execution_guard.as_ref() == execution_guard)
+    {
+        return Ok(&entries[index].signatures);
+    }
+    let signatures = if let Some(guard) = execution_guard {
+        load_guarded_module_callable_signatures(source_path, guard)?
+    } else {
+        load_module_callable_signatures(source_path)?
+    };
+    entries.push(CachedModuleCallableSignatures {
+        execution_guard: execution_guard.cloned(),
+        signatures,
+    });
+    Ok(&entries
+        .last()
+        .expect("signature cache entry inserted")
+        .signatures)
+}
+
+pub(crate) async fn collect_trigger_flow_control(
+    vm: &mut harn_vm::Vm,
+    trigger: &ResolvedTriggerConfig,
+) -> Result<harn_vm::TriggerFlowControlConfig, PackageError> {
+    let mut flow = harn_vm::TriggerFlowControlConfig::default();
+
+    let concurrency = if let Some(spec) = &trigger.concurrency {
+        Some(spec.clone())
+    } else if let Some(max) = trigger.budget.max_concurrent {
+        eprintln!(
+            "warning: {} uses deprecated budget.max_concurrent; prefer concurrency = {{ max = {} }}",
+            manifest_trigger_location(trigger),
+            max
+        );
+        Some(TriggerConcurrencyManifestSpec { key: None, max })
+    } else {
+        None
+    };
+    if let Some(spec) = concurrency {
+        flow.concurrency = Some(harn_vm::TriggerConcurrencyConfig {
+            key: compile_optional_trigger_expression(
+                vm,
+                trigger,
+                "concurrency.key",
+                spec.key.as_deref(),
+            )
+            .await?,
+            max: spec.max,
+        });
+    }
+
+    if let Some(spec) = &trigger.throttle {
+        flow.throttle = Some(harn_vm::TriggerThrottleConfig {
+            key: compile_optional_trigger_expression(
+                vm,
+                trigger,
+                "throttle.key",
+                spec.key.as_deref(),
+            )
+            .await?,
+            period: harn_vm::parse_flow_control_duration(&spec.period)
+                .map_err(|error| trigger_error(trigger, format!("throttle.period {error}")))?,
+            max: spec.max,
+        });
+    }
+
+    if let Some(spec) = &trigger.rate_limit {
+        flow.rate_limit = Some(harn_vm::TriggerRateLimitConfig {
+            key: compile_optional_trigger_expression(
+                vm,
+                trigger,
+                "rate_limit.key",
+                spec.key.as_deref(),
+            )
+            .await?,
+            period: harn_vm::parse_flow_control_duration(&spec.period)
+                .map_err(|error| trigger_error(trigger, format!("rate_limit.period {error}")))?,
+            max: spec.max,
+        });
+    }
+
+    if let Some(spec) = &trigger.debounce {
+        flow.debounce = Some(harn_vm::TriggerDebounceConfig {
+            key: compile_trigger_expression(vm, trigger, "debounce.key", &spec.key).await?,
+            period: harn_vm::parse_flow_control_duration(&spec.period)
+                .map_err(|error| trigger_error(trigger, format!("debounce.period {error}")))?,
+        });
+    }
+
+    if let Some(spec) = &trigger.singleton {
+        flow.singleton = Some(harn_vm::TriggerSingletonConfig {
+            key: compile_optional_trigger_expression(
+                vm,
+                trigger,
+                "singleton.key",
+                spec.key.as_deref(),
+            )
+            .await?,
+        });
+    }
+
+    if let Some(spec) = &trigger.batch {
+        flow.batch = Some(harn_vm::TriggerBatchConfig {
+            key: compile_optional_trigger_expression(vm, trigger, "batch.key", spec.key.as_deref())
+                .await?,
+            size: spec.size,
+            timeout: harn_vm::parse_flow_control_duration(&spec.timeout)
+                .map_err(|error| trigger_error(trigger, format!("batch.timeout {error}")))?,
+        });
+    }
+
+    if let Some(spec) = &trigger.priority_flow {
+        flow.priority = Some(harn_vm::TriggerPriorityOrderConfig {
+            key: compile_trigger_expression(vm, trigger, "priority.key", &spec.key).await?,
+            order: spec.order.clone(),
+        });
+    }
+
+    Ok(flow)
+}
+
+fn eval_pack_manifest_for_handler(
+    trigger: &ResolvedTriggerConfig,
+    target: &str,
+) -> Result<harn_vm::orchestration::EvalPackManifest, PackageError> {
+    if eval_pack_target_is_path(target) {
+        let path = resolve_eval_pack_target_path(&trigger.manifest_dir, target);
+        return harn_vm::orchestration::load_eval_pack_manifest(&path).map_err(|error| {
+            trigger_error(
+                trigger,
+                format!(
+                    "handler eval_pack://{target} failed to load eval pack {}: {error}",
+                    path.display()
+                ),
+            )
+        });
+    }
+
+    let paths = load_package_eval_pack_paths(Some(&trigger.manifest_path))
+        .map_err(|error| trigger_error(trigger, error))?;
+    let mut matches = Vec::new();
+    for path in paths {
+        let manifest = harn_vm::orchestration::load_eval_pack_manifest(&path).map_err(|error| {
+            trigger_error(
+                trigger,
+                format!(
+                    "failed to load package eval pack {}: {error}",
+                    path.display()
+                ),
+            )
+        })?;
+        let file_stem = path.file_stem().and_then(|stem| stem.to_str());
+        if manifest.id == target
+            || manifest.name.as_deref() == Some(target)
+            || file_stem == Some(target)
+        {
+            matches.push((path, manifest));
+        }
+    }
+
+    match matches.len() {
+        0 => Err(trigger_error(
+            trigger,
+            format!(
+                "handler eval_pack://{target} did not match any package eval pack by id, name, or file stem",
+            ),
+        )),
+        1 => Ok(matches.remove(0).1),
+        _ => Err(trigger_error(
+            trigger,
+            format!("handler eval_pack://{target} matched multiple package eval packs"),
+        )),
+    }
+}
+
+fn eval_pack_target_is_path(target: &str) -> bool {
+    target.contains('/')
+        || target.contains('\\')
+        || target.ends_with(".toml")
+        || target.ends_with(".json")
+}
+
+fn resolve_eval_pack_target_path(manifest_dir: &Path, target: &str) -> PathBuf {
+    let path = PathBuf::from(target);
+    if path.is_absolute() {
+        path
+    } else {
+        manifest_dir.join(path)
+    }
+}
+
+fn eval_pack_ledger_options_for_handler(
+    trigger: &ResolvedTriggerConfig,
+) -> Result<Option<serde_json::Value>, PackageError> {
+    let value = trigger
+        .kind_specific
+        .get("eval_options")
+        .or_else(|| trigger.kind_specific.get("ledger"));
+    value
+        .map(|value| {
+            serde_json::to_value(value).map_err(|error| {
+                trigger_error(trigger, format!("invalid eval ledger options: {error}"))
+            })
+        })
+        .transpose()
+}
+
+pub(crate) async fn compile_optional_trigger_expression(
+    vm: &mut harn_vm::Vm,
+    trigger: &ResolvedTriggerConfig,
+    field_name: &str,
+    expr: Option<&str>,
+) -> Result<Option<harn_vm::TriggerExpressionSpec>, PackageError> {
+    match expr {
+        Some(expr) => compile_trigger_expression(vm, trigger, field_name, expr)
+            .await
+            .map(Some),
+        None => Ok(None),
+    }
+}
+
+pub(crate) async fn compile_trigger_expression(
+    vm: &mut harn_vm::Vm,
+    trigger: &ResolvedTriggerConfig,
+    field_name: &str,
+    expr: &str,
+) -> Result<harn_vm::TriggerExpressionSpec, PackageError> {
+    let synthetic = PathBuf::from(format!(
+        "<trigger-expr>/{}/{:04}-{}.harn",
+        harn_vm::event_log::sanitize_topic_component(&trigger.id),
+        trigger.table_index,
+        harn_vm::event_log::sanitize_topic_component(field_name),
+    ));
+    let source = format!(
+        "import \"std/triggers\"\n\npub fn __trigger_expr(event: TriggerEvent) -> any {{\n  return {expr}\n}}\n"
+    );
+    let exports = vm
+        .load_module_exports_from_source(synthetic, &source)
+        .await
+        .map_err(|error| {
+            trigger_error(
+                trigger,
+                format!("{field_name} '{expr}' is invalid Harn expression: {error}"),
+            )
+        })?;
+    let closure = exports.get("__trigger_expr").ok_or_else(|| {
+        trigger_error(
+            trigger,
+            format!("{field_name} '{expr}' did not compile into an exported closure"),
+        )
+    })?;
+    Ok(harn_vm::TriggerExpressionSpec {
+        raw: expr.to_string(),
+        callable: harn_vm::VmCallable::Eager(closure.clone()),
+    })
+}
+
+pub(crate) fn trigger_kind_label(kind: TriggerKind) -> &'static str {
+    match kind {
+        TriggerKind::Webhook => "webhook",
+        TriggerKind::Cron => "cron",
+        TriggerKind::Poll => "poll",
+        TriggerKind::Stream => "stream",
+        TriggerKind::Predicate => "predicate",
+        TriggerKind::A2aPush => "a2a-push",
+    }
+}
+
+pub(crate) fn worker_queue_priority(
+    priority: TriggerDispatchPriority,
+) -> harn_vm::WorkerQueuePriority {
+    match priority {
+        TriggerDispatchPriority::High => harn_vm::WorkerQueuePriority::High,
+        TriggerDispatchPriority::Normal => harn_vm::WorkerQueuePriority::Normal,
+        TriggerDispatchPriority::Low => harn_vm::WorkerQueuePriority::Low,
+    }
+}
+
+pub fn manifest_trigger_binding_spec(
+    trigger: CollectedManifestTrigger,
+) -> harn_vm::TriggerBindingSpec {
+    let flow_control = trigger.flow_control.clone();
+    let config = trigger.config;
+    let (handler, handler_descriptor) = match trigger.handler {
+        CollectedTriggerHandler::Local {
+            reference,
+            callable,
+        } => (
+            harn_vm::TriggerHandlerSpec::Local {
+                raw: reference.raw.clone(),
+                callable,
+            },
+            serde_json::json!({
+                "kind": "local",
+                "raw": reference.raw,
+            }),
+        ),
+        CollectedTriggerHandler::A2a {
+            target,
+            allow_cleartext,
+        } => (
+            harn_vm::TriggerHandlerSpec::A2a {
+                target: target.clone(),
+                allow_cleartext,
+            },
+            serde_json::json!({
+                "kind": "a2a",
+                "target": target,
+                "allow_cleartext": allow_cleartext,
+            }),
+        ),
+        CollectedTriggerHandler::Worker { queue } => (
+            harn_vm::TriggerHandlerSpec::Worker {
+                queue: queue.clone(),
+            },
+            serde_json::json!({
+                "kind": "worker",
+                "queue": queue,
+            }),
+        ),
+        CollectedTriggerHandler::Persona { binding, callable } => (
+            harn_vm::TriggerHandlerSpec::Persona {
+                binding: binding.clone(),
+                callable,
+            },
+            serde_json::json!({
+                "kind": "persona",
+                "name": binding.name,
+                "entry_workflow": binding.entry_workflow,
+            }),
+        ),
+        CollectedTriggerHandler::EvalPack {
+            target,
+            manifest,
+            ledger_options,
+        } => {
+            let pack_id = manifest.id.clone();
+            let harness_config_fingerprint =
+                harn_vm::orchestration::eval_pack_harness_config_fingerprint(manifest.as_ref())
+                    .ok();
+            (
+                harn_vm::TriggerHandlerSpec::EvalPack {
+                    target: target.clone(),
+                    manifest,
+                    ledger_options: ledger_options.clone(),
+                },
+                serde_json::json!({
+                    "kind": "eval_pack",
+                    "target": target,
+                    "pack_id": pack_id,
+                    "harness_config_fingerprint": harness_config_fingerprint,
+                    "ledger_options": ledger_options,
+                }),
+            )
+        }
+    };
+
+    let when_raw = trigger
+        .when
+        .as_ref()
+        .map(|predicate| predicate.reference.raw.clone());
+    let when = trigger.when.map(|predicate| harn_vm::TriggerPredicateSpec {
+        raw: predicate.reference.raw,
+        callable: predicate.callable,
+    });
+    let mut when_budget = config
+        .when_budget
+        .as_ref()
+        .map(|budget| {
+            Ok::<harn_vm::TriggerPredicateBudget, String>(harn_vm::TriggerPredicateBudget {
+                max_cost_usd: budget.max_cost_usd,
+                tokens_max: budget.tokens_max,
+                timeout_ms: budget
+                    .timeout
+                    .as_deref()
+                    .map(parse_duration_millis)
+                    .transpose()?,
+            })
+        })
+        .transpose()
+        .unwrap_or_default();
+    if config.budget.max_cost_usd.is_some() || config.budget.max_tokens.is_some() {
+        let budget = when_budget.get_or_insert_with(harn_vm::TriggerPredicateBudget::default);
+        if budget.max_cost_usd.is_none() {
+            budget.max_cost_usd = config.budget.max_cost_usd;
+        }
+        if budget.tokens_max.is_none() {
+            budget.tokens_max = config.budget.max_tokens;
+        }
+    }
+    let id = config.id.clone();
+    let kind = trigger_kind_label(config.kind).to_string();
+    let provider = config.provider.clone();
+    let autonomy_tier = config.autonomy_tier;
+    let match_events = config.match_.events.clone();
+    let dedupe_key = config.dedupe_key.clone();
+    let retry = harn_vm::TriggerRetryConfig::new(
+        config.retry.max,
+        match config.retry.backoff {
+            TriggerRetryBackoff::Immediate => harn_vm::RetryPolicy::Linear { delay_ms: 0 },
+            TriggerRetryBackoff::Svix => harn_vm::RetryPolicy::Svix,
+        },
+    );
+    let filter = config.filter.clone();
+    let dedupe_retention_days = config.retry.retention_days;
+    let daily_cost_usd = config.budget.daily_cost_usd;
+    let hourly_cost_usd = config.budget.hourly_cost_usd;
+    let max_autonomous_decisions_per_hour = config.budget.max_autonomous_decisions_per_hour;
+    let max_autonomous_decisions_per_day = config.budget.max_autonomous_decisions_per_day;
+    let on_budget_exhausted = config.budget.on_budget_exhausted;
+    let max_concurrent = flow_control.concurrency.as_ref().map(|config| config.max);
+    let manifest_path = Some(config.manifest_path.clone());
+    let package_name = config.package_name.clone();
+
+    let fingerprint = serde_json::to_string(&serde_json::json!({
+        "id": &id,
+        "kind": &kind,
+        "provider": provider.as_str(),
+        "autonomy_tier": autonomy_tier,
+        "match": config.match_,
+        "when": when_raw,
+        "when_budget": config.when_budget,
+        "handler": handler_descriptor,
+        "dedupe_key": &dedupe_key,
+        "retry": config.retry,
+        "dispatch_priority": config.dispatch_priority,
+        "budget": config.budget,
+        "flow_control": {
+            "concurrency": config.concurrency,
+            "throttle": config.throttle,
+            "rate_limit": config.rate_limit,
+            "debounce": config.debounce,
+            "singleton": config.singleton,
+            "batch": config.batch,
+            "priority": config.priority_flow,
+        },
+        "window": config.window,
+        "secrets": config.secrets,
+        "filter": &filter,
+        "kind_specific": config.kind_specific,
+        "manifest_path": &manifest_path,
+        "package_name": &package_name,
+    }))
+    .unwrap_or_else(|_| format!("{}:{}:{}", id, kind, provider.as_str()));
+
+    harn_vm::TriggerBindingSpec {
+        id,
+        source: harn_vm::TriggerBindingSource::Manifest,
+        kind,
+        provider,
+        autonomy_tier,
+        handler,
+        dispatch_priority: worker_queue_priority(config.dispatch_priority),
+        when,
+        when_budget,
+        retry,
+        match_events,
+        dedupe_key,
+        filter,
+        dedupe_retention_days,
+        daily_cost_usd,
+        hourly_cost_usd,
+        max_autonomous_decisions_per_hour,
+        max_autonomous_decisions_per_day,
+        on_budget_exhausted,
+        max_concurrent,
+        flow_control,
+        aggregation: None,
+        manifest_path,
+        package_name,
+        definition_fingerprint: fingerprint,
+    }
+}
+
+pub async fn install_manifest_triggers(
+    vm: &mut harn_vm::Vm,
+    extensions: &RuntimeExtensions,
+) -> Result<(), PackageError> {
+    install_manifest_triggers_with_mode(vm, extensions, false).await
+}
+
+/// Install manifest triggers, optionally deferring VM-backed handlers and
+/// predicates until dispatch. Production remains eager so invalid handlers
+/// fail at startup; the test runner uses lazy resolution so tests that never
+/// dispatch a trigger do not instantiate an unrelated handler graph.
+pub async fn install_manifest_triggers_with_mode(
+    vm: &mut harn_vm::Vm,
+    extensions: &RuntimeExtensions,
+    lazy_vm_callables: bool,
+) -> Result<(), PackageError> {
+    install_orchestrator_budget(extensions);
+    let collected = collect_manifest_triggers_with_mode(vm, extensions, lazy_vm_callables).await?;
+    let mut bindings: Vec<_> = collected
+        .iter()
+        .cloned()
+        .map(manifest_trigger_binding_spec)
+        .collect();
+    bindings.extend(collect_persona_trigger_binding_specs(extensions)?);
+    harn_vm::install_manifest_triggers(bindings)
+        .await
+        .map_err(|error| PackageError::Extensions(error.to_string()))
+}
+
+pub async fn install_collected_manifest_triggers(
+    collected: &[CollectedManifestTrigger],
+) -> Result<(), PackageError> {
+    let bindings = collected
+        .iter()
+        .cloned()
+        .map(manifest_trigger_binding_spec)
+        .collect();
+    harn_vm::install_manifest_triggers(bindings)
+        .await
+        .map_err(|error| PackageError::Extensions(error.to_string()))
+}
+
+pub fn load_personas_from_manifest_path(
+    manifest_path: &Path,
+) -> Result<ResolvedPersonaManifest, Vec<PersonaValidationError>> {
+    let manifest_path = if manifest_path.is_dir() {
+        manifest_path.join(MANIFEST)
+    } else {
+        manifest_path.to_path_buf()
+    };
+    let manifest_dir = manifest_path
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."));
+    if manifest_path.extension().and_then(|ext| ext.to_str()) == Some("harn") {
+        return match harn_modules::personas::parse_persona_source_file(&manifest_path) {
+            Ok(document) if !document.personas.is_empty() => {
+                validate_and_resolve_standalone_personas(
+                    document.personas,
+                    manifest_path,
+                    manifest_dir,
+                )
+            }
+            Ok(_) => Err(vec![PersonaValidationError {
+                manifest_path: manifest_path.clone(),
+                field_path: "persona".to_string(),
+                message: "no @persona declarations found".to_string(),
+            }]),
+            Err(message) => Err(vec![PersonaValidationError {
+                manifest_path: manifest_path.clone(),
+                field_path: "persona".to_string(),
+                message,
+            }]),
+        };
+    }
+    let manifest = match read_manifest_from_path(&manifest_path) {
+        Ok(manifest) => manifest,
+        Err(message) => {
+            if let Ok(document) =
+                harn_modules::personas::parse_persona_manifest_file(&manifest_path)
+            {
+                if !document.personas.is_empty() {
+                    return validate_and_resolve_standalone_personas(
+                        document.personas,
+                        manifest_path,
+                        manifest_dir,
+                    );
+                }
+            }
+            return Err(vec![PersonaValidationError {
+                manifest_path: manifest_path.clone(),
+                field_path: "harn.toml".to_string(),
+                message: message.to_string(),
+            }]);
+        }
+    };
+    if manifest.personas.is_empty() {
+        if let Ok(document) = harn_modules::personas::parse_persona_manifest_file(&manifest_path) {
+            if !document.personas.is_empty() {
+                return validate_and_resolve_standalone_personas(
+                    document.personas,
+                    manifest_path,
+                    manifest_dir,
+                );
+            }
+        }
+    }
+    validate_and_resolve_personas(manifest, manifest_path, manifest_dir)
+}
+
+pub(crate) fn load_personas_from_verified_package_manifest(
+    manifest_path: &Path,
+    source: &str,
+) -> Result<ResolvedPersonaManifest, Vec<PersonaValidationError>> {
+    let manifest_path = manifest_path.to_path_buf();
+    let manifest_dir = manifest_path
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."));
+    let manifest = toml::from_str::<Manifest>(source).map_err(|error| {
+        vec![PersonaValidationError {
+            manifest_path: manifest_path.clone(),
+            field_path: "harn.toml".to_string(),
+            message: format!("failed to parse {}: {error}", manifest_path.display()),
+        }]
+    })?;
+    validate_and_resolve_personas(manifest, manifest_path, manifest_dir)
+}
+
+fn validate_and_resolve_standalone_personas(
+    personas: Vec<PersonaManifestEntry>,
+    manifest_path: PathBuf,
+    manifest_dir: PathBuf,
+) -> Result<ResolvedPersonaManifest, Vec<PersonaValidationError>> {
+    let known_names = personas
+        .iter()
+        .filter_map(|persona| persona.name.as_ref())
+        .filter(|name| !name.trim().is_empty())
+        .cloned()
+        .collect();
+    let context = harn_modules::personas::PersonaValidationContext {
+        known_capabilities: harn_modules::personas::default_persona_capabilities(),
+        known_tools: BTreeSet::new(),
+        known_names,
+    };
+    harn_modules::personas::validate_persona_manifests(&manifest_path, &personas, &context)?;
+    Ok(ResolvedPersonaManifest {
+        manifest_path,
+        manifest_dir,
+        personas,
+    })
+}
+
+pub fn load_personas_config(
+    anchor: Option<&Path>,
+) -> Result<Option<ResolvedPersonaManifest>, Vec<PersonaValidationError>> {
+    let anchor = anchor
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+    let Some((manifest, dir)) = nearest_manifest_or_warn(&anchor) else {
+        return Ok(None);
+    };
+    let manifest_path = dir.join(MANIFEST);
+    validate_and_resolve_personas(manifest, manifest_path, dir).map(Some)
+}
+
+pub(crate) fn validate_and_resolve_personas(
+    manifest: Manifest,
+    manifest_path: PathBuf,
+    manifest_dir: PathBuf,
+) -> Result<ResolvedPersonaManifest, Vec<PersonaValidationError>> {
+    let known_capabilities = known_persona_capabilities(&manifest, &manifest_dir);
+    let known_tools = known_persona_tools(&manifest);
+    let known_names: BTreeSet<String> = manifest
+        .personas
+        .iter()
+        .filter_map(|persona| persona.name.as_ref())
+        .filter(|name| !name.trim().is_empty())
+        .cloned()
+        .collect();
+    let context = harn_modules::personas::PersonaValidationContext {
+        known_capabilities,
+        known_tools,
+        known_names,
+    };
+    if let Err(errors) = harn_modules::personas::validate_persona_manifests(
+        &manifest_path,
+        &manifest.personas,
+        &context,
+    ) {
+        Err(errors)
+    } else {
+        let mut personas = manifest.personas;
+        attach_entry_workflow_steps(&mut personas, &manifest_dir);
+        Ok(ResolvedPersonaManifest {
+            manifest_path,
+            manifest_dir,
+            personas,
+        })
+    }
+}
+
+fn attach_entry_workflow_steps(personas: &mut [PersonaManifestEntry], manifest_dir: &Path) {
+    for persona in personas {
+        if !persona.steps.is_empty() {
+            continue;
+        }
+        let Some(entry_workflow) = persona.entry_workflow.as_deref() else {
+            continue;
+        };
+        let Some((path, entry_name)) = entry_workflow.split_once('#') else {
+            continue;
+        };
+        if !path.ends_with(".harn") {
+            continue;
+        }
+        let source_path = manifest_dir.join(path);
+        let Ok(document) = harn_modules::personas::parse_persona_source_file(&source_path) else {
+            continue;
+        };
+        let entry_name = entry_name.trim();
+        if let Some(source_persona) = document.personas.iter().find(|candidate| {
+            candidate.entry_workflow.as_deref() == Some(entry_name)
+                || candidate.name.as_deref() == persona.name.as_deref()
+        }) {
+            persona.steps.clone_from(&source_persona.steps);
+        }
+    }
+}
+
+pub(crate) fn known_persona_capabilities(
+    manifest: &Manifest,
+    manifest_dir: &Path,
+) -> BTreeSet<String> {
+    let mut capabilities = BTreeSet::new();
+    for (capability, operations) in default_persona_capability_map() {
+        for operation in operations {
+            capabilities.insert(format!("{capability}.{operation}"));
+        }
+    }
+    for (capability, operations) in &manifest.check.host_capabilities {
+        for operation in operations {
+            capabilities.insert(format!("{capability}.{operation}"));
+        }
+    }
+    if let Some(path) = manifest.check.host_capabilities_path.as_deref() {
+        let path = PathBuf::from(path);
+        let path = if path.is_absolute() {
+            path
+        } else {
+            manifest_dir.join(path)
+        };
+        if let Ok(content) = fs::read_to_string(path) {
+            let parsed_json = serde_json::from_str::<serde_json::Value>(&content).ok();
+            let parsed_toml = toml::from_str::<toml::Value>(&content)
+                .ok()
+                .and_then(|value| serde_json::to_value(value).ok());
+            if let Some(value) = parsed_json.or(parsed_toml) {
+                collect_persona_capabilities_from_json(&value, &mut capabilities);
+            }
+        }
+    }
+    capabilities
+}
+
+pub(crate) fn collect_persona_capabilities_from_json(
+    value: &serde_json::Value,
+    out: &mut BTreeSet<String>,
+) {
+    let root = value.get("capabilities").unwrap_or(value);
+    let Some(capabilities) = root.as_object() else {
+        return;
+    };
+    for (capability, entry) in capabilities {
+        if let Some(list) = entry.as_array() {
+            for item in list {
+                if let Some(operation) = item.as_str() {
+                    out.insert(format!("{capability}.{operation}"));
+                }
+            }
+        } else if let Some(obj) = entry.as_object() {
+            if let Some(list) = obj
+                .get("operations")
+                .or_else(|| obj.get("ops"))
+                .and_then(|v| v.as_array())
+            {
+                for item in list {
+                    if let Some(operation) = item.as_str() {
+                        out.insert(format!("{capability}.{operation}"));
+                    }
+                }
+            } else {
+                for (operation, enabled) in obj {
+                    if enabled.as_bool().unwrap_or(true) {
+                        out.insert(format!("{capability}.{operation}"));
+                    }
+                }
+            }
+        }
+    }
+}
+
+pub(crate) fn default_persona_capability_map() -> BTreeMap<&'static str, Vec<&'static str>> {
+    harn_modules::personas::default_persona_capability_map()
+}
+
+pub(crate) fn known_persona_tools(manifest: &Manifest) -> BTreeSet<String> {
+    let mut tools = BTreeSet::from([
+        "a2a".to_string(),
+        "acp".to_string(),
+        "ci".to_string(),
+        "filesystem".to_string(),
+        "github".to_string(),
+        "linear".to_string(),
+        "mcp".to_string(),
+        "notion".to_string(),
+        "pagerduty".to_string(),
+        "shell".to_string(),
+        "slack".to_string(),
+    ]);
+    for server in &manifest.mcp {
+        tools.insert(server.name.clone());
+    }
+    for provider in &manifest.providers {
+        tools.insert(provider.id.as_str().to_string());
+    }
+    for trigger in &manifest.triggers {
+        if let Some(provider) = trigger.provider.as_ref() {
+            tools.insert(provider.as_str().to_string());
+        }
+        for source in &trigger.sources {
+            tools.insert(source.provider.as_str().to_string());
+        }
+    }
+    tools
+}
+
+#[cfg(test)]
+#[path = "extensions_tests.rs"]
+mod tests;
+
+#[cfg(test)]
+#[path = "extensions_lazy_tests.rs"]
+mod lazy_tests;
+
+#[cfg(test)]
+#[path = "extensions_provider_tests.rs"]
+mod provider_tests;
+
+#[cfg(test)]
+#[path = "persona_runtime_tests.rs"]
+mod persona_tests;

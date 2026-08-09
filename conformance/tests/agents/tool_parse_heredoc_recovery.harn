@@ -1,0 +1,219 @@
+// Heredocs the model got wrong, and the line between recovery and refusal.
+//
+// A botched terminator is ~2,400× more common in the mined corpus than a
+// genuine max-token truncation, so a structurally complete call whose only
+// omission is the `EOF` tag is recovered at the call's own `})` tail. But a
+// body cut off mid-token, or one whose last line is a bare `}` that could be
+// either code or a botched tail, has no anchor — and dispatching a guess means
+// writing half a file. Those error.
+//
+// The second class here is the JSON-escaped body: cheap models emit the whole
+// heredoc as a one-liner where the line breaks are the two literal bytes `\`
+// and `n`. Those are decoded, while a real-newline body keeps a literal `\n`
+// typed inside it (a Go format string) byte-for-byte.
+import { probe, sample_registry } from "_tool_parse_probe"
+
+pipeline main(harness: Harness) {
+  // Sloppy terminator: no `EOF` tag, but the call's own `})` tail terminates
+  // the body implicitly.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "missing tag with a structural close recovers",
+    """edit({
+    action: "create",
+    path: "main.go",
+    content: <<EOF
+package main
+// no closing EOF tag
+})""",
+    sample_registry(),
+  )
+  // Genuinely truncated mid-token with no call tail to anchor on.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "truncated mid body errors",
+    """edit({
+    action: "create",
+    path: "main.go",
+    content: <<EOF
+package main
+
+func main() {
+    fmt.Println("hello""",
+    sample_registry(),
+  )
+  // A final standalone `}` is ambiguous — ordinary Go/Rust block close or a
+  // botched call tail. With no `)` to anchor, do not guess.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "bare brace close stays ambiguous",
+    """edit({
+    action: "create",
+    path: "main.go",
+    content: <<EOF
+func main() {
+    return
+}""",
+    sample_registry(),
+  )
+  // `<<` with no tag at all.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "missing heredoc tag",
+    """edit({
+    action: "create",
+    path: "main.go",
+    content: <<
+package main
+EOF
+})""",
+    sample_registry(),
+  )
+  // `<<EOF` followed by end of input: no newline, no literal `\n`.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "heredoc opener at end of input",
+    "edit({ path: \"x.go\", content: <<EOF",
+    sample_registry(),
+  )
+  // A quoted value that opens a heredoc and never closes the quote. The
+  // heredoc reading is salvaged rather than dropping the call.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "quoted heredoc value without a closing quote",
+    """edit({
+  path: "tests/unit/test_experiment_service.py",
+  action: "replace_range",
+  range_start: 1,
+  range_end: 4,
+  content: "<<EOF
+import pytest
+
+def test_create_experiment():
+    assert "ok" == "ok"
+EOF
+})""",
+    sample_registry(),
+  )
+  // The degraded on-the-wire form: the body is one line and the breaks are the
+  // literal bytes `\` + `n`. Decoded to real newlines, tabs, and quotes.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "json escaped literal newline body",
+    "edit({ path: \"parser_test.go\", content: <<EOF\\npackage manifest\\n\\nimport (\\n\\t\\\"strings\\\"\\n\\t\\\"testing\\\"\\n)\\n\\nfunc TestX(t *testing.T) {\\n\\tif 1 != 1 {\\n\\t\\tt.Fatal(\\\"bad\\\")\\n\\t}\\n}\\nEOF\\n })",
+    sample_registry(),
+  )
+  // GUARD: a REAL-newline body is never unescaped, so a literal `\n` typed
+  // inside it (a Go format string `"%d\n"`) survives verbatim.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "real newline body is not unescaped",
+    """edit({ path: "main.go", content: <<EOF
+package main
+import "fmt"
+func main() { fmt.Printf("%d\n", 1) }
+EOF
+})""",
+    sample_registry(),
+  )
+  // An escaped-backslash `\\n` on the wire is one decoded `\` then `n`, not the
+  // escaped line separator: the close scan must not split there.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "escaped backslash n is not a line break",
+    "edit({ path: \"m.go\", content: <<EOF\\npackage main\\nvar s = \\\"x\\\\n\\\"\\nEOF\\n})",
+    sample_registry(),
+  )
+  // The escaped form that never reaches a closing tag line must error rather
+  // than swallow the rest of the call.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "unterminated escaped heredoc",
+    "edit({ path: \"x.go\", content: <<EOF\\npackage main\\nfunc main() {}",
+    sample_registry(),
+  )
+  // Thinking tags: a real `<think>...</think>` block in the surrounding prose
+  // is stripped, but the same bytes inside a string argument and inside a
+  // heredoc body are content and must survive.
+  //
+  // These two cases differ, and the difference is the point. Inside a
+  // `<tool_call>` block the close-tag scan bounds the body, so the argument
+  // bytes are safe. WITHOUT a wrapper the top-level chunker ends its
+  // non-structural run at the next `<`, which lands mid-string on the `<think>`
+  // in `title:` and shreds the call — a bare call may not carry an angle
+  // bracket inside a quoted argument. The value parser this used to be tested
+  // against never saw that boundary, so the shape looked safe.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "thinking tags inside arguments, wrapped",
+    """<think>I should write a file documenting the think tags.</think>
+<tool_call>
+edit({
+    action: "create",
+    path: "doc.md",
+    title: "use <think> and </think> markers",
+    content: <<EOF
+Models emit <think>reasoning</think> on the thinking channel.
+Keep the </think> close tag intact in docs.
+EOF
+})
+</tool_call>""",
+    sample_registry(),
+  )
+  probe(
+    harness.agent,
+    harness.stdio,
+    "thinking tags inside arguments, bare",
+    """<think>I should write a file documenting the think tags.</think>
+edit({
+    action: "create",
+    path: "doc.md",
+    title: "use <think> and </think> markers",
+    content: <<EOF
+Models emit <think>reasoning</think> on the thinking channel.
+Keep the </think> close tag intact in docs.
+EOF
+})""",
+    sample_registry(),
+  )
+  // A quoted `content` holding a Rust raw string whose inner quotes the model
+  // left unescaped. The strict scan closes at the first bare `"`, so the object
+  // continuation lands on `s`/`#` instead of `,`/`}`; the greedy recovery
+  // absorbs the embedded quotes and keeps the call dispatchable.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "over-closed object string recovers an embedded raw string",
+    "<tool_call>edit({ action: \"create\", path: \"t.rs\", content: \"let q = parse_query(r#\"sel\"#);\" })</tool_call>",
+    sample_registry(),
+  )
+  // Over-capture guard: when the embedded-quote value is NOT the last key, the
+  // greedy scan stops at the first close whose continuation validates.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "over-closed recovery stops at the true boundary",
+    "<tool_call>edit({ content: \"x=r#\"a\"#y\", action: \"create\", path: \"t.rs\" })</tool_call>",
+    sample_registry(),
+  )
+  // The recovery engages only after the strict continuation already failed, so
+  // a cleanly escaped value parses identically.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "well formed escaped string untouched by recovery",
+    "<tool_call>edit({ action: \"create\", path: \"t.rs\", content: \"line1\\nline2\" })</tool_call>",
+    sample_registry(),
+  )
+}

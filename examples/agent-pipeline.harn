@@ -1,0 +1,16 @@
+pipeline default(harness: Harness, task) {
+  harness.stdio.log("Starting agent pipeline")
+  const steps = ["analyze", "plan", "execute", "verify"]
+  for step in steps {
+    harness.stdio.log("Step: ${step}")
+    retry 3 {
+      match step {
+        "analyze" -> { harness.stdio.log("  Analyzing task requirements...") }
+        "plan" -> { harness.stdio.log("  Creating execution plan...") }
+        "execute" -> { harness.stdio.log("  Executing changes...") }
+        "verify" -> { harness.stdio.log("  Verifying results...") }
+      }
+    }
+  }
+  harness.stdio.log("Pipeline complete!")
+}

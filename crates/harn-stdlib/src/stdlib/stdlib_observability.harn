@@ -1,0 +1,327 @@
+/**
+ * std/observability - unified user-facing spans, logs, and metrics.
+ *
+ * The module exposes direct functions (`span`, `log`, `metric`,
+ * `configure`) plus `obs(harness.obs)`, a namespace record for call sites that
+ * prefer `obs(harness.obs).span(...)` style. Backend factories are named values
+ * returned by `backends()` / `obs(harness.obs).Backend`, so runtime configuration
+ * chooses routing once instead of making every emission pick a wire
+ * format.
+ */
+type ObsBackend = dict
+
+type ObsSpan = dict
+
+fn __backend(kind: string, fields: dict = {}) -> ObsBackend {
+  const id = fields?.id ?? kind
+  return fields + {kind: kind, id: id}
+}
+
+fn __span_fields(span: ObsSpan, fields: dict) -> dict {
+  const attrs = span?.attrs ?? {}
+  return attrs + fields
+}
+
+/**
+ * backends returns backend factories and ready handles for
+ * observability configuration. `auto` selects OTel, Splunk HEC,
+ * Honeycomb, or pretty stderr from process environment in that order.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ * @example: configure({backend: backends().auto})
+ */
+pub fn backends() -> dict {
+  return {
+    auto: __backend("auto"),
+    pretty_stderr: __backend("pretty_stderr"),
+    otel: { endpoint = nil, id = "otel" -> __backend("otel", {endpoint: endpoint, id: id}) },
+    splunk_hec: { endpoint = nil, token = nil, id = "splunk" ->
+      __backend("splunk_hec", {endpoint: endpoint, token: token, id: id})
+    },
+    honeycomb: { api_key = nil, dataset = nil, id = "honeycomb" ->
+      __backend("honeycomb", {api_key: api_key, dataset: dataset, id: id})
+    },
+    compose: { items, id = "compose" -> __backend("compose", {backends: items, id: id}) },
+    test: { id = "test" -> __backend("test", {id: id}) },
+  }
+}
+
+/**
+ * processors returns stock event processors for the observability
+ * pipeline. `redaction` applies the active runtime redaction policy
+ * before backend routing or wire-format conversion.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ * @example: configure({processors: [processors().redaction]})
+ */
+pub fn processors() -> dict {
+  return {redaction: "redaction"}
+}
+
+/**
+ * configure installs process-local observability routing for subsequent
+ * `span`, `log`, and `metric` calls. Supported keys are `backend`,
+ * `backends`, `routes`, `processors`, and `audit_to_pretty_stderr`.
+ *
+ * @effects: [host]
+ * @errors: [invalid_argument]
+ * @api_stability: experimental
+ * @example: configure({backend: backends().auto})
+ */
+pub fn configure(obs: HarnessObs, config: dict = {}) {
+  obs.configure(config)
+}
+
+/**
+ * auto_backend returns the concrete backend selected by `Backend.auto`
+ * for the current process environment.
+ *
+ * @effects: [env]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn auto_backend(obs: HarnessObs) -> ObsBackend {
+  return obs.auto_backend()
+}
+
+/**
+ * start_span opens a user observability span and returns an opaque span
+ * handle. Pair it with `end_span`, or use `span(name, attrs, callback)`
+ * for callback-scoped auto-close.
+ *
+ * @effects: [host]
+ * @errors: [invalid_argument]
+ * @api_stability: experimental
+ * @example: let s = start_span("review", {pr: 1915})
+ */
+pub fn start_span(obs: HarnessObs, name: string, attrs: dict = {}) -> ObsSpan {
+  return obs.start_span(name, attrs)
+}
+
+/**
+ * end_span closes a span handle returned by `start_span`.
+ *
+ * @effects: [host]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn end_span(obs: HarnessObs, span: ObsSpan) {
+  obs.end_span(span)
+}
+
+/**
+ * span either opens an imperative span (`callback == nil`) or runs a
+ * callback inside a span and closes it on return or throw.
+ *
+ * @effects: [host]
+ * @errors: [invalid_argument]
+ * @api_stability: experimental
+ * @example: span("review", {pr: 1915}, { -> work() })
+ */
+pub fn span(obs: HarnessObs, name: string, attrs: dict = {}, callback = nil) {
+  const handle = start_span(obs, name, attrs)
+  if callback == nil {
+    return handle
+  }
+  try {
+    const result = callback()
+    end_span(obs, handle)
+    return result
+  } catch (e) {
+    end_span(obs, handle)
+    throw e
+  }
+}
+
+/**
+ * log emits a structured log event through the configured backend.
+ *
+ * @effects: [host]
+ * @errors: []
+ * @api_stability: experimental
+ * @example: log(harness.obs, "starting", "info", {phase: "review"})
+ */
+pub fn log(obs: HarnessObs, message: string, level: string = "info", fields: dict = {}) {
+  return obs.log(message, level, fields)
+}
+
+/**
+ * metric emits a numeric measurement through the configured backend.
+ *
+ * @effects: [host]
+ * @errors: []
+ * @api_stability: experimental
+ * @example: metric("review_duration_ms", 42, {pr: 1915})
+ */
+pub fn metric(obs: HarnessObs, name: string, value, fields: dict = {}) {
+  return obs.emit({kind: "metric", name: name, value: value, fields: fields})
+}
+
+/**
+ * counter records a monotonic increment for the named counter
+ * instrument. Backends with native counter support (OTLP, OpenMetrics)
+ * round-trip this as `Sum`-typed metric points.
+ *
+ * @effects: [host]
+ * @errors: [invalid_argument]
+ * @api_stability: experimental
+ * @example: counter("harn.session.put_total", 1, {"harn.session.outcome": "ok"})
+ */
+pub fn counter(obs: HarnessObs, name: string, value = 1, attrs: dict = {}) {
+  return obs.counter(name, value, attrs)
+}
+
+/**
+ * histogram records a distribution observation (e.g. duration in ms).
+ * Backends with native histogram support bucket the value; otherwise
+ * the value lands as a generic observation alongside `counter`/`gauge`.
+ *
+ * @effects: [host]
+ * @errors: [invalid_argument]
+ * @api_stability: experimental
+ * @example: histogram("harn.pg.duration_ms", 42, {"harn.pg.query_name": "users.by_id"})
+ */
+pub fn histogram(obs: HarnessObs, name: string, value, attrs: dict = {}) {
+  return obs.histogram(name, value, attrs)
+}
+
+/**
+ * gauge sets the current value of the named gauge instrument. Backends
+ * with native gauge support replace the prior value; aggregating
+ * exporters keep only the most recent reading.
+ *
+ * @effects: [host]
+ * @errors: [invalid_argument]
+ * @api_stability: experimental
+ * @example: gauge("harn.mcp.restart_count", 3, {"harn.mcp.server": "fs"})
+ */
+pub fn gauge(obs: HarnessObs, name: string, value, attrs: dict = {}) {
+  return obs.gauge(name, value, attrs)
+}
+
+/**
+ * request_id returns the ambient request id pushed by the dispatching
+ * host (e.g. `harn-serve`'s HTTP/ACP adapters). `nil` when no host is
+ * bound — useful for tests and standalone `harn run`.
+ *
+ * @effects: [host]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn request_id(obs: HarnessObs) {
+  return obs.request_id()
+}
+
+/**
+ * event emits an arbitrary structured observation. It is the shared
+ * primitive underneath logs, metrics, and span lifecycle events.
+ *
+ * @effects: [host]
+ * @errors: []
+ * @api_stability: experimental
+ * @example: event({kind: "audit", name: "policy.decision"})
+ */
+pub fn event(obs: HarnessObs, record: dict) {
+  return obs.emit(record)
+}
+
+/**
+ * log_in_span emits a log correlated with an imperative span handle
+ * without requiring that span to be current on the stack.
+ *
+ * @effects: [host]
+ * @errors: []
+ * @api_stability: experimental
+ * @example: log_in_span(span, "child event")
+ */
+pub fn log_in_span(
+  obs: HarnessObs,
+  span: ObsSpan,
+  message: string,
+  level: string = "info",
+  fields: dict = {},
+) {
+  return obs.emit(
+    {
+      kind: "log",
+      message: message,
+      level: level,
+      fields: __span_fields(span, fields),
+      trace_id: span?.trace_id,
+      span_id: span?.span_id,
+    },
+  )
+}
+
+/**
+ * events returns the process-local emitted payload buffer. It is meant
+ * for tests and embedded hosts that want to pull observations directly.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn events(obs: HarnessObs) -> list {
+  return obs.events()
+}
+
+/**
+ * events_take drains the process-local emitted payload buffer.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn events_take(obs: HarnessObs) -> list {
+  return obs.events_take()
+}
+
+/**
+ * reset clears observability configuration, open spans, and captured
+ * emissions for the current VM thread.
+ *
+ * @effects: [host]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn reset(obs: HarnessObs) {
+  obs.reset()
+}
+
+/**
+ * obs returns the ergonomic namespace record for user code that wants
+ * `obs(harness.obs).span(...)`, `obs(harness.obs).Backend.auto`, and matching direct helpers.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ * @example: let o = obs(harness.obs); o.log("ready")
+ */
+pub fn obs(obs: HarnessObs) -> dict {
+  return {
+    Backend: backends(),
+    Processor: processors(),
+    configure: { config = {} -> configure(obs, config) },
+    auto_backend: { -> auto_backend(obs) },
+    start_span: { name, attrs = {} -> start_span(obs, name, attrs) },
+    end_span: { handle -> end_span(obs, handle) },
+    span: { name, attrs = {}, callback = nil -> span(obs, name, attrs, callback) },
+    log: { message, level = "info", fields = {} -> log(obs, message, level, fields) },
+    log_in_span: { handle, message, level = "info", fields = {} ->
+      log_in_span(obs, handle, message, level, fields)
+    },
+    metric: { name, value, fields = {} -> metric(obs, name, value, fields) },
+    counter: { name, value = 1, attrs = {} -> counter(obs, name, value, attrs) },
+    histogram: { name, value, attrs = {} -> histogram(obs, name, value, attrs) },
+    gauge: { name, value, attrs = {} -> gauge(obs, name, value, attrs) },
+    request_id: { -> request_id(obs) },
+    event: { record -> event(obs, record) },
+    events: { -> events(obs) },
+    events_take: { -> events_take(obs) },
+    reset: { -> reset(obs) },
+  }
+}

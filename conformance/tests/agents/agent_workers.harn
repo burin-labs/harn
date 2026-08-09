@@ -1,0 +1,68 @@
+import "std/agents"
+
+pipeline main(harness: Harness) {
+  const stage_worker = spawn_agent(
+    harness.agent,
+    {
+      name: "stage-worker",
+      task: "Draft a short note",
+      node: {
+        kind: "subagent",
+        mode: "llm",
+        model_policy: {provider: "mock"},
+        output_contract: {output_kinds: ["summary"]},
+      },
+    },
+  )
+  harness.stdio.println(stage_worker.status)
+  harness.stdio.println(stage_worker.mode)
+  const stage_done = wait_agent(harness.agent, stage_worker)
+  harness.stdio.println(stage_done?.status)
+  harness.stdio.println(stage_done?.artifact_count >= 1)
+  harness.stdio.println(stage_done?.has_transcript)
+  harness.stdio.println(stage_done?.parent_stage_id == nil)
+  const resumed = send_input(harness.agent, stage_done, "Continue and add one more sentence")
+  harness.stdio.println(resumed?.status)
+  const resumed_done = wait_agent(harness.agent, stage_done)
+  harness.stdio.println(resumed_done?.status)
+  harness.stdio.println(len(list_agents(harness.agent)) >= 1)
+  const flow = workflow_graph(
+    {
+      name: "worker-flow",
+      entry: "act",
+      nodes: {
+        act: {
+          kind: "stage",
+          mode: "llm",
+          model_policy: {provider: "mock"},
+          output_contract: {output_kinds: ["summary"]},
+        },
+      },
+      edges: [],
+    },
+  )
+  const workflow_worker = spawn_agent(
+    harness.agent,
+    {name: "flow-worker", task: "Write a workflow summary", graph: flow, options: {max_steps: 2}},
+  )
+  harness.stdio.println(workflow_worker.mode)
+  const workflow_done = wait_agent(harness.agent, workflow_worker)
+  harness.stdio.println(workflow_done?.status)
+  harness.stdio.println(workflow_done?.result?.status == "completed")
+  harness.stdio.println(workflow_done?.child_run_id != nil)
+  harness.stdio.println(workflow_done?.child_run_path != nil)
+  harness.stdio.println(workflow_done?.snapshot_path != nil)
+  const restored = resume_agent(harness.agent, workflow_done?.snapshot_path)
+  harness.stdio.println(restored?.status == "completed")
+  const restored_resumed = send_input(
+    harness.agent,
+    restored,
+    "Continue the workflow with one more update",
+  )
+  harness.stdio.println(restored_resumed?.status)
+  const restored_done = wait_agent(harness.agent, restored_resumed)
+  harness.stdio.println(restored_done?.status == "completed")
+  harness.stdio.println(restored_done?.child_run_path != nil)
+  const closed = close_agent(harness.agent, workflow_done)
+  harness.stdio.println(closed?.status)
+}

@@ -1,0 +1,157 @@
+name: Main health
+
+# The scheduled suites gate nothing. A break in one of them stays invisible
+# until somebody happens to open the Actions tab, and "somebody happens to"
+# measured eight days the last time it mattered: `Thread-count parity` and
+# `Flake detection` both went red on 2026-07-27 with the same aborting test
+# and stayed red, while every PR merged green the whole time.
+#
+# The information was always one `gh run list` away. What was missing was
+# anything that looked at it. This does, once a day, and reports on main's own
+# commit status — visible on the repo home and in the commits list, which are
+# surfaces people already read. It files no issues and opens no PRs.
+#
+# It distinguishes a persistent break from a flake by consecutive runs only.
+# One red nightly is noise; three in a row is a bug that has been shipping.
+#
+# That metric deliberately under-reports. `Flake detection` was aborting on the
+# same bug as `Thread-count parity` but alternated red/green, so a consecutive
+# streak never saw it. Catching intermittent-but-real breakage means comparing
+# failing test names across runs, which needs log parsing this does not do.
+# A check that reports deterministic breakage and says so beats one that
+# guesses at the rest.
+
+on:
+  schedule:
+    # After the nightlies (the latest starts 09:00 UTC) have finished.
+    - cron: "23 13 * * *"
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  statuses: write
+
+concurrency:
+  group: main-health
+  cancel-in-progress: false
+
+jobs:
+  report:
+    name: Report persistently failing suites
+    if: github.repository == 'burin-labs/harn'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Classify each scheduled suite and post main's status
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          # A suite is "broken" once this many of its most recent scheduled
+          # runs on main have failed back to back.
+          #
+          # Three is a judgement, not a derived number. Over the last ~40
+          # scheduled runs of each watched suite, isolated single failures are
+          # routine (Release smoke: one in forty) while every multi-run streak
+          # was a real break somebody eventually fixed — `Windows nightly` ran
+          # twenty consecutive failures, `macOS nightly` four, `CLI cold-start
+          # budget` three. So streaks are the signal, and three trades about
+          # three days of latency for not paging on the ordinary flake.
+          STREAK: "3"
+          # E2E is deliberately excluded: it is already known-flaky, is
+          # excluded from the CI status rollup by design, and would keep this
+          # permanently red for a reason nobody would act on.
+          # One suite per line: the names contain spaces, so this list is
+          # newline-delimited and must stay a literal block.
+          SUITES: |
+            Thread-count parity
+            Flake detection
+            macOS nightly
+            Windows nightly
+            Install channels smoke
+            CLI cold-start budget
+            Release smoke
+        run: |
+          set -euo pipefail
+
+          broken=()
+          unknown=()
+
+          # `gh run list --workflow` returns nothing both for a workflow that
+          # does not exist and for one that has simply never run on a schedule.
+          # Without this list the two are indistinguishable, so renaming a
+          # watched suite would quietly drop it from monitoring and leave the
+          # report looking healthy — the same silent decay this check exists to
+          # catch. Resolve the names once and treat a miss as an error.
+          known="$(gh api "repos/$GH_REPO/actions/workflows" --paginate --jq '.workflows[].name')"
+
+          {
+            echo "| suite | recent scheduled runs (newest first) | verdict |"
+            echo "| --- | --- | --- |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          while IFS= read -r suite; do
+            [[ -n "$suite" ]] || continue
+
+            # Fixed-string, whole-line match: suite names contain spaces and
+            # hyphens, so a substring or regex match would happily accept a
+            # renamed neighbour.
+            if ! grep -Fxq "$suite" <<< "$known"; then
+              unknown+=("$suite")
+              echo "| $suite | — | **UNKNOWN — no such workflow** |" >> "$GITHUB_STEP_SUMMARY"
+              continue
+            fi
+
+            # `conclusion` is null while a run is still going; drop those so an
+            # in-flight run cannot break a streak that is genuinely unbroken.
+            recent="$(
+              gh run list --repo "$GH_REPO" --workflow "$suite" \
+                --event schedule --branch main --limit 10 \
+                --json conclusion \
+                --jq '[.[] | select(.conclusion != null and .conclusion != "cancelled") | .conclusion] | .[0:6] | join(" ")'
+            )" || recent=""
+
+            if [[ -z "$recent" ]]; then
+              echo "| $suite | (no scheduled history) | skipped |" >> "$GITHUB_STEP_SUMMARY"
+              continue
+            fi
+
+            # Split explicitly rather than leaning on unquoted word-splitting:
+            # under a shell that does not split (zsh), the loop below runs once
+            # on the whole string, every streak reads as zero, and the report
+            # comes back reassuringly empty.
+            read -ra outcomes <<< "$recent"
+            streak=0
+            for outcome in "${outcomes[@]}"; do
+              [[ "$outcome" == "failure" ]] || break
+              streak=$((streak + 1))
+            done
+
+            if (( streak >= STREAK )); then
+              broken+=("$suite (${streak} consecutive)")
+              echo "| $suite | $recent | **BROKEN — ${streak} consecutive** |" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "| $suite | $recent | ok |" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done <<< "$SUITES"
+
+          sha="$(gh api "repos/$GH_REPO/commits/main" --jq '.sha')"
+
+          if (( ${#broken[@]} == 0 && ${#unknown[@]} == 0 )); then
+            gh api "repos/$GH_REPO/statuses/$sha" -X POST \
+              -f state=success -f context="main health" \
+              -f description="all watched scheduled suites passing" >/dev/null
+            echo "All watched suites are passing." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          # A name that resolves to nothing is reported as loudly as a break:
+          # it means this check is watching less than it claims to.
+          problems=("${broken[@]}" "${unknown[@]/#/no such workflow: }")
+          summary="$(IFS='; '; echo "${problems[*]}")"
+          gh api "repos/$GH_REPO/statuses/$sha" -X POST \
+            -f state=failure -f context="main health" \
+            -f description="${summary:0:139}" \
+            -f target_url="https://github.com/$GH_REPO/actions/runs/${GITHUB_RUN_ID}" >/dev/null
+
+          echo "::error::main health — $summary"
+          exit 1

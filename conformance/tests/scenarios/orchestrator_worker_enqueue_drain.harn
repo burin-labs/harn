@@ -1,0 +1,82 @@
+import "../_common"
+
+pipeline default(harness: Harness, task) {
+  const unique = harness.random.uuid()
+  const root = path_join(harness.fs.workspace_temp_dir(), "harn-worker-enqueue-drain-" + unique)
+  const producer_dir = path_join(root, "producer")
+  const consumer_dir = path_join(root, "consumer")
+  const state_dir = path_join(root, "state")
+  harness.fs.mkdir(root)
+  harness.fs.mkdir(producer_dir)
+  harness.fs.mkdir(consumer_dir)
+  harness.fs.mkdir(state_dir)
+  harness.fs.write_text(
+    path_join(producer_dir, "harn.toml"),
+    "[package]\nname = \"worker-producer\"\n\n[[triggers]]\nid = \"incoming-review-task\"\nkind = \"a2a-push\"\nprovider = \"a2a-push\"\nmatch = { events = [\"a2a.task.received\"] }\nhandler = \"worker://triage\"\npriority = \"high\"\n",
+  )
+  harness.fs.write_text(
+    path_join(consumer_dir, "harn.toml"),
+    "[package]\nname = \"worker-consumer\"\n\n[exports]\nhandlers = \"lib.harn\"\n\n[[triggers]]\nid = \"incoming-review-task\"\nkind = \"a2a-push\"\nprovider = \"a2a-push\"\nmatch = { events = [\"a2a.task.received\"] }\nhandler = \"handlers::on_task\"\n",
+  )
+  harness.fs.write_text(
+    path_join(consumer_dir, "lib.harn"),
+    "import \"std/triggers\"\n\npub fn on_task(harness: Harness, event: TriggerEvent) -> dict {\n  return {ok: true, kind: event.kind, event_id: event.id}\n}\n",
+  )
+  const repo_root = harness.process.exec("git", "rev-parse", "--show-toplevel").stdout.trim()
+  const harn_bin = harness.env.get_or(
+    "HARN_CONFORMANCE_HARN_BIN",
+    resolve_harn_bin(harness, repo_root),
+  )
+  assert(harness.fs.exists(harn_bin), "missing built harn binary at " + harn_bin)
+  const fire = harness.process.exec(
+    harn_bin,
+    "orchestrator",
+    "fire",
+    "incoming-review-task",
+    "--config",
+    path_join(producer_dir, "harn.toml"),
+    "--state-dir",
+    state_dir,
+  )
+  const queue_before = harness.process.exec(
+    harn_bin,
+    "orchestrator",
+    "queue",
+    "--config",
+    path_join(consumer_dir, "harn.toml"),
+    "--state-dir",
+    state_dir,
+    "ls",
+    "--json",
+  )
+  const before = json_parse(queue_before.stdout)
+  harness.stdio.println(
+    fire.success
+      && contains(fire.stdout, "\"queue\":\"triage\"")
+      && queue_before.success
+      && before.worker_queues[0].queue == "triage"
+      && before.worker_queues[0].ready == 1,
+  )
+  const drain = harness.process.exec(
+    harn_bin,
+    "orchestrator",
+    "queue",
+    "--config",
+    path_join(consumer_dir, "harn.toml"),
+    "--state-dir",
+    state_dir,
+    "drain",
+    "triage",
+    "--consumer-id",
+    "consumer-a",
+    "--json",
+  )
+  const data = json_parse(drain.stdout)
+  harness.stdio.println(drain.success && data.drained == 1 && data.acked == 1 && data.deferred == 0)
+  harness.stdio.println(
+    data.summary.ready == 0 && data.summary.in_flight == 0 && data.summary.responses == 1,
+  )
+  harness.stdio.println(
+    data.responses[0].outcome?.status == "succeeded" && data.responses[0].error == nil,
+  )
+}

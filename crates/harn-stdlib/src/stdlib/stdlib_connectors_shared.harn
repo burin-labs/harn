@@ -1,0 +1,642 @@
+import { filter_nil } from "std/collections"
+pub import {
+  connector_http_header,
+  connector_http_json,
+  connector_http_rate_limit,
+  connector_http_request,
+} from "std/connectors/http"
+import { JsonParseFailure, merge } from "std/json"
+
+const GIT_FORGE_PULL_REQUEST_TOPIC = "connectors.git_forge.pull_request"
+
+type GitForgeRepositoryRef = {provider: string, full_name?: string, id?: string, web_url?: string}
+
+type GitForgePullRequestRef = {
+  number: int,
+  id?: string,
+  title?: string,
+  author?: string,
+  web_url?: string,
+  head_ref?: string,
+  head_sha?: string,
+  base_ref?: string,
+  base_sha?: string,
+  state?: string,
+  draft?: bool,
+  merged?: bool,
+}
+
+type GitForgeWritebackTarget = {
+  provider: string,
+  repository_full_name?: string,
+  repository_id?: string,
+  pull_request_number: int,
+  web_url?: string,
+}
+
+type GitForgePullRequestEvent = {
+  topic: string,
+  event: string,
+  kind: string,
+  provider: string,
+  lifecycle: string,
+  repository: GitForgeRepositoryRef,
+  pull_request: GitForgePullRequestRef,
+  writeback: GitForgeWritebackTarget,
+  delivery_id: string?,
+  signature_status?: any,
+  provider_metadata: dict<string, any>,
+  raw_payload: any,
+}
+
+type GitForgeWritebackRequest = {
+  provider: string,
+  method: string,
+  params: dict<string, any>,
+  target: GitForgeWritebackTarget,
+}
+
+fn __strip_signature_prefix(signature) {
+  const trimmed = trim(signature ?? "")
+  if starts_with(trimmed, "sha256=") {
+    return split(trimmed, "sha256=")[1]
+  }
+  if starts_with(trimmed, "sha1=") {
+    return split(trimmed, "sha1=")[1]
+  }
+  return trimmed
+}
+
+/**
+ * Constant-time HMAC signature check.
+ * Legacy HMAC-SHA1 requires options.allow_legacy_sha1.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn verify_hmac_signature(body, signature, secret, algorithm = "sha256", options = nil) {
+  const alg = lowercase(trim(algorithm ?? "sha256"))
+  const provided = __strip_signature_prefix(signature)
+  const opts = options ?? {}
+  if alg == "sha1" || alg == "hmac-sha1" {
+    if !(opts.allow_legacy_sha1 ?? false) {
+      return false
+    }
+    return constant_time_eq(hmac_sha1(secret, body), provided)
+  }
+  if alg != "sha256" && alg != "hmac-sha256" {
+    return false
+  }
+  const expected = hmac_sha256(secret, body)
+  return constant_time_eq(expected, provided)
+}
+
+/**
+ * verify_jwt.
+ *
+ * @effects: [net]
+ * @errors: []
+ */
+pub fn verify_jwt(net: HarnessNet, token, jwks_url, options = nil) {
+  const opts = options ?? {}
+  let jwks = opts.inline_jwks
+  if jwks == nil {
+    if jwks_url == nil || trim(jwks_url) == "" {
+      return {
+        ok: false,
+        claims: nil,
+        error: "jwks_url is required unless options.inline_jwks is provided",
+      }
+    }
+    const response = net.get(jwks_url, {headers: {Accept: "application/json"}})
+    if !(response.ok ?? false) {
+      return {ok: false, claims: nil, error: response.body, status: response.status}
+    }
+    const parsed_jwks: Result<unknown, JsonParseFailure> = try {
+      json_parse(response.body)
+    }
+    if is_err(parsed_jwks) {
+      return {
+        ok: false,
+        claims: nil,
+        error: "JWKS response was not valid JSON",
+        status: response.status,
+      }
+    }
+    jwks = unwrap(parsed_jwks)
+    if type_of(jwks) != "dict" {
+      return {
+        ok: false,
+        claims: nil,
+        error: "JWKS response was not a JSON object",
+        status: response.status,
+      }
+    }
+  }
+  return connector_shared_verify_jwt_inline(token, jwks, opts)
+}
+
+fn __form_body(params) {
+  let parts = []
+  for entry in params {
+    parts = parts + [url_encode(entry.key) + "=" + url_encode(to_string(entry.value))]
+  }
+  return join(parts, "&")
+}
+
+/**
+ * oauth2_token_refresh.
+ *
+ * @effects: [net]
+ * @errors: []
+ */
+pub fn oauth2_token_refresh(
+  net: HarnessNet,
+  client_id,
+  client_secret,
+  refresh_token,
+  token_url,
+  options = nil,
+) {
+  const opts = options ?? {}
+  const params = filter_nil(
+    merge(
+      {
+        grant_type: "refresh_token",
+        client_id: client_id,
+        client_secret: client_secret,
+        refresh_token: refresh_token,
+      },
+      opts.extra_params ?? {},
+    ),
+  )
+  const headers = merge(
+    {Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded"},
+    opts.headers ?? {},
+  )
+  const response = net.post(token_url, __form_body(params), {headers: headers})
+  const parsed: Result<unknown, JsonParseFailure> = try {
+    json_parse(response.body)
+  }
+  if !(response.ok ?? false) {
+    const error_body = if is_ok(parsed) {
+      unwrap(parsed)
+    } else {
+      response.body
+    }
+    return {ok: false, status: response.status, error: error_body}
+  }
+  if is_err(parsed) {
+    return {ok: false, status: response.status, error: "OAuth2 token response was not valid JSON"}
+  }
+  const body = unwrap(parsed)
+  if type_of(body) != "dict" {
+    return {
+      ok: false,
+      status: response.status,
+      error: "OAuth2 token response was not a JSON object",
+    }
+  }
+  return merge(body, {ok: true, status: response.status})
+}
+
+/**
+ * rate_limit_token_bucket.
+ *
+ * @effects: [time]
+ * @errors: []
+ */
+pub fn rate_limit_token_bucket(clock: HarnessClock, state = nil, config = nil, now_ms = nil) {
+  const cfg = config ?? {}
+  let capacity = cfg.capacity ?? 60
+  if capacity < 1 {
+    capacity = 1
+  }
+  let refill_tokens = cfg.refill_tokens ?? 1
+  if refill_tokens <= 0 {
+    refill_tokens = 1
+  }
+  let refill_interval_ms = cfg.refill_interval_ms ?? 1000
+  if refill_interval_ms < 1 {
+    refill_interval_ms = 1
+  }
+  const now = now_ms ?? to_int(clock.timestamp() * 1000)
+  const last_refill_ms = state?.last_refill_ms ?? now
+  const elapsed_ms = now - last_refill_ms
+  let tokens = state?.tokens ?? capacity
+  if elapsed_ms > 0 {
+    tokens = tokens + elapsed_ms / refill_interval_ms * refill_tokens
+    if tokens > capacity {
+      tokens = capacity
+    }
+  }
+  let allowed = false
+  let retry_after_ms = 0
+  if tokens >= 1 {
+    tokens = tokens - 1
+    allowed = true
+  } else {
+    retry_after_ms = to_int((1 - tokens) * refill_interval_ms / refill_tokens)
+    if retry_after_ms < 1 {
+      retry_after_ms = 1
+    }
+  }
+  return {
+    allowed: allowed,
+    retry_after_ms: retry_after_ms,
+    state: {tokens: tokens, last_refill_ms: now},
+  }
+}
+
+fn __page_items(page, items_path) {
+  if items_path != nil {
+    return json_pointer(page, items_path) ?? []
+  }
+  return page.results ?? page.items ?? page.data ?? []
+}
+
+/**
+ * paginate_cursor.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn paginate_cursor(initial_url, fetch_fn, cursor_path, options = nil) {
+  const opts = options ?? {}
+  const max_pages = opts.max_pages ?? 100
+  const items_path = opts.items_path
+  let cursor = opts.initial_cursor
+  let pages = []
+  let items = []
+  let page_count = 0
+  while page_count < max_pages {
+    const page = fetch_fn(initial_url, cursor)
+    pages = pages + [page]
+    for item in __page_items(page, items_path) {
+      items = items + [item]
+    }
+    page_count = page_count + 1
+    cursor = json_pointer(page, cursor_path)
+    if cursor == nil || cursor == "" {
+      return {complete: true, pages: pages, items: items, next_cursor: nil}
+    }
+  }
+  return {complete: false, pages: pages, items: items, next_cursor: cursor}
+}
+
+fn __git_forge_text(value) {
+  if value == nil {
+    return nil
+  }
+  const text = trim(to_string(value))
+  if text == "" {
+    return nil
+  }
+  return text
+}
+
+fn __git_forge_bool(value) {
+  if type_of(value) == "bool" {
+    return value
+  }
+  const text = lowercase(trim(to_string(value ?? "")))
+  if text == "true" {
+    return true
+  }
+  if text == "false" {
+    return false
+  }
+  return nil
+}
+
+fn __git_forge_payload(value) {
+  if value?.payload?.event?.provider_payload != nil {
+    return value.payload.event.provider_payload
+  }
+  if value?.event?.provider_payload != nil {
+    return value.event.provider_payload
+  }
+  if value?.provider_payload != nil {
+    return value.provider_payload
+  }
+  return value
+}
+
+fn __git_forge_provider(provider, payload, options) {
+  return lowercase(
+    trim(
+      to_string(provider ?? options?.provider ?? payload?.provider ?? payload?.raw?.provider ?? ""),
+    ),
+  )
+}
+
+fn __git_forge_lifecycle(provider, action, change) {
+  const normalized = lowercase(trim(to_string(action ?? "")))
+  if contains(["opened", "open"], normalized) {
+    return "opened"
+  }
+  if contains(["reopened", "reopen"], normalized) {
+    return "reopened"
+  }
+  if contains(["synchronize", "synchronized", "sync"], normalized) {
+    return "synchronized"
+  }
+  if contains(["edited", "update", "updated"], normalized) {
+    return "updated"
+  }
+  if normalized == "ready_for_review" || normalized == "ready-for-review" {
+    return "ready_for_review"
+  }
+  if contains(["merge", "merged"], normalized) {
+    return "merged"
+  }
+  if contains(["closed", "close"], normalized) {
+    if __git_forge_bool(change?.merged) ?? false {
+      return "merged"
+    }
+    return "closed"
+  }
+  if provider == "gitlab" && change?.state == "merged" {
+    return "merged"
+  }
+  if provider == "gitlab" && change?.state == "closed" {
+    return "closed"
+  }
+  return "updated"
+}
+
+fn __git_forge_repo_from_full_name(provider, full_name, id, web_url) -> GitForgeRepositoryRef {
+  return filter_nil(
+    {
+      provider: provider,
+      full_name: __git_forge_text(full_name),
+      id: __git_forge_text(id),
+      web_url: __git_forge_text(web_url),
+    },
+  )
+}
+
+fn __git_forge_author(user) {
+  if type_of(user) != "dict" {
+    return __git_forge_text(user)
+  }
+  return __git_forge_text(user?.login ?? user?.username ?? user?.name ?? user?.id)
+}
+
+fn __git_forge_delivery_id(raw) {
+  const headers = raw?.headers ?? {}
+  return __git_forge_text(
+    raw?.delivery_id
+      ?? connector_http_header(headers, "X-GitHub-Delivery")
+      ?? connector_http_header(
+      headers,
+      "X-Gitlab-Event-UUID",
+    )
+      ?? connector_http_header(headers, "X-Gitlab-Delivery")
+      ?? connector_http_header(
+      headers,
+      "X-Gitea-Delivery",
+    ),
+  )
+}
+
+fn __git_forge_event(provider, lifecycle, repo, pr, raw, options) -> GitForgePullRequestEvent? {
+  const number = to_int(pr?.number ?? pr?.iid ?? pr?.index)
+  if number == nil {
+    return nil
+  }
+  const kind = "pull_request." + lifecycle
+  const repository = __git_forge_repo_from_full_name(
+    provider,
+    repo?.full_name,
+    repo?.id,
+    repo?.web_url ?? repo?.html_url,
+  )
+  const pull_request: GitForgePullRequestRef = filter_nil(
+    {
+      number: number,
+      id: __git_forge_text(pr?.id),
+      title: __git_forge_text(pr?.title),
+      author: __git_forge_text(pr?.author ?? pr?.user ?? pr?.sender),
+      web_url: __git_forge_text(pr?.web_url ?? pr?.html_url ?? pr?.url),
+      head_ref: __git_forge_text(pr?.head_ref ?? pr?.head?.ref ?? pr?.source_branch),
+      head_sha: __git_forge_text(pr?.head_sha ?? pr?.head?.sha ?? pr?.last_commit?.id),
+      base_ref: __git_forge_text(pr?.base_ref ?? pr?.base?.ref ?? pr?.target_branch),
+      base_sha: __git_forge_text(pr?.base_sha ?? pr?.base?.sha),
+      state: __git_forge_text(pr?.state),
+      draft: __git_forge_bool(pr?.draft),
+      merged: __git_forge_bool(pr?.merged),
+    },
+  )
+  const writeback: GitForgeWritebackTarget = filter_nil(
+    {
+      provider: provider,
+      repository_full_name: repository.full_name,
+      repository_id: repository.id,
+      pull_request_number: number,
+      web_url: pull_request.web_url,
+    },
+  )
+  const provider_metadata: dict<string, any> = filter_nil(
+    merge(raw?.provider_metadata ?? {}, options?.provider_metadata ?? {}),
+  )
+  return {
+    topic: GIT_FORGE_PULL_REQUEST_TOPIC,
+    event: "pull_request",
+    kind: kind,
+    provider: provider,
+    lifecycle: lifecycle,
+    repository: repository,
+    pull_request: pull_request,
+    writeback: writeback,
+    delivery_id: __git_forge_delivery_id(raw),
+    signature_status: raw?.signature_status,
+    provider_metadata: provider_metadata,
+    raw_payload: raw?.raw ?? raw,
+  }
+}
+
+fn __git_forge_github_event(payload, options) {
+  const raw = payload?.raw ?? payload
+  const repo = payload?.repository ?? raw?.repository
+  const pr = payload?.pull_request ?? raw?.pull_request
+  if pr == nil {
+    return nil
+  }
+  const normalized_pr = merge(
+    pr,
+    {
+      author: __git_forge_author(pr?.user),
+      head_ref: pr?.head?.ref,
+      head_sha: pr?.head?.sha,
+      base_ref: pr?.base?.ref,
+      base_sha: pr?.base?.sha,
+      web_url: pr?.html_url ?? pr?.url,
+    },
+  )
+  const lifecycle = __git_forge_lifecycle("github", payload?.action ?? raw?.action, normalized_pr)
+  return __git_forge_event("github", lifecycle, repo, normalized_pr, payload, options)
+}
+
+fn __git_forge_gitlab_event(payload, options) {
+  const raw = payload?.raw ?? payload
+  const attrs = raw?.object_attributes ?? raw?.merge_request
+  if attrs == nil {
+    return nil
+  }
+  const repo = {
+    full_name: raw?.project?.path_with_namespace,
+    id: raw?.project?.id,
+    web_url: raw?.project?.web_url,
+  }
+  const pr = merge(
+    attrs,
+    {
+      number: attrs?.iid,
+      author: __git_forge_author(raw?.user),
+      head_ref: attrs?.source_branch,
+      head_sha: attrs?.last_commit?.id ?? attrs?.last_commit?.sha,
+      base_ref: attrs?.target_branch,
+      web_url: attrs?.url,
+    },
+  )
+  const lifecycle = __git_forge_lifecycle("gitlab", attrs?.action ?? raw?.action, pr)
+  return __git_forge_event("gitlab", lifecycle, repo, pr, payload, options)
+}
+
+fn __git_forge_gitea_event(payload, options) {
+  const raw = payload?.raw ?? payload
+  const pr = raw?.pull_request
+  if pr == nil {
+    return nil
+  }
+  const repo = {
+    full_name: raw?.repository?.full_name,
+    id: raw?.repository?.id,
+    web_url: raw?.repository?.html_url ?? raw?.repository?.website,
+  }
+  const normalized_pr = merge(
+    pr,
+    {
+      author: __git_forge_author(pr?.user),
+      head_ref: pr?.head?.ref,
+      head_sha: pr?.head?.sha,
+      base_ref: pr?.base?.ref,
+      base_sha: pr?.base?.sha,
+      web_url: pr?.html_url ?? pr?.url,
+    },
+  )
+  const lifecycle = __git_forge_lifecycle("gitea", raw?.action, normalized_pr)
+  return __git_forge_event("gitea", lifecycle, repo, normalized_pr, payload, options)
+}
+
+/**
+ * git_forge_pull_request_topic returns the shared event-log topic for
+ * provider-independent PR/MR lifecycle events.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn git_forge_pull_request_topic() {
+  return GIT_FORGE_PULL_REQUEST_TOPIC
+}
+
+/**
+ * git_forge_pull_request_event normalizes GitHub pull_request, GitLab
+ * merge_request, and Gitea pull_request payloads into one forge event shape.
+ *
+ * @effects: []
+ * @errors: []
+ * @example: git_forge_pull_request_event("github", payload)
+ */
+pub fn git_forge_pull_request_event(provider, payload, options = nil) -> GitForgePullRequestEvent? {
+  const opts = options ?? {}
+  const value = __git_forge_payload(payload)
+  const resolved_provider = __git_forge_provider(provider, value, opts)
+  if resolved_provider == "github" {
+    return __git_forge_github_event(value, opts)
+  }
+  if resolved_provider == "gitlab" {
+    return __git_forge_gitlab_event(value, opts)
+  }
+  if resolved_provider == "gitea" || resolved_provider == "forgejo" {
+    const event = __git_forge_gitea_event(value, opts)
+    if event == nil || resolved_provider == "gitea" {
+      return event
+    }
+    return merge(
+      event,
+      {
+        provider: "forgejo",
+        repository: merge(event.repository, {provider: "forgejo"}),
+        writeback: merge(event.writeback, {provider: "forgejo"}),
+      },
+    )
+  }
+  return nil
+}
+
+fn __git_forge_repo_parts(full_name) {
+  const text = __git_forge_text(full_name)
+  if text == nil || !contains(text, "/") {
+    return nil
+  }
+  const parts = split(text, "/")
+  if len(parts) < 2 {
+    return nil
+  }
+  return {owner: parts[0], repo: parts[1]}
+}
+
+/**
+ * git_forge_writeback_request builds the connector call needed to post a
+ * provider-independent status comment for a normalized forge event.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn git_forge_writeback_request(
+  event: GitForgePullRequestEvent,
+  body: string,
+  options = nil,
+) -> GitForgeWritebackRequest {
+  const opts = options ?? {}
+  const provider = lowercase(trim(to_string(opts?.provider ?? event.provider)))
+  const target = event.writeback
+  const comment_body = to_string(body ?? "")
+  if provider == "github" {
+    const repo = __git_forge_repo_parts(target.repository_full_name)
+    const params = filter_nil(
+      {
+        owner: repo?.owner,
+        repo: repo?.repo,
+        issue_number: target.pull_request_number,
+        body: comment_body,
+      },
+    )
+    return {provider: "github", method: "issues.create_comment", params: params, target: target}
+  }
+  return {
+    provider: provider,
+    method: opts?.method ?? "git_forge.comment",
+    params: {target: target, body: comment_body, event: event},
+    target: target,
+  }
+}
+
+/**
+ * git_forge_writeback_comment posts a provider-independent forge status
+ * comment through the active connector client.
+ *
+ * @effects: [net]
+ * @errors: []
+ */
+pub fn git_forge_writeback_comment(
+  net: HarnessNet,
+  event: GitForgePullRequestEvent,
+  body: string,
+  options = nil,
+) {
+  const request = git_forge_writeback_request(event, body, options)
+  return net.connector_call(request.provider, request.method, request.params)
+}

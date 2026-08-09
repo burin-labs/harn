@@ -1,0 +1,25 @@
+pipeline test(harness: Harness, task) {
+  const parts = url_parse("https://user:pass@api.example.com:8080/v1/items?q=hello&page=2#frag")
+  harness.stdio.log(parts["scheme"])
+  harness.stdio.log(parts["host"])
+  harness.stdio.log(parts["port"])
+  harness.stdio.log(parts["path"])
+  harness.stdio.log(parts["query"])
+  harness.stdio.log(parts["fragment"])
+  harness.stdio.log(parts["username"])
+  const built = url_build({scheme: "https", host: "example.com", path: "/api", query: "x=1&y=2"})
+  harness.stdio.log(built)
+  const normalized_path = url_build({scheme: "https", host: "example.com", path: "api"})
+  harness.stdio.log(normalized_path)
+  const userinfo = url_build(
+    {scheme: "https", host: "example.com", path: "/", username: "a@b", password: "p:q"},
+  )
+  harness.stdio.log(userinfo)
+  const pairs = query_parse("?key=alpha&key=beta&other=42")
+  harness.stdio.log(len(pairs))
+  harness.stdio.log(pairs[0]["key"])
+  harness.stdio.log(pairs[0]["value"])
+  harness.stdio.log(pairs[1]["value"])
+  const qs = query_stringify([{key: "name", value: "ali ce"}, {key: "ids", value: "1,2,3"}])
+  harness.stdio.log(qs)
+}

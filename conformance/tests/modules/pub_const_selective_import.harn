@@ -1,0 +1,14 @@
+// Selective import of `pub const` / `pub let` values (and a `pub fn` that
+// closes over a private const). Exercises HARN visibility: only `pub` names
+// bind.
+import { GREETING, MAX_RETRIES, MUTABLE_SEED, scaled } from "pub_const_lib"
+
+assert_eq(MAX_RETRIES, 3)
+
+assert_eq(GREETING, "hi")
+
+assert_eq(MUTABLE_SEED, 7)
+
+assert_eq(MAX_RETRIES * 2, 6)
+
+assert_eq(scaled(), 297)

@@ -1,0 +1,1074 @@
+# Bridge protocol
+
+Harn's stdio bridge uses JSON-RPC 2.0 notifications and requests for
+host/runtime coordination below ACP session semantics.
+
+## Native hypothesis attestation
+
+`harness.obs.hypothesis_event_authority_request` sends a `host/call` request
+named `hypothesis.attest_event`. Its `args` object contains
+`authority_kind`, `event_fingerprint`, `plan_fingerprint`, `hypothesis_id`,
+`operation_receipt_id`, and nullable `run_id`. The host verifies the receipt
+against the completed native operation and either returns a JSON-RPC error or
+this exact result:
+
+```json
+{
+  "_meta": {
+    "harn": {
+      "hostResult": {
+        "schema": "harn.host-result.v1",
+        "kind": "hypothesis_native_attestation"
+      }
+    }
+  }
+}
+```
+
+Harn rejects missing, malformed, or extended success documents. It validates
+the request bindings before the host call, consumes the success marker inside
+the authority-scoped builtin, and mints a VM-local resource bound to the
+current execution. The marker is not an authority token: the generic
+`host_call` path returns it as an ordinary dictionary, script mocks cannot
+satisfy the specialized request, and the operation is never served from the
+per-turn read memo.
+
+The adapter owns operation receipts and binds each receipt to one exact request;
+approval UI output or an observation payload alone is not a receipt. An exact
+retry may return the same success, but reuse with different bindings fails.
+Hosts advertise `hypothesis.attest_event` through `host/capabilities` only
+while a trusted adapter is installed. Denial, a stale or mismatched receipt,
+or a native-operation failure is a JSON-RPC error; there is no successful
+"denied" result variant.
+
+## Tool lifecycle observation
+
+The `tool/pre_use`, `tool/post_use`, and `tool/request_approval` bridge
+request/response methods have been **retired** in favor of the canonical
+ACP surface:
+
+- Tool lifecycle is now carried on the `session/update` notification
+  stream as `tool_call` and `tool_call_update` variants (see the ACP
+  schema at <https://agentclientprotocol.com/protocol/schema>). Hosts
+  observe every dispatch via the session update stream — there is no
+  host-side approve/deny/modify hook at dispatch time.
+- Approvals route through canonical `session/request_permission`. When
+  harn's declarative `ToolApprovalPolicy` classifies a call as
+  `RequiresHostApproval`, the agent loop issues a
+  `session/request_permission` request to the host and **fails closed**
+  if the host does not implement it (or returns an error).
+
+Internally, the agent loop emits `AgentEvent::ToolCall` +
+`AgentEvent::ToolCallUpdate` events; the packaged `harn-serve` ACP adapter
+translates them into `session/update` notifications via an `AgentEventSink` it
+registers per session.
+
+### ACP compatibility contract
+
+Harn-owned ACP/MCP extension fields are specified in
+[Harn ACP/MCP extensions v1](./spec/harn-extensions/v1.md). Harn tracks the
+upstream Agent Client Protocol schema and pins its
+wire contract against `agentclientprotocol/agent-client-protocol` schema
+`v0.12.2`. The adapter treats these `session/update` values as standard
+ACP variants:
+
+- `user_message`
+- `user_message_chunk`
+- `agent_message_chunk`
+- `agent_thought_chunk`
+- `tool_call`
+- `tool_call_update`
+- `plan`
+
+Harn emits additional host-facing lifecycle updates outside ACP. They
+ride as top-level `sessionUpdate` discriminators for compatibility with
+existing IDE-host and other host renderers, advertised during
+`initialize` under `agentCapabilities._meta.harn.sessionUpdateExtensions`:
+
+- `artifact`
+- `available_commands_update`
+- `fs_watch`
+- `handoff`
+- `hitl_request`
+- `hitl_resolved`
+- `log`
+- `progress`
+- `reminder_emitted`
+- `skill_activated`
+- `skill_deactivated`
+- `skill_narrow`
+- `skill_scope_tools`
+- `tool_search_query`
+- `tool_search_result`
+- `transcript_compacted`
+- `transcript_projected`
+- `worker_update`
+
+Unknown values should be ignored per ACP forward-compatibility rules.
+Hosts that render Harn extensions should key off the explicit extension
+list from `initialize` instead of a local allow-list.
+
+Agent-loop prompt results expose the same producer-owned terminal outcome used
+by Harn's runtime under `result._meta.harn.terminal`, advertised through
+`agentCapabilities._meta.harn.promptResultExtensionFields`. Hosts must treat
+only `terminal.kind: "natural"` as completion; canonical ACP `stopReason:
+"end_turn"` alone is not completion evidence.
+
+Harn keeps its tool-rendering extensions under `tool_call._meta.harn` and
+`tool_call_update._meta.harn`, following ACP's extension convention while
+leaving canonical ACP fields at their standard locations. These Harn
+metadata keys are advertised during `initialize` under
+`agentCapabilities._meta.harn.toolLifecycleExtensionFields`:
+
+- `audit`
+- `changedPaths`
+- `data`
+- `durationMs`
+- `error`
+- `errorCategory`
+- `executionDurationMs`
+- `executor`
+- `mutationStatus`
+- `parsing`
+- `rawInputPartial`
+
+The standard ACP fields (`toolCallId`, `title`, `kind`, `status`,
+`content`, `locations`, `rawInput`, and `rawOutput`) remain available in
+their ACP locations. Hosts migrating from pre-#904 builds should read the
+listed Harn fields from `_meta.harn` instead of the tool-call update root.
+Harn's pinned fixtures under `crates/harn-serve/tests/fixtures/acp/` pin
+both the standard and extension shapes so host integrations can reference
+stable examples.
+
+#### Vendor-extension session-update payload namespacing (#905)
+
+Following the
+[ACP extensibility convention](https://agentclientprotocol.com/protocol/extensibility),
+**every vendor field on a Harn extension session-update is emitted under
+`update._meta.harn`** — never as a bare top-level field. The `sessionUpdate`
+discriminator stays at the canonical location so existing dispatchers
+that route on it keep working unchanged. Concretely:
+
+| Update variant         | Vendor fields under `_meta.harn`                                                                                                       |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `artifact`             | `artifactId`, `kind`, `title`, `mimeType`, `spec`, `fallback`, `sizeBytes`, `provenance`, `metadata`                                   |
+| `progress`             | `phase`, `message`, `progress`, `total`, `data`                                                                                        |
+| `log`                  | `level`, `message`, `fields`                                                                                                           |
+| `fs_watch`             | `subscriptionId`, `events`                                                                                                             |
+| `worker_update`        | `workerId`, `workerName`, `workerTask`, `workerMode`, `event`, `status`, `terminal`, `metadata`, `audit`                               |
+| `transcript_compacted` | `receiptId`, `schemaVersion`, `mode`, `reason`, `strategy`, `engineStrategy`, `archivedMessages`, `estimatedTokensBefore`, `estimatedTokensAfter`, `snapshotAssetId`, `instructionMode`, `instructionSource`, `compactionPolicy`, `recap` |
+| `transcript_projected` | `policy`, `reason`, `prefixHash`, `keptCount`, `droppedCount`, `providerSafetyBlocked`, `redactedCount`, `reclaimedTokens`, `rootsConsulted`, `redactionPointers` |
+| `handoff`              | `handoffId`, `artifactId`, `handoff`                                                                                                   |
+| `skill_activated`      | `skillName`, `iteration`, `reason`                                                                                                     |
+| `skill_deactivated`    | `skillName`, `iteration`                                                                                                               |
+| `skill_scope_tools`    | `skillName`, `allowedTools`                                                                                                            |
+| `tool_search_query`    | `toolUseId`, `name`, `query`, `strategy`, `mode`                                                                                       |
+| `tool_search_result`   | `toolUseId`, `promoted`, `strategy`, `mode`                                                                                            |
+| `hitl_request`         | `requestId`, `kind`, `payload`                                                                                                         |
+| `hitl_resolved`        | `requestId`, `kind`, `outcome`                                                                                                         |
+| `reminder_emitted`     | `reminder`                                                                                                                             |
+
+Hosts migrating from pre-#905 builds must read these fields from
+`_meta.harn.<field>` instead of the update root. The fixture
+`crates/harn-serve/tests/fixtures/acp/session_update_extensions.json`
+pins the new wire shape verbatim.
+
+`reminder_emitted` is sent when a pending system reminder is rendered
+into the next model request. Its payload lives at
+`update._meta.harn.reminder`:
+
+```json
+{
+  "sessionUpdate": "reminder_emitted",
+  "_meta": {
+    "harn": {
+      "reminder": {
+        "reminderId": "reminder-1",
+        "tags": ["token_pressure"],
+        "body": "Refresh the compacted context before answering.",
+        "roleHint": "developer",
+        "renderedRole": "user",
+        "source": "stdlib_provider",
+        "ttlTurns": 2
+      }
+    }
+  }
+}
+```
+
+The event-log lifecycle topic also emits
+`transcript.reminder.iteration_summary` once per model request that renders
+reminders. That aggregate carries `count`, `body_bytes`, `rendered_bytes`,
+max-byte fields, and rollups by logical reminder tag, source, and rendered role,
+so operators can audit per-turn reminder pressure without scanning every
+individual `transcript.reminder.fired` event.
+
+Content extensions (`visible_text`, `visible_delta`, and
+`permission_preview`, advertised via
+`agentCapabilities._meta.harn.contentExtensionFields`) follow the same
+convention but ride under `content._meta.harn` because they extend the
+canonical ACP content block, not the session-update envelope. Example:
+
+```json
+{
+  "sessionUpdate": "agent_message_chunk",
+  "content": {
+    "type": "text",
+    "text": "hello",
+    "_meta": {
+      "harn": {
+        "visible_text": "hello",
+        "visible_delta": "hello"
+      }
+    }
+  }
+}
+```
+
+### Composition event migration note
+
+Governed Code Mode composition runs are represented on the Harn
+`_harn/agentEvent` extension channel, not as one opaque tool call and
+not as new ACP `session/update` variants. Consumers that do not render
+composition events can ignore unknown `_harn/agentEvent.kind` values and
+continue reading ordinary `tool_call` / `tool_call_update` events.
+
+The Harn-native MVP is surfaced by `composition_binding_manifest(...)`,
+`composition_execute(...)`, and the `std/composition`
+`composition_mcp_tools(...)` profile. Binding manifests are hashable prompt
+contracts; execution reports carry the same parent/child fields described here.
+TypeScript declarations generated from a manifest are editor/model affordances,
+not the bridge authority.
+
+Consumers that do render them should group by `runId`:
+
+- `composition_start` identifies the snippet language, snippet hash,
+  binding-manifest hash, and requested side-effect ceiling.
+- `composition_child_call` records each child binding operation with
+  `rawInput`, `policyContext`, `requestedSideEffectLevel`, and the
+  `ToolAnnotations` used for policy decisions.
+- `composition_child_result` records the child status, executor,
+  output/error, and timing.
+- `composition_finish` and `composition_error` are terminal parent
+  events carrying stdout, stderr, artifacts, structured result, duration,
+  and failure category.
+
+Portal and transcript indexers should treat composition events as a
+parent/child grouping overlay. A mutating child remains a mutating child
+operation because its own annotations and side-effect level are present;
+do not infer the whole run is read-only from the parent event alone.
+
+### `audit` tag
+
+Both `tool_call` and `tool_call_update` carry an optional `_meta.harn.audit`
+field that mirrors the active mutation session for the dispatch (see
+[Trust boundary](../../spec/opentrustgraph.md)). Hosts use it to:
+
+- group every tool emission belonging to the same write-capable
+  session (so undo/redo and audit logs never cross sessions even when
+  multiple workers run in parallel);
+- correlate the canonical `tool_call` stream against
+  `session/update.worker_update.audit` and the optional
+  `session/request_permission.mutation` payloads — they all carry the
+  same `MutationSessionRecord`, so a host that already understands one
+  reuses the same codepath for the others;
+- decide whether to surface a tool dispatch in trust-boundary UX
+  (e.g. badge writes that escape `mutation_scope: read_only`) without
+  guessing from the tool name.
+
+Wire shape (snake_case fields, matching the existing `worker_update.audit`
+contract):
+
+```json
+{
+  "_meta": {
+    "harn": {
+      "audit": {
+        "session_id": "session_42",
+        "parent_session_id": "session_root",
+        "run_id": "run_42",
+        "worker_id": "worker_3",
+        "execution_kind": "worker",
+        "mutation_scope": "apply_workspace",
+        "approval_policy": {
+          "auto_approve": [],
+          "auto_deny": [],
+          "require_approval": ["edit_*"],
+          "write_path_allowlist": ["src/**"]
+        }
+      }
+    }
+  }
+}
+```
+
+The `_meta.harn.audit` field is omitted when no mutation session is installed (read-only
+`harn run` invocations, conformance fixtures, scripts that don't enter
+a workflow). Worker lifecycle audit data is carried as
+`worker_update._meta.harn.audit`, matching the Harn extension namespacing
+contract.
+
+### `executor` tag
+
+`tool_call_update` carries an optional `_meta.harn.executor` field that names the
+backend that ran the tool, so clients can render "via mcp:linear" /
+"via host bridge" badges, attribute latency by transport, and route
+errors correctly. Variants:
+
+- `"harn_builtin"` — VM-stdlib (e.g. `read_file`, `write_file`,
+  `exec`, `http_*`, `mcp_*`) or any Harn-side handler closure
+  registered in the script's `tools` table.
+- `"host_bridge"` — capability provided by the host through the bridge
+  (Swift IDE bridge, BurinApp, BurinCLI host shells).
+- `{"kind": "mcp_server", "serverName": "<name>"}` — tool came from
+  `mcp_list_tools` against the named server. The agent loop detects
+  this from the `_mcp_server` annotation `mcp_list_tools` injects on
+  every dict, so the tag survives even when the call physically
+  proxies through a bridge.
+- `"provider_native"` — provider executed the tool server-side and
+  inlined the result (currently only OpenAI Responses-API
+  `tool_search` and the equivalent Anthropic native search; the agent
+  never dispatches these locally).
+
+Unit variants serialize as bare strings; the `mcp_server` case carries
+the configured server name. The field is omitted when unknown — most
+commonly for the in-progress emission that fires before the dispatch
+backend is picked.
+
+### `session/request_permission`
+
+Request payload (harn-issued):
+
+```json
+{
+  "sessionId": "session_123",
+  "toolCall": {
+    "sessionUpdate": "tool_call_update",
+    "toolCallId": "tool-call_123",
+    "title": "edit_file",
+    "kind": "edit",
+    "rawInput": {
+      "path": "src/main.rs",
+      "old_string": "let port = 3000;",
+      "new_string": "let port = 8080;"
+    },
+    "content": [
+      {
+        "type": "diff",
+        "path": "/workspace/src/main.rs",
+        "oldText": "fn main() {\n    let port = 3000;\n}\n",
+        "newText": "fn main() {\n    let port = 8080;\n}\n",
+        "_meta": {
+          "harn": {
+            "permission_preview": {
+              "source": "pre_approval",
+              "preimageSha256": "3a7bd3e2360a...",
+              "byteCount": 35
+            }
+          }
+        }
+      }
+    ],
+    "_meta": {
+      "harn": {
+        "toolName": "edit_file",
+        "approvalRequest": {
+          "id": "tool-call_123",
+          "action": "edit_file",
+          "args": {
+            "path": "src/main.rs",
+            "old_string": "let port = 3000;",
+            "new_string": "let port = 8080;"
+          },
+          "principal": "session_123",
+          "requested_at": "2026-04-30T12:00:00Z",
+          "approvers_required": 1,
+          "evidence_refs": [
+            {
+              "kind": "file_mutation_diff",
+              "path": "/workspace/src/main.rs",
+              "oldText": "fn main() {\n    let port = 3000;\n}\n",
+              "newText": "fn main() {\n    let port = 8080;\n}\n",
+              "preimageSha256": "3a7bd3e2360a...",
+              "byteCount": 35,
+              "source": "pre_approval"
+            }
+          ],
+          "undo_metadata": {
+            "policy_decision": {
+              "type": "harn.permission_policy_decision.v1",
+              "action": "ask",
+              "reason": "workspace edit"
+            }
+          },
+          "capabilities_requested": ["tool.edit_file"]
+        },
+        "policyDecision": {
+          "type": "harn.permission_policy_decision.v1",
+          "action": "ask",
+          "reason": "workspace edit",
+          "matched_rule": {
+            "source": "rules",
+            "action": "ask",
+            "id": "edit-src",
+            "index": 0
+          },
+          "risk_labels": ["approval_required", "path_rule"],
+          "context": {
+            "tool_name": "edit_file",
+            "tool_kind": "edit",
+            "side_effect": "workspace_write",
+            "paths": [{"workspace_path": "src/main.rs"}]
+          }
+        }
+      }
+    }
+  },
+  "options": [
+    {"optionId": "allow", "name": "Allow", "kind": "allow_once"},
+    {"optionId": "reject", "name": "Reject", "kind": "reject_once"}
+  ]
+}
+```
+
+The request uses ACP's canonical `toolCall.content` diff shape. Harn reads each
+declared file path immediately before requesting approval and emits full
+`oldText` and `newText` when the mutation can be reconstructed exactly. The
+pre-image is bounded to 1 MiB per file and 16 files per request. For an
+unsupported edit shape, path outside the execution root, symlink, unreadable
+file, non-UTF-8 file, or oversized file, Harn omits the canonical diff instead
+of fabricating one and records explicit `file_preimage` evidence (including an
+unavailability reason when applicable) in
+`toolCall._meta.harn.approvalRequest.evidence_refs`.
+
+`approvalRequest` is the canonical Harn `ApprovalRequest` payload and
+`policyDecision` is the policy rationale. Both live under
+`toolCall._meta.harn`; the standard ACP fields remain at their canonical
+locations. The same policy receipt is copied into
+`approvalRequest.undo_metadata.policy_decision` and into
+`PermissionGrant`/`PermissionDeny` transcript-event metadata so approvals are
+auditable and replayable.
+
+Response payload (host-issued):
+
+```json
+{
+  "outcome": {
+    "outcome": "selected",
+    "optionId": "allow"
+  }
+}
+```
+
+Selecting `reject` denies the call. A cancelled chooser returns
+`{"outcome":{"outcome":"cancelled"}}`; both cases fail closed.
+
+## Worker lifecycle notifications
+
+Delegated workers emit `session/update` notifications with `worker_update`
+content. Those payloads include lifecycle timing, child run/snapshot paths,
+and audit-session metadata so hosts can render background work without
+scraping plain-text logs.
+
+### Lifecycle states
+
+The runtime emits one of seven typed lifecycle events per worker
+transition. The wire `status` string is the same value harn writes to
+the worker's persisted state, so it round-trips through the bridge
+unchanged:
+
+| Event                   | `status`         | Meaning                                                                                                            |
+| ----------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `WorkerSpawned`         | `running`        | A worker (delegated stage, workflow, or sub-agent) has begun a new cycle.                                          |
+| `WorkerProgressed`      | `progressed`     | A retriggerable worker is resuming after `worker_trigger`. Followed shortly by another `running` from the new cycle. |
+| `WorkerWaitingForInput` | `awaiting_input` | A retriggerable worker has finished its current cycle and is parked waiting for the next host trigger payload.     |
+| `WorkerCompleted`       | `completed`      | A non-retriggerable worker has finished successfully (terminal).                                                   |
+| `WorkerFailed`          | `failed`         | A worker terminated with an error (terminal).                                                                      |
+| `WorkerStopped`         | `stopped`        | A worker stopped gracefully after emitting a typed handoff summary (terminal).                                     |
+| `WorkerCancelled`       | `cancelled`      | A worker was cancelled via `close_agent` or upstream cancellation (terminal).                                      |
+
+The four terminal events end the worker's lifetime. `Progressed` and
+`WaitingForInput` are explicitly non-terminal — observers should
+expect more events on the same `worker_id` after they fire.
+
+### `worker_update` notification shape
+
+ACP and A2A adapters subscribe to the canonical `AgentEvent::WorkerUpdate`
+variant and translate it into their respective wire formats from one
+typed source. ACP emits a `session/update` with `sessionUpdate:
+"worker_update"`. Per the [vendor-extension namespacing
+rule](#vendor-extension-session-update-payload-namespacing-905), all
+worker fields ride under `update._meta.harn`:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "session/update",
+  "params": {
+    "sessionId": "session_123",
+    "update": {
+      "sessionUpdate": "worker_update",
+      "_meta": {
+        "harn": {
+          "workerId": "worker_abc",
+          "workerName": "review_captain",
+          "workerTask": "Review PR #42",
+          "workerMode": "delegated_stage",
+          "event": "WorkerWaitingForInput",
+          "status": "awaiting_input",
+          "terminal": false,
+          "metadata": {
+            "task": "Review PR #42",
+            "mode": "delegated_stage",
+            "started_at": "0193...",
+            "finished_at": null,
+            "awaiting_started_at": "0193...",
+            "child_run_id": "run_xyz",
+            "child_run_path": ".harn-runs/run_xyz",
+            "snapshot_path": ".harn/workers/worker_abc.json",
+            "audit": { "...": "MutationSessionRecord" },
+            "error": null
+          },
+          "audit": { "...": "MutationSessionRecord" }
+        }
+      }
+    }
+  }
+}
+```
+
+The `event` discriminator is the typed `WorkerEvent` variant name; the
+`status` field is the same lower-case value the legacy bridge `status`
+field carried. `terminal` is a derived hint so clients can decide whether
+to retain the worker in their tracking UI without parsing the event
+name.
+
+A2A surfaces the same event as a task-stream entry of type
+`worker_update`, scoped to the task whose dispatch spawned the worker.
+A2A is a separate protocol surface and keeps the worker fields at the
+task-stream entry root (it has its own envelope conventions). ACP hosts
+should always read worker fields from `update._meta.harn.<field>`.
+
+Structured Harn plan emissions use the same task stream. When an agent calls
+`emit_plan` or `update_plan`, A2A subscribers receive a
+`harn_plan_document` entry with standard ACP-compatible `entries` plus the
+canonical `harn.plan_document.v1` value under `planDocument`. Its current
+immutable revision contains editable Markdown and the normalized executable
+`harn.plan.v1` plan; anchored comments and resolution receipts travel with the
+same update and event-log replay.
+
+Agent progress reports use protocol-native A2A status updates. When
+`agent_progress` emits narration or entries, task-stream subscribers receive a
+non-terminal `status-update` event with `type: "status"`,
+`status.state: "working"`, a populated `status.message`, and `final: false`.
+Entry lists render as a deterministic markdown checklist inside the message
+text. Final task completion still emits the terminal `completed` status
+separately.
+
+## External-agent delegation
+
+Harn core exposes an open external-agent contract for paid or autonomous
+delegation over interoperable transports. It does not contain proprietary
+adapters; hosted products, cloud platforms, or connector packages should translate
+their own APIs into the capability metadata and extension methods below.
+
+Agent Cards advertise support under one of:
+
+- `capabilities.externalAgent`
+- `capabilities._meta.harn.externalAgent`
+- `_meta.harn.externalAgent`
+
+The object uses schema id `harn.external_agent.v1` and should include:
+
+```json
+{
+  "schema": "harn.external_agent.v1",
+  "pre_dispatch_checkpoint": true,
+  "budget_cap": true,
+  "idempotency": true,
+  "reviewable_handoff": true,
+  "dispatch": true,
+  "operations": [
+    "_harn/externalAgent.plan",
+    "_harn/externalAgent.dispatch"
+  ]
+}
+```
+
+A2A peers expose these as JSON-RPC extension methods on the card's JSONRPC
+transport:
+
+- `_harn/externalAgent.plan` returns a checkpoint with `checkpoint_id`, `plan`,
+  `expected_scope`, optional `evidence_refs`, and `metadata`.
+- `_harn/externalAgent.dispatch` accepts the approved checkpoint, `budget`,
+  `idempotency_key`, `task`, `expected_scope`, `context`, and `metadata`, then
+  returns a result with a reviewable `handoff`, `artifacts`, `diff`/`patch`,
+  `receipts`, and `budget_used` (`usd`, `tokens`, `seconds`, `tool_calls`)
+  where applicable.
+
+`std/external_agent.external_agent_delegate(target, task, options?)` enforces the
+safe sequence:
+
+1. Validate that `budget` has at least one positive cap and that an
+   `idempotency_key` is present or generated by the stdlib wrapper.
+2. Resolve the Agent Card and prove `budget_cap`, `idempotency`,
+   `reviewable_handoff`, and dispatch support before any paid work.
+3. Fetch a pre-dispatch checkpoint and return
+   `status: "checkpoint_required"` unless `checkpoint.approved` is already true.
+4. Dispatch only after approval, preserving the same idempotency key. Replays of
+   a completed delegation return `status: "replayed"` without another remote
+   dispatch.
+5. Normalize the result into a typed `harn.external_agent.handoff.v1` envelope
+   with a handoff artifact and a diff artifact when a patch is present.
+
+If a peer cannot provide a remote checkpoint, normal dispatch is refused. Hosts
+may set `checkpoint.allow_local_fallback: true` with an explicit local plan; Harn
+will still require the remote peer to advertise budget, idempotency, reviewable
+handoff, and dispatch support before sending the approved task. When a peer
+reports `budget_used` above the cap, Harn returns a reviewable envelope with
+`status: "budget_exceeded"` rather than silently treating the work as clean.
+
+## Daemon idle/resume notifications
+
+Daemon agents stay alive after text-only turns and wait for host activity with adaptive
+backoff: `100ms`, `500ms`, `1s`, `2s`, resetting to `100ms` whenever activity arrives.
+
+### `agent/idle`
+
+Sent as a bridge notification whenever the daemon enters or remains in the idle wait loop.
+
+Payload:
+
+```json
+{
+  "iteration": 3,
+  "backoff_ms": 1000
+}
+```
+
+### `agent/resume`
+
+Hosts can send this notification to wake an idle daemon without injecting a user-visible
+message.
+
+Payload:
+
+```json
+{}
+```
+
+On the ACP adapter surface, hosts can wake the daemon by sending a pending
+user-message inject. `session/inject` accepts `{sessionId, mode, content}`
+where `content` is a string or ACP content-block array, then responds
+immediately with `status: "accepted"` and an agent-owned `messageId`. Harn
+later delivers the same id as `session/update` with `sessionUpdate:
+"user_message"`. `mode: "steer"` maps to the next safe operation boundary, and
+`mode: "queue"` maps to end-of-interaction delivery. Pending injects can be
+revoked with `session/revoke_inject` or edited in place with
+`session/replace_inject` before delivery; successful mutation responses return
+`status: "revoked"`, `"already_revoked"`, or `"replaced"`. Races return
+structured error data with `reason: "already_delivered"`,
+`"already_revoked"`, `"unknown_message_id"`, or
+`"not_owner_or_not_authorized"`.
+
+To inject ambient context without pretending it is a user message, send
+`session/remind`:
+
+```json
+{
+  "body": "The workspace changed while you were idle; re-read src/lib.rs before editing.",
+  "tags": ["workspace"],
+  "dedupe_key": "workspace-change",
+  "ttl_turns": 2,
+  "role_hint": "system",
+  "mode": "interrupt_immediate",
+  "_meta": {
+    "harn": {
+      "origin": "file-watcher"
+    }
+  }
+}
+```
+
+`mode` accepts the same delivery values as queued user messages:
+`interrupt_immediate`, `finish_step`, and `audit_only`. `audit_only`
+reminders drain at `loop_exit` and land in the transcript but are never
+rendered into a model prompt — see
+[steering seams](./concepts/steering-seams.md) for the full table. The reminder
+payload is validated as a reminder spec; non-standard host metadata belongs under
+`_meta`. Malformed reminder payloads are rejected with `HARN-RMD-002`; unknown
+top-level reminder options are rejected with `HARN-RMD-001`.
+
+Hosts that need an operator-facing queue can call
+`session/pending_injections` with `{ "sessionId": "..." }`. The response is
+`{pendingCount, injections}` in FIFO order, with `kind: "user"` rows for
+pending `session/inject` messages and `kind: "reminder"` rows for pending
+`session/remind` reminders. Reminder rows include `reminderId`, `mode`, `body`,
+`tags`, `dedupeKey`, `ttlTurns`, `roleHint`, and `source`.
+
+Queued reminders can be revoked before delivery with
+`session/revoke_reminder` and `{ "sessionId": "...", "reminderId": "..." }`.
+Successful revocation returns `{reminderId, status: "revoked"}`; repeated
+revocation returns `status: "already_revoked"`. Races after a checkpoint drains
+the reminder return a structured `already_delivered` error.
+
+## Live session attach/detach
+
+Interactive clients attach to an existing live session with a Harn-owned
+lifecycle contract. Hosted/cloud brokers can authenticate and route these calls,
+but the runtime owns the session semantics so local TUIs, portals, and remote
+clients do not invent incompatible takeover rules.
+
+`session/attach` accepts:
+
+```json
+{
+  "sessionId": "session_123",
+  "clientId": "portal",
+  "mode": "observer",
+  "takeover": false,
+  "_meta": {
+    "harn": {
+      "surface": "portal"
+    }
+  }
+}
+```
+
+`mode` is `observer` or `controller`. A session may have many observers and at
+most one controller. A second controller attach fails unless `takeover: true` is
+set or the client calls `session/takeover`, which demotes the prior controller
+to observer. `session/detach` removes the client and releases control when the
+detaching client was the controller. `session/heartbeat` refreshes the client's
+last-seen marker and optional metadata without changing ownership.
+
+Responses share this shape:
+
+```json
+{
+  "client": {
+    "client_id": "portal",
+    "mode": "observer",
+    "attached_at": "1780000000",
+    "last_seen_at": "1780000000",
+    "prompt_injection": false,
+    "permission_routing": false,
+    "metadata": {"surface": "portal"}
+  },
+  "previous_controller_id": null,
+  "active_controller_id": "tui",
+  "clients": []
+}
+```
+
+Only the active controller may inject user prompts or route permission requests.
+Controller prompt injection records the client id on the user message metadata.
+Permission routing records a `live_session_permission_route` transcript event
+containing the request id, controller client, and host metadata. Attach,
+takeover, detach, and heartbeat record `live_session_client` transcript events
+and are also emitted as `session/update` extensions using the same
+`_meta.harn` namespacing rule as other Harn session-update extensions.
+
+Unexpected client exit is represented as `session/detach` with
+`reason: "client_exit"` by the host/broker that detects the disconnect. Reconnect
+is a fresh `session/attach` using the same `clientId`; the runtime preserves the
+transcript and recomputes ownership from the live-client registry.
+
+## Client-executed tool search
+
+When a Harn script opts into `tool_search` against a provider that lacks
+native defer-loading support, the runtime switches to a client-executed
+fallback (see the [LLM tools guide](./llm/tools.md#client-executed-fallback)).
+Built-in `bm25`, `regex`, and `hybrid` strategies stay in Harn/VM space. Hosts
+that want embeddings, LLM reranking, project-specific indexes, or remote search
+services should provide those through ordinary Harn callbacks, host-backed
+tools, or MCP tools and pass the closure as `tool_search.strategy`. The bridge
+observes only the resulting `tool_search_query` and `tool_search_result`
+transcript events; there is no special `tool_search/query` RPC.
+
+- `tool_names` (required): ordered list of tool names to promote.
+  Unknown names are ignored by the runtime — they can't be surfaced
+  because their schemas weren't registered. Return at most ~20 names
+  per call; the runtime caps promotions soft-per-turn regardless.
+- `diagnostic` (optional): short explanation surfaced to the model in
+  the tool result alongside `tool_names`. Useful for "no hits, try
+  broader terms"-style feedback.
+
+An ACP-style wrapper `{ "result": { "tool_names": [...] } }` is also
+accepted for hosts that re-wrap everything in a `result` envelope.
+
+Errors: a JSON-RPC error response (standard shape) is surfaced to the
+model as a `tool_names: []` result with a diagnostic that includes the
+host error message. The loop continues — the model can retry with a
+different query.
+
+## Host tool discovery
+
+Hosts can expose their own dynamic tool surface to scripts without
+pre-registering every tool in the initial prompt. Harn discovers that
+surface through one bridge RPC and then invokes individual tools
+through the existing `builtin_call` request path.
+
+### `host/tools/list`
+
+VM-issued request. No parameters (or an empty object). The host
+responds with a list of tool descriptors. Canonical response shape:
+
+```json
+{
+  "tools": [
+    {
+      "name": "Read",
+      "description": "Read a file from the active workspace",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "path": {"type": "string", "description": "File path to read"}
+        },
+        "required": ["path"]
+      },
+      "deprecated": false
+    },
+    {
+      "name": "open_file",
+      "description": "Reveal a file in the editor",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "path": {"type": "string"}
+        },
+        "required": ["path"]
+      },
+      "deprecated": true
+    }
+  ]
+}
+```
+
+Accepted variants:
+
+- a bare array `[{...}, {...}]`
+- an ACP-style wrapper `{ "result": { "tools": [...] } }`
+- compatibility field names `short_description`, `parameters`, or
+  `input_schema`; Harn normalizes them to `description` and `schema`
+
+Each normalized descriptor surfaced to scripts has exactly these keys:
+
+- `name`: string, required
+- `description`: string, defaults to `""`
+- `schema`: JSON Schema object or `null`
+- `deprecated`: boolean, defaults to `false`
+
+Invocation:
+
+- `harness.tools.list_registered()` returns the normalized list directly.
+- `harness.tools.invoke(name, args)` then dispatches that tool through the
+  existing `builtin_call` bridge request using `name` as the builtin
+  name and `args` as the single argument payload.
+
+## Shell discovery host capability
+
+Shell discovery is a typed `process` host capability so IDEs, TUIs,
+headless CLI runs, and cloud workers can share one shell-selection
+contract. Harn's standalone fallback exposes the same operations when no
+bridge host is attached.
+
+### `harness.process.list_shells()`
+
+Ordinary scripts call `harness.process.list_shells()`. The privileged host wire
+dispatches the registry-owned `process.list_shells` operation and returns:
+
+```json
+{
+  "shells": [
+    {
+      "id": "zsh",
+      "label": "zsh",
+      "path": "/bin/zsh",
+      "platform": "darwin",
+      "available": true,
+      "supports_login": true,
+      "supports_interactive": true,
+      "default_args": ["-c"],
+      "login_args": ["-l", "-c"],
+      "source": "env"
+    }
+  ],
+  "default_shell_id": "zsh"
+}
+```
+
+Windows hosts should distinguish `pwsh`, `powershell`, and `cmd`.
+`cmd` uses `["/C"]`; PowerShell variants use
+`["-NoProfile", "-Command"]`.
+
+### `process.get_default_shell` / `process.set_default_shell`
+
+`process.get_default_shell` returns the selected shell object for the
+session. Stateful hosts may implement `process.set_default_shell` with
+`{ "shell_id": "zsh" }`; hosts that keep persistence in editor settings
+can omit persistence and still pass the selected shell on command
+requests.
+
+### `process.shell_invocation`
+
+`process.shell_invocation` resolves a discovered shell ID or shell object
+into executable argv:
+
+```json
+{
+  "shell_id": "zsh",
+  "command": "printf ok",
+  "login": false,
+  "interactive": false
+}
+```
+
+Response:
+
+```json
+{
+  "program": "/bin/zsh",
+  "args": ["-c", "printf ok"],
+  "command_arg_index": 1,
+  "shell": {"id": "zsh"}
+}
+```
+
+Shell-mode command runners may pass a shell object or a shell ID
+resolved through this capability, and otherwise use the selected default
+shell. `argv` mode remains preferred for programmatic execution; shell
+mode is for user-authored commands and interactive shell semantics. The
+normative JSON Schema lives at
+`spec/schemas/host-shell-discovery.schema.json`.
+
+## Skill registry
+
+Hosts expose their own managed skill store to the VM through three RPCs.
+Filesystem skill discovery works without the bridge (`harn run` walks
+the seven non-host layers described in [Skills](./skills.md)); these
+RPCs add a layer 8 so cloud hosts, enterprise deployments, and IDE
+hosts can serve skills the filesystem can't see.
+
+### `skills/list`
+
+VM-issued request. No parameters (or an empty object). The host
+responds with an array of `SkillManifestRef` entries. Minimal shape:
+
+```json
+[
+  { "id": "deploy", "name": "deploy", "description": "Ship it", "source": "host" },
+  { "id": "acme/ops/review", "name": "review", "description": "Code review", "source": "host" }
+]
+```
+
+The VM also accepts `{ "skills": [ ... ] }` for hosts that wrap
+collections in an object.
+
+### `skills/fetch`
+
+VM-issued request. Parameters: `{ "id": "<skill id>" }`. Response is a
+single skill object carrying enough metadata to populate a `Skill`:
+
+```json
+{
+  "name": "deploy",
+  "description": "Ship it",
+  "body": "# Deploy runbook\n...",
+  "manifest": {
+    "when_to_use": "...",
+    "allowed_tools": ["bash", "git"],
+    "paths": ["infra/**"],
+    "model": "claude-opus-4-7"
+  }
+}
+```
+
+Hosts may flatten the manifest fields into the top level instead — the
+CLI accepts either shape.
+
+### `skills/update`
+
+Host-issued notification. No parameters. Invalidates the VM's cached
+skill catalog; the CLI re-runs layered discovery (including another
+`skills/list` call) on the next iteration boundary — for `harn watch`,
+between file changes; for long-running agents, between turns. A VM
+without an active bridge ignores the notification.
+
+## Host-delegated skill matching
+
+Harn agents that opt into
+`skill_match: { strategy: "host" }` (or the alias `"embedding"`)
+delegate skill ranking to the host via a single JSON-RPC request. The
+host response is purely advisory — unknown skill names are ignored,
+and an RPC error falls back to the in-VM metadata ranker with a
+warning logged against `agent.skill_match`.
+
+### `skill/match`
+
+Request payload (harn-issued, host response required):
+
+```json
+{
+  "strategy": "host",
+  "prompt": "Ship the new release to production",
+  "working_files": ["infra/terraform/cluster.tf"],
+  "candidates": [
+    {
+      "name": "ship",
+      "description": "Ship a production release",
+      "when_to_use": "User says ship/release/deploy",
+      "paths": ["infra/**", "Dockerfile"]
+    },
+    {
+      "name": "review",
+      "description": "Review existing code for correctness",
+      "when_to_use": "User asks to review/audit",
+      "paths": []
+    }
+  ]
+}
+```
+
+Response payload (host-issued):
+
+```json
+{
+  "matches": [
+    {"name": "ship", "score": 0.92, "reason": "matched by embedding similarity"}
+  ]
+}
+```
+
+- `matches[*].name` (required): the candidate's skill name. Names
+  absent from the original `candidates` list are ignored.
+- `matches[*].score` (optional): non-negative float; higher scores
+  rank earlier. Defaults to `1.0` when omitted.
+- `matches[*].reason` (optional): short diagnostic stored on the
+  `skill_matched` / `skill_activated` transcript events. Defaults
+  to `"host match"`.
+
+Alternative shapes accepted for host convenience:
+
+- Top-level array: `[{"name": ..., "score": ...}, ...]`
+- `{"skills": [...]}` wrapping
+- `{"result": {"matches": [...]}}` ACP envelope
+
+### Skill lifecycle session updates
+
+Agents emit ACP `session/update` notifications for skill lifecycle
+transitions so hosts can surface active-skill state in real time.
+These are Harn extension variants advertised during `initialize`, not
+upstream ACP `SessionUpdate` variants.
+The packaged `harn-serve` ACP adapter translates the canonical `AgentEvent`
+variants into:
+
+- `sessionUpdate: "skill_activated"` — `{skillName, iteration, reason}`
+- `sessionUpdate: "skill_deactivated"` — `{skillName, iteration}`
+- `sessionUpdate: "skill_scope_tools"` — `{skillName, allowedTools}`
+- `sessionUpdate: "skill_narrow"` — `{reason, removedTools, remainingTools,
+  policy, removedToolDetails, keptToolDetails}`
+
+`skill_matched` stays internal to the VM transcript — the candidate
+list can be large and host UIs typically only care about activation
+transitions, not every ranking pass.

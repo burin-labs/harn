@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540" role="img" aria-labelledby="title desc" viewBox="0 0 960 540">
+  <title id="title">Harn DLQ management portal</title>
+  <desc id="desc">A portal screenshot-style panel with DLQ filters, grouped error classes, a table, and a detail inspector.</desc>
+  <rect width="960" height="540" fill="#08101c"/>
+  <rect x="24" y="24" width="912" height="492" rx="8" fill="#101a29" stroke="#233146"/>
+  <text x="48" y="66" fill="#55b6ff" font-family="Arial, sans-serif" font-size="12" font-weight="700">OPERATIONS</text>
+  <text x="48" y="98" fill="#e8edf7" font-family="Arial, sans-serif" font-size="30" font-weight="700">Dead-letter queue</text>
+  <rect x="48" y="126" width="178" height="36" rx="6" fill="#0d1624" stroke="#233146"/>
+  <text x="64" y="149" fill="#92a0b8" font-family="Arial, sans-serif" font-size="13">cake-classifier</text>
+  <rect x="238" y="126" width="150" height="36" rx="6" fill="#0d1624" stroke="#233146"/>
+  <text x="254" y="149" fill="#92a0b8" font-family="Arial, sans-serif" font-size="13">github</text>
+  <rect x="400" y="126" width="170" height="36" rx="6" fill="#0d1624" stroke="#233146"/>
+  <text x="416" y="149" fill="#ffc6c6" font-family="Arial, sans-serif" font-size="13">provider_5xx</text>
+  <rect x="582" y="126" width="86" height="36" rx="6" fill="#12304a" stroke="#55b6ff"/>
+  <text x="605" y="149" fill="#e8edf7" font-family="Arial, sans-serif" font-size="13">Refresh</text>
+  <rect x="48" y="188" width="388" height="62" rx="8" fill="#0d1624" stroke="#233146"/>
+  <text x="66" y="217" fill="#e8edf7" font-family="Arial, sans-serif" font-size="16" font-weight="700">Error groups</text>
+  <rect x="66" y="228" width="122" height="22" rx="11" fill="#3a1b22" stroke="#7a2e39"/>
+  <text x="80" y="244" fill="#ffc6c6" font-family="Arial, sans-serif" font-size="12">provider_5xx: 8</text>
+  <rect x="448" y="188" width="440" height="62" rx="8" fill="#0d1624" stroke="#233146"/>
+  <text x="466" y="217" fill="#e8edf7" font-family="Arial, sans-serif" font-size="16" font-weight="700">Alerts</text>
+  <rect x="466" y="228" width="254" height="22" rx="11" fill="#3a1b22" stroke="#7a2e39"/>
+  <text x="480" y="244" fill="#ffc6c6" font-family="Arial, sans-serif" font-size="12">cake-classifier provider_5xx 8/5</text>
+  <rect x="48" y="278" width="548" height="190" rx="8" fill="#0b1320" stroke="#233146"/>
+  <text x="70" y="310" fill="#92a0b8" font-family="Arial, sans-serif" font-size="12">TRIGGER</text>
+  <text x="236" y="310" fill="#92a0b8" font-family="Arial, sans-serif" font-size="12">EVENT</text>
+  <text x="410" y="310" fill="#92a0b8" font-family="Arial, sans-serif" font-size="12">FAILED AT</text>
+  <line x1="48" y1="324" x2="596" y2="324" stroke="#233146"/>
+  <text x="70" y="354" fill="#e8edf7" font-family="Arial, sans-serif" font-size="14">cake-classifier</text>
+  <text x="236" y="354" fill="#e8edf7" font-family="Arial, sans-serif" font-size="14">trigger_evt_7</text>
+  <text x="410" y="354" fill="#e8edf7" font-family="Arial, sans-serif" font-size="14">2026-04-24 10:00</text>
+  <text x="70" y="394" fill="#e8edf7" font-family="Arial, sans-serif" font-size="14">cake-classifier</text>
+  <text x="236" y="394" fill="#e8edf7" font-family="Arial, sans-serif" font-size="14">trigger_evt_8</text>
+  <text x="410" y="394" fill="#e8edf7" font-family="Arial, sans-serif" font-size="14">2026-04-24 10:04</text>
+  <rect x="616" y="278" width="272" height="190" rx="8" fill="#0d1624" stroke="#233146"/>
+  <text x="636" y="310" fill="#e8edf7" font-family="Arial, sans-serif" font-size="16" font-weight="700">Detail</text>
+  <rect x="636" y="330" width="90" height="30" rx="6" fill="#12304a" stroke="#55b6ff"/>
+  <text x="660" y="350" fill="#e8edf7" font-family="Arial, sans-serif" font-size="12">Replay</text>
+  <rect x="736" y="330" width="124" height="30" rx="6" fill="#1a2638" stroke="#233146"/>
+  <text x="750" y="350" fill="#e8edf7" font-family="Arial, sans-serif" font-size="12">Export fixture</text>
+  <text x="636" y="386" fill="#92a0b8" font-family="Arial, sans-serif" font-size="12">last_error</text>
+  <text x="636" y="410" fill="#ffc6c6" font-family="Arial, sans-serif" font-size="13">provider returned 503</text>
+  <text x="636" y="442" fill="#92a0b8" font-family="Arial, sans-serif" font-size="12">attempt_history: 3</text>
+</svg>

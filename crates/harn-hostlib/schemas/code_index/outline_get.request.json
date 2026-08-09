@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/code_index/outline_get.request.json",
+  "title": "code_index.outline_get request",
+  "description": "Return the cached outline symbols for a file id.",
+  "type": "object",
+  "properties": {
+    "file_id": { "type": "integer", "minimum": 1 }
+  },
+  "required": ["file_id"],
+  "additionalProperties": false
+}

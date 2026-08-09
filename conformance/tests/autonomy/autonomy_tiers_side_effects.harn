@@ -1,0 +1,143 @@
+import "std/triggers"
+
+fn tier_handler(harness: Harness, event: TriggerEvent) -> dict {
+  const context = harness.runtime.handler_context()
+  const file_path = path_join(
+    harness.fs.workspace_temp_dir(),
+    "autonomy_tier_" + event.headers?.x_delivery + ".txt",
+  )
+  harness.fs.write_text(file_path, "tier:" + context?.autonomy_tier)
+  return {
+    tier: context?.autonomy_tier,
+    file_path: file_path,
+    file_exists: harness.fs.exists(file_path),
+  }
+}
+
+fn register_tier_agent(runtime: HarnessRuntime, agent_id: string, tier: string) -> TriggerHandle {
+  return runtime.trigger_register(
+    {
+      id: agent_id,
+      kind: "issue.opened",
+      provider: "webhook",
+      autonomy_tier: tier,
+      handler: tier_handler,
+      when: nil,
+      retry: nil,
+      match: {events: ["issue.opened"]},
+      events: nil,
+      dedupe_key: nil,
+      filter: nil,
+      budget: nil,
+      manifest_path: "runtime://autonomy-tiers",
+      package_name: "conformance",
+    },
+  )
+}
+
+fn fire_tier(runtime: HarnessRuntime, handle: TriggerHandle, unique: string) -> DispatchHandle {
+  return runtime.trigger_fire(
+    handle,
+    {provider: "webhook", kind: "issue.opened", headers: {x_delivery: unique}},
+  )
+}
+
+pipeline test(harness: Harness, task) {
+  harness.testing.clear()
+  const unique = to_string(to_int(harness.clock.timestamp())) + "-"
+    + to_string(
+    harness.random.range(100000, 999999),
+  )
+  const shadow_agent = "autonomy-shadow-" + unique
+  const shadow = fire_tier(
+    harness.runtime,
+    register_tier_agent(harness.runtime, shadow_agent, "shadow"),
+    "shadow-" + unique,
+  )
+  const shadow_records: list<TrustRecord> = harness.runtime.trust_query(
+    {agent: shadow_agent, action: "fs.write", tier: "shadow"},
+  )
+  harness.stdio.println(shadow.status == "dispatched" && shadow.result?.tier == "shadow")
+  harness.stdio.println(
+    !shadow.result?.file_exists && len(shadow_records) == 1
+      && shadow_records[0]?.outcome == "denied",
+  )
+  const suggest_agent = "autonomy-suggest-" + unique
+  const suggest = fire_tier(
+    harness.runtime,
+    register_tier_agent(harness.runtime, suggest_agent, "suggest"),
+    "suggest-" + unique,
+  )
+  const suggest_pending = harness.interaction.hitl_pending({}).filter(
+    { row -> row.agent == suggest_agent },
+  )
+  const suggest_records: list<TrustRecord> = harness.runtime.trust_query(
+    {agent: suggest_agent, action: "fs.write", tier: "suggest"},
+  )
+  harness.stdio.println(suggest.status == "dispatched" && suggest.result?.tier == "suggest")
+  harness.stdio.println(
+    !suggest.result?.file_exists && len(suggest_pending) == 1 && len(suggest_records) == 1,
+  )
+  harness.testing.respond(
+    "interaction",
+    "approval_response",
+    {approved: true, reviewer: "lead", reason: "ok"},
+  )
+  const approval_agent = "autonomy-approval-" + unique
+  const approved = fire_tier(
+    harness.runtime,
+    register_tier_agent(harness.runtime, approval_agent, "act_with_approval"),
+    "approval-" + unique,
+  )
+  const approved_records: list<TrustRecord> = harness.runtime.trust_query(
+    {agent: approval_agent, action: "fs.write", tier: "act_with_approval"},
+  )
+  harness.stdio.println(
+    approved.status == "dispatched" && approved.result?.tier == "act_with_approval",
+  )
+  harness.stdio.println(
+    approved.result?.file_exists && len(approved_records) == 1
+      && approved_records[0]?.outcome
+      == "success",
+  )
+  harness.testing.clear()
+  const auto_agent = "autonomy-auto-" + unique
+  const auto = fire_tier(
+    harness.runtime,
+    register_tier_agent(harness.runtime, auto_agent, "act_auto"),
+    "auto-" + unique,
+  )
+  const auto_records: list<TrustRecord> = harness.runtime.trust_query(
+    {agent: auto_agent, action: "fs.write"},
+  )
+  harness.stdio.println(auto.status == "dispatched" && auto.result?.tier == "act_auto")
+  harness.stdio.println(auto.result?.file_exists && len(auto_records) == 0)
+  const scoped_agent = "autonomy-scoped-" + unique
+  const scoped_path = path_join(
+    harness.fs.workspace_temp_dir(),
+    "autonomy_tier_scoped_" + unique + ".txt",
+  )
+  harness.runtime.with_autonomy_policy(
+    {agent_id: scoped_agent, autonomy_tier: "act_auto", action_tiers: {"fs.write": "shadow"}},
+    fn() { harness.fs.write_text(scoped_path, "scoped") },
+  )
+  const scoped_records: list<TrustRecord> = harness.runtime.trust_query(
+    {agent: scoped_agent, action: "fs.write", tier: "shadow"},
+  )
+  harness.stdio.println(
+    !harness.fs.exists(scoped_path) && len(scoped_records) == 1
+      && scoped_records[0]?.outcome
+      == "denied",
+  )
+  for path in [
+    shadow.result?.file_path,
+    suggest.result?.file_path,
+    approved.result?.file_path,
+    auto.result?.file_path,
+    scoped_path,
+  ] {
+    if path != nil && harness.fs.exists(path) {
+      harness.fs.delete(path)
+    }
+  }
+}
