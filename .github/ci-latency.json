@@ -3,7 +3,7 @@
   "repository": "burin-labs/harn",
   "workflow": "ci.yml",
   "event": "merge_group",
-  "topology_epoch": "2026-08-08T22:06:31Z",
+  "topology_epoch": "2026-08-09T02:24:48Z",
   "full_run_jobs": [
     { "name": "Verify publishable crates", "match": "exact" },
     { "name": "Rust workspace tests", "match": "exact" },
