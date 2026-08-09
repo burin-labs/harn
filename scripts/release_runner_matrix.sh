@@ -6,6 +6,7 @@ POLICY="${HARN_RELEASE_RUNNER_POLICY:-${ROOT}/.github/release-runner-policy.json
 MODE=""
 PROFILE="policy"
 TARGETS=""
+FORCE_STANDARD_MACOS="${HARN_RELEASE_FORCE_STANDARD_MACOS:-false}"
 
 usage() {
   cat <<'EOF'
@@ -55,13 +56,36 @@ case "$MODE:$PROFILE" in
     ;;
 esac
 
+case "$FORCE_STANDARD_MACOS" in
+  true|false) ;;
+  *)
+    echo 'HARN_RELEASE_FORCE_STANDARD_MACOS must be true or false' >&2
+    exit 2
+    ;;
+esac
+
 jq -e '
-  (keys == ["pricing", "schema_version", "targets"]) and
-  .schema_version == 1 and
-  (.pricing | keys == ["as_of", "macos_large_usd_per_minute", "source"]) and
+  (keys == ["jobs", "pricing", "schema_version", "targets"]) and
+  .schema_version == 2 and
+  (.jobs | keys == ["cli_aot"]) and
+  (.jobs.cli_aot | keys == ["primary", "standard"]) and
+  all(.jobs.cli_aot[]; type == "string" and length > 0) and
+  (.pricing | keys == [
+    "as_of",
+    "blacksmith_linux_16vcpu_usd_per_minute",
+    "blacksmith_macos_12vcpu_usd_per_minute",
+    "github_macos_xlarge_usd_per_minute",
+    "sources"
+  ]) and
   (.pricing.as_of | type == "string" and length > 0) and
-  (.pricing.source | type == "string" and startswith("https://docs.github.com/")) and
-  (.pricing.macos_large_usd_per_minute | type == "number" and . > 0) and
+  (.pricing.sources | keys == ["blacksmith", "github"]) and
+  (.pricing.sources.blacksmith | type == "string" and startswith("https://www.blacksmith.sh/")) and
+  (.pricing.sources.github | type == "string" and startswith("https://docs.github.com/")) and
+  all([
+    .pricing.blacksmith_linux_16vcpu_usd_per_minute,
+    .pricing.blacksmith_macos_12vcpu_usd_per_minute,
+    .pricing.github_macos_xlarge_usd_per_minute
+  ][]; type == "number" and . > 0) and
   (.targets | type == "array" and length > 0) and
   ([.targets[].target] | length == (unique | length)) and
   all(.targets[];
@@ -101,6 +125,7 @@ fi
 
 jq -c \
   --arg runner_key "$RUNNER_KEY" \
+  --argjson force_standard_macos "$FORCE_STANDARD_MACOS" \
   --argjson requested "$REQUESTED_JSON" '
     def rust_cache_broad_restore_prefix($target):
       if $target == "x86_64-apple-darwin" then
@@ -122,7 +147,14 @@ jq -c \
       | select(($requested | length) == 0 or ($requested | index($entry.target)))
       | {
           target,
-          runner: .runners[$runner_key],
+          runner: (
+            if $force_standard_macos
+              and ($runner_key == "primary" or $runner_key == "recovery")
+              and .target == "x86_64-apple-darwin"
+            then .runners.standard
+            else .runners[$runner_key]
+            end
+          ),
           rust_cache_broad_restore_prefix: rust_cache_broad_restore_prefix(.target),
           release_codegen_units,
           use_sccache

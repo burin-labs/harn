@@ -54,7 +54,24 @@ const RELEASE_BUILD_CONCURRENCY_GROUP = "build-release-binaries-build-$"
 const RELEASE_BUILD_CANCEL_POLICY = "$"
   + "{{ github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.setup.outputs.build_mode == 'warm' }}"
 
+const RELEASE_ACTIVE_TAG_SELECTOR =
+  "(.event == \"push\" and ((.headBranch // \"\") | test(\"^v[0-9]+\\\\.[0-9]+\\\\.[0-9]+(-[0-9A-Za-z.-]+)?$\")))"
+
+const RELEASE_ACTIVE_DISPATCH_SELECTOR = "(.event == \"workflow_dispatch\")"
+
 const RELEASE_BUILD_IF = "needs.setup.outputs.should_build_binaries == 'true'"
+
+const RELEASE_AOT_PRIMARY_OUTPUT = "needs.setup.outputs.cli_aot_primary_runner"
+
+const RELEASE_AOT_STANDARD_OUTPUT = "needs.setup.outputs.cli_aot_standard_runner"
+
+const RELEASE_AOT_SETUP_PRIMARY = "$"
+  + "{{ steps.resolve.outputs.cli_aot_primary_runner }}"
+
+const RELEASE_AOT_SETUP_STANDARD = "$"
+  + "{{ steps.resolve.outputs.cli_aot_standard_runner }}"
+
+const RELEASE_AOT_FALLBACK_SWITCH = "vars.HARN_RELEASE_FORCE_STANDARD_LINUX != 'true'"
 
 const RELEASE_CACHE_BUDGET_IF =
   "always() && needs.setup.outputs.build_mode == 'warm' && needs.setup.outputs.should_build_binaries == 'true' && needs.build.result != 'cancelled'"
@@ -452,6 +469,50 @@ pub fn release_warm_cache_concurrency_errors(workflow) -> list<string> {
       + [
       "${RELEASE_BINARY_WORKFLOW}:build must let only real main-branch warms supersede a target warm",
     ]
+  }
+  const resolve_run = (workflow?.jobs?.setup?.steps ?? []).filter({ step -> step?.id == "resolve" })
+    .to_list()[0]?.run
+    ?? ""
+  if !contains(resolve_run, RELEASE_ACTIVE_TAG_SELECTOR) {
+    errors = errors
+      + ["${RELEASE_BINARY_WORKFLOW}:setup must recognize active tag-release runs"]
+  }
+  if contains(resolve_run, RELEASE_ACTIVE_DISPATCH_SELECTOR) {
+    errors = errors
+      + [
+      "${RELEASE_BINARY_WORKFLOW}:setup must not misclassify benchmark or warm dispatches as releases",
+    ]
+  }
+  return errors
+}
+
+pub fn release_aot_runner_errors(workflow) -> list<string> {
+  let errors: list<string> = []
+  const setup_outputs = workflow?.jobs?.setup?.outputs ?? {}
+  if setup_outputs?.cli_aot_primary_runner != RELEASE_AOT_SETUP_PRIMARY {
+    errors = errors
+      + [
+      "${RELEASE_BINARY_WORKFLOW}:setup must project the policy-selected CLI AOT primary runner",
+    ]
+  }
+  if setup_outputs?.cli_aot_standard_runner != RELEASE_AOT_SETUP_STANDARD {
+    errors = errors
+      + [
+      "${RELEASE_BINARY_WORKFLOW}:setup must project the policy-selected CLI AOT standard runner",
+    ]
+  }
+  const runner = trim(workflow?.jobs?.prepare_cli_aot?.["runs-on"] ?? "")
+  for required in [
+    RELEASE_AOT_PRIMARY_OUTPUT,
+    RELEASE_AOT_STANDARD_OUTPUT,
+    RELEASE_AOT_FALLBACK_SWITCH,
+  ] {
+    if !contains(runner, required) {
+      errors = errors
+        + [
+        "${RELEASE_BINARY_WORKFLOW}:prepare_cli_aot runner selection must include ${required}",
+      ]
+    }
   }
   return errors
 }
@@ -1981,6 +2042,7 @@ fn main(harness: Harness) {
       workflows[RELEASE_BINARY_WORKFLOW],
     ),
     release_warm_cache_concurrency_errors(workflows[RELEASE_BINARY_WORKFLOW]),
+    release_aot_runner_errors(workflows[RELEASE_BINARY_WORKFLOW]),
     release_warm_cache_prune_errors(workflows[RELEASE_BINARY_WORKFLOW]),
     setup_harn_cache_action_errors(setup_harn_action),
     sccache_install_action_errors(sccache_install_action),
