@@ -56,6 +56,33 @@ launch behavior.
 - Verify closed error variants and diagnostic codes.
 - Keep fixtures minimal and readable.
 
+## Run Harn test suites
+
+- Put module behavior behind a public Harn function and call that function
+  from tests in the same process. Use a subprocess only when the CLI adapter,
+  installed artifact, process isolation, or operating-system exit status is
+  the behavior under test.
+- Select related files in one invocation with repeatable `--test-path`
+  arguments. Harn compiles the selected import graph once and schedules the
+  combined cases from one queue.
+- Use `--parallel` without `--jobs` by default. The runner sizes the worker
+  pool from available CPU and memory. Reserve `--jobs` or `HARN_TEST_JOBS` for
+  an operator-imposed limit on a shared host.
+- Mark tests that start compilers, test runners, or multi-threaded child
+  processes with `@heavy(threads: N)`. Mark tests that share mutable external
+  state with `@serial(group: "name")`. Keep ordinary filesystem fixtures in
+  per-test workspace temporary directories instead of serializing the suite.
+- Use `--timeout` as an execution-only wall-clock safety rail. It starts after
+  discovery, import-graph compilation, fixture setup, and resource queueing;
+  it still detects blocked I/O and deadlocks, which a CPU-time limit would
+  miss.
+- Assert performance separately with `--max-test-ms` or `--max-execute-ms` in
+  a host-isolated lane. Harn serializes those measurement budgets so scheduler
+  contention cannot decide the result.
+
+The repository reference `docs/src/testing.md` defines the exact timing
+phases, cache contract, defaults, and machine-readable receipts.
+
 ## Conformance
 
 - Put language/runtime specification behavior under `conformance/tests/`.
