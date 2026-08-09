@@ -109,6 +109,7 @@ fn capability_for_effect(kind: EffectKind, access: EffectAccess) -> Capability {
         EffectKind::Network => Capability::NetworkAccess,
         EffectKind::Llm => Capability::ModelCall,
         EffectKind::Tool | EffectKind::Mcp | EffectKind::Host => Capability::ConnectorAccess,
+        EffectKind::Authority => Capability::Authority,
         EffectKind::Worker => Capability::WorkerDispatch,
         EffectKind::Stdio => Capability::Stdio,
         EffectKind::Env => Capability::Environment,

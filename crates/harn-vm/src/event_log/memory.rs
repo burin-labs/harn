@@ -5,8 +5,8 @@ use futures::stream::BoxStream;
 
 use super::util::{prepare_event_after, stream_from_broadcast, BroadcastMap};
 use super::{
-    AppendOutcome, CompactReport, ConsumerId, EventId, EventLog, EventLogBackendKind,
-    EventLogDescription, LogError, LogEvent, Topic,
+    require_expected_topic_head, AppendHeadExpectation, AppendOutcome, CompactReport, ConsumerId,
+    EventId, EventLog, EventLogBackendKind, EventLogDescription, LogError, LogEvent, Topic,
 };
 
 #[derive(Default)]
@@ -55,6 +55,42 @@ impl MemoryEventLog {
         value: &str,
         event: LogEvent,
     ) -> Result<AppendOutcome, LogError> {
+        self.append_idempotent_by_header_with_expectation(
+            topic,
+            header,
+            value,
+            AppendHeadExpectation::Any,
+            event,
+        )
+        .await
+    }
+
+    pub(super) async fn append_idempotent_chained_by_header(
+        &self,
+        topic: &Topic,
+        header: &str,
+        value: &str,
+        expected_head: Option<&str>,
+        event: LogEvent,
+    ) -> Result<AppendOutcome, LogError> {
+        self.append_idempotent_by_header_with_expectation(
+            topic,
+            header,
+            value,
+            AppendHeadExpectation::Exact(expected_head),
+            event,
+        )
+        .await
+    }
+
+    async fn append_idempotent_by_header_with_expectation(
+        &self,
+        topic: &Topic,
+        header: &str,
+        value: &str,
+        expectation: AppendHeadExpectation<'_>,
+        event: LogEvent,
+    ) -> Result<AppendOutcome, LogError> {
         let mut state = self.state()?;
         if let Some((event_id, existing)) = state
             .topics
@@ -81,6 +117,7 @@ impl MemoryEventLog {
             .get(topic.as_str())
             .and_then(|events| events.back())
             .map(|(previous_id, previous_event)| (*previous_id, previous_event));
+        require_expected_topic_head(topic, previous, expectation)?;
         let event = prepare_event_after(topic, event_id, previous, event)?;
         state.latest.insert(topic.as_str().to_string(), event_id);
         state

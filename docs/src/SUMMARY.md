@@ -35,6 +35,7 @@
 - [Scripting cheatsheet](./scripting-cheatsheet.md)
 - [LLM quick reference](./docs/llm/harn-quickref.md)
 - [Best practices](./best-practices.md)
+- [Compile a bounded experiment](./cookbooks/compile-hypothesis.md)
 - [Pipeline lifecycle cookbook](./cookbooks/lifecycle.md)
 - [Tool hooks cookbook](./cookbooks/tool-hooks.md)
 - [Channel cookbook](./cookbooks/channels.md)
@@ -326,6 +327,7 @@
 - [ADR 0004: VM multithreading via Send values + share-nothing isolates](./adr/0004-vm-multithreading.md)
 - [ADR 0005: Keep Harn's A2A adapter; do not adopt a2a-lf](./adr/0005-a2a-keep-bespoke-adapter.md)
 - [ADR 0006: Keep hand-rolled ACP until the official SDK clears the Zed falsifier](./adr/0006-acp-hand-rolled-vs-sdk.md)
+- [ADR 0007: Compile hypotheses into Harn's existing experiment and workflow owners](./adr/0007-hypothesis-compiler-ownership.md)
 
 # Operations
 

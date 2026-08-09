@@ -272,6 +272,12 @@ provider integrations.
 | `harness.net.egress_policy(config)` | Install a destination policy on this Harness for HTTP, SSE, WebSocket, and Rust-backed connector outbound calls. Hosts seed each root Harness from the run environment; `harn test` gives each pipeline an isolated root. Rules support exact hosts, `*.suffix` hosts, IP literals/CIDR, optional `:port`, and `default: "deny"` allowlist mode. `block_private: "private"` blocks DNS-resolved loopback, private, link-local, metadata, multicast, documentation, CGNAT, benchmark, and equivalent IPv6 ranges; `block_private: "off"` opts out, and `allow_loopback: true` opens only loopback. The same axes can be seeded with `HARN_EGRESS_BLOCK_PRIVATE` and `HARN_EGRESS_ALLOW_LOOPBACK`. Blocked calls throw `{type: "EgressBlocked", category: "egress_blocked", host, port, reason, url}`. `harness.with_net_policy(policy)` derives an attenuated Harness without replacing the root destination policy. |
 | `harness.secrets.read(secret_id)` | Read a secret from the active connector context |
 | `harness.obs.event_log_emit(topic, kind, payload, headers?)` | Append an event to the active connector event log |
+| `harness.obs.event_log_emit_idempotent(topic, kind, idempotency_key, payload?, headers?)` | Append once for a stable identity and return the original event on replay |
+| `harness.obs.event_log_emit_idempotent_chained(topic, kind, idempotency_key, expected_head, payload?, headers?)` | Atomically append once only when the retained provenance-chain head matches |
+| `harness.obs.event_log_verify(topic)` | Verify the retained topic provenance chain and return its count and head hash |
+| `harness.obs.hypothesis_event_snapshot(hypothesis_id)` | Verify the reserved hypothesis topic once and return the records projected for one hypothesis |
+| `harness.obs.hypothesis_event_authority_mint(native_attestation, authority_kind, event_fingerprint, plan_fingerprint, hypothesis_id, run_id?)` | Convert a non-serializable attestation from a registered native adapter into an exact, policy-scoped append proof; ordinary Harn values cannot supply the attestation |
+| `harness.obs.hypothesis_event_append(proof, kind, idempotency_key, expected_head, event_fingerprint, plan_fingerprint, hypothesis_id, run_id, payload, headers?)` | Append one exact authorized event to the reserved `hypotheses.events.v1` topic |
 | `harness.obs.metrics_inc(name, amount?)` | Increment a connector-owned Prometheus counter |
 
 Harn-backed connector modules are loaded through manifest `[[providers]]`

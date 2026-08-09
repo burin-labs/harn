@@ -6,7 +6,7 @@ use std::time::Duration;
 use futures::StreamExt;
 use rand::{rngs::StdRng, RngExt, SeedableRng};
 use rusqlite::{params, Connection};
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, Barrier};
 
 use super::util::{file_size, stream_from_broadcast};
 use super::{
@@ -128,6 +128,191 @@ async fn exercise_idempotent_append(log: Arc<AnyEventLog>) {
     assert!(missing.is_none());
 }
 
+fn chained_event(identity: &str, value: i64) -> LogEvent {
+    let mut headers = BTreeMap::new();
+    headers.insert("harn.test.identity".to_string(), identity.to_string());
+    LogEvent::new("test.chained", serde_json::json!({"value": value})).with_headers(headers)
+}
+
+async fn exercise_atomic_chained_append(logs: [Arc<AnyEventLog>; 2]) {
+    const IDENTITY_HEADER: &str = "harn.test.identity";
+    let topic = Topic::new("integrity.compare_append").unwrap();
+    let reader = logs[0].clone();
+
+    let first = reader
+        .append_idempotent_chained_by_header(
+            &topic,
+            IDENTITY_HEADER,
+            "first",
+            None,
+            chained_event("first", 1),
+        )
+        .await
+        .unwrap();
+    assert!(first.inserted);
+    let first_head = first.event.headers[crate::provenance::HEADER_RECORD_HASH].clone();
+
+    let stale = reader
+        .append_idempotent_chained_by_header(
+            &topic,
+            IDENTITY_HEADER,
+            "stale",
+            None,
+            chained_event("stale", 2),
+        )
+        .await;
+    match stale {
+        Err(LogError::StaleTopicHead {
+            topic: stale_topic,
+            expected,
+            actual,
+        }) => {
+            assert_eq!(stale_topic, topic.as_str());
+            assert_eq!(expected, None);
+            assert_eq!(actual.as_deref(), Some(first_head.as_str()));
+        }
+        other => panic!("expected stale topic head, got {other:?}"),
+    }
+
+    let second = reader
+        .append_idempotent_chained_by_header(
+            &topic,
+            IDENTITY_HEADER,
+            "second",
+            Some(&first_head),
+            chained_event("second", 2),
+        )
+        .await
+        .unwrap();
+    assert!(second.inserted);
+
+    let replay = reader
+        .append_idempotent_chained_by_header(
+            &topic,
+            IDENTITY_HEADER,
+            "first",
+            Some("sha256:deliberately-stale"),
+            chained_event("first", 999),
+        )
+        .await
+        .unwrap();
+    assert!(!replay.inserted);
+    assert_eq!(replay.event_id, first.event_id);
+    assert_eq!(replay.event.payload, serde_json::json!({"value": 1}));
+
+    let expected_head = second.event.headers[crate::provenance::HEADER_RECORD_HASH].clone();
+    let barrier = Arc::new(Barrier::new(3));
+    let spawn_append = |log: Arc<AnyEventLog>, identity: &'static str, value: i64| {
+        let topic = topic.clone();
+        let expected_head = expected_head.clone();
+        let barrier = barrier.clone();
+        tokio::spawn(async move {
+            barrier.wait().await;
+            log.append_idempotent_chained_by_header(
+                &topic,
+                IDENTITY_HEADER,
+                identity,
+                Some(&expected_head),
+                chained_event(identity, value),
+            )
+            .await
+        })
+    };
+    let left = spawn_append(logs[0].clone(), "concurrent-left", 3);
+    let right = spawn_append(logs[1].clone(), "concurrent-right", 4);
+    barrier.wait().await;
+    let outcomes = [left.await.unwrap(), right.await.unwrap()];
+    assert_eq!(
+        outcomes
+            .iter()
+            .filter(|outcome| outcome.as_ref().is_ok_and(|outcome| outcome.inserted))
+            .count(),
+        1,
+        "exactly one contender must append at the shared head"
+    );
+    assert_eq!(
+        outcomes
+            .iter()
+            .filter(|outcome| matches!(outcome, Err(LogError::StaleTopicHead { .. })))
+            .count(),
+        1,
+        "the losing contender must observe a stale head"
+    );
+
+    let events = reader.read_range(&topic, None, usize::MAX).await.unwrap();
+    assert_eq!(events.len(), 3);
+    let report = reader.verify_topic(&topic).await.unwrap();
+    assert!(report.verified, "{:?}", report.errors);
+    assert_eq!(report.event_count, 3);
+}
+
+async fn exercise_clean_integrity_chain(log: Arc<AnyEventLog>) {
+    let topic = Topic::new("integrity.clean").unwrap();
+    log.append(
+        &topic,
+        LogEvent::new("first", serde_json::json!({"value": 1})),
+    )
+    .await
+    .unwrap();
+    log.append(
+        &topic,
+        LogEvent::new("second", serde_json::json!({"value": 2})),
+    )
+    .await
+    .unwrap();
+
+    let report = log.verify_topic(&topic).await.unwrap();
+    assert!(report.verified, "{:?}", report.errors);
+    assert!(report.errors.is_empty());
+    assert_eq!(report.event_count, 2);
+    assert!(report.last_hash.is_some());
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn verified_snapshot_filters_a_large_shared_topic_in_one_boundary_call() {
+    let log = AnyEventLog::Memory(super::MemoryEventLog::new(8));
+    let topic = Topic::new("hypotheses.snapshot.scale").unwrap();
+    for index in 0..2_000 {
+        let hypothesis_id = if index % 20 == 0 { "target" } else { "noise" };
+        let mut headers = BTreeMap::new();
+        headers.insert("hypothesis_id".to_string(), hypothesis_id.to_string());
+        log.append(
+            &topic,
+            LogEvent::new("hypothesis.test", serde_json::json!({"index": index}))
+                .with_headers(headers),
+        )
+        .await
+        .unwrap();
+    }
+
+    let snapshot = log
+        .verified_snapshot_by_header(&topic, "hypothesis_id", "target")
+        .await
+        .unwrap();
+    assert!(snapshot.verification.verified);
+    assert_eq!(snapshot.verification.event_count, 2_000);
+    assert_eq!(snapshot.events.len(), 100);
+}
+
+fn rewrite_file_topic(
+    topic_path: &std::path::Path,
+    mutate: impl FnOnce(&mut Vec<serde_json::Value>),
+) {
+    let source = std::fs::read_to_string(topic_path).unwrap();
+    let mut records: Vec<serde_json::Value> = source
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    mutate(&mut records);
+    let encoded = records
+        .into_iter()
+        .map(|record| serde_json::to_string(&record).unwrap())
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n";
+    std::fs::write(topic_path, encoded).unwrap();
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn memory_backend_supports_append_read_subscribe_and_compact() {
     let log = Arc::new(AnyEventLog::Memory(MemoryEventLog::new(8)));
@@ -165,6 +350,18 @@ async fn memory_backend_supports_append_read_subscribe_and_compact() {
 async fn memory_backend_idempotent_append_returns_original_event() {
     let log = Arc::new(AnyEventLog::Memory(MemoryEventLog::new(8)));
     exercise_idempotent_append(log).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn memory_backend_atomically_compares_chain_head() {
+    let log = Arc::new(AnyEventLog::Memory(MemoryEventLog::new(8)));
+    exercise_atomic_chained_append([log.clone(), log]).await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn memory_backend_verifies_clean_integrity_chain() {
+    let log = Arc::new(AnyEventLog::Memory(MemoryEventLog::new(8)));
+    exercise_clean_integrity_chain(log).await;
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -244,6 +441,104 @@ async fn file_backend_idempotent_append_returns_original_event() {
         FileEventLog::open(dir.path().to_path_buf(), 8).unwrap(),
     ));
     exercise_idempotent_append(log).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn file_backend_atomically_compares_chain_head_across_handles() {
+    let dir = tempfile::tempdir().unwrap();
+    let left = Arc::new(AnyEventLog::File(
+        FileEventLog::open(dir.path().to_path_buf(), 8).unwrap(),
+    ));
+    let right = Arc::new(AnyEventLog::File(
+        FileEventLog::open(dir.path().to_path_buf(), 8).unwrap(),
+    ));
+    exercise_atomic_chained_append([left, right]).await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn file_backend_latest_refreshes_after_another_handle_appends() {
+    let dir = tempfile::tempdir().unwrap();
+    let topic = Topic::new("latest.cross_handle").unwrap();
+    let reader = FileEventLog::open(dir.path().to_path_buf(), 8).unwrap();
+    let writer = FileEventLog::open(dir.path().to_path_buf(), 8).unwrap();
+
+    assert_eq!(reader.latest(&topic).await.unwrap(), None);
+    writer
+        .append(&topic, LogEvent::new("written", serde_json::Value::Null))
+        .await
+        .unwrap();
+    assert_eq!(reader.latest(&topic).await.unwrap(), Some(1));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn file_backend_verifies_clean_integrity_chain() {
+    let dir = tempfile::tempdir().unwrap();
+    let log = Arc::new(AnyEventLog::File(
+        FileEventLog::open(dir.path().to_path_buf(), 8).unwrap(),
+    ));
+    exercise_clean_integrity_chain(log).await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn file_backend_verifier_detects_payload_tampering() {
+    let dir = tempfile::tempdir().unwrap();
+    let topic = Topic::new("integrity.tampered_payload").unwrap();
+    let log = AnyEventLog::File(FileEventLog::open(dir.path().to_path_buf(), 8).unwrap());
+    log.append(
+        &topic,
+        LogEvent::new("observation", serde_json::json!({"value": 1})),
+    )
+    .await
+    .unwrap();
+
+    let topic_path = dir
+        .path()
+        .join("topics")
+        .join("integrity.tampered_payload.jsonl");
+    rewrite_file_topic(&topic_path, |records| {
+        records[0]["event"]["payload"]["value"] = serde_json::json!(999);
+    });
+
+    let report = log.verify_topic(&topic).await.unwrap();
+    assert!(!report.verified);
+    assert!(report
+        .errors
+        .iter()
+        .any(|error| error.contains("record_hash mismatch")));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn file_backend_verifier_detects_provenance_header_tampering() {
+    let dir = tempfile::tempdir().unwrap();
+    let topic = Topic::new("integrity.tampered_headers").unwrap();
+    let log = AnyEventLog::File(FileEventLog::open(dir.path().to_path_buf(), 8).unwrap());
+    log.append(&topic, LogEvent::new("first", serde_json::json!({})))
+        .await
+        .unwrap();
+    log.append(&topic, LogEvent::new("second", serde_json::json!({})))
+        .await
+        .unwrap();
+
+    let topic_path = dir
+        .path()
+        .join("topics")
+        .join("integrity.tampered_headers.jsonl");
+    rewrite_file_topic(&topic_path, |records| {
+        records[0]["event"]["headers"]["harn.provenance.schema"] = serde_json::json!("forged");
+        records[1]["event"]["headers"]["harn.provenance.prev_hash"] =
+            serde_json::json!("sha256:forged");
+    });
+
+    let report = log.verify_topic(&topic).await.unwrap();
+    assert!(!report.verified);
+    assert!(report
+        .errors
+        .iter()
+        .any(|error| error.contains("provenance schema mismatch")));
+    assert!(report
+        .errors
+        .iter()
+        .any(|error| error.contains("prev_hash mismatch")));
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -342,6 +637,25 @@ async fn sqlite_backend_idempotent_append_returns_original_event() {
     let path = dir.path().join("events.sqlite");
     let log = Arc::new(AnyEventLog::Sqlite(SqliteEventLog::open(path, 8).unwrap()));
     exercise_idempotent_append(log).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn sqlite_backend_atomically_compares_chain_head_across_connections() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("events.sqlite");
+    let left = Arc::new(AnyEventLog::Sqlite(
+        SqliteEventLog::open(path.clone(), 8).unwrap(),
+    ));
+    let right = Arc::new(AnyEventLog::Sqlite(SqliteEventLog::open(path, 8).unwrap()));
+    exercise_atomic_chained_append([left, right]).await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn sqlite_backend_verifies_clean_integrity_chain() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("events.sqlite");
+    let log = Arc::new(AnyEventLog::Sqlite(SqliteEventLog::open(path, 8).unwrap()));
+    exercise_clean_integrity_chain(log).await;
 }
 
 #[tokio::test(flavor = "current_thread")]

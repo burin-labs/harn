@@ -242,12 +242,8 @@ fn module_usage(program: &[SNode]) -> ModuleUsage {
             usage.effects.extend(direct_effects(&call));
             if let CallClassification::Capabilities(effects) = call.classification {
                 for effect in effects {
-                    usage
-                        .capabilities
-                        .insert(capability_label(effect.capability));
-                    usage
-                        .effects
-                        .insert(effect_label(effect.capability, &effect.operation));
+                    usage.capabilities.insert(capability_requirement(&effect));
+                    usage.effects.insert(effect_label(&effect));
                     usage.host_calls.insert(call.display_name.clone());
                 }
             }
@@ -405,8 +401,18 @@ fn capability_label(capability: Capability) -> String {
     capability.canonical().to_string()
 }
 
-fn effect_label(capability: Capability, operation: &str) -> String {
-    match capability {
+fn capability_requirement(effect: &harn_ir::CapabilityEffect) -> String {
+    if effect.capability == Capability::Authority {
+        return format!(
+            "authority.{}",
+            harn_ir::authority_effect_policy_operation(effect.access, effect.path.as_deref())
+        );
+    }
+    capability_label(effect.capability)
+}
+
+fn effect_label(effect: &harn_ir::CapabilityEffect) -> String {
+    match effect.capability {
         Capability::FilesystemRead
         | Capability::WorkspaceMutation
         | Capability::CommandExecution
@@ -422,14 +428,15 @@ fn effect_label(capability: Capability, operation: &str) -> String {
         | Capability::Channel
         | Capability::State
         | Capability::HumanApproval
-        | Capability::AutonomyPolicy => capability.canonical().to_string(),
+        | Capability::AutonomyPolicy => effect.capability.canonical().to_string(),
         Capability::ConnectorAccess => {
-            if operation == "template.render" {
+            if effect.operation == "template.render" {
                 "template.render".to_string()
             } else {
                 "connector.call".to_string()
             }
         }
+        Capability::Authority => capability_requirement(effect),
     }
 }
 
@@ -679,4 +686,33 @@ fn module_matches_filter(path: &Path, filter: &str, root_dir: &Path) -> bool {
         || display.strip_suffix(".harn") == Some(filter)
         || path.file_stem().and_then(|stem| stem.to_str()) == Some(filter)
         || path.file_name().and_then(|name| name.to_str()) == Some(filter)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn graph_preserves_scoped_authority_effect() {
+        let effect = harn_ir::CapabilityEffect {
+            capability: Capability::Authority,
+            operation: "hypothesis_event_authority_mint".to_string(),
+            path: Some("plan_admission".to_string()),
+            access: harn_builtin_meta::EffectAccess::Write,
+        };
+        assert_eq!(
+            capability_requirement(&effect),
+            "authority.write@plan_admission"
+        );
+        assert_eq!(effect_label(&effect), "authority.write@plan_admission");
+
+        let existing_host = harn_ir::CapabilityEffect {
+            capability: Capability::ConnectorAccess,
+            operation: "notify_file_edited".to_string(),
+            path: Some("src/main.harn".to_string()),
+            access: harn_builtin_meta::EffectAccess::Write,
+        };
+        assert_eq!(capability_requirement(&existing_host), "mcp.connector");
+        assert_eq!(effect_label(&existing_host), "connector.call");
+    }
 }

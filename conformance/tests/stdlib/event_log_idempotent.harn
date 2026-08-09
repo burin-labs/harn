@@ -1,0 +1,78 @@
+pipeline default(harness: Harness, _task) {
+  const first = harness.obs.event_log_emit_idempotent(
+    "tests.idempotent",
+    "hypothesis.plan.registered",
+    "plan-1:v1",
+    {fingerprint: "sha256:one"},
+    {schema: "harn.hypothesis.event.v1"},
+  )
+  const replay = harness.obs.event_log_emit_idempotent(
+    "tests.idempotent",
+    "hypothesis.plan.registered",
+    "plan-1:v1",
+    {fingerprint: "sha256:one"},
+    {schema: "harn.hypothesis.event.v1"},
+  )
+  const next = harness.obs.event_log_emit_idempotent(
+    "tests.idempotent",
+    "hypothesis.evidence.observed",
+    "observation-1",
+    {fingerprint: "sha256:two"},
+  )
+  require first.inserted, "the first identity is appended"
+  require !replay.inserted, "replaying the identity returns the original event"
+  require replay.event_id == first.event_id, "idempotent replay preserves ordering identity"
+  require replay.event.payload.fingerprint == "sha256:one", "replay returns persisted payload"
+  require next.event_id == first.event_id + 1, "new identities append in topic order"
+  const chained = harness.obs.event_log_emit_idempotent_chained(
+    "tests.idempotent",
+    "hypothesis.evidence.admitted",
+    "admission-1",
+    next.event.headers["harn.provenance.record_hash"],
+    {fingerprint: "sha256:three"},
+  )
+  require chained.inserted && chained.event_id == next.event_id + 1,
+    "a matching chain head admits exactly one new identity"
+  const stale = try {
+    harness.obs.event_log_emit_idempotent_chained(
+      "tests.idempotent",
+      "hypothesis.evidence.admitted",
+      "admission-stale",
+      first.event.headers["harn.provenance.record_hash"],
+      {fingerprint: "sha256:stale"},
+    )
+  }
+  require is_err(stale), "a new identity cannot append from a stale chain head"
+  const chained_replay = harness.obs.event_log_emit_idempotent_chained(
+    "tests.idempotent",
+    "hypothesis.evidence.admitted",
+    "admission-1",
+    first.event.headers["harn.provenance.record_hash"],
+    {fingerprint: "sha256:ignored"},
+  )
+  require !chained_replay.inserted && chained_replay.event_id == chained.event_id,
+    "an existing identity replays even when its expected head is stale"
+  const records = harness.obs.event_log_read("tests.idempotent")
+  require len(records) == 3, "the ledger contains no duplicate physical event"
+  require records[0]?.headers["harn.idempotency_key"] == "plan-1:v1",
+    "the fixed identity header is visible to replay and export"
+  require records[1]?.headers["harn.provenance.prev_hash"] != nil,
+    "later events retain the event-log integrity chain"
+  const verification = harness.obs.event_log_verify("tests.idempotent")
+  require verification.verified && len(verification.errors) == 0,
+    "the public verifier accepts an intact event-log chain"
+  require verification.event_count == 3, "the verification report accounts for every durable event"
+  require verification.last_hash == records[2]?.headers["harn.provenance.record_hash"],
+    "the verification report exposes the verified chain head"
+  const reserved = try {
+    harness.obs.event_log_emit_idempotent(
+      "tests.idempotent",
+      "invalid",
+      "reserved",
+      {},
+      {"harn.idempotency_key": "caller-controlled"},
+    )
+  }
+  require is_err(reserved), "callers cannot override the identity index header"
+  harness.stdio.println("event-log-idempotent-ok")
+}

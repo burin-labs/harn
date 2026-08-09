@@ -1,6 +1,6 @@
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use futures::stream::BoxStream;
 use serde::{Deserialize, Serialize};
@@ -10,9 +10,12 @@ use super::util::{
     sync_tree, write_json_atomically, BroadcastMap,
 };
 use super::{
-    AppendOutcome, CompactReport, ConsumerId, EventId, EventLog, EventLogBackendKind,
-    EventLogDescription, LogError, LogEvent, LogEventBytes, Topic,
+    require_expected_topic_head, AppendHeadExpectation, AppendOutcome, CompactReport, ConsumerId,
+    EventId, EventLog, EventLogBackendKind, EventLogDescription, LogError, LogEvent, LogEventBytes,
+    Topic,
 };
+
+const TOPIC_LOCK_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Serialize, Deserialize)]
 struct FileRecord {
@@ -22,7 +25,6 @@ struct FileRecord {
 
 pub struct FileEventLog {
     root: PathBuf,
-    latest_ids: Mutex<HashMap<String, EventId>>,
     write_lock: Mutex<()>,
     pub(super) broadcasts: BroadcastMap,
     pub(super) queue_depth: usize,
@@ -34,9 +36,10 @@ impl FileEventLog {
             .map_err(|error| LogError::Io(format!("event log mkdir error: {error}")))?;
         std::fs::create_dir_all(root.join("consumers"))
             .map_err(|error| LogError::Io(format!("event log mkdir error: {error}")))?;
+        std::fs::create_dir_all(root.join("locks"))
+            .map_err(|error| LogError::Io(format!("event log mkdir error: {error}")))?;
         Ok(Self {
             root,
-            latest_ids: Mutex::new(HashMap::new()),
             write_lock: Mutex::new(()),
             broadcasts: BroadcastMap::default(),
             queue_depth: queue_depth.max(1),
@@ -57,17 +60,29 @@ impl FileEventLog {
         ))
     }
 
-    fn latest_id_for_topic(&self, topic: &Topic) -> Result<EventId, LogError> {
-        if let Some(event_id) = self
-            .latest_ids
-            .lock()
-            .expect("file event log latest ids poisoned")
-            .get(topic.as_str())
-            .copied()
-        {
-            return Ok(event_id);
-        }
+    fn lock_topic(&self, topic: &Topic) -> Result<std::fs::File, LogError> {
+        let path = self
+            .root
+            .join("locks")
+            .join(format!("{}.lock", topic.as_str()));
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(&path)
+            .map_err(|error| LogError::Io(format!("event log topic lock open error: {error}")))?;
+        harn_flock::lock_with_deadline(
+            &file,
+            &path,
+            harn_flock::LockMode::Exclusive,
+            TOPIC_LOCK_TIMEOUT,
+        )
+        .map_err(|error| LogError::Io(format!("event log topic lock error: {error}")))?;
+        Ok(file)
+    }
 
+    fn latest_id_from_disk(&self, topic: &Topic) -> Result<EventId, LogError> {
         let mut latest = 0;
         let path = self.topic_path(topic);
         if path.is_file() {
@@ -75,10 +90,6 @@ impl FileEventLog {
                 latest = record.id;
             }
         }
-        self.latest_ids
-            .lock()
-            .expect("file event log latest ids poisoned")
-            .insert(topic.as_str().to_string(), latest);
         Ok(latest)
     }
 
@@ -136,10 +147,45 @@ impl FileEventLog {
         value: &str,
         event: LogEvent,
     ) -> Result<AppendOutcome, LogError> {
+        self.append_idempotent_by_header_with_expectation(
+            topic,
+            header,
+            value,
+            AppendHeadExpectation::Any,
+            event,
+        )
+    }
+
+    pub(super) fn append_idempotent_chained_by_header(
+        &self,
+        topic: &Topic,
+        header: &str,
+        value: &str,
+        expected_head: Option<&str>,
+        event: LogEvent,
+    ) -> Result<AppendOutcome, LogError> {
+        self.append_idempotent_by_header_with_expectation(
+            topic,
+            header,
+            value,
+            AppendHeadExpectation::Exact(expected_head),
+            event,
+        )
+    }
+
+    fn append_idempotent_by_header_with_expectation(
+        &self,
+        topic: &Topic,
+        header: &str,
+        value: &str,
+        expectation: AppendHeadExpectation<'_>,
+        event: LogEvent,
+    ) -> Result<AppendOutcome, LogError> {
         let _guard = self
             .write_lock
             .lock()
             .expect("file event log write lock poisoned");
+        let _topic_lock = self.lock_topic(topic)?;
         let existing_events = self.read_range_sync(topic, None, usize::MAX)?;
         if let Some((event_id, existing)) = existing_events.iter().find(|(_, event)| {
             event
@@ -154,10 +200,15 @@ impl FileEventLog {
             });
         }
 
-        let next_id = self.latest_id_for_topic(topic)? + 1;
+        let next_id = existing_events
+            .last()
+            .map(|(event_id, _)| *event_id)
+            .unwrap_or(0)
+            + 1;
         let previous = existing_events
             .last()
             .map(|(previous_id, previous_event)| (*previous_id, previous_event));
+        require_expected_topic_head(topic, previous, expectation)?;
         let event = prepare_event_after(topic, next_id, previous, event)?;
         self.append_record_locked(topic, next_id, event)
     }
@@ -205,10 +256,6 @@ impl FileEventLog {
             .map_err(|error| LogError::Io(format!("event log open error: {error}")))?;
         writeln!(file, "{line}")
             .map_err(|error| LogError::Io(format!("event log write error: {error}")))?;
-        self.latest_ids
-            .lock()
-            .expect("file event log latest ids poisoned")
-            .insert(topic.as_str().to_string(), event_id);
         self.broadcasts
             .publish(topic, self.queue_depth, (event_id, event.clone()));
         Ok(AppendOutcome {
@@ -262,8 +309,13 @@ impl EventLog for FileEventLog {
             .write_lock
             .lock()
             .expect("file event log write lock poisoned");
-        let next_id = self.latest_id_for_topic(topic)? + 1;
+        let _topic_lock = self.lock_topic(topic)?;
         let existing_events = self.read_range_sync(topic, None, usize::MAX)?;
+        let next_id = existing_events
+            .last()
+            .map(|(event_id, _)| *event_id)
+            .unwrap_or(0)
+            + 1;
         let previous = existing_events
             .last()
             .map(|(previous_id, previous_event)| (*previous_id, previous_event));
@@ -346,7 +398,8 @@ impl EventLog for FileEventLog {
     }
 
     async fn latest(&self, topic: &Topic) -> Result<Option<EventId>, LogError> {
-        let latest = self.latest_id_for_topic(topic)?;
+        let _topic_lock = self.lock_topic(topic)?;
+        let latest = self.latest_id_from_disk(topic)?;
         if latest == 0 {
             Ok(None)
         } else {
@@ -359,6 +412,7 @@ impl EventLog for FileEventLog {
             .write_lock
             .lock()
             .expect("file event log write lock poisoned");
+        let _topic_lock = self.lock_topic(topic)?;
         let path = self.topic_path(topic);
         if !path.is_file() {
             return Ok(CompactReport::default());
@@ -383,10 +437,6 @@ impl EventLog for FileEventLog {
             .map_err(|error| LogError::Io(format!("event log compact finalize error: {error}")))?;
         }
         let latest = retained.last().map(|(event_id, _)| *event_id);
-        self.latest_ids
-            .lock()
-            .expect("file event log latest ids poisoned")
-            .insert(topic.as_str().to_string(), latest.unwrap_or(0));
         Ok(CompactReport {
             removed,
             remaining: retained.len(),

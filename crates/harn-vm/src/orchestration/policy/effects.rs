@@ -1,17 +1,16 @@
 //! Typed effect records carried on `HandoffArtifact` envelopes.
 //!
-//! `EffectRecord` is the leaf payload that names a single side-effect a
-//! spawned child agent may exercise (e.g. `Net write to https://api.example`,
-//! `Fs read of /workspace/src`). The set sits on each handoff so the
+//! `EffectRecord` names one side-effect a spawned child may exercise. The set
+//! sits on each handoff so the
 //! dispatcher (E5.4) and the OpenTrustGraph receipt chain (E5.5) can prove
 //! the child never escaped its parent's effect grant.
-//!
 //! Computation at spawn time walks the child's entrypoint module via the
 //! same capability analysis `harn graph --json` uses (issue HARN-#1758),
 //! plus a conservative AST walker for harness calls embedded in inline spawn
 //! configs. The two extraction paths feed one canonicalization step so
 //! downstream consumers see a single deduped, deterministically ordered list.
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use serde::{Deserialize, Serialize};
@@ -52,8 +51,9 @@ pub enum EffectKind {
     State,
     /// Other typed host-service access.
     Host,
-    /// LLM model calls — captures the provider and model when statically
-    /// known so the receipt chain can name the inference dependency.
+    /// Opaque authority that public values cannot manufacture.
+    Authority,
+    /// LLM calls with known provider and model receipt metadata.
     Llm {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         provider: Option<String>,
@@ -298,6 +298,7 @@ fn effect_kind_from_contract(kind: harn_builtin_meta::EffectKind) -> EffectKind 
         ContractKind::Clock => EffectKind::Clock,
         ContractKind::Random => EffectKind::Random,
         ContractKind::Host => EffectKind::Host,
+        ContractKind::Authority => EffectKind::Authority,
         ContractKind::Secret => EffectKind::Secret,
         ContractKind::Observability => EffectKind::Observability,
         ContractKind::Channel => EffectKind::Channel,
@@ -581,6 +582,7 @@ fn capability_effect_to_record(effect: &harn_ir::CapabilityEffect) -> Option<Eff
             },
             EffectScope::Write,
         ),
+        Capability::Authority => (EffectKind::Authority, contract_scope),
         Capability::ModelCall => (
             EffectKind::Llm {
                 provider: None,
@@ -746,7 +748,7 @@ fn effect_allowed_by_ceiling_with_authorization(
 ) -> bool {
     if ceiling.capabilities_are_restricted() {
         let (capability, op) = effect_capability_op(effect);
-        let allowed = super::policy_allows_capability(ceiling, capability, op);
+        let allowed = super::policy_allows_capability(ceiling, capability, op.as_ref());
         if !allowed && !explicitly_authorized {
             return false;
         }
@@ -760,35 +762,51 @@ fn effect_allowed_by_ceiling_with_authorization(
     true
 }
 
-fn effect_capability_op(effect: &EffectRecord) -> (&'static str, &'static str) {
+fn effect_capability_op(effect: &EffectRecord) -> (&'static str, Cow<'static, str>) {
+    let fixed = |capability, operation| (capability, Cow::Borrowed(operation));
     match (&effect.kind, effect.scope) {
-        (EffectKind::Stdio, EffectScope::Read) => ("stdio", "read"),
-        (EffectKind::Stdio, _) => ("stdio", "write"),
-        (EffectKind::Fs, EffectScope::Read) => ("workspace", "read_text"),
-        (EffectKind::Fs, EffectScope::Write) => ("workspace", "write_text"),
-        (EffectKind::Fs, EffectScope::Mutate) => ("workspace", "apply_edit"),
-        (EffectKind::Fs, EffectScope::Observe) => ("workspace", "exists"),
-        (EffectKind::Net, _) => ("network", "http"),
-        (EffectKind::Env, EffectScope::Read | EffectScope::Observe) => ("environment", "read"),
-        (EffectKind::Env, _) => ("environment", "write"),
-        (EffectKind::Clock, _) => ("clock", "now"),
-        (EffectKind::Random, _) => ("random", "bytes"),
-        (EffectKind::Process, EffectScope::Read | EffectScope::Observe) => ("process", "inspect"),
-        (EffectKind::Process, _) => ("process", "run"),
-        (EffectKind::Secret, EffectScope::Read | EffectScope::Observe) => ("secrets", "read"),
-        (EffectKind::Secret, _) => ("secrets", "write"),
-        (EffectKind::Observability, _) => ("observability", "emit"),
-        (EffectKind::Channel, EffectScope::Read | EffectScope::Observe) => ("channel", "read"),
-        (EffectKind::Channel, _) => ("channel", "write"),
-        (EffectKind::State, EffectScope::Read | EffectScope::Observe) => ("state", "read"),
-        (EffectKind::State, _) => ("state", "write"),
-        (EffectKind::Host, _) => ("connector", "call"),
-        (EffectKind::Llm { .. }, EffectScope::Read) => ("llm", "catalog"),
-        (EffectKind::Llm { .. }, _) => ("llm", "call"),
-        (EffectKind::Tool { .. }, _) => ("host", "tool_call"),
-        (EffectKind::Hostcall { .. }, _) => ("connector", "call"),
-        (EffectKind::Persona { .. }, _) => ("worker", "dispatch"),
-        (EffectKind::Spawn, _) => ("worker", "dispatch"),
+        (EffectKind::Stdio, EffectScope::Read) => fixed("stdio", "read"),
+        (EffectKind::Stdio, _) => fixed("stdio", "write"),
+        (EffectKind::Fs, EffectScope::Read) => fixed("workspace", "read_text"),
+        (EffectKind::Fs, EffectScope::Write) => fixed("workspace", "write_text"),
+        (EffectKind::Fs, EffectScope::Mutate) => fixed("workspace", "apply_edit"),
+        (EffectKind::Fs, EffectScope::Observe) => fixed("workspace", "exists"),
+        (EffectKind::Net, _) => fixed("network", "http"),
+        (EffectKind::Env, EffectScope::Read | EffectScope::Observe) => fixed("environment", "read"),
+        (EffectKind::Env, _) => fixed("environment", "write"),
+        (EffectKind::Clock, _) => fixed("clock", "now"),
+        (EffectKind::Random, _) => fixed("random", "bytes"),
+        (EffectKind::Process, EffectScope::Read | EffectScope::Observe) => {
+            fixed("process", "inspect")
+        }
+        (EffectKind::Process, _) => fixed("process", "run"),
+        (EffectKind::Secret, EffectScope::Read | EffectScope::Observe) => fixed("secrets", "read"),
+        (EffectKind::Secret, _) => fixed("secrets", "write"),
+        (EffectKind::Observability, _) => fixed("observability", "emit"),
+        (EffectKind::Channel, EffectScope::Read | EffectScope::Observe) => fixed("channel", "read"),
+        (EffectKind::Channel, _) => fixed("channel", "write"),
+        (EffectKind::State, EffectScope::Read | EffectScope::Observe) => fixed("state", "read"),
+        (EffectKind::State, _) => fixed("state", "write"),
+        (EffectKind::Host, _) => fixed("connector", "call"),
+        (EffectKind::Authority, scope) => {
+            let access = match scope {
+                EffectScope::Read => harn_builtin_meta::EffectAccess::Read,
+                EffectScope::Write => harn_builtin_meta::EffectAccess::Write,
+                EffectScope::Mutate => harn_builtin_meta::EffectAccess::Mutate,
+                EffectScope::Observe => harn_builtin_meta::EffectAccess::Observe,
+            };
+            let operation = Cow::Owned(harn_ir::authority_effect_policy_operation(
+                access,
+                effect.resource.as_deref(),
+            ));
+            ("authority", operation)
+        }
+        (EffectKind::Llm { .. }, EffectScope::Read) => fixed("llm", "catalog"),
+        (EffectKind::Llm { .. }, _) => fixed("llm", "call"),
+        (EffectKind::Tool { .. }, _) => fixed("host", "tool_call"),
+        (EffectKind::Hostcall { .. }, _) => fixed("connector", "call"),
+        (EffectKind::Persona { .. }, _) => fixed("worker", "dispatch"),
+        (EffectKind::Spawn, _) => fixed("worker", "dispatch"),
     }
 }
 
@@ -813,6 +831,8 @@ fn side_effect_level_for(effect: &EffectRecord) -> &'static str {
         (EffectKind::State, _) => "workspace_write",
         (EffectKind::Host, EffectScope::Read | EffectScope::Observe) => "read_only",
         (EffectKind::Host, _) => "workspace_write",
+        (EffectKind::Authority, EffectScope::Read | EffectScope::Observe) => "read_only",
+        (EffectKind::Authority, _) => "workspace_write",
         // Model inference consumes an explicitly granted `llm.call`
         // capability but does not mutate the user's workspace or an external
         // system. Keep its rich read/write effect scope for lineage and
@@ -882,6 +902,7 @@ fn effect_kind_family_matches(parent: &EffectKind, child: &EffectKind) -> bool {
         | (EffectKind::Channel, EffectKind::Channel)
         | (EffectKind::State, EffectKind::State)
         | (EffectKind::Host, EffectKind::Host)
+        | (EffectKind::Authority, EffectKind::Authority)
         | (EffectKind::Spawn, EffectKind::Spawn) => true,
         (EffectKind::Llm { .. }, EffectKind::Llm { .. }) => true,
         (
@@ -959,6 +980,7 @@ pub fn effect_kind_label(kind: &EffectKind) -> String {
         EffectKind::Channel => "channel".to_string(),
         EffectKind::State => "state".to_string(),
         EffectKind::Host => "host".to_string(),
+        EffectKind::Authority => "authority".to_string(),
         EffectKind::Llm { provider, model } => match (provider.as_deref(), model.as_deref()) {
             (Some(provider), Some(model)) => format!("llm:{provider}/{model}"),
             (Some(provider), None) => format!("llm:{provider}"),
@@ -995,6 +1017,10 @@ pub fn effect_record_summary(effect: &EffectRecord) -> String {
         _ => format!("{}:{}", effect_kind_label(&effect.kind), scope),
     }
 }
+
+#[cfg(test)]
+#[path = "effects_authority_tests.rs"]
+mod authority_tests;
 
 #[cfg(test)]
 mod tests {

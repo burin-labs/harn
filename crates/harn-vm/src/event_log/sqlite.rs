@@ -17,8 +17,9 @@ use super::util::{
     sqlite_size_bytes, stream_from_broadcast, BroadcastMap,
 };
 use super::{
-    AppendOutcome, CompactReport, ConsumerId, EventId, EventLog, EventLogBackendKind,
-    EventLogDescription, LogError, LogEvent, LogEventBytes, Topic,
+    require_expected_topic_head, AppendHeadExpectation, AppendOutcome, CompactReport, ConsumerId,
+    EventId, EventLog, EventLogBackendKind, EventLogDescription, LogError, LogEvent, LogEventBytes,
+    Topic,
 };
 
 const SQLITE_SCHEMA: RuntimeSqliteSchema = RuntimeSqliteSchema::new(
@@ -142,6 +143,40 @@ impl SqliteEventLog {
         value: &str,
         event: LogEvent,
     ) -> Result<AppendOutcome, LogError> {
+        self.append_idempotent_by_header_with_expectation(
+            topic,
+            header,
+            value,
+            AppendHeadExpectation::Any,
+            event,
+        )
+    }
+
+    pub(super) fn append_idempotent_chained_by_header(
+        &self,
+        topic: &Topic,
+        header: &str,
+        value: &str,
+        expected_head: Option<&str>,
+        event: LogEvent,
+    ) -> Result<AppendOutcome, LogError> {
+        self.append_idempotent_by_header_with_expectation(
+            topic,
+            header,
+            value,
+            AppendHeadExpectation::Exact(expected_head),
+            event,
+        )
+    }
+
+    fn append_idempotent_by_header_with_expectation(
+        &self,
+        topic: &Topic,
+        header: &str,
+        value: &str,
+        expectation: AppendHeadExpectation<'_>,
+        event: LogEvent,
+    ) -> Result<AppendOutcome, LogError> {
         let mut connection = self
             .connection
             .lock()
@@ -169,6 +204,26 @@ impl SqliteEventLog {
             });
         }
 
+        let previous = tx
+            .query_row(
+                "SELECT event_id, kind, payload, headers, occurred_at_ms
+                 FROM events
+                 WHERE topic = ?1
+                 ORDER BY event_id DESC
+                 LIMIT 1",
+                params![topic.as_str()],
+                decode_id_event_row,
+            )
+            .optional()
+            .map_err(|error| LogError::Sqlite(format!("event log previous read error: {error}")))?;
+        require_expected_topic_head(
+            topic,
+            previous
+                .as_ref()
+                .map(|(previous_id, previous_event)| (*previous_id, previous_event)),
+            expectation,
+        )?;
+
         tx.execute(
             "INSERT OR IGNORE INTO topic_heads(topic, last_id) VALUES (?1, 0)",
             params![topic.as_str()],
@@ -188,18 +243,6 @@ impl SqliteEventLog {
             .map_err(|error| LogError::Sqlite(format!("event log head read error: {error}")))
             .and_then(sqlite_i64_to_event_id)?;
         let event_id_sql = event_id_to_sqlite_i64(event_id)?;
-        let previous = tx
-            .query_row(
-                "SELECT event_id, kind, payload, headers, occurred_at_ms
-                 FROM events
-                 WHERE topic = ?1 AND event_id < ?2
-                 ORDER BY event_id DESC
-                 LIMIT 1",
-                params![topic.as_str(), event_id_sql],
-                decode_id_event_row,
-            )
-            .optional()
-            .map_err(|error| LogError::Sqlite(format!("event log previous read error: {error}")))?;
         let event = prepare_event_after(
             topic,
             event_id,

@@ -133,6 +133,38 @@ Carries a `mode` (`interrupt_immediate`, `finish_step`, `audit_only`),
 a `role_hint`, optional `dedupe_key`, and optional TTL. See [System
 reminders](../system-reminders.md).
 
+## Hypotheses and evidence
+
+**Hypothesis.** A versioned, testable claim with an owner, provenance, and
+explicit evidence lane. It is not a fact or a mutable confidence label.
+
+**Evidence policy.** The typed contract that selects the registered inference
+mode, practical threshold, evidence ladder, claim ceiling, and explicit gate
+promotion. The experiment registration owns assignment and statistical
+decisions; the design budget owns execution ceilings.
+
+**Experiment plan.** The deterministic compilation of a hypothesis and evidence
+policy into an existing experiment registration. It is data, not model-authored
+Harn source, an executable workflow, or a grant of host authority. A registered
+host adapter must separately enforce approval, capability, and resource
+ceilings.
+
+**Hypothesis-event authority.** A non-serializable proof minted by a registered
+native adapter and bound to one event fingerprint, plan fingerprint, aggregate,
+run, and authority kind. It authorizes one specialized append to the reserved
+hypothesis topic. Serialized event payloads and audit headers are provenance,
+not authority.
+
+**Observation.** One immutable, assignment-bound measurement admitted by an
+evidence policy. A revised value is a new corrective event, never an in-place
+edit of accumulated evidence.
+
+**Decision.** A typed statistical result derived from registered evidence and a
+frozen policy. It does not itself mutate a product default.
+
+**Promotion proposal.** A decision-bound request for a host-owned product
+change. Approval and application are separate events with separate receipts.
+
 ## Delegation
 
 **Worker.** An agent running in its own execution context with its own
@@ -217,3 +249,4 @@ conversational-unit noun.
 | Model jobs, receipts, media assets | [Model-job reference](../stdlib/model-jobs.md) |
 | Personas | [Personas](../personas.md) |
 | Daemon loops | [Daemon stdlib](../stdlib/daemon.md) |
+| Hypotheses, evidence policy, experiment plans, decisions | [ADR 0007](../adr/0007-hypothesis-compiler-ownership.md) |

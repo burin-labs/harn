@@ -681,6 +681,7 @@ fn parse_effect_spec(
         "tool" => quote!(#support::EffectKind::Tool),
         "mcp" => quote!(#support::EffectKind::Mcp),
         "host" => quote!(#support::EffectKind::Host),
+        "authority" => quote!(#support::EffectKind::Authority),
         "worker" => quote!(#support::EffectKind::Worker),
         "secret" => quote!(#support::EffectKind::Secret),
         "observability" => quote!(#support::EffectKind::Observability),

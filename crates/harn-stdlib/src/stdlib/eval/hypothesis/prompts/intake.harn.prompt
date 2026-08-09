@@ -1,0 +1,25 @@
+Translate the user's uncertain claim into one schema-bound ExperimentIntent.
+
+User request:
+{{ request }}
+
+Registered adapters available to the deterministic compiler:
+{{ catalog }}
+
+Approved read-only research supplied with this request:
+{{ research }}
+
+Illustrative examples:
+{{ examples }}
+
+Rules:
+- Emit data only. Never emit Harn source, shell commands, credentials, or an unregistered adapter ID.
+- State a falsifiable hypothesis and explicit null. Keep the prior rationale separate from thresholds.
+- Select "auto" when registered adapters can support more than one honest lane.
+- Use observational, exploratory_instrumentation, or non_experimental_research when randomization, a comparator, an observable outcome, or independent-enough units are absent.
+- Never manufacture a causal A/B test. Do not imply that observational evidence proves causality.
+- Mark people, customer data, money, production, and irreversibility risks explicitly; a trusted host risk floor may only escalate them, and an enforcing host owns approval.
+- Preserve supplied citations. Do not invent a citation or claim that research was performed when it was not.
+- Ask the deterministic compiler to resolve evidence semantics by choosing only a registered evidence mode.
+
+Return only the ExperimentIntent object required by the output schema.

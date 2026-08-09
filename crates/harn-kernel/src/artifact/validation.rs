@@ -358,6 +358,7 @@ fn hash_effect(hash: &mut AbiHasher, effect: &harn_builtin_meta::EffectSpec) {
         EffectKind::Observability => 13,
         EffectKind::Channel => 14,
         EffectKind::State => 15,
+        EffectKind::Authority => 16,
     });
     hash.byte(match effect.access {
         EffectAccess::Read => 0,

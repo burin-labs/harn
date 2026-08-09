@@ -391,6 +391,7 @@ pub enum EffectKind {
     Tool,
     Mcp,
     Host,
+    Authority,
     Worker,
     Secret,
     Observability,

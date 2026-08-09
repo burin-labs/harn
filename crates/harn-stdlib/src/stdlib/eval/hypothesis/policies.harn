@@ -1,0 +1,91 @@
+/** Registered evidence policies for hypothesis compilation. */
+import {
+  EvidenceMode,
+  EvidencePolicy,
+  ExperimentResourceBudget,
+  OutcomeAdapter,
+} from "std/eval/hypothesis/contracts"
+
+fn __ladder(minimum: int, maximum: int) -> list<int> {
+  const middle = min(maximum, max(minimum + 1, minimum * 2))
+  let ladder = [minimum]
+  if middle > minimum && middle < maximum {
+    ladder = ladder + [middle]
+  }
+  if maximum > minimum {
+    ladder = ladder + [maximum]
+  }
+  return ladder
+}
+
+/**
+ * Resolve a named evidence mode into transparent statistical and promotion
+ * semantics. Priors are intentionally absent: belief does not change a
+ * decision threshold.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn resolve_evidence_policy(
+  mode: EvidenceMode,
+  primary: OutcomeAdapter?,
+  budget: ExperimentResourceBudget,
+) -> EvidencePolicy {
+  const width = if primary == nil {
+    1.0
+  } else {
+    primary.bounds.hi - primary.bounds.lo
+  }
+  const ladder = __ladder(budget.min_trials_per_case, budget.max_trials_per_case)
+  if mode == "scout" {
+    return {
+      schema: "harn.evidence.policy.v1",
+      id: "harn.evidence.scout.v1",
+      mode: mode,
+      claim_ceiling: "bounded_simulation",
+      delta: 0.2,
+      epsilon: width * 0.05,
+      ladder: ladder,
+      adaptive: true,
+      promotion: "explicit_gate",
+    }
+  }
+  if mode == "confirmatory" {
+    return {
+      schema: "harn.evidence.policy.v1",
+      id: "harn.evidence.confirmatory.v1",
+      mode: mode,
+      claim_ceiling: "randomized_causal",
+      delta: 0.01,
+      epsilon: width * 0.02,
+      ladder: ladder,
+      adaptive: true,
+      promotion: "explicit_gate",
+    }
+  }
+  if mode == "observational" {
+    return {
+      schema: "harn.evidence.policy.v1",
+      id: "harn.evidence.observational.v1",
+      mode: mode,
+      claim_ceiling: "associational",
+      delta: nil,
+      epsilon: nil,
+      ladder: [],
+      adaptive: false,
+      promotion: "none",
+    }
+  }
+  return {
+    schema: "harn.evidence.policy.v1",
+    id: "harn.evidence.standard_sequential.v1",
+    mode: "standard_sequential",
+    claim_ceiling: "randomized_causal",
+    delta: 0.05,
+    epsilon: width * 0.02,
+    ladder: ladder,
+    adaptive: true,
+    promotion: "explicit_gate",
+  }
+}
