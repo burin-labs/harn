@@ -15,6 +15,8 @@
 // Contract: reads a Codex or Claude PreToolUse payload on stdin, prints a
 // permission decision on stdout. Exit status is always 0 — a crashed guard
 // must not look like a denial.
+import { DISPOSABLE_PATH_POLICY } from "./agent_shell_guard_policy"
+
 // Commands whose full output is worth keeping. Grepping any of these through a
 // pipe without a redirect is what forces a rerun.
 const SLOW_COMMANDS = ["cargo", "make", "nextest", "swift", "pnpm", "npm", "xcodebuild"]
@@ -32,6 +34,44 @@ const CARGO_VERB_TARGETS = {
 }
 
 pub type ShellGuardDecision = {allow: bool, reason: string}
+
+/** Tokenize one shell stage without mistaking whitespace inside quotes for argv boundaries. */
+pub fn shell_words(stage: string) -> list<string> {
+  let words = []
+  let current = ""
+  let quote = ""
+  let escaped = false
+  for character in stage.chars() {
+    if escaped {
+      current = current + character
+      escaped = false
+    } else if character == "\\" && quote != "'" {
+      escaped = true
+    } else if quote != "" {
+      if character == quote {
+        quote = ""
+      } else {
+        current = current + character
+      }
+    } else if character == "\"" || character == "'" {
+      quote = character
+    } else if character == " " || character == "\t" {
+      if current != "" {
+        words = words + [current]
+        current = ""
+      }
+    } else {
+      current = current + character
+    }
+  }
+  if escaped {
+    current = current + "\\"
+  }
+  if current != "" {
+    words = words + [current]
+  }
+  return words
+}
 
 pub fn strip_shell_prefix(words: list<string>) -> list<string> {
   // Skip shell wrappers and environment settings so the guard sees the real
@@ -55,7 +95,7 @@ pub fn strip_shell_prefix(words: list<string>) -> list<string> {
 }
 
 pub fn program_of(segment: string) -> string {
-  const words = segment.trim().split(" ").filter(fn(word: string) { return word != "" }).to_list()
+  const words = shell_words(segment)
   const stripped = strip_shell_prefix(words)
   if len(stripped) == 0 {
     return ""
@@ -88,9 +128,7 @@ pub fn cargo_violation(command: string) -> string {
     if program_of(segment) != "cargo" {
       continue
     }
-    const words = strip_shell_prefix(
-      segment.trim().split(" ").filter(fn(word: string) { return word != "" }).to_list(),
-    )
+    const words = strip_shell_prefix(shell_words(segment))
     const verb_index = if (words[1] ?? "").starts_with("+") {
       2
     } else {
@@ -110,6 +148,79 @@ pub fn cargo_violation(command: string) -> string {
       + target
       + "` instead. "
       + "For a genuine one-off, set HARN_ALLOW_RAW_CARGO=1 in the command."
+  }
+  return ""
+}
+
+/** True only for a path rooted in an OS-temp or known generated-output tree. */
+pub fn is_disposable_path(token: string) -> bool {
+  // Forward slashes are accepted by Windows shells and let every platform use
+  // one component-aware matcher. Single-quoted Windows paths retain their
+  // backslashes through shell tokenization and normalize here.
+  const path = token.trim().replace("\\", "/")
+  for root in DISPOSABLE_PATH_POLICY.posix_temp_roots {
+    if path == root || path.starts_with(root + "/") {
+      return true
+    }
+  }
+  for variable in DISPOSABLE_PATH_POLICY.posix_temp_variables {
+    if path == variable || path.starts_with(variable + "/") {
+      return true
+    }
+  }
+  const folded_path = lowercase(path)
+  for variable in DISPOSABLE_PATH_POLICY.windows_temp_variables {
+    const folded_variable = lowercase(variable)
+    if folded_path == folded_variable || folded_path.starts_with(folded_variable + "/") {
+      return true
+    }
+  }
+  for marker in DISPOSABLE_PATH_POLICY.windows_temp_markers {
+    if folded_path.ends_with(marker) || folded_path.contains(marker + "/") {
+      return true
+    }
+  }
+  for prefix in DISPOSABLE_PATH_POLICY.macos_temp_prefixes {
+    const component = DISPOSABLE_PATH_POLICY.macos_temp_component
+    if path.starts_with(prefix)
+      && (path.ends_with(component) || path.contains(component + "/")) {
+      return true
+    }
+  }
+  for root in DISPOSABLE_PATH_POLICY.generated_relative_roots {
+    if path == root
+      || path == "./" + root
+      || path.starts_with(root + "/")
+      || path.starts_with("./" + root + "/")
+      || path.ends_with("/" + root)
+      || path.contains("/" + root + "/") {
+      return true
+    }
+  }
+  return false
+}
+
+/** Reject Trash as a cleanup backend only when an argv path is disposable. */
+pub fn disposable_trash_violation(command: string) -> string {
+  for segment in segments_of(command) {
+    const program = program_of(segment)
+    if program != "trash" && program != "trash-put" {
+      continue
+    }
+    const words = strip_shell_prefix(shell_words(segment))
+    for token in words.slice(1, len(words)) {
+      if token == "--" || token.starts_with("-") {
+        continue
+      }
+      if is_disposable_path(token) {
+        return "`" + program
+          + "` would move disposable generated data into the user's visible Trash. "
+          + "Keep rebuildable caches in place unless invalidation is required. For temporary output, "
+          + "use an OS temporary directory and an exact, validated permanent cleanup accepted by the host. "
+          + "If permanent cleanup is refused, leave the artifact in its temporary/build root and report it; "
+          + "reserve Trash for user-authored or uncertain data."
+      }
+    }
   }
   return ""
 }
@@ -180,12 +291,18 @@ pub fn decision(payload: string) -> ShellGuardDecision {
     return {allow: true, reason: ""}
   }
   const command = to_string(parsed?.tool_input?.command ?? "")
-  if command == "" || command.contains("HARN_ALLOW_RAW_CARGO=1") {
+  if command == "" {
     return {allow: true, reason: ""}
   }
-  const cargo = cargo_violation(command)
-  if cargo != "" {
-    return {allow: false, reason: cargo}
+  if !command.contains("HARN_ALLOW_RAW_CARGO=1") {
+    const cargo = cargo_violation(command)
+    if cargo != "" {
+      return {allow: false, reason: cargo}
+    }
+  }
+  const disposable_trash = disposable_trash_violation(command)
+  if disposable_trash != "" {
+    return {allow: false, reason: disposable_trash}
   }
   const discarded = discarded_output_violation(command)
   if discarded != "" {

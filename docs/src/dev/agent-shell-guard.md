@@ -47,6 +47,22 @@ make test 2>&1 | tee .harn-runs/test.log
 This preserves the evidence needed to investigate a failure without repeating
 the expensive command.
 
+## Keep generated output out of Trash
+
+Trash is reserved for user-authored or uncertain data that may need recovery.
+Do not move temporary files, benchmark output, compiler caches, or other
+reproducible build artifacts there: that turns cleanup into visible Trash
+clutter. The guard rejects `trash` and `trash-put` when an argument resolves to
+an OS temporary root or a repository-generated root such as `.build/`,
+`target/`, `.harn-runs/`, or the Burin eval roots. It still allows Trash for
+ordinary user files.
+
+Prefer leaving a rebuildable cache in place. Put one-off output beneath an OS
+temporary directory, and permanently remove it only through an exact,
+validated path and a mechanism accepted by the host. If the host refuses that
+cleanup, leave the data in its temporary/build root and report it instead of
+using Trash as a fallback.
+
 ## Enable the hooks
 
 The repository already carries both host adapters:
@@ -63,6 +79,9 @@ existing Harn executable and passes the host payload to
 starts a build. Its empty builtin allow list denies registered non-core
 builtins and the typed Harness methods backed by them.
 `HARN_LLM_CALLS_DISABLED=1` independently prevents a real model request.
+Platform-specific temporary roots and generated-root configuration live in the
+typed, data-only `scripts/agent_shell_guard_policy.harn` module; the evaluator
+contains no second path list.
 
 The adapter loads project trigger and hook handler code only if a handler runs.
 A top-level handler initialization failure therefore cannot disable command
@@ -111,6 +130,7 @@ must own its build directory and environment before the matching Cargo command
 is blocked. Then project these files from Harn without editing their copies:
 
 - `scripts/agent_shell_guard.harn`
+- `scripts/agent_shell_guard_policy.harn`
 - `scripts/agent-shell-guard.sh`
 
 Add host settings that call the projected adapter. Keep repository-specific

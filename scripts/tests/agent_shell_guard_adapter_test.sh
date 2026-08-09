@@ -12,6 +12,7 @@ trap 'rm -rf "$fixture_root"' EXIT
 mkdir -p "$fixture_root/scripts"
 cp "$repo_root/scripts/agent-shell-guard.sh" "$fixture_root/scripts/"
 cp "$repo_root/scripts/agent_shell_guard.harn" "$fixture_root/scripts/"
+cp "$repo_root/scripts/agent_shell_guard_policy.harn" "$fixture_root/scripts/"
 
 cat >"$fixture_root/harn.toml" <<'TOML'
 [package]

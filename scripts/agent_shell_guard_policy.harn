@@ -1,0 +1,31 @@
+/**
+ * Data-only policy consumed by the shared Codex and Claude shell guard.
+ * Keep platform spellings here so the evaluator and its downstream projections
+ * stay code-identical.
+ */
+pub type DisposablePathPolicy = {
+  generated_relative_roots: list<string>,
+  posix_temp_roots: list<string>,
+  posix_temp_variables: list<string>,
+  windows_temp_variables: list<string>,
+  windows_temp_markers: list<string>,
+  macos_temp_prefixes: list<string>,
+  macos_temp_component: string,
+}
+
+pub const DISPOSABLE_PATH_POLICY: DisposablePathPolicy = {
+  generated_relative_roots: [".build", "target", ".harn-runs", ".burin-evals", ".burin-live-evals"],
+  posix_temp_roots: ["/tmp", "/private/tmp", "/var/tmp", "/private/var/tmp"],
+  posix_temp_variables: ["$TMPDIR", "\${TMPDIR}", "$TMP", "\${TMP}", "$TEMP", "\${TEMP}"],
+  windows_temp_variables: [
+    "%TEMP%",
+    "%TMP%",
+    "$env:TEMP",
+    "\${env:TEMP}",
+    "$env:TMP",
+    "\${env:TMP}",
+  ],
+  windows_temp_markers: ["/appdata/local/temp", "/windows/temp"],
+  macos_temp_prefixes: ["/var/folders/", "/private/var/folders/"],
+  macos_temp_component: "/T",
+}
