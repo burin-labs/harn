@@ -1,0 +1,106 @@
+import { read_yaml } from "std/fs"
+
+fn bump_workflow_errors(workflow, text: string) -> list<string> {
+  let errors: list<string> = []
+  const inputs = workflow?.on?.workflow_call?.inputs ?? {}
+  if inputs?.get("refresh-command")?.type != "string" {
+    errors = errors + ["refresh-command must remain a typed reusable-workflow input"]
+  }
+  if inputs?.get("node-version")?.type != "string" {
+    errors = errors + ["node-version must remain a typed reusable-workflow input"]
+  }
+  const steps = workflow?.jobs?.bump?.steps ?? []
+  const package_checkout = steps.find({ step -> step?.name == "Checkout package repo" })
+  if package_checkout?.with?.path != "package" {
+    errors = errors + ["consumer package must be checked out below the workflow workspace"]
+  }
+  const runtime_checkout = steps.find(
+    { step -> step?.name == "Checkout Harn runtime orchestration" },
+  )
+  if runtime_checkout?.with?.path != ".harn-runtime" {
+    errors = errors + ["runtime orchestration must remain outside the consumer package checkout"]
+  }
+  const node = steps.find({ step -> step?.name == "Install caller Node.js toolchain" })
+  if node == nil || node?.if != "inputs.node-version != ''" {
+    errors = errors + ["optional Node setup must be gated by node-version"]
+  }
+  const package_manager = steps.find(
+    { step -> step?.name == "Activate caller Node.js package manager" },
+  )
+  if package_manager == nil || package_manager?.if != "inputs.node-version != ''" {
+    errors = errors + ["package-manager activation must share the Node setup gate"]
+  }
+  if package_manager?.get("working-directory") != "package" {
+    errors = errors + ["package-manager activation must inspect the consumer package"]
+  }
+  const package_manager_command = to_string(package_manager?.run ?? "")
+  for required in [
+    "packageManager",
+    "npm|pnpm|yarn",
+    "corepack enable",
+    "actual_version=",
+    "--version",
+    "packageManager must pin an exact version",
+  ] {
+    if !package_manager_command.contains(required) {
+      errors = errors + ["package-manager bootstrap must remain deterministic: " + required]
+    }
+  }
+  const driver_install = steps.find({ step -> step?.name == "Install bump driver dependencies" })
+  if driver_install?.get("working-directory") != ".harn-runtime/scripts/bump-driver" {
+    errors = errors + ["provider dependencies must install from the target runtime's driver lock"]
+  }
+  if trim(to_string(driver_install?.run ?? "")) != "harn install --locked" {
+    errors = errors + ["provider dependencies must use the immutable driver lock"]
+  }
+  const run = steps.find({ step -> step?.name == "Run bump orchestration" })
+  if run == nil {
+    return errors + ["workflow must keep one attributable bump orchestration step"]
+  }
+  if run?.get("working-directory") != "package" {
+    errors = errors + ["refresh, validation, and git effects must run from the consumer package"]
+  }
+  const env = run?.env ?? {}
+  if env?.HARN_BUMP_REFRESH_COMMAND != "$" + "{{ inputs.refresh-command }}" {
+    errors = errors + ["refresh-command must flow into the orchestration environment"]
+  }
+  if !to_string(env?.HARN_BUMP_REFRESH_SENTINEL ?? "").contains("github.run_attempt") {
+    errors = errors + ["refresh success sentinel must be unique per run attempt"]
+  }
+  const command = to_string(run?.run ?? "")
+  const migration = "harn fix --apply --safety surface-changing --capability-migrations-only ."
+  for required in [
+    migration,
+    "eval \"$HARN_BUMP_REFRESH_COMMAND\"",
+    "> \"$HARN_BUMP_REFRESH_SENTINEL\"",
+    "test -f \"$HARN_BUMP_REFRESH_SENTINEL\"",
+    "eval \"$HARN_BUMP_VALIDATE_COMMAND\"",
+    "../.harn-runtime/scripts/bump-driver/bump_harn_runtime.harn",
+  ] {
+    if !command.contains(required) {
+      errors = errors + ["orchestration must fail closed across runtime version skew: " + required]
+    }
+  }
+  if command.index_of(migration) >= command.index_of("eval \"$HARN_BUMP_REFRESH_COMMAND\"") {
+    errors = errors + ["target capability migrations must precede the caller refresh"]
+  }
+  if text.contains("HARN_BUMP_REFRESH: $" + "{{ inputs.refresh-command }}") {
+    errors = errors + ["refresh-command must not bypass the fail-closed sentinel wrapper"]
+  }
+  for forbidden in ["gh api /graphql", "createCommitOnBranch(input:", "/git/refs/heads/"] {
+    if text.contains(forbidden) {
+      errors = errors + ["workflow must not reimplement GitHub connector behavior: " + forbidden]
+    }
+  }
+  return errors
+}
+
+@test
+pipeline test_reusable_bump_workflow_preserves_refresh_and_workspace_boundaries(
+  harness: Harness,
+  task,
+) {
+  const path = path_join(harness.fs.source_dir(), "../../.github/workflows/bump-harn.yml")
+  const text = harness.fs.read_text(path)
+  assert_eq(bump_workflow_errors(read_yaml(harness.fs, path), text), [])
+}

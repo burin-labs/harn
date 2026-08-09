@@ -1,0 +1,83 @@
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
+import { AgentLoopOptions } from "std/agent/options"
+import { llm_text, with_llm_script } from "std/testing"
+
+fn checkpoints(events, schema: string) -> list {
+  return events.filter(
+    { event -> event.type == "typed_checkpoint" && event?.checkpoint?.schema == schema },
+  )
+    .to_list()
+}
+
+pipeline test_judge_reuses_stable_prefix_and_suppresses_stale_next_step(harness: Harness, task) {
+  const continue_verdict = {
+    text:
+      "{\"verdict\":\"continue\",\"reasoning\":\"tests are still missing\",\"next_step\":\"run the focused test\"}",
+    input_tokens: 120,
+    output_tokens: 20,
+    cache_write_tokens: 80,
+  }
+  const cached_continue_verdict = continue_verdict
+    + {cache_write_tokens: 0, cache_read_tokens: 80}
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text("The work is complete. ##DONE##"),
+      continue_verdict,
+      llm_text("The work is complete. ##DONE##"),
+      cached_continue_verdict,
+      llm_text("The work is complete. ##DONE##"),
+      {
+        text: "{\"verdict\":\"done\",\"reasoning\":\"tests now pass\"}",
+        input_tokens: 120,
+        output_tokens: 12,
+        cache_read_tokens: 80,
+      },
+    ],
+    { ->
+      const session = "judge-cache-feedback-" + harness.random.uuid()
+      const opts: AgentLoopOptions = {
+        provider: "mock",
+        session_id: session,
+        loop_until_done: true,
+        done_sentinel: "##DONE##",
+        max_iterations: 5,
+        verify_completion_judge: {provider: "mock", max_invocations: 3},
+      }
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(harness, "Finish the task and run its focused test.", nil, opts) },
+      )
+      assert_eq(captured.result.status, "done")
+      const calls = harness.llm.mock_calls()
+      assert_eq(calls[1].system, calls[3].system)
+      assert_eq(calls[3].system, calls[5].system)
+      assert(calls[1].messages[0].content != calls[3].messages[0].content)
+      const cache = checkpoints(captured.events, "harn.completion_judge_cache.v1")
+      assert_eq(len(cache), 3)
+      assert_eq(cache[0].checkpoint.stable_prefix_hash, cache[1].checkpoint.stable_prefix_hash)
+      assert_eq(cache[1].checkpoint.stable_prefix_hash, cache[2].checkpoint.stable_prefix_hash)
+      assert_eq(cache[0].checkpoint.cache_used, false)
+      assert_eq(cache[1].checkpoint.cache_used, true)
+      const composition = checkpoints(captured.events, "harn.agent_feedback_composition.v1").filter(
+        { event ->
+          event.checkpoint?.messages?.[0]?.kind
+            == "verify_completion"
+            || event.checkpoint?.suppressed?.[0]?.reason
+            == "judge_veto"
+        },
+      )
+        .to_list()
+      assert_eq(len(composition), 2)
+      assert_eq(len(composition[0].checkpoint.messages), 1)
+      assert_eq(len(composition[1].checkpoint.messages), 0)
+      assert_eq(composition[1].checkpoint.suppressed[0].suppression_reason, "unchanged_next_step")
+      const feedback = captured.events.filter(
+        { event -> event.type == "feedback_injected" && event.kind == "verify_completion" },
+      )
+      assert_eq(len(feedback), 1)
+    },
+  )
+}

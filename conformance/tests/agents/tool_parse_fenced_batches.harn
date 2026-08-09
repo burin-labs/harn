@@ -1,0 +1,74 @@
+// Batched reads in the fenced-JSON lane.
+//
+// A turn-1 batched grounding read — three files in one message — parsed to zero
+// calls across every dialect at one point, which is the worst possible failure
+// for the first turn of a run. These pin the canonical batch spellings to N
+// calls: several objects inside one fence, and the shape where the model treats
+// the ```tool opener as a SEPARATOR between calls and never closes the first
+// block.
+//
+// Salvage is per-object, not per-block: complete objects before a truncated
+// tail still dispatch, and the tail is a loud error rather than a silent
+// truncation of the batch.
+import { probe_json } from "_tool_parse_probe"
+
+pipeline main(harness: Harness) {
+  probe_json(
+    harness.agent,
+    harness.stdio,
+    "three objects in one fence",
+    """```tool
+{"name": "look", "args": {"file": "src/writer.zig"}}
+{"name": "look", "args": {"file": "src/parser.zig"}}
+{"name": "look", "args": {"file": "src/document.zig"}}
+```""",
+  )
+  probe_json(
+    harness.agent,
+    harness.stdio,
+    "double tool fence used as a separator",
+    """```tool
+{"name": "look", "args": {"file": "a.zig"}}
+```tool
+{"name": "look", "args": {"file": "b.zig"}}""",
+  )
+  probe_json(
+    harness.agent,
+    harness.stdio,
+    "complete objects before a truncated tail",
+    """```tool
+{"name": "look", "args": {"file": "a.zig"}}
+{"name": "look", "args": {"file": "b.zig"}}
+{"name": "look", "args": {"file": "trunc""",
+  )
+  probe_json(
+    harness.agent,
+    harness.stdio,
+    "three nested xml call tags",
+    """<tool_calls>
+<look>
+<file>
+src/writer.zig
+</file>
+</look>
+<look>
+<file>
+src/parser.zig
+</file>
+</look>
+<look>
+<file>
+src/document.zig
+</file>
+</look>
+</tool_calls>""",
+  )
+  probe_json(
+    harness.agent,
+    harness.stdio,
+    "a single object is one call",
+    """```tool
+{"name": "look", "args": {"file": "a.zig"}}
+```""",
+  )
+}

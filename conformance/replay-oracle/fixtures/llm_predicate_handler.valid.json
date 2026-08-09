@@ -1,0 +1,91 @@
+{
+  "schema_version": "harn.orchestration.replay_trace.v1",
+  "name": "trigger_llm_predicate_handler",
+  "description": "A trigger predicate uses a deterministic LLM cache key before dispatching the handler.",
+  "expect": "match",
+  "allowlist": [
+    {"path": "/run_id", "reason": "run ids are allocated per execution"},
+    {"path": "/event_log_entries/*/event_id", "reason": "EventLog offsets are backend-local"},
+    {"path": "/event_log_entries/*/occurred_at_ms", "reason": "append timestamps are wall-clock observations"},
+    {"path": "/event_log_entries/*/payload/event_id", "reason": "TriggerEvent ids are generated per intake"},
+    {"path": "/trigger_firings/*/event_id", "reason": "TriggerEvent ids are generated per intake"},
+    {"path": "/trigger_firings/*/trace_id", "reason": "trace ids are generated per execution"},
+    {"path": "/llm_interactions/*/request_id", "reason": "provider request ids are generated per call"},
+    {"path": "/llm_interactions/*/latency_ms", "reason": "model latency is a wall-clock observation"},
+    {"path": "/llm_interactions/*/usage", "reason": "token accounting can vary across provider reports for the same cached semantic result"}
+  ],
+  "first_run": {
+    "run_id": "run_live_llm_predicate",
+    "event_log_entries": [
+      {
+        "event_id": 31,
+        "topic": "trigger.attempts",
+        "kind": "predicate_evaluated",
+        "occurred_at_ms": 1770000000300,
+        "payload": {"event_id": "trigger_evt_live_llm", "binding_id": "llm-predicate", "predicate": "llm_gate", "decision": "allow"}
+      },
+      {
+        "event_id": 32,
+        "topic": "trigger.outbox",
+        "kind": "dispatch_succeeded",
+        "occurred_at_ms": 1770000000400,
+        "payload": {"event_id": "trigger_evt_live_llm", "binding_id": "llm-predicate", "result": {"priority": "p1", "route": "incident-review"}}
+      }
+    ],
+    "trigger_firings": [
+      {"binding_id": "llm-predicate", "event_id": "trigger_evt_live_llm", "trace_id": "trace_live_llm", "handler_kind": "harn", "decision": "dispatched"}
+    ],
+    "llm_interactions": [
+      {
+        "request_id": "chatcmpl-live-llm",
+        "cache_key": "sha256:llm-predicate:issue-42:v1",
+        "provider": "mock",
+        "model": "deterministic-fixture",
+        "messages_sha256": "9d6a2ea25cdb0f7e54a79b4211b3df6b2a59431f99f715b6571d8cb01c505d79",
+        "response": {"allow": true, "priority": "p1"},
+        "usage": {"input_tokens": 105, "output_tokens": 12},
+        "latency_ms": 18
+      }
+    ],
+    "policy_decisions": [
+      {"decision_id": "predicate-allow", "kind": "predicate", "decision": "allow", "reason": "cached semantic classification"}
+    ]
+  },
+  "second_run": {
+    "run_id": "run_replay_llm_predicate",
+    "event_log_entries": [
+      {
+        "event_id": 41,
+        "topic": "trigger.attempts",
+        "kind": "predicate_evaluated",
+        "occurred_at_ms": 1770001000300,
+        "payload": {"event_id": "trigger_evt_replay_llm", "binding_id": "llm-predicate", "predicate": "llm_gate", "decision": "allow"}
+      },
+      {
+        "event_id": 42,
+        "topic": "trigger.outbox",
+        "kind": "dispatch_succeeded",
+        "occurred_at_ms": 1770001000400,
+        "payload": {"event_id": "trigger_evt_replay_llm", "binding_id": "llm-predicate", "result": {"priority": "p1", "route": "incident-review"}}
+      }
+    ],
+    "trigger_firings": [
+      {"binding_id": "llm-predicate", "event_id": "trigger_evt_replay_llm", "trace_id": "trace_replay_llm", "handler_kind": "harn", "decision": "dispatched"}
+    ],
+    "llm_interactions": [
+      {
+        "request_id": "chatcmpl-replay-llm",
+        "cache_key": "sha256:llm-predicate:issue-42:v1",
+        "provider": "mock",
+        "model": "deterministic-fixture",
+        "messages_sha256": "9d6a2ea25cdb0f7e54a79b4211b3df6b2a59431f99f715b6571d8cb01c505d79",
+        "response": {"allow": true, "priority": "p1"},
+        "usage": {"input_tokens": 103, "output_tokens": 13},
+        "latency_ms": 4
+      }
+    ],
+    "policy_decisions": [
+      {"decision_id": "predicate-allow", "kind": "predicate", "decision": "allow", "reason": "cached semantic classification"}
+    ]
+  }
+}

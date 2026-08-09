@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/session/open.request.json",
+  "title": "session.open request",
+  "description": "Open an existing canonical session or create it if absent.",
+  "type": "object",
+  "properties": {
+    "root": { "type": "string", "minLength": 1 },
+    "id": { "type": ["string", "null"] },
+    "tenant_id": { "type": ["string", "null"] },
+    "persona": { "type": ["string", "null"] },
+    "parent_session_id": { "type": ["string", "null"] },
+    "title": { "type": ["string", "null"] },
+    "cwd": { "type": ["string", "null"] },
+    "model": { "type": ["string", "null"] },
+    "session_type": {
+      "type": ["string", "null"],
+      "enum": ["user", "subagent", "scheduled", null]
+    },
+    "project_scope": { "type": ["string", "null"] },
+    "usage_input": { "type": "integer", "minimum": 0 },
+    "usage_output": { "type": "integer", "minimum": 0 },
+    "usage_cost_usd_micros": { "type": "integer", "minimum": 0 },
+    "ttl_seconds": { "type": ["integer", "null"], "minimum": 0 },
+    "tags": { "type": "array", "items": { "type": "string" } },
+    "attributes": { "type": "object" }
+  },
+  "required": ["root"],
+  "additionalProperties": false
+}

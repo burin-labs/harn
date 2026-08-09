@@ -1,0 +1,9 @@
+terminal
+budget_exceeded
+budget_exceeded
+true
+true
+max_input_tokens
+true
+budget_exhausted
+true

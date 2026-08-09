@@ -1,0 +1,40 @@
+import { agent_reminder_providers_fire } from "std/agent/state"
+
+fn has_code(result, code) {
+  return is_err(result) && contains(to_string(unwrap_err(result)), code)
+}
+
+pipeline main(harness: Harness) {
+  const invalid_type = try {
+    harness.agent.transcript_inject_reminder(transcript(), {body: 1})
+  }
+  harness.stdio.println(has_code(invalid_type, "HARN-RMD-001"))
+  const bad_propagate = try {
+    harness.agent.transcript_inject_reminder(
+      transcript(),
+      {body: "remember", propagate: "workspace"},
+    )
+  }
+  harness.stdio.println(has_code(bad_propagate, "HARN-RMD-005"))
+  harness.agent.clear_reminder_providers()
+  harness.agent.register_reminder_provider(
+    {
+      id: "bad_spec",
+      subscribes_to: "session_idle",
+      evaluate: { _ctx -> return {reminder: {tags: ["bad"]}} },
+    },
+  )
+  const session = harness.agent.open("reminder-diagnostic-codes")
+  harness.agent.reset(session)
+  const bad_provider = try {
+    agent_reminder_providers_fire(
+      harness.agent,
+      session,
+      "session_idle",
+      {session: {id: session}},
+      {},
+    )
+  }
+  harness.stdio.println(has_code(bad_provider, "HARN-RMD-006"))
+  harness.agent.clear_reminder_providers()
+}

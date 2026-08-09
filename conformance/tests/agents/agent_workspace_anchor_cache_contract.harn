@@ -1,0 +1,86 @@
+import { agent_loop } from "std/agent/loop"
+import { with_llm_script } from "std/testing"
+
+pipeline default(harness: Harness) {
+  with_llm_script(
+    harness.llm,
+    [
+      {text: "first ##DONE##", input_tokens: 1, output_tokens: 1, model: "o3"},
+      {text: "second ##DONE##", input_tokens: 1, output_tokens: 1, model: "o3"},
+    ],
+    { ->
+      const session_id = "workspace-anchor-cache-" + harness.random.uuid()
+      const _ = harness.agent.open(
+        session_id,
+        {workspace_anchor: {primary: "/workspace/a", anchored_at: "2026-05-24T00:00:00Z"}},
+      )
+      const first = agent_loop(
+        harness,
+        "first",
+        "Base system.",
+        {
+          provider: "mock",
+          model: "o3",
+          session_id: session_id,
+          max_iterations: 1,
+          auto_context_profile: false,
+        },
+      )
+      const changed = harness.agent.set_workspace_anchor(
+        session_id,
+        {
+          primary: "/workspace/b",
+          additional_roots: [
+            {path: "/workspace/c", mount_mode: "read_only", mounted_at: "2026-05-24T00:00:01Z"},
+          ],
+          anchored_at: "2026-05-24T00:00:02Z",
+        },
+      )
+      const second = agent_loop(
+        harness,
+        "second",
+        nil,
+        {
+          provider: "mock",
+          model: "o3",
+          session_id: session_id,
+          max_iterations: 1,
+          auto_context_profile: false,
+        },
+      )
+      const calls = harness.llm.mock_calls()
+      const first_reminders = transcript_events_by_kind(first.transcript, "system_reminder")
+      const second_reminders = transcript_events_by_kind(second.transcript, "system_reminder")
+      const first_body = first_reminders[len(first_reminders) - 1].reminder.body
+      const second_body = second_reminders[len(second_reminders) - 1].reminder.body
+      const first_directives = calls[0].messages[len(calls[0].messages) - 1]
+      const second_directives = calls[1].messages[len(calls[1].messages) - 1]
+      harness.stdio.println(changed)
+      harness.stdio.println(len(calls))
+      harness.stdio.println(calls[0].system == calls[1].system)
+      harness.stdio.println(
+        harness.agent.system_prompt(session_id)
+          == first.transcript.metadata.system_prompt.content,
+      )
+      harness.stdio.println(first_directives.role == "user")
+      harness.stdio.println(contains(first_directives.content, "<context-directives>"))
+      harness.stdio.println(contains(first_directives.content, "primary: /workspace/a"))
+      harness.stdio.println(contains(second_directives.content, "primary: /workspace/b"))
+      harness.stdio.println(
+        contains(
+          second_directives.content,
+          "/workspace/c (mount_mode: read_only, mounted_at: 2026-05-24T00:00:01Z)",
+        ),
+      )
+      harness.stdio.println(!contains(calls[1].system, "/workspace/a"))
+      harness.stdio.println(!contains(calls[1].system, "/workspace/b"))
+      harness.stdio.println(
+        first.transcript.metadata.system_prompt.sha256
+          == second.transcript.metadata.system_prompt
+          .sha256,
+      )
+      harness.stdio.println(contains(first_body, "primary: /workspace/a"))
+      harness.stdio.println(contains(second_body, "primary: /workspace/b"))
+    },
+  )
+}

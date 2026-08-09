@@ -1,0 +1,9 @@
+pipeline test(harness: Harness, task) {
+  // Distinct resource keys are distinct locks, so nesting them does not
+  // deadlock; the same key re-entered would (see mutex_self_reacquire_deadlock).
+  mutex("a") {
+    mutex("b") {
+      harness.stdio.log("distinct keys do not deadlock")
+    }
+  }
+}

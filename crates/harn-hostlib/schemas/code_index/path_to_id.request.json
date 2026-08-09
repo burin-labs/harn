@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/code_index/path_to_id.request.json",
+  "title": "code_index.path_to_id request",
+  "description": "Look up the stable file id assigned to a workspace-relative or absolute path.",
+  "type": "object",
+  "properties": {
+    "path": { "type": "string", "minLength": 1 }
+  },
+  "required": ["path"],
+  "additionalProperties": false
+}

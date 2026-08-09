@@ -1,0 +1,285 @@
+import {
+  compact_preserving_test_failures,
+  compact_retaining_current_plan,
+} from "std/agent/autocompact"
+import { agent_loop } from "std/agent/loop"
+import { agent_session_visible_messages } from "std/agent/state"
+import { llm_text, with_llm_script } from "std/testing"
+
+fn list_tools() {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "list_directory",
+    "List directory contents",
+    {
+      handler: { _args -> "" },
+      parameters: {path: {type: "string", description: "Directory path"}},
+      returns: {type: "string"},
+    },
+  )
+  return tools
+}
+
+pipeline test(harness: Harness, task) {
+  harness.tools.register_hook({pattern: "list_directory", deny: "listing disabled"})
+  const denied = agent_loop(
+    harness,
+    "Inspect the workspace",
+    "You are helpful",
+    {provider: "mock", tools: list_tools(), tool_format: "native", max_iterations: 1},
+  )
+  harness.stdio.println(denied?.tools?.rejected[0])
+  harness.stdio.println(
+    json_stringify(transcript_messages(denied?.transcript)).contains("permission_denied"),
+  )
+  harness.tools.clear_hooks()
+  let trunc_tools = tool_registry()
+  trunc_tools = tool_define(
+    trunc_tools,
+    "verbose_tool",
+    "Returns long output",
+    {handler: { _args -> "x" * 300 }, parameters: {}},
+  )
+  harness.tools.register_hook({pattern: "verbose_tool", max_output: 200})
+  const truncated = agent_loop(
+    harness,
+    "Run the tool",
+    "You are helpful",
+    {provider: "mock", tools: trunc_tools, tool_format: "native", max_iterations: 1},
+  )
+  harness.stdio.println(
+    json_stringify(transcript_messages(truncated?.transcript)).contains("snipped"),
+  )
+  harness.tools.clear_hooks()
+  const base_messages = [
+    {role: "user", content: "Need a parser plan"},
+    {role: "assistant", content: "We should isolate the lexer first."},
+    {role: "user", content: "Then update the diagnostics."},
+  ]
+  const llm_compacted = harness.agent.transcript_auto_compact(
+    base_messages,
+    {provider: "mock", keep_last: 1, token_threshold: 1},
+  )
+  // transcript_auto_compact now returns { messages, archived, summary }; the
+  // archived count and summary come straight from the engine instead of being
+  // inferred from a length delta.
+  harness.stdio.println(len(llm_compacted.messages))
+  harness.stdio.println(llm_compacted.archived)
+  harness.stdio.println(llm_compacted.messages[0].content.contains("auto-compacted"))
+  harness.stdio.println(llm_compacted.summary.contains("auto-compacted"))
+  const custom_compacted = harness.agent.transcript_auto_compact(
+    base_messages,
+    {
+      keep_last: 1,
+      token_threshold: 1,
+      compact_strategy: "custom",
+      compact_callback: { archived -> {summary: "custom compact " + to_string(len(archived))} },
+    },
+  )
+  harness.stdio.println(custom_compacted.messages[0].content.contains("custom compact 2"))
+  const policy_compacted = harness.agent.transcript_auto_compact(
+    base_messages,
+    {
+      keep_last: 1,
+      token_threshold: 1,
+      compact_strategy: "custom",
+      compact_callback: { archived, _reminders, policy ->
+        {summary: "policy compact " + policy.mode + " " + policy.preserve[0]}
+      },
+      policy: compact_preserving_test_failures({author: "host"}),
+    },
+  )
+  harness.stdio.println(
+    policy_compacted.messages[0].content.contains(
+      "policy compact preserve_test_failures failing test names",
+    ),
+  )
+  const repair_messages = [
+    {role: "user", content: "Fix the include path"},
+    {role: "tool", name: "edit", content: "Applied edit to src/main.cpp: fixed include path"},
+    {role: "tool", name: "run", content: "src/main.cpp:1:10: error: missing generated/widget.h"},
+    {
+      role: "tool",
+      name: "edit",
+      content: "Applied edit to src/main.cpp: included generated/widget.h",
+    },
+    {role: "tool", name: "run", content: "All tests passed\nexit code 0"},
+    {role: "user", content: "What remains?"},
+  ]
+  const repair_compacted = harness.agent.transcript_auto_compact(
+    repair_messages,
+    {
+      keep_last: 1,
+      token_threshold: 1,
+      compact_strategy: "custom",
+      compact_callback: { archived -> {summary: "repair compact " + to_string(len(archived))} },
+    },
+  )
+  assert(
+    repair_compacted.summary.contains("harn.agent.repair_ledger.v1"),
+    "forced compaction carries repair ledger",
+  )
+  assert(repair_compacted.summary.contains("verified-good"), "repair ledger records verified fixes")
+  assert(
+    !repair_compacted.summary.contains("missing generated/widget.h"),
+    "superseded diagnostics are not retained as current diagnostics",
+  )
+  const loop_compacted = agent_loop(
+    harness,
+    "Inspect the workspace",
+    "You are helpful",
+    {
+      provider: "mock",
+      tools: list_tools(),
+      tool_format: "native",
+      max_iterations: 2,
+      auto_compact: compact_retaining_current_plan({author: "host"}),
+      compact_threshold: 1,
+      compact_keep_last: 1,
+      compact_strategy: "custom",
+      compact_callback: { archived, _reminders, policy ->
+        {summary: "loop compact " + policy.mode + " " + to_string(len(archived))}
+      },
+    },
+  )
+  harness.stdio.println(
+    transcript_summary(loop_compacted?.transcript)?.contains("loop compact retain_current_plan"),
+  )
+  const request_compacted = agent_loop(
+    harness,
+    "Inspect the workspace",
+    "You are helpful",
+    {
+      provider: "mock",
+      tools: list_tools(),
+      tool_format: "native",
+      max_iterations: 2,
+      auto_compact: {
+        compaction_request: {
+          mode: "resume_request",
+          policy: {instructions: "Keep host state.", author: "host"},
+        },
+      },
+      compact_threshold: 1,
+      compact_keep_last: 1,
+      compact_strategy: "custom",
+      compact_callback: { archived, _reminders, policy ->
+        {
+          summary: "request compact " + policy.mode + " " + policy.author + " "
+            + to_string(
+            len(archived),
+          ),
+        }
+      },
+    },
+  )
+  harness.stdio.println(
+    transcript_summary(request_compacted?.transcript)?.contains(
+      "request compact resume_request host",
+    ),
+  )
+  const stopped_after_tool_turn = agent_loop(
+    harness,
+    "Inspect the workspace",
+    "You are helpful",
+    {
+      provider: "mock",
+      tools: list_tools(),
+      tool_format: "native",
+      max_iterations: 3,
+      post_turn_callback: { info ->
+        if (info?.tool_results?.count ?? 0) > 0
+          && info?.tool_results[0]?.tool_name
+          == "list_directory"
+          && info?.tool_results[0]?.status == "ok" {
+          return {message: "handoff now", stop: true}
+        }
+        return ""
+      },
+    },
+  )
+  harness.stdio.println(stopped_after_tool_turn?.llm?.iterations == 1)
+  harness.stdio.println(
+    json_stringify(
+      agent_session_visible_messages(harness.agent, stopped_after_tool_turn.session_id),
+    )
+      .contains("handoff now"),
+  )
+  with_llm_script(
+    harness.llm,
+    [
+      {text: "", tool_calls: [{id: "hook_1", name: "list_directory", arguments: {path: "."}}]},
+      llm_text("Final answer from the model."),
+    ],
+    { ->
+      const hook_driven_final = agent_loop(
+        harness,
+        "Inspect the workspace",
+        "You are helpful",
+        {
+          provider: "mock",
+          tools: list_tools(),
+          tool_format: "native",
+          loop_until_done: true,
+          max_iterations: 3,
+          post_turn_callback: { info ->
+            if len(info?.successful_tool_names ?? []) > 0 {
+              return {
+                message:
+                  "finalize now current=${info.successful_tool_names[0]} session=${info.session_successful_tools[0]} rejected=${len(info?.session_rejected_tools ?? [])}",
+                llm_options: {tool_choice: "none"},
+              }
+            }
+            return nil
+          },
+        },
+      )
+      const hook_calls = harness.llm.mock_calls()
+      const second_call = json_stringify(hook_calls[1].messages)
+      harness.stdio.println(hook_driven_final?.llm?.iterations == 2)
+      harness.stdio.println(second_call.contains("current=list_directory"))
+      harness.stdio.println(second_call.contains("session=list_directory"))
+      harness.stdio.println(second_call.contains("rejected=0"))
+      harness.stdio.println(hook_calls[1].tool_choice == "none")
+      harness.stdio.println(second_call.contains("finalize now"))
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [
+      {text: "", tool_calls: [{id: "hook_2", name: "list_directory", arguments: {path: "."}}]},
+      llm_text("Final answer after clearing tools."),
+    ],
+    { ->
+      const final_tools = tool_registry()
+      const cleared_final = agent_loop(
+        harness,
+        "Inspect the workspace",
+        "You are helpful",
+        {
+          provider: "mock",
+          tools: list_tools(),
+          tool_format: "native",
+          loop_until_done: true,
+          max_iterations: 3,
+          max_nudges: 0,
+          post_turn_callback: { info ->
+            if len(info?.successful_tool_names ?? []) > 0 {
+              return {
+                message: "finalize without tools",
+                llm_options: {tool_choice: "none", tools: final_tools},
+                next_options: {tools: final_tools, loop_until_done: false, max_nudges: 0},
+              }
+            }
+            return nil
+          },
+        },
+      )
+      const cleared_calls = harness.llm.mock_calls()
+      harness.stdio.println(cleared_final?.status == "done")
+      harness.stdio.println(cleared_final?.llm?.iterations == 2)
+      harness.stdio.println(len(cleared_calls[1]?.tools ?? []) == 0)
+    },
+  )
+}

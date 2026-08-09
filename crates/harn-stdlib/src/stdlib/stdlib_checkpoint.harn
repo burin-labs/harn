@@ -1,0 +1,636 @@
+// std/checkpoint — Checkpoint & resume utilities for resilient pipelines.
+//
+// Import: import {
+//           checkpoint_stage,
+//           checkpoint_stage_keyed,
+//           checkpoint_stage_keyed_retry,
+//           checkpoint_stage_retry,
+//         } from "std/checkpoint"
+// checkpoint_stage(name, f) -> value
+// checkpoint_stage_retry(name, max_retries, f) -> value
+// checkpoint_stage_keyed(name, identity, f) -> value
+// checkpoint_stage_keyed_retry(name, identity, max_retries, f) -> value
+//
+// Runs f() and caches the result under `name`. On subsequent calls with the
+// same name, returns the cached result without running f() again. Enables
+// idempotent, resumable pipelines that survive crashes and restarts.
+//
+// Example:
+//   import { checkpoint_stage } from "std/checkpoint"
+//
+//   pipeline process(task) {
+//     let data    = checkpoint_stage("fetch",   { -> fetch_dataset(url) })
+//     let cleaned = checkpoint_stage("clean",   { -> clean(data) })
+//     let result  = checkpoint_stage("process", { -> run_model(cleaned) })
+//     upload(result)
+//   }
+//
+// On first run all three stages execute. On a resumed run (after a crash),
+// completed stages are skipped automatically.
+import { agent_emit_event } from "std/agent/state"
+import { llm_call_options } from "std/llm/options"
+
+/**
+ * checkpoint_stage.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn checkpoint_stage(runtime: HarnessRuntime, name, f) {
+  if runtime.checkpoint_exists(name) {
+    return runtime.checkpoint_get(name)
+  }
+  const result = f()
+  runtime.checkpoint(name, result)
+  return result
+}
+
+type KeyedCheckpointStageRecord = {schema: string, fingerprint: string, value: unknown}
+
+const CHECKPOINT_STAGE_KEYED_SCHEMA: string = "harn.checkpoint_stage.keyed.v1"
+
+fn __checkpoint_stage_fingerprint(identity: unknown) -> string {
+  return "sha256:" + sha256(json_stringify(identity))
+}
+
+fn __checkpoint_stage_keyed_record(
+  runtime: HarnessRuntime,
+  name: string,
+  fingerprint: string,
+) -> KeyedCheckpointStageRecord? {
+  guard runtime.checkpoint_exists(name) else {
+    return nil
+  }
+  const record = runtime.checkpoint_get(name)
+  guard type_of(record) == "dict"
+    && record?.schema == CHECKPOINT_STAGE_KEYED_SCHEMA
+    && record?.fingerprint == fingerprint
+    && record.keys().contains("value") else {
+    return nil
+  }
+  return record
+}
+
+fn __checkpoint_stage_keyed_save(
+  runtime: HarnessRuntime,
+  name: string,
+  fingerprint: string,
+  value: unknown,
+) -> nil {
+  runtime.checkpoint(
+    name,
+    {schema: CHECKPOINT_STAGE_KEYED_SCHEMA, fingerprint: fingerprint, value: value},
+  )
+}
+
+/**
+ * Run and cache a resumable stage only while its structured identity matches.
+ * Identity values are canonicalized and persisted only as a SHA-256 digest.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn checkpoint_stage_keyed(
+  runtime: HarnessRuntime,
+  name: string,
+  identity: unknown,
+  f,
+) -> unknown {
+  const fingerprint = __checkpoint_stage_fingerprint(identity)
+  const cached = __checkpoint_stage_keyed_record(runtime, name, fingerprint)
+  if cached != nil {
+    return cached.value
+  }
+  const result = f()
+  __checkpoint_stage_keyed_save(runtime, name, fingerprint, result)
+  return result
+}
+
+// checkpoint_stage_retry(name, max_retries, fn) -> value
+//
+// Like checkpoint_stage, but retries fn() up to max_retries times on failure
+// before propagating the error. Once successful, caches the result so retries
+// are never needed on resume.
+//
+// Example:
+//   let data = checkpoint_stage_retry("fetch", 3, fn() { fetch_with_timeout(url) })
+/**
+ * checkpoint_stage_retry.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn checkpoint_stage_retry(runtime: HarnessRuntime, name, max_retries, f) {
+  if runtime.checkpoint_exists(name) {
+    return runtime.checkpoint_get(name)
+  }
+  let attempts = 0
+  let last_err = "unknown error"
+  while attempts < max_retries {
+    const result = try {
+      f()
+    }
+    if is_ok(result) {
+      const v = unwrap(result)
+      runtime.checkpoint(name, v)
+      return v
+    }
+    last_err = to_string(unwrap_err(result))
+    attempts = attempts + 1
+  }
+  throw "checkpoint_stage_retry failed after " + to_string(max_retries) + " attempts: " + last_err
+}
+
+/**
+ * Retry and cache a resumable stage only while its structured identity matches.
+ * Failed attempts are never checkpointed.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn checkpoint_stage_keyed_retry(
+  runtime: HarnessRuntime,
+  name: string,
+  identity: unknown,
+  max_retries: int,
+  f,
+) -> unknown {
+  const fingerprint = __checkpoint_stage_fingerprint(identity)
+  const cached = __checkpoint_stage_keyed_record(runtime, name, fingerprint)
+  if cached != nil {
+    return cached.value
+  }
+  let attempts = 0
+  let last_err = "unknown error"
+  while attempts < max_retries {
+    const result = try {
+      f()
+    }
+    if is_ok(result) {
+      const value = unwrap(result)
+      __checkpoint_stage_keyed_save(runtime, name, fingerprint, value)
+      return value
+    }
+    last_err = to_string(unwrap_err(result))
+    attempts = attempts + 1
+  }
+  throw "checkpoint_stage_keyed_retry failed after "
+    + to_string(max_retries)
+    + " attempts: "
+    + last_err
+}
+
+fn __typed_checkpoint_options(options) {
+  const opts = options ?? {}
+  let llm_opts = opts?.llm_options ?? opts
+  if llm_opts?.schema_retries == nil {
+    llm_opts = llm_opts + {schema_retries: opts?.schema_retries ?? 2}
+  }
+  if llm_opts?.repair == nil {
+    llm_opts = llm_opts + {repair: opts?.repair ?? {enabled: true}}
+  }
+  if opts?.system != nil && llm_opts?.system == nil {
+    llm_opts = llm_opts + {system: opts.system}
+  }
+  return llm_call_options(llm_opts)
+}
+
+fn __typed_checkpoint_string_list(value) {
+  if value == nil {
+    return []
+  }
+  if type_of(value) == "list" {
+    return value.map({ item -> to_string(item) })
+  }
+  return [to_string(value)]
+}
+
+fn __typed_checkpoint_validator_errors(value) {
+  if value == nil {
+    return []
+  }
+  if type_of(value) == "bool" {
+    return if value {
+      []
+    } else {
+      ["validator returned false"]
+    }
+  }
+  if type_of(value) == "string" {
+    const text = trim(value)
+    return if text == "" {
+      []
+    } else {
+      [text]
+    }
+  }
+  if type_of(value) == "list" {
+    return __typed_checkpoint_string_list(value)
+  }
+  if type_of(value) == "dict" {
+    if value?.ok ?? false {
+      return []
+    }
+    const errors = value?.errors ?? value?.validation_errors ?? value?.messages
+    if errors != nil {
+      return __typed_checkpoint_string_list(errors)
+    }
+    const message = value?.error ?? value?.message ?? "validator rejected output"
+    return [to_string(message)]
+  }
+  return ["validator returned unsupported result type " + type_of(value)]
+}
+
+fn __typed_checkpoint_validate(data, validator) {
+  if validator == nil {
+    return []
+  }
+  const result = validator(data)
+  return __typed_checkpoint_validator_errors(result)
+}
+
+fn __typed_checkpoint_failure_lists(result) {
+  const category = result?.error_category ?? "unknown"
+  const error = result?.error ?? "structured output failed"
+  if category == "missing_json" {
+    return {parse_failures: [error], schema_failures: []}
+  }
+  return {parse_failures: [], schema_failures: [error]}
+}
+
+fn __typed_checkpoint_attempt_record(index, result, validator_errors) {
+  return {
+    attempt: index,
+    ok: result.ok,
+    raw_text: result?.raw_text ?? "",
+    error: result?.error ?? "",
+    error_category: result?.error_category,
+    repaired: result?.repaired ?? false,
+    extracted_json: result?.extracted_json ?? false,
+    validator_errors: validator_errors,
+  }
+}
+
+fn __typed_checkpoint_correction_prompt(name, prompt, errors) {
+  return prompt + "\n\nTyped-output checkpoint '" + name
+    + "' rejected the previous JSON after parsing. Return a corrected JSON object only.\n"
+    + "Validator correction messages:\n- "
+    + errors.join("\n- ")
+}
+
+fn __typed_checkpoint_status(ok, category) {
+  if ok {
+    return "accepted"
+  }
+  if category == "validator_failure" {
+    return "validator_rejected"
+  }
+  return "schema_rejected"
+}
+
+fn __typed_checkpoint_emit(agent: HarnessAgent, options, envelope) {
+  try {
+    __host_typed_checkpoint_trace(envelope)
+  } catch (e) {
+  }
+  const session_id = options?.session_id ?? options?.llm_options?.session_id
+  if session_id != nil && session_id != "" {
+    try {
+      agent_emit_event(agent, session_id, "typed_checkpoint", envelope)
+    } catch (e) {
+    }
+  }
+}
+
+fn __typed_checkpoint_envelope(args) {
+  const ok = args.ok
+  const checkpoint_attempts = args.checkpoint_attempts ?? 0
+  const category = if ok {
+    nil
+  } else {
+    args.error_category ?? "unknown"
+  }
+  const parse_failures = args.parse_failures ?? []
+  const schema_failures = args.schema_failures ?? []
+  const validator_failures = args.validator_failures ?? []
+  const validation_errors = parse_failures + schema_failures + validator_failures
+  const final_result = args.final_result
+  return {
+    _type: "typed_output_checkpoint",
+    version: 1,
+    name: args.name,
+    ok: ok,
+    status: __typed_checkpoint_status(ok, category),
+    data: if ok {
+      final_result?.data
+    } else {
+      args.data
+    },
+    raw_text: final_result?.raw_text ?? args.raw_text ?? "",
+    raw_outputs: args.raw_outputs ?? [],
+    error: if ok {
+      ""
+    } else {
+      args.error ?? validation_errors.join("; ")
+    },
+    error_category: category,
+    attempts: args.attempts ?? 0,
+    checkpoint_attempts: checkpoint_attempts,
+    retries: if checkpoint_attempts > 0 {
+      checkpoint_attempts - 1
+    } else {
+      0
+    },
+    repaired: args.repaired ?? false,
+    extracted_json: args.extracted_json ?? false,
+    parse_failures: parse_failures,
+    schema_failures: schema_failures,
+    validator_failures: validator_failures,
+    validation_errors: validation_errors,
+    final_accepted: ok,
+    trace: args.trace ?? [],
+    usage: final_result?.usage ?? {},
+    model: final_result?.model ?? "",
+    provider: final_result?.provider ?? "",
+  }
+}
+
+/**
+ * Run a strict, schema-bound LLM checkpoint with bounded repair and an
+ * optional deterministic post-parse validator. The validator may return
+ * true/nil, a string, a list of messages, or `{ok, errors}`; rejected
+ * outputs are re-prompted with those correction messages before any
+ * caller-owned side effects run.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn typed_output_checkpoint(
+  agent: HarnessAgent,
+  llm: HarnessLlm,
+  name,
+  prompt,
+  schema,
+  options = nil,
+  validator = nil,
+) {
+  const opts = options ?? {}
+  const max_validator_retries = opts?.validator_retries ?? 1
+  let checkpoint_attempt = 0
+  let total_llm_attempts = 0
+  let raw_outputs = []
+  let trace = []
+  let validator_failures = []
+  let current_prompt = prompt
+  let any_repaired = false
+  let any_extracted = false
+  let last_result = nil
+  while checkpoint_attempt <= max_validator_retries {
+    checkpoint_attempt = checkpoint_attempt + 1
+    const result = llm.call_structured_result(
+      current_prompt,
+      schema,
+      __typed_checkpoint_options(opts),
+    )
+    last_result = result
+    const result_attempts = result?.attempts ?? 0
+    total_llm_attempts = total_llm_attempts + result_attempts
+    raw_outputs = raw_outputs.appending(result?.raw_text ?? "")
+    const result_repaired = result?.repaired ?? false
+    const result_extracted = result?.extracted_json ?? false
+    any_repaired = any_repaired || result_repaired
+    any_extracted = any_extracted || result_extracted
+    if !result.ok {
+      const failures = __typed_checkpoint_failure_lists(result)
+      trace = trace.appending(__typed_checkpoint_attempt_record(checkpoint_attempt, result, []))
+      const envelope = __typed_checkpoint_envelope(
+        {
+          name: name,
+          ok: false,
+          final_result: result,
+          error: result?.error ?? "structured output failed",
+          error_category: result?.error_category ?? "schema_validation",
+          attempts: total_llm_attempts,
+          checkpoint_attempts: checkpoint_attempt,
+          repaired: any_repaired,
+          extracted_json: any_extracted,
+          parse_failures: failures.parse_failures,
+          schema_failures: failures.schema_failures,
+          validator_failures: validator_failures,
+          raw_outputs: raw_outputs,
+          trace: trace,
+        },
+      )
+      __typed_checkpoint_emit(agent, opts, envelope)
+      return envelope
+    }
+    const errors = __typed_checkpoint_validate(result.data, validator)
+    trace = trace.appending(__typed_checkpoint_attempt_record(checkpoint_attempt, result, errors))
+    if len(errors) == 0 {
+      const envelope = __typed_checkpoint_envelope(
+        {
+          name: name,
+          ok: true,
+          final_result: result,
+          attempts: total_llm_attempts,
+          checkpoint_attempts: checkpoint_attempt,
+          repaired: any_repaired,
+          extracted_json: any_extracted,
+          validator_failures: validator_failures,
+          raw_outputs: raw_outputs,
+          trace: trace,
+        },
+      )
+      __typed_checkpoint_emit(agent, opts, envelope)
+      return envelope
+    }
+    validator_failures = validator_failures + errors
+    if checkpoint_attempt > max_validator_retries {
+      const envelope = __typed_checkpoint_envelope(
+        {
+          name: name,
+          ok: false,
+          final_result: result,
+          data: result.data,
+          error: errors.join("; "),
+          error_category: "validator_failure",
+          attempts: total_llm_attempts,
+          checkpoint_attempts: checkpoint_attempt,
+          repaired: any_repaired,
+          extracted_json: any_extracted,
+          validator_failures: validator_failures,
+          raw_outputs: raw_outputs,
+          trace: trace,
+        },
+      )
+      __typed_checkpoint_emit(agent, opts, envelope)
+      return envelope
+    }
+    current_prompt = __typed_checkpoint_correction_prompt(name, prompt, errors)
+  }
+  const envelope = __typed_checkpoint_envelope(
+    {
+      name: name,
+      ok: false,
+      final_result: last_result,
+      error: "typed checkpoint exhausted without a final result",
+      error_category: "validator_failure",
+      attempts: total_llm_attempts,
+      checkpoint_attempts: checkpoint_attempt,
+      repaired: any_repaired,
+      extracted_json: any_extracted,
+      validator_failures: validator_failures,
+      raw_outputs: raw_outputs,
+      trace: trace,
+    },
+  )
+  __typed_checkpoint_emit(agent, opts, envelope)
+  return envelope
+}
+
+fn __typed_checkpoint_text_repair_prompt(name, raw_text, errors) {
+  return "Typed-output checkpoint '" + name + "' rejected an already-produced JSON summary.\n"
+    + "Do not describe new actions or claim new side effects. Repair only the summary below.\n"
+    + "Validator correction messages:\n- "
+    + errors.join("\n- ")
+    + "\n\nRaw summary:\n"
+    + raw_text
+    + "\n\nReturn the corrected JSON object only."
+}
+
+/**
+ * Validate already-produced model text against a schema and optional
+ * deterministic validator. Validator repair prompts operate only on the
+ * raw summary text, so callers can run this after side-effectful agent
+ * work without replaying those side effects.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn typed_output_checkpoint_from_text(
+  agent: HarnessAgent,
+  llm: HarnessLlm,
+  name,
+  raw_text,
+  schema,
+  options = nil,
+  validator = nil,
+) {
+  const opts = options ?? {}
+  const max_validator_retries = opts?.validator_retries ?? 1
+  let checkpoint_attempt = 1
+  let total_attempts = 0
+  let raw_outputs = [raw_text]
+  let trace = []
+  let validator_failures = []
+  const recovered = llm.recover_schema(raw_text, schema, opts)
+  const recovered_attempts = recovered.attempts ?? 0
+  total_attempts = total_attempts + recovered_attempts
+  if !recovered.ok {
+    const failures = __typed_checkpoint_failure_lists(recovered)
+    trace = trace.appending(__typed_checkpoint_attempt_record(checkpoint_attempt, recovered, []))
+    const envelope = __typed_checkpoint_envelope(
+      {
+        name: name,
+        ok: false,
+        final_result: recovered,
+        error: recovered.error ?? "structured output recovery failed",
+        error_category: recovered.error_category ?? "schema_validation",
+        attempts: total_attempts,
+        checkpoint_attempts: checkpoint_attempt,
+        repaired: recovered.repaired ?? false,
+        extracted_json: recovered.stage == "extracted",
+        parse_failures: failures.parse_failures,
+        schema_failures: failures.schema_failures,
+        validator_failures: validator_failures,
+        raw_outputs: raw_outputs,
+        trace: trace,
+      },
+    )
+    __typed_checkpoint_emit(agent, opts, envelope)
+    return envelope
+  }
+  let last_result = recovered
+  let any_repaired = recovered.repaired ?? false
+  let any_extracted = recovered.stage == "extracted"
+  let errors = __typed_checkpoint_validate(recovered.data, validator)
+  trace = trace.appending(__typed_checkpoint_attempt_record(checkpoint_attempt, recovered, errors))
+  while len(errors) > 0 && checkpoint_attempt <= max_validator_retries {
+    validator_failures = validator_failures + errors
+    checkpoint_attempt = checkpoint_attempt + 1
+    const prompt = __typed_checkpoint_text_repair_prompt(name, raw_text, errors)
+    const result = llm.call_structured_result(prompt, schema, __typed_checkpoint_options(opts))
+    last_result = result
+    const result_attempts = result?.attempts ?? 0
+    total_attempts = total_attempts + result_attempts
+    raw_outputs = raw_outputs.appending(result?.raw_text ?? "")
+    const result_repaired = result?.repaired ?? false
+    const result_extracted = result?.extracted_json ?? false
+    any_repaired = any_repaired || result_repaired
+    any_extracted = any_extracted || result_extracted
+    if !result.ok {
+      const failures = __typed_checkpoint_failure_lists(result)
+      trace = trace.appending(__typed_checkpoint_attempt_record(checkpoint_attempt, result, []))
+      const envelope = __typed_checkpoint_envelope(
+        {
+          name: name,
+          ok: false,
+          final_result: result,
+          error: result?.error ?? "structured output failed",
+          error_category: result?.error_category ?? "schema_validation",
+          attempts: total_attempts,
+          checkpoint_attempts: checkpoint_attempt,
+          repaired: any_repaired,
+          extracted_json: any_extracted,
+          parse_failures: failures.parse_failures,
+          schema_failures: failures.schema_failures,
+          validator_failures: validator_failures,
+          raw_outputs: raw_outputs,
+          trace: trace,
+        },
+      )
+      __typed_checkpoint_emit(agent, opts, envelope)
+      return envelope
+    }
+    errors = __typed_checkpoint_validate(result.data, validator)
+    trace = trace.appending(__typed_checkpoint_attempt_record(checkpoint_attempt, result, errors))
+  }
+  if len(errors) == 0 {
+    const envelope = __typed_checkpoint_envelope(
+      {
+        name: name,
+        ok: true,
+        final_result: last_result,
+        attempts: total_attempts,
+        checkpoint_attempts: checkpoint_attempt,
+        repaired: any_repaired,
+        extracted_json: any_extracted,
+        validator_failures: validator_failures,
+        raw_outputs: raw_outputs,
+        trace: trace,
+      },
+    )
+    __typed_checkpoint_emit(agent, opts, envelope)
+    return envelope
+  }
+  validator_failures = validator_failures + errors
+  const envelope = __typed_checkpoint_envelope(
+    {
+      name: name,
+      ok: false,
+      final_result: last_result,
+      data: last_result.data,
+      error: errors.join("; "),
+      error_category: "validator_failure",
+      attempts: total_attempts,
+      checkpoint_attempts: checkpoint_attempt,
+      repaired: any_repaired,
+      extracted_json: any_extracted,
+      validator_failures: validator_failures,
+      raw_outputs: raw_outputs,
+      trace: trace,
+    },
+  )
+  __typed_checkpoint_emit(agent, opts, envelope)
+  return envelope
+}

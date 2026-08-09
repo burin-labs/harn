@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/tools/inspect_test_results.response.json",
+  "title": "tools.inspect_test_results response",
+  "type": "object",
+  "properties": {
+    "result_handle": { "type": "string" },
+    "tests": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/TestRecord" }
+    }
+  },
+  "required": ["result_handle", "tests"],
+  "additionalProperties": false,
+  "$defs": {
+    "TestRecord": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "status": {
+          "type": "string",
+          "enum": ["passed", "failed", "skipped", "errored"]
+        },
+        "duration_ms": { "type": "integer", "minimum": 0 },
+        "message": { "type": ["string", "null"] },
+        "stdout": { "type": ["string", "null"] },
+        "stderr": { "type": ["string", "null"] },
+        "path": { "type": ["string", "null"] },
+        "line": { "type": ["integer", "null"], "minimum": 1 }
+      },
+      "required": ["name", "status", "duration_ms"],
+      "additionalProperties": false
+    }
+  }
+}

@@ -1,0 +1,10 @@
+pipeline test(harness: Harness, task) {
+  // Printing an iter renders <iter> and does NOT drain it — the
+  // subsequent .to_list() still yields the full sequence.
+  const it = iter([1, 2, 3])
+  harness.stdio.log(it)
+  harness.stdio.log(it.to_list())
+  // After draining, the same handle prints as <iter (exhausted)>.
+  harness.stdio.log(it)
+  harness.stdio.log(it.to_list())
+}

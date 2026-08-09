@@ -1,0 +1,11 @@
+id = "llm-policy-model-identity"
+language = "harn"
+severity = "error"
+message = "Move model/provider identity policy to capability or catalog source data"
+
+[rule]
+query = "(string_literal) @VALUE @__match"
+
+[[where]]
+metavar = "VALUE"
+regex = '''^"(?:anthropic|openai|gemini|openrouter|deepseek|groq|cerebras|together|ollama|local|mock|claude[^" ]*|gpt[^" ]*|o[1-9][^" ]*|gemini[^" ]*|qwen[^" ]*|Qwen/[^" ]*|llama[^" ]*|gemma[^" ]*|deepseek[^" ]*|mistral[^" ]*|command[^" ]*|grok[^" ]*|MiniMax[^" ]*)"$'''

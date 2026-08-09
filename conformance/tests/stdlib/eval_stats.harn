@@ -1,0 +1,195 @@
+import "std/eval/stats"
+
+fn row(name, group, passes, trials, skips, timeouts, cost) {
+  return {
+    name: name,
+    group: group,
+    passes: passes,
+    trials: trials,
+    skips: skips,
+    timeouts: timeouts,
+    wallTimeSeconds: 1.0,
+    costUsd: cost,
+  }
+}
+
+pipeline test(harness: Harness, task) {
+  const rows = [
+    row("py-a", "python", 4, 4, 0, 0, 1.0),
+    row("py-b", "python", 1, 4, 0, 1, 2.0),
+    row("rs-a", "rust", 0, 4, 0, 0, 3.0),
+    row("rs-skip", "rust", 0, 4, 4, 0, 4.0) + {status: "skip"},
+  ]
+  assert_eq(round(macro_pass_at_1(rows) * 1000), 417)
+  const reliability = reliability_breakdown(rows)
+  assert_eq(reliability.all_pass_cases, 1)
+  assert_eq(reliability.flaky_cases, 1)
+  assert_eq(reliability.all_fail_cases, 1)
+  assert_eq(reliability.no_decision_cases, 1)
+  assert_eq(round(pass_caret_k(rows) * 1000), 333)
+  assert_eq(pass_at_k(rows), pass_caret_k(rows))
+  assert_eq(round(skip_rate(rows) * 1000), 250)
+  assert_eq(round(timeout_rate(rows) * 1000), 63)
+  assert_eq(cost_per_solved(rows), 5.0)
+  // estimate_cost_usd: cache-aware token->USD. 1M billable input @ $3 + 1M
+  // output @ $15 = 18.0; cache-read tokens bill at their own rate and are not
+  // re-charged at the input rate.
+  assert_eq(estimate_cost_usd(nil, {inputTokens: 1000000}), nil)
+  assert_eq(
+    estimate_cost_usd(
+      {inputPerMTok: 3.0, outputPerMTok: 15.0},
+      {inputTokens: 1000000, outputTokens: 1000000},
+    ),
+    18.0,
+  )
+  assert_eq(
+    estimate_cost_usd(
+      {inputPerMTok: 3.0, outputPerMTok: 15.0, cacheReadPerMTok: 0.3},
+      {inputTokens: 1000000, cacheReadTokens: 1000000},
+    ),
+    0.3,
+  )
+  // Once a provider reports cached reads, an absent cache-read tier is
+  // unknown pricing—not permission to charge those tokens at the input tier.
+  assert_eq(
+    estimate_cost_usd(
+      {inputPerMTok: 3.0, outputPerMTok: 15.0},
+      {inputTokens: 1000000, cacheReadTokens: 1000000},
+    ),
+    nil,
+  )
+  // realized_trial_cost_usd: a cached replay realizes $0; otherwise pass-through.
+  assert_eq(realized_trial_cost_usd(0.42, true), 0.0)
+  assert_eq(realized_trial_cost_usd(0.42, false), 0.42)
+  assert_eq(realized_trial_cost_usd(nil, true), nil)
+  assert_eq(worst_group(rows), {group: "rust", pass_rate: 0.0, cases: 2})
+  const language_rows = [
+    row("rs-a", "legacy", 4, 4, 0, 0, 1.0) + {metadata: {language: "rust"}},
+    row("py-a", "legacy", 2, 4, 0, 1, 2.0) + {language: "python", metadata: {language: "ignored"}},
+    row("missing", "legacy", 0, 4, 4, 0, 0.0) + {metadata: {language: ["rust"]}},
+    row("missing", "legacy", 0, 4, 4, 0, 0.0),
+  ]
+  const languages = axis_breakdown(language_rows, "language")
+  assert_eq(languages.axis, "language")
+  assert_eq(languages.cases, 4)
+  assert_eq(languages.classified_cases, 2)
+  assert_eq(languages.missing_cases, ["missing"])
+  assert_eq(languages.missing_count, 2)
+  assert_eq(languages.groups.map({ group -> group.value }), ["python", "rust"])
+  assert_eq(languages.groups[0]?.macro_pass_at_1, 0.5)
+  assert_eq(languages.groups[0]?.timeout_rate, 0.25)
+  assert_eq(languages.groups[1]?.cost_per_solved_usd, 1.0)
+  assert_eq(languages.worst?.value, "python")
+  const no_axes = axis_breakdown([], "language")
+  assert_eq(no_axes.groups, [])
+  assert_eq(no_axes.worst, nil)
+  const aggregate = aggregate_trials(
+    "agg-a",
+    [
+      {verification: "PASS", wallTimeSeconds: 10.0, costUsd: 0.2},
+      {verification: "FAIL", wallTimeSeconds: 20.0, costUsd: 0.4},
+      {verification: "skip", wallTimeSeconds: 0.0},
+      {verification: "FAIL", outcomeKind: "agent_timeout", wallTimeSeconds: 30.0, costUsd: 0.6},
+    ],
+    {group: "python", caseFingerprint: "fp-agg"},
+  )
+  assert_eq(aggregate.passes, 1)
+  assert_eq(aggregate.fails, 2)
+  assert_eq(aggregate.skips, 1)
+  assert_eq(aggregate.timeouts, 1)
+  assert_eq(aggregate.status, "FLAKY")
+  assert_eq(aggregate.harness_config_fingerprint, nil)
+  assert_eq(aggregate.majority, "FAIL")
+  assert_eq(aggregate.pass_rate, 0.25)
+  assert_eq(aggregate.mean_wall_time_seconds, 15.0)
+  assert_eq(aggregate.stdev_wall_time_seconds, 11.18)
+  assert_eq(aggregate.total_cost_usd, 1.2)
+  const aggregate_with_harness = aggregate_trials(
+    "agg-harness",
+    [{verification: "PASS", wallTimeSeconds: 1.0}],
+    {harnessConfigFingerprint: "cfg-1"},
+  )
+  assert_eq(aggregate_with_harness.harness_config_fingerprint, "cfg-1")
+  const fingerprint_rows = [
+    {case_name: "case-a", case_fingerprint: "a", harness_config_fingerprint: "cfg-1"},
+    {case_name: "case-a", case_fingerprint: "a", harness_config_fingerprint: "cfg-1"},
+    {case_name: "case-b", case_fingerprint: "b", harness_config_fingerprint: "cfg-1"},
+  ]
+  assert_eq(
+    eval_fingerprint_integrity(fingerprint_rows),
+    {
+      complete: true,
+      consistent: true,
+      case_fingerprints: {"case-a": "a", "case-b": "b"},
+      harness_fingerprints: ["cfg-1"],
+      inconsistent_cases: [],
+    },
+  )
+  const mixed_fingerprints = eval_fingerprint_integrity(
+    fingerprint_rows
+      + [
+      {case_name: "case-a", case_fingerprint: "a-v2", harness_config_fingerprint: "cfg-2"},
+    ],
+  )
+  assert_eq(mixed_fingerprints.complete, true)
+  assert_eq(mixed_fingerprints.consistent, false)
+  assert_eq(mixed_fingerprints.harness_fingerprints, ["cfg-1", "cfg-2"])
+  assert_eq(mixed_fingerprints.inconsistent_cases, ["case-a"])
+  assert_eq(
+    eval_fingerprint_integrity(
+      [{case_name: "case-a", case_fingerprint: "", harness_config_fingerprint: "cfg-1"}],
+    ).complete,
+    false,
+  )
+  const power_two_values = [0, 1, 0, 1, 0, 1, 0, 1, 1, 0, 1, 0, 1, 0, 1, 0]
+  const ci = bootstrap_mean_ci(power_two_values, 200, 0.05, 12345)
+  assert_eq(ci, bootstrap_mean_ci(power_two_values, 200, 0.05, 12345))
+  assert(ci.hi > ci.lo, "n=16 bootstrap CI must not collapse")
+  const baseline = [
+    row("case-a", "python", 0, 4, 0, 0, 1.0) + {case_fingerprint: "a"},
+    row("case-b", "python", 0, 4, 0, 0, 1.0) + {case_fingerprint: "b"},
+  ]
+  const current = [
+    row("case-a", "python", 4, 4, 0, 0, 1.0) + {case_fingerprint: "a"},
+    row("case-b", "python", 2, 4, 0, 0, 1.0) + {case_fingerprint: "b"},
+  ]
+  assert_eq(paired_case_deltas(baseline, current), [1.0, 0.5])
+  const harness_baseline = [
+    row("case-a", "python", 0, 4, 0, 0, 1.0)
+      + {
+      case_fingerprint: "a",
+      harness_config_fingerprint: "cfg-a",
+    },
+  ]
+  const harness_current = [
+    row("case-a", "python", 4, 4, 0, 0, 1.0)
+      + {
+      case_fingerprint: "a",
+      harness_config_fingerprint: "cfg-b",
+    },
+  ]
+  assert_eq(paired_case_deltas(harness_baseline, harness_current), [])
+  const delta = paired_delta_report(baseline, current, 200, 99)
+  assert(delta.improved)
+  assert_eq(delta.status, "improved")
+  const regression = regression_gate(current, baseline)
+  assert(!regression.passed)
+  assert_eq(regression.status, "regression")
+  const cheap = [row("case-a", "python", 1, 2, 0, 0, 0.2), row("case-b", "python", 0, 2, 0, 0, 0.2)]
+  const ladder = [
+    row("case-a", "python", 1, 2, 0, 0, 0.5) + {escalated: true},
+    row("case-b", "python", 0, 2, 0, 0, 0.5) + {escalated: false},
+  ]
+  const frontier = [
+    row("case-a", "python", 2, 2, 0, 0, 1.0),
+    row("case-b", "python", 2, 2, 0, 0, 1.0),
+  ]
+  const routing = routing_calibration_report(cheap, ladder, frontier)
+  assert_eq(routing.paired_cases, 2)
+  assert_eq(routing.escalated_cases, 1)
+  assert_eq(routing.over_escalated_cases, 1)
+  assert_eq(routing.under_escalated_cases, 1)
+  assert_eq(round(routing.escalation_rate * 1000), 500)
+  assert_eq(round(routing.convergence_at_frontier * 1000), 500)
+  harness.stdio.log("stdlib eval stats ok")
+}

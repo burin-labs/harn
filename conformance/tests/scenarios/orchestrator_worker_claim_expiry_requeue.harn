@@ -1,0 +1,132 @@
+import "../_common"
+
+pipeline default(harness: Harness, task) {
+  const unique = harness.random.uuid()
+  const root = path_join(harness.fs.workspace_temp_dir(), "harn-worker-claim-expiry-" + unique)
+  const producer_dir = path_join(root, "producer")
+  const failing_consumer_dir = path_join(root, "consumer-fail")
+  const ok_consumer_dir = path_join(root, "consumer-ok")
+  const state_dir = path_join(root, "state")
+  harness.fs.mkdir(root)
+  harness.fs.mkdir(producer_dir)
+  harness.fs.mkdir(failing_consumer_dir)
+  harness.fs.mkdir(ok_consumer_dir)
+  harness.fs.mkdir(state_dir)
+  harness.fs.write_text(
+    path_join(producer_dir, "harn.toml"),
+    "[package]\nname = \"worker-producer\"\n\n[[triggers]]\nid = \"incoming-review-task\"\nkind = \"a2a-push\"\nprovider = \"a2a-push\"\nmatch = { events = [\"a2a.task.received\"] }\nhandler = \"worker://triage\"\n",
+  )
+  harness.fs.write_text(
+    path_join(failing_consumer_dir, "harn.toml"),
+    "[package]\nname = \"worker-consumer-fail\"\n\n[exports]\nhandlers = \"lib.harn\"\n\n[[triggers]]\nid = \"incoming-review-task\"\nkind = \"a2a-push\"\nprovider = \"a2a-push\"\nmatch = { events = [\"a2a.task.received\"] }\nhandler = \"handlers::on_task\"\n",
+  )
+  harness.fs.write_text(
+    path_join(failing_consumer_dir, "lib.harn"),
+    "import \"std/triggers\"\n\npub fn on_task(harness: Harness, event: TriggerEvent) -> any {\n  throw(\"fail:\" + event.id)\n}\n",
+  )
+  harness.fs.write_text(
+    path_join(ok_consumer_dir, "harn.toml"),
+    "[package]\nname = \"worker-consumer-ok\"\n\n[exports]\nhandlers = \"lib.harn\"\n\n[[triggers]]\nid = \"incoming-review-task\"\nkind = \"a2a-push\"\nprovider = \"a2a-push\"\nmatch = { events = [\"a2a.task.received\"] }\nhandler = \"handlers::on_task\"\n",
+  )
+  harness.fs.write_text(
+    path_join(ok_consumer_dir, "lib.harn"),
+    "import \"std/triggers\"\n\npub fn on_task(harness: Harness, event: TriggerEvent) -> dict {\n  return {ok: true, event_id: event.id}\n}\n",
+  )
+  const repo_root = harness.process.exec("git", "rev-parse", "--show-toplevel").stdout.trim()
+  const harn_bin = harness.env.get_or(
+    "HARN_CONFORMANCE_HARN_BIN",
+    resolve_harn_bin(harness, repo_root),
+  )
+  assert(harness.fs.exists(harn_bin), "missing built harn binary at " + harn_bin)
+  const fire = harness.process.exec(
+    harn_bin,
+    "orchestrator",
+    "fire",
+    "incoming-review-task",
+    "--config",
+    path_join(producer_dir, "harn.toml"),
+    "--state-dir",
+    state_dir,
+  )
+  assert(fire.success, "producer fire failed: " + fire.stderr)
+  const first = harness.process.exec(
+    harn_bin,
+    "orchestrator",
+    "queue",
+    "--config",
+    path_join(failing_consumer_dir, "harn.toml"),
+    "--state-dir",
+    state_dir,
+    "drain",
+    "triage",
+    "--consumer-id",
+    "consumer-a",
+    "--claim-ttl",
+    "50ms",
+    "--json",
+  )
+  const first_data = json_parse(first.stdout)
+  harness.stdio.println(
+    first.success && first_data.drained == 1 && first_data.acked == 0 && first_data.deferred == 1,
+  )
+  harness.stdio.println(
+    first_data.summary.in_flight == 1
+      && first_data.summary.responses == 1
+      && first_data.responses[0].outcome?.status == "dlq"
+      && first_data.responses[0].outcome?.error
+      != nil,
+  )
+  // Poll a later drain until the deferred claim expires. The first drain must
+  // keep its failed claim alive until it exits; otherwise it can reclaim and
+  // dispatch its own deferred job when response persistence plus loop overhead
+  // exceeds the short TTL. A no-op later drain is safe to retry because it
+  // cannot consume a still-claimed job.
+  let second = nil
+  let second_data = nil
+  const claim_reclaim_deadline = harness.clock.now_ms() + 5000
+  while harness.clock.now_ms() < claim_reclaim_deadline {
+    second = harness.process.exec(
+      harn_bin,
+      "orchestrator",
+      "queue",
+      "--config",
+      path_join(ok_consumer_dir, "harn.toml"),
+      "--state-dir",
+      state_dir,
+      "drain",
+      "triage",
+      "--consumer-id",
+      "consumer-b",
+      "--json",
+    )
+    if second.success {
+      const parsed = json_parse(second.stdout)
+      if parsed.drained == 1 && parsed.acked == 1 && parsed.deferred == 0 {
+        second_data = parsed
+        break
+      }
+      second_data = parsed
+    }
+    harness.clock.sleep_ms(50ms)
+  }
+  harness.stdio.println(
+    second.success && second_data.drained == 1 && second_data.acked == 1
+      && second_data.deferred == 0,
+  )
+  const first_has_response = len(first_data.responses ?? []) > 0
+  const second_has_response = len(second_data.responses ?? []) > 0
+  harness.stdio.println(
+    first_has_response
+      && second_has_response
+      && second_data.responses[0].job_event_id
+      == first_data.responses[0]
+      .job_event_id
+      && second_data.responses[0].outcome?.status == "succeeded",
+  )
+  harness.stdio.println(
+    second_data.summary.ready == 0 && second_data.summary.in_flight == 0
+      && second_data.summary
+      .responses
+      == 2,
+  )
+}

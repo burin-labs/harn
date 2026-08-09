@@ -1,0 +1,105 @@
+import { task_plan_validate } from "std/agent/task_plan"
+
+fn codes_of(report) {
+  let out = []
+  for err in report.errors {
+    out = out + [err.code]
+  }
+  return out
+}
+
+pipeline main(harness: Harness) {
+  // Wrong schema version triggers a structured error rather than a throw.
+  const bad_version = task_plan_validate(
+    {
+      schema_version: "0",
+      objective: "x",
+      entry: "a",
+      nodes: {a: {kind: "agent_loop", prompt: "go"}},
+    },
+  )
+  harness.stdio.println(bad_version.valid)
+  harness.stdio.println(contains(codes_of(bad_version), "schema_version_mismatch"))
+  // Missing entry and dangling edge surface together; no throws.
+  const dangling = task_plan_validate(
+    {
+      schema_version: "1",
+      objective: "x",
+      nodes: {a: {kind: "agent_loop", prompt: "go"}},
+      edges: [{from: "a", to: "nowhere"}],
+    },
+  )
+  harness.stdio.println(dangling.valid)
+  const dangling_codes = codes_of(dangling)
+  harness.stdio.println(contains(dangling_codes, "entry_missing"))
+  harness.stdio.println(contains(dangling_codes, "edge_to_unknown"))
+  // Kind-specific contracts: agent_loop without prompt, sub_agent without
+  // worker_name, deterministic_command without tool, human_gate without
+  // approval_id, workflow_map without map.items, verify without contract.
+  const kinds = task_plan_validate(
+    {
+      schema_version: "1",
+      objective: "x",
+      entry: "loop",
+      nodes: {
+        loop: {kind: "agent_loop"},
+        worker: {kind: "sub_agent"},
+        cmd: {kind: "deterministic_command"},
+        gate: {kind: "human_gate"},
+        scan: {kind: "workflow_map"},
+        check: {kind: "verify"},
+      },
+    },
+  )
+  harness.stdio.println(kinds.valid)
+  const kind_codes = codes_of(kinds)
+  harness.stdio.println(contains(kind_codes, "agent_loop_missing_prompt"))
+  harness.stdio.println(contains(kind_codes, "sub_agent_missing_worker"))
+  harness.stdio.println(contains(kind_codes, "command_missing_tool"))
+  harness.stdio.println(contains(kind_codes, "human_gate_missing_approval"))
+  harness.stdio.println(contains(kind_codes, "map_missing_inputs"))
+  // verify-without-contract is a warning, not an error.
+  let saw_verify_warning = false
+  for warn in kinds.warnings {
+    if warn.code == "verify_no_contract" {
+      saw_verify_warning = true
+    }
+  }
+  harness.stdio.println(saw_verify_warning)
+  // Budget overflow and promotion policy out of range.
+  const bad_policy = task_plan_validate(
+    {
+      schema_version: "1",
+      objective: "x",
+      entry: "a",
+      nodes: {a: {kind: "agent_loop", prompt: "go"}},
+      budgets: {max_nodes: 0},
+      promotion_policy: {min_pass_rate: 1.5, shadow_runs_required: -1},
+    },
+  )
+  const bad_codes = codes_of(bad_policy)
+  harness.stdio.println(contains(bad_codes, "budget_max_nodes"))
+  harness.stdio.println(contains(bad_codes, "promotion_invalid_pass_rate"))
+  harness.stdio.println(contains(bad_codes, "promotion_negative_shadow_runs"))
+  // Unreachable nodes are warnings, not errors.
+  const unreached = task_plan_validate(
+    {
+      schema_version: "1",
+      objective: "x",
+      entry: "a",
+      nodes: {a: {kind: "agent_loop", prompt: "go"}, orphan: {kind: "agent_loop", prompt: "noop"}},
+    },
+  )
+  harness.stdio.println(unreached.valid)
+  let orphan_warned = false
+  for warn in unreached.warnings {
+    if warn.code == "node_unreachable" && warn.path == "nodes.orphan" {
+      orphan_warned = true
+    }
+  }
+  harness.stdio.println(orphan_warned)
+  // Non-dict input never throws.
+  const weird = task_plan_validate("oops")
+  harness.stdio.println(weird.valid)
+  harness.stdio.println(codes_of(weird)[0])
+}

@@ -1,0 +1,13 @@
+pipeline default(harness: Harness) {
+  const catalog = harness.process.list_shells()
+  const default_shell = harness.process.default_shell()
+  const invocation = harness.process.shell_invocation(
+    {shell_id: default_shell?.id, command: "printf shell-contract"},
+  )
+  harness.stdio.println(len(catalog?.shells) > 0)
+  harness.stdio.println(catalog?.default_shell_id == default_shell?.id)
+  harness.stdio.println(invocation?.program == default_shell?.path)
+  harness.stdio.println(invocation?.args != nil)
+  const result = harness.process.run({program: invocation.program, args: invocation.args})
+  harness.stdio.println(result.stdout)
+}

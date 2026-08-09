@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/ast/bracket_balance.request.json",
+  "title": "ast.bracket_balance request",
+  "description": "Count unbalanced parentheses, square brackets, and braces in `source`, ignoring brackets inside string literals and comments. The `language` field selects comment syntax; only Python (`py`) switches to `#` line comments and disables `//` / `/* */`.",
+  "type": "object",
+  "properties": {
+    "source": {
+      "type": "string",
+      "description": "Full source text to scan."
+    },
+    "language": {
+      "type": "string",
+      "description": "Canonical language name. Optional; defaults to brace-language comment syntax (`//`, `/* */`)."
+    }
+  },
+  "required": ["source"],
+  "additionalProperties": false
+}

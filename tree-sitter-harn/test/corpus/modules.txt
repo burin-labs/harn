@@ -1,0 +1,402 @@
+==================
+Generic Interface Where Bounds
+==================
+
+interface Sink<in T> {
+  fn accept(value: T) -> nil
+}
+
+interface Debuggable {
+  fn debug() -> string
+}
+
+fn drain<S>(sink: S) where S: Sink<int> + Debuggable {
+  return sink
+}
+
+---
+
+(source_file
+  (interface_declaration
+    name: (identifier)
+    (generic_params
+      (generic_param
+        (identifier)))
+    (interface_method
+      name: (identifier)
+      (parameter_list
+        (typed_parameter
+          name: (identifier)
+          type: (type_annotation
+            (identifier))))
+      (type_annotation
+        (identifier))))
+  (interface_declaration
+    name: (identifier)
+    (interface_method
+      name: (identifier)
+      (type_annotation
+        (identifier))))
+  (fn_declaration
+    name: (identifier)
+    (generic_params
+      (generic_param
+        (identifier)))
+    (parameter_list
+      (typed_parameter
+        name: (identifier)
+        type: (type_annotation
+          (identifier))))
+    (where_clause
+      (identifier)
+      (type_annotation
+        (identifier)
+        (type_annotation
+          (identifier)))
+      (type_annotation
+        (identifier)))
+    body: (block
+      (return_statement
+        (identifier)))))
+
+==================
+Import And Loop
+==================
+
+import { helper } from "lib/helpers"
+
+pipeline build() {
+  let items = [1, 2, 3]
+  for item in items {
+    log(item)
+  }
+}
+
+---
+
+(source_file
+  (import_declaration
+    (identifier)
+    (string_literal
+      (string_delimiter)
+      (string_content)
+      (string_delimiter)))
+  (pipeline_declaration
+    name: (identifier)
+    (block
+      (let_binding
+        name: (identifier)
+        value: (list_literal
+          (integer_literal)
+          (integer_literal)
+          (integer_literal)))
+      (for_statement
+        variable: (identifier)
+        iterable: (identifier)
+        body: (block
+          (expression_statement
+            (call_expression
+              function: (identifier)
+              (argument_list
+                (identifier)))))))))
+
+==================
+Variance Markers
+==================
+
+type Reader<out T> = T
+
+interface Sink<in T> {
+  fn accept(value: T) -> int
+}
+
+fn map<in A, out B>(value: A) -> B {
+  return value
+}
+
+---
+
+(source_file
+  (type_declaration
+    name: (identifier)
+    (generic_params
+      (generic_param
+        (identifier)))
+    type: (type_annotation
+      (identifier)))
+  (interface_declaration
+    name: (identifier)
+    (generic_params
+      (generic_param
+        (identifier)))
+    (interface_method
+      name: (identifier)
+      (parameter_list
+        (typed_parameter
+          name: (identifier)
+          type: (type_annotation
+            (identifier))))
+      (type_annotation
+        (identifier))))
+  (fn_declaration
+    name: (identifier)
+    (generic_params
+      (generic_param
+        (identifier))
+      (generic_param
+        (identifier)))
+    (parameter_list
+      (typed_parameter
+        name: (identifier)
+        type: (type_annotation
+          (identifier))))
+    (type_annotation
+      (identifier))
+    body: (block
+      (return_statement
+        (identifier)))))
+
+==================
+Import With Trailing Comma
+==================
+
+import {
+  helper,
+  render,
+} from "lib/helpers"
+
+---
+
+(source_file
+  (import_declaration
+    (identifier)
+    (identifier)
+    (string_literal
+      (string_delimiter)
+      (string_content)
+      (string_delimiter))))
+
+==================
+Public Wildcard Re-Export
+==================
+
+pub import "lib/shared"
+
+---
+
+(source_file
+  (import_declaration
+    (string_literal
+      (string_delimiter)
+      (string_content)
+      (string_delimiter))))
+
+==================
+Namespace Import
+==================
+
+import * as helpers from "lib/helpers"
+
+---
+
+(source_file
+  (import_declaration
+    alias: (identifier)
+    (string_literal
+      (string_delimiter)
+      (string_content)
+      (string_delimiter))))
+
+==================
+Public Namespace Re-Export
+==================
+
+pub import * as helpers from "lib/helpers"
+
+---
+
+(source_file
+  (import_declaration
+    alias: (identifier)
+    (string_literal
+      (string_delimiter)
+      (string_content)
+      (string_delimiter))))
+
+==================
+Public Selective Re-Export
+==================
+
+pub import { greet, add } from "lib/helpers"
+
+---
+
+(source_file
+  (import_declaration
+    (identifier)
+    (identifier)
+    (string_literal
+      (string_delimiter)
+      (string_content)
+      (string_delimiter))))
+
+==================
+Scoped Selective Import
+==================
+
+pub import std::personas::prelude::{verify_then_act, summarize}
+
+---
+
+(source_file
+  (import_declaration
+    path: (scoped_import_path)
+    (identifier)
+    (identifier)))
+
+==================
+Public And Generic Declarations
+==================
+
+pub pipeline build(task) extends base {
+  return task
+}
+
+pub enum Result {
+  Ok(value: string),
+  Err(message: string, code: int),
+}
+
+pub struct Config {
+  host: string
+  port?: int
+}
+
+interface Repository<T> {
+  fn get(id: string) -> T
+  fn put<U>(id: string, value: U) -> U
+}
+
+---
+
+(source_file
+  (pipeline_declaration
+    name: (identifier)
+    (parameter_list
+      (typed_parameter
+        name: (identifier)))
+    parent: (identifier)
+    (block
+      (return_statement
+        (identifier))))
+  (enum_declaration
+    name: (identifier)
+    (enum_variant
+      name: (identifier)
+      (parameter_list
+        (typed_parameter
+          name: (identifier)
+          type: (type_annotation
+            (identifier)))))
+    (enum_variant
+      name: (identifier)
+      (parameter_list
+        (typed_parameter
+          name: (identifier)
+          type: (type_annotation
+            (identifier)))
+        (typed_parameter
+          name: (identifier)
+          type: (type_annotation
+            (identifier))))))
+  (struct_declaration
+    name: (identifier)
+    (struct_field
+      name: (identifier)
+      type: (type_annotation
+        (identifier)))
+    (struct_field
+      name: (identifier)
+      type: (type_annotation
+        (identifier))))
+  (interface_declaration
+    name: (identifier)
+    (generic_params
+      (generic_param
+        (identifier)))
+    (interface_method
+      name: (identifier)
+      (parameter_list
+        (typed_parameter
+          name: (identifier)
+          type: (type_annotation
+            (identifier))))
+      (type_annotation
+        (identifier)))
+    (interface_method
+      name: (identifier)
+      (generic_params
+        (generic_param
+          (identifier)))
+      (parameter_list
+        (typed_parameter
+          name: (identifier)
+          type: (type_annotation
+            (identifier)))
+        (typed_parameter
+          name: (identifier)
+          type: (type_annotation
+            (identifier))))
+      (type_annotation
+        (identifier)))))
+
+==================
+Public Type Alias
+==================
+
+pub type SmartTarget = {name: string, score: int}
+
+type Private = int
+
+---
+
+(source_file
+  (type_declaration
+    name: (identifier)
+    type: (type_annotation
+      (shape_type
+        (shape_field
+          name: (identifier)
+          type: (type_annotation
+            (identifier)))
+        (shape_field
+          name: (identifier)
+          type: (type_annotation
+            (identifier))))))
+  (type_declaration
+    name: (identifier)
+    type: (type_annotation
+      (identifier))))
+
+==================
+Public const and let bindings
+==================
+
+pub const MAX = 3
+
+pub let seed = 7
+
+const private_c = 9
+
+---
+
+(source_file
+  (const_binding
+    name: (identifier)
+    value: (integer_literal))
+  (let_binding
+    name: (identifier)
+    value: (integer_literal))
+  (const_binding
+    name: (identifier)
+    value: (integer_literal)))

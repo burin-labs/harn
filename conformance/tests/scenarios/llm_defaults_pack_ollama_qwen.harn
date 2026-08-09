@@ -1,0 +1,13 @@
+// pack_for(qwen3:8b, reasoning_policy="off") returns canonical disabled
+// thinking; the Ollama adapter owns its eventual /no_think representation.
+import { pack_for } from "std/llm/defaults"
+
+pipeline test(harness: Harness, task) {
+  const r = pack_for(harness.agent, harness.llm, {model: "qwen3:8b", reasoning_policy: "off"})
+  assert_eq(r.provider, "ollama")
+  assert_eq(r.thinking.mode, "disabled")
+  // No provider-wire reasoning keys escape the canonical policy boundary.
+  assert_eq(r.has("effort"), false)
+  assert_eq(r.has("thinkingBudget"), false)
+  harness.stdio.log("llm_defaults_pack_ollama_qwen passed")
+}

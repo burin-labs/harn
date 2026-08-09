@@ -1,0 +1,34 @@
+/**
+ * PL-07: a pipeline that submits pool work and returns without draining
+ * should surface those tasks in `harness.unsettled_state()` so on_finish
+ * presets (drain, abandon, handoff) can act on them.
+ *
+ * Pool work shows up under the dedicated `pool_pending_tasks` bucket
+ * with one entry per non-terminal task (queued + running).
+ */
+import { pool_create } from "std/lifecycle/pool"
+
+pipeline default(harness: Harness) {
+  const gate = harness.runtime.channel(nil, 1)
+  const pool = pool_create(harness.agent, {name: "unsettled-integration", max_concurrent: 1})
+  // One task occupies the slot (parked on `gate`), two more sit in the
+  // queue. None reach a terminal state before on_finish runs.
+  const _running = pool.submit(
+    { ->
+      harness.runtime.receive(gate)
+      return "done"
+    },
+  )
+  const _queued_a = pool.submit({ -> "a" }, {priority: 5})
+  const _queued_b = pool.submit({ -> "b" }, {priority: 10})
+  harness.agent.pipeline_on_finish(
+    { harness, return_value ->
+      const state = harness.unsettled_state()
+      const pending = state?.pool_pending_tasks ?? []
+      harness.stdio.println("pool_pending=" + to_string(len(pending)))
+      harness.runtime.send(gate, "go")
+      return return_value
+    },
+  )
+  return "ok"
+}

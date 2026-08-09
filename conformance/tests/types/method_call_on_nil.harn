@@ -1,0 +1,6 @@
+// Calling a method on a value statically known to be `nil` fails at
+// runtime; the checker flags the receiver and points at `?.m(…)`.
+pipeline default(harness: Harness, _) {
+  const x: nil = nil
+  harness.stdio.println(x.foo())
+}

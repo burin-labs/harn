@@ -1,0 +1,10 @@
+resume_control=allow
+cancel_control=allow
+observed=2
+observed_resume=1
+observed_cancel=1
+receipt_status=recorded
+audit_count=1
+audit_kind=drain_decision
+audit_action=handoff
+audit_item_id=worker://triage/44

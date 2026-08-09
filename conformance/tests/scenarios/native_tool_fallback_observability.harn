@@ -1,0 +1,79 @@
+import { agent_loop } from "std/agent/loop"
+import { llm_text, with_llm_script } from "std/testing"
+
+fn tools() {
+  let registry = tool_registry()
+  registry = tool_define(
+    registry,
+    "read",
+    "Read a file",
+    {
+      handler: { args -> "read:" + args.path },
+      parameters: {path: {type: "string", description: "Path to read"}},
+      returns: {type: "string"},
+    },
+  )
+  return registry
+}
+
+pipeline default(harness: Harness) {
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text("<tool_call>\nread({ path: \"src/lib.rs\" })\n</tool_call>"),
+      llm_text("<tool_call>\nread({ path: \"src/lib.rs\" })\n</tool_call>"),
+    ],
+    { ->
+      const fallback = agent_loop(
+        harness,
+        "Inspect the repo",
+        "You are helpful",
+        {
+          provider: "mock",
+          tools: tools(),
+          tool_format: "native",
+          native_tool_fallback: "allow_once",
+          loop_until_done: true,
+          max_iterations: 2,
+        },
+      )
+      harness.stdio.println(fallback?.trace?.native_text_tool_fallbacks == 2)
+      harness.stdio.println(fallback?.trace?.native_text_tool_fallback_rejections == 1)
+      const fallback_events = transcript_events_by_kind(
+        fallback?.transcript,
+        "native_tool_fallback",
+      )
+      harness.stdio.println(len(fallback_events) == 2)
+      harness.stdio.println(fallback_events[0]?.metadata?.accepted)
+      harness.stdio.println(!fallback_events[1]?.metadata?.accepted)
+    },
+  )
+  // The built-in empty-completion retry applies to provider-shaped routes
+  // only. The mock provider replays scripted turns deterministically, so the
+  // thrown empty-completion shape surfaces on the first attempt with no
+  // silent retry (pre-v0.10, `llm_retries` could opt mock into a budget).
+  with_llm_script(
+    harness.llm,
+    [
+      {
+        error: {
+          category: "server_error",
+          message:
+            "openai-compatible model mock reported completion_tokens=1 but delivered no content, reasoning, or tool calls",
+        },
+      },
+      llm_text("<done>##DONE##</done>"),
+    ],
+    { ->
+      const surfaced = agent_loop(
+        harness,
+        "Finish the task",
+        "You are helpful",
+        {provider: "mock", loop_until_done: true, max_iterations: 1},
+      )
+      harness.stdio.println(surfaced.status)
+      harness.stdio.println(surfaced?.trace?.empty_completion_retries == 0)
+      harness.stdio.println(len(harness.llm.mock_calls()) == 1)
+    },
+  )
+}

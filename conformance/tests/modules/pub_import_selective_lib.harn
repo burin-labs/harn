@@ -1,0 +1,11 @@
+pub fn alpha() {
+  return "alpha"
+}
+
+pub fn beta() {
+  return "beta"
+}
+
+pub fn _hidden() {
+  return "hidden"
+}

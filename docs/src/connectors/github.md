@@ -1,0 +1,68 @@
+# GitHub connector
+
+GitHub provider behavior lives in the pure-Harn
+[`harn-github-connector`](https://github.com/burin-labs/harn-github-connector)
+package. Harn core keeps the shared trigger envelope, webhook signature
+primitives, inbox/dedupe path, and provider schema metadata; the connector
+package owns GitHub-specific normalization, outbound calls, fixtures, and
+release cadence.
+
+## Install
+
+```sh
+harn add github.com/burin-labs/harn-github-connector@v0.2.0
+harn package verify . --provider github
+```
+
+Wire the package through the provider manifest entry:
+
+```toml
+[[providers]]
+id = "github"
+connector = { harn = "harn-github-connector" }
+
+[[triggers]]
+id = "github-prs"
+kind = "webhook"
+provider = "github"
+match = { path = "/hooks/github", events = ["pull_request.opened"] }
+handler = "handlers::on_github"
+dedupe_key = "event.dedupe_key"
+secrets = { signing_secret = "github/webhook-secret" }
+```
+
+## Runtime contract
+
+The package verifies GitHub webhook signatures, normalizes GitHub delivery
+headers into `TriggerEvent`, and exposes outbound GitHub App calls through its
+connector exports. The core runtime treats those exports like any other
+connector contract v1 package.
+
+Use the generic `webhook` provider only for forge-agnostic intake. Use
+`provider = "github"` with the package above when handlers need GitHub event
+families such as `issues`, `pull_request`, `issue_comment`,
+`pull_request_review`, `push`, `workflow_run`, `deployment_status`,
+`check_run`, `check_suite`, `status`, `merge_group`, `installation`, or
+`installation_repositories`.
+
+For preview-environment workflows that should also work with GitLab merge
+requests and Gitea pull requests, normalize GitHub `pull_request` webhooks
+through `std/connectors/github::forge_pull_request_event(...)` or the shared
+`std/connectors/shared::git_forge_pull_request_event("github", ...)`. Connector
+packages can publish the returned `GitForgePullRequestEvent` to
+`git_forge_pull_request_topic()` and use
+`git_forge_writeback_request(event, body)` for provider-independent status
+comments.
+
+## Verification
+
+```sh
+harn connector check .
+harn package verify . --provider github
+```
+
+For local development against this repository's CLI:
+
+```sh
+cargo run --quiet --bin harn -- package verify /path/to/harn-github-connector --provider github
+```

@@ -1,0 +1,36 @@
+import { debate } from "std/llm/ensemble"
+import { llm_call_count, llm_text, with_llm_script } from "std/testing"
+
+pipeline default(harness: Harness) {
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text("Paris is the capital of France."),
+      llm_text("The answer is Paris, France."),
+      llm_text("Paris is the capital of France."),
+      llm_text("The answer is Paris, France."),
+      llm_text("Paris is the capital of France."),
+      llm_text("The answer is Paris, France."),
+      llm_text("Paris is the capital of France."),
+      llm_text("The answer is Paris, France."),
+    ],
+    { ->
+      const result = debate(
+        harness.llm,
+        harness.obs,
+        {
+          prompt: "What is the capital of France?",
+          debaters: ["alpha", "beta"],
+          n_rounds: 4,
+          provider: "mock",
+        },
+      )
+      harness.stdio.println(result.completed_rounds)
+      harness.stdio.println(result.stopped_early)
+      harness.stdio.println(result.stop_reason == nil)
+      harness.stdio.println(llm_call_count(harness.llm))
+      harness.stdio.println(len(result.stability))
+      harness.stdio.println(result.stability[0].stable)
+    },
+  )
+}

@@ -1,0 +1,7 @@
+calls=18
+unknown=5
+total=$0.121200
+known=$0.121200
+rows=3
+top=claude-sonnet-4-20250514
+top_calls=3

@@ -1,0 +1,529 @@
+==================
+Fn Expression Return Type
+==================
+
+pipeline test() {
+  let f = fn(name: string) -> string {
+    return name
+  }
+}
+
+---
+
+(source_file
+  (pipeline_declaration
+    name: (identifier)
+    (block
+      (let_binding
+        name: (identifier)
+        value: (fn_expression
+          (parameter_list
+            (typed_parameter
+              name: (identifier)
+              type: (type_annotation
+                (identifier))))
+          return_type: (type_annotation
+            (identifier))
+          body: (block
+            (return_statement
+              (identifier))))))))
+
+==================
+Const Keyword Property And Long Durations
+==================
+
+pipeline test() {
+  const wait = 1d
+  log(config.const)
+  sleep(2w)
+}
+
+---
+
+(source_file
+  (pipeline_declaration
+    name: (identifier)
+    (block
+      (const_binding
+        name: (identifier)
+        value: (duration_literal))
+      (expression_statement
+        (call_expression
+          function: (identifier)
+          (argument_list
+            (property_access
+              object: (identifier)
+              property: (keyword_identifier)))))
+      (expression_statement
+        (call_expression
+          function: (identifier)
+          (argument_list
+            (duration_literal)))))))
+
+==================
+Generic Call Type Arguments
+==================
+
+pipeline test(task) {
+  let mapped: [int] = map<int, string>([1], label)
+}
+
+---
+
+(source_file
+  (pipeline_declaration
+    name: (identifier)
+    (parameter_list
+      (typed_parameter
+        name: (identifier)))
+    (block
+      (let_binding
+        name: (identifier)
+        type: (type_annotation
+          (type_annotation
+            (identifier)))
+        value: (generic_call_expression
+          function: (identifier)
+          type_arguments: (type_arguments
+            (type_annotation
+              (identifier))
+            (type_annotation
+              (identifier)))
+          (argument_list
+            (list_literal
+              (integer_literal))
+            (identifier)))))))
+
+==================
+Binding Pattern Defaults
+==================
+
+pipeline test() {
+  const {tool_name = "run", kind = "execute", raw_input = {}} = fixture ?? {}
+  let [first = 1, second] = items
+  var y = 0
+}
+
+---
+
+(source_file
+  (pipeline_declaration
+    name: (identifier)
+    (block
+      (const_binding
+        name: (dict_pattern
+          (dict_pattern_field
+            (identifier)
+            (string_literal
+              (string_delimiter)
+              (string_content)
+              (string_delimiter)))
+          (dict_pattern_field
+            (identifier)
+            (string_literal
+              (string_delimiter)
+              (string_content)
+              (string_delimiter)))
+          (dict_pattern_field
+            (identifier)
+            (dict_literal)))
+        value: (nil_coalescing_expression
+          (identifier)
+          (dict_literal)))
+      (let_binding
+        name: (list_pattern
+          (list_pattern_element
+            (identifier)
+            (integer_literal))
+          (list_pattern_element
+            (identifier)))
+        value: (identifier))
+      (var_binding
+        name: (identifier)
+        value: (integer_literal)))))
+
+==================
+Ternary List Branches
+==================
+
+pipeline test() {
+  let args = repo ? ["--repo", repo] : []
+  let selected = repo ? ["--repo", repo][0] : "none"
+}
+
+---
+
+(source_file
+  (pipeline_declaration
+    name: (identifier)
+    (block
+      (let_binding
+        name: (identifier)
+        value: (ternary_expression
+          (identifier)
+          (list_literal
+            (string_literal
+              (string_delimiter)
+              (string_content)
+              (string_delimiter))
+            (identifier))
+          (list_literal)))
+      (let_binding
+        name: (identifier)
+        value: (ternary_expression
+          (identifier)
+          (subscript_expression
+            object: (list_literal
+              (string_literal
+                (string_delimiter)
+                (string_content)
+                (string_delimiter))
+              (identifier))
+            (integer_literal))
+          (string_literal
+            (string_delimiter)
+            (string_content)
+            (string_delimiter)))))))
+
+==================
+Optional Bracket Subscript
+==================
+
+pipeline test() {
+  let content_type = headers?.["content-type"]
+  let first = items?.[0]
+}
+
+---
+
+(source_file
+  (pipeline_declaration
+    name: (identifier)
+    (block
+      (let_binding
+        name: (identifier)
+        value: (subscript_expression
+          object: (identifier)
+          (string_literal
+            (string_delimiter)
+            (string_content)
+            (string_delimiter))))
+      (let_binding
+        name: (identifier)
+        value: (subscript_expression
+          object: (identifier)
+          (integer_literal))))))
+
+==================
+Comparison With Identifier LHS
+==================
+
+pipeline test(task) {
+  var i = 0
+  if i < 5 {
+    log(i)
+  }
+  while i < 10 {
+    i = i + 1
+  }
+  log(i.size < 5)
+  log((i) < 5)
+}
+
+---
+
+(source_file
+  (pipeline_declaration
+    name: (identifier)
+    (parameter_list
+      (typed_parameter
+        name: (identifier)))
+    (block
+      (var_binding
+        name: (identifier)
+        value: (integer_literal))
+      (if_statement
+        condition: (binary_expression
+          (identifier)
+          (integer_literal))
+        consequence: (block
+          (expression_statement
+            (call_expression
+              function: (identifier)
+              (argument_list
+                (identifier))))))
+      (while_statement
+        condition: (binary_expression
+          (identifier)
+          (integer_literal))
+        body: (block
+          (assignment
+            target: (identifier)
+            value: (binary_expression
+              (identifier)
+              (integer_literal)))))
+      (expression_statement
+        (call_expression
+          function: (identifier)
+          (argument_list
+            (binary_expression
+              (property_access
+                object: (identifier)
+                property: (identifier))
+              (integer_literal)))))
+      (expression_statement
+        (call_expression
+          function: (identifier)
+          (argument_list
+            (binary_expression
+              (parenthesized_expression
+                (identifier))
+              (integer_literal))))))))
+
+==================
+Exponentiation Precedence
+==================
+
+pipeline test(task) {
+  let x = a * b ** c
+  let y = (a ** b) ** c
+}
+
+---
+
+(source_file
+  (pipeline_declaration
+    name: (identifier)
+    (parameter_list
+      (typed_parameter
+        name: (identifier)))
+    (block
+      (let_binding
+        name: (identifier)
+        value: (binary_expression
+          (identifier)
+          (binary_expression
+            (identifier)
+            (identifier))))
+      (let_binding
+        name: (identifier)
+        value: (binary_expression
+          (parenthesized_expression
+            (binary_expression
+              (identifier)
+              (identifier)))
+          (identifier))))))
+
+==================
+Unary Minus Binds Looser Than Exponentiation
+==================
+
+pipeline test(task) {
+  let a = -2 ** 2
+  let b = 2 ** -3
+}
+
+---
+
+(source_file
+  (pipeline_declaration
+    name: (identifier)
+    (parameter_list
+      (typed_parameter
+        name: (identifier)))
+    (block
+      (let_binding
+        name: (identifier)
+        value: (unary_expression
+          (binary_expression
+            (integer_literal)
+            (integer_literal))))
+      (let_binding
+        name: (identifier)
+        value: (binary_expression
+          (integer_literal)
+          (unary_expression
+            (integer_literal)))))))
+
+==================
+Nil Coalescing Versus Arithmetic
+==================
+
+pipeline test(task) {
+  let c = x ?? y + z
+  let d = x ?? y * z
+}
+
+---
+
+(source_file
+  (pipeline_declaration
+    name: (identifier)
+    (parameter_list
+      (typed_parameter
+        name: (identifier)))
+    (block
+      (let_binding
+        name: (identifier)
+        value: (binary_expression
+          (nil_coalescing_expression
+            (identifier)
+            (identifier))
+          (identifier)))
+      (let_binding
+        name: (identifier)
+        value: (nil_coalescing_expression
+          (identifier)
+          (binary_expression
+            (identifier)
+            (identifier)))))))
+
+==================
+Backslash Continued Expression
+==================
+
+pipeline test(task) {
+  let ok = left \
+    == right
+}
+
+---
+
+(source_file
+  (pipeline_declaration
+    name: (identifier)
+    (parameter_list
+      (typed_parameter
+        name: (identifier)))
+    (block
+      (let_binding
+        name: (identifier)
+        value: (binary_expression
+          (identifier)
+          (identifier))))))
+
+==================
+Line Leading Infix Operators
+==================
+
+pipeline test(task) {
+  let fallback = nil
+    ?? "fallback"
+  let same = 1
+    == 1
+  let different = 1
+    != 2
+  let larger = 2
+    >= 1
+}
+
+---
+
+(source_file
+  (pipeline_declaration
+    name: (identifier)
+    (parameter_list
+      (typed_parameter
+        name: (identifier)))
+    (block
+      (let_binding
+        name: (identifier)
+        value: (nil_coalescing_expression
+          (nil)
+          (string_literal
+            (string_delimiter)
+            (string_content)
+            (string_delimiter))))
+      (let_binding
+        name: (identifier)
+        value: (binary_expression
+          (integer_literal)
+          (integer_literal)))
+      (let_binding
+        name: (identifier)
+        value: (binary_expression
+          (integer_literal)
+          (integer_literal)))
+      (let_binding
+        name: (identifier)
+        value: (binary_expression
+          (integer_literal)
+          (integer_literal))))))
+
+==================
+Stream Function Emit
+==================
+
+gen fn numbers() -> Stream<int> {
+  emit 1
+  emit 2
+}
+
+---
+
+(source_file
+  (fn_declaration
+    name: (identifier)
+    (type_annotation
+      (identifier)
+      (type_annotation
+        (identifier)))
+    body: (block
+      (emit_expression
+        (integer_literal))
+      (emit_expression
+        (integer_literal)))))
+
+==================
+Struct Construct In Return Expression
+==================
+
+struct Basket {
+  items: list<int>
+}
+
+impl Basket {
+  fn push(self, item: int) -> Basket {
+    return Basket {items: self.items.push(item)}
+  }
+}
+
+---
+
+(source_file
+  (struct_declaration
+    name: (identifier)
+    (struct_field
+      name: (identifier)
+      type: (type_annotation
+        (identifier)
+        (type_annotation
+          (identifier)))))
+  (impl_block
+    type_name: (identifier)
+    (fn_declaration
+      name: (identifier)
+      (parameter_list
+        (typed_parameter
+          name: (identifier))
+        (typed_parameter
+          name: (identifier)
+          type: (type_annotation
+            (identifier))))
+      (type_annotation
+        (identifier))
+      body: (block
+        (return_statement
+          (struct_construct
+            type_name: (identifier)
+            fields: (dict_literal
+              (dict_entry
+                key: (identifier)
+                value: (call_expression
+                  function: (property_access
+                    object: (property_access
+                      object: (identifier)
+                      property: (identifier))
+                    property: (identifier))
+                  (argument_list
+                    (identifier)))))))))))

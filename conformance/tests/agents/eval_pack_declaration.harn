@@ -1,0 +1,50 @@
+pipeline main(harness: Harness) {
+  const dir = path_join(harness.fs.workspace_temp_dir(), "harn_eval_pack_declaration")
+  harness.fs.mkdir(dir)
+  const run = run_record(
+    {
+      _type: "run_record",
+      id: "candidate",
+      workflow_id: "wf",
+      workflow_name: "demo",
+      task: "demo",
+      status: "completed",
+      started_at: "1",
+      stages: [
+        {
+          id: "stage_1",
+          node_id: "act",
+          kind: "stage",
+          status: "completed",
+          outcome: "success",
+          started_at: "1",
+        },
+      ],
+    },
+  )
+  harness.fs.run_record_save(run, path_join(dir, "candidate.json"))
+  eval_pack pack "regression-pack" {
+    base_dir: dir
+    baseline: "candidate.json"
+    fixtures: [{id: "candidate-run", kind: "run-record", path: "candidate.json"}]
+    rubrics: [
+      {
+        id: "status",
+        kind: "deterministic",
+        assertions: [{kind: "run-status", expected: "completed"}],
+      },
+    ]
+    cases: [{id: "case_1", run: "candidate-run", rubrics: ["status"]}]
+    for case in cases {
+      harness.stdio.println(case.id)
+    }
+    summarize {
+      const report = harness.runtime.eval_pack_run(pack)
+      harness.stdio.println(report.pass)
+      harness.stdio.println(report.total)
+      harness.stdio.println(report.cases[0].comparison.identical)
+    }
+  }
+  harness.stdio.println(pack.id)
+  harness.stdio.println(pack.version)
+}

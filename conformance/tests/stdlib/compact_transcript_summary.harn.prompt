@@ -1,0 +1,5 @@
+Compact prompt from asset.
+Archived count: {{ archived_count }}
+
+Conversation:
+{{ formatted_messages }}

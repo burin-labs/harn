@@ -1,0 +1,65 @@
+import { agent_loop } from "std/agent/loop"
+import { llm_text, with_llm_script } from "std/testing"
+
+/**
+ * agent_loop reports a canonical ACP `stopReason` (end_turn / max_tokens
+ * / max_turn_requests / refusal) on its result dict via `acp_stop_reason`.
+ * The ACP adapter consumes this field through `bridge.take_prompt_stop_reason()`
+ * to fill `session/prompt`'s `stopReason` per the protocol at
+ * https://agentclientprotocol.com/protocol/prompt-turn.
+ */
+pipeline default(harness: Harness) {
+  // Natural completion → end_turn.
+  with_llm_script(
+    harness.llm,
+    [llm_text("all done")],
+    { ->
+      const normal = agent_loop(harness, "hi", nil, {provider: "mock"})
+      harness.stdio.println(normal.acp_stop_reason)
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [{text: "truncated", stop_reason: "max_tokens"}],
+    { ->
+      const truncated = agent_loop(harness, "hi", nil, {provider: "mock"})
+      harness.stdio.println(truncated.acp_stop_reason)
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [{text: "truncated", stop_reason: "length"}],
+    { ->
+      const length = agent_loop(harness, "hi", nil, {provider: "mock"})
+      harness.stdio.println(length.acp_stop_reason)
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [{text: "I cannot assist with that.", stop_reason: "refusal"}],
+    { ->
+      const refused = agent_loop(harness, "hi", nil, {provider: "mock"})
+      harness.stdio.println(refused.acp_stop_reason)
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [llm_text("still working"), llm_text("still working")],
+    { ->
+      const capped = agent_loop(
+        harness,
+        "hi",
+        nil,
+        {provider: "mock", loop_until_done: true, max_iterations: 1},
+      )
+      harness.stdio.println(capped.acp_stop_reason)
+    },
+  )
+}
+// Provider truncated the response → max_tokens.
+// OpenAI-style finish_reason "length" maps to the same canonical value.
+// Anthropic refusal → refusal.
+// Iteration cap → max_turn_requests. Persistent + text-only keeps the
+// loop going until max_iterations, which the loop reports as
+// budget_exhausted; finalize maps that to max_turn_requests when the
+// iteration count matches the configured cap.

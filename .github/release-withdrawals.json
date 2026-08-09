@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "releases": [
+    {
+      "version": "0.10.51",
+      "tag_commit": "d55201f77f196de7c311d69d6d9fee122ab620fe",
+      "distribution_version": "0.10.50",
+      "replacement": "0.10.52",
+      "reason": "invalid_tagged_candidate"
+    }
+  ]
+}

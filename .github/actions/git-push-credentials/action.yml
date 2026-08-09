@@ -1,0 +1,86 @@
+name: Git push credentials
+description: Authenticate git pushes through a credential helper, so a checkout can stay persist-credentials false.
+inputs:
+  token:
+    description: Token to authenticate as. Written to a 0600 file outside every checkout, never to a config value.
+    required: true
+  host:
+    description: Host the credential applies to.
+    required: false
+    default: github.com
+  username:
+    description: Username half of the credential. The default suits a GitHub App installation token.
+    required: false
+    default: x-access-token
+runs:
+  using: composite
+  steps:
+    # Every checkout in this ecosystem should set `persist-credentials: false`,
+    # including the ones that push. `persist-credentials: true` writes an
+    # `include.path` into `.git/config` pointing at a $RUNNER_TEMP file, and git
+    # reads that include on *every* invocation. A Harn sandbox jails reads to the
+    # workspace, so the include is unreadable there, and git treats an unreadable
+    # include as fatal rather than skipping it — which takes down each sandboxed
+    # `harn run` in the job before it does any work (harn#6259, harn#6276).
+    #
+    # A credential helper has the property the include lacks: git consults it
+    # only when a transport needs to authenticate, never while parsing config.
+    # So local git keeps working under the sandbox and pushes still authenticate,
+    # with no sandbox grant and no token on a path every git call has to read.
+    - shell: bash
+      env:
+        GIT_CREDENTIAL_TOKEN: ${{ inputs.token }}
+        GIT_CREDENTIAL_HOST: ${{ inputs.host }}
+        GIT_CREDENTIAL_USERNAME: ${{ inputs.username }}
+      run: |
+        set -euo pipefail
+
+        if [[ -z "$GIT_CREDENTIAL_TOKEN" ]]; then
+          echo "::error::git-push-credentials requires a non-empty token"
+          exit 1
+        fi
+
+        # $RUNNER_TEMP is outside every checkout, so the file cannot be picked up
+        # by a status check, an archive step, or a stray `git add -A`.
+        store_path="${RUNNER_TEMP}/git-credentials"
+        umask 077
+        touch "$store_path"
+        chmod 600 "$store_path"
+
+        # git-credential-store reads one URL per line, so repeated calls for
+        # different hosts accumulate instead of clobbering each other. Drop any
+        # prior line for this host first; the last writer for a host wins.
+        entry="https://${GIT_CREDENTIAL_USERNAME}:${GIT_CREDENTIAL_TOKEN}@${GIT_CREDENTIAL_HOST}"
+        remaining="$(grep -v "@${GIT_CREDENTIAL_HOST}\$" "$store_path" || true)"
+        printf '%s\n' "$remaining" | sed '/^$/d' > "$store_path"
+        printf '%s\n' "$entry" >> "$store_path"
+
+        # Global, not repository-scoped. Identity has to reach linked worktrees
+        # and every git subprocess the job spawns without depending on which
+        # config file a worktree happens to resolve.
+        git config --global credential.helper "store --file=${store_path}"
+
+        # Prove the credential resolves before the job spends work on something
+        # that ends in a failed push. `git credential fill` is the same lookup a
+        # push performs and needs no network.
+        #
+        # The empty `credential.helper` first clears the inherited helper list,
+        # so the only helper consulted is the one just written. Without that
+        # reset the check would pass on a credential from any other helper the
+        # machine happens to have — which a hosted runner does not have and a
+        # self-hosted one very well might, making this exactly the kind of proof
+        # that reports a state it never established.
+        #
+        # `git credential fill` writes the secret on stdout, so its output is
+        # matched against and never echoed. Terminal prompting is off, so an
+        # unresolved credential fails here instead of hanging the job.
+        if ! printf 'protocol=https\nhost=%s\n\n' "$GIT_CREDENTIAL_HOST" \
+          | GIT_TERMINAL_PROMPT=0 git \
+              -c credential.helper= \
+              -c credential.helper="store --file=${store_path}" \
+              credential fill 2>/dev/null \
+          | grep -qx "username=${GIT_CREDENTIAL_USERNAME}"; then
+          echo "::error::credential helper did not resolve a credential for ${GIT_CREDENTIAL_HOST}"
+          exit 1
+        fi
+        echo "git push credentials armed for ${GIT_CREDENTIAL_HOST} as ${GIT_CREDENTIAL_USERNAME}"

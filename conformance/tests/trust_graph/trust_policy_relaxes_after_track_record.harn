@@ -1,0 +1,43 @@
+import "std/trust"
+
+pipeline test(harness: Harness, task) {
+  const unique = to_string(to_int(harness.clock.timestamp())) + "-"
+    + to_string(
+    harness.random.range(100000, 999999),
+  )
+  const actor_id = "trust-policy-" + unique
+  record(
+    harness.runtime,
+    {
+      actor_id: actor_id,
+      action: "trust.promote",
+      approver: "maintainer-1",
+      outcome: "success",
+      trace_id: "trace-control-" + unique,
+      autonomy_tier_at_time: "act_with_approval",
+    },
+  )
+  let i = 0
+  while i < 10 {
+    record(
+      harness.runtime,
+      {
+        actor_id: actor_id,
+        action: "merge_pr",
+        approver: "maintainer-1",
+        outcome: "success",
+        trace_id: "trace-merge-" + to_string(i) + "-" + unique,
+        autonomy_tier_at_time: "act_with_approval",
+        evidence_refs: [{kind: "pull_request", id: to_string(i)}],
+      },
+    )
+    i = i + 1
+  }
+  const policy: CapabilityPolicy = policy_for(harness.runtime, actor_id)
+  const records: list<TrustGraphRecord> = query(
+    harness.runtime,
+    {actor_id: actor_id, action: "merge_pr"},
+  )
+  harness.stdio.println(len(records) == 10)
+  harness.stdio.println(policy.side_effect_level == "network")
+}

@@ -1,0 +1,34 @@
+import "std/agent/workers"
+import { llm_text, with_llm_script } from "std/testing"
+
+pipeline main(harness: Harness) {
+  with_llm_script(
+    harness.llm,
+    [llm_text("{\"answer\":\"ok\"}")],
+    { ->
+      const direct = sub_agent_run(
+        harness,
+        "Return machine-readable JSON.",
+        {provider: "mock", output: "json"},
+      )
+      harness.stdio.println(direct?.ok)
+      harness.stdio.println(direct?.summary == "{\"answer\":\"ok\"}")
+      harness.stdio.println(direct?.data?.answer == "ok")
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [llm_text("{\"answer\":\"background\"}")],
+    { ->
+      const handle = sub_agent_run(
+        harness,
+        "Return machine-readable JSON in the background.",
+        {provider: "mock", output: "json", background: true},
+      )
+      const done = wait_agent(harness.agent, handle)
+      harness.stdio.println(done?.status == "completed")
+      harness.stdio.println(done?.result?.summary == "{\"answer\":\"background\"}")
+      harness.stdio.println(done?.result?.data?.answer == "background")
+    },
+  )
+}

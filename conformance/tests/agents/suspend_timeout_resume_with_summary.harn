@@ -1,0 +1,65 @@
+import "std/agent/workers"
+import { llm_text, with_llm_script } from "std/testing"
+
+/**
+ * S-11 (#1847): a timeout-conditioned suspension auto-resumes when
+ * the deadline elapses. With `on_timeout: "resume_with_summary"`
+ * (the default), the runtime fires a synthetic `auto_resume.timeout`
+ * trigger event, the loop resumes with `initiator: "timeout"`, and
+ * the worker drives to completion via the next mock LLM turn.
+ *
+ * The timeout is fired deterministically via `mock_time` +
+ * `advance_time`: the underlying `clock::sleep` honours the unified
+ * mock clock so no wall-clock sleep is involved. The trigger condition
+ * is required because timeout scheduling is keyed off the trigger
+ * registration (see `register_auto_resume_trigger`).
+ */
+pipeline main(harness: Harness) {
+  const _ = harness.testing.clock_set(1700000000000)
+  with_llm_script(
+    harness.llm,
+    [
+      {
+        tool_calls: [
+          {
+            id: "park_timeout",
+            name: "agent_await_resumption",
+            arguments: {
+              reason: "waiting on review",
+              conditions: {
+                trigger: {kind: "review.approved", provider: "github"},
+                timeout: {duration_minutes: 5, on_timeout: "resume_with_summary"},
+              },
+            },
+          },
+        ],
+      },
+      llm_text("resumed after timeout"),
+    ],
+    { ->
+      const handle = sub_agent_run(
+        harness,
+        "Park until the review timeout fires.",
+        {provider: "mock", background: true, tool_format: "native", max_iterations: 3},
+      )
+      const suspended = wait_agent(harness.agent, handle)
+      harness.stdio.println("status=" + suspended.status)
+      harness.stdio.println(
+        "has_auto_trigger=" + to_string(suspended?.suspension?.auto_resume_trigger != nil),
+      )
+      const _ = harness.testing.clock_advance(6 * 60 * 1000)
+      harness.runtime.yield_now()
+      harness.runtime.yield_now()
+      harness.runtime.yield_now()
+      const resumed = wait_agent(harness.agent, handle)
+      harness.stdio.println("post_timeout_status=" + resumed.status)
+      harness.stdio.println("has_transcript=" + to_string(resumed.has_transcript))
+      const _ = harness.testing.clock_reset()
+    },
+  )
+}
+// Advance the mock clock past the 5-minute timeout. The spawned
+// auto-resume timeout task wakes from `clock::sleep`, fires the
+// synthetic auto_resume.timeout event, and the agent loop resumes.
+// Yield so the timeout task can run, dispatch, and the resumed
+// worker can complete its next turn.

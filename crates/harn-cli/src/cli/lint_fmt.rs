@@ -1,0 +1,67 @@
+use clap::Args;
+
+#[derive(Debug, Args)]
+pub(crate) struct PathTargetsArgs {
+    /// Automatically apply safe fixes.
+    #[arg(long)]
+    pub fix: bool,
+    /// Force-enable the `require-file-header` rule (overrides harn.toml).
+    #[arg(long = "require-file-header")]
+    pub require_file_header: bool,
+    /// Require explicit parameter and return annotations on public functions
+    /// and pipelines.
+    #[arg(long = "require-public-api-types")]
+    pub require_public_api_types: bool,
+    /// Treat warnings as failures: exit non-zero when any file emits a lint
+    /// warning, not just an error. Overrides `[check] strict` in harn.toml.
+    #[arg(long)]
+    pub strict: bool,
+    /// Emit a structured `JsonEnvelope` report instead of human-readable output.
+    /// See `docs/src/cli-json-contract.md` for the envelope shape.
+    #[arg(long)]
+    pub json: bool,
+    /// Lint these files as privileged artifacts, so a call to a
+    /// `privileged_wire` builtin is sanctioned rather than a finding. Matches
+    /// `harn check --trusted-host-dispatch`; use it when the host serving
+    /// those operations is the one linting them.
+    #[arg(long = "trusted-host-dispatch")]
+    pub trusted_host_dispatch: bool,
+    /// Only enforce diagnostics that overlap lines added since this Git revision.
+    #[arg(
+        long = "changed-from",
+        value_name = "REV",
+        conflicts_with_all = ["fix", "targets"]
+    )]
+    pub changed_from: Option<String>,
+    /// Compare added lines through this Git revision. Defaults to HEAD.
+    #[arg(
+        long = "changed-to",
+        value_name = "REV",
+        requires = "changed_from",
+        conflicts_with = "targets"
+    )]
+    pub changed_to: Option<String>,
+    /// One or more .harn files or directories.
+    #[arg(required_unless_present = "changed_from")]
+    pub targets: Vec<String>,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct FmtArgs {
+    /// Check formatting without rewriting files.
+    #[arg(long)]
+    pub check: bool,
+    /// Emit a structured `JsonEnvelope` report instead of human-readable output.
+    #[arg(long)]
+    pub json: bool,
+    /// Maximum line width before wrapping. Overrides `[fmt] line_width` in harn.toml.
+    #[arg(long = "line-width")]
+    pub line_width: Option<usize>,
+    /// Total width of `// ----` separator bars. Defaults to line width minus indent.
+    /// Overrides `[fmt] separator_width`.
+    #[arg(long = "separator-width")]
+    pub separator_width: Option<usize>,
+    /// One or more .harn files or directories.
+    #[arg(required = true)]
+    pub targets: Vec<String>,
+}

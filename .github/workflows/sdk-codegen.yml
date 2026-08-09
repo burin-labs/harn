@@ -1,0 +1,73 @@
+name: SDK codegen
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/sdk-codegen.yml"
+      - "scripts/generate_sdk_clients.sh"
+      - "scripts/tests/generate_sdk_clients_test.sh"
+      - "spec/openapi.yaml"
+      - "spec/openapi.snapshot"
+      - "spec/openapi-sdk-surface.md"
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/sdk-codegen.yml"
+      - "scripts/generate_sdk_clients.sh"
+      - "scripts/tests/generate_sdk_clients_test.sh"
+      - "spec/openapi.yaml"
+      - "spec/openapi.snapshot"
+      - "spec/openapi-sdk-surface.md"
+  release:
+    types:
+      - published
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  generate:
+    name: Generate ${{ matrix.language }} SDK
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        language:
+          - python
+          - typescript
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Python
+        if: matrix.language == 'python'
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+
+      - name: Set up Node
+        if: matrix.language == 'typescript'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+
+      - name: Generate SDK client
+        run: |
+          scripts/generate_sdk_clients.sh \
+            --language "${{ matrix.language }}" \
+            --output-dir "${RUNNER_TEMP}/generated-sdks"
+
+      - name: Upload generated SDK artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: harn-sdk-${{ matrix.language }}-${{ github.sha }}
+          path: ${{ runner.temp }}/generated-sdks/${{ matrix.language }}
+          if-no-files-found: error
+          # Inspected by hand when SDK codegen drifts; no job downloads it.
+          # Declared at the current effective window rather than shortened.
+          retention-days: 30

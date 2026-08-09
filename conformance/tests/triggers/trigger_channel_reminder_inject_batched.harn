@@ -1,0 +1,68 @@
+import "std/triggers"
+
+/**
+ * CH-08 (#1879): when a `ReminderInject` (#1876) handler is paired with a
+ * batched (#1875) channel trigger, the dispatcher fires the inject
+ * exactly ONCE per batch dispatch — not once per constituent event. The
+ * three input emits coalesce into a single match invocation, which lands
+ * a single SystemReminder on the target session's transcript.
+ *
+ * Deterministic time control via `harness.testing.clock_set(...)` so the test never
+ * depends on wall-clock behavior to close the aggregation window.
+ */
+pipeline test(harness: Harness, task) {
+  harness.testing.clock_set(1000000)
+  const target_session = harness.agent.open("trigger-channel-reminder-batched")
+  harness.agent.reset(target_session)
+  const unique = to_string(harness.random.range(100000, 999999))
+  const _handle: TriggerHandle = harness.runtime.trigger_register(
+    {
+      id: "trigger-channel-reminder-batched-" + unique,
+      kind: "channel.emit",
+      provider: "channel",
+      autonomy_tier: "act_auto",
+      handler: ReminderInject(
+        {
+          target: target_session,
+          body:
+            "Batch {{ batch[0].provider_payload.payload.seq }}-{{ batch[1].provider_payload.payload.seq }}-{{ batch[2].provider_payload.payload.seq }} landed.",
+          tags: ["batched_reminder"],
+        },
+      ),
+      when: nil,
+      retry: nil,
+      match: {events: ["channel:ch.reminder.batched.input"]},
+      events: nil,
+      dedupe_key: nil,
+      filter: nil,
+      batch: {count: 3, window: "10m"},
+      budget: nil,
+      manifest_path: nil,
+      package_name: "conformance",
+    },
+  )
+  const _ = harness.channels.append("ch.reminder.batched.input", {seq: 1})
+  const _ = harness.channels.append("ch.reminder.batched.input", {seq: 2})
+  const before = transcript_events_by_kind(
+    harness.agent.snapshot(target_session),
+    "system_reminder",
+  )
+  harness.stdio.println("before-threshold:" + to_string(len(before)))
+  // Threshold-fire path: the third emit closes the batch and dispatches once.
+  const _ = harness.channels.append("ch.reminder.batched.input", {seq: 3})
+  const after = transcript_events_by_kind(harness.agent.snapshot(target_session), "system_reminder")
+  harness.stdio.println("after-threshold:" + to_string(len(after)))
+  harness.stdio.println(after[0].reminder.body)
+  harness.stdio.println(after[0].reminder.tags[0])
+  // Subsequent emits in a fresh batch generate a new inject — proves
+  // the batch counter resets cleanly after a fire.
+  const _ = harness.channels.append("ch.reminder.batched.input", {seq: 4})
+  const _ = harness.channels.append("ch.reminder.batched.input", {seq: 5})
+  const _ = harness.channels.append("ch.reminder.batched.input", {seq: 6})
+  const after_second = transcript_events_by_kind(
+    harness.agent.snapshot(target_session),
+    "system_reminder",
+  )
+  harness.stdio.println("after-second-batch:" + to_string(len(after_second)))
+  harness.testing.clock_reset()
+}

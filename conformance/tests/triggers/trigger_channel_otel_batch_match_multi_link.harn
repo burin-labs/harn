@@ -1,0 +1,79 @@
+import "std/triggers"
+
+/**
+ * CH-06 (#1877): for an aggregation/batched trigger the `ChannelMatch`
+ * span multi-links to ALL constituent `ChannelEmit` spans. The
+ * transcript match event also surfaces the batch summary with the full
+ * constituent event id list so downstream renderers can join the
+ * batched dispatch back to the emit timeline.
+ */
+fn handle_batch(harness: Harness, event) {
+  const batch_len = if event.batch == nil {
+    0
+  } else {
+    len(event.batch)
+  }
+  harness.channels.append("ch.otel.batch.fired", {batch_size: batch_len})
+}
+
+pipeline default(harness: Harness) {
+  harness.obs.enable_tracing(true)
+  const stream = harness.obs.event_log_subscribe({topic: "transcript.channel.lifecycle"})
+  const unique = to_string(to_int(harness.clock.timestamp())) + "-"
+    + to_string(
+    harness.random.range(100000, 999999),
+  )
+  const _ = harness.runtime.trigger_register(
+    {
+      id: "channel-otel-batch-" + unique,
+      kind: "channel.emit",
+      provider: "channel",
+      autonomy_tier: "act_auto",
+      handler: handle_batch,
+      when: nil,
+      retry: nil,
+      match: {events: ["channel:ch.otel.batch.input"]},
+      events: nil,
+      dedupe_key: nil,
+      filter: nil,
+      batch: {count: 3, window: "10m"},
+      budget: nil,
+      manifest_path: nil,
+      package_name: "conformance",
+    },
+  )
+  const _ = harness.channels.append("ch.otel.batch.input", {seq: 1})
+  const _ = harness.channels.append("ch.otel.batch.input", {seq: 2})
+  const _ = harness.channels.append("ch.otel.batch.input", {seq: 3})
+  // Drain emit + match lifecycle events. Three input emits land first,
+  // then the batched match, then the nested emit of `ch.otel.batch.fired`
+  // (with its own match event since no binding listens to it).
+  const first = stream.next().value
+  const second = stream.next().value
+  const third = stream.next().value
+  const fourth = stream.next().value
+  harness.stdio.println(first.kind)
+  harness.stdio.println(second.kind)
+  harness.stdio.println(third.kind)
+  harness.stdio.println(fourth.kind)
+  harness.stdio.println(fourth.payload.handler_kind)
+  harness.stdio.println(fourth.payload.batch.count)
+  harness.stdio.println(len(fourth.payload.batch.constituent_event_ids))
+  // Span check: match span must multi-link to every emit span.
+  const spans = harness.obs.trace_spans()
+  const emit_spans = spans.filter(
+    { s ->
+      s.kind == "channel_emit" && s.metadata.name_resolved == "tenant:default:ch.otel.batch.input"
+    },
+  )
+  const match_spans = spans.filter(
+    { s ->
+      s.kind == "channel_match" && s.name == "channel.match tenant:default:ch.otel.batch.input"
+    },
+  )
+  harness.stdio.println(len(emit_spans) >= 3)
+  harness.stdio.println(len(match_spans) >= 1)
+  const match_span = match_spans[0]
+  harness.stdio.println(len(match_span.links) >= 3)
+  harness.obs.enable_tracing(false)
+}

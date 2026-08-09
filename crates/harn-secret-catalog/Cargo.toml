@@ -1,0 +1,17 @@
+[package]
+name = "harn-secret-catalog"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Canonical high-confidence secret pattern catalog shared by the Harn runtime redaction/scan paths and downstream host consumers."
+
+# Intentionally zero-dependency: this crate is pure `&'static str` catalog data
+# so a fast-lane host crate (e.g. the Burin TUI's dependency-light `util`) can
+# share the single source of truth without pulling the Harn runtime. Consumers
+# bring their own regex engine to compile the `regex` field.
+
+[lints]
+workspace = true

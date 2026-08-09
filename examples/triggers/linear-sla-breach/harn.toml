@@ -1,0 +1,15 @@
+[package]
+name = "linear-sla-breach"
+
+[exports]
+handlers = "lib.harn"
+
+[[triggers]]
+id = "linear-sla-breach"
+kind = "cron"
+provider = "cron"
+match = { events = ["cron.tick"] }
+handler = "handlers::scan_for_sla_breaches"
+schedule = "*/30 * * * *"
+timezone = "UTC"
+budget = { daily_cost_usd = 2.00, max_concurrent = 1 }

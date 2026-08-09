@@ -1,0 +1,11 @@
+/**
+ * E4.1: the new `main(harness: Harness)` entrypoint convention is the
+ * hello-world for the explicit-capability handle. Sub-handles flow
+ * through field access (`harness.stdio`) and methods route to host
+ * implementations (`println` here is wired; the rest land in E4.2-E4.4).
+ */
+fn main(harness: Harness) {
+  harness.stdio.println("ok")
+  harness.stdio.print("partial ")
+  harness.stdio.println("line")
+}

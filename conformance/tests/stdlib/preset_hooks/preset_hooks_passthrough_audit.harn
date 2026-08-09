@@ -1,0 +1,33 @@
+import { preset_run_command, tool_hooks_mode_passthrough_only_audit } from "std/tool_hooks"
+
+/**
+ * preset_hooks_passthrough_audit (TH-07 #1900).
+ *
+ * Passthrough-only-audit mode: a registered rule fires but the wrapper
+ * lets the original command flow through to `inner` unchanged. The
+ * audit log captures a `tool_rule_warning` entry naming the rule and
+ * severity, and no `tool_rewritten` reminder is queued (passthrough
+ * does not mutate behaviour).
+ */
+pipeline default(harness: Harness) {
+  harness.obs.pipeline_lifecycle_audit_log_take()
+  const inner = { args -> {ok: true, ran: args.command} }
+  const wrapper = preset_run_command(
+    harness,
+    {stacks: ["python"], mode: tool_hooks_mode_passthrough_only_audit, inner: inner},
+  )
+  const result = wrapper({command: "find . -name '*.py'"})
+  harness.stdio.println(result.action)
+  harness.stdio.println(result.rule_id)
+  harness.stdio.println(result.original_command)
+  /* original_command and command are identical — no rewrite applied. */
+  harness.stdio.println(result.command)
+  harness.stdio.println(result.result.ran)
+  /* Exactly one audit entry, kind tool_rule_warning. No
+   * tool_hooks.reminder_injected — passthrough is observability-only. */
+  const log = harness.obs.pipeline_lifecycle_audit_log_take()
+  harness.stdio.println(len(log))
+  harness.stdio.println(log[0].kind)
+  harness.stdio.println(log[0].payload.rule_id)
+  harness.stdio.println(log[0].payload.severity)
+}

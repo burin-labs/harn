@@ -1,0 +1,1356 @@
+use crate::value::VmDictExt;
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::sync::Arc;
+
+use crate::stdlib::macros::harn_builtin;
+use crate::value::{VmClosure, VmError, VmValue};
+use crate::vm::Vm;
+
+mod client;
+pub(crate) mod framing;
+mod mock;
+mod sigv4;
+mod streaming;
+#[cfg(test)]
+mod tests;
+
+pub(crate) use mock::HttpMockRegistry;
+use mock::{
+    clear_http_mocks, http_mock_calls_value, parse_mock_responses, register_http_mock,
+    reset_http_mocks,
+};
+pub use mock::{http_mock_calls_snapshot, push_http_mock, HttpMockCallSnapshot, HttpMockResponse};
+
+/// Route a Harn HTTP request through the standard verb pipeline.
+///
+/// This is the entry point used by the `harness.net.*` sub-handle so
+/// every script-visible network call observes the same egress allowlist,
+/// retry policy, and mock plumbing as the legacy ambient builtins.
+pub(crate) async fn execute_http_request(
+    method: &str,
+    url: &str,
+    options: &crate::value::DictMap,
+) -> Result<VmValue, VmError> {
+    client::vm_execute_http_request(method, url, options).await
+}
+
+pub(crate) async fn execute_harness_http_request(
+    registry: &HttpMockRegistry,
+    method: &str,
+    url: &str,
+    options: &crate::value::DictMap,
+) -> Result<VmValue, VmError> {
+    client::harness_mocks::vm_execute_http_request_with_mocks(registry, method, url, options).await
+}
+
+pub(crate) fn register_harness_http_mock(
+    registry: &HttpMockRegistry,
+    method: String,
+    url_pattern: String,
+    response: &crate::value::DictMap,
+) {
+    registry.register(method, url_pattern, parse_mock_responses(response));
+}
+
+pub(crate) async fn execute_harness_http_verb(
+    registry: &HttpMockRegistry,
+    method: &str,
+    has_body: bool,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    client::harness_mocks::http_verb_handler(registry, method, has_body, args).await
+}
+
+pub(crate) async fn execute_harness_http_download(
+    registry: &HttpMockRegistry,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    client::harness_mocks::download(registry, args).await
+}
+
+pub(crate) async fn execute_harness_http_stream_open(
+    registry: &HttpMockRegistry,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    client::harness_mocks::stream_open(registry, args).await
+}
+
+pub(crate) async fn execute_harness_http_session_request(
+    registry: &HttpMockRegistry,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    client::harness_mocks::session_request(registry, args).await
+}
+
+pub(crate) fn harness_http_mock_matches(
+    registry: &HttpMockRegistry,
+    harness_method: &str,
+    args: &[VmValue],
+) -> bool {
+    let (http_method, url) = if harness_method == "request" {
+        match (args.first(), args.get(1)) {
+            (Some(VmValue::String(method)), Some(VmValue::String(url))) => {
+                (method.to_string(), url.to_string())
+            }
+            _ => return false,
+        }
+    } else if harness_method == "session_request" {
+        match (args.get(1), args.get(2)) {
+            (Some(VmValue::String(method)), Some(VmValue::String(url))) => {
+                (method.to_string(), url.to_string())
+            }
+            _ => return false,
+        }
+    } else {
+        let default_method = match harness_method {
+            "get" => "GET",
+            "post" => "POST",
+            "put" => "PUT",
+            "patch" => "PATCH",
+            "delete" => "DELETE",
+            "download" | "stream_open" => "GET",
+            _ => return false,
+        };
+        let Some(VmValue::String(url)) = args.first() else {
+            return false;
+        };
+        let options_index = match harness_method {
+            "download" => Some(2),
+            "stream_open" => Some(1),
+            _ => None,
+        };
+        let http_method = options_index
+            .and_then(|index| args.get(index))
+            .and_then(VmValue::as_dict)
+            .and_then(|options| options.get("method"))
+            .map(VmValue::display)
+            .filter(|method| !method.is_empty())
+            .unwrap_or_else(|| default_method.to_string());
+        (http_method, url.to_string())
+    };
+    registry.has_match(&http_method, &url)
+}
+#[cfg(test)]
+use mock::{mock_call_headers_value, redact_mock_call_url};
+
+#[derive(Clone)]
+struct HttpServerRoute {
+    method: String,
+    template: String,
+    handler: Arc<VmClosure>,
+    max_body_bytes: Option<usize>,
+    retain_raw_body: Option<bool>,
+}
+
+#[derive(Clone)]
+struct HttpServer {
+    routes: Vec<HttpServerRoute>,
+    before: Vec<Arc<VmClosure>>,
+    after: Vec<Arc<VmClosure>>,
+    ready: bool,
+    readiness: Option<Arc<VmClosure>>,
+    shutdown_hooks: Vec<Arc<VmClosure>>,
+    shutdown: bool,
+    max_body_bytes: usize,
+    retain_raw_body: bool,
+}
+
+pub(super) const DEFAULT_TIMEOUT_MS: u64 = 30_000;
+pub(super) const DEFAULT_BACKOFF_MS: u64 = 1_000;
+pub(super) const MAX_RETRY_DELAY_MS: u64 = 60_000;
+pub(super) const DEFAULT_RETRYABLE_STATUSES: [u16; 6] = [408, 429, 500, 502, 503, 504];
+pub(super) const DEFAULT_RETRYABLE_METHODS: [&str; 5] = ["GET", "HEAD", "PUT", "DELETE", "OPTIONS"];
+pub(super) const DEFAULT_TRANSPORT_RECEIVE_TIMEOUT_MS: u64 = 30_000;
+pub(super) const DEFAULT_MAX_STREAM_EVENTS: usize = 10_000;
+pub(super) const DEFAULT_MAX_MESSAGE_BYTES: usize = 1024 * 1024;
+pub(super) const DEFAULT_SERVER_MAX_BODY_BYTES: usize = 1024 * 1024;
+pub(super) const DEFAULT_WEBSOCKET_SERVER_IDLE_TIMEOUT_MS: u64 = 30_000;
+pub(super) const MAX_HTTP_SESSIONS: usize = 64;
+pub(super) const MAX_HTTP_STREAMS: usize = 64;
+pub(super) const MAX_SSE_STREAMS: usize = 64;
+pub(super) const MAX_SSE_SERVER_STREAMS: usize = 64;
+pub(super) const MAX_WEBSOCKETS: usize = 64;
+pub(super) const MULTIPART_MOCK_BOUNDARY: &str = "harn-boundary";
+pub(super) const MAX_HTTP_SERVERS: usize = 128;
+pub(super) const MAX_WEBSOCKET_SERVERS: usize = 16;
+
+thread_local! {
+    static TRANSPORT_HANDLE_COUNTER: RefCell<u64> = const { RefCell::new(0) };
+    static HTTP_SERVERS: RefCell<HashMap<String, HttpServer>> = RefCell::new(HashMap::new());
+}
+
+/// Reset thread-local HTTP mock state. Call between test runs.
+pub fn reset_http_state() {
+    reset_http_mocks();
+    client::reset_client_state();
+    streaming::reset_streaming_state();
+    TRANSPORT_HANDLE_COUNTER.with(|counter| *counter.borrow_mut() = 0);
+    HTTP_SERVERS.with(|servers| servers.borrow_mut().clear());
+}
+
+pub(super) fn vm_error(message: impl Into<String>) -> VmError {
+    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(message.into())))
+}
+
+pub(super) fn next_transport_handle(prefix: &str) -> String {
+    TRANSPORT_HANDLE_COUNTER.with(|counter| {
+        let mut counter = counter.borrow_mut();
+        *counter += 1;
+        format!("{prefix}-{}", *counter)
+    })
+}
+
+pub(super) fn handle_from_value(value: &VmValue, builtin: &str) -> Result<String, VmError> {
+    match value {
+        VmValue::String(handle) => Ok(handle.to_string()),
+        VmValue::Dict(dict) => dict
+            .get("id")
+            .map(|id| id.display())
+            .filter(|id| !id.is_empty())
+            .ok_or_else(|| vm_error(format!("{builtin}: handle dict must contain id"))),
+        _ => Err(vm_error(format!(
+            "{builtin}: first argument must be a handle string or dict"
+        ))),
+    }
+}
+
+pub(super) fn get_options_arg(args: &[VmValue], index: usize) -> crate::value::DictMap {
+    args.get(index)
+        .and_then(|value| value.as_dict())
+        .cloned()
+        .unwrap_or_default()
+}
+
+fn dict_value(entries: crate::value::DictMap) -> VmValue {
+    VmValue::dict(entries)
+}
+
+fn get_bool_option(options: &crate::value::DictMap, key: &str, default: bool) -> bool {
+    match options.get(key) {
+        Some(VmValue::Bool(value)) => *value,
+        _ => default,
+    }
+}
+
+fn get_usize_option(
+    options: &crate::value::DictMap,
+    key: &str,
+    default: usize,
+) -> Result<usize, VmError> {
+    match options.get(key).and_then(VmValue::as_int) {
+        Some(value) if value >= 0 => Ok(value as usize),
+        Some(_) => Err(vm_error(format!("http_server: {key} must be non-negative"))),
+        None => Ok(default),
+    }
+}
+
+fn get_optional_usize_option(
+    options: &crate::value::DictMap,
+    key: &str,
+) -> Result<Option<usize>, VmError> {
+    match options.get(key).and_then(VmValue::as_int) {
+        Some(value) if value >= 0 => Ok(Some(value as usize)),
+        Some(_) => Err(vm_error(format!(
+            "http_server_route: {key} must be non-negative"
+        ))),
+        None => Ok(None),
+    }
+}
+
+fn server_from_value(value: &VmValue, builtin: &str) -> Result<String, VmError> {
+    handle_from_value(value, builtin)
+}
+
+fn closure_arg(args: &[VmValue], index: usize, builtin: &str) -> Result<Arc<VmClosure>, VmError> {
+    match args.get(index) {
+        Some(VmValue::Closure(closure)) => Ok(closure.clone()),
+        Some(other) => Err(vm_error(format!(
+            "{builtin}: argument {} must be a closure, got {}",
+            index + 1,
+            other.type_name()
+        ))),
+        None => Err(vm_error(format!(
+            "{builtin}: missing closure argument {}",
+            index + 1
+        ))),
+    }
+}
+
+fn http_server_handle_value(id: &str) -> VmValue {
+    let mut dict = crate::value::DictMap::new();
+    dict.insert(crate::value::intern_key("id"), VmValue::string(id));
+    dict.insert(
+        crate::value::intern_key("kind"),
+        VmValue::string("http_server"),
+    );
+    dict_value(dict)
+}
+
+fn header_lookup_value(headers: &crate::value::DictMap, name: &str) -> VmValue {
+    headers
+        .iter()
+        .find(|(candidate, _)| candidate.eq_ignore_ascii_case(name))
+        .map(|(_, value)| value.clone())
+        .unwrap_or(VmValue::Nil)
+}
+
+fn headers_from_value(value: &VmValue) -> crate::value::DictMap {
+    match value {
+        VmValue::Dict(dict) => dict
+            .get("headers")
+            .and_then(VmValue::as_dict)
+            .map(|headers| {
+                headers
+                    .iter()
+                    .map(|(key, value)| {
+                        (
+                            crate::value::intern_key(&key.to_ascii_lowercase()),
+                            VmValue::string(value.display()),
+                        )
+                    })
+                    .collect()
+            })
+            .unwrap_or_else(|| {
+                dict.iter()
+                    .map(|(key, value)| {
+                        (
+                            crate::value::intern_key(&key.to_ascii_lowercase()),
+                            VmValue::string(value.display()),
+                        )
+                    })
+                    .collect()
+            }),
+        _ => crate::value::DictMap::new(),
+    }
+}
+
+fn normalize_headers(value: Option<&VmValue>) -> crate::value::DictMap {
+    match value.and_then(VmValue::as_dict) {
+        Some(headers) => headers
+            .iter()
+            .map(|(key, value)| {
+                (
+                    crate::value::intern_key(&key.to_ascii_lowercase()),
+                    VmValue::string(value.display()),
+                )
+            })
+            .collect(),
+        None => crate::value::DictMap::new(),
+    }
+}
+
+/// Decode `%XX` escapes and `+` spaces entirely in byte space.
+///
+/// Also the implementation behind the `url_decode` script builtin: indexing
+/// the `&str` by escape offsets panics when `%` is followed by a multi-byte
+/// character, so every decoder routes through this one byte-based copy.
+pub(crate) fn percent_decode(input: &str) -> String {
+    let bytes = input.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'+' {
+            out.push(b' ');
+            i += 1;
+            continue;
+        }
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let (Some(hi), Some(lo)) = (hex_val(bytes[i + 1]), hex_val(bytes[i + 2])) {
+                out.push((hi << 4) | lo);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+fn hex_val(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
+}
+
+fn split_path_and_query(raw_path: &str) -> (String, crate::value::DictMap) {
+    let (path, query) = raw_path.split_once('?').unwrap_or((raw_path, ""));
+    let mut query_map = crate::value::DictMap::new();
+    for pair in query.split('&').filter(|part| !part.is_empty()) {
+        let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+        query_map.insert(
+            crate::value::intern_key(&percent_decode(key)),
+            VmValue::string(percent_decode(value)),
+        );
+    }
+    (
+        if path.is_empty() { "/" } else { path }.to_string(),
+        query_map,
+    )
+}
+
+fn request_body_bytes(input: &crate::value::DictMap) -> Vec<u8> {
+    match input.get("raw_body").or_else(|| input.get("body")) {
+        Some(VmValue::Bytes(bytes)) => bytes.as_ref().clone(),
+        Some(value) => value.display().into_bytes(),
+        None => Vec::new(),
+    }
+}
+
+fn request_value(
+    method: &str,
+    path: &str,
+    path_params: crate::value::DictMap,
+    mut query: crate::value::DictMap,
+    input: &crate::value::DictMap,
+    body_bytes: &[u8],
+    retain_raw_body: bool,
+) -> VmValue {
+    if let Some(explicit_query) = input.get("query").and_then(VmValue::as_dict) {
+        query.extend(
+            explicit_query
+                .iter()
+                .map(|(key, value)| (key.clone(), value.clone())),
+        );
+    }
+
+    let headers = normalize_headers(input.get("headers"));
+    let body = String::from_utf8_lossy(body_bytes).into_owned();
+    let mut request = crate::value::DictMap::new();
+    request.insert(crate::value::intern_key("method"), VmValue::string(method));
+    request.insert(crate::value::intern_key("path"), VmValue::string(path));
+    let path_params = dict_value(path_params);
+    request.insert(crate::value::intern_key("path_params"), path_params.clone());
+    request.insert(crate::value::intern_key("params"), path_params);
+    request.insert(crate::value::intern_key("query"), dict_value(query));
+    request.insert(crate::value::intern_key("headers"), dict_value(headers));
+    request.insert(crate::value::intern_key("body"), VmValue::string(body));
+    request.insert(
+        crate::value::intern_key("raw_body"),
+        if retain_raw_body {
+            VmValue::Bytes(std::sync::Arc::new(body_bytes.to_vec()))
+        } else {
+            VmValue::Nil
+        },
+    );
+    request.insert(
+        crate::value::intern_key("body_bytes"),
+        VmValue::Int(body_bytes.len() as i64),
+    );
+    request.insert(
+        crate::value::intern_key("remote_addr"),
+        input
+            .get("remote_addr")
+            .or_else(|| input.get("remote"))
+            .map(|value| VmValue::string(value.display()))
+            .unwrap_or(VmValue::Nil),
+    );
+    request.insert(
+        crate::value::intern_key("client_ip"),
+        input
+            .get("client_ip")
+            .or_else(|| input.get("remote_ip"))
+            .or_else(|| input.get("ip"))
+            .map(|value| VmValue::string(value.display()))
+            .unwrap_or(VmValue::Nil),
+    );
+    dict_value(request)
+}
+
+fn normalize_status(status: i64) -> i64 {
+    if (100..=999).contains(&status) {
+        status
+    } else {
+        500
+    }
+}
+
+fn response_with_kind(
+    status: i64,
+    mut headers: crate::value::DictMap,
+    body: VmValue,
+    body_kind: &str,
+) -> VmValue {
+    let status = normalize_status(status);
+    let mut response = crate::value::DictMap::new();
+    if body_kind == "json" && matches!(header_lookup_value(&headers, "content-type"), VmValue::Nil)
+    {
+        headers.insert(
+            crate::value::intern_key("content-type"),
+            VmValue::string("application/json; charset=utf-8"),
+        );
+    } else if body_kind == "text"
+        && matches!(header_lookup_value(&headers, "content-type"), VmValue::Nil)
+    {
+        headers.insert(
+            crate::value::intern_key("content-type"),
+            VmValue::string("text/plain; charset=utf-8"),
+        );
+    }
+    response.insert(crate::value::intern_key("status"), VmValue::Int(status));
+    response.insert(crate::value::intern_key("headers"), dict_value(headers));
+    response.insert(
+        crate::value::intern_key("ok"),
+        VmValue::Bool((200..300).contains(&status)),
+    );
+    response.insert(
+        crate::value::intern_key("body_kind"),
+        VmValue::string(body_kind),
+    );
+    match body {
+        VmValue::Bytes(bytes) => {
+            response.insert(
+                crate::value::intern_key("body"),
+                VmValue::string(String::from_utf8_lossy(&bytes)),
+            );
+            response.insert(crate::value::intern_key("raw_body"), VmValue::Bytes(bytes));
+        }
+        other => {
+            response.insert(
+                crate::value::intern_key("body"),
+                VmValue::string(other.display()),
+            );
+            response.insert(
+                crate::value::intern_key("raw_body"),
+                VmValue::Bytes(std::sync::Arc::new(other.display().into_bytes())),
+            );
+        }
+    }
+    dict_value(response)
+}
+
+fn normalize_response(value: VmValue) -> VmValue {
+    match value {
+        VmValue::Dict(dict) if dict.contains_key("status") => {
+            let status = dict.get("status").and_then(VmValue::as_int).unwrap_or(200);
+            let headers = dict
+                .get("headers")
+                .and_then(VmValue::as_dict)
+                .cloned()
+                .unwrap_or_default();
+            let body_kind = dict
+                .get("body_kind")
+                .or_else(|| dict.get("kind"))
+                .map(|value| value.display())
+                .unwrap_or_else(|| "text".to_string());
+            let body = dict
+                .get("raw_body")
+                .filter(|value| matches!(value, VmValue::Bytes(_)))
+                .or_else(|| dict.get("body"))
+                .cloned()
+                .unwrap_or(VmValue::Nil);
+            response_with_kind(status, headers, body, &body_kind)
+        }
+        VmValue::Nil => response_with_kind(204, crate::value::DictMap::new(), VmValue::Nil, "text"),
+        other => response_with_kind(200, crate::value::DictMap::new(), other, "text"),
+    }
+}
+
+fn body_limit_response(limit: usize, actual: usize) -> VmValue {
+    let mut headers = crate::value::DictMap::new();
+    headers.insert(
+        crate::value::intern_key("content-type"),
+        VmValue::string("text/plain; charset=utf-8"),
+    );
+    headers.insert(
+        crate::value::intern_key("connection"),
+        VmValue::string("close"),
+    );
+    headers.insert(
+        crate::value::intern_key("x-harn-body-limit"),
+        VmValue::string(limit.to_string()),
+    );
+    response_with_kind(
+        413,
+        headers,
+        VmValue::string(format!("request body too large: {actual} > {limit} bytes")),
+        "text",
+    )
+}
+
+fn not_found_response(method: &str, path: &str) -> VmValue {
+    response_with_kind(
+        404,
+        crate::value::DictMap::new(),
+        VmValue::string(format!("no route for {method} {path}")),
+        "text",
+    )
+}
+
+fn unavailable_response(message: &str) -> VmValue {
+    response_with_kind(
+        503,
+        crate::value::DictMap::new(),
+        VmValue::string(message),
+        "text",
+    )
+}
+
+#[expect(
+    clippy::string_slice,
+    reason = "slices cut at ASCII `{`/`}`/`:` delimiters verified by starts_with/ends_with"
+)]
+fn route_template_match(template: &str, path: &str) -> Option<crate::value::DictMap> {
+    let template_segments: Vec<&str> = template.trim_matches('/').split('/').collect();
+    let path_segments: Vec<&str> = path.trim_matches('/').split('/').collect();
+    if template == "/" && path == "/" {
+        return Some(crate::value::DictMap::new());
+    }
+    if template_segments.len() != path_segments.len() {
+        return None;
+    }
+    let mut params = crate::value::DictMap::new();
+    for (tmpl, actual) in template_segments.iter().zip(path_segments.iter()) {
+        if tmpl.starts_with('{') && tmpl.ends_with('}') && tmpl.len() > 2 {
+            params.insert(
+                crate::value::intern_key(&tmpl[1..tmpl.len() - 1]),
+                VmValue::string(percent_decode(actual)),
+            );
+        } else if tmpl.starts_with(':') && tmpl.len() > 1 {
+            params.insert(
+                crate::value::intern_key(&tmpl[1..]),
+                VmValue::string(percent_decode(actual)),
+            );
+        } else if tmpl != actual {
+            return None;
+        }
+    }
+    Some(params)
+}
+
+fn matching_route(
+    server: &HttpServer,
+    method: &str,
+    path: &str,
+) -> Option<(HttpServerRoute, crate::value::DictMap)> {
+    server.routes.iter().find_map(|route| {
+        if route.method != "*" && !route.method.eq_ignore_ascii_case(method) {
+            return None;
+        }
+        route_template_match(&route.template, path).map(|params| (route.clone(), params))
+    })
+}
+
+async fn call_server_closure(
+    ctx: &crate::vm::AsyncBuiltinCtx,
+    closure: &Arc<VmClosure>,
+    args: &[VmValue],
+    _builtin: &str,
+) -> Result<VmValue, VmError> {
+    let mut vm = ctx.child_vm();
+    let result = vm.call_closure_pub(closure, args).await;
+    ctx.forward_output(&vm.take_output());
+    result
+}
+
+fn value_is_response(value: &VmValue) -> bool {
+    matches!(value, VmValue::Dict(dict) if dict.contains_key("status"))
+}
+
+async fn run_http_server_request(
+    ctx: &crate::vm::AsyncBuiltinCtx,
+    server_id: &str,
+    request: VmValue,
+) -> Result<VmValue, VmError> {
+    let server = HTTP_SERVERS.with(|servers| servers.borrow().get(server_id).cloned());
+    let Some(server) = server else {
+        return Err(vm_error(format!(
+            "http_server_request: unknown server handle '{server_id}'"
+        )));
+    };
+    if server.shutdown {
+        return Ok(unavailable_response("server is shut down"));
+    }
+    if !server.ready {
+        return Ok(unavailable_response("server is not ready"));
+    }
+    if let Some(readiness) = &server.readiness {
+        let ready = call_server_closure(
+            ctx,
+            readiness,
+            &[http_server_handle_value(server_id)],
+            "http_server_request",
+        )
+        .await?;
+        if !ready.is_truthy() {
+            return Ok(unavailable_response("server is not ready"));
+        }
+    }
+
+    let input = request.as_dict().cloned().unwrap_or_default();
+    let method = input
+        .get("method")
+        .map(|value| value.display())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "GET".to_string())
+        .to_ascii_uppercase();
+    let raw_path = input
+        .get("path")
+        .map(|value| value.display())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "/".to_string());
+    let (path, query) = split_path_and_query(&raw_path);
+    let body_bytes = request_body_bytes(&input);
+
+    let Some((route, path_params)) = matching_route(&server, &method, &path) else {
+        return Ok(not_found_response(&method, &path));
+    };
+
+    let limit = route.max_body_bytes.unwrap_or(server.max_body_bytes);
+    if body_bytes.len() > limit {
+        return Ok(body_limit_response(limit, body_bytes.len()));
+    }
+    let retain_raw_body = route.retain_raw_body.unwrap_or(server.retain_raw_body);
+    let mut req = request_value(
+        &method,
+        &path,
+        path_params,
+        query,
+        &input,
+        &body_bytes,
+        retain_raw_body,
+    );
+
+    for before in &server.before {
+        let result =
+            call_server_closure(ctx, before, &[req.clone()], "http_server_request").await?;
+        if value_is_response(&result) {
+            return Ok(normalize_response(result));
+        }
+        if !matches!(result, VmValue::Nil) {
+            req = result;
+        }
+    }
+
+    let handler_result =
+        call_server_closure(ctx, &route.handler, &[req.clone()], "http_server_request").await?;
+    let mut response = normalize_response(handler_result);
+
+    for after in &server.after {
+        let result = call_server_closure(
+            ctx,
+            after,
+            &[response.clone(), req.clone()],
+            "http_server_request",
+        )
+        .await?;
+        if !matches!(result, VmValue::Nil) {
+            response = normalize_response(result);
+        }
+    }
+
+    Ok(response)
+}
+
+/// Register HTTP builtins on a VM.
+pub fn register_http_builtins(vm: &mut Vm) {
+    register_http_tls_builtins(vm);
+    register_http_server_builtins(vm);
+    register_http_mock_builtins(vm);
+    client::register_http_client_builtins(vm);
+    streaming::register_http_streaming_builtins(vm);
+}
+
+fn register_http_tls_builtins(vm: &mut Vm) {
+    vm.register_builtin("__http_server_tls_plain", |_args, _out| {
+        Ok(http_server_tls_config_value(
+            "plain",
+            false,
+            "http",
+            false,
+            crate::value::DictMap::new(),
+        ))
+    });
+    vm.register_builtin("__http_server_tls_edge", |args, _out| {
+        let options = get_options_arg(args, 0);
+        Ok(http_server_tls_config_value(
+            "edge",
+            false,
+            "https",
+            vm_get_bool_option(&options, "hsts", true),
+            hsts_options(&options),
+        ))
+    });
+    vm.register_builtin("__http_server_tls_pem", |args, _out| {
+        if args.len() < 2 {
+            return Err(vm_error(
+                "http_server_tls_pem: requires cert path and key path",
+            ));
+        }
+        let cert_path = args[0].display();
+        let key_path = args[1].display();
+        if !std::path::Path::new(&cert_path).is_file() {
+            return Err(vm_error(format!(
+                "http_server_tls_pem: certificate not found: {cert_path}"
+            )));
+        }
+        if !std::path::Path::new(&key_path).is_file() {
+            return Err(vm_error(format!(
+                "http_server_tls_pem: private key not found: {key_path}"
+            )));
+        }
+        let mut extra = crate::value::DictMap::new();
+        extra.put_str("cert_path", cert_path);
+        extra.put_str("key_path", key_path);
+        Ok(http_server_tls_config_value(
+            "pem", true, "https", true, extra,
+        ))
+    });
+    vm.register_builtin("__http_server_tls_self_signed_dev", |args, _out| {
+        let hosts = tls_hosts_arg(args.first())?;
+        let cert = rcgen::generate_simple_self_signed(hosts.clone()).map_err(|error| {
+            vm_error(format!(
+                "http_server_tls_self_signed_dev: failed to generate certificate: {error}"
+            ))
+        })?;
+        let mut extra = crate::value::DictMap::new();
+        extra.insert(
+            crate::value::intern_key("hosts"),
+            VmValue::List(std::sync::Arc::new(
+                hosts
+                    .into_iter()
+                    .map(|host| VmValue::String(arcstr::ArcStr::from(host)))
+                    .collect(),
+            )),
+        );
+        extra.put_str("cert_pem", cert.cert.pem());
+        extra.put_str("key_pem", cert.signing_key.serialize_pem());
+        Ok(http_server_tls_config_value(
+            "self_signed_dev",
+            true,
+            "https",
+            false,
+            extra,
+        ))
+    });
+    vm.register_builtin("__http_server_security_headers", |args, _out| {
+        let Some(VmValue::Dict(config)) = args.first() else {
+            return Err(vm_error(
+                "http_server_security_headers: requires a TLS config dict",
+            ));
+        };
+        Ok(VmValue::dict(http_server_security_headers(config)))
+    });
+}
+
+fn register_http_server_builtins(vm: &mut Vm) {
+    // --- Inbound HTTP server primitives ---
+
+    vm.register_builtin("__http_server", |args, _out| {
+        let options = get_options_arg(args, 0);
+        let server = HttpServer {
+            routes: Vec::new(),
+            before: Vec::new(),
+            after: Vec::new(),
+            ready: get_bool_option(&options, "ready", true),
+            readiness: None,
+            shutdown_hooks: Vec::new(),
+            shutdown: false,
+            max_body_bytes: get_usize_option(
+                &options,
+                "max_body_bytes",
+                DEFAULT_SERVER_MAX_BODY_BYTES,
+            )?,
+            retain_raw_body: get_bool_option(&options, "retain_raw_body", true),
+        };
+        let id = next_transport_handle("http-server");
+        HTTP_SERVERS.with(|servers| {
+            let mut servers = servers.borrow_mut();
+            if servers.len() >= MAX_HTTP_SERVERS {
+                return Err(vm_error(format!(
+                    "http_server: maximum open servers ({MAX_HTTP_SERVERS}) reached"
+                )));
+            }
+            servers.insert(id.clone(), server);
+            Ok(())
+        })?;
+        Ok(http_server_handle_value(&id))
+    });
+
+    vm.register_builtin("__http_server_route", |args, _out| {
+        if args.len() < 4 {
+            return Err(vm_error(
+                "http_server_route: requires server, method, path template, and handler",
+            ));
+        }
+        let server_id = server_from_value(&args[0], "http_server_route")?;
+        let method = args[1].display().to_ascii_uppercase();
+        if method.is_empty() {
+            return Err(vm_error("http_server_route: method is required"));
+        }
+        let template = args[2].display();
+        if !template.starts_with('/') {
+            return Err(vm_error(
+                "http_server_route: path template must start with '/'",
+            ));
+        }
+        let handler = closure_arg(args, 3, "http_server_route")?;
+        let options = get_options_arg(args, 4);
+        let route = HttpServerRoute {
+            method,
+            template,
+            handler,
+            max_body_bytes: get_optional_usize_option(&options, "max_body_bytes")?,
+            retain_raw_body: match options.get("retain_raw_body") {
+                Some(VmValue::Bool(value)) => Some(*value),
+                _ => None,
+            },
+        };
+        HTTP_SERVERS.with(|servers| {
+            let mut servers = servers.borrow_mut();
+            let server = servers.get_mut(&server_id).ok_or_else(|| {
+                vm_error(format!("http_server_route: unknown server '{server_id}'"))
+            })?;
+            server.routes.push(route);
+            Ok::<_, VmError>(())
+        })?;
+        Ok(http_server_handle_value(&server_id))
+    });
+
+    vm.register_builtin("__http_server_before", |args, _out| {
+        if args.len() < 2 {
+            return Err(vm_error("http_server_before: requires server and handler"));
+        }
+        let server_id = server_from_value(&args[0], "http_server_before")?;
+        let handler = closure_arg(args, 1, "http_server_before")?;
+        HTTP_SERVERS.with(|servers| {
+            let mut servers = servers.borrow_mut();
+            let server = servers.get_mut(&server_id).ok_or_else(|| {
+                vm_error(format!("http_server_before: unknown server '{server_id}'"))
+            })?;
+            server.before.push(handler);
+            Ok::<_, VmError>(())
+        })?;
+        Ok(http_server_handle_value(&server_id))
+    });
+
+    vm.register_builtin("__http_server_after", |args, _out| {
+        if args.len() < 2 {
+            return Err(vm_error("http_server_after: requires server and handler"));
+        }
+        let server_id = server_from_value(&args[0], "http_server_after")?;
+        let handler = closure_arg(args, 1, "http_server_after")?;
+        HTTP_SERVERS.with(|servers| {
+            let mut servers = servers.borrow_mut();
+            let server = servers.get_mut(&server_id).ok_or_else(|| {
+                vm_error(format!("http_server_after: unknown server '{server_id}'"))
+            })?;
+            server.after.push(handler);
+            Ok::<_, VmError>(())
+        })?;
+        Ok(http_server_handle_value(&server_id))
+    });
+
+    vm.register_async_builtin("__http_server_request", |ctx, args| async move {
+        if args.len() < 2 {
+            return Err(vm_error("http_server_request: requires server and request"));
+        }
+        let server_id = server_from_value(&args[0], "http_server_request")?;
+        run_http_server_request(&ctx, &server_id, args[1].clone()).await
+    });
+
+    vm.register_async_builtin("__http_server_test", |ctx, args| async move {
+        if args.len() < 2 {
+            return Err(vm_error("http_server_test: requires server and request"));
+        }
+        let server_id = server_from_value(&args[0], "http_server_test")?;
+        run_http_server_request(&ctx, &server_id, args[1].clone()).await
+    });
+
+    vm.register_builtin("__http_server_set_ready", |args, _out| {
+        if args.len() < 2 {
+            return Err(vm_error(
+                "http_server_set_ready: requires server and ready bool",
+            ));
+        }
+        let server_id = server_from_value(&args[0], "http_server_set_ready")?;
+        let ready = matches!(args[1], VmValue::Bool(true));
+        HTTP_SERVERS.with(|servers| {
+            let mut servers = servers.borrow_mut();
+            let server = servers.get_mut(&server_id).ok_or_else(|| {
+                vm_error(format!(
+                    "http_server_set_ready: unknown server '{server_id}'"
+                ))
+            })?;
+            server.ready = ready;
+            Ok::<_, VmError>(())
+        })?;
+        Ok(VmValue::Bool(ready))
+    });
+
+    vm.register_builtin("__http_server_readiness", |args, _out| {
+        if args.len() < 2 {
+            return Err(vm_error(
+                "http_server_readiness: requires server and readiness closure",
+            ));
+        }
+        let server_id = server_from_value(&args[0], "http_server_readiness")?;
+        let handler = closure_arg(args, 1, "http_server_readiness")?;
+        HTTP_SERVERS.with(|servers| {
+            let mut servers = servers.borrow_mut();
+            let server = servers.get_mut(&server_id).ok_or_else(|| {
+                vm_error(format!(
+                    "http_server_readiness: unknown server '{server_id}'"
+                ))
+            })?;
+            server.readiness = Some(handler);
+            Ok::<_, VmError>(())
+        })?;
+        Ok(http_server_handle_value(&server_id))
+    });
+
+    vm.register_async_builtin("__http_server_ready", |ctx, args| async move {
+        let Some(server_arg) = args.first() else {
+            return Err(vm_error("http_server_ready: requires server"));
+        };
+        let server_id = server_from_value(server_arg, "http_server_ready")?;
+        let server = HTTP_SERVERS.with(|servers| servers.borrow().get(&server_id).cloned());
+        let Some(server) = server else {
+            return Err(vm_error(format!(
+                "http_server_ready: unknown server '{server_id}'"
+            )));
+        };
+        if server.shutdown {
+            return Ok(VmValue::Bool(false));
+        }
+        let Some(readiness) = server.readiness else {
+            return Ok(VmValue::Bool(server.ready));
+        };
+        let result = call_server_closure(
+            &ctx,
+            &readiness,
+            &[http_server_handle_value(&server_id)],
+            "http_server_ready",
+        )
+        .await?;
+        Ok(VmValue::Bool(result.is_truthy()))
+    });
+
+    vm.register_builtin("__http_server_on_shutdown", |args, _out| {
+        if args.len() < 2 {
+            return Err(vm_error(
+                "http_server_on_shutdown: requires server and handler",
+            ));
+        }
+        let server_id = server_from_value(&args[0], "http_server_on_shutdown")?;
+        let handler = closure_arg(args, 1, "http_server_on_shutdown")?;
+        HTTP_SERVERS.with(|servers| {
+            let mut servers = servers.borrow_mut();
+            let server = servers.get_mut(&server_id).ok_or_else(|| {
+                vm_error(format!(
+                    "http_server_on_shutdown: unknown server '{server_id}'"
+                ))
+            })?;
+            server.shutdown_hooks.push(handler);
+            Ok::<_, VmError>(())
+        })?;
+        Ok(http_server_handle_value(&server_id))
+    });
+
+    vm.register_async_builtin("__http_server_shutdown", |ctx, args| async move {
+        let Some(server_arg) = args.first() else {
+            return Err(vm_error("http_server_shutdown: requires server"));
+        };
+        let server_id = server_from_value(server_arg, "http_server_shutdown")?;
+        let hooks = HTTP_SERVERS.with(|servers| {
+            let mut servers = servers.borrow_mut();
+            let server = servers.get_mut(&server_id).ok_or_else(|| {
+                vm_error(format!(
+                    "http_server_shutdown: unknown server '{server_id}'"
+                ))
+            })?;
+            server.shutdown = true;
+            Ok::<_, VmError>(server.shutdown_hooks.clone())
+        })?;
+        for hook in hooks {
+            let _ = call_server_closure(
+                &ctx,
+                &hook,
+                &[http_server_handle_value(&server_id)],
+                "http_server_shutdown",
+            )
+            .await?;
+        }
+        Ok(VmValue::Bool(true))
+    });
+
+    vm.register_builtin_def(&HTTP_RESPONSE_IMPL_DEF);
+    vm.register_builtin_def(&HTTP_RESPONSE_TEXT_IMPL_DEF);
+    vm.register_builtin_def(&HTTP_RESPONSE_JSON_IMPL_DEF);
+    vm.register_builtin_def(&HTTP_RESPONSE_BYTES_IMPL_DEF);
+    vm.register_builtin_def(&HTTP_HEADER_IMPL_DEF);
+}
+
+#[harn_builtin(exposure = "pure", effects = [], sig = "http_response(status?: int, body?: any, headers?: dict) -> dict", category = "http")]
+fn http_response_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let status = args.first().and_then(VmValue::as_int).unwrap_or(200);
+    let body = args.get(1).cloned().unwrap_or(VmValue::Nil);
+    let headers = args
+        .get(2)
+        .and_then(VmValue::as_dict)
+        .cloned()
+        .unwrap_or_default();
+    Ok(response_with_kind(status, headers, body, "text"))
+}
+
+#[harn_builtin(exposure = "pure", effects = [], sig = "http_response_text(body?: any, options?: dict) -> dict", category = "http")]
+fn http_response_text_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let body = args.first().cloned().unwrap_or(VmValue::Nil);
+    let options = get_options_arg(args, 1);
+    let status = options
+        .get("status")
+        .and_then(VmValue::as_int)
+        .unwrap_or(200);
+    let headers = options
+        .get("headers")
+        .and_then(VmValue::as_dict)
+        .cloned()
+        .unwrap_or_default();
+    Ok(response_with_kind(status, headers, body, "text"))
+}
+
+#[harn_builtin(exposure = "pure", effects = [], sig = "http_response_json(body?: any, options?: dict) -> dict", category = "http")]
+fn http_response_json_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let body = args
+        .first()
+        .map(crate::stdlib::json::vm_value_to_json)
+        .map(VmValue::string)
+        .unwrap_or_else(|| VmValue::string("null"));
+    let options = get_options_arg(args, 1);
+    let status = options
+        .get("status")
+        .and_then(VmValue::as_int)
+        .unwrap_or(200);
+    let headers = options
+        .get("headers")
+        .and_then(VmValue::as_dict)
+        .cloned()
+        .unwrap_or_default();
+    Ok(response_with_kind(status, headers, body, "json"))
+}
+
+#[harn_builtin(exposure = "pure", effects = [], sig = "http_response_bytes(body?: any, options?: dict) -> dict", category = "http")]
+fn http_response_bytes_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let body = match args.first() {
+        Some(VmValue::Bytes(bytes)) => VmValue::Bytes(bytes.clone()),
+        Some(value) => VmValue::Bytes(std::sync::Arc::new(value.display().into_bytes())),
+        None => VmValue::Bytes(std::sync::Arc::new(Vec::new())),
+    };
+    let options = get_options_arg(args, 1);
+    let status = options
+        .get("status")
+        .and_then(VmValue::as_int)
+        .unwrap_or(200);
+    let headers = options
+        .get("headers")
+        .and_then(VmValue::as_dict)
+        .cloned()
+        .unwrap_or_default();
+    Ok(response_with_kind(status, headers, body, "bytes"))
+}
+
+#[harn_builtin(exposure = "pure", effects = [], sig = "http_header(source: dict | list, name: string) -> string?", category = "http")]
+fn http_header_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    if args.len() < 2 {
+        return Err(vm_error(
+            "http_header: requires headers/request/response and name",
+        ));
+    }
+    Ok(header_lookup_value(
+        &headers_from_value(&args[0]),
+        &args[1].display(),
+    ))
+}
+
+fn register_http_mock_builtins(vm: &mut Vm) {
+    vm.register_capability_method(
+        harn_builtin_meta::CapabilityId::Testing,
+        "http_mock",
+        |args, _out| {
+            let method = args.first().map(VmValue::display).unwrap_or_default();
+            let url_pattern = args.get(1).map(VmValue::display).unwrap_or_default();
+            let response = args
+                .get(2)
+                .and_then(VmValue::as_dict)
+                .cloned()
+                .unwrap_or_default();
+            register_http_mock(method, url_pattern, parse_mock_responses(&response));
+            Ok(VmValue::Nil)
+        },
+    );
+    vm.register_capability_method(
+        harn_builtin_meta::CapabilityId::Testing,
+        "http_mock_clear",
+        |_args, _out| {
+            clear_http_mocks();
+            client::clear_http_streams();
+            Ok(VmValue::Nil)
+        },
+    );
+    vm.register_capability_method(
+        harn_builtin_meta::CapabilityId::Testing,
+        "http_mock_calls",
+        |args, _out| {
+            let options = get_options_arg(args, 0);
+            let include_sensitive = get_bool_option(&options, "include_sensitive", false)
+                || get_bool_option(&options, "include_sensitive_headers", false);
+            let redact_sensitive = get_bool_option(
+                &options,
+                "redact_sensitive",
+                get_bool_option(&options, "redact_headers", true),
+            ) && !include_sensitive;
+            Ok(VmValue::List(std::sync::Arc::new(http_mock_calls_value(
+                redact_sensitive,
+            ))))
+        },
+    );
+}
+
+fn http_server_tls_config_value(
+    mode: &str,
+    terminate_tls: bool,
+    scheme: &str,
+    hsts: bool,
+    extra: crate::value::DictMap,
+) -> VmValue {
+    let mut dict = crate::value::DictMap::new();
+    dict.put_str("mode", mode);
+    dict.insert(
+        crate::value::intern_key("terminate_tls"),
+        VmValue::Bool(terminate_tls),
+    );
+    dict.put_str("scheme", scheme);
+    dict.insert(crate::value::intern_key("hsts"), VmValue::Bool(hsts));
+    for (key, value) in extra {
+        dict.insert(key, value);
+    }
+    VmValue::dict(dict)
+}
+
+fn hsts_options(options: &crate::value::DictMap) -> crate::value::DictMap {
+    let mut hsts = crate::value::DictMap::new();
+    hsts.insert(
+        crate::value::intern_key("hsts_max_age_seconds"),
+        VmValue::Int(vm_get_int_option(
+            options,
+            "hsts_max_age_seconds",
+            31_536_000,
+        )),
+    );
+    hsts.insert(
+        crate::value::intern_key("hsts_include_subdomains"),
+        VmValue::Bool(vm_get_bool_option(
+            options,
+            "hsts_include_subdomains",
+            false,
+        )),
+    );
+    hsts.insert(
+        crate::value::intern_key("hsts_preload"),
+        VmValue::Bool(vm_get_bool_option(options, "hsts_preload", false)),
+    );
+    hsts
+}
+
+fn http_server_security_headers(config: &crate::value::DictMap) -> crate::value::DictMap {
+    let hsts_enabled = vm_get_bool_option(config, "hsts", false);
+    if !hsts_enabled {
+        return crate::value::DictMap::new();
+    }
+    let mut value = format!(
+        "max-age={}",
+        vm_get_int_option(config, "hsts_max_age_seconds", 31_536_000).max(0)
+    );
+    if vm_get_bool_option(config, "hsts_include_subdomains", false) {
+        value.push_str("; includeSubDomains");
+    }
+    if vm_get_bool_option(config, "hsts_preload", false) {
+        value.push_str("; preload");
+    }
+    crate::value::DictMap::from_iter([(
+        crate::value::intern_key("strict-transport-security"),
+        VmValue::String(arcstr::ArcStr::from(value)),
+    )])
+}
+
+fn tls_hosts_arg(value: Option<&VmValue>) -> Result<Vec<String>, VmError> {
+    match value {
+        None | Some(VmValue::Nil) => Ok(vec!["localhost".to_string(), "127.0.0.1".to_string()]),
+        Some(VmValue::List(hosts)) => {
+            let mut parsed = Vec::new();
+            for host in hosts.iter() {
+                let host = host.display();
+                if host.is_empty() {
+                    return Err(vm_error(
+                        "http_server_tls_self_signed_dev: host names must be non-empty",
+                    ));
+                }
+                parsed.push(host);
+            }
+            if parsed.is_empty() {
+                return Err(vm_error(
+                    "http_server_tls_self_signed_dev: host list must not be empty",
+                ));
+            }
+            Ok(parsed)
+        }
+        Some(other) => {
+            let host = other.display();
+            if host.is_empty() {
+                return Err(vm_error(
+                    "http_server_tls_self_signed_dev: host name must be non-empty",
+                ));
+            }
+            Ok(vec![host])
+        }
+    }
+}
+
+pub(super) fn vm_get_int_option(options: &crate::value::DictMap, key: &str, default: i64) -> i64 {
+    options.get(key).and_then(|v| v.as_int()).unwrap_or(default)
+}
+
+pub(super) fn vm_get_bool_option(
+    options: &crate::value::DictMap,
+    key: &str,
+    default: bool,
+) -> bool {
+    match options.get(key) {
+        Some(VmValue::Bool(b)) => *b,
+        _ => default,
+    }
+}
+
+pub(super) fn vm_get_int_option_prefer(
+    options: &crate::value::DictMap,
+    canonical: &str,
+    alias: &str,
+    default: i64,
+) -> i64 {
+    options
+        .get(canonical)
+        .and_then(|value| value.as_int())
+        .or_else(|| options.get(alias).and_then(|value| value.as_int()))
+        .unwrap_or(default)
+}
+
+pub(super) fn vm_get_optional_int_option(
+    options: &crate::value::DictMap,
+    key: &str,
+) -> Option<u64> {
+    options
+        .get(key)
+        .and_then(|value| value.as_int())
+        .map(|value| value.max(0) as u64)
+}
+
+pub(super) fn string_option(options: &crate::value::DictMap, key: &str) -> Option<String> {
+    options
+        .get(key)
+        .map(|value| value.display())
+        .filter(|value| !value.is_empty())
+}

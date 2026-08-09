@@ -1,0 +1,35 @@
+pipeline main(harness: Harness) {
+  const topic = "transcript.reminder.lifecycle"
+  const base = transcript_from_messages(
+    [
+      {role: "user", content: "one"},
+      {role: "assistant", content: "two"},
+      {role: "user", content: "three"},
+      {role: "assistant", content: "four"},
+    ],
+  )
+  const with_reminder = harness.agent.transcript_inject_reminder(
+    base,
+    {
+      body: "expire at compaction boundary",
+      dedupe_key: "ttl",
+      ttl_turns: 1,
+      preserve_on_compact: true,
+    },
+  ).transcript
+  const cursor = harness.obs.event_log_latest(topic)
+  const compacted = harness.agent.compact_transcript(
+    with_reminder,
+    {strategy: "truncate", keep_last: 1, target_tokens: 1},
+  )
+  const reminders = transcript_events_by_kind(compacted, "system_reminder")
+  const stream = harness.obs.event_log_subscribe(
+    {topic: topic, from_cursor: cursor, kind_prefix: "transcript.reminder.expired"},
+  )
+  const logged = stream.next().value
+  harness.stdio.println(len(reminders))
+  harness.stdio.println(logged.kind)
+  harness.stdio.println(logged.payload.reminder_id != "")
+  harness.stdio.println(logged.payload.ttl_turns_before)
+  harness.stdio.println(logged.payload.expired_at_boundary)
+}

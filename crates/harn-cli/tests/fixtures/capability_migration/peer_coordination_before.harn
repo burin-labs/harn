@@ -1,0 +1,103 @@
+// Exact Burin regression fixture for multi-pass capability migration.
+import { with_host_mocks, with_mocks } from "std/testing"
+import {
+  peer_coordination_enabled,
+  run_peer_coordination_gate,
+} from "../../pipelines/lib/runtime/peer-coordination"
+
+fn pin_peer_coordination(variant: string?) -> nil {
+  store_set("burin.peer_coordination.test_variant_override", variant)
+  return nil
+}
+
+fn peer_presence_mock(result: dict) -> list {
+  return [
+    {capability: "project", operation: "peer_presence", unregistered_ok: true, result: result},
+  ]
+}
+
+fn unrelated_operation_record() -> dict {
+  return {capability: "audit", operation: "unrelated", result: true}
+}
+
+pipeline test_gate_is_noop_when_flag_off(_task) {
+  pin_peer_coordination(nil)
+  assert(!peer_coordination_enabled(), "default must be OFF")
+  const decision = run_peer_coordination_gate("edit src/foo.rs", {})
+  assert(decision?.active == false, "flag OFF => gate inactive")
+  assert(decision?.verdict == "disabled", "flag OFF => verdict disabled, got ${decision?.verdict}")
+}
+
+pipeline test_gate_proceeds_when_host_says_proceed(_task) {
+  pin_peer_coordination("on")
+  const decision = with_host_mocks(
+    peer_presence_mock({verdict: "proceed", peers: []}),
+    { _ -> run_peer_coordination_gate("edit src/foo.rs", {}) },
+  )
+  pin_peer_coordination(nil)
+  assert(decision?.active == true, "flag ON => gate active")
+  assert(decision?.verdict == "proceed", "no peer => proceed, got ${decision?.verdict}")
+  assert(decision?.worktree_path == "", "proceed => no worktree pivot")
+}
+
+pipeline test_gate_pivots_to_worktree_on_overlap(_task) {
+  pin_peer_coordination("on")
+  const decision = with_host_mocks(
+    peer_presence_mock(
+      {
+        verdict: "take_worktree",
+        worktree_path: "/tmp/checkout-peer-agent-b",
+        peers: [{sessionId: "agent-a", hotPaths: ["src/foo.rs"]}],
+      },
+    ),
+    { _ -> run_peer_coordination_gate("edit src/foo.rs", {}) },
+  )
+  pin_peer_coordination(nil)
+  assert(decision?.verdict == "take_worktree", "overlap => take_worktree, got ${decision?.verdict}")
+  assert(
+    decision?.worktree_path == "/tmp/checkout-peer-agent-b",
+    "gate threads the host's worktree path, got ${decision?.worktree_path}",
+  )
+  assert(decision?.peer_count == 1, "gate counts the live peer, got ${decision?.peer_count}")
+}
+
+pipeline test_gate_escalates_when_pivot_unavailable(_task) {
+  pin_peer_coordination("on")
+  // The host could not isolate (e.g. not a git checkout) => request_permission.
+  const result = with_host_mocks(
+    peer_presence_mock({verdict: "request_permission", peers: []})
+      + [
+      {capability: "runtime", operation: "emit_response", unregistered_ok: true, result: true},
+    ],
+    { _ ->
+      let decision = run_peer_coordination_gate("edit src/foo.rs", {})
+      let emitted = host_mock_calls().filter(
+        { call -> call?.capability == "runtime" && call?.operation == "emit_response" },
+      )
+      return {decision: decision, emit_count: len(emitted)}
+    },
+  )
+  pin_peer_coordination(nil)
+  assert(
+    result?.decision?.verdict == "request_permission",
+    "no-isolation => request_permission, got ${result?.decision?.verdict}",
+  )
+  assert(
+    result?.emit_count >= 1,
+    "escalation must emit a visible advisory, got ${result?.emit_count} emits",
+  )
+}
+
+pipeline test_gate_degrades_safely_on_legacy_host(_task) {
+  pin_peer_coordination("on")
+  const decision = with_host_mocks(
+    [{capability: "project", operation: "peer_presence", unregistered_ok: true, result: nil}],
+    { _ -> run_peer_coordination_gate("edit src/foo.rs", {}) },
+  )
+  pin_peer_coordination(nil)
+  assert(decision?.active == true, "flag ON => gate active even on a legacy host")
+  assert(
+    decision?.verdict == "proceed",
+    "missing capability => safe proceed, got ${decision?.verdict}",
+  )
+}

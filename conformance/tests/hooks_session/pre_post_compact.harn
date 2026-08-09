@@ -1,0 +1,60 @@
+import { agent_loop } from "std/agent/loop"
+import { llm_text, with_llm_script } from "std/testing"
+
+/**
+ * `pre_compact` hooks can veto an autocompaction pass with
+ * `{block: true}`. `post_compact` hooks observe the archived-message
+ * count once compaction completes successfully.
+ */
+pipeline default(harness: Harness) {
+  const pre_seen = harness.runtime.atomic(0)
+  const post_seen = harness.runtime.atomic(0)
+  harness.agent.clear_session_hooks()
+  harness.agent.register_session_hook(
+    "pre_compact",
+    { _hook_harness, event ->
+      if type_of(event?.session?.id) == "string" {
+        harness.runtime.atomic_add(pre_seen, 1)
+      }
+      if harness.runtime.atomic_get(pre_seen) == 1 {
+        return {block: true, reason: "first compact intentionally vetoed"}
+      }
+      return nil
+    },
+  )
+  // First call: block. Second call: allow.
+  harness.agent.register_session_hook(
+    "post_compact",
+    { _hook_harness, event ->
+      if (event?.archived_messages ?? 0) > 0 {
+        harness.runtime.atomic_add(post_seen, 1)
+      }
+      return nil
+    },
+  )
+  // Force compaction with a hostile threshold so the autocompactor
+  // tries to compress even with a tiny transcript.
+  with_llm_script(
+    harness.llm,
+    [llm_text("round one"), llm_text("round two")],
+    { ->
+      const result = agent_loop(
+        harness,
+        "compact me",
+        nil,
+        {
+          provider: "mock",
+          loop_until_done: true,
+          max_iterations: 2,
+          compaction: {strategy: "observation_mask"},
+          compact_threshold: 1,
+          compact_keep_last: 0,
+        },
+      )
+      harness.stdio.println(result.status)
+      harness.stdio.println(harness.runtime.atomic_get(pre_seen))
+      harness.stdio.println(harness.runtime.atomic_get(post_seen))
+      harness.agent.clear_session_hooks()
+    },
+  )
+}

@@ -1,0 +1,101 @@
+{
+  "schema_version": "harn.release_audit_contract.v1",
+  "lanes": [
+    {"name": "rust-audit", "runner": "run_rust_audit", "proof": "merge_group"},
+    {"name": "harn-audit", "runner": "run_harn_audit", "proof": "merge_group"},
+    {"name": "generated-audit", "runner": "run_generated_audit", "proof": "residual"},
+    {"name": "docs-audit", "runner": "run_docs_audit", "proof": "residual"},
+    {"name": "grammar-audit", "runner": "run_grammar_audit", "proof": "residual"},
+    {"name": "security-audit", "runner": "run_security_audit", "proof": "residual"},
+    {"name": "package-audit", "runner": "run_package_audit", "proof": "merge_group"},
+    {"name": "smoke-audit", "runner": "run_smoke_audit", "proof": "residual"}
+  ],
+  "merge_group_jobs": [
+    {
+      "name": "Format check",
+      "job_id": "fmt",
+      "matrix_kind": "",
+      "proofs": ["rust-audit"],
+      "steps": [
+        {"id": "release-audit-format", "condition": "", "run": "make fmt-check"}
+      ]
+    },
+    {
+      "name": "Verify publishable crates",
+      "job_id": "package-audit",
+      "matrix_kind": "",
+      "proofs": ["package-audit"],
+      "steps": [
+        {"id": "release-audit-package", "condition": "", "run": "./scripts/verify_crate_packages.sh"}
+      ]
+    },
+    {
+      "name": "Check Rust code",
+      "job_id": "rust-checks",
+      "matrix_kind": "",
+      "proofs": ["rust-audit"],
+      "steps": [
+        {
+          "id": "release-audit-rust-lint",
+          "condition": "",
+          "run": "./scripts/ci/run_rust_lint_lane.sh"
+        }
+      ]
+    },
+    {
+      "name": "Rust workspace tests",
+      "job_id": "rust-check-inputs",
+      "matrix_kind": "",
+      "proofs": ["rust-audit"],
+      "steps": [
+        {
+          "id": "release-audit-rust-test",
+          "condition": "vars.HARN_CI_DISABLE_COLOCATED_TESTS != 'true'",
+          "required_env": {"HARN_LLM_CALLS_DISABLED": "1"},
+          "run": "scripts/ci/run_rust_test_lane.sh cargo nextest run --locked --workspace --profile ci -E 'not (test(test_linux_process_sandbox_catches_ten_process_escapes) or test(workspace_env_integration) or test(local_backend_execs_inside_session_outputs) or test(local_backend_timeout_is_enforced_without_shell_timeout_binary) or test(sandboxed_npm_install_resolves_file_tarball_dependency_offline))'"
+        }
+      ]
+    },
+    {
+      "name": "Run Linux sandbox tests",
+      "job_id": "rust-security",
+      "matrix_kind": "",
+      "proofs": ["rust-audit"],
+      "steps": [
+        {
+          "id": "release-audit-rust-security",
+          "condition": "",
+          "run": "scripts/ci/run_rust_test_lane.sh cargo nextest run --profile ci --archive-file \"$RUNNER_TEMP/harn-security/harn-security-tests.tar.zst\" --workspace-remap \"$GITHUB_WORKSPACE\" -E 'test(test_linux_process_sandbox_catches_ten_process_escapes) or test(workspace_env_integration) or test(local_backend_execs_inside_session_outputs) or test(local_backend_timeout_is_enforced_without_shell_timeout_binary) or test(sandboxed_npm_install_resolves_file_tarball_dependency_offline)'"
+        }
+      ]
+    },
+    {
+    "name": "Run Harn conformance tests",
+    "job_id": "harn-audit",
+    "matrix_kind": "conformance",
+      "proofs": ["harn-audit"],
+      "steps": [
+        {
+          "id": "release-audit-harn",
+          "condition": "",
+        "run": "./scripts/audit_gates.sh --phase \"${{ matrix.kind }}\""
+      }
+    ]
+  },
+  {
+    "name": "Check Harn sources and generated files",
+    "job_id": "harn-audit",
+    "matrix_kind": "audit",
+    "proofs": [
+      "harn-audit"
+    ],
+    "steps": [
+      {
+        "id": "release-audit-harn",
+        "condition": "",
+        "run": "./scripts/audit_gates.sh --phase \"${{ matrix.kind }}\""
+      }
+      ]
+    }
+  ]
+}

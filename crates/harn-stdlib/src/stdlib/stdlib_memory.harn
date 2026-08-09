@@ -1,0 +1,140 @@
+// std/memory — append-only durable memory with optional host-backed vector recall.
+//
+// Import: import "std/memory"
+//
+// The default backend is deterministic BM25 lexical recall. Call
+// `memory_open(namespace, {backend: "vector" | "hybrid", ...})` once to
+// switch a namespace to host-provided embeddings via the `memory.embed`
+// host capability. Recall queries can override the namespace default per
+// call by passing `{mode: "lexical" | "semantic" | "hybrid"}`. Embeddings
+// are cached on disk per `(model_hint, content_hash)` so replays are
+// deterministic from the recorded event log.
+/**
+ * Configure a memory namespace.
+ *
+ * `options.backend` selects the recall backend ("bm25" — default,
+ * "vector", or "hybrid"). `options.embed_model_hint` selects the host
+ * embedding model. `options.embed_dim`, `options.bm25_weight`, and
+ * `options.cosine_weight` are optional. Open events are append-only;
+ * calling `memory_open` again replaces the active config.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn memory_open(memory: HarnessMemory, namespace, options = nil) {
+  return memory.open(namespace, options)
+}
+
+/**
+ * Append a memory observation.
+ *
+ * Set `options.embed: true` (or open the namespace with backend
+ * "vector"/"hybrid") to eagerly cache the record's embedding so later
+ * semantic recall is cache-only.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn memory_store(memory: HarnessMemory, namespace, key, value, tags = nil, options = nil) {
+  return memory.store(namespace, key, value, tags, options)
+}
+
+/**
+ * Recall active records ranked by the namespace backend.
+ *
+ * Pass `options.mode` to override per call ("lexical", "semantic", or
+ * "hybrid"). `options.embed_model_hint` overrides the namespace embedding
+ * model for this query only.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn memory_recall(memory: HarnessMemory, namespace, query, k = nil, options = nil) {
+  return memory.recall(namespace, query, k, options)
+}
+
+/**
+ * memory_summarize.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn memory_summarize(memory: HarnessMemory, namespace, window = nil, options = nil) {
+  return memory.summarize(namespace, window, options)
+}
+
+/**
+ * memory_forget.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn memory_forget(memory: HarnessMemory, namespace, predicate, options = nil) {
+  return memory.forget(namespace, predicate, options)
+}
+
+/**
+ * Append an in-place update to the record with `id` and return the updated
+ * record (or nil if the id is unknown or forgotten).
+ *
+ * `patch` may set any of `value`, `tags`, `status`, `scope`, `flags` (a
+ * `{name: bool}` map merged key-by-key), and `provenance`. Absent keys leave
+ * the record unchanged; updating `value` refreshes the derived search text.
+ * The event log stays append-only — the update is overlaid at projection.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn memory_update(memory: HarnessMemory, namespace, id, patch, options = nil) {
+  return memory.update(namespace, id, patch, options)
+}
+
+/**
+ * Enumerate active records in a namespace, newest first.
+ *
+ * Unlike `memory_recall` (query-ranked), this returns the full listing.
+ * Filter with `options.status`, `options.scope`, `options.tag`, `options.flag`
+ * (a flag name that must be true), and `options.limit`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn memory_list(memory: HarnessMemory, namespace, options = nil) {
+  return memory.list(namespace, options)
+}
+
+/**
+ * Return the active records flagged to auto-surface as reminders — the ones
+ * whose per-record flag (default `auto_surface`) is true. Deterministic: a
+ * filtered enumeration, safe to call every turn to build the turn's reminders.
+ *
+ * Pass `options.flag` to use a different flag name, plus any `memory_list`
+ * filter (`status`, `scope`, `tag`, `limit`).
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn memory_reminders(memory: HarnessMemory, namespace, options = nil) {
+  const flag = (options ?? {})?.flag ?? "auto_surface"
+  return memory_list(memory, namespace, (options ?? {}) + {flag: flag})
+}
+
+/**
+ * Embed `text` into a dense vector via the host `memory.embed` capability.
+ *
+ * Returns `{vector: list<float>, model: string, dim: int}`. Embeddings are
+ * content-addressed and cached on disk per `(model_hint, sha256(text))`, so
+ * embedding the same text twice is a cache-only replay — deterministic under
+ * a recorded event log. This is the raw primitive behind semantic recall and
+ * semantic response caching (see `std/llm/handlers` `with_semantic_cache`);
+ * reach for `memory_recall` when you want ranked document search instead.
+ *
+ * `options.embed_model_hint` (alias `options.model_hint`) selects the host
+ * embedding model; `options.root` overrides the on-disk cache root.
+ *
+ * @effects: [host]
+ * @errors: []
+ */
+pub fn embed(embedder: HarnessEmbed, text, options = nil) -> dict {
+  return embedder.text(text, options)
+}

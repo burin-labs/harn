@@ -1,0 +1,4 @@
+[harn] localhost:8080 debug=false
+[harn] example.com:8080 debug=false
+[harn] example.com:3000 debug=false
+[harn] example.com:3000 debug=true

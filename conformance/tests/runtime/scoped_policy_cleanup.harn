@@ -1,0 +1,40 @@
+import { agent_dispatch_tool_call } from "std/agent/primitives"
+
+fn scoped_tools() {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "write_note",
+    "Write a note",
+    {
+      handler: { args -> "wrote " + args.path },
+      parameters: {path: {type: "string", description: "Path"}},
+      returns: {type: "string"},
+    },
+  )
+  return tools
+}
+
+pipeline main(harness: Harness) {
+  const tools = scoped_tools()
+  const call = {name: "write_note", arguments: {path: "notes.txt"}}
+  const denied = harness.runtime.with_approval_policy(
+    {auto_deny: ["write*"]},
+    fn() { return agent_dispatch_tool_call(harness.tools, call, tools) },
+  )
+  harness.stdio.println(denied.ok)
+  harness.stdio.println(denied.error_category)
+  try {
+    harness.runtime.with_approval_policy(
+      {auto_deny: ["write*"]},
+      fn() {
+        throw "boom"
+      },
+    )
+  } catch (e) {
+    harness.stdio.println("caught")
+  }
+  const allowed = agent_dispatch_tool_call(harness.tools, call, tools)
+  harness.stdio.println(allowed.ok)
+  harness.stdio.println(allowed.rendered_result)
+}

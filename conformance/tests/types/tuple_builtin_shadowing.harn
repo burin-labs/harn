@@ -1,0 +1,7 @@
+fn tuple(value: int) -> string {
+  return "user:${value}"
+}
+
+pipeline default(harness: Harness) {
+  harness.stdio.println(tuple(9))
+}

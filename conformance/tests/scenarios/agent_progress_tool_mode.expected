@@ -1,0 +1,6 @@
+tool_exposed=true
+progress_events=1
+event_message=from tool
+entry_status=in_progress
+replace=false
+result_status=done

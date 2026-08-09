@@ -1,0 +1,7 @@
+fn make_callback() -> fn(int) -> int {
+  { x -> x + "oops" }
+}
+
+pipeline default(harness: Harness) {
+  harness.stdio.println(0)
+}

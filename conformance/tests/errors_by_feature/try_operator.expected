@@ -1,0 +1,3 @@
+[harn] Result.Ok(20)
+[harn] Result.Err(division by zero)
+[harn] Result.Ok(10)

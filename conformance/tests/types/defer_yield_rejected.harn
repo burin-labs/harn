@@ -1,0 +1,8 @@
+pipeline test(harness: Harness, task) {
+  fn bad() {
+    defer {
+      yield 1
+    }
+  }
+  bad()
+}

@@ -1,0 +1,11 @@
+fn classify(b: bool) -> string {
+  match b {
+    true -> { return "yes" }
+    false -> { return "no" }
+  }
+}
+
+pipeline default(harness: Harness) {
+  harness.stdio.println(classify(true))
+  harness.stdio.println(classify(false))
+}

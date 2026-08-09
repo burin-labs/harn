@@ -1,0 +1,15 @@
+[package]
+name = "notion-content-review-scheduler"
+
+[exports]
+handlers = "lib.harn"
+
+[[triggers]]
+id = "notion-content-review-scheduler"
+kind = "cron"
+provider = "cron"
+match = { events = ["cron.tick"] }
+handler = "handlers::schedule_content_reviews"
+schedule = "0 10 * * 1"
+timezone = "America/Los_Angeles"
+budget = { daily_cost_usd = 1.00, max_concurrent = 1 }

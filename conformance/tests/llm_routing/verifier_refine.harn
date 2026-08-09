@@ -1,0 +1,33 @@
+import { with_llm_script } from "std/testing"
+
+/**
+ * Verifier-signal refine: the first attempt has a forbidden pattern,
+ * the lint verifier asks the router to retry the same link with a
+ * tightened prompt. The second attempt is clean and gets returned.
+ * Both attempts must show up on the routing trace.
+ */
+pipeline test(harness: Harness, task) {
+  with_llm_script(
+    harness.llm,
+    [
+      {text: "use unwrap() here", model: "mock", provider: "mock"},
+      {text: "use match instead", model: "mock", provider: "mock"},
+    ],
+    { ->
+      const policy = harness.llm.routing_policy(
+        {
+          chain: [{provider: "mock", model: "mock", label: "cheap"}],
+          escalate_on: [{kind: "lint", forbidden_patterns: ["unwrap"], on_fail: "refine"}],
+          label: "verifier-refine",
+        },
+      )
+      const result = harness.llm.call("question", nil, {routing: policy})
+      harness.stdio.println(result.text)
+      const attempts = result.routing.attempts
+      harness.stdio.println(len(attempts))
+      harness.stdio.println(attempts[0].verifier_outcome)
+      harness.stdio.println(attempts[1].verifier_outcome)
+      harness.stdio.println(result.routing.selected)
+    },
+  )
+}

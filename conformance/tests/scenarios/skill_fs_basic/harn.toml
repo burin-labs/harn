@@ -1,0 +1,12 @@
+# Marker file so `find_project_root` anchors here and the fixture's
+# `.harn/skills/` is the only skill source in scope. Keeps the
+# conformance result stable across user home / machine setup.
+
+[package]
+name = "skill-fs-basic"
+version = "0.0.0"
+
+[skills]
+# Exercise `disable` — host layer has no source here but the doctor
+# path uses this entry.
+disable = ["system"]

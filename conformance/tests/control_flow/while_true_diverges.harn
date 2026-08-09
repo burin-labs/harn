@@ -1,0 +1,35 @@
+// A `while true { ... }` with no `break` binding to it diverges, so a
+// function whose tail is such a loop needs no unreachable trailing return.
+fn first_over(limit: int) -> int {
+  let n = 0
+  while true {
+    n = n + 7
+    if n > limit {
+      return n
+    }
+  }
+}
+
+// Nested infinite loops: the inner `break` binds the inner loop, so the
+// outer `while true` still diverges and the tail needs no return.
+fn nested(limit: int) -> int {
+  let total = 0
+  while true {
+    let step = 0
+    while true {
+      step = step + 1
+      if step == 3 {
+        break
+      }
+    }
+    total = total + step
+    if total >= limit {
+      return total
+    }
+  }
+}
+
+pipeline test(harness: Harness, task) {
+  harness.stdio.log(first_over(20))
+  harness.stdio.log(nested(7))
+}

@@ -1,0 +1,209 @@
+use std::sync::Arc;
+
+use harn_parser::{BindingPattern, ParallelMode, SNode, SelectCase, TypeExpr, TypedParam};
+
+use crate::chunk::{CompiledFunction, Constant, Op};
+
+use super::error::CompileError;
+use super::Compiler;
+
+impl Compiler {
+    pub(super) fn compile_parallel(
+        &mut self,
+        mode: &ParallelMode,
+        expr: &SNode,
+        variable: &Option<String>,
+        body: &[SNode],
+        options: &[(String, SNode)],
+    ) -> Result<(), CompileError> {
+        // Push the `max_concurrent` cap first so the runtime
+        // opcodes can pop it beneath the iterable + closure. A
+        // cap of 0 (or a missing `with { ... }` clause) means
+        // "unlimited". Unknown option keys are parser errors.
+        let cap_expr = options
+            .iter()
+            .find(|(key, _)| key == "max_concurrent")
+            .map(|(_, value)| value);
+        if let Some(cap_expr) = cap_expr {
+            self.compile_node(cap_expr)?;
+        } else {
+            let zero_idx = self.chunk.add_constant(Constant::Int(0));
+            self.chunk.emit_u16(Op::Constant, zero_idx, self.line);
+        }
+        let (fn_name, params) = match mode {
+            ParallelMode::Count => (
+                "<parallel>",
+                vec![variable.clone().unwrap_or_else(|| "__i__".to_string())],
+            ),
+            ParallelMode::Each | ParallelMode::EachStream => (
+                "<parallel_each>",
+                vec![variable.clone().unwrap_or_else(|| "__item__".to_string())],
+            ),
+            ParallelMode::Settle => (
+                "<parallel_settle>",
+                vec![variable.clone().unwrap_or_else(|| "__item__".to_string())],
+            ),
+        };
+        let param_type = match mode {
+            ParallelMode::Count => Some(TypeExpr::Named("int".into())),
+            ParallelMode::Each | ParallelMode::EachStream | ParallelMode::Settle => {
+                self.infer_for_item_type(expr)
+            }
+        };
+        self.compile_node(expr)?;
+        let mut fn_compiler = self.nested_body();
+        fn_compiler.enum_names = self.enum_names.clone();
+        fn_compiler.enum_variant_owners = self.enum_variant_owners.clone();
+        fn_compiler.imported_enum_candidates = self.imported_enum_candidates.clone();
+        fn_compiler.imported_enum_candidates_authoritative =
+            self.imported_enum_candidates_authoritative;
+        fn_compiler.interface_methods = self.interface_methods.clone();
+        fn_compiler.type_aliases = self.type_aliases.clone();
+        let typed_params = params.iter().map(TypedParam::untyped).collect::<Vec<_>>();
+        fn_compiler.declare_param_slots(&typed_params);
+        fn_compiler.struct_layouts = self.struct_layouts.clone();
+        if let Some(param_name) = params.first() {
+            fn_compiler
+                .record_binding_type(&BindingPattern::Identifier(param_name.clone()), param_type);
+        }
+        fn_compiler.seed_captured_idents(body);
+        fn_compiler.compile_block(body)?;
+        fn_compiler.chunk.emit(Op::Return, self.line);
+        let param_slots = fn_compiler.compile_param_slots(&typed_params);
+        let has_runtime_type_checks =
+            CompiledFunction::has_runtime_type_checks_for_params(&param_slots);
+        super::ensure_chunk_addressable(&fn_compiler.chunk, &format!("`{fn_name}`"), self.line)?;
+        let func = CompiledFunction {
+            name: fn_name.to_string(),
+            type_params: Vec::new(),
+            nominal_type_names: fn_compiler.nominal_type_names(),
+            params: param_slots,
+            default_start: None,
+            chunk: Arc::new(fn_compiler.chunk),
+            is_generator: false,
+            is_stream: false,
+            has_rest_param: false,
+            has_runtime_type_checks,
+        };
+        let fn_idx = self.chunk.functions.len();
+        self.chunk.functions.push(Arc::new(func));
+        self.chunk.emit_u16(Op::Closure, fn_idx as u16, self.line);
+        let op = match mode {
+            ParallelMode::Count => Op::Parallel,
+            ParallelMode::Each => Op::ParallelMap,
+            ParallelMode::EachStream => Op::ParallelMapStream,
+            ParallelMode::Settle => Op::ParallelSettle,
+        };
+        self.chunk.emit(op, self.line);
+        Ok(())
+    }
+
+    pub(super) fn compile_spawn_expr(&mut self, body: &[SNode]) -> Result<(), CompileError> {
+        let mut fn_compiler = self.nested_body();
+        fn_compiler.enum_names = self.enum_names.clone();
+        fn_compiler.enum_variant_owners = self.enum_variant_owners.clone();
+        fn_compiler.imported_enum_candidates = self.imported_enum_candidates.clone();
+        fn_compiler.imported_enum_candidates_authoritative =
+            self.imported_enum_candidates_authoritative;
+        fn_compiler.interface_methods = self.interface_methods.clone();
+        fn_compiler.type_aliases = self.type_aliases.clone();
+        fn_compiler.struct_layouts = self.struct_layouts.clone();
+        fn_compiler.seed_captured_idents(body);
+        fn_compiler.compile_block(body)?;
+        fn_compiler.chunk.emit(Op::Return, self.line);
+        super::ensure_chunk_addressable(&fn_compiler.chunk, "spawn body", self.line)?;
+        let func = CompiledFunction {
+            name: "<spawn>".to_string(),
+            type_params: Vec::new(),
+            nominal_type_names: fn_compiler.nominal_type_names(),
+            params: vec![],
+            default_start: None,
+            chunk: Arc::new(fn_compiler.chunk),
+            is_generator: false,
+            is_stream: false,
+            has_rest_param: false,
+            has_runtime_type_checks: false,
+        };
+        let fn_idx = self.chunk.functions.len();
+        self.chunk.functions.push(Arc::new(func));
+        self.chunk.emit_u16(Op::Closure, fn_idx as u16, self.line);
+        self.chunk.emit(Op::Spawn, self.line);
+        Ok(())
+    }
+
+    pub(super) fn compile_select_expr(
+        &mut self,
+        cases: &[SelectCase],
+        timeout: &Option<(Box<SNode>, Vec<SNode>)>,
+        default_body: &Option<Vec<SNode>>,
+    ) -> Result<(), CompileError> {
+        // Desugar `select` into a builtin call returning a dict with
+        // {index, value}, then dispatch on result.index. `index == -1`
+        // means timeout / default fell through.
+        let builtin_name = if timeout.is_some() {
+            "__select_timeout"
+        } else if default_body.is_some() {
+            "__select_try"
+        } else {
+            "__select_list"
+        };
+
+        let name_idx = self.string_constant(builtin_name);
+        self.chunk.emit_u16(Op::Constant, name_idx, self.line);
+
+        for case in cases {
+            self.compile_node(&case.channel)?;
+        }
+        self.chunk
+            .emit_u16(Op::BuildList, cases.len() as u16, self.line);
+
+        if let Some((duration_expr, _)) = timeout {
+            self.compile_node(duration_expr)?;
+            self.chunk.emit_u8(Op::Call, 2, self.line);
+        } else {
+            self.chunk.emit_u8(Op::Call, 1, self.line);
+        }
+
+        self.temp_counter += 1;
+        let result_name = format!("__sel_result_{}__", self.temp_counter);
+        self.emit_define_binding(&result_name, true);
+
+        let mut end_jumps = Vec::new();
+
+        for (i, case) in cases.iter().enumerate() {
+            self.emit_get_binding(&result_name);
+            let idx_prop = self.string_constant("index");
+            self.chunk.emit_u16(Op::GetProperty, idx_prop, self.line);
+            let case_i = self.chunk.add_constant(Constant::Int(i as i64));
+            self.chunk.emit_u16(Op::Constant, case_i, self.line);
+            self.chunk.emit(Op::Equal, self.line);
+            let skip = self.chunk.emit_jump(Op::JumpIfFalse, self.line);
+            self.chunk.emit(Op::Pop, self.line);
+            self.begin_scope();
+
+            self.emit_get_binding(&result_name);
+            let val_prop = self.string_constant("value");
+            self.chunk.emit_u16(Op::GetProperty, val_prop, self.line);
+            self.emit_define_binding(&case.variable, false);
+
+            self.compile_try_body(&case.body)?;
+            self.end_scope();
+            end_jumps.push(self.chunk.emit_jump(Op::Jump, self.line));
+            self.chunk.patch_jump(skip);
+            self.chunk.emit(Op::Pop, self.line);
+        }
+
+        if let Some((_, ref timeout_body)) = timeout {
+            self.compile_try_body(timeout_body)?;
+        } else if let Some(ref def_body) = default_body {
+            self.compile_try_body(def_body)?;
+        } else {
+            self.chunk.emit(Op::Nil, self.line);
+        }
+
+        for ej in end_jumps {
+            self.chunk.patch_jump(ej);
+        }
+        Ok(())
+    }
+}

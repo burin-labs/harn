@@ -1,0 +1,5 @@
+fn main(harness: Harness) {
+  let opts = {provider: "mock"}
+  opts["reasoning_effort"] = "high"
+  harness.llm.call("x", nil, opts)
+}

@@ -1,0 +1,23 @@
+pipeline test(harness: Harness, task) {
+  // Start clean in case a previous run left state
+  harness.runtime.checkpoint_clear()
+  // Non-existent key returns false
+  assert(!harness.runtime.checkpoint_exists("step1"), "missing key should return false")
+  // After setting, exists returns true
+  harness.runtime.checkpoint("step1", "done")
+  assert(harness.runtime.checkpoint_exists("step1"), "existing key should return true")
+  // Works with any serializable value type
+  harness.runtime.checkpoint("step2", 42)
+  harness.runtime.checkpoint("step3", {status: "ok"})
+  assert(harness.runtime.checkpoint_exists("step2"), "int value should exist")
+  assert(harness.runtime.checkpoint_exists("step3"), "dict value should exist")
+  assert(!harness.runtime.checkpoint_exists("step4"), "step4 not set yet")
+  // Still works after overwriting a key
+  harness.runtime.checkpoint("step1", "updated")
+  assert(harness.runtime.checkpoint_exists("step1"), "still exists after overwrite")
+  // Also works for nil values (key present even if value is nil)
+  harness.runtime.checkpoint("nil_key", nil)
+  assert(harness.runtime.checkpoint_exists("nil_key"), "key with nil value should still exist")
+  harness.runtime.checkpoint_clear()
+  harness.stdio.log("checkpoint_exists tests passed")
+}

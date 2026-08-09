@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "data": {
+    "files": [
+      {
+        "path": "src/agent.harn",
+        "status": "warning",
+        "diagnostics": [
+          {
+            "source": "lint",
+            "severity": "warning",
+            "code": "HARN-LNT-032",
+            "message": "comparison to `false` is redundant",
+            "span": { "start": 128, "end": 142 }
+          }
+        ],
+        "fixable": 1,
+        "fixed": 0
+      }
+    ],
+    "summary": {
+      "ok": 0,
+      "warnings": 1,
+      "errors": 0,
+      "diagnostics": 1,
+      "fixable": 1,
+      "fixed": 0
+    }
+  },
+  "error": null,
+  "warnings": []
+}

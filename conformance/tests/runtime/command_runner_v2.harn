@@ -1,0 +1,13 @@
+pipeline default(harness: Harness) {
+  const argv = harness.process.run({program: "printf", args: ["runner-v2"]})
+  harness.stdio.println(argv.status)
+  harness.stdio.println(argv.exit_code)
+  harness.stdio.println(argv.success)
+  harness.stdio.println(argv.stdout)
+  harness.stdio.println(argv.command_id != nil)
+  harness.stdio.println(argv.pid != nil)
+  const shell = harness.process.shell("printf shell-v2")
+  harness.stdio.println(shell?.status)
+  harness.stdio.println(shell?.exit_code)
+  harness.stdio.println(shell?.stdout)
+}

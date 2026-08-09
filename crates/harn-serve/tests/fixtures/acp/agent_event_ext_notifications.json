@@ -1,0 +1,595 @@
+[
+  {
+    "jsonrpc": "2.0",
+    "method": "_harn/agentEvent",
+    "params": {
+      "iteration": 0,
+      "kind": "iteration_start",
+      "sessionId": "session-1"
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "_harn/agentEvent",
+    "params": {
+      "iteration": 0,
+      "iterationInfo": {
+        "tool_calls": 2,
+        "tool_names": ["read_file", "grep"]
+      },
+      "kind": "iteration_end",
+      "sessionId": "session-1"
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "_harn/agentEvent",
+    "params": {
+      "artifacts": [],
+      "bindingManifestHash": "sha256:manifest-readonly",
+      "durationMs": null,
+      "error": null,
+      "failureCategory": null,
+      "kind": "composition_start",
+      "language": "harn",
+      "metadata": {},
+      "requestedSideEffectCeiling": "read_only",
+      "result": null,
+      "runId": "cmp-1",
+      "sessionId": "session-1",
+      "snippetHash": "sha256:2ef48d9c1687d751a5d53acf87171cfa53db1e0bfb28f4e86ea57e8054d9e775",
+      "stderr": null,
+      "stdout": null
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "_harn/agentEvent",
+    "params": {
+      "annotations": {
+        "arg_schema": {
+          "arg_aliases": {},
+          "dependency_key_params": [],
+          "dependency_range_params": [],
+          "path_params": [],
+          "required": []
+        },
+        "capabilities": {},
+        "emits_artifacts": false,
+        "inline_result": false,
+        "kind": "search",
+        "result_readers": [],
+        "side_effect_level": "read_only"
+      },
+      "kind": "composition_child_call",
+      "operationIndex": 0,
+      "policyContext": {
+        "approval": "not_required",
+        "ceiling": "read_only"
+      },
+      "rawInput": {
+        "query": "agent_events"
+      },
+      "requestedSideEffectLevel": "read_only",
+      "runId": "cmp-1",
+      "sessionId": "session-1",
+      "toolCallId": "tool-cmp-1",
+      "toolName": "tool.search"
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "_harn/agentEvent",
+    "params": {
+      "durationMs": 11,
+      "error": null,
+      "errorCategory": null,
+      "executionDurationMs": 9,
+      "executor": "harn_builtin",
+      "kind": "composition_child_result",
+      "operationIndex": 0,
+      "rawOutput": {
+        "count": 1
+      },
+      "runId": "cmp-1",
+      "sessionId": "session-1",
+      "status": "completed",
+      "toolCallId": "tool-cmp-1",
+      "toolName": "tool.search"
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "_harn/agentEvent",
+    "params": {
+      "artifacts": [],
+      "bindingManifestHash": "sha256:manifest-readonly",
+      "durationMs": 18,
+      "error": null,
+      "failureCategory": null,
+      "kind": "composition_finish",
+      "language": "harn",
+      "metadata": {},
+      "requestedSideEffectCeiling": "read_only",
+      "result": {
+        "matches": ["crates/harn-vm/src/lib.rs"]
+      },
+      "runId": "cmp-1",
+      "sessionId": "session-1",
+      "snippetHash": "sha256:2ef48d9c1687d751a5d53acf87171cfa53db1e0bfb28f4e86ea57e8054d9e775",
+      "stderr": null,
+      "stdout": "2 files scanned"
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "_harn/agentEvent",
+    "params": {
+      "artifacts": [],
+      "bindingManifestHash": "sha256:manifest-write",
+      "durationMs": null,
+      "error": null,
+      "failureCategory": null,
+      "kind": "composition_start",
+      "language": "harn",
+      "metadata": {},
+      "requestedSideEffectCeiling": "workspace_write",
+      "result": null,
+      "runId": "cmp-2",
+      "sessionId": "session-1",
+      "snippetHash": "sha256:cece894820918a7586744d6bba556cc4b40261d9539272bc29eef2913f3662ce",
+      "stderr": null,
+      "stdout": null
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "_harn/agentEvent",
+    "params": {
+      "annotations": {
+        "arg_schema": {
+          "arg_aliases": {},
+          "dependency_key_params": [],
+          "dependency_range_params": [],
+          "path_params": [],
+          "required": []
+        },
+        "capabilities": {},
+        "emits_artifacts": false,
+        "inline_result": false,
+        "kind": "edit",
+        "result_readers": [],
+        "side_effect_level": "workspace_write"
+      },
+      "kind": "composition_child_call",
+      "operationIndex": 0,
+      "policyContext": {
+        "approval": "denied",
+        "ceiling": "workspace_write"
+      },
+      "rawInput": {
+        "content": "...",
+        "path": "src/lib.rs"
+      },
+      "requestedSideEffectLevel": "workspace_write",
+      "runId": "cmp-2",
+      "sessionId": "session-1",
+      "toolCallId": "tool-cmp-2",
+      "toolName": "tool.write_file"
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "_harn/agentEvent",
+    "params": {
+      "durationMs": 3,
+      "error": "workspace writes require approval",
+      "errorCategory": "permission_denied",
+      "executionDurationMs": 0,
+      "executor": null,
+      "kind": "composition_child_result",
+      "operationIndex": 0,
+      "rawOutput": null,
+      "runId": "cmp-2",
+      "sessionId": "session-1",
+      "status": "failed",
+      "toolCallId": "tool-cmp-2",
+      "toolName": "tool.write_file"
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "_harn/agentEvent",
+    "params": {
+      "artifacts": [],
+      "bindingManifestHash": "sha256:manifest-write",
+      "durationMs": 3,
+      "error": "workspace writes require approval",
+      "failureCategory": "policy_denied",
+      "kind": "composition_error",
+      "language": "harn",
+      "metadata": {},
+      "requestedSideEffectCeiling": "workspace_write",
+      "result": null,
+      "runId": "cmp-2",
+      "sessionId": "session-1",
+      "snippetHash": "sha256:cece894820918a7586744d6bba556cc4b40261d9539272bc29eef2913f3662ce",
+      "stderr": null,
+      "stdout": null
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "_harn/agentEvent",
+    "params": {
+      "action": "rewritten",
+      "kind": "compass_routing_decision",
+      "mode": "rewrite",
+      "originalTool": "str_replace",
+      "path": "src/lib.rs",
+      "persona": "fixer",
+      "routedTool": "edit_safe_text_patch",
+      "sessionId": "session-1",
+      "targetTool": "edit_safe_text_patch",
+      "toolCallId": "tool-edit-1"
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "_harn/agentEvent",
+    "params": {
+      "kind": "session_closed",
+      "metadata": {
+        "idle_ms": 5000
+      },
+      "reason": "timeout",
+      "sessionId": "session-1",
+      "status": "timeout"
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "_harn/agentEvent",
+    "params": {
+      "acceptedEvidence": [],
+      "confirm": false,
+      "convertedFrom": "cosmetic_only",
+      "escalationRecommended": true,
+      "escalationTarget": "frontier",
+      "iteration": 0,
+      "judgeDurationMs": 42,
+      "kind": "judge_decision",
+      "nextStep": "run the verifier",
+      "reason": "repeated_verification_failures",
+      "reasoning": "needs one more concrete action",
+      "sessionId": "session-1",
+      "source": "deterministic",
+      "specificGaps": [
+        "rerun the verifier",
+        "cite the changed source file"
+      ],
+      "trigger": "stalled",
+      "verdict": "continue"
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "_harn/agentEvent",
+    "params": {
+      "attempts": 0,
+      "diagnostic": "Assistant emitted no tool calls while writable tools were available.",
+      "iteration": 1,
+      "kind": "structural_validator_decision",
+      "maxAttempts": 3,
+      "onFailure": "regenerate_with_feedback",
+      "reason": null,
+      "recommendedAction": "Emit the concrete write or edit tool call needed for the task, or only mark the task done after that work is complete.",
+      "rule": "non_empty_when_writes_expected",
+      "sessionId": "session-1",
+      "skipped": false,
+      "vetoed": true
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "_harn/agentEvent",
+    "params": {
+      "actor": "implementer",
+      "kind": "require_successful_tools_violation",
+      "metadata": {
+        "iterations": 2,
+        "missing_required_tools": [
+          "edit"
+        ],
+        "successful_tool_names": []
+      },
+      "recurrenceHints": [
+        "missing_required_tools=1"
+      ],
+      "redactedSummary": "agent_loop completed without invoking edit",
+      "runId": "run-1",
+      "sessionId": "session-1",
+      "source": "agent_loop.require_successful_tools",
+      "violationKind": "tool_gap"
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "_harn/agentEvent",
+    "params": {
+      "finalStatus": "max_iterations",
+      "hostDirective": false,
+      "iteration": 4,
+      "kind": "final_wrapup",
+      "sessionId": "session-1",
+      "stopReason": "iteration_limit",
+      "terminalKind": "max_iterations"
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "_harn/agentEvent",
+    "params": {
+      "kind": "pack_thinking_stripped",
+      "model": "claude-opus-adaptive",
+      "reason": "claude_opus_adaptive",
+      "requested": "high",
+      "sessionId": "session-1"
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "_harn/agentEvent",
+    "params": {
+      "answer": "alpha",
+      "distribution": [
+        {
+          "answer": "alpha",
+          "count": 2
+        },
+        {
+          "answer": "beta",
+          "count": 2
+        }
+      ],
+      "kind": "self_consistency_tie",
+      "sessionId": "session-1",
+      "total": 4
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "_harn/agentEvent",
+    "params": {
+      "attemptedCypher": null,
+      "kind": "code_librarian_query_nl_fallback",
+      "mctsDepth": 3,
+      "mctsExpansions": 9,
+      "resultCount": 2,
+      "sessionId": "session-1",
+      "text": "where is session recovery implemented?"
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "_harn/agentEvent",
+    "params": {
+      "event": {
+        "at_ms": 12,
+        "backend": "fixture",
+        "job_id": "job-1",
+        "kind": "state_changed",
+        "request_id": "logo-1",
+        "schema": "harn.model_job_event.v1",
+        "state": "running"
+      },
+      "kind": "model_job",
+      "sessionId": "session-1"
+    }
+  },
+
+  {
+    "jsonrpc": "2.0",
+    "method": "_harn/agentEvent",
+    "params": {
+      "checkpoint": {
+        "stage": "verify",
+        "type": "stage_gate"
+      },
+      "kind": "typed_checkpoint",
+      "sessionId": "session-1"
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "_harn/agentEvent",
+    "params": {
+      "deliveredAtSeam": "immediate",
+      "delivery": "immediate",
+      "durationMs": 17,
+      "error": null,
+      "injectionId": "inj-tool-1",
+      "kind": "host_tool_result",
+      "provenance": {
+        "host": "tui",
+        "initiator": "user",
+        "source": "user_invoked_tool",
+        "ts_ms": 1782000000000
+      },
+      "rawInput": {
+        "url": "https://example.test"
+      },
+      "rawOutput": {
+        "text": "payload"
+      },
+      "resultPointer": null,
+      "sanitization": {
+        "action": "passed",
+        "delivered_bytes": 7,
+        "labels": [
+          "web_content"
+        ],
+        "original_bytes": 31,
+        "trust": "untrusted"
+      },
+      "sequence": 2,
+      "sessionId": "session-1",
+      "status": "completed",
+      "toolCallId": "hosttc-1",
+      "toolName": "web_fetch"
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "_harn/agentEvent",
+    "params": {
+      "artifactPointer": ".burin/chat-assets/a.png",
+      "deliveredAtSeam": "immediate",
+      "delivery": "immediate",
+      "description": "screenshot",
+      "descriptionModel": "vision-model",
+      "flavor": "image",
+      "injectionId": "inj-attachment-1",
+      "kind": "host_attachment",
+      "mediaType": "image/png",
+      "provenance": {
+        "host": "tui",
+        "initiator": "user",
+        "source": "user_attachment",
+        "ts_ms": 1782000000001
+      },
+      "rendered": "pointer_only",
+      "sanitization": {
+        "action": "pointerized",
+        "delivered_bytes": 22,
+        "original_bytes": 42,
+        "trust": "untrusted"
+      },
+      "sequence": 3,
+      "sessionId": "session-1",
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "sizeBytes": 42
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "_harn/agentEvent",
+    "params": {
+      "content": "missed required tool call; reissuing",
+      "feedbackKind": "protocol_violation",
+      "kind": "feedback_injected",
+      "sessionId": "session-1"
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "_harn/agentEvent",
+    "params": {
+      "budgetKind": "max_iterations",
+      "costUsd": 0.12,
+      "kind": "budget_exhausted",
+      "maxIterations": 8,
+      "sessionId": "session-1",
+      "wallClockMs": 1500
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "_harn/agentEvent",
+    "params": {
+      "breakerKind": "consecutive_failures",
+      "consecutiveCount": 3,
+      "kind": "budget_circuit_breaker",
+      "pausedForMs": 2000,
+      "sessionId": "session-1"
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "_harn/agentEvent",
+    "params": {
+      "kind": "loop_stuck",
+      "lastIteration": 4,
+      "maxNudges": 3,
+      "sessionId": "session-1",
+      "tailExcerpt": "still thinking..."
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "_harn/agentEvent",
+    "params": {
+      "attempts": 5,
+      "elapsedMs": 12000,
+      "kind": "daemon_watchdog_tripped",
+      "sessionId": "session-1"
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "_harn/agentEvent",
+    "params": {
+      "action": "extend",
+      "iteration": 6,
+      "kind": "loop_control_decision",
+      "newLimit": 10,
+      "oldLimit": 8,
+      "reason": "verification still running",
+      "sessionId": "session-1",
+      "status": "working"
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "_harn/agentEvent",
+    "params": {
+      "catalogParity": "native_unreliable",
+      "kind": "tool_format_override",
+      "model": "qwen/qwen3-coder",
+      "overrideReason": "cross-check provider regression",
+      "provider": "openrouter",
+      "recommendedFormat": "text",
+      "requestedFormat": "native",
+      "sessionId": "session-1"
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "_harn/agentEvent",
+    "params": {
+      "audit": {
+        "consent": "not_required",
+        "summary": "Read project context"
+      },
+      "kind": "tool_call_audit",
+      "receipt": {
+        "schema_version": 1,
+        "session_id": "session-1",
+        "run_id": "run-1",
+        "tool_call_id": "tool-1",
+        "tool_name": "read_file",
+        "iteration": 6,
+        "turn_index": 5,
+        "emit_order": 0,
+        "reason": "Read project context",
+        "kind": "read",
+        "executor": "harn",
+        "status": "ok",
+        "error_category": null,
+        "duration_ms": 7,
+        "args_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "result_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+        "audit": {
+          "consent": "not_required",
+          "summary": "Read project context"
+        },
+        "emitted_at": "2026-05-16T00:00:00Z",
+        "model": "mock",
+        "provider": "mock"
+      },
+      "sessionId": "session-1",
+      "toolCallId": "tool-1",
+      "toolName": "read_file"
+    }
+  }
+]

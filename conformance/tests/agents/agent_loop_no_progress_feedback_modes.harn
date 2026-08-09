@@ -1,0 +1,198 @@
+import { llm_text, with_llm_script } from "std/testing"
+import { agent_loop } from "../../../crates/harn-stdlib/src/stdlib/agent/loop.harn"
+
+fn note_tools() {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "write_note",
+    "Write a note.",
+    {
+      handler: { args -> "wrote " + args.path },
+      parameters: {path: {type: "string", description: "Path to write"}},
+      returns: {type: "string"},
+      annotations: {kind: "edit", side_effect_level: "workspace_write"},
+    },
+  )
+  return tools
+}
+
+fn failing_tools() {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "explode",
+    "Throw from a Harn-side handler.",
+    {
+      handler: { _args ->
+        throw "boom from tool handler"
+      },
+      parameters: {},
+      returns: {type: "string"},
+      annotations: {kind: "read"},
+    },
+  )
+  return tools
+}
+
+fn messages_for_streak_retry(calls) {
+  return calls[2].messages[len(calls[2].messages) - 1].content
+}
+
+pipeline default(harness: Harness) {
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text("The context appears consistent."),
+      llm_text("The surrounding details remain aligned."),
+      llm_text("<user_response>done</user_response>\n<done>##DONE##</done>"),
+    ],
+    { ->
+      const text_result = agent_loop(
+        harness,
+        "Write notes.txt.",
+        nil,
+        {
+          provider: "mock",
+          tool_format: "text",
+          loop_until_done: true,
+          done_sentinel: "##DONE##",
+          max_iterations: 4,
+          max_nudges: 4,
+          tools: note_tools(),
+        },
+      )
+      const text_retry = messages_for_streak_retry(harness.llm.mock_calls())
+      harness.stdio.println("text.status=" + text_result.status)
+      harness.stdio.println(
+        "text.has_streak="
+          + to_string(contains(text_retry, "<directive authority=\"corrective\">")),
+      )
+      harness.stdio.println(
+        "text.has_tool_call_tag=" + to_string(contains(text_retry, "&lt;tool_call&gt;")),
+      )
+      harness.stdio.println(
+        "text.has_user_response_tag=" + to_string(contains(text_retry, "&lt;user_response&gt;")),
+      )
+      harness.stdio.println(
+        "text.no_native_final=" + to_string(!contains(text_retry, "concise assistant text")),
+      )
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text("The context appears consistent."),
+      llm_text("The surrounding details remain aligned."),
+      llm_text("##DONE##"),
+    ],
+    { ->
+      const native_result = agent_loop(
+        harness,
+        "Write notes.txt.",
+        nil,
+        {
+          provider: "mock",
+          tool_format: "native",
+          loop_until_done: true,
+          done_sentinel: "##DONE##",
+          done_judge: nil,
+          max_iterations: 4,
+          max_nudges: 4,
+          tools: note_tools(),
+        },
+      )
+      const native_retry = messages_for_streak_retry(harness.llm.mock_calls())
+      harness.stdio.println("native.status=" + native_result.status)
+      harness.stdio.println(
+        "native.has_streak="
+          + to_string(
+          contains(native_retry, "<directive authority=\"corrective\">"),
+        ),
+      )
+      harness.stdio.println(
+        "native.has_native_final=" + to_string(contains(native_retry, "concise assistant text")),
+      )
+      harness.stdio.println(
+        "native.has_native_tool=" + to_string(contains(native_retry, "native tool")),
+      )
+      harness.stdio.println(
+        "native.no_tool_call_tag=" + to_string(!contains(native_retry, "<tool_call>")),
+      )
+      harness.stdio.println(
+        "native.no_user_response_tag=" + to_string(!contains(native_retry, "<user_response>")),
+      )
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text("The context appears consistent."),
+      llm_text("The surrounding details remain aligned."),
+      llm_text("##DONE##"),
+    ],
+    { ->
+      const json_result = agent_loop(
+        harness,
+        "Write notes.txt.",
+        nil,
+        {
+          provider: "mock",
+          tool_format: "json",
+          loop_until_done: true,
+          done_sentinel: "##DONE##",
+          done_judge: nil,
+          max_iterations: 4,
+          max_nudges: 4,
+          tools: note_tools(),
+        },
+      )
+      const json_retry = messages_for_streak_retry(harness.llm.mock_calls())
+      harness.stdio.println("json.status=" + json_result.status)
+      harness.stdio.println(
+        "json.has_streak="
+          + to_string(contains(json_retry, "<directive authority=\"corrective\">")),
+      )
+      harness.stdio.println("json.has_tool_fence=" + to_string(contains(json_retry, "```tool")))
+      harness.stdio.println(
+        "json.no_tool_call_tag=" + to_string(!contains(json_retry, "<tool_call>")),
+      )
+      harness.stdio.println(
+        "json.no_user_response_tag=" + to_string(!contains(json_retry, "<user_response>")),
+      )
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [
+      {text: "", tool_calls: [{id: "bad1", name: "explode", arguments: {}}]},
+      {text: "", tool_calls: [{id: "bad2", name: "explode", arguments: {}}]},
+      llm_text("##DONE##"),
+    ],
+    { ->
+      const rejected_result = agent_loop(
+        harness,
+        "Call the failing tool twice, then finish.",
+        nil,
+        {
+          provider: "mock",
+          tool_format: "native",
+          loop_until_done: true,
+          done_sentinel: "##DONE##",
+          done_judge: nil,
+          max_iterations: 4,
+          max_nudges: 4,
+          tools: failing_tools(),
+        },
+      )
+      const rejected_retry = json_stringify(harness.llm.mock_calls()[2].messages)
+      harness.stdio.println("rejected.status=" + rejected_result.status)
+      harness.stdio.println(
+        "rejected.has_failure=" + to_string(contains(rejected_retry, "boom from tool handler")),
+      )
+      harness.stdio.println(
+        "rejected.no_streak=" + to_string(!contains(rejected_retry, "no_progress_streak")),
+      )
+    },
+  )
+}

@@ -1,0 +1,15 @@
+fn show_three(stdio: HarnessStdio, a, b, c) {
+  stdio.log("a=" + a)
+  stdio.log("b=" + b)
+  stdio.log("c=" + c)
+}
+
+fn tag_for(path) {
+  return "tag:" + path
+}
+
+pipeline test(harness: Harness, task) {
+  const base = "base"
+  const path = nil
+  show_three(harness.stdio, base, path ?? "", tag_for(path ?? ""))
+}

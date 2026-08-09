@@ -1,0 +1,9 @@
+first.hit=false
+first.value={"answer":42}
+second.hit=true
+second.value={"answer":42}
+compute_count=1
+plain={"answer":42}
+fresh.hit=true
+stale.hit=false
+stale.value=recomputed

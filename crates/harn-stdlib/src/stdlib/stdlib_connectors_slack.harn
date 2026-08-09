@@ -1,0 +1,276 @@
+import { filter_nil } from "std/collections"
+import { slack_message_disclosure } from "std/disclosure"
+import { merge } from "std/json"
+import { wait_for } from "std/monitors"
+
+let slack_connector_config = {}
+
+/**
+ * Configure default parameters merged into every Slack connector call.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn configure(config) {
+  slack_connector_config = filter_nil(config ?? {})
+  return slack_connector_config
+}
+
+/**
+ * Clear module-level Slack connector defaults.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn reset() {
+  slack_connector_config = {}
+}
+
+fn __call(net: HarnessNet, method, params = {}) {
+  return net.connector_call(
+    "slack",
+    method,
+    filter_nil(merge(slack_connector_config, params ?? {})),
+  )
+}
+
+fn __configured_slack_disclosure(options) {
+  return options?._harn?.disclosure?.slack ?? options?.slack_disclosure
+    ?? options?.disclosure?.slack
+}
+
+fn __slack_actor_chain(options) {
+  return options?.actor_chain ?? options?._harn?.actor_chain ?? options?.harn_actor_chain
+}
+
+fn __slack_disclosure_options(options) {
+  return options?.disclosure_options ?? options?._harn?.disclosure_options ?? {}
+}
+
+fn __with_slack_disclosure(env: HarnessEnv, fs: HarnessFs, options) {
+  const opts = options ?? {}
+  if __configured_slack_disclosure(opts) != nil {
+    return opts
+  }
+  const chain = __slack_actor_chain(opts)
+  if chain == nil {
+    return opts
+  }
+  const disclosure = slack_message_disclosure(env, fs, chain, __slack_disclosure_options(opts))
+  const harn = merge(
+    opts?._harn ?? {},
+    {disclosure: merge(opts?._harn?.disclosure ?? {}, {slack: disclosure})},
+  )
+  return merge(opts, {_harn: harn})
+}
+
+/**
+ * Post a Slack channel or thread message.
+ *
+ * When `options.actor_chain` is present, the call carries Slack disclosure
+ * metadata for connector-side byline and AI-mark handling.
+ *
+ * @effects: [net]
+ * @errors: [ConnectorError]
+ */
+pub fn post_message(harness: Harness, channel, text, blocks = nil, options = nil) {
+  const opts = __with_slack_disclosure(harness.env, harness.fs, options)
+  return __call(
+    harness.net,
+    "post_message",
+    filter_nil(merge(opts, {channel: channel, text: text, blocks: blocks})),
+  )
+}
+
+/**
+ * Update an existing Slack message.
+ *
+ * @effects: [net]
+ * @errors: [ConnectorError]
+ */
+pub fn update_message(net: HarnessNet, channel, ts, text, blocks = nil, options = nil) {
+  return __call(
+    net,
+    "update_message",
+    filter_nil((options ?? {}) + {channel: channel, ts: ts, text: text, blocks: blocks}),
+  )
+}
+
+/**
+ * Add a reaction to a Slack message.
+ *
+ * @effects: [net]
+ * @errors: [ConnectorError]
+ */
+pub fn add_reaction(net: HarnessNet, channel, ts, name, options = nil) {
+  return __call(net, "add_reaction", (options ?? {}) + {channel: channel, ts: ts, name: name})
+}
+
+/**
+ * Open a Slack modal view for an interaction trigger.
+ *
+ * @effects: [net]
+ * @errors: [ConnectorError]
+ */
+pub fn open_view(net: HarnessNet, trigger_id, view, options = nil) {
+  return __call(net, "open_view", (options ?? {}) + {trigger_id: trigger_id, view: view})
+}
+
+/**
+ * Fetch Slack user profile information.
+ *
+ * @effects: [net]
+ * @errors: [ConnectorError]
+ */
+pub fn user_info(net: HarnessNet, user_id, options = nil) {
+  return __call(net, "user_info", (options ?? {}) + {user_id: user_id})
+}
+
+/**
+ * Call a raw Slack Web API method through the active connector.
+ *
+ * @effects: [net]
+ * @errors: [ConnectorError]
+ */
+pub fn api_call(net: HarnessNet, method, args = nil, options = nil) {
+  return __call(net, "api_call", filter_nil((options ?? {}) + {method: method, args: args ?? {}}))
+}
+
+/**
+ * Upload file content through the active Slack connector.
+ *
+ * @effects: [net]
+ * @errors: [ConnectorError]
+ */
+pub fn upload_file(net: HarnessNet, filename, content, options = nil) {
+  return __call(net, "upload_file", (options ?? {}) + {filename: filename, content: content})
+}
+
+fn __slack_event(log_event) {
+  return log_event?.payload?.event
+}
+
+fn __slack_payload(log_event) {
+  return __slack_event(log_event)?.provider_payload
+}
+
+fn __slack_channel_matches(payload, channel) {
+  return channel == nil || payload?.channel == channel || payload?.channel_id == channel
+}
+
+fn __slack_user_matches(payload, user) {
+  return user == nil || payload?.user == user || payload?.user_id == user
+}
+
+fn __slack_text_matches(payload, text) {
+  return text == nil || contains(payload?.text ?? "", text)
+}
+
+/**
+ * message_source.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn message_source(channel = nil, options = nil) {
+  return {
+    label: "slack.message:" + to_string(channel ?? "*"),
+    prefers_push: true,
+    poll: { ctx ->
+      const payload = __slack_payload(ctx?.last_push_event)
+      return {
+        matched: payload != nil,
+        message: payload,
+        channel: payload?.channel ?? payload?.channel_id,
+        user: payload?.user ?? payload?.user_id,
+        text: payload?.text,
+        ts: payload?.ts,
+        thread_ts: payload?.thread_ts,
+      }
+    },
+    push_filter: { log_event ->
+      const event = __slack_event(log_event)
+      const payload = __slack_payload(log_event)
+      return event?.provider == "slack"
+        && (event?.kind == "message" || event?.kind == "app_mention"
+        || starts_with(
+        event?.kind ?? "",
+        "message.",
+      ))
+        && __slack_channel_matches(payload, channel)
+        && __slack_user_matches(payload, options?.user)
+        && (options?.thread_ts == nil
+        || payload?.thread_ts
+        == options
+        .thread_ts)
+        && __slack_text_matches(payload, options?.text_contains)
+    },
+  }
+}
+
+/**
+ * reaction_source.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn reaction_source(channel = nil, reaction = nil, options = nil) {
+  return {
+    label: "slack.reaction:" + to_string(channel ?? "*") + ":" + to_string(reaction ?? "*"),
+    prefers_push: true,
+    poll: { ctx ->
+      const payload = __slack_payload(ctx?.last_push_event)
+      return {
+        matched: payload != nil,
+        reaction: payload?.reaction,
+        item: payload?.item,
+        item_user: payload?.item_user,
+        event: payload,
+      }
+    },
+    push_filter: { log_event ->
+      const event = __slack_event(log_event)
+      const payload = __slack_payload(log_event)
+      return event?.provider == "slack"
+        && event?.kind == "reaction_added"
+        && (reaction == nil || payload?.reaction == reaction)
+        && (channel == nil
+        || payload?.item?.channel
+        == channel
+        || payload?.channel_id == channel)
+        && __slack_user_matches(payload, options?.user)
+    },
+  }
+}
+
+/**
+ * wait_for_message.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn wait_for_message(runtime: HarnessRuntime, channel = nil, options = nil) {
+  return wait_for(
+    runtime,
+    merge(
+      options ?? {},
+      {source: message_source(channel, options), condition: { state -> state.matched }},
+    ),
+  )
+}
+
+/**
+ * wait_for_reaction.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn wait_for_reaction(runtime: HarnessRuntime, channel = nil, reaction = nil, options = nil) {
+  return wait_for(
+    runtime,
+    merge(
+      options ?? {},
+      {source: reaction_source(channel, reaction, options), condition: { state -> state.matched }},
+    ),
+  )
+}

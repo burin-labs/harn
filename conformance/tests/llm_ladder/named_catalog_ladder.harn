@@ -1,0 +1,30 @@
+import { with_llm_script } from "std/testing"
+
+/**
+ * `ladder: "frugal"` resolves the named `[model_ladders.frugal]` catalog
+ * ladder (haiku -> sonnet -> opus). The cheap rung hits a 429 and the ladder
+ * escalates to the next rung, which serves the answer. The policy label
+ * comes from the catalog declaration.
+ */
+pipeline test(harness: Harness, task) {
+  with_llm_script(
+    harness.llm,
+    [
+      {
+        error: {category: "rate_limit", message: "HTTP 429", retry_after_ms: 10},
+        model: "cheap",
+        provider: "anthropic",
+      },
+      {text: "escalated answer", model: "mid", provider: "anthropic"},
+    ],
+    { ->
+      const result = harness.llm.call("hi", nil, {ladder: "frugal"})
+      harness.stdio.println(result.text)
+      harness.stdio.println(result.routing.policy)
+      const attempts = result.routing.attempts
+      harness.stdio.println(len(attempts))
+      harness.stdio.println(attempts[0].status)
+      harness.stdio.println(attempts[1].status)
+    },
+  )
+}

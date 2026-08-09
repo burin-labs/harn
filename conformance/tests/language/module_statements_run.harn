@@ -1,0 +1,16 @@
+// Module-level statements (assignments, expression statements) execute in
+// source order before any pipeline runs — the same semantics as script
+// mode. They used to be silently dropped when the file declared a pipeline.
+let counter = 1
+
+counter = counter + 1
+
+let nested = {a: {b: 0}}
+
+nested.a.b = counter
+
+pipeline test(harness: Harness, task) {
+  assert_eq(counter, 2, "module-level reassignment is visible in the pipeline")
+  assert_eq(nested.a.b, 2, "module-level nested assignment is visible in the pipeline")
+  harness.stdio.log("module statements: all tests passed")
+}

@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/code_index/lock_release.request.json",
+  "title": "code_index.lock_release request",
+  "description": "Release a lock previously held by `agent_id` on `path`. Idempotent.",
+  "type": "object",
+  "properties": {
+    "agent_id": { "type": "integer", "minimum": 1 },
+    "path": { "type": "string", "minLength": 1 }
+  },
+  "required": ["agent_id", "path"],
+  "additionalProperties": false
+}

@@ -1,0 +1,14 @@
+pipeline test(harness: Harness, task) {
+  const result = try {
+    mutex("L") {
+      throw "boom"
+    }
+  }
+  harness.stdio.println(is_err(result))
+  // If the throw above failed to release the "L" lock, re-acquiring the same
+  // keyed mutex would self-deadlock (HARN-ORC-011). Reaching the body proves
+  // the guard was released during unwind.
+  mutex("L") {
+    harness.stdio.println("reacquired")
+  }
+}

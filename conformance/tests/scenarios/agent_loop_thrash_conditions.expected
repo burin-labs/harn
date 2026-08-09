@@ -1,0 +1,13 @@
+same_obs=repeated_same_observation
+polling=repeated_success,trips=3
+varied=,trips=0
+same_err=repeated_error
+distinct_err=,trips=0
+monologue=no_progress_monologue
+monologue_reset=,trips=0
+pingpong=ping_pong
+ctx=repeated_context_window_error
+hard_stop=true,consecutive=5
+exempt=,trips=0
+gate_stalls=0
+gate_judges=0

@@ -1,0 +1,21 @@
+// Session-scope pools (the default) are in-memory: simulating a process
+// restart drops every task. Verifies the durability backend selector
+// routes correctly when scope is omitted or set to "session".
+import { pool_create, pool_simulate_restart, pool_wait } from "std/lifecycle/pool"
+
+pipeline default(harness: Harness) {
+  const pool = pool_create(harness.agent, {name: "session-demo", max_concurrent: 1})
+  harness.stdio.log(pool.scope)
+  harness.stdio.log(pool.durable)
+  const h1 = pool.submit({ -> 11 })
+  const r1 = pool_wait(harness.agent, h1)
+  harness.stdio.log(r1.status)
+  harness.stdio.log(r1.result)
+  // After restart, the registry forgets the pool entirely. Re-creating
+  // by the same name observes a fresh handle with no carried-over
+  // tasks.
+  pool_simulate_restart(harness.agent)
+  const again = pool_create(harness.agent, {name: "session-demo", max_concurrent: 1})
+  harness.stdio.log(again.scope)
+  harness.stdio.log(again.total)
+}

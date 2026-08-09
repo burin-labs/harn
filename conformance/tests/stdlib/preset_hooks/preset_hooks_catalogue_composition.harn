@@ -1,0 +1,75 @@
+/**
+ * preset_hooks_catalogue_composition (TH-07 #1900).
+ *
+ * Multiple catalogues registered against the same registry. When a
+ * command matches rules across catalogues, `tool_hooks_match` sorts
+ * the hits by combined (catalogue_priority + rule_priority), highest
+ * first, so deny-tier rules out-rank rewrites and the agent sees the
+ * blocking explanation before any rewrite suggestion.
+ */
+pipeline default(harness: Harness) {
+  /* Three catalogues with deliberately overlapping coverage on
+   * `git push --force`:
+   *   - "low" catalogue: warning-severity rewrite rule, priority 1.
+   *   - "mid" catalogue: warning-severity rewrite rule, priority 5.
+   *   - "deny" catalogue: error-severity deny rule, priority 100. */
+  const low_rule = tool_rule(
+    {
+      id: "low.git_push_force_rewrite",
+      pattern: "git push.* --force",
+      severity: "warning",
+      explanation: "prefer --force-with-lease",
+      priority: 1,
+    },
+  )
+  const mid_rule = tool_rule(
+    {
+      id: "mid.git_push_force_rewrite",
+      pattern: "git push.* --force",
+      severity: "warning",
+      explanation: "prefer --force-with-lease (mid)",
+      priority: 5,
+    },
+  )
+  const deny_rule = tool_rule(
+    {
+      id: "deny.git_push_force_deny",
+      pattern: "git push.* --force",
+      severity: "error",
+      explanation: "force-pushing main is denied",
+      priority: 100,
+    },
+  )
+  const low_cat = catalogue({id: "team/low", stack: "git", rules: [low_rule]})
+  const mid_cat = catalogue({id: "team/mid", stack: "git", rules: [mid_rule]})
+  const deny_cat = catalogue({id: "team/deny", stack: "git", rules: [deny_rule]})
+  /* Register intentionally out-of-order so the priority-sort is the
+   * subject under test (not the registration order). */
+  const reg = harness.tools.hooks_register(
+    harness.tools.hooks_register(
+      harness.tools.hooks_register(harness.tools.hooks_registry(), low_cat),
+      deny_cat,
+    ),
+    mid_cat,
+  )
+  const matches = harness.tools.hooks_match(reg, "git push origin main --force", {stacks: ["git"]})
+  /* All three rules matched. */
+  harness.stdio.println(len(matches))
+  /* Highest priority wins the first slot regardless of insertion order. */
+  harness.stdio.println(matches[0].rule_id)
+  harness.stdio.println(matches[0].catalogue_id)
+  harness.stdio.println(matches[0].severity)
+  harness.stdio.println(matches[1].rule_id)
+  harness.stdio.println(matches[2].rule_id)
+  /* Removing the deny catalogue collapses to the rewrite rules and the
+   * mid (priority 5) rule wins over the low (priority 1) one. */
+  const pruned = harness.tools.hooks_unregister(reg, "team/deny")
+  const pruned_matches = harness.tools.hooks_match(
+    pruned,
+    "git push origin main --force",
+    {stacks: ["git"]},
+  )
+  harness.stdio.println(len(pruned_matches))
+  harness.stdio.println(pruned_matches[0].rule_id)
+  harness.stdio.println(pruned_matches[1].rule_id)
+}

@@ -1,0 +1,166 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/tools/run_command.response.json",
+  "title": "tools.run_command response",
+  "type": "object",
+  "properties": {
+    "command_id": { "type": "string" },
+    "cwd": {
+      "type": "string",
+      "description": "Canonical effective working directory, normalized with forward-slash separators."
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "completed",
+        "running",
+        "timed_out",
+        "killed",
+        "blocked",
+        "consent_denied",
+        "spawn_failed"
+      ]
+    },
+    "pid": { "type": ["integer", "null"] },
+    "process_group_id": { "type": ["integer", "null"] },
+    "handle_id": { "type": ["string", "null"] },
+    "started_at": { "type": "string", "format": "date-time" },
+    "ended_at": { "type": ["string", "null"], "format": "date-time" },
+    "duration_ms": { "type": "integer", "minimum": 0 },
+    "exit_code": { "type": ["integer", "null"] },
+    "signal": { "type": ["string", "null"] },
+    "timed_out": { "type": "boolean" },
+    "stdout": { "type": "string" },
+    "stderr": { "type": "string" },
+    "output_path": { "type": "string" },
+    "stdout_path": { "type": "string" },
+    "stderr_path": { "type": "string" },
+    "line_count": { "type": "integer", "minimum": 0 },
+    "byte_count": { "type": "integer", "minimum": 0 },
+    "output_offset": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Monotonic combined-output byte offset carried on running snapshots; the agent loop pages only the delta since its last digest from here."
+    },
+    "stderr_byte_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Cumulative stderr bytes on running snapshots; the loop derives the first-stderr decision trigger from this crossing zero."
+    },
+    "silence_ms": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Milliseconds since the last output chunk (or since spawn if none) on running snapshots, for byte-stall detection."
+    },
+    "output_sha256": { "type": "string" },
+    "sandbox": {
+      "type": "object",
+      "properties": {
+        "kind": { "type": "string" },
+        "enforced": { "type": "boolean" }
+      },
+      "required": ["kind", "enforced"],
+      "additionalProperties": false
+    },
+    "audit_id": { "type": "string" },
+    "policy_context": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "command_policy": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "process_cleanup": { "$ref": "#/$defs/process_cleanup" },
+    "snapshot_binding": {
+      "type": "object",
+      "description": "Opaque verification snapshot binding carried through background handles, progress items, and completion results.",
+      "additionalProperties": true
+    },
+    "command": { "type": "string" },
+    "command_or_op_descriptor": { "type": "string" },
+    "feedback_kind": {
+      "type": "string",
+      "description": "Feedback/progress kind carried on background-after responses; absent on plain foreground and handle results."
+    }
+  },
+  "required": [
+    "command_id",
+    "cwd",
+    "status",
+    "pid",
+    "process_group_id",
+    "handle_id",
+    "started_at",
+    "ended_at",
+    "duration_ms",
+    "exit_code",
+    "signal",
+    "timed_out",
+    "stdout",
+    "stderr",
+    "output_path",
+    "stdout_path",
+    "stderr_path",
+    "line_count",
+    "byte_count",
+    "output_sha256",
+    "sandbox",
+    "audit_id"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "process_cleanup": {
+      "type": "object",
+      "properties": {
+        "root_pid": { "type": ["integer", "null"] },
+        "attempted_signals": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "observed_child_count": { "type": "integer", "minimum": 0 },
+        "reaped_child_count": { "type": "integer", "minimum": 0 },
+        "survivor_count": { "type": "integer", "minimum": 0 },
+        "observed_children": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/process_cleanup_child" }
+        },
+        "reaped_children": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/process_cleanup_child" }
+        },
+        "surviving_children": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/process_cleanup_child" }
+        }
+      },
+      "required": [
+        "root_pid",
+        "attempted_signals",
+        "observed_child_count",
+        "reaped_child_count",
+        "survivor_count",
+        "observed_children",
+        "reaped_children",
+        "surviving_children"
+      ],
+      "additionalProperties": false
+    },
+    "process_cleanup_child": {
+      "type": "object",
+      "properties": {
+        "pid": { "type": "integer" },
+        "parent_pid": { "type": ["integer", "null"] },
+        "depth": { "type": "integer", "minimum": 1 },
+        "command_name": { "type": ["string", "null"] },
+        "signals": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "alive_after_cleanup": { "type": ["boolean", "null"] }
+      },
+      "required": ["pid", "parent_pid", "depth", "command_name", "signals", "alive_after_cleanup"],
+      "additionalProperties": false
+    }
+  }
+}

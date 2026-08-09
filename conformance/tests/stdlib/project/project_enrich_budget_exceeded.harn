@@ -1,0 +1,44 @@
+import "std/project"
+
+pipeline test(harness: Harness, task) {
+  const base_dir = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-project-enrich-budget-" + harness.random.uuid(),
+  )
+  harness.fs.mkdir(path_join(base_dir, "src"))
+  harness.fs.write_text(
+    path_join(base_dir, "Cargo.toml"),
+    "[package]\nname = \"project-enrich-budget\"\nversion = \"0.1.0\"\n",
+  )
+  harness.fs.write_text(path_join(base_dir, "Cargo.lock"), "# lock\n")
+  harness.fs.write_text(
+    path_join(base_dir, "src/lib.rs"),
+    "pub struct UserName;\npub fn greet_name() -> &'static str { \"hi\" }\n",
+  )
+  const base = project_scan(harness.project, base_dir, {tiers: ["ambient", "config"]})
+  const prompt =
+    "Project path: {{path}}\n{{ for file in files }}FILE {{file.path}}\n{{file.content}}\n{{ end }}\nReturn JSON."
+  const schema = {
+    type: "object",
+    required: ["framework"],
+    properties: {framework: {type: "string"}},
+  }
+  const result = project_enrich(
+    harness.project,
+    base_dir,
+    {
+      base_evidence: base,
+      prompt: prompt,
+      schema: schema,
+      budget_tokens: 1,
+      provider: "mock",
+      model: "mock-model",
+      cache_key: "budget-v1",
+      include_operator_meta: false,
+    },
+  )
+  harness.stdio.println(result.budget_exceeded)
+  harness.stdio.println(result.package_name == "project-enrich-budget")
+  harness.stdio.println(result.languages[0] == "rust")
+  harness.stdio.println(len(harness.llm.mock_calls()) == 0)
+}

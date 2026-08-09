@@ -1,0 +1,36 @@
+pipeline default(harness: Harness) {
+  const starts = harness.runtime.atomic(0)
+  const sup = harness.runtime.supervisor_start(
+    {
+      name: "windowed",
+      strategy: "one_for_one",
+      children: [
+        {
+          name: "windowed-worker",
+          kind: "workflow_runner",
+          restart: {mode: "on_failure", max_restarts: 1, window_ms: 1, backoff_ms: 5},
+          task: { _ctx ->
+            let attempt = harness.runtime.atomic_add(starts, 1) + 1
+            if attempt < 3 {
+              throw "transient"
+            }
+            "recovered-after-window"
+          },
+        },
+      ],
+    },
+  )
+  let state = harness.runtime.supervisor_state(sup)
+  const deadline_ms = harness.clock.timestamp() * 1000 + 250
+  while state.status != "completed" && harness.clock.timestamp() * 1000 < deadline_ms {
+    harness.clock.sleep_ms(5ms)
+    state = harness.runtime.supervisor_state(sup)
+  }
+  harness.stdio.println(harness.runtime.atomic_get(starts))
+  harness.stdio.println(state.status)
+  harness.stdio.println(state.children[0].status)
+  harness.stdio.println(state.children[0].restart_count)
+  harness.stdio.println(state.metrics.failed)
+  harness.stdio.println(state.metrics.restarted)
+  harness.stdio.println(state.metrics.suppressed)
+}

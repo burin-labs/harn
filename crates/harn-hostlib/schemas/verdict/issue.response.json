@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/verdict/issue.response.json",
+  "title": "verdict.issue response",
+  "type": "object",
+  "properties": {
+    "outcome": { "type": "string", "enum": ["pass", "fail", "unavailable"] },
+    "passed": { "type": "integer", "minimum": 0 },
+    "total": { "type": "integer", "minimum": 0 },
+    "artifact_id": { "type": "string" },
+    "artifact_hash": { "type": "string" },
+    "execution_scope": { "type": ["string", "null"] },
+    "plan_id": { "type": ["string", "null"] },
+    "workspace_hash": { "type": ["string", "null"] },
+    "command_hash": { "type": ["string", "null"] },
+    "subject": { "type": ["string", "null"] },
+    "detail": { "type": "string" }
+  },
+  "required": ["outcome", "passed", "total", "artifact_id", "artifact_hash", "detail"],
+  "additionalProperties": false
+}
