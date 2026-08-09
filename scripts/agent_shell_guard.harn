@@ -15,20 +15,11 @@
 // Contract: reads a Codex or Claude PreToolUse payload on stdin, prints a
 // permission decision on stdout. Exit status is always 0 — a crashed guard
 // must not look like a denial.
+import { DISPOSABLE_PATH_POLICY } from "./agent_shell_guard_policy"
+
 // Commands whose full output is worth keeping. Grepping any of these through a
 // pipe without a redirect is what forces a rerun.
 const SLOW_COMMANDS = ["cargo", "make", "nextest", "swift", "pnpm", "npm", "xcodebuild"]
-
-// Trash is a recovery surface for user-authored data, not a garbage collector
-// for generated output. These are the roots that the repository contracts
-// already define as disposable and reproducible.
-const DISPOSABLE_RELATIVE_ROOTS = [
-  ".build",
-  "target",
-  ".harn-runs",
-  ".burin-evals",
-  ".burin-live-evals",
-]
 
 // `cargo <verb>` calls that have a Makefile owner. Anything not listed here is
 // a one-off (`cargo tree`, `cargo add`) and passes through.
@@ -163,35 +154,40 @@ pub fn cargo_violation(command: string) -> string {
 
 /** True only for a path rooted in an OS-temp or known generated-output tree. */
 pub fn is_disposable_path(token: string) -> bool {
-  const path = token.trim()
-  if path == "/tmp" || path.starts_with("/tmp/") {
-    return true
+  // Forward slashes are accepted by Windows shells and let every platform use
+  // one component-aware matcher. Single-quoted Windows paths retain their
+  // backslashes through shell tokenization and normalize here.
+  const path = token.trim().replace("\\", "/")
+  for root in DISPOSABLE_PATH_POLICY.posix_temp_roots {
+    if path == root || path.starts_with(root + "/") {
+      return true
+    }
   }
-  if path == "/private/tmp" || path.starts_with("/private/tmp/") {
-    return true
-  }
-  if path == "/var/tmp"
-    || path.starts_with("/var/tmp/")
-    || path == "/private/var/tmp"
-    || path.starts_with("/private/var/tmp/") {
-    return true
-  }
-  for variable in ["$TMPDIR", "\${TMPDIR}", "$TMP", "\${TMP}", "$TEMP", "\${TEMP}"] {
+  for variable in DISPOSABLE_PATH_POLICY.posix_temp_variables {
     if path == variable || path.starts_with(variable + "/") {
       return true
     }
   }
-  if path.starts_with("%TEMP%/") || path.starts_with("%TMP%/") {
-    return true
+  const folded_path = lowercase(path)
+  for variable in DISPOSABLE_PATH_POLICY.windows_temp_variables {
+    const folded_variable = lowercase(variable)
+    if folded_path == folded_variable || folded_path.starts_with(folded_variable + "/") {
+      return true
+    }
   }
-  // macOS expands TMPDIR beneath /var/folders/.../T (or /private/var/folders).
-  if (path.starts_with("/var/folders/") || path.starts_with("/private/var/folders/"))
-    && path.contains(
-    "/T/",
-  ) {
-    return true
+  for marker in DISPOSABLE_PATH_POLICY.windows_temp_markers {
+    if folded_path.ends_with(marker) || folded_path.contains(marker + "/") {
+      return true
+    }
   }
-  for root in DISPOSABLE_RELATIVE_ROOTS {
+  for prefix in DISPOSABLE_PATH_POLICY.macos_temp_prefixes {
+    const component = DISPOSABLE_PATH_POLICY.macos_temp_component
+    if path.starts_with(prefix)
+      && (path.ends_with(component) || path.contains(component + "/")) {
+      return true
+    }
+  }
+  for root in DISPOSABLE_PATH_POLICY.generated_relative_roots {
     if path == root
       || path == "./" + root
       || path.starts_with(root + "/")

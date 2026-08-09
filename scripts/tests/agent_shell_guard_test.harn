@@ -143,6 +143,12 @@ pipeline test_disposable_path_policy_covers_temp_and_generated_roots(harness: Ha
     "$TMP/output.log",
     "\${TEMP}/output.log",
     "%TEMP%/output.log",
+    "%tmp%/output.log",
+    "$env:TEMP/output.log",
+    "\${env:TMP}/output.log",
+    "C:/Users/Alice/AppData/Local/Temp/output.log",
+    "c:\\users\\alice\\appdata\\local\\temp\\output.log",
+    "C:/Windows/Temp/output.log",
     "/var/folders/ab/cd/T/output.log",
     "/private/var/folders/ab/cd/T/output.log",
     ".build/debug/ModuleCache",
@@ -157,6 +163,7 @@ pipeline test_disposable_path_policy_covers_temp_and_generated_roots(harness: Ha
     "/Users/alice/Documents/report.txt",
     "notes/target-audience.md",
     "/var/folders/ab/cd/not-temp/output.log",
+    "C:/Users/Alice/Documents/Temp Notes/report.txt",
   ] {
     assert(!is_disposable_path(path), path + " should remain recoverable through Trash")
   }
