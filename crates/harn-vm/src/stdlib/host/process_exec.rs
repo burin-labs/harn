@@ -118,7 +118,9 @@ pub(super) async fn dispatch_process_exec_after_policy(
     // without having to rewrite the surrounding policy. The override
     // is scoped to this call and pops with the guard at end-of-scope.
     let profile_guard = match optional_string(params, "sandbox_profile") {
-        Some(value) => Some(push_sandbox_profile_override(&value)?),
+        Some(value) => Some(crate::process_sandbox::push_sandbox_profile_override(
+            &value,
+        )?),
         None => None,
     };
     #[cfg(target_os = "windows")]
@@ -642,38 +644,4 @@ fn split_argv(mut argv: Vec<String>) -> Result<(String, Vec<String>), VmError> {
         ));
     }
     Ok((program, argv))
-}
-
-/// Push a transient policy onto the execution stack with the
-/// requested sandbox profile, returning a guard that pops on drop.
-/// Used by `host_call("process", "exec", ...)` to honor a per-call
-/// `sandbox_profile` override without rewriting the surrounding
-/// orchestration policy.
-pub(crate) fn push_sandbox_profile_override(value: &str) -> Result<SandboxProfileGuard, VmError> {
-    let profile = crate::orchestration::SandboxProfile::parse(value).ok_or_else(|| {
-        let expected = crate::orchestration::SandboxProfile::all()
-            .iter()
-            .map(|profile| format!("{:?}", profile.as_str()))
-            .collect::<Vec<_>>()
-            .join(", ");
-        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-            "host_call process.exec: unknown sandbox_profile {value:?}; expected one of {expected}"
-        ))))
-    })?;
-    let mut policy = crate::orchestration::current_execution_policy().unwrap_or_default();
-    policy.sandbox_profile = profile;
-    crate::orchestration::push_execution_policy(policy);
-    Ok(SandboxProfileGuard {
-        _private: std::marker::PhantomData,
-    })
-}
-
-pub(crate) struct SandboxProfileGuard {
-    _private: std::marker::PhantomData<*const ()>,
-}
-
-impl Drop for SandboxProfileGuard {
-    fn drop(&mut self) {
-        crate::orchestration::pop_execution_policy();
-    }
 }

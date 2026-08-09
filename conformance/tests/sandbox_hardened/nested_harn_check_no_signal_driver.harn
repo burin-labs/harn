@@ -37,7 +37,7 @@ pipeline default(harness: Harness) {
       return command_run(
         harness.tools,
         [harn_bin, "check", script],
-        {cwd: root, capture: {max_inline_bytes: 200000}},
+        {cwd: root, sandbox_profile: "workspace_paths", capture: {max_inline_bytes: 200000}},
       )
     },
   )

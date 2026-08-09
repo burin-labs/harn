@@ -56,6 +56,11 @@
     },
     "stdin": { "type": "string" },
     "timeout_ms": { "type": "integer", "minimum": 0 },
+    "sandbox_profile": {
+      "type": "string",
+      "enum": ["unrestricted", "workspace_paths", "worktree", "wasi", "os_hardened"],
+      "description": "Per-command sandbox profile override. The override is scoped to this command and preserves the surrounding workspace roots and capability ceilings. workspace_paths keeps Harn path enforcement while omitting recursive OS process confinement for trusted toolchain commands."
+    },
     "background": { "type": "boolean", "default": false },
     "background_after_ms": {
       "type": "integer",

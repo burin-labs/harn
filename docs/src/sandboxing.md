@@ -400,6 +400,30 @@ harness.process.run({
 })
 ```
 
+`std/command.command_run` accepts the same per-call override in either the
+command spec or options. Use `workspace_paths` for a trusted compiler, package
+manager, or nested Harn invocation that must retain Harn's workspace-root path
+checks without recursively installing an OS process sandbox:
+
+```harn,ignore
+import { command_run } from "std/command"
+
+const checked = command_run(
+  harness.tools,
+  [harn_bin, "check", script],
+  {
+    cwd: harness.fs.project_root(),
+    sandbox_profile: "workspace_paths",
+  },
+)
+```
+
+`workspace_paths` is not containment for untrusted child code. Use `worktree`
+or `os_hardened` when the child itself needs OS confinement. The override
+changes only the profile for that spawn; surrounding workspace roots and
+capability ceilings remain in force, and the parent profile is restored when
+the command returns.
+
 ### From an embedder
 
 Embedders that drive the runtime through `harn-vm` directly construct

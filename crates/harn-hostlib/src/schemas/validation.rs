@@ -219,6 +219,40 @@ mod tests {
     }
 
     #[test]
+    fn run_command_request_schema_accepts_only_named_sandbox_profiles() {
+        let request = VmValue::dict([
+            (
+                "argv",
+                VmValue::List(Arc::new(vec![VmValue::string("true")])),
+            ),
+            ("sandbox_profile", VmValue::string("workspace_paths")),
+        ]);
+        validate_request_args(
+            "hostlib_tools_run_command",
+            "tools",
+            "run_command",
+            &[request],
+        )
+        .expect("workspace_paths must be a valid run_command profile");
+
+        let invalid = VmValue::dict([
+            (
+                "argv",
+                VmValue::List(Arc::new(vec![VmValue::string("true")])),
+            ),
+            ("sandbox_profile", VmValue::string("wide_open")),
+        ]);
+        let error = validate_request_args(
+            "hostlib_tools_run_command",
+            "tools",
+            "run_command",
+            &[invalid],
+        )
+        .expect_err("unknown profiles must fail schema validation");
+        assert!(error.to_string().contains("sandbox_profile"));
+    }
+
+    #[test]
     fn asynchronous_command_schemas_accept_only_background() {
         for (schema, method) in [
             ("hostlib_tools_run_command", "run_command"),

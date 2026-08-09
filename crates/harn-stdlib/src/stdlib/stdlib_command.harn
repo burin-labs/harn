@@ -28,6 +28,21 @@ pub type CommandStepReceipt = {
   recovery_hint?: string,
 }
 
+const COMMAND_COMMON_OPTION_KEYS = [
+  "cwd",
+  "env",
+  "env_remove",
+  "env_mode",
+  "stdin",
+  "timeout_ms",
+  "sandbox_profile",
+  "background",
+  "background_after_ms",
+  "progress_interval_ms",
+  "progress_max_inline_bytes",
+  "policy_context",
+]
+
 fn __command_options(options) {
   return options ?? {}
 }
@@ -53,19 +68,7 @@ fn __command_copy_common(req, source) {
     return req
   }
   let out = req
-  for key in [
-    "cwd",
-    "env",
-    "env_remove",
-    "env_mode",
-    "stdin",
-    "timeout_ms",
-    "background",
-    "background_after_ms",
-    "progress_interval_ms",
-    "progress_max_inline_bytes",
-    "policy_context",
-  ] {
+  for key in COMMAND_COMMON_OPTION_KEYS {
     if source?.[key] != nil {
       out = out + {[key]: source[key]}
     }
@@ -84,19 +87,7 @@ fn __command_copy_common(req, source) {
 fn __command_apply_option_defaults(req, options) {
   const opts = __command_options(options)
   let out = req
-  for key in [
-    "cwd",
-    "env",
-    "env_remove",
-    "env_mode",
-    "stdin",
-    "timeout_ms",
-    "background",
-    "background_after_ms",
-    "progress_interval_ms",
-    "progress_max_inline_bytes",
-    "policy_context",
-  ] {
+  for key in COMMAND_COMMON_OPTION_KEYS {
     if out?.[key] == nil && opts[key] != nil {
       out = out + {[key]: opts[key]}
     }
