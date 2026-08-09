@@ -331,6 +331,7 @@
     "event_log.hypothesis_authority_request",
     "event_log.hypothesis_event_append",
     "event_log.hypothesis_event_snapshot",
+    "event_log.hypothesis_operation_request",
     "event_log.latest",
     "event_log.read",
     "event_log.subscribe",

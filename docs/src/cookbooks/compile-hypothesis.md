@@ -201,12 +201,30 @@ ledger validates the event and its attestation. It does not query or validate
 the host's external receipt store.
 
 Use `hypothesis_workflow(harness.obs, {kind: "inspect", hypothesis_id: id})`
-for the same typed read and report projection. `start`, `resume`, and
-`stand_down` are state-checked requests, not an executor. This slice provides no
-native operation adapter, so mutating requests return
-`kind: "adapter_unavailable"` before any lifecycle event is appended. Call the
-existing `design_hypothesis` planner separately when natural-language design is
-needed.
+for the same typed read and report projection. `start`, `pause`, `resume`,
+`advance`, and `stand_down` are state-checked requests. They call the registered
+`hypothesis.operation` native adapter; when none is present, they return
+`kind: "adapter_unavailable"` before appending a lifecycle event.
+
+`advance` executes one balanced case/trial block. The caller supplies concrete
+blocking values, Harn freezes and randomizes the arm order with
+`plan_assignments`, and the adapter returns measurements in exactly that order.
+Harn realizes the assignments, validates the full block against the resource
+ceilings, appends only missing cells on retry, and runs `decide_experiment`.
+The adapter never chooses the assignment or supplies the verdict.
+
+```harn
+const advanced = hypothesis_workflow(
+  harness.obs,
+  {
+    kind: "advance",
+    hypothesis_id: plan.hypothesis_id,
+    blocking_values: {host: host_id, time_slot: frozen_slot},
+  },
+)
+```
+
+Call `design_hypothesis` separately when natural-language design is needed.
 
 ## Verify the boundary you claim
 
@@ -216,7 +234,7 @@ For deterministic compiler changes, run the exact conformance fixture:
 harn test conformance tests/stdlib/eval_hypothesis_compiler.harn --verbose
 ```
 
-For an experiment claim, also prove that the registered intervention fired,
+For an experiment claim, also prove through the native adapter that the registered intervention fired,
 the realized assignment matched the randomized plan, outcomes came from the
 declared population and grader, the stopping decision used the frozen
 experiment registration, and resource totals remained below every ceiling.
