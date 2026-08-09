@@ -3,9 +3,9 @@
 Use `std/eval/hypothesis` when an agent or product needs to turn a question into
 an experiment without letting model output become executable authority. The
 planner produces typed data. The deterministic compiler accepts only registered
-adapters, validates trusted host risk, capability, citation, and resource
-ceilings, and lowers an accepted design into Harn's existing experiment
-registration contract.
+adapters, validates trusted host risk, capability, placement, citation, and
+resource ceilings, and lowers an accepted design into Harn's existing
+experiment registration contract.
 
 This guide shows the control flow. The complete executable fixture is
 [`eval_hypothesis_compiler.harn`](../../../conformance/tests/stdlib/eval_hypothesis_compiler.harn),
@@ -58,7 +58,11 @@ if !receipt.ok {
 Use immutable adapter IDs and variants. Put credentials in host-managed secret
 references, never in the catalog or intent. The capability manifest declares
 filesystem roots, process commands, network domains, providers, connectors,
-database scopes, mutation reversibility, and approval requirements.
+database scopes, mutation reversibility, and approval requirements. Executable
+adapters may also declare one typed `placement` requirement with `mode`,
+`platform`, `requires_gpu`, and `resource_class`. Baseline and candidate
+requirements must be identical, and the compiler refuses a host ceiling that
+cannot enforce them.
 
 ## Hand the registration to an enforcing host adapter
 
@@ -66,9 +70,10 @@ An accepted receipt contains a stable intent fingerprint and plan fingerprint.
 If `receipt.plan.kind == "registered_experiment"`, the plan contains the
 canonical `ExperimentManifest` and `ExperimentRegistration`. It deliberately
 does not contain an executable workflow. Only a registered host adapter that
-enforces the plan's capabilities, approval requirement, and remaining resource
-ceilings may schedule it; that adapter must use Harn's canonical assignment,
-observation, and decision APIs rather than reconstructing their rules.
+enforces the plan's capabilities, placement, approval requirement, and
+remaining resource ceilings may schedule it; that adapter must use Harn's
+canonical assignment, observation, and decision APIs rather than reconstructing
+their rules.
 
 ```harn,ignore
 if receipt.plan.kind == "observe_only" {

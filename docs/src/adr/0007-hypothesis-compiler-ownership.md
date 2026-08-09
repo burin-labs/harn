@@ -93,8 +93,8 @@ owns:
 - lane selection and causal-claim classification;
 - metric bounds, estimand, practical threshold, evidence ceilings, and frozen
   multiplicity family;
-- capability, approval, and resource-budget validation against trusted host
-  ceilings;
+- capability, placement, approval, and resource-budget validation against
+  trusted host ceilings;
 - compilation into `ExperimentRegistration`;
 - refusal when a warning would weaken an authority or evidence boundary.
 
@@ -118,9 +118,11 @@ separate fields and events. A confidence label cannot stand in for all four.
   promotion between iterate and gate splits, and decisions.
 - `std/eval/sequential` owns anytime-valid bounded inference.
 - A registered host adapter owns execution structure and must enforce the
-  compiled capabilities, approval requirement, and resource ceilings before it
-  calls the canonical assignment and decision APIs. The first slice does not
-  synthesize an execution graph.
+  compiled capabilities, typed placement requirement, approval requirement,
+  and resource ceilings before it calls the canonical assignment and decision
+  APIs. The compiler rejects different baseline/candidate placement policies so
+  host placement cannot become an arm-level confounder. The first slice does
+  not synthesize an execution graph.
 - Harn's event log owns global ordering, atomic idempotency, integrity chaining,
   SQLite/file/memory persistence, subscriptions, compaction, and replay. The
   session store remains the owner of agent transcripts, not experiment state.

@@ -82,6 +82,13 @@ pub type MutationCapability = {
   requires_approval: bool,
 }
 
+pub type ExperimentPlacementCapability = {
+  mode: "any" | "local" | "remote",
+  platform: "any" | "macos" | "linux" | "windows",
+  requires_gpu: bool,
+  resource_class: string?,
+}
+
 pub type ExperimentCapabilityManifest = {
   tools: list<string>,
   capabilities: dict<string, list<string>>,
@@ -100,6 +107,7 @@ pub type ExperimentCapabilityManifest = {
   database_scopes: list<string>,
   provider_ids: list<string>,
   secret_refs: list<string>,
+  placement?: ExperimentPlacementCapability,
   mutation: MutationCapability,
 }
 
