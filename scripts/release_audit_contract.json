@@ -78,7 +78,7 @@
         {
           "id": "release-audit-harn",
           "condition": "",
-        "run": "./scripts/audit_gates.sh --phase \"${{ matrix.kind }}\""
+        "run": "args=(--phase \"${{ matrix.kind }}\")\nif [ \"$TREE_SITTER_PARSER_PREFLIGHTED\" = true ]; then\n  args+=(--tree-sitter-parser-preflighted)\nfi\n./scripts/audit_gates.sh \"${args[@]}\"\n"
       }
     ]
   },
@@ -93,7 +93,7 @@
       {
         "id": "release-audit-harn",
         "condition": "",
-        "run": "./scripts/audit_gates.sh --phase \"${{ matrix.kind }}\""
+        "run": "args=(--phase \"${{ matrix.kind }}\")\nif [ \"$TREE_SITTER_PARSER_PREFLIGHTED\" = true ]; then\n  args+=(--tree-sitter-parser-preflighted)\nfi\n./scripts/audit_gates.sh \"${args[@]}\"\n"
       }
       ]
     }

@@ -581,9 +581,7 @@ pipeline test_rejects_parser_check_after_shared_binary_wait(harness: Harness, ta
       ...valid.jobs,
       "harn-audit": {
         ...audit,
-        steps: audit.steps.filter(
-          { step -> step.name != "Check generated parser is current" },
-        )
+        steps: audit.steps.filter({ step -> step.name != "Check generated parser is current" })
           .to_list(),
       },
     },

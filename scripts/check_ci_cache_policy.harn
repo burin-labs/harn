@@ -1564,7 +1564,10 @@ fn harn_audit_overlap_errors(workflow) -> list<string> {
     "wait_for_run_artifacts.sh harn-cli.tar.zst",
   )
     || parser_command != "make check-tree-sitter-parser"
-    || !contains(audit_command, "--tree-sitter-parser-preflighted") {
+    || !contains(
+    audit_command,
+    "--tree-sitter-parser-preflighted",
+  ) {
     return [
       "ci.yml:harn-audit must overlap CLI-independent setup, then wait for and verify the exact shared Harn binary",
     ]
