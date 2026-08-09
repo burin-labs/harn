@@ -203,10 +203,47 @@ expect_failure() {
   fi
 }
 
+run_verifier_with_repository_signer() {
+  local signer_dir="$tmp/repository-signer-bin"
+  mkdir -p "$signer_dir"
+  ln -sf "$tmp/bin/gh" "$signer_dir/gh"
+  cat >"$signer_dir/git" <<MOCK
+#!/usr/bin/env bash
+set -euo pipefail
+case "\${1:-} \${2:-}" in
+  "rev-parse refs/tags/$tag^{tag}") echo aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ;;
+  "rev-parse refs/tags/$tag^{commit}") echo $source_commit ;;
+  "-c gpg.ssh.allowedSignersFile="*)
+    [[ "\${3:-}" == "verify-tag" && "\${4:-}" == "$tag" ]]
+    ;;
+  *) echo "unexpected git invocation: \$*" >&2; exit 2 ;;
+esac
+MOCK
+  chmod +x "$signer_dir/git"
+  FIXTURE_DIR="$fixture" PATH="$signer_dir:$PATH" \
+    "$verifier" \
+    --artifacts-dir "$fixture/artifacts" \
+    --tag "$tag" \
+    --repo "$repo" \
+    --allowed-signers "$fixture/allowed-signers"
+}
+
 # Original five-target release.
 new_fixture
 attest_all 100
 expect_success primary run_verifier
+
+# GitHub Apps cannot register SSH signing keys, so hosted release tags carry a
+# real repository-pinned signature while GitHub reports `unknown_key`. Accept
+# that exact tag only when the local tag object and peeled commit match the API.
+jq '.verification = {verified: false, reason: "unknown_key"}' \
+  "$fixture/tag-object.json" >"$fixture/tag-object.tmp"
+mv "$fixture/tag-object.tmp" "$fixture/tag-object.json"
+printf 'release@example.invalid ssh-ed25519 fixture\n' >"$fixture/allowed-signers"
+expect_success repository_signer run_verifier_with_repository_signer
+jq '.verification = {verified: true}' \
+  "$fixture/tag-object.json" >"$fixture/tag-object.tmp"
+mv "$fixture/tag-object.tmp" "$fixture/tag-object.json"
 
 # One-target recovery and its nonpublishing fixture: four archives retain
 # original-run bindings while one comes from a recovery run; all resolve to the
@@ -335,7 +372,9 @@ require_workflow_text "is_prerelease: \${{ steps.resolve.outputs.is_prerelease }
 require_workflow_text "source scripts/lib/release_version.sh"
 require_workflow_text 'policy_dir="$RUNNER_TEMP/release-provenance-policy"'
 require_workflow_text 'cp scripts/lib/release_version.sh "$policy_dir/lib/release_version.sh"'
+require_workflow_text 'cp .github/release-bot-allowed-signers "$policy_dir/release-bot-allowed-signers"'
 require_workflow_text 'bash "$RUNNER_TEMP/release-provenance-policy/verify_release_archive_provenance.sh"'
+require_workflow_text '--allowed-signers "$RUNNER_TEMP/release-provenance-policy/release-bot-allowed-signers"'
 require_workflow_text "prerelease: \${{ needs.setup.outputs.is_prerelease }}"
 require_workflow_text "enable=\${{ needs.setup.outputs.make_latest == 'true' }}"
 require_workflow_text "needs.build.result == 'success' || needs.build.result == 'skipped'"
