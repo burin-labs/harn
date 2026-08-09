@@ -1,0 +1,40 @@
+import { agent_skills_match, agent_skills_preview } from "std/agent/skills"
+
+fn tool_names(options) -> list {
+  return (options?.tools?.tools ?? []).map(
+    { entry -> to_string(entry?.function?.name ?? entry?.name ?? "") },
+  )
+    .to_list()
+}
+
+pipeline test(harness: Harness, _task) {
+  skill alpha {
+    description "Alpha workflow"
+    when_to_use "Use alpha for alpha-shaped work"
+    prompt "Alpha instructions."
+  }
+  const options = {
+    skills: alpha,
+    skill_match: {strategy: "manual"},
+    context_profile: {skills: ["alpha"]},
+  }
+  const preview = agent_skills_preview(harness.agent, options)
+  assert(tool_names(preview).contains("load_skill"), "preview advertises Harn's load_skill tool")
+  assert(
+    to_string(harness.agent.prompt_explain(preview)?.system ?? "").contains("Alpha instructions."),
+    "preview applies context-profile skill activation",
+  )
+  const session_id = "skill-preview-live"
+  harness.agent.open(session_id)
+  const live = agent_skills_match(harness.agent, {session_id: session_id}, options, 0)
+  assert(tool_names(preview) == tool_names(live), "fresh preview and live tool projections match")
+  assert(
+    to_string(harness.agent.prompt_explain(preview)?.system ?? "")
+      == to_string(
+      harness.agent.prompt_explain(live)?.system ?? "",
+    ),
+    "fresh preview and live skill prompts match",
+  )
+  harness.agent.close(session_id)
+  harness.stdio.log("skill_preview_fresh_turn passed")
+}

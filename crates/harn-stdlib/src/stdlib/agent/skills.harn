@@ -679,6 +679,31 @@ fn __opts_with_active_skills(opts, registry, active, activated_this_turn = false
   return next
 }
 
+fn __fresh_skill_projection_inputs(agent: HarnessAgent, session, opts, registry) {
+  const tool_opts = __with_load_skill_tool(agent, session, opts)
+  return {tool_opts: tool_opts, profile_active: __active_from_context_profile(registry, tool_opts)}
+}
+
+/**
+ * Project the skill-owned options for a fresh first turn without requiring or
+ * mutating an agent session. Prompt previews use this to share Harn's load-tool,
+ * context-profile activation, tool-scoping, and catalog policy with live turns.
+ * The projected `load_skill` handler is descriptive until execution; callers
+ * must use `agent_skills_match` inside an open session before invoking tools.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_skills_preview(agent: HarnessAgent, opts) {
+  const registry = __skills_registry(opts)
+  if registry == nil || len(__skills_entries(registry)) == 0 {
+    return opts
+  }
+  const inputs = __fresh_skill_projection_inputs(agent, {session_id: ""}, opts, registry)
+  return __opts_with_active_skills(inputs.tool_opts, registry, inputs.profile_active)
+}
+
 /**
  * agent_skills_match.
  *
@@ -691,12 +716,13 @@ pub fn agent_skills_match(agent: HarnessAgent, session, opts, iteration) {
   if registry == nil || len(__skills_entries(registry)) == 0 {
     return opts
   }
-  const tool_opts = __with_load_skill_tool(agent, session, opts)
+  const inputs = __fresh_skill_projection_inputs(agent, session, opts, registry)
+  const tool_opts = inputs.tool_opts
   const stored_prev = __active_from_ids(
     registry,
     agent_session_active_skills(agent, session.session_id) ?? [],
   )
-  const profile_active = __active_from_context_profile(registry, tool_opts)
+  const profile_active = inputs.profile_active
   const prev = __merge_active_skills(stored_prev, profile_active)
   if !__skills_same_ids(stored_prev, prev) {
     __record_activations(agent, session, stored_prev, prev, iteration)
