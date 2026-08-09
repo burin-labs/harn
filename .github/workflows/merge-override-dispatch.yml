@@ -1,6 +1,5 @@
-# Project into .github/workflows/merge-override-dispatch.yml and replace
-# 8682431255c17e77c96a4a3444952e7dccbec67f with the burin-labs/.github commit that owns
-# merge-override.yml.
+# Thin dispatcher for org-admin merge overrides.
+# Pinned to burin-labs/.github merge-override.yml.
 
 name: Merge override dispatch
 
@@ -20,11 +19,13 @@ jobs:
     if: >-
       github.event_name == 'pull_request' &&
       contains(fromJSON('["bypass-ci", "bypass-merge-queue", "force-merge"]'), github.event.label.name)
-    uses: burin-labs/.github/.github/workflows/merge-override.yml@004bd52e37720b8ffe3298818b6cba4c6fec8b93
+    uses: burin-labs/.github/.github/workflows/merge-override.yml@2f6d41abcaf2be9eca1f328c3b2c160de926f9f5
     with:
       label: ${{ github.event.label.name }}
       actor: ${{ github.actor }}
       pr-number: ${{ github.event.pull_request.number }}
       head-sha: ${{ github.event.pull_request.head.sha }}
       head-repository: ${{ github.event.pull_request.head.repo.full_name }}
-    secrets: inherit
+    secrets:
+      RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+      RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
