@@ -94,15 +94,28 @@ let a downloader detect corruption or substitution relative to the metadata it
 fetched, but they do not prove which source revision or workflow produced an
 archive.
 
+Release archives are built as immutable candidate artifacts before the tag.
+`build-release-binaries.yml` `candidate_only` builds, signs, notarizes, packages,
+and attests the five-target matrix against an exact source SHA, then uploads
+fail-closed run-scoped archives plus
+`candidate-archive-manifest-<sha>.json`. That path never mutates a GitHub
+release.
+
+Tag push (and `promote_only`) attach those exact bytes, regenerate
+`SHA256SUMS` / `release-assets.json`, and publish the container. The canonical
+path does not compile again; `force_rebuild` remains the audited recovery that
+re-enters the receipt contract after a rebuild.
+
 Every new release archive therefore also has a GitHub artifact attestation with
 predicate type
-`https://harnlang.com/attestations/release-archive/v1`. The signed predicate
-binds the archive digest and filename to the target triple, release tag, peeled
-source commit, workflow run/job, and exact build-policy revision. Release
-finalization verifies that binding for all five archives before regenerating
-either consumer manifest or setting `prerelease: false` / `make_latest: true`.
-Recovery runs may combine archives from multiple workflow runs, but all five
-must resolve to the same GitHub-verified signed tag commit.
+`https://harnlang.com/attestations/release-archive/v1`. Candidate-phase
+predicates bind the archive digest and filename to the target triple, source
+commit, workflow run/job, and exact build-policy revision without a tag.
+Promote/finalization accepts that candidate binding when the signed tag peels
+to the same source commit, and refuses digest, target-set, policy, or provenance
+mismatches against the candidate manifest. Recovery runs may combine archives
+from multiple workflow runs, but all five must resolve to the same
+GitHub-verified signed tag commit.
 
 Releases through v0.10.40 predate attestations and fail closed by default. A
 recovery operator may provide `legacy_provenance_override` only as an explicit

@@ -1,7 +1,7 @@
 ---
 name: release-harn
 short: Merge-queue-safe Harn patch/minor/major release workflow.
-description: Cut a Harn release through the merge queue. One PR carries CHANGELOG + Cargo.toml bump + regenerated artifacts; downstream tag push + binary build cascades fire automatically once it lands.
+description: Cut a Harn release through the merge queue. One PR carries CHANGELOG + Cargo.toml bump + regenerated artifacts; candidate archive builds run before the tag, and tag push promotes those exact archives without recompiling.
 when_to_use: Use when cutting a Harn `vX.Y.Z` patch / minor / major release from main, or recovering from a partially-failed release run.
 ---
 
@@ -35,9 +35,14 @@ workflows cascade automatically under the `harn-release-bot` App
 identity:
 
 ```text
-land "Release vX.Y.Z" → publish-release pushes tag + cargo publish + GH release
-        → tag push → build-release-binaries assembles binaries + GHCR container
+immutable candidate OID
+  → candidate_only archive matrix (sign/notarize/attest) in parallel with certification
+  → join receipts → signed tag
+  → tag push promotes exact archives + finalize + GHCR container (no compile)
 ```
+
+Fleet `release_harn` owns that orchestration. Direct tag recovery without a
+candidate receipt fails closed unless `force_rebuild=true`.
 
 ## Local entry points
 
@@ -58,7 +63,13 @@ Manual workflow_dispatch entry points for recovery:
 
 ```bash
 gh workflow run publish-release.yml --ref main
-gh workflow run build-release-binaries.yml --ref main -f tag=vX.Y.Z
+gh workflow run build-release-binaries.yml --ref main \
+  -f candidate_only=true \
+  -f candidate_source_ref=release-certify/<sha> \
+  -f candidate_source_sha=<40-hex>
+gh workflow run build-release-binaries.yml --ref main \
+  -f promote_only=true -f tag=vX.Y.Z -f candidate_run_id=<id>
+gh workflow run build-release-binaries.yml --ref main -f tag=vX.Y.Z -f force_rebuild=true
 gh workflow run bump-release.yml --ref main          # reconstruct a missed bump PR
 ```
 
@@ -103,9 +114,9 @@ is a published-version concern, not a developer-loop concern.
   downstream cascades fire (a `GITHUB_TOKEN` tag push would be
   suppressed by GHA).
 - `.github/workflows/build-release-binaries.yml` (display name:
-  "Build release binaries") — fires on tag push. Also accepts a
-  `tag` input via `workflow_dispatch` for re-running against an
-  existing tag.
+  "Build release binaries") — `candidate_only` builds signed archives
+  for an exact SHA; tag push / `promote_only` attaches those exact
+  archives without compiling; `force_rebuild` is audited recovery.
 - `.github/workflows/bump-release.yml`, display name "Open version bump
   PR (recovery)". It is `workflow_dispatch` only. Use it to reconstruct
   a bump PR if a "Prepare vX.Y.Z release"-style commit accidentally

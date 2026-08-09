@@ -67,6 +67,7 @@ pipeline test_release_runner_policy_pins_every_mode(harness: Harness, task) {
   const recovery = ["x86_64-apple-darwin=macos-15-xlarge"]
     + standard.slice(1, len(standard))
   assert_eq(runners(matrix(harness.fs, harness.process, "--mode primary")), primary)
+  assert_eq(runners(matrix(harness.fs, harness.process, "--mode candidate")), primary)
   assert_eq(runners(matrix(harness.fs, harness.process, "--mode recovery")), recovery)
   assert_eq(
     runners(

@@ -126,12 +126,14 @@ write_attestation() {
   local run_id="$2"
   local predicate_tag="${3:-$tag}"
   local predicate_source="${4:-$source_commit}"
+  local predicate_phase="${5:-release}"
   local target digest
   target="$(target_for_archive "$archive")"
   digest="$(sha256_file "$fixture/artifacts/$archive")"
   jq -n \
     --arg expected "$digest" \
     --arg repo "$repo" \
+    --arg phase "$predicate_phase" \
     --arg tag "$predicate_tag" \
     --arg source "$predicate_source" \
     --arg archive "$archive" \
@@ -147,6 +149,7 @@ write_attestation() {
           statement: {
             predicate: {
               schemaVersion: "harn.release_archive_provenance.v1",
+              phase: $phase,
               repository: $repo,
               tag: $tag,
               sourceCommit: $source,
@@ -273,6 +276,17 @@ expect_failure wrong_source run_verifier
 write_attestation harn-aarch64-apple-darwin.tar.gz 100 v9.9.9 "$source_commit"
 expect_failure mixed_version run_verifier
 
+# Candidate-phase attestations bind sourceCommit without a tag and promote when
+# the signed tag peels to that exact commit.
+new_fixture
+for archive in "${archives[@]}"; do
+  write_attestation "$archive" 300 "" "$source_commit" candidate
+done
+expect_success candidate_phase run_verifier
+write_attestation harn-aarch64-apple-darwin.tar.gz 300 "" \
+  3333333333333333333333333333333333333333 candidate
+expect_failure candidate_wrong_source run_verifier
+
 # A self-asserted policy revision must also match the signer digest carried by
 # the verified certificate.
 new_fixture
@@ -380,8 +394,21 @@ require_workflow_text "enable=\${{ needs.setup.outputs.make_latest == 'true' }}"
 require_workflow_text "needs.build.result == 'success' || needs.build.result == 'skipped'"
 require_workflow_text "Only release metadata is missing"
 require_workflow_text "gh release upload \"\$REF\" \"\$archive\" --repo \"\$GITHUB_REPOSITORY\" --clobber"
+require_workflow_text "candidate_only:"
+require_workflow_text "promote_only:"
+require_workflow_text "candidate_run_id:"
+require_workflow_text "candidate-archive-manifest-"
+require_workflow_text "should_package_archives"
+require_workflow_text "BUILD_MODE=promote"
+require_workflow_text "BUILD_MODE=candidate"
+require_workflow_text "name: Promote candidate archives"
 if grep -Fq "make_latest: true" "$workflow"; then
   echo "FAIL: historical recovery must not unconditionally move /releases/latest" >&2
+  exit 1
+fi
+# Canonical tag path must not cold-compile unless force_rebuild is set.
+if ! grep -Fq 'Promoting candidate archives for $REF from run' "$workflow"; then
+  echo "FAIL: tag path must promote candidate archives instead of rebuilding" >&2
   exit 1
 fi
 
@@ -390,8 +417,13 @@ publish_line="$(workflow_line "name: Publish archive to release (incremental)")"
 verify_line="$(workflow_line "name: Verify release archive provenance")"
 checksums_line="$(workflow_line "name: Generate SHA256SUMS")"
 finalize_line="$(workflow_line "name: Finalize GitHub release")"
+promote_line="$(workflow_line "name: Promote candidate archives")"
 if ! (( attest_line < publish_line && verify_line < checksums_line && verify_line < finalize_line )); then
   echo "FAIL: provenance must be emitted before upload and verified before metadata/finalization" >&2
+  exit 1
+fi
+if ! (( promote_line > 0 && promote_line < finalize_line )); then
+  echo "FAIL: promote job must exist before finalize" >&2
   exit 1
 fi
 

@@ -12,9 +12,10 @@ usage() {
   cat <<'EOF'
 Usage: scripts/release_runner_matrix.sh --mode MODE [--profile PROFILE] [--targets TARGETS]
 
-MODE is warm, primary, recovery, or benchmark. PROFILE is policy, standard,
-or fast. Warm and primary always use policy; benchmark requires an explicit
-standard or fast profile. TARGETS is a comma/space-separated target subset.
+MODE is warm, primary, recovery, candidate, or benchmark. PROFILE is policy,
+standard, or fast. Warm, primary, and candidate always use policy; benchmark
+requires an explicit standard or fast profile. TARGETS is a comma/space-
+separated target subset. Candidate uses the primary runner map.
 EOF
 }
 
@@ -45,7 +46,7 @@ while (( $# > 0 )); do
 done
 
 case "$MODE:$PROFILE" in
-  warm:policy|primary:policy|recovery:policy|recovery:standard|recovery:fast|benchmark:standard|benchmark:fast) ;;
+  warm:policy|primary:policy|candidate:policy|recovery:policy|recovery:standard|recovery:fast|benchmark:standard|benchmark:fast) ;;
   benchmark:policy)
     echo 'benchmark mode requires --profile standard or --profile fast' >&2
     exit 2
@@ -122,6 +123,10 @@ RUNNER_KEY="$PROFILE"
 if [[ "$PROFILE" == "policy" ]]; then
   RUNNER_KEY="$MODE"
 fi
+# Candidate archives use the same runners as primary releases.
+if [[ "$RUNNER_KEY" == "candidate" ]]; then
+  RUNNER_KEY="primary"
+fi
 
 jq -c \
   --arg runner_key "$RUNNER_KEY" \
@@ -149,7 +154,7 @@ jq -c \
           target,
           runner: (
             if $force_standard_macos
-              and ($runner_key == "primary" or $runner_key == "recovery")
+              and ($runner_key == "primary" or $runner_key == "recovery" or $runner_key == "candidate")
               and .target == "x86_64-apple-darwin"
             then .runners.standard
             else .runners[$runner_key]
