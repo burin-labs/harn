@@ -142,6 +142,7 @@ pub(super) const HARNESS_MIGRATIONS: &[(&str, &str)] = &[
     ("event_log.emit_idempotent", "harness.obs.event_log_emit_idempotent"),
     ("event_log.emit_idempotent_chained", "harness.obs.event_log_emit_idempotent_chained"),
     ("event_log.hypothesis_authority_mint", "harness.obs.hypothesis_event_authority_mint"),
+    ("event_log.hypothesis_authority_request", "harness.obs.hypothesis_event_authority_request"),
     ("event_log.hypothesis_event_append", "harness.obs.hypothesis_event_append"),
     ("event_log.hypothesis_event_snapshot", "harness.obs.hypothesis_event_snapshot"),
     ("event_log.latest", "harness.obs.event_log_latest"),

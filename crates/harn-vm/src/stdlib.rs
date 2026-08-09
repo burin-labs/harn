@@ -590,7 +590,9 @@ fn builtin_manifest_index() -> &'static BuiltinManifestIndex {
             }
             if matches!(
                 entry.contract.exposure,
-                BuiltinExposure::CapabilityFunction { .. } | BuiltinExposure::PrivilegedWire
+                BuiltinExposure::CapabilityFunction { .. }
+                    | BuiltinExposure::HarnessMethod { .. }
+                    | BuiltinExposure::PrivilegedWire
             ) && !entry.contract.effects.is_empty()
             {
                 recorded_effects_by_name.insert(entry.name, *entry);
@@ -1188,7 +1190,9 @@ fn main(harness: Harness) {
             );
             let should_record = matches!(
                 entry.contract.exposure,
-                BuiltinExposure::CapabilityFunction { .. } | BuiltinExposure::PrivilegedWire
+                BuiltinExposure::CapabilityFunction { .. }
+                    | BuiltinExposure::HarnessMethod { .. }
+                    | BuiltinExposure::PrivilegedWire
             ) && !entry.contract.effects.is_empty();
             assert_eq!(
                 recorded_effect_builtin_manifest_entry(entry.name).is_some(),

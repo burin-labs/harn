@@ -102,6 +102,89 @@ async fn non_turn_stable_read_still_reaches_the_editor() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn hypothesis_attestation_round_trip_becomes_a_vm_local_resource_only_in_the_scoped_builtin()
+{
+    harn_vm::reset_thread_local_state();
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let mut server =
+        AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx.clone()));
+    let bridge = test_bridge(tx, &server);
+    install_acp_host_bridge(bridge);
+
+    let event_fingerprint = format!("sha256:{}", "a".repeat(64));
+    let plan_fingerprint = format!("sha256:{}", "b".repeat(64));
+    let source = format!(
+        r#"
+pipeline main(harness: Harness) {{
+  const proof = harness.obs.hypothesis_event_authority_request(
+    "plan_admission",
+    "{event_fingerprint}",
+    "{plan_fingerprint}",
+    "hyp-1",
+    "receipt-1",
+    nil,
+  )
+  return type_of(proof)
+}}
+"#
+    );
+    let chunk = harn_vm::compile_source(&source).expect("compile authority request");
+    let mut vm = harn_vm::Vm::new();
+    harn_vm::register_vm_stdlib(&mut vm);
+    let (harness, _clock) = harn_vm::Harness::test();
+    vm.set_harness(harness);
+    let execution = vm.execute(&chunk);
+    tokio::pin!(execution);
+
+    let outgoing = tokio::select! {
+        message = recv_json(&mut rx) => message,
+        result = &mut execution => panic!("authority request completed before host response: {result:?}"),
+    };
+    assert_eq!(outgoing["method"], "host/call");
+    assert_eq!(outgoing["params"]["name"], "hypothesis.attest_event");
+    assert_eq!(
+        outgoing["params"]["args"]["operation_receipt_id"],
+        "receipt-1"
+    );
+    assert_eq!(
+        outgoing["params"]["args"]["authority_kind"],
+        "plan_admission"
+    );
+    assert_eq!(
+        outgoing["params"]["args"]["event_fingerprint"],
+        event_fingerprint
+    );
+    assert_eq!(
+        outgoing["params"]["args"]["plan_fingerprint"],
+        plan_fingerprint
+    );
+    assert_eq!(outgoing["params"]["args"]["hypothesis_id"], "hyp-1");
+    assert!(outgoing["params"]["args"]["run_id"].is_null());
+
+    server
+        .handle_incoming_message(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": outgoing["id"].clone(),
+            "result": {
+                "_meta": {
+                    "harn": {
+                        "hostResult": {
+                            "schema": "harn.host-result.v1",
+                            "kind": "hypothesis_native_attestation"
+                        }
+                    }
+                }
+            }
+        }))
+        .await;
+    let result = execution
+        .await
+        .expect("tagged native success should mint a resource");
+    assert_eq!(result.display(), "resource");
+    harn_vm::clear_host_call_bridge();
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn process_exec_host_call_is_gated_by_command_policy_on_acp_bridge() {
     // Acceptance for #5523: installing the ACP bridge must not let
     // host_call("process.exec", ...) bypass harn's deny-patterns.

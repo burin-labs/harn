@@ -12,7 +12,7 @@
 //! key with no runtime backing (either wire it up or move it to the
 //! allowlist with a tracking comment).
 
-use std::collections::BTreeSet;
+use std::{borrow::Cow, collections::BTreeSet};
 
 use serde::Serialize;
 
@@ -24,6 +24,14 @@ const AGENT_OPTIONS_MODULE: &str = "agent/options";
 const AGENT_OPTIONS_TYPES_MODULE: &str = "agent/options_types";
 const AGENT_CONTRACTS_MODULE: &str = "agent/contracts";
 const WORKFLOW_OPTIONS_MODULE: &str = "workflow/options";
+
+fn normalized_harn_source(source: &str) -> Cow<'_, str> {
+    if source.contains('\r') {
+        Cow::Owned(source.replace("\r\n", "\n").replace('\r', "\n"))
+    } else {
+        Cow::Borrowed(source)
+    }
+}
 
 fn stdlib_source(module: &str) -> &'static str {
     harn_stdlib::get_stdlib_source(module)
@@ -60,35 +68,23 @@ const AGENT_SPEC_PARTS: [&str; 6] = [
 ];
 
 fn agent_spec_keys_from(source: &str) -> BTreeSet<String> {
-    let declaration = harn_declaration_rhs(source, "AgentSpec");
-    let members: Vec<&str> = declaration
-        .split('&')
-        .map(|part| part.trim().trim_end_matches('\\').trim())
-        .collect();
-    assert_eq!(
-        members, AGENT_SPEC_PARTS,
+    let source = normalized_harn_source(source);
+    let declaration = concat!(
+        "pub type AgentSpec = AgentModelSpec \\\n",
+        "  & AgentExecutionSpec \\\n",
+        "  & AgentCapabilitySpec \\\n",
+        "  & AgentLifecycleSpec \\\n",
+        "  & AgentContextSpec \\\n",
+        "  & AgentObservabilitySpec",
+    );
+    assert!(
+        source.contains(declaration),
         "AgentSpec must compose exactly the six named agent contract records"
     );
     AGENT_SPEC_PARTS
         .into_iter()
-        .flat_map(|name| harn_alias_keys(source, name))
+        .flat_map(|name| harn_alias_keys(&source, name))
         .collect()
-}
-
-/// Return one Harn type declaration's right-hand side, independent of the
-/// checkout's newline convention. Embedded stdlib source preserves repository
-/// bytes, so tests that inspect it must accept both LF and CRLF rather than
-/// treating platform line endings as contract syntax.
-fn harn_declaration_rhs(source: &str, name: &str) -> String {
-    let marker = format!("type {name} =");
-    let (_, declaration) = source
-        .split_once(&marker)
-        .unwrap_or_else(|| panic!("alias `{name}` not found in Harn source"));
-    declaration
-        .lines()
-        .take_while(|line| !line.trim().is_empty())
-        .collect::<Vec<_>>()
-        .join("\n")
 }
 
 fn agent_spec_keys() -> BTreeSet<String> {
@@ -171,7 +167,15 @@ fn harn_alias_keys(source: &str, name: &str) -> BTreeSet<String> {
 }
 
 fn harn_string_union_values(source: &str, name: &str) -> BTreeSet<String> {
-    harn_declaration_rhs(source, name)
+    let source = normalized_harn_source(source);
+    let marker = format!("type {name} =");
+    let (_, declaration) = source
+        .split_once(&marker)
+        .unwrap_or_else(|| panic!("alias `{name}` not found in Harn source"));
+    declaration
+        .split("\n\n")
+        .next()
+        .expect("union declaration")
         .split('|')
         .filter_map(|part| {
             let value = part.trim().trim_end_matches('\\').trim().trim_matches('"');
@@ -181,23 +185,20 @@ fn harn_string_union_values(source: &str, name: &str) -> BTreeSet<String> {
 }
 
 #[test]
-fn contract_source_parsers_are_newline_agnostic() {
-    let options_lf = agent_options_harn();
-    let options_crlf = options_lf.replace('\n', "\r\n");
+fn typed_contract_parsers_accept_crlf_sources() {
+    let crlf_options = agent_options_harn().replace('\n', "\r\n");
     assert_eq!(
-        agent_spec_keys_from(options_lf),
-        agent_spec_keys_from(&options_crlf)
+        agent_spec_keys_from(&crlf_options),
+        agent_spec_keys_from(agent_options_harn()),
+        "AgentSpec extraction must be independent of checkout line endings",
     );
 
-    let contracts_lf = agent_contracts_harn();
-    let contracts_crlf = contracts_lf.replace('\n', "\r\n");
-    for name in ["AgentTerminalKind", "AgentTerminalOwner"] {
-        assert_eq!(
-            harn_string_union_values(contracts_lf, name),
-            harn_string_union_values(&contracts_crlf, name),
-            "`{name}` changed under CRLF"
-        );
-    }
+    let crlf_contracts = agent_contracts_harn().replace('\n', "\r\n");
+    assert_eq!(
+        harn_string_union_values(&crlf_contracts, "AgentTerminalKind"),
+        harn_string_union_values(agent_contracts_harn(), "AgentTerminalKind"),
+        "string-union extraction must be independent of checkout line endings",
+    );
 }
 
 /// Serialize a struct's `Default` and return the top-level JSON object keys.

@@ -3,6 +3,44 @@
 Harn's stdio bridge uses JSON-RPC 2.0 notifications and requests for
 host/runtime coordination below ACP session semantics.
 
+## Native hypothesis attestation
+
+`harness.obs.hypothesis_event_authority_request` sends a `host/call` request
+named `hypothesis.attest_event`. Its `args` object contains
+`authority_kind`, `event_fingerprint`, `plan_fingerprint`, `hypothesis_id`,
+`operation_receipt_id`, and nullable `run_id`. The host verifies the receipt
+against the completed native operation and either returns a JSON-RPC error or
+this exact result:
+
+```json
+{
+  "_meta": {
+    "harn": {
+      "hostResult": {
+        "schema": "harn.host-result.v1",
+        "kind": "hypothesis_native_attestation"
+      }
+    }
+  }
+}
+```
+
+Harn rejects missing, malformed, or extended success documents. It validates
+the request bindings before the host call, consumes the success marker inside
+the authority-scoped builtin, and mints a VM-local resource bound to the
+current execution. The marker is not an authority token: the generic
+`host_call` path returns it as an ordinary dictionary, script mocks cannot
+satisfy the specialized request, and the operation is never served from the
+per-turn read memo.
+
+The adapter owns operation receipts and binds each receipt to one exact request;
+approval UI output or an observation payload alone is not a receipt. An exact
+retry may return the same success, but reuse with different bindings fails.
+Hosts advertise `hypothesis.attest_event` through `host/capabilities` only
+while a trusted adapter is installed. Denial, a stale or mismatched receipt,
+or a native-operation failure is a JSON-RPC error; there is no successful
+"denied" result variant.
+
 ## Tool lifecycle observation
 
 The `tool/pre_use`, `tool/post_use`, and `tool/request_approval` bridge

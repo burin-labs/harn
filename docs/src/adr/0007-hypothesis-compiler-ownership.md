@@ -143,6 +143,16 @@ scope. Resource-scoped `authority.write@<kind>` effects let an execution-policy
 ceiling grant plan admission, native approval, native observation, and lifecycle
 audit independently; a connector grant is not authority to mint these proofs.
 
+Protocol hosts use the same boundary without serializing the resource. The
+`hypothesis_event_authority_request` builtin sends the exact bindings plus a
+native operation-receipt ID through `hypothesis.attest_event`. The host either
+returns a JSON-RPC error or the exact `harn.host-result.v1` success marker. Harn
+consumes that marker inside the authority-scoped builtin and mints the resource
+in the current VM execution. The generic host-call path deliberately leaves an
+identical marker as ordinary data, so `connector.call` cannot substitute for
+`authority.write@<kind>`. Requests bypass script mocks and the per-turn read
+memo because attestation is an operation-completion boundary.
+
 After checking that proof, the hypothesis ledger validates the typed payload
 and aggregate predecessor before using the existing event log's atomic
 compare-and-append. It folds a read model from the same events, reapplies
