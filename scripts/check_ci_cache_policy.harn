@@ -178,6 +178,8 @@ const CI_WORKFLOW_CONCURRENCY_GROUP = "$"
 
 const CI_WORKFLOW_CANCEL_POLICY = "$" + "{{ github.event_name == 'pull_request' }}"
 
+const CI_CACHE_REFRESH_CONCURRENCY_GROUP = "harn-ci-rust-cache-refresh"
+
 const UPSTREAM_CACHE_PREFIX = "Swatinem/rust-cache@"
 
 const UPSTREAM_CACHE_RESTORE_PREFIX = "actions/cache/restore@"
@@ -1362,6 +1364,22 @@ fn hosted_refresh_lane_errors(workflow) -> list<string> {
   return errors
 }
 
+/** Serialize the mutating cache tail without cancelling an in-flight save. */
+pub fn rust_cache_refresh_concurrency_errors(job) -> list<string> {
+  let errors: list<string> = []
+  if trim(job?.concurrency?.group ?? "") != CI_CACHE_REFRESH_CONCURRENCY_GROUP {
+    errors = errors
+      + ["ci.yml:rust-cache-refresh must serialize cache mutation across main commits"]
+  }
+  if lowercase(trim(to_string(job?.concurrency?.["cancel-in-progress"] ?? true))) != "false" {
+    errors = errors
+      + [
+      "ci.yml:rust-cache-refresh must finish the active cache save before the newest pending one",
+    ]
+  }
+  return errors
+}
+
 /** Keep the post-merge main-scoped cache refresher wired to proof reuse. */
 fn rust_cache_refresh_errors(workflow) -> list<string> {
   const job = workflow?.jobs?.["rust-cache-refresh"]
@@ -1369,6 +1387,7 @@ fn rust_cache_refresh_errors(workflow) -> list<string> {
     return ["ci.yml:rust-cache-refresh must define the main-scoped cache writer"]
   }
   let errors: list<string> = []
+  errors = errors + rust_cache_refresh_concurrency_errors(job)
   if trim(job?.if ?? "") != "needs.changes.outputs.rust_cache_refresh == 'true'" {
     errors = errors
       + [

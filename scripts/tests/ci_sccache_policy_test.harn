@@ -170,6 +170,7 @@ fn workflow() {
       "rust-cache-refresh": {
         "runs-on": "ubuntu-latest",
         if: "needs.changes.outputs.rust_cache_refresh == 'true'",
+        concurrency: {group: "harn-ci-rust-cache-refresh", "cancel-in-progress": false},
         permissions: {contents: "read", actions: "write"},
         env: {HARN_RUNNER_TIER: "github-hosted", RUSTFLAGS: gha_expression("matrix.rustflags")},
         strategy: {

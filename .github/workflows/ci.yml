@@ -652,6 +652,12 @@ jobs:
     needs: [changes]
     if: needs.changes.outputs.rust_cache_refresh == 'true'
     runs-on: ubuntu-latest
+    # Main CI is keyed per commit so every integration proof starts. Serialize
+    # only this mutating tail across those runs: GitHub retains the running job
+    # and the newest pending job, avoiding concurrent prune/save operations.
+    concurrency:
+      group: harn-ci-rust-cache-refresh
+      cancel-in-progress: false
     # Serial legs: each save needs its own headroom under the 10 GiB ceiling.
     timeout-minutes: 45
     strategy:
