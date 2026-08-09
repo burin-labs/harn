@@ -936,6 +936,9 @@ jobs:
           npm ci
           touch src/parser.c
           ./scripts/tree-sitter-cli.sh build
+      - name: Check generated parser is current
+        if: matrix.kind == 'audit'
+        run: make check-tree-sitter-parser
       - name: Wait for shared Harn binary
         env:
           GH_TOKEN: ${{ github.token }}
@@ -960,7 +963,13 @@ jobs:
         env:
           AUDIT_GATES_CONCURRENCY: "4"
           HARN_CONFORMANCE_JOBS: "4"
-        run: ./scripts/audit_gates.sh --phase "${{ matrix.kind }}"
+          TREE_SITTER_PARSER_PREFLIGHTED: ${{ matrix.kind == 'audit' && 'true' || 'false' }}
+        run: |
+          args=(--phase "${{ matrix.kind }}")
+          if [ "$TREE_SITTER_PARSER_PREFLIGHTED" = true ]; then
+            args+=(--tree-sitter-parser-preflighted)
+          fi
+          ./scripts/audit_gates.sh "${args[@]}"
 
   ci-walltime-report:
     name: Write CI timing report

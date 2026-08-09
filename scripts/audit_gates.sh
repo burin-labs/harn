@@ -25,10 +25,14 @@
 # throughput for a measurement that reflects the workload rather than runner
 # contention.
 #
-# Usage: scripts/audit_gates.sh [--phase all|conformance|audit]
+# Usage: scripts/audit_gates.sh [--phase all|conformance|audit] [--tree-sitter-parser-preflighted]
 #   --phase all             run both worker pools together (default; local use)
 #   --phase conformance     run conformance workers, then the performance ratchet
 #   --phase audit           run only the independent audit gate fanout
+#   --tree-sitter-parser-preflighted
+#                            omit that gate only after the caller ran it on the
+#                            same checkout (CI uses this to overlap it with the
+#                            shared-binary build)
 #   HARN_BIN                 pre-built binary to reuse (skips the warm build)
 #   AUDIT_GATES_CONCURRENCY  `make -j` cap (default: nproc minus conformance
 #                            workers; see headroom note below). Explicit values
@@ -42,6 +46,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 phase="all"
+tree_sitter_parser_preflighted="false"
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --phase)
@@ -53,8 +58,12 @@ while [ "$#" -gt 0 ]; do
       phase="${1#--phase=}"
       shift
       ;;
+    --tree-sitter-parser-preflighted)
+      tree_sitter_parser_preflighted="true"
+      shift
+      ;;
     -h|--help)
-      echo "usage: scripts/audit_gates.sh [--phase all|conformance|audit]"
+      echo "usage: scripts/audit_gates.sh [--phase all|conformance|audit] [--tree-sitter-parser-preflighted]"
       exit 0
       ;;
     *)
@@ -123,6 +132,15 @@ GATES=(
   check-release-audit-contract
   check-vm-rss-soak
 )
+if [ "$tree_sitter_parser_preflighted" = "true" ]; then
+  filtered_gates=()
+  for gate in "${GATES[@]}"; do
+    if [ "$gate" != "check-tree-sitter-parser" ]; then
+      filtered_gates+=("$gate")
+    fi
+  done
+  GATES=("${filtered_gates[@]}")
+fi
 
 nproc_count() { getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4; }
 explicit_audit_concurrency="${AUDIT_GATES_CONCURRENCY-}"

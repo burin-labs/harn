@@ -1543,7 +1543,10 @@ fn harn_audit_overlap_errors(workflow) -> list<string> {
   const download_index = step_index_by_name(steps, "Download shared Harn binary")
   const verify_index = step_index_by_name(steps, "Verify shared Harn binary")
   const grammar_index = step_index_by_name(steps, "Build tree-sitter grammar for the parse sweep")
+  const parser_index = step_index_by_name(steps, "Check generated parser is current")
   const wait_command = trim(step_by_name(steps, "Wait for shared Harn binary")?.run ?? "")
+  const parser_command = trim(step_by_name(steps, "Check generated parser is current")?.run ?? "")
+  const audit_command = trim(step_by_name(steps, "Run $" + "{{ matrix.step_name }}")?.run ?? "")
   if (audit?.needs ?? []) != ["changes"]
     || trim(audit?.if ?? "")
     != "needs.changes.outputs.rust == 'true'"
@@ -1551,13 +1554,17 @@ fn harn_audit_overlap_errors(workflow) -> list<string> {
     || download_index < 0
     || verify_index < 0
     || grammar_index < 0
-    || grammar_index >= wait_index
+    || parser_index < 0
+    || grammar_index >= parser_index
+    || parser_index >= wait_index
     || wait_index >= download_index
     || download_index >= verify_index
     || !contains(
     wait_command,
     "wait_for_run_artifacts.sh harn-cli.tar.zst",
-  ) {
+  )
+    || parser_command != "make check-tree-sitter-parser"
+    || !contains(audit_command, "--tree-sitter-parser-preflighted") {
     return [
       "ci.yml:harn-audit must overlap CLI-independent setup, then wait for and verify the exact shared Harn binary",
     ]

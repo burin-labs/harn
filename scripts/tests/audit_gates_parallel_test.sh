@@ -219,6 +219,24 @@ if ! grep -Fxq "=== audit gates passed ===" "$tmp_root/split-audit.out"; then
   exit 1
 fi
 
+preflighted_audit_record="$tmp_root/preflighted-audit-record.txt"
+: > "$preflighted_audit_record"
+FAKE_SPLIT_PHASE=1 \
+  AUDIT_GATES_CONCURRENCY=3 \
+  HARN_CONFORMANCE_JOBS=3 \
+  HARN_BIN="$fake_harn" \
+  FAKE_AUDIT_RECORD="$preflighted_audit_record" \
+  FAKE_CONFORMANCE_RECORD="$split_audit_conformance_record" \
+  FAKE_AUDIT_ROOT="$tmp_root" \
+  FAKE_CONFORMANCE_START_FIFO_DIR="$conformance_start_fifo_dir" \
+  PATH="$fake_bin:$PATH" \
+  "$repo_root/scripts/audit_gates.sh" --phase audit \
+    --tree-sitter-parser-preflighted > "$tmp_root/preflighted-audit.out"
+if grep -Fq "check-tree-sitter-parser" "$preflighted_audit_record"; then
+  echo "preflighted audit repeated the generated parser check" >&2
+  exit 1
+fi
+
 # Default (unset) AUDIT_GATES_CONCURRENCY must reserve cores for conformance
 # workers so process-heavy cases are not starved by the make -j fanout.
 : > "$record"
