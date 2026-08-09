@@ -381,6 +381,8 @@ mod tests {
                 insertions: 1,
                 evictions: 0,
                 entries: 1,
+                test_files_compiled: 1,
+                test_entries_compiled: 1,
             },
             summary: crate::test_runner::TestSummary {
                 results: vec![crate::test_runner::TestResult {
@@ -411,6 +413,9 @@ mod tests {
                     collection_ms: 1,
                     setup_ms: 1,
                     compile_ms: 1,
+                    test_file_compile_ms: 0,
+                    test_files_compiled: 0,
+                    test_entries_compiled: 0,
                     execute_ms: 10,
                     teardown_ms: 0,
                     modules: harn_vm::ModulePhaseStats::default(),
@@ -427,11 +432,13 @@ mod tests {
                 "run_count": 3,
                 "cache_before": {
                     "workers": 0, "hits": 0, "misses": 0,
-                    "insertions": 0, "evictions": 0, "entries": 0
+                    "insertions": 0, "evictions": 0, "entries": 0,
+                    "test_files_compiled": 0, "test_entries_compiled": 0
                 },
                 "cache_after": {
                     "workers": 1, "hits": 2, "misses": 1,
-                    "insertions": 1, "evictions": 0, "entries": 1
+                    "insertions": 1, "evictions": 0, "entries": 1,
+                    "test_files_compiled": 1, "test_entries_compiled": 1
                 },
                 "summary": {
                     "results": [{
@@ -458,6 +465,8 @@ mod tests {
                     },
                     "aggregate": {
                         "collection_ms": 1, "setup_ms": 1, "compile_ms": 1,
+                        "test_file_compile_ms": 0,
+                        "test_files_compiled": 0, "test_entries_compiled": 0,
                         "execute_ms": 10, "teardown_ms": 0,
                         "modules": {
                             "module_compile_ms": 0, "module_load_ms": 0,

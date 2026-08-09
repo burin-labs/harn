@@ -383,6 +383,12 @@ fn print_user_test_timing(summary: &test_runner::TestSummary) {
         aggregate.teardown_ms,
     );
     println!(
+        "Test-file entries: compile={} ms ({} files, {} entries)",
+        aggregate.test_file_compile_ms,
+        aggregate.test_files_compiled,
+        aggregate.test_entries_compiled,
+    );
+    println!(
         "Module attribution (overlaps phases): compile={} ms ({} modules)  load={} ms ({} modules)",
         aggregate.modules.module_compile_ms,
         aggregate.modules.modules_compiled,

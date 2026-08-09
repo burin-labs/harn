@@ -56,6 +56,11 @@ pipeline test_isolated(fx: dict, replacement: int) {
 
     assert_eq!(summary.passed, 2, "{:?}", summary.results);
     assert_eq!(summary.failed, 0, "{:?}", summary.results);
+    assert_eq!(summary.aggregate.test_files_compiled, 1);
+    assert_eq!(
+        summary.aggregate.test_entries_compiled, 2,
+        "the file fixture and parameterized pipeline must share one file lowering"
+    );
     assert_eq!(
         fs::read_to_string(suite.join("fixture-calls.log")).unwrap(),
         "called\n",

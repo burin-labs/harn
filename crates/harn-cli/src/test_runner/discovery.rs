@@ -49,6 +49,8 @@ pub(super) fn extract_cases_from_program(
                 args: meta.default_args,
                 fixture: meta.fixture,
                 file_fixture_value: None,
+                compiled_entry: None,
+                compiled_file_fixture_entry: None,
                 trusted_host_dispatch: false,
             });
         } else {
@@ -69,6 +71,8 @@ pub(super) fn extract_cases_from_program(
                     args: row.args,
                     fixture: meta.fixture.clone(),
                     file_fixture_value: None,
+                    compiled_entry: None,
+                    compiled_file_fixture_entry: None,
                     trusted_host_dispatch: false,
                 });
             }

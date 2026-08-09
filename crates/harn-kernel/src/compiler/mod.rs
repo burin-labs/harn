@@ -73,6 +73,16 @@ pub struct CompiledCallableEntry {
     pub expects_harness: bool,
 }
 
+/// Ordered results from one shared lowering of a source file's requested
+/// callable entries. A declaration-level failure remains local to its request;
+/// parse/import/top-level failures are returned by the batch operation itself.
+pub struct CompiledCallableBatch {
+    /// Results in the same order as requested pipeline entries.
+    pub pipelines: Vec<Result<CompiledCallableEntry, CompileError>>,
+    /// Results in the same order as requested function entries.
+    pub functions: Vec<Result<CompiledCallableEntry, CompileError>>,
+}
+
 /// Jump operands are 16-bit chunk offsets (`emit_jump`, `patch_jump`,
 /// backward loop jumps), so a chunk whose code grows past `u16::MAX`
 /// bytes would silently truncate jump targets and land somewhere wild at

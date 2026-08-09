@@ -1,5 +1,5 @@
 /// Compile error.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct CompileError {
     pub message: String,
     pub line: u32,

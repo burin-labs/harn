@@ -13,6 +13,13 @@ pub struct CompiledCallableEntry {
     pub(crate) expects_harness: bool,
 }
 
+pub struct CompiledCallableBatch {
+    /// Results in the same order as requested pipeline entries.
+    pub pipelines: Vec<Result<CompiledCallableEntry, CompileError>>,
+    /// Results in the same order as requested function entries.
+    pub functions: Vec<Result<CompiledCallableEntry, CompileError>>,
+}
+
 pub struct Compiler {
     inner: harn_kernel::Compiler,
 }
@@ -71,6 +78,47 @@ impl Compiler {
         self.inner
             .compile_named_pipeline_entry(program, name, fixture)
             .map(convert_entry)
+    }
+
+    /// Compile several named pipelines from one parsed file while sharing the
+    /// immutable top-level compilation work between their entry artifacts.
+    pub fn compile_named_pipeline_entries(
+        self,
+        program: &[harn_parser::SNode],
+        entries: &[(&str, Option<&str>)],
+    ) -> Result<Vec<Result<CompiledCallableEntry, CompileError>>, CompileError> {
+        self.inner
+            .compile_named_pipeline_entries(program, entries)
+            .map(|entries| {
+                entries
+                    .into_iter()
+                    .map(|entry| entry.map(convert_entry))
+                    .collect()
+            })
+    }
+
+    /// Compile pipeline and function entries through one immutable file
+    /// lowering while preserving a fresh runtime artifact for every request.
+    pub fn compile_named_callable_entries(
+        self,
+        program: &[harn_parser::SNode],
+        pipelines: &[(&str, Option<&str>)],
+        functions: &[&str],
+    ) -> Result<CompiledCallableBatch, CompileError> {
+        self.inner
+            .compile_named_callable_entries(program, pipelines, functions)
+            .map(|batch| CompiledCallableBatch {
+                pipelines: batch
+                    .pipelines
+                    .into_iter()
+                    .map(|entry| entry.map(convert_entry))
+                    .collect(),
+                functions: batch
+                    .functions
+                    .into_iter()
+                    .map(|entry| entry.map(convert_entry))
+                    .collect(),
+            })
     }
 
     pub fn compile_named_function_entry(
