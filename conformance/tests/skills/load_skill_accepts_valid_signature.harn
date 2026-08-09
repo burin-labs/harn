@@ -27,7 +27,7 @@ pipeline test(harness: Harness, task) {
           skills: skills,
         },
       )
-      assert(result?.status == "done", "agent loop finishes")
+      assert(result.status == "done", "agent loop finishes")
       const chain = skill_who_signed(skills, "signed-review")
       assert(chain?.trusted, "who-signed query marks chain trusted")
       assert(
@@ -52,7 +52,7 @@ pipeline test(harness: Harness, task) {
         contains(second_messages, "Always verify the signed skill body."),
         "signed skill body is loaded",
       )
-      const events = transcript_events(result?.transcript)
+      const events = transcript_events(result.transcript)
       let saw_record = false
       for ev in events {
         if ev?.kind == "skill.loaded" && ev?.metadata?.skill_id == "signed-review" {

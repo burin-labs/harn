@@ -28,8 +28,8 @@ pipeline main(harness: Harness) {
       policy: {tools: ["read_only"]},
     },
   )
-  harness.stdio.println(denied?.tools?.rejected[0] == "write_note")
-  const transcript = json_stringify(transcript_messages(denied?.transcript))
+  harness.stdio.println(denied.tools.rejected[0] == "write_note")
+  const transcript = json_stringify(transcript_messages(denied.transcript))
   harness.stdio.println(!transcript.contains("permission_denied"))
   harness.stdio.println(transcript.contains("unknown_tool"))
   harness.stdio.println(transcript.contains("write_note"))
@@ -53,8 +53,8 @@ pipeline main(harness: Harness) {
       },
     },
   )
-  harness.stdio.println(read_only_denied?.tools?.rejected[0] == "write_note")
-  const read_only_transcript = json_stringify(transcript_messages(read_only_denied?.transcript))
+  harness.stdio.println(read_only_denied.tools.rejected[0] == "write_note")
+  const read_only_transcript = json_stringify(transcript_messages(read_only_denied.transcript))
   harness.stdio.println(!read_only_transcript.contains("permission_denied"))
   harness.stdio.println(read_only_transcript.contains("unknown_tool"))
   harness.stdio.println(read_only_transcript.contains("write_note"))

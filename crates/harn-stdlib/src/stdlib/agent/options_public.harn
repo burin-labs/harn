@@ -199,14 +199,14 @@ pub fn agent_preset_options(options: AgentPresetOptions = {}) -> AgentPresetOpti
 
 /**
  * agent_options is the typed constructor for `agent_loop` options. Direct
- * dict literals are checked against `AgentLoopOptions`, so option typos
+ * dict literals are checked against `AgentSpec`, so option typos
  * fail at check time. The returned dict is exactly what was passed in;
  * `agent_loop` (via `agent_loop_options` below) normalizes it at runtime.
  *
  * @effects: []
  * @errors: []
  */
-pub fn agent_options(options: AgentLoopOptions = {}) -> AgentLoopOptions {
+pub fn agent_options(options: AgentSpec = {}) -> AgentSpec {
   return options
 }
 

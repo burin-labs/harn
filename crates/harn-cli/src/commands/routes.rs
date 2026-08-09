@@ -364,8 +364,6 @@ fn direct_call_capabilities(call: &harn_ir::CallSemantics) -> BTreeSet<String> {
         | "llm_call_structured_safe"
         | "llm_call_structured_result"
         | "llm_completion"
-        | "agent_llm_turn"
-        | "agent_turn"
         | "agent_loop" => {
             capabilities.insert("llm.call".to_string());
         }

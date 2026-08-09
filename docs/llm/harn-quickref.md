@@ -2099,9 +2099,9 @@ ask the user. Every transition emits a `stance_transition` event
 (`phase`: armed / write_access_granted / write_access_denied / disarmed).
 
 ```harn,ignore
-import { AgentLoopOptions } from "std/agent/options"
+import { AgentSpec } from "std/agent/options"
 
-const stance_opts: AgentLoopOptions = {
+const stance_opts: AgentSpec = {
   tools: tools,
   read_only_stance: {
     enabled: true,
@@ -2199,9 +2199,9 @@ harness.stdio.log(cleared.removed_count)
 Opt out per loop:
 
 ```harn
-import { AgentLoopOptions } from "std/agent/options"
+import { AgentSpec } from "std/agent/options"
 
-const reminder_opts: AgentLoopOptions = {
+const reminder_opts: AgentSpec = {
   reminders: {providers: ["-token_pressure", "-idle_nudge"]},
 }
 agent_loop(harness, task, system, reminder_opts)
@@ -2256,49 +2256,21 @@ over-budget results return a reviewable `status: "budget_exceeded"` envelope.
 
 ## Agent runtime
 
-### `agent_turn`
-
-`agent_turn(prompt, options?)` is the high-level wrapper for the common
-"complete this request" shape. It builds on `agent_loop`, moves
-`options.system` into the system prompt, adds generic progress guidance,
-defaults to loop-until-done completion, and requires the completion judge.
-Native-tool turns complete naturally when the model returns final text
-with no tool calls; text/no-tool turns use the normal sentinel path.
-Pass `judge: {...}` or `done_judge: {...}` to customize the judge; omit
-both to use the default judge.
-
-The result is the normal `agent_loop` dict plus:
-
-- `iterations` — compact per-turn summaries from live loop events.
-- `judge_decisions` — structured completion judge decisions with
-  `iteration`, `verdict`, `reasoning`, `next_step`, and
-  `judge_duration_ms`, plus optional `trigger`.
-
-```harn
-const result = agent_turn("Review this patch and fix obvious issues.", {
-  system: "Be direct and keep changes narrowly scoped.",
-  provider: "openai",
-  model: "gpt-5-mini",
-})
-harness.stdio.log(result.visible_text)
-harness.stdio.log(result.judge_decisions[0].verdict)
-```
-
 ### `agent_loop`
 
 `agent_loop(harness, prompt, system?, options?)` runs a multi-turn loop with
-tool dispatch. Build the options through the typed `AgentLoopOptions`
-alias from `std/agent/options` (`let opts: AgentLoopOptions = {...}`)
-or an `agent_preset(...)` / `agent_options(...)` constructor — this is
-the documented path, and the `unnormalized-options` lint flags inline
-dict literals that bypass it (they still execute). Native-tool loops complete naturally when the model
+tool dispatch. Build options through `AgentSpec` from `std/agent/options`
+(`let opts: AgentSpec = {...}`) or an `agent_preset(...)` /
+`agent_options(...)` constructor. `AgentSpec` composes model, execution,
+capability, lifecycle, context, and observability records while remaining one
+flat runtime value. Native-tool loops complete naturally when the model
 returns final assistant text with no tool calls. Tagged text-tool stages
 use `<done>##DONE##</done>`, and no-tool sentinel loops use bare
 `##DONE##`. Set `done_sentinel` to a non-empty string to require a
 sentinel, or `nil` for no sentinel. Native-tool loop-until-done loops default
 to `nil`; text/no-tool loop-until-done loops default to `"##DONE##"`.
 
-Returns a namespaced dict: top-level `status`, `text`, `visible_text`
+Returns the typed `AgentResult`: top-level `status`, `terminal`, `text`, `visible_text`
 (last iteration's prose with tool calls stripped), `task_ledger`,
 `transcript`, `daemon_state`, `daemon_snapshot_path`, `trace`, and
 `deferred_user_messages`; LLM execution metrics nested under `llm`
@@ -2361,9 +2333,9 @@ Vercel AI SDK's `stopWhen: hasToolCall(name)` and OpenAI Agents SDK's
 agent step:
 
 ```harn
-import { AgentLoopOptions } from "std/agent/options"
+import { AgentSpec } from "std/agent/options"
 
-const stop_opts: AgentLoopOptions = {
+const stop_opts: AgentSpec = {
   tools: registry,
   stop_after_successful_tools: ["ask_question", "exit_plan_mode"],
 }
@@ -2451,9 +2423,9 @@ Use `done_judge.cadence` when completion checks should be signal-gated
 instead of firing on every completion candidate:
 
 ```harn
-import { AgentLoopOptions } from "std/agent/options"
+import { AgentSpec } from "std/agent/options"
 
-const cadence_opts: AgentLoopOptions = {
+const cadence_opts: AgentSpec = {
   loop_until_done: true,
   done_judge: {
     cadence: {
@@ -2486,10 +2458,10 @@ showing stall symptoms.
 Pass `permissions` to scope one agent below the ambient `policy` ceiling:
 
 ```harn
-import { AgentLoopOptions } from "std/agent/options"
+import { AgentSpec } from "std/agent/options"
 import { path_scope } from "std/tools"
 
-const scoped_opts: AgentLoopOptions = {
+const scoped_opts: AgentSpec = {
   permissions: {
     allow: {read_note: path_scope(), write_note: path_scope({mount_modes: ["extend"]})},
     deny: ["dangerous_*"],
@@ -2807,9 +2779,9 @@ appends an `autonomy.tier_transition` trust-graph record from `act_auto`
 to `act_with_approval`:
 
 ```harn
-import { AgentLoopOptions } from "std/agent/options"
+import { AgentSpec } from "std/agent/options"
 
-const budgeted_opts: AgentLoopOptions = {
+const budgeted_opts: AgentSpec = {
   autonomy_budget: {per_hour: 10, per_day: 100, key: "captain.persona", reviewer: "oncall"},
 }
 agent_loop(harness, task, system, budgeted_opts)
@@ -4281,7 +4253,7 @@ assert(recovered.error.reason == "upstream_unavailable")
 budget behavior without forking the loop:
 
 ```harn,ignore
-import { AgentLoopOptions } from "std/agent/options"
+import { AgentSpec } from "std/agent/options"
 import {default_llm_caller} from "std/llm/caller"
 import {with_retry, with_fallback, compose} from "std/llm/handlers"
 
@@ -4290,7 +4262,7 @@ const caller = compose([
   with_fallback,    // pseudo: with_fallback expects a list of callers
 ])(default_llm_caller())
 
-const resilient_opts: AgentLoopOptions = {loop_until_done: true, llm_caller: caller}
+const resilient_opts: AgentSpec = {loop_until_done: true, llm_caller: caller}
 agent_loop(harness, task, system, resilient_opts)
 ```
 
@@ -4519,7 +4491,7 @@ wraps every tool dispatch. Combined with the `tools_use_middleware`
   tool definitions
 
 ```harn,ignore
-import { AgentLoopOptions } from "std/agent/options"
+import { AgentSpec } from "std/agent/options"
 import {
   with_required_reason, with_audit_log, with_consent,
   compose_tool_callers, tools_use_middleware,
@@ -4534,7 +4506,7 @@ const caller = compose_tool_callers([
   mw.caller,
 ])
 
-const audited_opts: AgentLoopOptions = {tools: registry, tool_caller: caller}
+const audited_opts: AgentSpec = {tools: registry, tool_caller: caller}
 agent_loop(harness, task, system, audited_opts)
 ```
 

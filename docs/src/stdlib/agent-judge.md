@@ -112,8 +112,8 @@ Each deterministic decision emits a `judge_decision` event with
 the budget converts a soft veto into an allow, the event carries
 `reason: "veto_budget_exhausted"` plus `converted_from` with the original class.
 Streak escalation decisions also carry `escalation_recommended` and, when
-configured, `escalation_target`. `agent_turn(...).judge_decisions` preserves
-the same fields.
+configured, `escalation_target`. Consumers read the same fields from the
+session's `judge_decision` events.
 
 `feedback_decorator` runs only after the ladder and veto budget resolve a veto
 that will actually be delivered. It receives `(reason, feedback, verdict)`;

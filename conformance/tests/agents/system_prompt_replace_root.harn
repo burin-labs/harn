@@ -2,7 +2,7 @@
 // contributor. Prove that at the provider boundary so no builder-local test
 // can pass while a later assembly or placement path re-adds context.
 import { agent_loop } from "std/agent/loop"
-import { AgentLoopOptions } from "std/agent/options"
+import { AgentSpec } from "std/agent/options"
 import { SystemReplacement } from "std/llm/options"
 import { llm_text, with_llm_script } from "std/testing"
 import { ToolRegistry } from "std/tools"
@@ -34,7 +34,7 @@ pipeline default(harness: Harness) {
     [llm_text("done ##DONE##")],
     { ->
       const replacement: SystemReplacement = {mode: "replace", content: REPLACEMENT}
-      const opts: AgentLoopOptions = {
+      const opts: AgentSpec = {
         provider: "mock",
         model: "mock",
         loop_until_done: true,

@@ -1,6 +1,5 @@
 import { agent_loop } from "std/agent/loop"
 import { agent_prompt_overrides } from "std/agent/prompts"
-import { agent_turn } from "std/agent/turn"
 import { llm_text, with_llm_script } from "std/testing"
 
 pipeline test(harness: Harness, task) {
@@ -64,29 +63,6 @@ pipeline test(harness: Harness, task) {
       assert(
         contains(typed_calls[0].system, "TYPED LOOP CONTRACT ##DONE##"),
         "typed prompt helper rendered",
-      )
-    },
-  )
-  with_llm_script(
-    harness.llm,
-    [
-      llm_text("<user_response>turn done</user_response>\n<done>##DONE##</done>"),
-      llm_text("{\"verdict\":\"done\",\"reasoning\":\"turn complete\"}"),
-    ],
-    { ->
-      agent_turn(
-        harness,
-        "turn preamble override",
-        {
-          provider: "mock",
-          max_iterations: 2,
-          prompts: {"agent.turn_preamble": {text: "CUSTOM TURN PREAMBLE"}},
-        },
-      )
-      const turn_calls = harness.llm.mock_calls()
-      assert(
-        contains(turn_calls[0].system, "CUSTOM TURN PREAMBLE"),
-        "agent_turn preamble override rendered",
       )
     },
   )

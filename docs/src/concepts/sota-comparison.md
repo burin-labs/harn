@@ -12,8 +12,8 @@ table for that system.
 | OpenAI term | Harn equivalent | Notes |
 |---|---|---|
 | `Agent` (class) | `agent_loop(harness, ...)` invocation, or a `persona` | OpenAI's `Agent` bundles instructions, tools, and output type; the closest Harn shape is a configured `agent_loop` call site. |
-| `Runner.run(...)` | `agent_turn(...)` or one `agent_loop(harness, ...)` | One OpenAI "turn" wraps many model round-trips. Harn's `agent_turn` wraps the same idea. |
-| **"turn"** | Harn **`prompt_turn`** / `agent_turn` | OpenAI's "turn" is the *outer* cycle (one user request → final answer). Map it to Harn's `agent_turn` wrapper, not to Harn's per-iteration counter. |
+| `Runner.run(...)` | one `agent_loop(harness, ...)` invocation | One OpenAI "turn" wraps many model round-trips. One Harn agent loop invocation does the same. |
+| **"turn"** | Harn **prompt turn** / `agent_loop` | OpenAI's "turn" is the outer cycle (one user request → final answer), not Harn's per-iteration counter. |
 | "model roundtrip" (unnamed) | Harn **`iteration`** | The inner unit. |
 | `max_turns` | `max_iterations` | Both bound a budget, but the nouns are off-by-one — OpenAI counts outer SDK invocations, Harn counts inner LLM calls. |
 | `Session` (`SQLiteSession("id")`) | `session_id` + `harness.agent.open(id)` | Direct match. |
@@ -25,7 +25,7 @@ table for that system.
 | Anthropic term | Harn equivalent | Notes |
 |---|---|---|
 | **"agent loop"** | `agent_loop` | Direct vocabulary match. |
-| `query()` / `ClaudeSDKClient` | `agent_loop(harness, ...)` / `agent_chat_loop(...)` | Stateless single-shot vs stateful multi-turn. |
+| `query()` / `ClaudeSDKClient` | `agent_loop(harness, ...)` | Pass `history` or reuse `session_id` for stateful prompt turns. |
 | `AssistantMessage`, `TextBlock` (typed stream) | transcript events | Anthropic streams typed messages; Harn streams typed transcript events. |
 | Session resumption | `harness.agent.open(id)` + transcript continuity | Direct match. |
 | **"hook"** | `register_tool_hook`, `register_session_hook`, `register_reminder_provider` | Harn's hook registry is the richer version. |
@@ -108,7 +108,7 @@ we speak ACP natively.
 |---|---|---|
 | `session/new`, `session/load`, `session/resume` | `agent_session_open`, session fork, snapshot resume | Direct match. |
 | `session/prompt` | one user message → `agent_loop` invocation | Direct match. |
-| **`prompt_turn`** | **`agent_turn` (the wrapper)** | The outer user-message → final-response cycle, terminated by `stop_reason`. Harn's `agent_turn` is the same concept; an `agent_turn` invocation contains many iterations. |
+| **`prompt_turn`** | one **`agent_loop` invocation** | The outer user-message → final-response cycle, terminated by a typed `terminal` outcome and lossless `stop_reason`. One invocation contains many iterations. |
 | `stop_reason` | `stop_reason` | Same names. |
 | `available_commands` | skills, tool registry | Partial match; ACP advertises slash-style commands. |
 | `Plan` (agent plan updates) | `task_ledger`, progress tool | Direct match. |
@@ -120,7 +120,7 @@ we speak ACP natively.
 is the *outer* concept (one user request → final response with stop reason).
 Harn's loop counts *iterations*, which are model round-trips inside the prompt
 turn — the transcript events fire as `iteration_start` / `iteration_end`, and
-the steering seams use the same names. One `agent_turn(...)` invocation maps
+the steering seams use the same names. One `agent_loop(...)` invocation maps
 to one ACP `prompt_turn` and contains many `iteration_*` events.
 
 ## A2A — Agent2Agent Protocol

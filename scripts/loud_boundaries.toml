@@ -94,16 +94,6 @@ test = "crates/harn-vm/src/llm/agent_observe/provider_errors_boundary_tests.rs"
 notes = "Without this, the 429 storm that follows reads as a provider problem rather than as the governor having given up."
 
 [[boundary]]
-id = "chat_turn_cap"
-title = "agent_chat_loop turn and input caps"
-drops = "The remainder of a conversation, when max_turns or max_input_events ends it mid-thread."
-was_silent = true
-event = "agent_event:boundary_failure"
-anchors = ["crates/harn-stdlib/src/stdlib/agent/chat.harn"]
-test = "conformance/tests/scenarios/agent_loud_boundary_events.harn"
-notes = "Emitted from Harn through the allowlisted `boundary_failure` host event, so a `.harn` boundary and a Rust one land on the same wire with the same vocabulary."
-
-[[boundary]]
 id = "post_tool_output"
 title = "PostToolUse output shaping"
 drops = "Bytes a PostToolUse hook explicitly reports removing before the rendered tool result reaches the next model turn."

@@ -5,7 +5,7 @@
 // without reparsing provider text.
 import { agent_capture_events } from "std/agent/events"
 import { agent_loop } from "std/agent/loop"
-import { AgentLoopOptions } from "std/agent/options"
+import { AgentSpec } from "std/agent/options"
 import { llm_done, llm_text, with_llm_script } from "std/testing"
 
 fn __feedback_contents(captured, kind: string) -> list<string> {
@@ -28,7 +28,7 @@ pipeline test_fenced_completion_judge_uses_typed_checkpoint(harness: Harness, ta
     [llm_done(), judge_response, llm_text("Addressed the gap. ##DONE##")],
     { ->
       const session = "judge-fenced-typed-" + harness.random.uuid()
-      const opts: AgentLoopOptions = {
+      const opts: AgentSpec = {
         provider: "mock",
         session_id: session,
         done_sentinel: "##DONE##",

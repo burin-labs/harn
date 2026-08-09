@@ -87,6 +87,31 @@ impl AgentTerminalKind {
         }
     }
 
+    /// Parse the stable wire value emitted in `AgentResult.terminal.kind`.
+    pub fn from_wire(value: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|kind| kind.as_str() == value.trim())
+    }
+
+    /// Project the producer-owned terminal decision onto the shared
+    /// agent/run lifecycle vocabulary. Protocol and persistence adapters use
+    /// this projection instead of independently interpreting status strings.
+    pub const fn lifecycle_state(self) -> super::AgentLifecycleState {
+        match self {
+            Self::Natural => super::AgentLifecycleState::Completed,
+            Self::UserCancelled => super::AgentLifecycleState::Cancelled,
+            Self::PolicyBudget
+            | Self::PolicyNoProgress
+            | Self::PolicyGuardrail
+            | Self::PolicyStop => super::AgentLifecycleState::Stopped,
+            Self::ProviderError | Self::RuntimeError | Self::Unknown => {
+                super::AgentLifecycleState::Failed
+            }
+            Self::Suspended => super::AgentLifecycleState::Suspended,
+        }
+    }
+
     /// The party responsible for the stop — a stable, coarse attribution that
     /// pairs with the kind so hosts can bucket outcomes (agent-driven vs
     /// user vs provider vs harness vs policy) without re-deriving it.
@@ -272,9 +297,43 @@ mod tests {
             assert_eq!(encoded, format!("\"{wire}\""));
             let decoded: AgentTerminalKind = serde_json::from_str(&encoded).unwrap();
             assert_eq!(decoded, variant);
+            assert_eq!(AgentTerminalKind::from_wire(wire), Some(variant));
         }
         // The wire table above must cover every variant.
         assert_eq!(pairs.len(), AgentTerminalKind::ALL.len());
+    }
+
+    #[test]
+    fn terminal_kinds_project_to_shared_lifecycle_states() {
+        use super::super::AgentLifecycleState;
+
+        assert_eq!(
+            AgentTerminalKind::Natural.lifecycle_state(),
+            AgentLifecycleState::Completed
+        );
+        assert_eq!(
+            AgentTerminalKind::Suspended.lifecycle_state(),
+            AgentLifecycleState::Suspended
+        );
+        assert_eq!(
+            AgentTerminalKind::UserCancelled.lifecycle_state(),
+            AgentLifecycleState::Cancelled
+        );
+        for kind in [
+            AgentTerminalKind::PolicyBudget,
+            AgentTerminalKind::PolicyNoProgress,
+            AgentTerminalKind::PolicyGuardrail,
+            AgentTerminalKind::PolicyStop,
+        ] {
+            assert_eq!(kind.lifecycle_state(), AgentLifecycleState::Stopped);
+        }
+        for kind in [
+            AgentTerminalKind::ProviderError,
+            AgentTerminalKind::RuntimeError,
+            AgentTerminalKind::Unknown,
+        ] {
+            assert_eq!(kind.lifecycle_state(), AgentLifecycleState::Failed);
+        }
     }
 
     #[test]

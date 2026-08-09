@@ -1,6 +1,6 @@
 import { agent_capture_events } from "std/agent/events"
 import { agent_loop } from "std/agent/loop"
-import { AgentLoopOptions } from "std/agent/options"
+import { AgentSpec } from "std/agent/options"
 
 pipeline default(harness: Harness) {
   const seen = harness.runtime.shared_cell(
@@ -32,7 +32,7 @@ pipeline default(harness: Harness) {
     return nil
   }
   const session = "route-tool-format-refresh-" + harness.random.uuid()
-  const opts: AgentLoopOptions = {
+  const opts: AgentSpec = {
     session_id: session,
     provider: "openrouter",
     model: "openai/gpt-oss-120b",

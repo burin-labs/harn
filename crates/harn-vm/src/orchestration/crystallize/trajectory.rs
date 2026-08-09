@@ -363,7 +363,7 @@ fn model_call_action(turn: &AgentTurnRecord) -> CrystallizationAction {
         name: turn
             .model
             .clone()
-            .unwrap_or_else(|| "agent_turn".to_string()),
+            .unwrap_or_else(|| "agent_loop".to_string()),
         timestamp: turn.started_at.clone(),
         inputs: JsonValue::Null,
         output: output.clone(),

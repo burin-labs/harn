@@ -1,6 +1,6 @@
 //! `unnormalized-options` rule: nudge inline option dict literals passed
 //! directly to `agent_loop` / `workflow_execute` toward the typed option
-//! path — an annotated binding (`let opts: AgentLoopOptions = {...}`) or a
+//! path — an annotated binding (`let opts: AgentSpec = {...}`) or a
 //! typed constructor (`agent_preset(...)`, `agent_options(...)`,
 //! `workflow_stage_spec(...)`). Raw dicts still execute unchanged; this is
 //! lint-level deprecation, not an error.
@@ -40,7 +40,7 @@ pub(crate) fn check_unnormalized_options(program: &[SNode], diagnostics: &mut Ve
                         diagnostics.push(make_diagnostic(
                             arg.span,
                             AGENT_LOOP_CALLEE,
-                            "annotate a binding with `AgentLoopOptions` (std/agent/options) or build the options via `agent_preset(...)` / `agent_options(...)`",
+                            "annotate a binding with `AgentSpec` (std/agent/options) or build the options via `agent_preset(...)` / `agent_options(...)`",
                         ));
                     }
                 }
@@ -78,7 +78,7 @@ fn make_diagnostic(span: Span, callee: &str, hint: &str) -> LintDiagnostic {
         span,
         severity: LintSeverity::Info,
         suggestion: Some(format!(
-            "bind the options first (e.g. `let opts: AgentLoopOptions = {{...}}`) and pass `opts` to `{callee}`; the dict still executes unchanged — this is lint-level deprecation"
+            "bind the options first (e.g. `let opts: AgentSpec = {{...}}`) and pass `opts` to `{callee}`; the dict still executes unchanged — this is lint-level deprecation"
         )),
         fix: None,
     }
@@ -114,7 +114,7 @@ pipeline default(task) {
         assert_eq!(count_rule(&diags), 1, "diags: {diags:?}");
         let diag = diags.iter().find(|d| d.rule == RULE_NAME).unwrap();
         assert!(
-            diag.message.contains("AgentLoopOptions"),
+            diag.message.contains("AgentSpec"),
             "hint names the alias: {}",
             diag.message
         );

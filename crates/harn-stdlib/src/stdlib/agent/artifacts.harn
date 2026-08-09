@@ -99,7 +99,10 @@ pub type AgentTraceSummary = {
   tools_used?: list<string>,
 }
 
-pub type AgentResult = {
+// Compatibility projection for persisted v1/v2 artifacts. The live loop result
+// is `AgentResult` from `std/agent/contracts`; this distinct name prevents a
+// legacy-compatible reader shape from becoming a second runtime contract.
+pub type AgentResultArtifact = {
   // GUARANTEED deterministic facts.
   status: string,
   final_status: string,
@@ -136,11 +139,11 @@ pub type AgentResult = {
  * @errors: []
  * @example: read_versioned_json_result(path, agent_result_contract())
  */
-pub fn agent_result_contract() -> VersionedContract<AgentResult> {
+pub fn agent_result_contract() -> VersionedContract<AgentResultArtifact> {
   return versioned_contract(
     "harn.agent_result",
     ARTIFACT_VERSION,
-    schema_contract(schema_of(AgentResult), []),
+    schema_contract(schema_of(AgentResultArtifact), []),
     {supported: SUPPORTED_VERSIONS, absent_version: 1},
   )
 }
@@ -154,7 +157,7 @@ pub fn agent_result_contract() -> VersionedContract<AgentResult> {
  */
 pub fn agent_result_descriptor(
   name: string = "agent-result.json",
-) -> ArtifactDescriptor<AgentResult> {
+) -> ArtifactDescriptor<AgentResultArtifact> {
   return versioned_descriptor(name, agent_result_contract())
 }
 
@@ -171,7 +174,7 @@ pub fn agent_result_descriptor(
 pub fn read_agent_result_result(
   fs: HarnessFs,
   path: string,
-) -> Result<VersionedValue<AgentResult>, ArtifactReadFailure> {
+) -> Result<VersionedValue<AgentResultArtifact>, ArtifactReadFailure> {
   return read_versioned_json_result(fs, path, agent_result_contract())
 }
 

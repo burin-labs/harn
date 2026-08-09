@@ -38,7 +38,7 @@ impl Vm {
         // effect differently. `__cap_` is an internal renaming artifact.
         let resolved = crate::stdlib::builtin_for_harness_path(name).unwrap_or(name);
         match resolved.strip_prefix("__cap_").unwrap_or(resolved) {
-            "llm_call" | "llm_stream" | "llm_stream_call" | "agent_loop" | "agent_turn" => {
+            "llm_call" | "llm_stream" | "llm_stream_call" | "agent_loop" => {
                 Some(crate::tracing::SpanKind::LlmCall)
             }
             "mcp_call" => Some(crate::tracing::SpanKind::ToolCall),

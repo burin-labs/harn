@@ -62,9 +62,9 @@
 //!
 //! ```harn
 //! agent_emit_event(session_id, "boundary_failure", {
-//!   boundary: "chat_turn_cap",
-//!   kind: "capped",
-//!   detail: "agent_chat_loop reached max_turns",
+//!   boundary: "text_tool_parse",
+//!   kind: "unrecognized",
+//!   detail: "tool-shaped bytes were not parsed",
 //! })
 //! ```
 
@@ -101,8 +101,6 @@ pub enum BoundaryId {
     /// The provider rate governor's admission gate: a call that proceeds
     /// without the reservation the governor's back-pressure assumes.
     ProviderAdmissionGate,
-    /// `agent_chat_loop` turn/input caps: the loop stops mid-conversation.
-    ChatTurnCap,
     /// PostToolUse result shaping: a hook shortens the tool output before the
     /// next model turn sees it.
     PostToolOutput,
@@ -120,13 +118,12 @@ pub enum BoundaryId {
 }
 
 impl BoundaryId {
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 10] = [
         Self::TextToolParse,
         Self::ResponseContentExtraction,
         Self::VisibleTextSanitize,
         Self::HostEventIngest,
         Self::ProviderAdmissionGate,
-        Self::ChatTurnCap,
         Self::PostToolOutput,
         Self::TranscriptSeed,
         Self::SessionTranscript,
@@ -141,7 +138,6 @@ impl BoundaryId {
             Self::VisibleTextSanitize => "visible_text_sanitize",
             Self::HostEventIngest => "host_event_ingest",
             Self::ProviderAdmissionGate => "provider_admission_gate",
-            Self::ChatTurnCap => "chat_turn_cap",
             Self::PostToolOutput => "post_tool_output",
             Self::TranscriptSeed => "transcript_seed",
             Self::SessionTranscript => "session_transcript",

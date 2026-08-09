@@ -1,5 +1,5 @@
 import { agent_loop } from "std/agent/loop"
-import { AgentLoopOptions } from "std/agent/options"
+import { AgentSpec } from "std/agent/options"
 import { parse_jsonl } from "std/jsonl"
 import { process_shell } from "std/runtime"
 import { llm_text, with_llm_script } from "std/testing"
@@ -45,7 +45,7 @@ pipeline default(harness: Harness) {
       llm_text("<done>##DONE##</done>"),
     ],
     { ->
-      const opts: AgentLoopOptions = {
+      const opts: AgentSpec = {
         provider: "mock",
         tool_format: "native",
         max_iterations: 3,
@@ -69,8 +69,8 @@ pipeline default(harness: Harness) {
       )
       require calls != nil, "timed out waiting for MCP server to record both echo tool calls"
       process_shell(harness.process, "kill $(cat \"" + pid_path + "\") >/dev/null 2>&1 || true")
-      harness.stdio.println(result?.tools.successful[0])
-      harness.stdio.println(result?.tools.successful[1])
+      harness.stdio.println(result.tools.successful[0])
+      harness.stdio.println(result.tools.successful[1])
       harness.stdio.println(len(calls))
       harness.stdio.println(calls[0].name)
       harness.stdio.println(calls[0].arguments.message)

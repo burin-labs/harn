@@ -19,9 +19,9 @@ pipeline default(harness: Harness) {
     nil,
     {provider: "mock", session_id: s, max_iterations: 1},
   )
-  harness.stdio.println(len(transcript_messages(resumed?.transcript)))
+  harness.stdio.println(len(transcript_messages(resumed.transcript)))
   const compacted = harness.agent.compact_transcript(
-    resumed?.transcript,
+    resumed.transcript,
     {keep_last: 1, summary: "summary"},
   )
   harness.stdio.println(transcript_summary(compacted))

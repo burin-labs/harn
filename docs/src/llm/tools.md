@@ -22,7 +22,7 @@ accepts or forwards registries through a typed public API — do not widen to
 `dict` / `any` or duplicate the `{_type: "tool_registry", tools: ...}` shape.
 
 ```harn
-import { AgentLoopOptions, agent_options } from "std/agent/options"
+import { AgentSpec, agent_options } from "std/agent/options"
 import { ToolRegistry } from "std/tools"
 
 /** Package export: accept and return the stdlib registry type. */
@@ -33,7 +33,7 @@ pub fn with_search_tool(registry: ToolRegistry) -> ToolRegistry {
   })
 }
 
-fn agent_opts_from_package() -> AgentLoopOptions {
+fn agent_opts_from_package() -> AgentSpec {
   const tools: ToolRegistry = with_search_tool(tool_registry())
   return agent_options({provider: "mock", tools: tools})
 }

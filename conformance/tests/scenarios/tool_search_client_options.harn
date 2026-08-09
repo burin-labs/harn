@@ -52,7 +52,7 @@ pipeline test(harness: Harness, task) {
         !contains(calls[0].system, "__harn_tool_search"),
         "default name not used when overridden",
       )
-      const events = transcript_events(result?.transcript)
+      const events = transcript_events(result.transcript)
       let promoted_deploy = false
       for ev in events {
         if ev.kind == "tool_search_result" {

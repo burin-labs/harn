@@ -15,7 +15,7 @@ use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
 use super::agent_terminal_class::{
-    agent_terminal_class, agent_turn_made_no_llm_call, session_status_indicates_error,
+    agent_loop_made_no_llm_call, agent_terminal_class, session_status_indicates_error,
 };
 use super::cost::calculate_cost_for_provider_with_cache;
 use super::tools::build_assistant_response_message;
@@ -725,7 +725,7 @@ async fn host_agent_session_finalize(
 
     // Promote model-less success before the terminal marker so the durable
     // descriptor matches the returned terminal result.
-    if agent_turn_made_no_llm_call(
+    if agent_loop_made_no_llm_call(
         &final_status,
         terminal_error.is_some(),
         iterations,
@@ -813,8 +813,7 @@ async fn host_agent_session_finalize(
         session.last_llm_stop_reason.as_deref(),
     );
     let terminal_class = agent_terminal_class(&final_status, &stop_reason, terminal_error.as_ref());
-    // Classify once at the owning loop boundary. The bridge carries this exact
-    // value to ACP; hosts never reconstruct terminal truth from `stopReason`.
+    // Classify once at the loop boundary; the bridge carries this exact value to ACP.
     let terminal_outcome = crate::agent_events::AgentTerminalOutcome::new(
         crate::agent_events::classify_agent_terminal_with_class(
             &canonical_status,
@@ -854,6 +853,7 @@ async fn host_agent_session_finalize(
         &stop_reason,
         terminal_class.map(super::agent_terminal_class::AgentTerminalClass::as_str),
         terminal_error.as_ref(),
+        &terminal_outcome,
     )
     .await?;
     cancellation::finish_agent_session(&mut session, &session_id, canonical_status != "suspended");

@@ -1486,7 +1486,7 @@ GUARANTEED / OPTIONAL / MODEL / REDACTED / UNSTABLE in the module source.
 
 | Function | Description |
 |---|---|
-| `agent_result_contract()` / `agent_result_descriptor(name?)` | Versioned contract + descriptor for `agent-result.json` |
+| `agent_result_contract()` / `agent_result_descriptor(name?)` | Versioned contract + descriptor over the legacy-compatible `AgentResultArtifact` shape for `agent-result.json` |
 | `read_agent_result_result(path)` | Read a durable agent-result artifact, keeping all six failure kinds distinct |
 | `transcript_event_spec()` | Discriminated decode spec for every stable `llm_transcript.jsonl` event family |
 | `read_transcript_events_page_result(path, options?)` | Read one bounded page of typed transcript events |
@@ -1991,10 +1991,29 @@ Small deterministic workflow recipes:
 | `workflow_verification_only_graph(config?)` | Build a graph with only a verifier node |
 | `workflow_failover(config)` | Run typed failover over opaque route handles with caller-owned evaluation/classification callbacks |
 
-### std/agent/options (model-option resolution)
+### std/agent/contracts
+
+Typed results and producer-owned terminal outcomes for the agent plane:
+
+| Type | Description |
+|---|---|
+| `AgentResult` | Result of `agent_loop` and `HarnessAgent.session_finalize`, including LLM/tool summaries and the terminal outcome |
+| `AgentTerminalOutcome` | Stable `{kind, reason, owner}` terminal decision projected to hosts and protocols |
+| `AgentTerminalKind` | Closed natural, policy, cancellation, error, suspension, and unknown vocabulary |
+
+Consumers branch on `AgentResult.terminal.kind`. The transport `status`,
+`stop_reason`, and raw payload fields remain available for diagnostics but do
+not own completion classification.
+
+### std/agent/options (agent specification and model-option resolution)
 
 Model-option resolution helpers (moved here from the removed
 `std/agent/stack` in 0.10 — see [Migrating to 0.10](./migrations/v0.10.md)):
+
+`AgentSpec` is the flat public loop contract. Its six named components are
+`AgentModelSpec`, `AgentExecutionSpec`, `AgentCapabilitySpec`,
+`AgentLifecycleSpec`, `AgentContextSpec`, and `AgentObservabilitySpec`; use a
+component type when an interface should accept only that part of the spec.
 
 | Function | Description |
 |---|---|
@@ -2044,16 +2063,6 @@ Live, session-local working memory for `agent_loop`:
 | `agent_scratchpad_recitation_fragment(session, opts)` | Return the prompt-tail `_system_fragments` entry that recites the current scratchpad |
 | `agent_scratchpad_reorganize(session, opts, iteration, context?)` | Run the structured reorganization pass, validate source refs, and persist the compacted scratchpad |
 | `agent_scratchpad_reorganize_if_due(session, opts, iteration_index, context?)` | Apply the configured reorganization cadence after a completed turn |
-
-### std/agent/chat
-
-Interactive chat-loop helpers built on `agent_loop` sessions:
-
-| Function | Description |
-|---|---|
-| `agent_chat_loop(opts)` | Run an operator-input / model-turn loop around `agent_loop`, preserving one session across turns and closing it with a typed reason by default |
-| `agent_chat_route_input(line, state?, handlers?)` | Apply the shared slash-command convention (`/exit`, `/quit`, `/help`, custom handlers) and return a normalized `{kind, message?, state?}` decision |
-| `agent_chat_wait_for_user_tools(registry?)` | Add a `wait_for_user` tool to a registry; the chat loop stops that turn with `stop_reason: "wait_for_user"` and returns to user input |
 
 ### std/agent/user
 

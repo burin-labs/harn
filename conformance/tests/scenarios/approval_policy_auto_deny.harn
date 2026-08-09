@@ -28,8 +28,8 @@ pipeline main(harness: Harness) {
       approval_policy: {auto_deny: ["shell*"]},
     },
   )
-  harness.stdio.println(denied?.tools?.rejected[0] == "shell_exec")
-  const transcript = json_stringify(transcript_messages(denied?.transcript))
+  harness.stdio.println(denied.tools.rejected[0] == "shell_exec")
+  const transcript = json_stringify(transcript_messages(denied.transcript))
   harness.stdio.println(transcript.contains("permission_denied"))
   harness.stdio.println(transcript.contains("auto_denied") || transcript.contains("deny pattern"))
 }

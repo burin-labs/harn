@@ -236,10 +236,10 @@ pipeline test_rust_sites_map_variants_back_to_wire_ids(harness: Harness, task) {
 
 @test
 pipeline test_harn_sites_read_the_boundary_field(harness: Harness, task) {
-  const grep = ["x.harn:44:        boundary: \"chat_turn_cap\",", "y.harn:7:  const boundary = 1"]
+  const grep = ["x.harn:44:        boundary: \"text_tool_parse\",", "y.harn:7:  const boundary = 1"]
     .join("\n")
   const sites = harn_sites(grep)
   assert_eq(sites.count, 1)
   assert_eq(sites[0]?.path, "x.harn")
-  assert_eq(sites[0]?.id, "chat_turn_cap")
+  assert_eq(sites[0]?.id, "text_tool_parse")
 }

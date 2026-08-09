@@ -52,23 +52,21 @@ exclusive with an explicit `model:`/`routing:`.
 | [`llm_call`](../llm/llm_call.md) | One question, one answer. Classification, summarization, extraction, completions. | Direct control over tokens, cache, schema. Cheapest. | No looping, no automatic tool dispatch, no completion detection. |
 | [`llm_call_structured`](../llm/llm_call.md#llm_call_structured) | Same as above, but the answer must match a schema. | Validated JSON, safe and result-envelope variants. | One extra schema-validation pass. |
 | [`agent_loop`](../llm/agent_loop.md) | The model needs several iterations — calling tools, reading results, deciding what to do next. | Tool dispatch, completion sentinels, budgets, status outcomes, transcript management, profiles, skills, daemon mode. | More machinery; opinionated about what "done" means. |
-| [`agent_turn`](../llm/agent_loop.md) | Same as `agent_loop` but you want a judge to decide completion. | Loop + automatic `done_judge` + per-iteration judge decisions. | Extra LLM calls for the judge. |
 | [`spawn_agent`](../agent-lifecycle.md) / [`sub_agent_run`](../agent-lifecycle.md) | A *separate* agent should run, possibly in parallel or background, with its own transcript and possibly a different model. | Independent execution context, suspend/resume, snapshots, joins. | Coordination overhead — handles, resume conditions, wait points. |
 | [`workflow_execute`](../workflow-runtime.md) | The orchestration shape itself matters — multiple stages, conditional branches, joins, replay, audit, typed contracts. | Typed graph, validated topology, per-stage results, replay, structured artifacts. | Up-front graph definition. Overkill for "one agent does one job." |
 | [`tree_of_thoughts`](../llm/ensemble.md) | Deliberate branching search where you score and prune candidates. | Deterministic BFS/DFS/beam with caller-defined `expand`/`evaluate`/`is_terminal`. | You write the search semantics. |
 | Handler middleware ([`std/llm/handlers`](../stdlib/llm-handlers.md)) | Cross-cutting concerns under every LLM call: retry, cache, rate limit, circuit-breaker. | A composable middleware chain at the call boundary. | One more layer to read when debugging. |
 
-## The five-step decision
+## The four-step decision
 
 1. **One shot?** → `llm_call`. If you need JSON, `llm_call_structured`.
-2. **Loop until done?** → `agent_loop`.
-3. **Loop until a *judge* says done?** → `agent_turn`.
-4. **Need a parallel or backgrounded helper agent?** → `spawn_agent` or
+2. **Loop until done, optionally with `done_judge`?** → `agent_loop`.
+3. **Need a parallel or backgrounded helper agent?** → `spawn_agent` or
    `sub_agent_run`.
-5. **Need typed, inspectable, replayable orchestration over many stages?** →
+4. **Need typed, inspectable, replayable orchestration over many stages?** →
    `workflow_execute`.
 
-If your answer to all five is "yes, sort of," start with `agent_loop` and lift
+If your answer to all four is "yes, sort of," start with `agent_loop` and lift
 to a workflow when the orchestration shape genuinely starts to matter — usually
 around the third or fourth stage.
 
@@ -130,10 +128,10 @@ missing features usually mean the loop hasn't grown an option it should have.
 
 ## What about the chat surface?
 
-For interactive user-facing chats, prefer
-[`agent_chat_loop`](../llm/agent_loop.md#interactive-chat-loops) over running
-`agent_loop` in your own input loop. It preserves one session across user turns,
-routes slash commands, and handles the `wait_for_user` terminal tool.
+The host owns its input loop, commands, and presentation. Pass caller-managed
+history through `AgentContextSpec.history`, or reuse a `session_id`, and invoke
+`agent_loop` once for each prompt turn. This keeps agent lifecycle semantics in
+Harn without moving editor or terminal UI policy into the stdlib.
 
 ## See also
 

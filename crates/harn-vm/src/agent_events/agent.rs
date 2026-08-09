@@ -259,7 +259,7 @@ pub enum AgentEvent {
     /// Fires at the top of every model round-trip inside an
     /// `agent_loop` invocation. Maps to the `iteration_start` steering
     /// seam. Not the same as ACP's outer `prompt_turn` boundary; an
-    /// `agent_turn`/`prompt_turn` cycle contains many of these.
+    /// outer `prompt_turn` cycle contains many of these.
     IterationStart {
         session_id: String,
         iteration: usize,

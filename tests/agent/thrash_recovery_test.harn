@@ -7,7 +7,7 @@
 // wrapup whose tool call is silently dropped.
 import { agent_capture_events } from "std/agent/events"
 import { agent_loop } from "std/agent/loop"
-import { AgentLoopOptions } from "std/agent/options"
+import { AgentSpec } from "std/agent/options"
 import { llm_text, with_llm_script } from "std/testing"
 
 fn toolset() {
@@ -77,7 +77,7 @@ pipeline test_thrash_hard_stop_gets_one_bounded_recovery_turn(harness: Harness, 
     ],
     { ->
       let session = "thrash-recovery-" + harness.random.uuid()
-      let opts: AgentLoopOptions = {
+      let opts: AgentSpec = {
         provider: "mock",
         tools: toolset(),
         tool_format: "native",
@@ -142,7 +142,7 @@ pipeline test_no_progress_monologue_gets_one_tool_call_recovery_turn(harness: Ha
     ],
     { ->
       const session = "monologue-recovery-" + harness.random.uuid()
-      const opts: AgentLoopOptions = {
+      const opts: AgentSpec = {
         provider: "mock",
         tools: toolset(),
         tool_format: "native",
@@ -205,7 +205,7 @@ pipeline test_uncovered_thrash_hard_stop_emits_skipped_recovery_receipt(harness:
     [fail_call("f1"), fail_call("f2"), fail_call("f3")],
     { ->
       const session = "thrash-no-rung-" + harness.random.uuid()
-      const opts: AgentLoopOptions = {
+      const opts: AgentSpec = {
         provider: "mock",
         tools: toolset(),
         tool_format: "native",
@@ -263,7 +263,7 @@ pipeline test_final_wrapup_tool_call_skip_is_observable(harness: Harness, task) 
     }
     return {ok: true, value: run_call("r1") + {provider: "mock", model: "mock"}}
   }
-  let opts: AgentLoopOptions = {
+  let opts: AgentSpec = {
     provider: "mock",
     tools: toolset(),
     tool_format: "native",

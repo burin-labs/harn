@@ -105,6 +105,28 @@ fn iteration_start(iteration: i64) -> AppendEvent {
 }
 
 fn terminal(final_status: &str, stop_reason: &str) -> AppendEvent {
+    let kind = crate::agent_events::classify_agent_terminal(
+        final_status,
+        stop_reason,
+        matches!(final_status, "error" | "failed" | "provider_error"),
+        None,
+    );
+    AppendEvent::new(
+        custom("agent_run_terminal"),
+        transcript_event(
+            "agent_run_terminal",
+            json!({
+                "error": null,
+                "final_status": final_status,
+                "stop_reason": stop_reason,
+                "terminal_class": null,
+                "terminal": crate::agent_events::AgentTerminalOutcome::new(kind, stop_reason),
+            }),
+        ),
+    )
+}
+
+fn legacy_terminal(final_status: &str, stop_reason: &str) -> AppendEvent {
     AppendEvent::new(
         custom("agent_run_terminal"),
         transcript_event(
@@ -174,7 +196,9 @@ async fn a_headless_session_projects_the_run_record_no_host_ever_wrote() {
     // The session is still `open` — the host exited without closing it, exactly
     // as the run in #6120 did. The loop's own terminal verdict has to win, or a
     // finished run reports as still running forever.
-    assert_eq!(run.status, "completed");
+    assert_eq!(run.status, "stopped");
+    assert_eq!(run.metadata["terminal"]["kind"], "policy_stop");
+    assert_eq!(run.metadata["terminal"]["owner"], "policy");
     assert!(
         run.finished_at.is_some(),
         "a run with a terminal event has an end time even when its session was never closed"
@@ -403,6 +427,89 @@ async fn a_loop_that_ended_in_error_projects_as_a_failed_run() {
         .await
         .expect("project");
     assert_eq!(run.status, "failed");
+}
+
+#[tokio::test]
+async fn typed_terminal_projects_suspension_and_cancellation_without_reclassification() {
+    for (final_status, stop_reason, expected_status, expected_kind) in [
+        ("suspended", "awaiting_ci", "suspended", "suspended"),
+        ("cancelled", "user_cancelled", "cancelled", "user_cancelled"),
+        ("verify_capped", "verify_capped", "stopped", "policy_budget"),
+    ] {
+        let store = MemorySessionStore::default();
+        let meta = store
+            .create(CreateSession::default())
+            .await
+            .expect("create session");
+        store
+            .append(&meta.id, terminal(final_status, stop_reason))
+            .await
+            .expect("append terminal");
+
+        let run = project_run_record_from_session(&store, &meta.id)
+            .await
+            .expect("project");
+        assert_eq!(run.status, expected_status);
+        assert_eq!(run.metadata["terminal"]["kind"], expected_kind);
+    }
+}
+
+#[tokio::test]
+async fn typed_terminal_reason_wins_over_the_legacy_stop_reason() {
+    let store = MemorySessionStore::default();
+    let meta = store
+        .create(CreateSession::default())
+        .await
+        .expect("create session");
+    store
+        .append(
+            &meta.id,
+            AppendEvent::new(
+                custom("agent_run_terminal"),
+                transcript_event(
+                    "agent_run_terminal",
+                    json!({
+                        "final_status": "done",
+                        "stop_reason": "legacy_summary",
+                        "terminal": {
+                            "kind": "natural",
+                            "owner": "agent",
+                            "reason": "model_signalled_completion",
+                        },
+                    }),
+                ),
+            ),
+        )
+        .await
+        .expect("append terminal");
+
+    let run = project_run_record_from_session(&store, &meta.id)
+        .await
+        .expect("project");
+    assert_eq!(
+        run.metadata["terminal"]["reason"],
+        "model_signalled_completion"
+    );
+    assert_eq!(run.metadata["stop_reason"], "legacy_summary");
+}
+
+#[tokio::test]
+async fn journals_from_before_typed_terminals_keep_the_legacy_status_fallback() {
+    let store = MemorySessionStore::default();
+    let meta = store
+        .create(CreateSession::default())
+        .await
+        .expect("create session");
+    store
+        .append(&meta.id, legacy_terminal("done", "pace_cutoff"))
+        .await
+        .expect("append legacy terminal");
+
+    let run = project_run_record_from_session(&store, &meta.id)
+        .await
+        .expect("project legacy journal");
+    assert_eq!(run.status, "completed");
+    assert!(!run.metadata.contains_key("terminal"));
 }
 
 #[tokio::test]

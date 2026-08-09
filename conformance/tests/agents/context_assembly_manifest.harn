@@ -2,7 +2,7 @@
 // of materials from the same real agent transcript. The explain projection and
 // journal projection come from the same assembly value.
 import { agent_loop } from "std/agent/loop"
-import { AgentLoopOptions } from "std/agent/options"
+import { AgentSpec } from "std/agent/options"
 import { read_jsonl } from "std/jsonl"
 import { SystemReplacement } from "std/llm/options"
 import { llm_text, with_llm_script } from "std/testing"
@@ -22,7 +22,7 @@ pipeline main(harness: Harness) {
       const explained = harness.agent.prompt_explain(
         {system: replacement, call_role: "model.router"},
       )
-      const opts: AgentLoopOptions = {
+      const opts: AgentSpec = {
         provider: "mock",
         model: "mock",
         system: replacement,

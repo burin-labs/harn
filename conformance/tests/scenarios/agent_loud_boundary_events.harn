@@ -1,4 +1,3 @@
-import { agent_chat_loop } from "std/agent/chat"
 import { agent_loop } from "std/agent/loop"
 // Every boundary between model bytes and executed action is loud (harn#5142).
 //
@@ -120,29 +119,4 @@ pipeline test(harness: Harness, task) {
   const prose = observe_boundary(harness.agent, harness.runtime, prose_session, "text_tool_parse")
   run_text_turn(harness, prose_session, "Let me think about this before acting. ##DONE##")
   assert(harness.runtime.atomic_get(prose.seen) == 0, "ordinary prose must not emit boundary noise")
-  // 4. A conversation cut short by a cap is a policy stop, not an agent that
-  //    ran out of things to say.
-  const chat_session = "loud-boundary-chat-" + harness.random.uuid()
-  const chat = observe_boundary(harness.agent, harness.runtime, chat_session, "chat_turn_cap")
-  with_llm_script(
-    harness.llm,
-    [llm_text("first answer"), llm_text("##DONE##")],
-    { ->
-      const _ = agent_chat_loop(
-        harness,
-        {
-          session_id: chat_session,
-          provider: "mock",
-          max_turns: 1,
-          close_session: false,
-          on_user_input: { _state -> "hello" },
-        },
-      )
-    },
-  )
-  assert(
-    harness.runtime.atomic_get(chat.seen) == 1,
-    "a turn cap must emit a chat_turn_cap boundary_failure",
-  )
-  assert(harness.runtime.atomic_get(chat.owner_is_policy) == 1, "a cap is owned by policy")
 }

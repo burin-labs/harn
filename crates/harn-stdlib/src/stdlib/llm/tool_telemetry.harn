@@ -144,7 +144,7 @@ fn __tt_events(result, start_ms, end_ms) {
  * `extras` (optional dict):
  *   persona:           string — caller identity (e.g. "merge_captain")
  *   mode:              string — caller mode (e.g. "preview"/"apply")
- *   parent_span_id:    string — set when nested under an agent_turn span
+ *   parent_span_id:    string — set when nested under an agent-loop span
  *   trace_id_override: string — replace the default session_id-derived trace id
  *   extra_attributes:  dict   — additional attributes merged into `attributes`
  *   start_time_iso:    string — pre-sampled ISO timestamp matching start_ms

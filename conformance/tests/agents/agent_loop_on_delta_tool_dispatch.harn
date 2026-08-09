@@ -1,5 +1,5 @@
 import { agent_loop } from "std/agent/loop"
-import { AgentLoopOptions } from "std/agent/options"
+import { AgentSpec } from "std/agent/options"
 import { llm_text, llm_tool_call, with_llm_script } from "std/testing"
 
 fn on_delta_tools() {
@@ -22,7 +22,7 @@ pipeline default(harness: Harness) {
     harness.llm,
     [llm_tool_call("note", {text: "remember"}), llm_text("All done.")],
     { ->
-      const opts: AgentLoopOptions = {
+      const opts: AgentSpec = {
         provider: "mock",
         tools: on_delta_tools(),
         tool_format: "native",

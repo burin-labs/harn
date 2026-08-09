@@ -81,7 +81,7 @@ pipeline test(harness: Harness, task) {
           session_id: events_session,
         },
       )
-      assert(result?.status == "done", "loop completes")
+      assert(result.status == "done", "loop completes")
       const calls = harness.llm.mock_calls()
       assert(len(calls) >= 2, "at least two LLM calls happened")
       const turn2_messages = calls[1].messages
@@ -100,7 +100,7 @@ pipeline test(harness: Harness, task) {
       }
       assert(saw_query_marker, "subscriber fired for tool_search_query (live, not replayed)")
       assert(saw_result_marker, "subscriber fired for tool_search_result (live, not replayed)")
-      const events = transcript_events(result?.transcript)
+      const events = transcript_events(result.transcript)
       let query_events = 0
       let result_events = 0
       for ev in events {

@@ -70,20 +70,6 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         TY_MESSAGES_OR_TRANSCRIPT,
     ),
     BuiltinSignature::simple(
-        "agent_chat_route_input",
-        &[
-            Param::new("line", TY_ANY),
-            Param::optional("state", TY_DICT_OR_NIL),
-            Param::optional("handlers", TY_DICT_OR_NIL),
-        ],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple(
-        "agent_chat_wait_for_user_tools",
-        &[Param::optional("registry", TY_DICT_OR_NIL)],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple(
         "agent_preset",
         &[
             Param::new("kind", TY_STRING),

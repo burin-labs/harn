@@ -1,7 +1,6 @@
 import {
   agent_dispatch_tool_batch,
   agent_dispatch_tool_call,
-  agent_llm_turn,
   agent_parse_tool_calls,
 } from "std/agent/primitives"
 import { with_llm_script } from "std/testing"
@@ -47,12 +46,7 @@ pipeline main(harness: Harness) {
       {text: "", tool_calls: [{id: "native_add", name: "add", arguments: {left: 4, right: 6}}]},
     ],
     { ->
-      const turn = agent_llm_turn(
-        harness.llm,
-        "Calculate 2 + 3",
-        nil,
-        {provider: "mock", tools: tools},
-      )
+      const turn = harness.llm.call("Calculate 2 + 3", nil, {provider: "mock", tools: tools})
       const parsed = agent_parse_tool_calls(harness.agent, turn.raw_text, tools)
       const dispatched = agent_dispatch_tool_call(harness.tools, parsed.tool_calls[0], tools)
       const batch = agent_dispatch_tool_batch(harness.tools, parsed.tool_calls, tools)
@@ -71,12 +65,7 @@ pipeline main(harness: Harness) {
         {name: "explode", arguments: {}},
         tools,
       )
-      const native_turn = agent_llm_turn(
-        harness.llm,
-        "Calculate 4 + 6",
-        nil,
-        {provider: "mock", tools: tools},
-      )
+      const native_turn = harness.llm.call("Calculate 4 + 6", nil, {provider: "mock", tools: tools})
       const native_batch = agent_dispatch_tool_batch(harness.tools, native_turn.tool_calls, tools)
       harness.stdio.println(parsed.tool_calls[0].name)
       harness.stdio.println(dispatched.ok)

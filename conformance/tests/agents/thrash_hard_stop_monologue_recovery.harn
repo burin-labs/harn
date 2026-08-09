@@ -1,6 +1,6 @@
 import { agent_capture_events } from "std/agent/events"
 import { agent_loop } from "std/agent/loop"
-import { AgentLoopOptions } from "std/agent/options"
+import { AgentSpec } from "std/agent/options"
 import { llm_text, with_llm_script } from "std/testing"
 
 /**
@@ -42,7 +42,7 @@ pipeline default(harness: Harness) {
     ],
     { ->
       const session = "monologue-recovery-conformance-" + harness.random.uuid()
-      const opts: AgentLoopOptions = {
+      const opts: AgentSpec = {
         provider: "mock",
         tools: toolset(),
         tool_format: "native",

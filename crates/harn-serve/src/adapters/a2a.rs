@@ -170,6 +170,21 @@ impl TaskStatus {
             Self::Completed | Self::Failed | Self::Cancelled | Self::Rejected
         )
     }
+
+    fn from_agent_terminal(kind: harn_vm::agent_events::AgentTerminalKind) -> Self {
+        match kind.lifecycle_state().a2a_task_state() {
+            Some("completed") => Self::Completed,
+            Some("failed") => Self::Failed,
+            Some("cancelled") => Self::Cancelled,
+            // `paused` is Harn's documented A2A protocol contribution. Until
+            // it is standardized, keep the standard state `working` and put
+            // the lossless pause envelope in `metadata.harn.pause`.
+            Some("paused") => Self::Working,
+            Some("working") => Self::Working,
+            Some("input-required") => Self::InputRequired,
+            _ => Self::Failed,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]

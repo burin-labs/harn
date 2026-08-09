@@ -23,22 +23,18 @@ response-in, optional tool dispatch. Counted in `result.llm.iterations`.
 **Round-trip.** Alias for **iteration**. Used in prose; prefer "iteration" in
 field names and code.
 
-**Turn.** Overloaded — historically used for both inner (iteration) and outer
-(`agent_turn` wrapper) units. Prefer **iteration** for the inner unit and
-**prompt turn** for the outer unit. See [SOTA comparison](./sota-comparison.md)
-for the ACP alignment that motivates this.
+**Turn.** Overloaded. Prefer **iteration** for one model round-trip and
+**prompt turn** for the outer user-message cycle. See
+[Coming from elsewhere](./sota-comparison.md) for ACP terminology.
 
 **Prompt turn.** The outer cycle: one user message → final agent response,
 terminated by a `stop_reason`. Maps directly to ACP's `prompt_turn` and to one
-invocation of `agent_turn`.
+invocation of `agent_loop`.
 
-**Agent loop.** A function that runs iterations until completion. The body of
-the `agent_loop` builtin. Status outcomes: `done`, `stuck`, `suspended`,
+**Agent loop.** A function that runs iterations until completion. The
+`agent_loop` stdlib entrypoint owns this lifecycle. Status outcomes include
+`done`, `stuck`, `suspended`,
 `budget_exhausted`, `provider_error`, `idle`, `watchdog`, `failed`.
-
-**Agent turn (`agent_turn`).** A wrapper around `agent_loop` that adds a
-completion judge and runs one prompt-turn-shaped invocation. Despite the name,
-it can contain many iterations.
 
 **Daemon loop.** An agent loop that idles waiting for wake sources (triggers,
 timers) instead of returning when no work is pending. Same primitive, different
@@ -204,7 +200,7 @@ conversational-unit noun.
 | Concept | Reference page |
 |---|---|
 | `llm_call`, `llm_call_structured`, `llm_completion` | [LLM calls](../llm/llm_call.md) |
-| `agent_loop`, `agent_turn`, profiles, `done_judge` | [Agent loops](../llm/agent_loop.md) |
+| `agent_loop`, `AgentSpec`, profiles, `done_judge` | [Agent loops](../llm/agent_loop.md) |
 | Tools, Tool Vault, MCP server tools | [LLM tools](../llm/tools.md) |
 | Sessions, fork, reset, compact, snapshot | [Sessions](../sessions.md) |
 | Transcripts, events, assets | [Transcript architecture](../transcript-architecture.md) |

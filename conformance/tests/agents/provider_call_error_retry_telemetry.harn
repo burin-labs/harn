@@ -1,5 +1,5 @@
 import { agent_loop } from "std/agent/loop"
-import { AgentLoopOptions } from "std/agent/options"
+import { AgentSpec } from "std/agent/options"
 import { read_jsonl } from "std/jsonl"
 import { with_llm_script } from "std/testing"
 
@@ -12,7 +12,7 @@ pipeline main(harness: Harness) {
         harness.fs.workspace_temp_dir(),
         "harn-provider-call-error-telemetry-" + harness.random.uuid(),
       )
-      const opts: AgentLoopOptions = {
+      const opts: AgentSpec = {
         provider: "mock",
         model: "mock",
         loop_until_done: true,

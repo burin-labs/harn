@@ -122,26 +122,6 @@
     "tags": ["harn_seed", "file"]
   },
   {
-    "id": "harn_wait_for_user_branch",
-    "prompt": "Ask the user which branch to use.",
-    "tools": [
-      {
-        "name": "wait_for_user",
-        "description": "Ask the user a question and wait.",
-        "parameters": {
-          "question": {"type": "string"}
-        }
-      }
-    ],
-    "expected": {
-      "kind": "exact",
-      "name": "wait_for_user",
-      "args": {"question": "Which branch?"}
-    },
-    "source": "harn:conformance/tests/agents/agent_chat_loop.harn",
-    "tags": ["harn_seed", "hitl"]
-  },
-  {
     "id": "harn_read_current_session_id",
     "prompt": "Check the current agent session id.",
     "tools": [

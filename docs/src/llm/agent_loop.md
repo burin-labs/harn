@@ -1,51 +1,26 @@
 # Agent loops
 
-## agent_turn
-
-Use `agent_turn(prompt, opts?)` for the common "make one agent complete this
-request" case. It wraps `agent_loop`, puts `opts.system` into the system prompt
-alongside generic progress guidance, defaults to loop-until-done completion, and
-requires a completion judge. Native-tool turns complete naturally when the model
-returns final text with no tool calls; text/no-tool turns use the normal
-sentinel path. Pass `judge: {...}` or `done_judge: {...}` to customize that
-judge; omit it to use the default judge.
-
-The return value is the normal `agent_loop` result with two extra summaries:
-`iterations` (`[{iteration, started, ended?, tool_count?, prose_chars?}]`) and `judge_decisions`
-(`[{iteration, verdict, reasoning, next_step, judge_duration_ms, trigger?, reason?, confirm?,
-converted_from?, escalation_recommended?, escalation_target?}]`).
-
-```harn
-import { AgentLoopOptions } from "std/agent/options"
-
-const turn_opts: AgentLoopOptions = {
-  system: "Be concise and cite concrete evidence.",
-  provider: "openai",
-  model: "gpt-5-mini",
-}
-const result = agent_turn("Summarize the current project risks.", turn_opts)
-harness.stdio.log(result.visible_text)
-harness.stdio.log(result.judge_decisions[0].verdict)
-```
-
 ## agent_loop
 
 Run an agent that keeps working until it's done. The agent maintains
 conversation history across turns. Native-tool loops stop naturally when the
 model returns final assistant text with no tool calls; tagged text-tool loops
 use the completion sentinel `<done>##DONE##</done>`, and no-tool sentinel loops
-use bare `##DONE##`. Returns a dict with canonical visible text, tool usage,
-transcript state, and any deferred queued human messages.
+use bare `##DONE##`. Returns the typed `AgentResult` with canonical visible
+text, tool usage, transcript state, and a producer-owned terminal outcome.
 
-Build the options through the typed `AgentLoopOptions` alias from
-`std/agent/options` (or an `agent_preset(...)` constructor). This is the
-documented path: option typos surface at `harn check` time, and the
-`unnormalized-options` lint flags inline dict literals that bypass it.
+Build options through `AgentSpec` from `std/agent/options` or an
+`agent_preset(...)` constructor. `AgentSpec` composes six named records:
+`AgentModelSpec`, `AgentExecutionSpec`, `AgentCapabilitySpec`,
+`AgentLifecycleSpec`, `AgentContextSpec`, and `AgentObservabilitySpec`. The
+runtime value stays flat; the records separate independently evolving parts of
+the contract without adding another normalization format. Option typos surface
+at `harn check` time.
 
 ```harn
-import { AgentLoopOptions } from "std/agent/options"
+import { AgentSpec } from "std/agent/options"
 
-const opts: AgentLoopOptions = {loop_until_done: true}
+const opts: AgentSpec = {loop_until_done: true}
 const result = agent_loop(harness,
   "Write a function that sorts a list, then write tests for it.",
   "You are a senior engineer.",
@@ -85,8 +60,9 @@ answer without actually calling the tool. When debugging a provider route, set
 
 ### agent_loop return value
 
-`agent_loop` returns a namespaced dict. Execution metrics live under
-`llm`, tool invocation data under `tools`. This shape replaces the
+`agent_loop` returns `AgentResult` from `std/agent/contracts`. Execution metrics
+live under `llm`, tool invocation data under `tools`, and terminal decisions
+live under `terminal`. This shape replaces the
 earlier flat layout (`iterations`, `duration_ms`, `tools_used`,
 `successful_tools`, `rejected_tools`, `tool_calling_mode` were all
 top-level keys before `v0.8`).
@@ -95,7 +71,7 @@ top-level keys before `v0.8`).
 |---|---|---|
 | `status` | string | Terminal state: `"done"` (natural completion), `"error"` (a harness-owned failure such as `terminal_class: "parse_dropped"`), `"input_guardrail"` (a configured input guardrail tripped before the first main model turn), `"suspended"` (worker yielded at a cooperative suspend checkpoint), `"stuck"` (exceeded `max_nudges` consecutive text-only turns), `"budget_exhausted"` (hit a limit without a more specific terminal cause), `"verify_capped"` (a structured completion-judge veto cap was reached; see `stop_reason: "completion_judge_cap_reached"` or `"done_judge_cap_reached"`), `"provider_error"` (provider/tool-protocol request failed and was captured in `error`), `"idle"` (daemon yielded with no remaining wake source), `"watchdog"` (daemon idle-wait tripped the `idle_watchdog_attempts` limit), or `"failed"` (`require_successful_tools` not satisfied). |
 | `error` | dict or nil | Structured terminal failure: `{terminal_class?, category, reason, kind?, provider?, model?, message, phase?, tool_format?, after_tool_result?}`. `terminal_class: "parse_dropped"` means the last tool-shaped model turn was lost at the parser boundary and exhausted its repair budget; it is harness-owned, not a model failure. |
-| `terminal` | dict | Producer-owned terminal classification: `{kind, reason, owner}`. `kind` distinguishes `natural`, user cancellation, policy budget/no-progress/guardrail/custom stops, provider/runtime errors, suspension, and unknown future states. ACP hosts receive the same value both as a `typed_checkpoint` with `schema: "harn.agent_terminal.v1"` and on the prompt result at `_meta.harn.terminal`; only `kind: "natural"` proves completion, regardless of ACP's coarse `stopReason`. |
+| `terminal` | `AgentTerminalOutcome` | Producer-owned `{kind, reason, owner}` classification. `kind` distinguishes `natural`, user cancellation, policy budget/no-progress/guardrail/custom stops, provider/runtime errors, suspension, and unknown future states. ACP receives the same value as a typed checkpoint and prompt metadata; A2A receives it in `metadata.harn.terminal`; replay run records preserve it in `metadata.terminal`. Only `kind: "natural"` proves completion. |
 | `text` | string | Accumulated text output from all iterations |
 | `visible_text` | string | Human-visible accumulated output |
 | `output` | any | Present when an `output` contract is set and the loop completed (`status` `"done"`). The terminal answer parsed as JSON and, for schema contracts, validated against the schema. |
@@ -173,7 +149,7 @@ that can be wired into an agent as an `ask_user` tool, or as a post-turn callbac
 for agents that ask clarification questions in plain text.
 
 ```harn,ignore
-import { AgentLoopOptions } from "std/agent/options"
+import { AgentSpec } from "std/agent/options"
 import {
   agentic_user,
   simulated_user_read_tools,
@@ -188,7 +164,7 @@ const answerer = agentic_user(
   {max_replies: 4, max_llm_calls: 8, max_iterations: 4},
 )
 
-const opts: AgentLoopOptions = {
+const opts: AgentSpec = {
   provider: "openai",
   model: "gpt-5-mini",
   tools: user_tools(answerer, coding_tools),
@@ -204,7 +180,7 @@ For deterministic eval fixtures, use `scripted_user(...)` or its alias
 `reply`, `action: "stop"`, or `action: "fail"`.
 
 ```harn,ignore
-import { AgentLoopOptions } from "std/agent/options"
+import { AgentSpec } from "std/agent/options"
 import { scripted_user, user_tools } from "std/agent/user"
 
 const answerer = scripted_user([
@@ -212,7 +188,7 @@ const answerer = scripted_user([
   {match: "*done*", action: "stop", reason: "complete"},
 ], {max_replies: 2})
 
-const opts: AgentLoopOptions = {
+const opts: AgentSpec = {
   tools: user_tools(answerer),
   tool_format: "native",
   loop_until_done: true,
@@ -233,42 +209,6 @@ bound any codebase-research loop. Simulated-user decisions also emit
 `simulated_user_reply`, `simulated_user_stop`, `simulated_user_failed`, or
 `simulated_user_budget_exhausted` so evals can audit when the harness user
 intervened.
-
-### Interactive chat loops
-
-Use `std/agent/chat` when a harness wants an operator-typed chat loop instead
-of hand-driving `agent_loop` one turn at a time. `agent_chat_loop(...)` owns the
-session, calls `on_user_input(state)` before each model turn, preserves the
-same `session_id` across turns, and closes the session with a typed reason
-unless `close_session: false` is set.
-
-```harn,ignore
-import { agent_chat_loop, agent_chat_route_input } from "std/agent/chat"
-import { read_line } from "std/io"
-
-const result = agent_chat_loop({
-  session_id: "review-chat",
-  provider: "ollama",
-  model: "devstral-small-2",
-  tools: coding_tools,
-  tool_format: "native",
-  on_user_input: { state ->
-    const line = harness.stdio.read_line()
-    if !line.ok {
-      return {kind: "exit", reason: line.status ?? "closed"}
-    }
-    return agent_chat_route_input(line.value, state, {
-      "/runs": { req -> {kind: "handled", message: render_recent_runs(req.state)} },
-    })
-  },
-  on_model_turn: { turn, state -> {state: state + {last_text: turn.visible_text}} },
-})
-```
-
-The chat loop adds a Harn-handled `wait_for_user` tool by default. When the
-model calls it, the current `agent_loop` turn stops with
-`stop_reason: "wait_for_user"` and the wrapper returns to `on_user_input`.
-Pass `wait_for_user_tool: false` to keep the tool registry unchanged.
 
 ### Seeding caller-managed history
 
@@ -362,10 +302,10 @@ Semantics:
 
 ### agent_loop options
 
-The typed shape of this surface is `AgentLoopOptions` from
+The typed shape of this surface is `AgentSpec` from
 `std/agent/options` — every `llm_call` option plus the loop-control
 keys below. Annotate a binding
-(`let opts: AgentLoopOptions = {...}`) or build the dict via
+(`let opts: AgentSpec = {...}`) or build the dict via
 `agent_preset(...)` / `agent_options(...)`; inline dict literals still
 execute but are flagged by the `unnormalized-options` lint.
 
@@ -524,9 +464,9 @@ structured reorganization pass every three continuing turns. The reorganizer may
 use a different provider or model:
 
 ```harn
-import { AgentLoopOptions } from "std/agent/options"
+import { AgentSpec } from "std/agent/options"
 
-const scratchpad_opts: AgentLoopOptions = {
+const scratchpad_opts: AgentSpec = {
   loop_until_done: true,
   scratchpad: {
     reorganize_every: 2,
@@ -568,7 +508,7 @@ closure that wraps the per-turn `harness.llm.call(...)` and the loop will
 route every turn through it:
 
 ```harn,ignore
-import { AgentLoopOptions } from "std/agent/options"
+import { AgentSpec } from "std/agent/options"
 import {default_llm_caller} from "std/llm/caller"
 import {with_retry, with_fallback, compose} from "std/llm/handlers"
 
@@ -576,7 +516,7 @@ const caller = compose([
   with_retry({max_attempts: 4, backoff: "exponential"}),
 ])(default_llm_caller())
 
-const opts: AgentLoopOptions = {
+const opts: AgentSpec = {
   loop_until_done: true,
   llm_caller: caller,
 }
@@ -601,9 +541,9 @@ verbatim, summarize older messages, and fall back to truncation if the summary
 still exceeds the hard limit.
 
 ```harn
-import { AgentLoopOptions } from "std/agent/options"
+import { AgentSpec } from "std/agent/options"
 
-const compaction_opts: AgentLoopOptions = {
+const compaction_opts: AgentSpec = {
   provider: "openai",
   model: "gpt-4o",
   compaction: {strategy: "hybrid", keep_last_n: 10},
@@ -639,9 +579,9 @@ the next model-visible summary unless `scope` is `"model_visible"`,
 
 ```harn
 import {compact_for_bug_fix_resumption} from "std/agent/autocompact"
-import { AgentLoopOptions } from "std/agent/options"
+import { AgentSpec } from "std/agent/options"
 
-const auto_compact_opts: AgentLoopOptions = {
+const auto_compact_opts: AgentSpec = {
   provider: "mock",
   compact_threshold: 1,
   compact_strategy: "custom",
@@ -675,10 +615,10 @@ evidence of forward progress, instead of forcing harness authors to guess a
 single number.
 
 ```harn
-import { AgentLoopOptions, IterationBudget } from "std/agent/options"
+import { AgentSpec, IterationBudget } from "std/agent/options"
 
 const budget: IterationBudget = {mode: "adaptive", initial: 4, max: 16, extend_by: 2}
-const budget_opts: AgentLoopOptions = {iteration_budget: budget}
+const budget_opts: AgentSpec = {iteration_budget: budget}
 const result = agent_loop(harness, prompt, system, budget_opts)
 ```
 
@@ -783,9 +723,9 @@ All decisions are recorded:
   also surfaced to ACP/A2A bridges.
 
 ```harn
-import { AgentLoopOptions } from "std/agent/options"
+import { AgentSpec } from "std/agent/options"
 
-const adaptive_opts: AgentLoopOptions = {iteration_budget: {mode: "adaptive", initial: 4, max: 12}}
+const adaptive_opts: AgentSpec = {iteration_budget: {mode: "adaptive", initial: 4, max: 12}}
 const result = agent_loop(harness, prompt, system, adaptive_opts)
 harness.stdio.log(result.adaptive_budget.extensions_used)
 harness.stdio.log(result.adaptive_budget.final_limit)
@@ -1034,9 +974,9 @@ used only when the judge returned no recovery text. The corresponding
 `JudgeDecision` event carries `trigger: "stalled"`.
 
 ```harn
-import { AgentLoopOptions } from "std/agent/options"
+import { AgentSpec } from "std/agent/options"
 
-const judged_opts: AgentLoopOptions = {
+const judged_opts: AgentSpec = {
   loop_until_done: true,
   done_judge: {
     cadence: {every: 5, when: "always", max_invocations: 3},
@@ -1224,7 +1164,7 @@ Example: hide older assistant messages so the model mostly sees user intent,
 tool results, and the latest assistant turn.
 
 ```harn
-import { AgentLoopOptions } from "std/agent/options"
+import { AgentSpec } from "std/agent/options"
 
 fn hide_old_assistant_turns(ctx) {
   let kept = []
@@ -1242,7 +1182,7 @@ fn hide_old_assistant_turns(ctx) {
   return {messages: kept}
 }
 
-const callback_opts: AgentLoopOptions = {
+const callback_opts: AgentSpec = {
   loop_until_done: true,
   context_callback: hide_old_assistant_turns,
 }
@@ -1312,9 +1252,9 @@ fn finalize_after_read(turn) {
 ### Example with retry
 
 ```harn
-import { AgentLoopOptions } from "std/agent/options"
+import { AgentSpec } from "std/agent/options"
 
-const retry_opts: AgentLoopOptions = {
+const retry_opts: AgentSpec = {
   loop_until_done: true,
   max_iterations: 30,
   max_nudges: 5,
@@ -1410,7 +1350,7 @@ scaffolding.
 ### Example
 
 ```harn,ignore
-import { AgentLoopOptions } from "std/agent/options"
+import { AgentSpec } from "std/agent/options"
 
 skill ship {
   description "Ship a production release"
@@ -1420,7 +1360,7 @@ skill ship {
   prompt "Follow the deploy runbook. One command at a time."
 }
 
-const ship_opts: AgentLoopOptions = {
+const ship_opts: AgentSpec = {
   provider: "anthropic",
   tools: tools(),
   skills: ship,

@@ -4,6 +4,52 @@ use super::events::*;
 use super::schema::*;
 use super::*;
 
+#[derive(Clone, Debug)]
+pub(super) struct AgentTerminalProjection {
+    pub(super) status: TaskStatus,
+    pub(super) harn_metadata: JsonValue,
+}
+
+pub(super) fn agent_terminal_projection(value: &JsonValue) -> Option<AgentTerminalProjection> {
+    let terminal = value.get("terminal")?;
+    let kind = terminal
+        .get("kind")
+        .and_then(JsonValue::as_str)
+        .and_then(harn_vm::agent_events::AgentTerminalKind::from_wire)?;
+    let mut harn_metadata = json!({"terminal": terminal});
+    if kind == harn_vm::agent_events::AgentTerminalKind::Suspended {
+        let mut pause = json!({
+            "state": "paused",
+            "reason": terminal.get("reason").cloned().unwrap_or(JsonValue::Null),
+            "terminal": terminal,
+        });
+        if let Some(handle) = value.get("handle") {
+            pause["handle"] = handle.clone();
+        }
+        if let Some(worker) = value.get("worker") {
+            pause["worker"] = worker.clone();
+        }
+        harn_metadata["pause"] = pause;
+    }
+    Some(AgentTerminalProjection {
+        status: TaskStatus::from_agent_terminal(kind),
+        harn_metadata,
+    })
+}
+
+fn merge_harn_metadata(task: &mut TaskState, harn_metadata: &JsonValue) {
+    let harn = task
+        .metadata
+        .entry("harn".to_string())
+        .or_insert_with(|| json!({}));
+    if !harn.is_object() {
+        *harn = json!({});
+    }
+    if let (Some(target), Some(source)) = (harn.as_object_mut(), harn_metadata.as_object()) {
+        target.extend(source.clone());
+    }
+}
+
 impl A2aServer {
     pub(super) async fn prepare_task(
         &self,
@@ -215,6 +261,7 @@ impl A2aServer {
     }
 
     pub(super) fn complete_task(&self, task_id: &str, response: CallResponse) {
+        let terminal_projection = agent_terminal_projection(&response.value);
         let parts = response_parts(&response.value);
         let artifacts = response_artifacts(&response.value, &parts);
         let handoff_metadata = handoff_task_metadata(&response);
@@ -241,9 +288,20 @@ impl A2aServer {
             if let Some(metadata) = handoff_metadata {
                 task.metadata.extend(metadata);
             }
+            if let Some(projection) = terminal_projection.as_ref() {
+                merge_harn_metadata(task, &projection.harn_metadata);
+            }
             publish_locked(task, message);
-            task.status = TaskStatus::Completed;
-            publish_locked(task, status_event(task_id, TaskStatus::Completed));
+            let status = terminal_projection
+                .as_ref()
+                .map(|projection| projection.status.clone())
+                .unwrap_or(TaskStatus::Completed);
+            task.status = status.clone();
+            let mut event = status_event(task_id, status);
+            if let Some(projection) = terminal_projection.as_ref() {
+                event["metadata"] = json!({"harn": projection.harn_metadata});
+            }
+            publish_locked(task, event);
             task.cancel_token = None;
             task_to_json(task)
         };

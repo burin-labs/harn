@@ -663,10 +663,10 @@ fn from_host_accepts_a_harn_side_boundary_failure_and_derives_the_owner() {
         "s1",
         "boundary_failure",
         &json!({
-            "boundary": "chat_turn_cap",
+            "boundary": "text_tool_parse",
             "kind": "capped",
             "owner": "agent",
-            "detail": "agent_chat_loop stopped at max_turns after 4 turn(s)",
+            "detail": "tool-shaped bytes were not parsed",
             "dropped_count": 1,
         }),
     )
@@ -683,13 +683,13 @@ fn from_host_accepts_a_harn_side_boundary_failure_and_derives_the_owner() {
             ..
         } => {
             assert_eq!(session_id, "s1");
-            assert_eq!(boundary, crate::boundary::BoundaryId::ChatTurnCap);
+            assert_eq!(boundary, crate::boundary::BoundaryId::TextToolParse);
             assert_eq!(kind, crate::boundary::BoundaryFailureKind::Capped);
             assert_eq!(
                 owner, "policy",
                 "a payload-supplied owner must be overruled, not trusted",
             );
-            assert!(detail.contains("max_turns"));
+            assert!(detail.contains("tool-shaped bytes"));
             assert_eq!(dropped_count, 1);
             assert!(!unreported);
         }

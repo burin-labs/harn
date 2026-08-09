@@ -5,8 +5,8 @@
  * crates/harn-vm/src/orchestration/typed_options_parity.rs.
  */
 import {
-  AgentLoopOptions,
   AgentPresetOptions,
+  AgentSpec,
   agent_options,
   agent_preset_options,
 } from "std/agent/options"
@@ -39,7 +39,7 @@ pipeline test(harness: Harness, task) {
     },
   ]
   harness.stdio.log("ladder len=" + to_string(len(model_ladder(ladder))))
-  const loop_opts: AgentLoopOptions = {
+  const loop_opts: AgentSpec = {
     provider: "mock",
     loop_until_done: true,
     iteration_budget: {mode: "adaptive", initial: 2, max: 6, extend_by: 2},

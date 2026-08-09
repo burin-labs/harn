@@ -255,11 +255,12 @@ session messages; a reorganization that invents refs is rejected and the prior
 scratchpad remains active. Successful and failed reorganization attempts emit
 `agent_scratchpad_reorganization` events with status and count metadata.
 
-`agent_turn(prompt, options?)` is the high-level wrapper for a single complete
-agent request. It uses `agent_loop`, folds `options.system` into the system
-prompt with generic progress guidance, defaults to explicit
-`loop_until_done` completion, and requires `done_judge` (omitted means the
-default judge).
+`agent_loop(harness, prompt, system?, options?)` is the single public loop
+entrypoint for a complete agent request. Its typed `AgentSpec` composes model,
+execution, capability, lifecycle, context, and observability records. The loop
+emits typed stages through `HarnessAgent` and returns `AgentResult`, whose
+producer-owned `terminal` field classifies completion, policy stops, errors,
+and suspension without requiring consumers to parse `stop_reason`.
 
 Execute tools that can emit large result artifacts declare this in
 `ToolAnnotations`:

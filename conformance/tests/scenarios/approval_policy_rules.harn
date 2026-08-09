@@ -87,9 +87,9 @@ fn one_call(harness: Harness, name, args, approval_policy) {
 pipeline main(harness: Harness) {
   const secret = one_call(harness, "read_secret", {path: "config/.env"}, {rules: [{allow: "*"}]})
   const secret_events = json_stringify(
-    transcript_events_by_kind(secret?.transcript, "PermissionDeny"),
+    transcript_events_by_kind(secret.transcript, "PermissionDeny"),
   )
-  harness.stdio.println(secret?.tools?.rejected[0] == "read_secret")
+  harness.stdio.println(secret.tools.rejected[0] == "read_secret")
   harness.stdio.println(secret_events.contains("sensitive_path"))
   harness.stdio.println(secret_events.contains("harn.permission_policy_decision.v1"))
   const ask = one_call(
@@ -105,8 +105,8 @@ pipeline main(harness: Harness) {
       ],
     },
   )
-  const ask_events = json_stringify(transcript_events_by_kind(ask?.transcript, "PermissionDeny"))
-  harness.stdio.println(ask?.tools?.rejected[0] == "fetch_url")
+  const ask_events = json_stringify(transcript_events_by_kind(ask.transcript, "PermissionDeny"))
+  harness.stdio.println(ask.tools.rejected[0] == "fetch_url")
   harness.stdio.println(ask_events.contains("managed network approval"))
   harness.stdio.println(ask_events.contains("\"action\":\"ask\""))
   const allowed = one_call(
@@ -116,9 +116,9 @@ pipeline main(harness: Harness) {
     {allow_sensitive_paths: true, rules: [{allow: {tool: "run_command", command_identity: "npm"}}]},
   )
   const grant_events = json_stringify(
-    transcript_events_by_kind(allowed?.transcript, "PermissionGrant"),
+    transcript_events_by_kind(allowed.transcript, "PermissionGrant"),
   )
-  harness.stdio.println(len(allowed?.tools?.rejected) == 0)
+  harness.stdio.println(len(allowed.tools.rejected) == 0)
   harness.stdio.println(grant_events.contains("command_rule"))
   const mcp = one_call(
     harness,
@@ -133,8 +133,8 @@ pipeline main(harness: Harness) {
       ],
     },
   )
-  const mcp_events = json_stringify(transcript_events_by_kind(mcp?.transcript, "PermissionDeny"))
-  harness.stdio.println(mcp?.tools?.rejected[0] == "github__create_issue")
+  const mcp_events = json_stringify(transcript_events_by_kind(mcp.transcript, "PermissionDeny"))
+  harness.stdio.println(mcp.tools.rejected[0] == "github__create_issue")
   harness.stdio.println(mcp_events.contains("mcp_rule"))
   with_llm_script(
     harness.llm,
@@ -161,9 +161,9 @@ pipeline main(harness: Harness) {
         },
       )
       const repeat_events = json_stringify(
-        transcript_events_by_kind(repeated?.transcript, "PermissionDeny"),
+        transcript_events_by_kind(repeated.transcript, "PermissionDeny"),
       )
-      harness.stdio.println(repeated?.tools?.rejected[0] == "run_command")
+      harness.stdio.println(repeated.tools.rejected[0] == "run_command")
       harness.stdio.println(repeat_events.contains("repeated_call"))
     },
   )
