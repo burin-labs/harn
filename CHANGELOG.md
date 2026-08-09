@@ -9,6 +9,69 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.67
+
+### Breaking
+
+- **The agent plane now has one loop entrypoint and one typed contract (#6312).**
+  `AgentSpec` replaces `AgentLoopOptions`; `agent_loop` returns `AgentResult`
+  with the producer-owned terminal outcome. The redundant `agent_turn`,
+  `agent_llm_turn`, `agent_chat_loop`, `std/agent/chat`, and
+  `std/agent/completions` surfaces are removed. One-shot model requests use
+  `harness.llm`, while hosts own chat and editor-completion presentation. The
+  persisted-artifact reader type is renamed to `AgentResultArtifact`, leaving
+  `AgentResult` as the single live loop envelope.
+
+### Added
+
+- Add `std/eval/hypothesis`, a schema-bound natural-language intake and
+  deterministic compiler that lowers registered randomized designs into Harn's
+  existing experiment-registration contract. The module also provides typed
+  evidence policies, replay-validating atomic compare-and-append over the event
+  log, a reserved hypothesis topic with exact-event opaque authority proofs,
+  retained-chain self-consistency verification, and a content-addressed hypothesis
+  report. A new resource-scoped `authority` effect family lets execution policies
+  grant each native authority kind without broad connector access; execution
+  remains explicitly deferred to a registered host adapter.
+
+  ACP and other protocol hosts can now complete that authority boundary through
+  `hypothesis_event_authority_request`. The scoped builtin sends exact bindings
+  and a native operation receipt to `hypothesis.attest_event`, consumes only an
+  exact tagged success, and mints the non-serializable proof inside the active VM
+  execution. Script mocks, generic host calls, and the per-turn read memo cannot
+  manufacture or replay that authority. Legacy namespace projections now enforce
+  and record the same typed effects as their canonical Harness methods.
+- Add Gemini 3.6 Flash and Gemini 3.5 Flash-Lite to the canonical provider catalog,
+  including current pricing, OpenRouter mirrors, and model-specific Interactions
+  API capability contracts.
+- `harn test` now accepts repeatable `--test-path` selectors, letting curated
+  non-contiguous suites share one import-graph compilation and bounded scheduler
+  invocation.
+
+### Changed
+
+- **Focused user-test engine builds no longer compile the entire CLI product graph (#6365).** Discovery, fixtures,
+  callable batching, weighted scheduling, reusable sessions, progress events, timing, and receipts now live behind
+  the `harn-test-runner` crate. The distributed CLI explicitly selects the VM's canonical `full` capability closure,
+  while engine embedders can omit unrelated database, document, and compression families.
+- Unified OpenAI-compatible, Anthropic, Gemini, and Gemini Interactions wire
+  handling behind one typed dialect contract. Request building, stream decoding,
+  response parsing, and provider-error classification now share one resolved
+  contract, and the old structured-output mirror fields have been removed.
+
+### Fixed
+
+- Partition CPU workers across concurrent release-audit compiler and conformance
+  lanes so a wide workstation cannot turn nested CLI startup into a false timeout.
+- Forward documented focused `ARGS` through the root Rust test target instead of
+  silently launching the complete workspace suite.
+- Host bridges now inject every leading typed Harness capability requested by a
+  callable, so automatic capability migrations can widen embedded exports without
+  causing runtime arity mismatches.
+- **Release audits now reject missing lane prerequisites before expensive builds (#6365).** A missing
+  `cargo-nextest`, Node.js, or ripgrep is reported immediately instead of after the warm build and shared CLI AOT
+  preparation.
+
 ## v0.10.66
 
 ### Added
