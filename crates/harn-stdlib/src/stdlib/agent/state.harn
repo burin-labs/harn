@@ -1,3 +1,5 @@
+import { AgentResult } from "std/agent/contracts"
+
 // Thin Harn wrappers over host session-state primitives. These are CRUD only;
 // no decision logic lives here. The agent loop holds the session dict locally
 // and passes session_id into the host for any mutation.
@@ -33,7 +35,7 @@ pub fn agent_session_init(
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_session_finalize(agent: HarnessAgent, session_id, status) {
+pub fn agent_session_finalize(agent: HarnessAgent, session_id, status) -> AgentResult {
   return agent.session_finalize(session_id, status)
 }
 

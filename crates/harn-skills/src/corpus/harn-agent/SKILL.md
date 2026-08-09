@@ -46,7 +46,12 @@ deterministic evidence, and [[harn-product-quality]] for user-facing behavior.
 
 ## Loop design
 
-- Build options with `AgentLoopOptions`, `agent_options`, or `agent_preset`.
+- Use `agent_loop` as the one public agent entry point. Use
+  `harness.llm.call` or `harness.llm.completion` when the work is one model
+  request, and keep interactive input and editor state in the host.
+- Build the flat `AgentSpec` with `agent_options` or `agent_preset`. Use its
+  named model, execution, capability, lifecycle, context, and observability
+  component records at narrower boundaries.
 - Bound iterations, tool duration, concurrency, tokens, and cost.
 - Use adaptive iteration budgets only when progress signals justify extension.
 - Register typed tools with closed input and result shapes.
@@ -86,6 +91,8 @@ Stop, wait, stand down, and pivot are controls, not suggestions.
 ## Completion
 
 - Define completion against the user outcome, not lack of tool calls.
+- Consume the typed `AgentResult` and branch on `terminal.kind`; do not
+  reclassify `status`, `stop_reason`, model text, or transport metadata.
 - Name a plausible falsifier for the completion claim.
 - Gate on required artifacts, checks, receipts, or landed state.
 - Use deterministic checks before an LLM judge.

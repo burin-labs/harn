@@ -64,7 +64,7 @@ pipeline test(harness: Harness, task) {
           skill_match: {strategy: "metadata"},
         },
       )
-      assert(result?.status == "done", "agent loop completes")
+      assert(result.status == "done", "agent loop completes")
       const calls = harness.llm.mock_calls()
       assert(len(calls) >= 1, "at least one LLM call happened")
       const first_system = calls[0].system
@@ -93,7 +93,7 @@ pipeline test(harness: Harness, task) {
       }
       assert(seen_deploy, "scoped tool remained in the schema")
       assert(!seen_metrics, "out-of-scope tool was filtered")
-      const events = transcript_events(result?.transcript)
+      const events = transcript_events(result.transcript)
       let matched = 0
       let activated = 0
       let scoped = 0

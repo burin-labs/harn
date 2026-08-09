@@ -43,7 +43,7 @@ pipeline test(harness: Harness, task) {
           max_iterations: 3,
         },
       )
-      const events = transcript_events(result?.transcript)
+      const events = transcript_events(result.transcript)
       let saw_hybrid = false
       let promoted_run = false
       for ev in events {

@@ -1,7 +1,7 @@
 // Auto-compaction is itself a provider call and must be retained on the same
 // observed request/manifest spine as the agent turns around it.
 import { agent_loop } from "std/agent/loop"
-import { AgentLoopOptions } from "std/agent/options"
+import { AgentSpec } from "std/agent/options"
 import { read_jsonl } from "std/jsonl"
 import { llm_done, llm_text, with_llm_script } from "std/testing"
 
@@ -34,7 +34,7 @@ fn main(harness: Harness) {
         harness.fs.workspace_temp_dir(),
         "harn-compaction-context-manifest-" + harness.random.uuid(),
       )
-      const options: AgentLoopOptions = {
+      const options: AgentSpec = {
         provider: "mock",
         model: "mock",
         tools: evidence_tools(),

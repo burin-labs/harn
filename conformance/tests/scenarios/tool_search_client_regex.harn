@@ -72,7 +72,7 @@ pipeline test(harness: Harness, task) {
           max_iterations: 5,
         },
       )
-      const events = transcript_events(result?.transcript)
+      const events = transcript_events(result.transcript)
       let found_regex_strategy = false
       let promoted_edit = false
       let promoted_create = false

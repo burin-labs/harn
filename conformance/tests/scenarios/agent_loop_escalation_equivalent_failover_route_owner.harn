@@ -3,7 +3,7 @@ import { agent_loop } from "std/agent/loop"
  * Escalated agent-loop turns do not synthesize equivalent_failover over a
  * caller-owned routing surface.
  */
-import { AgentLoopOptions } from "std/agent/options"
+import { AgentSpec } from "std/agent/options"
 
 fn tools() {
   const r = tool_registry()
@@ -54,7 +54,7 @@ pipeline default(harness: Harness) {
       },
     }
   }
-  const opts: AgentLoopOptions = {
+  const opts: AgentSpec = {
     provider: "fireworks",
     model: "gpt-oss-120b",
     tools: tools(),

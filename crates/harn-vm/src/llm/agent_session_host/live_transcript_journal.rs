@@ -33,7 +33,7 @@ pub(super) async fn initialize(
         session_id,
         options,
         run_id.clone(),
-        format!("agent_turn_{}", uuid::Uuid::now_v7()),
+        format!("agent_loop_{}", uuid::Uuid::now_v7()),
     )
     .await?;
     let has_canonical_history = !prepared.transcript.messages.is_empty();
@@ -68,6 +68,10 @@ pub(super) async fn flush_init_terminal(
     final_status: &str,
     stop_reason: &str,
 ) -> Result<(), VmError> {
+    let terminal = crate::agent_events::AgentTerminalOutcome::new(
+        crate::agent_events::classify_agent_terminal(final_status, stop_reason, false, None),
+        stop_reason,
+    );
     let event = super::super::helpers::transcript_event(
         "agent_run_terminal",
         "assistant",
@@ -76,6 +80,7 @@ pub(super) async fn flush_init_terminal(
         Some(serde_json::json!({
             "final_status": final_status,
             "stop_reason": stop_reason,
+            "terminal": terminal,
         })),
     );
     crate::agent_sessions::append_event(session_id, event).map_err(VmError::Runtime)?;
@@ -90,6 +95,7 @@ pub(super) async fn flush_terminal(
     stop_reason: &str,
     terminal_class: Option<&str>,
     terminal_error: Option<&serde_json::Value>,
+    terminal: &crate::agent_events::AgentTerminalOutcome,
 ) -> Result<(), VmError> {
     let event = super::super::helpers::transcript_event(
         "agent_run_terminal",
@@ -101,6 +107,7 @@ pub(super) async fn flush_terminal(
             "stop_reason": stop_reason,
             "terminal_class": terminal_class,
             "error": terminal_error,
+            "terminal": terminal,
         })),
     );
     crate::agent_sessions::append_event(session_id, event).map_err(VmError::Runtime)?;

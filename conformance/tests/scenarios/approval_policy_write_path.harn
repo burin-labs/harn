@@ -29,7 +29,5 @@ pipeline main(harness: Harness) {
       approval_policy: {write_path_allowlist: ["/tmp/*"]},
     },
   )
-  harness.stdio.println(
-    len(denied?.tools?.rejected) == 0 || denied?.tools?.rejected[0] == "write_file",
-  )
+  harness.stdio.println(len(denied.tools.rejected) == 0 || denied.tools.rejected[0] == "write_file")
 }

@@ -1,5 +1,5 @@
 import { agent_loop } from "std/agent/loop"
-import { AgentLoopOptions } from "std/agent/options"
+import { AgentSpec } from "std/agent/options"
 import { llm_text, with_llm_script } from "std/testing"
 
 pipeline default(harness: Harness) {
@@ -12,7 +12,7 @@ pipeline default(harness: Harness) {
       llm_text("recovered by default retry. ##DONE##"),
     ],
     { ->
-      const opts: AgentLoopOptions = {provider: "mock"}
+      const opts: AgentSpec = {provider: "mock"}
       const result = agent_loop(harness, "finish", nil, opts)
       harness.stdio.println(result.status)
       harness.stdio.println(result.text)
@@ -27,7 +27,7 @@ pipeline default(harness: Harness) {
       llm_text("unreachable with retry disabled. ##DONE##"),
     ],
     { ->
-      const opts: AgentLoopOptions = {provider: "mock", retry: false}
+      const opts: AgentSpec = {provider: "mock", retry: false}
       const result = agent_loop(harness, "finish", nil, opts)
       harness.stdio.println(result.status)
       harness.stdio.println(result.error.kind)

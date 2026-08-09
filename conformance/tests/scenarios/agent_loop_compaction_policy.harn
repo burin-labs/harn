@@ -26,10 +26,10 @@ pipeline default(harness: Harness) {
       compaction: {strategy: "hybrid", keep_last_n: 10},
     },
   )
-  const events = transcript_events_by_kind(result?.transcript, "compaction")
-  harness.stdio.println(result?.llm?.iterations == 100)
-  harness.stdio.println(result?.status == "budget_exhausted")
-  harness.stdio.println(result?.trace?.compactions > 0)
+  const events = transcript_events_by_kind(result.transcript, "compaction")
+  harness.stdio.println(result.llm.iterations == 100)
+  harness.stdio.println(result.status == "budget_exhausted")
+  harness.stdio.println(result.trace.compactions > 0)
   harness.stdio.println(len(events) > 0)
   harness.stdio.println(events[0]?.metadata?.strategy == "hybrid")
   harness.stdio.println(events[0]?.metadata?.engine_strategy == "llm")

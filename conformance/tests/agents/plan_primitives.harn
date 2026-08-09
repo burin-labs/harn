@@ -59,7 +59,7 @@ pipeline main(harness: Harness) {
         nil,
         {provider: "mock", tools: tools, max_iterations: 2, session_id: "plan-conformance"},
       )
-      const events = transcript_events(result?.transcript)
+      const events = transcript_events(result.transcript)
       let saw_plan = false
       for event in events {
         if event.kind == "plan_document" {

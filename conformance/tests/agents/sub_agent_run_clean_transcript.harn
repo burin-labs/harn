@@ -71,8 +71,8 @@ pipeline main(harness: Harness) {
         "You are helpful.",
         {provider: "mock", tools: parent_tools(harness), tool_format: "native", max_iterations: 2},
       )
-      const stats = transcript_stats(result?.transcript)
-      const transcript = json_stringify(transcript_messages(result?.transcript))
+      const stats = transcript_stats(result.transcript)
+      const transcript = json_stringify(transcript_messages(result.transcript))
       harness.stdio.println(stats?.tool_call_count == 1)
       harness.stdio.println(stats?.tool_result_message_count == 1)
       harness.stdio.println(contains(transcript, "delegate"))

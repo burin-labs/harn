@@ -66,7 +66,7 @@ pipeline test(harness: Harness, task) {
           },
         },
       )
-      const events = transcript_events(result?.transcript)
+      const events = transcript_events(result.transcript)
       let draft_activate = false
       let review_activate = false
       let draft_deactivate = false

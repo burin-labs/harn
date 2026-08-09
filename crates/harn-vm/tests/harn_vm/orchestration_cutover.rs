@@ -10,7 +10,6 @@ fn stdlib_facades_are_imported_and_host_primitives_are_discoverable() {
     // effects to flow through the nominal handles in their signatures.
     for name in [
         "agent_loop",
-        "agent_turn",
         "agent_parse_tool_calls",
         "agent_dispatch_tool_call",
         "agent_dispatch_tool_batch",

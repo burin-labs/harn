@@ -1,5 +1,5 @@
 import { agent_loop } from "std/agent/loop"
-import { AgentLoopOptions } from "std/agent/options"
+import { AgentSpec } from "std/agent/options"
 import { with_llm_script } from "std/testing"
 
 fn lookup_tools() {
@@ -36,7 +36,7 @@ pipeline main(harness: Harness) {
         harness.fs.workspace_temp_dir(),
         "harn-agent-loop-provider-error-" + harness.random.uuid(),
       )
-      const opts: AgentLoopOptions = {
+      const opts: AgentSpec = {
         provider: "mock",
         model: "qwen-local",
         tools: lookup_tools(),

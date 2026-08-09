@@ -161,9 +161,8 @@ pub fn __agent_loop_run(harness: Harness, message, session, initial_opts) {
         } catch (e) {
           nil
         }
-        __agent_loop_checkpoint(
+        agent_stage(
           harness.agent,
-          harness.llm,
           session.session_id,
           "iteration_start",
           {iteration: iteration_index + 1},
@@ -191,17 +190,15 @@ pub fn __agent_loop_run(harness: Harness, message, session, initial_opts) {
           command_hold_cap_tokens = nil
         }
         const turn_llm_opts = __agent_loop_effective_llm_options(harness.llm, turn_opts)
-        __agent_loop_checkpoint(
+        agent_stage(
           harness.agent,
-          harness.llm,
           session.session_id,
           "pre_compact",
           {iteration: iteration_index + 1},
         )
         agent_autocompact_if_needed(harness.agent, session, turn_llm_opts)
-        __agent_loop_checkpoint(
+        agent_stage(
           harness.agent,
-          harness.llm,
           session.session_id,
           "post_compact",
           {iteration: iteration_index + 1},
@@ -855,12 +852,11 @@ pub fn __agent_loop_run(harness: Harness, message, session, initial_opts) {
               stop_reason = stall_exhaustion.kind
               break
             }
-            const stalled_done_checkpoint = __agent_loop_checkpoint(
+            const stalled_done_checkpoint = agent_stage(
               harness.agent,
-              harness.llm,
               session.session_id,
               "iteration_end",
-              {iteration: iteration_index + 1},
+              {iteration: iteration_index + 1, mock_queue: harness.llm.mock_snapshot()},
             )
             if stalled_done_checkpoint.delivered > 0 {
               continue
@@ -1081,9 +1077,8 @@ pub fn __agent_loop_run(harness: Harness, message, session, initial_opts) {
             step_judge_attempts = 0
           }
         }
-        const pre_dispatch_checkpoint = __agent_loop_checkpoint(
+        const pre_dispatch_checkpoint = agent_stage(
           harness.agent,
-          harness.llm,
           session.session_id,
           "pre_tool_dispatch",
           {iteration: iteration_index + 1},
@@ -1235,9 +1230,8 @@ pub fn __agent_loop_run(harness: Harness, message, session, initial_opts) {
             ),
           },
         )
-        const post_dispatch_checkpoint = __agent_loop_checkpoint(
+        const post_dispatch_checkpoint = agent_stage(
           harness.agent,
-          harness.llm,
           session.session_id,
           "post_tool_dispatch",
           {iteration: iteration_index + 1},
@@ -1287,9 +1281,8 @@ pub fn __agent_loop_run(harness: Harness, message, session, initial_opts) {
           )
           command_ledger = hold.ledger
           command_hold_state = hold.hold_state
-          __agent_loop_checkpoint(
+          agent_stage(
             harness.agent,
-            harness.llm,
             session.session_id,
             "command_hold",
             {iteration: iteration_index + 1},

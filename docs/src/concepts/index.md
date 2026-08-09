@@ -28,7 +28,7 @@ Every term Harn uses for a conversational unit, with one-line definitions and po
 
 ## [Choosing an abstraction](./abstraction-ladder.md)
 
-When to reach for `llm_call`, `agent_loop`, `agent_turn`, `workflow_execute`, `spawn_agent`, and friends.
+When to reach for `llm_call`, `agent_loop`, `workflow_execute`, `spawn_agent`, and friends.
 
 </div>
 

@@ -9,7 +9,7 @@ import {
   agent_tool_batch_disposition_event_schema,
 } from "std/agent/events"
 import { agent_loop } from "std/agent/loop"
-import { AgentLoopOptions } from "std/agent/options"
+import { AgentSpec } from "std/agent/options"
 import { with_llm_script } from "std/testing"
 
 fn reset_counts(runtime: HarnessRuntime, counters) {
@@ -233,7 +233,7 @@ fn run_phased(harness: Harness, counters) {
           {tool_calls: [done_call("done-5")]},
         ],
         { ->
-          const opts: AgentLoopOptions = {
+          const opts: AgentSpec = {
             provider: "mock",
             tools: phase_tools(harness.runtime, counters),
             tool_format: "native",
@@ -284,7 +284,7 @@ fn run_blocked_then_recovered(harness: Harness, counters) {
           {tool_calls: [done_call("recovery-done-5")]},
         ],
         { ->
-          const opts: AgentLoopOptions = {
+          const opts: AgentSpec = {
             provider: "mock",
             tools: phase_tools(harness.runtime, counters),
             tool_format: "native",

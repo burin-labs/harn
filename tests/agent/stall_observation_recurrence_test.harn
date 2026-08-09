@@ -6,7 +6,7 @@
 // into a stall.
 import { agent_capture_events } from "std/agent/events"
 import { agent_loop } from "std/agent/loop"
-import { AgentLoopOptions } from "std/agent/options"
+import { AgentSpec } from "std/agent/options"
 import { agent_stall_initial_state, agent_stall_observe_completed_dispatch } from "std/agent/stall"
 import { llm_text, with_llm_script } from "std/testing"
 
@@ -196,7 +196,7 @@ fn _assert_agent_loop_budget_guard(harness: Harness, stall_diagnostics, expected
     ],
     { ->
       const session = "observation-budget-" + harness.random.uuid()
-      const opts: AgentLoopOptions = {
+      const opts: AgentSpec = {
         provider: "mock",
         session_id: session,
         tools: _search_tools(),

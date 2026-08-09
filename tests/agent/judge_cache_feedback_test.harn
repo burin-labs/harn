@@ -1,6 +1,6 @@
 import { agent_capture_events } from "std/agent/events"
 import { agent_loop } from "std/agent/loop"
-import { AgentLoopOptions } from "std/agent/options"
+import { AgentSpec } from "std/agent/options"
 import { llm_text, with_llm_script } from "std/testing"
 
 fn checkpoints(events, schema: string) -> list {
@@ -37,7 +37,7 @@ pipeline test_judge_reuses_stable_prefix_and_suppresses_stale_next_step(harness:
     ],
     { ->
       const session = "judge-cache-feedback-" + harness.random.uuid()
-      const opts: AgentLoopOptions = {
+      const opts: AgentSpec = {
         provider: "mock",
         session_id: session,
         loop_until_done: true,

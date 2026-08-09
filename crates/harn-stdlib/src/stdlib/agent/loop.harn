@@ -1,4 +1,5 @@
 // @harn-entrypoint-category agent.stdlib
+import { AgentResult } from "std/agent/contracts"
 import { __agent_loop_run } from "std/agent/loop_run"
 import "std/agent/loop_support"
 import {
@@ -17,7 +18,7 @@ pub fn __progress_nudge_text(depth, has_tools, paradigm, made_tool_calls = false
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_loop(harness: Harness, message, system_prompt = nil, options = nil) {
+pub fn agent_loop(harness: Harness, message, system_prompt = nil, options = nil) -> AgentResult {
   let opts = agent_loop_options(harness, agent_progress_apply_options(harness.agent, options))
   opts = opts + {tools: agent_lifecycle_tools(harness.agent, opts?.tools, opts)}
   if system_prompt != nil && system_prompt != "" {

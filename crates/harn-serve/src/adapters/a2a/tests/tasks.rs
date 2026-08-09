@@ -1,6 +1,7 @@
 use super::protocol::server_with_api_key_policy;
 use super::*;
 
+mod terminal_projection;
 mod tool_call_artifacts;
 
 async fn collect_task_stream_until_terminal(
@@ -613,8 +614,7 @@ use harn_vm::agent_events::AgentEventSink as _;
 
 #[test]
 fn a2a_worker_sink_publishes_worker_update_to_task_stream() {
-    // The per-task `AgentEventSink` translates canonical worker
-    // lifecycle events into A2A task events of type
+    // The per-task `AgentEventSink` translates canonical worker lifecycle into
     // `worker_update`. This is the A2A side of the ACP/A2A parity
     // contract — same canonical AgentEvent, mapped onto each
     // protocol's wire shape from a single source.

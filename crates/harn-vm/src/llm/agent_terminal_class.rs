@@ -125,7 +125,7 @@ pub(crate) fn session_status_indicates_error(final_status: &str) -> bool {
 /// already-errored turns legitimately finalize with zero iterations and must
 /// be left alone; otherwise we would turn an intentional pause into a
 /// spurious failure.
-pub(crate) fn agent_turn_made_no_llm_call(
+pub(crate) fn agent_loop_made_no_llm_call(
     final_status: &str,
     has_terminal_error: bool,
     iterations: i64,
@@ -605,19 +605,19 @@ mod tests {
     fn model_less_turn_is_flagged_as_no_llm_call() {
         // Zero iterations + zero tokens + non-error status = silent
         // short-circuit. This is the model-less turn we must fail loud on.
-        assert!(agent_turn_made_no_llm_call("", false, 0, 0, 0));
-        assert!(agent_turn_made_no_llm_call("done", false, 0, 0, 0));
+        assert!(agent_loop_made_no_llm_call("", false, 0, 0, 0));
+        assert!(agent_loop_made_no_llm_call("done", false, 0, 0, 0));
     }
 
     #[test]
     fn real_turn_is_not_flagged_as_no_llm_call() {
         // Any real provider round-trip records iterations and/or tokens.
-        assert!(!agent_turn_made_no_llm_call("done", false, 1, 0, 0));
-        assert!(!agent_turn_made_no_llm_call("done", false, 0, 12, 0));
-        assert!(!agent_turn_made_no_llm_call("done", false, 0, 0, 34));
+        assert!(!agent_loop_made_no_llm_call("done", false, 1, 0, 0));
+        assert!(!agent_loop_made_no_llm_call("done", false, 0, 12, 0));
+        assert!(!agent_loop_made_no_llm_call("done", false, 0, 0, 34));
         // Already-errored or terminal-error turns are left as-is.
-        assert!(!agent_turn_made_no_llm_call("error", false, 0, 0, 0));
-        assert!(!agent_turn_made_no_llm_call("failed", false, 0, 0, 0));
-        assert!(!agent_turn_made_no_llm_call("", true, 0, 0, 0));
+        assert!(!agent_loop_made_no_llm_call("error", false, 0, 0, 0));
+        assert!(!agent_loop_made_no_llm_call("failed", false, 0, 0, 0));
+        assert!(!agent_loop_made_no_llm_call("", true, 0, 0, 0));
     }
 }

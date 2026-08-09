@@ -36,7 +36,11 @@ deterministic verification, and [[harn-product-quality]] for product projections
 
 ## Agent loops
 
-- Use `AgentLoopOptions`, `agent_options`, or `agent_preset`.
+- Use `agent_loop` as the one agent entry point; use `harness.llm.call` or
+  `harness.llm.completion` for one model request and leave interactive input
+  and editor state to the host.
+- Build the flat `AgentSpec` with `agent_options` or `agent_preset`; accept its
+  six named component records when a boundary needs only part of the contract.
 - Bound iterations, tool duration, concurrency, tokens, and cost.
 - Prefer structural progress and lifecycle events over prompt conventions.
 - Define completion against observable artifacts or receipts.
@@ -46,6 +50,8 @@ deterministic verification, and [[harn-product-quality]] for product projections
 - Use `harness.agent` for open, snapshot, fork, compact, inject, and lifecycle
   operations. Do not add a parallel ambient session API.
 - Treat stop, wait, stand-down, and pivot as lifecycle events.
+- Return `AgentResult` and project its producer-owned `terminal.kind`; hosts do
+  not derive lifecycle state from text or transport stop reasons.
 
 ## Triggers
 

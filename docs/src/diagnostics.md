@@ -3390,7 +3390,7 @@ inline options dict bypasses the typed option constructors
 
 `agent_loop` and `workflow_execute` accept large option surfaces. Passing an
 inline dict literal at the call site skips the typed structural aliases
-(`AgentLoopOptions` from `std/agent/options`, `StageSpec` and friends from
+(`AgentSpec` from `std/agent/options`, `StageSpec` and friends from
 `std/workflow/options`), so option typos and wrongly-typed values are only
 discovered at runtime — or silently ignored.
 
@@ -3400,7 +3400,7 @@ nudge toward the single documented path.
 #### How to fix
 
 - Bind the options to an annotated `let` first:
-  `let opts: AgentLoopOptions = {...}` then `agent_loop(task, system, opts)`.
+  `let opts: AgentSpec = {...}` then `agent_loop(task, system, opts)`.
 - Or build the options through a typed constructor:
   `agent_preset(kind, {...})` / `agent_options({...})` from
   `std/agent/options`, or `workflow_stage_spec({...})` from

@@ -8,7 +8,7 @@ import {
   agent_feedback_injected_event_schema,
 } from "std/agent/events"
 import { agent_loop } from "std/agent/loop"
-import { AgentLoopOptions } from "std/agent/options"
+import { AgentSpec } from "std/agent/options"
 import { llm_text, with_llm_script } from "std/testing"
 
 fn parse_feedback_tools() {
@@ -36,7 +36,7 @@ pipeline test_parse_feedback_is_counted_once(harness: Harness, task) {
     [llm_text("<tool_call>\nadd({ left: })\n</tool_call>"), llm_text("<done>##DONE##</done>")],
     { ->
       const session = "parse-feedback-cardinality-" + harness.random.uuid()
-      const opts: AgentLoopOptions = {
+      const opts: AgentSpec = {
         provider: "mock",
         session_id: session,
         tools: parse_feedback_tools(),
@@ -96,7 +96,7 @@ pipeline test_repeated_full_parse_rejection_enters_bounded_recovery(harness: Har
     ],
     { ->
       const session = "parse-feedback-recovery-" + harness.random.uuid()
-      const opts: AgentLoopOptions = {
+      const opts: AgentSpec = {
         provider: "mock",
         session_id: session,
         tools: parse_feedback_tools(),

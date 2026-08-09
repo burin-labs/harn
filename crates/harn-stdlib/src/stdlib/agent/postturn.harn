@@ -854,7 +854,7 @@ fn __tool_surface_entry_class(entry) {
   )
     || contains(["session_control", "lifecycle", "suspend", "resume"], kind)
     || contains(
-    ["load_skill", "agent_await_resumption", "subagent_pause", "subagent_resume", "wait_for_user"],
+    ["load_skill", "agent_await_resumption", "subagent_pause", "subagent_resume"],
     name,
   ) {
     return "session_control"

@@ -17,6 +17,7 @@ pub import {
   autonomy_policy,
 } from "std/agent/options_public"
 import { AgentLoopRetryOptions } from "std/agent/retry"
+import { ToolRegistry } from "std/tools"
 
 // Keep public option aliases on this facade: runtime `pub import` re-exports
 // carry type schemas, but the type checker currently resolves consumer
@@ -151,10 +152,7 @@ pub type JudgeConfig = {
 }
 
 /**
- * The public `agent_loop` options surface: everything `llm_call` accepts
- * plus the loop-control keys from the options table in
- * `docs/src/llm/agent_loop.md`, plus the caller-facing keys consumed by the
- * `agent_loop_options` normalizer below.
+ * Model and provider fields accepted by `AgentSpec`.
  *
  * The `llm_call` keys are inlined so consumers can import this alias alone and
  * retain structural checking. The parity test pins it as a superset of
@@ -167,7 +165,7 @@ pub type JudgeConfig = {
  * as `run.output`; `run.output_valid` reports whether the contract passed. For
  * one-shot extraction, use `llm_call_structured`.
  */
-pub type AgentLoopOptions = {
+pub type AgentModelSpec = {
   provider?: string,
   model?: string,
   model_role?: string,
@@ -215,10 +213,7 @@ pub type AgentLoopOptions = {
   audio?: bool,
   pdf?: bool,
   video?: bool,
-  // Structural twin of `std/tools.ToolRegistry`. Keep this inline so consumers
-  // can assign `tool_registry()` without also importing that alias (cross-module
-  // aliases in option fields do not resolve for importers yet).
-  tools?: list | {_type: "tool_registry", tools: list},
+  tools?: list | ToolRegistry,
   tool_choice?: string | dict,
   tool_search?: bool | string | dict,
   tool_format?: string,
@@ -256,6 +251,10 @@ pub type AgentLoopOptions = {
   system?: string | list | {mode: "replace", content: string},
   structural_experiment?: any,
   metadata?: dict,
+}
+
+/** Loop bounds, completion policy, callbacks, and dispatch controls. */
+pub type AgentExecutionSpec = {
   profile?: string,
   loop_until_done?: bool,
   done_sentinel?: string,
@@ -294,6 +293,10 @@ pub type AgentLoopOptions = {
   prefetch_next_turn?: bool,
   tool_surface_narrowing?: bool | dict,
   tool_format_override_reason?: string,
+}
+
+/** Policy and capability extensions applied at the agent boundary. */
+pub type AgentCapabilitySpec = {
   missing_tool_call_recovery?: bool | dict,
   read_only_stance?: bool | dict,
   progress_tool?: bool | dict,
@@ -304,6 +307,10 @@ pub type AgentLoopOptions = {
   subagents?: bool,
   subagent_tools?: bool,
   mcp_servers?: list,
+}
+
+/** Persistence, suspension, compaction, and daemon extensions. */
+pub type AgentLifecycleSpec = {
   stall_diagnostics?: bool | StallDiagnostics,
   daemon?: bool,
   persist_path?: string,
@@ -319,6 +326,10 @@ pub type AgentLoopOptions = {
   compact_strategy?: string,
   compact_callback?: any,
   auto_compact?: bool | dict,
+}
+
+/** Transcript, prompt, skill, and task-context extensions. */
+pub type AgentContextSpec = {
   transcript_projection?: string | dict,
   scratchpad?: bool | dict,
   timestamp_messages?: bool,
@@ -334,23 +345,19 @@ pub type AgentLoopOptions = {
   skills?: any,
   skill_match?: dict,
   working_files?: string | list<string>,
-  llm_transcript_dir?: string,
-  on_delta?: any,
 }
 
-// llm_call surface (kept in lockstep with LlmCallOptions in
-// std/llm/options by typed_options_parity.rs).
-// Loop shape and completion.
-// Completion gates and judges.
-// Composable seams.
-// Tool dispatch.
-// Stall detection.
-// Daemon lifecycle.
-// Context window management.
-// Prompts, reminders, and context profiles.
-// Task ledger shorthand.
-// Skills.
-// Observability.
+/** Observability extensions that do not alter agent semantics. */
+pub type AgentObservabilitySpec = {llm_transcript_dir?: string, on_delta?: any}
+
+/** Complete typed contract accepted by `agent_loop`. */
+pub type AgentSpec = AgentModelSpec \
+  & AgentExecutionSpec \
+  & AgentCapabilitySpec \
+  & AgentLifecycleSpec \
+  & AgentContextSpec \
+  & AgentObservabilitySpec
+
 /**
  * Overrides accepted by `agent_preset(kind, overrides)` and the captain
  * presets in `std/agent/presets`: any agent_loop option, plus the opt-in
@@ -360,7 +367,7 @@ pub type AgentLoopOptions = {
  *
  * Rust twin: none — presets are stdlib-owned option packs.
  */
-pub type AgentPresetOptions = AgentLoopOptions \
+pub type AgentPresetOptions = AgentSpec \
   & {
   consent?: any,
   audit_sink?: any,

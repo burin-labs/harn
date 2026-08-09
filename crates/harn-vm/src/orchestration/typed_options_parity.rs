@@ -21,6 +21,8 @@ use crate::llm::cost::LlmBudgetEnvelope;
 
 const LLM_OPTIONS_MODULE: &str = "llm/options";
 const AGENT_OPTIONS_MODULE: &str = "agent/options";
+const AGENT_OPTIONS_TYPES_MODULE: &str = "agent/options_types";
+const AGENT_CONTRACTS_MODULE: &str = "agent/contracts";
 const WORKFLOW_OPTIONS_MODULE: &str = "workflow/options";
 
 fn stdlib_source(module: &str) -> &'static str {
@@ -36,8 +38,48 @@ fn agent_options_harn() -> &'static str {
     stdlib_source(AGENT_OPTIONS_MODULE)
 }
 
+fn agent_options_types_harn() -> &'static str {
+    stdlib_source(AGENT_OPTIONS_TYPES_MODULE)
+}
+
+fn agent_contracts_harn() -> &'static str {
+    stdlib_source(AGENT_CONTRACTS_MODULE)
+}
+
 fn workflow_options_harn() -> &'static str {
     stdlib_source(WORKFLOW_OPTIONS_MODULE)
+}
+
+const AGENT_SPEC_PARTS: [&str; 6] = [
+    "AgentModelSpec",
+    "AgentExecutionSpec",
+    "AgentCapabilitySpec",
+    "AgentLifecycleSpec",
+    "AgentContextSpec",
+    "AgentObservabilitySpec",
+];
+
+fn agent_spec_keys_from(source: &str) -> BTreeSet<String> {
+    let declaration = concat!(
+        "pub type AgentSpec = AgentModelSpec \\\n",
+        "  & AgentExecutionSpec \\\n",
+        "  & AgentCapabilitySpec \\\n",
+        "  & AgentLifecycleSpec \\\n",
+        "  & AgentContextSpec \\\n",
+        "  & AgentObservabilitySpec",
+    );
+    assert!(
+        source.contains(declaration),
+        "AgentSpec must compose exactly the six named agent contract records"
+    );
+    AGENT_SPEC_PARTS
+        .into_iter()
+        .flat_map(|name| harn_alias_keys(source, name))
+        .collect()
+}
+
+fn agent_spec_keys() -> BTreeSet<String> {
+    agent_spec_keys_from(agent_options_harn())
 }
 
 /// Extract the top-level keys declared by `type <name> = ... { ... }` in a
@@ -113,6 +155,23 @@ fn harn_alias_keys(source: &str, name: &str) -> BTreeSet<String> {
         }
     }
     panic!("alias `{name}` shape body never closed");
+}
+
+fn harn_string_union_values(source: &str, name: &str) -> BTreeSet<String> {
+    let marker = format!("type {name} =");
+    let (_, declaration) = source
+        .split_once(&marker)
+        .unwrap_or_else(|| panic!("alias `{name}` not found in Harn source"));
+    declaration
+        .split("\n\n")
+        .next()
+        .expect("union declaration")
+        .split('|')
+        .filter_map(|part| {
+            let value = part.trim().trim_end_matches('\\').trim().trim_matches('"');
+            (!value.is_empty()).then(|| value.to_string())
+        })
+        .collect()
 }
 
 /// Serialize a struct's `Default` and return the top-level JSON object keys.
@@ -294,18 +353,30 @@ fn llm_call_options_excludes_removed_keys() {
     }
 }
 
-/// `AgentLoopOptions` inlines the `llm_call` option keys (cross-module type
-/// references do not structurally resolve for importing consumers yet, so
-/// composing `LlmCallOptions & {...}` would break annotation at call sites).
-/// This pin keeps the inlined copy a strict superset of `LlmCallOptions`.
+/// The model component of `AgentSpec` inlines the `llm_call` option keys.
+/// Composing the six same-module records keeps the public contract navigable
+/// without weakening the existing strict superset check.
 #[test]
 fn agent_loop_options_is_superset_of_llm_call_options() {
     let llm_keys = harn_alias_keys(llm_options_harn(), "LlmCallOptions");
-    let agent_keys = harn_alias_keys(agent_options_harn(), "AgentLoopOptions");
+    let agent_keys = agent_spec_keys();
     let missing: Vec<&String> = llm_keys.difference(&agent_keys).collect();
     assert!(
         missing.is_empty(),
-        "AgentLoopOptions must inline every LlmCallOptions key (add these to std/agent/options): {missing:?}"
+        "AgentSpec must inline every LlmCallOptions key (add these to std/agent/options): {missing:?}"
+    );
+}
+
+/// Harn's type checker currently requires the public facade to redeclare type
+/// aliases instead of re-exporting the canonical internal declarations. Keep
+/// that compatibility projection mechanical rather than maintaining two
+/// independently evolving option surfaces.
+#[test]
+fn agent_spec_public_projection_matches_internal_owner() {
+    assert_eq!(
+        agent_spec_keys_from(agent_options_harn()),
+        agent_spec_keys_from(agent_options_types_harn()),
+        "std/agent/options AgentSpec projection drifted from std/agent/options_types",
     );
 }
 
@@ -333,7 +404,7 @@ fn stdlib_owned_agent_aliases_declare_load_bearing_keys() {
     for key in ["provider", "model", "max_invocations", "cadence"] {
         assert!(judge.contains(key), "JudgeConfig lost key `{key}`");
     }
-    let loop_options = harn_alias_keys(agent_options_harn(), "AgentLoopOptions");
+    let loop_options = agent_spec_keys();
     for key in [
         "loop_until_done",
         "iteration_budget",
@@ -343,9 +414,56 @@ fn stdlib_owned_agent_aliases_declare_load_bearing_keys() {
         // never migrate onto LlmCallOptions.
         "history",
     ] {
-        assert!(
-            loop_options.contains(key),
-            "AgentLoopOptions lost key `{key}`"
-        );
+        assert!(loop_options.contains(key), "AgentSpec lost key `{key}`");
+    }
+}
+
+#[test]
+fn agent_terminal_contract_projects_the_rust_owner_exactly() {
+    let source = agent_contracts_harn();
+    let harn_kinds = harn_string_union_values(source, "AgentTerminalKind");
+    let rust_kinds: BTreeSet<String> = crate::agent_events::AgentTerminalKind::ALL
+        .into_iter()
+        .map(|kind| kind.as_str().to_string())
+        .collect();
+    assert_eq!(
+        harn_kinds, rust_kinds,
+        "AgentTerminalKind projection drifted"
+    );
+
+    let harn_owners = harn_string_union_values(source, "AgentTerminalOwner");
+    let rust_owners: BTreeSet<String> = crate::agent_events::AgentTerminalKind::ALL
+        .into_iter()
+        .map(|kind| kind.owner().to_string())
+        .collect();
+    assert_eq!(
+        harn_owners, rust_owners,
+        "AgentTerminalOwner projection drifted"
+    );
+
+    assert_eq!(
+        harn_alias_keys(source, "AgentTerminalOutcome"),
+        ["kind", "owner", "reason"]
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
+        "AgentTerminalOutcome must expose only producer-owned terminal fields",
+    );
+}
+
+#[test]
+fn agent_result_contract_carries_the_typed_terminal_projection() {
+    let keys = harn_alias_keys(agent_contracts_harn(), "AgentResult");
+    for key in [
+        "status",
+        "final_status",
+        "stop_reason",
+        "terminal",
+        "llm",
+        "tools",
+        "session_id",
+        "run_id",
+    ] {
+        assert!(keys.contains(key), "AgentResult lost core field `{key}`");
     }
 }

@@ -1,0 +1,68 @@
+/** Producer-owned classification of an agent-loop terminal. */
+pub type AgentTerminalKind = "natural" \
+  | "user_cancelled" \
+  | "policy_budget" \
+  | "policy_no_progress" \
+  | "policy_guardrail" \
+  | "policy_stop" \
+  | "provider_error" \
+  | "runtime_error" \
+  | "suspended" \
+  | "unknown"
+
+pub type AgentTerminalOwner = "agent" | "user" | "policy" | "provider" | "harness" | "unknown"
+
+pub type AgentTerminalOutcome = {kind: AgentTerminalKind, reason: string, owner: AgentTerminalOwner}
+
+pub type AgentLlmSummary = {
+  token_scope: string,
+  iterations: int,
+  duration_ms: int,
+  input_tokens: int,
+  output_tokens: int,
+  cache_read_tokens: int,
+  cache_write_tokens: int,
+  ...rest,
+}
+
+pub type AgentToolSummary = {
+  calls: list,
+  successful: list<string>,
+  rejected: list<string>,
+  mode: string,
+  ...rest,
+}
+
+/**
+ * Canonical result returned by `agent_loop` and `HarnessAgent.session_finalize`.
+ *
+ * `terminal` is the stable decision surface. `final_status`, `stop_reason`,
+ * and the open raw payloads remain lossless compatibility data for transcripts
+ * and diagnostics; consumers do not reclassify them.
+ */
+pub type AgentResult = {
+  status: string,
+  final_status: string,
+  stop_reason: string,
+  acp_stop_reason: string,
+  terminal_class: string?,
+  terminal: AgentTerminalOutcome,
+  error: any,
+  text: string,
+  visible_text: string,
+  private_reasoning: any,
+  thinking_summary: any,
+  llm: AgentLlmSummary,
+  tools: AgentToolSummary,
+  transcript: any,
+  trace: any,
+  tokens_used: int,
+  cost_usd: float,
+  session_id: string,
+  run_id: string,
+  started_at: string,
+  task: string,
+  daemon_state: any,
+  daemon_snapshot_path: any,
+  ...rest,
+}

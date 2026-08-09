@@ -134,7 +134,6 @@
 - [Calendar stdlib](./stdlib/calendar.md)
 - [Daemon stdlib](./stdlib/daemon.md)
 - [Current session builtin](./stdlib/agent_session_current_id.md)
-- [Agent completions stdlib](./stdlib/agent-completions.md)
 - [Compaction pins and the goal object](./stdlib/agent-pins-goal.md)
 - [Runtime introspection tools](./stdlib/runtime-introspection.md)
 - [Monitor stdlib](./stdlib/monitors.md)
@@ -300,7 +299,7 @@
 - [Process sandboxing](./sandboxing.md)
 - [OpenTrustGraph v0 spec](./spec/open-trust-graph/v0.md)
 - [LLM dialect ownership](./dev/llm-dialect-contract.md)
-- [Agent loop runtime notes](./dev/agent-loops.md)
+- [Agent plane ownership](./dev/agent-loops.md)
 - [Evidence-aware repair loop](./dev/repair-diagnostics.md)
 
 ## Protocol contributions
@@ -357,6 +356,7 @@
 # Migrations
 
 - [Portable kernel artifacts](./migrations/portable-kernel-v1.md)
+- [Agent plane cutover](./migrations/agent-plane-cutover.md)
 
 - [0.6.x → 0.7.0](./migrations/v0.7.md)
 - [Migrating to 0.10](./migrations/v0.10.md)

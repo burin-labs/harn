@@ -744,7 +744,7 @@ pub fn __agent_loop_emit_provider_error(
 }
 
 /**
- * Mode filter table for `__agent_loop_checkpoint`. Each row encodes the
+ * Mode filter table for `agent_stage`. Each row encodes the
  * invariant for one seam: which bridge modes are eligible to drain, and
  * whether the host should pull the agent_inbox feedback queue.
  *
@@ -772,7 +772,28 @@ pub fn __agent_loop_emit_provider_error(
  * @effects: [agent]
  * @errors: []
  */
-pub fn __agent_loop_checkpoint_modes(kind) {
+pub type AgentStage = "iteration_start" \
+  | "pre_compact" \
+  | "post_compact" \
+  | "pre_tool_dispatch" \
+  | "post_tool_dispatch" \
+  | "iteration_end" \
+  | "command_hold" \
+  | "daemon_idle_pre" \
+  | "daemon_idle_post" \
+  | "loop_exit"
+
+pub type AgentStageInput = {iteration?: int, mock_queue?: dict}
+
+pub type AgentStageResult = {
+  delivered: int,
+  inbox_delivered: int,
+  typed_delivered: int,
+  dispatch_skipped: bool,
+  kind: AgentStage,
+}
+
+pub fn __agent_stage_modes(kind: AgentStage) {
   if kind == "pre_tool_dispatch" || kind == "daemon_idle_pre" || kind == "daemon_idle_post" {
     return {
       immediate: true,
@@ -845,7 +866,7 @@ pub fn __agent_loop_checkpoint_modes(kind) {
 }
 
 /**
- * Single source of truth for "the loop is at a safe injection seam."
+ * Single HarnessAgent seam for every typed stage in the loop.
  * Every drain site in the agent loop body and the daemon idle path
  * routes through here so plugin authors and replayers see one canonical
  * event (`LoopCheckpoint`) instead of having to enumerate inline calls.
@@ -862,8 +883,14 @@ pub fn __agent_loop_checkpoint_modes(kind) {
  * @effects: [host, agent]
  * @errors: []
  */
-pub fn __agent_loop_checkpoint(agent: HarnessAgent, llm: HarnessLlm, session_id, kind, opts = nil) {
-  const modes = __agent_loop_checkpoint_modes(kind)
+pub fn agent_stage(
+  agent: HarnessAgent,
+  session_id: string,
+  kind: AgentStage,
+  input: AgentStageInput? = nil,
+) -> AgentStageResult {
+  const opts = input ?? {}
+  const modes = __agent_stage_modes(kind)
   let delivered = 0
   if modes.immediate {
     const result = agent_session_drain_bridge_injections(agent, session_id, "interrupt_immediate")
@@ -911,8 +938,8 @@ pub fn __agent_loop_checkpoint(agent: HarnessAgent, llm: HarnessLlm, session_id,
       dispatch_skipped: dispatch_skipped,
     },
   )
-  if kind == "iteration_end" {
-    const mock_queue = llm.mock_snapshot()
+  if kind == "iteration_end" && opts?.mock_queue != nil {
+    const mock_queue = opts.mock_queue
     if mock_queue.schema_version > 0 || len(keys(mock_queue.queue_remaining)) > 0 {
       agent_emit_event(
         agent,

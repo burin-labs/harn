@@ -36,7 +36,7 @@ pipeline default(harness: Harness) {
     [llm_text("ok")],
     { ->
       const result = agent_loop(harness, "hello vetome please", nil, {provider: "mock"})
-      const events = transcript_events(result?.transcript)
+      const events = transcript_events(result.transcript)
       harness.stdio.println(result.status)
       harness.stdio.println(count_kind(events, "hook_call") > 0)
       harness.stdio.println(count_kind(events, "hook_returned") > 0)

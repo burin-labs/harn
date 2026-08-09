@@ -39,7 +39,7 @@ pipeline test(harness: Harness, task) {
         nil,
         {provider: "mock", max_iterations: 1, skills: guarded, skill_match: {strategy: "metadata"}},
       )
-      const events = transcript_events(result?.transcript)
+      const events = transcript_events(result.transcript)
       let activated = 0
       let matched_events = 0
       for ev in events {

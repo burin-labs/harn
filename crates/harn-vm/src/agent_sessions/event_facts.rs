@@ -27,6 +27,13 @@ pub(crate) const TERMINAL_ERROR: &str = "/transcript_event/metadata/error";
 /// Coarse terminal classification assigned by
 /// [`crate::llm::agent_terminal_class`].
 pub(crate) const TERMINAL_CLASS: &str = "/transcript_event/metadata/terminal_class";
+/// Producer-owned terminal kind recorded by `agent_session_finalize`.
+pub(crate) const TERMINAL_KIND: &str = "/transcript_event/metadata/terminal/kind";
+/// Producer-owned terminal attribution paired with [`TERMINAL_KIND`].
+pub(crate) const TERMINAL_OWNER: &str = "/transcript_event/metadata/terminal/owner";
+/// Producer-owned explanation paired with [`TERMINAL_KIND`]. This can be more
+/// precise than the legacy loop-level [`STOP_REASON`].
+pub(crate) const TERMINAL_REASON: &str = "/transcript_event/metadata/terminal/reason";
 
 /// Provider-assigned name of the model that served an `llm_call`.
 pub(crate) const MODEL: &str = "/transcript_event/metadata/model";

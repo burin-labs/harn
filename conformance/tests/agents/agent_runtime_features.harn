@@ -29,9 +29,9 @@ pipeline test(harness: Harness, task) {
     "You are helpful",
     {provider: "mock", tools: list_tools(), tool_format: "native", max_iterations: 1},
   )
-  harness.stdio.println(denied?.tools?.rejected[0])
+  harness.stdio.println(denied.tools.rejected[0])
   harness.stdio.println(
-    json_stringify(transcript_messages(denied?.transcript)).contains("permission_denied"),
+    json_stringify(transcript_messages(denied.transcript)).contains("permission_denied"),
   )
   harness.tools.clear_hooks()
   let trunc_tools = tool_registry()
@@ -49,7 +49,7 @@ pipeline test(harness: Harness, task) {
     {provider: "mock", tools: trunc_tools, tool_format: "native", max_iterations: 1},
   )
   harness.stdio.println(
-    json_stringify(transcript_messages(truncated?.transcript)).contains("snipped"),
+    json_stringify(transcript_messages(truncated.transcript)).contains("snipped"),
   )
   harness.tools.clear_hooks()
   const base_messages = [
@@ -144,7 +144,7 @@ pipeline test(harness: Harness, task) {
     },
   )
   harness.stdio.println(
-    transcript_summary(loop_compacted?.transcript)?.contains("loop compact retain_current_plan"),
+    transcript_summary(loop_compacted.transcript)?.contains("loop compact retain_current_plan"),
   )
   const request_compacted = agent_loop(
     harness,
@@ -175,7 +175,7 @@ pipeline test(harness: Harness, task) {
     },
   )
   harness.stdio.println(
-    transcript_summary(request_compacted?.transcript)?.contains(
+    transcript_summary(request_compacted.transcript)?.contains(
       "request compact resume_request host",
     ),
   )
@@ -199,7 +199,7 @@ pipeline test(harness: Harness, task) {
       },
     },
   )
-  harness.stdio.println(stopped_after_tool_turn?.llm?.iterations == 1)
+  harness.stdio.println(stopped_after_tool_turn.llm.iterations == 1)
   harness.stdio.println(
     json_stringify(
       agent_session_visible_messages(harness.agent, stopped_after_tool_turn.session_id),
@@ -237,7 +237,7 @@ pipeline test(harness: Harness, task) {
       )
       const hook_calls = harness.llm.mock_calls()
       const second_call = json_stringify(hook_calls[1].messages)
-      harness.stdio.println(hook_driven_final?.llm?.iterations == 2)
+      harness.stdio.println(hook_driven_final.llm.iterations == 2)
       harness.stdio.println(second_call.contains("current=list_directory"))
       harness.stdio.println(second_call.contains("session=list_directory"))
       harness.stdio.println(second_call.contains("rejected=0"))
@@ -277,8 +277,8 @@ pipeline test(harness: Harness, task) {
         },
       )
       const cleared_calls = harness.llm.mock_calls()
-      harness.stdio.println(cleared_final?.status == "done")
-      harness.stdio.println(cleared_final?.llm?.iterations == 2)
+      harness.stdio.println(cleared_final.status == "done")
+      harness.stdio.println(cleared_final.llm.iterations == 2)
       harness.stdio.println(len(cleared_calls[1]?.tools ?? []) == 0)
     },
   )

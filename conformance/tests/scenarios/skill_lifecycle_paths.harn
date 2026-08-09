@@ -39,8 +39,8 @@ pipeline test(harness: Harness, task) {
           working_files: ["infra/terraform/cluster.tf", "README.md"],
         },
       )
-      assert(result?.status == "done", "loop completes on path-only match")
-      const events = transcript_events(result?.transcript)
+      assert(result.status == "done", "loop completes on path-only match")
+      const events = transcript_events(result.transcript)
       let infra_activated = false
       let docs_activated = false
       for ev in events {

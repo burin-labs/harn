@@ -5,7 +5,7 @@
 // mechanics without sleeps, wall-clock polling, API calls, or broad eval
 // machinery.
 import { agent_loop } from "std/agent/loop"
-import { AgentLoopOptions } from "std/agent/options"
+import { AgentSpec } from "std/agent/options"
 import { llm_text, llm_tool_call, with_llm_script } from "std/testing"
 
 fn terminal_callback_tools() {
@@ -48,7 +48,7 @@ pipeline test_terminal_callback_can_continue_max_iteration_exit(harness: Harness
       llm_text("The rescue turn completed the task. ##DONE##"),
     ],
     { ->
-      const opts: AgentLoopOptions = {
+      const opts: AgentSpec = {
         provider: "mock",
         tools: terminal_callback_tools(),
         loop_until_done: true,

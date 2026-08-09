@@ -3,7 +3,7 @@ import { agent_loop } from "std/agent/loop"
  * Partial provider/model route patches keep legacy merge behavior, but they do
  * not opt into equivalent_failover around the composed half-stale route.
  */
-import { AgentLoopOptions } from "std/agent/options"
+import { AgentSpec } from "std/agent/options"
 
 fn tools() {
   const r = tool_registry()
@@ -53,7 +53,7 @@ pipeline default(harness: Harness) {
       },
     }
   }
-  const opts: AgentLoopOptions = {
+  const opts: AgentSpec = {
     provider: "fireworks",
     model: "gpt-oss-120b",
     tools: tools(),

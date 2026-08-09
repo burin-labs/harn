@@ -1,0 +1,43 @@
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
+import { AgentStage } from "std/agent/loop_turn_options"
+import { llm_text, with_llm_script } from "std/testing"
+
+fn known_stage(stage: AgentStage) -> AgentStage {
+  return stage
+}
+
+pipeline test(harness: Harness, task) {
+  const session_id = "agent-stage-contract-" + harness.random.uuid_v7()
+  with_llm_script(
+    harness.llm,
+    [llm_text("done")],
+    { ->
+      const captured = agent_capture_events(
+        harness.agent,
+        session_id,
+        fn() { return agent_loop(
+          harness,
+          "Finish once.",
+          nil,
+          {provider: "mock", session_id: session_id, max_iterations: 1},
+        ) },
+      )
+      let stages = []
+      for event in captured.events {
+        if event?.type == "loop_checkpoint" {
+          stages = stages.appending(known_stage(event.kind))
+        }
+      }
+      assert(contains(stages, "iteration_start"), "agent loop entered the typed iteration stage")
+      assert(contains(stages, "pre_compact"), "agent loop entered the typed pre-compact stage")
+      assert(contains(stages, "post_compact"), "agent loop entered the typed post-compact stage")
+      assert(contains(stages, "loop_exit"), "agent loop entered the typed terminal stage")
+      assert(
+        captured.result.terminal.kind == "natural",
+        "typed terminal outcome survived projection",
+      )
+      harness.stdio.log("agent_stage_contract ok")
+    },
+  )
+}

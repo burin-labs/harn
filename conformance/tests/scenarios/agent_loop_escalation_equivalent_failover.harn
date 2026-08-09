@@ -8,7 +8,7 @@ import { agent_loop } from "std/agent/loop"
  * returning the done sentinel, proving the loop injected equivalent_failover
  * without live providers or timing-sensitive behavior.
  */
-import { AgentLoopOptions } from "std/agent/options"
+import { AgentSpec } from "std/agent/options"
 
 fn tools() {
   const r = tool_registry()
@@ -60,7 +60,7 @@ pipeline default(harness: Harness) {
       },
     }
   }
-  const opts: AgentLoopOptions = {
+  const opts: AgentSpec = {
     provider: "fireworks",
     model: "gpt-oss-120b",
     tools: tools(),

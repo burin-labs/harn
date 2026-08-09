@@ -496,8 +496,6 @@ fn builtin_effect(name: &str) -> Option<EffectRecord> {
         | "llm_call_structured_safe"
         | "llm_call_structured_result"
         | "llm_completion"
-        | "agent_llm_turn"
-        | "agent_turn"
         | "agent_loop" => Some(EffectRecord::new(
             EffectKind::Llm {
                 provider: None,

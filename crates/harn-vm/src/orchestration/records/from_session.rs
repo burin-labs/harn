@@ -294,7 +294,7 @@ async fn child_records(
             session_id: Some(child.id.clone()),
             parent_session_id: Some(session_id.to_string()),
             task: child.title.clone().unwrap_or_default(),
-            status: run_status_for(&child.status, None).to_string(),
+            status: run_status_for(&child.status, None, None).to_string(),
             started_at: child.created_at.clone(),
             finished_at: child.closed_at.clone(),
             run_id: Some(child.id.clone()),
@@ -358,6 +358,9 @@ struct TerminalFacts {
     stop_reason: Option<String>,
     error: Option<String>,
     class: Option<String>,
+    kind: Option<crate::agent_events::AgentTerminalKind>,
+    owner: Option<String>,
+    reason: Option<String>,
     at: String,
 }
 
@@ -374,6 +377,7 @@ fn assemble(
 
     let status = run_status_for(
         &meta.status,
+        fold.terminal.as_ref().and_then(|terminal| terminal.kind),
         fold.terminal
             .as_ref()
             .and_then(|t| t.final_status.as_deref()),
@@ -449,6 +453,16 @@ fn assemble(
         }
         if let Some(error) = &terminal.error {
             metadata.insert("terminal_error".to_string(), json!(error));
+        }
+        if let Some(kind) = terminal.kind {
+            metadata.insert(
+                "terminal".to_string(),
+                json!({
+                    "kind": kind.as_str(),
+                    "reason": terminal.reason.as_deref().or(terminal.stop_reason.as_deref()),
+                    "owner": terminal.owner.as_deref().unwrap_or_else(|| kind.owner()),
+                }),
+            );
         }
     }
 
@@ -632,6 +646,11 @@ impl SessionFold {
             stop_reason: facts::string_at(&event.payload, facts::STOP_REASON),
             error: facts::string_at(&event.payload, facts::TERMINAL_ERROR),
             class: facts::string_at(&event.payload, facts::TERMINAL_CLASS),
+            kind: facts::string_at(&event.payload, facts::TERMINAL_KIND)
+                .as_deref()
+                .and_then(crate::agent_events::AgentTerminalKind::from_wire),
+            owner: facts::string_at(&event.payload, facts::TERMINAL_OWNER),
+            reason: facts::string_at(&event.payload, facts::TERMINAL_REASON),
             at: event.ts.clone(),
         });
     }
@@ -643,7 +662,14 @@ impl SessionFold {
 /// The loop's own verdict wins when it left one: a host that exits without
 /// closing the session leaves `status = open`, which would otherwise report a
 /// finished run as still running.
-fn run_status_for(session_status: &SessionStatus, final_status: Option<&str>) -> &'static str {
+fn run_status_for(
+    session_status: &SessionStatus,
+    terminal_kind: Option<crate::agent_events::AgentTerminalKind>,
+    final_status: Option<&str>,
+) -> &'static str {
+    if let Some(kind) = terminal_kind {
+        return kind.lifecycle_state().wire_name();
+    }
     if let Some(final_status) = final_status.filter(|value| !value.is_empty()) {
         return if crate::llm::session_status_indicates_error(final_status) {
             "failed"

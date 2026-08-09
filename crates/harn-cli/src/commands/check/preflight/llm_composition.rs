@@ -43,9 +43,8 @@ fn scan_node(
 fn options_arg<'a>(name: &str, args: &'a [SNode]) -> Option<&'a SNode> {
     let index = match name {
         "agent_options" | "agent_loop_options" | "agent_preset_options" => 0,
-        "agent_turn" | "agent_preset" | "agent_governed_preset" => 1,
+        "agent_preset" | "agent_governed_preset" => 1,
         "agent_loop"
-        | "agent_llm_turn"
         | "agent_stream_call"
         | "llm_call"
         | "llm_call_safe"

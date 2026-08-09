@@ -19,7 +19,6 @@ type AgentPromptId = "agent.completion_judge_feedback" \
   | "agent.tool_contract_task_ledger" \
   | "agent.tool_contract_text" \
   | "agent.tool_contract_text_response_protocol" \
-  | "agent.turn_preamble" \
   | "agent.verification_gate_feedback"
 
 type AgentPromptEntry = string | {path: string} | {text: string} | fn(dict) -> string
@@ -46,7 +45,6 @@ type AgentPromptOverrides = {
   tool_contract_task_ledger?: AgentPromptEntry,
   tool_contract_text?: AgentPromptEntry,
   tool_contract_text_response_protocol?: AgentPromptEntry,
-  turn_preamble?: AgentPromptEntry,
   verification_gate_feedback?: AgentPromptEntry,
 }
 
@@ -73,7 +71,6 @@ fn __agent_prompt_ids() {
     "agent.tool_contract_task_ledger",
     "agent.tool_contract_text",
     "agent.tool_contract_text_response_protocol",
-    "agent.turn_preamble",
     "agent.verification_gate_feedback",
   ]
 }
@@ -102,7 +99,6 @@ fn __agent_default_prompt_catalog() {
     "agent.tool_contract_text": "tool_contract_text.harn.prompt",
     "agent.tool_contract_text_response_protocol":
       "tool_contract_text_response_protocol.harn.prompt",
-    "agent.turn_preamble": "agent_turn_preamble.harn.prompt",
     "agent.verification_gate_feedback": "verification_gate_feedback.harn.prompt",
   }
 }
@@ -321,7 +317,6 @@ pub fn agent_prompt_override_map(overrides: AgentPromptOverrides) -> dict {
     "agent.tool_contract_text_response_protocol",
     overrides.tool_contract_text_response_protocol,
   )
-  out = __agent_add_prompt_override(out, "agent.turn_preamble", overrides.turn_preamble)
   out = __agent_add_prompt_override(
     out,
     "agent.verification_gate_feedback",
@@ -597,17 +592,6 @@ pub fn tool_contract_text_prompt(fs: HarnessFs, bindings, options = nil) {
  */
 pub fn tool_contract_text_response_protocol_prompt(fs: HarnessFs, bindings, options = nil) {
   return render_agent_prompt_id(fs, "agent.tool_contract_text_response_protocol", bindings, options)
-}
-
-/**
- * agent_turn_preamble_prompt.
- *
- * @effects: []
- * @errors: []
- * @api_stability: experimental
- */
-pub fn agent_turn_preamble_prompt(fs: HarnessFs, options = nil) {
-  return render_agent_prompt_id(fs, "agent.turn_preamble", {}, options)
 }
 
 /**

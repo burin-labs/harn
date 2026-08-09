@@ -73,13 +73,7 @@ pub fn __agent_loop_finalize_session(harness: Harness, message, session, state) 
   } catch (e) {
     nil
   }
-  __agent_loop_checkpoint(
-    harness.agent,
-    harness.llm,
-    session.session_id,
-    "loop_exit",
-    {iteration: state.iteration},
-  )
+  agent_stage(harness.agent, session.session_id, "loop_exit", {iteration: state.iteration})
   __drain_audit_flushes(state.audit_background_tasks)
   const result = agent_session_finalize(
     harness.agent,

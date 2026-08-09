@@ -1,4 +1,4 @@
-import { AgentLoopOptions } from "std/agent/options"
+import { AgentSpec } from "std/agent/options"
 import { FacadeTarget } from "pub_type_schema_runtime_facade"
 import {
   DirectTarget,
@@ -36,8 +36,8 @@ pipeline default(harness: Harness) {
     schema_of(GenericNested).properties.value.properties.forwards_assistant_prefill.union[0].type,
   )
   harness.stdio.println(schema_of(OpenExtras).additional_properties.type)
-  harness.stdio.println(schema_is({model: "gpt-5"}, AgentLoopOptions))
-  harness.stdio.println(schema_is({model: 5}, AgentLoopOptions))
+  harness.stdio.println(schema_is({model: "gpt-5"}, AgentSpec))
+  harness.stdio.println(schema_is({model: 5}, AgentSpec))
   harness.stdio.println(schema_of(NestedReuse).type)
   harness.stdio.println(schema_of(NestedReuse).properties.mids.union[0].type)
   harness.stdio.println(schema_is({mids: {}}, NestedReuse))

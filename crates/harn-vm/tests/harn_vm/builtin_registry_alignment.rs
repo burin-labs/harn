@@ -235,8 +235,6 @@ fn static_parser_signatures_have_runtime_owners_or_migrations() {
     // become callable only after import creates a local binding, so they are
     // neither ambient APIs nor runtime-registry entries.
     const STATIC_MODULE_EXPORTS: &[&str] = &[
-        "agent_chat_route_input",
-        "agent_chat_wait_for_user_tools",
         "agent_preset",
         "agent_preset_kinds",
         "agent_preset_register",

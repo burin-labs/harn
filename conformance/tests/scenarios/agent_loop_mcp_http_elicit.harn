@@ -1,5 +1,5 @@
 import { agent_loop } from "std/agent/loop"
-import { AgentLoopOptions } from "std/agent/options"
+import { AgentSpec } from "std/agent/options"
 import { process_shell } from "std/runtime"
 import { llm_text, with_llm_script } from "std/testing"
 import { resolve_harn_bin, wait_for_log_match } from "../_common.harn"
@@ -46,7 +46,7 @@ pipeline default(harness: Harness) {
       llm_text("<done>##DONE##</done>"),
     ],
     { ->
-      const opts: AgentLoopOptions = {
+      const opts: AgentSpec = {
         provider: "mock",
         tool_format: "native",
         max_iterations: 3,
@@ -54,7 +54,7 @@ pipeline default(harness: Harness) {
       }
       const result = agent_loop(harness, "Use the remote ask tool", nil, opts)
       const calls = harness.testing.calls()
-      const successful = result?.tools.successful[0]
+      const successful = result.tools.successful[0]
       const tool_name_parts = split(successful, "__")
       const response = regex_captures(
         "(accept):(staging):(true)",

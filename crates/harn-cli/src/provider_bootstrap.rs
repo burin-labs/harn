@@ -11,7 +11,6 @@ use crate::net;
 const OLLAMA_TAGS_URL: &str = "http://127.0.0.1:11434/api/tags";
 const PROVIDER_BACKED_LLM_BUILTINS: &[&str] = &[
     "agent_loop",
-    "agent_turn",
     "llm_call",
     "llm_call_safe",
     "llm_call_structured",
@@ -591,7 +590,7 @@ mod tests {
     #[test]
     fn detects_provider_backed_llm_surfaces() {
         for builtin in [
-            "agent_turn",
+            "agent_loop",
             "llm_call_safe",
             "llm_call_structured",
             "llm_call_structured_safe",

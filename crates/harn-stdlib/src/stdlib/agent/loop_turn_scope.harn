@@ -217,12 +217,11 @@ pub fn __input_guardrail_record_skip_turn(
       },
     },
   )
-  let _ = __agent_loop_checkpoint(
+  let _ = agent_stage(
     agent,
-    llm,
     session.session_id,
     "iteration_end",
-    {iteration: iteration_index + 1},
+    {iteration: iteration_index + 1, mock_queue: llm.mock_snapshot()},
   )
   return text
 }
@@ -389,12 +388,11 @@ pub fn __scope_classifier_record_skip_turn(
       },
     },
   )
-  let _ = __agent_loop_checkpoint(
+  let _ = agent_stage(
     agent,
-    llm,
     session.session_id,
     "iteration_end",
-    {iteration: iteration_index + 1},
+    {iteration: iteration_index + 1, mock_queue: llm.mock_snapshot()},
   )
   return text
 }

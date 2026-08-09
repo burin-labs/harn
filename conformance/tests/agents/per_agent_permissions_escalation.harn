@@ -49,14 +49,14 @@ pipeline main(harness: Harness) {
         },
       )
       harness.stdio.println(
-        len(transcript_events_by_kind(result?.transcript, "PermissionEscalation")) == 1,
+        len(transcript_events_by_kind(result.transcript, "PermissionEscalation")) == 1,
       )
       harness.stdio.println(
-        len(transcript_events_by_kind(result?.transcript, "PermissionGrant")) == 2,
+        len(transcript_events_by_kind(result.transcript, "PermissionGrant")) == 2,
       )
-      harness.stdio.println(len(result?.tools?.rejected ?? []) == 0)
+      harness.stdio.println(len(result.tools.rejected) == 0)
       harness.stdio.println(
-        transcript_render_full(result?.transcript).contains("workspace write approved"),
+        transcript_render_full(result.transcript).contains("workspace write approved"),
       )
     },
   )
