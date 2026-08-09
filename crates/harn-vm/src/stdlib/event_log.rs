@@ -14,6 +14,7 @@ use crate::value::{VmError, VmResourceHandle, VmStream, VmValue};
 use crate::vm::Vm;
 
 mod hypothesis_authority;
+mod hypothesis_host_attestation;
 #[cfg(test)]
 mod hypothesis_persistence_tests;
 
@@ -514,6 +515,7 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &EVENT_LOG_EMIT_IDEMPOTENT_IMPL_DEF,
     &EVENT_LOG_EMIT_IDEMPOTENT_CHAINED_IMPL_DEF,
     &HYPOTHESIS_EVENT_AUTHORITY_MINT_IMPL_DEF,
+    &hypothesis_host_attestation::HYPOTHESIS_EVENT_AUTHORITY_REQUEST_IMPL_DEF,
     &HYPOTHESIS_EVENT_APPEND_IMPL_DEF,
     &HYPOTHESIS_EVENT_SNAPSHOT_IMPL_DEF,
     &EVENT_LOG_LATEST_IMPL_DEF,
@@ -530,6 +532,7 @@ fn register_event_log_namespace(vm: &mut Vm) {
         "emit_idempotent",
         "emit_idempotent_chained",
         "hypothesis_authority_mint",
+        "hypothesis_authority_request",
         "hypothesis_event_append",
         "hypothesis_event_snapshot",
         "latest",

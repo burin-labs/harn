@@ -275,6 +275,7 @@ provider integrations.
 | `harness.obs.event_log_verify(topic)` | Verify the retained topic provenance chain and return its count and head hash |
 | `harness.obs.hypothesis_event_snapshot(hypothesis_id)` | Verify the reserved hypothesis topic once and return the records projected for one hypothesis |
 | `harness.obs.hypothesis_event_authority_mint(native_attestation, authority_kind, event_fingerprint, plan_fingerprint, hypothesis_id, run_id?)` | Convert a non-serializable attestation from a registered native adapter into an exact, policy-scoped append proof; ordinary Harn values cannot supply the attestation |
+| `harness.obs.hypothesis_event_authority_request(authority_kind, event_fingerprint, plan_fingerprint, hypothesis_id, operation_receipt_id, run_id?)` | Ask the registered native host adapter to attest one completed operation and convert its exact tagged success into a non-serializable, policy-scoped append proof |
 | `harness.obs.hypothesis_event_append(proof, kind, idempotency_key, expected_head, event_fingerprint, plan_fingerprint, hypothesis_id, run_id, payload, headers?)` | Append one exact authorized event to the reserved `hypotheses.events.v1` topic |
 | `harness.obs.metrics_inc(name, amount?)` | Increment a connector-owned Prometheus counter |
 

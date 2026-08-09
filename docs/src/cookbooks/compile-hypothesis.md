@@ -136,14 +136,14 @@ const event = hypothesis_event({
   payload: {kind: "plan_registered", plan: plan},
 })
 
-// `native_attestation` is an opaque value injected only after the registered
-// adapter completes plan admission. Ordinary Harn code cannot construct it.
-const proof = harness.obs.hypothesis_event_authority_mint(
-  native_attestation,
+// The native adapter owns this receipt and returns a tagged success only after
+// it verifies that the corresponding plan-admission operation completed.
+const proof = harness.obs.hypothesis_event_authority_request(
   "plan_admission",
   event.fingerprint,
   plan.fingerprint,
   hypothesis_id,
+  "plan-admission-receipt-01",
   nil,
 )
 const first = hypothesis_ledger_append(harness.obs, event, proof)
@@ -157,8 +157,22 @@ const snapshot = hypothesis_ledger_project(
 )
 ```
 
-The example assumes it runs inside a registered plan-admission adapter with the
-narrow `authority.write@plan_admission` effect grant. Do not grant
+The example assumes the host registered `hypothesis.attest_event` and gave this
+pipeline the narrow `authority.write@plan_admission` effect grant. Harn sends
+the exact authority kind, fingerprints, IDs, and operation receipt over the
+host bridge. The adapter must return a JSON-RPC error for a missing, stale,
+mismatched, reused-with-different-bindings, or denied receipt. It may return the
+same success for an exact retry. An accepted response is the exact tagged result
+documented in [Bridge protocol](../bridge-protocol.md#native-hypothesis-attestation).
+Harn consumes that document inside the scoped builtin and returns only a
+non-serializable VM resource. An ordinary `host_call` sees the same document as
+plain data and cannot turn it into authority.
+
+In-process Rust embedders may instead create a native attestation with
+`harn_vm::stdlib::mint_hypothesis_native_attestation` and pass it to
+`hypothesis_event_authority_mint`. That constructor is not a wire format.
+
+Do not grant
 hypothesis-event authority writes to model-authored code. Give approval,
 execution, and lifecycle adapters only their corresponding
 `authority.write@native_approval`, `authority.write@native_observation`, or

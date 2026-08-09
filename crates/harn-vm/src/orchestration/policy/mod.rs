@@ -351,25 +351,29 @@ pub fn enforce_current_policy_for_builtin(name: &str, args: &[VmValue]) -> Resul
         return Ok(());
     };
     if let Some(entry) = crate::stdlib::builtin_manifest_entry(name) {
-        if let harn_builtin_meta::BuiltinExposure::CapabilityFunction { authority_argument } =
-            entry.contract.exposure
-        {
-            if args.get(usize::from(authority_argument)).is_none() {
-                return reject_policy(format!(
-                    "capability function '{name}' is missing authority argument {authority_argument}"
-                ));
+        match entry.contract.exposure {
+            harn_builtin_meta::BuiltinExposure::CapabilityFunction { authority_argument } => {
+                if args.get(usize::from(authority_argument)).is_none() {
+                    return reject_policy(format!(
+                        "capability function '{name}' is missing authority argument {authority_argument}"
+                    ));
+                }
+                if let Some(effect) =
+                    effects::runtime_effects_from_contract(entry.contract.effects, args)
+                        .into_iter()
+                        .find(|effect| !effects::effect_allowed_by_ceiling(effect, &policy))
+                {
+                    return reject_policy(format!(
+                        "capability function '{name}' exceeds the active effect ceiling: {}",
+                        effects::effect_record_summary(&effect)
+                    ));
+                }
+                return Ok(());
             }
-            if let Some(effect) =
-                effects::runtime_effects_from_contract(entry.contract.effects, args)
-                    .into_iter()
-                    .find(|effect| !effects::effect_allowed_by_ceiling(effect, &policy))
-            {
-                return reject_policy(format!(
-                    "capability function '{name}' exceeds the active effect ceiling: {}",
-                    effects::effect_record_summary(&effect)
-                ));
+            harn_builtin_meta::BuiltinExposure::HarnessMethod { capability, method } => {
+                return enforce_current_policy_for_capability(capability, method, args);
             }
-            return Ok(());
+            _ => {}
         }
     }
     if effects::builtin_has_network_effect(name)
