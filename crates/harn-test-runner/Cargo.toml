@@ -9,10 +9,10 @@ homepage.workspace = true
 description = "Reusable discovery, scheduling, execution, and receipt contracts for Harn tests"
 
 [dependencies]
-harn-lexer = { path = "../harn-lexer", version = "=0.10.66" }
-harn-modules = { path = "../harn-modules", version = "=0.10.66" }
-harn-parser = { path = "../harn-parser", version = "=0.10.66" }
-harn-vm = { path = "../harn-vm", version = "=0.10.66", default-features = false }
+harn-lexer = { path = "../harn-lexer", version = "=0.10.67" }
+harn-modules = { path = "../harn-modules", version = "=0.10.67" }
+harn-parser = { path = "../harn-parser", version = "=0.10.67" }
+harn-vm = { path = "../harn-vm", version = "=0.10.67", default-features = false }
 serde = { version = "1", features = ["derive"] }
 
 [lints]
