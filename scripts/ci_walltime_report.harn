@@ -236,21 +236,21 @@ fn positive_int(raw, field: string) -> int {
 }
 
 pub fn parse_ci_latency_policy(text: string) -> CiLatencyPolicy {
-  const raw = json_parse(text)
-  if to_int(raw?.schema_version) != 1 {
+  const raw: CiLatencyPolicy = schema_expect(json_parse(text), schema_of(CiLatencyPolicy))
+  if raw.schema_version != 1 {
     throw "CI latency policy schema_version must be 1"
   }
-  const repository = to_string(raw?.repository ?? "")
-  const workflow = to_string(raw?.workflow ?? "")
-  const event = to_string(raw?.event ?? "")
-  const topology_epoch = to_string(raw?.topology_epoch ?? "")
+  const repository = raw.repository
+  const workflow = raw.workflow
+  const event = raw.event
+  const topology_epoch = raw.topology_epoch
   if repository == "" || workflow == "" || event == "" || timestamp_ms(topology_epoch) == nil {
     throw "CI latency policy must name repository, workflow, event, and a valid topology_epoch"
   }
   let sentinels: list<CiSentinel> = []
-  for raw_sentinel in raw?.full_run_jobs ?? [] {
-    const name = to_string(raw_sentinel?.name ?? "")
-    const match_mode = to_string(raw_sentinel?.match ?? "exact")
+  for raw_sentinel in raw.full_run_jobs {
+    const name = raw_sentinel.name
+    const match_mode = raw_sentinel.match
     if name == "" || (match_mode != "exact" && match_mode != "prefix") {
       throw "CI latency full_run_jobs entries require a name and exact|prefix match"
     }
@@ -260,11 +260,11 @@ pub fn parse_ci_latency_policy(text: string) -> CiLatencyPolicy {
     throw "CI latency policy must declare at least one full-run sentinel job"
   }
   const slo: CiLatencySlo = {
-    warning_ms: positive_int(raw?.slo?.warning_ms, "slo.warning_ms"),
-    p90_ms: positive_int(raw?.slo?.p90_ms, "slo.p90_ms"),
-    hard_max_ms: positive_int(raw?.slo?.hard_max_ms, "slo.hard_max_ms"),
-    min_samples: positive_int(raw?.slo?.min_samples, "slo.min_samples"),
-    window_samples: positive_int(raw?.slo?.window_samples, "slo.window_samples"),
+    warning_ms: positive_int(raw.slo.warning_ms, "slo.warning_ms"),
+    p90_ms: positive_int(raw.slo.p90_ms, "slo.p90_ms"),
+    hard_max_ms: positive_int(raw.slo.hard_max_ms, "slo.hard_max_ms"),
+    min_samples: positive_int(raw.slo.min_samples, "slo.min_samples"),
+    window_samples: positive_int(raw.slo.window_samples, "slo.window_samples"),
   }
   if slo.warning_ms >= slo.p90_ms || slo.p90_ms >= slo.hard_max_ms {
     throw "CI latency policy requires warning_ms < p90_ms < hard_max_ms"

@@ -128,7 +128,7 @@ pipeline test_policy_rejects_ambiguous_or_inverted_contracts(harness: Harness, t
     },
   )
   assert_eq(parse_ci_latency_policy(valid).slo.p90_ms, 600000)
-  const raw = json_parse(valid)
+  const raw = parse_ci_latency_policy(valid)
   const inverted = json_stringify({...raw, slo: {...raw.slo, warning_ms: 610000}})
   const result = try {
     parse_ci_latency_policy(inverted)
