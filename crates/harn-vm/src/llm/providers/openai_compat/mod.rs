@@ -9,13 +9,11 @@
 //! - [`messages`] — transcript history to an OpenAI-legal `messages` array.
 //! - [`tools`] — tool definitions and `tool_choice` on the request.
 //! - [`reasoning`] — per-dialect reasoning/thinking request shapes.
-//! - [`prompt_cache`] — prompt-cache breakpoint placement.
 //! - [`openrouter`] — OpenRouter upstream-routing directives.
 //! - [`streaming`] — live-delta canonicalization for reserved-token models.
 
 mod messages;
 mod openrouter;
-mod prompt_cache;
 mod reasoning;
 mod streaming;
 mod tools;
@@ -36,7 +34,6 @@ use self::messages::{
     enforce_tool_result_adjacency, maybe_remap_tool_call_text,
     relocate_tool_message_images_to_user, sanitize_openai_message_for_request,
 };
-use self::prompt_cache::apply_prompt_cache_breakpoint;
 use self::reasoning::{
     enabled_reasoning_config, is_openrouter_reasoning_disable, minimax_thinking_config,
     model_declares_reasoning, openrouter_reasoning_config, zai_thinking_config,
@@ -183,6 +180,7 @@ impl OpenAiCompatibleProvider {
             sanitize_openai_message_for_request(
                 &mut message,
                 remap_tool_call,
+                caps.reasoning_round_trip,
                 caps.reasoning_history_wire_field,
             );
             message
@@ -401,7 +399,12 @@ impl OpenAiCompatibleProvider {
             let field = chat_template_options_field(&caps);
             body[field] = chat_template_kwargs;
         }
-        apply_prompt_cache_breakpoint(&mut body, opts.cache, &caps);
+        crate::llm::prompt_cache::apply_prompt_cache_breakpoint(
+            &mut body,
+            opts.cache,
+            &caps,
+            serde_json::json!({"type": "ephemeral"}),
+        );
         crate::llm::serving_tiers::apply_fast_request_knob(&mut body, &opts.model, opts.fast);
         body
     }

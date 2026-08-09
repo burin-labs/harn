@@ -11,9 +11,9 @@ use std::collections::{BTreeMap, HashSet};
 use serde::Deserialize;
 
 use super::model::{
-    fill_opt, Capabilities, CapabilitiesFile, ComputerUseStyle, LiveEndpointFamily,
-    ProviderDefaults, ReasoningHistoryWireField, ScreenshotScaling, SystemMessagePlacement,
-    ToolModeParitySource, WireDialect,
+    fill_opt, CacheBreakpointStyle, Capabilities, CapabilitiesFile, ComputerUseStyle,
+    LiveEndpointFamily, ProviderDefaults, ReasoningHistoryWireField, ReasoningRoundTripPolicy,
+    ScreenshotScaling, SystemMessagePlacement, ToolModeParitySource, WireDialect,
 };
 use crate::llm::providers::anthropic::claude_generation;
 use crate::llm::providers::openai_compat::gpt_generation;
@@ -170,7 +170,7 @@ pub struct ProviderRule {
     /// `cache_control` to opt into provider prompt caching. Known values are
     /// `none`, `top_level`, and `last_block`.
     #[serde(default)]
-    pub cache_breakpoint_style: Option<String>,
+    pub cache_breakpoint_style: Option<CacheBreakpointStyle>,
     /// Whether this provider/model route accepts image or other visual
     /// input blocks through Harn's LLM message path.
     #[serde(default)]
@@ -266,6 +266,10 @@ pub struct ProviderRule {
     /// the same role there.
     #[serde(default)]
     pub preserve_thinking: Option<bool>,
+    /// Provider-visible replay policy for prior assistant reasoning. Typed so
+    /// unknown or misspelled policies fail capability loading.
+    #[serde(default)]
+    pub reasoning_round_trip: Option<ReasoningRoundTripPolicy>,
     /// Provider-specific field that must receive Harn's private reasoning on
     /// replayed assistant history. Typed so catalog typos fail at load time.
     #[serde(default)]
@@ -586,6 +590,7 @@ impl ProviderRule {
             vision_supported,
             image_url_input_supported,
             preserve_thinking,
+            reasoning_round_trip,
             reasoning_history_wire_field,
             server_parser,
             honors_chat_template_kwargs,
@@ -695,6 +700,7 @@ impl ProviderRule {
             image_url_input_supported,
         );
         fill_opt(&mut self.preserve_thinking, preserve_thinking);
+        fill_opt(&mut self.reasoning_round_trip, reasoning_round_trip);
         fill_opt(
             &mut self.reasoning_history_wire_field,
             reasoning_history_wire_field,
@@ -1119,6 +1125,7 @@ fn defaults_to_caps(defaults: &ProviderDefaults) -> Capabilities {
         vision_supported: None,
         image_url_input_supported: None,
         preserve_thinking: None,
+        reasoning_round_trip: None,
         reasoning_history_wire_field: None,
         server_parser: None,
         honors_chat_template_kwargs: None,
@@ -1281,8 +1288,8 @@ fn rule_to_caps(rule: &ProviderRule, defaults: &ProviderDefaults) -> Capabilitie
         },
         cache_breakpoint_style: rule
             .cache_breakpoint_style
-            .clone()
-            .unwrap_or_else(|| "none".to_string()),
+            .or(defaults.cache_breakpoint_style)
+            .unwrap_or_default(),
         vision: rule_vision(rule),
         audio: rule.audio.unwrap_or(false),
         pdf: rule.pdf.unwrap_or(false),
@@ -1315,6 +1322,10 @@ fn rule_to_caps(rule: &ProviderRule, defaults: &ProviderDefaults) -> Capabilitie
             .or(defaults.image_url_input_supported)
             .unwrap_or(true),
         preserve_thinking: rule.preserve_thinking.unwrap_or(false),
+        reasoning_round_trip: rule
+            .reasoning_round_trip
+            .or(defaults.reasoning_round_trip)
+            .unwrap_or_default(),
         reasoning_history_wire_field: rule.reasoning_history_wire_field,
         server_parser: rule
             .server_parser

@@ -534,6 +534,48 @@ fn gpt_oss_harmony_leak_persists_clean_tool_call_without_dirty_reasoning() {
 }
 
 #[test]
+fn anthropic_session_history_preserves_signed_reasoning_before_tool_use() {
+    let result = crate::stdlib::json_to_vm_value(&json!({
+        "provider": "anthropic",
+        "model": "claude-opus-4-7",
+        "text": "",
+        "thinking": "Check the tool.",
+        "blocks": [
+            {
+                "type": "thinking",
+                "thinking": "Check the tool.",
+                "signature": "signed-thinking"
+            },
+            {"type": "redacted_thinking", "data": "opaque-reasoning"},
+            {
+                "type": "tool_call",
+                "id": "toolu_1",
+                "name": "read",
+                "arguments": {"path": "README.md"}
+            }
+        ],
+        "native_tool_calls": [{
+            "id": "toolu_1",
+            "name": "read",
+            "arguments": {"path": "README.md"}
+        }],
+        "tool_calls": [{
+            "id": "toolu_1",
+            "name": "read",
+            "arguments": {"path": "README.md"}
+        }],
+    }));
+
+    let message = vm_to_json(&assistant_message_from_llm_result(&result));
+    let content = message["content"].as_array().expect("Anthropic blocks");
+
+    assert_eq!(content[0]["signature"], "signed-thinking");
+    assert_eq!(content[1]["data"], "opaque-reasoning");
+    assert_eq!(content[2]["type"], "tool_use");
+    assert_eq!(content[2]["id"], "toolu_1");
+}
+
+#[test]
 fn text_tool_calls_replay_as_text_history_even_on_native_capable_routes() {
     let text_call = "<tool_call>\nlookup_ping({ query: \"catalog-refresh\" })\n</tool_call>";
     let result = crate::stdlib::json_to_vm_value(&json!({

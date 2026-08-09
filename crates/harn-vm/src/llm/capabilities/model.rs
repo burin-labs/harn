@@ -155,6 +155,14 @@ pub struct ProviderDefaults {
     /// [`crate::llm::capabilities::rule::ProviderRule::prompt_cache_min_prefix_tokens`].
     #[serde(default)]
     pub prompt_cache_min_prefix_tokens: Option<u32>,
+    /// Request-side cache marker placement shared by every adapter for this
+    /// provider. Unknown values fail capability loading.
+    #[serde(default)]
+    pub cache_breakpoint_style: Option<CacheBreakpointStyle>,
+    /// How prior assistant reasoning may be projected back onto the provider
+    /// wire. The privacy-preserving default is `strip`.
+    #[serde(default)]
+    pub reasoning_round_trip: Option<ReasoningRoundTripPolicy>,
     #[serde(default)]
     pub seed_supported: Option<bool>,
     #[serde(default)]
@@ -237,6 +245,11 @@ macro_rules! merge_provider_defaults {
             &mut $dst.prompt_cache_min_prefix_tokens,
             &$src.prompt_cache_min_prefix_tokens,
         );
+        $op(
+            &mut $dst.cache_breakpoint_style,
+            &$src.cache_breakpoint_style,
+        );
+        $op(&mut $dst.reasoning_round_trip, &$src.reasoning_round_trip);
         $op(&mut $dst.seed_supported, &$src.seed_supported);
         $op(&mut $dst.top_k_supported, &$src.top_k_supported);
         $op(&mut $dst.temperature_supported, &$src.temperature_supported);
@@ -286,6 +299,8 @@ impl ProviderDefaults {
             || self.batch_regions.is_some()
             || self.prompt_cache_ttls.is_some()
             || self.prompt_cache_min_prefix_tokens.is_some()
+            || self.cache_breakpoint_style.is_some()
+            || self.reasoning_round_trip.is_some()
             || self.seed_supported.is_some()
             || self.top_k_supported.is_some()
             || self.temperature_supported.is_some()
@@ -488,6 +503,55 @@ pub enum ReasoningHistoryWireField {
     ReasoningContent,
 }
 
+/// Placement of a provider prompt-cache breakpoint.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CacheBreakpointStyle {
+    /// The route has no explicit request marker.
+    #[default]
+    None,
+    /// Put `cache_control` on the request object.
+    TopLevel,
+    /// Put `cache_control` on the final message content block.
+    LastBlock,
+}
+
+impl CacheBreakpointStyle {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::TopLevel => "top_level",
+            Self::LastBlock => "last_block",
+        }
+    }
+}
+
+/// Provider-visible replay policy for private assistant reasoning.
+///
+/// Reasoning is stripped unless a capability row explicitly opts into the
+/// provider's cryptographically bound or same-field continuation contract.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReasoningRoundTripPolicy {
+    /// Never send private reasoning back to the provider.
+    #[default]
+    Strip,
+    /// Replay only provider-signed opaque reasoning blocks.
+    EchoSigned,
+    /// Replay Harn's canonical reasoning text under the typed provider field.
+    EchoSameKey,
+}
+
+impl ReasoningRoundTripPolicy {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Strip => "strip",
+            Self::EchoSigned => "echo_signed",
+            Self::EchoSameKey => "echo_same_key",
+        }
+    }
+}
+
 impl ReasoningHistoryWireField {
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -558,7 +622,7 @@ pub struct Capabilities {
     /// the route has no model-specific floor and the wire-dialect default in
     /// [`crate::llm::cache_conformance::CacheControlProfile`] applies.
     pub prompt_cache_min_prefix_tokens: Option<u32>,
-    pub cache_breakpoint_style: String,
+    pub cache_breakpoint_style: CacheBreakpointStyle,
     pub vision: bool,
     pub audio: bool,
     pub pdf: bool,
@@ -598,6 +662,8 @@ pub struct Capabilities {
     pub vision_supported: bool,
     pub image_url_input_supported: bool,
     pub preserve_thinking: bool,
+    /// Typed provider-visible reasoning replay policy. Defaults to strip.
+    pub reasoning_round_trip: ReasoningRoundTripPolicy,
     /// Provider-specific wire field used to replay Harn's private reasoning
     /// on the preceding assistant turn. `None` preserves the privacy default:
     /// reasoning is never sent back to an OpenAI-compatible provider.
@@ -714,7 +780,7 @@ impl Default for Capabilities {
             prompt_caching: false,
             prompt_cache_ttls: Vec::new(),
             prompt_cache_min_prefix_tokens: None,
-            cache_breakpoint_style: "none".to_string(),
+            cache_breakpoint_style: CacheBreakpointStyle::None,
             vision: false,
             audio: false,
             pdf: false,
@@ -739,6 +805,7 @@ impl Default for Capabilities {
             vision_supported: false,
             image_url_input_supported: true,
             preserve_thinking: false,
+            reasoning_round_trip: ReasoningRoundTripPolicy::Strip,
             reasoning_history_wire_field: None,
             server_parser: "none".to_string(),
             honors_chat_template_kwargs: false,

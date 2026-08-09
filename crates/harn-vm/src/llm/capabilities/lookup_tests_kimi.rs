@@ -25,6 +25,10 @@ fn moonshot_kimi_k3_requires_max_effort_and_catalog_owned_reasoning_replay() {
             .map(|field| field.as_str()),
         Some("reasoning_content")
     );
+    assert_eq!(
+        caps.reasoning_round_trip,
+        super::ReasoningRoundTripPolicy::EchoSameKey
+    );
     assert!(!caps.temperature_supported);
     assert!(!caps.top_p_supported);
     assert!(!caps.frequency_penalty_supported);

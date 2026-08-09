@@ -115,6 +115,8 @@
 #                     may cache, but Harn has no explicit TTL request knob.
 #   cache_breakpoint_style:
 #                     explicit cache_control strategy: none, top_level, or last_block.
+#   reasoning_round_trip:
+#                     private reasoning replay: strip, echo_signed, or echo_same_key.
 #   vision          : whether Harn can send visual input blocks on this route.
 #   audio_supported : whether Harn can send audio input blocks on this route.
 #   pdf_supported   : whether Harn can send PDF/document input blocks on this route.
@@ -329,6 +331,8 @@ seed_supported = false
 frequency_penalty_supported = false
 presence_penalty_supported = false
 prompt_cache_ttls = ["5m", "1h"]
+cache_breakpoint_style = "top_level"
+reasoning_round_trip = "echo_signed"
 
 [provider_defaults.openai]
 batch_wire_format = "openai"
@@ -3141,6 +3145,7 @@ reasoning_effort_levels = ["max"]
 reasoning_none_supported = false
 reasoning_disable_supported = false
 reasoning_history_wire_field = "reasoning_content"
+reasoning_round_trip = "echo_same_key"
 temperature_supported = false
 top_p_supported = false
 frequency_penalty_supported = false

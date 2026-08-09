@@ -111,6 +111,8 @@
 #                     may cache, but Harn has no explicit TTL request knob.
 #   cache_breakpoint_style:
 #                     explicit cache_control strategy: none, top_level, or last_block.
+#   reasoning_round_trip:
+#                     private reasoning replay: strip, echo_signed, or echo_same_key.
 #   vision          : whether Harn can send visual input blocks on this route.
 #   audio_supported : whether Harn can send audio input blocks on this route.
 #   pdf_supported   : whether Harn can send PDF/document input blocks on this route.

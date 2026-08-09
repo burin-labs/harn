@@ -80,6 +80,32 @@ the complete run record. If a bundle has no embedded run record but does
 carry a replay fixture and transcript sections, import reconstructs a
 minimal replayable run record from those canonical sections.
 
+### Suspended workers
+
+Checkpoint a suspended worker when another machine or process must resume the
+same agent loop:
+
+```bash
+harn session checkpoint /path/to/worker.snapshot.json --out worker.bundle.json
+harn session import worker.bundle.json \
+  --out imported-run.json \
+  --worker-snapshot-dir worker-snapshots \
+  --json
+harn run --resume /path/reported/in/worker_snapshots/0/path
+```
+
+Import materializes a destination-local snapshot and rewrites only local
+snapshot references, including the snapshot's self-reference, suspension
+reference, and imported run metadata. The transcript itself is unchanged. Its
+messages and events therefore retain provider reasoning blocks, `llm_call`
+usage, and provider outcome facts. A self-suspending turn records those facts
+before its snapshot is written.
+
+The JSON import report contains each new path and a `resume_command`; callers
+should use that report instead of retaining the source-machine path. Once the
+bundle and destination snapshot exist, the source workspace can be removed.
+Resume does not depend on it.
+
 ## Fixtures
 
 Contract fixtures live under `spec/session-bundles/fixtures/`:

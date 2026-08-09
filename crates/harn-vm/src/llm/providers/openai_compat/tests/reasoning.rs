@@ -7,6 +7,45 @@ use crate::llm::providers::openai_compat::OpenAiCompatibleProvider;
 use serde_json::json;
 
 #[test]
+fn kimi_replays_canonical_reasoning_under_its_typed_wire_field() {
+    let mut payload = base_request_payload();
+    payload.provider = "moonshot".to_string();
+    payload.model = "moonshot/kimi-k3".to_string();
+    payload.messages = vec![json!({
+        "role": "assistant",
+        "content": "I will call the tool.",
+        "reasoning": "private continuation state",
+        "reasoning_content": "untrusted seeded value"
+    })];
+
+    let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+
+    assert_eq!(
+        body["messages"][0]["reasoning_content"],
+        "private continuation state"
+    );
+    assert!(body["messages"][0].get("reasoning").is_none());
+}
+
+#[test]
+fn default_openai_compatible_route_strips_reasoning_history() {
+    let mut payload = base_request_payload();
+    payload.provider = "openai".to_string();
+    payload.model = "gpt-4o".to_string();
+    payload.messages = vec![json!({
+        "role": "assistant",
+        "content": "Answer.",
+        "reasoning": "private continuation state",
+        "reasoning_content": "untrusted seeded value"
+    })];
+
+    let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+
+    assert!(body["messages"][0].get("reasoning").is_none());
+    assert!(body["messages"][0].get("reasoning_content").is_none());
+}
+
+#[test]
 fn openrouter_thinking_enabled_maps_to_reasoning_enabled() {
     let provider = OpenAiCompatibleProvider::new("openrouter".to_string());
     let mut payload = base_request_payload();

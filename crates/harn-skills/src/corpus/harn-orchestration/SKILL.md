@@ -43,6 +43,8 @@ deterministic verification, and [[harn-product-quality]] for product projections
 - Use deterministic gates before model judges.
 - Put resilience in a composable `llm_caller`.
 - Keep a stable session id for durable work.
+- Use `harness.agent` for open, snapshot, fork, compact, inject, and lifecycle
+  operations. Do not add a parallel ambient session API.
 - Treat stop, wait, stand-down, and pivot as lifecycle events.
 
 ## Triggers
@@ -65,6 +67,8 @@ deterministic verification, and [[harn-product-quality]] for product projections
 - Suspend cooperatively at a bounded turn or tool seam.
 - Graceful stop returns a typed handoff.
 - Resume from durable state with continuity context.
+- Use a session bundle for cross-compute handoff. Import rewrites local snapshot
+  paths while preserving transcript, reasoning, usage, and outcome facts.
 - Do not widen authority through delegation.
 
 ## Parallelism

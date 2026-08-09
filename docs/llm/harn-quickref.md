@@ -1258,6 +1258,7 @@ harness.stdio.log(response.canonical_text) // canonical replay form of a tagged 
 harness.stdio.log(response.usage.input_tokens)
 harness.stdio.log(response.usage.output_tokens)
 harness.stdio.log(response.outcome.kind)   // "complete" | "tool_use" | "truncated" | "refused" | "paused" | "empty"
+harness.stdio.log(response.blocks)         // canonical blocks; may contain private signed reasoning
 harness.stdio.log(response.logprobs)       // present when requested and returned
 ```
 
@@ -1265,6 +1266,11 @@ All call accounting lives under `usage` and the typed `outcome`
 classifies what the call produced — branch on `outcome`, never on the
 provider-native `stop_reason`. The full contract is `LlmResponse` from
 `std/llm/envelope`.
+
+`thinking` is the readable reasoning projection. `blocks` retains exact
+provider continuation material, including Anthropic signed `thinking` and
+opaque `redacted_thinking` blocks. Keep those blocks private and unmodified;
+the capability matrix decides whether they may be replayed to a route.
 
 ### `llm_call` options
 
@@ -1657,6 +1663,7 @@ const caps = harness.llm.provider_capabilities("anthropic", "claude-opus-4-7")
 //   supports_assistant_prefill: false,
 //   prefers_xml_tools: true,
 //   thinking_block_style: "thinking_blocks",
+//   reasoning_round_trip: "echo_signed",
 // }
 
 // `caps.tools` matches Harn's own tool gate: true when the route can call
@@ -1718,6 +1725,8 @@ set under `[provider_defaults.<name>]`:
 | `thinking_block_style` | string | Preferred thinking representation: `none`, `thinking_blocks`, `reasoning_summary`, or `inline`. |
 | `thinking_modes` | `[string]` | Supported script-facing modes: `enabled`, `adaptive`, `effort`. |
 | `reasoning_wire_format` | string | Non-standard OpenAI-compatible reasoning shape: `openrouter` or `enabled`. |
+| `reasoning_history_wire_field` | string | Typed OpenAI-compatible field used when a route requires same-key reasoning replay. |
+| `reasoning_round_trip` | string | Private reasoning replay policy: `strip` (default), `echo_signed`, or `echo_same_key`. |
 | `requires_completion_tokens` | bool | Use OpenAI `max_completion_tokens` instead of `max_tokens`. |
 | `reasoning_effort_supported` | bool | Provider/model accepts OpenAI `reasoning_effort`. |
 | `interleaved_thinking_supported` | bool | `thinking: true` can request Anthropic's interleaved-thinking beta header. |
@@ -2523,6 +2532,9 @@ iterations_completed}` to the parent. Lifecycle calls emit
 Top-level loops use the same shape: a root `agent_loop(harness, ...)` that parks
 returns `status: "suspended"` with `handle.snapshot_path`, and the CLI
 cold-restores it with `harn run --resume <snapshot_path>`.
+The snapshot records the suspending provider turn first, so its transcript
+contains the exact messages, reasoning, `llm_call` usage, and provider outcome
+needed by cross-compute resume.
 
 ```harn,ignore
 // Self-park mid-loop until a review approval lands or 30 minutes pass.

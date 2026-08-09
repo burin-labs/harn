@@ -514,6 +514,16 @@ pub fn __agent_loop_run(harness: Harness, message, session, initial_opts) {
               unwrap(await_parsed).reason,
             )
           }
+          // The await helper snapshots the session before it returns a
+          // suspended result. Record the provider turn first so the portable
+          // checkpoint carries its usage and outcome facts with the messages.
+          const await_totals = agent_session_record_usage(
+            harness.agent,
+            session.session_id,
+            llm_result,
+            turn_llm_opts,
+            iteration_index + 1,
+          )
           const await_result = if is_err(await_parsed) {
             await_parsed
           } else {
@@ -545,13 +555,6 @@ pub fn __agent_loop_run(harness: Harness, message, session, initial_opts) {
               session.session_id,
               "agent_await_resumption",
               __agent_loop_invalid_await_resumption_feedback(await_error),
-            )
-            const await_totals = agent_session_record_usage(
-              harness.agent,
-              session.session_id,
-              llm_result,
-              turn_llm_opts,
-              iteration_index + 1,
             )
             agent_emit_event(
               harness.agent,
@@ -602,13 +605,6 @@ pub fn __agent_loop_run(harness: Harness, message, session, initial_opts) {
             continue
           }
           suspend_result = unwrap(await_result)
-          const _totals = agent_session_record_usage(
-            harness.agent,
-            session.session_id,
-            llm_result,
-            turn_llm_opts,
-            iteration_index + 1,
-          )
           agent_emit_event(
             harness.agent,
             session.session_id,
@@ -622,7 +618,7 @@ pub fn __agent_loop_run(harness: Harness, message, session, initial_opts) {
                 llm_result,
                 len(tool_calls),
                 visible_text,
-                _totals,
+                await_totals,
                 loop_start_ms,
               ),
             },

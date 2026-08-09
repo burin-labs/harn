@@ -41,7 +41,7 @@ fn an_anthropic_content_block_with_no_handler_is_reported() {
     let response = json!({
         "content": [
             {"type": "text", "text": "here is the answer"},
-            {"type": "redacted_thinking", "data": "opaque-blob"},
+            {"type": "some_future_block", "data": "opaque-blob"},
         ],
         "usage": {"output_tokens": 12},
     });
@@ -51,7 +51,7 @@ fn an_anthropic_content_block_with_no_handler_is_reported() {
     let reported = details(&captured.boundary_failures());
     assert_eq!(reported.len(), 1, "got: {reported:?}");
     assert!(
-        reported[0].contains("redacted_thinking"),
+        reported[0].contains("some_future_block"),
         "the event must name the block type: {reported:?}",
     );
 }

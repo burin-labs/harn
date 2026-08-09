@@ -28,6 +28,8 @@ seed_supported = false
 frequency_penalty_supported = false
 presence_penalty_supported = false
 prompt_cache_ttls = ["5m", "1h"]
+cache_breakpoint_style = "top_level"
+reasoning_round_trip = "echo_signed"
 
 [provider_defaults.openai]
 batch_wire_format = "openai"

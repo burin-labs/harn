@@ -349,6 +349,19 @@ Use `effort` for intent. Use `thinking` only when a caller needs to choose the
 provider mechanism or budget explicitly. Provider capabilities decide how
 intent is lowered.
 
+`thinking` is the readable reasoning projection. `blocks` retains the exact
+provider continuation material when the provider requires it: Anthropic
+`thinking` blocks include their `signature`, and `redacted_thinking` blocks
+retain their opaque `data`. Treat those fields as private transcript data and
+do not render or edit them.
+
+Replay is capability-owned rather than a caller option. The resolved route's
+`reasoning_round_trip` policy is `strip` by default, `echo_signed` for native
+Anthropic routes, and `echo_same_key` for routes such as Moonshot Kimi K3 that
+require reasoning under the same response field. This keeps private reasoning
+off unrelated providers while preserving valid continuation on routes that
+require it.
+
 #### Tools
 
 | Key | Type | Meaning |

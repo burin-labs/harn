@@ -15,7 +15,10 @@ fn catalog_ids_inherit_upstream_model_capabilities() {
     let anthropic = lookup("vercel_ai_gateway", "vercel/anthropic/claude-haiku-4.5");
     assert!(anthropic.native_tools);
     assert!(anthropic.prompt_caching);
-    assert_eq!(anthropic.cache_breakpoint_style, "top_level");
+    assert_eq!(
+        anthropic.cache_breakpoint_style,
+        super::CacheBreakpointStyle::TopLevel
+    );
     assert_eq!(anthropic.structured_output.as_deref(), Some("tool_use"));
     assert!(anthropic.responses_api);
 
@@ -28,4 +31,31 @@ fn catalog_ids_inherit_upstream_model_capabilities() {
     assert!(gemini.pdf);
     assert!(gemini.responses_api);
     assert_eq!(gemini.preferred_tool_format.as_deref(), Some("native"));
+}
+
+#[test]
+fn openrouter_explicit_cache_routes_get_block_breakpoints() {
+    clear_user_overrides();
+    for model in [
+        "qwen/qwen3.6-plus",
+        "qwen/qwen3-coder-plus",
+        "qwen/qwen3-coder-flash",
+        "qwen/qwen3-max",
+        "qwen/qwen-plus",
+    ] {
+        let caps = lookup("openrouter", model);
+        assert!(caps.prompt_caching, "{model} should support prompt cache");
+        assert_eq!(
+            caps.cache_breakpoint_style,
+            super::CacheBreakpointStyle::LastBlock,
+            "{model} should request explicit content-block cache breakpoints",
+        );
+    }
+
+    let open_weight = lookup("openrouter", "qwen/qwen3.6-35b-a3b");
+    assert!(!open_weight.prompt_caching);
+    assert_eq!(
+        open_weight.cache_breakpoint_style,
+        super::CacheBreakpointStyle::None
+    );
 }
