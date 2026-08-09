@@ -1,5 +1,30 @@
 import { read_yaml } from "std/fs"
 
+fn checkout_boundary_errors(steps: list) -> list<string> {
+  let errors: list<string> = []
+  const package_checkout = steps.find({ step -> step?.name == "Checkout package repo" })
+  if package_checkout?.with?.path != "package" {
+    errors = errors + ["consumer package must be checked out below the workflow workspace"]
+  }
+  if package_checkout?.with?.ref != "$" + "{{ inputs.base }}" {
+    errors = errors + ["consumer checkout ancestry must be rooted at the declared PR base"]
+  }
+  if package_checkout?.with?.get("persist-credentials") != false {
+    errors = errors
+      + ["consumer checkout credentials must not escape the GitHub connector boundary"]
+  }
+  const runtime_checkout = steps.find(
+    { step -> step?.name == "Checkout Harn runtime orchestration" },
+  )
+  if runtime_checkout?.with?.path != ".harn-runtime" {
+    errors = errors + ["runtime orchestration must remain outside the consumer package checkout"]
+  }
+  if runtime_checkout?.with?.get("persist-credentials") != false {
+    errors = errors + ["runtime checkout credentials must not persist"]
+  }
+  return errors
+}
+
 fn bump_workflow_errors(workflow, text: string) -> list<string> {
   let errors: list<string> = []
   const inputs = workflow?.on?.workflow_call?.inputs ?? {}
@@ -10,16 +35,7 @@ fn bump_workflow_errors(workflow, text: string) -> list<string> {
     errors = errors + ["node-version must remain a typed reusable-workflow input"]
   }
   const steps = workflow?.jobs?.bump?.steps ?? []
-  const package_checkout = steps.find({ step -> step?.name == "Checkout package repo" })
-  if package_checkout?.with?.path != "package" {
-    errors = errors + ["consumer package must be checked out below the workflow workspace"]
-  }
-  const runtime_checkout = steps.find(
-    { step -> step?.name == "Checkout Harn runtime orchestration" },
-  )
-  if runtime_checkout?.with?.path != ".harn-runtime" {
-    errors = errors + ["runtime orchestration must remain outside the consumer package checkout"]
-  }
+  errors = errors + checkout_boundary_errors(steps)
   const node = steps.find({ step -> step?.name == "Install caller Node.js toolchain" })
   if node == nil || node?.if != "inputs.node-version != ''" {
     errors = errors + ["optional Node setup must be gated by node-version"]
