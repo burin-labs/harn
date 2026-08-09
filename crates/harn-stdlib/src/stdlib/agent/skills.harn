@@ -695,7 +695,7 @@ fn __fresh_skill_projection_inputs(agent: HarnessAgent, session, opts, registry)
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_skills_preview(agent: HarnessAgent, opts) {
+pub fn agent_skills_preview(agent: HarnessAgent, opts: dict) -> dict {
   const registry = __skills_registry(opts)
   if registry == nil || len(__skills_entries(registry)) == 0 {
     return opts
