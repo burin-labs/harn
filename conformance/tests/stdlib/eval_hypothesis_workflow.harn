@@ -1,0 +1,116 @@
+import {
+  HypothesisLedgerSnapshot,
+  compile_experiment_intent,
+  hypothesis_ledger_snapshot,
+  hypothesis_workflow,
+} from "std/eval/hypothesis"
+import {
+  hypothesis_fixture_context,
+  hypothesis_fixture_intent,
+} from "./hypothesis_fixture_lib.harn"
+
+pipeline default(harness: Harness, _task) {
+  const compiled = compile_experiment_intent(
+    hypothesis_fixture_intent(),
+    hypothesis_fixture_context(),
+  )
+  if compiled.plan == nil || compiled.plan.kind != "registered_experiment" {
+    throw "workflow fixture did not compile to a registered experiment"
+  }
+  const plan = compiled.plan
+  const before = hypothesis_ledger_snapshot(harness.obs, plan.hypothesis_id)
+  require before.integrity.scope == "retained_topic_chain"
+    && before.integrity.verified
+    && before.integrity.scanned_event_count
+    == 0
+    && before.integrity.last_hash
+    == nil
+    && before.snapshot.event_count
+    == 0,
+    "the typed snapshot reports the empty retained chain and aggregate"
+  const current = before.snapshot
+  const legacy_v1_snapshot = {
+    schema: "harn.hypothesis.snapshot.v1",
+    hypothesis_id: current.hypothesis_id,
+    event_count: current.event_count,
+    latest_cursor: current.latest_cursor,
+    plan: current.plan,
+    active_run_id: current.active_run_id,
+    approval_status: current.approval_status,
+    approval_id: current.approval_id,
+    run_state: current.run_state,
+    decision: current.decision,
+    observation_count: current.observation_count,
+    observed_arms: current.observed_arms,
+    receipt_ids: current.receipt_ids,
+    drift: current.drift,
+    relationships: current.relationships,
+    invalidations: current.invalidations,
+    regressions: current.regressions,
+    total_spend_usd: current.total_spend_usd,
+    total_compute_ms: current.total_compute_ms,
+    total_tokens: current.total_tokens,
+    total_api_calls: current.total_api_calls,
+    telemetry_degradations: current.telemetry_degradations,
+  }
+  require schema_is(legacy_v1_snapshot, HypothesisLedgerSnapshot),
+    "a v1 snapshot without completion still satisfies the public wire contract"
+  const started = hypothesis_workflow(
+    harness.obs,
+    {kind: "start", plan: plan, run_id: "workflow-run-1"},
+  )
+  require started.kind == "adapter_unavailable"
+    && started.required_adapter
+    == "hypothesis.operation"
+    && started.state
+    == "unregistered",
+    "start returns the typed native-adapter blocker"
+  const inspected = hypothesis_workflow(
+    harness.obs,
+    {kind: "inspect", hypothesis_id: plan.hypothesis_id},
+  )
+  require inspected.kind == "inspection"
+    && inspected.state
+    == "unregistered"
+    && inspected.ledger.snapshot.event_count
+    == 0,
+    "inspect returns the same single-pass empty read model"
+  const resumed = hypothesis_workflow(
+    harness.obs,
+    {kind: "resume", hypothesis_id: plan.hypothesis_id},
+  )
+  require resumed.kind == "not_actionable" && resumed.reason == "not_started",
+    "resume refuses an aggregate that was never started"
+  const stood_down = hypothesis_workflow(
+    harness.obs,
+    {kind: "stand_down", hypothesis_id: plan.hypothesis_id, reason: "operator request"},
+  )
+  require stood_down.kind == "not_actionable" && stood_down.reason == "not_started",
+    "stand_down refuses an aggregate that was never started"
+  const observe_only = compile_experiment_intent(
+    hypothesis_fixture_intent()
+      + {
+      requested_lane: "non_experimental_research",
+      requested_evidence: "observational",
+      intervention: nil,
+      comparator: nil,
+      assignment_unit: nil,
+      population_id: nil,
+      outcome_ids: [],
+    },
+    hypothesis_fixture_context(),
+  )
+  if observe_only.plan == nil || observe_only.plan.kind != "observe_only" {
+    throw "observe-only workflow fixture did not compile"
+  }
+  const observe_start = hypothesis_workflow(
+    harness.obs,
+    {kind: "start", plan: observe_only.plan, run_id: "observe-only-run"},
+  )
+  require observe_start.kind == "not_actionable" && observe_start.reason == "observe_only",
+    "observe-only plans remain non-executable instead of requesting an adapter"
+  const after = hypothesis_ledger_snapshot(harness.obs, plan.hypothesis_id)
+  require after.integrity.scanned_event_count == 0 && after.snapshot.event_count == 0,
+    "adapter-unavailable and non-actionable workflow requests append no lifecycle events"
+  harness.stdio.println("hypothesis-workflow-ok")
+}

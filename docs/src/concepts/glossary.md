@@ -158,6 +158,11 @@ edit of accumulated evidence.
 **Decision.** A typed statistical result derived from registered evidence and a
 frozen policy. It does not itself mutate a product default.
 
+**Hypothesis workflow.** A read-first state machine over the canonical
+hypothesis ledger. It inspects current state and classifies start, resume, and
+stand-down requests. Without a registered native operation adapter, a mutating
+request returns `adapter_unavailable` and records no lifecycle event.
+
 **Promotion proposal.** A decision-bound request for a host-owned product
 change. Approval and application are separate events with separate receipts.
 

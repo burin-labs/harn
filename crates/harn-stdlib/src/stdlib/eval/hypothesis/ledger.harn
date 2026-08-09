@@ -19,6 +19,7 @@ import {
   HypothesisLedgerEvent,
   HypothesisLedgerRecord,
   HypothesisLedgerSnapshot,
+  HypothesisLedgerSnapshotRead,
   HypothesisObservationRecorded,
   HypothesisPlanRegistered,
   HypothesisRegressionObserved,
@@ -136,15 +137,83 @@ fn __validate_decision_admission(
   if plan.kind != "registered_experiment" || snapshot.run_state != "completed" {
     throw "hypothesis ledger: a terminal decision requires a completed registered experiment"
   }
-  if decision.elapsed_ms > plan.design.budget.max_wall_clock_ms {
+  if snapshot.completion == nil {
+    throw "hypothesis ledger: a terminal decision requires a typed completion reason"
+  }
+  const completion = snapshot.completion
+  if completion.kind == "wall_clock" {
+    if decision.elapsed_ms != completion.elapsed_ms
+      || completion.elapsed_ms
+      < plan.design.budget
+      .max_wall_clock_ms {
+      throw "hypothesis ledger: wall-clock exhaustion does not match the registered ceiling"
+    }
+  } else if decision.elapsed_ms > plan.design.budget.max_wall_clock_ms {
     throw "hypothesis ledger: decision exceeds the registered wall-clock budget"
   }
   const expected = decide_experiment(
     plan.registration,
-    {observations: observations, phase_spend_usd: snapshot.total_spend_usd, budget_spent: true},
+    {
+      observations: observations,
+      phase_spend_usd: snapshot.total_spend_usd,
+      budget_spent: completion.kind != "statistical",
+    },
   )
   if __fingerprint(decision.decision) != __fingerprint(expected) {
     throw "hypothesis ledger: decision is not the canonical result of the registered evidence"
+  }
+}
+
+fn __max_trials_exhausted(plan: HypothesisPlan, snapshot: HypothesisLedgerSnapshot) -> bool {
+  if plan.kind != "registered_experiment" {
+    return false
+  }
+  const expected = len(plan.registration.candidates)
+    * len(plan.registration.case_set.cases)
+    * plan.registration.budget.max_trials_per_case
+  return snapshot.observation_count == expected
+}
+
+fn __validate_completion(
+  plan: HypothesisPlan,
+  snapshot: HypothesisLedgerSnapshot,
+  observations: list<PairedObservation>,
+  transition: HypothesisRunTransition,
+) {
+  if transition.state != "completed" {
+    if transition.completion != nil {
+      throw "hypothesis ledger: only a completed run may carry completion evidence"
+    }
+    return
+  }
+  if transition.completion == nil {
+    throw "hypothesis ledger: a completed run requires typed completion evidence"
+  }
+  const completion = transition.completion
+  if completion.kind == "statistical" {
+    const decision = decide_experiment(
+      plan.registration,
+      {observations: observations, phase_spend_usd: snapshot.total_spend_usd, budget_spent: false},
+    )
+    if decision.verdict == "RUNNING" {
+      throw "hypothesis ledger: statistical completion requires a terminal canonical decision"
+    }
+    return
+  }
+  if completion.kind == "max_trials" {
+    if !__max_trials_exhausted(plan, snapshot) {
+      throw "hypothesis ledger: max-trial completion requires every registered trial cell"
+    }
+    return
+  }
+  __non_empty(completion.receipt_id, "completion receipt_id")
+  if !transition.receipt_ids.contains(completion.receipt_id) {
+    throw "hypothesis ledger: native completion receipt must be bound to the lifecycle event"
+  }
+  if completion.kind == "wall_clock"
+    && completion.elapsed_ms
+    < plan.design.budget.max_wall_clock_ms {
+    throw "hypothesis ledger: wall-clock completion precedes the registered ceiling"
   }
 }
 
@@ -227,6 +296,7 @@ fn __validate_admission(
     if !__transition_allowed(snapshot.run_state, content.payload.state) {
       throw "hypothesis ledger: invalid run-state transition"
     }
+    __validate_completion(plan, snapshot, observations, content.payload)
     return
   }
   if content.payload.kind == "observation_recorded" {
@@ -433,6 +503,35 @@ pub fn hypothesis_ledger_read(
   return __read_verified_snapshot(obs, hypothesis_id).records
 }
 
+/**
+ * Read and project one hypothesis in a single pass.
+ *
+ * Integrity metadata covers the retained global hypothesis topic from its
+ * retained genesis through the reported head. It does not prove that an
+ * external checkpoint retained an earlier head.
+ *
+ * @effects: [state.read@harness.runtime]
+ * @errors: [backend, validation]
+ * @api_stability: experimental
+ */
+pub fn hypothesis_ledger_snapshot(
+  obs: HarnessObs,
+  hypothesis_id: string,
+) -> HypothesisLedgerSnapshotRead {
+  __non_empty(hypothesis_id, "hypothesis_id")
+  const state = __read_verified_snapshot(obs, hypothesis_id)
+  return {
+    schema: "harn.hypothesis.ledger_snapshot.v1",
+    integrity: {
+      scope: "retained_topic_chain",
+      verified: true,
+      scanned_event_count: state.scanned_event_count,
+      last_hash: state.last_hash,
+    },
+    snapshot: state.snapshot,
+  }
+}
+
 fn __read_verified_snapshot(obs: HarnessObs, hypothesis_id: string) {
   const retained = obs.hypothesis_event_snapshot(hypothesis_id)
   if !retained.verified {
@@ -447,7 +546,12 @@ fn __read_verified_snapshot(obs: HarnessObs, hypothesis_id: string) {
     records = records + [__decode_record(raw)]
   }
   const folded = __fold_records(records, hypothesis_id)
-  return folded + {records: records, last_hash: retained.last_hash}
+  return folded
+    + {
+    records: records,
+    last_hash: retained.last_hash,
+    scanned_event_count: retained.scanned_event_count,
+  }
 }
 
 fn __empty_snapshot(hypothesis_id: string) -> HypothesisLedgerSnapshot {
@@ -461,6 +565,7 @@ fn __empty_snapshot(hypothesis_id: string) -> HypothesisLedgerSnapshot {
     approval_status: nil,
     approval_id: nil,
     run_state: nil,
+    completion: nil,
     decision: nil,
     observation_count: 0,
     observed_arms: [],
@@ -498,6 +603,7 @@ fn __apply_record(
       + {
       active_run_id: snapshot.active_run_id ?? record.event.content.run_id,
       run_state: transition.state,
+      completion: transition.completion,
     }
   }
   if payload.kind == "observation_recorded" {
@@ -529,6 +635,7 @@ fn __apply_record(
       + {
       invalidations: snapshot.invalidations + [invalidated],
       run_state: "invalid",
+      completion: nil,
       decision: nil,
     }
   }

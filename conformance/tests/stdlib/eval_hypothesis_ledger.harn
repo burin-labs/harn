@@ -242,49 +242,94 @@ fn verify_bounded_observation_scale() {
   )
   records = append_checked(records, running, plan.fingerprint)
   let predecessor = running.fingerprint
-  for trial_index in range(0, 32) {
-    const assignment = plan_assignments(
-      plan.registration,
-      "a",
-      trial_index,
-      {host: "host-a", time_slot: "scale-slot"},
-    )
-    const observation = {
-      arm_id: "candidate",
-      case_id: "a",
-      trial_index: trial_index,
-      metrics: [{id: "success", baseline: 0.0, treatment: 1.0}],
-      baseline_assignment: realize_assignment(assignment, "baseline", assignment.blocking_values),
-      candidate_assignment: realize_assignment(assignment, "candidate", assignment.blocking_values),
+  for case_id in ["a", "b"] {
+    for trial_index in range(0, 32) {
+      const assignment = plan_assignments(
+        plan.registration,
+        case_id,
+        trial_index,
+        {host: "host-a", time_slot: "scale-slot"},
+      )
+      const observation = {
+        arm_id: "candidate",
+        case_id: case_id,
+        trial_index: trial_index,
+        metrics: [{id: "success", baseline: 0.0, treatment: 1.0}],
+        baseline_assignment: realize_assignment(assignment, "baseline", assignment.blocking_values),
+        candidate_assignment: realize_assignment(
+          assignment,
+          "candidate",
+          assignment.blocking_values,
+        ),
+      }
+      const event_id = "scale-observation-" + case_id + "-" + to_string(trial_index)
+      const observed = hypothesis_event(
+        content(
+          event_id,
+          hypothesis_id,
+          plan.plan_id,
+          "scale-run",
+          predecessor,
+          {
+            kind: "observation_recorded",
+            observation_id: event_id,
+            observation: observation,
+            spend_delta_usd: 0.0,
+            compute_delta_ms: 0,
+            token_delta: 0,
+            api_call_delta: 0,
+            telemetry_status: "observed",
+            capability_degradations: [],
+          },
+        ),
+      )
+      records = records + [record(len(records) + 1, observed, plan.fingerprint)]
+      predecessor = observed.fingerprint
     }
-    const observed = hypothesis_event(
-      content(
-        "scale-observation-" + to_string(trial_index),
-        hypothesis_id,
-        plan.plan_id,
-        "scale-run",
-        predecessor,
-        {
-          kind: "observation_recorded",
-          observation_id: "scale-observation-" + to_string(trial_index),
-          observation: observation,
-          spend_delta_usd: 0.0,
-          compute_delta_ms: 0,
-          token_delta: 0,
-          api_call_delta: 0,
-          telemetry_status: "observed",
-          capability_degradations: [],
-        },
-      ),
-    )
-    records = append_checked(records, observed, plan.fingerprint)
-    predecessor = observed.fingerprint
   }
   const snapshot = hypothesis_ledger_project(records, hypothesis_id)
-  require snapshot.observation_count == 32 && len(snapshot.receipt_ids) == 64,
+  require snapshot.observation_count == 64 && len(snapshot.receipt_ids) == 128,
     "the bounded maximum observation history projects each unique assignment receipt"
   require snapshot.observed_arms == ["baseline", "candidate"],
     "scaled projection preserves stable first-seen arm ordering"
+  const statistical = hypothesis_event(
+    content(
+      "scale-statistical-completion",
+      hypothesis_id,
+      plan.plan_id,
+      "scale-run",
+      predecessor,
+      {
+        kind: "run_transition",
+        state: "completed",
+        reason: "canonical decision reached a terminal verdict",
+        receipt_ids: [],
+        completion: {kind: "statistical"},
+      },
+    ),
+  )
+  const statistical_records = append_checked(records, statistical, plan.fingerprint)
+  require len(statistical_records) == len(records) + 1,
+    "a non-RUNNING decision computed without exhaustion admits statistical completion"
+  const exhausted = hypothesis_event(
+    content(
+      "scale-max-trials-completion",
+      hypothesis_id,
+      plan.plan_id,
+      "scale-run",
+      predecessor,
+      {
+        kind: "run_transition",
+        state: "completed",
+        reason: "every registered trial cell was observed",
+        receipt_ids: [],
+        completion: {kind: "max_trials"},
+      },
+    ),
+  )
+  const exhausted_records = append_checked(records, exhausted, plan.fingerprint)
+  require len(exhausted_records) == len(records) + 1,
+    "exact candidate-by-case-by-trial coverage admits max-trial exhaustion"
 }
 
 pipeline default(harness: Harness, _task) {
@@ -407,6 +452,168 @@ pipeline default(harness: Harness, _task) {
     },
   ),
     "an immutable arm/case/trial cell is admitted once even under a new observation id"
+  const premature_statistical = hypothesis_event(
+    content(
+      "event-premature-statistical",
+      hypothesis_id,
+      plan.plan_id,
+      "run-1",
+      observed.fingerprint,
+      {
+        kind: "run_transition",
+        state: "completed",
+        reason: "one observation is not terminal",
+        receipt_ids: [],
+        completion: {kind: "statistical"},
+      },
+    ),
+  )
+  require is_err(
+    try {
+      append_checked(records, premature_statistical, plan.fingerprint)
+    },
+  ),
+    "statistical completion cannot turn a RUNNING canonical decision terminal"
+  const premature_max_trials = hypothesis_event(
+    content(
+      "event-premature-max-trials",
+      hypothesis_id,
+      plan.plan_id,
+      "run-1",
+      observed.fingerprint,
+      {
+        kind: "run_transition",
+        state: "completed",
+        reason: "trial cells remain",
+        receipt_ids: [],
+        completion: {kind: "max_trials"},
+      },
+    ),
+  )
+  require is_err(
+    try {
+      append_checked(records, premature_max_trials, plan.fingerprint)
+    },
+  ),
+    "max-trial completion requires exact registered cell coverage"
+  const unbound_budget = hypothesis_event(
+    content(
+      "event-unbound-budget",
+      hypothesis_id,
+      plan.plan_id,
+      "run-1",
+      observed.fingerprint,
+      {
+        kind: "run_transition",
+        state: "completed",
+        reason: "native budget refusal",
+        receipt_ids: [],
+        completion: {
+          kind: "native_budget",
+          resource: "api_calls",
+          receipt_id: "receipt-budget-stop",
+        },
+      },
+    ),
+  )
+  require is_err(
+    try {
+      append_checked(records, unbound_budget, plan.fingerprint)
+    },
+  ),
+    "native budget exhaustion requires its receipt in the fingerprinted lifecycle payload"
+  const early_wall_clock = hypothesis_event(
+    content(
+      "event-early-wall-clock",
+      hypothesis_id,
+      plan.plan_id,
+      "run-1",
+      observed.fingerprint,
+      {
+        kind: "run_transition",
+        state: "completed",
+        reason: "wall clock",
+        receipt_ids: ["receipt-wall-stop"],
+        completion: {
+          kind: "wall_clock",
+          elapsed_ms: plan.design.budget.max_wall_clock_ms - 1,
+          receipt_id: "receipt-wall-stop",
+        },
+      },
+    ),
+  )
+  require is_err(
+    try {
+      append_checked(records, early_wall_clock, plan.fingerprint)
+    },
+  ),
+    "wall-clock exhaustion cannot precede the registered ceiling"
+  const exact_wall_clock = hypothesis_event(
+    content(
+      "event-exact-wall-clock",
+      hypothesis_id,
+      plan.plan_id,
+      "run-1",
+      observed.fingerprint,
+      {
+        kind: "run_transition",
+        state: "completed",
+        reason: "native wall-clock deadline fired",
+        receipt_ids: ["receipt-wall-stop"],
+        completion: {
+          kind: "wall_clock",
+          elapsed_ms: plan.design.budget.max_wall_clock_ms,
+          receipt_id: "receipt-wall-stop",
+        },
+      },
+    ),
+  )
+  const wall_records = append_checked(records, exact_wall_clock, plan.fingerprint)
+  const wall_decision_value = decide_experiment(
+    plan.registration,
+    {observations: [observation], phase_spend_usd: 0.02, budget_spent: true},
+  )
+  const wall_decision = hypothesis_event(
+    content(
+      "event-wall-decision",
+      hypothesis_id,
+      plan.plan_id,
+      "run-1",
+      exact_wall_clock.fingerprint,
+      {
+        kind: "decision_recorded",
+        decision: wall_decision_value,
+        summary: "The wall-clock ceiling ended an unresolved run.",
+        belief_before: nil,
+        belief_after: nil,
+        decision_utility: nil,
+        elapsed_ms: plan.design.budget.max_wall_clock_ms,
+        can_conclude: ["the registered wall-clock ceiling was reached"],
+        cannot_conclude: ["the candidate is better"],
+        follow_up: nil,
+      },
+    ),
+  )
+  const wall_decision_records = append_checked(wall_records, wall_decision, plan.fingerprint)
+  require len(wall_decision_records) == len(wall_records) + 1,
+    "an exact natively attested wall-clock completion admits its matching decision"
+  const wrong_wall_elapsed = hypothesis_event(
+    content(
+      "event-wall-decision-wrong-elapsed",
+      hypothesis_id,
+      plan.plan_id,
+      "run-1",
+      exact_wall_clock.fingerprint,
+      wall_decision.content.payload
+        + {elapsed_ms: plan.design.budget.max_wall_clock_ms + 1},
+    ),
+  )
+  require is_err(
+    try {
+      append_checked(wall_records, wrong_wall_elapsed, plan.fingerprint)
+    },
+  ),
+    "a wall-clock decision must preserve the elapsed time in the attested completion"
   const completed = hypothesis_event(
     content(
       "event-completed",
@@ -414,7 +621,17 @@ pipeline default(harness: Harness, _task) {
       plan.plan_id,
       "run-1",
       observed.fingerprint,
-      {kind: "run_transition", state: "completed", reason: "budget", receipt_ids: []},
+      {
+        kind: "run_transition",
+        state: "completed",
+        reason: "native adapter refused another API call",
+        receipt_ids: ["receipt-budget-stop"],
+        completion: {
+          kind: "native_budget",
+          resource: "api_calls",
+          receipt_id: "receipt-budget-stop",
+        },
+      },
     ),
   )
   records = append_checked(records, completed, plan.fingerprint)
@@ -422,6 +639,39 @@ pipeline default(harness: Harness, _task) {
     plan.registration,
     {observations: [observation], phase_spend_usd: 0.02, budget_spent: true},
   )
+  const running_decision = decide_experiment(
+    plan.registration,
+    {observations: [observation], phase_spend_usd: 0.02, budget_spent: false},
+  )
+  require running_decision.verdict == "RUNNING" && canonical_decision.verdict != "RUNNING",
+    "the decision fixture distinguishes unspent evidence from native budget exhaustion"
+  const wrong_budget_decision = hypothesis_event(
+    content(
+      "event-decision-budget-not-spent",
+      hypothesis_id,
+      plan.plan_id,
+      "run-1",
+      completed.fingerprint,
+      {
+        kind: "decision_recorded",
+        decision: running_decision,
+        summary: "This decision incorrectly ignores attested exhaustion.",
+        belief_before: nil,
+        belief_after: nil,
+        decision_utility: nil,
+        elapsed_ms: 100,
+        can_conclude: [],
+        cannot_conclude: [],
+        follow_up: nil,
+      },
+    ),
+  )
+  require is_err(
+    try {
+      append_checked(records, wrong_budget_decision, plan.fingerprint)
+    },
+  ),
+    "native budget completion recomputes the decision with exhaustion enabled"
   const decision = hypothesis_event(
     content(
       "event-decision",

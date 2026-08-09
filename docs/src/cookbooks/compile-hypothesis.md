@@ -107,8 +107,8 @@ ran.
 ## Record lifecycle facts once
 
 Create typed events with `hypothesis_event`, append them with
-`hypothesis_ledger_append`, and derive current state with
-`hypothesis_ledger_project`. The ledger is a typed projection over Harn's event
+`hypothesis_ledger_append`, and derive current state with the single-pass
+`hypothesis_ledger_snapshot`. The ledger is a typed projection over Harn's event
 log, so it inherits global ordering, integrity hashes, and SQLite, file, or
 memory persistence. The topic is reserved: generic event-log writes fail, and
 the specialized append requires a non-serializable authority proof minted by a
@@ -118,8 +118,7 @@ registered native adapter for that exact event.
 import {
   hypothesis_event,
   hypothesis_ledger_append,
-  hypothesis_ledger_project,
-  hypothesis_ledger_read,
+  hypothesis_ledger_snapshot,
 } from "std/eval/hypothesis"
 
 const event = hypothesis_event({
@@ -151,10 +150,10 @@ const replay = hypothesis_ledger_append(harness.obs, event, proof)
 require first.cursor == replay.cursor && !replay.inserted,
   "a retry must return the original durable event"
 
-const snapshot = hypothesis_ledger_project(
-  hypothesis_ledger_read(harness.obs, hypothesis_id),
-  hypothesis_id,
-)
+const read = hypothesis_ledger_snapshot(harness.obs, hypothesis_id)
+require read.integrity.scope == "retained_topic_chain" && read.integrity.verified,
+  "the retained topic chain must verify before projection"
+const snapshot = read.snapshot
 ```
 
 The example assumes the host registered `hypothesis.attest_event` and gave this
@@ -191,6 +190,23 @@ closed. Record realized paired observations, execution drift, decisions,
 invalidations, regressions, and follow-up relationships as events; do not update
 a parallel JSON document. Reports and host dashboards should project the ledger
 snapshot rather than becoming independent sources of truth.
+
+A `completed` run transition carries typed completion evidence. Use
+`{kind: "statistical"}` only when `decide_experiment` is already non-`RUNNING`
+with `budget_spent: false`. Use `{kind: "max_trials"}` only after every frozen
+candidate, case, and trial cell has an observation. Native budget and wall-clock
+completion carry a non-empty receipt ID in the fingerprinted transition and in
+its `receipt_ids`; the native lifecycle attestation binds that exact event. The
+ledger validates the event and its attestation. It does not query or validate
+the host's external receipt store.
+
+Use `hypothesis_workflow(harness.obs, {kind: "inspect", hypothesis_id: id})`
+for the same typed read and report projection. `start`, `resume`, and
+`stand_down` are state-checked requests, not an executor. This slice provides no
+native operation adapter, so mutating requests return
+`kind: "adapter_unavailable"` before any lifecycle event is appended. Call the
+existing `design_hypothesis` planner separately when natural-language design is
+needed.
 
 ## Verify the boundary you claim
 
