@@ -221,7 +221,7 @@ hook_events! {
     PreDrain                { kind: Session },
     PostDrain               { kind: Session },
     OnDrainDecision         { kind: Session },
-    /// Fired by `__agent_loop_checkpoint(kind, ...)` at every safe
+    /// Fired by `agent_stage(agent, session_id, stage, input?)` at every safe
     /// injection seam in the agent loop. Pattern-match on `payload.kind`
     /// to subscribe to specific seams (e.g. `kind=="pre_tool_dispatch"`)
     /// or use `*` to observe every checkpoint pass.

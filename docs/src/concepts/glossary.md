@@ -204,8 +204,8 @@ agent terminates). The full seam catalog lives in
 
 **Checkpoint.** A safe point in the loop body where the runtime checks for
 pending steering injections. Every drain in the agent loop and the daemon
-idle path routes through `__agent_loop_checkpoint(kind)`; observers
-subscribe via `register_checkpoint_hook(kinds, handler)`. See
+idle path routes through the typed `agent_stage` seam; observers subscribe via
+`harness.agent.register_checkpoint_hook(kinds, handler)`. See
 [Steering seams](./steering-seams.md) for the canonical catalog.
 
 ## Things Harn doesn't use as nouns

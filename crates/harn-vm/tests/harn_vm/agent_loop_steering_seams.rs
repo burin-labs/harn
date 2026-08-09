@@ -1,4 +1,4 @@
-//! Integration coverage for the `__agent_loop_checkpoint` seam catalog
+//! Integration coverage for the typed `agent_stage` seam catalog
 //! (harn#2211) and the audit-only mode rename (harn#2212).
 //!
 //! Race-window coverage (#2211) — a host injects "STOP, do not push"
