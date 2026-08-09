@@ -376,6 +376,14 @@ exit 2
 SH
 chmod +x "$fake_tools/cargo"
 
+cat > "$fake_tools/cargo-nextest" <<'SH'
+#!/usr/bin/env bash
+# The audit invokes nextest through `make test`; this executable only proves
+# that prerequisite discovery reaches the hermetic test toolchain first.
+exit 0
+SH
+chmod +x "$fake_tools/cargo-nextest"
+
 cat > "$fake_tools/make" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -666,7 +674,7 @@ if PATH="$no_npm_path" command -v npm >/dev/null 2>&1; then
 fi
 assert_residual_prerequisite_fails \
   missing-npm \
-  "error: npm (Node.js) is required for the release" \
+  "error: release audit prerequisites missing: npm" \
   "$no_npm_path"
 
 assert_residual_lane_failure() {

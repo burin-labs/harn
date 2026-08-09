@@ -32,6 +32,10 @@ pub mod agent_sessions;
 pub mod agent_transcript_budget;
 pub mod atomic_io;
 pub mod autonomy;
+#[cfg(feature = "cloud-aws")]
+pub(crate) mod aws_sigv4;
+#[cfg(not(feature = "cloud-aws"))]
+#[path = "aws_sigv4_disabled.rs"]
 pub(crate) mod aws_sigv4;
 pub mod boundary;
 pub mod bridge;

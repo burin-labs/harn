@@ -78,6 +78,70 @@ pub fn optional_dep_feature_contract_violations_from_text(
     }
     violations = violations + ort_download_tls_violations(path, ort)
   }
+  if path == "crates/harn-vm/Cargo.toml" {
+    const features = doc.get("features")
+    const defaults = features.get("default")
+    const full = features.get("full")
+    if type_of(defaults) != "list"
+      || defaults.count != 1
+      || defaults[0] != "full" {
+      violations = violations
+        + [
+        path + ": default VM capabilities must be owned by the single `full` feature",
+      ]
+    }
+    const required = [
+      "postgres",
+      "sqlite",
+      "content",
+      "compression",
+      "http-compression",
+      "cloud-aws",
+      "native-keyring",
+    ]
+    if type_of(full) != "list" || full.count != required.count {
+      violations = violations
+        + [
+        path + ": `full` must enumerate the canonical distributed VM capability families",
+      ]
+    } else {
+      for feature in required {
+        if !full.contains(feature) {
+          violations = violations
+            + [
+            path + ": `full` is missing VM capability family `" + feature + "`",
+          ]
+        }
+      }
+    }
+  }
+  if path == "crates/harn-cli/Cargo.toml" {
+    const vm = doc.get("dependencies").get("harn-vm")
+    const vm_features = vm.get("features")
+    if type_of(vm.get("default-features")) != "bool"
+      || vm.get("default-features")
+      || type_of(vm_features) != "list"
+      || vm_features.count != 2
+      || !vm_features.contains("full")
+      || !vm_features.contains("otel") {
+      violations = violations
+        + [
+        path
+          + ": distributed CLI must explicitly select the canonical `full` VM surface plus `otel`",
+      ]
+    }
+  }
+  if path == "crates/harn-test-runner/Cargo.toml" {
+    const vm = doc.get("dependencies").get("harn-vm")
+    if type_of(vm.get("default-features")) != "bool"
+      || vm.get("default-features")
+      || vm.get("features") != nil {
+      violations = violations
+        + [
+        path + ": test engine must keep the VM capability closure lean and explicit",
+      ]
+    }
+  }
   return violations
 }
 

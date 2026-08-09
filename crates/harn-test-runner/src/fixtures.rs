@@ -6,15 +6,15 @@ use harn_lexer::Span;
 use harn_parser::{Attribute, Node, SNode};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum FixtureScope {
+pub enum FixtureScope {
     File,
     Case,
 }
 
 #[derive(Clone, Debug)]
-pub(super) struct TestFixture {
-    pub(super) name: String,
-    pub(super) scope: FixtureScope,
+pub struct TestFixture {
+    pub name: String,
+    pub scope: FixtureScope,
 }
 
 pub(super) type FixtureRegistry = BTreeMap<String, TestFixture>;
