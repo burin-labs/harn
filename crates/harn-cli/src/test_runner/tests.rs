@@ -627,6 +627,19 @@ fn resolve_workers_returns_one_when_not_parallel() {
 }
 
 #[test]
+fn timing_budgets_own_a_serial_measurement_lane() {
+    let mut opts = RunOptions::new(1_000);
+    opts.parallel = true;
+    opts.jobs = Some(8);
+    opts.max_execute_ms = Some(500);
+    assert_eq!(resolve_workers(&opts), 1);
+
+    opts.max_execute_ms = None;
+    opts.max_test_ms = Some(750);
+    assert_eq!(resolve_workers(&opts), 1);
+}
+
+#[test]
 fn memory_worker_cap_backs_off_under_pressure() {
     // ~4 GiB available, 1 GiB reserved, 1 GiB/worker -> 3 workers.
     assert_eq!(memory_worker_cap(4096, 1024, 1024), 3);

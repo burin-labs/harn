@@ -81,6 +81,10 @@ once into the suite's shared immutable prepared-module cache before any
 per-test clock starts; each test still instantiates fresh module state and runs
 module initialization in its own VM. Use `--max-test-ms` when total wall time
 is a performance requirement, or `--max-execute-ms` to ratchet execution cost.
+Either measurement budget makes the runner use one worker even when
+`--parallel` or `--jobs` is present, so co-scheduled test VMs cannot change the
+verdict. Use the ordinary `--timeout` safety rail for bounded parallel
+correctness suites, and measure performance in a host-isolated job.
 Conformance and other non-user targets continue to apply `--timeout` to their
 whole test case or subprocess.
 

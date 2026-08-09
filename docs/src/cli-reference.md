@@ -563,8 +563,8 @@ test still receives a fresh VM, module state, and persistence root.
 | `--timeout <ms>` | Per-test timeout in milliseconds (default: 30000). For user suites, setup and shared import-graph compilation are measured separately and do not consume the pipeline-execution budget; other targets bound their test case or subprocess |
 | `--approve-risky <operation>` | Explicitly authorize one exact risky stdlib operation for user-test execution; repeatable (for example `git.push`) |
 | `--trusted-host-dispatch` | Compile the test and its private import graph for a Rust-host-selected route boundary, exposing privileged wire builtins such as `host_call`. Ordinary tests remain unprivileged. |
-| `--max-test-ms <ms>` | Fail a passing test whose total setup + execution wall time exceeds the budget |
-| `--max-execute-ms <ms>` | Fail a passing test whose measured execution phase exceeds the performance budget |
+| `--max-test-ms <ms>` | Fail a passing test whose total setup + execution wall time exceeds the budget; forces a single measurement worker |
+| `--max-execute-ms <ms>` | Fail a passing test whose measured execution phase exceeds the performance budget; forces a single measurement worker |
 | `--record` | Record LLM responses to `.harn-fixtures/` |
 | `--replay` | Replay recorded LLM responses |
 | `--coverage` | Print per-file line coverage for executed Harn source (user test suites only) |
