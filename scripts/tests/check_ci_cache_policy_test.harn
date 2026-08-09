@@ -9,6 +9,7 @@ import {
   release_warm_cache_path_policy_errors,
   release_warm_cache_path_policy_parse,
   release_warm_cache_prune_errors,
+  rust_cache_refresh_concurrency_errors,
   setup_harn_cache_action_errors,
   windows_shared_cache_errors,
 } from "../check_ci_cache_policy"
@@ -46,6 +47,21 @@ pipeline test_ci_concurrency_rejects_shared_main_ref(harness: Harness, task) {
     },
   }
   assert_eq(len(ci_workflow_concurrency_errors(invalid)), 1)
+}
+
+@test
+pipeline test_cache_refresh_serializes_mutation_without_cancelling_active_save(
+  harness: Harness,
+  task,
+) {
+  const job = {concurrency: {group: "harn-ci-rust-cache-refresh", "cancel-in-progress": false}}
+  assert_eq(rust_cache_refresh_concurrency_errors(job), [])
+}
+
+@test
+pipeline test_cache_refresh_rejects_cross_commit_race(harness: Harness, task) {
+  const job = {concurrency: {group: "per-commit", "cancel-in-progress": true}}
+  assert_eq(len(rust_cache_refresh_concurrency_errors(job)), 2)
 }
 
 fn native_source_key() -> string {
