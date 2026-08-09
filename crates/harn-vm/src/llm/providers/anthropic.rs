@@ -430,14 +430,6 @@ impl LlmProvider for AnthropicProvider {
         "anthropic"
     }
 
-    fn is_anthropic_style(&self) -> bool {
-        true
-    }
-
-    fn supports_cache(&self) -> bool {
-        true
-    }
-
     fn supports_thinking(&self, model: &str) -> bool {
         !crate::llm::capabilities::lookup(self.name(), model)
             .thinking_modes
@@ -462,14 +454,6 @@ impl LlmProviderChat for AnthropicProvider {
 }
 
 impl AnthropicProvider {
-    pub(crate) fn classify_http_error(
-        status: reqwest::StatusCode,
-        retry_after: Option<&str>,
-        body: &str,
-    ) -> crate::llm::api::LlmErrorInfo {
-        crate::llm::api::classify_provider_http_error("anthropic", status, retry_after, body)
-    }
-
     /// Build the Anthropic-style request body.
     pub(crate) fn build_request_body(opts: &LlmRequestPayload) -> serde_json::Value {
         let caps = crate::llm::capabilities::lookup(&opts.provider, &opts.model);
@@ -688,11 +672,12 @@ impl AnthropicProvider {
         request: &LlmRequestPayload,
         delta_tx: Option<DeltaSender>,
     ) -> Result<LlmResult, VmError> {
+        let dialect = crate::llm::api::DialectContract::for_request(request);
         crate::llm::api::vm_call_llm_api_with_body(
             request,
             delta_tx,
-            Self::build_request_body(request),
-            crate::llm::capabilities::WireDialect::Anthropic,
+            dialect.build_request_body(request),
+            dialect,
         )
         .await
     }
@@ -2122,7 +2107,12 @@ mod tests {
 
     #[test]
     fn classifies_anthropic_overloaded_error_as_transient_server_error() {
-        let info = AnthropicProvider::classify_http_error(
+        let info = crate::llm::api::DialectContract::new(
+            crate::llm::capabilities::WireDialect::Anthropic,
+            None,
+        )
+        .classify_http_error(
+            "anthropic",
             reqwest::StatusCode::from_u16(529).unwrap(),
             None,
             r#"{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}"#,
@@ -2133,7 +2123,12 @@ mod tests {
 
     #[test]
     fn classifies_anthropic_auth_error_as_terminal_auth_failure() {
-        let info = AnthropicProvider::classify_http_error(
+        let info = crate::llm::api::DialectContract::new(
+            crate::llm::capabilities::WireDialect::Anthropic,
+            None,
+        )
+        .classify_http_error(
+            "anthropic",
             reqwest::StatusCode::UNAUTHORIZED,
             None,
             r#"{"type":"error","error":{"type":"authentication_error","message":"bad key"}}"#,

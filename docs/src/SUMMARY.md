@@ -299,6 +299,7 @@
 - [Host boundary](./host-boundary.md)
 - [Process sandboxing](./sandboxing.md)
 - [OpenTrustGraph v0 spec](./spec/open-trust-graph/v0.md)
+- [LLM dialect ownership](./dev/llm-dialect-contract.md)
 - [Agent loop runtime notes](./dev/agent-loops.md)
 - [Evidence-aware repair loop](./dev/repair-diagnostics.md)
 

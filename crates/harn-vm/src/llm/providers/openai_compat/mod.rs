@@ -98,15 +98,6 @@ impl OpenAiCompatibleProvider {
             provider_name: name,
         }
     }
-
-    pub(crate) fn classify_http_error(
-        provider: &str,
-        status: reqwest::StatusCode,
-        retry_after: Option<&str>,
-        body: &str,
-    ) -> crate::llm::api::LlmErrorInfo {
-        crate::llm::api::classify_provider_http_error(provider, status, retry_after, body)
-    }
 }
 
 impl LlmProvider for OpenAiCompatibleProvider {
@@ -154,10 +145,7 @@ impl LlmProviderChat for OpenAiCompatibleProvider {
 
 impl OpenAiCompatibleProvider {
     /// Build the OpenAI-compatible request body.
-    pub(crate) fn build_request_body(
-        opts: &LlmRequestPayload,
-        force_string_content: bool,
-    ) -> serde_json::Value {
+    pub(crate) fn build_request_body(opts: &LlmRequestPayload) -> serde_json::Value {
         let caps = crate::llm::capabilities::lookup(&opts.provider, &opts.model);
         // Models that reserve `<tool_call>` as a special token collapse when
         // they meet it as instructional/wrapper text. Remap the colliding
@@ -192,7 +180,7 @@ impl OpenAiCompatibleProvider {
                 "content": prefill,
             }));
         }
-        msgs = crate::llm::api::normalize_openai_style_messages(msgs, force_string_content);
+        msgs = crate::llm::api::normalize_openai_style_messages(msgs, false);
         if has_native_tools {
             msgs = drop_orphan_tool_result_messages(msgs);
         }
@@ -428,7 +416,8 @@ impl OpenAiCompatibleProvider {
             return crate::llm::providers::OpenAiResponsesProvider::call(request, delta_tx).await;
         }
 
-        let mut body = Self::build_request_body(request, false);
+        let dialect = crate::llm::api::DialectContract::for_request(request);
+        let mut body = dialect.build_request_body(request);
         self.transform_request(&mut body);
 
         // For reserved-tool-call-token models the prompt was sent with the
@@ -445,13 +434,8 @@ impl OpenAiCompatibleProvider {
         } else {
             delta_tx
         };
-        let result = crate::llm::api::vm_call_llm_api_with_body(
-            request,
-            delta_tx,
-            body,
-            crate::llm::capabilities::WireDialect::OpenAiCompat,
-        )
-        .await?;
+        let result =
+            crate::llm::api::vm_call_llm_api_with_body(request, delta_tx, body, dialect).await?;
         Ok(result)
     }
 }

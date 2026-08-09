@@ -16,6 +16,8 @@ use super::*;
 use crate::agent_events::{
     clear_session_sinks, register_sink, AgentEvent, AgentEventSink, ToolCallStatus,
 };
+use crate::llm::api::DialectContract;
+use crate::llm::capabilities::WireDialect;
 use std::sync::{Arc, Mutex};
 
 struct CapturingSink {
@@ -69,7 +71,14 @@ async fn drive_result(
         reader,
         if is_anthropic { "anthropic" } else { "openai" },
         "test-model",
-        is_anthropic,
+        DialectContract::new(
+            if is_anthropic {
+                WireDialect::Anthropic
+            } else {
+                WireDialect::OpenAiCompat
+            },
+            None,
+        ),
         delta_tx,
         Some(session_id),
         None,
@@ -1140,7 +1149,7 @@ async fn no_session_id_means_no_streaming_events() {
         reader,
         "anthropic",
         "test-model",
-        true,
+        DialectContract::new(WireDialect::Anthropic, None),
         delta_tx,
         None,
         None,

@@ -1,5 +1,5 @@
 use super::parse_llm_response;
-use crate::llm::capabilities::should_use_responses_transport;
+use crate::llm::capabilities::{should_use_responses_transport, WireDialect};
 
 #[test]
 fn openai_parser_preserves_partial_usage_in_telemetry() {
@@ -12,8 +12,14 @@ fn openai_parser_preserves_partial_usage_in_telemetry() {
         "usage": {"prompt_tokens": 314, "completion_tokens": 27}
     });
 
-    let result =
-        parse_llm_response(&response, "vllm", "qwen3.6", false, false).expect("parser succeeds");
+    let result = parse_llm_response(
+        &response,
+        "vllm",
+        "qwen3.6",
+        WireDialect::OpenAiCompat,
+        false,
+    )
+    .expect("parser succeeds");
     assert_eq!(
         result.telemetry.source,
         crate::llm::api::telemetry_source::OPENAI_USAGE
@@ -45,7 +51,7 @@ fn openai_parser_preserves_gateway_routing_metadata() {
         &response,
         "vercel_ai_gateway",
         "openai/gpt-5.4-nano",
-        false,
+        WireDialect::OpenAiCompat,
         false,
     )
     .expect("gateway response parses");

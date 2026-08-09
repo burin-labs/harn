@@ -146,6 +146,23 @@ pub(crate) async fn err_for_non_success(provider: &str, response: reqwest::Respo
     VmError::Thrown(VmValue::String(arcstr::ArcStr::from(message)))
 }
 
+/// Consume and classify a non-success response through the resolved dialect
+/// contract. Provider transports use this once request/response semantics have
+/// moved behind [`super::DialectContract`].
+pub(crate) async fn err_for_non_success_with_dialect(
+    dialect: super::DialectContract,
+    provider: &str,
+    response: reqwest::Response,
+) -> VmError {
+    let status = response.status();
+    let retry_after = retry_after_header(response.headers());
+    let body = response.text().await.unwrap_or_default();
+    let message = dialect
+        .classify_http_error(provider, status, retry_after.as_deref(), &body)
+        .message;
+    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(message)))
+}
+
 fn sanitize_provider_error_body(body: &str) -> String {
     let summary =
         structured_provider_error_summary(body).unwrap_or_else(|| body.trim().to_string());

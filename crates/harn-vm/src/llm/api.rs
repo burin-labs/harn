@@ -7,6 +7,7 @@
 mod auth;
 mod completion;
 mod context_window;
+mod dialect;
 mod errors;
 mod ollama;
 mod openai_normalize;
@@ -31,9 +32,11 @@ use super::mock::{
 pub(crate) use auth::apply_auth_headers;
 pub(crate) use completion::vm_call_completion_full;
 pub use context_window::fetch_provider_max_context;
+pub(crate) use dialect::{DialectContract, StreamProtocol};
 pub(crate) use errors::{
-    classify_llm_error, classify_provider_http_error, err_for_non_success, retry_after_header,
-    LlmErrorInfo, LlmErrorKind, LlmErrorReason,
+    classify_llm_error, classify_provider_http_error, err_for_non_success,
+    err_for_non_success_with_dialect, retry_after_header, LlmErrorInfo, LlmErrorKind,
+    LlmErrorReason,
 };
 pub(crate) use ollama::apply_ollama_runtime_settings;
 pub(crate) use ollama::ollama_unload_grace_duration_from_env;
@@ -50,9 +53,10 @@ pub(crate) use options::{
     PromptCacheTtl, ReasoningEffort, ReminderLifecycleEmission, ThinkingConfig, ToolSearchConfig,
     ToolSearchMode, ToolSearchVariant,
 };
+#[cfg(test)]
+pub(crate) use response::parse_llm_response as parse_llm_response_for_provider;
 pub(crate) use response::{
-    extract_cache_read_tokens, extract_cache_write_tokens,
-    parse_llm_response as parse_llm_response_for_provider, parse_openai_responses_response,
+    extract_cache_read_tokens, extract_cache_write_tokens, parse_openai_responses_response,
 };
 #[cfg(test)]
 pub(crate) use result::test_text_projection;

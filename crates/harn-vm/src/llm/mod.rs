@@ -929,7 +929,6 @@ mod tests {
             model: "mock".to_string(),
             max_tokens: 128,
             output_format: super::api::OutputFormat::JsonObject,
-            response_format: Some("json".to_string()),
             output_schema: Some(serde_json::json!({
                 "type": "object",
                 "properties": {

@@ -26,7 +26,7 @@ fn forced_native_tool_search_keeps_extensions_for_unknown_proxy_model() {
     ]);
     let payload = LlmRequestPayload::from(&opts);
 
-    let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
 
     assert_eq!(body["tools"][0]["type"], "tool_search");
     assert_eq!(body["tools"][1]["namespace"], "ops");
@@ -101,7 +101,7 @@ fn build_request_body_strips_storage_only_message_fields() {
         }),
     ];
     let payload = LlmRequestPayload::from(&opts);
-    let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
     let messages = body["messages"].as_array().expect("messages array");
     for message in messages {
         for key in [
@@ -194,7 +194,7 @@ fn moonshot_kimi_k3_replays_only_harn_owned_assistant_reasoning() {
     ];
 
     let moonshot_payload = LlmRequestPayload::from(&opts);
-    let body = OpenAiCompatibleProvider::build_request_body(&moonshot_payload, false);
+    let body = OpenAiCompatibleProvider::build_request_body(&moonshot_payload);
     let messages = body["messages"].as_array().expect("messages array");
     assert!(messages[0].get("reasoning_content").is_none());
     let assistant = &messages[1];
@@ -209,7 +209,7 @@ fn moonshot_kimi_k3_replays_only_harn_owned_assistant_reasoning() {
     opts.provider = "openai".to_string();
     opts.model = "gpt-4.1".to_string();
     let generic_payload = LlmRequestPayload::from(&opts);
-    let generic_body = OpenAiCompatibleProvider::build_request_body(&generic_payload, false);
+    let generic_body = OpenAiCompatibleProvider::build_request_body(&generic_payload);
     assert!(generic_body["messages"][1]
         .get("reasoning_content")
         .is_none());
@@ -242,7 +242,7 @@ fn moonshot_kimi_k3_builder_projects_admitted_generation_knobs() {
     opts.tool_choice = Some(json!("required"));
 
     let payload = LlmRequestPayload::from(&opts);
-    let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
 
     assert_eq!(body["model"], "kimi-k3");
     assert_eq!(body["max_completion_tokens"], 128);

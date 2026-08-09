@@ -534,8 +534,6 @@ mod tests {
             presence_penalty: None,
             fast: false,
             output_format: OutputFormat::Text,
-            response_format: None,
-            json_schema: None,
             output_schema: None,
             schema_stream_abort: false,
             thinking: ThinkingConfig::Disabled,

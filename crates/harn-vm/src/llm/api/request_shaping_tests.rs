@@ -15,7 +15,7 @@ fn openai_compat_prefill_appends_assistant_and_sets_chat_template_kwargs() {
     opts.model = "Qwen/Qwen3.5-Coder-32B".to_string();
     opts.prefill = Some("<done>##DONE##</done>".to_string());
     let payload = LlmRequestPayload::from(&opts);
-    let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
 
     let messages = body["messages"].as_array().expect("messages array");
     let last = messages.last().expect("at least one message");
@@ -33,7 +33,7 @@ fn openai_compat_without_prefill_omits_continue_flags() {
 
     let opts = base_opts("openai");
     let payload = LlmRequestPayload::from(&opts);
-    let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
 
     let kw = &body["chat_template_kwargs"];
     assert!(kw.get("add_generation_prompt").is_none());

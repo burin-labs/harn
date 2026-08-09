@@ -1692,6 +1692,12 @@ Additional helpers:
   `harn.toml`.
 - `harness.llm.provider_capabilities_clear()` — revert to the shipped defaults.
 
+`message_wire_format` and `live_endpoint_family` resolve one wire contract for
+the full call. Harn uses it for request building, stream decoding, response
+parsing, and error classification; a response header cannot select a different
+parser. Custom proxy rows should declare the format their endpoint actually
+speaks.
+
 Rule schema (per `[[provider.<name>]]` entry). Shared defaults can also be
 set under `[provider_defaults.<name>]`:
 

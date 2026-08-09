@@ -993,8 +993,6 @@ aws_secret_access_key = dev-secret
             presence_penalty: None,
             fast: false,
             output_format: crate::llm::api::OutputFormat::Text,
-            response_format: None,
-            json_schema: None,
             output_schema: None,
             schema_stream_abort: false,
             thinking: ThinkingConfig::Disabled,

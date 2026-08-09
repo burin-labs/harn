@@ -11,7 +11,9 @@
 //! the test stays deterministic and offline.
 use super::sse::consume_sse_lines;
 use super::*;
+use crate::llm::api::DialectContract;
 use crate::llm::api::StreamSchemaWatch;
+use crate::llm::capabilities::WireDialect;
 use crate::llm::trace::{peek_agent_trace, reset_agent_trace_state, AgentTraceEvent};
 use crate::value::ErrorCategory;
 use crate::{install_active_metrics_registry, MetricsRegistry};
@@ -57,7 +59,7 @@ async fn openai_stream_aborts_on_impossible_property_type() {
         reader,
         "openai",
         "gpt-test",
-        false,
+        DialectContract::new(WireDialect::OpenAiCompat, None),
         delta_tx,
         None,
         Some(watch),

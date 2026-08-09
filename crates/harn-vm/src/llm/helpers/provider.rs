@@ -370,7 +370,7 @@ pub(crate) struct ResolvedProvider {
 impl ResolvedProvider {
     pub fn resolve(provider: &str) -> ResolvedProvider {
         let pdef = crate::llm_config::provider_config(provider);
-        let is_anthropic_style = pdef
+        let uses_anthropic_endpoint = pdef
             .as_ref()
             .map(|p| p.chat_endpoint.contains("/messages"))
             .unwrap_or_else(|| {
@@ -378,7 +378,7 @@ impl ResolvedProvider {
                     .message_wire_format
                     .is_anthropic()
             });
-        let (default_base, default_endpoint) = if is_anthropic_style {
+        let (default_base, default_endpoint) = if uses_anthropic_endpoint {
             ("https://api.anthropic.com/v1", "/messages")
         } else {
             ("https://api.openai.com/v1", "/chat/completions")

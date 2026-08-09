@@ -287,10 +287,8 @@ pub(crate) fn extract_llm_options(
         enforce_capability_gates,
     )?;
 
-    // The single `output` contract key. The parsed format is the one
-    // producer of every internal structured-output field: the legacy
-    // response_format / json_schema mirrors are derived here (single
-    // producer) purely for the provider layer, and die with it in W5.
+    // The single `output` contract key. Providers lower this typed value
+    // directly; there is no response-format/schema mirror to drift.
     let parsed_output = parse_output_option(options.as_ref())?;
     let output_format = parsed_output.format;
     if enforce_capability_gates {
@@ -298,12 +296,6 @@ pub(crate) fn extract_llm_options(
     }
     let output_schema = output_format.schema().cloned();
     let output_validation = parsed_output.validation;
-    let response_format = if output_format.is_structured() {
-        Some("json".to_string())
-    } else {
-        None
-    };
-    let json_schema = output_schema.clone();
     // Stream-abort defaults to true whenever a schema is in play, so callers
     // that expect structured output get the early-abort win automatically.
     // `output: {schema, stream_abort: false}` opts out (relying on
@@ -769,8 +761,6 @@ pub(crate) fn extract_llm_options(
         portable_option_intent,
         fast,
         output_format,
-        response_format,
-        json_schema,
         output_schema,
         output_validation,
         schema_stream_abort,

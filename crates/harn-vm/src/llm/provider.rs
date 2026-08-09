@@ -93,16 +93,6 @@ pub(crate) trait LlmProvider {
     /// Provider name (e.g. "anthropic", "openai", "ollama", "mock").
     fn name(&self) -> &str;
 
-    /// Whether this provider uses Anthropic-style messages API (vs OpenAI-style).
-    fn is_anthropic_style(&self) -> bool {
-        false
-    }
-
-    /// Whether this provider supports prompt caching.
-    fn supports_cache(&self) -> bool {
-        false
-    }
-
     /// Whether this provider/model supports any thinking mode.
     fn supports_thinking(&self, model: &str) -> bool {
         !super::capabilities::lookup(self.name(), model)

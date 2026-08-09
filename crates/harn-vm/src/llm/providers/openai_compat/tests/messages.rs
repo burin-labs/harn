@@ -80,7 +80,7 @@ fn strict_provider_defers_feedback_until_after_tool_result() {
         json!({"role": "tool", "tool_call_id": "call_001", "content": "fn main() {}"}),
     ];
 
-    let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
     let messages = body["messages"].as_array().expect("messages array");
     let roles = messages
         .iter()
@@ -119,7 +119,7 @@ fn strict_provider_keeps_parallel_tool_results_adjacent() {
         json!({"role": "tool", "tool_call_id": "call_001", "content": "a"}),
     ];
 
-    let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
     let messages = body["messages"].as_array().expect("messages array");
     let roles = messages
         .iter()
@@ -165,7 +165,7 @@ fn native_route_drops_orphan_tool_result_messages() {
         json!({"role": "user", "content": "continue"}),
     ];
 
-    let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
     let messages = body["messages"].as_array().expect("messages array");
     let roles = messages
         .iter()
@@ -210,7 +210,7 @@ fn single_tool_call_text_route_strips_native_tool_history_metadata() {
         json!({"role": "tool", "tool_call_id": "call_001", "name": "read", "content": "a"}),
     ];
 
-    let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
     assert!(body.get("parallel_tool_calls").is_none());
     let messages = body["messages"].as_array().expect("messages array");
     assert_eq!(messages[1]["role"], "assistant");
@@ -268,7 +268,7 @@ fn single_tool_call_native_route_splits_parallel_tool_history() {
         json!({"role": "tool", "tool_call_id": "call_002", "content": "b"}),
     ];
 
-    let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
     assert_eq!(body["parallel_tool_calls"], false);
     let messages = body["messages"].as_array().expect("messages array");
     let roles = messages
@@ -319,7 +319,7 @@ fn lenient_provider_preserves_interleaved_tool_feedback_order() {
         json!({"role": "tool", "tool_call_id": "call_001", "content": "fn main() {}"}),
     ];
 
-    let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
     let messages = body["messages"].as_array().expect("messages array");
     let roles = messages
         .iter()
