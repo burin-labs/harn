@@ -141,22 +141,23 @@ impl NativeKeyring {
 }
 
 fn platform_store() -> Result<Arc<CredentialStore>, NativeKeyringError> {
-    #[cfg(target_os = "macos")]
+    #[cfg(all(feature = "native-keyring", target_os = "macos"))]
     {
         let store: Arc<CredentialStore> = apple_native_keyring_store::keychain::Store::new()?;
         return Ok(store);
     }
-    #[cfg(target_os = "ios")]
+    #[cfg(all(feature = "native-keyring", target_os = "ios"))]
     {
         let store: Arc<CredentialStore> = apple_native_keyring_store::protected::Store::new()?;
         return Ok(store);
     }
-    #[cfg(target_os = "windows")]
+    #[cfg(all(feature = "native-keyring", target_os = "windows"))]
     {
         let store: Arc<CredentialStore> = windows_native_keyring_store::Store::new()?;
         return Ok(store);
     }
     #[cfg(all(
+        feature = "native-keyring",
         unix,
         not(any(target_os = "macos", target_os = "ios", target_os = "android"))
     ))]

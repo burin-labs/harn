@@ -833,55 +833,6 @@ fn select_shard_cases_balances_by_historical_duration() {
     assert_eq!(names_two, vec!["test_mid", "test_small_a"]);
 }
 
-#[test]
-fn resource_gate_serializes_same_group() {
-    // Deterministic, in-process: while one permit for a group is held, a
-    // second acquire for the SAME group cannot proceed; releasing frees it.
-    // (Previously this used two threads + `thread::sleep` to coax an
-    // ordering, which was both flaky and ~60ms of wall-clock per run.)
-    let gate = ResourceGate::new(4);
-    let g_a = gate.acquire(1, Some("login"));
-    assert!(
-        gate.try_acquire(1, Some("login")).is_none(),
-        "second acquire of a busy group must not proceed",
-    );
-    drop(g_a);
-    assert!(
-        gate.try_acquire(1, Some("login")).is_some(),
-        "group should be free once the holder releases",
-    );
-}
-
-#[test]
-fn resource_gate_allows_independent_groups_in_parallel() {
-    // Holding one group must never block an unrelated group, as long as
-    // permits remain. No threads needed — `try_acquire` proves it directly.
-    let gate = ResourceGate::new(4);
-    let _guard_a = gate.acquire(1, Some("alpha"));
-    assert!(
-        gate.try_acquire(1, Some("beta")).is_some(),
-        "an unrelated group must acquire without blocking",
-    );
-}
-
-#[test]
-fn resource_gate_caps_heavy_weight_at_capacity() {
-    // A test that asks for more than the pool size must still be
-    // schedulable (weight is capped to capacity) rather than deadlocking,
-    // and while it holds the whole pool no other task can acquire.
-    let gate = ResourceGate::new(2);
-    let g = gate.acquire(99, None);
-    assert!(
-        gate.try_acquire(1, None).is_none(),
-        "pool is fully consumed; a single-weight task must wait",
-    );
-    drop(g);
-    assert!(
-        gate.try_acquire(1, None).is_some(),
-        "permit becomes available once the heavy holder releases",
-    );
-}
-
 #[tokio::test]
 async fn parallel_scheduler_runs_heavy_tests_without_oversubscribing() {
     // Heavy(2) should never run concurrently with another test when
@@ -1340,20 +1291,6 @@ async fn fail_fast_discovery_error_prevents_case_execution() {
 
     assert_eq!(summary.total, 1);
     assert_eq!(summary.results[0].name, "<file error>");
-}
-
-#[test]
-fn fail_fast_parallel_claim_refuses_queued_case_after_cancellation() {
-    let source = Arc::new("pipeline test_one(task) {}".to_string());
-    let program = Arc::new(parse_program(&source).unwrap());
-    let cases =
-        extract_cases_from_program(Path::new("test_one.harn"), &source, &program, None, 2).unwrap();
-    let queue = Mutex::new(cases);
-    let cancelled = AtomicBool::new(true);
-
-    assert!(claim_next_case(&queue, &cancelled, true).is_none());
-    assert_eq!(queue.lock().unwrap().len(), 1, "case must remain unclaimed");
-    assert!(claim_next_case(&queue, &cancelled, false).is_some());
 }
 
 #[tokio::test]

@@ -9,9 +9,9 @@ use harn_parser::const_eval::{const_eval, ConstEnv, ConstValue};
 use harn_parser::{Attribute, Node, Parser, SNode, TypeExpr};
 use harn_vm::VmValue;
 
-use super::{fixtures, TestCase, TestFixture};
+use crate::{fixtures, TestCase, TestFixture};
 
-pub(super) fn parse_program(source: &str) -> Result<Vec<SNode>, String> {
+pub fn parse_program(source: &str) -> Result<Vec<SNode>, String> {
     let mut lexer = Lexer::new(source);
     let tokens = lexer.tokenize().map_err(|error| format!("{error}"))?;
     Parser::new(tokens)
@@ -19,7 +19,7 @@ pub(super) fn parse_program(source: &str) -> Result<Vec<SNode>, String> {
         .map_err(|error| format!("{error}"))
 }
 
-pub(super) fn extract_cases_from_program(
+pub fn extract_cases_from_program(
     file: &Path,
     source: &Arc<String>,
     program: &Arc<Vec<SNode>>,
@@ -81,7 +81,7 @@ pub(super) fn extract_cases_from_program(
     Ok(cases)
 }
 
-pub(super) fn seed_imported_enum_candidates(file: &Path, source: &str, cases: &mut [TestCase]) {
+pub fn seed_imported_enum_candidates(file: &Path, source: &str, cases: &mut [TestCase]) {
     if cases.is_empty() || !harn_parser::visit::contains_identifier_enum_pattern(&cases[0].program)
     {
         return;

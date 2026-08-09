@@ -2,7 +2,7 @@
 
 use serde::Serialize;
 
-use crate::test_timing::DurationSummary;
+use crate::timing::DurationSummary;
 
 #[derive(Clone, Debug, Serialize)]
 pub struct TestResult {
@@ -94,20 +94,23 @@ pub struct AggregateTimings {
 }
 
 #[derive(Clone, Copy, Debug, Default)]
-pub(super) struct SuiteModulePreparation {
+#[doc(hidden)]
+pub struct SuiteModulePreparation {
     pub duration_ms: u64,
     pub modules: harn_vm::ModulePhaseStats,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
-pub(super) struct SuiteCallablePreparation {
+#[doc(hidden)]
+pub struct SuiteCallablePreparation {
     pub duration_ms: u64,
     pub files: usize,
     pub entries: usize,
 }
 
 impl AggregateTimings {
-    pub(super) fn from_results(
+    #[doc(hidden)]
+    pub fn from_results(
         collection_ms: u64,
         module_preparation: SuiteModulePreparation,
         callable_preparation: SuiteCallablePreparation,
@@ -144,7 +147,8 @@ impl TestResult {
     /// Emit a one-line phase breakdown to stderr. Driven by `--diagnose`
     /// / `HARN_TEST_DIAGNOSE=1`. The format is intentionally
     /// machine-readable so downstream eval pipelines can grep it.
-    pub(super) fn emit_diagnose(&self) {
+    #[doc(hidden)]
+    pub fn emit_diagnose(&self) {
         let outcome = if self.passed { "ok" } else { "FAIL" };
         let phases = self
             .phases

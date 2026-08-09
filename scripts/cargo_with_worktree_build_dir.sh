@@ -2,8 +2,18 @@
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+workspace="$(cd "$script_dir/.." && pwd -P)"
 # shellcheck source=scripts/lib/cargo_env.sh
 source "$script_dir/lib/cargo_env.sh"
+
+# Make compiler-object identity independent of the disposable worktree's
+# absolute path. `dev_setup.sh` projects the same contract through Cargo's
+# generated config, but the wrapper is also used before setup and in lean
+# source checkouts. Failing open there made a shared 24 GiB sccache report
+# effectively zero Rust hits across worktrees while appearing healthy.
+if [[ -z "${SCCACHE_BASEDIRS:-}" ]]; then
+  export SCCACHE_BASEDIRS="$workspace"
+fi
 
 if [[ -z "${CARGO_TARGET_DIR:-}" ]]; then
   CARGO_TARGET_DIR="$(harn_cargo_metadata_target_dir)"
@@ -35,7 +45,6 @@ if [[ -n "${HARN_CARGO_LEASE_RUNNER:-}" ]]; then
     exit 1
   fi
 
-  workspace="$(cd "$script_dir/.." && pwd -P)"
   lease_args=(
     host lease run cargo
     --owner "$lease_owner"

@@ -4,7 +4,7 @@ use std::sync::Mutex;
 
 use serde::Serialize;
 
-use super::reporting::SuiteModulePreparation;
+use crate::reporting::SuiteModulePreparation;
 
 /// Reusable runtime state for repeated user-test runs.
 ///
@@ -70,16 +70,15 @@ impl TestRunSession {
         }
     }
 
-    pub(super) fn prepared_module_cache(
-        &self,
-        worker_index: usize,
-    ) -> harn_vm::PreparedModuleCache {
+    #[doc(hidden)]
+    pub fn prepared_module_cache(&self, worker_index: usize) -> harn_vm::PreparedModuleCache {
         let mut workers = self.workers.lock().unwrap();
         *workers = (*workers).max(worker_index.saturating_add(1));
         self.prepared_module_cache.clone()
     }
 
-    pub(super) fn prepare_import_graphs(
+    #[doc(hidden)]
+    pub fn prepare_import_graphs(
         &self,
         roots: impl IntoIterator<Item = (PathBuf, bool)>,
     ) -> SuiteModulePreparation {
@@ -120,13 +119,15 @@ impl TestRunSession {
         }
     }
 
-    pub(super) fn record_callable_preparation(&self, files: usize, entries: usize) {
+    #[doc(hidden)]
+    pub fn record_callable_preparation(&self, files: usize, entries: usize) {
         let mut totals = self.callable_preparations.lock().unwrap();
         totals.0 = totals.0.saturating_add(files);
         totals.1 = totals.1.saturating_add(entries);
     }
 
-    pub(super) fn stdio_available(&self) -> bool {
+    #[doc(hidden)]
+    pub fn stdio_available(&self) -> bool {
         self.stdio_available
     }
 }

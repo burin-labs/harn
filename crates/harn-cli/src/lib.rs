@@ -30,7 +30,9 @@ pub mod skill_provenance;
 mod source_exec;
 pub mod test_report;
 pub mod test_runner;
-pub mod test_timing;
+pub mod test_timing {
+    pub use harn_test_runner::DurationSummary;
+}
 #[doc(hidden)]
 pub mod tests;
 mod typecheck_imports;

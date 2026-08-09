@@ -46,6 +46,7 @@ harn-parser = { path = "../harn-parser", version = "=0.10.65" }
 harn-ir = { path = "../harn-ir", version = "=0.10.65" }
 harn-kernel = { path = "../harn-kernel", version = "=0.10.65" }
 harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.65" }
+harn-test-runner = { path = "../harn-test-runner", version = "=0.10.65" }
 # testbench-wasi (wasmtime + the cranelift JIT, ~36 crates, ~8.6 MB of the
 # stripped binary plus real compile time) is NOT enabled by default — it only
 # backs the advanced `harn testbench run --process-wasi <dir>`
@@ -55,7 +56,7 @@ harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.65" }
 # sidecars) works without it, so the default binary stays lean. Opt in with the
 # `testbench-wasi` feature below; without it `--process-wasi` returns a clear
 # "requires the testbench-wasi Cargo feature" error.
-harn-vm = { path = "../harn-vm", version = "=0.10.65", features = ["otel"] }
+harn-vm = { path = "../harn-vm", version = "=0.10.65", default-features = false, features = ["full", "otel"] }
 harn-hostlib = { path = "../harn-hostlib", version = "=0.10.65", optional = true }
 harn-rules = { path = "../harn-rules", version = "=0.10.65", optional = true }
 harn-rules-hostlib = { path = "../harn-rules-hostlib", version = "=0.10.65", optional = true }

@@ -6,8 +6,11 @@
 
 use std::collections::BTreeMap;
 
+#[cfg(feature = "cloud-aws")]
 use aws_config::default_provider::credentials::DefaultCredentialsChain;
+#[cfg(feature = "cloud-aws")]
 use aws_config::Region;
+#[cfg(feature = "cloud-aws")]
 use aws_credential_types::provider::ProvideCredentials;
 use chrono::Utc;
 
@@ -515,18 +518,24 @@ pub(crate) async fn resolve_live_region(override_region: Option<&str>) -> Result
     if !implicit_discovery_allowed() {
         return resolve_region(None);
     }
-    aws_config::default_provider::region::DefaultRegionChain::builder()
-        .build()
-        .region()
-        .await
-        .map(|region| region.as_ref().to_string())
-        .ok_or_else(|| {
-            vm_err(
-                "AWS region is not configured; set AWS_REGION, AWS_DEFAULT_REGION, or BEDROCK_REGION",
-            )
-        })
+    #[cfg(feature = "cloud-aws")]
+    {
+        return aws_config::default_provider::region::DefaultRegionChain::builder()
+            .build()
+            .region()
+            .await
+            .map(|region| region.as_ref().to_string())
+            .ok_or_else(|| {
+                vm_err(
+                    "AWS region is not configured; set AWS_REGION, AWS_DEFAULT_REGION, or BEDROCK_REGION",
+                )
+            });
+    }
+    #[cfg(not(feature = "cloud-aws"))]
+    resolve_region(None)
 }
 
+#[cfg(feature = "cloud-aws")]
 pub(crate) async fn resolve_aws_credentials(region: &str) -> Result<AwsCredentials, VmError> {
     if !implicit_discovery_allowed() {
         let access_key_id =
@@ -561,6 +570,20 @@ pub(crate) async fn resolve_aws_credentials(region: &str) -> Result<AwsCredentia
         access_key_id: credentials.access_key_id().to_string(),
         secret_access_key: credentials.secret_access_key().to_string(),
         session_token: credentials.session_token().map(str::to_string),
+    })
+}
+
+#[cfg(not(feature = "cloud-aws"))]
+pub(crate) async fn resolve_aws_credentials(_region: &str) -> Result<AwsCredentials, VmError> {
+    let access_key_id = crate::stdlib::process::session_env_var("AWS_ACCESS_KEY_ID")?
+        .ok_or_else(|| vm_err("AWS credentials require the harn-vm `cloud-aws` feature"))?;
+    let secret_access_key = crate::stdlib::process::session_env_var("AWS_SECRET_ACCESS_KEY")?
+        .ok_or_else(|| vm_err("AWS credentials require the harn-vm `cloud-aws` feature"))?;
+    let session_token = crate::stdlib::process::session_env_var("AWS_SESSION_TOKEN")?;
+    Ok(AwsCredentials {
+        access_key_id,
+        secret_access_key,
+        session_token,
     })
 }
 
