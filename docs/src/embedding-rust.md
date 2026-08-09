@@ -80,12 +80,16 @@ commands re-exec the embedding executable in guardian mode; without the
 dispatch, those commands fail during startup. Windows uses a Job Object and
 the function returns `false`.
 
-Finer control is available one layer down: `harn-hostlib` exposes per-family
-grammar features (`grammar-web`, `grammar-systems`, `grammar-scripting`,
-`grammar-jvm`, `grammar-enterprise`, `grammar-data`) so a client that only ever
-edits, say, TypeScript and Python can compile just those grammars. A language
-whose family is not compiled in still parses its name and extension; its
-AST-precise edits simply degrade to the text fallback.
+Finer control is available one layer down: `harn-hostlib`'s `ast` feature is
+the code-intelligence mechanism only. Per-family grammar features
+(`grammar-web`, `grammar-systems`, `grammar-scripting`, `grammar-jvm`,
+`grammar-enterprise`, `grammar-data`, or the `grammars-all` umbrella on
+`full`) are opted in separately so a client that only ever edits, say,
+TypeScript and Python can compile just those grammars. A language whose family
+is not compiled in still parses its name and extension; its AST-precise edits
+simply degrade to the text fallback. Library crates that Burin and other
+in-process hosts share (`harn-lint`, `harn-rules-hostlib`, …) keep
+`harn-vm`/`harn-hostlib` lean so they cannot unify `full` back on.
 `scripts/measure_lean_embedding.sh` reports the dependency delta between the
 lean and full configurations and gates against regressions in CI.
 

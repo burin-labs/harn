@@ -326,7 +326,21 @@ impl ProviderTelemetry {
             .filter(|value| !value.is_null())
             .filter(|value| !value.as_object().is_some_and(serde_json::Map::is_empty))
         {
-            self.provider_metadata = Some(metadata.clone());
+            merge_provider_metadata(&mut self.provider_metadata, metadata);
+        }
+        if let Some(receipt) = response
+            .get(crate::llm::managed_supply::MANAGED_SUPPLY_WIRE_KEY)
+            .filter(|value| !value.is_null())
+        {
+            let mut managed = serde_json::Map::new();
+            managed.insert(
+                crate::llm::managed_supply::MANAGED_SUPPLY_WIRE_KEY.to_string(),
+                receipt.clone(),
+            );
+            merge_provider_metadata(
+                &mut self.provider_metadata,
+                &serde_json::Value::Object(managed),
+            );
         }
     }
 
@@ -406,6 +420,19 @@ impl ProviderTelemetry {
             );
         }
         Some(VmValue::dict(dict))
+    }
+}
+
+fn merge_provider_metadata(target: &mut Option<serde_json::Value>, incoming: &serde_json::Value) {
+    let Some(incoming) = incoming.as_object() else {
+        return;
+    };
+    let target = target.get_or_insert_with(|| serde_json::Value::Object(Default::default()));
+    let Some(target) = target.as_object_mut() else {
+        return;
+    };
+    for (key, value) in incoming {
+        target.insert(key.clone(), value.clone());
     }
 }
 

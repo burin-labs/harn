@@ -7,6 +7,18 @@ use serde::{Deserialize, Serialize};
 
 use super::*;
 
+/// Versioned managed-supply provider declaration.
+///
+/// The empty-looking v1 payload is deliberate: catalog identity is derived
+/// from the selected model instead of being copied into every gateway config.
+/// A typed table leaves room for an additive future version without turning a
+/// magic feature string into permanent policy.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ManagedSupplyProviderDef {
+    pub version: u32,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProviderDef {
     pub display_name: Option<String>,
@@ -15,6 +27,11 @@ pub struct ProviderDef {
     /// path; `acp` launches an Agent Client Protocol server and drives it as
     /// an agent-backed provider.
     pub protocol: Option<String>,
+    /// Opt-in contract for a gateway that owns provider credential supply and
+    /// may serve the request on a different physical route. Harn keeps the
+    /// selected catalog route as the logical capability identity while this
+    /// provider remains the transport/auth adapter.
+    pub managed_supply: Option<ManagedSupplyProviderDef>,
     pub base_url: String,
     pub base_url_env: Option<String>,
     /// Optional env var that selects one of this provider's named regional
@@ -97,6 +114,8 @@ struct ProviderDefWire {
     #[serde(default)]
     protocol: Option<String>,
     #[serde(default)]
+    managed_supply: Option<ManagedSupplyProviderDef>,
+    #[serde(default)]
     base_url: String,
     #[serde(default)]
     base_url_env: Option<String>,
@@ -167,6 +186,7 @@ impl<'de> Deserialize<'de> for ProviderDef {
             display_name: wire.display_name,
             icon: wire.icon,
             protocol: wire.protocol,
+            managed_supply: wire.managed_supply,
             base_url: wire.base_url,
             base_url_env: wire.base_url_env,
             region_env: wire.region_env,
@@ -209,6 +229,7 @@ impl Default for ProviderDef {
             display_name: None,
             icon: None,
             protocol: None,
+            managed_supply: None,
             base_url: String::new(),
             base_url_env: None,
             region_env: None,
@@ -248,6 +269,7 @@ impl ProviderDef {
         merge_option(&mut self.display_name, &overlay.display_name);
         merge_option(&mut self.icon, &overlay.icon);
         merge_option(&mut self.protocol, &overlay.protocol);
+        merge_option(&mut self.managed_supply, &overlay.managed_supply);
         merge_string(&mut self.base_url, &overlay.base_url);
         merge_option(&mut self.base_url_env, &overlay.base_url_env);
         merge_option(&mut self.region_env, &overlay.region_env);

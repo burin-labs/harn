@@ -901,7 +901,7 @@ fn apply_thinking_disable_directive(payload: &mut LlmRequestPayload) {
     if !payload.thinking.is_disabled() {
         return;
     }
-    let caps = crate::llm::capabilities::lookup(&payload.provider, &payload.model);
+    let caps = crate::llm::managed_supply::capabilities_for(&payload.provider, &payload.model);
     let Some(directive) = caps.thinking_disable_directive.as_deref() else {
         return;
     };

@@ -1155,7 +1155,7 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
     // assistant message AND the transcript the eval grader mines. Keep `.text`
     // empty and surface the reasoning only via `thinking`, mirroring
     // `openai_normalize::normalize_openai_message_text`.
-    let caps = crate::llm::capabilities::lookup(provider, model);
+    let caps = crate::llm::managed_supply::capabilities_for(provider, model);
     if caps.reasoning_text_promotable
         && !truncated
         && !tools_offered

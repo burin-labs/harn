@@ -33,20 +33,22 @@ pub struct LlmUsage {
 
 impl LlmUsage {
     pub(crate) fn from_result(result: &LlmResult) -> Self {
-        let cost_usd = super::cost::pricing_detail_for_tier(
-            &result.provider,
-            &result.model,
-            result.served_fast,
-            result.input_tokens,
-        )
-        .map(|detail| {
-            super::cost::project_call_cost(
-                &detail,
+        let cost_usd = super::managed_supply::authoritative_cost_usd(result).or_else(|| {
+            super::cost::pricing_detail_for_tier(
+                &result.provider,
+                &result.model,
+                result.served_fast,
                 result.input_tokens,
-                result.output_tokens,
-                result.cache_read_tokens,
-                result.cache_write_tokens,
             )
+            .map(|detail| {
+                super::cost::project_call_cost(
+                    &detail,
+                    result.input_tokens,
+                    result.output_tokens,
+                    result.cache_read_tokens,
+                    result.cache_write_tokens,
+                )
+            })
         });
         let cache_hit_ratio = result.cache_supported.then(|| {
             super::cost::cache_hit_ratio(

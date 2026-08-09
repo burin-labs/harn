@@ -134,6 +134,8 @@ pub(crate) fn extract_llm_options(
             model = first.model.clone();
         }
     }
+    let (capability_provider, capability_model) =
+        crate::llm::managed_supply::logical_route(&provider, &model)?;
     let api_key = if routing_policy
         .as_ref()
         .is_some_and(|policy| policy.chain.len() > 1)
@@ -144,7 +146,7 @@ pub(crate) fn extract_llm_options(
     } else {
         resolve_api_key(&provider)?
     };
-    let caps = crate::llm::capabilities::lookup(&provider, &model);
+    let caps = crate::llm::capabilities::lookup(&capability_provider, &capability_model);
     let mut api_mode = parse_api_mode_option(options.as_ref())?;
     if enforce_responses_provider_gate(api_mode, &provider) {
         return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
@@ -188,7 +190,8 @@ pub(crate) fn extract_llm_options(
 
     // Apply providers.toml model_defaults as fallbacks for unspecified params
     // (e.g. presence_penalty=1.5 for Qwen to avoid repetition loops).
-    let model_defaults = crate::llm_config::model_params_for_route(&provider, &model);
+    let model_defaults =
+        crate::llm_config::model_params_for_route(&capability_provider, &capability_model);
     let mut portable_option_intent: std::collections::BTreeSet<
         crate::llm::capabilities::PortableOption,
     > = options
@@ -274,16 +277,16 @@ pub(crate) fn extract_llm_options(
     let thinking = resolve_thinking_config(
         options.as_ref(),
         &model_defaults,
-        &provider,
-        &model,
+        &capability_provider,
+        &capability_model,
         &caps,
         enforce_capability_gates,
     )?;
     let mut anthropic_beta_features = parse_anthropic_beta_features_option(
         options.as_ref(),
         &thinking,
-        &provider,
-        &model,
+        &capability_provider,
+        &capability_model,
         enforce_capability_gates,
     )?;
 
@@ -292,7 +295,12 @@ pub(crate) fn extract_llm_options(
     let parsed_output = parse_output_option(options.as_ref())?;
     let output_format = parsed_output.format;
     if enforce_capability_gates {
-        validate_output_format_supported(&output_format, &provider, &model, &caps)?;
+        validate_output_format_supported(
+            &output_format,
+            &capability_provider,
+            &capability_model,
+            &caps,
+        )?;
     }
     let output_schema = output_format.schema().cloned();
     let output_validation = parsed_output.validation;
@@ -326,19 +334,39 @@ pub(crate) fn extract_llm_options(
         || crate::llm::content::messages_contain_videos(&messages)?;
     let uses_file_ids = crate::llm::content::messages_contain_file_ids(&messages)?;
     if enforce_capability_gates && vision && !caps.vision_supported {
-        return Err(unsupported_option_error("vision", &provider, &model));
+        return Err(unsupported_option_error(
+            "vision",
+            &capability_provider,
+            &capability_model,
+        ));
     }
     if enforce_capability_gates && audio && !caps.audio {
-        return Err(unsupported_option_error("audio", &provider, &model));
+        return Err(unsupported_option_error(
+            "audio",
+            &capability_provider,
+            &capability_model,
+        ));
     }
     if enforce_capability_gates && pdf && !caps.pdf {
-        return Err(unsupported_option_error("pdf", &provider, &model));
+        return Err(unsupported_option_error(
+            "pdf",
+            &capability_provider,
+            &capability_model,
+        ));
     }
     if enforce_capability_gates && video && !caps.video {
-        return Err(unsupported_option_error("video", &provider, &model));
+        return Err(unsupported_option_error(
+            "video",
+            &capability_provider,
+            &capability_model,
+        ));
     }
     if enforce_capability_gates && uses_file_ids && !caps.files_api_supported {
-        return Err(unsupported_option_error("files_api", &provider, &model));
+        return Err(unsupported_option_error(
+            "files_api",
+            &capability_provider,
+            &capability_model,
+        ));
     }
     if uses_file_ids && caps.message_wire_format.is_anthropic() {
         crate::llm::api::push_unique_anthropic_beta_feature(
@@ -347,7 +375,10 @@ pub(crate) fn extract_llm_options(
         );
     }
     if vision
-        && !crate::llm::provider::provider_supports_image_urls(&provider, &model)
+        && !crate::llm::provider::provider_supports_image_urls(
+            &capability_provider,
+            &capability_model,
+        )
         && crate::llm::content::messages_contain_url_images(&messages)?
     {
         return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
@@ -360,8 +391,9 @@ pub(crate) fn extract_llm_options(
         .and_then(|o| o.get("tools"))
         .filter(|value| !matches!(value, VmValue::Nil))
         .cloned();
-    let requested_tool_format = opt_str(&options, "tool_format")
-        .unwrap_or_else(|| crate::llm_config::default_tool_format(&model, &provider));
+    let requested_tool_format = opt_str(&options, "tool_format").unwrap_or_else(|| {
+        crate::llm_config::default_tool_format(&capability_model, &capability_provider)
+    });
     // FOOTGUN-REMOVAL: a tool-bearing call must use a tool_format whose channel
     // the capability registry trusts to return parseable tool calls for this
     // route. An explicit pin (or alias) can request a channel the route is
@@ -374,9 +406,11 @@ pub(crate) fn extract_llm_options(
     // tool-bearing call that can only yield a silent empty tool stream, so name
     // the bad combo and a suggested alternative up front instead of dispatching.
     if enforce_capability_gates && tools_val.is_some() {
-        if let Some(message) =
-            crate::llm::capabilities::no_viable_tool_channel_with_caps(&provider, &model, &caps)
-        {
+        if let Some(message) = crate::llm::capabilities::no_viable_tool_channel_with_caps(
+            &capability_provider,
+            &capability_model,
+            &caps,
+        ) {
             return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                 message,
             ))));
@@ -384,8 +418,8 @@ pub(crate) fn extract_llm_options(
     }
     let tool_format = if enforce_capability_gates && tools_val.is_some() {
         let decision = crate::llm::capabilities::validate_tool_format_with_caps(
-            &provider,
-            &model,
+            &capability_provider,
+            &capability_model,
             &requested_tool_format,
             &caps,
         );
@@ -401,7 +435,11 @@ pub(crate) fn extract_llm_options(
         && tool_format == "native"
         && !caps.native_tools
     {
-        return Err(unsupported_option_error("tools", &provider, &model));
+        return Err(unsupported_option_error(
+            "tools",
+            &capability_provider,
+            &capability_model,
+        ));
     }
     // harn#4743: in the text tool-call lane the model emits its call inside
     // `<tool_call>…</tool_call>` in visible content. With no stop sequence the
@@ -420,7 +458,11 @@ pub(crate) fn extract_llm_options(
     );
     let mut native_tools = if tool_format == "native" {
         if let Some(tools) = &tools_val {
-            Some(vm_tools_to_native(tools, &provider, &model)?)
+            Some(vm_tools_to_native(
+                tools,
+                &capability_provider,
+                &capability_model,
+            )?)
         } else {
             None
         }
@@ -466,9 +508,11 @@ pub(crate) fn extract_llm_options(
         //     search tool, and emits client-mode events.
         //   - error: explicit native mode on a provider that cannot
         //     satisfy it.
-        let native_variants = provider_tool_search_variants(&provider, &model);
+        let native_variants =
+            provider_tool_search_variants(&capability_provider, &capability_model);
         let model_based_native =
-            provider_supports_defer_loading(&provider, &model) && !native_variants.is_empty();
+            provider_supports_defer_loading(&capability_provider, &capability_model)
+                && !native_variants.is_empty();
         // Escape hatch for proxied OpenAI-compat providers whose model
         // ID Harn cannot parse. The override forces the OpenAI
         // Responses-API shape; user asserts the endpoint forwards
@@ -540,7 +584,7 @@ pub(crate) fn extract_llm_options(
                 // provider we infer from the model string so
                 // conformance tests can exercise both paths without
                 // HTTP. See `provider_native_tool_search_shape`.
-                let shape = classify_native_shape(&provider, &model);
+                let shape = classify_native_shape(&capability_provider, &capability_model);
                 match shape {
                     crate::llm::provider::NativeToolSearchShape::Anthropic => {
                         // Anthropic exposes {bm25, regex}. Variant
@@ -618,7 +662,11 @@ pub(crate) fn extract_llm_options(
         && !caps.native_tools
         && !caps.text_tool_wire_format_supported
     {
-        return Err(unsupported_option_error("tool_choice", &provider, &model));
+        return Err(unsupported_option_error(
+            "tool_choice",
+            &capability_provider,
+            &capability_model,
+        ));
     }
 
     let provider_overrides = options

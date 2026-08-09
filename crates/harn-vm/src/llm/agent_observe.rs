@@ -632,7 +632,12 @@ pub(crate) async fn observed_llm_call(
             crate::stdlib::process::session_env_value("HARN_AGENT_TOOL_FORMAT")
                 .filter(|value| !value.trim().is_empty())
         })
-        .unwrap_or_else(|| crate::llm_config::default_tool_format(&opts.model, &opts.provider));
+        .unwrap_or_else(|| {
+            let (capability_provider, capability_model) =
+                super::managed_supply::logical_route(&opts.provider, &opts.model)
+                    .unwrap_or_else(|_| (opts.provider.clone(), opts.model.clone()));
+            crate::llm_config::default_tool_format(&capability_model, &capability_provider)
+        });
     // Working request. Starts as the caller's `opts` (zero-copy) and is only
     // cloned when the runtime tool_format fallback degrades a native-channel
     // request to text mid-retry (see the `Err` arm below). Once degraded, the

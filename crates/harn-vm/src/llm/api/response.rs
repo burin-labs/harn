@@ -963,7 +963,7 @@ pub(crate) fn parse_llm_response(
             ))))
         })?;
         let finish_reason = choice["finish_reason"].as_str();
-        let caps = crate::llm::capabilities::lookup(provider, model);
+        let caps = crate::llm::managed_supply::capabilities_for(provider, model);
         let promote_reasoning_to_text = caps.reasoning_text_promotable && !tools_offered;
         let (text, extracted_thinking) =
             normalize_openai_message_text(message, finish_reason, promote_reasoning_to_text);

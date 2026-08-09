@@ -421,7 +421,7 @@ fn request_body_warnings(
     payload: &LlmRequestPayload,
     body: &Value,
 ) -> Vec<ToolConformanceRequestWarning> {
-    let caps = crate::llm::capabilities::lookup(&payload.provider, &payload.model);
+    let caps = crate::llm::managed_supply::capabilities_for(&payload.provider, &payload.model);
     let dialect = request_validation_dialect(&payload.provider, &caps);
     let mut omitted = Vec::new();
 

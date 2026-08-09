@@ -57,6 +57,7 @@ pub(crate) mod helpers;
 pub mod introspection;
 pub mod jsonl;
 pub mod local_profiles;
+pub mod managed_supply;
 pub(crate) mod mock;
 mod mock_builtins;
 pub(crate) mod mock_store;

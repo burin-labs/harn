@@ -146,7 +146,7 @@ impl LlmProviderChat for OpenAiCompatibleProvider {
 impl OpenAiCompatibleProvider {
     /// Build the OpenAI-compatible request body.
     pub(crate) fn build_request_body(opts: &LlmRequestPayload) -> serde_json::Value {
-        let caps = crate::llm::capabilities::lookup(&opts.provider, &opts.model);
+        let caps = crate::llm::managed_supply::capabilities_for(&opts.provider, &opts.model);
         // Models that reserve `<tool_call>` as a special token collapse when
         // they meet it as instructional/wrapper text. Remap the colliding
         // delimiters to a non-special wire form on every outgoing message
@@ -410,7 +410,7 @@ impl OpenAiCompatibleProvider {
         // the unregistered fallback and never reaches here). This guard stays
         // as defense-in-depth for any registered OpenAI-family provider.
         if request.api_mode == crate::llm::api::LlmApiMode::Responses
-            || crate::llm::capabilities::lookup(&request.provider, &request.model)
+            || crate::llm::managed_supply::capabilities_for(&request.provider, &request.model)
                 .chat_completions_unsupported
         {
             return crate::llm::providers::OpenAiResponsesProvider::call(request, delta_tx).await;
@@ -427,8 +427,9 @@ impl OpenAiCompatibleProvider {
         // mapped back to canonical in the shared transport funnel
         // (`vm_call_llm_api_with_body`), which is the single boundary covering
         // every route — registered and unregistered, streaming and not.
-        let remap_tool_call = crate::llm::capabilities::lookup(&request.provider, &request.model)
-            .reserved_tool_call_token;
+        let remap_tool_call =
+            crate::llm::managed_supply::capabilities_for(&request.provider, &request.model)
+                .reserved_tool_call_token;
         let delta_tx = if remap_tool_call {
             delta_tx.map(canonicalizing_delta_tx)
         } else {
