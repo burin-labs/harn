@@ -12,7 +12,11 @@ trap 'rm -rf "$tmp_root"' EXIT
 fake_bin="$tmp_root/harn"
 cat > "$fake_bin" <<'SH'
 #!/usr/bin/env bash
-printf 'fake harn\n'
+if [[ "${1:-}" = "--print-inherited-harn-bin" ]]; then
+  printf '%s\n' "${HARN_BIN-}"
+else
+  printf 'fake harn\n'
+fi
 SH
 chmod +x "$fake_bin"
 
@@ -20,6 +24,12 @@ HARN_BIN="$fake_bin" "$repo_root/scripts/harn_bin.sh" --print >"$tmp_root/explic
 if ! grep -Fxq "$fake_bin" "$tmp_root/explicit.out"; then
   echo "harn_bin resolver did not return the explicit executable HARN_BIN" >&2
   cat "$tmp_root/explicit.out" >&2
+  exit 1
+fi
+explicit_child_bin="$(HARN_BIN="$fake_bin" \
+  "$repo_root/scripts/harn_bin.sh" -- --print-inherited-harn-bin)"
+if [[ "$explicit_child_bin" != "$fake_bin" ]]; then
+  echo "harn_bin runner did not propagate the explicit binary to its child" >&2
   exit 1
 fi
 
@@ -115,7 +125,11 @@ case "$*" in
     cat > "$CARGO_TARGET_DIR/debug/harn" <<'BIN'
 #!/usr/bin/env bash
 set -euo pipefail
-printf 'fake harn\n'
+if [[ "${1:-}" = "--print-inherited-harn-bin" ]]; then
+  printf '%s\n' "${HARN_BIN-}"
+else
+  printf 'fake harn\n'
+fi
 BIN
     chmod +x "$CARGO_TARGET_DIR/debug/harn"
     printf '%s\n' "$CARGO_TARGET_DIR/debug/harn"
@@ -187,6 +201,15 @@ fi
 if ! grep -Fxq "CARGO_BUILD_BUILD_DIR=$target_dir" "$record"; then
   echo "harn_bin resolver did not align Cargo build-dir with CARGO_TARGET_DIR" >&2
   cat "$record" >&2
+  exit 1
+fi
+
+auto_child_bin="$(CARGO_TARGET_DIR="$target_dir" \
+  FAKE_CARGO_RECORD="$record" \
+  PATH="$fake_cargo_bin:$PATH" \
+  "$repo_root/scripts/harn_bin.sh" --no-build -- --print-inherited-harn-bin)"
+if [[ "$auto_child_bin" != "$expected_bin" ]]; then
+  echo "harn_bin runner did not propagate the auto-resolved binary to its child" >&2
   exit 1
 fi
 
