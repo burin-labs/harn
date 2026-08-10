@@ -1,0 +1,531 @@
+import { checkpoint_stage_keyed } from "std/checkpoint"
+import {
+  ExternalActionAdapter,
+  ExternalActionAdapterOutcome,
+  ExternalActionAdapterResult,
+  ExternalActionError,
+  ExternalActionGrant,
+  ExternalActionIntent,
+  ExternalActionNextAction,
+  ExternalActionOutcome,
+  ExternalActionReceipt,
+  ExternalActionReceiptStatus,
+  external_action_error,
+  external_action_grant_check,
+  external_action_grant_integrity_check,
+  external_action_intent_is_exact,
+} from "std/external_action/contracts"
+
+const EXTERNAL_ACTION_RECEIPT_TOPIC = "external_actions.receipts"
+
+fn __external_action_is_callable(value) -> bool {
+  const kind = type_of(value)
+  return kind == "closure" || kind == "function"
+}
+
+fn __external_action_evidence_result(raw) -> Result<list<string>, ExternalActionError> {
+  if raw == nil {
+    return Ok([])
+  }
+  if type_of(raw) != "list" || len(raw) > 20 {
+    return Err(
+      external_action_error(
+        "malformed_adapter_result",
+        "invalid_evidence_refs",
+        "adapter evidence must be a bounded list of references",
+      ),
+    )
+  }
+  let refs: list<string> = []
+  for item in raw {
+    const reference = trim(to_string(item))
+    if reference == "" || len(reference) > 512 || reference.contains("\n")
+      || !reference.contains(":") {
+      return Err(
+        external_action_error(
+          "malformed_adapter_result",
+          "invalid_evidence_ref",
+          "adapter evidence entries must be compact reference identifiers",
+        ),
+      )
+    }
+    refs = refs + [reference]
+  }
+  return Ok(refs)
+}
+
+fn __external_action_adapter_result(
+  raw: unknown,
+) -> Result<ExternalActionAdapterResult, ExternalActionError> {
+  if type_of(raw) != "dict" {
+    return Err(
+      external_action_error(
+        "malformed_adapter_result",
+        "invalid_adapter_result",
+        "adapter result must be an object",
+      ),
+    )
+  }
+  const raw_outcome = lowercase(trim(to_string(raw?.outcome ?? "")))
+  if raw_outcome != "confirmed" && raw_outcome != "failed_before_dispatch"
+    && raw_outcome
+    != "indeterminate" {
+    return Err(
+      external_action_error(
+        "malformed_adapter_result",
+        "invalid_adapter_outcome",
+        "adapter outcome is unsupported",
+      ),
+    )
+  }
+  const evidence = __external_action_evidence_result(raw?.evidence_refs)
+  if !is_ok(evidence) {
+    return Err(unwrap_err(evidence))
+  }
+  const provider_action_id = trim(to_string(raw?.provider_action_id ?? ""))
+  if provider_action_id != "" {
+    if len(provider_action_id) > 512 || provider_action_id.contains("\n") {
+      return Err(
+        external_action_error(
+          "malformed_adapter_result",
+          "invalid_provider_action_id",
+          "provider action id must be a compact identifier",
+        ),
+      )
+    }
+  }
+  const error_code = trim(to_string(raw?.error_code ?? ""))
+  if error_code != "" {
+    if regex_match("^[A-Za-z0-9._:-]{1,128}$", error_code) == nil {
+      return Err(
+        external_action_error(
+          "malformed_adapter_result",
+          "invalid_adapter_error_code",
+          "adapter error code must be a compact machine identifier",
+        ),
+      )
+    }
+  }
+  if raw_outcome == "confirmed" {
+    return Ok(
+      __external_action_adapter_result_fields(
+        "confirmed",
+        unwrap(evidence),
+        provider_action_id,
+        error_code,
+      ),
+    )
+  }
+  if raw_outcome == "failed_before_dispatch" {
+    return Ok(
+      __external_action_adapter_result_fields(
+        "failed_before_dispatch",
+        unwrap(evidence),
+        provider_action_id,
+        error_code,
+      ),
+    )
+  }
+  return Ok(
+    __external_action_adapter_result_fields(
+      "indeterminate",
+      unwrap(evidence),
+      provider_action_id,
+      error_code,
+    ),
+  )
+}
+
+fn __external_action_adapter_result_fields(
+  outcome: ExternalActionAdapterOutcome,
+  evidence_refs: list<string>,
+  provider_action_id: string = "",
+  error_code: string = "",
+) -> ExternalActionAdapterResult {
+  let result: ExternalActionAdapterResult = {outcome: outcome}
+  if len(evidence_refs) > 0 {
+    result.evidence_refs = evidence_refs
+  }
+  if provider_action_id != "" {
+    result.provider_action_id = provider_action_id
+  }
+  if error_code != "" {
+    result.error_code = error_code
+  }
+  return result
+}
+
+fn __external_action_indeterminate_result(code: string) -> ExternalActionAdapterResult {
+  return __external_action_adapter_result_fields("indeterminate", [], "", code)
+}
+
+fn __external_action_receipt_fields(
+  intent: ExternalActionIntent,
+  adapter_id: string,
+  outcome: ExternalActionOutcome,
+  status: ExternalActionReceiptStatus,
+  next_action: ExternalActionNextAction,
+  dispatch_attempted: bool,
+  recorded_at_ms: int,
+  provider_action_id: string?,
+  evidence_refs: list<string>,
+  error: ExternalActionError?,
+  reconciliation,
+) -> ExternalActionReceipt {
+  let receipt: ExternalActionReceipt = {
+    schema: "harn.external_action_receipt.v1",
+    id: "receipt_"
+      + substring(
+      sha256(
+        json_stringify(
+          {
+            action: intent.fingerprint,
+            adapter: adapter_id,
+            outcome: outcome,
+            provider_action_id: provider_action_id,
+            reconciliation: reconciliation,
+            error_code: error?.code,
+          },
+        ),
+      ),
+      0,
+      24,
+    ),
+    action_id: intent.id,
+    intent_fingerprint: intent.fingerprint,
+    idempotency_key: intent.idempotency_key,
+    provider: intent.provider,
+    capability: intent.capability,
+    operation: intent.operation,
+    environment: intent.environment,
+    adapter_id: adapter_id,
+    outcome: outcome,
+    status: status,
+    next_action: next_action,
+    dispatch_attempted: dispatch_attempted,
+    recorded_at_ms: recorded_at_ms,
+    evidence_refs: evidence_refs,
+  }
+  if provider_action_id != nil {
+    receipt.provider_action_id = provider_action_id
+  }
+  if error != nil {
+    receipt.error = error
+  }
+  if reconciliation != nil {
+    receipt.reconciliation = reconciliation
+  }
+  return receipt
+}
+
+fn __external_action_receipt(
+  intent: ExternalActionIntent,
+  adapter_id: string,
+  result: ExternalActionAdapterResult,
+  recorded_at_ms: int,
+  options = {},
+) -> ExternalActionReceipt {
+  const opts = options ?? {}
+  const outcome = result.outcome
+  let error: ExternalActionError? = nil
+  if result.error_code != nil {
+    error = external_action_error(
+      "adapter_failure",
+      result.error_code,
+      outcome == "indeterminate" ? "The provider outcome is unknown and must be reconciled." : "The provider rejected the action before dispatch.",
+      outcome == "indeterminate",
+    )
+  }
+  if opts?.error != nil {
+    error = opts.error
+  }
+  if outcome == "confirmed" {
+    return __external_action_receipt_fields(
+      intent,
+      adapter_id,
+      "confirmed",
+      "confirmed",
+      "none",
+      opts?.dispatch_attempted ?? true,
+      recorded_at_ms,
+      result.provider_action_id,
+      result.evidence_refs ?? [],
+      error,
+      opts?.reconciliation,
+    )
+  }
+  if outcome == "failed_before_dispatch" {
+    return __external_action_receipt_fields(
+      intent,
+      adapter_id,
+      "failed_before_dispatch",
+      "failed_before_dispatch",
+      "none",
+      opts?.dispatch_attempted ?? false,
+      recorded_at_ms,
+      result.provider_action_id,
+      result.evidence_refs ?? [],
+      error,
+      opts?.reconciliation,
+    )
+  }
+  return __external_action_receipt_fields(
+    intent,
+    adapter_id,
+    "indeterminate",
+    "reconciliation_required",
+    "reconcile",
+    opts?.dispatch_attempted ?? true,
+    recorded_at_ms,
+    result.provider_action_id,
+    result.evidence_refs ?? [],
+    error,
+    opts?.reconciliation,
+  )
+}
+
+fn __external_action_denied_receipt(
+  intent: ExternalActionIntent,
+  adapter_id: string,
+  error: ExternalActionError,
+  recorded_at_ms: int,
+) -> ExternalActionReceipt {
+  return __external_action_receipt_fields(
+    intent,
+    adapter_id,
+    "denied",
+    "denied",
+    "none",
+    false,
+    recorded_at_ms,
+    nil,
+    [],
+    error,
+    nil,
+  )
+}
+
+fn __external_action_emit(obs: HarnessObs, receipt: ExternalActionReceipt) {
+  obs.event_log_emit(
+    EXTERNAL_ACTION_RECEIPT_TOPIC,
+    "external_action_receipt",
+    receipt,
+    {schema: receipt.schema, action_id: receipt.action_id, status: receipt.status},
+  )
+}
+
+fn __external_action_adapter_id(adapter: ExternalActionAdapter) -> string {
+  const id = trim(to_string(adapter.id ?? ""))
+  return id == "" ? "unavailable" : id
+}
+
+/**
+ * Dispatch one exact action at most once for its fingerprint.
+ *
+ * Invalid grants are not checkpointed, so a later valid authorization may run.
+ * Once dispatch begins, even thrown or malformed adapter responses become a
+ * durable reconciliation-required receipt and are never blindly retried.
+ *
+ * @effects: [runtime, observability, external]
+ * @errors: []
+ */
+pub fn external_action_execute(
+  harness: Harness,
+  intent: ExternalActionIntent,
+  grant: ExternalActionGrant,
+  adapter: ExternalActionAdapter,
+) -> ExternalActionReceipt {
+  const adapter_id = __external_action_adapter_id(adapter)
+  const now_ms = harness.clock.now_ms()
+  if !external_action_intent_is_exact(intent) {
+    const denied = __external_action_denied_receipt(
+      intent,
+      adapter_id,
+      external_action_error(
+        "invalid_grant",
+        "intent_fingerprint_mismatch",
+        "intent fingerprint does not match its effect",
+      ),
+      now_ms,
+    )
+    __external_action_emit(harness.obs, denied)
+    return denied
+  }
+  if !__external_action_is_callable(adapter.dispatch) {
+    const denied = __external_action_denied_receipt(
+      intent,
+      adapter_id,
+      external_action_error(
+        "adapter_unavailable",
+        "dispatch_unavailable",
+        "external action adapter has no dispatch function",
+      ),
+      now_ms,
+    )
+    __external_action_emit(harness.obs, denied)
+    return denied
+  }
+  const attempted = try {
+    checkpoint_stage_keyed(
+      harness.runtime,
+      "external_action.dispatch." + substring(intent.fingerprint, 7, len(intent.fingerprint)),
+      {intent_fingerprint: intent.fingerprint},
+      fn() {
+        const grant_check = external_action_grant_check(intent, grant, harness.clock.now_ms())
+        if !is_ok(grant_check) {
+          throw {external_action_denied: true, error: unwrap_err(grant_check)}
+        }
+        const request = {
+          schema: "harn.external_action_dispatch_request.v1",
+          intent: intent,
+          grant: grant,
+          idempotency_key: intent.idempotency_key,
+        }
+        const raw = try {
+          adapter.dispatch(harness, request)
+        }
+        const receipt = if !is_ok(raw) {
+          __external_action_receipt(
+            intent,
+            adapter_id,
+            __external_action_indeterminate_result("adapter_threw"),
+            harness.clock.now_ms(),
+            {
+              error: external_action_error(
+                "adapter_failure",
+                "adapter_threw",
+                "The provider outcome is unknown and must be reconciled.",
+                true,
+              ),
+            },
+          )
+        } else {
+          const normalized = __external_action_adapter_result(unwrap(raw))
+          if !is_ok(normalized) {
+            __external_action_receipt(
+              intent,
+              adapter_id,
+              __external_action_indeterminate_result("malformed_adapter_result"),
+              harness.clock.now_ms(),
+              {error: unwrap_err(normalized)},
+            )
+          } else {
+            __external_action_receipt(
+              intent,
+              adapter_id,
+              unwrap(normalized),
+              harness.clock.now_ms(),
+            )
+          }
+        }
+        __external_action_emit(harness.obs, receipt)
+        return receipt
+      },
+    )
+  }
+  if is_ok(attempted) {
+    return unwrap(attempted)
+  }
+  const thrown = unwrap_err(attempted)
+  const error = if type_of(thrown) == "dict" && thrown?.external_action_denied == true {
+    thrown.error
+  } else {
+    external_action_error(
+      "adapter_failure",
+      "dispatch_checkpoint_failed",
+      "The action did not reach the provider.",
+    )
+  }
+  const denied = __external_action_denied_receipt(intent, adapter_id, error, now_ms)
+  __external_action_emit(harness.obs, denied)
+  return denied
+}
+
+/**
+ * Query an ambiguous provider outcome without invoking dispatch again.
+ * Callers supply a stable `attempt_id`; replay of that attempt is checkpointed,
+ * while a later polling attempt can use a new id.
+ *
+ * @effects: [runtime, observability, external]
+ * @errors: [invalid_reconciliation]
+ */
+pub fn external_action_reconcile(
+  harness: Harness,
+  intent: ExternalActionIntent,
+  grant: ExternalActionGrant,
+  receipt: ExternalActionReceipt,
+  adapter: ExternalActionAdapter,
+  attempt_id: string,
+) -> ExternalActionReceipt {
+  const normalized_attempt = trim(attempt_id)
+  require normalized_attempt != "", "external_action_reconcile: attempt_id is required"
+  require external_action_intent_is_exact(intent),
+    "external_action_reconcile: intent fingerprint mismatch"
+  require receipt.intent_fingerprint == intent.fingerprint
+    && receipt.status
+    == "reconciliation_required",
+    "external_action_reconcile: receipt is not reconcilable"
+  const grant_integrity = external_action_grant_integrity_check(intent, grant)
+  require is_ok(grant_integrity), "external_action_reconcile: grant does not match the action"
+  require __external_action_is_callable(adapter.reconcile),
+    "external_action_reconcile: adapter has no reconcile function"
+  const completed = checkpoint_stage_keyed(
+    harness.runtime,
+    "external_action.reconcile."
+      + substring(intent.fingerprint, 7, len(intent.fingerprint))
+      + "."
+      + sha256(normalized_attempt),
+    {
+      intent_fingerprint: intent.fingerprint,
+      receipt_id: receipt.id,
+      attempt_id: normalized_attempt,
+    },
+    fn() {
+      const request = {
+        schema: "harn.external_action_reconcile_request.v1",
+        intent: intent,
+        grant: grant,
+        receipt: receipt,
+        attempt_id: normalized_attempt,
+      }
+      const raw = try {
+        adapter.reconcile(harness, request)
+      }
+      const normalized: Result<ExternalActionAdapterResult, ExternalActionError> = if !is_ok(raw) {
+        Ok(__external_action_indeterminate_result("reconcile_threw"))
+      } else {
+        __external_action_adapter_result(unwrap(raw))
+      }
+      const next = if !is_ok(normalized) {
+        __external_action_receipt(
+          intent,
+          __external_action_adapter_id(adapter),
+          __external_action_indeterminate_result("malformed_reconcile_result"),
+          harness.clock.now_ms(),
+          {
+            error: unwrap_err(normalized),
+            reconciliation: {attempt_id: normalized_attempt, previous_receipt_id: receipt.id},
+          },
+        )
+      } else {
+        __external_action_receipt(
+          intent,
+          __external_action_adapter_id(adapter),
+          unwrap(normalized),
+          harness.clock.now_ms(),
+          {reconciliation: {attempt_id: normalized_attempt, previous_receipt_id: receipt.id}},
+        )
+      }
+      __external_action_emit(harness.obs, next)
+      return next
+    },
+  )
+  require type_of(completed) == "dict"
+    && completed?.schema == "harn.external_action_receipt.v1"
+    && completed?.intent_fingerprint
+    == intent
+    .fingerprint,
+    "external_action_reconcile: checkpoint returned an invalid receipt"
+  const typed: any = completed
+  return typed
+}

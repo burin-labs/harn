@@ -1,0 +1,6 @@
+confirmed_once:1
+changed_denied:grant_binding_mismatch
+forged_grant_denied:grant_integrity_mismatch
+spend_denied:external_spend_exceeds_grant
+reconciled_without_redispatch:1:1
+malformed_bounded:invalid_evidence_ref

@@ -134,6 +134,7 @@
 - [Durable step stdlib](./stdlib/step.md)
 - [Cache stdlib](./stdlib/cache.md)
 - [Calendar stdlib](./stdlib/calendar.md)
+- [External actions](./stdlib/external-action.md)
 - [Daemon stdlib](./stdlib/daemon.md)
 - [Current session builtin](./stdlib/agent_session_current_id.md)
 - [Compaction pins and the goal object](./stdlib/agent-pins-goal.md)
