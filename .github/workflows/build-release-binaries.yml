@@ -13,7 +13,10 @@ name: Build release binaries
 #      the full five-target matrix against an exact source SHA under current
 #      main policy. Uploads fail-closed run-scoped candidate archives and a
 #      candidate-archive-manifest-<sha> receipt. Never mutates a GitHub
-#      release or publishes a container.
+#      release or publishes a container. Because the workflow itself runs on
+#      main, each successful candidate also refreshes the bounded per-target
+#      Rust cache. This prevents continuous releases from starving the warm
+#      lane while later candidates still verify their exact source revision.
 #
 #   3. workflow_dispatch promote_only / tag+candidate_run_id — attach bound
 #      candidate archives without compiling.
@@ -34,8 +37,9 @@ name: Build release binaries
 #      for an existing tag; warm_cache_only; or benchmark_only size gates.
 #
 # Cache architecture note. GitHub Actions caches are scoped per-ref: tag
-# promote runs restore only. Warm-only events own the save. Candidate
-# builds also restore-only (they must not rotate default-branch caches).
+# promote runs restore only. Main warm events and main-dispatched candidate
+# builds own saves. Candidate saves matter when continuous releases suppress
+# every overlapping warm run. Each target prunes old generations first.
 on:
   push:
     branches: [main]
@@ -971,6 +975,7 @@ jobs:
       CARGO_PROFILE_RELEASE_LTO: thin
       CARGO_PROFILE_RELEASE_CODEGEN_UNITS: ${{ matrix.release_codegen_units }}
       CARGO_PROFILE_RELEASE_STRIP: symbols
+      HARN_RELEASE_CACHE_SAVE_ENABLED: ${{ ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && (inputs.warm_cache_only || inputs.candidate_only) && github.ref == 'refs/heads/main')) && 'true' || 'false' }}
     strategy:
       # Release artifacts are uploaded incrementally per target. If one leg
       # fails (for example a size-budget ratchet or platform-specific signer
@@ -1048,12 +1053,9 @@ jobs:
         shell: bash
         run: echo "RUSTC_WRAPPER=${SCCACHE_PATH}" >> "$GITHUB_ENV"
 
-      # See the cache architecture note at the top of this workflow for why
-      # only warm-cache-only events save. Short version: tag-push runs can
-      # never restore another tag's cache, so a tag-push save just burns a
-      # cache slot. Letting only main-push + cron save (and tag-push +
-      # workflow_dispatch restore) keeps the per-repo 10 GB cache budget
-      # focused on the entries we can actually read back.
+      # See the cache architecture note at the top of this workflow. Tag-push
+      # runs cannot restore another tag's cache, so they stay restore-only.
+      # Main warm runs and exact candidate builds can feed the next candidate.
       - uses: ./.github/actions/rust-cache
         id: rust-cache
         # Cache restore/save is a release latency optimization, not a release
@@ -1067,7 +1069,7 @@ jobs:
           cache-on-failure: true
           cache-bin: false
           prune-superseded-release-generations: true
-          save: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only && github.ref == 'refs/heads/main') }}
+          save: ${{ env.HARN_RELEASE_CACHE_SAVE_ENABLED == 'true' }}
 
       - name: Summarize cache mode
         shell: bash
@@ -1076,7 +1078,6 @@ jobs:
           HARN_RELEASE_RUNNER_LABEL: ${{ matrix.runner }}
           HARN_RELEASE_SCCACHE_REQUESTED: ${{ matrix.use_sccache }}
           HARN_RELEASE_RUST_CACHE_HIT: ${{ steps.rust-cache.outputs.cache-hit || '<unset>' }}
-          HARN_RELEASE_CACHE_SAVE_ENABLED: ${{ ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only && github.ref == 'refs/heads/main')) && 'true' || 'false' }}
         run: |
           set -euo pipefail
           {

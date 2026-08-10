@@ -218,6 +218,12 @@ const RELEASE_CACHE_JOB = "build"
 
 const RELEASE_CACHE_SHARED_KEY = "release-$" + "{{ matrix.target }}"
 
+const RELEASE_CACHE_SAVE_ENV = "$"
+  + "{{ ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && (inputs.warm_cache_only || inputs.candidate_only) && github.ref == 'refs/heads/main')) && 'true' || 'false' }}"
+
+const RELEASE_CACHE_SAVE_REQUEST = "$"
+  + "{{ env.HARN_RELEASE_CACHE_SAVE_ENABLED == 'true' }}"
+
 const CLI_COLD_START_WORKFLOW = "cli-cold-start-budget.yml"
 
 const CLI_COLD_START_JOB = "cold-start-budget"
@@ -935,6 +941,12 @@ fn release_cache_retention_errors(workflows: dict) -> list<string> {
     errors = errors
       + ["${RELEASE_CACHE_WORKFLOW}:${RELEASE_CACHE_JOB} must grant actions: write"]
   }
+  if trim(job?.env?.HARN_RELEASE_CACHE_SAVE_ENABLED ?? "") != RELEASE_CACHE_SAVE_ENV {
+    errors = errors
+      + [
+      "${RELEASE_CACHE_WORKFLOW}:${RELEASE_CACHE_JOB} must let main warm runs and exact candidate builds refresh the release cache",
+    ]
+  }
   const writers = (job?.steps ?? []).filter(
     { step ->
       return step_uses(step) == "./.github/actions/rust-cache"
@@ -949,6 +961,13 @@ fn release_cache_retention_errors(workflows: dict) -> list<string> {
     errors = errors
       + [
       "${RELEASE_CACHE_WORKFLOW}:${RELEASE_CACHE_JOB} must prune superseded release generations before saving",
+    ]
+  }
+  if len(writers) == 1
+    && trim(to_string(writers[0]?.with?.save ?? "")) != RELEASE_CACHE_SAVE_REQUEST {
+    errors = errors
+      + [
+      "${RELEASE_CACHE_WORKFLOW}:${RELEASE_CACHE_JOB} must derive the release cache write from HARN_RELEASE_CACHE_SAVE_ENABLED",
     ]
   }
   return errors

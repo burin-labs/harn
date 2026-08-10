@@ -308,13 +308,18 @@ fn workflows() {
       jobs: {
         build: {
           permissions: {actions: "write", contents: "write"},
+          env: {
+            HARN_RELEASE_CACHE_SAVE_ENABLED: gha_expression(
+              "((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && (inputs.warm_cache_only || inputs.candidate_only) && github.ref == 'refs/heads/main')) && 'true' || 'false'",
+            ),
+          },
           steps: [
             {
               uses: "./.github/actions/rust-cache",
               with: {
                 "shared-key": "release-" + gha_expression("matrix.target"),
                 "prune-superseded-release-generations": true,
-                save: gha_expression("needs.setup.outputs.build_mode == 'warm'"),
+                save: gha_expression("env.HARN_RELEASE_CACHE_SAVE_ENABLED == 'true'"),
               },
             },
           ],
@@ -1113,6 +1118,44 @@ pipeline test_ci_cache_policy_rejects_unbounded_release_writer(harness: Harness,
   assert(
     errors.contains(
       "build-release-binaries.yml:build must prune superseded release generations before saving",
+    ),
+  )
+}
+
+pipeline test_ci_cache_policy_rejects_candidate_cache_starvation(harness: Harness, task) {
+  const bounded = workflows()["build-release-binaries.yml"].jobs.build
+  const release_cache = bounded.steps[0]
+  const invalid = {
+    ...workflows(),
+    "build-release-binaries.yml": {
+      jobs: {
+        build: {
+          ...bounded,
+          env: {
+            HARN_RELEASE_CACHE_SAVE_ENABLED: gha_expression(
+              "github.event_name == 'workflow_dispatch' && inputs.warm_cache_only",
+            ),
+          },
+          steps: [
+            {
+              ...release_cache,
+              with: {...release_cache.with, save: gha_expression("inputs.warm_cache_only")},
+            },
+          ],
+        },
+        cache_budget: workflows()["build-release-binaries.yml"].jobs.cache_budget,
+      },
+    },
+  }
+  const errors = ci_cache_policy_errors(policy(), action(), node_action(), invalid)
+  assert(
+    errors.contains(
+      "build-release-binaries.yml:build must let main warm runs and exact candidate builds refresh the release cache",
+    ),
+  )
+  assert(
+    errors.contains(
+      "build-release-binaries.yml:build must derive the release cache write from HARN_RELEASE_CACHE_SAVE_ENABLED",
     ),
   )
 }
