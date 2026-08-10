@@ -34,11 +34,17 @@ pipeline main(harness: Harness) {
   harness.fs.mkdir(root, true)
   harness.fs.mkdir(outside, true)
   const tools = agent_edit_tools(harness.fs, harness.tools, nil, {root: root, cwd: root})
+  // Direct dispatch inherits an ambient agent session when no identity is
+  // supplied. Give this filesystem fixture one explicit owner so a staged
+  // session left active by its process-isolated suite worker cannot capture
+  // writes that the assertions read from disk.
+  const dispatch_options = {session_id: "edit-tools-direct-" + harness.random.uuid()}
   // --- write_file happy path: create + read back ---
   const wrote = agent_dispatch_tool_call(
     harness.tools,
     {id: "w1", name: "write_file", arguments: {path: "notes/hello.txt", content: "alpha\nbeta\n"}},
     tools,
+    dispatch_options,
   )
   harness.stdio.println(wrote.ok)
   const wrote_data = json_parse(wrote.rendered_result)
@@ -53,6 +59,7 @@ pipeline main(harness: Harness) {
       arguments: {path: "notes/hello.txt", old_string: "beta", new_string: "gamma"},
     },
     tools,
+    dispatch_options,
   )
   harness.stdio.println(edited.ok)
   const edited_data = json_parse(edited.rendered_result)
@@ -68,6 +75,7 @@ pipeline main(harness: Harness) {
       arguments: {path: "notes/rep.txt", old_string: "x", new_string: "y", replace_all: true},
     },
     tools,
+    dispatch_options,
   )
   const all_data = json_parse(all.rendered_result)
   harness.stdio.println(all_data.replacements)
@@ -81,6 +89,7 @@ pipeline main(harness: Harness) {
       arguments: {path: "notes/rep.txt", old_string: "y", new_string: "z"},
     },
     tools,
+    dispatch_options,
   )
   harness.stdio.println(ambiguous.ok)
   harness.stdio.println(contains(ambiguous.error, "not unique"))
@@ -93,6 +102,7 @@ pipeline main(harness: Harness) {
       arguments: {path: "notes/hello.txt", old_string: "nope", new_string: "q"},
     },
     tools,
+    dispatch_options,
   )
   harness.stdio.println(missing.ok)
   harness.stdio.println(contains(missing.error, "not found"))
@@ -101,6 +111,7 @@ pipeline main(harness: Harness) {
     harness.tools,
     {id: "d1", name: "create_directory", arguments: {path: "deep/nested/dir"}},
     tools,
+    dispatch_options,
   )
   harness.stdio.println(made.ok)
   harness.stdio.println(harness.fs.stat(path_join(root, "deep/nested/dir")).is_dir)
@@ -109,6 +120,7 @@ pipeline main(harness: Harness) {
     harness.tools,
     {id: "x1", name: "delete_path", arguments: {path: "notes/rep.txt"}},
     tools,
+    dispatch_options,
   )
   const del_data = json_parse(del.rendered_result)
   harness.stdio.println(del_data.removed)
@@ -118,6 +130,7 @@ pipeline main(harness: Harness) {
     harness.tools,
     {id: "x2", name: "delete_path", arguments: {path: "notes"}},
     tools,
+    dispatch_options,
   )
   harness.stdio.println(refuse.ok)
   harness.stdio.println(contains(refuse.error, "recursive"))
@@ -127,6 +140,7 @@ pipeline main(harness: Harness) {
     harness.tools,
     {id: "x3", name: "delete_path", arguments: {path: "notes", recursive: true}},
     tools,
+    dispatch_options,
   )
   const purge_data = json_parse(purge.rendered_result)
   harness.stdio.println(purge_data.removed)
@@ -136,6 +150,7 @@ pipeline main(harness: Harness) {
     harness.tools,
     {id: "o1", name: "write_file", arguments: {path: path_join(outside, "evil.txt"), content: "x"}},
     tools,
+    dispatch_options,
   )
   harness.stdio.println(escape.ok)
   harness.stdio.println(contains(escape.error, "absolute paths are disabled"))
@@ -195,6 +210,7 @@ pipeline main(harness: Harness) {
       harness.tools,
       {id: call.call_id, name: call.tool_name, arguments: call.tool_args},
       edit,
+      dispatch_options,
     )
   }
   const consent_hits = harness.runtime.atomic(0)
