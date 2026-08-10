@@ -1,3 +1,4 @@
-Release archive builds now retry transient GitHub artifact download failures
-twice before failing closed, so a brief endpoint refusal cannot discard an
-otherwise fully certified multi-platform release candidate.
+Release-critical artifact restores now retry bounded transient GitHub service
+failures while preserving the official downloader's terminal integrity checks.
+Candidate manifests also preserve each target's producing attempt, so rerunning
+only a failed target can reuse verified artifacts from earlier attempts.

@@ -726,14 +726,6 @@ pipeline test_release_workflow_generates_aot_once_for_release_and_benchmark_targ
     workflow.jobs.build.steps,
     "Restore target-independent CLI AOT payload",
   )
-  const retry_restore = release_workflow_step(
-    workflow.jobs.build.steps,
-    "Retry target-independent CLI AOT payload restore",
-  )
-  const final_restore = release_workflow_step(
-    workflow.jobs.build.steps,
-    "Final target-independent CLI AOT payload restore",
-  )
   const build = release_workflow_step(workflow.jobs.build.steps, "Build")
   const aot_condition =
     "needs.setup.outputs.is_release == 'true' || needs.setup.outputs.build_mode == 'benchmark' || needs.setup.outputs.build_mode == 'candidate'"
@@ -743,20 +735,37 @@ pipeline test_release_workflow_generates_aot_once_for_release_and_benchmark_targ
   assert_eq(generator.if, aot_condition)
   assert_eq(generator.run, "make gen-cli-aot && make check-cli-aot")
   assert_eq(restore.if, aot_condition)
-  assert_eq(restore.uses, "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c")
-  assert_eq(restore.id, "restore_cli_aot_primary")
-  assert_eq(restore["continue-on-error"], true)
-  assert_eq(retry_restore.if, "steps.restore_cli_aot_primary.outcome == 'failure'")
-  assert_eq(retry_restore["continue-on-error"], true)
-  assert_eq(
-    final_restore.if,
-    "steps.restore_cli_aot_primary.outcome == 'failure' && steps.restore_cli_aot_retry.outcome == 'failure'",
-  )
-  assert_eq(final_restore["continue-on-error"], nil)
+  assert_eq(restore.uses, "./.github/actions/download-artifact-with-retry")
   assert_eq(build.env?.HARN_REQUIRE_CLI_AOT, "$" + "{{ (" + aot_condition + ") && '1' || '0' }}")
   assert_eq(workflow.jobs.build.needs.contains("prepare_cli_aot"), true)
   assert_eq(workflow.jobs.release.needs.contains("prepare_cli_aot"), true)
   assert_eq(workflow.jobs.release.if.contains("needs.prepare_cli_aot.result"), true)
+}
+
+@test
+pipeline test_artifact_download_retry_is_bounded_and_fail_closed(harness: Harness, task) {
+  const action = harness.fs.read_text(
+    "../../.github/actions/download-artifact-with-retry/action.yml",
+  )
+  const release_workflow_text = harness.fs.read_text(
+    "../../.github/workflows/build-release-binaries.yml",
+  )
+  const ci_workflow_text = harness.fs.read_text("../../.github/workflows/ci.yml")
+  const official_download =
+    "uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c"
+  const bounded_download = "uses: ./.github/actions/download-artifact-with-retry"
+  assert_eq(action.split(official_download).count, 4)
+  assert_eq(action.split("continue-on-error: true").count, 3)
+  assert(action.contains("if: steps.attempt_1.outcome == 'failure'"))
+  assert(action.contains("if: steps.attempt_2.outcome == 'failure'"))
+  assert_eq(action.split("sleep 2").count, 2)
+  assert_eq(action.split("sleep 5").count, 2)
+  assert(action.contains("Download artifact (attempt 3/3)"))
+  assert(!action.contains("continue-on-error: false"))
+  assert(!release_workflow_text.contains(official_download))
+  assert(!ci_workflow_text.contains(official_download))
+  assert_eq(release_workflow_text.split(bounded_download).count, 3)
+  assert_eq(ci_workflow_text.split(bounded_download).count, 6)
 }
 
 // --- format_mib -------------------------------------------------------------

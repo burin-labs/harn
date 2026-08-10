@@ -110,6 +110,7 @@ write_receipt() {
   local attestation_identity="${4:-burin-labs/harn/.github/workflows/build-release-binaries.yml@$policy_revision}"
   local signing_status="${5:-signed}"
   local notarization_status="${6:-not_applicable}"
+  local producer_attempt="${7:-$run_attempt}"
   "$writer" \
     --output "$fixture/receipts/$target.json" \
     --source-commit "$source_commit" \
@@ -121,7 +122,7 @@ write_receipt() {
     --notarization-status "$notarization_status" \
     --attestation-identity "$attestation_identity" \
     --run-id "$run_id" \
-    --run-attempt "$run_attempt" \
+    --run-attempt "$producer_attempt" \
     --workflow-url "$workflow_url"
 }
 
@@ -213,6 +214,53 @@ expect_failure wrong_policy_revision \
 
 new_fixture
 expect_failure wrong_run_id run_verifier --expected-run-id 42
+
+new_fixture
+rm -f "$fixture/manifest.json"
+rm -f "$fixture/receipts/aarch64-apple-darwin.json"
+write_receipt \
+  aarch64-apple-darwin \
+  harn-aarch64-apple-darwin.tar.gz \
+  "$(sha256_file_local "$fixture/artifacts/harn-aarch64-apple-darwin.tar.gz")" \
+  "burin-labs/harn/.github/workflows/build-release-binaries.yml@$policy_revision" \
+  signed \
+  notarized \
+  1
+"$assembler" \
+  --output "$fixture/manifest.json" \
+  --source-commit "$source_commit" \
+  --policy-revision "$policy_revision" \
+  --run-id "$run_id" \
+  --run-attempt 2 \
+  --receipts-dir "$fixture/receipts" \
+  --workflow-url "$workflow_url"
+expect_success mixed_producer_attempts run_verifier
+
+new_fixture
+jq '.runAttempt = "2"' \
+  "$fixture/receipts/aarch64-apple-darwin.json" >"$fixture/receipt.tmp"
+mv "$fixture/receipt.tmp" "$fixture/receipts/aarch64-apple-darwin.json"
+expect_failure assemble_rejects_future_producer_attempt \
+  "$assembler" \
+  --output "$fixture/manifest-future-attempt.json" \
+  --source-commit "$source_commit" \
+  --policy-revision "$policy_revision" \
+  --run-id "$run_id" \
+  --run-attempt "$run_attempt" \
+  --receipts-dir "$fixture/receipts"
+
+new_fixture
+jq '.runId = "9002"' \
+  "$fixture/receipts/aarch64-apple-darwin.json" >"$fixture/receipt.tmp"
+mv "$fixture/receipt.tmp" "$fixture/receipts/aarch64-apple-darwin.json"
+expect_failure assemble_rejects_other_run \
+  "$assembler" \
+  --output "$fixture/manifest-other-run.json" \
+  --source-commit "$source_commit" \
+  --policy-revision "$policy_revision" \
+  --run-id "$run_id" \
+  --run-attempt "$run_attempt" \
+  --receipts-dir "$fixture/receipts"
 
 new_fixture
 jq '.archives["aarch64-apple-darwin"].attestationIdentity = ""' \

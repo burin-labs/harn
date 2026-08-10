@@ -85,7 +85,7 @@ validate_candidate_manifest_json() {
     ($doc.sourceCommit | type == "string" and test("^[0-9a-f]{40}$")) and
     ($doc.policyRevision | type == "string" and test("^[0-9a-f]{40}$")) and
     ($doc.runId | type == "string" and test("^[0-9]+$")) and
-    ($doc.runAttempt | type == "string" and test("^[0-9]+$")) and
+    ($doc.runAttempt | type == "string" and test("^[1-9][0-9]*$")) and
     ($doc.archives | type == "object") and
     ([$doc.archives | keys[]] | sort) == ($expectedTargets | sort) and
     all($expectedTargets[];
@@ -96,8 +96,9 @@ validate_candidate_manifest_json() {
       ($entry.signingStatus | IN("signed", "not_applicable")) and
       ($entry.notarizationStatus | IN("notarized", "not_applicable")) and
       ($entry.attestationIdentity | type == "string" and length > 0) and
-      ($entry.runId | type == "string" and test("^[0-9]+$")) and
-      ($entry.runAttempt | type == "string" and test("^[0-9]+$"))
+      ($entry.runId == $doc.runId) and
+      ($entry.runAttempt | type == "string" and test("^[1-9][0-9]*$")) and
+      (($entry.runAttempt | tonumber) <= ($doc.runAttempt | tonumber))
     )
     ' "$manifest_file" >/dev/null; then
     echo "error: candidate archive manifest is malformed or incomplete: $manifest_file" >&2
