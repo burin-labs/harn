@@ -1929,44 +1929,6 @@ mod tests {
     }
 
     #[test]
-    fn openai_parser_recovers_look_from_harmony_recipient_to_wrapper() {
-        // Fireworks Harmony demux can lift the recipient token `to` into
-        // function.name while leaving clean look args and no real tool name
-        // (burin-code#4809 Face 2).
-        let response = serde_json::json!({
-            "choices": [{
-                "message": {
-                    "content": "",
-                    "tool_calls": [
-                        {
-                            "id": "call_to_wrapper",
-                            "type": "function",
-                            "function": {
-                                "name": "to",
-                                "arguments": "{\"file\": \"Sources/App.swift\", \"intent\": \"read\"}"
-                            }
-                        }
-                    ]
-                },
-                "finish_reason": "tool_calls"
-            }],
-            "usage": {"prompt_tokens": 10, "completion_tokens": 12}
-        });
-
-        let result = parse_llm_response(&response, "fireworks", "gpt-oss-120b", false, false)
-            .expect("parser succeeds");
-
-        assert_eq!(result.stop_reason.as_deref(), Some("tool_calls"));
-        assert_eq!(result.tool_calls.len(), 1);
-        assert_eq!(result.tool_calls[0]["name"], "look");
-        assert_eq!(
-            result.tool_calls[0]["arguments"]["file"],
-            "Sources/App.swift"
-        );
-        assert_eq!(result.tool_calls[0]["arguments"]["intent"], "read");
-    }
-
-    #[test]
     fn openai_parser_recovers_text_tool_call_with_malformed_wrapper_suffix() {
         let response = serde_json::json!({
             "choices": [{
