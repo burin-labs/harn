@@ -33,8 +33,9 @@ make_fixture_repo() {
 
   mkdir -p "$repo/scripts/lib" "$repo/bin"
   cp "$repo_root/scripts/dev_setup.sh" "$repo/scripts/dev_setup.sh"
+  cp "$repo_root/scripts/cargo_target_seed.sh" "$repo/scripts/cargo_target_seed.sh"
   cp "$repo_root/scripts/lib/file_time.sh" "$repo/scripts/lib/file_time.sh"
-  chmod +x "$repo/scripts/dev_setup.sh"
+  chmod +x "$repo/scripts/dev_setup.sh" "$repo/scripts/cargo_target_seed.sh"
   printf '[package]\nname = "setup-fixture"\nversion = "0.1.0"\n' > "$repo/Cargo.toml"
   printf '#!/usr/bin/env bash\nset -euo pipefail\n' > "$repo/scripts/configure_merge_drivers.sh"
   printf '#!/usr/bin/env bash\nset -euo pipefail\n' > "$repo/scripts/sign_local_macos.sh"
@@ -88,6 +89,8 @@ run_setup() {
     TMPDIR="$tmp_root/tmp-$profile" \
     HARN_DEV_SETUP_PROFILE="$profile" \
     HARN_DEV_SETUP_FORCE=1 \
+    HARN_CARGO_TARGET_SEED_KEY=fixture-toolchain \
+    HARN_CARGO_TARGET_SEED_TEST_COPY=1 \
     HARN_DEV_SETUP_STATE_DIR="$tmp_root/state-$profile" \
     HARN_DEV_TARGET_WORKTREE_PATH="${SETUP_TEST_WORKTREE_PATH:-$repo}" \
     DEV_SETUP_TEST_CARGO_RECORD="$cargo_record" \
@@ -108,6 +111,12 @@ rust_target_dir="$tmp_root/cache-rust/harn/dev-setup/harn-target/$(basename "$tm
 rust_harn_bin="$rust_target_dir/debug/harn"
 if [[ ! -x "$rust_harn_bin" ]]; then
   echo "rust setup did not leave an executable production Harn binary" >&2
+  exit 1
+fi
+rust_seed_dir="$tmp_root/cache-rust/harn/dev-setup/cargo-target-seed/fixture-toolchain"
+if [[ ! -f "$rust_seed_dir/.harn-cargo-target-seed" \
+  || ! -x "$rust_seed_dir/debug/harn" ]]; then
+  echo "rust setup did not publish its completed canonical target as a reusable seed" >&2
   exit 1
 fi
 if grep -Fq 'install ' "$rust_cargo"; then

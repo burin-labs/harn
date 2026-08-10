@@ -74,7 +74,11 @@ live in [Engineering principles](docs/src/dev/engineering-principles.md):
 - Never share a mutable Cargo `target-dir` or `build-dir` across concurrent
   worktrees. Every setup profile derives one stable per-worktree target under
   `${XDG_CACHE_HOME:-$HOME/.cache}/harn/dev-setup/harn-target/` and configures
-  sccache for cross-worktree object reuse.
+  sccache for compiler-object reuse. Because released sccache versions include
+  Rust's absolute compilation directory in the cache key, setup also restores
+  an immutable toolchain-keyed Cargo target seed with filesystem copy-on-write.
+  Each lane gets private files; unsupported filesystems simply take the cold
+  build path. A successful canonical CLI build publishes the seed once.
 - `HARN_DEV_TARGET_WORKTREE_PATH` and `CODEX_WORKTREE_PATH` must name the
   checkout being configured. Setup ignores stale sibling-worktree values.
 - Setup phases are fingerprinted under `.codex/dev-setup/`; use
