@@ -154,6 +154,52 @@ fn registered_provider_metadata_builds_oauth_request_with_cli_overrides() {
 }
 
 #[test]
+fn registered_provider_parser_accepts_secret_safe_manual_input() {
+    let parsed = parse_external_provider_connect(
+        vec![
+            "duffel".to_string(),
+            "--from-env".to_string(),
+            "DUFFEL_TEST_KEY".to_string(),
+            "--json".to_string(),
+        ],
+        false,
+    )
+    .expect("manual provider arguments");
+
+    assert_eq!(parsed.provider, "duffel");
+    assert_eq!(parsed.from_env.as_deref(), Some("DUFFEL_TEST_KEY"));
+    assert!(parsed.value_file.is_none());
+    assert!(parsed.oauth.json);
+}
+
+#[test]
+fn registered_api_key_provider_requires_one_typed_secret_target() {
+    let setup = package::ProviderSetupManifest {
+        auth_type: Some("api_key".to_string()),
+        required_secrets: vec!["duffel/test-access-token".to_string()],
+        ..package::ProviderSetupManifest::default()
+    };
+    assert_eq!(
+        api_key_secret_for_provider("duffel", &setup).expect("manual setup"),
+        Some("duffel/test-access-token")
+    );
+
+    let ambiguous = package::ProviderSetupManifest {
+        auth_type: Some("api-key".to_string()),
+        required_secrets: vec![
+            "buildkite/webhook-token".to_string(),
+            "buildkite/api-token".to_string(),
+        ],
+        ..package::ProviderSetupManifest::default()
+    };
+    let error = api_key_secret_for_provider("buildkite", &ambiguous)
+        .expect_err("multiple secrets need explicit commands");
+    assert!(error.contains("requires 2 separate secrets"));
+    assert!(error.contains("--secret-id buildkite/webhook-token"));
+    assert!(error.contains("--secret-id buildkite/api-token"));
+}
+
+#[test]
 fn missing_required_scopes_splits_oauth_scope_strings() {
     let required = vec![
         "issues:read".to_string(),

@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::time::Duration;
 
 use clap::Parser as ClapParser;
@@ -265,7 +266,13 @@ async fn run_connect_inner(args: ConnectArgs) -> Result<(), String> {
         ConnectCommand::Generic(args) => run_connect_generic(&args).await,
         ConnectCommand::Provider(raw) => {
             let parsed = parse_external_provider_connect(raw, json_output)?;
-            run_connect_registered_provider(&parsed.provider, &parsed.oauth).await
+            run_connect_registered_provider(
+                &parsed.provider,
+                &parsed.oauth,
+                parsed.from_env,
+                parsed.value_file,
+            )
+            .await
         }
     }
 }
@@ -274,6 +281,12 @@ async fn run_connect_inner(args: ConnectArgs) -> Result<(), String> {
 #[command(no_binary_name = true, disable_help_flag = true)]
 struct ExternalProviderConnectArgs {
     provider: String,
+    /// Read a manual connector secret from this environment variable.
+    #[arg(long = "from-env", value_name = "NAME", conflicts_with = "value_file")]
+    from_env: Option<String>,
+    /// Read a manual connector secret from this file.
+    #[arg(long = "value-file", value_name = "PATH", conflicts_with = "from_env")]
+    value_file: Option<PathBuf>,
     #[command(flatten)]
     oauth: ConnectOAuthArgs,
 }

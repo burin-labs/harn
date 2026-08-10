@@ -2461,6 +2461,7 @@ harn connect notion \
 harn connect generic acme https://mcp.example.com/mcp
 harn connect --generic acme https://mcp.example.com/mcp
 harn connect acme
+harn connect duffel --from-env DUFFEL_TEST_KEY
 harn connect --list
 harn connect --refresh notion
 harn connect --revoke slack
@@ -2477,10 +2478,17 @@ to both the authorization and token endpoints. `harn mcp login` derives that
 resource from the canonical MCP server URI: lowercase scheme and host, no
 default port, no query string, no fragment, and no trailing slash.
 
-`harn connect <provider>` is available for providers registered in the nearest
-`harn.toml` `[[providers]]` table with `oauth = { ... }` metadata. CLI flags
-such as `--client-id`, `--scope`, `--auth-url`, and `--token-url` override the
-manifest metadata for that run.
+`harn connect <provider>` reads authentication metadata for providers in the
+nearest `harn.toml` `[[providers]]` table. OAuth metadata starts the browser
+flow; flags such as `--client-id`, `--scope`, `--auth-url`, and `--token-url`
+override that metadata for one run.
+
+For `auth_type = "api-key"` with one `required_secrets` entry, the same command
+prompts without echoing the key. Use `--from-env NAME` or `--value-file PATH`
+for unattended setup; the option contains only the source name or path, never
+the secret. A connector with several required secrets returns the exact
+`harn connect api-key` command for each target so their values cannot be mixed
+up.
 
 Stored OAuth tokens are written under connector-friendly secret ids:
 

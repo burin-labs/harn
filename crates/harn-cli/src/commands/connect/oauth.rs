@@ -6,17 +6,17 @@ use harn_vm::mcp_auth::{
     OAuthClientAuthOptions, DEFAULT_MCP_OAUTH_CLIENT_ID_METADATA_DOCUMENT_URL,
 };
 use sha2::{Digest, Sha256};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use url::Url;
 
-use crate::cli::{ConnectGenericArgs, ConnectLinearArgs, ConnectOAuthArgs};
+use crate::cli::{ConnectApiKeyArgs, ConnectGenericArgs, ConnectLinearArgs, ConnectOAuthArgs};
 use crate::net;
 use crate::package::{self, ProviderOAuthManifest};
 
 use super::callback::{bind_loopback_listener, wait_for_oauth_response};
 use super::store::{
     connector_token_summary, current_unix_timestamp, format_expiry, load_connector_token,
-    save_connector_token,
+    run_connect_api_key, save_connector_token,
 };
 use super::{
     DynamicClientRegistrationResponse, OAuthConnectRequest, OAuthProviderDefaults,
@@ -107,31 +107,124 @@ pub(super) async fn run_connect_generic(args: &ConnectGenericArgs) -> Result<(),
 pub(super) async fn run_connect_registered_provider(
     provider: &str,
     args: &ConnectOAuthArgs,
+    from_env: Option<String>,
+    value_file: Option<PathBuf>,
 ) -> Result<(), String> {
-    if let Some(metadata) = registered_provider_oauth(provider)? {
+    let registered = registered_provider(provider)?;
+    if let Some(metadata) = registered.as_ref().and_then(|entry| entry.oauth.as_ref()) {
+        reject_manual_secret_options(provider, from_env.as_deref(), value_file.as_deref())?;
         return run_oauth_connect(oauth_request_from_provider_metadata(
-            provider, args, &metadata,
+            provider, args, metadata,
         )?)
         .await;
     }
     if oauth_provider_defaults(provider).is_some() {
+        reject_manual_secret_options(provider, from_env.as_deref(), value_file.as_deref())?;
         return run_connect_named_oauth(provider, args).await;
     }
+    if let Some(setup) = registered.as_ref().and_then(|entry| entry.setup.as_ref()) {
+        if let Some(secret_id) = api_key_secret_for_provider(provider, setup)? {
+            reject_oauth_options_for_manual_provider(provider, args)?;
+            return run_connect_api_key(&ConnectApiKeyArgs {
+                connector: provider.to_string(),
+                secret_id: secret_id.to_string(),
+                value: None,
+                value_file,
+                from_env,
+                scopes: (!setup.required_scopes.is_empty())
+                    .then(|| setup.required_scopes.join(" ")),
+                json: args.json,
+            })
+            .await;
+        }
+    }
     Err(format!(
-        "provider '{provider}' is not registered with OAuth metadata; add `oauth = {{ resource = \"...\" }}` to its [[providers]] entry or use `harn connect generic {provider} <url>`"
+        "provider '{provider}' has no supported authentication setup; declare OAuth metadata or providers.setup auth_type = \"api-key\" with exactly one required secret"
     ))
 }
 
-pub(super) fn registered_provider_oauth(
+pub(super) fn api_key_secret_for_provider<'a>(
     provider: &str,
-) -> Result<Option<ProviderOAuthManifest>, String> {
+    setup: &'a package::ProviderSetupManifest,
+) -> Result<Option<&'a str>, String> {
+    let auth_type = setup
+        .auth_type
+        .as_deref()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase()
+        .replace('_', "-");
+    if auth_type != "api-key" {
+        return Ok(None);
+    }
+    if setup.required_secrets.len() != 1 {
+        return Err(manual_connector_setup_error(
+            provider,
+            &setup.required_secrets,
+        ));
+    }
+    Ok(setup.required_secrets.first().map(String::as_str))
+}
+
+fn reject_manual_secret_options(
+    provider: &str,
+    from_env: Option<&str>,
+    value_file: Option<&Path>,
+) -> Result<(), String> {
+    if from_env.is_some() || value_file.is_some() {
+        return Err(format!(
+            "provider '{provider}' uses OAuth; --from-env and --value-file are only for manual API-key connectors"
+        ));
+    }
+    Ok(())
+}
+
+fn reject_oauth_options_for_manual_provider(
+    provider: &str,
+    args: &ConnectOAuthArgs,
+) -> Result<(), String> {
+    if args.client_id.is_some()
+        || args.client_secret.is_some()
+        || args.scope.is_some()
+        || args.resource.is_some()
+        || args.auth_url.is_some()
+        || args.token_url.is_some()
+        || args.token_auth_method.is_some()
+        || args.no_open
+    {
+        return Err(format!(
+            "provider '{provider}' uses an API key; OAuth options such as --client-id and --scope do not apply"
+        ));
+    }
+    Ok(())
+}
+
+fn manual_connector_setup_error(provider: &str, required_secrets: &[String]) -> String {
+    if required_secrets.is_empty() {
+        return format!(
+            "provider '{provider}' declares API-key authentication but no required secret"
+        );
+    }
+    let commands = required_secrets
+        .iter()
+        .map(|secret| format!("`harn connect api-key --connector {provider} --secret-id {secret}`"))
+        .collect::<Vec<_>>()
+        .join(", then ");
+    format!(
+        "provider '{provider}' requires {} separate secrets; store them with {commands}",
+        required_secrets.len()
+    )
+}
+
+fn registered_provider(
+    provider: &str,
+) -> Result<Option<package::ResolvedProviderConnectorConfig>, String> {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let extensions = package::try_load_runtime_extensions(&cwd)?;
     Ok(extensions
         .provider_connectors
         .into_iter()
-        .find(|entry| entry.id.as_str() == provider)
-        .and_then(|entry| entry.oauth))
+        .find(|entry| entry.id.as_str() == provider))
 }
 
 pub(super) fn oauth_request_from_provider_metadata(
