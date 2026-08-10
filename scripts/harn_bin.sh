@@ -25,7 +25,8 @@ Resolves a worktree harn binary through Cargo unless HARN_BIN is explicit. With
 command arguments, executes the resolved binary.
 
 Environment:
-  HARN_BIN           explicit executable to validate and use
+  HARN_BIN           explicit executable to validate and use; the resolved path
+                     is exported to the child process for nested Harn commands
   HARN_BIN_NO_BUILD  set to 1 to forbid implicit Cargo builds
   CARGO_TARGET_DIR                 target directory for --no-build worktree lookup
   HARN_BIN_CARGO_TIMEOUT_SECONDS   Cargo probe deadline in seconds (default: 600)
@@ -63,4 +64,5 @@ if [[ "$print_only" = "1" ]]; then
   exit 0
 fi
 
+export HARN_BIN="$bin"
 exec "$bin" "$@"

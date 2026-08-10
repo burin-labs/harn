@@ -46,6 +46,12 @@ Release and audit gates that call `make test` must have nextest installed
 (they do after `make setup`); failing loudly is preferred to silently changing
 what "the tests pass" means (#6145).
 
+Make targets run Harn scripts through `scripts/harn_bin.sh`. The runner exports
+the exact validated executable as `HARN_BIN` to the child process. A Harn script
+that starts a nested Harn check should reuse that path instead of starting a
+second Cargo build. Set `HARN_BIN` yourself only when you need to pin a different
+executable; the runner validates it before use.
+
 ## Approved patterns
 
 ### `harn_clock::Clock` injection (preferred for runtime code)
