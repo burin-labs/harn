@@ -339,13 +339,23 @@ pub(super) fn elide_image_base64(value: &serde_json::Value) -> serde_json::Value
 /// Coerce a Harn tool handler's return value into the tool-result payload.
 ///
 /// Handler returns are normally rendered to their display string, because tool
-/// results are text the model reads. Preserve structure only for the explicit
-/// `harn.agent_tool_handler_result.v1` envelope and screenshot-bearing computer
-/// results. Every other return keeps its historical `String(display())`
-/// behavior.
+/// results are text the model reads. Preserve structure for the explicit
+/// `harn.agent_tool_handler_result.v1` envelope, screenshot-bearing computer
+/// results, and typed domain outcomes with a boolean `ok` or `success` field.
+/// The dispatch boundary needs those outcome fields to distinguish "the
+/// handler returned" from "the requested operation succeeded."
 pub(super) fn harn_handler_result_value(val: &VmValue) -> serde_json::Value {
     let json = crate::llm::vm_value_to_json(val);
-    if agent_tool_handler_result_text(&json).is_some() || json_carries_screenshot(&json) {
+    let carries_typed_outcome = json.as_object().is_some_and(|object| {
+        object.get("ok").is_some_and(serde_json::Value::is_boolean)
+            || object
+                .get("success")
+                .is_some_and(serde_json::Value::is_boolean)
+    });
+    if agent_tool_handler_result_text(&json).is_some()
+        || json_carries_screenshot(&json)
+        || carries_typed_outcome
+    {
         json
     } else {
         serde_json::Value::String(val.display())
@@ -1348,6 +1358,32 @@ mod tests {
         let stringified =
             serde_json::Value::String(r#"{"ok": false, "error": "boom"}"#.to_string());
         assert_eq!(ok_result_failure_category(&stringified), Some("tool_error"));
+    }
+
+    #[test]
+    fn harn_handler_preserves_typed_domain_outcomes() {
+        let failed = crate::stdlib::json_to_vm_value(&serde_json::json!({
+            "ok": false,
+            "error": {"code": "credential_missing", "message": "Connect this service first."}
+        }));
+        let successful = crate::stdlib::json_to_vm_value(&serde_json::json!({
+            "success": true,
+            "data": {"offer_id": "off_test"}
+        }));
+        let ordinary = crate::stdlib::json_to_vm_value(&serde_json::json!({"count": 2}));
+
+        assert_eq!(
+            harn_handler_result_value(&failed),
+            serde_json::json!({
+                "ok": false,
+                "error": {"code": "credential_missing", "message": "Connect this service first."}
+            })
+        );
+        assert_eq!(
+            harn_handler_result_value(&successful),
+            serde_json::json!({"success": true, "data": {"offer_id": "off_test"}})
+        );
+        assert!(harn_handler_result_value(&ordinary).is_string());
     }
 
     #[test]

@@ -2817,7 +2817,7 @@ shape; new keys are additive):
   dispatch: list | dict | nil,
   tool_count: int,                   // calls dispatched this turn
   tool_results: list<dict>,          // structured per-call results
-  successful_tool_names: list<string>,
+  successful_tool_names: list<string>, // excludes typed result payloads with ok/success=false
   rejected_tool_names: list<string>,
   session_successful_tools: list<string>,
   session_rejected_tools: list<string>,

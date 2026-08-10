@@ -219,10 +219,20 @@ fn __agent_tool_result_edit_status(result) -> AgentEditOutcomeStatus? {
 
 fn __agent_tool_result_product_error(result) -> bool? {
   const raw = result?.product_error
-  if raw == nil {
+  if raw != nil {
+    return raw ? true : false
+  }
+  const payload = result?.result
+  if type_of(payload) != "dict" {
     return nil
   }
-  return raw ? true : false
+  if payload?.ok != nil {
+    return payload.ok ? false : true
+  }
+  if payload?.success != nil {
+    return payload.success ? false : true
+  }
+  return nil
 }
 
 fn __agent_tool_result_diagnostics_error_count(result) -> int? {
@@ -251,8 +261,11 @@ fn __agent_tool_result_kind(
  * Classify a dispatched tool result from its STRUCTURED envelope fields only —
  * transport status (`ok`/`success`/`status`), the typed error code/category,
  * and any producer-stamped `product_error` / `edit_status` / diagnostics
- * fields. It never inspects rendered or observation prose. This is the single
- * contract both the agent loop and host tool-result classifiers converge on.
+ * fields. A typed payload returned under `result` may also report its domain
+ * outcome with `ok` or `success`; `false` is a product failure even when the
+ * transport completed. It never inspects rendered or observation prose. This
+ * is the single contract both the agent loop and host tool-result classifiers
+ * converge on.
  *
  * @effects: []
  * @errors: []
