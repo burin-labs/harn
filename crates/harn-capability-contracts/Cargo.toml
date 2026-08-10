@@ -9,9 +9,9 @@ homepage.workspace = true
 description = "Canonical typed Harness capability method contracts"
 
 [dependencies]
-harn-builtin-macros = { path = "../harn-builtin-macros", version = "=0.10.71" }
-harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.71" }
-harn-builtin-registry = { path = "../harn-builtin-registry", version = "=0.10.71" }
+harn-builtin-macros = { path = "../harn-builtin-macros", version = "=0.10.72" }
+harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.72" }
+harn-builtin-registry = { path = "../harn-builtin-registry", version = "=0.10.72" }
 
 [build-dependencies]
 proc-macro2 = "1"

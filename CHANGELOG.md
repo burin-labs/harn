@@ -9,6 +9,35 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.72
+
+### Added
+
+- Add a zeroizing in-memory secret provider and allow ACP hosts to attach it, or
+  other process-local capabilities, to each execution harness without serializing
+  them into ACP session state. `harness.llm` resolves credential references in
+  that task-local provider, so concurrent sessions do not share raw keys.
+
+### Changed
+
+- Exact-source macOS certification now uses the proven Blacksmith M4 runner and
+  has a 30-minute timeout, while the scheduled cache writer stays on GitHub's
+  included runner with its own 75-minute hang fuse.
+
+### Fixed
+
+- Preserve prompt-cache read and write token counts in agent iteration events so
+  hosts can report cache use accurately.
+- Treat equivalent credential-free SSH and HTTPS spellings of a Git package
+  repository as one immutable source resolution, so committed private-package
+  generations remain usable across authentication environments.
+- Make the Harn binary resolver's timeout regressions advance from explicit child
+  readiness instead of a sub-second scheduler race.
+- Direct tool dispatch now scopes host execution to the resolved agent session,
+  preventing nested session state from capturing staged writes or mutation receipts.
+- The release audit now applies its conformance worker budget instead of silently
+  using the host-wide default alongside the Rust and package audit worker pools.
+
 ## v0.10.71
 
 ### Fixed
