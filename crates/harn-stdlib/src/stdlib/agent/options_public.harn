@@ -547,6 +547,41 @@ pub fn __stack_sanitize_result(llm: HarnessLlm, options, policy = nil) {
     out = out.removing("thinking")
     stripped = stripped + ["thinking"]
   }
+  if !(caps?.temperature_supported ?? true) {
+    const result = __stack_strip_option_keys(out, stripped, ["temperature"])
+    out = result.options
+    stripped = result.stripped
+  }
+  if !(caps?.top_p_supported ?? true) {
+    const result = __stack_strip_option_keys(out, stripped, ["top_p"])
+    out = result.options
+    stripped = result.stripped
+  }
+  if !(caps?.top_k_supported ?? true) {
+    const result = __stack_strip_option_keys(out, stripped, ["top_k"])
+    out = result.options
+    stripped = result.stripped
+  }
+  if !(caps?.seed_supported ?? true) {
+    const result = __stack_strip_option_keys(out, stripped, ["seed"])
+    out = result.options
+    stripped = result.stripped
+  }
+  if !(caps?.frequency_penalty_supported ?? true) {
+    const result = __stack_strip_option_keys(out, stripped, ["frequency_penalty"])
+    out = result.options
+    stripped = result.stripped
+  }
+  if !(caps?.presence_penalty_supported ?? true) {
+    const result = __stack_strip_option_keys(out, stripped, ["presence_penalty"])
+    out = result.options
+    stripped = result.stripped
+  }
+  if !(caps?.stop_supported ?? true) {
+    const result = __stack_strip_option_keys(out, stripped, ["stop"])
+    out = result.options
+    stripped = result.stripped
+  }
   if !(caps?.prompt_caching ?? false) {
     const cache = __stack_strip_option_keys(
       out,
@@ -639,10 +674,10 @@ pub fn __stack_configured_model_options(env: HarnessEnv, cfg, prefixes) {
 /**
  * Return a capability-sanitized options dict for a provider/model route.
  * Unsupported provider-specific knobs are dropped instead of leaking to the
- * wire. Currently strips unsupported `effort`, `thinking`, and prompt-cache
- * request keys. Pass `{mode: "healthcheck"}` (or `"preflight"` / `"probe"`)
- * to also drop deliberate-reasoning knobs for cheap readiness probes even
- * when the full route supports them.
+ * wire. Currently strips unsupported reasoning, sampling, penalty, stop, seed,
+ * and prompt-cache request keys. Pass `{mode: "healthcheck"}` (or `"preflight"`
+ * / `"probe"`) to also drop deliberate-reasoning knobs for cheap readiness
+ * probes even when the full route supports them.
  *
  * @effects: []
  * @errors: []
