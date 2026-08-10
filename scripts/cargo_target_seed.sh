@@ -7,6 +7,8 @@
 # workspace artifacts while retaining the expensive compatible dependencies.
 set -euo pipefail
 
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+
 usage() {
   echo "usage: $0 <restore|publish|key> [target-dir storage-root]" >&2
   exit 2
@@ -60,6 +62,18 @@ copy_tree_cow() {
   esac
 }
 
+clean_workspace_artifacts() {
+  local target_dir="$1"
+
+  # Cargo fingerprints and dep-info contain absolute paths to the worktree that
+  # produced them. Keep third-party dependencies warm, but force every
+  # workspace package to be rebuilt against the consuming worktree.
+  (
+    cd "${repo_root}"
+    cargo clean --workspace --target-dir "${target_dir}" --locked >/dev/null
+  )
+}
+
 cleanup_stage() {
   local stage="$1"
   local allowed_parent="$2"
@@ -97,6 +111,12 @@ restore_seed() (
     cleanup_stage "${stage}" "${target_parent}"
     stage=""
     echo "Cargo target seed skipped: copy-on-write clones are unavailable on this filesystem."
+    return 0
+  fi
+  if ! clean_workspace_artifacts "${stage}"; then
+    cleanup_stage "${stage}" "${target_parent}"
+    stage=""
+    echo "Cargo target seed skipped: workspace artifacts could not be removed safely."
     return 0
   fi
 
@@ -173,6 +193,14 @@ publish_seed() (
     rmdir "${lock_dir}" 2>/dev/null || true
     lock_dir=""
     echo "Cargo target seed publish skipped: copy-on-write clones are unavailable on this filesystem."
+    return 0
+  fi
+  if ! clean_workspace_artifacts "${stage}"; then
+    cleanup_stage "${stage}" "${seed_root}"
+    stage=""
+    rmdir "${lock_dir}" 2>/dev/null || true
+    lock_dir=""
+    echo "Cargo target seed publish skipped: workspace artifacts could not be removed safely."
     return 0
   fi
   printf '%s\n' "${key}" > "${stage}/.harn-cargo-target-seed"
