@@ -9,6 +9,31 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.73
+
+### Fixed
+
+- **Affected test runs now emit stable machine reports (#6486).** A zero-file
+  `--affected-from` selection writes schema-valid JUnit and JSON reports instead
+  of panicking. Nonempty affected reports also keep case file and class names
+  relative to the common requested suite root instead of making their identity
+  depend on the first selected test file.
+- Keep Harn's structured-call temperature defaults off models with a fixed
+  sampling policy, while preserving typed errors for unsupported options that
+  callers explicitly request.
+- Include portable generation options in `harness.llm.mock_calls()` so tests can
+  inspect the request that reached the mock provider.
+- Keep contended host-lease and Cargo workers idle until a real lease change,
+  expiry, liveness check, or deadline instead of waking continuously on their
+  own SQLite activity.
+- Make `std/testing::llm_error()` produce the typed mock-provider error shape,
+  so fixtures fail the intended LLM call instead of failing while the script is
+  installed.
+
+### Security
+
+- Keep inherited and explicit child credentials out of the Unix process guardian's arguments and environment.
+
 ## v0.10.72
 
 ### Added
