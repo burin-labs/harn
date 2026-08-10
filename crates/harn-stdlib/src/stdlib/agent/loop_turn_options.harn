@@ -7,6 +7,25 @@ import { AgentStallState } from "std/agent/stall_types"
 
 pub type AgentLoopCompletedDispatchStall = {state: AgentStallState, no_information_gain: bool}
 
+/** Stable progress telemetry projected to agent lifecycle consumers. */
+pub type AgentIterationInfo = {
+  tool_count: int,
+  text: string,
+  provider: string,
+  model: string,
+  serving_base_url: string,
+  cache_supported: bool,
+  cache_read_tokens: int,
+  cache_write_tokens: int,
+  response_ms: int,
+  input_tokens: int,
+  output_tokens: int,
+  thinking_chars: int,
+  cost_usd?: float,
+  wall_clock_ms?: int,
+  ...rest,
+}
+
 /**
  * Fold the two stall signals that become authoritative only after dispatch:
  * exact observation recurrence and completed read-only actuation.
@@ -318,7 +337,7 @@ pub fn __loop_progress_nudge_text(depth, has_tools, paradigm, made_tool_calls = 
 /**
  * Build the `iteration_info` payload for the `iteration_end` event from
  * the LLM result plus the loop's per-iteration aggregates. Carries `provider`,
- * `model`, `response_ms`, token counts, and `thinking_chars` so live
+ * `model`, `response_ms`, token and cache counts, and `thinking_chars` so live
  * pulse-check consumers (fleet hooks, ACP clients) can attribute
  * latency and surface "still working" indicators without re-parsing
  * the transcript JSONL. Empty/missing fields are dropped so the event
@@ -327,7 +346,12 @@ pub fn __loop_progress_nudge_text(depth, has_tools, paradigm, made_tool_calls = 
  * @effects: []
  * @errors: []
  */
-pub fn __iteration_info_payload(llm_result, tool_count, visible_text, aggregates = nil) {
+pub fn __iteration_info_payload(
+  llm_result,
+  tool_count: int,
+  visible_text: string,
+  aggregates = nil,
+) -> AgentIterationInfo {
   const telemetry = llm_result?.usage?.provider_telemetry ?? {}
   const thinking = llm_result?.thinking ?? ""
   const thinking_chars = if type_of(thinking) == "string" {
@@ -343,6 +367,8 @@ pub fn __iteration_info_payload(llm_result, tool_count, visible_text, aggregates
     model: llm_result?.model ?? "",
     serving_base_url: telemetry?.serving_base_url ?? "",
     cache_supported: llm_result?.usage?.cache_supported ?? false,
+    cache_read_tokens: llm_result?.usage?.cache_read_tokens ?? 0,
+    cache_write_tokens: llm_result?.usage?.cache_write_tokens ?? 0,
     response_ms: telemetry?.client_wall_ms ?? 0,
     input_tokens: llm_result?.usage?.input_tokens ?? 0,
     output_tokens: llm_result?.usage?.output_tokens ?? 0,
