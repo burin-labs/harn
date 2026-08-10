@@ -9,6 +9,29 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.74
+
+### Changed
+
+- **Release candidate builds keep the next release warm (#6501).** Exact
+  candidate archive jobs can now refresh the bounded per-target Rust cache from
+  the main workflow ref. A continuous release train no longer suppresses every
+  cache writer.
+- **Hosted release failures keep the useful cause in view.** Source audit
+  output now repeats a bounded failure recap after full lane logs, so tail-only
+  workflow views show the failed lane and its last diagnostic lines.
+
+### Fixed
+
+- Fix stale `harness.fs.read_text` results after a host capability rewrites or
+  deletes a same-length file, including edits made through the shared agent tools.
+  Also publish orchestrator state snapshots atomically so supervisors and
+  hot-reload clients never observe empty or partial JSON.
+- **Registered API-key connector setup.** `harn connect <provider>` now follows
+  manifest-declared manual API-key authentication, supports secret-safe
+  `--from-env` and `--value-file` input, and gives exact recovery commands when
+  a connector requires more than one independent secret.
+
 ## v0.10.73
 
 ### Fixed
