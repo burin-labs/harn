@@ -14,10 +14,10 @@ use parking_lot::Mutex;
 
 use crate::chunk::{Chunk, CompiledFunction};
 use crate::module_artifact::{
-    compile_module_artifact_from_source, compile_module_artifact_from_source_with_imported_enums,
+    compile_module_artifact_from_source, compile_module_artifact_from_source_with_imported_symbols,
     compile_trusted_host_dispatch_module_artifact_from_source,
-    compile_trusted_host_dispatch_module_artifact_from_source_with_imported_enums, ModuleArtifact,
-    ModuleImportSpec, ModuleProvenance,
+    compile_trusted_host_dispatch_module_artifact_from_source_with_imported_symbols,
+    ModuleArtifact, ModuleImportSpec, ModuleProvenance,
 };
 use crate::module_source::ModuleSource;
 use crate::{ModulePhaseRecorder, ModulePhaseStats, VmError};
@@ -215,12 +215,19 @@ impl PreparedModuleCache {
                 .into_iter()
                 .collect::<Vec<_>>();
             imported_enum_candidates.sort_unstable();
+            let mut imported_source_callable_names = graph
+                .imported_callable_names_for_file(&path)
+                .unwrap_or_default()
+                .into_iter()
+                .collect::<Vec<_>>();
+            imported_source_callable_names.sort_unstable();
             let canonical = harn_modules::canonical_path(&path);
             let _ = self.prepare(
                 &path,
                 &canonical,
                 &source,
                 Some(&imported_enum_candidates),
+                Some(&imported_source_callable_names),
                 Some(&recorder),
                 provenance,
             );
@@ -278,6 +285,7 @@ impl PreparedModuleCache {
         canonical_path: &Path,
         source: &ModuleSource,
         imported_enum_candidates: Option<&[String]>,
+        imported_source_callable_names: Option<&[String]>,
         recorder: Option<&ModulePhaseRecorder>,
         provenance: ModuleProvenance,
     ) -> Result<Arc<PreparedModuleArtifact>, VmError> {
@@ -294,15 +302,16 @@ impl PreparedModuleCache {
         // fresh VMs without sharing any runtime module state.
         let cached = if provenance == ModuleProvenance::TrustedHostDispatch {
             let mut compile_span = recorder.map(ModulePhaseRecorder::compile_span);
-            let compiled = match imported_enum_candidates {
-                Some(candidates) => {
-                    compile_trusted_host_dispatch_module_artifact_from_source_with_imported_enums(
+            let compiled = match (imported_enum_candidates, imported_source_callable_names) {
+                (Some(enum_candidates), Some(callable_names)) => {
+                    compile_trusted_host_dispatch_module_artifact_from_source_with_imported_symbols(
                         source_path,
                         source.as_str(),
-                        candidates.iter().cloned(),
+                        enum_candidates.iter().cloned(),
+                        callable_names.iter().cloned(),
                     )?
                 }
-                None => compile_trusted_host_dispatch_module_artifact_from_source(
+                _ => compile_trusted_host_dispatch_module_artifact_from_source(
                     source_path,
                     source.as_str(),
                 )?,
@@ -324,13 +333,16 @@ impl PreparedModuleCache {
                 artifact
             } else {
                 let mut compile_span = recorder.map(ModulePhaseRecorder::compile_span);
-                let compiled = match imported_enum_candidates {
-                    Some(candidates) => compile_module_artifact_from_source_with_imported_enums(
-                        source_path,
-                        source.as_str(),
-                        candidates.iter().cloned(),
-                    )?,
-                    None => compile_module_artifact_from_source(source_path, source.as_str())?,
+                let compiled = match (imported_enum_candidates, imported_source_callable_names) {
+                    (Some(enum_candidates), Some(callable_names)) => {
+                        compile_module_artifact_from_source_with_imported_symbols(
+                            source_path,
+                            source.as_str(),
+                            enum_candidates.iter().cloned(),
+                            callable_names.iter().cloned(),
+                        )?
+                    }
+                    _ => compile_module_artifact_from_source(source_path, source.as_str())?,
                 };
                 if let Some(span) = &mut compile_span {
                     span.mark_compile_succeeded();

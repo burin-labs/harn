@@ -137,6 +137,7 @@ impl Compiler {
                 program,
                 &init_nodes,
                 imported_enum_candidates,
+                &[],
             )?)
         };
 

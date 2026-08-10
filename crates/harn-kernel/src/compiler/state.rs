@@ -48,6 +48,19 @@ impl Compiler {
         self
     }
 
+    /// Seed callables resolved from wildcard imports by the module graph.
+    ///
+    /// A source declaration owns a colliding name before builtin policy is
+    /// considered. Selective imports are visible in the AST, while wildcard
+    /// imports require this resolved projection from the module owner.
+    pub fn with_imported_source_callable_names(
+        mut self,
+        names: impl IntoIterator<Item = String>,
+    ) -> Self {
+        self.add_imported_source_callable_names(names);
+        self
+    }
+
     /// Populate every module-level compiler catalog needed by declarations
     /// compiled outside the entry pipeline. Module artifacts use this same
     /// preparation as ordinary program compilation so imported functions see
@@ -77,6 +90,11 @@ impl Compiler {
         self.imported_enum_candidates.extend(candidates);
     }
 
+    #[doc(hidden)]
+    pub fn add_imported_source_callable_names(&mut self, names: impl IntoIterator<Item = String>) {
+        self.source_callable_names.extend(names);
+    }
+
     /// Compile only the declarations that form a module's initialization
     /// chunk, using the complete source program for compiler context. The
     /// caller supplies a filtered list so function and pipeline closures are
@@ -87,8 +105,10 @@ impl Compiler {
         context: &[SNode],
         init_nodes: &[SNode],
         imported_enum_candidates: &[String],
+        imported_source_callable_names: &[String],
     ) -> Result<Chunk, CompileError> {
         self.add_imported_enum_candidates(imported_enum_candidates.iter().cloned());
+        self.add_imported_source_callable_names(imported_source_callable_names.iter().cloned());
         self.prepare_module_context(context);
         self.compile_top_level_declarations(init_nodes)?;
         self.chunk.emit(Op::Nil, self.line);

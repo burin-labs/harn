@@ -55,6 +55,15 @@ impl Compiler {
         }
     }
 
+    pub fn with_imported_source_callable_names(
+        self,
+        names: impl IntoIterator<Item = String>,
+    ) -> Self {
+        Self {
+            inner: self.inner.with_imported_source_callable_names(names),
+        }
+    }
+
     pub fn compile(self, program: &[harn_parser::SNode]) -> Result<Chunk, CompileError> {
         self.inner.compile(program).map(Chunk::from_portable)
     }
@@ -139,14 +148,24 @@ impl Compiler {
         self.inner.add_imported_enum_candidates(candidates);
     }
 
+    pub fn add_imported_source_callable_names(&mut self, names: impl IntoIterator<Item = String>) {
+        self.inner.add_imported_source_callable_names(names);
+    }
+
     pub fn compile_module_init(
         self,
         context: &[harn_parser::SNode],
         init_nodes: &[harn_parser::SNode],
         imported_enums: &[String],
+        imported_source_callable_names: &[String],
     ) -> Result<Chunk, CompileError> {
         self.inner
-            .compile_module_init(context, init_nodes, imported_enums)
+            .compile_module_init(
+                context,
+                init_nodes,
+                imported_enums,
+                imported_source_callable_names,
+            )
             .map(Chunk::from_portable)
     }
 
