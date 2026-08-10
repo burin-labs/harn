@@ -1465,9 +1465,9 @@ pub(super) async fn host_agent_dispatch_tool_call(
     // this future inline in the parent frame pushes the enclosing async fn
     // over clippy's `large_stack_frames` threshold. Boxing moves that state
     // onto the heap; both await arms below consume the `Pin<Box<_>>` directly.
-    let mut dispatch_future = Box::pin(crate::agent_sessions::scope_current_tool_call(
-        tool_id.clone(),
-        async {
+    let mut dispatch_future = Box::pin(crate::orchestration::scope_agent_session(
+        session_id.clone(),
+        crate::agent_sessions::scope_current_tool_call(tool_id.clone(), async {
             agent_tools::dispatch_tool_execution_with_mcp(
                 Some(&ctx),
                 &tool_name,
@@ -1479,7 +1479,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
                 tool_backoff_ms,
             )
             .await
-        },
+        }),
     ));
     let (outcome, preempted_by_cancel) = match cancel_handle.as_ref() {
         Some(handle) => {
@@ -2990,12 +2990,11 @@ mod parse_tool_call_id_tests {
 
 #[cfg(test)]
 mod approval_unavailable_tests;
-
-#[cfg(test)]
-mod side_effect_ceiling_tests;
-
 #[cfg(test)]
 mod schema_argument_dispatch_tests;
-
+#[cfg(test)]
+mod session_scope_tests;
+#[cfg(test)]
+mod side_effect_ceiling_tests;
 #[cfg(test)]
 mod tool_output_truncation_tests;

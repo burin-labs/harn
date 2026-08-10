@@ -712,6 +712,23 @@ pub(crate) fn scope_inline_subtask<F: Future>(inner: F) -> Scoped<F> {
     scope_ambient(AmbientExecutionScope::capture_for_inline_subtask(), inner)
 }
 
+/// Run one asynchronous tool execution under its resolved agent session.
+///
+/// Direct tool dispatch can supply a `session_id` even when the caller has no
+/// matching ambient session (or is temporarily nested under another one).
+/// Host capabilities such as staged filesystem writes and mutation receipts
+/// resolve their owner from the ambient session, so the execution boundary
+/// must install the dispatcher's resolved identity around every poll. Keeping
+/// this as a specialization of [`scope_ambient`] avoids holding a raw
+/// thread-local guard across an `.await`.
+pub(crate) fn scope_agent_session<F: Future>(session_id: String, inner: F) -> Scoped<F> {
+    let mut scope = AmbientExecutionScope::capture_for_inline_subtask();
+    if scope.session_stack.last() != Some(&session_id) {
+        scope.session_stack.push(session_id);
+    }
+    scope_ambient(scope, inner)
+}
+
 /// Restores the outer scope (and saves the task's own scope back) on drop, so
 /// the thread-locals are left correct even if the inner poll panics.
 struct RestoreGuard<'a> {
@@ -786,6 +803,28 @@ mod tests {
             vec!["committed".to_string()]
         );
         clear_execution_policy_stacks();
+    }
+
+    #[tokio::test]
+    async fn agent_session_scope_owns_every_poll_and_restores_the_caller() {
+        crate::agent_sessions::reset_session_store();
+        let _outer = crate::agent_sessions::enter_current_session("ambient-session");
+
+        let observed = scope_agent_session("resolved-dispatch-session".to_string(), async {
+            assert_eq!(
+                crate::agent_sessions::current_session_id().as_deref(),
+                Some("resolved-dispatch-session")
+            );
+            tokio::task::yield_now().await;
+            crate::agent_sessions::current_session_id()
+        })
+        .await;
+
+        assert_eq!(observed.as_deref(), Some("resolved-dispatch-session"));
+        assert_eq!(
+            crate::agent_sessions::current_session_id().as_deref(),
+            Some("ambient-session")
+        );
     }
 
     async fn spawn_pending_llm_context_task(
