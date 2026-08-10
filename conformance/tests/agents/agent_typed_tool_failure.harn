@@ -1,0 +1,76 @@
+import { agent_loop } from "std/agent/loop"
+import { with_llm_script } from "std/testing"
+
+struct ServiceErrorDetail {
+  code: string
+  message: string
+}
+
+struct ServiceError {
+  ok: bool
+  error: ServiceErrorDetail
+}
+
+fn service_tools() {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "connected_read",
+    "Read one connected service",
+    {
+      handler: { _args ->
+        ServiceError {
+          ok: false,
+          error: ServiceErrorDetail {
+            code: "credential_missing",
+            message: "Connect this service first.",
+          },
+        }
+      },
+      parameters: {},
+      returns: {
+        type: "object",
+        required: ["ok", "error"],
+        properties: {ok: {type: "boolean"}, error: {type: "object"}},
+      },
+    },
+  )
+  return tools
+}
+
+pipeline test(harness: Harness) {
+  with_llm_script(
+    harness.llm,
+    [{text: "", tool_calls: [{id: "read_1", name: "connected_read", arguments: {}}]}],
+    { ->
+      let callback_fired = false
+      const result = agent_loop(
+        harness,
+        "Read the service",
+        "Use the connected service.",
+        {
+          provider: "mock",
+          tools: service_tools(),
+          tool_format: "native",
+          max_iterations: 1,
+          post_turn_callback: { info ->
+            if len(info?.tool_results ?? []) == 0 {
+              return nil
+            }
+            callback_fired = true
+            assert_eq(info.tool_results[0].ok, false)
+            assert_eq(info.tool_results[0].status, "error")
+            assert_eq(info.successful_tool_names, [])
+            assert_eq(info.rejected_tool_names, ["connected_read"])
+            assert_eq(info.session_successful_tools, [])
+            return {stop: true}
+          },
+        },
+      )
+      assert_eq(callback_fired, true)
+      assert_eq(result.tools.successful, [])
+      assert_eq(result.tools.rejected, ["connected_read"])
+    },
+  )
+  harness.stdio.println("typed tool failure stays failed")
+}

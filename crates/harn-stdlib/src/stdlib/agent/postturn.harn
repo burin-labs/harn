@@ -1,3 +1,4 @@
+import "std/agent/loop_result_status"
 import { agent_render_tool_call_exemplar, agent_tool_call_paradigm } from "std/agent/preflight"
 import { agent_parse_tool_calls } from "std/agent/primitives"
 import { agent_required_tools_missing_from_session } from "std/agent/required_tools"
@@ -21,43 +22,6 @@ fn __sentinel_hit(text, sentinel, parsed_done_marker) {
     return contains(parsed_done_marker, sentinel)
   }
   return contains(text, sentinel)
-}
-
-fn __dispatch_results_list(dispatch) {
-  if dispatch == nil {
-    return []
-  }
-  if type_of(dispatch) == "list" {
-    return dispatch
-  }
-  return dispatch?.results ?? []
-}
-
-fn __tool_result_ok(result) {
-  if result?.ok != nil {
-    return result.ok ? true : false
-  }
-  if result?.success != nil {
-    return result.success ? true : false
-  }
-  const status = result?.status ?? ""
-  return status == "ok" || status == "success"
-}
-
-fn __tool_result_name(result) {
-  return result?.tool_name ?? result?.name ?? ""
-}
-
-fn __tool_names_by_status(dispatch, want_ok) {
-  const results = __dispatch_results_list(dispatch)
-  let names = []
-  for result in results {
-    const name = __tool_result_name(result)
-    if name != "" && __tool_result_ok(result) == want_ok {
-      names = names.appending(name)
-    }
-  }
-  return names
 }
 
 fn __post_turn_callback_verdict(opts, payload) {

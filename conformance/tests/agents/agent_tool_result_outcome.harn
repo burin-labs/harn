@@ -42,6 +42,18 @@ pipeline test(harness: Harness) {
   const clean = agent_tool_result_outcome({status: "ok", product_error: false})
   assert_eq(clean.kind, "ok")
   assert_eq(agent_tool_result_is_ok(clean), true)
+  // A connector or other domain tool can complete at the transport layer and
+  // return a typed failure payload. That payload is failed evidence.
+  const nested_failure = agent_tool_result_outcome(
+    {status: "ok", result: {ok: false, error: {code: "credential_missing"}}},
+  )
+  assert_eq(nested_failure.kind, "error")
+  assert_eq(nested_failure.product_error, true)
+  assert_eq(agent_tool_result_is_ok(nested_failure), false)
+  const nested_success = agent_tool_result_outcome({status: "ok", result: {ok: true, data: []}})
+  assert_eq(nested_success.kind, "ok")
+  assert_eq(nested_success.product_error, false)
+  assert_eq(agent_tool_result_is_ok(nested_success), true)
   // Edit-status spine, read from the flat `edit_status` field.
   const rejected = agent_tool_result_outcome({ok: false, edit_status: "rejected_not_applied"})
   assert_eq(rejected.edit_status, "rejected_not_applied")

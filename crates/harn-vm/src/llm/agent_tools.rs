@@ -337,15 +337,15 @@ pub(super) fn elide_image_base64(value: &serde_json::Value) -> serde_json::Value
 }
 
 /// Coerce a Harn tool handler's return value into the tool-result payload.
-///
-/// Handler returns are normally rendered to their display string, because tool
-/// results are text the model reads. Preserve structure only for the explicit
-/// `harn.agent_tool_handler_result.v1` envelope and screenshot-bearing computer
-/// results. Every other return keeps its historical `String(display())`
-/// behavior.
+/// Preserve explicit text envelopes, computer screenshots, and typed domain
+/// outcomes. Boolean `ok` or `success` distinguishes return from operation
+/// success; other values retain historical display rendering.
 pub(super) fn harn_handler_result_value(val: &VmValue) -> serde_json::Value {
     let json = crate::llm::vm_value_to_json(val);
-    if agent_tool_handler_result_text(&json).is_some() || json_carries_screenshot(&json) {
+    if agent_tool_handler_result_text(&json).is_some()
+        || json_carries_screenshot(&json)
+        || handler_result::carries_typed_outcome(val, &json)
+    {
         json
     } else {
         serde_json::Value::String(val.display())
