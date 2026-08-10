@@ -726,6 +726,14 @@ pipeline test_release_workflow_generates_aot_once_for_release_and_benchmark_targ
     workflow.jobs.build.steps,
     "Restore target-independent CLI AOT payload",
   )
+  const retry_restore = release_workflow_step(
+    workflow.jobs.build.steps,
+    "Retry target-independent CLI AOT payload restore",
+  )
+  const final_restore = release_workflow_step(
+    workflow.jobs.build.steps,
+    "Final target-independent CLI AOT payload restore",
+  )
   const build = release_workflow_step(workflow.jobs.build.steps, "Build")
   const aot_condition =
     "needs.setup.outputs.is_release == 'true' || needs.setup.outputs.build_mode == 'benchmark' || needs.setup.outputs.build_mode == 'candidate'"
@@ -736,6 +744,15 @@ pipeline test_release_workflow_generates_aot_once_for_release_and_benchmark_targ
   assert_eq(generator.run, "make gen-cli-aot && make check-cli-aot")
   assert_eq(restore.if, aot_condition)
   assert_eq(restore.uses, "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c")
+  assert_eq(restore.id, "restore_cli_aot_primary")
+  assert_eq(restore["continue-on-error"], true)
+  assert_eq(retry_restore.if, "steps.restore_cli_aot_primary.outcome == 'failure'")
+  assert_eq(retry_restore["continue-on-error"], true)
+  assert_eq(
+    final_restore.if,
+    "steps.restore_cli_aot_primary.outcome == 'failure' && steps.restore_cli_aot_retry.outcome == 'failure'",
+  )
+  assert_eq(final_restore["continue-on-error"], nil)
   assert_eq(build.env?.HARN_REQUIRE_CLI_AOT, "$" + "{{ (" + aot_condition + ") && '1' || '0' }}")
   assert_eq(workflow.jobs.build.needs.contains("prepare_cli_aot"), true)
   assert_eq(workflow.jobs.release.needs.contains("prepare_cli_aot"), true)
