@@ -328,9 +328,21 @@ fn remap_edit_action_args(verb: &str, arguments: serde_json::Value) -> serde_jso
 }
 
 pub(crate) fn is_generic_wrapper_name(name: &str) -> bool {
+    // `tool_call` is Harn's taught text wrapper tag (`TEXT_TOOL_CALL_TAG`).
+    // Fireworks Harmony demux can lift that tag — or the recipient token `to`
+    // from `tool_call to=<name>` — into OpenAI `function.name` even when the
+    // route requested text tools. Treat both as framing, never as dispatch
+    // names (burin-labs/burin-code#4809).
     matches!(
         name,
-        "tool" | "tool.call" | "tool.exec" | "tool_call" | "function" | "function.call" | "call"
+        "tool"
+            | "tool.call"
+            | "tool.exec"
+            | "tool_call"
+            | "function"
+            | "function.call"
+            | "call"
+            | "to"
     )
 }
 
@@ -361,6 +373,27 @@ fn infer_tool_name_from_arguments(arguments: &serde_json::Value) -> Option<Strin
         .is_some();
     if has_command_shape {
         return Some("run".to_string());
+    }
+
+    // Harmony demux fatal shape (burin-code#4809 Face 2): wrapper name is only
+    // `tool_call`/`to`, and the real tool name is nowhere in the payload — only
+    // clean look args (`file`/`path` without an intent, and without
+    // edit/search/run discriminators). Recover look rather than dispatching
+    // the framing token. When `intent` is present but unrecognized (e.g.
+    // "summarize"), leave inference to the marker/wrapper sanitizer so denial
+    // feedback stays precise.
+    if intent.is_none() {
+        let has_look_target = object.get("file").is_some() || object.get("path").is_some();
+        let has_edit_discriminator = object.get("action").is_some()
+            || object.get("content").is_some()
+            || object.get("ops").is_some()
+            || object.get("old_string").is_some()
+            || object.get("new_string").is_some();
+        let has_search_discriminator =
+            object.get("query").is_some() || object.get("pattern").is_some();
+        if has_look_target && !has_edit_discriminator && !has_search_discriminator {
+            return Some("look".to_string());
+        }
     }
 
     None
@@ -641,6 +674,45 @@ mod tests {
 
         assert_eq!(name, "search");
         assert_eq!(normalized_arguments, arguments);
+    }
+
+    #[test]
+    fn treats_harmony_recipient_to_as_generic_wrapper() {
+        assert!(is_generic_wrapper_name("to"));
+        let arguments = serde_json::json!({"intent": "read", "file": "src/lib.rs"});
+        let (name, normalized_arguments) = normalize_tool_call_shape("to", arguments.clone());
+        assert_eq!(name, "look");
+        assert_eq!(normalized_arguments, arguments);
+    }
+
+    #[test]
+    fn recovers_look_from_demux_wrapper_with_nameless_look_args() {
+        // Fatal Fireworks demux shape: function.name is the wrapper/recipient
+        // token and the payload carries only look args — no inner name field.
+        let arguments = serde_json::json!({"file": "Sources/App.swift"});
+        let (name, normalized_arguments) =
+            normalize_tool_call_shape("tool_call", arguments.clone());
+        assert_eq!(name, "look");
+        assert_eq!(normalized_arguments, arguments);
+
+        let (name, normalized_arguments) = normalize_tool_call_shape("to", arguments.clone());
+        assert_eq!(name, "look");
+        assert_eq!(normalized_arguments, arguments);
+    }
+
+    #[test]
+    fn does_not_infer_look_when_edit_discriminators_present() {
+        let arguments = serde_json::json!({
+            "path": "src/lib.rs",
+            "action": "create",
+            "content": "fn main() {}"
+        });
+        let (name, _) = normalize_tool_call_shape("tool_call", arguments);
+        assert_eq!(
+            name, "tool_call",
+            "edit-shaped args must not be guessed as look; leave the wrapper name \
+             so denial/parse guidance can fire instead of mis-dispatch"
+        );
     }
 
     #[test]
