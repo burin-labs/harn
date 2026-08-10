@@ -1217,7 +1217,7 @@ fn blacksmith_timeout_expression() -> string {
   const paid_event =
     "(github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))"
   return "$"
-    + "{{ ${paid_event} && vars.${BLACKSMITH_DISABLE_VAR} != 'true' && 10 || 25 }}"
+    + "{{ ${paid_event} && vars.${BLACKSMITH_DISABLE_VAR} != 'true' && 20 || 25 }}"
 }
 
 /** Keep a compile lane on free hosted capacity with one complete coarse cache. */
@@ -1291,7 +1291,7 @@ fn persistent_compile_lane_errors(
   if trim(to_string(job?.["timeout-minutes"] ?? "")) != blacksmith_timeout_expression() {
     errors = errors
       + [
-      "ci.yml:${job_name} must keep the 10-minute paid-runner fuse and 25-minute hosted fallback",
+      "ci.yml:${job_name} must keep the 20-minute paid-runner fuse and 25-minute hosted fallback",
     ]
   }
   const persistent = matching_steps(job, PERSISTENT_SCCACHE_ACTION)

@@ -490,12 +490,28 @@ run_security_audit() {
       README.md docs/src crates/harn-vm crates/harn-cli .github CLAUDE.md >/dev/null
 }
 
+release_rust_test() {
+  # Blacksmith's Ubuntu image does not expose Landlock. Harn CI therefore runs
+  # every environment-neutral workspace test there and owns the six
+  # OS-confinement assertions on GitHub Ubuntu. Release candidates are
+  # generated metadata-only commits over a merge-queue-proven parent, so the
+  # hosted release audit must preserve that same partition instead of turning
+  # a missing host kernel feature into a product failure.
+  local host_bound_filter='test(test_linux_process_sandbox_catches_ten_process_escapes) or test(workspace_env_integration) or test(local_backend_execs_inside_session_outputs) or test(local_backend_timeout_is_enforced_without_shell_timeout_binary) or test(sandboxed_npm_install_resolves_file_tarball_dependency_offline)'
+  if [[ "${HARN_RUNNER_TIER:-}" == "blacksmith" ]]; then
+    echo "release rust audit: Blacksmith tier; Landlock-only tests remain owned by GitHub Ubuntu CI"
+    make test ARGS="--workspace -E 'not (${host_bound_filter})'"
+  else
+    make test
+  fi
+}
+
 run_rust_audit() {
   time_phase "cargo fmt --check" make fmt-check
   time_phase "prompt text ownership" make lint-no-rust-prompt-prose
   time_phase "cargo clippy --workspace --all-targets" \
     ./scripts/ci/run_rust_lint_lane.sh
-  time_phase "make test (cargo-nextest)" make test
+  time_phase "make test (cargo-nextest)" release_rust_test
 }
 
 run_harn_audit() {
