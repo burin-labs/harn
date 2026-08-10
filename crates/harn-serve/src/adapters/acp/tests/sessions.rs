@@ -4,6 +4,8 @@ use harn_vm::event_log::EventLog as _;
 use harn_vm::orchestration::{save_run_record, RunRecord, RunTraceSpanRecord};
 use harn_vm::session_timeline::SESSION_TIMELINE_SCHEMA_VERSION;
 
+mod typed_observability;
+
 async fn run_prompt_with_project_capability(
     request_tx: &mpsc::UnboundedSender<serde_json::Value>,
     response_rx: &mut mpsc::UnboundedReceiver<String>,
@@ -359,9 +361,8 @@ async fn acp_server_handles_session_flow_and_prompt_updates() {
             let initialize = recv_json(&mut response_rx).await;
             assert_eq!(initialize["id"], 1);
             assert_eq!(initialize["result"]["agentInfo"]["name"], "harn");
-            // A file-less attach server (no configured auth methods)
-            // still advertises the spec-conformant local "none" method so
-            // `initialize` passes the ACP registry auth gate.
+            // A file-less attach server still advertises the spec-conformant local
+            // "none" method so `initialize` passes the ACP registry auth gate.
             assert_eq!(
                 initialize["result"]["authMethods"],
                 serde_json::json!([{
@@ -1708,8 +1709,7 @@ async fn acp_session_cancel_kills_active_terminal() {
                     "method": "session/prompt",
                     "params": {
                         "sessionId": session_id,
-                        // `run_command` is rebound to the same ACP terminal path as
-                        // `exec`, without exercising unrelated mode-policy checks.
+                        // `run_command` shares ACP's terminal path with `exec`.
                         "prompt": [{"type": "text", "text": "run_command(\"sleep 999\")"}],
                     },
                 }))

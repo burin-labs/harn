@@ -14,6 +14,21 @@ use harn_vm::{HostCallBridge, HostCallDispatchFuture};
 
 use super::AcpBridge;
 
+fn log_message_and_fields(args: &[harn_vm::VmValue]) -> (String, Option<serde_json::Value>) {
+    let message = args
+        .first()
+        .map(|value| value.display())
+        .unwrap_or_default();
+    let fields = args.get(1).and_then(|value| {
+        if matches!(value, harn_vm::VmValue::Nil) {
+            None
+        } else {
+            Some(harn_vm::llm::vm_value_to_json(value))
+        }
+    });
+    (message, fields)
+}
+
 /// ACP embedder bridge for canonical `host_call` dispatch.
 ///
 /// Forwards unhandled capability/operation pairs to the editor over
@@ -194,20 +209,25 @@ pub(super) async fn register_acp_builtins(
     });
 
     for level in ["log_debug", "log_info", "log_warn", "log_error"] {
-        let b = bridge.clone();
-        let lvl = level.strip_prefix("log_").unwrap_or(level).to_string();
+        let builtin_bridge = bridge.clone();
+        let builtin_level = level.strip_prefix("log_").unwrap_or(level).to_string();
         vm.register_builtin(level, move |args, _out| {
-            let msg = args.first().map(|a| a.display()).unwrap_or_default();
-            let fields = args.get(1).and_then(|a| {
-                if matches!(a, harn_vm::VmValue::Nil) {
-                    None
-                } else {
-                    Some(harn_vm::llm::vm_value_to_json(a))
-                }
-            });
-            b.send_log(&lvl, &msg, fields);
+            let (message, fields) = log_message_and_fields(args);
+            builtin_bridge.send_log(&builtin_level, &message, fields);
             Ok(harn_vm::VmValue::Nil)
         });
+
+        let capability_bridge = bridge.clone();
+        let capability_level = level.strip_prefix("log_").unwrap_or(level).to_string();
+        vm.override_capability_method(
+            harn_builtin_meta::CapabilityId::Observability,
+            level,
+            move |args, _out| {
+                let (message, fields) = log_message_and_fields(args);
+                capability_bridge.send_log(&capability_level, &message, fields);
+                Ok(harn_vm::VmValue::Nil)
+            },
+        );
     }
 
     // The default `trace_end` writes to the VM's `out` buffer, which only
