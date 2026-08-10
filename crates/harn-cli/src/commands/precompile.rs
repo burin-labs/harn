@@ -26,7 +26,7 @@ use harn_vm::module_artifact::ModuleArtifact;
 use crate::cli::PrecompileArgs;
 use crate::command_error;
 use crate::commands::collect_harn_files;
-use crate::compiler_context::SourceCompilerAuthority;
+use crate::compiler_context::{imported_symbols_for_source, SourceCompilerAuthority};
 use crate::dispatch;
 use crate::env_guard::ScopedEnvVar;
 use crate::parse_source_file;
@@ -219,13 +219,21 @@ fn compile_artifacts(
     program: &[harn_parser::SNode],
     authority: SourceCompilerAuthority,
 ) -> Result<PrecompileArtifacts, String> {
-    let imported_enum_candidates = crate::imported_enum_candidates_for_source(source_path, source);
+    let imported = imported_symbols_for_source(source_path, source);
     let entry_chunk = authority
-        .compiler_with_imported_enums(imported_enum_candidates.iter().cloned())
+        .compiler_with_imported_symbols(
+            imported.enum_candidates.iter().cloned(),
+            imported.callable_names.iter().cloned(),
+        )
         .compile(program)
         .map_err(|e| format!("compile error: {e}"))?;
     let module_artifact = authority
-        .compile_module_with_imported_enums(source_path, source, imported_enum_candidates)
+        .compile_module_with_imported_symbols(
+            source_path,
+            source,
+            imported.enum_candidates,
+            imported.callable_names,
+        )
         .map_err(|e| format!("module compile error: {e}"))
         .ok();
     Ok(PrecompileArtifacts {

@@ -9,6 +9,57 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.70
+
+### Added
+
+- `harn test --affected-from <git-ref> --plan` now prints the versioned affected-test
+  plan as JSON without executing tests. CI can use the reported `selected` or `full`
+  mode, reason, and exact files to size its test matrix while preserving Harn's
+  fail-safe complete-suite fallback.
+- Add provider-neutral external-action intents, exact grants, at-most-once dispatch,
+  reconciliation receipts, and deterministic fake adapters to the Harn stdlib.
+- Hypothesis experiment capability manifests can now carry a typed local or remote
+  placement policy. Compilation rejects host ceilings that cannot enforce the
+  required platform, GPU, or resource class and rejects arm-specific placement
+  drift that would confound a randomized comparison.
+
+### Changed
+
+- **Release archives are built as immutable candidates before the tag, then
+  promoted without recompilation (#6440).** `build-release-binaries.yml`
+  gains `candidate_only` (sign/notarize/attest/upload run-scoped archives and
+  a `candidate-archive-manifest-<sha>`) and `promote_only` / tag-push promote
+  paths that attach those exact digests. Canonical tag push no longer
+  cold-compiles; `force_rebuild` remains audited recovery.
+- Worktree Cargo commands that may compile now use Harn's machine-level
+  `rust-heavy` lease automatically when a prebuilt Harn runner is available,
+  preventing sibling worktrees from multiplying compiler memory and wall time.
+  Set `HARN_CARGO_LEASE_MODE=off` only for an intentionally independent lane.
+
+### Fixed
+
+- Harden the openai-compat text-route tool-call format contract: treat Harmony
+  recipient token `to` as a demux wrapper (never a dispatch name), recover
+  nameless look-shaped demux payloads, fail closed on deleted `adaptive`
+  pins, and pin teach/accept exemplar parity in conformance.
+- **Local macOS builds survive restricted signing environments (#6443).** When
+  an installed Developer ID certificate is visible but unusable inside an agent
+  sandbox, the development signer now falls back to its existing ad-hoc mode
+  instead of failing an otherwise successful Cargo build.
+- New worktrees now restore an immutable, copy-on-write Cargo target seed. This
+  keeps builds isolated while reusing compatible dependencies that released
+  sccache versions cannot share across different Rust compilation directories.
+  An explicit size ceiling prevents old build profiles from being pinned.
+- **Candidate archive receipt helpers no longer require bash 4 associative
+  arrays (#6450).** macOS release runners still execute `/bin/bash` 3.2, which
+  treated `harn-*-*.tar.gz` keys as arithmetic under `set -u` and aborted the
+  write-receipt step after a successful build/attest.
+- Recursive `HarnessFs.mkdir` now treats an existing directory as a scoped
+  read-only no-op before requesting mutation authority, so callers can
+  idempotently initialize an exact sandbox root without weakening root deletion
+  or out-of-scope protections.
+
 ## v0.10.69
 
 ### Breaking

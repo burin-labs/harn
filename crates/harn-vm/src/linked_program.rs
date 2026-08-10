@@ -45,8 +45,13 @@ pub fn link_program(
         .graph
         .imported_names_by_kind_for_file(&entrypoint, harn_modules::DefKind::Enum)
         .unwrap_or_default();
+    let imported_callables = build
+        .graph
+        .imported_callable_names_for_file(&entrypoint)
+        .unwrap_or_default();
     let entry_chunk = crate::Compiler::new()
         .with_imported_enum_candidates(imported_enums)
+        .with_imported_source_callable_names(imported_callables)
         .compile(&entry_source.program)
         .map_err(|error| {
             LinkedProgramError::invalid(format!(
@@ -111,18 +116,24 @@ pub fn link_program(
             .graph
             .imported_names_by_kind_for_file(&path, harn_modules::DefKind::Enum)
             .unwrap_or_default();
+        let imported_callables = build
+            .graph
+            .imported_callable_names_for_file(&path)
+            .unwrap_or_default();
         let compile_path = runtime_compile_path(&path);
-        let full = crate::module_artifact::compile_module_artifact_from_source_with_imported_enums(
-            &compile_path,
-            &parsed.source,
-            imported_enums,
-        )
-        .map_err(|error| {
-            LinkedProgramError::invalid(format!(
-                "module compile failed for {}: {error}",
-                path.display()
-            ))
-        })?;
+        let full =
+            crate::module_artifact::compile_module_artifact_from_source_with_imported_symbols(
+                &compile_path,
+                &parsed.source,
+                imported_enums,
+                imported_callables,
+            )
+            .map_err(|error| {
+                LinkedProgramError::invalid(format!(
+                    "module compile failed for {}: {error}",
+                    path.display()
+                ))
+            })?;
         let full_symbols = artifact_symbols(&full);
         let input_bytes = postcard::to_allocvec(&full)
             .map_err(|error| LinkedProgramError::invalid(format!("module size failed: {error}")))?

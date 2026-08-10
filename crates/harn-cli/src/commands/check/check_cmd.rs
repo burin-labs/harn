@@ -277,11 +277,16 @@ pub(crate) fn check_file_report_inner(
         let imported_enums = module_graph
             .imported_names_by_kind_for_file(path, harn_modules::DefKind::Enum)
             .unwrap_or_default();
+        let imported_callables = module_graph
+            .imported_callable_names_for_file(path)
+            .unwrap_or_default();
         let compiler = if config.trusted_host_dispatch {
             harn_vm::Compiler::new_trusted_host_dispatch()
                 .with_imported_enum_candidates(imported_enums)
+                .with_imported_source_callable_names(imported_callables)
         } else {
             crate::compiler_with_imported_enum_candidates(imported_enums)
+                .with_imported_source_callable_names(imported_callables)
         };
         if let Err(compile_err) = compiler.compile(&program) {
             has_error = true;
