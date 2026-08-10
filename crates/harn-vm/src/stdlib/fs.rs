@@ -1,7 +1,7 @@
 use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, SystemTime};
 use std::{cell::RefCell, thread_local};
 
@@ -26,6 +26,7 @@ thread_local! {
 }
 
 const FILE_TEXT_CACHE_MAX_ENTRIES: usize = RuntimeLimits::DEFAULT.max_file_text_cache_entries;
+static HOST_FS_MUTATION_EPOCH: AtomicU64 = AtomicU64::new(0);
 
 pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &READ_FILE_BUILTIN_DEF,
@@ -65,10 +66,28 @@ struct FileTextCacheEntry {
     content: arcstr::ArcStr,
     len: u64,
     modified: Option<SystemTime>,
+    host_mutation_epoch: u64,
 }
 
 pub(crate) fn reset_fs_state() {
     FILE_TEXT_CACHE.with(|cache| cache.borrow_mut().clear());
+}
+
+/// Invalidate the VM's read-through text caches after a host capability
+/// mutates a path outside the `harness.fs` builtins.
+///
+/// Host capabilities and `harness.fs` share one filesystem, but only the VM
+/// builtins can update this thread-local cache directly. The hostlib mutation
+/// chokepoint calls this before each write or delete. The global epoch reaches
+/// caches on every runtime thread; removing the local entry keeps the common
+/// same-thread path cheap. Together they prevent a same-length rewrite from
+/// remaining hidden when the filesystem preserves a coarse modification
+/// timestamp or an async VM resumes on a different worker.
+pub fn invalidate_cached_file_text(path: &Path) {
+    HOST_FS_MUTATION_EPOCH.fetch_add(1, Ordering::AcqRel);
+    FILE_TEXT_CACHE.with(|cache| {
+        cache.borrow_mut().remove(path);
+    });
 }
 
 #[derive(Clone, Copy)]
@@ -409,6 +428,10 @@ fn read_cached_text(path: &PathBuf) -> Option<arcstr::ArcStr> {
     FILE_TEXT_CACHE.with(|cache| {
         let mut cache = cache.borrow_mut();
         let entry = cache.get(path).cloned()?;
+        if entry.host_mutation_epoch != HOST_FS_MUTATION_EPOCH.load(Ordering::Acquire) {
+            cache.remove(path);
+            return None;
+        }
         match metadata_signature(path) {
             Some((len, modified)) if len == entry.len && modified == entry.modified => {
                 Some(entry.content)
@@ -436,6 +459,7 @@ fn write_cached_text(path: PathBuf, content: arcstr::ArcStr) {
                 content,
                 len,
                 modified,
+                host_mutation_epoch: HOST_FS_MUTATION_EPOCH.load(Ordering::Acquire),
             },
         );
     });

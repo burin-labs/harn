@@ -152,7 +152,10 @@ pub(super) fn write_state_snapshot(
         std::fs::create_dir_all(parent)
             .map_err(|error| format!("failed to create {}: {error}", parent.display()))?;
     }
-    std::fs::write(path, encoded).map_err(|error| {
+    // The snapshot is a live read interface for supervisors and operators.
+    // A truncate-then-write update briefly exposes an empty or partial JSON
+    // document to concurrent readers during startup and hot reload.
+    harn_vm::atomic_io::atomic_write(path, &encoded).map_err(|error| {
         OrchestratorError::Serve(format!("failed to write {}: {error}", path.display()))
     })
 }

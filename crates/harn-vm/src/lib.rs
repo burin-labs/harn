@@ -355,6 +355,8 @@ pub use sessions::{
 /// (today: the `harn-hostlib` deterministic-tool builtins) skip exactly the
 /// same paths the in-VM builtins do.
 pub use stdlib::fs::ignore_policy;
+#[doc(hidden)]
+pub use stdlib::fs::invalidate_cached_file_text;
 pub use stdlib::hitl::{
     append_hitl_response, ApprovalRequest, HitlHostResponse, HITL_APPROVALS_TOPIC,
     HITL_DUAL_CONTROL_TOPIC, HITL_ESCALATIONS_TOPIC, HITL_QUESTIONS_TOPIC,

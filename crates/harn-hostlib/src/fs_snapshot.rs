@@ -416,6 +416,13 @@ pub fn drop_snapshot(session_id: &str, snapshot_id: &str) -> Result<DropResult, 
 /// when no session is active or no tool-call id is set, which keeps read-only
 /// tools and writes outside active tool scopes cheap.
 pub(crate) fn auto_capture_for_write(builtin: &'static str, path: &Path) {
+    // `harness.fs.read_text` keeps a small thread-local cache. Hostlib writes
+    // bypass the VM builtin that normally updates it, so invalidate at this
+    // shared mutation seam before any early return. Size + mtime is not a safe
+    // substitute: a same-length rewrite can retain a coarse timestamp and make
+    // the next read return pre-mutation bytes.
+    harn_vm::invalidate_cached_file_text(path);
+
     let Some(session_id) = active_session_id() else {
         return;
     };
