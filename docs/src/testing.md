@@ -108,7 +108,7 @@ The aggregate receipt exposes `test_file_compile_ms`, `test_files_compiled`,
 and `test_entries_compiled` so compile-once behavior is mechanically visible.
 Cold module compilation overlaps the suite compile phase; module instantiation
 and initialization remain attributed to the test that executes them. User JSON
-report schema v2 carries the same distribution, typed timeout metadata, and
+report schema v3 carries the same distribution, typed timeout metadata, and
 per-case phases. Conformance JSON schema v3 uses the same typed distribution
 owner. Module compile/load values overlap compile, setup, and execution and
 must not be added to total wall time.

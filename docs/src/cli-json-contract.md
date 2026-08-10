@@ -288,12 +288,12 @@ a plain replay. A plan that fails to load or evaluate exits non-zero with
 ### `harn test --json-out`
 
 User-test reports are standalone JSON documents rather than envelopes. Schema
-v2 adds typed timeout and phase records plus suite-level timing and aggregate
-work attribution:
+v3 includes typed timeout and phase records, suite-level timing and aggregate
+work attribution, and optional captured output:
 
 ```json
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "suite": "user",
   "root": "/workspace/tests",
   "duration_ms": 31,
@@ -348,6 +348,11 @@ work attribution:
   }]
 }
 ```
+
+`root` is the narrowest common directory containing every requested test
+target; a requested file contributes its parent directory. Case `file` and
+`classname` values are relative to that root, which remains stable when
+`--affected-from` narrows the executed files.
 
 `timeout`, `phases`, and `message` are omitted when unavailable. An empty
 distribution has `sample_count: 0` and `null` for every duration statistic.

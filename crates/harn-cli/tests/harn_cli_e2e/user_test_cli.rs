@@ -110,6 +110,210 @@ fn affected_test_plan_reports_selection_and_safe_fallback_without_running_tests(
 }
 
 #[test]
+fn empty_affected_selection_writes_zero_case_machine_reports() {
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let suite = temp.path().join("suite");
+    std::fs::create_dir_all(&suite).expect("create suite");
+    std::fs::write(
+        suite.join("test_must_not_run.harn"),
+        "pipeline test_must_not_run(_task) { assert_eq(1, 2) }\n",
+    )
+    .expect("write failing sentinel test");
+    git(temp.path(), &["init", "-q"]);
+    git(temp.path(), &["config", "user.email", "test@example.com"]);
+    git(temp.path(), &["config", "user.name", "Harn Test"]);
+    git(temp.path(), &["add", "."]);
+    git(temp.path(), &["commit", "-q", "-m", "base"]);
+
+    let junit = temp.path().join("report.xml");
+    let json_out = temp.path().join("report.json");
+    let output = Command::new(binary_path())
+        .current_dir(temp.path())
+        .args([
+            "test",
+            "suite",
+            "--affected-from",
+            "HEAD",
+            "--shard-index",
+            "1",
+            "--shard-total",
+            "1",
+            "--timeout",
+            "120000",
+            "--parallel",
+            "--timing",
+            "--junit",
+            junit.to_str().expect("JUnit path is UTF-8"),
+            "--json-out",
+            json_out.to_str().expect("JSON report path is UTF-8"),
+        ])
+        .output()
+        .expect("spawn empty affected test selection");
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&json_out).expect("read JSON report"))
+            .expect("parse JSON report");
+    assert_eq!(
+        report["schemaVersion"],
+        harn_cli::test_report::USER_TEST_REPORT_SCHEMA_VERSION
+    );
+    assert_eq!(report["summary"]["total"], 0);
+    assert_eq!(report["summary"]["passed"], 0);
+    assert_eq!(report["summary"]["failed"], 0);
+    assert_eq!(report["cases"], serde_json::json!([]));
+
+    let junit_xml = std::fs::read_to_string(&junit).expect("read JUnit report");
+    assert!(junit_xml.contains(r#"tests="0""#), "{junit_xml}");
+    assert!(!junit_xml.contains("<testcase"), "{junit_xml}");
+}
+
+#[test]
+fn affected_test_reports_keep_suite_relative_case_identity() {
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let suite = temp.path().join("suite");
+    std::fs::create_dir_all(suite.join("lib")).expect("create suite");
+    std::fs::write(
+        suite.join("lib/shared.harn"),
+        "pub fn value() -> int { return 1 }\n",
+    )
+    .expect("write shared module");
+    std::fs::write(
+        suite.join("test_direct.harn"),
+        "import { value } from \"lib/shared.harn\"\npipeline test_direct(_task) { assert_eq(value() > 0, true) }\n",
+    )
+    .expect("write direct test");
+    std::fs::write(
+        suite.join("test_unrelated.harn"),
+        "pipeline test_unrelated(_task) { assert(true) }\n",
+    )
+    .expect("write unrelated test");
+    git(temp.path(), &["init", "-q"]);
+    git(temp.path(), &["config", "user.email", "test@example.com"]);
+    git(temp.path(), &["config", "user.name", "Harn Test"]);
+    git(temp.path(), &["add", "."]);
+    git(temp.path(), &["commit", "-q", "-m", "base"]);
+    let base = git(temp.path(), &["rev-parse", "HEAD"]);
+
+    std::fs::write(
+        suite.join("lib/shared.harn"),
+        "pub fn value() -> int { return 2 }\n",
+    )
+    .expect("change shared module");
+    git(temp.path(), &["add", "."]);
+    git(temp.path(), &["commit", "-q", "-m", "change module"]);
+    let json_out = temp.path().join("report.json");
+    let junit = temp.path().join("report.xml");
+    let output = Command::new(binary_path())
+        .current_dir(temp.path())
+        .args([
+            "test",
+            "suite",
+            "--affected-from",
+            &base,
+            "--junit",
+            junit.to_str().expect("JUnit report path is UTF-8"),
+            "--json-out",
+            json_out.to_str().expect("JSON report path is UTF-8"),
+        ])
+        .output()
+        .expect("spawn affected test run");
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let report: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&json_out).expect("read JSON report"))
+            .expect("parse JSON report");
+    let cases = report["cases"]
+        .as_array()
+        .expect("report cases are an array");
+    assert_eq!(cases.len(), 1, "{report:#}");
+    assert_eq!(
+        report["root"],
+        suite
+            .canonicalize()
+            .expect("canonical suite")
+            .display()
+            .to_string()
+    );
+    assert_eq!(cases[0]["file"], "test_direct.harn");
+    assert_eq!(cases[0]["classname"], "test_direct.harn");
+    let junit_xml = std::fs::read_to_string(&junit).expect("read JUnit report");
+    assert!(
+        junit_xml.contains(r#"classname="test_direct.harn" file="test_direct.harn""#),
+        "{junit_xml}"
+    );
+}
+
+#[test]
+fn multiple_test_targets_share_one_relative_report_namespace() {
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let suite_a = temp.path().join("suite_a");
+    let suite_b = temp.path().join("suite_b/nested");
+    std::fs::create_dir_all(&suite_a).expect("create suite A");
+    std::fs::create_dir_all(&suite_b).expect("create suite B");
+    std::fs::write(
+        suite_a.join("test_a.harn"),
+        "pipeline test_a(_task) { assert(true) }\n",
+    )
+    .expect("write suite A test");
+    std::fs::write(
+        suite_b.join("test_b.harn"),
+        "pipeline test_b(_task) { assert(true) }\n",
+    )
+    .expect("write suite B test");
+    let json_out = temp.path().join("report.json");
+
+    let output = Command::new(binary_path())
+        .current_dir(temp.path())
+        .args([
+            "test",
+            "suite_a",
+            "--test-path",
+            "suite_b/nested",
+            "--json-out",
+            json_out.to_str().expect("JSON report path is UTF-8"),
+        ])
+        .output()
+        .expect("spawn multi-target test run");
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let report: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&json_out).expect("read JSON report"))
+            .expect("parse JSON report");
+    assert_eq!(
+        report["root"],
+        temp.path()
+            .canonicalize()
+            .expect("canonical tempdir")
+            .display()
+            .to_string()
+    );
+    let mut files = report["cases"]
+        .as_array()
+        .expect("report cases are an array")
+        .iter()
+        .map(|case| case["file"].as_str().expect("case file").to_string())
+        .collect::<Vec<_>>();
+    files.sort();
+    assert_eq!(files, ["suite_a/test_a.harn", "suite_b/nested/test_b.harn"]);
+}
+
+#[test]
 fn std_testing_temp_dir_works_in_the_default_run_sandbox() {
     let temp = tempfile::TempDir::new().expect("tempdir");
     let script = temp.path().join("main.harn");
