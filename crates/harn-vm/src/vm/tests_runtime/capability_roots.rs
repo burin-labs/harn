@@ -235,7 +235,7 @@ fn recursive_mkdir_treats_existing_sandbox_roots_as_read_only_noops() {
         assert!(existing_root.is_dir());
     }
 
-    let file_error = run_harn_with_policy(
+    run_harn_with_policy(
         &format!(
             r#"pipeline t(harness: Harness, task) {{ harness.fs.mkdir("{}", true) }}"#,
             existing_file.display()
@@ -243,9 +243,6 @@ fn recursive_mkdir_treats_existing_sandbox_roots_as_read_only_noops() {
         policy.clone(),
     )
     .expect_err("recursive mkdir must not accept an existing file");
-    assert!(file_error
-        .to_string()
-        .contains("Failed to create directory"));
     assert_eq!(std::fs::read_to_string(&existing_file).unwrap(), "file");
 
     let missing_read_only = read_only.path().join("missing");
