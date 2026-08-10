@@ -6,6 +6,15 @@ pub(super) fn agent_tool_handler_result_text(value: &serde_json::Value) -> Optio
     object.get("text")?.as_str()
 }
 
+pub(super) fn carries_typed_outcome(value: &serde_json::Value) -> bool {
+    value.as_object().is_some_and(|object| {
+        object.get("ok").is_some_and(serde_json::Value::is_boolean)
+            || object
+                .get("success")
+                .is_some_and(serde_json::Value::is_boolean)
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::{harn_handler_result_value, render_tool_result};
@@ -33,5 +42,18 @@ mod tests {
             result.is_string(),
             "unmarked dict returns must keep their historical display-string payload"
         );
+    }
+
+    #[test]
+    fn typed_domain_outcomes_remain_structured() {
+        for outcome in [
+            serde_json::json!({"ok": false, "error": {"code": "credential_missing"}}),
+            serde_json::json!({"success": true, "data": {"offer_id": "off_test"}}),
+        ] {
+            let value = crate::stdlib::json_to_vm_value(&outcome);
+            assert_eq!(harn_handler_result_value(&value), outcome);
+        }
+        let ordinary = crate::stdlib::json_to_vm_value(&serde_json::json!({"count": 2}));
+        assert!(harn_handler_result_value(&ordinary).is_string());
     }
 }
