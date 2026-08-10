@@ -99,7 +99,14 @@ pipeline default(harness: Harness) {
   harness.stdio.println(go_result.applied && go_result.match_count == 1)
   const go_after = harness.fs.read_text(go_path)
   harness.stdio.println(contains(go_after, "func a() int { return 1 }"))
-  harness.stdio.println(contains(go_after, "func b() int { return 7 }"))
+  const go_selected = contains(go_after, "func b() int { return 7 }")
+  harness.stdio.println(go_selected)
+  if !go_selected {
+    // Keep the mutated bytes in the conformance diff when this release-only
+    // failure recurs; a bare `false` cannot distinguish selection, write, or
+    // read-back faults.
+    harness.stdio.println("go_after=" + json_stringify(go_after))
+  }
   harness.stdio.println(contains(go_after, "func c() int { return 3 }"))
   // 5) Selector=unique with multiple matches returns ambiguous.
   const multi_path = write_fixture(harness.fs, root, "multi.rs", "fn a() { 1 }\nfn b() { 2 }\n")
