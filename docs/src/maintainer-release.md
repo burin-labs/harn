@@ -74,6 +74,31 @@ restart the release from the still-unmodified source branch. If a valid exact
 run is already recorded, reuse its receipt; do not dispatch a blind duplicate.
 If the branch moved, discard both platform receipts and freeze the new SHA.
 
+### Diagnose a source audit failure
+
+Open the failed hosted release artifact and read `release-audit.json`. Find the
+`hosted-platform-certification` step. Its output ends with `RELEASE AUDIT
+FAILURE RECAP`, the failed lane, its exit status, and the last 40 log lines.
+Use that cause to choose the narrowest local check. Do not rerun a release only
+because the workflow page shows a generic `harn-audit failed` message.
+
+For a Harn conformance failure, rerun the named file with the frozen candidate
+binary and the release network environment cleared:
+
+```bash
+env -u HARN_EGRESS_ALLOW \
+  -u HARN_EGRESS_DENY \
+  -u HARN_EGRESS_DEFAULT \
+  -u HARN_EGRESS_BLOCK_PRIVATE \
+  -u HARN_EGRESS_ALLOW_LOOPBACK \
+  HARN_BIN=/path/to/frozen/harn \
+  ./scripts/harn_bin.sh -- test conformance/tests/path/to/test.harn
+```
+
+If the focused test passes, replay the full conformance set more than once.
+Treat one pass as evidence of a transient failure, not proof that the cause is
+gone. Keep the failed receipt and the replay logs with the release record.
+
 ## Piecewise gates
 
 Use the repository-local gates only when you need to audit or dry-run without
