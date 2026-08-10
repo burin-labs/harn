@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use std::fmt;
+use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -9,9 +10,11 @@ use zeroize::{Zeroize, Zeroizing};
 
 mod env;
 mod keyring;
+mod memory;
 
 pub use env::EnvSecretProvider;
 pub use keyring::{KeyringSecretProvider, NativeKeyring, NativeKeyringError};
+pub use memory::MemorySecretProvider;
 
 pub const DEFAULT_SECRET_PROVIDER_CHAIN: &str = "env,keyring";
 pub const SECRET_PROVIDER_CHAIN_ENV: &str = "HARN_SECRET_PROVIDERS";
@@ -22,6 +25,10 @@ pub const CONNECTOR_ACCESS_TOKEN_SECRET_NAME: &str = "access-token";
 pub const CONNECTOR_REFRESH_TOKEN_SECRET_NAME: &str = "refresh-token";
 const RUNTIME_PROVENANCE_SECRET_NAMESPACE: &str = "provenance";
 const SCOPED_RUNTIME_PROVENANCE_SECRET_NAMESPACE: &str = "harn.provenance";
+
+tokio::task_local! {
+    static ACTIVE_SECRET_PROVIDER: Arc<dyn SecretProvider>;
+}
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash, Ord, PartialOrd, Serialize, Deserialize)]
 pub enum SecretVersion {
@@ -144,8 +151,12 @@ pub fn resolve_secret_ref_to_string(raw: &str) -> Result<Option<String>, SecretE
     let Some(id) = parse_secret_ref(raw)? else {
         return Ok(None);
     };
-    let chain = configured_default_chain(SECRET_REF_CHAIN_NAMESPACE)?;
-    let secret = futures::executor::block_on(chain.get(&id))?;
+    let secret = if let Ok(provider) = ACTIVE_SECRET_PROVIDER.try_with(Arc::clone) {
+        futures::executor::block_on(provider.get(&id))?
+    } else {
+        let chain = configured_default_chain(SECRET_REF_CHAIN_NAMESPACE)?;
+        futures::executor::block_on(chain.get(&id))?
+    };
     let rendered = secret.with_exposed(|bytes| {
         std::str::from_utf8(bytes)
             .map(str::to_string)
@@ -156,6 +167,21 @@ pub fn resolve_secret_ref_to_string(raw: &str) -> Result<Option<String>, SecretE
             })
     })?;
     Ok(Some(rendered))
+}
+
+/// Resolve secret references through `provider` for one async operation.
+///
+/// Hosts scope the complete session execution so model discovery, routing,
+/// health checks, and provider calls share one credential view. Tokio
+/// task-local scope keeps concurrent sessions on a shared runtime isolated.
+pub async fn with_active_secret_provider<T>(
+    provider: Option<Arc<dyn SecretProvider>>,
+    operation: impl Future<Output = T>,
+) -> T {
+    match provider {
+        Some(provider) => ACTIVE_SECRET_PROVIDER.scope(provider, operation).await,
+        None => operation.await,
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

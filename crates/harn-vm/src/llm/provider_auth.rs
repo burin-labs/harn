@@ -396,6 +396,42 @@ mod tests {
         assert!(!message.contains("sk-from-ref"));
     }
 
+    #[test]
+    fn harness_session_provider_resolves_reference_without_global_secret_state() {
+        let _guard = crate::llm::env_guard();
+        let _reference = ScopedEnv::set(
+            "ANTHROPIC_API_KEY",
+            "harn-secret://burin.provider-auth/anthropic-api-key",
+        );
+        let _providers = ScopedEnv::set("HARN_SECRET_PROVIDERS", "env");
+        let _global_secret = ScopedEnv::unset("HARN_SECRET_BURIN_PROVIDER_AUTH_ANTHROPIC_API_KEY");
+        let provider = crate::secrets::MemorySecretProvider::new("burin-session").with_secret(
+            crate::secrets::SecretId::new("burin.provider-auth", "anthropic-api-key"),
+            "sk-process-local",
+        );
+
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime")
+            .block_on(crate::secrets::with_active_secret_provider(
+                Some(std::sync::Arc::new(provider)),
+                async {
+                    assert_eq!(resolve_api_key("anthropic").unwrap(), "sk-process-local");
+                    assert_eq!(
+                        provider_auth_status("anthropic").credential_status,
+                        ProviderCredentialStatus::Ok
+                    );
+                },
+            ));
+
+        assert_eq!(
+            provider_auth_status("anthropic").credential_status,
+            ProviderCredentialStatus::Missing,
+            "the process-local provider must not escape its task"
+        );
+    }
+
     /// Install a environment policy for the duration of a test and clear it on
     /// drop, so a panicking assertion cannot leak a profile into a sibling test
     /// sharing the thread.

@@ -824,6 +824,11 @@ impl Harness {
         Self { inner }
     }
 
+    /// Return the provider attached to `harness.secrets.*`, when present.
+    pub fn secret_provider(&self) -> Option<&Arc<dyn crate::secrets::SecretProvider>> {
+        self.inner.secret_provider()
+    }
+
     /// Attach a provider for `harness.secrets.*`.
     ///
     /// The provider is intentionally embedder-supplied. Harn owns the typed
