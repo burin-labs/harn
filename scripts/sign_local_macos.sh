@@ -48,8 +48,13 @@ sign_one() {
     if codesign -d --verbose=2 "$path" 2>&1 | grep -Fq "Authority=$SIGN_ID"; then
       return 0
     fi
-    codesign --force --options runtime --timestamp \
-      --sign "$SIGN_ID" "$path" 2>/dev/null
+    if ! codesign --force --options runtime --timestamp \
+      --sign "$SIGN_ID" "$path" 2>/dev/null; then
+      if [ "${HARN_LOCAL_SIGN_QUIET:-0}" != "1" ]; then
+        echo "scripts/sign_local_macos.sh: Developer ID signing unavailable — falling back to ad-hoc sign." >&2
+      fi
+      codesign -s - -f "$path" 2>/dev/null || true
+    fi
   else
     codesign -s - -f "$path" 2>/dev/null || true
   fi
