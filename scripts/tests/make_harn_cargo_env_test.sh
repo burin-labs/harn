@@ -28,7 +28,7 @@ case "$*" in
       printf '{"target_directory":"%s"}\n' "$FAKE_METADATA_TARGET_DIR"
     fi
     ;;
-  run\ *)
+  build\ *|clean|fmt\ *|run\ *|test\ *)
     ;;
   *)
     echo "unexpected cargo invocation: $*" >&2
@@ -42,13 +42,15 @@ cat > "$fake_bin/harn-lease" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
 for name in HARN_CARGO_LEASE_RUNNER HARN_CARGO_LEASE_OWNER HARN_CARGO_LEASE_HOST \
-  HARN_CARGO_LEASE_WAIT_MS HARN_CARGO_LEASE_PRIORITY_CLASS; do
+  HARN_CARGO_LEASE_WAIT_MS HARN_CARGO_LEASE_PRIORITY_CLASS HARN_CARGO_LEASE_MODE; do
   if [[ -v "$name" ]]; then
     echo "wrapper leaked $name into the lease runner" >&2
     exit 91
   fi
 done
-printf '%s\n' "$@" > "$FAKE_HARN_LEASE_RECORD"
+printf 'CARGO_HARN_HOST_LEASE_ACTIVE=%s\n' \
+  "${CARGO_HARN_HOST_LEASE_ACTIVE-__unset__}" > "$FAKE_HARN_LEASE_RECORD"
+printf '%s\n' "$@" >> "$FAKE_HARN_LEASE_RECORD"
 SH
 chmod +x "$fake_bin/harn-lease"
 
@@ -58,6 +60,11 @@ echo "python3 must not run" >&2
 exit 42
 SH
 chmod +x "$fake_bin/python3"
+
+# Direct-wrapper fixtures below exercise target/build-dir behavior, not machine
+# admission. Opt out explicitly so a developer's installed harn cannot change
+# their path through the fixture.
+export HARN_CARGO_LEASE_MODE=off
 
 PATH="$fake_bin:$PATH" \
   CARGO_TARGET_DIR="$target_dir" \
@@ -98,7 +105,8 @@ if ! grep -Fxq "CARGO_BUILD_BUILD_DIR=$custom_build_dir" "$record"; then
 fi
 
 lease_record="$tmp_root/harn-lease-record.txt"
-PATH="$fake_bin:$PATH" \
+env -u HARN_CARGO_LEASE_MODE \
+  PATH="$fake_bin:$PATH" \
   CARGO_TARGET_DIR="$target_dir" \
   CARGO_BUILD_BUILD_DIR="$custom_build_dir" \
   HARN_CARGO_LEASE_RUNNER=harn-lease \
@@ -106,10 +114,12 @@ PATH="$fake_bin:$PATH" \
   HARN_CARGO_LEASE_HOST=mac-local \
   HARN_CARGO_LEASE_WAIT_MS=123 \
   HARN_CARGO_LEASE_PRIORITY_CLASS=interactive \
+  CI=true \
   FAKE_HARN_LEASE_RECORD="$lease_record" \
-  "$repo_root/scripts/cargo_with_worktree_build_dir.sh" test -p harn-vm
+  "$repo_root/scripts/cargo_with_worktree_build_dir.sh" --locked test -p harn-vm
 
 cat > "$tmp_root/expected-harn-lease-record.txt" <<EOF
+CARGO_HARN_HOST_LEASE_ACTIVE=1
 host
 lease
 run
@@ -129,6 +139,7 @@ mac-local
 --priority-class
 interactive
 --
+--locked
 test
 -p
 harn-vm
@@ -137,6 +148,181 @@ if ! diff -u "$tmp_root/expected-harn-lease-record.txt" "$lease_record"; then
   echo "wrapper did not route the isolated Cargo invocation through Harn" >&2
   exit 1
 fi
+
+auto_harn="$target_dir/debug/harn"
+mkdir -p "$(dirname "$auto_harn")"
+cp "$fake_bin/harn-lease" "$auto_harn"
+: > "$lease_record"
+env -u HARN_CARGO_LEASE_MODE \
+  PATH="$fake_bin:$PATH" \
+  CARGO_TARGET_DIR="$target_dir" \
+  FAKE_HARN_LEASE_RECORD="$lease_record" \
+  "$repo_root/scripts/cargo_with_worktree_build_dir.sh" test -p harn-vm
+
+cat > "$tmp_root/expected-auto-harn-lease-record.txt" <<EOF
+CARGO_HARN_HOST_LEASE_ACTIVE=1
+host
+lease
+run
+cargo
+--owner
+cargo-wrapper
+--workspace
+$repo_root
+--target-dir
+$target_dir
+--build-dir
+$target_dir
+--wait-ms
+3600000
+--priority-class
+interactive
+--
+test
+-p
+harn-vm
+EOF
+if ! diff -u "$tmp_root/expected-auto-harn-lease-record.txt" "$lease_record"; then
+  echo "wrapper did not auto-route a heavy Cargo command through the target Harn binary" >&2
+  exit 1
+fi
+
+cp "$fake_bin/harn-lease" "$fake_bin/harn"
+cat > "$target_dir/debug/harn.exe" <<'SH'
+#!/usr/bin/env bash
+echo "Windows wrapper tried to supervise a build with its target executable" >&2
+exit 97
+SH
+chmod +x "$target_dir/debug/harn.exe"
+: > "$lease_record"
+env -u HARN_CARGO_LEASE_MODE \
+  OS=Windows_NT \
+  PATH="$fake_bin:$PATH" \
+  CARGO_TARGET_DIR="$target_dir" \
+  FAKE_HARN_LEASE_RECORD="$lease_record" \
+  "$repo_root/scripts/cargo_with_worktree_build_dir.sh" test -p harn-vm
+if ! diff -u "$tmp_root/expected-auto-harn-lease-record.txt" "$lease_record"; then
+  echo "Windows wrapper did not use the independently installed Harn runner" >&2
+  exit 1
+fi
+rm -f "$fake_bin/harn" "$target_dir/debug/harn.exe"
+
+: > "$record"
+: > "$lease_record"
+HARN_CARGO_LEASE_MODE=required \
+  HARN_CARGO_LEASE_RUNNER=harn-lease \
+  PATH="$fake_bin:$PATH" \
+  CARGO_TARGET_DIR="$target_dir" \
+  CARGO_HARN_HOST_LEASE_ACTIVE=1 \
+  FAKE_CARGO_RECORD="$record" \
+  FAKE_HARN_LEASE_RECORD="$lease_record" \
+  "$repo_root/scripts/cargo_with_worktree_build_dir.sh" test -p harn-vm
+if ! grep -Fxq "args=test -p harn-vm" "$record" || [[ -s "$lease_record" ]]; then
+  echo "nested wrapper call reacquired its active rust-heavy lease" >&2
+  cat "$record" "$lease_record" >&2
+  exit 1
+fi
+
+: > "$record"
+: > "$lease_record"
+HARN_CARGO_LEASE_MODE=required \
+  HARN_CARGO_LEASE_RUNNER=harn-lease \
+  PATH="$fake_bin:$PATH" \
+  CARGO_TARGET_DIR="$target_dir" \
+  FAKE_CARGO_RECORD="$record" \
+  FAKE_HARN_LEASE_RECORD="$lease_record" \
+  "$repo_root/scripts/cargo_with_worktree_build_dir.sh" fmt --all
+if ! grep -Fxq "args=fmt --all" "$record" || [[ -s "$lease_record" ]]; then
+  echo "static Cargo command acquired the rust-heavy lease" >&2
+  cat "$record" "$lease_record" >&2
+  exit 1
+fi
+
+: > "$lease_record"
+HARN_CARGO_LEASE_MODE=required \
+  HARN_CARGO_LEASE_RUNNER=harn-lease \
+  PATH="$fake_bin:$PATH" \
+  CARGO_TARGET_DIR="$target_dir" \
+  FAKE_HARN_LEASE_RECORD="$lease_record" \
+  "$repo_root/scripts/cargo_with_worktree_build_dir.sh" clean
+if ! grep -Fxq "clean" "$lease_record"; then
+  echo "cargo clean bypassed the rust-heavy lease" >&2
+  cat "$lease_record" >&2
+  exit 1
+fi
+rm -f "$auto_harn"
+
+: > "$record"
+env -u HARN_CARGO_LEASE_MODE \
+  PATH="$fake_bin:/usr/bin:/bin" \
+  CARGO_TARGET_DIR="$target_dir" \
+  FAKE_CARGO_RECORD="$record" \
+  "$repo_root/scripts/cargo_with_worktree_build_dir.sh" build -p harn-vm \
+  > "$tmp_root/auto-fallback-stdout.txt" \
+  2> "$tmp_root/auto-fallback-stderr.txt"
+if ! grep -Fxq "args=build -p harn-vm" "$record"; then
+  echo "automatic lease discovery did not fall back to Cargo" >&2
+  cat "$record" >&2
+  exit 1
+fi
+if ! grep -Fq "no compatible prebuilt Harn binary" "$tmp_root/auto-fallback-stderr.txt"; then
+  echo "automatic lease fallback was silent" >&2
+  cat "$tmp_root/auto-fallback-stderr.txt" >&2
+  exit 1
+fi
+
+: > "$record"
+if HARN_CARGO_LEASE_MODE=required \
+  PATH="$fake_bin:/usr/bin:/bin" \
+  CARGO_TARGET_DIR="$target_dir" \
+  FAKE_CARGO_RECORD="$record" \
+  "$repo_root/scripts/cargo_with_worktree_build_dir.sh" build -p harn-vm \
+  > "$tmp_root/required-missing-stdout.txt" \
+  2> "$tmp_root/required-missing-stderr.txt"; then
+  echo "required lease mode accepted a missing runner" >&2
+  exit 1
+fi
+if [[ -s "$record" ]] \
+  || ! grep -Fq "no compatible prebuilt Harn binary" "$tmp_root/required-missing-stderr.txt"; then
+  echo "required lease mode did not fail closed before Cargo" >&2
+  cat "$record" "$tmp_root/required-missing-stderr.txt" >&2
+  exit 1
+fi
+
+: > "$record"
+if HARN_CARGO_LEASE_MODE=invalid \
+  PATH="$fake_bin:/usr/bin:/bin" \
+  CARGO_TARGET_DIR="$target_dir" \
+  FAKE_CARGO_RECORD="$record" \
+  "$repo_root/scripts/cargo_with_worktree_build_dir.sh" fmt --all \
+  > "$tmp_root/invalid-mode-stdout.txt" \
+  2> "$tmp_root/invalid-mode-stderr.txt"; then
+  echo "wrapper accepted an invalid lease mode" >&2
+  exit 1
+fi
+if [[ -s "$record" ]] \
+  || ! grep -Fq "must be auto, off, or required" "$tmp_root/invalid-mode-stderr.txt"; then
+  echo "invalid lease mode did not fail before Cargo" >&2
+  cat "$record" "$tmp_root/invalid-mode-stderr.txt" >&2
+  exit 1
+fi
+
+cp "$fake_bin/harn-lease" "$auto_harn"
+: > "$record"
+: > "$lease_record"
+env -u HARN_CARGO_LEASE_MODE \
+  CI=true \
+  PATH="$fake_bin:$PATH" \
+  CARGO_TARGET_DIR="$target_dir" \
+  FAKE_CARGO_RECORD="$record" \
+  FAKE_HARN_LEASE_RECORD="$lease_record" \
+  "$repo_root/scripts/cargo_with_worktree_build_dir.sh" build -p harn-vm
+if ! grep -Fxq "args=build -p harn-vm" "$record" || [[ -s "$lease_record" ]]; then
+  echo "CI default unexpectedly acquired the local rust-heavy lease" >&2
+  cat "$record" "$lease_record" >&2
+  exit 1
+fi
+rm -f "$auto_harn"
 
 : > "$record"
 PATH="$fake_bin:$PATH" \

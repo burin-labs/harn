@@ -272,23 +272,42 @@ completion the supervisor writes a redacted receipt under
 `~/.harn/host-leases/receipts/` containing wait time, hold time, exit status,
 resource identity, and hashed workspace/target/build identities.
 
-The existing worktree Cargo wrapper can opt a heavy invocation into this
-boundary without changing its artifact-isolation policy:
+The worktree Cargo wrapper uses this boundary by default for commands that may
+compile or mutate build artifacts: build, check, clean, clippy, doc, fix,
+install, nextest, package, publish, run, rustc, rustdoc, test, bench, and
+unknown Cargo plugins. Static commands such as fmt, metadata, tree, fetch, and
+update bypass the lease. Artifact isolation remains unchanged.
+
+The wrapper first looks for an already-built Harn binary in the active target
+directory, then on `PATH`. It never builds a lease runner recursively. A first
+build with no compatible runner prints one warning and runs Cargo directly;
+subsequent commands use the binary that build produced. CI defaults this local
+admission layer off because workflow jobs own their runner concurrency.
+
+Automatic runs wait up to one hour on lease-change notifications and use the
+interactive priority class. Override those defaults or require an exact runner
+when a script needs a fail-closed boundary:
 
 ```bash
 HARN_CARGO_LEASE_RUNNER=/path/to/prebuilt/harn \
 HARN_CARGO_LEASE_OWNER=ci-verify \
 HARN_CARGO_LEASE_PRIORITY_CLASS=ci-verify \
 HARN_CARGO_LEASE_WAIT_MS=600000 \
+HARN_CARGO_LEASE_MODE=required \
 ./scripts/cargo_with_worktree_build_dir.sh test -p harn-vm
 ```
 
-The runner must already exist; the wrapper never builds Harn recursively.
-The wrapper consumes its `HARN_CARGO_LEASE_*` controls before launching Harn,
-so Cargo, build scripts, tests, and nested wrapper invocations cannot inherit
-the opt-in and wait behind their own capacity-one lease.
-Leave the variable unset for formatting, metadata reads, and other static
-commands that do not need the `rust-heavy` resource.
+`HARN_CARGO_LEASE_MODE` accepts `auto` (the local default), `required`, or
+`off`. Use `off` only for an intentionally independent lane:
+
+```bash
+HARN_CARGO_LEASE_MODE=off make vm-check
+```
+
+The wrapper consumes its request variables before launching Harn and marks the
+supervised Cargo process tree internally. Build scripts, tests, and nested Make
+calls therefore cannot inherit the request or wait behind their own
+capacity-one lease.
 
 State defaults to `~/.harn/host-leases`. Set `HARN_HOST_LEASE_ROOT` to isolate
 tests or relocate state for processes running under the same OS account. A
