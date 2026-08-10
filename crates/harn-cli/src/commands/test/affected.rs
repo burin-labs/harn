@@ -1,29 +1,95 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use serde::Serialize;
+
 use crate::test_runner::{self, AffectedTestFiles};
 
-pub(super) enum AffectedTestPaths {
-    Selected(Vec<String>),
-    Full { reason: String },
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum AffectedTestMode {
+    Selected,
+    Full,
 }
 
-pub(super) fn resolve(paths: &[String], base: &str) -> AffectedTestPaths {
+pub(super) struct ResolvedAffectedTests {
+    pub mode: AffectedTestMode,
+    pub reason: String,
+    pub files: Vec<String>,
+}
+
+#[derive(Serialize)]
+pub(super) struct AffectedTestPlan<'a> {
+    schema_version: u32,
+    kind: &'static str,
+    base_ref: &'a str,
+    mode: AffectedTestMode,
+    reason: &'a str,
+    requested_targets: &'a [String],
+    test_file_count: usize,
+    test_files: Vec<String>,
+}
+
+impl ResolvedAffectedTests {
+    pub fn plan<'a>(&'a self, base: &'a str, paths: &'a [String]) -> AffectedTestPlan<'a> {
+        AffectedTestPlan {
+            schema_version: 1,
+            kind: "harn.test.affected_plan",
+            base_ref: base,
+            mode: self.mode,
+            reason: &self.reason,
+            requested_targets: paths,
+            test_file_count: self.files.len(),
+            test_files: self.files.iter().map(|path| plan_path(path)).collect(),
+        }
+    }
+}
+
+fn plan_path(path: &str) -> String {
+    let path = Path::new(path);
+    let display = std::env::current_dir()
+        .ok()
+        .and_then(|current| path.strip_prefix(current).ok())
+        .unwrap_or(path);
+    display
+        .to_string_lossy()
+        .replace(std::path::MAIN_SEPARATOR, "/")
+}
+
+pub(super) fn resolve(paths: &[String], base: &str) -> ResolvedAffectedTests {
     let targets = paths.iter().map(PathBuf::from).collect::<Vec<_>>();
     let changed = match changed_harn_files(base) {
         Ok(changed) => changed,
-        Err(reason) => return AffectedTestPaths::Full { reason },
+        Err(reason) => {
+            return resolved(AffectedTestMode::Full, reason, all_test_files(&targets));
+        }
     };
 
     match test_runner::select_affected_test_files(&targets, &changed) {
-        AffectedTestFiles::Selected(files) => AffectedTestPaths::Selected(
-            files
-                .into_iter()
-                .map(|path| path.to_string_lossy().into_owned())
-                .collect(),
+        AffectedTestFiles::Selected { files } => resolved(
+            AffectedTestMode::Selected,
+            "resolved changed modules through the transitive importer graph".to_string(),
+            files,
         ),
-        AffectedTestFiles::Full { reason } => AffectedTestPaths::Full { reason },
+        AffectedTestFiles::Full { files, reason } => {
+            resolved(AffectedTestMode::Full, reason, files)
+        }
     }
+}
+
+fn resolved(mode: AffectedTestMode, reason: String, files: Vec<PathBuf>) -> ResolvedAffectedTests {
+    ResolvedAffectedTests {
+        mode,
+        reason,
+        files: files
+            .into_iter()
+            .map(|path| path.to_string_lossy().into_owned())
+            .collect(),
+    }
+}
+
+fn all_test_files(targets: &[PathBuf]) -> Vec<PathBuf> {
+    test_runner::discover_test_files_for_targets(targets)
 }
 
 fn changed_harn_files(base: &str) -> Result<Vec<PathBuf>, String> {

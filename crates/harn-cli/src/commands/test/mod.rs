@@ -83,6 +83,37 @@ pub(crate) async fn run_command(args: TestArgs) {
     {
         command_error("--affected-from is supported only for one-shot user-test suites");
     }
+    if args.plan && args.affected_from.is_none() {
+        command_error("--plan requires --affected-from <git-ref>");
+    }
+    if args.plan
+        && (args.watch
+            || args.determinism
+            || args.evals
+            || args.record
+            || args.replay
+            || args.coverage
+            || args.coverage_out.is_some()
+            || args.junit.is_some()
+            || args.json
+            || args.json_out.is_some()
+            || args.parallel
+            || args.fail_fast
+            || args.jobs.is_some()
+            || args.shard_index.is_some()
+            || args.shard_total.is_some()
+            || args.filter.is_some()
+            || args.verbose
+            || args.timing
+            || args.diagnose
+            || !args.approve_risky.is_empty()
+            || !args.skill_dir.is_empty()
+            || args.trusted_host_dispatch)
+    {
+        command_error(
+            "--plan inspects affected test files only; remove execution, report, filter, shard, coverage, and skill options",
+        );
+    }
 
     if args.coverage || args.coverage_out.is_some() {
         if args.watch {
@@ -329,20 +360,37 @@ async fn run_user_test_targets(
     cli_skill_dirs: &[PathBuf],
     operator_approval_grant: Option<harn_vm::orchestration::OperatorApprovalGrant>,
 ) {
+    for path in paths {
+        if !Path::new(path).exists() {
+            command_error(&format!("test target does not exist: {path}"));
+        }
+    }
     let selected_paths;
     let paths = if let Some(base) = args.affected_from.as_deref() {
-        match affected::resolve(paths, base) {
-            affected::AffectedTestPaths::Selected(selected) => {
+        let resolved = affected::resolve(paths, base);
+        if args.plan {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&resolved.plan(base, paths))
+                    .expect("affected test plan is JSON-serializable")
+            );
+            return;
+        }
+        match resolved.mode {
+            affected::AffectedTestMode::Selected => {
                 eprintln!(
                     "affected tests: selected {} test file(s) from {} requested target(s)",
-                    selected.len(),
+                    resolved.files.len(),
                     paths.len()
                 );
-                selected_paths = selected;
+                selected_paths = resolved.files;
                 &selected_paths
             }
-            affected::AffectedTestPaths::Full { reason } => {
-                eprintln!("affected tests: {reason}; running the complete requested suite");
+            affected::AffectedTestMode::Full => {
+                eprintln!(
+                    "affected tests: {}; running the complete requested suite",
+                    resolved.reason
+                );
                 paths
             }
         }

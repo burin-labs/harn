@@ -9,6 +9,106 @@ fn binary_path() -> std::path::PathBuf {
     std::path::PathBuf::from(env!("CARGO_BIN_EXE_harn"))
 }
 
+fn git(repo: &std::path::Path, args: &[&str]) -> String {
+    let output = Command::new("git")
+        .current_dir(repo)
+        .args(args)
+        .output()
+        .expect("spawn git");
+    assert!(
+        output.status.success(),
+        "git {} failed:\n{}",
+        args.join(" "),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout).trim().to_string()
+}
+
+#[test]
+fn affected_test_plan_reports_selection_and_safe_fallback_without_running_tests() {
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let suite = temp.path().join("suite");
+    std::fs::create_dir_all(suite.join("lib")).expect("create suite");
+    std::fs::write(
+        suite.join("lib/shared.harn"),
+        "pub fn value() -> int { return 1 }\n",
+    )
+    .expect("write shared module");
+    std::fs::write(
+        suite.join("test_direct.harn"),
+        "import { value } from \"lib/shared.harn\"\npipeline test_direct(_task) { assert_eq(value(), 999) }\n",
+    )
+    .expect("write direct test");
+    std::fs::write(
+        suite.join("test_unrelated.harn"),
+        "pipeline test_unrelated(_task) { assert_eq(1, 999) }\n",
+    )
+    .expect("write unrelated test");
+    git(temp.path(), &["init", "-q"]);
+    git(temp.path(), &["config", "user.email", "test@example.com"]);
+    git(temp.path(), &["config", "user.name", "Harn Test"]);
+    git(temp.path(), &["add", "."]);
+    git(temp.path(), &["commit", "-q", "-m", "base"]);
+    let base = git(temp.path(), &["rev-parse", "HEAD"]);
+
+    std::fs::write(
+        suite.join("lib/shared.harn"),
+        "pub fn value() -> int { return 2 }\n",
+    )
+    .expect("change shared module");
+    git(temp.path(), &["add", "."]);
+    git(temp.path(), &["commit", "-q", "-m", "change module"]);
+
+    let selected = Command::new(binary_path())
+        .current_dir(temp.path())
+        .args(["test", "suite", "--affected-from", &base, "--plan"])
+        .output()
+        .expect("spawn affected test plan");
+    assert!(
+        selected.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&selected.stdout),
+        String::from_utf8_lossy(&selected.stderr)
+    );
+    let selected_json: serde_json::Value =
+        serde_json::from_slice(&selected.stdout).expect("selected plan JSON");
+    assert_eq!(selected_json["schema_version"], 1);
+    assert_eq!(selected_json["kind"], "harn.test.affected_plan");
+    assert_eq!(selected_json["mode"], "selected");
+    assert_eq!(selected_json["test_file_count"], 1);
+    assert_eq!(selected_json["test_files"][0], "suite/test_direct.harn");
+    assert!(!String::from_utf8_lossy(&selected.stdout).contains("PASS"));
+
+    let harn_base = git(temp.path(), &["rev-parse", "HEAD"]);
+    std::fs::write(temp.path().join("policy.toml"), "changed = true\n")
+        .expect("write non-Harn input");
+    git(temp.path(), &["add", "."]);
+    git(temp.path(), &["commit", "-q", "-m", "change policy"]);
+
+    let fallback = Command::new(binary_path())
+        .current_dir(temp.path())
+        .args(["test", "suite", "--affected-from", &harn_base, "--plan"])
+        .output()
+        .expect("spawn fallback test plan");
+    assert!(fallback.status.success());
+    let fallback_json: serde_json::Value =
+        serde_json::from_slice(&fallback.stdout).expect("fallback plan JSON");
+    assert_eq!(fallback_json["mode"], "full");
+    assert_eq!(fallback_json["test_file_count"], 2);
+    assert!(fallback_json["reason"]
+        .as_str()
+        .is_some_and(|reason| reason.contains("changed non-Harn input policy.toml")));
+
+    let invalid = Command::new(binary_path())
+        .current_dir(temp.path())
+        .args(["test", "suite", "--plan"])
+        .output()
+        .expect("spawn invalid test plan");
+    assert!(!invalid.status.success());
+    assert!(String::from_utf8_lossy(&invalid.stderr)
+        .contains("--plan requires --affected-from <git-ref>"));
+}
+
 #[test]
 fn std_testing_temp_dir_works_in_the_default_run_sandbox() {
     let temp = tempfile::TempDir::new().expect("tempdir");
