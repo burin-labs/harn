@@ -77,9 +77,12 @@ live in [Engineering principles](docs/src/dev/engineering-principles.md):
   sccache for compiler-object reuse. Because released sccache versions include
   Rust's absolute compilation directory in the cache key, setup also restores
   an immutable toolchain-keyed Cargo target seed with filesystem copy-on-write.
+  The seed keeps third-party dependency artifacts but removes workspace
+  binaries, fingerprints, dep-info, and incremental state before publication
+  and after restore, so every lane rebuilds Harn against its own source tree.
   Each lane gets private files; unsupported filesystems simply take the cold
-  build path. A successful canonical CLI build publishes the seed once; an
-  8 GiB ceiling prevents an accumulated multi-profile target from becoming the
+  build path. A successful canonical CLI build publishes the seed once; an 8
+  GiB ceiling prevents an accumulated multi-profile target from becoming the
   permanent seed.
 - `HARN_DEV_TARGET_WORKTREE_PATH` and `CODEX_WORKTREE_PATH` must name the
   checkout being configured. Setup ignores stale sibling-worktree values.
