@@ -113,7 +113,7 @@ fn __openai_outputs_result(
   const mime_type = if format == "jpeg" {
     "image/jpeg"
   } else {
-    "image/" + format
+    "image/" + to_string(format)
   }
   for item in response?.output ?? [] {
     if item?.type == "image_generation_call" && trim(to_string(item?.result ?? "")) != "" {
@@ -132,7 +132,7 @@ fn __openai_outputs_result(
       outputs = outputs
         + [
         {
-          name: to_string(item?.id ?? "openai-image") + "." + format,
+          name: to_string(item?.id ?? "openai-image") + "." + to_string(format),
           mime_type: mime_type,
           bytes: unwrap(decoded),
           metadata: {
@@ -148,7 +148,7 @@ fn __openai_outputs_result(
 }
 
 fn __openai_mime_type(format: OpenAiImageFormat) -> string {
-  return format == "jpeg" ? "image/jpeg" : "image/" + format
+  return format == "jpeg" ? "image/jpeg" : "image/" + to_string(format)
 }
 
 /**

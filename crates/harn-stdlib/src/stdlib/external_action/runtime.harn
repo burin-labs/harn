@@ -18,6 +18,25 @@ import {
 
 const EXTERNAL_ACTION_RECEIPT_TOPIC = "external_actions.receipts"
 
+const EXTERNAL_ACTION_RECEIPT_SCHEMA: "harn.external_action_receipt.v1" =
+  "harn.external_action_receipt.v1"
+
+fn __external_action_adapter_outcome(value: string) -> ExternalActionAdapterOutcome {
+  return schema_expect(value, schema_of(ExternalActionAdapterOutcome))
+}
+
+fn __external_action_outcome(value: string) -> ExternalActionOutcome {
+  return schema_expect(value, schema_of(ExternalActionOutcome))
+}
+
+fn __external_action_status(value: string) -> ExternalActionReceiptStatus {
+  return schema_expect(value, schema_of(ExternalActionReceiptStatus))
+}
+
+fn __external_action_next_action(value: string) -> ExternalActionNextAction {
+  return schema_expect(value, schema_of(ExternalActionNextAction))
+}
+
 fn __external_action_is_callable(value) -> bool {
   const kind = type_of(value)
   return kind == "closure" || kind == "function"
@@ -109,7 +128,7 @@ fn __external_action_adapter_result(
   if raw_outcome == "confirmed" {
     return Ok(
       __external_action_adapter_result_fields(
-        "confirmed",
+        __external_action_adapter_outcome("confirmed"),
         unwrap(evidence),
         provider_action_id,
         error_code,
@@ -119,7 +138,7 @@ fn __external_action_adapter_result(
   if raw_outcome == "failed_before_dispatch" {
     return Ok(
       __external_action_adapter_result_fields(
-        "failed_before_dispatch",
+        __external_action_adapter_outcome("failed_before_dispatch"),
         unwrap(evidence),
         provider_action_id,
         error_code,
@@ -128,7 +147,7 @@ fn __external_action_adapter_result(
   }
   return Ok(
     __external_action_adapter_result_fields(
-      "indeterminate",
+      __external_action_adapter_outcome("indeterminate"),
       unwrap(evidence),
       provider_action_id,
       error_code,
@@ -142,7 +161,7 @@ fn __external_action_adapter_result_fields(
   provider_action_id: string = "",
   error_code: string = "",
 ) -> ExternalActionAdapterResult {
-  let result: ExternalActionAdapterResult = {outcome: outcome}
+  let result = {outcome: outcome}
   if len(evidence_refs) > 0 {
     result.evidence_refs = evidence_refs
   }
@@ -152,11 +171,16 @@ fn __external_action_adapter_result_fields(
   if error_code != "" {
     result.error_code = error_code
   }
-  return result
+  return schema_expect(result, schema_of(ExternalActionAdapterResult))
 }
 
 fn __external_action_indeterminate_result(code: string) -> ExternalActionAdapterResult {
-  return __external_action_adapter_result_fields("indeterminate", [], "", code)
+  return __external_action_adapter_result_fields(
+    __external_action_adapter_outcome("indeterminate"),
+    [],
+    "",
+    code,
+  )
 }
 
 fn __external_action_receipt_fields(
@@ -172,8 +196,8 @@ fn __external_action_receipt_fields(
   error: ExternalActionError?,
   reconciliation,
 ) -> ExternalActionReceipt {
-  let receipt: ExternalActionReceipt = {
-    schema: "harn.external_action_receipt.v1",
+  let receipt = {
+    schema: EXTERNAL_ACTION_RECEIPT_SCHEMA,
     id: "receipt_"
       + substring(
       sha256(
@@ -215,7 +239,7 @@ fn __external_action_receipt_fields(
   if reconciliation != nil {
     receipt.reconciliation = reconciliation
   }
-  return receipt
+  return schema_expect(receipt, schema_of(ExternalActionReceipt))
 }
 
 fn __external_action_receipt(
@@ -243,9 +267,9 @@ fn __external_action_receipt(
     return __external_action_receipt_fields(
       intent,
       adapter_id,
-      "confirmed",
-      "confirmed",
-      "none",
+      __external_action_outcome("confirmed"),
+      __external_action_status("confirmed"),
+      __external_action_next_action("none"),
       opts?.dispatch_attempted ?? true,
       recorded_at_ms,
       result.provider_action_id,
@@ -258,9 +282,9 @@ fn __external_action_receipt(
     return __external_action_receipt_fields(
       intent,
       adapter_id,
-      "failed_before_dispatch",
-      "failed_before_dispatch",
-      "none",
+      __external_action_outcome("failed_before_dispatch"),
+      __external_action_status("failed_before_dispatch"),
+      __external_action_next_action("none"),
       opts?.dispatch_attempted ?? false,
       recorded_at_ms,
       result.provider_action_id,
@@ -272,9 +296,9 @@ fn __external_action_receipt(
   return __external_action_receipt_fields(
     intent,
     adapter_id,
-    "indeterminate",
-    "reconciliation_required",
-    "reconcile",
+    __external_action_outcome("indeterminate"),
+    __external_action_status("reconciliation_required"),
+    __external_action_next_action("reconcile"),
     opts?.dispatch_attempted ?? true,
     recorded_at_ms,
     result.provider_action_id,
@@ -293,9 +317,9 @@ fn __external_action_denied_receipt(
   return __external_action_receipt_fields(
     intent,
     adapter_id,
-    "denied",
-    "denied",
-    "none",
+    __external_action_outcome("denied"),
+    __external_action_status("denied"),
+    __external_action_next_action("none"),
     false,
     recorded_at_ms,
     nil,

@@ -558,6 +558,7 @@ test-pr-gate-scripts:
 	./scripts/tests/tree_sitter_generated_test.sh
 	./scripts/tests/native_platform_ci_plan_test.sh
 	./scripts/tests/ci_merge_group_proof_test.sh
+	./scripts/tests/e2e_workflow_trigger_test.sh
 	./scripts/tests/changelog_fragment_check_test.sh
 	./scripts/tests/release_ship_fragment_guard_test.sh
 	./scripts/tests/release_ship_tag_push_idempotent_test.sh
@@ -599,6 +600,7 @@ test-pr-gate-scripts:
 	./scripts/tests/report_ci_cache_budget_test.sh
 	./scripts/tests/loadgen_postgres_gate_test.sh
 	./scripts/tests/check_all_features_test.sh
+	./scripts/tests/check_stdlib_strict_types_test.sh
 	./scripts/tests/test_one_test.sh
 
 # Rust/Harn-backed shell integration tests run only after CI restores the Rust

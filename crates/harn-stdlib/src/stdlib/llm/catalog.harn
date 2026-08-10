@@ -62,7 +62,11 @@ pub fn resolved_options(llm: HarnessLlm, opts) {
  * @errors: ["llm_model_ladder: ladder name is required"]
  */
 pub fn named_model_ladder(llm: HarnessLlm, name: string) -> NamedModelLadder? {
-  return llm.model_ladder(name)
+  const ladder = llm.model_ladder(name)
+  if ladder == nil {
+    return nil
+  }
+  return schema_expect(ladder, schema_of(NamedModelLadder))
 }
 
 fn __capability_field(caps, capability) {

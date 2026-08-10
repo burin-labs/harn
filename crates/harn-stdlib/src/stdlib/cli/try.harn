@@ -49,7 +49,7 @@ fn main(harness: Harness) {
   }
   const result = agent_loop(harness, prompt, nil, options)
   const warning = agent_first_tool_format_override_warning_text(
-    transcript_events(result?.transcript),
+    transcript_events(result.transcript),
   )
   if warning != nil {
     harness.stdio.eprintln(warning)

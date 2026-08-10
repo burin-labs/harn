@@ -26,7 +26,7 @@ pub fn agent_loop(harness: Harness, message, system_prompt = nil, options = nil)
   }
   const session = agent_session_init(harness.agent, message, system_prompt, opts)
   if session?.done {
-    return session.result
+    return schema_expect(session.result, schema_of(AgentResult))
   }
   agent_scratchpad_init(harness.agent, session, opts)
   if opts?._tool_format_override != nil {

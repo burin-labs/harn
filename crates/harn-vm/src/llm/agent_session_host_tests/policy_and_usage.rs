@@ -117,7 +117,7 @@ mod nested_budget_tests {
         };
         let result = build_nested_budget_denial("session-x", "go", &error);
         let json = vm_to_json(&result);
-        assert_eq!(json["final_status"], "blocked");
+        assert_eq!(json["final_status"], "budget_exhausted");
         assert_eq!(json["stop_reason"], "nested_execution_budget_exhausted");
         assert_eq!(json["error"]["category"], "budget_exceeded");
         assert!(json["error"]["message"]
