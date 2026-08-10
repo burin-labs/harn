@@ -1022,7 +1022,30 @@ jobs:
           fi
 
       - name: Restore target-independent CLI AOT payload
+        id: restore_cli_aot_primary
         if: needs.setup.outputs.is_release == 'true' || needs.setup.outputs.build_mode == 'benchmark' || needs.setup.outputs.build_mode == 'candidate'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        continue-on-error: true
+        with:
+          name: harn-cli-aot-payload
+          path: crates/harn-cli/generated
+
+      # GitHub's artifact endpoint can transiently refuse a connection even
+      # after the producer uploaded the payload successfully. Release builds
+      # are expensive and fan out across five targets, so absorb two bounded
+      # transport retries while still failing closed if the artifact remains
+      # unavailable.
+      - name: Retry target-independent CLI AOT payload restore
+        id: restore_cli_aot_retry
+        if: steps.restore_cli_aot_primary.outcome == 'failure'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        continue-on-error: true
+        with:
+          name: harn-cli-aot-payload
+          path: crates/harn-cli/generated
+
+      - name: Final target-independent CLI AOT payload restore
+        if: steps.restore_cli_aot_primary.outcome == 'failure' && steps.restore_cli_aot_retry.outcome == 'failure'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: harn-cli-aot-payload
