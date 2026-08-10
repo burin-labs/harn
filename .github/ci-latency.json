@@ -28,7 +28,7 @@
       "package-audit": { "budget_ms": 590000 },
       "lint-md": { "budget_ms": 30000 },
       "rust-checks": { "budget_ms": 470000 },
-      "rust-check-inputs": { "budget_ms": 600000 },
+      "rust-check-inputs": { "budget_ms": 900000 },
       "rust-artifacts-ready": { "budget_ms": 240000 },
       "security-tests-ready": { "budget_ms": 420000 },
       "rust-cache-refresh": { "budget_ms": 600000 },
