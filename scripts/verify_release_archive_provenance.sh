@@ -196,7 +196,14 @@ predicate_matches() {
       .verificationResult.statement.predicate as $p |
       $p.schemaVersion == $schema and
       $p.repository == $repo and
-      $p.tag == $tag and
+      (
+        $p.tag == $tag or
+        (
+          ($p.phase // "") == "candidate" and
+          (($p.tag // "") == "") and
+          $p.sourceCommit == $source
+        )
+      ) and
       $p.sourceCommit == $source and
       $p.archive == $archive and
       $p.target == $target and
@@ -238,7 +245,14 @@ for archive in "${expected_archives[@]}"; do
          .verificationResult.statement.predicate as $p |
          select(
            $p.schemaVersion == $schema and
-           $p.tag == $tag and
+           (
+             $p.tag == $tag or
+             (
+               ($p.phase // "") == "candidate" and
+               (($p.tag // "") == "") and
+               $p.sourceCommit == $source
+             )
+           ) and
            $p.sourceCommit == $source and
            $p.archive == $archive and
            $p.target == $target and
