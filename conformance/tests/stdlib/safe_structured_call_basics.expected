@@ -4,3 +4,5 @@ YES
 2
 clear
 1
+temperature_default=0.0
+explicit_temperature=0.2

@@ -551,13 +551,13 @@ pub fn schema_retry_nudge_for(schema, hint) {
  * not as a caller-seam middleware.
  *
  * Defaults applied when the corresponding option is unset:
- *   temperature      -> 0.0
+ *   temperature      -> 0.0 when the resolved route supports it
  *   schema_retries   -> 2
  *   repair.enabled   -> true
  *   repair.max_tokens-> floored reasoning-awarely: `max(600, structured floor)`
  *                       (600 baseline on a non-reasoning route; reasoning budget
  *                       + verdict headroom on a reasoning route)
- *   repair.temperature -> 0.0
+ *   repair.temperature -> 0.0 when the repair route supports it
  *   schema_retry_nudge -> derived via `schema_retry_nudge_for`
  *   max_tokens       -> floored to `STRUCTURED_MIN_MAX_TOKENS` (512)
  *
@@ -742,7 +742,7 @@ fn __apply_judge_defaults(llm: HarnessLlm, schema, options) {
   if requested_max_tokens < floor {
     resolved = resolved + {max_tokens: floor}
   }
-  if resolved?.temperature == nil {
+  if resolved?.temperature == nil && __temperature_default_supported(llm, resolved) {
     resolved = resolved + {temperature: 0.0}
   }
   if resolved?.schema_retries == nil {
@@ -771,10 +771,44 @@ fn __apply_judge_defaults(llm: HarnessLlm, schema, options) {
   if requested_repair_max_tokens < repair_floor {
     repair = repair + {max_tokens: repair_floor}
   }
-  if repair?.temperature == nil {
+  if repair?.temperature == nil
+    && __temperature_default_supported(llm, resolved + repair) {
     repair = repair + {temperature: 0.0}
   }
   return resolved + {repair: repair}
+}
+
+/**
+ * Whether the stdlib may add its deterministic temperature default.
+ *
+ * This only governs an option Harn itself supplies. An explicit caller value
+ * stays untouched and reaches the canonical capability-admission gate, where
+ * an unsupported request remains a typed error. Unknown and unresolved routes
+ * preserve the historical open-world behavior.
+ */
+fn __temperature_default_supported(llm: HarnessLlm, options) -> bool {
+  const model = trim(to_string(options?.model ?? ""))
+  if model == "" {
+    return true
+  }
+  const info = try {
+    llm.model_info(model)
+  } catch {
+    nil
+  }
+  let provider = trim(to_string(options?.provider ?? ""))
+  if provider == "" || provider == "auto" {
+    provider = trim(to_string(info?.provider ?? ""))
+  }
+  if provider == "" || provider == "auto" {
+    return true
+  }
+  const capabilities = try {
+    llm.provider_capabilities(provider, model)
+  } catch {
+    nil
+  }
+  return capabilities?.temperature_supported != false
 }
 
 /**

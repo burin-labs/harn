@@ -72,7 +72,16 @@ pipeline test_testing_toolkit(harness: Harness, task) {
   assert_eq(llm_text("hi"), {text: "hi"})
   assert_eq(llm_done(), {text: "##DONE##"})
   assert_eq(llm_done("<<END>>"), {text: "<<END>>"})
-  assert_eq(llm_error("boom"), {error: "boom"})
+  assert_eq(llm_error("boom"), {error: {category: "generic", message: "boom"}})
+  const scripted_error = try {
+    with_llm_script(
+      harness.llm,
+      [llm_error("boom")],
+      { _ -> harness.llm.call("fail", nil, {provider: "mock", model: "mock"}) },
+    )
+  }
+  assert(is_err(scripted_error), "llm_error must fail the call, not fixture installation")
+  assert(contains(to_string(unwrap_err(scripted_error)), "boom"), "the safe message must survive")
   // Single tool call: id defaults to the tool name.
   assert_eq(
     llm_tool_call("write_note", {path: "n.txt"}),

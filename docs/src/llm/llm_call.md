@@ -817,8 +817,8 @@ harness.llm.mock_enqueue({error: {status: 503, kind: "transient", reason: "upstr
 
 // Inspect what was sent to the mock provider
 const calls = harness.llm.mock_calls()
-// Each entry includes mock_scope plus {messages: [...], system: "..." or nil,
-// tools: [...] or nil}.
+// Each entry includes mock_scope, messages, system, tools, output/thinking
+// controls, and portable generation options such as temperature and max_tokens.
 
 // Clear all mocks and call log between tests
 harness.llm.mock_clear()

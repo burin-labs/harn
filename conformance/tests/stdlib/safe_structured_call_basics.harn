@@ -21,4 +21,22 @@ pipeline test(harness: Harness, task) {
   harness.stdio.println(len(envelope.value.bullets))
   harness.stdio.println(envelope.value.bullets[0])
   harness.stdio.println(envelope.attempts)
+  const calls = harness.llm.mock_calls()
+  harness.stdio.println("temperature_default=" + to_string(calls[0].temperature))
+  const explicit = safe_structured_call(
+    harness.llm,
+    "Grade this output again.",
+    schema,
+    {
+      provider: "mock",
+      model: "mock-model",
+      system: "you are a judge",
+      max_tokens: 512,
+      temperature: 0.2,
+      repair: {enabled: false},
+    },
+  )
+  assert(explicit.ok)
+  const explicit_calls = harness.llm.mock_calls()
+  harness.stdio.println("explicit_temperature=" + to_string(explicit_calls[1].temperature))
 }
