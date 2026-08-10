@@ -1,0 +1,108 @@
+// Teach/accept parity for the openai-compat text-route format contract
+// (burin-labs/burin-code#4809).
+//
+// Claim: every exemplar rendered by `agent_render_tool_call_exemplar` for a
+// given `tool_format` is accepted by `agent_parse_tool_calls` under that same
+// format, with the taught tool name and body content intact.
+//
+// Falsifier: an exemplar that parses to zero calls, a parse error, the wrong
+// name, or a corrupted multiline body — or an adaptive pin that silently
+// demotes to tagged text.
+import { agent_render_tool_call_exemplar, agent_tool_call_paradigm } from "std/agent/preflight"
+import { agent_parse_tool_calls } from "std/agent/primitives"
+import { sample_registry } from "_tool_parse_probe"
+
+fn __assert(stdio: HarnessStdio, label: string, ok: bool) {
+  if !ok {
+    throw "tool_format_contract_parity failed: ${label}"
+  }
+  stdio.println("ok ${label}")
+}
+
+pipeline main(harness: Harness) {
+  const registry = sample_registry()
+  const body = "fn main() {\n    println!(\"hi\");\n}"
+  // --- text / heredoc lane -------------------------------------------------
+  const text_paradigm = agent_tool_call_paradigm(harness.llm, {tool_format: "text"})
+  __assert(harness.stdio, "text paradigm kind", text_paradigm.kind == "text")
+  __assert(
+    harness.stdio,
+    "text body_hint teaches heredoc",
+    contains(text_paradigm.body_hint, "heredoc"),
+  )
+  const text_ex = agent_render_tool_call_exemplar(
+    harness.llm,
+    "edit",
+    [
+      {key: "action", value: "create"},
+      {key: "path", value: "t.rs"},
+      {key: "content", value: body, body: true},
+    ],
+    {tool_format: "text"},
+  )
+  __assert(harness.stdio, "text exemplar opens <tool_call>", starts_with(text_ex, "<tool_call>"))
+  __assert(harness.stdio, "text exemplar uses heredoc", contains(text_ex, "content: <<EOF\n"))
+  const text_parsed = agent_parse_tool_calls(harness.agent, text_ex, registry, "text")
+  __assert(harness.stdio, "text exemplar lands one call", len(text_parsed.tool_calls) == 1)
+  __assert(
+    harness.stdio,
+    "text exemplar has no parse errors",
+    len(text_parsed.tool_parse_errors) == 0,
+  )
+  __assert(harness.stdio, "text exemplar name is edit", text_parsed.tool_calls[0].name == "edit")
+  __assert(
+    harness.stdio,
+    "text exemplar preserves body bytes",
+    text_parsed.tool_calls[0].arguments.content == body,
+  )
+  // --- json / fenced lane --------------------------------------------------
+  const json_paradigm = agent_tool_call_paradigm(harness.llm, {tool_format: "json"})
+  __assert(harness.stdio, "json paradigm kind", json_paradigm.kind == "json")
+  __assert(
+    harness.stdio,
+    "json body_hint teaches escaped strings",
+    contains(json_paradigm.body_hint, "JSON string"),
+  )
+  const json_ex = agent_render_tool_call_exemplar(
+    harness.llm,
+    "edit",
+    [
+      {key: "action", value: "create"},
+      {key: "path", value: "t.rs"},
+      {key: "content", value: body, body: true},
+    ],
+    {tool_format: "json"},
+  )
+  __assert(harness.stdio, "json exemplar opens ```tool", starts_with(json_ex, "```tool\n"))
+  __assert(
+    harness.stdio,
+    "json exemplar carries name field",
+    contains(json_ex, "\"name\"") && contains(json_ex, "\"edit\""),
+  )
+  const json_parsed = agent_parse_tool_calls(harness.agent, json_ex, nil, "json")
+  __assert(harness.stdio, "json exemplar lands one call", len(json_parsed.tool_calls) == 1)
+  __assert(
+    harness.stdio,
+    "json exemplar has no parse errors",
+    len(json_parsed.tool_parse_errors) == 0,
+  )
+  __assert(harness.stdio, "json exemplar name is edit", json_parsed.tool_calls[0].name == "edit")
+  __assert(
+    harness.stdio,
+    "json exemplar preserves body bytes",
+    json_parsed.tool_calls[0].arguments.content == body,
+  )
+  // Wrong-format negative: text markup on a json pin must not dispatch.
+  const wrong = agent_parse_tool_calls(harness.agent, text_ex, registry, "json")
+  __assert(harness.stdio, "json pin rejects text exemplar calls", len(wrong.tool_calls) == 0)
+  __assert(harness.stdio, "json pin reports wrong_tool_format", len(wrong.protocol_violations) > 0)
+  // Deleted adaptive union must fail closed (never silent tagged demotion).
+  const adaptive = agent_parse_tool_calls(harness.agent, text_ex, registry, "adaptive")
+  __assert(harness.stdio, "adaptive lands no calls", len(adaptive.tool_calls) == 0)
+  __assert(
+    harness.stdio,
+    "adaptive fails closed with guidance",
+    len(adaptive.tool_parse_errors) == 1 && contains(adaptive.tool_parse_errors[0], "adaptive"),
+  )
+  harness.stdio.println("tool_format_contract_parity passed")
+}

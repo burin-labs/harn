@@ -1461,6 +1461,20 @@ fn __tool_parse_json_error(detail: string) -> string {
 pub fn parse_tool_calls(payload: dict) -> dict {
   const text = to_string(payload?.text ?? "")
   const format = to_string(payload?.tool_format ?? "")
+  // `adaptive` was an opt-in union parser (#5272) deleted in the dialect
+  // cutover (#5700). Keep failing closed so an explicit pin cannot silently
+  // demote to tagged text and hide teach/accept drift (burin-code#4809).
+  if format == "adaptive" {
+    return empty_parse()
+      + {
+      tool_parse_errors: [
+        "`tool_format=adaptive` is not implemented. Pin `json` (fenced JSON, "
+          + "global default) or `text` (heredoc `<tool_call>`), or use `native` "
+          + "when the provider tool channel is reliable.",
+      ],
+      prose: trim(text),
+    }
+  }
   const parsed = if format == "json" {
     __tool_parse_json(text)
   } else {

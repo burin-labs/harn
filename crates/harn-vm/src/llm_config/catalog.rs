@@ -933,9 +933,10 @@ pub enum ToolFormatChannel {
 pub fn tool_format_channel(format: &str) -> Option<ToolFormatChannel> {
     match format {
         "native" => Some(ToolFormatChannel::Native),
-        // `adaptive` is an opt-in permissive text-channel union (DEFAULT-OFF:
-        // no route resolves to it; reachable only via an explicit pin/request).
-        "text" | "json" | "adaptive" => Some(ToolFormatChannel::Text),
+        // `adaptive` was removed with the dialect cutover (#5700). Keep it out
+        // of the known set so catalog pins cannot silently select a deleted
+        // union parser; `parse_tool_calls` also fails closed if it is forced.
+        "text" | "json" => Some(ToolFormatChannel::Text),
         _ => None,
     }
 }

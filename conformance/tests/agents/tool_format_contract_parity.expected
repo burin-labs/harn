@@ -1,0 +1,21 @@
+ok text paradigm kind
+ok text body_hint teaches heredoc
+ok text exemplar opens <tool_call>
+ok text exemplar uses heredoc
+ok text exemplar lands one call
+ok text exemplar has no parse errors
+ok text exemplar name is edit
+ok text exemplar preserves body bytes
+ok json paradigm kind
+ok json body_hint teaches escaped strings
+ok json exemplar opens ```tool
+ok json exemplar carries name field
+ok json exemplar lands one call
+ok json exemplar has no parse errors
+ok json exemplar name is edit
+ok json exemplar preserves body bytes
+ok json pin rejects text exemplar calls
+ok json pin reports wrong_tool_format
+ok adaptive lands no calls
+ok adaptive fails closed with guidance
+tool_format_contract_parity passed
