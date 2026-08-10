@@ -474,15 +474,15 @@ jobs:
     if: needs.changes.outputs.rust == 'true'
     # Paid capacity covers the merge queue and trusted same-repository PRs; fork
     # PRs and pushes retain the free hosted fallback. At $0.016/min every paid
-    # run has a hard 15-minute/$0.24 fuse, while hosted and kill-switch paths
+    # run has a hard 20-minute/$0.32 fuse, while hosted and kill-switch paths
     # keep enough time to finish from a cold coarse cache. The producer builds
     # both portable artifacts before executing the full workspace suite, and
-    # observed merge-group runs need more than ten minutes for that complete
+    # observed merge-group runs need more than fifteen minutes for that complete
     # fail-closed proof even with the persistent compiler cache warm. The
     # machine-readable performance budget remains ten minutes so this extra
     # recovery margin does not weaken the latency SLO.
     runs-on: ${{ vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && 'ubuntu-latest' || ((github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'blacksmith-8vcpu-ubuntu-2404' || 'ubuntu-latest') }}
-    timeout-minutes: ${{ (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && vars.HARN_CI_DISABLE_BLACKSMITH_LINUX != 'true' && 15 || 25 }}
+    timeout-minutes: ${{ (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && vars.HARN_CI_DISABLE_BLACKSMITH_LINUX != 'true' && 20 || 25 }}
     # The GitHub-hosted fallback remains an authorized main-branch cache
     # writer; Blacksmith uses sticky sccache and never enters that step.
     permissions:
