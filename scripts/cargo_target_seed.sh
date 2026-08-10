@@ -49,7 +49,7 @@ copy_tree_cow() {
 
   case "$(uname -s)" in
     Darwin)
-      cp -cR "${source}/." "${destination}"
+      cp -cRp "${source}/." "${destination}"
       ;;
     Linux)
       cp --reflink=always -a "${source}/." "${destination}/"
@@ -131,7 +131,7 @@ restore_seed() (
 publish_seed() (
   local target_dir="$1"
   local storage_root="$2"
-  local key seed_root seed_dir lock_dir stage
+  local key seed_root seed_dir lock_dir stage max_kib target_kib
 
   [[ -d "${target_dir}" ]] || return 0
   key="$(seed_key)" || return 0
@@ -140,6 +140,20 @@ publish_seed() (
   mkdir -p "${seed_root}"
   if [[ -f "${seed_dir}/.harn-cargo-target-seed" ]]; then
     echo "Cargo target seed already published: ${key}"
+    return 0
+  fi
+
+  # A seed must accelerate a fresh lane without pinning an indefinitely grown
+  # developer target. The canonical CLI target is about 5 GiB; 8 GiB leaves
+  # headroom while rejecting multi-profile targets observed above 80 GiB.
+  max_kib="${HARN_CARGO_TARGET_SEED_MAX_KIB:-8388608}"
+  if [[ ! "${max_kib}" =~ ^[1-9][0-9]*$ ]]; then
+    echo "error: HARN_CARGO_TARGET_SEED_MAX_KIB must be a positive integer" >&2
+    return 2
+  fi
+  target_kib="$(du -sk "${target_dir}" | awk '{print $1}')" || return 0
+  if [[ ! "${target_kib}" =~ ^[0-9]+$ ]] || (( target_kib > max_kib )); then
+    echo "Cargo target seed publish skipped: target size ${target_kib:-unknown} KiB exceeds the ${max_kib} KiB ceiling."
     return 0
   fi
 

@@ -55,4 +55,16 @@ if [[ "$(find "${storage_root}/cargo-target-seed" -mindepth 1 -maxdepth 1 -type 
   exit 1
 fi
 
+oversized_output="$(
+  HARN_CARGO_TARGET_SEED_KEY=oversized-toolchain \
+  HARN_CARGO_TARGET_SEED_TEST_COPY=1 \
+  HARN_CARGO_TARGET_SEED_MAX_KIB=1 \
+    "${seed_tool}" publish "${source_target}" "${storage_root}"
+)"
+if ! grep -Fq 'exceeds the 1 KiB ceiling' <<< "${oversized_output}" \
+  || [[ -e "${storage_root}/cargo-target-seed/oversized-toolchain" ]]; then
+  echo "publish retained an oversized Cargo target seed" >&2
+  exit 1
+fi
+
 echo "cargo_target_seed_test: ok"
