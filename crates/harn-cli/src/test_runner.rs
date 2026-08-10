@@ -1152,10 +1152,27 @@ fn discover_test_files(dir: &Path) -> Vec<PathBuf> {
     files
 }
 
+pub(crate) fn discover_test_files_for_targets(targets: &[PathBuf]) -> Vec<PathBuf> {
+    let mut files = targets
+        .iter()
+        .flat_map(|target| {
+            let target = canonicalize_existing_path(target);
+            if target.is_dir() {
+                discover_test_files(&target)
+            } else {
+                vec![target]
+            }
+        })
+        .collect::<Vec<_>>();
+    files.sort();
+    files.dedup();
+    files
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum AffectedTestFiles {
-    Selected(Vec<PathBuf>),
-    Full { reason: String },
+    Selected { files: Vec<PathBuf> },
+    Full { files: Vec<PathBuf>, reason: String },
 }
 
 /// Select test roots whose module graph can observe one of `changed_files`.
@@ -1168,22 +1185,10 @@ pub(crate) fn select_affected_test_files(
     targets: &[PathBuf],
     changed_files: &[PathBuf],
 ) -> AffectedTestFiles {
-    let mut test_files = targets
-        .iter()
-        .flat_map(|target| {
-            let target = canonicalize_existing_path(target);
-            if target.is_dir() {
-                discover_test_files(&target)
-            } else {
-                vec![target]
-            }
-        })
-        .collect::<Vec<_>>();
-    test_files.sort();
-    test_files.dedup();
+    let test_files = discover_test_files_for_targets(targets);
 
     if changed_files.is_empty() {
-        return AffectedTestFiles::Selected(Vec::new());
+        return AffectedTestFiles::Selected { files: Vec::new() };
     }
 
     let graph = harn_modules::build(&test_files);
@@ -1194,6 +1199,7 @@ pub(crate) fn select_affected_test_files(
         let changed = canonicalize_existing_path(changed);
         if !graph.contains_module(&changed) {
             return AffectedTestFiles::Full {
+                files: test_files,
                 reason: format!(
                     "changed module {} is outside the resolved test module graph",
                     changed.display()
@@ -1211,5 +1217,7 @@ pub(crate) fn select_affected_test_files(
         }
     }
 
-    AffectedTestFiles::Selected(selected.into_iter().collect())
+    AffectedTestFiles::Selected {
+        files: selected.into_iter().collect(),
+    }
 }

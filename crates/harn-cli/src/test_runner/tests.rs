@@ -52,11 +52,13 @@ fn affected_test_selection_follows_transitive_module_importers() {
     );
     assert_eq!(
         selection,
-        AffectedTestFiles::Selected(vec![temp
-            .path()
-            .join("suite/test_direct.harn")
-            .canonicalize()
-            .unwrap()])
+        AffectedTestFiles::Selected {
+            files: vec![temp
+                .path()
+                .join("suite/test_direct.harn")
+                .canonicalize()
+                .unwrap()]
+        }
     );
 }
 
@@ -73,7 +75,20 @@ fn affected_test_selection_falls_back_for_unmodelled_harn_files() {
         &[temp.path().join("suite")],
         &[temp.path().join("dynamic_helper.harn")],
     );
-    assert!(matches!(selection, AffectedTestFiles::Full { .. }));
+    match selection {
+        AffectedTestFiles::Full { files, reason } => {
+            assert!(reason.contains("outside the resolved test module graph"));
+            assert_eq!(
+                files,
+                vec![temp
+                    .path()
+                    .join("suite/test_known.harn")
+                    .canonicalize()
+                    .unwrap()]
+            );
+        }
+        other => panic!("expected complete-suite fallback, got {other:?}"),
+    }
 }
 
 #[tokio::test]

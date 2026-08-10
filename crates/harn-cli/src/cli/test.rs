@@ -145,4 +145,8 @@ pub(crate) struct TestArgs {
     /// the graph, so an uncertain impact plan never weakens coverage.
     #[arg(long = "affected-from", value_name = "GIT_REF")]
     pub affected_from: Option<String>,
+    /// Print the versioned affected-test plan as JSON without running tests.
+    /// Requires `--affected-from`.
+    #[arg(long, action = ArgAction::SetTrue)]
+    pub plan: bool,
 }
