@@ -70,7 +70,7 @@ clean_workspace_artifacts() {
   # workspace package to be rebuilt against the consuming worktree.
   (
     cd "${repo_root}"
-    cargo clean --workspace --target-dir "${target_dir}" --locked --offline >/dev/null
+    cargo clean --workspace --target-dir "${target_dir}" --locked >/dev/null
   )
 }
 
