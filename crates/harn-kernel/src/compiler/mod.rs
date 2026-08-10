@@ -302,7 +302,8 @@ pub struct Compiler {
     /// enum exports without paying for another syntax scan.
     imported_enum_candidates_authoritative: bool,
     /// Callables supplied by this source module rather than the builtin
-    /// registry. This includes local declarations and selective imports.
+    /// registry. This includes local declarations plus selective and
+    /// module-graph-resolved wildcard imports.
     ///
     /// The distinction matters when a source callable deliberately shares a
     /// name with a privileged wire builtin: lexical/module resolution owns

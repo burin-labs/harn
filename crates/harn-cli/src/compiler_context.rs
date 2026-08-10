@@ -10,6 +10,11 @@ pub(crate) struct SourceCompilerAuthority {
     trusted_host_dispatch: bool,
 }
 
+pub(crate) struct ImportedSymbols {
+    pub(crate) enum_candidates: Vec<String>,
+    pub(crate) callable_names: Vec<String>,
+}
+
 impl SourceCompilerAuthority {
     pub(crate) fn for_source(path: &Path) -> Self {
         Self {
@@ -33,21 +38,35 @@ impl SourceCompilerAuthority {
         compiler.with_imported_enum_candidates(candidates)
     }
 
-    pub(crate) fn compile_module_with_imported_enums(
+    pub(crate) fn compiler_with_imported_symbols(
+        self,
+        enum_candidates: impl IntoIterator<Item = String>,
+        callable_names: impl IntoIterator<Item = String>,
+    ) -> harn_vm::Compiler {
+        self.compiler_with_imported_enums(enum_candidates)
+            .with_imported_source_callable_names(callable_names)
+    }
+
+    pub(crate) fn compile_module_with_imported_symbols(
         self,
         source_path: &Path,
         source: &str,
-        candidates: impl IntoIterator<Item = String>,
+        enum_candidates: impl IntoIterator<Item = String>,
+        callable_names: impl IntoIterator<Item = String>,
     ) -> Result<harn_vm::module_artifact::ModuleArtifact, harn_vm::VmError> {
         if self.trusted_host_dispatch {
-            harn_vm::module_artifact::compile_trusted_host_dispatch_module_artifact_from_source_with_imported_enums(
-                source_path, source, candidates,
-            )
-        } else {
-            harn_vm::module_artifact::compile_module_artifact_from_source_with_imported_enums(
+            harn_vm::module_artifact::compile_trusted_host_dispatch_module_artifact_from_source_with_imported_symbols(
                 source_path,
                 source,
-                candidates,
+                enum_candidates,
+                callable_names,
+            )
+        } else {
+            harn_vm::module_artifact::compile_module_artifact_from_source_with_imported_symbols(
+                source_path,
+                source,
+                enum_candidates,
+                callable_names,
             )
         }
     }
@@ -75,8 +94,25 @@ pub(crate) fn ensure_builtin_signatures_installed() {
 /// lowering, so every file-backed CLI compile must use the same export
 /// contract as typechecking and module-artifact compilation.
 pub(crate) fn compiler_for_source(path: &Path, source: &str) -> harn_vm::Compiler {
+    let imported = imported_symbols_for_source(path, source);
     SourceCompilerAuthority::for_source(path)
-        .compiler_with_imported_enums(imported_enum_candidates_for_source(path, source))
+        .compiler_with_imported_symbols(imported.enum_candidates, imported.callable_names)
+}
+
+pub(crate) fn imported_symbols_for_source(path: &Path, source: &str) -> ImportedSymbols {
+    let graph = harn_modules::build_with_source(path, source);
+    ImportedSymbols {
+        enum_candidates: graph
+            .imported_names_by_kind_for_file(path, harn_modules::DefKind::Enum)
+            .unwrap_or_default()
+            .into_iter()
+            .collect(),
+        callable_names: graph
+            .imported_callable_names_for_file(path)
+            .unwrap_or_default()
+            .into_iter()
+            .collect(),
+    }
 }
 
 /// Read the project's own `[check].trusted_host_dispatch` declaration for the
@@ -115,15 +151,6 @@ pub(crate) fn enable_trusted_host_dispatch_for_source(
     }
     vm.enable_trusted_host_dispatch()?;
     Ok(())
-}
-
-pub(crate) fn imported_enum_candidates_for_source(path: &Path, source: &str) -> Vec<String> {
-    let mut candidates = harn_modules::build_with_source(path, source)
-        .imported_names_by_kind_for_file(path, harn_modules::DefKind::Enum)
-        .unwrap_or_default();
-    let mut candidates = candidates.drain().collect::<Vec<_>>();
-    candidates.sort_unstable();
-    candidates
 }
 
 /// Build a compiler from an already-resolved graph projection. This avoids a

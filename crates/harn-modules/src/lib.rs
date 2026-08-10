@@ -717,6 +717,23 @@ impl ModuleGraph {
         Some(names)
     }
 
+    /// Collect imported declarations that can be invoked with ordinary call
+    /// syntax. This is the module graph's canonical callable projection for
+    /// compilers; it includes function-like declarations and struct
+    /// constructors while preserving import visibility and resolution.
+    pub fn imported_callable_names_for_file(&self, file: &Path) -> Option<HashSet<String>> {
+        let mut names = HashSet::new();
+        for kind in [
+            DefKind::Function,
+            DefKind::Pipeline,
+            DefKind::Tool,
+            DefKind::Struct,
+        ] {
+            names.extend(self.imported_names_by_kind_for_file(file, kind)?);
+        }
+        Some(names)
+    }
+
     /// Collect type / struct / enum / interface declarations made visible to
     /// `file` by its imports. Returns `None` when any import is unresolved so
     /// callers can fall back to conservative behavior.

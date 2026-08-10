@@ -19,7 +19,13 @@ use serde::{Deserialize, Serialize};
 use crate::chunk::{CachedChunk, CachedCompiledFunction};
 use crate::value::VmError;
 
-type ImportedEnumCache = BTreeMap<PathBuf, ([u8; 32], Vec<String>)>;
+#[derive(Clone, Default)]
+struct ImportedSymbolProjection {
+    enum_candidates: Vec<String>,
+    source_callable_names: Vec<String>,
+}
+
+type ImportedSymbolCache = BTreeMap<PathBuf, ([u8; 32], ImportedSymbolProjection)>;
 
 /// Authority provenance carried by a compiled module.
 ///
@@ -39,8 +45,8 @@ pub enum ModuleProvenance {
     TrustedHostDispatch,
 }
 
-fn imported_enum_cache() -> &'static Mutex<ImportedEnumCache> {
-    static CACHE: OnceLock<Mutex<ImportedEnumCache>> = OnceLock::new();
+fn imported_symbol_cache() -> &'static Mutex<ImportedSymbolCache> {
+    static CACHE: OnceLock<Mutex<ImportedSymbolCache>> = OnceLock::new();
     CACHE.get_or_init(|| Mutex::new(BTreeMap::new()))
 }
 
@@ -268,30 +274,33 @@ pub fn compile_module_artifact(
     program: &[harn_parser::SNode],
     module_source_file: Option<String>,
 ) -> Result<ModuleArtifact, VmError> {
-    let imported_enum_candidates = module_source_file
+    let imported_symbols = module_source_file
         .as_deref()
-        .filter(|_| needs_imported_enum_candidates(program))
-        .and_then(|path| {
-            harn_modules::build(&[Path::new(path).to_path_buf()])
-                .imported_names_by_kind_for_file(Path::new(path), DefKind::Enum)
+        .filter(|_| needs_imported_symbol_projection(program))
+        .map(|path| {
+            let graph = harn_modules::build(&[Path::new(path).to_path_buf()]);
+            sorted_imported_symbol_projection(&graph, Path::new(path))
         })
         .unwrap_or_default();
-    compile_module_artifact_with_imported_enums(
+    compile_module_artifact_with_imported_symbols(
         program,
         module_source_file,
-        &imported_enum_candidates.into_iter().collect::<Vec<_>>(),
+        &imported_symbols.enum_candidates,
+        &imported_symbols.source_callable_names,
     )
 }
 
-fn compile_module_artifact_with_imported_enums(
+fn compile_module_artifact_with_imported_symbols(
     program: &[harn_parser::SNode],
     module_source_file: Option<String>,
     imported_enum_candidates: &[String],
+    imported_source_callable_names: &[String],
 ) -> Result<ModuleArtifact, VmError> {
     compile_module_artifact_with_provenance(
         program,
         module_source_file,
         imported_enum_candidates,
+        imported_source_callable_names,
         ModuleProvenance::User,
     )
 }
@@ -300,6 +309,7 @@ fn compile_module_artifact_with_provenance(
     program: &[harn_parser::SNode],
     module_source_file: Option<String>,
     imported_enum_candidates: &[String],
+    imported_source_callable_names: &[String],
     provenance: ModuleProvenance,
 ) -> Result<ModuleArtifact, VmError> {
     let namespace_demands = harn_parser::namespace_import_demands(program);
@@ -384,7 +394,12 @@ fn compile_module_artifact_with_provenance(
         let compiler = compiler();
         Some(
             compiler
-                .compile_module_init(program, &init_nodes, imported_enum_candidates)
+                .compile_module_init(
+                    program,
+                    &init_nodes,
+                    imported_enum_candidates,
+                    imported_source_callable_names,
+                )
                 .map_err(|e| VmError::Runtime(format!("Import init compile error: {e}")))?
                 .freeze_for_cache(),
         )
@@ -442,6 +457,8 @@ fn compile_module_artifact_with_provenance(
         {
             let mut compiler = compiler();
             compiler.add_imported_enum_candidates(imported_enum_candidates.iter().cloned());
+            compiler
+                .add_imported_source_callable_names(imported_source_callable_names.iter().cloned());
             let pipeline = compiler
                 .compile_pipeline_callable(program, name, params, body, extends.as_deref())
                 .map_err(|error| VmError::Runtime(format!("Import compile error: {error}")))?;
@@ -461,6 +478,7 @@ fn compile_module_artifact_with_provenance(
 
         let mut compiler = compiler();
         compiler.add_imported_enum_candidates(imported_enum_candidates.iter().cloned());
+        compiler.add_imported_source_callable_names(imported_source_callable_names.iter().cloned());
         compiler.prepare_module_context(program);
         let func_chunk = compiler
             .compile_fn_body(type_params, params, body, module_source_file.clone())
@@ -515,12 +533,12 @@ pub fn compile_module_artifact_from_source(
     source: &str,
 ) -> Result<ModuleArtifact, VmError> {
     let program = parse_module_source(source_path, source)?;
-    let imported_enum_candidates =
-        imported_enum_candidates_for_program(source_path, source, &program);
-    compile_module_artifact_with_imported_enums(
+    let imported_symbols = imported_symbol_projection_for_program(source_path, source, &program);
+    compile_module_artifact_with_imported_symbols(
         &program,
         Some(source_path.display().to_string()),
-        &imported_enum_candidates,
+        &imported_symbols.enum_candidates,
+        &imported_symbols.source_callable_names,
     )
 }
 
@@ -537,12 +555,12 @@ pub fn compile_privileged_wire_module_artifact_from_source(
     source: &str,
 ) -> Result<ModuleArtifact, VmError> {
     let program = parse_module_source(source_path, source)?;
-    let imported_enum_candidates =
-        imported_enum_candidates_for_program(source_path, source, &program);
+    let imported_symbols = imported_symbol_projection_for_program(source_path, source, &program);
     compile_module_artifact_with_provenance(
         &program,
         Some(source_path.display().to_string()),
-        &imported_enum_candidates,
+        &imported_symbols.enum_candidates,
+        &imported_symbols.source_callable_names,
         ModuleProvenance::PrivilegedWire,
     )
 }
@@ -556,12 +574,12 @@ pub fn compile_trusted_host_dispatch_module_artifact_from_source(
     source: &str,
 ) -> Result<ModuleArtifact, VmError> {
     let program = parse_module_source(source_path, source)?;
-    let imported_enum_candidates =
-        imported_enum_candidates_for_program(source_path, source, &program);
+    let imported_symbols = imported_symbol_projection_for_program(source_path, source, &program);
     compile_module_artifact_with_provenance(
         &program,
         Some(source_path.display().to_string()),
-        &imported_enum_candidates,
+        &imported_symbols.enum_candidates,
+        &imported_symbols.source_callable_names,
         ModuleProvenance::TrustedHostDispatch,
     )
 }
@@ -577,47 +595,69 @@ pub fn compile_trusted_host_dispatch_module_artifact_from_source_with_imported_e
 ) -> Result<ModuleArtifact, VmError> {
     let program = parse_module_source(source_path, source)?;
     let imported_enum_candidates = imported_enum_candidates.into_iter().collect::<Vec<_>>();
+    let imported_symbols = imported_symbol_projection_for_program(source_path, source, &program);
     compile_module_artifact_with_provenance(
         &program,
         Some(source_path.display().to_string()),
         &imported_enum_candidates,
+        &imported_symbols.source_callable_names,
         ModuleProvenance::TrustedHostDispatch,
     )
 }
 
-/// Resolve imported enum names only for modules whose match patterns can use
-/// them. Ordinary property access is runtime lookup and does not need a graph
-/// walk; avoiding it keeps uncached module compilation independent of the
-/// size of unrelated import closures.
-fn imported_enum_candidates_for_program(
+pub fn compile_trusted_host_dispatch_module_artifact_from_source_with_imported_symbols(
+    source_path: &Path,
+    source: &str,
+    imported_enum_candidates: impl IntoIterator<Item = String>,
+    imported_source_callable_names: impl IntoIterator<Item = String>,
+) -> Result<ModuleArtifact, VmError> {
+    let program = parse_module_source(source_path, source)?;
+    let imported_enum_candidates = imported_enum_candidates.into_iter().collect::<Vec<_>>();
+    let imported_source_callable_names = imported_source_callable_names
+        .into_iter()
+        .collect::<Vec<_>>();
+    compile_module_artifact_with_provenance(
+        &program,
+        Some(source_path.display().to_string()),
+        &imported_enum_candidates,
+        &imported_source_callable_names,
+        ModuleProvenance::TrustedHostDispatch,
+    )
+}
+
+/// Resolve syntax-sensitive imported symbols in one module-graph walk.
+///
+/// Enum-pattern lowering and wildcard callable shadowing need different
+/// projections of the same graph. Keeping them together avoids rebuilding a
+/// large stdlib closure once per compiler catalog.
+fn imported_symbol_projection_for_program(
     source_path: &Path,
     source: &str,
     program: &[harn_parser::SNode],
-) -> Vec<String> {
-    if !needs_imported_enum_candidates(program) {
-        return Vec::new();
+) -> ImportedSymbolProjection {
+    if !needs_imported_symbol_projection(program) {
+        return ImportedSymbolProjection::default();
     }
     let source_hash = *blake3::hash(source.as_bytes()).as_bytes();
     let cache_key = harn_modules::canonical_path(source_path);
     let cacheable = is_immutable_stdlib_path(source_path);
     if cacheable {
-        if let Some((_cached_hash, candidates)) = imported_enum_cache()
+        if let Some((_cached_hash, projection)) = imported_symbol_cache()
             .lock()
-            .expect("imported enum cache lock poisoned")
+            .expect("imported symbol cache lock poisoned")
             .get(&cache_key)
             .filter(|(cached_hash, _)| *cached_hash == source_hash)
         {
-            return candidates.clone();
+            return projection.clone();
         }
     }
 
-    // A graph walk is needed to resolve wildcard and re-exported enums, but
-    // the result describes every module in that closure. Publish all those
-    // projections at once so loading a large stdlib does not rebuild the same
-    // reachable graph once per module artifact.
+    // The result describes every module in the closure. Publish all those
+    // projections at once so loading a large stdlib does not rebuild it once
+    // per module artifact or once per compiler catalog.
     let graph = harn_modules::build_with_source(source_path, source);
     if !cacheable {
-        return sorted_imported_enum_candidates(&graph, source_path);
+        return sorted_imported_symbol_projection(&graph, source_path);
     }
     let mut projections = Vec::new();
     for path in graph.module_paths() {
@@ -629,18 +669,18 @@ fn imported_enum_candidates_for_program(
         let Some(module_source) = module_source else {
             continue;
         };
-        let candidates = sorted_imported_enum_candidates(&graph, &path);
+        let projection = sorted_imported_symbol_projection(&graph, &path);
         projections.push((
             path,
             (
                 *blake3::hash(module_source.as_bytes()).as_bytes(),
-                candidates,
+                projection,
             ),
         ));
     }
-    let mut cache = imported_enum_cache()
+    let mut cache = imported_symbol_cache()
         .lock()
-        .expect("imported enum cache lock poisoned");
+        .expect("imported symbol cache lock poisoned");
     for (path, projection) in projections {
         if is_immutable_stdlib_path(&path) {
             cache.insert(path, projection);
@@ -649,21 +689,30 @@ fn imported_enum_candidates_for_program(
     cache
         .get(&cache_key)
         .filter(|(cached_hash, _)| *cached_hash == source_hash)
-        .map(|(_, candidates)| candidates.clone())
+        .map(|(_, projection)| projection.clone())
         .unwrap_or_default()
 }
 
-fn sorted_imported_enum_candidates(
+fn sorted_imported_symbol_projection(
     graph: &harn_modules::ModuleGraph,
     source_path: &Path,
-) -> Vec<String> {
-    let mut candidates = graph
+) -> ImportedSymbolProjection {
+    let mut enum_candidates = graph
         .imported_names_by_kind_for_file(source_path, DefKind::Enum)
         .unwrap_or_default()
         .into_iter()
         .collect::<Vec<_>>();
-    candidates.sort_unstable();
-    candidates
+    enum_candidates.sort_unstable();
+    let mut source_callable_names = graph
+        .imported_callable_names_for_file(source_path)
+        .unwrap_or_default()
+        .into_iter()
+        .collect::<Vec<_>>();
+    source_callable_names.sort_unstable();
+    ImportedSymbolProjection {
+        enum_candidates,
+        source_callable_names,
+    }
 }
 
 fn is_immutable_stdlib_path(path: &Path) -> bool {
@@ -673,6 +722,30 @@ fn is_immutable_stdlib_path(path: &Path) -> bool {
 
 fn needs_imported_enum_candidates(program: &[harn_parser::SNode]) -> bool {
     harn_parser::visit::contains_identifier_enum_pattern(program)
+}
+
+fn needs_imported_symbol_projection(program: &[harn_parser::SNode]) -> bool {
+    needs_imported_enum_candidates(program) || needs_imported_source_callable_names(program)
+}
+
+fn needs_imported_source_callable_names(program: &[harn_parser::SNode]) -> bool {
+    let has_wildcard_import = program.iter().any(|node| match &node.node {
+        harn_parser::Node::ImportDecl { .. } => true,
+        harn_parser::Node::AttributedDecl { inner, .. } => {
+            matches!(&inner.node, harn_parser::Node::ImportDecl { .. })
+        }
+        _ => false,
+    });
+    if !has_wildcard_import {
+        return false;
+    }
+    let mut needs_projection = false;
+    harn_parser::visit::walk_program(program, &mut |node| {
+        if let harn_parser::Node::FunctionCall { name, .. } = &node.node {
+            needs_projection |= harn_parser::builtin_signatures::is_builtin(name);
+        }
+    });
+    needs_projection
 }
 
 fn parse_module_source(
@@ -706,10 +779,34 @@ pub fn compile_module_artifact_from_source_with_imported_enums(
 ) -> Result<ModuleArtifact, VmError> {
     let program = parse_module_source(source_path, source)?;
     let imported_enum_candidates = imported_enum_candidates.into_iter().collect::<Vec<_>>();
-    compile_module_artifact_with_imported_enums(
+    let imported_symbols = imported_symbol_projection_for_program(source_path, source, &program);
+    compile_module_artifact_with_imported_symbols(
         &program,
         Some(source_path.display().to_string()),
         &imported_enum_candidates,
+        &imported_symbols.source_callable_names,
+    )
+}
+
+/// Compile a source-backed module from one already-resolved module-graph
+/// projection. Closed-program linkers use this entry point because their
+/// runtime paths need not exist on the host filesystem.
+pub fn compile_module_artifact_from_source_with_imported_symbols(
+    source_path: &Path,
+    source: &str,
+    imported_enum_candidates: impl IntoIterator<Item = String>,
+    imported_source_callable_names: impl IntoIterator<Item = String>,
+) -> Result<ModuleArtifact, VmError> {
+    let program = parse_module_source(source_path, source)?;
+    let imported_enum_candidates = imported_enum_candidates.into_iter().collect::<Vec<_>>();
+    let imported_source_callable_names = imported_source_callable_names
+        .into_iter()
+        .collect::<Vec<_>>();
+    compile_module_artifact_with_imported_symbols(
+        &program,
+        Some(source_path.display().to_string()),
+        &imported_enum_candidates,
+        &imported_source_callable_names,
     )
 }
 
