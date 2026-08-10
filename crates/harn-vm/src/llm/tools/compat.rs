@@ -377,17 +377,23 @@ fn infer_tool_name_from_arguments(arguments: &serde_json::Value) -> Option<Strin
 
     // Harmony demux fatal shape (burin-code#4809 Face 2): wrapper name is only
     // `tool_call`/`to`, and the real tool name is nowhere in the payload — only
-    // clean look args (`file`/`path` without edit/search/run discriminators).
-    // Recover look rather than dispatching the framing token as a tool.
-    let has_look_target = object.get("file").is_some() || object.get("path").is_some();
-    let has_edit_discriminator = object.get("action").is_some()
-        || object.get("content").is_some()
-        || object.get("ops").is_some()
-        || object.get("old_string").is_some()
-        || object.get("new_string").is_some();
-    let has_search_discriminator = object.get("query").is_some() || object.get("pattern").is_some();
-    if has_look_target && !has_edit_discriminator && !has_search_discriminator {
-        return Some("look".to_string());
+    // clean look args (`file`/`path` without an intent, and without
+    // edit/search/run discriminators). Recover look rather than dispatching
+    // the framing token. When `intent` is present but unrecognized (e.g.
+    // "summarize"), leave inference to the marker/wrapper sanitizer so denial
+    // feedback stays precise.
+    if intent.is_none() {
+        let has_look_target = object.get("file").is_some() || object.get("path").is_some();
+        let has_edit_discriminator = object.get("action").is_some()
+            || object.get("content").is_some()
+            || object.get("ops").is_some()
+            || object.get("old_string").is_some()
+            || object.get("new_string").is_some();
+        let has_search_discriminator =
+            object.get("query").is_some() || object.get("pattern").is_some();
+        if has_look_target && !has_edit_discriminator && !has_search_discriminator {
+            return Some("look".to_string());
+        }
     }
 
     None
