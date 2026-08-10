@@ -214,6 +214,12 @@ returns a typed `host_lease_contended` receipt and exit status 75. Add
 lease's expiry, or a bounded owner-liveness recheck instead of a fixed polling
 loop.
 
+A contended wait should stay near idle until one of those events occurs. Harn
+uses a dedicated lease-change signal for this path; routine SQLite registry
+traffic does not wake the waiter. If an older Harn process uses substantial CPU
+while it only waits for a host lease, upgrade Harn before starting more queued
+work.
+
 Finite leases default to 15 minutes and should be renewed by long-running work.
 `--no-expiry` requires the PID of the process that owns the work. Harn records
 that process's start identity and recovers the lease after a confirmed crash

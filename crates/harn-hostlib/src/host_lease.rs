@@ -36,6 +36,7 @@ use self::schema::{
 pub const HOST_LEASE_ROOT_ENV: &str = "HARN_HOST_LEASE_ROOT";
 const HARN_HOME_ENV: &str = "HARN_HOME";
 const LEASE_DB_FILE: &str = "host-leases.sqlite";
+const LEASE_WAKE_FILE: &str = "host-leases.wake";
 const RUN_RECEIPTS_DIR: &str = "receipts";
 // Headroom for a briefly-contended registry writer to serialize rather than
 // erroring "database is locked". WAL keeps genuine contention short, so a
@@ -482,6 +483,7 @@ pub struct HostLeaseReleaseReceipt {
 pub struct HostLeaseStore {
     root: PathBuf,
     db_path: PathBuf,
+    wake_path: PathBuf,
     process_inspector: Arc<dyn ProcessInspector>,
     #[cfg(test)]
     busy_handler: Option<fn(i32) -> bool>,
@@ -519,12 +521,17 @@ impl HostLeaseStore {
         std::fs::create_dir_all(&root)?;
         let store = Self {
             db_path: root.join(LEASE_DB_FILE),
+            wake_path: root.join(LEASE_WAKE_FILE),
             root,
             process_inspector,
             #[cfg(test)]
             busy_handler: None,
         };
         store.initialize()?;
+        std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&store.wake_path)?;
         Ok(store)
     }
 
@@ -636,7 +643,7 @@ impl HostLeaseStore {
         })
         .map_err(|error| HostLeaseError::Watch(error.to_string()))?;
         watcher
-            .watch(&self.root, RecursiveMode::NonRecursive)
+            .watch(&self.wake_path, RecursiveMode::NonRecursive)
             .map_err(|error| HostLeaseError::Watch(error.to_string()))?;
 
         loop {
@@ -766,6 +773,7 @@ impl HostLeaseStore {
         handle.expires_at_ms = Some(now.saturating_add(u64_ms_i64(ttl_ms)));
         write_handle(&tx, &handle)?;
         tx.commit()?;
+        self.signal_waiters();
         Ok(HostLeaseRenewReceipt {
             schema_version: SCHEMA_VERSION,
             renewed: true,
@@ -880,6 +888,9 @@ impl HostLeaseStore {
             ],
         )? == 1;
         let now = unix_now_ms()?;
+        if released {
+            self.signal_waiters();
+        }
         Ok(HostLeaseReleaseReceipt {
             schema_version: SCHEMA_VERSION,
             released,
@@ -906,6 +917,18 @@ impl HostLeaseStore {
         }
         tx.commit()?;
         Ok(())
+    }
+
+    /// Wake contended callers after a committed availability change.
+    ///
+    /// This is intentionally separate from the SQLite files. Opening an
+    /// immediate transaction updates SQLite's shared-memory bookkeeping even
+    /// when the transaction makes no data change. Watching the registry
+    /// directory therefore lets a waiter wake itself and spin continuously.
+    /// The lease deadline remains the fallback if a best-effort signal write
+    /// is unavailable after the database commit.
+    fn signal_waiters(&self) {
+        let _ = std::fs::write(&self.wake_path, Uuid::now_v7().to_string());
     }
 
     #[cfg(test)]
@@ -1118,6 +1141,9 @@ impl HostLeaseStore {
             self.process_inspector.as_ref(),
         )?;
         tx.commit()?;
+        if recovered.is_some() {
+            self.signal_waiters();
+        }
         Ok(HostLeaseState {
             schema_version: SCHEMA_VERSION,
             host: host.to_string(),
