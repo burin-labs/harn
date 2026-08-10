@@ -71,4 +71,54 @@ pipeline default(harness: Harness) {
   harness.stdio.println(healthcheck.effort == nil)
   harness.stdio.println(healthcheck.thinking == nil)
   harness.stdio.println(healthcheck.prompt_cache == nil)
+  const fixed_sampling = agent_sanitize_model_options(
+    harness.llm,
+    {provider: "openai", model: "gpt-5.6-luna", temperature: 0.0, top_p: 0.9},
+  )
+  harness.stdio.println(fixed_sampling.temperature == nil)
+  harness.stdio.println(fixed_sampling.top_p)
+  const fixed_sampling_pair = agent_sanitize_model_options(
+    harness.llm,
+    {
+      provider: "openrouter",
+      model: "moonshotai/kimi-k2.7-code",
+      temperature: 0.0,
+      top_p: 0.9,
+      frequency_penalty: 0.1,
+      presence_penalty: 0.1,
+    },
+  )
+  harness.stdio.println(fixed_sampling_pair.temperature == nil)
+  harness.stdio.println(fixed_sampling_pair.top_p == nil)
+  harness.stdio.println(fixed_sampling_pair.frequency_penalty == nil)
+  harness.stdio.println(fixed_sampling_pair.presence_penalty == nil)
+  const fixed_provider_controls = agent_sanitize_model_options(
+    harness.llm,
+    {
+      provider: "anthropic",
+      model: "claude-sonnet-4-6",
+      seed: 42,
+      frequency_penalty: 0.1,
+      presence_penalty: 0.1,
+    },
+  )
+  harness.stdio.println(fixed_provider_controls.seed == nil)
+  harness.stdio.println(fixed_provider_controls.frequency_penalty == nil)
+  harness.stdio.println(fixed_provider_controls.presence_penalty == nil)
+  const fixed_top_k = agent_sanitize_model_options(
+    harness.llm,
+    {provider: "gemini", model: "gemini-3.6-pro", top_k: 20},
+  )
+  harness.stdio.println(fixed_top_k.top_k == nil)
+  const fixed_stop = agent_sanitize_model_options(
+    harness.llm,
+    {provider: "xai", model: "grok-4.5", stop: ["END"]},
+  )
+  harness.stdio.println(fixed_stop.stop == nil)
+  const configurable_sampling = agent_sanitize_model_options(
+    harness.llm,
+    {provider: "mock", model: "gpt-4o", temperature: 0.2, top_p: 0.8},
+  )
+  harness.stdio.println(configurable_sampling.temperature)
+  harness.stdio.println(configurable_sampling.top_p)
 }
