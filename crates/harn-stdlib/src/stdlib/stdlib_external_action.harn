@@ -1,0 +1,7 @@
+/**
+ * std/external_action — exact authorization and at-most-once dispatch for
+ * consequential effects outside the current Harn workspace.
+ */
+pub import "std/external_action/contracts"
+pub import "std/external_action/runtime"
+pub import "std/external_action/testing"

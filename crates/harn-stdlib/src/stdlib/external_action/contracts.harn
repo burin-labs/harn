@@ -1,0 +1,553 @@
+/** Provider-neutral contracts for consequential external effects. */
+pub type ExternalActionEnvironment = "mock" | "test" | "live"
+
+pub type ExternalActionOutcome = "confirmed" | "denied" | "failed_before_dispatch" | "indeterminate"
+
+pub type ExternalActionReceiptStatus = "confirmed" \
+  | "denied" \
+  | "failed_before_dispatch" \
+  | "reconciliation_required"
+
+pub type ExternalActionNextAction = "none" | "reconcile"
+
+pub type ExternalActionAuthorizationMethod = "manual" \
+  | "policy" \
+  | "adversarial_auto" \
+  | "managed_policy" \
+  | "test_fixture"
+
+pub type ExternalActionAuthenticationAssurance = "none" | "session" | "biometric" | "managed"
+
+pub type ExternalActionActor = {kind: string, id: string}
+
+pub type ExternalActionMoney = {currency: string, amount_minor: int}
+
+pub type ExternalActionDisplay = {summary: string, details?: list<string>}
+
+pub type ExternalActionIntent = {
+  schema: "harn.external_action_intent.v1",
+  id: string,
+  fingerprint: string,
+  idempotency_key: string,
+  actor: ExternalActionActor,
+  provider: string,
+  capability: string,
+  operation: string,
+  environment: ExternalActionEnvironment,
+  payload: unknown,
+  external_spend?: ExternalActionMoney,
+  display: ExternalActionDisplay,
+}
+
+pub type ExternalActionGrant = {
+  schema: "harn.external_action_grant.v1",
+  id: string,
+  intent_fingerprint: string,
+  actor: ExternalActionActor,
+  provider: string,
+  capability: string,
+  environment: ExternalActionEnvironment,
+  authorized_by: ExternalActionActor,
+  authorization_method: ExternalActionAuthorizationMethod,
+  authentication_assurance: ExternalActionAuthenticationAssurance,
+  issued_at_ms: int,
+  expires_at_ms: int,
+  max_external_spend?: ExternalActionMoney,
+}
+
+pub type ExternalActionErrorKind = "invalid_intent" \
+  | "invalid_grant" \
+  | "adapter_unavailable" \
+  | "adapter_failure" \
+  | "malformed_adapter_result" \
+  | "invalid_reconciliation"
+
+pub type ExternalActionError = {
+  kind: ExternalActionErrorKind,
+  code: string,
+  message: string,
+  retryable: bool,
+}
+
+/** The only response shape an external provider adapter may return. */
+pub type ExternalActionAdapterOutcome = "confirmed" | "failed_before_dispatch" | "indeterminate"
+
+pub type ExternalActionAdapterResult = {
+  outcome: ExternalActionAdapterOutcome,
+  provider_action_id?: string,
+  evidence_refs?: list<string>,
+  error_code?: string,
+}
+
+pub type ExternalActionDispatchRequest = {
+  schema: "harn.external_action_dispatch_request.v1",
+  intent: ExternalActionIntent,
+  grant: ExternalActionGrant,
+  idempotency_key: string,
+}
+
+pub type ExternalActionReconcileRequest = {
+  schema: "harn.external_action_reconcile_request.v1",
+  intent: ExternalActionIntent,
+  grant: ExternalActionGrant,
+  receipt: ExternalActionReceipt,
+  attempt_id: string,
+}
+
+pub type ExternalActionAdapter = {
+  id: string,
+  dispatch: fn(Harness, ExternalActionDispatchRequest) -> ExternalActionAdapterResult,
+  reconcile: fn(Harness, ExternalActionReconcileRequest) -> ExternalActionAdapterResult,
+}
+
+pub type ExternalActionReceipt = {
+  schema: "harn.external_action_receipt.v1",
+  id: string,
+  action_id: string,
+  intent_fingerprint: string,
+  idempotency_key: string,
+  provider: string,
+  capability: string,
+  operation: string,
+  environment: ExternalActionEnvironment,
+  adapter_id: string,
+  outcome: ExternalActionOutcome,
+  status: ExternalActionReceiptStatus,
+  next_action: ExternalActionNextAction,
+  dispatch_attempted: bool,
+  recorded_at_ms: int,
+  provider_action_id?: string,
+  evidence_refs: list<string>,
+  error?: ExternalActionError,
+  reconciliation?: {attempt_id: string, previous_receipt_id: string},
+}
+
+/**
+ * Build a stable external-action error for hosts and adapters.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn external_action_error(
+  kind: ExternalActionErrorKind,
+  code: string,
+  message: string,
+  retryable: bool = false,
+) -> ExternalActionError {
+  return {kind: kind, code: code, message: message, retryable: retryable}
+}
+
+fn __external_action_non_empty(value, field: string) -> Result<string, ExternalActionError> {
+  const text = trim(to_string(value ?? ""))
+  if text == "" {
+    return Err(external_action_error("invalid_intent", "missing_" + field, field + " is required"))
+  }
+  return Ok(text)
+}
+
+fn __external_action_actor_result(
+  raw: unknown,
+) -> Result<ExternalActionActor, ExternalActionError> {
+  if type_of(raw) != "dict" {
+    return Err(external_action_error("invalid_intent", "invalid_actor", "actor must be an object"))
+  }
+  const kind = __external_action_non_empty(raw?.kind, "actor_kind")
+  const id = __external_action_non_empty(raw?.id, "actor_id")
+  if !is_ok(kind) {
+    return Err(unwrap_err(kind))
+  }
+  if !is_ok(id) {
+    return Err(unwrap_err(id))
+  }
+  return Ok({kind: unwrap(kind), id: unwrap(id)})
+}
+
+fn __external_action_environment_result(
+  raw,
+) -> Result<ExternalActionEnvironment, ExternalActionError> {
+  const environment = lowercase(trim(to_string(raw ?? "")))
+  if environment == "mock" || environment == "test" || environment == "live" {
+    return Ok(environment)
+  }
+  return Err(
+    external_action_error(
+      "invalid_intent",
+      "invalid_environment",
+      "environment must be mock, test, or live",
+    ),
+  )
+}
+
+fn __external_action_money_result(
+  raw: unknown,
+) -> Result<ExternalActionMoney?, ExternalActionError> {
+  if raw == nil {
+    return Ok(nil)
+  }
+  if type_of(raw) != "dict" {
+    return Err(
+      external_action_error(
+        "invalid_intent",
+        "invalid_external_spend",
+        "external spend must be an object",
+      ),
+    )
+  }
+  const currency = uppercase(trim(to_string(raw?.currency ?? "")))
+  if regex_match("^[A-Z]{3}$", currency) == nil {
+    return Err(
+      external_action_error(
+        "invalid_intent",
+        "invalid_currency",
+        "currency must be an ISO 4217 code",
+      ),
+    )
+  }
+  if type_of(raw?.amount_minor) != "int" || raw.amount_minor < 0 {
+    return Err(
+      external_action_error(
+        "invalid_intent",
+        "invalid_amount_minor",
+        "amount_minor must be a non-negative integer",
+      ),
+    )
+  }
+  return Ok({currency: currency, amount_minor: raw.amount_minor})
+}
+
+fn __external_action_display(raw: unknown, operation: string) -> ExternalActionDisplay {
+  const source = type_of(raw) == "dict" ? raw : {}
+  const summary = trim(to_string(source?.summary ?? operation))
+  let display: ExternalActionDisplay = {summary: summary == "" ? operation : summary}
+  if type_of(source?.details) == "list" {
+    let details: list<string> = []
+    for item in source.details {
+      const text = trim(to_string(item))
+      if text != "" && len(text) <= 512 {
+        details = details + [text]
+      }
+    }
+    if len(details) > 0 {
+      display.details = details
+    }
+  }
+  return display
+}
+
+fn __external_action_fingerprint_payload(
+  actor: ExternalActionActor,
+  provider: string,
+  capability: string,
+  operation: string,
+  environment: ExternalActionEnvironment,
+  payload: unknown,
+  external_spend: ExternalActionMoney?,
+) -> dict {
+  return {
+    schema: "harn.external_action_fingerprint.v1",
+    actor: actor,
+    provider: provider,
+    capability: capability,
+    operation: operation,
+    environment: environment,
+    payload: payload,
+    external_spend: external_spend,
+  }
+}
+
+/**
+ * Validate and normalize an untrusted proposed external effect once.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn external_action_intent_result(
+  raw: unknown,
+) -> Result<ExternalActionIntent, ExternalActionError> {
+  if type_of(raw) != "dict" {
+    return Err(external_action_error("invalid_intent", "invalid_shape", "intent must be an object"))
+  }
+  const actor = __external_action_actor_result(raw?.actor)
+  const provider = __external_action_non_empty(raw?.provider, "provider")
+  const capability = __external_action_non_empty(raw?.capability, "capability")
+  const operation = __external_action_non_empty(raw?.operation, "operation")
+  const environment = __external_action_environment_result(raw?.environment)
+  const money = __external_action_money_result(raw?.external_spend)
+  for checked in [actor, provider, capability, operation, environment, money] {
+    if !is_ok(checked) {
+      return Err(unwrap_err(checked))
+    }
+  }
+  const normalized_actor = unwrap(actor)
+  const normalized_provider = lowercase(unwrap(provider))
+  const normalized_capability = lowercase(unwrap(capability))
+  const normalized_operation = lowercase(unwrap(operation))
+  const normalized_environment = unwrap(environment)
+  const normalized_money = unwrap(money)
+  const payload = raw?.payload
+  const fingerprint = "sha256:"
+    + sha256(
+    json_stringify(
+      __external_action_fingerprint_payload(
+        normalized_actor,
+        normalized_provider,
+        normalized_capability,
+        normalized_operation,
+        normalized_environment,
+        payload,
+        normalized_money,
+      ),
+    ),
+  )
+  let intent: ExternalActionIntent = {
+    schema: "harn.external_action_intent.v1",
+    id: "action_" + substring(fingerprint, 7, 31),
+    fingerprint: fingerprint,
+    idempotency_key: "harn:" + substring(fingerprint, 7, len(fingerprint)),
+    actor: normalized_actor,
+    provider: normalized_provider,
+    capability: normalized_capability,
+    operation: normalized_operation,
+    environment: normalized_environment,
+    payload: payload,
+    display: __external_action_display(raw?.display, normalized_operation),
+  }
+  if normalized_money != nil {
+    intent.external_spend = normalized_money
+  }
+  return Ok(intent)
+}
+
+/**
+ * Normalize an action intent or throw its typed validation error.
+ *
+ * @effects: []
+ * @errors: [invalid_intent]
+ */
+pub fn external_action_intent(raw: unknown) -> ExternalActionIntent {
+  const checked = external_action_intent_result(raw)
+  if !is_ok(checked) {
+    throw unwrap_err(checked)
+  }
+  return unwrap(checked)
+}
+
+/**
+ * Return true only when an intent's stored fingerprint still matches its effect.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn external_action_intent_is_exact(intent: ExternalActionIntent) -> bool {
+  const checked = external_action_intent_result(intent)
+  return is_ok(checked) && unwrap(checked).fingerprint == intent.fingerprint
+}
+
+/**
+ * Build an exact, time-bounded authorization for one normalized intent.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn external_action_grant_result(
+  intent: ExternalActionIntent,
+  raw: unknown,
+) -> Result<ExternalActionGrant, ExternalActionError> {
+  if !external_action_intent_is_exact(intent) {
+    return Err(
+      external_action_error(
+        "invalid_grant",
+        "intent_fingerprint_mismatch",
+        "intent fingerprint does not match its effect",
+      ),
+    )
+  }
+  if type_of(raw) != "dict" {
+    return Err(external_action_error("invalid_grant", "invalid_shape", "grant must be an object"))
+  }
+  const authorized_by = __external_action_actor_result(raw?.authorized_by)
+  if !is_ok(authorized_by) {
+    const cause = unwrap_err(authorized_by)
+    return Err(external_action_error("invalid_grant", cause.code, cause.message))
+  }
+  const method = lowercase(trim(to_string(raw?.authorization_method ?? "")))
+  if method != "manual" && method != "policy" && method != "adversarial_auto"
+    && method
+    != "managed_policy"
+    && method != "test_fixture" {
+    return Err(
+      external_action_error(
+        "invalid_grant",
+        "invalid_authorization_method",
+        "authorization method is unsupported",
+      ),
+    )
+  }
+  const assurance = lowercase(trim(to_string(raw?.authentication_assurance ?? "none")))
+  if assurance != "none" && assurance != "session" && assurance != "biometric"
+    && assurance
+    != "managed" {
+    return Err(
+      external_action_error(
+        "invalid_grant",
+        "invalid_authentication_assurance",
+        "authentication assurance is unsupported",
+      ),
+    )
+  }
+  if type_of(raw?.issued_at_ms) != "int" || type_of(raw?.expires_at_ms) != "int"
+    || raw.expires_at_ms
+    <= raw
+    .issued_at_ms {
+    return Err(
+      external_action_error(
+        "invalid_grant",
+        "invalid_expiry",
+        "grant expiry must follow its issue time",
+      ),
+    )
+  }
+  const ceiling = __external_action_money_result(raw?.max_external_spend)
+  if !is_ok(ceiling) {
+    const cause = unwrap_err(ceiling)
+    return Err(external_action_error("invalid_grant", cause.code, cause.message))
+  }
+  if intent.environment == "live" && method == "test_fixture" {
+    return Err(
+      external_action_error(
+        "invalid_grant",
+        "test_grant_for_live_action",
+        "test fixtures cannot authorize live effects",
+      ),
+    )
+  }
+  const normalized_ceiling = unwrap(ceiling)
+  const identity = {
+    intent_fingerprint: intent.fingerprint,
+    authorized_by: unwrap(authorized_by),
+    authorization_method: method,
+    authentication_assurance: assurance,
+    issued_at_ms: raw.issued_at_ms,
+    expires_at_ms: raw.expires_at_ms,
+    max_external_spend: normalized_ceiling,
+  }
+  let grant: ExternalActionGrant = {
+    schema: "harn.external_action_grant.v1",
+    id: "grant_" + substring(sha256(json_stringify(identity)), 0, 24),
+    intent_fingerprint: intent.fingerprint,
+    actor: intent.actor,
+    provider: intent.provider,
+    capability: intent.capability,
+    environment: intent.environment,
+    authorized_by: unwrap(authorized_by),
+    authorization_method: method,
+    authentication_assurance: assurance,
+    issued_at_ms: raw.issued_at_ms,
+    expires_at_ms: raw.expires_at_ms,
+  }
+  if normalized_ceiling != nil {
+    grant.max_external_spend = normalized_ceiling
+  }
+  return Ok(grant)
+}
+
+/**
+ * Normalize an action grant or throw its typed validation error.
+ *
+ * @effects: []
+ * @errors: [invalid_grant]
+ */
+pub fn external_action_grant(intent: ExternalActionIntent, raw: unknown) -> ExternalActionGrant {
+  const checked = external_action_grant_result(intent, raw)
+  if !is_ok(checked) {
+    throw unwrap_err(checked)
+  }
+  return unwrap(checked)
+}
+
+/**
+ * Verify every persisted grant field against its canonical construction.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn external_action_grant_integrity_check(
+  intent: ExternalActionIntent,
+  grant: ExternalActionGrant,
+) -> Result<ExternalActionGrant, ExternalActionError> {
+  const normalized = external_action_grant_result(intent, grant)
+  if !is_ok(normalized) {
+    return Err(unwrap_err(normalized))
+  }
+  if unwrap(normalized) != grant {
+    return Err(
+      external_action_error(
+        "invalid_grant",
+        "grant_integrity_mismatch",
+        "grant fields do not match their canonical authorization",
+      ),
+    )
+  }
+  return normalized
+}
+
+/**
+ * Check the exact binding and effective monetary ceiling at dispatch time.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn external_action_grant_check(
+  intent: ExternalActionIntent,
+  grant: ExternalActionGrant,
+  now_ms: int,
+) -> Result<ExternalActionGrant, ExternalActionError> {
+  if !external_action_intent_is_exact(intent) {
+    return Err(
+      external_action_error(
+        "invalid_grant",
+        "intent_fingerprint_mismatch",
+        "intent fingerprint does not match its effect",
+      ),
+    )
+  }
+  if grant.schema != "harn.external_action_grant.v1"
+    || grant.intent_fingerprint != intent.fingerprint
+    || grant.actor != intent.actor
+    || grant.provider != intent.provider
+    || grant.capability != intent.capability
+    || grant.environment != intent.environment {
+    return Err(
+      external_action_error(
+        "invalid_grant",
+        "grant_binding_mismatch",
+        "grant does not authorize this exact action",
+      ),
+    )
+  }
+  const integrity = external_action_grant_integrity_check(intent, grant)
+  if !is_ok(integrity) {
+    return Err(unwrap_err(integrity))
+  }
+  if now_ms < grant.issued_at_ms || now_ms >= grant.expires_at_ms {
+    return Err(
+      external_action_error("invalid_grant", "grant_expired", "grant is not currently valid"),
+    )
+  }
+  if intent.external_spend != nil {
+    const ceiling = grant.max_external_spend
+    if ceiling == nil || ceiling.currency != intent.external_spend.currency
+      || ceiling.amount_minor
+      < intent
+      .external_spend.amount_minor {
+      return Err(
+        external_action_error(
+          "invalid_grant",
+          "external_spend_exceeds_grant",
+          "external spend exceeds the authorized ceiling",
+        ),
+      )
+    }
+  }
+  return Ok(grant)
+}

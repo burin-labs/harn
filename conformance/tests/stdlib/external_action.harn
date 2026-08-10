@@ -1,0 +1,163 @@
+import {
+  external_action_execute,
+  external_action_fake_adapter,
+  external_action_grant,
+  external_action_intent,
+  external_action_reconcile,
+} from "std/external_action"
+
+fn grant(intent, amount_minor = 20000, expires_at_ms = 9999999999999) {
+  return external_action_grant(
+    intent,
+    {
+      authorized_by: {kind: "user", id: "user-1"},
+      authorization_method: "test_fixture",
+      authentication_assurance: "session",
+      issued_at_ms: 0,
+      expires_at_ms: expires_at_ms,
+      max_external_spend: {currency: "USD", amount_minor: amount_minor},
+    },
+  )
+}
+
+pipeline test(harness: Harness) {
+  harness.runtime.checkpoint_clear()
+  const intent = external_action_intent(
+    {
+      actor: {kind: "user", id: "user-1"},
+      provider: "DUFFEL",
+      capability: "Flights.Book",
+      operation: "Create_Order",
+      environment: "test",
+      payload: {offer_id: "off_test_123", passengers: [{id: "pas_1"}]},
+      external_spend: {currency: "usd", amount_minor: 12345},
+      display: {summary: "Book the selected flight"},
+    },
+  )
+  const exact_grant = grant(intent)
+  const confirmed = external_action_fake_adapter(
+    harness.runtime,
+    "duffel-test",
+    {
+      outcome: "confirmed",
+      provider_action_id: "ord_test_123",
+      evidence_refs: ["duffel:orders/ord_test_123"],
+    },
+  )
+  const first = external_action_execute(harness, intent, exact_grant, confirmed.adapter)
+  const replay = external_action_execute(harness, intent, exact_grant, confirmed.adapter)
+  assert(first.status == "confirmed", "first dispatch must confirm")
+  assert(replay.id == first.id, "replay must return the durable receipt")
+  assert(confirmed.dispatch_calls() == 1, "replay must not dispatch twice")
+  harness.stdio.println("confirmed_once:" + to_string(confirmed.dispatch_calls()))
+  const changed = external_action_intent(
+    intent + {payload: {offer_id: "off_test_changed", passengers: [{id: "pas_1"}]}},
+  )
+  const changed_receipt = external_action_execute(harness, changed, exact_grant, confirmed.adapter)
+  assert(changed_receipt.status == "denied", "changed payload must invalidate the grant")
+  assert(changed_receipt.error?.code == "grant_binding_mismatch", "denial must be typed")
+  assert(confirmed.dispatch_calls() == 1, "denied mutation must not reach the adapter")
+  harness.stdio.println("changed_denied:" + to_string(changed_receipt.error?.code ?? ""))
+  const forged_intent = external_action_intent(
+    intent + {payload: {offer_id: "off_test_forged_grant"}},
+  )
+  const forged_grant = grant(forged_intent)
+    + {authorized_by: {kind: "user", id: "different-user"}}
+  const forged_receipt = external_action_execute(
+    harness,
+    forged_intent,
+    forged_grant,
+    confirmed.adapter,
+  )
+  assert(forged_receipt.status == "denied", "changed grant fields must invalidate its digest")
+  assert(
+    forged_receipt.error?.code == "grant_integrity_mismatch",
+    "forged grant denial must be typed",
+  )
+  harness.stdio.println("forged_grant_denied:" + to_string(forged_receipt.error?.code ?? ""))
+  const raised_spend = external_action_intent(
+    intent + {external_spend: {currency: "USD", amount_minor: 25000}},
+  )
+  const spend_receipt = external_action_execute(
+    harness,
+    raised_spend,
+    grant(raised_spend, 20000),
+    confirmed.adapter,
+  )
+  assert(spend_receipt.status == "denied", "spend above the grant ceiling must be denied")
+  assert(spend_receipt.error?.code == "external_spend_exceeds_grant", "spend denial must be typed")
+  harness.stdio.println("spend_denied:" + to_string(spend_receipt.error?.code ?? ""))
+  const ambiguous_intent = external_action_intent(
+    intent + {payload: {offer_id: "off_test_ambiguous"}},
+  )
+  const ambiguous = external_action_fake_adapter(
+    harness.runtime,
+    "duffel-test",
+    {outcome: "indeterminate", error_code: "connection_lost_after_send"},
+    [
+      {
+        outcome: "confirmed",
+        provider_action_id: "ord_test_reconciled",
+        evidence_refs: ["duffel:orders/ord_test_reconciled"],
+      },
+    ],
+  )
+  const uncertain = external_action_execute(
+    harness,
+    ambiguous_intent,
+    grant(ambiguous_intent),
+    ambiguous.adapter,
+  )
+  assert(uncertain.outcome == "indeterminate", "ambiguous dispatch must remain indeterminate")
+  assert(
+    uncertain.status == "reconciliation_required",
+    "ambiguous dispatch must require reconciliation",
+  )
+  const reconciled = external_action_reconcile(
+    harness,
+    ambiguous_intent,
+    grant(ambiguous_intent),
+    uncertain,
+    ambiguous.adapter,
+    "poll-1",
+  )
+  const reconciled_replay = external_action_reconcile(
+    harness,
+    ambiguous_intent,
+    grant(ambiguous_intent),
+    uncertain,
+    ambiguous.adapter,
+    "poll-1",
+  )
+  assert(reconciled.status == "confirmed", "reconciliation must resolve the receipt")
+  assert(reconciled_replay.id == reconciled.id, "reconciliation replay must use its checkpoint")
+  assert(ambiguous.dispatch_calls() == 1, "reconciliation must not redispatch")
+  assert(ambiguous.reconcile_calls() == 1, "one reconciliation attempt must query once")
+  harness.stdio.println(
+    "reconciled_without_redispatch:"
+      + to_string(ambiguous.dispatch_calls())
+      + ":"
+      + to_string(ambiguous.reconcile_calls()),
+  )
+  const malformed_intent = external_action_intent(
+    intent + {payload: {offer_id: "off_test_malformed"}},
+  )
+  const malformed = external_action_fake_adapter(
+    harness.runtime,
+    "malformed-test",
+    {outcome: "confirmed", evidence_refs: ["not a reference\nraw provider body"]},
+  )
+  const bounded = external_action_execute(
+    harness,
+    malformed_intent,
+    grant(malformed_intent),
+    malformed.adapter,
+  )
+  assert(bounded.status == "reconciliation_required", "malformed provider evidence must fail safe")
+  assert(
+    !json_stringify(bounded).contains("raw provider body"),
+    "receipt must not retain raw provider text",
+  )
+  harness.stdio.println("malformed_bounded:" + to_string(bounded.error?.code ?? ""))
+  harness.runtime.checkpoint_clear()
+}

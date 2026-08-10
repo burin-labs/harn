@@ -1,0 +1,44 @@
+import {
+  ExternalActionAdapter,
+  ExternalActionAdapterResult,
+  ExternalActionDispatchRequest,
+  ExternalActionReconcileRequest,
+} from "std/external_action/contracts"
+
+/**
+ * Build a deterministic adapter with inspectable dispatch/reconcile call counts.
+ *
+ * @effects: [state.mutate]
+ * @errors: []
+ */
+pub fn external_action_fake_adapter(
+  runtime: HarnessRuntime,
+  id: string,
+  dispatch_result: ExternalActionAdapterResult,
+  reconcile_results: list<ExternalActionAdapterResult> = [],
+) -> dict {
+  const dispatch_calls = runtime.atomic(0)
+  const reconcile_calls = runtime.atomic(0)
+  let cursor = 0
+  const adapter: ExternalActionAdapter = {
+    id: id,
+    dispatch: fn(_harness: Harness, _request: ExternalActionDispatchRequest) {
+      runtime.atomic_add(dispatch_calls, 1)
+      return dispatch_result
+    },
+    reconcile: fn(_harness: Harness, _request: ExternalActionReconcileRequest) {
+      runtime.atomic_add(reconcile_calls, 1)
+      if cursor >= len(reconcile_results) {
+        return {outcome: "indeterminate", error_code: "fixture_exhausted"}
+      }
+      const result = reconcile_results[cursor]
+      cursor = cursor + 1
+      return result
+    },
+  }
+  return {
+    adapter: adapter,
+    dispatch_calls: fn() { return runtime.atomic_get(dispatch_calls) },
+    reconcile_calls: fn() { return runtime.atomic_get(reconcile_calls) },
+  }
+}
