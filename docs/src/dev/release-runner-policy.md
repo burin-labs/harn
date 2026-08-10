@@ -37,10 +37,11 @@ and [Blacksmith pricing](https://www.blacksmith.sh/pricing).
 ## Current decision
 
 Use `blacksmith-12vcpu-macos-15` for primary `x86_64-apple-darwin` builds and
-the independent GitHub-hosted `macos-15-xlarge` runner for recovery. Keep
+exact-source macOS workspace certification, and use the independent
+GitHub-hosted `macos-15-xlarge` runner for release-archive recovery. Keep
 `warm` and `standard` on `macos-15-intel`. Routine main pushes and scheduled
-cache refreshes therefore stay free; only shipping and recovery use paid
-capacity.
+cache refreshes stay free; workflow-dispatched certification, shipping, and
+recovery use paid capacity.
 
 Set the repository Actions variable `HARN_RELEASE_FORCE_STANDARD_MACOS=true`
 to route policy-selected primary and recovery Intel builds back to

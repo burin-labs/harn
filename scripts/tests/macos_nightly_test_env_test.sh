@@ -3,6 +3,18 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 workflow="$ROOT_DIR/.github/workflows/macos-nightly.yml"
+dispatch_runner="runs-on: \${{ github.event_name == 'schedule' && 'macos-latest' || 'blacksmith-12vcpu-macos-15' }}"
+dispatch_timeout="timeout-minutes: \${{ github.event_name == 'schedule' && 75 || 30 }}"
+
+if ! grep -Fq "$dispatch_runner" "$workflow"; then
+  echo "macOS nightly must reserve the proven M4 runner for exact-source dispatches" >&2
+  exit 1
+fi
+
+if ! grep -Fq "$dispatch_timeout" "$workflow"; then
+  echo "macOS nightly must bound scheduled and exact-source hangs independently" >&2
+  exit 1
+fi
 
 if ! grep -Fq \
   'scripts/ci/run_rust_test_lane.sh cargo nextest run --workspace --profile ci' \

@@ -7,13 +7,14 @@ name: macOS nightly
 # sandbox profile generation in `crates/harn-vm/src/stdlib/sandbox/macos.rs`
 # and its `#[cfg(target_os = "macos")]` unit tests — compile and run nowhere
 # in CI today (only on a contributor's local Mac). This nightly closes that
-# gap and, because GitHub's `macos-latest` runner is Apple Silicon, also gives
-# incidental arm64 coverage.
+# gap. Scheduled cache-warming runs use GitHub's Apple Silicon runner; exact
+# source dispatches use the proven Blacksmith M4 class. Both give arm64
+# coverage through this one workflow and job identity.
 #
-# Failure is informational, not blocking — the nightly does not gate the
-# `ci-status` job. When something regresses, file an issue and either fix the
-# underlying portability bug or add a per-test `#[cfg(not(target_os = "macos"))]`
-# annotation with rationale.
+# Scheduled failures are informational and do not gate `ci-status`.
+# Release-certification dispatches are blocking exact-source proof. When a
+# platform regression appears, fix the underlying portability bug or add a
+# per-test `#[cfg(not(target_os = "macos"))]` annotation with rationale.
 #
 # Tracking issue: harn#946 (cross-platform test coverage).
 
@@ -35,7 +36,8 @@ env:
 jobs:
   nextest:
     name: Workspace nextest (macos-latest)
-    runs-on: macos-latest
+    runs-on: ${{ github.event_name == 'schedule' && 'macos-latest' || 'blacksmith-12vcpu-macos-15' }}
+    timeout-minutes: ${{ github.event_name == 'schedule' && 75 || 30 }}
     # Don't run forks of the repo on a fork's own schedule.
     if: github.repository == 'burin-labs/harn'
     steps:
@@ -44,11 +46,11 @@ jobs:
       - uses: ./.github/actions/rust-cache
         continue-on-error: true
         with:
-          # This default-branch nightly is the sole writer for the native
-          # macOS workspace cache. Path-routed PR jobs restore it without
-          # writing. Keep both participants on plain rustc: runner-local
-          # sccache measured 0 hits / 1,097 misses and added setup/teardown
-          # overhead without providing cross-run reuse.
+          # This scheduled default-branch job is the sole writer for the
+          # native macOS workspace cache. Exact-source dispatches and
+          # path-routed PR jobs restore it without writing. Keep every
+          # participant on plain rustc: runner-local sccache measured 0 hits /
+          # 1,097 misses and added setup/teardown overhead without reuse.
           shared-key: workspace-macos
           # Do not restore target artifacts containing embedded Harn sources
           # across revisions; this is the same safety boundary as Windows.
