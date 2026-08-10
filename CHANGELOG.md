@@ -9,6 +9,70 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.69
+
+### Breaking
+
+- **Project handlers now initialize on first dispatch (#6429).** `harn run`
+  still validates trigger and hook declarations, exports, and callable
+  signatures at startup, but it no longer initializes unrelated handler module
+  graphs. Remove `--defer-project-handlers` from scripts; use
+  `--eager-project-handlers` only when fail-fast module initialization is
+  required for diagnosis.
+
+### Added
+
+- **Managed provider supply contracts preserve logical model capabilities across gateways
+  (#6410).** A versioned request extension now carries Harn's catalog-owned capability
+  fingerprint, while authoritative terminal receipts supply served route, token, and cost
+  accounting for JSON and streaming completions.
+- **`std/command` now supports scoped sandbox-profile overrides.**
+  `command_run` forwards `sandbox_profile` through its typed hostlib request,
+  so trusted nested Harn and toolchain commands can choose `workspace_paths`
+  without disabling workspace-root enforcement. Harness process calls and
+  hostlib commands now share one validated override guard, which restores the
+  parent policy after each spawn.
+- `harn test --affected-from <git-ref>` now uses the resolved Harn module graph
+  to run changed modules' transitive importer tests, with a fail-safe full-suite
+  fallback for unmodelled changes.
+
+### Changed
+
+- Clarify that harn-serve provider markers select request-body handling: use
+  `@raw` for body-bearing routes, including JSON POST endpoints that return an
+  unbuffered SSE response; `@stream` remains the bodyless request variant.
+- Align bundled Harn skills with repository-owned command entry points, typed
+  data-only policy modules, and resource-safe worktree verification.
+- Refresh the public Harn developer documentation around a shorter Diátaxis path,
+  current provider setup, explicit entrypoints, and clearer Harn/host boundaries.
+  Provider readiness now accepts Gemini's `models/<id>` discovery identifiers.
+- Library crates no longer force `harn-vm/full`, and `harn-hostlib`'s `ast`
+  feature no longer pulls every tree-sitter grammar — lean in-process embedders
+  can drop sqlx/AWS/content parsers and select grammar families without Cargo
+  unifying the fat surface back on.
+
+### Fixed
+
+- Restore stdio connections from MCP clients that start with `initialize`,
+  including Codex. Both Harn MCP server commands now use the same connection code
+  for released and 2026-07-28 clients. Harn's stdio client can select any version
+  listed by the official SDK.
+
+  Precompilation and file-backed MCP, A2A, and site servers now honor the
+  project's `trusted_host_dispatch` setting. Projects no longer need a separate
+  warm-up run or the process-wide legacy capability flag for approved host calls.
+
+  The shared agent shell guard now uses one quote-aware command parser, so
+  search patterns containing shell separators are not mistaken for commands.
+  Pre-commit now uses the current worktree's existing Harn for its optional
+  generated-file check and reports when that check could not run. The required
+  repository check still decides whether generated files are current.
+- Prevent agent cleanup from moving temporary and rebuildable build artifacts
+  into the user's visible macOS Trash.
+- Fix code-index `rebuild` so an already-live index still re-walks disk after edits.
+
+  Session-warm single-flight join no longer short-circuits refresh.
+
 ## v0.10.68
 
 ### Added

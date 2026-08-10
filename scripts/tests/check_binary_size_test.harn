@@ -728,7 +728,7 @@ pipeline test_release_workflow_generates_aot_once_for_release_and_benchmark_targ
   )
   const build = release_workflow_step(workflow.jobs.build.steps, "Build")
   const aot_condition =
-    "needs.setup.outputs.is_release == 'true' || needs.setup.outputs.build_mode == 'benchmark'"
+    "needs.setup.outputs.is_release == 'true' || needs.setup.outputs.build_mode == 'benchmark' || needs.setup.outputs.build_mode == 'candidate'"
   assert_eq(workflow.jobs.prepare_cli_aot.needs, "setup")
   assert_eq(workflow.jobs.prepare_cli_aot.if, "needs.setup.outputs.should_build_binaries == 'true'")
   assert_eq(checkout.if, aot_condition)
