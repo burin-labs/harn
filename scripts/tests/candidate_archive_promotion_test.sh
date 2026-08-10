@@ -35,6 +35,19 @@ done
 # shellcheck source=scripts/lib/candidate_archive_contract.sh
 source "$contract"
 
+# macOS release jobs use /bin/bash 3.2. Associative-array compound assignment
+# of keys like harn-*.tar.gz is arithmetic under `set -u` there; keep the
+# contract sourcable on that interpreter.
+if [[ -x /bin/bash ]]; then
+  /bin/bash -c '
+    set -euo pipefail
+    # shellcheck disable=SC1090
+    source "$1"
+    target_for_archive harn-x86_64-apple-darwin.tar.gz >/dev/null
+    archive_for_target x86_64-pc-windows-msvc >/dev/null
+  ' bash "$contract"
+fi
+
 sha256_file_local() {
   sha256_file "$1"
 }
