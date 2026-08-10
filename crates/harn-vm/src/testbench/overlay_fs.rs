@@ -299,6 +299,19 @@ impl OverlayFs {
         }
     }
 
+    pub fn is_dir(&self, path: &Path) -> bool {
+        if !self.within_root(path) {
+            return path.is_dir();
+        }
+        let key = self.key(path);
+        let layer = self.layer.lock().expect("overlay layer poisoned");
+        match layer.get(&key) {
+            Some(OverlayEntry::Directory) => true,
+            Some(OverlayEntry::File(_)) | Some(OverlayEntry::Deleted) => false,
+            None => path.is_dir(),
+        }
+    }
+
     pub fn remove_file(&self, path: &Path) -> std::io::Result<()> {
         if !self.within_root(path) {
             return std::fs::remove_file(path);
@@ -993,6 +1006,13 @@ pub mod helpers {
         }
     }
 
+    pub fn is_dir(path: &Path) -> bool {
+        match active_overlay() {
+            Some(overlay) => overlay.is_dir(path),
+            None => path.is_dir(),
+        }
+    }
+
     pub fn remove_file(path: &Path) -> std::io::Result<()> {
         let result = match active_overlay() {
             Some(overlay) => overlay.remove_file(path),
@@ -1109,6 +1129,34 @@ mod tests {
             std::io::ErrorKind::NotFound
         );
         assert!(nested.join("secret.txt").exists());
+    }
+
+    #[test]
+    fn is_dir_uses_the_overlay_visible_entry_kind() {
+        let dir = tempfile::tempdir().unwrap();
+        let underlying_dir = dir.path().join("underlying-dir");
+        let underlying_file = dir.path().join("underlying-file");
+        std::fs::create_dir(&underlying_dir).unwrap();
+        std::fs::write(&underlying_file, "file").unwrap();
+        let overlay = OverlayFs::rooted_at(dir.path());
+
+        assert!(overlay.is_dir(dir.path()));
+        assert!(overlay.is_dir(&underlying_dir));
+        assert!(!overlay.is_dir(&underlying_file));
+
+        let overlay_dir = dir.path().join("overlay-dir");
+        let overlay_file = dir.path().join("overlay-file");
+        overlay.create_dir_all(&overlay_dir).unwrap();
+        overlay.write(&overlay_file, b"file").unwrap();
+        assert!(overlay.is_dir(&overlay_dir));
+        assert!(!overlay.is_dir(&overlay_file));
+
+        overlay.remove_file(&underlying_dir).unwrap();
+        assert!(!overlay.is_dir(&underlying_dir));
+        assert!(
+            underlying_dir.is_dir(),
+            "the overlay tombstone must not mutate the underlying directory"
+        );
     }
 
     #[test]

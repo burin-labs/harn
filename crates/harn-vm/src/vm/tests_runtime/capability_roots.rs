@@ -209,6 +209,68 @@ fn test_policy_workspace_roots_catch_filesystem_escapes() {
 }
 
 #[test]
+fn recursive_mkdir_treats_existing_sandbox_roots_as_read_only_noops() {
+    let writable = tempfile::tempdir().unwrap();
+    let read_only = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let existing_file = writable.path().join("not-a-directory");
+    std::fs::write(&existing_file, "file").unwrap();
+
+    let policy = crate::orchestration::CapabilityPolicy {
+        workspace_roots: vec![writable.path().display().to_string()],
+        read_only_roots: vec![read_only.path().display().to_string()],
+        side_effect_level: Some("workspace_write".to_string()),
+        ..Default::default()
+    };
+
+    for existing_root in [writable.path(), read_only.path()] {
+        run_harn_with_policy(
+            &format!(
+                r#"pipeline t(harness: Harness, task) {{ harness.fs.mkdir("{}", true) }}"#,
+                existing_root.display()
+            ),
+            policy.clone(),
+        )
+        .expect("recursive mkdir of an existing sandbox root must be a no-op");
+        assert!(existing_root.is_dir());
+    }
+
+    run_harn_with_policy(
+        &format!(
+            r#"pipeline t(harness: Harness, task) {{ harness.fs.mkdir("{}", true) }}"#,
+            existing_file.display()
+        ),
+        policy.clone(),
+    )
+    .expect_err("recursive mkdir must not accept an existing file");
+    assert_eq!(std::fs::read_to_string(&existing_file).unwrap(), "file");
+
+    let missing_read_only = read_only.path().join("missing");
+    let read_only_error = run_harn_with_policy(
+        &format!(
+            r#"pipeline t(harness: Harness, task) {{ harness.fs.mkdir("{}", true) }}"#,
+            missing_read_only.display()
+        ),
+        policy.clone(),
+    )
+    .expect_err("creating under a read-only root must still be rejected");
+    assert!(read_only_error
+        .to_string()
+        .contains("read-only workspace root"));
+    assert!(!missing_read_only.exists());
+
+    let outside_error = run_harn_with_policy(
+        &format!(
+            r#"pipeline t(harness: Harness, task) {{ harness.fs.mkdir("{}", true) }}"#,
+            outside.path().display()
+        ),
+        policy,
+    )
+    .expect_err("an existing out-of-root directory must remain unreadable");
+    assert!(outside_error.to_string().contains("sandbox violation"));
+}
+
+#[test]
 fn test_policy_read_only_root_allows_reads_but_rejects_writes() {
     let writable = tempfile::tempdir().unwrap();
     let read_only = tempfile::tempdir().unwrap();

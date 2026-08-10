@@ -1004,6 +1004,21 @@ fn mkdir_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
     let path = args.first().map(|a| a.display()).unwrap_or_default();
     let recursive = !matches!(args.get(1), Some(VmValue::Bool(false)));
     let resolved = resolve_fs_path(&path);
+    if recursive {
+        // Recursive mkdir is an idempotent read when the overlay-visible target
+        // is already a directory. Resolve that case before asking for mutation
+        // authority: sandbox roots themselves are intentionally immutable, and
+        // a no-op must not emit a file-edited event. Read scope still prevents
+        // this check from becoming an out-of-root existence oracle.
+        crate::stdlib::sandbox::enforce_fs_path(
+            "mkdir",
+            &resolved,
+            crate::stdlib::sandbox::FsAccess::Read,
+        )?;
+        if overlay::is_dir(&resolved) {
+            return Ok(VmValue::Nil);
+        }
+    }
     crate::stdlib::sandbox::enforce_fs_path(
         "mkdir",
         &resolved,
