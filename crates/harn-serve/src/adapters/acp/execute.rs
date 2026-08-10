@@ -213,6 +213,7 @@ pub(super) async fn execute_chunk(
     let pipeline_name = pipeline_name_for(setup.source_path);
     bridge.set_script_name(&pipeline_name);
 
+    let runtime_configurator = setup.runtime_configurator.clone();
     let mut vm = if let Some(baseline) = setup.baseline {
         baseline.instantiate()
     } else {
@@ -229,7 +230,9 @@ pub(super) async fn execute_chunk(
         vm
     };
 
-    vm.set_harness(harn_vm::Harness::real());
+    let execution_harness = configured_execution_harness(runtime_configurator.as_ref());
+    let execution_secret_provider = execution_harness.secret_provider().cloned();
+    vm.set_harness(execution_harness);
     let prompt_content_value =
         harn_vm::json_to_vm_value(&serde_json::Value::Array(prompt.content.to_vec()));
     // Bind the ACP session-prompt ambient globals from the single source of
@@ -345,10 +348,13 @@ pub(super) async fn execute_chunk(
     // harn-vm but nothing in production had ever switched it on.
     let module_phases = vm.enable_module_phase_timing();
     let execute_started = Instant::now();
-    let result = match vm.execute_arc(std::sync::Arc::new(chunk)).await {
-        Ok(_) => Ok(vm.output().to_string()),
-        Err(e) => Err(PromptExecutionError::from_vm_error(&vm, &e)),
-    };
+    let result = harn_vm::secrets::with_active_secret_provider(execution_secret_provider, async {
+        match vm.execute_arc(std::sync::Arc::new(chunk)).await {
+            Ok(_) => Ok(vm.output().to_string()),
+            Err(e) => Err(PromptExecutionError::from_vm_error(&vm, &e)),
+        }
+    })
+    .await;
     let execute_ms = execute_started.elapsed().as_millis() as u64;
     let modules = module_phases.snapshot();
     bridge.send_log(
@@ -369,6 +375,12 @@ pub(super) async fn execute_chunk(
     harn_vm::stdlib::process::set_session_environment(None);
     harn_vm::stdlib::process::set_thread_execution_context(None);
     result
+}
+
+fn configured_execution_harness(
+    runtime_configurator: &dyn AcpRuntimeConfigurator,
+) -> harn_vm::Harness {
+    runtime_configurator.configure_harness(harn_vm::Harness::real())
 }
 
 pub(super) async fn load_host_mcp_clients(
@@ -432,6 +444,19 @@ pub(super) async fn load_host_mcp_clients(
 mod tests {
     use super::*;
 
+    struct MemorySecretRuntimeConfigurator;
+
+    #[async_trait::async_trait(?Send)]
+    impl super::super::AcpRuntimeConfigurator for MemorySecretRuntimeConfigurator {
+        fn configure_harness(&self, harness: harn_vm::Harness) -> harn_vm::Harness {
+            let provider = harn_vm::secrets::MemorySecretProvider::new("acp-host").with_secret(
+                harn_vm::secrets::SecretId::new("assistant", "session-key"),
+                "memory-only",
+            );
+            harness.with_secret_provider(Arc::new(provider))
+        }
+    }
+
     #[test]
     fn acp_project_root_prefers_explicit_session_root() {
         let session_root = tempfile::tempdir().expect("session root");
@@ -459,6 +484,24 @@ mod tests {
         assert_eq!(
             acp_project_root(Some(&source_path), &nested, None),
             Some(project_root.path().to_path_buf())
+        );
+    }
+
+    #[tokio::test]
+    async fn configured_execution_harness_exposes_host_memory_secrets() {
+        let configurator = MemorySecretRuntimeConfigurator;
+        let harness = configured_execution_harness(&configurator);
+        let provider = harness
+            .secret_provider()
+            .expect("host-configured secret provider");
+        let secret = provider
+            .get(&harn_vm::secrets::SecretId::new("assistant", "session-key"))
+            .await
+            .expect("read injected secret");
+
+        assert_eq!(
+            secret.with_exposed(|bytes| bytes.to_vec()),
+            b"memory-only".to_vec()
         );
     }
 

@@ -3,10 +3,9 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration as StdDuration;
 
-use async_trait::async_trait;
 use serde_json::{json, Value as JsonValue};
 use time::OffsetDateTime;
 use tokio::sync::mpsc;
@@ -25,40 +24,11 @@ use crate::connectors::{
     ConnectorCtx, MetricsRegistry, RateLimiterFactory, RawInbound, TriggerBinding,
 };
 use crate::event_log::{AnyEventLog, MemoryEventLog};
-use crate::secrets::{
-    RotationHandle, SecretBytes, SecretError, SecretId, SecretMeta, SecretProvider, SecretVersion,
-};
+pub use crate::secrets::MemorySecretProvider;
+use crate::secrets::SecretId;
 use crate::triggers::{InboxIndex, ProviderId, TenantId};
 
-#[derive(Clone, Debug)]
-pub struct MemorySecretProvider {
-    provider: String,
-    inner: Arc<Mutex<BTreeMap<(String, String), VersionedSecret>>>,
-}
-
-#[derive(Clone, Debug, Default)]
-struct VersionedSecret {
-    latest: Option<u64>,
-    versions: BTreeMap<u64, Vec<u8>>,
-}
-
 impl MemorySecretProvider {
-    pub fn new(provider: impl Into<String>) -> Self {
-        Self {
-            provider: provider.into(),
-            inner: Arc::new(Mutex::new(BTreeMap::new())),
-        }
-    }
-
-    pub fn empty() -> Self {
-        Self::new("connector-testkit")
-    }
-
-    pub fn with_secret(mut self, id: SecretId, value: impl AsRef<[u8]>) -> Self {
-        self.insert(id, value);
-        self
-    }
-
     pub fn with_scoped_secret(
         self,
         namespace: impl Into<String>,
@@ -69,11 +39,6 @@ impl MemorySecretProvider {
     ) -> Self {
         let id = scoped_secret_id(namespace, tenant_id, binding_id, name);
         self.with_secret(id, value)
-    }
-
-    pub fn insert(&mut self, id: SecretId, value: impl AsRef<[u8]>) {
-        let mut inner = self.inner.lock().expect("memory secret provider poisoned");
-        insert_secret(&mut inner, id, value.as_ref().to_vec());
     }
 
     pub fn insert_scoped(
@@ -88,118 +53,6 @@ impl MemorySecretProvider {
         self.insert(id.clone(), value);
         id
     }
-
-    pub fn snapshot(&self) -> Vec<SecretMeta> {
-        let inner = self.inner.lock().expect("memory secret provider poisoned");
-        inner
-            .iter()
-            .filter_map(|((namespace, name), secret)| {
-                let latest = secret.latest?;
-                Some(SecretMeta {
-                    id: SecretId::new(namespace.clone(), name.clone())
-                        .with_version(SecretVersion::Exact(latest)),
-                    provider: self.provider.clone(),
-                })
-            })
-            .collect()
-    }
-}
-
-#[async_trait]
-impl SecretProvider for MemorySecretProvider {
-    async fn get(&self, id: &SecretId) -> Result<SecretBytes, SecretError> {
-        let inner = self.inner.lock().expect("memory secret provider poisoned");
-        let secret = inner
-            .get(&(id.namespace.clone(), id.name.clone()))
-            .ok_or_else(|| SecretError::NotFound {
-                provider: self.provider.clone(),
-                id: id.clone(),
-            })?;
-        let version = match id.version {
-            SecretVersion::Latest => secret.latest,
-            SecretVersion::Exact(version) => Some(version),
-        }
-        .ok_or_else(|| SecretError::NotFound {
-            provider: self.provider.clone(),
-            id: id.clone(),
-        })?;
-        secret
-            .versions
-            .get(&version)
-            .cloned()
-            .map(SecretBytes::from)
-            .ok_or_else(|| SecretError::NotFound {
-                provider: self.provider.clone(),
-                id: id.clone(),
-            })
-    }
-
-    async fn put(&self, id: &SecretId, value: SecretBytes) -> Result<(), SecretError> {
-        let mut inner = self.inner.lock().expect("memory secret provider poisoned");
-        let value = value.with_exposed(|bytes| bytes.to_vec());
-        insert_secret(&mut inner, id.clone(), value);
-        Ok(())
-    }
-
-    async fn rotate(&self, id: &SecretId) -> Result<RotationHandle, SecretError> {
-        let mut inner = self.inner.lock().expect("memory secret provider poisoned");
-        let key = (id.namespace.clone(), id.name.clone());
-        let secret = inner.entry(key).or_default();
-        let from_version = secret.latest;
-        let to_version = from_version.unwrap_or(0) + 1;
-        let value = from_version
-            .and_then(|version| secret.versions.get(&version).cloned())
-            .unwrap_or_default();
-        secret.versions.insert(to_version, value);
-        secret.latest = Some(to_version);
-        Ok(RotationHandle {
-            provider: self.provider.clone(),
-            id: SecretId::new(id.namespace.clone(), id.name.clone())
-                .with_version(SecretVersion::Exact(to_version)),
-            from_version,
-            to_version: Some(to_version),
-        })
-    }
-
-    async fn list(&self, prefix: &SecretId) -> Result<Vec<SecretMeta>, SecretError> {
-        let inner = self.inner.lock().expect("memory secret provider poisoned");
-        Ok(inner
-            .iter()
-            .filter(|((namespace, name), _)| {
-                namespace == &prefix.namespace && name.starts_with(&prefix.name)
-            })
-            .filter_map(|((namespace, name), secret)| {
-                let latest = secret.latest?;
-                Some(SecretMeta {
-                    id: SecretId::new(namespace.clone(), name.clone())
-                        .with_version(SecretVersion::Exact(latest)),
-                    provider: self.provider.clone(),
-                })
-            })
-            .collect())
-    }
-
-    fn namespace(&self) -> &str {
-        &self.provider
-    }
-
-    fn supports_versions(&self) -> bool {
-        true
-    }
-}
-
-fn insert_secret(
-    inner: &mut BTreeMap<(String, String), VersionedSecret>,
-    id: SecretId,
-    value: Vec<u8>,
-) {
-    let secret = inner.entry((id.namespace, id.name)).or_default();
-    let version = match id.version {
-        SecretVersion::Latest => secret.latest.unwrap_or(0) + 1,
-        SecretVersion::Exact(version) => version,
-    };
-    secret.versions.insert(version, value);
-    secret.latest = Some(secret.latest.map_or(version, |latest| latest.max(version)));
 }
 
 pub fn scoped_secret_id(
@@ -588,7 +441,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::secrets::SecretProvider;
+    use crate::secrets::{SecretBytes, SecretProvider, SecretVersion};
 
     fn parse_ts(value: &str) -> OffsetDateTime {
         OffsetDateTime::parse(value, &time::format_description::well_known::Rfc3339).unwrap()

@@ -605,6 +605,15 @@ pub trait AcpRuntimeConfigurator: Send + Sync {
         Ok(())
     }
 
+    /// Customize the per-execution harness after the VM baseline is restored.
+    ///
+    /// This is the host-owned seam for process-local capabilities such as an
+    /// in-memory secret provider. The harness is never serialized into ACP
+    /// state, and the default preserves the standard real-runtime behavior.
+    fn configure_harness(&self, harness: harn_vm::Harness) -> harn_vm::Harness {
+        harness
+    }
+
     /// Host-verified provider endpoints that travel with this server's
     /// runtime configuration rather than its serializable provider catalog.
     fn runtime_provider_endpoint_overrides(
@@ -634,6 +643,10 @@ impl AcpRuntimeConfigurator for EndpointOverrideRuntimeConfigurator {
         source_path: Option<&std::path::Path>,
     ) -> Result<(), String> {
         self.inner.configure(vm, source_path).await
+    }
+
+    fn configure_harness(&self, harness: harn_vm::Harness) -> harn_vm::Harness {
+        self.inner.configure_harness(harness)
     }
 
     fn runtime_provider_endpoint_overrides(
