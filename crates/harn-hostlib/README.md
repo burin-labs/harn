@@ -169,6 +169,9 @@ fn main() {
 
 On Unix, managed background commands re-exec the embedding executable in this
 mode so the kernel can terminate their process groups if the supervisor dies.
+A private pipe carries the prepared command. The guardian removes inherited
+credentials and does not copy child arguments or environment values into its
+own arguments or environment.
 Omitting the early dispatch makes owner-death-contained commands fail during
 startup. Windows uses a Job Object and the function returns `false`.
 

@@ -76,9 +76,12 @@ fn main() {
 ```
 
 This must run before public CLI parsing. On Unix, owner-death-contained
-commands re-exec the embedding executable in guardian mode; without the
-dispatch, those commands fail during startup. Windows uses a Job Object and
-the function returns `false`.
+commands re-exec the embedding executable in guardian mode. A private pipe
+carries the prepared command, including its explicit child environment. The
+guardian removes inherited credentials and does not copy that data into its
+own arguments or environment.
+Without the dispatch, those commands fail during startup. Windows uses a Job
+Object and the function returns `false`.
 
 Finer control is available one layer down: `harn-hostlib`'s `ast` feature is
 the code-intelligence mechanism only. Per-family grammar features

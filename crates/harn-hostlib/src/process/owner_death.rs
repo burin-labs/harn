@@ -21,7 +21,7 @@ use std::os::unix::process::{CommandExt, ExitStatusExt};
 #[cfg(unix)]
 use std::path::PathBuf;
 #[cfg(unix)]
-use std::process::{Child, ChildStderr, Command, ExitStatus, Stdio};
+use std::process::{Child, ChildStderr, ChildStdin, Command, ExitStatus, Stdio};
 
 #[cfg(unix)]
 use serde::{Deserialize, Serialize};
@@ -33,9 +33,13 @@ use super::{ProcessError, SpawnSpec};
 pub const GUARDIAN_ARG: &str = "__harn-process-owner-guardian";
 
 #[cfg(unix)]
-const REQUEST_ENV: &str = "HARN_INTERNAL_PROCESS_GUARDIAN_REQUEST";
+const MODE_ENV: &str = "HARN_INTERNAL_PROCESS_GUARDIAN_MODE";
+#[cfg(unix)]
+const PIPE_MODE: &str = "request-pipe-v1";
 #[cfg(unix)]
 const REAPER_ENV: &str = "HARN_INTERNAL_PROCESS_GUARDIAN_REAPER";
+#[cfg(unix)]
+const MAX_REQUEST_BYTES: usize = 16 * 1024 * 1024;
 
 #[cfg(unix)]
 thread_local! {
@@ -94,12 +98,12 @@ struct StartupMessage {
     pid: Option<u32>,
 }
 
-/// Build the guardian re-exec command and its inherited payload request.
+/// Build the guardian re-exec command and its private pipe request.
 #[cfg(unix)]
 pub(crate) fn prepare_guardian(
     spec: &SpawnSpec,
     cleanup_token: String,
-) -> Result<Command, ProcessError> {
+) -> Result<(Command, Vec<u8>), ProcessError> {
     let mut payload_spec = spec.clone();
     payload_spec.configure_process_group = false;
     payload_spec.owner_death = super::OwnerDeathPolicy::None;
@@ -114,7 +118,7 @@ pub(crate) fn prepare_guardian(
         spec.env_mode == super::EnvMode::Replace,
         cleanup_token.clone(),
     );
-    let request = serde_json::to_string(&request)
+    let request = serde_json::to_vec(&request)
         .map_err(|error| ProcessError::Spawn(format!("encode guardian request: {error}")))?;
 
     let executable = std::env::current_exe()
@@ -130,15 +134,47 @@ pub(crate) fn prepare_guardian(
             guardian.arg(GUARDIAN_ARG);
         }
     }
+    strip_sensitive_parent_env(&mut guardian, std::env::vars_os());
     guardian
-        .env(REQUEST_ENV, request)
+        .env(MODE_ENV, PIPE_MODE)
         .env(REAPER_ENV, "1")
         .env_remove(harn_vm::op_interrupt::PROCESS_CLEANUP_TOKEN_ENV)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .process_group(0);
-    Ok(guardian)
+    Ok((guardian, request))
+}
+
+#[cfg(unix)]
+fn strip_sensitive_parent_env<I>(guardian: &mut Command, parent_env: I)
+where
+    I: IntoIterator<Item = (OsString, OsString)>,
+{
+    for (key, _) in parent_env {
+        if key
+            .to_str()
+            .is_some_and(super::handle::is_sensitive_env_name)
+        {
+            guardian.env_remove(key);
+        }
+    }
+}
+
+/// Send the prepared command before retaining the same pipe as the owner's
+/// liveness lease. The payload may contain credentials, so it must never be
+/// placed in argv or the guardian environment.
+#[cfg(unix)]
+pub(crate) fn write_request(pipe: &mut ChildStdin, request: &[u8]) -> Result<(), ProcessError> {
+    if request.len() > MAX_REQUEST_BYTES {
+        return Err(ProcessError::Spawn(format!(
+            "guardian request exceeded {MAX_REQUEST_BYTES} bytes"
+        )));
+    }
+    pipe.write_all(request)
+        .and_then(|()| pipe.write_all(b"\n"))
+        .and_then(|()| pipe.flush())
+        .map_err(|error| ProcessError::Spawn(format!("write guardian request: {error}")))
 }
 
 #[cfg(unix)]
@@ -180,7 +216,7 @@ impl PreparedCommand {
             }
         }
         command
-            .env_remove(REQUEST_ENV)
+            .env_remove(MODE_ENV)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
@@ -239,19 +275,21 @@ pub(crate) fn await_startup(child: &mut Child) -> Result<(ChildStderr, u32, u32)
     }
 }
 
-/// Run the guardian payload when the private request environment is present.
+/// Run the guardian payload when the private request pipe is active.
 ///
 /// This is public only so a re-executed integration-test fixture can enter the
 /// same native guardian path as the shipped `harn` executable.
 #[cfg(unix)]
 #[doc(hidden)]
-pub fn run_guardian_from_env() -> io::Result<()> {
+pub fn run_guardian_from_pipe() -> io::Result<()> {
     if std::env::var_os(REAPER_ENV).is_some() {
         run_guardian_reaper();
     }
-    let raw = std::env::var(REQUEST_ENV)
-        .map_err(|_| io::Error::other("guardian request environment is missing"))?;
-    let request: PreparedCommand = serde_json::from_str(&raw)
+    if std::env::var(MODE_ENV).as_deref() != Ok(PIPE_MODE) {
+        return Err(io::Error::other("guardian request pipe is not active"));
+    }
+    let raw = read_request()?;
+    let request: PreparedCommand = serde_json::from_slice(&raw)
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
     let (mut payload_command, cleanup_token) = request.into_command();
     let _journal_cleanup = OwnerJournalCleanup(cleanup_token.clone());
@@ -391,6 +429,35 @@ pub fn run_guardian_from_env() -> io::Result<()> {
     ))
 }
 
+/// Compatibility name for embedders that entered the hidden guardian helper
+/// directly. The request now comes from stdin, not the environment.
+#[cfg(unix)]
+#[doc(hidden)]
+#[deprecated(note = "use run_guardian_from_pipe")]
+pub fn run_guardian_from_env() -> io::Result<()> {
+    run_guardian_from_pipe()
+}
+
+#[cfg(unix)]
+fn read_request() -> io::Result<Vec<u8>> {
+    let mut stdin = io::stdin();
+    let mut request = Vec::new();
+    loop {
+        let mut byte = [0_u8; 1];
+        stdin.read_exact(&mut byte)?;
+        if byte[0] == b'\n' {
+            return Ok(request);
+        }
+        request.push(byte[0]);
+        if request.len() > MAX_REQUEST_BYTES {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("guardian request exceeded {MAX_REQUEST_BYTES} bytes"),
+            ));
+        }
+    }
+}
+
 #[cfg(unix)]
 fn run_guardian_reaper() -> ! {
     let executable = std::env::current_exe().unwrap_or_else(|error| {
@@ -497,11 +564,11 @@ fn reap_adopted_children() -> io::Result<()> {
     Ok(())
 }
 
-/// Whether this process carries a private guardian payload request.
+/// Whether this process carries a private guardian request pipe marker.
 #[cfg(unix)]
 #[doc(hidden)]
 pub fn guardian_requested() -> bool {
-    std::env::var_os(REQUEST_ENV).is_some()
+    std::env::var(MODE_ENV).as_deref() == Ok(PIPE_MODE)
 }
 
 #[cfg(unix)]
@@ -557,11 +624,89 @@ pub fn run_if_requested() -> bool {
     if std::env::args_os().nth(1).as_deref() != Some(OsStr::new(GUARDIAN_ARG)) {
         return false;
     }
-    if let Err(error) = run_guardian_from_env() {
+    if let Err(error) = run_guardian_from_pipe() {
         eprintln!("harn process guardian failed: {error}");
         std::process::exit(1);
     }
     unreachable!("guardian execution always exits")
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use super::*;
+    use crate::process::{EnvMode, OutputCapture, OwnerDeathPolicy};
+
+    #[test]
+    fn guardian_request_keeps_explicit_credentials_out_of_argv_and_env() {
+        let canary = "guardian-request-pipe-canary";
+        let spec = SpawnSpec {
+            builtin: "guardian_request_test",
+            program: "/usr/bin/env".to_string(),
+            args: Vec::new(),
+            cwd: None,
+            env: BTreeMap::from([("EXAMPLE_API_KEY".to_string(), canary.to_string())]),
+            env_remove: Vec::new(),
+            env_mode: EnvMode::Patch,
+            use_stdin: false,
+            configure_process_group: true,
+            owner_death: OwnerDeathPolicy::KillContainment,
+            output_capture: OutputCapture::Pipe,
+        };
+
+        let cleanup_token = harn_vm::op_interrupt::new_process_cleanup_token();
+        let (guardian, request) =
+            prepare_guardian(&spec, cleanup_token.clone()).expect("prepare guardian");
+        harn_vm::op_interrupt::remove_process_owner_group_journal(&cleanup_token);
+        let decoded: PreparedCommand =
+            serde_json::from_slice(&request).expect("decode private guardian request");
+        assert!(
+            decoded.env.iter().any(|(key, value)| {
+                key.as_slice() == b"EXAMPLE_API_KEY" && value.as_deref() == Some(canary.as_bytes())
+            }),
+            "the private request must still carry the explicit child credential"
+        );
+        assert!(
+            guardian
+                .get_args()
+                .all(|arg| !arg.to_string_lossy().contains(canary)),
+            "the guardian argv must not carry child credentials"
+        );
+        assert!(
+            guardian.get_envs().all(|(key, value)| {
+                !key.to_string_lossy().contains(canary)
+                    && !value.is_some_and(|value| value.to_string_lossy().contains(canary))
+            }),
+            "the guardian environment must not carry child credentials"
+        );
+    }
+
+    #[test]
+    fn guardian_scrubs_sensitive_values_inherited_from_its_parent() {
+        let mut guardian = Command::new("/usr/bin/true");
+        strip_sensitive_parent_env(
+            &mut guardian,
+            [
+                (
+                    OsString::from("EXAMPLE_API_KEY"),
+                    OsString::from("secret-canary"),
+                ),
+                (OsString::from("PATH"), OsString::from("/usr/bin")),
+            ],
+        );
+
+        let env = guardian.get_envs().collect::<Vec<_>>();
+        assert!(
+            env.iter()
+                .any(|(key, value)| { *key == OsStr::new("EXAMPLE_API_KEY") && value.is_none() }),
+            "the guardian must remove inherited credentials before re-exec"
+        );
+        assert!(
+            env.iter().all(|(key, _)| *key != OsStr::new("PATH")),
+            "the guardian must preserve ordinary inherited environment"
+        );
+    }
 }
 
 /// Unix alone uses the re-exec guardian; Windows uses a Job Object.
