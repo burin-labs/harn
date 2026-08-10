@@ -153,7 +153,7 @@ auto_harn="$target_dir/debug/harn"
 mkdir -p "$(dirname "$auto_harn")"
 cp "$fake_bin/harn-lease" "$auto_harn"
 : > "$lease_record"
-env -u HARN_CARGO_LEASE_MODE \
+env -u HARN_CARGO_LEASE_MODE -u CI \
   PATH="$fake_bin:$PATH" \
   CARGO_TARGET_DIR="$target_dir" \
   FAKE_HARN_LEASE_RECORD="$lease_record" \
@@ -195,7 +195,7 @@ exit 97
 SH
 chmod +x "$target_dir/debug/harn.exe"
 : > "$lease_record"
-env -u HARN_CARGO_LEASE_MODE \
+env -u HARN_CARGO_LEASE_MODE -u CI \
   OS=Windows_NT \
   PATH="$fake_bin:$PATH" \
   CARGO_TARGET_DIR="$target_dir" \
@@ -253,7 +253,7 @@ fi
 rm -f "$auto_harn"
 
 : > "$record"
-env -u HARN_CARGO_LEASE_MODE \
+env -u HARN_CARGO_LEASE_MODE -u CI \
   PATH="$fake_bin:/usr/bin:/bin" \
   CARGO_TARGET_DIR="$target_dir" \
   FAKE_CARGO_RECORD="$record" \
