@@ -2,6 +2,7 @@
 set -euo pipefail
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+real_sleep=$(command -v sleep)
 # shellcheck source=scripts/lib/harn_bin.sh
 source "$repo_root/scripts/lib/harn_bin.sh"
 
@@ -80,12 +81,16 @@ case "${FAKE_CARGO_MODE:-success}" in
   plain-timeout)
     tail -f /dev/null &
     printf '%s\n' "$!" > "${FAKE_CARGO_CHILD_PID_FILE:?}"
+    printf 'ready\n' > "${FAKE_CARGO_TIMEOUT_FIFO:?}"
     wait "$!"
     ;;
   wrapper-timeout|wrapper-timeout-retry-failure)
-    if [[ -n "${RUSTC_WRAPPER:-}" || -n "${CARGO_BUILD_RUSTC_WRAPPER:-}" ]]; then
+    if [[ -n "${RUSTC_WRAPPER:-}" || -n "${RUSTC_WORKSPACE_WRAPPER:-}" || \
+          -n "${CARGO_BUILD_RUSTC_WRAPPER:-}" || \
+          -n "${CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER:-}" ]]; then
       tail -f /dev/null &
       printf '%s\n' "$!" > "${FAKE_CARGO_CHILD_PID_FILE:?}"
+      printf 'ready\n' > "${FAKE_CARGO_TIMEOUT_FIFO:?}"
       wait "$!"
     fi
     if [[ "$FAKE_CARGO_MODE" = "wrapper-timeout-retry-failure" ]]; then
@@ -96,6 +101,7 @@ case "${FAKE_CARGO_MODE:-success}" in
   wrapper-timeout-always)
     tail -f /dev/null &
     printf '%s\n' "$!" >> "${FAKE_CARGO_CHILD_PID_FILE:?}"
+    printf 'ready\n' > "${FAKE_CARGO_TIMEOUT_FIFO:?}"
     wait "$!"
     ;;
 esac
@@ -121,6 +127,41 @@ BIN
 esac
 SH
 chmod +x "$fake_cargo_bin/cargo"
+
+# The production watchdog uses `sleep`, but a sub-second sleep is not a stable
+# test clock under runner load. This PATH-scoped adapter rendezvous with the
+# fake Cargo child through a FIFO: timeout cases advance only after the child
+# has actually blocked, while successful or failing retry probes leave the
+# watchdog asleep until the resolver cancels it.
+cat > "$fake_cargo_bin/sleep" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ -z "${FAKE_CARGO_TIMEOUT_FIFO:-}" || "${1:-}" != "0.1" ]]; then
+  if [[ -n "${FAKE_CARGO_TIMEOUT_FIFO:-}" && "${1:-}" = "1" ]]; then
+    exit 0
+  fi
+  exec "${FAKE_REAL_SLEEP:?}" "$@"
+fi
+
+case "${FAKE_CARGO_MODE:-success}" in
+  plain-timeout|wrapper-timeout-always)
+    IFS= read -r _ < "$FAKE_CARGO_TIMEOUT_FIFO"
+    ;;
+  wrapper-timeout|wrapper-timeout-retry-failure)
+    if [[ -n "${RUSTC_WRAPPER:-}" || -n "${RUSTC_WORKSPACE_WRAPPER:-}" || \
+          -n "${CARGO_BUILD_RUSTC_WRAPPER:-}" || \
+          -n "${CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER:-}" ]]; then
+      IFS= read -r _ < "$FAKE_CARGO_TIMEOUT_FIFO"
+    else
+      exec "$FAKE_REAL_SLEEP" 600
+    fi
+    ;;
+  *) exec "$FAKE_REAL_SLEEP" "$@" ;;
+esac
+SH
+chmod +x "$fake_cargo_bin/sleep"
+export FAKE_REAL_SLEEP="$real_sleep"
 
 # The resolver's explicit binary and build policy are a coupled input. This
 # test supplies both independently below, so do not inherit either from the
@@ -265,6 +306,9 @@ if [[ "$(grep -Fc 'args=run --quiet --bin harn -- __internal-executable-path' "$
 fi
 
 : > "$record"
+timeout_fifo="$tmp_root/cargo-timeout-ready"
+mkfifo "$timeout_fifo"
+export FAKE_CARGO_TIMEOUT_FIFO="$timeout_fifo"
 child_pid_file="$tmp_root/default-timeout-child.pid"
 if RUSTC_WRAPPER=sccache \
   CARGO_TARGET_DIR="$target_dir" \
