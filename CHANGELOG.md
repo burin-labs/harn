@@ -9,6 +9,30 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.71
+
+### Fixed
+
+- **Wildcard-imported callables now resolve before builtin exposure policy
+  (#6455).** Functions, pipelines, tools, and struct constructors supplied by
+  wildcard imports can safely share names with parser-known builtins, while
+  genuinely unresolved privileged and legacy builtins remain fail-closed.
+- Keep the scheduled E2E suite aligned with lazy project-handler initialization,
+  rerun opted-in PR E2E after every later push, make every shipped stdlib module
+  type-correct, and have required CI reject new stdlib type errors before an
+  optional command is the first path to reach them. Admission-time agent stops
+  now return the same complete result contract as ordinary loop finalization.
+- Changing a package dependency source now publishes a fresh immutable generation instead of silently reusing stale
+  package code under the same alias.
+- Release archive builds now retry transient GitHub artifact download failures
+  twice before failing closed, so a brief endpoint refusal cannot discard an
+  otherwise fully certified multi-platform release candidate.
+- The hosted release audit now applies CI's runner-tier partition, keeping
+  Landlock-only process-sandbox tests on GitHub Ubuntu instead of failing a
+  healthy release on Blacksmith's Landlock-free image. Merge-group Rust proof
+  also has enough bounded runner time to build both release artifacts and finish
+  the complete workspace suite.
+
 ## v0.10.70
 
 ### Added
