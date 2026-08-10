@@ -22,15 +22,27 @@ pub(super) async fn run_connect_api_key(args: &ConnectApiKeyArgs) -> Result<(), 
             args.secret_id
         )
     })?;
-    let value = match (args.value.as_ref(), args.value_file.as_ref()) {
-        (Some(value), None) => value.as_bytes().to_vec(),
-        (None, Some(path)) => std::fs::read(path)
+    let value = match (
+        args.value.as_ref(),
+        args.value_file.as_ref(),
+        args.from_env.as_ref(),
+    ) {
+        (Some(value), None, None) => value.as_bytes().to_vec(),
+        (None, Some(path), None) => std::fs::read(path)
             .map_err(|error| format!("failed to read API key file {}: {error}", path.display()))?,
-        (None, None) => rpassword::prompt_password("API key: ")
+        (None, None, Some(name)) => std::env::var(name)
+            .map_err(|error| {
+                format!("failed to read API key from environment variable {name}: {error}")
+            })?
+            .into_bytes(),
+        (None, None, None) => rpassword::prompt_password("API key: ")
             .map_err(|error| format!("failed to read API key: {error}"))?
             .into_bytes(),
         _ => unreachable!("clap enforces API key value conflicts"),
     };
+    if value.is_empty() {
+        return Err("API key must not be empty".to_string());
+    }
     let provider = connect_secret_provider()?;
     provider
         .put(&secret_id, SecretBytes::from(value))

@@ -391,6 +391,13 @@ can be `secret`, `command`, `http`, `mcp`, or `resource`; only `secret` and
 declared for hosts and provider-specific validators. `harn connector check`
 fails when setup metadata is missing or malformed.
 
+When an `api-key` provider declares exactly one required secret,
+`harn connect <provider>` prompts for that value and stores it at the declared
+secret id. It also accepts `--from-env NAME` and `--value-file PATH`. Providers
+with several independent secrets should keep explicit `harn connect api-key`
+commands in `setup_command`; the shorthand reports those targets instead of
+guessing which value belongs where.
+
 Minimal example:
 
 ```harn
