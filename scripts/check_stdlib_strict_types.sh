@@ -1,18 +1,20 @@
 #!/usr/bin/env bash
-# Strict-types ratchet for the Harn stdlib.
+# Type-safety gate for the Harn stdlib.
 #
 # Runs `harn check --strict-types` over crates/harn-stdlib/src/stdlib and fails
 # when any HARN-OWN-004 finding ("unvalidated boundary value used directly")
-# appears outside the frontier exclusion list below. The strict-types checker
-# flags boundary-sourced values (json_parse / llm_call without a schema /
+# appears outside the frontier exclusion list below. It also fails on every
+# ordinary HARN-TYP-* error. Type errors have no baseline: shipped stdlib
+# modules must remain statically usable even when an optional nightly command
+# is the first consumer to reach one of them.
+#
+# The strict-types checker flags boundary-sourced values (json_parse / llm_call without a schema /
 # host_call results) that are field-accessed without narrowing via
 # schema_expect(), a schema_is() guard, or a shape type annotation.
 #
-# HARN-OWN-004 is emitted as a *warning*, so a plain `harn check` exits 0 on it;
-# this gate is what turns the strict-types class into a hard CI failure. It keys
-# on the HARN-OWN-004 code specifically and deliberately ignores every other
-# diagnostic (pre-existing HARN-TYP-* type errors, lint warnings, etc.) that a
-# whole-directory check surfaces but that are out of scope for this ratchet.
+# HARN-OWN-004 is emitted as a *warning*, so this gate turns the strict-types
+# class into a hard CI failure. Directory-wide lint debt remains separately
+# ratcheted; neither warnings nor its non-zero exit status can hide a type error.
 #
 # Frontier: files listed in EXCLUDE still carry HARN-OWN-004 findings whose
 # clean fix is a judgment call, not an unambiguous narrowing (see PR that added
@@ -34,10 +36,24 @@ EXCLUDE=(
 # gate must fail rather than compile or mistake resolver failure for no findings.
 harn_bin="$(./scripts/harn_bin.sh --no-build --print)"
 
-# The check exits non-zero on pre-existing HARN-TYP errors in the tree; those
-# are not this gate's concern, so capture output and drive the verdict off the
-# HARN-OWN-004 findings alone.
+# The directory still has separately ratcheted lint warnings, so capture output
+# and drive this gate from the diagnostic codes it owns.
 out="$("$harn_bin" check --strict-types "$STDLIB_DIR" 2>&1 || true)"
+
+mapfile -t type_errors < <(
+  printf '%s\n' "$out" | awk '
+    index($0, "error[HARN-TYP-") { diagnostic = $0; armed = 1; next }
+    armed && /-->/ { print diagnostic " @ " $2; armed = 0 }
+  '
+)
+
+if [[ ${#type_errors[@]} -gt 0 ]]; then
+  echo "stdlib type-safety gate failed: ordinary type errors are not baseline-eligible:" >&2
+  for diagnostic in "${type_errors[@]}"; do
+    echo "  $diagnostic" >&2
+  done
+  exit 1
+fi
 
 # Each finding is a `warning[HARN-OWN-004]: ...` line followed by a
 # `    --> <file>:<line>:<col>` locator. Pull the locators for our code.
@@ -73,4 +89,4 @@ if [[ ${#violations[@]} -gt 0 ]]; then
   exit 1
 fi
 
-echo "strict-types ratchet passed: no $CODE findings in the gated stdlib."
+echo "stdlib type-safety gate passed: no HARN-TYP-* errors or unratcheted $CODE findings."

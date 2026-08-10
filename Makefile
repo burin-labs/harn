@@ -599,6 +599,7 @@ test-pr-gate-scripts:
 	./scripts/tests/report_ci_cache_budget_test.sh
 	./scripts/tests/loadgen_postgres_gate_test.sh
 	./scripts/tests/check_all_features_test.sh
+	./scripts/tests/check_stdlib_strict_types_test.sh
 	./scripts/tests/test_one_test.sh
 
 # Rust/Harn-backed shell integration tests run only after CI restores the Rust

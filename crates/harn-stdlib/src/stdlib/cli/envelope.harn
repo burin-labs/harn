@@ -3,6 +3,7 @@
 // Emission helpers stay in `std/cli/render`. This module owns consume/decode
 // for public schema-v1 contracts published via `harn --json-schemas`.
 import {
+  JsonTypedReport,
   SchemaFailure,
   get_typed_result,
   parse_json_typed_report,
@@ -476,7 +477,10 @@ pub fn decode_lint_envelope(value: unknown, options: LintDecodeOptions? = nil) -
  */
 pub fn decode_lint_json(text: string, options: LintDecodeOptions? = nil) -> LintDecodeResult {
   const opts = options ?? {}
-  const report = parse_json_typed_report(text, lint_envelope_schema())
+  const report: JsonTypedReport<LintEnvelope> = parse_json_typed_report(
+    text,
+    lint_envelope_schema(),
+  )
   if !report.ok {
     if report.stage == "json_parse" {
       return Err(__failure("json_parse", report.message, []))
@@ -504,6 +508,9 @@ pub fn decode_lint_json(text: string, options: LintDecodeOptions? = nil) -> Lint
       }
     }
     return Err(__failure("schema", report.message, report.issues ?? []))
+  }
+  if report.value == nil {
+    return Err(__failure("schema", "typed lint envelope is missing its value", []))
   }
   return __validate_semantics(report.value, opts)
 }

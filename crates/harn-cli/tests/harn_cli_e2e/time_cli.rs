@@ -168,7 +168,7 @@ fn time_run_json_smoke_emits_module_attribution_with_cache_miss_then_hit() {
 }
 
 #[test]
-fn time_run_setup_error_reconciles_module_attribution_to_run_setup() {
+fn time_run_setup_error_does_not_claim_a_lazy_module_load() {
     let workdir = tempfile::tempdir().expect("workdir");
     let cache_dir = tempfile::tempdir().expect("cache dir");
     std::fs::write(
@@ -214,7 +214,8 @@ handler = "handlers::missing"
 
     assert_eq!(data["exit_code"], 1);
     assert_eq!(run_setup["kind"], "top_level", "{run_setup}");
-    assert_eq!(module_load["events"], 1, "{module_load}");
+    // Setup validation fails before the lazy handler module is reached.
+    assert_eq!(module_load["events"], 0, "{module_load}");
     assert_eq!(module_load["kind"], "attribution", "{module_load}");
 }
 

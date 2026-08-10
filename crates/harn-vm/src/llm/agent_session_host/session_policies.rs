@@ -198,7 +198,7 @@ pub(super) fn build_nested_budget_denial(
         .unwrap_or(serde_json::Value::Null);
     let result = serde_json::json!({
         "status": "blocked",
-        "final_status": "blocked",
+        "final_status": "budget_exhausted",
         "stop_reason": "nested_execution_budget_exhausted",
         "error": {
             "category": category,
