@@ -190,6 +190,49 @@ fn llm_mock_calls_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValu
                 json_to_vm_value(&c.output_format),
             );
             dict.insert("thinking".to_string(), json_to_vm_value(&c.thinking));
+            dict.insert("max_tokens".to_string(), VmValue::Int(c.max_tokens));
+            dict.insert(
+                "temperature".to_string(),
+                c.temperature.map(VmValue::Float).unwrap_or(VmValue::Nil),
+            );
+            dict.insert(
+                "top_p".to_string(),
+                c.top_p.map(VmValue::Float).unwrap_or(VmValue::Nil),
+            );
+            dict.insert(
+                "top_k".to_string(),
+                c.top_k.map(VmValue::Int).unwrap_or(VmValue::Nil),
+            );
+            dict.insert(
+                "stop".to_string(),
+                c.stop
+                    .as_ref()
+                    .map(|items| {
+                        VmValue::List(std::sync::Arc::new(
+                            items
+                                .iter()
+                                .map(|item| VmValue::String(arcstr::ArcStr::from(item.as_str())))
+                                .collect(),
+                        ))
+                    })
+                    .unwrap_or(VmValue::Nil),
+            );
+            dict.insert(
+                "seed".to_string(),
+                c.seed.map(VmValue::Int).unwrap_or(VmValue::Nil),
+            );
+            dict.insert(
+                "frequency_penalty".to_string(),
+                c.frequency_penalty
+                    .map(VmValue::Float)
+                    .unwrap_or(VmValue::Nil),
+            );
+            dict.insert(
+                "presence_penalty".to_string(),
+                c.presence_penalty
+                    .map(VmValue::Float)
+                    .unwrap_or(VmValue::Nil),
+            );
             dict.insert(
                 "previous_response_id".to_string(),
                 c.previous_response_id

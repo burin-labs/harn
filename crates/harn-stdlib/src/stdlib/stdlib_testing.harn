@@ -602,7 +602,7 @@ pub fn llm_done(marker: string = "##DONE##") -> dict {
  * @example: llm_error("rate limited")
  */
 pub fn llm_error(message: string) -> dict {
-  return {error: message}
+  return {error: {category: "generic", message: message}}
 }
 
 /**
