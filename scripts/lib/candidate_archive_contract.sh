@@ -2,6 +2,10 @@
 
 # Shared contract for candidate archive receipts and promotion manifests.
 # Sourced by write/assemble/verify helpers and their structural tests.
+#
+# Keep this file free of bash-4 associative arrays. GitHub's macOS runners
+# still invoke /bin/bash 3.2, and under `set -u` a key like
+# `harn-x86_64-apple-darwin.tar.gz` is parsed as arithmetic (`harn - ...`).
 
 CANDIDATE_ARCHIVE_SCHEMA="harn.candidate_archive_manifest.v1"
 CANDIDATE_RECEIPT_SCHEMA="harn.candidate_archive_receipt.v1"
@@ -12,22 +16,6 @@ EXPECTED_RELEASE_ARCHIVES=(
   harn-x86_64-apple-darwin.tar.gz
   harn-x86_64-pc-windows-msvc.zip
   harn-x86_64-unknown-linux-gnu.tar.gz
-)
-
-declare -A _CANDIDATE_TARGET_FOR_ARCHIVE=(
-  ["harn-aarch64-apple-darwin.tar.gz"]="aarch64-apple-darwin"
-  ["harn-aarch64-unknown-linux-gnu.tar.gz"]="aarch64-unknown-linux-gnu"
-  ["harn-x86_64-apple-darwin.tar.gz"]="x86_64-apple-darwin"
-  ["harn-x86_64-pc-windows-msvc.zip"]="x86_64-pc-windows-msvc"
-  ["harn-x86_64-unknown-linux-gnu.tar.gz"]="x86_64-unknown-linux-gnu"
-)
-
-declare -A _CANDIDATE_ARCHIVE_FOR_TARGET=(
-  ["aarch64-apple-darwin"]="harn-aarch64-apple-darwin.tar.gz"
-  ["aarch64-unknown-linux-gnu"]="harn-aarch64-unknown-linux-gnu.tar.gz"
-  ["x86_64-apple-darwin"]="harn-x86_64-apple-darwin.tar.gz"
-  ["x86_64-pc-windows-msvc"]="harn-x86_64-pc-windows-msvc.zip"
-  ["x86_64-unknown-linux-gnu"]="harn-x86_64-unknown-linux-gnu.tar.gz"
 )
 
 candidate_archive_expected_targets_json() {
@@ -42,20 +30,32 @@ candidate_archive_expected_targets_json() {
 
 target_for_archive() {
   local archive="${1:-}"
-  if [[ -z "${_CANDIDATE_TARGET_FOR_ARCHIVE[$archive]+x}" ]]; then
-    echo "error: unknown release archive: $archive" >&2
-    return 1
-  fi
-  printf '%s\n' "${_CANDIDATE_TARGET_FOR_ARCHIVE[$archive]}"
+  case "$archive" in
+    harn-aarch64-apple-darwin.tar.gz) printf '%s\n' "aarch64-apple-darwin" ;;
+    harn-aarch64-unknown-linux-gnu.tar.gz) printf '%s\n' "aarch64-unknown-linux-gnu" ;;
+    harn-x86_64-apple-darwin.tar.gz) printf '%s\n' "x86_64-apple-darwin" ;;
+    harn-x86_64-pc-windows-msvc.zip) printf '%s\n' "x86_64-pc-windows-msvc" ;;
+    harn-x86_64-unknown-linux-gnu.tar.gz) printf '%s\n' "x86_64-unknown-linux-gnu" ;;
+    *)
+      echo "error: unknown release archive: $archive" >&2
+      return 1
+      ;;
+  esac
 }
 
 archive_for_target() {
   local target="${1:-}"
-  if [[ -z "${_CANDIDATE_ARCHIVE_FOR_TARGET[$target]+x}" ]]; then
-    echo "error: unknown release target: $target" >&2
-    return 1
-  fi
-  printf '%s\n' "${_CANDIDATE_ARCHIVE_FOR_TARGET[$target]}"
+  case "$target" in
+    aarch64-apple-darwin) printf '%s\n' "harn-aarch64-apple-darwin.tar.gz" ;;
+    aarch64-unknown-linux-gnu) printf '%s\n' "harn-aarch64-unknown-linux-gnu.tar.gz" ;;
+    x86_64-apple-darwin) printf '%s\n' "harn-x86_64-apple-darwin.tar.gz" ;;
+    x86_64-pc-windows-msvc) printf '%s\n' "harn-x86_64-pc-windows-msvc.zip" ;;
+    x86_64-unknown-linux-gnu) printf '%s\n' "harn-x86_64-unknown-linux-gnu.tar.gz" ;;
+    *)
+      echo "error: unknown release target: $target" >&2
+      return 1
+      ;;
+  esac
 }
 
 sha256_file() {
