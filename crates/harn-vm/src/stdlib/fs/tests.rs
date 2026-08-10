@@ -72,6 +72,35 @@ fn result_value(value: &VmValue) -> &VmValue {
 }
 
 #[test]
+fn host_mutation_invalidation_removes_same_signature_text() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("same-length.txt");
+    std::fs::write(&path, "new").unwrap();
+    let worker_path = path.clone();
+    let (cached_tx, cached_rx) = std::sync::mpsc::channel();
+    let (invalidated_tx, invalidated_rx) = std::sync::mpsc::channel();
+
+    // Model the dangerous state directly: cached bytes from before a host
+    // rewrite paired with the rewritten file's same length and timestamp. Use
+    // another thread to prove the host mutation epoch reaches every VM worker,
+    // not only the thread that receives the host callback.
+    let worker = std::thread::spawn(move || {
+        write_cached_text(worker_path.clone(), arcstr::ArcStr::from("old"));
+        assert_eq!(read_cached_text(&worker_path).as_deref(), Some("old"));
+        cached_tx.send(()).unwrap();
+        invalidated_rx.recv().unwrap();
+        assert!(read_cached_text(&worker_path).is_none());
+    });
+    cached_rx.recv().unwrap();
+
+    invalidate_cached_file_text(&path);
+    invalidated_tx.send(()).unwrap();
+    worker.join().unwrap();
+
+    assert_eq!(std::fs::read_to_string(path).unwrap(), "new");
+}
+
+#[test]
 fn conditional_text_replacement_returns_closed_receipts() {
     let dir = tempfile::tempdir().unwrap();
     let _locks =
