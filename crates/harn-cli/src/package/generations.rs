@@ -4,7 +4,6 @@ use harn_modules::package_snapshot::{
     PackageGenerationPointer, PackageSnapshot, GENERATION_LEASE_FILE, GENERATION_LOCK_FILE,
     GENERATION_MANIFEST_FILE, GENERATION_PACKAGES_DIR,
 };
-use std::collections::BTreeSet;
 use std::fs::{self, File, OpenOptions, TryLockError};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -105,11 +104,20 @@ fn current_generation_matches_lock(
     // alone discarded a byte-for-byte correct generation on every bump and
     // re-fetched every dependency from its source.
     //
-    // So fall through to the structural question instead of answering the
-    // proxy one: does the materialized tree hold exactly this lock's packages,
-    // at exactly this lock's content hashes?
-    if snapshot.lock_digest() != expected_lock_digest && !package_sets_match(&snapshot, lock) {
-        return Ok(false);
+    // So compare the stored and requested resolutions when the bytes differ.
+    // Package names alone are insufficient: changing an alias from Git to a
+    // local path (or between two paths) must publish a new generation, or the
+    // old package tree remains silently executable under the new lock.
+    if snapshot.lock_digest() != expected_lock_digest {
+        let materialized_lock = LockFile::load(snapshot.lock_path())?.ok_or_else(|| {
+            PackageError::Lockfile(format!(
+                "{} is missing from the active package generation",
+                snapshot.lock_path().display()
+            ))
+        })?;
+        if !materialized_lock.same_resolution(lock) {
+            return Ok(false);
+        }
     }
     for entry in &lock.packages {
         validate_package_alias(&entry.name)?;
@@ -131,27 +139,6 @@ fn current_generation_matches_lock(
         }
     }
     Ok(true)
-}
-
-/// Whether the generation was materialized for exactly this lock's package set.
-///
-/// The per-entry loop in [`current_generation_matches_lock`] walks the *lock*,
-/// so it can only see packages the lock still names. It cannot notice one that
-/// was dropped from the manifest and is still sitting materialized and
-/// importable in the generation. While the digest was the sole gate that gap
-/// was unreachable; now that a digest mismatch can be survived, it is not.
-fn package_sets_match(snapshot: &PackageSnapshot, lock: &LockFile) -> bool {
-    let materialized: BTreeSet<&str> = snapshot
-        .package_names()
-        .iter()
-        .map(String::as_str)
-        .collect();
-    let locked: BTreeSet<&str> = lock
-        .packages
-        .iter()
-        .map(|entry| entry.name.as_str())
-        .collect();
-    materialized == locked
 }
 
 pub(crate) fn current_package_snapshot(
@@ -695,10 +682,37 @@ mod tests {
         );
     }
 
-    /// The per-entry check walks the lock, so it cannot see a package the lock
-    /// no longer names. Now that a digest mismatch is survivable, that gap is
-    /// reachable: without the set comparison a dropped dependency would stay
-    /// materialized and importable.
+    #[test]
+    fn changing_a_dependency_source_rebuilds_the_generation() {
+        let temp = tempfile::tempdir().unwrap();
+        let ctx = test_context(temp.path());
+        let (mut lock, generation) = publish_vendored_generation(&ctx);
+
+        lock.packages[0].source = "path+file:///tmp/vendored".to_string();
+        lock.packages[0].content_hash = None;
+        publish_package_generation(&ctx, &lock, false, |packages| {
+            let dir = packages.join("vendored");
+            fs::create_dir(&dir).unwrap();
+            fs::write(dir.join("main.harn"), "pipeline replacement() {}\n").unwrap();
+            Ok(1)
+        })
+        .unwrap();
+
+        let snapshot = PackageSnapshot::acquire(temp.path()).unwrap().unwrap();
+        assert_ne!(
+            snapshot.generation(),
+            generation,
+            "a new source must never reuse the old package tree"
+        );
+        assert_eq!(
+            fs::read_to_string(snapshot.packages_root().join("vendored/main.harn")).unwrap(),
+            "pipeline replacement() {}\n"
+        );
+    }
+
+    /// The per-entry integrity check walks the requested lock, so it cannot see
+    /// a package that lock no longer names. The stored-resolution comparison
+    /// must reject that stale generation before the integrity loop runs.
     #[test]
     fn dropping_a_dependency_rebuilds_even_though_every_remaining_entry_matches() {
         let temp = tempfile::tempdir().unwrap();
