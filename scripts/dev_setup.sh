@@ -409,6 +409,9 @@ if [[ -n "${target_dir}" ]] && grep -Fxq \
   .cargo/config.toml; then
   mkdir -p "${target_dir}"
   echo "Configured Cargo target dir -> ${target_dir}"
+  if [[ -x ./scripts/cargo_target_seed.sh ]]; then
+    ./scripts/cargo_target_seed.sh restore "${target_dir}" "${HARN_DEV_SETUP_STORAGE_ROOT}"
+  fi
 elif [[ -n "${target_dir}" ]]; then
   echo "Preserved user-owned Cargo target dir from .cargo/config.toml"
 fi
@@ -553,6 +556,11 @@ if [[ "${SETUP_PROFILE}" != "bootstrap" ]]; then
     "${SETUP_STATE_DIR}/cargo-build-harn-${cargo_fp}.stamp" \
     "executable:${harn_binary_path}" \
     -- "${cargo_builder[@]}" build --locked -p harn-cli --bin harn
+  if [[ -x ./scripts/cargo_target_seed.sh ]] \
+    && grep -Fxq "target-dir = \"${cargo_target_root}\" # ${MANAGED_CARGO_CONFIG_MARKER}" \
+      .cargo/config.toml; then
+    ./scripts/cargo_target_seed.sh publish "${cargo_target_root}" "${HARN_DEV_SETUP_STORAGE_ROOT}"
+  fi
 else
   echo "Bootstrap profile configured the worktree; deferring compilation to the final task lane."
 fi
