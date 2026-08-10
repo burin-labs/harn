@@ -558,6 +558,23 @@ do
   fi
 done
 
+expected_host_bound_filter="$(node -e '
+  const fs = require("node:fs")
+  const contract = JSON.parse(fs.readFileSync(process.argv[1], "utf8"))
+  const job = contract.merge_group_jobs.find((entry) => entry.job_id === "rust-check-inputs")
+  const command = job.steps.find((step) => step.id === "release-audit-rust-test").run
+  const match = command.match(/-E '\''not \((.*)\)'\''$/)
+  if (!match) process.exit(1)
+  process.stdout.write(match[1])
+' "$repo_root/scripts/release_audit_contract.json")"
+HARN_RUNNER_TIER=blacksmith run_audit blacksmith --source-only
+expected_make="make test ARGS=--workspace -E 'not ($expected_host_bound_filter)'"
+if ! grep -Fq "$expected_make" "$audit_record"; then
+  echo "Blacksmith release audit did not preserve CI's exact Landlock test partition" >&2
+  cat "$audit_record" >&2
+  exit 1
+fi
+
 receipt="$tmp_root/receipt.json"
 printf '{}\n' > "$receipt"
 run_audit residual --receipt "$receipt"
