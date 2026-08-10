@@ -344,7 +344,7 @@ pub(super) fn harn_handler_result_value(val: &VmValue) -> serde_json::Value {
     let json = crate::llm::vm_value_to_json(val);
     if agent_tool_handler_result_text(&json).is_some()
         || json_carries_screenshot(&json)
-        || handler_result::carries_typed_outcome(&json)
+        || handler_result::carries_typed_outcome(val, &json)
     {
         json
     } else {

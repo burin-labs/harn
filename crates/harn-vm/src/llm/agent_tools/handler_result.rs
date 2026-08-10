@@ -6,13 +6,17 @@ pub(super) fn agent_tool_handler_result_text(value: &serde_json::Value) -> Optio
     object.get("text")?.as_str()
 }
 
-pub(super) fn carries_typed_outcome(value: &serde_json::Value) -> bool {
-    value.as_object().is_some_and(|object| {
-        object.get("ok").is_some_and(serde_json::Value::is_boolean)
-            || object
-                .get("success")
-                .is_some_and(serde_json::Value::is_boolean)
-    })
+pub(super) fn carries_typed_outcome(
+    source: &crate::value::VmValue,
+    value: &serde_json::Value,
+) -> bool {
+    source.struct_data().is_some()
+        && value.as_object().is_some_and(|object| {
+            object.get("ok").is_some_and(serde_json::Value::is_boolean)
+                || object
+                    .get("success")
+                    .is_some_and(serde_json::Value::is_boolean)
+        })
 }
 
 #[cfg(test)]
@@ -46,14 +50,18 @@ mod tests {
 
     #[test]
     fn typed_domain_outcomes_remain_structured() {
-        for outcome in [
-            serde_json::json!({"ok": false, "error": {"code": "credential_missing"}}),
-            serde_json::json!({"success": true, "data": {"offer_id": "off_test"}}),
-        ] {
-            let value = crate::stdlib::json_to_vm_value(&outcome);
-            assert_eq!(harn_handler_result_value(&value), outcome);
-        }
-        let ordinary = crate::stdlib::json_to_vm_value(&serde_json::json!({"count": 2}));
-        assert!(harn_handler_result_value(&ordinary).is_string());
+        let fields =
+            crate::value::DictMap::new().update("ok".into(), crate::value::VmValue::Bool(false));
+        let typed = crate::value::VmValue::struct_instance("ServiceError", fields);
+        assert_eq!(
+            harn_handler_result_value(&typed),
+            serde_json::json!({"ok": false})
+        );
+
+        let ordinary = crate::stdlib::json_to_vm_value(&serde_json::json!({"ok": false}));
+        assert!(
+            harn_handler_result_value(&ordinary).is_string(),
+            "plain dictionaries retain legacy display rendering"
+        );
     }
 }
