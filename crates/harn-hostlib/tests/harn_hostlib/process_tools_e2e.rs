@@ -134,7 +134,7 @@ fn owner_death_guardian_fixture() {
     if !harn_hostlib::process::owner_death::guardian_requested() {
         return;
     }
-    harn_hostlib::process::owner_death::run_guardian_from_env().expect("run owner-death guardian");
+    harn_hostlib::process::owner_death::run_guardian_from_pipe().expect("run owner-death guardian");
 }
 
 #[test]
@@ -552,6 +552,38 @@ fn real_background_spawn_failure_is_reported_before_returning_a_handle() {
             .contains("harn-owner-death-command-that-does-not-exist")
             || error.to_string().contains("No such file"),
         "unexpected background spawn error: {error}"
+    );
+}
+
+#[test]
+fn real_background_child_receives_explicit_credential_over_private_pipe() {
+    let session_id = format!(
+        "test-guardian-request-pipe-{}-{:?}",
+        std::process::id(),
+        std::thread::current().id()
+    );
+    let _session_guard = harn_vm::agent_sessions::enter_current_session(session_id);
+    let canary = "guardian-request-pipe-canary";
+    let mut req = dict();
+    req.insert("argv".into(), vlist_str(&["env"]));
+    req.insert("background".into(), VmValue::Bool(true));
+    req.insert("env_mode".into(), vstr("patch"));
+    let mut env = dict();
+    env.insert("EXAMPLE_API_KEY".into(), vstr(canary));
+    req.insert("env".into(), VmValue::dict(env));
+
+    let start = require_dict(call("hostlib_tools_run_command", req).unwrap());
+    let mut wait_req = dict();
+    wait_req.insert("handle_id".into(), vstr(&require_str(&start, "handle_id")));
+    wait_req.insert("timeout_ms".into(), VmValue::Int(10_000));
+    let waited = require_dict(call("hostlib_tools_wait_command", wait_req).unwrap());
+
+    assert_eq!(require_str(&waited, "status"), "completed");
+    assert!(
+        require_str(&waited, "stdout")
+            .lines()
+            .any(|line| line == format!("EXAMPLE_API_KEY={canary}")),
+        "the private pipe must preserve explicit child environment values"
     );
 }
 

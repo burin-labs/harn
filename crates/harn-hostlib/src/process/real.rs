@@ -46,7 +46,8 @@ impl ProcessSpawner for RealSpawner {
                 ));
             }
             let cleanup_token = harn_vm::op_interrupt::new_process_cleanup_token();
-            let mut command = super::owner_death::prepare_guardian(&spec, cleanup_token.clone())?;
+            let (mut command, request) =
+                super::owner_death::prepare_guardian(&spec, cleanup_token.clone())?;
             let mut child = match command.spawn() {
                 Ok(child) => child,
                 Err(error) => {
@@ -64,7 +65,7 @@ impl ProcessSpawner for RealSpawner {
                     "record guardian owner group: {error}"
                 )));
             }
-            let liveness = match child.stdin.take() {
+            let mut liveness = match child.stdin.take() {
                 Some(liveness) => liveness,
                 None => {
                     let _ =
@@ -76,6 +77,12 @@ impl ProcessSpawner for RealSpawner {
                     ));
                 }
             };
+            if let Err(error) = super::owner_death::write_request(&mut liveness, &request) {
+                let _ = harn_vm::op_interrupt::signal_pid_tree_and_group_with_report(child.id(), 9);
+                let _ = child.wait();
+                harn_vm::op_interrupt::remove_process_owner_group_journal(&cleanup_token);
+                return Err(error);
+            }
             let (stderr, guardian_pid, payload_pid) =
                 match super::owner_death::await_startup(&mut child) {
                     Ok(startup) => startup,
