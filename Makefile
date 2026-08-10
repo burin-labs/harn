@@ -315,7 +315,7 @@ test-fast:
 
 # Run Harn conformance test suite
 conformance:
-	$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD_VERBOSE) test conformance --parallel
+	$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD_VERBOSE) test conformance --parallel $(if $(HARN_CONFORMANCE_JOBS),--jobs $(HARN_CONFORMANCE_JOBS))
 
 # Mechanism-contract onramp tier: the manufactured mini-evals that prove a new
 # termination/escalation/judge/guard/routing mechanism ENGAGES correctly (fires
@@ -581,6 +581,7 @@ test-pr-gate-scripts:
 	./scripts/tests/update_queued_pr_test.sh
 	./scripts/tests/cancel_superseded_merge_groups_test.sh
 	./scripts/tests/audit_gates_parallel_test.sh
+	./scripts/tests/conformance_worker_budget_test.sh
 	./scripts/tests/rust_artifact_test.sh
 	./scripts/tests/ci_harn_bin_warm_test.sh
 	./scripts/tests/harn_bin_resolver_test.sh
