@@ -1,0 +1,32 @@
+// Run: harn test tests/agent/iteration_telemetry_test.harn
+//
+// Regression for #6474: the iteration event is the public progress seam used
+// by ACP hosts. It must preserve cache usage from the provider response.
+import { __iteration_info_payload } from "std/agent/loop_internal"
+
+pipeline test_iteration_info_preserves_cache_usage(harness: Harness, task) {
+  const info = __iteration_info_payload(
+    {
+      provider: "openai",
+      model: "gpt-test",
+      usage: {
+        input_tokens: 500,
+        output_tokens: 20,
+        cache_read_tokens: 320,
+        cache_write_tokens: 64,
+        cache_supported: true,
+      },
+    },
+    2,
+    "done",
+  )
+  assert_eq(info.cache_read_tokens, 320)
+  assert_eq(info.cache_write_tokens, 64)
+  assert_eq(info.cache_supported, true)
+}
+
+pipeline test_iteration_info_defaults_missing_cache_usage(harness: Harness, task) {
+  const info = __iteration_info_payload({usage: {}}, 0, "")
+  assert_eq(info.cache_read_tokens, 0)
+  assert_eq(info.cache_write_tokens, 0)
+}

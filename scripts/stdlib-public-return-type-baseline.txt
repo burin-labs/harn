@@ -31,7 +31,7 @@
 # count    1  crates/harn-stdlib/src/stdlib/agent/loop_run.harn
 # count   12  crates/harn-stdlib/src/stdlib/agent/loop_support.harn
 # count   29  crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn
-# count   26  crates/harn-stdlib/src/stdlib/agent/loop_turn_options.harn
+# count   25  crates/harn-stdlib/src/stdlib/agent/loop_turn_options.harn
 # count   32  crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn
 # count    3  crates/harn-stdlib/src/stdlib/agent/mcp.harn
 # count   11  crates/harn-stdlib/src/stdlib/agent/options_formats.harn
@@ -369,7 +369,6 @@ crates/harn-stdlib/src/stdlib/agent/loop_turn_options.harn::__agent_loop_tracks_
 crates/harn-stdlib/src/stdlib/agent/loop_turn_options.harn::__agent_loop_transport_abort_error
 crates/harn-stdlib/src/stdlib/agent/loop_turn_options.harn::__agent_stage_modes
 crates/harn-stdlib/src/stdlib/agent/loop_turn_options.harn::__apply_post_turn_options
-crates/harn-stdlib/src/stdlib/agent/loop_turn_options.harn::__iteration_info_payload
 crates/harn-stdlib/src/stdlib/agent/loop_turn_options.harn::__loop_progress_nudge_text
 crates/harn-stdlib/src/stdlib/agent/loop_turn_options.harn::__merge_hook_dict
 crates/harn-stdlib/src/stdlib/agent/loop_turn_options.harn::__merge_tool_names
