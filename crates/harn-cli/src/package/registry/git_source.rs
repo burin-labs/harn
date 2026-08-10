@@ -95,6 +95,40 @@ pub(crate) fn normalize_git_url(raw: &str) -> Result<String, PackageError> {
     Ok(normalized)
 }
 
+/// Whether two lockfile source strings name the same Git repository through
+/// the standard credential-free HTTPS and SSH transports.
+///
+/// Transport is not part of a resolved package's identity: the immutable
+/// commit and content hash are. Repository identity still is, so this only
+/// folds the conservative shape Harn can prove structurally -- the same host
+/// and path, with no embedded credentials, query, fragment, or explicit port.
+/// Other URL spellings remain distinct and therefore fail closed.
+pub(crate) fn equivalent_git_repository_sources(left: &str, right: &str) -> bool {
+    if left == right {
+        return true;
+    }
+    canonical_git_repository_identity(left)
+        .zip(canonical_git_repository_identity(right))
+        .is_some_and(|(left, right)| left == right)
+}
+
+fn canonical_git_repository_identity(source: &str) -> Option<(String, String)> {
+    let raw = source.strip_prefix("git+")?;
+    let normalized = normalize_git_url(raw).ok()?;
+    let url = Url::parse(&normalized).ok()?;
+    if url.port().is_some() || url.query().is_some() || url.fragment().is_some() {
+        return None;
+    }
+    match url.scheme() {
+        "https" if url.username().is_empty() && url.password().is_none() => {}
+        "ssh" if url.username() == "git" && url.password().is_none() => {}
+        _ => return None,
+    }
+    let host = url.host_str()?.to_ascii_lowercase();
+    let path = url.path().trim_matches('/').trim_end_matches(".git");
+    (!path.is_empty()).then(|| (host, path.to_string()))
+}
+
 pub(crate) fn derive_repo_name_from_source(source: &str) -> Result<String, PackageError> {
     let url = Url::parse(source).map_err(|error| format!("invalid git URL {source}: {error}"))?;
     let segment = url

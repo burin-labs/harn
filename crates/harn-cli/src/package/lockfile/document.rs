@@ -208,7 +208,12 @@ impl LockFile {
     /// substantive changing. Provenance freshness stays softly enforced by
     /// `harn package audit` (a warning, not a gate).
     pub(crate) fn same_resolution(&self, other: &Self) -> bool {
-        self.packages == other.packages
+        self.packages.len() == other.packages.len()
+            && self
+                .packages
+                .iter()
+                .zip(&other.packages)
+                .all(|(left, right)| left.same_resolution(right))
     }
 
     pub(crate) fn requires_git_hash_migration(&self) -> bool {
@@ -241,6 +246,27 @@ impl LockFile {
 
     pub(super) fn remove(&mut self, name: &str) {
         self.packages.retain(|entry| entry.name != name);
+    }
+}
+
+impl LockEntry {
+    fn same_resolution(&self, other: &Self) -> bool {
+        if self == other {
+            return true;
+        }
+        if !equivalent_git_repository_sources(&self.source, &other.source) {
+            return false;
+        }
+
+        // `LockEntry`'s derived equality remains the exhaustive owner of every
+        // other resolution field, including fields added in the future. Clear
+        // only the source spelling after proving repository identity instead
+        // of duplicating that field list here.
+        let mut left = self.clone();
+        let mut right = other.clone();
+        left.source.clear();
+        right.source.clear();
+        left == right
     }
 }
 

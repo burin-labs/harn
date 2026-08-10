@@ -621,7 +621,7 @@ mod tests {
         let lock = LockFile {
             packages: vec![LockEntry {
                 name: "vendored".to_string(),
-                source: "git+ssh://example.invalid/vendored.git".to_string(),
+                source: "git+ssh://git@example.invalid/vendored.git".to_string(),
                 content_hash: Some(content_hash),
                 ..LockEntry::default()
             }],
@@ -679,6 +679,32 @@ mod tests {
                 .generation(),
             generation,
             "only the provenance stamps moved, so the generation must be reused"
+        );
+    }
+
+    /// Authentication transport can change between an interactive checkout
+    /// and automation without changing the repository, commit, or bytes. That
+    /// spelling-only change must not discard a valid committed generation and
+    /// force a private dependency fetch.
+    #[test]
+    fn changing_only_git_transport_reuses_the_materialized_generation() {
+        let temp = tempfile::tempdir().unwrap();
+        let ctx = test_context(temp.path());
+        let (mut lock, generation) = publish_vendored_generation(&ctx);
+        lock.packages[0].source = "git+https://example.invalid/vendored".to_string();
+
+        publish_package_generation(&ctx, &lock, false, |_| {
+            panic!("re-materialized a generation whose Git repository identity still matches")
+        })
+        .unwrap();
+
+        assert_eq!(
+            PackageSnapshot::acquire(temp.path())
+                .unwrap()
+                .unwrap()
+                .generation(),
+            generation,
+            "only the Git transport moved, so the generation must be reused"
         );
     }
 
