@@ -36,6 +36,32 @@ fn pick_ls_remote_commit_returns_none_on_empty_output() {
     assert_eq!(pick_ls_remote_commit(""), None);
 }
 
+#[test]
+fn equivalent_git_repository_sources_fold_only_standard_transport_spelling() {
+    let https = "git+https://github.com/burin-labs/burin-commerce";
+    assert!(equivalent_git_repository_sources(
+        https,
+        "git+ssh://git@github.com/burin-labs/burin-commerce.git"
+    ));
+    assert!(equivalent_git_repository_sources(
+        https,
+        "git+git@github.com:burin-labs/burin-commerce.git"
+    ));
+
+    for different in [
+        "git+https://git.example.com/burin-labs/burin-commerce",
+        "git+https://github.com/burin-labs/other",
+        "git+ssh://deploy@github.com/burin-labs/burin-commerce.git",
+        "git+ssh://git@github.com:2222/burin-labs/burin-commerce.git",
+        "git+http://github.com/burin-labs/burin-commerce",
+    ] {
+        assert!(
+            !equivalent_git_repository_sources(https, different),
+            "unexpectedly folded {different} into the GitHub repository identity"
+        );
+    }
+}
+
 #[cfg(unix)]
 #[test]
 fn hardened_git_env_scrubs_ambient_git_credentials_and_config() {
