@@ -1083,11 +1083,10 @@ cmd_audit() {
     fi
   fi
 
-  if [[ "$failed" -ne 0 ]]; then
-    # ── Failure summary FIRST (so the real cause is at the TOP of the
-    # output / audit md, not buried thousands of lines into the full dump). ──
+  release_gate_print_failed_lane_summary() {
+    local heading="$1"
     echo ""
-    echo "=== RELEASE AUDIT FAILED — failing step(s) ==="
+    echo "$heading"
     # Report exactly the lanes that are still failing. Selecting them by
     # scanning logs for error text hid lanes killed by a signal, whose last
     # line is the shell's own `Killed: 9` notice and matches no error pattern.
@@ -1119,6 +1118,14 @@ cmd_audit() {
         echo "    no log was written"
       fi
     done
+  }
+
+  if [[ "$failed" -ne 0 ]]; then
+    # Put the summary first for people reading the complete audit. Repeat the
+    # same bounded summary at the end because hosted command adapters and CI
+    # surfaces often show only the tail of a multi-megabyte Cargo log.
+    release_gate_print_failed_lane_summary \
+      "=== RELEASE AUDIT FAILED — failing step(s) ==="
 
     # ── Full logs AFTER the summary, for deep debugging. ──
     echo ""
@@ -1135,6 +1142,8 @@ cmd_audit() {
         echo ""
       fi
     done
+    release_gate_print_failed_lane_summary \
+      "=== RELEASE AUDIT FAILURE RECAP — failing step(s) ==="
     rm -rf "$tmp"
     exit 1
   fi

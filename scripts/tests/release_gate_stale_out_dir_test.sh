@@ -644,6 +644,15 @@ if [[ "$(grep -c '^fmt-check$' "$ordinary_parallel_state/make-record")" -ne 1 ]]
 fi
 grep -Fq 'error[E0308]: ordinary audit-lane compiler failure' \
   "$ordinary_parallel_state/output"
+tail -n 60 "$ordinary_parallel_state/output" > "$ordinary_parallel_state/output-tail"
+if ! grep -Fq '=== RELEASE AUDIT FAILURE RECAP — failing step(s) ===' \
+  "$ordinary_parallel_state/output-tail" \
+  || ! grep -Fq 'error[E0308]: ordinary audit-lane compiler failure' \
+    "$ordinary_parallel_state/output-tail"; then
+  echo "ordinary audit cause must remain in the hosted-output tail" >&2
+  cat "$ordinary_parallel_state/output-tail" >&2
+  exit 1
+fi
 
 failed_retry_state=$(run_parallel_case failed-retry parallel-retry-fails)
 if [[ "$(<"$failed_retry_state/status")" -eq 0 ]]; then
