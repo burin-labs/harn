@@ -365,6 +365,14 @@ async fn run_user_test_targets(
             command_error(&format!("test target does not exist: {path}"));
         }
     }
+    // Reports describe the requested suite, not whichever affected test file
+    // happens to be selected first. Retain that owner before impact analysis
+    // narrows the execution list, including all the way to an empty list.
+    let report_config = UserTestReportConfig::for_requested_targets(
+        args.junit.as_deref(),
+        args.json_out.as_deref(),
+        paths,
+    );
     let selected_paths;
     let paths = if let Some(base) = args.affected_from.as_deref() {
         let resolved = affected::resolve(paths, base);
@@ -419,22 +427,13 @@ async fn run_user_test_targets(
         let coverage = (args.coverage || args.coverage_out.is_some()).then(|| CoverageOptions {
             out: args.coverage_out.clone(),
         });
-        run_user_tests(
-            paths,
-            run_args,
-            UserTestReportConfig {
-                junit_path: args.junit.as_deref(),
-                json_out_path: args.json_out.as_deref(),
-            },
-            coverage,
-        )
-        .await;
+        run_user_tests(paths, run_args, report_config, coverage).await;
     }
 }
 
 /// Coverage knobs for a user-test run. Present only when `--coverage` (or
 /// `--coverage-out`) was requested.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub(crate) struct CoverageOptions {
     /// Optional LCOV output path.
     pub out: Option<String>,
@@ -468,18 +467,108 @@ fn command_error(message: &str) -> ! {
         .exit()
 }
 
-/// Report-writing options threaded into `run_user_tests`. Each `Some`
-/// path triggers a write at end-of-run; a missing parent directory or
-/// I/O error fails the run loudly instead of silently succeeding.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct UserTestReportConfig<'a> {
-    pub junit_path: Option<&'a str>,
-    pub json_out_path: Option<&'a str>,
+/// Optional report contract threaded into `run_user_tests` as one unit.
+/// Destinations and suite identity are either all absent or structurally owned
+/// together; a missing parent directory or I/O error fails the run loudly.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct UserTestReportConfig<'a> {
+    reports: Option<UserTestReports<'a>>,
 }
 
-impl UserTestReportConfig<'_> {
-    pub fn is_empty(&self) -> bool {
-        self.junit_path.is_none() && self.json_out_path.is_none()
+#[derive(Debug, Clone)]
+struct UserTestReports<'a> {
+    junit_path: Option<&'a str>,
+    json_out_path: Option<&'a str>,
+    suite_root: PathBuf,
+}
+
+impl<'a> UserTestReportConfig<'a> {
+    fn for_requested_targets(
+        junit_path: Option<&'a str>,
+        json_out_path: Option<&'a str>,
+        requested_targets: &[String],
+    ) -> Self {
+        let reports = (junit_path.is_some() || json_out_path.is_some()).then(|| UserTestReports {
+            junit_path,
+            json_out_path,
+            suite_root: common_report_root(requested_targets),
+        });
+        Self { reports }
+    }
+
+    fn reports(&self) -> Option<&UserTestReports<'a>> {
+        self.reports.as_ref()
+    }
+}
+
+/// Return the narrowest directory containing every requested test target.
+///
+/// Report case paths are relative to this stable suite boundary. A file target
+/// therefore contributes its parent directory, while multiple targets use
+/// their common ancestor. Impact analysis may later select any subset without
+/// changing report identity. Distant targets can legitimately reduce the
+/// common boundary to the filesystem root.
+fn common_report_root(requested_targets: &[String]) -> PathBuf {
+    let mut roots = requested_targets.iter().map(|target| {
+        let canonical = Path::new(target).canonicalize().unwrap_or_else(|error| {
+            command_error(&format!(
+                "failed to resolve test target for reporting: {target}: {error}"
+            ))
+        });
+        if canonical.is_file() {
+            canonical
+                .parent()
+                .expect("a canonical file target has a parent directory")
+                .to_path_buf()
+        } else {
+            canonical
+        }
+    });
+    let mut common = roots
+        .next()
+        .expect("user test targets are validated as non-empty");
+    for root in roots {
+        while !root.starts_with(&common) {
+            if !common.pop() {
+                command_error("test report targets must share a filesystem root");
+            }
+        }
+    }
+    common
+}
+
+#[cfg(test)]
+mod report_root_tests {
+    use super::common_report_root;
+
+    #[test]
+    fn file_target_uses_its_parent_as_the_report_root() {
+        let temp = tempfile::TempDir::new().expect("tempdir");
+        let test_file = temp.path().join("test_one.harn");
+        std::fs::write(&test_file, "pipeline test_one(_task) { assert(true) }\n")
+            .expect("write test file");
+
+        assert_eq!(
+            common_report_root(&[test_file.to_string_lossy().into_owned()]),
+            temp.path().canonicalize().expect("canonical tempdir")
+        );
+    }
+
+    #[test]
+    fn multiple_targets_use_their_common_ancestor_as_the_report_root() {
+        let temp = tempfile::TempDir::new().expect("tempdir");
+        let left = temp.path().join("left");
+        let right = temp.path().join("right/nested");
+        std::fs::create_dir_all(&left).expect("create left suite");
+        std::fs::create_dir_all(&right).expect("create right suite");
+
+        assert_eq!(
+            common_report_root(&[
+                left.to_string_lossy().into_owned(),
+                right.to_string_lossy().into_owned(),
+            ]),
+            temp.path().canonicalize().expect("canonical tempdir")
+        );
     }
 }
 
@@ -694,11 +783,11 @@ pub(crate) async fn run_user_tests(
             process::exit(1);
         }
     }
-    if !report_config.is_empty() {
-        if let Some(p) = report_config.junit_path {
+    if let Some(reports) = report_config.reports() {
+        if let Some(p) = reports.junit_path {
             preflight_report_path(p);
         }
-        if let Some(p) = report_config.json_out_path {
+        if let Some(p) = reports.json_out_path {
             preflight_report_path(p);
         }
     }
@@ -713,13 +802,12 @@ pub(crate) async fn run_user_tests(
 
     let summary = run_user_test_paths_once(&paths, args).await;
 
-    if !report_config.is_empty() {
-        let suite_root = paths[0].canonicalize().unwrap_or_else(|_| paths[0].clone());
-        let report = user_test_report_from_summary(&suite_root, &summary);
-        if let Some(p) = report_config.junit_path {
+    if let Some(reports) = report_config.reports() {
+        let report = user_test_report_from_summary(&reports.suite_root, &summary);
+        if let Some(p) = reports.junit_path {
             write_junit_xml_or_exit(p, &report, true);
         }
-        if let Some(p) = report_config.json_out_path {
+        if let Some(p) = reports.json_out_path {
             write_user_test_json_or_exit(p, &report, true);
         }
     }
