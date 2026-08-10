@@ -82,6 +82,7 @@ fi
 manifest_source_commit="$(jq -r '.sourceCommit' "$manifest")"
 manifest_policy_revision="$(jq -r '.policyRevision' "$manifest")"
 manifest_run_id="$(jq -r '.runId' "$manifest")"
+manifest_run_attempt="$(jq -r '.runAttempt' "$manifest")"
 
 if [[ -n "$expected_source_commit" && "$manifest_source_commit" != "$expected_source_commit" ]]; then
   echo "error: manifest sourceCommit $manifest_source_commit does not match expected $expected_source_commit" >&2
@@ -153,8 +154,8 @@ while IFS= read -r target; do
     echo "error: manifest entry for $target runId does not match manifest runId" >&2
     exit 1
   fi
-  if [[ "$entry_run_attempt" != "$(jq -r '.runAttempt' "$manifest")" ]]; then
-    echo "error: manifest entry for $target runAttempt does not match manifest runAttempt" >&2
+  if ((10#$entry_run_attempt > 10#$manifest_run_attempt)); then
+    echo "error: manifest entry for $target was produced after the manifest attempt" >&2
     exit 1
   fi
 

@@ -88,7 +88,8 @@ for receipt_file in "${receipt_files[@]}"; do
     .sourceCommit == $expectedSource and
     .policyRevision == $expectedPolicy and
     .runId == $expectedRunId and
-    .runAttempt == $expectedRunAttempt and
+    (.runAttempt | type == "string" and test("^[1-9][0-9]*$")) and
+    ((.runAttempt | tonumber) <= ($expectedRunAttempt | tonumber)) and
     (.target | type == "string" and length > 0) and
     (.archive | type == "string" and length > 0) and
     (.sha256 | type == "string" and test("^[0-9a-f]{64}$")) and
