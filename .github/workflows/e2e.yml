@@ -3,18 +3,24 @@ name: E2E
 # Slow E2E / smoke suite — subprocess-spawning binary surface tests.
 # Runs:
 #   - nightly (3 AM UTC)
-#   - when the `e2e` label is added to a pull request
+#   - when the `e2e` label is added to a pull request and after every later push
 #   - manually via workflow_dispatch
 
 on:
   schedule:
     - cron: "0 3 * * *"
   pull_request:
-    types: [labeled]
+    types: [labeled, synchronize]
   workflow_dispatch:
 
 permissions:
   contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  # A new commit invalidates the old E2E result for an opted-in PR. Cancel
+  # only on synchronize so adding the label cannot turn its own run red.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' && github.event.action == 'synchronize' }}
 
 env:
   CARGO_TERM_COLOR: always

@@ -558,6 +558,7 @@ test-pr-gate-scripts:
 	./scripts/tests/tree_sitter_generated_test.sh
 	./scripts/tests/native_platform_ci_plan_test.sh
 	./scripts/tests/ci_merge_group_proof_test.sh
+	./scripts/tests/e2e_workflow_trigger_test.sh
 	./scripts/tests/changelog_fragment_check_test.sh
 	./scripts/tests/release_ship_fragment_guard_test.sh
 	./scripts/tests/release_ship_tag_push_idempotent_test.sh
