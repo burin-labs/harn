@@ -891,3 +891,25 @@ fn wait_rechecks_after_cross_thread_release_without_polling() {
     let receipt = waiter.join().unwrap();
     assert_eq!(receipt.status, HostLeaseAcquireStatus::Acquired);
 }
+
+#[test]
+fn wait_notifications_use_a_dedicated_signal_not_sqlite_activity() {
+    let temp = TempDir::new().unwrap();
+    let store = store(&temp);
+
+    assert_ne!(store.wake_path, store.db_path);
+    assert!(store.wake_path.is_file());
+    assert_eq!(store.wake_path.parent(), Some(store.root()));
+
+    let before = std::fs::read(&store.wake_path).unwrap();
+    let acquired = store.try_acquire(request("codex-0")).unwrap();
+    let handle = acquired.handle.unwrap();
+    assert!(
+        store
+            .release(&handle.host, &handle.lease_id)
+            .unwrap()
+            .released
+    );
+    let after = std::fs::read(&store.wake_path).unwrap();
+    assert_ne!(after, before);
+}
