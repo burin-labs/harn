@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "metric": "build_step_wall_seconds",
+  "baseline": {
+    "version": "0.10.65",
+    "run_id": "31288092986",
+    "url": "https://github.com/burin-labs/harn/actions/runs/31288092986",
+    "observed_at": "2026-08-09T01:21:09Z",
+    "note": "Cold-ish version-only release fanout before macOS/Windows compiler-cache parity."
+  },
+  "targets": [
+    {
+      "target": "aarch64-unknown-linux-gnu",
+      "baseline_seconds": 909,
+      "warn_seconds": 909,
+      "budget_seconds": 1200
+    },
+    {
+      "target": "x86_64-unknown-linux-gnu",
+      "baseline_seconds": 1044,
+      "warn_seconds": 1044,
+      "budget_seconds": 1350
+    },
+    {
+      "target": "x86_64-apple-darwin",
+      "baseline_seconds": 1948,
+      "warn_seconds": 1948,
+      "budget_seconds": 2400
+    },
+    {
+      "target": "aarch64-apple-darwin",
+      "baseline_seconds": 2024,
+      "warn_seconds": 2024,
+      "budget_seconds": 2500
+    },
+    {
+      "target": "x86_64-pc-windows-msvc",
+      "baseline_seconds": 2020,
+      "warn_seconds": 2020,
+      "budget_seconds": 2500
+    }
+  ]
+}

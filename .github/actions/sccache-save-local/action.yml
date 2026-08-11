@@ -1,0 +1,28 @@
+name: Save local sccache directory
+description: >
+  Persist a bounded local SCCACHE_DIR after a compile lane. Used only when the
+  setup path restored via local-cache; sticky-disk lanes do not need this.
+  Prunes older generations for the same family before saving so the blob store
+  stays inside the repository Actions cache budget.
+
+inputs:
+  cache-key:
+    description: Stable lane identity matching the earlier local-cache restore.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Prune superseded local sccache generations
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        HARN_CACHE_FAMILY_PREFIX: ${{ github.repository }}-sccache-local-${{ inputs.cache-key }}-${{ runner.os }}-${{ runner.arch }}-
+      run: ./scripts/prune_ci_cache_generations.sh --family-prefix "$HARN_CACHE_FAMILY_PREFIX"
+
+    - name: Save local sccache directory
+      uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
+      continue-on-error: true
+      with:
+        path: ~/.cache/sccache
+        key: ${{ github.repository }}-sccache-local-${{ inputs.cache-key }}-${{ runner.os }}-${{ runner.arch }}-${{ github.sha }}

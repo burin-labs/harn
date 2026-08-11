@@ -115,7 +115,8 @@ pipeline test_release_runner_policy_selects_targeted_fast_capacity(harness: Harn
         runner: "blacksmith-12vcpu-macos-15",
         rust_cache_broad_restore_prefix: "v0-rust-release-x86_64-apple-darwin-Darwin-x64-",
         release_codegen_units: 16,
-        use_sccache: "false",
+        use_sccache: "true",
+        sccache_backend: "sticky",
       },
     ],
   )
@@ -171,6 +172,9 @@ pipeline test_release_runner_policy_rejects_unsafe_requests(harness: Harness, ta
                 // Stringly-typed: scripts/release_runner_matrix.sh compares it as text,
                 // so "false" here is the string, not a boolean.
                 use_sccache: schema_field(schema_enum(["true", "false"])),
+                sccache_backend: schema_field(
+                  schema_enum(["sticky", "local", "install", "none"]),
+                ),
                 runners: schema_field(schema_dict(schema_string())),
               },
               {additional_properties: true},
