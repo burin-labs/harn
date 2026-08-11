@@ -493,7 +493,15 @@ description = "Connector capability parity matrix doc generated from package man
 gen = "gen-connector-matrix"
 check = "check-connector-matrix"
 outputs = ["docs/src/connectors/parity-matrix.md"]
-sources = ["crates/harn-cli/portal/", "crates/harn-modules/"]
+sources = [
+  "crates/harn-cli/portal/",
+  "crates/harn-cli/src/commands/check/connector_matrix.rs",
+  "crates/harn-cli/src/package/manifest.rs",
+  "crates/harn-cli/src/package/manifest/",
+  "crates/harn-cli/src/package/credential_environment.rs",
+  "crates/harn-modules/",
+  "conformance/fixtures/connectors/",
+]
 ci = true
 make_all = true
 

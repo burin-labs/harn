@@ -2490,6 +2490,12 @@ the secret. A connector with several required secrets returns the exact
 `harn connect api-key` command for each target so their values cannot be mixed
 up.
 
+Connectors can declare `credential_environment` mappings from logical secret
+ids to accepted environment-variable names. `harn connect status` then treats
+a declared, non-blank variable as ready even when the local keyring is not
+available. JSON and table output show the variable name but never its value.
+Undeclared variables are ignored.
+
 Stored OAuth tokens are written under connector-friendly secret ids:
 
 - `<provider>/access-token`

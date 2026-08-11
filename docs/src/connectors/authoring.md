@@ -391,6 +391,22 @@ can be `secret`, `command`, `http`, `mcp`, or `resource`; only `secret` and
 declared for hosts and provider-specific validators. `harn connector check`
 fails when setup metadata is missing or malformed.
 
+For an API key that may come from a process environment variable, map the
+logical secret to its accepted names. Harn checks only whether a declared
+variable has a non-blank value. Status output includes its name, never its
+value.
+
+```toml
+credential_environment = [
+  { secret = "example/api-key", environment_names = ["EXAMPLE_API_KEY"] },
+]
+```
+
+Every mapped `secret` must also appear in `required_secrets`. Names must use
+the portable `A_Z`, `0_9`, and `_` environment-variable form. This manifest
+mapping is the connector's source of truth; hosts must not guess names from a
+provider id.
+
 When an `api-key` provider declares exactly one required secret,
 `harn connect <provider>` prompts for that value and stores it at the declared
 secret id. It also accepts `--from-env NAME` and `--value-file PATH`. Providers

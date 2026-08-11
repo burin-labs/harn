@@ -74,6 +74,49 @@ fn package_dir_from_anchor_finds_manifest_for_nested_file() {
 }
 
 #[test]
+fn connector_credential_environment_validation_is_bounded_and_secret_scoped() {
+    let valid = package::ProviderSetupManifest {
+        required_secrets: vec!["echo/api-token".to_string()],
+        credential_environment: vec![package::ConnectorCredentialEnvironmentManifest {
+            secret: "echo/api-token".to_string(),
+            environment_names: vec!["ECHO_API_TOKEN".to_string()],
+        }],
+        ..package::ProviderSetupManifest::default()
+    };
+    let issues = package::credential_environment_issues(&valid);
+    assert!(issues.is_empty(), "issues={issues:?}");
+
+    let invalid = package::ProviderSetupManifest {
+        required_secrets: vec!["echo/api-token".to_string(), "echo/other-token".to_string()],
+        credential_environment: vec![
+            package::ConnectorCredentialEnvironmentManifest {
+                secret: "echo/undeclared".to_string(),
+                environment_names: vec!["bad-name".to_string(), "SHARED_TOKEN".to_string()],
+            },
+            package::ConnectorCredentialEnvironmentManifest {
+                secret: "echo/undeclared".to_string(),
+                environment_names: vec!["DUPLICATE".to_string(), "DUPLICATE".to_string()],
+            },
+            package::ConnectorCredentialEnvironmentManifest {
+                secret: "echo/other-token".to_string(),
+                environment_names: vec!["SHARED_TOKEN".to_string()],
+            },
+        ],
+        ..package::ProviderSetupManifest::default()
+    };
+    let joined = package::credential_environment_issues(&invalid)
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(joined.contains("must also appear in required_secrets"));
+    assert!(joined.contains("repeats secret 'echo/undeclared'"));
+    assert!(joined.contains("name 'bad-name' must use uppercase"));
+    assert!(joined.contains("repeats environment name 'DUPLICATE'"));
+    assert!(joined.contains("name 'SHARED_TOKEN' is assigned to both"));
+}
+
+#[test]
 fn package_gates_share_exact_input_exclusions() {
     let dir = tempfile::tempdir().unwrap();
     for relative in [".harn/workflow-policy", "src/.harn-runs/session"] {

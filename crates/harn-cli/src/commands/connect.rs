@@ -143,6 +143,7 @@ struct ConnectorStatus {
     missing_scopes: Vec<String>,
     required_secrets: Vec<String>,
     missing_secrets: Vec<String>,
+    credential_environment: Vec<package::ConnectorCredentialEnvironmentManifest>,
     #[serde(skip_serializing_if = "Option::is_none")]
     secret_id: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -175,6 +176,7 @@ struct ConnectSetupPlan {
     flow: Option<String>,
     required_scopes: Vec<String>,
     required_secrets: Vec<String>,
+    credential_environment: Vec<package::ConnectorCredentialEnvironmentManifest>,
     setup_command: Vec<String>,
     validation_command: Vec<String>,
     health_checks: Vec<package::ConnectorHealthCheckManifest>,

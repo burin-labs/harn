@@ -215,6 +215,9 @@ capabilities = ["webhook"]
 auth_type = "api-key"
 flow = "api-key"
 required_secrets = ["acme/api-key"]
+credential_environment = [
+  { secret = "acme/api-key", environment_names = ["ACME_API_KEY"] },
+]
 setup_command = ["harn", "connect", "api-key", "--connector", "acme", "--secret-id", "acme/api-key"]
 validation_command = ["harn", "connect", "status", "--connector", "acme", "--json"]
 

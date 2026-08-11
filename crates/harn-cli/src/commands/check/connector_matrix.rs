@@ -7,8 +7,8 @@ use serde::Serialize;
 use crate::cli::CheckOutputFormat;
 use crate::json_envelope::{to_string_pretty, JsonEnvelope};
 use crate::package::{
-    find_nearest_manifest_dir, normalize_connector_capability, read_manifest_from_path,
-    ConnectorCapabilities, Manifest,
+    credential_environment_names, find_nearest_manifest_dir, normalize_connector_capability,
+    read_manifest_from_path, ConnectorCapabilities, Manifest,
 };
 
 pub(crate) const CONNECTOR_MATRIX_SCHEMA_VERSION: u32 = 1;
@@ -25,6 +25,7 @@ pub(crate) struct ConnectorCapabilityMatrixRow {
     pub repository: Option<String>,
     pub auth_type: String,
     pub required_secrets: Vec<String>,
+    pub credential_environment_names: Vec<String>,
     pub setup_command: Vec<String>,
     pub validation_command: Vec<String>,
     pub fixture_count: usize,
@@ -102,8 +103,8 @@ pub(crate) fn generate_markdown(rows: &[ConnectorCapabilityMatrixRow]) -> String
         "This table is generated from connector package manifests. A checked feature means the package declares support for that connector surface; missing support highlights either an intentional scope boundary or a package gap.\n\n",
     );
     out.push_str("Regenerate with `make gen-connector-matrix` and verify with `make check-connector-matrix`.\n\n");
-    out.push_str("| Provider | Package version | Harn floor | Auth | Secrets | Setup | Validate | Package gate | Capabilities |\n");
-    out.push_str("|---|---|---|---|---|---|---|---|---|\n");
+    out.push_str("| Provider | Package version | Harn floor | Auth | Secrets | Environment | Setup | Validate | Package gate | Capabilities |\n");
+    out.push_str("|---|---|---|---|---|---|---|---|---|---|\n");
     for row in rows {
         let capabilities = [
             ("webhook", row.webhook),
@@ -118,13 +119,14 @@ pub(crate) fn generate_markdown(rows: &[ConnectorCapabilityMatrixRow]) -> String
         .collect::<Vec<_>>()
         .join(", ");
         out.push_str(&format!(
-            "| `{}` | {} `{}` | `{}` | `{}` | {} | `{}` | `{}` | `harn package verify . --provider {}` ({} fixtures) | {} |\n",
+            "| `{}` | {} `{}` | `{}` | `{}` | {} | {} | `{}` | `{}` | `harn package verify . --provider {}` ({} fixtures) | {} |\n",
             row.provider,
             package_cell(row),
             row.package_version,
             row.harn_version,
             row.auth_type,
             markdown_list(&row.required_secrets),
+            markdown_list(&row.credential_environment_names),
             shell_command(&row.setup_command),
             shell_command(&row.validation_command),
             row.provider,
@@ -330,6 +332,7 @@ fn row_from_provider(
 ) -> ConnectorCapabilityMatrixRow {
     let capabilities = provider.capabilities;
     let setup = provider.setup.clone().unwrap_or_default();
+    let credential_environment_names = credential_environment_names(&setup);
     let fixtures = fixtures
         .iter()
         .filter(|fixture| fixture.provider == provider.id)
@@ -342,6 +345,7 @@ fn row_from_provider(
         repository,
         auth_type: setup.auth_type.unwrap_or_else(|| "unspecified".to_string()),
         required_secrets: setup.required_secrets,
+        credential_environment_names,
         setup_command: setup.setup_command,
         validation_command: setup.validation_command,
         fixture_count: fixtures.len(),
@@ -550,6 +554,7 @@ capabilities = { webhook = true, oauth = true, rate_limit = true }
             repository: None,
             auth_type: "api-key".to_string(),
             required_secrets: vec!["acme/token".to_string()],
+            credential_environment_names: vec!["ACME_TOKEN".to_string()],
             setup_command: vec![
                 "harn".to_string(),
                 "connect".to_string(),
@@ -578,7 +583,10 @@ capabilities = { webhook = true, oauth = true, rate_limit = true }
         let markdown = generate_markdown(&rows);
         assert!(markdown.contains("Connector parity matrix"));
         assert!(markdown.contains("Source of truth"));
-        assert!(markdown.contains("| Provider | Package version | Harn floor | Auth |"));
+        assert!(markdown.contains(
+            "| Provider | Package version | Harn floor | Auth | Secrets | Environment |"
+        ));
+        assert!(markdown.contains("ACME_TOKEN"));
         assert!(markdown.contains("`harn-acme-connector` `0.1.0`"));
         assert!(markdown.contains("`harn connect status --connector acme`"));
         assert!(markdown.contains("`harn package verify . --provider acme` (3 fixtures)"));
