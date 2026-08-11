@@ -1271,9 +1271,10 @@ jobs:
           # sccache may emit duplicate summary lines; take the first integer only
           # so bash 3.2 arithmetic on macOS runners cannot see a multiline value.
           first_stat() {
-            awk -v key="$1" '$0 ~ ("^" key "[[:space:]]") { print $NF; exit } END { if (NR == 0) print 0 }' "$stats_file" \
-              | tr -cd '0-9\n' \
-              | head -n 1
+            awk -v key="$1" '
+              $0 ~ ("^" key "[[:space:]]") { print $NF; found=1; exit }
+              END { if (!found) print 0 }
+            ' "$stats_file" | tr -cd '0-9\n' | head -n 1
           }
           compile_requests="$(first_stat "Compile requests")"
           cache_hits="$(first_stat "Cache hits")"
