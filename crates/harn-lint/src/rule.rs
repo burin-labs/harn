@@ -260,7 +260,10 @@ impl Rule for ApiDesign {
             crate::rules::api_design::check_api_design(
                 source,
                 program,
-                ctx.connector_runtime_module,
+                crate::rules::api_design::RuntimeModuleContext::for_source(
+                    ctx.file_path,
+                    ctx.connector_runtime_module,
+                ),
                 out,
             );
         }

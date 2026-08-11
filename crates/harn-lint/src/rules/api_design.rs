@@ -7,7 +7,7 @@
 //! four or more same-typed positional values should use a named closed record
 //! so call sites state which value is which.
 
-use std::collections::BTreeSet;
+use std::{collections::BTreeSet, path::Path};
 
 use harn_builtin_meta::CapabilityId;
 use harn_lexer::{FixEdit, Span};
@@ -33,6 +33,39 @@ pub struct CapabilityAttenuation {
     pub capabilities: BTreeSet<CapabilityId>,
 }
 
+/// Package and source facts that identify host-entered module exports.
+///
+/// Keep these facts together so diagnostics and whole-program repair cannot
+/// disagree about which public signatures a runtime owns.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct RuntimeModuleContext {
+    connector_module: bool,
+    mcp_module: bool,
+}
+
+impl RuntimeModuleContext {
+    /// Build runtime-module context from the source path and package manifest.
+    #[must_use]
+    pub fn for_source(path: Option<&Path>, connector_module: bool) -> Self {
+        let mcp_module = path
+            .and_then(Path::file_name)
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.ends_with(".mcp.harn"));
+        Self {
+            connector_module,
+            mcp_module,
+        }
+    }
+
+    #[cfg(test)]
+    fn mcp() -> Self {
+        Self {
+            mcp_module: true,
+            ..Self::default()
+        }
+    }
+}
+
 /// The callables a runtime or host framework enters directly.
 ///
 /// The signatures of these are a contract with a caller no source file in this
@@ -51,6 +84,9 @@ pub struct RuntimeBoundaries {
     /// Whether this module is a connector, whose runtime exports are entered
     /// by the connector ABI rather than by local callers.
     connector_module: bool,
+    /// Whether public functions in this source are tools entered by the MCP
+    /// server runtime rather than ordinary source callers.
+    mcp_module: bool,
 }
 
 /// Declares that an embedding host, not a caller in this program, supplies a
@@ -73,10 +109,10 @@ const HOST_ENTRY_ATTRIBUTE: &str = "host_entry";
 impl RuntimeBoundaries {
     /// Collect the boundary set for a parsed module.
     ///
-    /// `declared_connector_module` is the package manifest's answer, and it
-    /// wins. See the note on the fallback inference below.
+    /// `module_context` contains the source and package facts that syntax alone
+    /// cannot prove. A declared connector wins over fallback inference.
     #[must_use]
-    pub fn collect(program: &[SNode], declared_connector_module: bool) -> Self {
+    pub fn collect(program: &[SNode], module_context: RuntimeModuleContext) -> Self {
         let mut callbacks = BTreeSet::new();
         let mut host_entries = BTreeSet::new();
         let mut public_functions = BTreeSet::new();
@@ -119,7 +155,7 @@ impl RuntimeBoundaries {
         // attenuable, so `harn fix` rewrites `normalize_inbound` into a
         // signature the connector ABI rejects. The inference stays for files
         // linted with no package context, where nothing can declare anything.
-        let connector_module = declared_connector_module
+        let connector_module = module_context.connector_module
             || harn_vm::connectors::harn_module::abi::metadata_exports()
                 .iter()
                 .all(|name| public_functions.contains(*name));
@@ -127,6 +163,7 @@ impl RuntimeBoundaries {
             callbacks,
             host_entries,
             connector_module,
+            mcp_module: module_context.mcp_module,
         }
     }
 
@@ -152,10 +189,12 @@ impl RuntimeBoundaries {
         let connector_boundary = self.connector_module
             && is_pub
             && harn_vm::connectors::harn_module::abi::is_runtime_export(name);
+        let mcp_boundary = self.mcp_module && is_pub;
         name == "main"
             || attributed_boundary
             || trigger_boundary
             || connector_boundary
+            || mcp_boundary
             || self.callbacks.contains(name)
             || self.host_entries.contains(name)
     }
@@ -201,9 +240,9 @@ pub fn runtime_supplies_arguments(outer: &SNode) -> bool {
 pub fn capability_attenuations(
     source: &str,
     program: &[SNode],
-    connector_runtime_module: bool,
+    module_context: RuntimeModuleContext,
 ) -> Vec<CapabilityAttenuation> {
-    let boundaries = RuntimeBoundaries::collect(program, connector_runtime_module);
+    let boundaries = RuntimeBoundaries::collect(program, module_context);
     let mut attenuations = Vec::new();
     for outer in program {
         let attributed = root_harness_boundary_attribute(outer);
@@ -240,12 +279,12 @@ pub fn capability_attenuations(
 pub(crate) fn check_api_design(
     source: &str,
     program: &[SNode],
-    connector_runtime_module: bool,
+    module_context: RuntimeModuleContext,
     diagnostics: &mut Vec<LintDiagnostic>,
 ) {
-    let attenuations = capability_attenuations(source, program, connector_runtime_module);
+    let attenuations = capability_attenuations(source, program, module_context);
     let module_names = module_level_names(program);
-    let boundaries = RuntimeBoundaries::collect(program, connector_runtime_module);
+    let boundaries = RuntimeBoundaries::collect(program, module_context);
     for outer in program {
         let attributed = root_harness_boundary_attribute(outer);
         // Naming asks the broader question: a flow predicate's handle is
@@ -627,14 +666,19 @@ mod tests {
         let tokens = Lexer::new(source).tokenize().expect("lex");
         let program = Parser::new(tokens).parse().expect("parse");
         let mut diagnostics = Vec::new();
-        check_api_design(source, &program, false, &mut diagnostics);
+        check_api_design(
+            source,
+            &program,
+            RuntimeModuleContext::default(),
+            &mut diagnostics,
+        );
         diagnostics
     }
 
     fn attenuated(source: &str) -> Vec<BTreeSet<CapabilityId>> {
         let tokens = Lexer::new(source).tokenize().expect("lex");
         let program = Parser::new(tokens).parse().expect("parse");
-        capability_attenuations(source, &program, false)
+        capability_attenuations(source, &program, RuntimeModuleContext::default())
             .into_iter()
             .map(|attenuation| attenuation.capabilities)
             .collect()
@@ -643,10 +687,28 @@ mod tests {
     fn attenuated_in_declared_connector(source: &str) -> Vec<BTreeSet<CapabilityId>> {
         let tokens = Lexer::new(source).tokenize().expect("lex");
         let program = Parser::new(tokens).parse().expect("parse");
-        capability_attenuations(source, &program, true)
-            .into_iter()
-            .map(|attenuation| attenuation.capabilities)
-            .collect()
+        capability_attenuations(
+            source,
+            &program,
+            RuntimeModuleContext::for_source(None, true),
+        )
+        .into_iter()
+        .map(|attenuation| attenuation.capabilities)
+        .collect()
+    }
+
+    #[test]
+    fn public_mcp_tools_keep_runtime_owned_harness_signatures() {
+        let source = "pub fn search(harness: Harness) { return harness.net.get(\"https://example.com\") }\n\nfn helper(harness: Harness) { return harness.clock.now_ms() }\n";
+        let tokens = Lexer::new(source).tokenize().expect("lex");
+        let program = Parser::new(tokens).parse().expect("parse");
+        let attenuations = capability_attenuations(source, &program, RuntimeModuleContext::mcp());
+
+        assert_eq!(attenuations.len(), 1, "only the private helper may narrow");
+        assert_eq!(
+            attenuations[0].capabilities,
+            BTreeSet::from([CapabilityId::Clock])
+        );
     }
 
     /// The connector ABI pins every runtime export to a root `Harness`.
