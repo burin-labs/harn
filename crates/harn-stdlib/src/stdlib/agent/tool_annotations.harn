@@ -68,6 +68,17 @@ const __AGENT_READ_ONLY_TOOL_KINDS = ["read", "search", "think", "fetch"]
 
 const __AGENT_READ_ONLY_SIDE_EFFECTS = ["none", "read_only"]
 
+fn __agent_tool_side_effect_is_observational(kind: string, level: string) -> bool {
+  if contains(__AGENT_READ_ONLY_SIDE_EFFECTS, level) {
+    return true
+  }
+  // `network` describes where an operation runs, not whether it changes the
+  // remote system. ACP's `fetch` kind supplies that missing mutation fact.
+  // Keep `execute + network` closed so sends, purchases, and other remote
+  // actions still require write access.
+  return contains(__AGENT_READ_ONLY_TOOL_KINDS, kind) && level == "network"
+}
+
 /**
  * Classify one registry entry through the ACP-aligned annotation vocabulary.
  * Missing or unknown annotations fail closed as mutating.
@@ -96,7 +107,7 @@ pub fn agent_tool_is_read_only(entry, policy = nil, tool_name = "") -> bool {
   if kind != "" && !contains(__AGENT_READ_ONLY_TOOL_KINDS, kind) {
     return false
   }
-  if level != "" && !contains(__AGENT_READ_ONLY_SIDE_EFFECTS, level) {
+  if level != "" && !__agent_tool_side_effect_is_observational(kind, level) {
     return false
   }
   if read_only_hint != nil && !(type_of(read_only_hint) == "bool" && read_only_hint) {

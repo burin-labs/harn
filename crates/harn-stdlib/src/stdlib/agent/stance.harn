@@ -50,7 +50,11 @@ fn __stance_entry_name(entry) {
 }
 
 fn __stance_read_only_names(registry, policy, hard_keep, escape_tool) {
-  let names = [escape_tool]
+  let names = if escape_tool == "" {
+    []
+  } else {
+    [escape_tool]
+  }
   for name in hard_keep ?? [] {
     if !contains(names, name) {
       names = names.appending(name)
@@ -303,10 +307,14 @@ pub fn agent_stance_apply(turn_opts) {
   if len(names ?? []) == 0 {
     return turn_opts
   }
+  // Tool search, skill activation, and MCP mounting can inject tools after the
+  // stance is prepared. Reclassify the current registry so newly mounted,
+  // explicitly observational tools remain usable while mutations stay closed.
+  const allowed = __stance_read_only_names(turn_opts?.tools, turn_opts?.policy, names, "")
   return turn_opts
     + {
-    tools: __tool_surface_filter_registry(turn_opts?.tools, names),
-    policy: __tool_surface_policy_tools(turn_opts?.policy, names),
+    tools: __tool_surface_filter_registry(turn_opts?.tools, allowed),
+    policy: __tool_surface_policy_tools(turn_opts?.policy, allowed),
   }
 }
 
