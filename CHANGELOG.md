@@ -9,6 +9,22 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.81
+
+### Added
+
+- The reusable runtime bump can opt into publishing refresh- or validation-failed
+  changes as a leased repair pull request with auto-merge disabled.
+
+### Fixed
+
+- Reusable Harn bump workflows now normalize behavior-preserving migration fallout before consumer validation,
+  including positional-arity-safe repairs for newly unused parameters.
+- Consume trailing managed-supply receipt frames after an OpenAI-compatible
+  provider finish event so streamed identity, usage, and cost remain authoritative.
+- Make the code-index background-warm persistence test join the owning
+  single-flight completion signal instead of racing the earlier in-memory update.
+
 ## v0.10.80
 
 ### Fixed
