@@ -16,6 +16,26 @@ fn remote(harness: Harness) {
   )
 }
 
+fn pull(head_oid: string) {
+  return {
+    number: 42,
+    title: "Bump Harn runtime",
+    state: "open",
+    html_url: "https://github.com/octo-org/octo-repo/pull/42",
+    base: {
+      ref: "main",
+      sha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      repo: {full_name: "octo-org/octo-repo", owner: {login: "octo-org"}},
+    },
+    head: {
+      ref: "automation/bump-harn-runtime",
+      sha: head_oid,
+      repo: {full_name: "octo-org/octo-repo", owner: {login: "octo-org"}},
+    },
+    auto_merge: {merge_method: "squash"},
+  }
+}
+
 pipeline test_release_projection_is_closed_and_exact(harness: Harness, task) {
   harness.testing.http_mock_clear()
   const tag = "v0.10.53"
@@ -83,30 +103,7 @@ pipeline test_open_pull_projection_retains_publication_leases(harness: Harness, 
   harness.testing.http_mock(
     "GET",
     url,
-    {
-      status: 200,
-      body: json_stringify(
-        [
-          {
-            number: 42,
-            title: "Bump Harn runtime",
-            state: "open",
-            html_url: "https://github.com/octo-org/octo-repo/pull/42",
-            base: {
-              ref: "main",
-              sha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-              repo: {full_name: "octo-org/octo-repo", owner: {login: "octo-org"}},
-            },
-            head: {
-              ref: "automation/bump-harn-runtime",
-              sha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-              repo: {full_name: "octo-org/octo-repo", owner: {login: "octo-org"}},
-            },
-            auto_merge: {merge_method: "squash"},
-          },
-        ],
-      ),
-    },
+    {status: 200, body: json_stringify([pull("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")])},
   )
   assert_eq(
     remote(harness).find_bump_pr(),
@@ -125,6 +122,59 @@ pipeline test_open_pull_projection_retains_publication_leases(harness: Harness, 
     harness.testing.http_mock_calls().map({ call -> {method: call.method, url: call.url} })
       .to_list(),
     [{method: "GET", url: url}],
+  )
+  harness.testing.http_mock_clear()
+}
+
+pipeline test_pull_upsert_waits_for_published_head_before_mutation(harness: Harness, task) {
+  harness.testing.http_mock_clear()
+  const previous_head_oid = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  const expected_head_oid = "cccccccccccccccccccccccccccccccccccccccc"
+  const list_url = API
+    + "/repos/octo-org/octo-repo/pulls?state=open&head=octo-org%3Aautomation%2Fbump-harn-runtime&base=main&per_page=2"
+  const pull_url = API + "/repos/octo-org/octo-repo/pulls/42"
+  harness.testing.http_mock(
+    "GET",
+    list_url,
+    {
+      responses: [
+        {status: 200, body: json_stringify([pull(previous_head_oid)])},
+        {status: 200, body: json_stringify([pull(expected_head_oid)])},
+      ],
+    },
+  )
+  harness.testing.http_mock(
+    "PATCH",
+    pull_url,
+    {status: 200, body: json_stringify(pull(expected_head_oid))},
+  )
+  const existing = {
+    number: 42,
+    head_oid: previous_head_oid,
+    base_ref: "main",
+    base_oid: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    auto_merge_enabled: true,
+    auto_merge_method: "SQUASH",
+    url: "https://github.com/octo-org/octo-repo/pull/42",
+    state: "open",
+  }
+  assert_eq(
+    remote(harness).upsert_pr(existing, expected_head_oid),
+    {
+      number: 42,
+      head_oid: expected_head_oid,
+      url: "https://github.com/octo-org/octo-repo/pull/42",
+      created: false,
+    },
+  )
+  assert_eq(
+    harness.testing.http_mock_calls().map({ call -> {method: call.method, url: call.url} })
+      .to_list(),
+    [
+      {method: "GET", url: list_url},
+      {method: "GET", url: list_url},
+      {method: "PATCH", url: pull_url},
+    ],
   )
   harness.testing.http_mock_clear()
 }
