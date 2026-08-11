@@ -25,6 +25,7 @@ mod discarded_result;
 mod execution_safety;
 mod program;
 mod public_api_types;
+mod unused_parameters;
 mod walk;
 
 use discarded_result::BlockKind;
@@ -1230,22 +1231,7 @@ impl<'a> Linter<'a> {
             }
         }
 
-        for decl in &self.param_declarations {
-            if decl.name.starts_with('_') {
-                continue;
-            }
-            if !self.references.contains(&decl.name) {
-                self.diagnostics.push(LintDiagnostic {
-                    code: Code::LintUnusedParameter,
-                    rule: "unused-parameter".into(),
-                    message: format!("parameter `{}` is declared but never used", decl.name),
-                    span: decl.span,
-                    severity: LintSeverity::Warning,
-                    suggestion: Some("replace the parameter name with `_`".to_string()),
-                    fix: None,
-                });
-            }
-        }
+        self.finalize_unused_parameters();
 
         for import in &self.imports {
             // `pub import { ... } from "..."` re-exports the listed names as

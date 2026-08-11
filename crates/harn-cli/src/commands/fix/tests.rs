@@ -203,6 +203,31 @@ fn plan_reports_repairable_diagnostics_without_writing() {
 }
 
 #[test]
+fn behavior_preserving_apply_keeps_unused_parameter_arity() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let script = temp.path().join("generated_capability.harn");
+    fs::write(
+        &script,
+        "fn probe(tools: HarnessTools, git) { return git([\"status\"]) }\n",
+    )
+    .unwrap();
+
+    let result = apply_repairs(&script, RepairSafety::BehaviorPreserving, false).unwrap();
+    assert!(
+        result
+            .applied
+            .iter()
+            .any(|repair| repair.repair_id == "bindings/rename-unused"),
+        "the safe repair pass must consume migration fallout: {result:#?}"
+    );
+    assert_eq!(
+        fs::read_to_string(script).unwrap(),
+        "fn probe(_tools: HarnessTools, git) { return git([\"status\"]) }\n",
+        "underscore prefixing must preserve the parameter's positional slot",
+    );
+}
+
+#[test]
 fn plan_skips_invalid_files_and_keeps_repairing_valid_files() {
     let temp = tempfile::TempDir::new().unwrap();
     let valid = temp.path().join("valid.harn");

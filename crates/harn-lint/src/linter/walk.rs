@@ -165,7 +165,7 @@ impl<'a> Linter<'a> {
                 let saved_loop_depth = self.loop_depth;
                 self.loop_depth = 0;
                 for p in params {
-                    self.declare_parameter(&p.name, snode.span);
+                    self.declare_parameter(&p.name, p.span);
                 }
                 self.return_type_stack.push(return_type.clone());
                 self.harness_param_stack
@@ -209,7 +209,7 @@ impl<'a> Linter<'a> {
                 let saved_loop_depth = self.loop_depth;
                 self.loop_depth = 0;
                 for p in params {
-                    self.declare_parameter(&p.name, snode.span);
+                    self.declare_parameter(&p.name, p.span);
                 }
                 self.return_type_stack.push(return_type.clone());
                 self.harness_param_stack
@@ -1013,7 +1013,7 @@ impl<'a> Linter<'a> {
                 let saved_loop_depth = self.loop_depth;
                 self.loop_depth = 0;
                 for p in params {
-                    self.declare_parameter(&p.name, snode.span);
+                    self.declare_parameter(&p.name, p.span);
                 }
                 self.lint_param_default_values(params);
                 self.enter_long_running_body(body);

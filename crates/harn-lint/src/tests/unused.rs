@@ -199,6 +199,16 @@ greet("hi", "there")
         !has_rule(&diags, "unused-variable"),
         "unused fn param should not trigger unused-variable: {diags:?}"
     );
+    let result = apply_fixes(
+        "pipeline default(task) {\nfn greet(name, unused: HarnessTools) {\n    log(name)\n}\ngreet(\"hi\", {})\n}",
+        &lint_source(
+            "pipeline default(task) {\nfn greet(name, unused: HarnessTools) {\n    log(name)\n}\ngreet(\"hi\", {})\n}",
+        ),
+    );
+    assert!(
+        result.contains("fn greet(name, _unused: HarnessTools)"),
+        "unused parameter repair must preserve positional arity: {result}"
+    );
 }
 
 #[test]

@@ -2543,7 +2543,7 @@ result)
 unused variable lint
 
 - **Repair:** `bindings/rename-unused` &nbsp;·&nbsp; **Safety:** `behavior-preserving`
-- Use the `_` discard binding for an unused binding
+- Mark an unused binding without changing callable arity
 
 #### How to fix
 
@@ -2559,7 +2559,7 @@ unused variable lint
 unused pattern binding lint
 
 - **Repair:** `bindings/rename-unused` &nbsp;·&nbsp; **Safety:** `behavior-preserving`
-- Use the `_` discard binding for an unused binding
+- Mark an unused binding without changing callable arity
 
 #### How to fix
 
@@ -2573,7 +2573,7 @@ unused pattern binding lint
 unused parameter lint
 
 - **Repair:** `bindings/rename-unused` &nbsp;·&nbsp; **Safety:** `behavior-preserving`
-- Use the `_` discard binding for an unused binding
+- Mark an unused binding without changing callable arity
 
 #### How to fix
 

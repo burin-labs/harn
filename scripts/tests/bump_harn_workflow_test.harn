@@ -85,8 +85,10 @@ fn bump_workflow_errors(workflow, text: string) -> list<string> {
   }
   const command = to_string(run?.run ?? "")
   const migration = "harn fix --apply --safety surface-changing --capability-migrations-only ."
+  const safe_repairs = "harn fix --apply --safety behavior-preserving ."
   for required in [
     migration,
+    safe_repairs,
     "eval \"$HARN_BUMP_REFRESH_COMMAND\"",
     "> \"$HARN_BUMP_REFRESH_SENTINEL\"",
     "test -f \"$HARN_BUMP_REFRESH_SENTINEL\"",
@@ -99,6 +101,12 @@ fn bump_workflow_errors(workflow, text: string) -> list<string> {
   }
   if command.index_of(migration) >= command.index_of("eval \"$HARN_BUMP_REFRESH_COMMAND\"") {
     errors = errors + ["target capability migrations must precede the caller refresh"]
+  }
+  if command.index_of(migration) >= command.index_of(safe_repairs) {
+    errors = errors + ["behavior-preserving repairs must run after target capability migrations"]
+  }
+  if command.index_of(safe_repairs) >= command.index_of("eval \"$HARN_BUMP_REFRESH_COMMAND\"") {
+    errors = errors + ["behavior-preserving repairs must precede the caller refresh"]
   }
   if text.contains("HARN_BUMP_REFRESH: $" + "{{ inputs.refresh-command }}") {
     errors = errors + ["refresh-command must not bypass the fail-closed sentinel wrapper"]
