@@ -130,6 +130,29 @@ echo "pack strips workspace members and incremental output"
 run_pack
 test -f "$tmpdir/out/staging/manifest"
 test -f "$tmpdir/out/staging/target.tar.gz"
+
+echo "pack tolerates Windows drive-letter staging paths"
+drive_staging="$tmpdir/D:drive-staging"
+mkdir -p "$(dirname "$drive_staging")"
+# Recreate a populated target for the second pack.
+mkdir -p "$tmpdir/target/debug/deps" "$tmpdir/target/debug/.fingerprint" "$tmpdir/target/debug/incremental/foo"
+printf 'dep\n' > "$tmpdir/target/debug/deps/libserde-abc123.rlib"
+printf 'ws\n' > "$tmpdir/target/debug/deps/libharn_vm-def456.rlib"
+printf 'ws\n' > "$tmpdir/target/debug/.fingerprint/harn-vm-def456"
+printf 'inc\n' > "$tmpdir/target/debug/incremental/foo/x"
+(
+  cd "$tmpdir/work"
+  env \
+    PATH="$tmpdir/bin:$PATH" \
+    FAKE_TARGET="$tmpdir/target" \
+    FAKE_COMMIT="$commit" \
+    FAKE_RUSTC_IDENTITY="rustc 1.95.0 (fake)" \
+    CARGO_TARGET_DIR="$tmpdir/target" \
+    CARGO_INCREMENTAL=0 \
+    RUSTFLAGS="-D warnings" \
+    "$script" pack "$drive_staging"
+)
+test -f "$drive_staging/target.tar.gz"
 grep -qx "schema=harn.windows_workspace_warm.v1" "$tmpdir/out/staging/manifest"
 grep -qx "producer_commit=${commit}" "$tmpdir/out/staging/manifest"
 if [[ -e "$tmpdir/target/debug/deps/libharn_vm-def456.rlib" ]]; then

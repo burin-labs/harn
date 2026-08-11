@@ -161,7 +161,12 @@ pack() {
   mkdir -p "$staging"
   write_manifest "$staging" "$producer_commit"
   archive="$staging/target.tar.gz"
-  tar -czf "$archive" -C "$target_dir" .
+  # Write the archive via a basename so Git Bash tar does not treat Windows
+  # drive-letter staging paths (D:\a\_temp\...) as remote hosts.
+  (
+    cd "$staging"
+    tar -czf target.tar.gz -C "$target_dir" .
+  )
   bytes="$(wc -c < "$archive" | tr -d ' ')"
   limit="$(max_bundle_bytes)"
   if (( bytes > limit )); then
@@ -199,7 +204,10 @@ restore() {
   mkdir -p "$target_dir"
   # Replace any partial target so restored deps own the tree.
   find "$target_dir" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
-  tar -xzf "$archive" -C "$target_dir"
+  (
+    cd "$(dirname "$archive")"
+    tar -xzf "$(basename "$archive")" -C "$target_dir"
+  )
   printf 'windows_warm_restore=hit\n'
   printf 'windows_warm_restore_producer_commit=%s\n' \
     "$(sed -n 's/^producer_commit=//p' "$manifest")"
