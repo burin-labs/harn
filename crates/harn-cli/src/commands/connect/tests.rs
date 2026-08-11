@@ -259,6 +259,81 @@ async fn status_reports_missing_auth_for_missing_required_secret_chain() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn status_accepts_only_declared_nonempty_credential_environment() {
+    const ENV_NAME: &str = "HARN_TEST_CONNECTOR_STATUS_TOKEN_6530";
+    let _environment = crate::env_guard::ScopedEnvVar::set(ENV_NAME, "test-token");
+    let secrets = harn_vm::connectors::testkit::MemorySecretProvider::empty();
+    let index = ConnectIndex {
+        providers: vec![ConnectIndexEntry {
+            provider: "duffel".to_string(),
+            kind: "api-key".to_string(),
+            secret_id: "duffel/stale-token".to_string(),
+            secret_ids: Vec::new(),
+            expires_at_unix: Some(99),
+            scopes: None,
+            connected_at_unix: 1,
+            last_used_at_unix: None,
+        }],
+    };
+    let mut setup = oauth_setup();
+    setup.auth_type = Some("api_key".to_string());
+    setup.required_scopes = Vec::new();
+    setup.required_secrets = vec!["duffel/test-access-token".to_string()];
+    setup.credential_environment = vec![package::ConnectorCredentialEnvironmentManifest {
+        secret: "duffel/test-access-token".to_string(),
+        environment_names: vec![ENV_NAME.to_string()],
+    }];
+    let config = status_config(setup);
+
+    let status = connector_status(
+        "duffel",
+        Some(&config),
+        &secrets,
+        &index,
+        100,
+        false,
+        Some("keyring unavailable"),
+    )
+    .await;
+
+    assert_eq!(status.status, "healthy");
+    assert!(status.usable);
+    assert!(status.missing_secrets.is_empty());
+    assert_eq!(status.credential_environment.len(), 1);
+    assert_eq!(
+        status.health_checks[0].detail,
+        format!("available from environment:{ENV_NAME}")
+    );
+    let json = serde_json::to_string(&status).expect("status JSON");
+    assert!(json.contains(ENV_NAME));
+    assert!(!json.contains("test-token"));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn status_rejects_empty_declared_credential_environment() {
+    const ENV_NAME: &str = "HARN_TEST_CONNECTOR_STATUS_EMPTY_6530";
+    let _environment = crate::env_guard::ScopedEnvVar::set(ENV_NAME, "   ");
+    let secrets = harn_vm::connectors::testkit::MemorySecretProvider::empty();
+    let index = ConnectIndex::default();
+    let mut setup = oauth_setup();
+    setup.auth_type = Some("api_key".to_string());
+    setup.required_scopes = Vec::new();
+    setup.required_secrets = vec!["duffel/test-access-token".to_string()];
+    setup.credential_environment = vec![package::ConnectorCredentialEnvironmentManifest {
+        secret: "duffel/test-access-token".to_string(),
+        environment_names: vec![ENV_NAME.to_string()],
+    }];
+    let config = status_config(setup);
+
+    let status =
+        connector_status("duffel", Some(&config), &secrets, &index, 100, false, None).await;
+
+    assert_eq!(status.status, "missing_auth");
+    assert!(!status.usable);
+    assert_eq!(status.missing_secrets, ["duffel/test-access-token"]);
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn status_reports_expired_credentials_before_scope_checks() {
     let secrets = harn_vm::connectors::testkit::MemorySecretProvider::empty();
     let index = ConnectIndex {

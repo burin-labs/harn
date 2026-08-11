@@ -27,6 +27,7 @@ const MANIFEST: &str = harn_modules::manifest_walk::MANIFEST_FILENAME;
 const LOCK_FILE: &str = "harn.lock";
 const TRIGGER_RETRY_MAX_LIMIT: u32 = 100;
 
+mod credential_environment;
 pub(crate) mod errors;
 mod extensions;
 mod generations;
@@ -48,6 +49,7 @@ mod validation;
 pub use errors::{PackageError, PackageResult};
 
 pub(crate) use crate::path_policy::PathEntryKind;
+pub use credential_environment::*;
 pub use extensions::*;
 pub(crate) use generations::*;
 pub(crate) use git_cwd::Cwd;

@@ -144,6 +144,7 @@ pub(super) async fn connector_status(
     let recovery = setup.recovery.clone();
     let required_scopes = setup.required_scopes.clone();
     let required_secrets = setup.required_secrets.clone();
+    let credential_environment = setup.credential_environment.clone();
     let entry = index
         .providers
         .iter()
@@ -153,7 +154,12 @@ pub(super) async fn connector_status(
     let mut status = "healthy".to_string();
     let mut reason = "connector is installed and credentials are present".to_string();
 
-    if let Some(error) = credential_backend_error {
+    let environment_covers_required_secrets = !required_secrets.is_empty()
+        && required_secrets.iter().all(|secret| {
+            package::available_process_credential_environment_name(&credential_environment, secret)
+                .is_some()
+        });
+    if let Some(error) = credential_backend_error.filter(|_| !environment_covers_required_secrets) {
         status = "transient_provider_outage".to_string();
         reason = format!("credential backend was unavailable: {error}");
     }
@@ -170,7 +176,7 @@ pub(super) async fn connector_status(
     let secret_id = entry.map(|entry| entry.secret_id.clone());
     let secret_ids = entry.map(normalized_secret_ids).unwrap_or_default();
     let expires_at_unix = entry.and_then(|entry| entry.expires_at_unix);
-    if status == "healthy" {
+    if status == "healthy" && !environment_covers_required_secrets {
         if let Some(expires_at) = expires_at_unix {
             if expires_at <= now {
                 status = "expired_credentials".to_string();
@@ -178,7 +184,7 @@ pub(super) async fn connector_status(
             }
         }
     }
-    if status == "healthy" {
+    if status == "healthy" && !environment_covers_required_secrets {
         if let Some(entry) = entry {
             match parse_secret_id(&entry.secret_id) {
                 Some(id) => match provider.get(&id).await {
@@ -208,6 +214,18 @@ pub(super) async fn connector_status(
 
     if status == "healthy" {
         for secret in &required_secrets {
+            if let Some(environment_name) = package::available_process_credential_environment_name(
+                &credential_environment,
+                secret,
+            ) {
+                health_checks.push(ConnectorHealthStatus {
+                    id: format!("secret:{secret}"),
+                    kind: "secret".to_string(),
+                    status: "pass".to_string(),
+                    detail: format!("available from environment:{environment_name}"),
+                });
+                continue;
+            }
             match parse_secret_id(secret) {
                 Some(id) => match provider.get(&id).await {
                     Ok(_) => health_checks.push(ConnectorHealthStatus {
@@ -290,6 +308,7 @@ pub(super) async fn connector_status(
         missing_scopes,
         required_secrets,
         missing_secrets,
+        credential_environment,
         secret_id,
         secret_ids,
         expires_at_unix,
@@ -311,6 +330,7 @@ pub(super) fn missing_install_status(connector_id: &str) -> ConnectorStatus {
         missing_scopes: Vec::new(),
         required_secrets: Vec::new(),
         missing_secrets: Vec::new(),
+        credential_environment: Vec::new(),
         secret_id: None,
         secret_ids: Vec::new(),
         expires_at_unix: None,
@@ -358,6 +378,7 @@ pub(super) fn connect_setup_plan_at(
             flow: None,
             required_scopes: Vec::new(),
             required_secrets: Vec::new(),
+            credential_environment: Vec::new(),
             setup_command: Vec::new(),
             validation_command: vec![
                 "harn".to_string(),
@@ -416,6 +437,7 @@ pub(super) fn connect_setup_plan_at(
         flow: setup.flow,
         required_scopes: setup.required_scopes,
         required_secrets: setup.required_secrets,
+        credential_environment: setup.credential_environment,
         setup_command: setup.setup_command,
         validation_command: setup.validation_command,
         health_checks: setup.health_checks,
