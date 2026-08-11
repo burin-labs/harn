@@ -18,18 +18,18 @@ pub type WindowsWorkspaceWarmPolicy = {
   job: string,
   retention_days: int,
   max_bytes: int,
-  nextest_version: string,
   dev_drive_size_default: string,
   dev_drive_size_release_certify: string,
 }
 
 pub type CiCachePolicy = {
-  schema_version: 3,
+  schema_version: 4,
   rust_cache_action: "./.github/actions/rust-cache",
   node_cache_action: "./.github/actions/node-cache",
   persistent_ref: "refs/heads/main",
   storage_limit_bytes: int,
   remote_sccache: bool,
+  nextest_version: string,
   windows_workspace_warm: WindowsWorkspaceWarmPolicy,
   writers: list<CiCacheWriter>,
 }
@@ -285,6 +285,10 @@ fn drive_size_schema() {
   return schema_string() + {pattern: "^[1-9][0-9]*GB$"}
 }
 
+fn nextest_version_schema() {
+  return schema_string() + {pattern: "^[0-9]+[.][0-9]+[.][0-9]+$"}
+}
+
 fn windows_workspace_warm_schema() {
   return schema_closed_object(
     {
@@ -294,7 +298,6 @@ fn windows_workspace_warm_schema() {
       job: schema_string() + {pattern: "^[a-z0-9-]+$"},
       retention_days: schema_int() + {minimum: 1, maximum: 90},
       max_bytes: schema_int() + {minimum: 1},
-      nextest_version: schema_string() + {pattern: "^[0-9]+[.][0-9]+[.][0-9]+$"},
       dev_drive_size_default: drive_size_schema(),
       dev_drive_size_release_certify: drive_size_schema(),
     },
@@ -304,12 +307,13 @@ fn windows_workspace_warm_schema() {
 fn policy_schema() {
   return schema_closed_object(
     {
-      schema_version: schema_literal(3),
+      schema_version: schema_literal(4),
       rust_cache_action: schema_literal("./.github/actions/rust-cache"),
       node_cache_action: schema_literal("./.github/actions/node-cache"),
       persistent_ref: schema_literal("refs/heads/main"),
       storage_limit_bytes: schema_int() + {minimum: 1073741824},
       remote_sccache: schema_literal(false),
+      nextest_version: nextest_version_schema(),
       windows_workspace_warm: windows_workspace_warm_schema(),
       writers: schema_list(
         schema_closed_object(
@@ -600,12 +604,13 @@ pub fn release_warm_cache_prune_errors(workflow) -> list<string> {
 fn policy_from_validated(value) -> CiCachePolicy {
   const warm = value.windows_workspace_warm
   return {
-    schema_version: 3,
+    schema_version: 4,
     rust_cache_action: "./.github/actions/rust-cache",
     node_cache_action: "./.github/actions/node-cache",
     persistent_ref: "refs/heads/main",
     storage_limit_bytes: value.storage_limit_bytes,
     remote_sccache: false,
+    nextest_version: value.nextest_version,
     windows_workspace_warm: {
       artifact_name: warm.artifact_name,
       manifest_schema: warm.manifest_schema,
@@ -613,7 +618,6 @@ fn policy_from_validated(value) -> CiCachePolicy {
       job: warm.job,
       retention_days: warm.retention_days,
       max_bytes: warm.max_bytes,
-      nextest_version: warm.nextest_version,
       dev_drive_size_default: warm.dev_drive_size_default,
       dev_drive_size_release_certify: warm.dev_drive_size_release_certify,
     },
@@ -1351,7 +1355,7 @@ pub fn windows_release_certify_warm_errors(
       return step_uses(step).starts_with("taiki-e/install-action@")
         && contains(
         trim(to_string(step?.with?.tool ?? "")),
-        "nextest@${warm.nextest_version}",
+        "nextest@${policy.nextest_version}",
       )
     },
   )
@@ -1359,8 +1363,39 @@ pub fn windows_release_certify_warm_errors(
   if len(nextest_installs) != 1 {
     errors = errors
       + [
-      "${warm.workflow}:${warm.job} must install nextest@${warm.nextest_version} from cache-policy.json",
+      "${warm.workflow}:${warm.job} must install nextest@${policy.nextest_version} from cache-policy.json",
     ]
+  }
+  return errors
+}
+
+/** Every workflow nextest@ pin must match the single cache-policy owner. */
+pub fn nextest_version_errors(policy: CiCachePolicy, workflows: dict) -> list<string> {
+  const expected = "nextest@${policy.nextest_version}"
+  let errors: list<string> = []
+  let installs = 0
+  for workflow in workflows.keys().sorted() {
+    const jobs = workflows[workflow]?.jobs ?? {}
+    for job in jobs.keys().sorted() {
+      for step in jobs[job]?.steps ?? [] {
+        if !step_uses(step).starts_with("taiki-e/install-action@") {
+          continue
+        }
+        const install_tool = trim(to_string(step?.with?.tool ?? ""))
+        if !contains(install_tool, "nextest@") {
+          continue
+        }
+        installs = installs + 1
+        if !contains(install_tool, expected) {
+          errors = errors
+            + ["${workflow}:${job} must install ${expected} from cache-policy.json"]
+        }
+      }
+    }
+  }
+  if installs == 0 {
+    errors = errors
+      + ["at least one workflow must install ${expected} from cache-policy.json"]
   }
   return errors
 }
@@ -2299,6 +2334,7 @@ fn main(harness: Harness) {
     ci_linux_lane_policy_errors(workflows["ci.yml"]),
     windows_shared_cache_errors(workflows["ci.yml"], workflows["windows-nightly.yml"]),
     windows_release_certify_warm_errors(policy, workflows["windows-nightly.yml"]),
+    nextest_version_errors(policy, workflows),
     actions_cache_capacity_errors(policy),
     macos_shared_cache_errors(workflows["ci.yml"], workflows["macos-nightly.yml"]),
   ]
