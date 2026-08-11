@@ -1,5 +1,10 @@
 name: Configure persistent sccache
-description: Give the Blacksmith compile producer a persistent sticky-disk sccache backend.
+description: >
+  Install and enable sccache with an explicit persistence backend. Blacksmith
+  sticky disks are the preferred cross-job store. Hosted runners that cannot
+  mount sticky storage may persist a bounded local SCCACHE_DIR through the
+  Actions cache API as a single blob. The per-object GHA sccache backend stays
+  off either way.
 
 inputs:
   cache-key:
@@ -9,10 +14,35 @@ inputs:
     description: Mount Blacksmith sticky storage for the local sccache directory.
     required: false
     default: "false"
+  local-cache:
+    description: >
+      Restore a bounded local SCCACHE_DIR from the Actions cache before compile.
+      Pair with ./.github/actions/sccache-save-local after the build when saving.
+    required: false
+    default: "false"
+  cache-size:
+    description: sccache local store ceiling (SCCACHE_CACHE_SIZE).
+    required: false
+    default: "2G"
 
 runs:
   using: composite
   steps:
+    - name: Prefer local disk over the per-object GHA sccache backend
+      if: inputs.sticky == 'true' || inputs.local-cache == 'true'
+      shell: bash
+      env:
+        HARN_SCCACHE_CACHE_SIZE: ${{ inputs.cache-size }}
+      run: |
+        set -euo pipefail
+        sccache_dir="${HOME}/.cache/sccache"
+        mkdir -p "$sccache_dir"
+        {
+          echo "SCCACHE_GHA_ENABLED=false"
+          echo "SCCACHE_DIR=${sccache_dir}"
+          echo "SCCACHE_CACHE_SIZE=${HARN_SCCACHE_CACHE_SIZE}"
+        } >> "$GITHUB_ENV"
+
     - name: Mount persistent sccache directory
       if: inputs.sticky == 'true'
       uses: useblacksmith/stickydisk@6d373c96a74cbde0c99fedc5ea5d3a7ba66ba494 # v1.4.0
@@ -20,6 +50,17 @@ runs:
       with:
         key: ${{ github.repository }}-sccache-${{ inputs.cache-key }}-${{ runner.os }}-${{ runner.arch }}
         path: ~/.cache/sccache
+
+    - name: Restore local sccache directory
+      if: inputs.local-cache == 'true'
+      uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
+      continue-on-error: true
+      with:
+        path: ~/.cache/sccache
+        key: ${{ github.repository }}-sccache-local-${{ inputs.cache-key }}-${{ runner.os }}-${{ runner.arch }}-${{ github.sha }}
+        restore-keys: |
+          ${{ github.repository }}-sccache-local-${{ inputs.cache-key }}-${{ runner.os }}-${{ runner.arch }}-
+
     - uses: ./.github/actions/sccache-install
       continue-on-error: true
     - uses: ./.github/actions/configure-cargo-sccache

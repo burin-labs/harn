@@ -75,11 +75,46 @@ impl LlmErrorReason {
         }
     }
 
+    pub(crate) fn parse(value: &str) -> Option<Self> {
+        match value {
+            "rate_limit" | "rate_limited" => Some(Self::RateLimit),
+            "server_error" | "http_error" => Some(Self::ServerError),
+            "network_error" => Some(Self::NetworkError),
+            "timeout" => Some(Self::Timeout),
+            "auth_failure" => Some(Self::AuthFailure),
+            "context_overflow" => Some(Self::ContextOverflow),
+            "content_policy" => Some(Self::ContentPolicy),
+            "invalid_request" => Some(Self::InvalidRequest),
+            "invalid_response" => Some(Self::InvalidResponse),
+            "model_unavailable" => Some(Self::ModelUnavailable),
+            "empty_generation" => Some(Self::EmptyGeneration),
+            "unknown" => Some(Self::Unknown),
+            _ => None,
+        }
+    }
+
     fn legacy_tag(self) -> &'static str {
         match self {
             Self::RateLimit => "rate_limited",
             Self::ServerError => "http_error",
             other => other.as_str(),
+        }
+    }
+
+    fn default_kind(self) -> LlmErrorKind {
+        match self {
+            Self::RateLimit
+            | Self::ServerError
+            | Self::NetworkError
+            | Self::Timeout
+            | Self::EmptyGeneration => LlmErrorKind::Transient,
+            Self::AuthFailure
+            | Self::ContextOverflow
+            | Self::ContentPolicy
+            | Self::InvalidRequest
+            | Self::InvalidResponse
+            | Self::ModelUnavailable
+            | Self::Unknown => LlmErrorKind::Terminal,
         }
     }
 }
@@ -131,6 +166,73 @@ pub(crate) fn classify_provider_http_error(
         reason,
         message: msg,
     }
+}
+
+/// Classify a mid-stream structured provider error payload (SSE `event: error`
+/// or top-level error JSON) through the same sanitizer and taxonomy as HTTP
+/// failures. Prefer explicit upstream `kind`/`reason` fields when present so a
+/// valid terminal provider error does not fall through to premature EOF.
+pub(crate) fn classify_provider_stream_error(provider: &str, body: &str, partial: bool) -> VmError {
+    let json = serde_json::from_str::<serde_json::Value>(body).ok();
+    let (kind, reason) = match explicit_stream_error_taxonomy(json.as_ref()) {
+        Some(taxonomy) => taxonomy,
+        // No HTTP status on an in-band SSE error frame; classify from body
+        // fingerprints only (neutral status avoids status-forced reasons).
+        None => classify_http_status_and_body(reqwest::StatusCode::OK, body),
+    };
+    let body_summary = sanitize_provider_error_body(body);
+    let mut message = format!(
+        "{provider} stream error [{}]: {body_summary}",
+        reason.legacy_tag()
+    );
+    if reason == LlmErrorReason::ContextOverflow {
+        if let Some(tokens) = extract_token_count_hint(body) {
+            message.push_str(&format!(" (offending_tokens: {tokens})"));
+        }
+    }
+    stream_error_thrown(kind, reason, message, partial)
+}
+
+fn explicit_stream_error_taxonomy(
+    json: Option<&serde_json::Value>,
+) -> Option<(LlmErrorKind, LlmErrorReason)> {
+    let json = json?;
+    let kind = json_taxonomy_str(json, "kind").and_then(LlmErrorKind::parse);
+    let reason = json_taxonomy_str(json, "reason").and_then(LlmErrorReason::parse);
+    match (kind, reason) {
+        (Some(kind), Some(reason)) => Some((kind, reason)),
+        (None, Some(reason)) => Some((reason.default_kind(), reason)),
+        (Some(kind), None) => Some((kind, LlmErrorReason::Unknown)),
+        (None, None) => None,
+    }
+}
+
+fn json_taxonomy_str<'a>(json: &'a serde_json::Value, key: &str) -> Option<&'a str> {
+    json.get(key)
+        .and_then(serde_json::Value::as_str)
+        .or_else(|| {
+            json.get("error")
+                .and_then(|error| error.get(key))
+                .and_then(serde_json::Value::as_str)
+        })
+}
+
+fn stream_error_thrown(
+    kind: LlmErrorKind,
+    reason: LlmErrorReason,
+    message: String,
+    partial: bool,
+) -> VmError {
+    use crate::value::VmDictExt;
+
+    let mut fields = std::collections::BTreeMap::new();
+    fields.put_str("category", ErrorCategory::Generic.as_str());
+    fields.put_str("kind", kind.as_str());
+    fields.put_str("reason", reason.as_str());
+    fields.put_str("message", message);
+    fields.put_str("source", "provider_stream");
+    fields.put_bool("partial", partial);
+    VmError::Thrown(VmValue::dict(fields))
 }
 
 /// Consume a non-2xx provider [`Response`] and build the thrown [`VmError`]

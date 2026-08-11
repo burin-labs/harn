@@ -79,14 +79,18 @@ const RELEASE_CACHE_BUDGET_IF =
 const REQUIRED_RELEASE_BUILD_INPUTS = [
   ".github/actions/rust-cache/**",
   ".github/actions/rust-toolchain/**",
+  ".github/actions/sccache/**",
   ".github/actions/sccache-install/**",
+  ".github/actions/sccache-save-local/**",
   ".github/release-runner-policy.json",
+  ".github/release-warm-build-budget.json",
   ".github/release-warm-cache-paths.yml",
   ".github/workflows/build-release-binaries.yml",
   "**/Cargo.toml",
   "Cargo.lock",
   "Cargo.toml",
   "rust-toolchain.toml",
+  "scripts/check_release_warm_build_budget.sh",
   "scripts/prune_ci_cache_generations.sh",
   "scripts/release_runner_matrix.sh",
 ]

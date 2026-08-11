@@ -1033,25 +1033,54 @@ jobs:
           name: harn-cli-aot-payload
           path: crates/harn-cli/generated
 
+      # Compiler-cache backends are policy data (sccache_backend):
+      #   sticky  — Blacksmith sticky disk; hosted runners fall back to local
+      #   local   — bounded SCCACHE_DIR blob cache; GHA per-object backend off
+      #   install — legacy Linux install path (mozilla action)
+      #   none    — documented skip
+      # The per-object GHA sccache backend remains forbidden: Windows hit
+      # `os error 10054` mid harn-vm compile (#2114), and the hosted trial
+      # burned storage without useful hits (v0.10.39).
+      - uses: ./.github/actions/sccache
+        if: matrix.sccache_backend == 'sticky'
+        continue-on-error: true
+        with:
+          cache-key: release-${{ matrix.target }}
+          sticky: "true"
+          # Warm/standard/recovery Intel macOS is not Blacksmith; keep a local
+          # blob fallback so version-only commits still reuse object cache.
+          local-cache: ${{ contains(matrix.runner, 'blacksmith') && 'false' || 'true' }}
+          cache-size: "2G"
+
+      - uses: ./.github/actions/sccache
+        if: matrix.sccache_backend == 'local'
+        continue-on-error: true
+        with:
+          cache-key: release-${{ matrix.target }}
+          local-cache: "true"
+          cache-size: "2G"
+
       - uses: ./.github/actions/sccache-install
-        if: matrix.use_sccache == 'true'
+        if: matrix.sccache_backend == 'install'
         # sccache is a build-cache optimization, not a build requirement. The
         # upstream action sometimes fails on merge_group / restricted-token
         # events with "Bad credentials" when api.github.com gates the release
         # lookup; a cold build is a fine fallback, but the job shouldn't fail.
         continue-on-error: true
 
-      # Skip sccache on Windows and macOS. Windows has repeatedly dropped the
-      # GHA cache connection during the long single-rustc-call harn-vm compile
-      # (`os error 10054`). On macOS, v0.8.58 recovery logs showed the server
-      # shutting down unexpectedly and final stats with 0 useful compile
-      # requests on arm64 and only 2 non-cacheable requests on x86_64. Local
-      # rustc + Swatinem/rust-cache still cover incremental warmth for repeat
-      # builds without the wrapper process churn.
       - name: Configure Cargo to use sccache
-        if: matrix.use_sccache == 'true' && env.SCCACHE_PATH != ''
+        if: matrix.sccache_backend == 'install' && env.SCCACHE_PATH != ''
         shell: bash
-        run: echo "RUSTC_WRAPPER=${SCCACHE_PATH}" >> "$GITHUB_ENV"
+        run: |
+          set -euo pipefail
+          # Keep Linux on the historical install path, but never enable the
+          # per-object GHA backend from workflow env.
+          echo "SCCACHE_GHA_ENABLED=false" >> "$GITHUB_ENV"
+          if [ -n "${SCCACHE_PATH:-}" ] && "${SCCACHE_PATH}" "${RUSTC:-rustc}" -vV >/dev/null 2>&1; then
+            echo "RUSTC_WRAPPER=${SCCACHE_PATH}" >> "$GITHUB_ENV"
+          else
+            echo "RUSTC_WRAPPER=" >> "$GITHUB_ENV"
+          fi
 
       # See the cache architecture note at the top of this workflow. Tag-push
       # runs cannot restore another tag's cache, so they stay restore-only.
@@ -1077,9 +1106,24 @@ jobs:
           HARN_RELEASE_TARGET: ${{ matrix.target }}
           HARN_RELEASE_RUNNER_LABEL: ${{ matrix.runner }}
           HARN_RELEASE_SCCACHE_REQUESTED: ${{ matrix.use_sccache }}
+          HARN_RELEASE_SCCACHE_BACKEND: ${{ matrix.sccache_backend }}
           HARN_RELEASE_RUST_CACHE_HIT: ${{ steps.rust-cache.outputs.cache-hit || '<unset>' }}
         run: |
           set -euo pipefail
+          backend="$HARN_RELEASE_SCCACHE_BACKEND"
+          case "$backend" in
+            sticky)
+              if [[ "$HARN_RELEASE_RUNNER_LABEL" == *blacksmith* ]]; then
+                mode="sticky"
+              else
+                mode="local(fallback-from-sticky)"
+              fi
+              ;;
+            local) mode="local" ;;
+            install) mode="install" ;;
+            none) mode="disabled(policy)" ;;
+            *) mode="unknown($backend)" ;;
+          esac
           {
             echo "### Release cache mode"
             echo
@@ -1092,7 +1136,11 @@ jobs:
             echo "| Swatinem cache save enabled | $HARN_RELEASE_CACHE_SAVE_ENABLED |"
             echo "| Swatinem cache hit | $HARN_RELEASE_RUST_CACHE_HIT |"
             echo "| sccache requested | $HARN_RELEASE_SCCACHE_REQUESTED |"
+            echo "| sccache backend | $backend |"
+            echo "| sccache mode | $mode |"
             echo "| sccache path | ${SCCACHE_PATH:-<unset>} |"
+            echo "| SCCACHE_GHA_ENABLED | ${SCCACHE_GHA_ENABLED:-<unset>} |"
+            echo "| SCCACHE_DIR | ${SCCACHE_DIR:-<unset>} |"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Install cargo-bloat
@@ -1129,6 +1177,7 @@ jobs:
         run: echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> "$GITHUB_ENV"
 
       - name: Build
+        id: build
         timeout-minutes: 90
         shell: bash
         env:
@@ -1155,6 +1204,7 @@ jobs:
             cargo build --release -p harn-cli --bin harn-container-probe --target "$HARN_RELEASE_TARGET"
           fi
           duration=$((SECONDS - start))
+          echo "duration_seconds=${duration}" >> "$GITHUB_OUTPUT"
           {
             echo "### Release binary build"
             echo
@@ -1174,10 +1224,11 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Summarize sccache stats
-        if: always() && matrix.use_sccache == 'true'
+        if: always()
         shell: bash
         env:
           HARN_RELEASE_TARGET: ${{ matrix.target }}
+          HARN_RELEASE_SCCACHE_BACKEND: ${{ matrix.sccache_backend }}
           HARN_RELEASE_IS_RELEASE: ${{ needs.setup.outputs.is_release }}
         run: |
           set -euo pipefail
@@ -1187,6 +1238,25 @@ jobs:
             echo "### Release sccache stats"
             echo
             echo "Target: \`$HARN_RELEASE_TARGET\`"
+            echo
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Backend | $HARN_RELEASE_SCCACHE_BACKEND |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [[ "$HARN_RELEASE_SCCACHE_BACKEND" == "none" ]]; then
+            {
+              echo "| Status | skipped |"
+              echo "| Reason | policy disables compiler cache for this target |"
+              echo
+              echo '```text'
+              echo "sccache disabled by release-runner-policy sccache_backend=none"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          {
             echo
             echo '```text'
             if command -v "$sccache_bin" >/dev/null 2>&1; then
@@ -1198,12 +1268,24 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
-          compile_requests="$(awk '/^Compile requests[[:space:]]/ {print $NF; found=1} END {if (!found) print 0}' "$stats_file")"
-          cache_hits="$(awk '/^Cache hits[[:space:]]/ {print $NF; found=1; exit} END {if (!found) print 0}' "$stats_file")"
-          cache_misses="$(awk '/^Cache misses[[:space:]]/ {print $NF; found=1; exit} END {if (!found) print 0}' "$stats_file")"
-          cache_write_errors="$(awk '/^Cache write errors[[:space:]]/ {print $NF; found=1; exit} END {if (!found) print 0}' "$stats_file")"
+          # sccache may emit duplicate summary lines; take the first integer only
+          # so bash 3.2 arithmetic on macOS runners cannot see a multiline value.
+          first_stat() {
+            awk -v key="$1" '
+              $0 ~ ("^" key "[[:space:]]") { print $NF; found=1; exit }
+              END { if (!found) print 0 }
+            ' "$stats_file" | tr -cd '0-9\n' | head -n 1
+          }
+          compile_requests="$(first_stat "Compile requests")"
+          cache_hits="$(first_stat "Cache hits")"
+          cache_misses="$(first_stat "Cache misses")"
+          cache_write_errors="$(first_stat "Cache write errors")"
+          : "${compile_requests:=0}"
+          : "${cache_hits:=0}"
+          : "${cache_misses:=0}"
+          : "${cache_write_errors:=0}"
           hit_rate="0.00"
-          if (( compile_requests > 0 )); then
+          if [[ "$compile_requests" =~ ^[0-9]+$ ]] && (( compile_requests > 0 )); then
             hit_rate="$(awk -v hits="$cache_hits" -v total="$compile_requests" 'BEGIN { printf "%.2f", (hits * 100.0) / total }')"
           fi
           {
@@ -1217,12 +1299,40 @@ jobs:
             echo "| Cache hit rate | ${hit_rate}% |"
           } >> "$GITHUB_STEP_SUMMARY"
 
-          if (( compile_requests >= 100 )) && awk -v rate="$hit_rate" 'BEGIN { exit !(rate < 5.0) }'; then
+          if [[ "$compile_requests" =~ ^[0-9]+$ ]] && (( compile_requests >= 100 )) && awk -v rate="$hit_rate" 'BEGIN { exit !(rate < 5.0) }'; then
             echo "::warning title=Release sccache is effectively cold::${HARN_RELEASE_TARGET} had ${cache_hits}/${compile_requests} hits (${hit_rate}%). Release latency likely came from cold compile cache."
           fi
-          if (( cache_write_errors > 0 )); then
+          if [[ "$cache_write_errors" =~ ^[0-9]+$ ]] && (( cache_write_errors > 0 )); then
             echo "::warning title=Release sccache write errors::${HARN_RELEASE_TARGET} reported ${cache_write_errors} cache write error(s). Warm-cache recovery may remain slow until cache writes succeed."
           fi
+
+      - name: Persist local release sccache
+        if: >-
+          always()
+          && env.HARN_RELEASE_CACHE_SAVE_ENABLED == 'true'
+          && (
+            matrix.sccache_backend == 'local'
+            || (matrix.sccache_backend == 'sticky' && !contains(matrix.runner, 'blacksmith'))
+          )
+        continue-on-error: true
+        uses: ./.github/actions/sccache-save-local
+        with:
+          cache-key: release-${{ matrix.target }}
+
+      - name: Evaluate warm-build budget
+        if: always() && steps.build.outcome == 'success'
+        shell: bash
+        env:
+          HARN_RELEASE_TARGET: ${{ matrix.target }}
+          HARN_RELEASE_BUILD_MODE: ${{ needs.setup.outputs.build_mode }}
+          HARN_RELEASE_BUILD_SECONDS: ${{ steps.build.outputs.duration_seconds }}
+        run: |
+          set -euo pipefail
+          ./scripts/check_release_warm_build_budget.sh \
+            --target "$HARN_RELEASE_TARGET" \
+            --duration "$HARN_RELEASE_BUILD_SECONDS" \
+            --mode "$HARN_RELEASE_BUILD_MODE" \
+            --enforce warn
 
       # Sign the single `harn` Mach-O binary with the Developer ID Application
       # identity (hardened runtime + secure timestamp), then submit it to

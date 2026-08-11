@@ -29,6 +29,23 @@ fn log_message_and_fields(args: &[harn_vm::VmValue]) -> (String, Option<serde_js
     (message, fields)
 }
 
+/// Host capability contract is `request: dict`; accept either that shape
+/// (`{text: ...}`) or a legacy bare string from older pipelines.
+fn emit_response_text(args: &[harn_vm::VmValue]) -> String {
+    match args.first() {
+        Some(value) => {
+            if let Some(map) = value.as_dict() {
+                map.get("text")
+                    .map(|item| item.display())
+                    .unwrap_or_else(|| value.display())
+            } else {
+                value.display()
+            }
+        }
+        None => String::new(),
+    }
+}
+
 /// ACP embedder bridge for canonical `host_call` dispatch.
 ///
 /// Forwards unhandled capability/operation pairs to the editor over
@@ -268,25 +285,25 @@ pub(super) async fn register_acp_builtins(
         Ok(harn_vm::VmValue::Nil)
     });
 
+    // Product paths call `harness.runtime.emit_response` after capability
+    // migration. Without a typed override that path goes through `host/call`
+    // (and previously carried HOST_MUTATE), so ACP consumers lost the
+    // assistant timeline entry that the ambient builtin projects. Keep the
+    // ambient name as a legacy alias; both routes share `send_update`.
     let b = bridge.clone();
     vm.register_builtin("emit_response", move |args, _out| {
-        // Host capability contract is `request: dict`; accept either that shape
-        // (`{text: ...}`) or a legacy bare string from older pipelines.
-        let text = match args.first() {
-            Some(value) => {
-                if let Some(map) = value.as_dict() {
-                    map.get("text")
-                        .map(|item| item.display())
-                        .unwrap_or_else(|| value.display())
-                } else {
-                    value.display()
-                }
-            }
-            None => String::new(),
-        };
-        b.send_update(&text);
+        b.send_update(&emit_response_text(args));
         Ok(harn_vm::VmValue::Nil)
     });
+    let b = bridge.clone();
+    vm.override_capability_method(
+        harn_builtin_meta::CapabilityId::Runtime,
+        "emit_response",
+        move |args, _out| {
+            b.send_update(&emit_response_text(args));
+            Ok(harn_vm::VmValue::Nil)
+        },
+    );
 
     // exec/shell route through terminal/create + wait + output + release.
     for name in ["exec", "shell"] {
