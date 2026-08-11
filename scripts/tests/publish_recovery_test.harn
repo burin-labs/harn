@@ -162,6 +162,68 @@ pipeline test_publish_recovery_retries_rate_limits_with_injected_wait(harness: H
 }
 
 @test
+pipeline test_publish_recovery_retries_transient_crates_io_transport_failure(
+  harness: Harness,
+  task,
+) {
+  const attempts = harness.runtime.atomic(0)
+  const waited_ms = harness.runtime.atomic(0)
+  const adapters: PublishAdapters = {
+    probe: { _name, _version -> return {status: "missing"} },
+    publish: { _package ->
+      const attempt = harness.runtime.atomic_add(attempts, 1) + 1
+      if attempt == 1 {
+        return {
+          success: false,
+          output: "[35] SSL connect error (Recv failure: Connection reset by peer)",
+        }
+      }
+      return {success: true}
+    },
+    wait: { delay_ms ->
+      harness.runtime.atomic_add(waited_ms, delay_ms)
+      return nil
+    },
+  }
+  const receipt = publish_recover(
+    [{deps: [], name: "alpha", version: "1.2.3"}],
+    adapters,
+    {max_publish_attempts: 2, transient_network_delay_ms: 19},
+  )
+  assert(receipt.ok)
+  assert_eq(receipt.published, ["alpha"])
+  assert_eq(harness.runtime.atomic_get(attempts), 2)
+  assert_eq(harness.runtime.atomic_get(waited_ms), 19)
+}
+
+@test
+pipeline test_publish_recovery_probes_after_uncertain_transport_failure(harness: Harness, task) {
+  const attempts = harness.runtime.atomic(0)
+  const adapters: PublishAdapters = {
+    probe: { _name, _version ->
+      if harness.runtime.atomic_get(attempts) == 1 {
+        return {status: "visible"}
+      }
+      return {status: "missing"}
+    },
+    publish: { _package ->
+      harness.runtime.atomic_add(attempts, 1)
+      return {success: false, output: "Recv failure: Connection reset by peer"}
+    },
+    wait: { _delay_ms -> return nil },
+  }
+  const receipt = publish_recover(
+    [{deps: [], name: "alpha", version: "1.2.3"}],
+    adapters,
+    {max_publish_attempts: 2},
+  )
+  assert(receipt.ok)
+  assert_eq(receipt.already_present, ["alpha"])
+  assert_eq(receipt.published, [])
+  assert_eq(harness.runtime.atomic_get(attempts), 1)
+}
+
+@test
 pipeline test_publish_failure_categories_are_closed(harness: Harness, task) {
   assert_eq(publish_failure_category("429 Too Many Requests"), "rate_limited")
   assert_eq(
@@ -169,5 +231,9 @@ pipeline test_publish_failure_categories_are_closed(harness: Harness, task) {
     "propagation",
   )
   assert_eq(publish_failure_category("crate version 1.2.3 is already uploaded"), "already_present")
+  assert_eq(
+    publish_failure_category("[35] SSL connect error (Recv failure: Connection reset by peer)"),
+    "transient_network",
+  )
   assert_eq(publish_failure_category("authentication token rejected"), "permanent")
 }

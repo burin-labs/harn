@@ -13,7 +13,11 @@ pub type RegistryProbeStatus = "visible" | "missing" | "error"
 
 pub type RegistryProbe = {status: RegistryProbeStatus, detail?: string}
 
-pub type PublishFailureCategory = "already_present" | "propagation" | "rate_limited" | "permanent"
+pub type PublishFailureCategory = "already_present" \
+  | "propagation" \
+  | "rate_limited" \
+  | "transient_network" \
+  | "permanent"
 
 pub type PublishAttempt = {success: bool, output?: string}
 
@@ -39,6 +43,7 @@ pub type PublishRecoveryOptions = {
   backoff_ms?: list<int>,
   max_publish_attempts?: int,
   rate_limit_delay_ms?: int,
+  transient_network_delay_ms?: int,
 }
 
 type RegistryWait = {ok: bool, waited: bool, detail: string}
@@ -127,6 +132,17 @@ pub fn publish_failure_category(output: string) -> PublishFailureCategory {
   if text.contains("429") || text.contains("too many requests") {
     return "rate_limited"
   }
+  if text.contains("ssl connect error")
+    || text.contains("connection reset by peer")
+    || text.contains("recv failure")
+    || text.contains("could not resolve host")
+    || text.contains("failed to resolve host")
+    || text.contains("connection timed out")
+    || text.contains("timeout was reached")
+    || text.contains("broken pipe")
+    || text.contains("unexpected eof while reading") {
+    return "transient_network"
+  }
   if text.contains("packages remain in plan")
     || text.contains(
     "timeout while waiting for published dependencies",
@@ -155,6 +171,7 @@ pub fn publish_recover(
   const backoff_ms = opts.backoff_ms ?? [2000, 5000, 10000, 20000, 30000, 60000]
   const max_publish_attempts = opts.max_publish_attempts ?? 3
   const rate_limit_delay_ms = opts.rate_limit_delay_ms ?? 120000
+  const transient_network_delay_ms = opts.transient_network_delay_ms ?? 5000
   if max_publish_attempts <= 0 {
     throw "publish recovery max_publish_attempts must be positive"
   }
@@ -219,6 +236,8 @@ pub fn publish_recover(
       }
       if category == "rate_limited" {
         adapters.wait(rate_limit_delay_ms)
+      } else if category == "transient_network" {
+        adapters.wait(transient_network_delay_ms)
       } else {
         for dep in package.deps {
           if !published.contains(dep) {
