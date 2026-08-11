@@ -40,6 +40,7 @@ use harn_session_store::{
 };
 use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
+use serde::Serialize;
 use serde_json::json;
 
 use super::types::{LlmUsageRecord, RunChildRecord, RunRecord, RunTraceSpanRecord, ToolCallRecord};
@@ -97,7 +98,7 @@ pub async fn project_run_record_from_session(
     let events = drain_events(store, session_id).await?;
     let children = child_records(store, session_id).await?;
     let root = root_session_id(store, &meta).await?;
-    Ok(assemble(meta, events, children, root))
+    assemble(meta, events, children, root)
 }
 
 /// Walk `parent_session_id` to the top of the delegation chain.
@@ -307,6 +308,7 @@ async fn child_records(
 #[derive(Default)]
 struct SessionFold {
     task: Option<String>,
+    messages: Vec<ProjectedMessage>,
     usage: LlmUsageRecord,
     models: Vec<String>,
     providers: Vec<String>,
@@ -364,12 +366,111 @@ struct TerminalFacts {
     at: String,
 }
 
+#[derive(Clone, Copy, Debug, Serialize)]
+#[serde(rename_all = "lowercase")]
+enum ProjectedMessageRole {
+    User,
+    Assistant,
+    System,
+    Developer,
+    Tool,
+}
+
+impl ProjectedMessageRole {
+    fn parse(value: &str) -> Option<Self> {
+        match value {
+            "user" => Some(Self::User),
+            "assistant" => Some(Self::Assistant),
+            "system" => Some(Self::System),
+            "developer" => Some(Self::Developer),
+            "tool" => Some(Self::Tool),
+            _ => None,
+        }
+    }
+
+    fn block_kind(self) -> &'static str {
+        match self {
+            Self::Assistant => "output_text",
+            _ => "text",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct ProjectedMessage {
+    #[serde(skip)]
+    event_id: String,
+    role: ProjectedMessageRole,
+    content: String,
+}
+
+#[derive(Debug, Serialize)]
+struct ProjectedTranscript<'a> {
+    #[serde(rename = "_type")]
+    type_name: &'static str,
+    id: &'a str,
+    source: &'static str,
+    messages: &'a [ProjectedMessage],
+    events: Vec<ProjectedTranscriptEvent<'a>>,
+}
+
+#[derive(Debug, Serialize)]
+struct ProjectedTranscriptEvent<'a> {
+    id: String,
+    kind: &'static str,
+    role: ProjectedMessageRole,
+    visibility: &'static str,
+    text: &'a str,
+    blocks: [ProjectedTranscriptBlock<'a>; 1],
+}
+
+#[derive(Debug, Serialize)]
+struct ProjectedTranscriptBlock<'a> {
+    #[serde(rename = "type")]
+    kind: &'static str,
+    visibility: &'static str,
+    text: &'a str,
+}
+
+fn projected_transcript(
+    session_id: &str,
+    messages: &[ProjectedMessage],
+) -> Result<Option<serde_json::Value>, VmError> {
+    if messages.is_empty() {
+        return Ok(None);
+    }
+    let events = messages
+        .iter()
+        .map(|message| ProjectedTranscriptEvent {
+            id: message.event_id.clone(),
+            kind: "message",
+            role: message.role,
+            visibility: "public",
+            text: &message.content,
+            blocks: [ProjectedTranscriptBlock {
+                kind: message.role.block_kind(),
+                visibility: "public",
+                text: &message.content,
+            }],
+        })
+        .collect();
+    serde_json::to_value(ProjectedTranscript {
+        type_name: "transcript",
+        id: session_id,
+        source: PROJECTION_SOURCE,
+        messages,
+        events,
+    })
+    .map(Some)
+    .map_err(|error| VmError::Runtime(format!("runs: failed to encode transcript: {error}")))
+}
+
 fn assemble(
     meta: SessionMeta,
     events: Vec<StoredEvent>,
     children: Vec<RunChildRecord>,
     root_run_id: String,
-) -> RunRecord {
+) -> Result<RunRecord, VmError> {
     let mut fold = SessionFold::default();
     for event in &events {
         fold.absorb(event);
@@ -472,7 +573,7 @@ fn assemble(
         ..fold.usage
     };
 
-    RunRecord {
+    Ok(RunRecord {
         type_name: "run".to_string(),
         id: meta.id.clone(),
         workflow_id: AGENT_SESSION_WORKFLOW_ID.to_string(),
@@ -487,13 +588,14 @@ fn assemble(
         parent_run_id: meta.parent_session_id.clone(),
         root_run_id: Some(root_run_id),
         child_runs: children,
+        transcript: projected_transcript(&meta.id, &fold.messages)?,
         usage: (usage.call_count > 0).then_some(usage),
         trace_spans: llm_call_spans(&meta, &fold.llm_calls),
         tool_recordings: fold.tools,
         execution: None,
         metadata,
         ..RunRecord::default()
-    }
+    })
 }
 
 impl SessionFold {
@@ -511,14 +613,32 @@ impl SessionFold {
     }
 
     fn absorb_message(&mut self, event: &StoredEvent) {
-        if self.task.is_some() {
+        let Some(role) = facts::semantic_string(&event.payload, &facts::ROLE)
+            .as_deref()
+            .and_then(ProjectedMessageRole::parse)
+        else {
+            return;
+        };
+        if facts::string_at(&event.payload, facts::VISIBILITY)
+            .is_some_and(|visibility| visibility != "public")
+        {
             return;
         }
-        let is_user = event.actor.as_deref() == Some("user")
-            || facts::semantic_string(&event.payload, &facts::ROLE).as_deref() == Some("user");
-        if is_user {
-            self.task = facts::semantic_string(&event.payload, &facts::TEXT);
+        let Some(text) = facts::semantic_string(&event.payload, &facts::TEXT) else {
+            return;
+        };
+        if self.task.is_none()
+            && (event.actor.as_deref() == Some("user")
+                || matches!(role, ProjectedMessageRole::User))
+        {
+            self.task = Some(text.clone());
         }
+        self.messages.push(ProjectedMessage {
+            event_id: facts::string_at(&event.payload, facts::TRANSCRIPT_EVENT_ID)
+                .unwrap_or_else(|| format!("session-event-{}", event.event_id)),
+            role,
+            content: text,
+        });
     }
 
     fn absorb_llm_call(&mut self, event: &StoredEvent) {

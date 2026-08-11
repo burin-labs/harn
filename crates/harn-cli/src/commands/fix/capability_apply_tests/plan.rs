@@ -3,6 +3,32 @@
 
 use super::*;
 
+#[test]
+fn capability_apply_preserves_mcp_tool_harness_and_narrows_private_helpers() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let script = temp.path().join("assistant.mcp.harn");
+    let original = "pub fn search(harness: Harness) {\n  return harness.net.get(\"https://example.com\")\n}\n\nfn timestamp(harness: Harness) {\n  return harness.clock.now_ms()\n}\n";
+    fs::write(&script, original).unwrap();
+
+    super::apply_repairs_with_options_at(
+        temp.path(),
+        RepairSafety::SurfaceChanging,
+        false,
+        super::FixOptions::capability_migrations(),
+    )
+    .unwrap();
+
+    let updated = fs::read_to_string(&script).unwrap();
+    assert!(
+        updated.contains("pub fn search(harness: Harness)"),
+        "the MCP runtime supplies a root Harness to public tools:\n{updated}"
+    );
+    assert!(
+        updated.contains("fn timestamp(clock: HarnessClock)"),
+        "ordinary private helpers should still attenuate:\n{updated}"
+    );
+}
+
 /// A capability reached only through `${...}` is still reached.
 ///
 /// `visit::walk_program` stops at `Node::InterpolatedString`: the lexer keeps a

@@ -84,6 +84,12 @@ pub(crate) const ITERATION: &str = "/transcript_event/metadata/iteration";
 pub(crate) const TEXT: [&str; 2] = ["/transcript_event/text", "/raw_message/content"];
 /// Speaker of an event, as the transcript or the raw message records it.
 pub(crate) const ROLE: [&str; 2] = ["/transcript_event/role", "/raw_message/role"];
+/// Visibility of a transcript event. Older raw provider messages do not carry
+/// this field; readers decide whether that legacy absence is safe for their
+/// projection. An explicit non-public value must never be treated as public.
+pub(crate) const VISIBILITY: &str = "/transcript_event/visibility";
+/// Stable transcript-envelope id when the producer supplied one.
+pub(crate) const TRANSCRIPT_EVENT_ID: &str = "/transcript_event/id";
 /// Tool name across the transcript envelope and both raw-message placements.
 pub(crate) const TOOL_NAME_ANY: [&str; 3] = [
     TOOL_NAME,

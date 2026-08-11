@@ -152,6 +152,23 @@ fn user_message(text: &str) -> AppendEvent {
     .with_actor("user")
 }
 
+fn assistant_message(text: &str) -> AppendEvent {
+    AppendEvent::new(
+        SessionEventKind::Message,
+        json!({
+            "transcript_event": {
+                "id": "assistant-visible",
+                "kind": "message",
+                "role": "assistant",
+                "visibility": "public",
+                "text": text,
+            },
+            "raw_message": {"content": text, "role": "assistant"},
+        }),
+    )
+    .with_actor("assistant")
+}
+
 /// A store holding one session shaped like the run in #6120: a rate-limited,
 /// pace-cut agent loop with tool calls and no run record anywhere.
 async fn capstone_like_store() -> (MemorySessionStore, String) {
@@ -168,6 +185,7 @@ async fn capstone_like_store() -> (MemorySessionStore, String) {
         user_message("Migrate the three unit test files."),
         iteration_start(1),
         llm_call(10951, 112, 0.002872),
+        assistant_message("I inspected the three requested files."),
         tool_call("call_A", "look"),
         tool_update("call_A", "look", "in_progress", 0),
         tool_result("call_A", "[result of look]\n1\tclass CartTest"),
@@ -221,6 +239,93 @@ async fn a_headless_session_projects_the_run_record_no_host_ever_wrote() {
         run.metadata.get("iterations").and_then(|v| v.as_u64()),
         Some(2)
     );
+}
+
+#[tokio::test]
+async fn readable_messages_project_in_order_without_private_payload_fields() {
+    let (store, id) = capstone_like_store().await;
+    let run = project_run_record_from_session(&store, &id)
+        .await
+        .expect("project");
+
+    let transcript = run.transcript.as_ref().expect("readable transcript");
+    assert_eq!(transcript["_type"], "transcript");
+    assert_eq!(transcript["id"], id);
+    assert_eq!(transcript["source"], PROJECTION_SOURCE);
+    assert_eq!(
+        transcript["messages"],
+        json!([
+            {"role": "user", "content": "Migrate the three unit test files."},
+            {"role": "assistant", "content": "I inspected the three requested files."},
+        ])
+    );
+    assert_eq!(transcript["events"][0]["kind"], "message");
+    assert_eq!(transcript["events"][0]["visibility"], "public");
+    assert_eq!(transcript["events"][1]["id"], "assistant-visible");
+    assert_eq!(transcript["events"][1]["blocks"][0]["type"], "output_text");
+    assert!(transcript.pointer("/events/0/metadata").is_none());
+    assert!(transcript.pointer("/events/0/raw_message").is_none());
+
+    let view = crate::orchestration::records::build_run_view(&run);
+    assert_eq!(view.transcript.message_count, 2);
+    assert_eq!(view.transcript.event_count, 2);
+    assert_eq!(
+        view.visible_text.as_deref(),
+        Some("I inspected the three requested files.")
+    );
+}
+
+#[tokio::test]
+async fn private_and_malformed_messages_are_not_projected() {
+    let store = MemorySessionStore::default();
+    let meta = store
+        .create(CreateSession::default())
+        .await
+        .expect("create session");
+    let id = meta.id.clone();
+    for event in [
+        user_message("public request"),
+        AppendEvent::new(
+            SessionEventKind::Message,
+            json!({"transcript_event": {
+                "kind": "message",
+                "role": "assistant",
+                "visibility": "private",
+                "text": "private reasoning",
+            }}),
+        ),
+        AppendEvent::new(
+            SessionEventKind::Message,
+            json!({"transcript_event": {
+                "kind": "message",
+                "role": "future-role",
+                "visibility": "public",
+                "text": "unknown speaker",
+            }}),
+        ),
+        AppendEvent::new(
+            SessionEventKind::Message,
+            json!({"transcript_event": {
+                "kind": "message",
+                "role": "assistant",
+                "visibility": "public",
+            }}),
+        ),
+    ] {
+        store.append(&id, event).await.expect("append");
+    }
+
+    let run = project_run_record_from_session(&store, &id)
+        .await
+        .expect("project");
+    let transcript = run.transcript.expect("public transcript");
+    assert_eq!(
+        transcript["messages"],
+        json!([{"role": "user", "content": "public request"}])
+    );
+    let encoded = transcript.to_string();
+    assert!(!encoded.contains("private reasoning"));
+    assert!(!encoded.contains("unknown speaker"));
 }
 
 #[tokio::test]
@@ -356,6 +461,7 @@ async fn the_unrecoverable_field_list_matches_what_the_projector_actually_leaves
         ("status", run.status.is_empty()),
         ("started_at", run.started_at.is_empty()),
         ("finished_at", run.finished_at.is_none()),
+        ("transcript", run.transcript.is_none()),
         ("usage", run.usage.is_none()),
         ("tool_recordings", run.tool_recordings.is_empty()),
         ("metadata", run.metadata.is_empty()),
