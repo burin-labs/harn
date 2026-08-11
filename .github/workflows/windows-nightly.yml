@@ -65,7 +65,7 @@ jobs:
       # the ci.yml windows job for the full rationale.
       - name: Set up Dev Drive
         if: ${{ vars.HARN_WINDOWS_DEVDRIVE == 'on' }}
-        uses: samypr100/setup-dev-drive@30f0f98ae5636b2b6501e181dfb3631b9974818d # v4.0.0
+        uses: samypr100/setup-dev-drive@562171fe8df7401fdf582d766cd3b6ab80d5b1a0 # v4.1.0
         with:
           drive-size: 25GB
           drive-format: ReFS
@@ -103,7 +103,7 @@ jobs:
           $drive = Get-PSDrive -Name $root.TrimEnd('\').TrimEnd(':')
           "target=$target target_present=$(Test-Path $target) drive_free_bytes=$($drive.Free) drive_used_bytes=$($drive.Used)"
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@6a1bd70eaac3c8bdf093356838d7ee09fda951cf # v2.85.5
+        uses: taiki-e/install-action@67729d5c413db75907f0ad1e39bb04b9c868ff60 # v2.85.7
         with:
           tool: nextest@0.9.132
       - name: Run workspace nextest

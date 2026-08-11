@@ -394,7 +394,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: DavidAnson/markdownlint-cli2-action@6bf21b07787794f89a243495939cd651942aeabe # v24.1.0
+      - uses: DavidAnson/markdownlint-cli2-action@21c1be1b93ad9ed58fa840aacc3f279cde2a72ff # v24.2.0
 
   # Strict Clippy is an independent compile proof. Its warm hosted-cache time is
   # already below the SLO; the full test graph is owned by rust-check-inputs so the
@@ -524,7 +524,7 @@ jobs:
           cache-workspace-crates: "true"
           save: "true"
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@6a1bd70eaac3c8bdf093356838d7ee09fda951cf # v2.85.5
+        uses: taiki-e/install-action@67729d5c413db75907f0ad1e39bb04b9c868ff60 # v2.85.7
         with:
           tool: nextest@0.9.132
       - name: Build portable Harn CLI
@@ -732,7 +732,7 @@ jobs:
           ./scripts/prune_ci_cache_generations.sh --ensure-headroom "$HARN_CACHE_SAVE_HEADROOM_BYTES"
       - name: Install cargo-nextest
         if: matrix.install_nextest
-        uses: taiki-e/install-action@065d6a08a14e61e89fb0a4c10eecdbdef39c7d8e # v2.85.4
+        uses: taiki-e/install-action@67729d5c413db75907f0ad1e39bb04b9c868ff60 # v2.85.7
         with:
           tool: nextest@0.9.132
       - name: Warm Cargo graph
@@ -787,7 +787,7 @@ jobs:
           check-command: mold
       - uses: ./.github/actions/rust-toolchain
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@6a1bd70eaac3c8bdf093356838d7ee09fda951cf # v2.85.5
+        uses: taiki-e/install-action@67729d5c413db75907f0ad1e39bb04b9c868ff60 # v2.85.7
         with:
           tool: nextest@0.9.132
       - name: Start workspace test archive download timer
@@ -864,7 +864,7 @@ jobs:
           check-command: mold
       - uses: ./.github/actions/rust-toolchain
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@6a1bd70eaac3c8bdf093356838d7ee09fda951cf # v2.85.5
+        uses: taiki-e/install-action@67729d5c413db75907f0ad1e39bb04b9c868ff60 # v2.85.7
         with:
           tool: nextest@0.9.132
       - name: Download security test archive
@@ -1305,7 +1305,7 @@ jobs:
       # the shared-cache policy's pre-cache step-sequence comparison keeps matching.
       - name: Set up Dev Drive
         if: ${{ vars.HARN_WINDOWS_DEVDRIVE == 'on' }}
-        uses: samypr100/setup-dev-drive@30f0f98ae5636b2b6501e181dfb3631b9974818d # v4.0.0
+        uses: samypr100/setup-dev-drive@562171fe8df7401fdf582d766cd3b6ab80d5b1a0 # v4.1.0
         with:
           drive-size: 25GB
           drive-format: ReFS
@@ -1326,7 +1326,7 @@ jobs:
           cache-on-failure: true
           cache-bin: false
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@6a1bd70eaac3c8bdf093356838d7ee09fda951cf # v2.85.5
+        uses: taiki-e/install-action@67729d5c413db75907f0ad1e39bb04b9c868ff60 # v2.85.7
         continue-on-error: true
         with:
           tool: nextest@0.9.132
@@ -1438,7 +1438,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/rust-toolchain
       - name: Install pinned cross CLI
-        uses: taiki-e/install-action@6a1bd70eaac3c8bdf093356838d7ee09fda951cf # v2.85.5
+        uses: taiki-e/install-action@67729d5c413db75907f0ad1e39bb04b9c868ff60 # v2.85.7
         with:
           tool: cross@0.2.5
           fallback: none
@@ -1721,7 +1721,7 @@ jobs:
       # availability-dependent security signal without blocking every PR or
       # merge group when the external API returns 5xx.
       - name: Run zizmor
-        uses: zizmorcore/zizmor-action@6fc4b006235f201fdab3722e17240ab420d580e5 # v0.6.1
+        uses: zizmorcore/zizmor-action@3dc1ecc9bcb9e94e9b2c709687979e1298497054 # v0.6.2
         with:
           version: "1.26.1"
           online-audits: false
