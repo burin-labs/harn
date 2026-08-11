@@ -902,6 +902,82 @@ fn equivalent_failover_filters_by_provider_tool_requirements() {
 }
 
 #[test]
+fn equivalent_failover_filters_routes_without_responses_api_support() {
+    let mut overlay = ProvidersConfig::default();
+    for provider in ["mock", "chat-backup", "openai"] {
+        overlay.providers.insert(
+            provider.to_string(),
+            test_provider(&format!("https://{provider}.example/v1")),
+        );
+    }
+    overlay.models.insert(
+        "responses-primary-model".to_string(),
+        test_equivalent_model("mock", "responses-equivalent-test"),
+    );
+    overlay.models.insert(
+        "chat-backup-model".to_string(),
+        test_equivalent_model("chat-backup", "responses-equivalent-test"),
+    );
+    overlay.models.insert(
+        "responses-backup-model".to_string(),
+        test_equivalent_model("openai", "responses-equivalent-test"),
+    );
+    crate::llm_config::set_user_overrides(Some(overlay));
+    let capability_overlay = [
+        "[[provider.mock]]",
+        "model_match = \"responses-primary-model\"",
+        "responses_api = true",
+        "",
+        "[[provider.chat-backup]]",
+        "model_match = \"chat-backup-model\"",
+        "responses_api = false",
+        "",
+        "[[provider.openai]]",
+        "model_match = \"responses-backup-model\"",
+        "responses_api = true",
+    ]
+    .join("\n");
+    crate::llm::capabilities::set_user_overrides_toml(&capability_overlay)
+        .expect("capability override");
+
+    let opts = extract_with_options(crate::value::DictMap::from_iter([
+        (
+            crate::value::intern_key("provider"),
+            VmValue::String(arcstr::ArcStr::from("mock")),
+        ),
+        (
+            crate::value::intern_key("model"),
+            VmValue::String(arcstr::ArcStr::from("responses-primary-model")),
+        ),
+        (
+            crate::value::intern_key("api_mode"),
+            VmValue::String(arcstr::ArcStr::from("responses")),
+        ),
+        (
+            crate::value::intern_key("equivalent_failover"),
+            VmValue::Bool(true),
+        ),
+    ]))
+    .expect("options");
+
+    let requirements = equivalent_failover_requirements_for_options(&opts);
+    assert!(requirements.responses_api);
+    let candidates = crate::llm_config::equivalent_model_catalog_entries_for_requirements(
+        "responses-primary-model",
+        requirements.clone(),
+    );
+    assert!(candidates
+        .iter()
+        .any(|(id, model)| { id == "responses-backup-model" && model.provider == "openai" }));
+    assert!(candidates
+        .iter()
+        .all(|(id, model)| { id != "chat-backup-model" && model.provider != "chat-backup" }));
+
+    crate::llm_config::clear_user_overrides();
+    crate::llm::capabilities::clear_user_overrides();
+}
+
+#[test]
 fn equivalent_failover_rejects_non_bool_no_dispatch_option() {
     install_equivalent_routes();
     let mut failover = crate::value::DictMap::new();
