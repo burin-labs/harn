@@ -8,6 +8,7 @@ use harn_serve::MCP_PROTOCOL_VERSION;
 use harn_vm::llm::receipts::{TOOL_CALL_RECEIPT_EXECUTORS, TOOL_CALL_RECEIPT_STATUSES};
 
 use super::constants::*;
+use super::external_action::ExternalActionVocabulary;
 use super::support::*;
 use super::values::*;
 
@@ -17,10 +18,16 @@ use session_timeline::append_session_timeline_types;
 
 #[cfg(test)]
 pub(super) fn generate_swift() -> String {
-    generate_swift_for_version(env!("CARGO_PKG_VERSION"))
+    generate_swift_for_version(
+        env!("CARGO_PKG_VERSION"),
+        &ExternalActionVocabulary::load_for_tests(),
+    )
 }
 
-pub(super) fn generate_swift_for_version(artifact_version: &str) -> String {
+pub(super) fn generate_swift_for_version(
+    artifact_version: &str,
+    external_actions: &ExternalActionVocabulary,
+) -> String {
     let mut out = generated_header("harn dump-protocol-artifacts", "swift");
     out.push_str("import Foundation\n\n");
     out.push_str("public enum HarnProtocolConstants {\n");
@@ -121,6 +128,19 @@ pub(super) fn generate_swift_for_version(artifact_version: &str) -> String {
         TOOL_CALL_RECEIPT_EXECUTORS,
     ));
     out.push_str("}\n\n");
+
+    out.push_str(&swift_enum(
+        "HarnExternalActionOutcome",
+        &external_actions.outcomes,
+    ));
+    out.push_str(&swift_enum(
+        "HarnExternalActionReceiptStatus",
+        &external_actions.receipt_statuses,
+    ));
+    out.push_str(&swift_enum(
+        "HarnExternalActionNextAction",
+        &external_actions.next_actions,
+    ));
 
     out.push_str(&swift_enum_with_deprecations(
         "HarnACPAgentMethod",
@@ -1364,17 +1384,6 @@ pub(super) fn swift_enum_with_deprecations(
     }
     out.push_str("    ].map { Self(rawValue: $0)! }\n");
     out.push_str("}\n\n");
-    out
-}
-
-pub(super) fn swift_string_array(name: &str, values: &[&str]) -> String {
-    let mut out = format!("    public static let {name}: [String] = [\n");
-    for value in values {
-        out.push_str("        ");
-        out.push_str(&json_string_literal(value));
-        out.push_str(",\n");
-    }
-    out.push_str("    ]\n");
     out
 }
 

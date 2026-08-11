@@ -4,7 +4,12 @@ const ARTIFACTS_REL = "spec/protocol-artifacts"
 
 const TARGETS = [
   {source: "HarnProtocol.swift", destination: "Sources/BurinCore/ACP/HarnProtocol.generated.swift"},
+  {
+    source: "harn-protocol.rs",
+    destination: "crates/burin-tui/protocol/src/harn_protocol_generated.rs",
+  },
   {source: "harn-protocol.ts", destination: "server/src/generated/harn-protocol.ts"},
+  {source: "harn-protocol.ts", destination: "burin-portal/src/generated/harn-protocol.ts"},
 ]
 
 fn repo_root(fs: HarnessFs) -> string {
@@ -24,6 +29,26 @@ fn artifact_root(fs: HarnessFs, root: string = "") -> string {
 
 pub fn normalize_protocol_text(text: string) -> string {
   return text.replace("\r\n", "\n").replace("\r", "\n")
+}
+
+/** Apply the same canonicalization Burin uses before vendoring each target. */
+pub fn normalize_protocol_target(
+  process: HarnessProcess,
+  source: string,
+  source_path: string,
+  text: string,
+) -> string {
+  const normalized = normalize_protocol_text(text)
+  if !source.ends_with(".rs") {
+    return normalized
+  }
+  const formatted = process.run(
+    {program: "rustfmt", args: ["--emit", "stdout", "--quiet", source_path]},
+  )
+  if !formatted.success {
+    throw "rustfmt failed while normalizing " + source + ": " + trim(formatted.stderr)
+  }
+  return normalize_protocol_text(formatted.stdout)
 }
 
 fn expand_user(env: HarnessEnv, path: string) -> string {
@@ -72,6 +97,7 @@ pub fn discover_burin_root(env: HarnessEnv, fs: HarnessFs, explicit_root: string
 }
 
 pub fn stale_burin_protocol_bindings(
+  process: HarnessProcess,
   fs: HarnessFs,
   burin_root: string,
   harn_root: string = "",
@@ -86,7 +112,12 @@ pub fn stale_burin_protocol_bindings(
       stale = stale + [destination_rel + " (missing)"]
       continue
     }
-    const source_text = normalize_protocol_text(fs.read_text(source))
+    const source_text = normalize_protocol_target(
+      process,
+      to_string(target.source),
+      source,
+      fs.read_text(source),
+    )
     const destination_text = normalize_protocol_text(fs.read_text(destination))
     if source_text != destination_text {
       stale = stale + [destination_rel]
@@ -97,6 +128,7 @@ pub fn stale_burin_protocol_bindings(
 
 pub fn check_burin_protocol_bindings(
   env: HarnessEnv,
+  process: HarnessProcess,
   fs: HarnessFs,
   burin_root_arg: string = "",
   required: bool = false,
@@ -115,7 +147,7 @@ pub fn check_burin_protocol_bindings(
       stale_count: 0,
     }
   }
-  const stale = stale_burin_protocol_bindings(fs, burin_root, harn_root)
+  const stale = stale_burin_protocol_bindings(process, fs, burin_root, harn_root)
   return {
     ok: len(stale) == 0,
     skipped: false,
@@ -158,6 +190,7 @@ fn main(harness: Harness) {
   const parsed = unwrap(parsed_result).options
   const report = check_burin_protocol_bindings(
     harness.env,
+    harness.process,
     harness.fs,
     to_string(parsed?.burin_root ?? ""),
     parsed?.required ?? false,

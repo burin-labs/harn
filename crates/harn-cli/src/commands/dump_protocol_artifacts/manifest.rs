@@ -13,6 +13,7 @@ use serde_json::json;
 use std::path::Path;
 
 use super::constants::*;
+use super::external_action::{ExternalActionVocabulary, EXTERNAL_ACTION_VOCABULARY_SOURCE};
 use super::support::*;
 use super::values::*;
 
@@ -38,12 +39,14 @@ pub(crate) fn manifest_json_from(anchor: &Path) -> Result<String, String> {
 }
 
 pub(super) fn generate_manifest(source: &ProtocolArtifactSource) -> Result<String, String> {
-    generate_manifest_for_version(source, env!("CARGO_PKG_VERSION"))
+    let external_actions = ExternalActionVocabulary::load(source)?;
+    generate_manifest_for_version(source, env!("CARGO_PKG_VERSION"), &external_actions)
 }
 
 pub(super) fn generate_manifest_for_version(
     source: &ProtocolArtifactSource,
     artifact_version: &str,
+    external_actions: &ExternalActionVocabulary,
 ) -> Result<String, String> {
     let mut schemas = SCHEMA_COPIES
         .iter()
@@ -174,6 +177,12 @@ pub(super) fn generate_manifest_for_version(
             "toolCallReceiptSchema": TOOL_CALL_RECEIPT_SCHEMA_ARTIFACT,
             "toolCallReceiptStatuses": TOOL_CALL_RECEIPT_STATUSES,
             "toolCallReceiptExecutors": TOOL_CALL_RECEIPT_EXECUTORS,
+        },
+        "externalActions": {
+            "source": EXTERNAL_ACTION_VOCABULARY_SOURCE,
+            "outcomes": external_actions.outcomes,
+            "receiptStatuses": external_actions.receipt_statuses,
+            "nextActions": external_actions.next_actions,
         },
         "plans": {
             "documentSchemaVersion": harn_vm::llm::plan::PLAN_DOCUMENT_SCHEMA_VERSION,

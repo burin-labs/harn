@@ -7,16 +7,23 @@ use harn_serve::MCP_PROTOCOL_VERSION;
 use harn_vm::llm::receipts::{TOOL_CALL_RECEIPT_EXECUTORS, TOOL_CALL_RECEIPT_STATUSES};
 
 use super::constants::*;
+use super::external_action::ExternalActionVocabulary;
 use super::support::*;
 use super::swift::{deprecated_wire_value, deprecation_message, wire_value_property_name};
 use super::values::*;
 
 #[cfg(test)]
 pub(super) fn generate_typescript() -> String {
-    generate_typescript_for_version(env!("CARGO_PKG_VERSION"))
+    generate_typescript_for_version(
+        env!("CARGO_PKG_VERSION"),
+        &ExternalActionVocabulary::load_for_tests(),
+    )
 }
 
-pub(super) fn generate_typescript_for_version(artifact_version: &str) -> String {
+pub(super) fn generate_typescript_for_version(
+    artifact_version: &str,
+    external_actions: &ExternalActionVocabulary,
+) -> String {
     let mut out = generated_header("harn dump-protocol-artifacts", "typescript");
     out.push_str("export const HARN_PROTOCOL_ARTIFACT_VERSION = ");
     out.push_str(&json_string_literal(artifact_version));
@@ -158,6 +165,21 @@ pub(super) fn generate_typescript_for_version(artifact_version: &str) -> String 
         "HARN_TOOL_CALL_RECEIPT_EXECUTORS",
         TOOL_CALL_RECEIPT_EXECUTORS,
         "HarnToolCallReceiptExecutor",
+    ));
+    out.push_str(&ts_array_owned(
+        "EXTERNAL_ACTION_OUTCOMES",
+        &external_actions.outcomes,
+        "HarnExternalActionOutcome",
+    ));
+    out.push_str(&ts_array_owned(
+        "EXTERNAL_ACTION_RECEIPT_STATUSES",
+        &external_actions.receipt_statuses,
+        "HarnExternalActionReceiptStatus",
+    ));
+    out.push_str(&ts_array_owned(
+        "EXTERNAL_ACTION_NEXT_ACTIONS",
+        &external_actions.next_actions,
+        "HarnExternalActionNextAction",
     ));
     out.push_str(&ts_array(
         "A2A_TASK_STATES",

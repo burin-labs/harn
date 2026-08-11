@@ -20,6 +20,7 @@ use harn_vm::session_timeline::{
 };
 
 use super::constants::*;
+use super::external_action::ExternalActionVocabulary;
 use super::go::*;
 use super::manifest::*;
 use super::python::*;
@@ -163,6 +164,68 @@ fn generated_types_include_harn_wire_vocabularies() {
         assert!(ts.contains(&value), "TypeScript artifact missing {value}");
         assert!(swift.contains(&value), "Swift artifact missing {value}");
     }
+}
+
+#[test]
+fn external_action_vocabulary_projects_to_every_supported_host() {
+    let vocabulary = ExternalActionVocabulary::load(&protocol_source()).unwrap();
+    let ts = generate_typescript_for_version("1.0.0", &vocabulary);
+    let swift = generate_swift_for_version("1.0.0", &vocabulary);
+    let rust = generate_rust_for_version("1.0.0", &vocabulary);
+
+    assert!(ts.contains("export type HarnExternalActionOutcome"));
+    assert!(ts.contains("export type HarnExternalActionReceiptStatus"));
+    assert!(ts.contains("export type HarnExternalActionNextAction"));
+    assert!(swift.contains("public enum HarnExternalActionOutcome"));
+    assert!(swift.contains("public enum HarnExternalActionReceiptStatus"));
+    assert!(swift.contains("public enum HarnExternalActionNextAction"));
+    assert!(rust.contains("pub enum HarnExternalActionOutcome"));
+    assert!(rust.contains("pub enum HarnExternalActionReceiptStatus"));
+    assert!(rust.contains("pub enum HarnExternalActionNextAction"));
+
+    for value in vocabulary
+        .outcomes
+        .iter()
+        .chain(&vocabulary.receipt_statuses)
+        .chain(&vocabulary.next_actions)
+    {
+        for (host, generated) in [("TypeScript", &ts), ("Swift", &swift), ("Rust", &rust)] {
+            assert!(
+                generated.contains(value),
+                "{host} projection omitted external-action value `{value}`"
+            );
+        }
+    }
+}
+
+#[test]
+fn adding_external_action_values_updates_all_host_projections() {
+    let vocabulary = ExternalActionVocabulary {
+        outcomes: vec!["confirmed".into(), "future_outcome".into()],
+        receipt_statuses: vec!["confirmed".into(), "future_status".into()],
+        next_actions: vec!["none".into(), "future_action".into()],
+    };
+    for generated in [
+        generate_typescript_for_version("1.0.0", &vocabulary),
+        generate_swift_for_version("1.0.0", &vocabulary),
+        generate_rust_for_version("1.0.0", &vocabulary),
+    ] {
+        for future_value in ["future_outcome", "future_status", "future_action"] {
+            assert!(generated.contains(future_value));
+        }
+    }
+}
+
+#[test]
+fn generated_rust_external_action_enum_rejects_unknown_values() {
+    let unknown = serde_json::from_str::<generated_rust_binding::HarnExternalActionOutcome>(
+        "\"future_terminal\"",
+    );
+    assert!(unknown.is_err());
+    let rejected =
+        serde_json::from_str::<generated_rust_binding::HarnExternalActionOutcome>("\"rejected\"")
+            .unwrap();
+    assert_eq!(rejected.as_str(), "rejected");
 }
 
 #[test]

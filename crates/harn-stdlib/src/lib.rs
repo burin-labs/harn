@@ -155,6 +155,7 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "config" => "stdlib/stdlib_config.harn",
     "calendar" => "stdlib/stdlib_calendar.harn",
     "external_action" => "stdlib/stdlib_external_action.harn",
+    "external_action/vocabulary" => "stdlib/external_action/vocabulary.harn",
     "external_action/contracts" => "stdlib/external_action/contracts.harn",
     "external_action/runtime" => "stdlib/external_action/runtime.harn",
     "external_action/testing" => "stdlib/external_action/testing.harn",

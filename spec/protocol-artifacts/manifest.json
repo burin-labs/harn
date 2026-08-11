@@ -539,6 +539,27 @@
     }
   },
   "checkCommand": "make check-protocol-artifacts",
+  "externalActions": {
+    "nextActions": [
+      "none",
+      "reconcile"
+    ],
+    "outcomes": [
+      "confirmed",
+      "denied",
+      "failed_before_dispatch",
+      "rejected",
+      "indeterminate"
+    ],
+    "receiptStatuses": [
+      "confirmed",
+      "denied",
+      "failed_before_dispatch",
+      "rejected",
+      "reconciliation_required"
+    ],
+    "source": "crates/harn-stdlib/src/stdlib/external_action/vocabulary.harn"
+  },
   "generatedBy": "harn dump-protocol-artifacts",
   "mcp": {
     "cacheResultFields": [
