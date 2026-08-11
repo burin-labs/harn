@@ -3,6 +3,7 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 script="$repo_root/scripts/ci/rust_artifact.sh"
+policy_nextest="$(jq -er '.nextest_version' "$repo_root/.github/cache-policy.json")"
 tmpdir="$(mktemp -d)"
 trap 'rm -rf "$tmpdir"' EXIT
 
@@ -22,7 +23,7 @@ case "$1" in
     ;;
   nextest)
     if [[ "$#" -eq 2 && "$2" == "--version" ]]; then
-      printf 'cargo-nextest %s (fake)\n' "${FAKE_NEXTEST_VERSION:-0.9.132}"
+      printf 'cargo-nextest %s (fake)\n' "${FAKE_NEXTEST_VERSION:-}"
       exit 0
     fi
     if [[ "$#" -eq 10 && "$2" == "archive" && "$3" == "--locked" && \
@@ -84,7 +85,7 @@ run_artifact() {
       CARGO_RECEIPTS="$tmpdir/receipts" \
       FAKE_TARGET="$tmpdir/target" \
       FAKE_COMMIT="${FAKE_COMMIT_OVERRIDE:-$commit}" \
-      FAKE_NEXTEST_VERSION="${FAKE_NEXTEST_VERSION_OVERRIDE:-0.9.132}" \
+      FAKE_NEXTEST_VERSION="${FAKE_NEXTEST_VERSION_OVERRIDE:-$policy_nextest}" \
       FAKE_RUSTC_IDENTITY="${FAKE_RUSTC_IDENTITY_OVERRIDE:-rustc 1.95.0 (fake)}" \
       RUSTFLAGS="${RUSTFLAGS_OVERRIDE:--D warnings -Clink-arg=-fuse-ld=mold}" \
       CARGO_PROFILE_DEV_DEBUG="${DEV_DEBUG_OVERRIDE:-line-tables-only}" \

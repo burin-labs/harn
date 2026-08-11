@@ -5,6 +5,7 @@ import {
   ci_cache_policy_parse,
   ci_workflow_concurrency_errors,
   macos_shared_cache_errors,
+  nextest_version_errors,
   release_aot_runner_errors,
   release_warm_cache_concurrency_errors,
   release_warm_cache_path_matches,
@@ -93,7 +94,6 @@ fn windows_warm_policy() {
     job: "nextest",
     retention_days: 3,
     max_bytes: 8589934592,
-    nextest_version: "0.9.132",
     dev_drive_size_default: "25GB",
     dev_drive_size_release_certify: "50GB",
   }
@@ -101,12 +101,13 @@ fn windows_warm_policy() {
 
 fn policy() -> CiCachePolicy {
   return {
-    schema_version: 3,
+    schema_version: 4,
     rust_cache_action: "./.github/actions/rust-cache",
     node_cache_action: "./.github/actions/node-cache",
     persistent_ref: "refs/heads/main",
     storage_limit_bytes: 10737418240,
     remote_sccache: false,
+    nextest_version: "0.9.132",
     windows_workspace_warm: windows_warm_policy(),
     writers: [
       {
@@ -754,9 +755,8 @@ pipeline test_ci_cache_policy_accepts_declared_main_guarded_writers(harness: Har
       declared["windows-nightly.yml"],
     )
       + windows_release_certify_warm_errors(policy(), declared["windows-nightly.yml"])
-      + actions_cache_capacity_errors(
-      policy(),
-    ),
+      + nextest_version_errors(policy(), declared)
+      + actions_cache_capacity_errors(policy()),
     [],
   )
 }
@@ -768,6 +768,7 @@ pipeline test_windows_shared_cache_targets_dev_drive_with_one_stable_restore_own
   const declared = workflows()
   assert_eq(windows_shared_cache_errors(declared["ci.yml"], declared["windows-nightly.yml"]), [])
   assert_eq(windows_release_certify_warm_errors(policy(), declared["windows-nightly.yml"]), [])
+  assert_eq(nextest_version_errors(policy(), declared), [])
   assert_eq(actions_cache_capacity_errors(policy()), [])
 }
 
@@ -844,6 +845,37 @@ pipeline test_windows_release_certify_warm_requires_artifact_path_and_larger_dri
   )
 }
 
+pipeline test_nextest_version_locks_every_workflow_pin(harness: Harness, task) {
+  const declared = workflows()
+  const declared_policy = policy()
+  assert_eq(nextest_version_errors(declared_policy, declared), [])
+  const drifted = {
+    ...declared,
+    "windows-nightly.yml": {
+      ...declared["windows-nightly.yml"],
+      jobs: {
+        nextest: {
+          ...declared["windows-nightly.yml"].jobs.nextest,
+          steps: declared["windows-nightly.yml"].jobs.nextest.steps.map(
+            { step ->
+              if trim(step?.name ?? "") != "Install cargo-nextest" {
+                return step
+              }
+              return {...step, with: {tool: "nextest@0.9.131"}}
+            },
+          )
+            .to_list(),
+        },
+      },
+    },
+  }
+  assert(
+    nextest_version_errors(declared_policy, drifted).contains(
+      "windows-nightly.yml:nextest must install nextest@0.9.132 from cache-policy.json",
+    ),
+  )
+}
+
 pipeline test_actions_cache_capacity_keeps_warm_artifact_below_pool(harness: Harness, task) {
   assert_eq(actions_cache_capacity_errors(policy()), [])
   const base = policy()
@@ -854,6 +886,7 @@ pipeline test_actions_cache_capacity_keeps_warm_artifact_below_pool(harness: Har
     persistent_ref: base.persistent_ref,
     storage_limit_bytes: base.storage_limit_bytes,
     remote_sccache: base.remote_sccache,
+    nextest_version: base.nextest_version,
     windows_workspace_warm: {...base.windows_workspace_warm, max_bytes: base.storage_limit_bytes},
     writers: base.writers,
   }
@@ -869,6 +902,7 @@ pipeline test_actions_cache_capacity_keeps_warm_artifact_below_pool(harness: Har
     persistent_ref: base.persistent_ref,
     storage_limit_bytes: base.storage_limit_bytes,
     remote_sccache: base.remote_sccache,
+    nextest_version: base.nextest_version,
     windows_workspace_warm: {
       ...base.windows_workspace_warm,
       dev_drive_size_release_certify: base.windows_workspace_warm.dev_drive_size_default,

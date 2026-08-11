@@ -3,31 +3,22 @@
 # namespace. Release-certify consumers restore it read-only and fall back cold
 # when no compatible generation exists (harn#6485).
 #
-# Knobs live in .github/cache-policy.json under windows_workspace_warm; this
-# script and scripts/check_ci_cache_policy.harn both read that document.
+# Knobs live in .github/cache-policy.json; this script and
+# scripts/check_ci_cache_policy.harn both read that document through
+# scripts/ci/cache_policy.sh.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd -P)"
-readonly CACHE_POLICY_PATH="${HARN_CACHE_POLICY_PATH:-$REPO_ROOT/.github/cache-policy.json}"
+# shellcheck source=scripts/ci/cache_policy.sh
+source "${SCRIPT_DIR}/cache_policy.sh"
 
 load_warm_policy() {
-  if [[ ! -f "$CACHE_POLICY_PATH" ]]; then
-    echo "error: cache policy not found: $CACHE_POLICY_PATH" >&2
-    exit 2
-  fi
-  local schema_version
-  schema_version="$(jq -er '.schema_version' "$CACHE_POLICY_PATH")"
-  if [[ "$schema_version" != "3" ]]; then
-    echo "error: expected cache-policy.json schema_version 3, got ${schema_version}" >&2
-    exit 2
-  fi
-  ARTIFACT_NAME="$(jq -er '.windows_workspace_warm.artifact_name' "$CACHE_POLICY_PATH")"
-  SCHEMA="$(jq -er '.windows_workspace_warm.manifest_schema' "$CACHE_POLICY_PATH")"
-  WORKFLOW_FILE="$(jq -er '.windows_workspace_warm.workflow' "$CACHE_POLICY_PATH")"
-  DEFAULT_MAX_BYTES="$(jq -er '.windows_workspace_warm.max_bytes' "$CACHE_POLICY_PATH")"
-  NEXTEST_VERSION="$(jq -er '.windows_workspace_warm.nextest_version' "$CACHE_POLICY_PATH")"
-  PRODUCER_REF="$(jq -er '.persistent_ref' "$CACHE_POLICY_PATH")"
+  ARTIFACT_NAME="$(harn_cache_policy_jq '.windows_workspace_warm.artifact_name')"
+  SCHEMA="$(harn_cache_policy_jq '.windows_workspace_warm.manifest_schema')"
+  WORKFLOW_FILE="$(harn_cache_policy_jq '.windows_workspace_warm.workflow')"
+  DEFAULT_MAX_BYTES="$(harn_cache_policy_jq '.windows_workspace_warm.max_bytes')"
+  NEXTEST_VERSION="$(harn_cache_policy_jq '.nextest_version')"
+  PRODUCER_REF="$(harn_cache_policy_jq '.persistent_ref')"
   PRODUCER_BRANCH="${PRODUCER_REF#refs/heads/}"
   if [[ "$PRODUCER_BRANCH" == "$PRODUCER_REF" || -z "$PRODUCER_BRANCH" ]]; then
     echo "error: persistent_ref must be refs/heads/<branch>, got ${PRODUCER_REF}" >&2
@@ -50,7 +41,8 @@ download-and-restore finds the newest successful main windows-nightly warm
 artifact, restores it into the target dir, and exits 0 only on a compatible hit.
 Missing or incompatible generations exit non-zero so the caller can fall cold.
 
-Configuration is owned by .github/cache-policy.json (windows_workspace_warm).
+Configuration is owned by .github/cache-policy.json (nextest_version and
+windows_workspace_warm).
 EOF
 }
 

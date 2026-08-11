@@ -67,9 +67,11 @@ Successful `main` `windows-nightly` runs publish a short-retention
 `workspace-windows-warm` workflow artifact; `release-certify/<sha>` consumers
 restore that artifact read-only into a larger Dynamic Dev Drive ceiling and
 fall cold when no compatible generation exists. Cargo still owns exact-source
-invalidation after the restore. Artifact name, retention, size budget, nextest
-pin, and Dev Drive ceilings are owned by `.github/cache-policy.json`
-(`windows_workspace_warm`) and locked by `scripts/check_ci_cache_policy.harn`.
+invalidation after the restore. Artifact name, retention, size budget, and Dev Drive ceilings are owned by
+`.github/cache-policy.json` (`windows_workspace_warm`); the workspace
+`cargo-nextest` pin is the top-level `nextest_version` in the same document.
+`scripts/check_ci_cache_policy.harn` locks both surfaces, and CI scripts load
+them through `scripts/ci/cache_policy.sh`.
 
 The resulting `harn.release_audit_receipt.v2` records the certified source SHA,
 run/job URLs and IDs, per-lane timings, and critical path. The harness re-reads

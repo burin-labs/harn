@@ -1,7 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-readonly NEXTEST_VERSION="0.9.132"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+# shellcheck source=scripts/ci/cache_policy.sh
+source "${SCRIPT_DIR}/cache_policy.sh"
+
+# Owned by .github/cache-policy.json nextest_version (schema v4).
+NEXTEST_VERSION="$(harn_cache_policy_jq '.nextest_version')"
+readonly NEXTEST_VERSION
 readonly NEUTRAL_FILTER='all()'
 readonly SECURITY_FILTER='(package(harn-vm) and binary(harn_vm)) or (package(harn-hostlib) and binary(harn_hostlib))'
 readonly EXPECTED_RUSTFLAGS='-D warnings -Clink-arg=-fuse-ld=mold'
