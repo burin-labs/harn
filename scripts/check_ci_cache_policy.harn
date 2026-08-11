@@ -1181,7 +1181,8 @@ fn matching_upload_steps(job, artifact_name: string) -> list {
   return (job?.steps ?? []).filter(
     { step ->
       return step_uses(step).starts_with("actions/upload-artifact@")
-        && trim(step?.with?.name ?? "") == artifact_name
+        && trim(step?.with?.name ?? "")
+        == artifact_name
     },
   )
     .to_list()
@@ -1261,7 +1262,8 @@ pub fn windows_release_certify_warm_errors(nightly_workflow) -> list<string> {
   const restore_steps = matching_run_steps(job, WINDOWS_WARM_RESTORE_MARKER)
   if len(restore_steps) != 1
     || trim(restore_steps[0]?.if ?? "") != WINDOWS_WARM_RELEASE_CERTIFY_GUARD
-    || restore_steps[0]?.["continue-on-error"] != true {
+    || restore_steps[0]?.["continue-on-error"]
+    != true {
     errors = errors
       + [
       "windows-nightly.yml:nextest must restore-only the main warm artifact on release-certify refs with cold fallback",
@@ -1270,15 +1272,17 @@ pub fn windows_release_certify_warm_errors(nightly_workflow) -> list<string> {
   const pack_steps = matching_run_steps(job, WINDOWS_WARM_PACK_MARKER)
   if len(pack_steps) != 1 || trim(pack_steps[0]?.if ?? "") != WINDOWS_WARM_MAIN_GUARD {
     errors = errors
-      + [
-      "windows-nightly.yml:nextest must pack the Windows warm artifact only on main",
-    ]
+      + ["windows-nightly.yml:nextest must pack the Windows warm artifact only on main"]
   }
   const upload_steps = matching_upload_steps(job, WINDOWS_WARM_ARTIFACT_NAME)
   if len(upload_steps) != 1
     || trim(upload_steps[0]?.if ?? "") != WINDOWS_WARM_MAIN_GUARD
-    || upload_steps[0]?.with?.["retention-days"] != WINDOWS_WARM_ARTIFACT_RETENTION_DAYS
-    || trim(to_string(upload_steps[0]?.with?.["if-no-files-found"] ?? "")) != "error" {
+    || upload_steps[0]?.with?.["retention-days"]
+    != WINDOWS_WARM_ARTIFACT_RETENTION_DAYS
+    || trim(
+    to_string(upload_steps[0]?.with?.["if-no-files-found"] ?? ""),
+  )
+    != "error" {
     errors = errors
       + [
       "windows-nightly.yml:nextest must upload ${WINDOWS_WARM_ARTIFACT_NAME} from main with 3-day retention",

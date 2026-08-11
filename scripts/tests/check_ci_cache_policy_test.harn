@@ -410,7 +410,8 @@ fn workflows() {
               name: "Restore Windows workspace warm artifact",
               if: gha_expression("startsWith(github.ref_name, 'release-certify/')"),
               "continue-on-error": true,
-              run: "./scripts/ci/windows_workspace_warm_artifact.sh download-and-restore --repo owner/repo",
+              run:
+                "./scripts/ci/windows_workspace_warm_artifact.sh download-and-restore --repo owner/repo",
             },
             {
               name: "Stage Windows workspace warm artifact",
@@ -728,7 +729,9 @@ pipeline test_ci_cache_policy_accepts_declared_main_guarded_writers(harness: Har
       declared["windows-nightly.yml"],
     )
       + windows_release_certify_warm_errors(declared["windows-nightly.yml"])
-      + actions_cache_capacity_errors(policy()),
+      + actions_cache_capacity_errors(
+      policy(),
+    ),
     [],
   )
 }
@@ -769,7 +772,6 @@ pipeline test_windows_release_certify_warm_requires_artifact_path_and_larger_dri
   const declared = workflows()
   const producer = declared["windows-nightly.yml"]
   assert_eq(windows_release_certify_warm_errors(producer), [])
-
   const without_restore = {
     ...producer,
     jobs: {
@@ -792,7 +794,6 @@ pipeline test_windows_release_certify_warm_requires_artifact_path_and_larger_dri
       "windows-nightly.yml:nextest must restore-only the main warm artifact on release-certify refs with cold fallback",
     ),
   )
-
   const small_drive = {
     ...producer,
     jobs: {
