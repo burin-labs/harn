@@ -839,6 +839,15 @@ compatible-served-route constructor live in `harn_vm::llm::managed_supply`, so
 Rust gateways consume the owning types and policy directly instead of copying
 catalog checks.
 
+Hosted OpenAI-compatible gateways should also deserialize messages, function
+tools, and generation options through `HostedChatRequest`, then call
+`hosted_openai_request(provider, model, request)` for physical provider egress.
+That projection is closed: hosted tenancy, routing, and accounting metadata
+cannot enter the third-party body. The provider catalog's
+`stream_usage_accounting` field controls whether the documented
+`stream_options.include_usage` extension is emitted; an absent declaration
+fails closed.
+
 ### Field-wise catalog patches with `[patch.models]`
 
 An overlay's `[models.<id>]` table replaces the whole model row, which is

@@ -43,6 +43,7 @@ pub fn schema_value() -> Value {
                     "extra_headers": {"type": "object", "additionalProperties": {"type": "string"}},
                     "healthcheck": {"$ref": "#/$defs/healthcheck"},
                     "cache_usage_accounting": {"type": "boolean"},
+                    "stream_usage_accounting": {"type": "boolean"},
                     "protocols": {"type": "array", "items": {"type": "string"}},
                     "features": {"type": "array", "items": {"type": "string"}},
                     "caveats": {"type": "array", "items": {"type": "string"}},

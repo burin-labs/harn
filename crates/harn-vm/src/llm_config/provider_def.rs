@@ -67,6 +67,11 @@ pub struct ProviderDef {
     /// Whether zero-valued cache usage fields from this provider represent a
     /// real cache miss. `None` means accounting has not been verified.
     pub cache_usage_accounting: Option<bool>,
+    /// Whether this provider accepts OpenAI's
+    /// `stream_options.include_usage` request extension. `None` is
+    /// deliberately fail-closed for hosted adapters: an undocumented field
+    /// must not be guessed onto a third-party wire.
+    pub stream_usage_accounting: Option<bool>,
     pub features: Vec<String>,
     /// Fallback provider name to try if this provider fails.
     pub fallback: Option<String>,
@@ -154,6 +159,8 @@ struct ProviderDefWire {
     #[serde(default)]
     cache_usage_accounting: Option<bool>,
     #[serde(default)]
+    stream_usage_accounting: Option<bool>,
+    #[serde(default)]
     features: Vec<String>,
     #[serde(default)]
     fallback: Option<String>,
@@ -208,6 +215,7 @@ impl<'de> Deserialize<'de> for ProviderDef {
             healthcheck: wire.healthcheck,
             local_runtime: wire.local_runtime,
             cache_usage_accounting: wire.cache_usage_accounting,
+            stream_usage_accounting: wire.stream_usage_accounting,
             features: wire.features,
             fallback: wire.fallback,
             retry_count: wire.retry_count,
@@ -249,6 +257,7 @@ impl Default for ProviderDef {
             healthcheck: None,
             local_runtime: None,
             cache_usage_accounting: None,
+            stream_usage_accounting: None,
             features: Vec::new(),
             fallback: None,
             retry_count: None,
@@ -303,6 +312,10 @@ impl ProviderDef {
         merge_option(
             &mut self.cache_usage_accounting,
             &overlay.cache_usage_accounting,
+        );
+        merge_option(
+            &mut self.stream_usage_accounting,
+            &overlay.stream_usage_accounting,
         );
         merge_vec(&mut self.features, &overlay.features);
         merge_option(&mut self.fallback, &overlay.fallback);

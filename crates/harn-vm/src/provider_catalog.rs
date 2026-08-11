@@ -180,6 +180,7 @@ fn provider_def_from_catalog(provider: &CatalogProvider) -> llm_config::Provider
             .clone()
             .map(healthcheck_def_from_catalog),
         cache_usage_accounting: Some(provider.cache_usage_accounting),
+        stream_usage_accounting: provider.stream_usage_accounting,
         features: provider.features.clone(),
         rpm: provider.rpm,
         rate_limits: provider.rate_limits.clone(),
@@ -421,6 +422,7 @@ fn catalog_provider(id: String, provider: ProviderDef) -> CatalogProvider {
             .clone()
             .map(catalog_provider_healthcheck),
         cache_usage_accounting: provider.cache_usage_accounting.unwrap_or(false),
+        stream_usage_accounting: provider.stream_usage_accounting,
         protocols: provider_protocols(&id, &provider),
         features: provider.features.clone(),
         caveats: provider_caveats(&id, &provider),
