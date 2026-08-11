@@ -608,6 +608,7 @@ pub fn model_equivalence_group(model_id: &str) -> Option<String> {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct EquivalentModelRequirements {
     pub context_tokens: Option<u64>,
+    pub responses_api: bool,
     pub native_tools: bool,
     pub text_tool_wire_format: bool,
     pub provider_tool_types: Vec<String>,
@@ -630,6 +631,7 @@ impl EquivalentModelRequirements {
     ) -> Self {
         Self {
             context_tokens: Some(context_tokens),
+            responses_api: caps.responses_api,
             native_tools: caps.native_tools,
             text_tool_wire_format: caps.text_tool_wire_format_supported,
             provider_tool_types: equivalent_provider_tool_types_for_capabilities(caps),
@@ -704,6 +706,7 @@ pub fn equivalent_model_catalog_entries_for_requirements(
             let caps = crate::llm::capabilities::lookup(&model.provider, id);
             let candidate_context = model.runtime_context_window.unwrap_or(model.context_window);
             let context_matches = candidate_context >= minimum_context;
+            let responses_api_match = !requirements.responses_api || caps.responses_api;
             let native_tools_match = !requirements.native_tools || caps.native_tools;
             let text_tool_format_match =
                 !requirements.text_tool_wire_format || caps.text_tool_wire_format_supported;
@@ -728,6 +731,7 @@ pub fn equivalent_model_catalog_entries_for_requirements(
                 .as_ref()
                 .is_none_or(|mode| mode == &caps.structured_output_mode);
             context_matches
+                && responses_api_match
                 && native_tools_match
                 && text_tool_format_match
                 && provider_tools_match

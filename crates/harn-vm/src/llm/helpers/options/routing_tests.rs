@@ -1,11 +1,11 @@
 use super::extract::*;
+use super::routing_test_support::{
+    extract_with_options, test_equivalent_model, test_equivalent_model_with_context, test_provider,
+};
 use super::*;
-use crate::llm::helpers::options::routing::equivalent_failover_requirements_for_options;
 use crate::value::VmDictExt;
 
-use crate::llm_config::{
-    AliasDef, AuthEnv, ModelAvailability, ModelDef, ProviderDef, ProvidersConfig, TierRule,
-};
+use crate::llm_config::{AliasDef, AuthEnv, ProviderDef, ProvidersConfig, TierRule};
 
 fn install_test_routes() {
     let mut overlay = ProvidersConfig::default();
@@ -64,63 +64,6 @@ fn install_test_routes() {
         tier: "mid".to_string(),
     });
     crate::llm_config::set_user_overrides(Some(overlay));
-}
-
-fn test_provider(url: &str) -> ProviderDef {
-    ProviderDef {
-        base_url: url.to_string(),
-        auth_style: "none".to_string(),
-        auth_env: AuthEnv::None,
-        chat_endpoint: "/chat/completions".to_string(),
-        cost_per_1k_in: Some(0.0),
-        cost_per_1k_out: Some(0.0),
-        latency_p50_ms: Some(1000),
-        ..Default::default()
-    }
-}
-
-fn test_equivalent_model(provider: &str, group: &str) -> ModelDef {
-    test_equivalent_model_with_context(provider, group, 32_000)
-}
-fn test_equivalent_model_with_context(
-    provider: &str,
-    group: &str,
-    context_window: u64,
-) -> ModelDef {
-    ModelDef {
-        name: format!("{provider} equivalent model"),
-        display_name: None,
-        blurb: None,
-        provider: provider.to_string(),
-        context_window,
-        logical_model: None,
-        equivalence_group: Some(group.to_string()),
-        served_variant: None,
-        wire_model: None,
-        api_dialect: None,
-        rate_limits: None,
-        performance: None,
-        architecture: None,
-        local_memory: None,
-        runtime_context_window: None,
-        stream_timeout: None,
-        capabilities: Vec::new(),
-        pricing: None,
-        deprecated: false,
-        deprecation_note: None,
-        superseded_by: None,
-        serving_tiers: Vec::new(),
-        quality_tags: Vec::new(),
-        availability: ModelAvailability::Serverless,
-        tier: Some("mid".to_string()),
-        open_weight: Some(true),
-        strengths: Vec::new(),
-        benchmarks: std::collections::BTreeMap::new(),
-        family: Some("test-equivalent-family".to_string()),
-        lineage: None,
-        complementary_with: Vec::new(),
-        avoid_as_reviewer_for: Vec::new(),
-    }
 }
 
 fn install_equivalent_routes() {
@@ -186,16 +129,6 @@ fn cheapest_over_quality_selects_lowest_cost_available_candidate() {
         .iter()
         .any(|alt| alt.provider == "fast"));
     crate::llm_config::clear_user_overrides();
-}
-
-fn extract_with_options(
-    opts: crate::value::DictMap,
-) -> Result<crate::llm::api::LlmCallOptions, VmError> {
-    extract_llm_options(&[
-        VmValue::String(arcstr::ArcStr::from("hello".to_string())),
-        VmValue::Nil,
-        VmValue::dict(opts),
-    ])
 }
 
 fn model_role_options(role: &str) -> crate::value::DictMap {
@@ -804,98 +737,6 @@ fn equivalent_failover_filters_by_multimodal_requirements() {
         .chain
         .iter()
         .all(|link| link.provider != "text-backup"));
-
-    crate::llm_config::clear_user_overrides();
-    crate::llm::capabilities::clear_user_overrides();
-}
-
-#[test]
-fn equivalent_failover_filters_by_provider_tool_requirements() {
-    let mut overlay = ProvidersConfig::default();
-    for provider in ["mock", "plain-backup", "openai"] {
-        overlay.providers.insert(
-            provider.to_string(),
-            test_provider(&format!("https://{provider}.example/v1")),
-        );
-    }
-    overlay.models.insert(
-        "tool-primary-model".to_string(),
-        test_equivalent_model("mock", "provider-tool-equivalent-test"),
-    );
-    overlay.models.insert(
-        "plain-backup-model".to_string(),
-        test_equivalent_model("plain-backup", "provider-tool-equivalent-test"),
-    );
-    overlay.models.insert(
-        "tool-backup-model".to_string(),
-        test_equivalent_model("openai", "provider-tool-equivalent-test"),
-    );
-    crate::llm_config::set_user_overrides(Some(overlay));
-    let capability_overlay = [
-        "[[provider.mock]]",
-        "model_match = \"tool-primary-model\"",
-        "native_tools = true",
-        "preferred_tool_format = \"native\"",
-        "responses_api = true",
-        "hosted_tools = [\"web_search\"]",
-        "",
-        "[[provider.plain-backup]]",
-        "model_match = \"plain-backup-model\"",
-        "native_tools = true",
-        "preferred_tool_format = \"native\"",
-        "responses_api = true",
-        "",
-        "[[provider.openai]]",
-        "model_match = \"tool-backup-model\"",
-        "native_tools = true",
-        "preferred_tool_format = \"native\"",
-        "responses_api = true",
-        "hosted_tools = [\"web_search\"]",
-    ]
-    .join("\n");
-    crate::llm::capabilities::set_user_overrides_toml(&capability_overlay)
-        .expect("capability override");
-
-    let opts = extract_with_options(crate::value::DictMap::from_iter([
-        (
-            crate::value::intern_key("provider"),
-            VmValue::String(arcstr::ArcStr::from("mock")),
-        ),
-        (
-            crate::value::intern_key("model"),
-            VmValue::String(arcstr::ArcStr::from("tool-primary-model")),
-        ),
-        (
-            crate::value::intern_key("api_mode"),
-            VmValue::String(arcstr::ArcStr::from("responses")),
-        ),
-        (
-            crate::value::intern_key("provider_tools"),
-            VmValue::List(std::sync::Arc::new(vec![VmValue::String(
-                arcstr::ArcStr::from("web_search"),
-            )])),
-        ),
-        (
-            crate::value::intern_key("equivalent_failover"),
-            VmValue::Bool(true),
-        ),
-    ]))
-    .expect("options");
-
-    let requirements = equivalent_failover_requirements_for_options(&opts);
-    let candidates = crate::llm_config::equivalent_model_catalog_entries_for_requirements(
-        "tool-primary-model",
-        requirements.clone(),
-    );
-    assert!(
-        candidates
-            .iter()
-            .any(|(id, model)| { id == "tool-backup-model" && model.provider == "openai" }),
-        "requirements={requirements:?} candidates={candidates:?}"
-    );
-    assert!(candidates
-        .iter()
-        .all(|(id, model)| { id != "plain-backup-model" && model.provider != "plain-backup" }));
 
     crate::llm_config::clear_user_overrides();
     crate::llm::capabilities::clear_user_overrides();

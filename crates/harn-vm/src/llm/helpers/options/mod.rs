@@ -41,6 +41,10 @@ mod route_policy_cutover_tests;
 #[cfg(test)]
 mod routing_credential_tests;
 #[cfg(test)]
+mod routing_responses_tests;
+#[cfg(test)]
+mod routing_test_support;
+#[cfg(test)]
 mod routing_tests;
 
 // Shared imports re-exported across the whole `options` subtree so each
