@@ -60,6 +60,26 @@ fn stance_tools() {
   )
   tools = tool_define(
     tools,
+    "fetch",
+    "fetch remote data",
+    {
+      parameters: {},
+      annotations: {kind: "fetch", side_effect_level: "network"},
+      handler: { _args -> "remote data" },
+    },
+  )
+  tools = tool_define(
+    tools,
+    "send",
+    "change a remote system",
+    {
+      parameters: {},
+      annotations: {kind: "execute", side_effect_level: "network"},
+      handler: { _args -> "sent" },
+    },
+  )
+  tools = tool_define(
+    tools,
     "mystery",
     "unannotated tool",
     {parameters: {}, handler: { _args -> "?" }},
@@ -154,6 +174,8 @@ pipeline default(harness: Harness) {
       harness.stdio.println(has_tool(first_tools, "request_write_access"))
       harness.stdio.println(has_tool(first_tools, "edit"))
       harness.stdio.println(has_tool(first_tools, "run"))
+      harness.stdio.println(has_tool(first_tools, "fetch"))
+      harness.stdio.println(has_tool(first_tools, "send"))
       harness.stdio.println(has_tool(first_tools, "mystery"))
       const third_tools = calls[2].tools
       harness.stdio.println(has_tool(third_tools, "edit"))
