@@ -773,12 +773,15 @@ fn test_model_family_preserves_underlying_hosted_lineage() {
 
 #[test]
 fn test_complementary_reviewer_uses_different_family() {
-    let selection = pick_complementary_reviewer(ComplementaryReviewerOptions {
-        author_model: "claude-sonnet-4-6".to_string(),
-        author_provider: None,
-        intent: ComplementaryReviewerIntent::PlanReview,
-        max_price_multiplier: Some(3.0),
-    });
+    let selection = pick_complementary_reviewer_with_availability(
+        ComplementaryReviewerOptions {
+            author_model: "claude-sonnet-4-6".to_string(),
+            author_provider: None,
+            intent: ComplementaryReviewerIntent::PlanReview,
+            max_price_multiplier: Some(3.0),
+        },
+        |_| true,
+    );
 
     assert!(!selection.fallback, "{selection:?}");
     assert_eq!(selection.author.family, "anthropic-claude");
@@ -792,12 +795,15 @@ fn test_complementary_reviewer_uses_different_family() {
 
 #[test]
 fn test_complementary_reviewer_falls_back_deterministically_on_price_cap() {
-    let selection = pick_complementary_reviewer(ComplementaryReviewerOptions {
-        author_model: "gpt-4o-mini".to_string(),
-        author_provider: Some("openai".to_string()),
-        intent: ComplementaryReviewerIntent::Review,
-        max_price_multiplier: Some(0.01),
-    });
+    let selection = pick_complementary_reviewer_with_availability(
+        ComplementaryReviewerOptions {
+            author_model: "gpt-4o-mini".to_string(),
+            author_provider: Some("openai".to_string()),
+            intent: ComplementaryReviewerIntent::Review,
+            max_price_multiplier: Some(0.01),
+        },
+        |_| true,
+    );
 
     assert!(selection.fallback, "{selection:?}");
     assert_eq!(selection.reviewer.id, "gpt-4o-mini");
@@ -837,8 +843,48 @@ fn test_reviewer_fallback_codes_are_stable_strings() {
         "no_diff_family_serverless"
     );
     assert_eq!(
+        ReviewerFallbackCode::NoDiffFamilyAvailable.as_code(),
+        "no_diff_family_available"
+    );
+    assert_eq!(
         ReviewerFallbackCode::AllDiffFamilyExcluded.as_code(),
         "all_diff_family_excluded"
+    );
+}
+
+#[test]
+fn test_complementary_reviewer_skips_unavailable_provider() {
+    let selection = pick_complementary_reviewer_with_availability(
+        ComplementaryReviewerOptions {
+            author_model: "gpt-5.6-luna".to_string(),
+            author_provider: Some("openai".to_string()),
+            intent: ComplementaryReviewerIntent::Critique,
+            max_price_multiplier: None,
+        },
+        |provider| provider != "gemini",
+    );
+
+    assert!(!selection.fallback, "{selection:?}");
+    assert_ne!(selection.reviewer.provider, "gemini");
+    assert_ne!(selection.reviewer.family, selection.author.family);
+}
+
+#[test]
+fn test_complementary_reviewer_reports_no_available_independent_route() {
+    let selection = pick_complementary_reviewer_with_availability(
+        ComplementaryReviewerOptions {
+            author_model: "gpt-5.6-luna".to_string(),
+            author_provider: Some("openai".to_string()),
+            intent: ComplementaryReviewerIntent::Critique,
+            max_price_multiplier: None,
+        },
+        |_| false,
+    );
+
+    assert!(selection.fallback, "{selection:?}");
+    assert_eq!(
+        selection.fallback_code.as_deref(),
+        Some(ReviewerFallbackCode::NoDiffFamilyAvailable.as_code())
     );
 }
 
