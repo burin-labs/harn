@@ -9,6 +9,48 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.78
+
+### Added
+
+- Connector manifests can now declare validated environment aliases for logical
+  credentials. Setup and status reports project the same source facts.
+
+### Changed
+
+- **Release fanout now keeps compiler-cache parity on macOS and Windows
+  (#6372).** Each release target declares an `sccache_backend` (`sticky`,
+  `local`, `install`, or `none`). Blacksmith macOS uses sticky-disk sccache;
+  hosted macOS ARM and Windows persist a bounded local `SCCACHE_DIR` without
+  the per-object GHA backend that previously failed mid-compile. Every Build
+  job records cache mode, hit/miss stats, and Build-step wall time, and warm
+  or candidate builds compare that duration to the `v0.10.65` warm-build
+  budget.
+- **Windows workspace warm knobs now live in `cache-policy.json`.** Artifact
+  name, retention, size budget, nextest pin, and Dev Drive ceilings are owned by
+  the typed `windows_workspace_warm` config (schema v3); the pack/restore script
+  and CI cache-policy checker both read that document instead of duplicating
+  constants.
+
+### Fixed
+
+- ACP overrides typed `harness.runtime.emit_response` onto the session
+  presentation stream (same `agent_message_chunk` path as the ambient builtin)
+  and classifies it as presentation rather than host mutation, so capability
+  migration no longer detaches Burin ACP consumers from the assistant timeline.
+- **SSE transports surface structured `event: error` frames as classified
+  provider failures instead of premature EOF (#6499).** Named error events and
+  top-level error JSON terminate through the shared sanitized provider-error
+  classifier with the upstream kind/reason, preserve partial-output when text
+  already streamed, and keep secret-like body values redacted.
+- External-action receipts now distinguish a provider rejection after dispatch
+  from an action that never reached the provider. This keeps retry decisions and
+  audit evidence truthful.
+- Equivalent-model failover now keeps Responses API calls on routes that support the required endpoint.
+- **Windows warm-artifact packing no longer breaks on Git Bash drive-letter
+  paths.** Staging archives are written via basename paths so hosted Windows
+  runners under `D:\a\_temp` can publish `workspace-windows-warm`.
+
 ## v0.10.77
 
 ### Changed
