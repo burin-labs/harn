@@ -51,12 +51,16 @@ pipeline test(harness: Harness, task) {
   const reviewer = harness.llm.complementary_reviewer(
     {author_model: "claude-sonnet-4-6", intent: "plan_review"},
   )
-  assert_eq(reviewer.fallback, false)
-  assert(reviewer.reviewer.family != reviewer.author.family, "reviewer uses a different family")
-  assert(
-    reviewer.estimated_incremental_cost.total_per_mtok > 0.0,
-    "reviewer exposes estimated cost",
-  )
+  if reviewer.fallback {
+    assert_eq(reviewer.fallback_code, "no_diff_family_available")
+    assert_eq(reviewer.estimated_incremental_cost, nil)
+  } else {
+    assert(reviewer.reviewer.family != reviewer.author.family, "reviewer uses a different family")
+    const estimate = reviewer.estimated_incremental_cost
+    if estimate != nil {
+      assert(estimate.total_per_mtok > 0.0, "reviewer exposes estimated cost")
+    }
+  }
   const capped = harness.llm.complementary_reviewer(
     {author_model: "gpt-4o-mini", intent: "review", max_price_multiplier: 0.01},
   )

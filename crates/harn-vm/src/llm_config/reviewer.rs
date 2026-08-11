@@ -72,6 +72,9 @@ pub enum ReviewerFallbackCode {
     NoDiffFamilyWithinPrice,
     /// No active, serverless, different-family reviewer is cataloged at all.
     NoDiffFamilyServerless,
+    /// Different-family serverless reviewers are cataloged, but none of their
+    /// providers can authenticate through the active dispatch credential view.
+    NoDiffFamilyAvailable,
     /// Different-family candidates exist but were all excluded (e.g. every
     /// one declares `avoid_as_reviewer_for` the author).
     AllDiffFamilyExcluded,
@@ -83,6 +86,7 @@ impl ReviewerFallbackCode {
             Self::UnknownAuthorFamily => "unknown_author_family",
             Self::NoDiffFamilyWithinPrice => "no_diff_family_within_price",
             Self::NoDiffFamilyServerless => "no_diff_family_serverless",
+            Self::NoDiffFamilyAvailable => "no_diff_family_available",
             Self::AllDiffFamilyExcluded => "all_diff_family_excluded",
         }
     }
@@ -110,6 +114,15 @@ pub struct ComplementaryCostEstimate {
 
 pub fn pick_complementary_reviewer(
     options: ComplementaryReviewerOptions,
+) -> ComplementaryReviewerSelection {
+    pick_complementary_reviewer_with_availability(options, |provider| {
+        crate::llm::provider_auth_status(provider).available
+    })
+}
+
+pub(super) fn pick_complementary_reviewer_with_availability(
+    options: ComplementaryReviewerOptions,
+    provider_is_available: impl Fn(&str) -> bool,
 ) -> ComplementaryReviewerSelection {
     let config = effective_config();
     let mut author = resolve_model_info(&options.author_model);
@@ -165,6 +178,7 @@ pub fn pick_complementary_reviewer(
     let author_refs = reviewer_match_refs(&author_identity);
     let mut rejected_by_price = 0usize;
     let mut diff_family_seen = 0usize;
+    let mut available_diff_family_seen = 0usize;
     let mut candidates = Vec::new();
 
     for (id, model) in config.models.iter() {
@@ -179,6 +193,10 @@ pub fn pick_complementary_reviewer(
             continue;
         }
         diff_family_seen += 1;
+        if !provider_is_available(&model.provider) {
+            continue;
+        }
+        available_diff_family_seen += 1;
         let lineage = model_lineage_with_config(&config, &model.provider, id);
         let candidate_identity = complementary_identity(
             id.clone(),
@@ -237,6 +255,12 @@ pub fn pick_complementary_reviewer(
             return fallback(
                 ReviewerFallbackCode::NoDiffFamilyServerless,
                 "no active serverless different-family reviewer is cataloged".to_string(),
+            );
+        }
+        if available_diff_family_seen == 0 {
+            return fallback(
+                ReviewerFallbackCode::NoDiffFamilyAvailable,
+                "no different-family reviewer has an available provider credential".to_string(),
             );
         }
         return fallback(
