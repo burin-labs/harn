@@ -1268,12 +1268,23 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
-          compile_requests="$(awk '/^Compile requests[[:space:]]/ {print $NF; found=1} END {if (!found) print 0}' "$stats_file")"
-          cache_hits="$(awk '/^Cache hits[[:space:]]/ {print $NF; found=1; exit} END {if (!found) print 0}' "$stats_file")"
-          cache_misses="$(awk '/^Cache misses[[:space:]]/ {print $NF; found=1; exit} END {if (!found) print 0}' "$stats_file")"
-          cache_write_errors="$(awk '/^Cache write errors[[:space:]]/ {print $NF; found=1; exit} END {if (!found) print 0}' "$stats_file")"
+          # sccache may emit duplicate summary lines; take the first integer only
+          # so bash 3.2 arithmetic on macOS runners cannot see a multiline value.
+          first_stat() {
+            awk -v key="$1" '$0 ~ ("^" key "[[:space:]]") { print $NF; exit } END { if (NR == 0) print 0 }' "$stats_file" \
+              | tr -cd '0-9\n' \
+              | head -n 1
+          }
+          compile_requests="$(first_stat "Compile requests")"
+          cache_hits="$(first_stat "Cache hits")"
+          cache_misses="$(first_stat "Cache misses")"
+          cache_write_errors="$(first_stat "Cache write errors")"
+          : "${compile_requests:=0}"
+          : "${cache_hits:=0}"
+          : "${cache_misses:=0}"
+          : "${cache_write_errors:=0}"
           hit_rate="0.00"
-          if (( compile_requests > 0 )); then
+          if [[ "$compile_requests" =~ ^[0-9]+$ ]] && (( compile_requests > 0 )); then
             hit_rate="$(awk -v hits="$cache_hits" -v total="$compile_requests" 'BEGIN { printf "%.2f", (hits * 100.0) / total }')"
           fi
           {
@@ -1287,10 +1298,10 @@ jobs:
             echo "| Cache hit rate | ${hit_rate}% |"
           } >> "$GITHUB_STEP_SUMMARY"
 
-          if (( compile_requests >= 100 )) && awk -v rate="$hit_rate" 'BEGIN { exit !(rate < 5.0) }'; then
+          if [[ "$compile_requests" =~ ^[0-9]+$ ]] && (( compile_requests >= 100 )) && awk -v rate="$hit_rate" 'BEGIN { exit !(rate < 5.0) }'; then
             echo "::warning title=Release sccache is effectively cold::${HARN_RELEASE_TARGET} had ${cache_hits}/${compile_requests} hits (${hit_rate}%). Release latency likely came from cold compile cache."
           fi
-          if (( cache_write_errors > 0 )); then
+          if [[ "$cache_write_errors" =~ ^[0-9]+$ ]] && (( cache_write_errors > 0 )); then
             echo "::warning title=Release sccache write errors::${HARN_RELEASE_TARGET} reported ${cache_write_errors} cache write error(s). Warm-cache recovery may remain slow until cache writes succeed."
           fi
 

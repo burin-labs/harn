@@ -71,7 +71,10 @@ if [[ ! -f "$POLICY" ]]; then
   exit 2
 fi
 
-mapfile -t budget_lines < <(jq -r -f "${ROOT}/.github/release-warm-build-budget.jq" "$POLICY")
+# Validate the closed policy contract without bash-4-only helpers (macOS
+# GitHub-hosted runners still ship bash 3.2).
+budget_lines="$(jq -r -f "${ROOT}/.github/release-warm-build-budget.jq" "$POLICY")"
+policy_target_count="$(printf '%s\n' "$budget_lines" | sed '/^$/d' | wc -l | tr -d '[:space:]')"
 entry="$(jq -c --arg target "$TARGET" '.targets[] | select(.target == $target)' "$POLICY")"
 if [[ -z "$entry" ]]; then
   echo "warm-build budget has no target '$TARGET'" >&2
@@ -111,7 +114,7 @@ echo "baseline_seconds=$baseline"
 echo "warn_seconds=$warn_at"
 echo "budget_seconds=$budget"
 echo "status=$status"
-echo "policy_targets=${#budget_lines[@]}"
+echo "policy_targets=${policy_target_count}"
 
 case "$MODE" in
   warm|candidate)
