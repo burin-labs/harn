@@ -277,15 +277,26 @@ pub fn hosted_openai_request(
     nonempty(provider, "provider")?;
     nonempty(model, "model")?;
     validate_request(&request)?;
-    let provider = crate::llm_config::provider_config(provider).ok_or_else(|| {
+    let provider_definition = crate::llm_config::provider_config(provider).ok_or_else(|| {
         ManagedSupplyContractError::new("hosted chat provider is not in Harn's registry")
     })?;
-    let stream_options = (request.stream && provider.stream_usage_accounting == Some(true))
-        .then_some(HostedStreamOptions {
-            include_usage: true,
-        });
+    let catalog_model = crate::llm_config::model_catalog_entry(model)
+        .filter(|entry| entry.provider == provider)
+        .ok_or_else(|| {
+            ManagedSupplyContractError::new(
+                "hosted chat model is not a canonical route for the selected provider",
+            )
+        })?;
+    let wire_model = catalog_model
+        .wire_model
+        .unwrap_or_else(|| model.to_string());
+    let stream_options = (request.stream
+        && provider_definition.stream_usage_accounting == Some(true))
+    .then_some(HostedStreamOptions {
+        include_usage: true,
+    });
     Ok(HostedOpenAiRequest {
-        model: model.to_string(),
+        model: wire_model,
         messages: request.messages,
         tools: request.tools,
         tool_choice: request.tool_choice,
@@ -347,11 +358,40 @@ mod tests {
     #[test]
     fn deepseek_projection_requests_terminal_usage() {
         let value = serde_json::to_value(
-            hosted_openai_request("deepseek", "deepseek-chat", request(true))
+            hosted_openai_request("deepseek", "deepseek-v4-flash", request(true))
                 .expect("DeepSeek request"),
         )
         .expect("JSON");
         assert_eq!(value["stream_options"]["include_usage"], true);
+    }
+
+    #[test]
+    fn hosted_projection_resolves_catalog_id_to_provider_wire_model() {
+        let value = serde_json::to_value(
+            hosted_openai_request("groq", "groq/openai/gpt-oss-120b", request(false))
+                .expect("Groq GPT-OSS request"),
+        )
+        .expect("JSON");
+        assert_eq!(value["model"], "openai/gpt-oss-120b");
+    }
+
+    #[test]
+    fn hosted_projection_preserves_same_id_model() {
+        let value = serde_json::to_value(
+            hosted_openai_request("groq", "llama-3.3-70b-versatile", request(false))
+                .expect("Groq request"),
+        )
+        .expect("JSON");
+        assert_eq!(value["model"], "llama-3.3-70b-versatile");
+    }
+
+    #[test]
+    fn hosted_projection_rejects_provider_model_mismatch() {
+        let error = hosted_openai_request("groq", "deepseek-v4-flash", request(false))
+            .expect_err("cross-provider route must fail before egress");
+        assert!(error
+            .to_string()
+            .contains("not a canonical route for the selected provider"));
     }
 
     #[test]
