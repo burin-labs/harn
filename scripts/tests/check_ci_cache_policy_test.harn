@@ -755,7 +755,10 @@ pipeline test_ci_cache_policy_accepts_declared_main_guarded_writers(harness: Har
       declared["windows-nightly.yml"],
     )
       + windows_release_certify_warm_errors(policy(), declared["windows-nightly.yml"])
-      + nextest_version_errors(policy(), declared)
+      + nextest_version_errors(
+      policy(),
+      declared,
+    )
       + actions_cache_capacity_errors(policy()),
     [],
   )
