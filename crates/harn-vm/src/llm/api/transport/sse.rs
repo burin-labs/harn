@@ -521,10 +521,10 @@ fn is_structured_sse_error_frame(
         return true;
     }
     match protocol {
-        StreamProtocol::OpenAiSse => !json
+        StreamProtocol::OpenAiSse => json
             .get("choices")
             .and_then(serde_json::Value::as_array)
-            .is_some_and(|choices| !choices.is_empty()),
+            .is_none_or(|choices| choices.is_empty()),
         // Anthropic errors use `type=error` (handled above). A bare `error`
         // field on other Anthropic event types is not a recognized shape.
         StreamProtocol::AnthropicSse

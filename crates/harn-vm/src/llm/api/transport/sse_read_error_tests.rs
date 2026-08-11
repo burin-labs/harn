@@ -266,10 +266,8 @@ async fn top_level_structured_sse_error_without_event_name_classifies() {
 
 #[tokio::test]
 async fn anthropic_typed_error_frame_classifies_instead_of_premature_eof() {
-    let body: &[u8] = concat!(
-        "data: {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"boom\"}}\n",
-    )
-    .as_bytes();
+    let body: &[u8] =
+        b"data: {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"boom\"}}\n";
     let (delta_tx, _delta_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
     let err = consume_sse_lines(
         tokio::io::BufReader::new(body),
