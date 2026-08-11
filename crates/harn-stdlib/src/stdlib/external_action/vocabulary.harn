@@ -1,0 +1,20 @@
+/**
+ * Canonical external-action receipt vocabulary.
+ *
+ * Host bindings are generated from these closed unions by
+ * `harn dump-protocol-artifacts`. Add receipt vocabulary here once; do not
+ * mirror it in Swift, Rust, or TypeScript.
+ */
+pub type ExternalActionOutcome = "confirmed" \
+  | "denied" \
+  | "failed_before_dispatch" \
+  | "rejected" \
+  | "indeterminate"
+
+pub type ExternalActionReceiptStatus = "confirmed" \
+  | "denied" \
+  | "failed_before_dispatch" \
+  | "rejected" \
+  | "reconciliation_required"
+
+pub type ExternalActionNextAction = "none" | "reconcile"

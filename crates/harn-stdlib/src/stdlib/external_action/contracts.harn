@@ -1,19 +1,11 @@
+pub import {
+  ExternalActionNextAction,
+  ExternalActionOutcome,
+  ExternalActionReceiptStatus,
+} from "std/external_action/vocabulary"
+
 /** Provider-neutral contracts for consequential external effects. */
 pub type ExternalActionEnvironment = "mock" | "test" | "live"
-
-pub type ExternalActionOutcome = "confirmed" \
-  | "denied" \
-  | "failed_before_dispatch" \
-  | "rejected" \
-  | "indeterminate"
-
-pub type ExternalActionReceiptStatus = "confirmed" \
-  | "denied" \
-  | "failed_before_dispatch" \
-  | "rejected" \
-  | "reconciliation_required"
-
-pub type ExternalActionNextAction = "none" | "reconcile"
 
 pub type ExternalActionAuthorizationMethod = "manual" \
   | "policy" \

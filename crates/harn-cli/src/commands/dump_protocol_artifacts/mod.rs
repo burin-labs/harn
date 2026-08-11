@@ -12,6 +12,7 @@
 //! target language owns that language's emitter.
 
 mod constants;
+mod external_action;
 mod manifest;
 mod support;
 mod values;
@@ -33,6 +34,7 @@ use harn_vm::llm::plan::PLAN_DOCUMENT_SCHEMA_ARTIFACT;
 use harn_vm::llm::receipts::TOOL_CALL_RECEIPT_SCHEMA_ARTIFACT;
 
 use constants::*;
+use external_action::ExternalActionVocabulary;
 use go::*;
 use manifest::*;
 use python::*;
@@ -123,24 +125,25 @@ fn generate_artifacts(
     source: &ProtocolArtifactSource,
     artifact_version: &str,
 ) -> Result<Vec<Artifact>, String> {
+    let external_actions = ExternalActionVocabulary::load(source)?;
     let go_artifact = generate_go_artifact_for_version(artifact_version)?;
     let mut artifacts = vec![
         Artifact::new("README.md", generate_readme()),
         Artifact::new(
             "manifest.json",
-            generate_manifest_for_version(source, artifact_version)?,
+            generate_manifest_for_version(source, artifact_version, &external_actions)?,
         ),
         Artifact::new(
             "harn-protocol.ts",
-            generate_typescript_for_version(artifact_version),
+            generate_typescript_for_version(artifact_version, &external_actions),
         ),
         Artifact::new(
             "HarnProtocol.swift",
-            generate_swift_for_version(artifact_version),
+            generate_swift_for_version(artifact_version, &external_actions),
         ),
         Artifact::new(
             "harn-protocol.rs",
-            generate_rust_for_version(artifact_version),
+            generate_rust_for_version(artifact_version, &external_actions),
         ),
         Artifact::new(
             "python/harn_protocol.py",
