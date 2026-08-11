@@ -9,6 +9,21 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.79
+
+### Changed
+
+- Own the workspace `cargo-nextest` pin in `.github/cache-policy.json`
+  (`nextest_version`, schema v4) and load it from CI scripts via
+  `scripts/ci/cache_policy.sh`, so Windows warm artifacts, Rust test archives,
+  and workflow `nextest@` installs share one config surface.
+
+### Fixed
+
+- Hosted managed-supply requests now validate canonical provider/model pairs and
+  project catalog model IDs to their provider wire IDs before egress, fixing
+  routed models such as Groq GPT-OSS.
+
 ## v0.10.78
 
 ### Added
