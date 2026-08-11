@@ -664,6 +664,7 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
     // Most recent SSE `event:` name. Consumed with the next `data:` frame so
     // named `event: error` payloads classify before delta parsing.
     let mut current_event: Option<String> = None;
+    let managed_transport = crate::llm::managed_supply::is_managed_transport(provider);
 
     loop {
         let line = match liveness.next_line(lines.next_line()).await? {
@@ -707,6 +708,10 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
             ));
         }
         liveness.mark_partial_output();
+        let managed_receipt_frame = managed_transport
+            && json
+                .get(crate::llm::managed_supply::MANAGED_SUPPLY_WIRE_KEY)
+                .is_some_and(|receipt| !receipt.is_null());
         let terminal_frame = if dialect.stream_protocol() == StreamProtocol::AnthropicSse {
             json["type"].as_str() == Some("message_stop")
         } else {
@@ -1115,7 +1120,12 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
             }
             telemetry.capture_provider_metadata(&json);
         }
-        if terminal_frame {
+        // Direct OpenAI-compatible providers are terminal at finish_reason.
+        // Managed gateways may legally append usage and their authoritative
+        // receipt in later empty-choices frames, so their receipt is the
+        // terminal boundary. Stopping at the served provider's finish frame
+        // loses the only authoritative identity/cost record on the wire.
+        if managed_receipt_frame || (terminal_frame && !managed_transport) {
             break;
         }
     }

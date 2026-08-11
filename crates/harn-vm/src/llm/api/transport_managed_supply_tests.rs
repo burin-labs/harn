@@ -140,6 +140,14 @@ fn managed_supply_streams_multiple_deltas_and_applies_terminal_receipt() {
             "model": "ignored-gateway-model",
             "choices": [{"index": 0, "delta": {"content": "world"}, "finish_reason": "stop"}],
             "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        });
+        let receipt = serde_json::json!({
+            "id": "gateway-stream",
+            "object": "chat.completion.chunk",
+            "created": 0,
+            "model": "ignored-gateway-model",
+            "choices": [],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
             "harn_managed_supply": {
                 "version": 1,
                 "request_id": "pool-stream-request",
@@ -162,7 +170,8 @@ fn managed_supply_streams_multiple_deltas_and_applies_terminal_receipt() {
                 }],
             }
         });
-        let response_body = format!("data: {first}\n\ndata: {terminal}\n\ndata: [DONE]\n\n");
+        let response_body =
+            format!("data: {first}\n\ndata: {terminal}\n\ndata: {receipt}\n\ndata: [DONE]\n\n");
         let response = format!(
             "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
             response_body.len(),
