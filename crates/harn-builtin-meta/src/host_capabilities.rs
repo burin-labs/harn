@@ -145,6 +145,15 @@ const HOST_MUTATE: &[EffectSpec] = &[EffectSpec::new(
     EffectAccess::Mutate,
     DYNAMIC,
 )];
+/// Assistant-visible response projection. Classified like `stdio.write` so ACP
+/// presentation ceilings (`read_only`) admit the typed
+/// `harness.runtime.emit_response` path after capability migration, instead of
+/// treating a UI stream as a workspace-mutating host call (harn#6374).
+const PRESENTATION_WRITE: &[EffectSpec] = &[EffectSpec::new(
+    EffectKind::Stdio,
+    EffectAccess::Write,
+    &[ResourceSelector::Constant("stdout")],
+)];
 const SESSION_READ: &[EffectSpec] = &[
     EffectSpec::new(EffectKind::Fs, EffectAccess::Read, DYNAMIC),
     EffectSpec::new(EffectKind::State, EffectAccess::Read, DYNAMIC),
@@ -589,8 +598,12 @@ pub const EMBEDDER_CAPABILITY_GROUPS: &[HostCapabilityGroup] = &[
     },
     HostCapabilityGroup {
         capability: CapabilityId::Runtime,
+        methods: &["emit_response"],
+        effects: PRESENTATION_WRITE,
+    },
+    HostCapabilityGroup {
+        capability: CapabilityId::Runtime,
         methods: &[
-            "emit_response",
             "execute_hook",
             "run_pipeline",
             "set_feature_audit",
@@ -706,6 +719,22 @@ mod tests {
             "host_conditions"
         ));
         assert!(!is_host_capability_method(CapabilityId::System, "sample"));
+    }
+
+    #[test]
+    fn runtime_emit_response_is_presentation_not_host_mutate() {
+        let emit = all_host_capability_groups()
+            .find(|group| {
+                group.capability == CapabilityId::Runtime
+                    && group.methods.contains(&"emit_response")
+            })
+            .expect("runtime.emit_response contract");
+
+        assert_eq!(emit.effects, PRESENTATION_WRITE);
+        assert_ne!(
+            emit.effects, HOST_MUTATE,
+            "emit_response must stay under presentation ceilings so ACP typed callers survive capability migration"
+        );
     }
 
     #[test]

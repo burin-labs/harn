@@ -1487,34 +1487,6 @@ fn acp_prompt_capabilities_follow_configured_model_aliases() {
     );
 }
 
-#[test]
-fn parse_oauth_redirect_url_extracts_code_state_issuer() {
-    let (state, code, issuer) = parse_oauth_redirect_url(
-        "burin://oauth/callback?code=auth-code&state=xyz&iss=https://auth.example",
-    )
-    .expect("parse");
-    assert_eq!(state, "xyz");
-    assert_eq!(code, "auth-code");
-    assert_eq!(issuer.as_deref(), Some("https://auth.example"));
-}
-
-#[test]
-fn parse_oauth_redirect_url_propagates_provider_error() {
-    let error = parse_oauth_redirect_url(
-        "http://127.0.0.1/cb?error=access_denied&error_description=nope&state=xyz",
-    )
-    .expect_err("error param");
-    assert!(error.contains("access_denied"), "{error}");
-    assert!(error.contains("nope"), "{error}");
-}
-
-#[test]
-fn parse_oauth_redirect_url_requires_code() {
-    let error =
-        parse_oauth_redirect_url("http://127.0.0.1/cb?state=xyz").expect_err("missing code");
-    assert!(error.contains("code"), "{error}");
-}
-
 /// Drift guard: every `session/*` dispatch arm must gate on
 /// `reject_unauthenticated`. `session/cancel` shipped without the guard once
 /// (any unauthenticated peer could cancel a running session); this keeps the
@@ -1555,9 +1527,11 @@ fn every_session_dispatch_arm_checks_authentication() {
 
 mod caching;
 mod commands;
+mod emit_response;
 mod event_log_barrier;
 mod host_call_turn_cache;
 mod modes;
+mod oauth_redirect;
 mod prompt_errors;
 mod runtime_overrides;
 mod sessions;
