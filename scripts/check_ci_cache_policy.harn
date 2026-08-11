@@ -11,13 +11,26 @@ import { empty_scope_failure } from "./guard_scope.harn"
 
 pub type CiCacheWriter = {workflow: string, job: string, shared_key: string}
 
+pub type WindowsWorkspaceWarmPolicy = {
+  artifact_name: string,
+  manifest_schema: string,
+  workflow: string,
+  job: string,
+  retention_days: int,
+  max_bytes: int,
+  nextest_version: string,
+  dev_drive_size_default: string,
+  dev_drive_size_release_certify: string,
+}
+
 pub type CiCachePolicy = {
-  schema_version: 2,
+  schema_version: 3,
   rust_cache_action: "./.github/actions/rust-cache",
   node_cache_action: "./.github/actions/node-cache",
   persistent_ref: "refs/heads/main",
   storage_limit_bytes: int,
   remote_sccache: bool,
+  windows_workspace_warm: WindowsWorkspaceWarmPolicy,
   writers: list<CiCacheWriter>,
 }
 
@@ -248,13 +261,6 @@ const WINDOWS_CACHE_TARGET_DIR = "$" + "{{ env.CARGO_TARGET_DIR }}"
 const WINDOWS_RELEASE_CERTIFY_CACHE_GUARD = "$"
   + "{{ !startsWith(github.ref_name, 'release-certify/') }}"
 
-const WINDOWS_RELEASE_CERTIFY_DEV_DRIVE_SIZE = "$"
-  + "{{ startsWith(github.ref_name, 'release-certify/') && '50GB' || '25GB' }}"
-
-const WINDOWS_WARM_ARTIFACT_NAME = "workspace-windows-warm"
-
-const WINDOWS_WARM_ARTIFACT_RETENTION_DAYS = 3
-
 const WINDOWS_WARM_PACK_MARKER = "windows_workspace_warm_artifact.sh pack"
 
 const WINDOWS_WARM_RESTORE_MARKER = "windows_workspace_warm_artifact.sh download-and-restore"
@@ -263,8 +269,6 @@ const WINDOWS_WARM_MAIN_GUARD = "$" + "{{ github.ref == 'refs/heads/main' }}"
 
 const WINDOWS_WARM_RELEASE_CERTIFY_GUARD = "$"
   + "{{ startsWith(github.ref_name, 'release-certify/') }}"
-
-const ACTIONS_CACHE_STORAGE_LIMIT_BYTES = 10737418240
 
 const MACOS_CACHE_KEY = "workspace-macos"
 
@@ -277,15 +281,36 @@ const NATIVE_SCCACHE_ACTION_PREFIX = "mozilla-actions/sccache-action@"
 
 const CONFIGURE_CARGO_SCCACHE_ACTION = "./.github/actions/configure-cargo-sccache"
 
+fn drive_size_schema() {
+  return schema_string() + {pattern: "^[1-9][0-9]*GB$"}
+}
+
+fn windows_workspace_warm_schema() {
+  return schema_closed_object(
+    {
+      artifact_name: schema_string() + {pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$"},
+      manifest_schema: schema_string() + {pattern: "^harn[.][a-z0-9_]+[.]v[0-9]+$"},
+      workflow: schema_string() + {pattern: "^[a-z0-9-]+[.]yml$"},
+      job: schema_string() + {pattern: "^[a-z0-9-]+$"},
+      retention_days: schema_int() + {minimum: 1, maximum: 90},
+      max_bytes: schema_int() + {minimum: 1},
+      nextest_version: schema_string() + {pattern: "^[0-9]+[.][0-9]+[.][0-9]+$"},
+      dev_drive_size_default: drive_size_schema(),
+      dev_drive_size_release_certify: drive_size_schema(),
+    },
+  )
+}
+
 fn policy_schema() {
   return schema_closed_object(
     {
-      schema_version: schema_literal(2),
+      schema_version: schema_literal(3),
       rust_cache_action: schema_literal("./.github/actions/rust-cache"),
       node_cache_action: schema_literal("./.github/actions/node-cache"),
       persistent_ref: schema_literal("refs/heads/main"),
       storage_limit_bytes: schema_int() + {minimum: 1073741824},
       remote_sccache: schema_literal(false),
+      windows_workspace_warm: windows_workspace_warm_schema(),
       writers: schema_list(
         schema_closed_object(
           {
@@ -297,6 +322,15 @@ fn policy_schema() {
       ),
     },
   )
+}
+
+fn windows_release_certify_dev_drive_size(warm: WindowsWorkspaceWarmPolicy) -> string {
+  return "$"
+    + "{{ startsWith(github.ref_name, 'release-certify/') && '"
+    + warm.dev_drive_size_release_certify
+    + "' || '"
+    + warm.dev_drive_size_default
+    + "' }}"
 }
 
 fn release_warm_cache_path_policy_schema() {
@@ -564,13 +598,25 @@ pub fn release_warm_cache_prune_errors(workflow) -> list<string> {
 }
 
 fn policy_from_validated(value) -> CiCachePolicy {
+  const warm = value.windows_workspace_warm
   return {
-    schema_version: 2,
+    schema_version: 3,
     rust_cache_action: "./.github/actions/rust-cache",
     node_cache_action: "./.github/actions/node-cache",
     persistent_ref: "refs/heads/main",
     storage_limit_bytes: value.storage_limit_bytes,
     remote_sccache: false,
+    windows_workspace_warm: {
+      artifact_name: warm.artifact_name,
+      manifest_schema: warm.manifest_schema,
+      workflow: warm.workflow,
+      job: warm.job,
+      retention_days: warm.retention_days,
+      max_bytes: warm.max_bytes,
+      nextest_version: warm.nextest_version,
+      dev_drive_size_default: warm.dev_drive_size_default,
+      dev_drive_size_release_certify: warm.dev_drive_size_release_certify,
+    },
     writers: value.writers.map(
       { writer ->
         return {workflow: writer.workflow, job: writer.job, shared_key: writer.shared_key}
@@ -1240,27 +1286,36 @@ pub fn windows_shared_cache_errors(ci_workflow, nightly_workflow) -> list<string
   return errors
 }
 
-/** Exact candidates warm from a main-produced artifact outside the 10 GiB cache pool. */
-pub fn windows_release_certify_warm_errors(nightly_workflow) -> list<string> {
-  const job = nightly_workflow?.jobs?.nextest
+/** Exact candidates warm from a main-produced artifact outside the Actions cache pool. */
+pub fn windows_release_certify_warm_errors(
+  policy: CiCachePolicy,
+  nightly_workflow,
+) -> list<string> {
+  const warm = policy.windows_workspace_warm
+  const job = nightly_workflow?.jobs?.[warm.job]
   if job == nil {
-    return ["windows-nightly.yml:nextest must own the Windows workspace warm artifact path"]
+    return ["${warm.workflow}:${warm.job} must own the Windows workspace warm artifact path"]
   }
   let errors: list<string> = []
+  if warm.workflow != "windows-nightly.yml" || warm.job != "nextest" {
+    errors = errors
+      + [
+      "cache-policy.json windows_workspace_warm must stay owned by windows-nightly.yml:nextest",
+    ]
+  }
   const permissions = nightly_workflow?.permissions ?? {}
   if trim(to_string(permissions?.actions ?? "")) != "write" {
     errors = errors
-      + [
-      "windows-nightly.yml must grant actions: write for warm artifact upload/download",
-    ]
+      + ["${warm.workflow} must grant actions: write for warm artifact upload/download"]
   }
+  const expected_drive_size = windows_release_certify_dev_drive_size(warm)
   const dev_drives = matching_named_steps(job, "Set up Dev Drive")
   if len(dev_drives) != 1
     || trim(to_string(dev_drives[0]?.with?.["drive-size"] ?? ""))
-    != WINDOWS_RELEASE_CERTIFY_DEV_DRIVE_SIZE {
+    != expected_drive_size {
     errors = errors
       + [
-      "windows-nightly.yml:nextest must give release-certify refs a 50GB Dev Drive ceiling",
+      "${warm.workflow}:${warm.job} Dev Drive size must follow cache-policy.json windows_workspace_warm ceilings",
     ]
   }
   const restore_steps = matching_run_steps(job, WINDOWS_WARM_RESTORE_MARKER)
@@ -1270,35 +1325,56 @@ pub fn windows_release_certify_warm_errors(nightly_workflow) -> list<string> {
     != true {
     errors = errors
       + [
-      "windows-nightly.yml:nextest must restore-only the main warm artifact on release-certify refs with cold fallback",
+      "${warm.workflow}:${warm.job} must restore-only the main warm artifact on release-certify refs with cold fallback",
     ]
   }
   const pack_steps = matching_run_steps(job, WINDOWS_WARM_PACK_MARKER)
   if len(pack_steps) != 1 || trim(pack_steps[0]?.if ?? "") != WINDOWS_WARM_MAIN_GUARD {
     errors = errors
-      + ["windows-nightly.yml:nextest must pack the Windows warm artifact only on main"]
+      + ["${warm.workflow}:${warm.job} must pack the Windows warm artifact only on main"]
   }
-  const upload_steps = matching_upload_steps(job, WINDOWS_WARM_ARTIFACT_NAME)
+  const upload_steps = matching_upload_steps(job, warm.artifact_name)
   if len(upload_steps) != 1
     || trim(upload_steps[0]?.if ?? "") != WINDOWS_WARM_MAIN_GUARD
     || upload_steps[0]?.with?.["retention-days"]
-    != WINDOWS_WARM_ARTIFACT_RETENTION_DAYS
-    || trim(
-    to_string(upload_steps[0]?.with?.["if-no-files-found"] ?? ""),
-  )
+    != warm
+    .retention_days
+    || trim(to_string(upload_steps[0]?.with?.["if-no-files-found"] ?? ""))
     != "error" {
     errors = errors
       + [
-      "windows-nightly.yml:nextest must upload ${WINDOWS_WARM_ARTIFACT_NAME} from main with 3-day retention",
+      "${warm.workflow}:${warm.job} must upload ${warm.artifact_name} from main with ${warm.retention_days}-day retention",
+    ]
+  }
+  const nextest_installs = (job?.steps ?? []).filter(
+    { step ->
+      return step_uses(step).starts_with("taiki-e/install-action@")
+        && contains(
+        trim(to_string(step?.with?.tool ?? "")),
+        "nextest@${warm.nextest_version}",
+      )
+    },
+  )
+    .to_list()
+  if len(nextest_installs) != 1 {
+    errors = errors
+      + [
+      "${warm.workflow}:${warm.job} must install nextest@${warm.nextest_version} from cache-policy.json",
     ]
   }
   return errors
 }
 
 pub fn actions_cache_capacity_errors(policy: CiCachePolicy) -> list<string> {
-  if policy.storage_limit_bytes != ACTIONS_CACHE_STORAGE_LIMIT_BYTES {
+  const warm = policy.windows_workspace_warm
+  if warm.max_bytes >= policy.storage_limit_bytes {
     return [
-      "cache-policy.json storage_limit_bytes must stay at ${ACTIONS_CACHE_STORAGE_LIMIT_BYTES}; Windows warm targets use workflow artifacts instead of raising Actions cache capacity",
+      "cache-policy.json windows_workspace_warm.max_bytes must stay below storage_limit_bytes so warm artifacts cannot pretend to replace the Actions cache pool",
+    ]
+  }
+  if warm.dev_drive_size_release_certify == warm.dev_drive_size_default {
+    return [
+      "cache-policy.json windows_workspace_warm must give release-certify a larger Dev Drive ceiling than the default",
     ]
   }
   return []
@@ -2222,7 +2298,7 @@ fn main(harness: Harness) {
     ci_workflow_concurrency_errors(workflows["ci.yml"]),
     ci_linux_lane_policy_errors(workflows["ci.yml"]),
     windows_shared_cache_errors(workflows["ci.yml"], workflows["windows-nightly.yml"]),
-    windows_release_certify_warm_errors(workflows["windows-nightly.yml"]),
+    windows_release_certify_warm_errors(policy, workflows["windows-nightly.yml"]),
     actions_cache_capacity_errors(policy),
     macos_shared_cache_errors(workflows["ci.yml"], workflows["macos-nightly.yml"]),
   ]

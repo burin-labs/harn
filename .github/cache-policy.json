@@ -1,10 +1,21 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "rust_cache_action": "./.github/actions/rust-cache",
   "node_cache_action": "./.github/actions/node-cache",
   "persistent_ref": "refs/heads/main",
   "storage_limit_bytes": 10737418240,
   "remote_sccache": false,
+  "windows_workspace_warm": {
+    "artifact_name": "workspace-windows-warm",
+    "manifest_schema": "harn.windows_workspace_warm.v1",
+    "workflow": "windows-nightly.yml",
+    "job": "nextest",
+    "retention_days": 3,
+    "max_bytes": 8589934592,
+    "nextest_version": "0.9.132",
+    "dev_drive_size_default": "25GB",
+    "dev_drive_size_release_certify": "50GB"
+  },
   "writers": [
     {
       "workflow": "build-release-binaries.yml",

@@ -1,14 +1,39 @@
 #!/usr/bin/env bash
-# Main-produced Windows workspace warm target outside the 10 GiB Actions cache
+# Main-produced Windows workspace warm target outside the Actions cache
 # namespace. Release-certify consumers restore it read-only and fall back cold
 # when no compatible generation exists (harn#6485).
+#
+# Knobs live in .github/cache-policy.json under windows_workspace_warm; this
+# script and scripts/check_ci_cache_policy.harn both read that document.
 set -euo pipefail
 
-readonly ARTIFACT_NAME="workspace-windows-warm"
-readonly SCHEMA="harn.windows_workspace_warm.v1"
-readonly WORKFLOW_FILE="windows-nightly.yml"
-readonly DEFAULT_MAX_BYTES=8589934592  # 8 GiB compressed
-readonly NEXTEST_VERSION="0.9.132"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd -P)"
+readonly CACHE_POLICY_PATH="${HARN_CACHE_POLICY_PATH:-$REPO_ROOT/.github/cache-policy.json}"
+
+load_warm_policy() {
+  if [[ ! -f "$CACHE_POLICY_PATH" ]]; then
+    echo "error: cache policy not found: $CACHE_POLICY_PATH" >&2
+    exit 2
+  fi
+  local schema_version
+  schema_version="$(jq -er '.schema_version' "$CACHE_POLICY_PATH")"
+  if [[ "$schema_version" != "3" ]]; then
+    echo "error: expected cache-policy.json schema_version 3, got ${schema_version}" >&2
+    exit 2
+  fi
+  ARTIFACT_NAME="$(jq -er '.windows_workspace_warm.artifact_name' "$CACHE_POLICY_PATH")"
+  SCHEMA="$(jq -er '.windows_workspace_warm.manifest_schema' "$CACHE_POLICY_PATH")"
+  WORKFLOW_FILE="$(jq -er '.windows_workspace_warm.workflow' "$CACHE_POLICY_PATH")"
+  DEFAULT_MAX_BYTES="$(jq -er '.windows_workspace_warm.max_bytes' "$CACHE_POLICY_PATH")"
+  NEXTEST_VERSION="$(jq -er '.windows_workspace_warm.nextest_version' "$CACHE_POLICY_PATH")"
+  PRODUCER_REF="$(jq -er '.persistent_ref' "$CACHE_POLICY_PATH")"
+  PRODUCER_BRANCH="${PRODUCER_REF#refs/heads/}"
+  if [[ "$PRODUCER_BRANCH" == "$PRODUCER_REF" || -z "$PRODUCER_BRANCH" ]]; then
+    echo "error: persistent_ref must be refs/heads/<branch>, got ${PRODUCER_REF}" >&2
+    exit 2
+  fi
+}
 
 usage() {
   cat <<'EOF'
@@ -24,6 +49,8 @@ writes a typed warm bundle under <staging-dir> for actions/upload-artifact.
 download-and-restore finds the newest successful main windows-nightly warm
 artifact, restores it into the target dir, and exits 0 only on a compatible hit.
 Missing or incompatible generations exit non-zero so the caller can fall cold.
+
+Configuration is owned by .github/cache-policy.json (windows_workspace_warm).
 EOF
 }
 
@@ -87,7 +114,7 @@ write_manifest() {
 schema=${SCHEMA}
 artifact=${ARTIFACT_NAME}
 producer_commit=${producer_commit}
-producer_ref=refs/heads/main
+producer_ref=${PRODUCER_REF}
 nextest=${NEXTEST_VERSION}
 rustc_sha256=$(rustc_identity_sha256)
 rust_toolchain_sha256=$(sha256 rust-toolchain.toml)
@@ -239,7 +266,7 @@ discover() {
 
   local runs_json run_id artifacts_json
   runs_json="$(gh api \
-    "repos/${repo}/actions/workflows/${WORKFLOW_FILE}/runs?branch=main&status=completed&per_page=30")"
+    "repos/${repo}/actions/workflows/${WORKFLOW_FILE}/runs?branch=${PRODUCER_BRANCH}&status=completed&per_page=30")"
   while IFS= read -r run_json; do
     [[ -n "$run_json" ]] || continue
     if [[ "$(jq -r '.conclusion // empty' <<<"$run_json")" != "success" ]]; then
@@ -256,7 +283,7 @@ discover() {
     fi
   done < <(jq -c '.workflow_runs[]?' <<<"$runs_json")
 
-  echo "error: no successful main ${WORKFLOW_FILE} run has a live ${ARTIFACT_NAME} artifact" >&2
+  echo "error: no successful ${PRODUCER_BRANCH} ${WORKFLOW_FILE} run has a live ${ARTIFACT_NAME} artifact" >&2
   exit 1
 }
 
@@ -281,7 +308,7 @@ download_and_restore() {
 
   local run_id staging
   run_id="$(discover --repo "$repo")"
-  staging="$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/workspace-windows-warm.XXXXXX")"
+  staging="$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/${ARTIFACT_NAME}.XXXXXX")"
   cleanup_dir="$staging"
   trap '[[ -z "${cleanup_dir:-}" ]] || rm -rf "$cleanup_dir"' EXIT
 
@@ -302,11 +329,14 @@ main() {
   fi
   shift
   case "$command" in
+    -h|--help) usage; return 0 ;;
+  esac
+  load_warm_policy
+  case "$command" in
     pack) pack "$@" ;;
     restore) restore "$@" ;;
     discover) discover "$@" ;;
     download-and-restore) download_and_restore "$@" ;;
-    -h|--help) usage ;;
     *) echo "error: unknown command: $command" >&2; usage >&2; exit 2 ;;
   esac
 }

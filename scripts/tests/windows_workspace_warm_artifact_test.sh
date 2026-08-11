@@ -14,6 +14,10 @@ mkdir -p \
   "$tmpdir/target/debug/incremental/foo" \
   "$tmpdir/out"
 cp "$repo_root/rust-toolchain.toml" "$tmpdir/work/rust-toolchain.toml"
+# Keep the shell test on an isolated policy document so knobs stay config, not
+# hardcoded in the assertion surface.
+cp "$repo_root/.github/cache-policy.json" "$tmpdir/cache-policy.json"
+export HARN_CACHE_POLICY_PATH="$tmpdir/cache-policy.json"
 
 # Seed third-party and workspace-shaped outputs.
 printf 'dep\n' > "$tmpdir/target/debug/deps/libserde-abc123.rlib"
@@ -104,6 +108,7 @@ run_pack() {
     cd "$tmpdir/work"
     env \
       PATH="$tmpdir/bin:$PATH" \
+      HARN_CACHE_POLICY_PATH="$HARN_CACHE_POLICY_PATH" \
       FAKE_TARGET="$tmpdir/target" \
       FAKE_COMMIT="$commit" \
       FAKE_RUSTC_IDENTITY="rustc 1.95.0 (fake)" \
@@ -119,6 +124,7 @@ run_restore() {
     cd "$tmpdir/work"
     env \
       PATH="$tmpdir/bin:$PATH" \
+      HARN_CACHE_POLICY_PATH="$HARN_CACHE_POLICY_PATH" \
       FAKE_RUSTC_IDENTITY="rustc 1.95.0 (fake)" \
       CARGO_INCREMENTAL=0 \
       RUSTFLAGS="-D warnings" \
@@ -144,6 +150,7 @@ printf 'inc\n' > "$tmpdir/target/debug/incremental/foo/x"
   cd "$tmpdir/work"
   env \
     PATH="$tmpdir/bin:$PATH" \
+    HARN_CACHE_POLICY_PATH="$HARN_CACHE_POLICY_PATH" \
     FAKE_TARGET="$tmpdir/target" \
     FAKE_COMMIT="$commit" \
     FAKE_RUSTC_IDENTITY="rustc 1.95.0 (fake)" \
@@ -180,6 +187,7 @@ if (
   cd "$tmpdir/work"
   env \
     PATH="$tmpdir/bin:$PATH" \
+    HARN_CACHE_POLICY_PATH="$HARN_CACHE_POLICY_PATH" \
     FAKE_RUSTC_IDENTITY="rustc 1.95.0 (fake)" \
     CARGO_INCREMENTAL=0 \
     RUSTFLAGS="-D warnings -Clinker=rust-lld.exe" \
@@ -193,7 +201,8 @@ echo "discover selects the newest successful main warm artifact run"
 export FAKE_RUNS_JSON='{"workflow_runs":[{"id":41,"conclusion":"failure"},{"id":42,"conclusion":"success"},{"id":43,"conclusion":"success"}]}'
 export FAKE_ARTIFACTS_JSON='{"artifacts":[{"name":"workspace-windows-warm","expired":false,"size_in_bytes":1234}]}'
 discovered="$(
-  env PATH="$tmpdir/bin:$PATH" "$script" discover --repo burin-labs/harn
+  env PATH="$tmpdir/bin:$PATH" HARN_CACHE_POLICY_PATH="$HARN_CACHE_POLICY_PATH" \
+    "$script" discover --repo burin-labs/harn
 )"
 [[ "$discovered" == "42" ]]
 
@@ -206,6 +215,7 @@ export FAKE_ARTIFACT_DIR="$tmpdir/fake-artifact"
   cd "$tmpdir/work"
   env \
     PATH="$tmpdir/bin:$PATH" \
+    HARN_CACHE_POLICY_PATH="$HARN_CACHE_POLICY_PATH" \
     FAKE_RUNS_JSON="$FAKE_RUNS_JSON" \
     FAKE_ARTIFACTS_JSON="$FAKE_ARTIFACTS_JSON" \
     FAKE_ARTIFACT_DIR="$FAKE_ARTIFACT_DIR" \

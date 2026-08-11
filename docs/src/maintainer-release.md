@@ -62,12 +62,14 @@ local source audit runs. GitHub must return an exact run ID for each dispatch.
 Both runs and their full-workspace jobs must complete successfully with the
 expected workflow path, event, SHA, URL, and unique job identity.
 
-Windows certification stays off the contended 10 GiB Actions cache namespace.
+Windows certification stays off the contended Actions cache namespace.
 Successful `main` `windows-nightly` runs publish a short-retention
 `workspace-windows-warm` workflow artifact; `release-certify/<sha>` consumers
 restore that artifact read-only into a larger Dynamic Dev Drive ceiling and
 fall cold when no compatible generation exists. Cargo still owns exact-source
-invalidation after the restore.
+invalidation after the restore. Artifact name, retention, size budget, nextest
+pin, and Dev Drive ceilings are owned by `.github/cache-policy.json`
+(`windows_workspace_warm`) and locked by `scripts/check_ci_cache_policy.harn`.
 
 The resulting `harn.release_audit_receipt.v2` records the certified source SHA,
 run/job URLs and IDs, per-lane timings, and critical path. The harness re-reads
