@@ -9,6 +9,25 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.82
+
+### Added
+
+- **Managed workspaces can tighten external-action safety policy.**
+  `std/external_action` now validates one versioned restriction contract for
+  approval mode, authentication, live effects, money limits, providers,
+  capabilities, and environments before provider dispatch.
+
+### Fixed
+
+- Fleet runtime-bump promotions now tolerate bounded GitHub pull-request head
+  propagation lag after publishing a replacement commit, while preserving
+  exact-head lease checks.
+- **Safety review no longer selects retired Gemini 2.5 Flash-Lite (#6559).**
+  Automatic complementary review now uses Gemini 3.5 Flash-Lite when Gemini is
+  the best available distinct provider, and deprecated models are excluded
+  from the selectable catalog.
+
 ## v0.10.81
 
 ### Added
