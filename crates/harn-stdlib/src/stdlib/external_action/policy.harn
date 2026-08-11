@@ -73,7 +73,9 @@ fn __external_action_policy_text_list(
     return Ok(nil)
   }
   if type_of(raw) != "list" || len(raw) > 100 {
-    return Err(__external_action_policy_error("invalid_" + field, field + " must be a bounded list"))
+    return Err(
+      __external_action_policy_error("invalid_" + field, field + " must be a bounded list"),
+    )
   }
   let values: list<string> = []
   for item in raw {
@@ -131,11 +133,17 @@ fn __external_action_policy_money(raw) -> Result<list<ExternalActionMoney>, Exte
   let currencies: list<string> = []
   for item in raw {
     if type_of(item) != "dict" {
-      return Err(__external_action_policy_error("invalid_max_external_spend", "each spend ceiling must be an object"))
+      return Err(
+        __external_action_policy_error(
+          "invalid_max_external_spend",
+          "each spend ceiling must be an object",
+        ),
+      )
     }
     const currency = uppercase(trim(to_string(item?.currency ?? "")))
     if regex_match("^[A-Z]{3}$", currency) == nil || type_of(item?.amount_minor) != "int"
-      || item.amount_minor
+      || item
+      .amount_minor
       < 0 {
       return Err(
         __external_action_policy_error(
@@ -158,7 +166,11 @@ fn __external_action_policy_money(raw) -> Result<list<ExternalActionMoney>, Exte
   return Ok(ceilings)
 }
 
-/** Validate and normalize one versioned managed-policy projection. */
+/**
+ * Validate and normalize one versioned managed-policy projection.
+ * @effects: []
+ * @errors: []
+ */
 pub fn external_action_managed_policy_result(
   raw: unknown,
 ) -> Result<ExternalActionManagedPolicy, ExternalActionError> {
@@ -167,7 +179,12 @@ pub fn external_action_managed_policy_result(
   }
   for key in keys(raw) {
     if !__EXTERNAL_ACTION_POLICY_KEYS.contains(key) {
-      return Err(__external_action_policy_error("unknown_field", "managed policy contains an unsupported field"))
+      return Err(
+        __external_action_policy_error(
+          "unknown_field",
+          "managed policy contains an unsupported field",
+        ),
+      )
     }
   }
   if raw?.schema != nil && raw.schema != "harn.external_action_managed_policy.v1" {
@@ -189,7 +206,16 @@ pub fn external_action_managed_policy_result(
     "allowed_capabilities",
   )
   const environments = __external_action_policy_environments(raw?.allowed_environments)
-  for checked in [disabled, no_auto, no_live, assurance, ceilings, providers, capabilities, environments] {
+  for checked in [
+    disabled,
+    no_auto,
+    no_live,
+    assurance,
+    ceilings,
+    providers,
+    capabilities,
+    environments,
+  ] {
     if !is_ok(checked) {
       return Err(unwrap_err(checked))
     }
@@ -214,7 +240,11 @@ pub fn external_action_managed_policy_result(
   return Ok(policy)
 }
 
-/** Normalize a managed policy or throw its typed validation error. */
+/**
+ * Normalize a managed policy or throw its typed validation error.
+ * @effects: []
+ * @errors: [invalid_policy]
+ */
 pub fn external_action_managed_policy(raw: unknown) -> ExternalActionManagedPolicy {
   const checked = external_action_managed_policy_result(raw)
   if !is_ok(checked) {
@@ -243,40 +273,97 @@ fn __external_action_automatic_method(method: string) -> bool {
 /**
  * Apply organization restrictions after the user's exact grant is validated.
  * This function can deny or narrow an action; it never creates authority.
+ * @effects: []
+ * @errors: []
  */
 pub fn external_action_managed_policy_check(
   intent: ExternalActionIntent,
   grant: ExternalActionGrant,
   policy: ExternalActionManagedPolicy,
 ) -> Result<ExternalActionGrant, ExternalActionError> {
-  if !external_action_intent_is_exact(intent) || !is_ok(external_action_grant_integrity_check(intent, grant)) {
-    return Err(__external_action_policy_error("invalid_action_authority", "action intent or grant is not exact"))
+  if !external_action_intent_is_exact(intent)
+    || !is_ok(
+    external_action_grant_integrity_check(intent, grant),
+  ) {
+    return Err(
+      __external_action_policy_error(
+        "invalid_action_authority",
+        "action intent or grant is not exact",
+      ),
+    )
   }
   const normalized = external_action_managed_policy_result(policy)
   if !is_ok(normalized) || unwrap(normalized) != policy {
-    return Err(__external_action_policy_error("policy_integrity_mismatch", "managed policy is not canonical"))
+    return Err(
+      __external_action_policy_error(
+        "policy_integrity_mismatch",
+        "managed policy is not canonical",
+      ),
+    )
   }
   if policy.external_actions_disabled {
-    return Err(__external_action_policy_error("external_actions_disabled", "external actions are disabled by managed policy"))
+    return Err(
+      __external_action_policy_error(
+        "external_actions_disabled",
+        "external actions are disabled by managed policy",
+      ),
+    )
   }
-  if policy.automatic_approval_forbidden && __external_action_automatic_method(grant.authorization_method) {
-    return Err(__external_action_policy_error("automatic_approval_forbidden", "managed policy requires a person to approve this action"))
+  if policy.automatic_approval_forbidden
+    && __external_action_automatic_method(
+    grant.authorization_method,
+  ) {
+    return Err(
+      __external_action_policy_error(
+        "automatic_approval_forbidden",
+        "managed policy requires a person to approve this action",
+      ),
+    )
   }
   if policy.live_actions_forbidden && intent.environment == "live" {
-    return Err(__external_action_policy_error("live_actions_forbidden", "live external actions are disabled by managed policy"))
+    return Err(
+      __external_action_policy_error(
+        "live_actions_forbidden",
+        "live external actions are disabled by managed policy",
+      ),
+    )
   }
   if policy.allowed_providers != nil && !policy.allowed_providers.contains(intent.provider) {
-    return Err(__external_action_policy_error("provider_not_allowed", "provider is not allowed by managed policy"))
+    return Err(
+      __external_action_policy_error(
+        "provider_not_allowed",
+        "provider is not allowed by managed policy",
+      ),
+    )
   }
-  if policy.allowed_capabilities != nil && !policy.allowed_capabilities.contains(intent.capability) {
-    return Err(__external_action_policy_error("capability_not_allowed", "capability is not allowed by managed policy"))
+  if policy.allowed_capabilities != nil
+    && !policy.allowed_capabilities.contains(intent.capability) {
+    return Err(
+      __external_action_policy_error(
+        "capability_not_allowed",
+        "capability is not allowed by managed policy",
+      ),
+    )
   }
-  if policy.allowed_environments != nil && !policy.allowed_environments.contains(intent.environment) {
-    return Err(__external_action_policy_error("environment_not_allowed", "environment is not allowed by managed policy"))
+  if policy.allowed_environments != nil
+    && !policy.allowed_environments.contains(intent.environment) {
+    return Err(
+      __external_action_policy_error(
+        "environment_not_allowed",
+        "environment is not allowed by managed policy",
+      ),
+    )
   }
   if __external_action_assurance_rank(grant.authentication_assurance)
-    < __external_action_assurance_rank(policy.minimum_authentication_assurance) {
-    return Err(__external_action_policy_error("authentication_too_weak", "managed policy requires stronger authentication"))
+    < __external_action_assurance_rank(
+    policy.minimum_authentication_assurance,
+  ) {
+    return Err(
+      __external_action_policy_error(
+        "authentication_too_weak",
+        "managed policy requires stronger authentication",
+      ),
+    )
   }
   if intent.external_spend != nil && len(policy.max_external_spend) > 0 {
     let allowed: ExternalActionMoney? = nil
@@ -286,7 +373,12 @@ pub fn external_action_managed_policy_check(
       }
     }
     if allowed == nil || intent.external_spend.amount_minor > allowed.amount_minor {
-      return Err(__external_action_policy_error("external_spend_exceeds_policy", "external spend exceeds the managed policy limit"))
+      return Err(
+        __external_action_policy_error(
+          "external_spend_exceeds_policy",
+          "external spend exceeds the managed policy limit",
+        ),
+      )
     }
   }
   return Ok(grant)

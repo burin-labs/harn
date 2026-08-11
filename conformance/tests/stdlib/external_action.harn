@@ -158,7 +158,9 @@ pipeline test(harness: Harness) {
     "managed policy denial must be typed",
   )
   assert(managed_adapter.dispatch_calls() == 0, "managed denial must not reach the adapter")
-  harness.stdio.println("managed_denied_without_dispatch:" + to_string(managed_adapter.dispatch_calls()))
+  harness.stdio.println(
+    "managed_denied_without_dispatch:" + to_string(managed_adapter.dispatch_calls()),
+  )
   const expired_intent = external_action_intent(
     intent + {payload: {offer_id: "off_test_expired_grant"}},
   )
