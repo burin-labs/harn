@@ -351,23 +351,15 @@ mod tests {
         let dir = fixture_tree();
         let cap = CodeIndexCapability::new();
         assert_eq!(cap.warm_session(dir.path()), SessionWarmOutcome::Building);
-        // Immediately after kickoff the slot may still be empty — that is the
-        // non-blocking contract. Wait for the background thread.
-        let deadline = Instant::now() + Duration::from_secs(30);
-        loop {
-            {
-                let shared = cap.shared();
-                let guard = shared.lock().unwrap();
-                if guard.as_ref().is_some_and(|s| s.files.len() == 2) {
-                    break;
-                }
-            }
-            assert!(
-                Instant::now() < deadline,
-                "background warm did not populate the index in time"
-            );
-            thread::sleep(Duration::from_millis(20));
-        }
+        // `Building` is the non-blocking handoff. The index slot is installed
+        // before snapshot persistence, so observing the slot alone does not
+        // prove that the whole flight finished. Join the owning coordinator:
+        // its guard drops only after persistence has been attempted.
+        cap.warm.wait_if_building(dir.path());
+        let shared = cap.shared();
+        let guard = shared.lock().unwrap();
+        assert_eq!(guard.as_ref().map(|state| state.files.len()), Some(2));
+        drop(guard);
         assert!(
             CodeIndexSnapshot::path_for(dir.path()).exists(),
             "warm should persist a snapshot for the next session"
