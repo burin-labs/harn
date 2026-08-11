@@ -1,0 +1,293 @@
+import {
+  ExternalActionAuthenticationAssurance,
+  ExternalActionEnvironment,
+  ExternalActionError,
+  ExternalActionGrant,
+  ExternalActionIntent,
+  ExternalActionMoney,
+  external_action_error,
+  external_action_grant_integrity_check,
+  external_action_intent_is_exact,
+} from "std/external_action/contracts"
+
+/** Extra restrictions supplied by an organization that manages the actor. */
+pub type ExternalActionManagedPolicy = {
+  schema: "harn.external_action_managed_policy.v1",
+  external_actions_disabled: bool,
+  automatic_approval_forbidden: bool,
+  live_actions_forbidden: bool,
+  minimum_authentication_assurance: ExternalActionAuthenticationAssurance,
+  max_external_spend: list<ExternalActionMoney>,
+  allowed_providers?: list<string>,
+  allowed_capabilities?: list<string>,
+  allowed_environments?: list<ExternalActionEnvironment>,
+}
+
+const __EXTERNAL_ACTION_POLICY_KEYS = [
+  "schema",
+  "external_actions_disabled",
+  "automatic_approval_forbidden",
+  "live_actions_forbidden",
+  "minimum_authentication_assurance",
+  "max_external_spend",
+  "allowed_providers",
+  "allowed_capabilities",
+  "allowed_environments",
+]
+
+fn __external_action_policy_error(code: string, message: string) -> ExternalActionError {
+  return external_action_error("invalid_policy", code, message)
+}
+
+fn __external_action_policy_bool(raw: dict, field: string) -> Result<bool, ExternalActionError> {
+  const value = raw[field]
+  if value == nil {
+    return Ok(false)
+  }
+  if type_of(value) != "bool" {
+    return Err(__external_action_policy_error("invalid_" + field, field + " must be true or false"))
+  }
+  return Ok(value)
+}
+
+fn __external_action_policy_assurance(
+  raw,
+) -> Result<ExternalActionAuthenticationAssurance, ExternalActionError> {
+  const value = lowercase(trim(to_string(raw ?? "none")))
+  if value == "none" || value == "session" || value == "biometric" || value == "managed" {
+    return Ok(value)
+  }
+  return Err(
+    __external_action_policy_error(
+      "invalid_minimum_authentication_assurance",
+      "minimum authentication assurance must be none, session, biometric, or managed",
+    ),
+  )
+}
+
+fn __external_action_policy_text_list(
+  raw,
+  field: string,
+) -> Result<list<string>?, ExternalActionError> {
+  if raw == nil {
+    return Ok(nil)
+  }
+  if type_of(raw) != "list" || len(raw) > 100 {
+    return Err(__external_action_policy_error("invalid_" + field, field + " must be a bounded list"))
+  }
+  let values: list<string> = []
+  for item in raw {
+    const value = lowercase(trim(to_string(item)))
+    if value == "" || len(value) > 128 || value.contains("\n") {
+      return Err(
+        __external_action_policy_error(
+          "invalid_" + field,
+          field + " entries must be plain identifiers up to 128 characters",
+        ),
+      )
+    }
+    if !values.contains(value) {
+      values = values + [value]
+    }
+  }
+  return Ok(values.sorted())
+}
+
+fn __external_action_policy_environments(
+  raw,
+) -> Result<list<ExternalActionEnvironment>?, ExternalActionError> {
+  const checked = __external_action_policy_text_list(raw, "allowed_environments")
+  if !is_ok(checked) || unwrap(checked) == nil {
+    return checked
+  }
+  let environments: list<ExternalActionEnvironment> = []
+  for value in unwrap(checked) {
+    if value != "mock" && value != "test" && value != "live" {
+      return Err(
+        __external_action_policy_error(
+          "invalid_allowed_environments",
+          "allowed environments may contain only mock, test, or live",
+        ),
+      )
+    }
+    environments = environments + [value]
+  }
+  return Ok(environments)
+}
+
+fn __external_action_policy_money(raw) -> Result<list<ExternalActionMoney>, ExternalActionError> {
+  if raw == nil {
+    return Ok([])
+  }
+  if type_of(raw) != "list" || len(raw) > 32 {
+    return Err(
+      __external_action_policy_error(
+        "invalid_max_external_spend",
+        "max external spend must be a bounded list of currency ceilings",
+      ),
+    )
+  }
+  let ceilings: list<ExternalActionMoney> = []
+  let currencies: list<string> = []
+  for item in raw {
+    if type_of(item) != "dict" {
+      return Err(__external_action_policy_error("invalid_max_external_spend", "each spend ceiling must be an object"))
+    }
+    const currency = uppercase(trim(to_string(item?.currency ?? "")))
+    if regex_match("^[A-Z]{3}$", currency) == nil || type_of(item?.amount_minor) != "int"
+      || item.amount_minor
+      < 0 {
+      return Err(
+        __external_action_policy_error(
+          "invalid_max_external_spend",
+          "each spend ceiling needs an ISO currency and non-negative minor-unit amount",
+        ),
+      )
+    }
+    if currencies.contains(currency) {
+      return Err(
+        __external_action_policy_error(
+          "duplicate_spend_currency",
+          "max external spend may define each currency once",
+        ),
+      )
+    }
+    currencies = currencies + [currency]
+    ceilings = ceilings + [{currency: currency, amount_minor: item.amount_minor}]
+  }
+  return Ok(ceilings)
+}
+
+/** Validate and normalize one versioned managed-policy projection. */
+pub fn external_action_managed_policy_result(
+  raw: unknown,
+) -> Result<ExternalActionManagedPolicy, ExternalActionError> {
+  if type_of(raw) != "dict" {
+    return Err(__external_action_policy_error("invalid_shape", "managed policy must be an object"))
+  }
+  for key in keys(raw) {
+    if !__EXTERNAL_ACTION_POLICY_KEYS.contains(key) {
+      return Err(__external_action_policy_error("unknown_field", "managed policy contains an unsupported field"))
+    }
+  }
+  if raw?.schema != nil && raw.schema != "harn.external_action_managed_policy.v1" {
+    return Err(
+      __external_action_policy_error(
+        "unsupported_schema",
+        "managed policy schema must be harn.external_action_managed_policy.v1",
+      ),
+    )
+  }
+  const disabled = __external_action_policy_bool(raw, "external_actions_disabled")
+  const no_auto = __external_action_policy_bool(raw, "automatic_approval_forbidden")
+  const no_live = __external_action_policy_bool(raw, "live_actions_forbidden")
+  const assurance = __external_action_policy_assurance(raw?.minimum_authentication_assurance)
+  const ceilings = __external_action_policy_money(raw?.max_external_spend)
+  const providers = __external_action_policy_text_list(raw?.allowed_providers, "allowed_providers")
+  const capabilities = __external_action_policy_text_list(
+    raw?.allowed_capabilities,
+    "allowed_capabilities",
+  )
+  const environments = __external_action_policy_environments(raw?.allowed_environments)
+  for checked in [disabled, no_auto, no_live, assurance, ceilings, providers, capabilities, environments] {
+    if !is_ok(checked) {
+      return Err(unwrap_err(checked))
+    }
+  }
+  let policy: ExternalActionManagedPolicy = {
+    schema: "harn.external_action_managed_policy.v1",
+    external_actions_disabled: unwrap(disabled),
+    automatic_approval_forbidden: unwrap(no_auto),
+    live_actions_forbidden: unwrap(no_live),
+    minimum_authentication_assurance: unwrap(assurance),
+    max_external_spend: unwrap(ceilings),
+  }
+  if unwrap(providers) != nil {
+    policy.allowed_providers = unwrap(providers)
+  }
+  if unwrap(capabilities) != nil {
+    policy.allowed_capabilities = unwrap(capabilities)
+  }
+  if unwrap(environments) != nil {
+    policy.allowed_environments = unwrap(environments)
+  }
+  return Ok(policy)
+}
+
+/** Normalize a managed policy or throw its typed validation error. */
+pub fn external_action_managed_policy(raw: unknown) -> ExternalActionManagedPolicy {
+  const checked = external_action_managed_policy_result(raw)
+  if !is_ok(checked) {
+    throw unwrap_err(checked)
+  }
+  return unwrap(checked)
+}
+
+fn __external_action_assurance_rank(value: ExternalActionAuthenticationAssurance) -> int {
+  if value == "none" {
+    return 0
+  }
+  if value == "session" {
+    return 1
+  }
+  if value == "biometric" {
+    return 2
+  }
+  return 3
+}
+
+fn __external_action_automatic_method(method: string) -> bool {
+  return method == "policy" || method == "adversarial_auto" || method == "managed_policy"
+}
+
+/**
+ * Apply organization restrictions after the user's exact grant is validated.
+ * This function can deny or narrow an action; it never creates authority.
+ */
+pub fn external_action_managed_policy_check(
+  intent: ExternalActionIntent,
+  grant: ExternalActionGrant,
+  policy: ExternalActionManagedPolicy,
+) -> Result<ExternalActionGrant, ExternalActionError> {
+  if !external_action_intent_is_exact(intent) || !is_ok(external_action_grant_integrity_check(intent, grant)) {
+    return Err(__external_action_policy_error("invalid_action_authority", "action intent or grant is not exact"))
+  }
+  const normalized = external_action_managed_policy_result(policy)
+  if !is_ok(normalized) || unwrap(normalized) != policy {
+    return Err(__external_action_policy_error("policy_integrity_mismatch", "managed policy is not canonical"))
+  }
+  if policy.external_actions_disabled {
+    return Err(__external_action_policy_error("external_actions_disabled", "external actions are disabled by managed policy"))
+  }
+  if policy.automatic_approval_forbidden && __external_action_automatic_method(grant.authorization_method) {
+    return Err(__external_action_policy_error("automatic_approval_forbidden", "managed policy requires a person to approve this action"))
+  }
+  if policy.live_actions_forbidden && intent.environment == "live" {
+    return Err(__external_action_policy_error("live_actions_forbidden", "live external actions are disabled by managed policy"))
+  }
+  if policy.allowed_providers != nil && !policy.allowed_providers.contains(intent.provider) {
+    return Err(__external_action_policy_error("provider_not_allowed", "provider is not allowed by managed policy"))
+  }
+  if policy.allowed_capabilities != nil && !policy.allowed_capabilities.contains(intent.capability) {
+    return Err(__external_action_policy_error("capability_not_allowed", "capability is not allowed by managed policy"))
+  }
+  if policy.allowed_environments != nil && !policy.allowed_environments.contains(intent.environment) {
+    return Err(__external_action_policy_error("environment_not_allowed", "environment is not allowed by managed policy"))
+  }
+  if __external_action_assurance_rank(grant.authentication_assurance)
+    < __external_action_assurance_rank(policy.minimum_authentication_assurance) {
+    return Err(__external_action_policy_error("authentication_too_weak", "managed policy requires stronger authentication"))
+  }
+  if intent.external_spend != nil && len(policy.max_external_spend) > 0 {
+    let allowed: ExternalActionMoney? = nil
+    for ceiling in policy.max_external_spend {
+      if ceiling.currency == intent.external_spend.currency {
+        allowed = ceiling
+      }
+    }
+    if allowed == nil || intent.external_spend.amount_minor > allowed.amount_minor {
+      return Err(__external_action_policy_error("external_spend_exceeds_policy", "external spend exceeds the managed policy limit"))
+    }
+  }
+  return Ok(grant)
+}

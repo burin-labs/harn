@@ -3,5 +3,6 @@
  * consequential effects outside the current Harn workspace.
  */
 pub import "std/external_action/contracts"
+pub import "std/external_action/policy"
 pub import "std/external_action/runtime"
 pub import "std/external_action/testing"

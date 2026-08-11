@@ -15,6 +15,10 @@ import {
   external_action_grant_integrity_check,
   external_action_intent_is_exact,
 } from "std/external_action/contracts"
+import {
+  ExternalActionManagedPolicy,
+  external_action_managed_policy_check,
+} from "std/external_action/policy"
 
 const EXTERNAL_ACTION_RECEIPT_TOPIC = "external_actions.receipts"
 
@@ -392,6 +396,7 @@ pub fn external_action_execute(
   intent: ExternalActionIntent,
   grant: ExternalActionGrant,
   adapter: ExternalActionAdapter,
+  managed_policy: ExternalActionManagedPolicy? = nil,
 ) -> ExternalActionReceipt {
   const adapter_id = __external_action_adapter_id(adapter)
   const now_ms = harness.clock.now_ms()
@@ -432,6 +437,12 @@ pub fn external_action_execute(
         const grant_check = external_action_grant_check(intent, grant, harness.clock.now_ms())
         if !is_ok(grant_check) {
           throw {external_action_denied: true, error: unwrap_err(grant_check)}
+        }
+        if managed_policy != nil {
+          const policy_check = external_action_managed_policy_check(intent, grant, managed_policy)
+          if !is_ok(policy_check) {
+            throw {external_action_denied: true, error: unwrap_err(policy_check)}
+          }
         }
         const request = {
           schema: "harn.external_action_dispatch_request.v1",

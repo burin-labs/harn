@@ -62,6 +62,7 @@ pub type ExternalActionGrant = {
 
 pub type ExternalActionErrorKind = "invalid_intent" \
   | "invalid_grant" \
+  | "invalid_policy" \
   | "adapter_unavailable" \
   | "adapter_failure" \
   | "malformed_adapter_result" \
