@@ -18,12 +18,16 @@ pipeline default(harness: Harness) {
   )
   const edit = entry("edit", {kind: "edit", side_effect_level: "workspace_write"})
   const network_fetch = entry("network_fetch", {kind: "fetch", side_effect_level: "network"})
+  const network_search = entry("network_search", {kind: "search", side_effect_level: "network"})
   const network_action = entry("network_action", {kind: "execute", side_effect_level: "network"})
-  const tools = {tools: [read, mcp_read, destructive, edit, network_fetch, network_action]}
+  const tools = {
+    tools: [read, mcp_read, destructive, edit, network_fetch, network_search, network_action],
+  }
   harness.stdio.println(agent_tool_is_read_only(read))
   harness.stdio.println(agent_tool_is_read_only(mcp_read))
   harness.stdio.println(agent_tool_is_read_only(destructive))
   harness.stdio.println(agent_tool_is_read_only(network_fetch))
+  harness.stdio.println(agent_tool_is_read_only(network_search))
   harness.stdio.println(agent_tool_is_read_only(network_action))
   harness.stdio.println(agent_tool_calls_are_read_only([{name: "read"}, {name: "mcp_read"}], tools))
   harness.stdio.println(agent_tool_calls_are_read_only([{name: "read"}, {name: "edit"}], tools))

@@ -1,1 +1,1 @@
-Keep read-only network fetch tools available while an agent's read-only stance is armed.
+Keep read-only network lookup and deferred-tool search available while an agent's read-only stance is armed.

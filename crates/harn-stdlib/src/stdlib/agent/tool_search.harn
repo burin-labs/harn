@@ -245,6 +245,7 @@ fn __tool_search_synthetic_tool(registry, state) {
     __tool_search_description(state.strategy),
     {
       parameters: {query: {type: "string", description: "Search query for deferred tools"}},
+      annotations: {kind: "search", side_effect_level: "read_only"},
       handler: { args -> __tool_search_run(args, state) },
     },
   )

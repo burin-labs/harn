@@ -76,7 +76,7 @@ fn __agent_tool_side_effect_is_observational(kind: string, level: string) -> boo
   // remote system. ACP's `fetch` kind supplies that missing mutation fact.
   // Keep `execute + network` closed so sends, purchases, and other remote
   // actions still require write access.
-  return kind == "fetch" && level == "network"
+  return contains(__AGENT_READ_ONLY_TOOL_KINDS, kind) && level == "network"
 }
 
 /**

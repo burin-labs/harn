@@ -64,6 +64,7 @@ fn stance_tools() {
     "fetch remote data",
     {
       parameters: {},
+      defer_loading: true,
       annotations: {kind: "fetch", side_effect_level: "network"},
       handler: { _args -> "remote data" },
     },
@@ -160,6 +161,7 @@ pipeline default(harness: Harness) {
             provider: "mock",
             tools: stance_tools(),
             tool_format: "native",
+            tool_search: {mode: "client"},
             loop_until_done: true,
             max_iterations: 6,
             session_id: session,
@@ -175,6 +177,7 @@ pipeline default(harness: Harness) {
       harness.stdio.println(has_tool(first_tools, "edit"))
       harness.stdio.println(has_tool(first_tools, "run"))
       harness.stdio.println(has_tool(first_tools, "fetch"))
+      harness.stdio.println(has_tool(first_tools, "__harn_tool_search"))
       harness.stdio.println(has_tool(first_tools, "send"))
       harness.stdio.println(has_tool(first_tools, "mystery"))
       const third_tools = calls[2].tools
