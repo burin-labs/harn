@@ -377,7 +377,7 @@ const REPAIR_BINDINGS_MAKE_IMMUTABLE: RepairTemplate = RepairTemplate {
 
 const REPAIR_BINDINGS_RENAME_UNUSED: RepairTemplate = RepairTemplate {
     id: "bindings/rename-unused",
-    summary: "Use the `_` discard binding for an unused binding",
+    summary: "Mark an unused binding without changing callable arity",
     safety: RepairSafety::BehaviorPreserving,
 };
 

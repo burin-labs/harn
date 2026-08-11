@@ -1650,7 +1650,7 @@
         {
           "id": "bindings/rename-unused",
           "safety": "behavior-preserving",
-          "summary": "Use the `_` discard binding for an unused binding"
+          "summary": "Mark an unused binding without changing callable arity"
         }
       ],
       "related": [],
@@ -1665,7 +1665,7 @@
         {
           "id": "bindings/rename-unused",
           "safety": "behavior-preserving",
-          "summary": "Use the `_` discard binding for an unused binding"
+          "summary": "Mark an unused binding without changing callable arity"
         }
       ],
       "related": [],
@@ -1680,7 +1680,7 @@
         {
           "id": "bindings/rename-unused",
           "safety": "behavior-preserving",
-          "summary": "Use the `_` discard binding for an unused binding"
+          "summary": "Mark an unused binding without changing callable arity"
         }
       ],
       "related": [],
