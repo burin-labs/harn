@@ -9,6 +9,20 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.83
+
+### Fixed
+
+- External-action receipt outcomes, statuses, and next actions now come from one
+  Harn-owned vocabulary and are generated into the Swift, Rust, and TypeScript
+  host bindings, preventing supported hosts from silently drifting.
+- Workspace publishing now retries short crates.io network failures safely. It
+  checks the registry before a retry, so a dropped response cannot cause the same
+  crate version to be uploaded twice.
+- Session-backed run records now include the ordered, readable conversation, so
+  reports, reviews, and exports no longer lose user and assistant messages.
+- `harn fix` now preserves the root `Harness` parameter on public MCP tool functions while still narrowing private helpers.
+
 ## v0.10.82
 
 ### Added
