@@ -39,6 +39,8 @@ public struct HarnCatalogProvider: Codable, Sendable, Equatable {
     public let healthcheck: HarnProviderHealthcheck?
     private let encodedCacheUsageAccounting: Bool?
     public var cacheUsageAccounting: Bool { encodedCacheUsageAccounting ?? false }
+    private let encodedStreamUsageAccounting: Bool?
+    public var streamUsageAccounting: Bool? { encodedStreamUsageAccounting }
     public let protocols: [String]
     public let features: [String]
     public let caveats: [String]
@@ -58,6 +60,7 @@ public struct HarnCatalogProvider: Codable, Sendable, Equatable {
         case extraHeaders = "extra_headers"
         case healthcheck
         case encodedCacheUsageAccounting = "cache_usage_accounting"
+        case encodedStreamUsageAccounting = "stream_usage_accounting"
         case protocols
         case features
         case caveats

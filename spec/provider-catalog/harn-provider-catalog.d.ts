@@ -25,6 +25,7 @@ export interface HarnCatalogProvider {
   extra_headers?: Record<string, string>
   healthcheck?: HarnProviderHealthcheck
   cache_usage_accounting: boolean
+  stream_usage_accounting?: boolean
   protocols: string[]
   features: string[]
   caveats: string[]

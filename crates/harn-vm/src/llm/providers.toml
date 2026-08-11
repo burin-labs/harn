@@ -184,6 +184,10 @@ method = "GET"
 path = "/models"
 
 [providers.together]
+# Together's native chat reference does not document OpenAI's stream usage
+# extension. Keep hosted egress fail-closed even though the compatibility SDK
+# accepts and ignores several OpenAI-only fields.
+stream_usage_accounting = false
 base_url = "https://api.together.xyz/v1"
 base_url_env = "TOGETHER_AI_BASE_URL"
 auth_style = "bearer"
@@ -203,6 +207,7 @@ path = "/models"
 # on Llama 3.1 8B, ~594 tok/s on Llama 4 Scout. Useful executor target
 # when sub-100ms TTFT matters more than raw quality.
 [providers.groq]
+stream_usage_accounting = true
 base_url = "https://api.groq.com/openai/v1"
 base_url_env = "GROQ_BASE_URL"
 auth_style = "bearer"
@@ -242,6 +247,7 @@ path = "/models"
 
 [providers.deepseek]
 cache_usage_accounting = true
+stream_usage_accounting = true
 base_url = "https://api.deepseek.com/v1"
 base_url_env = "DEEPSEEK_BASE_URL"
 auth_style = "bearer"

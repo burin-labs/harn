@@ -38,6 +38,8 @@ pub struct CatalogProvider {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub healthcheck: Option<CatalogProviderHealthcheck>,
     pub cache_usage_accounting: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stream_usage_accounting: Option<bool>,
     pub protocols: Vec<String>,
     pub features: Vec<String>,
     pub caveats: Vec<String>,
