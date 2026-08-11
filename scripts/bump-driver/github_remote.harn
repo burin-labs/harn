@@ -44,11 +44,14 @@ fn __must(result, operation: string) {
 pub fn github_bump_remote(harness: Harness, config: GithubBumpRemoteConfig) -> LiveBumpRemote {
   const repo = __repo(config.repo)
   const release_repo = __repo(config.release_repo)
-  const auth = {installation_token: config.token}
+  const options = {installation_token: config.token}
   return {
     latest_release_tag: fn() {
       const latest = __must(
-        github_latest_release(harness, release_repo.owner, release_repo.name, auth),
+        github_latest_release(
+          harness,
+          {owner: release_repo.owner, repo: release_repo.name, options: options},
+        ),
         "latest release lookup",
       )
       if !(latest.ok ?? false) {
@@ -58,7 +61,10 @@ pub fn github_bump_remote(harness: Harness, config: GithubBumpRemoteConfig) -> L
     },
     release_view: fn(tag) {
       const lookup = __must(
-        github_release(harness, release_repo.owner, release_repo.name, tag, auth),
+        github_release(
+          harness,
+          {owner: release_repo.owner, repo: release_repo.name, tag: tag, options: options},
+        ),
         "release lookup",
       )
       if !lookup.found {
@@ -78,9 +84,14 @@ pub fn github_bump_remote(harness: Harness, config: GithubBumpRemoteConfig) -> L
     find_bump_pr: fn() {
       const found = github_find_open_pr(
         harness,
-        repo.owner,
-        repo.name,
-        auth + {head_ref: config.branch, base_ref: config.base, head_owner: repo.owner},
+        {
+          owner: repo.owner,
+          repo: repo.name,
+          head_ref: config.branch,
+          base_ref: config.base,
+          head_owner: repo.owner,
+          options: options,
+        },
       )
       if !found.ok {
         throw "bump-driver: pull request lookup failed: " + json_stringify(found.error)
@@ -112,15 +123,15 @@ pub fn github_bump_remote(harness: Harness, config: GithubBumpRemoteConfig) -> L
       __must(
         pulls_disable_auto_merge(
           harness,
-          repo.owner,
-          repo.name,
-          pull.number,
-          auth
-            + {
+          {
+            owner: repo.owner,
+            repo: repo.name,
+            pull_number: pull.number,
             expected_head_oid: pull.head_oid,
             base_branch: pull.base_ref,
             expected_base_oid: base_oid,
-            restore_merge_method: pull.auto_merge_method ?? "SQUASH",
+            restore_merge_method: (pull.auto_merge_method ?? "squash").lower(),
+            options: options,
           },
         ),
         "leased auto-merge disable",
@@ -138,9 +149,10 @@ pub fn github_bump_remote(harness: Harness, config: GithubBumpRemoteConfig) -> L
         base_oid: request.base_sha,
         create_branch: true,
         reset_branch: true,
+        options: options,
       }
       const receipt = __must(
-        github_commit_worktree(harness, publication, auth),
+        github_commit_worktree(harness, publication),
         "leased signed worktree publication",
       )
       if !receipt.committed {
@@ -158,11 +170,11 @@ pub fn github_bump_remote(harness: Harness, config: GithubBumpRemoteConfig) -> L
         repo: repo.name,
         left_ref: config.branch,
         right_ref: config.base,
+        options: options,
       }
-      return __must(github_compare_branch_trees(harness, request, auth), "branch tree comparison")
-        .equal
+      return __must(github_compare_branch_trees(harness, request), "branch tree comparison").equal
     },
-    upsert_pr: fn(_existing, expected_head_oid) {
+    upsert_pr: fn(existing, expected_head_oid) {
       const request: GithubPullRequestUpsertRequest = {
         owner: repo.owner,
         repo: repo.name,
@@ -172,9 +184,11 @@ pub fn github_bump_remote(harness: Harness, config: GithubBumpRemoteConfig) -> L
         body:
           "Automated Harn runtime bump. Regenerated the lockfile and ran the declared validation entrypoint. Merges through the normal queue.\n\nProduced by the reusable `bump-harn` workflow.",
         expected_head_oid: expected_head_oid,
+        previous_head_oid: existing?.head_oid,
+        options: options,
       }
       const receipt = __must(
-        github_upsert_pull_request(harness, request, auth),
+        github_upsert_pull_request(harness, request),
         "leased pull request upsert",
       )
       return {
@@ -185,7 +199,16 @@ pub fn github_bump_remote(harness: Harness, config: GithubBumpRemoteConfig) -> L
       }
     },
     close_pr: fn(number, comment) {
-      const receipt = github_close_pr(harness, repo.owner, repo.name, number, comment, auth)
+      const receipt = github_close_pr(
+        harness,
+        {
+          owner: repo.owner,
+          repo: repo.name,
+          pull_number: number,
+          comment: comment,
+          options: options,
+        },
+      )
       if !receipt.ok {
         throw "bump-driver: pull request close failed: " + json_stringify(receipt.error)
       }
@@ -195,10 +218,14 @@ pub fn github_bump_remote(harness: Harness, config: GithubBumpRemoteConfig) -> L
       const receipt = __must(
         pulls_enable_auto_merge(
           harness,
-          repo.owner,
-          repo.name,
-          number,
-          auth + {expected_head_oid: expected_head_oid, method: "SQUASH"},
+          {
+            owner: repo.owner,
+            repo: repo.name,
+            pull_number: number,
+            expected_head_oid: expected_head_oid,
+            method: "squash",
+            options: options,
+          },
         ),
         "leased auto-merge enable",
       )
