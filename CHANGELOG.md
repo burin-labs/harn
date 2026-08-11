@@ -9,6 +9,14 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.80
+
+### Fixed
+
+- Complementary reviewer selection now skips providers that cannot authenticate.
+  Automatic independent review uses a reachable route or fails closed with a typed reason.
+- Keep read-only network lookup and deferred-tool search available while an agent's read-only stance is armed.
+
 ## v0.10.79
 
 ### Changed
