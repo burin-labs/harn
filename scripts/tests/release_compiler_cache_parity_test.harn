@@ -10,30 +10,21 @@ fn step_by_name(steps, name: string) {
 
 @test
 pipeline test_release_build_records_cache_mode_stats_and_budget(harness: Harness, task) {
-  const workflow = read_yaml(
-    harness.fs,
-    "../../.github/workflows/build-release-binaries.yml",
-    nil,
-  )
+  const workflow = read_yaml(harness.fs, "../../.github/workflows/build-release-binaries.yml", nil)
   const steps = workflow?.jobs?.build?.steps ?? []
   assert(step_by_name(steps, "Summarize cache mode") != nil)
   assert(step_by_name(steps, "Summarize sccache stats") != nil)
   assert(step_by_name(steps, "Evaluate warm-build budget") != nil)
   assert(step_by_name(steps, "Persist local release sccache") != nil)
-
   const build = step_by_name(steps, "Build")
   assert_eq(build?.id, "build")
   assert(to_string(build?.run ?? "").contains("duration_seconds="))
   assert(to_string(build?.run ?? "").contains("GITHUB_OUTPUT"))
-
   const stats = step_by_name(steps, "Summarize sccache stats")
   assert_eq(trim(stats?.if ?? ""), "always()")
   assert(to_string(stats?.run ?? "").contains("sccache_backend=none"))
-
   const budget = step_by_name(steps, "Evaluate warm-build budget")
-  assert(
-    to_string(budget?.run ?? "").contains("scripts/check_release_warm_build_budget.sh"),
-  )
+  assert(to_string(budget?.run ?? "").contains("scripts/check_release_warm_build_budget.sh"))
   assert_eq(
     trim(budget?.env?.HARN_RELEASE_BUILD_SECONDS ?? ""),
     gha_expression("steps.build.outputs.duration_seconds"),
@@ -41,13 +32,8 @@ pipeline test_release_build_records_cache_mode_stats_and_budget(harness: Harness
 }
 
 @test
-pipeline test_release_runner_policy_enables_macos_windows_compiler_cache(
-  harness: Harness,
-  task,
-) {
-  const policy = json_parse(
-    harness.fs.read_text("../../.github/release-runner-policy.json"),
-  )
+pipeline test_release_runner_policy_enables_macos_windows_compiler_cache(harness: Harness, task) {
+  const policy = json_parse(harness.fs.read_text("../../.github/release-runner-policy.json"))
   const apple_x86 = policy.targets.find({ row -> row.target == "x86_64-apple-darwin" })
   const apple_arm = policy.targets.find({ row -> row.target == "aarch64-apple-darwin" })
   const windows = policy.targets.find({ row -> row.target == "x86_64-pc-windows-msvc" })
@@ -62,9 +48,7 @@ pipeline test_release_runner_policy_enables_macos_windows_compiler_cache(
 
 @test
 pipeline test_warm_build_budget_ratchets_v01065_baseline(harness: Harness, task) {
-  const budget = json_parse(
-    harness.fs.read_text("../../.github/release-warm-build-budget.json"),
-  )
+  const budget = json_parse(harness.fs.read_text("../../.github/release-warm-build-budget.json"))
   assert_eq(budget.baseline.version, "0.10.65")
   assert_eq(budget.baseline.run_id, "31288092986")
   assert_eq(budget.metric, "build_step_wall_seconds")
