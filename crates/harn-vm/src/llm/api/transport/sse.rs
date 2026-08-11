@@ -487,6 +487,53 @@ fn push_internal_tool_call(
     }));
 }
 
+/// True when an SSE `data:` JSON frame is a terminal provider error rather than
+/// a completion/delta chunk. Named `event: error` frames always qualify; otherwise
+/// recognize Anthropic `type=error` and OpenAI-compatible / managed top-level
+/// `error` payloads that lack a usable `choices` array.
+fn is_structured_sse_error_frame(
+    event_name: Option<&str>,
+    json: &serde_json::Value,
+    protocol: StreamProtocol,
+) -> bool {
+    if event_name.is_some_and(|name| name.eq_ignore_ascii_case("error")) {
+        return true;
+    }
+    if json.get("type").and_then(serde_json::Value::as_str) == Some("error") {
+        return true;
+    }
+    let Some(error) = json.get("error") else {
+        return false;
+    };
+    if error.is_null() {
+        return false;
+    }
+    // Managed OpenAI-compatible transports often stamp taxonomy beside `error`.
+    if json
+        .get("kind")
+        .and_then(serde_json::Value::as_str)
+        .is_some()
+        && json
+            .get("reason")
+            .and_then(serde_json::Value::as_str)
+            .is_some()
+    {
+        return true;
+    }
+    match protocol {
+        StreamProtocol::OpenAiSse => !json
+            .get("choices")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|choices| !choices.is_empty()),
+        // Anthropic errors use `type=error` (handled above). A bare `error`
+        // field on other Anthropic event types is not a recognized shape.
+        StreamProtocol::AnthropicSse
+        | StreamProtocol::OllamaNdjson
+        | StreamProtocol::GeminiJson
+        | StreamProtocol::GeminiInteractionsSse => false,
+    }
+}
+
 /// Pure SSE-line consumer used by the response wrapper and by tests
 /// that drive canned byte streams without standing up a full
 /// `reqwest::Response`. The Anthropic / OpenAI branches and the
@@ -614,12 +661,19 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
     // out of the visible delta stream so the tool-call parser / progress
     // UI only see the real response.
     let mut oai_thinking_splitter = ThinkingStreamSplitter::new();
+    // Most recent SSE `event:` name. Consumed with the next `data:` frame so
+    // named `event: error` payloads classify before delta parsing.
+    let mut current_event: Option<String> = None;
 
     loop {
         let line = match liveness.next_line(lines.next_line()).await? {
             Some(line) => line,
             None => return Err(liveness.premature_eof("a provider terminal event")),
         };
+        if let Some(event) = line.strip_prefix("event:") {
+            current_event = Some(event.trim().to_string());
+            continue;
+        }
         let data = if let Some(d) = line.strip_prefix("data: ") {
             d
         } else {
@@ -630,8 +684,28 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
         }
         let json: serde_json::Value = match serde_json::from_str(data) {
             Ok(v) => v,
-            Err(_) => continue,
+            Err(_) => {
+                // Drop a stale event name so a later data frame cannot inherit
+                // an earlier `event:` label after a malformed payload.
+                current_event = None;
+                continue;
+            }
         };
+        let event_name = current_event.take();
+        if is_structured_sse_error_frame(event_name.as_deref(), &json, dialect.stream_protocol()) {
+            // Flush any OpenAI-compat visible carry held for `<think>` boundary
+            // detection so short partial text still counts as partial output.
+            let pending_visible = oai_thinking_splitter.flush();
+            if !pending_visible.is_empty() {
+                text.push_str(&pending_visible);
+                let _ = delta_tx.send(pending_visible);
+            }
+            return Err(super::super::classify_provider_stream_error(
+                provider,
+                data,
+                !text.is_empty(),
+            ));
+        }
         liveness.mark_partial_output();
         let terminal_frame = if dialect.stream_protocol() == StreamProtocol::AnthropicSse {
             json["type"].as_str() == Some("message_stop")

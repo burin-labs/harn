@@ -148,6 +148,158 @@ async fn clean_eof_without_terminal_evidence_is_typed_failure() {
     assert!(failure.partial);
 }
 
+fn assert_structured_sse_error(
+    err: &crate::value::VmError,
+    expected_partial: bool,
+    forbidden_secret: Option<&str>,
+) {
+    assert!(
+        err.provider_stream_failure().is_none(),
+        "structured SSE error must not fall through to ProviderStreamFailure/premature_eof; got: {err}"
+    );
+    let crate::value::VmError::Thrown(crate::value::VmValue::Dict(dict)) = err else {
+        panic!("structured SSE error must throw a taxonomy dict; got: {err}");
+    };
+    assert_eq!(
+        dict.get("kind").map(|value| value.display()).as_deref(),
+        Some("terminal")
+    );
+    assert_eq!(
+        dict.get("reason").map(|value| value.display()).as_deref(),
+        Some("invalid_request")
+    );
+    assert_eq!(
+        dict.get("partial").map(|value| value.display()).as_deref(),
+        Some(if expected_partial { "true" } else { "false" })
+    );
+    assert_eq!(
+        dict.get("source").map(|value| value.display()).as_deref(),
+        Some("provider_stream")
+    );
+    let message = dict
+        .get("message")
+        .map(|value| value.display())
+        .unwrap_or_default();
+    assert!(
+        message.contains("[invalid_request]"),
+        "sanitized classifier tag missing from message: {message}"
+    );
+    assert!(
+        !crate::llm::agent_observe::is_retryable_llm_error(err),
+        "terminal invalid_request must not be retryable; message was: {message}"
+    );
+    if let Some(secret) = forbidden_secret {
+        assert!(
+            !message.contains(secret),
+            "provider error sanitizer must redact secrets; message was: {message}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn named_sse_error_event_classifies_instead_of_premature_eof() {
+    let body: &[u8] = concat!(
+        "event: error\n",
+        "data: {\"error\":\"request rejected\",\"kind\":\"terminal\",\"reason\":\"invalid_request\"}\n",
+    )
+    .as_bytes();
+    let (delta_tx, _delta_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    let err = consume_sse_lines(
+        tokio::io::BufReader::new(body),
+        "openai",
+        "test-model",
+        DialectContract::new(WireDialect::OpenAiCompat, None),
+        delta_tx,
+        None,
+        None,
+        false,
+    )
+    .await
+    .expect_err("named SSE error event must terminate as a classified provider error");
+    assert_structured_sse_error(&err, false, None);
+}
+
+#[tokio::test]
+async fn partial_text_then_sse_error_preserves_partial_and_upstream_taxonomy() {
+    let body: &[u8] = concat!(
+        "data: {\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\n",
+        "event: error\n",
+        "data: {\"error\":\"Authorization: Bearer sk-secret-token\",\"kind\":\"terminal\",\"reason\":\"invalid_request\"}\n",
+    )
+    .as_bytes();
+    let (delta_tx, mut delta_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    let err = consume_sse_lines(
+        tokio::io::BufReader::new(body),
+        "openai",
+        "test-model",
+        DialectContract::new(WireDialect::OpenAiCompat, None),
+        delta_tx,
+        None,
+        None,
+        false,
+    )
+    .await
+    .expect_err("partial text then SSE error must terminate as a classified provider error");
+    assert_eq!(delta_rx.try_recv().ok().as_deref(), Some("hello"));
+    assert_structured_sse_error(&err, true, Some("sk-secret-token"));
+}
+
+#[tokio::test]
+async fn top_level_structured_sse_error_without_event_name_classifies() {
+    let body: &[u8] =
+        b"data: {\"error\":\"bad request shape\",\"kind\":\"terminal\",\"reason\":\"invalid_request\"}\n";
+    let (delta_tx, _delta_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    let err = consume_sse_lines(
+        tokio::io::BufReader::new(body),
+        "openai",
+        "test-model",
+        DialectContract::new(WireDialect::OpenAiCompat, None),
+        delta_tx,
+        None,
+        None,
+        false,
+    )
+    .await
+    .expect_err("top-level structured error JSON must classify without event: error");
+    assert_structured_sse_error(&err, false, None);
+}
+
+#[tokio::test]
+async fn anthropic_typed_error_frame_classifies_instead_of_premature_eof() {
+    let body: &[u8] = concat!(
+        "data: {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"boom\"}}\n",
+    )
+    .as_bytes();
+    let (delta_tx, _delta_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    let err = consume_sse_lines(
+        tokio::io::BufReader::new(body),
+        "anthropic",
+        "test-model",
+        DialectContract::new(WireDialect::Anthropic, None),
+        delta_tx,
+        None,
+        None,
+        false,
+    )
+    .await
+    .expect_err("Anthropic type=error must classify instead of premature EOF");
+    assert!(
+        err.provider_stream_failure().is_none(),
+        "Anthropic typed error must not fall through to premature_eof; got: {err}"
+    );
+    let crate::value::VmError::Thrown(crate::value::VmValue::Dict(dict)) = err else {
+        panic!("Anthropic typed error must throw a taxonomy dict; got: {err}");
+    };
+    assert_eq!(
+        dict.get("reason").map(|value| value.display()).as_deref(),
+        Some("invalid_request")
+    );
+    assert_eq!(
+        dict.get("partial").map(|value| value.display()).as_deref(),
+        Some("false")
+    );
+}
+
 async fn pending_sse_deadline(
     policy: StreamDeadlinePolicy,
     initial: Option<&[u8]>,
