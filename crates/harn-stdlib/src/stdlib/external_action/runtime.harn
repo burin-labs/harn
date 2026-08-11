@@ -88,6 +88,8 @@ fn __external_action_adapter_result(
   const raw_outcome = lowercase(trim(to_string(raw?.outcome ?? "")))
   if raw_outcome != "confirmed" && raw_outcome != "failed_before_dispatch"
     && raw_outcome
+    != "rejected"
+    && raw_outcome
     != "indeterminate" {
     return Err(
       external_action_error(
@@ -139,6 +141,16 @@ fn __external_action_adapter_result(
     return Ok(
       __external_action_adapter_result_fields(
         __external_action_adapter_outcome("failed_before_dispatch"),
+        unwrap(evidence),
+        provider_action_id,
+        error_code,
+      ),
+    )
+  }
+  if raw_outcome == "rejected" {
+    return Ok(
+      __external_action_adapter_result_fields(
+        __external_action_adapter_outcome("rejected"),
         unwrap(evidence),
         provider_action_id,
         error_code,
@@ -253,10 +265,17 @@ fn __external_action_receipt(
   const outcome = result.outcome
   let error: ExternalActionError? = nil
   if result.error_code != nil {
+    const message = if outcome == "indeterminate" {
+      "The provider outcome is unknown and must be reconciled."
+    } else if outcome == "rejected" {
+      "The provider rejected the dispatched action."
+    } else {
+      "The action was rejected before provider dispatch."
+    }
     error = external_action_error(
       "adapter_failure",
       result.error_code,
-      outcome == "indeterminate" ? "The provider outcome is unknown and must be reconciled." : "The provider rejected the action before dispatch.",
+      message,
       outcome == "indeterminate",
     )
   }
@@ -286,6 +305,21 @@ fn __external_action_receipt(
       __external_action_status("failed_before_dispatch"),
       __external_action_next_action("none"),
       opts?.dispatch_attempted ?? false,
+      recorded_at_ms,
+      result.provider_action_id,
+      result.evidence_refs ?? [],
+      error,
+      opts?.reconciliation,
+    )
+  }
+  if outcome == "rejected" {
+    return __external_action_receipt_fields(
+      intent,
+      adapter_id,
+      __external_action_outcome("rejected"),
+      __external_action_status("rejected"),
+      __external_action_next_action("none"),
+      true,
       recorded_at_ms,
       result.provider_action_id,
       result.evidence_refs ?? [],
