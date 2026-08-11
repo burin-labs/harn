@@ -114,6 +114,41 @@ pipeline test(harness: Harness) {
   assert(spend_receipt.status == "denied", "spend above the grant ceiling must be denied")
   assert(spend_receipt.error?.code == "external_spend_exceeds_grant", "spend denial must be typed")
   harness.stdio.println("spend_denied:" + to_string(spend_receipt.error?.code ?? ""))
+  const expired_intent = external_action_intent(
+    intent + {payload: {offer_id: "off_test_expired_grant"}},
+  )
+  const expired = external_action_fake_adapter(
+    harness.runtime,
+    "duffel-test-expired",
+    {outcome: "confirmed", provider_action_id: "must_not_dispatch"},
+  )
+  const receipt_cursor = harness.obs.event_log_latest("external_actions.receipts")
+  harness.testing.clock_set(2000)
+  const expired_receipt = external_action_execute(
+    harness,
+    expired_intent,
+    grant(expired_intent, 20000, 1000),
+    expired.adapter,
+  )
+  harness.testing.clock_reset()
+  assert(expired_receipt.status == "denied", "expired grants must be denied")
+  assert(expired_receipt.error?.code == "grant_expired", "expiry denial must be typed")
+  assert(expired.dispatch_calls() == 0, "expired grants must not reach the adapter")
+  const receipt_stream = harness.obs.event_log_subscribe(
+    {topic: "external_actions.receipts", from_cursor: receipt_cursor},
+  )
+  const expired_event = receipt_stream.next().value
+  assert(
+    expired_event.kind == "external_action_receipt",
+    "expiry denial must use the canonical receipt event",
+  )
+  assert(expired_event.payload.id == expired_receipt.id, "emitted expiry receipt must be exact")
+  harness.stdio.println(
+    "expired_denied_without_dispatch:"
+      + to_string(expired.dispatch_calls())
+      + ":"
+      + to_string(expired_event.payload.error?.code ?? ""),
+  )
   const ambiguous_intent = external_action_intent(
     intent + {payload: {offer_id: "off_test_ambiguous"}},
   )
