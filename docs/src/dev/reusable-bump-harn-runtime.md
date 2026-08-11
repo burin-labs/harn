@@ -69,6 +69,11 @@ jobs:
           harn lint "${files[@]}"
         fi
         [ -d tests ] && harn test tests/ --parallel || true
+      # Optional controller handoff. A failed refresh or validation still
+      # fails the workflow, but publishes the exact signed mutation as a PR
+      # with auto-merge disabled so a separately bounded repair lane has a
+      # head lease. Ordinary callers should keep the default false.
+      publish-failure-for-repair: false
     secrets:
       app-client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
       app-private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
@@ -86,10 +91,15 @@ from the same published version.
   zero mutation.
 - Not yet published: a target whose release is still finalizing is a clean exit
   (`outcome: not_ready`); the next scheduled run picks it up.
-- Refresh failure: the target runtime reports `refresh_failed` before
-  validation or commit. When a compatible older target predates that receipt
-  outcome, the workflow's per-run success sentinel makes validation fail
-  closed instead; neither path can reach a signed commit.
+- Refresh or validation failure: the default remains fail-before-publish.
+  Controllers that set `publish-failure-for-repair: true` receive a signed
+  repair PR only when the failed mutation produced a file delta. The receipt
+  preserves `refresh_failed` or `validation_failed`, validation is not run
+  after a failed refresh, and the workflow remains failed. This path never
+  arms auto-merge; a separate validator must prove and republish the leased
+  head before merge can be enabled. When a compatible older target predates
+  the typed refresh outcome, the workflow's per-run success sentinel still
+  makes validation fail closed.
 - Stale heads: an open bump PR with auto-merge armed is disarmed only under its
   exact PR-head and base-head leases. The connector then derives the local
   worktree delta, creates or resets the branch, and publishes the GitHub-signed

@@ -48,6 +48,11 @@ on:
         required: false
         type: boolean
         default: true
+      publish-failure-for-repair:
+        description: "Publish a refresh- or validation-failed mutation as a repair PR with auto-merge disabled."
+        required: false
+        type: boolean
+        default: false
     secrets:
       app-client-id:
         description: "GitHub App client id used to mint a signed-commit-capable installation token."
@@ -202,6 +207,7 @@ jobs:
           HARN_BUMP_BRANCH: ${{ inputs.branch }}
           HARN_BUMP_BASE: ${{ inputs.base }}
           HARN_BUMP_ENABLE_AUTOMERGE: ${{ inputs.enable-auto-merge }}
+          HARN_BUMP_PUBLISH_FAILURE_FOR_REPAIR: ${{ inputs.publish-failure-for-repair }}
         shell: bash
         run: |
           set -euo pipefail

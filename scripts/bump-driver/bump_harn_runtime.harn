@@ -29,6 +29,12 @@ pipeline main(harness: Harness) {
   const branch = env_or(harness.env, "HARN_BUMP_BRANCH", "automation/bump-harn-runtime")
   const base = env_or(harness.env, "HARN_BUMP_BASE", "main")
   const enable_auto_merge = env_or(harness.env, "HARN_BUMP_ENABLE_AUTOMERGE", "true") != "false"
+  const publish_failure_for_repair = env_or(
+    harness.env,
+    "HARN_BUMP_PUBLISH_FAILURE_FOR_REPAIR",
+    "false",
+  )
+    == "true"
   const remote = github_bump_remote(
     harness,
     {repo: repo, release_repo: release_repo, token: token, branch: branch, base: base},
@@ -59,6 +65,7 @@ pipeline main(harness: Harness) {
         base: base,
         tag: env_or(harness.env, "HARN_BUMP_TARGET_TAG", ""),
         enable_auto_merge: enable_auto_merge,
+        publish_failure_for_repair: publish_failure_for_repair,
       },
     ),
     adapter,
