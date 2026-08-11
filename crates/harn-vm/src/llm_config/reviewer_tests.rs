@@ -94,6 +94,23 @@ fn complementary_reviewer_skips_unavailable_provider() {
 }
 
 #[test]
+fn complementary_reviewer_skips_deprecated_model_on_available_provider() {
+    let selection = pick_complementary_reviewer_with_availability(
+        ComplementaryReviewerOptions {
+            author_model: "gpt-5.6-luna".to_string(),
+            author_provider: Some("openai".to_string()),
+            intent: ComplementaryReviewerIntent::Critique,
+            max_price_multiplier: Some(3.0),
+        },
+        |_| true,
+    );
+
+    assert!(!selection.fallback, "{selection:?}");
+    assert_ne!(selection.reviewer.id, "gemini-2.5-flash-lite");
+    assert_ne!(selection.reviewer.family, selection.author.family);
+}
+
+#[test]
 fn complementary_reviewer_reports_no_available_independent_route() {
     let selection = pick_complementary_reviewer_with_availability(
         ComplementaryReviewerOptions {

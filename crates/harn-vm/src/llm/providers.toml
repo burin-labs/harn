@@ -1848,7 +1848,7 @@ minimax = "MiniMax-M2.5-highspeed"
 # GLM-4.6 is Z.AI's cheap coding route, confirmed serving at paas/v4.
 zai = "glm-4.6"
 deepseek = "deepseek-v4-flash"
-gemini = "gemini-2.5-flash-lite"
+gemini = "gemini-3.5-flash-lite"
 
 # --- source: 50-presentation/00-model-selection.toml ---
 # Host-facing model-selection metadata. These rows describe picker choices and,
@@ -2642,6 +2642,9 @@ provider = "gemini"
 context_window = 1048576
 capabilities = ["tools", "vision", "streaming", "thinking"]
 pricing = { input_per_mtok = 0.10, output_per_mtok = 0.40, cache_read_per_mtok = 0.01 }
+deprecated = true
+deprecation_note = "Unavailable to new Gemini API users as of August 2026 and scheduled to shut down 2026-10-16. Use gemini-3.5-flash-lite."
+superseded_by = "gemini-3.5-flash-lite"
 tier = "small"
 open_weight = false
 strengths = ["speed", "cheap", "long_context", "summarization", "tool_use"]

@@ -319,6 +319,9 @@ provider = "gemini"
 context_window = 1048576
 capabilities = ["tools", "vision", "streaming", "thinking"]
 pricing = { input_per_mtok = 0.10, output_per_mtok = 0.40, cache_read_per_mtok = 0.01 }
+deprecated = true
+deprecation_note = "Unavailable to new Gemini API users as of August 2026 and scheduled to shut down 2026-10-16. Use gemini-3.5-flash-lite."
+superseded_by = "gemini-3.5-flash-lite"
 tier = "small"
 open_weight = false
 strengths = ["speed", "cheap", "long_context", "summarization", "tool_use"]
