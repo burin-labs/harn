@@ -73,7 +73,8 @@ jobs:
       # Exact candidates get a higher Dynamic ceiling so a restored warm target
       # and the version-bumped workspace rebuild can coexist without hitting the
       # old fixed 25 GB VHDX cap (harn#6027 / harn#6485). Growth remains bounded
-      # by host free space on C:.
+      # by host free space on C:. Drive sizes are owned by cache-policy.json
+      # windows_workspace_warm and locked by check_ci_cache_policy.harn.
       - name: Set up Dev Drive
         if: ${{ vars.HARN_WINDOWS_DEVDRIVE == 'on' }}
         uses: samypr100/setup-dev-drive@562171fe8df7401fdf582d766cd3b6ab80d5b1a0 # v4.1.0
@@ -148,6 +149,9 @@ jobs:
         run: |
           echo 'fn main(harness: Harness) { harness.stdio.println("ok") }' > smoke.harn
           "${CARGO_TARGET_DIR:-target}/debug/harn.exe" run smoke.harn
+      # Artifact name/retention are owned by cache-policy.json
+      # windows_workspace_warm; keep these literals byte-compatible with that
+      # document or check-ci-cache-policy fails.
       - name: Stage Windows workspace warm artifact
         if: ${{ github.ref == 'refs/heads/main' }}
         shell: bash

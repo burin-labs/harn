@@ -85,14 +85,29 @@ fn windows_cache_inputs(save: bool = false) {
   }
 }
 
+fn windows_warm_policy() {
+  return {
+    artifact_name: "workspace-windows-warm",
+    manifest_schema: "harn.windows_workspace_warm.v1",
+    workflow: "windows-nightly.yml",
+    job: "nextest",
+    retention_days: 3,
+    max_bytes: 8589934592,
+    nextest_version: "0.9.132",
+    dev_drive_size_default: "25GB",
+    dev_drive_size_release_certify: "50GB",
+  }
+}
+
 fn policy() -> CiCachePolicy {
   return {
-    schema_version: 2,
+    schema_version: 3,
     rust_cache_action: "./.github/actions/rust-cache",
     node_cache_action: "./.github/actions/node-cache",
     persistent_ref: "refs/heads/main",
     storage_limit_bytes: 10737418240,
     remote_sccache: false,
+    windows_workspace_warm: windows_warm_policy(),
     writers: [
       {
         workflow: "build-release-binaries.yml",
@@ -433,6 +448,11 @@ fn workflows() {
                 "if-no-files-found": "error",
               },
             },
+            {
+              name: "Install cargo-nextest",
+              uses: "taiki-e/install-action@exact-pin",
+              with: {tool: "nextest@0.9.132"},
+            },
           ],
         },
       },
@@ -733,7 +753,7 @@ pipeline test_ci_cache_policy_accepts_declared_main_guarded_writers(harness: Har
       declared["ci.yml"],
       declared["windows-nightly.yml"],
     )
-      + windows_release_certify_warm_errors(declared["windows-nightly.yml"])
+      + windows_release_certify_warm_errors(policy(), declared["windows-nightly.yml"])
       + actions_cache_capacity_errors(
       policy(),
     ),
@@ -747,7 +767,7 @@ pipeline test_windows_shared_cache_targets_dev_drive_with_one_stable_restore_own
 ) {
   const declared = workflows()
   assert_eq(windows_shared_cache_errors(declared["ci.yml"], declared["windows-nightly.yml"]), [])
-  assert_eq(windows_release_certify_warm_errors(declared["windows-nightly.yml"]), [])
+  assert_eq(windows_release_certify_warm_errors(policy(), declared["windows-nightly.yml"]), [])
   assert_eq(actions_cache_capacity_errors(policy()), [])
 }
 
@@ -776,7 +796,8 @@ pipeline test_windows_release_certify_warm_requires_artifact_path_and_larger_dri
 ) {
   const declared = workflows()
   const producer = declared["windows-nightly.yml"]
-  assert_eq(windows_release_certify_warm_errors(producer), [])
+  const declared_policy = policy()
+  assert_eq(windows_release_certify_warm_errors(declared_policy, producer), [])
   const without_restore = {
     ...producer,
     jobs: {
@@ -795,7 +816,7 @@ pipeline test_windows_release_certify_warm_requires_artifact_path_and_larger_dri
     },
   }
   assert(
-    windows_release_certify_warm_errors(without_restore).contains(
+    windows_release_certify_warm_errors(declared_policy, without_restore).contains(
       "windows-nightly.yml:nextest must restore-only the main warm artifact on release-certify refs with cold fallback",
     ),
   )
@@ -817,27 +838,46 @@ pipeline test_windows_release_certify_warm_requires_artifact_path_and_larger_dri
     },
   }
   assert(
-    windows_release_certify_warm_errors(small_drive).contains(
-      "windows-nightly.yml:nextest must give release-certify refs a 50GB Dev Drive ceiling",
+    windows_release_certify_warm_errors(declared_policy, small_drive).contains(
+      "windows-nightly.yml:nextest Dev Drive size must follow cache-policy.json windows_workspace_warm ceilings",
     ),
   )
 }
 
-pipeline test_actions_cache_capacity_stays_at_ten_gib(harness: Harness, task) {
+pipeline test_actions_cache_capacity_keeps_warm_artifact_below_pool(harness: Harness, task) {
   assert_eq(actions_cache_capacity_errors(policy()), [])
   const base = policy()
-  const oversized: CiCachePolicy = {
+  const oversized_warm: CiCachePolicy = {
     schema_version: base.schema_version,
     rust_cache_action: base.rust_cache_action,
     node_cache_action: base.node_cache_action,
     persistent_ref: base.persistent_ref,
-    storage_limit_bytes: 32212254720,
+    storage_limit_bytes: base.storage_limit_bytes,
     remote_sccache: base.remote_sccache,
+    windows_workspace_warm: {...base.windows_workspace_warm, max_bytes: base.storage_limit_bytes},
     writers: base.writers,
   }
   assert(
-    actions_cache_capacity_errors(oversized).contains(
-      "cache-policy.json storage_limit_bytes must stay at 10737418240; Windows warm targets use workflow artifacts instead of raising Actions cache capacity",
+    actions_cache_capacity_errors(oversized_warm).contains(
+      "cache-policy.json windows_workspace_warm.max_bytes must stay below storage_limit_bytes so warm artifacts cannot pretend to replace the Actions cache pool",
+    ),
+  )
+  const flat_drive: CiCachePolicy = {
+    schema_version: base.schema_version,
+    rust_cache_action: base.rust_cache_action,
+    node_cache_action: base.node_cache_action,
+    persistent_ref: base.persistent_ref,
+    storage_limit_bytes: base.storage_limit_bytes,
+    remote_sccache: base.remote_sccache,
+    windows_workspace_warm: {
+      ...base.windows_workspace_warm,
+      dev_drive_size_release_certify: base.windows_workspace_warm.dev_drive_size_default,
+    },
+    writers: base.writers,
+  }
+  assert(
+    actions_cache_capacity_errors(flat_drive).contains(
+      "cache-policy.json windows_workspace_warm must give release-certify a larger Dev Drive ceiling than the default",
     ),
   )
 }
