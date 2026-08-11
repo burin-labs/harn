@@ -198,6 +198,74 @@ pipeline test_validation_failure_blocks_commit(harness: Harness, task) {
   assert_eq(call_names(fake.calls()), ["apply_version", "run_validation"])
 }
 
+/** Fleet repair opt-in publishes an exact lease but never arms auto-merge. */
+pipeline test_validation_failure_can_publish_repair_pr_without_auto_merge(harness: Harness, task) {
+  const fake = make_fake({validation_ok: false, validation_detail: "harn check failed"})
+  const receipt = run_bump(opts({publish_failure_for_repair: true}), fake.adapter)
+  assert_eq(receipt.outcome, "validation_failed")
+  assert_eq(receipt.ok, false)
+  assert_eq(receipt.validation.ok, false)
+  assert_eq(receipt.pr_action, "created")
+  assert_eq(receipt.pr_number, 4242)
+  assert_eq(receipt.commit_oid, "c0ffee")
+  assert_eq(receipt.auto_merge, nil)
+  assert_eq(
+    call_names(fake.calls()),
+    ["apply_version", "run_validation", "publish_commit", "upsert_pr"],
+  )
+}
+
+pipeline test_validation_failure_opt_in_does_not_publish_an_empty_delta(harness: Harness, task) {
+  const fake = make_fake(
+    {validation_ok: false, validation_detail: "harn check failed", additions: [], deletions: []},
+  )
+  const receipt = run_bump(opts({publish_failure_for_repair: true}), fake.adapter)
+  assert_eq(receipt.outcome, "validation_failed")
+  assert_eq(receipt.ok, false)
+  assert_eq(receipt.pr_action, "none")
+  assert_eq(call_names(fake.calls()), ["apply_version", "run_validation"])
+}
+
+pipeline test_validation_failure_opt_in_never_becomes_success_when_branch_matches_base(
+  harness: Harness,
+  task,
+) {
+  const fake = make_fake(
+    {validation_ok: false, validation_detail: "harn check failed", branch_matches: true},
+  )
+  const receipt = run_bump(opts({publish_failure_for_repair: true}), fake.adapter)
+  assert_eq(receipt.outcome, "validation_failed")
+  assert_eq(receipt.ok, false)
+  assert_eq(receipt.pr_action, "none")
+  assert_eq(call_names(fake.calls()), ["apply_version", "run_validation", "publish_commit"])
+}
+
+pipeline test_refresh_failure_can_publish_repair_pr_without_validation_or_auto_merge(
+  harness: Harness,
+  task,
+) {
+  const fake = make_fake({apply_ok: false})
+  const receipt = run_bump(opts({publish_failure_for_repair: true}), fake.adapter)
+  assert_eq(receipt.outcome, "refresh_failed")
+  assert_eq(receipt.ok, false)
+  assert_eq(receipt.refresh_ok, false)
+  assert_eq(receipt.validation.ok, true)
+  assert_eq(receipt.pr_action, "created")
+  assert_eq(receipt.pr_number, 4242)
+  assert_eq(receipt.commit_oid, "c0ffee")
+  assert_eq(receipt.auto_merge, nil)
+  assert_eq(call_names(fake.calls()), ["apply_version", "publish_commit", "upsert_pr"])
+}
+
+pipeline test_refresh_failure_opt_in_does_not_publish_without_a_mutation(harness: Harness, task) {
+  const fake = make_fake({apply_ok: false, apply_changed: false, additions: [], deletions: []})
+  const receipt = run_bump(opts({publish_failure_for_repair: true}), fake.adapter)
+  assert_eq(receipt.outcome, "refresh_failed")
+  assert_eq(receipt.ok, false)
+  assert_eq(receipt.pr_action, "none")
+  assert_eq(call_names(fake.calls()), ["apply_version"])
+}
+
 /**
  * 6. Stale branch/PR lease: an open PR with auto-merge armed is disarmed
  * BEFORE the branch and signed commit are atomically published. Order matters.
