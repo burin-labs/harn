@@ -94,6 +94,30 @@ that warm Intel path, so primary release latency no longer depends on an x86
 cache hit. Intel cache warms remain useful for the emergency standard fallback
 and retain the repository's existing storage budgets and pruning.
 
+## Compiler-cache backends
+
+Each target also declares `sccache_backend` next to `use_sccache`:
+
+| Backend | Meaning |
+| --- | --- |
+| `sticky` | Blacksmith sticky-disk `SCCACHE_DIR`. Hosted runners for the same target fall back to the bounded local blob cache. |
+| `local` | Bounded local `SCCACHE_DIR` restored/saved as one Actions cache blob. `SCCACHE_GHA_ENABLED=false`. |
+| `install` | Historical Linux install path through `.github/actions/sccache-install`. |
+| `none` | Explicit skip with a job-summary reason. |
+
+The per-object GHA sccache backend stays off. Windows previously failed mid
+`harn-vm` compile with `os error 10054` (#2114), and the hosted per-object trial
+spent 5.35 GiB for negligible hits (v0.10.39). Local blob persistence is the
+next-best reusable boundary on hosted macOS ARM and Windows: restore once
+before compile, save once after, never talk to the cache API during rustc.
+
+Every Build job records cache mode, hit/miss statistics (or an explicit skip
+reason), and Build-step wall time in the job summary. Warm and candidate modes
+compare that Build-step duration to
+`.github/release-warm-build-budget.json`, which ratchets from the measured
+`v0.10.65` fanout ([run 31288092986](https://github.com/burin-labs/harn/actions/runs/31288092986)).
+Queue time and skipped targets do not count.
+
 An earlier cold-cache benchmark saved only 55 seconds on Large. That result
 correctly blocked adoption at the time, but cold dependency compilation is not
 the intended steady-state Intel release path. The later cache-hit pair showed a

@@ -303,21 +303,15 @@ jobs:
 
       - uses: ./.github/actions/rust-toolchain
         if: needs.resolve.outputs.mode == 'source'
-      - uses: ./.github/actions/sccache-install
-        if: needs.resolve.outputs.mode == 'source' && matrix.platform != 'windows'
-        # sccache is a build-cache optimization, not a build requirement. The
-        # upstream action sometimes fails on merge_group / restricted-token
-        # events with "Bad credentials" when api.github.com gates the release
-        # lookup; a cold build is a fine fallback, but the job shouldn't fail.
+      # Match build-release-binaries.yml: persist a bounded local SCCACHE_DIR
+      # without the per-object GHA backend that failed mid-compile on Windows.
+      - uses: ./.github/actions/sccache
+        if: needs.resolve.outputs.mode == 'source'
         continue-on-error: true
-
-      # Match build-release-binaries.yml. Windows release-smoke spends long
-      # stretches in one harn-vm rustc invocation where the wrapper has not
-      # produced useful hits. The shared Cargo cache remains the persistent layer.
-      - name: Configure Cargo to use sccache
-        if: needs.resolve.outputs.mode == 'source' && matrix.platform != 'windows' && env.SCCACHE_PATH != ''
-        shell: bash
-        run: echo "RUSTC_WRAPPER=${SCCACHE_PATH}" >> "$GITHUB_ENV"
+        with:
+          cache-key: release-smoke-${{ matrix.platform }}
+          local-cache: "true"
+          cache-size: "2G"
       - uses: ./.github/actions/rust-cache
         if: needs.resolve.outputs.mode == 'source'
         continue-on-error: true

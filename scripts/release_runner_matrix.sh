@@ -90,11 +90,16 @@ jq -e '
   (.targets | type == "array" and length > 0) and
   ([.targets[].target] | length == (unique | length)) and
   all(.targets[];
-    (keys == ["release_codegen_units", "runners", "target", "use_sccache"]) and
+    (keys == ["release_codegen_units", "runners", "sccache_backend", "target", "use_sccache"]) and
     (.runners | keys == ["fast", "primary", "recovery", "standard", "warm"]) and
     (.target | type == "string" and length > 0) and
     (.release_codegen_units | type == "number" and floor == . and . >= 1 and . <= 256) and
-    (.use_sccache == "true" or .use_sccache == "false"))
+    (.use_sccache == "true" or .use_sccache == "false") and
+    (.sccache_backend == "sticky"
+      or .sccache_backend == "local"
+      or .sccache_backend == "install"
+      or .sccache_backend == "none") and
+    ((.use_sccache == "false") == (.sccache_backend == "none")))
 ' "$POLICY" >/dev/null
 
 # Validate runner fields separately so jq evaluates them against each target.
@@ -162,6 +167,7 @@ jq -c \
           ),
           rust_cache_broad_restore_prefix: rust_cache_broad_restore_prefix(.target),
           release_codegen_units,
-          use_sccache
+          use_sccache,
+          sccache_backend
         }]
   ' "$POLICY"
