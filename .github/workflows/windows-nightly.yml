@@ -14,6 +14,12 @@ name: Windows nightly
 # `docs/src/dev/windows-test-coverage.md` to reflect the disposition.
 #
 # Tracking issue: harn#946.
+#
+# Release certification (`release-certify/<sha>`) keeps the shared Actions
+# `workspace-windows` cache skipped so the contended 10 GiB namespace is not
+# thrashed, and instead restores a short-retention main-produced workflow
+# artifact when one is compatible (harn#6485). Candidates stay restore-only
+# and fall cold when no generation exists.
 
 on:
   schedule:
@@ -25,6 +31,7 @@ on:
 
 permissions:
   contents: read
+  actions: write
 
 env:
   CARGO_TERM_COLOR: always
@@ -63,21 +70,23 @@ jobs:
       # the shared-cache policy's pre-cache step-sequence comparison fails.
       # Toggled together via the single HARN_WINDOWS_DEVDRIVE repo variable. See
       # the ci.yml windows job for the full rationale.
+      # Exact candidates get a higher Dynamic ceiling so a restored warm target
+      # and the version-bumped workspace rebuild can coexist without hitting the
+      # old fixed 25 GB VHDX cap (harn#6027 / harn#6485). Growth remains bounded
+      # by host free space on C:.
       - name: Set up Dev Drive
         if: ${{ vars.HARN_WINDOWS_DEVDRIVE == 'on' }}
         uses: samypr100/setup-dev-drive@562171fe8df7401fdf582d766cd3b6ab80d5b1a0 # v4.1.0
         with:
-          drive-size: 25GB
+          drive-size: ${{ startsWith(github.ref_name, 'release-certify/') && '50GB' || '25GB' }}
           drive-format: ReFS
           env-mapping: |
             CARGO_HOME,{{ DEV_DRIVE }}/.cargo
             CARGO_TARGET_DIR,{{ DEV_DRIVE }}/target
       - uses: ./.github/actions/rust-toolchain
       - uses: ./.github/actions/rust-cache
-        # A release commit changes every workspace package version. Restoring
-        # the main target generation then retains old and new artifacts side by
-        # side until the fixed 25 GB Dev Drive fills. Exact-candidate runs are
-        # deliberately cold; dependency downloads still use Cargo's registry.
+        # Keep exact candidates off the contended 10 GiB Actions cache namespace.
+        # Their warm path is the short-retention workflow artifact below.
         if: ${{ !startsWith(github.ref_name, 'release-certify/') }}
         continue-on-error: true
         with:
@@ -94,6 +103,28 @@ jobs:
           cache-on-failure: true
           cache-bin: false
           save: true
+      - name: Restore Windows workspace warm artifact
+        id: windows-warm-restore
+        if: ${{ startsWith(github.ref_name, 'release-certify/') }}
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ./scripts/ci/windows_workspace_warm_artifact.sh download-and-restore \
+            --repo "${{ github.repository }}" \
+            --target-dir "${CARGO_TARGET_DIR:-target}"
+      - name: Report Windows warm restore outcome
+        if: ${{ startsWith(github.ref_name, 'release-certify/') }}
+        shell: bash
+        run: |
+          outcome="${{ steps.windows-warm-restore.outcome }}"
+          echo "windows_warm_restore_outcome=${outcome}"
+          if [[ "${outcome}" == "success" ]]; then
+            echo "Windows release certification restored a compatible main warm artifact."
+          else
+            echo "Windows release certification falling cold; no compatible warm artifact."
+          fi
       - name: Report Windows build storage
         shell: pwsh
         run: |
@@ -117,3 +148,18 @@ jobs:
         run: |
           echo 'fn main(harness: Harness) { harness.stdio.println("ok") }' > smoke.harn
           "${CARGO_TARGET_DIR:-target}/debug/harn.exe" run smoke.harn
+      - name: Stage Windows workspace warm artifact
+        if: ${{ github.ref == 'refs/heads/main' }}
+        shell: bash
+        run: |
+          ./scripts/ci/windows_workspace_warm_artifact.sh pack \
+            "${RUNNER_TEMP}/workspace-windows-warm"
+      - name: Upload Windows workspace warm artifact
+        if: ${{ github.ref == 'refs/heads/main' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: workspace-windows-warm
+          path: ${{ runner.temp }}/workspace-windows-warm/
+          if-no-files-found: error
+          retention-days: 3
+          compression-level: 6

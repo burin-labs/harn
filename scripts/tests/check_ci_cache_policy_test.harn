@@ -1,4 +1,6 @@
 import {
+  CiCachePolicy,
+  actions_cache_capacity_errors,
   ci_cache_policy_errors,
   ci_cache_policy_parse,
   ci_workflow_concurrency_errors,
@@ -11,6 +13,7 @@ import {
   release_warm_cache_prune_errors,
   rust_cache_refresh_concurrency_errors,
   setup_harn_cache_action_errors,
+  windows_release_certify_warm_errors,
   windows_shared_cache_errors,
 } from "../check_ci_cache_policy"
 
@@ -384,16 +387,47 @@ fn workflows() {
       },
     },
     "windows-nightly.yml": {
+      permissions: {contents: "read", actions: "write"},
       jobs: {
         nextest: {
           steps: [
             {uses: "actions/checkout@exact-pin"},
-            {uses: "samypr100/setup-dev-drive@exact-pin"},
+            {
+              name: "Set up Dev Drive",
+              uses: "samypr100/setup-dev-drive@exact-pin",
+              with: {
+                "drive-size": gha_expression(
+                  "startsWith(github.ref_name, 'release-certify/') && '50GB' || '25GB'",
+                ),
+              },
+            },
             {uses: "./.github/actions/rust-toolchain"},
             {
               uses: "./.github/actions/rust-cache",
               if: gha_expression("!startsWith(github.ref_name, 'release-certify/')"),
               with: windows_cache_inputs(true),
+            },
+            {
+              name: "Restore Windows workspace warm artifact",
+              if: gha_expression("startsWith(github.ref_name, 'release-certify/')"),
+              "continue-on-error": true,
+              run:
+                "./scripts/ci/windows_workspace_warm_artifact.sh download-and-restore --repo owner/repo",
+            },
+            {
+              name: "Stage Windows workspace warm artifact",
+              if: gha_expression("github.ref == 'refs/heads/main'"),
+              run: "./scripts/ci/windows_workspace_warm_artifact.sh pack staging",
+            },
+            {
+              name: "Upload Windows workspace warm artifact",
+              if: gha_expression("github.ref == 'refs/heads/main'"),
+              uses: "actions/upload-artifact@exact-pin",
+              with: {
+                name: "workspace-windows-warm",
+                "retention-days": 3,
+                "if-no-files-found": "error",
+              },
             },
           ],
         },
@@ -694,6 +728,10 @@ pipeline test_ci_cache_policy_accepts_declared_main_guarded_writers(harness: Har
       + windows_shared_cache_errors(
       declared["ci.yml"],
       declared["windows-nightly.yml"],
+    )
+      + windows_release_certify_warm_errors(declared["windows-nightly.yml"])
+      + actions_cache_capacity_errors(
+      policy(),
     ),
     [],
   )
@@ -705,6 +743,8 @@ pipeline test_windows_shared_cache_targets_dev_drive_with_one_stable_restore_own
 ) {
   const declared = workflows()
   assert_eq(windows_shared_cache_errors(declared["ci.yml"], declared["windows-nightly.yml"]), [])
+  assert_eq(windows_release_certify_warm_errors(declared["windows-nightly.yml"]), [])
+  assert_eq(actions_cache_capacity_errors(policy()), [])
 }
 
 pipeline test_windows_shared_cache_requires_release_certification_bypass(harness: Harness, task) {
@@ -722,6 +762,78 @@ pipeline test_windows_shared_cache_requires_release_certification_bypass(harness
   assert(
     windows_shared_cache_errors(declared["ci.yml"], invalid).contains(
       "windows-nightly.yml:nextest must skip the shared target cache for release-certify refs",
+    ),
+  )
+}
+
+pipeline test_windows_release_certify_warm_requires_artifact_path_and_larger_drive(
+  harness: Harness,
+  task,
+) {
+  const declared = workflows()
+  const producer = declared["windows-nightly.yml"]
+  assert_eq(windows_release_certify_warm_errors(producer), [])
+  const without_restore = {
+    ...producer,
+    jobs: {
+      nextest: {
+        ...producer.jobs.nextest,
+        steps: producer.jobs.nextest.steps.filter(
+          { step ->
+            return !contains(
+              trim(step?.run ?? ""),
+              "windows_workspace_warm_artifact.sh download-and-restore",
+            )
+          },
+        )
+          .to_list(),
+      },
+    },
+  }
+  assert(
+    windows_release_certify_warm_errors(without_restore).contains(
+      "windows-nightly.yml:nextest must restore-only the main warm artifact on release-certify refs with cold fallback",
+    ),
+  )
+  const small_drive = {
+    ...producer,
+    jobs: {
+      nextest: {
+        ...producer.jobs.nextest,
+        steps: producer.jobs.nextest.steps.map(
+          { step ->
+            if trim(step?.name ?? "") != "Set up Dev Drive" {
+              return step
+            }
+            return {...step, with: {...step.with, "drive-size": "25GB"}}
+          },
+        )
+          .to_list(),
+      },
+    },
+  }
+  assert(
+    windows_release_certify_warm_errors(small_drive).contains(
+      "windows-nightly.yml:nextest must give release-certify refs a 50GB Dev Drive ceiling",
+    ),
+  )
+}
+
+pipeline test_actions_cache_capacity_stays_at_ten_gib(harness: Harness, task) {
+  assert_eq(actions_cache_capacity_errors(policy()), [])
+  const base = policy()
+  const oversized: CiCachePolicy = {
+    schema_version: base.schema_version,
+    rust_cache_action: base.rust_cache_action,
+    node_cache_action: base.node_cache_action,
+    persistent_ref: base.persistent_ref,
+    storage_limit_bytes: 32212254720,
+    remote_sccache: base.remote_sccache,
+    writers: base.writers,
+  }
+  assert(
+    actions_cache_capacity_errors(oversized).contains(
+      "cache-policy.json storage_limit_bytes must stay at 10737418240; Windows warm targets use workflow artifacts instead of raising Actions cache capacity",
     ),
   )
 }
