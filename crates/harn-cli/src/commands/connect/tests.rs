@@ -260,7 +260,7 @@ async fn status_reports_missing_auth_for_missing_required_secret_chain() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn status_accepts_only_declared_nonempty_credential_environment() {
-    const ENV_NAME: &str = "HARN_TEST_CONNECTOR_STATUS_TOKEN_6530";
+    const ENV_NAME: &str = "CONNECTOR_STATUS_TEST_TOKEN_6530";
     let _environment = crate::env_guard::ScopedEnvVar::set(ENV_NAME, "test-token");
     let secrets = harn_vm::connectors::testkit::MemorySecretProvider::empty();
     let index = ConnectIndex {
@@ -311,7 +311,7 @@ async fn status_accepts_only_declared_nonempty_credential_environment() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn status_rejects_empty_declared_credential_environment() {
-    const ENV_NAME: &str = "HARN_TEST_CONNECTOR_STATUS_EMPTY_6530";
+    const ENV_NAME: &str = "CONNECTOR_STATUS_TEST_EMPTY_6530";
     let _environment = crate::env_guard::ScopedEnvVar::set(ENV_NAME, "   ");
     let secrets = harn_vm::connectors::testkit::MemorySecretProvider::empty();
     let index = ConnectIndex::default();
