@@ -9,7 +9,8 @@ owns the effective approval policy.
 The lifecycle is:
 
 1. Normalize untrusted action data with `external_action_intent(...)`.
-2. Let the host evaluate user, workspace, and managed-organization policy.
+2. Let the host evaluate user and workspace policy. Normalize any organization
+   restrictions with `external_action_managed_policy(...)`.
 3. Encode the effective decision with `external_action_grant(...)`.
 4. Call `external_action_execute(...)` with a provider adapter.
 5. If the receipt is `reconciliation_required`, query the provider with
@@ -44,7 +45,17 @@ const grant = external_action_grant(intent, {
   max_external_spend: {currency: "USD", amount_minor: 24567},
 })
 
-const receipt = external_action_execute(harness, intent, grant, duffel_adapter)
+const managed = external_action_managed_policy({
+  automatic_approval_forbidden: true,
+  live_actions_forbidden: true,
+  minimum_authentication_assurance: "biometric",
+  max_external_spend: [{currency: "USD", amount_minor: 50000}],
+  allowed_providers: ["duffel"],
+  allowed_capabilities: ["flights.book"],
+  allowed_environments: ["test"],
+})
+
+const receipt = external_action_execute(harness, intent, grant, duffel_adapter, managed)
 ```
 
 ## Guarantees
@@ -53,6 +64,10 @@ const receipt = external_action_execute(harness, intent, grant, duffel_adapter)
   payload, and external spend. Changing any of them invalidates the grant.
 - Model/API inference cost is not part of `external_spend`; hosts can budget
   the two independently.
+- Managed policy is a restriction layer, not a grant. It can disable actions,
+  require manual approval or stronger authentication, forbid live effects,
+  reduce a currency limit, or restrict providers, capabilities, and
+  environments. It cannot create authority that the exact grant does not have.
 - Dispatch is checkpointed by the exact intent fingerprint. Replaying the same
   action returns the original receipt without calling the adapter again.
 - Once dispatch starts, thrown or malformed provider responses become an

@@ -3,6 +3,7 @@ import {
   external_action_fake_adapter,
   external_action_grant,
   external_action_intent,
+  external_action_managed_policy,
   external_action_reconcile,
 } from "std/external_action"
 
@@ -114,6 +115,52 @@ pipeline test(harness: Harness) {
   assert(spend_receipt.status == "denied", "spend above the grant ceiling must be denied")
   assert(spend_receipt.error?.code == "external_spend_exceeds_grant", "spend denial must be typed")
   harness.stdio.println("spend_denied:" + to_string(spend_receipt.error?.code ?? ""))
+  const managed_intent = external_action_intent(
+    intent + {payload: {offer_id: "off_test_managed_denial"}},
+  )
+  const managed_adapter = external_action_fake_adapter(
+    harness.runtime,
+    "duffel-managed-test",
+    {outcome: "confirmed", provider_action_id: "must_not_dispatch_managed"},
+  )
+  const managed_policy = external_action_managed_policy(
+    {
+      automatic_approval_forbidden: true,
+      live_actions_forbidden: true,
+      minimum_authentication_assurance: "biometric",
+      max_external_spend: [{currency: "USD", amount_minor: 10000}],
+      allowed_providers: ["duffel"],
+      allowed_capabilities: ["flights.book"],
+      allowed_environments: ["test"],
+    },
+  )
+  const automatic_grant = external_action_grant(
+    managed_intent,
+    {
+      authorized_by: {kind: "reviewer", id: "safety-reviewer"},
+      authorization_method: "adversarial_auto",
+      authentication_assurance: "managed",
+      issued_at_ms: 0,
+      expires_at_ms: 9999999999999,
+      max_external_spend: {currency: "USD", amount_minor: 20000},
+    },
+  )
+  const managed_denial = external_action_execute(
+    harness,
+    managed_intent,
+    automatic_grant,
+    managed_adapter.adapter,
+    managed_policy,
+  )
+  assert(managed_denial.status == "denied", "managed policy must deny forbidden auto approval")
+  assert(
+    managed_denial.error?.code == "automatic_approval_forbidden",
+    "managed policy denial must be typed",
+  )
+  assert(managed_adapter.dispatch_calls() == 0, "managed denial must not reach the adapter")
+  harness.stdio.println(
+    "managed_denied_without_dispatch:" + to_string(managed_adapter.dispatch_calls()),
+  )
   const expired_intent = external_action_intent(
     intent + {payload: {offer_id: "off_test_expired_grant"}},
   )
