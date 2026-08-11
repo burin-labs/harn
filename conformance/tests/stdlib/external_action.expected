@@ -3,5 +3,6 @@ changed_denied:grant_binding_mismatch
 provider_rejected_after_dispatch:1
 forged_grant_denied:grant_integrity_mismatch
 spend_denied:external_spend_exceeds_grant
+expired_denied_without_dispatch:0:grant_expired
 reconciled_without_redispatch:1:1
 malformed_bounded:invalid_evidence_ref
