@@ -31,6 +31,8 @@ runs:
     - name: Prefer local disk over the per-object GHA sccache backend
       if: inputs.sticky == 'true' || inputs.local-cache == 'true'
       shell: bash
+      env:
+        HARN_SCCACHE_CACHE_SIZE: ${{ inputs.cache-size }}
       run: |
         set -euo pipefail
         sccache_dir="${HOME}/.cache/sccache"
@@ -38,7 +40,7 @@ runs:
         {
           echo "SCCACHE_GHA_ENABLED=false"
           echo "SCCACHE_DIR=${sccache_dir}"
-          echo "SCCACHE_CACHE_SIZE=${{ inputs.cache-size }}"
+          echo "SCCACHE_CACHE_SIZE=${HARN_SCCACHE_CACHE_SIZE}"
         } >> "$GITHUB_ENV"
 
     - name: Mount persistent sccache directory
