@@ -31,6 +31,8 @@ mod pricing_tests;
 #[cfg(test)]
 mod provider_endpoint_tests;
 #[cfg(test)]
+mod reviewer_tests;
+#[cfg(test)]
 mod tests;
 #[cfg(test)]
 mod tool_format_fitness_tests;
