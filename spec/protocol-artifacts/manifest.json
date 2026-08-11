@@ -508,7 +508,7 @@
       "cancelled"
     ]
   },
-  "artifactVersion": "0.10.79",
+  "artifactVersion": "0.10.80",
   "bindings": {
     "go": {
       "artifact": "go/harnprotocol/harnprotocol.go",
