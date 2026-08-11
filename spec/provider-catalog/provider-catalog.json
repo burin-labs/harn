@@ -7967,7 +7967,9 @@
         "cache_write_per_mtok": null
       },
       "deprecation": {
-        "status": "active"
+        "status": "deprecated",
+        "note": "Unavailable to new Gemini API users as of August 2026 and scheduled to shut down 2026-10-16. Use gemini-3.5-flash-lite.",
+        "superseded_by": "gemini-3.5-flash-lite"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -26463,31 +26465,6 @@
     },
     {
       "provider": "gemini",
-      "model": "gemini-2.5-flash-lite",
-      "base_url": "https://generativelanguage.googleapis.com",
-      "secret_env": "GEMINI_API_KEY",
-      "label": "Gemini 2.5 Flash-Lite",
-      "family": "google-gemini",
-      "capabilities": [
-        "audio",
-        "batch",
-        "extended_thinking",
-        "files",
-        "native_tools",
-        "pdf",
-        "prefers_markdown_scaffolding",
-        "prefers_xml_scaffolding",
-        "streaming",
-        "structured_output",
-        "structured_output_mode:native_json",
-        "text_tools",
-        "thinking",
-        "tools",
-        "vision"
-      ]
-    },
-    {
-      "provider": "gemini",
       "model": "gemini-2.5-pro",
       "base_url": "https://generativelanguage.googleapis.com",
       "secret_env": "GEMINI_API_KEY",
@@ -29922,7 +29899,7 @@
     "anthropic": "claude-haiku-4-5-20251001",
     "cohere": "command-a-plus-05-2026",
     "deepseek": "deepseek-v4-flash",
-    "gemini": "gemini-2.5-flash-lite",
+    "gemini": "gemini-3.5-flash-lite",
     "groq": "llama-3.1-8b-instant",
     "local": "gemma-4-26b-a4b-it",
     "minimax": "MiniMax-M2.5-highspeed",
