@@ -9,6 +9,22 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.77
+
+### Changed
+
+- **Windows release certification no longer cold-compiles the workspace by
+  policy.** Exact `release-certify/*` runs still skip the contended 10 GiB
+  Actions `workspace-windows` cache, but restore a short-retention
+  main-produced `workspace-windows-warm` workflow artifact into a larger
+  Dynamic Dev Drive ceiling when one is compatible, and fall cold otherwise.
+
+### Fixed
+
+- Managed OpenAI-compatible gateways can now consume Harn's closed, typed chat
+  contract and provider-wire projection, preventing hosted accounting metadata
+  and undocumented stream options from leaking into third-party requests.
+
 ## v0.10.76
 
 ### Fixed
