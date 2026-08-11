@@ -1,11 +1,16 @@
 /** Provider-neutral contracts for consequential external effects. */
 pub type ExternalActionEnvironment = "mock" | "test" | "live"
 
-pub type ExternalActionOutcome = "confirmed" | "denied" | "failed_before_dispatch" | "indeterminate"
+pub type ExternalActionOutcome = "confirmed" \
+  | "denied" \
+  | "failed_before_dispatch" \
+  | "rejected" \
+  | "indeterminate"
 
 pub type ExternalActionReceiptStatus = "confirmed" \
   | "denied" \
   | "failed_before_dispatch" \
+  | "rejected" \
   | "reconciliation_required"
 
 pub type ExternalActionNextAction = "none" | "reconcile"
@@ -70,7 +75,10 @@ pub type ExternalActionError = {
 }
 
 /** The only response shape an external provider adapter may return. */
-pub type ExternalActionAdapterOutcome = "confirmed" | "failed_before_dispatch" | "indeterminate"
+pub type ExternalActionAdapterOutcome = "confirmed" \
+  | "failed_before_dispatch" \
+  | "rejected" \
+  | "indeterminate"
 
 pub type ExternalActionAdapterResult = {
   outcome: ExternalActionAdapterOutcome,

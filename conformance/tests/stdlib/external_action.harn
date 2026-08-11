@@ -58,6 +58,33 @@ pipeline test(harness: Harness) {
   assert(changed_receipt.error?.code == "grant_binding_mismatch", "denial must be typed")
   assert(confirmed.dispatch_calls() == 1, "denied mutation must not reach the adapter")
   harness.stdio.println("changed_denied:" + to_string(changed_receipt.error?.code ?? ""))
+  const rejected_intent = external_action_intent(
+    intent + {payload: {offer_id: "off_test_provider_rejected"}},
+  )
+  const rejected = external_action_fake_adapter(
+    harness.runtime,
+    "duffel-test",
+    {outcome: "rejected", error_code: "validation_required"},
+  )
+  const rejected_receipt = external_action_execute(
+    harness,
+    rejected_intent,
+    grant(rejected_intent),
+    rejected.adapter,
+  )
+  const rejected_replay = external_action_execute(
+    harness,
+    rejected_intent,
+    grant(rejected_intent),
+    rejected.adapter,
+  )
+  assert(rejected_receipt.status == "rejected", "provider rejection must be distinct")
+  assert(rejected_receipt.dispatch_attempted, "provider rejection must record dispatch")
+  assert(rejected_receipt.next_action == "none", "definite rejection must not reconcile")
+  assert(!rejected_receipt.error?.retryable, "definite rejection must not invite a retry")
+  assert(rejected_replay.id == rejected_receipt.id, "rejection replay must use its checkpoint")
+  assert(rejected.dispatch_calls() == 1, "rejection replay must not dispatch twice")
+  harness.stdio.println("provider_rejected_after_dispatch:" + to_string(rejected.dispatch_calls()))
   const forged_intent = external_action_intent(
     intent + {payload: {offer_id: "off_test_forged_grant"}},
   )
