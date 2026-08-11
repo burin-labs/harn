@@ -1,4 +1,5 @@
 import {
+  CiCachePolicy,
   actions_cache_capacity_errors,
   ci_cache_policy_errors,
   ci_cache_policy_parse,
@@ -820,8 +821,18 @@ pipeline test_windows_release_certify_warm_requires_artifact_path_and_larger_dri
 
 pipeline test_actions_cache_capacity_stays_at_ten_gib(harness: Harness, task) {
   assert_eq(actions_cache_capacity_errors(policy()), [])
+  const base = policy()
+  const oversized: CiCachePolicy = {
+    schema_version: base.schema_version,
+    rust_cache_action: base.rust_cache_action,
+    node_cache_action: base.node_cache_action,
+    persistent_ref: base.persistent_ref,
+    storage_limit_bytes: 32212254720,
+    remote_sccache: base.remote_sccache,
+    writers: base.writers,
+  }
   assert(
-    actions_cache_capacity_errors({...policy(), storage_limit_bytes: 32212254720}).contains(
+    actions_cache_capacity_errors(oversized).contains(
       "cache-policy.json storage_limit_bytes must stay at 10737418240; Windows warm targets use workflow artifacts instead of raising Actions cache capacity",
     ),
   )
