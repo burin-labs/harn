@@ -9,6 +9,23 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.76
+
+### Fixed
+
+- Worktree setup no longer restores Harn binaries or Cargo fingerprints from the
+  worktree that published the shared target seed. Third-party dependencies stay
+  warm, while each worktree rebuilds workspace packages from its own source.
+- Agent model-option sanitizing now removes sampling, penalty, seed, and stop
+  controls when the selected provider route does not support them, so internal
+  classifiers and agent calls can use fixed-generation models without failing
+  before transport.
+- The shared Harn runner now passes its resolved executable path to nested Harn
+  scripts, avoiding redundant Cargo builds and related compiler-cache or sandbox
+  failures in documentation and validation targets.
+- ACP sessions now keep typed `harness.obs` diagnostics on the log stream instead
+  of adding JSON log lines to user-visible assistant messages.
+
 ## v0.10.75
 
 ### Fixed
