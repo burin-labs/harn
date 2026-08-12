@@ -49,6 +49,10 @@ struct ParallelCancelGuard(Arc<std::sync::atomic::AtomicBool>);
 
 impl Drop for ParallelCancelGuard {
     fn drop(&mut self) {
+        eprintln!(
+            "[harn-process-debug] cancel_store site=ParallelCancelGuard::drop token={:p}",
+            Arc::as_ptr(&self.0)
+        );
         self.0.store(true, std::sync::atomic::Ordering::SeqCst);
     }
 }

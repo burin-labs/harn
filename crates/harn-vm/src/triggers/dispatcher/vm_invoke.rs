@@ -169,6 +169,10 @@ impl Dispatcher {
             tokio::select! {
                 result = &mut future => break result,
                 _ = recv_cancel(cancel_rx) => {
+                    eprintln!(
+                        "[harn-process-debug] cancel_store site=trigger_recv_cancel token={:p}",
+                        std::sync::Arc::as_ptr(&cancel_token)
+                    );
                     cancel_token.store(true, Ordering::SeqCst);
                 }
                 _ = poll.tick() => {
@@ -179,6 +183,10 @@ impl Dispatcher {
                         replay_of_event_id,
                     )
                     .await? {
+                        eprintln!(
+                            "[harn-process-debug] cancel_store site=trigger_dispatch_cancel token={:p}",
+                            std::sync::Arc::as_ptr(&cancel_token)
+                        );
                         cancel_token.store(true, Ordering::SeqCst);
                     }
                 }

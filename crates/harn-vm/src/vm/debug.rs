@@ -264,10 +264,20 @@ impl Vm {
 
     /// True when cooperative cancellation has been requested.
     pub fn is_cancel_requested(&self) -> bool {
-        self.cancel_token
+        let requested = self
+            .cancel_token
             .as_ref()
             .map(|t| t.load(std::sync::atomic::Ordering::SeqCst))
-            .unwrap_or(false)
+            .unwrap_or(false);
+        if requested {
+            eprintln!(
+                "[harn-process-debug] Vm::is_cancel_requested token={:p}",
+                self.cancel_token
+                    .as_ref()
+                    .map_or(std::ptr::null(), std::sync::Arc::as_ptr)
+            );
+        }
+        requested
     }
 
     /// Identifiers visible at the given frame's scope — locals plus

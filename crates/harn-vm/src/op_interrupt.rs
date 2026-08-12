@@ -472,12 +472,14 @@ pub fn requested() -> bool {
         let Some(ctx) = ctx.as_ref() else {
             return false;
         };
-        if ctx
-            .cancel
-            .as_ref()
-            .is_some_and(|token| token.load(Ordering::SeqCst))
-        {
-            return true;
+        if let Some(token) = ctx.cancel.as_ref() {
+            if token.load(Ordering::SeqCst) {
+                eprintln!(
+                    "[harn-process-debug] op_interrupt requested token={:p}",
+                    Arc::as_ptr(token)
+                );
+                return true;
+            }
         }
         ctx.deadline
             .is_some_and(|deadline| Instant::now() >= deadline)

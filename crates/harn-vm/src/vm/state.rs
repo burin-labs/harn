@@ -1252,6 +1252,10 @@ impl Vm {
     /// from outliving their parent execution scope.
     pub(crate) fn cancel_spawned_tasks(&mut self) {
         for (_, task) in std::mem::take(&mut self.spawned_tasks) {
+            eprintln!(
+                "[harn-process-debug] cancel_store site=Vm::cancel_spawned_tasks token={:p}",
+                std::sync::Arc::as_ptr(&task.cancel_token)
+            );
             task.cancel_token
                 .store(true, std::sync::atomic::Ordering::SeqCst);
             task.handle.abort();
