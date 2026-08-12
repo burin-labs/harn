@@ -50,6 +50,7 @@ pub struct RunReport {
     pub agents: Vec<RunReportAgent>,
     pub delegations: Vec<RunReportDelegation>,
     pub llm_calls: Vec<RunReportLlmCall>,
+    pub tool_calls: Vec<RunReportToolCall>,
     pub coordination: RunReportCoordination,
     pub timelines: Vec<SessionTimelineSnapshot>,
     pub sources: Vec<RunReportSource>,
@@ -141,6 +142,20 @@ pub struct RunReportLlmCall {
     pub cache_read_tokens: Option<i64>,
     pub cache_write_tokens: Option<i64>,
     pub cost_usd: Option<f64>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct RunReportToolCall {
+    pub agent_id: String,
+    pub call_id: String,
+    pub tool_name: String,
+    pub args_hash: String,
+    pub result: String,
+    pub is_rejected: bool,
+    pub duration_ms: u64,
+    pub iteration: usize,
+    pub timestamp: String,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -373,6 +388,7 @@ fn assemble_report(
     let mut agents = Vec::new();
     let mut delegations = Vec::new();
     let mut llm_calls = Vec::new();
+    let mut tool_calls = Vec::new();
     let mut sources = Vec::new();
     let mut forward_edges = BTreeSet::new();
 
@@ -416,6 +432,12 @@ fn assemble_report(
             }
             llm_calls.push(llm_call_from_span(&record.id, span));
         }
+        tool_calls.extend(
+            record
+                .tool_recordings
+                .iter()
+                .map(|tool| tool_call_from_record(&record.id, tool)),
+        );
         for child in &record.child_runs {
             let path_record = child
                 .run_path
@@ -666,6 +688,13 @@ fn assemble_report(
         ))
     });
     llm_calls.sort_by_key(|call| (call.start_ms, call.call_id.clone()));
+    tool_calls.sort_by(|left, right| {
+        (&left.timestamp, &left.agent_id, &left.call_id).cmp(&(
+            &right.timestamp,
+            &right.agent_id,
+            &right.call_id,
+        ))
+    });
     sources.sort_by(|left, right| left.id.cmp(&right.id));
     checks.sort_by(|left, right| (&left.code, &left.agent_id).cmp(&(&right.code, &right.agent_id)));
 
@@ -681,6 +710,7 @@ fn assemble_report(
         agents,
         delegations,
         llm_calls,
+        tool_calls,
         coordination,
         timelines,
         sources,
@@ -893,6 +923,20 @@ fn llm_call_from_span(run_id: &str, span: &super::RunTraceSpanRecord) -> RunRepo
     }
 }
 
+fn tool_call_from_record(run_id: &str, tool: &super::ToolCallRecord) -> RunReportToolCall {
+    RunReportToolCall {
+        agent_id: format!("run:{run_id}"),
+        call_id: tool.tool_use_id.clone(),
+        tool_name: tool.tool_name.clone(),
+        args_hash: tool.args_hash.clone(),
+        result: tool.result.clone(),
+        is_rejected: tool.is_rejected,
+        duration_ms: tool.duration_ms,
+        iteration: tool.iteration,
+        timestamp: tool.timestamp.clone(),
+    }
+}
+
 fn coordination_summary(
     delegations: &[RunReportDelegation],
     checks: &[RunReportCheck],
@@ -1027,6 +1071,10 @@ fn check(code: &str, severity: &str, agent_id: &str, message: String) -> RunRepo
 fn nonempty(value: &str) -> Option<String> {
     (!value.is_empty()).then(|| value.to_string())
 }
+
+#[cfg(test)]
+#[path = "report/tool_call_tests.rs"]
+mod tool_call_tests;
 
 #[cfg(test)]
 mod tests {

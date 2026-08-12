@@ -42,7 +42,7 @@ pub(crate) use report::read_checked_run_report_bytes;
 pub use report::{
     build_run_report, run_report_projection_hash, validate_run_report, RunReport, RunReportAgent,
     RunReportCheck, RunReportCoordination, RunReportDelegation, RunReportError, RunReportExecution,
-    RunReportLlmCall, RunReportProjection, RunReportRequest, RunReportSource,
+    RunReportLlmCall, RunReportProjection, RunReportRequest, RunReportSource, RunReportToolCall,
     RunReportValidationError, RUN_REPORT_SCHEMA, RUN_REPORT_SCHEMA_VERSION,
 };
 pub use transcript_descriptor::{
