@@ -67,7 +67,7 @@ esac
 
 jq -e '
   (keys == ["jobs", "pricing", "schema_version", "targets"]) and
-  .schema_version == 2 and
+  .schema_version == 3 and
   (.jobs | keys == ["cli_aot"]) and
   (.jobs.cli_aot | keys == ["primary", "standard"]) and
   all(.jobs.cli_aot[]; type == "string" and length > 0) and
@@ -90,9 +90,13 @@ jq -e '
   (.targets | type == "array" and length > 0) and
   ([.targets[].target] | length == (unique | length)) and
   all(.targets[];
-    (keys == ["release_codegen_units", "runners", "sccache_backend", "target", "use_sccache"]) and
+    (keys == ["glibc_max", "release_codegen_units", "runners", "sccache_backend", "target", "use_sccache"]) and
     (.runners | keys == ["fast", "primary", "recovery", "standard", "warm"]) and
     (.target | type == "string" and length > 0) and
+    (if (.target | endswith("unknown-linux-gnu"))
+      then (.glibc_max == "2.35" and all(.runners[]; . == "ubuntu-22.04"))
+      else .glibc_max == null
+      end) and
     (.release_codegen_units | type == "number" and floor == . and . >= 1 and . <= 256) and
     (.use_sccache == "true" or .use_sccache == "false") and
     (.sccache_backend == "sticky"
@@ -143,9 +147,9 @@ jq -c \
       elif $target == "aarch64-apple-darwin" then
         "v0-rust-release-aarch64-apple-darwin-Darwin-arm64-"
       elif $target == "x86_64-unknown-linux-gnu" then
-        "v0-rust-release-x86_64-unknown-linux-gnu-Linux-x64-"
+        "v1-rust-release-glibc235-x86_64-unknown-linux-gnu-Linux-x64-"
       elif $target == "aarch64-unknown-linux-gnu" then
-        "v0-rust-release-aarch64-unknown-linux-gnu-Linux-arm64-"
+        "v1-rust-release-glibc235-aarch64-unknown-linux-gnu-Linux-x64-"
       elif $target == "x86_64-pc-windows-msvc" then
         "v0-rust-release-x86_64-pc-windows-msvc-Windows_NT-x64-"
       else
@@ -157,6 +161,7 @@ jq -c \
       | select(($requested | length) == 0 or ($requested | index($entry.target)))
       | {
           target,
+          glibc_max,
           runner: (
             if $force_standard_macos
               and ($runner_key == "primary" or $runner_key == "recovery" or $runner_key == "candidate")
