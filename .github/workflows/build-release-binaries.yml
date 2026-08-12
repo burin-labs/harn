@@ -1165,13 +1165,15 @@ jobs:
           targets: ${{ matrix.target }}
 
       # Both GNU/Linux release legs intentionally build on the same pinned
-      # x86_64 Ubuntu baseline. ARM64 therefore uses the cross linker while
-      # the native ARM64 runner remains reserved for artifact smoke testing.
-      - name: Install Linux ARM64 cross linker (x86 host only)
+      # x86_64 Ubuntu baseline. ARM64 therefore needs the complete target
+      # C toolchain: gcc-aarch64-linux-gnu only recommends (and does not own)
+      # the target libc development headers that native build scripts load.
+      # The native ARM64 runner remains reserved for artifact smoke testing.
+      - name: Install Linux ARM64 cross toolchain (x86 host only)
         if: matrix.target == 'aarch64-unknown-linux-gnu' && runner.arch == 'X64'
         uses: ./.github/actions/apt-install
         with:
-          packages: gcc-aarch64-linux-gnu
+          packages: gcc-aarch64-linux-gnu libc6-dev-arm64-cross
           check-command: aarch64-linux-gnu-gcc
 
       - name: Configure Linux ARM64 cross linker (x86 host only)

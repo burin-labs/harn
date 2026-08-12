@@ -29,6 +29,20 @@ pipeline test_release_build_records_cache_mode_stats_and_budget(harness: Harness
   assert(step_by_name(steps, "Summarize sccache stats") != nil)
   assert(step_by_name(steps, "Evaluate warm-build budget") != nil)
   assert(step_by_name(steps, "Persist local release sccache") != nil)
+  const arm_cross_toolchain = step_by_name(
+    steps,
+    "Install Linux ARM64 cross toolchain (x86 host only)",
+  )
+  assert(arm_cross_toolchain != nil)
+  assert_eq(
+    trim(arm_cross_toolchain?.if ?? ""),
+    "matrix.target == 'aarch64-unknown-linux-gnu' && runner.arch == 'X64'",
+  )
+  assert_eq(
+    trim(arm_cross_toolchain?.with?.packages ?? ""),
+    "gcc-aarch64-linux-gnu libc6-dev-arm64-cross",
+  )
+  assert_eq(trim(arm_cross_toolchain?.with?.["check-command"] ?? ""), "aarch64-linux-gnu-gcc")
   const build = step_by_name(steps, "Build")
   assert_eq(build?.id, "build")
   assert(to_string(build?.run ?? "").contains("duration_seconds="))
