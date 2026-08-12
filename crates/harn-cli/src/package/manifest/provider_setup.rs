@@ -150,9 +150,9 @@ pub fn connector_service_issues(service: &ConnectorServiceManifest) -> Vec<Strin
         } else {
             operation.id.as_str()
         };
-        if !portable_id(&operation.id) {
+        if !portable_operation_id(&operation.id) {
             issues.push(format!(
-                "service operation '{label}' id must use lowercase letters, digits, '.', '_', or '-'"
+                "service operation '{label}' id must use ASCII letters, digits, '.', '_', or '-'"
             ));
         } else if !operation_ids.insert(operation.id.as_str()) {
             issues.push(format!(
@@ -247,6 +247,15 @@ fn portable_id(value: &str) -> bool {
     !value.is_empty()
         && value.bytes().all(|byte| {
             byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'.' | b'_' | b'-')
+        })
+}
+
+fn portable_operation_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.bytes().all(|byte| {
+            byte.is_ascii_alphabetic()
+                || byte.is_ascii_digit()
+                || matches!(byte, b'.' | b'_' | b'-')
         })
 }
 
