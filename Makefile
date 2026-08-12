@@ -552,6 +552,7 @@ test-agent-scripts:
 	@echo "    Harn agent-loop tests OK."
 
 test-pr-gate-scripts:
+	./scripts/tests/apt_install_action_test.sh
 	./scripts/tests/ci_docs_only_test.sh
 	./scripts/tests/ci_release_metadata_only_test.sh
 	./scripts/tests/release_metadata_git_failure_test.sh
