@@ -944,11 +944,10 @@ jobs:
           check-command: rg
       - name: Build tree-sitter grammar for the parse sweep
         if: matrix.kind == 'audit'
-        working-directory: tree-sitter-harn
         run: |
-          npm ci
-          touch src/parser.c
-          ./scripts/tree-sitter-cli.sh build
+          ./scripts/npm_ci_with_retry.sh tree-sitter-harn
+          touch tree-sitter-harn/src/parser.c
+          (cd tree-sitter-harn && ./scripts/tree-sitter-cli.sh build)
       - name: Check generated parser is current
         if: matrix.kind == 'audit'
         run: make check-tree-sitter-parser

@@ -442,10 +442,9 @@ jobs:
         # verify_tree_sitter_parse.harn). The default no-audit finalize
         # doesn't touch tree-sitter.
         if: inputs.reaudit
-        working-directory: tree-sitter-harn
         run: |
-          npm ci
-          npm run build
+          ./scripts/npm_ci_with_retry.sh tree-sitter-harn
+          npm --prefix tree-sitter-harn run build
 
       - name: Configure git identity
         run: |
