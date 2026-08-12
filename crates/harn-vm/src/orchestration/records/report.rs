@@ -50,6 +50,7 @@ pub struct RunReport {
     pub agents: Vec<RunReportAgent>,
     pub delegations: Vec<RunReportDelegation>,
     pub llm_calls: Vec<RunReportLlmCall>,
+    pub tool_calls: Vec<RunReportToolCall>,
     pub coordination: RunReportCoordination,
     pub timelines: Vec<SessionTimelineSnapshot>,
     pub sources: Vec<RunReportSource>,
@@ -141,6 +142,20 @@ pub struct RunReportLlmCall {
     pub cache_read_tokens: Option<i64>,
     pub cache_write_tokens: Option<i64>,
     pub cost_usd: Option<f64>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct RunReportToolCall {
+    pub agent_id: String,
+    pub call_id: String,
+    pub tool_name: String,
+    pub args_hash: String,
+    pub result: String,
+    pub is_rejected: bool,
+    pub duration_ms: u64,
+    pub iteration: usize,
+    pub timestamp: String,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -373,6 +388,7 @@ fn assemble_report(
     let mut agents = Vec::new();
     let mut delegations = Vec::new();
     let mut llm_calls = Vec::new();
+    let mut tool_calls = Vec::new();
     let mut sources = Vec::new();
     let mut forward_edges = BTreeSet::new();
 
@@ -416,6 +432,12 @@ fn assemble_report(
             }
             llm_calls.push(llm_call_from_span(&record.id, span));
         }
+        tool_calls.extend(
+            record
+                .tool_recordings
+                .iter()
+                .map(|tool| tool_call_from_record(&record.id, tool)),
+        );
         for child in &record.child_runs {
             let path_record = child
                 .run_path
@@ -666,6 +688,13 @@ fn assemble_report(
         ))
     });
     llm_calls.sort_by_key(|call| (call.start_ms, call.call_id.clone()));
+    tool_calls.sort_by(|left, right| {
+        (&left.timestamp, &left.agent_id, &left.call_id).cmp(&(
+            &right.timestamp,
+            &right.agent_id,
+            &right.call_id,
+        ))
+    });
     sources.sort_by(|left, right| left.id.cmp(&right.id));
     checks.sort_by(|left, right| (&left.code, &left.agent_id).cmp(&(&right.code, &right.agent_id)));
 
@@ -681,6 +710,7 @@ fn assemble_report(
         agents,
         delegations,
         llm_calls,
+        tool_calls,
         coordination,
         timelines,
         sources,
@@ -893,6 +923,20 @@ fn llm_call_from_span(run_id: &str, span: &super::RunTraceSpanRecord) -> RunRepo
     }
 }
 
+fn tool_call_from_record(run_id: &str, tool: &super::ToolCallRecord) -> RunReportToolCall {
+    RunReportToolCall {
+        agent_id: format!("run:{run_id}"),
+        call_id: tool.tool_use_id.clone(),
+        tool_name: tool.tool_name.clone(),
+        args_hash: tool.args_hash.clone(),
+        result: tool.result.clone(),
+        is_rejected: tool.is_rejected,
+        duration_ms: tool.duration_ms,
+        iteration: tool.iteration,
+        timestamp: tool.timestamp.clone(),
+    }
+}
+
 fn coordination_summary(
     delegations: &[RunReportDelegation],
     checks: &[RunReportCheck],
@@ -1031,13 +1075,70 @@ fn nonempty(value: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::orchestration::{save_run_record, RunChildRecord, RunTraceSpanRecord};
+    use crate::orchestration::{
+        save_run_record, RunChildRecord, RunTraceSpanRecord, ToolCallRecord,
+    };
     use std::fs;
 
     fn temp_dir(label: &str) -> PathBuf {
         let path = std::env::temp_dir().join(format!("harn-{label}-{}", uuid::Uuid::now_v7()));
         fs::create_dir_all(&path).unwrap();
         path
+    }
+
+    #[tokio::test]
+    async fn report_retains_recorded_tool_evidence_without_a_sidecar() {
+        let dir = temp_dir("run-report-tool-evidence");
+        let run_path = dir.join("run.json");
+        let run = RunRecord {
+            type_name: "workflow_run".to_string(),
+            id: "root".to_string(),
+            status: "completed".to_string(),
+            tool_recordings: vec![ToolCallRecord {
+                tool_name: "find_flights".to_string(),
+                tool_use_id: "call-flight".to_string(),
+                args_hash: "sha256:args".to_string(),
+                result: "offer off_test costs 275.94 USD".to_string(),
+                is_rejected: false,
+                duration_ms: 9460,
+                iteration: 1,
+                timestamp: "2026-08-12T01:42:15Z".to_string(),
+            }],
+            ..RunRecord::default()
+        };
+        save_run_record(&run, Some(run_path.to_str().unwrap())).unwrap();
+
+        let report = build_run_report(RunReportRequest {
+            run_record_path: run_path,
+            allowed_roots: vec![dir.clone()],
+            source_root: Some(dir.clone()),
+            ..RunReportRequest::default()
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(report.tool_calls.len(), 1);
+        assert_eq!(report.tool_calls[0].agent_id, "run:root");
+        assert_eq!(report.tool_calls[0].call_id, "call-flight");
+        assert_eq!(report.tool_calls[0].tool_name, "find_flights");
+        assert_eq!(report.tool_calls[0].args_hash, "sha256:args");
+        assert_eq!(
+            report.tool_calls[0].result,
+            "offer off_test costs 275.94 USD"
+        );
+        assert_eq!(report.tool_calls[0].duration_ms, 9460);
+        assert_eq!(report.tool_calls[0].iteration, 1);
+
+        let value = serde_json::to_value(&report).unwrap();
+        let (evidence, projection) =
+            crate::orchestration::run_review::build_evidence_projection_for_test(&value);
+        assert_eq!(
+            evidence["tool_calls"][0]["result"],
+            "offer off_test costs 275.94 USD"
+        );
+        assert!(projection.omissions.is_empty());
+
+        fs::remove_dir_all(dir).unwrap();
     }
 
     #[tokio::test]

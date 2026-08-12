@@ -375,6 +375,13 @@ fn build_evidence_projection(
     (evidence, receipt)
 }
 
+#[cfg(test)]
+pub(crate) fn build_evidence_projection_for_test(
+    report: &Value,
+) -> (Value, RunReviewEvidenceProjection) {
+    build_evidence_projection(report, crate::canonical_json::to_vec(report).len())
+}
+
 fn project_evidence_value(
     value: &Value,
     report_pointer: &str,
