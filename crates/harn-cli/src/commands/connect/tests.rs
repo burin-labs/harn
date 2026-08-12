@@ -18,6 +18,20 @@ use url::Url;
 fn status_config(
     setup: package::ProviderSetupManifest,
 ) -> package::ResolvedProviderConnectorConfig {
+    let service = toml::from_str(
+        r#"
+name = "GitHub"
+description = "Reads and updates GitHub work."
+
+[[operations]]
+id = "issues.read"
+capability = "issues"
+purpose = "Read GitHub issues."
+effect = "read"
+environments = ["live"]
+"#,
+    )
+    .expect("test service manifest");
     package::ResolvedProviderConnectorConfig {
         id: harn_vm::ProviderId::from("github"),
         manifest_dir: PathBuf::from("/tmp"),
@@ -26,6 +40,8 @@ fn status_config(
         },
         oauth: None,
         setup: Some(setup),
+        service: Some(service),
+        connector_contract_version: 1,
     }
 }
 
@@ -236,6 +252,28 @@ async fn status_reports_missing_auth_without_credentials() {
 
     assert_eq!(status.status, "missing_auth");
     assert!(!status.usable);
+    assert_eq!(
+        status.service.as_ref().map(|service| service.name.as_str()),
+        Some("GitHub")
+    );
+    let json = serde_json::to_value(&status).expect("status JSON");
+    assert_eq!(json["service"]["operations"][0]["effect"], "read");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn connector_contract_v2_fails_closed_without_service_metadata() {
+    let secrets = harn_vm::connectors::testkit::MemorySecretProvider::empty();
+    let index = ConnectIndex::default();
+    let mut config = status_config(oauth_setup());
+    config.service = None;
+    config.connector_contract_version = 2;
+
+    let status =
+        connector_status("github", Some(&config), &secrets, &index, 100, false, None).await;
+
+    assert_eq!(status.status, "invalid_manifest");
+    assert!(!status.usable);
+    assert!(status.reason.contains("service metadata is missing"));
 }
 
 #[tokio::test(flavor = "current_thread")]

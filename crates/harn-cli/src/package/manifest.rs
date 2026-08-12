@@ -11,8 +11,12 @@ pub use harn_modules::personas::{
     PersonaValidationError, ResolvedPersonaManifest,
 };
 pub use provider_setup::{
-    ConnectorCredentialEnvironmentManifest, ConnectorHealthCheckManifest, ConnectorRecoveryCopy,
-    ProviderSetupManifest,
+    connector_service_issues, ConnectorConditionalProfileRequirement,
+    ConnectorCredentialEnvironmentManifest, ConnectorEnvironment, ConnectorEvidenceRequirement,
+    ConnectorExternalSpend, ConnectorHealthCheckManifest, ConnectorOperationEffect,
+    ConnectorOperationManifest, ConnectorProtectedProfileManifest, ConnectorReconciliation,
+    ConnectorRecoveryCopy, ConnectorRedactionTarget, ConnectorServiceManifest,
+    ConnectorTestProfile, ProtectedProfileFieldClass, ProviderSetupManifest,
 };
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1007,6 +1011,8 @@ pub struct ProviderManifestEntry {
     #[serde(default)]
     pub setup: Option<ProviderSetupManifest>,
     #[serde(default)]
+    pub service: Option<ConnectorServiceManifest>,
+    #[serde(default)]
     pub capabilities: ConnectorCapabilities,
 }
 
@@ -1195,6 +1201,8 @@ pub struct ResolvedProviderConnectorConfig {
     pub connector: ResolvedProviderConnectorKind,
     pub oauth: Option<ProviderOAuthManifest>,
     pub setup: Option<ProviderSetupManifest>,
+    pub service: Option<ConnectorServiceManifest>,
+    pub connector_contract_version: u32,
 }
 
 #[derive(Debug, Clone)]

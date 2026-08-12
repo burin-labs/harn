@@ -24,6 +24,17 @@ version = "0.1.0"
 id = "echo"
 connector = {{ harn = "./lib.harn" }}
 
+[providers.service]
+name = "Echo"
+description = "Sends and receives deterministic test messages."
+
+[[providers.service.operations]]
+id = "messages.read"
+capability = "messages"
+purpose = "Read messages from Echo."
+effect = "read"
+environments = ["mock", "test", "live"]
+
 [providers.setup]
 auth_type = "api-key"
 flow = "api-key"
@@ -114,6 +125,17 @@ fn connector_credential_environment_validation_is_bounded_and_secret_scoped() {
     assert!(joined.contains("name 'bad-name' must use uppercase"));
     assert!(joined.contains("repeats environment name 'DUPLICATE'"));
     assert!(joined.contains("name 'SHARED_TOKEN' is assigned to both"));
+}
+
+#[test]
+fn connector_contract_v2_requires_service_metadata() {
+    let mut failures = Vec::new();
+    validate_service_metadata("echo", None, 1, &mut failures);
+    assert!(failures.is_empty(), "v1 remains compatible: {failures:?}");
+
+    validate_service_metadata("echo", None, 2, &mut failures);
+    assert_eq!(failures.len(), 1);
+    assert!(failures[0].contains("connector contract v2"));
 }
 
 #[test]

@@ -108,7 +108,7 @@ pub(super) fn connector_reload_fingerprint_map(
 
 #[cfg_attr(not(unix), allow(dead_code))]
 fn provider_connector_fingerprint(config: &ResolvedProviderConnectorConfig) -> String {
-    match &config.connector {
+    let connector = match &config.connector {
         ResolvedProviderConnectorKind::RustBuiltin => format!(
             "{}::builtin@{}",
             config.id.as_str(),
@@ -126,7 +126,13 @@ fn provider_connector_fingerprint(config: &ResolvedProviderConnectorConfig) -> S
             message,
             config.manifest_dir.display()
         ),
-    }
+    };
+    let service = serde_json::to_string(&config.service)
+        .unwrap_or_else(|_| "<invalid-service-metadata>".to_string());
+    format!(
+        "{connector}::contract={}::service={service}",
+        config.connector_contract_version
+    )
 }
 
 #[cfg_attr(not(unix), allow(dead_code))]
