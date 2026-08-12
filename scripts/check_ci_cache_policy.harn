@@ -233,7 +233,7 @@ const RELEASE_CACHE_WORKFLOW = "build-release-binaries.yml"
 
 const RELEASE_CACHE_JOB = "build"
 
-const RELEASE_CACHE_SHARED_KEY = "release-$" + "{{ matrix.target }}"
+const RELEASE_CACHE_SHARED_KEY = "$" + "{{ matrix.rust_cache_shared_key }}"
 
 const RELEASE_CACHE_SAVE_ENV = "$"
   + "{{ ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && (inputs.warm_cache_only || inputs.candidate_only) && github.ref == 'refs/heads/main')) && 'true' || 'false' }}"

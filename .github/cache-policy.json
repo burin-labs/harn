@@ -20,7 +20,7 @@
     {
       "workflow": "build-release-binaries.yml",
       "job": "build",
-      "shared_key": "release-${{ matrix.target }}"
+      "shared_key": "${{ matrix.rust_cache_shared_key }}"
     },
     {
       "workflow": "windows-nightly.yml",

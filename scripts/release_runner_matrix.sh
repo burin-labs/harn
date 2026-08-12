@@ -156,6 +156,15 @@ jq -c \
         error("missing release Rust cache prefix for " + $target)
       end;
 
+    def rust_cache_shared_key($target):
+      if $target == "x86_64-unknown-linux-gnu" then
+        "release-glibc235-x86_64-unknown-linux-gnu"
+      elif $target == "aarch64-unknown-linux-gnu" then
+        "release-glibc235-aarch64-unknown-linux-gnu"
+      else
+        "release-" + $target
+      end;
+
     [.targets[]
       | . as $entry
       | select(($requested | length) == 0 or ($requested | index($entry.target)))
@@ -171,6 +180,7 @@ jq -c \
             end
           ),
           rust_cache_broad_restore_prefix: rust_cache_broad_restore_prefix(.target),
+          rust_cache_shared_key: rust_cache_shared_key(.target),
           release_codegen_units,
           use_sccache,
           sccache_backend

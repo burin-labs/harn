@@ -1093,7 +1093,11 @@ jobs:
         # instead of fail-fast cancelling every artifact leg.
         continue-on-error: true
         with:
-          shared-key: release-${{ matrix.target }}
+          # Host-built proc macros live in Cargo's target cache and are loaded
+          # by rustc before the shipped-binary GLIBC check can run. The matrix
+          # therefore versions GNU/Linux exact caches by ABI floor; a portable
+          # runner must never restore a moving-runner host artifact.
+          shared-key: ${{ matrix.rust_cache_shared_key }}
           broad-restore-prefix: ${{ matrix.rust_cache_broad_restore_prefix }}
           cache-on-failure: true
           cache-bin: false

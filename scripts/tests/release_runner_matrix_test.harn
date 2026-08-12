@@ -49,6 +49,10 @@ fn cache_prefixes(rows) {
   return rows.map({ row -> row.target + "=" + row.rust_cache_broad_restore_prefix })
 }
 
+fn cache_shared_keys(rows) {
+  return rows.map({ row -> row.target + "=" + row.rust_cache_shared_key })
+}
+
 fn codegen_units(rows) {
   return rows.map({ row -> row.target + "=" + to_string(row.release_codegen_units) })
 }
@@ -100,6 +104,16 @@ pipeline test_release_runner_policy_pins_every_mode(harness: Harness, task) {
       "x86_64-pc-windows-msvc=v0-rust-release-x86_64-pc-windows-msvc-Windows_NT-x64-",
     ],
   )
+  assert_eq(
+    cache_shared_keys(matrix(harness.fs, harness.process, "--mode primary")),
+    [
+      "x86_64-apple-darwin=release-x86_64-apple-darwin",
+      "aarch64-apple-darwin=release-aarch64-apple-darwin",
+      "x86_64-unknown-linux-gnu=release-glibc235-x86_64-unknown-linux-gnu",
+      "aarch64-unknown-linux-gnu=release-glibc235-aarch64-unknown-linux-gnu",
+      "x86_64-pc-windows-msvc=release-x86_64-pc-windows-msvc",
+    ],
+  )
 }
 
 pipeline test_release_runner_policy_selects_targeted_fast_capacity(harness: Harness, task) {
@@ -115,6 +129,7 @@ pipeline test_release_runner_policy_selects_targeted_fast_capacity(harness: Harn
         glibc_max: nil,
         runner: "blacksmith-12vcpu-macos-15",
         rust_cache_broad_restore_prefix: "v0-rust-release-x86_64-apple-darwin-Darwin-x64-",
+        rust_cache_shared_key: "release-x86_64-apple-darwin",
         release_codegen_units: 16,
         use_sccache: "true",
         sccache_backend: "sticky",

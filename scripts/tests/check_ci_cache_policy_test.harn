@@ -113,7 +113,7 @@ fn policy() -> CiCachePolicy {
       {
         workflow: "build-release-binaries.yml",
         job: "build",
-        shared_key: "release-" + gha_expression("matrix.target"),
+        shared_key: gha_expression("matrix.rust_cache_shared_key"),
       },
       {workflow: "windows-nightly.yml", job: "nextest", shared_key: "workspace-windows"},
       {workflow: "macos-nightly.yml", job: "nextest", shared_key: "workspace-macos"},
@@ -340,7 +340,7 @@ fn workflows() {
             {
               uses: "./.github/actions/rust-cache",
               with: {
-                "shared-key": "release-" + gha_expression("matrix.target"),
+                "shared-key": gha_expression("matrix.rust_cache_shared_key"),
                 "prune-superseded-release-generations": true,
                 save: gha_expression("env.HARN_RELEASE_CACHE_SAVE_ENABLED == 'true'"),
               },
