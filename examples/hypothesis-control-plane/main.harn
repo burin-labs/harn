@@ -1,0 +1,93 @@
+/** CLI entry point and MCP export surface for the canonical hypothesis control plane. */
+import {
+  ExperimentCompileContext,
+  ExperimentCompileReceipt,
+  ExperimentIntent,
+  HypothesisPlannerOptions,
+  HypothesisPlannerReceipt,
+  HypothesisReport,
+  HypothesisWorkflowRequest,
+  HypothesisWorkflowResult,
+} from "std/eval/hypothesis"
+import {
+  hypothesis_apply_projection,
+  hypothesis_compile_projection,
+  hypothesis_design_projection,
+  hypothesis_inspect_projection,
+  hypothesis_report_projection,
+} from "./lib"
+
+@host_entry
+pub fn design(
+  harness: Harness,
+  request: string,
+  context: ExperimentCompileContext,
+  options: HypothesisPlannerOptions? = nil,
+) -> HypothesisPlannerReceipt {
+  return hypothesis_design_projection(harness, request, context, options)
+}
+
+@host_entry
+pub fn compile(
+  intent: ExperimentIntent,
+  context: ExperimentCompileContext,
+) -> ExperimentCompileReceipt {
+  return hypothesis_compile_projection(intent, context)
+}
+
+@host_entry
+pub fn apply(harness: Harness, request: HypothesisWorkflowRequest) -> HypothesisWorkflowResult {
+  return hypothesis_apply_projection(harness.obs, request)
+}
+
+@host_entry
+pub fn inspect(harness: Harness, hypothesis_id: string) -> HypothesisWorkflowResult {
+  return hypothesis_inspect_projection(harness.obs, hypothesis_id)
+}
+
+@host_entry
+pub fn report(harness: Harness, hypothesis_id: string) -> HypothesisReport {
+  return hypothesis_report_projection(harness.obs, hypothesis_id)
+}
+
+fn arg_value(args: list<string>, prefix: string) -> string? {
+  for arg in args {
+    if starts_with(arg, prefix) {
+      return substring(arg, len(prefix), len(arg))
+    }
+  }
+  return nil
+}
+
+fn dispatch(harness: Harness, action: string, input) {
+  if action == "design" {
+    return design(harness, input.request, input.context, input.options)
+  }
+  if action == "compile" {
+    return compile(input.intent, input.context)
+  }
+  if action == "apply" {
+    return apply(harness, input.request)
+  }
+  if action == "inspect" {
+    return inspect(harness, input.hypothesis_id)
+  }
+  if action == "report" {
+    return report(harness, input.hypothesis_id)
+  }
+  throw "hypothesis control plane: unknown action '" + action + "'"
+}
+
+pipeline default(harness: Harness) {
+  const action = arg_value(argv, "--action=") ?? ""
+  const input_path = arg_value(argv, "--input=") ?? ""
+  if action == "" || input_path == "" {
+    harness.stdio.eprintln(
+      "usage: harn run examples/hypothesis-control-plane/main.harn -- --action=<design|compile|apply|inspect|report> --input=<request.json>",
+    )
+    return 2
+  }
+  const input = json_parse(harness.fs.read_text(input_path))
+  harness.stdio.println(json_stringify_pretty(dispatch(harness, action, input)))
+  return 0
+}

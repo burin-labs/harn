@@ -1,0 +1,56 @@
+/** Thin CLI/MCP projections of the canonical hypothesis control plane. */
+import {
+  ExperimentCompileContext,
+  ExperimentCompileReceipt,
+  ExperimentIntent,
+  HypothesisPlannerOptions,
+  HypothesisPlannerReceipt,
+  HypothesisReport,
+  HypothesisWorkflowRequest,
+  HypothesisWorkflowResult,
+  compile_experiment_intent,
+  design_hypothesis,
+  hypothesis_ledger_snapshot,
+  hypothesis_report,
+  hypothesis_workflow,
+} from "std/eval/hypothesis"
+
+/** Design and deterministically compile one natural-language hypothesis. */
+pub fn hypothesis_design_projection(
+  harness: Harness,
+  request: string,
+  context: ExperimentCompileContext,
+  options: HypothesisPlannerOptions? = nil,
+) -> HypothesisPlannerReceipt {
+  return design_hypothesis(harness, request, context, options)
+}
+
+/** Deterministically compile an already-typed intent. */
+pub fn hypothesis_compile_projection(
+  intent: ExperimentIntent,
+  context: ExperimentCompileContext,
+) -> ExperimentCompileReceipt {
+  return compile_experiment_intent(intent, context)
+}
+
+/** Apply one state-checked request through the registered native adapter. */
+pub fn hypothesis_apply_projection(
+  obs: HarnessObs,
+  request: HypothesisWorkflowRequest,
+) -> HypothesisWorkflowResult {
+  return hypothesis_workflow(obs, request)
+}
+
+/** Read one verified ledger snapshot and its canonical report. */
+pub fn hypothesis_inspect_projection(
+  obs: HarnessObs,
+  hypothesis_id: string,
+) -> HypothesisWorkflowResult {
+  return hypothesis_workflow(obs, {kind: "inspect", hypothesis_id: hypothesis_id})
+}
+
+/** Render the domain-neutral report from the canonical ledger snapshot. */
+pub fn hypothesis_report_projection(obs: HarnessObs, hypothesis_id: string) -> HypothesisReport {
+  const read = hypothesis_ledger_snapshot(obs, hypothesis_id)
+  return hypothesis_report(read.snapshot)
+}

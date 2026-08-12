@@ -54,6 +54,19 @@ pub fn greet(name: string, excited: bool = false) -> dict {
     .unwrap();
 }
 
+fn write_authority_export_fixture(temp: &TempDir) {
+    fs::create_dir_all(temp.path().join("nested")).unwrap();
+    fs::write(
+        temp.path().join("nested/server.harn"),
+        r"
+pub fn inspect(harness: Harness, hypothesis_id: string) -> dict {
+  return {hypothesis_id: hypothesis_id, has_root: harness != nil}
+}
+",
+    )
+    .unwrap();
+}
+
 fn write_elicitation_fixture(temp: &TempDir) {
     fs::write(
         temp.path().join("server.harn"),
@@ -143,6 +156,41 @@ fn serve_mcp_stdio_discovers_and_calls_exported_tool() {
         called["result"]["structuredContent"]["message"],
         "Hello, Harn!"
     );
+    client.shutdown_expect_success();
+}
+
+#[ignore = "binary surface — runs in the slow E2E/smoke job"]
+#[test]
+fn serve_mcp_injects_authority_for_relative_nested_script() {
+    let temp = TempDir::new().unwrap();
+    write_authority_export_fixture(&temp);
+    let mut command = harn_e2e_command();
+    command
+        .current_dir(temp.path())
+        .arg("serve")
+        .arg("mcp")
+        .arg("nested/server.harn");
+    let mut client = StdioJsonRpcClient::spawn("harn serve mcp", command);
+
+    let _ = client.request(stable_request(1, "server/discover", json!({})));
+    let tools = client.request(stable_request(2, "tools/list", json!({})));
+    let inspect = &tools["result"]["tools"][0];
+    assert_eq!(inspect["name"], "inspect");
+    assert!(inspect["inputSchema"]["properties"]
+        .get("harness")
+        .is_none());
+    assert_eq!(inspect["inputSchema"]["required"], json!(["hypothesis_id"]));
+
+    let called = client.request(stable_request(
+        3,
+        "tools/call",
+        json!({"name": "inspect", "arguments": {"hypothesis_id": "hypothesis-1"}}),
+    ));
+    assert_eq!(
+        called["result"]["structuredContent"]["hypothesis_id"],
+        "hypothesis-1"
+    );
+    assert_eq!(called["result"]["structuredContent"]["has_root"], true);
     client.shutdown_expect_success();
 }
 

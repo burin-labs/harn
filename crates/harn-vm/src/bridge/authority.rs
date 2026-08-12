@@ -64,14 +64,7 @@ pub fn inject_leading_authorities(
 ) -> Result<Vec<VmValue>, VmError> {
     let mut call_args = Vec::with_capacity(closure.func.params.len().max(args.len()));
     for param in &closure.func.params {
-        // Preserve the long-standing untyped `harness` entrypoint convention
-        // while making explicit nominal Harness types independent of the
-        // parameter's local name.
-        let type_name = param
-            .type_expr
-            .as_ref()
-            .and_then(named_type)
-            .or_else(|| (param.name == "harness").then_some("Harness"));
+        let type_name = authority_type_name(&param.name, param.type_expr.as_ref());
         let Some(type_name) = type_name else {
             break;
         };
@@ -103,6 +96,28 @@ pub fn inject_leading_authorities(
 
     call_args.extend_from_slice(args);
     Ok(call_args)
+}
+
+/// Count the contiguous host-injected authority prefix in a callable signature.
+///
+/// JSON-facing adapters use this to project only caller-owned domain inputs.
+/// Keeping the classification beside authority injection prevents an adapter
+/// from advertising an unforgeable `Harness*` value as ordinary JSON.
+pub fn leading_authority_param_count(params: &[harn_parser::TypedParam]) -> usize {
+    params
+        .iter()
+        .take_while(|param| authority_type_name(&param.name, param.type_expr.as_ref()).is_some())
+        .count()
+}
+
+fn authority_type_name<'a>(name: &'a str, type_expr: Option<&'a TypeExpr>) -> Option<&'a str> {
+    // Preserve the long-standing untyped `harness` entrypoint convention while
+    // making explicit nominal Harness types independent of the local name.
+    let type_name = type_expr
+        .and_then(named_type)
+        .or_else(|| (name == "harness").then_some("Harness"))?;
+    (type_name == "Harness" || CapabilityId::from_type_name(type_name).is_some())
+        .then_some(type_name)
 }
 
 pub(super) fn inject_export_authority(
@@ -158,5 +173,18 @@ mod tests {
         vm.call_closure_pub(closure, &call_args)
             .await
             .expect("multi-authority export accepts injected prefix");
+    }
+
+    #[test]
+    fn counts_only_the_contiguous_authority_prefix() {
+        let program = harn_parser::parse_source(
+            "pub fn dispatch(root: Harness, process: HarnessProcess, args: dict, later: HarnessFs) {}",
+        )
+        .expect("parse fixture");
+        let (_, node) = harn_parser::peel_attributes(&program[0]);
+        let harn_parser::Node::FnDecl { params, .. } = &node.node else {
+            panic!("expected function")
+        };
+        assert_eq!(leading_authority_param_count(params), 2);
     }
 }
