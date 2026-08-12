@@ -254,6 +254,21 @@ async fn a_headless_session_projects_the_run_record_no_host_ever_wrote() {
     );
 }
 
+#[test]
+fn incomplete_or_unknown_build_attributes_do_not_claim_provenance() {
+    assert!(build_from_session_attributes(&BTreeMap::from([
+        ("source".to_string(), json!("burin-headless")),
+        ("source_version".to_string(), json!("0.2.0")),
+    ]))
+    .is_none());
+    assert!(build_from_session_attributes(&BTreeMap::from([
+        ("source".to_string(), json!("burin-headless")),
+        ("source_version".to_string(), json!("0.2.0")),
+        ("harn_version".to_string(), json!("unknown")),
+    ]))
+    .is_none());
+}
+
 #[tokio::test]
 async fn readable_messages_project_in_order_without_private_payload_fields() {
     let (store, id) = capstone_like_store().await;
