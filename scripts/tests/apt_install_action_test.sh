@@ -37,6 +37,10 @@ SCRIPT
 cat >"$fixture_root/bin/apt-get" <<'SCRIPT'
 #!/usr/bin/env bash
 printf 'apt-get %s\n' "$*" >>"$APT_TEST_CALLS"
+if [[ "$*" == *" install "* ]] && [[ ! -e "$APT_TEST_FIRST_INSTALL_FAILED" ]]; then
+  : >"$APT_TEST_FIRST_INSTALL_FAILED"
+  exit 100
+fi
 exit 0
 SCRIPT
 
@@ -55,6 +59,7 @@ output="$({
     APT_SOURCES_DIR="$fixture_root/sources" \
     APT_TEST_CALLS="$calls" \
     APT_TEST_FIRST_UPDATE_FAILED="$fixture_root/first-update-failed" \
+    APT_TEST_FIRST_INSTALL_FAILED="$fixture_root/first-install-failed" \
     bash "$installer"
 } 2>&1)"
 
@@ -63,7 +68,7 @@ if [[ "$output" != *"apt-get update failed or timed out"* ]]; then
   exit 1
 fi
 
-update_calls="$(grep -c ' apt-get .* update' "$calls")"
+update_calls="$(grep -c -- '--kill-after=5s 40s apt-get .* update' "$calls")"
 if [[ "$update_calls" -ne 2 ]]; then
   printf 'expected two bounded update attempts, got %s\n' "$update_calls" >&2
   exit 1
@@ -86,8 +91,9 @@ if ! grep -q -- 'Acquire::http::Timeout=15' "$calls"; then
   exit 1
 fi
 
-if ! grep -q -- ' apt-get .* install -y --no-install-recommends mold' "$calls"; then
-  printf 'package installation did not follow recovery:\n' >&2
+install_calls="$(grep -c '^apt-get .* install -y --no-install-recommends mold' "$calls")"
+if [[ "$install_calls" -ne 2 ]]; then
+  printf 'expected install before and after recovery, got %s:\n' "$install_calls" >&2
   cat "$calls" >&2
   exit 1
 fi

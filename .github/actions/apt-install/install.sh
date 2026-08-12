@@ -47,26 +47,27 @@ apt_update() {
   run_apt "$APT_UPDATE_SECONDS" update
 }
 
-if ! apt_update; then
-  echo "::warning::apt-get update failed or timed out; disabling hosted-runner Microsoft apt sources and retrying"
-  disabled_dir="${RUNNER_TEMP:-/tmp}/disabled-apt-sources"
-  sudo mkdir -p "$disabled_dir"
-  shopt -s nullglob
-  for source_file in "$APT_SOURCES_DIR"/*; do
-    if sudo grep -qi 'packages.microsoft.com' "$source_file"; then
-      sudo mv "$source_file" "$disabled_dir/$(basename "$source_file")"
-    fi
-  done
-  apt_update
-fi
-
 apt_install() {
   run_apt "$APT_INSTALL_SECONDS" install -y --no-install-recommends "${packages[@]}"
 }
 
+# Hosted images normally have usable package indexes already. Installing first
+# avoids turning a healthy package cache into a dependency on every configured
+# mirror. Refresh only when apt proves the cache is insufficient.
 if ! apt_install; then
-  echo "::warning::apt-get install failed or timed out; retrying once after metadata refresh"
-  apt_update
+  echo "::warning::apt-get install failed or timed out; refreshing package metadata before retrying"
+  if ! apt_update; then
+    echo "::warning::apt-get update failed or timed out; disabling hosted-runner Microsoft apt sources and retrying"
+    disabled_dir="${RUNNER_TEMP:-/tmp}/disabled-apt-sources"
+    sudo mkdir -p "$disabled_dir"
+    shopt -s nullglob
+    for source_file in "$APT_SOURCES_DIR"/*; do
+      if sudo grep -qi 'packages.microsoft.com' "$source_file"; then
+        sudo mv "$source_file" "$disabled_dir/$(basename "$source_file")"
+      fi
+    done
+    apt_update
+  fi
   apt_install
 fi
 
