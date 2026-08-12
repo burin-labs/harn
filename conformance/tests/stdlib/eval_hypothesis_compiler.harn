@@ -1,12 +1,114 @@
-import { compile_experiment_intent, validate_compiled_hypothesis_plan } from "std/eval/hypothesis"
+import { check_versioned } from "std/artifacts/typed"
+import {
+  compile_experiment_intent,
+  experiment_intent_contract,
+  validate_compiled_hypothesis_plan,
+} from "std/eval/hypothesis"
 import {
   hypothesis_fixture_budget,
   hypothesis_fixture_capabilities,
   hypothesis_fixture_context,
   hypothesis_fixture_intent,
+  hypothesis_fixture_intent_v2,
   hypothesis_fixture_intervention,
   hypothesis_fixture_placement,
 } from "./hypothesis_fixture_lib.harn"
+
+fn test_versioned_intent_normalization() {
+  const legacy = hypothesis_fixture_intent()
+  const current = hypothesis_fixture_intent_v2()
+  require is_ok(check_versioned(legacy, experiment_intent_contract())),
+    "the current reader keeps accepting v1 intent"
+  require is_ok(check_versioned(current, experiment_intent_contract())),
+    "the same contract accepts v2 intent"
+  const legacy_receipt = compile_experiment_intent(legacy, hypothesis_fixture_context())
+  const current_receipt = compile_experiment_intent(current, hypothesis_fixture_context())
+  require legacy_receipt.ok && current_receipt.ok, "both supported versions compile"
+  require legacy_receipt.plan_fingerprint == current_receipt.plan_fingerprint,
+    "v1 and equivalent v2 intent normalize to one plan identity"
+  if legacy_receipt.plan == nil {
+    throw "v1 normalization omitted the compiled plan"
+  }
+  require legacy_receipt.plan.intent.schema == "harn.experiment.intent.v2",
+    "compiled plans retain only the canonical current intent"
+  const unsupported = current + {schema: "harn.experiment.intent.v3", schema_version: 3}
+  const rejected = compile_experiment_intent(unsupported, hypothesis_fixture_context())
+  require !rejected.ok, "future intent versions fail closed"
+  require rejected.failure?.diagnostics?.[0]?.code == "experiment.intent_schema_version",
+    "version rejection is distinct from structural schema repair"
+  require rejected.failure?.diagnostics?.[0]?.repair?.owner == "intent",
+    "version rejection carries a typed intent repair"
+}
+
+fn test_quasi_experiment_contract() {
+  const missing = hypothesis_fixture_intent_v2()
+    + {
+    requested_lane: "quasi_experimental",
+    requested_evidence: "observational",
+    intervention: nil,
+    comparator: nil,
+  }
+  const missing_receipt = compile_experiment_intent(missing, hypothesis_fixture_context())
+  require !missing_receipt.ok, "a quasi-experimental label cannot omit its identifying design"
+  require missing_receipt.failure?.diagnostics?.[0]?.code
+    == "experiment.quasi_design_required",
+    "the missing contract has a stable repair code"
+  require missing_receipt.failure?.diagnostics?.[0]?.repair?.operation == "set",
+    "the missing contract names a typed repair operation"
+  const quasi = missing
+    + {
+    quasi_experiment: {
+      design: "matched_comparison",
+      assignment_mechanism: "Operators choose rollout eligibility before measurement.",
+      identifying_assumptions: ["No unmeasured confounding after matching."],
+      matching: {
+        method: "exact",
+        covariates: ["team", "baseline_volume"],
+        caliper: nil,
+        with_replacement: false,
+      },
+    },
+  }
+  const receipt = compile_experiment_intent(quasi, hypothesis_fixture_context())
+  require receipt.ok && receipt.plan?.kind == "observe_only",
+    "supported quasi-experimental intent compiles without manufacturing randomization"
+  if receipt.plan == nil {
+    throw "quasi-experimental compilation omitted its plan"
+  }
+  require receipt.plan.design.lane == "quasi_experimental", "the plan retains the classified lane"
+  require receipt.plan.design.claim_strength == "associational",
+    "the compiler does not overclaim causal identification"
+}
+
+fn test_explicit_capability_policy() {
+  const context = hypothesis_fixture_context()
+  const candidate = hypothesis_fixture_intervention("candidate", 1)
+  const excessive = candidate
+    + {
+    capabilities: candidate.capabilities
+      + {
+      customer_state: {access: "reversible_write", scopes: ["tenant:customer-1"]},
+      models: {model_ids: ["mock", "unregistered-model"], dynamic_routing: true},
+      privacy: {data_classes: ["personal"], retention: "durable", cross_tenant: true},
+    },
+  }
+  const receipt = compile_experiment_intent(
+    hypothesis_fixture_intent_v2(),
+    context
+      + {
+      catalog: context.catalog + {interventions: [context.catalog.interventions[0], excessive]},
+    },
+  )
+  require !receipt.ok && receipt.failure?.kind == "unsafe_plan",
+    "customer, model, and privacy authority stay below the host ceiling"
+  require receipt.failure?.diagnostics?.[0]?.code == "experiment.capability_ceiling",
+    "the existing capability refusal owns the expanded policy"
+  require receipt.failure?.diagnostics?.[0]?.repair?.owner == "catalog"
+    && receipt.failure?.diagnostics?.[0]
+    ?.repair?.operation
+    == "reduce",
+    "over-capability execution returns a typed least-authority repair"
+}
 
 fn test_executable_compile() {
   const first = compile_experiment_intent(hypothesis_fixture_intent(), hypothesis_fixture_context())
@@ -239,6 +341,9 @@ fn test_fail_closed_boundaries() {
 }
 
 pipeline default(harness: Harness, _task) {
+  test_versioned_intent_normalization()
+  test_quasi_experiment_contract()
+  test_explicit_capability_policy()
   test_executable_compile()
   test_honest_non_experimental_compile()
   test_fail_closed_boundaries()

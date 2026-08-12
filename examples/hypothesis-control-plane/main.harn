@@ -2,7 +2,7 @@
 import {
   ExperimentCompileContext,
   ExperimentCompileReceipt,
-  ExperimentIntent,
+  ExperimentIntentInput,
   HypothesisPlannerOptions,
   HypothesisPlannerReceipt,
   HypothesisReport,
@@ -29,7 +29,7 @@ pub fn design(
 
 @host_entry
 pub fn compile(
-  intent: ExperimentIntent,
+  intent: ExperimentIntentInput,
   context: ExperimentCompileContext,
 ) -> ExperimentCompileReceipt {
   return hypothesis_compile_projection(intent, context)

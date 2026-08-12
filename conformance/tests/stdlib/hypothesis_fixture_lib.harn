@@ -3,6 +3,7 @@ import {
   ExperimentCapabilityManifest,
   ExperimentCompileContext,
   ExperimentIntent,
+  ExperimentIntentV1,
   ExperimentPlacementCapability,
   ExperimentResourceBudget,
   InterventionAdapter,
@@ -28,6 +29,9 @@ pub fn hypothesis_fixture_capabilities() -> ExperimentCapabilityManifest {
     database_scopes: [],
     provider_ids: ["mock"],
     secret_refs: [],
+    customer_state: {access: "none", scopes: []},
+    models: {model_ids: ["mock"], dynamic_routing: false},
+    privacy: {data_classes: [], retention: "none", cross_tenant: false},
     placement: hypothesis_fixture_placement(),
     mutation: {reversible: true, rollback_adapter_id: nil, requires_approval: false},
   }
@@ -136,7 +140,7 @@ pub fn hypothesis_fixture_context(reverse: bool = false) -> ExperimentCompileCon
   }
 }
 
-pub fn hypothesis_fixture_intent() -> ExperimentIntent {
+pub fn hypothesis_fixture_intent() -> ExperimentIntentV1 {
   return {
     schema: "harn.experiment.intent.v1",
     schema_version: 1,
@@ -163,5 +167,37 @@ pub fn hypothesis_fixture_intent() -> ExperimentIntent {
       touches_production: false,
       irreversible: false,
     },
+  }
+}
+
+pub fn hypothesis_fixture_intent_v2() -> ExperimentIntent {
+  const legacy = hypothesis_fixture_intent()
+  return {
+    schema: "harn.experiment.intent.v2",
+    schema_version: 2,
+    question: legacy.question,
+    hypothesis: legacy.hypothesis,
+    null_hypothesis: legacy.null_hypothesis,
+    alternative_hypotheses: [],
+    decision_scope: {
+      kind: "choose_intervention",
+      target: legacy.decision,
+      population: nil,
+      horizon: nil,
+    },
+    domain: legacy.domain,
+    requested_lane: legacy.requested_lane,
+    requested_evidence: legacy.requested_evidence,
+    intervention: legacy.intervention,
+    comparator: legacy.comparator,
+    assignment_unit: legacy.assignment_unit,
+    population_id: legacy.population_id,
+    outcome_ids: legacy.outcome_ids,
+    quasi_experiment: nil,
+    assumptions: legacy.assumptions,
+    threats: legacy.threats,
+    prior: legacy.prior,
+    citations: legacy.citations,
+    risk: legacy.risk,
   }
 }

@@ -19,6 +19,9 @@ fn capabilities() {
     database_scopes: [],
     provider_ids: [],
     secret_refs: [],
+    customer_state: {access: "none", scopes: []},
+    models: {model_ids: [], dynamic_routing: false},
+    privacy: {data_classes: [], retention: "none", cross_tenant: false},
     placement: nil,
     mutation: {reversible: true, rollback_adapter_id: nil, requires_approval: false},
   }

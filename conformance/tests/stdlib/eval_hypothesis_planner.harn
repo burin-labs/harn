@@ -2,15 +2,15 @@ import { design_hypothesis } from "std/eval/hypothesis"
 import { llm_text, with_llm_script } from "std/testing"
 import {
   hypothesis_fixture_context,
-  hypothesis_fixture_intent,
+  hypothesis_fixture_intent_v2,
 } from "./hypothesis_fixture_lib.harn"
 
 pipeline default(harness: Harness, _task) {
-  const invalid = hypothesis_fixture_intent()
+  const invalid = hypothesis_fixture_intent_v2()
     + {
     intervention: {adapter_id: "prompt", variant_id: "invented"},
   }
-  const valid = hypothesis_fixture_intent()
+  const valid = hypothesis_fixture_intent_v2()
   with_llm_script(
     harness.llm,
     [llm_text(json_stringify(invalid)), llm_text(json_stringify(valid))],

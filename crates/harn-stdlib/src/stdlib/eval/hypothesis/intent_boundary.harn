@@ -1,0 +1,271 @@
+/**
+ * The single version-selection, normalization, and semantic repair boundary for authored intent.
+ */
+import { check_versioned } from "std/artifacts/typed"
+import {
+  ExperimentCompileDiagnostic,
+  ExperimentCompileRepair,
+  ExperimentIntent,
+  experiment_intent_contract,
+} from "std/eval/hypothesis/contracts"
+
+pub type ExperimentIntentBoundaryFailure = {
+  intent_fingerprint: string,
+  diagnostics: list<ExperimentCompileDiagnostic>,
+}
+
+fn __fingerprint(value) -> string {
+  return "sha256:" + sha256(json_stringify(value))
+}
+
+fn __repair(
+  operation: "set" | "remove" | "register" | "reduce",
+  path: string,
+  expected: string,
+) -> ExperimentCompileRepair {
+  const repair: ExperimentCompileRepair = {
+    owner: "intent",
+    operation: operation,
+    path: path,
+    expected: expected,
+  }
+  return repair
+}
+
+fn __diagnostic(
+  code: string,
+  path: string,
+  message: string,
+  repair: ExperimentCompileRepair,
+) -> ExperimentCompileDiagnostic {
+  let diagnostic: ExperimentCompileDiagnostic = {
+    code: code,
+    path: path,
+    message: message,
+    severity: "error",
+  }
+  diagnostic.repair = repair
+  return diagnostic
+}
+
+fn __normalize(value) -> ExperimentIntent {
+  if value.schema_version == 2 {
+    const current: ExperimentIntent = value
+    return current
+  }
+  const normalized: ExperimentIntent = {
+    schema: "harn.experiment.intent.v2",
+    schema_version: 2,
+    question: value.question,
+    hypothesis: value.hypothesis,
+    null_hypothesis: value.null_hypothesis,
+    alternative_hypotheses: [],
+    decision_scope: {
+      kind: "choose_intervention",
+      target: value.decision,
+      population: nil,
+      horizon: nil,
+    },
+    domain: value.domain,
+    requested_lane: value.requested_lane,
+    requested_evidence: value.requested_evidence,
+    intervention: value.intervention,
+    comparator: value.comparator,
+    assignment_unit: value.assignment_unit,
+    population_id: value.population_id,
+    outcome_ids: value.outcome_ids,
+    quasi_experiment: nil,
+    assumptions: value.assumptions,
+    threats: value.threats,
+    prior: value.prior,
+    citations: value.citations,
+    risk: value.risk,
+  }
+  return normalized
+}
+
+fn __semantic_diagnostics(intent: ExperimentIntent) -> list<ExperimentCompileDiagnostic> {
+  let diagnostics: list<ExperimentCompileDiagnostic> = []
+  for field in [
+    {path: "question", value: intent.question},
+    {path: "hypothesis", value: intent.hypothesis},
+    {path: "null_hypothesis", value: intent.null_hypothesis},
+    {path: "decision_scope.target", value: intent.decision_scope.target},
+    {path: "domain", value: intent.domain},
+  ] {
+    if trim(field.value) == "" {
+      diagnostics = diagnostics
+        + [
+        __diagnostic(
+          "experiment.required",
+          field.path,
+          field.path + " must be non-empty",
+          __repair("set", field.path, "a non-empty value"),
+        ),
+      ]
+    }
+  }
+  let alternative_ids: dict<string, bool> = {}
+  for alternative in intent.alternative_hypotheses {
+    if trim(alternative.id) == "" || trim(alternative.statement) == "" {
+      diagnostics = diagnostics
+        + [
+        __diagnostic(
+          "experiment.invalid_alternative",
+          "alternative_hypotheses",
+          "alternative hypothesis IDs and statements must be non-empty",
+          __repair("set", "alternative_hypotheses", "unique non-empty IDs and statements"),
+        ),
+      ]
+    } else if alternative_ids[alternative.id] ?? false {
+      diagnostics = diagnostics
+        + [
+        __diagnostic(
+          "experiment.duplicate_alternative",
+          "alternative_hypotheses",
+          "alternative hypothesis IDs must be unique",
+          __repair("set", "alternative_hypotheses", "unique alternative IDs"),
+        ),
+      ]
+    }
+    alternative_ids = alternative_ids + {[alternative.id]: true}
+  }
+  const design = intent.quasi_experiment
+  if intent.requested_lane != "quasi_experimental" && design != nil {
+    diagnostics = diagnostics
+      + [
+      __diagnostic(
+        "experiment.quasi_design_lane",
+        "quasi_experiment",
+        "quasi-experimental policy is only valid with the quasi_experimental lane",
+        __repair("remove", "quasi_experiment", "omit quasi policy or select its lane"),
+      ),
+    ]
+  }
+  if intent.requested_lane == "quasi_experimental" && design == nil {
+    diagnostics = diagnostics
+      + [
+      __diagnostic(
+        "experiment.quasi_design_required",
+        "quasi_experiment",
+        "quasi_experimental intent requires an identifying design contract",
+        __repair("set", "quasi_experiment", "a registered quasi-experimental design"),
+      ),
+    ]
+  }
+  if design != nil {
+    if trim(design.assignment_mechanism) == "" {
+      diagnostics = diagnostics
+        + [
+        __diagnostic(
+          "experiment.quasi_assignment_required",
+          "quasi_experiment.assignment_mechanism",
+          "quasi-experimental intent must explain the non-random assignment mechanism",
+          __repair(
+            "set",
+            "quasi_experiment.assignment_mechanism",
+            "a non-empty assignment mechanism",
+          ),
+        ),
+      ]
+    }
+    if len(design.identifying_assumptions) == 0 {
+      diagnostics = diagnostics
+        + [
+        __diagnostic(
+          "experiment.quasi_assumptions_required",
+          "quasi_experiment.identifying_assumptions",
+          "quasi-experimental intent must name its identifying assumptions",
+          __repair(
+            "set",
+            "quasi_experiment.identifying_assumptions",
+            "one or more explicit identifying assumptions",
+          ),
+        ),
+      ]
+    }
+    if design.design == "matched_comparison" && design.matching == nil {
+      diagnostics = diagnostics
+        + [
+        __diagnostic(
+          "experiment.matching_policy_required",
+          "quasi_experiment.matching",
+          "matched comparison requires an explicit matching policy",
+          __repair("set", "quasi_experiment.matching", "method and matching covariates"),
+        ),
+      ]
+    }
+    if design.matching != nil && len(design.matching.covariates) == 0 {
+      diagnostics = diagnostics
+        + [
+        __diagnostic(
+          "experiment.matching_covariates_required",
+          "quasi_experiment.matching.covariates",
+          "matching policy must name at least one pre-treatment covariate",
+          __repair(
+            "set",
+            "quasi_experiment.matching.covariates",
+            "one or more pre-treatment covariates",
+          ),
+        ),
+      ]
+    }
+  }
+  return diagnostics
+}
+
+/**
+ * Accept v1/v2, normalize once, and return repairable boundary failures.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ */
+pub fn normalize_experiment_intent(
+  value: unknown,
+) -> Result<ExperimentIntent, ExperimentIntentBoundaryFailure> {
+  const checked = check_versioned(value, experiment_intent_contract())
+  if !is_ok(checked) {
+    const failure = unwrap_err(checked)
+    const version_failure = failure.kind == "version_mismatch"
+    return Err(
+      {
+        intent_fingerprint: __fingerprint(value),
+        diagnostics: [
+          __diagnostic(
+            if version_failure {
+              "experiment.intent_schema_version"
+            } else {
+              "experiment.intent_schema"
+            },
+            if version_failure {
+              "schema_version"
+            } else {
+              ""
+            },
+            failure.detail,
+            __repair(
+              "set",
+              if version_failure {
+                "schema_version"
+              } else {
+                ""
+              },
+              if version_failure {
+                "supported intent version 1 or 2"
+              } else {
+                "valid intent fields"
+              },
+            ),
+          ),
+        ],
+      },
+    )
+  }
+  const intent = __normalize(unwrap(checked).value)
+  const diagnostics = __semantic_diagnostics(intent)
+  if len(diagnostics) > 0 {
+    return Err({intent_fingerprint: __fingerprint(intent), diagnostics: diagnostics})
+  }
+  return Ok(intent)
+}
