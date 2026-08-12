@@ -70,6 +70,26 @@ pub fn set_host_call_bridge(bridge: Arc<dyn HostCallBridge>) {
     HOST_CALL_BRIDGE.with(|b| *b.borrow_mut() = Some(bridge));
 }
 
+/// Install a bridge for one lexical host scope and restore the previous bridge on drop.
+pub fn install_host_call_bridge(bridge: Arc<dyn HostCallBridge>) -> HostCallBridgeGuard {
+    turn_cache::reset();
+    let previous = HOST_CALL_BRIDGE.with(|slot| slot.borrow_mut().replace(bridge));
+    HostCallBridgeGuard { previous }
+}
+
+#[must_use = "dropping the guard restores the previous host-call bridge"]
+pub struct HostCallBridgeGuard {
+    previous: Option<Arc<dyn HostCallBridge>>,
+}
+
+impl Drop for HostCallBridgeGuard {
+    fn drop(&mut self) {
+        turn_cache::reset();
+        let previous = self.previous.take();
+        HOST_CALL_BRIDGE.with(|slot| *slot.borrow_mut() = previous);
+    }
+}
+
 /// Remove the current thread's bridge. Idempotent.
 pub fn clear_host_call_bridge() {
     turn_cache::reset();
@@ -95,5 +115,48 @@ pub async fn dispatch_host_call_bridge(
         Ok(Some(value)) => Some(Ok(value)),
         Ok(None) => None,
         Err(error) => Some(Err(error)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::value::DictMap;
+
+    struct NamedBridge(&'static str);
+
+    impl HostCallBridge for NamedBridge {
+        fn dispatch<'a>(
+            &'a self,
+            _capability: &'a str,
+            _operation: &'a str,
+            _params: &'a DictMap,
+        ) -> HostCallDispatchFuture<'a> {
+            host_call_ready(Ok(Some(VmValue::String(self.0.into()))))
+        }
+    }
+
+    async fn active_name() -> Option<String> {
+        dispatch_host_call_bridge("test", "name", &DictMap::new())
+            .await?
+            .ok()
+            .and_then(|value| match value {
+                VmValue::String(value) => Some(value.to_string()),
+                _ => None,
+            })
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn lexical_bridge_install_restores_nested_state() {
+        clear_host_call_bridge();
+        let outer = install_host_call_bridge(Arc::new(NamedBridge("outer")));
+        assert_eq!(active_name().await.as_deref(), Some("outer"));
+        {
+            let _inner = install_host_call_bridge(Arc::new(NamedBridge("inner")));
+            assert_eq!(active_name().await.as_deref(), Some("inner"));
+        }
+        assert_eq!(active_name().await.as_deref(), Some("outer"));
+        drop(outer);
+        assert_eq!(active_name().await, None);
     }
 }

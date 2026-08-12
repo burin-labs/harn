@@ -309,6 +309,7 @@ async fn execute_conformance_source(
                 subprocess,
                 network: harn_vm::testbench::NetworkConfig::Real,
                 tape: tape_cfg,
+                hypothesis: None,
             }
             .activate()
             .map_err(|e| format!("testbench activate: {e}"))?,

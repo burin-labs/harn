@@ -38,6 +38,7 @@
 
 pub mod annotations;
 pub mod fidelity;
+pub mod hypothesis;
 pub mod mcp_mock;
 pub mod overlay_fs;
 pub mod process_tape;
@@ -66,6 +67,7 @@ pub struct Testbench {
     pub subprocess: SubprocessConfig,
     pub network: NetworkConfig,
     pub tape: TapeConfig,
+    pub hypothesis: Option<hypothesis::HypothesisScenario>,
 }
 
 /// Configures the unified mock clock. Defaults to the runtime's real
@@ -267,6 +269,11 @@ impl TestbenchBuilder {
         self
     }
 
+    pub fn hypothesis_scenario(mut self, scenario: hypothesis::HypothesisScenario) -> Self {
+        self.bench.hypothesis = Some(scenario);
+        self
+    }
+
     pub fn build(self) -> Testbench {
         self.bench
     }
@@ -276,6 +283,7 @@ impl TestbenchBuilder {
 /// for the active axes; dropping it tears them all down in order.
 #[must_use = "the testbench tears down on drop; bind the handle to a `_session` local"]
 pub struct TestbenchSession {
+    _hypothesis: Option<crate::HostCallBridgeGuard>,
     _clock_leak_scope: Option<leak_audit::ClockLeakScopeGuard>,
     _clock: Option<ClockOverrideGuard>,
     _process: Option<ProcessTapeGuard>,
@@ -299,6 +307,9 @@ pub struct TestbenchSession {
 
 impl TestbenchSession {
     fn install(bench: Testbench) -> Result<Self, TestbenchError> {
+        let hypothesis_guard = bench
+            .hypothesis
+            .map(|scenario| crate::install_host_call_bridge(hypothesis::bridge(scenario)));
         let (clock_leak_scope, clock_guard, started_at_unix_ms) = match bench.clock {
             ClockConfig::Real => (None, None, None),
             ClockConfig::Paused { starting_at_ms } => (
@@ -398,6 +409,7 @@ impl TestbenchSession {
         };
 
         Ok(Self {
+            _hypothesis: hypothesis_guard,
             _clock_leak_scope: clock_leak_scope,
             _clock: clock_guard,
             _process: process_guard,

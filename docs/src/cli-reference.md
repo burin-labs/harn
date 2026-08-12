@@ -620,6 +620,7 @@ Execute a script under the testbench. Selected flags:
 | `--clock <paused\|real>` | Pin the mock clock (default `paused`) or use the real clock |
 | `--start-at <UNIX_MS>` | Pin the paused clock to a specific UNIX-epoch millisecond value |
 | `--llm-fixture <path>` / `--llm-record <path>` | Replay LLM responses from, or record them to, a JSONL fixture (mutually exclusive) |
+| `--hypothesis-scenario <name>` | Install a trusted deterministic hypothesis native-adapter scenario; see [testbench mode](./dev/testbench.md#hypothesis-workflow-scenarios) |
 | `--fs-overlay <dir>` | Mount a copy-on-write overlay rooted at a worktree; writes stay in memory until the run ends |
 | `--process-record <path>` / `--process-replay <path>` | Record subprocess invocations to a tape, or replay them from one (mutually exclusive) |
 | `--process-wasi <dir>` | Resolve subprocess programs to `<dir>/<program>.wasm` under wasmtime (requires the `testbench-wasi` build feature) |

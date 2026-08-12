@@ -273,6 +273,7 @@ async fn replay_args(args: TestBenchReplayArgs) -> RunOutcome {
         clock: "paused".to_string(),
         llm_fixture: args.llm_fixture.clone(),
         llm_record: None,
+        hypothesis_scenario: None,
         fs_overlay: args.fs_overlay.clone(),
         process_replay: Some(args.process_tape.clone()),
         process_record: None,
@@ -523,6 +524,7 @@ async fn fidelity_args(args: TestBenchFidelityArgs) -> RunOutcome {
                 clock: "paused".to_string(),
                 llm_fixture: None,
                 llm_record: None,
+                hypothesis_scenario: None,
                 fs_overlay: args.fs_overlay.clone(),
                 process_replay: None,
                 process_record: None,
@@ -656,6 +658,12 @@ fn build_testbench(args: &TestBenchRunArgs) -> Result<Testbench, String> {
         },
     };
 
+    let hypothesis = args
+        .hypothesis_scenario
+        .as_deref()
+        .map(harn_vm::testbench::hypothesis::HypothesisScenario::parse)
+        .transpose()?;
+
     Ok(Testbench {
         clock,
         llm,
@@ -663,6 +671,7 @@ fn build_testbench(args: &TestBenchRunArgs) -> Result<Testbench, String> {
         subprocess,
         network,
         tape,
+        hypothesis,
     })
 }
 

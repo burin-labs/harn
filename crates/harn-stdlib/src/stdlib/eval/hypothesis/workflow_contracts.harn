@@ -3,6 +3,7 @@ import { VersionedContract, versioned_contract } from "std/artifacts/typed"
 import { AssignmentPlan } from "std/eval/experiment/assignment"
 import { HypothesisPlan } from "std/eval/hypothesis/contracts"
 import {
+  HypothesisBudgetResource,
   HypothesisLedgerAppendReceipt,
   HypothesisLedgerSnapshotRead,
 } from "std/eval/hypothesis/ledger_contracts"
@@ -106,8 +107,21 @@ pub type HypothesisNativeOperationDenied = {
   message: string,
 }
 
+pub type HypothesisNativeOperationExhausted = {
+  schema: "harn.hypothesis.operation_result.v1",
+  kind: "exhausted",
+  action: "advance",
+  operation_receipt_id: string,
+  occurred_at: string,
+  actor: string,
+  source: string,
+  resource: HypothesisBudgetResource | "wall_clock",
+  elapsed_ms: int,
+}
+
 pub type HypothesisNativeOperationResult = HypothesisNativeOperationAccepted \
-  | HypothesisNativeOperationDenied
+  | HypothesisNativeOperationDenied \
+  | HypothesisNativeOperationExhausted
 
 /**
  * Return the versioned boundary contract for native hypothesis operation results.
