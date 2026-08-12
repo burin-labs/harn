@@ -484,15 +484,26 @@ pub fn requested() -> bool {
     })
 }
 
-/// Put the child in its own process group (`setpgid(0, 0)`) so a later
-/// group signal reaps ordinary grandchildren too. No-op on non-Unix targets — group
-/// semantics are Unix-first; Windows callers fall back to killing the
-/// direct child handle (`TerminateProcess` via `Child::kill`).
+/// Put the child in its own session (`setsid()`), which also makes it the
+/// leader of a fresh process group. A session boundary is stronger than a
+/// bare `setpgid(0, 0)`: descendants cannot move back into Harn's session and
+/// accidentally deliver a tool-owned group signal to the parent VM. Group
+/// cleanup still reaches ordinary grandchildren because the child remains its
+/// new process-group leader.
+///
+/// No-op on non-Unix targets; Windows callers use Job Objects or fall back to
+/// killing the direct child handle (`TerminateProcess` via `Child::kill`).
 pub fn configure_kill_group(command: &mut std::process::Command) {
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
-        command.process_group(0);
+        // SAFETY: `pre_exec` runs after fork and before exec. `setsid(2)` is an
+        // async-signal-safe syscall and touches no Rust-owned memory. A freshly
+        // forked child cannot already lead the parent's active process group,
+        // so `setsid` is the deterministic containment boundary we require.
+        unsafe {
+            command.pre_exec(start_kill_session);
+        }
     }
     #[cfg(not(unix))]
     {
@@ -502,16 +513,28 @@ pub fn configure_kill_group(command: &mut std::process::Command) {
 
 /// Tokio-process variant of [`configure_kill_group`]. Tokio's command wrapper
 /// does not flow through `std::process::Command`, so async spawn paths must opt
-/// in separately before they rely on group/tree cleanup.
+/// in separately before they rely on session/tree cleanup.
 pub fn configure_tokio_kill_group(command: &mut tokio::process::Command) {
     #[cfg(unix)]
     {
-        command.process_group(0);
+        // SAFETY: see `configure_kill_group`; Tokio forwards this hook to the
+        // underlying `std::process::Command` pre-exec path.
+        unsafe {
+            command.pre_exec(start_kill_session);
+        }
     }
     #[cfg(not(unix))]
     {
         let _ = command;
     }
+}
+
+#[cfg(unix)]
+fn start_kill_session() -> std::io::Result<()> {
+    if unsafe { libc::setsid() } == -1 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(())
 }
 
 /// Signal a pid and its process group. No-op on non-Unix targets.

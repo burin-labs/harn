@@ -128,6 +128,15 @@ fn require_list(map: &harn_vm::value::DictMap, key: &str) -> Vec<VmValue> {
 
 const OWNER_DEATH_SUPERVISOR_ENV: &str = "HARN_TEST_OWNER_DEATH_SUPERVISOR";
 const OWNER_DEATH_REPORT_FD_ENV: &str = "HARN_TEST_OWNER_DEATH_REPORT_FD";
+const SESSION_REPORT_ENV: &str = "HARN_TEST_SESSION_REPORT";
+
+#[test]
+fn session_report_fixture() {
+    if std::env::var_os(SESSION_REPORT_ENV).is_none() {
+        return;
+    }
+    println!("session_id={}", unsafe { libc::getsid(0) });
+}
 
 #[test]
 fn owner_death_guardian_fixture() {
@@ -1112,6 +1121,42 @@ fn real_run_command_interrupt_kills_the_whole_process_group() {
     assert_process_gone(
         -pgid,
         &format!("process group {pgid} (incl. the sleep grandchild)"),
+    );
+}
+
+#[test]
+fn real_run_command_isolates_the_child_in_its_own_session() {
+    let executable = std::env::current_exe().expect("resolve process-tools test executable");
+    let mut req = dict();
+    req.insert(
+        "argv".into(),
+        vlist(vec![
+            vstr(&executable.to_string_lossy()),
+            vstr("--exact"),
+            vstr("process_tools_e2e::session_report_fixture"),
+            vstr("--nocapture"),
+        ]),
+    );
+    let mut env = dict();
+    env.insert(SESSION_REPORT_ENV.into(), vstr("1"));
+    req.insert("env".into(), VmValue::dict(env));
+    let resp = require_dict(call("hostlib_tools_run_command", req).unwrap());
+
+    assert_eq!(require_str(&resp, "status"), "completed");
+    let pid = require_int(&resp, "pid");
+    let pgid = require_int(&resp, "process_group_id");
+    let stdout = require_str(&resp, "stdout");
+    let session_id = stdout
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("session_id="))
+        .expect("fixture should print its session id")
+        .parse::<i64>()
+        .expect("fixture should print a numeric session id");
+
+    assert_eq!(pgid, pid, "the command must lead its cleanup group");
+    assert_eq!(
+        session_id, pid,
+        "the command must lead an OS session that descendants cannot escape back into"
     );
 }
 

@@ -625,15 +625,7 @@ pub(crate) fn child_process_group_id(pid: u32) -> Option<u32> {
 }
 
 pub(crate) fn configure_background_process_group(command: &mut std::process::Command) {
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        command.process_group(0);
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = command;
-    }
+    harn_vm::op_interrupt::configure_kill_group(command);
 }
 
 #[cfg(test)]
