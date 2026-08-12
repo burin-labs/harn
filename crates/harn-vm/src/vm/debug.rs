@@ -254,6 +254,10 @@ impl Vm {
             self.cancel_token = Some(t.clone());
             t
         });
+        eprintln!(
+            "[harn-process-debug] Vm::signal_cancel token={:p}",
+            std::sync::Arc::as_ptr(&token)
+        );
         token.store(true, std::sync::atomic::Ordering::SeqCst);
         token
     }

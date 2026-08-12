@@ -136,6 +136,10 @@ pub(super) fn install_signal_shutdown_handler() -> RunInterruptTokens {
 }
 
 fn request_vm_interrupt(tokens: &RunInterruptTokens, signal_name: &str) {
+    eprintln!(
+        "[harn-process-debug] request_vm_interrupt source={signal_name} token={:p}",
+        Arc::as_ptr(&tokens.cancel_token)
+    );
     if let Ok(mut signal) = tokens.signal_token.lock() {
         *signal = Some(signal_name.to_string());
     }

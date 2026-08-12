@@ -237,6 +237,10 @@ pub(crate) async fn run_file_with_skill_dirs(
 ) -> i32 {
     // Graceful shutdown: flush run records before exit on SIGINT/SIGTERM.
     let interrupt_tokens = install_signal_shutdown_handler();
+    eprintln!(
+        "[harn-process-debug] root_cancel_token={:p}",
+        Arc::as_ptr(&interrupt_tokens.cancel_token)
+    );
     let deadline_guard = control
         .timeout
         .map(|timeout| start_run_deadline_watchdog(timeout, interrupt_tokens.clone()));
