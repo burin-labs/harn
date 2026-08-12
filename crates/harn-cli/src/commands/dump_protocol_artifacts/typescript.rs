@@ -181,6 +181,11 @@ pub(super) fn generate_typescript_for_version(
         &external_actions.next_actions,
         "HarnExternalActionNextAction",
     ));
+    out.push_str(&ts_array_owned(
+        "EXTERNAL_ACTION_PROTECTED_FIELD_CLASSES",
+        &external_actions.protected_field_classes,
+        "HarnExternalActionProtectedFieldClass",
+    ));
     out.push_str(&ts_array(
         "A2A_TASK_STATES",
         A2A_TASK_STATES,

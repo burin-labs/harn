@@ -16,6 +16,14 @@ import {
   external_action_intent_is_exact,
 } from "std/external_action/contracts"
 import {
+  ExternalActionDisclosure,
+  ExternalActionDisclosureReceipt,
+  ExternalActionDisclosureResolver,
+  external_action_disclosure_receipt,
+  external_action_disclosure_request,
+  external_action_disclosure_result,
+} from "std/external_action/disclosure"
+import {
   ExternalActionManagedPolicy,
   external_action_managed_policy_check,
 } from "std/external_action/policy"
@@ -211,6 +219,7 @@ fn __external_action_receipt_fields(
   evidence_refs: list<string>,
   error: ExternalActionError?,
   reconciliation,
+  disclosure: ExternalActionDisclosureReceipt? = nil,
 ) -> ExternalActionReceipt {
   let receipt = {
     schema: EXTERNAL_ACTION_RECEIPT_SCHEMA,
@@ -254,6 +263,9 @@ fn __external_action_receipt_fields(
   }
   if reconciliation != nil {
     receipt.reconciliation = reconciliation
+  }
+  if disclosure != nil {
+    receipt.disclosure = disclosure
   }
   return schema_expect(receipt, schema_of(ExternalActionReceipt))
 }
@@ -299,6 +311,7 @@ fn __external_action_receipt(
       result.evidence_refs ?? [],
       error,
       opts?.reconciliation,
+      opts?.disclosure,
     )
   }
   if outcome == "failed_before_dispatch" {
@@ -314,6 +327,7 @@ fn __external_action_receipt(
       result.evidence_refs ?? [],
       error,
       opts?.reconciliation,
+      opts?.disclosure,
     )
   }
   if outcome == "rejected" {
@@ -329,6 +343,7 @@ fn __external_action_receipt(
       result.evidence_refs ?? [],
       error,
       opts?.reconciliation,
+      opts?.disclosure,
     )
   }
   return __external_action_receipt_fields(
@@ -343,6 +358,7 @@ fn __external_action_receipt(
     result.evidence_refs ?? [],
     error,
     opts?.reconciliation,
+    opts?.disclosure,
   )
 }
 
@@ -363,6 +379,7 @@ fn __external_action_denied_receipt(
     nil,
     [],
     error,
+    nil,
     nil,
   )
 }
@@ -397,6 +414,7 @@ pub fn external_action_execute(
   grant: ExternalActionGrant,
   adapter: ExternalActionAdapter,
   managed_policy: ExternalActionManagedPolicy? = nil,
+  disclosure_resolver: ExternalActionDisclosureResolver? = nil,
 ) -> ExternalActionReceipt {
   const adapter_id = __external_action_adapter_id(adapter)
   const now_ms = harness.clock.now_ms()
@@ -444,12 +462,52 @@ pub fn external_action_execute(
             throw {external_action_denied: true, error: unwrap_err(policy_check)}
           }
         }
-        const request = {
+        let disclosure: ExternalActionDisclosure? = nil
+        if intent.protected_disclosure != nil {
+          if disclosure_resolver == nil
+            || !__external_action_is_callable(
+            disclosure_resolver.disclose,
+          ) {
+            throw {
+              external_action_denied: true,
+              error: external_action_error(
+                "disclosure_unavailable",
+                "protected_disclosure_unavailable",
+                "The required protected personal details are not available for this action.",
+              ),
+            }
+          }
+          const disclosed = try {
+            disclosure_resolver.disclose(harness, external_action_disclosure_request(intent, grant))
+          }
+          if !is_ok(disclosed) {
+            throw {
+              external_action_denied: true,
+              error: external_action_error(
+                "disclosure_refused",
+                "protected_disclosure_refused",
+                "Protected personal details were not shared. The provider was not contacted.",
+              ),
+            }
+          }
+          const checked_disclosure = external_action_disclosure_result(intent, unwrap(disclosed))
+          if !is_ok(checked_disclosure) {
+            throw {external_action_denied: true, error: unwrap_err(checked_disclosure)}
+          }
+          disclosure = unwrap(checked_disclosure)
+        }
+        let request = {
           schema: "harn.external_action_dispatch_request.v1",
           intent: intent,
           grant: grant,
           idempotency_key: intent.idempotency_key,
         }
+        if disclosure != nil {
+          request.protected_disclosure = disclosure
+        }
+        const disclosure_receipt = disclosure == nil ? nil : external_action_disclosure_receipt(
+          disclosure,
+        )
         const raw = try {
           adapter.dispatch(harness, request)
         }
@@ -466,6 +524,7 @@ pub fn external_action_execute(
                 "The provider outcome is unknown and must be reconciled.",
                 true,
               ),
+              disclosure: disclosure_receipt,
             },
           )
         } else {
@@ -476,7 +535,7 @@ pub fn external_action_execute(
               adapter_id,
               __external_action_indeterminate_result("malformed_adapter_result"),
               harness.clock.now_ms(),
-              {error: unwrap_err(normalized)},
+              {error: unwrap_err(normalized), disclosure: disclosure_receipt},
             )
           } else {
             __external_action_receipt(
@@ -484,6 +543,7 @@ pub fn external_action_execute(
               adapter_id,
               unwrap(normalized),
               harness.clock.now_ms(),
+              {disclosure: disclosure_receipt},
             )
           }
         }

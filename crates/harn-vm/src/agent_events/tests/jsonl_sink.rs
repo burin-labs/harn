@@ -195,6 +195,7 @@ fn jsonl_sink_redacts_tool_payloads_before_write() {
         status: ToolCallStatus::Pending,
         raw_input: serde_json::json!({
             "api_key": "raw-api-key-value",
+            "protected_disclosure": {"protected_values": {"given_name": "PersonalSentinel"}},
             "url": "https://user:password@example.com/items?client_secret=raw-client-secret&ok=1"
         }),
         parsing: None,
@@ -230,6 +231,7 @@ fn jsonl_sink_redacts_tool_payloads_before_write() {
         "user:password",
         "raw-client-secret",
         "raw-access-token",
+        "PersonalSentinel",
     ] {
         assert!(
             !text.contains(secret),

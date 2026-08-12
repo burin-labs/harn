@@ -141,6 +141,10 @@ pub(super) fn generate_swift_for_version(
         "HarnExternalActionNextAction",
         &external_actions.next_actions,
     ));
+    out.push_str(&swift_enum(
+        "HarnExternalActionProtectedFieldClass",
+        &external_actions.protected_field_classes,
+    ));
 
     out.push_str(&swift_enum_with_deprecations(
         "HarnACPAgentMethod",

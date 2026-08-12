@@ -29,7 +29,14 @@ const intent = external_action_intent({
   capability: "flights.book",
   operation: "create_order",
   environment: "test",
-  payload: {offer_id: offer_id, passengers: passengers},
+  payload: {offer_id: offer_id},
+  protected_disclosure: {
+    field_classes: ["legal_identity", "birth_date", "contact_details"],
+    recipient: "Duffel",
+    purpose: "Create the exact approved order.",
+    source: "user_profile",
+    require_reauthentication: true,
+  },
   external_spend: {currency: "USD", amount_minor: 24567},
   display: {summary: "Book SEA to JFK for $245.67"},
 })
@@ -55,13 +62,37 @@ const managed = external_action_managed_policy({
   allowed_environments: ["test"],
 })
 
-const receipt = external_action_execute(harness, intent, grant, duffel_adapter, managed)
+// The product host owns this resolver. It returns requested values only after
+// the exact grant and managed policy pass. The values exist only for this
+// adapter call; Harn checkpoints and receipts retain metadata, never values.
+const receipt = external_action_execute(
+  harness,
+  intent,
+  grant,
+  duffel_adapter,
+  managed,
+  protected_profile_resolver,
+)
 ```
 
 ## Guarantees
 
 - The fingerprint covers actor, provider, capability, operation, environment,
-  payload, and external spend. Changing any of them invalidates the grant.
+  payload, protected-disclosure plan, and external spend. Changing any of them
+  invalidates the grant.
+- A protected-disclosure plan contains only field classes, recipient, purpose,
+  source, and reauthentication policy. Personal values must not be placed in
+  the intent payload.
+- Grant and managed-policy checks run before the disclosure resolver. Missing,
+  refused, malformed, or mismatched disclosure produces a typed denial and
+  zero provider dispatches.
+- Reauthentication is separate from action approval. When a plan requires it,
+  the protected-profile host must report biometric or managed assurance from
+  that disclosure attempt; the receipt records that actual assurance.
+- Requested personal values are validated against a closed field-class
+  contract immediately before dispatch. The adapter receives them transiently.
+  Checkpoints, receipt events, replay state, and receipts retain only the
+  value-free disclosure record.
 - Model/API inference cost is not part of `external_spend`; hosts can budget
   the two independently.
 - Managed policy is a restriction layer, not a grant. It can disable actions,
@@ -82,3 +113,8 @@ const receipt = external_action_execute(harness, intent, grant, duffel_adapter, 
 Use `external_action_fake_adapter(...)` in deterministic tests. A production
 connector and the fake both implement the same two-method adapter seam:
 `dispatch` and `reconcile`.
+
+The unified operational redactor treats `protected_disclosure` and
+`protected_values` containers as sensitive. Connector adapters must also apply
+their manifest redaction rules when they translate protected fields into a
+provider-specific request shape.

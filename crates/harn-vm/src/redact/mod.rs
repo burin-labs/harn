@@ -553,6 +553,8 @@ fn is_default_sensitive_field(lower: &str) -> bool {
             | "passwd"
             | "privatekey"
             | "sessiontoken"
+            | "protectedvalues"
+            | "protecteddisclosure"
     ) || compact.ends_with("token")
         || compact.ends_with("secret")
         || compact.ends_with("password")
@@ -758,6 +760,7 @@ mod tests {
                 { "name": "bob" },
             ],
             "clientSecret": "camel-secret",
+            "protected_values": {"legal_identity": {"given_name": "PersonalSentinel"}},
             "free_form": "Bearer ghp_abcdefghijklmnopqrstuvwxyz0123456789ABCD",
             "url": "https://api.example.com/v1?api_key=hideme",
         });
@@ -772,6 +775,7 @@ mod tests {
         assert_eq!(value["list"][0]["accessToken"], REDACTED_PLACEHOLDER);
         assert_eq!(value["list"][0]["name"], "alice");
         assert_eq!(value["clientSecret"], REDACTED_PLACEHOLDER);
+        assert_eq!(value["protected_values"], REDACTED_PLACEHOLDER);
         let free_form = value["free_form"].as_str().unwrap();
         // Free-form pattern matches produce the OA-06 named placeholder
         // `<redacted:<pattern>:<len>>` so audit logs can attribute leaks to a

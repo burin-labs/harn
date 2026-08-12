@@ -268,5 +268,190 @@ pipeline test(harness: Harness) {
     "receipt must not retain raw provider text",
   )
   harness.stdio.println("malformed_bounded:" + to_string(bounded.error?.code ?? ""))
+  const protected_sentinel = "HarnProtectedSentinel"
+  const protected_intent = external_action_intent(
+    {
+      actor: {kind: "user", id: "user-1"},
+      provider: "duffel",
+      capability: "flights.book",
+      operation: "create_order",
+      environment: "test",
+      payload: {offer_id: "off_test_protected"},
+      protected_disclosure: {
+        field_classes: ["legal_identity", "birth_date"],
+        recipient: "Duffel test mode",
+        purpose: "Create the exact approved test order.",
+        source: "fictional_test_fixture",
+        require_reauthentication: true,
+      },
+      external_spend: {currency: "USD", amount_minor: 12345},
+      display: {summary: "Create one Duffel test order"},
+    },
+  )
+  const protected_grant = grant(protected_intent)
+  const disclosure_calls = harness.runtime.atomic(0)
+  const protected_resolver = {
+    id: "burin-protected-profile",
+    disclose: { _harness, request ->
+      harness.runtime.atomic_add(disclosure_calls, 1)
+      assert(
+        request.intent_fingerprint == protected_intent.fingerprint,
+        "disclosure must bind intent",
+      )
+      assert(request.provider == protected_intent.provider, "disclosure provider must bind intent")
+      assert(
+        request.operation == protected_intent.operation,
+        "disclosure operation must bind intent",
+      )
+      assert(
+        request.recipient == protected_intent.protected_disclosure?.recipient,
+        "disclosure recipient must bind intent",
+      )
+      assert(
+        request.purpose == protected_intent.protected_disclosure?.purpose,
+        "disclosure purpose must bind intent",
+      )
+      assert(
+        request.field_classes == protected_intent.protected_disclosure?.field_classes,
+        "disclosure field classes must bind intent",
+      )
+      assert(
+        request.source == protected_intent.protected_disclosure?.source,
+        "disclosure source must bind intent",
+      )
+      return {
+        schema: "harn.external_action_disclosure.v1",
+        intent_fingerprint: request.intent_fingerprint,
+        provider: request.provider,
+        operation: request.operation,
+        recipient: request.recipient,
+        purpose: request.purpose,
+        field_classes: request.field_classes,
+        source: request.source,
+        authentication_assurance: "biometric",
+        protected_values: {
+          legal_identity: {given_name: protected_sentinel, family_name: "Traveler"},
+          birth_date: "1990-01-01",
+        },
+      }
+    },
+  }
+  const protected_dispatch_calls = harness.runtime.atomic(0)
+  const protected_adapter = {
+    id: "duffel-protected-test",
+    dispatch: { _harness, request ->
+      harness.runtime.atomic_add(protected_dispatch_calls, 1)
+      assert(
+        request.protected_disclosure?.protected_values?.legal_identity?.given_name
+          == protected_sentinel,
+        "the adapter must receive the transient requested fields",
+      )
+      return {outcome: "confirmed", provider_action_id: "ord_test_protected"}
+    },
+    reconcile: { _harness, _request -> return {outcome: "indeterminate"} },
+  }
+  const protected_cursor = harness.obs.event_log_latest("external_actions.receipts")
+  const protected_receipt = external_action_execute(
+    harness,
+    protected_intent,
+    protected_grant,
+    protected_adapter,
+    nil,
+    protected_resolver,
+  )
+  const protected_replay = external_action_execute(
+    harness,
+    protected_intent,
+    protected_grant,
+    protected_adapter,
+    nil,
+    protected_resolver,
+  )
+  assert(
+    protected_receipt.status == "confirmed",
+    "protected dispatch must confirm: " + json_stringify(protected_receipt),
+  )
+  assert(protected_replay.id == protected_receipt.id, "protected replay must use its receipt")
+  assert(harness.runtime.atomic_get(disclosure_calls) == 1, "replay must not disclose twice")
+  assert(
+    harness.runtime.atomic_get(protected_dispatch_calls) == 1,
+    "replay must not dispatch twice",
+  )
+  assert(
+    protected_receipt.disclosure?.field_classes == ["legal_identity", "birth_date"],
+    "receipt must retain value-free disclosure classes",
+  )
+  assert(
+    protected_receipt.disclosure?.authentication_assurance == "biometric",
+    "receipt must retain the disclosure host's actual authentication assurance",
+  )
+  for durable in [protected_intent, protected_grant, protected_receipt] {
+    const encoded = json_stringify(durable)
+    assert(
+      !encoded.contains(protected_sentinel),
+      "durable action state must exclude protected values",
+    )
+    assert(
+      !encoded.contains("protected_values"),
+      "durable action state must exclude value containers",
+    )
+  }
+  for checkpoint_key in harness.runtime.checkpoint_list() {
+    assert(
+      !json_stringify(harness.runtime.checkpoint_get(checkpoint_key)).contains(protected_sentinel),
+      "checkpoints must exclude protected values",
+    )
+  }
+  const protected_event = harness.obs.event_log_subscribe(
+    {topic: "external_actions.receipts", from_cursor: protected_cursor},
+  )
+    .next().value
+  assert(
+    !json_stringify(protected_event).contains(protected_sentinel),
+    "receipt events must exclude protected values",
+  )
+  const unavailable_intent = external_action_intent(
+    protected_intent + {payload: {offer_id: "off_test_profile_unavailable"}},
+  )
+  const unavailable = external_action_execute(
+    harness,
+    unavailable_intent,
+    grant(unavailable_intent),
+    protected_adapter,
+  )
+  assert(unavailable.status == "denied", "missing disclosure resolver must deny")
+  assert(
+    unavailable.error?.code == "protected_disclosure_unavailable",
+    "missing resolver denial must be typed",
+  )
+  assert(
+    harness.runtime.atomic_get(protected_dispatch_calls) == 1,
+    "missing profile must not dispatch",
+  )
+  const refused_intent = external_action_intent(
+    protected_intent + {payload: {offer_id: "off_test_profile_refused"}},
+  )
+  const refused_resolver = {
+    id: "burin-protected-profile-refused",
+    disclose: { _harness, _request ->
+      throw protected_sentinel
+    },
+  }
+  const refused = external_action_execute(
+    harness,
+    refused_intent,
+    grant(refused_intent),
+    protected_adapter,
+    nil,
+    refused_resolver,
+  )
+  assert(refused.status == "denied", "refused disclosure must deny")
+  assert(refused.error?.code == "protected_disclosure_refused", "refusal must be typed")
+  assert(
+    !json_stringify(refused).contains(protected_sentinel),
+    "refusal errors must not leak values",
+  )
+  assert(harness.runtime.atomic_get(protected_dispatch_calls) == 1, "refusal must not dispatch")
+  harness.stdio.println("protected_disclosure_once_without_persistence:1")
   harness.runtime.checkpoint_clear()
 }

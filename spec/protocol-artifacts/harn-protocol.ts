@@ -363,6 +363,16 @@ export const EXTERNAL_ACTION_NEXT_ACTIONS = [
 ] as const
 export type HarnExternalActionNextAction = (typeof EXTERNAL_ACTION_NEXT_ACTIONS)[number]
 
+export const EXTERNAL_ACTION_PROTECTED_FIELD_CLASSES = [
+  "legal_identity",
+  "birth_date",
+  "contact_details",
+  "accessibility_needs",
+  "loyalty_accounts",
+  "travel_documents",
+] as const
+export type HarnExternalActionProtectedFieldClass = (typeof EXTERNAL_ACTION_PROTECTED_FIELD_CLASSES)[number]
+
 export const A2A_TASK_STATES = [
   "submitted",
   "working",

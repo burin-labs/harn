@@ -80,6 +80,11 @@ pub(super) fn generate_rust_for_version(
         "Closed external-action follow-up actions owned by `std/external_action/vocabulary`.",
         &external_actions.next_actions,
     ));
+    out.push_str(&rust_string_enum(
+        "HarnExternalActionProtectedFieldClass",
+        "Closed protected-profile field classes owned by `std/external_action/vocabulary`.",
+        &external_actions.protected_field_classes,
+    ));
     out.push_str(&rust_wire_types());
 
     out.push_str(&rust_const_group(

@@ -12,6 +12,7 @@ pub(super) struct ExternalActionVocabulary {
     pub(super) outcomes: Vec<String>,
     pub(super) receipt_statuses: Vec<String>,
     pub(super) next_actions: Vec<String>,
+    pub(super) protected_field_classes: Vec<String>,
 }
 
 impl ExternalActionVocabulary {
@@ -28,6 +29,7 @@ impl ExternalActionVocabulary {
             outcomes: literal_union(&program, "ExternalActionOutcome")?,
             receipt_statuses: literal_union(&program, "ExternalActionReceiptStatus")?,
             next_actions: literal_union(&program, "ExternalActionNextAction")?,
+            protected_field_classes: literal_union(&program, "ExternalActionProtectedFieldClass")?,
         })
     }
 
@@ -102,12 +104,14 @@ mod tests {
 pub type ExternalActionOutcome = "first" | "second_value"
 pub type ExternalActionReceiptStatus = "ready"
 pub type ExternalActionNextAction = "none" | "continue"
+pub type ExternalActionProtectedFieldClass = "legal_identity"
 "#,
         )
         .unwrap();
         assert_eq!(vocabulary.outcomes, ["first", "second_value"]);
         assert_eq!(vocabulary.receipt_statuses, ["ready"]);
         assert_eq!(vocabulary.next_actions, ["none", "continue"]);
+        assert_eq!(vocabulary.protected_field_classes, ["legal_identity"]);
     }
 
     #[test]
@@ -117,6 +121,7 @@ pub type ExternalActionNextAction = "none" | "continue"
 pub type ExternalActionOutcome = string
 pub type ExternalActionReceiptStatus = "ready"
 pub type ExternalActionNextAction = "none"
+pub type ExternalActionProtectedFieldClass = "legal_identity"
 "#,
         )
         .unwrap_err();

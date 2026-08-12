@@ -1,3 +1,9 @@
+import {
+  ExternalActionDisclosure,
+  ExternalActionDisclosurePlan,
+  ExternalActionDisclosureReceipt,
+  external_action_disclosure_plan_result,
+} from "std/external_action/disclosure"
 pub import {
   ExternalActionNextAction,
   ExternalActionOutcome,
@@ -32,6 +38,7 @@ pub type ExternalActionIntent = {
   operation: string,
   environment: ExternalActionEnvironment,
   payload: unknown,
+  protected_disclosure?: ExternalActionDisclosurePlan,
   external_spend?: ExternalActionMoney,
   display: ExternalActionDisplay,
 }
@@ -58,6 +65,9 @@ pub type ExternalActionErrorKind = "invalid_intent" \
   | "adapter_unavailable" \
   | "adapter_failure" \
   | "malformed_adapter_result" \
+  | "disclosure_unavailable" \
+  | "disclosure_refused" \
+  | "malformed_disclosure" \
   | "invalid_reconciliation"
 
 pub type ExternalActionError = {
@@ -85,6 +95,7 @@ pub type ExternalActionDispatchRequest = {
   intent: ExternalActionIntent,
   grant: ExternalActionGrant,
   idempotency_key: string,
+  protected_disclosure?: ExternalActionDisclosure,
 }
 
 pub type ExternalActionReconcileRequest = {
@@ -121,6 +132,7 @@ pub type ExternalActionReceipt = {
   evidence_refs: list<string>,
   error?: ExternalActionError,
   reconciliation?: {attempt_id: string, previous_receipt_id: string},
+  disclosure?: ExternalActionDisclosureReceipt,
 }
 
 /**
@@ -242,6 +254,7 @@ fn __external_action_fingerprint_payload(
   operation: string,
   environment: ExternalActionEnvironment,
   payload: unknown,
+  protected_disclosure: ExternalActionDisclosurePlan?,
   external_spend: ExternalActionMoney?,
 ) -> dict {
   return {
@@ -252,6 +265,7 @@ fn __external_action_fingerprint_payload(
     operation: operation,
     environment: environment,
     payload: payload,
+    protected_disclosure: protected_disclosure,
     external_spend: external_spend,
   }
 }
@@ -274,7 +288,8 @@ pub fn external_action_intent_result(
   const operation = __external_action_non_empty(raw?.operation, "operation")
   const environment = __external_action_environment_result(raw?.environment)
   const money = __external_action_money_result(raw?.external_spend)
-  for checked in [actor, provider, capability, operation, environment, money] {
+  const disclosure = external_action_disclosure_plan_result(raw?.protected_disclosure)
+  for checked in [actor, provider, capability, operation, environment, money, disclosure] {
     if !is_ok(checked) {
       return Err(unwrap_err(checked))
     }
@@ -285,6 +300,7 @@ pub fn external_action_intent_result(
   const normalized_operation = lowercase(unwrap(operation))
   const normalized_environment = unwrap(environment)
   const normalized_money = unwrap(money)
+  const normalized_disclosure = unwrap(disclosure)
   const payload = raw?.payload
   const fingerprint = "sha256:"
     + sha256(
@@ -296,6 +312,7 @@ pub fn external_action_intent_result(
         normalized_operation,
         normalized_environment,
         payload,
+        normalized_disclosure,
         normalized_money,
       ),
     ),
@@ -315,6 +332,9 @@ pub fn external_action_intent_result(
   }
   if normalized_money != nil {
     intent.external_spend = normalized_money
+  }
+  if normalized_disclosure != nil {
+    intent.protected_disclosure = normalized_disclosure
   }
   return Ok(intent)
 }
