@@ -9,6 +9,22 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.85
+
+### Added
+
+- **Hypothesis control-plane CLI and MCP example (#6353).** Design, compile,
+  apply, inspect, and report actions now project the canonical
+  `std/eval/hypothesis` contracts without adding another scheduler or ledger.
+
+### Fixed
+
+- **Accurate served-export schemas and identity (#6353).** `harn serve` now
+  hides host-injected `Harness*` authority, expands imported aliases in public
+  schemas, and invokes exports correctly from relative nested script paths.
+- Isolate Unix command trees in their own OS session so a timed-out toolchain
+  helper cannot signal and cancel its parent Harn VM.
+
 ## v0.10.84
 
 ### Fixed
