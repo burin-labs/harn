@@ -71,9 +71,12 @@ tool_mode_parity = "native_unreliable"
         },
       )
       const calls = harness.llm.mock_calls()
+      const followup_history = calls[1].messages
       harness.stdio.println(contains(calls[0].system, "<tool_call>"))
       harness.stdio.println(!contains(calls[0].system, "native tool-calling channel"))
       harness.stdio.println(len(calls[0].tools ?? []))
+      harness.stdio.println(contains(followup_history[1].content, "emit_judgment"))
+      harness.stdio.println(followup_history[2].role)
       harness.stdio.println(result.status)
     },
   )
@@ -81,5 +84,6 @@ tool_mode_parity = "native_unreliable"
 // Asserts, in order: the prompt rides the steered TEXT harness.runtime.channel(carries
 // the `<tool_call>` contract, never advertises the forbidden native
 // channel); no native tool schemas ship on the wire (consistent with the
-// steered text channel, not a silent native drop); the text-format tool
-// call parsed and dispatched (status `done`).
+// steered text channel, not a silent native drop); the follow-up history keeps
+// the assistant's text call and returns its result as an ordinary user turn;
+// the text-format tool call parsed and dispatched (status `done`).

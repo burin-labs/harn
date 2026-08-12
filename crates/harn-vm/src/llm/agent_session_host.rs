@@ -51,7 +51,7 @@ const HOST_AGENT_RECORD_COMPACTION: &str = "__host_agent_record_compaction";
 mod assistant_messages;
 pub(crate) mod cancellation;
 mod tool_result_messages;
-use assistant_messages::{canonical_text_history_for_tool_calls, durable_anthropic_blocks};
+use assistant_messages::durable_anthropic_blocks;
 use cancellation::CancelSafeNestedExecutionGuard;
 mod live_transcript_journal;
 mod plan_document;
@@ -1082,22 +1082,15 @@ fn assistant_message_from_llm_result(llm_result: &VmValue) -> VmValue {
         .collect::<Vec<_>>();
     let durable_blocks = durable_anthropic_blocks(llm_result, &provider, &model);
     let thinking = dict_get(llm_result, "thinking").map(|v| v.display());
-    let agent_tool_format = dict_get(llm_result, "_agent_tool_format").map(|v| v.display());
-    let text_history_requested = agent_tool_format.as_deref() == Some("text");
-    if text_history_requested && !native_calls_json.is_empty() {
-        if let Some(canonical_text) =
-            canonical_text_history_for_tool_calls(&text, &native_calls_json)
-        {
-            let msg = build_assistant_response_message(
-                &canonical_text,
-                &[],
-                &[],
-                thinking.as_deref(),
-                &provider,
-                &model,
-            );
-            return json_to_vm(&msg);
-        }
+    if let Some(message) = assistant_messages::text_channel_provider_surprise_message(
+        llm_result,
+        &provider,
+        &model,
+        &text,
+        &native_calls_json,
+        thinking.as_deref(),
+    ) {
+        return message;
     }
     if native_calls_json.is_empty() {
         // gpt-oss / harmony channel-leak backstop. A native-tools model is
@@ -1128,9 +1121,7 @@ fn assistant_message_from_llm_result(llm_result: &VmValue) -> VmValue {
         // llamacpp) legitimately keep their calls inline in `content` for the
         // NEXT turn's text parser to re-read, so those keep the verbatim-text
         // path below.
-        let caps = crate::llm::capabilities::lookup(&provider, &model);
-        let native_history_requested = agent_tool_format.as_deref().unwrap_or("native") == "native";
-        if native_history_requested && caps.native_tools {
+        if assistant_messages::supports_native_history(llm_result, &provider, &model) {
             let recovered_calls = list_items(
                 &dict_get(llm_result, "tool_calls")
                     .cloned()
@@ -1445,11 +1436,15 @@ fn host_agent_session_record_tool_results_builtin(
     // inline in `content` and carry no structured block, so they stay on the
     // text echo — unchanged).
     let session_tool_format = crate::agent_sessions::tool_format(&session_id).unwrap_or_default();
-    let tool_format = if trailing_assistant_has_native_tool_use(&session_id) {
-        "native".to_string()
-    } else {
-        session_tool_format
-    };
+    let tool_format = assistant_messages::effective_session_tool_format(
+        &provider,
+        &model,
+        if trailing_assistant_has_native_tool_use(&session_id) {
+            "native"
+        } else {
+            &session_tool_format
+        },
+    );
     // dispatch may be either a flat list of results (as returned by
     // agent_dispatch_tool_batch) or a dict with a `results` key (legacy
     // shape some callers still synthesize). Handle both.
