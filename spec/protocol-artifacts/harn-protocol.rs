@@ -120,6 +120,45 @@ impl HarnExternalActionNextAction {
     }
 }
 
+/// Closed protected-profile field classes owned by `std/external_action/vocabulary`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum HarnExternalActionProtectedFieldClass {
+    #[serde(rename = "legal_identity")]
+    LegalIdentity,
+    #[serde(rename = "birth_date")]
+    BirthDate,
+    #[serde(rename = "contact_details")]
+    ContactDetails,
+    #[serde(rename = "accessibility_needs")]
+    AccessibilityNeeds,
+    #[serde(rename = "loyalty_accounts")]
+    LoyaltyAccounts,
+    #[serde(rename = "travel_documents")]
+    TravelDocuments,
+}
+
+impl HarnExternalActionProtectedFieldClass {
+    pub const ALL: &'static [Self] = &[
+        Self::LegalIdentity,
+        Self::BirthDate,
+        Self::ContactDetails,
+        Self::AccessibilityNeeds,
+        Self::LoyaltyAccounts,
+        Self::TravelDocuments,
+    ];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::LegalIdentity => "legal_identity",
+            Self::BirthDate => "birth_date",
+            Self::ContactDetails => "contact_details",
+            Self::AccessibilityNeeds => "accessibility_needs",
+            Self::LoyaltyAccounts => "loyalty_accounts",
+            Self::TravelDocuments => "travel_documents",
+        }
+    }
+}
+
 /// Author identity on a collaborative plan revision or comment.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HarnPlanAuthor {

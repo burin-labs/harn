@@ -183,6 +183,7 @@ pub(super) fn generate_manifest_for_version(
             "outcomes": external_actions.outcomes,
             "receiptStatuses": external_actions.receipt_statuses,
             "nextActions": external_actions.next_actions,
+            "protectedFieldClasses": external_actions.protected_field_classes,
         },
         "plans": {
             "documentSchemaVersion": harn_vm::llm::plan::PLAN_DOCUMENT_SCHEMA_VERSION,

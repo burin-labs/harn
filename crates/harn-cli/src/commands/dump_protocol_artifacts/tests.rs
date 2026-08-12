@@ -176,18 +176,22 @@ fn external_action_vocabulary_projects_to_every_supported_host() {
     assert!(ts.contains("export type HarnExternalActionOutcome"));
     assert!(ts.contains("export type HarnExternalActionReceiptStatus"));
     assert!(ts.contains("export type HarnExternalActionNextAction"));
+    assert!(ts.contains("export type HarnExternalActionProtectedFieldClass"));
     assert!(swift.contains("public enum HarnExternalActionOutcome"));
     assert!(swift.contains("public enum HarnExternalActionReceiptStatus"));
     assert!(swift.contains("public enum HarnExternalActionNextAction"));
+    assert!(swift.contains("public enum HarnExternalActionProtectedFieldClass"));
     assert!(rust.contains("pub enum HarnExternalActionOutcome"));
     assert!(rust.contains("pub enum HarnExternalActionReceiptStatus"));
     assert!(rust.contains("pub enum HarnExternalActionNextAction"));
+    assert!(rust.contains("pub enum HarnExternalActionProtectedFieldClass"));
 
     for value in vocabulary
         .outcomes
         .iter()
         .chain(&vocabulary.receipt_statuses)
         .chain(&vocabulary.next_actions)
+        .chain(&vocabulary.protected_field_classes)
     {
         for (host, generated) in [("TypeScript", &ts), ("Swift", &swift), ("Rust", &rust)] {
             assert!(
@@ -204,13 +208,19 @@ fn adding_external_action_values_updates_all_host_projections() {
         outcomes: vec!["confirmed".into(), "future_outcome".into()],
         receipt_statuses: vec!["confirmed".into(), "future_status".into()],
         next_actions: vec!["none".into(), "future_action".into()],
+        protected_field_classes: vec!["legal_identity".into(), "future_field".into()],
     };
     for generated in [
         generate_typescript_for_version("1.0.0", &vocabulary),
         generate_swift_for_version("1.0.0", &vocabulary),
         generate_rust_for_version("1.0.0", &vocabulary),
     ] {
-        for future_value in ["future_outcome", "future_status", "future_action"] {
+        for future_value in [
+            "future_outcome",
+            "future_status",
+            "future_action",
+            "future_field",
+        ] {
             assert!(generated.contains(future_value));
         }
     }

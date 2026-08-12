@@ -18,3 +18,10 @@ pub type ExternalActionReceiptStatus = "confirmed" \
   | "reconciliation_required"
 
 pub type ExternalActionNextAction = "none" | "reconcile"
+
+pub type ExternalActionProtectedFieldClass = "legal_identity" \
+  | "birth_date" \
+  | "contact_details" \
+  | "accessibility_needs" \
+  | "loyalty_accounts" \
+  | "travel_documents"

@@ -1,0 +1,475 @@
+pub import { ExternalActionProtectedFieldClass } from "std/external_action/vocabulary"
+
+pub type ExternalActionDisclosureSource = "user_profile" | "fictional_test_fixture"
+
+type ExternalActionDisclosureAssurance = "none" | "session" | "biometric" | "managed"
+
+type ExternalActionDisclosureAuthorizationMethod = "manual" \
+  | "policy" \
+  | "adversarial_auto" \
+  | "managed_policy" \
+  | "test_fixture"
+
+type ExternalActionDisclosureError = {kind: string, code: string, message: string, retryable: bool}
+
+pub type ExternalActionDisclosurePlan = {
+  field_classes: list<ExternalActionProtectedFieldClass>,
+  recipient: string,
+  purpose: string,
+  source: ExternalActionDisclosureSource,
+  require_reauthentication: bool,
+}
+
+pub type ExternalActionLegalIdentity = {
+  given_name: string,
+  family_name: string,
+  middle_names?: list<string>,
+  title?: string,
+}
+
+pub type ExternalActionPostalAddress = {
+  line1: string,
+  line2?: string,
+  city: string,
+  region?: string,
+  postal_code: string,
+  country_code: string,
+}
+
+pub type ExternalActionContactDetails = {
+  email: string,
+  phone: string,
+  address?: ExternalActionPostalAddress,
+}
+
+pub type ExternalActionAccessibilityNeed = {kind: string, details?: string}
+
+pub type ExternalActionLoyaltyAccount = {program: string, member_number: string}
+
+pub type ExternalActionTravelDocument = {
+  document_type: "passport" | "national_identity_card",
+  issuing_country: string,
+  number: string,
+  expiry_date: string,
+  nationality?: string,
+}
+
+/** Transient values. This record must never be checkpointed, logged, or receipted. */
+pub type ExternalActionProtectedValues = {
+  legal_identity?: ExternalActionLegalIdentity,
+  birth_date?: string,
+  contact_details?: ExternalActionContactDetails,
+  accessibility_needs?: list<ExternalActionAccessibilityNeed>,
+  loyalty_accounts?: list<ExternalActionLoyaltyAccount>,
+  travel_documents?: list<ExternalActionTravelDocument>,
+}
+
+pub type ExternalActionDisclosure = {
+  schema: "harn.external_action_disclosure.v1",
+  intent_fingerprint: string,
+  provider: string,
+  operation: string,
+  recipient: string,
+  purpose: string,
+  field_classes: list<ExternalActionProtectedFieldClass>,
+  source: ExternalActionDisclosureSource,
+  authentication_assurance: ExternalActionDisclosureAssurance,
+  protected_values: ExternalActionProtectedValues,
+}
+
+pub type ExternalActionDisclosureRequest = {
+  schema: "harn.external_action_disclosure_request.v1",
+  intent_fingerprint: string,
+  provider: string,
+  operation: string,
+  environment: "mock" | "test" | "live",
+  recipient: string,
+  purpose: string,
+  field_classes: list<ExternalActionProtectedFieldClass>,
+  source: ExternalActionDisclosureSource,
+  require_reauthentication: bool,
+  authorization_method: ExternalActionDisclosureAuthorizationMethod,
+  grant_authentication_assurance: ExternalActionDisclosureAssurance,
+}
+
+pub type ExternalActionDisclosureResolver = {
+  id: string,
+  disclose: fn(Harness, ExternalActionDisclosureRequest) -> ExternalActionDisclosure,
+}
+
+/** Durable, value-free proof that the field classes were disclosed. */
+pub type ExternalActionDisclosureReceipt = {
+  recipient: string,
+  purpose: string,
+  field_classes: list<ExternalActionProtectedFieldClass>,
+  source: ExternalActionDisclosureSource,
+  authentication_assurance: ExternalActionDisclosureAssurance,
+}
+
+fn __disclosure_error(
+  kind: string,
+  code: string,
+  message: string,
+) -> ExternalActionDisclosureError {
+  return {kind: kind, code: code, message: message, retryable: false}
+}
+
+fn __disclosure_text(
+  value,
+  field: string,
+  maximum: int,
+) -> Result<string, ExternalActionDisclosureError> {
+  const text = trim(to_string(value ?? ""))
+  if text == "" || len(text) > maximum || text.contains("\n") {
+    return Err(
+      __disclosure_error(
+        "invalid_intent",
+        "invalid_disclosure_" + field,
+        "protected disclosure " + field + " is invalid",
+      ),
+    )
+  }
+  return Ok(text)
+}
+
+/**
+ * Validate and normalize value-free disclosure metadata at the intent seam.
+ * @effects: []
+ * @errors: []
+ */
+pub fn external_action_disclosure_plan_result(
+  raw: unknown,
+) -> Result<ExternalActionDisclosurePlan?, ExternalActionDisclosureError> {
+  if raw == nil {
+    return Ok(nil)
+  }
+  if !schema_is(raw, schema_of(ExternalActionDisclosurePlan)) {
+    return Err(
+      __disclosure_error(
+        "invalid_intent",
+        "invalid_disclosure_plan",
+        "protected disclosure must use the typed value-free plan",
+      ),
+    )
+  }
+  const typed = schema_expect(raw, schema_of(ExternalActionDisclosurePlan))
+  if len(typed.field_classes) == 0 || len(typed.field_classes) > 6 {
+    return Err(
+      __disclosure_error(
+        "invalid_intent",
+        "invalid_disclosure_field_classes",
+        "protected disclosure must name one to six field classes",
+      ),
+    )
+  }
+  let seen = {}
+  for field_class in typed.field_classes {
+    if seen[field_class] {
+      return Err(
+        __disclosure_error(
+          "invalid_intent",
+          "duplicate_disclosure_field_class",
+          "protected disclosure field classes must be unique",
+        ),
+      )
+    }
+    seen[field_class] = true
+  }
+  const recipient = __disclosure_text(typed.recipient, "recipient", 300)
+  const purpose = __disclosure_text(typed.purpose, "purpose", 500)
+  if !is_ok(recipient) {
+    return Err(unwrap_err(recipient))
+  }
+  if !is_ok(purpose) {
+    return Err(unwrap_err(purpose))
+  }
+  return Ok(
+    {
+      field_classes: typed.field_classes,
+      recipient: unwrap(recipient),
+      purpose: unwrap(purpose),
+      source: typed.source,
+      require_reauthentication: typed.require_reauthentication,
+    },
+  )
+}
+
+/**
+ * Build the value-free request a protected-profile host receives after authorization.
+ * @effects: []
+ * @errors: [invalid_intent]
+ */
+pub fn external_action_disclosure_request(intent, grant) -> ExternalActionDisclosureRequest {
+  const plan = intent.protected_disclosure
+  require plan != nil, "external_action_disclosure_request: action has no disclosure plan"
+  return {
+    schema: "harn.external_action_disclosure_request.v1",
+    intent_fingerprint: intent.fingerprint,
+    provider: intent.provider,
+    operation: intent.operation,
+    environment: intent.environment,
+    recipient: plan.recipient,
+    purpose: plan.purpose,
+    field_classes: plan.field_classes,
+    source: plan.source,
+    require_reauthentication: plan.require_reauthentication,
+    authorization_method: grant.authorization_method,
+    grant_authentication_assurance: grant.authentication_assurance,
+  }
+}
+
+fn __disclosure_has(values: ExternalActionProtectedValues, field_class: string) -> bool {
+  if field_class == "legal_identity" {
+    return values.legal_identity != nil
+  }
+  if field_class == "birth_date" {
+    return values.birth_date != nil
+  }
+  if field_class == "contact_details" {
+    return values.contact_details != nil
+  }
+  if field_class == "accessibility_needs" {
+    return values.accessibility_needs != nil
+  }
+  if field_class == "loyalty_accounts" {
+    return values.loyalty_accounts != nil
+  }
+  return values.travel_documents != nil
+}
+
+fn __protected_text_is_valid(value, maximum: int) -> bool {
+  const text = trim(to_string(value ?? ""))
+  return text != "" && len(text) <= maximum && !text.contains("\n")
+}
+
+fn __protected_date_is_valid(value) -> bool {
+  return regex_match("^[0-9]{4}-[0-9]{2}-[0-9]{2}$", to_string(value ?? "")) != nil
+}
+
+fn __protected_country_is_valid(value) -> bool {
+  return regex_match("^[A-Z]{2}$", to_string(value ?? "")) != nil
+}
+
+fn __protected_identity_is_valid(identity: ExternalActionLegalIdentity?) -> bool {
+  if identity == nil {
+    return true
+  }
+  if !__protected_text_is_valid(identity.given_name, 200)
+    || !__protected_text_is_valid(
+    identity.family_name,
+    200,
+  ) {
+    return false
+  }
+  for middle_name in identity.middle_names ?? [] {
+    if !__protected_text_is_valid(middle_name, 200) {
+      return false
+    }
+  }
+  return identity.title == nil || __protected_text_is_valid(identity.title, 40)
+}
+
+fn __protected_address_is_valid(address: ExternalActionPostalAddress?) -> bool {
+  if address == nil {
+    return true
+  }
+  if !__protected_text_is_valid(address.line1, 300)
+    || !__protected_text_is_valid(address.city, 200)
+    || !__protected_text_is_valid(
+    address.postal_code,
+    40,
+  )
+    || !__protected_country_is_valid(address.country_code) {
+    return false
+  }
+  return (address.line2 == nil || __protected_text_is_valid(address.line2, 300))
+    && (address.region == nil
+    || __protected_text_is_valid(
+    address.region,
+    200,
+  ))
+}
+
+fn __protected_contact_is_valid(contact: ExternalActionContactDetails?) -> bool {
+  if contact == nil {
+    return true
+  }
+  return __protected_text_is_valid(contact.email, 320) && contact.email.contains("@")
+    && __protected_text_is_valid(
+    contact.phone,
+    80,
+  )
+    && __protected_address_is_valid(contact.address)
+}
+
+fn __protected_needs_are_valid(needs: list<ExternalActionAccessibilityNeed>?) -> bool {
+  for need in needs ?? [] {
+    if regex_match("^[A-Za-z0-9._-]{1,128}$", need.kind) == nil
+      || (need.details != nil
+      && !__protected_text_is_valid(
+      need.details,
+      1000,
+    )) {
+      return false
+    }
+  }
+  return true
+}
+
+fn __protected_accounts_are_valid(accounts: list<ExternalActionLoyaltyAccount>?) -> bool {
+  for account in accounts ?? [] {
+    if !__protected_text_is_valid(account.program, 200)
+      || !__protected_text_is_valid(
+      account.member_number,
+      200,
+    ) {
+      return false
+    }
+  }
+  return true
+}
+
+fn __protected_documents_are_valid(documents: list<ExternalActionTravelDocument>?) -> bool {
+  for document in documents ?? [] {
+    if !__protected_country_is_valid(document.issuing_country)
+      || !__protected_text_is_valid(
+      document.number,
+      200,
+    )
+      || !__protected_date_is_valid(document.expiry_date)
+      || (document.nationality != nil
+      && !__protected_country_is_valid(
+      document.nationality,
+    )) {
+      return false
+    }
+  }
+  return true
+}
+
+fn __protected_values_are_valid(values: ExternalActionProtectedValues) -> bool {
+  return __protected_identity_is_valid(values.legal_identity)
+    && (values.birth_date == nil
+    || __protected_date_is_valid(
+    values.birth_date,
+  ))
+    && __protected_contact_is_valid(values.contact_details)
+    && __protected_needs_are_valid(
+    values.accessibility_needs,
+  )
+    && __protected_accounts_are_valid(values.loyalty_accounts)
+    && __protected_documents_are_valid(
+    values.travel_documents,
+  )
+}
+
+fn __disclosure_assurance_is_valid(
+  plan: ExternalActionDisclosurePlan,
+  assurance: ExternalActionDisclosureAssurance,
+) -> bool {
+  if !plan.require_reauthentication {
+    return true
+  }
+  return assurance == "biometric" || assurance == "managed"
+}
+
+fn __disclosure_binding_error(field: string) -> ExternalActionDisclosureError {
+  return __disclosure_error(
+    "malformed_disclosure",
+    "disclosure_" + field + "_mismatch",
+    "protected disclosure " + field + " does not match the authorized action",
+  )
+}
+
+/**
+ * Validate exact metadata and requested-only values immediately before dispatch.
+ * @effects: []
+ * @errors: []
+ */
+pub fn external_action_disclosure_result(
+  intent,
+  raw: unknown,
+) -> Result<ExternalActionDisclosure, ExternalActionDisclosureError> {
+  if !schema_is(raw, schema_of(ExternalActionDisclosure)) {
+    return Err(
+      __disclosure_error(
+        "malformed_disclosure",
+        "invalid_disclosure",
+        "the protected profile host returned an invalid disclosure",
+      ),
+    )
+  }
+  const disclosure = schema_expect(raw, schema_of(ExternalActionDisclosure))
+  if !__protected_values_are_valid(disclosure.protected_values) {
+    return Err(
+      __disclosure_error(
+        "malformed_disclosure",
+        "invalid_protected_values",
+        "the protected profile host returned invalid field values",
+      ),
+    )
+  }
+  const plan = intent.protected_disclosure
+  if plan == nil {
+    return Err(__disclosure_binding_error("plan"))
+  }
+  for binding in [
+    ["intent", disclosure.intent_fingerprint, intent.fingerprint],
+    ["provider", disclosure.provider, intent.provider],
+    ["operation", disclosure.operation, intent.operation],
+    ["recipient", disclosure.recipient, plan.recipient],
+    ["purpose", disclosure.purpose, plan.purpose],
+    ["field_classes", disclosure.field_classes, plan.field_classes],
+    ["source", disclosure.source, plan.source],
+  ] {
+    if binding[1] != binding[2] {
+      return Err(__disclosure_binding_error(binding[0]))
+    }
+  }
+  if !__disclosure_assurance_is_valid(plan, disclosure.authentication_assurance) {
+    return Err(
+      __disclosure_error(
+        "malformed_disclosure",
+        "disclosure_reauthentication_required",
+        "protected disclosure did not satisfy the required reauthentication",
+      ),
+    )
+  }
+  for field_class in [
+    "legal_identity",
+    "birth_date",
+    "contact_details",
+    "accessibility_needs",
+    "loyalty_accounts",
+    "travel_documents",
+  ] {
+    const expected = plan.field_classes.contains(field_class)
+    if __disclosure_has(disclosure.protected_values, field_class) != expected {
+      return Err(
+        __disclosure_error(
+          "malformed_disclosure",
+          "disclosure_field_mismatch",
+          "protected disclosure values must match the requested field classes exactly",
+        ),
+      )
+    }
+  }
+  return Ok(disclosure)
+}
+
+/**
+ * Project one transient disclosure into durable, value-free audit metadata.
+ * @effects: []
+ * @errors: []
+ */
+pub fn external_action_disclosure_receipt(
+  disclosure: ExternalActionDisclosure,
+) -> ExternalActionDisclosureReceipt {
+  return {
+    recipient: disclosure.recipient,
+    purpose: disclosure.purpose,
+    field_classes: disclosure.field_classes,
+    source: disclosure.source,
+    authentication_assurance: disclosure.authentication_assurance,
+  }
+}

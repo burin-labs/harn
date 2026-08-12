@@ -7,3 +7,4 @@ managed_denied_without_dispatch:0
 expired_denied_without_dispatch:0:grant_expired
 reconciled_without_redispatch:1:1
 malformed_bounded:invalid_evidence_ref
+protected_disclosure_once_without_persistence:1

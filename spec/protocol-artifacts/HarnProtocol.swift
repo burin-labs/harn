@@ -199,6 +199,24 @@ public enum HarnExternalActionNextAction: String, Codable, Sendable, CaseIterabl
     ].map { Self(rawValue: $0)! }
 }
 
+public enum HarnExternalActionProtectedFieldClass: String, Codable, Sendable, CaseIterable {
+    case legalIdentity = "legal_identity"
+    case birthDate = "birth_date"
+    case contactDetails = "contact_details"
+    case accessibilityNeeds = "accessibility_needs"
+    case loyaltyAccounts = "loyalty_accounts"
+    case travelDocuments = "travel_documents"
+
+    public static let allCases: [Self] = [
+        "legal_identity",
+        "birth_date",
+        "contact_details",
+        "accessibility_needs",
+        "loyalty_accounts",
+        "travel_documents",
+    ].map { Self(rawValue: $0)! }
+}
+
 public enum HarnACPAgentMethod: String, Codable, Sendable, CaseIterable {
     case initialize = "initialize"
     case sessionInject = "session/inject"
