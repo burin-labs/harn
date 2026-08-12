@@ -18,6 +18,7 @@ pub const RUN_REVIEW_SCHEMA: &str = "harn.run_review.v1";
 pub const RUN_REVIEW_SCHEMA_VERSION: u32 = 1;
 pub const RUN_REVIEW_EVIDENCE_SCHEMA: &str = "harn.run_review_evidence.v1";
 pub const MAX_RUN_REVIEW_INPUT_TOKENS: i64 = 48_000;
+const MAX_RUN_REVIEW_OUTPUT_TOKENS: i64 = 2_048;
 const MAX_PROJECTED_ARRAY_ITEMS: usize = 32;
 const MAX_PROJECTED_STRING_BYTES: usize = 2_048;
 pub const DEFAULT_RUN_REVIEW_RUBRIC: &str = "Assess the run using only the supplied run report. Judge whether the run completed its stated work, coordinated reliably, exposed material failures, and preserved enough evidence to support the verdict. Prefer a limitation over an unsupported claim.";
@@ -230,12 +231,17 @@ async fn review_run_report_with_clock(
     let system = build_system_prompt();
     let estimated_input_tokens = crate::llm::estimate_text_tokens(&prompt)
         .saturating_add(crate::llm::estimate_text_tokens(&system));
-    if estimated_input_tokens > MAX_RUN_REVIEW_INPUT_TOKENS {
-        return Err(lifecycle.invalid(
-            format!(
-                "the deterministic run review projection is estimated at {estimated_input_tokens} tokens, above the {MAX_RUN_REVIEW_INPUT_TOKENS}-token limit; the report cannot be reviewed within the bounded one-call budget"
-            ),
-        ));
+    let selector = request.model.clone().unwrap_or_else(|| "small".to_string());
+    if request.model.is_some() {
+        let resolved = crate::llm_config::resolve_model_info(&selector);
+        let declared_route = RunReviewModelRoute {
+            selector: selector.clone(),
+            provider: resolved.provider,
+            model: resolved.id.clone(),
+            tier: resolved.tier,
+        };
+        validate_review_input_budget(estimated_input_tokens, &declared_route)
+            .map_err(|message| lifecycle.invalid(message))?;
     }
     let options = build_llm_options(request.model.as_deref());
     let options_dict = options
@@ -248,13 +254,14 @@ async fn review_run_report_with_clock(
         options.clone(),
     ])
     .map_err(|error| lifecycle.failed(vm_error_message(error)))?;
-    let selector = request.model.unwrap_or_else(|| "small".to_string());
     let route = RunReviewModelRoute {
         selector,
         provider: extracted.provider.clone(),
         model: extracted.model.clone(),
         tier: crate::llm_config::model_tier(&extracted.model),
     };
+    validate_review_input_budget(estimated_input_tokens, &route)
+        .map_err(|message| lifecycle.invalid(message))?;
     let idempotency_key = idempotency_key(&report_hash, &rubric_hash, &route);
 
     lifecycle.advance(RunReviewState::Reviewing);
@@ -304,7 +311,7 @@ fn build_llm_options(model: Option<&str>) -> VmValue {
     let mut options = serde_json::json!({
         "provider": "auto",
         "model_tier": "small",
-        "max_tokens": 2048,
+        "max_tokens": MAX_RUN_REVIEW_OUTPUT_TOKENS,
         "output": {"schema": model_review_schema(), "validation": "error"},
         "schema_retries": 0
     });
@@ -316,6 +323,48 @@ fn build_llm_options(model: Option<&str>) -> VmValue {
         options["model"] = Value::String(model.to_string());
     }
     crate::stdlib::json_to_vm_value(&options)
+}
+
+fn validate_review_input_budget(
+    estimated_input_tokens: i64,
+    route: &RunReviewModelRoute,
+) -> Result<(), String> {
+    let route_context = review_route_context_window(route);
+    let route_input_limit = route_context
+        .map(|window| window.saturating_sub(MAX_RUN_REVIEW_OUTPUT_TOKENS))
+        .unwrap_or(MAX_RUN_REVIEW_INPUT_TOKENS);
+    let input_limit = MAX_RUN_REVIEW_INPUT_TOKENS.min(route_input_limit);
+    if estimated_input_tokens <= input_limit {
+        return Ok(());
+    }
+
+    if let Some(context_window) = route_context.filter(|window| {
+        window.saturating_sub(MAX_RUN_REVIEW_OUTPUT_TOKENS) < MAX_RUN_REVIEW_INPUT_TOKENS
+    }) {
+        return Err(format!(
+            "the deterministic run review projection is estimated at {estimated_input_tokens} input tokens, but selected route {}/{} has an effective {context_window}-token context window and reserves up to {MAX_RUN_REVIEW_OUTPUT_TOKENS} tokens for the review; choose a larger-context model or reduce the report/rubric",
+            route.provider, route.model
+        ));
+    }
+    Err(format!(
+        "the deterministic run review projection is estimated at {estimated_input_tokens} tokens, above the {MAX_RUN_REVIEW_INPUT_TOKENS}-token limit; the report cannot be reviewed within the bounded one-call budget"
+    ))
+}
+
+fn review_route_context_window(route: &RunReviewModelRoute) -> Option<i64> {
+    if route.provider == "ollama" {
+        return i64::try_from(
+            crate::llm::OllamaRuntimeSettings::from_env_overrides_and_model(
+                None,
+                Some(&route.model),
+            )
+            .num_ctx,
+        )
+        .ok();
+    }
+    let catalog_id = crate::llm_config::model_catalog_id_for_route(&route.provider, &route.model)?;
+    let model = crate::llm_config::model_catalog_entry(&catalog_id)?;
+    i64::try_from(model.runtime_context_window.unwrap_or(model.context_window)).ok()
 }
 
 fn model_review_schema() -> Value {
@@ -1171,6 +1220,30 @@ mod tests {
             .receipts
             .iter()
             .any(|receipt| receipt.state == RunReviewState::Validated));
+        assert!(!error
+            .lifecycle
+            .receipts
+            .iter()
+            .any(|receipt| receipt.state == RunReviewState::Reviewing));
+    }
+
+    #[tokio::test]
+    async fn review_rejects_input_above_selected_ollama_runtime_context() {
+        let (_dir, path) = report_file(Vec::new());
+        let mut oversized = request(path);
+        oversized.model = Some("ollama/gemma4:26b".to_string());
+        // About 32K estimated input tokens: below the global 48K review cap,
+        // but above this route's 32,768-token runtime context after reserving
+        // the bounded 2,048-token response.
+        oversized.rubric = "x".repeat(128_000);
+
+        let error = review_run_report(oversized)
+            .await
+            .expect_err("route-specific over-context review must fail before inference");
+        assert_eq!(error.lifecycle.state, RunReviewState::Invalid);
+        assert!(error.message.contains("ollama/gemma4:26b"));
+        assert!(error.message.contains("32768-token context window"));
+        assert!(error.message.contains("reserves up to 2048 tokens"));
         assert!(!error
             .lifecycle
             .receipts
