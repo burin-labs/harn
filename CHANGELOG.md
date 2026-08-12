@@ -9,6 +9,19 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.84
+
+### Fixed
+
+- HarnDoc migration now escapes block-comment delimiters in copied prose, so a
+  multi-edit `harn fix --apply` candidate remains valid when a line comment
+  contains a route wildcard such as `/try/*`.
+- `harn runs review` now works with models that do not accept a temperature option.
+- Run reports and reviews now retain recorded tool calls and their redacted results.
+- Session-backed run records now preserve typed host and Harn build provenance.
+- Bounded Ubuntu package downloads so a stalled CI mirror can fail over instead
+  of blocking the shared build producer until its job times out.
+
 ## v0.10.83
 
 ### Fixed
