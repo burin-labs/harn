@@ -57,8 +57,8 @@ pipeline test_release_runner_policy_pins_every_mode(harness: Harness, task) {
   const standard = [
     "x86_64-apple-darwin=macos-15-intel",
     "aarch64-apple-darwin=macos-latest",
-    "x86_64-unknown-linux-gnu=ubuntu-latest",
-    "aarch64-unknown-linux-gnu=ubuntu-24.04-arm",
+    "x86_64-unknown-linux-gnu=ubuntu-22.04",
+    "aarch64-unknown-linux-gnu=ubuntu-22.04",
     "x86_64-pc-windows-msvc=windows-latest",
   ]
   assert_eq(runners(matrix(harness.fs, harness.process, "--mode warm")), standard)
@@ -95,8 +95,8 @@ pipeline test_release_runner_policy_pins_every_mode(harness: Harness, task) {
     [
       "x86_64-apple-darwin=v0-rust-release-x86_64-apple-darwin-Darwin-x64-",
       "aarch64-apple-darwin=v0-rust-release-aarch64-apple-darwin-Darwin-arm64-",
-      "x86_64-unknown-linux-gnu=v0-rust-release-x86_64-unknown-linux-gnu-Linux-x64-",
-      "aarch64-unknown-linux-gnu=v0-rust-release-aarch64-unknown-linux-gnu-Linux-arm64-",
+      "x86_64-unknown-linux-gnu=v1-rust-release-glibc235-x86_64-unknown-linux-gnu-Linux-x64-",
+      "aarch64-unknown-linux-gnu=v1-rust-release-glibc235-aarch64-unknown-linux-gnu-Linux-x64-",
       "x86_64-pc-windows-msvc=v0-rust-release-x86_64-pc-windows-msvc-Windows_NT-x64-",
     ],
   )
@@ -112,6 +112,7 @@ pipeline test_release_runner_policy_selects_targeted_fast_capacity(harness: Harn
     [
       {
         target: "x86_64-apple-darwin",
+        glibc_max: nil,
         runner: "blacksmith-12vcpu-macos-15",
         rust_cache_broad_restore_prefix: "v0-rust-release-x86_64-apple-darwin-Darwin-x64-",
         release_codegen_units: 16,
@@ -168,6 +169,7 @@ pipeline test_release_runner_policy_rejects_unsafe_requests(harness: Harness, ta
             schema_object(
               {
                 target: schema_field(schema_string()),
+                glibc_max: schema_field(schema_union([schema_string(), schema_literal(nil)])),
                 release_codegen_units: schema_field(schema_int()),
                 // Stringly-typed: scripts/release_runner_matrix.sh compares it as text,
                 // so "false" here is the string, not a boolean.
@@ -190,6 +192,26 @@ pipeline test_release_runner_policy_rejects_unsafe_requests(harness: Harness, ta
       harness.process,
       harness.random,
       {...policy, typo: true},
+      "--mode primary",
+    ).success,
+    false,
+  )
+  assert_eq(
+    run_matrix_with_policy(
+      harness.fs,
+      harness.process,
+      harness.random,
+      {
+        ...policy,
+        targets: policy.targets.map(
+          { target ->
+            if target.target == "x86_64-unknown-linux-gnu" {
+              return {...target, runners: {...target.runners, primary: "ubuntu-latest"}}
+            }
+            return target
+          },
+        ),
+      },
       "--mode primary",
     ).success,
     false,

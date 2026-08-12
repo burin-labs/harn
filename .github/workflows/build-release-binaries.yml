@@ -1159,12 +1159,9 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
-      # Cross gcc/linker is ONLY needed when building arm64 Linux on an x86
-      # host. The arm64 Linux leg now runs on a native arm64 runner, so this
-      # install + the CARGO_TARGET_*_LINKER env below are gated on runner.arch
-      # == X64 and stay dormant on the native path. Kept (rather than deleted)
-      # so the cross fallback still works if the arm runner pool is ever
-      # unavailable and the leg is pointed back at ubuntu-latest.
+      # Both GNU/Linux release legs intentionally build on the same pinned
+      # x86_64 Ubuntu baseline. ARM64 therefore uses the cross linker while
+      # the native ARM64 runner remains reserved for artifact smoke testing.
       - name: Install Linux ARM64 cross linker (x86 host only)
         if: matrix.target == 'aarch64-unknown-linux-gnu' && runner.arch == 'X64'
         uses: ./.github/actions/apt-install
@@ -1222,6 +1219,19 @@ jobs:
             echo "| Release LTO | ${CARGO_PROFILE_RELEASE_LTO:-<unset>} |"
             echo "| Release codegen units | ${CARGO_PROFILE_RELEASE_CODEGEN_UNITS:-<unset>} |"
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Enforce portable Linux glibc floor
+        if: matrix.glibc_max != null
+        shell: bash
+        env:
+          HARN_RELEASE_TARGET: ${{ matrix.target }}
+          HARN_RELEASE_GLIBC_MAX: ${{ matrix.glibc_max }}
+        run: |
+          for binary in harn harn-container-probe; do
+            scripts/check_linux_glibc_floor.sh \
+              "target/${HARN_RELEASE_TARGET}/release/${binary}" \
+              "$HARN_RELEASE_GLIBC_MAX"
+          done
 
       - name: Summarize sccache stats
         if: always()
