@@ -366,8 +366,8 @@ pub use stdlib::hitl::{
 /// Per-turn memo for turn-stable host reads. See [`stdlib::host::turn_cache`].
 pub use stdlib::host::turn_cache as host_turn_cache;
 pub use stdlib::host::{
-    clear_host_call_bridge, dispatch_host_operation, host_call_ready, set_host_call_bridge,
-    HostCallBridge, HostCallDispatchFuture,
+    clear_host_call_bridge, dispatch_host_operation, host_call_ready, install_host_call_bridge,
+    set_host_call_bridge, HostCallBridge, HostCallBridgeGuard, HostCallDispatchFuture,
 };
 pub use stdlib::http_response::{
     parse_envelope as parse_http_envelope, HttpEnvelope, HttpHeaderValue, WsUpgradeSpec,

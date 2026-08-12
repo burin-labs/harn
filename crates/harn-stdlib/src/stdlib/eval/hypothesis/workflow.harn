@@ -33,6 +33,7 @@ import { hypothesis_report } from "std/eval/hypothesis/report"
 import {
   HypothesisNativeArmObservation,
   HypothesisNativeOperationAccepted,
+  HypothesisNativeOperationExhausted,
   HypothesisNativeOperationRequest,
   HypothesisNativeOperationResult,
   HypothesisWorkflowNotActionableReason,
@@ -377,6 +378,19 @@ fn __native_operation(
   __non_empty(native.occurred_at, "occurred_at")
   __non_empty(native.actor, "actor")
   __non_empty(native.source, "source")
+  if native.kind == "exhausted" && native.elapsed_ms < 0 {
+    throw "hypothesis workflow: native exhaustion elapsed_ms must be non-negative"
+  }
+  return native
+}
+
+fn __accepted_native_result(
+  native: HypothesisNativeOperationResult,
+  action: string,
+) -> HypothesisNativeOperationAccepted {
+  if native.kind != "accepted" {
+    throw "hypothesis workflow: native " + action + " returned an advance-only terminal result"
+  }
   return native
 }
 
@@ -386,7 +400,7 @@ fn __event(
   predecessor_fingerprint: string?,
   operation_receipt_id: string,
   event_key: string,
-  native: HypothesisNativeOperationAccepted,
+  native: HypothesisNativeOperationAccepted | HypothesisNativeOperationExhausted,
   payload: unknown,
 ) -> HypothesisLedgerEvent {
   return hypothesis_event(
@@ -479,7 +493,7 @@ fn __start(
   if native_result.kind == "denied" {
     return __denied("start", plan.hypothesis_id, native_result, read)
   }
-  const native: HypothesisNativeOperationAccepted = native_result
+  const native = __accepted_native_result(native_result, "start")
   if plan.design.approval_required
     && read.snapshot.approval_status
     == nil
@@ -626,6 +640,60 @@ fn __advance(
   if native_result.kind == "denied" {
     return __denied("advance", hypothesis_id, native_result, read)
   }
+  if native_result.kind == "exhausted" {
+    const exhausted: HypothesisNativeOperationExhausted = native_result
+    if exhausted.resource == "wall_clock" {
+      if exhausted.elapsed_ms < plan.design.budget.max_wall_clock_ms {
+        throw "hypothesis workflow: native wall-clock exhaustion precedes the registered ceiling"
+      }
+    } else if exhausted.elapsed_ms > plan.design.budget.max_wall_clock_ms {
+      throw "hypothesis workflow: native budget exhaustion exceeds the registered wall-clock ceiling"
+    }
+    const completion: HypothesisRunCompletion = if exhausted.resource == "wall_clock" {
+      {kind: "wall_clock", elapsed_ms: exhausted.elapsed_ms, receipt_id: operation_receipt_id}
+    } else {
+      {kind: "native_budget", resource: exhausted.resource, receipt_id: operation_receipt_id}
+    }
+    const completed = __event(
+      plan,
+      run_id,
+      read.snapshot.latest_event_fingerprint,
+      operation_receipt_id,
+      "completed",
+      exhausted,
+      {
+        kind: "run_transition",
+        state: "completed",
+        reason: "registered " + exhausted.resource + " ceiling reached",
+        receipt_ids: [operation_receipt_id],
+        completion: completion,
+      },
+    )
+    let appends: list<HypothesisLedgerAppendReceipt> = [
+      __append(obs, plan, completed, operation_receipt_id),
+    ]
+    const after_completion = hypothesis_ledger_snapshot(obs, hypothesis_id)
+    const decision = decide_experiment(
+      plan.registration,
+      {
+        observations: after_completion.observations ?? [],
+        phase_spend_usd: after_completion.snapshot.total_spend_usd,
+        budget_spent: true,
+      },
+    )
+    const decided = __event(
+      plan,
+      run_id,
+      after_completion.snapshot.latest_event_fingerprint,
+      operation_receipt_id,
+      "decision",
+      exhausted,
+      __decision_payload(decision, exhausted.elapsed_ms),
+    )
+    appends = appends + [__append(obs, plan, decided, operation_receipt_id)]
+    const after = hypothesis_ledger_snapshot(obs, hypothesis_id)
+    return __applied("advance", hypothesis_id, operation_receipt_id, appends, after)
+  }
   if native_result.action != "advance" {
     throw "hypothesis workflow: native advance returned a control result"
   }
@@ -668,6 +736,56 @@ fn __advance(
       + {
       [result.arm_id]: realize_assignment(next.plan, result.arm_id, observed_blocking_values),
     }
+  }
+  let telemetry_degradations: list<string> = []
+  for result in arm_observations {
+    if result.telemetry_status != "observed" {
+      telemetry_degradations = telemetry_degradations
+        + [
+        "native adapter returned " + result.telemetry_status + " telemetry",
+      ]
+    }
+    telemetry_degradations = telemetry_degradations + result.capability_degradations
+  }
+  telemetry_degradations = unique(telemetry_degradations)
+  if len(telemetry_degradations) > 0 {
+    const reason = join(telemetry_degradations, "; ")
+    const drift = __event(
+      plan,
+      run_id,
+      read.snapshot.latest_event_fingerprint,
+      operation_receipt_id,
+      "telemetry-drift",
+      native,
+      {
+        kind: "execution_drift",
+        path: "telemetry",
+        planned: "observed telemetry without capability degradation",
+        actual: reason,
+        severity: "invalidating",
+        reason: reason,
+      },
+    )
+    let appends: list<HypothesisLedgerAppendReceipt> = [
+      __append(obs, plan, drift, operation_receipt_id),
+    ]
+    const invalid = __event(
+      plan,
+      run_id,
+      drift.fingerprint,
+      operation_receipt_id,
+      "invalid",
+      native,
+      {
+        kind: "run_transition",
+        state: "invalid",
+        reason: reason,
+        receipt_ids: [operation_receipt_id],
+      },
+    )
+    appends = appends + [__append(obs, plan, invalid, operation_receipt_id)]
+    const after = hypothesis_ledger_snapshot(obs, hypothesis_id)
+    return __applied("advance", hypothesis_id, operation_receipt_id, appends, after)
   }
   const baseline = arm_results[plan.registration.baseline.id]
   const baseline_assignment = realized[plan.registration.baseline.id]
@@ -924,7 +1042,7 @@ fn __control(
   if native_result.kind == "denied" {
     return __denied(action, hypothesis_id, native_result, read)
   }
-  const native: HypothesisNativeOperationAccepted = native_result
+  const native = __accepted_native_result(native_result, "control")
   if native.approval != nil {
     throw "hypothesis workflow: a control operation returned an approval result"
   }

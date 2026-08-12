@@ -199,6 +199,89 @@ mod tests {
         operation_calls: AtomicUsize,
         attestation_calls: AtomicUsize,
         fail_decision_attestation_once: std::sync::atomic::AtomicBool,
+        advance_mode: AdvanceMode,
+    }
+
+    #[derive(Clone, Copy)]
+    enum AdvanceMode {
+        Observed,
+        BudgetExhausted,
+        MissingTelemetry,
+    }
+
+    const SINGLE_ADVANCE_WORKFLOW: &str = r#"
+import { compile_experiment_intent, hypothesis_workflow } from "std/eval/hypothesis"
+import { hypothesis_fixture_context, hypothesis_fixture_intent } from "./hypothesis_fixture_lib.harn"
+
+pub fn run(harness: Harness) {
+  const compiled = compile_experiment_intent(hypothesis_fixture_intent(), hypothesis_fixture_context())
+  if compiled.plan == nil || compiled.plan.kind != "registered_experiment" {
+    throw "native workflow fixture did not compile"
+  }
+  const started = hypothesis_workflow(
+    harness.obs,
+    {kind: "start", plan: compiled.plan, run_id: "native-workflow-run"},
+  )
+  require started.state == "running", "native workflow fixture starts"
+  return hypothesis_workflow(
+    harness.obs,
+    {
+      kind: "advance",
+      hypothesis_id: compiled.plan.hypothesis_id,
+      blocking_values: {host: "native-test-host", time_slot: "frozen-slot"},
+    },
+  )
+}
+"#;
+
+    const START_WORKFLOW: &str = r#"
+import { compile_experiment_intent, hypothesis_workflow } from "std/eval/hypothesis"
+import { hypothesis_fixture_context, hypothesis_fixture_intent } from "./hypothesis_fixture_lib.harn"
+
+pub fn run(harness: Harness) {
+  const compiled = compile_experiment_intent(hypothesis_fixture_intent(), hypothesis_fixture_context())
+  if compiled.plan == nil || compiled.plan.kind != "registered_experiment" {
+    throw "native workflow fixture did not compile"
+  }
+  return hypothesis_workflow(
+    harness.obs,
+    {kind: "start", plan: compiled.plan, run_id: "native-workflow-run"},
+  )
+}
+"#;
+
+    async fn run_workflow(source: &str) -> serde_json::Value {
+        let temp = tempfile::tempdir().expect("temporary native workflow directory");
+        std::fs::copy(
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../conformance/tests/stdlib/hypothesis_fixture_lib.harn"
+            ),
+            temp.path().join("hypothesis_fixture_lib.harn"),
+        )
+        .expect("copy canonical hypothesis fixture helpers");
+        let entry = temp.path().join("workflow_native_sad_path.harn");
+        std::fs::write(&entry, source).expect("write native workflow fixture");
+
+        let mut vm = Vm::new();
+        crate::register_vm_stdlib(&mut vm);
+        let (harness, _clock) = crate::Harness::test();
+        vm.set_harness(harness.clone());
+        let exports = vm
+            .load_module_exports(&entry)
+            .await
+            .expect("native workflow module loads");
+        let run = exports.get("run").expect("native workflow exports run");
+        let result = vm
+            .call_closure_pub(run, &[harness.into_vm_value()])
+            .await
+            .expect("native workflow returns a typed result");
+        serde_json::from_str(&crate::stdlib::json::vm_value_to_json(&result))
+            .expect("native workflow result is JSON-shaped")
+    }
+
+    async fn run_single_advance_workflow() -> serde_json::Value {
+        run_workflow(SINGLE_ADVANCE_WORKFLOW).await
     }
 
     impl RecordingBridge {
@@ -263,6 +346,7 @@ mod tests {
                 operation_calls: AtomicUsize::new(0),
                 attestation_calls: AtomicUsize::new(0),
                 fail_decision_attestation_once: std::sync::atomic::AtomicBool::new(false),
+                advance_mode: AdvanceMode::Observed,
             })
         }
 
@@ -271,6 +355,25 @@ mod tests {
                 operation_calls: AtomicUsize::new(0),
                 attestation_calls: AtomicUsize::new(0),
                 fail_decision_attestation_once: std::sync::atomic::AtomicBool::new(true),
+                advance_mode: AdvanceMode::Observed,
+            })
+        }
+
+        fn with_budget_exhaustion() -> Arc<Self> {
+            Arc::new(Self {
+                operation_calls: AtomicUsize::new(0),
+                attestation_calls: AtomicUsize::new(0),
+                fail_decision_attestation_once: std::sync::atomic::AtomicBool::new(false),
+                advance_mode: AdvanceMode::BudgetExhausted,
+            })
+        }
+
+        fn with_missing_telemetry() -> Arc<Self> {
+            Arc::new(Self {
+                operation_calls: AtomicUsize::new(0),
+                attestation_calls: AtomicUsize::new(0),
+                fail_decision_attestation_once: std::sync::atomic::AtomicBool::new(false),
+                advance_mode: AdvanceMode::MissingTelemetry,
             })
         }
     }
@@ -307,6 +410,14 @@ mod tests {
                         ("source", string_value("harn-vm-test")),
                     ];
                     if matches!(&action, VmValue::String(value) if value.as_str() == "advance") {
+                        if matches!(self.advance_mode, AdvanceMode::BudgetExhausted) {
+                            entries[1] = ("kind", string_value("exhausted"));
+                            entries.extend([
+                                ("resource", string_value("api_calls")),
+                                ("elapsed_ms", VmValue::Int(500)),
+                            ]);
+                            return Box::pin(async move { Ok(Some(dict(entries))) });
+                        }
                         let assignment_plan = params
                             .get("assignment_plan")
                             .and_then(VmValue::as_dict)
@@ -367,7 +478,19 @@ mod tests {
                                     ("compute_delta_ms", VmValue::Int(1)),
                                     ("token_delta", VmValue::Int(0)),
                                     ("api_call_delta", VmValue::Int(0)),
-                                    ("telemetry_status", string_value("observed")),
+                                    (
+                                        "telemetry_status",
+                                        string_value(
+                                            if matches!(
+                                                self.advance_mode,
+                                                AdvanceMode::MissingTelemetry
+                                            ) {
+                                                "unavailable"
+                                            } else {
+                                                "observed"
+                                            },
+                                        ),
+                                    ),
                                     (
                                         "capability_degradations",
                                         VmValue::List(Arc::new(vec![])),
@@ -787,6 +910,75 @@ pub fn recover(harness: Harness) {
             bridge.attestation_calls.load(Ordering::SeqCst)
                 > bridge.operation_calls.load(Ordering::SeqCst),
             "registration, lifecycle, observations, completion, and decision are all attested"
+        );
+
+        clear_host_call_bridge();
+        crate::event_log::reset_active_event_log();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn native_budget_exhaustion_is_a_typed_terminal_workflow_result() {
+        crate::event_log::reset_active_event_log();
+        install_memory_for_current_thread(EVENT_LOG_QUEUE_DEPTH);
+        clear_host_call_bridge();
+        let bridge = LifecycleBridge::with_budget_exhaustion();
+        set_host_call_bridge(bridge);
+        let _scope = enter_execution_scope(mint_execution_scope());
+        let result = run_single_advance_workflow().await;
+        assert_eq!(result["kind"], "applied");
+        assert_eq!(result["state"], "completed");
+        assert_eq!(
+            result["ledger"]["snapshot"]["completion"]["kind"],
+            "native_budget"
+        );
+        assert_ne!(
+            result["ledger"]["snapshot"]["decision"]["decision"]["verdict"],
+            "RUNNING"
+        );
+
+        clear_host_call_bridge();
+        crate::event_log::reset_active_event_log();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn native_denial_returns_before_any_ledger_event() {
+        crate::event_log::reset_active_event_log();
+        install_memory_for_current_thread(EVENT_LOG_QUEUE_DEPTH);
+        clear_host_call_bridge();
+        set_host_call_bridge(crate::testbench::hypothesis::bridge(
+            crate::testbench::hypothesis::HypothesisScenario::Denied,
+        ));
+        let _scope = enter_execution_scope(mint_execution_scope());
+
+        let result = run_workflow(START_WORKFLOW).await;
+        assert_eq!(result["kind"], "denied");
+        assert_eq!(result["state"], "unregistered");
+        assert_eq!(result["code"], "scenario.capability_denied");
+        assert_eq!(result["ledger"]["snapshot"]["event_count"], 0);
+
+        clear_host_call_bridge();
+        crate::event_log::reset_active_event_log();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn missing_telemetry_invalidates_without_admitting_canonical_evidence() {
+        crate::event_log::reset_active_event_log();
+        install_memory_for_current_thread(EVENT_LOG_QUEUE_DEPTH);
+        clear_host_call_bridge();
+        let bridge = LifecycleBridge::with_missing_telemetry();
+        set_host_call_bridge(bridge);
+        let _scope = enter_execution_scope(mint_execution_scope());
+        let result = run_single_advance_workflow().await;
+        assert_eq!(result["kind"], "applied");
+        assert_eq!(result["state"], "invalid");
+        assert_eq!(result["ledger"]["snapshot"]["observation_count"], 0);
+        assert_eq!(
+            result["ledger"]["snapshot"]["drift"][0]["path"],
+            "telemetry"
+        );
+        assert_eq!(
+            result["ledger"]["snapshot"]["telemetry_degradations"][0],
+            "native adapter returned unavailable telemetry"
         );
 
         clear_host_call_bridge();

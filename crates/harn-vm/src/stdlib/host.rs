@@ -20,8 +20,8 @@ pub mod turn_cache;
 
 use bridge::HOST_CALL_BRIDGE;
 pub use bridge::{
-    clear_host_call_bridge, dispatch_host_call_bridge, host_call_ready, set_host_call_bridge,
-    HostCallBridge, HostCallDispatchFuture,
+    clear_host_call_bridge, dispatch_host_call_bridge, host_call_ready, install_host_call_bridge,
+    set_host_call_bridge, HostCallBridge, HostCallBridgeGuard, HostCallDispatchFuture,
 };
 
 use process_dispatch::dispatch_process_exec_with_policy;

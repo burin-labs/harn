@@ -1,0 +1,113 @@
+/** Small registered catalog for the deterministic hypothesis liveness scenarios. */
+import {
+  ExperimentCompileContext,
+  ExperimentResourceBudget,
+  InterventionAdapter,
+} from "std/eval/hypothesis"
+
+fn capabilities() {
+  return {
+    tools: [],
+    capabilities: {},
+    workspace_roots: [],
+    read_only_roots: [],
+    side_effect_level: "none",
+    sandbox_profile: "worktree",
+    process: {commands: [], read_roots: [], write_roots: []},
+    network: {domains: [], allow_private: false},
+    connectors: [],
+    database_scopes: [],
+    provider_ids: [],
+    secret_refs: [],
+    placement: nil,
+    mutation: {reversible: true, rollback_adapter_id: nil, requires_approval: false},
+  }
+}
+
+fn intervention(variant: string, complexity: int) -> InterventionAdapter {
+  return {
+    id: "prompt",
+    variant_id: variant,
+    domain: "agent",
+    description: "A deterministic registered prompt variant.",
+    supported_lanes: ["randomized_offline", "replay_simulation"],
+    config: {prompt: variant},
+    complexity: complexity,
+    executable: true,
+    randomizable: true,
+    reversible: true,
+    contamination_risk: "none",
+    carryover_risk: "none",
+    interference_risk: "none",
+    capabilities: capabilities(),
+  }
+}
+
+fn budget() -> ExperimentResourceBudget {
+  return {
+    min_trials_per_case: 4,
+    max_trials_per_case: 32,
+    max_wall_clock_ms: 60000,
+    max_compute_ms: 1000,
+    max_tokens: 100,
+    max_api_calls: 64,
+    max_spend_usd: 0.01,
+    max_concurrency: 1,
+  }
+}
+
+pub fn hypothesis_fixture_context(scenario: string) -> ExperimentCompileContext {
+  const registered_budget = budget()
+  return {
+    owner: "hypothesis-scenario",
+    seed: "scenario-" + scenario,
+    catalog: {
+      schema: "harn.experiment.adapter_catalog.v1",
+      interventions: [intervention("baseline", 0), intervention("candidate", 1)],
+      outcomes: [
+        {
+          id: "success",
+          domain: "agent",
+          description: "Frozen-fixture task success.",
+          direction: "up",
+          bounds: {lo: 0.0, hi: 1.0},
+          observation_delay_ms: 0,
+          observable: true,
+          grader_id: "deterministic-scenario",
+          guardrail: false,
+          alarm: nil,
+        },
+      ],
+      populations: [
+        {
+          id: "scenario-fixtures",
+          domain: "agent",
+          assignment_unit: "case-trial",
+          iterate: {id: "scenario", digest: "sha256:scenario", cases: ["case-a"]},
+          gate: {id: "scenario-gate", digest: "sha256:scenario-gate", cases: ["case-z"]},
+          blocking_factors: ["host", "time_slot"],
+          independent_enough: true,
+        },
+      ],
+    },
+    trusted_citations: [],
+    risk_floor: {
+      touches_people: false,
+      touches_customer_data: false,
+      touches_money: false,
+      touches_production: false,
+      irreversible: false,
+    },
+    capability_ceiling: capabilities(),
+    supported_blocking_factors: ["host", "time_slot"],
+    host_identity_available: true,
+    budget_request: registered_budget,
+    budget_ceiling: registered_budget,
+    approval_id: nil,
+    provenance: {
+      source: "harn-testbench",
+      actor: "hypothesis-scenario",
+      created_at: "2026-01-01T00:00:00Z",
+    },
+  }
+}

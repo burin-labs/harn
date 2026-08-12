@@ -1,0 +1,115 @@
+/** Deterministic native-adapter liveness driver for the hypothesis control plane. */
+import {
+  ExperimentCompileContext,
+  HypothesisPlannerOptions,
+  HypothesisWorkflowResult,
+  design_hypothesis,
+  hypothesis_workflow,
+} from "std/eval/hypothesis"
+import { hypothesis_fixture_context } from "./scenario_fixture"
+
+fn arg_value(args: list<string>, prefix: string) -> string? {
+  for arg in args {
+    if starts_with(arg, prefix) {
+      return substring(arg, len(prefix), len(arg))
+    }
+  }
+  return nil
+}
+
+fn require_plan(receipt) {
+  if !receipt.ok || receipt.compilation?.plan == nil {
+    throw "hypothesis scenario: natural-language design did not compile"
+  }
+  return receipt.compilation.plan
+}
+
+fn needs_advance(result: HypothesisWorkflowResult) -> bool {
+  return result.state == "running"
+    || (result.state == "completed"
+    && result.ledger.snapshot.decision == nil)
+}
+
+fn advance_to_terminal(
+  obs: HarnessObs,
+  started: HypothesisWorkflowResult,
+) -> HypothesisWorkflowResult {
+  let result = started
+  let advances = 0
+  while needs_advance(result) && advances < 128 {
+    result = hypothesis_workflow(
+      obs,
+      {
+        kind: "advance",
+        hypothesis_id: result.hypothesis_id,
+        blocking_values: {host: "testbench-host", time_slot: "frozen-slot"},
+      },
+    )
+    advances = advances + 1
+  }
+  if needs_advance(result) {
+    throw "hypothesis scenario: workflow exceeded its bounded advance count"
+  }
+  return result
+}
+
+fn execute(
+  harness: Harness,
+  scenario: string,
+  request: string,
+  provider: string,
+  model: string?,
+  design_only: bool,
+) {
+  const context: ExperimentCompileContext = hypothesis_fixture_context(scenario)
+  let planner_options: HypothesisPlannerOptions = {
+    provider: provider,
+    max_tokens: 1200,
+    validator_retries: 1,
+  }
+  if model != nil {
+    planner_options = planner_options + {model: model}
+  }
+  const planned = design_hypothesis(harness, request, context, planner_options)
+  if design_only {
+    return {scenario: scenario, planner: planned}
+  }
+  const plan = require_plan(planned)
+  const run_id = "scenario-" + scenario
+  const inspected = hypothesis_workflow(
+    harness.obs,
+    {kind: "inspect", hypothesis_id: plan.hypothesis_id},
+  )
+  if inspected.state == "running"
+    || (inspected.state == "completed"
+    && inspected.ledger.snapshot.decision
+    == nil) {
+    const recovered = advance_to_terminal(harness.obs, inspected)
+    return {scenario: scenario, planner: planned, result: recovered}
+  }
+  if contains(["completed", "cancelled", "failed", "invalid"], inspected.state) {
+    return {scenario: scenario, planner: planned, result: inspected}
+  }
+  const started = hypothesis_workflow(harness.obs, {kind: "start", plan: plan, run_id: run_id})
+  if started.kind == "denied" || started.kind == "adapter_unavailable" {
+    return {scenario: scenario, planner: planned, result: started}
+  }
+  if started.kind != "applied" || started.state != "running" {
+    return {scenario: scenario, planner: planned, result: started}
+  }
+  const result = advance_to_terminal(harness.obs, started)
+  return {scenario: scenario, planner: planned, result: result}
+}
+
+pipeline default(harness: Harness) {
+  const scenario = arg_value(argv, "--scenario=") ?? "aa"
+  const request = arg_value(argv, "--request=")
+    ?? "Does the registered candidate prompt improve frozen-fixture task success?"
+  const provider = arg_value(argv, "--provider=") ?? "mock"
+  const model = arg_value(argv, "--model=")
+  const design_only = arg_value(argv, "--design-only=") == "true"
+  harness.stdio.println(
+    json_stringify_pretty(execute(harness, scenario, request, provider, model, design_only)),
+  )
+  return 0
+}

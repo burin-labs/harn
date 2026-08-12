@@ -13,9 +13,9 @@ trail of everything that crossed the host boundary.
 
 ## Host capabilities
 
-A Harn pipeline reaches the outside world through five host
-capabilities. Testbench mode lets the operator override every one of
-them, leaving production behavior untouched.
+A Harn pipeline reaches the outside world through host capabilities.
+Testbench mode lets the operator override them, leaving production behavior
+untouched.
 
 | Capability | Default | Testbench override |
 |---|---|---|
@@ -24,6 +24,7 @@ them, leaving production behavior untouched.
 | Filesystem (read/write/append/delete) | Real disk | Read-through, copy-on-write `OverlayFs` with diff emission |
 | Subprocess invocations | Real `std::process::Command` | `ProcessTape` records `(program, args, cwd) → (stdout, stderr, exit, virtual Δt)` for replay; `WasiToolchain` runs WASM modules under wasmtime with `clock_time_get` and `poll_oneoff` virtualized into the mock clock |
 | Network egress | Configured `HARN_EGRESS_*` policy | Deny-by-default; `--allow-host` opens specific destinations |
+| Hypothesis native operations | Product-registered adapter | An explicit deterministic scenario adapter for control-plane tests |
 
 Every override is opt-in. Activating one axis does not change the
 others.
@@ -50,6 +51,7 @@ Flag reference:
 | `--start-at <unix_ms>` | Initial wall-clock time. Defaults to `2026-01-01T00:00:00Z` |
 | `--llm-fixture <path>` | Replay scripted LLM responses (same JSONL format as `harn run --llm-mock`) |
 | `--llm-record <path>` | Capture executed responses for a future replay |
+| `--hypothesis-scenario <name>` | Install the trusted deterministic hypothesis adapter described below |
 | `--fs-overlay <dir>` | Mount the COW overlay rooted at `dir` |
 | `--process-record <path>` / `--process-replay <path>` | Record or replay subprocess invocations |
 | `--process-wasi <dir>` | Resolve subprocesses against a directory of WASI (`wasm32-wasi`) modules — see [WASI subprocess sandbox](#wasi-subprocess-sandbox) |
@@ -68,6 +70,24 @@ harn test-bench run script.harn
 
 is equivalent to `--clock paused --network deny`, with no LLM/FS/process
 overrides.
+
+### Hypothesis workflow scenarios
+
+`--hypothesis-scenario` exercises the public `hypothesis.operation` and
+`hypothesis.attest_event` boundary without provider calls or product authority.
+It is a test adapter, not a scheduler or production execution backend.
+
+| Scenario | Native behavior |
+|---|---|
+| `aa` | Equal baseline and candidate observations |
+| `known-bad` | Candidate observations are worse than baseline |
+| `denied` | Deny before the ledger accepts an event |
+| `budget-exhausted` | Return typed native budget exhaustion |
+| `missing-telemetry` | Invalidate the run without admitting an observation |
+| `fail-decision-attestation` | Fail when the terminal decision crosses the host attestation boundary |
+
+The runnable natural-language example and cross-process recovery commands are
+in [`examples/hypothesis-control-plane`](../../../examples/hypothesis-control-plane/README.md).
 
 ### `harn test-bench replay`
 

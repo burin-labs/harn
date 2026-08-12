@@ -1,5 +1,5 @@
 use super::*;
-use crate::cli::TimeCommand;
+use crate::cli::{TestBenchCommand, TimeCommand};
 
 #[test]
 fn test_parses_app_run() {
@@ -420,6 +420,28 @@ fn test_test_bench_run_help_discloses_wasi_feature_gate() {
             "expected `{token}` in `harn test-bench run --help`, got:\n{help}"
         );
     }
+}
+
+#[test]
+fn test_parses_test_bench_hypothesis_scenario() {
+    let cli = Cli::parse_from([
+        "harn",
+        "test-bench",
+        "run",
+        "scenario.harn",
+        "--hypothesis-scenario",
+        "missing-telemetry",
+    ]);
+    let Command::TestBench(args) = cli.command.unwrap() else {
+        panic!("expected test-bench command");
+    };
+    let TestBenchCommand::Run(args) = args.command else {
+        panic!("expected test-bench run command");
+    };
+    assert_eq!(
+        args.hypothesis_scenario.as_deref(),
+        Some("missing-telemetry")
+    );
 }
 
 #[test]

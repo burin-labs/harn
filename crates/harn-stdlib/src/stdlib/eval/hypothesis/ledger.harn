@@ -637,7 +637,15 @@ fn __apply_record(
   }
   if payload.kind == "execution_drift" {
     const drift: HypothesisExecutionDrift = payload
-    return updated + {drift: snapshot.drift + [drift]}
+    return updated
+      + {
+      drift: snapshot.drift + [drift],
+      telemetry_degradations: if drift.path == "telemetry" {
+        unique(snapshot.telemetry_degradations + [drift.reason])
+      } else {
+        snapshot.telemetry_degradations
+      },
+    }
   }
   if payload.kind == "invalidated" {
     const invalidated: HypothesisInvalidated = payload

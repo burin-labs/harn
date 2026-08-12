@@ -59,6 +59,9 @@ pub(crate) struct TestBenchRunArgs {
         conflicts_with = "llm_fixture"
     )]
     pub llm_record: Option<String>,
+    /// Install a trusted deterministic native hypothesis adapter scenario.
+    #[arg(long = "hypothesis-scenario", value_name = "SCENARIO")]
+    pub hypothesis_scenario: Option<String>,
     /// Mount a copy-on-write filesystem overlay rooted at the given
     /// worktree path. Reads pass through; writes stay in memory until
     /// the run ends.
