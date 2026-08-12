@@ -1,4 +1,5 @@
 /** Domain-neutral human-readable projection of the typed plan and ledger. */
+import { ExperimentIntentInput } from "std/eval/hypothesis/contracts"
 import { HypothesisLedgerSnapshot } from "std/eval/hypothesis/ledger_contracts"
 
 pub type HypothesisReport = {
@@ -67,6 +68,24 @@ fn __outcome(value) -> string {
     + ")"
 }
 
+fn __decision_target(intent: ExperimentIntentInput) -> string {
+  return if intent.schema_version == 1 {
+    intent.decision
+  } else {
+    intent.decision_scope.target
+  }
+}
+
+fn __alternatives(intent: ExperimentIntentInput) -> list<string> {
+  if intent.schema_version == 1 {
+    return []
+  }
+  return intent.alternative_hypotheses.map(
+    { alternative -> alternative.id + ": " + alternative.statement },
+  )
+    .to_list()
+}
+
 /**
  * Render a report from the canonical read model; the Markdown is never a source of truth.
  *
@@ -107,7 +126,7 @@ pub fn hypothesis_report(snapshot: HypothesisLedgerSnapshot) -> HypothesisReport
       "",
       __markdown_text(intent.question),
       "",
-      "Decision informed: " + __markdown_text(intent.decision),
+      "Decision informed: " + __markdown_text(__decision_target(intent)),
       "",
       "## Prior evidence and rationale",
       "",
@@ -145,6 +164,12 @@ pub fn hypothesis_report(snapshot: HypothesisLedgerSnapshot) -> HypothesisReport
       "Hypothesis: " + __markdown_text(intent.hypothesis),
       "",
       "Null: " + __markdown_text(intent.null_hypothesis),
+      "",
+      "Alternatives:",
+      "",
+    ]
+      + __items(__alternatives(intent), "No alternative hypotheses were recorded.")
+      + [
       "",
       "Claim ceiling: " + __markdown_text(design.claim_strength),
       "",

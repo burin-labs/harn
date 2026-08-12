@@ -1,0 +1,457 @@
+/** Canonical normalization, composition, and ceiling checks for experiment authority. */
+import {
+  CustomerStateCapability,
+  ExperimentCapabilityManifest,
+  ExperimentCompileDiagnostic,
+  ExperimentCompileRepair,
+  ExperimentPlacementCapability,
+  ModelCapabilityPolicy,
+  PrivacyCapabilityPolicy,
+} from "std/eval/hypothesis/contracts"
+
+fn __diagnostic(
+  code: string,
+  path: string,
+  message: string,
+  repair: ExperimentCompileRepair,
+) -> ExperimentCompileDiagnostic {
+  let diagnostic: ExperimentCompileDiagnostic = {
+    code: code,
+    path: path,
+    message: message,
+    severity: "error",
+  }
+  diagnostic.repair = repair
+  return diagnostic
+}
+
+fn __policy_repair(path: string, expected: string) -> ExperimentCompileRepair {
+  const host_owned = path.starts_with("capability_ceiling")
+  return {
+    owner: if host_owned {
+      "host_context"
+    } else {
+      "catalog"
+    },
+    operation: "set",
+    path: path,
+    expected: expected,
+  }
+}
+
+fn __sorted_union(left: list<string>, right: list<string>) -> list<string> {
+  let seen: dict<string, bool> = {}
+  let values: list<string> = []
+  for value in (left ?? []) + (right ?? []) {
+    if !(seen[value] ?? false) {
+      seen = seen + {[value]: true}
+      values = values + [value]
+    }
+  }
+  return values.sorted_by({ value -> value })
+}
+
+fn __merge_named(
+  left: dict<string, list<string>>,
+  right: dict<string, list<string>>,
+) -> dict<string, list<string>> {
+  let merged: dict<string, list<string>> = {}
+  for entry in left {
+    merged = merged + {[entry.key]: __sorted_union(entry.value, right[entry.key] ?? [])}
+  }
+  for entry in right {
+    if merged[entry.key] == nil {
+      merged = merged + {[entry.key]: __sorted_union([], entry.value)}
+    }
+  }
+  return merged
+}
+
+fn __side_effect_rank(value: string) -> int {
+  if value == "read_only" {
+    return 1
+  }
+  if value == "workspace_write" {
+    return 2
+  }
+  if value == "process_exec" {
+    return 3
+  }
+  if value == "network" {
+    return 4
+  }
+  if value == "desktop_control" {
+    return 5
+  }
+  return 0
+}
+
+fn __sandbox_rank(value: string) -> int {
+  if value == "os_hardened" {
+    return 2
+  }
+  if value == "worktree" {
+    return 1
+  }
+  return 0
+}
+
+fn __customer_state_rank(value: string) -> int {
+  if value == "read_only" {
+    return 1
+  }
+  if value == "reversible_write" {
+    return 2
+  }
+  if value == "irreversible_write" {
+    return 3
+  }
+  return 0
+}
+
+fn __retention_rank(value: string) -> int {
+  if value == "ephemeral" {
+    return 1
+  }
+  if value == "durable" {
+    return 2
+  }
+  return 0
+}
+
+fn __max_ranked(left: string, right: string, rank) -> string {
+  return if rank(left) >= rank(right) {
+    left
+  } else {
+    right
+  }
+}
+
+/**
+ * Normalize legacy omission to no customer-state authority.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ */
+pub fn experiment_customer_state(
+  manifest: ExperimentCapabilityManifest,
+) -> CustomerStateCapability {
+  return manifest.customer_state ?? {access: "none", scopes: []}
+}
+
+/**
+ * Normalize legacy omission to a fixed empty model allowlist.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ */
+pub fn experiment_model_policy(manifest: ExperimentCapabilityManifest) -> ModelCapabilityPolicy {
+  return manifest.models ?? {model_ids: [], dynamic_routing: false}
+}
+
+/**
+ * Normalize legacy omission to no classified data and no retention.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ */
+pub fn experiment_privacy_policy(
+  manifest: ExperimentCapabilityManifest,
+) -> PrivacyCapabilityPolicy {
+  return manifest.privacy ?? {data_classes: [], retention: "none", cross_tenant: false}
+}
+
+/**
+ * Merge two arm manifests into the least authority that can execute either arm.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ */
+pub fn merge_experiment_capabilities(
+  baseline: ExperimentCapabilityManifest,
+  candidate: ExperimentCapabilityManifest,
+) -> ExperimentCapabilityManifest {
+  const baseline_customer = experiment_customer_state(baseline)
+  const candidate_customer = experiment_customer_state(candidate)
+  const baseline_models = experiment_model_policy(baseline)
+  const candidate_models = experiment_model_policy(candidate)
+  const baseline_privacy = experiment_privacy_policy(baseline)
+  const candidate_privacy = experiment_privacy_policy(candidate)
+  const rollback = if baseline.mutation.rollback_adapter_id
+    == candidate.mutation.rollback_adapter_id {
+    baseline.mutation.rollback_adapter_id
+  } else {
+    nil
+  }
+  let merged: ExperimentCapabilityManifest = {
+    tools: __sorted_union(baseline.tools, candidate.tools),
+    capabilities: __merge_named(baseline.capabilities, candidate.capabilities),
+    workspace_roots: __sorted_union(baseline.workspace_roots, candidate.workspace_roots),
+    read_only_roots: __sorted_union(baseline.read_only_roots, candidate.read_only_roots),
+    side_effect_level: __max_ranked(
+      baseline.side_effect_level,
+      candidate.side_effect_level,
+      __side_effect_rank,
+    ),
+    sandbox_profile: __max_ranked(
+      baseline.sandbox_profile,
+      candidate.sandbox_profile,
+      __sandbox_rank,
+    ),
+    process: {
+      commands: __sorted_union(baseline.process.commands, candidate.process.commands),
+      read_roots: __sorted_union(baseline.process.read_roots, candidate.process.read_roots),
+      write_roots: __sorted_union(baseline.process.write_roots, candidate.process.write_roots),
+    },
+    network: {
+      domains: __sorted_union(baseline.network.domains, candidate.network.domains),
+      allow_private: baseline.network.allow_private || candidate.network.allow_private,
+    },
+    connectors: __sorted_union(baseline.connectors, candidate.connectors),
+    database_scopes: __sorted_union(baseline.database_scopes, candidate.database_scopes),
+    provider_ids: __sorted_union(baseline.provider_ids, candidate.provider_ids),
+    secret_refs: __sorted_union(baseline.secret_refs, candidate.secret_refs),
+    customer_state: {
+      access: __max_ranked(
+        baseline_customer.access,
+        candidate_customer.access,
+        __customer_state_rank,
+      ),
+      scopes: __sorted_union(baseline_customer.scopes, candidate_customer.scopes),
+    },
+    models: {
+      model_ids: __sorted_union(baseline_models.model_ids, candidate_models.model_ids),
+      dynamic_routing: baseline_models.dynamic_routing || candidate_models.dynamic_routing,
+    },
+    privacy: {
+      data_classes: __sorted_union(baseline_privacy.data_classes, candidate_privacy.data_classes),
+      retention: __max_ranked(
+        baseline_privacy.retention,
+        candidate_privacy.retention,
+        __retention_rank,
+      ),
+      cross_tenant: baseline_privacy.cross_tenant || candidate_privacy.cross_tenant,
+    },
+    mutation: {
+      reversible: baseline.mutation.reversible && candidate.mutation.reversible,
+      rollback_adapter_id: rollback,
+      requires_approval: baseline.mutation.requires_approval
+        || candidate.mutation.requires_approval,
+    },
+  }
+  if baseline.placement != nil {
+    merged.placement = baseline.placement
+  }
+  return merged
+}
+
+/**
+ * Reject internally contradictory optional policy fields.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ */
+pub fn experiment_capability_policy_diagnostics(
+  manifest: ExperimentCapabilityManifest,
+  path: string,
+) -> list<ExperimentCompileDiagnostic> {
+  const customer = experiment_customer_state(manifest)
+  const models = experiment_model_policy(manifest)
+  const privacy = experiment_privacy_policy(manifest)
+  let diagnostics: list<ExperimentCompileDiagnostic> = []
+  if (customer.access == "none" && len(customer.scopes) > 0)
+    || (customer.access != "none"
+    && len(
+    customer.scopes,
+  )
+    == 0) {
+    diagnostics = diagnostics
+      + [
+      __diagnostic(
+        "experiment.invalid_customer_state_policy",
+        path + ".customer_state",
+        "customer-state scopes must be empty for no access and non-empty for declared access",
+        __policy_repair(path + ".customer_state", "access and scopes that agree"),
+      ),
+    ]
+  }
+  if models.dynamic_routing && len(models.model_ids) == 0 {
+    diagnostics = diagnostics
+      + [
+      __diagnostic(
+        "experiment.invalid_model_policy",
+        path + ".models",
+        "dynamic model routing requires an explicit model allowlist",
+        __policy_repair(path + ".models", "an explicit non-empty model allowlist"),
+      ),
+    ]
+  }
+  if privacy.cross_tenant && len(privacy.data_classes) == 0 {
+    diagnostics = diagnostics
+      + [
+      __diagnostic(
+        "experiment.invalid_privacy_policy",
+        path + ".privacy",
+        "cross-tenant data handling requires explicit data classes",
+        __policy_repair(path + ".privacy", "explicit non-empty data classes"),
+      ),
+    ]
+  }
+  return diagnostics
+}
+
+/**
+ * Validate the optional placement value before comparison.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ */
+pub fn experiment_placement_well_formed(placement: ExperimentPlacementCapability?) -> bool {
+  return placement == nil
+    || placement.resource_class == nil
+    || trim(placement.resource_class) != ""
+}
+
+fn __placement_satisfied(
+  required: ExperimentPlacementCapability?,
+  ceiling: ExperimentPlacementCapability?,
+) -> bool {
+  if required == nil {
+    return true
+  }
+  if ceiling == nil {
+    return false
+  }
+  const mode_ok = required.mode == "any" || ceiling.mode == "any" || required.mode == ceiling.mode
+  const platform_ok = required.platform == "any"
+    || ceiling.platform == "any"
+    || required.platform
+    == ceiling.platform
+  const gpu_ok = !required.requires_gpu || ceiling.requires_gpu
+  const resource_ok = required.resource_class == nil
+    || required.resource_class
+    == ceiling.resource_class
+  return mode_ok && platform_ok && gpu_ok && resource_ok
+}
+
+fn __missing(required: list<string>, allowed: list<string>) -> list<string> {
+  return required.filter({ value -> !allowed.contains(value) }).to_list()
+}
+
+/**
+ * Compare one normalized execution requirement with the registered host ceiling.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ */
+pub fn experiment_capability_ceiling_diagnostics(
+  required: ExperimentCapabilityManifest,
+  ceiling: ExperimentCapabilityManifest,
+) -> list<ExperimentCompileDiagnostic> {
+  if !experiment_placement_well_formed(ceiling.placement) {
+    return [
+      __diagnostic(
+        "experiment.invalid_placement",
+        "capability_ceiling.placement.resource_class",
+        "placement resource_class must be omitted or non-empty",
+        __policy_repair(
+          "capability_ceiling.placement.resource_class",
+          "an omitted or non-empty resource class",
+        ),
+      ),
+    ]
+  }
+  const policy = experiment_capability_policy_diagnostics(ceiling, "capability_ceiling")
+  if len(policy) > 0 {
+    return policy
+  }
+  const required_customer = experiment_customer_state(required)
+  const ceiling_customer = experiment_customer_state(ceiling)
+  const required_models = experiment_model_policy(required)
+  const ceiling_models = experiment_model_policy(ceiling)
+  const required_privacy = experiment_privacy_policy(required)
+  const ceiling_privacy = experiment_privacy_policy(ceiling)
+  let missing = __missing(required.tools, ceiling.tools)
+  missing = missing + __missing(required.workspace_roots, ceiling.workspace_roots)
+  missing = missing + __missing(required.read_only_roots, ceiling.read_only_roots)
+  missing = missing + __missing(required.process.commands, ceiling.process.commands)
+  missing = missing + __missing(required.process.read_roots, ceiling.process.read_roots)
+  missing = missing + __missing(required.process.write_roots, ceiling.process.write_roots)
+  missing = missing + __missing(required.network.domains, ceiling.network.domains)
+  missing = missing + __missing(required.connectors, ceiling.connectors)
+  missing = missing + __missing(required.database_scopes, ceiling.database_scopes)
+  missing = missing + __missing(required.provider_ids, ceiling.provider_ids)
+  missing = missing + __missing(required.secret_refs, ceiling.secret_refs)
+  missing = missing + __missing(required_customer.scopes, ceiling_customer.scopes)
+  missing = missing + __missing(required_models.model_ids, ceiling_models.model_ids)
+  missing = missing + __missing(required_privacy.data_classes, ceiling_privacy.data_classes)
+  for entry in required.capabilities {
+    missing = missing + __missing(entry.value, ceiling.capabilities[entry.key] ?? [])
+  }
+  if __side_effect_rank(required.side_effect_level)
+    > __side_effect_rank(ceiling.side_effect_level)
+    || __sandbox_rank(required.sandbox_profile)
+    > __sandbox_rank(
+    ceiling.sandbox_profile,
+  )
+    || (required.network.allow_private && !ceiling.network.allow_private)
+    || (required.mutation
+    .requires_approval
+    && !ceiling.mutation.requires_approval)
+    || (!required.mutation.reversible
+    && ceiling.mutation.reversible)
+    || __customer_state_rank(required_customer.access)
+    > __customer_state_rank(
+    ceiling_customer.access,
+  )
+    || (required_models.dynamic_routing && !ceiling_models.dynamic_routing)
+    || __retention_rank(
+    required_privacy.retention,
+  )
+    > __retention_rank(ceiling_privacy.retention)
+    || (required_privacy.cross_tenant
+    && !ceiling_privacy
+    .cross_tenant)
+    || (required.mutation.rollback_adapter_id != nil
+    && required.mutation.rollback_adapter_id
+    != ceiling
+    .mutation.rollback_adapter_id)
+    || len(missing) > 0 {
+    return [
+      __diagnostic(
+        "experiment.capability_ceiling",
+        "capability_ceiling",
+        "required capabilities cannot be enforced by the registered host ceiling",
+        {
+          owner: "catalog",
+          operation: "reduce",
+          path: "catalog.interventions[].capabilities",
+          expected: "requirements within the registered host capability ceiling",
+        },
+      ),
+    ]
+  }
+  if !__placement_satisfied(required.placement, ceiling.placement) {
+    return [
+      __diagnostic(
+        "experiment.placement_ceiling",
+        "capability_ceiling.placement",
+        "required placement cannot be enforced by the registered host ceiling",
+        {
+          owner: "catalog",
+          operation: "reduce",
+          path: "catalog.interventions[].capabilities.placement",
+          expected: "placement within the registered host capability ceiling",
+        },
+      ),
+    ]
+  }
+  return []
+}

@@ -19,6 +19,7 @@ pub type ExperimentLane = "randomized_online" \
   | "human_study" \
   | "sequential_agent" \
   | "observational" \
+  | "quasi_experimental" \
   | "exploratory_instrumentation" \
   | "non_experimental_research"
 
@@ -46,7 +47,7 @@ pub type ExperimentIntentRisk = {
   irreversible: bool,
 }
 
-pub type ExperimentIntent = {
+pub type ExperimentIntentV1 = {
   schema: "harn.experiment.intent.v1",
   schema_version: 1,
   question: string,
@@ -68,6 +69,64 @@ pub type ExperimentIntent = {
   risk: ExperimentIntentRisk,
 }
 
+pub type AlternativeHypothesis = {
+  id: string,
+  statement: string,
+  relation: "competing" | "complementary" | "mechanism",
+}
+
+pub type ExperimentDecisionScope = {
+  kind: "choose_intervention" | "estimate_effect" | "monitor" | "research",
+  target: string,
+  population: string?,
+  horizon: string?,
+}
+
+pub type ExperimentMatchingPolicy = {
+  method: "exact" | "stratified" | "propensity_score" | "synthetic_control",
+  covariates: list<string>,
+  caliper: float?,
+  with_replacement: bool,
+}
+
+pub type QuasiExperimentContract = {
+  design: "matched_comparison" \
+    | "difference_in_differences" \
+    | "regression_discontinuity" \
+    | "instrumental_variable" \
+    | "synthetic_control",
+  assignment_mechanism: string,
+  identifying_assumptions: list<string>,
+  matching: ExperimentMatchingPolicy?,
+}
+
+/** Current canonical intent. The compiler remains the only v1-to-v2 normalization owner. */
+pub type ExperimentIntent = {
+  schema: "harn.experiment.intent.v2",
+  schema_version: 2,
+  question: string,
+  hypothesis: string,
+  null_hypothesis: string,
+  alternative_hypotheses: list<AlternativeHypothesis>,
+  decision_scope: ExperimentDecisionScope,
+  domain: string,
+  requested_lane: RequestedExperimentLane,
+  requested_evidence: EvidenceMode,
+  intervention: ExperimentAdapterRef?,
+  comparator: ExperimentAdapterRef?,
+  assignment_unit: string?,
+  population_id: string?,
+  outcome_ids: list<string>,
+  quasi_experiment: QuasiExperimentContract?,
+  assumptions: list<string>,
+  threats: list<string>,
+  prior: HypothesisPrior?,
+  citations: list<HypothesisCitation>,
+  risk: ExperimentIntentRisk,
+}
+
+pub type ExperimentIntentInput = ExperimentIntentV1 | ExperimentIntent
+
 pub type ProcessCapability = {
   commands: list<string>,
   read_roots: list<string>,
@@ -80,6 +139,19 @@ pub type MutationCapability = {
   reversible: bool,
   rollback_adapter_id: string?,
   requires_approval: bool,
+}
+
+pub type CustomerStateCapability = {
+  access: "none" | "read_only" | "reversible_write" | "irreversible_write",
+  scopes: list<string>,
+}
+
+pub type ModelCapabilityPolicy = {model_ids: list<string>, dynamic_routing: bool}
+
+pub type PrivacyCapabilityPolicy = {
+  data_classes: list<"public" | "internal" | "personal" | "sensitive" | "regulated">,
+  retention: "none" | "ephemeral" | "durable",
+  cross_tenant: bool,
 }
 
 pub type ExperimentPlacementCapability = {
@@ -107,6 +179,9 @@ pub type ExperimentCapabilityManifest = {
   database_scopes: list<string>,
   provider_ids: list<string>,
   secret_refs: list<string>,
+  customer_state?: CustomerStateCapability,
+  models?: ModelCapabilityPolicy,
+  privacy?: PrivacyCapabilityPolicy,
   placement?: ExperimentPlacementCapability,
   mutation: MutationCapability,
 }
@@ -233,7 +308,7 @@ pub type RegisteredExperimentPlan = {
   version: int,
   fingerprint: string,
   hypothesis_id: string,
-  intent: ExperimentIntent,
+  intent: ExperimentIntentInput,
   design: ExperimentDesign,
   manifest: ExperimentManifest,
   registration: ExperimentRegistration,
@@ -250,7 +325,7 @@ pub type ObserveOnlyHypothesisPlan = {
   version: int,
   fingerprint: string,
   hypothesis_id: string,
-  intent: ExperimentIntent,
+  intent: ExperimentIntentInput,
   design: ExperimentDesign,
   instrumentation_questions: list<string>,
   provenance: PlanProvenance,
@@ -264,6 +339,14 @@ pub type ExperimentCompileDiagnostic = {
   path: string,
   message: string,
   severity: "error" | "warning",
+  repair?: ExperimentCompileRepair,
+}
+
+pub type ExperimentCompileRepair = {
+  owner: "intent" | "catalog" | "host_context",
+  operation: "set" | "remove" | "register" | "reduce",
+  path: string,
+  expected: string,
 }
 
 pub type ExperimentCompileFailure = {
@@ -289,11 +372,12 @@ pub type ExperimentCompileReceipt = {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn experiment_intent_contract() -> VersionedContract<ExperimentIntent> {
+pub fn experiment_intent_contract() -> VersionedContract<ExperimentIntentInput> {
   return versioned_contract(
     "harn.experiment.intent",
-    1,
-    schema_contract(schema_of(ExperimentIntent), []),
+    2,
+    schema_contract(schema_of(ExperimentIntentInput), []),
+    {supported: [1, 2], absent_version: 1},
   )
 }
 
@@ -306,7 +390,7 @@ pub fn experiment_intent_contract() -> VersionedContract<ExperimentIntent> {
  */
 pub fn experiment_intent_descriptor(
   name: string = "experiment-intent.json",
-) -> ArtifactDescriptor<ExperimentIntent> {
+) -> ArtifactDescriptor<ExperimentIntentInput> {
   return versioned_descriptor(name, experiment_intent_contract())
 }
 

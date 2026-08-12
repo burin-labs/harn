@@ -50,15 +50,39 @@ const receipt = compile_experiment_intent(intent, context)
 if !receipt.ok {
   for diagnostic in receipt.failure?.diagnostics ?? [] {
     harness.stdio.eprintln(diagnostic.code + ": " + diagnostic.message)
+    if diagnostic.repair != nil {
+      harness.stdio.eprintln(
+        "repair " + diagnostic.repair.owner + " " + diagnostic.repair.operation
+          + " " + diagnostic.repair.path,
+      )
+    }
   }
   return
 }
 ```
 
+The current authored contract is `harn.experiment.intent.v2`. It carries typed
+alternative hypotheses and a typed decision scope. The compiler also accepts
+v1 input and normalizes it before fingerprinting, so equivalent v1 and v2
+intents produce one plan identity. Future versions fail with
+`experiment.intent_schema_version`; structural failures use
+`experiment.intent_schema`. Both can carry a typed repair owner, operation,
+path, and expected shape.
+
+Select `quasi_experimental` only with an explicit `quasi_experiment` contract.
+Name the non-random assignment mechanism and identifying assumptions. A
+matched comparison must also name its matching method and pre-treatment
+covariates. The current compiler emits an `observe_only` plan with an
+`associational` claim ceiling; it does not reinterpret matching as randomized
+causal evidence.
+
 Use immutable adapter IDs and variants. Put credentials in host-managed secret
 references, never in the catalog or intent. The capability manifest declares
 filesystem roots, process commands, network domains, providers, connectors,
-database scopes, mutation reversibility, and approval requirements. Executable
+database scopes, customer-state access, model routing, privacy class and
+retention, mutation reversibility, and approval requirements. Missing
+customer-state, model, and privacy fields in a legacy manifest normalize to no
+authority. New compiled plans carry them explicitly. Executable
 adapters may also declare one typed `placement` requirement with `mode`,
 `platform`, `requires_gpu`, and `resource_class`. Baseline and candidate
 requirements must be identical, and the compiler refuses a host ceiling that
@@ -237,7 +261,9 @@ The [hypothesis control-plane example](../../../examples/hypothesis-control-plan
 exports the planner, compiler, workflow, ledger inspection, and report as typed
 functions. Run one function through `harn run`, or expose the same functions as
 structured tools with `harn serve mcp`. The projection adds no scheduler,
-manifest, decision rule, or write authority.
+manifest, decision rule, or write authority. The `compile` tool's generated
+schema accepts the same v1/v2 intent union, including the v2 quasi-experiment
+and decision-scope fields.
 
 ## Verify the boundary you claim
 

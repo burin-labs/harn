@@ -1,5 +1,4 @@
 /** Deterministic hypothesis classifier, validator, and experiment lowerer. */
-import { check_versioned } from "std/artifacts/typed"
 import {
   ExperimentGuardrail,
   ExperimentManifest,
@@ -8,6 +7,15 @@ import {
   register_experiment,
   validate_experiment_manifest,
 } from "std/eval/experiment/contracts"
+import {
+  experiment_capability_ceiling_diagnostics,
+  experiment_capability_policy_diagnostics,
+  experiment_customer_state,
+  experiment_model_policy,
+  experiment_placement_well_formed,
+  experiment_privacy_policy,
+  merge_experiment_capabilities,
+} from "std/eval/hypothesis/capabilities"
 import {
   ClaimStrength,
   EvidenceMode,
@@ -19,9 +27,9 @@ import {
   ExperimentCompileReceipt,
   ExperimentDesign,
   ExperimentIntent,
+  ExperimentIntentInput,
   ExperimentIntentRisk,
   ExperimentLane,
-  ExperimentPlacementCapability,
   ExperimentResourceBudget,
   HypothesisCitation,
   HypothesisPlan,
@@ -32,8 +40,8 @@ import {
   PopulationAdapter,
   RegisteredExperimentPlan,
   RequestedExperimentLane,
-  experiment_intent_contract,
 } from "std/eval/hypothesis/contracts"
+import { normalize_experiment_intent } from "std/eval/hypothesis/intent_boundary"
 import { resolve_evidence_policy } from "std/eval/hypothesis/policies"
 
 type ResolvedIntentAdapters = {
@@ -55,7 +63,13 @@ fn __diagnostic(
   message: string,
   severity: "error" | "warning" = "error",
 ) -> ExperimentCompileDiagnostic {
-  return {code: code, path: path, message: message, severity: severity}
+  const diagnostic: ExperimentCompileDiagnostic = {
+    code: code,
+    path: path,
+    message: message,
+    severity: severity,
+  }
+  return diagnostic
 }
 
 fn __failure(
@@ -121,148 +135,6 @@ fn __find_population(catalog: ExperimentAdapterCatalog, id: string) -> Populatio
   return nil
 }
 
-fn __sorted_union(left: list<string>, right: list<string>) -> list<string> {
-  let seen: dict<string, bool> = {}
-  let values: list<string> = []
-  for value in (left ?? []) + (right ?? []) {
-    if !(seen[value] ?? false) {
-      seen = seen + {[value]: true}
-      values = values + [value]
-    }
-  }
-  return values.sorted_by({ value -> value })
-}
-
-fn __merge_named_capabilities(
-  left: dict<string, list<string>>,
-  right: dict<string, list<string>>,
-) -> dict<string, list<string>> {
-  let merged: dict<string, list<string>> = {}
-  for entry in left {
-    merged = merged + {[entry.key]: __sorted_union(entry.value, right[entry.key] ?? [])}
-  }
-  for entry in right {
-    if merged[entry.key] == nil {
-      merged = merged + {[entry.key]: __sorted_union([], entry.value)}
-    }
-  }
-  return merged
-}
-
-fn __side_effect_rank(value: string) -> int {
-  if value == "read_only" {
-    return 1
-  }
-  if value == "workspace_write" {
-    return 2
-  }
-  if value == "process_exec" {
-    return 3
-  }
-  if value == "network" {
-    return 4
-  }
-  if value == "desktop_control" {
-    return 5
-  }
-  return 0
-}
-
-fn __max_side_effect(left: string, right: string) -> string {
-  if __side_effect_rank(left) >= __side_effect_rank(right) {
-    return left
-  }
-  return right
-}
-
-fn __sandbox_rank(value: string) -> int {
-  if value == "os_hardened" {
-    return 2
-  }
-  if value == "worktree" {
-    return 1
-  }
-  return 0
-}
-
-fn __strictest_sandbox(left: string, right: string) -> string {
-  if __sandbox_rank(left) >= __sandbox_rank(right) {
-    return left
-  }
-  return right
-}
-
-fn __merge_capabilities(
-  baseline: ExperimentCapabilityManifest,
-  candidate: ExperimentCapabilityManifest,
-) -> ExperimentCapabilityManifest {
-  const rollback = if baseline.mutation.rollback_adapter_id
-    == candidate.mutation.rollback_adapter_id {
-    baseline.mutation.rollback_adapter_id
-  } else {
-    nil
-  }
-  let merged: ExperimentCapabilityManifest = {
-    tools: __sorted_union(baseline.tools, candidate.tools),
-    capabilities: __merge_named_capabilities(baseline.capabilities, candidate.capabilities),
-    workspace_roots: __sorted_union(baseline.workspace_roots, candidate.workspace_roots),
-    read_only_roots: __sorted_union(baseline.read_only_roots, candidate.read_only_roots),
-    side_effect_level: __max_side_effect(baseline.side_effect_level, candidate.side_effect_level),
-    sandbox_profile: __strictest_sandbox(baseline.sandbox_profile, candidate.sandbox_profile),
-    process: {
-      commands: __sorted_union(baseline.process.commands, candidate.process.commands),
-      read_roots: __sorted_union(baseline.process.read_roots, candidate.process.read_roots),
-      write_roots: __sorted_union(baseline.process.write_roots, candidate.process.write_roots),
-    },
-    network: {
-      domains: __sorted_union(baseline.network.domains, candidate.network.domains),
-      allow_private: baseline.network.allow_private || candidate.network.allow_private,
-    },
-    connectors: __sorted_union(baseline.connectors, candidate.connectors),
-    database_scopes: __sorted_union(baseline.database_scopes, candidate.database_scopes),
-    provider_ids: __sorted_union(baseline.provider_ids, candidate.provider_ids),
-    secret_refs: __sorted_union(baseline.secret_refs, candidate.secret_refs),
-    mutation: {
-      reversible: baseline.mutation.reversible && candidate.mutation.reversible,
-      rollback_adapter_id: rollback,
-      requires_approval: baseline.mutation.requires_approval
-        || candidate.mutation.requires_approval,
-    },
-  }
-  if baseline.placement != nil {
-    merged.placement = baseline.placement
-  }
-  return merged
-}
-
-fn __placement_satisfied(
-  required: ExperimentPlacementCapability?,
-  ceiling: ExperimentPlacementCapability?,
-) -> bool {
-  if required == nil {
-    return true
-  }
-  if ceiling == nil {
-    return false
-  }
-  const mode_ok = required.mode == "any" || ceiling.mode == "any" || required.mode == ceiling.mode
-  const platform_ok = required.platform == "any"
-    || ceiling.platform == "any"
-    || required.platform
-    == ceiling.platform
-  const gpu_ok = !required.requires_gpu || ceiling.requires_gpu
-  const resource_ok = required.resource_class == nil
-    || required.resource_class
-    == ceiling.resource_class
-  return mode_ok && platform_ok && gpu_ok && resource_ok
-}
-
-fn __placement_well_formed(placement: ExperimentPlacementCapability?) -> bool {
-  return placement == nil
-    || placement.resource_class == nil
-    || trim(placement.resource_class) != ""
-}
-
 fn __budget_diagnostics(
   request: ExperimentResourceBudget,
   ceiling: ExperimentResourceBudget,
@@ -316,80 +188,6 @@ fn __budget_diagnostics(
   return diagnostics
 }
 
-fn __missing_values(required: list<string>, allowed: list<string>) -> list<string> {
-  let missing: list<string> = []
-  for value in required {
-    if !allowed.contains(value) {
-      missing = missing + [value]
-    }
-  }
-  return missing
-}
-
-fn __capability_ceiling_diagnostics(
-  required: ExperimentCapabilityManifest,
-  ceiling: ExperimentCapabilityManifest,
-) -> list<ExperimentCompileDiagnostic> {
-  if !__placement_well_formed(ceiling.placement) {
-    return [
-      __diagnostic(
-        "experiment.invalid_placement",
-        "capability_ceiling.placement.resource_class",
-        "placement resource_class must be omitted or non-empty",
-      ),
-    ]
-  }
-  let missing = __missing_values(required.tools, ceiling.tools)
-  missing = missing + __missing_values(required.workspace_roots, ceiling.workspace_roots)
-  missing = missing + __missing_values(required.read_only_roots, ceiling.read_only_roots)
-  missing = missing + __missing_values(required.process.commands, ceiling.process.commands)
-  missing = missing + __missing_values(required.process.read_roots, ceiling.process.read_roots)
-  missing = missing + __missing_values(required.process.write_roots, ceiling.process.write_roots)
-  missing = missing + __missing_values(required.network.domains, ceiling.network.domains)
-  missing = missing + __missing_values(required.connectors, ceiling.connectors)
-  missing = missing + __missing_values(required.database_scopes, ceiling.database_scopes)
-  missing = missing + __missing_values(required.provider_ids, ceiling.provider_ids)
-  missing = missing + __missing_values(required.secret_refs, ceiling.secret_refs)
-  for entry in required.capabilities {
-    missing = missing + __missing_values(entry.value, ceiling.capabilities[entry.key] ?? [])
-  }
-  if __side_effect_rank(required.side_effect_level)
-    > __side_effect_rank(ceiling.side_effect_level)
-    || __sandbox_rank(required.sandbox_profile)
-    > __sandbox_rank(
-    ceiling.sandbox_profile,
-  )
-    || (required.network.allow_private && !ceiling.network.allow_private)
-    || (required.mutation
-    .requires_approval
-    && !ceiling.mutation.requires_approval)
-    || (!required.mutation.reversible
-    && ceiling.mutation.reversible)
-    || (required.mutation.rollback_adapter_id != nil
-    && required.mutation
-    .rollback_adapter_id
-    != ceiling.mutation.rollback_adapter_id)
-    || len(missing) > 0 {
-    return [
-      __diagnostic(
-        "experiment.capability_ceiling",
-        "capability_ceiling",
-        "required capabilities cannot be enforced by the registered host ceiling",
-      ),
-    ]
-  }
-  if !__placement_satisfied(required.placement, ceiling.placement) {
-    return [
-      __diagnostic(
-        "experiment.placement_ceiling",
-        "capability_ceiling.placement",
-        "required placement cannot be enforced by the registered host ceiling",
-      ),
-    ]
-  }
-  return []
-}
-
 fn __catalog_diagnostics(catalog: ExperimentAdapterCatalog) -> list<ExperimentCompileDiagnostic> {
   let diagnostics: list<ExperimentCompileDiagnostic> = []
   let seen_interventions: dict<string, bool> = {}
@@ -402,7 +200,7 @@ fn __catalog_diagnostics(catalog: ExperimentAdapterCatalog) -> list<ExperimentCo
       ]
     }
     seen_interventions = seen_interventions + {[key]: true}
-    if !__placement_well_formed(adapter.capabilities.placement) {
+    if !experiment_placement_well_formed(adapter.capabilities.placement) {
       diagnostics = diagnostics
         + [
         __diagnostic(
@@ -412,6 +210,11 @@ fn __catalog_diagnostics(catalog: ExperimentAdapterCatalog) -> list<ExperimentCo
         ),
       ]
     }
+    diagnostics = diagnostics
+      + experiment_capability_policy_diagnostics(
+      adapter.capabilities,
+      "catalog.interventions",
+    )
     if adapter.reversible != adapter.capabilities.mutation.reversible {
       diagnostics = diagnostics
         + [
@@ -522,6 +325,9 @@ fn __observe_lane(requested: RequestedExperimentLane) -> ExperimentLane {
   if requested == "observational" {
     return "observational"
   }
+  if requested == "quasi_experimental" {
+    return "quasi_experimental"
+  }
   if requested == "exploratory_instrumentation" {
     return "exploratory_instrumentation"
   }
@@ -538,7 +344,7 @@ fn __lane_claim(lane: ExperimentLane, evidence_mode: EvidenceMode) -> ClaimStren
   if lane == "exploratory_instrumentation" {
     return "descriptive"
   }
-  if lane == "observational" {
+  if lane == "observational" || lane == "quasi_experimental" {
     return "associational"
   }
   if evidence_mode == "observational" {
@@ -563,32 +369,15 @@ fn __lane_claim(lane: ExperimentLane, evidence_mode: EvidenceMode) -> ClaimStren
   return "none"
 }
 
-fn __intent_blank_diagnostics(intent: ExperimentIntent) -> list<ExperimentCompileDiagnostic> {
-  let diagnostics: list<ExperimentCompileDiagnostic> = []
-  for field in [
-    {path: "question", value: intent.question},
-    {path: "hypothesis", value: intent.hypothesis},
-    {path: "null_hypothesis", value: intent.null_hypothesis},
-    {path: "decision", value: intent.decision},
-    {path: "domain", value: intent.domain},
-  ] {
-    if trim(field.value) == "" {
-      diagnostics = diagnostics
-        + [
-        __diagnostic("experiment.required", field.path, field.path + " must be non-empty"),
-      ]
-    }
-  }
-  return diagnostics
-}
-
 fn __approval_required(
-  intent: ExperimentIntent,
+  intent: ExperimentIntentInput,
   risk_floor: ExperimentIntentRisk,
   capabilities: ExperimentCapabilityManifest,
   baseline: InterventionAdapter,
   candidate: InterventionAdapter,
 ) -> bool {
+  const customer_state = experiment_customer_state(capabilities)
+  const privacy = experiment_privacy_policy(capabilities)
   return risk_floor.touches_people
     || risk_floor.touches_customer_data
     || risk_floor.touches_money
@@ -599,13 +388,16 @@ fn __approval_required(
     || intent.risk.touches_money
     || intent.risk.touches_production
     || intent.risk.irreversible
+    || customer_state.access != "none"
+    || len(privacy.data_classes) > 0
+    || privacy.cross_tenant
     || capabilities.mutation.requires_approval
     || !capabilities.mutation.reversible
     || !baseline.reversible
     || !candidate.reversible
 }
 
-fn __instrumentation_questions(intent: ExperimentIntent) -> list<string> {
+fn __instrumentation_questions(intent: ExperimentIntentInput) -> list<string> {
   let questions: list<string> = []
   if intent.intervention == nil {
     questions = questions + ["What executable intervention is available?"]
@@ -833,6 +625,7 @@ fn __resolve_intent_adapters(
 fn __must_observe_only(intent: ExperimentIntent, resolved: ResolvedIntentAdapters) -> bool {
   return intent.requested_evidence == "observational"
     || intent.requested_lane == "observational"
+    || intent.requested_lane == "quasi_experimental"
     || intent.requested_lane
     == "exploratory_instrumentation"
     || intent.requested_lane == "non_experimental_research"
@@ -845,6 +638,9 @@ fn __must_observe_only(intent: ExperimentIntent, resolved: ResolvedIntentAdapter
 fn __observe_only_lane(intent: ExperimentIntent) -> ExperimentLane {
   if intent.requested_lane == "observational" {
     return "observational"
+  }
+  if intent.requested_lane == "quasi_experimental" {
+    return "quasi_experimental"
   }
   if intent.requested_lane == "non_experimental_research" {
     return "non_experimental_research"
@@ -896,6 +692,9 @@ fn __observe_only_plan(
     database_scopes: [],
     provider_ids: [],
     secret_refs: [],
+    customer_state: {access: "none", scopes: []},
+    models: {model_ids: [], dynamic_routing: false},
+    privacy: {data_classes: [], retention: "none", cross_tenant: false},
     placement: nil,
     mutation: {reversible: true, rollback_adapter_id: nil, requires_approval: false},
   }
@@ -973,22 +772,18 @@ pub fn compile_experiment_intent(
 ) -> ExperimentCompileReceipt {
   const normalized_catalog = __catalog_normalized(context.catalog)
   const catalog_fingerprint = __fingerprint(normalized_catalog)
-  let intent_fingerprint = __fingerprint(value)
-  const checked = check_versioned(value, experiment_intent_contract())
-  if !is_ok(checked) {
+  const normalized = normalize_experiment_intent(value)
+  if !is_ok(normalized) {
+    const failure = unwrap_err(normalized)
     return __receipt_failure(
-      intent_fingerprint,
+      failure.intent_fingerprint,
       catalog_fingerprint,
-      __failure(
-        "invalid_intent",
-        [__diagnostic("experiment.intent_schema", "", unwrap_err(checked).detail)],
-      ),
+      __failure("invalid_intent", failure.diagnostics),
     )
   }
-  const intent: ExperimentIntent = unwrap(checked).value
-  intent_fingerprint = __fingerprint(intent)
+  const intent = unwrap(normalized)
+  const intent_fingerprint = __fingerprint(intent)
   let diagnostics = __catalog_diagnostics(normalized_catalog)
-  diagnostics = diagnostics + __intent_blank_diagnostics(intent)
   diagnostics = diagnostics + __citation_diagnostics(intent, context.trusted_citations)
   diagnostics = diagnostics + __budget_diagnostics(context.budget_request, context.budget_ceiling)
   if len(diagnostics) > 0 {
@@ -1130,8 +925,8 @@ pub fn compile_experiment_intent(
       ),
     )
   }
-  const capabilities = __merge_capabilities(baseline.capabilities, candidate.capabilities)
-  diagnostics = __capability_ceiling_diagnostics(capabilities, context.capability_ceiling)
+  const capabilities = merge_experiment_capabilities(baseline.capabilities, candidate.capabilities)
+  diagnostics = experiment_capability_ceiling_diagnostics(capabilities, context.capability_ceiling)
   if len(diagnostics) > 0 {
     return __receipt_failure(
       intent_fingerprint,
@@ -1322,6 +1117,9 @@ fn __validate_plan_identity(plan: HypothesisPlan) -> string {
 }
 
 fn __validate_observe_only_plan(plan: ObserveOnlyHypothesisPlan, hypothesis_id: string) {
+  const customer_state = experiment_customer_state(plan.design.capabilities)
+  const models = experiment_model_policy(plan.design.capabilities)
+  const privacy = experiment_privacy_policy(plan.design.capabilities)
   __require_plan(
     plan.design.capabilities.side_effect_level == "none"
       && len(plan.design.capabilities.tools) == 0
@@ -1349,6 +1147,13 @@ fn __validate_observe_only_plan(plan: ObserveOnlyHypothesisPlan, hypothesis_id: 
       && len(plan.design.capabilities.provider_ids) == 0
       && len(plan.design.capabilities.secret_refs)
       == 0
+      && customer_state.access == "none"
+      && len(customer_state.scopes) == 0
+      && len(models.model_ids) == 0
+      && !models.dynamic_routing
+      && len(privacy.data_classes) == 0
+      && privacy.retention == "none"
+      && !privacy.cross_tenant
       && plan.design.capabilities.placement == nil
       && !plan.design.approval_required
       && plan.design.approval_id == nil,
@@ -1380,8 +1185,8 @@ fn __validate_registered_plan(plan: RegisteredExperimentPlan, hypothesis_id: str
     throw "hypothesis compiler: invalid compiled plan: registered plan omits an adapter"
   }
   __require_plan(
-    __placement_well_formed(baseline.capabilities.placement)
-      && __placement_well_formed(
+    experiment_placement_well_formed(baseline.capabilities.placement)
+      && experiment_placement_well_formed(
       candidate.capabilities.placement,
     ),
     "placement resource_class is empty",
@@ -1390,7 +1195,7 @@ fn __validate_registered_plan(plan: RegisteredExperimentPlan, hypothesis_id: str
     __same(baseline.capabilities.placement, candidate.capabilities.placement),
     "baseline and candidate placement policies differ",
   )
-  const required = __merge_capabilities(baseline.capabilities, candidate.capabilities)
+  const required = merge_experiment_capabilities(baseline.capabilities, candidate.capabilities)
   __require_plan(__same(plan.design.capabilities, required), "capability manifest was modified")
   const no_risk_floor: ExperimentIntentRisk = {
     touches_people: false,

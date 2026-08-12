@@ -2,7 +2,7 @@
 import {
   ExperimentCompileContext,
   ExperimentCompileReceipt,
-  ExperimentIntent,
+  ExperimentIntentInput,
   HypothesisPlannerOptions,
   HypothesisPlannerReceipt,
   HypothesisReport,
@@ -27,7 +27,7 @@ pub fn hypothesis_design_projection(
 
 /** Deterministically compile an already-typed intent. */
 pub fn hypothesis_compile_projection(
-  intent: ExperimentIntent,
+  intent: ExperimentIntentInput,
   context: ExperimentCompileContext,
 ) -> ExperimentCompileReceipt {
   return compile_experiment_intent(intent, context)
