@@ -157,9 +157,9 @@ pub(crate) async fn check_connector_package(
         .as_ref()
         .ok_or_else(|| format!("no harn.toml found for {}", anchor.display()))?;
     let fixture_version = manifest.connector_contract.version.unwrap_or(1);
-    if fixture_version != 1 {
+    if !matches!(fixture_version, 1 | 2) {
         return Err(format!(
-            "unsupported connector_contract.version {fixture_version}; expected 1"
+            "unsupported connector_contract.version {fixture_version}; expected 1 or 2"
         ));
     }
 
@@ -189,11 +189,19 @@ pub(crate) async fn check_connector_package(
             continue;
         };
         validate_setup_metadata(provider.id.as_str(), provider.setup.as_ref(), &mut failures);
+        validate_service_metadata(
+            provider.id.as_str(),
+            provider.service.as_ref(),
+            fixture_version,
+            &mut failures,
+        );
 
         match check_one_connector(
             provider.id.clone(),
             &provider.manifest_dir,
             module,
+            provider.service.as_ref(),
+            fixture_version,
             &manifest.connector_contract.fixtures,
             args.run_poll_tick,
         )
@@ -495,12 +503,18 @@ fn validate_connector_package_metadata(anchor: &Path) -> PackageVerifyCheck {
                     provider.setup.as_ref(),
                     &mut failures,
                 );
+                validate_service_metadata(
+                    provider.id.as_str(),
+                    provider.service.as_ref(),
+                    manifest.connector_contract.version.unwrap_or(1),
+                    &mut failures,
+                );
             }
             if !package_dir.join("README.md").is_file() {
                 failures.push("README.md is required".to_string());
             }
-            if manifest.connector_contract.version.unwrap_or(1) != 1 {
-                failures.push("connector_contract.version must be 1 when present".to_string());
+            if !matches!(manifest.connector_contract.version.unwrap_or(1), 1 | 2) {
+                failures.push("connector_contract.version must be 1 or 2 when present".to_string());
             }
             details.push(format!("exports: {}", manifest.exports.len()));
             details.push(format!(
@@ -606,6 +620,27 @@ fn validate_setup_metadata(
             )),
         }
     }
+}
+
+fn validate_service_metadata(
+    provider_id: &str,
+    service: Option<&package::ConnectorServiceManifest>,
+    contract_version: u32,
+    failures: &mut Vec<String>,
+) {
+    let Some(service) = service else {
+        if contract_version >= 2 {
+            failures.push(format!(
+                "provider '{provider_id}' must declare product-facing service metadata for connector contract v2"
+            ));
+        }
+        return;
+    };
+    failures.extend(
+        package::connector_service_issues(service)
+            .into_iter()
+            .map(|issue| format!("provider '{provider_id}' {issue}")),
+    );
 }
 
 fn validate_recovery_copy(

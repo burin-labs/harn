@@ -384,6 +384,64 @@ inaccessible_resource = "Grant the connector access to the requested resource."
 transient_provider_outage = "Retry after the provider or credential backend recovers."
 ```
 
+Connector contract v2 requires each provider to declare one product-facing
+service contract. This is the semantic source for host setup screens,
+capability filtering, action
+policy, protected-profile disclosure, spend presentation, reconciliation, and
+redaction. Provider request and response schemas do not belong here; keep them
+inside the connector adapter.
+
+```toml
+[connector_contract]
+version = 2
+
+[providers.service]
+name = "Example Travel"
+description = "Searches current travel offers and creates governed orders."
+
+[[providers.service.operations]]
+id = "offers.search"
+capability = "travel.search"
+purpose = "Find current offers for the requested itinerary."
+effect = "read"
+environments = ["test", "live"]
+evidence = ["citation", "current_provider_state"]
+redaction = ["error_body"]
+
+[[providers.service.operations]]
+id = "orders.create"
+capability = "travel.booking"
+purpose = "Create the exact order reviewed by the user."
+effect = "consequential"
+environments = ["test"]
+evidence = ["fresh_quote", "user_confirmation"]
+external_spend = "commit"
+reconciliation = "required"
+test_profile = "fictional_required"
+redaction = ["request_body", "response_body", "error_body"]
+
+[providers.service.operations.protected_profile]
+required = ["legal_identity", "birth_date"]
+optional = ["contact_details", "loyalty_accounts", "accessibility_needs"]
+
+[[providers.service.operations.protected_profile.conditional]]
+condition = "international_itinerary"
+field_classes = ["travel_documents"]
+```
+
+The closed protected-profile classes are `legal_identity`, `birth_date`,
+`contact_details`, `accessibility_needs`, `loyalty_accounts`, and
+`travel_documents`. They describe disclosure classes only; profile values must
+never appear in the manifest, action intent, transcript, receipt, or logs.
+Operations that use profile data in `test` mode must set
+`test_profile = "fictional_required"`. Hosts then supply an explicitly
+fictional fixture instead of silently treating test data as the user.
+
+`harn connect status --json` and `harn connect setup-plan --json` project the
+same typed service block alongside authentication and health state. Hosts
+should consume that projection instead of maintaining connector-specific
+tables.
+
 `auth_type` names the credential family (`oauth2`, `device-code`, `api-key`,
 `github-app`, or `none`) and `flow` names the host interaction. `health_checks`
 can be `secret`, `command`, `http`, `mcp`, or `resource`; only `secret` and

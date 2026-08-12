@@ -11,8 +11,13 @@ pub use harn_modules::personas::{
     PersonaValidationError, ResolvedPersonaManifest,
 };
 pub use provider_setup::{
-    ConnectorCredentialEnvironmentManifest, ConnectorHealthCheckManifest, ConnectorRecoveryCopy,
-    ProviderSetupManifest,
+    connector_service_issues, ConnectorConditionalProfileRequirement,
+    ConnectorCredentialEnvironmentManifest, ConnectorEnvironment, ConnectorEvidenceRequirement,
+    ConnectorExternalSpend, ConnectorHealthCheckManifest, ConnectorOperationEffect,
+    ConnectorOperationManifest, ConnectorProtectedProfileManifest, ConnectorReconciliation,
+    ConnectorRecoveryCopy, ConnectorRedactionTarget, ConnectorServiceManifest,
+    ConnectorTestProfile, ProtectedProfileFieldClass, ProviderManifestEntry, ProviderSetupManifest,
+    ResolvedProviderConnectorConfig,
 };
 
 #[derive(Debug, Clone, Deserialize)]
@@ -999,18 +1004,6 @@ pub struct RuntimeExtensions {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct ProviderManifestEntry {
-    pub id: harn_vm::ProviderId,
-    pub connector: ProviderConnectorManifest,
-    #[serde(default)]
-    pub oauth: Option<ProviderOAuthManifest>,
-    #[serde(default)]
-    pub setup: Option<ProviderSetupManifest>,
-    #[serde(default)]
-    pub capabilities: ConnectorCapabilities,
-}
-
-#[derive(Debug, Clone, Deserialize)]
 pub struct ProviderConnectorManifest {
     #[serde(default)]
     pub harn: Option<String>,
@@ -1186,15 +1179,6 @@ pub enum ResolvedProviderConnectorKind {
     Harn { module: String },
     RustBuiltin,
     Invalid(String),
-}
-
-#[derive(Debug, Clone)]
-pub struct ResolvedProviderConnectorConfig {
-    pub id: harn_vm::ProviderId,
-    pub manifest_dir: PathBuf,
-    pub connector: ResolvedProviderConnectorKind,
-    pub oauth: Option<ProviderOAuthManifest>,
-    pub setup: Option<ProviderSetupManifest>,
 }
 
 #[derive(Debug, Clone)]

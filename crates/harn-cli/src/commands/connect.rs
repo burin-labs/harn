@@ -131,6 +131,8 @@ struct ConnectStatusReport {
 #[derive(Clone, Debug, Serialize)]
 struct ConnectorStatus {
     id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    service: Option<package::ConnectorServiceManifest>,
     installed: bool,
     usable: bool,
     status: String,
@@ -167,6 +169,8 @@ struct ConnectorHealthStatus {
 struct ConnectSetupPlan {
     schema_version: u32,
     connector: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    service: Option<package::ConnectorServiceManifest>,
     installed: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     manifest: Option<String>,

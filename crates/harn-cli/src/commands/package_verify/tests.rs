@@ -24,6 +24,17 @@ version = "0.1.0"
 id = "echo"
 connector = {{ harn = "./lib.harn" }}
 
+[providers.service]
+name = "Echo"
+description = "Sends and receives deterministic test messages."
+
+[[providers.service.operations]]
+id = "messages.read"
+capability = "messages"
+purpose = "Read messages from Echo."
+effect = "read"
+environments = ["mock", "test", "live"]
+
 [providers.setup]
 auth_type = "api-key"
 flow = "api-key"
@@ -114,6 +125,52 @@ fn connector_credential_environment_validation_is_bounded_and_secret_scoped() {
     assert!(joined.contains("name 'bad-name' must use uppercase"));
     assert!(joined.contains("repeats environment name 'DUPLICATE'"));
     assert!(joined.contains("name 'SHARED_TOKEN' is assigned to both"));
+}
+
+#[test]
+fn connector_contract_v2_requires_service_metadata() {
+    let mut failures = Vec::new();
+    validate_service_metadata("echo", None, 1, &mut failures);
+    assert!(failures.is_empty(), "v1 remains compatible: {failures:?}");
+
+    validate_service_metadata("echo", None, 2, &mut failures);
+    assert_eq!(failures.len(), 1);
+    assert!(failures[0].contains("connector contract v2"));
+}
+
+#[tokio::test]
+async fn connector_contract_v2_requires_manifest_and_runtime_method_parity() {
+    let _guard = connector_check_test_guard().await;
+    let matching = write_package(
+        "[connector_contract]\nversion = 2",
+        r#"
+pub fn provider_id() { return "echo" }
+pub fn kinds() { return ["webhook"] }
+pub fn payload_schema() { return "EchoEventPayload" }
+pub fn methods() { return [{name: "messages.read"}] }
+pub fn normalize_inbound(_harness: Harness, _raw) { return {type: "reject", status: 400} }
+"#,
+    );
+    let report = check_connector_package(&check_args(matching.path()))
+        .await
+        .expect("matching contract-v2 method inventories should pass");
+    assert_eq!(report.checked_connectors.len(), 1);
+
+    let drifted = write_package(
+        "[connector_contract]\nversion = 2",
+        r#"
+pub fn provider_id() { return "echo" }
+pub fn kinds() { return ["webhook"] }
+pub fn payload_schema() { return "EchoEventPayload" }
+pub fn methods() { return [{name: "messages.send"}] }
+pub fn normalize_inbound(_harness: Harness, _raw) { return {type: "reject", status: 400} }
+"#,
+    );
+    let error = check_connector_package(&check_args(drifted.path()))
+        .await
+        .expect_err("drifted contract-v2 method inventories must fail");
+    assert!(error.contains("runtime-only: [messages.send]"), "{error}");
+    assert!(error.contains("manifest-only: [messages.read]"), "{error}");
 }
 
 #[test]

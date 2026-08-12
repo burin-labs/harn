@@ -139,6 +139,7 @@ pub(super) async fn connector_status(
         return missing_install_status(connector_id);
     };
     let setup = config.setup.clone().unwrap_or_default();
+    let service = config.service.clone();
     let auth_type = setup.auth_type.clone();
     let flow = setup.flow.clone();
     let recovery = setup.recovery.clone();
@@ -151,8 +152,29 @@ pub(super) async fn connector_status(
         .find(|entry| entry.provider == connector_id);
     let mut health_checks = Vec::new();
     let mut missing_secrets = Vec::new();
-    let mut status = "healthy".to_string();
-    let mut reason = "connector is installed and credentials are present".to_string();
+    let service_issues = service.as_ref().map_or_else(
+        || {
+            if config.connector_contract_version >= 2 {
+                vec!["service metadata is missing".to_string()]
+            } else {
+                Vec::new()
+            }
+        },
+        package::connector_service_issues,
+    );
+    let mut status = if service_issues.is_empty() {
+        "healthy".to_string()
+    } else {
+        "invalid_manifest".to_string()
+    };
+    let mut reason = if service_issues.is_empty() {
+        "connector is installed and credentials are present".to_string()
+    } else {
+        format!(
+            "connector service metadata is invalid: {}",
+            service_issues.join("; ")
+        )
+    };
 
     let environment_covers_required_secrets = !required_secrets.is_empty()
         && required_secrets.iter().all(|secret| {
@@ -298,6 +320,7 @@ pub(super) async fn connector_status(
 
     ConnectorStatus {
         id: connector_id.to_string(),
+        service,
         installed: true,
         usable: status == "healthy",
         status,
@@ -320,6 +343,7 @@ pub(super) async fn connector_status(
 pub(super) fn missing_install_status(connector_id: &str) -> ConnectorStatus {
     ConnectorStatus {
         id: connector_id.to_string(),
+        service: None,
         installed: false,
         usable: false,
         status: "missing_install".to_string(),
@@ -372,6 +396,7 @@ pub(super) fn connect_setup_plan_at(
         return Ok(ConnectSetupPlan {
             schema_version: 1,
             connector: connector_id.to_string(),
+            service: None,
             installed: false,
             manifest,
             auth_type: None,
@@ -431,6 +456,7 @@ pub(super) fn connect_setup_plan_at(
     Ok(ConnectSetupPlan {
         schema_version: 1,
         connector: connector_id.to_string(),
+        service: config.service.clone(),
         installed: true,
         manifest,
         auth_type: setup.auth_type,
