@@ -1,0 +1,85 @@
+import {
+  GitHubApiAdapters,
+  GitHubApiAttempt,
+  github_api_failure_kind,
+  github_api_json_with_retry,
+} from "../github_api.harn"
+
+fn failed(detail: string) -> GitHubApiAttempt {
+  return {success: false, stdout: "", stderr: detail, timed_out: false}
+}
+
+pipeline test_github_api_retries_known_transport_failures(task) {
+  let attempts = [
+    failed("tls: failed to verify certificate: x509: certificate is not valid"),
+    {success: true, stdout: "{\"ok\":true}", stderr: "", timed_out: false},
+  ]
+  let waits: list<int> = []
+  const adapters: GitHubApiAdapters = {
+    request: { _path ->
+      const next = attempts[0] ?? failed("fixture exhausted")
+      attempts = attempts[1:]
+      return next
+    },
+    wait: { delay_ms -> waits = waits + [delay_ms] },
+  }
+  const receipt = github_api_json_with_retry(
+    adapters,
+    "/repos/burin-labs/harn/actions/runs/1/jobs",
+    {max_attempts: 3, delay_ms: 25},
+  )
+  assert_eq(receipt.ok, true)
+  assert_eq(receipt.attempts, 2)
+  assert_eq(receipt.value?.ok, true)
+  assert_eq(waits, [25])
+}
+
+pipeline test_github_api_fails_closed_after_bounded_transport_retries(task) {
+  let request_count = 0
+  const adapters: GitHubApiAdapters = {
+    request: { _path ->
+      request_count = request_count + 1
+      return failed("connection reset by peer")
+    },
+    wait: { _delay_ms -> nil },
+  }
+  const receipt = github_api_json_with_retry(
+    adapters,
+    "/repos/burin-labs/harn/actions/runs/1/jobs",
+    {max_attempts: 3, delay_ms: 0},
+  )
+  assert_eq(receipt.ok, false)
+  assert_eq(receipt.attempts, 3)
+  assert_eq(receipt.failure_kind, "transient_transport")
+  assert_eq(request_count, 3)
+}
+
+pipeline test_github_api_does_not_retry_semantic_or_malformed_responses(task) {
+  assert_eq(github_api_failure_kind(failed("gh: Not Found (HTTP 404)")), "command")
+  let request_count = 0
+  const adapters: GitHubApiAdapters = {
+    request: { _path ->
+      request_count = request_count + 1
+      return {success: true, stdout: "not-json", stderr: "", timed_out: false}
+    },
+    wait: { _delay_ms -> nil },
+  }
+  const receipt = github_api_json_with_retry(
+    adapters,
+    "/repos/burin-labs/harn/actions/runs/1/jobs",
+    {max_attempts: 3, delay_ms: 0},
+  )
+  assert_eq(receipt.ok, false)
+  assert_eq(receipt.failure_kind, "invalid_json")
+  assert_eq(request_count, 1)
+  const null_receipt = github_api_json_with_retry(
+    {
+      request: { _path -> return {success: true, stdout: "null", stderr: "", timed_out: false} },
+      wait: { _delay_ms -> nil },
+    },
+    "/repos/burin-labs/harn/nullable",
+    {max_attempts: 3, delay_ms: 0},
+  )
+  assert_eq(null_receipt.ok, true)
+  assert_eq(null_receipt.attempts, 1)
+}
