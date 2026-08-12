@@ -1375,7 +1375,8 @@ Harn transcript.
 |---|---|---|
 | `local:<model>` | `ollama` | `<model>` |
 | `ollama:<model>` | `ollama` | `<model>` |
-| `<org>/<model>` (one slash) | `openrouter` | unchanged |
+| `ollama/<model>` | `ollama` | `<model>` |
+| `<org>/<model>` (one slash, except `ollama/`) | `openrouter` | unchanged |
 | `claude-*` | `anthropic` | unchanged |
 | `gpt-*`, `o1*`, `o3*`, `o4*` | `openai` | unchanged |
 | `gemini-*` | `gemini` | unchanged |
