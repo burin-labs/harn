@@ -235,6 +235,8 @@ const RELEASE_CACHE_JOB = "build"
 
 const RELEASE_CACHE_SHARED_KEY = "release-$" + "{{ matrix.target }}"
 
+const RELEASE_CACHE_SOURCE_KEY = "$" + "{{ matrix.rust_cache_broad_restore_prefix }}"
+
 const RELEASE_CACHE_SAVE_ENV = "$"
   + "{{ ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && (inputs.warm_cache_only || inputs.candidate_only) && github.ref == 'refs/heads/main')) && 'true' || 'false' }}"
 
@@ -1040,6 +1042,14 @@ fn release_cache_retention_errors(workflows: dict) -> list<string> {
     errors = errors
       + [
       "${RELEASE_CACHE_WORKFLOW}:${RELEASE_CACHE_JOB} must derive the release cache write from HARN_RELEASE_CACHE_SAVE_ENABLED",
+    ]
+  }
+  if len(writers) == 1
+    && trim(to_string(writers[0]?.with?.["source-key"] ?? ""))
+    != RELEASE_CACHE_SOURCE_KEY {
+    errors = errors
+      + [
+      "${RELEASE_CACHE_WORKFLOW}:${RELEASE_CACHE_JOB} must bind the exact release cache to the runner-compatibility projection",
     ]
   }
   return errors

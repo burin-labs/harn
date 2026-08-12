@@ -341,6 +341,7 @@ fn workflows() {
               uses: "./.github/actions/rust-cache",
               with: {
                 "shared-key": "release-" + gha_expression("matrix.target"),
+                "source-key": gha_expression("matrix.rust_cache_broad_restore_prefix"),
                 "prune-superseded-release-generations": true,
                 save: gha_expression("env.HARN_RELEASE_CACHE_SAVE_ENABLED == 'true'"),
               },
@@ -1311,6 +1312,29 @@ pipeline test_ci_cache_policy_rejects_unbounded_release_writer(harness: Harness,
   assert(
     errors.contains(
       "build-release-binaries.yml:build must prune superseded release generations before saving",
+    ),
+  )
+}
+
+pipeline test_ci_cache_policy_rejects_unpartitioned_release_exact_cache(harness: Harness, task) {
+  const bounded = workflows()["build-release-binaries.yml"].jobs.build
+  const release_cache = bounded.steps[0]
+  const invalid = {
+    ...workflows(),
+    "build-release-binaries.yml": {
+      jobs: {
+        build: {
+          ...bounded,
+          steps: [{...release_cache, with: {...release_cache.with, "source-key": ""}}],
+        },
+        cache_budget: workflows()["build-release-binaries.yml"].jobs.cache_budget,
+      },
+    },
+  }
+  const errors = ci_cache_policy_errors(policy(), action(), node_action(), invalid)
+  assert(
+    errors.contains(
+      "build-release-binaries.yml:build must bind the exact release cache to the runner-compatibility projection",
     ),
   )
 }
