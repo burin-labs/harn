@@ -1,5 +1,6 @@
 import { help_requested, parse, parser } from "std/cli/argparse"
 import { render_table } from "std/table"
+import { github_api_json_result } from "./github_api.harn"
 
 const DEFAULT_ORG = "burin-labs"
 
@@ -83,18 +84,6 @@ fn sort_spend_rows(rows: list) -> list {
     out = next
   }
   return out
-}
-
-fn parse_json_maybe(text: string) {
-  const trimmed = text.trim()
-  if trimmed == "" {
-    return nil
-  }
-  return try {
-    json_parse(trimmed)
-  } catch (_err) {
-    nil
-  }
 }
 
 pub fn has_billing_usage_items(data) -> bool {
@@ -233,16 +222,17 @@ fn require_gh(harness: Harness) {
   }
 }
 
-fn gh_api_json(process: HarnessProcess, path: string) {
-  const res = process.run({program: "gh", args: ["api", path]})
-  if !res.success {
+fn gh_api_json(process: HarnessProcess, clock: HarnessClock, path: string) {
+  const receipt = github_api_json_result(process, clock, path)
+  if !receipt.ok {
     return nil
   }
-  return parse_json_maybe(res.stdout)
+  return receipt.value
 }
 
 fn collect_run_timing_rows(
   process: HarnessProcess,
+  clock: HarnessClock,
   org: string,
   repos: list<string>,
   runs_per_repo: int,
@@ -251,10 +241,15 @@ fn collect_run_timing_rows(
   for repo in repos {
     const runs = gh_api_json(
       process,
+      clock,
       "/repos/${org}/${repo}/actions/runs?per_page=${runs_per_repo}",
     )
     for ref in action_run_refs(runs) {
-      const timing = gh_api_json(process, "/repos/${org}/${repo}/actions/runs/${ref.id}/timing")
+      const timing = gh_api_json(
+        process,
+        clock,
+        "/repos/${org}/${repo}/actions/runs/${ref.id}/timing",
+      )
       if timing == nil {
         continue
       }
@@ -289,7 +284,7 @@ fn main(harness: Harness) {
   require_gh(harness)
   const billing_path =
     "/orgs/${org}/settings/billing/usage?year=${current_utc_year(harness.process)}"
-  const billing = gh_api_json(harness.process, billing_path)
+  const billing = gh_api_json(harness.process, harness.clock, billing_path)
   if parsed?.json ?? false {
     if has_billing_usage_items(billing) {
       harness.stdio.println(json_stringify_pretty(billing))
@@ -316,7 +311,9 @@ fn main(harness: Harness) {
       "(billing usage endpoint unavailable or unauthorized; falling back to run /timing minutes)",
     )
     harness.stdio.println(
-      render_spend_table(collect_run_timing_rows(harness.process, org, repos, runs_per_repo)),
+      render_spend_table(
+        collect_run_timing_rows(harness.process, harness.clock, org, repos, runs_per_repo),
+      ),
     )
   }
   return nil

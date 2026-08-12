@@ -1,0 +1,119 @@
+pub type GitHubApiFailureKind = "command" | "invalid_json" | "transient_transport"
+
+pub type GitHubApiAttempt = {success: bool, stdout: string, stderr: string, timed_out: bool}
+
+pub type GitHubApiRetryPolicy = {max_attempts: int, delay_ms: int}
+
+pub type GitHubApiReceipt = {
+  ok: bool,
+  attempts: int,
+  value?: unknown,
+  failure_kind?: GitHubApiFailureKind,
+  detail?: string,
+}
+
+pub type GitHubApiAdapters = {request: fn(string) -> GitHubApiAttempt, wait: fn(int) -> nil}
+
+const DEFAULT_RETRY_POLICY: GitHubApiRetryPolicy = {max_attempts: 3, delay_ms: 1000}
+
+/** Classify only known transport failures as retryable. */
+pub fn github_api_failure_kind(attempt: GitHubApiAttempt) -> GitHubApiFailureKind {
+  if attempt.timed_out {
+    return "transient_transport"
+  }
+  const detail = attempt.stderr.lower()
+  if detail.contains("tls:")
+    || detail.contains("x509:")
+    || detail.contains("connection reset")
+    || detail.contains("connection timed out")
+    || detail.contains("unexpected eof")
+    || detail.contains("temporarily unavailable")
+    || detail.contains("502 bad gateway")
+    || detail.contains("503 service unavailable")
+    || detail.contains("504 gateway timeout") {
+    return "transient_transport"
+  }
+  return "command"
+}
+
+/** Run one read-only GitHub API request with bounded transport recovery. */
+pub fn github_api_json_with_retry(
+  adapters: GitHubApiAdapters,
+  path: string,
+  policy: GitHubApiRetryPolicy,
+) -> GitHubApiReceipt {
+  const max_attempts = max(1, policy.max_attempts)
+  const delay_ms = max(0, policy.delay_ms)
+  let attempt_number = 1
+  while attempt_number <= max_attempts {
+    const attempt = adapters.request(path)
+    if attempt.success {
+      const parsed = try {
+        Ok(json_parse(attempt.stdout))
+      } catch (_err) {
+        Err("invalid_json")
+      }
+      if is_err(parsed) {
+        return {
+          ok: false,
+          attempts: attempt_number,
+          failure_kind: "invalid_json",
+          detail: "GitHub API returned invalid JSON",
+        }
+      }
+      return {ok: true, attempts: attempt_number, value: unwrap(parsed)}
+    }
+    const failure_kind = github_api_failure_kind(attempt)
+    if failure_kind != "transient_transport" || attempt_number == max_attempts {
+      return {
+        ok: false,
+        attempts: attempt_number,
+        failure_kind: failure_kind,
+        detail: "GitHub API request failed: ${attempt.stderr.trim()}",
+      }
+    }
+    adapters.wait(delay_ms)
+    attempt_number = attempt_number + 1
+  }
+  return {
+    ok: false,
+    attempts: max_attempts,
+    failure_kind: "command",
+    detail: "GitHub API request exhausted its retry budget",
+  }
+}
+
+pub fn github_api_json_result(
+  process: HarnessProcess,
+  clock: HarnessClock,
+  path: string,
+  policy: GitHubApiRetryPolicy? = nil,
+) -> GitHubApiReceipt {
+  const adapters: GitHubApiAdapters = {
+    request: { requested_path ->
+      const result = process.run({program: "gh", args: ["api", requested_path], timeout_ms: 30000})
+      return {
+        success: result.success,
+        stdout: result.stdout,
+        stderr: result.stderr,
+        timed_out: result.timed_out,
+      }
+    },
+    wait: { delay_ms -> clock.sleep_ms(delay_ms) },
+  }
+  return github_api_json_with_retry(adapters, path, policy ?? DEFAULT_RETRY_POLICY)
+}
+
+/** Return parsed JSON or fail closed with the typed retry receipt's detail. */
+pub fn github_api_json(
+  process: HarnessProcess,
+  clock: HarnessClock,
+  path: string,
+  policy: GitHubApiRetryPolicy? = nil,
+) -> unknown {
+  const receipt = github_api_json_result(process, clock, path, policy)
+  if !receipt.ok {
+    throw receipt.detail ?? "GitHub API request failed"
+  }
+  return receipt.value
+}
