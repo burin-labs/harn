@@ -1,7 +1,7 @@
-//! JSON-RPC 2.0 bridge that delegates VM effects to a host process over
-//! stdin/stdout when `harn run --bridge` is active.
+//! JSON-RPC 2.0 host bridge for VM effects when `harn run --bridge` is active.
 
 mod authority;
+pub use authority::leading_authority_param_count;
 pub use authority::{inject_leading_authorities, inject_leading_authority};
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::future::Future;

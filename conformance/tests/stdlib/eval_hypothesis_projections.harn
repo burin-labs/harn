@@ -1,0 +1,29 @@
+import {
+  hypothesis_compile_projection,
+  hypothesis_inspect_projection,
+  hypothesis_report_projection,
+} from "../../../examples/hypothesis-control-plane/lib.harn"
+import {
+  hypothesis_fixture_context,
+  hypothesis_fixture_intent,
+} from "./hypothesis_fixture_lib.harn"
+
+pipeline default(harness: Harness, _task) {
+  const compiled = hypothesis_compile_projection(
+    hypothesis_fixture_intent(),
+    hypothesis_fixture_context(),
+  )
+  require compiled.ok && compiled.plan != nil, "the projection reaches the deterministic compiler"
+  const plan = compiled.plan
+  const inspected = hypothesis_inspect_projection(harness.obs, plan.hypothesis_id)
+  require inspected.kind == "inspection"
+    && inspected.state
+    == "unregistered"
+    && inspected.ledger.snapshot.event_count
+    == 0,
+    "the projection reaches the verified empty ledger"
+  const rendered = hypothesis_report_projection(harness.obs, plan.hypothesis_id)
+  require rendered.hypothesis_id == plan.hypothesis_id,
+    "the report is rendered from the same ledger aggregate"
+  harness.stdio.println("hypothesis-projections-ok")
+}

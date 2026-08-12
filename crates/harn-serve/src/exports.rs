@@ -7,6 +7,8 @@ use harn_parser::{Attribute, AttributeArg, Node, TypeExpr};
 use crate::limits::{limits_and_budget_from_attributes, BudgetSpec, RouteLimits};
 use crate::DispatchError;
 
+mod schema_projection;
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct ExportedParam {
     pub name: String,
@@ -385,9 +387,10 @@ impl ExportCatalog {
             DispatchError::Validation(format!("failed to parse {}: {error}", path.display()))
         })?;
 
-        // Resolve `type` aliases declared in the module so a parameter typed as a
-        // named alias projects its real shape/enum instead of erasing to `{}`.
-        let schema_resolver = harn_vm::SchemaAliasResolver::from_program(&program);
+        // Resolve local and imported type aliases through the same module graph
+        // as the checker so served JSON schemas stay structural without a
+        // second import resolver.
+        let schema_resolver = schema_projection::resolver_for_module(path, &program);
         let mut functions = BTreeMap::new();
         let mut diagnostics = Vec::new();
         for node in &program {
@@ -413,14 +416,15 @@ impl ExportCatalog {
             let stream = stream_from_attributes(attrs, name, route.as_ref(), &mut diagnostics);
             let raw = raw_from_attributes(attrs, name, route.as_ref(), stream, &mut diagnostics);
             let ws = ws_from_attributes(attrs, name, route.as_ref(), raw, &mut diagnostics);
+            let public_params = schema_projection::public_params(params);
             functions.insert(
                 name.clone(),
                 ExportedFunction {
                     name: name.clone(),
                     kind: ExportedCallableKind::Function,
-                    params: exported_params(params, &schema_resolver),
+                    params: schema_projection::exported_params(public_params, &schema_resolver),
                     return_type: return_type.clone(),
-                    input_schema: schema_resolver.json_schema_for_typed_params(params),
+                    input_schema: schema_resolver.json_schema_for_typed_params(public_params),
                     output_schema: return_type
                         .as_ref()
                         .and_then(|type_expr| schema_resolver.json_schema_for_type_expr(type_expr)),
@@ -462,14 +466,15 @@ impl ExportCatalog {
             let stream = stream_from_attributes(attrs, name, None, &mut diagnostics);
             let raw = raw_from_attributes(attrs, name, None, stream, &mut diagnostics);
             let ws = ws_from_attributes(attrs, name, None, raw, &mut diagnostics);
+            let public_params = schema_projection::public_params(params);
             functions
                 .entry(name.clone())
                 .or_insert_with(|| ExportedFunction {
                     name: name.clone(),
                     kind: ExportedCallableKind::Pipeline,
-                    params: exported_params(params, &schema_resolver),
+                    params: schema_projection::exported_params(public_params, &schema_resolver),
                     return_type: return_type.clone(),
-                    input_schema: schema_resolver.json_schema_for_typed_params(params),
+                    input_schema: schema_resolver.json_schema_for_typed_params(public_params),
                     output_schema: return_type
                         .as_ref()
                         .and_then(|type_expr| schema_resolver.json_schema_for_type_expr(type_expr)),
@@ -505,26 +510,6 @@ impl ExportCatalog {
     pub fn diagnostics(&self) -> &[ExportDiagnostic] {
         &self.diagnostics
     }
-}
-
-fn exported_params(
-    params: &[harn_parser::TypedParam],
-    resolver: &harn_vm::SchemaAliasResolver,
-) -> Vec<ExportedParam> {
-    params
-        .iter()
-        .map(|param| ExportedParam {
-            name: param.name.clone(),
-            type_expr: param.type_expr.clone(),
-            input_schema: param
-                .type_expr
-                .as_ref()
-                .and_then(|type_expr| resolver.json_schema_for_type_expr(type_expr))
-                .unwrap_or_else(|| serde_json::json!({})),
-            has_default: param.default_value.is_some(),
-            rest: param.rest,
-        })
-        .collect()
 }
 
 /// The two scope buckets a `@scopes(...)` attribute set resolves into: a
@@ -1563,11 +1548,9 @@ pipeline default(harness: Harness, task) {
         let catalog = ExportCatalog::from_path(&path).expect("catalog");
         let default = catalog.function("default").expect("default pipeline");
         assert_eq!(default.kind, ExportedCallableKind::Pipeline);
-        assert_eq!(default.params[0].name, "harness");
-        assert!(default
-            .params
-            .get(1)
-            .is_some_and(|param| param.name == "task"));
+        assert_eq!(default.params.len(), 1);
+        assert_eq!(default.params[0].name, "task");
+        assert!(default.input_schema["properties"].get("harness").is_none());
     }
 
     /// Build a catalog from inline source, asserting it parses cleanly.

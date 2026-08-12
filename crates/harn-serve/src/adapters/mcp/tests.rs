@@ -45,6 +45,27 @@ pub fn greet(name: string) -> string {
 }
 
 #[tokio::test]
+async fn tools_list_hides_host_injected_authority() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let script = dir.path().join("server.harn");
+    std::fs::write(
+        &script,
+        r"
+pub fn inspect(harness: Harness, hypothesis_id: string) -> string {
+  return hypothesis_id
+}
+",
+    )
+    .expect("write script");
+    let core = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");
+    let server = McpServer::new(McpServerConfig::new(core));
+    let tools = server.tools_list_result(&json!({}));
+    let schema = &tools["tools"][0]["inputSchema"];
+    assert!(schema["properties"].get("harness").is_none());
+    assert_eq!(schema["required"], json!(["hypothesis_id"]));
+}
+
+#[tokio::test]
 async fn discover_and_resources_expose_server_card() {
     let dir = tempfile::tempdir().expect("tempdir");
     let script = dir.path().join("server.harn");

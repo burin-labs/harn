@@ -27,7 +27,17 @@ pub struct DispatchCoreConfig {
 
 impl DispatchCoreConfig {
     pub fn for_script(path: impl Into<PathBuf>) -> Self {
-        let script_path = path.into();
+        let path = path.into();
+        // Dispatch changes the VM source directory to the script's parent. An
+        // absolute identity prevents a relative `dir/script.harn` from being
+        // resolved as `dir/dir/script.harn` when an exported call loads it.
+        let script_path = if path.is_absolute() {
+            path
+        } else {
+            std::env::current_dir()
+                .unwrap_or_else(|_| PathBuf::from("."))
+                .join(path)
+        };
         let base_dir = script_path.parent().unwrap_or(Path::new(".")).to_path_buf();
         let service_name = script_path
             .file_stem()
@@ -45,5 +55,19 @@ impl DispatchCoreConfig {
             trusted_host_dispatch: false,
             limit_registry: None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn relative_script_paths_are_bound_to_the_launch_directory() {
+        let relative = PathBuf::from("examples/server.harn");
+        let config = DispatchCoreConfig::for_script(&relative);
+        assert!(config.script_path.is_absolute());
+        assert!(config.script_path.ends_with(&relative));
+        assert_eq!(config.base_dir, config.script_path.parent().unwrap());
     }
 }

@@ -619,7 +619,7 @@ impl DispatchCore {
                         &format!("serve export `{}`", request.function),
                     )
                     .map_err(classify_vm_error)?;
-                    let user_args = build_vm_args(&request.arguments, function, !args.is_empty())?;
+                    let user_args = build_vm_args(&request.arguments, function)?;
                     args.extend(user_args);
                     let result = vm.call_closure_pub(closure, &args).await;
 
@@ -701,7 +701,7 @@ impl DispatchCore {
                         &format!("serve pipeline `{}`", function.name),
                     )
                     .map_err(classify_vm_error)?;
-                    let user_args = build_vm_args(&arguments, &function, !args.is_empty())?;
+                    let user_args = build_vm_args(&arguments, &function)?;
                     args.extend(user_args);
                     let result = vm.call_closure_pub(&closure, &args).await;
 
@@ -767,16 +767,10 @@ impl DispatchCore {
 fn build_vm_args(
     arguments: &CallArguments,
     function: &crate::ExportedFunction,
-    has_leading_authority: bool,
 ) -> Result<Vec<VmValue>, DispatchError> {
-    let mut params = function.params.as_slice();
-    // Authority-bearing parameters are host-injected instead of JSON-bound.
-    // Exclude the leading root or nominal Harness slot from the public request
-    // schema; the VM bridge remains the semantic owner of deriving the
-    // declared handle from the installed root.
-    if has_leading_authority {
-        params = &params[1..];
-    }
+    // ExportCatalog already removes the contiguous host-injected authority
+    // prefix. The remaining parameters are exactly the caller-owned JSON API.
+    let params = function.params.as_slice();
 
     let rest = match arguments {
         CallArguments::Positional(values) => {

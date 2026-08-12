@@ -231,6 +231,14 @@ const advanced = hypothesis_workflow(
 
 Call `design_hypothesis` separately when natural-language design is needed.
 
+## Use the same boundary from CLI or MCP
+
+The [hypothesis control-plane example](../../../examples/hypothesis-control-plane/README.md)
+exports the planner, compiler, workflow, ledger inspection, and report as typed
+functions. Run one function through `harn run`, or expose the same functions as
+structured tools with `harn serve mcp`. The projection adds no scheduler,
+manifest, decision rule, or write authority.
+
 ## Verify the boundary you claim
 
 For deterministic compiler changes, run the exact conformance fixture:
