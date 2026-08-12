@@ -54,6 +54,10 @@ harn test-bench run examples/hypothesis-control-plane/scenario.harn \
   --hypothesis-scenario aa -- --scenario=aa
 ```
 
+When `--model` is set, the planner derives its output budget from that model's
+registered context and output limits. Use `--max-output-tokens=<n>` only to set
+an explicit bounded override for a diagnostic run.
+
 Replace both `aa` values with `known-bad`, `denied`, `budget-exhausted`, or
 `missing-telemetry` to exercise the corresponding terminal path. Use a fresh
 SQLite path for each independent scenario.

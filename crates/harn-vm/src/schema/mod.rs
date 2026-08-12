@@ -18,11 +18,18 @@ pub(crate) use api::{
 };
 pub use canonicalize::json_to_vm_value;
 
-/// Rewrite Harn type vocabulary inside a JSON-Schema-shaped value without
+/// Rewrite Harn schema vocabulary inside a JSON-Schema-shaped value without
 /// canonicalizing or dropping any other keyword.
-pub(crate) fn normalize_json_schema_type_names(value: &mut serde_json::Value) {
+pub(crate) fn normalize_provider_json_schema(value: &mut serde_json::Value) {
     match value {
         serde_json::Value::Object(object) => {
+            // `schema_of(...)` uses Harn's canonical `union` spelling. That is
+            // an internal schema key, not a JSON Schema keyword; letting it
+            // reach a provider makes the provider reject an otherwise valid
+            // optional field before Harn's prompt-mode fallback can run.
+            if let Some(branches) = object.remove("union") {
+                object.entry("anyOf".to_string()).or_insert(branches);
+            }
             if let Some(serde_json::Value::String(kind)) = object.get_mut("type") {
                 if let Some(normalized) = json_schema_type_name(kind) {
                     *kind = normalized.to_string();
@@ -38,12 +45,12 @@ pub(crate) fn normalize_json_schema_type_names(value: &mut serde_json::Value) {
                 }
             }
             for child in object.values_mut() {
-                normalize_json_schema_type_names(child);
+                normalize_provider_json_schema(child);
             }
         }
         serde_json::Value::Array(items) => {
             for item in items {
-                normalize_json_schema_type_names(item);
+                normalize_provider_json_schema(item);
             }
         }
         _ => {}

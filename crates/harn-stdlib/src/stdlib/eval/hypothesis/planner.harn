@@ -6,6 +6,7 @@ import {
   ExperimentCompileReceipt,
   ExperimentIntent,
 } from "std/eval/hypothesis/contracts"
+import { recommend_max_output_tokens } from "std/llm/budget"
 
 pub type HypothesisPlannerOptions = {
   provider?: string,
@@ -151,6 +152,12 @@ pub fn design_hypothesis(
       examples: json_stringify(__examples()),
     },
   )
+  const max_tokens = opts.max_tokens
+    ?? if opts.model != nil {
+    recommend_max_output_tokens(harness.llm, {prompt: prompt, model: opts.model, task_kind: "json"})
+  } else {
+    1600
+  }
   const checkpoint = typed_output_checkpoint(
     harness.agent,
     harness.llm,
@@ -166,7 +173,7 @@ pub fn design_hypothesis(
       } else {
         nil
       },
-      max_tokens: opts.max_tokens ?? 1600,
+      max_tokens: max_tokens,
       schema_retries: 0,
       validator_retries: retries,
       repair: {enabled: false},

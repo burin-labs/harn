@@ -178,7 +178,7 @@ pub(super) fn vm_build_json_schema(params: Option<&crate::value::DictMap>) -> se
     if let Some(params) = params {
         if looks_like_json_schema_object(params) {
             let mut json = super::super::vm_value_to_json(&VmValue::dict(params.clone()));
-            crate::schema::normalize_json_schema_type_names(&mut json);
+            crate::schema::normalize_provider_json_schema(&mut json);
             return json;
         }
     }
@@ -219,7 +219,7 @@ fn vm_param_to_json_schema(value: &VmValue) -> (serde_json::Value, bool) {
         ),
         VmValue::Dict(dict) => {
             let mut json = super::super::vm_value_to_json(value);
-            crate::schema::normalize_json_schema_type_names(&mut json);
+            crate::schema::normalize_provider_json_schema(&mut json);
             let is_required = dict
                 .get("required")
                 .and_then(|value| match value {

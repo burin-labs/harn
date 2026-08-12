@@ -74,6 +74,8 @@ pub type LlmUsage = {
   cache_visibility?: string,
   cache_savings_usd: float,
   served_fast: bool,
+  /* Optional only for replay compatibility with recordings made before this field existed. */
+  accounting_status?: "reported" | "unknown",
   provider_telemetry?: dict,
   /*
    * Optional because a replayed recording captured before this field existed

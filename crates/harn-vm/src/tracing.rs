@@ -1034,6 +1034,7 @@ mod tests {
             cache_savings_usd: 0.0,
             cache_hit: true,
             served_fast: false,
+            accounting_status: crate::llm::usage::UsageAccountingStatus::Reported,
         };
         let pairs: BTreeMap<&str, serde_json::Value> = usage
             .metadata_pairs("anthropic", "claude-sonnet-4")
@@ -1061,6 +1062,7 @@ mod tests {
             cache_savings_usd: 0.0,
             cache_hit: false,
             served_fast: false,
+            accounting_status: crate::llm::usage::UsageAccountingStatus::Reported,
         };
         let pairs: BTreeMap<&str, serde_json::Value> = usage
             .metadata_pairs("local", "local-model")

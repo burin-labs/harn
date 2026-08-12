@@ -146,6 +146,7 @@ or derive cache behavior independently.
 | `cache_supported` | bool | Whether the provider reports prompt-cache accounting |
 | `cache_hit_ratio` | float \| nil | Fraction of prompt tokens served from cache; `nil` when the provider reports no cache accounting |
 | `cache_visibility` | string | `"unsupported"` when the provider exposes no cache accounting (e.g. native Ollama), so a local model is never scored as a 100% cache miss |
+| `accounting_status` | string | `"reported"` when token or authoritative cost telemetry was observed; `"unknown"` when a completed response omitted accounting telemetry. Unknown usage keeps `cost_usd` nil rather than treating the call as free. |
 | `cache_savings_usd` | float | Estimated prompt-cache savings versus full input-token price; negative when cache writes cost more than normal input |
 | `served_fast` | bool | `true` when the provider confirmed it served this request at the accelerated ("fast mode") tier; drives premium-tier billing |
 | `provider_telemetry` | dict | Raw provider-reported usage/telemetry, passed through when present |

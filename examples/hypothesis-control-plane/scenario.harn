@@ -59,16 +59,16 @@ fn execute(
   request: string,
   provider: string,
   model: string?,
+  max_output_tokens: int?,
   design_only: bool,
 ) {
   const context: ExperimentCompileContext = hypothesis_fixture_context(scenario)
-  let planner_options: HypothesisPlannerOptions = {
-    provider: provider,
-    max_tokens: 1200,
-    validator_retries: 1,
-  }
+  let planner_options: HypothesisPlannerOptions = {provider: provider, validator_retries: 1}
   if model != nil {
     planner_options = planner_options + {model: model}
+  }
+  if max_output_tokens != nil {
+    planner_options = planner_options + {max_tokens: max_output_tokens}
   }
   const planned = design_hypothesis(harness, request, context, planner_options)
   if design_only {
@@ -107,9 +107,12 @@ pipeline default(harness: Harness) {
     ?? "Does the registered candidate prompt improve frozen-fixture task success?"
   const provider = arg_value(argv, "--provider=") ?? "mock"
   const model = arg_value(argv, "--model=")
+  const max_output_tokens = to_int(arg_value(argv, "--max-output-tokens="))
   const design_only = arg_value(argv, "--design-only=") == "true"
   harness.stdio.println(
-    json_stringify_pretty(execute(harness, scenario, request, provider, model, design_only)),
+    json_stringify_pretty(
+      execute(harness, scenario, request, provider, model, max_output_tokens, design_only),
+    ),
   )
   return 0
 }
