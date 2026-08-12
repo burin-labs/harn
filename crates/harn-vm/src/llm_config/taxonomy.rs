@@ -23,7 +23,10 @@ pub(crate) fn infer_provider_with_config(
     config: &ProvidersConfig,
     model_id: &str,
 ) -> crate::llm::provider::ProviderInference {
-    if model_id.starts_with("local:") || model_id.starts_with("ollama:") {
+    if model_id.starts_with("local:")
+        || model_id.starts_with("ollama:")
+        || model_id.starts_with("ollama/")
+    {
         return crate::llm::provider::ProviderInference::builtin("ollama");
     }
     if model_id.starts_with("huggingface:") || model_id.starts_with("hf:") {

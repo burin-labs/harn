@@ -42,9 +42,9 @@ pub fn resolve_model(alias: &str) -> (String, Option<String>) {
 
 /// Strip host/provider selector prefixes that identify transport, not the
 /// provider-native model id. This mirrors the host's existing normalization so
-/// `ollama:qwen3:30b` reaches Ollama as `qwen3:30b` instead of an invalid
-/// model named `ollama`. Cerebras follows the same convention but uses a
-/// slash separator (`cerebras/gpt-oss-120b`) because its own /v1/models
+/// `ollama:qwen3:30b` and `ollama/qwen3:30b` reach Ollama as
+/// `qwen3:30b` instead of an invalid model named `ollama`. Cerebras follows
+/// the slash convention (`cerebras/gpt-oss-120b`) because its own /v1/models
 /// endpoint returns bare names that overlap OpenAI's families.
 pub fn normalize_model_id(raw: &str) -> String {
     normalize_model_id_with_config(raw, &effective_config())
@@ -64,8 +64,14 @@ fn normalize_model_id_with_config(raw: &str, config: &ProvidersConfig) -> String
     raw.to_string()
 }
 
-const PROVIDER_SELECTOR_PREFIXES: &[&str] =
-    &["ollama:", "local:", "huggingface:", "hf:", "cerebras/"];
+const PROVIDER_SELECTOR_PREFIXES: &[&str] = &[
+    "ollama:",
+    "ollama/",
+    "local:",
+    "huggingface:",
+    "hf:",
+    "cerebras/",
+];
 
 /// Resolve an alias or selector into the complete catalog identity hosts need:
 /// provider inference, prefix-normalized model id, default tool format, and tier.

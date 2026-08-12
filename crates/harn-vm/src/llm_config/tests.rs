@@ -708,18 +708,18 @@ fn test_user_catalog_overlay_re_homes_model_provider() {
 
 #[test]
 fn test_resolve_model_info_normalizes_provider_prefixes() {
-    let local = resolve_model_info("local:gemma-4-e4b-it");
-    assert_eq!(local.id, "gemma-4-e4b-it");
-    assert_eq!(local.provider, "ollama");
-
-    let ollama = resolve_model_info("ollama:qwen3:30b-a3b");
-    assert_eq!(ollama.id, "qwen3:30b-a3b");
-    assert_eq!(ollama.provider, "ollama");
-
+    for (selector, model_id) in [
+        ("local:gemma-4-e4b-it", "gemma-4-e4b-it"),
+        ("ollama:qwen3:30b-a3b", "qwen3:30b-a3b"),
+        ("ollama/gemma4:26b", "gemma4:26b"),
+    ] {
+        let model = resolve_model_info(selector);
+        assert_eq!(model.id, model_id);
+        assert_eq!(model.provider, "ollama");
+    }
     let hf = resolve_model_info("hf:Qwen/Qwen3.6-35B-A3B");
     assert_eq!(hf.id, "Qwen/Qwen3.6-35B-A3B");
     assert_eq!(hf.provider, "huggingface");
-
     let cerebras = resolve_model_info("cerebras/gpt-oss-120b");
     assert_eq!(cerebras.id, "gpt-oss-120b");
     assert_eq!(cerebras.provider, "cerebras");
