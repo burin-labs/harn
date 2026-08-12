@@ -10,6 +10,7 @@ use harn_session_store::{
     AppendEvent, CreateSession, MemorySessionStore, SessionEventKind, SessionStore,
 };
 use serde_json::json;
+use std::collections::BTreeMap;
 
 use super::*;
 
@@ -176,6 +177,13 @@ async fn capstone_like_store() -> (MemorySessionStore, String) {
     let meta = store
         .create(CreateSession {
             id: Some("019fc7e6-3103-7610-81ed-91599858fa1a".to_string()),
+            attributes: BTreeMap::from([
+                ("source".to_string(), json!("burin-headless")),
+                ("source_version".to_string(), json!("0.2.0")),
+                ("source_revision".to_string(), json!("burin-sha")),
+                ("harn_version".to_string(), json!("v0.10.84")),
+                ("harn_revision".to_string(), json!("harn-sha")),
+            ]),
             ..CreateSession::default()
         })
         .await
@@ -222,6 +230,11 @@ async fn a_headless_session_projects_the_run_record_no_host_ever_wrote() {
         "a run with a terminal event has an end time even when its session was never closed"
     );
     assert_eq!(run.root_run_id.as_deref(), Some(id.as_str()));
+    assert_eq!(run.metadata["build"]["producer"], "burin-headless");
+    assert_eq!(run.metadata["build"]["producer_version"], "0.2.0");
+    assert_eq!(run.metadata["build"]["producer_revision"], "burin-sha");
+    assert_eq!(run.metadata["build"]["harn_version"], "v0.10.84");
+    assert_eq!(run.metadata["build"]["harn_revision"], "harn-sha");
 
     let usage = run.usage.as_ref().expect("usage");
     assert_eq!(usage.call_count, 2);
@@ -239,6 +252,21 @@ async fn a_headless_session_projects_the_run_record_no_host_ever_wrote() {
         run.metadata.get("iterations").and_then(|v| v.as_u64()),
         Some(2)
     );
+}
+
+#[test]
+fn incomplete_or_unknown_build_attributes_do_not_claim_provenance() {
+    assert!(build_from_session_attributes(&BTreeMap::from([
+        ("source".to_string(), json!("burin-headless")),
+        ("source_version".to_string(), json!("0.2.0")),
+    ]))
+    .is_none());
+    assert!(build_from_session_attributes(&BTreeMap::from([
+        ("source".to_string(), json!("burin-headless")),
+        ("source_version".to_string(), json!("0.2.0")),
+        ("harn_version".to_string(), json!("unknown")),
+    ]))
+    .is_none());
 }
 
 #[tokio::test]
