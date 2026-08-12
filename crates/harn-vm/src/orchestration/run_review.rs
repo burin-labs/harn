@@ -304,7 +304,6 @@ fn build_llm_options(model: Option<&str>) -> VmValue {
     let mut options = serde_json::json!({
         "provider": "auto",
         "model_tier": "small",
-        "temperature": 0.0,
         "max_tokens": 2048,
         "output": {"schema": model_review_schema(), "validation": "error"},
         "schema_retries": 0
@@ -808,6 +807,10 @@ mod tests {
         assert_eq!(value["model_tier"], "small");
         assert_eq!(value["schema_retries"], 0);
         assert!(value.get("model").is_none());
+        assert!(
+            value.get("temperature").is_none(),
+            "generic review options must leave optional sampling controls to model defaults"
+        );
     }
 
     #[test]
