@@ -1094,6 +1094,11 @@ jobs:
         continue-on-error: true
         with:
           shared-key: release-${{ matrix.target }}
+          # The broad prefix owns release-target compatibility (runner ABI,
+          # architecture, and generation). Feed that same typed projection to
+          # Swatinem's exact key so it cannot restore host executables from an
+          # older runner floor after the broad cache correctly misses.
+          source-key: ${{ matrix.rust_cache_broad_restore_prefix }}
           broad-restore-prefix: ${{ matrix.rust_cache_broad_restore_prefix }}
           cache-on-failure: true
           cache-bin: false

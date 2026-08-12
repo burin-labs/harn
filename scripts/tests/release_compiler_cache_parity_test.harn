@@ -13,6 +13,18 @@ fn step_by_name(steps, name: string) {
 pipeline test_release_build_records_cache_mode_stats_and_budget(harness: Harness, task) {
   const workflow = read_yaml(harness.fs, "../../.github/workflows/build-release-binaries.yml", nil)
   const steps = workflow?.jobs?.build?.steps ?? []
+  const rust_cache = steps.find(
+    { step -> trim(step?.uses ?? "") == "./.github/actions/rust-cache" },
+  )
+  assert(rust_cache != nil)
+  assert_eq(
+    trim(rust_cache?.with?.["source-key"] ?? ""),
+    gha_expression("matrix.rust_cache_broad_restore_prefix"),
+  )
+  assert_eq(
+    trim(rust_cache?.with?.["broad-restore-prefix"] ?? ""),
+    gha_expression("matrix.rust_cache_broad_restore_prefix"),
+  )
   assert(step_by_name(steps, "Summarize cache mode") != nil)
   assert(step_by_name(steps, "Summarize sccache stats") != nil)
   assert(step_by_name(steps, "Evaluate warm-build budget") != nil)
