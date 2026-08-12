@@ -122,6 +122,31 @@ pub fn exposed() -> string {
 }
 
 #[test]
+fn test_legacy_doc_fix_escapes_both_block_comment_delimiters() {
+    let source = r#"// Paths may contain /try/* or */ fragments.
+pub fn exposed() -> string {
+  return "x"
+}
+"#;
+    let diags = lint_source(source);
+    let fix = diags
+        .iter()
+        .find(|diagnostic| diagnostic.rule == "legacy-doc-comment")
+        .and_then(|diagnostic| diagnostic.fix.as_ref())
+        .expect("legacy-doc-comment must carry an autofix");
+    let edit = &fix[0];
+    let mut candidate = source.to_string();
+    candidate.replace_range(edit.span.start..edit.span.end, &edit.replacement);
+
+    assert!(
+        edit.replacement.contains("/try/&#42;") && edit.replacement.contains("&#42;/ fragments"),
+        "both delimiter directions must be escaped: {:?}",
+        edit.replacement
+    );
+    harn_parser::parse_source(&candidate).expect("the generated HarnDoc must parse");
+}
+
+#[test]
 fn test_plain_double_slash_adjacent_to_pub_fn_fires() {
     let diags = lint_source(
         r#"

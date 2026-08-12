@@ -130,7 +130,10 @@ pub(crate) fn canonical_doc_block(
     while end > start && body_lines[end - 1].trim().is_empty() {
         end -= 1;
     }
-    let body = &body_lines[start..end];
+    let body = body_lines[start..end]
+        .iter()
+        .map(|line| escape_doc_block_delimiters(line))
+        .collect::<Vec<_>>();
     if body.is_empty() {
         return format!("{indent_str}/** */");
     }
@@ -159,6 +162,17 @@ pub(crate) fn canonical_doc_block(
     out.push_str(&indent_str);
     out.push_str(" */");
     out
+}
+
+/// Keep prose copied from a line comment from becoming block-comment syntax.
+///
+/// Harn block comments nest, so a route wildcard such as `/try/*` opens a
+/// nested comment. The generated block's closing `*/` then closes that nested
+/// comment and leaves the outer HarnDoc unterminated. Numeric character
+/// references keep the copied prose recognizable while ensuring the generated
+/// source contains no delimiter contributed by the comment body.
+fn escape_doc_block_delimiters(line: &str) -> String {
+    line.replace("/*", "/&#42;").replace("*/", "&#42;/")
 }
 
 /// Collect and emit `legacy-doc-comment` diagnostics. Walks top-level items
