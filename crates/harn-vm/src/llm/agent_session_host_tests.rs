@@ -15,6 +15,8 @@ use super::{
 mod mock_dispatch;
 #[path = "agent_session_host_record_tool_data_tests.rs"]
 mod record_tool_data;
+#[path = "agent_session_host_tool_channel_history_tests.rs"]
+mod tool_channel_history;
 
 #[test]
 fn agent_init_control_has_the_declared_runtime_shape() {
