@@ -24,7 +24,6 @@ fn main(harness: Harness) {
 }
 "#;
     let output = harn_e2e_command()
-        .env("HARN_DEBUG_PROCESS_CLEANUP", "1")
         .args(["run", "--no-sandbox", "-e", source])
         .output()
         .expect("spawn harn command probe regression");

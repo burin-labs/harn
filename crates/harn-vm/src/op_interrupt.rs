@@ -541,7 +541,7 @@ fn start_kill_session() -> std::io::Result<()> {
 pub fn signal_pid_and_group(pid: u32, signal: i32) {
     #[cfg(unix)]
     {
-        if std::env::var_os("HARN_DEBUG_PROCESS_CLEANUP").is_some() {
+        {
             let self_pid = std::process::id() as i32;
             let target_pid = pid as i32;
             // SAFETY: these read-only process identity syscalls accept any
