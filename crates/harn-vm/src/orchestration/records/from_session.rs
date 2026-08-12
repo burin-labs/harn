@@ -530,6 +530,14 @@ fn assemble(
     if !fold.providers.is_empty() {
         metadata.insert("providers".to_string(), json!(fold.providers));
     }
+    if let Some(build) = build_from_session_attributes(&meta.attributes) {
+        metadata.insert(
+            "build".to_string(),
+            serde_json::to_value(build).map_err(|error| {
+                VmError::Runtime(format!("runs: failed to encode build provenance: {error}"))
+            })?,
+        );
+    }
     // Only reported when the run actually retried. A block of zeroes on every
     // clean run would train a reader to skip the one place the contention
     // signal appears.
@@ -595,6 +603,35 @@ fn assemble(
         execution: None,
         metadata,
         ..RunRecord::default()
+    })
+}
+
+#[derive(Serialize)]
+struct RunBuildRecord {
+    producer: String,
+    producer_version: String,
+    producer_revision: Option<String>,
+    harn_version: String,
+    harn_revision: Option<String>,
+}
+
+fn build_from_session_attributes(
+    attributes: &BTreeMap<String, serde_json::Value>,
+) -> Option<RunBuildRecord> {
+    let text = |key: &str| {
+        attributes
+            .get(key)
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty() && *value != "unknown")
+            .map(str::to_string)
+    };
+    Some(RunBuildRecord {
+        producer: text("source")?,
+        producer_version: text("source_version")?,
+        producer_revision: text("source_revision"),
+        harn_version: text("harn_version")?,
+        harn_revision: text("harn_revision"),
     })
 }
 
