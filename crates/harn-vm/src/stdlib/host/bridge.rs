@@ -2,7 +2,9 @@
 
 use std::cell::RefCell;
 use std::future::Future;
+use std::marker::PhantomData;
 use std::pin::Pin;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use crate::value::{VmError, VmValue};
@@ -74,12 +76,18 @@ pub fn set_host_call_bridge(bridge: Arc<dyn HostCallBridge>) {
 pub fn install_host_call_bridge(bridge: Arc<dyn HostCallBridge>) -> HostCallBridgeGuard {
     turn_cache::reset();
     let previous = HOST_CALL_BRIDGE.with(|slot| slot.borrow_mut().replace(bridge));
-    HostCallBridgeGuard { previous }
+    HostCallBridgeGuard {
+        previous,
+        _not_send: PhantomData,
+    }
 }
 
 #[must_use = "dropping the guard restores the previous host-call bridge"]
 pub struct HostCallBridgeGuard {
     previous: Option<Arc<dyn HostCallBridge>>,
+    // The installed bridge lives in thread-local storage and must be restored
+    // on the same thread.
+    _not_send: PhantomData<Rc<()>>,
 }
 
 impl Drop for HostCallBridgeGuard {
