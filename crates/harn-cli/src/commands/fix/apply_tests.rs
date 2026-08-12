@@ -220,6 +220,38 @@ fn edit_group_key_keeps_unresolvable_paths_verbatim() {
     );
 }
 
+/// The v0.10.80 -> v0.10.81 Harn Cloud bump normalized the leading comment
+/// and renamed the later unused Harness parameter in one pass. The route
+/// wildcard in the comment contains `/*`; copying it verbatim into HarnDoc
+/// opens a nested block comment and made the applicator reject its own output.
+#[test]
+fn harn_cloud_doc_migration_composes_with_a_later_binding_edit() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let script = temp.path().join("admin_trial_telemetry.harn");
+    fs::write(
+        &script,
+        include_str!(
+            "../../../tests/fixtures/capability_migration/admin_trial_telemetry_before.harn"
+        ),
+    )
+    .unwrap();
+
+    let result = apply_repairs(&script, RepairSafety::BehaviorPreserving, false).unwrap();
+    let updated = fs::read_to_string(&script).unwrap();
+
+    harn_parser::parse_source(&updated).expect("the complete candidate must parse");
+    assert!(
+        updated.contains("public `/try/&#42;`")
+            && updated.contains("get_admin_trial_telemetry(_harness: Harness"),
+        "both planned edits must reach the valid candidate:\n{updated}"
+    );
+    assert_eq!(
+        result.applied.len(),
+        2,
+        "the doc and binding repairs must both fire: {result:#?}"
+    );
+}
+
 #[test]
 fn apply_file_edits_refuses_to_write_unparseable_source() {
     let temp = tempfile::TempDir::new().unwrap();
