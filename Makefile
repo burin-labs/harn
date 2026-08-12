@@ -553,6 +553,7 @@ test-agent-scripts:
 
 test-pr-gate-scripts:
 	./scripts/tests/apt_install_action_test.sh
+	./scripts/tests/npm_ci_with_retry_test.sh
 	./scripts/tests/ci_docs_only_test.sh
 	./scripts/tests/ci_release_metadata_only_test.sh
 	./scripts/tests/release_metadata_git_failure_test.sh

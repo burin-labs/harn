@@ -465,7 +465,7 @@ run_grammar_audit() {
     echo "error: npm (Node.js) is required for the release grammar audit" >&2
     return 1
   fi
-  time_phase "tree-sitter npm ci" bash -c "cd tree-sitter-harn && npm ci"
+  time_phase "tree-sitter npm ci" "$SCRIPT_DIR/npm_ci_with_retry.sh" tree-sitter-harn
   time_phase "verify_tree_sitter_parse" harn_cmd run scripts/verify_tree_sitter_parse.harn -- --strict
   time_phase "tree-sitter npm test" bash -c "cd tree-sitter-harn && npm test"
   if [[ ! -f spec/HARN_SPEC.md ]]; then

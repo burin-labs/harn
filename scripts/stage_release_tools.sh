@@ -20,6 +20,7 @@ for source in \
   release_gate.sh \
   release_metadata.harn \
   release_withdrawals.harn \
+  npm_ci_with_retry.sh \
   publish.sh \
   publish.harn \
   publish_plan.harn \
