@@ -12,6 +12,7 @@ import {
   bump_changeset_empty,
   bump_is_current,
   bump_options,
+  bump_version_relation,
   run_bump,
 } from "std/bump/runtime"
 import { assert_eq, assert_throws } from "std/testing"
@@ -135,6 +136,9 @@ pipeline test_pure_predicates_are_v_insensitive(harness: Harness, task) {
   assert_eq(bump_is_current("v0.10.30", "0.10.30"), true)
   assert_eq(bump_is_current("v0.10.29", "v0.10.30"), false)
   assert_eq(bump_is_current("", ""), false)
+  assert_eq(bump_version_relation("v0.10.29", "0.10.30"), "behind")
+  assert_eq(bump_version_relation("0.10.30", "v0.10.30"), "equal")
+  assert_eq(bump_version_relation("v0.10.31", "v0.10.30"), "ahead")
   assert_eq(bump_changeset_empty({additions: [], deletions: []}), true)
   assert_eq(bump_changeset_empty({additions: ["x"], deletions: []}), false)
 }
@@ -145,6 +149,32 @@ pipeline test_already_current_is_a_clean_noop(harness: Harness, task) {
   const receipt = run_bump(opts(), fake.adapter)
   assert_eq(receipt.outcome, "already_current")
   assert_eq(receipt.ok, true)
+  assert_eq(receipt.version_relation, "equal")
+  assert_eq(call_names(fake.calls()), [])
+}
+
+/** A stale target can never roll a consumer back from a newer release. */
+pipeline test_newer_pin_refuses_downgrade_without_mutation(harness: Harness, task) {
+  const fake = make_fake({current: "v0.10.85", target: "v0.10.84"})
+  const receipt = run_bump(opts(), fake.adapter)
+  assert_eq(receipt.outcome, "already_current")
+  assert_eq(receipt.ok, true)
+  assert_eq(receipt.version_relation, "ahead")
+  assert_eq(receipt.previous_version, "v0.10.85")
+  assert_eq(receipt.target_tag, "v0.10.84")
+  assert_eq(
+    receipt.notes,
+    ["pin v0.10.85 is newer than requested target v0.10.84; no downgrade applied"],
+  )
+  assert_eq(call_names(fake.calls()), [])
+}
+
+pipeline test_invalid_current_pin_fails_closed_before_mutation(harness: Harness, task) {
+  const fake = make_fake({current: "latest", target: "v0.10.84"})
+  assert_eq(
+    assert_throws({ -> run_bump(opts(), fake.adapter) }),
+    "std/semver: left version is not release semver: latest",
+  )
   assert_eq(call_names(fake.calls()), [])
 }
 
@@ -167,6 +197,7 @@ pipeline test_lockfile_refresh_produces_committed_pr(harness: Harness, task) {
   const fake = make_fake({refreshed: ["harn.lock", "generated/schema.json"]})
   const receipt = run_bump(opts(), fake.adapter)
   assert_eq(receipt.outcome, "committed")
+  assert_eq(receipt.version_relation, "behind")
   assert_eq(receipt.changed, true)
   assert_eq(receipt.refreshed, ["harn.lock", "generated/schema.json"])
   assert_eq(receipt.pr_action, "created")
