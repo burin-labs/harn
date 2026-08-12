@@ -349,6 +349,33 @@ pub fn payload_schema() { return "GenericWebhookPayload" }
 }
 
 #[tokio::test]
+async fn load_contract_reads_exact_connector_method_inventory() {
+    let (_dir, module_path) = write_connector(
+        r#"
+pub fn provider_id() { return "webhook" }
+pub fn kinds() { return ["webhook"] }
+pub fn payload_schema() { return "GenericWebhookPayload" }
+pub fn methods() {
+  return [
+    {name: "messages.read"},
+    {name: "messages.send", requires_approval: true},
+  ]
+}
+"#,
+    );
+
+    let contract = load_contract(&module_path).await.unwrap();
+
+    assert_eq!(
+        contract.method_ids,
+        Some(vec![
+            "messages.read".to_string(),
+            "messages.send".to_string()
+        ])
+    );
+}
+
+#[tokio::test]
 async fn runtime_exports_require_a_typed_leading_harness_at_load_time() {
     let (_dir, module_path) = write_connector(
         r#"

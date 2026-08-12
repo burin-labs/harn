@@ -200,6 +200,8 @@ pub(crate) async fn check_connector_package(
             provider.id.clone(),
             &provider.manifest_dir,
             module,
+            provider.service.as_ref(),
+            fixture_version,
             &manifest.connector_contract.fixtures,
             args.run_poll_tick,
         )

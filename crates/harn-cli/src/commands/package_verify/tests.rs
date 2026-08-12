@@ -138,6 +138,41 @@ fn connector_contract_v2_requires_service_metadata() {
     assert!(failures[0].contains("connector contract v2"));
 }
 
+#[tokio::test]
+async fn connector_contract_v2_requires_manifest_and_runtime_method_parity() {
+    let _guard = connector_check_test_guard().await;
+    let matching = write_package(
+        "[connector_contract]\nversion = 2",
+        r#"
+pub fn provider_id() { return "echo" }
+pub fn kinds() { return ["webhook"] }
+pub fn payload_schema() { return "EchoEventPayload" }
+pub fn methods() { return [{name: "messages.read"}] }
+pub fn normalize_inbound(_harness: Harness, _raw) { return {type: "reject", status: 400} }
+"#,
+    );
+    let report = check_connector_package(&check_args(matching.path()))
+        .await
+        .expect("matching contract-v2 method inventories should pass");
+    assert_eq!(report.checked_connectors.len(), 1);
+
+    let drifted = write_package(
+        "[connector_contract]\nversion = 2",
+        r#"
+pub fn provider_id() { return "echo" }
+pub fn kinds() { return ["webhook"] }
+pub fn payload_schema() { return "EchoEventPayload" }
+pub fn methods() { return [{name: "messages.send"}] }
+pub fn normalize_inbound(_harness: Harness, _raw) { return {type: "reject", status: 400} }
+"#,
+    );
+    let error = check_connector_package(&check_args(drifted.path()))
+        .await
+        .expect_err("drifted contract-v2 method inventories must fail");
+    assert!(error.contains("runtime-only: [messages.send]"), "{error}");
+    assert!(error.contains("manifest-only: [messages.read]"), "{error}");
+}
+
 #[test]
 fn package_gates_share_exact_input_exclusions() {
     let dir = tempfile::tempdir().unwrap();

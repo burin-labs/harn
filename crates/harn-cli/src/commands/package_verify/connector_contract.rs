@@ -4,6 +4,8 @@ pub(super) async fn check_one_connector(
     provider_id: harn_vm::ProviderId,
     manifest_dir: &Path,
     module: &str,
+    service: Option<&package::ConnectorServiceManifest>,
+    contract_version: u32,
     fixtures: &[ConnectorContractFixture],
     run_poll_tick: bool,
 ) -> Result<CheckedConnector, String> {
@@ -74,6 +76,12 @@ pub(super) async fn check_one_connector(
             provider_id.as_str()
         ));
     }
+    validate_method_inventory(
+        provider_id.as_str(),
+        service,
+        contract_version,
+        contract.method_ids.as_deref(),
+    )?;
 
     let mut connector = harn_vm::HarnConnector::load(&module_path)
         .await
@@ -218,6 +226,44 @@ pub(super) async fn check_one_connector(
         has_poll_tick: contract.has_poll_tick,
         fixtures: checked_fixtures,
     })
+}
+
+fn validate_method_inventory(
+    provider_id: &str,
+    service: Option<&package::ConnectorServiceManifest>,
+    contract_version: u32,
+    exported_method_ids: Option<&[String]>,
+) -> Result<(), String> {
+    if contract_version < 2 {
+        return Ok(());
+    }
+    let service = service.ok_or_else(|| {
+        format!("provider '{provider_id}' connector contract v2 requires service metadata")
+    })?;
+    let exported_method_ids = exported_method_ids.ok_or_else(|| {
+        format!(
+            "provider '{provider_id}' connector contract v2 must export methods() so its runtime allowlist can be checked against service.operations"
+        )
+    })?;
+    let declared = service
+        .operations
+        .iter()
+        .map(|operation| operation.id.as_str())
+        .collect::<BTreeSet<_>>();
+    let exported = exported_method_ids
+        .iter()
+        .map(String::as_str)
+        .collect::<BTreeSet<_>>();
+    let missing_from_manifest = exported.difference(&declared).copied().collect::<Vec<_>>();
+    let missing_from_runtime = declared.difference(&exported).copied().collect::<Vec<_>>();
+    if missing_from_manifest.is_empty() && missing_from_runtime.is_empty() {
+        return Ok(());
+    }
+    Err(format!(
+        "provider '{provider_id}' methods() and service.operations differ (runtime-only: [{}]; manifest-only: [{}])",
+        missing_from_manifest.join(", "),
+        missing_from_runtime.join(", ")
+    ))
 }
 
 async fn connector_ctx() -> Result<harn_vm::ConnectorCtx, String> {
