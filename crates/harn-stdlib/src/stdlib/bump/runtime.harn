@@ -15,7 +15,7 @@
  * that is both the machine-readable receipt the workflow surfaces and the
  * value the fixtures assert against.
  */
-import { strip_v } from "std/semver"
+import { compare_release, strip_v } from "std/semver"
 
 /** Everything the caller controls about one bump attempt. */
 pub type BumpOptions = {
@@ -72,6 +72,9 @@ pub type BumpPrUpsert = {number: int, head_oid: string, url: string, created: bo
 /** Result of arming auto-merge. */
 pub type BumpAutoMerge = {enabled: bool, state: string, detail: string}
 
+/** How the consumer's current pin compares with the requested release. */
+pub type BumpVersionRelation = "behind" | "equal" | "ahead"
+
 /**
  * The injected capability surface. Each field is a function the orchestrator
  * calls at a well-defined phase; swapping the record swaps live I/O for
@@ -118,6 +121,7 @@ pub type BumpReceipt = {
   branch: string,
   target_tag: string,
   previous_version: string,
+  version_relation: BumpVersionRelation,
   ready: bool,
   readiness_detail: string,
   changed: bool,
@@ -178,6 +182,25 @@ pub fn bump_is_current(previous: string, target: string) -> bool {
 }
 
 /**
+ * Compare a consumer pin with the requested release. Both inputs accept the
+ * optional `v` used by release tags. Invalid versions fail closed through the
+ * canonical SemVer parser instead of making a potentially unsafe mutation.
+ *
+ * @effects: []
+ * @errors: ["std/semver: left/right version is not release semver"]
+ */
+pub fn bump_version_relation(previous: string, target: string) -> BumpVersionRelation {
+  const order = compare_release(strip_v(trim(previous)), strip_v(trim(target)))
+  if order < 0 {
+    return "behind"
+  }
+  if order > 0 {
+    return "ahead"
+  }
+  return "equal"
+}
+
+/**
  * True when a changeset carries nothing a commit could include.
  *
  * @effects: []
@@ -187,7 +210,13 @@ pub fn bump_changeset_empty(changeset: BumpChangeSet) -> bool {
   return len(changeset.additions) == 0 && len(changeset.deletions) == 0
 }
 
-fn __bump_receipt_base(options, target, previous, readiness) -> BumpReceipt {
+fn __bump_receipt_base(
+  options: BumpOptions,
+  target: string,
+  previous: string,
+  relation: BumpVersionRelation,
+  readiness: ReleaseReadiness,
+) -> BumpReceipt {
   return {
     schema: "harn-bump-runtime-v1",
     outcome: "not_ready",
@@ -196,6 +225,7 @@ fn __bump_receipt_base(options, target, previous, readiness) -> BumpReceipt {
     branch: options.branch,
     target_tag: target,
     previous_version: previous,
+    version_relation: relation,
     ready: readiness.ready,
     readiness_detail: readiness.detail,
     changed: false,
@@ -227,7 +257,8 @@ pub fn run_bump(options: BumpOptions, adapter: BumpAdapter) -> BumpReceipt {
   const target = adapter.resolve_target_tag(options.tag)
   const readiness = adapter.release_ready(target)
   const previous = trim(adapter.read_current_version())
-  let receipt = __bump_receipt_base(options, target, previous, readiness)
+  const relation = bump_version_relation(previous, target)
+  let receipt = __bump_receipt_base(options, target, previous, relation, readiness)
   // Phase 1 — release readiness gate. A target that is still publishing its
   // assets is not an error; the scheduled rerun will pick it up.
   if !readiness.ready {
@@ -240,9 +271,20 @@ pub fn run_bump(options: BumpOptions, adapter: BumpAdapter) -> BumpReceipt {
   }
   // Phase 2 — idempotent no-op. Concurrent/scheduled reruns land here once the
   // pin already matches, so the common steady state does zero mutation.
-  if bump_is_current(previous, target) {
+  if relation == "equal" {
     return receipt
       + {outcome: "already_current", ok: true, notes: ["pin already matches ${target}"]}
+  }
+  // A bump is monotonic. A stale explicit target can race with a newer release
+  // landing on the base branch; treat the newer pin as satisfied and never
+  // turn that race into a downgrade PR.
+  if relation == "ahead" {
+    return receipt
+      + {
+      outcome: "already_current",
+      ok: true,
+      notes: ["pin ${previous} is newer than requested target ${target}; no downgrade applied"],
+    }
   }
   // Phase 3 — write the pin and regenerate derived sources (lockfile, codegen).
   const apply = adapter.apply_version(target)

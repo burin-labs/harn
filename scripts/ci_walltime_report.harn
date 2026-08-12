@@ -1,6 +1,7 @@
 import { help_requested, parse, parser } from "std/cli/argparse"
 import { percentile } from "std/math"
 import { render_table } from "std/table"
+import { github_api_json } from "./github_api.harn"
 
 type DurationStats = {count: int, mean_ms: int, p50_ms: int, p90_ms: int, max_ms: int}
 
@@ -476,14 +477,6 @@ fn build_latency_report(
   }
 }
 
-fn gh_api_json(process: HarnessProcess, path: string) {
-  const result = process.run({program: "gh", args: ["api", path]})
-  if !result.success {
-    throw "gh api ${path} failed: ${result.stderr.trim()}"
-  }
-  return json_parse(result.stdout)
-}
-
 fn format_seconds(duration_ms: int) -> string {
   const tenths = to_int(round(duration_ms / 100.0)) ?? 0
   return "${tenths / 10}.${tenths % 10}s"
@@ -563,8 +556,9 @@ pipeline main(harness: Harness, task) {
   const workflow = policy?.workflow ?? to_string(parsed.workflow)
   const event = policy?.event ?? to_string(parsed.event)
   const limit = min(100, max(1, to_int(parsed.limit) ?? DEFAULT_LIMIT))
-  const runs_data = gh_api_json(
+  const runs_data = github_api_json(
     harness.process,
+    harness.clock,
     "/repos/${repository}/actions/workflows/${workflow}/runs?event=${event}&status=success&per_page=${limit}",
   )
   if policy == nil {
@@ -574,8 +568,9 @@ pipeline main(harness: Harness, task) {
       jobs = jobs
         + job_samples_from_api(
         run.id,
-        gh_api_json(
+        github_api_json(
           harness.process,
+          harness.clock,
           "/repos/${repository}/actions/runs/${run.id}/jobs?per_page=100",
         ),
       )
@@ -595,7 +590,11 @@ pipeline main(harness: Harness, task) {
       + detailed_job_samples_from_api(
       run.id,
       run.created_at,
-      gh_api_json(harness.process, "/repos/${repository}/actions/runs/${run.id}/jobs?per_page=100"),
+      github_api_json(
+        harness.process,
+        harness.clock,
+        "/repos/${repository}/actions/runs/${run.id}/jobs?per_page=100",
+      ),
     )
   }
   const report = build_latency_report(policy, candidates, detailed_jobs)
