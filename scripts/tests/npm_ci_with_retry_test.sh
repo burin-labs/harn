@@ -25,6 +25,12 @@ case "${FAKE_NPM_MODE}" in
     echo 'npm error ETIMEDOUT downloading immutable dependency' >&2
     exit 18
     ;;
+  transient-three)
+    if [[ "$count" -le 3 ]]; then
+      echo 'npm error ECONNRESET: sustained release asset edge reset' >&2
+      exit 17
+    fi
+    ;;
   deterministic)
     echo 'npm error lifecycle script failed its test' >&2
     exit 19
@@ -33,6 +39,13 @@ esac
 printf 'npm %s\n' "$*"
 EOF
 chmod +x "$tmp_root/bin/npm"
+
+cat >"$tmp_root/bin/sleep" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$1" >>"${FAKE_NPM_STATE}/sleeps"
+EOF
+chmod +x "$tmp_root/bin/sleep"
 
 run_case() {
   local name="$1" mode="$2" expected_status="$3" expected_calls="$4"
@@ -54,8 +67,13 @@ run_case() {
 }
 
 run_case transient-once transient-once 0 2
-grep -Fq 'retrying once' "$tmp_root/transient-once/output"
-run_case transient-always transient-always 18 2
+grep -Fq 'retrying in 5s (attempt 2/4)' "$tmp_root/transient-once/output"
+[[ "$(<"$tmp_root/transient-once/sleeps")" == "5" ]]
+run_case transient-three transient-three 0 4
+[[ "$(paste -sd, "$tmp_root/transient-three/sleeps")" == "5,20,60" ]]
+run_case transient-always transient-always 18 4
+[[ "$(paste -sd, "$tmp_root/transient-always/sleeps")" == "5,20,60" ]]
 run_case deterministic deterministic 19 1
+[[ ! -e "$tmp_root/deterministic/sleeps" ]]
 
 echo "npm ci bounded retry tests passed"

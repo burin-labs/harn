@@ -16,6 +16,7 @@ package_dir="$1"
 log_file="$(mktemp "${TMPDIR:-/tmp}/harn-npm-ci.XXXXXX")"
 trap 'rm -f "$log_file"' EXIT
 
+retry_delays=(5 20 60)
 attempt=1
 while :; do
   : >"$log_file"
@@ -27,13 +28,16 @@ while :; do
 
   # Package/script failures are deterministic and must fail immediately. Retry
   # only transport diagnostics emitted while npm or an install hook downloads
-  # immutable dependencies. One retry bounds time and external traffic.
-  if [[ "$attempt" -ge 2 ]] || ! grep -Eiq \
+  # immutable dependencies. Three bounded, increasing waits cover a sustained
+  # release-asset edge reset without turning a persistent outage into a loop.
+  if [[ "$attempt" -gt "${#retry_delays[@]}" ]] || ! grep -Eiq \
     'ECONNRESET|socket hang up|ETIMEDOUT|EAI_AGAIN|ENETUNREACH|ECONNREFUSED|HTTP (429|5[0-9][0-9])' \
     "$log_file"; then
     exit "$status"
   fi
 
-  echo "warning: npm ci hit a transient network failure; retrying once" >&2
+  delay="${retry_delays[$((attempt - 1))]}"
+  echo "warning: npm ci hit a transient network failure; retrying in ${delay}s (attempt $((attempt + 1))/4)" >&2
+  sleep "$delay"
   attempt=$((attempt + 1))
 done
