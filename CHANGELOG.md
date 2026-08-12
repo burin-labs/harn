@@ -9,6 +9,40 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.86
+
+### Added
+
+- **Deterministic hypothesis workflow scenarios (#6353).** `harn test-bench`
+  can now drive natural-language A/A, negative-control, denial, budget,
+  missing-telemetry, and cross-process recovery paths through the native adapter.
+- **Versioned hypothesis intent and explicit experiment policy (#6353).** The
+  hypothesis compiler now normalizes compatible v1 input into a typed v2
+  intent with alternative hypotheses, decision scope, and a quasi-experimental
+  design contract. Compiled capability ceilings now include customer-state,
+  model-routing, and privacy policy, and repairable boundary failures carry
+  typed repair instructions.
+
+### Fixed
+
+- **Typed hypothesis sad paths (#6353).** Native budget exhaustion now reaches
+  a canonical terminal decision, while missing telemetry invalidates the run
+  without entering canonical evidence.
+- Handled command-launch errors no longer cancel the parent VM or interrupt later commands.
+- `harn runs review --model ollama/...` now stays on Ollama. Reviews also fail
+  before inference with a clear message when the selected route's effective
+  context is too small.
+- Runtime bump workflows now treat a consumer already pinned above the requested
+  release as current, so stale or racing requests cannot open downgrade pull
+  requests. Receipts report whether the consumer was behind, equal to, or ahead
+  of the target.
+- GitHub Actions reports now retry individual read-only API calls after short
+  transport failures. Persistent trust failures and invalid responses still stop
+  the report with a clear error.
+- **Provider-backed hypothesis planning now avoids false free calls and rejected schema preflights (#6353).**
+  Planner output budgets derive from the selected model unless explicitly bounded, Harn unions project to
+  provider JSON Schema, and omitted streamed usage remains unknown instead of becoming zero cost.
+
 ## v0.10.85
 
 ### Added
