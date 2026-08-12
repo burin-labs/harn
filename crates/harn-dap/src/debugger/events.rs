@@ -322,6 +322,7 @@ mod telemetry_tests {
             cache_savings_usd: 0.001,
             cache_hit: true,
             served_fast: false,
+            accounting_status: harn_vm::llm::usage::UsageAccountingStatus::Reported,
         };
 
         let payload = llm_telemetry_payload("call-1", "model-1", &usage, 42, 3);

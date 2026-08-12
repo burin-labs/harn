@@ -17,6 +17,23 @@ use super::api::{LlmResult, ProviderAttempts};
 /// This is the sole owner of derived cost/cache facts. It deliberately keeps
 /// provider/model identity out of the public usage object: those remain route
 /// metadata on the enclosing result and transcript event.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum UsageAccountingStatus {
+    Reported,
+    #[default]
+    Unknown,
+}
+
+impl UsageAccountingStatus {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Reported => "reported",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct LlmUsage {
     pub input_tokens: i64,
@@ -29,11 +46,21 @@ pub struct LlmUsage {
     pub cache_savings_usd: f64,
     pub cache_hit: bool,
     pub served_fast: bool,
+    #[serde(default)]
+    pub accounting_status: UsageAccountingStatus,
 }
 
 impl LlmUsage {
     pub(crate) fn from_result(result: &LlmResult) -> Self {
-        let cost_usd = super::managed_supply::authoritative_cost_usd(result).or_else(|| {
+        let usage_known = result.input_tokens > 0
+            || result.output_tokens > 0
+            || result.telemetry.server_prompt_tokens.is_some()
+            || result.telemetry.server_output_tokens.is_some();
+        let authoritative_cost = super::managed_supply::authoritative_cost_usd(result);
+        let cost_usd = authoritative_cost.or_else(|| {
+            if !usage_known {
+                return None;
+            }
             super::cost::pricing_detail_for_tier(
                 &result.provider,
                 &result.model,
@@ -74,6 +101,11 @@ impl LlmUsage {
             ),
             cache_hit: result.cache_read_tokens > 0,
             served_fast: result.served_fast,
+            accounting_status: if usage_known || authoritative_cost.is_some() {
+                UsageAccountingStatus::Reported
+            } else {
+                UsageAccountingStatus::Unknown
+            },
         }
     }
 
@@ -99,6 +131,7 @@ impl LlmUsage {
             cache_savings_usd: 0.0,
             cache_hit: false,
             served_fast: false,
+            accounting_status: UsageAccountingStatus::Reported,
         }
     }
 
@@ -151,6 +184,7 @@ impl LlmUsage {
             crate::value::intern_key("served_fast"),
             VmValue::Bool(self.served_fast),
         );
+        usage.put_str("accounting_status", self.accounting_status.as_str());
         usage
     }
 
@@ -194,6 +228,10 @@ impl LlmUsage {
         );
         fields.insert("cache_hit".to_string(), self.cache_hit.into());
         fields.insert("served_fast".to_string(), self.served_fast.into());
+        fields.insert(
+            "accounting_status".to_string(),
+            self.accounting_status.as_str().into(),
+        );
     }
 
     pub(crate) fn empty_vm_dict() -> crate::value::DictMap {
@@ -208,6 +246,7 @@ impl LlmUsage {
             cache_savings_usd: 0.0,
             cache_hit: false,
             served_fast: false,
+            accounting_status: UsageAccountingStatus::Unknown,
         }
         .to_vm_dict(&ProviderAttempts::default())
     }
@@ -475,6 +514,43 @@ mod tests {
         );
         assert_eq!(trace[crate::tracing::meta::COST_USD], event["cost_usd"]);
         assert_eq!(vm_usage["provider_attempts"]["retries"], json!(2));
+    }
+
+    #[test]
+    fn missing_stream_usage_stays_unknown_instead_of_becoming_free() {
+        let mut result = accounted_result();
+        result.provider = "fireworks".to_string();
+        result.model = "accounts/fireworks/models/minimax-m3".to_string();
+        result.input_tokens = 0;
+        result.output_tokens = 0;
+        result.telemetry = ProviderTelemetry::from_openai_usage(
+            &serde_json::json!({}),
+            Some("chatcmpl-without-usage"),
+        );
+
+        let usage = result.usage();
+        let vm_usage =
+            crate::llm::vm_value_to_json(&VmValue::Dict(usage.to_vm_dict(&result.attempts).into()));
+
+        assert_eq!(usage.cost_usd, None);
+        assert_eq!(vm_usage["accounting_status"], "unknown");
+        assert_eq!(vm_usage["cost_usd"], serde_json::Value::Null);
+    }
+
+    #[test]
+    fn pre_accounting_status_record_replays_as_unknown() {
+        let mut recorded = serde_json::to_value(accounted_result().usage()).expect("serialize");
+        recorded
+            .as_object_mut()
+            .expect("usage object")
+            .remove("accounting_status");
+
+        let replayed: super::LlmUsage = serde_json::from_value(recorded).expect("old recording");
+
+        assert_eq!(
+            replayed.accounting_status,
+            super::UsageAccountingStatus::Unknown
+        );
     }
 
     #[test]

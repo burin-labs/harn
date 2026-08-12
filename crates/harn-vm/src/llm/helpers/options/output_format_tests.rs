@@ -87,6 +87,32 @@ fn normalizes_harn_schema_types_in_unions_and_type_arrays() {
 }
 
 #[test]
+fn projects_harn_union_keyword_to_provider_json_schema() {
+    let schema = crate::schema::json_to_vm_value(&serde_json::json!({
+        "type": "dict",
+        "properties": {
+            "optional_label": {
+                "union": [{"type": "string"}, {"type": "nil"}]
+            }
+        }
+    }));
+
+    let parsed = parse_schema_value(Some(&schema), "output")
+        .expect("valid Harn schema")
+        .expect("present schema");
+    let optional = &parsed["properties"]["optional_label"];
+
+    assert_eq!(
+        optional["anyOf"],
+        serde_json::json!([{"type": "string"}, {"type": "null"}])
+    );
+    assert!(
+        optional.get("union").is_none(),
+        "provider request schemas must not leak Harn's internal union keyword"
+    );
+}
+
+#[test]
 fn parser_does_not_revive_removed_output_synonyms() {
     // W2 collapsed the `response_format` / `json_schema` / top-level `schema`
     // spellings onto the single canonical `output` key. `parse_output_option`

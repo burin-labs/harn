@@ -39,6 +39,37 @@ pipeline default(harness: Harness, _task) {
         "deterministic compiler diagnostics drive bounded repair"
     },
   )
+  with_llm_script(
+    harness.llm,
+    [llm_text(json_stringify(valid))],
+    { ->
+      const receipt = design_hypothesis(
+        harness,
+        "Does the registered candidate prompt improve success?",
+        hypothesis_fixture_context(),
+        {provider: "mock", model: "accounts/fireworks/models/minimax-m3", validator_retries: 0},
+      )
+      require receipt.ok, "a model-aware planner budget still produces a valid plan"
+      const call = harness.llm.mock_calls()[0]
+      require call?.max_tokens > 1600 && call.max_tokens <= 4096,
+        "planner output derives from the registered model budget instead of a fixed 1600 tokens"
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [llm_text(json_stringify(valid))],
+    { ->
+      const receipt = design_hypothesis(
+        harness,
+        "Does the registered candidate prompt improve success?",
+        hypothesis_fixture_context(),
+        {provider: "mock", max_tokens: 2048, validator_retries: 0},
+      )
+      require receipt.ok, "an explicit bounded planner budget still produces a valid plan"
+      require harness.llm.mock_calls()[0]?.max_tokens == 2048,
+        "an explicit planner output budget overrides the derived default"
+    },
+  )
   const before = len(harness.llm.mock_calls())
   const blank = design_hypothesis(harness, "  ", hypothesis_fixture_context(), {provider: "mock"})
   require !blank.ok && blank.attempts == 0, "blank intake fails before model spend"

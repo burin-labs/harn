@@ -232,7 +232,7 @@ fn install_prompt_mode_validation(
     schema: &VmValue,
 ) -> crate::llm::api::LlmCallOptions {
     let mut schema_json = vm_value_to_json(schema);
-    crate::schema::normalize_json_schema_type_names(&mut schema_json);
+    crate::schema::normalize_provider_json_schema(&mut schema_json);
     opts.output_schema = Some(schema_json);
     opts.output_validation = Some("error".to_string());
     opts.schema_stream_abort = false;

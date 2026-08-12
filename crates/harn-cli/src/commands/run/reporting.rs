@@ -572,6 +572,7 @@ mod trace_summary_pricing_tests {
                 cache_savings_usd: 0.0,
                 cache_hit: false,
                 served_fast: false,
+                accounting_status: harn_vm::llm::usage::UsageAccountingStatus::Reported,
             },
             duration_ms: 5,
         }
