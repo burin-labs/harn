@@ -16,7 +16,8 @@ pub use provider_setup::{
     ConnectorExternalSpend, ConnectorHealthCheckManifest, ConnectorOperationEffect,
     ConnectorOperationManifest, ConnectorProtectedProfileManifest, ConnectorReconciliation,
     ConnectorRecoveryCopy, ConnectorRedactionTarget, ConnectorServiceManifest,
-    ConnectorTestProfile, ProtectedProfileFieldClass, ProviderSetupManifest,
+    ConnectorTestProfile, ProtectedProfileFieldClass, ProviderManifestEntry, ProviderSetupManifest,
+    ResolvedProviderConnectorConfig,
 };
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1003,20 +1004,6 @@ pub struct RuntimeExtensions {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct ProviderManifestEntry {
-    pub id: harn_vm::ProviderId,
-    pub connector: ProviderConnectorManifest,
-    #[serde(default)]
-    pub oauth: Option<ProviderOAuthManifest>,
-    #[serde(default)]
-    pub setup: Option<ProviderSetupManifest>,
-    #[serde(default)]
-    pub service: Option<ConnectorServiceManifest>,
-    #[serde(default)]
-    pub capabilities: ConnectorCapabilities,
-}
-
-#[derive(Debug, Clone, Deserialize)]
 pub struct ProviderConnectorManifest {
     #[serde(default)]
     pub harn: Option<String>,
@@ -1192,17 +1179,6 @@ pub enum ResolvedProviderConnectorKind {
     Harn { module: String },
     RustBuiltin,
     Invalid(String),
-}
-
-#[derive(Debug, Clone)]
-pub struct ResolvedProviderConnectorConfig {
-    pub id: harn_vm::ProviderId,
-    pub manifest_dir: PathBuf,
-    pub connector: ResolvedProviderConnectorKind,
-    pub oauth: Option<ProviderOAuthManifest>,
-    pub setup: Option<ProviderSetupManifest>,
-    pub service: Option<ConnectorServiceManifest>,
-    pub connector_contract_version: u32,
 }
 
 #[derive(Debug, Clone)]

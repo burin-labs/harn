@@ -1,6 +1,37 @@
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
+
+use super::{
+    ConnectorCapabilities, ProviderConnectorManifest, ProviderOAuthManifest,
+    ResolvedProviderConnectorKind,
+};
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ProviderManifestEntry {
+    pub id: harn_vm::ProviderId,
+    pub connector: ProviderConnectorManifest,
+    #[serde(default)]
+    pub oauth: Option<ProviderOAuthManifest>,
+    #[serde(default)]
+    pub setup: Option<ProviderSetupManifest>,
+    #[serde(default)]
+    pub service: Option<ConnectorServiceManifest>,
+    #[serde(default)]
+    pub capabilities: ConnectorCapabilities,
+}
+
+#[derive(Debug, Clone)]
+pub struct ResolvedProviderConnectorConfig {
+    pub id: harn_vm::ProviderId,
+    pub manifest_dir: PathBuf,
+    pub connector: ResolvedProviderConnectorKind,
+    pub oauth: Option<ProviderOAuthManifest>,
+    pub setup: Option<ProviderSetupManifest>,
+    pub service: Option<ConnectorServiceManifest>,
+    pub connector_contract_version: u32,
+}
 
 /// Product-facing connector metadata shared by every host projection.
 ///
