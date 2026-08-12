@@ -541,6 +541,23 @@ fn start_kill_session() -> std::io::Result<()> {
 pub fn signal_pid_and_group(pid: u32, signal: i32) {
     #[cfg(unix)]
     {
+        if std::env::var_os("HARN_DEBUG_PROCESS_CLEANUP").is_some() {
+            let self_pid = std::process::id() as i32;
+            let target_pid = pid as i32;
+            // SAFETY: these read-only process identity syscalls accept any
+            // pid. Negative returns are useful diagnostic evidence too.
+            let (self_pgid, self_sid, target_pgid, target_sid) = unsafe {
+                (
+                    libc::getpgid(self_pid),
+                    libc::getsid(self_pid),
+                    libc::getpgid(target_pid),
+                    libc::getsid(target_pid),
+                )
+            };
+            eprintln!(
+                "[harn-process-debug] signal={signal} self_pid={self_pid} self_pgid={self_pgid} self_sid={self_sid} target_pid={target_pid} target_pgid={target_pgid} target_sid={target_sid}"
+            );
+        }
         // SAFETY: kill(2) takes a pid_t (i32 on all Unix targets) and a
         // signal number; calling it with any valid signal is well-defined.
         extern "C" {

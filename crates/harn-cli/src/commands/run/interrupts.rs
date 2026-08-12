@@ -112,6 +112,7 @@ pub(super) fn install_signal_shutdown_handler() -> RunInterruptTokens {
                     process::exit(124);
                 }
                 seen_signal = true;
+                eprintln!("[harn-process-debug] received {signal_name}");
                 request_vm_interrupt(&tokens_clone, signal_name);
                 eprintln!("{FIRST_SIGNAL_MESSAGE}");
             }
