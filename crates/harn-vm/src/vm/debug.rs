@@ -254,30 +254,16 @@ impl Vm {
             self.cancel_token = Some(t.clone());
             t
         });
-        eprintln!(
-            "[harn-process-debug] Vm::signal_cancel token={:p}",
-            std::sync::Arc::as_ptr(&token)
-        );
         token.store(true, std::sync::atomic::Ordering::SeqCst);
         token
     }
 
     /// True when cooperative cancellation has been requested.
     pub fn is_cancel_requested(&self) -> bool {
-        let requested = self
-            .cancel_token
+        self.cancel_token
             .as_ref()
             .map(|t| t.load(std::sync::atomic::Ordering::SeqCst))
-            .unwrap_or(false);
-        if requested {
-            eprintln!(
-                "[harn-process-debug] Vm::is_cancel_requested token={:p}",
-                self.cancel_token
-                    .as_ref()
-                    .map_or(std::ptr::null(), std::sync::Arc::as_ptr)
-            );
-        }
-        requested
+            .unwrap_or(false)
     }
 
     /// Identifiers visible at the given frame's scope — locals plus

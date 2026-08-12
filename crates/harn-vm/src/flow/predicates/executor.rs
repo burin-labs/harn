@@ -309,10 +309,6 @@ impl PredicateContext {
     }
 
     fn cancel(&self) {
-        eprintln!(
-            "[harn-process-debug] cancel_store site=PredicateExecutor::cancel token={:p}",
-            Arc::as_ptr(&self.inner.cancel_token)
-        );
         self.inner.cancel_token.store(true, Ordering::SeqCst);
     }
 

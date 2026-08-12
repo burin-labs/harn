@@ -1,10 +1,6 @@
 use crate::value::{VmJoinHandle, VmTaskHandle, VmValue};
 
 pub(super) async fn abort_task_and_wait(mut task: VmTaskHandle) {
-    eprintln!(
-        "[harn-process-debug] cancel_store site=abort_task_and_wait token={:p}",
-        std::sync::Arc::as_ptr(&task.cancel_token)
-    );
     task.cancel_token
         .store(true, std::sync::atomic::Ordering::SeqCst);
     abort_join_and_wait(&mut task.handle).await;
@@ -36,10 +32,6 @@ impl AwaitingTask {
 impl Drop for AwaitingTask {
     fn drop(&mut self) {
         if let Some(task) = self.task.take() {
-            eprintln!(
-                "[harn-process-debug] cancel_store site=AwaitingTask::drop token={:p}",
-                std::sync::Arc::as_ptr(&task.cancel_token)
-            );
             task.cancel_token
                 .store(true, std::sync::atomic::Ordering::SeqCst);
             task.handle.abort();

@@ -344,7 +344,7 @@ impl HostlibRegistry {
                                     });
                                     let mut cancel_on_drop = CancelOnDrop(Some(Arc::clone(&cancel)));
                                     let handler_for_blocking = handler.clone();
-                                    let result = harn_vm::orchestration::run_blocking_with_ambient(
+                                    let completed = harn_vm::orchestration::run_blocking_with_ambient(
                                         move || {
                                             let _interrupt = harn_vm::op_interrupt::install(
                                                 Some(cancel),
@@ -353,13 +353,19 @@ impl HostlibRegistry {
                                             handler_for_blocking(&[validated]).map_err(VmError::from)
                                         },
                                     )
-                                    .await
+                                    .await;
+                                    // The blocking operation is no longer running, even when it
+                                    // completed with a normal host error (for example ENOENT).
+                                    // Disarm before propagating either layer of Result; otherwise
+                                    // error unwinding drops the guard and poisons the parent VM's
+                                    // shared cancellation token.
+                                    cancel_on_drop.0 = None;
+                                    let result = completed
                                     .map_err(|error| {
                                         VmError::Runtime(format!(
                                             "{ambient_name} blocking host operation failed: {error}"
                                         ))
                                     })??;
-                                    cancel_on_drop.0 = None;
                                     if crate::tools::run_command_request_is_background(&params) {
                                         return crate::schemas::validate_response(
                                             ambient_name,
