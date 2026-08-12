@@ -28,6 +28,7 @@ mod check_fmt_json_cli;
 mod check_result_cache;
 mod check_strict_cli;
 mod codemod_dispatch;
+mod command_probe_parent_liveness;
 mod conformance_json_cli;
 mod conformance_process_lifetime_e2e;
 mod coverage_cli;

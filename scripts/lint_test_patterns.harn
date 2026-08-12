@@ -132,6 +132,9 @@ const E2E_SUBPROCESS_PATHS: list<string> = [
   "crates/harn-cli/tests/harn_cli_e2e/acp_server_cli.rs",
   "crates/harn-cli/tests/harn_cli_fast/burin_mini_playground.rs",
   "crates/harn-cli/tests/harn_cli_e2e/check_result_cache.rs",
+  // Cancellation poisoning crosses the async hostlib/VM/CLI boundary. A real
+  // CLI process proves a caught launch error leaves the parent execution live.
+  "crates/harn-cli/tests/harn_cli_e2e/command_probe_parent_liveness.rs",
   "crates/harn-cli/tests/harn_cli_e2e/conformance_process_lifetime_e2e.rs",
   // Strictness is an exit-status contract whose text and JSON renderings must
   // stay identical to advisory checks; only the real CLI process proves all three.
