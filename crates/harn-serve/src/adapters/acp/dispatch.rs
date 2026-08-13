@@ -103,6 +103,12 @@ impl AcpServer {
                 }
                 self.handle_session_set_config_option(&id, &params);
             }
+            ACP_METHOD_SESSION_PLAN_DOCUMENT_MUTATE => {
+                if self.reject_unauthenticated(&id) {
+                    return;
+                }
+                self.handle_plan_document_mutation(&id, &params);
+            }
             "session/fs_mode" => {
                 if self.reject_unauthenticated(&id) {
                     return;

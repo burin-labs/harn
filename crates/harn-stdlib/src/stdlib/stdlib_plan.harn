@@ -224,6 +224,12 @@ pub fn update_plan_tool(registry) {
           description: "Commands or checks to verify the work",
           required: false,
         },
+        comment_resolutions: {
+          type: "array",
+          description:
+            "Plan-comment transitions completed by this update; each entry names comment_id, optional state (addressed or resolved), and optional explanation",
+          required: false,
+        },
         approval: {type: "object", description: "Optional approval state", required: false},
       },
       returns: {type: "object"},

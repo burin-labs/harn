@@ -25,6 +25,7 @@ mod inject;
 mod integrations;
 mod io;
 mod modes;
+mod plan_documents;
 mod prompt;
 mod schema;
 mod session;
@@ -65,7 +66,8 @@ pub use transport::{
 };
 pub use types::{
     AcpContentBlock, AcpEmbeddedResource, AcpHarnMeta, AcpJsonRpcError, AcpJsonRpcErrorResponse,
-    AcpJsonRpcId, AcpJsonRpcRequest, AcpJsonRpcResponse, AcpMeta, AcpPromptErrorData,
+    AcpJsonRpcId, AcpJsonRpcRequest, AcpJsonRpcResponse, AcpMeta, AcpPlanDocumentMutation,
+    AcpPlanDocumentMutationParams, AcpPlanDocumentMutationResult, AcpPromptErrorData,
     AcpPromptErrorSchema, AcpSessionCancelToolCallParams, AcpSessionEnvironmentConfig,
     AcpSessionIdParams, AcpSessionInjectContent, AcpSessionInjectHostEventParams,
     AcpSessionInjectMode, AcpSessionInjectParams, AcpSessionMessageIdParams, AcpSessionNewParams,
@@ -73,9 +75,10 @@ pub use types::{
     AcpSessionRestoreResult, ACP_METHOD_INITIALIZE, ACP_METHOD_SESSION_CANCEL,
     ACP_METHOD_SESSION_CANCEL_TOOL_CALL, ACP_METHOD_SESSION_CLOSE, ACP_METHOD_SESSION_INJECT,
     ACP_METHOD_SESSION_INJECT_HOST_EVENT, ACP_METHOD_SESSION_LOAD, ACP_METHOD_SESSION_NEW,
-    ACP_METHOD_SESSION_PENDING_INJECTIONS, ACP_METHOD_SESSION_PROMPT,
-    ACP_METHOD_SESSION_REPLACE_INJECT, ACP_METHOD_SESSION_RESUME, ACP_METHOD_SESSION_REVOKE_INJECT,
-    ACP_PROMPT_ERROR_DATA_SCHEMA,
+    ACP_METHOD_SESSION_PENDING_INJECTIONS, ACP_METHOD_SESSION_PLAN_DOCUMENT_MUTATE,
+    ACP_METHOD_SESSION_PROMPT, ACP_METHOD_SESSION_REPLACE_INJECT, ACP_METHOD_SESSION_RESUME,
+    ACP_METHOD_SESSION_REVOKE_INJECT, ACP_PLAN_MUTATION_BUSY_CODE, ACP_PLAN_REVISION_CONFLICT_CODE,
+    ACP_PLAN_REVISION_CONFLICT_SCHEMA, ACP_PROMPT_ERROR_DATA_SCHEMA,
 };
 
 use std::collections::{BTreeMap, HashMap, HashSet};
