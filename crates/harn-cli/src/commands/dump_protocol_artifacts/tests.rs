@@ -1091,6 +1091,25 @@ fn generated_go_artifact_is_gofmt_stable_when_gofmt_is_available() {
 }
 
 #[test]
+fn generated_rust_artifact_is_rustfmt_stable() {
+    const VERSION: &str = "9.8.7-test.1";
+    let source = protocol_source();
+    let artifacts = generate_artifacts(&source, VERSION).expect("generate artifacts");
+    let rust = artifacts
+        .iter()
+        .find(|artifact| artifact.relative_path == "harn-protocol.rs")
+        .expect("generated Rust artifact")
+        .contents
+        .clone();
+    let reformatted = format_rust_source(rust.clone(), source.repo_root())
+        .expect("reformat generated Rust artifact");
+    assert_eq!(
+        reformatted, rust,
+        "generated Rust protocol artifact must be rustfmt-stable before it is written or checked"
+    );
+}
+
+#[test]
 fn round_trip_fixture_matches_python_and_go_field_set() {
     let fixture: serde_json::Value =
         serde_json::from_str(&generate_round_trip_fixture().expect("fixture"))

@@ -23,7 +23,6 @@ impl ProtocolArtifactSource {
         Ok(Self { repo_root })
     }
 
-    #[cfg(test)]
     pub(super) fn repo_root(&self) -> &Path {
         &self.repo_root
     }
