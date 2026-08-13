@@ -472,6 +472,9 @@ fn classify_http_status_and_body(
         return (LlmErrorKind::Terminal, LlmErrorReason::InvalidResponse);
     }
     if matches!(status.as_u16(), 500 | 502 | 503 | 529)
+        || body_lower.contains("internal_server_error")
+        || body_lower.contains("server_error")
+        || body_lower.contains("upstream_error")
         || body_lower.contains("overloaded_error")
         || body_lower.contains("service unavailable")
         || body_lower.contains("bad gateway")
@@ -723,8 +726,38 @@ fn is_model_unavailable(lower: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{classify_llm_error, classify_provider_http_error, LlmErrorKind, LlmErrorReason};
-    use crate::value::ErrorCategory;
+    use super::{
+        classify_llm_error, classify_provider_http_error, classify_provider_stream_error,
+        LlmErrorKind, LlmErrorReason,
+    };
+    use crate::value::{ErrorCategory, VmError, VmValue};
+
+    fn thrown_field(error: &VmError, key: &str) -> Option<String> {
+        let VmError::Thrown(VmValue::Dict(fields)) = error else {
+            return None;
+        };
+        fields.get(key).map(VmValue::display)
+    }
+
+    #[test]
+    fn classify_openai_compatible_internal_server_stream_error_as_transient() {
+        let error = classify_provider_stream_error(
+            "fireworks",
+            r#"{"error":{"message":"server had an error while processing your request, please retry again after a brief wait","type":"internal_server_error","code":"internal_server_error"}}"#,
+            false,
+        );
+
+        assert_eq!(thrown_field(&error, "kind").as_deref(), Some("transient"));
+        assert_eq!(
+            thrown_field(&error, "reason").as_deref(),
+            Some("server_error")
+        );
+        assert_eq!(
+            thrown_field(&error, "source").as_deref(),
+            Some("provider_stream")
+        );
+        assert_eq!(thrown_field(&error, "partial").as_deref(), Some("false"));
+    }
 
     #[test]
     fn classify_empty_generation_reason_tag() {

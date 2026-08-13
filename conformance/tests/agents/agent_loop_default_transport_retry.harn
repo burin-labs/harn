@@ -1,0 +1,58 @@
+import { __dispatch_default_result } from "std/agent/llm_dispatch"
+import { agent_loop_default_retry_predicate } from "std/agent/retry"
+
+pipeline test(harness: Harness) {
+  const fireworks_failure = try {
+    throw {
+      kind: "transient",
+      reason: "server_error",
+      category: "generic",
+      provider: "fireworks",
+      model: "accounts/fireworks/models/kimi-k2p5",
+      message: "server had an error while processing your request",
+      source: "provider_stream",
+      partial: false,
+    }
+  }
+  const projected = __dispatch_default_result(
+    fireworks_failure,
+    {
+      provider: "fireworks",
+      model: "accounts/fireworks/models/kimi-k2p5",
+      tool_format: "text",
+      messages: [{role: "tool", content: "durable result"}],
+    },
+  )
+  assert_eq(projected.ok, false)
+  assert_eq(projected.status, "provider_5xx")
+  assert_eq(projected.stop_reason, "provider_5xx")
+  assert_eq(projected.error.reason, "server_error")
+  assert_eq(projected.error.provider, "fireworks")
+  assert_eq(projected.error.source, "provider_stream")
+  assert_eq(projected.error.after_tool_result, true)
+  assert(agent_loop_default_retry_predicate(projected))
+  const invalid_request = __dispatch_default_result(
+    try {
+      throw {
+        kind: "terminal",
+        reason: "invalid_request",
+        category: "invalid_request",
+        message: "request shape is invalid",
+      }
+    },
+    {provider: "fireworks", model: "model"},
+  )
+  assert_eq(invalid_request.status, "provider_error")
+  assert_eq(invalid_request.stop_reason, "provider_error")
+  assert(!agent_loop_default_retry_predicate(invalid_request))
+  const budget = __dispatch_default_result(
+    try {
+      throw {kind: "terminal", reason: "budget_exceeded", category: "budget_exceeded"}
+    },
+    {provider: "fireworks", model: "model"},
+  )
+  assert_eq(budget.status, "budget_exhausted")
+  assert_eq(budget.stop_reason, "budget_exhausted")
+  assert(!agent_loop_default_retry_predicate(budget))
+  harness.stdio.println("agent default transport retries typed Fireworks server errors")
+}
