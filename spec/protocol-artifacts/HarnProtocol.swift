@@ -351,6 +351,25 @@ public extension HarnExternalActionActivityStatus {
     }
 }
 
+public extension HarnExternalActionActivityStatus {
+    /// Whether a later snapshot may advance from this lifecycle status.
+    func canAdvance(to next: Self) -> Bool {
+        if isTerminal { return self == next }
+        if next.isTerminal { return true }
+        return progressRank <= next.progressRank
+    }
+
+    private var progressRank: Int {
+        switch self {
+        case .proposed: 0
+        case .approvalPending: 1
+        case .dispatchPending: 2
+        case .reconciliationRequired: 3
+        default: Int.max
+        }
+    }
+}
+
 public enum HarnExternalActionPolicyLayer: String, Codable, Sendable, CaseIterable {
     case userPolicy = "user_policy"
     case managedPolicy = "managed_policy"

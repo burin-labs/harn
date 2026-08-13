@@ -690,6 +690,12 @@
       "adversarial_reviewer",
       "remembered_rule"
     ],
+    "progressActivityStatuses": [
+      "proposed",
+      "approval_pending",
+      "dispatch_pending",
+      "reconciliation_required"
+    ],
     "protectedFieldClasses": [
       "legal_identity",
       "birth_date",

@@ -246,6 +246,24 @@ pub(super) fn generate_typescript_for_version(
          \x20 return (EXTERNAL_ACTION_TERMINAL_ACTIVITY_STATUSES as readonly string[]).includes(status)\n\
          }\n\n",
     );
+    out.push_str("export const EXTERNAL_ACTION_PROGRESS_ACTIVITY_STATUSES = [\n");
+    for value in &external_actions.progress_activity_statuses {
+        out.push_str("  ");
+        out.push_str(&json_string_literal(value));
+        out.push_str(",\n");
+    }
+    out.push_str("] as const satisfies readonly HarnExternalActionActivityStatus[]\n\n");
+    out.push_str(
+        "export function canExternalActionActivityStatusAdvance(\n\
+         \x20 current: HarnExternalActionActivityStatus,\n\
+         \x20 next: HarnExternalActionActivityStatus,\n\
+         ): boolean {\n\
+         \x20 if (isExternalActionActivityStatusTerminal(current)) return current === next\n\
+         \x20 if (isExternalActionActivityStatusTerminal(next)) return true\n\
+         \x20 return EXTERNAL_ACTION_PROGRESS_ACTIVITY_STATUSES.indexOf(current as never)\n\
+         \x20   <= EXTERNAL_ACTION_PROGRESS_ACTIVITY_STATUSES.indexOf(next as never)\n\
+         }\n\n",
+    );
     out.push_str(&ts_array_owned(
         "EXTERNAL_ACTION_POLICY_LAYERS",
         &external_actions.policy_layers,
