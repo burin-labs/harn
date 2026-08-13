@@ -48,10 +48,14 @@ impl crate::vm::Vm {
         let Some(policy) = handle.inner().net_policy().cloned() else {
             return Ok(None);
         };
-        let Some(contract) = NetPolicyMethodContract::for_method(method) else {
-            debug_assert!(false, "unclassified HarnessNet method `{method}`");
-            return Ok(None);
-        };
+        let contract = NetPolicyMethodContract::for_method(method).ok_or_else(|| {
+            VmError::CategorizedError {
+                message: format!(
+                    "HarnessNet method `{method}` has no destination attenuation contract"
+                ),
+                category: ErrorCategory::ToolRejected,
+            }
+        })?;
         let Some(url) = contract.url(args) else {
             // Calls without a URL-addressed destination have no check at this
             // seam. For URL-addressed methods with a missing/non-string URL,

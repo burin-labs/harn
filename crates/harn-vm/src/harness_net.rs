@@ -159,9 +159,9 @@ pub struct NetPolicyAudit {
 ///
 /// `NetPolicy` directly gates operations whose call contract exposes a URL.
 /// The remaining methods operate on local state/already-authorized handles, or
-/// (for connector calls) resolve and enforce their destination inside the
-/// owning client. Treating arg0 of those calls as a URL would misclassify a
-/// handle, cookie name, provider name, or local path as an HTTP destination.
+/// (for connector calls) do not expose their destination at this method seam.
+/// Treating arg0 of those calls as a URL would misclassify a handle, cookie
+/// name, provider name, or local path as an HTTP destination.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum NetPolicyMethodContract {
     OutboundUrl { argument: usize },
