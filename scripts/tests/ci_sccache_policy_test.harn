@@ -114,6 +114,7 @@ fn workflow() {
     "needs.changes.outputs.rust == 'true' && needs.rust-artifacts-ready.result == 'success'"
   const artifact_consumer_needs = ["changes", "rust-artifacts-ready"]
   return {
+    env: {HARN_ARTIFACT_WAIT_MAX_ATTEMPTS: "270", HARN_ARTIFACT_WAIT_INTERVAL_SECONDS: "10"},
     jobs: {
       "package-audit": package_audit,
       "rust-check-inputs": {
@@ -149,7 +150,7 @@ fn workflow() {
       },
       "rust-artifacts-ready": {
         "runs-on": "ubuntu-latest",
-        "timeout-minutes": 12,
+        "timeout-minutes": 50,
         needs: ["changes"],
         permissions: {actions: "read", contents: "read"},
         steps: [
@@ -211,7 +212,7 @@ fn workflow() {
       "rust-test": rust_test,
       "security-tests-ready": {
         "runs-on": "ubuntu-latest",
-        "timeout-minutes": 12,
+        "timeout-minutes": 50,
         needs: ["changes"],
         permissions: {actions: "read", contents: "read"},
         steps: [
@@ -237,6 +238,7 @@ fn workflow() {
       },
       "harn-audit": {
         "runs-on": "ubuntu-latest",
+        "timeout-minutes": 65,
         needs: ["changes"],
         if: "needs.changes.outputs.rust == 'true'",
         steps: [
@@ -568,6 +570,30 @@ pipeline test_rejects_serialized_live_artifact_handoff(harness: Harness, task) {
   assert(
     errors.contains(
       "ci.yml:ci-walltime-report must publish a non-empty fail-closed timing report off the conformance tail",
+    ),
+  )
+}
+
+@test
+pipeline test_rejects_artifact_wait_shorter_than_cold_producer_headroom(harness: Harness, task) {
+  const valid = workflow()
+  const invalid = {
+    ...valid,
+    env: {...valid.env, HARN_ARTIFACT_WAIT_MAX_ATTEMPTS: "66"},
+    jobs: {
+      ...valid.jobs,
+      "security-tests-ready": {...valid.jobs["security-tests-ready"], "timeout-minutes": 12},
+    },
+  }
+  const errors = ci_linux_lane_policy_errors(invalid)
+  assert(
+    errors.contains(
+      "ci.yml:rust-artifacts-ready must be the bounded free-hosted immutable artifact barrier",
+    ),
+  )
+  assert(
+    errors.contains(
+      "ci.yml:security-tests-ready must be the bounded free-hosted security artifact barrier",
     ),
   )
 }

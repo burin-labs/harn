@@ -18,6 +18,11 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  # A cold merge-group producer can take more than 15 minutes to publish its
+  # exact-run artifacts. Every live consumer shares this bounded wait policy;
+  # the barrier jobs add scheduling and API headroom above it.
+  HARN_ARTIFACT_WAIT_MAX_ATTEMPTS: "270"
+  HARN_ARTIFACT_WAIT_INTERVAL_SECONDS: "10"
   # Incremental fights the within-job sccache wrapper. Cross-run reuse is
   # owned by each lane's persistent compiler-object cache. Do not persist a
   # shared target/: independent PR and merge-group builds overlap, and Cargo
@@ -609,7 +614,7 @@ jobs:
     needs: [changes]
     if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 50
     permissions:
       actions: read
       contents: read
@@ -632,7 +637,7 @@ jobs:
     needs: [changes]
     if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 50
     permissions:
       actions: read
       contents: read
@@ -913,7 +918,7 @@ jobs:
             step_name: source and generated-file checks
     # Hang backstop, not a performance budget. The per-test performance ratchet
     # still owns performance regressions.
-    timeout-minutes: 40
+    timeout-minutes: 65
     permissions:
       actions: read
       contents: read

@@ -185,6 +185,18 @@ const ARTIFACT_READY_JOB = "rust-artifacts-ready"
 
 const SECURITY_READY_JOB = "security-tests-ready"
 
+// A cold merge-group producer has taken ~15.5m to publish the CLI, and a later
+// healthy producer remained queued for more than 16m before compilation. The
+// 45m poll budget covers admission plus the producer's bounded build; barrier
+// and audit deadlines retain scheduling and post-artifact headroom.
+const ARTIFACT_WAIT_MAX_ATTEMPTS = "270"
+
+const ARTIFACT_WAIT_INTERVAL_SECONDS = "10"
+
+const ARTIFACT_READY_TIMEOUT_MINUTES = "50"
+
+const HARN_AUDIT_TIMEOUT_MINUTES = "65"
+
 const LIVE_ARTIFACT_CONSUMERS = ["audit-scripts", "ci-walltime-report"]
 
 const WORKFLOW_GLOB = ".github/workflows/*.yml"
@@ -1811,11 +1823,15 @@ fn artifact_ready_barrier_errors(workflow) -> list<string> {
   const ready_needs = ready_job?.needs ?? []
   const ready_step = step_by_name(ready_job?.steps ?? [], "Wait for shared Harn binary")
   const ready_command = trim(ready_step?.run ?? "")
-  if trim(ready_job?.["runs-on"] ?? "") != HOSTED_LINUX_RUNNER
+  if trim(workflow?.env?.HARN_ARTIFACT_WAIT_MAX_ATTEMPTS ?? "")
+    != ARTIFACT_WAIT_MAX_ATTEMPTS
+    || trim(workflow?.env?.HARN_ARTIFACT_WAIT_INTERVAL_SECONDS ?? "")
+    != ARTIFACT_WAIT_INTERVAL_SECONDS
+    || trim(ready_job?.["runs-on"] ?? "") != HOSTED_LINUX_RUNNER
     || trim(
     to_string(ready_job?.["timeout-minutes"] ?? ""),
   )
-    != "12"
+    != ARTIFACT_READY_TIMEOUT_MINUTES
     || ready_needs != ["changes"]
     || trim(ready_job?.permissions?.actions ?? "")
     != "read"
@@ -1848,7 +1864,7 @@ fn security_ready_barrier_errors(workflow) -> list<string> {
     || trim(
     to_string(ready_job?.["timeout-minutes"] ?? ""),
   )
-    != "12"
+    != ARTIFACT_READY_TIMEOUT_MINUTES
     || ready_needs != ["changes"]
     || trim(ready_job?.permissions?.actions ?? "") != "read"
     || trim(
@@ -1885,6 +1901,8 @@ fn harn_audit_overlap_errors(workflow) -> list<string> {
   if (audit?.needs ?? []) != ["changes"]
     || trim(audit?.if ?? "")
     != "needs.changes.outputs.rust == 'true'"
+    || trim(to_string(audit?.["timeout-minutes"] ?? ""))
+    != HARN_AUDIT_TIMEOUT_MINUTES
     || wait_index < 0
     || download_index < 0
     || verify_index < 0
