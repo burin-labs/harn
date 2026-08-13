@@ -48,10 +48,9 @@ pipeline default(harness: Harness) {
       harness.stdio.println(!fallback_events[1]?.metadata?.accepted)
     },
   )
-  // The built-in empty-completion retry applies to provider-shaped routes
-  // only. The mock provider replays scripted turns deterministically, so the
-  // thrown empty-completion shape surfaces on the first attempt with no
-  // silent retry (pre-v0.10, `llm_retries` could opt mock into a budget).
+  // The canonical agent transport projects this typed transient server error
+  // through the same bounded retry policy on every provider, including the
+  // deterministic mock route used by this fixture.
   with_llm_script(
     harness.llm,
     [
@@ -73,7 +72,7 @@ pipeline default(harness: Harness) {
       )
       harness.stdio.println(surfaced.status)
       harness.stdio.println(surfaced?.trace?.empty_completion_retries == 0)
-      harness.stdio.println(len(harness.llm.mock_calls()) == 1)
+      harness.stdio.println(len(harness.llm.mock_calls()) == 2)
     },
   )
 }
