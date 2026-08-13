@@ -1521,8 +1521,9 @@ harn tool new acme-echo --description "Echo text for tests."
 ```
 
 The generated package includes `[[package.tools]]` metadata, a stable
-`tools` export, package-local dispatch tests, API docs, and a CI call to the
-canonical `harn package verify` contract.
+`tools` export, an MCP entrypoint for lazy agent discovery, package-local
+dispatch tests, API docs, and a CI call to the canonical `harn package verify`
+contract. Run the entrypoint with `harn serve mcp server.harn`.
 
 ## harn skill
 

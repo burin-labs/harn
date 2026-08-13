@@ -227,6 +227,7 @@ fn tool_call_status_serde() {
 fn tool_mutation_status_serde_and_terminal_update_round_trip() {
     for (status, expected) in [
         (ToolMutationStatus::Applied, "applied"),
+        (ToolMutationStatus::Unchanged, "unchanged"),
         (ToolMutationStatus::NotApplied, "not_applied"),
         (ToolMutationStatus::Unknown, "unknown"),
     ] {

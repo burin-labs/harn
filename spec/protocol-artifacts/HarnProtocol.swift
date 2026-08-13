@@ -560,11 +560,13 @@ public enum HarnToolCallErrorCategory: String, Codable, Sendable, CaseIterable {
 
 public enum HarnToolMutationStatus: String, Codable, Sendable, CaseIterable {
     case applied = "applied"
+    case unchanged = "unchanged"
     case notApplied = "not_applied"
     case unknown = "unknown"
 
     public static let allCases: [Self] = [
         "applied",
+        "unchanged",
         "not_applied",
         "unknown",
     ].map { Self(rawValue: $0)! }

@@ -204,6 +204,86 @@ fn vm_tools_to_native_preserves_json_schema_required_arrays() {
 }
 
 #[test]
+fn vm_tools_to_native_preserves_mcp_camel_case_input_schema_for_anthropic() {
+    let input_schema = vm_dict(&[
+        ("type", vm_str("object")),
+        (
+            "properties",
+            vm_dict(&[
+                ("endpoint_name", vm_dict(&[("type", vm_str("string"))])),
+                (
+                    "method",
+                    vm_dict(&[
+                        ("type", vm_str("string")),
+                        ("enum", vm_list(vec![vm_str("GET"), vm_str("POST")])),
+                    ]),
+                ),
+            ]),
+        ),
+        (
+            "required",
+            vm_list(vec![vm_str("endpoint_name"), vm_str("method")]),
+        ),
+        ("additionalProperties", super::VmValue::Bool(false)),
+    ]);
+    let tool = vm_dict(&[
+        ("name", vm_str("add_internal_api_endpoint")),
+        (
+            "description",
+            vm_str("Add a conventional internal endpoint"),
+        ),
+        ("inputSchema", input_schema),
+    ]);
+
+    let tools = vm_tools_to_native(
+        &vm_list(vec![tool]),
+        "anthropic",
+        "claude-haiku-4-5-20251001",
+    )
+    .expect("anthropic native tools");
+    let schema = &tools[0]["input_schema"];
+
+    assert_eq!(schema["required"], json!(["endpoint_name", "method"]));
+    assert_eq!(
+        schema["properties"]["method"]["enum"],
+        json!(["GET", "POST"])
+    );
+    assert_eq!(schema["additionalProperties"], false);
+    assert!(
+        schema.get("inputSchema").is_none(),
+        "the schema itself must not be mistaken for a parameter map"
+    );
+}
+
+#[test]
+fn vm_tools_to_native_preserves_snake_case_input_schema_for_openai() {
+    let input_schema = vm_dict(&[
+        ("type", vm_str("object")),
+        (
+            "properties",
+            vm_dict(&[("path", vm_dict(&[("type", vm_str("string"))]))]),
+        ),
+        ("required", vm_list(vec![vm_str("path")])),
+    ]);
+    let tool = vm_dict(&[
+        ("name", vm_str("inspect")),
+        ("description", vm_str("Inspect a path")),
+        ("input_schema", input_schema),
+    ]);
+
+    let tools =
+        vm_tools_to_native(&vm_list(vec![tool]), "openai", "gpt-5.4").expect("openai native tools");
+    assert_eq!(
+        tools[0]["function"]["parameters"]["required"],
+        json!(["path"])
+    );
+    assert_eq!(
+        tools[0]["function"]["parameters"]["properties"]["path"]["type"],
+        "string"
+    );
+}
+
+#[test]
 fn extract_deferred_tool_names_walks_both_wire_shapes() {
     let anthropic = vec![
         json!({"name": "look"}),

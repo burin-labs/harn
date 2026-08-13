@@ -75,7 +75,6 @@ fn workspace_toolchain_env(policy: &CapabilityPolicy) -> Vec<(String, String)> {
         ("NPM_CONFIG_CACHE".to_string(), path("npm")),
         ("YARN_CACHE_FOLDER".to_string(), path("yarn")),
         ("PNPM_HOME".to_string(), path("pnpm/home")),
-        ("NPM_CONFIG_STORE_DIR".to_string(), path("pnpm/store")),
         ("PYTHONUSERBASE".to_string(), path("python-user")),
     ];
 
@@ -180,12 +179,15 @@ mod tests {
             "NPM_CONFIG_CACHE",
             "YARN_CACHE_FOLDER",
             "PNPM_HOME",
-            "NPM_CONFIG_STORE_DIR",
             "PYTHONUSERBASE",
         ] {
             let value = PathBuf::from(env.get(key).unwrap());
             assert!(value.starts_with(&cache), "{key} escaped cache: {value:?}");
         }
+        assert!(
+            !env.contains_key("NPM_CONFIG_STORE_DIR"),
+            "pnpm storage follows the isolated HOME/XDG roots; a global npm_config store-dir leaks an unsupported option into npm"
+        );
         assert!(PathBuf::from(env.get("CARGO_HOME").unwrap()).is_absolute());
         assert!(PathBuf::from(env.get("RUSTUP_HOME").unwrap()).is_absolute());
         for key in TMPDIR_ENV_KEYS {

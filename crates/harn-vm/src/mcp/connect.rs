@@ -4,6 +4,7 @@ pub(crate) async fn mcp_connect_stdio_impl(
     command: &str,
     args: &[String],
     env: &BTreeMap<String, String>,
+    cwd: Option<&str>,
     requested_protocol_version: String,
 ) -> Result<VmMcpClientHandle, VmError> {
     let mut cmd = tokio::process::Command::new(command);
@@ -12,6 +13,9 @@ pub(crate) async fn mcp_connect_stdio_impl(
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::inherit())
         .envs(env);
+    if let Some(cwd) = cwd.map(str::trim).filter(|cwd| !cwd.is_empty()) {
+        cmd.current_dir(cwd);
+    }
     cmd.kill_on_drop(true);
 
     let transport = rmcp::transport::TokioChildProcess::new(cmd).map_err(|e| {
@@ -158,6 +162,7 @@ pub async fn connect_mcp_server_from_spec(
                 &spec.command,
                 &spec.args,
                 &spec.env,
+                spec.cwd.as_deref(),
                 options.protocol_version,
             )
             .await?

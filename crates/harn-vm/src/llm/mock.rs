@@ -30,6 +30,7 @@ struct CliLlmMockState {
     mode: CliLlmMockMode,
     queue: MockQueue,
     recordings: Vec<LlmMock>,
+    next_tool_call_id: u64,
 }
 
 static CLI_LLM_MOCK_NEXT_SCOPE: AtomicU64 = AtomicU64::new(1);
@@ -387,6 +388,7 @@ struct LlmMockState {
     scopes: Vec<LlmMockScope>,
     receipts: Vec<MockConsumptionReceipt>,
     cli_scope: Option<Arc<CliLlmMockLease>>,
+    next_tool_call_id: u64,
 }
 
 /// Shared mutable mock state for one VM execution tree.
@@ -584,6 +586,7 @@ pub(crate) fn reset_llm_mock_state() {
         state.prompt_cache.clear();
         state.scopes.clear();
         state.receipts.clear();
+        state.next_tool_call_id = 0;
     });
 }
 
@@ -633,6 +636,7 @@ pub fn install_cli_llm_mocks(mocks: Vec<LlmMock>) {
             warnings: Vec::new(),
         }),
         recordings: Vec::new(),
+        next_tool_call_id: 0,
     });
 }
 
@@ -642,6 +646,7 @@ pub fn install_cli_llm_mock_fixture(fixture: LlmMockFixture) {
         mode: CliLlmMockMode::Replay,
         queue: MockQueue::from_fixture(fixture),
         recordings: Vec::new(),
+        next_tool_call_id: 0,
     });
 }
 
@@ -650,6 +655,7 @@ pub fn enable_cli_llm_mock_recording() {
         mode: CliLlmMockMode::Record,
         queue: MockQueue::default(),
         recordings: Vec::new(),
+        next_tool_call_id: 0,
     });
 }
 
@@ -725,7 +731,11 @@ fn record_llm_mock_call(request: &super::api::LlmRequestPayload) {
 }
 
 /// Build an LlmResult from a matched mock.
-fn build_mock_result(mock: &LlmMock, last_msg_len: usize) -> LlmResult {
+fn build_mock_result(
+    mock: &LlmMock,
+    last_msg_len: usize,
+    next_tool_call_id: &mut u64,
+) -> LlmResult {
     // A mock may script an ordered list of visible-text chunks for streaming
     // callers. Derive the flat `text` from their concatenation when `text` was
     // left empty, so the non-streaming result and the streamed transcript agree
@@ -758,8 +768,8 @@ fn build_mock_result(mock: &LlmMock, last_msg_len: usize) -> LlmResult {
         }
 
         let mut tool_calls = Vec::new();
-        for (i, tc) in mock.tool_calls.iter().enumerate() {
-            let id = format!("mock_call_{}", i + 1);
+        for tc in &mock.tool_calls {
+            let id = allocate_mock_tool_call_id(next_tool_call_id);
             let name = tc.get("name").and_then(|n| n.as_str()).unwrap_or("unknown");
             let arguments = tc
                 .get("arguments")
@@ -808,6 +818,11 @@ fn build_mock_result(mock: &LlmMock, last_msg_len: usize) -> LlmResult {
         logprobs: mock.logprobs.clone(),
         telemetry: ProviderTelemetry::default(),
     }
+}
+
+fn allocate_mock_tool_call_id(next_tool_call_id: &mut u64) -> String {
+    *next_tool_call_id += 1;
+    format!("mock_call_{next_tool_call_id}")
 }
 
 // Mock prompt patterns match free prose, where `?`/`[`/`{` are ordinary
@@ -958,21 +973,31 @@ struct ScopedMatch {
     receipt: MockConsumptionReceipt,
 }
 
-fn build_scoped_match(selected: QueueMatch, match_text: &str) -> ScopedMatch {
+fn build_scoped_match(
+    selected: QueueMatch,
+    match_text: &str,
+    next_tool_call_id: &mut u64,
+) -> ScopedMatch {
     let QueueMatch { mock, receipt } = selected;
     let outcome = match &mock.error {
         Some(err) => Err(mock_error_to_vm_error(err)),
-        None => Ok(build_mock_result(&mock, match_text.len())),
+        None => Ok(build_mock_result(
+            &mock,
+            match_text.len(),
+            next_tool_call_id,
+        )),
     };
     ScopedMatch { outcome, receipt }
 }
 
 fn try_match_builtin_mock(scope: &str, match_text: &str) -> Option<ScopedMatch> {
     with_mock_state_mut(|state| {
-        state
-            .builtin_queue
-            .match_request(scope, match_text)
-            .map(|selected| build_scoped_match(selected, match_text))
+        let selected = state.builtin_queue.match_request(scope, match_text)?;
+        Some(build_scoped_match(
+            selected,
+            match_text,
+            &mut state.next_tool_call_id,
+        ))
     })
 }
 
@@ -987,10 +1012,12 @@ fn try_match_cli_mock(
     if state.mode != CliLlmMockMode::Replay {
         return None;
     }
-    state
-        .queue
-        .match_request(scope, match_text)
-        .map(|selected| build_scoped_match(selected, match_text))
+    let selected = state.queue.match_request(scope, match_text)?;
+    Some(build_scoped_match(
+        selected,
+        match_text,
+        &mut state.next_tool_call_id,
+    ))
 }
 
 pub(crate) fn record_cli_llm_result(request: &super::api::LlmRequestPayload, result: &LlmResult) {
@@ -1387,13 +1414,16 @@ pub(crate) fn mock_llm_response(
         if let Some(first_tool) = mock_auto_tool_candidate(tools) {
             let tool_name = mock_tool_name(first_tool).unwrap_or("unknown");
             let mock_args = mock_required_args(first_tool);
+            let tool_call_id = with_mock_state_mut(|state| {
+                allocate_mock_tool_call_id(&mut state.next_tool_call_id)
+            });
             let mut result = LlmResult {
                 attempts: Default::default(),
                 text_projection: None,
                 served_fast: false,
                 text: String::new(),
                 tool_calls: vec![serde_json::json!({
-                        "id": "mock_call_1",
+                        "id": tool_call_id.clone(),
                         "type": "tool_call",
                         "name": tool_name,
                 "arguments": mock_args
@@ -1411,7 +1441,7 @@ pub(crate) fn mock_llm_response(
                 stop_reason: None,
                 blocks: vec![serde_json::json!({
                     "type": "tool_call",
-                    "id": "mock_call_1",
+                    "id": tool_call_id,
                     "name": tool_name,
                     "arguments": mock_args,
                     "visibility": "internal",

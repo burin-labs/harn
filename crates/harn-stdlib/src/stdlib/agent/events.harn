@@ -74,7 +74,7 @@ pub fn agent_tool_lifecycle_event_schema() {
         common
           + {
           type: schema_literal("tool_call_update"),
-          mutation_status: schema_enum(["applied", "not_applied", "unknown"]),
+          mutation_status: schema_enum(["applied", "unchanged", "not_applied", "unknown"]),
           changed_paths: schema_field(schema_list(schema_string()), false),
           data: schema_field(schema_any(), false),
         },
@@ -306,8 +306,8 @@ fn __agent_event_contract_report(value) {
     return {ok: false, message: message, errors: [message], issues: []}
   }
   const mutation_status = to_string(value.mutation_status)
-  if !contains(["applied", "not_applied", "unknown"], mutation_status) {
-    const message = "mutation_status must be one of applied, not_applied, unknown"
+  if !contains(["applied", "unchanged", "not_applied", "unknown"], mutation_status) {
+    const message = "mutation_status must be one of applied, unchanged, not_applied, unknown"
     return {ok: false, message: message, errors: [message], issues: []}
   }
   return nil

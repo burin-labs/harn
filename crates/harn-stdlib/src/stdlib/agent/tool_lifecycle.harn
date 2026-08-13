@@ -12,7 +12,7 @@ pub type AgentToolLifecycleErrorCategory = "schema_validation" \
   | "abandoned_at_loop_exit" \
   | "unknown"
 
-pub type AgentToolMutationStatus = "applied" | "not_applied" | "unknown"
+pub type AgentToolMutationStatus = "applied" | "unchanged" | "not_applied" | "unknown"
 
 /**
  * Explicit handler return for tools that need machine-readable facts beside the
@@ -123,7 +123,7 @@ pub fn agent_tool_mutation_status(raw: any) -> AgentToolMutationStatus {
     return "unknown"
   }
   const status = to_string(raw)
-  if contains(["applied", "not_applied", "unknown"], status) {
+  if contains(["applied", "unchanged", "not_applied", "unknown"], status) {
     return status
   }
   return "unknown"

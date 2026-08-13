@@ -7,6 +7,45 @@ use std::collections::BTreeSet;
 
 use super::collect::ToolSchema;
 
+/// Resolve one provider/model-safe spelling back to its declared tool name.
+///
+/// Models sometimes replace namespace punctuation with `_` even when the
+/// provider accepts the original spelling (`repo-workflows__x` becomes
+/// `repo_workflows__x`). Exact names always win. A normalized spelling is
+/// accepted only when it identifies exactly one catalog entry, so collisions
+/// abstain instead of bypassing a tool ceiling or dispatching the wrong tool.
+pub(crate) fn recover_unique_provider_safe_alias(
+    name: &str,
+    schemas: &[ToolSchema],
+) -> Option<String> {
+    if schemas.iter().any(|schema| schema.name == name) {
+        return Some(name.to_string());
+    }
+    let normalized = provider_safe_name(name);
+    let matches: Vec<&str> = schemas
+        .iter()
+        .filter(|schema| provider_safe_name(&schema.name) == normalized)
+        .map(|schema| schema.name.as_str())
+        .collect();
+    match matches.as_slice() {
+        [only] => Some((*only).to_string()),
+        _ => None,
+    }
+}
+
+fn provider_safe_name(name: &str) -> String {
+    name.trim()
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '_' {
+                ch.to_ascii_lowercase()
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
 pub(crate) fn normalize_repaired_denial(
     denial: crate::agent_events::ToolDenial,
     repair: Option<&serde_json::Value>,
@@ -185,6 +224,37 @@ mod tests {
             .iter()
             .map(|name| name.to_string())
             .collect()
+    }
+
+    #[test]
+    fn uniquely_recovers_provider_normalized_mcp_namespace() {
+        let schemas = vec![
+            tool(
+                "repo-workflows__add_internal_api_endpoint",
+                vec![param("slug", true)],
+            ),
+            tool("run", vec![param("command", true)]),
+        ];
+        assert_eq!(
+            recover_unique_provider_safe_alias(
+                "repo_workflows__add_internal_api_endpoint",
+                &schemas,
+            )
+            .as_deref(),
+            Some("repo-workflows__add_internal_api_endpoint")
+        );
+    }
+
+    #[test]
+    fn provider_safe_alias_abstains_on_collision() {
+        let schemas = vec![
+            tool("repo-workflows__x", vec![param("slug", true)]),
+            tool("repo_workflows__x", vec![param("slug", true)]),
+        ];
+        assert_eq!(
+            recover_unique_provider_safe_alias("repo.workflows__x", &schemas),
+            None
+        );
     }
 
     #[test]

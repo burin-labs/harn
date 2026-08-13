@@ -301,7 +301,10 @@ pub fn tools_use_middleware(registry, transform) {
  * tool_inject_param(entry, name, schema_fragment, opts?) -> entry
  *
  * Helper for schema-time middleware: given a tool registry entry, returns
- * a new entry whose `parameters` schema includes the given parameter.
+ * a new entry whose existing tool-input schema includes the given parameter.
+ * Registry entries may spell that schema `parameters`, `input_schema`, or
+ * `inputSchema`; the helper preserves the existing spelling so middleware
+ * cannot shadow an MCP schema with a second, incomplete schema.
  * Honors both the bare `{x: "string"}` shorthand and the full JSON-schema
  * `{type: "object", properties: {...}, required: [...]}` shape.
  *
@@ -326,7 +329,17 @@ pub fn tool_inject_param(entry, name, schema_fragment, opts = nil) {
   } else {
     schema_fragment
   }
-  const params = entry?.parameters
+  const entry_keys = entry.keys()
+  const schema_key = if contains(entry_keys, "parameters") {
+    "parameters"
+  } else if contains(entry_keys, "input_schema") {
+    "input_schema"
+  } else if contains(entry_keys, "inputSchema") {
+    "inputSchema"
+  } else {
+    "parameters"
+  }
+  const params = entry?.[schema_key]
   if type_of(params) == "dict" && contains(params.keys(), "type")
     && to_string(params.type)
     == "object" {
@@ -342,14 +355,14 @@ pub fn tool_inject_param(entry, name, schema_fragment, opts = nil) {
       req_list
     }
     const new_params = params + {properties: new_props, required: new_req}
-    return entry + {parameters: new_params}
+    return entry + {[schema_key]: new_params}
   }
   // Bare-shorthand path: parameters is `{name: "type"}` or empty.
   const bare = __tool_mw_dict(params)
   if contains(bare.keys(), name) {
     return entry
   }
-  return entry + {parameters: bare + {[name]: fragment}}
+  return entry + {[schema_key]: bare + {[name]: fragment}}
 }
 
 // -------------------------------------------------------------------------------------------------

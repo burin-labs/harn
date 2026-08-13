@@ -269,6 +269,7 @@ export type HarnToolCallErrorCategory = (typeof HARN_TOOL_CALL_ERROR_CATEGORIES)
 
 export const HARN_TOOL_MUTATION_STATUSES = [
   "applied",
+  "unchanged",
   "not_applied",
   "unknown",
 ] as const

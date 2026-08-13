@@ -43,6 +43,9 @@ impl ToolCallStatus {
 pub enum ToolMutationStatus {
     /// The tool changed workspace state.
     Applied,
+    /// The requested state already existed, so the tool satisfied its
+    /// postcondition without changing workspace bytes.
+    Unchanged,
     /// The tool did not change workspace state.
     NotApplied,
     /// The execution boundary did not provide a definitive outcome.
@@ -50,11 +53,17 @@ pub enum ToolMutationStatus {
 }
 
 impl ToolMutationStatus {
-    pub const ALL: [Self; 3] = [Self::Applied, Self::NotApplied, Self::Unknown];
+    pub const ALL: [Self; 4] = [
+        Self::Applied,
+        Self::Unchanged,
+        Self::NotApplied,
+        Self::Unknown,
+    ];
 
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Applied => "applied",
+            Self::Unchanged => "unchanged",
             Self::NotApplied => "not_applied",
             Self::Unknown => "unknown",
         }

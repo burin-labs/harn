@@ -109,3 +109,74 @@ fn dispatched_text_channel_result_omits_absent_data() {
     assert_eq!(last["role"], "user");
     assert!(last.get("data").is_none());
 }
+
+/// Structured mutation receipts from dynamic/MCP tools must survive dispatch
+/// into the durable transcript so completion policy need not infer writes from
+/// human-readable output.
+#[test]
+fn dispatched_result_projects_mutation_facts_into_transcript_data() {
+    reset_agent_session_host_state();
+    let session_id =
+        crate::agent_sessions::open_or_create(Some("record-structured-mutation-facts".to_string()));
+    crate::agent_sessions::claim_tool_format(&session_id, "text").expect("text lock claims");
+    seed_host_session_provider_model(&session_id, "moonshot", "moonshot/kimi-k2.7-code-highspeed");
+
+    let dispatch = crate::stdlib::json_to_vm_value(&serde_json::json!([{
+        "tool_name": "repo-workflows__add_internal_api_endpoint",
+        "tool_call_id": "tc_0",
+        "ok": true,
+        "observation": "created endpoint",
+        "data": {"endpoint": "GET /health"},
+        "mutation_status": "applied",
+        "changed_paths": [
+            "src/internal-api/handlers/health.ts",
+            "src/internal-api/routes.ts"
+        ],
+    }]));
+    crate::llm::agent_session_host::record_tool_results_for_test(&session_id, dispatch);
+
+    let transcript = crate::agent_sessions::transcript(&session_id).expect("transcript");
+    let messages = list_items(
+        &dict_get(&transcript, "messages")
+            .cloned()
+            .unwrap_or(crate::value::VmValue::Nil),
+    );
+    let last = vm_to_json(messages.last().expect("a recorded result message"));
+    assert_eq!(last["data"]["endpoint"], "GET /health");
+    assert_eq!(last["data"]["mutation_status"], "applied");
+    assert_eq!(
+        last["data"]["changed_paths"],
+        serde_json::json!([
+            "src/internal-api/handlers/health.ts",
+            "src/internal-api/routes.ts"
+        ])
+    );
+}
+
+#[test]
+fn dispatched_idempotent_result_preserves_satisfied_unchanged_outcome() {
+    reset_agent_session_host_state();
+    let session_id =
+        crate::agent_sessions::open_or_create(Some("record-idempotent-mutation-facts".to_string()));
+    crate::agent_sessions::claim_tool_format(&session_id, "text").expect("text lock claims");
+    seed_host_session_provider_model(&session_id, "mock", "fixture-fast");
+
+    let dispatch = crate::stdlib::json_to_vm_value(&serde_json::json!([{
+        "tool_name": "repo-workflows__add_internal_api_endpoint",
+        "tool_call_id": "tc_0",
+        "ok": true,
+        "observation": "already current",
+        "mutation_status": "unchanged",
+        "changed_paths": [],
+    }]));
+    crate::llm::agent_session_host::record_tool_results_for_test(&session_id, dispatch);
+
+    let transcript = crate::agent_sessions::transcript(&session_id).expect("transcript");
+    let messages = list_items(
+        &dict_get(&transcript, "messages")
+            .cloned()
+            .unwrap_or(crate::value::VmValue::Nil),
+    );
+    let last = vm_to_json(messages.last().expect("a recorded result message"));
+    assert_eq!(last["data"]["mutation_status"], "unchanged");
+}

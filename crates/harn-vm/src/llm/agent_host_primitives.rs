@@ -845,6 +845,14 @@ pub(super) async fn host_agent_dispatch_tool_call(
             return Ok(json_to_vm_value(&denied));
         }
     };
+    if let Some(registry) = tools {
+        let schemas = tools::collect_tool_schemas(Some(registry), None);
+        if let Some(declared_name) =
+            crate::llm::tools::recover_unique_provider_safe_alias(&tool_name, &schemas)
+        {
+            tool_name = declared_name;
+        }
+    }
     let mut tool_args = tools::normalize_tool_args(&tool_name, raw_args_json(), tools);
     let session_id = agent_primitive_option_str(options, "session_id")
         .or_else(current_agent_session_id)

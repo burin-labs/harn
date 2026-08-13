@@ -145,6 +145,7 @@ fn tool_new_dispatch_is_deterministic() {
         harn_snap.contains_key("lib/tools.harn"),
         "lib/tools.harn present"
     );
+    assert!(harn_snap.contains_key("server.harn"), "server.harn present");
     assert!(
         harn_snap.contains_key(".github/workflows/ci.yml"),
         "workflow yaml present"
