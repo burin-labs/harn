@@ -597,7 +597,12 @@ fn dispatched_acp_methods_match_artifact() {
         let trimmed = line.trim();
         // Match-arm heads look like `"method" => {` or `"a" | "b" => {`.
         if !trimmed.contains("=>") || !trimmed.starts_with('"') {
-            if let Some(method) = dispatch_arm_constant_value(trimmed) {
+            if trimmed.contains("=>") {
+                let method = dispatch_arm_constant_value(trimmed).unwrap_or_else(|| {
+                    panic!(
+                        "constant-based ACP dispatch arm is not resolved by the protocol artifact guard: {trimmed}"
+                    )
+                });
                 dispatched.insert(method);
             }
             continue;
@@ -629,6 +634,9 @@ fn dispatch_arm_constant_value(trimmed_arm: &str) -> Option<String> {
     let name = trimmed_arm.split("=>").next()?.trim();
     match name {
         "HARN_PROVIDER_CATALOG_METHOD" => Some(HARN_PROVIDER_CATALOG_METHOD.to_string()),
+        "ACP_METHOD_SESSION_PLAN_DOCUMENT_MUTATE" => {
+            Some(ACP_METHOD_SESSION_PLAN_DOCUMENT_MUTATE.to_string())
+        }
         "harn_vm::session_timeline::SESSION_TIMELINE_QUERY_METHOD" => {
             Some(SESSION_TIMELINE_QUERY_METHOD.to_string())
         }
