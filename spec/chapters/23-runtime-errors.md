@@ -4,7 +4,7 @@
 |---|---|
 | `undefinedVariable(name)` | Variable not found in any scope |
 | `undefinedBuiltin(name)` | No registered builtin or user function with this name |
-| `immutableAssignment(name)` | Attempted `=` on a `let` binding |
+| `immutableAssignment(name)` | Attempted assignment through a `const` binding |
 | `typeMismatch(expected, got)` | Type assertion failed |
 | `returnValue(value?)` | Internal: used to implement `return` (not a user-facing error) |
 | `retryExhausted` | All retry attempts failed |
@@ -80,4 +80,3 @@ programs.
 |---|---|
 | `HARN-POL-001` | A `backpressure_queue(..., "fail_submitter")` pool was full at submit time. Drop policies do not raise — they return a `rejected` task handle and emit a `pool_drop` audit on `lifecycle.pool.audit`. |
 | `HARN-POL-002` | A `fail_fast()` pool had no immediate capacity at submit time. The submitter receives the error synchronously; no task is enqueued. |
-

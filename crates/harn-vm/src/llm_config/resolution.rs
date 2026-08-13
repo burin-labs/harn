@@ -57,7 +57,9 @@ fn normalize_model_id_with_config(raw: &str, config: &ProvidersConfig) -> String
         }
     }
     if let Some((provider, model)) = raw.split_once(':') {
-        if !model.is_empty() && (provider == "mock" || config.providers.contains_key(provider)) {
+        if !model.is_empty()
+            && (provider == "mock" || configured_provider_selector(config, raw).is_some())
+        {
             return model.to_string();
         }
     }

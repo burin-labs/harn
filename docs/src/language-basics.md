@@ -103,7 +103,7 @@ harness.stdio.log(status)    // outer
 ```
 
 If you want to update an outer binding from inside a block, declare it with
-`var` outside the block and assign to it inside the branch or loop body.
+`let` outside the block and assign to it inside the branch or loop body.
 
 ## Types and values
 

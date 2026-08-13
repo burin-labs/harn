@@ -388,12 +388,14 @@ outputs = [
   "spec/provider-catalog/provider-catalog.schema.json",
   "spec/provider-catalog/harn-provider-catalog.d.ts",
   "spec/provider-catalog/HarnProviderCatalog.swift",
+  "crates/harn-stdlib/src/stdlib/llm/provider_names.harn",
 ]
 sources = [
   "crates/harn-vm/src/llm/catalog_sources/",
   "crates/harn-vm/src/llm/capability_sources/",
   "crates/harn-cli/src/cli/providers.rs",
   "crates/harn-cli/src/commands/providers.rs",
+  "crates/harn-cli/src/commands/providers/",
   "crates/harn-vm/src/llm_config.rs",
   "crates/harn-vm/src/llm/capabilities.rs",
   "crates/harn-vm/src/provider_catalog.rs",

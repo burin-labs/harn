@@ -48,7 +48,7 @@ pipeline default(harness: Harness, task) {
     stacks: ["rust", "python"],
     inner: { args -> harness.process.shell(args.command) },
   })
-  agent_loop(harness, task, {tools: {tools: [{name: "run_command", handler: run_command}]}})
+  agent_loop(harness, task, nil, {tools: {tools: [{name: "run_command", handler: run_command}]}})
 }
 ```
 
@@ -395,7 +395,7 @@ pipeline default(harness: Harness, task) {
     stacks: ["rust"],
     inner: { args -> harness.process.shell(args.command) },
   })
-  agent_loop(harness, task, {tools: {tools: [{name: "run_command", handler: run_command}]}})
+  agent_loop(harness, task, nil, {tools: {tools: [{name: "run_command", handler: run_command}]}})
 }
 ```
 

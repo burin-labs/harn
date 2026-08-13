@@ -1,11 +1,9 @@
 # Agent lifecycle: suspend, resume, stop, self-park
 
-Harn agents are not just one-shot calls — they are cooperatively schedulable
-units that can park mid-loop, persist a resumable snapshot, resume later, or
+Harn agents can park mid-loop, persist a resumable snapshot, resume later, or
 hand unfinished child work back to a parent with a typed stop handoff. This
-page is the long-form reference for lifecycle primitives: when to reach for
-them, who owns the resume responsibility, and how transcript continuity or
-stop handoffs work across the boundary.
+reference defines the lifecycle primitives, resume ownership, transcript
+continuity, and stop handoffs.
 
 For a one-screen LLM quickref see the "Agent lifecycle: pause, resume,
 self-park" section in `docs/llm/harn-quickref.md`. For the upstream protocol

@@ -4,7 +4,7 @@
 > renamed — learn the distinction once:
 >
 > - **`pipeline`** is the *language keyword*: a named, callable, function-like
->   composition (`pipeline name(args) { ... }`) that serves as a program
+>   composition (`pipeline name(args) { ... }`) that is a program
 >   entrypoint and container. Not itself agentic. This page describes its
 >   finish-time lifecycle.
 > - **Workflow** is the *stage-graph runtime*: the typed, replayable graph of

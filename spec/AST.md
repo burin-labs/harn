@@ -711,7 +711,7 @@ fn(a: int, b: int) -> int { a + b }
 | Type | Fields | Used in |
 |------|--------|---------|
 | `SNode` | `Spanned<Node>` — node + source span | everywhere |
-| `BindingPattern` | `Identifier(String)`, `Dict(Vec<...>)`, `List(Vec<...>)` | let/var/for |
+| `BindingPattern` | `Identifier(String)`, `Dict(Vec<...>)`, `List(Vec<...>)` | const/let/for |
 | `TypeExpr` | `Named`, `List`, `Optional`, `Union`, `Shape`, `FnType`, `Generic` | type annotations |
 | `TypeParam` | `name: String`, `constraint: Option<String>` | generics |
 | `TypedParam` | `name`, `type_expr`, `default_value`, `is_rest` | fn params |

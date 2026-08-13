@@ -1,7 +1,7 @@
 ## Destructuring patterns
 
 Destructuring binds multiple variables from a dict or list in a single
-`let`, `var`, or `for`-`in` statement.
+`const`, `let`, or `for`-`in` statement.
 
 ### Dict destructuring
 
@@ -106,9 +106,9 @@ for [a, b] in pairs {
 `_` is also a discard binding in loop patterns, so `for [_, value] in ...`
 or `for (_, value) in ...` drops the ignored element instead of binding it.
 
-### Var destructuring
+### Mutable destructuring
 
-`var` destructuring creates mutable bindings that can be reassigned:
+`let` destructuring creates mutable bindings that can be reassigned:
 
 ```harn
 let {x, y} = {x: 1, y: 2}
@@ -116,12 +116,11 @@ x = 10
 y = 20
 ```
 
-Discard bindings remain non-bindings under `var` as well: `var [_, value] =`
+Discard bindings remain non-bindings under `let` as well: `let [_, value] =`
 still only introduces `value`.
 
 ### Type errors
 
 Destructuring a non-dict value with a dict pattern or a non-list value
 with a list pattern produces a runtime error. For example,
-`let {a} = "hello"` throws `"dict destructuring requires a dict value"`.
-
+`const {a} = "hello"` throws `"dict destructuring requires a dict value"`.

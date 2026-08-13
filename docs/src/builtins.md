@@ -2109,7 +2109,7 @@ after the loop completes.
 Example:
 
 ```harn,ignore
-const result = agent_loop(harness, "summarize this file", tools: [read_file])
+const result = agent_loop(harness, "summarize this file", nil, {tools: [read_file]})
 const summary = agent_trace_summary()
 harness.stdio.log("LLM calls: " + str(summary.llm_calls))
 harness.stdio.log("Tools used: " + str(summary.tools_used))

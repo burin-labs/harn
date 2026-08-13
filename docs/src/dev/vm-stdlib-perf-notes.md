@@ -47,7 +47,7 @@ allocation-free.
 
 `std/collections::filter_nil`, `std/collections::pick_keys`, and the
 `std/json` `merge`, `pick`, `omit` helpers all expanded to a
-`var result = {}` accumulator with `result = result + {[k]: v}` per
+`let result = {}` accumulator with `result = result + {[k]: v}` per
 iteration — fresh `Rc<BTreeMap>` allocation per inserted entry plus a
 per-call closure dispatch in `filter_nil`. Every connector wrapper
 (`std/connectors/{github,linear,notion,slack}`), `std/context`,
@@ -167,7 +167,7 @@ Two patterns dominated that snapshot:
    `dict + dict` operator already does `Rc::try_unwrap` for the unique
    case, but `result = result + {[k]: v}` always sees the slot still
    holding the value while the operator runs (slot ref + stack ref). The
-   right answer is either a `var <op>= rhs` peephole that emits a
+   right answer is either a `let <op>= rhs` peephole that emits a
    "swap-take" sequence, or a compiler pass that moves a slot value
    onto the stack when it knows the slot is about to be overwritten.
    Cheaper interim is to keep migrating Harn helpers to subscript-store

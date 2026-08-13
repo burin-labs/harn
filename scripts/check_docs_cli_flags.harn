@@ -1,4 +1,4 @@
-// Verify long flags in docs/src bash/sh Harn examples exist in `harn --help`.
+// Verify long flags in active documentation bash/sh Harn examples exist in `harn --help`.
 //
 // Ported from scripts/check_docs_cli_flags.sh (bash + inline python):
 // same bash-block extraction, backslash continuation joining, shlex-style
@@ -7,7 +7,13 @@
 //
 // Usage:
 //   harn run scripts/check_docs_cli_flags.harn
-const DOCS_GLOB = "docs/src/**/*.md"
+const DOCS_GLOBS = [
+  "docs/src/**/*.md",
+  "docs/llm/*.md",
+  "README.md",
+  "CONTRIBUTING.md",
+  "website/*.md",
+]
 
 const ALLOW_STALE = "harn-doc-cli: allow-stale"
 
@@ -503,8 +509,10 @@ pipeline main(harness: Harness, task) {
   const harn_bin = resolve_harn_bin(harness)
   const fetch = { path: list<string> -> fetch_help(harness.process, harn_bin, path) }
   let md_files: list<string> = []
-  for g in harness.fs.glob(DOCS_GLOB) {
-    md_files = md_files + [rel_path(g)]
+  for docs_glob in DOCS_GLOBS {
+    for g in harness.fs.glob(docs_glob) {
+      md_files = md_files + [rel_path(g)]
+    }
   }
   let state = {help: {}, flagsets: {}}
   let checked = 0

@@ -6,7 +6,7 @@
 |---|---|
 | `undefinedVariable(name)` | Variable not found in any scope |
 | `undefinedBuiltin(name)` | No registered builtin or user function with this name |
-| `immutableAssignment(name)` | Attempted `=` on a `let` binding |
+| `immutableAssignment(name)` | Attempted assignment through a `const` binding |
 | `typeMismatch(expected, got)` | Type assertion failed |
 | `returnValue(value?)` | Internal: used to implement `return` (not a user-facing error) |
 | `retryExhausted` | All retry attempts failed |
@@ -14,7 +14,7 @@
 
 Most `undefinedBuiltin` errors are now caught statically by the
 cross-module typechecker (see [Static cross-module
-resolution](#static-cross-module-resolution)) — `harn check` and
+resolution](./06-evaluation-order.md#static-cross-module-resolution)) — `harn check` and
 `harn run` refuse to start the VM when a file contains a call to a name
 that is not a builtin, local declaration, struct constructor, callable
 variable, or imported symbol. The runtime check remains as a backstop
@@ -82,4 +82,3 @@ programs.
 |---|---|
 | `HARN-POL-001` | A `backpressure_queue(..., "fail_submitter")` pool was full at submit time. Drop policies do not raise — they return a `rejected` task handle and emit a `pool_drop` audit on `lifecycle.pool.audit`. |
 | `HARN-POL-002` | A `fail_fast()` pool had no immediate capacity at submit time. The submitter receives the error synchronously; no task is enqueued. |
-

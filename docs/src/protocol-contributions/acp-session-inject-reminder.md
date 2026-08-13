@@ -257,7 +257,7 @@ schema work.
 | Dedupe lifecycle event log | Shipping | `transcript.reminder.deduped` on the EventLog |
 | Expiry lifecycle event log | Shipping | `transcript.reminder.expired` on the EventLog |
 | `SessionUpdate::ReminderEmitted` wire shape | Reference impl tracked in [#1828](https://github.com/burin-labs/harn/issues/1828) | Will emit under `_meta.harn.reminder` until upstream lands |
-| Provider-capability rendering (developer vs system vs Anthropic user block) | Shipping | See [System reminders > Capability-aware rendering](../system-reminders.md#capability-aware-rendering) |
+| Provider-capability rendering (one provider-neutral directive envelope) | Shipping | See [System reminders > One context-directive envelope](../system-reminders.md#one-context-directive-envelope) |
 
 The canonical `SystemReminder` struct (verbatim from
 [`crates/harn-vm/src/llm/helpers/transcript.rs`][reminder-rs]) maps

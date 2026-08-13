@@ -80,6 +80,12 @@ pub(crate) struct ProvidersGenerateArgs {
     /// Directory for generated provider catalog JSON, schema, and type artifacts.
     #[arg(long, default_value = "spec/provider-catalog")]
     pub artifact_dir: PathBuf,
+    /// Generated Harn stdlib provider-name projection.
+    #[arg(
+        long,
+        default_value = "crates/harn-stdlib/src/stdlib/llm/provider_names.harn"
+    )]
+    pub stdlib_provider_names_output: PathBuf,
     /// Check whether every generated artifact is up to date without writing.
     #[arg(long)]
     pub check: bool,

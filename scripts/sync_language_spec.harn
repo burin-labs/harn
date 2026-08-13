@@ -72,6 +72,66 @@ pub fn render_mirror_from(spec_text: string) -> string {
   return HEADER + spec_text
 }
 
+/** GitHub/rehype-slug anchor for an ATX Markdown heading. */
+pub fn markdown_heading_anchor(line: string) -> string {
+  let text = trim(line)
+  while text.starts_with("#") {
+    text = text.substring(1, text.len())
+  }
+  text = lowercase(trim(text))
+  text = regex_replace("[^a-z0-9 _-]", "", text)
+  return regex_replace("[ \\t]+", "-", text)
+}
+
+/** Map every specification heading anchor to its owning split-page slug. */
+pub fn chapter_anchor_owners(fs: HarnessFs) -> dict<string, string> {
+  let owners: dict<string, string> = {}
+  for path in page_paths(fs) {
+    const owner = page_slug(path)
+    for line in fs.read_text(path).lines() {
+      if regex_match("^#{1,6}[ \\t]+", line) != nil {
+        const anchor = markdown_heading_anchor(line)
+        const existing = owners.get(anchor)
+        if existing == nil {
+          owners[anchor] = owner
+        } else if existing != owner {
+          // Repeated headings such as "Examples" do not identify a unique
+          // cross-chapter target. Leave those links local so the site contract
+          // can require an explicit page when the local anchor is absent.
+          owners[anchor] = ""
+        }
+      }
+    }
+  }
+  return owners
+}
+
+/** Rewrite assembled-spec same-document anchors for one split docs page. */
+pub fn rewrite_cross_chapter_links(
+  text: string,
+  current_slug: string,
+  owners: dict<string, string>,
+) -> string {
+  let rendered = text
+  for anchor in owners.keys().sorted() {
+    const owner = owners[anchor]
+    if owner != "" && owner != current_slug {
+      rendered = rendered.replace("](#${anchor})", "](./${owner}.md#${anchor})")
+    }
+  }
+  return rendered
+}
+
+/** Render one split chapter with cross-chapter anchors made page-aware. */
+pub fn render_page_mirror(fs: HarnessFs, path: string) -> string {
+  return HEADER
+    + rewrite_cross_chapter_links(
+    fs.read_text(path),
+    page_slug(path),
+    chapter_anchor_owners(fs),
+  )
+}
+
 /** All chapter source paths in `NN-` order. */
 pub fn chapter_paths(fs: HarnessFs) -> list<string> {
   return fs.glob(CHAPTERS_GLOB).sorted()
@@ -198,7 +258,7 @@ pipeline main(harness: Harness, task) {
     harness.fs.write_text(MIRROR, index_text)
     harness.fs.mkdir(PAGES_DIR)
     for path in page_paths(harness.fs) {
-      harness.fs.write_text(page_path(path), render_mirror_from(harness.fs.read_text(path)))
+      harness.fs.write_text(page_path(path), render_page_mirror(harness.fs, path))
     }
     harness.fs.write_text(SUMMARY, summary_text)
     return 0
@@ -215,12 +275,7 @@ pipeline main(harness: Harness, task) {
       bad = true
     }
     for path in page_paths(harness.fs) {
-      if stale(
-        harness.fs,
-        harness.stdio,
-        render_mirror_from(harness.fs.read_text(path)),
-        page_path(path),
-      ) {
+      if stale(harness.fs, harness.stdio, render_page_mirror(harness.fs, path), page_path(path)) {
         bad = true
       }
     }

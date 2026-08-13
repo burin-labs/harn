@@ -49,7 +49,7 @@ The following identifiers are reserved:
 | `override` | `.overrideKw` |
 | `let` | `.letKw` |
 | `const` | `.constKw` |
-| `var` | `.varKw` |
+| `var` | `.varKw` (reserved for the removed-keyword migration diagnostic) |
 | `if` | `.ifKw` |
 | `else` | `.elseKw` |
 | `for` | `.forKw` |

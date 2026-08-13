@@ -20,8 +20,7 @@ pipeline default(harness: Harness) {
       ],
     },
   )
-  harness.clock.sleep_ms(25ms)
-  const state = harness.runtime.supervisor_state(sup)
+  const state = harness.runtime.supervisor_wait(sup)
   harness.stdio.println(harness.runtime.atomic_get(starts))
   harness.stdio.println(state.children[0].status)
   harness.stdio.println(state.metrics.failed)

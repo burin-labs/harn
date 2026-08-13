@@ -108,8 +108,8 @@ type Counts = {a: int, b: int}
 const d: Counts = {a: 1, b: 2}
 ```
 
-The same opt-in applies to `var x = nil` widening loops; annotating with
-`var x: T? = nil` enables the strict diagnostics. Use the unannotated
+The same opt-in applies to `let x = nil` widening loops; annotating with
+`let x: T? = nil` enables the strict diagnostics. Use the unannotated
 form for genuinely dynamic loops, and the annotated form when you want
 the typechecker to enforce the invariant.
 

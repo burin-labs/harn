@@ -32,6 +32,9 @@ pub(crate) fn infer_provider_with_config(
     if model_id.starts_with("huggingface:") || model_id.starts_with("hf:") {
         return crate::llm::provider::ProviderInference::builtin("huggingface");
     }
+    if let Some(provider) = configured_provider_selector(config, model_id) {
+        return crate::llm::provider::ProviderInference::builtin(provider);
+    }
     // Exact catalog rows are the most authoritative declaration of where
     // a model is hosted: any pattern-based inference rule is necessarily
     // less specific than `[models."<id>"].provider = "<name>"`. Catalogs
@@ -66,6 +69,17 @@ pub(crate) fn infer_provider_with_config(
         model_id,
         &default_provider_with_config(config),
     )
+}
+
+pub(super) fn configured_provider_selector<'a>(
+    config: &ProvidersConfig,
+    selector: &'a str,
+) -> Option<&'a str> {
+    let (provider, model) = selector.split_once(':')?;
+    if model.is_empty() {
+        return None;
+    }
+    config.providers.contains_key(provider).then_some(provider)
 }
 
 pub fn default_provider() -> String {

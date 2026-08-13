@@ -34,7 +34,7 @@
 - [Run a workflow bundle from the CLI](./workflow-authoring-quickstart.md)
 - [Cookbook](./cookbook.md)
 - [Scripting cheatsheet](./scripting-cheatsheet.md)
-- [LLM quick reference](../llm/harn-quickref.md)
+- [LLM quick reference](./docs/llm/harn-quickref.md)
 - [Best practices](./best-practices.md)
 - [Compile a bounded experiment](./cookbooks/compile-hypothesis.md)
 - [Pipeline lifecycle cookbook](./cookbooks/lifecycle.md)
@@ -364,6 +364,7 @@
 
 - [0.6.x → 0.7.0](./migrations/v0.7.md)
 - [Migrating to 0.10](./migrations/v0.10.md)
+- [`const`/`let` keyword scheme](./migrations/const-let.md)
 - [Pure collection method names](./migrations/pure-collection-methods.md)
 - [Prompt templates: v2](./migrations/template-engine-v2.md)
 - [Package-root prompt assets](./migrations/package-root-prompt-assets.md)
