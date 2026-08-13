@@ -2,6 +2,7 @@ import { agent_loop_default_retry_predicate } from "std/agent/retry"
 import { agent_emit_event } from "std/agent/state"
 import { with_retry } from "std/llm/handlers"
 import { llm_call_options } from "std/llm/options"
+import { __wrap_llm_result } from "std/llm/safe"
 
 fn __dispatch_reject_removed_options(options) {
   const removed = __llm_call_option_registry().removed
@@ -36,13 +37,22 @@ fn __dispatch_error_field(err, key, fallback) {
 }
 
 fn __dispatch_provider_error(err, llm_opts) {
+  const typed = if type_of(err) == "dict" {
+    err
+  } else {
+    {}
+  }
   const message = __dispatch_error_field(err, "message", to_string(err))
   const category = __dispatch_error_field(err, "category", error_category(err))
   const reason = __dispatch_error_field(err, "reason", "")
   const kind = __dispatch_error_field(err, "kind", "")
   const provider = __dispatch_error_field(err, "provider", to_string(llm_opts?.provider ?? ""))
   const model = __dispatch_error_field(err, "model", to_string(llm_opts?.model ?? ""))
-  return {
+  // Preserve additive transport taxonomy fields (for example source,
+  // partial, status, and retry_after_ms) while normalizing the fields the
+  // agent contract guarantees and enriching them with call context.
+  return typed
+    + {
     category: category,
     reason: reason,
     kind: kind,
@@ -90,6 +100,23 @@ fn __dispatch_validate_caller_result(result) {
   }
 }
 
+/**
+ * Project a raw default-transport attempt into the canonical agent caller
+ * envelope. The shared LLM projector owns retry status and retryability;
+ * this boundary only enriches its error with agent call context.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn __dispatch_default_result(result, llm_opts) -> dict {
+  const projected = __wrap_llm_result(result)
+  if projected.ok {
+    return projected
+  }
+  const normalized = __dispatch_provider_error(projected.error, llm_opts)
+  return projected + {stop_reason: projected.status, error: normalized}
+}
+
 fn __dispatch_default(llm: HarnessLlm, message, turn_system, llm_opts) {
   // Streaming and non-streaming paths intentionally return the same normalized
   // result so downstream tool dispatch does not depend on rendering mode.
@@ -101,25 +128,7 @@ fn __dispatch_default(llm: HarnessLlm, message, turn_system, llm_opts) {
       llm.call(message, turn_system, llm_call_options(llm_opts))
     }
   }
-  if !is_err(result) {
-    return {ok: true, value: unwrap(result)}
-  }
-  const err = unwrap_err(result)
-  const normalized = __dispatch_provider_error(err, llm_opts)
-  const reason = if type_of(err) == "dict" {
-    err?.reason ?? ""
-  } else {
-    ""
-  }
-  if reason == "budget_exceeded" {
-    return {
-      ok: false,
-      status: "budget_exhausted",
-      stop_reason: "budget_exhausted",
-      error: normalized,
-    }
-  }
-  return {ok: false, status: "provider_error", stop_reason: "provider_error", error: normalized}
+  return __dispatch_default_result(result, llm_opts)
 }
 
 /**
