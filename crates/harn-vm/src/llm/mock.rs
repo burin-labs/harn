@@ -1427,7 +1427,7 @@ pub(crate) fn mock_llm_response(
                 served_fast: false,
                 text: String::new(),
                 tool_calls: vec![serde_json::json!({
-                        "id": tool_call_id.clone(),
+                        "id": tool_call_id,
                         "type": "tool_call",
                         "name": tool_name,
                 "arguments": mock_args
