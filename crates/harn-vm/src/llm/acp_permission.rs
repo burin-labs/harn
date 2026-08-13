@@ -19,8 +19,13 @@
 
 use std::collections::BTreeSet;
 
+use serde::Deserialize;
 use serde_json::{json, Value as JsonValue};
 
+use crate::orchestration::{
+    ToolPermissionDecider, ToolPermissionGrantScope, ToolPermissionOutcome,
+    ToolPermissionPolicyEvidence, ToolPermissionResolution,
+};
 use crate::workspace_path::is_absolute_path_syntax;
 
 /// Canonical ACP method for asking the client to decide a tool permission.
@@ -175,12 +180,94 @@ fn permission_content(approval_request: &JsonValue) -> Vec<JsonValue> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum WireOutcome {
     /// The selected canonical `allow_once` option.
-    Allowed,
+    Allowed {
+        resolution: ToolPermissionResolution,
+    },
     /// `{ outcome: { outcome: "selected", optionId: "reject" } }` or a
-    /// `cancelled` outcome (the client dismissed the prompt). Both stop
-    /// the tool call; `cancelled` is distinguished only by the default
-    /// reason.
-    Rejected { reason: String },
+    /// canonical cancellation. Both stop the tool call, while the typed
+    /// resolution preserves denial, timeout, and cancellation without
+    /// reclassifying human-facing prose.
+    Rejected {
+        reason: String,
+        resolution: ToolPermissionResolution,
+    },
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WireDecisionMetadata {
+    schema: String,
+    outcome: ToolPermissionOutcome,
+    decider: ToolPermissionDecider,
+    policy_evaluations: Vec<ToolPermissionPolicyEvidence>,
+    #[serde(default)]
+    grant_scope: Option<ToolPermissionGrantScope>,
+}
+
+fn decision_metadata(response: &JsonValue) -> Option<Result<WireDecisionMetadata, ()>> {
+    response
+        .pointer("/_meta/harn/permissionDecision")
+        .map(|value| {
+            serde_json::from_value(value.clone())
+                .map_err(|_| ())
+                .and_then(|metadata: WireDecisionMetadata| {
+                    (metadata.schema == "harn.tool_permission_decision.v1")
+                        .then_some(metadata)
+                        .ok_or(())
+                })
+        })
+}
+
+fn approved_resolution(response: &JsonValue) -> Result<ToolPermissionResolution, ()> {
+    let decision = match decision_metadata(response) {
+        Some(decision) => decision?,
+        None => WireDecisionMetadata {
+            schema: "harn.tool_permission_decision.v1".to_string(),
+            outcome: ToolPermissionOutcome::Approved,
+            decider: ToolPermissionDecider::Person,
+            policy_evaluations: Vec::new(),
+            grant_scope: Some(ToolPermissionGrantScope::Once),
+        },
+    };
+    if decision.outcome != ToolPermissionOutcome::Approved
+        || decision.decider == ToolPermissionDecider::HostUnavailable
+    {
+        return Err(());
+    }
+    let scope = decision.grant_scope.ok_or(())?;
+    ToolPermissionResolution::approved(decision.decider, scope)
+        .with_host_policy_evaluations(decision.policy_evaluations)
+        .map_err(|_| ())
+}
+
+fn terminal_resolution(
+    response: &JsonValue,
+    canonical_outcome: ToolPermissionOutcome,
+) -> Result<ToolPermissionResolution, ()> {
+    let decision = match decision_metadata(response) {
+        Some(decision) => decision?,
+        None => WireDecisionMetadata {
+            schema: "harn.tool_permission_decision.v1".to_string(),
+            outcome: canonical_outcome,
+            decider: ToolPermissionDecider::Person,
+            policy_evaluations: Vec::new(),
+            grant_scope: None,
+        },
+    };
+    let coherent = match canonical_outcome {
+        ToolPermissionOutcome::Denied => decision.outcome == ToolPermissionOutcome::Denied,
+        ToolPermissionOutcome::Cancelled => matches!(
+            decision.outcome,
+            ToolPermissionOutcome::Cancelled | ToolPermissionOutcome::TimedOut
+        ),
+        ToolPermissionOutcome::Approved | ToolPermissionOutcome::TimedOut => false,
+    };
+    if !coherent || decision.grant_scope.is_some() {
+        return Err(());
+    }
+    ToolPermissionResolution::terminal(decision.outcome, decision.decider)
+        .with_host_policy_evaluations(decision.policy_evaluations)
+        .map_err(|_| ())
 }
 
 /// Parse a canonical `RequestPermissionResponse` result into a
@@ -204,7 +291,16 @@ pub(crate) fn parse_response(response: &JsonValue) -> WireOutcome {
                 .and_then(JsonValue::as_str)
                 .unwrap_or("");
             if option_id == OPTION_ALLOW {
-                WireOutcome::Allowed
+                match approved_resolution(response) {
+                    Ok(resolution) => WireOutcome::Allowed { resolution },
+                    Err(()) => WireOutcome::Rejected {
+                        reason: "host returned invalid permission decision metadata".to_string(),
+                        resolution: ToolPermissionResolution::terminal(
+                            ToolPermissionOutcome::Denied,
+                            ToolPermissionDecider::HostUnavailable,
+                        ),
+                    },
+                }
             } else {
                 WireOutcome::Rejected {
                     reason: response
@@ -212,14 +308,38 @@ pub(crate) fn parse_response(response: &JsonValue) -> WireOutcome {
                         .and_then(JsonValue::as_str)
                         .map(str::to_string)
                         .unwrap_or_else(|| "host rejected the tool call".to_string()),
+                    resolution: terminal_resolution(response, ToolPermissionOutcome::Denied)
+                        .unwrap_or_else(|()| {
+                            ToolPermissionResolution::terminal(
+                                ToolPermissionOutcome::Denied,
+                                ToolPermissionDecider::HostUnavailable,
+                            )
+                        }),
                 }
             }
         }
-        "cancelled" => WireOutcome::Rejected {
-            reason: "permission request was cancelled".to_string(),
-        },
+        "cancelled" => {
+            let resolution = terminal_resolution(response, ToolPermissionOutcome::Cancelled)
+                .unwrap_or_else(|()| {
+                    ToolPermissionResolution::terminal(
+                        ToolPermissionOutcome::Cancelled,
+                        ToolPermissionDecider::HostUnavailable,
+                    )
+                });
+            WireOutcome::Rejected {
+                reason: match resolution.outcome {
+                    ToolPermissionOutcome::TimedOut => "permission request timed out".to_string(),
+                    _ => "permission request was cancelled".to_string(),
+                },
+                resolution,
+            }
+        }
         _ => WireOutcome::Rejected {
             reason: "host did not return a canonical permission outcome".to_string(),
+            resolution: ToolPermissionResolution::terminal(
+                ToolPermissionOutcome::Denied,
+                ToolPermissionDecider::HostUnavailable,
+            ),
         },
     }
 }
@@ -366,7 +486,17 @@ mod tests {
     #[test]
     fn selected_allow_is_allowed() {
         let response = allow_response();
-        assert_eq!(parse_response(&response), WireOutcome::Allowed);
+        assert!(matches!(
+            parse_response(&response),
+            WireOutcome::Allowed {
+                resolution: ToolPermissionResolution {
+                    outcome: ToolPermissionOutcome::Approved,
+                    decider: ToolPermissionDecider::Person,
+                    grant_scope: Some(ToolPermissionGrantScope::Once),
+                    policy_evaluations,
+                }
+            } if policy_evaluations.is_empty()
+        ));
     }
 
     #[test]
@@ -378,7 +508,7 @@ mod tests {
                 "outcome": { "outcome": "selected", "optionId": option_id }
             });
             assert_eq!(
-                matches!(parse_response(&response), WireOutcome::Allowed),
+                matches!(parse_response(&response), WireOutcome::Allowed { .. }),
                 kind.starts_with("allow_"),
                 "offered option {option_id} ({kind})"
             );
@@ -398,8 +528,141 @@ mod tests {
     fn cancelled_is_rejected() {
         let response = json!({"outcome": {"outcome": "cancelled"}});
         match parse_response(&response) {
-            WireOutcome::Rejected { reason } => assert!(reason.contains("cancelled")),
+            WireOutcome::Rejected { reason, resolution } => {
+                assert!(reason.contains("cancelled"));
+                assert_eq!(resolution.outcome, ToolPermissionOutcome::Cancelled);
+            }
             other => panic!("expected rejection, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn typed_host_metadata_preserves_remembered_and_timeout_deciders() {
+        let approved = json!({
+            "outcome": {"outcome": "selected", "optionId": OPTION_ALLOW},
+            "_meta": {"harn": {"permissionDecision": {
+                "schema": "harn.tool_permission_decision.v1",
+                "outcome": "approved",
+                "decider": "remembered_rule",
+                "policy_evaluations": [{
+                    "layer": "remembered_rule",
+                    "outcome": "allowed",
+                    "rule_id": "remember-travel",
+                    "risk_labels": []
+                }],
+                "grant_scope": "session"
+            }}}
+        });
+        let timed_out = json!({
+            "outcome": {"outcome": "cancelled"},
+            "_meta": {"harn": {"permissionDecision": {
+                "schema": "harn.tool_permission_decision.v1",
+                "outcome": "timed_out",
+                "decider": "person",
+                "policy_evaluations": [{
+                    "layer": "managed_policy",
+                    "outcome": "approval_required",
+                    "risk_labels": ["external_mutation"]
+                }]
+            }}}
+        });
+
+        assert!(matches!(
+            parse_response(&approved),
+            WireOutcome::Allowed {
+                resolution: ToolPermissionResolution {
+                    decider: ToolPermissionDecider::RememberedRule,
+                    grant_scope: Some(ToolPermissionGrantScope::Session),
+                    ..
+                }
+            }
+        ));
+        assert!(matches!(
+            parse_response(&timed_out),
+            WireOutcome::Rejected {
+                resolution: ToolPermissionResolution {
+                    outcome: ToolPermissionOutcome::TimedOut,
+                    ..
+                },
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn incoherent_or_reusable_host_metadata_fails_closed() {
+        for metadata in [
+            json!({
+                "schema": "harn.tool_permission_decision.v1",
+                "outcome": "denied",
+                "decider": "person",
+                "policy_evaluations": []
+            }),
+            json!({
+                "schema": "harn.tool_permission_decision.v1",
+                "outcome": "approved",
+                "decider": "person",
+                "policy_evaluations": [],
+                "grant_scope": "once",
+                "reusable": true
+            }),
+        ] {
+            let response = json!({
+                "outcome": {"outcome": "selected", "optionId": OPTION_ALLOW},
+                "_meta": {"harn": {"permissionDecision": metadata}}
+            });
+            assert!(matches!(
+                parse_response(&response),
+                WireOutcome::Rejected {
+                    resolution: ToolPermissionResolution {
+                        decider: ToolPermissionDecider::HostUnavailable,
+                        ..
+                    },
+                    ..
+                }
+            ));
+        }
+    }
+
+    #[test]
+    fn malformed_or_fabricated_host_policy_evidence_fails_closed() {
+        for policy_evaluations in [
+            json!([{
+                "layer": "runtime_policy",
+                "outcome": "allowed",
+                "risk_labels": []
+            }]),
+            json!([{
+                "layer": "managed_policy",
+                "outcome": "allowed",
+                "rule_id": "unsafe rule text",
+                "risk_labels": []
+            }]),
+            json!([
+                {"layer": "user_policy", "outcome": "allowed", "risk_labels": []},
+                {"layer": "user_policy", "outcome": "allowed", "risk_labels": []}
+            ]),
+        ] {
+            let response = json!({
+                "outcome": {"outcome": "selected", "optionId": OPTION_ALLOW},
+                "_meta": {"harn": {"permissionDecision": {
+                    "schema": "harn.tool_permission_decision.v1",
+                    "outcome": "approved",
+                    "decider": "person",
+                    "policy_evaluations": policy_evaluations,
+                    "grant_scope": "once"
+                }}}
+            });
+            assert!(matches!(
+                parse_response(&response),
+                WireOutcome::Rejected {
+                    resolution: ToolPermissionResolution {
+                        decider: ToolPermissionDecider::HostUnavailable,
+                        ..
+                    },
+                    ..
+                }
+            ));
         }
     }
 

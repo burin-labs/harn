@@ -7,15 +7,18 @@ use harn_serve::adapters::acp::{
 use harn_serve::MCP_PROTOCOL_VERSION;
 use harn_vm::llm::receipts::{TOOL_CALL_RECEIPT_EXECUTORS, TOOL_CALL_RECEIPT_STATUSES};
 
+use super::activity::ActivityVocabulary;
 use super::connector_setup::ConnectorSetupVocabulary;
 use super::constants::*;
 use super::external_action::ExternalActionVocabulary;
 use super::support::*;
 use super::values::*;
 
+mod activity_types;
 mod codegen_support;
 mod session_timeline;
 
+use activity_types::append_activity_types;
 pub(crate) use codegen_support::*;
 use session_timeline::append_session_timeline_types;
 
@@ -25,6 +28,7 @@ pub(super) fn generate_swift() -> String {
         env!("CARGO_PKG_VERSION"),
         &ExternalActionVocabulary::load_for_tests(),
         &ConnectorSetupVocabulary::load_for_tests(),
+        &ActivityVocabulary::load_for_tests(),
     )
 }
 
@@ -32,6 +36,7 @@ pub(super) fn generate_swift_for_version(
     artifact_version: &str,
     external_actions: &ExternalActionVocabulary,
     connector_setup: &ConnectorSetupVocabulary,
+    activity: &ActivityVocabulary,
 ) -> String {
     let mut out = generated_header("harn dump-protocol-artifacts", "swift");
     out.push_str("import Foundation\n\n");
@@ -44,6 +49,8 @@ pub(super) fn generate_swift_for_version(
         "    public static let acpSchemaCompatibility = {}\n",
         json_string_literal(ACP_SCHEMA_COMPATIBILITY)
     ));
+    out.push_str("    public static let toolPermissionDecisionSchema = \"harn.tool_permission_decision.v1\"\n");
+    out.push_str("    public static let toolPermissionActivitySchema = \"harn.tool_permission_activity.v1\"\n");
     out.push_str(&format!(
         "    public static let harnAgentEventMethod = {}\n",
         json_string_literal(HARN_AGENT_EVENT_METHOD)
@@ -178,6 +185,7 @@ pub(super) fn generate_swift_for_version(
         "HarnExternalActionReconciliationStatus",
         &external_actions.reconciliation_statuses,
     ));
+    append_activity_types(&mut out, activity);
     out.push_str(&swift_enum(
         "HarnConnectorSetupStage",
         &connector_setup.stages,

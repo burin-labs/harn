@@ -1,0 +1,63 @@
+import {
+  ToolPermissionDecider,
+  ToolPermissionGrantExpiry,
+  ToolPermissionGrantScope,
+  ToolPermissionOutcome,
+  ToolPermissionPolicyLayer,
+  ToolPermissionPolicyOutcome,
+} from "std/activity/vocabulary"
+
+/** Value-free semantic scope derived only from registered tool annotations. */
+pub type ToolPermissionScope = {tool_kind: string, side_effect: string, capabilities: list<string>}
+
+pub type ToolPermissionPolicyEvidence = {
+  layer: ToolPermissionPolicyLayer,
+  outcome: ToolPermissionPolicyOutcome,
+  rule_id?: string,
+  risk_labels: list<string>,
+}
+
+/** Evidence about a grant, never the reusable grant itself. */
+pub type ToolPermissionGrantEvidence = {
+  scope: ToolPermissionGrantScope,
+  expires: ToolPermissionGrantExpiry,
+  reusable: bool,
+}
+
+/** Value-free decision metadata returned by a native approval host. */
+pub type ToolPermissionDecisionMetadata = {
+  schema: "harn.tool_permission_decision.v1",
+  outcome: ToolPermissionOutcome,
+  decider: ToolPermissionDecider,
+  policy_evaluations: list<ToolPermissionPolicyEvidence>,
+  grant_scope?: ToolPermissionGrantScope,
+}
+
+pub type ToolPermissionRequester = {
+  session_id: string,
+  agent_id?: string,
+  model_provider?: string,
+  model_id?: string,
+}
+
+/**
+ * Portable generic-tool decision record.
+ *
+ * Raw arguments, stdin, environment, commands, credentials, protected values,
+ * provider payloads, arbitrary context, and reusable grants have no fields in
+ * this contract.
+ */
+pub type ToolPermissionActivityRecord = {
+  schema: "harn.tool_permission_activity.v1",
+  kind: "tool_permission",
+  id: string,
+  request_id: string,
+  tool_name: string,
+  scope: ToolPermissionScope,
+  outcome: ToolPermissionOutcome,
+  decider: ToolPermissionDecider,
+  policy_evaluations: list<ToolPermissionPolicyEvidence>,
+  grant?: ToolPermissionGrantEvidence,
+  requester: ToolPermissionRequester,
+  occurred_at_ms: int,
+}

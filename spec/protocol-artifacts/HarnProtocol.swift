@@ -6,6 +6,8 @@ import Foundation
 public enum HarnProtocolConstants {
     public static let artifactVersion = "0.10.89"
     public static let acpSchemaCompatibility = "agentclientprotocol/agent-client-protocol schema v0.12.2"
+    public static let toolPermissionDecisionSchema = "harn.tool_permission_decision.v1"
+    public static let toolPermissionActivitySchema = "harn.tool_permission_activity.v1"
     public static let harnAgentEventMethod = "_harn/agentEvent"
     public static let harnProviderCatalogMethod = "_harn/providerCatalog"
     public static let acpPromptErrorDataSchema = "harn.acp.prompt_error.v1"
@@ -328,6 +330,178 @@ public enum HarnExternalActionReconciliationStatus: String, Codable, Sendable, C
         "indeterminate",
         "refused",
     ].map { Self(rawValue: $0)! }
+}
+
+public enum HarnActivityKind: String, Codable, Sendable, CaseIterable {
+    case externalAction = "external_action"
+    case toolPermission = "tool_permission"
+
+    public static let allCases: [Self] = [
+        "external_action",
+        "tool_permission",
+    ].map { Self(rawValue: $0)! }
+}
+
+public enum HarnToolPermissionOutcome: String, Codable, Sendable, CaseIterable {
+    case approved = "approved"
+    case denied = "denied"
+    case timedOut = "timed_out"
+    case cancelled = "cancelled"
+
+    public static let allCases: [Self] = [
+        "approved",
+        "denied",
+        "timed_out",
+        "cancelled",
+    ].map { Self(rawValue: $0)! }
+}
+
+public enum HarnToolPermissionDecider: String, Codable, Sendable, CaseIterable {
+    case person = "person"
+    case rememberedRule = "remembered_rule"
+    case userPolicy = "user_policy"
+    case managedPolicy = "managed_policy"
+    case runtimePolicy = "runtime_policy"
+    case hostUnavailable = "host_unavailable"
+
+    public static let allCases: [Self] = [
+        "person",
+        "remembered_rule",
+        "user_policy",
+        "managed_policy",
+        "runtime_policy",
+        "host_unavailable",
+    ].map { Self(rawValue: $0)! }
+}
+
+public enum HarnToolPermissionPolicyLayer: String, Codable, Sendable, CaseIterable {
+    case userPolicy = "user_policy"
+    case managedPolicy = "managed_policy"
+    case runtimePolicy = "runtime_policy"
+    case rememberedRule = "remembered_rule"
+
+    public static let allCases: [Self] = [
+        "user_policy",
+        "managed_policy",
+        "runtime_policy",
+        "remembered_rule",
+    ].map { Self(rawValue: $0)! }
+}
+
+public enum HarnToolPermissionPolicyOutcome: String, Codable, Sendable, CaseIterable {
+    case allowed = "allowed"
+    case denied = "denied"
+    case approvalRequired = "approval_required"
+    case unavailable = "unavailable"
+
+    public static let allCases: [Self] = [
+        "allowed",
+        "denied",
+        "approval_required",
+        "unavailable",
+    ].map { Self(rawValue: $0)! }
+}
+
+public enum HarnToolPermissionGrantScope: String, Codable, Sendable, CaseIterable {
+    case once = "once"
+    case session = "session"
+
+    public static let allCases: [Self] = [
+        "once",
+        "session",
+    ].map { Self(rawValue: $0)! }
+}
+
+public enum HarnToolPermissionGrantExpiry: String, Codable, Sendable, CaseIterable {
+    case afterDispatch = "after_dispatch"
+    case sessionEnd = "session_end"
+
+    public static let allCases: [Self] = [
+        "after_dispatch",
+        "session_end",
+    ].map { Self(rawValue: $0)! }
+}
+
+public struct HarnToolPermissionScope: Codable, Sendable, Equatable {
+    public let toolKind: HarnACPToolKind
+    public let sideEffect: HarnSideEffectLevel
+    public let capabilities: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case capabilities
+        case toolKind = "tool_kind"
+        case sideEffect = "side_effect"
+    }
+}
+
+public struct HarnToolPermissionPolicyEvidence: Codable, Sendable, Equatable {
+    public let layer: HarnToolPermissionPolicyLayer
+    public let outcome: HarnToolPermissionPolicyOutcome
+    public let ruleId: String?
+    public let riskLabels: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case layer, outcome
+        case ruleId = "rule_id"
+        case riskLabels = "risk_labels"
+    }
+}
+
+public struct HarnToolPermissionDecisionMetadata: Codable, Sendable, Equatable {
+    public let schema: String
+    public let outcome: HarnToolPermissionOutcome
+    public let decider: HarnToolPermissionDecider
+    public let policyEvaluations: [HarnToolPermissionPolicyEvidence]
+    public let grantScope: HarnToolPermissionGrantScope?
+
+    enum CodingKeys: String, CodingKey {
+        case schema, outcome, decider
+        case policyEvaluations = "policy_evaluations"
+        case grantScope = "grant_scope"
+    }
+}
+
+public struct HarnToolPermissionGrantEvidence: Codable, Sendable, Equatable {
+    public let scope: HarnToolPermissionGrantScope
+    public let expires: HarnToolPermissionGrantExpiry
+    public let reusable: Bool
+}
+
+public struct HarnToolPermissionRequester: Codable, Sendable, Equatable {
+    public let sessionId: String
+    public let agentId: String?
+    public let modelProvider: String?
+    public let modelId: String?
+
+    enum CodingKeys: String, CodingKey {
+        case sessionId = "session_id"
+        case agentId = "agent_id"
+        case modelProvider = "model_provider"
+        case modelId = "model_id"
+    }
+}
+
+public struct HarnToolPermissionActivityRecord: Codable, Sendable, Equatable {
+    public let schema: String
+    public let kind: HarnActivityKind
+    public let id: String
+    public let requestId: String
+    public let toolName: String
+    public let scope: HarnToolPermissionScope
+    public let outcome: HarnToolPermissionOutcome
+    public let decider: HarnToolPermissionDecider
+    public let policyEvaluations: [HarnToolPermissionPolicyEvidence]
+    public let grant: HarnToolPermissionGrantEvidence?
+    public let requester: HarnToolPermissionRequester
+    public let occurredAtMs: Int64
+
+    enum CodingKeys: String, CodingKey {
+        case schema, kind, id, scope, outcome, decider, grant, requester
+        case requestId = "request_id"
+        case toolName = "tool_name"
+        case policyEvaluations = "policy_evaluations"
+        case occurredAtMs = "occurred_at_ms"
+    }
 }
 
 public enum HarnConnectorSetupStage: String, Codable, Sendable, CaseIterable {

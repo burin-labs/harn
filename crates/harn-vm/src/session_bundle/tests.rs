@@ -200,6 +200,37 @@ fn sanitized_export_redacts_secrets_and_records_manifest() {
 }
 
 #[test]
+fn permission_activity_projection_uses_only_typed_value_free_payload() {
+    let transcript = Some(json!({
+        "events": [{
+            "kind": "PermissionDecision",
+            "metadata": {
+                "activity": {
+                    "schema": "harn.tool_permission_activity.v1",
+                    "kind": "tool_permission",
+                    "id": "permission-1",
+                    "request_id": "call-1",
+                    "tool_name": "gmail.create_draft",
+                    "requester": {"session_id": "session-1", "agent_id": "assistant"}
+                },
+                "diagnostic_only": {"body": "secret-value"}
+            }
+        }]
+    }));
+    let mut permissions = Vec::new();
+
+    permissions::collect_permission_events(&mut permissions, "run.transcript", &transcript);
+
+    assert_eq!(permissions.len(), 1);
+    assert_eq!(permissions[0].request_id.as_deref(), Some("call-1"));
+    assert_eq!(permissions[0].agent.as_deref(), Some("assistant"));
+    let rendered = serde_json::to_string(&permissions[0].payload).unwrap();
+    assert!(rendered.contains("harn.tool_permission_activity.v1"));
+    assert!(!rendered.contains("secret-value"));
+    assert!(!rendered.contains("diagnostic_only"));
+}
+
+#[test]
 fn replay_only_export_withholds_prompt_and_tool_payloads() {
     let options = SessionBundleExportOptions {
         mode: SessionBundleExportMode::ReplayOnly,

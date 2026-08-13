@@ -95,8 +95,8 @@ async fn request_permission(
         )
         .await?;
     match crate::llm::acp_permission::parse_response(&response) {
-        crate::llm::acp_permission::WireOutcome::Allowed => Ok(response),
-        crate::llm::acp_permission::WireOutcome::Rejected { reason } => {
+        crate::llm::acp_permission::WireOutcome::Allowed { .. } => Ok(response),
+        crate::llm::acp_permission::WireOutcome::Rejected { reason, .. } => {
             Err(VmError::CategorizedError {
                 message: format!("{operation}: approval denied: {reason}"),
                 category: crate::value::ErrorCategory::ToolRejected,

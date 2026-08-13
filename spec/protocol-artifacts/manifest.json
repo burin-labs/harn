@@ -523,6 +523,47 @@
       "cancelled"
     ]
   },
+  "activity": {
+    "kinds": [
+      "external_action",
+      "tool_permission"
+    ],
+    "source": "crates/harn-stdlib/src/stdlib/activity/vocabulary.harn",
+    "toolPermissionDeciders": [
+      "person",
+      "remembered_rule",
+      "user_policy",
+      "managed_policy",
+      "runtime_policy",
+      "host_unavailable"
+    ],
+    "toolPermissionGrantExpiries": [
+      "after_dispatch",
+      "session_end"
+    ],
+    "toolPermissionGrantScopes": [
+      "once",
+      "session"
+    ],
+    "toolPermissionOutcomes": [
+      "approved",
+      "denied",
+      "timed_out",
+      "cancelled"
+    ],
+    "toolPermissionPolicyLayers": [
+      "user_policy",
+      "managed_policy",
+      "runtime_policy",
+      "remembered_rule"
+    ],
+    "toolPermissionPolicyOutcomes": [
+      "allowed",
+      "denied",
+      "approval_required",
+      "unavailable"
+    ]
+  },
   "artifactVersion": "0.10.89",
   "bindings": {
     "go": {

@@ -9,6 +9,12 @@ use std::sync::Arc;
 use crate::bridge::HostBridge;
 use crate::llm::permissions;
 
+use crate::orchestration::{
+    PolicyEvaluation, ToolPermissionActivityContext, ToolPermissionActivityRecord,
+    ToolPermissionPolicyFacts, ToolPermissionPolicyLayer, ToolPermissionPolicyOutcome,
+    ToolPermissionResolution,
+};
+
 pub(super) struct HostPermissionRequest {
     pub session_id: String,
     pub tool_call_id: String,
@@ -22,8 +28,14 @@ pub(super) struct HostPermissionRequest {
 }
 
 pub(super) enum HostPermissionOutcome {
-    Allowed { response: serde_json::Value },
-    Rejected { reason: String },
+    Allowed {
+        response: serde_json::Value,
+        resolution: ToolPermissionResolution,
+    },
+    Rejected {
+        reason: String,
+        resolution: ToolPermissionResolution,
+    },
     Unavailable,
 }
 
@@ -71,6 +83,143 @@ pub(super) fn emit_permission_event_with_policy(
     let _ = crate::agent_sessions::append_event(session_id, event);
 }
 
+/// Append the portable value-free permission decision beside the existing
+/// operational transcript event. Consumers persist only this typed activity;
+/// the raw permission event remains model/runtime diagnostics, not authority.
+pub(super) fn emit_permission_activity(
+    session_id: &str,
+    tool_call_id: &str,
+    tool_name: &str,
+    evaluation: &PolicyEvaluation,
+    layer: ToolPermissionPolicyLayer,
+    resolution: ToolPermissionResolution,
+) {
+    if !crate::agent_sessions::exists(session_id) {
+        return;
+    }
+    let request_id = if tool_call_id.is_empty() {
+        format!("tool-call-{}", uuid::Uuid::now_v7())
+    } else {
+        tool_call_id.to_string()
+    };
+    let model = crate::agent_sessions::pinned_model(session_id)
+        .map(|selector| crate::llm_config::resolve_model_info(&selector));
+    let context = ToolPermissionActivityContext {
+        id: format!("permission-{}", uuid::Uuid::now_v7()),
+        request_id,
+        session_id: session_id.to_string(),
+        agent_id: crate::agent_sessions::actor_chain(session_id)
+            .map(|chain| chain.current().to_string()),
+        model_provider: model.as_ref().map(|model| model.provider.clone()),
+        model_id: model.map(|model| model.id),
+        policy_layer: layer,
+        occurred_at_ms: crate::clock_mock::now_ms().max(0) as u64,
+    };
+    let policy = ToolPermissionPolicyFacts {
+        outcome: if evaluation.is_allow() {
+            ToolPermissionPolicyOutcome::Allowed
+        } else if evaluation.is_deny() {
+            ToolPermissionPolicyOutcome::Denied
+        } else {
+            ToolPermissionPolicyOutcome::ApprovalRequired
+        },
+        rule_id: evaluation
+            .matched_rule
+            .as_ref()
+            .and_then(|rule| rule.id.clone()),
+        risk_labels: evaluation.risk_labels.clone(),
+    };
+    let Ok(activity) =
+        ToolPermissionActivityRecord::from_policy_facts(tool_name, policy, context, resolution)
+    else {
+        return;
+    };
+    let Ok(activity) = serde_json::to_value(activity) else {
+        return;
+    };
+    let event = crate::llm::helpers::transcript_event(
+        "PermissionDecision",
+        "tool",
+        "internal",
+        "tool permission decision",
+        Some(serde_json::json!({"activity": activity})),
+    );
+    let _ = crate::agent_sessions::append_event(session_id, event);
+}
+
+pub(super) fn emit_runtime_auto_approved_activity(
+    session_id: &str,
+    tool_call_id: &str,
+    tool_name: &str,
+    evaluation: &PolicyEvaluation,
+) {
+    emit_runtime_resolved_activity(
+        session_id,
+        tool_call_id,
+        tool_name,
+        evaluation,
+        ToolPermissionResolution {
+            outcome: crate::orchestration::ToolPermissionOutcome::Approved,
+            decider: crate::orchestration::ToolPermissionDecider::RuntimePolicy,
+            grant_scope: None,
+            policy_evaluations: Vec::new(),
+        },
+    );
+}
+
+pub(super) fn emit_runtime_denied_activity(
+    session_id: &str,
+    tool_call_id: &str,
+    tool_name: &str,
+    evaluation: &PolicyEvaluation,
+) {
+    emit_runtime_resolved_activity(
+        session_id,
+        tool_call_id,
+        tool_name,
+        evaluation,
+        ToolPermissionResolution::terminal(
+            crate::orchestration::ToolPermissionOutcome::Denied,
+            crate::orchestration::ToolPermissionDecider::RuntimePolicy,
+        ),
+    );
+}
+
+pub(super) fn emit_runtime_unavailable_activity(
+    session_id: &str,
+    tool_call_id: &str,
+    tool_name: &str,
+    evaluation: &PolicyEvaluation,
+) {
+    emit_runtime_resolved_activity(
+        session_id,
+        tool_call_id,
+        tool_name,
+        evaluation,
+        ToolPermissionResolution::terminal(
+            crate::orchestration::ToolPermissionOutcome::Denied,
+            crate::orchestration::ToolPermissionDecider::HostUnavailable,
+        ),
+    );
+}
+
+pub(super) fn emit_runtime_resolved_activity(
+    session_id: &str,
+    tool_call_id: &str,
+    tool_name: &str,
+    evaluation: &PolicyEvaluation,
+    resolution: ToolPermissionResolution,
+) {
+    emit_permission_activity(
+        session_id,
+        tool_call_id,
+        tool_name,
+        evaluation,
+        ToolPermissionPolicyLayer::RuntimePolicy,
+        resolution,
+    );
+}
+
 pub(super) async fn request_host_permission(
     bridge: Option<&Arc<HostBridge>>,
     request: HostPermissionRequest,
@@ -116,23 +265,30 @@ pub(super) async fn request_host_permission(
         .await
     {
         Ok(response) => match crate::llm::acp_permission::parse_response(&response) {
-            crate::llm::acp_permission::WireOutcome::Allowed => {
-                HostPermissionOutcome::Allowed { response }
+            crate::llm::acp_permission::WireOutcome::Allowed { resolution } => {
+                HostPermissionOutcome::Allowed {
+                    response,
+                    resolution,
+                }
             }
-            crate::llm::acp_permission::WireOutcome::Rejected { reason } => {
-                HostPermissionOutcome::Rejected { reason }
+            crate::llm::acp_permission::WireOutcome::Rejected { reason, resolution } => {
+                HostPermissionOutcome::Rejected { reason, resolution }
             }
         },
-        Err(err) => {
+        Err(_) => {
             // A `session/cancel` races the outstanding permission call and
             // the bridge unwinds it with a "cancelled" error rather than a
             // host-side rejection or transport failure. Report that as a
             // normal user rejection, not the generic "host doesn't implement
             // this method" Unavailable path — the host DID implement it, the
             // user just cancelled before it resolved.
-            if err.to_string().contains("cancelled") {
+            if bridge.is_cancelled() {
                 HostPermissionOutcome::Rejected {
                     reason: "cancelled by user".to_string(),
+                    resolution: ToolPermissionResolution::terminal(
+                        crate::orchestration::ToolPermissionOutcome::Cancelled,
+                        crate::orchestration::ToolPermissionDecider::Person,
+                    ),
                 }
             } else {
                 HostPermissionOutcome::Unavailable
@@ -262,8 +418,12 @@ mod tests {
         let outcome = request_host_permission(Some(&bridge), request()).await;
 
         match outcome {
-            HostPermissionOutcome::Rejected { reason } => {
+            HostPermissionOutcome::Rejected { reason, resolution } => {
                 assert_eq!(reason, "cancelled by user");
+                assert_eq!(
+                    resolution.outcome,
+                    crate::orchestration::ToolPermissionOutcome::Cancelled
+                );
             }
             HostPermissionOutcome::Allowed { .. } => panic!("expected Rejected, got Allowed"),
             HostPermissionOutcome::Unavailable => panic!(
@@ -277,5 +437,48 @@ mod tests {
     async fn no_bridge_is_unavailable() {
         let outcome = request_host_permission(None, request()).await;
         assert!(matches!(outcome, HostPermissionOutcome::Unavailable));
+    }
+
+    #[test]
+    fn portable_activity_event_excludes_raw_permission_values() {
+        let _clock = crate::clock_mock::install_override(crate::clock_mock::MockClock::at_wall_ms(
+            1_700_000_000_123,
+        ));
+        let session_id = crate::agent_sessions::open_or_create(Some(
+            "permission-activity-event-test".to_string(),
+        ));
+        let evaluation = PolicyEvaluation {
+            action: "ask".to_string(),
+            reason: "contains secret-value".to_string(),
+            matched_rule: None,
+            required_approval: None,
+            risk_labels: vec!["network_rule".to_string()],
+            receipt: serde_json::json!({
+                "context": {"command": "secret-value", "to": "private@example.com"}
+            }),
+        };
+
+        emit_permission_activity(
+            &session_id,
+            "call-1",
+            "gmail.create_draft",
+            &evaluation,
+            ToolPermissionPolicyLayer::UserPolicy,
+            ToolPermissionResolution::approved(
+                crate::orchestration::ToolPermissionDecider::Person,
+                crate::orchestration::ToolPermissionGrantScope::Once,
+            ),
+        );
+
+        let transcript = crate::agent_sessions::transcript(&session_id).expect("transcript");
+        let rendered = serde_json::to_string(&crate::llm::helpers::vm_value_to_json(&transcript))
+            .expect("json");
+        assert!(rendered.contains("PermissionDecision"));
+        assert!(rendered.contains("harn.tool_permission_activity.v1"));
+        assert!(rendered.contains("1700000000123"));
+        assert!(!rendered.contains("secret-value"));
+        assert!(!rendered.contains("private@example.com"));
+        assert!(!rendered.contains("arguments"));
+        crate::agent_sessions::close(&session_id);
     }
 }

@@ -81,7 +81,7 @@ pub(super) async fn request_side_effect_permission(
         HostPermissionOutcome::Allowed { .. } => {
             SideEffectPermissionOutcome::Allowed { policy_decision }
         }
-        HostPermissionOutcome::Rejected { reason } => SideEffectPermissionOutcome::Denied {
+        HostPermissionOutcome::Rejected { reason, .. } => SideEffectPermissionOutcome::Denied {
             denial: ToolDenial::terminal(DenialGate::HostRejected, None, reason)
                 .with_side_effect_ceiling(request_details),
             escalated: true,
