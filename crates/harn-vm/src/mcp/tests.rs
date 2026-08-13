@@ -190,9 +190,15 @@ print(json.dumps({
     .await
     .expect("stdio server should launch from configured cwd");
     let discovery = handle.discovery_result.lock().await.clone().unwrap();
+    let reported_directory = discovery["serverInfo"]["name"]
+        .as_str()
+        .expect("server name should contain its working directory");
     assert_eq!(
-        discovery["serverInfo"]["name"],
-        serde_json::json!(directory.path().canonicalize().unwrap().to_string_lossy())
+        std::path::Path::new(reported_directory)
+            .canonicalize()
+            .expect("reported working directory should exist"),
+        directory.path().canonicalize().unwrap(),
+        "stdio server should observe the configured working directory"
     );
 }
 
