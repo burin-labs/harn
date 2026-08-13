@@ -48,12 +48,26 @@ pub struct LlmUsage {
     pub served_fast: bool,
     #[serde(default)]
     pub accounting_status: UsageAccountingStatus,
+    /// Known priced portion across every provider request represented here.
+    /// This remains available when `cost_usd` is null because one sibling
+    /// request was unpriced.
+    #[serde(default)]
+    pub known_cost_usd: f64,
+    /// Provider requests represented by this ledger. Aggregated logical calls
+    /// retain their physical transaction count instead of collapsing to one.
+    #[serde(default)]
+    pub provider_call_count: i64,
+    #[serde(default)]
+    pub unpriced_calls: i64,
+    #[serde(default)]
+    pub usage_unknown_calls: i64,
 }
 
 /// Aggregate cost certainty for a collection of canonical call ledgers.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct UsageCostCertainty {
     pub known_cost_usd: f64,
+    pub provider_call_count: i64,
     pub unpriced_calls: i64,
     pub usage_unknown_calls: i64,
 }
@@ -65,19 +79,101 @@ pub fn summarize_usage_cost_certainty<'a>(
     usages
         .into_iter()
         .fold(UsageCostCertainty::default(), |mut summary, usage| {
-            if let Some(cost_usd) = usage.cost_usd {
-                summary.known_cost_usd += cost_usd;
+            // A zero call count identifies ledgers recorded before the
+            // aggregation fields existed. Reconstruct their one-call
+            // certainty from the original stable fields.
+            let legacy = usage.provider_call_count == 0;
+            summary.known_cost_usd += if legacy {
+                usage.cost_usd.unwrap_or(0.0)
             } else {
-                summary.unpriced_calls += 1;
-            }
-            if usage.accounting_status == UsageAccountingStatus::Unknown {
-                summary.usage_unknown_calls += 1;
-            }
+                usage.known_cost_usd
+            };
+            summary.provider_call_count += if legacy { 1 } else { usage.provider_call_count };
+            summary.unpriced_calls += if legacy {
+                i64::from(usage.cost_usd.is_none())
+            } else {
+                usage.unpriced_calls
+            };
+            summary.usage_unknown_calls += if legacy {
+                i64::from(usage.accounting_status == UsageAccountingStatus::Unknown)
+            } else {
+                usage.usage_unknown_calls
+            };
             summary
         })
 }
 
 impl LlmUsage {
+    /// Fold completed calls into one structured-operation ledger. Schema and
+    /// repair retries must report every paid response, not only the final one.
+    pub(crate) fn aggregate(usages: &[Self]) -> Self {
+        let input_tokens = usages.iter().map(|usage| usage.input_tokens).sum();
+        let output_tokens = usages.iter().map(|usage| usage.output_tokens).sum();
+        let cache_read_tokens = usages.iter().map(|usage| usage.cache_read_tokens).sum();
+        let cache_write_tokens = usages.iter().map(|usage| usage.cache_write_tokens).sum();
+        let certainty = summarize_usage_cost_certainty(usages);
+        let cache_supported = usages.iter().all(|usage| usage.cache_supported);
+        Self {
+            input_tokens,
+            output_tokens,
+            cost_usd: (certainty.unpriced_calls == 0).then_some(certainty.known_cost_usd),
+            cache_read_tokens,
+            cache_write_tokens,
+            cache_supported,
+            cache_hit_ratio: cache_supported.then(|| {
+                super::cost::cache_hit_ratio(input_tokens, cache_read_tokens, cache_write_tokens)
+            }),
+            cache_savings_usd: usages.iter().map(|usage| usage.cache_savings_usd).sum(),
+            cache_hit: usages.iter().any(|usage| usage.cache_hit),
+            served_fast: usages.iter().any(|usage| usage.served_fast),
+            accounting_status: if certainty.usage_unknown_calls == 0 {
+                UsageAccountingStatus::Reported
+            } else {
+                UsageAccountingStatus::Unknown
+            },
+            known_cost_usd: certainty.known_cost_usd,
+            provider_call_count: certainty.provider_call_count,
+            unpriced_calls: certainty.unpriced_calls,
+            usage_unknown_calls: certainty.usage_unknown_calls,
+        }
+    }
+
+    pub(crate) fn known_zero_attempt() -> Self {
+        Self {
+            cost_usd: Some(0.0),
+            accounting_status: UsageAccountingStatus::Reported,
+            known_cost_usd: 0.0,
+            provider_call_count: 1,
+            unpriced_calls: 0,
+            usage_unknown_calls: 0,
+            ..Self::unknown_attempt()
+        }
+    }
+
+    pub(crate) fn unknown_attempt() -> Self {
+        Self {
+            input_tokens: 0,
+            output_tokens: 0,
+            cost_usd: None,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+            // No response means no evidence against sibling responses' cache
+            // support. These neutral values keep aggregation from turning one
+            // transport-unknown attempt into "cache unsupported" for the
+            // completed logical call.
+            cache_supported: true,
+            cache_hit_ratio: Some(0.0),
+            cache_savings_usd: 0.0,
+            cache_hit: false,
+            served_fast: false,
+            accounting_status: UsageAccountingStatus::Unknown,
+            known_cost_usd: 0.0,
+            provider_call_count: 1,
+            unpriced_calls: 1,
+            usage_unknown_calls: 1,
+        }
+    }
+
     pub(crate) fn from_result(result: &LlmResult) -> Self {
         let usage_known = result.input_tokens > 0
             || result.output_tokens > 0
@@ -136,6 +232,10 @@ impl LlmUsage {
             } else {
                 UsageAccountingStatus::Unknown
             },
+            known_cost_usd: cost_usd.unwrap_or(0.0),
+            provider_call_count: 1,
+            unpriced_calls: i64::from(cost_usd.is_none()),
+            usage_unknown_calls: i64::from(!usage_known && authoritative_cost.is_none()),
         }
     }
 
@@ -145,15 +245,12 @@ impl LlmUsage {
         input_tokens: i64,
         output_tokens: i64,
     ) -> Self {
+        let cost_usd =
+            super::cost::pricing_aware_call_cost(provider, model, input_tokens, output_tokens);
         Self {
             input_tokens,
             output_tokens,
-            cost_usd: super::cost::pricing_aware_call_cost(
-                provider,
-                model,
-                input_tokens,
-                output_tokens,
-            ),
+            cost_usd,
             cache_read_tokens: 0,
             cache_write_tokens: 0,
             cache_supported: false,
@@ -162,6 +259,10 @@ impl LlmUsage {
             cache_hit: false,
             served_fast: false,
             accounting_status: UsageAccountingStatus::Reported,
+            known_cost_usd: cost_usd.unwrap_or(0.0),
+            provider_call_count: 1,
+            unpriced_calls: i64::from(cost_usd.is_none()),
+            usage_unknown_calls: 0,
         }
     }
 
@@ -180,6 +281,22 @@ impl LlmUsage {
         usage.insert(
             crate::value::intern_key("cost_usd"),
             self.cost_usd.map_or(VmValue::Nil, VmValue::Float),
+        );
+        usage.insert(
+            crate::value::intern_key("known_cost_usd"),
+            VmValue::Float(self.known_cost_usd),
+        );
+        usage.insert(
+            crate::value::intern_key("provider_call_count"),
+            VmValue::Int(self.provider_call_count),
+        );
+        usage.insert(
+            crate::value::intern_key("unpriced_calls"),
+            VmValue::Int(self.unpriced_calls),
+        );
+        usage.insert(
+            crate::value::intern_key("usage_unknown_calls"),
+            VmValue::Int(self.usage_unknown_calls),
         );
         usage.insert(
             crate::value::intern_key("cache_read_tokens"),
@@ -224,11 +341,28 @@ impl LlmUsage {
         let fields = event
             .as_object_mut()
             .expect("usage projection target must be a JSON object");
+        self.project_onto_fields(fields);
+    }
+
+    /// Add canonical accounting directly to an observability field map.
+    /// Receipt producers use this instead of round-tripping through a JSON
+    /// object or maintaining a second cost projection.
+    pub(crate) fn project_onto_fields(&self, fields: &mut serde_json::Map<String, Value>) {
         fields.insert("input_tokens".to_string(), self.input_tokens.into());
         fields.insert("output_tokens".to_string(), self.output_tokens.into());
         fields.insert(
             "cost_usd".to_string(),
             self.cost_usd.map_or(Value::Null, serde_json::Value::from),
+        );
+        fields.insert("known_cost_usd".to_string(), self.known_cost_usd.into());
+        fields.insert(
+            "provider_call_count".to_string(),
+            self.provider_call_count.into(),
+        );
+        fields.insert("unpriced_calls".to_string(), self.unpriced_calls.into());
+        fields.insert(
+            "usage_unknown_calls".to_string(),
+            self.usage_unknown_calls.into(),
         );
         fields.insert(
             "cache_read_tokens".to_string(),
@@ -265,20 +399,7 @@ impl LlmUsage {
     }
 
     pub(crate) fn empty_vm_dict() -> crate::value::DictMap {
-        Self {
-            input_tokens: 0,
-            output_tokens: 0,
-            cost_usd: None,
-            cache_read_tokens: 0,
-            cache_write_tokens: 0,
-            cache_supported: true,
-            cache_hit_ratio: Some(0.0),
-            cache_savings_usd: 0.0,
-            cache_hit: false,
-            served_fast: false,
-            accounting_status: UsageAccountingStatus::Unknown,
-        }
-        .to_vm_dict(&ProviderAttempts::default())
+        Self::unknown_attempt().to_vm_dict(&ProviderAttempts::default())
     }
 
     /// Lower the ledger to canonical tracing metadata while keeping route
@@ -501,6 +622,12 @@ mod tests {
                 rate_limited: 1,
                 empty_completion: 1,
                 other: 0,
+                completed_retry_usage: vec![super::LlmUsage::from_probe_counts(
+                    "anthropic",
+                    "claude-sonnet-4-20250514",
+                    250,
+                    10,
+                )],
             },
         }
     }
@@ -511,6 +638,9 @@ mod tests {
         let mut unpriced = priced.clone();
         unpriced.cost_usd = None;
         unpriced.accounting_status = UsageAccountingStatus::Unknown;
+        unpriced.known_cost_usd = 0.0;
+        unpriced.unpriced_calls = 1;
+        unpriced.usage_unknown_calls = 1;
 
         let summary = summarize_usage_cost_certainty([&priced, &unpriced]);
 

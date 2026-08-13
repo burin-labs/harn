@@ -626,27 +626,34 @@ pub(super) fn emit_empty_completion_retry(
     reason: UnproductiveCompletionReason,
     duration_ms: u64,
     error: &str,
+    usage: Option<&crate::llm::usage::LlmUsage>,
 ) {
-    append_llm_observability_entry(
-        "empty_completion_retry",
-        serde_json::Map::from_iter([
-            (
-                "schema".to_string(),
-                serde_json::json!("harn.llm.empty_completion_retry.v1"),
-            ),
-            (
-                "receipt_kind".to_string(),
-                serde_json::json!("empty_completion_retry"),
-            ),
-            ("iteration".to_string(), serde_json::json!(iteration)),
-            ("attempt".to_string(), serde_json::json!(attempt)),
-            ("provider".to_string(), serde_json::json!(opts.provider)),
-            ("model".to_string(), serde_json::json!(opts.model)),
-            ("reason".to_string(), serde_json::json!(reason.as_str())),
-            ("duration_ms".to_string(), serde_json::json!(duration_ms)),
-            ("error".to_string(), serde_json::json!(error)),
-        ]),
-    );
+    let mut fields = serde_json::Map::from_iter([
+        (
+            "schema".to_string(),
+            serde_json::json!("harn.llm.empty_completion_retry.v1"),
+        ),
+        (
+            "receipt_kind".to_string(),
+            serde_json::json!("empty_completion_retry"),
+        ),
+        ("iteration".to_string(), serde_json::json!(iteration)),
+        ("attempt".to_string(), serde_json::json!(attempt)),
+        ("provider".to_string(), serde_json::json!(opts.provider)),
+        ("model".to_string(), serde_json::json!(opts.model)),
+        ("reason".to_string(), serde_json::json!(reason.as_str())),
+        ("duration_ms".to_string(), serde_json::json!(duration_ms)),
+        ("error".to_string(), serde_json::json!(error)),
+    ]);
+    if let Some(usage) = usage {
+        usage.project_onto_fields(&mut fields);
+    } else {
+        // A thrown completion has no trustworthy token ledger. It may still
+        // have reached a billable provider boundary, so preserve an explicit
+        // unknown transaction instead of reporting a free retry.
+        crate::llm::usage::LlmUsage::unknown_attempt().project_onto_fields(&mut fields);
+    }
+    append_llm_observability_entry("empty_completion_retry", fields);
     super::trace::emit_agent_event(super::trace::AgentTraceEvent::EmptyCompletionRetry {
         iteration,
         attempt,
@@ -710,6 +717,11 @@ pub(super) fn append_provider_call_error_observability(
         ("message".to_string(), serde_json::json!(message)),
         ("retryable".to_string(), serde_json::json!(retryable)),
     ]);
+    // Error responses have no authoritative usage object. Their economic
+    // effect therefore remains explicitly unknown in the durable receipt;
+    // callers may add a provider-side billed receipt later, but must never
+    // reinterpret this missing ledger as zero.
+    crate::llm::usage::LlmUsage::unknown_attempt().project_onto_fields(&mut fields);
     if failover_eligible {
         fields.insert(
             "failover_eligible".to_string(),
