@@ -9,6 +9,34 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.90
+
+### Added
+
+- Repository workflows can now be crystallized from repeated traces into reviewed,
+  validated tool and skill candidates, then exposed as typed local MCP tools with
+  compact discovery metadata.
+- **Generic tool approvals now use one portable, value-free activity contract
+  (#6628).** Harn records the exact outcome, decider, ordered policy layers,
+  safe annotated scope, grant expiry evidence, and requester lineage across
+  local and hosted projections while structurally excluding raw arguments,
+  credentials, protected values, arbitrary context, and reusable grants.
+- Live agent-event consumers now receive the same typed, value-free tool
+  permission activity that Harn persists in session transcripts and sanitized
+  bundles.
+- Generate complete, value-free external-action activity and receipt DTOs for
+  Rust, Swift, and TypeScript hosts. The canonical builder emits the same typed
+  discriminator and rejects receipts whose immutable action facts do not match
+  the intent.
+
+### Fixed
+
+- Keep merge-group artifact consumers alive for healthy cold Rust producers.
+- Fixed attenuated `HarnessNet` policies reading the HTTP method or session
+  handle as a URL. Destination checks now use a typed per-method contract and run
+  consistently before native, registered, and deterministic-fixture network paths.
+- Correct the attenuated network-policy documentation to use the typed host rule for port-restricted destinations.
+
 ## v0.10.89
 
 ### Fixed
