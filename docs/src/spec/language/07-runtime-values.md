@@ -21,7 +21,7 @@
 | `task_handle` | (from `spawn`) | Opaque handle to an async task |
 | `Generator<T>` | regular `fn` containing `yield` | Existing synchronous generator value |
 | `Stream<T>` | `gen fn` containing `emit` | Lazy, single-pass stream value |
-| `Iter<T>` | `x.iter()` / `iter(x)` | Lazy, single-pass, fused iterator. See [Iterator protocol](#iterator-protocol) |
+| `Iter<T>` | `x.iter()` / `iter(x)` | Lazy, single-pass, fused iterator. See [Iterator protocol](./21-iterator-protocol.md#iterator-protocol) |
 | `Pair<K, V>` | `pair(k, v)` | Two-element value; access via `.first` / `.second` |
 
 ### Truthiness

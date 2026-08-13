@@ -35,7 +35,7 @@ layer, not worked around at the call site.
 Reference capture shares *variable bindings* across a closure boundary. It does
 **not** alias distinct variables: `let b = a` still copies, and
 `let b = a; b[0] = x` still leaves `a` untouched. Swift is the precedent —
-value-typed data + reference-captured `var`s coexist. Container value semantics
+value-typed data and reference-captured mutable bindings coexist. Container value semantics
 (load-bearing for the covariance soundness in #4495) is unchanged.
 
 ## Mechanism: captured bindings become shared cells, confined to the env layer

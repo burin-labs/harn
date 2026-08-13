@@ -10,6 +10,7 @@ import {
   model_from_env,
   parse_model_id,
 } from "std/config"
+import { PROVIDER_NAMES } from "std/llm/provider_names"
 
 pipeline default(harness: Harness) {
   harness.stdio.println(env_str(harness.env, "HARN_TEST_UNSET_VAR_29X") == nil)
@@ -49,4 +50,14 @@ pipeline default(harness: Harness) {
   harness.stdio.println(cerebras.model)
   const dashscope = parse_model_id("dashscope:qwen-max")
   harness.stdio.println(dashscope.provider)
+  // Every named provider in the shipped LLM catalog must remain an explicit
+  // selector here. This catches the user-visible failure where a valid
+  // `provider:model` selector silently degrades to `provider: "auto"`.
+  for expected_provider in PROVIDER_NAMES {
+    const selector = "${expected_provider}:catalog-native-model"
+    const parsed = parse_model_id(selector)
+    require parsed.provider == expected_provider,
+      "${selector} resolved to ${parsed.provider}, expected ${expected_provider}"
+  }
+  harness.stdio.println("provider-prefixes-ok")
 }

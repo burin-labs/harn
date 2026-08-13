@@ -85,6 +85,7 @@ export interface LoadedDocs {
 }
 
 const GITHUB_EDIT_BASE = "https://github.com/burin-labs/harn/edit/main/docs/src/"
+const GITHUB_BLOB_BASE = "https://github.com/burin-labs/harn/blob/main/"
 const DESCRIPTION_LIMIT = 180
 
 function decodeEntity(value: string): string {
@@ -406,10 +407,38 @@ function rehypeCaptureTitle(ref: { title: string | null }) {
   }
 }
 
+function rehypeCollectAnchors(anchors: Set<string>) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return (tree: any) => {
+    visit(tree, "element", (node: any) => {
+      const id = node.properties?.id
+      if (typeof id === "string") anchors.add(id)
+    })
+  }
+}
+
+interface InternalLink {
+  sourceSlug: string
+  href: string
+}
+
+function rehypeCollectInternalLinks(sourceSlug: string, links: InternalLink[]) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return (tree: any) => {
+    visit(tree, "element", (node: any) => {
+      const href = node.properties?.href
+      if (node.tagName === "a" && typeof href === "string" && href.length > 0) {
+        if (href.startsWith("#") || href.startsWith("/")) links.push({ sourceSlug, href })
+      }
+    })
+  }
+}
+
 // Rewrite intra-doc links: ./foo.md, ../bar/baz.md(#anchor) → /<slug>.html(#anchor),
 // resolved relative to the source file. External links get target/rel.
 function rehypeRewriteLinks(sourceRel: string) {
-  const dir = posix.dirname(sourceRel)
+  const sourceRepoRel = posix.normalize(posix.join("docs/src", sourceRel))
+  const dir = posix.dirname(sourceRepoRel)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return (tree: any) => {
     visit(tree, "element", (node: any) => {
@@ -424,9 +453,15 @@ function rehypeRewriteLinks(sourceRel: string) {
       if (href.startsWith("#")) return
       const [path, anchor] = href.split("#")
       if (!/\.(md|html)$/.test(path)) return
-      let resolved = posix.normalize(posix.join(dir, path))
-      resolved = resolved.replace(/\.(md|html)$/, ".html")
-      node.properties.href = "/" + resolved + (anchor ? "#" + anchor : "")
+      const targetRepoRel = posix.normalize(posix.join(dir, path))
+      if (!targetRepoRel.startsWith("docs/src/")) {
+        node.properties.href = GITHUB_BLOB_BASE + targetRepoRel + (anchor ? "#" + anchor : "")
+        node.properties.target = "_blank"
+        node.properties.rel = "noopener noreferrer"
+        return
+      }
+      const siteRel = targetRepoRel.slice("docs/src/".length).replace(/\.(md|html)$/, ".html")
+      node.properties.href = "/" + siteRel + (anchor ? "#" + anchor : "")
     })
   }
 }
@@ -437,7 +472,10 @@ function rehypeRewriteLinks(sourceRel: string) {
 
 function buildProcessor(
   sourceRel: string,
+  sourceSlug: string,
   headings: Heading[],
+  anchors: Set<string>,
+  links: InternalLink[],
   titleRef: { title: string | null },
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   harnLanguage: any,
@@ -455,8 +493,10 @@ function buildProcessor(
     })
     .use(rehypeSlug)
     .use(rehypeCollectHeadings, headings)
+    .use(rehypeCollectAnchors, anchors)
     .use(rehypeCaptureTitle, titleRef)
     .use(rehypeRewriteLinks, sourceRel)
+    .use(rehypeCollectInternalLinks, sourceSlug, links)
     .use(rehypeStringify, { allowDangerousHtml: true })
 }
 
@@ -564,6 +604,55 @@ function collectMarkdownFiles(root: string): string[] {
   return out
 }
 
+function decodedAnchor(anchor: string): string {
+  try {
+    return decodeURIComponent(anchor)
+  } catch {
+    return anchor
+  }
+}
+
+function validateContentContract(
+  pages: Map<string, PageData>,
+  order: string[],
+  anchorsBySlug: Map<string, Set<string>>,
+  links: InternalLink[],
+) {
+  const errors: string[] = []
+  const indexed = new Set(order)
+
+  for (const slug of order) {
+    if (!pages.has(slug)) errors.push(`SUMMARY.md points to missing page: ${slug}`)
+  }
+  for (const slug of pages.keys()) {
+    if (!indexed.has(slug)) errors.push(`page is missing from SUMMARY.md: ${slug}`)
+  }
+
+  for (const { sourceSlug, href } of links) {
+    let targetSlug = sourceSlug
+    let anchor = ""
+    if (href.startsWith("#")) {
+      anchor = href.slice(1)
+    } else {
+      const [path, fragment = ""] = href.split("#", 2)
+      if (!path.endsWith(".html")) continue
+      targetSlug = path.slice(1, -".html".length)
+      anchor = fragment
+    }
+    if (!pages.has(targetSlug)) {
+      errors.push(`${sourceSlug}: ${href} points to missing page ${targetSlug}`)
+      continue
+    }
+    if (anchor && !anchorsBySlug.get(targetSlug)?.has(decodedAnchor(anchor))) {
+      errors.push(`${sourceSlug}: ${href} points to missing anchor`)
+    }
+  }
+
+  if (errors.length > 0) {
+    throw new Error(`documentation content contract failed:\n${errors.join("\n")}`)
+  }
+}
+
 export function loadAllDocs(repoRoot: string): LoadedDocs {
   const srcRoot = join(repoRoot, "docs/src")
   const keywords = loadHarnKeywords(repoRoot)
@@ -591,6 +680,8 @@ export function loadAllDocs(repoRoot: string): LoadedDocs {
   const pages = new Map<string, PageData>()
   const meta: Record<string, DocMeta> = {}
   const search: SearchDoc[] = []
+  const anchorsBySlug = new Map<string, Set<string>>()
+  const links: InternalLink[] = []
   const files = collectMarkdownFiles(srcRoot)
 
   for (const fileAbs of files) {
@@ -601,9 +692,21 @@ export function loadAllDocs(repoRoot: string): LoadedDocs {
     const included = resolveIncludes(fm.content, fileAbs, repoRoot)
 
     const headings: Heading[] = []
+    const anchors = new Set<string>()
     const titleRef: { title: string | null } = { title: null }
-    const processor = buildProcessor(sourceRel, headings, titleRef, harnLanguage)
+    const linkSourceRel =
+      typeof fm.data.linkSourceRel === "string" ? fm.data.linkSourceRel : sourceRel
+    const processor = buildProcessor(
+      linkSourceRel,
+      slug,
+      headings,
+      anchors,
+      links,
+      titleRef,
+      harnLanguage,
+    )
     const html = String(processor.processSync(included))
+    anchorsBySlug.set(slug, anchors)
 
     const fmTitle = typeof fm.data.title === "string" ? fm.data.title : null
     const navTitle = navTitleBySlug.get(slug) ?? fmTitle ?? titleRef.title ?? slug
@@ -646,6 +749,8 @@ export function loadAllDocs(repoRoot: string): LoadedDocs {
       text: plain.slice(0, 1800),
     })
   }
+
+  validateContentContract(pages, order, anchorsBySlug, links)
 
   // prev/next from SUMMARY order (only slugs that resolved to real pages).
   const orderedExisting = order.filter((s) => pages.has(s))

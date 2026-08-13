@@ -500,7 +500,7 @@ stdlib helpers instead of integer-indexed loops — they read better and
 avoid off-by-one bugs.
 
 ```harn
-for x in items { ... }
+for x in items { /* work */ }
 
 // enumerate: yields a list of {index, value} dicts.
 for {index, value} in items.enumerate() {
@@ -508,10 +508,10 @@ for {index, value} in items.enumerate() {
 }
 
 // zip: yields [a, b] pairs — destructure with list pattern.
-for [a, b] in xs.zip(ys) { ... }
+for [a, b] in xs.zip(ys) { /* work */ }
 
 // dict iteration: entries() yields [{key, value}, ...].
-for {key, value} in my_dict.entries() { ... }
+for {key, value} in my_dict.entries() { /* work */ }
 
 // Ranges:
 const first_5 = range(5)         // [0, 1, 2, 3, 4] — half-open, Python-style
@@ -627,7 +627,7 @@ imported alongside the functions that use it —
 annotations or as an `llm_call_structured` schema type; non-`pub`
 type aliases stay module-private and error on import.
 
-Top-level `let` / `var` and `fn` declarations are visible inside
+Top-level `const` / `let` and `fn` declarations are visible inside
 functions defined in the same file:
 
 ```harn
@@ -635,9 +635,9 @@ const GRADER_SYSTEM = """
 You are a strict grader...
 """
 
-pub fn grade_file(path) {
+pub fn grade_file(harness: Harness, path: string) {
   // GRADER_SYSTEM is in scope here.
-  return harness.llm.call("...", GRADER_SYSTEM, { ... })
+  return harness.llm.call("mock", GRADER_SYSTEM, {temperature: 0.0})
 }
 ```
 
@@ -2810,7 +2810,7 @@ hook for judges, reflection passes, and graders — no second
 The closure receives one dict argument with these keys (stable wire
 shape; new keys are additive):
 
-```harn
+```text
 {
   session_id: string,                // live agent_session id (use this with agent_session_*)
   iteration: int,                    // 0-based turn index
@@ -2919,8 +2919,7 @@ mechanics required:
   harness.agent.inject(branch, {role: "system",
     content: "Try the brute-force approach."})
 
-  const outcomes = parallel settle [base, branch]
-    with { max_concurrent: 2 } { sess ->
+  const outcomes = parallel settle [base, branch] with { max_concurrent: 2 } { sess ->
       agent_loop(harness, task, sys, {
         session_id: sess, tools: registry, max_iterations: 10,
       })
@@ -4595,7 +4594,9 @@ const run_command = preset_run_command({
   mode: tool_hooks_mode_rewrite_with_audit,         // default
   inner: { args -> harness.process.shell(args.command) }, // underlying executor
 })
-agent_loop(harness, message, tools: {tools: [{name: "run_command", handler: run_command}]})
+agent_loop(harness, message, nil, {
+  tools: {tools: [{name: "run_command", handler: run_command}]},
+})
 ```
 
 - `stacks` opts catalogues in via `tool_hooks_filter` (catalogues with
@@ -5054,7 +5055,7 @@ for entry in drain_audit() {
   prefix as the original call (not a growing conversation). The
   correction text is surfaced on the `SchemaRetry` trace event as
   `correction_prompt`.
-- Module-level `var` cross-fn mutation is not shared yet. Prefer
+- Module-level mutable `let` cross-fn mutation is not shared yet. Prefer
   atomics (`atomic(0)` / `atomic_add`) for shared counters.
 - Small / local models benefit heavily from:
   1. Wrapping judge input in `<transcript_to_grade>...</transcript_to_grade>`.

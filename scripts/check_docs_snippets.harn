@@ -1,4 +1,4 @@
-// Verify every fenced code block in docs/src/*.md that claims to be Harn
+// Verify every fenced code block in active documentation that claims to be Harn
 // source or a Harn prompt template is valid, by handing it to the real
 // binary rather than approximating either grammar here.
 //
@@ -34,7 +34,13 @@
 //
 // Usage:
 //   harn run scripts/check_docs_snippets.harn
-const DOCS_GLOB = "docs/src/**/*.md"
+const DOCS_GLOBS = [
+  "docs/src/**/*.md",
+  "docs/llm/*.md",
+  "README.md",
+  "CONTRIBUTING.md",
+  "website/*.md",
+]
 
 /** Count of leading space/tab characters in `line`. */
 pub fn leading_ws_len(line: string) -> int {
@@ -294,8 +300,10 @@ fn resolve_harn_bin(harness: Harness) -> string {
 pipeline main(harness: Harness, task) {
   const harn_bin = resolve_harn_bin(harness)
   let md_files: list<string> = []
-  for g in harness.fs.glob(DOCS_GLOB) {
-    md_files = md_files + [rel_path(g)]
+  for docs_glob in DOCS_GLOBS {
+    for g in harness.fs.glob(docs_glob) {
+      md_files = md_files + [rel_path(g)]
+    }
   }
   md_files = md_files.sorted()
   /* The runtime sandbox only permits writes inside the workspace, so the

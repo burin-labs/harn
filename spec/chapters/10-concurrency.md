@@ -224,12 +224,12 @@ defer { close(f) }
 
 ```harn
 const ch: owned<channel> = channel("log", 64)
-// implicit: defer { drop(ch) } registered at this `let`
+// implicit: defer { drop(ch) } registered at this binding
 ```
 
 `owned<T>` marks a binding as carrying sole ownership of a drop-able stdlib
 handle. The compiler emits an implicit `defer { drop(<binding>) }` at the
-`let` / `var` so the resource closes deterministically at lexical scope exit
+`const` / `let` binding so the resource closes deterministically at lexical scope exit
 — no manual `close_channel` / `mcp_disconnect` / etc. and no reliance on GC
 finalisation. `drop()` is a builtin that dispatches on the runtime value tag:
 channels close, sync permits release, future handle types add their own

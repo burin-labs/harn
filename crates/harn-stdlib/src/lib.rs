@@ -184,6 +184,7 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "ui/renderer" => "stdlib/ui/renderer.harn",
     "ui/testing" => "stdlib/ui/testing.harn",
     "llm/options" => "stdlib/llm/options.harn",
+    "llm/provider_names" => "stdlib/llm/provider_names.harn",
     "llm/catalog" => "stdlib/llm/catalog.harn",
     "llm/safe" => "stdlib/llm/safe.harn",
     "llm/envelope" => "stdlib/llm/envelope.harn",

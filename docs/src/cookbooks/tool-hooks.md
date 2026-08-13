@@ -66,7 +66,7 @@ pipeline default(harness: Harness, task) {
     stacks: ["python"],
     inner: { args -> harness.process.shell(args.command) },
   })
-  agent_loop(harness, task, {tools: {tools: [{name: "run_command", handler: run_command}]}})
+  agent_loop(harness, task, nil, {tools: {tools: [{name: "run_command", handler: run_command}]}})
 }
 ```
 
@@ -85,7 +85,7 @@ pipeline default(harness: Harness, task) {
     mode: tool_hooks_mode_deny_with_explanation,
     inner: { args -> harness.process.shell(args.command) },
   })
-  agent_loop(harness, task, {tools: {tools: [{name: "run_command", handler: run_command}]}})
+  agent_loop(harness, task, nil, {tools: {tools: [{name: "run_command", handler: run_command}]}})
 }
 ```
 
@@ -120,7 +120,7 @@ pipeline default(harness: Harness, task) {
     custom_rules: [xcodebuild_no_destination],
     inner: { args -> harness.process.shell(args.command) },
   })
-  agent_loop(harness, task, {tools: {tools: [{name: "run_command", handler: run_command}]}})
+  agent_loop(harness, task, nil, {tools: {tools: [{name: "run_command", handler: run_command}]}})
 }
 ```
 
@@ -153,7 +153,7 @@ pipeline default(harness: Harness, task) {
     mode: tool_hooks_mode_deny_with_explanation,
     inner: { args -> harness.process.shell(args.command) },
   })
-  agent_loop(harness, task, {tools: {tools: [{name: "run_command", handler: run_command}]}})
+  agent_loop(harness, task, nil, {tools: {tools: [{name: "run_command", handler: run_command}]}})
 }
 ```
 
@@ -174,7 +174,7 @@ pipeline default(harness: Harness, task) {
     stacks: ["harn"],
     inner: { args -> harness.process.shell(args.command) },
   })
-  agent_loop(harness, task, {tools: {tools: [{name: "run_command", handler: run_command}]}})
+  agent_loop(harness, task, nil, {tools: {tools: [{name: "run_command", handler: run_command}]}})
 }
 ```
 
@@ -202,7 +202,7 @@ pipeline default(harness: Harness, task) {
     },
     inner: { args -> harness.process.shell(args.command) },
   })
-  agent_loop(harness, task, {tools: {tools: [{name: "run_command", handler: run_command}]}})
+  agent_loop(harness, task, nil, {tools: {tools: [{name: "run_command", handler: run_command}]}})
 }
 ```
 
@@ -237,7 +237,7 @@ pipeline default(harness: Harness, task) {
     mode: tool_hooks_mode_passthrough_only_audit,
     inner: { args -> harness.process.shell(args.command) },
   })
-  const result = agent_loop(harness, task, {tools: {tools: [{name: "run_command", handler: run_command}]}})
+  const result = agent_loop(harness, task, nil, {tools: {tools: [{name: "run_command", handler: run_command}]}})
   const audits = harness.obs.pipeline_lifecycle_audit_log_take()
   const warnings = audits |> filter({ a -> a.kind == "tool_rule_warning" })
   harness.stdio.log("matched (audit-only): " + to_string(len(warnings)))
@@ -291,7 +291,7 @@ pipeline default(harness: Harness, task) {
     stacks: ["rust"],
     inner: { args -> harness.process.shell(args.command) },
   })
-  agent_loop(harness, task, {tools: {tools: [{name: "run_command", handler: run_command}]}})
+  agent_loop(harness, task, nil, {tools: {tools: [{name: "run_command", handler: run_command}]}})
 }
 ```
 

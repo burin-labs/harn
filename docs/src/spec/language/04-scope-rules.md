@@ -9,7 +9,7 @@ Harn uses lexical scoping with a parent-chain environment model.
 Each `HarnEnvironment` has:
 
 - A `values` dictionary mapping names to `HarnValue`
-- A `mutable` set tracking which names were declared with `var`
+- A `mutable` set tracking which names were declared with `let`
 - An optional `parent` reference
 
 ### Variable lookup

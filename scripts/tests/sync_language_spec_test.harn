@@ -25,3 +25,19 @@ pipeline test_render_mirror_empty_body(harness: Harness, task) {
   const rendered = render_mirror_from("")
   assert_eq(rendered, EXPECTED_HEADER)
 }
+
+@test
+pipeline test_markdown_heading_anchor_matches_rehype_slug(harness: Harness, task) {
+  assert_eq(markdown_heading_anchor("### The `never` type"), "the-never-type")
+  assert_eq(markdown_heading_anchor("### try/catch/finally"), "trycatchfinally")
+}
+
+@test
+pipeline test_cross_chapter_links_follow_anchor_owner(harness: Harness, task) {
+  const owners = {ambiguous: "", local: "01-first", "shared-target": "02-second"}
+  const source = "[local](#local), [ambiguous](#ambiguous), and [remote](#shared-target)"
+  assert_eq(
+    rewrite_cross_chapter_links(source, "01-first", owners),
+    "[local](#local), [ambiguous](#ambiguous), and [remote](./02-second.md#shared-target)",
+  )
+}

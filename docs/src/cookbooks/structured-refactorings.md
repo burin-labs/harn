@@ -51,7 +51,7 @@ Three knobs are common to all of them:
 
 ## Recipe — move a Harn setting into a config module
 
-Use `edit_move_decl` when a top-level Harn `const`, `let`, or `var` belongs in
+Use `edit_move_decl` when a top-level Harn `const` or `let` belongs in
 another module. The move is structural: Harn selects the named binding from the
 syntax tree, stages both file changes, and then commits them together. Local
 bindings and destructuring patterns are not selected by name.

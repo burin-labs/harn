@@ -56,7 +56,7 @@ between `0.0` and `1.0`.
 | `download` | Ask the browser to download base64 bytes |
 
 Use a scheduled `send_event` with
-[`model_job_step_result`](./model-jobs.md#interactive-job-driving) to show
+[`model_job_step_result`](./model-jobs.md#run-a-job-from-an-interactive-app) to show
 progress and cancellation without a blocking polling loop.
 
 ## Renderer resource

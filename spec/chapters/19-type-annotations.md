@@ -1140,8 +1140,9 @@ the original declared type is restored.
 
 #### Mutability
 
-Variables declared with `let` are immutable.  Assigning to a `let`
-variable produces a compile-time warning (and a runtime error).
+Variables declared with `const` are immutable. Assigning to a `const`
+variable produces a compile-time error (and a runtime error remains as a
+backstop). Use `let` when the binding must be reassigned.
 
 ### Runtime enforcement
 

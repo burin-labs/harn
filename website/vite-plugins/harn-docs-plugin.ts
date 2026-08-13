@@ -1,7 +1,7 @@
 import { fileURLToPath } from "node:url"
 import { dirname, resolve } from "node:path"
 import type { Plugin } from "vite"
-import { loadAllDocs, type LoadedDocs } from "./content"
+import { loadAllDocs, type LoadedDocs } from "./content.ts"
 
 // `virtual:harn-docs` ships only the lightweight nav tree + per-slug metadata to
 // the client. Per-page rendered HTML and the search index are served as JSON

@@ -171,7 +171,6 @@ filesystem access.
 ```ebnf
 statement          ::= let_binding
                      | const_binding
-                     | var_binding
                      | if_else
                      | for_in
                      | match_expr
@@ -202,8 +201,7 @@ statement          ::= let_binding
                      | expression_statement
 
 let_binding        ::= 'let' binding_pattern [':' type_expr] '=' expression
-const_binding      ::= 'const' IDENTIFIER [':' type_expr] '=' expression
-var_binding        ::= 'var' binding_pattern [':' type_expr] '=' expression
+const_binding      ::= 'const' binding_pattern [':' type_expr] '=' expression
 if_else            ::= 'if' expression '{' block '}'
                        ['else' (if_else | '{' block '}')]
 for_in             ::= 'for' binding_pattern 'in' expression '{' block '}'

@@ -147,7 +147,7 @@ catalog).
 
 ## Module scope
 
-Top-level `let` / `var` and `fn` declarations are visible inside
+Top-level `const` / `let` and `fn` declarations are visible inside
 functions defined in the same file — no wrapping in a getter fn
 needed:
 
@@ -164,7 +164,7 @@ pub fn grade(path) {
 }
 ```
 
-(Module-level mutable `var` cross-function mutation is not fully
+(Module-level mutable `let` cross-function mutation is not fully
 supported yet. If you need shared mutable state across functions, use
 atomics: `atomic(0)`, `atomic_add(a, 1)`, `atomic_get(a)`.)
 

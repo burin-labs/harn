@@ -189,7 +189,7 @@ fn compute(x) {
 No `catch` or `finally` block is needed for the `Result`-wrapping form. When
 `catch` or `finally` follow `try`, the form is a handled `try`/`catch`
 expression whose value is the try or catch body's tail value (see
-[try/catch/finally](#trycatchfinally)); only the bare `try { ... }` form wraps
+[try/catch/finally](./12-error-model.md#trycatchfinally)); only the bare `try { ... }` form wraps
 in `Result`.
 
 ### Result in pipelines

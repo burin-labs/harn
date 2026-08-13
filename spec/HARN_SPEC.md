@@ -70,7 +70,7 @@ The following identifiers are reserved:
 | `override` | `.overrideKw` |
 | `let` | `.letKw` |
 | `const` | `.constKw` |
-| `var` | `.varKw` |
+| `var` | `.varKw` (reserved for the removed-keyword migration diagnostic) |
 | `if` | `.ifKw` |
 | `else` | `.elseKw` |
 | `for` | `.forKw` |
@@ -478,7 +478,6 @@ filesystem access.
 ```ebnf
 statement          ::= let_binding
                      | const_binding
-                     | var_binding
                      | if_else
                      | for_in
                      | match_expr
@@ -509,8 +508,7 @@ statement          ::= let_binding
                      | expression_statement
 
 let_binding        ::= 'let' binding_pattern [':' type_expr] '=' expression
-const_binding      ::= 'const' IDENTIFIER [':' type_expr] '=' expression
-var_binding        ::= 'var' binding_pattern [':' type_expr] '=' expression
+const_binding      ::= 'const' binding_pattern [':' type_expr] '=' expression
 if_else            ::= 'if' expression '{' block '}'
                        ['else' (if_else | '{' block '}')]
 for_in             ::= 'for' binding_pattern 'in' expression '{' block '}'
@@ -803,7 +801,7 @@ Harn uses lexical scoping with a parent-chain environment model.
 Each `HarnEnvironment` has:
 
 - A `values` dictionary mapping names to `HarnValue`
-- A `mutable` set tracking which names were declared with `var`
+- A `mutable` set tracking which names were declared with `let`
 - An optional `parent` reference
 
 ### Variable lookup
@@ -915,7 +913,7 @@ shadow outer names and do not leak past the body.
 ## Destructuring patterns
 
 Destructuring binds multiple variables from a dict or list in a single
-`let`, `var`, or `for`-`in` statement.
+`const`, `let`, or `for`-`in` statement.
 
 ### Dict destructuring
 
@@ -1020,9 +1018,9 @@ for [a, b] in pairs {
 `_` is also a discard binding in loop patterns, so `for [_, value] in ...`
 or `for (_, value) in ...` drops the ignored element instead of binding it.
 
-### Var destructuring
+### Mutable destructuring
 
-`var` destructuring creates mutable bindings that can be reassigned:
+`let` destructuring creates mutable bindings that can be reassigned:
 
 ```harn
 let {x, y} = {x: 1, y: 2}
@@ -1030,14 +1028,14 @@ x = 10
 y = 20
 ```
 
-Discard bindings remain non-bindings under `var` as well: `var [_, value] =`
+Discard bindings remain non-bindings under `let` as well: `let [_, value] =`
 still only introduces `value`.
 
 ### Type errors
 
 Destructuring a non-dict value with a dict pattern or a non-list value
 with a list pattern produces a runtime error. For example,
-`let {a} = "hello"` throws `"dict destructuring requires a dict value"`.
+`const {a} = "hello"` throws `"dict destructuring requires a dict value"`.
 
 ## Evaluation order
 
@@ -1763,12 +1761,12 @@ defer { close(f) }
 
 ```harn
 const ch: owned<channel> = channel("log", 64)
-// implicit: defer { drop(ch) } registered at this `let`
+// implicit: defer { drop(ch) } registered at this binding
 ```
 
 `owned<T>` marks a binding as carrying sole ownership of a drop-able stdlib
 handle. The compiler emits an implicit `defer { drop(<binding>) }` at the
-`let` / `var` so the resource closes deterministically at lexical scope exit
+`const` / `let` binding so the resource closes deterministically at lexical scope exit
 — no manual `close_channel` / `mcp_disconnect` / etc. and no reliance on GC
 finalisation. `drop()` is a builtin that dispatches on the runtime value tag:
 channels close, sync permits release, future handle types add their own
@@ -5546,8 +5544,9 @@ the original declared type is restored.
 
 #### Mutability
 
-Variables declared with `let` are immutable.  Assigning to a `let`
-variable produces a compile-time warning (and a runtime error).
+Variables declared with `const` are immutable. Assigning to a `const`
+variable produces a compile-time error (and a runtime error remains as a
+backstop). Use `let` when the binding must be reassigned.
 
 ### Runtime enforcement
 
@@ -6130,7 +6129,7 @@ and `negative_knowledge.record(...)`.
 |---|---|
 | `undefinedVariable(name)` | Variable not found in any scope |
 | `undefinedBuiltin(name)` | No registered builtin or user function with this name |
-| `immutableAssignment(name)` | Attempted `=` on a `let` binding |
+| `immutableAssignment(name)` | Attempted assignment through a `const` binding |
 | `typeMismatch(expected, got)` | Type assertion failed |
 | `returnValue(value?)` | Internal: used to implement `return` (not a user-facing error) |
 | `retryExhausted` | All retry attempts failed |

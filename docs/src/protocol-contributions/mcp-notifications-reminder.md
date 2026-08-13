@@ -253,7 +253,7 @@ unknown notifications are already required to be tolerated.
 |---|---|---|
 | `_meta.harn.reminder` outbound emission on MCP notifications | Reference impl tracked in [#1828](https://github.com/burin-labs/harn/issues/1828) | `crates/harn-serve/src/adapters/mcp.rs` |
 | Typed `SystemReminder` lifecycle envelope | Shipping | Shared with ACP and A2A adapters. |
-| Host-side rendering with provider capability dispatch | Shipping (v0.8.x) | See [System reminders > Capability-aware rendering](../system-reminders.md#capability-aware-rendering). |
+| Host-side rendering through one provider-neutral directive envelope | Shipping (v0.8.x) | See [System reminders > One context-directive envelope](../system-reminders.md#one-context-directive-envelope). |
 | `capabilities.reminders` advertisement | Pending upstream schema | Currently under `capabilities._meta.harn.reminders`. |
 
 The canonical lifecycle struct ([`SystemReminder`][reminder-rs]) is

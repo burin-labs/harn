@@ -528,15 +528,6 @@ fn test_infer_provider_from_defaults() {
 }
 
 #[test]
-fn test_infer_provider_prefix_rules() {
-    assert_eq!(infer_provider("local:gemma-4-e4b-it"), "ollama");
-    assert_eq!(infer_provider("ollama:qwen3:30b-a3b"), "ollama");
-    // Even when the id also contains `/`, the local transport prefix wins.
-    assert_eq!(infer_provider("local:owner/model"), "ollama");
-    assert_eq!(infer_provider("hf:Qwen/Qwen3.6-35B-A3B"), "huggingface");
-}
-
-#[test]
 fn test_openrouter_inference_requires_one_slash() {
     let _guard = crate::llm::env_guard();
     let _env = crate::test_env::test_env_guard();
@@ -704,29 +695,6 @@ fn test_user_catalog_overlay_re_homes_model_provider() {
     assert_eq!(infer_provider("gpt-4o"), "openrouter");
 
     reset_overrides();
-}
-
-#[test]
-fn test_resolve_model_info_normalizes_provider_prefixes() {
-    for (selector, model_id) in [
-        ("local:gemma-4-e4b-it", "gemma-4-e4b-it"),
-        ("ollama:qwen3:30b-a3b", "qwen3:30b-a3b"),
-        ("ollama/gemma4:26b", "gemma4:26b"),
-    ] {
-        let model = resolve_model_info(selector);
-        assert_eq!(model.id, model_id);
-        assert_eq!(model.provider, "ollama");
-    }
-    let hf = resolve_model_info("hf:Qwen/Qwen3.6-35B-A3B");
-    assert_eq!(hf.id, "Qwen/Qwen3.6-35B-A3B");
-    assert_eq!(hf.provider, "huggingface");
-    let cerebras = resolve_model_info("cerebras/gpt-oss-120b");
-    assert_eq!(cerebras.id, "gpt-oss-120b");
-    assert_eq!(cerebras.provider, "cerebras");
-
-    let cerebras_glm = resolve_model_info("cerebras/zai-glm-4.7");
-    assert_eq!(cerebras_glm.id, "zai-glm-4.7");
-    assert_eq!(cerebras_glm.provider, "cerebras");
 }
 
 #[test]
@@ -1712,4 +1680,5 @@ fn gpt_5_5_fast_serving_tier_rides_service_tier() {
     assert_eq!(fast.status.as_deref(), Some("ga"));
 }
 
+mod provider_prefix;
 mod tool_protocol;

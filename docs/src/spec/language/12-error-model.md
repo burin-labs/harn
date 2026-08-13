@@ -82,7 +82,7 @@ value of the catch handler when an error is caught. This means the natural
 without needing to restructure through `Result` helpers. When a typed catch
 (`catch (e: AppError) { ... }`) does not match the thrown error's type, the
 throw propagates past the expression unchanged — the surrounding `let` never
-binds. See the [Try-expression](#try-expression) section below for the
+binds. See the [Try-expression](./14-enums.md#try-expression) section below for the
 `Result`-wrapping behavior when `catch` is omitted.
 
 ### try* (rethrow-into-catch)

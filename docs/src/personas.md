@@ -6,8 +6,8 @@ triggers, schedules, tools, host capabilities, autonomy, budget ceilings,
 handoff targets, context packs, eval packs, rollout policy, and receipt
 requirements.
 
-The product principle is simple: personas are operational roles with policies,
-not just natural-language behavior.
+Persona policy lives in a typed runtime contract rather than in
+natural-language behavior alone.
 
 ## Manifest shape
 
