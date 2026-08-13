@@ -62,6 +62,14 @@ pub type ExternalActionActivityStatus = "proposed" \
   | "rejected" \
   | "reconciliation_required"
 
+/** States whose exact activity snapshot may replay but may never advance. */
+pub type ExternalActionTerminalActivityStatus = "denied" \
+  | "cancelled" \
+  | "timed_out" \
+  | "confirmed" \
+  | "failed_before_dispatch" \
+  | "rejected"
+
 pub type ExternalActionPolicyLayer = "user_policy" \
   | "managed_policy" \
   | "adversarial_reviewer" \

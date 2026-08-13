@@ -190,6 +190,17 @@ pub(super) fn generate_swift_for_version(
         "HarnExternalActionActivityStatus",
         &external_actions.activity_statuses,
     ));
+    out.push_str("public extension HarnExternalActionActivityStatus {\n");
+    out.push_str(
+        "    /// Whether this snapshot is a final outcome and may only replay identically.\n",
+    );
+    out.push_str("    var isTerminal: Bool {\n        switch self {\n");
+    for value in &external_actions.terminal_activity_statuses {
+        out.push_str("        case .");
+        out.push_str(&swift_case_name(value));
+        out.push_str(": true\n");
+    }
+    out.push_str("        default: false\n        }\n    }\n}\n\n");
     out.push_str(&swift_enum(
         "HarnExternalActionPolicyLayer",
         &external_actions.policy_layers,

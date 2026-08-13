@@ -414,6 +414,20 @@ impl HarnExternalActionActivityStatus {
     }
 }
 
+impl HarnExternalActionActivityStatus {
+    /// Whether this snapshot is a final outcome and may only replay identically.
+    pub const fn is_terminal(self) -> bool {
+        matches!(self,
+            Self::Denied
+            | Self::Cancelled
+            | Self::TimedOut
+            | Self::Confirmed
+            | Self::FailedBeforeDispatch
+            | Self::Rejected
+        )
+    }
+}
+
 /// Closed external-action policy layers owned by `std/external_action/vocabulary`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum HarnExternalActionPolicyLayer {

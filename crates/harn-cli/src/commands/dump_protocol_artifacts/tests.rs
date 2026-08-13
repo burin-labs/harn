@@ -182,16 +182,19 @@ fn external_action_vocabulary_projects_to_every_supported_host() {
     assert!(ts.contains("export type HarnExternalActionNextAction"));
     assert!(ts.contains("export type HarnExternalActionProtectedFieldClass"));
     assert!(ts.contains("export type HarnExternalActionActivityStatus"));
+    assert!(ts.contains("isExternalActionActivityStatusTerminal"));
     assert!(swift.contains("public enum HarnExternalActionOutcome"));
     assert!(swift.contains("public enum HarnExternalActionReceiptStatus"));
     assert!(swift.contains("public enum HarnExternalActionNextAction"));
     assert!(swift.contains("public enum HarnExternalActionProtectedFieldClass"));
     assert!(swift.contains("public enum HarnExternalActionActivityStatus"));
+    assert!(swift.contains("var isTerminal: Bool"));
     assert!(rust.contains("pub enum HarnExternalActionOutcome"));
     assert!(rust.contains("pub enum HarnExternalActionReceiptStatus"));
     assert!(rust.contains("pub enum HarnExternalActionNextAction"));
     assert!(rust.contains("pub enum HarnExternalActionProtectedFieldClass"));
     assert!(rust.contains("pub enum HarnExternalActionActivityStatus"));
+    assert!(rust.contains("pub const fn is_terminal(self) -> bool"));
 
     for value in vocabulary
         .outcomes
@@ -275,6 +278,7 @@ fn adding_external_action_values_updates_all_host_projections() {
         protected_field_classes: vec!["legal_identity".into(), "future_field".into()],
         passenger_genders: vec!["m".into(), "future_gender".into()],
         activity_statuses: vec!["proposed".into(), "future_activity".into()],
+        terminal_activity_statuses: vec!["future_activity".into()],
         policy_layers: vec!["user_policy".into(), "future_layer".into()],
         policy_evaluation_outcomes: vec!["allowed".into(), "future_evaluation".into()],
         decision_outcomes: vec!["approved".into(), "future_decision".into()],

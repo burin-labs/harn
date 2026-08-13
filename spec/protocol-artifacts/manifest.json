@@ -712,7 +712,15 @@
       "indeterminate",
       "refused"
     ],
-    "source": "crates/harn-stdlib/src/stdlib/external_action/vocabulary.harn"
+    "source": "crates/harn-stdlib/src/stdlib/external_action/vocabulary.harn",
+    "terminalActivityStatuses": [
+      "denied",
+      "cancelled",
+      "timed_out",
+      "confirmed",
+      "failed_before_dispatch",
+      "rejected"
+    ]
   },
   "generatedBy": "harn dump-protocol-artifacts",
   "mcp": {

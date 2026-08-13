@@ -336,6 +336,21 @@ public enum HarnExternalActionActivityStatus: String, Codable, Sendable, CaseIte
     ].map { Self(rawValue: $0)! }
 }
 
+public extension HarnExternalActionActivityStatus {
+    /// Whether this snapshot is a final outcome and may only replay identically.
+    var isTerminal: Bool {
+        switch self {
+        case .denied: true
+        case .cancelled: true
+        case .timedOut: true
+        case .confirmed: true
+        case .failedBeforeDispatch: true
+        case .rejected: true
+        default: false
+        }
+    }
+}
+
 public enum HarnExternalActionPolicyLayer: String, Codable, Sendable, CaseIterable {
     case userPolicy = "user_policy"
     case managedPolicy = "managed_policy"

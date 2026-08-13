@@ -198,6 +198,7 @@ pub(super) fn generate_manifest_for_version(
             "protectedFieldClasses": external_actions.protected_field_classes,
             "passengerGenders": external_actions.passenger_genders,
             "activityStatuses": external_actions.activity_statuses,
+            "terminalActivityStatuses": external_actions.terminal_activity_statuses,
             "policyLayers": external_actions.policy_layers,
             "policyEvaluationOutcomes": external_actions.policy_evaluation_outcomes,
             "decisionOutcomes": external_actions.decision_outcomes,
