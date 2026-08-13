@@ -1205,12 +1205,16 @@ policy: construct a `NetPolicy` from `std/net_policy`, call
 `harness.with_net_policy(policy)`, and pass the resulting Harness or its
 `restricted.net` handle inward. A helper that receives the narrowed
 `HarnessNet` cannot reach filesystem, process, LLM, or other ungranted
-capabilities.
+capabilities. Bare strings in an attenuated policy represent domains, wildcard
+domains, or CIDR ranges. Use the typed `host(name, ports)` constructor when a
+rule must restrict ports.
 
 ```harn
+import { host } from "std/net_policy"
+
 pipeline main(harness: Harness) {
   const restricted = harness.with_net_policy({
-    allow: ["api.example.com:443", "*.trusted.example", "10.0.0.0/8"],
+    allow: [host("api.example.com", [443]), "*.trusted.example", "10.0.0.0/8"],
     deny: ["blocked.trusted.example"],
     default: "deny",
   })
