@@ -82,6 +82,7 @@ pipeline test(harness: Harness) {
     },
     20,
   )
+  assert(activity.kind == "external_action", "activity kind is portable and typed")
   assert(activity.status == "confirmed", "activity follows the terminal receipt")
   assert(activity.dispatch.attempted, "activity records provider dispatch")
   assert(activity.policy_evaluations[1]?.layer == "adversarial_reviewer", "policy chain is typed")

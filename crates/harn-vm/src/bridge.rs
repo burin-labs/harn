@@ -2554,10 +2554,10 @@ mod tests {
             .expect("send permission response");
 
         let response = call.await.expect("permission response");
-        assert_eq!(
+        assert!(matches!(
             crate::llm::acp_permission::parse_response(&response),
-            crate::llm::acp_permission::WireOutcome::Allowed
-        );
+            crate::llm::acp_permission::WireOutcome::Allowed { .. }
+        ));
     }
 
     async fn wait_for_pending<F>(

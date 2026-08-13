@@ -1,0 +1,22 @@
+/** Closed vocabulary shared by every portable product activity projection. */
+pub type ActivityKind = "external_action" | "tool_permission"
+
+pub type ToolPermissionOutcome = "approved" | "denied" | "timed_out" | "cancelled"
+
+pub type ToolPermissionDecider = "person" \
+  | "remembered_rule" \
+  | "user_policy" \
+  | "managed_policy" \
+  | "runtime_policy" \
+  | "host_unavailable"
+
+pub type ToolPermissionPolicyLayer = "user_policy" \
+  | "managed_policy" \
+  | "runtime_policy" \
+  | "remembered_rule"
+
+pub type ToolPermissionPolicyOutcome = "allowed" | "denied" | "approval_required" | "unavailable"
+
+pub type ToolPermissionGrantScope = "once" | "session"
+
+pub type ToolPermissionGrantExpiry = "after_dispatch" | "session_end"

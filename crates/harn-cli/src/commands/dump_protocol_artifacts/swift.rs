@@ -7,6 +7,7 @@ use harn_serve::adapters::acp::{
 use harn_serve::MCP_PROTOCOL_VERSION;
 use harn_vm::llm::receipts::{TOOL_CALL_RECEIPT_EXECUTORS, TOOL_CALL_RECEIPT_STATUSES};
 
+use super::activity::ActivityVocabulary;
 use super::connector_setup::ConnectorSetupVocabulary;
 use super::constants::*;
 use super::external_action::ExternalActionVocabulary;
@@ -25,6 +26,7 @@ pub(super) fn generate_swift() -> String {
         env!("CARGO_PKG_VERSION"),
         &ExternalActionVocabulary::load_for_tests(),
         &ConnectorSetupVocabulary::load_for_tests(),
+        &ActivityVocabulary::load_for_tests(),
     )
 }
 
@@ -32,6 +34,7 @@ pub(super) fn generate_swift_for_version(
     artifact_version: &str,
     external_actions: &ExternalActionVocabulary,
     connector_setup: &ConnectorSetupVocabulary,
+    activity: &ActivityVocabulary,
 ) -> String {
     let mut out = generated_header("harn dump-protocol-artifacts", "swift");
     out.push_str("import Foundation\n\n");
@@ -44,6 +47,8 @@ pub(super) fn generate_swift_for_version(
         "    public static let acpSchemaCompatibility = {}\n",
         json_string_literal(ACP_SCHEMA_COMPATIBILITY)
     ));
+    out.push_str("    public static let toolPermissionDecisionSchema = \"harn.tool_permission_decision.v1\"\n");
+    out.push_str("    public static let toolPermissionActivitySchema = \"harn.tool_permission_activity.v1\"\n");
     out.push_str(&format!(
         "    public static let harnAgentEventMethod = {}\n",
         json_string_literal(HARN_AGENT_EVENT_METHOD)
@@ -178,6 +183,104 @@ pub(super) fn generate_swift_for_version(
         "HarnExternalActionReconciliationStatus",
         &external_actions.reconciliation_statuses,
     ));
+    out.push_str(&swift_enum("HarnActivityKind", &activity.kinds));
+    out.push_str(&swift_enum(
+        "HarnToolPermissionOutcome",
+        &activity.permission_outcomes,
+    ));
+    out.push_str(&swift_enum(
+        "HarnToolPermissionDecider",
+        &activity.permission_deciders,
+    ));
+    out.push_str(&swift_enum(
+        "HarnToolPermissionPolicyLayer",
+        &activity.permission_policy_layers,
+    ));
+    out.push_str(&swift_enum(
+        "HarnToolPermissionPolicyOutcome",
+        &activity.permission_policy_outcomes,
+    ));
+    out.push_str(&swift_enum(
+        "HarnToolPermissionGrantScope",
+        &activity.permission_grant_scopes,
+    ));
+    out.push_str(&swift_enum(
+        "HarnToolPermissionGrantExpiry",
+        &activity.permission_grant_expiries,
+    ));
+    out.push_str(
+        "public struct HarnToolPermissionScope: Codable, Sendable, Equatable {\n\
+         \x20   public let toolKind: HarnACPToolKind\n\
+         \x20   public let sideEffect: HarnSideEffectLevel\n\
+         \x20   public let capabilities: [String]\n\n\
+         \x20   enum CodingKeys: String, CodingKey {\n\
+         \x20       case capabilities\n\
+         \x20       case toolKind = \"tool_kind\"\n\
+         \x20       case sideEffect = \"side_effect\"\n\
+         \x20   }\n\
+         }\n\n\
+         public struct HarnToolPermissionPolicyEvidence: Codable, Sendable, Equatable {\n\
+         \x20   public let layer: HarnToolPermissionPolicyLayer\n\
+         \x20   public let outcome: HarnToolPermissionPolicyOutcome\n\
+         \x20   public let ruleId: String?\n\
+         \x20   public let riskLabels: [String]\n\n\
+         \x20   enum CodingKeys: String, CodingKey {\n\
+         \x20       case layer, outcome\n\
+         \x20       case ruleId = \"rule_id\"\n\
+         \x20       case riskLabels = \"risk_labels\"\n\
+         \x20   }\n\
+         }\n\n\
+         public struct HarnToolPermissionDecisionMetadata: Codable, Sendable, Equatable {\n\
+         \x20   public let schema: String\n\
+         \x20   public let outcome: HarnToolPermissionOutcome\n\
+         \x20   public let decider: HarnToolPermissionDecider\n\
+         \x20   public let policyEvaluations: [HarnToolPermissionPolicyEvidence]\n\
+         \x20   public let grantScope: HarnToolPermissionGrantScope?\n\n\
+         \x20   enum CodingKeys: String, CodingKey {\n\
+         \x20       case schema, outcome, decider\n\
+         \x20       case policyEvaluations = \"policy_evaluations\"\n\
+         \x20       case grantScope = \"grant_scope\"\n\
+         \x20   }\n\
+         }\n\n\
+         public struct HarnToolPermissionGrantEvidence: Codable, Sendable, Equatable {\n\
+         \x20   public let scope: HarnToolPermissionGrantScope\n\
+         \x20   public let expires: HarnToolPermissionGrantExpiry\n\
+         \x20   public let reusable: Bool\n\
+         }\n\n\
+         public struct HarnToolPermissionRequester: Codable, Sendable, Equatable {\n\
+         \x20   public let sessionId: String\n\
+         \x20   public let agentId: String?\n\
+         \x20   public let modelProvider: String?\n\
+         \x20   public let modelId: String?\n\n\
+         \x20   enum CodingKeys: String, CodingKey {\n\
+         \x20       case sessionId = \"session_id\"\n\
+         \x20       case agentId = \"agent_id\"\n\
+         \x20       case modelProvider = \"model_provider\"\n\
+         \x20       case modelId = \"model_id\"\n\
+         \x20   }\n\
+         }\n\n\
+         public struct HarnToolPermissionActivityRecord: Codable, Sendable, Equatable {\n\
+         \x20   public let schema: String\n\
+         \x20   public let kind: HarnActivityKind\n\
+         \x20   public let id: String\n\
+         \x20   public let requestId: String\n\
+         \x20   public let toolName: String\n\
+         \x20   public let scope: HarnToolPermissionScope\n\
+         \x20   public let outcome: HarnToolPermissionOutcome\n\
+         \x20   public let decider: HarnToolPermissionDecider\n\
+         \x20   public let policyEvaluations: [HarnToolPermissionPolicyEvidence]\n\
+         \x20   public let grant: HarnToolPermissionGrantEvidence?\n\
+         \x20   public let requester: HarnToolPermissionRequester\n\
+         \x20   public let occurredAtMs: Int64\n\n\
+         \x20   enum CodingKeys: String, CodingKey {\n\
+         \x20       case schema, kind, id, scope, outcome, decider, grant, requester\n\
+         \x20       case requestId = \"request_id\"\n\
+         \x20       case toolName = \"tool_name\"\n\
+         \x20       case policyEvaluations = \"policy_evaluations\"\n\
+         \x20       case occurredAtMs = \"occurred_at_ms\"\n\
+         \x20   }\n\
+         }\n\n",
+    );
     out.push_str(&swift_enum(
         "HarnConnectorSetupStage",
         &connector_setup.stages,

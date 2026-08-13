@@ -1545,20 +1545,30 @@ fn collect_permission_events(
             .or_else(|| event.get("kind"))
             .and_then(JsonValue::as_str)
             .unwrap_or_default();
-        if kind.contains("permission") || kind.contains("approval") || kind.starts_with("hitl_") {
+        let normalized_kind = kind.to_ascii_lowercase();
+        if normalized_kind.contains("permission")
+            || normalized_kind.contains("approval")
+            || normalized_kind.starts_with("hitl_")
+        {
+            let activity = event
+                .get("metadata")
+                .and_then(|metadata| metadata.get("activity"));
             permissions.push(BundlePermission {
                 kind: kind.to_string(),
                 source: source.to_string(),
-                request_id: event
-                    .get("request_id")
+                request_id: activity
+                    .and_then(|activity| activity.get("request_id"))
+                    .or_else(|| event.get("request_id"))
                     .or_else(|| event.get("id"))
                     .and_then(JsonValue::as_str)
                     .map(str::to_string),
-                agent: event
-                    .get("agent")
+                agent: activity
+                    .and_then(|activity| activity.get("requester"))
+                    .and_then(|requester| requester.get("agent_id"))
+                    .or_else(|| event.get("agent"))
                     .and_then(JsonValue::as_str)
                     .map(str::to_string),
-                payload: event.clone(),
+                payload: activity.cloned().unwrap_or_else(|| event.clone()),
             });
         }
     }

@@ -1,5 +1,6 @@
 //! Policy types and capability-ceiling enforcement.
 
+mod approval_activity;
 mod approval_rules;
 mod capability_lattice;
 mod effect_call_cache;
@@ -25,6 +26,14 @@ pub(crate) use capability_lattice::operation_is_covered;
 use capability_lattice::policy_allows_capability;
 
 pub use crate::tool_annotations::{ToolArgSchema, ToolKind};
+pub use approval_activity::{
+    ActivityKind, ToolPermissionActivityContext, ToolPermissionActivityError,
+    ToolPermissionActivityRecord, ToolPermissionDecider, ToolPermissionGrantEvidence,
+    ToolPermissionGrantExpiry, ToolPermissionGrantScope, ToolPermissionOutcome,
+    ToolPermissionPolicyEvidence, ToolPermissionPolicyFacts, ToolPermissionPolicyLayer,
+    ToolPermissionPolicyOutcome, ToolPermissionRequester, ToolPermissionResolution,
+    ToolPermissionScope,
+};
 pub use approval_rules::{
     clear_all_approval_policy_repeat_counts, clear_approval_policy_repeat_counts,
     next_approval_policy_repeat_count, next_approval_unavailable_class_repeat_count, ApprovalShape,

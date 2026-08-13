@@ -15,6 +15,9 @@ use serde_json::{Map, Value};
 /// Harn release that generated this binding.
 pub const HARN_PROTOCOL_ARTIFACT_VERSION: &str = "0.10.89";
 
+pub const HARN_TOOL_PERMISSION_DECISION_SCHEMA: &str = "harn.tool_permission_decision.v1";
+pub const HARN_TOOL_PERMISSION_ACTIVITY_SCHEMA: &str = "harn.tool_permission_activity.v1";
+
 /// Upstream ACP schema version Harn tracks.
 pub const ACP_SCHEMA_COMPATIBILITY: &str = "agentclientprotocol/agent-client-protocol schema v0.12.2";
 
@@ -402,6 +405,358 @@ impl HarnExternalActionReconciliationStatus {
             Self::Refused => "refused",
         }
     }
+}
+
+/// Closed portable activity kinds owned by `std/activity/vocabulary`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum HarnActivityKind {
+    #[serde(rename = "external_action")]
+    ExternalAction,
+    #[serde(rename = "tool_permission")]
+    ToolPermission,
+}
+
+impl HarnActivityKind {
+    pub const ALL: &'static [Self] = &[
+        Self::ExternalAction,
+        Self::ToolPermission,
+    ];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::ExternalAction => "external_action",
+            Self::ToolPermission => "tool_permission",
+        }
+    }
+}
+
+/// Closed generic tool permission outcomes owned by `std/activity/vocabulary`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum HarnToolPermissionOutcome {
+    #[serde(rename = "approved")]
+    Approved,
+    #[serde(rename = "denied")]
+    Denied,
+    #[serde(rename = "timed_out")]
+    TimedOut,
+    #[serde(rename = "cancelled")]
+    Cancelled,
+}
+
+impl HarnToolPermissionOutcome {
+    pub const ALL: &'static [Self] = &[
+        Self::Approved,
+        Self::Denied,
+        Self::TimedOut,
+        Self::Cancelled,
+    ];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Approved => "approved",
+            Self::Denied => "denied",
+            Self::TimedOut => "timed_out",
+            Self::Cancelled => "cancelled",
+        }
+    }
+}
+
+/// Closed generic tool permission deciders owned by `std/activity/vocabulary`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum HarnToolPermissionDecider {
+    #[serde(rename = "person")]
+    Person,
+    #[serde(rename = "remembered_rule")]
+    RememberedRule,
+    #[serde(rename = "user_policy")]
+    UserPolicy,
+    #[serde(rename = "managed_policy")]
+    ManagedPolicy,
+    #[serde(rename = "runtime_policy")]
+    RuntimePolicy,
+    #[serde(rename = "host_unavailable")]
+    HostUnavailable,
+}
+
+impl HarnToolPermissionDecider {
+    pub const ALL: &'static [Self] = &[
+        Self::Person,
+        Self::RememberedRule,
+        Self::UserPolicy,
+        Self::ManagedPolicy,
+        Self::RuntimePolicy,
+        Self::HostUnavailable,
+    ];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Person => "person",
+            Self::RememberedRule => "remembered_rule",
+            Self::UserPolicy => "user_policy",
+            Self::ManagedPolicy => "managed_policy",
+            Self::RuntimePolicy => "runtime_policy",
+            Self::HostUnavailable => "host_unavailable",
+        }
+    }
+}
+
+/// Closed generic tool permission policy layers owned by `std/activity/vocabulary`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum HarnToolPermissionPolicyLayer {
+    #[serde(rename = "user_policy")]
+    UserPolicy,
+    #[serde(rename = "managed_policy")]
+    ManagedPolicy,
+    #[serde(rename = "runtime_policy")]
+    RuntimePolicy,
+    #[serde(rename = "remembered_rule")]
+    RememberedRule,
+}
+
+impl HarnToolPermissionPolicyLayer {
+    pub const ALL: &'static [Self] = &[
+        Self::UserPolicy,
+        Self::ManagedPolicy,
+        Self::RuntimePolicy,
+        Self::RememberedRule,
+    ];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::UserPolicy => "user_policy",
+            Self::ManagedPolicy => "managed_policy",
+            Self::RuntimePolicy => "runtime_policy",
+            Self::RememberedRule => "remembered_rule",
+        }
+    }
+}
+
+/// Closed generic tool permission policy outcomes owned by `std/activity/vocabulary`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum HarnToolPermissionPolicyOutcome {
+    #[serde(rename = "allowed")]
+    Allowed,
+    #[serde(rename = "denied")]
+    Denied,
+    #[serde(rename = "approval_required")]
+    ApprovalRequired,
+    #[serde(rename = "unavailable")]
+    Unavailable,
+}
+
+impl HarnToolPermissionPolicyOutcome {
+    pub const ALL: &'static [Self] = &[
+        Self::Allowed,
+        Self::Denied,
+        Self::ApprovalRequired,
+        Self::Unavailable,
+    ];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Allowed => "allowed",
+            Self::Denied => "denied",
+            Self::ApprovalRequired => "approval_required",
+            Self::Unavailable => "unavailable",
+        }
+    }
+}
+
+/// Closed generic tool permission grant scopes owned by `std/activity/vocabulary`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum HarnToolPermissionGrantScope {
+    #[serde(rename = "once")]
+    Once,
+    #[serde(rename = "session")]
+    Session,
+}
+
+impl HarnToolPermissionGrantScope {
+    pub const ALL: &'static [Self] = &[
+        Self::Once,
+        Self::Session,
+    ];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Once => "once",
+            Self::Session => "session",
+        }
+    }
+}
+
+/// Closed generic tool permission grant expiries owned by `std/activity/vocabulary`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum HarnToolPermissionGrantExpiry {
+    #[serde(rename = "after_dispatch")]
+    AfterDispatch,
+    #[serde(rename = "session_end")]
+    SessionEnd,
+}
+
+impl HarnToolPermissionGrantExpiry {
+    pub const ALL: &'static [Self] = &[
+        Self::AfterDispatch,
+        Self::SessionEnd,
+    ];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::AfterDispatch => "after_dispatch",
+            Self::SessionEnd => "session_end",
+        }
+    }
+}
+
+/// Closed ACP tool kinds owned by Harn's tool annotation registry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum HarnACPToolKind {
+    #[serde(rename = "read")]
+    Read,
+    #[serde(rename = "edit")]
+    Edit,
+    #[serde(rename = "delete")]
+    Delete,
+    #[serde(rename = "move")]
+    Move,
+    #[serde(rename = "search")]
+    Search,
+    #[serde(rename = "execute")]
+    Execute,
+    #[serde(rename = "think")]
+    Think,
+    #[serde(rename = "fetch")]
+    Fetch,
+    #[serde(rename = "other")]
+    Other,
+}
+
+impl HarnACPToolKind {
+    pub const ALL: &'static [Self] = &[
+        Self::Read,
+        Self::Edit,
+        Self::Delete,
+        Self::Move,
+        Self::Search,
+        Self::Execute,
+        Self::Think,
+        Self::Fetch,
+        Self::Other,
+    ];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Read => "read",
+            Self::Edit => "edit",
+            Self::Delete => "delete",
+            Self::Move => "move",
+            Self::Search => "search",
+            Self::Execute => "execute",
+            Self::Think => "think",
+            Self::Fetch => "fetch",
+            Self::Other => "other",
+        }
+    }
+}
+
+/// Closed side-effect levels owned by Harn's tool annotation registry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum HarnSideEffectLevel {
+    #[serde(rename = "none")]
+    None,
+    #[serde(rename = "read_only")]
+    ReadOnly,
+    #[serde(rename = "workspace_write")]
+    WorkspaceWrite,
+    #[serde(rename = "process_exec")]
+    ProcessExec,
+    #[serde(rename = "network")]
+    Network,
+    #[serde(rename = "desktop_control")]
+    DesktopControl,
+}
+
+impl HarnSideEffectLevel {
+    pub const ALL: &'static [Self] = &[
+        Self::None,
+        Self::ReadOnly,
+        Self::WorkspaceWrite,
+        Self::ProcessExec,
+        Self::Network,
+        Self::DesktopControl,
+    ];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::ReadOnly => "read_only",
+            Self::WorkspaceWrite => "workspace_write",
+            Self::ProcessExec => "process_exec",
+            Self::Network => "network",
+            Self::DesktopControl => "desktop_control",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnToolPermissionScope {
+    pub tool_kind: HarnACPToolKind,
+    pub side_effect: HarnSideEffectLevel,
+    pub capabilities: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnToolPermissionPolicyEvidence {
+    pub layer: HarnToolPermissionPolicyLayer,
+    pub outcome: HarnToolPermissionPolicyOutcome,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rule_id: Option<String>,
+    pub risk_labels: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnToolPermissionDecisionMetadata {
+    pub schema: String,
+    pub outcome: HarnToolPermissionOutcome,
+    pub decider: HarnToolPermissionDecider,
+    pub policy_evaluations: Vec<HarnToolPermissionPolicyEvidence>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grant_scope: Option<HarnToolPermissionGrantScope>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnToolPermissionGrantEvidence {
+    pub scope: HarnToolPermissionGrantScope,
+    pub expires: HarnToolPermissionGrantExpiry,
+    pub reusable: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnToolPermissionRequester {
+    pub session_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_provider: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_id: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnToolPermissionActivityRecord {
+    pub schema: String,
+    pub kind: HarnActivityKind,
+    pub id: String,
+    pub request_id: String,
+    pub tool_name: String,
+    pub scope: HarnToolPermissionScope,
+    pub outcome: HarnToolPermissionOutcome,
+    pub decider: HarnToolPermissionDecider,
+    pub policy_evaluations: Vec<HarnToolPermissionPolicyEvidence>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grant: Option<HarnToolPermissionGrantEvidence>,
+    pub requester: HarnToolPermissionRequester,
+    pub occurred_at_ms: u64,
 }
 
 /// Closed connector-setup stages owned by `std/connectors/setup`.

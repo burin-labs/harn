@@ -6,6 +6,7 @@ use harn_serve::adapters::acp::{
 use harn_serve::MCP_PROTOCOL_VERSION;
 use harn_vm::llm::receipts::{TOOL_CALL_RECEIPT_EXECUTORS, TOOL_CALL_RECEIPT_STATUSES};
 
+use super::activity::ActivityVocabulary;
 use super::connector_setup::ConnectorSetupVocabulary;
 use super::constants::*;
 use super::external_action::ExternalActionVocabulary;
@@ -19,6 +20,7 @@ pub(super) fn generate_typescript() -> String {
         env!("CARGO_PKG_VERSION"),
         &ExternalActionVocabulary::load_for_tests(),
         &ConnectorSetupVocabulary::load_for_tests(),
+        &ActivityVocabulary::load_for_tests(),
     )
 }
 
@@ -26,11 +28,14 @@ pub(super) fn generate_typescript_for_version(
     artifact_version: &str,
     external_actions: &ExternalActionVocabulary,
     connector_setup: &ConnectorSetupVocabulary,
+    activity: &ActivityVocabulary,
 ) -> String {
     let mut out = generated_header("harn dump-protocol-artifacts", "typescript");
     out.push_str("export const HARN_PROTOCOL_ARTIFACT_VERSION = ");
     out.push_str(&json_string_literal(artifact_version));
     out.push_str("\n\n");
+    out.push_str("export const HARN_TOOL_PERMISSION_DECISION_SCHEMA = \"harn.tool_permission_decision.v1\" as const\n");
+    out.push_str("export const HARN_TOOL_PERMISSION_ACTIVITY_SCHEMA = \"harn.tool_permission_activity.v1\" as const\n\n");
     for (name, value) in [
         ("MCP_PROTOCOL_VERSION", MCP_PROTOCOL_VERSION),
         (
@@ -224,6 +229,86 @@ pub(super) fn generate_typescript_for_version(
         &external_actions.reconciliation_statuses,
         "HarnExternalActionReconciliationStatus",
     ));
+    out.push_str(&ts_array_owned(
+        "ACTIVITY_KINDS",
+        &activity.kinds,
+        "HarnActivityKind",
+    ));
+    out.push_str(&ts_array_owned(
+        "TOOL_PERMISSION_OUTCOMES",
+        &activity.permission_outcomes,
+        "HarnToolPermissionOutcome",
+    ));
+    out.push_str(&ts_array_owned(
+        "TOOL_PERMISSION_DECIDERS",
+        &activity.permission_deciders,
+        "HarnToolPermissionDecider",
+    ));
+    out.push_str(&ts_array_owned(
+        "TOOL_PERMISSION_POLICY_LAYERS",
+        &activity.permission_policy_layers,
+        "HarnToolPermissionPolicyLayer",
+    ));
+    out.push_str(&ts_array_owned(
+        "TOOL_PERMISSION_POLICY_OUTCOMES",
+        &activity.permission_policy_outcomes,
+        "HarnToolPermissionPolicyOutcome",
+    ));
+    out.push_str(&ts_array_owned(
+        "TOOL_PERMISSION_GRANT_SCOPES",
+        &activity.permission_grant_scopes,
+        "HarnToolPermissionGrantScope",
+    ));
+    out.push_str(&ts_array_owned(
+        "TOOL_PERMISSION_GRANT_EXPIRIES",
+        &activity.permission_grant_expiries,
+        "HarnToolPermissionGrantExpiry",
+    ));
+    out.push_str(
+        "export interface HarnToolPermissionScope {\n\
+         \x20 tool_kind: ACPToolKind\n\
+         \x20 side_effect: HarnSideEffectLevel\n\
+         \x20 capabilities: string[]\n\
+         }\n\n\
+         export interface HarnToolPermissionPolicyEvidence {\n\
+         \x20 layer: HarnToolPermissionPolicyLayer\n\
+         \x20 outcome: HarnToolPermissionPolicyOutcome\n\
+         \x20 rule_id?: string\n\
+         \x20 risk_labels: string[]\n\
+         }\n\n\
+         export interface HarnToolPermissionDecisionMetadata {\n\
+         \x20 schema: \"harn.tool_permission_decision.v1\"\n\
+         \x20 outcome: HarnToolPermissionOutcome\n\
+         \x20 decider: HarnToolPermissionDecider\n\
+         \x20 policy_evaluations: HarnToolPermissionPolicyEvidence[]\n\
+         \x20 grant_scope?: HarnToolPermissionGrantScope\n\
+         }\n\n\
+         export interface HarnToolPermissionGrantEvidence {\n\
+         \x20 scope: HarnToolPermissionGrantScope\n\
+         \x20 expires: HarnToolPermissionGrantExpiry\n\
+         \x20 reusable: false\n\
+         }\n\n\
+         export interface HarnToolPermissionRequester {\n\
+         \x20 session_id: string\n\
+         \x20 agent_id?: string\n\
+         \x20 model_provider?: string\n\
+         \x20 model_id?: string\n\
+         }\n\n\
+         export interface HarnToolPermissionActivityRecord {\n\
+         \x20 schema: \"harn.tool_permission_activity.v1\"\n\
+         \x20 kind: \"tool_permission\"\n\
+         \x20 id: string\n\
+         \x20 request_id: string\n\
+         \x20 tool_name: string\n\
+         \x20 scope: HarnToolPermissionScope\n\
+         \x20 outcome: HarnToolPermissionOutcome\n\
+         \x20 decider: HarnToolPermissionDecider\n\
+         \x20 policy_evaluations: HarnToolPermissionPolicyEvidence[]\n\
+         \x20 grant?: HarnToolPermissionGrantEvidence\n\
+         \x20 requester: HarnToolPermissionRequester\n\
+         \x20 occurred_at_ms: number\n\
+         }\n\n",
+    );
     out.push_str(&ts_array_owned(
         "CONNECTOR_SETUP_STAGES",
         &connector_setup.stages,

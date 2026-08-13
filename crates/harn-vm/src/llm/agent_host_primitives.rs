@@ -23,8 +23,8 @@ use denial_results::{
 };
 use dispatch_policy::{tool_denial_from_policy, DispatchPolicy};
 use host_permission::{
-    emit_permission_event, emit_permission_event_with_policy, request_host_permission,
-    HostPermissionOutcome, HostPermissionRequest,
+    emit_permission_activity, emit_permission_event, emit_permission_event_with_policy,
+    request_host_permission, HostPermissionOutcome, HostPermissionRequest,
 };
 use side_effect_ceiling::{request_side_effect_permission, SideEffectPermissionOutcome};
 use tool_catalog::{
@@ -1171,8 +1171,32 @@ pub(super) async fn host_agent_dispatch_tool_call(
                 false,
                 Some(decision.receipt.clone()),
             );
+            emit_permission_activity(
+                &session_id,
+                &tool_id,
+                &tool_name,
+                &decision,
+                crate::orchestration::ToolPermissionPolicyLayer::RuntimePolicy,
+                crate::orchestration::ToolPermissionResolution {
+                    outcome: crate::orchestration::ToolPermissionOutcome::Approved,
+                    decider: crate::orchestration::ToolPermissionDecider::RuntimePolicy,
+                    grant_scope: None,
+                    policy_evaluations: Vec::new(),
+                },
+            );
         }
         Some(decision) if decision.is_deny() => {
+            emit_permission_activity(
+                &session_id,
+                &tool_id,
+                &tool_name,
+                &decision,
+                crate::orchestration::ToolPermissionPolicyLayer::RuntimePolicy,
+                crate::orchestration::ToolPermissionResolution::terminal(
+                    crate::orchestration::ToolPermissionOutcome::Denied,
+                    crate::orchestration::ToolPermissionDecider::RuntimePolicy,
+                ),
+            );
             let denial = crate::agent_events::ToolDenial::terminal(
                 crate::agent_events::DenialGate::ApprovalPolicy,
                 None,
@@ -1199,7 +1223,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
             let no_host_bridge = bridge.is_none();
             let request = HostPermissionRequest {
                 session_id: session_id.clone(),
-                tool_call_id: approval_id,
+                tool_call_id: approval_id.clone(),
                 tool_name: tool_name.clone(),
                 tool_args: tool_args.clone(),
                 policy_decision: decision.receipt.clone(),
@@ -1209,7 +1233,10 @@ pub(super) async fn host_agent_dispatch_tool_call(
                 tool_annotations: tool_annotations_for(tools, &tool_name),
             };
             match request_host_permission(bridge.as_ref(), request).await {
-                HostPermissionOutcome::Allowed { response } => {
+                HostPermissionOutcome::Allowed {
+                    response,
+                    resolution,
+                } => {
                     // Preserve the established static-approval extension.
                     // Side-effect grants intentionally never accept rewritten
                     // arguments: their exact exception was approved for the
@@ -1227,8 +1254,24 @@ pub(super) async fn host_agent_dispatch_tool_call(
                         true,
                         Some(decision.receipt.clone()),
                     );
+                    emit_permission_activity(
+                        &session_id,
+                        &approval_id,
+                        &tool_name,
+                        &decision,
+                        crate::orchestration::ToolPermissionPolicyLayer::RuntimePolicy,
+                        resolution,
+                    );
                 }
-                HostPermissionOutcome::Rejected { reason } => {
+                HostPermissionOutcome::Rejected { reason, resolution } => {
+                    emit_permission_activity(
+                        &session_id,
+                        &approval_id,
+                        &tool_name,
+                        &decision,
+                        crate::orchestration::ToolPermissionPolicyLayer::RuntimePolicy,
+                        resolution,
+                    );
                     let denial = crate::agent_events::ToolDenial::terminal(
                         crate::agent_events::DenialGate::HostRejected,
                         None,
@@ -1247,6 +1290,17 @@ pub(super) async fn host_agent_dispatch_tool_call(
                     .await);
                 }
                 HostPermissionOutcome::Unavailable => {
+                    emit_permission_activity(
+                        &session_id,
+                        &approval_id,
+                        &tool_name,
+                        &decision,
+                        crate::orchestration::ToolPermissionPolicyLayer::RuntimePolicy,
+                        crate::orchestration::ToolPermissionResolution::terminal(
+                            crate::orchestration::ToolPermissionOutcome::Denied,
+                            crate::orchestration::ToolPermissionDecider::HostUnavailable,
+                        ),
+                    );
                     let (denial_class, repeat_count) =
                         crate::orchestration::next_approval_unavailable_class_repeat_count(
                             &session_id,

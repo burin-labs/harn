@@ -3,6 +3,9 @@
 
 export const HARN_PROTOCOL_ARTIFACT_VERSION = "0.10.89"
 
+export const HARN_TOOL_PERMISSION_DECISION_SCHEMA = "harn.tool_permission_decision.v1" as const
+export const HARN_TOOL_PERMISSION_ACTIVITY_SCHEMA = "harn.tool_permission_activity.v1" as const
+
 export const MCP_PROTOCOL_VERSION = "2026-07-28"
 export const MCP_JSON_SCHEMA_2020_12_DIALECT = "https://json-schema.org/draft/2020-12/schema"
 export const MCP_UNSUPPORTED_PROTOCOL_VERSION_ERROR = { code: -32022, message: "Unsupported protocol version" } as const
@@ -438,6 +441,107 @@ export const EXTERNAL_ACTION_RECONCILIATION_STATUSES = [
   "refused",
 ] as const
 export type HarnExternalActionReconciliationStatus = (typeof EXTERNAL_ACTION_RECONCILIATION_STATUSES)[number]
+
+export const ACTIVITY_KINDS = [
+  "external_action",
+  "tool_permission",
+] as const
+export type HarnActivityKind = (typeof ACTIVITY_KINDS)[number]
+
+export const TOOL_PERMISSION_OUTCOMES = [
+  "approved",
+  "denied",
+  "timed_out",
+  "cancelled",
+] as const
+export type HarnToolPermissionOutcome = (typeof TOOL_PERMISSION_OUTCOMES)[number]
+
+export const TOOL_PERMISSION_DECIDERS = [
+  "person",
+  "remembered_rule",
+  "user_policy",
+  "managed_policy",
+  "runtime_policy",
+  "host_unavailable",
+] as const
+export type HarnToolPermissionDecider = (typeof TOOL_PERMISSION_DECIDERS)[number]
+
+export const TOOL_PERMISSION_POLICY_LAYERS = [
+  "user_policy",
+  "managed_policy",
+  "runtime_policy",
+  "remembered_rule",
+] as const
+export type HarnToolPermissionPolicyLayer = (typeof TOOL_PERMISSION_POLICY_LAYERS)[number]
+
+export const TOOL_PERMISSION_POLICY_OUTCOMES = [
+  "allowed",
+  "denied",
+  "approval_required",
+  "unavailable",
+] as const
+export type HarnToolPermissionPolicyOutcome = (typeof TOOL_PERMISSION_POLICY_OUTCOMES)[number]
+
+export const TOOL_PERMISSION_GRANT_SCOPES = [
+  "once",
+  "session",
+] as const
+export type HarnToolPermissionGrantScope = (typeof TOOL_PERMISSION_GRANT_SCOPES)[number]
+
+export const TOOL_PERMISSION_GRANT_EXPIRIES = [
+  "after_dispatch",
+  "session_end",
+] as const
+export type HarnToolPermissionGrantExpiry = (typeof TOOL_PERMISSION_GRANT_EXPIRIES)[number]
+
+export interface HarnToolPermissionScope {
+  tool_kind: ACPToolKind
+  side_effect: HarnSideEffectLevel
+  capabilities: string[]
+}
+
+export interface HarnToolPermissionPolicyEvidence {
+  layer: HarnToolPermissionPolicyLayer
+  outcome: HarnToolPermissionPolicyOutcome
+  rule_id?: string
+  risk_labels: string[]
+}
+
+export interface HarnToolPermissionDecisionMetadata {
+  schema: "harn.tool_permission_decision.v1"
+  outcome: HarnToolPermissionOutcome
+  decider: HarnToolPermissionDecider
+  policy_evaluations: HarnToolPermissionPolicyEvidence[]
+  grant_scope?: HarnToolPermissionGrantScope
+}
+
+export interface HarnToolPermissionGrantEvidence {
+  scope: HarnToolPermissionGrantScope
+  expires: HarnToolPermissionGrantExpiry
+  reusable: false
+}
+
+export interface HarnToolPermissionRequester {
+  session_id: string
+  agent_id?: string
+  model_provider?: string
+  model_id?: string
+}
+
+export interface HarnToolPermissionActivityRecord {
+  schema: "harn.tool_permission_activity.v1"
+  kind: "tool_permission"
+  id: string
+  request_id: string
+  tool_name: string
+  scope: HarnToolPermissionScope
+  outcome: HarnToolPermissionOutcome
+  decider: HarnToolPermissionDecider
+  policy_evaluations: HarnToolPermissionPolicyEvidence[]
+  grant?: HarnToolPermissionGrantEvidence
+  requester: HarnToolPermissionRequester
+  occurred_at_ms: number
+}
 
 export const CONNECTOR_SETUP_STAGES = [
   "resolving",

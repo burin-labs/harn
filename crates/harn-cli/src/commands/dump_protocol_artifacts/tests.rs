@@ -19,6 +19,7 @@ use harn_vm::session_timeline::{
     SESSION_TIMELINE_UNSUBSCRIBE_METHOD,
 };
 
+use super::activity::ActivityVocabulary;
 use super::connector_setup::ConnectorSetupVocabulary;
 use super::constants::*;
 use super::external_action::ExternalActionVocabulary;
@@ -171,9 +172,10 @@ fn generated_types_include_harn_wire_vocabularies() {
 fn external_action_vocabulary_projects_to_every_supported_host() {
     let vocabulary = ExternalActionVocabulary::load(&protocol_source()).unwrap();
     let setup = ConnectorSetupVocabulary::load(&protocol_source()).unwrap();
-    let ts = generate_typescript_for_version("1.0.0", &vocabulary, &setup);
-    let swift = generate_swift_for_version("1.0.0", &vocabulary, &setup);
-    let rust = generate_rust_for_version("1.0.0", &vocabulary, &setup);
+    let activity = ActivityVocabulary::load(&protocol_source()).unwrap();
+    let ts = generate_typescript_for_version("1.0.0", &vocabulary, &setup, &activity);
+    let swift = generate_swift_for_version("1.0.0", &vocabulary, &setup, &activity);
+    let rust = generate_rust_for_version("1.0.0", &vocabulary, &setup, &activity);
 
     assert!(ts.contains("export type HarnExternalActionOutcome"));
     assert!(ts.contains("export type HarnExternalActionReceiptStatus"));
@@ -215,6 +217,51 @@ fn external_action_vocabulary_projects_to_every_supported_host() {
 }
 
 #[test]
+fn generic_permission_activity_projects_to_every_supported_host() {
+    let actions = ExternalActionVocabulary::load(&protocol_source()).unwrap();
+    let setup = ConnectorSetupVocabulary::load(&protocol_source()).unwrap();
+    let activity = ActivityVocabulary::load(&protocol_source()).unwrap();
+    let generated = [
+        (
+            "TypeScript",
+            generate_typescript_for_version("1.0.0", &actions, &setup, &activity),
+        ),
+        (
+            "Swift",
+            generate_swift_for_version("1.0.0", &actions, &setup, &activity),
+        ),
+        (
+            "Rust",
+            generate_rust_for_version("1.0.0", &actions, &setup, &activity),
+        ),
+    ];
+
+    for value in activity
+        .kinds
+        .iter()
+        .chain(&activity.permission_outcomes)
+        .chain(&activity.permission_deciders)
+        .chain(&activity.permission_policy_layers)
+        .chain(&activity.permission_policy_outcomes)
+        .chain(&activity.permission_grant_scopes)
+        .chain(&activity.permission_grant_expiries)
+    {
+        for (host, artifact) in &generated {
+            assert!(
+                artifact.contains(value),
+                "{host} projection omitted activity value `{value}`"
+            );
+        }
+    }
+    for (_, artifact) in &generated {
+        assert!(artifact.contains("HarnToolPermissionDecisionMetadata"));
+        assert!(artifact.contains("HarnToolPermissionActivityRecord"));
+        assert!(artifact.contains("harn.tool_permission_decision.v1"));
+        assert!(artifact.contains("policy_evaluations"));
+    }
+}
+
+#[test]
 fn adding_external_action_values_updates_all_host_projections() {
     let vocabulary = ExternalActionVocabulary {
         outcomes: vec!["confirmed".into(), "future_outcome".into()],
@@ -230,10 +277,11 @@ fn adding_external_action_values_updates_all_host_projections() {
         reconciliation_statuses: vec!["not_needed".into(), "future_reconciliation".into()],
     };
     let setup = ConnectorSetupVocabulary::load(&protocol_source()).unwrap();
+    let activity = ActivityVocabulary::load(&protocol_source()).unwrap();
     for generated in [
-        generate_typescript_for_version("1.0.0", &vocabulary, &setup),
-        generate_swift_for_version("1.0.0", &vocabulary, &setup),
-        generate_rust_for_version("1.0.0", &vocabulary, &setup),
+        generate_typescript_for_version("1.0.0", &vocabulary, &setup, &activity),
+        generate_swift_for_version("1.0.0", &vocabulary, &setup, &activity),
+        generate_rust_for_version("1.0.0", &vocabulary, &setup, &activity),
     ] {
         for future_value in [
             "future_outcome",
@@ -257,6 +305,7 @@ fn adding_external_action_values_updates_all_host_projections() {
 fn connector_setup_vocabulary_projects_to_every_supported_host() {
     let actions = ExternalActionVocabulary::load(&protocol_source()).unwrap();
     let setup = ConnectorSetupVocabulary::load(&protocol_source()).unwrap();
+    let activity = ActivityVocabulary::load(&protocol_source()).unwrap();
     assert_eq!(
         setup.stages,
         crate::commands::connect::setup_events::CONNECTOR_SETUP_STAGES
@@ -280,13 +329,16 @@ fn connector_setup_vocabulary_projects_to_every_supported_host() {
     let generated = [
         (
             "TypeScript",
-            generate_typescript_for_version("1.0.0", &actions, &setup),
+            generate_typescript_for_version("1.0.0", &actions, &setup, &activity),
         ),
         (
             "Swift",
-            generate_swift_for_version("1.0.0", &actions, &setup),
+            generate_swift_for_version("1.0.0", &actions, &setup, &activity),
         ),
-        ("Rust", generate_rust_for_version("1.0.0", &actions, &setup)),
+        (
+            "Rust",
+            generate_rust_for_version("1.0.0", &actions, &setup, &activity),
+        ),
     ];
 
     for value in setup

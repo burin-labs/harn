@@ -12,6 +12,7 @@ use harn_vm::llm::receipts::{
 use serde_json::json;
 use std::path::Path;
 
+use super::activity::{ActivityVocabulary, ACTIVITY_VOCABULARY_SOURCE};
 use super::connector_setup::{ConnectorSetupVocabulary, CONNECTOR_SETUP_VOCABULARY_SOURCE};
 use super::constants::*;
 use super::external_action::{ExternalActionVocabulary, EXTERNAL_ACTION_VOCABULARY_SOURCE};
@@ -42,11 +43,13 @@ pub(crate) fn manifest_json_from(anchor: &Path) -> Result<String, String> {
 pub(super) fn generate_manifest(source: &ProtocolArtifactSource) -> Result<String, String> {
     let external_actions = ExternalActionVocabulary::load(source)?;
     let connector_setup = ConnectorSetupVocabulary::load(source)?;
+    let activity = ActivityVocabulary::load(source)?;
     generate_manifest_for_version(
         source,
         env!("CARGO_PKG_VERSION"),
         &external_actions,
         &connector_setup,
+        &activity,
     )
 }
 
@@ -55,6 +58,7 @@ pub(super) fn generate_manifest_for_version(
     artifact_version: &str,
     external_actions: &ExternalActionVocabulary,
     connector_setup: &ConnectorSetupVocabulary,
+    activity: &ActivityVocabulary,
 ) -> Result<String, String> {
     let mut schemas = SCHEMA_COPIES
         .iter()
@@ -199,6 +203,16 @@ pub(super) fn generate_manifest_for_version(
             "decisionOutcomes": external_actions.decision_outcomes,
             "deciders": external_actions.deciders,
             "reconciliationStatuses": external_actions.reconciliation_statuses,
+        },
+        "activity": {
+            "source": ACTIVITY_VOCABULARY_SOURCE,
+            "kinds": activity.kinds,
+            "toolPermissionOutcomes": activity.permission_outcomes,
+            "toolPermissionDeciders": activity.permission_deciders,
+            "toolPermissionPolicyLayers": activity.permission_policy_layers,
+            "toolPermissionPolicyOutcomes": activity.permission_policy_outcomes,
+            "toolPermissionGrantScopes": activity.permission_grant_scopes,
+            "toolPermissionGrantExpiries": activity.permission_grant_expiries,
         },
         "connectorSetup": {
             "source": CONNECTOR_SETUP_VOCABULARY_SOURCE,
