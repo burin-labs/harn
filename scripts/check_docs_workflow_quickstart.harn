@@ -146,7 +146,7 @@ fn harn_json(harness: Harness, harn_bin: string, args: list<string>, cwd: string
     harness.runtime.exit(res.exit_code)
   }
   const parsed = json_parse(res.stdout)
-  if parsed.ok == true && parsed.data != nil {
+  if parsed.ok && parsed.data != nil {
     return parsed.data
   }
   return parsed
