@@ -15,6 +15,7 @@ use serde::Serialize;
 use crate::commands::time::{self, PhaseRecord, RunTiming};
 use harn_vm::clock::{now_wall_ms, RealClock};
 use harn_vm::event_log::EventLog;
+use harn_vm::llm::usage::{summarize_usage_cost_certainty, UsageCostCertainty};
 
 use super::{RunAttestationOptions, RunProfileOptions};
 
@@ -84,7 +85,10 @@ struct RunSummary<'a> {
 
 #[derive(Serialize)]
 pub(super) struct RunSummaryLlm {
+    /// Completed logical LLM operations retained for wire compatibility.
     call_count: i64,
+    /// Physical provider requests, including schema, transport, and content retries.
+    provider_call_count: i64,
     input_tokens: i64,
     output_tokens: i64,
     time_ms: i64,
@@ -95,11 +99,13 @@ pub(super) struct RunSummaryLlm {
     /// Calls the catalog prices no rate for. A non-zero count makes
     /// `cost_usd` null and `known_cost_usd` the explicit lower bound.
     unpriced_calls: i64,
+    /// Physical provider requests whose token/cache usage is unknown.
+    usage_unknown_calls: i64,
 }
 
-/// v3 makes exact cost nullable and names the known-cost lower bound. This
-/// prevents an all-unpriced run from serializing as free.
-pub const RUN_SUMMARY_SCHEMA_VERSION: u32 = 3;
+/// v4 distinguishes logical operations from physical provider requests and
+/// retains unknown-usage counts alongside exact or lower-bound cost.
+pub const RUN_SUMMARY_SCHEMA_VERSION: u32 = 4;
 pub const RUN_PHASE_SCHEMA_VERSION: u32 = 2;
 pub const RUN_RUSAGE_SCHEMA_VERSION: u32 = 1;
 
@@ -208,16 +214,27 @@ fn build_run_summary<'a>(
 pub(super) fn run_summary_llm_snapshot() -> RunSummaryLlm {
     let (input_tokens, output_tokens, time_ms, call_count) = harn_vm::llm::peek_trace_summary();
     let trace = harn_vm::llm::peek_trace();
-    let certainty =
-        harn_vm::llm::usage::summarize_usage_cost_certainty(trace.iter().map(|entry| &entry.usage));
+    let certainty = summarize_usage_cost_certainty(trace.iter().map(|entry| &entry.usage));
+    run_summary_llm_from_parts(input_tokens, output_tokens, time_ms, call_count, certainty)
+}
+
+fn run_summary_llm_from_parts(
+    input_tokens: i64,
+    output_tokens: i64,
+    time_ms: i64,
+    call_count: i64,
+    certainty: UsageCostCertainty,
+) -> RunSummaryLlm {
     RunSummaryLlm {
         call_count,
+        provider_call_count: certainty.provider_call_count,
         input_tokens,
         output_tokens,
         time_ms,
         cost_usd: (certainty.unpriced_calls == 0).then_some(certainty.known_cost_usd),
         known_cost_usd: certainty.known_cost_usd,
         unpriced_calls: certainty.unpriced_calls,
+        usage_unknown_calls: certainty.usage_unknown_calls,
     }
 }
 
@@ -506,14 +523,8 @@ fn render_trace_entries(entries: &[harn_vm::llm::LlmTraceEntry]) -> String {
     // which sees prompt-cache accounting and the accelerated-serving tier;
     // re-pricing from tokens alone cannot, and would make this summary
     // disagree with the run's own reported total.
-    let mut priced_cost = 0.0f64;
-    let mut unpriced_calls = 0usize;
     for (index, entry) in entries.iter().enumerate() {
-        let cost = entry.usage.cost_usd;
-        match cost {
-            Some(cost) => priced_cost += cost,
-            None => unpriced_calls += 1,
-        }
+        let certainty = summarize_usage_cost_certainty([&entry.usage]);
         let _ = writeln!(
             out,
             "  #{}: {} | {} in + {} out tokens | {} ms | {}",
@@ -522,38 +533,64 @@ fn render_trace_entries(entries: &[harn_vm::llm::LlmTraceEntry]) -> String {
             entry.usage.input_tokens,
             entry.usage.output_tokens,
             entry.duration_ms,
-            cost.map_or_else(|| "unpriced".to_string(), |cost| format!("${cost:.4}")),
+            render_cost_certainty(certainty),
         );
         total_input += entry.usage.input_tokens;
         total_output += entry.usage.output_tokens;
         total_ms += entry.duration_ms;
     }
     let total_tokens = total_input + total_output;
-    // "≥" rather than "~" when some calls could not be priced: the total is a
-    // floor on the real spend, not an estimate of it.
-    let cost_label = if unpriced_calls == 0 {
-        format!("${priced_cost:.4}")
-    } else {
-        format!("≥${priced_cost:.4} ({unpriced_calls} unpriced)")
-    };
+    let certainty = summarize_usage_cost_certainty(entries.iter().map(|entry| &entry.usage));
+    let token_label = render_token_certainty(total_tokens, certainty.usage_unknown_calls);
     let _ = writeln!(
         out,
-        "  \x1b[1m{} call{}, {} tokens ({}in + {}out), {} ms, {}\x1b[0m",
+        "  \x1b[1m{} logical call{}, {} provider call{}, {} ({}in + {}out), {} ms, {}\x1b[0m",
         entries.len(),
         if entries.len() == 1 { "" } else { "s" },
-        total_tokens,
+        certainty.provider_call_count,
+        if certainty.provider_call_count == 1 {
+            ""
+        } else {
+            "s"
+        },
+        token_label,
         total_input,
         total_output,
         total_ms,
-        cost_label,
+        render_cost_certainty(certainty),
     );
     out
 }
 
+fn render_cost_certainty(certainty: UsageCostCertainty) -> String {
+    if certainty.unpriced_calls == 0 {
+        format!("${:.4}", certainty.known_cost_usd)
+    } else {
+        // This is a floor on real spend, not an estimate. The runtime's
+        // canonical ledger already includes priced siblings from a mixed
+        // retry aggregate in `known_cost_usd`.
+        format!(
+            "≥${:.4} ({} unpriced)",
+            certainty.known_cost_usd, certainty.unpriced_calls
+        )
+    }
+}
+
+fn render_token_certainty(known_tokens: i64, usage_unknown_calls: i64) -> String {
+    if usage_unknown_calls == 0 {
+        format!("{known_tokens} tokens")
+    } else {
+        format!("≥{known_tokens} tokens ({usage_unknown_calls} usage unknown)")
+    }
+}
+
 #[cfg(test)]
 mod trace_summary_pricing_tests {
-    use super::render_trace_entries;
-    use harn_vm::llm::{usage::LlmUsage, LlmTraceEntry};
+    use super::{render_trace_entries, run_summary_llm_from_parts};
+    use harn_vm::llm::{
+        usage::{LlmUsage, UsageCostCertainty},
+        LlmTraceEntry,
+    };
 
     fn entry(model: &str, cost_usd: Option<f64>) -> LlmTraceEntry {
         LlmTraceEntry {
@@ -634,5 +671,52 @@ mod trace_summary_pricing_tests {
             rendered.contains("$0.2500") && rendered.contains("$0.0125"),
             "each call must show its own price: {rendered}"
         );
+    }
+
+    #[test]
+    fn mixed_retry_keeps_known_spend_and_physical_uncertainty() {
+        let mut retried = entry("retrying-model", None);
+        retried.usage.input_tokens = 7;
+        retried.usage.output_tokens = 5;
+        retried.usage.known_cost_usd = 0.0123;
+        retried.usage.provider_call_count = 2;
+        retried.usage.unpriced_calls = 1;
+        retried.usage.usage_unknown_calls = 1;
+
+        let rendered = render_trace_entries(&[retried]);
+        assert!(
+            rendered.contains("1 logical call, 2 provider calls"),
+            "physical retries must not collapse to one logical trace row: {rendered}"
+        );
+        assert!(
+            rendered.contains("≥12 tokens (1 usage unknown)"),
+            "known tokens must be labeled as a lower bound: {rendered}"
+        );
+        assert!(
+            rendered.matches("≥$0.0123 (1 unpriced)").count() >= 2,
+            "both the row and total must retain the priced sibling's lower bound: {rendered}"
+        );
+    }
+
+    #[test]
+    fn json_summary_projects_the_canonical_physical_certainty() {
+        let summary = run_summary_llm_from_parts(
+            7,
+            5,
+            9,
+            1,
+            UsageCostCertainty {
+                known_cost_usd: 0.0123,
+                provider_call_count: 2,
+                unpriced_calls: 1,
+                usage_unknown_calls: 1,
+            },
+        );
+        assert_eq!(summary.call_count, 1);
+        assert_eq!(summary.provider_call_count, 2);
+        assert_eq!(summary.cost_usd, None);
+        assert_eq!(summary.known_cost_usd, 0.0123);
+        assert_eq!(summary.unpriced_calls, 1);
+        assert_eq!(summary.usage_unknown_calls, 1);
     }
 }

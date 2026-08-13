@@ -193,6 +193,7 @@ fn run_emit_summary_json_defaults_to_terminal_stderr_and_reports_llm_metrics() {
         "summary: {summary}"
     );
     assert_eq!(summary["llm"]["call_count"].as_i64(), Some(1));
+    assert_eq!(summary["llm"]["provider_call_count"].as_i64(), Some(1));
     assert_eq!(summary["llm"]["input_tokens"].as_i64(), Some(7));
     assert_eq!(summary["llm"]["output_tokens"].as_i64(), Some(5));
     assert!(summary["llm"]["time_ms"].as_i64().is_some());
@@ -204,6 +205,7 @@ fn run_emit_summary_json_defaults_to_terminal_stderr_and_reports_llm_metrics() {
         "summary: {summary}"
     );
     assert!(summary["llm"].get("known_cost_usd").is_some());
+    assert_eq!(summary["llm"]["usage_unknown_calls"].as_i64(), Some(0));
 }
 
 #[test]

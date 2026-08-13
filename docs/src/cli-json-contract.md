@@ -435,17 +435,20 @@ Unix file descriptor.
 
 ```json
 {
-  "schema_version": 2,
+  "schema_version": 4,
   "event": "run_summary",
   "wall_time_ms": 1234,
   "exit_code": 0,
   "llm": {
     "call_count": 2,
+    "provider_call_count": 3,
     "input_tokens": 1024,
     "output_tokens": 256,
     "time_ms": 480,
     "cost_usd": 0.0042,
-    "unpriced_calls": 0
+    "known_cost_usd": 0.0042,
+    "unpriced_calls": 0,
+    "usage_unknown_calls": 0
   },
   "profile": {
     "total_wall_ms": 1234,
@@ -460,14 +463,17 @@ Unix file descriptor.
 
 `profile` is omitted unless `--profile` or `--profile-json` is active.
 The LLM counters are enabled by the summary flag itself, so callers do
-not need to add `--trace` to receive `llm.call_count`, token totals,
-LLM time, and accumulated cost.
+not need to add `--trace` to receive logical call count, physical provider
+request count, token totals, LLM time, and accumulated cost.
 
-`llm.cost_usd` counts only calls the provider catalog prices. A call it
-prices no rate for contributes zero, so when `llm.unpriced_calls` is
-non-zero the cost is a floor on the real spend rather than the spend
-itself. Schema version 2 added that field; it is additive, so a reader
-that ignores it sees exactly the version 1 shape.
+`llm.call_count` counts completed logical operations;
+`llm.provider_call_count` includes schema, transport, and content retries.
+`llm.cost_usd` is null when any physical request is unpriced, while
+`llm.known_cost_usd` remains the priced-request lower bound.
+`llm.usage_unknown_calls` separately counts physical requests whose token or
+cache usage is unavailable; known token totals are then lower bounds. Schema
+version 4 adds the physical-call and unknown-usage fields to the nullable-cost
+version 3 contract.
 
 ### `harn run --emit-phase-json`
 

@@ -7,6 +7,8 @@ use url::Url;
 use super::OAUTH_CALLBACK_TIMEOUT;
 
 const CALLBACK_ACCEPT_POLL_INTERVAL: Duration = Duration::from_millis(50);
+const CALLBACK_REQUEST_READ_TIMEOUT: Duration = Duration::from_secs(5);
+const CALLBACK_REQUEST_MAX_BYTES: usize = 8192;
 
 pub(super) struct OAuthCallbackResponse {
     pub(super) code: String,
@@ -121,14 +123,18 @@ fn wait_for_callback_query_inner(
     loop {
         match listener.accept() {
             Ok((mut stream, _)) => {
-                let mut buffer = [0u8; 8192];
-                let bytes_read = stream.read(&mut buffer).map_err(|error| {
-                    OAuthCallbackError::Invalid(format!("Failed to read OAuth callback: {error}"))
-                })?;
-                let request = String::from_utf8_lossy(&buffer[..bytes_read]);
+                stream
+                    .set_nonblocking(false)
+                    .and_then(|()| stream.set_read_timeout(Some(CALLBACK_REQUEST_READ_TIMEOUT)))
+                    .map_err(|error| {
+                        OAuthCallbackError::Invalid(format!(
+                            "Failed to configure OAuth callback stream: {error}"
+                        ))
+                    })?;
+                let request = read_callback_request(&mut stream)?;
                 let response;
                 let result = parse_callback_request_typed(
-                    &request,
+                    &String::from_utf8_lossy(&request),
                     &expected_path,
                     expected_state,
                     &expected_origin,
@@ -169,6 +175,34 @@ fn wait_for_callback_query_inner(
                     "Failed to accept OAuth callback: {error}"
                 )))
             }
+        }
+    }
+}
+
+fn read_callback_request(reader: &mut impl Read) -> Result<Vec<u8>, OAuthCallbackError> {
+    let mut request = Vec::with_capacity(1024);
+    let mut chunk = [0u8; 1024];
+    loop {
+        let remaining = CALLBACK_REQUEST_MAX_BYTES.saturating_sub(request.len());
+        if remaining == 0 {
+            return Err(OAuthCallbackError::Invalid(
+                "OAuth callback request headers exceeded 8192 bytes".to_string(),
+            ));
+        }
+        let read_capacity = remaining.min(chunk.len());
+        let bytes_read = reader.read(&mut chunk[..read_capacity]).map_err(|error| {
+            OAuthCallbackError::Invalid(format!("Failed to read OAuth callback: {error}"))
+        })?;
+        if bytes_read == 0 {
+            return Err(OAuthCallbackError::Invalid(
+                "OAuth callback request ended before its headers were complete".to_string(),
+            ));
+        }
+        request.extend_from_slice(&chunk[..bytes_read]);
+        if request.windows(4).any(|window| window == b"\r\n\r\n")
+            || request.windows(2).any(|window| window == b"\n\n")
+        {
+            return Ok(request);
         }
     }
 }
@@ -291,6 +325,7 @@ pub(super) fn html_response(status: u16, message: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Cursor;
     use std::net::TcpStream;
     use std::thread;
 
@@ -315,5 +350,15 @@ mod tests {
             waiter.join().unwrap(),
             Err(OAuthCallbackError::UserDenied)
         ));
+    }
+
+    #[test]
+    fn callback_reader_reassembles_fragmented_http_headers() {
+        let request = b"GET /oauth/callback?error=access_denied&state=expected-state HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n";
+        let mut fragmented = Cursor::new(request)
+            .take(17)
+            .chain(Cursor::new(&request[17..]));
+        let reassembled = read_callback_request(&mut fragmented).unwrap();
+        assert_eq!(reassembled, request);
     }
 }
