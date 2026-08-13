@@ -49,7 +49,7 @@ pub enum AcpPlanDocumentMutation {
     Edit {
         markdown: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        plan: Option<harn_vm::llm::plan::PlanArtifact>,
+        plan: Option<Box<harn_vm::llm::plan::PlanArtifact>>,
     },
     AddComment {
         #[serde(default, skip_serializing_if = "Option::is_none")]

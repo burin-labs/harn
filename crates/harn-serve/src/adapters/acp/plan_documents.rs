@@ -138,7 +138,8 @@ fn mutate_plan_document(
     match &request.mutation {
         AcpPlanDocumentMutation::Edit { markdown, plan } => {
             let plan = plan
-                .clone()
+                .as_deref()
+                .cloned()
                 .unwrap_or_else(|| store.current().current_revision.plan.clone());
             store.edit(EditPlanDocument {
                 expected_revision_id: request.expected_revision_id.clone(),
