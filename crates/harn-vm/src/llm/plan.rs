@@ -10,6 +10,21 @@ pub const PLAN_SCHEMA_VERSION: &str = "harn.plan.v1";
 pub const EMIT_PLAN_TOOL: &str = "emit_plan";
 pub const UPDATE_PLAN_TOOL: &str = "update_plan";
 
+/// Timestamp used by canonical plan revisions and receipts.
+pub fn plan_timestamp() -> String {
+    crate::orchestration::now_unix_seconds_text()
+}
+
+/// Allocate an event id in the canonical plan-document namespace.
+pub fn new_plan_event_id() -> String {
+    crate::orchestration::new_id("plan_event")
+}
+
+/// Allocate a stable id for a newly-added plan comment.
+pub fn new_plan_comment_id() -> String {
+    crate::orchestration::new_id("plan_comment")
+}
+
 pub fn is_plan_tool(name: &str) -> bool {
     matches!(name, EMIT_PLAN_TOOL | UPDATE_PLAN_TOOL)
 }
@@ -134,6 +149,82 @@ pub fn plan_document_entries(document: &PlanDocument) -> serde_json::Value {
     serde_json::to_value(&document.current_revision.plan)
         .map(|plan| plan_entries(&plan))
         .unwrap_or_else(|_| serde_json::json!([]))
+}
+
+/// Recover every canonical plan-document event persisted in an agent session.
+///
+/// The transcript is the semantic source of truth. ACP/A2A replay and client
+/// mutations both use this reader so a host never needs a parallel plan store.
+pub fn persisted_plan_document_events(
+    session_id: &str,
+) -> Result<Vec<PlanDocumentEvent>, PlanDocumentError> {
+    let Some(transcript) = crate::agent_sessions::transcript(session_id) else {
+        return Ok(Vec::new());
+    };
+    crate::llm::helpers::vm_value_to_json(&transcript)
+        .get("events")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|event| event.pointer("/metadata/plan_document_event"))
+        .map(|event| {
+            serde_json::from_value(event.clone()).map_err(|error| {
+                PlanDocumentError::Invalid(format!(
+                    "invalid persisted plan document event: {error}"
+                ))
+            })
+        })
+        .collect()
+}
+
+/// Resume the canonical store for a session from transcript-owned events.
+pub fn resume_plan_document_store(
+    session_id: &str,
+) -> Result<PlanDocumentStore, PlanDocumentError> {
+    let events = persisted_plan_document_events(session_id)?;
+    if events.is_empty() {
+        return Err(PlanDocumentError::Invalid(format!(
+            "session {session_id} has no collaborative plan document"
+        )));
+    }
+    if let Some(latest_created) = events
+        .iter()
+        .rposition(|event| matches!(event, PlanDocumentEvent::Created { .. }))
+    {
+        PlanDocumentStore::replay(&events[latest_created..])
+    } else {
+        PlanDocumentStore::resume(
+            events
+                .last()
+                .expect("non-empty plan document event list")
+                .document()
+                .clone(),
+        )
+    }
+}
+
+/// Append one canonical plan mutation to the owning session transcript.
+///
+/// Event fanout remains the caller's responsibility because an agent-tool
+/// turn already has live sinks installed while an idle ACP client mutation
+/// must install its transport sink before emitting.
+pub fn persist_plan_document_event(
+    session_id: &str,
+    event: &PlanDocumentEvent,
+) -> Result<(), PlanDocumentError> {
+    let metadata = serde_json::json!({
+        "plan_document": event.document(),
+        "plan_document_event": event,
+    });
+    let transcript_event = crate::llm::helpers::transcript_event(
+        "plan_document",
+        "tool",
+        "public",
+        "",
+        Some(metadata),
+    );
+    crate::agent_sessions::append_event(session_id, transcript_event)
+        .map_err(PlanDocumentError::Invalid)
 }
 
 pub fn render_plan(plan: &serde_json::Value) -> String {

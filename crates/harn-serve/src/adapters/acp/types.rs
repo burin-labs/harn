@@ -21,7 +21,64 @@ pub const ACP_METHOD_SESSION_INJECT_HOST_EVENT: &str = "session/inject_host_even
 pub const ACP_METHOD_SESSION_REPLACE_INJECT: &str = "session/replace_inject";
 pub const ACP_METHOD_SESSION_REVOKE_INJECT: &str = "session/revoke_inject";
 pub const ACP_METHOD_SESSION_PENDING_INJECTIONS: &str = "session/pending_injections";
+pub const ACP_METHOD_SESSION_PLAN_DOCUMENT_MUTATE: &str = "session/plan_document/mutate";
+pub const ACP_PLAN_REVISION_CONFLICT_CODE: i64 = -32009;
+pub const ACP_PLAN_MUTATION_BUSY_CODE: i64 = -32010;
+pub const ACP_PLAN_REVISION_CONFLICT_SCHEMA: &str = "harn.plan_document_conflict.v1";
 pub const ACP_PROMPT_ERROR_DATA_SCHEMA: &str = "harn.acp.prompt_error.v1";
+
+/// Params for Harn's collaborative plan-document mutation extension.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AcpPlanDocumentMutationParams {
+    pub session_id: String,
+    pub document_id: String,
+    pub expected_revision_id: String,
+    pub mutation: AcpPlanDocumentMutation,
+}
+
+/// One optimistic mutation against a canonical collaborative plan document.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum AcpPlanDocumentMutation {
+    Edit {
+        markdown: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        plan: Option<harn_vm::llm::plan::PlanArtifact>,
+    },
+    AddComment {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        comment_id: Option<String>,
+        anchor: harn_vm::llm::plan::PlanCommentAnchor,
+        body: String,
+    },
+    ChangeCommentState {
+        comment_id: String,
+        state: harn_vm::llm::plan::PlanCommentState,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        agent_run_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        explanation: Option<String>,
+    },
+    Approve {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reviewer: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
+    },
+}
+
+/// Result returned after Harn has persisted and emitted a plan mutation.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AcpPlanDocumentMutationResult {
+    pub plan_document: harn_vm::llm::plan::PlanDocument,
+}
 
 /// JSON-RPC id values accepted by ACP requests and responses.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

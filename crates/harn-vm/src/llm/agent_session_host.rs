@@ -63,7 +63,7 @@ use session_policies::{
 pub(crate) use session_policies::{install_session_policy_guard, options_request_session_policies};
 mod visible_messages;
 
-use plan_document::{next_plan_document_event, plan_artifact_from_result};
+use plan_document::{next_plan_document_events, plan_artifact_from_result};
 pub(crate) use run_identity::active_run_id;
 use run_identity::{agent_init_control, agent_init_control_done};
 use usage_accounting::{resolve_call_accounting, SessionUsageTotals};
@@ -1631,7 +1631,7 @@ fn host_agent_session_record_tool_results_builtin(
             if let Some(plan_value) = plan_artifact_from_result(result) {
                 let created_at = crate::orchestration::now_unix_seconds_text();
                 let event_id = crate::orchestration::new_id("plan_event");
-                let document_event = next_plan_document_event(
+                let document_events = next_plan_document_events(
                     &session_id,
                     &name,
                     result,
@@ -1640,23 +1640,14 @@ fn host_agent_session_record_tool_results_builtin(
                     event_id,
                 )
                 .map_err(|error| VmError::Runtime(error.to_string()))?;
-                let plan_metadata = serde_json::json!({
-                    "plan_document": document_event.document(),
-                    "plan_document_event": document_event,
-                });
-                let event = super::helpers::transcript_event(
-                    "plan_document",
-                    "tool",
-                    "public",
-                    "",
-                    Some(plan_metadata.clone()),
-                );
-                crate::agent_sessions::append_event(&session_id, event)
-                    .map_err(VmError::Runtime)?;
-                super::agent_runtime::emit_agent_event_sync(&AgentEvent::PlanDocumentUpdated {
-                    session_id: session_id.clone(),
-                    event: Box::new(document_event),
-                });
+                for document_event in document_events {
+                    super::plan::persist_plan_document_event(&session_id, &document_event)
+                        .map_err(|error| VmError::Runtime(error.to_string()))?;
+                    super::agent_runtime::emit_agent_event_sync(&AgentEvent::PlanDocumentUpdated {
+                        session_id: session_id.clone(),
+                        event: Box::new(document_event),
+                    });
+                }
             }
         }
         // A computer-use result carries screenshot(s) the model must see; ride

@@ -149,6 +149,14 @@ pub(super) fn harn_acp_extension_meta() -> serde_json::Value {
                     "schema": harn_vm::provider_catalog::PROVIDER_CATALOG_SCHEMA_ID,
                     "schemaVersion": harn_vm::provider_catalog::PROVIDER_CATALOG_SCHEMA_VERSION,
                 },
+                super::types::ACP_METHOD_SESSION_PLAN_DOCUMENT_MUTATE: {
+                    "description": "Optimistically edit, comment on, resolve, reopen, or approve the canonical collaborative plan document.",
+                    "resultSchema": harn_vm::llm::plan::PLAN_DOCUMENT_SCHEMA_VERSION,
+                    "conflict": {
+                        "code": super::types::ACP_PLAN_REVISION_CONFLICT_CODE,
+                        "schemaVersion": super::types::ACP_PLAN_REVISION_CONFLICT_SCHEMA,
+                    },
+                },
                 harn_vm::orchestration::SESSION_VIEW_QUERY_METHOD: {
                     "description": "Return the harn.session_view.v1 projection for a live or persisted session.",
                     "schema": harn_vm::orchestration::SESSION_VIEW_SCHEMA,
