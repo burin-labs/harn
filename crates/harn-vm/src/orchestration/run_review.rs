@@ -1001,7 +1001,7 @@ mod tests {
         assert_eq!(review.limitations[0].evidence_pointer, "/checks/0");
         assert_eq!(review.usage.input_tokens, 120);
         assert_eq!(review.usage.cache_read_tokens, 20);
-        assert!(review.usage.cost_usd.is_some_and(|cost| cost > 0.0));
+        assert_eq!(review.usage.cost_usd, Some(0.0));
     }
 
     #[tokio::test(flavor = "current_thread")]

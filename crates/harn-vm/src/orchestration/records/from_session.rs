@@ -575,9 +575,12 @@ fn assemble(
         }
     }
 
+    let known_cost_usd = fold.total_cost.to_f64().unwrap_or_default();
     let usage = LlmUsageRecord {
         models: fold.models.clone(),
-        total_cost: fold.total_cost.to_f64().unwrap_or_default(),
+        cost_usd: (fold.usage.unpriced_calls == 0).then_some(known_cost_usd),
+        known_cost_usd,
+        total_cost: known_cost_usd,
         ..fold.usage
     };
 
@@ -691,6 +694,12 @@ impl SessionFold {
             cost_usd: facts::f64_at(payload, facts::COST_USD),
         });
         self.usage.call_count += 1;
+        if facts::f64_at(payload, facts::COST_USD).is_none() {
+            self.usage.unpriced_calls += 1;
+        }
+        if facts::string_at(payload, facts::ACCOUNTING_STATUS).as_deref() == Some("unknown") {
+            self.usage.usage_unknown_calls += 1;
+        }
         self.usage.input_tokens += facts::i64_at(payload, facts::INPUT_TOKENS).unwrap_or(0);
         self.usage.output_tokens += facts::i64_at(payload, facts::OUTPUT_TOKENS).unwrap_or(0);
         if let Some(cost) = facts::f64_at(payload, facts::COST_USD) {

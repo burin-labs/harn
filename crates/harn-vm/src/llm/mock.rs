@@ -298,6 +298,9 @@ pub struct LlmMock {
     pub output_tokens: Option<i64>,
     pub cache_read_tokens: Option<i64>,
     pub cache_write_tokens: Option<i64>,
+    /// Explicit cost used to exercise accounting and budget behavior. Ordinary
+    /// mocks make no provider request and therefore default to exact zero.
+    pub simulated_cost_usd: Option<f64>,
     pub thinking: Option<String>,
     pub thinking_summary: Option<String>,
     pub stop_reason: Option<String>,
@@ -806,7 +809,7 @@ fn build_mock_result(mock: &LlmMock, last_msg_len: usize) -> LlmResult {
         stop_reason: mock.stop_reason.clone(),
         blocks,
         logprobs: mock.logprobs.clone(),
-        telemetry: ProviderTelemetry::default(),
+        telemetry: ProviderTelemetry::mock_replay(mock.simulated_cost_usd),
     }
 }
 
@@ -1020,6 +1023,7 @@ pub(crate) fn record_cli_llm_result(request: &super::api::LlmRequestPayload, res
         output_tokens: Some(result.output_tokens),
         cache_read_tokens: Some(result.cache_read_tokens),
         cache_write_tokens: Some(result.cache_write_tokens),
+        simulated_cost_usd: None,
         thinking: result.thinking.clone(),
         thinking_summary: result.thinking_summary.clone(),
         stop_reason: result.stop_reason.clone(),

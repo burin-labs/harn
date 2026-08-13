@@ -44,6 +44,8 @@ pub(crate) const OUTPUT_TOKENS: &str = "/transcript_event/metadata/output_tokens
 pub(crate) const CACHE_READ_TOKENS: &str = "/transcript_event/metadata/cache_read_tokens";
 pub(crate) const CACHE_WRITE_TOKENS: &str = "/transcript_event/metadata/cache_write_tokens";
 pub(crate) const COST_USD: &str = "/transcript_event/metadata/cost_usd";
+/// Whether provider usage facts were reported or remain unknown.
+pub(crate) const ACCOUNTING_STATUS: &str = "/transcript_event/metadata/accounting_status";
 /// Provider requests issued for one logical `llm_call`, including the one that
 /// succeeded. Absent on calls recorded before the field existed, which is
 /// distinct from a recorded 1.

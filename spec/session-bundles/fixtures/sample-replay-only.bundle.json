@@ -536,13 +536,17 @@
       ],
       "usage": {
         "call_count": 1,
+        "cost_usd": null,
         "input_tokens": 42,
+        "known_cost_usd": 0.002,
         "models": [
           "mock/deploy-investigator"
         ],
         "output_tokens": 17,
         "total_cost": 0.002,
-        "total_duration_ms": 1200
+        "total_duration_ms": 1200,
+        "unpriced_calls": 0,
+        "usage_unknown_calls": 0
       },
       "workflow_id": "wf_fixture_session_bundle",
       "workflow_name": "Session bundle fixture"

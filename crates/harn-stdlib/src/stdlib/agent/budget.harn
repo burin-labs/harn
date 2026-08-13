@@ -39,5 +39,11 @@ pub fn agent_budget_post_call_blocked(totals, opts) {
       return true
     }
   }
+  // A configured USD ceiling cannot be proven safe once any completed call is
+  // unpriced. Stop at the same post-call boundary instead of treating unknown
+  // spend as zero and allowing the loop to continue unbounded.
+  if envelope?.total_budget_usd != nil && (totals?.unpriced_calls ?? 0) > 0 {
+    return true
+  }
   return false
 }

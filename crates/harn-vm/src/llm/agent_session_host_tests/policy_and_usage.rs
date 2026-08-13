@@ -204,3 +204,53 @@ fn record_usage_accumulates_cache_tokens_from_top_level_and_nested_usage() {
     assert_eq!(json["cache_read_tokens"], 100);
     assert_eq!(json["cache_write_tokens"], 15);
 }
+
+#[test]
+fn record_usage_preserves_unknown_cost_and_reports_the_known_floor() {
+    reset_agent_session_host_state();
+    let session_id =
+        crate::agent_sessions::open_or_create(Some("totals-cost-certainty".to_string()));
+    seed_host_session_provider_model(&session_id, "fireworks", "unpriced/model");
+
+    let unknown = json_to_vm(&serde_json::json!({
+        "provider": "fireworks",
+        "model": "unpriced/model",
+        "usage": {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cost_usd": null,
+            "accounting_status": "unknown"
+        }
+    }));
+    let unknown_totals = super::super::host_agent_session_record_usage_builtin(
+        &[crate::value::VmValue::string(&session_id), unknown],
+        &mut String::new(),
+    )
+    .expect("unknown usage");
+    let unknown_json = vm_to_json(&unknown_totals);
+    assert_eq!(unknown_json["cost_usd"], serde_json::Value::Null);
+    assert_eq!(unknown_json["known_cost_usd"], 0.0);
+    assert_eq!(unknown_json["unpriced_calls"], 1);
+    assert_eq!(unknown_json["usage_unknown_calls"], 1);
+
+    let priced = json_to_vm(&serde_json::json!({
+        "provider": "managed",
+        "model": "receipt-priced",
+        "usage": {
+            "input_tokens": 10,
+            "output_tokens": 4,
+            "cost_usd": 0.0025,
+            "accounting_status": "reported"
+        }
+    }));
+    let mixed_totals = super::super::host_agent_session_record_usage_builtin(
+        &[crate::value::VmValue::string(&session_id), priced],
+        &mut String::new(),
+    )
+    .expect("priced usage after unknown");
+    let mixed_json = vm_to_json(&mixed_totals);
+    assert_eq!(mixed_json["cost_usd"], serde_json::Value::Null);
+    assert_eq!(mixed_json["known_cost_usd"], 0.0025);
+    assert_eq!(mixed_json["unpriced_calls"], 1);
+    assert_eq!(mixed_json["usage_unknown_calls"], 1);
+}

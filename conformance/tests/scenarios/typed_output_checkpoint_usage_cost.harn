@@ -22,6 +22,7 @@ pipeline test_typed_output_checkpoint_usage_cost(harness: Harness) {
         model: "claude-sonnet-4-20250514",
         input_tokens: 1000,
         output_tokens: 1000,
+        simulated_cost_usd: 0.01875,
       },
       {
         text: "{\"decision\":\"wait\",\"confidence\":\"low\",\"evidence\":[\"pending\"]}",
@@ -29,6 +30,7 @@ pipeline test_typed_output_checkpoint_usage_cost(harness: Harness) {
         model: "claude-sonnet-4-20250514",
         input_tokens: 2000,
         output_tokens: 500,
+        simulated_cost_usd: 0.0081,
       },
       {
         text: "{\"decision\":\"wait\",\"confidence\":0.5,\"evidence\":[\"pending\"]}",
@@ -36,6 +38,7 @@ pipeline test_typed_output_checkpoint_usage_cost(harness: Harness) {
         model: "claude-sonnet-4-20250514",
         input_tokens: 500,
         output_tokens: 2000,
+        simulated_cost_usd: 0.03015,
       },
     ],
     { ->

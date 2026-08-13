@@ -44,6 +44,7 @@ async fn execute_sub_agent_persists_one_stop_with_lineage() {
         output_tokens: None,
         cache_read_tokens: None,
         cache_write_tokens: None,
+        simulated_cost_usd: None,
         thinking: None,
         thinking_summary: None,
         stop_reason: None,

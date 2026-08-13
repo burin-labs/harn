@@ -622,7 +622,15 @@ fn __governor_observe(agent: HarnessAgent, policy: GovernorPolicy, payload: dict
   const consumed = if signal == "tokens" {
     to_float(agent_session_totals(agent, session_id)?.tokens_used ?? 0)
   } else if signal == "cost" {
-    to_float(agent_session_totals(agent, session_id)?.cost_usd ?? 0.0)
+    const totals = agent_session_totals(agent, session_id)
+    // A cost governor is a ceiling, not a telemetry display. Unknown pricing
+    // therefore consumes the ceiling and stops fail-closed; known-cost floors
+    // remain available separately for evidence.
+    if (totals?.unpriced_calls ?? 0) > 0 {
+      to_float(policy.budget ?? 0.0)
+    } else {
+      to_float(totals?.cost_usd ?? 0.0)
+    }
   } else {
     to_float((to_int(payload?.iteration ?? 0) ?? 0) + 1)
   }

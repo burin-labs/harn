@@ -352,8 +352,23 @@ async fn execute_conformance_source(
                 (Ok(actual), Ok(expected)) => {
                     let report = compare(&expected, &actual, FidelityMode::PhaseAware);
                     if !report.is_byte_identical() {
+                        let details = report
+                            .divergences
+                            .iter()
+                            .map(|divergence| {
+                                format!(
+                                    "seq {} [{}]: {}",
+                                    divergence
+                                        .seq
+                                        .map_or_else(|| "n/a".to_string(), |seq| seq.to_string()),
+                                    divergence.category,
+                                    divergence.message
+                                )
+                            })
+                            .collect::<Vec<_>>()
+                            .join("; ");
                         sidecar_errors.push(format!(
-                            "tape fidelity: {} divergence(s) vs {}",
+                            "tape fidelity: {} divergence(s) vs {}: {details}",
                             report.divergences.len(),
                             expected_path.display()
                         ));

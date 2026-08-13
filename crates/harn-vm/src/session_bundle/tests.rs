@@ -46,8 +46,11 @@ fn fixture_run() -> RunRecord {
             output_tokens: 4,
             call_count: 1,
             total_duration_ms: 100,
+            cost_usd: Some(0.01),
+            known_cost_usd: 0.01,
             total_cost: 0.01,
             models: vec!["mock/model".to_string()],
+            ..LlmUsageRecord::default()
         }),
         stages: vec![RunStageRecord {
             id: "stage_1".to_string(),
