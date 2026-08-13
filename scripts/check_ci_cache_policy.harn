@@ -185,6 +185,15 @@ const ARTIFACT_READY_JOB = "rust-artifacts-ready"
 
 const SECURITY_READY_JOB = "security-tests-ready"
 
+// A cold merge-group producer has taken ~15.5m to publish the CLI. Consumers
+// poll for 27m, bounded by a 30m barrier job. Keep these values mechanically
+// paired so a workflow edit cannot silently restore the shorter failure mode.
+const ARTIFACT_WAIT_MAX_ATTEMPTS = "162"
+
+const ARTIFACT_WAIT_INTERVAL_SECONDS = "10"
+
+const ARTIFACT_READY_TIMEOUT_MINUTES = "30"
+
 const LIVE_ARTIFACT_CONSUMERS = ["audit-scripts", "ci-walltime-report"]
 
 const WORKFLOW_GLOB = ".github/workflows/*.yml"
@@ -1811,11 +1820,15 @@ fn artifact_ready_barrier_errors(workflow) -> list<string> {
   const ready_needs = ready_job?.needs ?? []
   const ready_step = step_by_name(ready_job?.steps ?? [], "Wait for shared Harn binary")
   const ready_command = trim(ready_step?.run ?? "")
-  if trim(ready_job?.["runs-on"] ?? "") != HOSTED_LINUX_RUNNER
+  if trim(workflow?.env?.HARN_ARTIFACT_WAIT_MAX_ATTEMPTS ?? "")
+    != ARTIFACT_WAIT_MAX_ATTEMPTS
+    || trim(workflow?.env?.HARN_ARTIFACT_WAIT_INTERVAL_SECONDS ?? "")
+    != ARTIFACT_WAIT_INTERVAL_SECONDS
+    || trim(ready_job?.["runs-on"] ?? "") != HOSTED_LINUX_RUNNER
     || trim(
     to_string(ready_job?.["timeout-minutes"] ?? ""),
   )
-    != "12"
+    != ARTIFACT_READY_TIMEOUT_MINUTES
     || ready_needs != ["changes"]
     || trim(ready_job?.permissions?.actions ?? "")
     != "read"
@@ -1848,7 +1861,7 @@ fn security_ready_barrier_errors(workflow) -> list<string> {
     || trim(
     to_string(ready_job?.["timeout-minutes"] ?? ""),
   )
-    != "12"
+    != ARTIFACT_READY_TIMEOUT_MINUTES
     || ready_needs != ["changes"]
     || trim(ready_job?.permissions?.actions ?? "") != "read"
     || trim(
