@@ -164,7 +164,7 @@ pub fn catalog() -> Vec<SchemaEntry> {
             schema_json: None,
         },
         SchemaEntry {
-            command: "connect <provider>",
+            command: "connect",
             schema_version: crate::commands::connect::setup_events::CONNECT_SETUP_EVENT_SCHEMA_VERSION,
             description: "Secret-free connector setup progress and terminal events as NDJSON.",
             schema_json: None,
