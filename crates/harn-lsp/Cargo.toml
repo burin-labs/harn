@@ -13,16 +13,16 @@ name = "harn-lsp"
 path = "src/main.rs"
 
 [dependencies]
-harn-lexer = { path = "../harn-lexer", version = "=0.10.86" }
-harn-parser = { path = "../harn-parser", version = "=0.10.86" }
-harn-ir = { path = "../harn-ir", version = "=0.10.86" }
-harn-lint = { path = "../harn-lint", version = "=0.10.86" }
-harn-modules = { path = "../harn-modules", version = "=0.10.86" }
-harn-fmt = { path = "../harn-fmt", version = "=0.10.86" }
-harn-vm = { path = "../harn-vm", version = "=0.10.86", default-features = false }
+harn-lexer = { path = "../harn-lexer", version = "=0.10.87" }
+harn-parser = { path = "../harn-parser", version = "=0.10.87" }
+harn-ir = { path = "../harn-ir", version = "=0.10.87" }
+harn-lint = { path = "../harn-lint", version = "=0.10.87" }
+harn-modules = { path = "../harn-modules", version = "=0.10.87" }
+harn-fmt = { path = "../harn-fmt", version = "=0.10.87" }
+harn-vm = { path = "../harn-vm", version = "=0.10.87", default-features = false }
 # LSP wants the full code-intelligence surface (AST + every grammar family).
-harn-hostlib = { path = "../harn-hostlib", version = "=0.10.86", default-features = false, features = ["full"] }
-harn-rules = { path = "../harn-rules", version = "=0.10.86" }
+harn-hostlib = { path = "../harn-hostlib", version = "=0.10.87", default-features = false, features = ["full"] }
+harn-rules = { path = "../harn-rules", version = "=0.10.87" }
 tower-lsp = "0.20"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std"] }
 serde = { version = "1", features = ["derive"] }
