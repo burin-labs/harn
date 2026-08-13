@@ -9,6 +9,42 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.88
+
+### Added
+
+- **External actions now expose one portable, value-free activity contract
+  (#5041).** Product and hosted projections can retain the exact requester,
+  policy decisions, authorization metadata, protected field classes, dispatch,
+  reconciliation, spend, and receipt without retaining payloads, personal
+  values, credentials, or reusable grants (burin-code#5041).
+- **ACP clients can now edit, review, approve, and replay Harn-owned collaborative
+  plan documents (#6613).** Optimistic revision conflicts, anchored comment
+  transitions, agent resolution receipts, and approval all persist through the
+  canonical agent-session transcript instead of a host-side plan store
+  (burin-code#4564).
+- **Connected-service setup now has one typed, secret-free lifecycle.** Native
+  hosts can launch OAuth setup, render browser and callback progress, classify
+  terminal failures, and refresh service state from generated Harn vocabulary.
+  Connector plans also expose Harn-derived safe launch commands and allowlisted
+  environment names for non-secret setup fields without exposing their values.
+
+### Fixed
+
+- Preserve unknown LLM usage and pricing through agent-session, workflow-run,
+  run/session view, trace, and CLI summary receipts. Priced spend remains
+  available as an explicit lower bound, while USD budgets and cost governors stop
+  fail-closed when a completed call cannot be priced.
+- Keep Prometheus LLM spend honest when provider usage is incomplete, including
+  known lower-bound cost and physical, unpriced, and usage-unknown request counts.
+- Account for every provider, schema, and repair retry in canonical LLM usage,
+  preserving exact cost only when every paid attempt is priced and retaining the
+  known lower bound otherwise.
+- **Tool-format probes now reserve visible-output headroom after model reasoning.**
+  `harn provider tool-probe` and `tool-calibrate` no longer starve reasoning
+  routes with a flat 256-token fallback and misclassify capable large-string
+  tool calls as `empty_silent`.
+
 ## v0.10.87
 
 ### Added
