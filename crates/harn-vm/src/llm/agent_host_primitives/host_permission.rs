@@ -142,9 +142,14 @@ pub(super) fn emit_permission_activity(
         "tool",
         "internal",
         "tool permission decision",
-        Some(serde_json::json!({"activity": activity})),
+        Some(serde_json::json!({"activity": activity.clone()})),
     );
-    let _ = crate::agent_sessions::append_event(session_id, event);
+    if crate::agent_sessions::append_event(session_id, event).is_ok() {
+        crate::llm::emit_live_agent_event_sync(&crate::agent_events::AgentEvent::TypedCheckpoint {
+            session_id: session_id.to_string(),
+            checkpoint: activity,
+        });
+    }
 }
 
 pub(super) fn emit_runtime_auto_approved_activity(
@@ -305,6 +310,15 @@ mod tests {
     use std::sync::Mutex as StdMutex;
     use tokio::sync::Mutex as TokioMutex;
 
+    #[derive(Clone)]
+    struct PermissionActivitySink(Arc<StdMutex<Vec<crate::agent_events::AgentEvent>>>);
+
+    impl crate::agent_events::AgentEventSink for PermissionActivitySink {
+        fn handle_event(&self, event: &crate::agent_events::AgentEvent) {
+            self.0.lock().expect("activity sink").push(event.clone());
+        }
+    }
+
     fn request() -> HostPermissionRequest {
         HostPermissionRequest {
             session_id: "cancel-outcome-test".to_string(),
@@ -447,6 +461,10 @@ mod tests {
         let session_id = crate::agent_sessions::open_or_create(Some(
             "permission-activity-event-test".to_string(),
         ));
+        let live_events = Arc::new(StdMutex::new(Vec::new()));
+        let sink_handle = crate::agent_events::register_wildcard_sink(Arc::new(
+            PermissionActivitySink(live_events.clone()),
+        ));
         let evaluation = PolicyEvaluation {
             action: "ask".to_string(),
             reason: "contains secret-value".to_string(),
@@ -471,14 +489,40 @@ mod tests {
         );
 
         let transcript = crate::agent_sessions::transcript(&session_id).expect("transcript");
-        let rendered = serde_json::to_string(&crate::llm::helpers::vm_value_to_json(&transcript))
-            .expect("json");
+        let transcript = crate::llm::helpers::vm_value_to_json(&transcript);
+        let rendered = serde_json::to_string(&transcript).expect("json");
         assert!(rendered.contains("PermissionDecision"));
         assert!(rendered.contains("harn.tool_permission_activity.v1"));
         assert!(rendered.contains("1700000000123"));
         assert!(!rendered.contains("secret-value"));
         assert!(!rendered.contains("private@example.com"));
         assert!(!rendered.contains("arguments"));
+        crate::agent_events::unregister_wildcard_sink(sink_handle);
+        let transcript_activity = transcript["events"]
+            .as_array()
+            .expect("events")
+            .iter()
+            .find_map(|event| event["metadata"].get("activity"))
+            .expect("transcript activity");
+        let events = live_events.lock().expect("live events");
+        let live_activity = events
+            .iter()
+            .find_map(|event| match event {
+                crate::agent_events::AgentEvent::TypedCheckpoint {
+                    session_id: emitted_session,
+                    checkpoint,
+                } if emitted_session == &session_id
+                    && checkpoint["schema"] == "harn.tool_permission_activity.v1" =>
+                {
+                    Some(checkpoint)
+                }
+                _ => None,
+            })
+            .expect("live activity checkpoint");
+        assert_eq!(live_activity, transcript_activity);
+        assert!(!serde_json::to_string(live_activity)
+            .expect("live json")
+            .contains("secret-value"));
         crate::agent_sessions::close(&session_id);
     }
 }
