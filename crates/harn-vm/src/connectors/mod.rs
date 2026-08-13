@@ -975,7 +975,13 @@ impl MetricsRegistry {
         );
     }
 
-    pub fn record_llm_call(&self, provider: &str, model: &str, outcome: &str, cost_usd: f64) {
+    pub(crate) fn record_llm_call(
+        &self,
+        provider: &str,
+        model: &str,
+        outcome: &str,
+        usage: &crate::llm::usage::LlmUsage,
+    ) {
         self.increment_counter(
             "harn_llm_calls_total",
             labels([
@@ -985,18 +991,32 @@ impl MetricsRegistry {
             ]),
             1,
         );
-        if cost_usd > 0.0 {
+        let accounting_labels = labels([("provider", provider), ("model", model)]);
+        let certainty = crate::llm::usage::summarize_usage_cost_certainty([usage]);
+        if certainty.known_cost_usd > 0.0 {
             self.increment_counter(
                 "harn_llm_cost_usd_total",
-                labels([("provider", provider), ("model", model)]),
-                cost_usd,
+                accounting_labels.clone(),
+                certainty.known_cost_usd,
             );
         } else {
-            self.ensure_counter(
-                "harn_llm_cost_usd_total",
-                labels([("provider", provider), ("model", model)]),
-            );
+            self.ensure_counter("harn_llm_cost_usd_total", accounting_labels.clone());
         }
+        self.increment_counter(
+            "harn_llm_provider_requests_total",
+            accounting_labels.clone(),
+            certainty.provider_call_count as f64,
+        );
+        self.increment_counter(
+            "harn_llm_unpriced_requests_total",
+            accounting_labels.clone(),
+            certainty.unpriced_calls as f64,
+        );
+        self.increment_counter(
+            "harn_llm_usage_unknown_requests_total",
+            accounting_labels,
+            certainty.usage_unknown_calls as f64,
+        );
     }
 
     pub fn record_llm_cache_hit(&self, provider: &str) {
@@ -1239,6 +1259,9 @@ fn metric_family_names(kind: MetricKind) -> &'static [&'static str] {
             "harn_a2a_hops_total",
             "harn_llm_calls_total",
             "harn_llm_cost_usd_total",
+            "harn_llm_provider_requests_total",
+            "harn_llm_unpriced_requests_total",
+            "harn_llm_usage_unknown_requests_total",
             "harn_llm_cache_hits_total",
             "harn_llm_schema_stream_aborted_total",
             "harn_scheduler_selections_total",
@@ -2158,7 +2181,15 @@ mod tests {
             1_000,
             4_000,
         );
-        metrics.record_llm_call("mock", "mock", "succeeded", 0.01);
+        let usage = crate::llm::usage::LlmUsage {
+            cost_usd: Some(0.01),
+            known_cost_usd: 0.01,
+            provider_call_count: 2,
+            unpriced_calls: 1,
+            usage_unknown_calls: 1,
+            ..crate::llm::usage::LlmUsage::known_zero_attempt()
+        };
+        metrics.record_llm_call("mock", "mock", "succeeded", &usage);
         metrics.record_llm_cache_hit("mock");
 
         let rendered = metrics.render_prometheus();
@@ -2197,6 +2228,9 @@ mod tests {
             "harn_trigger_oldest_pending_age_seconds{binding_key=\"github-new-issue@v7\",provider=\"github\",tenant_id=\"tenant-a\",trigger_id=\"github-new-issue\"} 3",
             "harn_llm_calls_total{model=\"mock\",outcome=\"succeeded\",provider=\"mock\"} 1",
             "harn_llm_cost_usd_total{model=\"mock\",provider=\"mock\"} 0.01",
+            "harn_llm_provider_requests_total{model=\"mock\",provider=\"mock\"} 2",
+            "harn_llm_unpriced_requests_total{model=\"mock\",provider=\"mock\"} 1",
+            "harn_llm_usage_unknown_requests_total{model=\"mock\",provider=\"mock\"} 1",
             "harn_llm_cache_hits_total{provider=\"mock\"} 1",
         ] {
             assert!(rendered.contains(needle), "missing {needle}\n{rendered}");
