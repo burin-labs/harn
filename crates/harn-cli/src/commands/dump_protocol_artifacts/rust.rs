@@ -131,6 +131,9 @@ pub(super) fn generate_rust_for_version(
         "Closed external-action activity statuses owned by `std/external_action/vocabulary`.",
         &external_actions.activity_statuses,
     ));
+    out.push_str(&rust_terminal_activity_status(
+        &external_actions.terminal_activity_statuses,
+    ));
     out.push_str(&rust_string_enum(
         "HarnExternalActionPolicyLayer",
         "Closed external-action policy layers owned by `std/external_action/vocabulary`.",
@@ -442,6 +445,27 @@ fn rust_string_enum(name: &str, doc: &str, values: &[String]) -> String {
         ));
     }
     out.push_str("        }\n    }\n}\n\n");
+    out
+}
+
+fn rust_terminal_activity_status(values: &[String]) -> String {
+    let mut out = String::from(
+        "impl HarnExternalActionActivityStatus {\n\
+         \x20   /// Whether this snapshot is a final outcome and may only replay identically.\n\
+         \x20   pub const fn is_terminal(self) -> bool {\n\
+         \x20       matches!(self,\n",
+    );
+    for (index, value) in values.iter().enumerate() {
+        out.push_str(if index == 0 {
+            "            "
+        } else {
+            "            | "
+        });
+        out.push_str("Self::");
+        out.push_str(&rust_type_name(value));
+        out.push('\n');
+    }
+    out.push_str("        )\n    }\n}\n\n");
     out
 }
 

@@ -446,6 +446,21 @@ export const EXTERNAL_ACTION_ACTIVITY_STATUSES = [
 ] as const
 export type HarnExternalActionActivityStatus = (typeof EXTERNAL_ACTION_ACTIVITY_STATUSES)[number]
 
+export const EXTERNAL_ACTION_TERMINAL_ACTIVITY_STATUSES = [
+  "denied",
+  "cancelled",
+  "timed_out",
+  "confirmed",
+  "failed_before_dispatch",
+  "rejected",
+] as const satisfies readonly HarnExternalActionActivityStatus[]
+
+export function isExternalActionActivityStatusTerminal(
+  status: HarnExternalActionActivityStatus,
+): boolean {
+  return (EXTERNAL_ACTION_TERMINAL_ACTIVITY_STATUSES as readonly string[]).includes(status)
+}
+
 export const EXTERNAL_ACTION_POLICY_LAYERS = [
   "user_policy",
   "managed_policy",

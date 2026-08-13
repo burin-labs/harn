@@ -20,6 +20,7 @@ pub(super) struct ExternalActionVocabulary {
     pub(super) protected_field_classes: Vec<String>,
     pub(super) passenger_genders: Vec<String>,
     pub(super) activity_statuses: Vec<String>,
+    pub(super) terminal_activity_statuses: Vec<String>,
     pub(super) policy_layers: Vec<String>,
     pub(super) policy_evaluation_outcomes: Vec<String>,
     pub(super) decision_outcomes: Vec<String>,
@@ -37,7 +38,7 @@ impl ExternalActionVocabulary {
         let program = parse_source(source).map_err(|error| {
             format!("failed to parse {EXTERNAL_ACTION_VOCABULARY_SOURCE}: {error}")
         })?;
-        Ok(Self {
+        let vocabulary = Self {
             outcomes: literal_union(
                 &program,
                 "ExternalActionOutcome",
@@ -93,6 +94,11 @@ impl ExternalActionVocabulary {
                 "ExternalActionActivityStatus",
                 EXTERNAL_ACTION_VOCABULARY_SOURCE,
             )?,
+            terminal_activity_statuses: literal_union(
+                &program,
+                "ExternalActionTerminalActivityStatus",
+                EXTERNAL_ACTION_VOCABULARY_SOURCE,
+            )?,
             policy_layers: literal_union(
                 &program,
                 "ExternalActionPolicyLayer",
@@ -118,7 +124,15 @@ impl ExternalActionVocabulary {
                 "ExternalActionReconciliationStatus",
                 EXTERNAL_ACTION_VOCABULARY_SOURCE,
             )?,
-        })
+        };
+        for status in &vocabulary.terminal_activity_statuses {
+            if !vocabulary.activity_statuses.contains(status) {
+                return Err(format!(
+                    "ExternalActionTerminalActivityStatus value `{status}` is not an activity status"
+                ));
+            }
+        }
+        Ok(vocabulary)
     }
 
     #[cfg(test)]
@@ -201,7 +215,8 @@ pub type ExternalActionDisclosureSource = "user_profile"
 pub type ExternalActionErrorKind = "invalid_intent"
 pub type ExternalActionProtectedFieldClass = "legal_identity"
 pub type ExternalActionPassengerGender = "m" | "f"
-pub type ExternalActionActivityStatus = "proposed"
+pub type ExternalActionActivityStatus = "proposed" | "denied"
+pub type ExternalActionTerminalActivityStatus = "denied"
 pub type ExternalActionPolicyLayer = "user_policy"
 pub type ExternalActionPolicyEvaluationOutcome = "allowed"
 pub type ExternalActionDecisionOutcome = "approved"
@@ -213,6 +228,7 @@ pub type ExternalActionReconciliationStatus = "not_needed"
         assert_eq!(vocabulary.outcomes, ["first", "second_value"]);
         assert_eq!(vocabulary.receipt_statuses, ["ready"]);
         assert_eq!(vocabulary.next_actions, ["none", "continue"]);
+        assert_eq!(vocabulary.terminal_activity_statuses, ["denied"]);
         assert_eq!(vocabulary.environments, ["test"]);
         assert_eq!(vocabulary.authorization_methods, ["manual"]);
         assert_eq!(vocabulary.protected_field_classes, ["legal_identity"]);
@@ -234,6 +250,7 @@ pub type ExternalActionErrorKind = "invalid_intent"
 pub type ExternalActionProtectedFieldClass = "legal_identity"
 pub type ExternalActionPassengerGender = "m"
 pub type ExternalActionActivityStatus = "proposed"
+pub type ExternalActionTerminalActivityStatus = "denied"
 pub type ExternalActionPolicyLayer = "user_policy"
 pub type ExternalActionPolicyEvaluationOutcome = "allowed"
 pub type ExternalActionDecisionOutcome = "approved"
@@ -243,5 +260,32 @@ pub type ExternalActionReconciliationStatus = "not_needed"
         )
         .unwrap_err();
         assert!(open.contains("closed string-literal union"));
+    }
+
+    #[test]
+    fn rejects_terminal_status_outside_activity_vocabulary() {
+        let error = ExternalActionVocabulary::parse(
+            r#"
+pub type ExternalActionOutcome = "confirmed"
+pub type ExternalActionReceiptStatus = "confirmed"
+pub type ExternalActionNextAction = "none"
+pub type ExternalActionEnvironment = "test"
+pub type ExternalActionAuthorizationMethod = "manual"
+pub type ExternalActionAuthenticationAssurance = "session"
+pub type ExternalActionDisclosureSource = "user_profile"
+pub type ExternalActionErrorKind = "invalid_intent"
+pub type ExternalActionProtectedFieldClass = "legal_identity"
+pub type ExternalActionPassengerGender = "m"
+pub type ExternalActionActivityStatus = "proposed"
+pub type ExternalActionTerminalActivityStatus = "confirmed"
+pub type ExternalActionPolicyLayer = "user_policy"
+pub type ExternalActionPolicyEvaluationOutcome = "allowed"
+pub type ExternalActionDecisionOutcome = "approved"
+pub type ExternalActionDecider = "person"
+pub type ExternalActionReconciliationStatus = "not_needed"
+"#,
+        )
+        .unwrap_err();
+        assert!(error.contains("is not an activity status"));
     }
 }
