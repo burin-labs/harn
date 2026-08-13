@@ -234,20 +234,24 @@ contract unchanged. By default the line is appended to stderr after
 human diagnostics; use `--summary-file <path>` or `--summary-fd <fd>`
 to isolate it from the script's own stderr.
 
-Shape (`schema_version: 1`):
+Shape (`schema_version: 4`):
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 4,
   "event": "run_summary",
   "wall_time_ms": 1234,
   "exit_code": 0,
   "llm": {
     "call_count": 2,
+    "provider_call_count": 3,
     "input_tokens": 1024,
     "output_tokens": 256,
     "time_ms": 480,
-    "cost_usd": 0.0042
+    "cost_usd": 0.0042,
+    "known_cost_usd": 0.0042,
+    "unpriced_calls": 0,
+    "usage_unknown_calls": 0
   },
   "profile": {
     "total_wall_ms": 1234,
@@ -263,6 +267,12 @@ Shape (`schema_version: 1`):
 `profile` is present only when the run enables profiling with
 `--profile` or `--profile-json`. The LLM metrics are collected whenever
 summary JSON is requested, even without `--trace`.
+
+`llm.call_count` is the logical-operation count, while
+`llm.provider_call_count` includes physical retries. Exact `cost_usd` becomes
+null if any physical call is unpriced; `known_cost_usd` remains the explicit
+lower bound. A nonzero `usage_unknown_calls` means the reported token/cache
+totals are also lower bounds rather than known-complete usage.
 
 ### Post-run phase JSON
 
