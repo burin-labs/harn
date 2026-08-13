@@ -14,7 +14,7 @@ use std::time::Duration;
 use crate::harness::{vm_string, HarnessKind, HarnessMode, VmHarness};
 use crate::harness_net::{
     self, record_audit, violation_request_value, violation_vm_error, NetPolicyAudit,
-    NetPolicyDecision, OnViolation,
+    NetPolicyDecision, NetPolicyMethodContract, OnViolation,
 };
 use crate::stdlib::io::{
     prompt_user_value, read_line_legacy_value, read_line_structured_value, write_stderr,

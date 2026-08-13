@@ -1,0 +1,4 @@
+{
+  "mode": "mock",
+  "expect_stdio": "request_policy_ok\n"
+}
