@@ -166,12 +166,12 @@ fn generate_artifacts(
         ),
         Artifact::new(
             "harn-protocol.rs",
-            generate_rust_for_version(
+            format_rust_source(generate_rust_for_version(
                 artifact_version,
                 &external_actions,
                 &connector_setup,
                 &activity,
-            ),
+            ))?,
         ),
         Artifact::new(
             "python/harn_protocol.py",

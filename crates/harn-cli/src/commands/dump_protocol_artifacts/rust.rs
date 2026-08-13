@@ -1,3 +1,6 @@
+use std::io::Write;
+use std::process::{Command, Stdio};
+
 use harn_serve::adapters::acp::{
     ACP_PROMPT_ERROR_DATA_SCHEMA, ACP_SCHEMA_COMPATIBILITY, HARN_AGENT_EVENT_KINDS,
     HARN_AGENT_EVENT_METHOD, HARN_CONTENT_EXTENSION_FIELDS, HARN_PROMPT_RESULT_EXTENSION_FIELDS,
@@ -425,6 +428,50 @@ pub(super) fn generate_rust_for_version(
         out.pop();
     }
     out
+}
+
+/// Normalize the vendored Rust artifact with the ecosystem's pinned formatter.
+///
+/// Repository and release lanes pin the `rustfmt` component. Requiring it here
+/// keeps every successful generation canonical, so downstream hosts can vendor
+/// the artifact byte-for-byte without fighting their normal format gate.
+pub(super) fn format_rust_source(source: String) -> Result<String, String> {
+    let mut child = match Command::new("rustfmt")
+        .args(["--emit", "stdout", "--quiet"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Err(
+                "rustfmt is required to generate canonical Rust protocol bindings; install the pinned Rust toolchain or run `rustup component add rustfmt`".to_string(),
+            );
+        }
+        Err(error) => return Err(format!("failed to spawn rustfmt: {error}")),
+    };
+
+    child
+        .stdin
+        .as_mut()
+        .ok_or_else(|| "failed to open rustfmt stdin".to_string())?
+        .write_all(source.as_bytes())
+        .map_err(|error| format!("failed to write generated Rust to rustfmt: {error}"))?;
+
+    let output = child
+        .wait_with_output()
+        .map_err(|error| format!("failed to wait for rustfmt: {error}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "rustfmt failed on generated Rust protocol artifact: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+
+    String::from_utf8(output.stdout).map_err(|error| {
+        format!("rustfmt returned non-UTF-8 output for generated Rust protocol artifact: {error}")
+    })
 }
 
 fn rust_string_enum(name: &str, doc: &str, values: &[String]) -> String {

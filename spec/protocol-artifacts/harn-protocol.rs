@@ -22,7 +22,8 @@ pub const HARN_EXTERNAL_ACTION_ACTIVITY_SCHEMA: &str = "harn.external_action_act
 pub const HARN_EXTERNAL_ACTION_RECEIPT_SCHEMA: &str = "harn.external_action_receipt.v1";
 
 /// Upstream ACP schema version Harn tracks.
-pub const ACP_SCHEMA_COMPATIBILITY: &str = "agentclientprotocol/agent-client-protocol schema v0.12.2";
+pub const ACP_SCHEMA_COMPATIBILITY: &str =
+    "agentclientprotocol/agent-client-protocol schema v0.12.2";
 
 /// JSON-RPC method for `_harn/agentEvent` extension notifications.
 pub const HARN_AGENT_EVENT_METHOD: &str = "_harn/agentEvent";
@@ -113,10 +114,7 @@ pub enum HarnExternalActionNextAction {
 }
 
 impl HarnExternalActionNextAction {
-    pub const ALL: &'static [Self] = &[
-        Self::None,
-        Self::Reconcile,
-    ];
+    pub const ALL: &'static [Self] = &[Self::None, Self::Reconcile];
 
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -138,11 +136,7 @@ pub enum HarnExternalActionEnvironment {
 }
 
 impl HarnExternalActionEnvironment {
-    pub const ALL: &'static [Self] = &[
-        Self::Mock,
-        Self::Test,
-        Self::Live,
-    ];
+    pub const ALL: &'static [Self] = &[Self::Mock, Self::Test, Self::Live];
 
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -202,12 +196,7 @@ pub enum HarnExternalActionAuthenticationAssurance {
 }
 
 impl HarnExternalActionAuthenticationAssurance {
-    pub const ALL: &'static [Self] = &[
-        Self::None,
-        Self::Session,
-        Self::Biometric,
-        Self::Managed,
-    ];
+    pub const ALL: &'static [Self] = &[Self::None, Self::Session, Self::Biometric, Self::Managed];
 
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -229,10 +218,7 @@ pub enum HarnExternalActionDisclosureSource {
 }
 
 impl HarnExternalActionDisclosureSource {
-    pub const ALL: &'static [Self] = &[
-        Self::UserProfile,
-        Self::FictionalTestFixture,
-    ];
+    pub const ALL: &'static [Self] = &[Self::UserProfile, Self::FictionalTestFixture];
 
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -346,10 +332,7 @@ pub enum HarnExternalActionPassengerGender {
 }
 
 impl HarnExternalActionPassengerGender {
-    pub const ALL: &'static [Self] = &[
-        Self::M,
-        Self::F,
-    ];
+    pub const ALL: &'static [Self] = &[Self::M, Self::F];
 
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -417,13 +400,14 @@ impl HarnExternalActionActivityStatus {
 impl HarnExternalActionActivityStatus {
     /// Whether this snapshot is a final outcome and may only replay identically.
     pub const fn is_terminal(self) -> bool {
-        matches!(self,
+        matches!(
+            self,
             Self::Denied
-            | Self::Cancelled
-            | Self::TimedOut
-            | Self::Confirmed
-            | Self::FailedBeforeDispatch
-            | Self::Rejected
+                | Self::Cancelled
+                | Self::TimedOut
+                | Self::Confirmed
+                | Self::FailedBeforeDispatch
+                | Self::Rejected
         )
     }
 }
@@ -431,8 +415,12 @@ impl HarnExternalActionActivityStatus {
 impl HarnExternalActionActivityStatus {
     /// Whether a later snapshot may advance from this lifecycle status.
     pub const fn can_advance_to(self, next: Self) -> bool {
-        if self.is_terminal() { return self as u8 == next as u8; }
-        if next.is_terminal() { return true; }
+        if self.is_terminal() {
+            return self as u8 == next as u8;
+        }
+        if next.is_terminal() {
+            return true;
+        }
         self.progress_rank() <= next.progress_rank()
     }
 
@@ -777,10 +765,7 @@ pub enum HarnActivityKind {
 }
 
 impl HarnActivityKind {
-    pub const ALL: &'static [Self] = &[
-        Self::ExternalAction,
-        Self::ToolPermission,
-    ];
+    pub const ALL: &'static [Self] = &[Self::ExternalAction, Self::ToolPermission];
 
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -932,10 +917,7 @@ pub enum HarnToolPermissionGrantScope {
 }
 
 impl HarnToolPermissionGrantScope {
-    pub const ALL: &'static [Self] = &[
-        Self::Once,
-        Self::Session,
-    ];
+    pub const ALL: &'static [Self] = &[Self::Once, Self::Session];
 
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -955,10 +937,7 @@ pub enum HarnToolPermissionGrantExpiry {
 }
 
 impl HarnToolPermissionGrantExpiry {
-    pub const ALL: &'static [Self] = &[
-        Self::AfterDispatch,
-        Self::SessionEnd,
-    ];
+    pub const ALL: &'static [Self] = &[Self::AfterDispatch, Self::SessionEnd];
 
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -1211,12 +1190,8 @@ pub enum HarnConnectorSetupInteraction {
 }
 
 impl HarnConnectorSetupInteraction {
-    pub const ALL: &'static [Self] = &[
-        Self::None,
-        Self::Browser,
-        Self::SecretEntry,
-        Self::UserCode,
-    ];
+    pub const ALL: &'static [Self] =
+        &[Self::None, Self::Browser, Self::SecretEntry, Self::UserCode];
 
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -1236,9 +1211,7 @@ pub enum HarnConnectorSetupConfigurationField {
 }
 
 impl HarnConnectorSetupConfigurationField {
-    pub const ALL: &'static [Self] = &[
-        Self::OauthClientId,
-    ];
+    pub const ALL: &'static [Self] = &[Self::OauthClientId];
 
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -1403,9 +1376,16 @@ pub struct HarnPlanArtifact {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum HarnPlanRevisionOperation {
-    Create { event_id: String },
-    Edit { event_id: String },
-    Comment { event_id: String, comment_id: String },
+    Create {
+        event_id: String,
+    },
+    Edit {
+        event_id: String,
+    },
+    Comment {
+        event_id: String,
+        comment_id: String,
+    },
     CommentState {
         event_id: String,
         comment_id: String,
@@ -1893,8 +1873,10 @@ pub const ACP_DISPATCHED_METHOD_AUTHENTICATE: &str = "authenticate";
 pub const ACP_DISPATCHED_METHOD_HARN_PROVIDERCATALOG: &str = "_harn/providerCatalog";
 pub const ACP_DISPATCHED_METHOD_HARN_SESSION_TIMELINE_QUERY: &str = "harn.session_timeline.query";
 pub const ACP_DISPATCHED_METHOD_HARN_SESSION_VIEW_QUERY: &str = "harn.session_view.query";
-pub const ACP_DISPATCHED_METHOD_HARN_SESSION_TIMELINE_SUBSCRIBE: &str = "harn.session_timeline.subscribe";
-pub const ACP_DISPATCHED_METHOD_HARN_SESSION_TIMELINE_UNSUBSCRIBE: &str = "harn.session_timeline.unsubscribe";
+pub const ACP_DISPATCHED_METHOD_HARN_SESSION_TIMELINE_SUBSCRIBE: &str =
+    "harn.session_timeline.subscribe";
+pub const ACP_DISPATCHED_METHOD_HARN_SESSION_TIMELINE_UNSUBSCRIBE: &str =
+    "harn.session_timeline.unsubscribe";
 pub const ACP_DISPATCHED_METHOD_SESSION_NEW: &str = "session/new";
 pub const ACP_DISPATCHED_METHOD_SESSION_LOAD: &str = "session/load";
 pub const ACP_DISPATCHED_METHOD_SESSION_ATTACH: &str = "session/attach";
@@ -2032,9 +2014,7 @@ pub const ACP_DISPATCHED_METHODS: &[&str] = &[
 pub const ACP_TRANSPORT_CONTROL_METHOD_SESSION_SET_BUDGET: &str = "session/set_budget";
 
 /// ACP control frames consumed by the transport before regular adapter dispatch.
-pub const ACP_TRANSPORT_CONTROL_METHODS: &[&str] = &[
-    "session/set_budget",
-];
+pub const ACP_TRANSPORT_CONTROL_METHODS: &[&str] = &["session/set_budget"];
 
 pub const ACP_HANDLED_METHOD_SESSION_SET_BUDGET: &str = "session/set_budget";
 pub const ACP_HANDLED_METHOD_INITIALIZE: &str = "initialize";
@@ -2042,8 +2022,10 @@ pub const ACP_HANDLED_METHOD_AUTHENTICATE: &str = "authenticate";
 pub const ACP_HANDLED_METHOD_HARN_PROVIDERCATALOG: &str = "_harn/providerCatalog";
 pub const ACP_HANDLED_METHOD_HARN_SESSION_TIMELINE_QUERY: &str = "harn.session_timeline.query";
 pub const ACP_HANDLED_METHOD_HARN_SESSION_VIEW_QUERY: &str = "harn.session_view.query";
-pub const ACP_HANDLED_METHOD_HARN_SESSION_TIMELINE_SUBSCRIBE: &str = "harn.session_timeline.subscribe";
-pub const ACP_HANDLED_METHOD_HARN_SESSION_TIMELINE_UNSUBSCRIBE: &str = "harn.session_timeline.unsubscribe";
+pub const ACP_HANDLED_METHOD_HARN_SESSION_TIMELINE_SUBSCRIBE: &str =
+    "harn.session_timeline.subscribe";
+pub const ACP_HANDLED_METHOD_HARN_SESSION_TIMELINE_UNSUBSCRIBE: &str =
+    "harn.session_timeline.unsubscribe";
 pub const ACP_HANDLED_METHOD_SESSION_NEW: &str = "session/new";
 pub const ACP_HANDLED_METHOD_SESSION_LOAD: &str = "session/load";
 pub const ACP_HANDLED_METHOD_SESSION_ATTACH: &str = "session/attach";
@@ -2194,10 +2176,14 @@ pub const ACP_CLIENT_METHODS: &[&str] = &[
     "session/request_permission",
 ];
 
-pub const HARN_SESSION_TIMELINE_METHOD_HARN_SESSION_TIMELINE_QUERY: &str = "harn.session_timeline.query";
-pub const HARN_SESSION_TIMELINE_METHOD_HARN_SESSION_TIMELINE_SUBSCRIBE: &str = "harn.session_timeline.subscribe";
-pub const HARN_SESSION_TIMELINE_METHOD_HARN_SESSION_TIMELINE_UNSUBSCRIBE: &str = "harn.session_timeline.unsubscribe";
-pub const HARN_SESSION_TIMELINE_METHOD_HARN_SESSION_TIMELINE_UPDATE: &str = "harn.session_timeline.update";
+pub const HARN_SESSION_TIMELINE_METHOD_HARN_SESSION_TIMELINE_QUERY: &str =
+    "harn.session_timeline.query";
+pub const HARN_SESSION_TIMELINE_METHOD_HARN_SESSION_TIMELINE_SUBSCRIBE: &str =
+    "harn.session_timeline.subscribe";
+pub const HARN_SESSION_TIMELINE_METHOD_HARN_SESSION_TIMELINE_UNSUBSCRIBE: &str =
+    "harn.session_timeline.unsubscribe";
+pub const HARN_SESSION_TIMELINE_METHOD_HARN_SESSION_TIMELINE_UPDATE: &str =
+    "harn.session_timeline.update";
 
 /// Session-timeline extension methods Harn accepts or emits.
 pub const HARN_SESSION_TIMELINE_METHODS: &[&str] = &[
@@ -2212,11 +2198,8 @@ pub const ACP_AGENT_NOTIFICATION_SESSION_UPDATE: &str = "session/update";
 pub const ACP_AGENT_NOTIFICATION_TERMINAL_OUTPUT: &str = "terminal/output";
 
 /// ACP notifications the agent emits to the host.
-pub const ACP_AGENT_NOTIFICATIONS: &[&str] = &[
-    "session/message",
-    "session/update",
-    "terminal/output",
-];
+pub const ACP_AGENT_NOTIFICATIONS: &[&str] =
+    &["session/message", "session/update", "terminal/output"];
 
 pub const ACP_SESSION_UPDATE_USER_MESSAGE: &str = "user_message";
 pub const ACP_SESSION_UPDATE_USER_MESSAGE_CHUNK: &str = "user_message_chunk";
@@ -2290,7 +2273,8 @@ pub const ACP_SESSION_UPDATES: &[&str] = &[
 ];
 
 pub const HARN_ACP_SESSION_UPDATE_EXTENSION_ARTIFACT: &str = "artifact";
-pub const HARN_ACP_SESSION_UPDATE_EXTENSION_AVAILABLE_COMMANDS_UPDATE: &str = "available_commands_update";
+pub const HARN_ACP_SESSION_UPDATE_EXTENSION_AVAILABLE_COMMANDS_UPDATE: &str =
+    "available_commands_update";
 pub const HARN_ACP_SESSION_UPDATE_EXTENSION_FS_WATCH: &str = "fs_watch";
 pub const HARN_ACP_SESSION_UPDATE_EXTENSION_HANDOFF: &str = "handoff";
 pub const HARN_ACP_SESSION_UPDATE_EXTENSION_HITL_REQUEST: &str = "hitl_request";
@@ -2337,7 +2321,8 @@ pub const HARN_ACP_SESSION_UPDATE_EXTENSIONS: &[&str] = &[
 pub const HARN_AGENT_EVENT_KIND_BOUNDARY_FAILURE: &str = "boundary_failure";
 pub const HARN_AGENT_EVENT_KIND_BUDGET_CIRCUIT_BREAKER: &str = "budget_circuit_breaker";
 pub const HARN_AGENT_EVENT_KIND_BUDGET_EXHAUSTED: &str = "budget_exhausted";
-pub const HARN_AGENT_EVENT_KIND_CODE_LIBRARIAN_QUERY_NL_FALLBACK: &str = "code_librarian_query_nl_fallback";
+pub const HARN_AGENT_EVENT_KIND_CODE_LIBRARIAN_QUERY_NL_FALLBACK: &str =
+    "code_librarian_query_nl_fallback";
 pub const HARN_AGENT_EVENT_KIND_COMPOSITION_CHILD_CALL: &str = "composition_child_call";
 pub const HARN_AGENT_EVENT_KIND_COMPOSITION_CHILD_RESULT: &str = "composition_child_result";
 pub const HARN_AGENT_EVENT_KIND_COMPOSITION_ERROR: &str = "composition_error";
@@ -2363,12 +2348,14 @@ pub const HARN_AGENT_EVENT_KIND_MODEL_JOB: &str = "model_job";
 pub const HARN_AGENT_EVENT_KIND_ORCHESTRATION_DECISION: &str = "orchestration_decision";
 pub const HARN_AGENT_EVENT_KIND_PACK_THINKING_STRIPPED: &str = "pack_thinking_stripped";
 pub const HARN_AGENT_EVENT_KIND_PROGRESS_REPORTED: &str = "progress_reported";
-pub const HARN_AGENT_EVENT_KIND_REQUIRE_SUCCESSFUL_TOOLS_VIOLATION: &str = "require_successful_tools_violation";
+pub const HARN_AGENT_EVENT_KIND_REQUIRE_SUCCESSFUL_TOOLS_VIOLATION: &str =
+    "require_successful_tools_violation";
 pub const HARN_AGENT_EVENT_KIND_RESERVED_TERMINAL_VERIFY: &str = "reserved_terminal_verify";
 pub const HARN_AGENT_EVENT_KIND_SCOPE_CLASSIFIER_VERDICT: &str = "scope_classifier_verdict";
 pub const HARN_AGENT_EVENT_KIND_SELF_CONSISTENCY_TIE: &str = "self_consistency_tie";
 pub const HARN_AGENT_EVENT_KIND_SESSION_CLOSED: &str = "session_closed";
-pub const HARN_AGENT_EVENT_KIND_STRUCTURAL_VALIDATOR_DECISION: &str = "structural_validator_decision";
+pub const HARN_AGENT_EVENT_KIND_STRUCTURAL_VALIDATOR_DECISION: &str =
+    "structural_validator_decision";
 pub const HARN_AGENT_EVENT_KIND_SUBAGENT_JOIN: &str = "subagent_join";
 pub const HARN_AGENT_EVENT_KIND_SUBAGENT_STOP: &str = "subagent_stop";
 pub const HARN_AGENT_EVENT_KIND_STEP_JUDGE_DECISION: &str = "step_judge_decision";
@@ -2483,32 +2470,21 @@ pub const AGENT_TERMINAL_OWNER_HARNESS: &str = "harness";
 pub const AGENT_TERMINAL_OWNER_UNKNOWN: &str = "unknown";
 
 /// Owners attributed by producer-owned agent terminal outcomes.
-pub const AGENT_TERMINAL_OWNERS: &[&str] = &[
-    "agent",
-    "user",
-    "policy",
-    "provider",
-    "harness",
-    "unknown",
-];
+pub const AGENT_TERMINAL_OWNERS: &[&str] =
+    &["agent", "user", "policy", "provider", "harness", "unknown"];
 
 pub const HARN_PROMPT_RESULT_EXTENSION_FIELD_TERMINAL: &str = "terminal";
 
 /// `_meta.harn` extension keys on successful ACP prompt results.
-pub const HARN_PROMPT_RESULT_EXTENSION_FIELDS: &[&str] = &[
-    "terminal",
-];
+pub const HARN_PROMPT_RESULT_EXTENSION_FIELDS: &[&str] = &["terminal"];
 
 pub const HARN_CONTENT_EXTENSION_FIELD_PERMISSION_PREVIEW: &str = "permission_preview";
 pub const HARN_CONTENT_EXTENSION_FIELD_VISIBLE_DELTA: &str = "visible_delta";
 pub const HARN_CONTENT_EXTENSION_FIELD_VISIBLE_TEXT: &str = "visible_text";
 
 /// `_meta.harn` extension keys Harn attaches to ACP content.
-pub const HARN_CONTENT_EXTENSION_FIELDS: &[&str] = &[
-    "permission_preview",
-    "visible_delta",
-    "visible_text",
-];
+pub const HARN_CONTENT_EXTENSION_FIELDS: &[&str] =
+    &["permission_preview", "visible_delta", "visible_text"];
 
 pub const HARN_TOOL_LIFECYCLE_EXTENSION_FIELD_AUDIT: &str = "audit";
 pub const HARN_TOOL_LIFECYCLE_EXTENSION_FIELD_CHANGEDPATHS: &str = "changedPaths";
