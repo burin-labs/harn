@@ -20,6 +20,7 @@ pub(super) struct ExternalActionVocabulary {
     pub(super) protected_field_classes: Vec<String>,
     pub(super) passenger_genders: Vec<String>,
     pub(super) activity_statuses: Vec<String>,
+    pub(super) progress_activity_statuses: Vec<String>,
     pub(super) terminal_activity_statuses: Vec<String>,
     pub(super) policy_layers: Vec<String>,
     pub(super) policy_evaluation_outcomes: Vec<String>,
@@ -94,6 +95,11 @@ impl ExternalActionVocabulary {
                 "ExternalActionActivityStatus",
                 EXTERNAL_ACTION_VOCABULARY_SOURCE,
             )?,
+            progress_activity_statuses: literal_union(
+                &program,
+                "ExternalActionProgressActivityStatus",
+                EXTERNAL_ACTION_VOCABULARY_SOURCE,
+            )?,
             terminal_activity_statuses: literal_union(
                 &program,
                 "ExternalActionTerminalActivityStatus",
@@ -125,12 +131,23 @@ impl ExternalActionVocabulary {
                 EXTERNAL_ACTION_VOCABULARY_SOURCE,
             )?,
         };
-        for status in &vocabulary.terminal_activity_statuses {
-            if !vocabulary.activity_statuses.contains(status) {
-                return Err(format!(
-                    "ExternalActionTerminalActivityStatus value `{status}` is not an activity status"
-                ));
-            }
+        let all = vocabulary.activity_statuses.iter().collect::<BTreeSet<_>>();
+        let progress = vocabulary
+            .progress_activity_statuses
+            .iter()
+            .collect::<BTreeSet<_>>();
+        let terminal = vocabulary
+            .terminal_activity_statuses
+            .iter()
+            .collect::<BTreeSet<_>>();
+        if let Some(status) = progress.intersection(&terminal).next() {
+            return Err(format!(
+                "activity status `{status}` is both progress and terminal"
+            ));
+        }
+        let partition = progress.union(&terminal).copied().collect::<BTreeSet<_>>();
+        if partition != all {
+            return Err("progress and terminal activity statuses must exactly partition all activity statuses".into());
         }
         Ok(vocabulary)
     }
@@ -216,6 +233,7 @@ pub type ExternalActionErrorKind = "invalid_intent"
 pub type ExternalActionProtectedFieldClass = "legal_identity"
 pub type ExternalActionPassengerGender = "m" | "f"
 pub type ExternalActionActivityStatus = "proposed" | "denied"
+pub type ExternalActionProgressActivityStatus = "proposed"
 pub type ExternalActionTerminalActivityStatus = "denied"
 pub type ExternalActionPolicyLayer = "user_policy"
 pub type ExternalActionPolicyEvaluationOutcome = "allowed"
@@ -228,6 +246,7 @@ pub type ExternalActionReconciliationStatus = "not_needed"
         assert_eq!(vocabulary.outcomes, ["first", "second_value"]);
         assert_eq!(vocabulary.receipt_statuses, ["ready"]);
         assert_eq!(vocabulary.next_actions, ["none", "continue"]);
+        assert_eq!(vocabulary.progress_activity_statuses, ["proposed"]);
         assert_eq!(vocabulary.terminal_activity_statuses, ["denied"]);
         assert_eq!(vocabulary.environments, ["test"]);
         assert_eq!(vocabulary.authorization_methods, ["manual"]);
@@ -250,6 +269,7 @@ pub type ExternalActionErrorKind = "invalid_intent"
 pub type ExternalActionProtectedFieldClass = "legal_identity"
 pub type ExternalActionPassengerGender = "m"
 pub type ExternalActionActivityStatus = "proposed"
+pub type ExternalActionProgressActivityStatus = "proposed"
 pub type ExternalActionTerminalActivityStatus = "denied"
 pub type ExternalActionPolicyLayer = "user_policy"
 pub type ExternalActionPolicyEvaluationOutcome = "allowed"
@@ -277,6 +297,7 @@ pub type ExternalActionErrorKind = "invalid_intent"
 pub type ExternalActionProtectedFieldClass = "legal_identity"
 pub type ExternalActionPassengerGender = "m"
 pub type ExternalActionActivityStatus = "proposed"
+pub type ExternalActionProgressActivityStatus = "proposed"
 pub type ExternalActionTerminalActivityStatus = "confirmed"
 pub type ExternalActionPolicyLayer = "user_policy"
 pub type ExternalActionPolicyEvaluationOutcome = "allowed"
@@ -286,6 +307,6 @@ pub type ExternalActionReconciliationStatus = "not_needed"
 "#,
         )
         .unwrap_err();
-        assert!(error.contains("is not an activity status"));
+        assert!(error.contains("exactly partition all activity statuses"));
     }
 }

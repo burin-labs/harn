@@ -62,6 +62,12 @@ pub type ExternalActionActivityStatus = "proposed" \
   | "rejected" \
   | "reconciliation_required"
 
+/** Nonterminal states in monotonic lifecycle order. */
+pub type ExternalActionProgressActivityStatus = "proposed" \
+  | "approval_pending" \
+  | "dispatch_pending" \
+  | "reconciliation_required"
+
 /** States whose exact activity snapshot may replay but may never advance. */
 pub type ExternalActionTerminalActivityStatus = "denied" \
   | "cancelled" \

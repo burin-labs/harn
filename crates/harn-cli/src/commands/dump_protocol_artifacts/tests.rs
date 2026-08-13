@@ -183,18 +183,21 @@ fn external_action_vocabulary_projects_to_every_supported_host() {
     assert!(ts.contains("export type HarnExternalActionProtectedFieldClass"));
     assert!(ts.contains("export type HarnExternalActionActivityStatus"));
     assert!(ts.contains("isExternalActionActivityStatusTerminal"));
+    assert!(ts.contains("canExternalActionActivityStatusAdvance"));
     assert!(swift.contains("public enum HarnExternalActionOutcome"));
     assert!(swift.contains("public enum HarnExternalActionReceiptStatus"));
     assert!(swift.contains("public enum HarnExternalActionNextAction"));
     assert!(swift.contains("public enum HarnExternalActionProtectedFieldClass"));
     assert!(swift.contains("public enum HarnExternalActionActivityStatus"));
     assert!(swift.contains("var isTerminal: Bool"));
+    assert!(swift.contains("func canAdvance(to next: Self) -> Bool"));
     assert!(rust.contains("pub enum HarnExternalActionOutcome"));
     assert!(rust.contains("pub enum HarnExternalActionReceiptStatus"));
     assert!(rust.contains("pub enum HarnExternalActionNextAction"));
     assert!(rust.contains("pub enum HarnExternalActionProtectedFieldClass"));
     assert!(rust.contains("pub enum HarnExternalActionActivityStatus"));
     assert!(rust.contains("pub const fn is_terminal(self) -> bool"));
+    assert!(rust.contains("pub const fn can_advance_to(self, next: Self) -> bool"));
 
     for value in vocabulary
         .outcomes
@@ -278,6 +281,7 @@ fn adding_external_action_values_updates_all_host_projections() {
         protected_field_classes: vec!["legal_identity".into(), "future_field".into()],
         passenger_genders: vec!["m".into(), "future_gender".into()],
         activity_statuses: vec!["proposed".into(), "future_activity".into()],
+        progress_activity_statuses: vec!["proposed".into()],
         terminal_activity_statuses: vec!["future_activity".into()],
         policy_layers: vec!["user_policy".into(), "future_layer".into()],
         policy_evaluation_outcomes: vec!["allowed".into(), "future_evaluation".into()],
@@ -427,6 +431,19 @@ fn generated_rust_external_action_enum_rejects_unknown_values() {
         serde_json::from_str::<generated_rust_binding::HarnExternalActionOutcome>("\"rejected\"")
             .unwrap();
     assert_eq!(rejected.as_str(), "rejected");
+}
+
+#[test]
+fn generated_external_action_progress_is_monotonic() {
+    use generated_rust_binding::HarnExternalActionActivityStatus as Status;
+
+    assert!(Status::Proposed.can_advance_to(Status::ApprovalPending));
+    assert!(Status::Proposed.can_advance_to(Status::DispatchPending));
+    assert!(Status::DispatchPending.can_advance_to(Status::ReconciliationRequired));
+    assert!(Status::DispatchPending.can_advance_to(Status::Confirmed));
+    assert!(!Status::DispatchPending.can_advance_to(Status::ApprovalPending));
+    assert!(!Status::Confirmed.can_advance_to(Status::ReconciliationRequired));
+    assert!(Status::Confirmed.can_advance_to(Status::Confirmed));
 }
 
 #[test]

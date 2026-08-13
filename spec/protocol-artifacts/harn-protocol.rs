@@ -428,6 +428,25 @@ impl HarnExternalActionActivityStatus {
     }
 }
 
+impl HarnExternalActionActivityStatus {
+    /// Whether a later snapshot may advance from this lifecycle status.
+    pub const fn can_advance_to(self, next: Self) -> bool {
+        if self.is_terminal() { return self as u8 == next as u8; }
+        if next.is_terminal() { return true; }
+        self.progress_rank() <= next.progress_rank()
+    }
+
+    const fn progress_rank(self) -> u8 {
+        match self {
+            Self::Proposed => 0,
+            Self::ApprovalPending => 1,
+            Self::DispatchPending => 2,
+            Self::ReconciliationRequired => 3,
+            _ => u8::MAX,
+        }
+    }
+}
+
 /// Closed external-action policy layers owned by `std/external_action/vocabulary`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum HarnExternalActionPolicyLayer {

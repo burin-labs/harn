@@ -461,6 +461,23 @@ export function isExternalActionActivityStatusTerminal(
   return (EXTERNAL_ACTION_TERMINAL_ACTIVITY_STATUSES as readonly string[]).includes(status)
 }
 
+export const EXTERNAL_ACTION_PROGRESS_ACTIVITY_STATUSES = [
+  "proposed",
+  "approval_pending",
+  "dispatch_pending",
+  "reconciliation_required",
+] as const satisfies readonly HarnExternalActionActivityStatus[]
+
+export function canExternalActionActivityStatusAdvance(
+  current: HarnExternalActionActivityStatus,
+  next: HarnExternalActionActivityStatus,
+): boolean {
+  if (isExternalActionActivityStatusTerminal(current)) return current === next
+  if (isExternalActionActivityStatusTerminal(next)) return true
+  return EXTERNAL_ACTION_PROGRESS_ACTIVITY_STATUSES.indexOf(current as never)
+    <= EXTERNAL_ACTION_PROGRESS_ACTIVITY_STATUSES.indexOf(next as never)
+}
+
 export const EXTERNAL_ACTION_POLICY_LAYERS = [
   "user_policy",
   "managed_policy",

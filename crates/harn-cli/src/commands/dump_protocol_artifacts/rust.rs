@@ -134,6 +134,9 @@ pub(super) fn generate_rust_for_version(
     out.push_str(&rust_terminal_activity_status(
         &external_actions.terminal_activity_statuses,
     ));
+    out.push_str(&rust_activity_progress(
+        &external_actions.progress_activity_statuses,
+    ));
     out.push_str(&rust_string_enum(
         "HarnExternalActionPolicyLayer",
         "Closed external-action policy layers owned by `std/external_action/vocabulary`.",
@@ -466,6 +469,28 @@ fn rust_terminal_activity_status(values: &[String]) -> String {
         out.push('\n');
     }
     out.push_str("        )\n    }\n}\n\n");
+    out
+}
+
+fn rust_activity_progress(values: &[String]) -> String {
+    let mut out = String::from(
+        "impl HarnExternalActionActivityStatus {\n\
+         \x20   /// Whether a later snapshot may advance from this lifecycle status.\n\
+         \x20   pub const fn can_advance_to(self, next: Self) -> bool {\n\
+         \x20       if self.is_terminal() { return self as u8 == next as u8; }\n\
+         \x20       if next.is_terminal() { return true; }\n\
+         \x20       self.progress_rank() <= next.progress_rank()\n\
+         \x20   }\n\n\
+         \x20   const fn progress_rank(self) -> u8 {\n\
+         \x20       match self {\n",
+    );
+    for (index, value) in values.iter().enumerate() {
+        out.push_str(&format!(
+            "            Self::{} => {index},\n",
+            rust_type_name(value)
+        ));
+    }
+    out.push_str("            _ => u8::MAX,\n        }\n    }\n}\n\n");
     out
 }
 

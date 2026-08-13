@@ -201,6 +201,23 @@ pub(super) fn generate_swift_for_version(
         out.push_str(": true\n");
     }
     out.push_str("        default: false\n        }\n    }\n}\n\n");
+    out.push_str("public extension HarnExternalActionActivityStatus {\n");
+    out.push_str("    /// Whether a later snapshot may advance from this lifecycle status.\n");
+    out.push_str("    func canAdvance(to next: Self) -> Bool {\n");
+    out.push_str("        if isTerminal { return self == next }\n");
+    out.push_str("        if next.isTerminal { return true }\n");
+    out.push_str("        return progressRank <= next.progressRank\n    }\n\n");
+    out.push_str("    private var progressRank: Int {\n        switch self {\n");
+    for (index, value) in external_actions
+        .progress_activity_statuses
+        .iter()
+        .enumerate()
+    {
+        out.push_str("        case .");
+        out.push_str(&swift_case_name(value));
+        out.push_str(&format!(": {index}\n"));
+    }
+    out.push_str("        default: Int.max\n        }\n    }\n}\n\n");
     out.push_str(&swift_enum(
         "HarnExternalActionPolicyLayer",
         &external_actions.policy_layers,
