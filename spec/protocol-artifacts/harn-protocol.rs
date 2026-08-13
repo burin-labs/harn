@@ -1194,6 +1194,7 @@ pub const ACP_DISPATCHED_METHOD_SESSION_ROLLBACK: &str = "session/rollback";
 pub const ACP_DISPATCHED_METHOD_SESSION_REDO: &str = "session/redo";
 pub const ACP_DISPATCHED_METHOD_SESSION_SET_MODE: &str = "session/set_mode";
 pub const ACP_DISPATCHED_METHOD_SESSION_SET_CONFIG_OPTION: &str = "session/set_config_option";
+pub const ACP_DISPATCHED_METHOD_SESSION_PLAN_DOCUMENT_MUTATE: &str = "session/plan_document/mutate";
 pub const ACP_DISPATCHED_METHOD_SESSION_FS_MODE: &str = "session/fs_mode";
 pub const ACP_DISPATCHED_METHOD_SESSION_FS_COMMIT_STAGED: &str = "session/fs_commit_staged";
 pub const ACP_DISPATCHED_METHOD_SESSION_FS_DISCARD_STAGED: &str = "session/fs_discard_staged";
@@ -1264,6 +1265,7 @@ pub const ACP_DISPATCHED_METHODS: &[&str] = &[
     "session/redo",
     "session/set_mode",
     "session/set_config_option",
+    "session/plan_document/mutate",
     "session/fs_mode",
     "session/fs_commit_staged",
     "session/fs_discard_staged",
@@ -1341,6 +1343,7 @@ pub const ACP_HANDLED_METHOD_SESSION_ROLLBACK: &str = "session/rollback";
 pub const ACP_HANDLED_METHOD_SESSION_REDO: &str = "session/redo";
 pub const ACP_HANDLED_METHOD_SESSION_SET_MODE: &str = "session/set_mode";
 pub const ACP_HANDLED_METHOD_SESSION_SET_CONFIG_OPTION: &str = "session/set_config_option";
+pub const ACP_HANDLED_METHOD_SESSION_PLAN_DOCUMENT_MUTATE: &str = "session/plan_document/mutate";
 pub const ACP_HANDLED_METHOD_SESSION_FS_MODE: &str = "session/fs_mode";
 pub const ACP_HANDLED_METHOD_SESSION_FS_COMMIT_STAGED: &str = "session/fs_commit_staged";
 pub const ACP_HANDLED_METHOD_SESSION_FS_DISCARD_STAGED: &str = "session/fs_discard_staged";
@@ -1412,6 +1415,7 @@ pub const ACP_HANDLED_METHODS: &[&str] = &[
     "session/redo",
     "session/set_mode",
     "session/set_config_option",
+    "session/plan_document/mutate",
     "session/fs_mode",
     "session/fs_commit_staged",
     "session/fs_discard_staged",

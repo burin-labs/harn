@@ -1,3 +1,4 @@
+pub(super) use harn_serve::adapters::acp::ACP_METHOD_SESSION_PLAN_DOCUMENT_MUTATE;
 use harn_serve::adapters::acp::HARN_PROVIDER_CATALOG_METHOD;
 pub(super) use harn_serve::MCP_PROTOCOL_VERSION;
 pub(super) use harn_vm::mcp_protocol::UNSUPPORTED_PROTOCOL_VERSION_CODE;
@@ -76,6 +77,7 @@ pub(super) const ACP_DISPATCHED_METHODS: &[&str] = &[
     "session/redo",
     "session/set_mode",
     "session/set_config_option",
+    ACP_METHOD_SESSION_PLAN_DOCUMENT_MUTATE,
     "session/fs_mode",
     "session/fs_commit_staged",
     "session/fs_discard_staged",
