@@ -39,8 +39,15 @@ pipeline test_structured_retry_cache_cost(harness: Harness) {
       const charged = harness.llm.session_cost().total_cost - before
       assert_eq(result.ok, true)
       assert_eq(result.attempts, 2)
-      assert_eq(result.usage.cache_read_tokens, 1000)
-      assert_approx(result.usage.cost_usd, 0.0039)
+      assert_eq(result.usage.input_tokens, 2200)
+      assert_eq(result.usage.output_tokens, 300)
+      assert_eq(result.usage.cache_read_tokens, 1800)
+      assert_eq(result.usage.provider_call_count, 2)
+      assert_eq(result.usage.unpriced_calls, 0)
+      assert_eq(result.usage.usage_unknown_calls, 0)
+      assert_eq(result.usage.accounting_status, "reported")
+      assert_approx(result.usage.cost_usd, 0.00624)
+      assert_approx(result.usage.known_cost_usd, 0.00624)
       assert_approx(charged, 0.00624)
       harness.stdio.println("ok")
     },

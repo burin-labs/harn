@@ -659,6 +659,10 @@ pub(crate) async fn observed_llm_call(
     // first-try serve from one that fought through rate limiting.
     let mut rate_limited_retries = 0u32;
     let mut other_retries = 0u32;
+    // Completed responses consumed by an in-call retry are still provider
+    // transactions. Carry their canonical usage into the final logical-call
+    // ledger so downstream schema/repair aggregation cannot lose them.
+    let mut completed_retry_usage = Vec::new();
     loop {
         let opts: &super::api::LlmCallOptions = working.as_ref();
         // Network-only circuit breaker: if this route has seen sustained
@@ -871,6 +875,8 @@ pub(crate) async fn observed_llm_call(
                 if is_retryable_unproductive_completion(&result)
                     && attempt < empty_completion_retry_budget(&opts.provider)
                 {
+                    let retry_usage = result.usage();
+                    completed_retry_usage.push(retry_usage.clone());
                     let errored_actionless = is_errored_actionless_completion(&result);
                     annotate_current_span(&[
                         ("status", serde_json::json!("retrying")),
@@ -900,6 +906,7 @@ pub(crate) async fn observed_llm_call(
                         retry_reason,
                         duration_ms,
                         &detail,
+                        Some(&retry_usage),
                     );
                     if let Some(b) = bridge {
                         b.send_call_end(
@@ -935,6 +942,15 @@ pub(crate) async fn observed_llm_call(
                 }
                 super::api::ensure_llm_text_projection(None, &mut result, opts.tools.as_ref())
                     .await?;
+                result.attempts = super::api::ProviderAttempts {
+                    // `attempt` is a zero-based retry counter, so the request
+                    // that succeeded is one more than the retries before it.
+                    total: u32::try_from(attempt).unwrap_or(u32::MAX).saturating_add(1),
+                    rate_limited: rate_limited_retries,
+                    empty_completion: u32::try_from(empty_completion_retries).unwrap_or(u32::MAX),
+                    other: other_retries,
+                    completed_retry_usage: completed_retry_usage.clone(),
+                };
                 let provider_under_throttle = provider_was_throttled_during_call
                     || crate::llm::rate_governor::provider_already_throttled(
                         &opts.provider,
@@ -1107,14 +1123,6 @@ pub(crate) async fn observed_llm_call(
                 } else {
                     super::rate_limit::observe_network_outcome_for_llm_call(opts, false);
                 }
-                result.attempts = super::api::ProviderAttempts {
-                    // `attempt` is a zero-based retry counter, so the request
-                    // that succeeded is one more than the retries before it.
-                    total: u32::try_from(attempt).unwrap_or(u32::MAX).saturating_add(1),
-                    rate_limited: rate_limited_retries,
-                    empty_completion: u32::try_from(empty_completion_retries).unwrap_or(u32::MAX),
-                    other: other_retries,
-                };
                 return Ok(result);
             }
             Err(error) => {
@@ -1313,6 +1321,7 @@ pub(crate) async fn observed_llm_call(
                         empty_completion_reason.expect("empty retry has a classified reason"),
                         duration_ms,
                         &error.to_string(),
+                        None,
                     );
                 }
                 // Apply the runtime tool_format degrade for the next attempt:

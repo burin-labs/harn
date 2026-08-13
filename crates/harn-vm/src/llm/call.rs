@@ -559,6 +559,7 @@ async fn execute_routing_schema_retry_loop(
     let output_validation_mode = output_validation_mode(&opts).to_string();
     let expects_structured = helpers::expects_structured_output(&opts);
     let original_messages = opts.messages.clone();
+    let mut usages = Vec::new();
 
     for attempt in 0..=schema_retries {
         let (vm_result, raw_text, errors) =
@@ -566,6 +567,7 @@ async fn execute_routing_schema_retry_loop(
                 .await
             {
                 Ok((result, trace)) => {
+                    usages.push(result.usage());
                     let raw_text = result.text.clone();
                     // Snap option metadata to the winning link so transcript / portal
                     // payloads describe the call that actually ran.
@@ -585,6 +587,7 @@ async fn execute_routing_schema_retry_loop(
                             attempts: attempt + 1,
                             schema_retries_budget: schema_retries,
                             output_validation_mode,
+                            usages,
                         });
                     }
                     let errors = structured_output_errors(&envelope, &opts);
@@ -607,6 +610,7 @@ async fn execute_routing_schema_retry_loop(
                 attempts: attempt + 1,
                 schema_retries_budget: schema_retries,
                 output_validation_mode,
+                usages,
             });
         }
 
@@ -637,6 +641,7 @@ async fn execute_routing_schema_retry_loop(
             attempts: attempt + 1,
             schema_retries_budget: schema_retries,
             output_validation_mode,
+            usages,
         });
     }
     unreachable!("routing schema retry loop exited without returning");
@@ -694,6 +699,9 @@ pub(crate) struct SchemaLoopOutcome {
     pub schema_retries_budget: usize,
     /// `output_validation` mode the caller configured (off / warn / error).
     pub output_validation_mode: String,
+    /// Canonical usage for every completed provider response consumed by this
+    /// schema loop, including invalid responses that triggered a retry.
+    pub usages: Vec<super::usage::LlmUsage>,
 }
 
 pub(crate) async fn execute_schema_retry_loop(
@@ -724,6 +732,7 @@ pub(crate) async fn execute_schema_retry_loop(
     // retry is a single-turn correction rather than a multi-turn
     // conversation.
     let original_messages = opts.messages.clone();
+    let mut usages = Vec::new();
     for attempt in 0..=schema_retries {
         // `observed_llm_call` owns the complete transport/observability retry
         // state machine. Keep that large future behind one pointer so the
@@ -752,6 +761,7 @@ pub(crate) async fn execute_schema_retry_loop(
         // gets a sharper prompt than a generic "stream failed".
         let (vm_result, raw_text, errors) = match call_result {
             Ok(result) => {
+                usages.push(result.usage());
                 let raw_text = result.text.clone();
                 let vm_result = agent_config::build_llm_call_result(ctx, &result, &opts).await?;
                 if !expects_structured {
@@ -762,6 +772,7 @@ pub(crate) async fn execute_schema_retry_loop(
                         attempts: attempt + 1,
                         schema_retries_budget: schema_retries,
                         output_validation_mode,
+                        usages,
                     });
                 }
                 let errors = structured_output_errors(&vm_result, &opts);
@@ -785,6 +796,7 @@ pub(crate) async fn execute_schema_retry_loop(
                 attempts: attempt + 1,
                 schema_retries_budget: schema_retries,
                 output_validation_mode,
+                usages,
             });
         }
 
@@ -822,6 +834,7 @@ pub(crate) async fn execute_schema_retry_loop(
             attempts: attempt + 1,
             schema_retries_budget: schema_retries,
             output_validation_mode,
+            usages,
         });
     }
     unreachable!("schema retry loop exited without returning");

@@ -323,6 +323,10 @@ mod telemetry_tests {
             cache_hit: true,
             served_fast: false,
             accounting_status: harn_vm::llm::usage::UsageAccountingStatus::Reported,
+            known_cost_usd: 0.0123,
+            provider_call_count: 1,
+            unpriced_calls: 0,
+            usage_unknown_calls: 0,
         };
 
         let payload = llm_telemetry_payload("call-1", "model-1", &usage, 42, 3);
@@ -331,6 +335,10 @@ mod telemetry_tests {
         assert_eq!(payload["output_tokens"], json!(20));
         assert_eq!(payload["cache_read_tokens"], json!(40));
         assert_eq!(payload["cache_write_tokens"], json!(8));
+        assert_eq!(payload["known_cost_usd"], json!(0.0123));
+        assert_eq!(payload["provider_call_count"], json!(1));
+        assert_eq!(payload["unpriced_calls"], json!(0));
+        assert_eq!(payload["usage_unknown_calls"], json!(0));
         assert_eq!(payload["duration_ms"], json!(42));
         for legacy in [
             "prompt_tokens",
