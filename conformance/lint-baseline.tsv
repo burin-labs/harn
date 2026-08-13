@@ -82,6 +82,7 @@
 1	modules/selective_import_from_zero_pub_rejected_lib.harn	HARN-LNT-019
 1	modules/selective_import_private_helper.harn	HARN-LNT-025
 1	modules/selective_import_private_rejected_lib.harn	HARN-LNT-019
+6	net_policy/request_uses_url_argument.harn	HARN-LNT-025
 1	personas/prelude_bounded_loop.harn	HARN-LNT-018
 1	pool/max_concurrent_caps_in_flight.harn	HARN-LNT-018
 3	pool/pool_unsettled_state_integration.harn	HARN-LNT-014

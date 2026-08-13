@@ -18,12 +18,10 @@ fn main(harness: Harness) {
     "https://blocked.example.test/probe",
     {status: 200, body: "must-not-bypass-policy", headers: {}},
   )
-
   const policy = create({allow: [domain("allowed.example.test")], default: "deny"})
   const restricted = harness.with_net_policy(policy)
   const allowed = restricted.net.request("GET", "https://allowed.example.test/probe", {})
   assert_eq(allowed.body, "allowed")
-
   const blocked = try {
     restricted.net.request("GET", "https://blocked.example.test/probe", {})
   }
