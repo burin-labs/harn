@@ -1,4 +1,5 @@
 use std::io::Write;
+use std::path::Path;
 use std::process::{Command, Stdio};
 
 use harn_serve::adapters::acp::{
@@ -435,9 +436,10 @@ pub(super) fn generate_rust_for_version(
 /// Repository and release lanes pin the `rustfmt` component. Requiring it here
 /// keeps every successful generation canonical, so downstream hosts can vendor
 /// the artifact byte-for-byte without fighting their normal format gate.
-pub(super) fn format_rust_source(source: String) -> Result<String, String> {
+pub(super) fn format_rust_source(source: String, repo_root: &Path) -> Result<String, String> {
     let mut child = match Command::new("rustfmt")
-        .args(["--emit", "stdout", "--quiet"])
+        .args(["--emit", "stdout", "--quiet", "--edition", "2021"])
+        .current_dir(repo_root)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
