@@ -329,6 +329,109 @@ public enum HarnExternalActionReconciliationStatus: String, Codable, Sendable, C
     ].map { Self(rawValue: $0)! }
 }
 
+public enum HarnConnectorSetupStage: String, Codable, Sendable, CaseIterable {
+    case resolving = "resolving"
+    case openingBrowser = "opening_browser"
+    case waitingForUser = "waiting_for_user"
+    case exchanging = "exchanging"
+    case storing = "storing"
+    case validating = "validating"
+    case ready = "ready"
+
+    public static let allCases: [Self] = [
+        "resolving",
+        "opening_browser",
+        "waiting_for_user",
+        "exchanging",
+        "storing",
+        "validating",
+        "ready",
+    ].map { Self(rawValue: $0)! }
+}
+
+public enum HarnConnectorSetupStatus: String, Codable, Sendable, CaseIterable {
+    case inProgress = "in_progress"
+    case succeeded = "succeeded"
+    case failed = "failed"
+    case cancelled = "cancelled"
+    case timedOut = "timed_out"
+
+    public static let allCases: [Self] = [
+        "in_progress",
+        "succeeded",
+        "failed",
+        "cancelled",
+        "timed_out",
+    ].map { Self(rawValue: $0)! }
+}
+
+public enum HarnConnectorSetupInteraction: String, Codable, Sendable, CaseIterable {
+    case none = "none"
+    case browser = "browser"
+    case secretEntry = "secret_entry"
+    case userCode = "user_code"
+
+    public static let allCases: [Self] = [
+        "none",
+        "browser",
+        "secret_entry",
+        "user_code",
+    ].map { Self(rawValue: $0)! }
+}
+
+public enum HarnConnectorSetupConfigurationField: String, Codable, Sendable, CaseIterable {
+    case oauthClientId = "oauth_client_id"
+
+    public static let allCases: [Self] = [
+        "oauth_client_id",
+    ].map { Self(rawValue: $0)! }
+}
+
+public enum HarnConnectorSetupErrorCode: String, Codable, Sendable, CaseIterable {
+    case connectorUnavailable = "connector_unavailable"
+    case configurationMissing = "configuration_missing"
+    case browserOpenFailed = "browser_open_failed"
+    case callbackTimeout = "callback_timeout"
+    case userDenied = "user_denied"
+    case stateMismatch = "state_mismatch"
+    case tokenExchangeFailed = "token_exchange_failed"
+    case credentialStoreFailed = "credential_store_failed"
+    case validationFailed = "validation_failed"
+    case cancelled = "cancelled"
+    case unknown = "unknown"
+
+    public static let allCases: [Self] = [
+        "connector_unavailable",
+        "configuration_missing",
+        "browser_open_failed",
+        "callback_timeout",
+        "user_denied",
+        "state_mismatch",
+        "token_exchange_failed",
+        "credential_store_failed",
+        "validation_failed",
+        "cancelled",
+        "unknown",
+    ].map { Self(rawValue: $0)! }
+}
+
+public struct HarnConnectorSetupEvent: Codable, Sendable, Equatable {
+    public let schema: String
+    public let sequence: Int
+    public let connector: String
+    public let stage: HarnConnectorSetupStage
+    public let status: HarnConnectorSetupStatus
+    public let interaction: HarnConnectorSetupInteraction
+    public let message: String
+    public let errorCode: HarnConnectorSetupErrorCode?
+    public let recovery: String?
+
+    enum CodingKeys: String, CodingKey {
+        case schema, sequence, connector, stage, status, interaction, message, recovery
+        case errorCode = "error_code"
+    }
+}
+
 public enum HarnACPAgentMethod: String, Codable, Sendable, CaseIterable {
     case initialize = "initialize"
     case sessionInject = "session/inject"

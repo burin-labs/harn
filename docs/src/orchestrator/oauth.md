@@ -63,6 +63,10 @@ required_scopes = ["mcp.read", "mcp.write"]
 setup_command = ["harn", "connect", "acme"]
 validation_command = ["harn", "connect", "status", "--connector", "acme", "--json"]
 
+[[providers.setup.configuration_environment]]
+field = "oauth_client_id"
+environment_names = ["ACME_OAUTH_CLIENT_ID"]
+
 [[providers.setup.health_checks]]
 id = "credentials"
 kind = "command"
@@ -78,6 +82,11 @@ transient_provider_outage = "Retry after the provider or credential backend reco
 ```
 
 `harn connect setup-plan --connector <id> --json` emits a host-renderable plan.
+For browser OAuth, the plan includes a Harn-derived `launch_command` that does
+not contain credentials. Native hosts execute that command and render the
+typed NDJSON setup events. Connector-declared `configuration_environment`
+entries allow only the named non-secret setup values; plans and status reports
+contain the names but never the values.
 `harn connect status --connector <id> --json` reports one of `healthy`,
 `missing_install`, `missing_auth`, `expired_credentials`,
 `revoked_credentials`, `missing_scopes`, `inaccessible_resource`, or

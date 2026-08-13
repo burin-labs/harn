@@ -302,6 +302,8 @@ pub struct ProviderSetupManifest {
     pub required_secrets: Vec<String>,
     #[serde(default, alias = "credential-environment")]
     pub credential_environment: Vec<ConnectorCredentialEnvironmentManifest>,
+    #[serde(default, alias = "configuration-environment")]
+    pub configuration_environment: Vec<ConnectorConfigurationEnvironmentManifest>,
     #[serde(default, alias = "setup-command")]
     pub setup_command: Vec<String>,
     #[serde(default, alias = "validation-command")]
@@ -312,6 +314,32 @@ pub struct ProviderSetupManifest {
     pub recovery: ConnectorRecoveryCopy,
     #[serde(flatten, default)]
     pub extra: BTreeMap<String, toml::Value>,
+}
+
+/// Non-secret setup input that a connector may read from an explicit process
+/// environment allowlist. Values are consumed only by the setup adapter and
+/// are never projected into plans, status reports, or model context.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum ConnectorSetupConfigurationField {
+    #[serde(rename = "oauth_client_id")]
+    OAuthClientId,
+}
+
+impl ConnectorSetupConfigurationField {
+    pub const WIRE_VALUES: &'static [&'static str] = &["oauth_client_id"];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::OAuthClientId => "oauth_client_id",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConnectorConfigurationEnvironmentManifest {
+    pub field: ConnectorSetupConfigurationField,
+    #[serde(default, alias = "environment-names")]
+    pub environment_names: Vec<String>,
 }
 
 /// Bounded process-environment aliases for one logical connector secret.

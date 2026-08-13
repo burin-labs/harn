@@ -587,6 +587,11 @@ fn validate_setup_metadata(
             "provider '{provider_id}' setup.credential_environment {issue}"
         ));
     }
+    for issue in package::configuration_environment_issues(setup) {
+        failures.push(format!(
+            "provider '{provider_id}' setup.configuration_environment {issue}"
+        ));
+    }
     validate_recovery_copy(provider_id, &setup.recovery, failures);
     for check in &setup.health_checks {
         if check.id.trim().is_empty() {
