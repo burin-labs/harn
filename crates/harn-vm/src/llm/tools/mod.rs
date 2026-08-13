@@ -21,7 +21,7 @@ pub(crate) use handle_local::{handle_tool_locally, is_vm_stdlib_short_circuit};
 pub(crate) use messages::build_assistant_tool_message;
 pub(crate) use messages::{build_assistant_response_message, normalize_tool_args};
 pub(crate) use name_recovery::{
-    normalize_repaired_denial, recover_unique_provider_safe_alias, schema_match_repair_result,
+    normalize_repaired_denial, recover_provider_safe_alias, schema_match_repair_result,
 };
 pub(crate) use native::{
     apply_tool_search_native_injection_typed, extract_deferred_tool_names, vm_tools_to_native,

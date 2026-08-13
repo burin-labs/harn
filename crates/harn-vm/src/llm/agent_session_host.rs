@@ -1650,10 +1650,9 @@ fn host_agent_session_record_tool_results_builtin(
                 }
             }
         }
-        // A computer-use result carries screenshot(s) the model must see; ride
-        // them back as image content blocks (see `tool_result_message_for_provider`).
+        // Carry computer-use screenshots back as provider image content blocks.
         let screenshots = screenshots_from_tool_result(result);
-        let transcript_data = transcript_tool_result_data(result);
+        let transcript_data = tool_result_messages::transcript_tool_result_data(result);
         let message_index = crate::agent_sessions::inject_message(
             &session_id,
             tool_result_message_for_provider(
@@ -1683,42 +1682,6 @@ fn host_agent_session_record_tool_results_builtin(
         Ok(())
     });
     Ok(VmValue::Nil)
-}
-
-/// Preserve typed producer facts on the durable tool-result message. Dispatch
-/// keeps mutation facts beside `data` so every consumer can inspect them
-/// without parsing rendered text; the transcript owns projecting those facts
-/// into the provider-neutral message envelope used by replay and completion
-/// policy.
-fn transcript_tool_result_data(result: &VmValue) -> Option<VmValue> {
-    let mut data = dict_get(result, "data")
-        .and_then(VmValue::as_dict)
-        .cloned()
-        .unwrap_or_default();
-
-    if let Some(VmValue::String(status)) = dict_get(result, "mutation_status") {
-        if matches!(status.as_str(), "applied" | "unchanged" | "not_applied") {
-            data.insert(
-                crate::value::intern_key("mutation_status"),
-                VmValue::String(status.clone()),
-            );
-        }
-    }
-
-    if let Some(VmValue::List(paths)) = dict_get(result, "changed_paths") {
-        if !paths.is_empty() {
-            data.insert(
-                crate::value::intern_key("changed_paths"),
-                VmValue::List(paths.clone()),
-            );
-        }
-    }
-
-    if data.is_empty() {
-        None
-    } else {
-        Some(VmValue::dict(data))
-    }
 }
 
 /// Synthesize a matching tool-result for each orphaned `tool_use`/`tool_call`

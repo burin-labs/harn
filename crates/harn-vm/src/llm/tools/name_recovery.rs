@@ -7,6 +7,22 @@ use std::collections::BTreeSet;
 
 use super::collect::ToolSchema;
 
+/// Rewrite a provider-safe spelling to the one declared by the registry when
+/// the mapping is unique. Dispatch callers use this boundary so alias policy
+/// remains owned alongside the schema matcher rather than each host path.
+pub(crate) fn recover_provider_safe_alias(
+    name: &mut String,
+    registry: Option<&crate::value::VmValue>,
+) {
+    let Some(registry) = registry else {
+        return;
+    };
+    let schemas = super::collect_tool_schemas(Some(registry), None);
+    if let Some(declared) = recover_unique_provider_safe_alias(name, &schemas) {
+        *name = declared;
+    }
+}
+
 /// Resolve one provider/model-safe spelling back to its declared tool name.
 ///
 /// Models sometimes replace namespace punctuation with `_` even when the
