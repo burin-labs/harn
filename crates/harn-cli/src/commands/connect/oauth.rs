@@ -424,7 +424,7 @@ async fn run_oauth_connect_inner(
         })?;
     request.redirect_uri = redirect_uri.clone();
     let (client_id, client_secret, token_auth_method) = resolve_oauth_client(
-        &request,
+        request,
         discovery.as_ref(),
         registration_endpoint.as_deref(),
     )

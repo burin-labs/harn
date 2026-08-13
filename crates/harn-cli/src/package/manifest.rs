@@ -32,9 +32,8 @@ pub struct Manifest {
     pub check: CheckConfig,
     #[serde(default)]
     pub workspace: WorkspaceConfig,
-    /// `[registry]` table — lightweight package discovery index
-    /// configuration. The CLI also honors `HARN_PACKAGE_REGISTRY` and
-    /// `--registry` flags for one-off overrides.
+    /// `[registry]` table — lightweight package discovery index configuration.
+    /// The CLI also honors `HARN_PACKAGE_REGISTRY` and `--registry` overrides.
     #[serde(default)]
     pub registry: PackageRegistryConfig,
     /// `[skills]` table — per-project skill discovery configuration

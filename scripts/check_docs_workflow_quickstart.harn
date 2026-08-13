@@ -145,7 +145,11 @@ fn harn_json(harness: Harness, harn_bin: string, args: list<string>, cwd: string
     harness.stdio.eprintln("error: ${harn_bin} ${args.join(" ")} failed (exit ${res.exit_code})")
     harness.runtime.exit(res.exit_code)
   }
-  return json_parse(res.stdout)
+  const parsed = json_parse(res.stdout)
+  if parsed.ok == true && parsed.data != nil {
+    return parsed.data
+  }
+  return parsed
 }
 
 pipeline main(harness: Harness, task) {

@@ -300,9 +300,8 @@ mod tests {
             bind_loopback_listener("http://127.0.0.1:0/oauth/callback").unwrap();
         let parsed = Url::parse(&redirect_uri).unwrap();
         let address = format!("127.0.0.1:{}", parsed.port().unwrap());
-        let waiter_redirect = redirect_uri.clone();
         let waiter = thread::spawn(move || {
-            wait_for_oauth_response(listener, &waiter_redirect, "expected-state")
+            wait_for_oauth_response(listener, &redirect_uri, "expected-state")
         });
 
         let mut stream = TcpStream::connect(address).unwrap();
