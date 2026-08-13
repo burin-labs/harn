@@ -138,6 +138,22 @@ impl LlmUsage {
         }
     }
 
+    /// Preserve completed provider receipts when the enclosing logical call
+    /// terminates on one or more attempts that produced no usable response.
+    pub(crate) fn aggregate_with_unknown_attempts(
+        completed: &[Self],
+        unknown_attempts: usize,
+    ) -> Self {
+        assert!(
+            unknown_attempts > 0,
+            "terminal usage requires an unknown attempt"
+        );
+        let mut usages = Vec::with_capacity(completed.len().saturating_add(1));
+        usages.extend_from_slice(completed);
+        usages.push(Self::unknown_attempts(unknown_attempts));
+        Self::aggregate(&usages)
+    }
+
     pub(crate) fn known_zero_attempt() -> Self {
         Self {
             cost_usd: Some(0.0),
@@ -151,6 +167,11 @@ impl LlmUsage {
     }
 
     pub(crate) fn unknown_attempt() -> Self {
+        Self::unknown_attempts(1)
+    }
+
+    pub(crate) fn unknown_attempts(count: usize) -> Self {
+        let count = i64::try_from(count.max(1)).unwrap_or(i64::MAX);
         Self {
             input_tokens: 0,
             output_tokens: 0,
@@ -168,9 +189,9 @@ impl LlmUsage {
             served_fast: false,
             accounting_status: UsageAccountingStatus::Unknown,
             known_cost_usd: 0.0,
-            provider_call_count: 1,
-            unpriced_calls: 1,
-            usage_unknown_calls: 1,
+            provider_call_count: count,
+            unpriced_calls: count,
+            usage_unknown_calls: count,
         }
     }
 
@@ -593,7 +614,9 @@ fn first_i64_field(value: &Value, names: &[&str]) -> Option<i64> {
 mod tests {
     use serde_json::json;
 
-    use super::{extract_probe_usage, summarize_usage_cost_certainty, UsageAccountingStatus};
+    use super::{
+        extract_probe_usage, summarize_usage_cost_certainty, LlmUsage, UsageAccountingStatus,
+    };
     use crate::llm::api::{LlmResult, ProviderAttempts, ProviderTelemetry};
     use crate::value::VmValue;
 
@@ -650,6 +673,48 @@ mod tests {
         );
         assert_eq!(summary.unpriced_calls, 1);
         assert_eq!(summary.usage_unknown_calls, 1);
+    }
+
+    #[test]
+    fn terminal_unknown_ledger_counts_every_physical_attempt() {
+        let usage = LlmUsage::unknown_attempts(3);
+
+        assert_eq!(usage.provider_call_count, 3);
+        assert_eq!(usage.unpriced_calls, 3);
+        assert_eq!(usage.usage_unknown_calls, 3);
+        assert_eq!(usage.cost_usd, None);
+        assert_eq!(usage.accounting_status, UsageAccountingStatus::Unknown);
+    }
+
+    #[test]
+    fn terminal_ledger_preserves_completed_receipts_before_unknown_attempts() {
+        let mut completed = LlmUsage::known_zero_attempt();
+        completed.cost_usd = Some(0.25);
+        completed.known_cost_usd = 0.25;
+
+        let usage = LlmUsage::aggregate_with_unknown_attempts(&[completed], 2);
+
+        assert_eq!(usage.known_cost_usd, 0.25);
+        assert_eq!(usage.cost_usd, None);
+        assert_eq!(usage.provider_call_count, 3);
+        assert_eq!(usage.unpriced_calls, 2);
+        assert_eq!(usage.usage_unknown_calls, 2);
+        assert_eq!(usage.accounting_status, UsageAccountingStatus::Unknown);
+    }
+
+    #[test]
+    fn legacy_ledger_reconstructs_one_call_without_losing_known_cost() {
+        let mut usage = LlmUsage::known_zero_attempt();
+        usage.cost_usd = Some(0.25);
+        usage.known_cost_usd = 0.0;
+        usage.provider_call_count = 0;
+
+        let summary = summarize_usage_cost_certainty([&usage]);
+
+        assert_eq!(summary.known_cost_usd, 0.25);
+        assert_eq!(summary.provider_call_count, 1);
+        assert_eq!(summary.unpriced_calls, 0);
+        assert_eq!(summary.usage_unknown_calls, 0);
     }
 
     #[test]

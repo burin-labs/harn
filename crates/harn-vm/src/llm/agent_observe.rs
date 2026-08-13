@@ -1020,12 +1020,7 @@ pub(crate) async fn observed_llm_call(
                     }
                     if let Some(metrics) = crate::active_metrics_registry() {
                         let usage = result.usage();
-                        metrics.record_llm_call(
-                            &result.provider,
-                            &result.model,
-                            status,
-                            usage.cost_usd.unwrap_or(0.0),
-                        );
+                        metrics.record_llm_call(&result.provider, &result.model, status, &usage);
                     }
                     return Err(error);
                 }
@@ -1081,12 +1076,7 @@ pub(crate) async fn observed_llm_call(
                     duration_ms,
                 });
                 if let Some(metrics) = crate::active_metrics_registry() {
-                    metrics.record_llm_call(
-                        &result.provider,
-                        &result.model,
-                        "succeeded",
-                        usage.cost_usd.unwrap_or(0.0),
-                    );
+                    metrics.record_llm_call(&result.provider, &result.model, "succeeded", &usage);
                     if usage.cache_hit {
                         metrics.record_llm_cache_hit(&result.provider);
                     }
@@ -1292,7 +1282,13 @@ pub(crate) async fn observed_llm_call(
                         );
                     }
                     if let Some(metrics) = crate::active_metrics_registry() {
-                        metrics.record_llm_call(&opts.provider, &opts.model, status, 0.0);
+                        let unknown_attempts =
+                            attempt_count.saturating_sub(completed_retry_usage.len());
+                        let usage = crate::llm::usage::LlmUsage::aggregate_with_unknown_attempts(
+                            &completed_retry_usage,
+                            unknown_attempts,
+                        );
+                        metrics.record_llm_call(&opts.provider, &opts.model, status, &usage);
                     }
                     // Terminal failure: emit the self-contained dispatch record
                     // with the error-derived outcome so a consumer sees the
