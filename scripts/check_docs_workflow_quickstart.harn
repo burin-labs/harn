@@ -148,8 +148,11 @@ fn harn_json(harness: Harness, harn_bin: string, args: list<string>, cwd: string
     harness.runtime.exit(res.exit_code)
   }
   const parsed = json_parse(res.stdout)
-  if schema_is(parsed, schema_of(HarnJsonEnvelope)) && parsed.ok && parsed.data != nil {
-    return parsed.data
+  if schema_is(parsed, schema_of(HarnJsonEnvelope)) {
+    const envelope: HarnJsonEnvelope = parsed
+    if envelope.ok && envelope.data != nil {
+      return envelope.data
+    }
   }
   return parsed
 }
