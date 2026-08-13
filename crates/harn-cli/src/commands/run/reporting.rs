@@ -571,6 +571,10 @@ mod trace_summary_pricing_tests {
                 cache_hit: false,
                 served_fast: false,
                 accounting_status: harn_vm::llm::usage::UsageAccountingStatus::Reported,
+                known_cost_usd: cost_usd.unwrap_or(0.0),
+                provider_call_count: 1,
+                unpriced_calls: i64::from(cost_usd.is_none()),
+                usage_unknown_calls: 0,
             },
             duration_ms: 5,
         }
