@@ -217,6 +217,118 @@ public enum HarnExternalActionProtectedFieldClass: String, Codable, Sendable, Ca
     ].map { Self(rawValue: $0)! }
 }
 
+public enum HarnExternalActionPassengerGender: String, Codable, Sendable, CaseIterable {
+    case m = "m"
+    case f = "f"
+
+    public static let allCases: [Self] = [
+        "m",
+        "f",
+    ].map { Self(rawValue: $0)! }
+}
+
+public enum HarnExternalActionActivityStatus: String, Codable, Sendable, CaseIterable {
+    case proposed = "proposed"
+    case approvalPending = "approval_pending"
+    case denied = "denied"
+    case cancelled = "cancelled"
+    case timedOut = "timed_out"
+    case dispatchPending = "dispatch_pending"
+    case confirmed = "confirmed"
+    case failedBeforeDispatch = "failed_before_dispatch"
+    case rejected = "rejected"
+    case reconciliationRequired = "reconciliation_required"
+
+    public static let allCases: [Self] = [
+        "proposed",
+        "approval_pending",
+        "denied",
+        "cancelled",
+        "timed_out",
+        "dispatch_pending",
+        "confirmed",
+        "failed_before_dispatch",
+        "rejected",
+        "reconciliation_required",
+    ].map { Self(rawValue: $0)! }
+}
+
+public enum HarnExternalActionPolicyLayer: String, Codable, Sendable, CaseIterable {
+    case userPolicy = "user_policy"
+    case managedPolicy = "managed_policy"
+    case adversarialReviewer = "adversarial_reviewer"
+    case rememberedRule = "remembered_rule"
+
+    public static let allCases: [Self] = [
+        "user_policy",
+        "managed_policy",
+        "adversarial_reviewer",
+        "remembered_rule",
+    ].map { Self(rawValue: $0)! }
+}
+
+public enum HarnExternalActionPolicyEvaluationOutcome: String, Codable, Sendable, CaseIterable {
+    case allowed = "allowed"
+    case denied = "denied"
+    case approvalRequired = "approval_required"
+    case unavailable = "unavailable"
+
+    public static let allCases: [Self] = [
+        "allowed",
+        "denied",
+        "approval_required",
+        "unavailable",
+    ].map { Self(rawValue: $0)! }
+}
+
+public enum HarnExternalActionDecisionOutcome: String, Codable, Sendable, CaseIterable {
+    case approved = "approved"
+    case denied = "denied"
+    case timedOut = "timed_out"
+    case cancelled = "cancelled"
+
+    public static let allCases: [Self] = [
+        "approved",
+        "denied",
+        "timed_out",
+        "cancelled",
+    ].map { Self(rawValue: $0)! }
+}
+
+public enum HarnExternalActionDecider: String, Codable, Sendable, CaseIterable {
+    case person = "person"
+    case rememberedRule = "remembered_rule"
+    case userPolicy = "user_policy"
+    case managedPolicy = "managed_policy"
+    case adversarialReviewer = "adversarial_reviewer"
+    case testFixture = "test_fixture"
+
+    public static let allCases: [Self] = [
+        "person",
+        "remembered_rule",
+        "user_policy",
+        "managed_policy",
+        "adversarial_reviewer",
+        "test_fixture",
+    ].map { Self(rawValue: $0)! }
+}
+
+public enum HarnExternalActionReconciliationStatus: String, Codable, Sendable, CaseIterable {
+    case notNeeded = "not_needed"
+    case confirmed = "confirmed"
+    case rejected = "rejected"
+    case indeterminate = "indeterminate"
+    case refused = "refused"
+
+    public static let allCases: [Self] = [
+        "not_needed",
+        "confirmed",
+        "rejected",
+        "indeterminate",
+        "refused",
+    ].map { Self(rawValue: $0)! }
+}
+
 public enum HarnACPAgentMethod: String, Codable, Sendable, CaseIterable {
     case initialize = "initialize"
     case sessionInject = "session/inject"

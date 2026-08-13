@@ -1,3 +1,4 @@
+pub import "std/external_action/activity"
 /**
  * std/external_action — exact authorization and at-most-once dispatch for
  * consequential effects outside the current Harn workspace.

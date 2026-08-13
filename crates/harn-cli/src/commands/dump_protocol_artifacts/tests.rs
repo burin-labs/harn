@@ -177,14 +177,17 @@ fn external_action_vocabulary_projects_to_every_supported_host() {
     assert!(ts.contains("export type HarnExternalActionReceiptStatus"));
     assert!(ts.contains("export type HarnExternalActionNextAction"));
     assert!(ts.contains("export type HarnExternalActionProtectedFieldClass"));
+    assert!(ts.contains("export type HarnExternalActionActivityStatus"));
     assert!(swift.contains("public enum HarnExternalActionOutcome"));
     assert!(swift.contains("public enum HarnExternalActionReceiptStatus"));
     assert!(swift.contains("public enum HarnExternalActionNextAction"));
     assert!(swift.contains("public enum HarnExternalActionProtectedFieldClass"));
+    assert!(swift.contains("public enum HarnExternalActionActivityStatus"));
     assert!(rust.contains("pub enum HarnExternalActionOutcome"));
     assert!(rust.contains("pub enum HarnExternalActionReceiptStatus"));
     assert!(rust.contains("pub enum HarnExternalActionNextAction"));
     assert!(rust.contains("pub enum HarnExternalActionProtectedFieldClass"));
+    assert!(rust.contains("pub enum HarnExternalActionActivityStatus"));
 
     for value in vocabulary
         .outcomes
@@ -192,6 +195,13 @@ fn external_action_vocabulary_projects_to_every_supported_host() {
         .chain(&vocabulary.receipt_statuses)
         .chain(&vocabulary.next_actions)
         .chain(&vocabulary.protected_field_classes)
+        .chain(&vocabulary.passenger_genders)
+        .chain(&vocabulary.activity_statuses)
+        .chain(&vocabulary.policy_layers)
+        .chain(&vocabulary.policy_evaluation_outcomes)
+        .chain(&vocabulary.decision_outcomes)
+        .chain(&vocabulary.deciders)
+        .chain(&vocabulary.reconciliation_statuses)
     {
         for (host, generated) in [("TypeScript", &ts), ("Swift", &swift), ("Rust", &rust)] {
             assert!(
@@ -209,6 +219,13 @@ fn adding_external_action_values_updates_all_host_projections() {
         receipt_statuses: vec!["confirmed".into(), "future_status".into()],
         next_actions: vec!["none".into(), "future_action".into()],
         protected_field_classes: vec!["legal_identity".into(), "future_field".into()],
+        passenger_genders: vec!["m".into(), "future_gender".into()],
+        activity_statuses: vec!["proposed".into(), "future_activity".into()],
+        policy_layers: vec!["user_policy".into(), "future_layer".into()],
+        policy_evaluation_outcomes: vec!["allowed".into(), "future_evaluation".into()],
+        decision_outcomes: vec!["approved".into(), "future_decision".into()],
+        deciders: vec!["person".into(), "future_decider".into()],
+        reconciliation_statuses: vec!["not_needed".into(), "future_reconciliation".into()],
     };
     for generated in [
         generate_typescript_for_version("1.0.0", &vocabulary),
@@ -220,6 +237,13 @@ fn adding_external_action_values_updates_all_host_projections() {
             "future_status",
             "future_action",
             "future_field",
+            "future_gender",
+            "future_activity",
+            "future_layer",
+            "future_evaluation",
+            "future_decision",
+            "future_decider",
+            "future_reconciliation",
         ] {
             assert!(generated.contains(future_value));
         }

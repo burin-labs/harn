@@ -1,4 +1,5 @@
 import {
+  external_action_activity,
   external_action_execute,
   external_action_fake_adapter,
   external_action_grant,
@@ -50,6 +51,44 @@ pipeline test(harness: Harness) {
   assert(first.status == "confirmed", "first dispatch must confirm")
   assert(replay.id == first.id, "replay must return the durable receipt")
   assert(confirmed.dispatch_calls() == 1, "replay must not dispatch twice")
+  const activity = external_action_activity(
+    intent,
+    first,
+    {
+      requester: {
+        actor: intent.actor,
+        agent_id: "assistant",
+        model_provider: "test",
+        model_id: "fixture-model",
+        session_id: "session-1",
+        run_id: "run-1",
+      },
+      policy_evaluations: [
+        {layer: "user_policy", outcome: "allowed", reason_code: "test_action_allowed"},
+        {layer: "adversarial_reviewer", outcome: "allowed", reason_code: "review_passed"},
+      ],
+      decision: {
+        outcome: "approved",
+        decider: "test_fixture",
+        decided_at_ms: 10,
+        reason_code: "fixture_approval",
+      },
+      authorization: {
+        method: "test_fixture",
+        authentication_assurance: "session",
+        issued_at_ms: 0,
+        expires_at_ms: 9999999999999,
+      },
+    },
+    20,
+  )
+  assert(activity.status == "confirmed", "activity follows the terminal receipt")
+  assert(activity.dispatch.attempted, "activity records provider dispatch")
+  assert(activity.policy_evaluations[1]?.layer == "adversarial_reviewer", "policy chain is typed")
+  assert(activity.authorization?.expires_at_ms == 9999999999999, "expiry is auditable")
+  assert(activity.receipt?.id == first.id, "activity retains the exact receipt")
+  assert(activity.receipt?.schema == "harn.external_action_receipt.v1", "receipt stays canonical")
+  assert(!json_stringify(activity).contains("offer_id"), "activity structurally excludes payloads")
   harness.stdio.println("confirmed_once:" + to_string(confirmed.dispatch_calls()))
   const changed = external_action_intent(
     intent + {payload: {offer_id: "off_test_changed", passengers: [{id: "pas_1"}]}},
@@ -330,7 +369,12 @@ pipeline test(harness: Harness) {
         source: request.source,
         authentication_assurance: "biometric",
         protected_values: {
-          legal_identity: {given_name: protected_sentinel, family_name: "Traveler"},
+          legal_identity: {
+            given_name: protected_sentinel,
+            family_name: "Traveler",
+            title: "ms",
+            gender: "f",
+          },
           birth_date: "1990-01-01",
         },
       }
@@ -345,6 +389,10 @@ pipeline test(harness: Harness) {
         request.protected_disclosure?.protected_values?.legal_identity?.given_name
           == protected_sentinel,
         "the adapter must receive the transient requested fields",
+      )
+      assert(
+        request.protected_disclosure?.protected_values?.legal_identity?.gender == "f",
+        "the adapter must receive the transient passenger marker",
       )
       return {outcome: "confirmed", provider_action_id: "ord_test_protected"}
     },

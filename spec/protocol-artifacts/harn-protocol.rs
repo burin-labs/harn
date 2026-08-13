@@ -159,6 +159,251 @@ impl HarnExternalActionProtectedFieldClass {
     }
 }
 
+/// Closed passenger gender markers owned by `std/external_action/vocabulary`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum HarnExternalActionPassengerGender {
+    #[serde(rename = "m")]
+    M,
+    #[serde(rename = "f")]
+    F,
+}
+
+impl HarnExternalActionPassengerGender {
+    pub const ALL: &'static [Self] = &[
+        Self::M,
+        Self::F,
+    ];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::M => "m",
+            Self::F => "f",
+        }
+    }
+}
+
+/// Closed external-action activity statuses owned by `std/external_action/vocabulary`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum HarnExternalActionActivityStatus {
+    #[serde(rename = "proposed")]
+    Proposed,
+    #[serde(rename = "approval_pending")]
+    ApprovalPending,
+    #[serde(rename = "denied")]
+    Denied,
+    #[serde(rename = "cancelled")]
+    Cancelled,
+    #[serde(rename = "timed_out")]
+    TimedOut,
+    #[serde(rename = "dispatch_pending")]
+    DispatchPending,
+    #[serde(rename = "confirmed")]
+    Confirmed,
+    #[serde(rename = "failed_before_dispatch")]
+    FailedBeforeDispatch,
+    #[serde(rename = "rejected")]
+    Rejected,
+    #[serde(rename = "reconciliation_required")]
+    ReconciliationRequired,
+}
+
+impl HarnExternalActionActivityStatus {
+    pub const ALL: &'static [Self] = &[
+        Self::Proposed,
+        Self::ApprovalPending,
+        Self::Denied,
+        Self::Cancelled,
+        Self::TimedOut,
+        Self::DispatchPending,
+        Self::Confirmed,
+        Self::FailedBeforeDispatch,
+        Self::Rejected,
+        Self::ReconciliationRequired,
+    ];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Proposed => "proposed",
+            Self::ApprovalPending => "approval_pending",
+            Self::Denied => "denied",
+            Self::Cancelled => "cancelled",
+            Self::TimedOut => "timed_out",
+            Self::DispatchPending => "dispatch_pending",
+            Self::Confirmed => "confirmed",
+            Self::FailedBeforeDispatch => "failed_before_dispatch",
+            Self::Rejected => "rejected",
+            Self::ReconciliationRequired => "reconciliation_required",
+        }
+    }
+}
+
+/// Closed external-action policy layers owned by `std/external_action/vocabulary`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum HarnExternalActionPolicyLayer {
+    #[serde(rename = "user_policy")]
+    UserPolicy,
+    #[serde(rename = "managed_policy")]
+    ManagedPolicy,
+    #[serde(rename = "adversarial_reviewer")]
+    AdversarialReviewer,
+    #[serde(rename = "remembered_rule")]
+    RememberedRule,
+}
+
+impl HarnExternalActionPolicyLayer {
+    pub const ALL: &'static [Self] = &[
+        Self::UserPolicy,
+        Self::ManagedPolicy,
+        Self::AdversarialReviewer,
+        Self::RememberedRule,
+    ];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::UserPolicy => "user_policy",
+            Self::ManagedPolicy => "managed_policy",
+            Self::AdversarialReviewer => "adversarial_reviewer",
+            Self::RememberedRule => "remembered_rule",
+        }
+    }
+}
+
+/// Closed policy evaluation outcomes owned by `std/external_action/vocabulary`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum HarnExternalActionPolicyEvaluationOutcome {
+    #[serde(rename = "allowed")]
+    Allowed,
+    #[serde(rename = "denied")]
+    Denied,
+    #[serde(rename = "approval_required")]
+    ApprovalRequired,
+    #[serde(rename = "unavailable")]
+    Unavailable,
+}
+
+impl HarnExternalActionPolicyEvaluationOutcome {
+    pub const ALL: &'static [Self] = &[
+        Self::Allowed,
+        Self::Denied,
+        Self::ApprovalRequired,
+        Self::Unavailable,
+    ];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Allowed => "allowed",
+            Self::Denied => "denied",
+            Self::ApprovalRequired => "approval_required",
+            Self::Unavailable => "unavailable",
+        }
+    }
+}
+
+/// Closed external-action decision outcomes owned by `std/external_action/vocabulary`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum HarnExternalActionDecisionOutcome {
+    #[serde(rename = "approved")]
+    Approved,
+    #[serde(rename = "denied")]
+    Denied,
+    #[serde(rename = "timed_out")]
+    TimedOut,
+    #[serde(rename = "cancelled")]
+    Cancelled,
+}
+
+impl HarnExternalActionDecisionOutcome {
+    pub const ALL: &'static [Self] = &[
+        Self::Approved,
+        Self::Denied,
+        Self::TimedOut,
+        Self::Cancelled,
+    ];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Approved => "approved",
+            Self::Denied => "denied",
+            Self::TimedOut => "timed_out",
+            Self::Cancelled => "cancelled",
+        }
+    }
+}
+
+/// Closed external-action decider kinds owned by `std/external_action/vocabulary`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum HarnExternalActionDecider {
+    #[serde(rename = "person")]
+    Person,
+    #[serde(rename = "remembered_rule")]
+    RememberedRule,
+    #[serde(rename = "user_policy")]
+    UserPolicy,
+    #[serde(rename = "managed_policy")]
+    ManagedPolicy,
+    #[serde(rename = "adversarial_reviewer")]
+    AdversarialReviewer,
+    #[serde(rename = "test_fixture")]
+    TestFixture,
+}
+
+impl HarnExternalActionDecider {
+    pub const ALL: &'static [Self] = &[
+        Self::Person,
+        Self::RememberedRule,
+        Self::UserPolicy,
+        Self::ManagedPolicy,
+        Self::AdversarialReviewer,
+        Self::TestFixture,
+    ];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Person => "person",
+            Self::RememberedRule => "remembered_rule",
+            Self::UserPolicy => "user_policy",
+            Self::ManagedPolicy => "managed_policy",
+            Self::AdversarialReviewer => "adversarial_reviewer",
+            Self::TestFixture => "test_fixture",
+        }
+    }
+}
+
+/// Closed external-action reconciliation statuses owned by `std/external_action/vocabulary`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum HarnExternalActionReconciliationStatus {
+    #[serde(rename = "not_needed")]
+    NotNeeded,
+    #[serde(rename = "confirmed")]
+    Confirmed,
+    #[serde(rename = "rejected")]
+    Rejected,
+    #[serde(rename = "indeterminate")]
+    Indeterminate,
+    #[serde(rename = "refused")]
+    Refused,
+}
+
+impl HarnExternalActionReconciliationStatus {
+    pub const ALL: &'static [Self] = &[
+        Self::NotNeeded,
+        Self::Confirmed,
+        Self::Rejected,
+        Self::Indeterminate,
+        Self::Refused,
+    ];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::NotNeeded => "not_needed",
+            Self::Confirmed => "confirmed",
+            Self::Rejected => "rejected",
+            Self::Indeterminate => "indeterminate",
+            Self::Refused => "refused",
+        }
+    }
+}
+
 /// Author identity on a collaborative plan revision or comment.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HarnPlanAuthor {

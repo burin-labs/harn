@@ -13,6 +13,13 @@ pub(super) struct ExternalActionVocabulary {
     pub(super) receipt_statuses: Vec<String>,
     pub(super) next_actions: Vec<String>,
     pub(super) protected_field_classes: Vec<String>,
+    pub(super) passenger_genders: Vec<String>,
+    pub(super) activity_statuses: Vec<String>,
+    pub(super) policy_layers: Vec<String>,
+    pub(super) policy_evaluation_outcomes: Vec<String>,
+    pub(super) decision_outcomes: Vec<String>,
+    pub(super) deciders: Vec<String>,
+    pub(super) reconciliation_statuses: Vec<String>,
 }
 
 impl ExternalActionVocabulary {
@@ -30,6 +37,16 @@ impl ExternalActionVocabulary {
             receipt_statuses: literal_union(&program, "ExternalActionReceiptStatus")?,
             next_actions: literal_union(&program, "ExternalActionNextAction")?,
             protected_field_classes: literal_union(&program, "ExternalActionProtectedFieldClass")?,
+            passenger_genders: literal_union(&program, "ExternalActionPassengerGender")?,
+            activity_statuses: literal_union(&program, "ExternalActionActivityStatus")?,
+            policy_layers: literal_union(&program, "ExternalActionPolicyLayer")?,
+            policy_evaluation_outcomes: literal_union(
+                &program,
+                "ExternalActionPolicyEvaluationOutcome",
+            )?,
+            decision_outcomes: literal_union(&program, "ExternalActionDecisionOutcome")?,
+            deciders: literal_union(&program, "ExternalActionDecider")?,
+            reconciliation_statuses: literal_union(&program, "ExternalActionReconciliationStatus")?,
         })
     }
 
@@ -105,6 +122,13 @@ pub type ExternalActionOutcome = "first" | "second_value"
 pub type ExternalActionReceiptStatus = "ready"
 pub type ExternalActionNextAction = "none" | "continue"
 pub type ExternalActionProtectedFieldClass = "legal_identity"
+pub type ExternalActionPassengerGender = "m" | "f"
+pub type ExternalActionActivityStatus = "proposed"
+pub type ExternalActionPolicyLayer = "user_policy"
+pub type ExternalActionPolicyEvaluationOutcome = "allowed"
+pub type ExternalActionDecisionOutcome = "approved"
+pub type ExternalActionDecider = "person"
+pub type ExternalActionReconciliationStatus = "not_needed"
 "#,
         )
         .unwrap();
@@ -112,6 +136,7 @@ pub type ExternalActionProtectedFieldClass = "legal_identity"
         assert_eq!(vocabulary.receipt_statuses, ["ready"]);
         assert_eq!(vocabulary.next_actions, ["none", "continue"]);
         assert_eq!(vocabulary.protected_field_classes, ["legal_identity"]);
+        assert_eq!(vocabulary.passenger_genders, ["m", "f"]);
     }
 
     #[test]
@@ -122,6 +147,13 @@ pub type ExternalActionOutcome = string
 pub type ExternalActionReceiptStatus = "ready"
 pub type ExternalActionNextAction = "none"
 pub type ExternalActionProtectedFieldClass = "legal_identity"
+pub type ExternalActionPassengerGender = "m"
+pub type ExternalActionActivityStatus = "proposed"
+pub type ExternalActionPolicyLayer = "user_policy"
+pub type ExternalActionPolicyEvaluationOutcome = "allowed"
+pub type ExternalActionDecisionOutcome = "approved"
+pub type ExternalActionDecider = "person"
+pub type ExternalActionReconciliationStatus = "not_needed"
 "#,
         )
         .unwrap_err();

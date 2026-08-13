@@ -25,3 +25,41 @@ pub type ExternalActionProtectedFieldClass = "legal_identity" \
   | "accessibility_needs" \
   | "loyalty_accounts" \
   | "travel_documents"
+
+pub type ExternalActionPassengerGender = "m" | "f"
+
+pub type ExternalActionActivityStatus = "proposed" \
+  | "approval_pending" \
+  | "denied" \
+  | "cancelled" \
+  | "timed_out" \
+  | "dispatch_pending" \
+  | "confirmed" \
+  | "failed_before_dispatch" \
+  | "rejected" \
+  | "reconciliation_required"
+
+pub type ExternalActionPolicyLayer = "user_policy" \
+  | "managed_policy" \
+  | "adversarial_reviewer" \
+  | "remembered_rule"
+
+pub type ExternalActionPolicyEvaluationOutcome = "allowed" \
+  | "denied" \
+  | "approval_required" \
+  | "unavailable"
+
+pub type ExternalActionDecisionOutcome = "approved" | "denied" | "timed_out" | "cancelled"
+
+pub type ExternalActionDecider = "person" \
+  | "remembered_rule" \
+  | "user_policy" \
+  | "managed_policy" \
+  | "adversarial_reviewer" \
+  | "test_fixture"
+
+pub type ExternalActionReconciliationStatus = "not_needed" \
+  | "confirmed" \
+  | "rejected" \
+  | "indeterminate" \
+  | "refused"

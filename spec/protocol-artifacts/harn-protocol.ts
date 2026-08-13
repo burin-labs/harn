@@ -373,6 +373,69 @@ export const EXTERNAL_ACTION_PROTECTED_FIELD_CLASSES = [
 ] as const
 export type HarnExternalActionProtectedFieldClass = (typeof EXTERNAL_ACTION_PROTECTED_FIELD_CLASSES)[number]
 
+export const EXTERNAL_ACTION_PASSENGER_GENDERS = [
+  "m",
+  "f",
+] as const
+export type HarnExternalActionPassengerGender = (typeof EXTERNAL_ACTION_PASSENGER_GENDERS)[number]
+
+export const EXTERNAL_ACTION_ACTIVITY_STATUSES = [
+  "proposed",
+  "approval_pending",
+  "denied",
+  "cancelled",
+  "timed_out",
+  "dispatch_pending",
+  "confirmed",
+  "failed_before_dispatch",
+  "rejected",
+  "reconciliation_required",
+] as const
+export type HarnExternalActionActivityStatus = (typeof EXTERNAL_ACTION_ACTIVITY_STATUSES)[number]
+
+export const EXTERNAL_ACTION_POLICY_LAYERS = [
+  "user_policy",
+  "managed_policy",
+  "adversarial_reviewer",
+  "remembered_rule",
+] as const
+export type HarnExternalActionPolicyLayer = (typeof EXTERNAL_ACTION_POLICY_LAYERS)[number]
+
+export const EXTERNAL_ACTION_POLICY_EVALUATION_OUTCOMES = [
+  "allowed",
+  "denied",
+  "approval_required",
+  "unavailable",
+] as const
+export type HarnExternalActionPolicyEvaluationOutcome = (typeof EXTERNAL_ACTION_POLICY_EVALUATION_OUTCOMES)[number]
+
+export const EXTERNAL_ACTION_DECISION_OUTCOMES = [
+  "approved",
+  "denied",
+  "timed_out",
+  "cancelled",
+] as const
+export type HarnExternalActionDecisionOutcome = (typeof EXTERNAL_ACTION_DECISION_OUTCOMES)[number]
+
+export const EXTERNAL_ACTION_DECIDERS = [
+  "person",
+  "remembered_rule",
+  "user_policy",
+  "managed_policy",
+  "adversarial_reviewer",
+  "test_fixture",
+] as const
+export type HarnExternalActionDecider = (typeof EXTERNAL_ACTION_DECIDERS)[number]
+
+export const EXTERNAL_ACTION_RECONCILIATION_STATUSES = [
+  "not_needed",
+  "confirmed",
+  "rejected",
+  "indeterminate",
+  "refused",
+] as const
+export type HarnExternalActionReconciliationStatus = (typeof EXTERNAL_ACTION_RECONCILIATION_STATUSES)[number]
+
 export const A2A_TASK_STATES = [
   "submitted",
   "working",

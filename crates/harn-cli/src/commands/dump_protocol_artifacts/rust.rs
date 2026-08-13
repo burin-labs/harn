@@ -85,6 +85,41 @@ pub(super) fn generate_rust_for_version(
         "Closed protected-profile field classes owned by `std/external_action/vocabulary`.",
         &external_actions.protected_field_classes,
     ));
+    out.push_str(&rust_string_enum(
+        "HarnExternalActionPassengerGender",
+        "Closed passenger gender markers owned by `std/external_action/vocabulary`.",
+        &external_actions.passenger_genders,
+    ));
+    out.push_str(&rust_string_enum(
+        "HarnExternalActionActivityStatus",
+        "Closed external-action activity statuses owned by `std/external_action/vocabulary`.",
+        &external_actions.activity_statuses,
+    ));
+    out.push_str(&rust_string_enum(
+        "HarnExternalActionPolicyLayer",
+        "Closed external-action policy layers owned by `std/external_action/vocabulary`.",
+        &external_actions.policy_layers,
+    ));
+    out.push_str(&rust_string_enum(
+        "HarnExternalActionPolicyEvaluationOutcome",
+        "Closed policy evaluation outcomes owned by `std/external_action/vocabulary`.",
+        &external_actions.policy_evaluation_outcomes,
+    ));
+    out.push_str(&rust_string_enum(
+        "HarnExternalActionDecisionOutcome",
+        "Closed external-action decision outcomes owned by `std/external_action/vocabulary`.",
+        &external_actions.decision_outcomes,
+    ));
+    out.push_str(&rust_string_enum(
+        "HarnExternalActionDecider",
+        "Closed external-action decider kinds owned by `std/external_action/vocabulary`.",
+        &external_actions.deciders,
+    ));
+    out.push_str(&rust_string_enum(
+        "HarnExternalActionReconciliationStatus",
+        "Closed external-action reconciliation statuses owned by `std/external_action/vocabulary`.",
+        &external_actions.reconciliation_statuses,
+    ));
     out.push_str(&rust_wire_types());
 
     out.push_str(&rust_const_group(
