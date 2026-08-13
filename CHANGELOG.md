@@ -9,6 +9,35 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.87
+
+### Added
+
+- Add a typed connector service manifest for product metadata, operation policy,
+  protected-profile field classes, spend, evidence, reconciliation, redaction,
+  and test-fixture requirements, projected through `harn connect` JSON.
+
+### Fixed
+
+- Build Linux release archives on an explicit GLIBC 2.35 baseline and fail publication if a binary requires newer symbols.
+- The ARM64 GNU/Linux release lane now installs target libc development headers
+  alongside its cross compiler, so native C dependencies build on the portable Ubuntu baseline.
+- **Text-tool agent history now follows the route's effective tool channel
+  (#6353).** When a provider returns structured tool calls on a text-only route,
+  Harn reserializes the assistant call and result into the selected text grammar
+  instead of replaying an invalid native tool role on the next turn.
+- **Release and CI dependency installs tolerate sustained transient download
+  failures (#6602).** Immutable dependency downloads now use four total
+  attempts with bounded 5s, 20s, and 60s backoff while deterministic failures
+  still stop immediately.
+- **Keep release caches inside their runner ABI floor.** Release builds now bind both exact and fallback Rust caches to the same compatibility generation, preventing newer-glibc host artifacts from contaminating portable Linux builds.
+
+### Security
+
+- Protected personal values now resolve only after exact action and policy checks,
+  remain transient for one adapter dispatch, and are excluded from action
+  checkpoints, receipts, events, and replay state.
+
 ## v0.10.86
 
 ### Added
