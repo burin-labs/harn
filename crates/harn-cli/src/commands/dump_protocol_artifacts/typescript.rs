@@ -10,6 +10,7 @@ use super::activity::ActivityVocabulary;
 use super::connector_setup::ConnectorSetupVocabulary;
 use super::constants::*;
 use super::external_action::ExternalActionVocabulary;
+use super::external_action_types::append_typescript_external_action_types;
 use super::support::*;
 use super::swift::{deprecated_wire_value, deprecation_message, wire_value_property_name};
 use super::values::*;
@@ -36,6 +37,8 @@ pub(super) fn generate_typescript_for_version(
     out.push_str("\n\n");
     out.push_str("export const HARN_TOOL_PERMISSION_DECISION_SCHEMA = \"harn.tool_permission_decision.v1\" as const\n");
     out.push_str("export const HARN_TOOL_PERMISSION_ACTIVITY_SCHEMA = \"harn.tool_permission_activity.v1\" as const\n\n");
+    out.push_str("export const HARN_EXTERNAL_ACTION_ACTIVITY_SCHEMA = \"harn.external_action_activity.v1\" as const\n");
+    out.push_str("export const HARN_EXTERNAL_ACTION_RECEIPT_SCHEMA = \"harn.external_action_receipt.v1\" as const\n\n");
     for (name, value) in [
         ("MCP_PROTOCOL_VERSION", MCP_PROTOCOL_VERSION),
         (
@@ -190,6 +193,31 @@ pub(super) fn generate_typescript_for_version(
         "HarnExternalActionNextAction",
     ));
     out.push_str(&ts_array_owned(
+        "EXTERNAL_ACTION_ENVIRONMENTS",
+        &external_actions.environments,
+        "HarnExternalActionEnvironment",
+    ));
+    out.push_str(&ts_array_owned(
+        "EXTERNAL_ACTION_AUTHORIZATION_METHODS",
+        &external_actions.authorization_methods,
+        "HarnExternalActionAuthorizationMethod",
+    ));
+    out.push_str(&ts_array_owned(
+        "EXTERNAL_ACTION_AUTHENTICATION_ASSURANCES",
+        &external_actions.authentication_assurances,
+        "HarnExternalActionAuthenticationAssurance",
+    ));
+    out.push_str(&ts_array_owned(
+        "EXTERNAL_ACTION_DISCLOSURE_SOURCES",
+        &external_actions.disclosure_sources,
+        "HarnExternalActionDisclosureSource",
+    ));
+    out.push_str(&ts_array_owned(
+        "EXTERNAL_ACTION_ERROR_KINDS",
+        &external_actions.error_kinds,
+        "HarnExternalActionErrorKind",
+    ));
+    out.push_str(&ts_array_owned(
         "EXTERNAL_ACTION_PROTECTED_FIELD_CLASSES",
         &external_actions.protected_field_classes,
         "HarnExternalActionProtectedFieldClass",
@@ -229,6 +257,7 @@ pub(super) fn generate_typescript_for_version(
         &external_actions.reconciliation_statuses,
         "HarnExternalActionReconciliationStatus",
     ));
+    append_typescript_external_action_types(&mut out);
     out.push_str(&ts_array_owned(
         "ACTIVITY_KINDS",
         &activity.kinds,

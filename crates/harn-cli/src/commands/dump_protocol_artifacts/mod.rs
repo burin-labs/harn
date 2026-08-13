@@ -15,6 +15,7 @@ mod activity;
 mod connector_setup;
 mod constants;
 mod external_action;
+mod external_action_types;
 mod manifest;
 mod support;
 mod values;

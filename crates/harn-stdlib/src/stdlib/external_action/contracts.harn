@@ -5,22 +5,16 @@ import {
   external_action_disclosure_plan_result,
 } from "std/external_action/disclosure"
 pub import {
+  ExternalActionAuthenticationAssurance,
+  ExternalActionAuthorizationMethod,
+  ExternalActionEnvironment,
+  ExternalActionErrorKind,
   ExternalActionNextAction,
   ExternalActionOutcome,
   ExternalActionReceiptStatus,
 } from "std/external_action/vocabulary"
 
 /** Provider-neutral contracts for consequential external effects. */
-pub type ExternalActionEnvironment = "mock" | "test" | "live"
-
-pub type ExternalActionAuthorizationMethod = "manual" \
-  | "policy" \
-  | "adversarial_auto" \
-  | "managed_policy" \
-  | "test_fixture"
-
-pub type ExternalActionAuthenticationAssurance = "none" | "session" | "biometric" | "managed"
-
 pub type ExternalActionActor = {kind: string, id: string}
 
 pub type ExternalActionMoney = {currency: string, amount_minor: int}
@@ -58,17 +52,6 @@ pub type ExternalActionGrant = {
   expires_at_ms: int,
   max_external_spend?: ExternalActionMoney,
 }
-
-pub type ExternalActionErrorKind = "invalid_intent" \
-  | "invalid_grant" \
-  | "invalid_policy" \
-  | "adapter_unavailable" \
-  | "adapter_failure" \
-  | "malformed_adapter_result" \
-  | "disclosure_unavailable" \
-  | "disclosure_refused" \
-  | "malformed_disclosure" \
-  | "invalid_reconciliation"
 
 pub type ExternalActionError = {
   kind: ExternalActionErrorKind,

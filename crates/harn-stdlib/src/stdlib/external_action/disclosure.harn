@@ -1,17 +1,12 @@
+import {
+  ExternalActionAuthenticationAssurance,
+  ExternalActionAuthorizationMethod,
+} from "std/external_action/vocabulary"
 pub import {
+  ExternalActionDisclosureSource,
   ExternalActionPassengerGender,
   ExternalActionProtectedFieldClass,
 } from "std/external_action/vocabulary"
-
-pub type ExternalActionDisclosureSource = "user_profile" | "fictional_test_fixture"
-
-type ExternalActionDisclosureAssurance = "none" | "session" | "biometric" | "managed"
-
-type ExternalActionDisclosureAuthorizationMethod = "manual" \
-  | "policy" \
-  | "adversarial_auto" \
-  | "managed_policy" \
-  | "test_fixture"
 
 type ExternalActionDisclosureError = {kind: string, code: string, message: string, retryable: bool}
 
@@ -77,7 +72,7 @@ pub type ExternalActionDisclosure = {
   purpose: string,
   field_classes: list<ExternalActionProtectedFieldClass>,
   source: ExternalActionDisclosureSource,
-  authentication_assurance: ExternalActionDisclosureAssurance,
+  authentication_assurance: ExternalActionAuthenticationAssurance,
   protected_values: ExternalActionProtectedValues,
 }
 
@@ -92,8 +87,8 @@ pub type ExternalActionDisclosureRequest = {
   field_classes: list<ExternalActionProtectedFieldClass>,
   source: ExternalActionDisclosureSource,
   require_reauthentication: bool,
-  authorization_method: ExternalActionDisclosureAuthorizationMethod,
-  grant_authentication_assurance: ExternalActionDisclosureAssurance,
+  authorization_method: ExternalActionAuthorizationMethod,
+  grant_authentication_assurance: ExternalActionAuthenticationAssurance,
 }
 
 pub type ExternalActionDisclosureResolver = {
@@ -107,7 +102,7 @@ pub type ExternalActionDisclosureReceipt = {
   purpose: string,
   field_classes: list<ExternalActionProtectedFieldClass>,
   source: ExternalActionDisclosureSource,
-  authentication_assurance: ExternalActionDisclosureAssurance,
+  authentication_assurance: ExternalActionAuthenticationAssurance,
 }
 
 fn __disclosure_error(
@@ -372,7 +367,7 @@ fn __protected_values_are_valid(values: ExternalActionProtectedValues) -> bool {
 
 fn __disclosure_assurance_is_valid(
   plan: ExternalActionDisclosurePlan,
-  assurance: ExternalActionDisclosureAssurance,
+  assurance: ExternalActionAuthenticationAssurance,
 ) -> bool {
   if !plan.require_reauthentication {
     return true

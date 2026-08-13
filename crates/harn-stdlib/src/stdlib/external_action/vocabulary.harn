@@ -19,6 +19,29 @@ pub type ExternalActionReceiptStatus = "confirmed" \
 
 pub type ExternalActionNextAction = "none" | "reconcile"
 
+pub type ExternalActionEnvironment = "mock" | "test" | "live"
+
+pub type ExternalActionAuthorizationMethod = "manual" \
+  | "policy" \
+  | "adversarial_auto" \
+  | "managed_policy" \
+  | "test_fixture"
+
+pub type ExternalActionAuthenticationAssurance = "none" | "session" | "biometric" | "managed"
+
+pub type ExternalActionDisclosureSource = "user_profile" | "fictional_test_fixture"
+
+pub type ExternalActionErrorKind = "invalid_intent" \
+  | "invalid_grant" \
+  | "invalid_policy" \
+  | "adapter_unavailable" \
+  | "adapter_failure" \
+  | "malformed_adapter_result" \
+  | "disclosure_unavailable" \
+  | "disclosure_refused" \
+  | "malformed_disclosure" \
+  | "invalid_reconciliation"
+
 pub type ExternalActionProtectedFieldClass = "legal_identity" \
   | "birth_date" \
   | "contact_details" \

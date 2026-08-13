@@ -12,6 +12,11 @@ pub(super) struct ExternalActionVocabulary {
     pub(super) outcomes: Vec<String>,
     pub(super) receipt_statuses: Vec<String>,
     pub(super) next_actions: Vec<String>,
+    pub(super) environments: Vec<String>,
+    pub(super) authorization_methods: Vec<String>,
+    pub(super) authentication_assurances: Vec<String>,
+    pub(super) disclosure_sources: Vec<String>,
+    pub(super) error_kinds: Vec<String>,
     pub(super) protected_field_classes: Vec<String>,
     pub(super) passenger_genders: Vec<String>,
     pub(super) activity_statuses: Vec<String>,
@@ -46,6 +51,31 @@ impl ExternalActionVocabulary {
             next_actions: literal_union(
                 &program,
                 "ExternalActionNextAction",
+                EXTERNAL_ACTION_VOCABULARY_SOURCE,
+            )?,
+            environments: literal_union(
+                &program,
+                "ExternalActionEnvironment",
+                EXTERNAL_ACTION_VOCABULARY_SOURCE,
+            )?,
+            authorization_methods: literal_union(
+                &program,
+                "ExternalActionAuthorizationMethod",
+                EXTERNAL_ACTION_VOCABULARY_SOURCE,
+            )?,
+            authentication_assurances: literal_union(
+                &program,
+                "ExternalActionAuthenticationAssurance",
+                EXTERNAL_ACTION_VOCABULARY_SOURCE,
+            )?,
+            disclosure_sources: literal_union(
+                &program,
+                "ExternalActionDisclosureSource",
+                EXTERNAL_ACTION_VOCABULARY_SOURCE,
+            )?,
+            error_kinds: literal_union(
+                &program,
+                "ExternalActionErrorKind",
                 EXTERNAL_ACTION_VOCABULARY_SOURCE,
             )?,
             protected_field_classes: literal_union(
@@ -164,6 +194,11 @@ mod tests {
 pub type ExternalActionOutcome = "first" | "second_value"
 pub type ExternalActionReceiptStatus = "ready"
 pub type ExternalActionNextAction = "none" | "continue"
+pub type ExternalActionEnvironment = "test"
+pub type ExternalActionAuthorizationMethod = "manual"
+pub type ExternalActionAuthenticationAssurance = "session"
+pub type ExternalActionDisclosureSource = "user_profile"
+pub type ExternalActionErrorKind = "invalid_intent"
 pub type ExternalActionProtectedFieldClass = "legal_identity"
 pub type ExternalActionPassengerGender = "m" | "f"
 pub type ExternalActionActivityStatus = "proposed"
@@ -178,6 +213,8 @@ pub type ExternalActionReconciliationStatus = "not_needed"
         assert_eq!(vocabulary.outcomes, ["first", "second_value"]);
         assert_eq!(vocabulary.receipt_statuses, ["ready"]);
         assert_eq!(vocabulary.next_actions, ["none", "continue"]);
+        assert_eq!(vocabulary.environments, ["test"]);
+        assert_eq!(vocabulary.authorization_methods, ["manual"]);
         assert_eq!(vocabulary.protected_field_classes, ["legal_identity"]);
         assert_eq!(vocabulary.passenger_genders, ["m", "f"]);
     }
@@ -189,6 +226,11 @@ pub type ExternalActionReconciliationStatus = "not_needed"
 pub type ExternalActionOutcome = string
 pub type ExternalActionReceiptStatus = "ready"
 pub type ExternalActionNextAction = "none"
+pub type ExternalActionEnvironment = "test"
+pub type ExternalActionAuthorizationMethod = "manual"
+pub type ExternalActionAuthenticationAssurance = "session"
+pub type ExternalActionDisclosureSource = "user_profile"
+pub type ExternalActionErrorKind = "invalid_intent"
 pub type ExternalActionProtectedFieldClass = "legal_identity"
 pub type ExternalActionPassengerGender = "m"
 pub type ExternalActionActivityStatus = "proposed"

@@ -18,6 +18,9 @@ pub const HARN_PROTOCOL_ARTIFACT_VERSION: &str = "0.10.89";
 pub const HARN_TOOL_PERMISSION_DECISION_SCHEMA: &str = "harn.tool_permission_decision.v1";
 pub const HARN_TOOL_PERMISSION_ACTIVITY_SCHEMA: &str = "harn.tool_permission_activity.v1";
 
+pub const HARN_EXTERNAL_ACTION_ACTIVITY_SCHEMA: &str = "harn.external_action_activity.v1";
+pub const HARN_EXTERNAL_ACTION_RECEIPT_SCHEMA: &str = "harn.external_action_receipt.v1";
+
 /// Upstream ACP schema version Harn tracks.
 pub const ACP_SCHEMA_COMPATIBILITY: &str = "agentclientprotocol/agent-client-protocol schema v0.12.2";
 
@@ -119,6 +122,177 @@ impl HarnExternalActionNextAction {
         match self {
             Self::None => "none",
             Self::Reconcile => "reconcile",
+        }
+    }
+}
+
+/// Closed external-action environments owned by `std/external_action/vocabulary`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum HarnExternalActionEnvironment {
+    #[serde(rename = "mock")]
+    Mock,
+    #[serde(rename = "test")]
+    Test,
+    #[serde(rename = "live")]
+    Live,
+}
+
+impl HarnExternalActionEnvironment {
+    pub const ALL: &'static [Self] = &[
+        Self::Mock,
+        Self::Test,
+        Self::Live,
+    ];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Mock => "mock",
+            Self::Test => "test",
+            Self::Live => "live",
+        }
+    }
+}
+
+/// Closed external-action authorization methods owned by `std/external_action/vocabulary`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum HarnExternalActionAuthorizationMethod {
+    #[serde(rename = "manual")]
+    Manual,
+    #[serde(rename = "policy")]
+    Policy,
+    #[serde(rename = "adversarial_auto")]
+    AdversarialAuto,
+    #[serde(rename = "managed_policy")]
+    ManagedPolicy,
+    #[serde(rename = "test_fixture")]
+    TestFixture,
+}
+
+impl HarnExternalActionAuthorizationMethod {
+    pub const ALL: &'static [Self] = &[
+        Self::Manual,
+        Self::Policy,
+        Self::AdversarialAuto,
+        Self::ManagedPolicy,
+        Self::TestFixture,
+    ];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Manual => "manual",
+            Self::Policy => "policy",
+            Self::AdversarialAuto => "adversarial_auto",
+            Self::ManagedPolicy => "managed_policy",
+            Self::TestFixture => "test_fixture",
+        }
+    }
+}
+
+/// Closed external-action authentication assurances owned by `std/external_action/vocabulary`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum HarnExternalActionAuthenticationAssurance {
+    #[serde(rename = "none")]
+    None,
+    #[serde(rename = "session")]
+    Session,
+    #[serde(rename = "biometric")]
+    Biometric,
+    #[serde(rename = "managed")]
+    Managed,
+}
+
+impl HarnExternalActionAuthenticationAssurance {
+    pub const ALL: &'static [Self] = &[
+        Self::None,
+        Self::Session,
+        Self::Biometric,
+        Self::Managed,
+    ];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Session => "session",
+            Self::Biometric => "biometric",
+            Self::Managed => "managed",
+        }
+    }
+}
+
+/// Closed external-action disclosure sources owned by `std/external_action/vocabulary`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum HarnExternalActionDisclosureSource {
+    #[serde(rename = "user_profile")]
+    UserProfile,
+    #[serde(rename = "fictional_test_fixture")]
+    FictionalTestFixture,
+}
+
+impl HarnExternalActionDisclosureSource {
+    pub const ALL: &'static [Self] = &[
+        Self::UserProfile,
+        Self::FictionalTestFixture,
+    ];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::UserProfile => "user_profile",
+            Self::FictionalTestFixture => "fictional_test_fixture",
+        }
+    }
+}
+
+/// Closed external-action error kinds owned by `std/external_action/vocabulary`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum HarnExternalActionErrorKind {
+    #[serde(rename = "invalid_intent")]
+    InvalidIntent,
+    #[serde(rename = "invalid_grant")]
+    InvalidGrant,
+    #[serde(rename = "invalid_policy")]
+    InvalidPolicy,
+    #[serde(rename = "adapter_unavailable")]
+    AdapterUnavailable,
+    #[serde(rename = "adapter_failure")]
+    AdapterFailure,
+    #[serde(rename = "malformed_adapter_result")]
+    MalformedAdapterResult,
+    #[serde(rename = "disclosure_unavailable")]
+    DisclosureUnavailable,
+    #[serde(rename = "disclosure_refused")]
+    DisclosureRefused,
+    #[serde(rename = "malformed_disclosure")]
+    MalformedDisclosure,
+    #[serde(rename = "invalid_reconciliation")]
+    InvalidReconciliation,
+}
+
+impl HarnExternalActionErrorKind {
+    pub const ALL: &'static [Self] = &[
+        Self::InvalidIntent,
+        Self::InvalidGrant,
+        Self::InvalidPolicy,
+        Self::AdapterUnavailable,
+        Self::AdapterFailure,
+        Self::MalformedAdapterResult,
+        Self::DisclosureUnavailable,
+        Self::DisclosureRefused,
+        Self::MalformedDisclosure,
+        Self::InvalidReconciliation,
+    ];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::InvalidIntent => "invalid_intent",
+            Self::InvalidGrant => "invalid_grant",
+            Self::InvalidPolicy => "invalid_policy",
+            Self::AdapterUnavailable => "adapter_unavailable",
+            Self::AdapterFailure => "adapter_failure",
+            Self::MalformedAdapterResult => "malformed_adapter_result",
+            Self::DisclosureUnavailable => "disclosure_unavailable",
+            Self::DisclosureRefused => "disclosure_refused",
+            Self::MalformedDisclosure => "malformed_disclosure",
+            Self::InvalidReconciliation => "invalid_reconciliation",
         }
     }
 }
@@ -405,6 +579,159 @@ impl HarnExternalActionReconciliationStatus {
             Self::Refused => "refused",
         }
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnExternalActionActor {
+    pub kind: String,
+    pub id: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnExternalActionMoney {
+    pub currency: String,
+    pub amount_minor: i64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnExternalActionDisclosureReceipt {
+    pub recipient: String,
+    pub purpose: String,
+    pub field_classes: Vec<HarnExternalActionProtectedFieldClass>,
+    pub source: HarnExternalActionDisclosureSource,
+    pub authentication_assurance: HarnExternalActionAuthenticationAssurance,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnExternalActionError {
+    pub kind: HarnExternalActionErrorKind,
+    pub code: String,
+    pub message: String,
+    pub retryable: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnExternalActionReceiptReconciliation {
+    pub attempt_id: String,
+    pub previous_receipt_id: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnExternalActionReceipt {
+    pub schema: String,
+    pub id: String,
+    pub action_id: String,
+    pub intent_fingerprint: String,
+    pub idempotency_key: String,
+    pub provider: String,
+    pub capability: String,
+    pub operation: String,
+    pub environment: HarnExternalActionEnvironment,
+    pub adapter_id: String,
+    pub outcome: HarnExternalActionOutcome,
+    pub status: HarnExternalActionReceiptStatus,
+    pub next_action: HarnExternalActionNextAction,
+    pub dispatch_attempted: bool,
+    pub recorded_at_ms: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_action_id: Option<String>,
+    pub evidence_refs: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<HarnExternalActionError>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reconciliation: Option<HarnExternalActionReceiptReconciliation>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disclosure: Option<HarnExternalActionDisclosureReceipt>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnExternalActionPolicyEvaluation {
+    pub layer: HarnExternalActionPolicyLayer,
+    pub outcome: HarnExternalActionPolicyEvaluationOutcome,
+    pub reason_code: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub policy_id: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnExternalActionDecision {
+    pub outcome: HarnExternalActionDecisionOutcome,
+    pub decider: HarnExternalActionDecider,
+    pub decided_at_ms: i64,
+    pub reason_code: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub actor: Option<HarnExternalActionActor>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnExternalActionAuthorizationRecord {
+    pub method: HarnExternalActionAuthorizationMethod,
+    pub authentication_assurance: HarnExternalActionAuthenticationAssurance,
+    pub issued_at_ms: i64,
+    pub expires_at_ms: i64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnExternalActionRequester {
+    pub actor: HarnExternalActionActor,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_provider: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_id: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnExternalActionDispatchRecord {
+    pub attempted: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub adapter_id: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnExternalActionReconciliationRecord {
+    pub attempted: bool,
+    pub status: HarnExternalActionReconciliationStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attempt_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub previous_receipt_id: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnExternalActionActivityRecord {
+    pub schema: String,
+    pub kind: HarnActivityKind,
+    pub id: String,
+    pub action_id: String,
+    pub intent_fingerprint: String,
+    pub provider: String,
+    pub capability: String,
+    pub operation: String,
+    pub environment: HarnExternalActionEnvironment,
+    pub summary: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub external_spend: Option<HarnExternalActionMoney>,
+    pub status: HarnExternalActionActivityStatus,
+    pub updated_at_ms: i64,
+    pub requester: HarnExternalActionRequester,
+    pub policy_evaluations: Vec<HarnExternalActionPolicyEvaluation>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub decision: Option<HarnExternalActionDecision>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub authorization: Option<HarnExternalActionAuthorizationRecord>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disclosure: Option<HarnExternalActionDisclosureReceipt>,
+    pub dispatch: HarnExternalActionDispatchRecord,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reconciliation: Option<HarnExternalActionReconciliationRecord>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub receipt: Option<HarnExternalActionReceipt>,
 }
 
 /// Closed portable activity kinds owned by `std/activity/vocabulary`.

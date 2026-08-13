@@ -11,6 +11,7 @@ use super::activity::ActivityVocabulary;
 use super::connector_setup::ConnectorSetupVocabulary;
 use super::constants::*;
 use super::external_action::ExternalActionVocabulary;
+use super::external_action_types::append_swift_external_action_types;
 use super::support::*;
 use super::values::*;
 
@@ -51,6 +52,10 @@ pub(super) fn generate_swift_for_version(
     ));
     out.push_str("    public static let toolPermissionDecisionSchema = \"harn.tool_permission_decision.v1\"\n");
     out.push_str("    public static let toolPermissionActivitySchema = \"harn.tool_permission_activity.v1\"\n");
+    out.push_str("    public static let externalActionActivitySchema = \"harn.external_action_activity.v1\"\n");
+    out.push_str(
+        "    public static let externalActionReceiptSchema = \"harn.external_action_receipt.v1\"\n",
+    );
     out.push_str(&format!(
         "    public static let harnAgentEventMethod = {}\n",
         json_string_literal(HARN_AGENT_EVENT_METHOD)
@@ -154,6 +159,26 @@ pub(super) fn generate_swift_for_version(
         &external_actions.next_actions,
     ));
     out.push_str(&swift_enum(
+        "HarnExternalActionEnvironment",
+        &external_actions.environments,
+    ));
+    out.push_str(&swift_enum(
+        "HarnExternalActionAuthorizationMethod",
+        &external_actions.authorization_methods,
+    ));
+    out.push_str(&swift_enum(
+        "HarnExternalActionAuthenticationAssurance",
+        &external_actions.authentication_assurances,
+    ));
+    out.push_str(&swift_enum(
+        "HarnExternalActionDisclosureSource",
+        &external_actions.disclosure_sources,
+    ));
+    out.push_str(&swift_enum(
+        "HarnExternalActionErrorKind",
+        &external_actions.error_kinds,
+    ));
+    out.push_str(&swift_enum(
         "HarnExternalActionProtectedFieldClass",
         &external_actions.protected_field_classes,
     ));
@@ -185,6 +210,7 @@ pub(super) fn generate_swift_for_version(
         "HarnExternalActionReconciliationStatus",
         &external_actions.reconciliation_statuses,
     ));
+    append_swift_external_action_types(&mut out);
     append_activity_types(&mut out, activity);
     out.push_str(&swift_enum(
         "HarnConnectorSetupStage",

@@ -9,6 +9,7 @@ use super::activity::ActivityVocabulary;
 use super::connector_setup::ConnectorSetupVocabulary;
 use super::constants::*;
 use super::external_action::ExternalActionVocabulary;
+use super::external_action_types::append_rust_external_action_types;
 use super::support::*;
 use super::values::*;
 
@@ -53,6 +54,8 @@ pub(super) fn generate_rust_for_version(
     ));
     out.push_str("pub const HARN_TOOL_PERMISSION_DECISION_SCHEMA: &str = \"harn.tool_permission_decision.v1\";\n");
     out.push_str("pub const HARN_TOOL_PERMISSION_ACTIVITY_SCHEMA: &str = \"harn.tool_permission_activity.v1\";\n\n");
+    out.push_str("pub const HARN_EXTERNAL_ACTION_ACTIVITY_SCHEMA: &str = \"harn.external_action_activity.v1\";\n");
+    out.push_str("pub const HARN_EXTERNAL_ACTION_RECEIPT_SCHEMA: &str = \"harn.external_action_receipt.v1\";\n\n");
     out.push_str("/// Upstream ACP schema version Harn tracks.\n");
     out.push_str(&format!(
         "pub const ACP_SCHEMA_COMPATIBILITY: &str = {};\n\n",
@@ -87,6 +90,31 @@ pub(super) fn generate_rust_for_version(
         "HarnExternalActionNextAction",
         "Closed external-action follow-up actions owned by `std/external_action/vocabulary`.",
         &external_actions.next_actions,
+    ));
+    out.push_str(&rust_string_enum(
+        "HarnExternalActionEnvironment",
+        "Closed external-action environments owned by `std/external_action/vocabulary`.",
+        &external_actions.environments,
+    ));
+    out.push_str(&rust_string_enum(
+        "HarnExternalActionAuthorizationMethod",
+        "Closed external-action authorization methods owned by `std/external_action/vocabulary`.",
+        &external_actions.authorization_methods,
+    ));
+    out.push_str(&rust_string_enum(
+        "HarnExternalActionAuthenticationAssurance",
+        "Closed external-action authentication assurances owned by `std/external_action/vocabulary`.",
+        &external_actions.authentication_assurances,
+    ));
+    out.push_str(&rust_string_enum(
+        "HarnExternalActionDisclosureSource",
+        "Closed external-action disclosure sources owned by `std/external_action/vocabulary`.",
+        &external_actions.disclosure_sources,
+    ));
+    out.push_str(&rust_string_enum(
+        "HarnExternalActionErrorKind",
+        "Closed external-action error kinds owned by `std/external_action/vocabulary`.",
+        &external_actions.error_kinds,
     ));
     out.push_str(&rust_string_enum(
         "HarnExternalActionProtectedFieldClass",
@@ -128,6 +156,7 @@ pub(super) fn generate_rust_for_version(
         "Closed external-action reconciliation statuses owned by `std/external_action/vocabulary`.",
         &external_actions.reconciliation_statuses,
     ));
+    append_rust_external_action_types(&mut out);
     out.push_str(&rust_string_enum(
         "HarnActivityKind",
         "Closed portable activity kinds owned by `std/activity/vocabulary`.",
