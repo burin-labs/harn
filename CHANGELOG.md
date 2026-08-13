@@ -9,6 +9,24 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.89
+
+### Fixed
+
+- Resolve every catalog-declared `provider:model` selector through its explicit
+  provider instead of falling through to `auto` or Ollama. Provider names in
+  `std/config` are now generated from the provider catalog.
+- Keep the hosted documentation complete and navigable: the site build now
+  rejects missing navigation entries, pages, and anchors, and split language
+  specification pages rewrite cross-chapter links to their owning page.
+- Correct the language specification and quick references for the shipped
+  `const`/`let` binding scheme, including `const` destructuring.
+- `harn serve api` now mounts its advertised live-session client lifecycle and
+  active-task steering routes through the canonical ACP and VM session owners.
+- Generated protocol artifacts now publish constant-based ACP dispatch methods,
+  including collaborative plan mutations, and fail closed when a new dispatch
+  constant is not registered.
+
 ## v0.10.88
 
 ### Added
