@@ -15,6 +15,7 @@ mod denial_results;
 mod dispatch_policy;
 pub(super) mod event_capture;
 mod host_permission;
+mod primitive_args;
 mod side_effect_ceiling;
 mod structured_tool_result;
 mod tool_catalog;
@@ -23,70 +24,21 @@ use denial_results::{
 };
 use dispatch_policy::{tool_denial_from_policy, DispatchPolicy};
 use host_permission::{
-    emit_permission_activity, emit_permission_event, emit_permission_event_with_policy,
-    request_host_permission, HostPermissionOutcome, HostPermissionRequest,
+    emit_permission_event, emit_permission_event_with_policy, emit_runtime_auto_approved_activity,
+    emit_runtime_denied_activity, emit_runtime_resolved_activity,
+    emit_runtime_unavailable_activity, request_host_permission, HostPermissionOutcome,
+    HostPermissionRequest,
+};
+use primitive_args::{
+    option_int as agent_primitive_option_int, option_str as agent_primitive_option_str,
+    options_value as agent_primitive_options_value_arg, tools as agent_primitive_tools_arg,
+    tools_value as agent_primitive_tools_value_arg,
 };
 use side_effect_ceiling::{request_side_effect_permission, SideEffectPermissionOutcome};
 use tool_catalog::{
     annotations_for as tool_annotations_for, descriptor_for as tool_descriptor_for,
     permission_context_for,
 };
-
-fn agent_primitive_tools_arg(
-    args: &[VmValue],
-    index: usize,
-    label: &str,
-) -> Result<Option<VmValue>, VmError> {
-    match args.get(index) {
-        Some(VmValue::Nil) | None => Ok(crate::stdlib::tools::current_tool_registry()),
-        Some(VmValue::Dict(_)) => Ok(args.get(index).cloned()),
-        Some(other) => Err(VmError::Runtime(format!(
-            "{label}: tools must be a tool registry dict or nil; got {}",
-            other.type_name()
-        ))),
-    }
-}
-
-fn agent_primitive_tools_value_arg(
-    value: Option<VmValue>,
-    label: &str,
-) -> Result<Option<VmValue>, VmError> {
-    match value {
-        Some(VmValue::Nil) | None => Ok(crate::stdlib::tools::current_tool_registry()),
-        Some(value @ VmValue::Dict(_)) => Ok(Some(value)),
-        Some(other) => Err(VmError::Runtime(format!(
-            "{label}: tools must be a tool registry dict or nil; got {}",
-            other.type_name()
-        ))),
-    }
-}
-
-fn agent_primitive_options_value_arg(
-    value: Option<VmValue>,
-    label: &str,
-) -> Result<crate::value::DictMap, VmError> {
-    match value {
-        Some(VmValue::Dict(options)) => {
-            Ok(Arc::try_unwrap(options).unwrap_or_else(|options| options.as_ref().clone()))
-        }
-        Some(VmValue::Nil) | None => Ok(crate::value::DictMap::new()),
-        Some(other) => Err(VmError::Runtime(format!(
-            "{label}: options must be a dict or nil; got {}",
-            other.type_name()
-        ))),
-    }
-}
-
-fn agent_primitive_option_str(options: &crate::value::DictMap, key: &str) -> Option<String> {
-    match options.get(key)? {
-        VmValue::Nil => None,
-        value => Some(value.display()),
-    }
-}
-
-fn agent_primitive_option_int(options: &crate::value::DictMap, key: &str) -> Option<i64> {
-    options.get(key)?.as_int()
-}
 
 /// Cause-named feedback for a tool call whose arguments failed validation
 /// because of an argument-DELIVERY fault — the model authored a real call, but
@@ -1171,32 +1123,10 @@ pub(super) async fn host_agent_dispatch_tool_call(
                 false,
                 Some(decision.receipt.clone()),
             );
-            emit_permission_activity(
-                &session_id,
-                &tool_id,
-                &tool_name,
-                &decision,
-                crate::orchestration::ToolPermissionPolicyLayer::RuntimePolicy,
-                crate::orchestration::ToolPermissionResolution {
-                    outcome: crate::orchestration::ToolPermissionOutcome::Approved,
-                    decider: crate::orchestration::ToolPermissionDecider::RuntimePolicy,
-                    grant_scope: None,
-                    policy_evaluations: Vec::new(),
-                },
-            );
+            emit_runtime_auto_approved_activity(&session_id, &tool_id, &tool_name, &decision);
         }
         Some(decision) if decision.is_deny() => {
-            emit_permission_activity(
-                &session_id,
-                &tool_id,
-                &tool_name,
-                &decision,
-                crate::orchestration::ToolPermissionPolicyLayer::RuntimePolicy,
-                crate::orchestration::ToolPermissionResolution::terminal(
-                    crate::orchestration::ToolPermissionOutcome::Denied,
-                    crate::orchestration::ToolPermissionDecider::RuntimePolicy,
-                ),
-            );
+            emit_runtime_denied_activity(&session_id, &tool_id, &tool_name, &decision);
             let denial = crate::agent_events::ToolDenial::terminal(
                 crate::agent_events::DenialGate::ApprovalPolicy,
                 None,
@@ -1254,22 +1184,20 @@ pub(super) async fn host_agent_dispatch_tool_call(
                         true,
                         Some(decision.receipt.clone()),
                     );
-                    emit_permission_activity(
+                    emit_runtime_resolved_activity(
                         &session_id,
                         &approval_id,
                         &tool_name,
                         &decision,
-                        crate::orchestration::ToolPermissionPolicyLayer::RuntimePolicy,
                         resolution,
                     );
                 }
                 HostPermissionOutcome::Rejected { reason, resolution } => {
-                    emit_permission_activity(
+                    emit_runtime_resolved_activity(
                         &session_id,
                         &approval_id,
                         &tool_name,
                         &decision,
-                        crate::orchestration::ToolPermissionPolicyLayer::RuntimePolicy,
                         resolution,
                     );
                     let denial = crate::agent_events::ToolDenial::terminal(
@@ -1290,16 +1218,11 @@ pub(super) async fn host_agent_dispatch_tool_call(
                     .await);
                 }
                 HostPermissionOutcome::Unavailable => {
-                    emit_permission_activity(
+                    emit_runtime_unavailable_activity(
                         &session_id,
                         &approval_id,
                         &tool_name,
                         &decision,
-                        crate::orchestration::ToolPermissionPolicyLayer::RuntimePolicy,
-                        crate::orchestration::ToolPermissionResolution::terminal(
-                            crate::orchestration::ToolPermissionOutcome::Denied,
-                            crate::orchestration::ToolPermissionDecider::HostUnavailable,
-                        ),
                     );
                     let (denial_class, repeat_count) =
                         crate::orchestration::next_approval_unavailable_class_repeat_count(

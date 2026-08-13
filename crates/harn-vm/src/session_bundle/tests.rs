@@ -219,7 +219,7 @@ fn permission_activity_projection_uses_only_typed_value_free_payload() {
     }));
     let mut permissions = Vec::new();
 
-    collect_permission_events(&mut permissions, "run.transcript", &transcript);
+    permissions::collect_permission_events(&mut permissions, "run.transcript", &transcript);
 
     assert_eq!(permissions.len(), 1);
     assert_eq!(permissions[0].request_id.as_deref(), Some("call-1"));

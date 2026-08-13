@@ -113,10 +113,7 @@ pub(super) fn emit_permission_activity(
         model_provider: model.as_ref().map(|model| model.provider.clone()),
         model_id: model.map(|model| model.id),
         policy_layer: layer,
-        occurred_at_ms: std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|duration| duration.as_millis().min(u128::from(u64::MAX)) as u64)
-            .unwrap_or(0),
+        occurred_at_ms: crate::clock_mock::now_ms().max(0) as u64,
     };
     let policy = ToolPermissionPolicyFacts {
         outcome: if evaluation.is_allow() {
@@ -148,6 +145,79 @@ pub(super) fn emit_permission_activity(
         Some(serde_json::json!({"activity": activity})),
     );
     let _ = crate::agent_sessions::append_event(session_id, event);
+}
+
+pub(super) fn emit_runtime_auto_approved_activity(
+    session_id: &str,
+    tool_call_id: &str,
+    tool_name: &str,
+    evaluation: &PolicyEvaluation,
+) {
+    emit_runtime_resolved_activity(
+        session_id,
+        tool_call_id,
+        tool_name,
+        evaluation,
+        ToolPermissionResolution {
+            outcome: crate::orchestration::ToolPermissionOutcome::Approved,
+            decider: crate::orchestration::ToolPermissionDecider::RuntimePolicy,
+            grant_scope: None,
+            policy_evaluations: Vec::new(),
+        },
+    );
+}
+
+pub(super) fn emit_runtime_denied_activity(
+    session_id: &str,
+    tool_call_id: &str,
+    tool_name: &str,
+    evaluation: &PolicyEvaluation,
+) {
+    emit_runtime_resolved_activity(
+        session_id,
+        tool_call_id,
+        tool_name,
+        evaluation,
+        ToolPermissionResolution::terminal(
+            crate::orchestration::ToolPermissionOutcome::Denied,
+            crate::orchestration::ToolPermissionDecider::RuntimePolicy,
+        ),
+    );
+}
+
+pub(super) fn emit_runtime_unavailable_activity(
+    session_id: &str,
+    tool_call_id: &str,
+    tool_name: &str,
+    evaluation: &PolicyEvaluation,
+) {
+    emit_runtime_resolved_activity(
+        session_id,
+        tool_call_id,
+        tool_name,
+        evaluation,
+        ToolPermissionResolution::terminal(
+            crate::orchestration::ToolPermissionOutcome::Denied,
+            crate::orchestration::ToolPermissionDecider::HostUnavailable,
+        ),
+    );
+}
+
+pub(super) fn emit_runtime_resolved_activity(
+    session_id: &str,
+    tool_call_id: &str,
+    tool_name: &str,
+    evaluation: &PolicyEvaluation,
+    resolution: ToolPermissionResolution,
+) {
+    emit_permission_activity(
+        session_id,
+        tool_call_id,
+        tool_name,
+        evaluation,
+        ToolPermissionPolicyLayer::RuntimePolicy,
+        resolution,
+    );
 }
 
 pub(super) async fn request_host_permission(
@@ -371,6 +441,9 @@ mod tests {
 
     #[test]
     fn portable_activity_event_excludes_raw_permission_values() {
+        let _clock = crate::clock_mock::install_override(crate::clock_mock::MockClock::at_wall_ms(
+            1_700_000_000_123,
+        ));
         let session_id = crate::agent_sessions::open_or_create(Some(
             "permission-activity-event-test".to_string(),
         ));
@@ -402,6 +475,7 @@ mod tests {
             .expect("json");
         assert!(rendered.contains("PermissionDecision"));
         assert!(rendered.contains("harn.tool_permission_activity.v1"));
+        assert!(rendered.contains("1700000000123"));
         assert!(!rendered.contains("secret-value"));
         assert!(!rendered.contains("private@example.com"));
         assert!(!rendered.contains("arguments"));
