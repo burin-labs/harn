@@ -185,14 +185,17 @@ const ARTIFACT_READY_JOB = "rust-artifacts-ready"
 
 const SECURITY_READY_JOB = "security-tests-ready"
 
-// A cold merge-group producer has taken ~15.5m to publish the CLI. Consumers
-// poll for 27m, bounded by a 30m barrier job. Keep these values mechanically
-// paired so a workflow edit cannot silently restore the shorter failure mode.
-const ARTIFACT_WAIT_MAX_ATTEMPTS = "162"
+// A cold merge-group producer has taken ~15.5m to publish the CLI, and a later
+// healthy producer remained queued for more than 16m before compilation. The
+// 45m poll budget covers admission plus the producer's bounded build; barrier
+// and audit deadlines retain scheduling and post-artifact headroom.
+const ARTIFACT_WAIT_MAX_ATTEMPTS = "270"
 
 const ARTIFACT_WAIT_INTERVAL_SECONDS = "10"
 
-const ARTIFACT_READY_TIMEOUT_MINUTES = "30"
+const ARTIFACT_READY_TIMEOUT_MINUTES = "50"
+
+const HARN_AUDIT_TIMEOUT_MINUTES = "65"
 
 const LIVE_ARTIFACT_CONSUMERS = ["audit-scripts", "ci-walltime-report"]
 
@@ -1898,6 +1901,8 @@ fn harn_audit_overlap_errors(workflow) -> list<string> {
   if (audit?.needs ?? []) != ["changes"]
     || trim(audit?.if ?? "")
     != "needs.changes.outputs.rust == 'true'"
+    || trim(to_string(audit?.["timeout-minutes"] ?? ""))
+    != HARN_AUDIT_TIMEOUT_MINUTES
     || wait_index < 0
     || download_index < 0
     || verify_index < 0

@@ -114,7 +114,7 @@ fn workflow() {
     "needs.changes.outputs.rust == 'true' && needs.rust-artifacts-ready.result == 'success'"
   const artifact_consumer_needs = ["changes", "rust-artifacts-ready"]
   return {
-    env: {HARN_ARTIFACT_WAIT_MAX_ATTEMPTS: "162", HARN_ARTIFACT_WAIT_INTERVAL_SECONDS: "10"},
+    env: {HARN_ARTIFACT_WAIT_MAX_ATTEMPTS: "270", HARN_ARTIFACT_WAIT_INTERVAL_SECONDS: "10"},
     jobs: {
       "package-audit": package_audit,
       "rust-check-inputs": {
@@ -150,7 +150,7 @@ fn workflow() {
       },
       "rust-artifacts-ready": {
         "runs-on": "ubuntu-latest",
-        "timeout-minutes": 30,
+        "timeout-minutes": 50,
         needs: ["changes"],
         permissions: {actions: "read", contents: "read"},
         steps: [
@@ -212,7 +212,7 @@ fn workflow() {
       "rust-test": rust_test,
       "security-tests-ready": {
         "runs-on": "ubuntu-latest",
-        "timeout-minutes": 30,
+        "timeout-minutes": 50,
         needs: ["changes"],
         permissions: {actions: "read", contents: "read"},
         steps: [
@@ -238,6 +238,7 @@ fn workflow() {
       },
       "harn-audit": {
         "runs-on": "ubuntu-latest",
+        "timeout-minutes": 65,
         needs: ["changes"],
         if: "needs.changes.outputs.rust == 'true'",
         steps: [
