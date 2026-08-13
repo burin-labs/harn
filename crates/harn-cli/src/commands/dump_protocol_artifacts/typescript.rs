@@ -186,6 +186,41 @@ pub(super) fn generate_typescript_for_version(
         &external_actions.protected_field_classes,
         "HarnExternalActionProtectedFieldClass",
     ));
+    out.push_str(&ts_array_owned(
+        "EXTERNAL_ACTION_PASSENGER_GENDERS",
+        &external_actions.passenger_genders,
+        "HarnExternalActionPassengerGender",
+    ));
+    out.push_str(&ts_array_owned(
+        "EXTERNAL_ACTION_ACTIVITY_STATUSES",
+        &external_actions.activity_statuses,
+        "HarnExternalActionActivityStatus",
+    ));
+    out.push_str(&ts_array_owned(
+        "EXTERNAL_ACTION_POLICY_LAYERS",
+        &external_actions.policy_layers,
+        "HarnExternalActionPolicyLayer",
+    ));
+    out.push_str(&ts_array_owned(
+        "EXTERNAL_ACTION_POLICY_EVALUATION_OUTCOMES",
+        &external_actions.policy_evaluation_outcomes,
+        "HarnExternalActionPolicyEvaluationOutcome",
+    ));
+    out.push_str(&ts_array_owned(
+        "EXTERNAL_ACTION_DECISION_OUTCOMES",
+        &external_actions.decision_outcomes,
+        "HarnExternalActionDecisionOutcome",
+    ));
+    out.push_str(&ts_array_owned(
+        "EXTERNAL_ACTION_DECIDERS",
+        &external_actions.deciders,
+        "HarnExternalActionDecider",
+    ));
+    out.push_str(&ts_array_owned(
+        "EXTERNAL_ACTION_RECONCILIATION_STATUSES",
+        &external_actions.reconciliation_statuses,
+        "HarnExternalActionReconciliationStatus",
+    ));
     out.push_str(&ts_array(
         "A2A_TASK_STATES",
         A2A_TASK_STATES,

@@ -1,4 +1,7 @@
-pub import { ExternalActionProtectedFieldClass } from "std/external_action/vocabulary"
+pub import {
+  ExternalActionPassengerGender,
+  ExternalActionProtectedFieldClass,
+} from "std/external_action/vocabulary"
 
 pub type ExternalActionDisclosureSource = "user_profile" | "fictional_test_fixture"
 
@@ -25,6 +28,7 @@ pub type ExternalActionLegalIdentity = {
   family_name: string,
   middle_names?: list<string>,
   title?: string,
+  gender?: ExternalActionPassengerGender,
 }
 
 pub type ExternalActionPostalAddress = {
@@ -266,7 +270,10 @@ fn __protected_identity_is_valid(identity: ExternalActionLegalIdentity?) -> bool
       return false
     }
   }
-  return identity.title == nil || __protected_text_is_valid(identity.title, 40)
+  if identity.title != nil && !__protected_text_is_valid(identity.title, 40) {
+    return false
+  }
+  return identity.gender == nil || identity.gender == "m" || identity.gender == "f"
 }
 
 fn __protected_address_is_valid(address: ExternalActionPostalAddress?) -> bool {

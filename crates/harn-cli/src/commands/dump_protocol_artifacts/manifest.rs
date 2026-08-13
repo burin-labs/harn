@@ -184,6 +184,13 @@ pub(super) fn generate_manifest_for_version(
             "receiptStatuses": external_actions.receipt_statuses,
             "nextActions": external_actions.next_actions,
             "protectedFieldClasses": external_actions.protected_field_classes,
+            "passengerGenders": external_actions.passenger_genders,
+            "activityStatuses": external_actions.activity_statuses,
+            "policyLayers": external_actions.policy_layers,
+            "policyEvaluationOutcomes": external_actions.policy_evaluation_outcomes,
+            "decisionOutcomes": external_actions.decision_outcomes,
+            "deciders": external_actions.deciders,
+            "reconciliationStatuses": external_actions.reconciliation_statuses,
         },
         "plans": {
             "documentSchemaVersion": harn_vm::llm::plan::PLAN_DOCUMENT_SCHEMA_VERSION,

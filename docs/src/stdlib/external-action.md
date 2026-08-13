@@ -15,6 +15,8 @@ The lifecycle is:
 4. Call `external_action_execute(...)` with a provider adapter.
 5. If the receipt is `reconciliation_required`, query the provider with
    `external_action_reconcile(...)`; never repeat dispatch speculatively.
+6. Project the intent, policy chain, decision, disclosure classes, dispatch,
+   reconciliation, and receipt with `external_action_activity(...)`.
 
 ```harn,ignore
 import {
@@ -93,6 +95,9 @@ const receipt = external_action_execute(
   contract immediately before dispatch. The adapter receives them transiently.
   Checkpoints, receipt events, replay state, and receipts retain only the
   value-free disclosure record.
+- Legal identity can include the closed `m` or `f` passenger marker required by
+  current airline order APIs. It remains inside the protected disclosure and
+  never moves into an intent, transcript, receipt, or activity record.
 - Model/API inference cost is not part of `external_spend`; hosts can budget
   the two independently.
 - Managed policy is a restriction layer, not a grant. It can disable actions,
@@ -108,7 +113,13 @@ const receipt = external_action_execute(
   poll can use a new ID.
 - Receipts accept bounded reference identifiers, provider action IDs, and
   machine error codes. They do not retain arbitrary provider response bodies or
-  secret-bearing headers.
+secret-bearing headers.
+- `external_action_activity(...)` produces one intent-keyed, value-free
+  snapshot. It records model, agent, session, policy-layer decisions, grant
+  expiry, disclosure classes, dispatch, reconciliation, and the canonical
+  receipt. Payloads, protected values, credentials, and reusable grants are
+  structurally absent. Product and Cloud stores update this record instead of
+  maintaining a second approval history.
 
 Use `external_action_fake_adapter(...)` in deterministic tests. A production
 connector and the fake both implement the same two-method adapter seam:

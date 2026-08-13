@@ -1,0 +1,208 @@
+import {
+  ExternalActionActor,
+  ExternalActionAuthenticationAssurance,
+  ExternalActionAuthorizationMethod,
+  ExternalActionEnvironment,
+  ExternalActionIntent,
+  ExternalActionMoney,
+  ExternalActionReceipt,
+} from "std/external_action/contracts"
+import { ExternalActionDisclosureReceipt } from "std/external_action/disclosure"
+pub import {
+  ExternalActionActivityStatus,
+  ExternalActionDecider,
+  ExternalActionDecisionOutcome,
+  ExternalActionPolicyEvaluationOutcome,
+  ExternalActionPolicyLayer,
+  ExternalActionReconciliationStatus,
+} from "std/external_action/vocabulary"
+
+/** Portable, value-free lifecycle vocabulary for one governed external action. */
+pub type ExternalActionPolicyEvaluation = {
+  layer: ExternalActionPolicyLayer,
+  outcome: ExternalActionPolicyEvaluationOutcome,
+  reason_code: string,
+  policy_id?: string,
+}
+
+pub type ExternalActionDecision = {
+  outcome: ExternalActionDecisionOutcome,
+  decider: ExternalActionDecider,
+  decided_at_ms: int,
+  reason_code: string,
+  actor?: ExternalActionActor,
+}
+
+/** Grant metadata safe to retain. It deliberately excludes the reusable grant. */
+pub type ExternalActionAuthorizationRecord = {
+  method: ExternalActionAuthorizationMethod,
+  authentication_assurance: ExternalActionAuthenticationAssurance,
+  issued_at_ms: int,
+  expires_at_ms: int,
+}
+
+pub type ExternalActionRequester = {
+  actor: ExternalActionActor,
+  agent_id?: string,
+  model_provider?: string,
+  model_id?: string,
+  session_id?: string,
+  run_id?: string,
+}
+
+pub type ExternalActionDispatchRecord = {attempted: bool, adapter_id?: string}
+
+pub type ExternalActionReconciliationRecord = {
+  attempted: bool,
+  status: ExternalActionReconciliationStatus,
+  attempt_id?: string,
+  previous_receipt_id?: string,
+}
+
+/**
+ * One intent-keyed snapshot for product activity views and hosted projections.
+ *
+ * Payloads, protected values, credentials, and reusable grants are structurally
+ * absent. Reconciliation replaces the same action snapshot instead of creating
+ * a competing history.
+ */
+pub type ExternalActionActivityRecord = {
+  schema: "harn.external_action_activity.v1",
+  id: string,
+  action_id: string,
+  intent_fingerprint: string,
+  provider: string,
+  capability: string,
+  operation: string,
+  environment: ExternalActionEnvironment,
+  summary: string,
+  external_spend?: ExternalActionMoney,
+  status: ExternalActionActivityStatus,
+  updated_at_ms: int,
+  requester: ExternalActionRequester,
+  policy_evaluations: list<ExternalActionPolicyEvaluation>,
+  decision?: ExternalActionDecision,
+  authorization?: ExternalActionAuthorizationRecord,
+  disclosure?: ExternalActionDisclosureReceipt,
+  dispatch: ExternalActionDispatchRecord,
+  reconciliation?: ExternalActionReconciliationRecord,
+  receipt?: ExternalActionReceipt,
+}
+
+pub type ExternalActionActivityContext = {
+  requester?: ExternalActionRequester,
+  policy_evaluations?: list<ExternalActionPolicyEvaluation>,
+  decision?: ExternalActionDecision,
+  authorization?: ExternalActionAuthorizationRecord,
+}
+
+fn __activity_status_value(value: string) -> ExternalActionActivityStatus {
+  return schema_expect(value, schema_of(ExternalActionActivityStatus))
+}
+
+fn __reconciliation_status_value(value: string) -> ExternalActionReconciliationStatus {
+  return schema_expect(value, schema_of(ExternalActionReconciliationStatus))
+}
+
+fn __activity_status(
+  receipt: ExternalActionReceipt?,
+  decision: ExternalActionDecision?,
+  policy_evaluations: list<ExternalActionPolicyEvaluation>,
+) -> ExternalActionActivityStatus {
+  if receipt != nil {
+    if receipt.status == "reconciliation_required" {
+      return __activity_status_value("reconciliation_required")
+    }
+    return __activity_status_value(receipt.status)
+  }
+  if decision?.outcome == "denied" {
+    return __activity_status_value("denied")
+  }
+  if decision?.outcome == "cancelled" {
+    return __activity_status_value("cancelled")
+  }
+  if decision?.outcome == "timed_out" {
+    return __activity_status_value("timed_out")
+  }
+  if decision?.outcome == "approved" {
+    return __activity_status_value("dispatch_pending")
+  }
+  for evaluation in policy_evaluations {
+    if evaluation.outcome == "approval_required" {
+      return __activity_status_value("approval_pending")
+    }
+  }
+  return __activity_status_value("proposed")
+}
+
+fn __activity_reconciliation(receipt: ExternalActionReceipt) -> ExternalActionReconciliationRecord {
+  if receipt.reconciliation == nil && receipt.status != "reconciliation_required" {
+    return {attempted: false, status: __reconciliation_status_value("not_needed")}
+  }
+  let result: ExternalActionReconciliationRecord = {
+    attempted: receipt.reconciliation != nil,
+    status: receipt.status == "confirmed" ? __reconciliation_status_value("confirmed") : if receipt
+      .status
+      == "rejected" {
+      __reconciliation_status_value("rejected")
+    } else {
+      __reconciliation_status_value("indeterminate")
+    },
+  }
+  const reconciliation = receipt.reconciliation
+  if reconciliation != nil {
+    result.attempt_id = reconciliation.attempt_id
+    result.previous_receipt_id = reconciliation.previous_receipt_id
+  }
+  return result
+}
+
+/**
+ * Build the canonical value-free activity projection for one exact intent.
+ * @effects: []
+ * @errors: [invalid_argument]
+ */
+pub fn external_action_activity(
+  intent: ExternalActionIntent,
+  receipt: ExternalActionReceipt? = nil,
+  context: ExternalActionActivityContext = {},
+  updated_at_ms: int = 0,
+) -> ExternalActionActivityRecord {
+  require receipt == nil || receipt.intent_fingerprint == intent.fingerprint,
+    "external_action_activity: receipt does not match intent"
+  const requester = context.requester ?? {actor: intent.actor}
+  let record: ExternalActionActivityRecord = {
+    schema: "harn.external_action_activity.v1",
+    id: "activity_" + substring(intent.fingerprint, 7, 31),
+    action_id: intent.id,
+    intent_fingerprint: intent.fingerprint,
+    provider: intent.provider,
+    capability: intent.capability,
+    operation: intent.operation,
+    environment: intent.environment,
+    summary: intent.display.summary,
+    status: __activity_status(receipt, context.decision, context.policy_evaluations ?? []),
+    updated_at_ms: updated_at_ms,
+    requester: requester,
+    policy_evaluations: context.policy_evaluations ?? [],
+    dispatch: {attempted: receipt?.dispatch_attempted ?? false},
+  }
+  if intent.external_spend != nil {
+    record.external_spend = intent.external_spend
+  }
+  if context.decision != nil {
+    record.decision = context.decision
+  }
+  if context.authorization != nil {
+    record.authorization = context.authorization
+  }
+  if receipt != nil {
+    record.receipt = receipt
+    record.dispatch = {attempted: receipt.dispatch_attempted, adapter_id: receipt.adapter_id}
+    record.reconciliation = __activity_reconciliation(receipt)
+    if receipt.disclosure != nil {
+      record.disclosure = receipt.disclosure
+    }
+  }
+  return record
+}

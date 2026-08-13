@@ -540,6 +540,32 @@
   },
   "checkCommand": "make check-protocol-artifacts",
   "externalActions": {
+    "activityStatuses": [
+      "proposed",
+      "approval_pending",
+      "denied",
+      "cancelled",
+      "timed_out",
+      "dispatch_pending",
+      "confirmed",
+      "failed_before_dispatch",
+      "rejected",
+      "reconciliation_required"
+    ],
+    "deciders": [
+      "person",
+      "remembered_rule",
+      "user_policy",
+      "managed_policy",
+      "adversarial_reviewer",
+      "test_fixture"
+    ],
+    "decisionOutcomes": [
+      "approved",
+      "denied",
+      "timed_out",
+      "cancelled"
+    ],
     "nextActions": [
       "none",
       "reconcile"
@@ -550,6 +576,22 @@
       "failed_before_dispatch",
       "rejected",
       "indeterminate"
+    ],
+    "passengerGenders": [
+      "m",
+      "f"
+    ],
+    "policyEvaluationOutcomes": [
+      "allowed",
+      "denied",
+      "approval_required",
+      "unavailable"
+    ],
+    "policyLayers": [
+      "user_policy",
+      "managed_policy",
+      "adversarial_reviewer",
+      "remembered_rule"
     ],
     "protectedFieldClasses": [
       "legal_identity",
@@ -565,6 +607,13 @@
       "failed_before_dispatch",
       "rejected",
       "reconciliation_required"
+    ],
+    "reconciliationStatuses": [
+      "not_needed",
+      "confirmed",
+      "rejected",
+      "indeterminate",
+      "refused"
     ],
     "source": "crates/harn-stdlib/src/stdlib/external_action/vocabulary.harn"
   },
