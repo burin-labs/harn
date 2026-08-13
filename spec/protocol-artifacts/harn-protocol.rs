@@ -2536,4 +2536,3 @@ pub const HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS: &[&str] = &[
     "parsing",
     "rawInputPartial",
 ];
-

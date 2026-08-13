@@ -418,6 +418,12 @@ pub(super) fn generate_rust_for_version(
         HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS,
     ));
 
+    // Consumers vendor this artifact verbatim, sometimes as a new file. Keep
+    // one POSIX final newline without a trailing blank line so their
+    // `git diff --check` remains clean.
+    while out.ends_with("\n\n") {
+        out.pop();
+    }
     out
 }
 
