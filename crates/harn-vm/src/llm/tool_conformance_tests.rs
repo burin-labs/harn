@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use super::request::{probe_request_body, probe_request_payload};
+use super::request::{probe_request_body, probe_request_payload, tool_probe_max_tokens};
 use super::*;
 
 #[test]
@@ -40,6 +40,36 @@ fn probe_payload_applies_provider_qualified_model_defaults() {
     assert_eq!(payload.top_k, Some(40));
 
     llm_config::clear_user_overrides();
+}
+
+#[test]
+fn large_string_probe_reserves_reasoning_budget_before_visible_tool_call() {
+    let _guard = crate::llm::env_guard();
+    llm_config::clear_user_overrides();
+    let payload = probe_request_payload(
+        "fireworks",
+        "accounts/fireworks/models/gpt-oss-120b",
+        ToolProbeMode::NonStreaming,
+        ToolProbeCase::LargeStringArgument,
+        ToolProbeRequestProfile::CatalogDefault,
+        DEFAULT_TOOL_PROBE_MARKER,
+    )
+    .expect("large-string probe payload");
+
+    assert_eq!(
+        payload.max_tokens, 12_768,
+        "GPT-OSS high reasoning needs its 12k reasoning allowance plus visible tool-call headroom"
+    );
+    llm_config::clear_user_overrides();
+}
+
+#[test]
+fn reasoning_aware_probe_floor_never_lowers_an_explicit_route_default() {
+    let thinking = crate::llm::api::ThinkingConfig::Effort {
+        level: crate::llm::api::ReasoningEffort::High,
+    };
+
+    assert_eq!(tool_probe_max_tokens(Some(50_000), &thinking), 50_000);
 }
 
 #[test]

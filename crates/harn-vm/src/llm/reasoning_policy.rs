@@ -396,6 +396,26 @@ pub(crate) fn budget_for_reasoning_level(level: &str) -> u32 {
     }
 }
 
+/// Resolve the output-token allowance consumed by a canonical thinking
+/// configuration. Callers that must reserve visible output after reasoning
+/// use this instead of reinterpreting provider-specific thinking shapes.
+pub(crate) fn budget_for_thinking_config(thinking: &ThinkingConfig) -> u32 {
+    match thinking {
+        ThinkingConfig::Disabled
+        | ThinkingConfig::Effort {
+            level: ReasoningEffort::None,
+        } => 0,
+        ThinkingConfig::Enabled {
+            budget_tokens: Some(budget),
+        } => *budget,
+        ThinkingConfig::Enabled {
+            budget_tokens: None,
+        }
+        | ThinkingConfig::Adaptive => budget_for_reasoning_level("medium"),
+        ThinkingConfig::Effort { level } => budget_for_reasoning_level(level.as_str()),
+    }
+}
+
 fn resolved_route_from_options(opts: &crate::value::DictMap) -> Option<(String, String)> {
     let model = opts.get("model")?.display();
     if model.trim().is_empty() {
@@ -486,6 +506,27 @@ mod tests {
 
     fn apply(opts: crate::value::DictMap) -> crate::value::DictMap {
         apply_policy_to_vm_options(&opts).expect("policy")
+    }
+
+    #[test]
+    fn thinking_config_budget_uses_the_canonical_reasoning_mapping() {
+        assert_eq!(budget_for_thinking_config(&ThinkingConfig::Disabled), 0);
+        assert_eq!(
+            budget_for_thinking_config(&ThinkingConfig::Effort {
+                level: ReasoningEffort::High,
+            }),
+            12_000
+        );
+        assert_eq!(
+            budget_for_thinking_config(&ThinkingConfig::Enabled {
+                budget_tokens: Some(2_345),
+            }),
+            2_345
+        );
+        assert_eq!(
+            budget_for_thinking_config(&ThinkingConfig::Adaptive),
+            budget_for_reasoning_level("medium")
+        );
     }
 
     #[test]
