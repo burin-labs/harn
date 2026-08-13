@@ -88,6 +88,21 @@ impl crate::vm::Vm {
                 .call_testing_capability_method(handle, method, args)
                 .await;
         }
+        // Destination attenuation belongs ahead of every execution path:
+        // deterministic fixtures, registered capability implementations, and
+        // native HTTP methods. The typed method contract makes handle/local
+        // server operations explicit no-ops instead of parsing arg0 as a URL.
+        if handle.kind() == HarnessKind::Net {
+            if let Some(decision) = self
+                .evaluate_net_policy_for_method(handle, method, args)
+                .await?
+            {
+                match decision {
+                    NetPolicyOutcome::Allow => {}
+                    NetPolicyOutcome::Deny(err) => return Err(err),
+                }
+            }
+        }
         if let Some(capability) = handle.kind().capability_id() {
             let deterministic_http_fixture = capability
                 == harn_builtin_meta::CapabilityId::Net
@@ -213,20 +228,6 @@ impl crate::vm::Vm {
         let _profile_timer = profile_name
             .as_deref()
             .and_then(crate::builtin_profile::BuiltinTimer::start);
-        // Enforce per-harness `NetPolicy` (issue #1913) ahead of mock
-        // dispatch so audit_only / quarantine outcomes apply uniformly
-        // to real and mock paths.
-        if handle.kind() == HarnessKind::Net {
-            if let Some(decision) = self
-                .evaluate_net_policy_for_method(handle, method, args)
-                .await?
-            {
-                match decision {
-                    NetPolicyOutcome::Allow => {}
-                    NetPolicyOutcome::Deny(err) => return Err(err),
-                }
-            }
-        }
         if matches!(handle.inner().mode(), HarnessMode::Mock(_))
             && !matches!(handle.kind(), HarnessKind::Runtime | HarnessKind::Testing)
         {

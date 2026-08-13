@@ -155,6 +155,86 @@ pub struct NetPolicyAudit {
     pub matched_rule: Option<String>,
 }
 
+/// How one `HarnessNet` method relates to destination attenuation.
+///
+/// `NetPolicy` directly gates operations whose call contract exposes a URL.
+/// The remaining methods operate on local state/already-authorized handles, or
+/// (for connector calls) do not expose their destination at this method seam.
+/// Treating arg0 of those calls as a URL would misclassify a handle, cookie
+/// name, provider name, or local path as an HTTP destination.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum NetPolicyMethodContract {
+    OutboundUrl { argument: usize },
+    NotUrlAddressed,
+}
+
+impl NetPolicyMethodContract {
+    pub(crate) fn for_method(method: &str) -> Option<Self> {
+        use NetPolicyMethodContract::{NotUrlAddressed, OutboundUrl};
+
+        Some(match method {
+            "get" | "post" | "put" | "patch" | "delete" | "download" | "stream_open"
+            | "jsonrpc_call" | "jsonrpc_batch" | "websocket_connect" => OutboundUrl { argument: 0 },
+            "request" | "sse_connect" => OutboundUrl { argument: 1 },
+            "session_request" => OutboundUrl { argument: 2 },
+            "egress_policy"
+            | "connector_call"
+            | "cookie_delete"
+            | "stream_read"
+            | "stream_info"
+            | "stream_close"
+            | "session"
+            | "session_close"
+            | "server"
+            | "server_route"
+            | "server_before"
+            | "server_after"
+            | "server_request"
+            | "server_test"
+            | "server_set_ready"
+            | "server_readiness"
+            | "server_ready"
+            | "server_on_shutdown"
+            | "server_shutdown"
+            | "server_tls_plain"
+            | "server_tls_edge"
+            | "server_tls_pem"
+            | "server_tls_self_signed_dev"
+            | "server_security_headers"
+            | "unix_socket_json_request"
+            | "sse_receive"
+            | "sse_close"
+            | "sse_server_response"
+            | "sse_server_send"
+            | "sse_server_heartbeat"
+            | "sse_server_flush"
+            | "sse_server_close"
+            | "sse_server_cancel"
+            | "sse_server_status"
+            | "sse_server_disconnected"
+            | "sse_server_cancelled"
+            | "websocket_server"
+            | "websocket_route"
+            | "websocket_accept"
+            | "websocket_send"
+            | "websocket_receive"
+            | "websocket_close"
+            | "websocket_server_close" => NotUrlAddressed,
+            _ => return None,
+        })
+    }
+
+    pub(crate) fn url(self, args: &[VmValue]) -> Option<&str> {
+        let Self::OutboundUrl { argument } = self else {
+            return None;
+        };
+        match args.get(argument) {
+            Some(VmValue::String(url)) => Some(url.as_str()),
+            _ => None,
+        }
+    }
+}
+
 impl NetPolicyAudit {
     fn to_json(&self) -> serde_json::Value {
         json!({
@@ -817,5 +897,60 @@ mod tests {
             Some(value) => std::env::set_var(HARN_NET_POLICY_BYPASS_ENV, value),
             None => std::env::remove_var(HARN_NET_POLICY_BYPASS_ENV),
         }
+    }
+
+    #[test]
+    fn outbound_method_contract_extracts_each_nonleading_url() {
+        let request_args = [
+            VmValue::String("GET".into()),
+            VmValue::String("https://request.example.test/path".into()),
+        ];
+        let session_args = [
+            VmValue::String("session-handle".into()),
+            VmValue::String("POST".into()),
+            VmValue::String("https://session.example.test/path".into()),
+        ];
+        let sse_args = [
+            VmValue::String("GET".into()),
+            VmValue::String("https://events.example.test/stream".into()),
+        ];
+
+        assert_eq!(
+            NetPolicyMethodContract::for_method("request").and_then(|c| c.url(&request_args)),
+            Some("https://request.example.test/path")
+        );
+        assert_eq!(
+            NetPolicyMethodContract::for_method("session_request")
+                .and_then(|c| c.url(&session_args)),
+            Some("https://session.example.test/path")
+        );
+        assert_eq!(
+            NetPolicyMethodContract::for_method("sse_connect").and_then(|c| c.url(&sse_args)),
+            Some("https://events.example.test/stream")
+        );
+        assert_eq!(
+            NetPolicyMethodContract::for_method("session_close").and_then(|c| c.url(&session_args)),
+            None
+        );
+    }
+
+    #[test]
+    fn every_declared_harness_net_method_has_a_destination_contract() {
+        crate::stdlib::force_link();
+        let unclassified = crate::stdlib::all_builtin_manifest()
+            .iter()
+            .filter_map(|entry| match entry.contract.exposure {
+                harn_builtin_meta::BuiltinExposure::HarnessMethod {
+                    capability: harn_builtin_meta::CapabilityId::Net,
+                    method,
+                } if NetPolicyMethodContract::for_method(method).is_none() => Some(method),
+                _ => None,
+            })
+            .collect::<std::collections::BTreeSet<_>>();
+
+        assert!(
+            unclassified.is_empty(),
+            "HarnessNet methods missing a NetPolicy destination contract: {unclassified:?}"
+        );
     }
 }

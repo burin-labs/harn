@@ -48,16 +48,27 @@ impl crate::vm::Vm {
         let Some(policy) = handle.inner().net_policy().cloned() else {
             return Ok(None);
         };
+        let contract = NetPolicyMethodContract::for_method(method).ok_or_else(|| {
+            VmError::CategorizedError {
+                message: format!(
+                    "HarnessNet method `{method}` has no destination attenuation contract"
+                ),
+                category: ErrorCategory::ToolRejected,
+            }
+        })?;
+        let Some(url) = contract.url(args) else {
+            // Calls without a URL-addressed destination have no check at this
+            // seam. For URL-addressed methods with a missing/non-string URL,
+            // preserve the underlying method's authoritative argument error.
+            return Ok(None);
+        };
         // Bypass is honoured *after* the policy is bound so that
         // configuring a policy and forgetting to clear the env var
         // still leaves an audit trail.
         if harness_net::bypass_enabled() {
             let bypass_audit = NetPolicyAudit {
                 method: method.to_string(),
-                url: args
-                    .first()
-                    .map(|v| v.display())
-                    .unwrap_or_else(|| "<missing>".to_string()),
+                url: url.to_string(),
                 host: String::new(),
                 port: None,
                 reason: "HARN_NET_POLICY_BYPASS set; policy not enforced".to_string(),
@@ -68,15 +79,7 @@ impl crate::vm::Vm {
             record_audit(&bypass_audit).await;
             return Ok(Some(NetPolicyOutcome::Allow));
         }
-        let Some(url) = args.first().and_then(|v| match v {
-            VmValue::String(s) => Some(s.as_str().to_string()),
-            _ => None,
-        }) else {
-            // No URL argument — let the underlying method surface its
-            // own type error.
-            return Ok(None);
-        };
-        let decision = policy.evaluate(method, &url)?;
+        let decision = policy.evaluate(method, url)?;
         match decision {
             NetPolicyDecision::Allow { audited, audit } => {
                 if audited {

@@ -1,0 +1,35 @@
+/**
+ * Destination attenuation follows the typed HarnessNet method contract rather
+ * than assuming arg0 is always a URL. It also runs before deterministic HTTP
+ * fixtures, so a mock response cannot accidentally bypass the policy.
+ *
+ * Tracking: harn#6640.
+ */
+import { create, domain } from "std/net_policy"
+
+fn main(harness: Harness) {
+  harness.testing.http_mock(
+    "GET",
+    "https://allowed.example.test/probe",
+    {status: 200, body: "allowed", headers: {}},
+  )
+  harness.testing.http_mock(
+    "GET",
+    "https://blocked.example.test/probe",
+    {status: 200, body: "must-not-bypass-policy", headers: {}},
+  )
+  const policy = create({allow: [domain("allowed.example.test")], default: "deny"})
+  const restricted = harness.with_net_policy(policy)
+  const allowed = restricted.net.request("GET", "https://allowed.example.test/probe", {})
+  assert_eq(allowed.body, "allowed")
+  const blocked = try {
+    restricted.net.request("GET", "https://blocked.example.test/probe", {})
+  }
+  assert(is_err(blocked))
+  const error = unwrap_err(blocked)
+  assert_eq(error.type, "NetPolicyViolation")
+  assert_eq(error.method, "request")
+  assert_eq(error.url, "https://blocked.example.test/probe")
+  assert_eq(error.host, "blocked.example.test")
+  harness.stdio.println("request_policy_ok")
+}
