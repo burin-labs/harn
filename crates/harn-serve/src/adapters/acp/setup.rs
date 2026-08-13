@@ -330,6 +330,7 @@ impl AcpServer {
                 tenant_id: None,
             };
             self.authenticated_principal = Some(principal.clone());
+            self.concurrent_controls.mark_authenticated();
             self.send_response(
                 id,
                 serde_json::json!({
@@ -370,6 +371,7 @@ impl AcpServer {
         match self.auth_policy.authorize(&auth).await {
             AuthorizationDecision::Authorized(principal) => {
                 self.authenticated_principal = Some(principal.clone());
+                self.concurrent_controls.mark_authenticated();
                 self.send_response(
                     id,
                     serde_json::json!({
@@ -427,6 +429,9 @@ impl AcpServer {
 
     pub(super) fn insert_session(&mut self, session_id: String, cwd: PathBuf, info: SessionInfo) {
         let cancellation = self.register_session_cancellation(&session_id);
+        let concurrent_control = ConcurrentSessionControl::new();
+        self.concurrent_controls
+            .register(&session_id, concurrent_control.clone());
         let project_root = session_project_root_for_cwd(&cwd);
         self.sessions.insert(
             session_id.clone(),
@@ -435,7 +440,8 @@ impl AcpServer {
                 project_root,
                 cancellation,
                 host_bridge: None,
-                inject_state: harn_vm::bridge::HostBridgeInjectionState::default(),
+                inject_state: concurrent_control.inject_state.clone(),
+                concurrent_control,
                 info,
                 advertised_commands: Vec::new(),
                 current_mode_id: modes::DEFAULT_MODE_ID.to_string(),

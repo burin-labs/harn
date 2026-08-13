@@ -1,6 +1,277 @@
 //! ACP session state and cancellation routing helpers.
 use super::*;
 
+#[derive(Clone)]
+pub(super) struct ConcurrentSessionControl {
+    pub(super) inject_state: harn_vm::bridge::HostBridgeInjectionState,
+    prompt_active: Arc<AtomicBool>,
+}
+
+impl ConcurrentSessionControl {
+    pub(super) fn new() -> Self {
+        Self {
+            inject_state: harn_vm::bridge::HostBridgeInjectionState::default(),
+            prompt_active: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    pub(super) fn set_prompt_active(&self, active: bool) {
+        self.prompt_active.store(active, Ordering::SeqCst);
+    }
+
+    pub(super) fn prompt_is_active(&self) -> bool {
+        self.prompt_active.load(Ordering::SeqCst)
+    }
+}
+
+#[derive(Clone)]
+pub(super) struct ConcurrentSessionControls {
+    sessions: Arc<std::sync::Mutex<HashMap<String, ConcurrentSessionControl>>>,
+    inject_owners: Arc<std::sync::Mutex<HashMap<String, BTreeMap<String, InjectControlRecord>>>>,
+    authenticated: Arc<AtomicBool>,
+    auth_required_data: Arc<serde_json::Value>,
+}
+
+impl ConcurrentSessionControls {
+    pub(super) fn new(authenticated: bool, auth_required_data: serde_json::Value) -> Self {
+        Self {
+            sessions: Arc::default(),
+            inject_owners: Arc::default(),
+            authenticated: Arc::new(AtomicBool::new(authenticated)),
+            auth_required_data: Arc::new(auth_required_data),
+        }
+    }
+
+    pub(super) fn mark_authenticated(&self) {
+        self.authenticated.store(true, Ordering::SeqCst);
+    }
+
+    pub(super) fn register(&self, session_id: &str, control: ConcurrentSessionControl) {
+        self.sessions
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .insert(session_id.to_string(), control);
+    }
+
+    pub(super) fn remove(&self, session_id: &str) {
+        self.sessions
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .remove(session_id);
+        self.inject_owners
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .remove(session_id);
+    }
+
+    pub(super) fn inject_owner(
+        &self,
+        session_id: &str,
+        message_id: &str,
+    ) -> Option<serde_json::Value> {
+        self.inject_owners
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .get(session_id)
+            .and_then(|records| records.get(message_id))
+            .map(|record| record.owner.clone())
+    }
+
+    pub(super) fn record_inject_owner(
+        &self,
+        session_id: &str,
+        message_id: String,
+        actor: serde_json::Value,
+    ) {
+        self.inject_owners
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .entry(session_id.to_string())
+            .or_default()
+            .insert(message_id, InjectControlRecord { owner: actor });
+    }
+
+    pub(super) fn preempt_active_live_client_operation(
+        &self,
+        msg: &serde_json::Value,
+        output: &AcpOutput,
+    ) -> bool {
+        let Some(method) = msg.get("method").and_then(serde_json::Value::as_str) else {
+            return false;
+        };
+        if !is_live_client_method(method) {
+            return false;
+        }
+        let Some(id) = msg.get("id") else {
+            return false;
+        };
+        if self.reject_unauthenticated(id, output) {
+            return true;
+        }
+        let params = msg.get("params").unwrap_or(&serde_json::Value::Null);
+        let Some(session_id) = session_id_param(params) else {
+            return false;
+        };
+        let active = self
+            .sessions
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .get(&session_id)
+            .is_some_and(ConcurrentSessionControl::prompt_is_active);
+        if !active {
+            return false;
+        }
+        match apply_live_client_operation(method, &session_id, params) {
+            Ok(operation) => write_live_client_operation(output, id, &session_id, operation),
+            Err(message) => send_routed_error(output, id, -32602, &message),
+        }
+        true
+    }
+
+    pub(super) async fn preempt_active_prompt_inject(
+        &self,
+        msg: &serde_json::Value,
+        output: &AcpOutput,
+    ) -> bool {
+        if msg.get("method").and_then(serde_json::Value::as_str) != Some("session/inject") {
+            return false;
+        }
+        let Some(id) = msg.get("id") else {
+            return false;
+        };
+        if self.reject_unauthenticated(id, output) {
+            return true;
+        }
+        let params = msg.get("params").unwrap_or(&serde_json::Value::Null);
+        let Some(session_id) = session_id_param(params) else {
+            send_routed_error(output, id, -32602, "session/inject requires sessionId");
+            return true;
+        };
+        let control = self
+            .sessions
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .get(&session_id)
+            .cloned();
+        let Some(control) = control else {
+            return false;
+        };
+        if !control.prompt_is_active() {
+            return false;
+        }
+
+        let actor = control_actor_from_params(params);
+        let mode = match bridge_mode_for_session_inject(params) {
+            Ok(mode) => mode,
+            Err(message) => {
+                send_routed_error(output, id, -32602, &message);
+                emit_routed_control_outcome(
+                    &session_id,
+                    "rejected",
+                    actor,
+                    serde_json::json!({"sessionId": session_id}),
+                    Some("invalid_mode"),
+                );
+                return true;
+            }
+        };
+        let (content, transcript_content) =
+            match normalize_session_inject_content("session/inject", params) {
+                Ok(content) => content,
+                Err(message) => {
+                    send_routed_error(output, id, -32602, &message);
+                    emit_routed_control_outcome(
+                        &session_id,
+                        "rejected",
+                        actor,
+                        serde_json::json!({"sessionId": session_id}),
+                        Some("invalid_content"),
+                    );
+                    return true;
+                }
+            };
+        let message_id = control
+            .inject_state
+            .push_pending_user_message(content, transcript_content, mode)
+            .await;
+        self.record_inject_owner(&session_id, message_id.clone(), actor.clone());
+        emit_routed_control_outcome(
+            &session_id,
+            "accepted",
+            actor.clone(),
+            serde_json::json!({"sessionId": session_id, "messageId": message_id}),
+            None,
+        );
+        let response = harn_vm::jsonrpc::response(
+            id.clone(),
+            serde_json::json!({
+                "messageId": message_id,
+                "status": "accepted",
+                "_meta": { "harn": { "actor": actor } }
+            }),
+        );
+        if let Ok(line) = serde_json::to_string(&response) {
+            output.write_line(&line);
+        }
+        true
+    }
+
+    fn reject_unauthenticated(&self, id: &serde_json::Value, output: &AcpOutput) -> bool {
+        if self.authenticated.load(Ordering::SeqCst) {
+            return false;
+        }
+        if !id.is_null() {
+            let response = harn_vm::jsonrpc::error_response_with_data(
+                id.clone(),
+                ACP_AUTH_REQUIRED_CODE,
+                "auth_required",
+                (*self.auth_required_data).clone(),
+            );
+            if let Ok(line) = serde_json::to_string(&response) {
+                output.write_line(&line);
+            }
+        }
+        true
+    }
+}
+
+impl Default for ConcurrentSessionControls {
+    fn default() -> Self {
+        Self::new(true, serde_json::json!({ "authMethods": [] }))
+    }
+}
+
+fn send_routed_error(output: &AcpOutput, id: &serde_json::Value, code: i64, message: &str) {
+    let response = harn_vm::jsonrpc::error_response(id.clone(), code, message);
+    if let Ok(line) = serde_json::to_string(&response) {
+        output.write_line(&line);
+    }
+}
+
+fn emit_routed_control_outcome(
+    session_id: &str,
+    outcome: &str,
+    actor: serde_json::Value,
+    target: serde_json::Value,
+    reason: Option<&str>,
+) {
+    harn_vm::agent_events::emit_event(&harn_vm::agent_events::AgentEvent::ControlOutcome {
+        session_id: session_id.to_string(),
+        control_id: control_id(),
+        method: "session/inject".to_string(),
+        outcome: outcome.to_string(),
+        status: if outcome == "accepted" {
+            "accepted".to_string()
+        } else {
+            "rejected".to_string()
+        },
+        actor,
+        target,
+        reason: reason.map(str::to_string),
+        metadata: serde_json::Value::Null,
+    });
+}
+
 #[derive(Clone, Default)]
 pub(super) struct SessionInfo {
     pub(super) title: Option<String>,
@@ -82,6 +353,8 @@ pub(super) struct Session {
     /// Pending user-message inject state that survives prompt cancellation
     /// and active bridge replacement until delivery or explicit revoke.
     pub(super) inject_state: harn_vm::bridge::HostBridgeInjectionState,
+    /// Shared state used by the transport router to steer an in-flight prompt.
+    pub(super) concurrent_control: ConcurrentSessionControl,
     pub(super) info: SessionInfo,
     /// Snapshot of slash-commands most recently advertised over
     /// `available_commands_update` for this session, used to skip re-emits
@@ -295,5 +568,175 @@ mod budget_rearm_tests {
             "method": "session/prompt", "params": {}
         })));
         harn_vm::set_llm_cost_budget(None);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn active_prompt_inject_is_handled_on_the_preemptive_control_lane() {
+        let controls = ConcurrentSessionControls::default();
+        let control = ConcurrentSessionControl::new();
+        control.set_prompt_active(true);
+        controls.register("session-1", control.clone());
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let output = AcpOutput::Channel(tx);
+        let actor = json!({
+            "clientId": "mobile",
+            "role": "host_owner",
+            "source": "agents_api",
+        });
+
+        let handled = controls
+            .preempt_active_prompt_inject(
+                &json!({
+                    "jsonrpc": "2.0",
+                    "id": 7,
+                    "method": "session/inject",
+                    "params": {
+                        "sessionId": "session-1",
+                        "mode": "steer",
+                        "content": "continue with the mobile correction",
+                        "_meta": { "harn": { "actor": actor } },
+                    },
+                }),
+                &output,
+            )
+            .await;
+
+        assert!(handled);
+        let response: serde_json::Value =
+            serde_json::from_str(&rx.recv().await.expect("injection response")).expect("json");
+        let message_id = response["result"]["messageId"]
+            .as_str()
+            .expect("message id");
+        assert_eq!(response["result"]["status"], "accepted");
+        assert_eq!(controls.inject_owner("session-1", message_id), Some(actor));
+
+        let pending = control.inject_state.pending_injections_json().await;
+        assert_eq!(pending["pendingCount"], 1);
+        assert_eq!(pending["injections"][0]["messageId"], message_id);
+        assert_eq!(
+            pending["injections"][0]["content"],
+            "continue with the mobile correction"
+        );
+        assert_eq!(pending["injections"][0]["mode"], "finish_step");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn active_prompt_takeover_is_handled_on_the_preemptive_control_lane() {
+        let session_id = format!("session-{}", uuid::Uuid::now_v7());
+        harn_vm::agent_sessions::open_or_create(Some(session_id.clone()));
+        harn_vm::agent_sessions::attach_live_client(
+            &session_id,
+            harn_vm::agent_sessions::AttachLiveClient {
+                client_id: "desktop".to_string(),
+                mode: harn_vm::agent_sessions::LiveClientMode::Controller,
+                takeover: false,
+                prompt_injection: true,
+                permission_routing: true,
+                metadata: json!({"surface": "desktop"}),
+            },
+        )
+        .expect("desktop attach");
+        harn_vm::agent_sessions::attach_live_client(
+            &session_id,
+            harn_vm::agent_sessions::AttachLiveClient {
+                client_id: "mobile".to_string(),
+                mode: harn_vm::agent_sessions::LiveClientMode::Observer,
+                takeover: false,
+                prompt_injection: false,
+                permission_routing: false,
+                metadata: json!({"surface": "mobile-web"}),
+            },
+        )
+        .expect("mobile attach");
+
+        let controls = ConcurrentSessionControls::default();
+        let control = ConcurrentSessionControl::new();
+        control.set_prompt_active(true);
+        controls.register(&session_id, control);
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let output = AcpOutput::Channel(tx);
+
+        assert!(controls.preempt_active_live_client_operation(
+            &json!({
+                "jsonrpc": "2.0",
+                "id": 8,
+                "method": "session/takeover",
+                "params": {"sessionId": session_id, "clientId": "mobile"},
+            }),
+            &output,
+        ));
+        let notification: serde_json::Value =
+            serde_json::from_str(&rx.recv().await.expect("takeover notification")).expect("json");
+        let response: serde_json::Value =
+            serde_json::from_str(&rx.recv().await.expect("takeover response")).expect("json");
+        assert_eq!(
+            notification["params"]["update"]["_meta"]["harn"]["action"],
+            "takeover"
+        );
+        assert_eq!(response["result"]["previous_controller_id"], "desktop");
+        assert_eq!(response["result"]["active_controller_id"], "mobile");
+        harn_vm::agent_sessions::close(&session_id);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn preemptive_control_lane_rejects_unauthenticated_takeover() {
+        let session_id = format!("session-{}", uuid::Uuid::now_v7());
+        harn_vm::agent_sessions::open_or_create(Some(session_id.clone()));
+        for (client_id, mode) in [
+            (
+                "desktop",
+                harn_vm::agent_sessions::LiveClientMode::Controller,
+            ),
+            ("mobile", harn_vm::agent_sessions::LiveClientMode::Observer),
+        ] {
+            let controller = mode == harn_vm::agent_sessions::LiveClientMode::Controller;
+            harn_vm::agent_sessions::attach_live_client(
+                &session_id,
+                harn_vm::agent_sessions::AttachLiveClient {
+                    client_id: client_id.to_string(),
+                    mode,
+                    takeover: false,
+                    prompt_injection: controller,
+                    permission_routing: controller,
+                    metadata: json!({}),
+                },
+            )
+            .expect("client attach");
+        }
+
+        let controls =
+            ConcurrentSessionControls::new(false, json!({"authMethods": [{"id": "api-key"}]}));
+        let control = ConcurrentSessionControl::new();
+        control.set_prompt_active(true);
+        controls.register(&session_id, control);
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let output = AcpOutput::Channel(tx);
+
+        assert!(controls.preempt_active_live_client_operation(
+            &json!({
+                "jsonrpc": "2.0",
+                "id": 9,
+                "method": "session/takeover",
+                "params": {"sessionId": session_id, "clientId": "mobile"},
+            }),
+            &output,
+        ));
+        let response: serde_json::Value =
+            serde_json::from_str(&rx.recv().await.expect("auth response")).expect("json");
+        assert_eq!(response["error"]["code"], ACP_AUTH_REQUIRED_CODE);
+        assert_eq!(response["error"]["message"], "auth_required");
+        assert!(
+            rx.try_recv().is_err(),
+            "takeover must not emit a notification"
+        );
+        let clients = harn_vm::agent_sessions::live_clients(&session_id).expect("session");
+        assert_eq!(
+            clients
+                .iter()
+                .find(|client| client.mode == harn_vm::agent_sessions::LiveClientMode::Controller)
+                .map(|client| client.client_id.as_str()),
+            Some("desktop")
+        );
+        harn_vm::agent_sessions::close(&session_id);
     }
 }

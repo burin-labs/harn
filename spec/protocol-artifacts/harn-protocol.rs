@@ -1182,6 +1182,11 @@ pub const ACP_DISPATCHED_METHOD_HARN_SESSION_TIMELINE_SUBSCRIBE: &str = "harn.se
 pub const ACP_DISPATCHED_METHOD_HARN_SESSION_TIMELINE_UNSUBSCRIBE: &str = "harn.session_timeline.unsubscribe";
 pub const ACP_DISPATCHED_METHOD_SESSION_NEW: &str = "session/new";
 pub const ACP_DISPATCHED_METHOD_SESSION_LOAD: &str = "session/load";
+pub const ACP_DISPATCHED_METHOD_SESSION_ATTACH: &str = "session/attach";
+pub const ACP_DISPATCHED_METHOD_SESSION_DETACH: &str = "session/detach";
+pub const ACP_DISPATCHED_METHOD_SESSION_HEARTBEAT: &str = "session/heartbeat";
+pub const ACP_DISPATCHED_METHOD_SESSION_LIVE_CLIENTS: &str = "session/live_clients";
+pub const ACP_DISPATCHED_METHOD_SESSION_TAKEOVER: &str = "session/takeover";
 pub const ACP_DISPATCHED_METHOD_SESSION_RESUME: &str = "session/resume";
 pub const ACP_DISPATCHED_METHOD_SESSION_FORK: &str = "session/fork";
 pub const ACP_DISPATCHED_METHOD_SESSION_TRUNCATE: &str = "session/truncate";
@@ -1247,6 +1252,11 @@ pub const ACP_DISPATCHED_METHODS: &[&str] = &[
     "harn.session_timeline.unsubscribe",
     "session/new",
     "session/load",
+    "session/attach",
+    "session/detach",
+    "session/heartbeat",
+    "session/live_clients",
+    "session/takeover",
     "session/resume",
     "session/fork",
     "session/truncate",
@@ -1319,6 +1329,11 @@ pub const ACP_HANDLED_METHOD_HARN_SESSION_TIMELINE_SUBSCRIBE: &str = "harn.sessi
 pub const ACP_HANDLED_METHOD_HARN_SESSION_TIMELINE_UNSUBSCRIBE: &str = "harn.session_timeline.unsubscribe";
 pub const ACP_HANDLED_METHOD_SESSION_NEW: &str = "session/new";
 pub const ACP_HANDLED_METHOD_SESSION_LOAD: &str = "session/load";
+pub const ACP_HANDLED_METHOD_SESSION_ATTACH: &str = "session/attach";
+pub const ACP_HANDLED_METHOD_SESSION_DETACH: &str = "session/detach";
+pub const ACP_HANDLED_METHOD_SESSION_HEARTBEAT: &str = "session/heartbeat";
+pub const ACP_HANDLED_METHOD_SESSION_LIVE_CLIENTS: &str = "session/live_clients";
+pub const ACP_HANDLED_METHOD_SESSION_TAKEOVER: &str = "session/takeover";
 pub const ACP_HANDLED_METHOD_SESSION_RESUME: &str = "session/resume";
 pub const ACP_HANDLED_METHOD_SESSION_FORK: &str = "session/fork";
 pub const ACP_HANDLED_METHOD_SESSION_TRUNCATE: &str = "session/truncate";
@@ -1385,6 +1400,11 @@ pub const ACP_HANDLED_METHODS: &[&str] = &[
     "harn.session_timeline.unsubscribe",
     "session/new",
     "session/load",
+    "session/attach",
+    "session/detach",
+    "session/heartbeat",
+    "session/live_clients",
+    "session/takeover",
     "session/resume",
     "session/fork",
     "session/truncate",
@@ -1498,6 +1518,7 @@ pub const ACP_SESSION_UPDATE_FS_WATCH: &str = "fs_watch";
 pub const ACP_SESSION_UPDATE_HANDOFF: &str = "handoff";
 pub const ACP_SESSION_UPDATE_HITL_REQUEST: &str = "hitl_request";
 pub const ACP_SESSION_UPDATE_HITL_RESOLVED: &str = "hitl_resolved";
+pub const ACP_SESSION_UPDATE_LIVE_SESSION_CLIENT: &str = "live_session_client";
 pub const ACP_SESSION_UPDATE_LOG: &str = "log";
 pub const ACP_SESSION_UPDATE_PROGRESS: &str = "progress";
 pub const ACP_SESSION_UPDATE_REMINDER_EMITTED: &str = "reminder_emitted";
@@ -1533,6 +1554,7 @@ pub const ACP_SESSION_UPDATES: &[&str] = &[
     "handoff",
     "hitl_request",
     "hitl_resolved",
+    "live_session_client",
     "log",
     "progress",
     "reminder_emitted",
@@ -1554,6 +1576,7 @@ pub const HARN_ACP_SESSION_UPDATE_EXTENSION_FS_WATCH: &str = "fs_watch";
 pub const HARN_ACP_SESSION_UPDATE_EXTENSION_HANDOFF: &str = "handoff";
 pub const HARN_ACP_SESSION_UPDATE_EXTENSION_HITL_REQUEST: &str = "hitl_request";
 pub const HARN_ACP_SESSION_UPDATE_EXTENSION_HITL_RESOLVED: &str = "hitl_resolved";
+pub const HARN_ACP_SESSION_UPDATE_EXTENSION_LIVE_SESSION_CLIENT: &str = "live_session_client";
 pub const HARN_ACP_SESSION_UPDATE_EXTENSION_LOG: &str = "log";
 pub const HARN_ACP_SESSION_UPDATE_EXTENSION_PROGRESS: &str = "progress";
 pub const HARN_ACP_SESSION_UPDATE_EXTENSION_REMINDER_EMITTED: &str = "reminder_emitted";
@@ -1576,6 +1599,7 @@ pub const HARN_ACP_SESSION_UPDATE_EXTENSIONS: &[&str] = &[
     "handoff",
     "hitl_request",
     "hitl_resolved",
+    "live_session_client",
     "log",
     "progress",
     "reminder_emitted",

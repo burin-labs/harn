@@ -673,6 +673,26 @@ fn api_router(state: ApiState) -> Router {
             post(sessions::close_session),
         )
         .route(
+            "/v1/sessions/{session_id}/live-clients",
+            get(sessions::list_session_live_clients),
+        )
+        .route(
+            "/v1/sessions/{session_id}/attach",
+            post(sessions::attach_session_client),
+        )
+        .route(
+            "/v1/sessions/{session_id}/takeover",
+            post(sessions::takeover_session_client),
+        )
+        .route(
+            "/v1/sessions/{session_id}/detach",
+            post(sessions::detach_session_client),
+        )
+        .route(
+            "/v1/sessions/{session_id}/heartbeat",
+            post(sessions::heartbeat_session_client),
+        )
+        .route(
             "/v1/sessions/{session_id}/fork",
             post(sessions::fork_session),
         )
@@ -691,6 +711,10 @@ fn api_router(state: ApiState) -> Router {
         .route("/v1/tasks", get(tasks::list_tasks).post(tasks::submit_task))
         .route("/v1/tasks/{task_id}", get(tasks::get_task))
         .route("/v1/tasks/{task_id}/cancel", post(tasks::cancel_task))
+        .route(
+            "/v1/tasks/{task_id}/messages",
+            post(tasks::append_task_message),
+        )
         .route(
             "/v1/artifacts",
             get(artifacts::list_artifacts).post(artifacts::register_artifact),
@@ -970,6 +994,7 @@ mod tests {
     use axum::body::{to_bytes, Body};
     use axum::http::Request;
     use tower::ServiceExt;
+    mod live_controls;
     mod session_model_policy;
 
     fn write_test_pipeline(path: &Path) {
@@ -1004,58 +1029,6 @@ mod tests {
         let value: Value = serde_json::from_slice(&body).expect("json");
         assert_eq!(value["openapi"], "3.1.0");
         assert!(value["paths"]["/v1/sessions"].is_object());
-    }
-
-    #[tokio::test]
-    async fn local_api_creates_session_and_accepts_task() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let script = dir.path().join("agent.harn");
-        write_test_pipeline(&script);
-        let server = ApiServer::new(ApiServerConfig::for_pipeline(
-            script.to_string_lossy().to_string(),
-        ));
-        let app = api_router(server.state);
-
-        let response = app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/v1/sessions")
-                    .header("content-type", "application/json")
-                    .body(Body::from(r#"{"workspace_id":"local"}"#))
-                    .expect("request"),
-            )
-            .await
-            .expect("session response");
-        assert_eq!(response.status(), StatusCode::CREATED);
-        let body = to_bytes(response.into_body(), usize::MAX)
-            .await
-            .expect("body");
-        let session: Value = serde_json::from_slice(&body).expect("session");
-        let session_id = session["id"].as_str().expect("session id");
-
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri(format!("/v1/sessions/{session_id}/tasks"))
-                    .header("content-type", "application/json")
-                    .body(Body::from(
-                        r#"{"input":{"role":"user","parts":[{"type":"text","text":"hello","visibility":"public"}]}}"#,
-                    ))
-                    .expect("request"),
-            )
-            .await
-            .expect("task response");
-        assert_eq!(response.status(), StatusCode::ACCEPTED);
-        let body = to_bytes(response.into_body(), usize::MAX)
-            .await
-            .expect("body");
-        let task: Value = serde_json::from_slice(&body).expect("task");
-        assert_eq!(task["object"], "task");
-        assert_eq!(task["status"], "WORKING");
-        assert_eq!(task["session_id"], session_id);
     }
 
     #[tokio::test]

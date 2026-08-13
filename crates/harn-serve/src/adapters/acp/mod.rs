@@ -24,6 +24,7 @@ mod host_ownership;
 mod inject;
 mod integrations;
 mod io;
+mod live_clients;
 mod modes;
 mod plan_documents;
 mod prompt;
@@ -41,6 +42,9 @@ mod types;
 use auth::acp_auth_request_for_method;
 use bridge::AcpBridge;
 pub use bridge::AcpOutput;
+use live_clients::{
+    apply_live_client_operation, is_live_client_method, write_live_client_operation,
+};
 #[cfg(test)]
 use schema::configured_llm_route_for_capabilities;
 use schema::{
@@ -56,8 +60,8 @@ pub use schema::{
 };
 use sessions::{
     apply_session_budget_rearm, lookup_session_cancellation, preempt_session_interruption,
-    prepare_session_prompt, session_project_root_for_cwd, Session, SessionBudget,
-    SessionCancellation, SessionInfo,
+    prepare_session_prompt, session_project_root_for_cwd, ConcurrentSessionControl,
+    ConcurrentSessionControls, Session, SessionBudget, SessionCancellation, SessionInfo,
 };
 pub(crate) use transport::run_acp_channel_server_with_existing_handle;
 pub use transport::{
@@ -903,9 +907,9 @@ pub struct AcpServer {
     runtime_configurator: Arc<dyn AcpRuntimeConfigurator>,
     /// Active sessions keyed by session ID.
     sessions: HashMap<String, Session>,
-    /// ACP control-plane ownership for pending injected messages, keyed by
-    /// session id then message id.
-    inject_controls: HashMap<String, BTreeMap<String, InjectControlRecord>>,
+    /// Typed controls shared with the transport router so they can preempt an
+    /// in-flight `session/prompt` without creating a second session owner.
+    concurrent_controls: ConcurrentSessionControls,
     /// Live timeline subscriptions created by Harn-specific ACP extension
     /// methods. Each task fans event-log appends into notifications.
     timeline_subscriptions: HashMap<String, TimelineSubscription>,

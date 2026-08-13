@@ -533,6 +533,9 @@ impl AcpServer {
         // A fork is the same session lineage: it inherits the parent's
         // environment policy (and thus its grants), not a fresh legacy env.
         let cancellation = self.register_session_cancellation(&new_session_id);
+        let concurrent_control = ConcurrentSessionControl::new();
+        self.concurrent_controls
+            .register(&new_session_id, concurrent_control.clone());
         let fork_cwd = harn_vm::agent_sessions::workspace_anchor(&new_session_id)
             .map(|anchor| anchor.primary)
             .unwrap_or(src_cwd);
@@ -544,7 +547,8 @@ impl AcpServer {
                 project_root,
                 cancellation,
                 host_bridge: None,
-                inject_state: harn_vm::bridge::HostBridgeInjectionState::default(),
+                inject_state: concurrent_control.inject_state.clone(),
+                concurrent_control,
                 info: info.clone(),
                 advertised_commands: Vec::new(),
                 current_mode_id: parent_mode_id.clone(),

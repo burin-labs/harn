@@ -199,6 +199,7 @@ ACP_SESSION_UPDATES: tuple = (
     "handoff",
     "hitl_request",
     "hitl_resolved",
+    "live_session_client",
     "log",
     "progress",
     "reminder_emitted",
@@ -233,6 +234,7 @@ HARN_ACP_SESSION_UPDATE_EXTENSIONS: tuple = (
     "handoff",
     "hitl_request",
     "hitl_resolved",
+    "live_session_client",
     "log",
     "progress",
     "reminder_emitted",
@@ -558,6 +560,7 @@ class ACPSessionUpdate(str, Enum):
     HANDOFF = "handoff"
     HITL_REQUEST = "hitl_request"
     HITL_RESOLVED = "hitl_resolved"
+    LIVE_SESSION_CLIENT = "live_session_client"
     LOG = "log"
     PROGRESS = "progress"
     REMINDER_EMITTED = "reminder_emitted"

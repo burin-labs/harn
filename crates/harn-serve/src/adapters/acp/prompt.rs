@@ -195,6 +195,7 @@ impl AcpServer {
         host_bridge.set_session_id(&bridge.session_id);
         if let Some(session) = self.sessions.get_mut(&session_id) {
             session.host_bridge = Some(host_bridge.clone());
+            session.concurrent_control.set_prompt_active(true);
         }
 
         let compile_started = Instant::now();

@@ -63,6 +63,7 @@ public enum HarnProtocolConstants {
         "handoff",
         "hitl_request",
         "hitl_resolved",
+        "live_session_client",
         "log",
         "progress",
         "reminder_emitted",
@@ -523,6 +524,7 @@ public enum HarnACPSessionUpdate: String, Codable, Sendable, CaseIterable {
     case handoff = "handoff"
     case hitlRequest = "hitl_request"
     case hitlResolved = "hitl_resolved"
+    case liveSessionClient = "live_session_client"
     case log = "log"
     case progress = "progress"
     case reminderEmitted = "reminder_emitted"
@@ -557,6 +559,7 @@ public enum HarnACPSessionUpdate: String, Codable, Sendable, CaseIterable {
         "handoff",
         "hitl_request",
         "hitl_resolved",
+        "live_session_client",
         "log",
         "progress",
         "reminder_emitted",
