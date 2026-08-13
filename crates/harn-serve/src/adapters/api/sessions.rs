@@ -154,6 +154,126 @@ pub(super) async fn get_session(
     }
 }
 
+pub(super) async fn list_session_live_clients(
+    State(state): State<ApiState>,
+    AxumPath(session_id): AxumPath<String>,
+    OriginalUri(uri): OriginalUri,
+    headers: HeaderMap,
+) -> Response {
+    if let Err(response) = authorize(&state, Method::GET, &uri, &headers, Bytes::new()).await {
+        return response;
+    }
+    if !api_session_exists(&state, &session_id) {
+        return api_error(StatusCode::NOT_FOUND, "not_found", "session not found");
+    }
+    match state
+        .acp
+        .call("session/live_clients", json!({"sessionId": session_id}))
+        .await
+    {
+        Ok(result) => Json(result).into_response(),
+        Err(error) => api_error(StatusCode::BAD_GATEWAY, "acp_error", &error),
+    }
+}
+
+pub(super) async fn attach_session_client(
+    State(state): State<ApiState>,
+    AxumPath(session_id): AxumPath<String>,
+    OriginalUri(uri): OriginalUri,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    live_client_mutation(state, session_id, uri, headers, body, "session/attach").await
+}
+
+pub(super) async fn takeover_session_client(
+    State(state): State<ApiState>,
+    AxumPath(session_id): AxumPath<String>,
+    OriginalUri(uri): OriginalUri,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    live_client_mutation(state, session_id, uri, headers, body, "session/takeover").await
+}
+
+pub(super) async fn detach_session_client(
+    State(state): State<ApiState>,
+    AxumPath(session_id): AxumPath<String>,
+    OriginalUri(uri): OriginalUri,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    live_client_mutation(state, session_id, uri, headers, body, "session/detach").await
+}
+
+pub(super) async fn heartbeat_session_client(
+    State(state): State<ApiState>,
+    AxumPath(session_id): AxumPath<String>,
+    OriginalUri(uri): OriginalUri,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    live_client_mutation(state, session_id, uri, headers, body, "session/heartbeat").await
+}
+
+async fn live_client_mutation(
+    state: ApiState,
+    session_id: String,
+    uri: Uri,
+    headers: HeaderMap,
+    body: Bytes,
+    method: &'static str,
+) -> Response {
+    if let Err(response) = authorize(&state, Method::POST, &uri, &headers, body.clone()).await {
+        return response;
+    }
+    if !api_session_exists(&state, &session_id) {
+        return api_error(StatusCode::NOT_FOUND, "not_found", "session not found");
+    }
+    let Ok(input) = parse_json_body(&body) else {
+        return invalid_json_response();
+    };
+    let params = json!({
+        "sessionId": session_id,
+        "clientId": input.get("client_id").cloned().unwrap_or(Value::Null),
+        "mode": input.get("mode").cloned().unwrap_or_else(|| json!("observer")),
+        "takeover": input.get("takeover").cloned().unwrap_or(json!(false)),
+        "promptInjection": input.get("prompt_injection").cloned().unwrap_or(Value::Null),
+        "permissionRouting": input.get("permission_routing").cloned().unwrap_or(Value::Null),
+        "reason": input.get("reason").cloned().unwrap_or(Value::Null),
+        "metadata": input.get("metadata").cloned().unwrap_or_else(|| json!({})),
+    });
+    match state.acp.call(method, params).await {
+        Ok(result) => {
+            project_live_client_state(&state, &session_id, &result);
+            Json(result).into_response()
+        }
+        Err(error) => api_error(StatusCode::BAD_REQUEST, "live_client_error", &error),
+    }
+}
+
+fn api_session_exists(state: &ApiState, session_id: &str) -> bool {
+    state
+        .inner
+        .lock()
+        .expect("api state poisoned")
+        .sessions
+        .contains_key(session_id)
+}
+
+fn project_live_client_state(state: &ApiState, session_id: &str, result: &Value) {
+    let mut inner = state.inner.lock().expect("api state poisoned");
+    let Some(session) = inner.sessions.get_mut(session_id) else {
+        return;
+    };
+    session["live_clients"] = result.get("clients").cloned().unwrap_or_else(|| json!([]));
+    session["live_controller_id"] = result
+        .get("active_controller_id")
+        .cloned()
+        .unwrap_or(Value::Null);
+    session["updated_at"] = json!(now_rfc3339());
+}
+
 pub(super) async fn get_session_view(
     State(state): State<ApiState>,
     AxumPath(session_id): AxumPath<String>,

@@ -26,6 +26,7 @@ pub const HARN_SESSION_UPDATE_EXTENSIONS: &[&str] = &[
     "handoff",
     "hitl_request",
     "hitl_resolved",
+    "live_session_client",
     "log",
     "progress",
     "reminder_emitted",
