@@ -8,6 +8,8 @@ public enum HarnProtocolConstants {
     public static let acpSchemaCompatibility = "agentclientprotocol/agent-client-protocol schema v0.12.2"
     public static let toolPermissionDecisionSchema = "harn.tool_permission_decision.v1"
     public static let toolPermissionActivitySchema = "harn.tool_permission_activity.v1"
+    public static let externalActionActivitySchema = "harn.external_action_activity.v1"
+    public static let externalActionReceiptSchema = "harn.external_action_receipt.v1"
     public static let harnAgentEventMethod = "_harn/agentEvent"
     public static let harnProviderCatalogMethod = "_harn/providerCatalog"
     public static let acpPromptErrorDataSchema = "harn.acp.prompt_error.v1"
@@ -202,6 +204,84 @@ public enum HarnExternalActionNextAction: String, Codable, Sendable, CaseIterabl
     ].map { Self(rawValue: $0)! }
 }
 
+public enum HarnExternalActionEnvironment: String, Codable, Sendable, CaseIterable {
+    case mock = "mock"
+    case test = "test"
+    case live = "live"
+
+    public static let allCases: [Self] = [
+        "mock",
+        "test",
+        "live",
+    ].map { Self(rawValue: $0)! }
+}
+
+public enum HarnExternalActionAuthorizationMethod: String, Codable, Sendable, CaseIterable {
+    case manual = "manual"
+    case policy = "policy"
+    case adversarialAuto = "adversarial_auto"
+    case managedPolicy = "managed_policy"
+    case testFixture = "test_fixture"
+
+    public static let allCases: [Self] = [
+        "manual",
+        "policy",
+        "adversarial_auto",
+        "managed_policy",
+        "test_fixture",
+    ].map { Self(rawValue: $0)! }
+}
+
+public enum HarnExternalActionAuthenticationAssurance: String, Codable, Sendable, CaseIterable {
+    case none = "none"
+    case session = "session"
+    case biometric = "biometric"
+    case managed = "managed"
+
+    public static let allCases: [Self] = [
+        "none",
+        "session",
+        "biometric",
+        "managed",
+    ].map { Self(rawValue: $0)! }
+}
+
+public enum HarnExternalActionDisclosureSource: String, Codable, Sendable, CaseIterable {
+    case userProfile = "user_profile"
+    case fictionalTestFixture = "fictional_test_fixture"
+
+    public static let allCases: [Self] = [
+        "user_profile",
+        "fictional_test_fixture",
+    ].map { Self(rawValue: $0)! }
+}
+
+public enum HarnExternalActionErrorKind: String, Codable, Sendable, CaseIterable {
+    case invalidIntent = "invalid_intent"
+    case invalidGrant = "invalid_grant"
+    case invalidPolicy = "invalid_policy"
+    case adapterUnavailable = "adapter_unavailable"
+    case adapterFailure = "adapter_failure"
+    case malformedAdapterResult = "malformed_adapter_result"
+    case disclosureUnavailable = "disclosure_unavailable"
+    case disclosureRefused = "disclosure_refused"
+    case malformedDisclosure = "malformed_disclosure"
+    case invalidReconciliation = "invalid_reconciliation"
+
+    public static let allCases: [Self] = [
+        "invalid_intent",
+        "invalid_grant",
+        "invalid_policy",
+        "adapter_unavailable",
+        "adapter_failure",
+        "malformed_adapter_result",
+        "disclosure_unavailable",
+        "disclosure_refused",
+        "malformed_disclosure",
+        "invalid_reconciliation",
+    ].map { Self(rawValue: $0)! }
+}
+
 public enum HarnExternalActionProtectedFieldClass: String, Codable, Sendable, CaseIterable {
     case legalIdentity = "legal_identity"
     case birthDate = "birth_date"
@@ -330,6 +410,205 @@ public enum HarnExternalActionReconciliationStatus: String, Codable, Sendable, C
         "indeterminate",
         "refused",
     ].map { Self(rawValue: $0)! }
+}
+
+public struct HarnExternalActionActor: Codable, Sendable, Equatable {
+    public let kind: String
+    public let id: String
+}
+
+public struct HarnExternalActionMoney: Codable, Sendable, Equatable {
+    public let currency: String
+    public let amountMinor: Int64
+
+    enum CodingKeys: String, CodingKey {
+        case currency
+        case amountMinor = "amount_minor"
+    }
+}
+
+public struct HarnExternalActionDisclosureReceipt: Codable, Sendable, Equatable {
+    public let recipient: String
+    public let purpose: String
+    public let fieldClasses: [HarnExternalActionProtectedFieldClass]
+    public let source: HarnExternalActionDisclosureSource
+    public let authenticationAssurance: HarnExternalActionAuthenticationAssurance
+
+    enum CodingKeys: String, CodingKey {
+        case recipient, purpose, source
+        case fieldClasses = "field_classes"
+        case authenticationAssurance = "authentication_assurance"
+    }
+}
+
+public struct HarnExternalActionError: Codable, Sendable, Equatable {
+    public let kind: HarnExternalActionErrorKind
+    public let code: String
+    public let message: String
+    public let retryable: Bool
+}
+
+public struct HarnExternalActionReceiptReconciliation: Codable, Sendable, Equatable {
+    public let attemptId: String
+    public let previousReceiptId: String
+
+    enum CodingKeys: String, CodingKey {
+        case attemptId = "attempt_id"
+        case previousReceiptId = "previous_receipt_id"
+    }
+}
+
+public struct HarnExternalActionReceipt: Codable, Sendable, Equatable {
+    public let schema: String
+    public let id: String
+    public let actionId: String
+    public let intentFingerprint: String
+    public let idempotencyKey: String
+    public let provider: String
+    public let capability: String
+    public let operation: String
+    public let environment: HarnExternalActionEnvironment
+    public let adapterId: String
+    public let outcome: HarnExternalActionOutcome
+    public let status: HarnExternalActionReceiptStatus
+    public let nextAction: HarnExternalActionNextAction
+    public let dispatchAttempted: Bool
+    public let recordedAtMs: Int64
+    public let providerActionId: String?
+    public let evidenceRefs: [String]
+    public let error: HarnExternalActionError?
+    public let reconciliation: HarnExternalActionReceiptReconciliation?
+    public let disclosure: HarnExternalActionDisclosureReceipt?
+
+    enum CodingKeys: String, CodingKey {
+        case schema, id, provider, capability, operation, environment, outcome, status, error
+        case reconciliation, disclosure
+        case actionId = "action_id"
+        case intentFingerprint = "intent_fingerprint"
+        case idempotencyKey = "idempotency_key"
+        case adapterId = "adapter_id"
+        case nextAction = "next_action"
+        case dispatchAttempted = "dispatch_attempted"
+        case recordedAtMs = "recorded_at_ms"
+        case providerActionId = "provider_action_id"
+        case evidenceRefs = "evidence_refs"
+    }
+}
+
+public struct HarnExternalActionPolicyEvaluation: Codable, Sendable, Equatable {
+    public let layer: HarnExternalActionPolicyLayer
+    public let outcome: HarnExternalActionPolicyEvaluationOutcome
+    public let reasonCode: String
+    public let policyId: String?
+
+    enum CodingKeys: String, CodingKey {
+        case layer, outcome
+        case reasonCode = "reason_code"
+        case policyId = "policy_id"
+    }
+}
+
+public struct HarnExternalActionDecision: Codable, Sendable, Equatable {
+    public let outcome: HarnExternalActionDecisionOutcome
+    public let decider: HarnExternalActionDecider
+    public let decidedAtMs: Int64
+    public let reasonCode: String
+    public let actor: HarnExternalActionActor?
+
+    enum CodingKeys: String, CodingKey {
+        case outcome, decider, actor
+        case decidedAtMs = "decided_at_ms"
+        case reasonCode = "reason_code"
+    }
+}
+
+public struct HarnExternalActionAuthorizationRecord: Codable, Sendable, Equatable {
+    public let method: HarnExternalActionAuthorizationMethod
+    public let authenticationAssurance: HarnExternalActionAuthenticationAssurance
+    public let issuedAtMs: Int64
+    public let expiresAtMs: Int64
+
+    enum CodingKeys: String, CodingKey {
+        case method
+        case authenticationAssurance = "authentication_assurance"
+        case issuedAtMs = "issued_at_ms"
+        case expiresAtMs = "expires_at_ms"
+    }
+}
+
+public struct HarnExternalActionRequester: Codable, Sendable, Equatable {
+    public let actor: HarnExternalActionActor
+    public let agentId: String?
+    public let modelProvider: String?
+    public let modelId: String?
+    public let sessionId: String?
+    public let runId: String?
+
+    enum CodingKeys: String, CodingKey {
+        case actor
+        case agentId = "agent_id"
+        case modelProvider = "model_provider"
+        case modelId = "model_id"
+        case sessionId = "session_id"
+        case runId = "run_id"
+    }
+}
+
+public struct HarnExternalActionDispatchRecord: Codable, Sendable, Equatable {
+    public let attempted: Bool
+    public let adapterId: String?
+
+    enum CodingKeys: String, CodingKey {
+        case attempted
+        case adapterId = "adapter_id"
+    }
+}
+
+public struct HarnExternalActionReconciliationRecord: Codable, Sendable, Equatable {
+    public let attempted: Bool
+    public let status: HarnExternalActionReconciliationStatus
+    public let attemptId: String?
+    public let previousReceiptId: String?
+
+    enum CodingKeys: String, CodingKey {
+        case attempted, status
+        case attemptId = "attempt_id"
+        case previousReceiptId = "previous_receipt_id"
+    }
+}
+
+public struct HarnExternalActionActivityRecord: Codable, Sendable, Equatable {
+    public let schema: String
+    public let kind: HarnActivityKind
+    public let id: String
+    public let actionId: String
+    public let intentFingerprint: String
+    public let provider: String
+    public let capability: String
+    public let operation: String
+    public let environment: HarnExternalActionEnvironment
+    public let summary: String
+    public let externalSpend: HarnExternalActionMoney?
+    public let status: HarnExternalActionActivityStatus
+    public let updatedAtMs: Int64
+    public let requester: HarnExternalActionRequester
+    public let policyEvaluations: [HarnExternalActionPolicyEvaluation]
+    public let decision: HarnExternalActionDecision?
+    public let authorization: HarnExternalActionAuthorizationRecord?
+    public let disclosure: HarnExternalActionDisclosureReceipt?
+    public let dispatch: HarnExternalActionDispatchRecord
+    public let reconciliation: HarnExternalActionReconciliationRecord?
+    public let receipt: HarnExternalActionReceipt?
+
+    enum CodingKeys: String, CodingKey {
+        case schema, kind, id, provider, capability, operation, environment, summary, status
+        case requester, decision, authorization, disclosure, dispatch, reconciliation, receipt
+        case actionId = "action_id"
+        case intentFingerprint = "intent_fingerprint"
+        case externalSpend = "external_spend"
+        case updatedAtMs = "updated_at_ms"
+        case policyEvaluations = "policy_evaluations"
+    }
 }
 
 public enum HarnActivityKind: String, Codable, Sendable, CaseIterable {

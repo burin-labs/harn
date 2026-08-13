@@ -6,6 +6,9 @@ export const HARN_PROTOCOL_ARTIFACT_VERSION = "0.10.89"
 export const HARN_TOOL_PERMISSION_DECISION_SCHEMA = "harn.tool_permission_decision.v1" as const
 export const HARN_TOOL_PERMISSION_ACTIVITY_SCHEMA = "harn.tool_permission_activity.v1" as const
 
+export const HARN_EXTERNAL_ACTION_ACTIVITY_SCHEMA = "harn.external_action_activity.v1" as const
+export const HARN_EXTERNAL_ACTION_RECEIPT_SCHEMA = "harn.external_action_receipt.v1" as const
+
 export const MCP_PROTOCOL_VERSION = "2026-07-28"
 export const MCP_JSON_SCHEMA_2020_12_DIALECT = "https://json-schema.org/draft/2020-12/schema"
 export const MCP_UNSUPPORTED_PROTOCOL_VERSION_ERROR = { code: -32022, message: "Unsupported protocol version" } as const
@@ -369,6 +372,50 @@ export const EXTERNAL_ACTION_NEXT_ACTIONS = [
 ] as const
 export type HarnExternalActionNextAction = (typeof EXTERNAL_ACTION_NEXT_ACTIONS)[number]
 
+export const EXTERNAL_ACTION_ENVIRONMENTS = [
+  "mock",
+  "test",
+  "live",
+] as const
+export type HarnExternalActionEnvironment = (typeof EXTERNAL_ACTION_ENVIRONMENTS)[number]
+
+export const EXTERNAL_ACTION_AUTHORIZATION_METHODS = [
+  "manual",
+  "policy",
+  "adversarial_auto",
+  "managed_policy",
+  "test_fixture",
+] as const
+export type HarnExternalActionAuthorizationMethod = (typeof EXTERNAL_ACTION_AUTHORIZATION_METHODS)[number]
+
+export const EXTERNAL_ACTION_AUTHENTICATION_ASSURANCES = [
+  "none",
+  "session",
+  "biometric",
+  "managed",
+] as const
+export type HarnExternalActionAuthenticationAssurance = (typeof EXTERNAL_ACTION_AUTHENTICATION_ASSURANCES)[number]
+
+export const EXTERNAL_ACTION_DISCLOSURE_SOURCES = [
+  "user_profile",
+  "fictional_test_fixture",
+] as const
+export type HarnExternalActionDisclosureSource = (typeof EXTERNAL_ACTION_DISCLOSURE_SOURCES)[number]
+
+export const EXTERNAL_ACTION_ERROR_KINDS = [
+  "invalid_intent",
+  "invalid_grant",
+  "invalid_policy",
+  "adapter_unavailable",
+  "adapter_failure",
+  "malformed_adapter_result",
+  "disclosure_unavailable",
+  "disclosure_refused",
+  "malformed_disclosure",
+  "invalid_reconciliation",
+] as const
+export type HarnExternalActionErrorKind = (typeof EXTERNAL_ACTION_ERROR_KINDS)[number]
+
 export const EXTERNAL_ACTION_PROTECTED_FIELD_CLASSES = [
   "legal_identity",
   "birth_date",
@@ -441,6 +488,126 @@ export const EXTERNAL_ACTION_RECONCILIATION_STATUSES = [
   "refused",
 ] as const
 export type HarnExternalActionReconciliationStatus = (typeof EXTERNAL_ACTION_RECONCILIATION_STATUSES)[number]
+
+export interface HarnExternalActionActor {
+  kind: string
+  id: string
+}
+
+export interface HarnExternalActionMoney {
+  currency: string
+  amount_minor: number
+}
+
+export interface HarnExternalActionDisclosureReceipt {
+  recipient: string
+  purpose: string
+  field_classes: HarnExternalActionProtectedFieldClass[]
+  source: HarnExternalActionDisclosureSource
+  authentication_assurance: HarnExternalActionAuthenticationAssurance
+}
+
+export interface HarnExternalActionError {
+  kind: HarnExternalActionErrorKind
+  code: string
+  message: string
+  retryable: boolean
+}
+
+export interface HarnExternalActionReceiptReconciliation {
+  attempt_id: string
+  previous_receipt_id: string
+}
+
+export interface HarnExternalActionReceipt {
+  schema: "harn.external_action_receipt.v1"
+  id: string
+  action_id: string
+  intent_fingerprint: string
+  idempotency_key: string
+  provider: string
+  capability: string
+  operation: string
+  environment: HarnExternalActionEnvironment
+  adapter_id: string
+  outcome: HarnExternalActionOutcome
+  status: HarnExternalActionReceiptStatus
+  next_action: HarnExternalActionNextAction
+  dispatch_attempted: boolean
+  recorded_at_ms: number
+  provider_action_id?: string
+  evidence_refs: string[]
+  error?: HarnExternalActionError
+  reconciliation?: HarnExternalActionReceiptReconciliation
+  disclosure?: HarnExternalActionDisclosureReceipt
+}
+
+export interface HarnExternalActionPolicyEvaluation {
+  layer: HarnExternalActionPolicyLayer
+  outcome: HarnExternalActionPolicyEvaluationOutcome
+  reason_code: string
+  policy_id?: string
+}
+
+export interface HarnExternalActionDecision {
+  outcome: HarnExternalActionDecisionOutcome
+  decider: HarnExternalActionDecider
+  decided_at_ms: number
+  reason_code: string
+  actor?: HarnExternalActionActor
+}
+
+export interface HarnExternalActionAuthorizationRecord {
+  method: HarnExternalActionAuthorizationMethod
+  authentication_assurance: HarnExternalActionAuthenticationAssurance
+  issued_at_ms: number
+  expires_at_ms: number
+}
+
+export interface HarnExternalActionRequester {
+  actor: HarnExternalActionActor
+  agent_id?: string
+  model_provider?: string
+  model_id?: string
+  session_id?: string
+  run_id?: string
+}
+
+export interface HarnExternalActionDispatchRecord {
+  attempted: boolean
+  adapter_id?: string
+}
+
+export interface HarnExternalActionReconciliationRecord {
+  attempted: boolean
+  status: HarnExternalActionReconciliationStatus
+  attempt_id?: string
+  previous_receipt_id?: string
+}
+
+export interface HarnExternalActionActivityRecord {
+  schema: "harn.external_action_activity.v1"
+  kind: "external_action"
+  id: string
+  action_id: string
+  intent_fingerprint: string
+  provider: string
+  capability: string
+  operation: string
+  environment: HarnExternalActionEnvironment
+  summary: string
+  external_spend?: HarnExternalActionMoney
+  status: HarnExternalActionActivityStatus
+  updated_at_ms: number
+  requester: HarnExternalActionRequester
+  policy_evaluations: HarnExternalActionPolicyEvaluation[]
+  decision?: HarnExternalActionDecision
+  authorization?: HarnExternalActionAuthorizationRecord
+  disclosure?: HarnExternalActionDisclosureReceipt
+  dispatch: HarnExternalActionDispatchRecord
+  reconciliation?: HarnExternalActionReconciliationRecord
+  receipt?: HarnExternalActionReceipt
+}
 
 export const ACTIVITY_KINDS = [
   "external_action",

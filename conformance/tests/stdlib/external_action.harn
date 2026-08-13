@@ -90,6 +90,28 @@ pipeline test(harness: Harness) {
   assert(activity.receipt?.id == first.id, "activity retains the exact receipt")
   assert(activity.receipt?.schema == "harn.external_action_receipt.v1", "receipt stays canonical")
   assert(!json_stringify(activity).contains("offer_id"), "activity structurally excludes payloads")
+  const mismatched_receipt = first + {provider: "google"}
+  const mismatch_error = try {
+    external_action_activity(intent, mismatched_receipt)
+    ""
+  } catch (error) {
+    to_string(error)
+  }
+  assert(
+    mismatch_error.contains("receipt does not match intent"),
+    "activity must reject a receipt carrying different immutable action facts",
+  )
+  const inconsistent_receipt = first + {outcome: "denied"}
+  const lifecycle_error = try {
+    external_action_activity(intent, inconsistent_receipt)
+    ""
+  } catch (error) {
+    to_string(error)
+  }
+  assert(
+    lifecycle_error.contains("receipt lifecycle is inconsistent"),
+    "activity must reject a receipt with conflicting outcome and status",
+  )
   harness.stdio.println("confirmed_once:" + to_string(confirmed.dispatch_calls()))
   const changed = external_action_intent(
     intent + {payload: {offer_id: "off_test_changed", passengers: [{id: "pas_1"}]}},
