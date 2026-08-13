@@ -1,1 +1,0 @@
-- **Keep release caches inside their runner ABI floor.** Release builds now bind both exact and fallback Rust caches to the same compatibility generation, preventing newer-glibc host artifacts from contaminating portable Linux builds.

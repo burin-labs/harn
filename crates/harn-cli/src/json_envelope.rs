@@ -153,14 +153,20 @@ pub fn catalog() -> Vec<SchemaEntry> {
         },
         SchemaEntry {
             command: "connect status",
-            schema_version: 1,
+            schema_version: crate::commands::connect::status::CONNECT_STATUS_SCHEMA_VERSION,
             description: "Outbound-connector readiness report.",
             schema_json: None,
         },
         SchemaEntry {
             command: "connect setup-plan",
-            schema_version: 1,
+            schema_version: crate::commands::connect::status::CONNECT_SETUP_PLAN_SCHEMA_VERSION,
             description: "Step-by-step plan to bring a connector online.",
+            schema_json: None,
+        },
+        SchemaEntry {
+            command: "connect",
+            schema_version: crate::commands::connect::setup_events::CONNECT_SETUP_EVENT_SCHEMA_VERSION,
+            description: "Secret-free connector setup progress and terminal events as NDJSON.",
             schema_json: None,
         },
         SchemaEntry {

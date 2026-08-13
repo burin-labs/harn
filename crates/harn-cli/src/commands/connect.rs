@@ -12,7 +12,8 @@ mod callback;
 mod github;
 mod linear;
 mod oauth;
-mod status;
+pub(crate) mod setup_events;
+pub(crate) mod status;
 pub(crate) mod store;
 mod workspace;
 
@@ -146,6 +147,7 @@ struct ConnectorStatus {
     required_secrets: Vec<String>,
     missing_secrets: Vec<String>,
     credential_environment: Vec<package::ConnectorCredentialEnvironmentManifest>,
+    configuration_environment: Vec<package::ConnectorConfigurationEnvironmentManifest>,
     #[serde(skip_serializing_if = "Option::is_none")]
     secret_id: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -181,6 +183,10 @@ struct ConnectSetupPlan {
     required_scopes: Vec<String>,
     required_secrets: Vec<String>,
     credential_environment: Vec<package::ConnectorCredentialEnvironmentManifest>,
+    configuration_environment: Vec<package::ConnectorConfigurationEnvironmentManifest>,
+    /// Harn-derived, secret-free command a native host may launch directly.
+    /// Connector manifests cannot override this field.
+    launch_command: Vec<String>,
     setup_command: Vec<String>,
     validation_command: Vec<String>,
     health_checks: Vec<package::ConnectorHealthCheckManifest>,

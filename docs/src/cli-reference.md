@@ -1823,7 +1823,9 @@ network request. Use `--repeat` for live reliability checks; repeated summaries
 only pass when every attempted probe for that mode succeeds. `harn local switch`
 can consume the JSON with `--probe-result`. `--tool-format native|json|text`
 forces the live emission contract and exact parser; it does not enable the
-permissive `adaptive` parser.
+permissive `adaptive` parser. Probes preserve route generation defaults and
+raise only the minimum output budget when necessary to leave visible tool-call
+headroom after the route's resolved reasoning allowance.
 
 ## harn provider tool-calibrate
 

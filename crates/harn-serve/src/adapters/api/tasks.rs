@@ -200,6 +200,112 @@ pub(super) async fn get_task(
     }
 }
 
+pub(super) async fn append_task_message(
+    State(state): State<ApiState>,
+    AxumPath(task_id): AxumPath<String>,
+    OriginalUri(uri): OriginalUri,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    if let Err(response) = authorize(&state, Method::POST, &uri, &headers, body.clone()).await {
+        return response;
+    }
+    let Ok(input) = parse_json_body(&body) else {
+        return invalid_json_response();
+    };
+    if input.get("kind").and_then(Value::as_str) != Some("input") {
+        return api_error(
+            StatusCode::BAD_REQUEST,
+            "unsupported_task_message_kind",
+            "task messages accept kind=input; use the task cancel and permission-response endpoints for controls",
+        );
+    }
+    let Some(message_input) = input.get("message").cloned() else {
+        return api_error(
+            StatusCode::BAD_REQUEST,
+            "missing_message",
+            "message is required",
+        );
+    };
+    let Some(content) = prompt_text(&message_input) else {
+        return api_error(
+            StatusCode::BAD_REQUEST,
+            "missing_message_text",
+            "an input task message requires at least one non-empty text part",
+        );
+    };
+    let (session_id, status) = {
+        let inner = state.inner.lock().expect("api state poisoned");
+        let Some(task) = inner.tasks.get(&task_id) else {
+            return api_error(StatusCode::NOT_FOUND, "not_found", "task not found");
+        };
+        (
+            task.get("session_id")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+            task.get("status")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+        )
+    };
+    if matches!(status.as_str(), "COMPLETED" | "FAILED" | "CANCELED") {
+        return api_error(
+            StatusCode::CONFLICT,
+            "task_terminal",
+            "cannot steer a terminal task",
+        );
+    }
+    let actor_metadata = message_input
+        .get("metadata")
+        .cloned()
+        .unwrap_or_else(|| json!({}));
+    let result = match state
+        .acp
+        .call(
+            "session/inject",
+            json!({
+                "sessionId": session_id,
+                "mode": "steer",
+                "content": content,
+                "_meta": {
+                    "harn": {
+                        "actor": {
+                            "kind": "agents_api",
+                            "taskId": task_id,
+                            "metadata": actor_metadata,
+                        }
+                    }
+                }
+            }),
+        )
+        .await
+    {
+        Ok(result) => result,
+        Err(error) => return api_error(StatusCode::CONFLICT, "task_not_steerable", &error),
+    };
+    let mut message = message_resource(&session_id, Some(&task_id), message_input);
+    if let Some(message_id) = result.get("messageId").and_then(Value::as_str) {
+        message["id"] = json!(message_id);
+    }
+    {
+        let mut inner = state.inner.lock().expect("api state poisoned");
+        inner
+            .messages
+            .entry(session_id.clone())
+            .or_default()
+            .push(message.clone());
+    }
+    state.append_event(
+        Some(session_id),
+        Some(task_id),
+        "message.created",
+        message.clone(),
+    );
+    (StatusCode::CREATED, Json(message)).into_response()
+}
+
 pub(super) async fn cancel_task(
     State(state): State<ApiState>,
     AxumPath(task_id): AxumPath<String>,

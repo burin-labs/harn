@@ -39,6 +39,36 @@ Backpressure decisions are exposed as
 tracks HTTP token-bucket admission/rejection; the `circuit` dimension tracks
 destination circuit transitions and fail-fast DLQ moves.
 
+### LLM spend certainty
+
+LLM metrics distinguish logical operations from physical provider requests so
+schema repair, transport retry, and structured-output retry traffic cannot be
+reported as one call or as free:
+
+- `harn_llm_calls_total{provider,model,outcome}` counts logical operations.
+- `harn_llm_provider_requests_total{provider,model}` counts physical provider
+  requests represented by their transaction ledgers.
+- `harn_llm_cost_usd_total{provider,model}` is the cumulative known USD lower
+  bound across those requests.
+- `harn_llm_unpriced_requests_total{provider,model}` counts requests whose USD
+  cost is not known. A window is exact only when this counter has no increase.
+- `harn_llm_usage_unknown_requests_total{provider,model}` counts requests whose
+  token usage is unknown, including terminal attempts that produced no usable
+  response.
+
+For example, this query returns the routes whose spend was not exact during the
+last hour:
+
+```promql
+sum by (provider, model) (
+  increase(harn_llm_unpriced_requests_total[1h])
+) > 0
+```
+
+Do not replace a missing price or terminal request receipt with zero. Combine
+the known-cost increase with the unpriced-request increase when displaying a
+spend total, and label it as a lower bound whenever the latter is nonzero.
+
 Example webhook-to-dispatch latency SLO queries:
 
 ```promql

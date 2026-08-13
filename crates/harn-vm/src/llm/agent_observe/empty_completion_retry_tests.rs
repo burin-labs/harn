@@ -89,6 +89,11 @@ fn empty_completion_retries_then_succeeds_on_second_attempt() {
             .expect("empty completion retry should recover");
         pop_llm_transcript_dir();
         assert_eq!(result.text, "recovered");
+        let usage = result.usage();
+        assert_eq!(
+            usage.provider_call_count, 2,
+            "both completed responses are accounted"
+        );
 
         let retries: Vec<(usize, String, String, String)> = peek_agent_trace()
             .iter()
@@ -224,6 +229,19 @@ fn billed_noncommittal_completion_retries_then_succeeds() {
             .await
             .expect("billed-noncommittal retry should recover");
         assert_eq!(result.text, "recovered");
+        let usage = result.usage();
+        assert_eq!(
+            usage.provider_call_count, 2,
+            "the thrown billed attempt remains represented"
+        );
+        assert!(
+            usage.unpriced_calls >= 1,
+            "unknown billed retry cannot become free"
+        );
+        assert!(
+            usage.usage_unknown_calls >= 1,
+            "missing thrown usage remains explicit"
+        );
 
         let retries: Vec<usize> = peek_agent_trace()
             .iter()

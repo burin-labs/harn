@@ -203,6 +203,7 @@ fn run_emit_summary_json_defaults_to_terminal_stderr_and_reports_llm_metrics() {
         summary["llm"]["unpriced_calls"].as_i64().is_some(),
         "summary: {summary}"
     );
+    assert!(summary["llm"].get("known_cost_usd").is_some());
 }
 
 #[test]

@@ -1035,6 +1035,10 @@ mod tests {
             cache_hit: true,
             served_fast: false,
             accounting_status: crate::llm::usage::UsageAccountingStatus::Reported,
+            known_cost_usd: 0.0123,
+            provider_call_count: 1,
+            unpriced_calls: 0,
+            usage_unknown_calls: 0,
         };
         let pairs: BTreeMap<&str, serde_json::Value> = usage
             .metadata_pairs("anthropic", "claude-sonnet-4")
@@ -1063,6 +1067,10 @@ mod tests {
             cache_hit: false,
             served_fast: false,
             accounting_status: crate::llm::usage::UsageAccountingStatus::Reported,
+            known_cost_usd: 0.0,
+            provider_call_count: 1,
+            unpriced_calls: 1,
+            usage_unknown_calls: 0,
         };
         let pairs: BTreeMap<&str, serde_json::Value> = usage
             .metadata_pairs("local", "local-model")

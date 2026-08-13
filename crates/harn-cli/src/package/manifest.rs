@@ -12,10 +12,11 @@ pub use harn_modules::personas::{
 };
 pub use provider_setup::{
     connector_service_issues, ConnectorConditionalProfileRequirement,
-    ConnectorCredentialEnvironmentManifest, ConnectorEnvironment, ConnectorEvidenceRequirement,
-    ConnectorExternalSpend, ConnectorHealthCheckManifest, ConnectorOperationEffect,
-    ConnectorOperationManifest, ConnectorProtectedProfileManifest, ConnectorReconciliation,
-    ConnectorRecoveryCopy, ConnectorRedactionTarget, ConnectorServiceManifest,
+    ConnectorConfigurationEnvironmentManifest, ConnectorCredentialEnvironmentManifest,
+    ConnectorEnvironment, ConnectorEvidenceRequirement, ConnectorExternalSpend,
+    ConnectorHealthCheckManifest, ConnectorOperationEffect, ConnectorOperationManifest,
+    ConnectorProtectedProfileManifest, ConnectorReconciliation, ConnectorRecoveryCopy,
+    ConnectorRedactionTarget, ConnectorServiceManifest, ConnectorSetupConfigurationField,
     ConnectorTestProfile, ProtectedProfileFieldClass, ProviderManifestEntry, ProviderSetupManifest,
     ResolvedProviderConnectorConfig,
 };
@@ -31,9 +32,8 @@ pub struct Manifest {
     pub check: CheckConfig,
     #[serde(default)]
     pub workspace: WorkspaceConfig,
-    /// `[registry]` table — lightweight package discovery index
-    /// configuration. The CLI also honors `HARN_PACKAGE_REGISTRY` and
-    /// `--registry` flags for one-off overrides.
+    /// `[registry]` table — lightweight package discovery index configuration.
+    /// The CLI also honors `HARN_PACKAGE_REGISTRY` and `--registry` overrides.
     #[serde(default)]
     pub registry: PackageRegistryConfig,
     /// `[skills]` table — per-project skill discovery configuration

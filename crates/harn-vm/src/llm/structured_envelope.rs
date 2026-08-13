@@ -69,7 +69,7 @@ pub(crate) async fn run_structured_envelope(
     let provider_hint = opts.provider.clone();
     let model_hint = opts.model.clone();
 
-    let main_outcome = match execute_schema_retry_loop(
+    let mut main_outcome = match execute_schema_retry_loop(
         None,
         opts,
         options_dict.clone(),
@@ -145,7 +145,7 @@ pub(crate) async fn run_structured_envelope(
     // Schema/JSON failure — try repair if configured.
     if let Some(repair) = repair_config {
         if repair.enabled {
-            if let Some(env) = run_repair_pass(
+            if let Some(mut repair_outcome) = run_repair_pass(
                 &main_outcome,
                 &repair,
                 options_dict.as_ref(),
@@ -154,7 +154,13 @@ pub(crate) async fn run_structured_envelope(
             )
             .await
             {
-                return Ok(env);
+                let mut combined_usages = main_outcome.usages.clone();
+                combined_usages.append(&mut repair_outcome.usages);
+                if repair_outcome.errors.is_empty() {
+                    repair_outcome.usages = combined_usages;
+                    return Ok(envelope_success(&repair_outcome, true));
+                }
+                main_outcome.usages = combined_usages;
             }
             // Repair didn't recover — fall through to the main-call
             // failure envelope, but mark the category as repair_failed
@@ -336,7 +342,7 @@ async fn run_repair_pass(
     base_options: Option<&crate::value::DictMap>,
     schema: &VmValue,
     bridge: Option<&Arc<crate::bridge::HostBridge>>,
-) -> Option<VmValue> {
+) -> Option<SchemaLoopOutcome> {
     let prompt = build_repair_prompt(&main_outcome.raw_text, &main_outcome.errors);
     let merged_options = merge_repair_options(base_options, &repair.overrides, schema);
     let merged_dict = Some(merged_options.clone());
@@ -352,11 +358,7 @@ async fn run_repair_pass(
     let outcome = execute_schema_retry_loop(None, opts, merged_dict, bridge, None)
         .await
         .ok()?;
-    if outcome.errors.is_empty() {
-        Some(envelope_success(&outcome, true))
-    } else {
-        None
-    }
+    Some(outcome)
 }
 
 fn build_repair_prompt(raw_text: &str, errors: &[String]) -> String {
@@ -542,6 +544,40 @@ fn empty_usage_dict() -> crate::value::DictMap {
 }
 
 fn build_usage_dict(outcome: &SchemaLoopOutcome) -> VmValue {
+    if !outcome.usages.is_empty() {
+        let aggregate = crate::llm::usage::LlmUsage::aggregate(&outcome.usages);
+        let certainty = crate::llm::usage::summarize_usage_cost_certainty(&outcome.usages);
+        let mut usage = aggregate.to_vm_dict(&Default::default());
+        if let Some(VmValue::Dict(final_usage)) = outcome
+            .vm_result
+            .as_dict()
+            .and_then(|result| result.get("usage"))
+        {
+            if let Some(provider_attempts) = final_usage.get("provider_attempts") {
+                usage.insert(
+                    crate::value::intern_key("provider_attempts"),
+                    provider_attempts.clone(),
+                );
+            }
+        }
+        usage.insert(
+            crate::value::intern_key("known_cost_usd"),
+            VmValue::Float(certainty.known_cost_usd),
+        );
+        usage.insert(
+            crate::value::intern_key("unpriced_calls"),
+            VmValue::Int(certainty.unpriced_calls),
+        );
+        usage.insert(
+            crate::value::intern_key("usage_unknown_calls"),
+            VmValue::Int(certainty.usage_unknown_calls),
+        );
+        usage.insert(
+            crate::value::intern_key("provider_call_count"),
+            VmValue::Int(certainty.provider_call_count),
+        );
+        return VmValue::dict(usage);
+    }
     // The canonical envelope always carries `usage`; the empty dict covers
     // non-dict results (schema-abort paths) only.
     match outcome.vm_result.as_dict() {
@@ -614,6 +650,7 @@ mod tests {
             attempts: 1,
             schema_retries_budget: 2,
             output_validation_mode: String::from("error"),
+            usages: Vec::new(),
         }
     }
 
@@ -639,6 +676,7 @@ mod tests {
             logprobs: Vec::new(),
             telemetry: crate::llm::api::ProviderTelemetry::default(),
         };
+        let usage = result.usage();
         SchemaLoopOutcome {
             vm_result: crate::llm::api::vm_build_llm_result(
                 &result,
@@ -651,6 +689,7 @@ mod tests {
             attempts: 1,
             schema_retries_budget: 2,
             output_validation_mode: String::from("error"),
+            usages: vec![usage],
         }
     }
 
@@ -663,15 +702,10 @@ mod tests {
     }
 
     #[test]
-    fn structured_success_and_validation_failure_preserve_final_usage() {
+    fn structured_success_and_validation_failure_preserve_accounted_usage() {
         let _guard = crate::llm::env_guard();
         crate::llm_config::clear_user_overrides();
         let outcome = priced_outcome(vec!["decision must be merge"]);
-        let canonical_usage = outcome
-            .vm_result
-            .as_dict()
-            .and_then(|dict| dict.get("usage"))
-            .expect("canonical usage");
         let expected_cost = crate::llm::cost::pricing_aware_call_cost(
             "anthropic",
             "claude-sonnet-4-20250514",
@@ -683,15 +717,63 @@ mod tests {
         let success = envelope_success(&outcome, false);
         let failure = envelope_failure(&outcome, EnvelopeFailureKind::SchemaValidation, false);
 
-        let canonical_usage = crate::llm::vm_value_to_json(canonical_usage);
         let success_usage =
             crate::llm::vm_value_to_json(&VmValue::Dict(envelope_usage(&success).clone().into()));
         let failure_usage =
             crate::llm::vm_value_to_json(&VmValue::Dict(envelope_usage(&failure).clone().into()));
-        assert_eq!(success_usage, canonical_usage);
-        assert_eq!(failure_usage, canonical_usage);
         assert_eq!(success_usage["cost_usd"], serde_json::json!(expected_cost));
         assert_eq!(failure_usage["cost_usd"], serde_json::json!(expected_cost));
+        assert_eq!(
+            success_usage["known_cost_usd"],
+            serde_json::json!(expected_cost)
+        );
+        assert_eq!(success_usage["unpriced_calls"], 0);
+        assert_eq!(success_usage["usage_unknown_calls"], 0);
+        assert_eq!(success_usage["input_tokens"], 1_000);
+        assert_eq!(failure_usage, success_usage);
+    }
+
+    #[test]
+    fn structured_usage_folds_every_schema_attempt() {
+        let _guard = crate::llm::env_guard();
+        crate::llm_config::clear_user_overrides();
+        let mut outcome = priced_outcome(Vec::new());
+        let one_cost = outcome.usages[0].cost_usd.expect("priced usage");
+        outcome.usages.push(outcome.usages[0].clone());
+        outcome.attempts = 2;
+
+        let envelope = envelope_success(&outcome, false);
+        let usage =
+            crate::llm::vm_value_to_json(&VmValue::Dict(envelope_usage(&envelope).clone().into()));
+        assert_eq!(usage["input_tokens"], 2_000);
+        assert_eq!(usage["output_tokens"], 2_000);
+        assert_eq!(usage["cost_usd"], serde_json::json!(one_cost * 2.0));
+        assert_eq!(usage["known_cost_usd"], serde_json::json!(one_cost * 2.0));
+        assert_eq!(usage["unpriced_calls"], 0);
+        assert_eq!(usage["provider_call_count"], 2);
+    }
+
+    #[test]
+    fn structured_usage_retains_lower_bound_when_one_attempt_is_unpriced() {
+        let _guard = crate::llm::env_guard();
+        crate::llm_config::clear_user_overrides();
+        let mut outcome = priced_outcome(Vec::new());
+        let one_cost = outcome.usages[0].cost_usd.expect("priced usage");
+        let mut unknown = outcome.usages[0].clone();
+        unknown.cost_usd = None;
+        unknown.accounting_status = crate::llm::usage::UsageAccountingStatus::Unknown;
+        unknown.known_cost_usd = 0.0;
+        unknown.unpriced_calls = 1;
+        unknown.usage_unknown_calls = 1;
+        outcome.usages.push(unknown);
+
+        let envelope = envelope_success(&outcome, false);
+        let usage =
+            crate::llm::vm_value_to_json(&VmValue::Dict(envelope_usage(&envelope).clone().into()));
+        assert_eq!(usage["cost_usd"], serde_json::Value::Null);
+        assert_eq!(usage["known_cost_usd"], serde_json::json!(one_cost));
+        assert_eq!(usage["unpriced_calls"], 1);
+        assert_eq!(usage["usage_unknown_calls"], 1);
     }
 
     #[test]

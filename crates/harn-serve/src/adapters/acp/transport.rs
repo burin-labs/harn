@@ -419,6 +419,8 @@ async fn run_acp_channel_server_inner(
             let mut server = AcpServer::new_with_output(config, AcpOutput::Channel(response_tx));
             let pending_clone = server.pending.clone();
             let cancellations = server.session_cancellations.clone();
+            let concurrent_controls = server.concurrent_controls.clone();
+            let routed_output = server.output.clone();
             let (routed_tx, mut routed_rx) =
                 tokio::sync::mpsc::unbounded_channel::<serde_json::Value>();
 
@@ -467,6 +469,17 @@ async fn run_acp_channel_server_inner(
 
                     prepare_session_prompt(&cancellations, &msg);
                     if preempt_session_interruption(&cancellations, &msg) {
+                        continue;
+                    }
+                    if concurrent_controls
+                        .preempt_active_live_client_operation(&msg, &routed_output)
+                    {
+                        continue;
+                    }
+                    if concurrent_controls
+                        .preempt_active_prompt_inject(&msg, &routed_output)
+                        .await
+                    {
                         continue;
                     }
                     if apply_session_budget_rearm(&msg) {
@@ -542,6 +555,8 @@ pub async fn run_acp_server(config: AcpServerConfig) {
             // requests/notifications onto the request channel.
             let pending_clone = server.pending.clone();
             let cancellations = server.session_cancellations.clone();
+            let concurrent_controls = server.concurrent_controls.clone();
+            let routed_output = server.output.clone();
             let (request_tx, mut request_rx) =
                 tokio::sync::mpsc::unbounded_channel::<serde_json::Value>();
 
@@ -575,6 +590,17 @@ pub async fn run_acp_server(config: AcpServerConfig) {
 
                     prepare_session_prompt(&cancellations, &msg);
                     if preempt_session_interruption(&cancellations, &msg) {
+                        continue;
+                    }
+                    if concurrent_controls
+                        .preempt_active_live_client_operation(&msg, &routed_output)
+                    {
+                        continue;
+                    }
+                    if concurrent_controls
+                        .preempt_active_prompt_inject(&msg, &routed_output)
+                        .await
+                    {
                         continue;
                     }
                     if apply_session_budget_rearm(&msg) {

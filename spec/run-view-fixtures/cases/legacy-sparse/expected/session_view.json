@@ -35,8 +35,8 @@
   "projection": {
     "last_event_id": null,
     "prefix_hash": null,
-    "projection_hash": "sha256:b6c78eebc054e818d1553a20ebb529852402936163c48657a7a96963cb4d6c4b",
-    "projection_id": "session_view:unknown:b6c78eebc054"
+    "projection_hash": "sha256:b38a7077966d5cf2ede63cbaa3cba97a4323e8e59762088320624d67ba1bce15",
+    "projection_id": "session_view:unknown:b38a7077966d"
   },
   "runs": [
     {
@@ -74,8 +74,8 @@
       "projection": {
         "last_event_id": null,
         "prefix_hash": null,
-        "projection_hash": "sha256:57c0067975c3aa2a1e5c85247e5dcb9460288be78bc036d88cf988eed8f10a7d",
-        "projection_id": "run_view:run_legacy_sparse:57c0067975c3"
+        "projection_hash": "sha256:2d044aa116a02fe85473d35527ba5c42f47609b5b6d9619bd7929b4affe1d801",
+        "projection_id": "run_view:run_legacy_sparse:2d044aa116a0"
       },
       "providers": [],
       "run": {
@@ -106,11 +106,15 @@
       },
       "usage": {
         "call_count": 0,
+        "cost_usd": null,
         "input_tokens": 0,
+        "known_cost_usd": 0.0,
         "models": [],
         "output_tokens": 0,
         "total_cost": 0.0,
-        "total_duration_ms": 0
+        "total_duration_ms": 0,
+        "unpriced_calls": 0,
+        "usage_unknown_calls": 0
       },
       "visible_text": null
     }
@@ -130,10 +134,14 @@
   },
   "usage": {
     "call_count": 0,
+    "cost_usd": 0.0,
     "input_tokens": 0,
+    "known_cost_usd": 0.0,
     "models": [],
     "output_tokens": 0,
     "total_cost": 0.0,
-    "total_duration_ms": 0
+    "total_duration_ms": 0,
+    "unpriced_calls": 0,
+    "usage_unknown_calls": 0
   }
 }

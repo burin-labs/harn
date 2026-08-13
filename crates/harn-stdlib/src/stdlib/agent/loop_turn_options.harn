@@ -403,6 +403,9 @@ pub fn __agent_loop_budget_aggregates(
   const resolved_totals = totals ?? agent_session_totals(agent, session_id)
   return {
     cost_usd: __agent_loop_cost_usd(resolved_totals),
+    known_cost_usd: to_float(resolved_totals?.known_cost_usd ?? 0.0) ?? 0.0,
+    unpriced_calls: to_int(resolved_totals?.unpriced_calls ?? 0) ?? 0,
+    usage_unknown_calls: to_int(resolved_totals?.usage_unknown_calls ?? 0) ?? 0,
     wall_clock_ms: __agent_loop_elapsed_ms(clock, loop_start_ms),
   }
 }
@@ -445,7 +448,11 @@ pub fn __agent_loop_budget_exhaustion(
       max_iterations: max_iterations,
     }
   }
-  if budget?.total_cost_usd != nil && aggregates.cost_usd >= budget.total_cost_usd {
+  if budget?.total_cost_usd != nil
+    && (aggregates.unpriced_calls > 0
+    || aggregates.cost_usd
+    >= budget
+    .total_cost_usd) {
     return aggregates
       + {
       exhausted: true,

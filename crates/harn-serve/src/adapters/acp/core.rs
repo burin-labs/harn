@@ -17,6 +17,12 @@ impl AcpServer {
             .runtime_configurator
             .runtime_provider_endpoint_overrides();
         let llm_capability_overrides = config.llm_capability_overrides.clone();
+        let concurrent_controls = ConcurrentSessionControls::new(
+            config.auth_policy.methods.is_empty() || config.authenticated_principal.is_some(),
+            serde_json::json!({
+                "authMethods": config.auth_policy.acp_auth_methods(),
+            }),
+        );
 
         Self {
             descriptor: AdapterDescriptor {
@@ -30,7 +36,7 @@ impl AcpServer {
             authenticated_principal: config.authenticated_principal,
             runtime_configurator: config.runtime_configurator,
             sessions: HashMap::new(),
-            inject_controls: HashMap::new(),
+            concurrent_controls,
             timeline_subscriptions: HashMap::new(),
             next_id: AtomicU64::new(1),
             pending: Arc::new(Mutex::new(HashMap::new())),

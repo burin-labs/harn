@@ -18,6 +18,9 @@ pub(in crate::llm::tool_conformance) use validation::validate_probe_request_body
 const ANTHROPIC_THINKING_SIGNATURE: &str = "harn-scorecard-anthropic-thinking-signature";
 const ANTHROPIC_REDACTED_THINKING_DATA: &str = "harn-scorecard-redacted-thinking-payload";
 const GEMINI_THOUGHT_SIGNATURE: &str = "harn-scorecard-gemini-thinking-signature";
+const DEFAULT_TOOL_PROBE_MAX_TOKENS: i64 = 256;
+const TOOL_PROBE_VISIBLE_OUTPUT_HEADROOM: i64 = 768;
+const TOOL_PROBE_MAX_TOKENS_CEILING: i64 = 32_768;
 
 #[cfg(test)]
 pub(super) fn probe_request_body(
@@ -183,6 +186,7 @@ pub(super) fn probe_request_payload_for_format(
         true,
     )
     .map_err(|error| error.to_string())?;
+    let max_tokens = tool_probe_max_tokens(default_int("max_tokens"), &thinking);
     let mut payload = LlmRequestPayload {
         provider: provider.to_string(),
         model: model.to_string(),
@@ -191,7 +195,7 @@ pub(super) fn probe_request_payload_for_format(
         api_mode: LlmApiMode::ChatCompletions,
         messages: Vec::new(),
         system: probe_tool_contract(tool_format)?,
-        max_tokens: default_int("max_tokens").unwrap_or(256),
+        max_tokens,
         temperature: Some(default_float("temperature").unwrap_or(0.0)),
         top_p: default_float("top_p"),
         top_k: default_int("top_k"),
@@ -233,6 +237,23 @@ pub(super) fn probe_request_payload_for_format(
     payload.messages = probe_messages(provider, tool_format, probe_case, marker);
     apply_request_profile(&mut payload, request_profile);
     Ok(payload)
+}
+
+pub(super) fn tool_probe_max_tokens(
+    configured: Option<i64>,
+    thinking: &crate::llm::api::ThinkingConfig,
+) -> i64 {
+    let configured = configured.unwrap_or(DEFAULT_TOOL_PROBE_MAX_TOKENS);
+    let reasoning = i64::from(crate::llm::reasoning_policy::budget_for_thinking_config(
+        thinking,
+    ));
+    if reasoning == 0 {
+        return configured;
+    }
+    let reasoning_aware_floor = reasoning
+        .saturating_add(TOOL_PROBE_VISIBLE_OUTPUT_HEADROOM)
+        .min(TOOL_PROBE_MAX_TOKENS_CEILING);
+    configured.max(reasoning_aware_floor)
 }
 
 fn apply_request_profile(

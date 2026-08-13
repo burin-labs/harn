@@ -135,7 +135,7 @@ __all__ = [
     "is_notification",
 ]
 
-HARN_PROTOCOL_ARTIFACT_VERSION: str = "0.10.86"
+HARN_PROTOCOL_ARTIFACT_VERSION: str = "0.10.87"
 HARN_AGENT_EVENT_METHOD: str = "_harn/agentEvent"
 HARN_PROVIDER_CATALOG_METHOD: str = "_harn/providerCatalog"
 ACP_SCHEMA_COMPATIBILITY: str = "agentclientprotocol/agent-client-protocol schema v0.12.2"
@@ -199,6 +199,7 @@ ACP_SESSION_UPDATES: tuple = (
     "handoff",
     "hitl_request",
     "hitl_resolved",
+    "live_session_client",
     "log",
     "progress",
     "reminder_emitted",
@@ -233,6 +234,7 @@ HARN_ACP_SESSION_UPDATE_EXTENSIONS: tuple = (
     "handoff",
     "hitl_request",
     "hitl_resolved",
+    "live_session_client",
     "log",
     "progress",
     "reminder_emitted",
@@ -559,6 +561,7 @@ class ACPSessionUpdate(str, Enum):
     HANDOFF = "handoff"
     HITL_REQUEST = "hitl_request"
     HITL_RESOLVED = "hitl_resolved"
+    LIVE_SESSION_CLIENT = "live_session_client"
     LOG = "log"
     PROGRESS = "progress"
     REMINDER_EMITTED = "reminder_emitted"

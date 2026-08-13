@@ -162,6 +162,7 @@ pub fn parse_llm_mock_value_versioned(
     let cache_read_tokens = optional_i64_field(object, "cache_read_tokens")?;
     let cache_write_tokens = optional_i64_field(object, "cache_write_tokens")?
         .or(optional_i64_field(object, "cache_creation_input_tokens")?);
+    let simulated_cost_usd = optional_nonnegative_f64_field(object, "simulated_cost_usd")?;
     let thinking = optional_string_field(object, "thinking")?;
     let thinking_summary = optional_string_field(object, "thinking_summary")?;
     let stop_reason = optional_string_field(object, "stop_reason")?;
@@ -197,6 +198,7 @@ pub fn parse_llm_mock_value_versioned(
         output_tokens,
         cache_read_tokens,
         cache_write_tokens,
+        simulated_cost_usd,
         thinking,
         thinking_summary,
         stop_reason,
@@ -334,6 +336,12 @@ fn serialize_llm_mock_value(
                 serde_json::Value::Number(cache_write_tokens.into()),
             );
         }
+    }
+    if let Some(simulated_cost_usd) = mock.simulated_cost_usd {
+        object.insert(
+            "simulated_cost_usd".to_string(),
+            serde_json::json!(simulated_cost_usd),
+        );
     }
     if let Some(thinking) = mock.thinking {
         object.insert("thinking".to_string(), serde_json::Value::String(thinking));
@@ -522,6 +530,7 @@ const V1_ENTRY_FIELDS: &[&str] = &[
     "output_tokens",
     "cache_read_tokens",
     "cache_write_tokens",
+    "simulated_cost_usd",
     "thinking",
     "thinking_summary",
     "stop_reason",
@@ -753,6 +762,20 @@ fn optional_i64_field(
     }
 }
 
+fn optional_nonnegative_f64_field(
+    object: &serde_json::Map<String, serde_json::Value>,
+    key: &str,
+) -> Result<Option<f64>, String> {
+    match object.get(key) {
+        None | Some(serde_json::Value::Null) => Ok(None),
+        Some(value) => value
+            .as_f64()
+            .filter(|number| number.is_finite() && *number >= 0.0)
+            .map(Some)
+            .ok_or_else(|| format!("`{key}` must be a finite non-negative number")),
+    }
+}
+
 fn optional_vec_field(
     object: &serde_json::Map<String, serde_json::Value>,
     key: &str,
@@ -773,6 +796,7 @@ mod tests {
         let mock = parse_llm_mock_value(&serde_json::json!({
             "text": "hello",
             "model": "mock",
+            "simulated_cost_usd": 0.0025,
             "tool_calls": [
                 { "name": "search", "args": { "q": "harn" } }
             ]
@@ -784,6 +808,19 @@ mod tests {
         assert_eq!(reparsed.text, "hello");
         assert_eq!(reparsed.tool_calls.len(), 1);
         assert_eq!(reparsed.tool_calls[0]["name"].as_str(), Some("search"));
+        assert_eq!(reparsed.simulated_cost_usd, Some(0.0025));
+    }
+
+    #[test]
+    fn simulated_cost_must_be_finite_and_nonnegative() {
+        for value in [serde_json::json!(-0.1), serde_json::json!("free")] {
+            let error = parse_llm_mock_value(&serde_json::json!({
+                "text": "hello",
+                "simulated_cost_usd": value,
+            }))
+            .expect_err("invalid simulated cost");
+            assert!(error.contains("finite non-negative number"), "{error}");
+        }
     }
 
     #[test]

@@ -37,14 +37,59 @@ pub const ACTION_GRAPH_EDGE_KIND_RETRY: &str = "retry";
 pub const ACTION_GRAPH_EDGE_KIND_DLQ_MOVE: &str = "dlq_move";
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
-#[serde(default)]
+#[serde(default, from = "LlmUsageRecordWire")]
 pub struct LlmUsageRecord {
     pub input_tokens: i64,
     pub output_tokens: i64,
     pub total_duration_ms: i64,
     pub call_count: i64,
+    /// Calls without a known USD price. `total_cost` is a lower bound whenever
+    /// this is non-zero.
+    pub unpriced_calls: i64,
+    /// Calls whose provider did not report token/cost accounting facts.
+    pub usage_unknown_calls: i64,
+    /// Exact total when every call is priced; unknown for a mixed/unpriced run.
+    pub cost_usd: Option<f64>,
+    /// Sum of priced calls, retained as a lower bound for mixed runs.
+    pub known_cost_usd: f64,
+    /// Legacy alias for `known_cost_usd`.
     pub total_cost: f64,
     pub models: Vec<String>,
+}
+
+/// Deserialization boundary for records written before cost certainty was
+/// explicit. Their numeric `total_cost` remains a valid known-cost lower bound,
+/// but cannot be promoted to an exact total.
+#[derive(Default, Deserialize)]
+#[serde(default)]
+struct LlmUsageRecordWire {
+    input_tokens: i64,
+    output_tokens: i64,
+    total_duration_ms: i64,
+    call_count: i64,
+    unpriced_calls: i64,
+    usage_unknown_calls: i64,
+    cost_usd: Option<f64>,
+    known_cost_usd: Option<f64>,
+    total_cost: f64,
+    models: Vec<String>,
+}
+
+impl From<LlmUsageRecordWire> for LlmUsageRecord {
+    fn from(wire: LlmUsageRecordWire) -> Self {
+        Self {
+            input_tokens: wire.input_tokens,
+            output_tokens: wire.output_tokens,
+            total_duration_ms: wire.total_duration_ms,
+            call_count: wire.call_count,
+            unpriced_calls: wire.unpriced_calls,
+            usage_unknown_calls: wire.usage_unknown_calls,
+            cost_usd: wire.cost_usd,
+            known_cost_usd: wire.known_cost_usd.unwrap_or(wire.total_cost),
+            total_cost: wire.total_cost,
+            models: wire.models,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]

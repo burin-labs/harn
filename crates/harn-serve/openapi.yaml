@@ -1246,7 +1246,12 @@ paths:
     post:
       tags: [Messages]
       operationId: appendTaskMessage
-      summary: Send input, interrupt, or tool-confirmation content to a Task.
+      summary: Steer a running Task with additional user input.
+      description: |
+        Routes text through Harn's canonical active-prompt injection seam. Use
+        the Task cancel endpoint for cancellation and the permission-response
+        endpoint for tool confirmations; those controls retain their own typed
+        audit contracts rather than being encoded as messages.
       parameters:
         - $ref: "#/components/parameters/ProtocolVersion"
         - $ref: "#/components/parameters/TaskId"
@@ -3353,7 +3358,7 @@ components:
       properties:
         kind:
           type: string
-          enum: [input, interrupt, tool_confirmation]
+          enum: [input]
         message:
           $ref: "#/components/schemas/MessageInput"
     Part:

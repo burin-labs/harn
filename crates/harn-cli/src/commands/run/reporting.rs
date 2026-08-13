@@ -88,17 +88,18 @@ pub(super) struct RunSummaryLlm {
     input_tokens: i64,
     output_tokens: i64,
     time_ms: i64,
-    cost_usd: f64,
-    /// Calls the catalog prices no rate for. They contribute nothing to
-    /// `cost_usd`, so a non-zero count here means `cost_usd` is a floor on the
-    /// real spend rather than the spend. Without it, a run served entirely by
-    /// an unpriced model reports `cost_usd: 0.0` and reads as free.
+    /// Exact total when every call is priced.
+    cost_usd: Option<f64>,
+    /// Sum of priced calls; a lower bound when `unpriced_calls` is non-zero.
+    known_cost_usd: f64,
+    /// Calls the catalog prices no rate for. A non-zero count makes
+    /// `cost_usd` null and `known_cost_usd` the explicit lower bound.
     unpriced_calls: i64,
 }
 
-/// v2 added `llm.unpriced_calls`. Additive: a reader that ignores it sees
-/// exactly the v1 shape.
-pub const RUN_SUMMARY_SCHEMA_VERSION: u32 = 2;
+/// v3 makes exact cost nullable and names the known-cost lower bound. This
+/// prevents an all-unpriced run from serializing as free.
+pub const RUN_SUMMARY_SCHEMA_VERSION: u32 = 3;
 pub const RUN_PHASE_SCHEMA_VERSION: u32 = 2;
 pub const RUN_RUSAGE_SCHEMA_VERSION: u32 = 1;
 
@@ -206,20 +207,17 @@ fn build_run_summary<'a>(
 
 pub(super) fn run_summary_llm_snapshot() -> RunSummaryLlm {
     let (input_tokens, output_tokens, time_ms, call_count) = harn_vm::llm::peek_trace_summary();
-    let cost_usd = harn_vm::llm::peek_total_cost();
-    // Counted off the trace rather than the accumulator: the accumulator folds
-    // an unpriced call in as 0.0 and cannot tell it apart afterwards.
-    let unpriced_calls = harn_vm::llm::peek_trace()
-        .iter()
-        .filter(|entry| entry.usage.cost_usd.is_none())
-        .count() as i64;
+    let trace = harn_vm::llm::peek_trace();
+    let certainty =
+        harn_vm::llm::usage::summarize_usage_cost_certainty(trace.iter().map(|entry| &entry.usage));
     RunSummaryLlm {
         call_count,
         input_tokens,
         output_tokens,
         time_ms,
-        cost_usd: if cost_usd.is_finite() { cost_usd } else { 0.0 },
-        unpriced_calls,
+        cost_usd: (certainty.unpriced_calls == 0).then_some(certainty.known_cost_usd),
+        known_cost_usd: certainty.known_cost_usd,
+        unpriced_calls: certainty.unpriced_calls,
     }
 }
 
@@ -573,6 +571,10 @@ mod trace_summary_pricing_tests {
                 cache_hit: false,
                 served_fast: false,
                 accounting_status: harn_vm::llm::usage::UsageAccountingStatus::Reported,
+                known_cost_usd: cost_usd.unwrap_or(0.0),
+                provider_call_count: 1,
+                unpriced_calls: i64::from(cost_usd.is_none()),
+                usage_unknown_calls: 0,
             },
             duration_ms: 5,
         }

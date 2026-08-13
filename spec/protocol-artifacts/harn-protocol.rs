@@ -13,7 +13,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Map, Value};
 
 /// Harn release that generated this binding.
-pub const HARN_PROTOCOL_ARTIFACT_VERSION: &str = "0.10.86";
+pub const HARN_PROTOCOL_ARTIFACT_VERSION: &str = "0.10.87";
 
 /// Upstream ACP schema version Harn tracks.
 pub const ACP_SCHEMA_COMPATIBILITY: &str = "agentclientprotocol/agent-client-protocol schema v0.12.2";
@@ -402,6 +402,208 @@ impl HarnExternalActionReconciliationStatus {
             Self::Refused => "refused",
         }
     }
+}
+
+/// Closed connector-setup stages owned by `std/connectors/setup`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum HarnConnectorSetupStage {
+    #[serde(rename = "resolving")]
+    Resolving,
+    #[serde(rename = "opening_browser")]
+    OpeningBrowser,
+    #[serde(rename = "waiting_for_user")]
+    WaitingForUser,
+    #[serde(rename = "exchanging")]
+    Exchanging,
+    #[serde(rename = "storing")]
+    Storing,
+    #[serde(rename = "validating")]
+    Validating,
+    #[serde(rename = "ready")]
+    Ready,
+}
+
+impl HarnConnectorSetupStage {
+    pub const ALL: &'static [Self] = &[
+        Self::Resolving,
+        Self::OpeningBrowser,
+        Self::WaitingForUser,
+        Self::Exchanging,
+        Self::Storing,
+        Self::Validating,
+        Self::Ready,
+    ];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Resolving => "resolving",
+            Self::OpeningBrowser => "opening_browser",
+            Self::WaitingForUser => "waiting_for_user",
+            Self::Exchanging => "exchanging",
+            Self::Storing => "storing",
+            Self::Validating => "validating",
+            Self::Ready => "ready",
+        }
+    }
+}
+
+/// Closed connector-setup statuses owned by `std/connectors/setup`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum HarnConnectorSetupStatus {
+    #[serde(rename = "in_progress")]
+    InProgress,
+    #[serde(rename = "succeeded")]
+    Succeeded,
+    #[serde(rename = "failed")]
+    Failed,
+    #[serde(rename = "cancelled")]
+    Cancelled,
+    #[serde(rename = "timed_out")]
+    TimedOut,
+}
+
+impl HarnConnectorSetupStatus {
+    pub const ALL: &'static [Self] = &[
+        Self::InProgress,
+        Self::Succeeded,
+        Self::Failed,
+        Self::Cancelled,
+        Self::TimedOut,
+    ];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::InProgress => "in_progress",
+            Self::Succeeded => "succeeded",
+            Self::Failed => "failed",
+            Self::Cancelled => "cancelled",
+            Self::TimedOut => "timed_out",
+        }
+    }
+}
+
+/// Closed connector-setup interactions owned by `std/connectors/setup`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum HarnConnectorSetupInteraction {
+    #[serde(rename = "none")]
+    None,
+    #[serde(rename = "browser")]
+    Browser,
+    #[serde(rename = "secret_entry")]
+    SecretEntry,
+    #[serde(rename = "user_code")]
+    UserCode,
+}
+
+impl HarnConnectorSetupInteraction {
+    pub const ALL: &'static [Self] = &[
+        Self::None,
+        Self::Browser,
+        Self::SecretEntry,
+        Self::UserCode,
+    ];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Browser => "browser",
+            Self::SecretEntry => "secret_entry",
+            Self::UserCode => "user_code",
+        }
+    }
+}
+
+/// Closed connector-setup configuration fields owned by `std/connectors/setup`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum HarnConnectorSetupConfigurationField {
+    #[serde(rename = "oauth_client_id")]
+    OauthClientId,
+}
+
+impl HarnConnectorSetupConfigurationField {
+    pub const ALL: &'static [Self] = &[
+        Self::OauthClientId,
+    ];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::OauthClientId => "oauth_client_id",
+        }
+    }
+}
+
+/// Closed connector-setup error codes owned by `std/connectors/setup`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum HarnConnectorSetupErrorCode {
+    #[serde(rename = "connector_unavailable")]
+    ConnectorUnavailable,
+    #[serde(rename = "configuration_missing")]
+    ConfigurationMissing,
+    #[serde(rename = "browser_open_failed")]
+    BrowserOpenFailed,
+    #[serde(rename = "callback_timeout")]
+    CallbackTimeout,
+    #[serde(rename = "user_denied")]
+    UserDenied,
+    #[serde(rename = "state_mismatch")]
+    StateMismatch,
+    #[serde(rename = "token_exchange_failed")]
+    TokenExchangeFailed,
+    #[serde(rename = "credential_store_failed")]
+    CredentialStoreFailed,
+    #[serde(rename = "validation_failed")]
+    ValidationFailed,
+    #[serde(rename = "cancelled")]
+    Cancelled,
+    #[serde(rename = "unknown")]
+    Unknown,
+}
+
+impl HarnConnectorSetupErrorCode {
+    pub const ALL: &'static [Self] = &[
+        Self::ConnectorUnavailable,
+        Self::ConfigurationMissing,
+        Self::BrowserOpenFailed,
+        Self::CallbackTimeout,
+        Self::UserDenied,
+        Self::StateMismatch,
+        Self::TokenExchangeFailed,
+        Self::CredentialStoreFailed,
+        Self::ValidationFailed,
+        Self::Cancelled,
+        Self::Unknown,
+    ];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::ConnectorUnavailable => "connector_unavailable",
+            Self::ConfigurationMissing => "configuration_missing",
+            Self::BrowserOpenFailed => "browser_open_failed",
+            Self::CallbackTimeout => "callback_timeout",
+            Self::UserDenied => "user_denied",
+            Self::StateMismatch => "state_mismatch",
+            Self::TokenExchangeFailed => "token_exchange_failed",
+            Self::CredentialStoreFailed => "credential_store_failed",
+            Self::ValidationFailed => "validation_failed",
+            Self::Cancelled => "cancelled",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnConnectorSetupEvent {
+    pub schema: String,
+    pub sequence: u64,
+    pub connector: String,
+    pub stage: HarnConnectorSetupStage,
+    pub status: HarnConnectorSetupStatus,
+    pub interaction: HarnConnectorSetupInteraction,
+    pub message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_code: Option<HarnConnectorSetupErrorCode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recovery: Option<String>,
 }
 
 /// Author identity on a collaborative plan revision or comment.
@@ -980,6 +1182,11 @@ pub const ACP_DISPATCHED_METHOD_HARN_SESSION_TIMELINE_SUBSCRIBE: &str = "harn.se
 pub const ACP_DISPATCHED_METHOD_HARN_SESSION_TIMELINE_UNSUBSCRIBE: &str = "harn.session_timeline.unsubscribe";
 pub const ACP_DISPATCHED_METHOD_SESSION_NEW: &str = "session/new";
 pub const ACP_DISPATCHED_METHOD_SESSION_LOAD: &str = "session/load";
+pub const ACP_DISPATCHED_METHOD_SESSION_ATTACH: &str = "session/attach";
+pub const ACP_DISPATCHED_METHOD_SESSION_DETACH: &str = "session/detach";
+pub const ACP_DISPATCHED_METHOD_SESSION_HEARTBEAT: &str = "session/heartbeat";
+pub const ACP_DISPATCHED_METHOD_SESSION_LIVE_CLIENTS: &str = "session/live_clients";
+pub const ACP_DISPATCHED_METHOD_SESSION_TAKEOVER: &str = "session/takeover";
 pub const ACP_DISPATCHED_METHOD_SESSION_RESUME: &str = "session/resume";
 pub const ACP_DISPATCHED_METHOD_SESSION_FORK: &str = "session/fork";
 pub const ACP_DISPATCHED_METHOD_SESSION_TRUNCATE: &str = "session/truncate";
@@ -1045,6 +1252,11 @@ pub const ACP_DISPATCHED_METHODS: &[&str] = &[
     "harn.session_timeline.unsubscribe",
     "session/new",
     "session/load",
+    "session/attach",
+    "session/detach",
+    "session/heartbeat",
+    "session/live_clients",
+    "session/takeover",
     "session/resume",
     "session/fork",
     "session/truncate",
@@ -1117,6 +1329,11 @@ pub const ACP_HANDLED_METHOD_HARN_SESSION_TIMELINE_SUBSCRIBE: &str = "harn.sessi
 pub const ACP_HANDLED_METHOD_HARN_SESSION_TIMELINE_UNSUBSCRIBE: &str = "harn.session_timeline.unsubscribe";
 pub const ACP_HANDLED_METHOD_SESSION_NEW: &str = "session/new";
 pub const ACP_HANDLED_METHOD_SESSION_LOAD: &str = "session/load";
+pub const ACP_HANDLED_METHOD_SESSION_ATTACH: &str = "session/attach";
+pub const ACP_HANDLED_METHOD_SESSION_DETACH: &str = "session/detach";
+pub const ACP_HANDLED_METHOD_SESSION_HEARTBEAT: &str = "session/heartbeat";
+pub const ACP_HANDLED_METHOD_SESSION_LIVE_CLIENTS: &str = "session/live_clients";
+pub const ACP_HANDLED_METHOD_SESSION_TAKEOVER: &str = "session/takeover";
 pub const ACP_HANDLED_METHOD_SESSION_RESUME: &str = "session/resume";
 pub const ACP_HANDLED_METHOD_SESSION_FORK: &str = "session/fork";
 pub const ACP_HANDLED_METHOD_SESSION_TRUNCATE: &str = "session/truncate";
@@ -1183,6 +1400,11 @@ pub const ACP_HANDLED_METHODS: &[&str] = &[
     "harn.session_timeline.unsubscribe",
     "session/new",
     "session/load",
+    "session/attach",
+    "session/detach",
+    "session/heartbeat",
+    "session/live_clients",
+    "session/takeover",
     "session/resume",
     "session/fork",
     "session/truncate",
@@ -1296,6 +1518,7 @@ pub const ACP_SESSION_UPDATE_FS_WATCH: &str = "fs_watch";
 pub const ACP_SESSION_UPDATE_HANDOFF: &str = "handoff";
 pub const ACP_SESSION_UPDATE_HITL_REQUEST: &str = "hitl_request";
 pub const ACP_SESSION_UPDATE_HITL_RESOLVED: &str = "hitl_resolved";
+pub const ACP_SESSION_UPDATE_LIVE_SESSION_CLIENT: &str = "live_session_client";
 pub const ACP_SESSION_UPDATE_LOG: &str = "log";
 pub const ACP_SESSION_UPDATE_PROGRESS: &str = "progress";
 pub const ACP_SESSION_UPDATE_REMINDER_EMITTED: &str = "reminder_emitted";
@@ -1331,6 +1554,7 @@ pub const ACP_SESSION_UPDATES: &[&str] = &[
     "handoff",
     "hitl_request",
     "hitl_resolved",
+    "live_session_client",
     "log",
     "progress",
     "reminder_emitted",
@@ -1352,6 +1576,7 @@ pub const HARN_ACP_SESSION_UPDATE_EXTENSION_FS_WATCH: &str = "fs_watch";
 pub const HARN_ACP_SESSION_UPDATE_EXTENSION_HANDOFF: &str = "handoff";
 pub const HARN_ACP_SESSION_UPDATE_EXTENSION_HITL_REQUEST: &str = "hitl_request";
 pub const HARN_ACP_SESSION_UPDATE_EXTENSION_HITL_RESOLVED: &str = "hitl_resolved";
+pub const HARN_ACP_SESSION_UPDATE_EXTENSION_LIVE_SESSION_CLIENT: &str = "live_session_client";
 pub const HARN_ACP_SESSION_UPDATE_EXTENSION_LOG: &str = "log";
 pub const HARN_ACP_SESSION_UPDATE_EXTENSION_PROGRESS: &str = "progress";
 pub const HARN_ACP_SESSION_UPDATE_EXTENSION_REMINDER_EMITTED: &str = "reminder_emitted";
@@ -1374,6 +1599,7 @@ pub const HARN_ACP_SESSION_UPDATE_EXTENSIONS: &[&str] = &[
     "handoff",
     "hitl_request",
     "hitl_resolved",
+    "live_session_client",
     "log",
     "progress",
     "reminder_emitted",

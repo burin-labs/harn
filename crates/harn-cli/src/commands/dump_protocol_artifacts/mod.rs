@@ -11,6 +11,7 @@
 //! emits the manifest/README/round-trip meta artifacts, and one module per
 //! target language owns that language's emitter.
 
+mod connector_setup;
 mod constants;
 mod external_action;
 mod manifest;
@@ -33,6 +34,7 @@ use std::process;
 use harn_vm::llm::plan::PLAN_DOCUMENT_SCHEMA_ARTIFACT;
 use harn_vm::llm::receipts::TOOL_CALL_RECEIPT_SCHEMA_ARTIFACT;
 
+use connector_setup::ConnectorSetupVocabulary;
 use constants::*;
 use external_action::ExternalActionVocabulary;
 use go::*;
@@ -126,24 +128,30 @@ fn generate_artifacts(
     artifact_version: &str,
 ) -> Result<Vec<Artifact>, String> {
     let external_actions = ExternalActionVocabulary::load(source)?;
+    let connector_setup = ConnectorSetupVocabulary::load(source)?;
     let go_artifact = generate_go_artifact_for_version(artifact_version)?;
     let mut artifacts = vec![
         Artifact::new("README.md", generate_readme()),
         Artifact::new(
             "manifest.json",
-            generate_manifest_for_version(source, artifact_version, &external_actions)?,
+            generate_manifest_for_version(
+                source,
+                artifact_version,
+                &external_actions,
+                &connector_setup,
+            )?,
         ),
         Artifact::new(
             "harn-protocol.ts",
-            generate_typescript_for_version(artifact_version, &external_actions),
+            generate_typescript_for_version(artifact_version, &external_actions, &connector_setup),
         ),
         Artifact::new(
             "HarnProtocol.swift",
-            generate_swift_for_version(artifact_version, &external_actions),
+            generate_swift_for_version(artifact_version, &external_actions, &connector_setup),
         ),
         Artifact::new(
             "harn-protocol.rs",
-            generate_rust_for_version(artifact_version, &external_actions),
+            generate_rust_for_version(artifact_version, &external_actions, &connector_setup),
         ),
         Artifact::new(
             "python/harn_protocol.py",

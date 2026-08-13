@@ -241,6 +241,11 @@ async fn a_headless_session_projects_the_run_record_no_host_ever_wrote() {
     assert_eq!(usage.input_tokens, 30951);
     assert_eq!(usage.output_tokens, 412);
     assert!((usage.total_cost - 0.006872).abs() < 1e-9);
+    assert!(usage
+        .cost_usd
+        .is_some_and(|cost| (cost - 0.006872).abs() < 1e-9));
+    assert!((usage.known_cost_usd - 0.006872).abs() < 1e-9);
+    assert_eq!(usage.unpriced_calls, 0);
     assert_eq!(usage.models, vec!["gpt-5.6-luna".to_string()]);
 
     assert_eq!(
@@ -252,6 +257,45 @@ async fn a_headless_session_projects_the_run_record_no_host_ever_wrote() {
         run.metadata.get("iterations").and_then(|v| v.as_u64()),
         Some(2)
     );
+}
+
+#[tokio::test]
+async fn an_unpriced_call_is_unknown_not_a_zero_cost_run() {
+    let store = MemorySessionStore::default();
+    let meta = store
+        .create(CreateSession::default())
+        .await
+        .expect("create session");
+    store
+        .append(
+            &meta.id,
+            AppendEvent::new(
+                custom("llm_call"),
+                transcript_event(
+                    "llm_call",
+                    json!({
+                        "accounting_status": "unknown",
+                        "cost_usd": null,
+                        "input_tokens": 0,
+                        "output_tokens": 0,
+                        "provider": "fireworks",
+                        "model": "unpriced-model",
+                    }),
+                ),
+            ),
+        )
+        .await
+        .expect("append");
+
+    let run = project_run_record_from_session(&store, &meta.id)
+        .await
+        .expect("project");
+    let usage = run.usage.as_ref().expect("usage");
+    assert_eq!(usage.cost_usd, None);
+    assert_eq!(usage.known_cost_usd, 0.0);
+    assert_eq!(usage.total_cost, 0.0);
+    assert_eq!(usage.unpriced_calls, 1);
+    assert_eq!(usage.usage_unknown_calls, 1);
 }
 
 #[test]

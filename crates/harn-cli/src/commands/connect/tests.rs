@@ -170,6 +170,32 @@ fn registered_provider_metadata_builds_oauth_request_with_cli_overrides() {
 }
 
 #[test]
+fn registered_oauth_reads_client_id_only_from_declared_configuration_environment() {
+    const NAME: &str = "HARN_TEST_GOOGLE_CLIENT_ID_6615";
+    let _environment = crate::env_guard::ScopedEnvVar::set(NAME, "fixture-public-client-id");
+    let metadata = ProviderOAuthManifest::default();
+    let setup = package::ProviderSetupManifest {
+        configuration_environment: vec![package::ConnectorConfigurationEnvironmentManifest {
+            field: package::ConnectorSetupConfigurationField::OAuthClientId,
+            environment_names: vec![NAME.to_string()],
+        }],
+        ..package::ProviderSetupManifest::default()
+    };
+
+    let resolved = oauth_metadata_with_setup_environment(&metadata, Some(&setup), None);
+    assert_eq!(
+        resolved.client_id.as_deref(),
+        Some("fixture-public-client-id")
+    );
+    let command_wins =
+        oauth_metadata_with_setup_environment(&metadata, Some(&setup), Some("command-client"));
+    assert!(command_wins.client_id.is_none());
+    assert!(!serde_json::to_string(&setup)
+        .unwrap()
+        .contains("fixture-public-client-id"));
+}
+
+#[test]
 fn registered_provider_parser_accepts_secret_safe_manual_input() {
     let parsed = parse_external_provider_connect(
         vec![
@@ -240,6 +266,15 @@ fn setup_plan_for_missing_connector_is_host_renderable() {
     assert!(!plan.installed);
     assert_eq!(plan.validation_command[0], "harn");
     assert_eq!(plan.steps[0].id, "install");
+}
+
+#[test]
+fn oauth_launch_command_is_harn_derived_and_secret_free() {
+    assert_eq!(
+        connector_setup_launch_command("google_workspace", Some("oauth2")),
+        ["harn", "connect", "google_workspace", "--json"]
+    );
+    assert!(connector_setup_launch_command("duffel", Some("api_key")).is_empty());
 }
 
 #[tokio::test(flavor = "current_thread")]

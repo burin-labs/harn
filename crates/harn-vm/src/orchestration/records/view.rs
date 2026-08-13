@@ -10,12 +10,14 @@ use crate::redact::{current_policy, RedactionPolicy};
 
 use super::super::ArtifactRecord;
 use super::{
-    LlmUsageRecord, RunCheckpointRecord, RunChildRecord, RunHitlQuestionRecord, RunRecord,
-    RunStageRecord, RunTraceSpanRecord,
+    RunCheckpointRecord, RunChildRecord, RunHitlQuestionRecord, RunRecord, RunStageRecord,
+    RunTraceSpanRecord,
 };
 
+mod usage;
 mod visible_transcript;
 
+pub use usage::RunViewUsage;
 use visible_transcript::public_assistant_transcript_text;
 
 pub const RUN_VIEW_SCHEMA: &str = "harn.run_view.v1";
@@ -102,45 +104,6 @@ pub struct RunViewChild {
     pub run_path: Option<String>,
     pub status: String,
     pub task: String,
-}
-
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
-#[serde(default)]
-pub struct RunViewUsage {
-    pub input_tokens: i64,
-    pub output_tokens: i64,
-    pub total_duration_ms: i64,
-    pub call_count: i64,
-    pub total_cost: f64,
-    pub models: Vec<String>,
-}
-
-impl From<&LlmUsageRecord> for RunViewUsage {
-    fn from(value: &LlmUsageRecord) -> Self {
-        Self {
-            input_tokens: value.input_tokens,
-            output_tokens: value.output_tokens,
-            total_duration_ms: value.total_duration_ms,
-            call_count: value.call_count,
-            total_cost: value.total_cost,
-            models: value.models.clone(),
-        }
-    }
-}
-
-impl RunViewUsage {
-    fn add_usage(&mut self, usage: &RunViewUsage) {
-        self.input_tokens += usage.input_tokens;
-        self.output_tokens += usage.output_tokens;
-        self.total_duration_ms += usage.total_duration_ms;
-        self.call_count += usage.call_count;
-        self.total_cost += usage.total_cost;
-        for model in &usage.models {
-            if !model.is_empty() && !self.models.contains(model) {
-                self.models.push(model.clone());
-            }
-        }
-    }
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
@@ -1274,6 +1237,7 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+    use crate::orchestration::LlmUsageRecord;
 
     fn sample_run() -> RunRecord {
         RunRecord {
@@ -1299,8 +1263,11 @@ mod tests {
                     output_tokens: 5,
                     total_duration_ms: 1000,
                     call_count: 1,
+                    cost_usd: Some(0.01),
+                    known_cost_usd: 0.01,
                     total_cost: 0.01,
                     models: vec!["model-a".to_string()],
+                    ..LlmUsageRecord::default()
                 }),
                 metadata: BTreeMap::from([
                     ("session_id".to_string(), json!("session_1")),

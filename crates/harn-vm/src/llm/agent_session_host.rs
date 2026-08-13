@@ -17,7 +17,6 @@ use crate::vm::Vm;
 use super::agent_terminal_class::{
     agent_loop_made_no_llm_call, agent_terminal_class, session_status_indicates_error,
 };
-use super::cost::calculate_cost_for_provider_with_cache;
 use super::tools::build_assistant_response_message;
 use super::{emit_live_agent_event_sync as emit_event, permissions};
 
@@ -57,15 +56,17 @@ mod live_transcript_journal;
 mod plan_document;
 mod run_identity;
 mod session_policies;
+mod usage_accounting;
 use session_policies::{
     build_nested_budget_denial, install_session_nested_budget, release_session_policies,
 };
 pub(crate) use session_policies::{install_session_policy_guard, options_request_session_policies};
 mod visible_messages;
 
-use plan_document::{next_plan_document_event, plan_artifact_from_result};
+use plan_document::{next_plan_document_events, plan_artifact_from_result};
 pub(crate) use run_identity::active_run_id;
 use run_identity::{agent_init_control, agent_init_control_done};
+use usage_accounting::{resolve_call_accounting, SessionUsageTotals};
 
 #[cfg(test)]
 pub(crate) use tool_result_messages::record_tool_results_for_test;
@@ -84,7 +85,11 @@ struct AgentHostSession {
     run_id: String,
     task: String,
     tokens_used: i64,
+    /// Sum of calls whose price is known. This remains useful as a lower bound
+    /// when another call in the same session is unpriced.
     cost_used: f64,
+    unpriced_calls: i64,
+    usage_unknown_calls: i64,
     input_tokens: i64,
     output_tokens: i64,
     cache_read_tokens: i64,
@@ -170,6 +175,8 @@ pub(crate) fn seed_host_session_provider_model(session_id: &str, provider: &str,
         task: String::new(),
         tokens_used: 0,
         cost_used: 0.0,
+        unpriced_calls: 0,
+        usage_unknown_calls: 0,
         input_tokens: 0,
         output_tokens: 0,
         cache_read_tokens: 0,
@@ -556,6 +563,8 @@ async fn host_agent_session_init(
         task: message.clone(),
         tokens_used: 0,
         cost_used: 0.0,
+        unpriced_calls: 0,
+        usage_unknown_calls: 0,
         input_tokens: 0,
         output_tokens: 0,
         cache_read_tokens: 0,
@@ -906,6 +915,16 @@ async fn host_agent_session_finalize(
             "output_tokens": session.output_tokens,
             "cache_read_tokens": session.cache_read_tokens,
             "cache_write_tokens": session.cache_write_tokens,
+            "accounting_status": if session.unpriced_calls == 0 && session.usage_unknown_calls == 0 {
+                "reported"
+            } else if session.cost_used > 0.0 || session.tokens_used > 0 {
+                "partial"
+            } else {
+                "unknown"
+            },
+            "known_cost_usd": session.cost_used,
+            "unpriced_calls": session.unpriced_calls,
+            "usage_unknown_calls": session.usage_unknown_calls,
         },
         "tools": {
             "calls": session.tool_calls,
@@ -916,7 +935,14 @@ async fn host_agent_session_finalize(
         "transcript": transcript_json,
         "trace": trace_summary,
         "tokens_used": session.tokens_used,
-        "cost_usd": session.cost_used,
+        "cost_usd": if session.unpriced_calls == 0 {
+            Some(session.cost_used)
+        } else {
+            None
+        },
+        "known_cost_usd": session.cost_used,
+        "unpriced_calls": session.unpriced_calls,
+        "usage_unknown_calls": session.usage_unknown_calls,
         "session_id": session.session_id,
         "run_id": session.run_id,
         "started_at": session.started_at,
@@ -1605,7 +1631,7 @@ fn host_agent_session_record_tool_results_builtin(
             if let Some(plan_value) = plan_artifact_from_result(result) {
                 let created_at = crate::orchestration::now_unix_seconds_text();
                 let event_id = crate::orchestration::new_id("plan_event");
-                let document_event = next_plan_document_event(
+                let document_events = next_plan_document_events(
                     &session_id,
                     &name,
                     result,
@@ -1614,23 +1640,14 @@ fn host_agent_session_record_tool_results_builtin(
                     event_id,
                 )
                 .map_err(|error| VmError::Runtime(error.to_string()))?;
-                let plan_metadata = serde_json::json!({
-                    "plan_document": document_event.document(),
-                    "plan_document_event": document_event,
-                });
-                let event = super::helpers::transcript_event(
-                    "plan_document",
-                    "tool",
-                    "public",
-                    "",
-                    Some(plan_metadata.clone()),
-                );
-                crate::agent_sessions::append_event(&session_id, event)
-                    .map_err(VmError::Runtime)?;
-                super::agent_runtime::emit_agent_event_sync(&AgentEvent::PlanDocumentUpdated {
-                    session_id: session_id.clone(),
-                    event: Box::new(document_event),
-                });
+                for document_event in document_events {
+                    super::plan::persist_plan_document_event(&session_id, &document_event)
+                        .map_err(|error| VmError::Runtime(error.to_string()))?;
+                    super::agent_runtime::emit_agent_event_sync(&AgentEvent::PlanDocumentUpdated {
+                        session_id: session_id.clone(),
+                        event: Box::new(document_event),
+                    });
+                }
             }
         }
         // A computer-use result carries screenshot(s) the model must see; ride
@@ -1762,7 +1779,12 @@ fn host_agent_session_record_usage_builtin(
     let model = dict_get(&llm_result, "model")
         .map(|v| v.display())
         .unwrap_or_default();
-    let cost = calculate_cost_for_provider_with_cache(
+    // Canonical LlmResult envelopes already own provider-reported or
+    // catalog-derived cost and its certainty. Legacy recordings that predate
+    // that envelope get the same catalog projection here. Neither path turns
+    // an unknown price into a zero-cost observation.
+    let accounting = resolve_call_accounting(
+        &usage_block,
         &provider,
         &model,
         input_tokens,
@@ -1791,16 +1813,18 @@ fn host_agent_session_record_usage_builtin(
         session.cache_write_tokens = session
             .cache_write_tokens
             .saturating_add(cache_write_tokens);
-        session.cost_used += cost;
+        if let Some(cost) = accounting.cost_usd {
+            session.cost_used += cost;
+        } else {
+            session.unpriced_calls = session.unpriced_calls.saturating_add(1);
+        }
+        if accounting.usage_unknown {
+            session.usage_unknown_calls = session.usage_unknown_calls.saturating_add(1);
+        }
         if stop_reason.is_some() {
             session.last_llm_stop_reason = stop_reason.clone();
         }
-        Ok((
-            session.tokens_used,
-            session.cost_used,
-            session.cache_read_tokens,
-            session.cache_write_tokens,
-        ))
+        Ok(SessionUsageTotals::from(&*session))
     })?;
     let mut llm_call_metadata = serde_json::json!({
         "input_tokens": input_tokens,
@@ -1809,7 +1833,8 @@ fn host_agent_session_record_usage_builtin(
         "cache_write_tokens": cache_write_tokens,
         "provider": provider,
         "model": model,
-        "cost_usd": cost,
+        "cost_usd": accounting.cost_usd,
+        "accounting_status": if accounting.usage_unknown { "unknown" } else { "reported" },
         "provider_stop_reason": stop_reason,
         "canonical_stop_reason": canonical_provider_stop_reason(stop_reason.as_deref()),
     });
@@ -1830,24 +1855,7 @@ fn host_agent_session_record_usage_builtin(
         ),
     )
     .map_err(VmError::Runtime)?;
-    let mut out = crate::value::DictMap::new();
-    out.insert(
-        crate::value::intern_key("tokens_used"),
-        VmValue::Int(totals.0),
-    );
-    out.insert(
-        crate::value::intern_key("cost_usd"),
-        VmValue::Float(totals.1),
-    );
-    out.insert(
-        crate::value::intern_key("cache_read_tokens"),
-        VmValue::Int(totals.2),
-    );
-    out.insert(
-        crate::value::intern_key("cache_write_tokens"),
-        VmValue::Int(totals.3),
-    );
-    Ok(VmValue::dict(out))
+    Ok(totals.to_vm(false))
 }
 
 /// Deterministic "should the loop auto-continue this truncated turn?" gate.
@@ -2105,45 +2113,13 @@ fn host_agent_session_totals_builtin(
 ) -> Result<VmValue, VmError> {
     let session_id = args.first().map(|v| v.display()).unwrap_or_default();
     let totals = with_session(&session_id, HOST_SESSION_TOTALS, |session| {
-        Ok((
-            session.tokens_used,
-            session.cost_used,
-            session.input_tokens,
-            session.output_tokens,
-            session.cache_read_tokens,
-            session.cache_write_tokens,
-        ))
+        Ok(SessionUsageTotals::from(&*session))
     })?;
-    let mut out = crate::value::DictMap::new();
     // `tokens_used` is cumulative input+output. `input_tokens` / `output_tokens`
     // are the split components — surfaced so budget/detector logic that keys on
     // the re-sent context size (e.g. std/agent/stall's token-runaway guard) can
     // read cumulative INPUT tokens rather than the input+output sum.
-    out.insert(
-        crate::value::intern_key("tokens_used"),
-        VmValue::Int(totals.0),
-    );
-    out.insert(
-        crate::value::intern_key("cost_usd"),
-        VmValue::Float(totals.1),
-    );
-    out.insert(
-        crate::value::intern_key("input_tokens"),
-        VmValue::Int(totals.2),
-    );
-    out.insert(
-        crate::value::intern_key("output_tokens"),
-        VmValue::Int(totals.3),
-    );
-    out.insert(
-        crate::value::intern_key("cache_read_tokens"),
-        VmValue::Int(totals.4),
-    );
-    out.insert(
-        crate::value::intern_key("cache_write_tokens"),
-        VmValue::Int(totals.5),
-    );
-    Ok(VmValue::dict(out))
+    Ok(totals.to_vm(true))
 }
 
 /// Persist runtime feedback as a corrective directive in the session envelope.

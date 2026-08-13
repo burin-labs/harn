@@ -160,7 +160,7 @@ pub(crate) struct LlmResult {
 /// rate-limit retry says the provider is saturated, an empty-completion retry
 /// says the model produced nothing usable, and a transport retry says the link
 /// is flaky. Collapsing them into one number would make all three look alike.
-#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub struct ProviderAttempts {
     /// Total provider requests issued for this call, including the one that
@@ -174,6 +174,11 @@ pub struct ProviderAttempts {
     /// Retryable failures that were neither of the above — transport errors,
     /// server faults, and tool-format degrades.
     pub other: u32,
+    /// Canonical usage from completed responses that were retried before the
+    /// final response. The public usage envelope projects their aggregate;
+    /// recordings retain the source ledgers so replay preserves exact spend.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) completed_retry_usage: Vec<crate::llm::usage::LlmUsage>,
 }
 
 impl ProviderAttempts {
@@ -183,10 +188,11 @@ impl ProviderAttempts {
     /// majority of calls, so a persisted transcript does not grow by a
     /// zero-valued object per call.
     pub fn is_single_clean_call(&self) -> bool {
-        self == &Self {
-            total: 1,
-            ..Self::default()
-        } || self == &Self::default()
+        (self.total <= 1)
+            && self.rate_limited == 0
+            && self.empty_completion == 0
+            && self.other == 0
+            && self.completed_retry_usage.is_empty()
     }
 
     /// Requests beyond the first. Zero for a call that succeeded outright.
@@ -199,7 +205,41 @@ impl LlmResult {
     /// Return the one normalized accounting view used by every public
     /// projection of this provider result.
     pub(crate) fn usage(&self) -> crate::llm::usage::LlmUsage {
-        crate::llm::usage::LlmUsage::from_result(self)
+        let current = crate::llm::usage::LlmUsage::from_result(self);
+        let attempts = &self.attempts;
+        if attempts.total <= 1
+            && attempts.completed_retry_usage.is_empty()
+            && attempts.rate_limited == 0
+            && attempts.empty_completion == 0
+            && attempts.other == 0
+        {
+            return current;
+        }
+
+        let mut usages = attempts.completed_retry_usage.clone();
+        let completed_empty = u32::try_from(usages.len()).unwrap_or(u32::MAX);
+        let missing_empty = attempts.empty_completion.saturating_sub(completed_empty);
+        let classified_retries = attempts
+            .rate_limited
+            .saturating_add(attempts.empty_completion)
+            .saturating_add(attempts.other);
+        let unclassified = attempts
+            .total
+            .saturating_sub(1)
+            .saturating_sub(classified_retries);
+        usages.extend(
+            std::iter::repeat_with(crate::llm::usage::LlmUsage::known_zero_attempt)
+                .take(attempts.rate_limited as usize),
+        );
+        usages.extend(
+            std::iter::repeat_with(crate::llm::usage::LlmUsage::unknown_attempt).take(
+                missing_empty
+                    .saturating_add(attempts.other)
+                    .saturating_add(unclassified) as usize,
+            ),
+        );
+        usages.push(current);
+        crate::llm::usage::LlmUsage::aggregate(&usages)
     }
 
     /// True when the completion carries nothing the agent loop can act on: no
@@ -1319,6 +1359,7 @@ mod provider_attempts_tests {
             rate_limited: 2,
             empty_completion: 1,
             other: 0,
+            completed_retry_usage: Vec::new(),
         }));
         let attempts = usage
             .get("provider_attempts")
@@ -1375,6 +1416,19 @@ mod provider_attempts_tests {
         );
         let round_tripped: LlmResult = serde_json::from_value(json).expect("deserialize");
         assert_eq!(round_tripped.attempts, retried);
+
+        let completed = ProviderAttempts {
+            total: 2,
+            empty_completion: 1,
+            completed_retry_usage: vec![crate::llm::usage::LlmUsage::known_zero_attempt()],
+            ..ProviderAttempts::default()
+        };
+        let json = serde_json::to_value(result_with(completed.clone())).expect("serialize usage");
+        let round_tripped: LlmResult = serde_json::from_value(json).expect("deserialize usage");
+        assert_eq!(
+            round_tripped.attempts, completed,
+            "retry usage must survive replay"
+        );
     }
 
     /// A recording made before this field existed deserializes with no

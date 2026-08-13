@@ -23,6 +23,8 @@ const AGENT_BUNDLE = "docs/fixtures/workflow-bundles/quickstart-agentic.bundle.j
 
 const DEMO_DIR = "docs/fixtures/connect-demo"
 
+type HarnJsonEnvelope = {ok: bool, data?: any}
+
 // Pinned digest in the docs page — bump both together if the canonical
 // graph encoding intentionally changes.
 const EXPECTED_MIN_DIGEST =
@@ -145,7 +147,14 @@ fn harn_json(harness: Harness, harn_bin: string, args: list<string>, cwd: string
     harness.stdio.eprintln("error: ${harn_bin} ${args.join(" ")} failed (exit ${res.exit_code})")
     harness.runtime.exit(res.exit_code)
   }
-  return json_parse(res.stdout)
+  const parsed = json_parse(res.stdout)
+  if schema_is(parsed, schema_of(HarnJsonEnvelope)) {
+    const envelope: HarnJsonEnvelope = parsed
+    if envelope.ok && envelope.data != nil {
+      return envelope.data
+    }
+  }
+  return parsed
 }
 
 pipeline main(harness: Harness, task) {

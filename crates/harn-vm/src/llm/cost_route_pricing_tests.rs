@@ -1,5 +1,7 @@
-use super::cost::calculate_cost_for_provider_with_cache;
-use super::cost::{calculate_cost_for_provider, pricing_detail_for, PricingSource};
+use super::cost::{
+    calculate_cost_for_provider, pricing_aware_call_cost_with_cache, pricing_detail_for,
+    PricingSource,
+};
 
 fn install_banded_pricing_model() {
     let mut overlay = crate::llm_config::ProvidersConfig::default();
@@ -36,7 +38,8 @@ fn whole_request_pricing_band_drives_cost_and_cache_accounting() {
     assert!((below - 0.001999).abs() < 1e-12);
     assert!((at_band - 0.0035).abs() < 1e-12);
     let cached =
-        calculate_cost_for_provider_with_cache("openai", "test/banded-pricing", 1_000, 100, 800, 0);
+        pricing_aware_call_cost_with_cache("openai", "test/banded-pricing", 1_000, 100, 800, 0)
+            .expect("fixture model is priced");
     assert!((cached - 0.00206).abs() < 1e-12);
     crate::llm_config::clear_user_overrides();
 }

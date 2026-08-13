@@ -341,6 +341,7 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "personas/bulletins" => "stdlib/stdlib_personas_bulletins.harn",
     "connectors/shared" => "stdlib/stdlib_connectors_shared.harn",
     "connectors/http" => "stdlib/connectors/http.harn",
+    "connectors/setup" => "stdlib/connectors/setup.harn",
     "oauth/providers" => "stdlib/oauth/providers.harn",
     "oauth/token_exchange_catalog" => "stdlib/oauth/token_exchange_catalog.harn",
     "oauth/token_exchange" => "stdlib/oauth/token_exchange.harn",

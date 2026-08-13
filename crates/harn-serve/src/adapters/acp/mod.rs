@@ -24,7 +24,9 @@ mod host_ownership;
 mod inject;
 mod integrations;
 mod io;
+mod live_clients;
 mod modes;
+mod plan_documents;
 mod prompt;
 mod schema;
 mod session;
@@ -40,6 +42,9 @@ mod types;
 use auth::acp_auth_request_for_method;
 use bridge::AcpBridge;
 pub use bridge::AcpOutput;
+use live_clients::{
+    apply_live_client_operation, is_live_client_method, write_live_client_operation,
+};
 #[cfg(test)]
 use schema::configured_llm_route_for_capabilities;
 use schema::{
@@ -55,8 +60,8 @@ pub use schema::{
 };
 use sessions::{
     apply_session_budget_rearm, lookup_session_cancellation, preempt_session_interruption,
-    prepare_session_prompt, session_project_root_for_cwd, Session, SessionBudget,
-    SessionCancellation, SessionInfo,
+    prepare_session_prompt, session_project_root_for_cwd, ConcurrentSessionControl,
+    ConcurrentSessionControls, Session, SessionBudget, SessionCancellation, SessionInfo,
 };
 pub(crate) use transport::run_acp_channel_server_with_existing_handle;
 pub use transport::{
@@ -65,7 +70,8 @@ pub use transport::{
 };
 pub use types::{
     AcpContentBlock, AcpEmbeddedResource, AcpHarnMeta, AcpJsonRpcError, AcpJsonRpcErrorResponse,
-    AcpJsonRpcId, AcpJsonRpcRequest, AcpJsonRpcResponse, AcpMeta, AcpPromptErrorData,
+    AcpJsonRpcId, AcpJsonRpcRequest, AcpJsonRpcResponse, AcpMeta, AcpPlanDocumentMutation,
+    AcpPlanDocumentMutationParams, AcpPlanDocumentMutationResult, AcpPromptErrorData,
     AcpPromptErrorSchema, AcpSessionCancelToolCallParams, AcpSessionEnvironmentConfig,
     AcpSessionIdParams, AcpSessionInjectContent, AcpSessionInjectHostEventParams,
     AcpSessionInjectMode, AcpSessionInjectParams, AcpSessionMessageIdParams, AcpSessionNewParams,
@@ -73,9 +79,10 @@ pub use types::{
     AcpSessionRestoreResult, ACP_METHOD_INITIALIZE, ACP_METHOD_SESSION_CANCEL,
     ACP_METHOD_SESSION_CANCEL_TOOL_CALL, ACP_METHOD_SESSION_CLOSE, ACP_METHOD_SESSION_INJECT,
     ACP_METHOD_SESSION_INJECT_HOST_EVENT, ACP_METHOD_SESSION_LOAD, ACP_METHOD_SESSION_NEW,
-    ACP_METHOD_SESSION_PENDING_INJECTIONS, ACP_METHOD_SESSION_PROMPT,
-    ACP_METHOD_SESSION_REPLACE_INJECT, ACP_METHOD_SESSION_RESUME, ACP_METHOD_SESSION_REVOKE_INJECT,
-    ACP_PROMPT_ERROR_DATA_SCHEMA,
+    ACP_METHOD_SESSION_PENDING_INJECTIONS, ACP_METHOD_SESSION_PLAN_DOCUMENT_MUTATE,
+    ACP_METHOD_SESSION_PROMPT, ACP_METHOD_SESSION_REPLACE_INJECT, ACP_METHOD_SESSION_RESUME,
+    ACP_METHOD_SESSION_REVOKE_INJECT, ACP_PLAN_MUTATION_BUSY_CODE, ACP_PLAN_REVISION_CONFLICT_CODE,
+    ACP_PLAN_REVISION_CONFLICT_SCHEMA, ACP_PROMPT_ERROR_DATA_SCHEMA,
 };
 
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -900,9 +907,9 @@ pub struct AcpServer {
     runtime_configurator: Arc<dyn AcpRuntimeConfigurator>,
     /// Active sessions keyed by session ID.
     sessions: HashMap<String, Session>,
-    /// ACP control-plane ownership for pending injected messages, keyed by
-    /// session id then message id.
-    inject_controls: HashMap<String, BTreeMap<String, InjectControlRecord>>,
+    /// Typed controls shared with the transport router so they can preempt an
+    /// in-flight `session/prompt` without creating a second session owner.
+    concurrent_controls: ConcurrentSessionControls,
     /// Live timeline subscriptions created by Harn-specific ACP extension
     /// methods. Each task fans event-log appends into notifications.
     timeline_subscriptions: HashMap<String, TimelineSubscription>,

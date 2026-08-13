@@ -319,7 +319,10 @@ arguments, empty response, HTTP error, or transport error. Its
 `tool_calling.fallback_mode` is the machine-readable choice downstream
 systems should record: `native`, `text`, or `disabled`. Use `--repeat` for
 provider reliability measurements; repeated summaries only pass when every
-attempt for that mode succeeds.
+attempt for that mode succeeds. Probe requests preserve route generation
+defaults and reserve visible-output headroom after the resolved reasoning
+allowance, so a reasoning model is not scored as silent merely because hidden
+reasoning exhausted a small generic completion budget.
 
 For route selection rather than a one-off lifecycle receipt, run
 `harn provider tool-calibrate --route provider:model`. It measures the fixed

@@ -157,7 +157,7 @@ impl AcpServer {
             .lock()
             .unwrap_or_else(|error| error.into_inner())
             .remove(session_id);
-        self.inject_controls.remove(session_id);
+        self.concurrent_controls.remove(session_id);
         self.timeline_subscriptions.retain(|_, subscription| {
             if subscription.session_id.as_deref() == Some(session_id) {
                 subscription.handle.abort();
@@ -240,15 +240,11 @@ impl AcpServer {
         let message_id = inject_state
             .push_pending_user_message(content, transcript_content, mode)
             .await;
-        self.inject_controls
-            .entry(session_id.clone())
-            .or_default()
-            .insert(
-                message_id.clone(),
-                InjectControlRecord {
-                    owner: actor.clone(),
-                },
-            );
+        self.concurrent_controls.record_inject_owner(
+            &session_id,
+            message_id.clone(),
+            actor.clone(),
+        );
         self.emit_control_outcome(
             &session_id,
             "session/inject",
@@ -279,6 +275,7 @@ impl AcpServer {
         let flush_result = flush_and_clear_session_sinks(session_id).await;
         if let Some(session) = self.sessions.get_mut(session_id) {
             session.host_bridge = None;
+            session.concurrent_control.set_prompt_active(false);
         }
         flush_result
     }
@@ -304,10 +301,8 @@ impl AcpServer {
         };
         let actor = control_actor_from_params(params);
         if let Some(owner) = self
-            .inject_controls
-            .get(&session_id)
-            .and_then(|records| records.get(message_id))
-            .map(|record| record.owner.clone())
+            .concurrent_controls
+            .inject_owner(&session_id, message_id)
         {
             if owner != actor && !actor_is_host_owner(&actor) {
                 self.send_pending_inject_error_with_data(
@@ -421,10 +416,8 @@ impl AcpServer {
         };
         let actor = control_actor_from_params(params);
         if let Some(owner) = self
-            .inject_controls
-            .get(&session_id)
-            .and_then(|records| records.get(message_id))
-            .map(|record| record.owner.clone())
+            .concurrent_controls
+            .inject_owner(&session_id, message_id)
         {
             if owner != actor && !actor_is_host_owner(&actor) {
                 self.send_pending_inject_error_with_data(

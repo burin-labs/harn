@@ -1366,6 +1366,37 @@ instead of a plan-specific sidecar. Revision ids hash the editable Markdown,
 normalized plan, comments, receipts, author/source metadata, timestamp, parent,
 and operation, so replay rejects state modified without a new revision.
 
+ACP clients mutate that same transcript-owned document with the Harn extension
+`session/plan_document/mutate`. Every request names the `sessionId`, stable
+`documentId`, and `expectedRevisionId`, plus one tagged mutation:
+
+```json
+{
+  "sessionId": "session-1",
+  "documentId": "plan_document_abc123",
+  "expectedRevisionId": "plan_revision_def456",
+  "mutation": {
+    "kind": "add_comment",
+    "commentId": "review-1",
+    "anchor": {
+      "step_id": "step-1",
+      "quoted_text": "Run the release gate"
+    },
+    "body": "Name the exact post-merge proof."
+  }
+}
+```
+
+The other mutation kinds are `edit` (`markdown` and an optional normalized
+`plan`), `change_comment_state` (`commentId`, `state`, optional `agentRunId`
+and `explanation`), and `approve` (optional `reviewer` and `reason`). A success
+returns the full `planDocument` and emits the standard plan session update.
+The method only accepts idle-session mutations. A stale revision returns JSON-RPC
+code `-32009` with `harn.plan_document_conflict.v1` data containing the expected
+and current revision ids; an active prompt returns `-32010`. Agent-authored
+`update_plan` calls may include `comment_resolutions` so addressed or resolved
+comments acquire replayable resolution receipts bound to the active run.
+
 When a workflow emits a typed handoff artifact, ACP also mirrors it as a
 structured `session/update` with `sessionUpdate: "handoff"`, so hosts can show
 handoff lifecycle entries without scraping transcript prose.

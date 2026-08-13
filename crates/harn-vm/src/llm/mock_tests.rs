@@ -22,6 +22,7 @@ fn text_mock(text: &str) -> LlmMock {
         output_tokens: None,
         cache_read_tokens: None,
         cache_write_tokens: None,
+        simulated_cost_usd: None,
         thinking: None,
         thinking_summary: None,
         stop_reason: None,
@@ -49,6 +50,12 @@ fn build_mock_result_surfaces_fixture_tool_calls() {
         mock.tool_calls
     );
     let result = build_mock_result(&mock, 10, &mut 0);
+    let usage = result.usage();
+    assert_eq!(usage.cost_usd, Some(0.0));
+    assert_eq!(
+        usage.accounting_status,
+        crate::llm::usage::UsageAccountingStatus::Reported
+    );
     assert!(
         !result.tool_calls.is_empty(),
         "build_mock_result must surface tool_calls: {:?}",

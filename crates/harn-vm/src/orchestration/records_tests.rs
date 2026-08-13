@@ -20,11 +20,14 @@ fn minimal_run(status: &str) -> RunRecord {
         status: status.to_string(),
         usage: Some(LlmUsageRecord {
             total_duration_ms: 12,
+            cost_usd: Some(0.01),
+            known_cost_usd: 0.01,
             total_cost: 0.01,
             input_tokens: 3,
             output_tokens: 4,
             call_count: 1,
             models: vec!["mock".to_string()],
+            ..LlmUsageRecord::default()
         }),
         replay_fixture: Some(ReplayFixture {
             type_name: "replay_fixture".to_string(),
@@ -60,6 +63,19 @@ fn ledger_row_json(case_name: &str, status: &str, trial: usize) -> serde_json::V
         "fails": fails,
         "skips": skips,
     })
+}
+
+#[test]
+fn legacy_usage_cost_is_preserved_only_as_a_known_lower_bound() {
+    let usage: LlmUsageRecord = serde_json::from_value(serde_json::json!({
+        "call_count": 1,
+        "total_cost": 0.02
+    }))
+    .expect("legacy usage record");
+
+    assert_eq!(usage.cost_usd, None);
+    assert_eq!(usage.known_cost_usd, 0.02);
+    assert_eq!(usage.total_cost, 0.02);
 }
 
 #[test]

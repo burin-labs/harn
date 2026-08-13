@@ -103,6 +103,12 @@ impl AcpServer {
                 }
                 self.handle_session_set_config_option(&id, &params);
             }
+            ACP_METHOD_SESSION_PLAN_DOCUMENT_MUTATE => {
+                if self.reject_unauthenticated(&id) {
+                    return;
+                }
+                self.handle_plan_document_mutation(&id, &params);
+            }
             "session/fs_mode" => {
                 if self.reject_unauthenticated(&id) {
                     return;
@@ -166,6 +172,36 @@ impl AcpServer {
                 }
                 self.handle_session_close(&id, &params, "session/close")
                     .await;
+            }
+            "session/live_clients" => {
+                if self.reject_unauthenticated(&id) {
+                    return;
+                }
+                self.handle_session_live_clients(&id, &params);
+            }
+            "session/attach" => {
+                if self.reject_unauthenticated(&id) {
+                    return;
+                }
+                self.handle_session_attach(&id, &params);
+            }
+            "session/takeover" => {
+                if self.reject_unauthenticated(&id) {
+                    return;
+                }
+                self.handle_session_takeover(&id, &params);
+            }
+            "session/detach" => {
+                if self.reject_unauthenticated(&id) {
+                    return;
+                }
+                self.handle_session_detach(&id, &params);
+            }
+            "session/heartbeat" => {
+                if self.reject_unauthenticated(&id) {
+                    return;
+                }
+                self.handle_session_heartbeat(&id, &params);
             }
             "session/stop" => {
                 if self.reject_unauthenticated(&id) {

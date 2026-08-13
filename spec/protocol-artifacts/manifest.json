@@ -194,6 +194,11 @@
       "harn.session_timeline.unsubscribe",
       "session/new",
       "session/load",
+      "session/attach",
+      "session/detach",
+      "session/heartbeat",
+      "session/live_clients",
+      "session/takeover",
       "session/resume",
       "session/fork",
       "session/truncate",
@@ -259,6 +264,11 @@
       "harn.session_timeline.unsubscribe",
       "session/new",
       "session/load",
+      "session/attach",
+      "session/detach",
+      "session/heartbeat",
+      "session/live_clients",
+      "session/takeover",
       "session/resume",
       "session/fork",
       "session/truncate",
@@ -372,6 +382,7 @@
       "handoff",
       "hitl_request",
       "hitl_resolved",
+      "live_session_client",
       "log",
       "progress",
       "reminder_emitted",
@@ -424,6 +435,7 @@
       "handoff",
       "hitl_request",
       "hitl_resolved",
+      "live_session_client",
       "log",
       "progress",
       "reminder_emitted",
@@ -509,7 +521,7 @@
       "cancelled"
     ]
   },
-  "artifactVersion": "0.10.86",
+  "artifactVersion": "0.10.87",
   "bindings": {
     "go": {
       "artifact": "go/harnprotocol/harnprotocol.go",
@@ -540,6 +552,47 @@
     }
   },
   "checkCommand": "make check-protocol-artifacts",
+  "connectorSetup": {
+    "configurationFields": [
+      "oauth_client_id"
+    ],
+    "errorCodes": [
+      "connector_unavailable",
+      "configuration_missing",
+      "browser_open_failed",
+      "callback_timeout",
+      "user_denied",
+      "state_mismatch",
+      "token_exchange_failed",
+      "credential_store_failed",
+      "validation_failed",
+      "cancelled",
+      "unknown"
+    ],
+    "interactions": [
+      "none",
+      "browser",
+      "secret_entry",
+      "user_code"
+    ],
+    "source": "crates/harn-stdlib/src/stdlib/connectors/setup.harn",
+    "stages": [
+      "resolving",
+      "opening_browser",
+      "waiting_for_user",
+      "exchanging",
+      "storing",
+      "validating",
+      "ready"
+    ],
+    "statuses": [
+      "in_progress",
+      "succeeded",
+      "failed",
+      "cancelled",
+      "timed_out"
+    ]
+  },
   "externalActions": {
     "activityStatuses": [
       "proposed",
