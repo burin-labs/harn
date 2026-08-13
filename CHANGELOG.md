@@ -9,6 +9,22 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.91
+
+### Added
+
+- Generate terminal-state semantics for governed external-action activity so hosts reject rewrites of final outcomes.
+
+### Fixed
+
+- Classify OpenAI-compatible in-stream server errors as transient provider failures
+  so orchestration and experiment schedulers can retry them instead of terminating
+  healthy work.
+- Generated external-action activity bindings now define one monotonic lifecycle
+  transition contract. Hosts can accept forward progress, skipped intermediate
+  snapshots, and final outcomes, but must reject backward progress and changes
+  after a terminal outcome.
+
 ## v0.10.90
 
 ### Added
