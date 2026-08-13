@@ -818,10 +818,8 @@ pub(super) async fn host_agent_dispatch_tool_call(
             _ => None,
         })
         .unwrap_or_default();
-    // The JSON form of the arguments is built lazily per consumer: the
-    // named path needs it once (feeding `normalize_tool_args`, which takes
-    // ownership so the object is not deep-cloned a second time), while the
-    // denial/feedback paths re-derive it from `call` only when they fire.
+    // Build argument JSON lazily: normalization takes ownership, while denial
+    // and feedback paths only derive it when they fire.
     let raw_args_json = || {
         call.get("arguments")
             .map(helpers::vm_value_to_json)
@@ -845,6 +843,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
             return Ok(json_to_vm_value(&denied));
         }
     };
+    tools::recover_provider_safe_alias(&mut tool_name, tools);
     let mut tool_args = tools::normalize_tool_args(&tool_name, raw_args_json(), tools);
     let session_id = agent_primitive_option_str(options, "session_id")
         .or_else(current_agent_session_id)

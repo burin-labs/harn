@@ -5,6 +5,6 @@ crates/harn-vm/src/llm/api/transport_stub_tests.rs:216 # test fixture: successfu
 crates/harn-vm/src/llm/api/transport_stub_tests.rs:242 # test fixture: empty OpenAI-compatible response wire JSON, not model-facing prose
 crates/harn-vm/src/llm/code_mode.rs:318 # test fixture: fake connector Harn script (returns JSON text), not model-facing prose
 crates/harn-vm/src/llm/code_mode.rs:339 # test fixture: code-mode composition Harn script, not model-facing prose
-crates/harn-vm/src/llm/mock_tests.rs:182 # test fixture: capability-scoped mock call script, not model-facing prose
-crates/harn-vm/src/llm/mock_tests.rs:197 # test fixture: isolated alpha mock queue script, not model-facing prose
-crates/harn-vm/src/llm/mock_tests.rs:209 # test fixture: isolated beta mock queue script, not model-facing prose
+crates/harn-vm/src/llm/mock_tests.rs:204 # test fixture: capability-scoped mock call script, not model-facing prose
+crates/harn-vm/src/llm/mock_tests.rs:219 # test fixture: isolated alpha mock queue script, not model-facing prose
+crates/harn-vm/src/llm/mock_tests.rs:231 # test fixture: isolated beta mock queue script, not model-facing prose

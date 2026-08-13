@@ -314,6 +314,7 @@ fn token_exchange_http_spec(base_url: &str) -> McpServerSpec {
         command: String::new(),
         args: Vec::new(),
         env: BTreeMap::new(),
+        cwd: None,
         url: format!("{base_url}/mcp"),
         auth_token: Some("base-token".to_string()),
         token_exchange: Some(crate::mcp_oauth::McpTokenExchangeConfig {

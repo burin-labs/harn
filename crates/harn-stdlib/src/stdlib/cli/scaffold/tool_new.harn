@@ -189,6 +189,15 @@ fn __render_main_harn(package_name: string) -> string {
     + "}\n"
 }
 
+fn __render_server_harn() -> string {
+  return "import { tools } from \"lib/tools\"\n"
+    + "\n"
+    + "/** Serve this package's tools over MCP for lazy agent discovery. */\n"
+    + "pipeline default(harness: Harness) {\n"
+    + "  harness.tools.mcp_tools(tools())\n"
+    + "}\n"
+}
+
 fn __render_test_harn(package_name: string, ident: string) -> string {
   const tool_name = __harn_string_literal(package_name)
   return "import { agent_dispatch_tool_call } from \"std/agent/primitives\"\n"
@@ -228,6 +237,12 @@ fn __render_readme(package_name: string, description: string) -> string {
     + "\n"
     + "```bash\n"
     + "harn package verify\n"
+    + "```\n"
+    + "\n"
+    + "Serve the package for progressive agent discovery:\n"
+    + "\n"
+    + "```bash\n"
+    + "harn serve mcp server.harn\n"
     + "```\n"
     + "\n"
     + "## Install into another project\n"
@@ -330,6 +345,7 @@ fn main(harness: Harness) {
   __write(harness, dest, ".harn-version", harn_version + "\n")
   __write(harness, dest, "lib/tools.harn", __render_tools_harn(name, handler, description))
   __write(harness, dest, "main.harn", __render_main_harn(name))
+  __write(harness, dest, "server.harn", __render_server_harn())
   __write(harness, dest, "tests/test_tool.harn", __render_test_harn(name, ident))
   __write(harness, dest, "README.md", __render_readme(name, description))
   __write(harness, dest, "LICENSE", "MIT OR Apache-2.0\n")

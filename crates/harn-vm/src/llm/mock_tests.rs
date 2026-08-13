@@ -49,7 +49,7 @@ fn build_mock_result_surfaces_fixture_tool_calls() {
         "fixture tool_calls must parse into the mock: {:?}",
         mock.tool_calls
     );
-    let result = build_mock_result(&mock, 10);
+    let result = build_mock_result(&mock, 10, &mut 0);
     let usage = result.usage();
     assert_eq!(usage.cost_usd, Some(0.0));
     assert_eq!(
@@ -62,6 +62,28 @@ fn build_mock_result_surfaces_fixture_tool_calls() {
         result.tool_calls
     );
     assert_eq!(result.tool_calls[0]["name"], "ask_user");
+}
+
+#[test]
+fn cli_mock_tool_call_ids_are_unique_across_responses() {
+    reset_llm_mock_state();
+    let fixture_tool_call = || {
+        crate::llm::jsonl::parse_llm_mock_value(&serde_json::json!({
+            "match": "*",
+            "consume_match": true,
+            "tool_calls": [{"name": "ask_user", "arguments": {"question": "Which?"}}]
+        }))
+        .expect("parse mock")
+    };
+    install_cli_llm_mocks(vec![fixture_tool_call(), fixture_tool_call()]);
+    let request = LlmRequestPayload::from(&crate::llm::api::options::base_opts("anthropic"));
+
+    let first = mock_llm_response(&request).expect("first mock response");
+    let second = mock_llm_response(&request).expect("second mock response");
+
+    assert_eq!(first.tool_calls[0]["id"], "mock_call_1");
+    assert_eq!(second.tool_calls[0]["id"], "mock_call_2");
+    clear_cli_llm_mock_mode();
 }
 
 #[test]
@@ -90,7 +112,7 @@ fn cli_llm_mock_record_scope_collects_provider_worker_thread_results() {
     reset_llm_mock_state();
     enable_cli_llm_mock_recording();
     let request = LlmRequestPayload::from(&crate::llm::api::options::base_opts("anthropic"));
-    let result = build_mock_result(&text_mock("cross-thread record"), 7);
+    let result = build_mock_result(&text_mock("cross-thread record"), 7, &mut 0);
 
     assert!(request.cli_llm_mock_scope.is_some());
     std::thread::spawn(move || record_cli_llm_result(&request, &result))

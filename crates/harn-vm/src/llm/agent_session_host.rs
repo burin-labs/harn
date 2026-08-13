@@ -1650,9 +1650,9 @@ fn host_agent_session_record_tool_results_builtin(
                 }
             }
         }
-        // A computer-use result carries screenshot(s) the model must see; ride
-        // them back as image content blocks (see `tool_result_message_for_provider`).
+        // Carry computer-use screenshots back as provider image content blocks.
         let screenshots = screenshots_from_tool_result(result);
+        let transcript_data = tool_result_messages::transcript_tool_result_data(result);
         let message_index = crate::agent_sessions::inject_message(
             &session_id,
             tool_result_message_for_provider(
@@ -1663,7 +1663,7 @@ fn host_agent_session_record_tool_results_builtin(
                 &tool_call_id,
                 &observation,
                 &screenshots,
-                dict_get(result, "data").filter(|value| !matches!(value, VmValue::Nil)),
+                transcript_data.as_ref(),
             ),
         )
         .map_err(VmError::Runtime)?;

@@ -60,6 +60,7 @@ fn http_spec(url: &str, auth_token: Option<&str>) -> McpServerSpec {
         command: String::new(),
         args: Vec::new(),
         env: BTreeMap::new(),
+        cwd: None,
         url: url.to_string(),
         auth_token: auth_token.map(str::to_string),
         token_exchange: None,
@@ -156,6 +157,48 @@ print(json.dumps({
     assert_eq!(
         discovery["protocolVersion"],
         serde_json::json!(PROTOCOL_VERSION)
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn stdio_server_uses_configured_working_directory() {
+    let directory = tempfile::tempdir().unwrap();
+    let script = r#"
+import json, os, sys
+request = json.loads(sys.stdin.readline())
+print(json.dumps({
+    "jsonrpc": "2.0",
+    "id": request["id"],
+    "result": {
+        "resultType": "complete",
+        "supportedVersions": ["2026-07-28"],
+        "capabilities": {"tools": {}},
+        "ttlMs": 0,
+        "cacheScope": "private",
+        "_meta": {"io.modelcontextprotocol/serverInfo": {"name": os.getcwd(), "version": "1.0.0"}}
+    }
+}), flush=True)
+"#;
+    let args = vec!["-u".to_string(), "-c".to_string(), script.to_string()];
+    let handle = mcp_connect_stdio_impl(
+        "python3",
+        &args,
+        &BTreeMap::new(),
+        directory.path().to_str(),
+        PROTOCOL_VERSION.to_string(),
+    )
+    .await
+    .expect("stdio server should launch from configured cwd");
+    let discovery = handle.discovery_result.lock().await.clone().unwrap();
+    let reported_directory = discovery["serverInfo"]["name"]
+        .as_str()
+        .expect("server name should contain its working directory");
+    assert_eq!(
+        std::path::Path::new(reported_directory)
+            .canonicalize()
+            .expect("reported working directory should exist"),
+        directory.path().canonicalize().unwrap(),
+        "stdio server should observe the configured working directory"
     );
 }
 
@@ -397,7 +440,7 @@ pub(super) async fn connect_stdio_test_script(
     protocol_version: String,
 ) -> VmMcpClientHandle {
     let args = vec!["-u".to_string(), "-c".to_string(), script.to_string()];
-    mcp_connect_stdio_impl("python3", &args, &BTreeMap::new(), protocol_version)
+    mcp_connect_stdio_impl("python3", &args, &BTreeMap::new(), None, protocol_version)
         .await
         .expect("stdio test MCP server should connect")
 }
@@ -433,6 +476,7 @@ async fn stable_http_handle(base_url: &str) -> VmMcpClientHandle {
         command: String::new(),
         args: Vec::new(),
         env: BTreeMap::new(),
+        cwd: None,
         url: format!("{base_url}/mcp"),
         auth_token: None,
         token_exchange: None,

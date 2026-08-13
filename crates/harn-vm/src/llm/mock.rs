@@ -5,9 +5,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, MutexGuard};
 
 use super::api::{LlmResult, ProviderTelemetry, RawProviderToolCall};
+pub use super::mock_error::MockError;
 use super::mock_store::{MockQueue, QueueMatch};
 use crate::orchestration::ToolCallRecord;
-use crate::value::{ErrorCategory, VmError, VmValue};
+use crate::value::{VmError, VmValue};
 
 /// LLM replay mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -30,6 +31,7 @@ struct CliLlmMockState {
     mode: CliLlmMockMode,
     queue: MockQueue,
     recordings: Vec<LlmMock>,
+    next_tool_call_id: u64,
 }
 
 static CLI_LLM_MOCK_NEXT_SCOPE: AtomicU64 = AtomicU64::new(1);
@@ -44,153 +46,7 @@ impl Drop for CliLlmMockLease {
     }
 }
 
-/// Categorized error injected by a mock. When present, the mock
-/// short-circuits the provider call and surfaces as
-/// `VmError::CategorizedError`, so `llm_call` throws and
-/// `llm_call_safe` populates its `error` envelope.
-#[derive(Clone, Debug)]
-pub struct MockError {
-    pub category: ErrorCategory,
-    pub message: String,
-    pub status: Option<u16>,
-    pub kind: Option<String>,
-    pub reason: Option<String>,
-    /// Optional retry hint. Provider-envelope mocks put this directly
-    /// on the thrown dict; legacy category-only mocks embed it in the
-    /// message so the live-provider parser path still exercises the
-    /// same extraction code.
-    pub retry_after_ms: Option<u64>,
-}
-
-impl MockError {
-    fn has_provider_envelope(&self) -> bool {
-        self.status.is_some() || self.kind.is_some() || self.reason.is_some()
-    }
-}
-
-pub(crate) fn build_mock_error(
-    category: Option<String>,
-    message: Option<String>,
-    status: Option<u16>,
-    kind: Option<String>,
-    reason: Option<String>,
-    retry_after_ms: Option<u64>,
-) -> Result<MockError, String> {
-    if retry_after_ms.is_some_and(|ms| ms > i64::MAX as u64) {
-        return Err("error.retry_after_ms must fit in a signed 64-bit integer".to_string());
-    }
-    let kind = match kind {
-        Some(value) if value.trim().is_empty() => None,
-        Some(value) => {
-            let normalized = value.trim().to_ascii_lowercase();
-            if super::api::LlmErrorKind::parse(&normalized).is_none() {
-                return Err(format!("unknown error kind `{value}`"));
-            }
-            Some(normalized)
-        }
-        None => None,
-    };
-    let reason = reason.and_then(|value| {
-        let trimmed = value.trim();
-        if trimmed.is_empty() {
-            None
-        } else {
-            Some(trimmed.to_string())
-        }
-    });
-    let category_was_provided = category.is_some();
-    let category = match category {
-        Some(value) if value.trim().is_empty() => {
-            return Err("error.category must not be empty".to_string());
-        }
-        Some(value) => {
-            let normalized = value.trim().to_ascii_lowercase();
-            let category = ErrorCategory::parse(&normalized);
-            if category.as_str() != normalized {
-                return Err(format!("unknown error category `{value}`"));
-            }
-            category
-        }
-        None => infer_mock_error_category(status, kind.as_deref(), reason.as_deref()),
-    };
-    if !category_was_provided && kind.is_none() && status.is_none() && reason.is_none() {
-        return Err(
-            "error.category is required unless error.status, error.kind, or error.reason is set"
-                .to_string(),
-        );
-    }
-    Ok(MockError {
-        category,
-        message: message.unwrap_or_else(|| {
-            default_mock_error_message(status, kind.as_deref(), reason.as_deref())
-        }),
-        status,
-        kind,
-        reason,
-        retry_after_ms,
-    })
-}
-
-pub(crate) fn validate_mock_error_status(status: i64) -> Result<u16, String> {
-    let status = u16::try_from(status)
-        .map_err(|_| "error.status must be an HTTP status code".to_string())?;
-    reqwest::StatusCode::from_u16(status)
-        .map_err(|_| "error.status must be an HTTP status code".to_string())?;
-    Ok(status)
-}
-
-fn infer_mock_error_category(
-    status: Option<u16>,
-    kind: Option<&str>,
-    reason: Option<&str>,
-) -> ErrorCategory {
-    if let Some(status) = status {
-        match status {
-            401 | 403 => return ErrorCategory::Auth,
-            404 | 410 => return ErrorCategory::NotFound,
-            408 | 504 | 522 | 524 => return ErrorCategory::Timeout,
-            429 => return ErrorCategory::RateLimit,
-            503 | 529 => return ErrorCategory::Overloaded,
-            500 | 502 => return ErrorCategory::ServerError,
-            _ => {}
-        }
-    }
-    if let Some(reason) = reason {
-        match reason {
-            "rate_limit" => return ErrorCategory::RateLimit,
-            "timeout" => return ErrorCategory::Timeout,
-            "network_error" | "transient_network" => return ErrorCategory::TransientNetwork,
-            "server_error" | "provider_error" | "provider_5xx" | "upstream_unavailable" => {
-                return ErrorCategory::ServerError;
-            }
-            "auth_failure" => return ErrorCategory::Auth,
-            "model_unavailable" => return ErrorCategory::NotFound,
-            _ => {}
-        }
-    }
-    if kind == Some("transient") {
-        return ErrorCategory::ServerError;
-    }
-    ErrorCategory::Generic
-}
-
-fn default_mock_error_message(
-    status: Option<u16>,
-    kind: Option<&str>,
-    reason: Option<&str>,
-) -> String {
-    match (status, kind, reason) {
-        (Some(status), Some(kind), Some(reason)) => {
-            format!("HTTP {status} mock LLM error ({kind}/{reason})")
-        }
-        (Some(status), _, Some(reason)) => format!("HTTP {status} mock LLM error ({reason})"),
-        (Some(status), _, _) => format!("HTTP {status} mock LLM error"),
-        (None, Some(kind), Some(reason)) => format!("mock LLM error ({kind}/{reason})"),
-        (None, Some(kind), None) => format!("mock LLM error ({kind})"),
-        (None, None, Some(reason)) => format!("mock LLM error ({reason})"),
-        (None, None, None) => String::new(),
-    }
-}
+pub(crate) use super::mock_error::{build_mock_error, validate_mock_error_status};
 
 /// The scope a fixture entry belongs to when no `scope` is authored, and the
 /// scope a call requests when it sets no `mock_scope`. V0 fixtures use this as
@@ -390,6 +246,7 @@ struct LlmMockState {
     scopes: Vec<LlmMockScope>,
     receipts: Vec<MockConsumptionReceipt>,
     cli_scope: Option<Arc<CliLlmMockLease>>,
+    next_tool_call_id: u64,
 }
 
 /// Shared mutable mock state for one VM execution tree.
@@ -587,6 +444,7 @@ pub(crate) fn reset_llm_mock_state() {
         state.prompt_cache.clear();
         state.scopes.clear();
         state.receipts.clear();
+        state.next_tool_call_id = 0;
     });
 }
 
@@ -636,6 +494,7 @@ pub fn install_cli_llm_mocks(mocks: Vec<LlmMock>) {
             warnings: Vec::new(),
         }),
         recordings: Vec::new(),
+        next_tool_call_id: 0,
     });
 }
 
@@ -645,6 +504,7 @@ pub fn install_cli_llm_mock_fixture(fixture: LlmMockFixture) {
         mode: CliLlmMockMode::Replay,
         queue: MockQueue::from_fixture(fixture),
         recordings: Vec::new(),
+        next_tool_call_id: 0,
     });
 }
 
@@ -653,6 +513,7 @@ pub fn enable_cli_llm_mock_recording() {
         mode: CliLlmMockMode::Record,
         queue: MockQueue::default(),
         recordings: Vec::new(),
+        next_tool_call_id: 0,
     });
 }
 
@@ -728,7 +589,11 @@ fn record_llm_mock_call(request: &super::api::LlmRequestPayload) {
 }
 
 /// Build an LlmResult from a matched mock.
-fn build_mock_result(mock: &LlmMock, last_msg_len: usize) -> LlmResult {
+fn build_mock_result(
+    mock: &LlmMock,
+    last_msg_len: usize,
+    next_tool_call_id: &mut u64,
+) -> LlmResult {
     // A mock may script an ordered list of visible-text chunks for streaming
     // callers. Derive the flat `text` from their concatenation when `text` was
     // left empty, so the non-streaming result and the streamed transcript agree
@@ -761,8 +626,8 @@ fn build_mock_result(mock: &LlmMock, last_msg_len: usize) -> LlmResult {
         }
 
         let mut tool_calls = Vec::new();
-        for (i, tc) in mock.tool_calls.iter().enumerate() {
-            let id = format!("mock_call_{}", i + 1);
+        for tc in &mock.tool_calls {
+            let id = allocate_mock_tool_call_id(next_tool_call_id);
             let name = tc.get("name").and_then(|n| n.as_str()).unwrap_or("unknown");
             let arguments = tc
                 .get("arguments")
@@ -811,6 +676,11 @@ fn build_mock_result(mock: &LlmMock, last_msg_len: usize) -> LlmResult {
         logprobs: mock.logprobs.clone(),
         telemetry: ProviderTelemetry::mock_replay(mock.simulated_cost_usd),
     }
+}
+
+fn allocate_mock_tool_call_id(next_tool_call_id: &mut u64) -> String {
+    *next_tool_call_id += 1;
+    format!("mock_call_{next_tool_call_id}")
 }
 
 // Mock prompt patterns match free prose, where `?`/`[`/`{` are ordinary
@@ -961,21 +831,31 @@ struct ScopedMatch {
     receipt: MockConsumptionReceipt,
 }
 
-fn build_scoped_match(selected: QueueMatch, match_text: &str) -> ScopedMatch {
+fn build_scoped_match(
+    selected: QueueMatch,
+    match_text: &str,
+    next_tool_call_id: &mut u64,
+) -> ScopedMatch {
     let QueueMatch { mock, receipt } = selected;
     let outcome = match &mock.error {
         Some(err) => Err(mock_error_to_vm_error(err)),
-        None => Ok(build_mock_result(&mock, match_text.len())),
+        None => Ok(build_mock_result(
+            &mock,
+            match_text.len(),
+            next_tool_call_id,
+        )),
     };
     ScopedMatch { outcome, receipt }
 }
 
 fn try_match_builtin_mock(scope: &str, match_text: &str) -> Option<ScopedMatch> {
     with_mock_state_mut(|state| {
-        state
-            .builtin_queue
-            .match_request(scope, match_text)
-            .map(|selected| build_scoped_match(selected, match_text))
+        let selected = state.builtin_queue.match_request(scope, match_text)?;
+        Some(build_scoped_match(
+            selected,
+            match_text,
+            &mut state.next_tool_call_id,
+        ))
     })
 }
 
@@ -990,10 +870,12 @@ fn try_match_cli_mock(
     if state.mode != CliLlmMockMode::Replay {
         return None;
     }
-    state
-        .queue
-        .match_request(scope, match_text)
-        .map(|selected| build_scoped_match(selected, match_text))
+    let selected = state.queue.match_request(scope, match_text)?;
+    Some(build_scoped_match(
+        selected,
+        match_text,
+        &mut state.next_tool_call_id,
+    ))
 }
 
 pub(crate) fn record_cli_llm_result(request: &super::api::LlmRequestPayload, result: &LlmResult) {
@@ -1391,13 +1273,16 @@ pub(crate) fn mock_llm_response(
         if let Some(first_tool) = mock_auto_tool_candidate(tools) {
             let tool_name = mock_tool_name(first_tool).unwrap_or("unknown");
             let mock_args = mock_required_args(first_tool);
+            let tool_call_id = with_mock_state_mut(|state| {
+                allocate_mock_tool_call_id(&mut state.next_tool_call_id)
+            });
             let mut result = LlmResult {
                 attempts: Default::default(),
                 text_projection: None,
                 served_fast: false,
                 text: String::new(),
                 tool_calls: vec![serde_json::json!({
-                        "id": "mock_call_1",
+                        "id": tool_call_id,
                         "type": "tool_call",
                         "name": tool_name,
                 "arguments": mock_args
@@ -1415,7 +1300,7 @@ pub(crate) fn mock_llm_response(
                 stop_reason: None,
                 blocks: vec![serde_json::json!({
                     "type": "tool_call",
-                    "id": "mock_call_1",
+                    "id": tool_call_id,
                     "name": tool_name,
                     "arguments": mock_args,
                     "visibility": "internal",

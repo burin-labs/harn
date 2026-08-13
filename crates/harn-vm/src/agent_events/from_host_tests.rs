@@ -125,6 +125,7 @@ fn from_host_tool_call_update_preserves_structured_executor() {
 fn from_host_tool_call_update_preserves_structured_mutation_status() {
     for (wire, expected) in [
         ("applied", ToolMutationStatus::Applied),
+        ("unchanged", ToolMutationStatus::Unchanged),
         ("not_applied", ToolMutationStatus::NotApplied),
         ("unknown", ToolMutationStatus::Unknown),
     ] {

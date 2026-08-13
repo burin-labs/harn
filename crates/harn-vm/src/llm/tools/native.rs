@@ -1,5 +1,25 @@
 use super::json_schema::vm_build_json_schema;
-use crate::value::{VmError, VmValue};
+use crate::value::{DictMap, VmError, VmValue};
+
+/// Project a tool's input contract to provider JSON Schema without changing
+/// which layer owns the shape.
+///
+/// Harn-authored tools use the compact `parameters` param map, while MCP tools
+/// arrive with the protocol's full `inputSchema` object (and internal adapters
+/// may use `input_schema`). Rebuilding an MCP schema as a Harn param map turns
+/// every such tool into an empty object on the provider wire, so preserve the
+/// full schema spellings verbatim and normalize only provider type aliases.
+fn input_schema_from_entry(entry: &DictMap) -> serde_json::Value {
+    for key in ["input_schema", "inputSchema"] {
+        if let Some(value) = entry.get(key) {
+            let mut schema = super::super::vm_value_to_json(value);
+            crate::schema::normalize_provider_json_schema(&mut schema);
+            return schema;
+        }
+    }
+
+    vm_build_json_schema(entry.get("parameters").and_then(VmValue::as_dict))
+}
 
 pub(crate) fn vm_tools_to_native(
     tools_val: &VmValue,
@@ -32,7 +52,6 @@ pub(crate) fn vm_tools_to_native(
                     .get("description")
                     .map(|value| value.display())
                     .unwrap_or_default();
-                let params = entry.get("parameters").and_then(|value| value.as_dict());
                 let output_schema = entry
                     .get("outputSchema")
                     .map(super::super::vm_value_to_json);
@@ -45,7 +64,7 @@ pub(crate) fn vm_tools_to_native(
                     _ => None,
                 });
 
-                let input_schema = vm_build_json_schema(params);
+                let input_schema = input_schema_from_entry(entry);
 
                 if super::super::provider::provider_uses_anthropic_native_tools(provider, model) {
                     let mut tool_json = serde_json::json!({

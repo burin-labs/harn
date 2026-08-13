@@ -637,7 +637,13 @@ const result = agent_loop(harness,
     model: "gpt-5.4",
     mcp_servers: [
       {name: "github", transport: "http", url: "http://localhost:3030/mcp"},
-      {name: "local_fs", transport: "stdio", command: ["mcp-filesystem", "/tmp/project"]},
+      {
+        name: "local_fs",
+        transport: "stdio",
+        command: "mcp-filesystem",
+        args: ["."],
+        cwd: "/tmp/project",
+      },
     ],
     max_iterations: 8,
   },
@@ -649,3 +655,6 @@ Discovered tools are always prefixed with the server name, for example
 deterministic when two servers both export a tool named `search` or when a
 server tool would otherwise overlap a local Harn tool. The actual MCP
 `tools/call` request still uses the original unprefixed MCP tool name.
+For stdio servers, `cwd` sets the child process working directory. This keeps
+relative repository-local server and package paths stable when the parent host
+is launched from a different directory.

@@ -2,6 +2,7 @@ pub(super) fn mutation_status(result: &serde_json::Value) -> &'static str {
     let status = fact(result, "mutation_status").and_then(serde_json::Value::as_str);
     match status {
         Some("applied") => crate::agent_events::ToolMutationStatus::Applied.as_str(),
+        Some("unchanged") => crate::agent_events::ToolMutationStatus::Unchanged.as_str(),
         Some("not_applied") => crate::agent_events::ToolMutationStatus::NotApplied.as_str(),
         _ => crate::agent_events::ToolMutationStatus::Unknown.as_str(),
     }
@@ -41,6 +42,10 @@ mod tests {
         assert_eq!(
             mutation_status(&serde_json::json!({"mutation_status": "applied"})),
             "applied"
+        );
+        assert_eq!(
+            mutation_status(&serde_json::json!({"mutation_status": "unchanged"})),
+            "unchanged"
         );
         assert_eq!(
             mutation_status(&serde_json::json!({"mutation_status": "not_applied"})),

@@ -15,6 +15,35 @@
 use super::{dict_get, list_items, vm_to_json};
 use crate::value::{VmDictExt, VmValue};
 
+/// Preserve typed producer facts on the durable tool-result message. Dispatch
+/// keeps mutation facts beside `data` so every consumer can inspect them
+/// without parsing rendered text; the transcript owns projecting those facts
+/// into the provider-neutral message envelope used by replay and completion
+/// policy.
+pub(super) fn transcript_tool_result_data(result: &VmValue) -> Option<VmValue> {
+    let mut data = dict_get(result, "data")
+        .and_then(VmValue::as_dict)
+        .cloned()
+        .unwrap_or_default();
+    if let Some(VmValue::String(status)) = dict_get(result, "mutation_status") {
+        if matches!(status.as_str(), "applied" | "unchanged" | "not_applied") {
+            data.insert(
+                crate::value::intern_key("mutation_status"),
+                VmValue::String(status.clone()),
+            );
+        }
+    }
+    if let Some(VmValue::List(paths)) = dict_get(result, "changed_paths") {
+        if !paths.is_empty() {
+            data.insert(
+                crate::value::intern_key("changed_paths"),
+                VmValue::List(paths.clone()),
+            );
+        }
+    }
+    (!data.is_empty()).then(|| VmValue::dict(data))
+}
+
 /// Test seam over the real record builtin, allowing provider egress regressions
 /// to exercise dispatch-result ingestion without a live model turn.
 #[cfg(test)]

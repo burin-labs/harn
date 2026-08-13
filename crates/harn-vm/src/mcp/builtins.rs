@@ -294,6 +294,7 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
                 &command,
                 &cmd_args,
                 &BTreeMap::new(),
+                None,
                 options.protocol_version,
             )
             .await?;

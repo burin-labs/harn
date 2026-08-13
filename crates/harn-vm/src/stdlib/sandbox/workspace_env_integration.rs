@@ -166,12 +166,15 @@ fn spawned_process_observes_workspace_toolchain_environment() {
         "NPM_CONFIG_CACHE",
         "YARN_CACHE_FOLDER",
         "PNPM_HOME",
-        "NPM_CONFIG_STORE_DIR",
         "PYTHONUSERBASE",
     ] {
         let value = PathBuf::from(values.get(key).unwrap_or_else(|| panic!("{key} missing")));
         assert!(value.starts_with(&cache), "{key} escaped cache: {value:?}");
     }
+    assert!(
+        !values.contains_key("NPM_CONFIG_STORE_DIR"),
+        "npm must not receive pnpm's unsupported store-dir option"
+    );
     assert_eq!(
         PathBuf::from(values.get("TMPDIR").unwrap()),
         root.join(WORKSPACE_TMPDIR_NAME)

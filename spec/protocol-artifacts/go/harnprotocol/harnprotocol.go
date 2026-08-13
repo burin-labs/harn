@@ -279,6 +279,7 @@ type HarnToolMutationStatus = string
 // HarnToolMutationStatuses enumerates every wire value Harn currently emits for HarnToolMutationStatus.
 var HarnToolMutationStatuses = []HarnToolMutationStatus{
 	"applied",
+	"unchanged",
 	"not_applied",
 	"unknown",
 }

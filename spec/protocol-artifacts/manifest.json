@@ -505,6 +505,7 @@
     ],
     "toolMutationStatuses": [
       "applied",
+      "unchanged",
       "not_applied",
       "unknown"
     ],

@@ -60,6 +60,7 @@ pub mod local_profiles;
 pub mod managed_supply;
 pub(crate) mod mock;
 mod mock_builtins;
+mod mock_error;
 pub(crate) mod mock_store;
 mod model_test;
 mod permission_preview;

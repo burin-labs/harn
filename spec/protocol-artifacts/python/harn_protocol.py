@@ -335,6 +335,7 @@ HARN_TOOL_CALL_ERROR_CATEGORIES: tuple = (
 )
 HARN_TOOL_MUTATION_STATUSES: tuple = (
     "applied",
+    "unchanged",
     "not_applied",
     "unknown",
 )
@@ -654,6 +655,7 @@ class HarnToolCallErrorCategory(str, Enum):
 
 class HarnToolMutationStatus(str, Enum):
     APPLIED = "applied"
+    UNCHANGED = "unchanged"
     NOT_APPLIED = "not_applied"
     UNKNOWN = "unknown"
 

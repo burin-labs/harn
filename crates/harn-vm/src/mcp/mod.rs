@@ -71,6 +71,11 @@ pub struct McpServerSpec {
     pub args: Vec<String>,
     #[serde(default)]
     pub env: BTreeMap<String, String>,
+    /// Optional working directory for a stdio server process. Hosts use this
+    /// to make repository-local server commands portable across GUI, TUI, and
+    /// headless launchers whose own process directories may differ.
+    #[serde(default)]
+    pub cwd: Option<String>,
     #[serde(default)]
     pub url: String,
     #[serde(default)]
