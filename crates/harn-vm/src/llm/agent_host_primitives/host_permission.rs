@@ -142,7 +142,7 @@ pub(super) fn emit_permission_activity(
         "tool",
         "internal",
         "tool permission decision",
-        Some(serde_json::json!({"activity": activity.clone()})),
+        Some(serde_json::json!({"activity": activity})),
     );
     if crate::agent_sessions::append_event(session_id, event).is_ok() {
         crate::llm::emit_live_agent_event_sync(&crate::agent_events::AgentEvent::TypedCheckpoint {
