@@ -1,7 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
-use super::{ConnectorCredentialEnvironmentManifest, ProviderSetupManifest};
+use super::{
+    ConnectorCredentialEnvironmentManifest, ConnectorSetupConfigurationField, ProviderSetupManifest,
+};
 
 const MAX_ENTRIES: usize = 16;
 const MAX_NAMES_PER_SECRET: usize = 8;
@@ -137,6 +139,74 @@ pub fn credential_environment_issues(
     issues
 }
 
+/// Validate the allowlisted environment names for non-secret setup fields.
+/// This is intentionally separate from credential sources: a public OAuth
+/// client id must never be mistaken for an access token or stored in the
+/// credential index.
+pub fn configuration_environment_issues(setup: &ProviderSetupManifest) -> Vec<String> {
+    let sources = &setup.configuration_environment;
+    let mut issues = Vec::new();
+    if sources.len() > MAX_ENTRIES {
+        issues.push(format!("must include at most {MAX_ENTRIES} entries"));
+    }
+    let mut fields = BTreeSet::new();
+    let mut names = BTreeSet::new();
+    for source in sources {
+        if !fields.insert(source.field) {
+            issues.push(format!("repeats field '{}'", source.field.as_str()));
+        }
+        if source.environment_names.is_empty() {
+            issues.push(format!(
+                "field '{}' must declare at least one environment name",
+                source.field.as_str()
+            ));
+        }
+        if source.environment_names.len() > MAX_NAMES_PER_SECRET {
+            issues.push(format!(
+                "field '{}' must declare at most {MAX_NAMES_PER_SECRET} environment names",
+                source.field.as_str()
+            ));
+        }
+        let mut field_names = BTreeSet::new();
+        for name in &source.environment_names {
+            if !environment_name_is_valid(name) {
+                issues.push(format!("environment name '{name}' is invalid"));
+            }
+            if !field_names.insert(name.as_str()) {
+                issues.push(format!(
+                    "field '{}' repeats environment name '{name}'",
+                    source.field.as_str()
+                ));
+            }
+            if !names.insert(name.as_str()) {
+                issues.push(format!(
+                    "environment name '{name}' is assigned to several configuration fields"
+                ));
+            }
+        }
+    }
+    issues
+}
+
+/// Resolve one non-secret setup value only from names explicitly declared by
+/// the connector manifest. The value is returned to the setup adapter and must
+/// not be included in status, plan, event, or diagnostic output.
+pub fn process_configuration_environment_value(
+    setup: &ProviderSetupManifest,
+    field: ConnectorSetupConfigurationField,
+) -> Option<String> {
+    setup
+        .configuration_environment
+        .iter()
+        .filter(|source| source.field == field)
+        .flat_map(|source| source.environment_names.iter())
+        .find_map(|name| {
+            std::env::var(name)
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+        })
+}
+
 pub fn available_process_credential_environment_name<'a>(
     sources: &'a [ConnectorCredentialEnvironmentManifest],
     secret: &str,
@@ -164,6 +234,17 @@ pub fn available_credential_environment_name<'a>(
 pub fn credential_environment_names(setup: &ProviderSetupManifest) -> Vec<String> {
     let mut names = setup
         .credential_environment
+        .iter()
+        .flat_map(|source| source.environment_names.iter().cloned())
+        .collect::<Vec<_>>();
+    names.sort();
+    names.dedup();
+    names
+}
+
+pub fn configuration_environment_names(setup: &ProviderSetupManifest) -> Vec<String> {
+    let mut names = setup
+        .configuration_environment
         .iter()
         .flat_map(|source| source.environment_names.iter().cloned())
         .collect::<Vec<_>>();
@@ -220,5 +301,49 @@ credential_environment = [
                 environment_names: vec!["DUFFEL_TEST_KEY".to_string()],
             }]
         );
+    }
+
+    #[test]
+    fn configuration_environment_is_allowlisted_and_value_safe() {
+        const NAME: &str = "HARN_TEST_OAUTH_CLIENT_ID_6615";
+        let _environment = crate::env_guard::ScopedEnvVar::set(NAME, "fixture-client-id");
+        let setup: ProviderSetupManifest = toml::from_str(&format!(
+            r#"
+auth_type = "oauth2"
+configuration_environment = [
+  {{ field = "oauth_client_id", environment_names = ["{NAME}"] }},
+]
+"#,
+        ))
+        .expect("setup manifest");
+        assert!(configuration_environment_issues(&setup).is_empty());
+        assert_eq!(
+            process_configuration_environment_value(
+                &setup,
+                ConnectorSetupConfigurationField::OAuthClientId,
+            )
+            .as_deref(),
+            Some("fixture-client-id")
+        );
+        let encoded = serde_json::to_string(&setup.configuration_environment).unwrap();
+        assert!(encoded.contains(NAME));
+        assert!(!encoded.contains("fixture-client-id"));
+    }
+
+    #[test]
+    fn configuration_environment_rejects_ambiguous_or_unsafe_names() {
+        let setup: ProviderSetupManifest = toml::from_str(
+            r#"
+configuration_environment = [
+  { field = "oauth_client_id", environment_names = ["bad-name", "SHARED_ID"] },
+  { field = "oauth_client_id", environment_names = ["SHARED_ID"] },
+]
+"#,
+        )
+        .expect("setup manifest");
+        let issues = configuration_environment_issues(&setup).join("\n");
+        assert!(issues.contains("repeats field"));
+        assert!(issues.contains("'bad-name' is invalid"));
+        assert!(issues.contains("assigned to several configuration fields"));
     }
 }

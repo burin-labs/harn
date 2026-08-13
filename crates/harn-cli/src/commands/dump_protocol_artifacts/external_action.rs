@@ -33,20 +33,61 @@ impl ExternalActionVocabulary {
             format!("failed to parse {EXTERNAL_ACTION_VOCABULARY_SOURCE}: {error}")
         })?;
         Ok(Self {
-            outcomes: literal_union(&program, "ExternalActionOutcome")?,
-            receipt_statuses: literal_union(&program, "ExternalActionReceiptStatus")?,
-            next_actions: literal_union(&program, "ExternalActionNextAction")?,
-            protected_field_classes: literal_union(&program, "ExternalActionProtectedFieldClass")?,
-            passenger_genders: literal_union(&program, "ExternalActionPassengerGender")?,
-            activity_statuses: literal_union(&program, "ExternalActionActivityStatus")?,
-            policy_layers: literal_union(&program, "ExternalActionPolicyLayer")?,
+            outcomes: literal_union(
+                &program,
+                "ExternalActionOutcome",
+                EXTERNAL_ACTION_VOCABULARY_SOURCE,
+            )?,
+            receipt_statuses: literal_union(
+                &program,
+                "ExternalActionReceiptStatus",
+                EXTERNAL_ACTION_VOCABULARY_SOURCE,
+            )?,
+            next_actions: literal_union(
+                &program,
+                "ExternalActionNextAction",
+                EXTERNAL_ACTION_VOCABULARY_SOURCE,
+            )?,
+            protected_field_classes: literal_union(
+                &program,
+                "ExternalActionProtectedFieldClass",
+                EXTERNAL_ACTION_VOCABULARY_SOURCE,
+            )?,
+            passenger_genders: literal_union(
+                &program,
+                "ExternalActionPassengerGender",
+                EXTERNAL_ACTION_VOCABULARY_SOURCE,
+            )?,
+            activity_statuses: literal_union(
+                &program,
+                "ExternalActionActivityStatus",
+                EXTERNAL_ACTION_VOCABULARY_SOURCE,
+            )?,
+            policy_layers: literal_union(
+                &program,
+                "ExternalActionPolicyLayer",
+                EXTERNAL_ACTION_VOCABULARY_SOURCE,
+            )?,
             policy_evaluation_outcomes: literal_union(
                 &program,
                 "ExternalActionPolicyEvaluationOutcome",
+                EXTERNAL_ACTION_VOCABULARY_SOURCE,
             )?,
-            decision_outcomes: literal_union(&program, "ExternalActionDecisionOutcome")?,
-            deciders: literal_union(&program, "ExternalActionDecider")?,
-            reconciliation_statuses: literal_union(&program, "ExternalActionReconciliationStatus")?,
+            decision_outcomes: literal_union(
+                &program,
+                "ExternalActionDecisionOutcome",
+                EXTERNAL_ACTION_VOCABULARY_SOURCE,
+            )?,
+            deciders: literal_union(
+                &program,
+                "ExternalActionDecider",
+                EXTERNAL_ACTION_VOCABULARY_SOURCE,
+            )?,
+            reconciliation_statuses: literal_union(
+                &program,
+                "ExternalActionReconciliationStatus",
+                EXTERNAL_ACTION_VOCABULARY_SOURCE,
+            )?,
         })
     }
 
@@ -59,7 +100,11 @@ impl ExternalActionVocabulary {
     }
 }
 
-fn literal_union(program: &[harn_parser::SNode], type_name: &str) -> Result<Vec<String>, String> {
+pub(super) fn literal_union(
+    program: &[harn_parser::SNode],
+    type_name: &str,
+    source_path: &str,
+) -> Result<Vec<String>, String> {
     let type_expr = program.iter().find_map(|node| match &node.node {
         Node::TypeDecl {
             name, type_expr, ..
@@ -67,9 +112,7 @@ fn literal_union(program: &[harn_parser::SNode], type_name: &str) -> Result<Vec<
         _ => None,
     });
     let Some(type_expr) = type_expr else {
-        return Err(format!(
-            "{EXTERNAL_ACTION_VOCABULARY_SOURCE} must declare `pub type {type_name}`"
-        ));
+        return Err(format!("{source_path} must declare `pub type {type_name}`"));
     };
 
     let values: Vec<String> = match type_expr {

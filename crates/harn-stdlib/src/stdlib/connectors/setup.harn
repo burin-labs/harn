@@ -1,0 +1,46 @@
+/**
+ * std/connectors/setup — host-neutral connected-service setup vocabulary.
+ *
+ * Harn owns these closed lifecycle terms. Native hosts consume generated
+ * protocol projections and render them with product-specific UI. Setup events
+ * carry progress and recovery metadata only; credential values, OAuth codes,
+ * PKCE material, and authorization URLs are outside this contract.
+ */
+pub type ConnectorSetupStage = "resolving" \
+  | "opening_browser" \
+  | "waiting_for_user" \
+  | "exchanging" \
+  | "storing" \
+  | "validating" \
+  | "ready"
+
+pub type ConnectorSetupStatus = "in_progress" | "succeeded" | "failed" | "cancelled" | "timed_out"
+
+pub type ConnectorSetupInteraction = "none" | "browser" | "secret_entry" | "user_code"
+
+/** Non-secret setup values that manifests may resolve from explicit sources. */
+pub type ConnectorSetupConfigurationField = "oauth_client_id"
+
+pub type ConnectorSetupErrorCode = "connector_unavailable" \
+  | "configuration_missing" \
+  | "browser_open_failed" \
+  | "callback_timeout" \
+  | "user_denied" \
+  | "state_mismatch" \
+  | "token_exchange_failed" \
+  | "credential_store_failed" \
+  | "validation_failed" \
+  | "cancelled" \
+  | "unknown"
+
+pub type ConnectorSetupEvent = {
+  schema: "harn.connector_setup.event.v1",
+  sequence: int,
+  connector: string,
+  stage: ConnectorSetupStage,
+  status: ConnectorSetupStatus,
+  interaction: ConnectorSetupInteraction,
+  message: string,
+  error_code?: ConnectorSetupErrorCode,
+  recovery?: string,
+}

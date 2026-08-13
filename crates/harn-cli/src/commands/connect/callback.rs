@@ -13,6 +13,25 @@ pub(super) struct OAuthCallbackResponse {
     pub(super) issuer: Option<String>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) enum OAuthCallbackError {
+    TimedOut,
+    UserDenied,
+    StateMismatch,
+    Invalid(String),
+}
+
+impl std::fmt::Display for OAuthCallbackError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::TimedOut => formatter.write_str("OAuth callback timed out after 5 minutes"),
+            Self::UserDenied => formatter.write_str("OAuth authorization was denied"),
+            Self::StateMismatch => formatter.write_str("OAuth callback state did not match"),
+            Self::Invalid(detail) => formatter.write_str(detail),
+        }
+    }
+}
+
 pub(super) fn bind_loopback_listener(redirect_uri: &str) -> Result<(TcpListener, String), String> {
     let mut parsed =
         Url::parse(redirect_uri).map_err(|error| format!("Invalid redirect URI: {error}"))?;
@@ -47,13 +66,17 @@ pub(super) fn wait_for_oauth_response(
     listener: TcpListener,
     redirect_uri: &str,
     expected_state: &str,
-) -> Result<OAuthCallbackResponse, String> {
-    let query = wait_for_callback_query(listener, redirect_uri, Some(expected_state))?;
+) -> Result<OAuthCallbackResponse, OAuthCallbackError> {
+    let query = wait_for_callback_query_inner(listener, redirect_uri, Some(expected_state), true)?;
     let code = query
         .iter()
         .find(|(key, _)| key == "code")
         .map(|(_, value)| value.clone())
-        .ok_or_else(|| "OAuth callback did not include an authorization code".to_string())?;
+        .ok_or_else(|| {
+            OAuthCallbackError::Invalid(
+                "OAuth callback did not include an authorization code".to_string(),
+            )
+        })?;
     let issuer = query
         .into_iter()
         .find(|(key, _)| key == "iss")
@@ -79,22 +102,32 @@ pub(super) fn wait_for_callback_query(
     redirect_uri: &str,
     expected_state: Option<&str>,
 ) -> Result<Vec<(String, String)>, String> {
-    let parsed_redirect =
-        Url::parse(redirect_uri).map_err(|error| format!("Invalid redirect URI: {error}"))?;
+    wait_for_callback_query_inner(listener, redirect_uri, expected_state, false)
+        .map_err(|error| error.to_string())
+}
+
+fn wait_for_callback_query_inner(
+    listener: TcpListener,
+    redirect_uri: &str,
+    expected_state: Option<&str>,
+    terminal_oauth_errors: bool,
+) -> Result<Vec<(String, String)>, OAuthCallbackError> {
+    let parsed_redirect = Url::parse(redirect_uri)
+        .map_err(|error| OAuthCallbackError::Invalid(format!("Invalid redirect URI: {error}")))?;
     let expected_path = parsed_redirect.path().to_string();
-    let expected_origin = loopback_origin(&parsed_redirect)?;
+    let expected_origin = loopback_origin(&parsed_redirect).map_err(OAuthCallbackError::Invalid)?;
     let deadline = Instant::now() + OAUTH_CALLBACK_TIMEOUT;
 
     loop {
         match listener.accept() {
             Ok((mut stream, _)) => {
                 let mut buffer = [0u8; 8192];
-                let bytes_read = stream
-                    .read(&mut buffer)
-                    .map_err(|error| format!("Failed to read OAuth callback: {error}"))?;
+                let bytes_read = stream.read(&mut buffer).map_err(|error| {
+                    OAuthCallbackError::Invalid(format!("Failed to read OAuth callback: {error}"))
+                })?;
                 let request = String::from_utf8_lossy(&buffer[..bytes_read]);
                 let response;
-                let result = parse_callback_request(
+                let result = parse_callback_request_typed(
                     &request,
                     &expected_path,
                     expected_state,
@@ -110,48 +143,76 @@ pub(super) fn wait_for_callback_query(
                         return Ok(query);
                     }
                     Err(error) => {
-                        response = html_response(400, &error);
+                        response = html_response(400, &error.to_string());
                         let _ = stream.write_all(response.as_bytes());
+                        // A matching `access_denied` response is an authenticated
+                        // terminal user choice. A mismatched state is not: any
+                        // local process could race the real browser callback, so
+                        // RFC 9700 CSRF protection requires us to ignore it and
+                        // keep waiting for the transaction-bound response.
+                        if terminal_oauth_errors && matches!(error, OAuthCallbackError::UserDenied)
+                        {
+                            return Err(error);
+                        }
                         continue;
                     }
                 }
             }
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                 if Instant::now() >= deadline {
-                    return Err("OAuth callback timed out after 5 minutes".to_string());
+                    return Err(OAuthCallbackError::TimedOut);
                 }
                 std::thread::sleep(CALLBACK_ACCEPT_POLL_INTERVAL);
             }
-            Err(error) => return Err(format!("Failed to accept OAuth callback: {error}")),
+            Err(error) => {
+                return Err(OAuthCallbackError::Invalid(format!(
+                    "Failed to accept OAuth callback: {error}"
+                )))
+            }
         }
     }
 }
 
+#[cfg(test)]
 pub(super) fn parse_callback_request(
     request: &str,
     expected_path: &str,
     expected_state: Option<&str>,
     expected_origin: &str,
 ) -> Result<Vec<(String, String)>, String> {
+    parse_callback_request_typed(request, expected_path, expected_state, expected_origin)
+        .map_err(|error| error.to_string())
+}
+
+fn parse_callback_request_typed(
+    request: &str,
+    expected_path: &str,
+    expected_state: Option<&str>,
+    expected_origin: &str,
+) -> Result<Vec<(String, String)>, OAuthCallbackError> {
     let mut lines = request.lines();
-    let request_line = lines
-        .next()
-        .ok_or_else(|| "OAuth callback request was empty".to_string())?;
+    let request_line = lines.next().ok_or_else(|| {
+        OAuthCallbackError::Invalid("OAuth callback request was empty".to_string())
+    })?;
     let mut request_parts = request_line.split_whitespace();
-    let method = request_parts
-        .next()
-        .ok_or_else(|| "OAuth callback request line was invalid".to_string())?;
+    let method = request_parts.next().ok_or_else(|| {
+        OAuthCallbackError::Invalid("OAuth callback request line was invalid".to_string())
+    })?;
     if method != "GET" {
-        return Err("OAuth callback request must use GET".to_string());
+        return Err(OAuthCallbackError::Invalid(
+            "OAuth callback request must use GET".to_string(),
+        ));
     }
-    let path_and_query = request_parts
-        .next()
-        .ok_or_else(|| "OAuth callback request line was invalid".to_string())?;
-    let version = request_parts
-        .next()
-        .ok_or_else(|| "OAuth callback request line was invalid".to_string())?;
+    let path_and_query = request_parts.next().ok_or_else(|| {
+        OAuthCallbackError::Invalid("OAuth callback request line was invalid".to_string())
+    })?;
+    let version = request_parts.next().ok_or_else(|| {
+        OAuthCallbackError::Invalid("OAuth callback request line was invalid".to_string())
+    })?;
     if !version.starts_with("HTTP/") || request_parts.next().is_some() {
-        return Err("OAuth callback request line was invalid".to_string());
+        return Err(OAuthCallbackError::Invalid(
+            "OAuth callback request line was invalid".to_string(),
+        ));
     }
     let origin = lines.find_map(|line| {
         let (name, value) = line.split_once(':')?;
@@ -160,14 +221,20 @@ pub(super) fn parse_callback_request(
     });
     if let Some(origin) = origin {
         if origin != expected_origin && origin != "null" {
-            return Err("OAuth callback Origin header did not match the redirect URI".to_string());
+            return Err(OAuthCallbackError::Invalid(
+                "OAuth callback Origin header did not match the redirect URI".to_string(),
+            ));
         }
     }
 
-    let callback_url = Url::parse(&format!("{expected_origin}{path_and_query}"))
-        .map_err(|error| format!("OAuth callback URL was invalid: {error}"))?;
+    let callback_url =
+        Url::parse(&format!("{expected_origin}{path_and_query}")).map_err(|error| {
+            OAuthCallbackError::Invalid(format!("OAuth callback URL was invalid: {error}"))
+        })?;
     if callback_url.path() != expected_path {
-        return Err("Invalid callback path".to_string());
+        return Err(OAuthCallbackError::Invalid(
+            "Invalid callback path".to_string(),
+        ));
     }
 
     let query = callback_url
@@ -180,11 +247,16 @@ pub(super) fn parse_callback_request(
             .find(|(key, _)| key == "state")
             .map(|(_, value)| value.as_str());
         if actual_state != Some(expected_state) {
-            return Err("State mismatch".to_string());
+            return Err(OAuthCallbackError::StateMismatch);
         }
     }
     if let Some((_, error)) = query.iter().find(|(key, _)| key == "error") {
-        return Err(format!("Authorization failed: {error}"));
+        if error == "access_denied" {
+            return Err(OAuthCallbackError::UserDenied);
+        }
+        return Err(OAuthCallbackError::Invalid(
+            "OAuth authorization failed".to_string(),
+        ));
     }
     Ok(query)
 }
@@ -214,4 +286,35 @@ pub(super) fn html_response(status: u16, message: &str) -> String {
     format!(
         "{status_line}\r\nContent-Type: text/html; charset=utf-8\r\nConnection: close\r\n\r\n<!doctype html><html><head><meta charset=\"utf-8\"><title>{title}</title></head><body><h1>{title}</h1><p>{escaped_message}</p></body></html>"
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::TcpStream;
+    use std::thread;
+
+    #[test]
+    fn matching_user_denial_is_terminal_without_waiting_for_timeout() {
+        let (listener, redirect_uri) =
+            bind_loopback_listener("http://127.0.0.1:0/oauth/callback").unwrap();
+        let parsed = Url::parse(&redirect_uri).unwrap();
+        let address = format!("127.0.0.1:{}", parsed.port().unwrap());
+        let waiter_redirect = redirect_uri.clone();
+        let waiter = thread::spawn(move || {
+            wait_for_oauth_response(listener, &waiter_redirect, "expected-state")
+        });
+
+        let mut stream = TcpStream::connect(address).unwrap();
+        stream
+            .write_all(
+                b"GET /oauth/callback?error=access_denied&state=expected-state HTTP/1.1\r\n\r\n",
+            )
+            .unwrap();
+
+        assert!(matches!(
+            waiter.join().unwrap(),
+            Err(OAuthCallbackError::UserDenied)
+        ));
+    }
 }

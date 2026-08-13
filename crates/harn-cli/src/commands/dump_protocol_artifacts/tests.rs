@@ -19,6 +19,7 @@ use harn_vm::session_timeline::{
     SESSION_TIMELINE_UNSUBSCRIBE_METHOD,
 };
 
+use super::connector_setup::ConnectorSetupVocabulary;
 use super::constants::*;
 use super::external_action::ExternalActionVocabulary;
 use super::go::*;
@@ -169,9 +170,10 @@ fn generated_types_include_harn_wire_vocabularies() {
 #[test]
 fn external_action_vocabulary_projects_to_every_supported_host() {
     let vocabulary = ExternalActionVocabulary::load(&protocol_source()).unwrap();
-    let ts = generate_typescript_for_version("1.0.0", &vocabulary);
-    let swift = generate_swift_for_version("1.0.0", &vocabulary);
-    let rust = generate_rust_for_version("1.0.0", &vocabulary);
+    let setup = ConnectorSetupVocabulary::load(&protocol_source()).unwrap();
+    let ts = generate_typescript_for_version("1.0.0", &vocabulary, &setup);
+    let swift = generate_swift_for_version("1.0.0", &vocabulary, &setup);
+    let rust = generate_rust_for_version("1.0.0", &vocabulary, &setup);
 
     assert!(ts.contains("export type HarnExternalActionOutcome"));
     assert!(ts.contains("export type HarnExternalActionReceiptStatus"));
@@ -227,10 +229,11 @@ fn adding_external_action_values_updates_all_host_projections() {
         deciders: vec!["person".into(), "future_decider".into()],
         reconciliation_statuses: vec!["not_needed".into(), "future_reconciliation".into()],
     };
+    let setup = ConnectorSetupVocabulary::load(&protocol_source()).unwrap();
     for generated in [
-        generate_typescript_for_version("1.0.0", &vocabulary),
-        generate_swift_for_version("1.0.0", &vocabulary),
-        generate_rust_for_version("1.0.0", &vocabulary),
+        generate_typescript_for_version("1.0.0", &vocabulary, &setup),
+        generate_swift_for_version("1.0.0", &vocabulary, &setup),
+        generate_rust_for_version("1.0.0", &vocabulary, &setup),
     ] {
         for future_value in [
             "future_outcome",
@@ -248,6 +251,65 @@ fn adding_external_action_values_updates_all_host_projections() {
             assert!(generated.contains(future_value));
         }
     }
+}
+
+#[test]
+fn connector_setup_vocabulary_projects_to_every_supported_host() {
+    let actions = ExternalActionVocabulary::load(&protocol_source()).unwrap();
+    let setup = ConnectorSetupVocabulary::load(&protocol_source()).unwrap();
+    assert_eq!(
+        setup.stages,
+        crate::commands::connect::setup_events::CONNECTOR_SETUP_STAGES
+    );
+    assert_eq!(
+        setup.statuses,
+        crate::commands::connect::setup_events::CONNECTOR_SETUP_STATUSES
+    );
+    assert_eq!(
+        setup.interactions,
+        crate::commands::connect::setup_events::CONNECTOR_SETUP_INTERACTIONS
+    );
+    assert_eq!(
+        setup.configuration_fields,
+        crate::package::ConnectorSetupConfigurationField::WIRE_VALUES
+    );
+    assert_eq!(
+        setup.error_codes,
+        crate::commands::connect::setup_events::CONNECTOR_SETUP_ERROR_CODES
+    );
+    let generated = [
+        (
+            "TypeScript",
+            generate_typescript_for_version("1.0.0", &actions, &setup),
+        ),
+        (
+            "Swift",
+            generate_swift_for_version("1.0.0", &actions, &setup),
+        ),
+        ("Rust", generate_rust_for_version("1.0.0", &actions, &setup)),
+    ];
+
+    for value in setup
+        .stages
+        .iter()
+        .chain(&setup.statuses)
+        .chain(&setup.interactions)
+        .chain(&setup.configuration_fields)
+        .chain(&setup.error_codes)
+    {
+        for (host, artifact) in &generated {
+            assert!(
+                artifact.contains(value),
+                "{host} projection omitted connector-setup value `{value}`"
+            );
+        }
+    }
+    assert!(generated[0].1.contains("HarnConnectorSetupStage"));
+    assert!(generated[0].1.contains("interface HarnConnectorSetupEvent"));
+    assert!(generated[1].1.contains("HarnConnectorSetupStatus"));
+    assert!(generated[1].1.contains("struct HarnConnectorSetupEvent"));
+    assert!(generated[2].1.contains("HarnConnectorSetupErrorCode"));
+    assert!(generated[2].1.contains("struct HarnConnectorSetupEvent"));
 }
 
 #[test]

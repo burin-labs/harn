@@ -51,8 +51,21 @@ command has no structured payload to attach.
 
 A small number of commands emit **NDJSON** (one envelope-shaped event
 per line) rather than a single document. Today this set is `harn run
---json` and `harn dev --watch --json`. Each line still carries
+--json`, `harn dev --watch --json`, and `harn connect <provider> --json`.
+Each line still carries
 `schemaVersion`; consumers can `jq -c` over the stream.
+
+Connector setup events use `data.schema = "harn.connector_setup.event.v1"`
+and a monotonic `data.sequence`. They report setup stage, terminal status,
+required host interaction, plain recovery copy, and a closed error code. They
+never include credential values, OAuth codes, PKCE material, callback payloads,
+or authorization URLs. Hosts should render the event stream directly and keep
+browser interaction outside model context and transcripts.
+
+`harn connect setup-plan --json` may list allowlisted environment variable
+names for non-secret setup fields such as an OAuth client id. It never includes
+the resolved values. The setup adapter consumes those values without putting
+them in command arguments or connector status output.
 
 `harn run --emit-summary-json`, `--emit-phase-json`, and
 `--emit-rusage-json` are intentionally separate from this envelope
@@ -108,6 +121,7 @@ versions.
 | `harn models lora train --json` | LoRA trainer receipt with backend argv/status, `backend.argv_required` when argv is omitted, input hashes, route/tool-catalog metadata, `dataset_audit`, and post-training commands |
 | `harn models lora preflight --json` | Corpus readiness report before LoRA training, including typed behavior-strata policy/status/counts, missing classes, and unclassified record ids |
 | `harn connect status --json` / `setup-plan --json` | Connector readiness reports        |
+| `harn connect <provider> --json` | Secret-free connector setup progress and terminal NDJSON events |
 | `harn skill list --json` / `get --json` | Canonical Harn skill corpus frontmatter        |
 | `harn version --json`          | CLI build metadata (`name`, `version`, `description`, optional `source_revision`)    |
 | `harn upgrade --json`          | Self-update probe (`--check`) or install summary         |

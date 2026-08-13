@@ -5,6 +5,7 @@ use std::process::Command as ProcessCommand;
 use serde_json::Value as JsonValue;
 
 use crate::cli::{ConnectSetupPlanArgs, ConnectStatusArgs};
+use crate::json_envelope::{self, JsonEnvelope};
 use crate::package::{self, ConnectorRecoveryCopy};
 use harn_vm::secrets::SecretProvider;
 
@@ -17,13 +18,18 @@ use super::{
     ConnectorStatus,
 };
 
+pub(crate) const CONNECT_STATUS_SCHEMA_VERSION: u32 = 1;
+pub(crate) const CONNECT_SETUP_PLAN_SCHEMA_VERSION: u32 = 1;
+
 pub(super) async fn run_connect_status(args: &ConnectStatusArgs) -> Result<(), String> {
     let report = connect_status_report(args).await?;
     if args.json {
         println!(
             "{}",
-            serde_json::to_string_pretty(&report)
-                .map_err(|error| format!("failed to encode JSON output: {error}"))?
+            json_envelope::to_string_pretty(&JsonEnvelope::ok(
+                CONNECT_STATUS_SCHEMA_VERSION,
+                &report,
+            ))
         );
     } else if report.connectors.is_empty() {
         println!("No connector providers declared in the nearest harn.toml.");
@@ -44,8 +50,10 @@ pub(super) fn run_connect_setup_plan(args: &ConnectSetupPlanArgs) -> Result<(), 
     if args.json {
         println!(
             "{}",
-            serde_json::to_string_pretty(&plan)
-                .map_err(|error| format!("failed to encode JSON output: {error}"))?
+            json_envelope::to_string_pretty(&JsonEnvelope::ok(
+                CONNECT_SETUP_PLAN_SCHEMA_VERSION,
+                &plan,
+            ))
         );
     } else {
         println!("Connector: {}", plan.connector);
@@ -146,6 +154,7 @@ pub(super) async fn connector_status(
     let required_scopes = setup.required_scopes.clone();
     let required_secrets = setup.required_secrets.clone();
     let credential_environment = setup.credential_environment.clone();
+    let configuration_environment = setup.configuration_environment.clone();
     let entry = index
         .providers
         .iter()
@@ -332,6 +341,7 @@ pub(super) async fn connector_status(
         required_secrets,
         missing_secrets,
         credential_environment,
+        configuration_environment,
         secret_id,
         secret_ids,
         expires_at_unix,
@@ -355,6 +365,7 @@ pub(super) fn missing_install_status(connector_id: &str) -> ConnectorStatus {
         required_secrets: Vec::new(),
         missing_secrets: Vec::new(),
         credential_environment: Vec::new(),
+        configuration_environment: Vec::new(),
         secret_id: None,
         secret_ids: Vec::new(),
         expires_at_unix: None,
@@ -404,6 +415,8 @@ pub(super) fn connect_setup_plan_at(
             required_scopes: Vec::new(),
             required_secrets: Vec::new(),
             credential_environment: Vec::new(),
+            configuration_environment: Vec::new(),
+            launch_command: Vec::new(),
             setup_command: Vec::new(),
             validation_command: vec![
                 "harn".to_string(),
@@ -453,6 +466,7 @@ pub(super) fn connect_setup_plan_at(
         body: String::new(),
     });
 
+    let launch_command = connector_setup_launch_command(connector_id, setup.auth_type.as_deref());
     Ok(ConnectSetupPlan {
         schema_version: 1,
         connector: connector_id.to_string(),
@@ -464,12 +478,29 @@ pub(super) fn connect_setup_plan_at(
         required_scopes: setup.required_scopes,
         required_secrets: setup.required_secrets,
         credential_environment: setup.credential_environment,
+        configuration_environment: setup.configuration_environment,
+        launch_command,
         setup_command: setup.setup_command,
         validation_command: setup.validation_command,
         health_checks: setup.health_checks,
         recovery: setup.recovery,
         steps,
     })
+}
+
+pub(super) fn connector_setup_launch_command(
+    connector_id: &str,
+    auth_type: Option<&str>,
+) -> Vec<String> {
+    if auth_type != Some("oauth2") {
+        return Vec::new();
+    }
+    vec![
+        "harn".to_string(),
+        "connect".to_string(),
+        connector_id.to_string(),
+        "--json".to_string(),
+    ]
 }
 
 pub(super) fn missing_required_scopes(required: &[String], actual: Option<&str>) -> Vec<String> {

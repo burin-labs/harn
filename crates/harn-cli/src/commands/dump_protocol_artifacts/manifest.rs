@@ -12,6 +12,7 @@ use harn_vm::llm::receipts::{
 use serde_json::json;
 use std::path::Path;
 
+use super::connector_setup::{ConnectorSetupVocabulary, CONNECTOR_SETUP_VOCABULARY_SOURCE};
 use super::constants::*;
 use super::external_action::{ExternalActionVocabulary, EXTERNAL_ACTION_VOCABULARY_SOURCE};
 use super::support::*;
@@ -40,13 +41,20 @@ pub(crate) fn manifest_json_from(anchor: &Path) -> Result<String, String> {
 
 pub(super) fn generate_manifest(source: &ProtocolArtifactSource) -> Result<String, String> {
     let external_actions = ExternalActionVocabulary::load(source)?;
-    generate_manifest_for_version(source, env!("CARGO_PKG_VERSION"), &external_actions)
+    let connector_setup = ConnectorSetupVocabulary::load(source)?;
+    generate_manifest_for_version(
+        source,
+        env!("CARGO_PKG_VERSION"),
+        &external_actions,
+        &connector_setup,
+    )
 }
 
 pub(super) fn generate_manifest_for_version(
     source: &ProtocolArtifactSource,
     artifact_version: &str,
     external_actions: &ExternalActionVocabulary,
+    connector_setup: &ConnectorSetupVocabulary,
 ) -> Result<String, String> {
     let mut schemas = SCHEMA_COPIES
         .iter()
@@ -191,6 +199,14 @@ pub(super) fn generate_manifest_for_version(
             "decisionOutcomes": external_actions.decision_outcomes,
             "deciders": external_actions.deciders,
             "reconciliationStatuses": external_actions.reconciliation_statuses,
+        },
+        "connectorSetup": {
+            "source": CONNECTOR_SETUP_VOCABULARY_SOURCE,
+            "stages": connector_setup.stages,
+            "statuses": connector_setup.statuses,
+            "interactions": connector_setup.interactions,
+            "configurationFields": connector_setup.configuration_fields,
+            "errorCodes": connector_setup.error_codes,
         },
         "plans": {
             "documentSchemaVersion": harn_vm::llm::plan::PLAN_DOCUMENT_SCHEMA_VERSION,

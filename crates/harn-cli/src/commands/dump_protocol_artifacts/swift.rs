@@ -7,6 +7,7 @@ use harn_serve::adapters::acp::{
 use harn_serve::MCP_PROTOCOL_VERSION;
 use harn_vm::llm::receipts::{TOOL_CALL_RECEIPT_EXECUTORS, TOOL_CALL_RECEIPT_STATUSES};
 
+use super::connector_setup::ConnectorSetupVocabulary;
 use super::constants::*;
 use super::external_action::ExternalActionVocabulary;
 use super::support::*;
@@ -23,12 +24,14 @@ pub(super) fn generate_swift() -> String {
     generate_swift_for_version(
         env!("CARGO_PKG_VERSION"),
         &ExternalActionVocabulary::load_for_tests(),
+        &ConnectorSetupVocabulary::load_for_tests(),
     )
 }
 
 pub(super) fn generate_swift_for_version(
     artifact_version: &str,
     external_actions: &ExternalActionVocabulary,
+    connector_setup: &ConnectorSetupVocabulary,
 ) -> String {
     let mut out = generated_header("harn dump-protocol-artifacts", "swift");
     out.push_str("import Foundation\n\n");
@@ -175,6 +178,43 @@ pub(super) fn generate_swift_for_version(
         "HarnExternalActionReconciliationStatus",
         &external_actions.reconciliation_statuses,
     ));
+    out.push_str(&swift_enum(
+        "HarnConnectorSetupStage",
+        &connector_setup.stages,
+    ));
+    out.push_str(&swift_enum(
+        "HarnConnectorSetupStatus",
+        &connector_setup.statuses,
+    ));
+    out.push_str(&swift_enum(
+        "HarnConnectorSetupInteraction",
+        &connector_setup.interactions,
+    ));
+    out.push_str(&swift_enum(
+        "HarnConnectorSetupConfigurationField",
+        &connector_setup.configuration_fields,
+    ));
+    out.push_str(&swift_enum(
+        "HarnConnectorSetupErrorCode",
+        &connector_setup.error_codes,
+    ));
+    out.push_str(
+        "public struct HarnConnectorSetupEvent: Codable, Sendable, Equatable {\n\
+         \x20   public let schema: String\n\
+         \x20   public let sequence: Int\n\
+         \x20   public let connector: String\n\
+         \x20   public let stage: HarnConnectorSetupStage\n\
+         \x20   public let status: HarnConnectorSetupStatus\n\
+         \x20   public let interaction: HarnConnectorSetupInteraction\n\
+         \x20   public let message: String\n\
+         \x20   public let errorCode: HarnConnectorSetupErrorCode?\n\
+         \x20   public let recovery: String?\n\n\
+         \x20   enum CodingKeys: String, CodingKey {\n\
+         \x20       case schema, sequence, connector, stage, status, interaction, message, recovery\n\
+         \x20       case errorCode = \"error_code\"\n\
+         \x20   }\n\
+         }\n\n",
+    );
 
     out.push_str(&swift_enum_with_deprecations(
         "HarnACPAgentMethod",

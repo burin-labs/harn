@@ -539,6 +539,47 @@
     }
   },
   "checkCommand": "make check-protocol-artifacts",
+  "connectorSetup": {
+    "configurationFields": [
+      "oauth_client_id"
+    ],
+    "errorCodes": [
+      "connector_unavailable",
+      "configuration_missing",
+      "browser_open_failed",
+      "callback_timeout",
+      "user_denied",
+      "state_mismatch",
+      "token_exchange_failed",
+      "credential_store_failed",
+      "validation_failed",
+      "cancelled",
+      "unknown"
+    ],
+    "interactions": [
+      "none",
+      "browser",
+      "secret_entry",
+      "user_code"
+    ],
+    "source": "crates/harn-stdlib/src/stdlib/connectors/setup.harn",
+    "stages": [
+      "resolving",
+      "opening_browser",
+      "waiting_for_user",
+      "exchanging",
+      "storing",
+      "validating",
+      "ready"
+    ],
+    "statuses": [
+      "in_progress",
+      "succeeded",
+      "failed",
+      "cancelled",
+      "timed_out"
+    ]
+  },
   "externalActions": {
     "activityStatuses": [
       "proposed",

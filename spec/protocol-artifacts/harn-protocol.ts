@@ -436,6 +436,66 @@ export const EXTERNAL_ACTION_RECONCILIATION_STATUSES = [
 ] as const
 export type HarnExternalActionReconciliationStatus = (typeof EXTERNAL_ACTION_RECONCILIATION_STATUSES)[number]
 
+export const CONNECTOR_SETUP_STAGES = [
+  "resolving",
+  "opening_browser",
+  "waiting_for_user",
+  "exchanging",
+  "storing",
+  "validating",
+  "ready",
+] as const
+export type HarnConnectorSetupStage = (typeof CONNECTOR_SETUP_STAGES)[number]
+
+export const CONNECTOR_SETUP_STATUSES = [
+  "in_progress",
+  "succeeded",
+  "failed",
+  "cancelled",
+  "timed_out",
+] as const
+export type HarnConnectorSetupStatus = (typeof CONNECTOR_SETUP_STATUSES)[number]
+
+export const CONNECTOR_SETUP_INTERACTIONS = [
+  "none",
+  "browser",
+  "secret_entry",
+  "user_code",
+] as const
+export type HarnConnectorSetupInteraction = (typeof CONNECTOR_SETUP_INTERACTIONS)[number]
+
+export const CONNECTOR_SETUP_CONFIGURATION_FIELDS = [
+  "oauth_client_id",
+] as const
+export type HarnConnectorSetupConfigurationField = (typeof CONNECTOR_SETUP_CONFIGURATION_FIELDS)[number]
+
+export const CONNECTOR_SETUP_ERROR_CODES = [
+  "connector_unavailable",
+  "configuration_missing",
+  "browser_open_failed",
+  "callback_timeout",
+  "user_denied",
+  "state_mismatch",
+  "token_exchange_failed",
+  "credential_store_failed",
+  "validation_failed",
+  "cancelled",
+  "unknown",
+] as const
+export type HarnConnectorSetupErrorCode = (typeof CONNECTOR_SETUP_ERROR_CODES)[number]
+
+export interface HarnConnectorSetupEvent {
+  schema: "harn.connector_setup.event.v1"
+  sequence: number
+  connector: string
+  stage: HarnConnectorSetupStage
+  status: HarnConnectorSetupStatus
+  interaction: HarnConnectorSetupInteraction
+  message: string
+  error_code?: HarnConnectorSetupErrorCode
+  recovery?: string
+}
+
 export const A2A_TASK_STATES = [
   "submitted",
   "working",

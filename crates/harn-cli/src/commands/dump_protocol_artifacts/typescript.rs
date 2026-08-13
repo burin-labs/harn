@@ -6,6 +6,7 @@ use harn_serve::adapters::acp::{
 use harn_serve::MCP_PROTOCOL_VERSION;
 use harn_vm::llm::receipts::{TOOL_CALL_RECEIPT_EXECUTORS, TOOL_CALL_RECEIPT_STATUSES};
 
+use super::connector_setup::ConnectorSetupVocabulary;
 use super::constants::*;
 use super::external_action::ExternalActionVocabulary;
 use super::support::*;
@@ -17,12 +18,14 @@ pub(super) fn generate_typescript() -> String {
     generate_typescript_for_version(
         env!("CARGO_PKG_VERSION"),
         &ExternalActionVocabulary::load_for_tests(),
+        &ConnectorSetupVocabulary::load_for_tests(),
     )
 }
 
 pub(super) fn generate_typescript_for_version(
     artifact_version: &str,
     external_actions: &ExternalActionVocabulary,
+    connector_setup: &ConnectorSetupVocabulary,
 ) -> String {
     let mut out = generated_header("harn dump-protocol-artifacts", "typescript");
     out.push_str("export const HARN_PROTOCOL_ARTIFACT_VERSION = ");
@@ -221,6 +224,44 @@ pub(super) fn generate_typescript_for_version(
         &external_actions.reconciliation_statuses,
         "HarnExternalActionReconciliationStatus",
     ));
+    out.push_str(&ts_array_owned(
+        "CONNECTOR_SETUP_STAGES",
+        &connector_setup.stages,
+        "HarnConnectorSetupStage",
+    ));
+    out.push_str(&ts_array_owned(
+        "CONNECTOR_SETUP_STATUSES",
+        &connector_setup.statuses,
+        "HarnConnectorSetupStatus",
+    ));
+    out.push_str(&ts_array_owned(
+        "CONNECTOR_SETUP_INTERACTIONS",
+        &connector_setup.interactions,
+        "HarnConnectorSetupInteraction",
+    ));
+    out.push_str(&ts_array_owned(
+        "CONNECTOR_SETUP_CONFIGURATION_FIELDS",
+        &connector_setup.configuration_fields,
+        "HarnConnectorSetupConfigurationField",
+    ));
+    out.push_str(&ts_array_owned(
+        "CONNECTOR_SETUP_ERROR_CODES",
+        &connector_setup.error_codes,
+        "HarnConnectorSetupErrorCode",
+    ));
+    out.push_str(
+        "export interface HarnConnectorSetupEvent {\n\
+         \x20 schema: \"harn.connector_setup.event.v1\"\n\
+         \x20 sequence: number\n\
+         \x20 connector: string\n\
+         \x20 stage: HarnConnectorSetupStage\n\
+         \x20 status: HarnConnectorSetupStatus\n\
+         \x20 interaction: HarnConnectorSetupInteraction\n\
+         \x20 message: string\n\
+         \x20 error_code?: HarnConnectorSetupErrorCode\n\
+         \x20 recovery?: string\n\
+         }\n\n",
+    );
     out.push_str(&ts_array(
         "A2A_TASK_STATES",
         A2A_TASK_STATES,

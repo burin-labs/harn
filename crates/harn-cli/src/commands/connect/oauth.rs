@@ -11,9 +11,13 @@ use url::Url;
 
 use crate::cli::{ConnectApiKeyArgs, ConnectGenericArgs, ConnectLinearArgs, ConnectOAuthArgs};
 use crate::net;
-use crate::package::{self, ProviderOAuthManifest};
+use crate::package::{self, ConnectorSetupConfigurationField, ProviderOAuthManifest};
 
-use super::callback::{bind_loopback_listener, wait_for_oauth_response};
+use super::callback::{bind_loopback_listener, wait_for_oauth_response, OAuthCallbackError};
+use super::setup_events::{
+    ConnectorSetupErrorCode, ConnectorSetupFailure, ConnectorSetupInteraction,
+    ConnectorSetupReporter, ConnectorSetupStage,
+};
 use super::store::{
     connector_token_summary, current_unix_timestamp, format_expiry, load_connector_token,
     run_connect_api_key, save_connector_token,
@@ -113,8 +117,13 @@ pub(super) async fn run_connect_registered_provider(
     let registered = registered_provider(provider)?;
     if let Some(metadata) = registered.as_ref().and_then(|entry| entry.oauth.as_ref()) {
         reject_manual_secret_options(provider, from_env.as_deref(), value_file.as_deref())?;
+        let metadata = oauth_metadata_with_setup_environment(
+            metadata,
+            registered.as_ref().and_then(|entry| entry.setup.as_ref()),
+            args.client_id.as_deref(),
+        );
         return run_oauth_connect(oauth_request_from_provider_metadata(
-            provider, args, metadata,
+            provider, args, &metadata,
         )?)
         .await;
     }
@@ -141,6 +150,23 @@ pub(super) async fn run_connect_registered_provider(
     Err(format!(
         "provider '{provider}' has no supported authentication setup; declare OAuth metadata or providers.setup auth_type = \"api-key\" with exactly one required secret"
     ))
+}
+
+pub(super) fn oauth_metadata_with_setup_environment(
+    metadata: &ProviderOAuthManifest,
+    setup: Option<&package::ProviderSetupManifest>,
+    command_client_id: Option<&str>,
+) -> ProviderOAuthManifest {
+    let mut resolved = metadata.clone();
+    if command_client_id.is_none() && resolved.client_id.is_none() {
+        resolved.client_id = setup.and_then(|setup| {
+            package::process_configuration_environment_value(
+                setup,
+                ConnectorSetupConfigurationField::OAuthClientId,
+            )
+        });
+    }
+    resolved
 }
 
 pub(super) fn api_key_secret_for_provider<'a>(
@@ -300,14 +326,53 @@ pub(super) fn oauth_provider_defaults(provider: &str) -> Option<OAuthProviderDef
 }
 
 pub(super) async fn run_oauth_connect(mut request: OAuthConnectRequest) -> Result<(), String> {
+    let mut reporter = ConnectorSetupReporter::new(&request.provider, request.json);
+    reporter.progress(
+        ConnectorSetupStage::Resolving,
+        ConnectorSetupInteraction::None,
+        "Preparing service sign-in.",
+    );
+    match run_oauth_connect_inner(&mut request, &mut reporter).await {
+        Ok(()) => Ok(()),
+        Err(failure) => {
+            reporter.failed(&failure);
+            if request.json {
+                Err("connector setup failed; inspect the terminal setup event".to_string())
+            } else {
+                Err(failure.to_string())
+            }
+        }
+    }
+}
+
+async fn run_oauth_connect_inner(
+    request: &mut OAuthConnectRequest,
+    reporter: &mut ConnectorSetupReporter,
+) -> Result<(), ConnectorSetupFailure> {
     let discovery = if request.authorization_endpoint.is_none() || request.token_endpoint.is_none()
     {
-        Some(discover_oauth_server(&request.resource).await?)
+        Some(
+            discover_oauth_server(&request.resource)
+                .await
+                .map_err(|error| {
+                    setup_failure(
+                        ConnectorSetupErrorCode::ConfigurationMissing,
+                        ConnectorSetupStage::Resolving,
+                        error,
+                    )
+                })?,
+        )
     } else {
         None
     };
     if let Some(discovery) = discovery.as_ref() {
-        ensure_pkce_support(&discovery.metadata)?;
+        ensure_pkce_support(&discovery.metadata).map_err(|error| {
+            setup_failure(
+                ConnectorSetupErrorCode::ConfigurationMissing,
+                ConnectorSetupStage::Resolving,
+                error,
+            )
+        })?;
         if request.scopes.is_none() && !discovery.scopes.is_empty() {
             request.scopes = Some(discovery.scopes.join(" "));
         }
@@ -321,7 +386,13 @@ pub(super) async fn run_oauth_connect(mut request: OAuthConnectRequest) -> Resul
                 .as_ref()
                 .map(|discovery| discovery.metadata.authorization_endpoint.clone())
         })
-        .ok_or_else(|| "OAuth authorization endpoint is required".to_string())?;
+        .ok_or_else(|| {
+            setup_failure(
+                ConnectorSetupErrorCode::ConfigurationMissing,
+                ConnectorSetupStage::Resolving,
+                "OAuth authorization endpoint is required",
+            )
+        })?;
     let token_endpoint = request
         .token_endpoint
         .clone()
@@ -330,21 +401,41 @@ pub(super) async fn run_oauth_connect(mut request: OAuthConnectRequest) -> Resul
                 .as_ref()
                 .map(|discovery| discovery.metadata.token_endpoint.clone())
         })
-        .ok_or_else(|| "OAuth token endpoint is required".to_string())?;
+        .ok_or_else(|| {
+            setup_failure(
+                ConnectorSetupErrorCode::ConfigurationMissing,
+                ConnectorSetupStage::Resolving,
+                "OAuth token endpoint is required",
+            )
+        })?;
     let registration_endpoint = request.registration_endpoint.clone().or_else(|| {
         discovery
             .as_ref()
             .and_then(|discovery| discovery.metadata.registration_endpoint.clone())
     });
 
-    let (listener, redirect_uri) = bind_loopback_listener(&request.redirect_uri)?;
+    let (listener, redirect_uri) =
+        bind_loopback_listener(&request.redirect_uri).map_err(|error| {
+            setup_failure(
+                ConnectorSetupErrorCode::ConfigurationMissing,
+                ConnectorSetupStage::Resolving,
+                error,
+            )
+        })?;
     request.redirect_uri = redirect_uri.clone();
     let (client_id, client_secret, token_auth_method) = resolve_oauth_client(
         &request,
         discovery.as_ref(),
         registration_endpoint.as_deref(),
     )
-    .await?;
+    .await
+    .map_err(|error| {
+        setup_failure(
+            ConnectorSetupErrorCode::ConfigurationMissing,
+            ConnectorSetupStage::Resolving,
+            error,
+        )
+    })?;
     let (code_verifier, code_challenge) = generate_pkce_pair();
     let state = random_hex(16);
     let auth_url = build_authorization_url(
@@ -355,19 +446,62 @@ pub(super) async fn run_oauth_connect(mut request: OAuthConnectRequest) -> Resul
         &code_challenge,
         &request.resource,
         request.scopes.as_deref(),
-    )?;
+    )
+    .map_err(|error| {
+        setup_failure(
+            ConnectorSetupErrorCode::ConfigurationMissing,
+            ConnectorSetupStage::Resolving,
+            error,
+        )
+    })?;
 
-    println!("Provider: {}", request.provider);
-    println!("Redirect URI: {redirect_uri}");
-    println!("Opening browser for OAuth authorization...");
-    if request.no_open || webbrowser::open(auth_url.as_str()).is_err() {
+    reporter.progress(
+        ConnectorSetupStage::OpeningBrowser,
+        ConnectorSetupInteraction::Browser,
+        "Opening the service sign-in page in your browser.",
+    );
+    if request.no_open {
+        if request.json {
+            return Err(setup_failure(
+                ConnectorSetupErrorCode::BrowserOpenFailed,
+                ConnectorSetupStage::OpeningBrowser,
+                "browser open failed because --no-open was requested",
+            ));
+        }
+        println!("Open this URL manually:\n{auth_url}");
+    } else if webbrowser::open(auth_url.as_str()).is_err() {
+        if request.json {
+            return Err(setup_failure(
+                ConnectorSetupErrorCode::BrowserOpenFailed,
+                ConnectorSetupStage::OpeningBrowser,
+                "browser open failed",
+            ));
+        }
         println!("Open this URL manually:\n{auth_url}");
     }
 
-    let callback = wait_for_oauth_response(listener, &redirect_uri, &state)?;
+    reporter.progress(
+        ConnectorSetupStage::WaitingForUser,
+        ConnectorSetupInteraction::Browser,
+        "Finish sign-in and review the requested permissions in your browser.",
+    );
+    let callback =
+        wait_for_oauth_response(listener, &redirect_uri, &state).map_err(callback_setup_failure)?;
     if let Some(discovery) = discovery.as_ref() {
-        validate_authorization_response_issuer(&discovery.metadata, callback.issuer.as_deref())?;
+        validate_authorization_response_issuer(&discovery.metadata, callback.issuer.as_deref())
+            .map_err(|error| {
+                setup_failure(
+                    ConnectorSetupErrorCode::StateMismatch,
+                    ConnectorSetupStage::WaitingForUser,
+                    error,
+                )
+            })?;
     }
+    reporter.progress(
+        ConnectorSetupStage::Exchanging,
+        ConnectorSetupInteraction::None,
+        "Finishing sign-in with the service.",
+    );
     let token = exchange_authorization_code(
         &token_endpoint,
         AuthorizationCodeExchange {
@@ -381,7 +515,14 @@ pub(super) async fn run_oauth_connect(mut request: OAuthConnectRequest) -> Resul
             code_verifier: &code_verifier,
         },
     )
-    .await?;
+    .await
+    .map_err(|error| {
+        setup_failure(
+            ConnectorSetupErrorCode::TokenExchangeFailed,
+            ConnectorSetupStage::Exchanging,
+            error,
+        )
+    })?;
 
     let stored = StoredConnectorToken {
         provider: request.provider.clone(),
@@ -400,20 +541,43 @@ pub(super) async fn run_oauth_connect(mut request: OAuthConnectRequest) -> Resul
         connected_at_unix: current_unix_timestamp(),
         last_used_at_unix: None,
     };
-    save_connector_token(&stored).await?;
+    reporter.progress(
+        ConnectorSetupStage::Storing,
+        ConnectorSetupInteraction::None,
+        "Saving the connected account in the operating system credential store.",
+    );
+    save_connector_token(&stored).await.map_err(|error| {
+        setup_failure(
+            ConnectorSetupErrorCode::CredentialStoreFailed,
+            ConnectorSetupStage::Storing,
+            format!("credential store failed: {error}"),
+        )
+    })?;
 
-    if request.json {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&connector_token_summary(&stored))
-                .map_err(|error| format!("failed to encode JSON output: {error}"))?
-        );
-    } else {
-        println!(
-            "OAuth token stored for {} as {}.",
-            stored.provider,
-            harn_vm::secrets::connector_access_token_id(&stored.provider)
-        );
+    reporter.progress(
+        ConnectorSetupStage::Validating,
+        ConnectorSetupInteraction::None,
+        "Checking the saved connection.",
+    );
+    let validated = load_connector_token(&stored.provider)
+        .await
+        .map_err(|error| {
+            setup_failure(
+                ConnectorSetupErrorCode::ValidationFailed,
+                ConnectorSetupStage::Validating,
+                format!("validation failed after saving credentials: {error}"),
+            )
+        })?;
+    if validated.provider != stored.provider || validated.access_token.is_empty() {
+        return Err(setup_failure(
+            ConnectorSetupErrorCode::ValidationFailed,
+            ConnectorSetupStage::Validating,
+            "validation failed after saving connector credentials",
+        ));
+    }
+
+    reporter.succeeded("The service is connected.");
+    if !request.json {
         println!(
             "Expires: {}",
             stored
@@ -424,6 +588,38 @@ pub(super) async fn run_oauth_connect(mut request: OAuthConnectRequest) -> Resul
     }
 
     Ok(())
+}
+
+fn setup_failure(
+    code: ConnectorSetupErrorCode,
+    stage: ConnectorSetupStage,
+    detail: impl Into<String>,
+) -> ConnectorSetupFailure {
+    ConnectorSetupFailure::failed(code, stage, detail)
+}
+
+fn callback_setup_failure(error: OAuthCallbackError) -> ConnectorSetupFailure {
+    let detail = error.to_string();
+    match error {
+        OAuthCallbackError::TimedOut => {
+            ConnectorSetupFailure::timed_out(ConnectorSetupStage::WaitingForUser, detail)
+        }
+        OAuthCallbackError::UserDenied => setup_failure(
+            ConnectorSetupErrorCode::UserDenied,
+            ConnectorSetupStage::WaitingForUser,
+            detail,
+        ),
+        OAuthCallbackError::StateMismatch => setup_failure(
+            ConnectorSetupErrorCode::StateMismatch,
+            ConnectorSetupStage::WaitingForUser,
+            detail,
+        ),
+        OAuthCallbackError::Invalid(_) => setup_failure(
+            ConnectorSetupErrorCode::Unknown,
+            ConnectorSetupStage::WaitingForUser,
+            detail,
+        ),
+    }
 }
 
 pub(super) async fn resolve_oauth_client(

@@ -12,10 +12,11 @@ pub use harn_modules::personas::{
 };
 pub use provider_setup::{
     connector_service_issues, ConnectorConditionalProfileRequirement,
-    ConnectorCredentialEnvironmentManifest, ConnectorEnvironment, ConnectorEvidenceRequirement,
-    ConnectorExternalSpend, ConnectorHealthCheckManifest, ConnectorOperationEffect,
-    ConnectorOperationManifest, ConnectorProtectedProfileManifest, ConnectorReconciliation,
-    ConnectorRecoveryCopy, ConnectorRedactionTarget, ConnectorServiceManifest,
+    ConnectorConfigurationEnvironmentManifest, ConnectorCredentialEnvironmentManifest,
+    ConnectorEnvironment, ConnectorEvidenceRequirement, ConnectorExternalSpend,
+    ConnectorHealthCheckManifest, ConnectorOperationEffect, ConnectorOperationManifest,
+    ConnectorProtectedProfileManifest, ConnectorReconciliation, ConnectorRecoveryCopy,
+    ConnectorRedactionTarget, ConnectorServiceManifest, ConnectorSetupConfigurationField,
     ConnectorTestProfile, ProtectedProfileFieldClass, ProviderManifestEntry, ProviderSetupManifest,
     ResolvedProviderConnectorConfig,
 };
