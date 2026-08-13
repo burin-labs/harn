@@ -186,14 +186,15 @@ fn calculate_cost_for_provider_with_cache_applies_cache_read_discount() {
 
     let without_cache =
         calculate_cost_for_provider("anthropic", "claude-sonnet-4-20250514", 1_000, 1_000);
-    let with_cache = calculate_cost_for_provider_with_cache(
+    let with_cache = pricing_aware_call_cost_with_cache(
         "anthropic",
         "claude-sonnet-4-20250514",
         1_000,
         1_000,
         500,
         0,
-    );
+    )
+    .expect("catalog-priced model");
 
     assert!(with_cache > 0.0);
     assert!(
@@ -479,5 +480,17 @@ fn a_long_context_call_bills_at_the_input_token_band() {
     assert!(
         above > unbanded,
         "the banded price must exceed the base-rate price: {above} vs {unbanded}"
+    );
+}
+
+#[test]
+fn mock_provider_has_an_authoritative_zero_cost() {
+    assert_eq!(
+        pricing_aware_call_cost("mock", "any-fixture", 10, 20),
+        Some(0.0)
+    );
+    assert_eq!(
+        pricing_aware_call_cost_with_cache("mock", "any-fixture", 10, 20, 5, 2),
+        Some(0.0)
     );
 }

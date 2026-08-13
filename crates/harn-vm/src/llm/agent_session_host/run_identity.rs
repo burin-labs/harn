@@ -110,6 +110,9 @@ fn canonical_init_result(session_id: &str, run_id: &str, task: &str, result: VmV
     insert_missing(object, "trace", serde_json::Value::Null);
     insert_missing(object, "tokens_used", serde_json::json!(0));
     insert_missing(object, "cost_usd", serde_json::json!(0.0));
+    insert_missing(object, "known_cost_usd", serde_json::json!(0.0));
+    insert_missing(object, "unpriced_calls", serde_json::json!(0));
+    insert_missing(object, "usage_unknown_calls", serde_json::json!(0));
     insert_missing(object, "started_at", serde_json::json!(super::now_id()));
     insert_missing(object, "daemon_state", serde_json::Value::Null);
     insert_missing(object, "daemon_snapshot_path", serde_json::Value::Null);
@@ -126,6 +129,10 @@ fn canonical_init_result(session_id: &str, run_id: &str, task: &str, result: VmV
     insert_missing(llm, "output_tokens", serde_json::json!(0));
     insert_missing(llm, "cache_read_tokens", serde_json::json!(0));
     insert_missing(llm, "cache_write_tokens", serde_json::json!(0));
+    insert_missing(llm, "accounting_status", serde_json::json!("reported"));
+    insert_missing(llm, "known_cost_usd", serde_json::json!(0.0));
+    insert_missing(llm, "unpriced_calls", serde_json::json!(0));
+    insert_missing(llm, "usage_unknown_calls", serde_json::json!(0));
 
     let tools = object_field(object, "tools");
     insert_missing(tools, "calls", serde_json::json!([]));

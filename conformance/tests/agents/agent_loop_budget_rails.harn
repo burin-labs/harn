@@ -99,6 +99,39 @@ fn total_cost_case(harness: Harness) {
   )
 }
 
+fn unknown_cost_case(harness: Harness) {
+  const caller = { _call ->
+    return {
+      ok: true,
+      value: {
+        text: "still working",
+        provider: "unpriced-provider",
+        model: "unpriced-model",
+        usage: {input_tokens: 0, output_tokens: 0, cost_usd: nil, accounting_status: "unknown"},
+      },
+    }
+  }
+  const result = agent_loop(
+    harness,
+    "work",
+    nil,
+    {
+      session_id: "budget-unknown-cost-" + harness.random.uuid(),
+      provider: "mock",
+      llm_caller: caller,
+      loop_until_done: true,
+      done_sentinel: "DONE",
+      max_nudges: 5,
+      iteration_budget: {mode: "fixed", max: 5, total_cost_usd: 1.0},
+    },
+  )
+  harness.stdio.println("unknown_cost_status=" + result.status)
+  harness.stdio.println("unknown_cost_reason=" + result.stop_reason)
+  harness.stdio.println("unknown_cost_is_nil=" + to_string(result.cost_usd == nil))
+  harness.stdio.println("unknown_cost_floor=" + to_string(result.known_cost_usd))
+  harness.stdio.println("unknown_cost_calls=" + to_string(result.unpriced_calls))
+}
+
 fn circuit_case(harness: Harness) {
   harness.testing.clock_set(0)
   const caller = { _call ->
@@ -143,5 +176,6 @@ fn circuit_case(harness: Harness) {
 pipeline default(harness: Harness) {
   wall_clock_case(harness)
   total_cost_case(harness)
+  unknown_cost_case(harness)
   circuit_case(harness)
 }

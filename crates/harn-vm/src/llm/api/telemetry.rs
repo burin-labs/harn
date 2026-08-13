@@ -43,6 +43,10 @@ pub mod source {
     /// [`GEMINI_USAGE`] because the two families spell every counter
     /// differently, so eval joins can tell which endpoint served a call.
     pub const GEMINI_INTERACTIONS_USAGE: &str = "gemini_interactions_usage";
+    /// Harn's deterministic mock/replay transport. No provider request occurs,
+    /// so its authoritative provider spend is exactly zero even when the
+    /// replay preserves the original provider/model identity.
+    pub const MOCK_REPLAY: &str = "mock_replay";
     /// Provider responded but we did not capture anything beyond what
     /// already lives on `LlmResult` (e.g. mock / fake providers, or a
     /// stream that finished without a usage frame).
@@ -137,6 +141,25 @@ impl ProviderTelemetry {
             source: source.to_string(),
             ..Self::default()
         }
+    }
+
+    pub(crate) fn mock_replay(simulated_cost_usd: Option<f64>) -> Self {
+        Self {
+            source: source::MOCK_REPLAY.to_string(),
+            provider_metadata: simulated_cost_usd
+                .map(|cost_usd| serde_json::json!({"harn_simulated_cost_usd": cost_usd})),
+            ..Self::default()
+        }
+    }
+
+    pub(crate) fn mock_replay_cost_usd(&self) -> Option<f64> {
+        (self.source == source::MOCK_REPLAY).then(|| {
+            self.provider_metadata
+                .as_ref()
+                .and_then(|metadata| metadata.get("harn_simulated_cost_usd"))
+                .and_then(serde_json::Value::as_f64)
+                .unwrap_or(0.0)
+        })
     }
 
     /// Returns `true` when no meaningful telemetry was captured. A bare

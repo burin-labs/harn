@@ -750,26 +750,29 @@ pub fn calculate_cost_for_provider(
         / 1000.0
 }
 
-/// Calculate per-call USD cost with provider prompt-cache accounting. Unknown
-/// pricing still returns 0.0, matching [`calculate_cost_for_provider`].
-pub(crate) fn calculate_cost_for_provider_with_cache(
+/// Per-call USD cost with cache accounting, preserving unknown pricing.
+/// Budget arithmetic may explicitly choose a zero lower bound, but evidence
+/// and receipts must use this projection so an unpriced call never masquerades
+/// as free.
+pub(crate) fn pricing_aware_call_cost_with_cache(
     provider: &str,
     model: &str,
     input_tokens: i64,
     output_tokens: i64,
     cache_read_tokens: i64,
     cache_write_tokens: i64,
-) -> f64 {
-    let Some(detail) = pricing_detail_for_usage(provider, model, input_tokens) else {
-        return 0.0;
-    };
-    project_call_cost(
+) -> Option<f64> {
+    if provider.eq_ignore_ascii_case("mock") {
+        return Some(0.0);
+    }
+    let detail = pricing_detail_for_usage(provider, model, input_tokens)?;
+    Some(project_call_cost(
         &detail,
         input_tokens,
         output_tokens,
         cache_read_tokens,
         cache_write_tokens,
-    )
+    ))
 }
 
 /// Per-call USD cost for trace attribution, or `None` when the
@@ -785,6 +788,9 @@ pub fn pricing_aware_call_cost(
     input_tokens: i64,
     output_tokens: i64,
 ) -> Option<f64> {
+    if provider.eq_ignore_ascii_case("mock") {
+        return Some(0.0);
+    }
     let detail = pricing_detail_for_usage(provider, model, input_tokens)?;
     Some(
         (input_tokens as f64 * detail.input_per_1k + output_tokens as f64 * detail.output_per_1k)

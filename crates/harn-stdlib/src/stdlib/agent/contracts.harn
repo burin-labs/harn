@@ -22,6 +22,10 @@ pub type AgentLlmSummary = {
   output_tokens: int,
   cache_read_tokens: int,
   cache_write_tokens: int,
+  accounting_status: "reported" | "partial" | "unknown",
+  known_cost_usd: float,
+  unpriced_calls: int,
+  usage_unknown_calls: int,
   ...rest,
 }
 
@@ -38,7 +42,8 @@ pub type AgentToolSummary = {
  *
  * `terminal` is the stable decision surface. `final_status`, `stop_reason`,
  * and the open raw payloads remain lossless compatibility data for transcripts
- * and diagnostics; consumers do not reclassify them.
+ * and diagnostics; consumers do not reclassify them. `cost_usd` is exact and
+ * nil if any call is unpriced; `known_cost_usd` is the priced-call lower bound.
  */
 pub type AgentResult = {
   status: string,
@@ -57,7 +62,10 @@ pub type AgentResult = {
   transcript: any,
   trace: any,
   tokens_used: int,
-  cost_usd: float,
+  cost_usd: float?,
+  known_cost_usd: float,
+  unpriced_calls: int,
+  usage_unknown_calls: int,
   session_id: string,
   run_id: string,
   started_at: string,

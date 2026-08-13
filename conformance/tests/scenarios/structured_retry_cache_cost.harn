@@ -17,6 +17,7 @@ pipeline test_structured_retry_cache_cost(harness: Harness) {
         input_tokens: 1000,
         output_tokens: 100,
         cache_read_tokens: 800,
+        simulated_cost_usd: 0.00234,
       },
       {
         text: "{\"decision\":\"merge\"}",
@@ -25,6 +26,7 @@ pipeline test_structured_retry_cache_cost(harness: Harness) {
         input_tokens: 1200,
         output_tokens: 200,
         cache_read_tokens: 1000,
+        simulated_cost_usd: 0.0039,
       },
     ],
     { ->

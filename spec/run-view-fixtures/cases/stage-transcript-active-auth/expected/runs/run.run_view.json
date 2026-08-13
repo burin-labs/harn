@@ -44,8 +44,8 @@
   "projection": {
     "last_event_id": null,
     "prefix_hash": null,
-    "projection_hash": "sha256:3f4576cf7939bfa3f16262b4c6059ccc097113044dfc540dde520398e3e740fd",
-    "projection_id": "run_view:run_stage_transcript_active:3f4576cf7939"
+    "projection_hash": "sha256:587aadbdb501585f47379a2dda662d1aa42a44e2317073313fa32ecd5537baa8",
+    "projection_id": "run_view:run_stage_transcript_active:587aadbdb501"
   },
   "providers": [],
   "run": {
@@ -84,11 +84,15 @@
       "status": "running",
       "usage": {
         "call_count": 0,
+        "cost_usd": null,
         "input_tokens": 0,
+        "known_cost_usd": 0.0,
         "models": [],
         "output_tokens": 0,
         "total_cost": 0.0,
-        "total_duration_ms": 0
+        "total_duration_ms": 0,
+        "unpriced_calls": 0,
+        "usage_unknown_calls": 0
       },
       "visible_text": "Waiting for connector authorization."
     }
@@ -102,11 +106,15 @@
   },
   "usage": {
     "call_count": 0,
+    "cost_usd": 0.0,
     "input_tokens": 0,
+    "known_cost_usd": 0.0,
     "models": [],
     "output_tokens": 0,
     "total_cost": 0.0,
-    "total_duration_ms": 0
+    "total_duration_ms": 0,
+    "unpriced_calls": 0,
+    "usage_unknown_calls": 0
   },
   "visible_text": "Waiting for connector authorization."
 }

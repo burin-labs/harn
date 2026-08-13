@@ -49,8 +49,8 @@
   "projection": {
     "last_event_id": null,
     "prefix_hash": null,
-    "projection_hash": "sha256:3c96a71b55794afe84fe4b455ffcb1fde668d31351fdd8a86d0e5928e1c816c9",
-    "projection_id": "run_view:run_root_transcript:3c96a71b5579"
+    "projection_hash": "sha256:86573296d365741b784f5dcf31a79a60426ab3d09238cd9873fd0cd73c3d2437",
+    "projection_id": "run_view:run_root_transcript:86573296d365"
   },
   "providers": [
     {
@@ -100,11 +100,15 @@
       "status": "completed",
       "usage": {
         "call_count": 0,
+        "cost_usd": null,
         "input_tokens": 0,
+        "known_cost_usd": 0.0,
         "models": [],
         "output_tokens": 0,
         "total_cost": 0.0,
-        "total_duration_ms": 0
+        "total_duration_ms": 0,
+        "unpriced_calls": 0,
+        "usage_unknown_calls": 0
       },
       "visible_text": "The ticket is resolved."
     }
@@ -118,13 +122,17 @@
   },
   "usage": {
     "call_count": 1,
+    "cost_usd": null,
     "input_tokens": 12,
+    "known_cost_usd": 0.02,
     "models": [
       "fixture-model"
     ],
     "output_tokens": 8,
     "total_cost": 0.02,
-    "total_duration_ms": 3000
+    "total_duration_ms": 3000,
+    "unpriced_calls": 0,
+    "usage_unknown_calls": 0
   },
   "visible_text": "The ticket is resolved."
 }

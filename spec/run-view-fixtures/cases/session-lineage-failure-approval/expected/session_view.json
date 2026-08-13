@@ -55,8 +55,8 @@
   "projection": {
     "last_event_id": null,
     "prefix_hash": null,
-    "projection_hash": "sha256:e36cf0a5edce392e837cad427b4af162cace49981a3db3bf4f4e058669a415e9",
-    "projection_id": "session_view:session_lineage:e36cf0a5edce"
+    "projection_hash": "sha256:9286ca0f82e2c1a34391c3860ed3c452c418e0d08d7868364d06f44f96470fe7",
+    "projection_id": "session_view:session_lineage:9286ca0f82e2"
   },
   "runs": [
     {
@@ -98,8 +98,8 @@
       "projection": {
         "last_event_id": null,
         "prefix_hash": null,
-        "projection_hash": "sha256:28391dbb37fa826271393564c5efac71add2999be7c1a91fbb03e8bf4397e9b9",
-        "projection_id": "run_view:run_lineage_root:28391dbb37fa"
+        "projection_hash": "sha256:4eec19ec770f81fe1ad7f57bf8967f2267fed1848a811cc4168b66ff641222be",
+        "projection_id": "run_view:run_lineage_root:4eec19ec770f"
       },
       "providers": [],
       "run": {
@@ -149,11 +149,15 @@
           "status": "completed",
           "usage": {
             "call_count": 0,
+            "cost_usd": null,
             "input_tokens": 0,
+            "known_cost_usd": 0.0,
             "models": [],
             "output_tokens": 0,
             "total_cost": 0.0,
-            "total_duration_ms": 0
+            "total_duration_ms": 0,
+            "unpriced_calls": 0,
+            "usage_unknown_calls": 0
           },
           "visible_text": "Delegated child work."
         }
@@ -167,11 +171,15 @@
       },
       "usage": {
         "call_count": 0,
+        "cost_usd": 0.0,
         "input_tokens": 0,
+        "known_cost_usd": 0.0,
         "models": [],
         "output_tokens": 0,
         "total_cost": 0.0,
-        "total_duration_ms": 0
+        "total_duration_ms": 0,
+        "unpriced_calls": 0,
+        "usage_unknown_calls": 0
       },
       "visible_text": "Delegated child work."
     },
@@ -210,8 +218,8 @@
       "projection": {
         "last_event_id": null,
         "prefix_hash": null,
-        "projection_hash": "sha256:be56519bdfd76a2078d4d1370b9eae1bcb094f9042095643d190792f4d9412bf",
-        "projection_id": "run_view:run_lineage_child:be56519bdfd7"
+        "projection_hash": "sha256:b4657830480a2b1fbec035a8dc8d772c694c610ec505313c7b9fcbb91ced6087",
+        "projection_id": "run_view:run_lineage_child:b4657830480a"
       },
       "providers": [],
       "run": {
@@ -250,11 +258,15 @@
           "status": "failed",
           "usage": {
             "call_count": 0,
+            "cost_usd": null,
             "input_tokens": 0,
+            "known_cost_usd": 0.0,
             "models": [],
             "output_tokens": 0,
             "total_cost": 0.0,
-            "total_duration_ms": 0
+            "total_duration_ms": 0,
+            "unpriced_calls": 0,
+            "usage_unknown_calls": 0
           },
           "visible_text": "Child validation failed."
         }
@@ -268,11 +280,15 @@
       },
       "usage": {
         "call_count": 0,
+        "cost_usd": 0.0,
         "input_tokens": 0,
+        "known_cost_usd": 0.0,
         "models": [],
         "output_tokens": 0,
         "total_cost": 0.0,
-        "total_duration_ms": 0
+        "total_duration_ms": 0,
+        "unpriced_calls": 0,
+        "usage_unknown_calls": 0
       },
       "visible_text": "Child validation failed."
     }
@@ -292,10 +308,14 @@
   },
   "usage": {
     "call_count": 0,
+    "cost_usd": 0.0,
     "input_tokens": 0,
+    "known_cost_usd": 0.0,
     "models": [],
     "output_tokens": 0,
     "total_cost": 0.0,
-    "total_duration_ms": 0
+    "total_duration_ms": 0,
+    "unpriced_calls": 0,
+    "usage_unknown_calls": 0
   }
 }

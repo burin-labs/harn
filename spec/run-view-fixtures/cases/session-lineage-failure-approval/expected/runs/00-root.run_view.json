@@ -37,8 +37,8 @@
   "projection": {
     "last_event_id": null,
     "prefix_hash": null,
-    "projection_hash": "sha256:28391dbb37fa826271393564c5efac71add2999be7c1a91fbb03e8bf4397e9b9",
-    "projection_id": "run_view:run_lineage_root:28391dbb37fa"
+    "projection_hash": "sha256:4eec19ec770f81fe1ad7f57bf8967f2267fed1848a811cc4168b66ff641222be",
+    "projection_id": "run_view:run_lineage_root:4eec19ec770f"
   },
   "providers": [],
   "run": {
@@ -88,11 +88,15 @@
       "status": "completed",
       "usage": {
         "call_count": 0,
+        "cost_usd": null,
         "input_tokens": 0,
+        "known_cost_usd": 0.0,
         "models": [],
         "output_tokens": 0,
         "total_cost": 0.0,
-        "total_duration_ms": 0
+        "total_duration_ms": 0,
+        "unpriced_calls": 0,
+        "usage_unknown_calls": 0
       },
       "visible_text": "Delegated child work."
     }
@@ -106,11 +110,15 @@
   },
   "usage": {
     "call_count": 0,
+    "cost_usd": 0.0,
     "input_tokens": 0,
+    "known_cost_usd": 0.0,
     "models": [],
     "output_tokens": 0,
     "total_cost": 0.0,
-    "total_duration_ms": 0
+    "total_duration_ms": 0,
+    "unpriced_calls": 0,
+    "usage_unknown_calls": 0
   },
   "visible_text": "Delegated child work."
 }

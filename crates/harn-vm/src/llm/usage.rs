@@ -50,13 +50,43 @@ pub struct LlmUsage {
     pub accounting_status: UsageAccountingStatus,
 }
 
+/// Aggregate cost certainty for a collection of canonical call ledgers.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct UsageCostCertainty {
+    pub known_cost_usd: f64,
+    pub unpriced_calls: i64,
+    pub usage_unknown_calls: i64,
+}
+
+/// Fold cost and accounting certainty once for every reporting projection.
+pub fn summarize_usage_cost_certainty<'a>(
+    usages: impl IntoIterator<Item = &'a LlmUsage>,
+) -> UsageCostCertainty {
+    usages
+        .into_iter()
+        .fold(UsageCostCertainty::default(), |mut summary, usage| {
+            if let Some(cost_usd) = usage.cost_usd {
+                summary.known_cost_usd += cost_usd;
+            } else {
+                summary.unpriced_calls += 1;
+            }
+            if usage.accounting_status == UsageAccountingStatus::Unknown {
+                summary.usage_unknown_calls += 1;
+            }
+            summary
+        })
+}
+
 impl LlmUsage {
     pub(crate) fn from_result(result: &LlmResult) -> Self {
         let usage_known = result.input_tokens > 0
             || result.output_tokens > 0
             || result.telemetry.server_prompt_tokens.is_some()
             || result.telemetry.server_output_tokens.is_some();
-        let authoritative_cost = super::managed_supply::authoritative_cost_usd(result);
+        let authoritative_cost = result
+            .telemetry
+            .mock_replay_cost_usd()
+            .or_else(|| super::managed_supply::authoritative_cost_usd(result));
         let cost_usd = authoritative_cost.or_else(|| {
             if !usage_known {
                 return None;
@@ -442,7 +472,7 @@ fn first_i64_field(value: &Value, names: &[&str]) -> Option<i64> {
 mod tests {
     use serde_json::json;
 
-    use super::extract_probe_usage;
+    use super::{extract_probe_usage, summarize_usage_cost_certainty, UsageAccountingStatus};
     use crate::llm::api::{LlmResult, ProviderAttempts, ProviderTelemetry};
     use crate::value::VmValue;
 
@@ -473,6 +503,23 @@ mod tests {
                 other: 0,
             },
         }
+    }
+
+    #[test]
+    fn cost_certainty_fold_preserves_known_floor_and_unknown_counts() {
+        let priced = accounted_result().usage();
+        let mut unpriced = priced.clone();
+        unpriced.cost_usd = None;
+        unpriced.accounting_status = UsageAccountingStatus::Unknown;
+
+        let summary = summarize_usage_cost_certainty([&priced, &unpriced]);
+
+        assert_eq!(
+            summary.known_cost_usd,
+            priced.cost_usd.expect("priced call")
+        );
+        assert_eq!(summary.unpriced_calls, 1);
+        assert_eq!(summary.usage_unknown_calls, 1);
     }
 
     #[test]
