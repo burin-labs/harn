@@ -442,20 +442,12 @@ pub fn __agent_loop_run(harness: Harness, message, session, initial_opts) {
         const llm_result = call.value
         consecutive_failure_count = 0
         iteration = iteration + 1
-        const raw_text = llm_result?.raw_text ?? llm_result?.text ?? ""
-        const parsed = agent_parse_tool_calls(
-          harness.agent,
-          raw_text,
-          turn_opts?.tools,
-          turn_opts?.tool_format,
-        )
-        const visible_text = __visible_text(parsed, raw_text)
-        const normalized = llm_result
-          + {
-          text: visible_text,
-          visible_text: visible_text,
-          _agent_tool_format: turn_opts?.tool_format ?? "",
-        }
+        const projection_context = {llm_options: turn_llm_opts, turn_options: turn_opts}
+        const projected = __agent_loop_project_result(harness.agent, llm_result, projection_context)
+        const raw_text = projected.raw_text
+        const parsed = projected.parsed
+        const visible_text = projected.visible_text
+        const normalized = projected.normalized
         const fallback_outcome = __detect_native_fallback(
           harness.agent,
           harness.fs,

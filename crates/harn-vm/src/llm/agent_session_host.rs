@@ -101,6 +101,10 @@ struct AgentHostSession {
     tool_mode: String,
     last_provider: Option<String>,
     last_model: Option<String>,
+    /// Exact grammar used by the last successful provider transaction. Unlike
+    /// the immutable session preference, this follows custom callers, route
+    /// switches, and runtime channel degradation turn by turn.
+    last_tool_format: Option<String>,
     pushed_transcript_dir: bool,
     started_at: String,
     /// Iteration cap from `agent_loop(options.max_iterations)`. Captured
@@ -188,6 +192,7 @@ pub(crate) fn seed_host_session_provider_model(session_id: &str, provider: &str,
         tool_mode: String::new(),
         last_provider: Some(provider.to_string()),
         last_model: Some(model.to_string()),
+        last_tool_format: None,
         pushed_transcript_dir: false,
         started_at: now_id(),
         max_iterations: 0,
@@ -576,6 +581,7 @@ async fn host_agent_session_init(
         tool_mode: tool_format,
         last_provider: None,
         last_model: None,
+        last_tool_format: None,
         pushed_transcript_dir,
         started_at: now_id(),
         max_iterations,
@@ -1220,6 +1226,9 @@ fn host_agent_session_record_assistant_builtin(
     let model = dict_get(&llm_result, "model")
         .map(|v| v.display())
         .unwrap_or_default();
+    let effective_tool_format = dict_get(&llm_result, "_effective_tool_format")
+        .map(|v| v.display())
+        .filter(|format| !format.trim().is_empty());
     let raw_tool_calls = dict_get(&llm_result, "tool_calls")
         .cloned()
         .unwrap_or(VmValue::Nil);
@@ -1232,16 +1241,13 @@ fn host_agent_session_record_assistant_builtin(
         assistant_message_from_llm_result(&llm_result),
     )
     .map_err(VmError::Runtime)?;
-    let _ = with_session(&session_id, HOST_SESSION_RECORD_ASSISTANT, |session| {
-        session.tool_calls.extend(calls_json);
-        if !provider.is_empty() {
-            session.last_provider = Some(provider);
-        }
-        if !model.is_empty() {
-            session.last_model = Some(model);
-        }
-        Ok(())
-    });
+    assistant_messages::record_dispatch_receipt(
+        &session_id,
+        calls_json,
+        provider,
+        model,
+        effective_tool_format,
+    );
     Ok(VmValue::Nil)
 }
 
@@ -1440,14 +1446,8 @@ fn host_agent_session_record_tool_results_builtin(
 ) -> Result<VmValue, VmError> {
     let session_id = args.first().map(|v| v.display()).unwrap_or_default();
     let dispatch = args.get(1).cloned().unwrap_or(VmValue::Nil);
-    let (provider, model) =
-        with_session(&session_id, HOST_SESSION_RECORD_TOOL_RESULTS, |session| {
-            Ok((
-                session.last_provider.clone().unwrap_or_default(),
-                session.last_model.clone().unwrap_or_default(),
-            ))
-        })
-        .unwrap_or_default();
+    let (provider, model, last_tool_format) =
+        assistant_messages::last_dispatch_receipt(&session_id);
     // The session `tool_format` lock is pinned to the PRIMARY model's format at
     // session init and is never re-claimed on escalation. But the trailing
     // assistant turn we are answering may have been produced by an escalated
@@ -1462,15 +1462,13 @@ fn host_agent_session_record_tool_results_builtin(
     // inline in `content` and carry no structured block, so they stay on the
     // text echo — unchanged).
     let session_tool_format = crate::agent_sessions::tool_format(&session_id).unwrap_or_default();
-    let tool_format = assistant_messages::effective_session_tool_format(
-        &provider,
-        &model,
-        if trailing_assistant_has_native_tool_use(&session_id) {
-            "native"
-        } else {
-            &session_tool_format
-        },
-    );
+    let tool_format = if trailing_assistant_has_native_tool_use(&session_id) {
+        assistant_messages::effective_session_tool_format(&provider, &model, "native")
+    } else if let Some(format) = last_tool_format {
+        format
+    } else {
+        assistant_messages::effective_session_tool_format(&provider, &model, &session_tool_format)
+    };
     // dispatch may be either a flat list of results (as returned by
     // agent_dispatch_tool_batch) or a dict with a `results` key (legacy
     // shape some callers still synthesize). Handle both.

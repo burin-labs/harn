@@ -1,0 +1,26 @@
+// Run: harn test tests/agent/effective_tool_format_receipt_test.harn
+//
+// The provider transaction owns the grammar used to parse and persist its
+// response. A supported-but-stale caller preference must not win merely
+// because capability admission would also accept it.
+import { __agent_loop_project_result } from "std/agent/loop_tool_calls"
+
+pipeline test_transaction_receipt_overrides_stale_text_grammar(harness: Harness, task) {
+  const tools = {
+    tools: [
+      {
+        name: "look",
+        description: "Read one workspace file.",
+        parameters: {type: "object", properties: {file: {type: "string"}}, required: ["file"]},
+      },
+    ],
+  }
+  const projected = __agent_loop_project_result(
+    harness.agent,
+    {text: "<tool_call>look({\"file\":\"README.md\"})</tool_call>", _effective_tool_format: "text"},
+    {llm_options: {tool_format: "json"}, turn_options: {tool_format: "json", tools: tools}},
+  )
+  assert_eq(projected.normalized._agent_tool_format, "text")
+  assert_eq(len(projected.parsed.calls), 1)
+  assert_eq(projected.parsed.calls[0].name, "look")
+}

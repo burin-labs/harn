@@ -1,10 +1,46 @@
 use crate::value::VmValue;
 
-use super::{dict_get, json_to_vm, list_items, vm_to_json};
+use super::{
+    dict_get, json_to_vm, list_items, vm_to_json, with_session, HOST_SESSION_RECORD_ASSISTANT,
+    HOST_SESSION_RECORD_TOOL_RESULTS,
+};
 use crate::llm::tools::{
     assistant_prose_block, build_assistant_response_message, render_canonical_call,
     text_tool_call_block,
 };
+
+pub(super) fn record_dispatch_receipt(
+    session_id: &str,
+    calls: Vec<serde_json::Value>,
+    provider: String,
+    model: String,
+    tool_format: Option<String>,
+) {
+    let _ = with_session(session_id, HOST_SESSION_RECORD_ASSISTANT, |session| {
+        session.tool_calls.extend(calls);
+        if !provider.is_empty() {
+            session.last_provider = Some(provider);
+        }
+        if !model.is_empty() {
+            session.last_model = Some(model);
+        }
+        if let Some(format) = tool_format {
+            session.last_tool_format = Some(format);
+        }
+        Ok(())
+    });
+}
+
+pub(super) fn last_dispatch_receipt(session_id: &str) -> (String, String, Option<String>) {
+    with_session(session_id, HOST_SESSION_RECORD_TOOL_RESULTS, |session| {
+        Ok((
+            session.last_provider.clone().unwrap_or_default(),
+            session.last_model.clone().unwrap_or_default(),
+            session.last_tool_format.clone(),
+        ))
+    })
+    .unwrap_or_default()
+}
 
 pub(super) fn effective_session_tool_format(
     provider: &str,
@@ -26,6 +62,12 @@ pub(super) fn effective_history_tool_format(
     provider: &str,
     model: &str,
 ) -> String {
+    if let Some(effective) = dict_get(llm_result, "_effective_tool_format")
+        .map(|value| value.display())
+        .filter(|format| !format.trim().is_empty())
+    {
+        return effective;
+    }
     // Legacy/replay fixtures without private route metadata historically mean
     // native structured history. Live results carry the admitted format; the
     // capability decision still repairs a missing-field Fireworks surprise.

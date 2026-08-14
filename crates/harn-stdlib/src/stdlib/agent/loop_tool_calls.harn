@@ -26,6 +26,40 @@ import { protocol_violation_messages } from "std/llm/tool_parse_result"
 
 // -------------------------------------------------------------------------------------------------
 
+pub type AgentLoopLlmResultProjection = {
+  raw_text: string,
+  parsed: dict,
+  visible_text: string,
+  normalized: dict,
+}
+
+pub type AgentLoopLlmProjectionContext = {llm_options: dict, turn_options: dict}
+
+pub fn __agent_loop_project_result(
+  agent: HarnessAgent,
+  result,
+  context: AgentLoopLlmProjectionContext,
+) -> AgentLoopLlmResultProjection {
+  const tool_format = result?._effective_tool_format
+    ?? context.llm_options?.tool_format
+    ?? context.turn_options?.tool_format
+    ?? ""
+  const raw_text = result?.raw_text ?? result?.text ?? ""
+  const parsed = agent_parse_tool_calls(agent, raw_text, context.turn_options?.tools, tool_format)
+  const visible_text = __visible_text(parsed, raw_text)
+  return {
+    raw_text: raw_text,
+    parsed: parsed,
+    visible_text: visible_text,
+    normalized: result
+      + {
+      text: visible_text,
+      visible_text: visible_text,
+      _agent_tool_format: tool_format,
+    },
+  }
+}
+
 pub fn __tool_registry_entry(tools, tool_name) {
   if tools == nil {
     return nil
