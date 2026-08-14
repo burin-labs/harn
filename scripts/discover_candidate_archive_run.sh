@@ -6,8 +6,10 @@ usage() {
 Usage: scripts/discover_candidate_archive_run.sh \
   --repo OWNER/REPO --source-commit SHA [--workflow build-release-binaries.yml]
 
-Finds the unique successful workflow_dispatch run that produced candidate archive
-artifacts for the requested source commit. Prints only the run id on stdout.
+Finds the newest successful workflow_dispatch run that produced unexpired
+candidate archive artifacts for the requested source commit. A later successful
+run supersedes an earlier retry for the same immutable source. Prints only the
+run id on stdout.
 EOF
 }
 
@@ -59,8 +61,14 @@ while IFS= read -r run_json; do
   matched=false
   artifacts_json="$(gh api "repos/$repo/actions/runs/$run_id/artifacts")"
   if jq -e --arg name "$manifest_artifact" \
-    'any(.artifacts[]?; .name == $name)' <<<"$artifacts_json" >/dev/null; then
+    'any(.artifacts[]?; .name == $name and ((.expired // false) | not))' \
+    <<<"$artifacts_json" >/dev/null; then
     matched=true
+  elif jq -e --arg name "$manifest_artifact" \
+    'any(.artifacts[]?; .name == $name)' <<<"$artifacts_json" >/dev/null; then
+    # An explicitly expired manifest is not reusable. Do not let the legacy
+    # title fallback resurrect it.
+    matched=false
   elif [[ "$display_title" == *"$source_commit"* || "$run_name" == *"$source_commit"* ]]; then
     matched=true
   fi
@@ -74,9 +82,9 @@ if ((${#matching_run_ids[@]} == 0)); then
   echo "error: no successful $workflow run binds candidate archives to $source_commit" >&2
   exit 1
 fi
-if ((${#matching_run_ids[@]} > 1)); then
-  echo "error: multiple successful $workflow runs bind candidate archives to $source_commit: ${matching_run_ids[*]}" >&2
-  exit 1
-fi
-
-printf '%s\n' "${matching_run_ids[0]}"
+# GitHub run ids are monotonically increasing. Repeated candidate certification
+# for the same immutable source is expected during release recovery; the newest
+# successful, unexpired run is the canonical projection. The downstream
+# manifest verifier still binds every archive digest, source SHA, policy
+# revision, producer run, and attestation before promotion.
+printf '%s\n' "$(printf '%s\n' "${matching_run_ids[@]}" | sort -n | tail -n 1)"
