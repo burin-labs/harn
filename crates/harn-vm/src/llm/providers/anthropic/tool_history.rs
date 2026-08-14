@@ -205,18 +205,15 @@ mod tests {
 
         normalize_tool_call_ids(&mut messages);
 
-        let tool_use_ids = messages[0]["content"]
-            .as_array()
-            .expect("assistant blocks")
+        let tool_uses = messages[0]["content"].as_array().expect("assistant blocks");
+        let tool_use_ids = tool_uses
             .iter()
             .map(|block| block["id"].as_str().expect("tool id"))
             .collect::<HashSet<_>>();
         assert_eq!(tool_use_ids.len(), 3);
-        for index in 0..3 {
-            assert_eq!(
-                messages[0]["content"][index]["id"],
-                messages[1]["content"][index]["tool_use_id"]
-            );
+        let tool_results = messages[1]["content"].as_array().expect("result blocks");
+        for (tool_use, tool_result) in tool_uses.iter().zip(tool_results) {
+            assert_eq!(tool_use["id"], tool_result["tool_use_id"]);
         }
     }
 
