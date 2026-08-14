@@ -103,6 +103,17 @@ expect_failure() {
   fi
 }
 
+expect_output() {
+  local name="$1"
+  local expected="$2"
+  shift 2
+  expect_success "$name" "$@"
+  if [[ "$(<"$tmp/$name.out")" != "$expected" ]]; then
+    echo "FAIL: $name expected '$expected', got '$(<"$tmp/$name.out")'" >&2
+    exit 1
+  fi
+}
+
 write_receipt() {
   local target="$1"
   local archive="$2"
@@ -184,7 +195,43 @@ run_verifier() {
 new_fixture
 expect_success primary run_verifier
 
-expect_success discover \
+expect_output discover "$run_id" \
+  env FIXTURE_DIR="$fixture" PATH="$tmp/bin:$PATH" \
+  "$discoverer" --repo "$repo" --source-commit "$source_commit"
+
+# Release recovery may certify the same immutable source more than once. The
+# newest successful run is authoritative; an expired newer artifact is not.
+jq --arg source "$source_commit" \
+  '.workflow_runs += [{
+    id: 9002,
+    conclusion: "success",
+    path: ".github/workflows/build-release-binaries.yml",
+    display_title: ("candidate retry " + $source),
+    name: ("Build release binaries " + $source)
+  }]' "$fixture/runs-index.json" >"$fixture/runs-index.tmp"
+mv "$fixture/runs-index.tmp" "$fixture/runs-index.json"
+mkdir -p "$fixture/runs/9002"
+jq -n --arg manifest "candidate-archive-manifest-$source_commit" \
+  '{artifacts: [{name: $manifest, expired: false}]}' \
+  >"$fixture/runs/9002/artifacts.json"
+expect_output discover_prefers_newest 9002 \
+  env FIXTURE_DIR="$fixture" PATH="$tmp/bin:$PATH" \
+  "$discoverer" --repo "$repo" --source-commit "$source_commit"
+
+jq --arg source "$source_commit" \
+  '.workflow_runs += [{
+    id: 9003,
+    conclusion: "success",
+    path: ".github/workflows/build-release-binaries.yml",
+    display_title: ("expired candidate retry " + $source),
+    name: ("Build release binaries " + $source)
+  }]' "$fixture/runs-index.json" >"$fixture/runs-index.tmp"
+mv "$fixture/runs-index.tmp" "$fixture/runs-index.json"
+mkdir -p "$fixture/runs/9003"
+jq -n --arg manifest "candidate-archive-manifest-$source_commit" \
+  '{artifacts: [{name: $manifest, expired: true}]}' \
+  >"$fixture/runs/9003/artifacts.json"
+expect_output discover_skips_expired 9002 \
   env FIXTURE_DIR="$fixture" PATH="$tmp/bin:$PATH" \
   "$discoverer" --repo "$repo" --source-commit "$source_commit"
 
