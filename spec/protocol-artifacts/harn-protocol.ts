@@ -551,10 +551,17 @@ export interface HarnExternalActionReceiptReconciliation {
   previous_receipt_id: string
 }
 
+export interface HarnExternalActionRetryLink {
+  schema: "harn.external_action_retry_link.v1"
+  previous_action_id: string
+  previous_receipt_id: string
+}
+
 export interface HarnExternalActionReceipt {
   schema: "harn.external_action_receipt.v1"
   id: string
   action_id: string
+  effect_fingerprint?: string
   intent_fingerprint: string
   idempotency_key: string
   provider: string
@@ -572,6 +579,7 @@ export interface HarnExternalActionReceipt {
   error?: HarnExternalActionError
   reconciliation?: HarnExternalActionReceiptReconciliation
   disclosure?: HarnExternalActionDisclosureReceipt
+  retry?: HarnExternalActionRetryLink
 }
 
 export interface HarnExternalActionPolicyEvaluation {
@@ -622,6 +630,7 @@ export interface HarnExternalActionActivityRecord {
   kind: "external_action"
   id: string
   action_id: string
+  effect_fingerprint?: string
   intent_fingerprint: string
   provider: string
   capability: string
@@ -639,6 +648,7 @@ export interface HarnExternalActionActivityRecord {
   dispatch: HarnExternalActionDispatchRecord
   reconciliation?: HarnExternalActionReconciliationRecord
   receipt?: HarnExternalActionReceipt
+  retry?: HarnExternalActionRetryLink
 }
 
 export const ACTIVITY_KINDS = [

@@ -14,6 +14,7 @@ import {
   external_action_grant_check,
   external_action_grant_integrity_check,
   external_action_intent_is_exact,
+  external_action_retry_check,
 } from "std/external_action/contracts"
 import {
   ExternalActionDisclosure,
@@ -241,6 +242,7 @@ fn __external_action_receipt_fields(
       24,
     ),
     action_id: intent.id,
+    effect_fingerprint: intent.effect_fingerprint,
     intent_fingerprint: intent.fingerprint,
     idempotency_key: intent.idempotency_key,
     provider: intent.provider,
@@ -266,6 +268,9 @@ fn __external_action_receipt_fields(
   }
   if disclosure != nil {
     receipt.disclosure = disclosure
+  }
+  if intent.retry != nil {
+    receipt.retry = intent.retry
   }
   return schema_expect(receipt, schema_of(ExternalActionReceipt))
 }
@@ -398,12 +403,84 @@ fn __external_action_adapter_id(adapter: ExternalActionAdapter) -> string {
   return id == "" ? "unavailable" : id
 }
 
+fn __external_action_dispatch_checkpoint_key(intent: ExternalActionIntent) -> string {
+  return "external_action.dispatch." + substring(intent.fingerprint, 7, len(intent.fingerprint))
+}
+
+/**
+ * Persist a terminal pre-dispatch denial under the action's replay identity.
+ *
+ * Policy and reviewer denials can happen before an adapter call. They must use
+ * the same checkpoint as dispatch so a later grant cannot rewrite that terminal
+ * decision. A caller must create an explicit linked retry instead.
+ *
+ * @effects: [runtime, observability]
+ * @errors: []
+ */
+pub fn external_action_deny(
+  harness: Harness,
+  intent: ExternalActionIntent,
+  adapter_id: string,
+  error: ExternalActionError,
+) -> ExternalActionReceipt {
+  const normalized_adapter_id = trim(adapter_id) == "" ? "unavailable" : trim(adapter_id)
+  const now_ms = harness.clock.now_ms()
+  if !external_action_intent_is_exact(intent) {
+    const denied = __external_action_denied_receipt(
+      intent,
+      normalized_adapter_id,
+      external_action_error(
+        "invalid_intent",
+        "intent_fingerprint_mismatch",
+        "intent fingerprint does not match its effect",
+      ),
+      now_ms,
+    )
+    __external_action_emit(harness.obs, denied)
+    return denied
+  }
+  const attempted = try {
+    checkpoint_stage_keyed(
+      harness.runtime,
+      __external_action_dispatch_checkpoint_key(intent),
+      {intent_fingerprint: intent.fingerprint},
+      fn() {
+        const denied = __external_action_denied_receipt(
+          intent,
+          normalized_adapter_id,
+          error,
+          harness.clock.now_ms(),
+        )
+        __external_action_emit(harness.obs, denied)
+        return denied
+      },
+    )
+  }
+  if is_ok(attempted) {
+    return unwrap(attempted)
+  }
+  const denied = __external_action_denied_receipt(
+    intent,
+    normalized_adapter_id,
+    external_action_error(
+      "adapter_failure",
+      "denial_checkpoint_failed",
+      "The terminal decision could not be checkpointed. The provider was not contacted.",
+    ),
+    now_ms,
+  )
+  __external_action_emit(harness.obs, denied)
+  return denied
+}
+
 /**
  * Dispatch one exact action at most once for its fingerprint.
  *
- * Invalid grants are not checkpointed, so a later valid authorization may run.
- * Once dispatch begins, even thrown or malformed adapter responses become a
- * durable reconciliation-required receipt and are never blindly retried.
+ * Every terminal decision is checkpointed for the action identity. A later
+ * authorization therefore replays that decision; an explicit linked retry is
+ * required to create a distinct action. Once dispatch begins, even thrown or
+ * malformed adapter responses become a durable reconciliation-required receipt
+ * and are never blindly retried.
  *
  * @effects: [runtime, observability, external]
  * @errors: []
@@ -415,6 +492,7 @@ pub fn external_action_execute(
   adapter: ExternalActionAdapter,
   managed_policy: ExternalActionManagedPolicy? = nil,
   disclosure_resolver: ExternalActionDisclosureResolver? = nil,
+  previous_terminal_receipt: ExternalActionReceipt? = nil,
 ) -> ExternalActionReceipt {
   const adapter_id = __external_action_adapter_id(adapter)
   const now_ms = harness.clock.now_ms()
@@ -432,14 +510,22 @@ pub fn external_action_execute(
     __external_action_emit(harness.obs, denied)
     return denied
   }
-  if !__external_action_is_callable(adapter.dispatch) {
+  const retry_check = if intent.retry == nil {
+    previous_terminal_receipt == nil
+  } else {
+    previous_terminal_receipt != nil
+      && is_ok(
+      external_action_retry_check(intent, previous_terminal_receipt),
+    )
+  }
+  if !retry_check {
     const denied = __external_action_denied_receipt(
       intent,
       adapter_id,
       external_action_error(
-        "adapter_unavailable",
-        "dispatch_unavailable",
-        "external action adapter has no dispatch function",
+        "invalid_intent",
+        "invalid_retry_link",
+        "retry must link to the exact prior terminal action",
       ),
       now_ms,
     )
@@ -449,17 +535,45 @@ pub fn external_action_execute(
   const attempted = try {
     checkpoint_stage_keyed(
       harness.runtime,
-      "external_action.dispatch." + substring(intent.fingerprint, 7, len(intent.fingerprint)),
+      __external_action_dispatch_checkpoint_key(intent),
       {intent_fingerprint: intent.fingerprint},
       fn() {
         const grant_check = external_action_grant_check(intent, grant, harness.clock.now_ms())
         if !is_ok(grant_check) {
-          throw {external_action_denied: true, error: unwrap_err(grant_check)}
+          const denied = __external_action_denied_receipt(
+            intent,
+            adapter_id,
+            unwrap_err(grant_check),
+            harness.clock.now_ms(),
+          )
+          __external_action_emit(harness.obs, denied)
+          return denied
+        }
+        if !__external_action_is_callable(adapter.dispatch) {
+          const denied = __external_action_denied_receipt(
+            intent,
+            adapter_id,
+            external_action_error(
+              "adapter_unavailable",
+              "dispatch_unavailable",
+              "external action adapter has no dispatch function",
+            ),
+            harness.clock.now_ms(),
+          )
+          __external_action_emit(harness.obs, denied)
+          return denied
         }
         if managed_policy != nil {
           const policy_check = external_action_managed_policy_check(intent, grant, managed_policy)
           if !is_ok(policy_check) {
-            throw {external_action_denied: true, error: unwrap_err(policy_check)}
+            const denied = __external_action_denied_receipt(
+              intent,
+              adapter_id,
+              unwrap_err(policy_check),
+              harness.clock.now_ms(),
+            )
+            __external_action_emit(harness.obs, denied)
+            return denied
           }
         }
         let disclosure: ExternalActionDisclosure? = nil
@@ -468,31 +582,46 @@ pub fn external_action_execute(
             || !__external_action_is_callable(
             disclosure_resolver.disclose,
           ) {
-            throw {
-              external_action_denied: true,
-              error: external_action_error(
+            const denied = __external_action_denied_receipt(
+              intent,
+              adapter_id,
+              external_action_error(
                 "disclosure_unavailable",
                 "protected_disclosure_unavailable",
                 "The required protected personal details are not available for this action.",
               ),
-            }
+              harness.clock.now_ms(),
+            )
+            __external_action_emit(harness.obs, denied)
+            return denied
           }
           const disclosed = try {
             disclosure_resolver.disclose(harness, external_action_disclosure_request(intent, grant))
           }
           if !is_ok(disclosed) {
-            throw {
-              external_action_denied: true,
-              error: external_action_error(
+            const denied = __external_action_denied_receipt(
+              intent,
+              adapter_id,
+              external_action_error(
                 "disclosure_refused",
                 "protected_disclosure_refused",
                 "Protected personal details were not shared. The provider was not contacted.",
               ),
-            }
+              harness.clock.now_ms(),
+            )
+            __external_action_emit(harness.obs, denied)
+            return denied
           }
           const checked_disclosure = external_action_disclosure_result(intent, unwrap(disclosed))
           if !is_ok(checked_disclosure) {
-            throw {external_action_denied: true, error: unwrap_err(checked_disclosure)}
+            const denied = __external_action_denied_receipt(
+              intent,
+              adapter_id,
+              unwrap_err(checked_disclosure),
+              harness.clock.now_ms(),
+            )
+            __external_action_emit(harness.obs, denied)
+            return denied
           }
           disclosure = unwrap(checked_disclosure)
         }
@@ -555,16 +684,11 @@ pub fn external_action_execute(
   if is_ok(attempted) {
     return unwrap(attempted)
   }
-  const thrown = unwrap_err(attempted)
-  const error = if type_of(thrown) == "dict" && thrown?.external_action_denied == true {
-    thrown.error
-  } else {
-    external_action_error(
-      "adapter_failure",
-      "dispatch_checkpoint_failed",
-      "The action did not reach the provider.",
-    )
-  }
+  const error = external_action_error(
+    "adapter_failure",
+    "dispatch_checkpoint_failed",
+    "The action did not reach the provider.",
+  )
   const denied = __external_action_denied_receipt(intent, adapter_id, error, now_ms)
   __external_action_emit(harness.obs, denied)
   return denied

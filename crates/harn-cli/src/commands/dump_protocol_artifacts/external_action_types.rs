@@ -48,10 +48,19 @@ pub struct HarnExternalActionReceiptReconciliation {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnExternalActionRetryLink {
+    pub schema: String,
+    pub previous_action_id: String,
+    pub previous_receipt_id: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HarnExternalActionReceipt {
     pub schema: String,
     pub id: String,
     pub action_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effect_fingerprint: Option<String>,
     pub intent_fingerprint: String,
     pub idempotency_key: String,
     pub provider: String,
@@ -73,6 +82,8 @@ pub struct HarnExternalActionReceipt {
     pub reconciliation: Option<HarnExternalActionReceiptReconciliation>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub disclosure: Option<HarnExternalActionDisclosureReceipt>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retry: Option<HarnExternalActionRetryLink>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -140,6 +151,8 @@ pub struct HarnExternalActionActivityRecord {
     pub kind: HarnActivityKind,
     pub id: String,
     pub action_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effect_fingerprint: Option<String>,
     pub intent_fingerprint: String,
     pub provider: String,
     pub capability: String,
@@ -163,6 +176,8 @@ pub struct HarnExternalActionActivityRecord {
     pub reconciliation: Option<HarnExternalActionReconciliationRecord>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub receipt: Option<HarnExternalActionReceipt>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retry: Option<HarnExternalActionRetryLink>,
 }
 
 "#;
@@ -197,10 +212,17 @@ export interface HarnExternalActionReceiptReconciliation {
   previous_receipt_id: string
 }
 
+export interface HarnExternalActionRetryLink {
+  schema: "harn.external_action_retry_link.v1"
+  previous_action_id: string
+  previous_receipt_id: string
+}
+
 export interface HarnExternalActionReceipt {
   schema: "harn.external_action_receipt.v1"
   id: string
   action_id: string
+  effect_fingerprint?: string
   intent_fingerprint: string
   idempotency_key: string
   provider: string
@@ -218,6 +240,7 @@ export interface HarnExternalActionReceipt {
   error?: HarnExternalActionError
   reconciliation?: HarnExternalActionReceiptReconciliation
   disclosure?: HarnExternalActionDisclosureReceipt
+  retry?: HarnExternalActionRetryLink
 }
 
 export interface HarnExternalActionPolicyEvaluation {
@@ -268,6 +291,7 @@ export interface HarnExternalActionActivityRecord {
   kind: "external_action"
   id: string
   action_id: string
+  effect_fingerprint?: string
   intent_fingerprint: string
   provider: string
   capability: string
@@ -285,6 +309,7 @@ export interface HarnExternalActionActivityRecord {
   dispatch: HarnExternalActionDispatchRecord
   reconciliation?: HarnExternalActionReconciliationRecord
   receipt?: HarnExternalActionReceipt
+  retry?: HarnExternalActionRetryLink
 }
 
 "#;
@@ -335,10 +360,23 @@ public struct HarnExternalActionReceiptReconciliation: Codable, Sendable, Equata
     }
 }
 
+public struct HarnExternalActionRetryLink: Codable, Sendable, Equatable {
+    public let schema: String
+    public let previousActionId: String
+    public let previousReceiptId: String
+
+    enum CodingKeys: String, CodingKey {
+        case schema
+        case previousActionId = "previous_action_id"
+        case previousReceiptId = "previous_receipt_id"
+    }
+}
+
 public struct HarnExternalActionReceipt: Codable, Sendable, Equatable {
     public let schema: String
     public let id: String
     public let actionId: String
+    public let effectFingerprint: String?
     public let intentFingerprint: String
     public let idempotencyKey: String
     public let provider: String
@@ -356,11 +394,13 @@ public struct HarnExternalActionReceipt: Codable, Sendable, Equatable {
     public let error: HarnExternalActionError?
     public let reconciliation: HarnExternalActionReceiptReconciliation?
     public let disclosure: HarnExternalActionDisclosureReceipt?
+    public let retry: HarnExternalActionRetryLink?
 
     enum CodingKeys: String, CodingKey {
         case schema, id, provider, capability, operation, environment, outcome, status, error
-        case reconciliation, disclosure
+        case reconciliation, disclosure, retry
         case actionId = "action_id"
+        case effectFingerprint = "effect_fingerprint"
         case intentFingerprint = "intent_fingerprint"
         case idempotencyKey = "idempotency_key"
         case adapterId = "adapter_id"
@@ -459,6 +499,7 @@ public struct HarnExternalActionActivityRecord: Codable, Sendable, Equatable {
     public let kind: HarnActivityKind
     public let id: String
     public let actionId: String
+    public let effectFingerprint: String?
     public let intentFingerprint: String
     public let provider: String
     public let capability: String
@@ -476,11 +517,13 @@ public struct HarnExternalActionActivityRecord: Codable, Sendable, Equatable {
     public let dispatch: HarnExternalActionDispatchRecord
     public let reconciliation: HarnExternalActionReconciliationRecord?
     public let receipt: HarnExternalActionReceipt?
+    public let retry: HarnExternalActionRetryLink?
 
     enum CodingKeys: String, CodingKey {
         case schema, kind, id, provider, capability, operation, environment, summary, status
-        case requester, decision, authorization, disclosure, dispatch, reconciliation, receipt
+        case requester, decision, authorization, disclosure, dispatch, reconciliation, receipt, retry
         case actionId = "action_id"
+        case effectFingerprint = "effect_fingerprint"
         case intentFingerprint = "intent_fingerprint"
         case externalSpend = "external_spend"
         case updatedAtMs = "updated_at_ms"

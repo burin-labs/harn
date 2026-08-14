@@ -459,6 +459,7 @@ fn generated_rust_external_action_activity_round_trips() {
         "kind": "external_action",
         "id": "activity_abc123",
         "action_id": "action_abc123",
+        "effect_fingerprint": "sha256:effect123",
         "intent_fingerprint": "sha256:abc123",
         "provider": "duffel",
         "capability": "flights",
@@ -504,10 +505,16 @@ fn generated_rust_external_action_activity_round_trips() {
         },
         "dispatch": {"attempted": true, "adapter_id": "duffel-test-v1"},
         "reconciliation": {"attempted": false, "status": "not_needed"},
+        "retry": {
+            "schema": "harn.external_action_retry_link.v1",
+            "previous_action_id": "action_denied",
+            "previous_receipt_id": "receipt_denied"
+        },
         "receipt": {
             "schema": "harn.external_action_receipt.v1",
             "id": "receipt-1",
             "action_id": "action_abc123",
+            "effect_fingerprint": "sha256:effect123",
             "intent_fingerprint": "sha256:abc123",
             "idempotency_key": "idempotency-1",
             "provider": "duffel",
@@ -522,6 +529,11 @@ fn generated_rust_external_action_activity_round_trips() {
             "recorded_at_ms": 1_788_000_000_000_i64,
             "provider_action_id": "ord_test_1",
             "evidence_refs": ["provider:order:ord_test_1"],
+            "retry": {
+                "schema": "harn.external_action_retry_link.v1",
+                "previous_action_id": "action_denied",
+                "previous_receipt_id": "receipt_denied"
+            },
             "disclosure": {
                 "recipient": "Duffel test mode",
                 "purpose": "Create one test flight order",
@@ -536,6 +548,19 @@ fn generated_rust_external_action_activity_round_trips() {
         serde_json::from_value(fixture.clone()).expect("generated activity DTO decodes");
     assert_eq!(decoded.kind, HarnActivityKind::ExternalAction);
     assert_eq!(decoded.status, HarnExternalActionActivityStatus::Confirmed);
+    assert_eq!(
+        decoded.retry.as_ref().expect("retry").previous_receipt_id,
+        "receipt_denied"
+    );
+    assert_eq!(
+        decoded
+            .receipt
+            .as_ref()
+            .expect("receipt")
+            .effect_fingerprint
+            .as_deref(),
+        Some("sha256:effect123")
+    );
     assert_eq!(
         decoded.decision.as_ref().expect("decision").outcome,
         HarnExternalActionDecisionOutcome::Approved

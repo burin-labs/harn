@@ -492,10 +492,23 @@ public struct HarnExternalActionReceiptReconciliation: Codable, Sendable, Equata
     }
 }
 
+public struct HarnExternalActionRetryLink: Codable, Sendable, Equatable {
+    public let schema: String
+    public let previousActionId: String
+    public let previousReceiptId: String
+
+    enum CodingKeys: String, CodingKey {
+        case schema
+        case previousActionId = "previous_action_id"
+        case previousReceiptId = "previous_receipt_id"
+    }
+}
+
 public struct HarnExternalActionReceipt: Codable, Sendable, Equatable {
     public let schema: String
     public let id: String
     public let actionId: String
+    public let effectFingerprint: String?
     public let intentFingerprint: String
     public let idempotencyKey: String
     public let provider: String
@@ -513,11 +526,13 @@ public struct HarnExternalActionReceipt: Codable, Sendable, Equatable {
     public let error: HarnExternalActionError?
     public let reconciliation: HarnExternalActionReceiptReconciliation?
     public let disclosure: HarnExternalActionDisclosureReceipt?
+    public let retry: HarnExternalActionRetryLink?
 
     enum CodingKeys: String, CodingKey {
         case schema, id, provider, capability, operation, environment, outcome, status, error
-        case reconciliation, disclosure
+        case reconciliation, disclosure, retry
         case actionId = "action_id"
+        case effectFingerprint = "effect_fingerprint"
         case intentFingerprint = "intent_fingerprint"
         case idempotencyKey = "idempotency_key"
         case adapterId = "adapter_id"
@@ -616,6 +631,7 @@ public struct HarnExternalActionActivityRecord: Codable, Sendable, Equatable {
     public let kind: HarnActivityKind
     public let id: String
     public let actionId: String
+    public let effectFingerprint: String?
     public let intentFingerprint: String
     public let provider: String
     public let capability: String
@@ -633,11 +649,13 @@ public struct HarnExternalActionActivityRecord: Codable, Sendable, Equatable {
     public let dispatch: HarnExternalActionDispatchRecord
     public let reconciliation: HarnExternalActionReconciliationRecord?
     public let receipt: HarnExternalActionReceipt?
+    public let retry: HarnExternalActionRetryLink?
 
     enum CodingKeys: String, CodingKey {
         case schema, kind, id, provider, capability, operation, environment, summary, status
-        case requester, decision, authorization, disclosure, dispatch, reconciliation, receipt
+        case requester, decision, authorization, disclosure, dispatch, reconciliation, receipt, retry
         case actionId = "action_id"
+        case effectFingerprint = "effect_fingerprint"
         case intentFingerprint = "intent_fingerprint"
         case externalSpend = "external_spend"
         case updatedAtMs = "updated_at_ms"

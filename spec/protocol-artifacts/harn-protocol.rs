@@ -638,10 +638,19 @@ pub struct HarnExternalActionReceiptReconciliation {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnExternalActionRetryLink {
+    pub schema: String,
+    pub previous_action_id: String,
+    pub previous_receipt_id: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HarnExternalActionReceipt {
     pub schema: String,
     pub id: String,
     pub action_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effect_fingerprint: Option<String>,
     pub intent_fingerprint: String,
     pub idempotency_key: String,
     pub provider: String,
@@ -663,6 +672,8 @@ pub struct HarnExternalActionReceipt {
     pub reconciliation: Option<HarnExternalActionReceiptReconciliation>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub disclosure: Option<HarnExternalActionDisclosureReceipt>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retry: Option<HarnExternalActionRetryLink>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -730,6 +741,8 @@ pub struct HarnExternalActionActivityRecord {
     pub kind: HarnActivityKind,
     pub id: String,
     pub action_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effect_fingerprint: Option<String>,
     pub intent_fingerprint: String,
     pub provider: String,
     pub capability: String,
@@ -753,6 +766,8 @@ pub struct HarnExternalActionActivityRecord {
     pub reconciliation: Option<HarnExternalActionReconciliationRecord>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub receipt: Option<HarnExternalActionReceipt>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retry: Option<HarnExternalActionRetryLink>,
 }
 
 /// Closed portable activity kinds owned by `std/activity/vocabulary`.

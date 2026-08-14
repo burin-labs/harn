@@ -21,9 +21,17 @@ pub type ExternalActionMoney = {currency: string, amount_minor: int}
 
 pub type ExternalActionDisplay = {summary: string, details?: list<string>}
 
+/** Value-free lineage for one explicit retry after a terminal action. */
+pub type ExternalActionRetryLink = {
+  schema: "harn.external_action_retry_link.v1",
+  previous_action_id: string,
+  previous_receipt_id: string,
+}
+
 pub type ExternalActionIntent = {
   schema: "harn.external_action_intent.v1",
   id: string,
+  effect_fingerprint: string,
   fingerprint: string,
   idempotency_key: string,
   actor: ExternalActionActor,
@@ -35,6 +43,7 @@ pub type ExternalActionIntent = {
   protected_disclosure?: ExternalActionDisclosurePlan,
   external_spend?: ExternalActionMoney,
   display: ExternalActionDisplay,
+  retry?: ExternalActionRetryLink,
 }
 
 pub type ExternalActionGrant = {
@@ -99,6 +108,7 @@ pub type ExternalActionReceipt = {
   schema: "harn.external_action_receipt.v1",
   id: string,
   action_id: string,
+  effect_fingerprint?: string,
   intent_fingerprint: string,
   idempotency_key: string,
   provider: string,
@@ -116,6 +126,7 @@ pub type ExternalActionReceipt = {
   error?: ExternalActionError,
   reconciliation?: {attempt_id: string, previous_receipt_id: string},
   disclosure?: ExternalActionDisclosureReceipt,
+  retry?: ExternalActionRetryLink,
 }
 
 /**
@@ -230,6 +241,52 @@ fn __external_action_display(raw: unknown, operation: string) -> ExternalActionD
   return display
 }
 
+fn __external_action_retry_link_result(
+  raw: unknown,
+) -> Result<ExternalActionRetryLink?, ExternalActionError> {
+  if raw == nil {
+    return Ok(nil)
+  }
+  if type_of(raw) != "dict" {
+    return Err(
+      external_action_error("invalid_intent", "invalid_retry_link", "retry must be an object"),
+    )
+  }
+  if raw?.schema != "harn.external_action_retry_link.v1" {
+    return Err(
+      external_action_error(
+        "invalid_intent",
+        "invalid_retry_schema",
+        "retry schema must be harn.external_action_retry_link.v1",
+      ),
+    )
+  }
+  const previous_action_id = trim(to_string(raw?.previous_action_id ?? ""))
+  const previous_receipt_id = trim(to_string(raw?.previous_receipt_id ?? ""))
+  for pair in [
+    ["previous_action_id", previous_action_id],
+    ["previous_receipt_id", previous_receipt_id],
+  ] {
+    const field = pair[0] ?? ""
+    if pair[1] == "" || len(pair[1]) > 256 || regex_match("[\\r\\n]", pair[1]) != nil {
+      return Err(
+        external_action_error(
+          "invalid_intent",
+          "invalid_" + field,
+          field + " must be a bounded non-empty identifier",
+        ),
+      )
+    }
+  }
+  return Ok(
+    {
+      schema: "harn.external_action_retry_link.v1",
+      previous_action_id: previous_action_id,
+      previous_receipt_id: previous_receipt_id,
+    },
+  )
+}
+
 fn __external_action_fingerprint_payload(
   actor: ExternalActionActor,
   provider: string,
@@ -272,7 +329,17 @@ pub fn external_action_intent_result(
   const environment = __external_action_environment_result(raw?.environment)
   const money = __external_action_money_result(raw?.external_spend)
   const disclosure = external_action_disclosure_plan_result(raw?.protected_disclosure)
-  for checked in [actor, provider, capability, operation, environment, money, disclosure] {
+  const attempt_link_checked = __external_action_retry_link_result(raw?.retry)
+  for checked in [
+    actor,
+    provider,
+    capability,
+    operation,
+    environment,
+    money,
+    disclosure,
+    attempt_link_checked,
+  ] {
     if !is_ok(checked) {
       return Err(unwrap_err(checked))
     }
@@ -284,8 +351,9 @@ pub fn external_action_intent_result(
   const normalized_environment = unwrap(environment)
   const normalized_money = unwrap(money)
   const normalized_disclosure = unwrap(disclosure)
+  const normalized_retry = unwrap(attempt_link_checked)
   const payload = raw?.payload
-  const fingerprint = "sha256:"
+  const effect_fingerprint = "sha256:"
     + sha256(
     json_stringify(
       __external_action_fingerprint_payload(
@@ -300,9 +368,24 @@ pub fn external_action_intent_result(
       ),
     ),
   )
+  const fingerprint = if normalized_retry == nil {
+    effect_fingerprint
+  } else {
+    "sha256:"
+      + sha256(
+      json_stringify(
+        {
+          schema: "harn.external_action_attempt_fingerprint.v1",
+          effect_fingerprint: effect_fingerprint,
+          retry: normalized_retry,
+        },
+      ),
+    )
+  }
   let intent: ExternalActionIntent = {
     schema: "harn.external_action_intent.v1",
     id: "action_" + substring(fingerprint, 7, 31),
+    effect_fingerprint: effect_fingerprint,
     fingerprint: fingerprint,
     idempotency_key: "harn:" + substring(fingerprint, 7, len(fingerprint)),
     actor: normalized_actor,
@@ -318,6 +401,9 @@ pub fn external_action_intent_result(
   }
   if normalized_disclosure != nil {
     intent.protected_disclosure = normalized_disclosure
+  }
+  if normalized_retry != nil {
+    intent.retry = normalized_retry
   }
   return Ok(intent)
 }
@@ -344,7 +430,114 @@ pub fn external_action_intent(raw: unknown) -> ExternalActionIntent {
  */
 pub fn external_action_intent_is_exact(intent: ExternalActionIntent) -> bool {
   const checked = external_action_intent_result(intent)
-  return is_ok(checked) && unwrap(checked).fingerprint == intent.fingerprint
+  return is_ok(checked) && unwrap(checked) == intent
+}
+
+fn __external_action_receipt_is_terminal(receipt: ExternalActionReceipt) -> bool {
+  const outcome_matches = (receipt.status == "confirmed" && receipt.outcome == "confirmed")
+    || (receipt
+    .status
+    == "denied"
+    && receipt.outcome == "denied")
+    || (receipt.status == "failed_before_dispatch"
+    && receipt.outcome
+    == "failed_before_dispatch")
+    || (receipt.status == "rejected" && receipt.outcome == "rejected")
+  const dispatch_matches = if receipt.outcome == "confirmed" || receipt.outcome == "rejected" {
+    receipt.dispatch_attempted
+  } else {
+    !receipt.dispatch_attempted
+  }
+  return receipt.schema == "harn.external_action_receipt.v1"
+    && receipt.next_action == "none"
+    && outcome_matches
+    && dispatch_matches
+}
+
+/**
+ * Verify that a retry is linked to the exact prior terminal action.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn external_action_retry_check(
+  intent: ExternalActionIntent,
+  previous_receipt: ExternalActionReceipt,
+) -> Result<ExternalActionRetryLink, ExternalActionError> {
+  const link = intent.retry
+  const previous_effect = previous_receipt.effect_fingerprint
+    ?? previous_receipt.intent_fingerprint
+  if link == nil
+    || !external_action_intent_is_exact(intent)
+    || link.previous_action_id != previous_receipt.action_id
+    || link.previous_receipt_id
+    != previous_receipt
+    .id
+    || !__external_action_receipt_is_terminal(previous_receipt)
+    || previous_receipt.intent_fingerprint
+    == intent
+    .fingerprint
+    || previous_effect != intent.effect_fingerprint
+    || previous_receipt.provider != intent.provider
+    || previous_receipt.capability != intent.capability
+    || previous_receipt.operation
+    != intent.operation
+    || previous_receipt.environment != intent.environment {
+    return Err(
+      external_action_error(
+        "invalid_intent",
+        "invalid_retry_link",
+        "retry must link to the exact prior terminal action",
+      ),
+    )
+  }
+  return Ok(link)
+}
+
+/**
+ * Create a distinct, replay-safe action identity for an explicit retry.
+ *
+ * The provider effect remains unchanged. The prior terminal action and receipt
+ * become part of the new attempt identity, so both outcomes remain auditable.
+ *
+ * @effects: []
+ * @errors: [invalid_intent]
+ */
+pub fn external_action_retry_intent(
+  intent: ExternalActionIntent,
+  previous_receipt: ExternalActionReceipt,
+) -> ExternalActionIntent {
+  require external_action_intent_is_exact(intent),
+    "external_action_retry_intent: intent is not exact"
+  const previous_effect = previous_receipt.effect_fingerprint
+    ?? previous_receipt.intent_fingerprint
+  require previous_receipt.action_id == intent.id
+    && previous_receipt.intent_fingerprint
+    == intent
+    .fingerprint
+    && previous_effect == intent.effect_fingerprint
+    && __external_action_receipt_is_terminal(
+    previous_receipt,
+  ),
+    "external_action_retry_intent: receipt is not the intent's terminal receipt"
+  return external_action_intent(
+    {
+      actor: intent.actor,
+      provider: intent.provider,
+      capability: intent.capability,
+      operation: intent.operation,
+      environment: intent.environment,
+      payload: intent.payload,
+      protected_disclosure: intent.protected_disclosure,
+      external_spend: intent.external_spend,
+      display: intent.display,
+      retry: {
+        schema: "harn.external_action_retry_link.v1",
+        previous_action_id: previous_receipt.action_id,
+        previous_receipt_id: previous_receipt.id,
+      },
+    },
+  )
 }
 
 /**
