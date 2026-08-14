@@ -1,11 +1,14 @@
 import {
   external_action_activity,
+  external_action_deny,
+  external_action_error,
   external_action_execute,
   external_action_fake_adapter,
   external_action_grant,
   external_action_intent,
   external_action_managed_policy,
   external_action_reconcile,
+  external_action_retry_intent,
 } from "std/external_action"
 
 fn grant(intent, amount_minor = 20000, expires_at_ms = 9999999999999) {
@@ -51,6 +54,113 @@ pipeline test(harness: Harness) {
   assert(first.status == "confirmed", "first dispatch must confirm")
   assert(replay.id == first.id, "replay must return the durable receipt")
   assert(confirmed.dispatch_calls() == 1, "replay must not dispatch twice")
+  const calendar_intent = external_action_intent(
+    {
+      actor: {kind: "user", id: "user-1"},
+      provider: "google",
+      capability: "calendar.write",
+      operation: "create_event",
+      environment: "test",
+      payload: {calendar_id: "primary", event_key: "toronto-hold"},
+      display: {summary: "Create the Toronto calendar hold"},
+    },
+  )
+  const calendar = external_action_fake_adapter(
+    harness.runtime,
+    "google-calendar-test",
+    {outcome: "confirmed", provider_action_id: "event_test_1"},
+  )
+  const calendar_denied = external_action_deny(
+    harness,
+    calendar_intent,
+    "google-calendar-test",
+    external_action_error(
+      "invalid_policy",
+      "adversarial_reviewer_denied",
+      "The independent reviewer denied this exact action.",
+    ),
+  )
+  const unchanged_after_denial = external_action_execute(
+    harness,
+    calendar_intent,
+    grant(calendar_intent),
+    calendar.adapter,
+  )
+  assert(calendar_denied.status == "denied", "the first calendar decision must deny")
+  assert(
+    unchanged_after_denial.id == calendar_denied.id,
+    "a later authorization must replay the terminal denial for the same action identity",
+  )
+  assert(calendar.dispatch_calls() == 0, "terminal denial must prevent unchanged dispatch")
+  const calendar_retry = external_action_retry_intent(calendar_intent, calendar_denied)
+  assert(
+    calendar_retry.effect_fingerprint == calendar_intent.effect_fingerprint,
+    "retry must preserve the stable provider effect identity",
+  )
+  assert(
+    calendar_retry.fingerprint != calendar_intent.fingerprint,
+    "retry must have a distinct action identity",
+  )
+  const retry_without_prior = external_action_execute(
+    harness,
+    calendar_retry,
+    grant(calendar_retry),
+    calendar.adapter,
+  )
+  assert(retry_without_prior.status == "denied", "unproven retry lineage must fail closed")
+  assert(
+    retry_without_prior.error?.code == "invalid_retry_link",
+    "unproven retry denial must be typed",
+  )
+  assert(calendar.dispatch_calls() == 0, "unproven retry must not reach the adapter")
+  const retry_with_altered_prior = external_action_execute(
+    harness,
+    calendar_retry,
+    grant(calendar_retry),
+    calendar.adapter,
+    nil,
+    nil,
+    calendar_denied + {outcome: "confirmed"},
+  )
+  assert(
+    retry_with_altered_prior.error?.code == "invalid_retry_link",
+    "altered terminal history must not authorize a retry",
+  )
+  assert(calendar.dispatch_calls() == 0, "altered terminal history must not dispatch")
+  const calendar_confirmed = external_action_execute(
+    harness,
+    calendar_retry,
+    grant(calendar_retry),
+    calendar.adapter,
+    nil,
+    nil,
+    calendar_denied,
+  )
+  const calendar_replay = external_action_execute(
+    harness,
+    calendar_retry,
+    grant(calendar_retry),
+    calendar.adapter,
+    nil,
+    nil,
+    calendar_denied,
+  )
+  assert(calendar_confirmed.status == "confirmed", "the explicit retry must dispatch")
+  assert(calendar_replay.id == calendar_confirmed.id, "retry replay must use its receipt")
+  assert(calendar.dispatch_calls() == 1, "the explicit retry must dispatch exactly once")
+  assert(
+    calendar_confirmed.retry?.previous_receipt_id == calendar_denied.id,
+    "retry receipt must preserve terminal lineage",
+  )
+  const denied_activity = external_action_activity(calendar_intent, calendar_denied)
+  const retry_activity = external_action_activity(calendar_retry, calendar_confirmed)
+  assert(denied_activity.id != retry_activity.id, "denial and retry must remain separate history")
+  assert(denied_activity.status == "denied", "prior denial must remain terminal")
+  assert(retry_activity.status == "confirmed", "linked retry must project provider truth")
+  assert(
+    retry_activity.retry?.previous_action_id == denied_activity.action_id,
+    "activity must project typed retry lineage",
+  )
   const activity = external_action_activity(
     intent,
     first,

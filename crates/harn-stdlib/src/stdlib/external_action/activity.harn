@@ -6,6 +6,7 @@ import {
   ExternalActionIntent,
   ExternalActionMoney,
   ExternalActionReceipt,
+  ExternalActionRetryLink,
 } from "std/external_action/contracts"
 import { ExternalActionDisclosureReceipt } from "std/external_action/disclosure"
 pub import {
@@ -72,6 +73,7 @@ pub type ExternalActionActivityRecord = {
   kind: "external_action",
   id: string,
   action_id: string,
+  effect_fingerprint?: string,
   intent_fingerprint: string,
   provider: string,
   capability: string,
@@ -89,6 +91,7 @@ pub type ExternalActionActivityRecord = {
   dispatch: ExternalActionDispatchRecord,
   reconciliation?: ExternalActionReconciliationRecord,
   receipt?: ExternalActionReceipt,
+  retry?: ExternalActionRetryLink,
 }
 
 pub type ExternalActionActivityContext = {
@@ -161,6 +164,9 @@ fn __activity_reconciliation(receipt: ExternalActionReceipt) -> ExternalActionRe
 
 fn __receipt_matches_intent(receipt: ExternalActionReceipt, intent: ExternalActionIntent) -> bool {
   return receipt.action_id == intent.id
+    && (receipt.effect_fingerprint ?? receipt.intent_fingerprint)
+    == intent
+    .effect_fingerprint
     && receipt.intent_fingerprint == intent.fingerprint
     && receipt.provider == intent.provider
     && receipt.capability == intent.capability
@@ -215,9 +221,9 @@ pub fn external_action_activity(
   let record: ExternalActionActivityRecord = {
     schema: "harn.external_action_activity.v1",
     kind: "external_action",
-    kind: "external_action",
     id: "activity_" + substring(intent.fingerprint, 7, 31),
     action_id: intent.id,
+    effect_fingerprint: intent.effect_fingerprint,
     intent_fingerprint: intent.fingerprint,
     provider: intent.provider,
     capability: intent.capability,
@@ -232,6 +238,9 @@ pub fn external_action_activity(
   }
   if intent.external_spend != nil {
     record.external_spend = intent.external_spend
+  }
+  if intent.retry != nil {
+    record.retry = intent.retry
   }
   if context.decision != nil {
     record.decision = context.decision
