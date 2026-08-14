@@ -33,7 +33,7 @@ mod wraps;
 
 use edits::{
     add_call_argument_at_index_edit, add_call_arguments_at_index_edit, ambient_edits,
-    argument_for_kind, carrier_supplies, explicit_capability_argument_edits,
+    argument_for_kind, argument_from_binding, carrier_supplies, explicit_capability_argument_edits,
     receiver_projection_edits, signature_edit, split_call_extension,
     split_capability_receiver_edits, split_capability_signature_edit, undefined_harness_edits,
 };
@@ -125,11 +125,12 @@ where
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct ProgramEdge {
     caller: usize,
     call_idx: usize,
     callee: usize,
+    lexical_argument: Option<(String, CarrierKind)>,
 }
 
 pub(super) fn plan(
@@ -530,21 +531,31 @@ pub(super) fn plan(
             let Some(callee_desired) = desired[edge.callee].as_ref() else {
                 continue;
             };
-            let argument = argument_for_kind(
-                caller,
-                caller_desired,
-                &added_capabilities[edge.caller],
-                callee_desired,
-            )
-            .map_err(|error| {
-                call_edge_error(
-                    &program_files[caller.file_idx].path,
-                    &caller.info.name,
-                    &callee.info.name,
-                    call.span,
-                    &error,
+            let argument = edge
+                .lexical_argument
+                .as_ref()
+                .map_or_else(
+                    || {
+                        argument_for_kind(
+                            caller,
+                            caller_desired,
+                            &added_capabilities[edge.caller],
+                            callee_desired,
+                        )
+                    },
+                    |(binding, available)| {
+                        argument_from_binding(binding, available, callee_desired)
+                    },
                 )
-            })?;
+                .map_err(|error| {
+                    call_edge_error(
+                        &program_files[caller.file_idx].path,
+                        &caller.info.name,
+                        &callee.info.name,
+                        call.span,
+                        &error,
+                    )
+                })?;
             let edit = if let Some(carrier) = &callee.carrier {
                 if let Some(argument_span) = call.args.get(carrier.param_index).copied() {
                     FixEdit {
@@ -1107,10 +1118,26 @@ fn resolve_edges(
                         .copied()
                 });
             if let Some(callee) = target {
+                let lexical_argument = callables[callee]
+                    .carrier
+                    .as_ref()
+                    .and_then(|carrier| call.args.get(carrier.param_index))
+                    .and_then(|span| files[caller.file_idx].source.get(span.start..span.end))
+                    .map(str::trim)
+                    .and_then(|argument| {
+                        let type_expr = call.lexical_capability_bindings.get(argument)?;
+                        let kind = capability_carrier_kind(
+                            type_expr,
+                            &BTreeMap::new(),
+                            &mut BTreeSet::new(),
+                        )?;
+                        Some((argument.to_string(), kind))
+                    });
                 edges.push(ProgramEdge {
                     caller: caller_idx,
                     call_idx,
                     callee,
+                    lexical_argument,
                 });
             }
         }
@@ -1125,6 +1152,9 @@ fn propagate_requirements(
 ) {
     let mut callers_by_callee = vec![BTreeSet::new(); requirements.len()];
     for edge in edges {
+        if edge.lexical_argument.is_some() {
+            continue;
+        }
         callers_by_callee[edge.callee].insert(edge.caller);
     }
 
@@ -1402,93 +1432,5 @@ fn canonical(path: &Path) -> PathBuf {
 }
 
 #[cfg(test)]
-mod tests {
-    use std::cell::Cell;
-
-    use super::*;
-
-    fn diagnostic(
-        file: &str,
-        code: Code,
-        repair_id: &str,
-        expected_type: Option<TypeExpr>,
-    ) -> RepairCandidate {
-        RepairCandidate {
-            file: file.to_string(),
-            source: "test",
-            severity: "warning",
-            code,
-            message: "test diagnostic".to_string(),
-            unresolved_name: None,
-            expected_type,
-            span: Some(Span::with_offsets(4, 8, 1, 5)),
-            repair: Repair {
-                id: harn_parser::RepairId::from_owned(repair_id.to_string()),
-                summary: "test repair".to_string(),
-                safety: RepairSafety::ScopeLocal,
-            },
-            impact: RepairImpactWire::generic(),
-            edits: Vec::new(),
-        }
-    }
-
-    #[test]
-    fn diagnostic_index_normalizes_each_relevant_file_once() {
-        let diagnostics = vec![
-            diagnostic(
-                "a.harn",
-                Code::LintAmbientFsBuiltin,
-                "bindings/thread-harness-fs",
-                None,
-            ),
-            diagnostic(
-                "a.harn",
-                Code::ArgumentTypeMismatch,
-                "bindings/prepend-capability-argument",
-                Some(TypeExpr::Named("HarnessFs".to_string())),
-            ),
-            diagnostic(
-                "b.harn",
-                Code::LintAmbientClockBuiltin,
-                "bindings/thread-harness-clock",
-                None,
-            ),
-            diagnostic(
-                "c.harn",
-                Code::FormatterWouldReformat,
-                "format/reformat",
-                None,
-            ),
-        ];
-        let normalizations = Cell::new(0);
-
-        let index = diagnostic_index_with(&diagnostics, |path| {
-            normalizations.set(normalizations.get() + 1);
-            path.to_path_buf()
-        });
-
-        assert_eq!(normalizations.get(), 2);
-        let indexed = index.get(Path::new("a.harn")).unwrap();
-        assert_eq!(indexed.ambient_spans.len(), 1);
-        assert_eq!(indexed.missing_capability_arguments.len(), 1);
-        assert_eq!(index[Path::new("b.harn")].ambient_spans.len(), 1);
-        assert!(!index.contains_key(Path::new("c.harn")));
-    }
-
-    #[test]
-    fn capability_carrier_alias_resolution_stops_at_cycles() {
-        let aliases = BTreeMap::from([
-            ("First".to_string(), TypeExpr::Named("Second".to_string())),
-            ("Second".to_string(), TypeExpr::Named("First".to_string())),
-        ]);
-
-        assert_eq!(
-            capability_carrier_kind(
-                &TypeExpr::Named("First".to_string()),
-                &aliases,
-                &mut BTreeSet::new(),
-            ),
-            None
-        );
-    }
-}
+#[path = "whole_program_capabilities/tests.rs"]
+mod tests;

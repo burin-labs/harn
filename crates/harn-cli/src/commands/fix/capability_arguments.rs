@@ -14,6 +14,19 @@ use harn_parser::{visit, Node, SNode, TypeExpr};
 
 use super::signature_threading::add_call_argument_edit;
 
+pub(super) fn type_expr_carries_capability(type_expr: &TypeExpr) -> bool {
+    match type_expr {
+        TypeExpr::Named(name) => {
+            name == "Harness" || harn_builtin_meta::CapabilityId::from_type_name(name).is_some()
+        }
+        TypeExpr::Shape(fields) => fields.iter().any(|field| {
+            matches!(&field.type_expr, TypeExpr::Named(name)
+                if harn_builtin_meta::CapabilityId::from_type_name(name).is_some())
+        }),
+        _ => false,
+    }
+}
+
 /// Names bound to a capability by the narrowest declaration enclosing `span`.
 pub(super) fn capability_carrier_param_names(program: &[SNode], span: Span) -> BTreeSet<String> {
     let mut names = BTreeSet::new();
@@ -29,18 +42,11 @@ pub(super) fn capability_carrier_param_names(program: &[SNode], span: Span) -> B
             _ => return,
         };
         for param in params {
-            let carries = match param.type_expr.as_ref() {
-                Some(TypeExpr::Named(name)) => {
-                    name == "Harness"
-                        || harn_builtin_meta::CapabilityId::from_type_name(name).is_some()
-                }
-                Some(TypeExpr::Shape(fields)) => fields.iter().any(|field| {
-                    matches!(&field.type_expr, TypeExpr::Named(name)
-                        if harn_builtin_meta::CapabilityId::from_type_name(name).is_some())
-                }),
-                _ => false,
-            };
-            if carries {
+            if param
+                .type_expr
+                .as_ref()
+                .is_some_and(type_expr_carries_capability)
+            {
                 names.insert(param.name.clone());
             }
         }
