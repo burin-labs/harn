@@ -171,9 +171,10 @@ fn cc_validate_artifact(harness: Harness, artifact: dict, options = nil) -> dict
     // files on every failed compiler turn multiplies context and prompt-cache
     // writes without adding information. Return formatter-normalized files only
     // on success, where the terminal persistence boundary needs them.
-    return passed
-      ? diagnostics + {artifact: artifact + {source: normalized_source, test_source: normalized_test}}
-      : diagnostics
+    return passed ? diagnostics
+      + {
+      artifact: artifact + {source: normalized_source, test_source: normalized_test},
+    } : diagnostics
   } catch (e) {
     harness.fs.delete(dir)
     return {outcome: "fail", error: to_string(e)}
@@ -243,15 +244,13 @@ fn cc_scaffold_tool(
     )
     if !(generated?.success ?? false) {
       capabilities.fs.delete(dir)
-      return {
-        success: false,
-        stderr: to_string(generated?.stderr ?? "")[0:4000],
-      }
+      return {success: false, stderr: to_string(generated?.stderr ?? "")[0:4000]}
     }
     const library = capabilities.fs.read_text(path_join(dir, "lib/tools.harn"))
     const server = capabilities.fs.read_text(path_join(dir, "server.harn"))
     const test = capabilities.fs.read_text(path_join(dir, "tests/test_tool.harn"))
-    const projected_server = library + "\n\n" + server.replace(
+    const projected_server = library + "\n\n"
+      + server.replace(
       "import { tools } from \"lib/tools\"\n\n",
       "",
     )
@@ -265,7 +264,8 @@ fn cc_scaffold_tool(
       entrypoint: "server.harn",
       source: projected_server,
       test_source: projected_test,
-      note: "Rename and adapt this generated package. Preserve tool_define schema validation and dispatch-level tests; keep public pure helpers directly testable.",
+      note:
+        "Rename and adapt this generated package. Preserve tool_define schema validation and dispatch-level tests; keep public pure helpers directly testable.",
     }
   } catch (e) {
     capabilities.fs.delete(dir)
@@ -292,10 +292,7 @@ fn cc_search_builtins(
     },
   )
   if !(result?.success ?? false) {
-    return {
-      success: false,
-      stderr: to_string(result?.stderr ?? "")[0:4000],
-    }
+    return {success: false, stderr: to_string(result?.stderr ?? "")[0:4000]}
   }
   const catalog = try {
     json_parse(to_string(result?.stdout ?? "{}"))
@@ -307,7 +304,8 @@ fn cc_search_builtins(
   for builtin in catalog?.builtins ?? [] {
     const name = lowercase(to_string(builtin?.name ?? ""))
     const exposure = to_string(builtin?.contract?.exposure?.kind ?? "")
-    if name.starts_with("__") || !(builtin?.parser_known ?? false) || exposure == "runtime_internal" {
+    if name.starts_with("__") || !(builtin?.parser_known ?? false)
+      || exposure == "runtime_internal" {
       continue
     }
     const projected = {
@@ -345,7 +343,9 @@ fn cc_prepare_valid_proposals(harness: Harness, proposals: list, options = nil) 
     const checked = cc_validate_artifact(harness, proposal?.artifact ?? {}, options)
     if checked?.outcome != "pass" {
       throw "submit_crystallization_batch: executable package did not pass strict check and authored tests; repair it before resubmitting.\n"
-        + json_stringify(checked)
+        + json_stringify(
+        checked,
+      )
     }
     prepared = prepared + [proposal + {artifact: checked.artifact}]
   }
@@ -358,7 +358,8 @@ fn cc_tools(harness: Harness, evidence: list, options = nil) {
     [
       {
         name: "inspect_session_evidence",
-        description: "Inspect the persisted transcript snapshot for one session in the curator's evidence window.",
+        description:
+          "Inspect the persisted transcript snapshot for one session in the curator's evidence window.",
         parameters: {session_id: {type: "string"}},
         returns: {type: "object"},
         handler: { args ->
@@ -369,7 +370,8 @@ fn cc_tools(harness: Harness, evidence: list, options = nil) {
       },
       {
         name: "lookup_harn_skill",
-        description: "Retrieve an authoritative Harn authoring guide before writing unfamiliar language, MCP, orchestration, testing, or product-quality code.",
+        description:
+          "Retrieve an authoritative Harn authoring guide before writing unfamiliar language, MCP, orchestration, testing, or product-quality code.",
         parameters: {
           name: {
             type: "string",
@@ -391,11 +393,9 @@ fn cc_tools(harness: Harness, evidence: list, options = nil) {
       },
       {
         name: "scaffold_harn_tool",
-        description: "Generate a compiler-current single-file Harn MCP tool and authored-test starting point from Harn's canonical tool package generator.",
-        parameters: {
-          name: {type: "string"},
-          description: {type: "string"},
-        },
+        description:
+          "Generate a compiler-current single-file Harn MCP tool and authored-test starting point from Harn's canonical tool package generator.",
+        parameters: {name: {type: "string"}, description: {type: "string"}},
         returns: {type: "object"},
         handler: { args ->
           cc_scaffold_tool(
@@ -409,26 +409,25 @@ fn cc_tools(harness: Harness, evidence: list, options = nil) {
       },
       {
         name: "search_harn_builtins",
-        description: "Search Harn's compiler/runtime-owned builtin contract catalog by semantic name terms. Use before guessing global function names or importing a builtin from stdlib.",
+        description:
+          "Search Harn's compiler/runtime-owned builtin contract catalog by semantic name terms. Use before guessing global function names or importing a builtin from stdlib.",
         parameters: {
           query: {
             type: "string",
-            description: "Space-separated API concepts such as 'character case string' or 'json parse'.",
+            description:
+              "Space-separated API concepts such as 'character case string' or 'json parse'.",
           },
         },
         returns: {type: "object"},
         handler: { args ->
-          cc_search_builtins(
-            {env: harness.env, tools: harness.tools},
-            args?.query,
-            options,
-          )
+          cc_search_builtins({env: harness.env, tools: harness.tools}, args?.query, options)
         },
         annotations: {kind: "read", side_effect_level: "read_only"},
       },
       {
         name: "validate_harn_candidate",
-        description: "Compile-check complete agent-authored Harn source and return bounded diagnostics. Use this before submitting every executable proposal.",
+        description:
+          "Compile-check complete agent-authored Harn source and return bounded diagnostics. Use this before submitting every executable proposal.",
         parameters: {
           entrypoint: {type: "string", enum: ["server.harn", "workflow.harn"]},
           source: {type: "string"},
@@ -440,7 +439,8 @@ fn cc_tools(harness: Harness, evidence: list, options = nil) {
       },
       {
         name: "submit_crystallization_batch",
-        description: "Submit the curator's final zero-to-three typed capability proposals for validation and review.",
+        description:
+          "Submit the curator's final zero-to-three typed capability proposals for validation and review.",
         parameters: {
           proposals: {
             type: "array",
@@ -451,7 +451,8 @@ fn cc_tools(harness: Harness, evidence: list, options = nil) {
                 kind: {type: "string", enum: ["skill", "harn_tool", "harn_workflow", "hybrid"]},
                 name: {
                   type: "string",
-                  description: "Capability name; the boundary canonicalizes reasonable words or underscores to a lowercase hyphenated slug.",
+                  description:
+                    "Capability name; the boundary canonicalizes reasonable words or underscores to a lowercase hyphenated slug.",
                 },
                 title: {type: "string"},
                 description: {type: "string"},
@@ -470,7 +471,15 @@ fn cc_tools(harness: Harness, evidence: list, options = nil) {
                   },
                 },
               },
-              required: ["kind", "name", "title", "description", "when_to_use", "body", "evidence_ids"],
+              required: [
+                "kind",
+                "name",
+                "title",
+                "description",
+                "when_to_use",
+                "body",
+                "evidence_ids",
+              ],
             },
           },
         },
@@ -532,12 +541,7 @@ pub fn crystallization_curate(harness: Harness, options = nil) -> dict {
     && route?.ladder == nil {
     agent_options = agent_options + {ladder: "frugal"}
   }
-  const result = agent_loop(
-    harness,
-    prompts.message,
-    prompts.system,
-    agent_options,
-  )
+  const result = agent_loop(harness, prompts.message, prompts.system, agent_options)
   const pending_after = pattern_learning_pending(harness, options)
   const proposals = pending_after.filter({ item -> item?.source == "agent_curator" }).to_list()
   return {

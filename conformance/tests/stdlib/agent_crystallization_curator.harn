@@ -50,15 +50,18 @@ pipeline default(harness: Harness) {
                   title: "Verify Package",
                   description: "Run the repository-owned verification contract for one package.",
                   when_to_use: "Use before merging a change scoped to one workspace package.",
-                  body: "# Verify Package\n\nUse the generated `verify_package` tool and report its receipt.",
+                  body:
+                    "# Verify Package\n\nUse the generated `verify_package` tool and report its receipt.",
                   evidence_ids: ["run-one"],
                   capabilities: ["process.run"],
                   side_effects: ["process"],
                   artifact: {
                     entrypoint: "server.harn",
                     tool_names: ["verify_package"],
-                    source: "import { tool_registry_from } from \"std/tools\"\npub fn verification_receipt(package: string) -> dict { return {package: package, status: \"verified\"} }\npipeline main(harness: Harness, task) { harness.tools.mcp_server_metadata({name: \"verify-package\", instructions: \"Verify one package using its repository contract.\"})\nconst tools = tool_registry_from([{name: \"verify_package\", description: \"Run the complete repository-owned verification contract for one package.\", parameters: {package: {type: \"string\"}}, handler: { args -> verification_receipt(args.package) }}])\nharness.tools.mcp_tools(tools) }",
-                    test_source: "import { verification_receipt } from \"./server\"\npipeline test_receipt(harness: Harness, task) { assert_eq(verification_receipt(\"widget\").status, \"verified\") }",
+                    source:
+                      "import { tool_registry_from } from \"std/tools\"\npub fn verification_receipt(package: string) -> dict { return {package: package, status: \"verified\"} }\npipeline main(harness: Harness, task) { harness.tools.mcp_server_metadata({name: \"verify-package\", instructions: \"Verify one package using its repository contract.\"})\nconst tools = tool_registry_from([{name: \"verify_package\", description: \"Run the complete repository-owned verification contract for one package.\", parameters: {package: {type: \"string\"}}, handler: { args -> verification_receipt(args.package) }}])\nharness.tools.mcp_tools(tools) }",
+                    test_source:
+                      "import { verification_receipt } from \"./server\"\npipeline test_receipt(harness: Harness, task) { assert_eq(verification_receipt(\"widget\").status, \"verified\") }",
                   },
                 },
               ],
@@ -73,13 +76,10 @@ pipeline default(harness: Harness) {
               memory_root: path_join(root, "memory"),
               evidence: evidence,
               now: "2026-08-13T12:05:00Z",
-              agent: {
-                provider: "mock",
-                model: "mock",
-                tool_format: "native",
-                max_iterations: 3,
+              agent: {provider: "mock", model: "mock", tool_format: "native", max_iterations: 3},
+              validator: { source ->
+                {outcome: source.contains("pipeline main") ? "pass" : "fail"}
               },
-              validator: { source -> {outcome: source.contains("pipeline main") ? "pass" : "fail"} },
             },
           )
           harness.stdio.println(result.schema)
@@ -101,7 +101,9 @@ pipeline default(harness: Harness) {
           harness.stdio.println(accepted.staged)
           harness.stdio.println(harness.fs.exists(accepted.entrypoint))
           harness.stdio.println(harness.fs.exists(accepted.test_path))
-          harness.stdio.println(harness.fs.exists(path_join(accepted.candidate_dir, "proposal.json")))
+          harness.stdio.println(
+            harness.fs.exists(path_join(accepted.candidate_dir, "proposal.json")),
+          )
         },
       )
     },
