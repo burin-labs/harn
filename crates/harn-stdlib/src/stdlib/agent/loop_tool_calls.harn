@@ -33,18 +33,19 @@ pub type AgentLoopLlmResultProjection = {
   normalized: dict,
 }
 
-pub fn __agent_loop_project_llm_result(
+pub type AgentLoopLlmProjectionContext = {llm_options: dict, turn_options: dict}
+
+pub fn __agent_loop_project_result(
   agent: HarnessAgent,
   result,
-  llm_opts,
-  turn_opts,
+  context: AgentLoopLlmProjectionContext,
 ) -> AgentLoopLlmResultProjection {
   const tool_format = result?._effective_tool_format
-    ?? llm_opts?.tool_format
-    ?? turn_opts?.tool_format
+    ?? context.llm_options?.tool_format
+    ?? context.turn_options?.tool_format
     ?? ""
   const raw_text = result?.raw_text ?? result?.text ?? ""
-  const parsed = agent_parse_tool_calls(agent, raw_text, turn_opts?.tools, tool_format)
+  const parsed = agent_parse_tool_calls(agent, raw_text, context.turn_options?.tools, tool_format)
   const visible_text = __visible_text(parsed, raw_text)
   return {
     raw_text: raw_text,

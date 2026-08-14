@@ -442,12 +442,8 @@ pub fn __agent_loop_run(harness: Harness, message, session, initial_opts) {
         const llm_result = call.value
         consecutive_failure_count = 0
         iteration = iteration + 1
-        const projected = __agent_loop_project_llm_result(
-          harness.agent,
-          llm_result,
-          turn_llm_opts,
-          turn_opts,
-        )
+        const projection_context = {llm_options: turn_llm_opts, turn_options: turn_opts}
+        const projected = __agent_loop_project_result(harness.agent, llm_result, projection_context)
         const raw_text = projected.raw_text
         const parsed = projected.parsed
         const visible_text = projected.visible_text
