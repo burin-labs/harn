@@ -9,6 +9,26 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.92
+
+### Fixed
+
+- Emit the generated Rust protocol artifact with one final newline so downstream vendoring stays diff-clean.
+- Generated Rust protocol bindings are now formatter-stable, so downstream hosts
+  can vendor the authoritative artifact byte-for-byte and still pass their normal
+  Rust format checks.
+- Capability migration now preserves an outer helper's least authority when a
+  nested closure supplies its own typed capability, and reaches a clean fixpoint
+  in one invocation.
+- **Host lease cleanup now tolerates sustained registry writer contention
+  (#6660).** Lease release and other registry mutations wait within a bounded
+  thirty-second ceiling instead of surfacing `database is locked` when a busy
+  Windows CI host serializes many independent coordination domains.
+- Preserve physical provider-call, known-cost lower-bound, and unknown-usage
+  telemetry in CLI run summaries, including mixed retry aggregates.
+- Reassemble bounded OAuth callback headers across fragmented TCP reads so a
+  valid browser denial or authorization response cannot be misparsed under load.
+
 ## v0.10.91
 
 ### Added
