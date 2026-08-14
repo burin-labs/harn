@@ -26,7 +26,19 @@ import { protocol_violation_messages } from "std/llm/tool_parse_result"
 
 // -------------------------------------------------------------------------------------------------
 
-pub fn __agent_loop_project_llm_result(agent: HarnessAgent, result, llm_opts, turn_opts) {
+pub type AgentLoopLlmResultProjection = {
+  raw_text: string,
+  parsed: dict,
+  visible_text: string,
+  normalized: dict,
+}
+
+pub fn __agent_loop_project_llm_result(
+  agent: HarnessAgent,
+  result,
+  llm_opts,
+  turn_opts,
+) -> AgentLoopLlmResultProjection {
   const tool_format = result?._effective_tool_format
     ?? llm_opts?.tool_format
     ?? turn_opts?.tool_format
