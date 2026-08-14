@@ -9,6 +9,28 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.95
+
+### Added
+
+- Prepared runs can now discover command-derived toolchain read roots after the
+  readiness receipt, apply only typed attenuating lease deltas, and account for
+  the probe, granted roots, denied widening, and unused authority.
+- Added consumer-bound platform identity brokers with value-free references,
+  exact provider/audience/tenant/consumer readiness checks, and opaque zeroizing
+  process-local handles shared by local and hosted adapters.
+
+### Fixed
+
+- **Crystallization curator validation now works inside sandboxed Harn runs
+  (#4601).** Fixed-argv Harn compiler, test, scaffold, guide, and builtin-catalog
+  subprocesses reuse the curator's owning sandbox instead of attempting a
+  nested macOS `sandbox-exec` profile that the operating system rejects.
+- **Generated mutation tools preserve typed completion evidence (#4601).**
+  Dynamic MCP results now retain their structured mutation facts in the durable
+  transcript, and the stdlib exposes an exact read-after-write postcondition
+  certificate for atomic tools that prove every changed path.
+
 ## v0.10.94
 
 ### Added
