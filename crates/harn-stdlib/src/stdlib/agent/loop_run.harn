@@ -443,7 +443,10 @@ pub fn __agent_loop_run(harness: Harness, message, session, initial_opts) {
         consecutive_failure_count = 0
         iteration = iteration + 1
         const projected = __agent_loop_project_llm_result(
-          harness.agent, llm_result, turn_llm_opts, turn_opts,
+          harness.agent,
+          llm_result,
+          turn_llm_opts,
+          turn_opts,
         )
         const raw_text = projected.raw_text
         const parsed = projected.parsed
