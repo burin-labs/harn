@@ -1,0 +1,109 @@
+import { crystallization_curate } from "std/agent/crystallization_curator"
+import { pattern_learning_accept } from "std/agent/pattern_knowledge"
+import { llm_tool_call, with_llm_script, with_temp_dir } from "std/testing"
+
+pipeline default(harness: Harness) {
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      const evidence = [
+        {
+          id: "run-one",
+          session_id: "completed-session-one",
+          prompt: "Verify the widget package before merging it",
+          tool_sequence: ["run", "run", "run"],
+          observed_at: "2026-08-13T12:00:00Z",
+        },
+      ]
+      with_llm_script(
+        harness.llm,
+        [
+          llm_tool_call(
+            "submit_crystallization_batch",
+            {
+              proposals: [
+                {
+                  kind: "harn_tool",
+                  name: "invalid-rust-shaped-candidate",
+                  title: "Invalid Candidate",
+                  description: "Compiler feedback fixture.",
+                  when_to_use: "Never; the source must be repaired first.",
+                  body: "This submission must not reach durable memory.",
+                  evidence_ids: ["run-one"],
+                  artifact: {
+                    entrypoint: "server.harn",
+                    tool_names: ["invalid_candidate"],
+                    source: "fn main() { println!(\"this is Rust, not Harn\"); }",
+                    test_source: "pipeline test_invalid(harness: Harness, task) { assert(false) }",
+                  },
+                },
+              ],
+            },
+          ),
+          llm_tool_call(
+            "submit_crystallization_batch",
+            {
+              proposals: [
+                {
+                  kind: "harn_tool",
+                  name: "verify-package",
+                  title: "Verify Package",
+                  description: "Run the repository-owned verification contract for one package.",
+                  when_to_use: "Use before merging a change scoped to one workspace package.",
+                  body: "# Verify Package\n\nUse the generated `verify_package` tool and report its receipt.",
+                  evidence_ids: ["run-one"],
+                  capabilities: ["process.run"],
+                  side_effects: ["process"],
+                  artifact: {
+                    entrypoint: "server.harn",
+                    tool_names: ["verify_package"],
+                    source: "import { tool_registry_from } from \"std/tools\"\npub fn verification_receipt(package: string) -> dict { return {package: package, status: \"verified\"} }\npipeline main(harness: Harness, task) { harness.tools.mcp_server_metadata({name: \"verify-package\", instructions: \"Verify one package using its repository contract.\"})\nconst tools = tool_registry_from([{name: \"verify_package\", description: \"Run the complete repository-owned verification contract for one package.\", parameters: {package: {type: \"string\"}}, handler: { args -> verification_receipt(args.package) }}])\nharness.tools.mcp_tools(tools) }",
+                    test_source: "import { verification_receipt } from \"./server\"\npipeline test_receipt(harness: Harness, task) { assert_eq(verification_receipt(\"widget\").status, \"verified\") }",
+                  },
+                },
+              ],
+            },
+          ),
+        ],
+        { ->
+          const result = crystallization_curate(
+            harness,
+            {
+              project_root: root,
+              memory_root: path_join(root, "memory"),
+              evidence: evidence,
+              now: "2026-08-13T12:05:00Z",
+              agent: {
+                provider: "mock",
+                model: "mock",
+                tool_format: "native",
+                max_iterations: 3,
+              },
+              validator: { source -> {outcome: source.contains("pipeline main") ? "pass" : "fail"} },
+            },
+          )
+          harness.stdio.println(result.schema)
+          harness.stdio.println(result.evidence_count)
+          harness.stdio.println(result.proposal_count)
+          harness.stdio.println(result.proposals[0].source)
+          harness.stdio.println(result.proposals[0].kind)
+          harness.stdio.println(result.proposals[0].evidence_ids[0])
+          harness.stdio.println(result.proposals[0].artifact.tool_names[0])
+          const accepted = pattern_learning_accept(
+            harness,
+            result.proposals[0].id,
+            {
+              project_root: root,
+              memory_root: path_join(root, "memory"),
+              now: "2026-08-13T12:06:00Z",
+            },
+          )
+          harness.stdio.println(accepted.staged)
+          harness.stdio.println(harness.fs.exists(accepted.entrypoint))
+          harness.stdio.println(harness.fs.exists(accepted.test_path))
+          harness.stdio.println(harness.fs.exists(path_join(accepted.candidate_dir, "proposal.json")))
+        },
+      )
+    },
+  )
+}

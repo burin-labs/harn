@@ -296,6 +296,7 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "agent/fact" => "stdlib/agent/fact.harn",
     "agent/hypothesis" => "stdlib/agent/hypothesis.harn",
     "agent/pattern_knowledge" => "stdlib/agent/pattern_knowledge.harn",
+    "agent/crystallization_curator" => "stdlib/agent/crystallization_curator.harn",
     "agent/probe" => "stdlib/agent/probe.harn",
     "agent/stream" => "stdlib/agent/stream.harn",
     "agent/presets" => "stdlib/agent/presets.harn",

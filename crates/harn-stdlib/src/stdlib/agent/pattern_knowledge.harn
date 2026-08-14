@@ -905,6 +905,161 @@ pub fn pattern_learning_pending(harness: Harness, options = nil) -> list {
   )
 }
 
+fn pl_curated_evidence_ids(proposal: dict, allowed_ids: list) -> list {
+  const raw = proposal?.evidence_ids ?? proposal?.evidence ?? []
+  if type_of(raw) != "list" || len(raw) == 0 {
+    throw "HARN-PATTERN-003: every curated proposal needs at least one evidence id"
+  }
+  let out = []
+  for value in raw {
+    const id = pl_text(value?.id ?? value)
+    if id == "" || !allowed_ids.contains(id) {
+      throw "HARN-PATTERN-003: curated proposal references unknown evidence `" + id + "`"
+    }
+    if !out.contains(id) {
+      out = out + [id]
+    }
+  }
+  return out
+}
+
+fn pl_curated_proposal(
+  agent: HarnessAgent,
+  proposal: dict,
+  observations_by_id: dict,
+  allowed_ids: list,
+  now: string,
+) -> dict {
+  const name = pl_slugify(pl_text(proposal?.name))
+  pl_validate_skill_name(name)
+  const kind = pl_text(proposal?.kind)
+  if !["skill", "harn_tool", "harn_workflow", "hybrid"].contains(kind) {
+    throw "HARN-PATTERN-003: curated proposal kind must be skill, harn_tool, harn_workflow, or hybrid"
+  }
+  const title = pl_text(proposal?.title)
+  const description = pl_text(proposal?.description)
+  const when_to_use = pl_text(proposal?.when_to_use)
+  const body = pl_text(proposal?.body ?? proposal?.skill_markdown)
+  if title == "" || description == "" || when_to_use == "" || body == "" {
+    throw "HARN-PATTERN-003: curated proposals require title, description, when_to_use, and body"
+  }
+  const evidence_ids = pl_curated_evidence_ids(proposal, allowed_ids)
+  const artifact = proposal?.artifact ?? {}
+  if kind != "skill" {
+    const entrypoint = pl_text(artifact?.entrypoint)
+    const expected = kind == "harn_workflow" ? "workflow.harn" : "server.harn"
+    if entrypoint != expected {
+      throw "HARN-PATTERN-003: " + kind + " proposals require artifact.entrypoint `" + expected + "`"
+    }
+    if pl_text(artifact?.source) == "" || pl_text(artifact?.test_source) == "" {
+      throw "HARN-PATTERN-003: executable curated proposals require artifact.source and artifact.test_source"
+    }
+    if (kind == "harn_tool" || kind == "hybrid")
+      && (type_of(artifact?.tool_names) != "list" || len(artifact.tool_names) == 0) {
+      throw "HARN-PATTERN-003: tool proposals require at least one artifact.tool_names entry"
+    }
+  }
+  let samples = []
+  let sequence = []
+  for id in evidence_ids {
+    const observation = observations_by_id[id] ?? {}
+    const prompt = pl_text(observation?.prompt)
+    if prompt != "" && len(samples) < 3 && !samples.contains(prompt) {
+      samples = samples + [prompt]
+    }
+    if len(sequence) == 0 {
+      sequence = observation?.tool_sequence ?? []
+    }
+  }
+  return proposal
+    + {
+    id: "curated-" + pl_short_hash(name + ":" + join(evidence_ids, ":")),
+    kind: kind,
+    source: "agent_curator",
+    name: name,
+    title: title,
+    description: description,
+    when_to_use: when_to_use,
+    body: body,
+    support: len(evidence_ids),
+    evidence_ids: evidence_ids,
+    sample_prompts: samples,
+    tool_sequence: proposal?.tool_sequence ?? sequence,
+    created_at: now,
+    last_seen_at: now,
+    curator_session_id: agent.current_id(),
+  }
+}
+
+/**
+ * Validate and persist the terminal proposal batch from a crystallization
+ * curator agent. The curator owns semantic synthesis; this boundary owns the
+ * closed shape, evidence membership, and durable pending-review state.
+ *
+ * @effects: [store.read, store.write]
+ * @errors: [HARN-PATTERN-003]
+ * @api_stability: experimental
+ */
+pub fn pattern_learning_record_curated_batch(
+  harness: Harness,
+  batch: dict,
+  evidence: list,
+  options = nil,
+) -> dict {
+  const raw = batch?.proposals ?? []
+  if type_of(raw) != "list" || len(raw) > 3 {
+    throw "HARN-PATTERN-003: curator batch must contain between zero and three proposals"
+  }
+  let observations_by_id = {}
+  let allowed_ids = []
+  for observation in evidence ?? [] {
+    const id = pl_text(observation?.id)
+    if id == "" {
+      throw "HARN-PATTERN-003: curator evidence entries require id"
+    }
+    observations_by_id = observations_by_id + {[id]: observation}
+    allowed_ids = allowed_ids + [id]
+  }
+  const now = pl_now(harness.clock, options)
+  let accepted = []
+  let names = []
+  for proposal in raw {
+    const normalized = pl_curated_proposal(
+      harness.agent,
+      proposal,
+      observations_by_id,
+      allowed_ids,
+      now,
+    )
+    if names.contains(normalized.name) {
+      throw "HARN-PATTERN-003: curator batch contains duplicate name `" + normalized.name + "`"
+    }
+    names = names + [normalized.name]
+    pl_store_record(
+      harness,
+      "pending",
+      "pending:" + normalized.id,
+      normalized,
+      options
+        + {
+        id: pl_unique_record_id(
+          harness.clock,
+          harness.random,
+          "pending_" + normalized.id.replace("-", "_"),
+          options,
+        ),
+      },
+    )
+    accepted = accepted + [normalized]
+  }
+  return {
+    accepted: true,
+    decision: len(accepted) == 0 ? "no_candidate" : "proposed",
+    proposal_count: len(accepted),
+    proposals: accepted,
+  }
+}
+
 /**
  * Store one completed-run observation and refresh pending proposals when learning is enabled.
  *
@@ -968,7 +1123,15 @@ fn pattern_learning_observe_inner(
     options,
   )
   pl_cap_observations(harness, options)
-  const proposals = pattern_learning_refresh(harness, options)
+  // Observation capture is intentionally semantic-free. The optional legacy
+  // miner remains available to callers that explicitly request it, but the
+  // default path waits for the bounded curator agent instead of mistaking
+  // lexical similarity or an argv sequence for reusable intent.
+  const proposals = if options?.heuristic_refresh ?? false {
+    pattern_learning_refresh(harness, options)
+  } else {
+    pattern_learning_pending(harness, options)
+  }
   return {
     observed: true,
     enabled: true,
@@ -1170,6 +1333,51 @@ fn pl_write_skill(fs: HarnessFs, proposal: dict, options = nil) -> string {
   return path
 }
 
+fn pl_write_candidate(
+  capabilities: {clock: HarnessClock, fs: HarnessFs},
+  proposal: dict,
+  options = nil,
+) -> dict {
+  const project = pl_project_root(capabilities.fs, options)
+  const candidate_dir = path_join(
+    path_join(project, ".burin", "crystallization"),
+    pl_text(proposal.id),
+  )
+  const artifact = proposal?.artifact ?? {}
+  const entrypoint = pl_text(artifact?.entrypoint)
+  capabilities.fs.mkdir(candidate_dir)
+  capabilities.fs.write_text(path_join(candidate_dir, entrypoint), to_string(artifact.source))
+  capabilities.fs.write_text(path_join(candidate_dir, "test.harn"), to_string(artifact.test_source))
+
+  // Keep the human guidance beside the executable artifact. It is deliberately
+  // not installed yet: acceptance approves staging; compiler + test gates own
+  // activation so an agent-authored source blob can never become callable by
+  // merely crossing the model boundary.
+  const skill_path = pl_write_skill(
+    capabilities.fs,
+    proposal,
+    options + {project_root: candidate_dir},
+  )
+  const manifest = proposal
+    + {
+    schema: "harn.crystallization.authored-candidate.v1",
+    status: "staged",
+    candidate_dir: candidate_dir,
+    staged_at: pl_now(capabilities.clock, options),
+  }
+  capabilities.fs.write_text(
+    path_join(candidate_dir, "proposal.json"),
+    json_stringify(manifest),
+  )
+  return {
+    staged: true,
+    candidate_dir: candidate_dir,
+    entrypoint: path_join(candidate_dir, entrypoint),
+    test_path: path_join(candidate_dir, "test.harn"),
+    skill_path: skill_path,
+  }
+}
+
 fn pl_find_pending(harness: Harness, id: string, options = nil) -> dict {
   for proposal in pattern_learning_pending(harness, options) {
     if proposal.id == id {
@@ -1196,14 +1404,19 @@ pub fn pattern_learning_accept(harness: Harness, id: string, options = nil) -> d
   if proposal?.id == nil {
     return {accepted: false, is_error: true, error: "proposal not found: " + pl_text(id)}
   }
-  const skill_path = pl_write_skill(harness.fs, proposal, options)
+  const executable = pl_text(proposal?.kind) != "" && pl_text(proposal?.kind) != "skill"
+  const staged = if executable {
+    pl_write_candidate({clock: harness.clock, fs: harness.fs}, proposal, options)
+  } else {
+    {staged: false, skill_path: pl_write_skill(harness.fs, proposal, options)}
+  }
   memory_forget(
     harness.memory,
     pl_namespace(options),
     {key: "pending:" + proposal.id},
     pl_memory_options(harness.fs, options),
   )
-  return {accepted: true, skill_path: skill_path, proposal: proposal}
+  return {accepted: true, proposal: proposal} + staged
 }
 
 fn pl_add_days_iso(now: string, days: int) -> string {

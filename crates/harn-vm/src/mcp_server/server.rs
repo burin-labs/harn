@@ -1,3 +1,4 @@
+use std::sync::Mutex;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::mpsc;
 
@@ -6,8 +7,7 @@ use crate::mcp_progress::{
     is_valid_progress_token, scope_context, ProgressBus, ProgressContext,
 };
 use crate::mcp_protocol::{
-    self, apply_result_envelope, enforce_request_protocol_version, parse_request_metadata,
-    server_discover_result, McpCacheHint,
+    self, apply_result_envelope, parse_request_metadata, server_discover_result, McpCacheHint,
 };
 use crate::stdlib::json_to_vm_value;
 use crate::value::VmError;
@@ -34,6 +34,7 @@ pub struct McpServer {
     /// Populated by `harn serve mcp --card path/to/card.json`.
     server_card: Option<serde_json::Value>,
     instructions: Option<String>,
+    connection: Mutex<mcp_protocol::McpServerSession>,
 }
 
 impl McpServer {
@@ -53,6 +54,7 @@ impl McpServer {
             prompts,
             server_card: None,
             instructions: None,
+            connection: Mutex::new(mcp_protocol::McpServerSession::default()),
         }
     }
 
@@ -143,10 +145,32 @@ impl McpServer {
         let id = msg.get("id").cloned()?;
         let params = msg.get("params").cloned().unwrap_or(serde_json::json!({}));
 
-        let metadata = parse_request_metadata(&params);
-        if let Err(response) = enforce_request_protocol_version(&id, &metadata) {
-            return Some(response);
+        if method == "initialize" {
+            let result = self
+                .connection
+                .lock()
+                .expect("MCP session lock poisoned")
+                .initialize(
+                    &params,
+                    serde_json::Value::Object(self.server_capabilities()),
+                    self.server_info_value(),
+                    self.instructions.as_deref(),
+                );
+            return Some(match result {
+                Ok(result) => crate::jsonrpc::response(id, result),
+                Err(error) => crate::jsonrpc::error_response(id, -32602, &error),
+            });
         }
+
+        let request_profile = match self
+            .connection
+            .lock()
+            .expect("MCP session lock poisoned")
+            .accept_request(&id, method, &params)
+        {
+            Ok(profile) => profile,
+            Err(response) => return Some(response),
+        };
 
         if let Some(response) =
             mcp_protocol::explicit_unsupported_method_response(id.clone(), method)
@@ -180,7 +204,11 @@ impl McpServer {
                 }
             }),
         };
-        Some(apply_envelope(response, cache_hint_for_method(method)))
+        Some(if request_profile.uses_result_envelope() {
+            apply_envelope(response, cache_hint_for_method(method))
+        } else {
+            response
+        })
     }
 
     fn server_capabilities(&self) -> serde_json::Map<String, serde_json::Value> {

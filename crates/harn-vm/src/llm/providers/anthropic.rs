@@ -462,7 +462,7 @@ impl AnthropicProvider {
         } else {
             8192
         };
-        let messages: Vec<serde_json::Value> = opts
+        let mut messages: Vec<serde_json::Value> = opts
             .messages
             .iter()
             .cloned()
@@ -520,6 +520,8 @@ impl AnthropicProvider {
                 }
             })
             .collect();
+        normalize_anthropic_tool_call_ids(&mut messages);
+        preserve_orphan_anthropic_tool_results_as_text(&mut messages);
         let mut messages = enforce_tool_result_adjacency(messages);
         if let Some(ref prefill) = opts.prefill {
             // Claude 4.6+ deprecated the assistant-prefill feature and
@@ -708,6 +710,123 @@ fn is_empty_anthropic_message(message: &serde_json::Value) -> bool {
         Some(serde_json::Value::String(text)) => text.trim().is_empty(),
         Some(serde_json::Value::Array(blocks)) => blocks.is_empty(),
         _ => false,
+    }
+}
+
+/// Anthropic restricts both `tool_use.id` and the matching
+/// `tool_result.tool_use_id` to ASCII letters, digits, `_`, and `-`. Durable
+/// transcripts can legitimately originate in another provider or Harn
+/// subsystem whose id vocabulary also permits separators such as `:`. Rewrite
+/// those ids as a pair at the Anthropic egress boundary; never make persistence
+/// provider-specific and never let a replay fail after minutes of useful work
+/// on a wire-only spelling constraint.
+fn normalize_anthropic_tool_call_ids(messages: &mut [serde_json::Value]) {
+    let mut replacements = std::collections::HashMap::<String, String>::new();
+    let mut next_empty = 0usize;
+    for message in messages {
+        let Some(blocks) = message
+            .get_mut("content")
+            .and_then(|value| value.as_array_mut())
+        else {
+            continue;
+        };
+        for block in blocks {
+            let key = match block.get("type").and_then(|value| value.as_str()) {
+                Some("tool_use") => "id",
+                Some("tool_result") => "tool_use_id",
+                _ => continue,
+            };
+            let Some(raw) = block.get(key).and_then(|value| value.as_str()) else {
+                continue;
+            };
+            if !raw.is_empty()
+                && raw
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
+            {
+                continue;
+            }
+            let normalized = if let Some(existing) = replacements.get(raw) {
+                existing.clone()
+            } else {
+                let mut candidate = raw
+                    .chars()
+                    .map(|ch| {
+                        if ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' {
+                            ch
+                        } else {
+                            '_'
+                        }
+                    })
+                    .collect::<String>();
+                if candidate.is_empty() {
+                    candidate = format!("harn_tool_{next_empty}");
+                    next_empty += 1;
+                }
+                replacements.insert(raw.to_string(), candidate.clone());
+                candidate
+            };
+            block[key] = serde_json::Value::String(normalized);
+        }
+    }
+}
+
+/// A durable transcript can contain a tool-result observation whose tool-call
+/// envelope was intentionally removed by compaction, interruption, or a legacy
+/// recorder. Anthropic rejects that otherwise-useful history unless every
+/// `tool_result` is paired with a `tool_use` in the immediately preceding
+/// assistant message. Preserve an orphan's content as an ordinary text block;
+/// do not fabricate a call the model never made and do not discard evidence.
+fn preserve_orphan_anthropic_tool_results_as_text(messages: &mut [serde_json::Value]) {
+    let mut preceding_tool_use_ids = std::collections::HashSet::<String>::new();
+    for message in messages {
+        let role = message
+            .get("role")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default();
+        if role == "assistant" {
+            preceding_tool_use_ids = assistant_tool_use_ids(message).unwrap_or_default();
+            continue;
+        }
+        if role != "user" {
+            preceding_tool_use_ids.clear();
+            continue;
+        }
+        let Some(blocks) = message
+            .get_mut("content")
+            .and_then(|value| value.as_array_mut())
+        else {
+            preceding_tool_use_ids.clear();
+            continue;
+        };
+        for block in blocks {
+            if block.get("type").and_then(|value| value.as_str()) != Some("tool_result") {
+                continue;
+            }
+            let id = block
+                .get("tool_use_id")
+                .and_then(|value| value.as_str())
+                .unwrap_or_default();
+            if preceding_tool_use_ids.contains(id) {
+                continue;
+            }
+            let content = block
+                .get("content")
+                .cloned()
+                .unwrap_or(serde_json::Value::String(String::new()));
+            let text = content
+                .as_str()
+                .map(ToString::to_string)
+                .unwrap_or_else(|| {
+                    serde_json::to_string(&content)
+                        .unwrap_or_else(|_| "result unavailable".to_string())
+                });
+            *block = serde_json::json!({
+                "type": "text",
+                "text": format!("[unpaired durable tool result]\n{text}"),
+            });
+        }
+        preceding_tool_use_ids.clear();
     }
 }
 
@@ -1285,6 +1404,75 @@ mod tests {
             Some("tool"),
             "persisted transcript shape must be unchanged at the storage layer"
         );
+    }
+
+    #[test]
+    fn durable_tool_ids_are_normalized_as_a_pair_for_anthropic() {
+        let mut opts = base_payload();
+        opts.messages = vec![
+            serde_json::json!({"role": "user", "content": "continue the durable run"}),
+            serde_json::json!({
+                "role": "assistant",
+                "content": [
+                    {"type": "tool_use", "id": "run:42/tool:7", "name": "validate", "input": {}}
+                ],
+            }),
+            serde_json::json!({
+                "role": "user",
+                "content": [
+                    {"type": "tool_result", "tool_use_id": "run:42/tool:7", "content": "ok"}
+                ],
+            }),
+        ];
+
+        let body = AnthropicProvider::build_request_body(&opts);
+        let messages = body["messages"].as_array().expect("messages array");
+        let tool_use_id = messages[1]["content"][0]["id"]
+            .as_str()
+            .expect("tool use id");
+        let tool_result_id = messages[2]["content"][0]["tool_use_id"]
+            .as_str()
+            .expect("tool result id");
+        assert_eq!(tool_use_id, "run_42_tool_7");
+        assert_eq!(tool_result_id, tool_use_id);
+        assert!(tool_use_id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-'));
+        assert_eq!(opts.messages[1]["content"][0]["id"], "run:42/tool:7");
+    }
+
+    #[test]
+    fn orphaned_durable_tool_result_is_preserved_as_text_for_anthropic() {
+        let mut opts = base_payload();
+        opts.messages = vec![
+            serde_json::json!({"role": "user", "content": "continue"}),
+            serde_json::json!({
+                "role": "assistant",
+                "content": [
+                    {"type": "tool_use", "id": "toolu_valid", "name": "lookup", "input": {}}
+                ],
+            }),
+            serde_json::json!({
+                "role": "user",
+                "content": [
+                    {"type": "tool_result", "tool_use_id": "toolu_valid", "content": "valid"},
+                    {"type": "tool_result", "tool_use_id": "", "content": "legacy observation"}
+                ],
+            }),
+        ];
+
+        let body = AnthropicProvider::build_request_body(&opts);
+        let content = body["messages"][2]["content"]
+            .as_array()
+            .expect("user content blocks");
+        assert_eq!(content[0]["type"], "tool_result");
+        assert_eq!(content[0]["tool_use_id"], "toolu_valid");
+        assert_eq!(content[1]["type"], "text");
+        assert!(content[1]["text"]
+            .as_str()
+            .expect("preserved text")
+            .contains("legacy observation"));
+        assert!(content[1].get("tool_use_id").is_none());
     }
 
     #[test]

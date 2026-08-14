@@ -6,6 +6,8 @@ fn test_parses_serve_mcp_flags() {
         "harn",
         "serve",
         "mcp",
+        "--surface",
+        "script",
         "--transport",
         "http",
         "--bind",
@@ -32,6 +34,7 @@ fn test_parses_serve_mcp_flags() {
         panic!("expected serve mcp");
     };
     assert_eq!(serve.transport, crate::cli::McpServeTransport::Http);
+    assert_eq!(serve.surface, crate::cli::McpServeSurface::Script);
     assert_eq!(serve.bind.to_string(), "127.0.0.1:9001");
     assert_eq!(serve.path, "/rpc");
     assert_eq!(serve.api_key, vec!["alpha".to_string(), "beta".to_string()]);
