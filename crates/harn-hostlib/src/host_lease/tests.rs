@@ -868,6 +868,44 @@ fn immediate_acquire_waits_for_internal_registry_writer() {
     );
 }
 
+static RELEASE_BUSY_HANDLER_BARRIERS: OnceLock<(Barrier, Barrier)> = OnceLock::new();
+static RELEASE_BUSY_HANDLER_OBSERVED: AtomicBool = AtomicBool::new(false);
+
+fn release_registry_writer_for_release_after_busy_observed(_attempts: i32) -> bool {
+    if !RELEASE_BUSY_HANDLER_OBSERVED.swap(true, Ordering::SeqCst) {
+        let barriers = RELEASE_BUSY_HANDLER_BARRIERS
+            .get()
+            .expect("release busy barriers");
+        barriers.0.wait();
+        barriers.1.wait();
+    }
+    true
+}
+
+#[test]
+fn release_waits_for_internal_registry_writer() {
+    let temp = TempDir::new().unwrap();
+    let store = store(&temp);
+    let acquired = store.try_acquire(request("release-owner")).unwrap();
+    let handle = acquired.handle.unwrap();
+    let mut blocker = store.connection(SQLITE_MUTATION_BUSY_TIMEOUT).unwrap();
+    let transaction = blocker
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .unwrap();
+    RELEASE_BUSY_HANDLER_BARRIERS
+        .set((Barrier::new(2), Barrier::new(2)))
+        .expect("one deterministic release busy-handler test");
+    let store = store.with_busy_handler(release_registry_writer_for_release_after_busy_observed);
+
+    let release = thread::spawn(move || store.release(&handle.host, &handle.lease_id).unwrap());
+    let barriers = RELEASE_BUSY_HANDLER_BARRIERS.get().unwrap();
+    barriers.0.wait();
+    drop(transaction);
+    barriers.1.wait();
+
+    assert!(release.join().unwrap().released);
+}
+
 #[test]
 fn wait_rechecks_after_cross_thread_release_without_polling() {
     let temp = TempDir::new().unwrap();
