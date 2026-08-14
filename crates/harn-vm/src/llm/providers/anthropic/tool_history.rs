@@ -7,7 +7,28 @@ use std::collections::{HashMap, HashSet};
 /// at the Anthropic egress boundary so persistence remains provider-neutral.
 pub(super) fn normalize_tool_call_ids(messages: &mut [serde_json::Value]) {
     let mut replacements = HashMap::<String, String>::new();
+    let mut claimed_ids = messages
+        .iter()
+        .filter_map(|message| message.get("content")?.as_array())
+        .flatten()
+        .filter_map(
+            |block| match block.get("type").and_then(serde_json::Value::as_str) {
+                Some("tool_use") => block.get("id"),
+                Some("tool_result") => block.get("tool_use_id"),
+                _ => None,
+            },
+        )
+        .filter_map(serde_json::Value::as_str)
+        .filter(|raw| {
+            !raw.is_empty()
+                && raw
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
+        })
+        .map(ToString::to_string)
+        .collect::<HashSet<_>>();
     let mut next_empty = 0usize;
+    let mut next_collision = 0usize;
     for message in messages {
         let Some(blocks) = message
             .get_mut("content")
@@ -48,6 +69,12 @@ pub(super) fn normalize_tool_call_ids(messages: &mut [serde_json::Value]) {
                     candidate = format!("harn_tool_{next_empty}");
                     next_empty += 1;
                 }
+                let base = candidate.clone();
+                while claimed_ids.contains(&candidate) {
+                    candidate = format!("{base}_harn_{next_collision}");
+                    next_collision += 1;
+                }
+                claimed_ids.insert(candidate.clone());
                 replacements.insert(raw.to_string(), candidate.clone());
                 candidate
             };
@@ -153,6 +180,44 @@ mod tests {
 
         assert_eq!(messages[0]["content"][0]["id"], "run_42_tool_7");
         assert_eq!(messages[1]["content"][0]["tool_use_id"], "run_42_tool_7");
+    }
+
+    #[test]
+    fn normalized_ids_do_not_collide_with_other_durable_calls() {
+        let mut messages = vec![
+            serde_json::json!({
+                "role": "assistant",
+                "content": [
+                    {"type": "tool_use", "id": "run:42"},
+                    {"type": "tool_use", "id": "run/42"},
+                    {"type": "tool_use", "id": "run_42"},
+                ],
+            }),
+            serde_json::json!({
+                "role": "user",
+                "content": [
+                    {"type": "tool_result", "tool_use_id": "run:42"},
+                    {"type": "tool_result", "tool_use_id": "run/42"},
+                    {"type": "tool_result", "tool_use_id": "run_42"},
+                ],
+            }),
+        ];
+
+        normalize_tool_call_ids(&mut messages);
+
+        let tool_use_ids = messages[0]["content"]
+            .as_array()
+            .expect("assistant blocks")
+            .iter()
+            .map(|block| block["id"].as_str().expect("tool id"))
+            .collect::<HashSet<_>>();
+        assert_eq!(tool_use_ids.len(), 3);
+        for index in 0..3 {
+            assert_eq!(
+                messages[0]["content"][index]["id"],
+                messages[1]["content"][index]["tool_use_id"]
+            );
+        }
     }
 
     #[test]
