@@ -9,6 +9,17 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.96
+
+### Fixed
+
+- Let release recovery deterministically reuse the newest successful, unexpired
+  candidate archive run when the same immutable source was certified more than
+  once.
+- Keep parallel release conformance from timing out healthy subprocess-heavy cases
+  by applying the canonical contention-aware timeout budget through `make
+  conformance`.
+
 ## v0.10.95
 
 ### Added
