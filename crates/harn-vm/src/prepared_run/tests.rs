@@ -86,14 +86,36 @@ fn network(destination: &str) -> NetworkRequirement {
     }
 }
 
+fn native_fixture_path(unix_path: &str) -> String {
+    #[cfg(windows)]
+    {
+        format!(
+            r"C:\{}",
+            unix_path.trim_start_matches('/').replace('/', r"\")
+        )
+    }
+    #[cfg(not(windows))]
+    {
+        unix_path.to_string()
+    }
+}
+
 fn toolchain_probe(root_ceiling: &str) -> ToolchainProbeRequirement {
     ToolchainProbeRequirement {
         probe_id: "rust-sysroot".to_string(),
-        executable: "rustc".to_string(),
+        executable: native_fixture_path("/toolchains/bin/rustc"),
         arguments: vec!["--print".to_string(), "sysroot".to_string()],
-        working_directory: "/workspace".to_string(),
-        read_root_ceiling: root_ceiling.to_string(),
+        working_directory: native_fixture_path("/workspace"),
+        read_root_ceiling: native_fixture_path(root_ceiling),
     }
+}
+
+#[test]
+fn toolchain_probe_fixture_uses_native_absolute_paths() {
+    let probe = toolchain_probe("/toolchains");
+    assert!(std::path::Path::new(&probe.executable).is_absolute());
+    assert!(std::path::Path::new(&probe.working_directory).is_absolute());
+    assert!(std::path::Path::new(&probe.read_root_ceiling).is_absolute());
 }
 
 fn identity_requirement() -> IdentityBrokerRequirement {
@@ -776,7 +798,7 @@ impl ToolchainProbeRunner for FixtureProbeRunner {
 fn toolchain_discovery_runs_after_readiness_and_accounts_for_applied_delta() {
     let probe = toolchain_probe("/toolchains");
     let discovered = AuthorityRequirement::ProcessReadRoot {
-        root: "/toolchains/rust/stable".to_string(),
+        root: native_fixture_path("/toolchains/rust/stable"),
     };
     let model_calls = Arc::new(AtomicUsize::new(0));
     let receipts = Arc::new(MemoryAuthorityReceiptSink::default());
@@ -805,7 +827,7 @@ fn toolchain_discovery_runs_after_readiness_and_accounts_for_applied_delta() {
         &probe,
         &FixtureProbeRunner {
             result: ToolchainProbeResult {
-                discovered_read_roots: vec!["/toolchains/rust/stable".to_string()],
+                discovered_read_roots: vec![native_fixture_path("/toolchains/rust/stable")],
                 attempted_authority: Vec::new(),
             },
             calls: calls.clone(),
@@ -872,7 +894,7 @@ fn malicious_toolchain_probe_widening_blocks_noninteractive_execution() {
         &probe,
         &FixtureProbeRunner {
             result: ToolchainProbeResult {
-                discovered_read_roots: vec!["/etc".to_string()],
+                discovered_read_roots: vec![native_fixture_path("/etc")],
                 attempted_authority: vec![AuthorityRequirement::Network(network(
                     "metadata.invalid",
                 ))],
@@ -932,7 +954,7 @@ fn interactive_toolchain_widening_returns_one_semantically_grouped_batch() {
         &probe,
         &FixtureProbeRunner {
             result: ToolchainProbeResult {
-                discovered_read_roots: vec!["/etc".to_string()],
+                discovered_read_roots: vec![native_fixture_path("/etc")],
                 attempted_authority: vec![AuthorityRequirement::Network(network(
                     "metadata.invalid",
                 ))],
