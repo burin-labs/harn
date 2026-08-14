@@ -107,6 +107,7 @@ mod persistent_state;
 pub mod personas;
 pub mod portable;
 mod prepared_module;
+pub mod prepared_run;
 pub mod process_sandbox;
 pub mod profile;
 pub mod provenance;
