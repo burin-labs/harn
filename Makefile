@@ -4,6 +4,7 @@
 
 HARN_BIN ?=
 HARN_PROTOCOL_ARTIFACT_VERSION ?=
+HARN_CONFORMANCE_TIMEOUT_MS ?= 60000
 HARN_CARGO_CMD = ./scripts/cargo_with_worktree_build_dir.sh
 # Rust tests start from a known security-policy environment. Focused tests may
 # still seed these variables explicitly after process startup. Harn script
@@ -315,7 +316,7 @@ test-fast:
 
 # Run Harn conformance test suite
 conformance:
-	$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD_VERBOSE) test conformance --parallel $(if $(HARN_CONFORMANCE_JOBS),--jobs $(HARN_CONFORMANCE_JOBS))
+	$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD_VERBOSE) test conformance --parallel $(if $(HARN_CONFORMANCE_JOBS),--jobs $(HARN_CONFORMANCE_JOBS)) --timeout $(HARN_CONFORMANCE_TIMEOUT_MS)
 
 # Mechanism-contract onramp tier: the manufactured mini-evals that prove a new
 # termination/escalation/judge/guard/routing mechanism ENGAGES correctly (fires
