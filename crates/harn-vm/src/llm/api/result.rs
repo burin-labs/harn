@@ -437,6 +437,9 @@ fn build_outcome_dict(kind: LlmOutcomeKind, result: &LlmResult) -> crate::value:
 /// provider call.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct LlmTextProjection {
+    /// Exact grammar used by the provider transaction that this projection
+    /// represents. This is routing metadata, not a provider response field.
+    pub(crate) effective_tool_format: Option<String>,
     pub(crate) visible_text_src: String,
     pub(crate) inline_reasoning: Option<String>,
     pub(crate) parsed: Option<crate::llm::tools::TextToolParseResult>,
@@ -482,6 +485,7 @@ pub(crate) async fn build_llm_text_projection(
     };
 
     Ok(LlmTextProjection {
+        effective_tool_format: None,
         visible_text_src,
         inline_reasoning,
         parsed,
@@ -615,6 +619,9 @@ pub(crate) fn vm_build_llm_result(
     let mut dict = crate::value::DictMap::new();
     dict.put_str("model", result.model.as_str());
     dict.put_str("provider", result.provider.as_str());
+    if let Some(tool_format) = projection.effective_tool_format.as_deref() {
+        dict.put_str("_effective_tool_format", tool_format);
+    }
     // `usage` is the single owner of ALL accounting (tokens, cache, cost,
     // served tier, provider timings). No accounting key is duplicated at the
     // top level: one spelling, one place.
@@ -859,6 +866,9 @@ mod cache_supported_serde_tests {
         let allowed: std::collections::BTreeSet<&str> = [
             "model",
             "provider",
+            // Private transaction receipt consumed by agent history. It is
+            // intentionally absent from serialized provider/replay payloads.
+            "_effective_tool_format",
             "usage",
             "outcome",
             "data",
@@ -888,13 +898,15 @@ mod cache_supported_serde_tests {
         result.thinking = Some("plan".to_string());
         result.thinking_summary = Some("summary".to_string());
         result.logprobs = vec![serde_json::json!({"token": "x"})];
-        let value = vm_build_llm_result(
-            &result,
-            None,
-            None,
-            &crate::llm::api::test_text_projection(&result, None),
-        );
+        let mut projection = crate::llm::api::test_text_projection(&result, None);
+        projection.effective_tool_format = Some("text".to_string());
+        let value = vm_build_llm_result(&result, None, None, &projection);
         let dict = value.as_dict().expect("result dict");
+        assert_eq!(
+            dict.get("_effective_tool_format").map(VmValue::display),
+            Some("text".to_string()),
+            "the provider transaction's effective grammar must reach the agent loop"
+        );
         for key in dict.keys() {
             assert!(
                 allowed.contains(key.as_str()),

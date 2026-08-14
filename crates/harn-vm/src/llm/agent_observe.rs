@@ -951,6 +951,9 @@ pub(crate) async fn observed_llm_call(
                     other: other_retries,
                     completed_retry_usage: completed_retry_usage.clone(),
                 };
+                if let Some(projection) = result.text_projection.as_mut() {
+                    projection.effective_tool_format = Some(effective_tool_format.clone());
+                }
                 let provider_under_throttle = provider_was_throttled_during_call
                     || crate::llm::rate_governor::provider_already_throttled(
                         &opts.provider,
