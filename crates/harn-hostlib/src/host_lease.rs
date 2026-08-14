@@ -38,12 +38,12 @@ const HARN_HOME_ENV: &str = "HARN_HOME";
 const LEASE_DB_FILE: &str = "host-leases.sqlite";
 const LEASE_WAKE_FILE: &str = "host-leases.wake";
 const RUN_RECEIPTS_DIR: &str = "receipts";
-// Headroom for a briefly-contended registry writer to serialize rather than
-// erroring "database is locked". WAL keeps genuine contention short, so a
-// writer only waits this long under pathological parallel load (for example a
-// CI host running the whole test workspace at once); it is not a per-operation
-// latency floor.
-const SQLITE_MUTATION_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
+// Headroom for contended registry writers to serialize rather than erroring
+// "database is locked". WAL keeps ordinary contention short, while the larger
+// bounded ceiling covers pathological parallel load (for example a Windows CI
+// host running the whole test workspace at once). SQLite returns immediately
+// when the lock is free, so this is not a per-operation latency floor.
+const SQLITE_MUTATION_BUSY_TIMEOUT: Duration = Duration::from_secs(30);
 const REGISTRY_BUSY_RETRY_INTERVAL: Duration = Duration::from_millis(250);
 const PROCESS_LIVENESS_RECHECK_INTERVAL: Duration = Duration::from_secs(5);
 const SCHEMA_VERSION: u32 = 3;
