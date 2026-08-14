@@ -831,6 +831,54 @@ async fn server_stable_non_list_methods_carry_result_type_envelope() {
 }
 
 #[tokio::test]
+async fn script_server_initializes_released_clients_without_stable_request_metadata() {
+    let server = McpServer::new(
+        "released-client-test".to_string(),
+        vec![McpToolDef {
+            name: "render_fixture".to_string(),
+            description: "Render a fixture".to_string(),
+            input_schema: serde_json::json!({"type": "object"}),
+            output_schema: None,
+            title: None,
+            annotations: None,
+            icons: None,
+            meta: None,
+            handler: empty_closure("render_fixture"),
+        }],
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
+    let mut vm = crate::Vm::new();
+    let initialized = server
+        .handle_json_rpc(
+            crate::jsonrpc::request(
+                1,
+                "initialize",
+                serde_json::json!({
+                    "protocolVersion": "2025-11-25",
+                    "capabilities": {},
+                    "clientInfo": {"name": "released-client", "version": "1"},
+                }),
+            ),
+            &mut vm,
+        )
+        .await
+        .expect("initialize response");
+    assert_eq!(initialized["result"]["protocolVersion"], "2025-11-25");
+
+    let listed = server
+        .handle_json_rpc(
+            crate::jsonrpc::request(2, "tools/list", serde_json::json!({})),
+            &mut vm,
+        )
+        .await
+        .expect("tools/list response");
+    assert_eq!(listed["result"]["tools"][0]["name"], "render_fixture");
+    assert!(listed["result"].get("resultType").is_none());
+}
+
+#[tokio::test]
 async fn server_stable_resources_read_emits_cache_hint() {
     let server = McpServer::new(
         "stable-test".to_string(),

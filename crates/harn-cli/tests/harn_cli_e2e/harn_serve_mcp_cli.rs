@@ -96,6 +96,31 @@ fn main(harness: Harness) {
     .unwrap();
 }
 
+fn write_mixed_surface_fixture(temp: &TempDir) {
+    fs::write(
+        temp.path().join("server.harn"),
+        r#"
+pub fn render_value(args) {
+  return {rendered: args.value}
+}
+
+pipeline default(harness: Harness) {
+  let tools = tool_registry()
+  tools = tool_define(tools, "render_fixture", "Render one fixture value", {
+    parameters: {
+      type: "object",
+      properties: {value: {type: "string"}},
+      required: ["value"],
+    },
+    handler: render_value,
+  })
+  harness.tools.mcp_tools(tools)
+}
+"#,
+    )
+    .unwrap();
+}
+
 fn write_trusted_host_dispatch_fixture(temp: &TempDir) {
     fs::write(
         temp.path().join("harn.toml"),
@@ -155,6 +180,63 @@ fn serve_mcp_stdio_discovers_and_calls_exported_tool() {
     assert_eq!(
         called["result"]["structuredContent"]["message"],
         "Hello, Harn!"
+    );
+    client.shutdown_expect_success();
+}
+
+#[ignore = "binary surface — runs in the slow E2E/smoke job"]
+#[test]
+fn serve_mcp_script_surface_wins_over_public_helpers_when_explicit() {
+    let temp = TempDir::new().unwrap();
+    write_mixed_surface_fixture(&temp);
+    let mut command = harn_e2e_command();
+    command
+        .current_dir(temp.path())
+        .arg("serve")
+        .arg("mcp")
+        .arg("--surface")
+        .arg("script")
+        .arg("server.harn");
+    let mut client = StdioJsonRpcClient::spawn("harn serve mcp --surface script", command);
+
+    let initialized = client.request(json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2025-11-25",
+            "capabilities": {},
+            "clientInfo": {"name": "released-client", "version": "1"}
+        }
+    }));
+    assert_eq!(initialized["result"]["protocolVersion"], "2025-11-25");
+    client.send(&json!({"jsonrpc": "2.0", "method": "notifications/initialized"}));
+    let tools = client.request(json!({
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "tools/list",
+        "params": {}
+    }));
+    let names = tools["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|tool| tool["name"].as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(names, vec!["render_fixture"]);
+
+    let called = client.request(json!({
+        "jsonrpc": "2.0",
+        "id": 3,
+        "method": "tools/call",
+        "params": {"name": "render_fixture", "arguments": {"value": "crystallized"}}
+    }));
+    let content = called["result"]["content"][0]["text"]
+        .as_str()
+        .expect("script tool text result");
+    assert!(
+        content.contains("crystallized"),
+        "unexpected result: {content}"
     );
     client.shutdown_expect_success();
 }

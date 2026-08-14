@@ -336,7 +336,8 @@ pub(crate) async fn run_mcp_server(args: &ServeMcpArgs) -> Result<(), String> {
 
     // Scripts that author the MCP surface explicitly through
     // `mcp_tools(registry)` / `mcp_resource(...)` / `mcp_prompt(...)`
-    // typically don't expose any `pub fn` entrypoints. Dispatch those to
+    // usually don't expose any `pub fn` entrypoints, so auto can recognize
+    // them. `--surface script` owns the intentional mixed case. Dispatch to
     // the script-driven runner that runs the script once,
     // collects the registered tools/resources/prompts, and serves them
     // over the requested transport. The DispatchCore-based adapter only knows how to
@@ -349,7 +350,13 @@ pub(crate) async fn run_mcp_server(args: &ServeMcpArgs) -> Result<(), String> {
         .values()
         .any(|function| function.kind == ExportedCallableKind::Function);
 
-    if !has_pub_fn_exports {
+    let use_script_surface = match args.surface {
+        crate::cli::McpServeSurface::Auto => !has_pub_fn_exports,
+        crate::cli::McpServeSurface::Script => true,
+        crate::cli::McpServeSurface::Exports => false,
+    };
+
+    if use_script_surface {
         let mode = match args.transport {
             McpServeTransport::Stdio => crate::commands::run::RunFileMcpServeMode::Stdio,
             McpServeTransport::Http => {

@@ -228,8 +228,9 @@ pub(crate) use runs::{
 pub(crate) use sandbox::SandboxArgs;
 pub(crate) use scan::ScanArgs;
 pub(crate) use serve::{
-    A2aServeArgs, AcpServeTransport, ApiServeArgs, McpServeTransport, ServeAcpArgs, ServeArgs,
-    ServeCommand, ServeMcpArgs, ServeObsMode, ServeTlsMode, SiteServeArgs, WorkerServeArgs,
+    A2aServeArgs, AcpServeTransport, ApiServeArgs, McpServeSurface, McpServeTransport,
+    ServeAcpArgs, ServeArgs, ServeCommand, ServeMcpArgs, ServeObsMode, ServeTlsMode, SiteServeArgs,
+    WorkerServeArgs,
 };
 pub(crate) use session::{
     SessionArgs, SessionCheckpointArgs, SessionCommand, SessionExportArgs, SessionImportArgs,

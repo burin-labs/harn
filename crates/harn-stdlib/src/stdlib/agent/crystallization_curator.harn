@@ -1,0 +1,556 @@
+// std/agent/crystallization_curator.harn
+//
+// Agentic write-side of cross-session crystallization. Pattern memory supplies
+// bounded evidence; a normal Harn agent loop decides whether and how to turn it
+// into a reusable skill, MCP tool, workflow, or hybrid. Deterministic code only
+// validates the terminal proposal contract and evidence membership.
+import { agent_loop } from "std/agent/loop"
+import {
+  pattern_learning_observations,
+  pattern_learning_pending,
+  pattern_learning_record_curated_batch,
+} from "std/agent/pattern_knowledge"
+import { command_run } from "std/command"
+import { tool_registry_from } from "std/tools"
+
+const CURATOR_SCHEMA = "harn.crystallization.curator.v1"
+
+fn cc_text(value) -> string {
+  return regex_replace(r"\s+", " ", to_string(value ?? "").trim())
+    ?? to_string(value ?? "").trim()
+}
+
+fn cc_recent_evidence(harness: Harness, options = nil) -> list {
+  const supplied = options?.evidence
+  const all = if type_of(supplied) == "list" {
+    supplied
+  } else {
+    pattern_learning_observations(harness, options)
+  }
+  const limit = min(max(1, options?.evidence_limit ?? 12), 40)
+  const start = max(0, len(all) - limit)
+  return all[start:len(all)]
+}
+
+fn cc_evidence_cards(evidence: list) -> list {
+  return (evidence ?? []).map(
+    { item ->
+      return {
+        id: item?.id,
+        session_id: item?.session_id,
+        prompt: item?.prompt,
+        tool_sequence: item?.tool_sequence ?? [],
+        observed_at: item?.observed_at,
+        outcome: item?.outcome,
+      }
+    },
+  )
+    .to_list()
+}
+
+fn cc_session_ids(evidence: list) -> list {
+  let out = []
+  for item in evidence ?? [] {
+    const id = cc_text(item?.session_id)
+    if id != "" && !out.contains(id) {
+      out = out + [id]
+    }
+  }
+  return out
+}
+
+fn cc_prompt(evidence: list, pending: list) -> dict {
+  const cards = cc_evidence_cards(evidence)
+  const system = """
+You are Burin's crystallization curator. You inspect completed coding-agent sessions and decide whether repeated or strongly reusable work should become a durable project capability.
+
+Think like a senior harness engineer, not a sequence miner. Infer intent, invariants, repository conventions, useful parameters, failure recovery, and the narrowest reusable interface. A capability may be a skill, an executable Harn MCP tool, a Harn workflow that mixes deterministic and agentic stages, or a hybrid. It is correct to propose nothing.
+
+Use inspect_session_evidence when the summary cards are insufficient and a card supplies a non-empty session_id; when none does, the cards are the complete evidence available. Before authoring an executable proposal, retrieve the narrow Harn guides you need with lookup_harn_skill; harn-language plus harn-mcp or harn-orchestration and harn-testing are usually sufficient. For an MCP tool, call scaffold_harn_tool before authoring: it projects Harn's current canonical generator into the single-file package shape accepted here, so do not reconstruct an older tool API from memory. Search compiler-owned global function names with search_harn_builtins instead of guessing APIs. For every executable proposal, author Harn language—not Rust, TypeScript, Python, or pseudocode—and call validate_harn_candidate on the complete source. Repair it until the compiler and authored tests report pass. Prefer small pure helper tests for deterministic rendering and validation; add Harness test doubles only when they prove behavior the pure seam cannot. Finish by calling submit_crystallization_batch exactly once successfully with zero to three proposals. A rejected submission is feedback: repair and resubmit. Never claim evidence you did not inspect. Do not encode secrets, machine-specific absolute paths, or transcript-specific ids into an artifact.
+
+Each executable proposal must include complete Harn source in artifact.source and a deterministic user-test suite in artifact.test_source. Set artifact.entrypoint to server.harn for harn_tool/hybrid proposals or workflow.harn for harn_workflow proposals. MCP server source must be runnable with `harn serve mcp server.harn`; tests must be runnable with `harn test test.harn`. Keep external effects behind Harness capabilities, declare capabilities and side effects, preserve approval boundaries, and prefer a small semantic interface over replaying incidental low-level calls.
+
+Treat authored tests as falsifiers for the repository contract, not liveness checks. For every representative success path, assert the exact externally consumed outputs—such as normalized paths, command arguments, generated names, status fields, and ordering—not only `ok`, non-empty output, or a generic substring. Include at least one held-out compositional input that was not copied from an evidence card (for example a multiword identifier when the evidence names were single words). A tool that dispatches successfully but returns a malformed path or subtly wrong receipt must fail admission.
+
+Harn tests are `pipeline test_name(harness: Harness, task) { assert_eq(...) }` and may import public helpers from `./server`. Do not use `use`, `struct`, `Vec`, `Result`, attributes, macros, references, or other Rust syntax.
+
+These examples define breadth, not templates:
+
+1. Repeated package verification may become verify_package(package): one MCP tool that runs the repository's typecheck, tests, and lint with failure receipts. The insight is the verified contract, not argv-position extraction.
+2. Repeated pull-request babysitting may become monitor_merge_candidate(repo, pr): a durable Harn workflow that observes checks and reviews, parks on triggers, classifies safe transitions agentically, and never merges without the configured policy boundary.
+3. Repeated creation of framework objects in a language with weak AST support may become add_framework_entity(name, fields): a tool that studies nearby exemplars, renders the repository-specific files, applies hash-guarded edits, and runs the framework's own validation. It may retain a bounded agentic step when deterministic parsing is not reliable.
+
+Prefer proposals that compress reasoning while preserving or improving correctness. Reject coincidental repetition, tasks with unstable semantics, and capabilities already covered by the pending or installed library.
+"""
+  const message = """
+Review this bounded evidence window and the existing pending capability cards.
+
+<evidence_cards>
+${json_stringify(cards)}
+</evidence_cards>
+
+<existing_pending>
+${json_stringify(pending ?? [])}
+</existing_pending>
+
+Call submit_crystallization_batch when your analysis is complete.
+"""
+  return {system: system, message: message}
+}
+
+fn cc_allowed_session(args: dict, allowed: list) -> string {
+  const id = cc_text(args?.session_id)
+  if id == "" || !allowed.contains(id) {
+    throw "inspect_session_evidence: session_id is outside this evidence window"
+  }
+  return id
+}
+
+fn cc_validate_artifact(harness: Harness, artifact: dict, options = nil) -> dict {
+  const source = to_string(artifact?.source ?? "")
+  const test_source = to_string(artifact?.test_source ?? "")
+  const entrypoint = cc_text(artifact?.entrypoint)
+  const injected = options?.validator
+  if injected != nil {
+    const checked = injected(source)
+    return checked + {artifact: artifact}
+  }
+  if !["server.harn", "workflow.harn"].contains(entrypoint) {
+    return {outcome: "fail", error: "entrypoint must be server.harn or workflow.harn"}
+  }
+  const import_path = entrypoint == "server.harn" ? "./server" : "./workflow"
+  if !test_source.contains(import_path) || !test_source.contains("assert") {
+    return {
+      outcome: "fail",
+      error: "test_source must import `" + import_path + "` and assert observable helper behavior",
+    }
+  }
+  const dir = harness.fs.mkdtemp_in_workspace("harn-curator-")
+  return try {
+    harness.fs.write_text(path_join(dir, entrypoint), source)
+    harness.fs.write_text(path_join(dir, "test.harn"), test_source)
+    const formatted = command_run(
+      harness.tools,
+      [cc_harn_binary(harness.env, options), "fmt", entrypoint, "test.harn"],
+      {cwd: dir, timeout_ms: options?.validation_timeout_ms ?? 30000},
+    )
+    if !(formatted?.success ?? false) {
+      harness.fs.delete(dir)
+      return {
+        outcome: "fail",
+        error: "harn fmt failed",
+        format_stdout: to_string(formatted?.stdout ?? "")[0:4000],
+        format_stderr: to_string(formatted?.stderr ?? "")[0:4000],
+      }
+    }
+    const normalized_source = harness.fs.read_text(path_join(dir, entrypoint))
+    const normalized_test = harness.fs.read_text(path_join(dir, "test.harn"))
+    const check = command_run(
+      harness.tools,
+      [cc_harn_binary(harness.env, options), "check", "--strict", entrypoint, "test.harn"],
+      {cwd: dir, timeout_ms: options?.validation_timeout_ms ?? 30000},
+    )
+    let tested = {}
+    if check?.success ?? false {
+      tested = command_run(
+        harness.tools,
+        [cc_harn_binary(harness.env, options), "test", "test.harn"],
+        {cwd: dir, timeout_ms: options?.validation_timeout_ms ?? 30000},
+      )
+    }
+    harness.fs.delete(dir)
+    const passed = (check?.success ?? false) && (tested?.success ?? false)
+    const diagnostics = {
+      outcome: passed ? "pass" : "fail",
+      check_stdout: to_string(check?.stdout ?? "")[0:4000],
+      check_stderr: to_string(check?.stderr ?? "")[0:4000],
+      test_stdout: to_string(tested?.stdout ?? "")[0:4000],
+      test_stderr: to_string(tested?.stderr ?? "")[0:4000],
+    }
+    // The model already owns the submitted source. Re-echoing both complete
+    // files on every failed compiler turn multiplies context and prompt-cache
+    // writes without adding information. Return formatter-normalized files only
+    // on success, where the terminal persistence boundary needs them.
+    return passed ? diagnostics
+      + {
+      artifact: artifact + {source: normalized_source, test_source: normalized_test},
+    } : diagnostics
+  } catch (e) {
+    harness.fs.delete(dir)
+    return {outcome: "fail", error: to_string(e)}
+  }
+}
+
+fn cc_harn_binary(env: HarnessEnv, options = nil) -> string {
+  return options?.harn_binary ?? env.get("HARN_BIN") ?? "harn"
+}
+
+fn cc_lookup_skill(
+  capabilities: {env: HarnessEnv, tools: HarnessTools},
+  raw_name,
+  options = nil,
+) -> dict {
+  const name = cc_text(raw_name)
+  const allowed = [
+    "harn-language",
+    "harn-agent",
+    "harn-mcp",
+    "harn-testing",
+    "harn-orchestration",
+    "harn-product-quality",
+  ]
+  if !allowed.contains(name) {
+    throw "lookup_harn_skill: unsupported guide `" + name + "`"
+  }
+  const result = command_run(
+    capabilities.tools,
+    [cc_harn_binary(capabilities.env, options), "skill", "get", name, "--full"],
+    {timeout_ms: options?.guide_timeout_ms ?? 30000},
+  )
+  const stdout = to_string(result?.stdout ?? "")
+  const stderr = to_string(result?.stderr ?? "")
+  return {
+    name: name,
+    success: result?.success ?? false,
+    guide: stdout[0:min(len(stdout), options?.guide_max_bytes ?? 16000)],
+    stderr: stderr[0:min(len(stderr), 2000)],
+  }
+}
+
+fn cc_scaffold_tool(
+  capabilities: {env: HarnessEnv, fs: HarnessFs, tools: HarnessTools},
+  raw_name,
+  raw_description,
+  options = nil,
+) -> dict {
+  const name = regex_replace(r"[^a-zA-Z0-9_-]+", "-", cc_text(raw_name)) ?? "capability"
+  const description = cc_text(raw_description)
+  const dir = capabilities.fs.mkdtemp_in_workspace("harn-tool-scaffold-")
+  return try {
+    const generated = command_run(
+      capabilities.tools,
+      [
+        cc_harn_binary(capabilities.env, options),
+        "tool",
+        "new",
+        name,
+        "--description",
+        description,
+        "--dir",
+        dir,
+        "--force",
+      ],
+      {timeout_ms: options?.guide_timeout_ms ?? 30000},
+    )
+    if !(generated?.success ?? false) {
+      capabilities.fs.delete(dir)
+      return {success: false, stderr: to_string(generated?.stderr ?? "")[0:4000]}
+    }
+    const library = capabilities.fs.read_text(path_join(dir, "lib/tools.harn"))
+    const server = capabilities.fs.read_text(path_join(dir, "server.harn"))
+    const test = capabilities.fs.read_text(path_join(dir, "tests/test_tool.harn"))
+    const projected_server = library + "\n\n"
+      + server.replace(
+      "import { tools } from \"lib/tools\"\n\n",
+      "",
+    )
+    const projected_test = test.replace(
+      "import { tools } from \"../lib/tools\"",
+      "import { tools } from \"./server\"",
+    )
+    capabilities.fs.delete(dir)
+    return {
+      success: true,
+      entrypoint: "server.harn",
+      source: projected_server,
+      test_source: projected_test,
+      note:
+        "Rename and adapt this generated package. Preserve tool_define schema validation and dispatch-level tests; keep public pure helpers directly testable.",
+    }
+  } catch (e) {
+    capabilities.fs.delete(dir)
+    return {success: false, error: to_string(e)}
+  }
+}
+
+fn cc_search_builtins(
+  capabilities: {env: HarnessEnv, tools: HarnessTools},
+  raw_query,
+  options = nil,
+) -> dict {
+  const query = lowercase(cc_text(raw_query))
+  const terms = query.split(" ").filter({ term -> len(term) >= 2 }).to_list()
+  if len(terms) == 0 {
+    return {success: false, error: "query must contain at least one two-character term"}
+  }
+  const result = command_run(
+    capabilities.tools,
+    [cc_harn_binary(capabilities.env, options), "contracts", "builtins", "--pretty", "false"],
+    {
+      timeout_ms: options?.guide_timeout_ms ?? 30000,
+      capture: {max_inline_bytes: options?.catalog_max_bytes ?? 2000000},
+    },
+  )
+  if !(result?.success ?? false) {
+    return {success: false, stderr: to_string(result?.stderr ?? "")[0:4000]}
+  }
+  const catalog = try {
+    json_parse(to_string(result?.stdout ?? "{}"))
+  } catch (e) {
+    return {success: false, error: "invalid contracts catalog: " + to_string(e)}
+  }
+  let primary = []
+  let secondary = []
+  for builtin in catalog?.builtins ?? [] {
+    const name = lowercase(to_string(builtin?.name ?? ""))
+    const exposure = to_string(builtin?.contract?.exposure?.kind ?? "")
+    if name.starts_with("__") || !(builtin?.parser_known ?? false)
+      || exposure == "runtime_internal" {
+      continue
+    }
+    const projected = {
+      name: builtin?.name,
+      exposure: exposure,
+      return_types: builtin?.return_types ?? [],
+      parser_known: true,
+    }
+    if terms.any({ term -> name == term || name.starts_with(term) || term.starts_with(name) }) {
+      primary = primary + [projected]
+    } else if terms.any({ term -> name.contains(term) }) {
+      secondary = secondary + [projected]
+    }
+  }
+  let matches = primary
+  for item in secondary {
+    if len(matches) >= 40 {
+      break
+    }
+    matches = matches + [item]
+  }
+  if len(matches) > 40 {
+    matches = matches[0:40]
+  }
+  return {success: true, query: query, matches: matches}
+}
+
+fn cc_prepare_valid_proposals(harness: Harness, proposals: list, options = nil) -> list {
+  let prepared = []
+  for proposal in proposals ?? [] {
+    if proposal?.kind == "skill" {
+      prepared = prepared + [proposal]
+      continue
+    }
+    const checked = cc_validate_artifact(harness, proposal?.artifact ?? {}, options)
+    if checked?.outcome != "pass" {
+      throw "submit_crystallization_batch: executable package did not pass strict check and authored tests; repair it before resubmitting.\n"
+        + json_stringify(
+        checked,
+      )
+    }
+    prepared = prepared + [proposal + {artifact: checked.artifact}]
+  }
+  return prepared
+}
+
+fn cc_tools(harness: Harness, evidence: list, options = nil) {
+  const allowed_sessions = cc_session_ids(evidence)
+  return tool_registry_from(
+    [
+      {
+        name: "inspect_session_evidence",
+        description:
+          "Inspect the persisted transcript snapshot for one session in the curator's evidence window.",
+        parameters: {session_id: {type: "string"}},
+        returns: {type: "object"},
+        handler: { args ->
+          const session_id = cc_allowed_session(args, allowed_sessions)
+          return harness.agent.snapshot(session_id)
+        },
+        annotations: {kind: "lookup", readOnlyHint: true, side_effect_level: "read_only"},
+      },
+      {
+        name: "lookup_harn_skill",
+        description:
+          "Retrieve an authoritative Harn authoring guide before writing unfamiliar language, MCP, orchestration, testing, or product-quality code.",
+        parameters: {
+          name: {
+            type: "string",
+            enum: [
+              "harn-language",
+              "harn-agent",
+              "harn-mcp",
+              "harn-testing",
+              "harn-orchestration",
+              "harn-product-quality",
+            ],
+          },
+        },
+        returns: {type: "object"},
+        handler: { args ->
+          cc_lookup_skill({env: harness.env, tools: harness.tools}, args?.name, options)
+        },
+        annotations: {kind: "lookup", readOnlyHint: true, side_effect_level: "process"},
+      },
+      {
+        name: "scaffold_harn_tool",
+        description:
+          "Generate a compiler-current single-file Harn MCP tool and authored-test starting point from Harn's canonical tool package generator.",
+        parameters: {name: {type: "string"}, description: {type: "string"}},
+        returns: {type: "object"},
+        handler: { args ->
+          cc_scaffold_tool(
+            {env: harness.env, fs: harness.fs, tools: harness.tools},
+            args?.name,
+            args?.description,
+            options,
+          )
+        },
+        annotations: {kind: "read", side_effect_level: "read_only"},
+      },
+      {
+        name: "search_harn_builtins",
+        description:
+          "Search Harn's compiler/runtime-owned builtin contract catalog by semantic name terms. Use before guessing global function names or importing a builtin from stdlib.",
+        parameters: {
+          query: {
+            type: "string",
+            description:
+              "Space-separated API concepts such as 'character case string' or 'json parse'.",
+          },
+        },
+        returns: {type: "object"},
+        handler: { args ->
+          cc_search_builtins({env: harness.env, tools: harness.tools}, args?.query, options)
+        },
+        annotations: {kind: "read", side_effect_level: "read_only"},
+      },
+      {
+        name: "validate_harn_candidate",
+        description:
+          "Compile-check complete agent-authored Harn source and return bounded diagnostics. Use this before submitting every executable proposal.",
+        parameters: {
+          entrypoint: {type: "string", enum: ["server.harn", "workflow.harn"]},
+          source: {type: "string"},
+          test_source: {type: "string"},
+        },
+        returns: {type: "object"},
+        handler: { args -> cc_validate_artifact(harness, args, options) },
+        annotations: {kind: "verification", readOnlyHint: true, side_effect_level: "process"},
+      },
+      {
+        name: "submit_crystallization_batch",
+        description:
+          "Submit the curator's final zero-to-three typed capability proposals for validation and review.",
+        parameters: {
+          proposals: {
+            type: "array",
+            maxItems: 3,
+            items: {
+              type: "object",
+              properties: {
+                kind: {type: "string", enum: ["skill", "harn_tool", "harn_workflow", "hybrid"]},
+                name: {
+                  type: "string",
+                  description:
+                    "Capability name; the boundary canonicalizes reasonable words or underscores to a lowercase hyphenated slug.",
+                },
+                title: {type: "string"},
+                description: {type: "string"},
+                when_to_use: {type: "string"},
+                body: {type: "string"},
+                evidence_ids: {type: "array", items: {type: "string"}, minItems: 1},
+                capabilities: {type: "array", items: {type: "string"}},
+                side_effects: {type: "array", items: {type: "string"}},
+                artifact: {
+                  type: "object",
+                  properties: {
+                    entrypoint: {type: "string"},
+                    tool_names: {type: "array", items: {type: "string"}},
+                    source: {type: "string"},
+                    test_source: {type: "string"},
+                  },
+                },
+              },
+              required: [
+                "kind",
+                "name",
+                "title",
+                "description",
+                "when_to_use",
+                "body",
+                "evidence_ids",
+              ],
+            },
+          },
+        },
+        returns: {type: "object"},
+        handler: { args ->
+          const proposals = cc_prepare_valid_proposals(harness, args?.proposals ?? [], options)
+          return pattern_learning_record_curated_batch(
+            harness,
+            args + {proposals: proposals},
+            evidence,
+            options,
+          )
+        },
+        annotations: {kind: "record", side_effect_level: "store_write"},
+      },
+    ],
+  )
+}
+
+/**
+ * Run one bounded agentic crystallization review over recent session evidence.
+ * The semantic decision is made by the model; Harn constrains evidence access,
+ * proposal shape, cost, iterations, and durable review state.
+ *
+ * @effects: [agent, llm, store.read, store.write]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn crystallization_curate(harness: Harness, options = nil) -> dict {
+  const evidence = cc_recent_evidence(harness, options)
+  if len(evidence) == 0 {
+    return {schema: CURATOR_SCHEMA, status: "no_evidence", proposals: []}
+  }
+  const pending_before = pattern_learning_pending(harness, options)
+  const prompts = cc_prompt(evidence, pending_before)
+  const route = options?.agent ?? {}
+  let agent_options = route
+    + {
+    tools: cc_tools(harness, evidence, options),
+    allowed_tools: [
+      "inspect_session_evidence",
+      "lookup_harn_skill",
+      "scaffold_harn_tool",
+      "search_harn_builtins",
+      "validate_harn_candidate",
+      "submit_crystallization_batch",
+    ],
+    require_successful_tools: ["submit_crystallization_batch"],
+    stop_after_successful_tools: ["submit_crystallization_batch"],
+    loop_until_done: true,
+    max_iterations: min(max(2, route?.max_iterations ?? 8), 24),
+    max_nudges: 2,
+    session_id: route?.session_id ?? ("crystallization-curator-" + harness.random.uuid_v7()),
+    budget: route?.budget ?? {max_cost_usd: 0.75, max_total_tokens: 60000},
+  }
+  if route?.provider == nil
+    && route?.model == nil
+    && route?.models == nil
+    && route?.ladder == nil {
+    agent_options = agent_options + {ladder: "frugal"}
+  }
+  const result = agent_loop(harness, prompts.message, prompts.system, agent_options)
+  const pending_after = pattern_learning_pending(harness, options)
+  const proposals = pending_after.filter({ item -> item?.source == "agent_curator" }).to_list()
+  return {
+    schema: CURATOR_SCHEMA,
+    status: result?.terminal?.kind ?? result?.status ?? "unknown",
+    curator_session_id: result?.session_id,
+    evidence_count: len(evidence),
+    proposal_count: len(proposals),
+    proposals: proposals,
+    agent_result: result,
+  }
+}

@@ -290,6 +290,12 @@ pub(crate) struct ServeMcpArgs {
     /// Transport to expose for MCP clients.
     #[arg(long, value_enum, default_value_t = McpServeTransport::Stdio)]
     pub transport: McpServeTransport,
+    /// Callable surface to expose. `script` executes the pipeline and serves
+    /// its explicit `mcp_tools(...)` registry even when the file also exports
+    /// public helpers; `exports` serves public functions; `auto` preserves the
+    /// compatibility heuristic.
+    #[arg(long, value_enum, default_value_t = McpServeSurface::Auto)]
+    pub surface: McpServeSurface,
     /// Socket address to bind when serving over HTTP.
     #[arg(
         long,
@@ -325,10 +331,10 @@ pub(crate) struct ServeMcpArgs {
     /// Where to route `harness.obs.*` spans/metrics/logs.
     #[arg(long = "obs", value_enum, default_value_t = ServeObsMode::Auto)]
     pub obs: ServeObsMode,
-    /// Path to the `.harn` file whose exported `pub fn` entrypoints are
-    /// served. Scripts that instead call `mcp_tools(registry)` /
-    /// `mcp_resource(...)` / `mcp_prompt(...)` are detected and served
-    /// via the script-driven surface.
+    /// Path to the `.harn` file to serve. `auto` serves exported `pub fn`
+    /// entrypoints when present and otherwise executes a script-declared
+    /// `mcp_tools(...)` / resource / prompt surface. Use `--surface script`
+    /// when a registry-backed server also exports helpers.
     pub file: String,
 }
 
@@ -336,6 +342,13 @@ pub(crate) struct ServeMcpArgs {
 pub(crate) enum McpServeTransport {
     Stdio,
     Http,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub(crate) enum McpServeSurface {
+    Auto,
+    Script,
+    Exports,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]

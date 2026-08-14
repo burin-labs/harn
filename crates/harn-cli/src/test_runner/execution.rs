@@ -306,12 +306,17 @@ async fn execute_compiled(
             crate::package::install_manifest_triggers(&mut vm, &extensions)
                 .await
                 .map_err(|error| format!("failed to install manifest triggers: {error}"))?;
-            // A pure-logic unit test does not initialize unrelated handler
-            // graphs. First dispatch resolves against the firing VM and keeps
-            // per-test module state isolated.
-            crate::package::install_manifest_hooks(&mut vm, &extensions)
-                .await
-                .map_err(|error| format!("failed to install manifest hooks: {error}"))?;
+            // Runtime handlers stay lazy in production. User-test timeouts,
+            // however, begin after fixture setup, so initialize them here to
+            // keep compiler work out of the execution safety rail while each
+            // fresh test VM still owns isolated handler state.
+            crate::package::install_manifest_hooks_with_initialization(
+                &mut vm,
+                &extensions,
+                crate::package::ManifestHandlerInitialization::Eager,
+            )
+            .await
+            .map_err(|error| format!("failed to install manifest hooks: {error}"))?;
             vm.set_harness(harn_vm::Harness::real());
             let setup_ms = setup_start.elapsed().as_millis() as u64;
             let exec_start = Instant::now();

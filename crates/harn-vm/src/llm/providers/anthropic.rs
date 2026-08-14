@@ -11,6 +11,12 @@ use crate::llm::providers::schema_compat::{
 };
 use crate::value::VmError;
 
+mod tool_history;
+
+use tool_history::{
+    assistant_tool_use_ids, normalize_tool_call_ids, preserve_orphan_results_as_text,
+};
+
 pub(crate) const ANTHROPIC_INTERLEAVED_THINKING_BETA: &str = "interleaved-thinking-2025-05-14";
 
 /// Anthropic beta header value that unlocks the native `computer_20251124`
@@ -462,7 +468,7 @@ impl AnthropicProvider {
         } else {
             8192
         };
-        let messages: Vec<serde_json::Value> = opts
+        let mut messages: Vec<serde_json::Value> = opts
             .messages
             .iter()
             .cloned()
@@ -520,7 +526,9 @@ impl AnthropicProvider {
                 }
             })
             .collect();
+        normalize_tool_call_ids(&mut messages);
         let mut messages = enforce_tool_result_adjacency(messages);
+        preserve_orphan_results_as_text(&mut messages);
         if let Some(ref prefill) = opts.prefill {
             // Claude 4.6+ deprecated the assistant-prefill feature and
             // returns HTTP 400 when the final message is role=assistant.
@@ -924,31 +932,6 @@ fn enforce_tool_result_adjacency(messages: Vec<serde_json::Value>) -> Vec<serde_
         normalized.extend(deferred);
     }
     normalized
-}
-
-fn assistant_tool_use_ids(message: &serde_json::Value) -> Option<HashSet<String>> {
-    if message.get("role").and_then(|role| role.as_str()) != Some("assistant") {
-        return None;
-    }
-    let blocks = message.get("content")?.as_array()?;
-    let ids: HashSet<String> = blocks
-        .iter()
-        .filter_map(|block| {
-            if block.get("type").and_then(|value| value.as_str()) == Some("tool_use") {
-                block
-                    .get("id")
-                    .and_then(|value| value.as_str())
-                    .map(ToString::to_string)
-            } else {
-                None
-            }
-        })
-        .collect();
-    if ids.is_empty() {
-        None
-    } else {
-        Some(ids)
-    }
 }
 
 fn matching_tool_result_ids(
@@ -1527,7 +1510,7 @@ mod tests {
     }
 
     #[test]
-    fn whitespace_only_text_blocks_are_dropped_before_anthropic_egress() {
+    fn whitespace_is_dropped_and_unpaired_tool_result_is_preserved_as_text() {
         let mut opts = base_payload();
         opts.messages = vec![serde_json::json!({
             "role": "user",
@@ -1550,8 +1533,8 @@ mod tests {
         assert_eq!(content.len(), 2);
         assert_eq!(content[0]["type"], "text");
         assert_eq!(content[0]["text"], "keep me");
-        assert_eq!(content[1]["type"], "tool_result");
-        assert_eq!(content[1]["tool_use_id"], "toolu_read");
+        assert_eq!(content[1]["type"], "text");
+        assert_eq!(content[1]["text"], "[unpaired durable tool result]\nresult");
     }
 
     #[test]
