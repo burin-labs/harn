@@ -527,8 +527,8 @@ impl AnthropicProvider {
             })
             .collect();
         normalize_tool_call_ids(&mut messages);
-        preserve_orphan_results_as_text(&mut messages);
         let mut messages = enforce_tool_result_adjacency(messages);
+        preserve_orphan_results_as_text(&mut messages);
         if let Some(ref prefill) = opts.prefill {
             // Claude 4.6+ deprecated the assistant-prefill feature and
             // returns HTTP 400 when the final message is role=assistant.
@@ -1510,7 +1510,7 @@ mod tests {
     }
 
     #[test]
-    fn whitespace_only_text_blocks_are_dropped_before_anthropic_egress() {
+    fn whitespace_is_dropped_and_unpaired_tool_result_is_preserved_as_text() {
         let mut opts = base_payload();
         opts.messages = vec![serde_json::json!({
             "role": "user",
@@ -1533,8 +1533,8 @@ mod tests {
         assert_eq!(content.len(), 2);
         assert_eq!(content[0]["type"], "text");
         assert_eq!(content[0]["text"], "keep me");
-        assert_eq!(content[1]["type"], "tool_result");
-        assert_eq!(content[1]["tool_use_id"], "toolu_read");
+        assert_eq!(content[1]["type"], "text");
+        assert_eq!(content[1]["text"], "[unpaired durable tool result]\nresult");
     }
 
     #[test]

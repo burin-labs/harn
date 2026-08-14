@@ -109,15 +109,17 @@ pub(super) fn preserve_orphan_results_as_text(messages: &mut [serde_json::Value]
             preceding_tool_use_ids.clear();
             continue;
         };
+        let mut saw_tool_result = false;
         for block in blocks {
             if block.get("type").and_then(serde_json::Value::as_str) != Some("tool_result") {
                 continue;
             }
+            saw_tool_result = true;
             let id = block
                 .get("tool_use_id")
                 .and_then(serde_json::Value::as_str)
                 .unwrap_or_default();
-            if preceding_tool_use_ids.contains(id) {
+            if preceding_tool_use_ids.remove(id) {
                 continue;
             }
             let content = block
@@ -136,7 +138,12 @@ pub(super) fn preserve_orphan_results_as_text(messages: &mut [serde_json::Value]
                 "text": format!("[unpaired durable tool result]\n{text}"),
             });
         }
-        preceding_tool_use_ids.clear();
+        // A recorder may persist results for one assistant turn as multiple
+        // consecutive user messages. Keep only the still-unmatched ids across
+        // those messages; an ordinary user turn closes the result envelope.
+        if !saw_tool_result {
+            preceding_tool_use_ids.clear();
+        }
     }
 }
 
@@ -241,5 +248,31 @@ mod tests {
             .as_str()
             .expect("preserved text")
             .contains("legacy observation"));
+    }
+
+    #[test]
+    fn matching_results_may_span_consecutive_user_messages() {
+        let mut messages = vec![
+            serde_json::json!({
+                "role": "assistant",
+                "content": [
+                    {"type": "tool_use", "id": "toolu_first"},
+                    {"type": "tool_use", "id": "toolu_second"},
+                ],
+            }),
+            serde_json::json!({
+                "role": "user",
+                "content": [{"type": "tool_result", "tool_use_id": "toolu_first", "content": "one"}],
+            }),
+            serde_json::json!({
+                "role": "user",
+                "content": [{"type": "tool_result", "tool_use_id": "toolu_second", "content": "two"}],
+            }),
+        ];
+
+        preserve_orphan_results_as_text(&mut messages);
+
+        assert_eq!(messages[1]["content"][0]["type"], "tool_result");
+        assert_eq!(messages[2]["content"][0]["type"], "tool_result");
     }
 }
