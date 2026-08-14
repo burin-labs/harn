@@ -15,6 +15,7 @@ pipeline default(harness: Harness) {
       const options = {
         project_root: root,
         now: "2026-06-27T12:00:00Z",
+        heuristic_refresh: true,
         support_threshold: 2,
         window_days: 30,
       }

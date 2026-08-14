@@ -1,0 +1,105 @@
+// Internal normalization boundary for agent-authored crystallization proposals.
+import {
+  pl_short_hash,
+  pl_slugify,
+  pl_text,
+  pl_validate_skill_name,
+} from "./pattern_knowledge_values"
+
+fn pl_curated_evidence_ids(proposal: dict, allowed_ids: list) -> list {
+  const raw = proposal?.evidence_ids ?? proposal?.evidence ?? []
+  if type_of(raw) != "list" || len(raw) == 0 {
+    throw "HARN-PATTERN-003: every curated proposal needs at least one evidence id"
+  }
+  let out = []
+  for value in raw {
+    const id = pl_text(value?.id ?? value)
+    if id == "" || !allowed_ids.contains(id) {
+      throw "HARN-PATTERN-003: curated proposal references unknown evidence `" + id + "`"
+    }
+    if !out.contains(id) {
+      out = out + [id]
+    }
+  }
+  return out
+}
+
+/**
+ * Normalize one agent-authored proposal against its closed evidence batch.
+ *
+ * @effects: [agent]
+ * @errors: [HARN-PATTERN-002, HARN-PATTERN-003]
+ * @api_stability: experimental
+ */
+pub fn pl_curated_proposal(
+  agent: HarnessAgent,
+  proposal: dict,
+  observations_by_id: dict,
+  allowed_ids: list,
+  now: string,
+) -> dict {
+  const name = pl_slugify(pl_text(proposal?.name))
+  pl_validate_skill_name(name)
+  const kind = pl_text(proposal?.kind)
+  if !["skill", "harn_tool", "harn_workflow", "hybrid"].contains(kind) {
+    throw "HARN-PATTERN-003: curated proposal kind must be skill, harn_tool, harn_workflow, or hybrid"
+  }
+  const title = pl_text(proposal?.title)
+  const description = pl_text(proposal?.description)
+  const when_to_use = pl_text(proposal?.when_to_use)
+  const body = pl_text(proposal?.body ?? proposal?.skill_markdown)
+  if title == "" || description == "" || when_to_use == "" || body == "" {
+    throw "HARN-PATTERN-003: curated proposals require title, description, when_to_use, and body"
+  }
+  const evidence_ids = pl_curated_evidence_ids(proposal, allowed_ids)
+  const artifact = proposal?.artifact ?? {}
+  if kind != "skill" {
+    const entrypoint = pl_text(artifact?.entrypoint)
+    const expected = kind == "harn_workflow" ? "workflow.harn" : "server.harn"
+    if entrypoint != expected {
+      throw "HARN-PATTERN-003: " + kind + " proposals require artifact.entrypoint `" + expected
+        + "`"
+    }
+    if pl_text(artifact?.source) == "" || pl_text(artifact?.test_source) == "" {
+      throw "HARN-PATTERN-003: executable curated proposals require artifact.source and artifact.test_source"
+    }
+    if (kind == "harn_tool" || kind == "hybrid")
+      && (type_of(artifact?.tool_names) != "list"
+      || len(
+      artifact.tool_names,
+    )
+      == 0) {
+      throw "HARN-PATTERN-003: tool proposals require at least one artifact.tool_names entry"
+    }
+  }
+  let samples = []
+  let sequence = []
+  for id in evidence_ids {
+    const observation = observations_by_id[id] ?? {}
+    const prompt = pl_text(observation?.prompt)
+    if prompt != "" && len(samples) < 3 && !samples.contains(prompt) {
+      samples = samples + [prompt]
+    }
+    if len(sequence) == 0 {
+      sequence = observation?.tool_sequence ?? []
+    }
+  }
+  return proposal
+    + {
+    id: "curated-" + pl_short_hash(name + ":" + join(evidence_ids, ":")),
+    kind: kind,
+    source: "agent_curator",
+    name: name,
+    title: title,
+    description: description,
+    when_to_use: when_to_use,
+    body: body,
+    support: len(evidence_ids),
+    evidence_ids: evidence_ids,
+    sample_prompts: samples,
+    tool_sequence: proposal?.tool_sequence ?? sequence,
+    created_at: now,
+    last_seen_at: now,
+    curator_session_id: agent.current_id(),
+  }
+}

@@ -1,0 +1,52 @@
+/**
+ * Normalize an optional value into compact text for pattern-learning records.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn pl_text(value) -> string {
+  return regex_replace(r"\s+", " ", to_string(value ?? "").trim()) ?? to_string(value ?? "").trim()
+}
+
+/**
+ * Normalize a value into the canonical pattern-learning identifier shape.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn pl_slugify(raw) -> string {
+  let slug = regex_replace(r"[^a-z0-9]+", "-", pl_text(raw).lower()) ?? ""
+  while slug.starts_with("-") {
+    slug = slug[1:]
+  }
+  while slug.ends_with("-") {
+    slug = slug[0:len(slug) - 1]
+  }
+  return slug
+}
+
+/**
+ * Return the stable short digest used in pattern-learning record identifiers.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn pl_short_hash(text: string) -> string {
+  return substring(sha256(text), 0, 12)
+}
+
+/**
+ * Require a canonical, path-safe learned-skill name.
+ *
+ * @effects: []
+ * @errors: [HARN-PATTERN-002]
+ * @api_stability: experimental
+ */
+pub fn pl_validate_skill_name(name: string) -> nil {
+  if name == "" || name != pl_slugify(name) {
+    throw "HARN-PATTERN-002: invalid skill name `" + name + "`"
+  }
+}
