@@ -10,7 +10,7 @@ use super::receipt::RunAuthorityReceipt;
 pub const RUN_AUTHORITY_PLAN_SCHEMA: &str = "harn.run_authority_plan.v1";
 pub const RUN_AUTHORITY_RECEIPT_SCHEMA: &str = "harn.run_authority.v1";
 pub const RUN_AUTHORITY_PLAN_V1_SCHEMA_JSON: &str =
-    include_str!("../../../../docs/schemas/run-authority-plan.v1.json");
+    include_str!("../../schemas/run-authority-plan.v1.json");
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

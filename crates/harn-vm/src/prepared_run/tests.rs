@@ -540,6 +540,17 @@ fn ndjson_sink_persists_startup_before_ready_and_terminal() {
 
 #[test]
 fn versioned_plan_schema_accepts_the_canonical_plan_and_all_requirement_shapes() {
+    let documentation_projection = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../docs/schemas/run-authority-plan.v1.json"),
+    )
+    .expect("documentation schema projection");
+    assert_eq!(
+        documentation_projection.trim(),
+        RUN_AUTHORITY_PLAN_V1_SCHEMA_JSON.trim(),
+        "documentation schema must remain a mechanical projection of the packaged contract"
+    );
+
     let mut intent = intent();
     intent.process_sockets = vec![ProcessSocketRequirement {
         socket_kind: ProcessSocketKind::Unix,
