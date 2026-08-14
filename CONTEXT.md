@@ -47,6 +47,21 @@ A typed request bound to a parent authority lease and intersected with its
 ceiling, without mutating or broadening the parent lease.
 _Avoid_: Escalation flag, policy exception
 
+**Toolchain probe**:
+An exact post-readiness inquiry that discovers toolchain read roots within a
+previously reviewed authority ceiling.
+_Avoid_: Preflight command, ambient path scan
+
+**Platform identity broker**:
+A host-side authority that exchanges a value-free identity reference for a
+short-lived handle bound to one provider, audience, tenant, and consumer.
+_Avoid_: Credential fallback, profile chain
+
+**Opaque identity handle**:
+A non-transferable, process-local capability to use one brokered platform
+identity through its declared consumer.
+_Avoid_: Token, secret value, bearer credential
+
 **Authority receipt**:
 A durable, non-authorizing record of requested, granted, used, denied, and unused run authority and its decider.
 _Avoid_: Authority lease, log line

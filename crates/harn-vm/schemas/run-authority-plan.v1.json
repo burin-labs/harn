@@ -278,6 +278,108 @@
           "additionalProperties": false,
           "required": [
             "kind",
+            "probe_id",
+            "executable",
+            "arguments",
+            "working_directory",
+            "read_root_ceiling"
+          ],
+          "properties": {
+            "kind": {
+              "const": "toolchain_probe"
+            },
+            "probe_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "executable": {
+              "type": "string",
+              "minLength": 1
+            },
+            "arguments": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "working_directory": {
+              "type": "string",
+              "minLength": 1
+            },
+            "read_root_ceiling": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "reference",
+            "broker_id",
+            "source",
+            "renewal",
+            "binding"
+          ],
+          "properties": {
+            "kind": {
+              "const": "identity_broker"
+            },
+            "reference": {
+              "type": "string",
+              "pattern": "^harn-identity://[^/]+/[^/]+$"
+            },
+            "broker_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "source": {
+              "enum": [
+                "sdk_profile",
+                "workload_identity",
+                "instance_metadata",
+                "hosted_broker"
+              ]
+            },
+            "renewal": {
+              "enum": [
+                "none",
+                "broker_managed"
+              ]
+            },
+            "binding": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "provider",
+                "audience",
+                "consumer"
+              ],
+              "properties": {
+                "provider": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "audience": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "tenant": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "consumer": {
+                  "$ref": "#/$defs/consumer"
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
             "profile",
             "preset"
           ],
@@ -551,4 +653,3 @@
     }
   }
 }
-

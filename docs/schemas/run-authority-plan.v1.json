@@ -16,23 +16,46 @@
     "receipt_uri"
   ],
   "properties": {
-    "schema": { "const": "harn.run_authority_plan.v1" },
-    "intent_id": { "type": "string", "minLength": 1 },
-    "capability_policy": { "$ref": "#/$defs/capabilityPolicy" },
+    "schema": {
+      "const": "harn.run_authority_plan.v1"
+    },
+    "intent_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "capability_policy": {
+      "$ref": "#/$defs/capabilityPolicy"
+    },
     "requirements": {
       "type": "array",
-      "items": { "$ref": "#/$defs/requirement" }
+      "items": {
+        "$ref": "#/$defs/requirement"
+      }
     },
-    "budget": { "$ref": "#/$defs/budget" },
-    "provenance": { "$ref": "#/$defs/provenance" },
-    "interactivity": { "enum": ["interactive", "non_interactive"] },
-    "startup_deadline_at_ms": { "type": "integer", "minimum": 0 },
-    "receipt_uri": { "type": "string", "minLength": 1 }
+    "budget": {
+      "$ref": "#/$defs/budget"
+    },
+    "provenance": {
+      "$ref": "#/$defs/provenance"
+    },
+    "interactivity": {
+      "enum": ["interactive", "non_interactive"]
+    },
+    "startup_deadline_at_ms": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "receipt_uri": {
+      "type": "string",
+      "minLength": 1
+    }
   },
   "$defs": {
     "stringArray": {
       "type": "array",
-      "items": { "type": "string" },
+      "items": {
+        "type": "string"
+      },
       "uniqueItems": true
     },
     "capabilityPolicy": {
@@ -50,19 +73,43 @@
         "process_sandbox"
       ],
       "properties": {
-        "tools": { "$ref": "#/$defs/stringArray" },
-        "tools_restricted": { "type": "boolean" },
+        "tools": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "tools_restricted": {
+          "type": "boolean"
+        },
         "capabilities": {
           "type": "object",
-          "additionalProperties": { "$ref": "#/$defs/stringArray" }
+          "additionalProperties": {
+            "$ref": "#/$defs/stringArray"
+          }
         },
-        "capabilities_restricted": { "type": "boolean" },
-        "workspace_roots": { "$ref": "#/$defs/stringArray" },
-        "read_only_roots": { "$ref": "#/$defs/stringArray" },
-        "side_effect_level": { "type": ["string", "null"] },
-        "recursion_limit": { "type": ["integer", "null"], "minimum": 0 },
-        "tool_arg_constraints": { "type": "array", "items": { "type": "object" } },
-        "tool_annotations": { "type": "object" },
+        "capabilities_restricted": {
+          "type": "boolean"
+        },
+        "workspace_roots": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "read_only_roots": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "side_effect_level": {
+          "type": ["string", "null"]
+        },
+        "recursion_limit": {
+          "type": ["integer", "null"],
+          "minimum": 0
+        },
+        "tool_arg_constraints": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "tool_annotations": {
+          "type": "object"
+        },
         "sandbox_profile": {
           "enum": [
             "unrestricted",
@@ -89,8 +136,12 @@
               },
               "uniqueItems": true
             },
-            "read_roots": { "$ref": "#/$defs/stringArray" },
-            "write_roots": { "$ref": "#/$defs/stringArray" }
+            "read_roots": {
+              "$ref": "#/$defs/stringArray"
+            },
+            "write_roots": {
+              "$ref": "#/$defs/stringArray"
+            }
           }
         }
       }
@@ -99,9 +150,18 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "spend_microusd": { "type": "integer", "minimum": 0 },
-        "time_ms": { "type": "integer", "minimum": 0 },
-        "turns": { "type": "integer", "minimum": 0 }
+        "spend_microusd": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "time_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "turns": {
+          "type": "integer",
+          "minimum": 0
+        }
       }
     },
     "provenance": {
@@ -117,13 +177,34 @@
         "runtime_digest"
       ],
       "properties": {
-        "harn_version": { "type": "string", "minLength": 1 },
-        "harn_revision": { "type": "string", "minLength": 1 },
-        "host_name": { "type": "string", "minLength": 1 },
-        "host_version": { "type": "string", "minLength": 1 },
-        "host_revision": { "type": "string", "minLength": 1 },
-        "contracts_version": { "type": "string", "minLength": 1 },
-        "runtime_digest": { "type": "string", "minLength": 1 }
+        "harn_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "harn_revision": {
+          "type": "string",
+          "minLength": 1
+        },
+        "host_name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "host_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "host_revision": {
+          "type": "string",
+          "minLength": 1
+        },
+        "contracts_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "runtime_digest": {
+          "type": "string",
+          "minLength": 1
+        }
       }
     },
     "consumer": {
@@ -131,9 +212,17 @@
       "additionalProperties": false,
       "required": ["kind", "id"],
       "properties": {
-        "kind": { "enum": ["provider", "process", "mcp", "connector"] },
-        "id": { "type": "string", "minLength": 1 },
-        "environment_name": { "type": "string", "minLength": 1 }
+        "kind": {
+          "enum": ["provider", "process", "mcp", "connector"]
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "environment_name": {
+          "type": "string",
+          "minLength": 1
+        }
       }
     },
     "requirement": {
@@ -151,7 +240,107 @@
                 "process_write_root"
               ]
             },
-            "root": { "type": "string", "minLength": 1 }
+            "root": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "probe_id",
+            "executable",
+            "arguments",
+            "working_directory",
+            "read_root_ceiling"
+          ],
+          "properties": {
+            "kind": {
+              "const": "toolchain_probe"
+            },
+            "probe_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "executable": {
+              "type": "string",
+              "minLength": 1
+            },
+            "arguments": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "working_directory": {
+              "type": "string",
+              "minLength": 1
+            },
+            "read_root_ceiling": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "reference",
+            "broker_id",
+            "source",
+            "renewal",
+            "binding"
+          ],
+          "properties": {
+            "kind": {
+              "const": "identity_broker"
+            },
+            "reference": {
+              "type": "string",
+              "pattern": "^harn-identity://[^/]+/[^/]+$"
+            },
+            "broker_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "source": {
+              "enum": [
+                "sdk_profile",
+                "workload_identity",
+                "instance_metadata",
+                "hosted_broker"
+              ]
+            },
+            "renewal": {
+              "enum": ["none", "broker_managed"]
+            },
+            "binding": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["provider", "audience", "consumer"],
+              "properties": {
+                "provider": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "audience": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "tenant": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "consumer": {
+                  "$ref": "#/$defs/consumer"
+                }
+              }
+            }
           }
         },
         {
@@ -159,9 +348,17 @@
           "additionalProperties": false,
           "required": ["kind", "profile", "preset"],
           "properties": {
-            "kind": { "const": "process_sandbox" },
-            "profile": { "type": "string", "minLength": 1 },
-            "preset": { "type": "string", "minLength": 1 }
+            "kind": {
+              "const": "process_sandbox"
+            },
+            "profile": {
+              "type": "string",
+              "minLength": 1
+            },
+            "preset": {
+              "type": "string",
+              "minLength": 1
+            }
           }
         },
         {
@@ -169,10 +366,22 @@
           "additionalProperties": false,
           "required": ["kind", "destination", "protocol", "port"],
           "properties": {
-            "kind": { "const": "network" },
-            "destination": { "type": "string", "minLength": 1 },
-            "protocol": { "type": "string", "minLength": 1 },
-            "port": { "type": "integer", "minimum": 1, "maximum": 65535 }
+            "kind": {
+              "const": "network"
+            },
+            "destination": {
+              "type": "string",
+              "minLength": 1
+            },
+            "protocol": {
+              "type": "string",
+              "minLength": 1
+            },
+            "port": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            }
           }
         },
         {
@@ -180,13 +389,19 @@
           "additionalProperties": false,
           "required": ["kind", "reference", "source", "consumer"],
           "properties": {
-            "kind": { "const": "secret" },
+            "kind": {
+              "const": "secret"
+            },
             "reference": {
               "type": "string",
               "pattern": "^harn-secret://[^/]+/[^@]+(?:@[0-9]+)?$"
             },
-            "source": { "enum": ["process_local", "durable_broker"] },
-            "consumer": { "$ref": "#/$defs/consumer" }
+            "source": {
+              "enum": ["process_local", "durable_broker"]
+            },
+            "consumer": {
+              "$ref": "#/$defs/consumer"
+            }
           }
         },
         {
@@ -194,11 +409,16 @@
           "additionalProperties": false,
           "required": ["kind", "socket_kind"],
           "properties": {
-            "kind": { "const": "process_socket" },
+            "kind": {
+              "const": "process_socket"
+            },
             "socket_kind": {
               "enum": ["unix", "tcp_loopback", "docker", "ssh_agent"]
             },
-            "endpoint": { "type": "string", "minLength": 1 }
+            "endpoint": {
+              "type": "string",
+              "minLength": 1
+            }
           }
         },
         {
@@ -206,8 +426,13 @@
           "additionalProperties": false,
           "required": ["kind", "name"],
           "properties": {
-            "kind": { "const": "environment" },
-            "name": { "type": "string", "minLength": 1 }
+            "kind": {
+              "const": "environment"
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1
+            }
           }
         },
         {
@@ -215,8 +440,13 @@
           "additionalProperties": false,
           "required": ["kind", "pattern"],
           "properties": {
-            "kind": { "const": "tool" },
-            "pattern": { "type": "string", "minLength": 1 }
+            "kind": {
+              "const": "tool"
+            },
+            "pattern": {
+              "type": "string",
+              "minLength": 1
+            }
           }
         },
         {
@@ -224,9 +454,17 @@
           "additionalProperties": false,
           "required": ["kind", "capability", "operation"],
           "properties": {
-            "kind": { "const": "host_capability" },
-            "capability": { "type": "string", "minLength": 1 },
-            "operation": { "type": "string", "minLength": 1 }
+            "kind": {
+              "const": "host_capability"
+            },
+            "capability": {
+              "type": "string",
+              "minLength": 1
+            },
+            "operation": {
+              "type": "string",
+              "minLength": 1
+            }
           }
         },
         {
@@ -234,8 +472,13 @@
           "additionalProperties": false,
           "required": ["kind", "level"],
           "properties": {
-            "kind": { "const": "side_effect_ceiling" },
-            "level": { "type": "string", "minLength": 1 }
+            "kind": {
+              "const": "side_effect_ceiling"
+            },
+            "level": {
+              "type": "string",
+              "minLength": 1
+            }
           }
         },
         {
@@ -243,8 +486,13 @@
           "additionalProperties": false,
           "required": ["kind", "depth"],
           "properties": {
-            "kind": { "const": "recursion_limit" },
-            "depth": { "type": "integer", "minimum": 0 }
+            "kind": {
+              "const": "recursion_limit"
+            },
+            "depth": {
+              "type": "integer",
+              "minimum": 0
+            }
           }
         },
         {
@@ -252,10 +500,21 @@
           "additionalProperties": false,
           "required": ["kind", "server", "tool", "side_effect"],
           "properties": {
-            "kind": { "const": "mcp" },
-            "server": { "type": "string", "minLength": 1 },
-            "tool": { "type": "string", "minLength": 1 },
-            "side_effect": { "type": "string", "minLength": 1 }
+            "kind": {
+              "const": "mcp"
+            },
+            "server": {
+              "type": "string",
+              "minLength": 1
+            },
+            "tool": {
+              "type": "string",
+              "minLength": 1
+            },
+            "side_effect": {
+              "type": "string",
+              "minLength": 1
+            }
           }
         },
         {
@@ -263,8 +522,12 @@
           "additionalProperties": false,
           "required": ["kind", "budget"],
           "properties": {
-            "kind": { "const": "budget" },
-            "budget": { "$ref": "#/$defs/budget" }
+            "kind": {
+              "const": "budget"
+            },
+            "budget": {
+              "$ref": "#/$defs/budget"
+            }
           }
         },
         {
@@ -272,8 +535,12 @@
           "additionalProperties": false,
           "required": ["kind", "provenance"],
           "properties": {
-            "kind": { "const": "provenance" },
-            "provenance": { "$ref": "#/$defs/provenance" }
+            "kind": {
+              "const": "provenance"
+            },
+            "provenance": {
+              "$ref": "#/$defs/provenance"
+            }
           }
         },
         {
@@ -281,9 +548,17 @@
           "additionalProperties": false,
           "required": ["kind", "deadline_at_ms", "receipt_uri"],
           "properties": {
-            "kind": { "const": "startup" },
-            "deadline_at_ms": { "type": "integer", "minimum": 0 },
-            "receipt_uri": { "type": "string", "minLength": 1 }
+            "kind": {
+              "const": "startup"
+            },
+            "deadline_at_ms": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "receipt_uri": {
+              "type": "string",
+              "minLength": 1
+            }
           }
         }
       ]

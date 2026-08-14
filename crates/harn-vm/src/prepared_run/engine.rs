@@ -19,9 +19,9 @@ pub trait PreparedRunExecutor {
 }
 
 pub struct PreparedRun<E> {
-    executor: E,
-    receipts: Arc<dyn AuthorityReceiptSink>,
-    now_ms: Arc<dyn Fn() -> u64 + Send + Sync>,
+    pub(super) executor: E,
+    pub(super) receipts: Arc<dyn AuthorityReceiptSink>,
+    pub(super) now_ms: Arc<dyn Fn() -> u64 + Send + Sync>,
 }
 
 impl<E> PreparedRun<E> {
@@ -226,10 +226,16 @@ impl<E> PreparedRun<E> {
             lease_fingerprint: lease_fingerprint.clone(),
             plan_fingerprint,
             plan,
+            requested_fingerprints: requirement_fingerprints.clone(),
             requirement_fingerprints,
             approval_policy: host_facts.approval_policy,
             net_policy: host_facts.net_policy,
             deciders: deciders.clone(),
+            approval_availability: host_facts.approval_availability,
+            prior_used: BTreeSet::new(),
+            prior_denied: Vec::new(),
+            prior_policy_decisions: Vec::new(),
+            invalidated: None,
             expires_at_ms,
         };
         let mut receipt = startup;
@@ -314,7 +320,12 @@ impl<E: PreparedRunExecutor> PreparedRun<E> {
     pub fn execute(&self, authority_lease: Box<AuthorityLease>) -> ExecutionOutcome<E::Output> {
         let now_ms = (self.now_ms)();
         let mut authority = AuthorityUse::new(&authority_lease, self.now_ms.clone());
-        let result = if now_ms > authority_lease.expires_at_ms {
+        let result = if let Some(diagnostic) = &authority_lease.invalidated {
+            Err(format!(
+                "authority lease invalidated during discovery: {}",
+                diagnostic.message
+            ))
+        } else if now_ms > authority_lease.expires_at_ms {
             Err("authority lease expired before execution".to_string())
         } else {
             authority.executor_invoked = true;
@@ -370,9 +381,9 @@ impl<'a> AuthorityUse<'a> {
         Self {
             lease,
             now_ms,
-            used: BTreeSet::new(),
-            denied: Vec::new(),
-            policy_decisions: Vec::new(),
+            used: lease.prior_used.clone(),
+            denied: lease.prior_denied.clone(),
+            policy_decisions: lease.prior_policy_decisions.clone(),
             executor_invoked: false,
         }
     }
@@ -443,6 +454,14 @@ impl<'a> AuthorityUse<'a> {
     }
 
     fn terminal_receipt(&self, completed: bool, observed_at_ms: u64) -> RunAuthorityReceipt {
+        let requested = receipted_requirements(
+            &self
+                .lease
+                .requested_fingerprints
+                .values()
+                .cloned()
+                .collect::<Vec<_>>(),
+        );
         let granted = receipted_requirements(
             &self
                 .lease
@@ -473,7 +492,7 @@ impl<'a> AuthorityUse<'a> {
             plan_fingerprint: self.lease.plan_fingerprint.clone(),
             lease_fingerprint: Some(self.lease.lease_fingerprint.clone()),
             observed_at_ms,
-            requested: granted.clone(),
+            requested,
             granted,
             used,
             denied: self.denied.clone(),
@@ -498,6 +517,10 @@ fn plan_from_intent(mut intent: RunIntent) -> RunAuthorityPlanV1 {
     intent.process_sockets.dedup();
     intent.mcp.sort();
     intent.mcp.dedup();
+    intent.toolchain_probes.sort();
+    intent.toolchain_probes.dedup();
+    intent.identity_brokers.sort();
+    intent.identity_brokers.dedup();
     let mut requirements = policy_requirements(&intent.capability_policy);
     requirements.extend(
         intent
@@ -528,6 +551,20 @@ fn plan_from_intent(mut intent: RunIntent) -> RunAuthorityPlanV1 {
             .map(AuthorityRequirement::ProcessSocket),
     );
     requirements.extend(intent.mcp.iter().cloned().map(AuthorityRequirement::Mcp));
+    requirements.extend(
+        intent
+            .toolchain_probes
+            .iter()
+            .cloned()
+            .map(AuthorityRequirement::ToolchainProbe),
+    );
+    requirements.extend(
+        intent
+            .identity_brokers
+            .iter()
+            .cloned()
+            .map(AuthorityRequirement::IdentityBroker),
+    );
     requirements.push(AuthorityRequirement::Budget {
         budget: intent.budget.clone(),
     });
@@ -830,10 +867,118 @@ fn validate_host_facts(
                     "Remove the MCP need or connect a host with that exact tool and side-effect ceiling.",
                 ));
             }
+            AuthorityRequirement::ToolchainProbe(probe) => {
+                if !host.toolchain_probes.contains(probe) {
+                    diagnostics.push(diagnostic(
+                        "toolchain_probe_unavailable",
+                        format!("toolchain probe '{}' is not available with the exact declared command and root ceiling", probe.probe_id),
+                        fingerprint.clone(),
+                        "Declare the exact host-supported probe or remove command-derived toolchain discovery.",
+                    ));
+                }
+                if probe.probe_id.trim().is_empty()
+                    || probe.executable.trim().is_empty()
+                    || !Path::new(&probe.working_directory).is_absolute()
+                    || !Path::new(&probe.read_root_ceiling).is_absolute()
+                {
+                    diagnostics.push(diagnostic(
+                        "invalid_toolchain_probe",
+                        "toolchain probes require a stable id, executable, absolute working directory, and absolute read-root ceiling",
+                        fingerprint,
+                        "Normalize the probe at the host seam before preparing the run.",
+                    ));
+                }
+            }
+            AuthorityRequirement::IdentityBroker(identity) => {
+                validate_identity_broker(plan, host, identity, fingerprint, &mut diagnostics);
+            }
             _ => {}
         }
     }
     diagnostics
+}
+
+fn validate_identity_broker(
+    plan: &RunAuthorityPlanV1,
+    host: &HostFacts,
+    identity: &IdentityBrokerRequirement,
+    fingerprint: Option<String>,
+    diagnostics: &mut Vec<AuthorityDiagnostic>,
+) {
+    let Some(broker) = host.identity_brokers.get(&identity.broker_id) else {
+        diagnostics.push(diagnostic(
+            "identity_broker_unavailable",
+            format!("identity broker '{}' is unavailable", identity.broker_id),
+            fingerprint,
+            "Configure the exact consumer-bound broker before preparation.",
+        ));
+        return;
+    };
+    if broker.broker_id != identity.broker_id {
+        diagnostics.push(diagnostic(
+            "identity_broker_mismatch",
+            "host identity broker facts do not match the requested broker id",
+            fingerprint.clone(),
+            "Publish truthful broker identity facts at the host seam.",
+        ));
+    }
+    if !broker.material_outside_sandbox || !broker.opaque_process_local_handles {
+        diagnostics.push(diagnostic(
+            "identity_broker_sandbox_boundary",
+            "identity material is not host-isolated behind opaque process-local handles",
+            fingerprint.clone(),
+            "Use a broker that keeps durable material outside the workload sandbox.",
+        ));
+    }
+    if plan.interactivity == RunInteractivity::NonInteractive
+        && (!broker.supports_non_interactive || broker.may_prompt_gui)
+    {
+        diagnostics.push(diagnostic(
+            "identity_broker_interactivity",
+            "non-interactive runs cannot use an identity broker that may require GUI interaction",
+            fingerprint.clone(),
+            "Use a non-interactive workload or hosted identity broker.",
+        ));
+    }
+    if !broker.sources.contains(&identity.source) {
+        diagnostics.push(diagnostic(
+            "identity_source_mismatch",
+            format!(
+                "broker '{}' does not advertise source {:?}",
+                identity.broker_id, identity.source
+            ),
+            fingerprint.clone(),
+            "Select a broker that advertises the exact identity source.",
+        ));
+    }
+    if !broker.renewal_modes.contains(&identity.renewal) {
+        diagnostics.push(diagnostic(
+            "identity_renewal_mismatch",
+            format!(
+                "broker '{}' does not advertise renewal mode {:?}",
+                identity.broker_id, identity.renewal
+            ),
+            fingerprint.clone(),
+            "Select a compatible broker renewal mode.",
+        ));
+    }
+    if !broker.bindings.contains(&identity.binding) {
+        diagnostics.push(diagnostic(
+            "identity_consumer_binding",
+            format!(
+                "identity reference '{}' is not bound by broker '{}' to provider '{}' audience '{}' tenant {:?} consumer {:?}:{}",
+                identity.reference,
+                identity.broker_id,
+                identity.binding.provider,
+                identity.binding.audience,
+                identity.binding.tenant,
+                identity.binding.consumer.kind,
+                identity.binding.consumer.id,
+            ),
+            fingerprint,
+            "Declare the exact broker/provider/audience/tenant/consumer binding.",
+        ));
+    }
 }
 
 fn missing_provenance_fields(provenance: &RuntimeContractProvenance) -> Vec<&'static str> {
@@ -898,7 +1043,7 @@ fn provenance_mismatch(
     format!("runtime provenance mismatch ({})", mismatched.join("; "))
 }
 
-fn evaluate_requirement(
+pub(super) fn evaluate_requirement(
     approval_policy: &crate::orchestration::ToolApprovalPolicy,
     net_policy: &crate::harness_net::NetPolicy,
     requirement: &AuthorityRequirement,
@@ -1007,6 +1152,31 @@ fn policy_request(requirement: &AuthorityRequirement) -> ToolApprovalRequest {
                 "side_effect": mcp.side_effect
             }),
         ),
+        AuthorityRequirement::ToolchainProbe(probe) => (
+            "prepared_run.process",
+            json!({
+                "probe_id": probe.probe_id,
+                "executable": probe.executable,
+                "arguments": probe.arguments,
+                "working_directory": probe.working_directory,
+                "read_root_ceiling": probe.read_root_ceiling,
+                "operation": "toolchain_discovery"
+            }),
+        ),
+        AuthorityRequirement::IdentityBroker(identity) => (
+            "prepared_run.identity",
+            json!({
+                "identity_ref": identity.reference.as_str(),
+                "broker_id": identity.broker_id,
+                "source": identity.source,
+                "renewal": identity.renewal,
+                "provider": identity.binding.provider,
+                "audience": identity.binding.audience,
+                "tenant": identity.binding.tenant,
+                "consumer_kind": identity.binding.consumer.kind,
+                "consumer": identity.binding.consumer.id,
+            }),
+        ),
         AuthorityRequirement::Budget { budget } => (
             "prepared_run.budget",
             serde_json::to_value(budget).expect("budget serializes"),
@@ -1030,7 +1200,10 @@ fn policy_request(requirement: &AuthorityRequirement) -> ToolApprovalRequest {
     }
 }
 
-fn policy_evidence(fingerprint: &str, evaluation: &PolicyEvaluation) -> PolicyDecisionEvidence {
+pub(super) fn policy_evidence(
+    fingerprint: &str,
+    evaluation: &PolicyEvaluation,
+) -> PolicyDecisionEvidence {
     PolicyDecisionEvidence {
         requirement_fingerprint: fingerprint.to_string(),
         action: evaluation.action.clone(),
@@ -1044,7 +1217,7 @@ fn policy_evidence(fingerprint: &str, evaluation: &PolicyEvaluation) -> PolicyDe
     }
 }
 
-fn approval_batch(
+pub(super) fn approval_batch(
     plan_fingerprint: &str,
     candidates: &[(ReceiptedAuthority, PolicyEvaluation)],
 ) -> Option<ApprovalBatch> {
@@ -1096,11 +1269,12 @@ fn semantic_group(requirement: &AuthorityRequirement) -> &'static str {
         AuthorityRequirement::ProcessReadRoot { .. }
         | AuthorityRequirement::ProcessWriteRoot { .. }
         | AuthorityRequirement::ProcessSandbox { .. }
-        | AuthorityRequirement::ProcessSocket(_) => "process",
+        | AuthorityRequirement::ProcessSocket(_)
+        | AuthorityRequirement::ToolchainProbe(_) => "process",
         AuthorityRequirement::Network(_) => "network",
-        AuthorityRequirement::Secret(_) | AuthorityRequirement::Environment { .. } => {
-            "credentials_and_environment"
-        }
+        AuthorityRequirement::Secret(_)
+        | AuthorityRequirement::IdentityBroker(_)
+        | AuthorityRequirement::Environment { .. } => "credentials_and_environment",
         AuthorityRequirement::Mcp(_) => "mcp",
         AuthorityRequirement::Tool { .. }
         | AuthorityRequirement::HostCapability { .. }
@@ -1120,11 +1294,22 @@ fn requirement_summary(requirement: &AuthorityRequirement) -> String {
             "secret reference {} -> {:?}:{}",
             secret.reference, secret.consumer.kind, secret.consumer.id
         ),
+        AuthorityRequirement::IdentityBroker(identity) => format!(
+            "identity reference {} via {} -> {}:{} for audience {} tenant {:?}",
+            identity.reference,
+            identity.broker_id,
+            identity.binding.provider,
+            identity.binding.consumer.id,
+            identity.binding.audience,
+            identity.binding.tenant,
+        ),
         other => serde_json::to_string(other).expect("authority requirement serializes"),
     }
 }
 
-fn receipted_requirements(requirements: &[AuthorityRequirement]) -> Vec<ReceiptedAuthority> {
+pub(super) fn receipted_requirements(
+    requirements: &[AuthorityRequirement],
+) -> Vec<ReceiptedAuthority> {
     let mut authority = requirements
         .iter()
         .cloned()
@@ -1180,29 +1365,48 @@ fn requirement_attenuates(
             AuthorityRequirement::ProcessWriteRoot { root: granted },
             AuthorityRequirement::ProcessReadRoot { root: requested },
         ) => path_is_within(requested, granted),
+        (
+            AuthorityRequirement::ToolchainProbe(probe),
+            AuthorityRequirement::ProcessReadRoot { root: requested },
+        ) => path_is_within(requested, &probe.read_root_ceiling),
         _ => granted == requested,
     }
 }
 
 fn path_is_within(requested: &str, granted: &str) -> bool {
-    let requested = lexical_components(Path::new(requested));
-    let granted = lexical_components(Path::new(granted));
+    let Some(requested) = lexical_components(Path::new(requested)) else {
+        return false;
+    };
+    let Some(granted) = lexical_components(Path::new(granted)) else {
+        return false;
+    };
     requested.len() >= granted.len() && requested[..granted.len()] == granted
 }
 
-fn lexical_components(path: &Path) -> Vec<String> {
-    path.components()
-        .filter_map(|component| match component {
-            Component::Prefix(prefix) => Some(prefix.as_os_str().to_string_lossy().to_string()),
-            Component::RootDir => Some("/".to_string()),
-            Component::CurDir => None,
-            Component::ParentDir => Some("..".to_string()),
-            Component::Normal(value) => Some(value.to_string_lossy().to_string()),
-        })
-        .collect()
+fn lexical_components(path: &Path) -> Option<Vec<String>> {
+    let mut normalized = Vec::new();
+    for component in path.components() {
+        match component {
+            Component::Prefix(prefix) => {
+                normalized.push(prefix.as_os_str().to_string_lossy().to_string())
+            }
+            Component::RootDir => normalized.push("/".to_string()),
+            Component::CurDir => {}
+            Component::ParentDir => match normalized.last().map(String::as_str) {
+                Some("/") | None => return None,
+                Some(_) => {
+                    normalized.pop();
+                }
+            },
+            Component::Normal(value) => {
+                normalized.push(value.to_string_lossy().to_string());
+            }
+        }
+    }
+    Some(normalized)
 }
 
-fn diagnostic(
+pub(super) fn diagnostic(
     code: impl Into<String>,
     message: impl Into<String>,
     requirement_fingerprint: Option<String>,
@@ -1216,7 +1420,7 @@ fn diagnostic(
     }
 }
 
-fn persist_terminally(
+pub(super) fn persist_terminally(
     sink: &dyn AuthorityReceiptSink,
     diagnostics: &mut Vec<AuthorityDiagnostic>,
     receipt: &RunAuthorityReceipt,
