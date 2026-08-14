@@ -180,6 +180,50 @@ pub(super) fn argument_for_kind(
     }
 }
 
+pub(super) fn argument_from_binding(
+    binding: &str,
+    available: &CarrierKind,
+    required: &CarrierKind,
+) -> Result<String, String> {
+    match required {
+        CarrierKind::Root => matches!(available, CarrierKind::Root)
+            .then(|| binding.to_string())
+            .ok_or_else(|| "a narrow lexical binding cannot supply root Harness".to_string()),
+        CarrierKind::Narrow(capability) => {
+            if !carrier_supplies(available, *capability) {
+                return Err("lexical binding does not hold the required capability".to_string());
+            }
+            Ok(if matches!(available, CarrierKind::Narrow(_)) {
+                binding.to_string()
+            } else {
+                format!("{binding}.{}", capability.field_name())
+            })
+        }
+        CarrierKind::Bundle(required) => {
+            if matches!(available, CarrierKind::Bundle(available) if available == required) {
+                return Ok(binding.to_string());
+            }
+            let fields = required
+                .iter()
+                .map(|capability| {
+                    carrier_supplies(available, *capability).then(|| {
+                        let value = if matches!(available, CarrierKind::Narrow(_)) {
+                            binding.to_string()
+                        } else {
+                            format!("{binding}.{}", capability.field_name())
+                        };
+                        format!("{}: {value}", capability.field_name())
+                    })
+                })
+                .collect::<Option<Vec<_>>>()
+                .ok_or_else(|| {
+                    "lexical binding does not hold the required capability bundle".to_string()
+                })?;
+            Ok(format!("{{{}}}", fields.join(", ")))
+        }
+    }
+}
+
 /// Project every capability argument required to make a split call contiguous.
 /// A missing ordinary parameter is not synthesizable, so that call is deferred.
 pub(super) fn split_call_extension(
@@ -304,7 +348,7 @@ pub(super) fn receiver_projection_edits(
         callable.carrier.as_ref().map(|carrier| &carrier.kind),
         desired,
     ) {
-        (Some(CarrierKind::Root), CarrierKind::Narrow(capability)) => {
+        (Some(CarrierKind::Root | CarrierKind::Bundle(_)), CarrierKind::Narrow(capability)) => {
             for access in &callable.receiver_accesses {
                 if access.property == capability.field_name() {
                     edits.push(FixEdit {

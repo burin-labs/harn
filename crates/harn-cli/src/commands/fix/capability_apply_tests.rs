@@ -230,6 +230,46 @@ fn capability_apply_converges_transitive_repairs_in_one_invocation() {
 }
 
 #[test]
+fn capability_apply_does_not_widen_outer_helper_for_closure_supplied_authority() {
+    let (result, updated) = apply_single(
+        "fn dispatch(harness: Harness, request: string) {\n  const url = \"${request}?t=${harness.clock.now_ms()}&cwd=${harness.fs.cwd()}\"\n  return harness.net.request(\"GET\", url)\n}\n\nfn adapter(net: HarnessNet) {\n  const probe = net.request(\"GET\", \"https://example.com\")\n  const run = fn(harness: Harness, request: string) {\n    return dispatch(harness, request)\n  }\n  return {run: run, probe: probe}\n}\n\nfn main(harness: Harness) {\n  return adapter(harness.net)\n}\n",
+    );
+    assert_eq!(
+        result.post_apply_diagnostics_count, 0,
+        "{result:#?}\n{updated}"
+    );
+    assert_eq!(
+        callable_params(&updated, "adapter"),
+        vec![param("net", "HarnessNet")],
+        "the closure supplies dispatch authority independently: {updated}"
+    );
+    assert_eq!(
+        call_argument_paths(&updated, "adapter")[0][0],
+        Some("harness.net".to_string())
+    );
+}
+
+#[test]
+fn capability_apply_recognizes_closure_supplied_capability_bundles() {
+    let (result, updated) = apply_single(
+        "fn dispatch(caps: {net: HarnessNet}, request: string) {\n  return caps.net.request(\"GET\", request)\n}\n\nfn adapter(net: HarnessNet) {\n  const probe = net.request(\"GET\", \"https://example.com\")\n  const run = fn(caps: {net: HarnessNet}, request: string) {\n    return dispatch(caps, request)\n  }\n  return {run: run, probe: probe}\n}\n\nfn main(harness: Harness) {\n  return adapter(harness.net)\n}\n",
+    );
+    assert_eq!(
+        result.post_apply_diagnostics_count, 0,
+        "{result:#?}\n{updated}"
+    );
+    assert_eq!(
+        callable_params(&updated, "adapter"),
+        vec![param("net", "HarnessNet")],
+        "the closure's typed bundle owns dispatch authority: {updated}"
+    );
+    assert!(
+        updated.contains("return dispatch(caps.net, request)"),
+        "the rewritten call must keep using the closure's binding: {updated}"
+    );
+}
+
+#[test]
 fn capability_apply_preserves_multiline_declaration_and_call_whitespace() {
     let (result, updated) = apply_single(
         "fn load(\n  path: string,\n) -> string {\n  return read_file(path)\n}\n\nfn main(harness: Harness) {\n  load(\n    \"config.json\",\n  )\n}\n",

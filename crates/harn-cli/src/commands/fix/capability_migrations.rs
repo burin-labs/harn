@@ -1,5 +1,7 @@
 //! Canonical ambient-global to typed-Harness migration recipes.
 
+use std::collections::BTreeMap;
+
 use harn_lexer::{FixEdit, Span};
 use harn_parser::{visit, DiagnosticCode as Code, Node, SNode};
 
@@ -162,6 +164,7 @@ fn record_callable_call(
         callee: name.to_string(),
         span,
         args: args.iter().map(|arg| arg.span).collect(),
+        lexical_capability_bindings: BTreeMap::new(),
     });
     if let Some(code) = ambient_code_for_call(name, args.len()) {
         ambient_calls.push(AmbientCapabilityCall {

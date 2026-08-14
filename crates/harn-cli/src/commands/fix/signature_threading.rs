@@ -13,9 +13,10 @@ use harn_parser::{
 };
 
 use super::alias_widening::AliasWidening;
+use super::capability_arguments::type_expr_carries_capability;
 use super::capability_migrations::collect_callable_node_calls;
 use super::value_escape::FrozenCause;
-use super::CallableInfo;
+use super::{CallSite, CallableInfo};
 
 /// The attribute that declares an embedding host supplies the arguments.
 /// The type checker owns the vocabulary; `harn-lint` keeps the boundary policy.
@@ -96,6 +97,7 @@ pub(super) fn collect_callable_infos(
                         &mut ambient_capability_calls,
                     );
                 });
+                annotate_nested_closure_capability_bindings(inner, &mut calls);
                 let Some((insert_offset, has_params)) = callable_param_insert(source, inner.span)
                 else {
                     continue;
@@ -140,6 +142,7 @@ pub(super) fn collect_callable_infos(
                         &mut ambient_capability_calls,
                     );
                 });
+                annotate_nested_closure_capability_bindings(inner, &mut calls);
                 let Some((insert_offset, has_params)) = callable_param_insert(source, inner.span)
                 else {
                     continue;
@@ -259,6 +262,39 @@ fn visit_callable_body(node: &SNode, visitor: &mut impl FnMut(&SNode)) {
     for stmt in body {
         visit::walk_node(stmt, visitor);
     }
+}
+
+/// Mark calls whose capability argument is bound by an enclosing closure.
+///
+/// The top-level invocation graph deliberately collects calls inside closures
+/// so it can repair them. Their already-supplied authority, however, belongs
+/// to the closure parameter rather than to the outer callable. Without this
+/// lexical fact, requirement propagation widens the outer helper and leaves a
+/// fresh attenuation diagnostic behind on the next fix pass (#6656).
+fn annotate_nested_closure_capability_bindings(node: &SNode, calls: &mut [CallSite]) {
+    visit::walk_node(node, &mut |child| {
+        let Node::Closure { params, .. } = &child.node else {
+            return;
+        };
+        let bindings = params
+            .iter()
+            .filter_map(|param| {
+                let type_expr = param.type_expr.as_ref()?;
+                type_expr_carries_capability(type_expr)
+                    .then(|| (param.name.clone(), type_expr.clone()))
+            })
+            .collect::<BTreeMap<_, _>>();
+        if bindings.is_empty() {
+            return;
+        }
+        for call in calls
+            .iter_mut()
+            .filter(|call| call.span.start >= child.span.start && call.span.end <= child.span.end)
+        {
+            call.lexical_capability_bindings
+                .extend(bindings.iter().map(|(name, ty)| (name.clone(), ty.clone())));
+        }
+    });
 }
 
 #[expect(

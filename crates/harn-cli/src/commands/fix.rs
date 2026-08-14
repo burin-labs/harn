@@ -124,6 +124,9 @@ struct CallSite {
     callee: String,
     span: Span,
     args: Vec<Span>,
+    /// Capability parameters supplied by an enclosing closure rather than by
+    /// the top-level callable that owns this collected call site.
+    lexical_capability_bindings: BTreeMap<String, TypeExpr>,
 }
 
 #[derive(Debug, Clone)]
