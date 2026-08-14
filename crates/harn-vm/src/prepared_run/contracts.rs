@@ -101,6 +101,106 @@ pub enum SecretConsumerKind {
     Connector,
 }
 
+pub const PLATFORM_IDENTITY_REF_SCHEME: &str = "harn-identity://";
+
+/// A value-free identity reference. Platform credentials never enter a run
+/// plan; hosts resolve this reference behind a consumer-bound broker.
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize)]
+#[serde(transparent)]
+pub struct PlatformIdentityReference(String);
+
+impl PlatformIdentityReference {
+    pub fn parse(raw: &str) -> Result<Self, String> {
+        let path = raw
+            .strip_prefix(PLATFORM_IDENTITY_REF_SCHEME)
+            .ok_or_else(|| {
+                "identity reference must use harn-identity://<namespace>/<name>".to_string()
+            })?;
+        let mut segments = path.split('/');
+        let namespace = segments.next().unwrap_or_default();
+        let name = segments.next().unwrap_or_default();
+        if namespace.is_empty()
+            || name.is_empty()
+            || segments.next().is_some()
+            || raw.chars().any(char::is_whitespace)
+        {
+            return Err(
+                "identity reference must use harn-identity://<namespace>/<name>".to_string(),
+            );
+        }
+        Ok(Self(raw.to_string()))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for PlatformIdentityReference {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
+impl<'de> Deserialize<'de> for PlatformIdentityReference {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let raw = String::deserialize(deserializer)?;
+        Self::parse(&raw).map_err(serde::de::Error::custom)
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PlatformIdentitySourceKind {
+    SdkProfile,
+    WorkloadIdentity,
+    InstanceMetadata,
+    HostedBroker,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IdentityRenewalMode {
+    None,
+    BrokerManaged,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
+pub struct IdentityBrokerBinding {
+    pub provider: String,
+    pub audience: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tenant: Option<String>,
+    pub consumer: SecretConsumerBinding,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
+pub struct IdentityBrokerRequirement {
+    pub reference: PlatformIdentityReference,
+    pub broker_id: String,
+    pub source: PlatformIdentitySourceKind,
+    pub renewal: IdentityRenewalMode,
+    pub binding: IdentityBrokerBinding,
+}
+
+/// Observed broker properties supplied by a host. `bindings` is an exact
+/// allow-set, not a pattern language, so provider/audience/tenant/consumer
+/// drift changes readiness and the plan fingerprint.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct IdentityBrokerFacts {
+    pub broker_id: String,
+    pub sources: BTreeSet<PlatformIdentitySourceKind>,
+    pub supports_non_interactive: bool,
+    pub may_prompt_gui: bool,
+    pub material_outside_sandbox: bool,
+    pub opaque_process_local_handles: bool,
+    pub renewal_modes: BTreeSet<IdentityRenewalMode>,
+    pub bindings: BTreeSet<IdentityBrokerBinding>,
+}
+
 /// A canonical Harn secret reference. Construction rejects raw values so a
 /// run authority plan cannot accidentally serialize credential material.
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize)]
@@ -198,6 +298,30 @@ pub struct McpRequirement {
     pub side_effect: String,
 }
 
+/// An exact post-readiness command that may discover narrower process read
+/// roots. The ceiling is authority reviewed during preparation; probe output
+/// cannot widen beyond it.
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
+pub struct ToolchainProbeRequirement {
+    pub probe_id: String,
+    pub executable: String,
+    #[serde(default)]
+    pub arguments: Vec<String>,
+    pub working_directory: String,
+    pub read_root_ceiling: String,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ToolchainProbeResult {
+    #[serde(default)]
+    pub discovered_read_roots: Vec<String>,
+    /// A sandbox adapter reports any operation the probe attempted beyond the
+    /// declared command. These observations are evaluated as lease deltas and
+    /// cannot be silently discarded.
+    #[serde(default)]
+    pub attempted_authority: Vec<AuthorityRequirement>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum AuthorityRequirement {
@@ -237,6 +361,8 @@ pub enum AuthorityRequirement {
         depth: usize,
     },
     Mcp(McpRequirement),
+    ToolchainProbe(ToolchainProbeRequirement),
+    IdentityBroker(IdentityBrokerRequirement),
     Budget {
         budget: RunBudget,
     },
@@ -263,6 +389,10 @@ pub struct RunIntent {
     pub process_sockets: Vec<ProcessSocketRequirement>,
     #[serde(default)]
     pub mcp: Vec<McpRequirement>,
+    #[serde(default)]
+    pub toolchain_probes: Vec<ToolchainProbeRequirement>,
+    #[serde(default)]
+    pub identity_brokers: Vec<IdentityBrokerRequirement>,
     pub budget: RunBudget,
     pub provenance: RuntimeContractProvenance,
     pub interactivity: RunInteractivity,
@@ -282,6 +412,8 @@ pub struct HostFacts {
     pub admitted_environment: BTreeSet<String>,
     pub process_sockets: BTreeSet<ProcessSocketRequirement>,
     pub mcp: BTreeSet<McpRequirement>,
+    pub toolchain_probes: BTreeSet<ToolchainProbeRequirement>,
+    pub identity_brokers: BTreeMap<String, IdentityBrokerFacts>,
     pub budget_ceiling: RunBudget,
     pub provenance: RuntimeContractProvenance,
 }
@@ -373,14 +505,36 @@ pub enum LeaseDeltaOutcome {
 }
 
 #[derive(Debug)]
+pub enum ToolchainDiscoveryOutcome {
+    Discovered {
+        deltas: Vec<AuthorityLeaseDelta>,
+        receipt: RunAuthorityReceipt,
+    },
+    NeedsApproval {
+        batched_requests: ApprovalBatch,
+        receipt: RunAuthorityReceipt,
+    },
+    Blocked {
+        diagnostics: Vec<AuthorityDiagnostic>,
+        receipt: RunAuthorityReceipt,
+    },
+}
+
+#[derive(Debug)]
 pub struct AuthorityLease {
     pub(crate) lease_fingerprint: String,
     pub(crate) plan_fingerprint: String,
     pub(crate) plan: RunAuthorityPlanV1,
+    pub(crate) requested_fingerprints: BTreeMap<String, AuthorityRequirement>,
     pub(crate) requirement_fingerprints: BTreeMap<String, AuthorityRequirement>,
     pub(crate) approval_policy: ToolApprovalPolicy,
     pub(crate) net_policy: crate::harness_net::NetPolicy,
     pub(crate) deciders: BTreeMap<String, AuthorityDecider>,
+    pub(crate) approval_availability: ApprovalAvailability,
+    pub(crate) prior_used: BTreeSet<String>,
+    pub(crate) prior_denied: Vec<super::receipt::DeniedAuthority>,
+    pub(crate) prior_policy_decisions: Vec<super::receipt::PolicyDecisionEvidence>,
+    pub(crate) invalidated: Option<AuthorityDiagnostic>,
     pub(crate) expires_at_ms: u64,
 }
 

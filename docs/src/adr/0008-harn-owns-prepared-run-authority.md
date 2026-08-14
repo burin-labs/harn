@@ -3,7 +3,9 @@
 ## Status
 
 Accepted on 2026-08-14 for
-[#6662](https://github.com/burin-labs/harn/issues/6662).
+[#6662](https://github.com/burin-labs/harn/issues/6662), and extended by
+[#6666](https://github.com/burin-labs/harn/issues/6666) and
+[#6667](https://github.com/burin-labs/harn/issues/6667).
 
 ## Context
 
@@ -61,6 +63,20 @@ Dynamic needs use a typed `AuthorityLeaseDelta`. A delta is bound to its parent
 lease and may only attenuate an existing requirement. Widening requires a new
 prepared run so a delta cannot silently turn an approved envelope into a larger
 one.
+
+Command-derived toolchain roots use a post-readiness discovery phase on the
+same lease. The plan reviews an exact probe command and root ceiling. The
+startup and readiness receipts exist before the probe runs, and every observed
+operation becomes a typed delta. Accepted roots attenuate the reviewed ceiling;
+any widening invalidates the lease and requires a new grouped decision.
+
+Platform identity is distinct from secret lookup. A consumer-bound broker
+advertises its interaction, GUI, sandbox, renewal, source, and exact binding
+facts. The plan fingerprints a value-free identity reference with the broker,
+provider, audience, tenant, and consumer. Broker implementations return only a
+non-serializable process-local handle, and durable material remains with the
+host owner. Burin and Harn Cloud implement this shared Harn interface rather
+than maintaining provider-chain fallbacks.
 
 Burin owns approval presentation, permission persistence, native secret
 brokers, and headless JSON/NDJSON projection. Harn Cloud owns hosted brokers and

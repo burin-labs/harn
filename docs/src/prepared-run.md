@@ -36,10 +36,33 @@ and dotenv credentials should be moved into a zeroizing process-local provider
 and scrubbed from the process environment before workload execution. Durable
 secrets remain behind a host broker outside the workload sandbox.
 
-`request_delta` handles newly discovered authority. An identical requirement
-is already covered. A narrower filesystem root produces a typed delta bound to
-the parent lease and its expiry. A wider or unrelated requirement is blocked
-and requires a newly prepared run.
+`discover_toolchain` is the only command-derived root path. Preparation reviews
+the exact command and a read-root ceiling, then persists readiness. Only after
+that receipt exists may a host `ToolchainProbeRunner` spawn the command. Harn
+turns every observed root or attempted operation into a typed lease delta. A
+narrower process-read root is applied atomically and remains unused until
+dispatch authorizes it. A wider path, network access, secret access, process
+write, or budget change invalidates the lease; interactive hosts receive one
+new grouped decision and non-interactive hosts receive an actionable block.
+
+`request_delta` remains the general typed attenuation interface. An identical
+requirement is already covered. A narrower filesystem root produces a delta
+bound to the parent lease and its expiry. A wider or unrelated requirement is
+blocked and requires a newly prepared run.
+
+SDK profiles, workload identity, instance metadata, and hosted credentials use
+`ConsumerBoundIdentityBroker`. `RunAuthorityPlan.v1` records only a
+`harn-identity://` reference plus exact broker, source, renewal, provider,
+audience, tenant, and consumer facts. A host advertises whether the broker is
+non-interactive, GUI-capable, host-isolated, renewing, and able to return
+opaque process-local handles for that exact binding. Changing any binding fact
+blocks readiness before broker acquisition or provider spend.
+
+`OpaqueIdentityHandle` is non-cloneable and non-serializable. Its zeroizing
+material can be consumed once through the complete fingerprinted requirement;
+the handle rejects a different provider, audience, tenant, consumer, or broker.
+Local and hosted adapters implement the same broker interface while retaining
+custody of their own durable stores.
 
 Every terminal receipt records requested, granted, used, denied, and unused
 authority, along with its decider and canonical policy-decision evidence. A
