@@ -4,7 +4,7 @@
 //! diagnostics into one program-wide edit graph so a narrowed signature and
 //! every reachable caller move in the same apply pass.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 
 use harn_builtin_meta::CapabilityId;
@@ -24,6 +24,8 @@ use wraps::{
     emit_value_reference_wraps, mark_value_reference_wraps, seed_frozen_owner_ambient_requirements,
 };
 
+#[path = "whole_program_capabilities/call_graph.rs"]
+mod call_graph;
 #[path = "whole_program_capabilities/edits.rs"]
 mod edits;
 #[path = "whole_program_capabilities/imported_calls.rs"]
@@ -31,11 +33,13 @@ mod imported_calls;
 #[path = "whole_program_capabilities/wraps.rs"]
 mod wraps;
 
+use call_graph::{propagate_requirements, resolve_edges, ProgramEdge};
 use edits::{
     add_call_argument_at_index_edit, add_call_arguments_at_index_edit, ambient_edits,
-    argument_for_kind, carrier_supplies, explicit_capability_argument_edits,
-    receiver_projection_edits, signature_edit, split_call_extension,
-    split_capability_receiver_edits, split_capability_signature_edit, undefined_harness_edits,
+    argument_for_kind, argument_for_lexical_scope, carrier_supplies,
+    explicit_capability_argument_edits, receiver_projection_edits, signature_edit,
+    split_call_extension, split_capability_receiver_edits, split_capability_signature_edit,
+    undefined_harness_edits,
 };
 use imported_calls::{
     argument_edits as imported_argument_edits, signatures as imported_signatures,
@@ -123,13 +127,6 @@ where
         self.paths.insert(path.to_path_buf(), normalized.clone());
         normalized
     }
-}
-
-#[derive(Debug, Clone, Copy)]
-struct ProgramEdge {
-    caller: usize,
-    call_idx: usize,
-    callee: usize,
 }
 
 pub(super) fn plan(
@@ -517,6 +514,13 @@ pub(super) fn plan(
             ));
     }
     for edge in &edges {
+        // A call inside a nested capability-owning closure is insulated from
+        // changes to the outer constructor. Its existing lexical grant is
+        // already the authority at this call site; only a callee signature
+        // change can require an edit here.
+        if !edge.propagates_authority && !signature_changed[edge.callee] {
+            continue;
+        }
         if !signature_changed[edge.callee] && !signature_changed[edge.caller] {
             continue;
         }
@@ -530,12 +534,16 @@ pub(super) fn plan(
             let Some(callee_desired) = desired[edge.callee].as_ref() else {
                 continue;
             };
-            let argument = argument_for_kind(
-                caller,
-                caller_desired,
-                &added_capabilities[edge.caller],
-                callee_desired,
-            )
+            let argument = if let Some(scope) = &call.authority_scope {
+                argument_for_lexical_scope(scope, callee_desired)
+            } else {
+                argument_for_kind(
+                    caller,
+                    caller_desired,
+                    &added_capabilities[edge.caller],
+                    callee_desired,
+                )
+            }
             .map_err(|error| {
                 call_edge_error(
                     &program_files[caller.file_idx].path,
@@ -1071,88 +1079,6 @@ fn seed_ambient_requirements(
                 callables[callable_idx]
                     .direct_requirements
                     .insert(capability);
-            }
-        }
-    }
-}
-
-fn resolve_edges(
-    files: &[ProgramFile],
-    callables: &[ProgramCallable],
-    module_graph: &harn_modules::ModuleGraph,
-) -> Vec<ProgramEdge> {
-    let by_file_name = callables
-        .iter()
-        .enumerate()
-        .map(|(idx, callable)| {
-            (
-                (
-                    files[callable.file_idx].path.clone(),
-                    callable.info.name.clone(),
-                ),
-                idx,
-            )
-        })
-        .collect::<BTreeMap<_, _>>();
-    let mut canonical_paths = CanonicalPathCache::new(canonical);
-    let mut edges = Vec::new();
-    for (caller_idx, caller) in callables.iter().enumerate() {
-        let caller_path = &files[caller.file_idx].path;
-        for (call_idx, call) in caller.info.calls.iter().enumerate() {
-            let target = module_graph
-                .definition_of(caller_path, &call.callee)
-                .and_then(|definition| {
-                    by_file_name
-                        .get(&(canonical_paths.get(&definition.file), definition.name))
-                        .copied()
-                });
-            if let Some(callee) = target {
-                edges.push(ProgramEdge {
-                    caller: caller_idx,
-                    call_idx,
-                    callee,
-                });
-            }
-        }
-    }
-    edges
-}
-
-fn propagate_requirements(
-    edges: &[ProgramEdge],
-    requirements: &mut [BTreeSet<CapabilityId>],
-    root_requirements: &mut [bool],
-) {
-    let mut callers_by_callee = vec![BTreeSet::new(); requirements.len()];
-    for edge in edges {
-        callers_by_callee[edge.callee].insert(edge.caller);
-    }
-
-    let mut queued = requirements
-        .iter()
-        .zip(root_requirements.iter())
-        .map(|(requirement, root_required)| !requirement.is_empty() || *root_required)
-        .collect::<Vec<_>>();
-    let mut pending = queued
-        .iter()
-        .enumerate()
-        .filter_map(|(idx, queued)| queued.then_some(idx))
-        .collect::<VecDeque<_>>();
-
-    while let Some(callee) = pending.pop_front() {
-        queued[callee] = false;
-        let propagated = requirements[callee].clone();
-        let root_propagated = root_requirements[callee];
-        for &caller in &callers_by_callee[callee] {
-            let before = requirements[caller].len();
-            let root_before = root_requirements[caller];
-            requirements[caller].extend(propagated.iter().copied());
-            root_requirements[caller] |= root_propagated;
-            if (requirements[caller].len() > before || root_requirements[caller] != root_before)
-                && !queued[caller]
-            {
-                queued[caller] = true;
-                pending.push_back(caller);
             }
         }
     }

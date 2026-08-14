@@ -15,7 +15,7 @@ use harn_parser::{
 use super::alias_widening::AliasWidening;
 use super::capability_migrations::collect_callable_node_calls;
 use super::value_escape::FrozenCause;
-use super::CallableInfo;
+use super::{CallSite, CallableInfo};
 
 /// The attribute that declares an embedding host supplies the arguments.
 /// The type checker owns the vocabulary; `harn-lint` keeps the boundary policy.
@@ -96,6 +96,7 @@ pub(super) fn collect_callable_infos(
                         &mut ambient_capability_calls,
                     );
                 });
+                mark_authority_isolated_calls(body, &mut calls);
                 let Some((insert_offset, has_params)) = callable_param_insert(source, inner.span)
                 else {
                     continue;
@@ -140,6 +141,7 @@ pub(super) fn collect_callable_infos(
                         &mut ambient_capability_calls,
                     );
                 });
+                mark_authority_isolated_calls(body, &mut calls);
                 let Some((insert_offset, has_params)) = callable_param_insert(source, inner.span)
                 else {
                     continue;
@@ -261,6 +263,44 @@ fn visit_callable_body(node: &SNode, visitor: &mut impl FnMut(&SNode)) {
     }
 }
 
+/// Mark calls whose nearest enclosing closure supplies an independent typed
+/// capability handle. Such a closure is a real authority boundary: its calls
+/// remain editable, but their requirements cannot be attributed to the outer
+/// callable that merely constructs the closure.
+fn mark_authority_isolated_calls(body: &[SNode], calls: &mut [CallSite]) {
+    let mut scope_spans = Vec::new();
+    visit::walk_program(body, &mut |node| {
+        let Node::Closure { params, .. } = &node.node else {
+            return;
+        };
+        if let Some((binding, kind)) = params.iter().find_map(|param| {
+            let Some(TypeExpr::Named(name)) = param.type_expr.as_ref() else {
+                return None;
+            };
+            let kind = if name == "Harness" {
+                super::LexicalAuthorityKind::Root
+            } else {
+                super::LexicalAuthorityKind::Narrow(
+                    harn_builtin_meta::CapabilityId::from_type_name(name)?,
+                )
+            };
+            Some((param.name.clone(), kind))
+        }) {
+            scope_spans.push((node.span, binding, kind));
+        }
+    });
+    for call in calls {
+        call.authority_scope = scope_spans
+            .iter()
+            .filter(|(scope, _, _)| scope.start <= call.span.start && scope.end >= call.span.end)
+            .min_by_key(|(scope, _, _)| scope.end.saturating_sub(scope.start))
+            .map(|(_, binding, kind)| super::LexicalAuthorityScope {
+                binding: binding.clone(),
+                kind: *kind,
+            });
+    }
+}
+
 #[expect(
     clippy::string_slice,
     reason = "open_paren is from find('('); close_paren is a char_indices offset past it"
@@ -326,6 +366,9 @@ pub(super) fn build_reverse_callers(infos: &[CallableInfo]) -> Vec<Vec<(usize, u
     let mut reverse = vec![Vec::new(); infos.len()];
     for (caller_idx, info) in infos.iter().enumerate() {
         for (call_idx, call) in info.calls.iter().enumerate() {
+            if call.authority_scope.is_some() {
+                continue;
+            }
             let Some(&callee_idx) = by_name.get(call.callee.as_str()) else {
                 continue;
             };

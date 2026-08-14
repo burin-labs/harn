@@ -835,6 +835,26 @@ fn capability_apply_repairs_imported_capability_helpers_inside_closures() {
 }
 
 #[test]
+fn capability_apply_does_not_widen_an_outer_helper_from_a_root_owned_closure() {
+    let (result, updated) = apply_single(
+        "fn dispatch(harness: Harness, request) { return harness.fs.cwd() }\n\npub fn adapter(net: HarnessNet) {\n  const callback = fn(harness: Harness, request) { return dispatch(harness, request) }\n  return {callback: callback, client: net.get(\"https://example.test\")}\n}\n\npipeline main(harness: Harness) { return adapter(harness.net) }\n",
+    );
+    assert_eq!(
+        result.post_apply_diagnostics_count, 0,
+        "{result:#?}\n{updated}"
+    );
+    assert_eq!(
+        callable_params(&updated, "adapter"),
+        vec![param("net", "HarnessNet")],
+        "a nested root-owned callback must not donate its authority to its constructor:\n{updated}"
+    );
+    assert_eq!(
+        call_argument_paths(&updated, "adapter")[0],
+        [Some("harness.net".to_string())]
+    );
+}
+
+#[test]
 fn capability_apply_repairs_session_ids_from_agent_session_producers() {
     let (result, updated) = apply_single(
         "import { agent_capture_events } from \"std/agent/events\"\nimport { agent_session_finalize, agent_session_init, agent_session_messages } from \"std/agent/state\"\n\npipeline main(task) {\n  const session = agent_session_open(\"session-id\")\n  const before = agent_session_messages(session)\n  const captured = agent_capture_events(session, fn() {\n    return agent_session_messages(session)\n  })\n  agent_session_finalize(session, {})\n  const control = agent_session_init(\"task\", nil, {})\n  const initialized_session = control?.session_id ?? \"\"\n  agent_session_finalize(initialized_session, {})\n  return {before: before, captured: captured}\n}\n",

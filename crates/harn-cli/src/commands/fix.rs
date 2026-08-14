@@ -124,6 +124,22 @@ struct CallSite {
     callee: String,
     span: Span,
     args: Vec<Span>,
+    /// The call is inside a nested callable that declares its own capability
+    /// handle. Its callee's authority must not widen the enclosing callable;
+    /// call-site edits still apply at this span when the callee migrates.
+    authority_scope: Option<LexicalAuthorityScope>,
+}
+
+#[derive(Debug, Clone)]
+struct LexicalAuthorityScope {
+    binding: String,
+    kind: LexicalAuthorityKind,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum LexicalAuthorityKind {
+    Root,
+    Narrow(harn_builtin_meta::CapabilityId),
 }
 
 #[derive(Debug, Clone)]

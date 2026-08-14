@@ -8,7 +8,7 @@ use harn_parser::TypedParam;
 
 use super::super::capability_migrations::{ambient_call_rewrite, ambient_replacement};
 use super::super::signature_threading::{add_call_argument_edit, prepend_list_item};
-use super::super::CallSite;
+use super::super::{CallSite, LexicalAuthorityKind, LexicalAuthorityScope};
 use super::{
     ambient_call_capability, diagnostic_capability, CarrierKind, FileDiagnostics, ProgramCallable,
 };
@@ -177,6 +177,44 @@ pub(super) fn argument_for_kind(
                 .ok_or_else(|| "caller does not hold the required capability bundle".to_string())?;
             Ok(format!("{{{}}}", fields.join(", ")))
         }
+    }
+}
+
+/// Project authority from the nearest nested callable that owns its own typed
+/// capability handle. A callback's parameter—not its outer constructor—is the
+/// grant available at calls inside that callback.
+pub(super) fn argument_for_lexical_scope(
+    scope: &LexicalAuthorityScope,
+    required: &CarrierKind,
+) -> Result<String, String> {
+    let available = match scope.kind {
+        LexicalAuthorityKind::Root => CarrierKind::Root,
+        LexicalAuthorityKind::Narrow(capability) => CarrierKind::Narrow(capability),
+    };
+    match (available, required) {
+        (CarrierKind::Root, CarrierKind::Root) => Ok(scope.binding.clone()),
+        (CarrierKind::Root, CarrierKind::Narrow(capability)) => {
+            Ok(format!("{}.{}", scope.binding, capability.field_name()))
+        }
+        (CarrierKind::Root, CarrierKind::Bundle(capabilities)) => Ok(format!(
+            "{{{}}}",
+            capabilities
+                .iter()
+                .map(|capability| format!(
+                    "{}: {}.{}",
+                    capability.field_name(),
+                    scope.binding,
+                    capability.field_name()
+                ))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )),
+        (CarrierKind::Narrow(available), CarrierKind::Narrow(required))
+            if available == *required =>
+        {
+            Ok(scope.binding.clone())
+        }
+        _ => Err("nested callable does not hold the required capability".to_string()),
     }
 }
 

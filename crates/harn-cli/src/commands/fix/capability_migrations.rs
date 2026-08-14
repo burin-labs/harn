@@ -162,6 +162,7 @@ fn record_callable_call(
         callee: name.to_string(),
         span,
         args: args.iter().map(|arg| arg.span).collect(),
+        authority_scope: None,
     });
     if let Some(code) = ambient_code_for_call(name, args.len()) {
         ambient_calls.push(AmbientCapabilityCall {
