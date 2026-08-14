@@ -4,7 +4,7 @@ import {
   pl_slugify,
   pl_text,
   pl_validate_skill_name,
-} from "./pattern_knowledge_values"
+} from "std/agent/pattern_knowledge_values"
 
 fn pl_curated_evidence_ids(proposal: dict, allowed_ids: list) -> list {
   const raw = proposal?.evidence_ids ?? proposal?.evidence ?? []

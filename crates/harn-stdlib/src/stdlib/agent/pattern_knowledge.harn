@@ -1,3 +1,10 @@
+import { pl_curated_proposal } from "std/agent/pattern_knowledge_curated"
+import {
+  pl_short_hash,
+  pl_slugify,
+  pl_text,
+  pl_validate_skill_name,
+} from "std/agent/pattern_knowledge_values"
 // std/agent/pattern_knowledge.harn
 //
 // Cross-session repeated-work knowledge for agent pattern recall. The durable
@@ -6,13 +13,6 @@
 import { write_json } from "std/fs"
 import { memory_forget, memory_store, memory_summarize } from "std/memory"
 import { runtime_state_paths_under } from "std/runtime"
-import { pl_curated_proposal } from "./pattern_knowledge_curated"
-import {
-  pl_short_hash,
-  pl_slugify,
-  pl_text,
-  pl_validate_skill_name,
-} from "./pattern_knowledge_values"
 
 const PATTERN_SCHEMA = "harn.pattern_learning.v1"
 
