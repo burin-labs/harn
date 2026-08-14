@@ -9,6 +9,24 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.94
+
+### Added
+
+- Add an agentic crystallization curator that reviews bounded session evidence,
+  retrieves Harn authoring guides, compiler-checks generated capabilities, and
+  stages evidence-linked executable candidates for explicit promotion.
+  Add `harn serve mcp --surface script|exports|auto` so promoted registry-backed
+  tools retain their declared callable names even when their package exports
+  public helpers for direct tests, and make registry-backed servers negotiate
+  released-client MCP `initialize` requests as well as Harn's stable protocol.
+
+### Fixed
+
+- Agent sessions now bind tool-call parsing and history to the exact format used
+  by each provider transaction, preventing stale text grammars from corrupting
+  later Fireworks requests.
+
 ## v0.10.93
 
 ### Added
