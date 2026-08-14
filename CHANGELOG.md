@@ -9,6 +9,16 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.93
+
+### Added
+
+- **Prepared runs reconcile authority before side effects (#6662).** Embedders
+  can now prepare a versioned, value-free authority plan against host facts,
+  canonical permission and network policy, secret-consumer bindings, budgets,
+  and runtime provenance; execute through an opaque attenuating lease; and
+  persist startup and terminal authority receipts.
+
 ## v0.10.92
 
 ### Fixed
