@@ -21,11 +21,23 @@ use crate::value::{VmDictExt, VmValue};
 /// into the provider-neutral message envelope used by replay and completion
 /// policy.
 pub(super) fn transcript_tool_result_data(result: &VmValue) -> Option<VmValue> {
-    let mut data = dict_get(result, "data")
+    // Tool handlers return their value under the dispatch envelope's `result`
+    // field. Built-in hosts may instead attach receipts directly to the
+    // envelope. Read both shapes so MCP/dynamic tools do not lose the same
+    // typed mutation facts that first-party tools preserve.
+    let handler_result = dict_get(result, "result").unwrap_or(result);
+    let mut data = dict_get(handler_result, "data")
         .and_then(VmValue::as_dict)
         .cloned()
         .unwrap_or_default();
-    if let Some(VmValue::String(status)) = dict_get(result, "mutation_status") {
+    if let Some(envelope_data) = dict_get(result, "data").and_then(VmValue::as_dict) {
+        for (key, value) in envelope_data {
+            data.insert(key.clone(), value.clone());
+        }
+    }
+    let mutation_status =
+        dict_get(result, "mutation_status").or_else(|| dict_get(handler_result, "mutation_status"));
+    if let Some(VmValue::String(status)) = mutation_status {
         if matches!(status.as_str(), "applied" | "unchanged" | "not_applied") {
             data.insert(
                 crate::value::intern_key("mutation_status"),
@@ -33,7 +45,9 @@ pub(super) fn transcript_tool_result_data(result: &VmValue) -> Option<VmValue> {
             );
         }
     }
-    if let Some(VmValue::List(paths)) = dict_get(result, "changed_paths") {
+    let changed_paths =
+        dict_get(result, "changed_paths").or_else(|| dict_get(handler_result, "changed_paths"));
+    if let Some(VmValue::List(paths)) = changed_paths {
         if !paths.is_empty() {
             data.insert(
                 crate::value::intern_key("changed_paths"),

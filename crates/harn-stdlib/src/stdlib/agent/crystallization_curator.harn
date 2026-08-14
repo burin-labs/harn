@@ -15,9 +15,34 @@ import { tool_registry_from } from "std/tools"
 
 const CURATOR_SCHEMA = "harn.crystallization.curator.v1"
 
+const CURATOR_VALIDATION_TIMEOUT_MS: int = 120000
+
 fn cc_text(value) -> string {
   return regex_replace(r"\s+", " ", to_string(value ?? "").trim())
     ?? to_string(value ?? "").trim()
+}
+
+/**
+ * Run trusted, fixed-argv toolchain commands under the curator's owning
+ * capability sandbox. `workspace_paths` retains Harn's in-process filesystem
+ * and launch-cwd checks while avoiding an unsupported nested macOS sandbox-exec
+ * around the fixed Harn argv. Candidate effects remain capability mediated.
+ */
+fn cc_toolchain_command_options(overrides = nil) -> dict {
+  const cwd = cc_text(overrides?.cwd)
+  const isolated_runtime = if cwd == "" {
+    {LANG: "en_US.UTF-8", TERM: "dumb"}
+  } else {
+    {
+      HARN_PROJECT_ROOT: cwd,
+      HARN_STATE_DIR: path_join(cwd, ".harn-state"),
+      LANG: "en_US.UTF-8",
+      TERM: "dumb",
+    }
+  }
+  return {sandbox_profile: "workspace_paths", env_mode: "replace", env: isolated_runtime}
+    + (overrides
+    ?? {})
 }
 
 fn cc_recent_evidence(harness: Harness, options = nil) -> list {
@@ -66,7 +91,7 @@ You are Burin's crystallization curator. You inspect completed coding-agent sess
 
 Think like a senior harness engineer, not a sequence miner. Infer intent, invariants, repository conventions, useful parameters, failure recovery, and the narrowest reusable interface. A capability may be a skill, an executable Harn MCP tool, a Harn workflow that mixes deterministic and agentic stages, or a hybrid. It is correct to propose nothing.
 
-Use inspect_session_evidence when the summary cards are insufficient and a card supplies a non-empty session_id; when none does, the cards are the complete evidence available. Before authoring an executable proposal, retrieve the narrow Harn guides you need with lookup_harn_skill; harn-language plus harn-mcp or harn-orchestration and harn-testing are usually sufficient. For an MCP tool, call scaffold_harn_tool before authoring: it projects Harn's current canonical generator into the single-file package shape accepted here, so do not reconstruct an older tool API from memory. Search compiler-owned global function names with search_harn_builtins instead of guessing APIs. For every executable proposal, author Harn language—not Rust, TypeScript, Python, or pseudocode—and call validate_harn_candidate on the complete source. Repair it until the compiler and authored tests report pass. Prefer small pure helper tests for deterministic rendering and validation; add Harness test doubles only when they prove behavior the pure seam cannot. Finish by calling submit_crystallization_batch exactly once successfully with zero to three proposals. A rejected submission is feedback: repair and resubmit. Never claim evidence you did not inspect. Do not encode secrets, machine-specific absolute paths, or transcript-specific ids into an artifact.
+Use inspect_session_evidence when the summary cards are insufficient and a card supplies a non-empty session_id; when none does, the cards are the complete evidence available. Before authoring an executable proposal, retrieve the narrow Harn guides you need with lookup_harn_skill; harn-language plus harn-mcp or harn-orchestration and harn-testing are usually sufficient. For an MCP tool, call scaffold_harn_tool before authoring: it projects Harn's current canonical generator into the single-file package shape accepted here, so do not reconstruct an older tool API from memory. Search compiler-owned global function names with search_harn_builtins instead of guessing APIs. For every executable proposal, author Harn language—not Rust, TypeScript, Python, or pseudocode—and call validate_harn_candidate on the complete source. Repair it until the compiler and authored tests report pass. Test pure helpers for deterministic rendering and validation, and also exercise at least one representative success path through the public tool registry. A workspace-writing tool must annotate `kind: "edit"` and `side_effect_level: "workspace_write"`. Return its producer facts with `agent_tool_handler_result`: successful data must carry `mutation_status: "applied"` plus the complete repo-relative `changed_paths` list (or `mutation_status: "unchanged"` when it proved the requested state already existed). When the tool can deterministically reread and prove every changed artifact, include `verification: agent_tool_postcondition(changed_paths)` only after those checks pass; never certify an unchecked write. Its tests must assert the dispatch envelope's typed mutation and postcondition receipts and the real filesystem effects, not merely its plan. In an MCP server, fs.project_root() is the capability package while fs.cwd() is the consumer workspace: apply consumer-repository effects relative to fs.cwd(). Finish by calling submit_crystallization_batch exactly once successfully with zero to three proposals. A rejected submission is feedback: repair and resubmit. Never claim evidence you did not inspect. Do not encode secrets, machine-specific absolute paths, or transcript-specific ids into an artifact.
 
 Each executable proposal must include complete Harn source in artifact.source and a deterministic user-test suite in artifact.test_source. Set artifact.entrypoint to server.harn for harn_tool/hybrid proposals or workflow.harn for harn_workflow proposals. MCP server source must be runnable with `harn serve mcp server.harn`; tests must be runnable with `harn test test.harn`. Keep external effects behind Harness capabilities, declare capabilities and side effects, preserve approval boundaries, and prefer a small semantic interface over replaying incidental low-level calls.
 
@@ -132,7 +157,9 @@ fn cc_validate_artifact(harness: Harness, artifact: dict, options = nil) -> dict
     const formatted = command_run(
       harness.tools,
       [cc_harn_binary(harness.env, options), "fmt", entrypoint, "test.harn"],
-      {cwd: dir, timeout_ms: options?.validation_timeout_ms ?? 30000},
+      cc_toolchain_command_options(
+        {cwd: dir, timeout_ms: options?.validation_timeout_ms ?? CURATOR_VALIDATION_TIMEOUT_MS},
+      ),
     )
     if !(formatted?.success ?? false) {
       harness.fs.delete(dir)
@@ -148,22 +175,30 @@ fn cc_validate_artifact(harness: Harness, artifact: dict, options = nil) -> dict
     const check = command_run(
       harness.tools,
       [cc_harn_binary(harness.env, options), "check", "--strict", entrypoint, "test.harn"],
-      {cwd: dir, timeout_ms: options?.validation_timeout_ms ?? 30000},
+      cc_toolchain_command_options(
+        {cwd: dir, timeout_ms: options?.validation_timeout_ms ?? CURATOR_VALIDATION_TIMEOUT_MS},
+      ),
     )
     let tested = {}
     if check?.success ?? false {
       tested = command_run(
         harness.tools,
         [cc_harn_binary(harness.env, options), "test", "test.harn"],
-        {cwd: dir, timeout_ms: options?.validation_timeout_ms ?? 30000},
+        cc_toolchain_command_options(
+          {cwd: dir, timeout_ms: options?.validation_timeout_ms ?? CURATOR_VALIDATION_TIMEOUT_MS},
+        ),
       )
     }
     harness.fs.delete(dir)
     const passed = (check?.success ?? false) && (tested?.success ?? false)
     const diagnostics = {
       outcome: passed ? "pass" : "fail",
+      check_status: check?.status,
+      check_timed_out: check?.timed_out ?? false,
       check_stdout: to_string(check?.stdout ?? "")[0:4000],
       check_stderr: to_string(check?.stderr ?? "")[0:4000],
+      test_status: tested?.status,
+      test_timed_out: tested?.timed_out ?? false,
       test_stdout: to_string(tested?.stdout ?? "")[0:4000],
       test_stderr: to_string(tested?.stderr ?? "")[0:4000],
     }
@@ -186,7 +221,7 @@ fn cc_harn_binary(env: HarnessEnv, options = nil) -> string {
 }
 
 fn cc_lookup_skill(
-  capabilities: {env: HarnessEnv, tools: HarnessTools},
+  capabilities: {env: HarnessEnv, fs: HarnessFs, tools: HarnessTools},
   raw_name,
   options = nil,
 ) -> dict {
@@ -202,11 +237,19 @@ fn cc_lookup_skill(
   if !allowed.contains(name) {
     throw "lookup_harn_skill: unsupported guide `" + name + "`"
   }
-  const result = command_run(
-    capabilities.tools,
-    [cc_harn_binary(capabilities.env, options), "skill", "get", name, "--full"],
-    {timeout_ms: options?.guide_timeout_ms ?? 30000},
-  )
+  const dir = capabilities.fs.mkdtemp_in_workspace("harn-curator-guide-")
+  const result = try {
+    const executed = command_run(
+      capabilities.tools,
+      [cc_harn_binary(capabilities.env, options), "skill", "get", name, "--full"],
+      cc_toolchain_command_options({cwd: dir, timeout_ms: options?.guide_timeout_ms ?? 30000}),
+    )
+    capabilities.fs.delete(dir)
+    executed
+  } catch (e) {
+    capabilities.fs.delete(dir)
+    throw e
+  }
   const stdout = to_string(result?.stdout ?? "")
   const stderr = to_string(result?.stderr ?? "")
   return {
@@ -240,7 +283,7 @@ fn cc_scaffold_tool(
         dir,
         "--force",
       ],
-      {timeout_ms: options?.guide_timeout_ms ?? 30000},
+      cc_toolchain_command_options({cwd: dir, timeout_ms: options?.guide_timeout_ms ?? 30000}),
     )
     if !(generated?.success ?? false) {
       capabilities.fs.delete(dir)
@@ -265,7 +308,7 @@ fn cc_scaffold_tool(
       source: projected_server,
       test_source: projected_test,
       note:
-        "Rename and adapt this generated package. Preserve tool_define schema validation and dispatch-level tests; keep public pure helpers directly testable.",
+        "Rename and adapt this generated package. Preserve tool_define schema validation and dispatch-level success tests; assert real filesystem effects for workspace-writing tools, use fs.cwd() for the consumer workspace, and keep public pure helpers directly testable.",
     }
   } catch (e) {
     capabilities.fs.delete(dir)
@@ -274,7 +317,7 @@ fn cc_scaffold_tool(
 }
 
 fn cc_search_builtins(
-  capabilities: {env: HarnessEnv, tools: HarnessTools},
+  capabilities: {env: HarnessEnv, fs: HarnessFs, tools: HarnessTools},
   raw_query,
   options = nil,
 ) -> dict {
@@ -283,14 +326,25 @@ fn cc_search_builtins(
   if len(terms) == 0 {
     return {success: false, error: "query must contain at least one two-character term"}
   }
-  const result = command_run(
-    capabilities.tools,
-    [cc_harn_binary(capabilities.env, options), "contracts", "builtins", "--pretty", "false"],
-    {
-      timeout_ms: options?.guide_timeout_ms ?? 30000,
-      capture: {max_inline_bytes: options?.catalog_max_bytes ?? 2000000},
-    },
-  )
+  const dir = capabilities.fs.mkdtemp_in_workspace("harn-curator-catalog-")
+  const result = try {
+    const executed = command_run(
+      capabilities.tools,
+      [cc_harn_binary(capabilities.env, options), "contracts", "builtins", "--pretty", "false"],
+      cc_toolchain_command_options(
+        {
+          cwd: dir,
+          timeout_ms: options?.guide_timeout_ms ?? 30000,
+          capture: {max_inline_bytes: options?.catalog_max_bytes ?? 2000000},
+        },
+      ),
+    )
+    capabilities.fs.delete(dir)
+    executed
+  } catch (e) {
+    capabilities.fs.delete(dir)
+    throw e
+  }
   if !(result?.success ?? false) {
     return {success: false, stderr: to_string(result?.stderr ?? "")[0:4000]}
   }
@@ -387,7 +441,11 @@ fn cc_tools(harness: Harness, evidence: list, options = nil) {
         },
         returns: {type: "object"},
         handler: { args ->
-          cc_lookup_skill({env: harness.env, tools: harness.tools}, args?.name, options)
+          cc_lookup_skill(
+            {env: harness.env, fs: harness.fs, tools: harness.tools},
+            args?.name,
+            options,
+          )
         },
         annotations: {kind: "lookup", readOnlyHint: true, side_effect_level: "process"},
       },
@@ -420,7 +478,11 @@ fn cc_tools(harness: Harness, evidence: list, options = nil) {
         },
         returns: {type: "object"},
         handler: { args ->
-          cc_search_builtins({env: harness.env, tools: harness.tools}, args?.query, options)
+          cc_search_builtins(
+            {env: harness.env, fs: harness.fs, tools: harness.tools},
+            args?.query,
+            options,
+          )
         },
         annotations: {kind: "read", side_effect_level: "read_only"},
       },

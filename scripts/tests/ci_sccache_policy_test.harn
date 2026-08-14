@@ -18,7 +18,7 @@ fn persistent_lane(
       "vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && 'ubuntu-latest' || (${paid_event} && '${runner}' || 'ubuntu-latest')",
     ),
     "timeout-minutes": gha_expression(
-      "${paid_event} && vars.HARN_CI_DISABLE_BLACKSMITH_LINUX != 'true' && 20 || 25",
+      "${paid_event} && vars.HARN_CI_DISABLE_BLACKSMITH_LINUX != 'true' && 20 || 40",
     ),
     env: {
       HARN_RUNNER_TIER: gha_expression(
@@ -746,7 +746,7 @@ pipeline test_rejects_paid_producer_outside_trusted_events_or_without_fuse(harne
   assert(errors.contains("ci.yml:rust-check-inputs must mirror its Blacksmith/hosted runner tier"))
   assert(
     errors.contains(
-      "ci.yml:rust-check-inputs must keep the 20-minute paid-runner fuse and 25-minute hosted fallback",
+      "ci.yml:rust-check-inputs must keep the 20-minute paid-runner fuse and 40-minute hosted recovery ceiling",
     ),
   )
 }

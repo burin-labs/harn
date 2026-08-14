@@ -25,6 +25,26 @@ pub type AgentToolHandlerResult<T> = {
   data: T,
 }
 
+pub type AgentToolPostcondition = {
+  schema: "harn.agent_tool_postcondition.v1",
+  status: "passed",
+  verified_paths: list<string>,
+}
+
+/**
+ * Certify deterministic read-after-write postconditions for one atomic tool call.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn agent_tool_postcondition(verified_paths: list<string>) -> AgentToolPostcondition {
+  return {
+    schema: "harn.agent_tool_postcondition.v1",
+    status: "passed",
+    verified_paths: verified_paths,
+  }
+}
+
 /**
  * Pair model-visible tool feedback with typed producer facts.
  *
