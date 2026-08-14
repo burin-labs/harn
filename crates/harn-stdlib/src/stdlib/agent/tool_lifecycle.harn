@@ -31,7 +31,12 @@ pub type AgentToolPostcondition = {
   verified_paths: list<string>,
 }
 
-/** Certify deterministic read-after-write postconditions for one atomic tool call. */
+/**
+ * Certify deterministic read-after-write postconditions for one atomic tool call.
+ *
+ * @effects: []
+ * @errors: []
+ */
 pub fn agent_tool_postcondition(verified_paths: list<string>) -> AgentToolPostcondition {
   return {
     schema: "harn.agent_tool_postcondition.v1",
