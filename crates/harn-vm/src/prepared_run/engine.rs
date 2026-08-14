@@ -1388,7 +1388,7 @@ fn lexical_components(path: &Path) -> Option<Vec<String>> {
     for component in path.components() {
         match component {
             Component::Prefix(prefix) => {
-                normalized.push(prefix.as_os_str().to_string_lossy().to_string())
+                normalized.push(prefix.as_os_str().to_string_lossy().to_string());
             }
             Component::RootDir => normalized.push("/".to_string()),
             Component::CurDir => {}
