@@ -1165,12 +1165,20 @@ fn requirement_attenuates(
             AuthorityRequirement::FilesystemWrite { root: requested },
         )
         | (
+            AuthorityRequirement::FilesystemWrite { root: granted },
+            AuthorityRequirement::FilesystemRead { root: requested },
+        )
+        | (
             AuthorityRequirement::ProcessReadRoot { root: granted },
             AuthorityRequirement::ProcessReadRoot { root: requested },
         )
         | (
             AuthorityRequirement::ProcessWriteRoot { root: granted },
             AuthorityRequirement::ProcessWriteRoot { root: requested },
+        )
+        | (
+            AuthorityRequirement::ProcessWriteRoot { root: granted },
+            AuthorityRequirement::ProcessReadRoot { root: requested },
         ) => path_is_within(requested, granted),
         _ => granted == requested,
     }

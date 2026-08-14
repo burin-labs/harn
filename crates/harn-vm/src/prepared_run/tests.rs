@@ -325,6 +325,50 @@ fn narrower_path_use_is_inside_the_granted_envelope_without_another_prompt() {
 }
 
 #[test]
+fn read_use_attenuates_existing_write_root_grants() {
+    let requirements = vec![
+        AuthorityRequirement::FilesystemRead {
+            root: "/workspace/src".to_string(),
+        },
+        AuthorityRequirement::ProcessReadRoot {
+            root: "/workspace/.cache/tool".to_string(),
+        },
+    ];
+    let mut run_intent = intent();
+    run_intent.capability_policy.process_sandbox.write_roots =
+        vec!["/workspace/.cache".to_string()];
+    let mut host = host_facts();
+    host.capability_ceiling.process_sandbox.write_roots = vec!["/workspace/.cache".to_string()];
+    let receipts = Arc::new(MemoryAuthorityReceiptSink::default());
+    let executor = FixtureExecutor {
+        requirements,
+        model_calls: Arc::new(AtomicUsize::new(0)),
+    };
+    let run = PreparedRun::with_clock(executor, receipts, Arc::new(|| NOW_MS));
+    let batch = match run.prepare(run_intent.clone(), host.clone()) {
+        PreparationOutcome::NeedsApproval {
+            batched_requests, ..
+        } => batched_requests,
+        other => panic!("expected approval, got {other:?}"),
+    };
+    host.approved_batches
+        .insert(batch.batch_fingerprint, AuthorityDecider::Person);
+    let lease = match run.prepare(run_intent, host) {
+        PreparationOutcome::Ready {
+            authority_lease, ..
+        } => authority_lease,
+        other => panic!("expected ready, got {other:?}"),
+    };
+    match run.execute(lease) {
+        ExecutionOutcome::Completed { receipt, .. } => {
+            assert_eq!(receipt.used.len(), 2);
+            assert!(receipt.denied.is_empty());
+        }
+        ExecutionOutcome::Failed { error, .. } => panic!("execution failed: {error}"),
+    }
+}
+
+#[test]
 fn lease_expiry_is_rechecked_at_each_material_operation() {
     let clock = Arc::new(AtomicU64::new(NOW_MS));
     let model_calls = Arc::new(AtomicUsize::new(0));
