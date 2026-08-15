@@ -267,6 +267,29 @@ impl HardenedGitEnv {
     }
 }
 
+/// Explain a failed remote Git call in terms of the environment it ran in.
+///
+/// Package fetches run under [`HardenedGitEnv`], which clears the environment
+/// and points Git at a scratch `HOME` and config. That is deliberate, but it
+/// makes Git's own wording actively misleading: "Please make sure you have the
+/// correct access rights" reads as a problem with the operator's credentials
+/// when in fact none were offered and none ever will be. Readers who do not
+/// know about the hardened environment reach for credential and network
+/// explanations that cannot be the cause, so state the constraint where the
+/// failure is reported.
+fn git_remote_failure(summary: String, stderr: &[u8]) -> PackageError {
+    let stderr = String::from_utf8_lossy(stderr);
+    format!(
+        "{summary}: {}\n\
+         note: Harn fetches packages with an isolated Git environment. It offers no \
+         credential helper, no SSH agent, and no user or system Git config, so a source \
+         that requires authentication cannot be fetched, in any context. Depend on a \
+         source Harn can read without credentials.",
+        stderr.trim()
+    )
+    .into()
+}
+
 pub(crate) fn git_output<I, S>(args: I, cwd: Cwd<'_>) -> Result<std::process::Output, PackageError>
 where
     I: IntoIterator<Item = S>,
@@ -315,11 +338,10 @@ pub(crate) fn resolve_git_commit(
         Cwd::Detached,
     )?;
     if !output.status.success() {
-        return Err(format!(
-            "failed to resolve git ref from {url}: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        )
-        .into());
+        return Err(git_remote_failure(
+            format!("failed to resolve git ref from {url}"),
+            &output.stderr,
+        ));
     }
     let stdout = String::from_utf8_lossy(&output.stdout);
     pick_ls_remote_commit(&stdout)
@@ -399,11 +421,10 @@ pub(crate) fn clone_git_commit_to(
             Cwd::Detached,
         )?;
         if !clone.status.success() {
-            return Err(format!(
-                "failed to fetch {commit} from {url}: {}",
-                String::from_utf8_lossy(&fetch.stderr).trim()
-            )
-            .into());
+            return Err(git_remote_failure(
+                format!("failed to fetch {commit} from {url}"),
+                &fetch.stderr,
+            ));
         }
         let checkout = git_output(
             CANONICAL_CHECKOUT_CONFIG
