@@ -277,7 +277,10 @@ pub fn pl_observation_from_input(
   const id = pl_text(input?.id)
   return {
     id: id == "" ? random.uuid() : id,
+    source_id: pl_text(input?.source_id ?? input?.sourceId),
     session_id: pl_text(input?.session_id ?? input?.sessionID),
+    run_id: pl_text(input?.run_id ?? input?.runId),
+    evidence_kind: pl_text(input?.evidence_kind ?? input?.evidenceKind),
     prompt: prompt,
     tool_sequence: pl_sanitize_tool_sequence(input?.tool_sequence ?? input?.toolSequence ?? []),
     observed_at: pl_text(input?.observed_at ?? input?.observedAt ?? pl_now(clock, options)),

@@ -15,11 +15,16 @@ use harn_session_store::{
 use crate::stdlib::session_store;
 use crate::value::{DictMap, VmError};
 
+const WORKFLOW_LEARNING_ELIGIBILITY_HEADER: &str = "harn.workflow_learning.eligibility";
+const WORKFLOW_LEARNING_ELIGIBLE: &str = "eligible";
+const WORKFLOW_LEARNING_EXCLUDED: &str = "excluded";
+
 #[derive(Clone)]
 struct JournalConfig {
     store: SqliteSessionStore,
     run_id: String,
     turn_id: String,
+    workflow_learning_eligibility: String,
 }
 
 #[derive(Clone)]
@@ -109,6 +114,7 @@ pub(crate) async fn prepare(
         }
         _ => SessionType::User,
     };
+    let workflow_learning_eligibility = workflow_learning_eligibility(options)?;
     let store = session_store::open_canonical_agent_session(
         &state_dir,
         session_id,
@@ -124,10 +130,39 @@ pub(crate) async fn prepare(
                 store,
                 run_id,
                 turn_id,
+                workflow_learning_eligibility,
             },
             pending: VecDeque::new(),
         },
     })
+}
+
+/// Closed per-run provenance for whether a completed agent turn may become
+/// reusable-workflow evidence. It is written on each persisted event (and
+/// therefore on the terminal event), so a later coding turn in a long-lived
+/// conversation does not inherit the eligibility of an earlier ask/plan turn.
+fn workflow_learning_eligibility(options: &DictMap) -> Result<String, VmError> {
+    let eligibility = match options.get("workflow_learning_eligibility") {
+        None => WORKFLOW_LEARNING_EXCLUDED,
+        Some(crate::value::VmValue::String(value)) if value.as_str() == WORKFLOW_LEARNING_ELIGIBLE => {
+            WORKFLOW_LEARNING_ELIGIBLE
+        }
+        Some(crate::value::VmValue::String(value)) if value.as_str() == WORKFLOW_LEARNING_EXCLUDED => {
+            WORKFLOW_LEARNING_EXCLUDED
+        }
+        Some(crate::value::VmValue::String(value)) => {
+            return Err(VmError::Runtime(format!(
+                "agent_loop: options.workflow_learning_eligibility must be 'eligible' or 'excluded'; got '{value}'"
+            )))
+        }
+        Some(_) => {
+            return Err(VmError::Runtime(
+                "agent_loop: options.workflow_learning_eligibility must be 'eligible' or 'excluded'"
+                    .to_string(),
+            ))
+        }
+    };
+    Ok(eligibility.to_string())
 }
 
 pub(crate) fn enqueue_message(
@@ -332,7 +367,12 @@ fn apply_identity(
     }
     identity
         .apply_to_headers(&mut event.headers)
-        .map_err(|error| VmError::Runtime(format!("agent transcript journal identity: {error}")))
+        .map_err(|error| VmError::Runtime(format!("agent transcript journal identity: {error}")))?;
+    event.headers.insert(
+        WORKFLOW_LEARNING_ELIGIBILITY_HEADER.to_string(),
+        config.workflow_learning_eligibility.clone(),
+    );
+    Ok(())
 }
 
 fn hydrate_events(events: Vec<harn_session_store::StoredEvent>) -> HydratedTranscript {
@@ -513,6 +553,7 @@ mod tests {
             store: SqliteSessionStore::open_in_memory().expect("in-memory store"),
             run_id: "run-tool".to_string(),
             turn_id: "turn-tool".to_string(),
+            workflow_learning_eligibility: WORKFLOW_LEARNING_EXCLUDED.to_string(),
         }
     }
 
@@ -545,6 +586,64 @@ mod tests {
             meta.project_scope.as_deref(),
             Some(root.path().to_string_lossy().as_ref())
         );
+    }
+
+    #[tokio::test]
+    async fn journal_records_explicit_workflow_learning_eligibility_at_creation() {
+        let root = tempfile::tempdir().expect("temp root");
+        let mut eligible_options = options(root.path());
+        eligible_options.put_str("workflow_learning_eligibility", "eligible");
+
+        let prepared = prepare(
+            "eligible-workflow-session",
+            &eligible_options,
+            "eligible-run".to_string(),
+            "eligible-turn".to_string(),
+        )
+        .await
+        .expect("prepare eligible journal");
+        let meta = prepared
+            .state
+            .config
+            .store
+            .describe("eligible-workflow-session")
+            .await
+            .expect("describe eligible session");
+
+        assert!(
+            meta.attributes.is_empty(),
+            "workflow eligibility belongs to each run, not the long-lived session"
+        );
+        let event = append_event_for_mutation(
+            &prepared.state.config,
+            TranscriptMutation::AuditEventAdded {
+                transcript_event: transcript_event(
+                    "eligible-terminal",
+                    "agent_run_terminal",
+                    "assistant",
+                ),
+            },
+        )
+        .expect("build eligible terminal event");
+        assert_eq!(
+            event.headers.get(WORKFLOW_LEARNING_ELIGIBILITY_HEADER),
+            Some(&WORKFLOW_LEARNING_ELIGIBLE.to_string())
+        );
+
+        let mut invalid = options(root.path());
+        invalid.put_str("workflow_learning_eligibility", "maybe");
+        let result = prepare(
+            "invalid-workflow-session",
+            &invalid,
+            "invalid-run".to_string(),
+            "invalid-turn".to_string(),
+        )
+        .await;
+        let error = match result {
+            Ok(_) => panic!("unknown eligibility must fail at the producer boundary"),
+            Err(error) => error,
+        };
+        assert!(error.to_string().contains("workflow_learning_eligibility"));
     }
 
     #[tokio::test]

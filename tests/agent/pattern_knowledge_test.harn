@@ -1,26 +1,34 @@
 import {
+  pattern_learning_curator_evidence,
   pattern_learning_import_session_records,
   pattern_learning_observations,
+  pattern_learning_observe,
 } from "std/agent/pattern_knowledge"
 import { session_store_append, session_store_list } from "std/session-store"
 import { with_temp_dir } from "std/testing"
 
 fn append_session_evidence(
-  harness: Harness,
+  agent: HarnessAgent,
   root: string,
   session_id: string,
   prompt: string,
   terminal_kind: string,
+  workflow_learning_eligibility: string,
+  run_id: string,
 ) -> nil {
-  const base = {root: root, actor: "pattern-learning-test"}
+  const base = {
+    root: root,
+    actor: "pattern-learning-test",
+    headers: {"harn.workflow_learning.eligibility": workflow_learning_eligibility, run_id: run_id},
+  }
   session_store_append(
-    harness.agent,
+    agent,
     session_id,
     {transcript_event: {kind: "message", role: "user", visibility: "public", text: prompt}},
     base + {kind_type: "message"},
   )
   session_store_append(
-    harness.agent,
+    agent,
     session_id,
     {
       transcript_event: {
@@ -34,7 +42,7 @@ fn append_session_evidence(
     base + {kind_type: "tool_call"},
   )
   session_store_append(
-    harness.agent,
+    agent,
     session_id,
     {
       transcript_event: {
@@ -61,36 +69,100 @@ pipeline test_pattern_learning_imports_natural_terminal_session_evidence_once(
         ["session-b", "Add a scheduled LedgerCompaction worker to this Rivet repository."],
         ["session-c", "Add a scheduled CacheWarmup worker to this Rivet repository."],
       ] {
-        append_session_evidence(harness, root, entry[0], entry[1], "natural")
+        const session_id = to_string(entry[0] ?? "")
+        const prompt = to_string(entry[1] ?? "")
+        append_session_evidence(
+          harness.agent,
+          root,
+          session_id,
+          prompt,
+          "natural",
+          "eligible",
+          "coding-" + session_id,
+        )
       }
       append_session_evidence(
-        harness,
+        harness.agent,
         root,
         "session-error",
         "Add a scheduled FailedWorker worker to this Rivet repository.",
         "provider_error",
+        "eligible",
+        "failed-run",
+      )
+      append_session_evidence(
+        harness.agent,
+        root,
+        "session-a",
+        "Review this bounded evidence window and submit a crystallization proposal.",
+        "natural",
+        "excluded",
+        "curator-run",
+      )
+      append_session_evidence(
+        harness.agent,
+        root,
+        "session-holdout-control",
+        "Add a scheduled SettlementExceptionSweep worker to this Rivet repository.",
+        "natural",
+        "excluded",
+        "holdout-run",
       )
       const sessions = session_store_list(
         harness.agent,
         {root: root, limit: 10, sort_by: "updated_at", order: "descending"},
       )
-      assert(len(sessions) == 4, "canonical session listing must expose every persisted session")
       assert(
-        sessions.all({ session -> session?.status == "open" }),
+        len(sessions) == 5,
+        "canonical session listing must preserve a multi-run conversation as one session",
+      )
+      assert(
+        sessions.all({ session -> session.status == "open" }),
         "the typed list projection must retain session lifecycle state",
       )
       const options = {project_root: root, session_store_root: root}
+      pattern_learning_observe(
+        harness,
+        "legacy-manual-observation",
+        "Add an unproven ManualWorker to this Rivet repository.",
+        ["edit"],
+        options,
+      )
       const first = pattern_learning_import_session_records(harness, options)
-      assert(first?.scanned_count == 4, "import must inspect the bounded canonical session list")
-      assert(first?.imported_count == 3, "only natural terminals may enter the curator corpus")
       assert(
-        first?.skipped_ineligible_count == 1,
-        "failed sessions must be excluded rather than trained",
+        first?.scanned_session_count == 5,
+        "import must inspect the bounded canonical session list",
+      )
+      assert(
+        first?.scanned_count == 6,
+        "import must classify each run, including an excluded control turn in a coding session",
+      )
+      assert(
+        first?.imported_count == 3,
+        "only producer-eligible, natural-terminal sessions may enter the curator corpus",
+      )
+      assert(
+        first?.skipped_ineligible_count == 3,
+        "failed, curator, and holdout sessions must be excluded rather than learned",
       )
       const observations = pattern_learning_observations(harness, options)
-      assert(len(observations) == 3, "one observation should be projected per eligible session")
+      const curator_evidence = pattern_learning_curator_evidence(harness, options)
       assert(
-        observations.all({ item -> item?.tool_sequence == ["edit"] }),
+        len(observations) == 4,
+        "raw historical observations remain inspectable for migration and operator review",
+      )
+      assert(
+        len(curator_evidence) == 3,
+        "only producer-stamped run evidence may seed a curator by default",
+      )
+      assert(
+        curator_evidence.all(
+          { item -> item?.source_id.starts_with("session-") && item?.run_id != "" },
+        ),
+        "each imported observation must retain its run-level provenance key",
+      )
+      assert(
+        curator_evidence.all({ item -> item?.tool_sequence == ["edit"] }),
         "the imported evidence must retain the canonical tool-call sequence",
       )
       const second = pattern_learning_import_session_records(harness, options)
@@ -100,7 +172,7 @@ pipeline test_pattern_learning_imports_natural_terminal_session_evidence_once(
         "existing session ids must be recognized structurally",
       )
       assert(
-        len(pattern_learning_observations(harness, options)) == 3,
+        len(pattern_learning_curator_evidence(harness, options)) == 3,
         "idempotent import must leave the curator corpus unchanged",
       )
       return nil

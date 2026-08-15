@@ -16,6 +16,7 @@ pipeline default(harness: Harness) {
         project_root: root,
         now: "2026-06-27T12:00:00Z",
         heuristic_refresh: true,
+        allow_manual_evidence: true,
         support_threshold: 2,
         window_days: 30,
       }

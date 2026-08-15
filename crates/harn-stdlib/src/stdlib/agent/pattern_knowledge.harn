@@ -197,36 +197,82 @@ fn pl_session_tool_sequence(events: list) -> list {
   return pl_sanitize_tool_sequence(out)
 }
 
-fn pl_session_has_natural_terminal(events: list) -> bool {
+fn pl_session_run_id(event: dict) -> string {
+  return pl_text(event?.headers?.run_id)
+}
+
+fn pl_session_run_key(session_id: string, run_id: string) -> string {
+  return session_id + "::" + run_id
+}
+
+fn pl_session_runs(events: list) -> list {
+  let ids = []
+  let grouped = {}
+  for event in events ?? [] {
+    const run_id = pl_session_run_id(event)
+    if run_id == "" {
+      continue
+    }
+    if !ids.contains(run_id) {
+      ids = ids + [run_id]
+    }
+    grouped = grouped + {[run_id]: (grouped[run_id] ?? []) + [event]}
+  }
+  return ids.map({ run_id -> {run_id: run_id, events: grouped[run_id] ?? []} }).to_list()
+}
+
+fn pl_run_has_eligible_natural_terminal(events: list) -> bool {
   for event in events ?? [] {
     const transcript_event = pl_session_transcript_event(event)
+    const headers = event?.headers ?? {}
     if pl_session_event_kind(event) != "agent_run_terminal"
       && pl_text(transcript_event?.kind)
       != "agent_run_terminal" {
       continue
     }
-    if pl_text(transcript_event?.metadata?.terminal?.kind) == "natural" {
+    if pl_text(transcript_event?.metadata?.terminal?.kind) == "natural"
+      && pl_text(
+      headers["harn.workflow_learning.eligibility"],
+    )
+      == "eligible" {
       return true
     }
   }
   return false
 }
 
-fn pl_observed_session_ids(fs: HarnessFs, memory: HarnessMemory, options = nil) -> list {
+/**
+ * Corpus provenance belongs to the producer-owned terminal event for one run,
+ * not an inference over its prompt, session id, or tool name. This lets one
+ * conversation contain distinct ask, coding, curation, and evaluation turns
+ * without allowing a control turn to taint the reusable-workflow corpus.
+ */
+fn pl_observed_evidence_keys(fs: HarnessFs, memory: HarnessMemory, options = nil) -> list {
   let ids = []
   for observation in pl_record_values(fs, memory, "observation", options) {
-    const session_id = pl_text(observation?.session_id)
-    if session_id != "" && !ids.contains(session_id) {
-      ids = ids + [session_id]
+    const source_id = pl_text(observation?.source_id)
+    const key = source_id == "" ? "legacy_session:" + pl_text(observation?.session_id) : source_id
+    if key != "" && !ids.contains(key) {
+      ids = ids + [key]
     }
   }
   return ids
 }
 
+fn pl_run_observed_at(events: list, fallback: string) -> string {
+  if len(events) == 0 {
+    return fallback
+  }
+  const observed_at = pl_text(events[len(events) - 1]?.ts)
+  return observed_at == "" ? fallback : observed_at
+}
+
 /**
- * Backfill natural-terminal Harn sessions into pattern memory before an
- * agentic curation pass. The canonical session store remains the evidence
- * owner; this projection only copies a bounded prompt and tool sequence once.
+ * Backfill explicitly eligible, natural-terminal Harn runs into pattern memory
+ * before an agentic curation pass. The canonical session store remains the
+ * evidence owner; this projection copies a bounded public prompt and tool
+ * sequence once. Runs without producer-owned terminal eligibility are
+ * excluded.
  *
  * @effects: [store.read, store.write, fs.read, fs.write]
  * @errors: []
@@ -240,56 +286,77 @@ pub fn pattern_learning_import_session_records(harness: Harness, options = nil) 
     max(1, options?.session_import_limit ?? DEFAULT_SESSION_IMPORT_LIMIT),
   )
   const sessions = session_store_list(harness.agent, pl_session_store_list_options(limit, options))
-  let observed_session_ids = pl_observed_session_ids(harness.fs, harness.memory, options)
+  let observed_evidence_keys = pl_observed_evidence_keys(harness.fs, harness.memory, options)
   let imported = 0
   let skipped_existing = 0
   let skipped_ineligible = 0
+  let scanned_runs = 0
   for session in sessions {
     const session_id = pl_text(session.id)
     if session_id == "" {
       skipped_ineligible = skipped_ineligible + 1
       continue
     }
-    if observed_session_ids.contains(session_id) {
-      skipped_existing = skipped_existing + 1
-      continue
-    }
     const events = session_store_events(harness.agent, session_id, session_options)
-    if !pl_session_has_natural_terminal(events) {
+    const runs = pl_session_runs(events)
+    if len(runs) == 0 {
       skipped_ineligible = skipped_ineligible + 1
       continue
     }
-    const prompt = pl_session_prompt(events)
-    if prompt == "" {
-      skipped_ineligible = skipped_ineligible + 1
-      continue
-    }
-    pl_store_observation(
-      harness,
-      pl_observation_from_input(
-        harness.clock,
-        harness.random,
-        {
-          session_id: session_id,
-          prompt: prompt,
-          tool_sequence: pl_session_tool_sequence(events),
-          observed_at: pl_text(session.updated_at) == "" ? pl_now(harness.clock, options) : session
-            .updated_at,
-        },
+    for run in runs {
+      scanned_runs = scanned_runs + 1
+      const run_id = pl_text(run?.run_id)
+      const evidence_key = pl_session_run_key(session_id, run_id)
+      if observed_evidence_keys.contains(evidence_key)
+        || observed_evidence_keys.contains(
+        "legacy_session:" + session_id,
+      ) {
+        skipped_existing = skipped_existing + 1
+        continue
+      }
+      const run_events = run?.events ?? []
+      if !pl_run_has_eligible_natural_terminal(run_events) {
+        skipped_ineligible = skipped_ineligible + 1
+        continue
+      }
+      const prompt = pl_session_prompt(run_events)
+      if prompt == "" {
+        skipped_ineligible = skipped_ineligible + 1
+        continue
+      }
+      pl_store_observation(
+        harness,
+        pl_observation_from_input(
+          harness.clock,
+          harness.random,
+          {
+            source_id: evidence_key,
+            session_id: session_id,
+            run_id: run_id,
+            prompt: prompt,
+            tool_sequence: pl_session_tool_sequence(run_events),
+            observed_at: pl_run_observed_at(
+              run_events,
+              pl_text(session.updated_at) == "" ? pl_now(harness.clock, options) : session
+                .updated_at,
+            ),
+          },
+          options,
+        ),
         options,
-      ),
-      options,
-    )
-    observed_session_ids = observed_session_ids + [session_id]
-    imported = imported + 1
+      )
+      observed_evidence_keys = observed_evidence_keys + [evidence_key]
+      imported = imported + 1
+    }
   }
   pl_cap_observations(harness, options)
   return {
-    scanned_count: len(sessions),
+    scanned_count: scanned_runs,
+    scanned_session_count: len(sessions),
     imported_count: imported,
     skipped_existing_count: skipped_existing,
     skipped_ineligible_count: skipped_ineligible,
-    observation_count: len(pattern_learning_observations(harness, options)),
+    observation_count: len(pattern_learning_curator_evidence(harness, options)),
   }
 }
 
@@ -305,6 +372,35 @@ pub fn pattern_learning_observations(harness: Harness, options = nil) -> list {
   return pl_record_values(harness.fs, harness.memory, "observation", options).sorted_by(
     { item -> pl_text(item?.observed_at) },
   )
+}
+
+fn pl_is_run_provenance_evidence(item: dict) -> bool {
+  return pl_text(item?.source_id) != ""
+    && pl_text(item?.session_id) != ""
+    && pl_text(item?.run_id) != ""
+}
+
+/**
+ * Return observations that are safe to provide to a curator or deterministic
+ * proposal refresher. Imported run evidence is the default. Callers that
+ * intentionally author manual evidence must opt in per invocation; historical
+ * records without either form of provenance remain inspectable but cannot
+ * become reusable capability proposals.
+ *
+ * @effects: [store.read]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn pattern_learning_curator_evidence(harness: Harness, options = nil) -> list {
+  const allow_manual = options?.allow_manual_evidence ?? false
+  return pattern_learning_observations(harness, options).filter(
+    { item ->
+      return pl_is_run_provenance_evidence(item)
+        || (allow_manual
+        && pl_text(item?.evidence_kind) == "manual")
+    },
+  )
+    .to_list()
 }
 
 fn pl_forget_observation(fs: HarnessFs, memory: HarnessMemory, id: string, options = nil) -> nil {
@@ -679,7 +775,7 @@ pub fn pattern_learning_refresh(harness: Harness, options = nil) -> list {
   const support_threshold = options?.support_threshold ?? DEFAULT_SUPPORT_THRESHOLD
   const window_days = options?.window_days ?? DEFAULT_WINDOW_DAYS
   const observations = pl_recent_observations(
-    pattern_learning_observations(harness, options),
+    pattern_learning_curator_evidence(harness, options),
     now,
     window_days,
   )
@@ -890,6 +986,7 @@ fn pattern_learning_observe_inner(
       harness.random,
       {
         session_id: session_id,
+        evidence_kind: "manual",
         prompt: message,
         tool_sequence: tool_sequence,
         observed_at: pl_now(harness.clock, options),
@@ -1230,9 +1327,12 @@ pub fn pattern_learning_reject(harness: Harness, id: string, options = nil) -> d
 pub fn pattern_learning_status(harness: Harness, options = nil) -> dict {
   const state = pattern_learning_state(harness, options)
   const pending = pattern_learning_pending(harness, options)
+  const observations = pattern_learning_observations(harness, options)
+  const curator_evidence = pattern_learning_curator_evidence(harness, options)
   return {
     enabled: state?.enabled ?? true,
-    observation_count: len(pattern_learning_observations(harness, options)),
+    observation_count: len(curator_evidence),
+    untrusted_observation_count: len(observations) - len(curator_evidence),
     pending_count: len(pending),
     observation_cap: OBSERVATION_CAP,
     skill_root: pattern_learning_skill_root(harness.fs, options),

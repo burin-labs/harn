@@ -253,6 +253,22 @@ fi
 rm -f "$auto_harn"
 
 : > "$record"
+: > "$lease_record"
+explicit_harn=/usr/bin/true
+env -u HARN_CARGO_LEASE_MODE -u CI \
+  HARN_BIN="$explicit_harn" \
+  PATH="$fake_bin:/usr/bin:/bin" \
+  CARGO_TARGET_DIR="$target_dir" \
+  FAKE_CARGO_RECORD="$record" \
+  FAKE_HARN_LEASE_RECORD="$lease_record" \
+  "$repo_root/scripts/cargo_with_worktree_build_dir.sh" build -p harn-vm
+if [[ -s "$record" || -s "$lease_record" ]]; then
+  echo "wrapper did not route through the explicit compatible Harn lease runner" >&2
+  cat "$record" "$lease_record" >&2
+  exit 1
+fi
+
+: > "$record"
 env -u HARN_CARGO_LEASE_MODE -u CI \
   PATH="$fake_bin:/usr/bin:/bin" \
   CARGO_TARGET_DIR="$target_dir" \
