@@ -330,7 +330,6 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `deepseek` | `deepseek-v4-flash` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `deepseek` | `deepseek-v4-pro` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `fireworks` | `accounts/fireworks/models/deepseek-v4-pro` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
-| `fireworks` | `accounts/fireworks/models/glm-5p1` | `native` | `unknown` | - | - | - | - | - | catalog note: 2026-08-15 cross-host native re-probe: single clean `message.tool_calls`, empty content, no `<tool_call>` markup. Fireworks glm-5p2 verified on tool_choice=auto and required, sync and streaming. |
 | `fireworks` | `accounts/fireworks/models/glm-5p2` | `native` | `unknown` | - | - | - | - | - | catalog note: 2026-08-15 cross-host native re-probe: single clean `message.tool_calls`, empty content, no `<tool_call>` markup. Fireworks glm-5p2 verified on tool_choice=auto and required, sync and streaming. |
 | `fireworks` | `accounts/fireworks/models/gpt-oss-120b` | `text` | `text_only` | - | - | - | - | - | `data not yet collected` |
 | `fireworks` | `accounts/fireworks/models/kimi-k2p5` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
@@ -385,8 +384,7 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `moonshot` | `moonshot/kimi-k2.7-code` | `json` | `native_unreliable` | - | - | - | - | - | catalog note: 2026-06-20 Harn agent-loop smoke after parser fix: forced native/off emitted no dispatchable tool_calls and claimed the tool was unavailable. Harn JSON tools completed the loop; text tools also pass after fixing text-mode history projection. |
 | `moonshot` | `moonshot/kimi-k2.7-code-highspeed` | `json` | `native_unreliable` | - | - | - | - | - | catalog note: 2026-06-20 Harn agent-loop smoke after parser fix: forced native/off emitted no dispatchable tool_calls and claimed the tool was unavailable. Harn JSON tools completed the loop; text tools also pass after fixing text-mode history projection. |
 | `moonshot` | `moonshot/kimi-k3` | `native` | `interchangeable` | - | - | - | - | - | catalog note: 2026-07-18 credentialed probe (harn 0.10.23, direct Moonshot /v1, tool_choice=auto, N=2): native carried the large backslash/quote/unicode string argument byte-exact 2/2, and the Harn text-tool channel parsed byte-exact 2/2 with no reasoning over-run. Forced tool_choice (required/specified) returns HTTP 400 'incompatible with thinking enabled' and is not an available mode. |
-| `nvidia` | `nvidia/deepseek-v4-flash` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
-| `nvidia` | `nvidia/deepseek-v4-pro` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `nvidia` | `nvidia/deepseek-v4-flash-0731` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `nvidia` | `nvidia/kimi-k2.6` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `nvidia` | `nvidia/minimax-m2.7` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `nvidia` | `nvidia/minimax-m3` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
@@ -398,7 +396,7 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `nvidia` | `nvidia/openai/gpt-oss-120b` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `nvidia` | `nvidia/openai/gpt-oss-20b` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `nvidia` | `nvidia/step-3.7-flash` | `native` | `interchangeable` | - | - | - | - | - | `data not yet collected` |
-| `nvidia` | `nvidia/z-ai/glm-5.1` | `native` | `unknown` | - | - | - | - | - | catalog note: 2026-08-15 cross-host native re-probe: single clean `message.tool_calls`, empty content, no `<tool_call>` markup. NVIDIA z-ai/glm-5.2 verified on tool_choice=auto (sync + streaming) and required. |
+| `nvidia` | `nvidia/z-ai/glm-5.2` | `native` | `unknown` | - | - | - | - | - | catalog note: 2026-08-15 cross-host native re-probe: single clean `message.tool_calls`, empty content, no `<tool_call>` markup. NVIDIA z-ai/glm-5.2 verified on tool_choice=auto (sync + streaming) and required. |
 | `ollama` | `devstral-small-2:24b` | `json` | `text_only` | - | - | - | - | - | `data not yet collected` |
 | `ollama` | `gemma4:12b-mlx` | `text` | `text_only` | - | - | - | - | - | `data not yet collected` |
 | `ollama` | `gemma4:12b-mxfp8` | `text` | `text_only` | - | - | - | - | - | `data not yet collected` |
@@ -510,8 +508,6 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `together` | `moonshotai/Kimi-K2.7-Code` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `together` | `openai/gpt-oss-20b` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `together` | `together/nvidia/nemotron-3-ultra-550b-a55b` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
-| `together` | `zai-org/GLM-5` | `native` | `unknown` | - | - | - | - | - | catalog note: 2026-08-15 cross-host native re-probe: single clean `message.tool_calls`, empty content, no `<tool_call>` markup. Together zai-org/GLM-5.2 verified on tool_choice=auto (sync + streaming) and required. Caveat: under tool_choice=required 1 of 4 runs returned the schema placeholder `{"city":"string"}` instead of the real argument; tool_choice=auto was clean in every run. |
-| `together` | `zai-org/GLM-5.1` | `native` | `unknown` | - | - | - | - | - | catalog note: 2026-08-15 cross-host native re-probe: single clean `message.tool_calls`, empty content, no `<tool_call>` markup. Together zai-org/GLM-5.2 verified on tool_choice=auto (sync + streaming) and required. Caveat: under tool_choice=required 1 of 4 runs returned the schema placeholder `{"city":"string"}` instead of the real argument; tool_choice=auto was clean in every run. |
 | `together` | `zai-org/GLM-5.2` | `native` | `unknown` | - | - | - | - | - | catalog note: 2026-08-15 cross-host native re-probe: single clean `message.tool_calls`, empty content, no `<tool_call>` markup. Together zai-org/GLM-5.2 verified on tool_choice=auto (sync + streaming) and required. Caveat: under tool_choice=required 1 of 4 runs returned the schema placeholder `{"city":"string"}` instead of the real argument; tool_choice=auto was clean in every run. |
 | `vercel_ai_gateway` | `vercel/anthropic/claude-haiku-4.5` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `vercel_ai_gateway` | `vercel/google/gemini-3.1-flash-lite-preview` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
