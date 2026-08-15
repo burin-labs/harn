@@ -79,13 +79,29 @@ const TOOL_TASKS: [&str; 3] = ["agent", "code", "verify"];
 /// belongs in that host's own row, not this cross-host invariant — e.g. a
 /// first-party authoritative endpoint may serve native cleanly while third-party
 /// rehosters do not, and that difference must be measured per host, not assumed.
-const NATIVE_UNRELIABLE_TOOL_FAMILIES: &[(&str, &str)] = &[(
-    "glm-5",
-    "GLM-5.x's native channel emits `<tool_call><arg_key>...` markup as assistant \
-     content instead of OpenAI message.tool_calls — reproduced across every GLM-5 host \
-     probed (zai/Baseten live, Together + OpenRouter agent-loop smoke, DeepInfra, Fireworks \
-     glm-5p*). Pin a text channel + tool_mode_parity = \"native_unreliable\".",
-)];
+///
+/// The list is currently EMPTY, and that is a finding rather than an oversight.
+/// It previously carried a `glm-5` row asserting that GLM-5.x leaks
+/// `<tool_call><arg_key>...` markup into assistant content on every host. A
+/// 2026-08-15 sweep re-probed that claim directly and it did not survive: across
+/// six independent hosts (zai-direct, OpenRouter, Fireworks, NVIDIA, Together,
+/// DeepInfra) and both `tool_choice` values, in sync and streaming mode, GLM
+/// returned exactly one well-formed `message.tool_calls` entry and zero markup
+/// leaks in 19/19 probes. The per-host rows that fed the generalization each
+/// described a *different* failure (markup leak / no dispatchable calls /
+/// function name containing the whole payload), all recorded on 2026-06-20
+/// immediately after a Harn parser fix — i.e. several distinct, since-resolved
+/// parser bugs generalized into one weight-intrinsic verdict.
+///
+/// The one defect that reproduced is host-specific and now lives in its own row:
+/// DeepInfra's `zai-org/GLM-5.2` deployment emits 38 duplicate tool calls under
+/// `tool_choice = "required"` (deterministic, 4/4 runs), while GLM-5.1, GLM-4.7
+/// and every DeepSeek route on that same host return a single call.
+///
+/// Keep the mechanism: it is the right shape for a genuine weight-intrinsic
+/// family. Add a row only with fresh cross-host evidence, and re-verify an
+/// existing row before relying on it.
+const NATIVE_UNRELIABLE_TOOL_FAMILIES: &[(&str, &str)] = &[];
 
 /// A single footgun finding: a capability row that violates an opinionated
 /// provider/model/config invariant.
@@ -128,6 +144,19 @@ impl CapabilityAuditReport {
 /// Audit the in-memory capability matrix for footgun provider/model/config
 /// combinations. Pure over the parsed file — no I/O, no model-name patterns.
 pub fn audit_capabilities(file: &CapabilitiesFile) -> CapabilityAuditReport {
+    audit_capabilities_with_families(file, NATIVE_UNRELIABLE_TOOL_FAMILIES)
+}
+
+/// Same audit, with the native-unreliable family list injected.
+///
+/// [`NATIVE_UNRELIABLE_TOOL_FAMILIES`] is legitimately empty right now, so tests
+/// supply their own list to keep the family-consistency gate covered. Without
+/// this seam, emptying the shipped list would silently retire the gate's tests
+/// along with its data.
+fn audit_capabilities_with_families(
+    file: &CapabilitiesFile,
+    native_unreliable_families: &[(&str, &str)],
+) -> CapabilityAuditReport {
     let mut report = CapabilityAuditReport::default();
     for (provider, rules) in &file.provider {
         for rule in rules {
@@ -243,7 +272,7 @@ pub fn audit_capabilities(file: &CapabilitiesFile) -> CapabilityAuditReport {
                 .unwrap_or(false);
             if pins_native {
                 let model_match_lower = rule.model_match.to_ascii_lowercase();
-                for (family, evidence) in NATIVE_UNRELIABLE_TOOL_FAMILIES {
+                for (family, evidence) in native_unreliable_families {
                     if model_match_lower.contains(family) {
                         report.footguns.push(CapabilityFootgun {
                             provider: provider.clone(),
@@ -277,6 +306,18 @@ mod tests {
 
     fn audit_toml(src: &str) -> CapabilityAuditReport {
         audit_capabilities(&parse_capabilities_toml(src).expect("parses"))
+    }
+
+    /// A synthetic native-unreliable family, so the family-consistency gate is
+    /// exercised independently of whatever the shipped list happens to contain.
+    const TEST_FAMILIES: &[(&str, &str)] =
+        &[("flaky-fam", "Synthetic family used to exercise the gate.")];
+
+    fn audit_toml_with_families(src: &str) -> CapabilityAuditReport {
+        audit_capabilities_with_families(
+            &parse_capabilities_toml(src).expect("parses"),
+            TEST_FAMILIES,
+        )
     }
 
     #[test]
@@ -410,13 +451,13 @@ preferred_tool_format = "native"
 
     #[test]
     fn flags_native_unreliable_family_pinning_native() {
-        // A GLM-5 route that pins the native channel (the nvidia outlier shape):
-        // native_tools = true keeps Footgun 3 quiet, so the ONLY footgun is the
-        // family-consistency gate.
-        let report = audit_toml(
+        // A route that pins the native channel for a listed family (the outlier
+        // shape): native_tools = true keeps Footgun 3 quiet, so the ONLY footgun
+        // is the family-consistency gate.
+        let report = audit_toml_with_families(
             r#"
-[[provider.nvidia]]
-model_match = "*glm-5*"
+[[provider.someprov]]
+model_match = "*flaky-fam*"
 native_tools = true
 preferred_tool_format = "native"
 "#,
@@ -424,22 +465,44 @@ preferred_tool_format = "native"
         assert_eq!(report.footguns.len(), 1, "{}", report.render());
         assert!(report.footguns[0]
             .message
-            .contains("native-unreliable `glm-5` family"));
+            .contains("native-unreliable `flaky-fam` family"));
     }
 
     #[test]
     fn native_unreliable_family_on_text_channel_is_clean() {
         // The family verdict satisfied: text channel + native_unreliable.
-        let report = audit_toml(
+        let report = audit_toml_with_families(
             r#"
-[[provider.nvidia]]
-model_match = "*glm-5*"
+[[provider.someprov]]
+model_match = "*flaky-fam*"
 native_tools = true
 preferred_tool_format = "text"
 tool_mode_parity = "native_unreliable"
 "#,
         );
         assert!(report.is_clean(), "{}", report.render());
+    }
+
+    #[test]
+    fn glm_native_pin_is_no_longer_a_family_footgun() {
+        // Regression guard for the 2026-08-15 re-probe: GLM's native channel
+        // returned clean `message.tool_calls` on all six hosts probed, so a GLM
+        // route pinning native must audit clean against the SHIPPED family list.
+        // If someone re-adds a `glm-5` row without fresh cross-host evidence,
+        // this fails and points them back at the probe record.
+        let report = audit_toml(
+            r#"
+[[provider.zai]]
+model_match = "glm-5*"
+native_tools = true
+preferred_tool_format = "native"
+"#,
+        );
+        assert!(
+            report.is_clean(),
+            "GLM native pin should not trip the family gate: {}",
+            report.render()
+        );
     }
 
     #[test]

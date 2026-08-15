@@ -60,27 +60,18 @@ tier = "mid"
 open_weight = true
 strengths = ["vision", "reasoning", "tool_use", "summarization", "long_context"]
 
-[models."nvidia/deepseek-v4-pro"]
-name = "DeepSeek V4 Pro (NVIDIA NIM)"
-provider = "nvidia"
-wire_model = "deepseek-ai/deepseek-v4-pro"
-context_window = 1048576
-logical_model = "deepseek-v4-pro"
-equivalence_group = "deepseek-v4-pro"
-served_variant = "nvidia-nim"
-api_dialect = "openai_chat"
-capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
-tier = "frontier"
-open_weight = true
-strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
-complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "kimi"]
+# 2026-08-15 reachability sweep: NIM retired both undated DeepSeek V4 builds
+# (HTTP 410, end of life 2026-08-07). It still serves the dated Flash snapshot,
+# so that row survives below. There is no DeepSeek V4 Pro build on NIM any more,
+# so the Pro row is gone rather than left pointing at a 410 — a catalog entry
+# that cannot be called is worse than an absent one, because it is selectable.
 
-[models."nvidia/deepseek-v4-flash"]
-name = "DeepSeek V4 Flash (NVIDIA NIM)"
+[models."nvidia/deepseek-v4-flash-0731"]
+name = "DeepSeek V4 Flash 0731 (NVIDIA NIM)"
 provider = "nvidia"
-wire_model = "deepseek-ai/deepseek-v4-flash"
+wire_model = "deepseek-ai/deepseek-v4-flash-0731"
 context_window = 1048576
-logical_model = "deepseek-v4-flash"
+logical_model = "deepseek-v4-flash-0731"
 equivalence_group = "deepseek-v4-flash"
 served_variant = "nvidia-nim"
 api_dialect = "openai_chat"
@@ -181,13 +172,16 @@ tier = "mid"
 open_weight = true
 strengths = ["speed", "cheap", "tool_use", "reasoning"]
 
-[models."nvidia/z-ai/glm-5.1"]
-name = "GLM 5.1 (NVIDIA NIM)"
+# 2026-08-15 reachability sweep: NIM retired `z-ai/glm-5.1` (HTTP 410, end of
+# life 2026-07-02) and now serves GLM-5.2 on this endpoint. The row moves to the
+# served build rather than being deleted, so the NVIDIA GLM route keeps working.
+[models."nvidia/z-ai/glm-5.2"]
+name = "GLM 5.2 (NVIDIA NIM)"
 provider = "nvidia"
-wire_model = "z-ai/glm-5.1"
+wire_model = "z-ai/glm-5.2"
 context_window = 202752
-logical_model = "glm-5.1"
-equivalence_group = "glm-5.1"
+logical_model = "glm-5.2"
+equivalence_group = "glm-5.2"
 served_variant = "nvidia-nim"
 api_dialect = "openai_chat"
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]

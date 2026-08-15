@@ -8,6 +8,16 @@
 # did produce parseable calls, so pin GLM to text while keeping native tools for
 # the Kimi, DeepSeek, GPT-OSS, and Nemotron routes that returned clean native
 # calls in the same probe set.
+#
+# STATUS (2026-08-15): this pin now rests ONLY on that 2026-06-23 Baseten
+# observation. It used to be reinforced by a cross-host `glm-5` family verdict,
+# which was retired after a re-probe found clean native tool calls on all six
+# hosts reachable from the fleet (see capability_audit.rs). Baseten was NOT
+# among them — no Baseten credential is available here — so this row is
+# deliberately left conservative rather than flipped on someone else's evidence.
+# It is the last GLM route still pinned on the markup-leak rationale, and it is
+# UNVERIFIED since 2026-06-23. Re-probe when a Baseten key exists: if GLM-5.2
+# returns a single clean `message.tool_calls`, flip this to native like the rest.
 
 [[provider.baseten]]
 model_match = "*glm-5*"

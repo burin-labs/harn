@@ -2333,9 +2333,8 @@ serving_precision = "trusted"
 [[provider.fireworks]]
 model_match = "accounts/fireworks/models/glm-5p*"
 native_tools = true
-preferred_tool_format = "json"
-tool_mode_parity = "native_unreliable"
-tool_mode_parity_notes = "2026-06-20 Harn agent-loop smoke after parser fix: forced native/off emitted XML `<tool_use>` text instead of provider-native tool_calls. JSON tools completed the loop when auto reasoning was disabled; text tools did not."
+preferred_tool_format = "native"
+tool_mode_parity_notes = "2026-08-15 cross-host native re-probe: single clean `message.tool_calls`, empty content, no `<tool_call>` markup. Fireworks glm-5p2 verified on tool_choice=auto and required, sync and streaming."
 structured_output = "native"
 thinking_modes = ["enabled"]
 auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
@@ -3243,12 +3242,52 @@ prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "inline"
 
+# DeepInfra's GLM-5.2 deployment specifically: pinned to the fenced-JSON text
+# channel because its NATIVE channel duplicates tool calls. 2026-08-15 probe
+# against `zai-org/GLM-5.2` with tool_choice=required returned 38 tool calls for
+# a single-city prompt — 38 distinct `index`/`id` entries all carrying the same
+# `{"city": "Paris"}` — deterministic across 4/4 runs, in both sync and
+# streaming mode. tool_choice=auto returned a single clean call.
+#
+# This is a HOST+MODEL defect, not the GLM family's: on the same DeepInfra
+# account, GLM-5.1, GLM-4.7, DeepSeek-V3.2, DeepSeek-V4-Pro and
+# DeepSeek-V4-Pro-0813 all returned exactly one call under required, and
+# GLM-5.2 served by zai-direct, OpenRouter, Fireworks, NVIDIA and Together
+# returned one call too. So the pin lives here rather than in the retired
+# cross-host `glm-5` family row (see capability_audit.rs).
+#
+# A duplicate storm is worse than a leak: each phantom call is separately
+# dispatched, so an agent loop would run the same tool 38 times.
+# Re-probe before widening this back to native.
 [[provider.deepinfra]]
-model_match = "*glm-5*"
+model_match = "*glm-5.2*"
 native_tools = true
 preferred_tool_format = "json"
 tool_mode_parity = "native_unreliable"
-tool_mode_parity_notes = "2026-06-20 Harn agent-loop smoke after parser fix: forced native/off emitted a malformed native call whose function name was the whole JSON payload; fenced JSON text-channel tools completed the loop."
+tool_mode_parity_notes = "2026-08-15 live probe: native channel emits 38 duplicate tool_calls for one intent under tool_choice=required (deterministic 4/4, sync + streaming); tool_choice=auto is clean. Host-specific to DeepInfra's GLM-5.2 deployment — GLM-5.1/GLM-4.7/DeepSeek on the same host and GLM-5.2 on five other hosts each return a single call. Fenced JSON text-channel tools dispatch correctly."
+structured_output = "native"
+thinking_modes = ["enabled"]
+prompt_caching = true
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+# Remaining DeepInfra GLM-5 routes (GLM-5.1, GLM-5). 2026-08-15 probe: GLM-5.1
+# returned a single clean `message.tool_calls` under tool_choice=required, with
+# no markup leak and no duplication. GLM-4.x is not matched by this pattern and
+# keeps whatever it resolved to before — DeepInfra GLM-4.7 also probed clean,
+# but adding a `*glm-4*` row here would change a route this change did not set
+# out to touch.
+[[provider.deepinfra]]
+model_match = "*glm-5*"
+native_tools = true
+preferred_tool_format = "native"
+tool_mode_parity_notes = "2026-08-15 cross-host native re-probe: DeepInfra GLM-5.1 returned a single clean `message.tool_calls` under tool_choice=required. The GLM-5.2 duplication is handled by the more specific rule above."
 structured_output = "native"
 thinking_modes = ["enabled"]
 prompt_caching = true
@@ -3686,9 +3725,8 @@ thinking_block_style = "inline"
 [[provider.nvidia]]
 model_match = "*glm-5*"
 native_tools = true
-preferred_tool_format = "text"
-tool_mode_parity = "native_unreliable"
-tool_mode_parity_notes = "GLM-5.x's native channel emits `<tool_call><arg_key>...` markup as content instead of OpenAI message.tool_calls — a weight-intrinsic behavior reproduced across every GLM-5 host probed (zai/Baseten live, Together + OpenRouter agent-loop smoke, DeepInfra, Fireworks glm-5p*). NVIDIA serves the same weights, so the same leak applies; pin the clean heredoc text channel for family parity. Flagged by the native_unreliable-family consistency gate."
+preferred_tool_format = "native"
+tool_mode_parity_notes = "2026-08-15 cross-host native re-probe: single clean `message.tool_calls`, empty content, no `<tool_call>` markup. NVIDIA z-ai/glm-5.2 verified on tool_choice=auto (sync + streaming) and required."
 structured_output = "native"
 thinking_modes = ["enabled"]
 prompt_caching = true
@@ -3777,6 +3815,16 @@ thinking_block_style = "none"
 # did produce parseable calls, so pin GLM to text while keeping native tools for
 # the Kimi, DeepSeek, GPT-OSS, and Nemotron routes that returned clean native
 # calls in the same probe set.
+#
+# STATUS (2026-08-15): this pin now rests ONLY on that 2026-06-23 Baseten
+# observation. It used to be reinforced by a cross-host `glm-5` family verdict,
+# which was retired after a re-probe found clean native tool calls on all six
+# hosts reachable from the fleet (see capability_audit.rs). Baseten was NOT
+# among them — no Baseten credential is available here — so this row is
+# deliberately left conservative rather than flipped on someone else's evidence.
+# It is the last GLM route still pinned on the markup-leak rationale, and it is
+# UNVERIFIED since 2026-06-23. Re-probe when a Baseten key exists: if GLM-5.2
+# returns a single clean `message.tool_calls`, flip this to native like the rest.
 
 [[provider.baseten]]
 model_match = "*glm-5*"
@@ -4910,9 +4958,8 @@ thinking_block_style = "inline"
 [[provider.together]]
 model_match = "zai-org/glm-5*"
 native_tools = true
-preferred_tool_format = "text"
-tool_mode_parity = "native_unreliable"
-tool_mode_parity_notes = "2026-06-20 Harn agent-loop smoke after parser fix: forced native/off emitted no dispatchable tool_calls and hallucinated a result token; heredoc text tools completed the loop."
+preferred_tool_format = "native"
+tool_mode_parity_notes = "2026-08-15 cross-host native re-probe: single clean `message.tool_calls`, empty content, no `<tool_call>` markup. Together zai-org/GLM-5.2 verified on tool_choice=auto (sync + streaming) and required. Caveat: under tool_choice=required 1 of 4 runs returned the schema placeholder `{\"city\":\"string\"}` instead of the real argument; tool_choice=auto was clean in every run."
 structured_output = "native"
 thinking_modes = ["enabled"]
 auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
@@ -5285,6 +5332,12 @@ serving_precision = "throttled"
 # Cerebras GLM 4.7 is a public preview model with native tools, native
 # structured output, and top-level `reasoning_effort`; `none` is the documented
 # no-thinking value, while the older `disable_reasoning` knob is deprecated.
+#
+# This row has always pinned native, and the 2026-08-15 cross-host sweep
+# confirmed it: `zai-glm-4.7` returned a single clean `message.tool_calls` under
+# tool_choice=auto and required, sync and streaming. It only ever escaped the
+# (now retired) `glm-5` family gate because `zai-glm-*` does not contain the
+# literal `glm-5` — an accident that happened to land on the correct answer.
 [[provider.cerebras]]
 model_match = "zai-glm-*"
 native_tools = true
@@ -5644,23 +5697,29 @@ requires_tool_result_adjacency = true
 # tasks; prompt caching is honored, structured output uses JSON mode
 # (delimited fallback).
 #
-# TOOL CHANNEL — PINNED TO TEXT (`native_unreliable`). The GLM-5.x native
-# channel is the same `<tool_call>`-markup footgun Harn already pins around on
-# Baseten/Fireworks/DeepInfra: the 2026-06-23 live Baseten probe found GLM-5.2
-# emits visible `<tool_call><arg_key>...` content instead of OpenAI
-# `message.tool_calls` on the native channel, while Harn's heredoc text-tool
-# grammar parsed the same intent cleanly (see 39-baseten.toml). The Fireworks
-# (`glm-5p*`) and DeepInfra (`*glm-5*`) rows already carry
-# `tool_mode_parity = "native_unreliable"` for this family. The zai-direct (and
-# OpenRouter) GLM-5 routes serve the identical weights, so the prior optimistic
-# `native` pin here risked the same vanishing/markup tool stream. Pin to TEXT so
-# a `native` pin or `--tool-format native` auto-corrects to `text` with an
-# explanatory `correction` via `validate_tool_format`, instead of a silent
-# markup-as-content tool call. `text_tool_wire_format_supported = true` keeps the
-# text channel viable (so the no-viable-channel fail-fast guard never fires).
-# TODO(zai-glm-native-probe): if a forced-format native probe against a specific
-# zai-direct GLM-5.x route ever returns clean `message.tool_calls`, narrow this
-# back to `native` for that route with the probe transcript as evidence.
+# TOOL CHANNEL — NATIVE (settles the former TODO(zai-glm-native-probe)).
+# These rows were previously pinned to TEXT with `native_unreliable`, inheriting
+# a family verdict that GLM-5.x leaks `<tool_call><arg_key>...` markup into
+# assistant content instead of emitting OpenAI `message.tool_calls`. The pin
+# asked for exactly one thing to lift it: a forced-format native probe against a
+# zai-direct GLM-5.x route returning clean `message.tool_calls`.
+#
+# 2026-08-15 probe, api.z.ai `/api/paas/v4/chat/completions`. Every zai-direct
+# GLM route returned a single well-formed native tool call with empty content
+# and `finish_reason = "tool_calls"`, with zero markup leaks:
+#   glm-5.2      tool_choice=auto + required, sync AND streaming  -> clean
+#   glm-5.1      tool_choice=required                             -> clean
+#   glm-5        tool_choice=required                             -> clean
+#   glm-5-turbo  tool_choice=required                             -> clean
+#   glm-4.7      tool_choice=required                             -> clean
+# Parallel dispatch also works: a two-city prompt returned two distinct calls
+# with correct per-call arguments. The same sweep cleared OpenRouter, Fireworks,
+# NVIDIA, Together and Cerebras, so the cross-host `glm-5` family row was
+# retired from NATIVE_UNRELIABLE_TOOL_FAMILIES (see capability_audit.rs).
+#
+# Native is the better channel here: it removes a grammar-parsing hop and lets
+# the model use the tool encoding it was trained on. `text_tool_wire_format_supported`
+# stays true so an explicit `--tool-format text` remains viable.
 #
 # THINKING WIRE — Z.AI is OpenAI-compatible for chat, but not for reasoning
 # controls. Official GLM-5.2 docs show `thinking = {type = "enabled"}` plus
@@ -5673,9 +5732,7 @@ requires_tool_result_adjacency = true
 [[provider.zai]]
 model_match = "glm-5.2*"
 native_tools = true
-preferred_tool_format = "text"
-tool_mode_parity = "native_unreliable"
-tool_mode_parity_notes = "GLM-5.x native channel emits `<tool_call><arg_key>...` markup as content instead of OpenAI message.tool_calls (2026-06-23 live Baseten probe, see 39-baseten.toml); heredoc text tools parse cleanly. Same family pinned native_unreliable on Fireworks (glm-5p*) and DeepInfra (*glm-5*)."
+preferred_tool_format = "native"
 structured_output = "native"
 thinking_modes = ["enabled", "effort"]
 reasoning_effort_supported = true
@@ -5694,9 +5751,7 @@ prompt_caching = true
 [[provider.zai]]
 model_match = "glm-5.1*"
 native_tools = true
-preferred_tool_format = "text"
-tool_mode_parity = "native_unreliable"
-tool_mode_parity_notes = "GLM-5.x native channel emits `<tool_call><arg_key>...` markup as content instead of OpenAI message.tool_calls (2026-06-23 live Baseten probe, see 39-baseten.toml); heredoc text tools parse cleanly. Same family pinned native_unreliable on Fireworks (glm-5p*) and DeepInfra (*glm-5*)."
+preferred_tool_format = "native"
 structured_output = "native"
 thinking_modes = ["enabled"]
 text_tool_wire_format_supported = true
@@ -5709,18 +5764,16 @@ prefers_xml_tools = false
 thinking_block_style = "inline"
 prompt_caching = true
 
-# GLM-4.x family (glm-4.5, glm-4.5-air, glm-4.6, glm-4.7) — same wire
-# format and `<tool_call>` markup lineage as GLM-5; pinned text for family
-# consistency (mirrors the NVIDIA glm-5 family-consistency gate) until a
-# clean zai-direct native probe says otherwise. Without this rule the
-# catalogued glm-4.x rows would fall through to the OpenAI-family gpt-*
+# GLM-4.x family (glm-4.5, glm-4.5-air, glm-4.6, glm-4.7) — same wire format as
+# GLM-5, and native on the same 2026-08-15 evidence: zai-direct glm-4.7 returned
+# a single clean `message.tool_calls` under tool_choice=required, and Cerebras
+# `zai-glm-4.7` (which has pinned native all along) matched. Without this rule
+# the catalogued glm-4.x rows would fall through to the OpenAI-family gpt-*
 # rules and resolve empty capabilities.
 [[provider.zai]]
 model_match = "glm-4*"
 native_tools = true
-preferred_tool_format = "text"
-tool_mode_parity = "native_unreliable"
-tool_mode_parity_notes = "Family-consistency pin: GLM native channels emit `<tool_call>` markup as content (2026-06-23 Baseten GLM-5.2 probe); no zai-direct GLM-4.7 probe yet, so inherit the family verdict rather than an optimistic native pin."
+preferred_tool_format = "native"
 structured_output = "native"
 thinking_modes = ["enabled"]
 text_tool_wire_format_supported = true
@@ -5735,9 +5788,7 @@ thinking_block_style = "inline"
 [[provider.zai]]
 model_match = "glm-5*"
 native_tools = true
-preferred_tool_format = "text"
-tool_mode_parity = "native_unreliable"
-tool_mode_parity_notes = "GLM-5.x native channel emits `<tool_call><arg_key>...` markup as content instead of OpenAI message.tool_calls (2026-06-23 live Baseten probe, see 39-baseten.toml); heredoc text tools parse cleanly. Same family pinned native_unreliable on Fireworks (glm-5p*) and DeepInfra (*glm-5*)."
+preferred_tool_format = "native"
 structured_output = "native"
 thinking_modes = ["enabled"]
 text_tool_wire_format_supported = true
@@ -5792,9 +5843,8 @@ structured_output = "delimited"
 [[provider.openrouter]]
 model_match = "z-ai/glm-5*"
 native_tools = true
-preferred_tool_format = "text"
-tool_mode_parity = "native_unreliable"
-tool_mode_parity_notes = "2026-06-20 Harn agent-loop smoke after parser fix: forced native/off emitted no dispatchable tool_calls and hallucinated a result token; heredoc text tools completed the loop. OpenRouter reasoning-on text tools emitted malformed tool markup, so auto reasoning is off for agent/code/verify tasks."
+preferred_tool_format = "native"
+tool_mode_parity_notes = "2026-08-15 cross-host native re-probe: single clean `message.tool_calls`, empty content, no `<tool_call>` markup. OpenRouter z-ai/glm-5.2 verified on tool_choice=auto and required, sync and streaming."
 text_tool_wire_format_supported = true
 structured_output = "native"
 thinking_modes = ["enabled"]

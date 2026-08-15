@@ -1249,6 +1249,10 @@ id = "deepinfra/deepseek-ai/DeepSeek-V4-Pro"
 provider = "deepinfra"
 tool_format = "native"
 
+# Stays on the fenced-JSON text channel while every other GLM route moved to
+# native: DeepInfra's GLM-5.2 deployment emits 38 duplicate native tool calls
+# for a single intent under tool_choice=required (2026-08-15, deterministic
+# 4/4). See the `*glm-5.2*` rule in 36-deepinfra.toml.
 [aliases."deepinfra-glm-5.2"]
 id = "deepinfra/zai-org/GLM-5.2"
 provider = "deepinfra"
@@ -1266,9 +1270,12 @@ id = "deepinfra/Qwen/Qwen3.6-35B-A3B"
 provider = "deepinfra"
 tool_format = "text"
 
-# Baseten Model APIs. GLM-5.x currently emits tool XML in assistant content on
-# `tool_choice=required` in Harn smoke probes, so pin GLM aliases to the text
-# grammar. Kimi, DeepSeek, GPT-OSS, and Nemotron returned OpenAI `tool_calls`.
+# Baseten Model APIs. The 2026-06-23 Harn smoke probe found GLM-5.x emitting
+# tool XML in assistant content on `tool_choice=required`, so GLM aliases pin
+# the text grammar; Kimi, DeepSeek, GPT-OSS, and Nemotron returned OpenAI
+# `tool_calls`. This is now the LAST GLM route still on the markup-leak
+# rationale, and it is unverified since 2026-06-23 because no Baseten
+# credential is available to re-probe it. See 39-baseten.toml.
 [aliases."baseten-glm-5.2"]
 id = "baseten/zai-org/GLM-5.2"
 provider = "baseten"
@@ -1415,8 +1422,13 @@ id = "stepfun/step-3.7-flash"
 provider = "openrouter"
 
 # Together mirrors for current GLM/MiniMax agent routes.
-[aliases."together-glm-5.1"]
-id = "zai-org/GLM-5.1"
+#
+# There is no `together-glm-5.1` alias: Together serves GLM-5.1 and GLM-5 only
+# through a provisioned dedicated endpoint, so serverless calls fail with HTTP
+# 400 `model_not_available` (2026-08-15 sweep). GLM-5.2 is the one serverless
+# Together GLM route, and `together-glm` points at it so the obvious name works.
+[aliases."together-glm"]
+id = "zai-org/GLM-5.2"
 provider = "together"
 
 [aliases."together-glm-5.2"]
@@ -1443,8 +1455,16 @@ id = "nvidia/nemotron-3-nano-30b-a3b"
 provider = "nvidia"
 tool_format = "native"
 
-[aliases."nvidia-deepseek-v4-pro"]
-id = "nvidia/deepseek-v4-pro"
+# NIM end-of-lifed both undated DeepSeek V4 builds on 2026-08-07 and GLM-5.1 on
+# 2026-07-02. These aliases follow NIM to what it actually serves: the dated
+# Flash snapshot and GLM-5.2. There is no NIM DeepSeek V4 Pro build to point at.
+[aliases."nvidia-deepseek-v4-flash"]
+id = "nvidia/deepseek-v4-flash-0731"
+provider = "nvidia"
+tool_format = "native"
+
+[aliases."nvidia-glm-5.2"]
+id = "nvidia/z-ai/glm-5.2"
 provider = "nvidia"
 tool_format = "native"
 
@@ -1542,13 +1562,15 @@ provider = "minimax"
 id = "MiniMax-M3"
 provider = "minimax"
 
-# Z.AI GLM aliases. GLM-5.x native channel emits `<tool_call>` markup instead of
-# OpenAI message.tool_calls (see 98-zai.toml + the Baseten probe), so the zai
-# GLM-5 rows are pinned to TEXT; these aliases pin `text` to match.
+# Z.AI GLM aliases. These previously pinned `tool_format = "text"` to match the
+# zai GLM-5 rows' text pin. The 2026-08-15 cross-host re-probe found GLM's
+# native channel clean on every reachable host, so 98-zai.toml now prefers
+# native and these aliases carry no tool_format override — they inherit the
+# capability matrix instead of hard-coding a channel that has to be kept in
+# sync by hand.
 [aliases.glm]
 id = "glm-5.2"
 provider = "zai"
-tool_format = "text"
 
 [aliases."glm-5"]
 id = "glm-5"
@@ -1561,12 +1583,10 @@ provider = "zai"
 [aliases."glm-5.2"]
 id = "glm-5.2"
 provider = "zai"
-tool_format = "text"
 
 [aliases."openrouter-glm-5.2"]
 id = "z-ai/glm-5.2"
 provider = "openrouter"
-tool_format = "text"
 
 # DeepSeek V4 direct API aliases.
 [aliases.deepseek]
@@ -1588,6 +1608,29 @@ provider = "deepseek"
 [aliases."deepseek-v4-pro"]
 id = "deepseek-v4-pro"
 provider = "deepseek"
+
+# Dated DeepSeek V4 snapshots, routed via OpenRouter (the host these were
+# verified serving on 2026-08-15; both returned a single clean native
+# `message.tool_calls`). Use these when a run must pin one fixed build — the
+# undated aliases above float with whatever DeepSeek promotes, which silently
+# moves eval baselines. On OpenRouter the 0813 snapshot is also ~2.7x cheaper
+# than the undated `deepseek/deepseek-v4-pro` route.
+#
+# No `tool_format` pin here, matching every sibling DeepSeek alias: the
+# capability matrix already resolves these routes to the native channel, and a
+# pin repeated here would override a later host-specific correction instead of
+# inheriting it.
+[aliases."deepseek-v4-pro-0813"]
+id = "deepseek/deepseek-v4-pro-0813"
+provider = "openrouter"
+
+[aliases."deepseek-v4-flash-0731"]
+id = "deepseek/deepseek-v4-flash-0731"
+provider = "openrouter"
+
+[aliases."together-deepseek-v4-flash-0731"]
+id = "deepseek-ai/DeepSeek-V4-Flash-0731"
+provider = "together"
 
 [aliases.cohere]
 id = "command-a-plus-05-2026"
@@ -3119,18 +3162,31 @@ tier = "frontier"
 open_weight = true
 strengths = ["agentic", "coding", "long_context", "tool_use", "reasoning"]
 complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "deepseek"]
-[models."zai-org/GLM-5.1"]
-name = "GLM 5.1 (Together)"
-provider = "together"
-context_window = 202752
-equivalence_group = "frontier-agent-coding"
-capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 1.40, output_per_mtok = 4.40, cache_read_per_mtok = 0.26 }
 
-tier = "frontier"
+# DeepSeek V4 Flash 0731 — the dated snapshot Together actually serves
+# serverless (the undated `DeepSeek-V4-Flash` is not on the serverless tier).
+# Pricing read from Together's `/v1/models` rate card on 2026-08-15:
+# $0.14 in / $0.28 out / $0.03 cached-input per MTok. Native tool calling
+# verified clean the same day.
+[models."deepseek-ai/DeepSeek-V4-Flash-0731"]
+name = "DeepSeek V4 Flash 0731 (Together)"
+provider = "together"
+context_window = 1048576
+logical_model = "deepseek-v4-flash"
+equivalence_group = "deepseek-v4-flash"
+served_variant = "together"
+wire_model = "deepseek-ai/DeepSeek-V4-Flash-0731"
+api_dialect = "openai_chat"
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.14, output_per_mtok = 0.28, cache_read_per_mtok = 0.03 }
+tier = "mid"
 open_weight = true
-strengths = ["agentic", "coding", "long_context", "tool_use", "reasoning"]
-complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "deepseek"]
+strengths = ["speed", "cheap", "tool_use", "reasoning", "long_context"]
+
+# 2026-08-15 reachability sweep: Together serves `zai-org/GLM-5.1` only via a
+# provisioned dedicated endpoint, so every serverless call returns HTTP 400
+# `model_not_available`. GLM-5.2 below is the serverless Together GLM route.
+
 [models."zai-org/GLM-5.2"]
 name = "GLM 5.2 (Together)"
 provider = "together"
@@ -3405,11 +3461,23 @@ strengths = ["coding", "agentic", "tool_use", "reasoning"]
 
 # --- source: 60-models/50-zai.toml ---
 # Z.AI GLM family, served via the OpenAI-compatible `/api/paas/v4` endpoint
-# (the `.../v1` base 404s). The live `/models` listing on 2026-07-03 reports:
+# (the `.../v1` base 404s). The live `/models` listing on 2026-08-15 reports:
 # glm-4.5, glm-4.5-air, glm-4.6, glm-4.7, glm-5, glm-5-turbo, glm-5.1,
-# glm-5.2. GLM-5.2 is the current 1M-context open-weight flagship; the GLM-4.x
-# line stays catalogued as the cheap independent-bucket coding/judge routes
-# (glm-4.6 is confirmed serving 200 at paas/v4). Pricing per docs.z.ai.
+# glm-5.2 — unchanged from the 2026-07-03 read. GLM-5.2 is the current
+# 1M-context open-weight flagship; the GLM-4.x line stays catalogued as the
+# cheap independent-bucket coding/judge routes (glm-4.6 is confirmed serving
+# 200 at paas/v4). Pricing per docs.z.ai.
+#
+# GLM-5.3 (announced 2026-08-14) is deliberately NOT catalogued yet. It is real
+# — Z.AI's API distinguishes an unknown model (error 1214 "modelCode: does not
+# exist", which is what `glm-9.9` returns) from a known but unentitled one
+# (error 1220 "You do not have permission to access ..."), and `glm-5.3`
+# returns 1220. But it is gated to the paid Coding Plan, it is absent from the
+# public `/models` listing and from every reseller (OpenRouter, Together,
+# Fireworks, DeepInfra all top out at GLM-5.2), and Z.AI has not published a
+# per-token rate card for it. Cataloguing it now would mean inventing pricing
+# and shipping a route nothing here can reach. Add it when the standard API
+# serves it and docs.z.ai publishes the tariff.
 
 # GLM-4.6 — 200K-context coding model, confirmed serving at paas/v4.
 [models."glm-4.6"]
@@ -3572,12 +3640,19 @@ strengths = ["reasoning", "coding", "tool_use", "long_context"]
 benchmarks = { aa_intelligence_index = 68.0 }
 # DeepSeek V4 OpenRouter mirrors. OpenRouter publishes an independent
 # rate card and a binary 1M-token context window for these routes.
+#
+# Prices below are the live OpenRouter rate card read from
+# `GET /api/v1/models` on 2026-08-15. The undated `deepseek/deepseek-v4-*`
+# aliases previously carried DeepSeek's DIRECT rate card, which understated
+# OpenRouter V4 Pro by ~2.7x ($0.435 recorded vs $1.168 charged per MTok in).
+# The dated snapshot rows further below are the ones that actually match the
+# direct rate card — do not copy prices between the two.
 [models."deepseek/deepseek-v4-flash"]
 name = "DeepSeek V4 Flash (via OpenRouter)"
 provider = "openrouter"
 context_window = 1048576
 capabilities = ["tools", "streaming"]
-pricing = { input_per_mtok = 0.098, output_per_mtok = 0.196, cache_read_per_mtok = 0.020 }
+pricing = { input_per_mtok = 0.06426, output_per_mtok = 0.12852, cache_read_per_mtok = 0.012852 }
 tier = "mid"
 open_weight = true
 strengths = ["speed", "cheap", "tool_use", "reasoning", "long_context"]
@@ -3586,12 +3661,38 @@ name = "DeepSeek V4 Pro (via OpenRouter)"
 provider = "openrouter"
 context_window = 1048576
 capabilities = ["tools", "streaming"]
-pricing = { input_per_mtok = 0.435, output_per_mtok = 0.87, cache_read_per_mtok = 0.003625 }
-
-# Open-router Qwen3.5 9B (kept for the `small` tier alias).
+pricing = { input_per_mtok = 1.168, output_per_mtok = 2.336, cache_read_per_mtok = 0.09855 }
 tier = "frontier"
 open_weight = true
 strengths = ["reasoning", "coding", "tool_use", "long_context"]
+
+# Dated DeepSeek V4 snapshots. The undated aliases float to whatever DeepSeek
+# ships; these pin a fixed build, which is what eval baselines need so a
+# silent upstream swap cannot move a measured number. Both verified serving on
+# 2026-08-15 and both returned a single clean native `message.tool_calls`.
+# On OpenRouter these snapshots price at the direct DeepSeek rate card, so
+# `deepseek-v4-pro-0813` is currently ~2.7x CHEAPER than the undated
+# `deepseek/deepseek-v4-pro` alias for identical weights.
+[models."deepseek/deepseek-v4-pro-0813"]
+name = "DeepSeek V4 Pro 0813 (via OpenRouter)"
+provider = "openrouter"
+context_window = 1048576
+capabilities = ["tools", "streaming", "prompt_caching"]
+pricing = { input_per_mtok = 0.435, output_per_mtok = 0.87, cache_read_per_mtok = 0.003625 }
+tier = "frontier"
+open_weight = true
+strengths = ["reasoning", "coding", "tool_use", "long_context"]
+[models."deepseek/deepseek-v4-flash-0731"]
+name = "DeepSeek V4 Flash 0731 (via OpenRouter)"
+provider = "openrouter"
+context_window = 1048576
+capabilities = ["tools", "streaming", "prompt_caching"]
+pricing = { input_per_mtok = 0.14, output_per_mtok = 0.28, cache_read_per_mtok = 0.028 }
+tier = "mid"
+open_weight = true
+strengths = ["speed", "cheap", "tool_use", "reasoning", "long_context"]
+
+# Open-router Qwen3.5 9B (kept for the `small` tier alias).
 [models."Qwen/Qwen3.5-9B"]
 name = "Qwen3.5 9B"
 provider = "openrouter"
@@ -4606,27 +4707,18 @@ tier = "mid"
 open_weight = true
 strengths = ["vision", "reasoning", "tool_use", "summarization", "long_context"]
 
-[models."nvidia/deepseek-v4-pro"]
-name = "DeepSeek V4 Pro (NVIDIA NIM)"
-provider = "nvidia"
-wire_model = "deepseek-ai/deepseek-v4-pro"
-context_window = 1048576
-logical_model = "deepseek-v4-pro"
-equivalence_group = "deepseek-v4-pro"
-served_variant = "nvidia-nim"
-api_dialect = "openai_chat"
-capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
-tier = "frontier"
-open_weight = true
-strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
-complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "kimi"]
+# 2026-08-15 reachability sweep: NIM retired both undated DeepSeek V4 builds
+# (HTTP 410, end of life 2026-08-07). It still serves the dated Flash snapshot,
+# so that row survives below. There is no DeepSeek V4 Pro build on NIM any more,
+# so the Pro row is gone rather than left pointing at a 410 — a catalog entry
+# that cannot be called is worse than an absent one, because it is selectable.
 
-[models."nvidia/deepseek-v4-flash"]
-name = "DeepSeek V4 Flash (NVIDIA NIM)"
+[models."nvidia/deepseek-v4-flash-0731"]
+name = "DeepSeek V4 Flash 0731 (NVIDIA NIM)"
 provider = "nvidia"
-wire_model = "deepseek-ai/deepseek-v4-flash"
+wire_model = "deepseek-ai/deepseek-v4-flash-0731"
 context_window = 1048576
-logical_model = "deepseek-v4-flash"
+logical_model = "deepseek-v4-flash-0731"
 equivalence_group = "deepseek-v4-flash"
 served_variant = "nvidia-nim"
 api_dialect = "openai_chat"
@@ -4727,13 +4819,16 @@ tier = "mid"
 open_weight = true
 strengths = ["speed", "cheap", "tool_use", "reasoning"]
 
-[models."nvidia/z-ai/glm-5.1"]
-name = "GLM 5.1 (NVIDIA NIM)"
+# 2026-08-15 reachability sweep: NIM retired `z-ai/glm-5.1` (HTTP 410, end of
+# life 2026-07-02) and now serves GLM-5.2 on this endpoint. The row moves to the
+# served build rather than being deleted, so the NVIDIA GLM route keeps working.
+[models."nvidia/z-ai/glm-5.2"]
+name = "GLM 5.2 (NVIDIA NIM)"
 provider = "nvidia"
-wire_model = "z-ai/glm-5.1"
+wire_model = "z-ai/glm-5.2"
 context_window = 202752
-logical_model = "glm-5.1"
-equivalence_group = "glm-5.1"
+logical_model = "glm-5.2"
+equivalence_group = "glm-5.2"
 served_variant = "nvidia-nim"
 api_dialect = "openai_chat"
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
@@ -5394,15 +5489,9 @@ tier = "frontier"
 open_weight = true
 strengths = ["coding", "reasoning", "tool_use", "long_context", "vision"]
 
-[models."zai-org/GLM-5"]
-name = "GLM 5 (Together)"
-provider = "together"
-context_window = 202752
-capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 1.00, output_per_mtok = 3.20 }
-tier = "frontier"
-open_weight = true
-strengths = ["coding", "agentic", "tool_use", "reasoning"]
+# 2026-08-15 reachability sweep: `zai-org/GLM-5` is non-serverless on Together
+# (HTTP 400 `model_not_available`), same as GLM-5.1. Removed rather than left
+# selectable; `zai-org/GLM-5.2` is the reachable Together GLM route.
 
 [models."together/nvidia/nemotron-3-ultra-550b-a55b"]
 name = "Nemotron 3 Ultra 550B A55B (Together)"
@@ -5504,19 +5593,9 @@ open_weight = true
 strengths = ["coding", "reasoning", "tool_use", "long_context", "vision"]
 
 # Fireworks compatibility fill-ins returned by live model discovery.
-[models."accounts/fireworks/models/glm-5p1"]
-name = "GLM 5.1 (Fireworks)"
-provider = "fireworks"
-context_window = 202752
-logical_model = "glm-5.1"
-equivalence_group = "frontier-agent-coding"
-served_variant = "fireworks"
-wire_model = "accounts/fireworks/models/glm-5p1"
-api_dialect = "openai_chat"
-capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
-tier = "frontier"
-open_weight = true
-strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
+# 2026-08-15 reachability sweep: Fireworks no longer deploys `glm-5p1`
+# (HTTP 404 `Model not found, inaccessible, and/or not deployed`); its model
+# listing carries only `glm-5p2`, which stays catalogued above.
 
 [models."accounts/fireworks/models/kimi-k2p5"]
 name = "Kimi K2.5 (Fireworks)"

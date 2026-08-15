@@ -511,27 +511,52 @@ mod tests {
         }
     }
 
-    /// FOOTGUN-REMOVAL — the GLM-5.x native channel emits `<tool_call>` markup
-    /// instead of provider-native `tool_calls`, so the zai-direct GLM rows pin
-    /// text and a `native` pin must auto-correct, matching the Fireworks/
-    /// DeepInfra/Baseten precedents.
+    /// The zai-direct GLM rows used to pin text and auto-correct a `native`
+    /// request, inheriting a cross-host verdict that GLM-5.x emits
+    /// `<tool_call>` markup instead of provider-native `tool_calls`. A
+    /// 2026-08-15 re-probe found every zai-direct GLM route returning a single
+    /// clean `message.tool_calls`, so that verdict was retired: a `native`
+    /// request must now pass through untouched. Rewriting it would push the
+    /// route onto a grammar-parsing hop it does not need.
     #[test]
-    fn validate_tool_format_autocorrects_zai_glm_native_pin_to_text() {
+    fn validate_tool_format_leaves_zai_glm_native_pin_unchanged() {
         reset();
         for model in ["glm-5.2", "glm-5.1", "glm-5"] {
             let decision = validate_tool_format("zai", model, "native");
             assert_eq!(
-                decision.effective, "text",
-                "zai/{model}: native must auto-correct to text"
+                decision.effective, "native",
+                "zai/{model}: native is the probed-clean channel"
             );
-            let reason = decision
-                .correction
-                .unwrap_or_else(|| panic!("zai/{model}: a correction must be reported"));
             assert!(
-                reason.contains("native_unreliable"),
-                "zai/{model}: names the parity"
+                decision.correction.is_none(),
+                "zai/{model}: no correction should be reported, got {:?}",
+                decision.correction
             );
         }
+    }
+
+    /// The one GLM route that kept a parity pin, so the auto-correct mechanism
+    /// stays covered on a GLM model rather than only on gpt-oss. DeepInfra's
+    /// GLM-5.2 deployment returns 38 duplicate tool calls for one intent under
+    /// `tool_choice = "required"`, so a `native` request steers to the fenced
+    /// JSON channel this row prefers.
+    #[test]
+    fn validate_tool_format_autocorrects_deepinfra_glm52_native_pin_to_json() {
+        reset();
+        let decision = validate_tool_format("deepinfra", "zai-org/GLM-5.2", "native");
+        assert_eq!(
+            decision.effective, "json",
+            "deepinfra GLM-5.2: native must steer to the fenced JSON channel"
+        );
+        let reason = decision
+            .correction
+            .expect("deepinfra GLM-5.2: a correction must be reported");
+        assert!(reason.contains("native_unreliable"), "names the parity");
+        assert!(reason.contains("json"), "names the working alternative");
+        // Sibling routes on the same host are unaffected by the pin.
+        let sibling = validate_tool_format("deepinfra", "zai-org/GLM-5.1", "native");
+        assert_eq!(sibling.effective, "native");
+        assert!(sibling.correction.is_none());
     }
 
     /// The known-good native routes must NOT be touched by the gpt-oss/GLM
