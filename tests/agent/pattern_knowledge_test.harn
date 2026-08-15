@@ -3,6 +3,8 @@ import {
   pattern_learning_import_session_records,
   pattern_learning_observations,
   pattern_learning_observe,
+  pattern_learning_set_enabled,
+  pattern_learning_status,
 } from "std/agent/pattern_knowledge"
 import { session_store_append, session_store_list } from "std/session-store"
 import { with_temp_dir } from "std/testing"
@@ -174,6 +176,37 @@ pipeline test_pattern_learning_imports_natural_terminal_session_evidence_once(
       assert(
         len(pattern_learning_curator_evidence(harness, options)) == 3,
         "idempotent import must leave the curator corpus unchanged",
+      )
+      return nil
+    },
+  )
+}
+
+pipeline test_pattern_learning_set_enabled_returns_the_persisted_state(harness: Harness, _task) {
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      // A fixed clock forces equal timestamps, so this verifies the mutation
+      // result itself rather than relying on incidental ordering in memory.
+      const options = {project_root: root, now: "2026-06-27T12:00:00Z"}
+      const disabled = pattern_learning_set_enabled(harness, false, options)
+      assert(disabled?.enabled == false, "set_enabled must return its persisted disabled state")
+      assert(
+        pattern_learning_status(harness, options)?.enabled == false,
+        "set_enabled must persist the disabled state",
+      )
+      const enabled = pattern_learning_set_enabled(harness, true, options)
+      assert(enabled?.enabled == true, "set_enabled must return its persisted enabled state")
+      const observed = pattern_learning_observe(
+        harness,
+        "return-contract",
+        "Capture an explicit operator observation.",
+        ["edit"],
+        options,
+      )
+      assert(
+        observed?.observation?.id != "",
+        "observation capture must return the persisted observation record",
       )
       return nil
     },

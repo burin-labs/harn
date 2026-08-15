@@ -183,7 +183,7 @@ pub fn pl_store_record(
       now: now,
       provenance: options?.provenance ?? {source: "harn.pattern_learning"},
     },
-  )?.value
+  )
 }
 
 pub fn pl_memory_records(
