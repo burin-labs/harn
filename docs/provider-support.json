@@ -203,14 +203,14 @@
         "BASETEN_API_KEY"
       ],
       "recommended": {
-        "selector": "baseten:baseten/openai/gpt-oss-120b",
+        "selector": "baseten:baseten/deepseek-ai/DeepSeek-V4-Flash-0731",
         "provider": "baseten",
-        "model": "baseten/openai/gpt-oss-120b",
-        "display_name": "GPT-OSS 120B (Baseten)",
+        "model": "baseten/deepseek-ai/DeepSeek-V4-Flash-0731",
+        "display_name": "DeepSeek V4 Flash 0731 (Baseten)",
         "tool_format": "native",
         "harn_options": [
           "provider = \"baseten\"",
-          "model = \"baseten/openai/gpt-oss-120b\"",
+          "model = \"baseten/deepseek-ai/DeepSeek-V4-Flash-0731\"",
           "tool_format = \"native\"",
           "structured_output_mode = \"native_json\""
         ]

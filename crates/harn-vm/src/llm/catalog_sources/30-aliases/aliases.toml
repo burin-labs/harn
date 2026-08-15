@@ -232,16 +232,24 @@ id = "deepinfra/Qwen/Qwen3.6-35B-A3B"
 provider = "deepinfra"
 tool_format = "text"
 
-# Baseten Model APIs. The 2026-06-23 Harn smoke probe found GLM-5.x emitting
-# tool XML in assistant content on `tool_choice=required`, so GLM aliases pin
-# the text grammar; Kimi, DeepSeek, GPT-OSS, and Nemotron returned OpenAI
-# `tool_calls`. This is now the LAST GLM route still on the markup-leak
-# rationale, and it is unverified since 2026-06-23 because no Baseten
-# credential is available to re-probe it. See 39-baseten.toml.
+# Baseten Model APIs. Every alias here was re-probed live on 2026-08-15 and
+# returned clean OpenAI `message.tool_calls`, so they all ride the native
+# channel. GLM used to pin the text grammar on a 2026-06-23 markup-leak
+# observation; a 16/16 re-probe across sync/streaming and tool_choice
+# auto/required found no leak, so that pin is gone. See 39-baseten.toml.
+#
+# `baseten-nemotron-super` is deliberately absent: Baseten returned HTTP 410
+# "deprecated" for `nvidia/Nemotron-120B-A12B` on 2026-08-15 and serves no
+# successor for that size, so the alias would only route to an error.
 [aliases."baseten-glm-5.2"]
 id = "baseten/zai-org/GLM-5.2"
 provider = "baseten"
-tool_format = "text"
+tool_format = "native"
+
+[aliases."baseten-glm-5.2-fast"]
+id = "baseten/zai-org/GLM-5.2-Fast"
+provider = "baseten"
+tool_format = "native"
 
 [aliases."baseten-kimi-k2.7-code"]
 id = "baseten/moonshotai/Kimi-K2.7-Code"
@@ -253,13 +261,18 @@ id = "baseten/deepseek-ai/DeepSeek-V4-Pro"
 provider = "baseten"
 tool_format = "native"
 
-[aliases."baseten-nemotron-ultra"]
-id = "baseten/nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B"
+[aliases."baseten-deepseek-v4-pro-0813"]
+id = "baseten/deepseek-ai/DeepSeek-V4-Pro-0813"
 provider = "baseten"
 tool_format = "native"
 
-[aliases."baseten-nemotron-super"]
-id = "baseten/nvidia/Nemotron-120B-A12B"
+[aliases."baseten-deepseek-v4-flash-0731"]
+id = "baseten/deepseek-ai/DeepSeek-V4-Flash-0731"
+provider = "baseten"
+tool_format = "native"
+
+[aliases."baseten-nemotron-ultra"]
+id = "baseten/nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B"
 provider = "baseten"
 tool_format = "native"
 

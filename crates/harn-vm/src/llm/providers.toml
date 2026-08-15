@@ -1272,16 +1272,24 @@ id = "deepinfra/Qwen/Qwen3.6-35B-A3B"
 provider = "deepinfra"
 tool_format = "text"
 
-# Baseten Model APIs. The 2026-06-23 Harn smoke probe found GLM-5.x emitting
-# tool XML in assistant content on `tool_choice=required`, so GLM aliases pin
-# the text grammar; Kimi, DeepSeek, GPT-OSS, and Nemotron returned OpenAI
-# `tool_calls`. This is now the LAST GLM route still on the markup-leak
-# rationale, and it is unverified since 2026-06-23 because no Baseten
-# credential is available to re-probe it. See 39-baseten.toml.
+# Baseten Model APIs. Every alias here was re-probed live on 2026-08-15 and
+# returned clean OpenAI `message.tool_calls`, so they all ride the native
+# channel. GLM used to pin the text grammar on a 2026-06-23 markup-leak
+# observation; a 16/16 re-probe across sync/streaming and tool_choice
+# auto/required found no leak, so that pin is gone. See 39-baseten.toml.
+#
+# `baseten-nemotron-super` is deliberately absent: Baseten returned HTTP 410
+# "deprecated" for `nvidia/Nemotron-120B-A12B` on 2026-08-15 and serves no
+# successor for that size, so the alias would only route to an error.
 [aliases."baseten-glm-5.2"]
 id = "baseten/zai-org/GLM-5.2"
 provider = "baseten"
-tool_format = "text"
+tool_format = "native"
+
+[aliases."baseten-glm-5.2-fast"]
+id = "baseten/zai-org/GLM-5.2-Fast"
+provider = "baseten"
+tool_format = "native"
 
 [aliases."baseten-kimi-k2.7-code"]
 id = "baseten/moonshotai/Kimi-K2.7-Code"
@@ -1293,13 +1301,18 @@ id = "baseten/deepseek-ai/DeepSeek-V4-Pro"
 provider = "baseten"
 tool_format = "native"
 
-[aliases."baseten-nemotron-ultra"]
-id = "baseten/nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B"
+[aliases."baseten-deepseek-v4-pro-0813"]
+id = "baseten/deepseek-ai/DeepSeek-V4-Pro-0813"
 provider = "baseten"
 tool_format = "native"
 
-[aliases."baseten-nemotron-super"]
-id = "baseten/nvidia/Nemotron-120B-A12B"
+[aliases."baseten-deepseek-v4-flash-0731"]
+id = "baseten/deepseek-ai/DeepSeek-V4-Flash-0731"
+provider = "baseten"
+tool_format = "native"
+
+[aliases."baseten-nemotron-ultra"]
+id = "baseten/nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B"
 provider = "baseten"
 tool_format = "native"
 
@@ -4854,11 +4867,26 @@ open_weight = false
 strengths = ["coding", "agentic", "long_context", "tool_use", "reasoning", "vision"]
 
 # --- source: 60-models/97-baseten.toml ---
-# Baseten Model APIs. Live /v1/models verified 2026-06-23 with
+# Baseten Model APIs. Live /v1/models re-verified 2026-08-15 with
 # BASETEN_API_KEY: ids, served context windows, pricing, features, modalities,
 # and route quantization come from the provider-owned endpoint. Rows are keyed
 # with `baseten/<wire-id>` so failover/eval tooling can compare the same
 # weights across Baseten, Z.AI, Together, DeepInfra, OpenRouter, and NVIDIA.
+#
+# The 2026-08-15 sweep POSTed a 5-token completion to every row rather than
+# diffing the models listing, because a listed id is not necessarily a callable
+# one. Four rows returned HTTP 410 "the model version you are trying to access
+# has been deprecated" and were removed:
+#
+#   zai-org/GLM-5, zai-org/GLM-5.1  -- superseded by GLM-5.2 / GLM-5.2-Fast
+#   moonshotai/Kimi-K2.5            -- superseded by Kimi-K2.6 / K2.7-Code
+#   nvidia/Nemotron-120B-A12B       -- no successor at that size is served
+#
+# The same sweep found two context windows and one cache-read rate stale
+# against the provider-owned metadata (GLM-5.2 was catalogued at 262144 tokens
+# and $0.26/Mtok cache reads against a served 1048576 and $0.14; DeepSeek V4
+# Pro at 131000 against a served 262144), so every surviving row below now
+# carries the value the endpoint reports.
 
 [models."baseten/zai-org/GLM-5.2"]
 name = "GLM 5.2 (Baseten)"
@@ -4868,11 +4896,33 @@ logical_model = "glm-5.2"
 equivalence_group = "glm-5.2"
 served_variant = "baseten-model-api"
 api_dialect = "openai_chat"
-context_window = 262144
+context_window = 1048576
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 1.40, output_per_mtok = 4.40, cache_read_per_mtok = 0.26 }
-architecture = { parameter_count_b = 744.0, active_parameter_count_b = 40.0, moe = true, quantization = "fp8", license = "MIT", source_url = "https://www.baseten.co/blog/how-we-built-the-worlds-fastest-api-for-glm-52/", last_verified = "2026-06-23" }
-performance = { output_tokens_per_sec = 281.2, time_to_answer_s = 7.95, source = "artificial_analysis", source_url = "https://artificialanalysis.ai/models/glm-5-2/providers", last_verified = "2026-06-23", notes = "Artificial Analysis GLM-5.2 provider benchmark; Harn 2026-06-23 smoke probes confirmed non-thinking and thinking Baseten calls plus native-tool unreliability." }
+pricing = { input_per_mtok = 1.40, output_per_mtok = 4.40, cache_read_per_mtok = 0.14 }
+architecture = { parameter_count_b = 744.0, active_parameter_count_b = 40.0, moe = true, quantization = "fp8", license = "MIT", source_url = "https://www.baseten.co/blog/how-we-built-the-worlds-fastest-api-for-glm-52/", last_verified = "2026-08-15" }
+performance = { output_tokens_per_sec = 281.2, time_to_answer_s = 7.95, source = "artificial_analysis", source_url = "https://artificialanalysis.ai/models/glm-5-2/providers", last_verified = "2026-06-23", notes = "Artificial Analysis GLM-5.2 provider benchmark. The 2026-06-23 Harn probe that accompanied this figure also recorded native-tool unreliability; a 2026-08-15 re-probe found 16/16 clean native tool calls and that verdict was withdrawn." }
+tier = "frontier"
+open_weight = true
+strengths = ["speed", "coding", "agentic", "tool_use", "reasoning", "long_context"]
+complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "kimi", "deepseek"]
+
+# Same weights as the row above (Baseten reports `hugging_face_id
+# zai-org/GLM-5.2` for both); the `-Fast` id is a higher-throughput serving
+# tier priced at a 50% premium. Modelled the way `deepinfra-turbo` and
+# `moonshot-direct-highspeed` are: one equivalence group, distinct
+# served_variant.
+[models."baseten/zai-org/GLM-5.2-Fast"]
+name = "GLM 5.2 Fast (Baseten)"
+provider = "baseten"
+wire_model = "zai-org/GLM-5.2-Fast"
+logical_model = "glm-5.2"
+equivalence_group = "glm-5.2"
+served_variant = "baseten-model-api-fast"
+api_dialect = "openai_chat"
+context_window = 1048576
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 2.10, output_per_mtok = 6.60, cache_read_per_mtok = 0.21 }
+architecture = { parameter_count_b = 744.0, active_parameter_count_b = 40.0, moe = true, quantization = "fp8", license = "MIT", source_url = "https://www.baseten.co/blog/how-we-built-the-worlds-fastest-api-for-glm-52/", last_verified = "2026-08-15" }
 tier = "frontier"
 open_weight = true
 strengths = ["speed", "coding", "agentic", "tool_use", "reasoning", "long_context"]
@@ -4889,7 +4939,7 @@ api_dialect = "openai_chat"
 context_window = 262000
 capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 0.95, output_per_mtok = 4.00, cache_read_per_mtok = 0.16 }
-architecture = { quantization = "fp4", source_url = "https://www.baseten.co/library/kimi-k27-code/", last_verified = "2026-06-23" }
+architecture = { quantization = "fp4", source_url = "https://www.baseten.co/library/kimi-k27-code/", last_verified = "2026-08-15" }
 tier = "frontier"
 open_weight = true
 strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context", "vision"]
@@ -4903,13 +4953,50 @@ logical_model = "deepseek-v4-pro"
 equivalence_group = "deepseek-v4-pro"
 served_variant = "baseten-model-api"
 api_dialect = "openai_chat"
-context_window = 131000
+context_window = 262144
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 1.74, output_per_mtok = 3.48, cache_read_per_mtok = 0.145 }
-architecture = { parameter_count_b = 1600.0, active_parameter_count_b = 49.0, moe = true, quantization = "fp4", source_url = "https://www.baseten.co/library/deepseek-v4/", last_verified = "2026-06-23" }
+architecture = { parameter_count_b = 1600.0, active_parameter_count_b = 49.0, moe = true, quantization = "fp4", source_url = "https://www.baseten.co/library/deepseek-v4/", last_verified = "2026-08-15" }
 tier = "frontier"
 open_weight = true
 strengths = ["reasoning", "coding", "agentic", "tool_use", "long_context"]
+complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "kimi"]
+
+# Dated snapshots. Baseten serves these alongside the undated ids, and they are
+# the builds an eval should pin so a silent upstream reroute cannot change what
+# a recorded trial measured.
+[models."baseten/deepseek-ai/DeepSeek-V4-Pro-0813"]
+name = "DeepSeek V4 Pro 0813 (Baseten)"
+provider = "baseten"
+wire_model = "deepseek-ai/DeepSeek-V4-Pro-0813"
+logical_model = "deepseek-v4-pro-0813"
+equivalence_group = "deepseek-v4-pro-0813"
+served_variant = "baseten-model-api"
+api_dialect = "openai_chat"
+context_window = 1048576
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 1.32, output_per_mtok = 3.96, cache_read_per_mtok = 0.132 }
+architecture = { parameter_count_b = 1600.0, active_parameter_count_b = 49.0, moe = true, quantization = "fp4", source_url = "https://www.baseten.co/library/deepseek-v4/", last_verified = "2026-08-15" }
+tier = "frontier"
+open_weight = true
+strengths = ["reasoning", "coding", "agentic", "tool_use", "long_context"]
+complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "kimi"]
+
+[models."baseten/deepseek-ai/DeepSeek-V4-Flash-0731"]
+name = "DeepSeek V4 Flash 0731 (Baseten)"
+provider = "baseten"
+wire_model = "deepseek-ai/DeepSeek-V4-Flash-0731"
+logical_model = "deepseek-v4-flash-0731"
+equivalence_group = "deepseek-v4-flash-0731"
+served_variant = "baseten-model-api"
+api_dialect = "openai_chat"
+context_window = 1048576
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.13, output_per_mtok = 0.26, cache_read_per_mtok = 0.028 }
+architecture = { parameter_count_b = 284.0, active_parameter_count_b = 13.0, moe = true, quantization = "fp8", source_url = "https://www.baseten.co/library/deepseek-v4/", last_verified = "2026-08-15" }
+tier = "mid"
+open_weight = true
+strengths = ["speed", "cheap", "reasoning", "coding", "agentic", "tool_use", "long_context"]
 complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "kimi"]
 
 [models."baseten/nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B"]
@@ -4923,27 +5010,10 @@ api_dialect = "openai_chat"
 context_window = 202800
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 0.60, output_per_mtok = 2.40, cache_read_per_mtok = 0.12 }
-architecture = { parameter_count_b = 550.0, active_parameter_count_b = 55.0, moe = true, quantization = "fp4", source_url = "https://www.baseten.co/library/nemotron-3-ultra/", last_verified = "2026-06-23" }
+architecture = { parameter_count_b = 550.0, active_parameter_count_b = 55.0, moe = true, quantization = "fp4", source_url = "https://www.baseten.co/library/nemotron-3-ultra/", last_verified = "2026-08-15" }
 tier = "frontier"
 open_weight = true
 strengths = ["reasoning", "coding", "agentic", "tool_use", "long_context"]
-complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "deepseek", "kimi"]
-
-[models."baseten/nvidia/Nemotron-120B-A12B"]
-name = "Nemotron 3 Super 120B A12B (Baseten)"
-provider = "baseten"
-wire_model = "nvidia/Nemotron-120B-A12B"
-logical_model = "nemotron-3-super-120b-a12b"
-equivalence_group = "nemotron-3-super-120b-a12b"
-served_variant = "baseten-model-api"
-api_dialect = "openai_chat"
-context_window = 202800
-capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 0.30, output_per_mtok = 0.75, cache_read_per_mtok = 0.06 }
-architecture = { parameter_count_b = 120.0, active_parameter_count_b = 12.0, moe = true, quantization = "fp4", source_url = "https://www.baseten.co/library/nemotron-3-super/", last_verified = "2026-06-23" }
-tier = "frontier"
-open_weight = true
-strengths = ["speed", "cheap", "reasoning", "coding", "agentic", "tool_use", "long_context"]
 complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "deepseek", "kimi"]
 
 [models."baseten/openai/gpt-oss-120b"]
@@ -4957,43 +5027,11 @@ api_dialect = "openai_chat"
 context_window = 128072
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 0.10, output_per_mtok = 0.50, cache_read_per_mtok = 0.10 }
-architecture = { parameter_count_b = 117.0, active_parameter_count_b = 5.1, moe = true, quantization = "fp4", license = "Apache-2.0", source_url = "https://www.baseten.co/library/gpt-oss-120b/", last_verified = "2026-06-23" }
+architecture = { parameter_count_b = 117.0, active_parameter_count_b = 5.1, moe = true, quantization = "fp4", license = "Apache-2.0", source_url = "https://www.baseten.co/library/gpt-oss-120b/", last_verified = "2026-08-15" }
 tier = "mid"
 open_weight = true
 strengths = ["cheap", "tool_use", "reasoning", "coding"]
 complementary_with = ["anthropic-claude", "google-gemini", "qwen", "deepseek", "kimi"]
-
-[models."baseten/zai-org/GLM-5.1"]
-name = "GLM 5.1 (Baseten)"
-provider = "baseten"
-wire_model = "zai-org/GLM-5.1"
-logical_model = "glm-5.1"
-equivalence_group = "glm-5.1"
-served_variant = "baseten-model-api"
-api_dialect = "openai_chat"
-context_window = 202800
-capabilities = ["tools", "streaming", "prompt_caching"]
-pricing = { input_per_mtok = 1.30, output_per_mtok = 4.30, cache_read_per_mtok = 0.26 }
-architecture = { quantization = "fp4", source_url = "https://www.baseten.co/pricing/", last_verified = "2026-06-23" }
-tier = "frontier"
-open_weight = true
-strengths = ["coding", "agentic", "tool_use", "long_context"]
-
-[models."baseten/zai-org/GLM-5"]
-name = "GLM 5 (Baseten)"
-provider = "baseten"
-wire_model = "zai-org/GLM-5"
-logical_model = "glm-5"
-equivalence_group = "glm-5"
-served_variant = "baseten-model-api"
-api_dialect = "openai_chat"
-context_window = 202800
-capabilities = ["tools", "streaming", "prompt_caching"]
-pricing = { input_per_mtok = 0.95, output_per_mtok = 3.15, cache_read_per_mtok = 0.20 }
-architecture = { quantization = "fp4", source_url = "https://www.baseten.co/pricing/", last_verified = "2026-06-23" }
-tier = "frontier"
-open_weight = true
-strengths = ["coding", "agentic", "tool_use", "long_context"]
 
 [models."baseten/zai-org/GLM-4.7"]
 name = "GLM 4.7 (Baseten)"
@@ -5006,7 +5044,7 @@ api_dialect = "openai_chat"
 context_window = 200000
 capabilities = ["tools", "streaming", "prompt_caching"]
 pricing = { input_per_mtok = 0.60, output_per_mtok = 2.20, cache_read_per_mtok = 0.12 }
-architecture = { quantization = "fp4", source_url = "https://www.baseten.co/pricing/", last_verified = "2026-06-23" }
+architecture = { quantization = "fp4", source_url = "https://www.baseten.co/pricing/", last_verified = "2026-08-15" }
 tier = "frontier"
 open_weight = true
 strengths = ["coding", "agentic", "tool_use", "long_context"]
@@ -5022,26 +5060,10 @@ api_dialect = "openai_chat"
 context_window = 262000
 capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 0.95, output_per_mtok = 4.00, cache_read_per_mtok = 0.16 }
-architecture = { quantization = "fp4", source_url = "https://www.baseten.co/pricing/", last_verified = "2026-06-23" }
+architecture = { quantization = "fp4", source_url = "https://www.baseten.co/pricing/", last_verified = "2026-08-15" }
 tier = "frontier"
 open_weight = true
 strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context", "vision"]
-
-[models."baseten/moonshotai/Kimi-K2.5"]
-name = "Kimi K2.5 (Baseten)"
-provider = "baseten"
-wire_model = "moonshotai/Kimi-K2.5"
-logical_model = "moonshot-kimi-k2.5"
-equivalence_group = "moonshot-kimi-k2.5"
-served_variant = "baseten-model-api"
-api_dialect = "openai_chat"
-context_window = 262000
-capabilities = ["tools", "vision", "streaming", "prompt_caching"]
-pricing = { input_per_mtok = 0.60, output_per_mtok = 3.00, cache_read_per_mtok = 0.12 }
-architecture = { quantization = "fp4", source_url = "https://www.baseten.co/pricing/", last_verified = "2026-06-23" }
-tier = "frontier"
-open_weight = true
-strengths = ["coding", "agentic", "tool_use", "long_context", "vision"]
 
 # --- source: 60-models/98-dashscope.toml ---
 # DashScope (Alibaba Model Studio, international endpoint) — first-party

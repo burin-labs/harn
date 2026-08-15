@@ -1011,3 +1011,20 @@ fn catalog_claim(
         provider_latency_p50_ms: None,
     }
 }
+
+#[test]
+fn scorecard_reports_a_retired_route_as_its_own_issue() {
+    // `provider_http_errors` says "retry or check your key". A row the provider
+    // deleted needs a catalog edit instead, so it gets its own issue and its
+    // own counter rather than being folded into the HTTP bucket.
+    let mut gone = case(ToolProbeClassification::RouteUnavailable, false);
+    gone.http_status = Some(410);
+    let scorecard =
+        scorecard_from_tool_reports(vec![report("baseten", "zai-org/GLM-5.1", vec![gone])]);
+
+    let route = &scorecard.routes[0];
+    assert_eq!(route.route_unavailable_cases, 1);
+    assert_eq!(route.http_error_cases, 0);
+    assert!(route.issues.contains(&"route_unavailable"));
+    assert!(!route.issues.contains(&"provider_http_errors"));
+}

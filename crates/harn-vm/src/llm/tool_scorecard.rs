@@ -21,7 +21,7 @@ mod catalog_drift;
 mod fitness;
 pub use fitness::*;
 
-pub const TOOL_SCORECARD_SCHEMA_VERSION: u32 = 8;
+pub const TOOL_SCORECARD_SCHEMA_VERSION: u32 = 9;
 pub const TOOL_SCORECARD_PLAN_SCHEMA_VERSION: u32 = 5;
 
 #[derive(Debug, Default)]
@@ -102,6 +102,7 @@ struct CaseStats {
     empty_completion_cases: usize,
     malformed_argument_cases: usize,
     http_error_cases: usize,
+    route_unavailable_cases: usize,
     transport_error_cases: usize,
     rate_limited_cases: usize,
     latency_ms: Vec<u64>,
@@ -182,6 +183,9 @@ impl CaseStats {
             }
             ToolProbeClassification::HttpError => {
                 self.http_error_cases += 1;
+            }
+            ToolProbeClassification::RouteUnavailable => {
+                self.route_unavailable_cases += 1;
             }
             ToolProbeClassification::TransportError => {
                 self.transport_error_cases += 1;
@@ -1014,6 +1018,7 @@ fn score_route(
         empty_completion_cases: stats.empty_completion_cases,
         malformed_argument_cases: stats.malformed_argument_cases,
         http_error_cases: stats.http_error_cases,
+        route_unavailable_cases: stats.route_unavailable_cases,
         transport_error_cases: stats.transport_error_cases,
         rate_limited_cases: stats.rate_limited_cases,
         observed_latency_case_count: stats.latency_ms.len(),
@@ -1114,6 +1119,7 @@ fn mode_evidence(mode: &'static str, stats: CaseStats) -> ToolScorecardModeEvide
         empty_completion_cases: stats.empty_completion_cases,
         malformed_argument_cases: stats.malformed_argument_cases,
         http_error_cases: stats.http_error_cases,
+        route_unavailable_cases: stats.route_unavailable_cases,
         transport_error_cases: stats.transport_error_cases,
         rate_limited_cases: stats.rate_limited_cases,
         observed_latency_case_count: stats.latency_ms.len(),
@@ -1210,6 +1216,11 @@ fn route_issues(
     }
     if stats.http_error_cases > 0 {
         issues.push("provider_http_errors");
+    }
+    // Deliberately its own issue rather than a flavour of provider_http_errors:
+    // this one is fixed by editing the catalog, not by retrying the probe.
+    if stats.route_unavailable_cases > 0 {
+        issues.push("route_unavailable");
     }
     if stats.rate_limited_cases > 0 {
         issues.push("provider_rate_limited");
@@ -1406,6 +1417,7 @@ fn classification_key(classification: &ToolProbeClassification) -> &'static str 
         ToolProbeClassification::MalformedJsonArguments => "malformed_json_arguments",
         ToolProbeClassification::EmptySilent => "empty_silent",
         ToolProbeClassification::HttpError => "http_error",
+        ToolProbeClassification::RouteUnavailable => "route_unavailable",
         ToolProbeClassification::TransportError => "transport_error",
     }
 }
@@ -1422,6 +1434,7 @@ fn wire_dialect_key(classification: &ToolProbeClassification) -> &'static str {
         ToolProbeClassification::MalformedJsonArguments => "malformed_tool_args",
         ToolProbeClassification::EmptySilent => "empty",
         ToolProbeClassification::HttpError => "http_error",
+        ToolProbeClassification::RouteUnavailable => "route_unavailable",
         ToolProbeClassification::TransportError => "transport_error",
     }
 }
