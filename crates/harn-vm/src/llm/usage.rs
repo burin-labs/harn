@@ -203,6 +203,7 @@ impl LlmUsage {
         let authoritative_cost = result
             .telemetry
             .mock_replay_cost_usd()
+            .or(result.telemetry.provider_cost_usd)
             .or_else(|| super::managed_supply::authoritative_cost_usd(result));
         let cost_usd = authoritative_cost.or_else(|| {
             if !usage_known {

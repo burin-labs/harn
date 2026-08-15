@@ -91,9 +91,8 @@ async fn mid_stream_connection_reset_is_also_retryable() {
 
 #[tokio::test]
 async fn finish_reason_terminal_completes_without_waiting_for_eof() {
-    // OpenAI-compatible providers may use a finish_reason chunk instead of a
-    // trailing `[DONE]`; that explicit terminal evidence is sufficient even
-    // when an HTTP/1.1 connection remains open.
+    // Providers that do not declare trailing stream accounting may use a
+    // finish_reason chunk instead of a trailing `[DONE]`.
     use tokio::io::AsyncWriteExt;
     let (reader, mut writer) = tokio::io::duplex(1024);
     writer
@@ -109,7 +108,7 @@ async fn finish_reason_terminal_completes_without_waiting_for_eof() {
     let (delta_tx, _delta_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
     let result = consume_sse_lines(
         tokio::io::BufReader::new(reader),
-        "openai",
+        "together",
         "test-model",
         DialectContract::new(WireDialect::OpenAiCompat, None),
         delta_tx,
@@ -122,6 +121,66 @@ async fn finish_reason_terminal_completes_without_waiting_for_eof() {
     drop(writer);
     assert_eq!(result.text, "hello");
     assert_eq!(result.stop_reason.as_deref(), Some("stop"));
+}
+
+#[tokio::test]
+async fn openrouter_reads_trailing_usage_and_exact_cost_after_finish_reason() {
+    let body = concat!(
+        "data: {\"id\":\"gen-live\",\"model\":\"qwen/test\",\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\n",
+        "data: {\"id\":\"gen-live\",\"model\":\"qwen/test\",\"choices\":[{\"index\":0,\"finish_reason\":\"stop\",\"delta\":{}}]}\n",
+        "data: {\"id\":\"gen-live\",\"model\":\"qwen/test\",\"choices\":[],\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":3,\"total_tokens\":15,\"cost\":0.00042}}\n",
+        "data: [DONE]\n",
+    );
+    let (delta_tx, _delta_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    let result = consume_sse_lines(
+        tokio::io::BufReader::new(body.as_bytes()),
+        "openrouter",
+        "qwen/test",
+        DialectContract::new(WireDialect::OpenAiCompat, None),
+        delta_tx,
+        None,
+        None,
+        false,
+    )
+    .await
+    .expect("OpenRouter trailing usage must be consumed");
+    assert_eq!(result.input_tokens, 12);
+    assert_eq!(result.output_tokens, 3);
+    assert_eq!(result.telemetry.request_id.as_deref(), Some("gen-live"));
+    assert_eq!(result.telemetry.provider_cost_usd, Some(0.00042));
+    assert_eq!(result.usage().cost_usd, Some(0.00042));
+}
+
+#[tokio::test]
+async fn openrouter_preserves_generation_id_from_response_header() {
+    let body = concat!(
+        "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n",
+        "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":2,\"completion_tokens\":1,\"cost\":0.00001}}\n",
+        "data: [DONE]\n",
+    );
+    let (delta_tx, _delta_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    let result = consume_sse_lines_with_policy(
+        tokio::io::BufReader::new(body.as_bytes()),
+        "openrouter",
+        "qwen/test",
+        DialectContract::new(WireDialect::OpenAiCompat, None),
+        delta_tx,
+        None,
+        None,
+        false,
+        StreamDeadlinePolicy {
+            total: Duration::from_hours(1),
+            first_chunk: Duration::from_hours(1),
+            idle: Duration::from_hours(1),
+        },
+        Some("gen-from-header"),
+    )
+    .await
+    .expect("header generation id must survive streaming parse");
+    assert_eq!(
+        result.telemetry.request_id.as_deref(),
+        Some("gen-from-header")
+    );
 }
 
 #[tokio::test]
@@ -318,6 +377,7 @@ async fn pending_sse_deadline(
         None,
         false,
         policy,
+        None,
     )
     .await
     .expect_err("pending stream must reach a deadline");
