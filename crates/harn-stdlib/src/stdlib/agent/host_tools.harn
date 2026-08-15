@@ -37,6 +37,14 @@ fn __agent_host_string_list(value, label) {
   throw "agent_host_tools: " + label + " must be a string, list of strings, or nil"
 }
 
+/** Treat generated optional-string defaults as absent rather than authority. */
+fn __agent_host_nonempty_string(value) {
+  if type_of(value) != "string" || trim(value) == "" {
+    return nil
+  }
+  return value
+}
+
 fn __agent_host_tool_enabled(options, key, group) {
   const opts = __agent_host_options(options)
   const enabled = opts?.enabled_tools ?? opts?.tools
@@ -286,7 +294,7 @@ fn __agent_host_safe_relative_path(path) {
 
 fn __agent_host_git_request(args, options) {
   let req = {operation: args.operation}
-  const repo = args?.repo ?? __agent_host_root(options)
+  const repo = __agent_host_nonempty_string(args?.repo) ?? __agent_host_root(options)
   if repo != nil && repo != "" {
     req = req + {repo: __agent_host_resolve_path(repo, options)}
   }
@@ -421,7 +429,7 @@ fn __agent_host_apply_command_policy(request, args, options) {
 
 fn __agent_host_command_cwd(args, options) {
   const opts = __agent_host_options(options)
-  const cwd = args?.cwd ?? opts?.cwd ?? opts?.root
+  const cwd = __agent_host_nonempty_string(args?.cwd) ?? opts?.cwd ?? opts?.root
   if cwd == nil || cwd == "" {
     return nil
   }
