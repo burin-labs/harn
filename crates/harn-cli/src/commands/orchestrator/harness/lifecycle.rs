@@ -187,9 +187,9 @@ async fn orchestrator_lifecycle(
             .unwrap_or_else(|| "<memory>".to_string())
     );
 
-    let secret_namespace = secret_namespace_for(&manifest_dir);
+    let secret_namespace = harn_vm::secrets::configured_secret_namespace();
     let secret_chain_display = configured_secret_chain_display();
-    let secret_chain = harn_vm::secrets::configured_default_chain(secret_namespace.clone())
+    let secret_chain = harn_vm::secrets::configured_secret_chain()
         .map_err(|error| format!("failed to configure secret providers: {error}"))?;
     if secret_chain.providers().is_empty() {
         return Err("secret provider chain resolved to zero providers"
@@ -687,20 +687,6 @@ fn configured_secret_chain_display() -> String {
         .filter(|segment| !segment.is_empty())
         .collect::<Vec<_>>()
         .join(" -> ")
-}
-
-fn secret_namespace_for(manifest_dir: &Path) -> String {
-    match std::env::var("HARN_SECRET_NAMESPACE") {
-        Ok(namespace) if !namespace.trim().is_empty() => namespace,
-        _ => {
-            let leaf = manifest_dir
-                .file_name()
-                .and_then(|name| name.to_str())
-                .filter(|name| !name.is_empty())
-                .unwrap_or("workspace");
-            format!("harn/{leaf}")
-        }
-    }
 }
 
 fn has_orchestrator_api_keys_configured() -> bool {

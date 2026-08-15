@@ -19,7 +19,12 @@ pub use memory::MemorySecretProvider;
 pub const DEFAULT_SECRET_PROVIDER_CHAIN: &str = "env,keyring";
 pub const SECRET_PROVIDER_CHAIN_ENV: &str = "HARN_SECRET_PROVIDERS";
 pub const SECRET_REF_SCHEME: &str = "harn-secret://";
-pub const SECRET_REF_CHAIN_NAMESPACE: &str = "harn.provider_auth";
+/// The one keyring namespace every Harn surface stores and resolves
+/// credentials under. `harn connect`, `--grant secret://`, connector dispatch,
+/// and `harn doctor` all read this same service so a credential that is
+/// storable is also usable.
+pub const DEFAULT_SECRET_NAMESPACE: &str = "harn.provider_auth";
+pub const SECRET_NAMESPACE_ENV: &str = "HARN_SECRET_NAMESPACE";
 pub const CONNECTOR_OAUTH_TOKEN_SECRET_NAME: &str = "oauth-token";
 pub const CONNECTOR_ACCESS_TOKEN_SECRET_NAME: &str = "access-token";
 pub const CONNECTOR_REFRESH_TOKEN_SECRET_NAME: &str = "refresh-token";
@@ -154,7 +159,7 @@ pub fn resolve_secret_ref_to_string(raw: &str) -> Result<Option<String>, SecretE
     let secret = if let Ok(provider) = ACTIVE_SECRET_PROVIDER.try_with(Arc::clone) {
         futures::executor::block_on(provider.get(&id))?
     } else {
-        let chain = configured_default_chain(SECRET_REF_CHAIN_NAMESPACE)?;
+        let chain = configured_secret_chain()?;
         futures::executor::block_on(chain.get(&id))?
     };
     let rendered = secret.with_exposed(|bytes| {
@@ -788,6 +793,23 @@ impl SecretProvider for ChainSecretProvider {
             .iter()
             .any(|provider| provider.supports_versions())
     }
+}
+
+/// The namespace this process stores and resolves credentials under.
+///
+/// `HARN_SECRET_NAMESPACE` overrides it for isolated workspaces and tests.
+/// Callers must not derive their own namespace: a namespace that only one
+/// surface computes is a credential only that surface can read.
+pub fn configured_secret_namespace() -> String {
+    match std::env::var(SECRET_NAMESPACE_ENV) {
+        Ok(namespace) if !namespace.trim().is_empty() => namespace,
+        _ => DEFAULT_SECRET_NAMESPACE.to_string(),
+    }
+}
+
+/// Build the process-wide secret chain over [`configured_secret_namespace`].
+pub fn configured_secret_chain() -> Result<ChainSecretProvider, SecretError> {
+    configured_default_chain(configured_secret_namespace())
 }
 
 pub fn configured_default_chain(

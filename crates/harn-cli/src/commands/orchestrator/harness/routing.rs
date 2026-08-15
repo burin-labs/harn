@@ -178,6 +178,8 @@ pub(super) async fn initialize_connectors(
         rate_limiter: Arc::new(harn_vm::RateLimiterFactory::default()),
     };
 
+    registry.bind_secret_store(Arc::clone(&ctx.secrets));
+
     let mut providers = Vec::new();
     let mut handles = Vec::new();
     for (provider, kinds) in grouped_kinds {
@@ -187,6 +189,9 @@ pub(super) async fn initialize_connectors(
             registry
                 .register(connector)
                 .map_err(|error| error.to_string())?;
+        }
+        if let Some(config) = provider_override_config(&provider, provider_overrides) {
+            registry.declare_secrets(provider.clone(), crate::declared_connector_secrets(config));
         }
         if registry.get(&provider).is_none() {
             if provider_requires_harn_connector(provider.as_str()) {
@@ -307,14 +312,20 @@ fn connector_for(
     }
 }
 
+fn provider_override_config<'a>(
+    provider: &harn_vm::ProviderId,
+    provider_overrides: &'a [ResolvedProviderConnectorConfig],
+) -> Option<&'a ResolvedProviderConnectorConfig> {
+    provider_overrides
+        .iter()
+        .find(|entry| entry.id == *provider)
+}
+
 async fn connector_override_for(
     provider: &harn_vm::ProviderId,
     provider_overrides: &[ResolvedProviderConnectorConfig],
 ) -> Result<Option<Box<dyn harn_vm::Connector>>, OrchestratorError> {
-    let Some(override_config) = provider_overrides
-        .iter()
-        .find(|entry| entry.id == *provider)
-    else {
+    let Some(override_config) = provider_override_config(provider, provider_overrides) else {
         return Ok(None);
     };
     package::load_provider_connector(override_config)

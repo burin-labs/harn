@@ -96,9 +96,10 @@ written, rotated, or leased through the scoped harness API. In particular,
 signed run-receipt Ed25519 seeds are loaded through trusted runtime provider
 access and are never exposed to Harn scripts.
 
-When `harn run` executes a package script, the default `harness.secrets`
-provider is scoped from the nearest `harn.toml`, matching the namespace used by
-`harn connect`. This lets package scripts read canonical connector ids such as
+Every Harn surface stores and resolves credentials under one namespace, so a
+credential `harn connect` can store is one the runtime can read. `harn run`,
+`harn connect`, `--grant secret://`, connector dispatch, and `harn doctor` all
+name the same backend, and package scripts read canonical connector ids such as
 `google_workspace/access-token` without knowing the host keyring namespace.
 
 Automated tests and CI should not touch the OS credential store. Use
@@ -117,13 +118,16 @@ The provider order is controlled with `HARN_SECRET_PROVIDERS`:
 export HARN_SECRET_PROVIDERS=env,keyring
 ```
 
-The doctor output also reports a namespace used for backend grouping. By
-default Harn derives it as `harn/<current-directory-name>`. Override it
-with:
+The doctor output also reports the namespace used for backend grouping. It is
+`harn.provider_auth` for every surface. Override it — for an isolated workspace
+or a test run — with:
 
 ```bash
 export HARN_SECRET_NAMESPACE="harn/my-workspace"
 ```
+
+The override applies process-wide. Set it for `harn connect` and for the run
+that consumes the credential, or the two will not meet.
 
 ## Environment provider
 

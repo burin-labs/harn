@@ -301,11 +301,7 @@ pub(crate) async fn execute_with_skill_dirs_and_options(
             let runtime_harness = match harness {
                 Some(harness) => harness,
                 None => {
-                    let resolved = match source_path {
-                        Some(path) => default_harness_for_manifest_or_base_dir(path, store_base),
-                        None => default_harness_for_base_dir(store_base),
-                    };
-                    resolved.map_err(|error| {
+                    default_harness().map_err(|error| {
                         ExecError::new(
                             ExecStage::Runtime,
                             format!("failed to configure harness secret provider: {error}"),
@@ -341,7 +337,7 @@ pub(crate) async fn execute_with_skill_dirs_and_options(
             let _connector_clients =
                 if should_install_default_connector_clients(source, source_path) {
                     Some(
-                        install_connector_clients(store_base, &extensions.provider_connectors)
+                        install_connector_clients(&extensions.provider_connectors)
                             .await
                             .map_err(|error| {
                                 ExecError::new(
@@ -396,15 +392,24 @@ impl Drop for ActiveConnectorClientsGuard {
     }
 }
 
+/// The credentials a provider's manifest declared it needs, as secret ids the
+/// runtime resolves at dispatch.
+pub(crate) fn declared_connector_secrets(
+    config: &package::ResolvedProviderConnectorConfig,
+) -> Vec<harn_vm::secrets::SecretId> {
+    let Some(setup) = config.setup.as_ref() else {
+        return Vec::new();
+    };
+    harn_vm::declared_secret_ids(setup.required_secrets.iter().map(String::as_str))
+}
+
 pub(crate) async fn install_connector_clients(
-    base_dir: &Path,
     provider_connectors: &[package::ResolvedProviderConnectorConfig],
 ) -> Result<ActiveConnectorClientsGuard, String> {
     let event_log = harn_vm::event_log::active_event_log()
         .unwrap_or_else(|| harn_vm::event_log::install_memory_for_current_thread(64));
-    let secret_namespace = connector_secret_namespace(base_dir);
     let secrets: Arc<dyn harn_vm::secrets::SecretProvider> = Arc::new(
-        harn_vm::secrets::configured_default_chain(secret_namespace)
+        harn_vm::secrets::configured_secret_chain()
             .map_err(|error| format!("failed to configure secret providers: {error}"))?,
     );
 
@@ -419,6 +424,7 @@ pub(crate) async fn install_connector_clients(
                 .register(connector)
                 .map_err(|error| error.to_string())?;
         }
+        registry.declare_secrets(config.id.clone(), declared_connector_secrets(config));
     }
     let metrics = Arc::new(harn_vm::MetricsRegistry::default());
     let inbox = Arc::new(
@@ -441,33 +447,8 @@ pub(crate) async fn install_connector_clients(
     Ok(ActiveConnectorClientsGuard)
 }
 
-pub(crate) fn connector_secret_namespace(base_dir: &Path) -> String {
-    match std::env::var("HARN_SECRET_NAMESPACE") {
-        Ok(namespace) if !namespace.trim().is_empty() => namespace,
-        _ => {
-            let leaf = base_dir
-                .file_name()
-                .and_then(|name| name.to_str())
-                .filter(|name| !name.is_empty())
-                .unwrap_or("workspace");
-            format!("harn/{leaf}")
-        }
-    }
-}
-
-pub(crate) fn default_harness_for_base_dir(base_dir: &Path) -> Result<harn_vm::Harness, String> {
-    let secret_namespace = connector_secret_namespace(base_dir);
-    default_harness_for_secret_namespace(secret_namespace)
-}
-
-pub(crate) fn default_harness_for_manifest_or_base_dir(
-    source_path: &Path,
-    base_dir: &Path,
-) -> Result<harn_vm::Harness, String> {
-    let secret_namespace = package::find_nearest_manifest_dir(source_path)
-        .map(|manifest_dir| connector_secret_namespace(&manifest_dir))
-        .unwrap_or_else(|| connector_secret_namespace(base_dir));
-    default_harness_for_secret_namespace(secret_namespace)
+pub(crate) fn default_harness() -> Result<harn_vm::Harness, String> {
+    default_harness_for_secret_namespace(harn_vm::secrets::configured_secret_namespace())
 }
 
 pub(crate) fn default_harness_for_secret_namespace(

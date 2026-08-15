@@ -8,8 +8,8 @@ use harn_vm::llm_config;
 use harn_vm::orchestration::SandboxProfile;
 use harn_vm::runtime_paths;
 use harn_vm::secrets::{
-    configured_default_chain, EnvSecretProvider, KeyringSecretProvider, SecretId,
-    DEFAULT_SECRET_PROVIDER_CHAIN, SECRET_PROVIDER_CHAIN_ENV,
+    configured_default_chain, configured_secret_namespace, EnvSecretProvider,
+    KeyringSecretProvider, SecretId, DEFAULT_SECRET_PROVIDER_CHAIN, SECRET_PROVIDER_CHAIN_ENV,
 };
 use serde::Serialize;
 
@@ -1233,7 +1233,7 @@ fn check_provider_selection() -> Vec<DoctorCheck> {
 }
 
 fn check_secret_providers() -> Vec<DoctorCheck> {
-    let namespace = default_secret_namespace();
+    let namespace = configured_secret_namespace();
     let configured = std::env::var(SECRET_PROVIDER_CHAIN_ENV)
         .unwrap_or_else(|_| DEFAULT_SECRET_PROVIDER_CHAIN.to_string());
     let mut checks = Vec::new();
@@ -1643,22 +1643,6 @@ fn check_event_log() -> Vec<DoctorCheck> {
 /// so `harn doctor` reports on the same manifest the rest of the CLI loads.
 fn find_nearest_manifest(start: &Path) -> Option<PathBuf> {
     harn_modules::manifest_walk::find_nearest_manifest(start).map(|found| found.path)
-}
-
-fn default_secret_namespace() -> String {
-    if let Ok(namespace) = std::env::var("HARN_SECRET_NAMESPACE") {
-        if !namespace.trim().is_empty() {
-            return namespace;
-        }
-    }
-
-    let cwd = std::env::current_dir().unwrap_or_default();
-    let leaf = cwd
-        .file_name()
-        .and_then(|name| name.to_str())
-        .filter(|name| !name.is_empty())
-        .unwrap_or("workspace");
-    format!("harn/{leaf}")
 }
 
 fn read_manifest(path: &Path) -> Result<package::Manifest, String> {

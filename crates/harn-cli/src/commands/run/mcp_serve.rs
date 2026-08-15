@@ -107,7 +107,6 @@ pub(crate) async fn run_file_mcp_serve(
 
     let _manifest_runtime = match super::manifest_runtime::install_manifest_runtime(
         Path::new(path),
-        store_base,
         &mut vm,
         crate::package::ManifestHandlerInitialization::OnDispatch,
     )

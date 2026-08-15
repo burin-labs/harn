@@ -25,17 +25,3 @@ pub(super) fn find_nearest_manifest(start: &Path) -> Option<(PathBuf, PathBuf)> 
     let found = harn_modules::manifest_walk::find_nearest_manifest(start)?;
     Some((found.path, found.dir))
 }
-
-pub(super) fn secret_namespace_for(manifest_dir: &Path) -> String {
-    match std::env::var("HARN_SECRET_NAMESPACE") {
-        Ok(namespace) if !namespace.trim().is_empty() => namespace,
-        _ => {
-            let leaf = manifest_dir
-                .file_name()
-                .and_then(|name| name.to_str())
-                .filter(|name| !name.is_empty())
-                .unwrap_or("workspace");
-            format!("harn/{leaf}")
-        }
-    }
-}

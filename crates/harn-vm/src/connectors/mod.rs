@@ -19,8 +19,7 @@ use crate::event_log::AnyEventLog;
 use crate::secrets::SecretProvider;
 use crate::triggers::test_util::clock::{self, ClockInstant};
 use crate::triggers::{
-    registered_provider_metadata, InboxIndex, ProviderId, ProviderMetadata,
-    ProviderRuntimeMetadata, TenantId, TriggerEvent,
+    InboxIndex, ProviderId, ProviderMetadata, ProviderRuntimeMetadata, TenantId, TriggerEvent,
 };
 
 pub mod a2a_push;
@@ -30,6 +29,8 @@ pub mod effect_policy;
 pub mod harn_module;
 pub mod hmac;
 mod llm_metrics;
+mod registry;
+mod secret_injection;
 pub mod shared;
 pub mod stream;
 mod stripe;
@@ -57,6 +58,8 @@ pub use hmac::{
     DEFAULT_STANDARD_WEBHOOKS_TIMESTAMP_HEADER, DEFAULT_STRIPE_SIGNATURE_HEADER,
     SIGNATURE_VERIFY_AUDIT_TOPIC,
 };
+pub use registry::ConnectorRegistry;
+pub use secret_injection::{declared_secret_ids, DeclaredConnectorSecrets};
 pub use shared::{
     paginate_cursor, resolve_jwks, verify_hmac_signature, verify_jwt_claims, verify_jwt_json,
     ConnectorBase, CursorPage, HmacSignatureAlgorithm, JwtKeySource, JwtVerificationOptions,
@@ -65,8 +68,6 @@ pub use stream::StreamConnector;
 pub use stripe::verify_stripe_signature;
 use webhook::WebhookProviderProfile;
 pub use webhook::{GenericWebhookConnector, WebhookSignatureVariant};
-
-use defaults::default_connector_for_provider;
 
 const OUTBOUND_CONNECTOR_HTTP_TIMEOUT: StdDuration = StdDuration::from_secs(30);
 
@@ -1664,97 +1665,6 @@ impl<'a> ScopedRateLimiter<'a> {
     }
 }
 
-/// Runtime connector registry keyed by provider id.
-pub struct ConnectorRegistry {
-    connectors: BTreeMap<ProviderId, ConnectorHandle>,
-}
-
-impl ConnectorRegistry {
-    pub fn empty() -> Self {
-        Self {
-            connectors: BTreeMap::new(),
-        }
-    }
-
-    pub fn with_defaults() -> Self {
-        Self::with_defaults_and_clock(harn_clock::RealClock::arc())
-    }
-
-    /// Build the default connector set with a shared clock for time-driven providers.
-    pub fn with_defaults_and_clock(clock: Arc<dyn harn_clock::Clock>) -> Self {
-        let mut registry = Self::empty();
-        for provider in registered_provider_metadata() {
-            if !matches!(provider.runtime, ProviderRuntimeMetadata::Builtin { .. }) {
-                continue;
-            }
-            registry
-                .register(default_connector_for_provider(&provider, clock.clone()))
-                .expect("default connector registration should not fail");
-        }
-        registry
-    }
-
-    pub fn register(&mut self, connector: Box<dyn Connector>) -> Result<(), ConnectorError> {
-        let provider = connector.provider_id().clone();
-        if self.connectors.contains_key(&provider) {
-            return Err(ConnectorError::DuplicateProvider(provider.0));
-        }
-        self.connectors
-            .insert(provider, Arc::new(AsyncMutex::new(connector)));
-        Ok(())
-    }
-
-    pub fn get(&self, id: &ProviderId) -> Option<ConnectorHandle> {
-        self.connectors.get(id).cloned()
-    }
-
-    pub fn remove(&mut self, id: &ProviderId) -> Option<ConnectorHandle> {
-        self.connectors.remove(id)
-    }
-
-    pub fn list(&self) -> Vec<ProviderId> {
-        self.connectors.keys().cloned().collect()
-    }
-
-    pub async fn init_all(&self, ctx: ConnectorCtx) -> Result<(), ConnectorError> {
-        for connector in self.connectors.values() {
-            connector.lock().await.init(ctx.clone()).await?;
-        }
-        Ok(())
-    }
-
-    pub async fn client_map(&self) -> BTreeMap<ProviderId, Arc<dyn ConnectorClient>> {
-        let mut clients = BTreeMap::new();
-        for (provider, connector) in &self.connectors {
-            let client = connector.lock().await.client();
-            clients.insert(provider.clone(), client);
-        }
-        clients
-    }
-
-    pub async fn activate_all(
-        &self,
-        registry: &TriggerRegistry,
-    ) -> Result<Vec<ActivationHandle>, ConnectorError> {
-        let mut handles = Vec::new();
-        for (provider, connector) in &self.connectors {
-            let bindings = registry.bindings_for(provider);
-            if bindings.is_empty() {
-                continue;
-            }
-            let connector = connector.lock().await;
-            handles.push(connector.activate(bindings).await?);
-        }
-        Ok(handles)
-    }
-}
-
-impl Default for ConnectorRegistry {
-    fn default() -> Self {
-        Self::with_defaults()
-    }
-}
-
 struct PlaceholderConnector {
     provider_id: ProviderId,
     kinds: Vec<TriggerKind>,
@@ -1847,6 +1757,8 @@ pub fn clear_active_connector_clients() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use crate::triggers::registered_provider_metadata;
 
     use std::sync::atomic::{AtomicUsize, Ordering};
 
