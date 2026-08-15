@@ -39,6 +39,34 @@ pub fn home_dir() -> Option<PathBuf> {
     )
 }
 
+/// Where Harn keeps its package cache for a given home directory.
+///
+/// The pure core takes `home` and `$XDG_CACHE_HOME` explicitly, for the same
+/// reason [`home_dir_from`] does: the resolution has to be assertable for a
+/// home that is not the running process's own. A sandboxed run relocates
+/// `HOME` and `XDG_CACHE_HOME` into the workspace so each toolchain writes its
+/// caches there, which silently moved Harn's package cache too and left every
+/// such run resolving an empty cache. Resolving against an explicit home lets
+/// the sandbox hand the child the real cache root instead.
+pub fn package_cache_dir_from(home: &Path, xdg_cache_home: Option<&OsStr>) -> PathBuf {
+    if cfg!(target_os = "macos") {
+        return home.join("Library/Caches/harn");
+    }
+    match non_empty(xdg_cache_home) {
+        Some(xdg) => xdg.join("harn"),
+        None => home.join(".cache/harn"),
+    }
+}
+
+/// [`package_cache_dir_from`] against the current process environment.
+///
+/// This is the default only. `HARN_CACHE_DIR` overrides it, and resolving that
+/// override stays with the package layer that owns the setting.
+pub fn package_cache_dir() -> Option<PathBuf> {
+    home_dir()
+        .map(|home| package_cache_dir_from(&home, std::env::var_os("XDG_CACHE_HOME").as_deref()))
+}
+
 /// Prefixes that stand in for the home directory, longest first so `"$HOME/"`
 /// is tried before the bare `"$HOME"`.
 const HOME_PREFIXES: &[&str] = &["~/", "$HOME/", "~", "$HOME"];
@@ -193,5 +221,36 @@ mod tests {
     fn expand_home_path_passes_through_non_utf8() {
         let raw = PathBuf::from("/etc/harn");
         assert_eq!(expand_home_path(&raw), raw);
+    }
+
+    #[test]
+    fn package_cache_follows_the_home_it_is_given() {
+        let home = PathBuf::from("/somewhere/else");
+        let resolved = package_cache_dir_from(&home, None);
+        assert!(
+            resolved.starts_with(&home),
+            "an explicit home must decide the cache root: {resolved:?}"
+        );
+    }
+
+    #[test]
+    fn package_cache_honours_xdg_cache_home_off_macos() {
+        let resolved = package_cache_dir_from(
+            Path::new("/home/u"),
+            Some(OsStr::new("/var/cache/somewhere")),
+        );
+        let expected = if cfg!(target_os = "macos") {
+            // macOS has no XDG convention, so the home path wins there.
+            PathBuf::from("/home/u/Library/Caches/harn")
+        } else {
+            PathBuf::from("/var/cache/somewhere/harn")
+        };
+        assert_eq!(resolved, expected);
+    }
+
+    #[test]
+    fn empty_xdg_cache_home_falls_back_to_the_home_default() {
+        let resolved = package_cache_dir_from(Path::new("/home/u"), Some(OsStr::new("")));
+        assert!(resolved.starts_with("/home/u"), "got {resolved:?}");
     }
 }

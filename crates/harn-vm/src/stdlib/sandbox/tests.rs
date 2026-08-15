@@ -1216,6 +1216,30 @@ fn developer_toolchain_roots_cover_common_home_managed_runtimes() {
     );
 }
 
+/// Harn's own package cache needs write, not merely read.
+///
+/// An entry is claimed through a lock file under the cache's `locks/` before
+/// it is read, so a read-only grant denies the claim and the entry reads as
+/// unusable. The run then re-fetches a package it already had, over a network
+/// the same sandbox denies.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[test]
+fn developer_toolchain_cache_roots_cover_the_harn_package_cache() {
+    let temp_home = tempfile::tempdir().expect("temp home");
+    let roots = developer_toolchain_cache_write_roots_for_home(temp_home.path());
+
+    let expected = if cfg!(target_os = "macos") {
+        Path::new("Library/Caches/harn")
+    } else {
+        Path::new(".cache/harn")
+    };
+    assert!(
+        roots.iter().any(|path| path.ends_with(expected)),
+        "no write grant for this platform's Harn package cache ({}); roots: {roots:?}",
+        expected.display()
+    );
+}
+
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 #[test]
 fn developer_toolchain_cache_roots_cover_jvm_and_ios_toolchains() {
