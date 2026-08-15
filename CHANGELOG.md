@@ -9,6 +9,27 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.98
+
+### Added
+
+- `learn curate` now backfills bounded, naturally completed Harn sessions from the canonical session store after a restart,
+  retaining their public task and tool sequence while excluding cancelled and failed sessions.
+
+### Fixed
+
+- **Agent host tools keep blank optional path fields inside their configured
+  checkout root (#6684).** Generated tool requests that encode omitted `repo`
+  or `cwd` as empty strings no longer fall back to the controller process
+  directory.
+- **OpenAI Codex model options.** Harn now drops unsupported `temperature`
+  before sending a direct OpenAI Codex request, avoiding a provider error at
+  agent startup (#6688).
+- **Workflow crystallization now admits only producer-stamped eligible natural
+  per-run evidence.** Curator, replay, and control runs—and historical
+  sessions without that provenance—can no longer recursively seed reusable
+  tools.
+
 ## v0.10.97
 
 ### Fixed
