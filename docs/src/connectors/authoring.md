@@ -408,6 +408,23 @@ environments = ["test", "live"]
 evidence = ["citation", "current_provider_state"]
 redaction = ["error_body"]
 
+[[providers.service.operations.parameters]]
+name = "origin"
+description = "IATA code the itinerary departs from."
+type = "string"
+required = true
+
+[[providers.service.operations.parameters]]
+name = "limit"
+description = "How many offers to return."
+type = "integer"
+
+[[providers.service.operations.parameters]]
+name = "cabin"
+description = "Cabin class to search."
+type = "string"
+allowed_values = ["economy", "premium_economy", "business", "first"]
+
 [[providers.service.operations]]
 id = "orders.create"
 capability = "travel.booking"
@@ -436,6 +453,26 @@ never appear in the manifest, action intent, transcript, receipt, or logs.
 Operations that use profile data in `test` mode must set
 `test_profile = "fictional_required"`. Hosts then supply an explicitly
 fictional fixture instead of silently treating test data as the user.
+
+Each operation may declare the arguments it accepts under `parameters`. This is
+what lets a host project the operation into an agent tool without a
+hand-written, per-connector argument table; without it the model is guessing
+argument names. Each entry needs a `name` (ASCII letters, digits, `.`, `_`, or
+`-`, unique within the operation) and a `description`, which is the text the
+model reads. `type` is one of `string`, `integer`, `number`, `boolean`,
+`object`, or `array`. `required` defaults to `false`. `allowed_values` declares
+a closed set and applies only to a `string` parameter.
+
+The closed vocabulary is deliberate: it stays authorable in TOML and validated
+at the manifest boundary, and hosts widen it into whatever schema dialect their
+tool surface speaks. It describes argument *shape* only — provider request and
+response schemas still belong inside the connector adapter.
+
+`parameters` is optional and omitting it stays valid. A connector repository
+pins a Harn version, and this manifest rejects unknown keys, so a connector
+cannot declare parameters until a release carrying the field reaches it. Hosts
+must keep projecting an operation that declares none, falling back to
+free-form arguments, rather than reading an empty list as "takes no arguments".
 
 `harn connect status --json` and `harn connect setup-plan --json` project the
 same typed service block alongside authentication and health state. Hosts
