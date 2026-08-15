@@ -1,6 +1,7 @@
 1	agents/agent_await_resumption.harn	HARN-LNT-018
 1	agents/agent_edge_cases.harn	HARN-LNT-016
 1	agents/agent_goal_reloop.harn	HARN-LNT-018
+1	agents/agent_host_tools_empty_path_defaults.harn	HARN-LNT-025
 2	agents/agent_loop_dynamic_llm_context.harn	HARN-LNT-018
 9	agents/agent_loop_escalation_provider_error.harn	HARN-LNT-018
 2	agents/agent_loop_intra_turn_failure_fanout_cap.harn	HARN-LNT-049

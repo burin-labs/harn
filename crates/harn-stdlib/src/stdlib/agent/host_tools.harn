@@ -37,12 +37,8 @@ fn __agent_host_string_list(value, label) {
   throw "agent_host_tools: " + label + " must be a string, list of strings, or nil"
 }
 
-/** Treat generated optional-string defaults as absent rather than authority. */
 fn __agent_host_nonempty_string(value) {
-  if type_of(value) != "string" || trim(value) == "" {
-    return nil
-  }
-  return value
+  return type_of(value) == "string" && trim(value) != "" ? value : nil
 }
 
 fn __agent_host_tool_enabled(options, key, group) {
@@ -1221,10 +1217,8 @@ pub fn agent_command_tools(harness: Harness, registry = nil, options = nil) {
 }
 
 /**
- * Code mode is default-OFF: only surface it when the caller explicitly opts in
- * with `code_mode: true` or lists "code_mode" in `enabled_tools`. It is a
- * powerful composition surface (a script that calls other tools), so it must
- * never appear by default.
+ * Code mode is default-OFF. Expose it only with `code_mode: true` or
+ * `enabled_tools: ["code_mode"]`; it can call other tools and must never be default.
  */
 fn __agent_host_code_mode_enabled(options) {
   const opts = __agent_host_options(options)
