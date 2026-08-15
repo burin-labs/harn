@@ -979,3 +979,28 @@ fn write_response(stream: &mut TcpStream, response: &str) {
         .write_all(response.as_bytes())
         .expect("write response");
 }
+
+/// Regression for harn#6706: `harn connect` used to write into a namespace
+/// derived from the checkout's directory name while the runtime resolved from
+/// a fixed one, so a credential could be storable and reported healthy while
+/// being structurally unreadable by the agent. Both sides must name one store.
+#[test]
+fn connect_writes_where_the_runtime_resolves() {
+    use harn_vm::secrets::SecretProvider;
+
+    let runtime_namespace = harn_vm::secrets::configured_secret_namespace();
+    assert_eq!(
+        store::connect_secret_provider()
+            .expect("connect writer provider")
+            .namespace(),
+        runtime_namespace,
+        "harn connect must store credentials in the namespace the runtime resolves from"
+    );
+    assert_eq!(
+        store::connect_secret_reader_provider()
+            .expect("connect status reader provider")
+            .namespace(),
+        runtime_namespace,
+        "harn connect status must read the namespace the runtime resolves from"
+    );
+}

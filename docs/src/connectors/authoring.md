@@ -502,6 +502,24 @@ the portable `A_Z`, `0_9`, and `_` environment-variable form. This manifest
 mapping is the connector's source of truth; hosts must not guess names from a
 provider id.
 
+### Declared secrets arrive in `args.secrets`
+
+When an operation dispatches, the runtime resolves the provider's
+`required_secrets` from the secret store and passes them in `args.secrets`,
+keyed by the secret name with `-` replaced by `_`. A manifest declaring
+`required_secrets = ["example/api-key"]` reaches the connector as
+`args.secrets.api_key`, so `call` should read that first:
+
+```harn
+const api_key = args?.api_key ?? args?.secrets?.api_key ?? env.get("EXAMPLE_API_KEY")
+```
+
+A credential the caller passed explicitly wins over the stored one, and a
+declared secret the store cannot produce is simply absent rather than an error
+— manifests list inbound webhook secrets beside outbound API credentials, and
+no single operation needs all of them. Report the specific missing credential
+from the operation that needed it.
+
 When an `api-key` provider declares exactly one required secret,
 `harn connect <provider>` prompts for that value and stores it at the declared
 secret id. It also accepts `--from-env NAME` and `--value-file PATH`. Providers

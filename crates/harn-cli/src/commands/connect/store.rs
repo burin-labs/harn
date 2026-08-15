@@ -1,15 +1,13 @@
 use std::collections::BTreeSet;
-use std::path::PathBuf;
 
 use serde_json::{json, Value as JsonValue};
 
 use crate::cli::ConnectApiKeyArgs;
 use harn_vm::secrets::{
-    configured_default_chain, ChainSecretProvider, KeyringSecretProvider, SecretBytes, SecretId,
-    SecretProvider,
+    configured_secret_chain, configured_secret_namespace, ChainSecretProvider,
+    KeyringSecretProvider, SecretBytes, SecretId, SecretProvider,
 };
 
-use super::workspace::{resolve_manifest_path, secret_namespace_for};
 use super::{
     ConnectIndex, ConnectIndexEntry, StoredConnectorToken, CONNECT_INDEX_NAME,
     CONNECT_INDEX_NAMESPACE,
@@ -160,22 +158,12 @@ pub(crate) fn parse_secret_id(raw: &str) -> Option<harn_vm::secrets::SecretId> {
 }
 
 pub(crate) fn connect_secret_provider() -> Result<KeyringSecretProvider, String> {
-    let manifest_dir = connect_manifest_dir();
-    Ok(KeyringSecretProvider::new(secret_namespace_for(
-        &manifest_dir,
-    )))
+    Ok(KeyringSecretProvider::new(configured_secret_namespace()))
 }
 
 pub(crate) fn connect_secret_reader_provider() -> Result<ChainSecretProvider, String> {
-    let manifest_dir = connect_manifest_dir();
-    configured_default_chain(secret_namespace_for(&manifest_dir))
+    configured_secret_chain()
         .map_err(|error| format!("failed to configure connector secret providers: {error}"))
-}
-
-fn connect_manifest_dir() -> PathBuf {
-    resolve_manifest_path(None)
-        .map(|(_, dir)| dir)
-        .unwrap_or_else(|_| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
 }
 
 pub(crate) async fn load_connect_secret_text(secret_id: &str) -> Result<String, String> {

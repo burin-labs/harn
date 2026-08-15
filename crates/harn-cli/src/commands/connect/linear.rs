@@ -1,5 +1,4 @@
 use std::collections::BTreeSet;
-use std::path::Path;
 
 use serde_json::{json, Value as JsonValue};
 
@@ -9,7 +8,7 @@ use crate::package;
 use harn_vm::secrets::SecretProvider;
 
 use super::store::parse_secret_id;
-use super::workspace::{resolve_manifest_path, secret_namespace_for};
+use super::workspace::resolve_manifest_path;
 use super::DEFAULT_LINEAR_API_BASE_URL;
 
 pub(super) async fn run_connect_linear(args: &ConnectLinearArgs) -> Result<(), String> {
@@ -38,7 +37,7 @@ pub(super) async fn run_connect_linear(args: &ConnectLinearArgs) -> Result<(), S
     }
 
     let resource_types = derive_linear_resource_types(&triggers)?;
-    let token = resolve_linear_auth(args, &manifest_dir).await?;
+    let token = resolve_linear_auth(args).await?;
     let label = args.label.clone().unwrap_or_else(|| {
         let package = extensions
             .root_manifest
@@ -204,10 +203,7 @@ pub(super) fn linear_resource_type_for_event(event: &str) -> Option<&'static str
     }
 }
 
-pub(super) async fn resolve_linear_auth(
-    args: &ConnectLinearArgs,
-    manifest_dir: &Path,
-) -> Result<String, String> {
+pub(super) async fn resolve_linear_auth(args: &ConnectLinearArgs) -> Result<String, String> {
     if let Some(token) = args.access_token.as_ref() {
         return Ok(format!("Bearer {token}"));
     }
@@ -224,7 +220,7 @@ pub(super) async fn resolve_linear_auth(
                 .to_string()
         })
         .and_then(|raw| parse_secret_id(raw).ok_or_else(|| format!("invalid secret id `{raw}`")))?;
-    let provider = harn_vm::secrets::configured_default_chain(secret_namespace_for(manifest_dir))
+    let provider = harn_vm::secrets::configured_secret_chain()
         .map_err(|error| format!("failed to configure secret providers: {error}"))?;
     let secret = provider
         .get(&secret_id)

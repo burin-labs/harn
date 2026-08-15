@@ -10,7 +10,7 @@ use uuid::Uuid;
 
 use crate::event_log::{active_event_log, AnyEventLog, EventLog, LogEvent, Topic};
 use crate::llm::trigger_predicate::TriggerPredicateBudget;
-use crate::secrets::{configured_default_chain, SecretProvider};
+use crate::secrets::{configured_secret_chain, SecretProvider};
 use crate::triggers::test_util::clock;
 use crate::trust_graph::AutonomyTier;
 
@@ -1553,25 +1553,9 @@ async fn append_lifecycle_events(
 }
 
 fn default_secret_provider() -> Option<Arc<dyn SecretProvider>> {
-    configured_default_chain(default_secret_namespace())
+    configured_secret_chain()
         .ok()
         .map(|provider| Arc::new(provider) as Arc<dyn SecretProvider>)
-}
-
-fn default_secret_namespace() -> String {
-    if let Ok(namespace) = std::env::var("HARN_SECRET_NAMESPACE") {
-        if !namespace.trim().is_empty() {
-            return namespace;
-        }
-    }
-
-    let cwd = std::env::current_dir().unwrap_or_default();
-    let leaf = cwd
-        .file_name()
-        .and_then(|name| name.to_str())
-        .filter(|name| !name.is_empty())
-        .unwrap_or("workspace");
-    format!("harn/{leaf}")
 }
 
 fn now_ms() -> i64 {

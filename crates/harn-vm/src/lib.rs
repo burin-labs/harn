@@ -224,7 +224,7 @@ pub use connectors::{
     clear_active_metrics_registry, connector_export_denied_builtin_reason,
     connector_export_denied_harness_method_reason, connector_export_effect_class,
     cron::{CatchupMode, CronConnector},
-    default_connector_export_policy,
+    declared_secret_ids, default_connector_export_policy,
     harn_module::{
         load_contract as load_harn_connector_contract, HarnConnector, HarnConnectorContract,
     },
