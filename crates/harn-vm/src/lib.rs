@@ -28,6 +28,7 @@ pub mod a2a;
 pub mod actor_chain;
 pub mod agent_events;
 pub(crate) mod agent_session_journal;
+pub mod agent_session_restore;
 pub mod agent_sessions;
 pub mod agent_transcript_budget;
 pub mod atomic_io;
