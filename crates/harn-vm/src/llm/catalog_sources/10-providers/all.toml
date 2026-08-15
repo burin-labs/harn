@@ -24,6 +24,7 @@ path = "/models"
 
 [providers.openai]
 cache_usage_accounting = true
+stream_usage_accounting = true
 base_url = "https://api.openai.com/v1"
 auth_style = "bearer"
 auth_env = "OPENAI_API_KEY"
@@ -40,6 +41,7 @@ path = "/models"
 
 [providers.openrouter]
 cache_usage_accounting = true
+stream_usage_accounting = true
 base_url = "https://openrouter.ai/api/v1"
 auth_style = "bearer"
 auth_env = "OPENROUTER_API_KEY"

@@ -33,6 +33,11 @@ pub(crate) struct DialectContract {
 }
 
 impl DialectContract {
+    fn provider_reports_stream_usage(provider: &str) -> bool {
+        crate::llm_config::provider_config(provider)
+            .is_some_and(|definition| definition.stream_usage_accounting == Some(true))
+    }
+
     /// Resolve the contract from the same capability row that admitted the
     /// request. Gemini's endpoint family is part of the contract because its
     /// two live APIs use different request, event, and response envelopes.
@@ -139,13 +144,20 @@ impl DialectContract {
         super::errors::classify_provider_http_error(error_owner, status, retry_after, body)
     }
 
-    pub(crate) fn requests_stream_usage(self, endpoint: &str) -> bool {
+    pub(crate) fn requests_stream_usage(self, provider: &str, endpoint: &str) -> bool {
         match self.stream_protocol() {
             StreamProtocol::AnthropicSse => false,
             StreamProtocol::OllamaNdjson => endpoint.contains("/v1/"),
-            StreamProtocol::OpenAiSse => true,
+            StreamProtocol::OpenAiSse => Self::provider_reports_stream_usage(provider),
             StreamProtocol::GeminiJson | StreamProtocol::GeminiInteractionsSse => false,
         }
+    }
+
+    /// Whether a finish-reason frame is only content-terminal and the parser
+    /// must continue through the provider's trailing accounting frame.
+    pub(crate) fn awaits_stream_usage(self, provider: &str) -> bool {
+        self.stream_protocol() == StreamProtocol::OpenAiSse
+            && Self::provider_reports_stream_usage(provider)
     }
 }
 

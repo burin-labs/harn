@@ -62,7 +62,7 @@ pub(crate) fn elapsed_ms(started: std::time::Instant) -> u64 {
 /// All fields default to `None` / empty. Producers fill in what they can
 /// extract and leave the rest absent; consumers must treat missing fields as
 /// "not reported by this provider", not "zero".
-#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ProviderTelemetry {
     /// Wire format the values came from (`ollama_chat`, `openai_usage`, ...).
     /// See [`source`] for the canonical strings. Empty when no telemetry was
@@ -127,6 +127,10 @@ pub struct ProviderTelemetry {
     /// Provider-supplied request id (`x-request-id` / `request_id`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub request_id: Option<String>,
+    /// Exact charge reported by the provider for this request. This takes
+    /// precedence over catalog estimates when present.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider_cost_usd: Option<f64>,
     /// Provider/router metadata returned alongside an otherwise standard wire
     /// response. Gateways use this for the resolved upstream, fallback
     /// attempts, routing policy, and exact billed cost. Preserved as JSON so
@@ -183,6 +187,7 @@ impl ProviderTelemetry {
             runtime_memory_vram_bytes,
             runtime_keep_alive_until,
             request_id,
+            provider_cost_usd,
             provider_metadata,
         } = self;
         source.is_empty()
@@ -201,6 +206,7 @@ impl ProviderTelemetry {
             && runtime_memory_vram_bytes.is_none()
             && runtime_keep_alive_until.is_none()
             && request_id.is_none()
+            && provider_cost_usd.is_none()
             && provider_metadata.is_none()
     }
 
@@ -275,7 +281,20 @@ impl ProviderTelemetry {
         if let Some(request_id) = request_id.filter(|value| !value.is_empty()) {
             telemetry.request_id = Some(request_id.to_string());
         }
+        telemetry.provider_cost_usd = usage
+            .get("cost")
+            .or_else(|| usage.get("total_cost"))
+            .and_then(serde_json::Value::as_f64)
+            .filter(|cost| cost.is_finite() && *cost >= 0.0);
         telemetry
+    }
+
+    pub fn capture_request_id(&mut self, request_id: Option<&str>) {
+        if self.request_id.is_none() {
+            self.request_id = request_id
+                .filter(|value| !value.is_empty())
+                .map(str::to_string);
+        }
     }
 
     /// Extract Anthropic-shape `usage` telemetry. Anthropic only reports
@@ -436,6 +455,12 @@ impl ProviderTelemetry {
         if let Some(ref request_id) = self.request_id {
             dict.put_str("request_id", request_id.as_str());
         }
+        if let Some(provider_cost_usd) = self.provider_cost_usd {
+            dict.insert(
+                crate::value::intern_key("provider_cost_usd"),
+                VmValue::Float(provider_cost_usd),
+            );
+        }
         if let Some(ref provider_metadata) = self.provider_metadata {
             dict.insert(
                 crate::value::intern_key("provider_metadata"),
@@ -579,10 +604,11 @@ mod tests {
     }
 
     #[test]
-    fn openai_usage_partial_extracts_counts_only() {
+    fn openai_usage_extracts_counts_and_provider_cost() {
         let usage = serde_json::json!({
             "prompt_tokens": 200,
-            "completion_tokens": 50
+            "completion_tokens": 50,
+            "cost": 0.00125
         });
 
         let telemetry = ProviderTelemetry::from_openai_usage(&usage, Some("req-abc"));
@@ -592,6 +618,7 @@ mod tests {
         assert_eq!(telemetry.server_output_tokens, Some(50));
         assert_eq!(telemetry.server_prompt_eval_ms, None);
         assert_eq!(telemetry.request_id.as_deref(), Some("req-abc"));
+        assert_eq!(telemetry.provider_cost_usd, Some(0.00125));
     }
 
     #[test]

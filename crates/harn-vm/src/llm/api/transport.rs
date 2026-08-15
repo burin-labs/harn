@@ -384,7 +384,7 @@ async fn vm_call_llm_api_with_body_inner(
     if use_stream_transport {
         body["stream"] = serde_json::json!(true);
         // OpenAI-style: request usage in the final streaming chunk.
-        if dialect.requests_stream_usage(&resolved.endpoint) {
+        if dialect.requests_stream_usage(provider, &resolved.endpoint) {
             body["stream_options"] = serde_json::json!({"include_usage": true});
         }
     }
@@ -472,6 +472,13 @@ async fn vm_call_llm_api_with_body_inner(
                     .message;
                 return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(msg))));
             }
+            let provider_request_id = response
+                .headers()
+                .get("x-generation-id")
+                .or_else(|| response.headers().get("x-request-id"))
+                .and_then(|value| value.to_str().ok())
+                .filter(|value| !value.is_empty())
+                .map(str::to_string);
             // Build a fresh schema watch per attempt so an Ollama-retry
             // restart doesn't see chunks from the previous run.
             let schema_watch = super::schema_stream::StreamSchemaWatch::from_payload(opts);
@@ -489,6 +496,7 @@ async fn vm_call_llm_api_with_body_inner(
                         tools_offered,
                         deadline_policy,
                         RawProviderCaptureTarget::new(raw_capture_context.clone(), Some(attempt)),
+                        provider_request_id.as_deref(),
                     )
                     .await;
                 }

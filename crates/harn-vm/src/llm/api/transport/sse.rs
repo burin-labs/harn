@@ -16,6 +16,7 @@ pub(super) async fn vm_call_llm_api_sse_from_response(
     tools_offered: bool,
     deadline_policy: super::liveness::StreamDeadlinePolicy,
     raw_capture: RawProviderCaptureTarget,
+    provider_request_id: Option<&str>,
 ) -> Result<LlmResult, VmError> {
     use tokio_stream::StreamExt;
 
@@ -44,6 +45,7 @@ pub(super) async fn vm_call_llm_api_sse_from_response(
         schema_watch,
         tools_offered,
         deadline_policy,
+        provider_request_id,
     )
     .await;
     if let Some(raw_bytes) = raw_bytes {
@@ -564,6 +566,7 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
             first_chunk: Duration::from_hours(1),
             idle: Duration::from_hours(1),
         },
+        None,
     )
     .await
 }
@@ -579,6 +582,7 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
     mut schema_watch: Option<super::super::schema_stream::StreamSchemaWatch>,
     tools_offered: bool,
     deadline_policy: super::liveness::StreamDeadlinePolicy,
+    provider_request_id: Option<&str>,
 ) -> Result<LlmResult, VmError> {
     use tokio::io::AsyncBufReadExt;
     let mut lines = reader.lines();
@@ -665,6 +669,7 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
     // named `event: error` payloads classify before delta parsing.
     let mut current_event: Option<String> = None;
     let managed_transport = crate::llm::managed_supply::is_managed_transport(provider);
+    let awaits_stream_usage = dialect.awaits_stream_usage(provider);
 
     loop {
         let line = match liveness.next_line(lines.next_line()).await? {
@@ -1120,12 +1125,10 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
             }
             telemetry.capture_provider_metadata(&json);
         }
-        // Direct OpenAI-compatible providers are terminal at finish_reason.
-        // Managed gateways may legally append usage and their authoritative
-        // receipt in later empty-choices frames, so their receipt is the
-        // terminal boundary. Stopping at the served provider's finish frame
-        // loses the only authoritative identity/cost record on the wire.
-        if managed_receipt_frame || (terminal_frame && !managed_transport) {
+        // A finish_reason ends content, not necessarily accounting. Providers
+        // with a declared stream-usage contract and managed gateways append
+        // their authoritative receipt in later empty-choices frames.
+        if managed_receipt_frame || (terminal_frame && !managed_transport && !awaits_stream_usage) {
             break;
         }
     }
@@ -1329,6 +1332,7 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
         });
         telemetry = ProviderTelemetry::from_anthropic_usage(&usage, anth_request_id.as_deref());
     }
+    telemetry.capture_request_id(provider_request_id);
     Ok(LlmResult {
         attempts: Default::default(),
         text_projection: None,
