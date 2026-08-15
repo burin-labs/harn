@@ -90,6 +90,104 @@ fn materialization_rejects_lock_alias_path_traversal_before_removing_paths() {
     );
 }
 
+/// A project whose dependency source can no longer be reached at all.
+///
+/// Installs `acme-lib` from a Git source, then removes both the source repo and
+/// the package cache, so any attempt to reach the source must fail rather than
+/// quietly succeed from a warm cache.
+fn project_with_unreachable_source() -> (tempfile::TempDir, TestWorkspace, PathBuf) {
+    let (_repo_tmp, repo, _branch) = create_git_package_repo();
+    let project_tmp = tempfile::tempdir().unwrap();
+    let root = project_tmp.path().to_path_buf();
+    let workspace = TestWorkspace::new(&root);
+    fs::create_dir_all(root.join(".git")).unwrap();
+    let git = normalize_git_url(repo.to_string_lossy().as_ref()).unwrap();
+    fs::write(
+        root.join(MANIFEST),
+        format!(
+            r#"
+[package]
+name = "workspace"
+version = "0.1.0"
+
+[dependencies]
+acme-lib = {{ git = "{git}", tag = "v1.0.0" }}
+"#
+        ),
+    )
+    .unwrap();
+
+    install_packages_in(workspace.env(), false, None, false).unwrap();
+
+    fs::remove_dir_all(&repo).unwrap();
+    fs::remove_dir_all(workspace.cache_dir()).unwrap();
+
+    (project_tmp, workspace, root)
+}
+
+/// Every run, nested ones included, is served by the materialized generation.
+///
+/// A run that reaches its dependency source is indistinguishable from one that
+/// reuses what is already materialized as long as the source stays reachable,
+/// so the source is deleted first: reuse is the only way to succeed. A run
+/// spawned inside a sandbox with no egress, or one whose credentials were
+/// scrubbed on the way to the child, is the same situation as this test.
+///
+/// The paired negative below is what keeps this honest. Without it, this test
+/// would still pass if materialization stopped happening for some unrelated
+/// reason.
+#[test]
+fn materialization_reuses_the_generation_without_reaching_the_source() {
+    let (_project_tmp, workspace, root) = project_with_unreachable_source();
+    let installed = harn_modules::package_snapshot::PackageSnapshot::acquire(&root)
+        .unwrap()
+        .unwrap();
+    let generation = installed.generation().to_string();
+    drop(installed);
+
+    ensure_dependencies_materialized_in(workspace.env(), &root).unwrap();
+
+    let snapshot = harn_modules::package_snapshot::PackageSnapshot::acquire(&root)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        snapshot.generation(),
+        generation,
+        "reuse must keep the published generation, not republish an identical one"
+    );
+    assert!(snapshot
+        .packages_root()
+        .join("acme-lib")
+        .join("lib.harn")
+        .is_file());
+    // The cache was removed above, so the cache tree reappearing is proof that
+    // a fetch was attempted. Asserting on the absence of the fetch itself,
+    // rather than on the run's exit status, is what makes this a regression
+    // test for the fetch and not merely for the outcome.
+    assert!(
+        !workspace.cache_dir().exists(),
+        "reuse must not populate the package cache, which only a fetch does"
+    );
+}
+
+#[test]
+fn materialization_without_a_generation_reports_the_unreachable_source() {
+    let (_project_tmp, workspace, root) = project_with_unreachable_source();
+    fs::remove_dir_all(root.join(".harn")).unwrap();
+
+    let error = ensure_dependencies_materialized_in(workspace.env(), &root).unwrap_err();
+
+    let message = error.to_string();
+    assert!(
+        message.contains("acme-lib") || message.contains("failed to fetch"),
+        "a true cache miss must report the unreachable source, got: {message}"
+    );
+    assert!(
+        message.contains("isolated Git environment"),
+        "a failed remote call must name the environment it ran in, got: {message}"
+    );
+}
+
 #[test]
 fn read_only_materialization_accepts_v4_git_hashes_without_rewriting_the_lock() {
     let (_repo_tmp, repo, _branch) = create_git_package_repo();
