@@ -1602,20 +1602,22 @@ provider = "deepseek"
 # undated aliases above float with whatever DeepSeek promotes, which silently
 # moves eval baselines. On OpenRouter the 0813 snapshot is also ~2.7x cheaper
 # than the undated `deepseek/deepseek-v4-pro` route.
+#
+# No `tool_format` pin here, matching every sibling DeepSeek alias: the
+# capability matrix already resolves these routes to the native channel, and a
+# pin repeated here would override a later host-specific correction instead of
+# inheriting it.
 [aliases."deepseek-v4-pro-0813"]
 id = "deepseek/deepseek-v4-pro-0813"
 provider = "openrouter"
-tool_format = "native"
 
 [aliases."deepseek-v4-flash-0731"]
 id = "deepseek/deepseek-v4-flash-0731"
 provider = "openrouter"
-tool_format = "native"
 
 [aliases."together-deepseek-v4-flash-0731"]
 id = "deepseek-ai/DeepSeek-V4-Flash-0731"
 provider = "together"
-tool_format = "native"
 
 [aliases.cohere]
 id = "command-a-plus-05-2026"

@@ -1201,7 +1201,12 @@ fn test_default_tool_format_uses_capability_matrix() {
         default_tool_format("qwen/qwen3.6-flash", "openrouter"),
         "native"
     );
-    assert_eq!(default_tool_format("z-ai/glm-5.2", "openrouter"), "text");
+    // GLM defaults to its provider-native channel after the 2026-08-15
+    // cross-host re-probe found clean `message.tool_calls` everywhere; only
+    // DeepInfra's GLM-5.2 deployment kept a pin, and it steers to fenced JSON
+    // rather than heredoc.
+    assert_eq!(default_tool_format("z-ai/glm-5.2", "openrouter"), "native");
+    assert_eq!(default_tool_format("zai-org/GLM-5.2", "deepinfra"), "json");
     // GPT-OSS tool defaults are provider-specific: aggregate OpenRouter and
     // Fireworks use Harn's heredoc text tools, as does DeepInfra — its
     // native Harmony channel drops tool calls into the private reasoning

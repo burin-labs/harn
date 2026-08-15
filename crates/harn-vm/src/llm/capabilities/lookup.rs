@@ -952,11 +952,21 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
         assert!(together.requires_streaming);
         assert!(!together.honors_chat_template_kwargs);
 
+        // 2026-08-15 cross-host re-probe: the GLM routes returned a single
+        // clean native `message.tool_calls`, so they no longer carry the
+        // inherited text pin or a `native_unreliable` parity.
         let glm = lookup("together", "zai-org/GLM-5.1");
         assert!(glm.native_tools);
         assert!(glm.prompt_caching);
-        assert_eq!(glm.preferred_tool_format.as_deref(), Some("text"));
-        assert_eq!(glm.tool_mode_parity.as_deref(), Some("native_unreliable"));
+        assert_eq!(glm.preferred_tool_format.as_deref(), Some("native"));
+        // Parity falls back to the no-opinion default rather than asserting the
+        // channels are interchangeable: the native evidence is fresh, but there
+        // is no matching text-channel probe from the same sweep.
+        assert_ne!(
+            glm.tool_mode_parity.as_deref(),
+            Some("native_unreliable"),
+            "the retired cross-host GLM verdict must not resolve here"
+        );
         assert_eq!(
             glm.auto_reasoning_overrides
                 .get("agent")
@@ -972,7 +982,33 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
         );
         assert_eq!(
             openrouter_glm.preferred_tool_format.as_deref(),
-            Some("text")
+            Some("native")
+        );
+        assert_ne!(
+            openrouter_glm.tool_mode_parity.as_deref(),
+            Some("native_unreliable")
+        );
+
+        // The one GLM route still pinned, and only on the host that reproduced
+        // a defect: DeepInfra's GLM-5.2 duplicates native tool calls.
+        let deepinfra_glm52 = lookup("deepinfra", "zai-org/GLM-5.2");
+        assert_eq!(
+            deepinfra_glm52.preferred_tool_format.as_deref(),
+            Some("json")
+        );
+        assert_eq!(
+            deepinfra_glm52.tool_mode_parity.as_deref(),
+            Some("native_unreliable")
+        );
+        let deepinfra_glm51 = lookup("deepinfra", "zai-org/GLM-5.1");
+        assert_eq!(
+            deepinfra_glm51.preferred_tool_format.as_deref(),
+            Some("native")
+        );
+        assert_ne!(
+            deepinfra_glm51.tool_mode_parity.as_deref(),
+            Some("native_unreliable"),
+            "the GLM-5.2 duplication pin must not widen to its siblings"
         );
 
         let minimax = lookup("together", "MiniMaxAI/MiniMax-M2.7");
