@@ -77,6 +77,11 @@ pipeline default(harness: Harness) {
   )
   harness.stdio.println(fixed_sampling.temperature == nil)
   harness.stdio.println(fixed_sampling.top_p)
+  const codex_sampling = agent_sanitize_model_options(
+    harness.llm,
+    {provider: "openai", model: "gpt-5.3-codex", temperature: 0.0},
+  )
+  harness.stdio.println(codex_sampling.temperature == nil)
   const fixed_sampling_pair = agent_sanitize_model_options(
     harness.llm,
     {

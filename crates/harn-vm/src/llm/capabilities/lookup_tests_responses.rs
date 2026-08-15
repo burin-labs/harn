@@ -21,6 +21,10 @@ fn openai_codex_models_are_responses_only() {
             caps.requires_completion_tokens,
             "{model} is a reasoning model"
         );
+        assert!(
+            !caps.temperature_supported,
+            "{model} rejects caller-set temperature"
+        );
     }
     assert!(!lookup("openai", "gpt-5.5").chat_completions_unsupported);
     assert!(!lookup("openrouter", "openai/gpt-5.2-codex").chat_completions_unsupported);

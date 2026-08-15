@@ -1376,6 +1376,9 @@ thinking_block_style = "none"
 model_match = "gpt-*codex*"
 native_tools = true
 preferred_tool_format = "native"
+# Codex reasoning routes reject caller-set sampling controls. The agent loop
+# sanitizes its deterministic default before the Responses request is built.
+temperature_supported = false
 responses_api = true
 chat_completions_unsupported = true
 requires_completion_tokens = true
