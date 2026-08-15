@@ -9,6 +9,13 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.97
+
+### Fixed
+
+- External actions now keep terminal denials immutable and require an explicit
+  linked retry before the same provider effect can dispatch again.
+
 ## v0.10.96
 
 ### Fixed
