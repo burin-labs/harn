@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 import {
   pattern_learning_curator_evidence,
   pattern_learning_import_session_records,
@@ -6,8 +7,8 @@ import {
   pattern_learning_set_enabled,
   pattern_learning_status,
 } from "std/agent/pattern_knowledge"
-import { session_store_append, session_store_list } from "std/session-store"
-import { with_temp_dir } from "std/testing"
+import { session_store_append, session_store_events, session_store_list } from "std/session-store"
+import { llm_text, with_llm_script, with_temp_dir } from "std/testing"
 
 fn append_session_evidence(
   agent: HarnessAgent,
@@ -209,6 +210,53 @@ pipeline test_pattern_learning_set_enabled_returns_the_persisted_state(harness: 
         "observation capture must return the persisted observation record",
       )
       return nil
+    },
+  )
+}
+
+pipeline test_pattern_learning_stamps_terminal_provenance_from_a_live_agent_loop(
+  harness: Harness,
+  _task,
+) {
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      with_llm_script(
+        harness.llm,
+        [llm_text("<done>##DONE##</done>")],
+        { ->
+          const result = agent_loop(
+            harness,
+            "Record a producer-owned workflow-learning terminal.",
+            "Finish after the supplied fixture response.",
+            {
+              provider: "mock",
+              model: "gpt-5.4",
+              tool_format: "native",
+              loop_until_done: true,
+              max_iterations: 2,
+              root: root,
+              session_id: "pattern-learning-live-terminal",
+              workflow_learning_eligibility: "eligible",
+            },
+          )
+          assert(result.status == "done", "the fixture agent loop must finish naturally")
+          const events = session_store_events(
+            harness.agent,
+            "pattern-learning-live-terminal",
+            {root: root},
+          )
+          const terminal = events.find(
+            { event -> event?.payload?.transcript_event?.kind == "agent_run_terminal" },
+          )
+          assert(terminal != nil, "the live loop must persist a terminal event")
+          assert(
+            terminal?.headers?.["harn.workflow_learning.eligibility"] == "eligible",
+            "the producer-owned eligibility must survive through the terminal event",
+          )
+          return nil
+        },
+      )
     },
   )
 }
