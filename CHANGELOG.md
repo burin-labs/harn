@@ -9,6 +9,64 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.100
+
+### Fixed
+
+- A credential stored with `harn connect api-key` is now one the runtime can
+  actually use. Connector credentials were stored in a keychain namespace derived
+  from the checkout's directory name, while `--grant secret://` resolved from a
+  fixed namespace and outbound connector calls consulted neither — so `harn
+  connect status` could report a connector healthy while the credential the agent
+  needed was unreadable, and storing a token in one worktree hid it from a sibling
+  worktree of the same repo. Every surface now stores and resolves under one
+  namespace, and when a connector operation dispatches, the runtime resolves the
+  provider's declared `required_secrets` from that store and passes them as
+  `args.secrets`. Authenticated connector operations run from a `.harn` script
+  without the operator reading a secret value out of the store.
+
+  Credentials stored under the old per-directory namespaces are not migrated;
+  re-run `harn connect` for each connector once.
+- Baseten's GLM routes now use the provider's native tool channel instead of
+  Harn's text grammar. The text pin came from a 2026-06-23 probe that saw GLM-5.2
+  leak `<tool_call>` markup into assistant content; a re-probe with a Baseten
+  credential found 16/16 clean `message.tool_calls` across sync and streaming with
+  `tool_choice` both `auto` and `required`, so the pin is retired. No route in the
+  catalog still carries that rationale.
+
+  The same live sweep retired four Baseten rows the provider now answers with
+  HTTP 410 (`zai-org/GLM-5`, `zai-org/GLM-5.1`, `moonshotai/Kimi-K2.5`,
+  `nvidia/Nemotron-120B-A12B`, along with the `baseten-nemotron-super` alias that
+  pointed at the last of them), added the served replacements
+  (`zai-org/GLM-5.2-Fast` and the dated `DeepSeek-V4-Pro-0813` /
+  `DeepSeek-V4-Flash-0731` snapshots), and corrected context windows and sampling
+  support that had drifted from what Baseten reports: GLM-5.2 serves 1M tokens
+  rather than the catalogued 256K, DeepSeek V4 Pro 256K rather than 131K, and the
+  Kimi, DeepSeek, and GPT-OSS routes accept neither `top_p` nor `top_k`.
+
+  A retired route is no longer indistinguishable from a failed call. Tool probes
+  classify HTTP 404/410, and typed `model_not_available`-class error codes, as
+  `route_unavailable`, and `provider tool-scorecard` reports it as its own issue
+  with its own counter. Retrying never fixes a catalog row the provider deleted,
+  so the two need different verdicts.
+- A package fetch that fails now says which environment it ran in. Harn clones
+  packages with an isolated Git environment that offers no credential helper, no
+  SSH agent and no user or system Git config, so Git's own advice to "make sure
+  you have the correct access rights" pointed readers at credentials that were
+  never offered and never will be. The failure now names that constraint. Package
+  materialization also gained a regression test proving that a run served by an
+  already-materialized generation makes no fetch attempt at all, so a project can
+  keep running against a source it can no longer reach.
+- A sandboxed run now uses the same package cache as its host instead of an
+  empty one. The sandbox relocates `HOME` and `XDG_CACHE_HOME` into the workspace
+  so each toolchain writes its caches there, and Harn's own package cache was
+  following them. Every such run therefore resolved a cache that was empty by
+  construction and re-fetched packages the host had already materialized, into a
+  network the same sandbox denies. The only error that surfaced was the fetch's,
+  naming DNS or repository access rather than the relocation that caused it. The
+  resolved cache root is now handed to the child and granted, the way `CARGO_HOME`
+  and the Go caches already were.
+
 ## v0.10.99
 
 ### Added
