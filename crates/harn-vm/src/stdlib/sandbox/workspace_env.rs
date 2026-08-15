@@ -85,6 +85,25 @@ fn workspace_toolchain_env(policy: &CapabilityPolicy) -> Vec<(String, String)> {
     // there also preserves private-registry configuration without copying
     // credentials into the workspace.
     if let Some(home) = crate::user_dirs::home_dir().filter(|home| home.is_absolute()) {
+        // Harn's own package cache has to survive the same relocation, and it
+        // is the one cache above that cannot simply be rebuilt in the
+        // workspace. Every entry in it is content-addressed and was fetched
+        // from a source the sandboxed child usually cannot reach: no network,
+        // and package fetches deliberately carry no credentials. Letting
+        // `HARN_CACHE_DIR` fall through to the relocated `HOME` pointed the
+        // child at an empty cache, so it re-fetched packages the host had
+        // already materialized and failed closed on the denied network. The
+        // only error that surfaced was the fetch's, which named DNS or
+        // repository access and never the relocation that caused it.
+        env.push((
+            "HARN_CACHE_DIR".to_string(),
+            crate::user_dirs::package_cache_dir_from(
+                &home,
+                std::env::var_os("XDG_CACHE_HOME").as_deref(),
+            )
+            .display()
+            .to_string(),
+        ));
         env.push((
             "CARGO_HOME".to_string(),
             home.join(".cargo").display().to_string(),
@@ -190,6 +209,22 @@ mod tests {
         );
         assert!(PathBuf::from(env.get("CARGO_HOME").unwrap()).is_absolute());
         assert!(PathBuf::from(env.get("RUSTUP_HOME").unwrap()).is_absolute());
+        // Harn's package cache must NOT follow the relocated HOME the way the
+        // caches above do. Those can be rebuilt from a registry the child can
+        // still reach; a Harn package entry was fetched from a source the
+        // child usually cannot reach at all, so a workspace-local Harn cache
+        // is an empty one the child then tries to fill over a denied network.
+        let harn_cache = PathBuf::from(env.get("HARN_CACHE_DIR").unwrap());
+        assert!(harn_cache.is_absolute());
+        assert!(
+            !harn_cache.starts_with(&cache),
+            "HARN_CACHE_DIR followed the relocated HOME into the workspace: {harn_cache:?}"
+        );
+        assert_eq!(
+            Some(harn_cache),
+            crate::user_dirs::package_cache_dir(),
+            "the child must be handed the same cache root the host resolves"
+        );
         for key in TMPDIR_ENV_KEYS {
             assert_eq!(
                 env.get(key).map(String::as_str),

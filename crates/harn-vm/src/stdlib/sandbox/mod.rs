@@ -2143,6 +2143,15 @@ pub(crate) fn developer_toolchain_cache_write_roots_for_home(home: &Path) -> Vec
         "Library/Caches/go-build", // Go build cache (GOCACHE, macOS default)
         ".cache/go-build",         // Go build cache (GOCACHE, Linux default)
         "go/pkg/mod",              // Go module cache (GOMODCACHE default)
+        // Harn's own package cache, which needs write and not merely read: an
+        // entry is claimed through a lock file under `locks/` before it is
+        // read, so a read-only grant denies the claim and the cached entry
+        // reads as unusable. Both OS defaults are listed for the same reason
+        // the Go caches above are; the OS-foreign one is simply absent.
+        // `HARN_CACHE_DIR` overrides the location, and the workspace env hands
+        // the child the resolved root so the two always agree.
+        "Library/Caches/harn", // Harn package cache (macOS default)
+        ".cache/harn",         // Harn package cache (Linux default)
         // Go env config (GOENV). `go` rewrites `go/env` on first use (e.g. to
         // record GOTOOLCHAIN); when its parent is not writable the toolchain
         // fails with `writing go env config: ... operation not permitted`. The

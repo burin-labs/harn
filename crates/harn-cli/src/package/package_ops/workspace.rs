@@ -71,13 +71,10 @@ impl PackageWorkspace {
         let home = harn_vm::user_dirs::home_dir().ok_or_else(|| {
             "neither HOME nor USERPROFILE is set and HARN_CACHE_DIR was not provided".to_string()
         })?;
-        if cfg!(target_os = "macos") {
-            return Ok(home.join("Library/Caches/harn"));
-        }
-        if let Some(xdg) = std::env::var_os("XDG_CACHE_HOME") {
-            return Ok(PathBuf::from(xdg).join("harn"));
-        }
-        Ok(home.join(".cache/harn"))
+        Ok(harn_vm::user_dirs::package_cache_dir_from(
+            &home,
+            std::env::var_os("XDG_CACHE_HOME").as_deref(),
+        ))
     }
 
     pub(crate) fn resolve_registry_source(
