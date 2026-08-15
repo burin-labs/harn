@@ -11,9 +11,9 @@ use std::sync::Arc;
 
 use harn_session_store::{
     AppendEvent, CreateSession, EventId, EventIdentity, EventIdentityField, ImportSession,
-    ReadRange, SearchFilter, SearchMode, SearchQuery, SessionEventKind, SessionImporter,
-    SessionStore, SessionType, SqliteSessionStore, StoreError, StoreHooks, StoredEvent,
-    VerifyReport, MAX_READ_BATCH,
+    ListFilter, ListOrder, ListSortKey, ReadRange, SearchFilter, SearchMode, SearchQuery,
+    SessionEventKind, SessionImporter, SessionStatus, SessionStore, SessionType,
+    SqliteSessionStore, StoreError, StoreHooks, StoredEvent, VerifyReport, MAX_READ_BATCH,
 };
 use serde::Deserialize;
 use serde_json::{json, Value as JsonValue};
@@ -69,6 +69,7 @@ pub(crate) fn register_session_store_builtins(vm: &mut Vm) {
 pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &SESSION_STORE_APPEND_IMPL_DEF,
     &SESSION_STORE_EVENTS_IMPL_DEF,
+    &SESSION_STORE_LIST_IMPL_DEF,
     &SESSION_STORE_VERIFY_IMPL_DEF,
     &SESSION_STORE_SEARCH_IMPL_DEF,
     &SESSION_STORE_PATH_IMPL_DEF,
@@ -170,6 +171,88 @@ async fn session_store_events_impl(
         .map(stored_event_value)
         .collect::<Result<Vec<_>, _>>()?;
     Ok(VmValue::List(Arc::new(values)))
+}
+
+#[harn_builtin(
+    exposure = "harness.agent.session_store_list",
+    effects = ["fs.read@dynamic", "state.read@dynamic"],
+    sig = "__session_store_list(options?: dict) -> list",
+    kind = "async",
+    category = "session_store"
+)]
+async fn session_store_list_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    let options = optional_dict_arg(
+        &args,
+        0,
+        "__session_store_list",
+        "options",
+        ErrorKind::Runtime,
+    )?;
+    let status = match option_string(options, "status")?.as_deref() {
+        None => None,
+        Some("open") => Some(SessionStatus::Open),
+        Some("closed") => Some(SessionStatus::Closed),
+        Some("soft_deleted") => Some(SessionStatus::SoftDeleted),
+        Some("hard_deleted") => Some(SessionStatus::HardDeleted),
+        Some(other) => {
+            return Err(VmError::Runtime(format!(
+                "session_store: options.status must be open, closed, soft_deleted, or hard_deleted; got '{other}'"
+            )));
+        }
+    };
+    let session_type = match option_string(options, "session_type")?.as_deref() {
+        None => None,
+        Some("user") => Some(SessionType::User),
+        Some("subagent") => Some(SessionType::Subagent),
+        Some("scheduled") => Some(SessionType::Scheduled),
+        Some(other) => {
+            return Err(VmError::Runtime(format!(
+                "session_store: options.session_type must be user, subagent, or scheduled; got '{other}'"
+            )));
+        }
+    };
+    let sort_by = match option_string(options, "sort_by")?.as_deref() {
+        None | Some("created_at") => ListSortKey::CreatedAt,
+        Some("updated_at") => ListSortKey::UpdatedAt,
+        Some(other) => {
+            return Err(VmError::Runtime(format!(
+                "session_store: options.sort_by must be created_at or updated_at; got '{other}'"
+            )));
+        }
+    };
+    let order = match option_string(options, "order")?.as_deref() {
+        None | Some("ascending") => ListOrder::Ascending,
+        Some("descending") => ListOrder::Descending,
+        Some(other) => {
+            return Err(VmError::Runtime(format!(
+                "session_store: options.order must be ascending or descending; got '{other}'"
+            )));
+        }
+    };
+    let store = open_store(&store_state_dir(options)?)?;
+    let sessions = store
+        .list(ListFilter {
+            tenant_id: option_string(options, "tenant_id")?,
+            project_scope: option_string(options, "project_scope")?,
+            status,
+            session_type,
+            limit: option_positive_usize(options, "limit")?,
+            cursor: option_string(options, "cursor")?,
+            sort_by,
+            order,
+            ..ListFilter::default()
+        })
+        .await
+        .map_err(store_error)?;
+    let value = serde_json::to_value(sessions).map_err(|error| {
+        VmError::Runtime(format!(
+            "session_store: failed to encode session list: {error}"
+        ))
+    })?;
+    Ok(json_to_vm_value(&value))
 }
 
 #[harn_builtin(

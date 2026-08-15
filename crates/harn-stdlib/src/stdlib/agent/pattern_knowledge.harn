@@ -13,6 +13,12 @@ import {
 import { write_json } from "std/fs"
 import { memory_forget, memory_store, memory_summarize } from "std/memory"
 import { runtime_state_paths_under } from "std/runtime"
+import {
+  SessionStoreListOptions,
+  SessionStoreOptions,
+  session_store_events,
+  session_store_list,
+} from "std/session-store"
 
 const PATTERN_SCHEMA = "harn.pattern_learning.v1"
 
@@ -25,6 +31,8 @@ const DEFAULT_SUPPORT_THRESHOLD: int = 5
 const DEFAULT_WINDOW_DAYS: int = 14
 
 const DEFAULT_SUPPRESSION_DAYS: int = 14
+
+const DEFAULT_SESSION_IMPORT_LIMIT: int = 100
 
 const STOP_WORDS = [
   "about",
@@ -417,6 +425,157 @@ fn pl_store_observation(harness: Harness, record: dict, options = nil) -> dict {
     record,
     options + {id: record.id},
   )?.value
+}
+
+fn pl_session_store_options(options = nil) -> SessionStoreOptions {
+  const root = pl_text(options?.session_store_root)
+  return root == "" ? {} : {root: root}
+}
+
+fn pl_session_store_list_options(limit: int, options = nil) -> SessionStoreListOptions {
+  const root = pl_text(options?.session_store_root)
+  return root == "" ? {limit: limit, sort_by: "updated_at", order: "descending"} : {
+    root: root,
+    limit: limit,
+    sort_by: "updated_at",
+    order: "descending",
+  }
+}
+
+fn pl_session_event_kind(event: dict) -> string {
+  return pl_text(event?.kind?.type ?? event?.kind?.kind)
+}
+
+fn pl_session_transcript_event(event: dict) -> dict {
+  return event?.payload?.transcript_event ?? {}
+}
+
+fn pl_session_prompt(events: list) -> string {
+  for event in events ?? [] {
+    const transcript_event = pl_session_transcript_event(event)
+    if pl_text(transcript_event?.kind) != "message"
+      || pl_text(transcript_event?.role) != "user"
+      || pl_text(transcript_event?.visibility) != "public" {
+      continue
+    }
+    const prompt = pl_text(transcript_event?.text)
+    if prompt != "" {
+      return prompt
+    }
+  }
+  return ""
+}
+
+fn pl_session_tool_sequence(events: list) -> list {
+  let out = []
+  for event in events ?? [] {
+    const transcript_event = pl_session_transcript_event(event)
+    if pl_session_event_kind(event) != "tool_call"
+      && pl_text(transcript_event?.kind) != "tool_call" {
+      continue
+    }
+    const name = pl_text(transcript_event?.metadata?.tool_name)
+    if name != "" {
+      out = out + [name]
+    }
+  }
+  return pl_sanitize_tool_sequence(out)
+}
+
+fn pl_session_has_natural_terminal(events: list) -> bool {
+  for event in events ?? [] {
+    const transcript_event = pl_session_transcript_event(event)
+    if pl_session_event_kind(event) != "agent_run_terminal"
+      && pl_text(transcript_event?.kind)
+      != "agent_run_terminal" {
+      continue
+    }
+    if pl_text(transcript_event?.metadata?.terminal?.kind) == "natural" {
+      return true
+    }
+  }
+  return false
+}
+
+fn pl_observed_session_ids(harness: Harness, options = nil) -> list {
+  let ids = []
+  for observation in pl_record_values(harness.fs, harness.memory, "observation", options) {
+    const session_id = pl_text(observation?.session_id)
+    if session_id != "" && !ids.contains(session_id) {
+      ids = ids + [session_id]
+    }
+  }
+  return ids
+}
+
+/**
+ * Backfill natural-terminal Harn sessions into pattern memory before an
+ * agentic curation pass. The canonical session store remains the evidence
+ * owner; this projection only copies a bounded prompt and tool sequence once.
+ *
+ * @effects: [store.read, store.write, fs.read, fs.write]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn pattern_learning_import_session_records(harness: Harness, options = nil) -> dict {
+  pattern_learning_ensure_migrated(harness, options)
+  const session_options = pl_session_store_options(options)
+  const limit = min(
+    OBSERVATION_CAP,
+    max(1, options?.session_import_limit ?? DEFAULT_SESSION_IMPORT_LIMIT),
+  )
+  const sessions = session_store_list(harness.agent, pl_session_store_list_options(limit, options))
+  let observed_session_ids = pl_observed_session_ids(harness, options)
+  let imported = 0
+  let skipped_existing = 0
+  let skipped_ineligible = 0
+  for session in sessions {
+    const session_id = pl_text(session?.id)
+    if session_id == "" {
+      skipped_ineligible = skipped_ineligible + 1
+      continue
+    }
+    if observed_session_ids.contains(session_id) {
+      skipped_existing = skipped_existing + 1
+      continue
+    }
+    const events = session_store_events(harness.agent, session_id, session_options)
+    if !pl_session_has_natural_terminal(events) {
+      skipped_ineligible = skipped_ineligible + 1
+      continue
+    }
+    const prompt = pl_session_prompt(events)
+    if prompt == "" {
+      skipped_ineligible = skipped_ineligible + 1
+      continue
+    }
+    pl_store_observation(
+      harness,
+      pl_observation_from_input(
+        harness.clock,
+        harness.random,
+        {
+          session_id: session_id,
+          prompt: prompt,
+          tool_sequence: pl_session_tool_sequence(events),
+          observed_at: pl_text(session?.updated_at) == "" ? pl_now(harness.clock, options) : session
+            .updated_at,
+        },
+        options,
+      ),
+      options,
+    )
+    observed_session_ids = observed_session_ids + [session_id]
+    imported = imported + 1
+  }
+  pl_cap_observations(harness, options)
+  return {
+    scanned_count: len(sessions),
+    imported_count: imported,
+    skipped_existing_count: skipped_existing,
+    skipped_ineligible_count: skipped_ineligible,
+    observation_count: len(pattern_learning_observations(harness, options)),
+  }
 }
 
 /**
