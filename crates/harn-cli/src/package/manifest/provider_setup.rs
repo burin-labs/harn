@@ -69,6 +69,56 @@ pub struct ConnectorOperationManifest {
     pub reconciliation: ConnectorReconciliation,
     #[serde(default)]
     pub redaction: Vec<ConnectorRedactionTarget>,
+    /// The arguments the operation accepts, for hosts that project it into an
+    /// agent tool.
+    ///
+    /// Empty is a legitimate state, not an omission. A connector repository
+    /// pins a Harn version and its manifest is `deny_unknown_fields`, so no
+    /// connector can declare this key until a release carrying it reaches
+    /// that repository. Hosts must therefore keep projecting an operation that
+    /// declares nothing here, falling back to free-form arguments, rather than
+    /// treating an empty list as "takes no arguments".
+    #[serde(default)]
+    pub parameters: Vec<ConnectorParameterManifest>,
+}
+
+/// One argument a connector operation accepts.
+///
+/// The service contract deliberately stops short of provider request and
+/// response shapes, but a host projecting an operation into an agent tool has
+/// to describe its arguments or the model is left guessing their names. This
+/// is that minimum and no more.
+///
+/// It is a closed vocabulary rather than embedded JSON Schema on purpose:
+/// every other field in this contract is a closed enum validated at the
+/// manifest boundary, and an arbitrary schema blob would be unauthorable in
+/// TOML, uncomparable, and unable to fail shut. Hosts widen this into whatever
+/// schema dialect their tool surface speaks.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ConnectorParameterManifest {
+    pub name: String,
+    /// Plain-language description of the argument, shown to the model.
+    pub description: String,
+    #[serde(rename = "type")]
+    pub value_type: ConnectorParameterType,
+    #[serde(default)]
+    pub required: bool,
+    /// The closed set of accepted values, when the operation accepts only
+    /// known ones. Empty means unconstrained.
+    #[serde(default)]
+    pub allowed_values: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConnectorParameterType {
+    String,
+    Integer,
+    Number,
+    Boolean,
+    Object,
+    Array,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -217,6 +267,47 @@ pub fn connector_service_issues(service: &ConnectorServiceManifest) -> Vec<Strin
             issues.push(format!(
                 "read operation '{label}' cannot require reconciliation"
             ));
+        }
+
+        let mut parameter_names = std::collections::BTreeSet::new();
+        for parameter in &operation.parameters {
+            let parameter_label = if parameter.name.trim().is_empty() {
+                "<missing>"
+            } else {
+                parameter.name.as_str()
+            };
+            if !portable_operation_id(&parameter.name) {
+                issues.push(format!(
+                    "service operation '{label}' parameter '{parameter_label}' name must use ASCII letters, digits, '.', '_', or '-'"
+                ));
+            } else if !parameter_names.insert(parameter.name.as_str()) {
+                issues.push(format!(
+                    "service operation '{label}' repeats parameter '{parameter_label}'"
+                ));
+            }
+            // The description is the only thing that tells a model what to put
+            // in the argument, so an undescribed parameter is worse than an
+            // undeclared one: it advertises a name and explains nothing.
+            if parameter.description.trim().is_empty() {
+                issues.push(format!(
+                    "service operation '{label}' parameter '{parameter_label}' description is required"
+                ));
+            }
+            if !parameter.allowed_values.is_empty()
+                && parameter.value_type != ConnectorParameterType::String
+            {
+                issues.push(format!(
+                    "service operation '{label}' parameter '{parameter_label}' declares allowed values, which only apply to a string parameter"
+                ));
+            }
+            let mut allowed = std::collections::BTreeSet::new();
+            for value in &parameter.allowed_values {
+                if !allowed.insert(value.as_str()) {
+                    issues.push(format!(
+                        "service operation '{label}' parameter '{parameter_label}' repeats allowed value '{value}'"
+                    ));
+                }
+            }
         }
 
         let profile = &operation.protected_profile;
@@ -448,6 +539,7 @@ field_classes = ["travel_documents"]
                 external_spend: ConnectorExternalSpend::Commit,
                 reconciliation: ConnectorReconciliation::Required,
                 redaction: vec![ConnectorRedactionTarget::ErrorBody],
+                parameters: Vec::new(),
             }],
         };
 
@@ -455,6 +547,153 @@ field_classes = ["travel_documents"]
         assert!(issues.contains("does not require a fictional fixture"));
         assert!(issues.contains("RequestBody"));
         assert!(issues.contains("ResponseBody"));
+    }
+
+    #[test]
+    fn operation_parameters_are_typed_and_optional() {
+        let service: ConnectorServiceManifest = toml::from_str(
+            r#"
+name = "Duffel"
+description = "Searches flights."
+
+[[operations]]
+id = "offers.list"
+capability = "flights.research"
+purpose = "List offers for a completed offer request."
+effect = "read"
+environments = ["test"]
+
+[[operations.parameters]]
+name = "offer_request_id"
+description = "The offer request to list offers for."
+type = "string"
+required = true
+
+[[operations.parameters]]
+name = "limit"
+description = "How many offers to return."
+type = "integer"
+
+[[operations.parameters]]
+name = "sort"
+description = "Ordering applied to the returned offers."
+type = "string"
+allowed_values = ["total_amount", "total_duration"]
+
+[[operations]]
+id = "places.list"
+capability = "flights.research"
+purpose = "Search airports and cities."
+effect = "read"
+environments = ["test"]
+"#,
+        )
+        .expect("typed parameters");
+
+        assert!(connector_service_issues(&service).is_empty());
+
+        let listed = &service.operations[0].parameters;
+        assert_eq!(listed.len(), 3);
+        assert_eq!(listed[0].name, "offer_request_id");
+        assert_eq!(listed[0].value_type, ConnectorParameterType::String);
+        assert!(listed[0].required);
+        // Absent `required` means optional, so a host never has to guess.
+        assert!(!listed[1].required);
+        assert_eq!(listed[1].value_type, ConnectorParameterType::Integer);
+        assert_eq!(listed[2].allowed_values, ["total_amount", "total_duration"]);
+
+        // An operation that declares no parameters stays valid. Connector
+        // repositories cannot add the key until a release carrying it reaches
+        // them, so this is the state every existing manifest is in.
+        assert!(service.operations[1].parameters.is_empty());
+    }
+
+    #[test]
+    fn operation_parameters_must_be_named_described_and_distinct() {
+        let service: ConnectorServiceManifest = toml::from_str(
+            r#"
+name = "Duffel"
+description = "Searches flights."
+
+[[operations]]
+id = "offers.list"
+capability = "flights.research"
+purpose = "List offers."
+effect = "read"
+environments = ["test"]
+
+[[operations.parameters]]
+name = "limit"
+description = "How many offers to return."
+type = "integer"
+
+[[operations.parameters]]
+name = "limit"
+description = "A repeat of the same argument."
+type = "integer"
+
+[[operations.parameters]]
+name = "sort by"
+description = "Name is not portable."
+type = "string"
+
+[[operations.parameters]]
+name = "cursor"
+description = "   "
+type = "string"
+
+[[operations.parameters]]
+name = "page"
+description = "Allowed values only apply to a string."
+type = "integer"
+allowed_values = ["1", "2"]
+"#,
+        )
+        .expect("parses; the issues are semantic");
+
+        let issues = connector_service_issues(&service).join("\n");
+        assert!(issues.contains("repeats parameter 'limit'"), "{issues}");
+        assert!(
+            issues.contains("parameter 'sort by' name must use"),
+            "{issues}"
+        );
+        assert!(
+            issues.contains("parameter 'cursor' description is required"),
+            "{issues}"
+        );
+        assert!(
+            issues.contains("parameter 'page' declares allowed values"),
+            "{issues}"
+        );
+    }
+
+    /// The parameter block is `deny_unknown_fields` like the rest of the
+    /// contract, so a misspelled key fails closed instead of silently
+    /// projecting an argument nobody described.
+    #[test]
+    fn operation_parameters_reject_unknown_fields() {
+        let error = toml::from_str::<ConnectorServiceManifest>(
+            r#"
+name = "Duffel"
+description = "Searches flights."
+
+[[operations]]
+id = "offers.list"
+capability = "flights.research"
+purpose = "List offers."
+effect = "read"
+environments = ["test"]
+
+[[operations.parameters]]
+name = "limit"
+description = "How many offers to return."
+type = "integer"
+defualt = 10
+"#,
+        )
+        .expect_err("unknown parameter keys must fail closed");
+
+        assert!(error.to_string().contains("defualt"), "{error}");
     }
 
     #[test]

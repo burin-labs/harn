@@ -15,9 +15,10 @@ pub use provider_setup::{
     ConnectorConfigurationEnvironmentManifest, ConnectorCredentialEnvironmentManifest,
     ConnectorEnvironment, ConnectorEvidenceRequirement, ConnectorExternalSpend,
     ConnectorHealthCheckManifest, ConnectorOperationEffect, ConnectorOperationManifest,
-    ConnectorProtectedProfileManifest, ConnectorReconciliation, ConnectorRecoveryCopy,
-    ConnectorRedactionTarget, ConnectorServiceManifest, ConnectorSetupConfigurationField,
-    ConnectorTestProfile, ProtectedProfileFieldClass, ProviderManifestEntry, ProviderSetupManifest,
+    ConnectorParameterManifest, ConnectorParameterType, ConnectorProtectedProfileManifest,
+    ConnectorReconciliation, ConnectorRecoveryCopy, ConnectorRedactionTarget,
+    ConnectorServiceManifest, ConnectorSetupConfigurationField, ConnectorTestProfile,
+    ProtectedProfileFieldClass, ProviderManifestEntry, ProviderSetupManifest,
     ResolvedProviderConnectorConfig,
 };
 
