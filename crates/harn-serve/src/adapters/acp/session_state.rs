@@ -151,6 +151,19 @@ impl AcpServer {
         self.insert_session(session_id.to_string(), cwd, SessionInfo::default());
     }
 
+    /// Project root to consult for a session this server never saw, resolved
+    /// exactly the way `session/list` resolves the roots it lists persisted
+    /// sessions from. Sharing the resolution is what keeps listing and loading
+    /// pointed at one store.
+    pub(super) fn restore_project_root(&self, params: &serde_json::Value) -> PathBuf {
+        let cwd = params
+            .get("cwd")
+            .and_then(|value| value.as_str())
+            .map(PathBuf::from)
+            .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+        session_project_root_for_cwd(&cwd)
+    }
+
     pub(super) async fn handle_session_load(
         &mut self,
         id: &serde_json::Value,
@@ -172,12 +185,10 @@ impl AcpServer {
             return;
         }
 
-        // Replay events are the durable source of truth for the in-process
-        // path, so load them before deciding whether the session is
-        // restorable. This mirrors the WebSocket hub's persisted fallback in
-        // `replay_persisted_acp_events`, but keeps the restored session live
-        // and promptable rather than replay-only.
-        let replay_events =
+        // The observability event log carries this process's live stream, so
+        // prefer it while it has the session: it is the freshest view and keeps
+        // an in-flight session promptable rather than replay-only.
+        let mut replay_events =
             match harn_vm::orchestration::load_agent_session_replay_events(&session_id).await {
                 Ok(events) => events,
                 Err(error) => {
@@ -192,13 +203,41 @@ impl AcpServer {
 
         if self.sessions.contains_key(&session_id) {
             harn_vm::agent_sessions::open_or_create(Some(session_id.clone()));
-        } else if replay_events.is_empty() {
-            // No live session and nothing persisted under this id: fail loudly
-            // so the client can distinguish a typo/stale id from a real load.
-            self.send_error(id, -32602, &format!("unknown session: {session_id}"));
-            return;
-        } else {
+        } else if !replay_events.is_empty() {
             self.register_restored_session(&session_id, params);
+        } else {
+            // Nothing live and nothing observed. Existence is not the event
+            // log's to decide — that sink is best-effort and is registered only
+            // while a prompt runs — so ask the canonical store, which is the
+            // same oracle `session/list` answers from. Anything it lists must
+            // load, or the client is handed ids it is then told are unknown
+            // (burin#6267).
+            let project_root = self.restore_project_root(params);
+            match harn_vm::agent_session_restore::load_canonical_session_replay_events(
+                &project_root,
+                &session_id,
+            )
+            .await
+            {
+                Ok(Some(persisted)) => {
+                    replay_events = persisted;
+                    self.register_restored_session(&session_id, params);
+                }
+                Ok(None) => {
+                    // Neither store knows this id: a typo or a stale id, and the
+                    // one case where failing loudly is right.
+                    self.send_error(id, -32602, &format!("unknown session: {session_id}"));
+                    return;
+                }
+                Err(error) => {
+                    self.send_error(
+                        id,
+                        -32000,
+                        &format!("Failed to restore session {session_id}: {error}"),
+                    );
+                    return;
+                }
+            }
         }
 
         let replay_sink = AcpAgentEventSink::for_replay(self.output.clone());
