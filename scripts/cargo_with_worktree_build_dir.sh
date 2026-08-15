@@ -94,6 +94,17 @@ resolve_lease_runner() {
     return
   fi
 
+  # A caller that has already warmed an explicit binary should not need the
+  # target-local copy to exist as well. This is especially important for
+  # focused checks launched from a separate build directory: falling through
+  # would silently start a second Rust-heavy compile instead of reusing the
+  # supplied lease supervisor.
+  if [[ -n "${HARN_BIN:-}" && -x "$HARN_BIN" ]] \
+    && "$HARN_BIN" host lease run cargo --help >/dev/null 2>&1; then
+    printf '%s\n' "$HARN_BIN"
+    return
+  fi
+
   case "${OS:-$(uname -s)}" in
     Windows_NT | MINGW* | MSYS* | CYGWIN*)
       suffix=".exe"

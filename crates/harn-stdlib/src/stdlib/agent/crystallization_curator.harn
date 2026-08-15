@@ -6,7 +6,8 @@
 // validates the terminal proposal contract and evidence membership.
 import { agent_loop } from "std/agent/loop"
 import {
-  pattern_learning_observations,
+  pattern_learning_curator_evidence,
+  pattern_learning_import_session_records,
   pattern_learning_pending,
   pattern_learning_record_curated_batch,
 } from "std/agent/pattern_knowledge"
@@ -50,7 +51,7 @@ fn cc_recent_evidence(harness: Harness, options = nil) -> list {
   const all = if type_of(supplied) == "list" {
     supplied
   } else {
-    pattern_learning_observations(harness, options)
+    pattern_learning_curator_evidence(harness, options)
   }
   const limit = min(max(1, options?.evidence_limit ?? 12), 40)
   const start = max(0, len(all) - limit)
@@ -571,9 +572,15 @@ fn cc_tools(harness: Harness, evidence: list, options = nil) {
  * @api_stability: experimental
  */
 pub fn crystallization_curate(harness: Harness, options = nil) -> dict {
+  const session_import = pattern_learning_import_session_records(harness, options)
   const evidence = cc_recent_evidence(harness, options)
   if len(evidence) == 0 {
-    return {schema: CURATOR_SCHEMA, status: "no_evidence", proposals: []}
+    return {
+      schema: CURATOR_SCHEMA,
+      status: "no_evidence",
+      proposals: [],
+      session_import: session_import,
+    }
   }
   const pending_before = pattern_learning_pending(harness, options)
   const prompts = cc_prompt(evidence, pending_before)
@@ -596,6 +603,8 @@ pub fn crystallization_curate(harness: Harness, options = nil) -> dict {
     max_nudges: 2,
     session_id: route?.session_id ?? ("crystallization-curator-" + harness.random.uuid_v7()),
     budget: route?.budget ?? {max_cost_usd: 0.75, max_total_tokens: 60000},
+    // A curator reviews evidence; it must never recursively become evidence.
+    workflow_learning_eligibility: "excluded",
   }
   if route?.provider == nil
     && route?.model == nil
@@ -613,6 +622,7 @@ pub fn crystallization_curate(harness: Harness, options = nil) -> dict {
     evidence_count: len(evidence),
     proposal_count: len(proposals),
     proposals: proposals,
+    session_import: session_import,
     agent_result: result,
   }
 }

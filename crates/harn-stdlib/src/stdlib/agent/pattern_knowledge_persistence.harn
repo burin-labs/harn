@@ -1,0 +1,318 @@
+import {
+  PATTERN_NAMESPACE,
+  PATTERN_SCHEMA,
+  pl_short_hash,
+  pl_slugify,
+  pl_text,
+} from "std/agent/pattern_knowledge_values"
+// Shared persistence boundary for cross-session pattern learning. This module
+// owns state paths, memory projections, and observation normalization; callers
+// retain policy such as curation thresholds and review decisions.
+import { memory_forget, memory_store, memory_summarize } from "std/memory"
+import { runtime_state_paths_under } from "std/runtime"
+
+pub fn pl_project_root(fs: HarnessFs, options = nil) -> string {
+  return pl_text(options?.project_root ?? fs.project_root() ?? fs.cwd() ?? ".")
+}
+
+pub fn pl_state_root(fs: HarnessFs, options = nil) -> string {
+  const explicit_project_root = pl_text(options?.project_root)
+  if explicit_project_root != "" {
+    return runtime_state_paths_under(explicit_project_root).state_root
+  }
+  return fs.runtime_paths().state_root
+}
+
+pub fn pl_memory_root(fs: HarnessFs, options = nil) -> string {
+  const explicit = pl_text(options?.memory_root ?? options?.root)
+  if explicit != "" {
+    return explicit
+  }
+  return path_join(pl_state_root(fs, options), "memory")
+}
+
+pub fn pl_namespace(options = nil) -> string {
+  const explicit = pl_text(options?.namespace)
+  return explicit == "" ? PATTERN_NAMESPACE : explicit
+}
+
+pub fn pl_memory_options(fs: HarnessFs, options = nil) -> dict {
+  return (options ?? {}) + {root: pl_memory_root(fs, options)}
+}
+
+pub fn pl_now(clock: HarnessClock, options = nil) -> string {
+  const explicit = pl_text(options?.now)
+  return explicit == "" ? clock.date_iso() : explicit
+}
+
+pub fn pl_observation_file(fs: HarnessFs, options = nil) -> string {
+  return path_join(
+    pl_state_root(fs, options),
+    "session-store",
+    "burin.agent_context.pattern_learning.observations.jsonl",
+  )
+}
+
+pub fn pl_pending_file(fs: HarnessFs, options = nil) -> string {
+  return path_join(
+    pl_state_root(fs, options),
+    "session-store",
+    "burin.agent_context.pattern_learning.pending.jsonl",
+  )
+}
+
+pub fn pl_state_file(fs: HarnessFs, options = nil) -> string {
+  return path_join(
+    pl_state_root(fs, options),
+    "session-store",
+    "burin.agent_context.pattern_learning.state.jsonl",
+  )
+}
+
+pub fn pl_migration_marker(fs: HarnessFs, options = nil) -> string {
+  return path_join(
+    pl_memory_root(fs, options),
+    pl_namespace(options),
+    ".burin-session-store-migrated-v1.json",
+  )
+}
+
+pub fn pl_read_jsonl_payloads(fs: HarnessFs, path: string) -> list {
+  if !path || !fs.exists(path) {
+    return []
+  }
+  let out = []
+  for raw_line in (fs.read_text(path) ?? "").split("\n") {
+    const line = pl_text(raw_line)
+    if line == "" {
+      continue
+    }
+    const parsed = try {
+      json_parse(line)
+    }
+    if is_ok(parsed) {
+      out = out + [unwrap(parsed)?.payload ?? {}]
+    }
+  }
+  return out
+}
+
+pub fn pl_project_collection(mutations: list) -> list {
+  let records = {}
+  let order = []
+  for mutation in mutations ?? [] {
+    const op = pl_text(mutation?.operation)
+    if op == "upsert" {
+      const record = mutation?.record ?? {}
+      const id = pl_text(record?.id)
+      if id == "" {
+        continue
+      }
+      if records[id] == nil {
+        order = order + [id]
+      }
+      records = records + {[id]: record}
+    } else if op == "delete" {
+      const id = pl_text(mutation?.id)
+      records = records + {[id]: nil}
+      order = order.filter({ existing -> existing != id })
+    } else if op == "replace" {
+      records = {}
+      order = []
+      for record in mutation?.records ?? [] {
+        const id = pl_text(record?.id)
+        if id == "" {
+          continue
+        }
+        if records[id] == nil {
+          order = order + [id]
+        }
+        records = records + {[id]: record}
+      }
+    } else if op == "clear" {
+      records = {}
+      order = []
+    }
+  }
+  return order.map({ id -> records[id] }).filter({ record -> record != nil }).to_list()
+}
+
+pub fn pl_project_value(mutations: list, fallback: dict) -> dict {
+  let value = fallback
+  for mutation in mutations ?? [] {
+    const op = pl_text(mutation?.operation)
+    if op == "replace" && mutation?.value != nil {
+      value = mutation.value
+    } else if op == "clear" {
+      value = fallback
+    }
+  }
+  return value
+}
+
+pub fn pl_tags(kind: string, extra = nil) -> list {
+  let tags = ["pattern_learning", "pattern_learning:" + kind, "schema:" + PATTERN_SCHEMA]
+  for raw in extra ?? [] {
+    const tag = pl_text(raw)
+    if tag != "" && !tags.contains(tag) {
+      tags = tags + [tag]
+    }
+  }
+  return tags
+}
+
+pub fn pl_store_record(
+  harness: Harness,
+  kind: string,
+  key: string,
+  value: dict,
+  options = nil,
+) -> dict {
+  const opts = pl_memory_options(harness.fs, options)
+  const now = pl_now(harness.clock, options)
+  const id = pl_text(options?.id)
+  return memory_store(
+    harness.memory,
+    pl_namespace(options),
+    key,
+    value + {schema: PATTERN_SCHEMA, record_kind: kind},
+    pl_tags(kind, options?.tags),
+    opts
+      + {
+      id: id == "" ? key.replace(":", "_") : id,
+      now: now,
+      provenance: options?.provenance ?? {source: "harn.pattern_learning"},
+    },
+  )
+}
+
+pub fn pl_memory_records(
+  fs: HarnessFs,
+  memory: HarnessMemory,
+  kind: string = "",
+  options = nil,
+) -> list {
+  const window = if kind == "" {
+    {limit: options?.record_limit ?? 2000}
+  } else {
+    {limit: options?.record_limit ?? 2000, tag: "pattern_learning:" + kind}
+  }
+  return memory_summarize(memory, pl_namespace(options), window, pl_memory_options(fs, options))
+    ?.records
+    ?? []
+}
+
+pub fn pl_record_values(fs: HarnessFs, memory: HarnessMemory, kind: string, options = nil) -> list {
+  return pl_memory_records(fs, memory, kind, options).map({ record -> record?.value ?? {} }).filter(
+    { value -> value?.schema == PATTERN_SCHEMA && (value?.record_kind ?? value?.kind) == kind },
+  )
+    .to_list()
+}
+
+pub fn pl_replace_state(harness: Harness, state: dict, options = nil) -> dict {
+  memory_forget(
+    harness.memory,
+    pl_namespace(options),
+    {key: "state"},
+    pl_memory_options(harness.fs, options),
+  )
+  return pl_store_record(
+    harness,
+    "state",
+    "state",
+    {
+      enabled: state?.enabled ?? true,
+      suppressed_until: state?.suppressed_until ?? state?.suppressedUntil ?? {},
+      updated_at: pl_now(harness.clock, options),
+    },
+    options + {id: pl_unique_record_id(harness.clock, harness.random, "state", options)},
+  )?.value
+}
+
+pub fn pl_unique_record_id(
+  clock: HarnessClock,
+  random: HarnessRandom,
+  prefix: string,
+  options = nil,
+) -> string {
+  return prefix + "_" + pl_short_hash(pl_now(clock, options) + ":" + random.uuid())
+}
+
+pub fn pl_sanitize_tool_sequence(sequence: list) -> list {
+  let out = []
+  for raw in sequence ?? [] {
+    const clean = pl_slugify(raw)
+    if clean != "" && clean != "load-skill" {
+      out = out + [clean]
+    }
+  }
+  return out
+}
+
+pub fn pl_redact_sensitive(text: string) -> string {
+  const no_private = regex_replace(
+    r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----",
+    "<redacted-private-key>",
+    text ?? "",
+  )
+    ?? (text ?? "")
+  return regex_replace(
+    r"(?i)\b(api[_-]?key|token|secret|password|credential)\b\s*[:=]\s*\S+",
+    "$1=<redacted>",
+    no_private,
+  )
+    ?? no_private
+}
+
+pub fn pl_observation_from_input(
+  clock: HarnessClock,
+  random: HarnessRandom,
+  input: dict,
+  options = nil,
+) -> dict {
+  const prompt = pl_redact_sensitive(pl_text(input?.prompt ?? input?.message))
+  if prompt == "" {
+    throw "HARN-PATTERN-001: prompt is required"
+  }
+  const id = pl_text(input?.id)
+  return {
+    id: id == "" ? random.uuid() : id,
+    source_id: pl_text(input?.source_id ?? input?.sourceId),
+    session_id: pl_text(input?.session_id ?? input?.sessionID),
+    run_id: pl_text(input?.run_id ?? input?.runId),
+    evidence_kind: pl_text(input?.evidence_kind ?? input?.evidenceKind),
+    prompt: prompt,
+    tool_sequence: pl_sanitize_tool_sequence(input?.tool_sequence ?? input?.toolSequence ?? []),
+    observed_at: pl_text(input?.observed_at ?? input?.observedAt ?? pl_now(clock, options)),
+  }
+}
+
+pub fn pl_observation_from_legacy(
+  clock: HarnessClock,
+  random: HarnessRandom,
+  record: dict,
+  options = nil,
+) -> dict {
+  return pl_observation_from_input(
+    clock,
+    random,
+    {
+      id: record?.id,
+      session_id: record?.sessionID ?? record?.session_id,
+      prompt: record?.prompt,
+      tool_sequence: record?.toolSequence ?? record?.tool_sequence ?? [],
+      observed_at: record?.observedAt ?? record?.observed_at ?? pl_now(clock, options),
+    },
+    options,
+  )
+}
+
+pub fn pl_store_observation(harness: Harness, record: dict, options = nil) -> dict {
+  return pl_store_record(
+    harness,
+    "observation",
+    "observation:" + record.id,
+    record,
+    options + {id: record.id},
+  )?.value
+}

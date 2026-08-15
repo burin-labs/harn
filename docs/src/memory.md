@@ -152,15 +152,19 @@ recall:
 ```harn
 import { pattern_learning_observe, pattern_learning_pending } from "std/agent/pattern_knowledge"
 
-pattern_learning_observe("session-1", "Refactor the auth refresh tests", ["read", "edit"])
-const proposals = pattern_learning_pending()
+const options = {allow_manual_evidence: true}
+pattern_learning_observe("session-1", "Refactor the auth refresh tests", ["read", "edit"], options)
+const proposals = pattern_learning_pending(options)
 ```
 
 The module keeps observations, pending proposals, and enablement state in the
 `project/pattern-learning` namespace. Accepted proposals are promoted into
 project skills, then recalled during later context assembly. See
 [Cross-session pattern knowledge](concepts/cross-session-pattern-knowledge.md)
-for the design rationale and migration contract.
+for the design rationale and migration contract. Session-store imports are the
+default curator evidence; manually authored observations require the explicit
+`allow_manual_evidence` opt-in and historical unproven observations are never
+promoted by default.
 
 ## Vector and hybrid backends
 

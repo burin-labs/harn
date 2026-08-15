@@ -88,6 +88,42 @@ pub type SessionStoreSearchResponse = {
   hits: list<SessionStoreSearchHit>,
 }
 
+pub type SessionStoreStatus = "open" | "closed" | "soft_deleted" | "hard_deleted"
+
+pub type SessionStoreSessionType = "user" | "subagent" | "scheduled"
+
+pub type SessionStoreListSort = "created_at" | "updated_at"
+
+pub type SessionStoreListOrder = "ascending" | "descending"
+
+pub type SessionStoreListOptions = {
+  root?: string,
+  tenant_id?: string,
+  project_scope?: string,
+  status?: SessionStoreStatus,
+  session_type?: SessionStoreSessionType,
+  limit?: int,
+  cursor?: string,
+  sort_by?: SessionStoreListSort,
+  order?: SessionStoreListOrder,
+}
+
+pub type SessionStoreSession = {
+  id: string,
+  tenant_id?: string?,
+  persona?: string?,
+  parent_session_id?: string?,
+  title?: string?,
+  cwd?: string?,
+  model?: string?,
+  session_type?: SessionStoreSessionType?,
+  project_scope?: string?,
+  created_at: string,
+  updated_at: string,
+  status: SessionStoreStatus,
+  event_count: int,
+}
+
 fn __session_store_event(raw: dict) -> SessionStoreEvent {
   return {
     event_id: raw.event_id,
@@ -184,6 +220,38 @@ pub fn session_store_events(
 ) -> list<SessionStoreEvent> {
   return agent.session_store_events(session_id, options).map(
     { event -> __session_store_event(event) },
+  )
+    .to_list()
+}
+
+/**
+ * List canonical sessions using keyset pagination and typed lifecycle filters.
+ *
+ * @effects: [store.read, fs.read]
+ * @errors: [runtime]
+ */
+pub fn session_store_list(
+  agent: HarnessAgent,
+  options: SessionStoreListOptions? = nil,
+) -> list<SessionStoreSession> {
+  return agent.session_store_list(options).map(
+    { session ->
+      return {
+        id: session.id,
+        tenant_id: session.tenant_id,
+        persona: session.persona,
+        parent_session_id: session.parent_session_id,
+        title: session.title,
+        cwd: session.cwd,
+        model: session.model,
+        session_type: session.session_type,
+        project_scope: session.project_scope,
+        created_at: session.created_at,
+        updated_at: session.updated_at,
+        status: session.status,
+        event_count: session.event_count,
+      }
+    },
   )
     .to_list()
 }

@@ -11,9 +11,9 @@ use std::sync::Arc;
 
 use harn_session_store::{
     AppendEvent, CreateSession, EventId, EventIdentity, EventIdentityField, ImportSession,
-    ReadRange, SearchFilter, SearchMode, SearchQuery, SessionEventKind, SessionImporter,
-    SessionStore, SessionType, SqliteSessionStore, StoreError, StoreHooks, StoredEvent,
-    VerifyReport, MAX_READ_BATCH,
+    ListFilter, ListOrder, ListSortKey, ReadRange, SearchFilter, SearchMode, SearchQuery,
+    SessionEventKind, SessionImporter, SessionStatus, SessionStore, SessionType,
+    SqliteSessionStore, StoreError, StoreHooks, StoredEvent, VerifyReport, MAX_READ_BATCH,
 };
 use serde::Deserialize;
 use serde_json::{json, Value as JsonValue};
@@ -69,6 +69,7 @@ pub(crate) fn register_session_store_builtins(vm: &mut Vm) {
 pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &SESSION_STORE_APPEND_IMPL_DEF,
     &SESSION_STORE_EVENTS_IMPL_DEF,
+    &SESSION_STORE_LIST_IMPL_DEF,
     &SESSION_STORE_VERIFY_IMPL_DEF,
     &SESSION_STORE_SEARCH_IMPL_DEF,
     &SESSION_STORE_PATH_IMPL_DEF,
@@ -170,6 +171,88 @@ async fn session_store_events_impl(
         .map(stored_event_value)
         .collect::<Result<Vec<_>, _>>()?;
     Ok(VmValue::List(Arc::new(values)))
+}
+
+#[harn_builtin(
+    exposure = "harness.agent.session_store_list",
+    effects = ["fs.read@dynamic", "state.read@dynamic"],
+    sig = "__session_store_list(options?: dict) -> list",
+    kind = "async",
+    category = "session_store"
+)]
+async fn session_store_list_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    let options = optional_dict_arg(
+        &args,
+        0,
+        "__session_store_list",
+        "options",
+        ErrorKind::Runtime,
+    )?;
+    let status = match option_string(options, "status")?.as_deref() {
+        None => None,
+        Some("open") => Some(SessionStatus::Open),
+        Some("closed") => Some(SessionStatus::Closed),
+        Some("soft_deleted") => Some(SessionStatus::SoftDeleted),
+        Some("hard_deleted") => Some(SessionStatus::HardDeleted),
+        Some(other) => {
+            return Err(VmError::Runtime(format!(
+                "session_store: options.status must be open, closed, soft_deleted, or hard_deleted; got '{other}'"
+            )));
+        }
+    };
+    let session_type = match option_string(options, "session_type")?.as_deref() {
+        None => None,
+        Some("user") => Some(SessionType::User),
+        Some("subagent") => Some(SessionType::Subagent),
+        Some("scheduled") => Some(SessionType::Scheduled),
+        Some(other) => {
+            return Err(VmError::Runtime(format!(
+                "session_store: options.session_type must be user, subagent, or scheduled; got '{other}'"
+            )));
+        }
+    };
+    let sort_by = match option_string(options, "sort_by")?.as_deref() {
+        None | Some("created_at") => ListSortKey::CreatedAt,
+        Some("updated_at") => ListSortKey::UpdatedAt,
+        Some(other) => {
+            return Err(VmError::Runtime(format!(
+                "session_store: options.sort_by must be created_at or updated_at; got '{other}'"
+            )));
+        }
+    };
+    let order = match option_string(options, "order")?.as_deref() {
+        None | Some("ascending") => ListOrder::Ascending,
+        Some("descending") => ListOrder::Descending,
+        Some(other) => {
+            return Err(VmError::Runtime(format!(
+                "session_store: options.order must be ascending or descending; got '{other}'"
+            )));
+        }
+    };
+    let store = open_store(&store_state_dir(options)?)?;
+    let sessions = store
+        .list(ListFilter {
+            tenant_id: option_string(options, "tenant_id")?,
+            project_scope: option_string(options, "project_scope")?,
+            status,
+            session_type,
+            limit: option_positive_usize(options, "limit")?,
+            cursor: option_string(options, "cursor")?,
+            sort_by,
+            order,
+            ..ListFilter::default()
+        })
+        .await
+        .map_err(store_error)?;
+    let value = serde_json::to_value(sessions).map_err(|error| {
+        VmError::Runtime(format!(
+            "session_store: failed to encode session list: {error}"
+        ))
+    })?;
+    Ok(json_to_vm_value(&value))
 }
 
 #[harn_builtin(
@@ -965,6 +1048,10 @@ fn store_error(error: StoreError) -> VmError {
 mod error_tests;
 
 #[cfg(test)]
+#[path = "session_store_execution_env_tests.rs"]
+mod execution_env_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -1347,132 +1434,5 @@ mod tests {
         .await
         .unwrap_err();
         assert!(verify_error.to_string().contains("does not match"));
-    }
-
-    async fn exercise_execution_env_store(
-        label: &'static str,
-        patch_mode: bool,
-        root: PathBuf,
-        fallback_root: PathBuf,
-    ) -> PathBuf {
-        crate::orchestration::scope_ambient(
-            crate::orchestration::AmbientExecutionScope::default(),
-            async move {
-                let root_value = root.to_string_lossy().into_owned();
-                let mut env = BTreeMap::new();
-                if patch_mode {
-                    env.insert("HARN_TEST_INHERITED".to_string(), "kept".to_string());
-                }
-                env.insert(STORE_ROOT_ENV.to_string(), root_value.clone());
-                crate::stdlib::process::set_thread_execution_context(Some(
-                    crate::orchestration::RunExecutionRecord {
-                        cwd: Some(fallback_root.to_string_lossy().into_owned()),
-                        project_root: Some(fallback_root.to_string_lossy().into_owned()),
-                        env,
-                        ..Default::default()
-                    },
-                ));
-
-                tokio::task::yield_now().await;
-                assert_eq!(
-                    crate::stdlib::process::read_env_value(STORE_ROOT_ENV).as_deref(),
-                    Some(root_value.as_str()),
-                    "{label}: VM-visible environment must expose the child root"
-                );
-                assert_eq!(
-                    canonical_store_state_dir(None).unwrap(),
-                    SessionStoreDir::under_root(&root),
-                    "{label}: native store root must match the VM-visible environment"
-                );
-
-                let ctx = crate::vm::AsyncBuiltinCtx::for_test(crate::vm::Vm::new());
-                let database_path = session_store_database_path_impl(ctx.clone(), Vec::new())
-                    .await
-                    .unwrap();
-                let database_path = PathBuf::from(database_path.display());
-                assert_eq!(
-                    database_path,
-                    store_path(&SessionStoreDir::under_root(&root))
-                );
-
-                session_store_append_impl(
-                    ctx.clone(),
-                    vec![
-                        VmValue::String(arcstr::ArcStr::from(format!("session.{label}"))),
-                        json_to_vm_value(&json!({"child": label})),
-                    ],
-                )
-                .await
-                .unwrap();
-                tokio::task::yield_now().await;
-
-                let events = session_store_events_impl(
-                    ctx,
-                    vec![VmValue::String(arcstr::ArcStr::from(format!(
-                        "session.{label}"
-                    )))],
-                )
-                .await
-                .unwrap();
-                let VmValue::List(events) = events else {
-                    panic!("{label}: expected a list of stored events");
-                };
-                assert_eq!(events.len(), 1, "{label}: expected one isolated event");
-                let child = events[0]
-                    .as_dict()
-                    .and_then(|event| event.get("payload"))
-                    .and_then(VmValue::as_dict)
-                    .and_then(|payload| payload.get("child"))
-                    .map(VmValue::display);
-                assert_eq!(child.as_deref(), Some(label));
-                database_path
-            },
-        )
-        .await
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn execution_env_isolates_patch_replace_and_concurrent_stores() {
-        let fallback = tempfile::tempdir().unwrap();
-        let patch = tempfile::tempdir().unwrap();
-        let replace = tempfile::tempdir().unwrap();
-        let fallback_root = fallback.path().to_path_buf();
-        let patch_root = patch.path().to_path_buf();
-        let replace_root = replace.path().to_path_buf();
-
-        let local = tokio::task::LocalSet::new();
-        let (patch_path, replace_path) = local
-            .run_until(async {
-                let patch_child = tokio::task::spawn_local(exercise_execution_env_store(
-                    "patch",
-                    true,
-                    patch_root.clone(),
-                    fallback_root.clone(),
-                ));
-                let replace_child = tokio::task::spawn_local(exercise_execution_env_store(
-                    "replace",
-                    false,
-                    replace_root.clone(),
-                    fallback_root.clone(),
-                ));
-                (patch_child.await.unwrap(), replace_child.await.unwrap())
-            })
-            .await;
-
-        assert_eq!(
-            patch_path,
-            store_path(&SessionStoreDir::under_root(&patch_root))
-        );
-        assert_eq!(
-            replace_path,
-            store_path(&SessionStoreDir::under_root(&replace_root))
-        );
-        assert!(patch_path.is_file());
-        assert!(replace_path.is_file());
-        assert_ne!(patch_path, replace_path);
-        assert!(
-            !store_path(&SessionStoreDir::under_root(&fallback_root)).exists(),
-            "the inherited/global fallback store must remain untouched"
-        );
     }
 }
