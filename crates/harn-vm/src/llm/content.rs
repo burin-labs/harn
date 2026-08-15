@@ -504,19 +504,28 @@ pub(crate) fn messages_contain_url_images(messages: &[serde_json::Value]) -> Res
     Ok(false)
 }
 
+/// Whether a content block's `type` tag marks it as user-facing prose.
+///
+/// An allowlist, deliberately: providers keep inventing block types, and most
+/// of the new ones carry model-private material (`thinking`,
+/// `redacted_thinking`, `reasoning_summary`, signatures). A denylist leaks
+/// every tag it has not been taught yet, which is how private reasoning
+/// reached `assistant_text` (#6254). An unrecognized block is not prose.
+pub(crate) fn is_user_facing_text_block_type(block_type: Option<&str>) -> bool {
+    matches!(block_type, Some("text" | "output_text"))
+}
+
 fn normalized_text_block(block: &serde_json::Value) -> Option<serde_json::Value> {
     let block_type = block.get("type").and_then(|value| value.as_str());
-    match block_type {
-        Some("text") | Some("output_text") => {
-            let mut normalized = serde_json::json!({
-                "type": "text",
-                "text": block.get("text").and_then(|value| value.as_str()).unwrap_or_default(),
-            });
-            copy_cache_control(block, &mut normalized);
-            Some(normalized)
-        }
-        _ => None,
+    if !is_user_facing_text_block_type(block_type) {
+        return None;
     }
+    let mut normalized = serde_json::json!({
+        "type": "text",
+        "text": block.get("text").and_then(|value| value.as_str()).unwrap_or_default(),
+    });
+    copy_cache_control(block, &mut normalized);
+    Some(normalized)
 }
 
 fn copy_cache_control(original: &serde_json::Value, normalized: &mut serde_json::Value) {

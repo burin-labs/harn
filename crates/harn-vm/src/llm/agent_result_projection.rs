@@ -48,6 +48,50 @@ pub(crate) fn terminal_loop_facts(
     }
 }
 
+/// The `String` behind a value, or `None` for every other shape.
+///
+/// Deliberately stricter than `display()`: a block whose `type` is not a
+/// string must not be coerced into one and then matched as if it were a tag.
+fn string_value(value: &VmValue) -> Option<&str> {
+    match value {
+        VmValue::String(text) => Some(text.as_str()),
+        _ => None,
+    }
+}
+
+/// The user-facing prose carried by one message's `content`.
+///
+/// `content` is either a plain string or a list of typed content blocks, and
+/// the block list is the case that bit us. Rendering it with `VmValue::display`
+/// produced `[{signature: …, type: thinking}, {text: …, type: text}]`: not
+/// JSON, not prose, and carrying both the model's private reasoning and the
+/// opaque provider signature into the field every consumer reads as the
+/// assistant's answer (#6254). Only text blocks cross this seam; everything
+/// else is model-private or structural and belongs in the transcript, which
+/// keeps the whole message.
+fn visible_text_in_content(content: &VmValue) -> String {
+    match content {
+        VmValue::List(blocks) => blocks
+            .iter()
+            .filter_map(text_in_block)
+            .collect::<Vec<_>>()
+            .join("\n\n"),
+        VmValue::Dict(_) => text_in_block(content).unwrap_or_default().to_string(),
+        _ => content.display(),
+    }
+}
+
+/// The prose in one content block, or `None` when the block is not prose.
+fn text_in_block(block: &VmValue) -> Option<&str> {
+    let block_type = dict_get(block, "type").and_then(string_value);
+    if !crate::llm::content::is_user_facing_text_block_type(block_type) {
+        return None;
+    }
+    dict_get(block, "text")
+        .and_then(string_value)
+        .filter(|text| !text.trim().is_empty())
+}
+
 /// The most recent assistant message with visible (non-reasoning) text.
 pub(crate) fn last_assistant_text(snapshot: &VmValue) -> Option<String> {
     let messages_value = dict_get(snapshot, "messages")?;
@@ -58,7 +102,12 @@ pub(crate) fn last_assistant_text(snapshot: &VmValue) -> Option<String> {
             .unwrap_or_default();
         if role == "assistant" {
             let visible = dict_get(msg, "content")
-                .map(|v| crate::visible_text::sanitize_visible_assistant_text(&v.display(), false))
+                .map(|v| {
+                    crate::visible_text::sanitize_visible_assistant_text(
+                        &visible_text_in_content(v),
+                        false,
+                    )
+                })
                 .unwrap_or_default();
             if !visible.trim().is_empty() {
                 return Some(visible);

@@ -1129,6 +1129,117 @@ fn final_visible_text_skips_control_only_assistant_turns() {
     );
 }
 
+/// REGRESSION GUARD (#6254): an assistant message whose `content` is a block
+/// list must project as the prose alone.
+///
+/// Rendering the block list with `VmValue::display` produced
+/// `[{signature: …, type: thinking}, {text: …, type: text}]` — unparseable,
+/// and it carried the model's private reasoning plus the opaque provider
+/// signature into the field consumers read as the assistant's answer.
+#[test]
+fn final_visible_text_keeps_only_text_blocks_from_structured_content() {
+    let snapshot = crate::stdlib::json_to_vm_value(&json!({
+        "messages": [
+            {
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "thinking",
+                        "thinking": "Those uniform prices are a red flag; I should be honest.",
+                        "signature": "EsgRCosBCBAYAipAGkEk3SOhr3/eDyycKfm7hrhm",
+                    },
+                    {"type": "text", "text": "I cannot complete either action as stated."},
+                ],
+            }
+        ]
+    }));
+
+    let text = crate::llm::agent_result_projection::last_assistant_text(&snapshot)
+        .expect("a message with a text block projects some visible text");
+
+    assert_eq!(text, "I cannot complete either action as stated.");
+    assert!(
+        !text.contains("red flag"),
+        "private reasoning must never reach the user-facing projection: {text}"
+    );
+    assert!(
+        !text.contains("signature") && !text.contains("EsgRCosB"),
+        "opaque provider signatures must never reach a text field: {text}"
+    );
+    assert!(
+        !text.contains("type: thinking") && !text.contains("type: text"),
+        "the projection must be prose, not a rendered block list: {text}"
+    );
+}
+
+/// A block type this seam has never met is dropped, not rendered. The filter is
+/// an allowlist precisely so the next reasoning format does not leak the way
+/// `thinking` did.
+#[test]
+fn final_visible_text_drops_unknown_block_types() {
+    let snapshot = crate::stdlib::json_to_vm_value(&json!({
+        "messages": [
+            {
+                "role": "assistant",
+                "content": [
+                    {"type": "redacted_thinking", "data": "EroBCkYIBBgCKkBc"},
+                    {"type": "some_future_reasoning_format", "text": "secret"},
+                    {"type": "text", "text": "The answer."},
+                ],
+            }
+        ]
+    }));
+
+    assert_eq!(
+        crate::llm::agent_result_projection::last_assistant_text(&snapshot).as_deref(),
+        Some("The answer.")
+    );
+}
+
+/// An assistant turn carrying reasoning but no prose is not a visible reply, so
+/// the search must fall through to the previous message rather than surfacing
+/// the reasoning or an empty string.
+#[test]
+fn final_visible_text_falls_through_reasoning_only_turns() {
+    let snapshot = crate::stdlib::json_to_vm_value(&json!({
+        "messages": [
+            {"role": "assistant", "content": "The earlier answer."},
+            {
+                "role": "assistant",
+                "content": [{"type": "thinking", "thinking": "Still deciding.", "signature": "abc"}],
+            }
+        ]
+    }));
+
+    assert_eq!(
+        crate::llm::agent_result_projection::last_assistant_text(&snapshot).as_deref(),
+        Some("The earlier answer.")
+    );
+}
+
+/// Multiple prose blocks in one message join as paragraphs; a provider that
+/// splits a reply across `text` blocks must not have them run together.
+#[test]
+fn final_visible_text_joins_multiple_text_blocks() {
+    let snapshot = crate::stdlib::json_to_vm_value(&json!({
+        "messages": [
+            {
+                "role": "assistant",
+                "content": [
+                    {"type": "text", "text": "First paragraph."},
+                    {"type": "thinking", "thinking": "hidden", "signature": "sig"},
+                    {"type": "output_text", "text": "Second paragraph."},
+                ],
+            }
+        ]
+    }));
+
+    assert_eq!(
+        crate::llm::agent_result_projection::last_assistant_text(&snapshot).as_deref(),
+        Some("First paragraph.\n\nSecond paragraph.")
+    );
+}
+
 #[test]
 fn iteration_cap_maps_to_max_turn_requests() {
     assert_eq!(
