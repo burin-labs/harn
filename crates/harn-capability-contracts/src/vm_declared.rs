@@ -51,6 +51,7 @@ pub static VM_DECLARED_CAPABILITY_METHODS: &[(&str, &str)] = &[
     ("agent", "session_store_append"),
     ("agent", "session_store_database_path"),
     ("agent", "session_store_events"),
+    ("agent", "session_store_list"),
     ("agent", "session_store_path"),
     ("agent", "session_store_search"),
     ("agent", "session_store_verify"),

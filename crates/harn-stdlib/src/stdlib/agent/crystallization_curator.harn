@@ -6,6 +6,7 @@
 // validates the terminal proposal contract and evidence membership.
 import { agent_loop } from "std/agent/loop"
 import {
+  pattern_learning_import_session_records,
   pattern_learning_observations,
   pattern_learning_pending,
   pattern_learning_record_curated_batch,
@@ -571,9 +572,15 @@ fn cc_tools(harness: Harness, evidence: list, options = nil) {
  * @api_stability: experimental
  */
 pub fn crystallization_curate(harness: Harness, options = nil) -> dict {
+  const session_import = pattern_learning_import_session_records(harness, options)
   const evidence = cc_recent_evidence(harness, options)
   if len(evidence) == 0 {
-    return {schema: CURATOR_SCHEMA, status: "no_evidence", proposals: []}
+    return {
+      schema: CURATOR_SCHEMA,
+      status: "no_evidence",
+      proposals: [],
+      session_import: session_import,
+    }
   }
   const pending_before = pattern_learning_pending(harness, options)
   const prompts = cc_prompt(evidence, pending_before)
@@ -613,6 +620,7 @@ pub fn crystallization_curate(harness: Harness, options = nil) -> dict {
     evidence_count: len(evidence),
     proposal_count: len(proposals),
     proposals: proposals,
+    session_import: session_import,
     agent_result: result,
   }
 }

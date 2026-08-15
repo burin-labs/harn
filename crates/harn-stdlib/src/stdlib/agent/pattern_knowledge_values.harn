@@ -1,3 +1,9 @@
+/** Stable storage schema for cross-session pattern-learning records. */
+pub const PATTERN_SCHEMA: string = "harn.pattern_learning.v1"
+
+/** Default memory namespace for cross-session pattern-learning records. */
+pub const PATTERN_NAMESPACE: string = "project/pattern-learning"
+
 /**
  * Normalize an optional value into compact text for pattern-learning records.
  *
