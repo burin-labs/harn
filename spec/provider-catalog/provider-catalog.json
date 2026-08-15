@@ -6751,7 +6751,7 @@
         "preferred_format": "json",
         "parity": "native_unreliable",
         "parity_source": "declared",
-        "parity_notes": "2026-06-20 Harn agent-loop smoke after parser fix: forced native/off emitted a malformed native call whose function name was the whole JSON payload; fenced JSON text-channel tools completed the loop.",
+        "parity_notes": "2026-08-15 live probe: native channel emits 38 duplicate tool_calls for one intent under tool_choice=required (deterministic 4/4, sync + streaming); tool_choice=auto is clean. Host-specific to DeepInfra's GLM-5.2 deployment — GLM-5.1/GLM-4.7/DeepSeek on the same host and GLM-5.2 on five other hosts each return a single call. Fenced JSON text-channel tools dispatch correctly.",
         "tool_search": []
       },
       "structured_output": "native",
@@ -7090,10 +7090,10 @@
       "tool_support": {
         "native": true,
         "text": true,
-        "preferred_format": "json",
-        "parity": "native_unreliable",
-        "parity_source": "declared",
-        "parity_notes": "2026-06-20 Harn agent-loop smoke after parser fix: forced native/off emitted XML `<tool_use>` text instead of provider-native tool_calls. JSON tools completed the loop when auto reasoning was disabled; text tools did not.",
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "parity_notes": "2026-08-15 cross-host native re-probe: single clean `message.tool_calls`, empty content, no `<tool_call>` markup. Fireworks glm-5p2 verified on tool_choice=auto and required, sync and streaming.",
         "tool_search": []
       },
       "structured_output": "native",
@@ -7180,10 +7180,10 @@
       "tool_support": {
         "native": true,
         "text": true,
-        "preferred_format": "json",
-        "parity": "native_unreliable",
-        "parity_source": "declared",
-        "parity_notes": "2026-06-20 Harn agent-loop smoke after parser fix: forced native/off emitted XML `<tool_use>` text instead of provider-native tool_calls. JSON tools completed the loop when auto reasoning was disabled; text tools did not.",
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "parity_notes": "2026-08-15 cross-host native re-probe: single clean `message.tool_calls`, empty content, no `<tool_call>` markup. Fireworks glm-5p2 verified on tool_choice=auto and required, sync and streaming.",
         "tool_search": []
       },
       "structured_output": "native",
@@ -13380,10 +13380,10 @@
       "tool_support": {
         "native": true,
         "text": true,
-        "preferred_format": "text",
-        "parity": "native_unreliable",
-        "parity_source": "declared",
-        "parity_notes": "GLM-5.x's native channel emits `<tool_call><arg_key>...` markup as content instead of OpenAI message.tool_calls — a weight-intrinsic behavior reproduced across every GLM-5 host probed (zai/Baseten live, Together + OpenRouter agent-loop smoke, DeepInfra, Fireworks glm-5p*). NVIDIA serves the same weights, so the same leak applies; pin the clean heredoc text channel for family parity. Flagged by the native_unreliable-family consistency gate.",
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "parity_notes": "2026-08-15 cross-host native re-probe: single clean `message.tool_calls`, empty content, no `<tool_call>` markup. NVIDIA z-ai/glm-5.2 verified on tool_choice=auto (sync + streaming) and required.",
         "tool_search": []
       },
       "structured_output": "native",
@@ -17127,9 +17127,87 @@
       },
       "prompt_cache": true,
       "pricing": {
-        "input_per_mtok": 0.098,
-        "output_per_mtok": 0.196,
-        "cache_read_per_mtok": 0.02,
+        "input_per_mtok": 0.06426,
+        "output_per_mtok": 0.12852,
+        "cache_read_per_mtok": 0.012852,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "prompt_caching",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ],
+      "family": "deepseek",
+      "lineage": "deepseek",
+      "tier": "mid",
+      "open_weight": true,
+      "strengths": [
+        "speed",
+        "cheap",
+        "tool_use",
+        "reasoning",
+        "long_context"
+      ]
+    },
+    {
+      "id": "deepseek/deepseek-v4-flash-0731",
+      "name": "DeepSeek V4 Flash 0731 (via OpenRouter)",
+      "display_name": "DeepSeek V4 Flash 0731",
+      "provider": "openrouter",
+      "aliases": [
+        "deepseek-v4-flash-0731"
+      ],
+      "context_window": 1048576,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled",
+          "effort"
+        ],
+        "effort_supported": false,
+        "effort_levels": [],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 0.14,
+        "output_per_mtok": 0.28,
+        "cache_read_per_mtok": 0.028,
         "cache_write_per_mtok": null
       },
       "deprecation": {
@@ -17163,6 +17241,83 @@
       "display_name": "DeepSeek V4 Pro",
       "provider": "openrouter",
       "aliases": [],
+      "context_window": 1048576,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled",
+          "effort"
+        ],
+        "effort_supported": false,
+        "effort_levels": [],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 1.168,
+        "output_per_mtok": 2.336,
+        "cache_read_per_mtok": 0.09855,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "prompt_caching",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ],
+      "family": "deepseek",
+      "lineage": "deepseek",
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "reasoning",
+        "coding",
+        "tool_use",
+        "long_context"
+      ]
+    },
+    {
+      "id": "deepseek/deepseek-v4-pro-0813",
+      "name": "DeepSeek V4 Pro 0813 (via OpenRouter)",
+      "display_name": "DeepSeek V4 Pro 0813",
+      "provider": "openrouter",
+      "aliases": [
+        "deepseek-v4-pro-0813"
+      ],
       "context_window": 1048576,
       "modalities": {
         "input": [
@@ -20691,10 +20846,10 @@
       "tool_support": {
         "native": true,
         "text": true,
-        "preferred_format": "text",
-        "parity": "native_unreliable",
-        "parity_source": "declared",
-        "parity_notes": "2026-06-20 Harn agent-loop smoke after parser fix: forced native/off emitted no dispatchable tool_calls and hallucinated a result token; heredoc text tools completed the loop. OpenRouter reasoning-on text tools emitted malformed tool markup, so auto reasoning is off for agent/code/verify tasks.",
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "parity_notes": "2026-08-15 cross-host native re-probe: single clean `message.tool_calls`, empty content, no `<tool_call>` markup. OpenRouter z-ai/glm-5.2 verified on tool_choice=auto and required, sync and streaming.",
         "tool_search": []
       },
       "structured_output": "native",
@@ -20768,10 +20923,10 @@
       "tool_support": {
         "native": true,
         "text": true,
-        "preferred_format": "text",
-        "parity": "native_unreliable",
-        "parity_source": "declared",
-        "parity_notes": "2026-06-20 Harn agent-loop smoke after parser fix: forced native/off emitted no dispatchable tool_calls and hallucinated a result token; heredoc text tools completed the loop. OpenRouter reasoning-on text tools emitted malformed tool markup, so auto reasoning is off for agent/code/verify tasks.",
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "parity_notes": "2026-08-15 cross-host native re-probe: single clean `message.tool_calls`, empty content, no `<tool_call>` markup. OpenRouter z-ai/glm-5.2 verified on tool_choice=auto and required, sync and streaming.",
         "tool_search": []
       },
       "structured_output": "native",
@@ -20850,10 +21005,10 @@
       "tool_support": {
         "native": true,
         "text": true,
-        "preferred_format": "text",
-        "parity": "native_unreliable",
-        "parity_source": "declared",
-        "parity_notes": "2026-06-20 Harn agent-loop smoke after parser fix: forced native/off emitted no dispatchable tool_calls and hallucinated a result token; heredoc text tools completed the loop. OpenRouter reasoning-on text tools emitted malformed tool markup, so auto reasoning is off for agent/code/verify tasks.",
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "parity_notes": "2026-08-15 cross-host native re-probe: single clean `message.tool_calls`, empty content, no `<tool_call>` markup. OpenRouter z-ai/glm-5.2 verified on tool_choice=auto and required, sync and streaming.",
         "tool_search": []
       },
       "structured_output": "native",
@@ -20929,10 +21084,10 @@
       "tool_support": {
         "native": true,
         "text": true,
-        "preferred_format": "text",
-        "parity": "native_unreliable",
-        "parity_source": "declared",
-        "parity_notes": "2026-06-20 Harn agent-loop smoke after parser fix: forced native/off emitted no dispatchable tool_calls and hallucinated a result token; heredoc text tools completed the loop. OpenRouter reasoning-on text tools emitted malformed tool markup, so auto reasoning is off for agent/code/verify tasks.",
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "parity_notes": "2026-08-15 cross-host native re-probe: single clean `message.tool_calls`, empty content, no `<tool_call>` markup. OpenRouter z-ai/glm-5.2 verified on tool_choice=auto and required, sync and streaming.",
         "tool_search": []
       },
       "structured_output": "native",
@@ -22287,6 +22442,99 @@
       ]
     },
     {
+      "id": "deepseek-ai/DeepSeek-V4-Flash-0731",
+      "name": "DeepSeek V4 Flash 0731 (Together)",
+      "display_name": "DeepSeek V4 Flash 0731",
+      "provider": "together",
+      "aliases": [
+        "together-deepseek-v4-flash-0731"
+      ],
+      "context_window": 1048576,
+      "logical_model": "deepseek-v4-flash",
+      "equivalence_group": "deepseek-v4-flash",
+      "served_variant": "together",
+      "wire_model": "deepseek-ai/DeepSeek-V4-Flash-0731",
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled",
+          "effort"
+        ],
+        "effort_supported": true,
+        "effort_levels": [],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "batch": {
+        "wire_format": "openai",
+        "input_mode": "jsonl_file",
+        "result_ordering": "custom_id_rejoin",
+        "partial_failure": "per_request",
+        "cancellation": "unknown",
+        "discount_percent": 50,
+        "turnaround_hours": 24
+      },
+      "pricing": {
+        "input_per_mtok": 0.14,
+        "output_per_mtok": 0.28,
+        "cache_read_per_mtok": 0.03,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "prompt_caching",
+        "thinking",
+        "extended_thinking",
+        "structured_output",
+        "batch"
+      ],
+      "family": "deepseek",
+      "lineage": "deepseek",
+      "tier": "mid",
+      "open_weight": true,
+      "strengths": [
+        "speed",
+        "cheap",
+        "tool_use",
+        "reasoning",
+        "long_context"
+      ]
+    },
+    {
       "id": "deepseek-ai/DeepSeek-V4-Pro",
       "name": "DeepSeek V4 Pro (Together)",
       "display_name": "DeepSeek V4 Pro",
@@ -22917,10 +23165,10 @@
       "tool_support": {
         "native": true,
         "text": true,
-        "preferred_format": "text",
-        "parity": "native_unreliable",
-        "parity_source": "declared",
-        "parity_notes": "2026-06-20 Harn agent-loop smoke after parser fix: forced native/off emitted no dispatchable tool_calls and hallucinated a result token; heredoc text tools completed the loop.",
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "parity_notes": "2026-08-15 cross-host native re-probe: single clean `message.tool_calls`, empty content, no `<tool_call>` markup. Together zai-org/GLM-5.2 verified on tool_choice=auto (sync + streaming) and required. Caveat: under tool_choice=required 1 of 4 runs returned the schema placeholder `{\"city\":\"string\"}` instead of the real argument; tool_choice=auto was clean in every run.",
         "tool_search": []
       },
       "structured_output": "native",
@@ -23004,10 +23252,10 @@
       "tool_support": {
         "native": true,
         "text": true,
-        "preferred_format": "text",
-        "parity": "native_unreliable",
-        "parity_source": "declared",
-        "parity_notes": "2026-06-20 Harn agent-loop smoke after parser fix: forced native/off emitted no dispatchable tool_calls and hallucinated a result token; heredoc text tools completed the loop.",
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "parity_notes": "2026-08-15 cross-host native re-probe: single clean `message.tool_calls`, empty content, no `<tool_call>` markup. Together zai-org/GLM-5.2 verified on tool_choice=auto (sync + streaming) and required. Caveat: under tool_choice=required 1 of 4 runs returned the schema placeholder `{\"city\":\"string\"}` instead of the real argument; tool_choice=auto was clean in every run.",
         "tool_search": []
       },
       "structured_output": "native",
@@ -23099,10 +23347,10 @@
       "tool_support": {
         "native": true,
         "text": true,
-        "preferred_format": "text",
-        "parity": "native_unreliable",
-        "parity_source": "declared",
-        "parity_notes": "2026-06-20 Harn agent-loop smoke after parser fix: forced native/off emitted no dispatchable tool_calls and hallucinated a result token; heredoc text tools completed the loop.",
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "parity_notes": "2026-08-15 cross-host native re-probe: single clean `message.tool_calls`, empty content, no `<tool_call>` markup. Together zai-org/GLM-5.2 verified on tool_choice=auto (sync + streaming) and required. Caveat: under tool_choice=required 1 of 4 runs returned the schema placeholder `{\"city\":\"string\"}` instead of the real argument; tool_choice=auto was clean in every run.",
         "tool_search": []
       },
       "structured_output": "native",
@@ -23826,10 +24074,9 @@
       "tool_support": {
         "native": true,
         "text": true,
-        "preferred_format": "text",
-        "parity": "native_unreliable",
-        "parity_source": "declared",
-        "parity_notes": "Family-consistency pin: GLM native channels emit `<tool_call>` markup as content (2026-06-23 Baseten GLM-5.2 probe); no zai-direct GLM-4.7 probe yet, so inherit the family verdict rather than an optimistic native pin.",
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -23899,10 +24146,9 @@
       "tool_support": {
         "native": true,
         "text": true,
-        "preferred_format": "text",
-        "parity": "native_unreliable",
-        "parity_source": "declared",
-        "parity_notes": "Family-consistency pin: GLM native channels emit `<tool_call>` markup as content (2026-06-23 Baseten GLM-5.2 probe); no zai-direct GLM-4.7 probe yet, so inherit the family verdict rather than an optimistic native pin.",
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -23974,10 +24220,9 @@
       "tool_support": {
         "native": true,
         "text": true,
-        "preferred_format": "text",
-        "parity": "native_unreliable",
-        "parity_source": "declared",
-        "parity_notes": "Family-consistency pin: GLM native channels emit `<tool_call>` markup as content (2026-06-23 Baseten GLM-5.2 probe); no zai-direct GLM-4.7 probe yet, so inherit the family verdict rather than an optimistic native pin.",
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -24047,10 +24292,9 @@
       "tool_support": {
         "native": true,
         "text": true,
-        "preferred_format": "text",
-        "parity": "native_unreliable",
-        "parity_source": "declared",
-        "parity_notes": "Family-consistency pin: GLM native channels emit `<tool_call>` markup as content (2026-06-23 Baseten GLM-5.2 probe); no zai-direct GLM-4.7 probe yet, so inherit the family verdict rather than an optimistic native pin.",
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -24122,10 +24366,9 @@
       "tool_support": {
         "native": true,
         "text": true,
-        "preferred_format": "text",
-        "parity": "native_unreliable",
-        "parity_source": "declared",
-        "parity_notes": "GLM-5.x native channel emits `<tool_call><arg_key>...` markup as content instead of OpenAI message.tool_calls (2026-06-23 live Baseten probe, see 39-baseten.toml); heredoc text tools parse cleanly. Same family pinned native_unreliable on Fireworks (glm-5p*) and DeepInfra (*glm-5*).",
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -24194,10 +24437,9 @@
       "tool_support": {
         "native": true,
         "text": true,
-        "preferred_format": "text",
-        "parity": "native_unreliable",
-        "parity_source": "declared",
-        "parity_notes": "GLM-5.x native channel emits `<tool_call><arg_key>...` markup as content instead of OpenAI message.tool_calls (2026-06-23 live Baseten probe, see 39-baseten.toml); heredoc text tools parse cleanly. Same family pinned native_unreliable on Fireworks (glm-5p*) and DeepInfra (*glm-5*).",
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -24271,10 +24513,9 @@
       "tool_support": {
         "native": true,
         "text": true,
-        "preferred_format": "text",
-        "parity": "native_unreliable",
-        "parity_source": "declared",
-        "parity_notes": "GLM-5.x native channel emits `<tool_call><arg_key>...` markup as content instead of OpenAI message.tool_calls (2026-06-23 live Baseten probe, see 39-baseten.toml); heredoc text tools parse cleanly. Same family pinned native_unreliable on Fireworks (glm-5p*) and DeepInfra (*glm-5*).",
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -24353,10 +24594,9 @@
       "tool_support": {
         "native": true,
         "text": true,
-        "preferred_format": "text",
-        "parity": "native_unreliable",
-        "parity_source": "declared",
-        "parity_notes": "GLM-5.x native channel emits `<tool_call><arg_key>...` markup as content instead of OpenAI message.tool_calls (2026-06-23 live Baseten probe, see 39-baseten.toml); heredoc text tools parse cleanly. Same family pinned native_unreliable on Fireworks (glm-5p*) and DeepInfra (*glm-5*).",
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -24531,9 +24771,21 @@
       "provider": "deepseek"
     },
     {
+      "name": "deepseek-v4-flash-0731",
+      "model_id": "deepseek/deepseek-v4-flash-0731",
+      "provider": "openrouter",
+      "tool_format": "native"
+    },
+    {
       "name": "deepseek-v4-pro",
       "model_id": "deepseek-v4-pro",
       "provider": "deepseek"
+    },
+    {
+      "name": "deepseek-v4-pro-0813",
+      "model_id": "deepseek/deepseek-v4-pro-0813",
+      "provider": "openrouter",
+      "tool_format": "native"
     },
     {
       "name": "devstral-medium",
@@ -24578,8 +24830,7 @@
     {
       "name": "glm",
       "model_id": "glm-5.2",
-      "provider": "zai",
-      "tool_format": "text"
+      "provider": "zai"
     },
     {
       "name": "glm-4.6",
@@ -24599,8 +24850,7 @@
     {
       "name": "glm-5.2",
       "model_id": "glm-5.2",
-      "provider": "zai",
-      "tool_format": "text"
+      "provider": "zai"
     },
     {
       "name": "gpt-5.6",
@@ -24972,8 +25222,7 @@
     {
       "name": "openrouter-glm-5.2",
       "model_id": "z-ai/glm-5.2",
-      "provider": "openrouter",
-      "tool_format": "text"
+      "provider": "openrouter"
     },
     {
       "name": "openrouter-kat-coder-pro-v2",
@@ -25153,6 +25402,12 @@
       "name": "together-deepseek",
       "model_id": "deepseek-ai/DeepSeek-V4-Pro",
       "provider": "together"
+    },
+    {
+      "name": "together-deepseek-v4-flash-0731",
+      "model_id": "deepseek-ai/DeepSeek-V4-Flash-0731",
+      "provider": "together",
+      "tool_format": "native"
     },
     {
       "name": "together-deepseek-v4-pro",
@@ -28231,10 +28486,50 @@
     },
     {
       "provider": "openrouter",
+      "model": "deepseek/deepseek-v4-flash-0731",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "DeepSeek V4 Flash 0731 (via OpenRouter)",
+      "family": "deepseek",
+      "capabilities": [
+        "extended_thinking",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "openrouter",
       "model": "deepseek/deepseek-v4-pro",
       "base_url": "https://openrouter.ai/api/v1",
       "secret_env": "OPENROUTER_API_KEY",
       "label": "DeepSeek V4 Pro (via OpenRouter)",
+      "family": "deepseek",
+      "capabilities": [
+        "extended_thinking",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "openrouter",
+      "model": "deepseek/deepseek-v4-pro-0813",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "DeepSeek V4 Pro 0813 (via OpenRouter)",
       "family": "deepseek",
       "capabilities": [
         "extended_thinking",
@@ -29399,6 +29694,28 @@
         "streaming",
         "structured_output",
         "structured_output_mode:delimited",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "together",
+      "model": "deepseek-ai/DeepSeek-V4-Flash-0731",
+      "base_url": "https://api.together.xyz/v1",
+      "secret_env": "TOGETHER_AI_API_KEY",
+      "label": "DeepSeek V4 Flash 0731 (Together)",
+      "family": "deepseek",
+      "capabilities": [
+        "batch",
+        "extended_thinking",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
         "text_tools",
         "thinking",
         "tools"

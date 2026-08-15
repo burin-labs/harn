@@ -59,6 +59,12 @@ serving_precision = "throttled"
 # Cerebras GLM 4.7 is a public preview model with native tools, native
 # structured output, and top-level `reasoning_effort`; `none` is the documented
 # no-thinking value, while the older `disable_reasoning` knob is deprecated.
+#
+# This row has always pinned native, and the 2026-08-15 cross-host sweep
+# confirmed it: `zai-glm-4.7` returned a single clean `message.tool_calls` under
+# tool_choice=auto and required, sync and streaming. It only ever escaped the
+# (now retired) `glm-5` family gate because `zai-glm-*` does not contain the
+# literal `glm-5` — an accident that happened to land on the correct answer.
 [[provider.cerebras]]
 model_match = "zai-glm-*"
 native_tools = true

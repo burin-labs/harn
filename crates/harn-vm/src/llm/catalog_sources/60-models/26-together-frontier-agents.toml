@@ -25,6 +25,27 @@ tier = "frontier"
 open_weight = true
 strengths = ["agentic", "coding", "long_context", "tool_use", "reasoning"]
 complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "deepseek"]
+
+# DeepSeek V4 Flash 0731 — the dated snapshot Together actually serves
+# serverless (the undated `DeepSeek-V4-Flash` is not on the serverless tier).
+# Pricing read from Together's `/v1/models` rate card on 2026-08-15:
+# $0.14 in / $0.28 out / $0.03 cached-input per MTok. Native tool calling
+# verified clean the same day.
+[models."deepseek-ai/DeepSeek-V4-Flash-0731"]
+name = "DeepSeek V4 Flash 0731 (Together)"
+provider = "together"
+context_window = 1048576
+logical_model = "deepseek-v4-flash"
+equivalence_group = "deepseek-v4-flash"
+served_variant = "together"
+wire_model = "deepseek-ai/DeepSeek-V4-Flash-0731"
+api_dialect = "openai_chat"
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.14, output_per_mtok = 0.28, cache_read_per_mtok = 0.03 }
+tier = "mid"
+open_weight = true
+strengths = ["speed", "cheap", "tool_use", "reasoning", "long_context"]
+
 [models."zai-org/GLM-5.1"]
 name = "GLM 5.1 (Together)"
 provider = "together"

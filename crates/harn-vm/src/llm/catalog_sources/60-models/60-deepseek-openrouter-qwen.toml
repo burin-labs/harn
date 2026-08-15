@@ -25,12 +25,19 @@ strengths = ["reasoning", "coding", "tool_use", "long_context"]
 benchmarks = { aa_intelligence_index = 68.0 }
 # DeepSeek V4 OpenRouter mirrors. OpenRouter publishes an independent
 # rate card and a binary 1M-token context window for these routes.
+#
+# Prices below are the live OpenRouter rate card read from
+# `GET /api/v1/models` on 2026-08-15. The undated `deepseek/deepseek-v4-*`
+# aliases previously carried DeepSeek's DIRECT rate card, which understated
+# OpenRouter V4 Pro by ~2.7x ($0.435 recorded vs $1.168 charged per MTok in).
+# The dated snapshot rows further below are the ones that actually match the
+# direct rate card — do not copy prices between the two.
 [models."deepseek/deepseek-v4-flash"]
 name = "DeepSeek V4 Flash (via OpenRouter)"
 provider = "openrouter"
 context_window = 1048576
 capabilities = ["tools", "streaming"]
-pricing = { input_per_mtok = 0.098, output_per_mtok = 0.196, cache_read_per_mtok = 0.020 }
+pricing = { input_per_mtok = 0.06426, output_per_mtok = 0.12852, cache_read_per_mtok = 0.012852 }
 tier = "mid"
 open_weight = true
 strengths = ["speed", "cheap", "tool_use", "reasoning", "long_context"]
@@ -39,12 +46,38 @@ name = "DeepSeek V4 Pro (via OpenRouter)"
 provider = "openrouter"
 context_window = 1048576
 capabilities = ["tools", "streaming"]
-pricing = { input_per_mtok = 0.435, output_per_mtok = 0.87, cache_read_per_mtok = 0.003625 }
-
-# Open-router Qwen3.5 9B (kept for the `small` tier alias).
+pricing = { input_per_mtok = 1.168, output_per_mtok = 2.336, cache_read_per_mtok = 0.09855 }
 tier = "frontier"
 open_weight = true
 strengths = ["reasoning", "coding", "tool_use", "long_context"]
+
+# Dated DeepSeek V4 snapshots. The undated aliases float to whatever DeepSeek
+# ships; these pin a fixed build, which is what eval baselines need so a
+# silent upstream swap cannot move a measured number. Both verified serving on
+# 2026-08-15 and both returned a single clean native `message.tool_calls`.
+# On OpenRouter these snapshots price at the direct DeepSeek rate card, so
+# `deepseek-v4-pro-0813` is currently ~2.7x CHEAPER than the undated
+# `deepseek/deepseek-v4-pro` alias for identical weights.
+[models."deepseek/deepseek-v4-pro-0813"]
+name = "DeepSeek V4 Pro 0813 (via OpenRouter)"
+provider = "openrouter"
+context_window = 1048576
+capabilities = ["tools", "streaming", "prompt_caching"]
+pricing = { input_per_mtok = 0.435, output_per_mtok = 0.87, cache_read_per_mtok = 0.003625 }
+tier = "frontier"
+open_weight = true
+strengths = ["reasoning", "coding", "tool_use", "long_context"]
+[models."deepseek/deepseek-v4-flash-0731"]
+name = "DeepSeek V4 Flash 0731 (via OpenRouter)"
+provider = "openrouter"
+context_window = 1048576
+capabilities = ["tools", "streaming", "prompt_caching"]
+pricing = { input_per_mtok = 0.14, output_per_mtok = 0.28, cache_read_per_mtok = 0.028 }
+tier = "mid"
+open_weight = true
+strengths = ["speed", "cheap", "tool_use", "reasoning", "long_context"]
+
+# Open-router Qwen3.5 9B (kept for the `small` tier alias).
 [models."Qwen/Qwen3.5-9B"]
 name = "Qwen3.5 9B"
 provider = "openrouter"

@@ -128,9 +128,8 @@ serving_precision = "trusted"
 [[provider.fireworks]]
 model_match = "accounts/fireworks/models/glm-5p*"
 native_tools = true
-preferred_tool_format = "json"
-tool_mode_parity = "native_unreliable"
-tool_mode_parity_notes = "2026-06-20 Harn agent-loop smoke after parser fix: forced native/off emitted XML `<tool_use>` text instead of provider-native tool_calls. JSON tools completed the loop when auto reasoning was disabled; text tools did not."
+preferred_tool_format = "native"
+tool_mode_parity_notes = "2026-08-15 cross-host native re-probe: single clean `message.tool_calls`, empty content, no `<tool_call>` markup. Fireworks glm-5p2 verified on tool_choice=auto and required, sync and streaming."
 structured_output = "native"
 thinking_modes = ["enabled"]
 auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }

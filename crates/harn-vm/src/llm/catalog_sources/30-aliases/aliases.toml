@@ -211,6 +211,10 @@ id = "deepinfra/deepseek-ai/DeepSeek-V4-Pro"
 provider = "deepinfra"
 tool_format = "native"
 
+# Stays on the fenced-JSON text channel while every other GLM route moved to
+# native: DeepInfra's GLM-5.2 deployment emits 38 duplicate native tool calls
+# for a single intent under tool_choice=required (2026-08-15, deterministic
+# 4/4). See the `*glm-5.2*` rule in 36-deepinfra.toml.
 [aliases."deepinfra-glm-5.2"]
 id = "deepinfra/zai-org/GLM-5.2"
 provider = "deepinfra"
@@ -228,9 +232,12 @@ id = "deepinfra/Qwen/Qwen3.6-35B-A3B"
 provider = "deepinfra"
 tool_format = "text"
 
-# Baseten Model APIs. GLM-5.x currently emits tool XML in assistant content on
-# `tool_choice=required` in Harn smoke probes, so pin GLM aliases to the text
-# grammar. Kimi, DeepSeek, GPT-OSS, and Nemotron returned OpenAI `tool_calls`.
+# Baseten Model APIs. The 2026-06-23 Harn smoke probe found GLM-5.x emitting
+# tool XML in assistant content on `tool_choice=required`, so GLM aliases pin
+# the text grammar; Kimi, DeepSeek, GPT-OSS, and Nemotron returned OpenAI
+# `tool_calls`. This is now the LAST GLM route still on the markup-leak
+# rationale, and it is unverified since 2026-06-23 because no Baseten
+# credential is available to re-probe it. See 39-baseten.toml.
 [aliases."baseten-glm-5.2"]
 id = "baseten/zai-org/GLM-5.2"
 provider = "baseten"
@@ -504,13 +511,15 @@ provider = "minimax"
 id = "MiniMax-M3"
 provider = "minimax"
 
-# Z.AI GLM aliases. GLM-5.x native channel emits `<tool_call>` markup instead of
-# OpenAI message.tool_calls (see 98-zai.toml + the Baseten probe), so the zai
-# GLM-5 rows are pinned to TEXT; these aliases pin `text` to match.
+# Z.AI GLM aliases. These previously pinned `tool_format = "text"` to match the
+# zai GLM-5 rows' text pin. The 2026-08-15 cross-host re-probe found GLM's
+# native channel clean on every reachable host, so 98-zai.toml now prefers
+# native and these aliases carry no tool_format override — they inherit the
+# capability matrix instead of hard-coding a channel that has to be kept in
+# sync by hand.
 [aliases.glm]
 id = "glm-5.2"
 provider = "zai"
-tool_format = "text"
 
 [aliases."glm-5"]
 id = "glm-5"
@@ -523,12 +532,10 @@ provider = "zai"
 [aliases."glm-5.2"]
 id = "glm-5.2"
 provider = "zai"
-tool_format = "text"
 
 [aliases."openrouter-glm-5.2"]
 id = "z-ai/glm-5.2"
 provider = "openrouter"
-tool_format = "text"
 
 # DeepSeek V4 direct API aliases.
 [aliases.deepseek]
@@ -550,6 +557,27 @@ provider = "deepseek"
 [aliases."deepseek-v4-pro"]
 id = "deepseek-v4-pro"
 provider = "deepseek"
+
+# Dated DeepSeek V4 snapshots, routed via OpenRouter (the host these were
+# verified serving on 2026-08-15; both returned a single clean native
+# `message.tool_calls`). Use these when a run must pin one fixed build — the
+# undated aliases above float with whatever DeepSeek promotes, which silently
+# moves eval baselines. On OpenRouter the 0813 snapshot is also ~2.7x cheaper
+# than the undated `deepseek/deepseek-v4-pro` route.
+[aliases."deepseek-v4-pro-0813"]
+id = "deepseek/deepseek-v4-pro-0813"
+provider = "openrouter"
+tool_format = "native"
+
+[aliases."deepseek-v4-flash-0731"]
+id = "deepseek/deepseek-v4-flash-0731"
+provider = "openrouter"
+tool_format = "native"
+
+[aliases."together-deepseek-v4-flash-0731"]
+id = "deepseek-ai/DeepSeek-V4-Flash-0731"
+provider = "together"
+tool_format = "native"
 
 [aliases.cohere]
 id = "command-a-plus-05-2026"
