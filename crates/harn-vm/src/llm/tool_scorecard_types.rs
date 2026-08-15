@@ -87,6 +87,10 @@ pub struct ToolScorecardRoute {
     pub empty_completion_cases: usize,
     pub malformed_argument_cases: usize,
     pub http_error_cases: usize,
+    /// Cases where the provider said the route does not exist (HTTP 404/410,
+    /// or a typed `model_not_available`-class error code). Separate from
+    /// `http_error_cases` because it is a catalog defect, not a flaky call.
+    pub route_unavailable_cases: usize,
     pub transport_error_cases: usize,
     pub rate_limited_cases: usize,
     pub observed_latency_case_count: usize,
@@ -139,6 +143,10 @@ pub struct ToolScorecardModeEvidence {
     pub empty_completion_cases: usize,
     pub malformed_argument_cases: usize,
     pub http_error_cases: usize,
+    /// Cases where the provider said the route does not exist (HTTP 404/410,
+    /// or a typed `model_not_available`-class error code). Separate from
+    /// `http_error_cases` because it is a catalog defect, not a flaky call.
+    pub route_unavailable_cases: usize,
     pub transport_error_cases: usize,
     pub rate_limited_cases: usize,
     pub observed_latency_case_count: usize,

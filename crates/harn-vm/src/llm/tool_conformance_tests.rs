@@ -1441,3 +1441,60 @@ fn probe_case(
         content_sample: None,
     }
 }
+
+#[test]
+fn retired_routes_classify_as_unavailable_not_as_a_failed_call() {
+    // Every status/body below is a verbatim shape observed while sweeping the
+    // catalog on 2026-08-15. The distinction is load-bearing: a retried
+    // `http_error` never converges on a route the provider deleted.
+    for (status, body) in [
+        // NVIDIA NIM and Baseten both retire routes with 410 + a prose reason.
+        (
+            410u16,
+            r#"{"detail":"the model version you are trying to access has been deprecated."}"#,
+        ),
+        // Fireworks 404s a model it no longer deploys.
+        (
+            404,
+            r#"{"error":{"message":"Model not found","type":"invalid_request_error"}}"#,
+        ),
+        // Together still LISTS these weights but serves them only through a
+        // provisioned dedicated endpoint, and says so with a typed code.
+        (
+            400,
+            r#"{"error":{"message":"...dedicated endpoint...","code":"model_not_available"}}"#,
+        ),
+    ] {
+        assert_eq!(
+            classify_http_failure(status, body),
+            ToolProbeClassification::RouteUnavailable,
+            "status {status} should read as a catalog defect",
+        );
+    }
+
+    // A route that exists but rejected this particular call stays an HttpError:
+    // rate limits, bad keys, and oversized requests are all retryable or
+    // fixable without touching the catalog.
+    for (status, body) in [
+        (
+            429u16,
+            r#"{"error":{"message":"rate limited","code":"rate_limit_exceeded"}}"#,
+        ),
+        (
+            401,
+            r#"{"error":{"message":"bad key","code":"invalid_api_key"}}"#,
+        ),
+        (
+            400,
+            r#"{"error":{"message":"max_tokens too large","code":"context_length_exceeded"}}"#,
+        ),
+        (500, "upstream exploded"),
+        (400, "not json at all"),
+    ] {
+        assert_eq!(
+            classify_http_failure(status, body),
+            ToolProbeClassification::HttpError,
+            "status {status} should stay a call failure",
+        );
+    }
+}

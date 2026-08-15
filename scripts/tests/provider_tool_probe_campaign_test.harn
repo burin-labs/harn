@@ -788,12 +788,35 @@ pipeline test_provider_tool_probe_campaign_aggregates_priced_probe_telemetry(
   assert_eq(telemetry.request_attempt_count, 2)
   assert_eq(telemetry.retry_count, 0)
   assert_eq(telemetry.rate_limited_count, 1)
+  assert_eq(telemetry.route_unavailable_count, 0)
   assert_eq(telemetry.observed_latency_count, 2)
   assert_eq(telemetry.latency_ms_total, 100)
   assert_eq(telemetry.input_tokens, 12)
   assert_eq(telemetry.output_tokens, 4)
   assert_eq(telemetry.actual_usd, 0.003)
   assert_eq(telemetry.unpriced_case_count, 0)
+}
+
+@test
+pipeline test_provider_tool_probe_campaign_counts_retired_routes_apart_from_failures(
+  harness: Harness,
+  task,
+) {
+  // A dead catalog row and a rate-limited call are both `ok: false`. Counting
+  // them together is why six unreachable rows survived in the shipped catalog
+  // until a hand sweep found them; the classification keeps them apart.
+  const telemetry = provider_tool_probe_campaign_probe_telemetry(
+    {
+      cases: [
+        {ok: false, classification: "route_unavailable", http_status: 410},
+        {ok: false, classification: "http_error", http_status: 429},
+      ],
+    },
+  )
+  assert_eq(telemetry.case_count, 2)
+  assert_eq(telemetry.successful_case_count, 0)
+  assert_eq(telemetry.route_unavailable_count, 1)
+  assert_eq(telemetry.rate_limited_count, 1)
 }
 
 @test

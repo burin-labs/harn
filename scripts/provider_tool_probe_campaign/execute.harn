@@ -21,6 +21,7 @@ pub fn provider_tool_probe_campaign_probe_telemetry(report: dict) -> dict {
   let successful_case_count = 0
   let empty_completion_count = 0
   let rate_limited_count = 0
+  let route_unavailable_count = 0
   let observed_latency_count = 0
   let latency_ms_total = 0
   let observed_usage_count = 0
@@ -38,6 +39,12 @@ pub fn provider_tool_probe_campaign_probe_telemetry(report: dict) -> dict {
     }
     if probe_case?.http_status == 429 {
       rate_limited_count = rate_limited_count + 1
+    }
+    // A route the provider has retired is a catalog defect, not a flaky call.
+    // Harn classifies it upstream so this counter never has to match on a
+    // provider's error prose.
+    if probe_case?.classification == "route_unavailable" {
+      route_unavailable_count = route_unavailable_count + 1
     }
     if probe_case?.elapsed_ms != nil {
       observed_latency_count = observed_latency_count + 1
@@ -63,6 +70,7 @@ pub fn provider_tool_probe_campaign_probe_telemetry(report: dict) -> dict {
     retry_count: 0,
     retry_accounting: "provider tool-probe makes one physical request per case and does not retry",
     rate_limited_count: rate_limited_count,
+    route_unavailable_count: route_unavailable_count,
     observed_latency_count: observed_latency_count,
     latency_ms_total: latency_ms_total,
     observed_usage_count: observed_usage_count,

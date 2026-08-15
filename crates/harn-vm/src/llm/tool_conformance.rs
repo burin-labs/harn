@@ -14,6 +14,8 @@ mod helpers;
 mod request;
 #[path = "tool_conformance_request_contract.rs"]
 mod request_contract;
+#[path = "tool_conformance_response.rs"]
+mod response;
 #[path = "tool_conformance_parse.rs"]
 mod text_parse;
 #[path = "tool_conformance_types.rs"]
@@ -24,6 +26,10 @@ pub(super) use helpers::{aggregate_stream_text, probe_tool_registry};
 #[cfg(test)]
 use request::validate_probe_request_body;
 use request::{probe_request_body_for_format, probe_request_body_with_warnings_for_format};
+use response::{
+    content_sample, extract_content, extract_native_tool_calls, first_non_empty,
+    has_raw_model_tool_tag, sample_content, sample_failure,
+};
 pub use types::{
     ToolConformanceRequestAuditFailure, ToolConformanceRequestAuditNotApplicable,
     ToolConformanceRequestAuditReport, ToolConformanceRequestAuditRoute,
@@ -171,6 +177,13 @@ pub enum ToolProbeClassification {
     MalformedJsonArguments,
     EmptySilent,
     HttpError,
+    /// The provider answered, and its answer was that this route does not
+    /// exist. Split out from [`HttpError`] because the two demand opposite
+    /// responses: a generic HTTP error is a probe that failed and should be
+    /// retried, while an unavailable route is a catalog row that should be
+    /// repointed or deleted. Collapsing them is how six unreachable rows sat
+    /// in the shipped catalog until a hand sweep found them on 2026-08-15.
+    RouteUnavailable,
     TransportError,
 }
 
@@ -287,11 +300,12 @@ impl ToolConformanceCase {
         status: u16,
         message: String,
         elapsed_ms: Option<u64>,
+        classification: ToolProbeClassification,
     ) -> Self {
         Self {
             mode,
             ok: false,
-            classification: ToolProbeClassification::HttpError,
+            classification,
             fallback_mode: ToolProbeFallbackMode::Disabled,
             failure_reason: Some(message),
             http_status: Some(status),
@@ -303,6 +317,51 @@ impl ToolConformanceCase {
             protocol_violations: Vec::new(),
             content_sample: None,
         }
+    }
+}
+
+/// OpenAI-compatible error codes that mean "this route is gone", as opposed to
+/// "this call failed". Hosts carry them in the typed `error.code`/`error.type`
+/// fields, so reading them does not couple Harn to any provider's prose.
+const ROUTE_UNAVAILABLE_ERROR_CODES: &[&str] = &[
+    "model_not_available",
+    "model_not_found",
+    "model_terminated",
+    "model_decommissioned",
+    "invalid_model",
+];
+
+/// Decide whether a non-success response says the call failed or says the
+/// route no longer exists.
+///
+/// `404` and `410` carry that meaning in HTTP itself, and every host observed
+/// retiring a route used one of them -- except Together, which answers `400`
+/// with `error.code = "model_not_available"` for weights it lists but only
+/// serves through a provisioned dedicated endpoint. A listing that still names
+/// the model is why the status alone is not enough here.
+fn classify_http_failure(status: u16, body: &str) -> ToolProbeClassification {
+    if status == 404 || status == 410 {
+        return ToolProbeClassification::RouteUnavailable;
+    }
+    if status != 400 && status != 403 {
+        return ToolProbeClassification::HttpError;
+    }
+    let Ok(payload) = serde_json::from_str::<Value>(body) else {
+        return ToolProbeClassification::HttpError;
+    };
+    let Some(error) = payload.get("error") else {
+        return ToolProbeClassification::HttpError;
+    };
+    let names_missing_route = ["code", "type"].into_iter().any(|field| {
+        error
+            .get(field)
+            .and_then(Value::as_str)
+            .is_some_and(|code| ROUTE_UNAVAILABLE_ERROR_CODES.contains(&code))
+    });
+    if names_missing_route {
+        ToolProbeClassification::RouteUnavailable
+    } else {
+        ToolProbeClassification::HttpError
     }
 }
 
@@ -989,6 +1048,7 @@ async fn execute_live_probe_case(
             status.as_u16(),
             sample_failure(&text, "provider returned non-success HTTP status"),
             elapsed,
+            classify_http_failure(status.as_u16(), &text),
         );
     }
     let response_value = if mode == ToolProbeMode::Streaming {
@@ -1285,211 +1345,6 @@ fn chat_url(def: &ProviderDef, base_url: &str) -> Result<String, String> {
     reqwest::Url::parse(&url)
         .map(|_| url.clone())
         .map_err(|error| format!("invalid provider chat URL '{url}': {error}"))
-}
-
-#[derive(Debug)]
-struct NativeToolCall {
-    name: String,
-    arguments: Option<Value>,
-}
-
-fn extract_native_tool_calls(response: &Value) -> Vec<NativeToolCall> {
-    // Streaming aggregation owns this top-level list. Its raw `frames` remain
-    // diagnostic evidence and must not become a second semantic call source.
-    if let Some(tool_calls) = response.get("tool_calls").and_then(Value::as_array) {
-        return tool_calls
-            .iter()
-            .filter_map(parse_native_tool_call)
-            .collect();
-    }
-    let mut calls = Vec::new();
-    visit_native_tool_call_arrays(response, &mut calls);
-    calls
-}
-
-fn visit_native_tool_call_arrays(value: &Value, calls: &mut Vec<NativeToolCall>) {
-    match value {
-        Value::Object(map) => {
-            if let Some(call) = parse_anthropic_tool_use_object(map) {
-                calls.push(call);
-            }
-            if let Some(tool_calls) = map.get("tool_calls").and_then(Value::as_array) {
-                for item in tool_calls {
-                    if let Some(call) = parse_native_tool_call(item) {
-                        calls.push(call);
-                    }
-                }
-            }
-            for child in map.values() {
-                visit_native_tool_call_arrays(child, calls);
-            }
-        }
-        Value::Array(items) => {
-            for item in items {
-                visit_native_tool_call_arrays(item, calls);
-            }
-        }
-        _ => {}
-    }
-}
-
-fn parse_anthropic_tool_use_object(
-    object: &serde_json::Map<String, Value>,
-) -> Option<NativeToolCall> {
-    if object.get("type").and_then(Value::as_str) != Some("tool_use") {
-        return None;
-    }
-    let name = object
-        .get("name")
-        .and_then(Value::as_str)
-        .filter(|name| !name.is_empty())?
-        .to_string();
-    let arguments = object
-        .get("input")
-        .or_else(|| object.get("arguments"))
-        .cloned()
-        .unwrap_or_else(|| json!({}));
-    Some(NativeToolCall {
-        name,
-        arguments: Some(arguments),
-    })
-}
-
-fn parse_native_tool_call(item: &Value) -> Option<NativeToolCall> {
-    let obj = item.as_object()?;
-    let function = obj.get("function").and_then(Value::as_object);
-    let name = function
-        .and_then(|function| function.get("name"))
-        .or_else(|| obj.get("name"))
-        .and_then(Value::as_str)?
-        .to_string();
-    match crate::llm::tools::parse_text_tool_call_from_native_name(&name) {
-        crate::llm::tools::NativeToolNameTextCall::Parsed { name, arguments } => {
-            return Some(NativeToolCall {
-                name,
-                arguments: Some(arguments),
-            });
-        }
-        crate::llm::tools::NativeToolNameTextCall::Malformed { name, .. } => {
-            return Some(NativeToolCall {
-                name,
-                arguments: None,
-            });
-        }
-        crate::llm::tools::NativeToolNameTextCall::NotCall => {}
-    }
-    let raw_args = function
-        .and_then(|function| function.get("arguments"))
-        .or_else(|| obj.get("arguments"));
-    let arguments = match raw_args {
-        Some(Value::String(raw)) => serde_json::from_str::<Value>(raw).ok(),
-        Some(value @ Value::Object(_)) => Some(value.clone()),
-        Some(_) => None,
-        None => Some(json!({})),
-    };
-    Some(NativeToolCall { name, arguments })
-}
-
-fn extract_content(response: &Value) -> String {
-    let mut parts = Vec::new();
-    visit_content(response, &mut parts);
-    parts
-        .into_iter()
-        .filter(|part| !part.trim().is_empty())
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-fn visit_content(value: &Value, parts: &mut Vec<String>) {
-    match value {
-        Value::Object(map) => {
-            if object_is_private_reasoning_content(map) {
-                return;
-            }
-            for key in ["content", "response", "text"] {
-                if let Some(text) = map.get(key).and_then(Value::as_str) {
-                    parts.push(text.to_string());
-                }
-            }
-            for (key, child) in map {
-                if field_is_private_reasoning(key) {
-                    continue;
-                }
-                visit_content(child, parts);
-            }
-        }
-        Value::Array(items) => {
-            for item in items {
-                visit_content(item, parts);
-            }
-        }
-        _ => {}
-    }
-}
-
-fn object_is_private_reasoning_content(map: &serde_json::Map<String, Value>) -> bool {
-    let block_type = map.get("type").and_then(Value::as_str).unwrap_or("");
-    if matches!(block_type, "reasoning" | "thinking" | "reasoning_summary") {
-        return true;
-    }
-    matches!(
-        map.get("visibility").and_then(Value::as_str),
-        Some("private" | "internal")
-    )
-}
-
-fn field_is_private_reasoning(field: &str) -> bool {
-    matches!(
-        field,
-        "analysis"
-            | "reasoning"
-            | "reasoning_content"
-            | "reasoning_details"
-            | "reasoning_summary"
-            | "thinking"
-            | "thinking_summary"
-    )
-}
-
-fn has_raw_model_tool_tag(content: &str) -> bool {
-    let lowered = content.to_ascii_lowercase();
-    lowered.contains("<tool_call")
-        || lowered.contains("<toolcall")
-        || lowered.contains("tool_code:")
-        || lowered.contains("tool_call:")
-        || lowered.contains("call:")
-        || lowered.contains("<function")
-}
-
-fn content_sample(response: &Value) -> Option<String> {
-    sample_content(&extract_content(response))
-}
-
-fn sample_content(content: &str) -> Option<String> {
-    let trimmed = content.trim();
-    if trimmed.is_empty() {
-        None
-    } else {
-        Some(trimmed.chars().take(240).collect())
-    }
-}
-
-fn sample_failure(text: &str, fallback: &str) -> String {
-    let trimmed = text.trim();
-    if trimmed.is_empty() {
-        fallback.to_string()
-    } else {
-        format!(
-            "{fallback}: {}",
-            trimmed.chars().take(240).collect::<String>()
-        )
-    }
-}
-
-fn first_non_empty(value: Option<String>, fallback: &str) -> String {
-    value
-        .filter(|value| !value.trim().is_empty())
-        .unwrap_or_else(|| fallback.to_string())
 }
 
 fn elapsed_ms(clock: &dyn harn_clock::Clock, started_ms: i64) -> u64 {

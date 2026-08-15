@@ -3717,6 +3717,109 @@
       ]
     },
     {
+      "id": "baseten/deepseek-ai/DeepSeek-V4-Flash-0731",
+      "name": "DeepSeek V4 Flash 0731 (Baseten)",
+      "display_name": "DeepSeek V4 Flash 0731",
+      "provider": "baseten",
+      "aliases": [
+        "baseten-deepseek-v4-flash-0731"
+      ],
+      "context_window": 1048576,
+      "logical_model": "deepseek-v4-flash-0731",
+      "equivalence_group": "deepseek-v4-flash-0731",
+      "served_variant": "baseten-model-api",
+      "wire_model": "deepseek-ai/DeepSeek-V4-Flash-0731",
+      "api_dialect": "openai_chat",
+      "architecture": {
+        "parameter_count_b": 284.0,
+        "active_parameter_count_b": 13.0,
+        "moe": true,
+        "quantization": "fp8",
+        "source_url": "https://www.baseten.co/library/deepseek-v4/",
+        "last_verified": "2026-08-15"
+      },
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "effort"
+        ],
+        "effort_supported": true,
+        "effort_levels": [
+          "low",
+          "medium",
+          "high"
+        ],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 0.13,
+        "output_per_mtok": 0.26,
+        "cache_read_per_mtok": 0.028,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "prompt_caching",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ],
+      "family": "deepseek",
+      "lineage": "deepseek",
+      "complementary_with": [
+        "anthropic-claude",
+        "openai-gpt",
+        "google-gemini",
+        "qwen",
+        "kimi"
+      ],
+      "tier": "mid",
+      "open_weight": true,
+      "strengths": [
+        "speed",
+        "cheap",
+        "reasoning",
+        "coding",
+        "agentic",
+        "tool_use",
+        "long_context"
+      ]
+    },
+    {
       "id": "baseten/deepseek-ai/DeepSeek-V4-Pro",
       "name": "DeepSeek V4 Pro (Baseten)",
       "display_name": "DeepSeek V4 Pro",
@@ -3724,7 +3827,7 @@
       "aliases": [
         "baseten-deepseek-v4-pro"
       ],
-      "context_window": 131000,
+      "context_window": 262144,
       "logical_model": "deepseek-v4-pro",
       "equivalence_group": "deepseek-v4-pro",
       "served_variant": "baseten-model-api",
@@ -3736,7 +3839,7 @@
         "moe": true,
         "quantization": "fp4",
         "source_url": "https://www.baseten.co/library/deepseek-v4/",
-        "last_verified": "2026-06-23"
+        "last_verified": "2026-08-15"
       },
       "modalities": {
         "input": [
@@ -3818,26 +3921,30 @@
       ]
     },
     {
-      "id": "baseten/moonshotai/Kimi-K2.5",
-      "name": "Kimi K2.5 (Baseten)",
-      "display_name": "Kimi K2.5",
+      "id": "baseten/deepseek-ai/DeepSeek-V4-Pro-0813",
+      "name": "DeepSeek V4 Pro 0813 (Baseten)",
+      "display_name": "DeepSeek V4 Pro 0813",
       "provider": "baseten",
-      "aliases": [],
-      "context_window": 262000,
-      "logical_model": "moonshot-kimi-k2.5",
-      "equivalence_group": "moonshot-kimi-k2.5",
+      "aliases": [
+        "baseten-deepseek-v4-pro-0813"
+      ],
+      "context_window": 1048576,
+      "logical_model": "deepseek-v4-pro-0813",
+      "equivalence_group": "deepseek-v4-pro-0813",
       "served_variant": "baseten-model-api",
-      "wire_model": "moonshotai/Kimi-K2.5",
+      "wire_model": "deepseek-ai/DeepSeek-V4-Pro-0813",
       "api_dialect": "openai_chat",
       "architecture": {
+        "parameter_count_b": 1600.0,
+        "active_parameter_count_b": 49.0,
+        "moe": true,
         "quantization": "fp4",
-        "source_url": "https://www.baseten.co/pricing/",
-        "last_verified": "2026-06-23"
+        "source_url": "https://www.baseten.co/library/deepseek-v4/",
+        "last_verified": "2026-08-15"
       },
       "modalities": {
         "input": [
-          "text",
-          "image"
+          "text"
         ],
         "output": [
           "text"
@@ -3859,23 +3966,27 @@
         "supports_assistant_prefill": false,
         "prefers_role_developer": false,
         "prefers_xml_tools": false,
-        "thinking_block_style": "inline"
+        "thinking_block_style": "reasoning_summary"
       },
       "reasoning": {
         "modes": [
-          "enabled"
+          "effort"
         ],
-        "effort_supported": false,
-        "effort_levels": [],
+        "effort_supported": true,
+        "effort_levels": [
+          "low",
+          "medium",
+          "high"
+        ],
         "none_supported": false,
         "interleaved_supported": false,
         "preserve_thinking": false
       },
       "prompt_cache": true,
       "pricing": {
-        "input_per_mtok": 0.6,
-        "output_per_mtok": 3.0,
-        "cache_read_per_mtok": 0.12,
+        "input_per_mtok": 1.32,
+        "output_per_mtok": 3.96,
+        "cache_read_per_mtok": 0.132,
         "cache_write_per_mtok": null
       },
       "deprecation": {
@@ -3886,21 +3997,28 @@
       "capability_tags": [
         "streaming",
         "tools",
-        "vision",
         "prompt_caching",
         "thinking",
+        "extended_thinking",
         "structured_output"
       ],
-      "family": "kimi",
-      "lineage": "kimi",
+      "family": "deepseek",
+      "lineage": "deepseek",
+      "complementary_with": [
+        "anthropic-claude",
+        "openai-gpt",
+        "google-gemini",
+        "qwen",
+        "kimi"
+      ],
       "tier": "frontier",
       "open_weight": true,
       "strengths": [
+        "reasoning",
         "coding",
         "agentic",
         "tool_use",
-        "long_context",
-        "vision"
+        "long_context"
       ]
     },
     {
@@ -3918,7 +4036,7 @@
       "architecture": {
         "quantization": "fp4",
         "source_url": "https://www.baseten.co/pricing/",
-        "last_verified": "2026-06-23"
+        "last_verified": "2026-08-15"
       },
       "modalities": {
         "input": [
@@ -4007,7 +4125,7 @@
       "architecture": {
         "quantization": "fp4",
         "source_url": "https://www.baseten.co/library/kimi-k27-code/",
-        "last_verified": "2026-06-23"
+        "last_verified": "2026-08-15"
       },
       "modalities": {
         "input": [
@@ -4106,7 +4224,7 @@
         "moe": true,
         "quantization": "fp4",
         "source_url": "https://www.baseten.co/library/nemotron-3-ultra/",
-        "last_verified": "2026-06-23"
+        "last_verified": "2026-08-15"
       },
       "modalities": {
         "input": [
@@ -4184,105 +4302,6 @@
       ]
     },
     {
-      "id": "baseten/nvidia/Nemotron-120B-A12B",
-      "name": "Nemotron 3 Super 120B A12B (Baseten)",
-      "display_name": "Nemotron 3 Super 120B A12B",
-      "provider": "baseten",
-      "aliases": [
-        "baseten-nemotron-super"
-      ],
-      "context_window": 202800,
-      "logical_model": "nemotron-3-super-120b-a12b",
-      "equivalence_group": "nemotron-3-super-120b-a12b",
-      "served_variant": "baseten-model-api",
-      "wire_model": "nvidia/Nemotron-120B-A12B",
-      "api_dialect": "openai_chat",
-      "architecture": {
-        "parameter_count_b": 120.0,
-        "active_parameter_count_b": 12.0,
-        "moe": true,
-        "quantization": "fp4",
-        "source_url": "https://www.baseten.co/library/nemotron-3-super/",
-        "last_verified": "2026-06-23"
-      },
-      "modalities": {
-        "input": [
-          "text"
-        ],
-        "output": [
-          "text"
-        ]
-      },
-      "tool_support": {
-        "native": true,
-        "text": true,
-        "preferred_format": "native",
-        "parity": "unknown",
-        "parity_source": "derived",
-        "tool_search": []
-      },
-      "structured_output": "native",
-      "format_preferences": {
-        "prefers_xml_scaffolding": false,
-        "prefers_markdown_scaffolding": true,
-        "structured_output_mode": "native_json",
-        "supports_assistant_prefill": false,
-        "prefers_role_developer": false,
-        "prefers_xml_tools": false,
-        "thinking_block_style": "inline"
-      },
-      "reasoning": {
-        "modes": [
-          "enabled"
-        ],
-        "effort_supported": false,
-        "effort_levels": [],
-        "none_supported": false,
-        "interleaved_supported": false,
-        "preserve_thinking": false
-      },
-      "prompt_cache": true,
-      "pricing": {
-        "input_per_mtok": 0.3,
-        "output_per_mtok": 0.75,
-        "cache_read_per_mtok": 0.06,
-        "cache_write_per_mtok": null
-      },
-      "deprecation": {
-        "status": "active"
-      },
-      "availability": "serverless",
-      "quality_tags": [],
-      "capability_tags": [
-        "streaming",
-        "tools",
-        "prompt_caching",
-        "thinking",
-        "structured_output"
-      ],
-      "family": "baseten",
-      "lineage": "baseten",
-      "complementary_with": [
-        "anthropic-claude",
-        "openai-gpt",
-        "google-gemini",
-        "qwen",
-        "deepseek",
-        "kimi"
-      ],
-      "tier": "frontier",
-      "open_weight": true,
-      "strengths": [
-        "speed",
-        "cheap",
-        "reasoning",
-        "coding",
-        "agentic",
-        "tool_use",
-        "long_context"
-      ]
-    },
-    {
       "id": "baseten/openai/gpt-oss-120b",
       "name": "GPT-OSS 120B (Baseten)",
       "display_name": "GPT-OSS 120B",
@@ -4303,7 +4322,7 @@
         "quantization": "fp4",
         "license": "Apache-2.0",
         "source_url": "https://www.baseten.co/library/gpt-oss-120b/",
-        "last_verified": "2026-06-23"
+        "last_verified": "2026-08-15"
       },
       "modalities": {
         "input": [
@@ -4398,7 +4417,7 @@
       "architecture": {
         "quantization": "fp4",
         "source_url": "https://www.baseten.co/pricing/",
-        "last_verified": "2026-06-23"
+        "last_verified": "2026-08-15"
       },
       "modalities": {
         "input": [
@@ -4463,174 +4482,6 @@
       ]
     },
     {
-      "id": "baseten/zai-org/GLM-5",
-      "name": "GLM 5 (Baseten)",
-      "display_name": "GLM 5",
-      "provider": "baseten",
-      "aliases": [],
-      "context_window": 202800,
-      "logical_model": "glm-5",
-      "equivalence_group": "glm-5",
-      "served_variant": "baseten-model-api",
-      "wire_model": "zai-org/GLM-5",
-      "api_dialect": "openai_chat",
-      "architecture": {
-        "quantization": "fp4",
-        "source_url": "https://www.baseten.co/pricing/",
-        "last_verified": "2026-06-23"
-      },
-      "modalities": {
-        "input": [
-          "text"
-        ],
-        "output": [
-          "text"
-        ]
-      },
-      "tool_support": {
-        "native": true,
-        "text": true,
-        "preferred_format": "text",
-        "parity": "native_unreliable",
-        "parity_source": "declared",
-        "parity_notes": "2026-06-23 live Baseten probe: forced native/off emitted visible `<tool_call><arg_key>...` content with no provider-native tool_calls; Harn heredoc text tools emitted parseable `<tool_call>\\nadd({ ... })\\n</tool_call>`.",
-        "tool_search": []
-      },
-      "structured_output": "native",
-      "format_preferences": {
-        "prefers_xml_scaffolding": false,
-        "prefers_markdown_scaffolding": true,
-        "structured_output_mode": "native_json",
-        "supports_assistant_prefill": false,
-        "prefers_role_developer": false,
-        "prefers_xml_tools": false,
-        "thinking_block_style": "inline"
-      },
-      "reasoning": {
-        "modes": [
-          "enabled"
-        ],
-        "effort_supported": false,
-        "effort_levels": [],
-        "none_supported": false,
-        "interleaved_supported": false,
-        "preserve_thinking": false
-      },
-      "prompt_cache": true,
-      "pricing": {
-        "input_per_mtok": 0.95,
-        "output_per_mtok": 3.15,
-        "cache_read_per_mtok": 0.2,
-        "cache_write_per_mtok": null
-      },
-      "deprecation": {
-        "status": "active"
-      },
-      "availability": "serverless",
-      "quality_tags": [],
-      "capability_tags": [
-        "streaming",
-        "tools",
-        "prompt_caching",
-        "thinking",
-        "structured_output"
-      ],
-      "family": "glm",
-      "lineage": "glm",
-      "tier": "frontier",
-      "open_weight": true,
-      "strengths": [
-        "coding",
-        "agentic",
-        "tool_use",
-        "long_context"
-      ]
-    },
-    {
-      "id": "baseten/zai-org/GLM-5.1",
-      "name": "GLM 5.1 (Baseten)",
-      "display_name": "GLM 5.1",
-      "provider": "baseten",
-      "aliases": [],
-      "context_window": 202800,
-      "logical_model": "glm-5.1",
-      "equivalence_group": "glm-5.1",
-      "served_variant": "baseten-model-api",
-      "wire_model": "zai-org/GLM-5.1",
-      "api_dialect": "openai_chat",
-      "architecture": {
-        "quantization": "fp4",
-        "source_url": "https://www.baseten.co/pricing/",
-        "last_verified": "2026-06-23"
-      },
-      "modalities": {
-        "input": [
-          "text"
-        ],
-        "output": [
-          "text"
-        ]
-      },
-      "tool_support": {
-        "native": true,
-        "text": true,
-        "preferred_format": "text",
-        "parity": "native_unreliable",
-        "parity_source": "declared",
-        "parity_notes": "2026-06-23 live Baseten probe: forced native/off emitted visible `<tool_call><arg_key>...` content with no provider-native tool_calls; Harn heredoc text tools emitted parseable `<tool_call>\\nadd({ ... })\\n</tool_call>`.",
-        "tool_search": []
-      },
-      "structured_output": "native",
-      "format_preferences": {
-        "prefers_xml_scaffolding": false,
-        "prefers_markdown_scaffolding": true,
-        "structured_output_mode": "native_json",
-        "supports_assistant_prefill": false,
-        "prefers_role_developer": false,
-        "prefers_xml_tools": false,
-        "thinking_block_style": "inline"
-      },
-      "reasoning": {
-        "modes": [
-          "enabled"
-        ],
-        "effort_supported": false,
-        "effort_levels": [],
-        "none_supported": false,
-        "interleaved_supported": false,
-        "preserve_thinking": false
-      },
-      "prompt_cache": true,
-      "pricing": {
-        "input_per_mtok": 1.3,
-        "output_per_mtok": 4.3,
-        "cache_read_per_mtok": 0.26,
-        "cache_write_per_mtok": null
-      },
-      "deprecation": {
-        "status": "active"
-      },
-      "availability": "serverless",
-      "quality_tags": [],
-      "capability_tags": [
-        "streaming",
-        "tools",
-        "prompt_caching",
-        "thinking",
-        "structured_output"
-      ],
-      "family": "glm",
-      "lineage": "glm",
-      "tier": "frontier",
-      "open_weight": true,
-      "strengths": [
-        "coding",
-        "agentic",
-        "tool_use",
-        "long_context"
-      ]
-    },
-    {
       "id": "baseten/zai-org/GLM-5.2",
       "name": "GLM 5.2 (Baseten)",
       "display_name": "GLM 5.2",
@@ -4638,7 +4489,7 @@
       "aliases": [
         "baseten-glm-5.2"
       ],
-      "context_window": 262144,
+      "context_window": 1048576,
       "logical_model": "glm-5.2",
       "equivalence_group": "glm-5.2",
       "served_variant": "baseten-model-api",
@@ -4650,7 +4501,7 @@
         "source": "artificial_analysis",
         "source_url": "https://artificialanalysis.ai/models/glm-5-2/providers",
         "last_verified": "2026-06-23",
-        "notes": "Artificial Analysis GLM-5.2 provider benchmark; Harn 2026-06-23 smoke probes confirmed non-thinking and thinking Baseten calls plus native-tool unreliability."
+        "notes": "Artificial Analysis GLM-5.2 provider benchmark. The 2026-06-23 Harn probe that accompanied this figure also recorded native-tool unreliability; a 2026-08-15 re-probe found 16/16 clean native tool calls and that verdict was withdrawn."
       },
       "architecture": {
         "parameter_count_b": 744.0,
@@ -4659,7 +4510,7 @@
         "quantization": "fp8",
         "license": "MIT",
         "source_url": "https://www.baseten.co/blog/how-we-built-the-worlds-fastest-api-for-glm-52/",
-        "last_verified": "2026-06-23"
+        "last_verified": "2026-08-15"
       },
       "modalities": {
         "input": [
@@ -4672,10 +4523,9 @@
       "tool_support": {
         "native": true,
         "text": true,
-        "preferred_format": "text",
-        "parity": "native_unreliable",
-        "parity_source": "declared",
-        "parity_notes": "2026-06-23 live Baseten probe: forced native/off emitted visible `<tool_call><arg_key>...` content with no provider-native tool_calls; Harn heredoc text tools emitted parseable `<tool_call>\\nadd({ ... })\\n</tool_call>`.",
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -4702,7 +4552,105 @@
       "pricing": {
         "input_per_mtok": 1.4,
         "output_per_mtok": 4.4,
-        "cache_read_per_mtok": 0.26,
+        "cache_read_per_mtok": 0.14,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "prompt_caching",
+        "thinking",
+        "structured_output"
+      ],
+      "family": "glm",
+      "lineage": "glm",
+      "complementary_with": [
+        "anthropic-claude",
+        "openai-gpt",
+        "google-gemini",
+        "kimi",
+        "deepseek"
+      ],
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "speed",
+        "coding",
+        "agentic",
+        "tool_use",
+        "reasoning",
+        "long_context"
+      ]
+    },
+    {
+      "id": "baseten/zai-org/GLM-5.2-Fast",
+      "name": "GLM 5.2 Fast (Baseten)",
+      "display_name": "GLM 5.2 Fast",
+      "provider": "baseten",
+      "aliases": [
+        "baseten-glm-5.2-fast"
+      ],
+      "context_window": 1048576,
+      "logical_model": "glm-5.2",
+      "equivalence_group": "glm-5.2",
+      "served_variant": "baseten-model-api-fast",
+      "wire_model": "zai-org/GLM-5.2-Fast",
+      "api_dialect": "openai_chat",
+      "architecture": {
+        "parameter_count_b": 744.0,
+        "active_parameter_count_b": 40.0,
+        "moe": true,
+        "quantization": "fp8",
+        "license": "MIT",
+        "source_url": "https://www.baseten.co/blog/how-we-built-the-worlds-fastest-api-for-glm-52/",
+        "last_verified": "2026-08-15"
+      },
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "effort_levels": [],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 2.1,
+        "output_per_mtok": 6.6,
+        "cache_read_per_mtok": 0.21,
         "cache_write_per_mtok": null
       },
       "deprecation": {
@@ -24322,8 +24270,20 @@
   ],
   "aliases": [
     {
+      "name": "baseten-deepseek-v4-flash-0731",
+      "model_id": "baseten/deepseek-ai/DeepSeek-V4-Flash-0731",
+      "provider": "baseten",
+      "tool_format": "native"
+    },
+    {
       "name": "baseten-deepseek-v4-pro",
       "model_id": "baseten/deepseek-ai/DeepSeek-V4-Pro",
+      "provider": "baseten",
+      "tool_format": "native"
+    },
+    {
+      "name": "baseten-deepseek-v4-pro-0813",
+      "model_id": "baseten/deepseek-ai/DeepSeek-V4-Pro-0813",
       "provider": "baseten",
       "tool_format": "native"
     },
@@ -24331,7 +24291,13 @@
       "name": "baseten-glm-5.2",
       "model_id": "baseten/zai-org/GLM-5.2",
       "provider": "baseten",
-      "tool_format": "text"
+      "tool_format": "native"
+    },
+    {
+      "name": "baseten-glm-5.2-fast",
+      "model_id": "baseten/zai-org/GLM-5.2-Fast",
+      "provider": "baseten",
+      "tool_format": "native"
     },
     {
       "name": "baseten-gpt-oss-120b",
@@ -24342,12 +24308,6 @@
     {
       "name": "baseten-kimi-k2.7-code",
       "model_id": "baseten/moonshotai/Kimi-K2.7-Code",
-      "provider": "baseten",
-      "tool_format": "native"
-    },
-    {
-      "name": "baseten-nemotron-super",
-      "model_id": "baseten/nvidia/Nemotron-120B-A12B",
       "provider": "baseten",
       "tool_format": "native"
     },
@@ -25520,6 +25480,27 @@
     },
     {
       "provider": "baseten",
+      "model": "deepseek-ai/DeepSeek-V4-Flash-0731",
+      "base_url": "https://inference.baseten.co/v1",
+      "secret_env": "BASETEN_API_KEY",
+      "label": "DeepSeek V4 Flash 0731 (Baseten)",
+      "family": "deepseek",
+      "capabilities": [
+        "extended_thinking",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "baseten",
       "model": "deepseek-ai/DeepSeek-V4-Pro",
       "base_url": "https://inference.baseten.co/v1",
       "secret_env": "BASETEN_API_KEY",
@@ -25541,22 +25522,23 @@
     },
     {
       "provider": "baseten",
-      "model": "moonshotai/Kimi-K2.5",
+      "model": "deepseek-ai/DeepSeek-V4-Pro-0813",
       "base_url": "https://inference.baseten.co/v1",
       "secret_env": "BASETEN_API_KEY",
-      "label": "Kimi K2.5 (Baseten)",
-      "family": "kimi",
+      "label": "DeepSeek V4 Pro 0813 (Baseten)",
+      "family": "deepseek",
       "capabilities": [
+        "extended_thinking",
         "native_tools",
         "prefers_markdown_scaffolding",
         "prompt_caching",
+        "reasoning_effort",
         "streaming",
         "structured_output",
         "structured_output_mode:native_json",
         "text_tools",
         "thinking",
-        "tools",
-        "vision"
+        "tools"
       ]
     },
     {
@@ -25620,25 +25602,6 @@
     },
     {
       "provider": "baseten",
-      "model": "nvidia/Nemotron-120B-A12B",
-      "base_url": "https://inference.baseten.co/v1",
-      "secret_env": "BASETEN_API_KEY",
-      "label": "Nemotron 3 Super 120B A12B (Baseten)",
-      "family": "baseten",
-      "capabilities": [
-        "native_tools",
-        "prefers_markdown_scaffolding",
-        "prompt_caching",
-        "streaming",
-        "structured_output",
-        "structured_output_mode:native_json",
-        "text_tools",
-        "thinking",
-        "tools"
-      ]
-    },
-    {
-      "provider": "baseten",
       "model": "openai/gpt-oss-120b",
       "base_url": "https://inference.baseten.co/v1",
       "secret_env": "BASETEN_API_KEY",
@@ -25677,48 +25640,29 @@
     },
     {
       "provider": "baseten",
-      "model": "zai-org/GLM-5",
-      "base_url": "https://inference.baseten.co/v1",
-      "secret_env": "BASETEN_API_KEY",
-      "label": "GLM 5 (Baseten)",
-      "family": "glm",
-      "capabilities": [
-        "native_tools",
-        "prefers_markdown_scaffolding",
-        "prompt_caching",
-        "streaming",
-        "structured_output",
-        "structured_output_mode:native_json",
-        "text_tools",
-        "thinking",
-        "tools"
-      ]
-    },
-    {
-      "provider": "baseten",
-      "model": "zai-org/GLM-5.1",
-      "base_url": "https://inference.baseten.co/v1",
-      "secret_env": "BASETEN_API_KEY",
-      "label": "GLM 5.1 (Baseten)",
-      "family": "glm",
-      "capabilities": [
-        "native_tools",
-        "prefers_markdown_scaffolding",
-        "prompt_caching",
-        "streaming",
-        "structured_output",
-        "structured_output_mode:native_json",
-        "text_tools",
-        "thinking",
-        "tools"
-      ]
-    },
-    {
-      "provider": "baseten",
       "model": "zai-org/GLM-5.2",
       "base_url": "https://inference.baseten.co/v1",
       "secret_env": "BASETEN_API_KEY",
       "label": "GLM 5.2 (Baseten)",
+      "family": "glm",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "baseten",
+      "model": "zai-org/GLM-5.2-Fast",
+      "base_url": "https://inference.baseten.co/v1",
+      "secret_env": "BASETEN_API_KEY",
+      "label": "GLM 5.2 Fast (Baseten)",
       "family": "glm",
       "capabilities": [
         "native_tools",
