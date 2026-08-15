@@ -37,6 +37,10 @@ fn __agent_host_string_list(value, label) {
   throw "agent_host_tools: " + label + " must be a string, list of strings, or nil"
 }
 
+fn __agent_host_nonempty_string(value) {
+  return type_of(value) == "string" && trim(value) != "" ? value : nil
+}
+
 fn __agent_host_tool_enabled(options, key, group) {
   const opts = __agent_host_options(options)
   const enabled = opts?.enabled_tools ?? opts?.tools
@@ -286,7 +290,7 @@ fn __agent_host_safe_relative_path(path) {
 
 fn __agent_host_git_request(args, options) {
   let req = {operation: args.operation}
-  const repo = args?.repo ?? __agent_host_root(options)
+  const repo = __agent_host_nonempty_string(args?.repo) ?? __agent_host_root(options)
   if repo != nil && repo != "" {
     req = req + {repo: __agent_host_resolve_path(repo, options)}
   }
@@ -421,7 +425,7 @@ fn __agent_host_apply_command_policy(request, args, options) {
 
 fn __agent_host_command_cwd(args, options) {
   const opts = __agent_host_options(options)
-  const cwd = args?.cwd ?? opts?.cwd ?? opts?.root
+  const cwd = __agent_host_nonempty_string(args?.cwd) ?? opts?.cwd ?? opts?.root
   if cwd == nil || cwd == "" {
     return nil
   }
@@ -1213,10 +1217,8 @@ pub fn agent_command_tools(harness: Harness, registry = nil, options = nil) {
 }
 
 /**
- * Code mode is default-OFF: only surface it when the caller explicitly opts in
- * with `code_mode: true` or lists "code_mode" in `enabled_tools`. It is a
- * powerful composition surface (a script that calls other tools), so it must
- * never appear by default.
+ * Code mode is default-OFF. Expose it only with `code_mode: true` or
+ * `enabled_tools: ["code_mode"]`; it can call other tools and must never be default.
  */
 fn __agent_host_code_mode_enabled(options) {
   const opts = __agent_host_options(options)

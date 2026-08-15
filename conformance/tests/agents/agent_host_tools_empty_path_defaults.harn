@@ -1,4 +1,4 @@
-import { agent_read_tools } from "std/agent/host_tools"
+import { agent_host_tools, agent_read_tools } from "std/agent/host_tools"
 import { agent_dispatch_tool_call } from "std/agent/primitives"
 
 fn main(harness: Harness) {
@@ -8,6 +8,8 @@ fn main(harness: Harness) {
   )
   harness.fs.mkdir(root)
   harness.fs.write_text(path_join(root, "needle.txt"), "alpha needle\n")
+  const initialized = harness.process.exec_at(root, "git", "init", "--quiet")
+  assert(initialized.success, "fixture repository initializes")
   const tools = agent_read_tools(harness.fs, harness.tools, nil, {root: root, cwd: root})
   const listed = agent_dispatch_tool_call(
     harness.tools,
@@ -23,4 +25,26 @@ fn main(harness: Harness) {
   harness.stdio.println(searched.ok)
   harness.stdio.println(contains(listed.rendered_result, "needle.txt"))
   harness.stdio.println(contains(searched.rendered_result, "needle"))
+  const host_tools = agent_host_tools(
+    harness,
+    nil,
+    {root: root, cwd: root, allow_argv_prefixes: [["pwd"]]},
+  )
+  // Native schemas often materialize absent optional strings as "". The
+  // configured root must remain the sole authority anchor in that form too.
+  const command = agent_dispatch_tool_call(
+    harness.tools,
+    {name: "run_command", arguments: {argv: ["pwd"], cwd: ""}},
+    host_tools,
+  )
+  const command_data = json_parse(command.rendered_result)
+  const git = agent_dispatch_tool_call(
+    harness.tools,
+    {name: "git_inspect", arguments: {operation: "status", repo: ""}},
+    host_tools,
+  )
+  harness.stdio.println(command.ok)
+  harness.stdio.println(contains(command_data.stdout, "harn-host-tools-empty-path"))
+  harness.stdio.println(git.ok)
+  harness.stdio.println(contains(git.rendered_result, "needle.txt"))
 }
