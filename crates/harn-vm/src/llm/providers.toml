@@ -1422,8 +1422,13 @@ id = "stepfun/step-3.7-flash"
 provider = "openrouter"
 
 # Together mirrors for current GLM/MiniMax agent routes.
-[aliases."together-glm-5.1"]
-id = "zai-org/GLM-5.1"
+#
+# There is no `together-glm-5.1` alias: Together serves GLM-5.1 and GLM-5 only
+# through a provisioned dedicated endpoint, so serverless calls fail with HTTP
+# 400 `model_not_available` (2026-08-15 sweep). GLM-5.2 is the one serverless
+# Together GLM route, and `together-glm` points at it so the obvious name works.
+[aliases."together-glm"]
+id = "zai-org/GLM-5.2"
 provider = "together"
 
 [aliases."together-glm-5.2"]
@@ -1450,8 +1455,16 @@ id = "nvidia/nemotron-3-nano-30b-a3b"
 provider = "nvidia"
 tool_format = "native"
 
-[aliases."nvidia-deepseek-v4-pro"]
-id = "nvidia/deepseek-v4-pro"
+# NIM end-of-lifed both undated DeepSeek V4 builds on 2026-08-07 and GLM-5.1 on
+# 2026-07-02. These aliases follow NIM to what it actually serves: the dated
+# Flash snapshot and GLM-5.2. There is no NIM DeepSeek V4 Pro build to point at.
+[aliases."nvidia-deepseek-v4-flash"]
+id = "nvidia/deepseek-v4-flash-0731"
+provider = "nvidia"
+tool_format = "native"
+
+[aliases."nvidia-glm-5.2"]
+id = "nvidia/z-ai/glm-5.2"
 provider = "nvidia"
 tool_format = "native"
 
@@ -3170,18 +3183,10 @@ tier = "mid"
 open_weight = true
 strengths = ["speed", "cheap", "tool_use", "reasoning", "long_context"]
 
-[models."zai-org/GLM-5.1"]
-name = "GLM 5.1 (Together)"
-provider = "together"
-context_window = 202752
-equivalence_group = "frontier-agent-coding"
-capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 1.40, output_per_mtok = 4.40, cache_read_per_mtok = 0.26 }
+# 2026-08-15 reachability sweep: Together serves `zai-org/GLM-5.1` only via a
+# provisioned dedicated endpoint, so every serverless call returns HTTP 400
+# `model_not_available`. GLM-5.2 below is the serverless Together GLM route.
 
-tier = "frontier"
-open_weight = true
-strengths = ["agentic", "coding", "long_context", "tool_use", "reasoning"]
-complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "deepseek"]
 [models."zai-org/GLM-5.2"]
 name = "GLM 5.2 (Together)"
 provider = "together"
@@ -4702,27 +4707,18 @@ tier = "mid"
 open_weight = true
 strengths = ["vision", "reasoning", "tool_use", "summarization", "long_context"]
 
-[models."nvidia/deepseek-v4-pro"]
-name = "DeepSeek V4 Pro (NVIDIA NIM)"
-provider = "nvidia"
-wire_model = "deepseek-ai/deepseek-v4-pro"
-context_window = 1048576
-logical_model = "deepseek-v4-pro"
-equivalence_group = "deepseek-v4-pro"
-served_variant = "nvidia-nim"
-api_dialect = "openai_chat"
-capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
-tier = "frontier"
-open_weight = true
-strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
-complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "kimi"]
+# 2026-08-15 reachability sweep: NIM retired both undated DeepSeek V4 builds
+# (HTTP 410, end of life 2026-08-07). It still serves the dated Flash snapshot,
+# so that row survives below. There is no DeepSeek V4 Pro build on NIM any more,
+# so the Pro row is gone rather than left pointing at a 410 — a catalog entry
+# that cannot be called is worse than an absent one, because it is selectable.
 
-[models."nvidia/deepseek-v4-flash"]
-name = "DeepSeek V4 Flash (NVIDIA NIM)"
+[models."nvidia/deepseek-v4-flash-0731"]
+name = "DeepSeek V4 Flash 0731 (NVIDIA NIM)"
 provider = "nvidia"
-wire_model = "deepseek-ai/deepseek-v4-flash"
+wire_model = "deepseek-ai/deepseek-v4-flash-0731"
 context_window = 1048576
-logical_model = "deepseek-v4-flash"
+logical_model = "deepseek-v4-flash-0731"
 equivalence_group = "deepseek-v4-flash"
 served_variant = "nvidia-nim"
 api_dialect = "openai_chat"
@@ -4823,13 +4819,16 @@ tier = "mid"
 open_weight = true
 strengths = ["speed", "cheap", "tool_use", "reasoning"]
 
-[models."nvidia/z-ai/glm-5.1"]
-name = "GLM 5.1 (NVIDIA NIM)"
+# 2026-08-15 reachability sweep: NIM retired `z-ai/glm-5.1` (HTTP 410, end of
+# life 2026-07-02) and now serves GLM-5.2 on this endpoint. The row moves to the
+# served build rather than being deleted, so the NVIDIA GLM route keeps working.
+[models."nvidia/z-ai/glm-5.2"]
+name = "GLM 5.2 (NVIDIA NIM)"
 provider = "nvidia"
-wire_model = "z-ai/glm-5.1"
+wire_model = "z-ai/glm-5.2"
 context_window = 202752
-logical_model = "glm-5.1"
-equivalence_group = "glm-5.1"
+logical_model = "glm-5.2"
+equivalence_group = "glm-5.2"
 served_variant = "nvidia-nim"
 api_dialect = "openai_chat"
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
@@ -5490,15 +5489,9 @@ tier = "frontier"
 open_weight = true
 strengths = ["coding", "reasoning", "tool_use", "long_context", "vision"]
 
-[models."zai-org/GLM-5"]
-name = "GLM 5 (Together)"
-provider = "together"
-context_window = 202752
-capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 1.00, output_per_mtok = 3.20 }
-tier = "frontier"
-open_weight = true
-strengths = ["coding", "agentic", "tool_use", "reasoning"]
+# 2026-08-15 reachability sweep: `zai-org/GLM-5` is non-serverless on Together
+# (HTTP 400 `model_not_available`), same as GLM-5.1. Removed rather than left
+# selectable; `zai-org/GLM-5.2` is the reachable Together GLM route.
 
 [models."together/nvidia/nemotron-3-ultra-550b-a55b"]
 name = "Nemotron 3 Ultra 550B A55B (Together)"
@@ -5600,19 +5593,9 @@ open_weight = true
 strengths = ["coding", "reasoning", "tool_use", "long_context", "vision"]
 
 # Fireworks compatibility fill-ins returned by live model discovery.
-[models."accounts/fireworks/models/glm-5p1"]
-name = "GLM 5.1 (Fireworks)"
-provider = "fireworks"
-context_window = 202752
-logical_model = "glm-5.1"
-equivalence_group = "frontier-agent-coding"
-served_variant = "fireworks"
-wire_model = "accounts/fireworks/models/glm-5p1"
-api_dialect = "openai_chat"
-capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
-tier = "frontier"
-open_weight = true
-strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
+# 2026-08-15 reachability sweep: Fireworks no longer deploys `glm-5p1`
+# (HTTP 404 `Model not found, inaccessible, and/or not deployed`); its model
+# listing carries only `glm-5p2`, which stays catalogued above.
 
 [models."accounts/fireworks/models/kimi-k2p5"]
 name = "Kimi K2.5 (Fireworks)"

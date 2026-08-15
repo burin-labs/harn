@@ -384,8 +384,13 @@ id = "stepfun/step-3.7-flash"
 provider = "openrouter"
 
 # Together mirrors for current GLM/MiniMax agent routes.
-[aliases."together-glm-5.1"]
-id = "zai-org/GLM-5.1"
+#
+# There is no `together-glm-5.1` alias: Together serves GLM-5.1 and GLM-5 only
+# through a provisioned dedicated endpoint, so serverless calls fail with HTTP
+# 400 `model_not_available` (2026-08-15 sweep). GLM-5.2 is the one serverless
+# Together GLM route, and `together-glm` points at it so the obvious name works.
+[aliases."together-glm"]
+id = "zai-org/GLM-5.2"
 provider = "together"
 
 [aliases."together-glm-5.2"]
@@ -412,8 +417,16 @@ id = "nvidia/nemotron-3-nano-30b-a3b"
 provider = "nvidia"
 tool_format = "native"
 
-[aliases."nvidia-deepseek-v4-pro"]
-id = "nvidia/deepseek-v4-pro"
+# NIM end-of-lifed both undated DeepSeek V4 builds on 2026-08-07 and GLM-5.1 on
+# 2026-07-02. These aliases follow NIM to what it actually serves: the dated
+# Flash snapshot and GLM-5.2. There is no NIM DeepSeek V4 Pro build to point at.
+[aliases."nvidia-deepseek-v4-flash"]
+id = "nvidia/deepseek-v4-flash-0731"
+provider = "nvidia"
+tool_format = "native"
+
+[aliases."nvidia-glm-5.2"]
+id = "nvidia/z-ai/glm-5.2"
 provider = "nvidia"
 tool_format = "native"
 

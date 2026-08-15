@@ -7068,96 +7068,6 @@
       ]
     },
     {
-      "id": "accounts/fireworks/models/glm-5p1",
-      "name": "GLM 5.1 (Fireworks)",
-      "display_name": "GLM 5.1",
-      "provider": "fireworks",
-      "aliases": [],
-      "context_window": 202752,
-      "logical_model": "glm-5.1",
-      "equivalence_group": "frontier-agent-coding",
-      "served_variant": "fireworks",
-      "wire_model": "accounts/fireworks/models/glm-5p1",
-      "api_dialect": "openai_chat",
-      "modalities": {
-        "input": [
-          "text"
-        ],
-        "output": [
-          "text"
-        ]
-      },
-      "tool_support": {
-        "native": true,
-        "text": true,
-        "preferred_format": "native",
-        "parity": "unknown",
-        "parity_source": "derived",
-        "parity_notes": "2026-08-15 cross-host native re-probe: single clean `message.tool_calls`, empty content, no `<tool_call>` markup. Fireworks glm-5p2 verified on tool_choice=auto and required, sync and streaming.",
-        "tool_search": []
-      },
-      "structured_output": "native",
-      "format_preferences": {
-        "prefers_xml_scaffolding": false,
-        "prefers_markdown_scaffolding": true,
-        "structured_output_mode": "native_json",
-        "supports_assistant_prefill": false,
-        "prefers_role_developer": false,
-        "prefers_xml_tools": false,
-        "thinking_block_style": "inline"
-      },
-      "reasoning": {
-        "modes": [
-          "enabled"
-        ],
-        "effort_supported": false,
-        "effort_levels": [],
-        "none_supported": false,
-        "interleaved_supported": false,
-        "preserve_thinking": false
-      },
-      "prompt_cache": true,
-      "batch": {
-        "wire_format": "fireworks",
-        "input_mode": "jsonl_file",
-        "result_ordering": "custom_id_rejoin",
-        "partial_failure": "unknown",
-        "cancellation": "unknown",
-        "discount_percent": 50,
-        "turnaround_hours": 24,
-        "max_input_bytes": 1073741824,
-        "operational_notes": [
-          "Batch support is model-specific; Harn only marks catalog rows that advertise provider batch capability.",
-          "Prompt caching can combine with eligible batch jobs for additional savings.",
-          "Provider docs currently mention selectable 12/24/48/72 hour expiration windows and also say expired jobs expire after 24h; Harn treats the exact expiration as provider-ambiguous."
-        ]
-      },
-      "deprecation": {
-        "status": "active"
-      },
-      "availability": "serverless",
-      "quality_tags": [],
-      "capability_tags": [
-        "streaming",
-        "tools",
-        "prompt_caching",
-        "thinking",
-        "structured_output",
-        "batch"
-      ],
-      "family": "glm",
-      "lineage": "glm",
-      "tier": "frontier",
-      "open_weight": true,
-      "strengths": [
-        "coding",
-        "agentic",
-        "tool_use",
-        "reasoning",
-        "long_context"
-      ]
-    },
-    {
       "id": "accounts/fireworks/models/glm-5p2",
       "name": "GLM 5.2 (Fireworks)",
       "display_name": "GLM 5.2",
@@ -12279,16 +12189,18 @@
       ]
     },
     {
-      "id": "nvidia/deepseek-v4-flash",
-      "name": "DeepSeek V4 Flash (NVIDIA NIM)",
-      "display_name": "DeepSeek V4 Flash",
+      "id": "nvidia/deepseek-v4-flash-0731",
+      "name": "DeepSeek V4 Flash 0731 (NVIDIA NIM)",
+      "display_name": "DeepSeek V4 Flash 0731",
       "provider": "nvidia",
-      "aliases": [],
+      "aliases": [
+        "nvidia-deepseek-v4-flash"
+      ],
       "context_window": 1048576,
-      "logical_model": "deepseek-v4-flash",
+      "logical_model": "deepseek-v4-flash-0731",
       "equivalence_group": "deepseek-v4-flash",
       "served_variant": "nvidia-nim",
-      "wire_model": "deepseek-ai/deepseek-v4-flash",
+      "wire_model": "deepseek-ai/deepseek-v4-flash-0731",
       "api_dialect": "openai_chat",
       "modalities": {
         "input": [
@@ -12352,88 +12264,6 @@
       "open_weight": true,
       "strengths": [
         "speed",
-        "coding",
-        "agentic",
-        "tool_use",
-        "reasoning",
-        "long_context"
-      ]
-    },
-    {
-      "id": "nvidia/deepseek-v4-pro",
-      "name": "DeepSeek V4 Pro (NVIDIA NIM)",
-      "display_name": "DeepSeek V4 Pro",
-      "provider": "nvidia",
-      "aliases": [
-        "nvidia-deepseek-v4-pro"
-      ],
-      "context_window": 1048576,
-      "logical_model": "deepseek-v4-pro",
-      "equivalence_group": "deepseek-v4-pro",
-      "served_variant": "nvidia-nim",
-      "wire_model": "deepseek-ai/deepseek-v4-pro",
-      "api_dialect": "openai_chat",
-      "modalities": {
-        "input": [
-          "text"
-        ],
-        "output": [
-          "text"
-        ]
-      },
-      "tool_support": {
-        "native": true,
-        "text": true,
-        "preferred_format": "native",
-        "parity": "unknown",
-        "parity_source": "derived",
-        "tool_search": []
-      },
-      "structured_output": "native",
-      "format_preferences": {
-        "prefers_xml_scaffolding": false,
-        "prefers_markdown_scaffolding": true,
-        "structured_output_mode": "native_json",
-        "supports_assistant_prefill": false,
-        "prefers_role_developer": false,
-        "prefers_xml_tools": false,
-        "thinking_block_style": "inline"
-      },
-      "reasoning": {
-        "modes": [
-          "enabled"
-        ],
-        "effort_supported": false,
-        "effort_levels": [],
-        "none_supported": false,
-        "interleaved_supported": false,
-        "preserve_thinking": false
-      },
-      "prompt_cache": true,
-      "deprecation": {
-        "status": "active"
-      },
-      "availability": "serverless",
-      "quality_tags": [],
-      "capability_tags": [
-        "streaming",
-        "tools",
-        "prompt_caching",
-        "thinking",
-        "structured_output"
-      ],
-      "family": "deepseek",
-      "lineage": "deepseek",
-      "complementary_with": [
-        "anthropic-claude",
-        "openai-gpt",
-        "google-gemini",
-        "qwen",
-        "kimi"
-      ],
-      "tier": "frontier",
-      "open_weight": true,
-      "strengths": [
         "coding",
         "agentic",
         "tool_use",
@@ -13358,16 +13188,18 @@
       ]
     },
     {
-      "id": "nvidia/z-ai/glm-5.1",
-      "name": "GLM 5.1 (NVIDIA NIM)",
-      "display_name": "GLM 5.1",
+      "id": "nvidia/z-ai/glm-5.2",
+      "name": "GLM 5.2 (NVIDIA NIM)",
+      "display_name": "GLM 5.2",
       "provider": "nvidia",
-      "aliases": [],
+      "aliases": [
+        "nvidia-glm-5.2"
+      ],
       "context_window": 202752,
-      "logical_model": "glm-5.1",
-      "equivalence_group": "glm-5.1",
+      "logical_model": "glm-5.2",
+      "equivalence_group": "glm-5.2",
       "served_variant": "nvidia-nim",
-      "wire_model": "z-ai/glm-5.1",
+      "wire_model": "z-ai/glm-5.2",
       "api_dialect": "openai_chat",
       "modalities": {
         "input": [
@@ -23148,190 +22980,12 @@
       ]
     },
     {
-      "id": "zai-org/GLM-5",
-      "name": "GLM 5 (Together)",
-      "display_name": "GLM 5",
-      "provider": "together",
-      "aliases": [],
-      "context_window": 202752,
-      "modalities": {
-        "input": [
-          "text"
-        ],
-        "output": [
-          "text"
-        ]
-      },
-      "tool_support": {
-        "native": true,
-        "text": true,
-        "preferred_format": "native",
-        "parity": "unknown",
-        "parity_source": "derived",
-        "parity_notes": "2026-08-15 cross-host native re-probe: single clean `message.tool_calls`, empty content, no `<tool_call>` markup. Together zai-org/GLM-5.2 verified on tool_choice=auto (sync + streaming) and required. Caveat: under tool_choice=required 1 of 4 runs returned the schema placeholder `{\"city\":\"string\"}` instead of the real argument; tool_choice=auto was clean in every run.",
-        "tool_search": []
-      },
-      "structured_output": "native",
-      "format_preferences": {
-        "prefers_xml_scaffolding": false,
-        "prefers_markdown_scaffolding": true,
-        "structured_output_mode": "native_json",
-        "supports_assistant_prefill": false,
-        "prefers_role_developer": false,
-        "prefers_xml_tools": false,
-        "thinking_block_style": "inline"
-      },
-      "reasoning": {
-        "modes": [
-          "enabled"
-        ],
-        "effort_supported": false,
-        "effort_levels": [],
-        "none_supported": false,
-        "interleaved_supported": false,
-        "preserve_thinking": false
-      },
-      "prompt_cache": true,
-      "batch": {
-        "wire_format": "openai",
-        "input_mode": "jsonl_file",
-        "result_ordering": "custom_id_rejoin",
-        "partial_failure": "per_request",
-        "cancellation": "unknown",
-        "discount_percent": 50,
-        "turnaround_hours": 24
-      },
-      "pricing": {
-        "input_per_mtok": 1.0,
-        "output_per_mtok": 3.2,
-        "cache_read_per_mtok": null,
-        "cache_write_per_mtok": null
-      },
-      "deprecation": {
-        "status": "active"
-      },
-      "availability": "serverless",
-      "quality_tags": [],
-      "capability_tags": [
-        "streaming",
-        "tools",
-        "prompt_caching",
-        "thinking",
-        "structured_output",
-        "batch"
-      ],
-      "family": "glm",
-      "lineage": "glm",
-      "tier": "frontier",
-      "open_weight": true,
-      "strengths": [
-        "coding",
-        "agentic",
-        "tool_use",
-        "reasoning"
-      ]
-    },
-    {
-      "id": "zai-org/GLM-5.1",
-      "name": "GLM 5.1 (Together)",
-      "display_name": "GLM 5.1",
-      "provider": "together",
-      "aliases": [
-        "together-glm-5.1"
-      ],
-      "context_window": 202752,
-      "equivalence_group": "frontier-agent-coding",
-      "modalities": {
-        "input": [
-          "text"
-        ],
-        "output": [
-          "text"
-        ]
-      },
-      "tool_support": {
-        "native": true,
-        "text": true,
-        "preferred_format": "native",
-        "parity": "unknown",
-        "parity_source": "derived",
-        "parity_notes": "2026-08-15 cross-host native re-probe: single clean `message.tool_calls`, empty content, no `<tool_call>` markup. Together zai-org/GLM-5.2 verified on tool_choice=auto (sync + streaming) and required. Caveat: under tool_choice=required 1 of 4 runs returned the schema placeholder `{\"city\":\"string\"}` instead of the real argument; tool_choice=auto was clean in every run.",
-        "tool_search": []
-      },
-      "structured_output": "native",
-      "format_preferences": {
-        "prefers_xml_scaffolding": false,
-        "prefers_markdown_scaffolding": true,
-        "structured_output_mode": "native_json",
-        "supports_assistant_prefill": false,
-        "prefers_role_developer": false,
-        "prefers_xml_tools": false,
-        "thinking_block_style": "inline"
-      },
-      "reasoning": {
-        "modes": [
-          "enabled"
-        ],
-        "effort_supported": false,
-        "effort_levels": [],
-        "none_supported": false,
-        "interleaved_supported": false,
-        "preserve_thinking": false
-      },
-      "prompt_cache": true,
-      "batch": {
-        "wire_format": "openai",
-        "input_mode": "jsonl_file",
-        "result_ordering": "custom_id_rejoin",
-        "partial_failure": "per_request",
-        "cancellation": "unknown",
-        "discount_percent": 50,
-        "turnaround_hours": 24
-      },
-      "pricing": {
-        "input_per_mtok": 1.4,
-        "output_per_mtok": 4.4,
-        "cache_read_per_mtok": 0.26,
-        "cache_write_per_mtok": null
-      },
-      "deprecation": {
-        "status": "active"
-      },
-      "availability": "serverless",
-      "quality_tags": [],
-      "capability_tags": [
-        "streaming",
-        "tools",
-        "prompt_caching",
-        "thinking",
-        "structured_output",
-        "batch"
-      ],
-      "family": "glm",
-      "lineage": "glm",
-      "complementary_with": [
-        "anthropic-claude",
-        "openai-gpt",
-        "google-gemini",
-        "qwen",
-        "deepseek"
-      ],
-      "tier": "frontier",
-      "open_weight": true,
-      "strengths": [
-        "agentic",
-        "coding",
-        "long_context",
-        "tool_use",
-        "reasoning"
-      ]
-    },
-    {
       "id": "zai-org/GLM-5.2",
       "name": "GLM 5.2 (Together)",
       "display_name": "GLM 5.2",
       "provider": "together",
       "aliases": [
+        "together-glm",
         "together-glm-5.2"
       ],
       "context_window": 262144,
@@ -25114,8 +24768,14 @@
       "tool_format": "native"
     },
     {
-      "name": "nvidia-deepseek-v4-pro",
-      "model_id": "nvidia/deepseek-v4-pro",
+      "name": "nvidia-deepseek-v4-flash",
+      "model_id": "nvidia/deepseek-v4-flash-0731",
+      "provider": "nvidia",
+      "tool_format": "native"
+    },
+    {
+      "name": "nvidia-glm-5.2",
+      "model_id": "nvidia/z-ai/glm-5.2",
       "provider": "nvidia",
       "tool_format": "native"
     },
@@ -25417,8 +25077,8 @@
       "provider": "together"
     },
     {
-      "name": "together-glm-5.1",
-      "model_id": "zai-org/GLM-5.1",
+      "name": "together-glm",
+      "model_id": "zai-org/GLM-5.2",
       "provider": "together"
     },
     {
@@ -26570,26 +26230,6 @@
     },
     {
       "provider": "fireworks",
-      "model": "accounts/fireworks/models/glm-5p1",
-      "base_url": "https://api.fireworks.ai/inference/v1",
-      "secret_env": "FIREWORKS_API_KEY",
-      "label": "GLM 5.1 (Fireworks)",
-      "family": "glm",
-      "capabilities": [
-        "batch",
-        "native_tools",
-        "prefers_markdown_scaffolding",
-        "prompt_caching",
-        "streaming",
-        "structured_output",
-        "structured_output_mode:native_json",
-        "text_tools",
-        "thinking",
-        "tools"
-      ]
-    },
-    {
-      "provider": "fireworks",
       "model": "accounts/fireworks/models/glm-5p2",
       "base_url": "https://api.fireworks.ai/inference/v1",
       "secret_env": "FIREWORKS_API_KEY",
@@ -27564,29 +27204,10 @@
     },
     {
       "provider": "nvidia",
-      "model": "deepseek-ai/deepseek-v4-flash",
+      "model": "deepseek-ai/deepseek-v4-flash-0731",
       "base_url": "https://integrate.api.nvidia.com/v1",
       "secret_env": "NVIDIA_API_KEY",
-      "label": "DeepSeek V4 Flash (NVIDIA NIM)",
-      "family": "deepseek",
-      "capabilities": [
-        "native_tools",
-        "prefers_markdown_scaffolding",
-        "prompt_caching",
-        "streaming",
-        "structured_output",
-        "structured_output_mode:native_json",
-        "text_tools",
-        "thinking",
-        "tools"
-      ]
-    },
-    {
-      "provider": "nvidia",
-      "model": "deepseek-ai/deepseek-v4-pro",
-      "base_url": "https://integrate.api.nvidia.com/v1",
-      "secret_env": "NVIDIA_API_KEY",
-      "label": "DeepSeek V4 Pro (NVIDIA NIM)",
+      "label": "DeepSeek V4 Flash 0731 (NVIDIA NIM)",
       "family": "deepseek",
       "capabilities": [
         "native_tools",
@@ -27815,10 +27436,10 @@
     },
     {
       "provider": "nvidia",
-      "model": "z-ai/glm-5.1",
+      "model": "z-ai/glm-5.2",
       "base_url": "https://integrate.api.nvidia.com/v1",
       "secret_env": "NVIDIA_API_KEY",
-      "label": "GLM 5.1 (NVIDIA NIM)",
+      "label": "GLM 5.2 (NVIDIA NIM)",
       "family": "glm",
       "capabilities": [
         "native_tools",
@@ -29847,46 +29468,6 @@
         "batch",
         "native_tools",
         "prefers_markdown_scaffolding",
-        "streaming",
-        "structured_output",
-        "structured_output_mode:native_json",
-        "text_tools",
-        "thinking",
-        "tools"
-      ]
-    },
-    {
-      "provider": "together",
-      "model": "zai-org/GLM-5",
-      "base_url": "https://api.together.xyz/v1",
-      "secret_env": "TOGETHER_AI_API_KEY",
-      "label": "GLM 5 (Together)",
-      "family": "glm",
-      "capabilities": [
-        "batch",
-        "native_tools",
-        "prefers_markdown_scaffolding",
-        "prompt_caching",
-        "streaming",
-        "structured_output",
-        "structured_output_mode:native_json",
-        "text_tools",
-        "thinking",
-        "tools"
-      ]
-    },
-    {
-      "provider": "together",
-      "model": "zai-org/GLM-5.1",
-      "base_url": "https://api.together.xyz/v1",
-      "secret_env": "TOGETHER_AI_API_KEY",
-      "label": "GLM 5.1 (Together)",
-      "family": "glm",
-      "capabilities": [
-        "batch",
-        "native_tools",
-        "prefers_markdown_scaffolding",
-        "prompt_caching",
         "streaming",
         "structured_output",
         "structured_output_mode:native_json",
