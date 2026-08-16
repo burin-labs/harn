@@ -39,10 +39,11 @@ In scope:
 - release artifacts and the install script, including checksum or signature
   mismatches that would let an attacker ship unintended code
 
-Out of scope (report to the appropriate upstream):
+Out of scope for *this* repository:
 
-- vulnerabilities in Burin Code -> https://github.com/burin-labs/burin-code/security/policy
-- vulnerabilities in Harn Cloud -> https://github.com/burin-labs/harn-cloud/security/policy
+- vulnerabilities in Burin Code or Harn Cloud. Still report them, to the same
+  address — **security@harn.cloud** — naming the product. Do not open a public
+  issue against them.
 - a script that is merely granted broad capabilities by its author. Harn
   enforces the policy it is given; a script explicitly granted process and
   network access is behaving as configured, not escaping the sandbox.
