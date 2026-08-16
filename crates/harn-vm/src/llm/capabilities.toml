@@ -1327,6 +1327,148 @@ prefers_role_developer = false
 prefers_xml_tools = true
 thinking_block_style = "thinking_blocks"
 
+# --- source: 20-providers/05-downstream-contributed.toml ---
+# Exact routes contributed from a downstream project's `harn.toml`
+# `[capabilities]` section.
+#
+# A project override only applies to processes started inside that project, so
+# these facts reached one repo's own runs and nobody else's. Worse for the
+# contributor: their shipped catalog projection was generated *with* the
+# override while their users' runtimes resolved *without* it, so the two halves
+# of one tool-format decision disagreed and a steer had to paper over the gap.
+# Provider and model capability is Harn's to own; moving the rules here gives
+# every scope one answer.
+#
+# This fragment sorts first in 20-providers/ on purpose. Capability lookup is
+# first-match-wins rather than a field-wise merge, and each rule below names an
+# exact route that must win over the family wildcards (`qwen/*`,
+# `accounts/fireworks/models/*`) that would otherwise claim it. The one rule
+# that wants the wildcard's other fields says so with `extends = true`.
+
+
+# Qwen3.6 Plus on DashScope. Native tools, server-side reasoning left on with
+# per-stage auto-reasoning disabled, and `/no_think` as the disable directive.
+[[provider.dashscope]]
+model_match = "qwen3.6-plus"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled"]
+auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
+preserve_thinking = true
+vision_supported = true
+server_parser = "none"
+honors_chat_template_kwargs = true
+recommended_endpoint = "/v1/chat/completions"
+text_tool_wire_format_supported = true
+thinking_disable_directive = "/no_think"
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+# Qwen3.6 35B A3B on OpenRouter. Same shape as the DashScope Plus row, minus
+# chat-template kwargs, which this route does not honor.
+[[provider.openrouter]]
+model_match = "qwen/qwen3.6-35b-a3b"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled"]
+reasoning_none_supported = true
+auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
+preserve_thinking = true
+vision_supported = true
+server_parser = "none"
+honors_chat_template_kwargs = false
+recommended_endpoint = "/v1/chat/completions"
+text_tool_wire_format_supported = true
+thinking_disable_directive = "/no_think"
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+# Qwen3.6 Plus on OpenRouter, including the dated/suffixed variants. This one
+# extends rather than replaces: the `qwen/*` family row already carries facts
+# this route needs (prompt caching among them), and restating only the fields
+# below keeps the rest resolving from there.
+[[provider.openrouter]]
+model_match = "qwen/qwen3.6-plus*"
+extends = true
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled"]
+reasoning_none_supported = true
+auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
+preserve_thinking = true
+vision_supported = true
+server_parser = "none"
+honors_chat_template_kwargs = false
+recommended_endpoint = "/v1/chat/completions"
+text_tool_wire_format_supported = true
+thinking_disable_directive = "/no_think"
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+# Qwen3.6 Plus served by Fireworks under its own account-scoped id.
+[[provider.fireworks]]
+model_match = "accounts/fireworks/models/qwen3p6-plus"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled"]
+auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
+preserve_thinking = true
+vision_supported = true
+server_parser = "none"
+honors_chat_template_kwargs = true
+recommended_endpoint = "/v1/chat/completions"
+text_tool_wire_format_supported = true
+thinking_disable_directive = "/no_think"
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+# Qwen3.6 Plus on Together, which publishes the upstream capitalized id.
+[[provider.together]]
+model_match = "Qwen/Qwen3.6-Plus"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled"]
+auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
+preserve_thinking = true
+vision_supported = true
+server_parser = "none"
+honors_chat_template_kwargs = true
+recommended_endpoint = "/v1/chat/completions"
+text_tool_wire_format_supported = true
+thinking_disable_directive = "/no_think"
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
 # --- source: 20-providers/10-openai.toml ---
 # ---------- OpenAI family -----------------------------------------------------
 #
@@ -2529,6 +2671,13 @@ preferred_tool_format = "native"
 prompt_caching = true
 cache_breakpoint_style = "top_level"
 structured_output = "tool_use"
+# OpenRouter passes these Anthropic models through verbatim, so they accept the
+# same non-text inputs the direct-Anthropic rows above already declare. Their
+# absence here made this projection of Claude look text-only while the direct
+# projection of the same model did not.
+vision_supported = true
+audio_supported = true
+pdf_supported = true
 text_tool_wire_format_supported = true
 prefers_xml_scaffolding = true
 prefers_markdown_scaffolding = false
@@ -2545,6 +2694,13 @@ preferred_tool_format = "native"
 prompt_caching = true
 cache_breakpoint_style = "top_level"
 structured_output = "tool_use"
+# OpenRouter passes these Anthropic models through verbatim, so they accept the
+# same non-text inputs the direct-Anthropic rows above already declare. Their
+# absence here made this projection of Claude look text-only while the direct
+# projection of the same model did not.
+vision_supported = true
+audio_supported = true
+pdf_supported = true
 text_tool_wire_format_supported = true
 prefers_xml_scaffolding = true
 prefers_markdown_scaffolding = false
@@ -2562,6 +2718,13 @@ preferred_tool_format = "native"
 prompt_caching = true
 cache_breakpoint_style = "top_level"
 structured_output = "tool_use"
+# OpenRouter passes these Anthropic models through verbatim, so they accept the
+# same non-text inputs the direct-Anthropic rows above already declare. Their
+# absence here made this projection of Claude look text-only while the direct
+# projection of the same model did not.
+vision_supported = true
+audio_supported = true
+pdf_supported = true
 text_tool_wire_format_supported = true
 prefers_xml_scaffolding = true
 prefers_markdown_scaffolding = false
@@ -2579,6 +2742,13 @@ preferred_tool_format = "native"
 prompt_caching = true
 cache_breakpoint_style = "top_level"
 structured_output = "tool_use"
+# OpenRouter passes these Anthropic models through verbatim, so they accept the
+# same non-text inputs the direct-Anthropic rows above already declare. Their
+# absence here made this projection of Claude look text-only while the direct
+# projection of the same model did not.
+vision_supported = true
+audio_supported = true
+pdf_supported = true
 text_tool_wire_format_supported = true
 prefers_xml_scaffolding = true
 prefers_markdown_scaffolding = false
@@ -2596,6 +2766,13 @@ preferred_tool_format = "native"
 prompt_caching = true
 cache_breakpoint_style = "top_level"
 structured_output = "tool_use"
+# OpenRouter passes these Anthropic models through verbatim, so they accept the
+# same non-text inputs the direct-Anthropic rows above already declare. Their
+# absence here made this projection of Claude look text-only while the direct
+# projection of the same model did not.
+vision_supported = true
+audio_supported = true
+pdf_supported = true
 text_tool_wire_format_supported = true
 prefers_xml_scaffolding = true
 prefers_markdown_scaffolding = false
@@ -2613,6 +2790,13 @@ preferred_tool_format = "native"
 prompt_caching = true
 cache_breakpoint_style = "top_level"
 structured_output = "tool_use"
+# OpenRouter passes these Anthropic models through verbatim, so they accept the
+# same non-text inputs the direct-Anthropic rows above already declare. Their
+# absence here made this projection of Claude look text-only while the direct
+# projection of the same model did not.
+vision_supported = true
+audio_supported = true
+pdf_supported = true
 text_tool_wire_format_supported = true
 prefers_xml_scaffolding = true
 prefers_markdown_scaffolding = false
@@ -2630,6 +2814,13 @@ preferred_tool_format = "native"
 prompt_caching = true
 cache_breakpoint_style = "top_level"
 structured_output = "tool_use"
+# OpenRouter passes these Anthropic models through verbatim, so they accept the
+# same non-text inputs the direct-Anthropic rows above already declare. Their
+# absence here made this projection of Claude look text-only while the direct
+# projection of the same model did not.
+vision_supported = true
+audio_supported = true
+pdf_supported = true
 text_tool_wire_format_supported = true
 prefers_xml_scaffolding = true
 prefers_markdown_scaffolding = false
@@ -2647,6 +2838,13 @@ preferred_tool_format = "native"
 prompt_caching = true
 cache_breakpoint_style = "top_level"
 structured_output = "tool_use"
+# OpenRouter passes these Anthropic models through verbatim, so they accept the
+# same non-text inputs the direct-Anthropic rows above already declare. Their
+# absence here made this projection of Claude look text-only while the direct
+# projection of the same model did not.
+vision_supported = true
+audio_supported = true
+pdf_supported = true
 text_tool_wire_format_supported = true
 prefers_xml_scaffolding = true
 prefers_markdown_scaffolding = false
@@ -2670,6 +2868,13 @@ preferred_tool_format = "native"
 prompt_caching = true
 cache_breakpoint_style = "top_level"
 structured_output = "tool_use"
+# OpenRouter passes these Anthropic models through verbatim, so they accept the
+# same non-text inputs the direct-Anthropic rows above already declare. Their
+# absence here made this projection of Claude look text-only while the direct
+# projection of the same model did not.
+vision_supported = true
+audio_supported = true
+pdf_supported = true
 text_tool_wire_format_supported = true
 prefers_xml_scaffolding = true
 prefers_markdown_scaffolding = false
