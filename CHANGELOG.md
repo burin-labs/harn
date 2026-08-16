@@ -9,6 +9,15 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.101
+
+### Fixed
+
+- Linux subprocesses launched with `--allow-process-network` can resolve hostnames
+  when `/etc/resolv.conf` points outside `/etc`. The Landlock profile now grants
+  the canonical inode for exact name-service files without opening the broader
+  `/run` tree.
+
 ## v0.10.100
 
 ### Fixed
