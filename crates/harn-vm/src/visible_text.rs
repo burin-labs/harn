@@ -915,8 +915,8 @@ mod tests {
     #[test]
     fn sanitize_strips_trailing_runtime_sentinel_after_answer_text() {
         assert_eq!(
-            sanitize_visible_assistant_text("HARN_LOCAL_TOOL_OK##DONE##", false),
-            "HARN_LOCAL_TOOL_OK"
+            sanitize_visible_assistant_text("SAMPLE_TOOL_OK##DONE##", false),
+            "SAMPLE_TOOL_OK"
         );
         assert_eq!(
             sanitize_visible_assistant_text("Done.\nPLAN_READY", false),

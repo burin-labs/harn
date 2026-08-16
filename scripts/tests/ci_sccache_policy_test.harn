@@ -701,7 +701,7 @@ pipeline test_rejects_unowned_runner_routing(harness: Harness, task) {
       "package-audit": {
         ...valid.jobs["package-audit"],
         "runs-on": gha_expression(
-          "vars.HARN_CI_DISABLE_SELFHOSTED_LINUX != 'true'"
+          "vars.CI_DISABLE_SELFHOSTED_LINUX != 'true'"
             + " && fromJSON('[\"self-hosted\", \"Linux\", \"X64\"]') || 'ubuntu-latest'",
         ),
       },

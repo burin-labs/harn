@@ -440,6 +440,13 @@ mod tests {
         ));
     }
 
+    /// These names are composed at read time rather than written literally, so
+    /// no source scan can find them and the reverse drift gate cannot see them.
+    /// `std/agent/options` builds each key as one of the `HARN_AGENT`,
+    /// `HARN_LLM`, `HARN_AGENT_<ROLE>`, `HARN_LLM_<ROLE>`, or `HARN_<ROLE>`
+    /// prefixes joined to a closed suffix vocabulary, which is why the grammar
+    /// admits a name such as `HARN_LLM_TOOL_FORMAT` that grep alone would read
+    /// as a near miss for `HARN_AGENT_TOOL_FORMAT`.
     #[test]
     fn dynamic_agent_role_options_follow_a_closed_structural_grammar() {
         for name in [
@@ -596,6 +603,139 @@ mod tests {
             missing.is_empty(),
             "Harn-script HARN_* names missing from environment_registry_names.txt:\n{}",
             missing.into_iter().collect::<Vec<_>>().join("\n")
+        );
+    }
+
+    /// Registered names that no repository source reads, and why they must
+    /// stay. Every entry is a standing exception to the reverse drift gate, so
+    /// it carries the reason a reader cannot exist in this tree. An entry whose
+    /// name gains a reader is rejected too, which keeps the list from rotting.
+    const UNREAD_NAME_ALLOWLIST: &[(&str, &str)] = &[];
+
+    /// Build output and vendored dependency trees are not sources of truth for
+    /// who reads a variable, and walking them makes the gate slow and flaky.
+    fn is_pruned_reference_directory(entry: &walkdir::DirEntry) -> bool {
+        entry.file_type().is_dir()
+            && matches!(
+                entry.file_name().to_str(),
+                Some(
+                    ".git"
+                        | ".build"
+                        | ".venv"
+                        | "__pycache__"
+                        | "changelog"
+                        | "dist"
+                        | "node_modules"
+                        | "pkg"
+                        | "target"
+                )
+            )
+    }
+
+    /// Prose can mention a retired name forever, so release notes and docs do
+    /// not count as a reader. The registry itself is excluded for the same
+    /// reason the forward gates exclude it: listing a name is not reading it.
+    fn is_reference_source(path: &std::path::Path) -> bool {
+        if path.extension().and_then(OsStr::to_str) == Some("md") {
+            return false;
+        }
+        !matches!(
+            path.file_name().and_then(OsStr::to_str),
+            Some("environment_registry.rs" | "environment_registry_names.txt")
+        )
+    }
+
+    /// Every maximal `HARN_*` token that starts at an identifier boundary.
+    ///
+    /// The left boundary matters: `FAKE_HARN_RECORD` and `STDLIB_HARN_DIR` are
+    /// unrelated local identifiers that merely end in a registered name, and
+    /// counting them as readers is what let dead entries look alive.
+    #[expect(
+        clippy::string_slice,
+        reason = "start/end bound an ASCII HARN_* token found by match_indices"
+    )]
+    fn bounded_harn_tokens(source: &str) -> impl Iterator<Item = &str> {
+        let bytes = source.as_bytes();
+        source.match_indices("HARN_").filter_map(move |(start, _)| {
+            if start > 0 {
+                let previous = bytes[start - 1];
+                if previous.is_ascii_alphanumeric() || previous == b'_' {
+                    return None;
+                }
+            }
+            let mut end = start + "HARN_".len();
+            while end < bytes.len()
+                && (bytes[end].is_ascii_uppercase()
+                    || bytes[end].is_ascii_digit()
+                    || bytes[end] == b'_')
+            {
+                end += 1;
+            }
+            Some(&source[start..end])
+        })
+    }
+
+    /// The forward gates only prove that every name a source reads is
+    /// registered. Without the reverse direction, a name whose reader is
+    /// deleted—or that was never a variable at all—stays registered forever,
+    /// keeps passing startup validation, and reads as a supported knob that
+    /// silently does nothing.
+    #[test]
+    fn every_registered_name_is_read_somewhere_in_the_tree() {
+        let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .nth(2)
+            .expect("harn-vm lives below workspace/crates");
+        let mut referenced = std::collections::BTreeSet::new();
+        for entry in walkdir::WalkDir::new(workspace_root)
+            .into_iter()
+            .filter_entry(|entry| !is_pruned_reference_directory(entry))
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_type().is_file() && is_reference_source(entry.path()))
+        {
+            let Ok(source) = std::fs::read_to_string(entry.path()) else {
+                continue;
+            };
+            for token in bounded_harn_tokens(&source) {
+                referenced.insert(token.to_string());
+            }
+        }
+
+        let allowed: std::collections::BTreeSet<&str> = UNREAD_NAME_ALLOWLIST
+            .iter()
+            .map(|(name, _)| *name)
+            .collect();
+        let unregistered_allowlist = allowed
+            .iter()
+            .copied()
+            .filter(|name| registered_names().binary_search(name).is_err())
+            .collect::<Vec<_>>();
+        assert!(
+            unregistered_allowlist.is_empty(),
+            "allowlisted names are not in environment_registry_names.txt:\n{}",
+            unregistered_allowlist.join("\n")
+        );
+        let readable_allowlist = allowed
+            .iter()
+            .copied()
+            .filter(|name| referenced.contains(*name))
+            .collect::<Vec<_>>();
+        assert!(
+            readable_allowlist.is_empty(),
+            "allowlisted names now have readers; drop them from UNREAD_NAME_ALLOWLIST:\n{}",
+            readable_allowlist.join("\n")
+        );
+
+        let unread = registered_names()
+            .iter()
+            .copied()
+            .filter(|name| !referenced.contains(*name) && !allowed.contains(name))
+            .collect::<Vec<_>>();
+        assert!(
+            unread.is_empty(),
+            "registered names no source reads; delete them from \
+             environment_registry_names.txt or allowlist them with a reason:\n{}",
+            unread.join("\n")
         );
     }
 
