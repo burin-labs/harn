@@ -26,6 +26,11 @@
 // model, which is the precise shape of a shipped defect. The cells here also
 // render `parse_guidance_prompt` and assert the diagnostic survives into the
 // text the model actually receives.
+//
+// The unit is the MESSAGE, not the span. A row may expect several calls, and
+// the count and order are part of the claim, because the failure that reads as
+// success here is a malformed span taking its well-formed neighbours down with
+// it — a check that only asks whether SOMETHING parsed cannot see that at all.
 import { __parse_feedback_diagnostics } from "std/agent/loop_tool_calls"
 import { agent_parse_tool_calls } from "std/agent/primitives"
 import { parse_guidance_prompt } from "std/agent/prompts"
@@ -74,13 +79,29 @@ fn cell(harness: Harness, pin: string, label: string, text: string, expect) -> n
   const parsed = agent_parse_tool_calls(harness.agent, text, tools, pin)
   const diagnostics = __parse_feedback_diagnostics(harness.llm, parsed, turn_opts)
   const calls = parsed?.tool_calls ?? []
-  const wanted = expect != nil
-    && len(calls) == 1
-    && to_string(calls[0].name) == to_string(expect.name)
-    && json_stringify(calls[0].arguments)
-    == json_stringify(
-    expect.args,
-  )
+  // `expect` is one call, or several in the order the message wrote them. The
+  // count is part of the claim: a turn that mixes grammars must not lose the
+  // calls a neighbouring malformed span happened to sit beside, and a check
+  // that only asks "did SOMETHING parse" cannot see that loss.
+  const wants = if expect == nil {
+    []
+  } else if type_of(expect) == "list" {
+    expect
+  } else {
+    [expect]
+  }
+  let matched = len(calls) == len(wants) && len(wants) > 0
+  for index in range(0, len(wants)) {
+    if matched
+      && !(to_string(calls[index].name) == to_string(wants[index].name)
+      && json_stringify(
+      calls[index].arguments,
+    )
+      == json_stringify(wants[index].args)) {
+      matched = false
+    }
+  }
+  const wanted = matched
   const outcome = if wanted {
     "parsed"
   } else if len(diagnostics) > 0 {
@@ -131,6 +152,8 @@ pipeline main(harness: Harness) {
     + content_lines()
     + "\nEOF })"
   const verify = {name: "verify", args: {}}
+  const run_call = {name: "run", args: {command: "pytest -q"}}
+  const run = {name: "run", args: {command: "pytest -q"}}
   const rows: list<dict> = [
     // Canonical fenced JSON, the default pin's own grammar.
     {label: "fence.nested", text: "```tool\n" + nested + "\n```", expect: edit},
@@ -222,6 +245,41 @@ pipeline main(harness: Harness) {
       label: "envelope.unclosed_marker",
       text: "<tool_calls>\n<tool>" + nested.slice(0, 40),
       expect: nil,
+    },
+    // Opener spellings a chat template may substitute for the canonical one.
+    // Each carries a complete call object; the spelling is the only difference.
+    {label: "opener.tag_tool", text: "<tool>\n" + nested + "\n</tool>", expect: edit},
+    {label: "opener.tag_tool_use", text: "<tool_use>\n" + nested + "\n</tool_use>", expect: edit},
+    {label: "opener.tag_tool_unclosed", text: "<tool>\n" + nested, expect: edit},
+    {label: "opener.brackets", text: "[[tool]]\n" + nested + "\n[[/tool]]", expect: edit},
+    {label: "opener.brackets_unclosed", text: "[[tool]]\n" + nested, expect: edit},
+    {
+      label: "opener.brackets_two_calls",
+      text: "[[tool]]\n" + nested + "\n" + json_stringify({name: "verify", args: {}}),
+      expect: [edit, verify],
+    },
+    {
+      label: "opener.prose_then_tag",
+      text: "I see the call was malformed. Let me try again.\n<tool>\n" + nested + "\n</tool>",
+      expect: edit,
+    },
+    // A malformed span must not take its well-formed neighbours with it. These
+    // are the mixed-grammar turns models emit while hunting for the spelling
+    // the runtime accepts, and the whole message is the unit that must survive.
+    {
+      label: "mixed.envelope_then_fence",
+      text: "<tool_call>tool\n" + flat + "\n```tool\n" + json_stringify(run_call) + "\n```",
+      expect: [edit, run],
+    },
+    {
+      label: "mixed.fence_then_envelope",
+      text: "```tool\n" + json_stringify(run_call) + "\n```\n<tool_call>tool\n" + flat,
+      expect: [run, edit],
+    },
+    {
+      label: "mixed.prose_around_envelope",
+      text: "Creating it now.\n<tool_call>tool\n" + flat + "\nThat should do it.",
+      expect: edit,
     },
   ]
   for pin in PINS {

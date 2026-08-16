@@ -1,0 +1,496 @@
+/**
+ * std/llm/tool_parse_body — reading ONE `<tool_call>` body.
+ *
+ * The tagged grammar delimits a call block; what sits inside it is another
+ * question entirely, and models answer it in half a dozen dialects: a bare
+ * `name({ ... })` expression, a JSON object, chat-template function markup,
+ * a nested XML tag, or narration wrapped around any of those. This module owns
+ * that ladder and nothing else.
+ *
+ * Split out of std/llm/tool_parse so that module stays what its own header
+ * claims — a composition layer over the host scanners — rather than also
+ * carrying every body dialect.
+ */
+import { HTML_ENTITIES } from "std/llm/dialects"
+import { tool_call_label_body } from "std/llm/tool_parse_envelope"
+import { json_fields } from "std/llm/tool_parse_json_support"
+import { registry_names } from "std/llm/tool_parse_result"
+
+fn __tool_parse_schema_type(tools, tool_name: string, parameter_name: string) {
+  if type_of(tools) != "dict" {
+    return nil
+  }
+  for entry in tools?.tools ?? [] {
+    if to_string(entry?.name ?? "") == tool_name {
+      return entry?.parameters?.[parameter_name]?.type
+    }
+  }
+  return nil
+}
+
+fn __tool_parse_unframe_markup_value(value: string) -> string {
+  let framed = value
+  if starts_with(framed, "\r\n") {
+    framed = framed.slice(2, len(framed))
+  } else if starts_with(framed, "\n") {
+    framed = framed.slice(1, len(framed))
+  }
+  if ends_with(framed, "\r\n") {
+    framed = framed.slice(0, len(framed) - 2)
+  } else if ends_with(framed, "\n") {
+    framed = framed.slice(0, len(framed) - 1)
+  }
+  return framed
+}
+
+fn __tool_parse_markup_value(raw: string, schema_type) {
+  const framed = __tool_parse_unframe_markup_value(raw)
+  if schema_type == nil || schema_type == "string" {
+    return framed
+  }
+  return try {
+    json_parse(trim(framed))
+  } catch (_) {
+    framed
+  }
+}
+
+/**
+ * Read chat-template function markup: `<function=NAME>` or `<invoke name=...>`
+ * with `<parameter>` children, or a trailing JSON arguments object.
+ *
+ * Returns `{matched: false}` when the body is not this dialect at all, so the
+ * caller can try the next rung; `{matched: true, ok: false, error}` when it IS
+ * this dialect and is broken, because that is a diagnosis, not a pass.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ */
+pub fn __tool_parse_markup(body: string, tools) -> dict {
+  const trimmed = trim(body)
+  let opener = ""
+  let close_tag = ""
+  let style = ""
+  if starts_with(trimmed, "<function=") {
+    opener = "<function="
+    close_tag = "</function>"
+    style = "`<function=...>`"
+  } else if starts_with(trimmed, "<invoke name=") {
+    opener = "<invoke name="
+    close_tag = "</invoke>"
+    style = "`<invoke name=...>`"
+  } else {
+    return {matched: false}
+  }
+  const rest = trimmed.slice(len(opener), len(trimmed))
+  const gt = rest.index_of(">")
+  if gt < 0 {
+    const subject = opener == "<function=" ? "a `<function=`" : "an `<invoke name=`"
+    return {
+      matched: true,
+      ok: false,
+      error: "TOOL CALL TRUNCATED: "
+        + subject
+        + " open tag was never closed with `>` — the response appears to have been cut off. "
+        + "The call was NOT executed; re-emit the complete call.",
+    }
+  }
+  const name = trim(regex_replace("^\"|\"$", "", rest.slice(0, gt)))
+  if len(regex_captures("^[A-Za-z0-9_.-]+$", name)) == 0 {
+    return {matched: false}
+  }
+  const known = registry_names(tools)
+  if !known.contains(name) {
+    return {
+      matched: true,
+      ok: false,
+      error: "Unknown tool '"
+        + name
+        + "' in chat-template "
+        + style
+        + " tool-call markup. Available tools: ["
+        + known.slice(0, 20).join(", ")
+        + "]",
+    }
+  }
+  const after_open = rest.slice(gt + 1, len(rest))
+  const close_at = after_open.index_of(close_tag)
+  const inner = close_at >= 0 ? after_open.slice(0, close_at) : after_open
+  const parameter_pattern =
+    "(?s)<parameter(?:=([A-Za-z0-9_][A-Za-z0-9_.-]*)|\\s+name=\"([^\"]+)\"(?:\\s+[A-Za-z_][A-Za-z0-9_.-]*=\"[^\"]*\")*)\\s*>(.*?)</parameter>"
+  let arguments: dict = {}
+  for capture in regex_captures(parameter_pattern, inner) {
+    const groups = capture?.groups ?? []
+    const key = to_string(groups[0] ?? groups[1] ?? "")
+    const raw = to_string(groups[2] ?? "")
+    arguments[key] = __tool_parse_markup_value(raw, __tool_parse_schema_type(tools, name, key))
+  }
+  const leftover = regex_replace(parameter_pattern, "", inner)
+  if contains(leftover, "<parameter") {
+    return {
+      matched: true,
+      ok: false,
+      error: "TOOL CALL TRUNCATED: a `<parameter ...>` block in the "
+        + style
+        + " markup for `"
+        + name
+        + "` was never closed with `</parameter>` — the response appears to have been cut off. "
+        + "The call was NOT executed; re-emit the complete call.",
+    }
+  }
+  if contains(leftover, "<function=") || contains(leftover, "<invoke name=") {
+    return {
+      matched: true,
+      ok: false,
+      error: "The "
+        + style
+        + " markup block for `"
+        + name
+        + "` contained more than one call; emit one call per <tool_call> block.",
+    }
+  }
+  if len(keys(arguments)) == 0 && starts_with(trim(leftover), "{") {
+    const json_source = trim(leftover)
+    const json_len = __host_tool_balanced_json_len(json_source)
+    if json_len == 0 {
+      return {
+        matched: true,
+        ok: false,
+        error: "TOOL CALL TRUNCATED: the JSON arguments object in the "
+          + style
+          + " markup for `"
+          + name
+          + "` was never closed — the response appears to have been cut off. "
+          + "The call was NOT executed; re-emit the complete call.",
+      }
+    }
+    arguments = try {
+      json_parse(json_source.slice(0, json_len))
+    } catch (error) {
+      return {
+        matched: true,
+        ok: false,
+        error: "The "
+          + style
+          + " markup for `"
+          + name
+          + "` had a JSON arguments object that did not parse: "
+          + to_string(error)
+          + ". The call was NOT executed.",
+      }
+    }
+    if type_of(arguments) != "dict" {
+      return {
+        matched: true,
+        ok: false,
+        error: "JSON arguments for tool '"
+          + name
+          + "' in "
+          + style
+          + " markup must be an object, got `"
+          + json_stringify(arguments)
+          + "`.",
+      }
+    }
+    arguments = __host_tool_decode_entities(arguments, HTML_ENTITIES)
+  }
+  return {
+    matched: true,
+    ok: true,
+    call: {id: "tc_fnmarkup_" + name, name: name, arguments: arguments},
+  }
+}
+
+fn __tool_parse_nested_xml(body: string, tools) -> dict {
+  const trimmed = trim(body)
+  const captures = regex_captures("^<([A-Za-z_][A-Za-z0-9_.-]*)>\\s*", trimmed)
+  if len(captures) == 0 {
+    return {matched: false}
+  }
+  const name = to_string(captures[0]?.groups?.[0] ?? "")
+  const after_open = trim(trimmed.slice(captures[0].end, len(trimmed)))
+  if !starts_with(after_open, "{") {
+    return {matched: false}
+  }
+  const known = registry_names(tools)
+  if !known.contains(name) {
+    return {
+      matched: true,
+      ok: false,
+      error: "Unknown tool '"
+        + name
+        + "' in nested XML tool-call body. Available tools: ["
+        + known.slice(0, 20).join(", ")
+        + "]",
+    }
+  }
+  const object_len = __host_tool_balanced_json_len(after_open)
+  if object_len == 0 {
+    return {
+      matched: true,
+      ok: false,
+      error: "<tool_call><"
+        + name
+        + "> body did not contain a complete JSON object. Emit `<tool_call>"
+        + name
+        + "({ ... })</tool_call>` instead.",
+    }
+  }
+  let arguments = try {
+    json_parse(after_open.slice(0, object_len))
+  } catch (error) {
+    return {
+      matched: true,
+      ok: false,
+      error: "<tool_call><"
+        + name
+        + "> body did not parse as a JSON object: "
+        + to_string(error)
+        + ". Emit `<tool_call>"
+        + name
+        + "({ ... })</tool_call>` instead.",
+    }
+  }
+  if type_of(arguments) != "dict" {
+    return {
+      matched: true,
+      ok: false,
+      error: "Nested XML arguments for tool '"
+        + name
+        + "' must be a JSON object, got `"
+        + json_stringify(arguments)
+        + "`.",
+    }
+  }
+  arguments = __host_tool_decode_entities(arguments, HTML_ENTITIES)
+  return {matched: true, ok: true, call: {id: "tc_xml_" + name, name: name, arguments: arguments}}
+}
+
+fn __tool_parse_narration(body: string, tools) -> dict {
+  let rest = trim(body)
+  let prose: list<string> = []
+  for tag in ["assistant_prose", "assistantprose", "thinking", "reasoning"] {
+    const open = "<" + tag + ">"
+    const close = "</" + tag + ">"
+    if starts_with(rest, open) {
+      const close_at = rest.index_of(close)
+      if close_at >= 0 {
+        const text = trim(rest.slice(len(open), close_at))
+        if text != "" {
+          prose = prose.appending(text)
+        }
+        rest = trim(rest.slice(close_at + len(close), len(rest)))
+      }
+    }
+  }
+  if len(prose) > 0 {
+    if rest == "" {
+      return {matched: true, ok: true, call: nil, prose: prose}
+    }
+    const parsed = __tool_parse_call_from_body(rest, tools)
+    if !(parsed?.ok ?? false) {
+      // The narration wrapper is not a licence to swallow the call it wraps.
+      // Keep the prose, but report why the remainder did not parse.
+      return {matched: true, ok: false, error: to_string(parsed?.error ?? "tool-call parse failed")}
+    }
+    return {matched: true, ok: true, call: parsed?.call, prose: prose}
+  }
+  if rest != ""
+    && !starts_with(rest, "<")
+    && !starts_with(rest, "{")
+    && !starts_with(rest, "[") {
+    const sniffed = __host_tool_scan_bare_calls(rest, tools)
+    if len(sniffed?.calls ?? []) == 0 && len(sniffed?.errors ?? []) == 0 {
+      return {matched: true, ok: true, call: nil, prose: [rest]}
+    }
+  }
+  return {matched: false}
+}
+
+fn __tool_parse_json_call_from_body(source: string, tools, name_hint: string = "") -> dict {
+  const decoded = try {
+    json_parse(source)
+  } catch (error) {
+    return {
+      ok: false,
+      error: "<tool_call> body looked like JSON but did not parse: "
+        + to_string(error)
+        + ". Emit either `name({ ... })` or JSON with `name` and `arguments`.",
+    }
+  }
+  const item = if type_of(decoded) == "list" {
+    if len(decoded) != 1 {
+      return {
+        ok: false,
+        error: "<tool_call> JSON array contained "
+          + to_string(len(decoded))
+          + " calls; emit one call per <tool_call> block.",
+      }
+    }
+    decoded[0]
+  } else {
+    decoded
+  }
+  if type_of(item) != "dict" {
+    return {
+      ok: false,
+      error: "<tool_call> JSON body must be an object, got `" + json_stringify(item) + "`.",
+    }
+  }
+  // Name and argument resolution is std/llm/tool_parse_json_support's business,
+  // so the tagged grammar reads an object exactly the way the fenced and
+  // chat-template grammars do. A body carrying bare arguments under a labeled
+  // opener takes its name from the label.
+  const fields = json_fields(item)
+  const name = if fields.name != "" {
+    fields.name
+  } else {
+    trim(name_hint)
+  }
+  if name == "" {
+    return {ok: false, error: "<tool_call> JSON body did not contain a tool name"}
+  }
+  const known = registry_names(tools)
+  if !known.contains(name) {
+    return {
+      ok: false,
+      error: "Unknown tool '" + name + "'. Available tools: [" + known.join(", ") + "]",
+    }
+  }
+  let arguments = fields.arguments
+  if type_of(arguments) == "string" {
+    arguments = try {
+      json_parse(arguments)
+    } catch (error) {
+      return {
+        ok: false,
+        error: "Could not parse JSON string arguments for tool '"
+          + name
+          + "': "
+          + to_string(error),
+      }
+    }
+  }
+  if type_of(arguments) != "dict" {
+    return {
+      ok: false,
+      error: "Tool '"
+        + name
+        + "' arguments must be a JSON object, got `"
+        + json_stringify(arguments)
+        + "`.",
+    }
+  }
+  return {
+    ok: true,
+    call: {
+      id: to_string(item?.id ?? "tc_json"),
+      name: name,
+      arguments: __host_tool_decode_entities(arguments, HTML_ENTITIES),
+    },
+  }
+}
+
+/**
+ * Read one delimited call body, trying each dialect in order: the direct
+ * `name({ ... })` expression the head scan already identified, chat-template
+ * markup, nested XML, a JSON object (with or without the label models write
+ * after the opener), narration wrapped around any of those, and finally a bare
+ * call sniff against the registry.
+ *
+ * `head_name`/`head_sep` are what the host scanner saw at the front of the
+ * body; `direct_candidate` is its parse if it made one. Returns `{ok: true,
+ * call}` or `{ok: false, error}` — never a silent nothing, because a body
+ * inside a call block was meant to be a call.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ */
+pub fn __tool_parse_call_from_body(
+  body: string,
+  tools,
+  head_name: string = "",
+  head_sep: string = "",
+  direct_candidate = nil,
+) -> dict {
+  const trimmed = trim(body)
+  if trimmed == "" {
+    return {
+      ok: false,
+      error: "<tool_call> body did not contain a bare `name({ ... })` expression. Got: \"\"",
+    }
+  }
+  if head_name != "" && registry_names(tools).contains(head_name) {
+    const direct = if direct_candidate != nil {
+      direct_candidate
+    } else if head_sep == "(" {
+      __host_tool_parse_call_expr(trimmed, head_name)
+    } else if head_sep == "{" {
+      const parsed = __host_tool_parse_object_literal(
+        trimmed.slice(len(head_name), len(trimmed)),
+        head_name,
+      )
+      parsed + {consumed: len(head_name) + (parsed?.consumed ?? 0)}
+    } else {
+      {ok: false}
+    }
+    if direct?.ok ?? false {
+      const trailing = trim(trimmed.slice(direct.consumed, len(trimmed)))
+      if trailing == "" {
+        return {
+          ok: true,
+          call: {id: "tc_0", name: head_name, arguments: direct.arguments ?? direct.value ?? {}},
+        }
+      }
+    }
+  }
+  const markup = __tool_parse_markup(trimmed, tools)
+  if markup?.matched ?? false {
+    return markup
+  }
+  const nested = __tool_parse_nested_xml(trimmed, tools)
+  if nested?.matched ?? false {
+    return nested
+  }
+  // A JSON body, with or without the label models write after the opener. The
+  // labeled form has to be recognized HERE: past this point the body no longer
+  // starts with a structural character, and the narration ladder below reads
+  // it as prose — which is how a complete call became visible text carrying no
+  // call, no error, and no violation.
+  const labeled = tool_call_label_body(trimmed)
+  if labeled?.ok ?? false {
+    return __tool_parse_json_call_from_body(
+      to_string(labeled.body),
+      tools,
+      to_string(labeled?.name_hint ?? ""),
+    )
+  }
+  const narration = __tool_parse_narration(trimmed, tools)
+  if narration?.matched ?? false {
+    return narration
+  }
+  const sniffed = __host_tool_scan_bare_calls(trimmed, tools)
+  if len(sniffed?.errors ?? []) > 0 {
+    return {ok: false, error: sniffed.errors[0]}
+  }
+  if len(sniffed?.calls ?? []) == 1 {
+    return {ok: true, call: sniffed.calls[0]}
+  }
+  if len(sniffed?.calls ?? []) > 1 {
+    return {
+      ok: false,
+      error: "<tool_call> body contained "
+        + to_string(len(sniffed.calls))
+        + " calls; emit one call per <tool_call> block.",
+    }
+  }
+  return {
+    ok: false,
+    error: "<tool_call> body did not contain a bare `name({ ... })` expression. Got: "
+      + json_stringify(
+      trimmed,
+    ),
+  }
+}
