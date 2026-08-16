@@ -1,15 +1,105 @@
-# Secret-scanning policy for the `Secret scan` workflow.
+# .gitleaks.toml — harn
+# Audited 2026-08-16 against origin/main @ ac05f79e7. Path + rule scoped.
 #
-# Extends gitleaks' default rules and adds NOTHING. The allowlist is empty on
-# purpose: the first scan of this repo returned 53 findings across 25
-# files, none of them audited, and an allowlist written from a guess would mask
-# a real leak in exactly the files most likely to hold one. The workflow is
-# report-only (`continue-on-error`) until that audit lands.
-#
-# When it does: add path entries here with a one-line justification each, then
-# drop `continue-on-error` from .github/workflows/secret-scan.yml in the SAME
-# change, so the repo never has a blocking gate and an unjustified waiver at
-# the same time.
-
+# DELIBERATELY NOT ALLOWLISTED (the gate should keep blocking these until the
+# separate provenance audit closes):
+#   conformance/helpers/github_app_test_key.pem   (RSA 2048)
+#   conformance/helpers/jwt_es256_test_key.pem    (EC P-256)
+#   crates/harn-vm/src/stdlib/crypto.rs           (same EC key material inline)
 [extend]
 useDefault = true
+
+[[allowlists]]
+description = "Token-redaction conformance fixtures"
+targetRules = ["aws-access-token"]
+paths = ['''^conformance/tests/stdlib/token_redaction_default_patterns\.harn$''']
+
+[[allowlists]]
+description = "Cookie signing-secret fixture (repeated hex filler)"
+targetRules = ["generic-api-key"]
+paths = ['''^conformance/tests/stdlib/cookie_session_helpers\.harn$''']
+
+[[allowlists]]
+description = "OAuth token-store fixture values (tok-* / rfr-* placeholders)"
+targetRules = ["generic-api-key"]
+paths = ['''^conformance/tests/stdlib/oauth/oauth_storage\.harn$''']
+
+[[allowlists]]
+description = "Webhook dedupe-key assertion value (a message id, not a credential)"
+targetRules = ["generic-api-key"]
+paths = ['''^conformance/tests/triggers/webhook_dedupe_blocks_duplicates\.harn$''']
+
+[[allowlists]]
+description = "harnpack signing fixture: ed25519 key named TEST_ED25519_PRIVATE_KEY, written only into tempdirs; the conformance case asserts this signer is REJECTED"
+targetRules = ["private-key"]
+paths = ['''^(crates/harn-cli/tests/harn_cli_fast/(pack_cli|harnpack_run)\.rs|conformance/tests/harn_pack/pack_verify_untrusted_signer\.harn)$''']
+
+[[allowlists]]
+description = "Protocol-artifact receipt fixture idempotency_key"
+targetRules = ["generic-api-key"]
+paths = ['''^crates/harn-cli/src/commands/dump_protocol_artifacts/tests\.rs$''']
+
+[[allowlists]]
+description = "RFC 6455 documented Sec-WebSocket-Key handshake example"
+targetRules = ["generic-api-key"]
+paths = ['''^crates/harn-serve/tests/harn_serve/site_websocket\.rs$''']
+
+[[allowlists]]
+description = "Config-layer redaction tests (the remote-defaults case embeds the same fixture in a URL query, which generic-api-key also matches)"
+targetRules = ["stripe-access-token", "generic-api-key"]
+paths = ['''^crates/harn-vm/src/config\.rs$''']
+
+[[allowlists]]
+description = "Standard Webhooks published test vector + dedupe-key fixture"
+targetRules = ["generic-api-key"]
+paths = ['''^crates/harn-vm/src/connectors/webhook/tests\.rs$''']
+
+[[allowlists]]
+description = "Run-view redaction tests"
+targetRules = ["aws-access-token"]
+paths = ['''^crates/harn-vm/src/orchestration/records/view\.rs$''']
+
+[[allowlists]]
+description = "Redaction engine unit tests"
+targetRules = ["aws-access-token"]
+paths = ['''^crates/harn-vm/src/redact/(mod|patterns)\.rs$''']
+
+[[allowlists]]
+description = "Cookie signing-secret fixture (repeated hex filler)"
+targetRules = ["generic-api-key"]
+paths = ['''^crates/harn-vm/src/stdlib/cookies\.rs$''']
+
+[[allowlists]]
+description = "Observability field-redaction tests"
+targetRules = ["stripe-access-token"]
+paths = ['''^crates/harn-vm/src/stdlib/observability\.rs$''']
+
+[[allowlists]]
+description = "Self-review test: fake diff adding a fixture OPENAI_API_KEY"
+targetRules = ["generic-api-key"]
+paths = ['''^crates/harn-vm/src/stdlib/review\.rs$''']
+
+[[allowlists]]
+description = "Secret-scan detector unit tests: detector inputs by construction"
+targetRules = ["generic-api-key", "private-key"]
+paths = ['''^crates/harn-vm/src/stdlib/secret_scan\.rs$''']
+
+[[allowlists]]
+description = "Token-redaction audit-sink test"
+targetRules = ["aws-access-token"]
+paths = ['''^crates/harn-vm/src/stdlib/token_redaction\.rs$''']
+
+[[allowlists]]
+description = "Trigger test-support fixture dedupe key"
+targetRules = ["generic-api-key"]
+paths = ['''^crates/harn-vm/src/triggers/test_util/mod\.rs$''']
+
+[[allowlists]]
+description = "Docs prose naming PEM header labels; no key body present"
+targetRules = ["private-key"]
+paths = ['''^docs/src/builtins\.md$''']
+
+[[allowlists]]
+description = "A2A paused-state protocol doc: elided resumeToken examples"
+targetRules = ["generic-api-key"]
+paths = ['''^docs/src/protocol-contributions/a2a-paused-state\.md$''']
