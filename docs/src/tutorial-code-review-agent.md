@@ -7,7 +7,7 @@ that can review a patch, inspect context, and return a concise report.
 Use the companion example as a starting point:
 
 ```bash
-cargo run --bin harn -- run examples/code-reviewer.harn
+harn run examples/code-reviewer.harn -- "$(git diff)"
 ```
 
 ## 1. Start with a tight review prompt
@@ -37,6 +37,12 @@ End with a short verdict.
 ```
 
 This is enough when the user pastes a diff directly into `task`.
+
+The `task` parameter is supplied by whatever drives the pipeline — an editor
+host over ACP, `harn serve`, or a caller that runs the pipeline for you.
+`harn run` does not bind it, so a pipeline you want to run straight from the
+CLI reads its input from `argv` instead, the way the companion example above
+does. Pick the shape that matches how the reviewer will be invoked.
 
 ## 2. Add file context when you need it
 
@@ -93,7 +99,9 @@ pipeline default(harness: Harness, task) {
 }
 ```
 
-That makes the output easier to compare in `harn eval` runs later.
+Recorded metrics are printed by the run and, for a workflow run, saved into the
+run record under `.harn-runs/` that `harn eval` reads. See
+[the eval pipeline tutorial](./tutorial-eval-pipeline.md) for that path.
 
 ## 4. When to stop
 
@@ -106,4 +114,4 @@ review itself is stable. For code review, that usually means:
 - record metrics so you can compare review quality over time
 
 If you need a richer workflow, combine this with the eval tutorial and the
-debugging tools in `docs/src/debugging.md`.
+[debugging tools](./debugging.md).
