@@ -2,7 +2,7 @@ import "std/agent/loop_call_resolution"
 import "std/agent/loop_foundation"
 import "std/agent/loop_result_status"
 import "std/agent/loop_support"
-import { protocol_violation_messages } from "std/llm/tool_parse_result"
+import { protocol_violation_messages, violation_reports_lost_call } from "std/llm/tool_parse_result"
 
 // Tool middleware seam — composable tool_caller (mirrors agent_invoke_llm).
 //
@@ -860,17 +860,29 @@ pub fn __parse_feedback_has_non_structural_tools(turn_opts) -> bool {
  * partial-success turn made real progress (its parsed calls dispatched), so it
  * returns false and stays subject to the normal stall accounting.
  *
+ * Off the tagged text protocol, only violations that report a LOST CALL are
+ * forwarded. A route that pinned another grammar has no `<assistant_prose>`
+ * rule to break, so the prose-form violations the text parser raises against
+ * its narration are artifacts of the reading, not findings about the turn —
+ * forwarding those nags a model that did nothing wrong. A dropped call is
+ * route-independent: the work did not happen, and only the model can re-emit
+ * it. Filtering the whole set by paradigm instead is what left a turn whose
+ * call was dropped as `wrong_tool_format` with no guidance at all, while the
+ * remediation it needed sat verbatim in the violation the runtime had just
+ * constructed and discarded.
+ *
  * @effects: []
  * @errors: []
  */
 pub fn __parse_feedback_protocol_violations(llm: HarnessLlm, parsed, turn_opts) {
-  if agent_tool_call_paradigm(llm, turn_opts).kind != "text"
-    || !__parse_feedback_has_non_structural_tools(
-    turn_opts,
-  ) {
+  if !__parse_feedback_has_non_structural_tools(turn_opts) {
     return []
   }
-  return parsed?.protocol_violations ?? []
+  const violations = parsed?.protocol_violations ?? []
+  if agent_tool_call_paradigm(llm, turn_opts).kind == "text" {
+    return violations
+  }
+  return violations.filter(violation_reports_lost_call)
 }
 
 pub fn __parse_feedback_diagnostics(llm: HarnessLlm, parsed, turn_opts) {

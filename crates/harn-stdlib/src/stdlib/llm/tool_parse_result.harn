@@ -29,6 +29,41 @@ pub type ProtocolViolation = {
 }
 
 /**
+ * The violation kinds that report a tool call which did not run.
+ *
+ * Every kind outside this set reports the FORM of the response's prose —
+ * unwrapped narration, an unknown top-level tag, an empty done block. Those
+ * rules exist only in the tagged text protocol, so on a route that pinned
+ * another grammar they describe nothing the model did wrong and their
+ * remediation teaches a protocol that route does not use.
+ *
+ * A lost call is different on every route: work the model asked for did not
+ * happen, and it is the only party that can re-emit it. That is why the two
+ * groups are separated here, at the type, rather than by asking the consumer
+ * which paradigm is in play — the paradigm answers "which grammar", never
+ * "was a call lost".
+ */
+pub const LOST_CALL_VIOLATION_KINDS: list<ProtocolViolationKind> = [
+  "ambiguous_recovery",
+  "bare_json",
+  "fence_dialect",
+  "provider_dialect",
+  "recovered_dialect",
+  "unparsed_tool_syntax",
+  "wrong_tool_format",
+]
+
+/**
+ * Whether this violation reports a tool call that did not run.
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ */
+pub fn violation_reports_lost_call(violation: ProtocolViolation) -> bool {
+  return LOST_CALL_VIOLATION_KINDS.contains(violation.kind)
+}
+
+/**
  * Construct one typed protocol violation.
  * @effects: []
  * @errors: []
