@@ -36,6 +36,7 @@
 - [Scripting cheatsheet](./scripting-cheatsheet.md)
 - [LLM quick reference](./docs/llm/harn-quickref.md)
 - [Best practices](./best-practices.md)
+- [Run an A/B experiment](./cookbooks/ab-experiment.md)
 - [Compile a bounded experiment](./cookbooks/compile-hypothesis.md)
 - [Pipeline lifecycle cookbook](./cookbooks/lifecycle.md)
 - [Tool hooks cookbook](./cookbooks/tool-hooks.md)
