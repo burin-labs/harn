@@ -11,12 +11,12 @@ description = "Portable compiler, program artifact, and deterministic execution 
 [dependencies]
 arcstr = "1"
 blake3 = "1"
-harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.100" }
-harn-builtin-registry = { path = "../harn-builtin-registry", version = "=0.10.100" }
-harn-capability-contracts = { path = "../harn-capability-contracts", version = "=0.10.100" }
-harn-lexer = { path = "../harn-lexer", version = "=0.10.100" }
-harn-parser = { path = "../harn-parser", version = "=0.10.100" }
-harn-secret-catalog = { path = "../harn-secret-catalog", version = "=0.10.100" }
+harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.101" }
+harn-builtin-registry = { path = "../harn-builtin-registry", version = "=0.10.101" }
+harn-capability-contracts = { path = "../harn-capability-contracts", version = "=0.10.101" }
+harn-lexer = { path = "../harn-lexer", version = "=0.10.101" }
+harn-parser = { path = "../harn-parser", version = "=0.10.101" }
+harn-secret-catalog = { path = "../harn-secret-catalog", version = "=0.10.101" }
 hex = "0.4"
 regex = "1"
 serde = { version = "1", features = ["derive", "rc"] }
