@@ -91,8 +91,8 @@ harn models recommend
 ```
 
 ```text
-vertex/claude-sonnet-4-6
-17 GB free, MPS available, cloud creds available -> vertex/claude-sonnet-4-6 (local installable route available: devstral-small-2)
+vertex/claude-sonnet-5
+17 GB free, MPS available, cloud creds available -> vertex/claude-sonnet-5 (local installable route available: devstral-small-2)
 ```
 
 The first line is the model. The second is the reasoning: free memory, GPU,
