@@ -264,3 +264,38 @@ pipeline test_indent_output(harness: Harness, task) {
 pipeline test_rel_path(harness: Harness, task) {
   assert_eq(rel_path("/r/./docs/src/a.md"), "docs/src/a.md")
 }
+
+// --- duplicate_leading_args -------------------------------------------------
+@test
+pipeline test_duplicate_leading_args_flags_repeated_receiver(harness: Harness, task) {
+  const snippet = "pipeline main(harness: Harness) {\n"
+    + "  const r = agent_loop(harness,\n"
+    + "    harness,\n"
+    + "    \"Triage ticket #42.\",\n"
+    + "  )\n"
+    + "}\n"
+  const found = duplicate_leading_args(snippet)
+  assert_eq(found.count, 1)
+  assert_eq(found[0].callee, "agent_loop")
+  assert_eq(found[0].name, "harness")
+  assert_eq(found[0].line, 2)
+}
+
+@test
+pipeline test_duplicate_leading_args_flags_same_line_form(harness: Harness, task) {
+  const found = duplicate_leading_args("agent_loop(harness, harness, \"go\", nil)\n")
+  assert_eq(found.count, 1)
+  assert_eq(found[0].callee, "agent_loop")
+}
+
+@test
+pipeline test_duplicate_leading_args_allows_distinct_arguments(harness: Harness, task) {
+  const snippet = "pipeline main(harness: Harness) {\n"
+    + "  const r = agent_loop(harness,\n"
+    + "    \"Triage ticket #42.\",\n"
+    + "    \"You are a careful triage assistant.\",\n"
+    + "  )\n"
+    + "  const s = sub_agent_run(harness, task, opts)\n"
+    + "}\n"
+  assert_eq(duplicate_leading_args(snippet), [])
+}

@@ -18,6 +18,13 @@
 // style rules (vendor-identity branching, branch explosion) stay advisory. Doc
 // prose often illustrates exactly the shape a style rule discourages.
 //
+// Every ```harn / ```harn,check block is additionally scanned for a call whose
+// first two positional arguments are the same bare identifier. Harn accepts
+// extra positional arguments, so `agent_loop(harness, harness, message, ...)`
+// parses and type-checks and then dies at run time deep inside the stdlib. A
+// reader pasting a docs snippet has no way to see that coming, so the gate
+// rejects the shape outright.
+//
 // Blocks tagged ```harn,ignore or ```harn-prompt,ignore are skipped — use those
 // for intentionally non-syntactic fragments (grammar demos in
 // language-spec.md, etc.).
@@ -142,6 +149,30 @@ pub fn mode_label(mode: string) -> string {
     return "harn-prompt"
   }
   return "harn"
+}
+
+// A call whose first two positional arguments are the same bare identifier —
+// the `agent_loop(harness,\n  harness, ...)` shape a reader gets by pasting a
+// receiver twice. Harn accepts extra positional arguments, so this is
+// arity-legal: neither `harn parse` nor `harn check` rejects it, and the
+// snippet only fails when someone actually runs it. Group 1 is the callee,
+// groups 2 and 3 the two leading arguments.
+const DUPLICATE_LEADING_ARG_RE =
+  r"([A-Za-z_][A-Za-z0-9_]*)\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*,\s*([A-Za-z_][A-Za-z0-9_]*)\s*,"
+
+/**
+ * `{callee, name, line}` records for every call in `content` that passes the
+ * same bare identifier as both its first and second argument. `line` is
+ * 1-based within the snippet body. Pure so the tests can drive it.
+ */
+pub fn duplicate_leading_args(content: string) -> list {
+  let out: list = []
+  for m in regex_captures(DUPLICATE_LEADING_ARG_RE, content) {
+    if m.groups[1] == m.groups[2] {
+      out = out + [{callee: m.groups[0], name: m.groups[1], line: m.line}]
+    }
+  }
+  return out
 }
 
 /**
@@ -345,6 +376,18 @@ pipeline main(harness: Harness, task) {
         continue
       }
       checked = checked + 1
+      if event.mode != "prompt" {
+        for dup in duplicate_leading_args(event.content) {
+          failures = failures + 1
+          harness.stdio.println("")
+          harness.stdio.println(
+            "FAIL: ${md_file} (${mode_label(event.mode)} block #${event.idx}, line ${dup.line})",
+          )
+          harness.stdio.println(
+            "      `${dup.callee}` receives `${dup.name}` as both its first and second argument.",
+          )
+        }
+      }
       const block_path = "${prefix}_${event.idx}${mode_extension(event.mode)}"
       harness.fs.write_text(block_path, event.content)
       const res = harness.process.run({program: harn_bin, args: mode_argv(event.mode, block_path)})
@@ -372,6 +415,12 @@ pipeline main(harness: Harness, task) {
     harness.stdio.println("      `{{ endif }}` is a variable lookup, not a closing tag.")
     harness.stdio.println("      Tag a block ```harn,ignore / ```harn-prompt,ignore if it is an")
     harness.stdio.println("      intentional fragment.")
+    harness.stdio.println("")
+    harness.stdio.println("      A duplicated leading argument is arity-legal, so `harn check`")
+    harness.stdio.println("      cannot see it — drop the repeated receiver (`agent_loop(harness,")
+    harness.stdio.println(
+      "      message, ...)`, not `agent_loop(harness, harness, message, ...)`).",
+    )
     // harness.runtime.exit() bypasses defer, so remove the scratch directory before reporting
     // failure to the calling shell.
     harness.process.run({program: "rm", args: ["-rf", tmp_dir]})

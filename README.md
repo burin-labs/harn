@@ -8,7 +8,9 @@ so you don't have to roll your own or pull in a patchwork of libraries. These in
 transcripts and session management, context assembly, retries, tool routing, provider
 differences, persistence, replay, and evals.
 
-```harn
+```harn,check
+import {agent_loop} from "std/agent/loop"
+
 fn main(harness: Harness) {
   tool search(pattern: string) -> string {
     description "Search the project"
@@ -16,7 +18,6 @@ fn main(harness: Harness) {
   }
 
   const result = agent_loop(harness,
-    harness,
     "Find the failing test and fix it.",
     "You are a senior engineer.",
     {loop_until_done: true, tools: search, max_iterations: 24},
@@ -130,7 +131,9 @@ wired through the Harn agent runtime.
 
 Tools are declared with typed parameters and an optional description:
 
-```harn
+```harn,check
+import {agent_loop} from "std/agent/loop"
+
 fn main(harness: Harness) {
   tool read(path: string) -> string {
     description "Read a file"
@@ -144,7 +147,6 @@ fn main(harness: Harness) {
   }
 
   const result = agent_loop(harness,
-    harness,
     "Fix the failing test and verify the change.",
     "You are a senior engineer.",
     {loop_until_done: true, tools: read, max_iterations: 24},
