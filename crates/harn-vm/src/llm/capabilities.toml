@@ -1339,17 +1339,25 @@ thinking_block_style = "thinking_blocks"
 # Provider and model capability is Harn's to own; moving the rules here gives
 # every scope one answer.
 #
-# This fragment sorts first in 20-providers/ on purpose. Capability lookup is
-# first-match-wins rather than a field-wise merge, and each rule below names an
-# exact route that must win over the family wildcards (`qwen/*`,
-# `accounts/fireworks/models/*`) that would otherwise claim it. The one rule
-# that wants the wildcard's other fields says so with `extends = true`.
+# This fragment sorts first in 20-providers/ on purpose, so each exact route
+# below is seen before the family wildcards (`qwen/*`,
+# `accounts/fireworks/models/*`) that would otherwise claim it.
+#
+# Every rule here is `extends = true`, and that is load-bearing rather than
+# stylistic. Lookup is first-match-wins: a non-extends rule wins outright and
+# silently drops every field it does not restate. These routes already have
+# rules elsewhere in the matrix carrying facts a contributed row has no reason
+# to know about — `provider_route_denylist` routing around a broken upstream is
+# the one that caught us, and it is invisible in the generated catalog because
+# it is not projected there. Contributed facts should layer onto what is
+# already known, never replace it.
 
 
 # Qwen3.6 Plus on DashScope. Native tools, server-side reasoning left on with
 # per-stage auto-reasoning disabled, and `/no_think` as the disable directive.
 [[provider.dashscope]]
 model_match = "qwen3.6-plus"
+extends = true
 native_tools = true
 preferred_tool_format = "native"
 structured_output = "native"
@@ -1374,6 +1382,7 @@ thinking_block_style = "inline"
 # chat-template kwargs, which this route does not honor.
 [[provider.openrouter]]
 model_match = "qwen/qwen3.6-35b-a3b"
+extends = true
 native_tools = true
 preferred_tool_format = "native"
 structured_output = "native"
@@ -1426,6 +1435,7 @@ thinking_block_style = "inline"
 # Qwen3.6 Plus served by Fireworks under its own account-scoped id.
 [[provider.fireworks]]
 model_match = "accounts/fireworks/models/qwen3p6-plus"
+extends = true
 native_tools = true
 preferred_tool_format = "native"
 structured_output = "native"
@@ -1449,6 +1459,7 @@ thinking_block_style = "inline"
 # Qwen3.6 Plus on Together, which publishes the upstream capitalized id.
 [[provider.together]]
 model_match = "Qwen/Qwen3.6-Plus"
+extends = true
 native_tools = true
 preferred_tool_format = "native"
 structured_output = "native"
