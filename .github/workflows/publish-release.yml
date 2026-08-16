@@ -478,3 +478,68 @@ jobs:
             HARN_RELEASE_GATE_SCRIPT="$RUNNER_TEMP/release-tools/release_gate.sh" \
             HARN_PUBLISH_SCRIPT="$RUNNER_TEMP/release-tools/publish.sh" \
             bash "$RUNNER_TEMP/release-tools/release_ship.sh" "${args[@]}"
+
+      # Downstream embedders pin this runtime by exact published version, so
+      # nothing they do can begin until the step above succeeds. Hand that
+      # fact to the fleet controller the moment it becomes true.
+      #
+      # This repository deliberately does not enumerate the repositories that
+      # embed it. `burin-labs/harn-bump-fleet` owns fleet membership in its
+      # `fleet.toml`, owns each embedder's update workflow, and owns the
+      # repair lane for updates that fail their checks. One dispatch hands it
+      # the version; the fan-out stays behind its manifest. A second list of
+      # embedder repositories here would be a competing source of truth for
+      # membership that nothing keeps in agreement with the first.
+      #
+      # Scoped to `actions: write` on that single repository — the least
+      # privilege that can start a workflow run in another repository, and
+      # narrower than the org-wide token the controller itself mints.
+      - name: Mint fleet dispatch token
+        id: fleet-dispatch-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: burin-labs
+          repositories: harn-bump-fleet
+          permission-actions: write
+
+      - name: Start downstream runtime updates
+        env:
+          GH_TOKEN: ${{ steps.fleet-dispatch-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          # Read the version from the tree we just published from, not from a
+          # workflow output. Every trigger path (tag push, main-push
+          # self-heal, manual recovery) has already checked out its publish
+          # ref by this point, so the workspace version is what reached
+          # crates.io by construction — no per-trigger reasoning to keep in
+          # sync with the drift detector above.
+          VERSION="$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')"
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::notice::Published $VERSION is not a stable release; embedders track stable versions only, so no fleet update is dispatched."
+            exit 0
+          fi
+          # The controller is idempotent for an already-current version: each
+          # embedder's update short-circuits before any mutation when its pin
+          # already names this version. A duplicate dispatch (a re-run, or the
+          # daily schedule arriving right behind this one) is therefore a
+          # no-op rather than a stream of empty pull requests.
+          for attempt in 1 2 3; do
+            if gh api --method POST \
+              repos/burin-labs/harn-bump-fleet/actions/workflows/bump-fleet.yml/dispatches \
+              --input - <<JSON
+          {"ref": "main", "inputs": {"version": "v$VERSION"}}
+          JSON
+            then
+              echo "::notice::Dispatched fleet update for v$VERSION."
+              exit 0
+            fi
+            echo "Dispatch attempt $attempt failed; retrying." >&2
+            sleep 10
+          done
+          # v$VERSION is published and immutable at this point. Fail loudly
+          # rather than silently: the daily schedule will still pick the
+          # release up, but a whole day of embedder lag should not look green.
+          echo "::error::Published v$VERSION but could not dispatch the fleet update. Embedders will lag until the next scheduled run. Recover with: gh workflow run bump-fleet.yml --repo burin-labs/harn-bump-fleet -f version=v$VERSION"
+          exit 1
