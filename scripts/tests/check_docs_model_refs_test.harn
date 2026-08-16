@@ -76,3 +76,31 @@ pipeline test_rel_path_strip(harness: Harness, task) {
   assert_eq(rel_path("/repo/./docs/src/a.md"), "docs/src/a.md")
   assert_eq(rel_path("docs/src/a.md"), "docs/src/a.md")
 }
+
+// --- provider-scoped refs ---------------------------------------------------
+@test
+pipeline test_other_provider_route_not_flagged(harness: Harness, task) {
+  // `aliases.sonnet` is an anthropic alias; a vertex route names vertex's own
+  // default model, so the two are not comparable.
+  assert_eq(stale_refs("vertex/claude-sonnet-4-6\n", "claude-sonnet-5"), [])
+}
+
+@test
+pipeline test_anthropic_namespaced_ref_still_flagged(harness: Harness, task) {
+  const refs = stale_refs("Use anthropic/claude-sonnet-4-0 today.\n", "claude-sonnet-5")
+  assert_eq(refs.count, 1)
+  assert_eq(refs[0].model, "claude-sonnet-4-0")
+}
+
+@test
+pipeline test_bare_ref_still_flagged(harness: Harness, task) {
+  const refs = stale_refs("Use claude-sonnet-4-0 today.\n", "claude-sonnet-5")
+  assert_eq(refs.count, 1)
+}
+
+@test
+pipeline test_ref_provider_reads_the_namespace(harness: Harness, task) {
+  assert_eq(ref_provider("vertex/claude-sonnet-4-6", "claude-sonnet-4-6"), "vertex")
+  assert_eq(ref_provider("bare claude-sonnet-4-6", "claude-sonnet-4-6"), "")
+  assert_eq(ref_provider("-> vertex/claude-sonnet-4-6 (x)", "claude-sonnet-4-6"), "vertex")
+}
