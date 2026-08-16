@@ -100,11 +100,8 @@ whether a cloud credential was found, and — in parentheses — the other route
 you could take. Your output will differ, because the answer depends on your
 hardware and on which credentials are already in your environment.
 
-If you have not signed up for a provider yet, take the local route named in
-parentheses. The recommendation itself still names a cloud model on a machine
-with no credentials configured, because providers that resolve their
-credentials at call time are counted as available
-([#6738](https://github.com/burin-labs/harn/issues/6738)).
+With no cloud credentials at all, every recommendation is a local model, so
+this works as a first command even before you have signed up for anything.
 
 ## Run a local model
 
