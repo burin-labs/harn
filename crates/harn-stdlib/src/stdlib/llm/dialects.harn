@@ -207,6 +207,10 @@ pub const STRUCTURAL_MARKER_TAGS: list<string> = ["tool", "tool_call", "tool_cal
  * keeps its own list drifts from the parser's, and a label the parser accepts
  * then reads as documentation somewhere else — which is how a well-formed call
  * becomes a turn with no call, no parse error, and no nudge.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
  */
 pub fn tool_fence_info_opens_call(info: string) -> bool {
   const normalized = lowercase(trim(to_string(info ?? "")))

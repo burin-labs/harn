@@ -107,7 +107,5 @@ pipeline main(harness: Harness) {
   )
   // Over-match guard: a label that merely starts with the same letters is an
   // ordinary language label and stays silent.
-  harness.stdio.println(
-    shapes(harness.agent, "```toolkit\nfn main() { println!(\"hi\"); }\n```"),
-  )
+  harness.stdio.println(shapes(harness.agent, "```toolkit\nfn main() { println!(\"hi\"); }\n```"))
 }
