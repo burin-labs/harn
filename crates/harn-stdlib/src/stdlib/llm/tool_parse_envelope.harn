@@ -120,18 +120,16 @@ fn __tool_parse_envelope_json_list(
   let after = trim(source.slice(stream.end, len(source)))
   if starts_with(after, close) {
     after = trim(after.slice(len(close), len(after)))
-  } else if after != "" {
-    return __tool_parse_envelope_error(
-      "tool_calls",
-      "expected a JSON tool object, found `" + after.slice(0, 80) + "`",
-      prose,
-    )
   }
-  return {
-    matched: true,
-    calls: calls,
-    prose: [trim(prose), after].filter(fn(part) { return part != "" }).join("\n"),
-  }
+  // Whatever follows the envelope's objects is NOT this module's to judge. An
+  // unclosed envelope runs to end of output, so the tail routinely holds the
+  // rest of the turn — including a well-formed call in another grammar. This
+  // used to become an "expected a JSON tool object" error that discarded both
+  // the tail AND the calls already parsed above, which is how one malformed
+  // envelope destroyed every other call in the message. Hand the tail back and
+  // let the composition layer parse it; it restores the error if the tail turns
+  // out to hold nothing.
+  return {matched: true, calls: calls, prose: trim(prose), trailing: after}
 }
 
 fn __tool_parse_envelope_markers(body: string, prose: string) -> dict {
@@ -326,20 +324,41 @@ fn __tool_parse_envelope_xml(body: string, prose: string) -> dict {
   }
 }
 
+/**
+ * The opener spellings a chat template may wrap a JSON call body in.
+ *
+ * `<tool>`, `<tool_use>`, and `[[tool]]` are not inventions of this parser's
+ * imagination: models reach for them under tool-format pressure and then, when
+ * nothing comes back, try another spelling — one mined turn narrates it, saying
+ * the call "was malformed" before emitting the same call under a different
+ * opener. Recognizing the spelling costs nothing, because the body still has to
+ * be a JSON call object to match at all; refusing to recognize it costs the
+ * call and teaches the model nothing.
+ *
+ * Order is not precedence — the EARLIEST opener in the text wins — so
+ * `<tool_calls>` still claims a `<tool>` that sits inside it.
+ */
+const ENVELOPE_OPENERS: list<dict> = [
+  {open: "<tool_calls>", close: "</tool_calls>", kind: "tool_calls"},
+  {open: "<tool_code>", close: "</tool_code>", kind: "tool_code"},
+  {open: "<tool_call>", close: "</tool_call>", kind: "tool_call"},
+  {open: "<tool_use>", close: "</tool_use>", kind: "tool_call"},
+  {open: "<tool>", close: "</tool>", kind: "tool_call"},
+  {open: "[[tool]]", close: "[[/tool]]", kind: "tool_call"},
+]
+
 pub fn tool_parse_envelope(text: string) -> dict {
   let opener = ""
   let kind = ""
+  let close_tag = ""
   let at = -1
-  for candidate in [
-    {open: "<tool_calls>", kind: "tool_calls"},
-    {open: "<tool_code>", kind: "tool_code"},
-    {open: "<tool_call>", kind: "tool_call"},
-  ] {
+  for candidate in ENVELOPE_OPENERS {
     const found = text.index_of(candidate.open)
     if found >= 0 && (at < 0 || found < at) {
       at = found
       opener = candidate.open
       kind = candidate.kind
+      close_tag = candidate.close
     }
   }
   if at < 0 {
@@ -370,7 +389,7 @@ pub fn tool_parse_envelope(text: string) -> dict {
       __tool_parse_envelope_xml(body, prose)
     }
   } else {
-    __tool_parse_envelope_json_list(kind, body, "</" + kind + ">", prose, name_hint)
+    __tool_parse_envelope_json_list(kind, body, close_tag, prose, name_hint)
   }
   if parsed?.result != nil {
     return parsed

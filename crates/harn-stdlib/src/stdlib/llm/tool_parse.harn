@@ -1056,6 +1056,36 @@ fn __tool_parse_tagged(text: string, tools) -> dict {
   if provider_dialect != nil {
     return provider_dialect
   }
+  // Which opener spellings wrap a JSON call body is not a property of the route
+  // pin. This lane owns `<tool_call>` and reads it far better than the envelope
+  // could, so that spelling stays here; the alternates it has no reading for —
+  // `<tool>`, `<tool_use>`, `[[tool]]` — went to the generic stray scan, which
+  // recovered the first object of a multi-call body and dropped the rest with
+  // nothing said. Ask the one owner instead, so a turn parses the same way on
+  // either pin.
+  if !contains(text, "<tool_call>") {
+    const envelope = tool_parse_envelope(text)
+    if (envelope?.matched ?? false) && envelope?.result != nil
+      && len(envelope.result?.calls ?? [])
+      > 0 {
+      const recovered = __tool_parse_envelope_remainder(
+        envelope,
+        fn(part) { return __tool_parse_tagged(part, tools) },
+      )
+      // The envelope phrases its violation for the fenced grammar because that
+      // is the pin it was written for. Say it in this lane's own vocabulary.
+      return recovered
+        + {
+        protocol_violations: [
+          protocol_violation(
+            "recovered_dialect",
+            "Recovered a tool call from a chat-template envelope. Emit each call as "
+              + "`<tool_call>name({ ... })</tool_call>` next turn.",
+          ),
+        ],
+      }
+    }
+  }
   const scanned = __host_tool_scan_units(text, tool_parse_scan_spec(tools))
   const bare_candidates = __host_tool_scan_bare_units(scanned.units, tools)
   const known = registry_names(tools)
@@ -1232,6 +1262,67 @@ fn __tool_parse_tagged(text: string, tools) -> dict {
  * fence recovery is the only thing that sees it. That would reintroduce exactly
  * the silent drop this change exists to remove. One direction is enough.
  */
+/**
+ * Fold the text an envelope did not consume back into the turn.
+ *
+ * An envelope owns its own span, not the message. An unclosed one runs to end
+ * of output, so the text after its objects routinely holds the rest of the
+ * turn — and models mix grammars within a turn precisely when they are unsure
+ * which one is real. Parsing the leading and trailing remainders in the
+ * ordinary way, in document order, is what stops one malformed envelope from
+ * taking a well-formed call elsewhere in the same message down with it.
+ *
+ * Recursion terminates because the envelope always consumes its opener, so
+ * each remainder is strictly shorter than the text it came from.
+ */
+fn __tool_parse_envelope_remainder(envelope: dict, parse_remainder) -> dict {
+  const result = envelope.result
+  const leading = to_string(envelope?.prose ?? "")
+  const trailing = to_string(envelope?.trailing ?? "")
+  if trim(leading) == "" && trim(trailing) == "" {
+    return result
+  }
+  // The remainder belongs to the lane that owns the turn, not to the envelope:
+  // the same leftover text means a fenced call on one pin and a heredoc call on
+  // the other, so the caller supplies the reading.
+  const before = if trim(leading) == "" {
+    empty_parse()
+  } else {
+    parse_remainder(leading)
+  }
+  const after = if trim(trailing) == "" {
+    empty_parse()
+  } else {
+    parse_remainder(trailing)
+  }
+  const calls = (before?.calls ?? []) + (result?.calls ?? []) + (after?.calls ?? [])
+  // The tail is not re-reported as a malformed envelope. Reading it as one was
+  // only ever a guess about text the envelope had no claim on, and it fired on
+  // ordinary narration after a call. Its real diagnostic comes from the same
+  // place every other unconsumed span's does: the lane records what it consumed
+  // without producing a call, and the shape detector speaks up when that text
+  // is shaped like one and stays quiet when it is prose.
+  const errors = (before?.tool_parse_errors ?? [])
+    + (result?.tool_parse_errors ?? [])
+    + (after?.tool_parse_errors ?? [])
+  const prose = [to_string(before?.prose ?? ""), to_string(after?.prose ?? "")].filter(
+    fn(part) { return trim(part) != "" },
+  )
+    .join("\n")
+  return result
+    + {
+    calls: calls,
+    tool_calls: calls,
+    tool_parse_errors: errors,
+    protocol_violations: (result?.protocol_violations ?? [])
+      + (before?.protocol_violations ?? [])
+      + (after?.protocol_violations ?? []),
+    dropped: (before?.dropped ?? []) + (after?.dropped ?? []),
+    prose: prose,
+    canonical_text: calls.map(fn(call) { return call_block(call) }).join("\n"),
+  }
+}
+
 fn __tool_parse_json(text: string, tools = nil, recover_heredoc = true) -> dict {
   const envelope = tool_parse_envelope(text)
   if envelope?.matched ?? false {
@@ -1239,7 +1330,10 @@ fn __tool_parse_json(text: string, tools = nil, recover_heredoc = true) -> dict 
       if len(envelope.result?.tool_parse_errors ?? []) > 0 {
         return envelope.result + {prose: trim(text)}
       }
-      return envelope.result
+      return __tool_parse_envelope_remainder(
+        envelope,
+        fn(part) { return __tool_parse_json(part, tools, false) },
+      )
     }
     return empty_parse()
       + {tool_parse_errors: ["chat-template envelope parse failed"], prose: text}
