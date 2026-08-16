@@ -1,0 +1,248 @@
+// The tool-call parse invariant, over the grammar x mutation x route-pin grid.
+//
+// An assistant emission containing a tool-call-shaped span has exactly two
+// permitted outcomes:
+//
+//   1. it parses to the full intended call — the right tool AND every argument
+//      the model wrote; or
+//   2. it is rejected with a diagnostic that reaches model feedback.
+//
+// There is no third outcome. Zero calls with zero diagnostics is a loss the
+// model is never told about; a call recovered with the right name and empty
+// arguments is worse, because an `edit` then dispatches with no path and no
+// content and the turn reads as success. Both have shipped, repeatedly, in
+// grammars whose only difference from a working one was a label token or
+// whether the arguments sat under `args` or beside `name`.
+//
+// So the invariant is asserted per cell rather than eyeballed in a baseline:
+// a `.expected` diff shows WHICH outcome a cell takes, and the assertions below
+// fail outright if a cell takes neither. The two are complementary — the
+// baseline catches a cell that quietly stops parsing, the assertions catch a
+// cell that quietly stops speaking.
+//
+// The diagnostic side is asserted at `__parse_feedback_diagnostics`, not at
+// `parsed.protocol_violations`. Those are different claims: a violation the
+// parser constructs and the feedback layer then discards is invisible to the
+// model, which is the precise shape of a shipped defect. The cells here also
+// render `parse_guidance_prompt` and assert the diagnostic survives into the
+// text the model actually receives.
+import { __parse_feedback_diagnostics } from "std/agent/loop_tool_calls"
+import { agent_parse_tool_calls } from "std/agent/primitives"
+import { parse_guidance_prompt } from "std/agent/prompts"
+import { corpus_registry } from "_tool_parse_probe"
+
+/** Route pins whose parser lane this grid crosses every grammar with. */
+const PINS: list<string> = ["json", "text", "native"]
+
+/**
+ * A code-bearing argument value: quotes, backslashes, blank lines, and triple
+ * quotes, so a grammar that mangles escaping is caught by the round trip rather
+ * than by inspection.
+ */
+fn content_lines() -> string {
+  return [
+    "\"\"\"Unit tests for the experiment service.\"\"\"",
+    "",
+    "import pytest",
+    "",
+    "def test_archive(svc):",
+    "    assert svc.run(\"a\\\\b\") == 1",
+  ]
+    .join("\n")
+}
+
+/** The same content grown to the size of a real captured call (~9 KB). */
+fn large_content() -> string {
+  let lines: list<string> = [content_lines()]
+  let index = 0
+  while index < 223 {
+    lines = lines.appending("    assert svc.list(page=${to_string(index)}) is not None")
+    index = index + 1
+  }
+  return lines.join("\n")
+}
+
+/**
+ * One cell: parse `text` under `pin` and hold it to the invariant.
+ *
+ * `expect` is the call the span was written to produce, or nil when the span is
+ * deliberately unparseable and only a diagnostic is acceptable.
+ */
+fn cell(harness: Harness, pin: string, label: string, text: string, expect) -> nil {
+  const tools = corpus_registry()
+  const turn_opts = {tool_format: pin, tools: tools}
+  const parsed = agent_parse_tool_calls(harness.agent, text, tools, pin)
+  const diagnostics = __parse_feedback_diagnostics(harness.llm, parsed, turn_opts)
+  const calls = parsed?.tool_calls ?? []
+  const wanted = expect != nil
+    && len(calls) == 1
+    && to_string(calls[0].name) == to_string(expect.name)
+    && json_stringify(calls[0].arguments)
+    == json_stringify(
+    expect.args,
+  )
+  const outcome = if wanted {
+    "parsed"
+  } else if len(diagnostics) > 0 {
+    "rejected"
+  } else {
+    "SILENT"
+  }
+  harness.stdio.println("${pin} ${label} ${outcome}")
+  require outcome != "SILENT",
+    "${pin}/${label}: ${to_string(len(calls))} call(s), no diagnostic reaching feedback — "
+    + "a tool-call-shaped span must parse in full or be reported"
+  if outcome == "rejected" {
+    // A cell that cannot parse has to SAY so, in the text the model reads.
+    // Asserting on the rendered prompt (not on the violation object) is the
+    // whole point: the two came apart in production.
+    const guidance = parse_guidance_prompt(
+      harness.fs,
+      {
+        error_summary: to_string(diagnostics[0]),
+        has_partial_success: len(calls) > 0,
+        parsed_call_count: len(calls),
+        body_hint: "",
+        is_native_format: pin == "native",
+        is_json_format: pin == "json",
+      },
+      turn_opts,
+    )
+    require contains(guidance, to_string(diagnostics[0])),
+      "${pin}/${label}: the diagnostic did not survive into rendered model feedback"
+  }
+  if expect == nil {
+    // A malformed span must not half-parse into a call nobody asked for.
+    require len(calls) == 0,
+      "${pin}/${label}: a span with no complete call still produced ${to_string(len(calls))}"
+  }
+  return nil
+}
+
+pipeline main(harness: Harness) {
+  const args = {action: "create", path: "tests/test_experiments.py", content: content_lines()}
+  const edit = {name: "edit", args: args}
+  // The same call in the two argument shapes models actually emit: nested under
+  // an alias, and flat beside `name`. A grammar must read both identically.
+  const nested = json_stringify({name: "edit", arguments: args})
+  const flat = json_stringify({name: "edit"} + args)
+  const bare = json_stringify(args)
+  const expr = "edit({ action: \"create\", path: \"tests/test_experiments.py\", content: <<EOF\n"
+    + content_lines()
+    + "\nEOF })"
+  const verify = {name: "verify", args: {}}
+  const rows: list<dict> = [
+    // Canonical fenced JSON, the default pin's own grammar.
+    {label: "fence.nested", text: "```tool\n" + nested + "\n```", expect: edit},
+    {label: "fence.flat", text: "```tool\n" + flat + "\n```", expect: edit},
+    {
+      label: "fence.empty_args",
+      text: "```tool\n" + json_stringify({name: "verify", arguments: {}}) + "\n```",
+      expect: verify,
+    },
+    {label: "fence.drift_spelling", text: "```json\n" + nested + "\n```", expect: edit},
+    {
+      label: "fence.prose_around",
+      text: "Creating it now.\n```tool\n" + nested + "\n```\nDone.",
+      expect: edit,
+    },
+    {
+      label: "fence.nested_fence",
+      text: "```tool\n" + nested + "\n```\n```python\nprint(1)\n```",
+      expect: edit,
+    },
+    {label: "fence.truncated", text: "```tool\n" + nested.slice(0, 60), expect: nil},
+    {
+      label: "fence.unclosed_json",
+      text: "```tool\n{\"name\": \"edit\", \"arguments\": {\"path\": \"a.py\"\n```",
+      expect: nil,
+    },
+    // Tagged opener carrying a JSON body — the hybrid shape, with and without
+    // the label models write after the opener and the closing tag they omit.
+    {
+      label: "tagged_json.nested_closed",
+      text: "<tool_call>\n" + nested + "\n</tool_call>",
+      expect: edit,
+    },
+    {
+      label: "tagged_json.flat_closed",
+      text: "<tool_call>\n" + flat + "\n</tool_call>",
+      expect: edit,
+    },
+    {label: "tagged_json.nested_open", text: "<tool_call>\n" + nested, expect: edit},
+    {label: "tagged_json.flat_open", text: "<tool_call>\n" + flat, expect: edit},
+    {label: "tagged_json.label_generic", text: "<tool_call>tool\n" + flat, expect: edit},
+    {label: "tagged_json.label_tool_name", text: "<tool_call>edit\n" + flat, expect: edit},
+    {
+      label: "tagged_json.label_closed",
+      text: "<tool_call>tool\n" + nested + "\n</tool_call>",
+      expect: edit,
+    },
+    {label: "tagged_json.label_names_bare_args", text: "<tool_call>edit\n" + bare, expect: edit},
+    {
+      label: "tagged_json.label_prose_around",
+      text: "I will create the file.\n<tool_call>tool\n" + nested,
+      expect: edit,
+    },
+    {label: "tagged_json.truncated", text: "<tool_call>tool\n" + nested.slice(0, 60), expect: nil},
+    {label: "tagged_json.no_name", text: "<tool_call>\n" + bare, expect: nil},
+    {
+      label: "tagged_json.empty_args",
+      text: "<tool_call>\n" + json_stringify({name: "verify", arguments: {}}) + "\n</tool_call>",
+      expect: verify,
+    },
+    // The tagged grammar's own call expression, wrapped and bare.
+    {label: "tagged_expr.closed", text: "<tool_call>\n" + expr + "\n</tool_call>", expect: edit},
+    {label: "tagged_expr.same_line", text: "<tool_call>" + expr + "</tool_call>", expect: edit},
+    {label: "tagged_expr.unclosed", text: "<tool_call>\n" + expr, expect: edit},
+    {label: "tagged_expr.bare_opener", text: expr, expect: edit},
+    {
+      label: "tagged_expr.inline_backticks",
+      text: "Use `<tool_call>` for calls: <tool_call>\n" + expr + "\n</tool_call>",
+      expect: edit,
+    },
+    {
+      label: "tagged_expr.unknown_tool",
+      text: "<tool_call>\nnope({ x: 1 })\n</tool_call>",
+      expect: nil,
+    },
+    // Chat-template envelopes.
+    {
+      label: "envelope.markers",
+      text: "<tool_calls>\n<tool>" + nested + "</tool>\n</tool_calls>",
+      expect: edit,
+    },
+    {
+      label: "envelope.function_markup",
+      text:
+        "<function=edit>\n<parameter=action>create</parameter>\n<parameter=path>tests/test_experiments.py</parameter>\n</function>",
+      expect: {name: "edit", args: {action: "create", path: "tests/test_experiments.py"}},
+    },
+    {
+      label: "envelope.unclosed_marker",
+      text: "<tool_calls>\n<tool>" + nested.slice(0, 40),
+      expect: nil,
+    },
+  ]
+  for pin in PINS {
+    for row in rows {
+      cell(harness, pin, to_string(row.label), to_string(row.text), row?.expect)
+    }
+  }
+  // A production-sized call, round-tripped: the argument the model wrote has to
+  // arrive byte-identical, not merely present. Truncation inside a large body is
+  // the failure this guards, and a length check catches it where an eyeball on a
+  // baseline cannot.
+  const big = large_content()
+  const big_args = {action: "create", path: "tests/test_experiments.py", content: big}
+  const big_span = "<tool_call>tool\n" + json_stringify({name: "edit"} + big_args)
+  for pin in PINS {
+    const parsed = agent_parse_tool_calls(harness.agent, big_span, corpus_registry(), pin)
+    const calls = parsed?.tool_calls ?? []
+    require len(calls) == 1, "${pin}/large: expected one recovered call"
+    const landed = len(to_string(calls[0].arguments.content))
+    require landed == len(big),
+      "${pin}/large: content round-tripped at ${to_string(landed)} of ${to_string(len(big))} chars"
+    harness.stdio.println("${pin} large.round_trip ${to_string(len(big))}")
+  }
+}

@@ -16,7 +16,7 @@ import {
   TILDE_FENCE,
   tool_fence_info_intent,
 } from "std/llm/dialects"
-import { tool_parse_envelope } from "std/llm/tool_parse_envelope"
+import { tool_call_label_body, tool_parse_envelope } from "std/llm/tool_parse_envelope"
 import {
   bind_verbatim,
   has_counted_verbatim,
@@ -311,7 +311,12 @@ fn __tool_parse_narration(body: string, tools) -> dict {
       return {matched: true, ok: true, call: nil, prose: prose}
     }
     const parsed = __tool_parse_call_from_body(rest, tools)
-    return {matched: true, ok: true, call: parsed?.ok ?? false ? parsed?.call : nil, prose: prose}
+    if !(parsed?.ok ?? false) {
+      // The narration wrapper is not a licence to swallow the call it wraps.
+      // Keep the prose, but report why the remainder did not parse.
+      return {matched: true, ok: false, error: to_string(parsed?.error ?? "tool-call parse failed")}
+    }
+    return {matched: true, ok: true, call: parsed?.call, prose: prose}
   }
   if rest != ""
     && !starts_with(rest, "<")
@@ -325,7 +330,7 @@ fn __tool_parse_narration(body: string, tools) -> dict {
   return {matched: false}
 }
 
-fn __tool_parse_json_call_from_body(source: string, tools) -> dict {
+fn __tool_parse_json_call_from_body(source: string, tools, name_hint: string = "") -> dict {
   const decoded = try {
     json_parse(source)
   } catch (error) {
@@ -355,7 +360,16 @@ fn __tool_parse_json_call_from_body(source: string, tools) -> dict {
       error: "<tool_call> JSON body must be an object, got `" + json_stringify(item) + "`.",
     }
   }
-  const name = trim(to_string(item?.name ?? item?.tool_name ?? item?.function?.name ?? ""))
+  // Name and argument resolution is std/llm/tool_parse_json_support's business,
+  // so the tagged grammar reads an object exactly the way the fenced and
+  // chat-template grammars do. A body carrying bare arguments under a labeled
+  // opener takes its name from the label.
+  const fields = json_fields(item)
+  const name = if fields.name != "" {
+    fields.name
+  } else {
+    trim(name_hint)
+  }
   if name == "" {
     return {ok: false, error: "<tool_call> JSON body did not contain a tool name"}
   }
@@ -366,11 +380,7 @@ fn __tool_parse_json_call_from_body(source: string, tools) -> dict {
       error: "Unknown tool '" + name + "'. Available tools: [" + known.join(", ") + "]",
     }
   }
-  let arguments = item?.arguments
-    ?? item?.parameters
-    ?? item?.args
-    ?? item?.function?.arguments
-    ?? {}
+  let arguments = fields.arguments
   if type_of(arguments) == "string" {
     arguments = try {
       json_parse(arguments)
@@ -450,8 +460,18 @@ fn __tool_parse_call_from_body(
   if nested?.matched ?? false {
     return nested
   }
-  if starts_with(trimmed, "{") || starts_with(trimmed, "[") {
-    return __tool_parse_json_call_from_body(trimmed, tools)
+  // A JSON body, with or without the label models write after the opener. The
+  // labeled form has to be recognized HERE: past this point the body no longer
+  // starts with a structural character, and the narration ladder below reads
+  // it as prose — which is how a complete call became visible text carrying no
+  // call, no error, and no violation.
+  const labeled = tool_call_label_body(trimmed)
+  if labeled?.ok ?? false {
+    return __tool_parse_json_call_from_body(
+      to_string(labeled.body),
+      tools,
+      to_string(labeled?.name_hint ?? ""),
+    )
   }
   const narration = __tool_parse_narration(trimmed, tools)
   if narration?.matched ?? false {
@@ -1320,14 +1340,50 @@ fn __tool_parse_json(text: string, tools = nil, recover_heredoc = true) -> dict 
     }
   }
   const canonical = calls.map(fn(call) { return call_block(call) }).join("\n")
+  // This module's contract is that every consumed non-call is recorded as
+  // dropped, and the shape detector reads that ledger. The fenced lane used to
+  // keep no ledger at all, so a turn whose only tool-call-shaped span this
+  // grammar cannot read — a bare `name({ … })`, say — ended as ordinary prose
+  // with nothing for the detector to find and nothing for the model to act on.
+  // Record it only when the turn produced neither a call nor an error, so a
+  // turn that already carries a diagnostic is not double-reported and prose
+  // alongside a successful call stays prose.
+  const unparsed_turn = len(calls) == 0 && len(errors) == 0 && trim(chunked.prose) != ""
+  const dropped = if unparsed_turn {
+    [{text: chunked.prose, reason: "unparsed_fenced_turn"}]
+  } else {
+    []
+  }
+  // The other grammar's bare call expression carries no structure this lane can
+  // key on, so the shape detector above cannot see it — but the registry can.
+  // A resolved, argument-bearing call to a DECLARED tool is not narration, and
+  // the model has to be told the turn produced nothing. It is reported rather
+  // than dispatched: what to accept on a json pin is the recovery ladder's
+  // decision, and silence is the only outcome that was never anyone's.
+  const stray = if unparsed_turn && tools != nil {
+    __host_tool_scan_bare_calls(chunked.prose, tools)
+  } else {
+    nil
+  }
+  const bare_violations = (stray?.calls ?? []).map(
+    fn(call) { return protocol_violation(
+      "wrong_tool_format",
+      "protocol_violation: `"
+        + to_string(call?.name ?? "")
+        + "({ ... })` was emitted as a bare call expression while `tool_format` is "
+        + "`json`; it did NOT run. Re-emit it as a strict JSON object inside a "
+        + "```tool fence.",
+    ) },
+  )
   return empty_parse()
     + {
     calls: calls,
     tool_calls: calls,
     tool_parse_errors: errors,
-    protocol_violations: chunked.violations,
+    protocol_violations: chunked.violations + bare_violations,
     canonical_text: canonical,
     prose: chunked.prose,
+    dropped: dropped,
   }
 }
 

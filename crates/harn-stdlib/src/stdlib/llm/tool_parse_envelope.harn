@@ -10,7 +10,6 @@
  * the byte-oriented host scanners rather than also carrying every envelope
  * dialect.
  */
-import { ARGUMENT_ALIASES, NAME_ALIASES } from "std/llm/dialects"
 import { json_fields } from "std/llm/tool_parse_json_support"
 import { empty_parse, protocol_violation, provider_result } from "std/llm/tool_parse_result"
 
@@ -32,30 +31,52 @@ fn __tool_parse_envelope_error(kind: string, detail: string, prose: string) -> d
   }
 }
 
-fn __tool_parse_envelope_call(value) -> dict {
+/**
+ * What may stand between a `<tool_call>` opener and its JSON body.
+ *
+ * Models label the block before the body — the literal word `tool`, the tool's
+ * own name, or a template channel token — and frequently omit the closing tag.
+ * This is the one owner of that vocabulary: both the envelope guard below and
+ * the tagged-grammar body parser ask it what the opener is actually carrying,
+ * so the two grammars cannot disagree about which spans are a JSON call.
+ *
+ * `name_hint` is the label, offered as a fallback name for a body that carries
+ * bare arguments and no `name` field.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ */
+pub fn tool_call_label_body(body: string) -> dict {
+  const trimmed = trim(body)
+  if starts_with(trimmed, "{") || starts_with(trimmed, "[") {
+    return {ok: true, body: trimmed, name_hint: ""}
+  }
+  const labeled = regex_captures("^([A-Za-z_][A-Za-z0-9_.\\-]{0,63})[ \\t]*\\r?\\n", trimmed)
+  if len(labeled) == 0 {
+    return {ok: false}
+  }
+  const rest = trim(trimmed.slice(labeled[0].end, len(trimmed)))
+  if !starts_with(rest, "{") && !starts_with(rest, "[") {
+    return {ok: false}
+  }
+  return {ok: true, body: rest, name_hint: to_string(labeled[0].groups[0])}
+}
+
+fn __tool_parse_envelope_call(value, name_hint: string = "") -> dict {
   if type_of(value) != "dict" {
     return {ok: false, error: "each chat-template tool entry must be a JSON object"}
   }
   const fields = json_fields(value)
-  const name = fields.name
+  const name = if fields.name != "" {
+    fields.name
+  } else {
+    trim(name_hint)
+  }
   if name == "" {
     return {ok: false, error: "a JSON tool object was missing a non-empty name"}
   }
   let arguments = fields.arguments
-  let has_arguments = false
-  for alias in ARGUMENT_ALIASES {
-    if value[alias] != nil {
-      has_arguments = true
-    }
-  }
-  if !has_arguments {
-    arguments = {}
-    for key in keys(value) {
-      if !NAME_ALIASES.contains(key) && key != "id" {
-        arguments[key] = value[key]
-      }
-    }
-  }
   if type_of(arguments) == "string" {
     arguments = try {
       json_parse(arguments)
@@ -74,6 +95,7 @@ fn __tool_parse_envelope_json_list(
   body: string,
   close: string,
   prose: string,
+  name_hint: string = "",
 ) -> dict {
   const source = trim(body)
   const stream = __host_tool_json_stream(source)
@@ -89,7 +111,7 @@ fn __tool_parse_envelope_json_list(
   }
   let calls: list<dict> = []
   for row in stream.values {
-    const normalized = __tool_parse_envelope_call(row.value)
+    const normalized = __tool_parse_envelope_call(row.value, name_hint)
     if !(normalized?.ok ?? false) {
       return __tool_parse_envelope_error("tool_calls", to_string(normalized.error), prose)
     }
@@ -324,10 +346,21 @@ pub fn tool_parse_envelope(text: string) -> dict {
     return {matched: false}
   }
   const prose = text.slice(0, at)
-  const body = text.slice(at + len(opener), len(text))
-  if kind == "tool_call" && !starts_with(trim(body), "{") {
+  const raw_body = text.slice(at + len(opener), len(text))
+  // A `<tool_call>` opener is only this module's business when it wraps a JSON
+  // body. Requiring the body to START with `{` also rejected the common shape
+  // where the model labels the block first, so a complete call was discarded
+  // with the label as the only discriminator.
+  const unwrapped = if kind == "tool_call" {
+    tool_call_label_body(raw_body)
+  } else {
+    {ok: true, body: raw_body, name_hint: ""}
+  }
+  if !(unwrapped?.ok ?? false) {
     return {matched: false}
   }
+  const body = to_string(unwrapped.body)
+  const name_hint = to_string(unwrapped?.name_hint ?? "")
   let parsed = if kind == "tool_calls" {
     const leading = trim(body)
     if starts_with(leading, "<tool>") || starts_with(leading, "{")
@@ -337,7 +370,7 @@ pub fn tool_parse_envelope(text: string) -> dict {
       __tool_parse_envelope_xml(body, prose)
     }
   } else {
-    __tool_parse_envelope_json_list(kind, body, "</" + kind + ">", prose)
+    __tool_parse_envelope_json_list(kind, body, "</" + kind + ">", prose, name_hint)
   }
   if parsed?.result != nil {
     return parsed

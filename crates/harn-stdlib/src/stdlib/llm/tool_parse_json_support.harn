@@ -24,22 +24,63 @@ fn __tool_parse_json_name(value: dict) -> string {
   return ""
 }
 
+/**
+ * Arguments written as siblings of `name` rather than under an argument alias.
+ *
+ * Chat templates and several open-weight models inline the argument fields
+ * directly: `{"name": "edit", "action": "create", "path": …}`. Read only when
+ * no alias is present, so a canonical `{"name": …, "args": {…}}` object is
+ * untouched. Without it the object still carries a resolvable NAME, so the
+ * call dispatches with an empty argument dict instead of failing — a silent
+ * corruption strictly worse than a rejection.
+ */
+fn __tool_parse_json_flat_arguments(value: dict) -> dict {
+  let arguments: dict = {}
+  for key in keys(value) {
+    if !NAME_ALIASES.contains(key) && !ARGUMENT_ALIASES.contains(key) && key != "id" {
+      arguments[key] = value[key]
+    }
+  }
+  return arguments
+}
+
 fn __tool_parse_json_arguments(value: dict) {
   for key in ARGUMENT_ALIASES {
     if value[key] != nil {
       return value[key]
     }
   }
-  return {}
+  return __tool_parse_json_flat_arguments(value)
+}
+
+/**
+ * The object that actually carries the call's name and arguments.
+ *
+ * Provider tool-call rows nest the pair under `function` and keep envelope
+ * metadata (`id`, `type`, `index`) outside it. Descending here means the flat
+ * reading above sees the call object, not the envelope around it.
+ */
+fn __tool_parse_json_source(value: dict) -> dict {
+  const nested = value?.function
+  if type_of(nested) == "dict" && __tool_parse_json_name(nested) != "" {
+    return nested
+  }
+  return value
 }
 
 /**
  * Read canonical name and arguments fields from a decoded tool-call object.
+ *
+ * This is the one owner of "which key holds the name" and "which keys hold the
+ * arguments" for every JSON-bearing tool-call grammar. Grammars differ in what
+ * WRAPS the object; they must not differ in how the object reads.
+ *
  * @effects: []
  * @errors: []
  */
 pub fn json_fields(value: dict) -> dict {
-  return {name: __tool_parse_json_name(value), arguments: __tool_parse_json_arguments(value)}
+  const source = __tool_parse_json_source(value)
+  return {name: __tool_parse_json_name(source), arguments: __tool_parse_json_arguments(source)}
 }
 
 /**
@@ -56,14 +97,15 @@ pub fn json_call(value, allow_flat_argument_string: bool) -> dict {
         + "Arrays, scalars, and other non-object entries are rejected.",
     }
   }
-  let name = __tool_parse_json_name(value)
+  const fields = json_fields(value)
+  let name = fields.name
   for marker in NAME_CHANNEL_MARKERS {
     const marker_at = name.index_of(marker)
     if marker_at >= 0 {
       name = name.slice(0, marker_at)
     }
   }
-  let arguments = __tool_parse_json_arguments(value)
+  let arguments = fields.arguments
   if GENERIC_WRAPPER_NAMES.contains(name) && type_of(arguments) == "dict" {
     const nested_name = __tool_parse_json_name(arguments)
     if nested_name != "" {
