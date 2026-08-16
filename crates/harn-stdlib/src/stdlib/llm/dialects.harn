@@ -213,16 +213,45 @@ pub const STRUCTURAL_MARKER_TAGS: list<string> = ["tool", "tool_call", "tool_cal
  * @api_stability: experimental
  */
 pub fn tool_fence_info_opens_call(info: string) -> bool {
+  return tool_fence_info_intent(info) != "none"
+}
+
+/**
+ * How strongly a fence info string declares itself a tool block:
+ *
+ * - `"canonical"` — the `tool` label or a `tool`-prefixed variant. The word
+ *   names a tool block and nothing else, so the fence is an attempted call
+ *   whatever format the route taught.
+ * - `"drift"` — a spelling that names a language or a chat-template field
+ *   (`json`, `function_call`). Accepted as a call once the route has already
+ *   taught fenced JSON, because there the model was asked for a fence and this
+ *   is the wrong label on the right thing.
+ * - `"none"` — not a tool block.
+ *
+ * The distinction exists because the drift set is only safe under a fenced-JSON
+ * pin. A route that taught tagged text never asked for a fence at all, so a
+ * ```json block there is far more likely to be an example than a call, and
+ * dispatching it would execute documentation. Callers that recover a fence
+ * ACROSS grammars must require `"canonical"`.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn tool_fence_info_intent(info: string) -> string {
   const normalized = lowercase(trim(to_string(info ?? "")))
-  if normalized == FENCE_OPEN_INFO || FENCE_DRIFT_INFOS.contains(normalized) {
-    return true
+  if normalized == FENCE_OPEN_INFO {
+    return "canonical"
   }
   for separator in FENCE_INFO_SUFFIX_SEPARATORS {
     if starts_with(normalized, FENCE_OPEN_INFO + separator) {
-      return true
+      return "canonical"
     }
   }
-  return false
+  if FENCE_DRIFT_INFOS.contains(normalized) {
+    return "drift"
+  }
+  return "none"
 }
 
 // ── JSON envelope key aliases ───────────────────────────────────────────────
