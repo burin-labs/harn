@@ -2,13 +2,19 @@
  * Code Review Agent Example
  *
  * Run with:
- *   cargo run --bin harn -- run examples/code-reviewer.harn
+ *   harn run examples/code-reviewer.harn -- "$(git diff)"
  *
  * This is a compact review agent that reviews a pasted patch or a task
  * description with optional context files.
+ *
+ * The patch arrives through `argv`, which is how `harn run` passes input to a
+ * pipeline. A host that drives Harn over ACP supplies its own task instead;
+ * see docs/src/acp-editor-hosts.md.
  */
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness) {
   harness.stdio.log("Starting code review agent")
+  const task = argv[0]
+    ?? "No patch supplied. Pass one with: harn run examples/code-reviewer.harn -- \"$(git diff)\""
   const system = """
 You are a senior code reviewer.
 Review the change for correctness, security, maintainability, and tests.

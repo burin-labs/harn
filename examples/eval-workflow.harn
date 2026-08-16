@@ -20,7 +20,7 @@ pipeline main(harness: Harness, task) {
     {input: "Capital of France?", expected: "Paris", category: "geography"},
     {input: "Color of grass?", expected: "green", category: "common-sense"},
   ]
-  const passed = 0
+  let passed = 0
   const total = len(test_cases)
   for tc in test_cases {
     // In production, replace with an actual llm_call:
@@ -39,7 +39,9 @@ pipeline main(harness: Harness, task) {
   }
   // mock for demo
   // Record aggregate metrics
-  const accuracy = passed / total
+  // `/` on two ints truncates, so 2 of 3 passing would report 0. Widen the
+  // numerator before dividing.
+  const accuracy = to_float(passed) / total
   eval_metric("accuracy", accuracy, {total: total, passed: passed})
   eval_metric("test_suite_size", total)
   // Check final usage

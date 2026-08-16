@@ -7,7 +7,7 @@ visible, not to build an elaborate benchmark harness.
 Use the companion example as a baseline:
 
 ```bash
-cargo run --bin harn -- run examples/data-pipeline.harn
+harn run examples/eval-workflow.harn
 ```
 
 ## 1. Define the dataset inline
@@ -82,7 +82,8 @@ pipeline main(harness: Harness) {
     eval_metric("case_correct", correct, {case_id: tc.id})
   }
 
-  const accuracy = passed / cases.count
+  // `/` on two ints truncates: 1 of 2 passing would report 0, not 0.5.
+  const accuracy = to_float(passed) / cases.count
   eval_metric("accuracy", accuracy, {passed: passed, total: cases.count})
   eval_metric("run_id", harness.random.uuid())
   eval_metric("generated_at", harness.clock.timestamp())
@@ -110,12 +111,32 @@ pipeline main(harness: Harness) {
 
 ## 5. How to use it
 
-Run the pipeline, inspect the metrics, then compare runs over time:
+Run the pipeline and read the metric trail it prints:
 
 ```bash
 harn run examples/eval-workflow.harn
-harn eval .harn-runs/<run-id>.json
 ```
+
+```text
+[harn] === Recorded Metrics ===
+[harn]   case_correct = true
+[harn]   case_correct = true
+[harn]   case_correct = true
+[harn]   accuracy = 1.0
+[harn]   test_suite_size = 3
+```
+
+To compare runs over time you need a saved run record. `harn run` on a plain
+pipeline does not write one — `.harn-runs/` is populated by `workflow_execute`,
+and that is what `harn eval` and `harn replay` consume:
+
+```bash
+harn eval .harn-runs/<run-id>.json
+harn eval .harn-runs/                 # every record in the directory
+```
+
+See [the workflow runtime](./workflow-runtime.md) for the run-record shape and
+how to produce one.
 
 A good eval pipeline answers three questions:
 
