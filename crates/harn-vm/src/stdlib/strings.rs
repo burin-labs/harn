@@ -796,6 +796,28 @@ fn pop_llm_render_context_impl(_args: &[VmValue], _out: &mut String) -> Result<V
     Ok(VmValue::Nil)
 }
 
+// Read the active frame without disturbing the stack. The agent loop pushes the
+// resolved route before it renders a turn, so this is the route the wire is
+// about to use — which is what lets `__tool_format_pair` answer for a caller
+// that rendered without threading `model` through its options instead of
+// falling back to a route-blind default grammar.
+#[harn_builtin(
+    exposure = "runtime_internal",
+    // Ambient read of the same thread-local frame push/pop maintain; see the
+    // effect rationale on `__push_llm_render_context`.
+    effects = [],
+    sig = "__current_llm_render_context() -> dict|nil",
+    category = "strings"
+)]
+fn current_llm_render_context_impl(
+    _args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    Ok(crate::stdlib::template::current_llm_render_context()
+        .map(|ctx| ctx.to_vm_value())
+        .unwrap_or(VmValue::Nil))
+}
+
 #[harn_builtin(
     exposure = "pure",
     effects = [],
@@ -906,6 +928,7 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &PROMPT_MARK_RENDERED_IMPL_DEF,
     &PUSH_LLM_RENDER_CONTEXT_IMPL_DEF,
     &POP_LLM_RENDER_CONTEXT_IMPL_DEF,
+    &CURRENT_LLM_RENDER_CONTEXT_IMPL_DEF,
     &REPEAT_IMPL_DEF,
     &INDENT_IMPL_DEF,
     &DEDENT_IMPL_DEF,

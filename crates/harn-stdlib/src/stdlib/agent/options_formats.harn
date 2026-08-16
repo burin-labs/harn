@@ -106,10 +106,29 @@ fn __resolved_model_id(llm: HarnessLlm, model) -> string {
   return to_string(unwrap(resolved)?.id ?? model)
 }
 
+// The agent loop pushes the resolved route before it renders a turn, so a
+// prompt-building caller that never threaded `model` through its options can
+// still be answered for the route the wire is about to use. Without this the
+// resolver reports `unresolved` and `agent_tool_format` falls through to the
+// route-blind global default — teaching a grammar the parser will not accept
+// and discarding every call the model makes.
+fn __render_context_pair() -> {provider: string, model: string}? {
+  const ctx = __current_llm_render_context()
+  if ctx == nil {
+    return nil
+  }
+  const provider = trim(to_string(ctx?.provider ?? ""))
+  const model = trim(to_string(ctx?.model ?? ""))
+  if provider == "" || model == "" {
+    return nil
+  }
+  return {provider: provider, model: model}
+}
+
 fn __tool_format_pair(llm: HarnessLlm, opts) -> {provider: string, model: string}? {
   const raw_model = opts?.model
   if raw_model == nil || trim(to_string(raw_model)) == "" {
-    return nil
+    return __render_context_pair()
   }
   const provider = __explicit_provider(opts)
   if provider != nil {
