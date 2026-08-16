@@ -16120,7 +16120,10 @@
       "context_window": 1000000,
       "modalities": {
         "input": [
-          "text"
+          "text",
+          "image",
+          "audio",
+          "pdf"
         ],
         "output": [
           "text"
@@ -16167,6 +16170,9 @@
       "capability_tags": [
         "streaming",
         "tools",
+        "vision",
+        "audio",
+        "pdf",
         "prompt_caching",
         "structured_output"
       ],
@@ -16193,7 +16199,10 @@
       "context_window": 200000,
       "modalities": {
         "input": [
-          "text"
+          "text",
+          "image",
+          "audio",
+          "pdf"
         ],
         "output": [
           "text"
@@ -16240,6 +16249,9 @@
       "capability_tags": [
         "streaming",
         "tools",
+        "vision",
+        "audio",
+        "pdf",
         "prompt_caching",
         "structured_output"
       ],
@@ -16264,7 +16276,10 @@
       "context_window": 1000000,
       "modalities": {
         "input": [
-          "text"
+          "text",
+          "image",
+          "audio",
+          "pdf"
         ],
         "output": [
           "text"
@@ -16311,6 +16326,9 @@
       "capability_tags": [
         "streaming",
         "tools",
+        "vision",
+        "audio",
+        "pdf",
         "prompt_caching",
         "structured_output"
       ],
@@ -16338,7 +16356,10 @@
       "context_window": 1000000,
       "modalities": {
         "input": [
-          "text"
+          "text",
+          "image",
+          "audio",
+          "pdf"
         ],
         "output": [
           "text"
@@ -16385,6 +16406,9 @@
       "capability_tags": [
         "streaming",
         "tools",
+        "vision",
+        "audio",
+        "pdf",
         "prompt_caching",
         "structured_output"
       ],
@@ -16410,7 +16434,10 @@
       "context_window": 1000000,
       "modalities": {
         "input": [
-          "text"
+          "text",
+          "image",
+          "audio",
+          "pdf"
         ],
         "output": [
           "text"
@@ -16457,6 +16484,9 @@
       "capability_tags": [
         "streaming",
         "tools",
+        "vision",
+        "audio",
+        "pdf",
         "prompt_caching",
         "structured_output"
       ],
@@ -16481,7 +16511,10 @@
       "equivalence_group": "frontier-agent-coding",
       "modalities": {
         "input": [
-          "text"
+          "text",
+          "image",
+          "audio",
+          "pdf"
         ],
         "output": [
           "text"
@@ -16528,6 +16561,9 @@
       "capability_tags": [
         "streaming",
         "tools",
+        "vision",
+        "audio",
+        "pdf",
         "prompt_caching",
         "structured_output"
       ],
@@ -16560,7 +16596,10 @@
       "equivalence_group": "frontier-agent-coding",
       "modalities": {
         "input": [
-          "text"
+          "text",
+          "image",
+          "audio",
+          "pdf"
         ],
         "output": [
           "text"
@@ -16607,6 +16646,9 @@
       "capability_tags": [
         "streaming",
         "tools",
+        "vision",
+        "audio",
+        "pdf",
         "prompt_caching",
         "structured_output"
       ],
@@ -19987,7 +20029,8 @@
       "equivalence_group": "qwen3.6-35b-a3b",
       "modalities": {
         "input": [
-          "text"
+          "text",
+          "image"
         ],
         "output": [
           "text"
@@ -20036,6 +20079,7 @@
       "capability_tags": [
         "streaming",
         "tools",
+        "vision",
         "thinking",
         "structured_output"
       ],
@@ -20216,7 +20260,8 @@
       "context_window": 1000000,
       "modalities": {
         "input": [
-          "text"
+          "text",
+          "image"
         ],
         "output": [
           "text"
@@ -20265,6 +20310,7 @@
       "capability_tags": [
         "streaming",
         "tools",
+        "vision",
         "prompt_caching",
         "thinking",
         "structured_output"
@@ -21977,7 +22023,8 @@
       "context_window": 1000000,
       "modalities": {
         "input": [
-          "text"
+          "text",
+          "image"
         ],
         "output": [
           "text"
@@ -22035,6 +22082,7 @@
       "capability_tags": [
         "streaming",
         "tools",
+        "vision",
         "thinking",
         "structured_output",
         "batch"
@@ -23042,7 +23090,10 @@
       "api_dialect": "openai_chat",
       "modalities": {
         "input": [
-          "text"
+          "text",
+          "image",
+          "audio",
+          "pdf"
         ],
         "output": [
           "text"
@@ -23089,6 +23140,9 @@
       "capability_tags": [
         "streaming",
         "tools",
+        "vision",
+        "audio",
+        "pdf",
         "prompt_caching",
         "structured_output"
       ],
@@ -27852,14 +27906,17 @@
       "label": "Claude Fable 5 (via OpenRouter)",
       "family": "anthropic-claude",
       "capabilities": [
+        "audio",
         "native_tools",
+        "pdf",
         "prefers_xml_scaffolding",
         "prompt_caching",
         "streaming",
         "structured_output",
         "structured_output_mode:xml_tagged",
         "text_tools",
-        "tools"
+        "tools",
+        "vision"
       ]
     },
     {
@@ -27870,14 +27927,17 @@
       "label": "Claude Haiku 4.5 (via OpenRouter)",
       "family": "anthropic-claude",
       "capabilities": [
+        "audio",
         "native_tools",
+        "pdf",
         "prefers_xml_scaffolding",
         "prompt_caching",
         "streaming",
         "structured_output",
         "structured_output_mode:xml_tagged",
         "text_tools",
-        "tools"
+        "tools",
+        "vision"
       ]
     },
     {
@@ -27888,14 +27948,17 @@
       "label": "Claude Opus 4.8 (via OpenRouter)",
       "family": "anthropic-claude",
       "capabilities": [
+        "audio",
         "native_tools",
+        "pdf",
         "prefers_xml_scaffolding",
         "prompt_caching",
         "streaming",
         "structured_output",
         "structured_output_mode:xml_tagged",
         "text_tools",
-        "tools"
+        "tools",
+        "vision"
       ]
     },
     {
@@ -27906,14 +27969,17 @@
       "label": "Claude Opus 4.8 Fast (via OpenRouter)",
       "family": "anthropic-claude",
       "capabilities": [
+        "audio",
         "native_tools",
+        "pdf",
         "prefers_xml_scaffolding",
         "prompt_caching",
         "streaming",
         "structured_output",
         "structured_output_mode:xml_tagged",
         "text_tools",
-        "tools"
+        "tools",
+        "vision"
       ]
     },
     {
@@ -27924,14 +27990,17 @@
       "label": "Claude Opus 5 (via OpenRouter)",
       "family": "anthropic-claude",
       "capabilities": [
+        "audio",
         "native_tools",
+        "pdf",
         "prefers_xml_scaffolding",
         "prompt_caching",
         "streaming",
         "structured_output",
         "structured_output_mode:xml_tagged",
         "text_tools",
-        "tools"
+        "tools",
+        "vision"
       ]
     },
     {
@@ -27942,14 +28011,17 @@
       "label": "Claude Sonnet 4.6 (via OpenRouter)",
       "family": "anthropic-claude",
       "capabilities": [
+        "audio",
         "native_tools",
+        "pdf",
         "prefers_xml_scaffolding",
         "prompt_caching",
         "streaming",
         "structured_output",
         "structured_output_mode:xml_tagged",
         "text_tools",
-        "tools"
+        "tools",
+        "vision"
       ]
     },
     {
@@ -27960,14 +28032,17 @@
       "label": "Claude Sonnet 5 (via OpenRouter)",
       "family": "anthropic-claude",
       "capabilities": [
+        "audio",
         "native_tools",
+        "pdf",
         "prefers_xml_scaffolding",
         "prompt_caching",
         "streaming",
         "structured_output",
         "structured_output_mode:xml_tagged",
         "text_tools",
-        "tools"
+        "tools",
+        "vision"
       ]
     },
     {
@@ -28798,7 +28873,8 @@
         "structured_output_mode:delimited",
         "text_tools",
         "thinking",
-        "tools"
+        "tools",
+        "vision"
       ]
     },
     {
@@ -28854,7 +28930,8 @@
         "structured_output_mode:delimited",
         "text_tools",
         "thinking",
-        "tools"
+        "tools",
+        "vision"
       ]
     },
     {
@@ -29222,7 +29299,8 @@
         "structured_output_mode:delimited",
         "text_tools",
         "thinking",
-        "tools"
+        "tools",
+        "vision"
       ]
     },
     {
@@ -29451,14 +29529,17 @@
       "label": "Claude Haiku 4.5 (Vercel AI Gateway)",
       "family": "anthropic-claude",
       "capabilities": [
+        "audio",
         "native_tools",
+        "pdf",
         "prefers_xml_scaffolding",
         "prompt_caching",
         "streaming",
         "structured_output",
         "structured_output_mode:xml_tagged",
         "text_tools",
-        "tools"
+        "tools",
+        "vision"
       ]
     },
     {
