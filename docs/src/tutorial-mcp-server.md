@@ -7,7 +7,7 @@ Streamable HTTP.
 Use the companion example as a baseline:
 
 ```bash
-cargo run --bin harn -- serve mcp examples/mcp_server.harn
+harn serve mcp examples/mcp_server.harn
 ```
 
 ## 1. Register tools
@@ -15,12 +15,12 @@ cargo run --bin harn -- serve mcp examples/mcp_server.harn
 Start by creating a tool registry and attaching a few tools with explicit
 schemas:
 
-```harn
+```harn,check
 pipeline main(harness: Harness) {
   let tools = tool_registry()
 
   tools = tool_define(tools, "greet", "Greet someone by name", {
-    params: { name: "string" },
+    parameters: { name: "string" },
     handler: { args -> "Hello, " + args.name + "!" },
     annotations: {
       title: "Greeting Tool",
@@ -30,7 +30,7 @@ pipeline main(harness: Harness) {
   })
 
   tools = tool_define(tools, "add", "Add two numbers", {
-    params: { a: "number", b: "number" },
+    parameters: { a: "number", b: "number" },
     handler: { args -> to_string(args.a + args.b) }
   })
 
@@ -46,7 +46,7 @@ model, not for a human reading source code.
 Resources are good for static content, while resource templates are better for
 parameterized data.
 
-```harn
+```harn,check
 pipeline main(harness: Harness) {
   harness.tools.mcp_resource({
     uri: "docs://readme",
@@ -80,7 +80,7 @@ state you want to expose without writing a dedicated tool for each lookup.
 
 Prompts let the client ask the server for structured guidance:
 
-```harn
+```harn,check
 pipeline main(harness: Harness) {
   harness.tools.mcp_prompt({
     name: "code_review",

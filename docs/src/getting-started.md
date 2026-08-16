@@ -47,7 +47,7 @@ cd hello-harn
 
 For a small first program, replace `main.harn` with:
 
-```harn
+```harn,check
 fn main(harness: Harness) {
   const response = harness.llm.call(
     "Say hello in one short sentence.",
@@ -61,7 +61,7 @@ fn main(harness: Harness) {
 Run it:
 
 ```bash
-harn run
+harn run main.harn
 ```
 
 The mock provider is deterministic and needs no network access or API key. Use

@@ -14,21 +14,24 @@ The [lifecycle cookbook](./cookbooks/lifecycle.md) collects production-shaped
 recipes that compose the same primitives.
 
 > Each step prints a small diagnostic line ("status=...", "snapshot=...") so
-> you can compare your run against the expected output. The mock provider
-> prints a one-time hint about Ollama on first use; the tutorial output below
-> elides it.
+> you can compare your run against the expected output. `harness.stdio.log`
+> prefixes every line with a `[harn]` tag, which is why the expected output
+> below carries that prefix. From step 3 on, the runtime also writes
+> `worker snapshot ... dropping non-serializable option` warnings to stderr
+> when it persists a parked worker; those are expected and elided below.
 
 ## 1. One-shot agent
 
 Start with the smallest useful loop: one prompt, one mocked response, one
 result. The pipeline returns as soon as the loop completes.
 
-```harn
+```harn,check
+import { agent_loop } from "std/agent/loop"
+
 pipeline main(harness: Harness) {
   harness.llm.mock_enqueue({text: "Triaged ticket #42 as duplicate of #38."})
 
   const result = agent_loop(harness,
-    harness,
     "Triage ticket #42.",
     "You are a careful triage assistant.",
     {provider: "mock"},
@@ -41,8 +44,8 @@ pipeline main(harness: Harness) {
 
 ```text
 $ harn run step1.harn
-status=done
-text=Triaged ticket #42 as duplicate of #38.
+[harn] status=done
+[harn] text=Triaged ticket #42 as duplicate of #38.
 ```
 
 This is the baseline. The loop ran one turn and returned `status: "done"`.
@@ -58,7 +61,8 @@ still in flight. The `on_finish_drain` preset walks the unsettled buckets
 and applies a default disposition (cancel, acknowledge, defer, drain) per
 item.
 
-```harn
+```harn,check
+import { agent_loop } from "std/agent/loop"
 import { on_finish_drain } from "std/lifecycle"
 
 pipeline main(harness: Harness) {
@@ -66,7 +70,6 @@ pipeline main(harness: Harness) {
   harness.llm.mock_enqueue({text: "Triaged ticket #42 as duplicate of #38."})
 
   const result = agent_loop(harness,
-    harness,
     "Triage ticket #42.",
     "You are a careful triage assistant.",
     {provider: "mock"},
@@ -94,7 +97,8 @@ upstream merge, anything off-VM), it calls that tool and the loop yields
 between turns. The pipeline gets back `status: "suspended"` with a snapshot
 path.
 
-```harn
+```harn,check
+import { agent_loop } from "std/agent/loop"
 import { on_finish_drain } from "std/lifecycle"
 
 pipeline main(harness: Harness) {
@@ -109,7 +113,6 @@ pipeline main(harness: Harness) {
   })
 
   const result = agent_loop(harness,
-    harness,
     "Triage ticket #42, escalate to a human if you need review.",
     "If you need a human review before proceeding, call agent_await_resumption.",
     {provider: "mock", tool_format: "native", max_iterations: 2},
@@ -123,9 +126,9 @@ pipeline main(harness: Harness) {
 
 ```text
 $ harn run step3.harn
-status=suspended
-reason=waiting on maintainer review
-snapshot=.harn/workers/worker_019e57c5-….json
+[harn] status=suspended
+[harn] reason=waiting on maintainer review
+[harn] snapshot=.harn/workers/worker_01a0087a-….json
 ```
 
 The snapshot is a JSON document on disk. The runtime persists the full
@@ -144,7 +147,8 @@ reminder onto the next turn, and finishes the loop. The script below
 runs both halves in one process so the tutorial stays self-contained;
 the prose after the snippet shows the cross-process command.
 
-```harn
+```harn,check
+import { agent_loop } from "std/agent/loop"
 import { on_finish_drain } from "std/lifecycle"
 import { resume_agent, wait_agent } from "std/agent/workers"
 
@@ -161,7 +165,6 @@ pipeline main(harness: Harness) {
   harness.llm.mock_enqueue({text: "Approved. Triaged ticket #42 as duplicate of #38."})
 
   const first = agent_loop(harness,
-    harness,
     "Triage ticket #42, escalate to a human if you need review.",
     "If you need a human review before proceeding, call agent_await_resumption.",
     {provider: "mock", tool_format: "native", max_iterations: 3},
@@ -180,16 +183,18 @@ pipeline main(harness: Harness) {
 
 ```text
 $ harn run step4.harn
-first.status=suspended
-snapshot=.harn/workers/worker_019e57c9-….json
-after_resume=completed
-text=Approved. Triaged ticket #42 as duplicate of #38.
+[harn] first.status=suspended
+[harn] snapshot=.harn/workers/worker_01a0087b-….json
+[harn] after_resume=completed
+[harn] text=Approved. Triaged ticket #42 as duplicate of #38.
 ```
 
 To do the same thing across processes, run step 3, copy the printed snapshot
-path, and run `harn run --resume <path> --json`. The `--json` flag dumps the
-final loop value as a structured envelope so it can be piped into another
-tool. Snapshots live under `.harn/workers/` by default; the path is
+path, and run `harn run --resume <path> --json`. The `--json` flag streams
+newline-delimited JSON envelopes — transcript and hook events as the loop
+runs, then a final line whose `data.event_type` is `result` and whose
+`data.value` is the loop's return value — so the run can be piped into
+another tool. Snapshots live under `.harn/workers/` by default; the path is
 script-relative, so resume the script from the same working directory.
 
 ## 5. Wake on a channel event
@@ -202,8 +207,9 @@ the dispatcher; firing the trigger drives the worker to completion with
 `initiator: "triggered"` and no explicit `resume_agent` call from the
 pipeline.
 
-```harn
+```harn,check
 import { on_finish_drain } from "std/lifecycle"
+import { sub_agent_run, wait_agent } from "std/agent/workers"
 
 pipeline main(harness: Harness) {
   harness.agent.pipeline_on_finish(on_finish_drain)
@@ -246,10 +252,10 @@ pipeline main(harness: Harness) {
 
 ```text
 $ harn run step5.harn
-parked_status=suspended
-waiting_on=channel:release.cut
-final_status=completed
-final_text=Release cut; tagged v0.9.0 and posted to the changelog.
+[harn] parked_status=suspended
+[harn] waiting_on=channel:release.cut
+[harn] final_status=completed
+[harn] final_text=Release cut; tagged v0.9.0 and posted to the changelog.
 ```
 
 `wait_agent` blocks until the worker reaches a terminal *or* parked state,
@@ -269,7 +275,8 @@ submissions; `max_concurrent` caps the active slot count, the rest queue.
 Pool tasks compose with the same waiter as agent handles, so `pool_wait`
 (or `wait_agent`) collects results uniformly.
 
-```harn
+```harn,check
+import { agent_loop } from "std/agent/loop"
 import { on_finish_drain } from "std/lifecycle"
 import { pool_create, pool_wait } from "std/lifecycle/pool"
 
@@ -278,21 +285,12 @@ pipeline main(harness: Harness) {
 
   const tickets = ["t-101", "t-102", "t-103"]
 
-  for ticket in tickets {
-    harness.llm.mock_enqueue({
-      match: "*" + ticket + "*",
-      text: "Triaged " + ticket + " as duplicate of t-100.",
-      consume_match: true,
-    })
-  }
-
   const pool = pool_create(harness.agent, {name: "ticket-triage", max_concurrent: 2})
   let handles = []
   for ticket in tickets {
     const t = ticket
     handles = handles + [pool.submit({ ->
       return agent_loop(harness,
-        harness,
         "Triage ticket " + t + ".",
         "You are a careful triage assistant.",
         {provider: "mock"},
@@ -309,10 +307,18 @@ pipeline main(harness: Harness) {
 
 ```text
 $ harn run step6.harn
-completed Triaged t-101 as duplicate of t-100.
-completed Triaged t-102 as duplicate of t-100.
-completed Triaged t-103 as duplicate of t-100.
+[harn] completed Mock response to 3-word prompt: Triage ticket t-101.
+[harn] completed Mock response to 3-word prompt: Triage ticket t-102.
+[harn] completed Mock response to 3-word prompt: Triage ticket t-103.
 ```
+
+The mock provider's default echo keeps the output deterministic here.
+`harness.llm.mock_enqueue` cannot be used to pin per-ticket replies inside a
+pool task today — enqueued entries registered on the pipeline thread are not
+visible inside `pool.submit` closures
+([#6726](https://github.com/burin-labs/harn/issues/6726)). Pin responses in
+the pipeline body, or drive the pool from a test that stubs the tool layer
+instead.
 
 The pool ran two agents concurrently and queued the third. Combine the
 pool with the parking pattern from step 5 to fan a queue of long-running
