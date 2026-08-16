@@ -37,6 +37,7 @@
 - [LLM quick reference](./docs/llm/harn-quickref.md)
 - [Best practices](./best-practices.md)
 - [Run an A/B experiment](./cookbooks/ab-experiment.md)
+- [Coming from LangChain](./cookbooks/coming-from-langchain.md)
 - [Compile a bounded experiment](./cookbooks/compile-hypothesis.md)
 - [Pipeline lifecycle cookbook](./cookbooks/lifecycle.md)
 - [Tool hooks cookbook](./cookbooks/tool-hooks.md)
