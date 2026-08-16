@@ -8,10 +8,13 @@
  */
 import {
   ARGUMENT_ALIASES,
+  BACKTICK_FENCE,
   HTML_ENTITIES,
   MARKUP_DIALECTS,
   NAME_ALIASES,
   TAGGED_DIALECT,
+  TILDE_FENCE,
+  tool_fence_info_intent,
 } from "std/llm/dialects"
 import {
   bind_verbatim,
@@ -854,6 +857,179 @@ fn __tool_parse_tagged_result(state: dict, response_tags: list<string>) -> dict 
   }
 }
 
+/**
+ * True when `text` opens a fence that names itself a tool block.
+ *
+ * Deliberately narrower than the fenced-JSON parser's own accept set: only the
+ * `"canonical"` intent counts, never the drift spellings. See
+ * `tool_fence_info_intent` — under a tagged-text pin the model was never asked
+ * for a fence, so a ```json block is documentation until proven otherwise, and
+ * dispatching it would run an example.
+ *
+ * This is a gate, not a parse. What the fence contains is still decided by
+ * `__tool_parse_json`.
+ */
+fn __tool_parse_has_canonical_tool_fence(text: string) -> bool {
+  for line in text.split("\n") {
+    const trimmed = trim(line)
+    const marker = if starts_with(trimmed, BACKTICK_FENCE) {
+      BACKTICK_FENCE
+    } else if starts_with(trimmed, TILDE_FENCE) {
+      TILDE_FENCE
+    } else {
+      ""
+    }
+    if marker != ""
+      && tool_fence_info_intent(trimmed.slice(len(marker), len(trimmed))) == "canonical" {
+      return true
+    }
+  }
+  return false
+}
+
+/**
+ * The tagged parser's fast path for a text unit outside any pending response.
+ *
+ * It differs from `__tool_parse_consume_stray` on purpose: no response-tag
+ * salvage (a pending response has already been ruled out here) and a `bare`
+ * canonical part that replays the sniffed call together with its prose.
+ *
+ * Fence recovery lives here and not in `__tool_parse_consume_stray` because
+ * that helper also runs while a response block is still open, where a fence is
+ * as likely to be quoted material as an attempted call. Recovery is only
+ * offered where the fence is unambiguously the model's own top-level output.
+ *
+ * It is offered only after the bare sniff comes up empty, so no text that
+ * already produced a call parses differently than before. Fenced text is
+ * accumulated on `state.fenced` rather than decided here: whether it dispatches
+ * depends on what the rest of the turn produced, which is not known until the
+ * unit loop ends.
+ */
+fn __tool_parse_stray_fast(unit, candidates, state: dict) -> dict {
+  const kind = to_string(unit?.kind ?? "")
+  const stray_text = trim(to_string(unit?.text ?? ""))
+  if stray_text == "" || stray_text == "<tool_call>" {
+    return state
+  }
+  const drop_reason = kind == "fenced_line" ? "fenced_narration" : "salvaged_as_prose"
+  const sniffed = candidates?.bare ?? {calls: [], errors: [], prose: stray_text}
+  if len(sniffed?.calls ?? []) > 0 {
+    const sniffed_prose = trim(to_string(sniffed?.prose ?? ""))
+    const prose = if sniffed_prose == "" {
+      state.prose
+    } else {
+      state.prose.appending(sniffed_prose)
+    }
+    return state
+      + {
+      calls: state.calls + sniffed.calls,
+      canonical: state.canonical.appending(
+        {kind: "bare", calls: sniffed.calls, prose: sniffed_prose},
+      ),
+      prose: prose,
+      recovered: state.recovered + len(sniffed.calls),
+    }
+  }
+  // No call in the taught grammar, but a fence that names itself a tool block.
+  if __tool_parse_has_canonical_tool_fence(stray_text) {
+    return state + {fenced: state.fenced.appending(stray_text)}
+  }
+  if len(sniffed?.errors ?? []) > 0 {
+    return state
+      + {
+      errors: state.errors + sniffed.errors,
+      dropped: state.dropped.appending({text: stray_text, reason: drop_reason}),
+    }
+  }
+  if has_response_protocol_fragment(stray_text) {
+    return state
+      + {
+      violations: state.violations.appending(
+        protocol_violation(
+          "stray_text",
+          "Stray text outside response tags: "
+            + json_stringify(stray_text)
+            + ". Wrap all prose in <assistant_prose>...</assistant_prose> or "
+            + "<user_response>...</user_response>, and every tool call in "
+            + "<tool_call>...</tool_call>.",
+          stray_text,
+        ),
+      ),
+      recovered: state.recovered + 1,
+      dropped: state.dropped.appending({text: stray_text, reason: drop_reason}),
+    }
+  }
+  return state
+    + {
+    prose: state.prose.appending(stray_text),
+    canonical: state.canonical.appending({kind: "prose", text: stray_text}),
+    dropped: state.dropped.appending({text: stray_text, reason: drop_reason}),
+  }
+}
+
+/**
+ * Decide what a turn's ```tool fences meant, once the taught grammar has had
+ * its say.
+ *
+ * A fence that names itself a tool block is an explicit statement of intent, so
+ * its body is parsed as a call and accepted — but only when the turn produced
+ * no call in the taught grammar. A turn that already called correctly is not
+ * improved by also mining its fences, and mixing the two would make the accept
+ * set depend on unit ordering.
+ *
+ * Either way the fence is REPORTED. Declining to dispatch is not licence to go
+ * quiet: a silent drop is the defect this exists to remove (burin-code#6388),
+ * and a conservative gate that reintroduced one would be worse than no gate.
+ */
+fn __tool_parse_recover_fenced_calls(blocks: list<string>, tools, state: dict) -> dict {
+  const fenced_text = blocks.join("\n")
+  const already_called = len(state.calls) > 0
+  const fenced_calls = if already_called {
+    []
+  } else {
+    __tool_parse_json(fenced_text, tools, false)?.calls ?? []
+  }
+  if len(fenced_calls) > 0 {
+    let canonical = state.canonical
+    for call in fenced_calls {
+      canonical = canonical.appending(call_block(call))
+    }
+    return state
+      + {
+      calls: state.calls + fenced_calls,
+      canonical: canonical,
+      recovered: state.recovered + len(fenced_calls),
+      violations: state.violations.appending(
+        protocol_violation(
+          "recovered_dialect",
+          "Recovered a tool call from a ```tool fence while `tool_format` is `text`; "
+            + "accepted this turn, but emit it inside <tool_call>...</tool_call> "
+            + "next turn.",
+        ),
+      ),
+    }
+  }
+  const reason = if already_called {
+    " because this turn already made a call in the taught grammar"
+  } else {
+    " because its body did not parse as a tool call"
+  }
+  return state
+    + {
+    prose: state.prose.appending(fenced_text),
+    canonical: state.canonical.appending({kind: "prose", text: fenced_text}),
+    dropped: state.dropped.appending({text: fenced_text, reason: "fenced_narration"}),
+    violations: state.violations.appending(
+      protocol_violation(
+        "wrong_tool_format",
+        "A ```tool fence was present while `tool_format` is `text` but was not dispatched"
+          + reason
+          + "; emit calls inside <tool_call>...</tool_call>.",
+      ),
+    ),
+  }
+}
+
 fn __tool_parse_tagged(text: string, tools) -> dict {
   const provider_dialect = parse_provider_dialect(text, tools)
   if provider_dialect != nil {
@@ -875,52 +1051,41 @@ fn __tool_parse_tagged(text: string, tools) -> dict {
   let recovered = 0
   let pending_response = nil
   let unclosed_response_prose = false
+  // Stray text carrying a ```tool fence. Held aside rather than dropped as
+  // narration: if the turn produces no call in the taught grammar, a call
+  // written in the fenced-JSON grammar is still a call the model meant to make,
+  // and discarding it silently is the burin-code#6388 failure. The fence label
+  // is what makes this unambiguous — prose *about* a tool is not written inside
+  // a fence that announces itself as a tool block.
+  let fenced_call_blocks: list<string> = []
   for index in range(0, len(scanned.units)) {
     const unit = scanned.units[index]
     const candidates = bare_candidates[index]
     const kind = unit?.kind ?? ""
     const tag = unit?.tag ?? ""
     if pending_response == nil && TEXT_UNIT_KINDS.contains(kind) {
-      const stray_text = trim(unit?.text ?? "")
-      if stray_text == "" || stray_text == "<tool_call>" {
-        continue
-      }
-      const sniffed = candidates?.bare ?? {calls: [], errors: [], prose: stray_text}
-      if len(sniffed?.calls ?? []) > 0 {
-        const sniffed_prose = trim(sniffed?.prose ?? "")
-        calls = calls + sniffed.calls
-        canonical = canonical.appending({kind: "bare", calls: sniffed.calls, prose: sniffed_prose})
-        if sniffed_prose != "" {
-          prose_parts = prose_parts.appending(sniffed_prose)
-        }
-        recovered = recovered + len(sniffed.calls)
-      } else if len(sniffed?.errors ?? []) > 0 {
-        const drop_reason = kind == "fenced_line" ? "fenced_narration" : "salvaged_as_prose"
-        for error in sniffed.errors {
-          errors = errors.appending(error)
-        }
-        dropped = dropped.appending({text: stray_text, reason: drop_reason})
-      } else if has_response_protocol_fragment(stray_text) {
-        const drop_reason = kind == "fenced_line" ? "fenced_narration" : "salvaged_as_prose"
-        violations = violations.appending(
-          protocol_violation(
-            "stray_text",
-            "Stray text outside response tags: "
-              + json_stringify(stray_text)
-              + ". Wrap all prose in <assistant_prose>...</assistant_prose> or "
-              + "<user_response>...</user_response>, and every tool call in "
-              + "<tool_call>...</tool_call>.",
-            stray_text,
-          ),
-        )
-        recovered = recovered + 1
-        dropped = dropped.appending({text: stray_text, reason: drop_reason})
-      } else {
-        const drop_reason = kind == "fenced_line" ? "fenced_narration" : "salvaged_as_prose"
-        prose_parts = prose_parts.appending(stray_text)
-        canonical = canonical.appending({kind: "prose", text: stray_text})
-        dropped = dropped.appending({text: stray_text, reason: drop_reason})
-      }
+      const stray = __tool_parse_stray_fast(
+        unit,
+        candidates,
+        {
+          calls: calls,
+          errors: errors,
+          violations: violations,
+          prose: prose_parts,
+          canonical: canonical,
+          dropped: dropped,
+          recovered: recovered,
+          fenced: fenced_call_blocks,
+        },
+      )
+      calls = stray.calls
+      errors = stray.errors
+      violations = stray.violations
+      prose_parts = stray.prose
+      canonical = stray.canonical
+      dropped = stray.dropped
+      recovered = stray.recovered
+      fenced_call_blocks = stray.fenced
       continue
     }
     if pending_response == nil && kind == "block" {
@@ -986,6 +1151,26 @@ fn __tool_parse_tagged(text: string, tools) -> dict {
     recovered = state.recovered
     pending_response = state.pending_response
     unclosed_response_prose = state.unclosed_response_prose
+  }
+  if len(fenced_call_blocks) > 0 {
+    const recovered_state = __tool_parse_recover_fenced_calls(
+      fenced_call_blocks,
+      tools,
+      {
+        calls: calls,
+        canonical: canonical,
+        prose: prose_parts,
+        dropped: dropped,
+        violations: violations,
+        recovered: recovered,
+      },
+    )
+    calls = recovered_state.calls
+    canonical = recovered_state.canonical
+    prose_parts = recovered_state.prose
+    dropped = recovered_state.dropped
+    violations = recovered_state.violations
+    recovered = recovered_state.recovered
   }
   return __tool_parse_tagged_result(
     {
@@ -1344,7 +1529,28 @@ fn __tool_parse_envelope(text: string) -> dict {
   return parsed
 }
 
-fn __tool_parse_json(text: string) -> dict {
+/**
+ * `recover_heredoc` breaks the one cycle between the two grammars.
+ *
+ * The recovery paths call each other: this function hands `<tool_call>` markup
+ * to `__tool_parse_tagged`, and `__tool_parse_recover_fenced_calls` hands a
+ * ```tool fence back here. Left open that is a loop, and its entry test is
+ * looser than what could stop it — `contains(text, "<tool_call>")` fires on the
+ * literal substring, while only the SCANNER decides whether that substring is a
+ * tag or narration. Termination must not depend on the two agreeing.
+ *
+ * So the fence path passes `false`: text arriving from
+ * `__tool_parse_recover_fenced_calls` has already been through the tagged
+ * parser once, and a second heredoc pass cannot find a call the first did not.
+ * Nothing is lost and the cycle cannot close.
+ *
+ * The guard is deliberately NOT symmetric. Disabling fence recovery in the
+ * tagged parser called from here would silently drop the fence in a mixed turn
+ * on a json pin — this branch delegates the WHOLE text to tagged, so tagged's
+ * fence recovery is the only thing that sees it. That would reintroduce exactly
+ * the silent drop this change exists to remove. One direction is enough.
+ */
+fn __tool_parse_json(text: string, tools = nil, recover_heredoc = true) -> dict {
   const envelope = __tool_parse_envelope(text)
   if envelope?.matched ?? false {
     if envelope?.result != nil {
@@ -1356,7 +1562,27 @@ fn __tool_parse_json(text: string) -> dict {
     return empty_parse()
       + {tool_parse_errors: ["chat-template envelope parse failed"], prose: text}
   }
-  if contains(text, "<tool_call>") {
+  if recover_heredoc && contains(text, "<tool_call>") {
+    // Accept the heredoc grammar here rather than discarding it. This route is
+    // measurably exposed: burin-code's default eval model `local-qwen3.6`
+    // resolves to llamacpp `qwen3.6-35b-a3b-ud-q4-k-xl`, whose capability row is
+    // `preferred = json` with `parity = text_only`, and a probe on it parses 1
+    // fenced call, 0 heredoc calls, and 0 errors — a silent total drop of
+    // exactly the grammar most open models reach for. The two grammars are
+    // mutually unambiguous, so forgiving one costs no soundness.
+    const recovered = __tool_parse_tagged(text, tools)
+    const violation = protocol_violation(
+      "recovered_dialect",
+      "Recovered `<tool_call>...</tool_call>` markup while `tool_format` is `json`; "
+        + "accepted this turn, but wrap each call as a strict JSON object inside a "
+        + "```tool fence next turn.",
+    )
+    if len(recovered?.calls ?? []) > 0 {
+      return recovered
+        + {
+        protocol_violations: (recovered?.protocol_violations ?? []).appending(violation),
+      }
+    }
     return empty_parse()
       + {
       protocol_violations: [
@@ -1476,7 +1702,7 @@ pub fn parse_tool_calls(payload: dict) -> dict {
     }
   }
   const parsed = if format == "json" {
-    __tool_parse_json(text)
+    __tool_parse_json(text, payload?.tools)
   } else {
     __tool_parse_tagged(text, payload?.tools)
   }
