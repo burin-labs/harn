@@ -43,8 +43,8 @@ total: 4329 calls, $18.8753, 82566555 in / 1567871 out tok, $1.8826 cache saving
 
 | Flag | Description |
 | --- | --- |
-| `--project <path>` | Project root whose `.harn/events.sqlite` to read. Defaults to the current directory. |
-| `--all` | Discover and aggregate across every `<project>/.harn/events.sqlite` found under the current directory and `~/projects`, skipping vendored `.cargo/registry` copies. |
+| `--project <path>` | Project root whose `.harn/events.sqlite` to read. Defaults to the current directory. Ignored when `--all` is set. |
+| `--all` | Discover and aggregate across every `<project>/.harn/events.sqlite` found under the current directory and `~/projects`, skipping vendored `.cargo/registry` copies and any `node_modules` trees. |
 | `--since <date>` | Only include calls at or after this date (inclusive). Accepts `YYYY-MM-DD` or an RFC3339 timestamp. |
 | `--until <date>` | Only include calls strictly before this date. A bare `YYYY-MM-DD` is inclusive of the whole day. |
 | `--group-by provider\|model\|day\|week\|month` | Roll-up dimension. Defaults to `provider`. |
@@ -53,8 +53,8 @@ total: 4329 calls, $18.8753, 82566555 in / 1567871 out tok, $1.8826 cache saving
 | `--json` | Emit the stable [`JsonEnvelope`](./cli-json-contract.md) instead of the text table. |
 | `--csv` | Emit CSV rows instead of the text table. |
 
-`mock`-provider rows are excluded by default so fixture and offline-demo calls
-never contaminate real spend.
+`mock`-provider rows are always excluded, so fixture and offline-demo calls
+never contaminate real spend. There is no flag to include them.
 
 ## Metrics
 

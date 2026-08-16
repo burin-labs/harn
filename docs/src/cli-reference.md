@@ -461,7 +461,7 @@ harn session schema --check
 
 | Subcommand | Description |
 |---|---|
-| `list` | Lists the agent sessions persisted in `.harn/session-store.sqlite`, newest first, with status, event count, cost, and title. These ids are the input to `harn runs --from-session`. |
+| `list` | Lists the agent sessions persisted in `.harn/session-store.sqlite`, newest first, with status, event count, cost, and title. These ids are the input to `--from-session` on every `harn runs` subcommand (`inspect`, `view`, `report`, `review`, `export-training`). |
 | `export <run-record>` | Writes a `harn_session_bundle` envelope. Default output is sanitized; `--local` preserves local-only content; `--replay-only` withholds prompt/tool payload fields. |
 | `validate <bundle>` | Validates required fields, schema version, bundle type, and high-confidence secret markers without writing a run record. |
 | `import <bundle>` | Validates the bundle and materializes a local run record from `replay.run_record` or replay metadata. |
@@ -572,7 +572,7 @@ test still receives a fresh VM, module state, and persistence root.
 |---|---|
 | `--filter <pattern>` | Only run tests matching pattern |
 | `--target <url>` | Harness base URL for `harn test agents-conformance` |
-| `--api-key <key>` | Bearer API key for `harn test agents-conformance` |
+| `--api-key <key>` | Bearer API key for `harn test agents-conformance`; also read from `HARN_AGENTS_CONFORMANCE_API_KEY` |
 | `--category <name>` | Agents conformance category to run; repeatable or comma-separated |
 | `--json` | Emit conformance results as JSON to stdout, or the agents-conformance leaderboard report |
 | `--json-out <path>` | Write user-test results (or the agents-conformance report) to a JSON file; user-test schemaVersion 3 includes typed timeout, phase, aggregate, latency-distribution, and captured-output data |
@@ -1602,7 +1602,7 @@ harn quickstart --non-interactive --provider ollama --model llama3.2
 Quickstart reports existing provider credentials, Ollama reachability, free disk
 space, and GPU detection. It creates or updates:
 
-- `~/.config/harn/providers.toml` or `HARN_PROVIDERS_CONFIG` when set
+- `HARN_PROVIDERS_CONFIG` when set, otherwise `~/.config/harn/providers.toml`
 - `harn.toml` in the current directory
 - `.env` in the current directory
 
