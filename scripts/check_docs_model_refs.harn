@@ -14,6 +14,9 @@ const SONNET_REF_RE = r"claude-sonnet-4(-[0-9][0-9A-Za-z]*)+"
 
 const ALLOW_STALE = "harn-doc-model-ref: allow-stale"
 
+/** Characters a provider id may contain, for walking back from a `/`. */
+const PROVIDER_CHARS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"
+
 /**
  * True when a file's first five lines carry a GENERATED marker — such
  * files mirror another source of truth and are skipped (the bash
@@ -34,9 +37,35 @@ pub fn is_generated(text: string) -> bool {
 }
 
 /**
+ * The provider that namespaces a match, or "" when the reference is bare.
+ *
+ * `aliases.sonnet` is an ANTHROPIC alias, so it is only the right thing to
+ * compare against for a bare or `anthropic/`-namespaced reference. Another
+ * provider's route resolves its own default model and can legitimately name a
+ * different one.
+ */
+pub fn ref_provider(line: string, model: string) -> string {
+  const idx = line.index_of(model)
+  if idx <= 0 || line.substring(idx - 1, idx) != "/" {
+    return ""
+  }
+  let start = idx - 1
+  while start > 0 && PROVIDER_CHARS.contains(line.substring(start - 1, start)) {
+    start = start - 1
+  }
+  return line.substring(start, idx - 1)
+}
+
+/**
  * All stale sonnet references in `text`: `{model, line_no, line}` records
  * for every `claude-sonnet-4-*` match that differs from `sonnet_model`
  * and whose line lacks the allow-stale marker. Pure so tests can drive it.
+ *
+ * A match namespaced to a provider other than `anthropic` is skipped: it names
+ * that provider's own route, not the anthropic alias, so comparing the two is a
+ * category error. `vertex/claude-sonnet-4-6` is a live route while
+ * `aliases.sonnet` is `claude-sonnet-5`, and flagging it pushed a correct doc
+ * example into contradicting a passing `models recommend` assertion.
  */
 pub fn stale_refs(text: string, sonnet_model: string) -> list {
   const ms = regex_captures(SONNET_REF_RE, text)
@@ -51,6 +80,10 @@ pub fn stale_refs(text: string, sonnet_model: string) -> list {
     }
     const line = lines[m.line - 1]
     if line.contains(ALLOW_STALE) {
+      continue
+    }
+    const provider = ref_provider(line, m.match)
+    if provider != "" && provider != "anthropic" {
       continue
     }
     out = out + [{model: m.match, line_no: m.line, line: line}]
