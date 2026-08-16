@@ -1498,15 +1498,19 @@ mod tests {
     use super::*;
     use crate::vm::Vm;
 
+    // EC P-256 test fixture for the jwt_sign round trip below. Generated with
+    // openssl genpkey on 2026-08-16 solely as a test prop; never used by any real
+    // service or account, and safe to be public. The public constant is this
+    // private key's own pair, so the two always move together.
     const ES256_PRIVATE_KEY: &str = "-----BEGIN PRIVATE KEY-----\n\
-MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgWTFfCGljY6aw3Hrt\n\
-kHmPRiazukxPLb6ilpRAewjW8nihRANCAATDskChT+Altkm9X7MI69T3IUmrQU0L\n\
-950IxEzvw/x5BMEINRMrXLBJhqzO9Bm+d6JbqA21YQmd1Kt4RzLJR1W+\n\
+MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgL/z9S+B6gXXkFHlu\n\
+NT/OiT2akIQzHq60993wCey95vGhRANCAATIs1NFRUVKlbbZYE4klZUg82yJrkhW\n\
+XAEZEyRQ8LkuxeTs1z7z9FAMXaitN4KB9YSk6ShJpRKTKwwQXRmktGzi\n\
 -----END PRIVATE KEY-----\n";
 
     const ES256_PUBLIC_KEY: &str = "-----BEGIN PUBLIC KEY-----\n\
-MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEw7JAoU/gJbZJvV+zCOvU9yFJq0FN\n\
-C/edCMRM78P8eQTBCDUTK1ywSYaszvQZvneiW6gNtWEJndSreEcyyUdVvg==\n\
+MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEyLNTRUVFSpW22WBOJJWVIPNsia5I\n\
+VlwBGRMkUPC5LsXk7Nc+8/RQDF2orTeCgfWEpOkoSaUSkysMEF0ZpLRs4g==\n\
 -----END PUBLIC KEY-----\n";
 
     fn vm() -> Vm {
