@@ -612,23 +612,33 @@ mod tests {
     /// name gains a reader is rejected too, which keeps the list from rotting.
     const UNREAD_NAME_ALLOWLIST: &[(&str, &str)] = &[];
 
-    /// Build output and vendored dependency trees are not sources of truth for
-    /// who reads a variable, and walking them makes the gate slow and flaky.
+    /// Build output, caches, vendored dependencies, and nested checkouts are
+    /// not sources of truth for who reads a variable. A nested worktree is the
+    /// dangerous one: it carries its own copy of the registry and of every
+    /// reader, so walking into it would make any name look alive.
     fn is_pruned_reference_directory(entry: &walkdir::DirEntry) -> bool {
-        entry.file_type().is_dir()
-            && matches!(
-                entry.file_name().to_str(),
-                Some(
-                    ".git"
-                        | ".build"
-                        | ".venv"
-                        | "__pycache__"
-                        | "changelog"
-                        | "dist"
-                        | "node_modules"
-                        | "pkg"
-                        | "target"
-                )
+        if !entry.file_type().is_dir() {
+            return false;
+        }
+        let Some(name) = entry.file_name().to_str() else {
+            return true;
+        };
+        name.starts_with(".target")
+            || matches!(
+                name,
+                ".build"
+                    | ".burin"
+                    | ".git"
+                    | ".harn-runs"
+                    | ".harn-toolchain-cache"
+                    | ".venv"
+                    | ".worktrees"
+                    | "__pycache__"
+                    | "changelog"
+                    | "dist"
+                    | "node_modules"
+                    | "pkg"
+                    | "target"
             )
     }
 
