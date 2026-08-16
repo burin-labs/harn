@@ -9,6 +9,52 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.103
+
+### Fixed
+
+- A tool call written in the other text grammar is now recovered instead of read
+  as prose. Harn teaches exactly one call syntax per route — tagged
+  `<tool_call>` heredocs or fenced-JSON ```` ```tool ```` blocks — but a model
+  that writes the other one produced a turn with zero calls, zero parse errors,
+  and no nudge, because a call in the wrong grammar is not malformed, it simply
+  is not a call. Nothing incremented and nothing warned. Both directions are now
+  accepted on arrival and reported as a `recovered_dialect` protocol violation,
+  so the drift that justified the pin stays visible.
+
+  The accept set widens only where the parser previously produced nothing.
+  A fence is recovered under a tagged-text pin only if it carries the canonical
+  `tool` label, never a drift spelling such as ```` ```json ````, which under a
+  route that never taught fences is documentation far more often than it is a
+  call. A turn that already called correctly keeps its call and does not also
+  mine its fences; the undispatched fence is still reported as
+  `wrong_tool_format` rather than dropped silently.
+- Fixed Anthropic and Qwen models looking text-only when reached through a
+  gateway. Eleven Anthropic routes served via OpenRouter and the Vercel AI
+  Gateway, plus three Qwen3.6 routes, resolved to text-only input while the same
+  models declared image, audio and PDF input on their direct routes — so whether
+  a model could be sent an image depended on which gateway it was reached
+  through, not on the model. These gateways pass the request through verbatim, so
+  the routes now declare the modalities they already accepted, and the matching
+  `vision`, `audio` and `pdf` capability tags come with them.
+
+  The gap was being papered over downstream: projects were restating these facts
+  in their own project-scoped capability overrides, which only apply to processes
+  started inside that project. `05-downstream-contributed.toml` collects the
+  exact-route rules contributed back, so every scope resolves one answer.
+
+  Changes are additive across all 250 catalog routes: fourteen routes gain
+  declared modalities and tags, no route loses a field or a value, and no route
+  is added or removed.
+- Added the missing assertions for gateway-routed Anthropic model capabilities.
+  Eleven routes reached through OpenRouter and the Vercel AI Gateway had recently
+  gained image, audio and PDF input, but no test asserted the new values — the
+  routes could have silently reverted to text-only with every check still green.
+  The OpenRouter test now compares each gateway route against the direct route for
+  the same model, so it states the invariant rather than today's answer: reaching
+  a model through a gateway that passes the request through verbatim must not
+  change which inputs the model accepts.
+
 ## v0.10.102
 
 ### Added
