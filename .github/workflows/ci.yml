@@ -659,6 +659,11 @@ jobs:
   # normally save, but exact-SHA proof reuse skips those compile lanes. This
   # matrix restores → warms → saves each Linux merge-gate key with the same
   # Swatinem env fingerprint as its consumer lane (#5003).
+  #
+  # A generation is only produced on a restore MISS. Cargo.lock, the crate
+  # manifests and the toolchain change far less often than main advances, so
+  # most commits restore the exact key and have nothing to write; those legs
+  # short-circuit instead of recompiling a target dir that is never saved.
   rust-cache-refresh:
     name: Refresh Rust cache (${{ matrix.cache_key }})
     needs: [changes]
@@ -738,14 +743,34 @@ jobs:
           ./scripts/prune_ci_cache_generations.sh --clear-family-prefix "$HARN_CACHE_FAMILY_PREFIX"
           ./scripts/prune_ci_cache_generations.sh --ensure-headroom "$HARN_CACHE_SAVE_HEADROOM_BYTES"
       - name: Install cargo-nextest
-        if: matrix.install_nextest
+        if: matrix.install_nextest && steps.rust-cache.outputs.cache-hit != 'true'
         uses: taiki-e/install-action@67729d5c413db75907f0ad1e39bb04b9c868ff60 # v2.85.7
         with:
           tool: nextest@0.9.132
+      # Warm only after a miss. An exact-key restore means this family's entry
+      # already holds this commit's env + lockfile fingerprint, and GitHub's
+      # cache entries are immutable: Swatinem's post step then reports
+      # "Cache up-to-date." and writes nothing, so a warm build compiles for
+      # ~10 min and is discarded with the runner. On a miss this step is
+      # unchanged and still produces the generation the post step saves.
       - name: Warm Cargo graph
+        if: steps.rust-cache.outputs.cache-hit != 'true'
         env:
           CARGO_BUILD_JOBS: "4"
         run: ${{ matrix.warm_script }}
+      - name: Report cache generation already current
+        if: steps.rust-cache.outputs.cache-hit == 'true'
+        env:
+          HARN_CACHE_FAMILY: ${{ matrix.cache_key }}
+        run: |
+          {
+            echo "### Rust cache refresh (${HARN_CACHE_FAMILY})"
+            echo
+            echo "Exact-key restore: the main-scoped generation already matches"
+            echo "this commit's Rust environment and lockfile fingerprint."
+            echo "Nothing to warm: GitHub cache entries are immutable, so a"
+            echo "rebuild would be discarded rather than saved."
+          } >> "$GITHUB_STEP_SUMMARY"
 
   # FALLBACK-ONLY consumer. By default the environment-neutral suite executes
   # inside the warm Rust producer (see rust-check-inputs), so this job skips and

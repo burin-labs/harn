@@ -13,6 +13,7 @@ import {
   release_warm_cache_path_policy_parse,
   release_warm_cache_prune_errors,
   rust_cache_refresh_concurrency_errors,
+  rust_cache_refresh_miss_only_errors,
   setup_harn_cache_action_errors,
   windows_release_certify_warm_errors,
   windows_shared_cache_errors,
@@ -66,6 +67,39 @@ pipeline test_cache_refresh_serializes_mutation_without_cancelling_active_save(
 pipeline test_cache_refresh_rejects_cross_commit_race(harness: Harness, task) {
   const job = {concurrency: {group: "per-commit", "cancel-in-progress": true}}
   assert_eq(len(rust_cache_refresh_concurrency_errors(job)), 2)
+}
+
+fn cache_refresh_generation_steps(miss_guard: string) {
+  return {
+    steps: [
+      {name: "Prepare Linux cache generation save", if: miss_guard},
+      {name: "Install cargo-nextest", if: "matrix.install_nextest && " + miss_guard},
+      {name: "Warm Cargo graph", if: miss_guard, run: gha_expression("matrix.warm_script")},
+    ],
+  }
+}
+
+@test
+pipeline test_cache_refresh_builds_a_generation_only_on_a_restore_miss(harness: Harness, task) {
+  const job = cache_refresh_generation_steps("steps.rust-cache.outputs.cache-hit != 'true'")
+  assert_eq(rust_cache_refresh_miss_only_errors(job), [])
+}
+
+@test
+pipeline test_cache_refresh_rejects_warming_a_generation_it_cannot_save(harness: Harness, task) {
+  // An exact-key restore is immutable: the post step writes nothing, so an
+  // unguarded warm compiles for minutes and discards the result.
+  const job = {
+    steps: [
+      {
+        name: "Prepare Linux cache generation save",
+        if: "steps.rust-cache.outputs.cache-hit != 'true'",
+      },
+      {name: "Install cargo-nextest", if: "matrix.install_nextest"},
+      {name: "Warm Cargo graph", run: gha_expression("matrix.warm_script")},
+    ],
+  }
+  assert_eq(len(rust_cache_refresh_miss_only_errors(job)), 2)
 }
 
 fn native_source_key() -> string {
