@@ -80,18 +80,58 @@ harn lint main.harn
 `fmt` applies the formatter. `check` validates syntax and types. `lint` finds
 common problems and style issues.
 
+## Pick a model for your machine
+
+Before you choose a provider, let Harn choose one for you. `harn models
+recommend` measures free memory, GPU, and disk, checks which provider
+credentials it can find, and names one model to start with:
+
+```bash
+harn models recommend
+```
+
+```text
+vertex/claude-sonnet-4-6
+17 GB free, MPS available, cloud creds available -> vertex/claude-sonnet-4-6 (local installable route available: devstral-small-2)
+```
+
+The first line is the model. The second is the reasoning: free memory, GPU,
+whether a cloud credential was found, and — in parentheses — the other route
+you could take. Your output will differ, because the answer depends on your
+hardware and on which credentials are already in your environment.
+
+With no cloud credentials at all, every recommendation is a local model, so
+this works as a first command even before you have signed up for anything.
+
+## Run a local model
+
+If the recommendation is a local model, or you want the local route it offered
+as an alternative, install it:
+
+```bash
+harn models install devstral-small-2
+```
+
+For an Ollama model that pulls the weights. For llama.cpp, MLX, or vLLM it
+prints the exact download and launch steps for your platform instead of
+downloading anything. `harn local list` then shows every local runtime Harn
+knows about and which models each is serving, and `harn local switch <alias>`
+makes one of them the active local model.
+
 ## Call a real provider
 
-Choose a provider and model, set its API key in your shell, then run a small
-program. For example:
+To use a cloud provider, set its API key in your shell and test the route:
 
 ```bash
 export ANTHROPIC_API_KEY=your-key
 harn models test claude-sonnet-5 --provider anthropic
 ```
 
-The test command checks the provider path without requiring a Harn program. To
-use the same provider in code, change the options in the example to:
+`harn models test` sends one small prompt and reports timing, tokens, and cost.
+It works for a local model too — pass the alias you installed above. Either way
+it checks the provider path without requiring a Harn program.
+
+To use the same provider in code, change the options in the example to:
 
 ```harn
 { provider: "anthropic", model: "claude-sonnet-5" }
