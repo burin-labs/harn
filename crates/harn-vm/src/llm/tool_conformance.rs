@@ -1190,10 +1190,21 @@ async fn classify_tool_probe_response(
     let text_cardinality_matches = parsed.calls.len() == expected_call_count;
     let requested_values_match = probe_values_present(&requested.calls, &expected_tool_values);
     let requested_cardinality_matches = requested.calls.len() == expected_call_count;
+    // A call the parser had to RECOVER across grammars did not honor the
+    // requested format; the parser was merely forgiving about it. That
+    // distinction is the whole point of a strict conformance probe, so strict
+    // mode keys on the recovery telemetry rather than on whether a call came
+    // out. Without this, a forgiving parser silently reports every route as
+    // conformant and the probe stops being able to see drift at all.
+    let requested_was_recovered = requested
+        .violations
+        .iter()
+        .any(|violation| violation.kind == crate::llm::ProtocolViolationKind::RecoveredDialect);
     let text_pass = if format_policy.strict {
         tool_format != ToolProbeFormat::Native
             && requested_values_match
             && requested_cardinality_matches
+            && !requested_was_recovered
     } else {
         text_values_match && text_cardinality_matches
     };

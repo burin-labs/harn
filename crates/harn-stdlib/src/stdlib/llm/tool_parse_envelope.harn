@@ -1,0 +1,354 @@
+/**
+ * Chat-template tool-call envelopes.
+ *
+ * Some templates wrap a call in their own envelope — marker pairs, an XML
+ * shell, a bare JSON list — instead of the fence the route taught. This module
+ * owns recognizing those shells and unwrapping them; what the unwrapped body
+ * MEANS is std/llm/tool_parse's business.
+ *
+ * Split out of std/llm/tool_parse so that module stays a composition layer over
+ * the byte-oriented host scanners rather than also carrying every envelope
+ * dialect.
+ */
+import { ARGUMENT_ALIASES, NAME_ALIASES } from "std/llm/dialects"
+import { json_fields } from "std/llm/tool_parse_json_support"
+import { empty_parse, protocol_violation, provider_result } from "std/llm/tool_parse_result"
+
+fn __tool_parse_envelope_error(kind: string, detail: string, prose: string) -> dict {
+  return {
+    matched: true,
+    result: empty_parse()
+      + {
+      tool_parse_errors: [
+        "The `<"
+          + kind
+          + ">` chat-template envelope is malformed: "
+          + detail
+          + ". Re-emit complete calls as canonical ```tool JSON blocks; "
+          + "incomplete entries were not executed.",
+      ],
+      prose: trim(prose),
+    },
+  }
+}
+
+fn __tool_parse_envelope_call(value) -> dict {
+  if type_of(value) != "dict" {
+    return {ok: false, error: "each chat-template tool entry must be a JSON object"}
+  }
+  const fields = json_fields(value)
+  const name = fields.name
+  if name == "" {
+    return {ok: false, error: "a JSON tool object was missing a non-empty name"}
+  }
+  let arguments = fields.arguments
+  let has_arguments = false
+  for alias in ARGUMENT_ALIASES {
+    if value[alias] != nil {
+      has_arguments = true
+    }
+  }
+  if !has_arguments {
+    arguments = {}
+    for key in keys(value) {
+      if !NAME_ALIASES.contains(key) && key != "id" {
+        arguments[key] = value[key]
+      }
+    }
+  }
+  if type_of(arguments) == "string" {
+    arguments = try {
+      json_parse(arguments)
+    } catch (error) {
+      return {ok: false, error: "arguments string did not parse: " + to_string(error)}
+    }
+  }
+  if type_of(arguments) != "dict" {
+    return {ok: false, error: "arguments must be a JSON object"}
+  }
+  return {ok: true, call: {id: "tc_envelope", name: name, arguments: arguments}}
+}
+
+fn __tool_parse_envelope_json_list(
+  kind: string,
+  body: string,
+  close: string,
+  prose: string,
+) -> dict {
+  const source = trim(body)
+  const stream = __host_tool_json_stream(source)
+  if len(stream?.values ?? []) == 0 {
+    const detail =
+      stream?.eof ?? false ? "a JSON tool object ended before its closing `}`" : "expected a JSON tool object, found `"
+      + trim(
+      body,
+    )
+      .slice(0, 80)
+      + "`"
+    return __tool_parse_envelope_error("tool_calls", detail, prose)
+  }
+  let calls: list<dict> = []
+  for row in stream.values {
+    const normalized = __tool_parse_envelope_call(row.value)
+    if !(normalized?.ok ?? false) {
+      return __tool_parse_envelope_error("tool_calls", to_string(normalized.error), prose)
+    }
+    calls = calls.appending(normalized.call)
+  }
+  let after = trim(source.slice(stream.end, len(source)))
+  if starts_with(after, close) {
+    after = trim(after.slice(len(close), len(after)))
+  } else if after != "" {
+    return __tool_parse_envelope_error(
+      "tool_calls",
+      "expected a JSON tool object, found `" + after.slice(0, 80) + "`",
+      prose,
+    )
+  }
+  return {
+    matched: true,
+    calls: calls,
+    prose: [trim(prose), after].filter(fn(part) { return part != "" }).join("\n"),
+  }
+}
+
+fn __tool_parse_envelope_markers(body: string, prose: string) -> dict {
+  let rest = trim(body)
+  let calls: list<dict> = []
+  let saw_marker = false
+  let marker_active = false
+  let marker_completed = false
+  while rest != "" {
+    if starts_with(rest, "</tool_calls>") {
+      rest = trim(rest.slice(len("</tool_calls>"), len(rest)))
+      break
+    }
+    if starts_with(rest, "<tool>") {
+      if marker_active {
+        return __tool_parse_envelope_error(
+          "tool_calls",
+          "a `<tool>` marker must be followed by a JSON object before another `<tool>` marker",
+          prose,
+        )
+      }
+      saw_marker = true
+      marker_active = true
+      marker_completed = false
+      rest = trim(rest.slice(len("<tool>"), len(rest)))
+      continue
+    }
+    if starts_with(rest, "</tool>") {
+      if marker_active || !marker_completed {
+        return __tool_parse_envelope_error(
+          "tool_calls",
+          "found an unmatched `</tool>` close without a preceding `<tool>` marker",
+          prose,
+        )
+      }
+      marker_active = false
+      marker_completed = false
+      rest = trim(rest.slice(len("</tool>"), len(rest)))
+      continue
+    }
+    if !marker_active {
+      if marker_completed && starts_with(rest, "{") {
+        marker_active = true
+      } else {
+        const detail =
+          saw_marker ? "expected a `<tool>` marker before this JSON object" : "the envelope contained no `<tool>` marker"
+        return __tool_parse_envelope_error("tool_calls", detail, prose)
+      }
+    }
+    if !starts_with(rest, "{") {
+      return __tool_parse_envelope_error(
+        "tool_calls",
+        "expected a JSON tool object, found `" + rest.slice(0, 80) + "`",
+        prose,
+      )
+    }
+    const object_len = __host_tool_balanced_json_len(rest)
+    if object_len == 0 {
+      return __tool_parse_envelope_error(
+        "tool_calls",
+        "a JSON tool object ended before its closing `}`",
+        prose,
+      )
+    }
+    const decoded = try {
+      json_parse(rest.slice(0, object_len))
+    } catch (error) {
+      return __tool_parse_envelope_error(
+        "tool_calls",
+        "a JSON tool object did not parse: " + to_string(error),
+        prose,
+      )
+    }
+    const normalized = __tool_parse_envelope_call(decoded)
+    if !(normalized?.ok ?? false) {
+      return __tool_parse_envelope_error("tool_calls", to_string(normalized.error), prose)
+    }
+    calls = calls.appending(normalized.call)
+    marker_active = false
+    marker_completed = true
+    rest = trim(rest.slice(object_len, len(rest)))
+  }
+  if marker_active {
+    return __tool_parse_envelope_error(
+      "tool_calls",
+      "a `<tool>` marker ended without a complete JSON object",
+      prose,
+    )
+  }
+  if !saw_marker {
+    return __tool_parse_envelope_error(
+      "tool_calls",
+      "the envelope contained no `<tool>` marker",
+      prose,
+    )
+  }
+  return {
+    matched: true,
+    calls: calls,
+    prose: [trim(prose), rest].filter(fn(p) { return p != "" }).join("\n"),
+  }
+}
+
+fn __tool_parse_envelope_xml(body: string, prose: string) -> dict {
+  let rest = trim(body)
+  let calls: list<dict> = []
+  while rest != "" {
+    if starts_with(rest, "</tool_calls>") {
+      rest = trim(rest.slice(len("</tool_calls>"), len(rest)))
+      break
+    }
+    const opened = regex_captures("^<([A-Za-z_][A-Za-z0-9_.-]*)>", rest)
+    if len(opened) == 0 {
+      return __tool_parse_envelope_error(
+        "tool_calls",
+        "expected a tool-call tag inside `<tool_calls>`, found `" + rest.slice(0, 60) + "`",
+        prose,
+      )
+    }
+    const name = to_string(opened[0].groups[0])
+    const close = "</" + name + ">"
+    const after_open = rest.slice(opened[0].end, len(rest))
+    const close_at = after_open.index_of(close)
+    const inner = close_at >= 0 ? after_open.slice(0, close_at) : after_open
+    let arguments: dict = {}
+    let argument_rest = trim(inner)
+    while argument_rest != "" {
+      const argument_open = regex_captures("^<([A-Za-z_][A-Za-z0-9_.-]*)>", argument_rest)
+      if len(argument_open) == 0 {
+        return __tool_parse_envelope_error(
+          "tool_calls",
+          "expected an argument tag inside `<"
+            + name
+            + ">`, found `"
+            + argument_rest.slice(0, 60)
+            + "`",
+          prose,
+        )
+      }
+      const key = to_string(argument_open[0].groups[0])
+      if arguments[key] != nil {
+        return __tool_parse_envelope_error(
+          "tool_calls",
+          "the `<"
+            + name
+            + ">` call repeated the `<"
+            + key
+            + ">` argument; a call with an ambiguous duplicate argument is not executed",
+          prose,
+        )
+      }
+      const argument_close = "</" + key + ">"
+      const value_source = argument_rest.slice(argument_open[0].end, len(argument_rest))
+      const argument_close_at = value_source.index_of(argument_close)
+      if argument_close_at < 0 {
+        return __tool_parse_envelope_error(
+          "tool_calls",
+          "the `<"
+            + key
+            + ">` argument tag was not closed with `"
+            + argument_close
+            + "` before end of output",
+          prose,
+        )
+      }
+      arguments[key] = trim(value_source.slice(0, argument_close_at))
+      argument_rest = trim(
+        value_source.slice(argument_close_at + len(argument_close), len(value_source)),
+      )
+    }
+    if close_at < 0 {
+      return __tool_parse_envelope_error(
+        "tool_calls",
+        "the `<" + name + ">` call tag was not closed with `" + close + "` before end of output",
+        prose,
+      )
+    }
+    calls = calls.appending({id: "tc_envelope_xml", name: name, arguments: arguments})
+    rest = trim(after_open.slice(close_at + len(close), len(after_open)))
+  }
+  if len(calls) == 0 {
+    return __tool_parse_envelope_error(
+      "tool_calls",
+      "the `<tool_calls>` envelope contained no tool-call tags",
+      prose,
+    )
+  }
+  return {
+    matched: true,
+    calls: calls,
+    prose: [trim(prose), rest].filter(fn(p) { return p != "" }).join("\n"),
+  }
+}
+
+pub fn tool_parse_envelope(text: string) -> dict {
+  let opener = ""
+  let kind = ""
+  let at = -1
+  for candidate in [
+    {open: "<tool_calls>", kind: "tool_calls"},
+    {open: "<tool_code>", kind: "tool_code"},
+    {open: "<tool_call>", kind: "tool_call"},
+  ] {
+    const found = text.index_of(candidate.open)
+    if found >= 0 && (at < 0 || found < at) {
+      at = found
+      opener = candidate.open
+      kind = candidate.kind
+    }
+  }
+  if at < 0 {
+    return {matched: false}
+  }
+  const prose = text.slice(0, at)
+  const body = text.slice(at + len(opener), len(text))
+  if kind == "tool_call" && !starts_with(trim(body), "{") {
+    return {matched: false}
+  }
+  let parsed = if kind == "tool_calls" {
+    const leading = trim(body)
+    if starts_with(leading, "<tool>") || starts_with(leading, "{")
+      || starts_with(leading, "</tool>") {
+      __tool_parse_envelope_markers(body, prose)
+    } else {
+      __tool_parse_envelope_xml(body, prose)
+    }
+  } else {
+    __tool_parse_envelope_json_list(kind, body, "</" + kind + ">", prose)
+  }
+  if parsed?.result != nil {
+    return parsed
+  }
+  const violation = protocol_violation(
+    "wrong_tool_format",
+    "protocol_violation: a tool call was emitted in a chat-template tool envelope "
+      + "while `tool_format` is `json`; accepted this turn, but emit canonical "
+      + "```tool JSON blocks next turn.",
+  )
+  parsed = parsed
+    + {result: provider_result(parsed.calls, [], parsed.prose, [violation])}
+  return parsed
+}
