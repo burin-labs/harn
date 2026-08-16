@@ -291,4 +291,14 @@ mod tests {
             "../testdata/dialects/gemini_interactions.json"
         ));
     }
+
+    /// burin-code#6388. Fireworks ends a streamed completion with a trailing
+    /// accounting frame after the finish-reason frame. Without this catalog
+    /// fact the parser treats finish-reason as terminal and drops the usage,
+    /// so every streamed agent call prices as `unknown` while non-streamed
+    /// structured calls on the same route price correctly.
+    #[test]
+    fn fireworks_streams_a_trailing_usage_frame() {
+        assert!(DialectContract::provider_reports_stream_usage("fireworks"));
+    }
 }

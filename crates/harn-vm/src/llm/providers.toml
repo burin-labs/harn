@@ -275,6 +275,15 @@ cost_per_1k_in = 0.0002
 cost_per_1k_out = 0.0006
 latency_p50_ms = 1400
 features = ["batch"]
+# Verified 2026-08-15 against api.fireworks.ai: a streamed completion ends with
+# a trailing accounting frame (`"choices": []`, populated `usage`) AFTER the
+# finish-reason frame, with or without `stream_options.include_usage`, and the
+# request extension is accepted without error. Leaving this unset made
+# `awaits_stream_usage` false, so the parser treated the finish-reason frame as
+# terminal and dropped the accounting frame: every streamed agent call reported
+# `accounting_status = "unknown"` and `cost_usd = null` while non-streamed
+# structured calls on the same route priced correctly.
+stream_usage_accounting = true
 
 [providers.fireworks.healthcheck]
 method = "GET"
