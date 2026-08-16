@@ -184,6 +184,13 @@ fn landlock_profile(
             true,
         )?;
     }
+    for path in network_name_service_read_roots(policy) {
+        // `/etc/resolv.conf` is commonly a symlink into `/run` on hosted
+        // Linux. Landlock checks the resolved inode, so the broad `/etc` rule
+        // above does not cover that target. Open each exact host file before
+        // confinement and grant its canonical inode without exposing `/run`.
+        push_rule(&mut profile, path, LANDLOCK_ACCESS_FS_READ_FILE, true)?;
+    }
     if proc_runtime_reads_are_contained() {
         // Some language runtimes (notably Swift on Linux) discover argv by
         // reading their own memory map. A rule for `/proc/self/maps` cannot
@@ -261,6 +268,22 @@ fn system_read_roots() -> Vec<PathBuf> {
         "/etc",
         "/nix/store",
         "/System",
+    ]
+    .into_iter()
+    .map(PathBuf::from)
+    .collect()
+}
+
+fn network_name_service_read_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
+    if !policy_allows_network(policy) {
+        return Vec::new();
+    }
+    [
+        "/etc/resolv.conf",
+        "/etc/hosts",
+        "/etc/nsswitch.conf",
+        "/etc/gai.conf",
+        "/etc/host.conf",
     ]
     .into_iter()
     .map(PathBuf::from)
@@ -948,6 +971,32 @@ mod tests {
                 "network ceiling must allowlist socket-family syscall {call}",
             );
         }
+    }
+
+    #[test]
+    fn network_ceiling_grants_exact_name_service_files_without_opening_run() {
+        let mut policy = linux_policy_with_workspace_ops(&["read_text"]);
+        assert!(network_name_service_read_roots(&policy).is_empty());
+
+        policy.side_effect_level = Some("network".to_string());
+        let roots = network_name_service_read_roots(&policy);
+        assert_eq!(
+            roots,
+            [
+                "/etc/resolv.conf",
+                "/etc/hosts",
+                "/etc/nsswitch.conf",
+                "/etc/gai.conf",
+                "/etc/host.conf",
+            ]
+            .into_iter()
+            .map(PathBuf::from)
+            .collect::<Vec<_>>(),
+        );
+        assert!(
+            roots.iter().all(|root| !root.starts_with("/run")),
+            "the repair must grant canonical resolver files, never the mutable /run tree",
+        );
     }
 
     #[test]
