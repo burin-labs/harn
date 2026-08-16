@@ -65,6 +65,30 @@
   prose=""
   answer=null
   done=null
+# sibling keys are the arguments when no container is present
+  calls=1 errors=0 violations=0 stray=0
+  call look {"file":"src/writer.zig","intent":"read"}
+  prose=""
+  answer=null
+  done=null
+# sibling arguments carry an edit payload
+  calls=1 errors=0 violations=0 stray=0
+  call edit {"action":"create","content":"x = 1","path":"a.py"}
+  prose=""
+  answer=null
+  done=null
+# a declared container wins over sibling keys
+  calls=1 errors=0 violations=0 stray=0
+  call look {"file":"a.py"}
+  prose=""
+  answer=null
+  done=null
+# an empty container is not overridden by siblings
+  calls=1 errors=0 violations=0 stray=0
+  call look {}
+  prose=""
+  answer=null
+  done=null
 # array body is rejected as a non-object
   calls=0 errors=1 violations=0 stray=0
   err "A ```tool block must contain one or more JSON objects `{ \"name\": ..., \"args\": { ... } }`, one per tool call (several calls in a turn may share one block or use several blocks). Arrays, scalars, and other non-object entries are rejected."
