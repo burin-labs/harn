@@ -23,7 +23,11 @@ use harn_vm::orchestration::{
 use tempfile::TempDir;
 use tokio::runtime::Builder;
 
-const TEST_ED25519_PRIVATE_KEY: &str = "-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEIDmsNDO8iZqiMmA/b7I7lwGXNKe68o+gDno6R5riUcDC\n-----END PRIVATE KEY-----\n";
+// Ed25519 test fixture for the pack signing tests. Generated with openssl genpkey
+// on 2026-08-16 solely as a test prop; never used by any real service or account,
+// enrolled in no trust store, and safe to be public. The matching public key is
+// derived from this one at runtime, so there is nothing else to keep in step.
+const TEST_ED25519_PRIVATE_KEY: &str = "-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEIIzGEtl10MUJbWnniBSN7o0kL2NJSVoev7Ct/1my+9/q\n-----END PRIVATE KEY-----\n";
 
 fn print_entry_source(message: &str) -> String {
     format!("fn main(harness: Harness) {{ harness.stdio.println(\"{message}\") }}\n")

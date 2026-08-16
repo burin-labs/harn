@@ -15,9 +15,13 @@ pipeline default(harness: Harness) {
     path_join(root, "hello.harn"),
     "fn main(harness: Harness) { harness.stdio.println(\"signed\") }\n",
   )
+  // Ed25519 test fixture generated with openssl genpkey on 2026-08-16 solely as a
+  // test prop. Despite the file name this signs nothing real, is enrolled in no
+  // trust store, and is safe to be public; the trust policy below deliberately
+  // excludes it so verification reports an untrusted signer.
   harness.fs.write_text(
     path_join(root, "release-key.pem"),
-    "-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEIDmsNDO8iZqiMmA/b7I7lwGXNKe68o+gDno6R5riUcDC\n-----END PRIVATE KEY-----\n",
+    "-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEIIzGEtl10MUJbWnniBSN7o0kL2NJSVoev7Ct/1my+9/q\n-----END PRIVATE KEY-----\n",
   )
   const pack = harness.process.exec_at(
     root,
