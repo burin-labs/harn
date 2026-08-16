@@ -228,7 +228,8 @@ fn __tool_shape_call_markup(text: string) -> int {
     if to_string(groups[1] ?? "") == ""
       && body.index_of(
       "</" + lowercase(to_string(groups[0] ?? "")) + ">",
-    ) >= 0 {
+    )
+      >= 0 {
       continue
     }
     if __tool_shape_body_has_arguments(body)
