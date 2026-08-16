@@ -1,0 +1,53 @@
+import { agent_tool_format } from "std/agent/options"
+import { agent_tool_call_paradigm } from "std/agent/preflight"
+import { agent_parse_tool_calls } from "std/agent/primitives"
+
+// The taught grammar must be the parsed grammar — on the exact shape that
+// dropped six edit calls in burin-code#6388.
+//
+// That run pinned `tool_format: "json"` on fireworks/gpt-oss-120b, a route the
+// capability matrix pins to heredoc `text`. Both channel gates classify `json`
+// and `text` as one channel, so the pin passed untouched: the system prompt
+// taught the fenced-JSON contract 24 times, the wire ran the heredoc grammar,
+// and every call the model made was discarded with no result, no parse error
+// and no nudge.
+//
+// This case walks the whole chain for that shape rather than one link of it —
+// what the resolver decides, what the model is TAUGHT, and what the parser
+// ACCEPTS — because the defect was invisible in each link alone and only
+// visible in their disagreement.
+const PROVIDER: string = "fireworks"
+
+const MODEL: string = "accounts/fireworks/models/gpt-oss-120b"
+
+const REGISTRY = {
+  _type: "tool_registry",
+  tools: [{name: "look", description: "look at a file", parameters: {}}],
+}
+
+pipeline main(harness: Harness) {
+  // The catalog's pin for this route, and the reason the rest must follow it.
+  const caps = harness.llm.provider_capabilities(PROVIDER, MODEL)
+  harness.stdio.println("route pin: " + to_string(caps?.preferred_tool_format ?? "?"))
+  // 1. RESOLVED. The explicit json pin is steered to the route's grammar.
+  const opts = {tool_format: "json", model: MODEL, provider: PROVIDER}
+  const resolved = agent_tool_format(harness.llm, opts)
+  harness.stdio.println("resolved: " + to_string(resolved))
+  // 2. TAUGHT. The paradigm is the single source of truth for the syntax the
+  // prompt instructs, so this is what the contract fragment renders.
+  const paradigm = agent_tool_call_paradigm(harness.llm, opts)
+  harness.stdio.println("taught opener: " + to_string(paradigm?.call_open ?? "?"))
+  // 3. PARSED. A call written in the taught syntax must actually parse under
+  // the resolved format. This is the link whose absence made the failure
+  // silent: well-formed calls, zero parsed, zero errors.
+  const taught_call = "<tool_call>\nlook({ file: \"a.rs\" })\n</tool_call>"
+  const parsed = agent_parse_tool_calls(harness.agent, taught_call, REGISTRY, resolved)
+  harness.stdio.println("parsed calls: " + to_string(len(parsed.tool_calls)))
+  harness.stdio.println("parse errors: " + to_string(len(parsed.tool_parse_errors ?? [])))
+  // 4. The grammar the pin ASKED for is the one the parser would not have run.
+  // Pinning this makes the disagreement itself the regression: if a future
+  // change lets `json` through again, the taught opener and this parse diverge.
+  const fenced_call = "```tool\n{\"name\": \"look\", \"args\": {\"file\": \"a.rs\"}}\n```"
+  const fenced = agent_parse_tool_calls(harness.agent, fenced_call, REGISTRY, resolved)
+  harness.stdio.println("fenced calls under resolved format: " + to_string(len(fenced.tool_calls)))
+}
