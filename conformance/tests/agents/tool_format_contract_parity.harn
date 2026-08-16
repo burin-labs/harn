@@ -92,10 +92,59 @@ pipeline main(harness: Harness) {
     "json exemplar preserves body bytes",
     json_parsed.tool_calls[0].arguments.content == body,
   )
-  // Wrong-format negative: text markup on a json pin must not dispatch.
+  // --- accept set: the taught grammar is one, the accepted set is two -------
+  //
+  // We teach exactly one grammar per route and forgive the other on ARRIVAL.
+  // A call written in the other grammar is still a call the model meant to
+  // make; discarding it silently is burin-code#6388. The two grammars are
+  // mutually unambiguous, so forgiving one costs no soundness — but every
+  // forgiven accept must SAY so, or the drift that justified the pin goes
+  // invisible.
+  //
+  // 1. Heredoc markup arriving on a json pin: accepted, normalized, evented.
+  //    Measured exposure: llamacpp `*qwen3.6*` (preferred=json, parity=
+  //    text_only) is the primary local eval model, and before this it parsed
+  //    0 heredoc calls with 0 errors — a silent total drop.
   const wrong = agent_parse_tool_calls(harness.agent, text_ex, registry, "json")
-  __assert(harness.stdio, "json pin rejects text exemplar calls", len(wrong.tool_calls) == 0)
-  __assert(harness.stdio, "json pin reports wrong_tool_format", len(wrong.protocol_violations) > 0)
+  __assert(harness.stdio, "json pin accepts heredoc call", len(wrong.tool_calls) == 1)
+  __assert(harness.stdio, "json pin keeps heredoc call name", wrong.tool_calls[0].name == "edit")
+  __assert(
+    harness.stdio,
+    "json pin reports the recovery",
+    wrong.protocol_violations.any({ entry -> entry.kind == "recovered_dialect" }),
+  )
+  // 2. Fenced JSON arriving on a text pin: accepted, normalized, evented.
+  const fenced_call = "```tool\n{\"name\": \"edit\", \"args\": {\"path\": \"a.rs\"}}\n```"
+  const fenced = agent_parse_tool_calls(harness.agent, fenced_call, registry, "text")
+  __assert(harness.stdio, "text pin accepts fenced call", len(fenced.tool_calls) == 1)
+  __assert(
+    harness.stdio,
+    "text pin reports the recovery",
+    fenced.protocol_violations.any({ entry -> entry.kind == "recovered_dialect" }),
+  )
+  // 3. Soundness floor: a fence that does NOT open a call is prose, even when
+  //    its body would parse and names a registered tool. The fence info is the
+  //    only thing separating a call from documentation ABOUT a call, so a
+  //    ```json example must never dispatch.
+  const example =
+    "Here is the shape:\n```json\n{\"name\": \"edit\", \"args\": {\"path\": \"a.rs\"}}\n```"
+  const prose_only = agent_parse_tool_calls(harness.agent, example, registry, "text")
+  __assert(
+    harness.stdio,
+    "text pin does not dispatch a ```json example",
+    len(prose_only.tool_calls) == 0,
+  )
+  // 4. Mixed turn: declining to dispatch is not licence to go quiet. The turn
+  //    already called correctly, so the fence is not acted on — but it is still
+  //    reported and still steered, never a silent 0.
+  const mixed = text_ex + "\n```tool\n{\"name\": \"edit\", \"args\": {\"path\": \"b.rs\"}}\n```"
+  const mixed_parsed = agent_parse_tool_calls(harness.agent, mixed, registry, "text")
+  __assert(harness.stdio, "mixed turn keeps the taught call", len(mixed_parsed.tool_calls) == 1)
+  __assert(
+    harness.stdio,
+    "mixed turn still reports the declined fence",
+    mixed_parsed.protocol_violations.any({ entry -> entry.kind == "wrong_tool_format" }),
+  )
   // Deleted adaptive union must fail closed (never silent tagged demotion).
   const adaptive = agent_parse_tool_calls(harness.agent, text_ex, registry, "adaptive")
   __assert(harness.stdio, "adaptive lands no calls", len(adaptive.tool_calls) == 0)

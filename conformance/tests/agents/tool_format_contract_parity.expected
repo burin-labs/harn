@@ -14,8 +14,14 @@ ok json exemplar lands one call
 ok json exemplar has no parse errors
 ok json exemplar name is edit
 ok json exemplar preserves body bytes
-ok json pin rejects text exemplar calls
-ok json pin reports wrong_tool_format
+ok json pin accepts heredoc call
+ok json pin keeps heredoc call name
+ok json pin reports the recovery
+ok text pin accepts fenced call
+ok text pin reports the recovery
+ok text pin does not dispatch a ```json example
+ok mixed turn keeps the taught call
+ok mixed turn still reports the declined fence
 ok adaptive lands no calls
 ok adaptive fails closed with guidance
 tool_format_contract_parity passed

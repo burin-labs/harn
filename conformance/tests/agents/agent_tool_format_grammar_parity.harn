@@ -44,10 +44,16 @@ pipeline main(harness: Harness) {
   const parsed = agent_parse_tool_calls(harness.agent, taught_call, REGISTRY, resolved)
   harness.stdio.println("parsed calls: " + to_string(len(parsed.tool_calls)))
   harness.stdio.println("parse errors: " + to_string(len(parsed.tool_parse_errors ?? [])))
-  // 4. The grammar the pin ASKED for is the one the parser would not have run.
-  // Pinning this makes the disagreement itself the regression: if a future
-  // change lets `json` through again, the taught opener and this parse diverge.
+  // 4. ACCEPTED. A call that ARRIVES in the other grammar is still a call the
+  // model meant to make, so the resolved format accepts and normalizes it
+  // rather than discarding it — that silent discard was #6388. This asserts
+  // the accept, not just the steer: the taught opener above stays `<tool_call>`
+  // (we teach one grammar), while the parser forgives the other on arrival and
+  // says so, because a silent forgiveness would hide the drift that justified
+  // the pin.
   const fenced_call = "```tool\n{\"name\": \"look\", \"args\": {\"file\": \"a.rs\"}}\n```"
   const fenced = agent_parse_tool_calls(harness.agent, fenced_call, REGISTRY, resolved)
   harness.stdio.println("fenced calls under resolved format: " + to_string(len(fenced.tool_calls)))
+  const kinds = (fenced.protocol_violations ?? []).map({ entry -> to_string(entry?.kind ?? "?") })
+  harness.stdio.println("fenced normalization events: " + kinds.join(","))
 }

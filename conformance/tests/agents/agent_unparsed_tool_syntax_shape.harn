@@ -29,6 +29,16 @@ fn shapes(agent: HarnessAgent, text: string) -> string {
   return out
 }
 
+/** Calls landed, and the protocol violations that named how they got there. */
+fn recovered(agent: HarnessAgent, text: string) -> string {
+  const parsed = agent_parse_tool_calls(agent, text, REGISTRY, "text")
+  let kinds = ""
+  for violation in parsed.protocol_violations {
+    kinds = kinds + violation.kind + ";"
+  }
+  return to_string(len(parsed.tool_calls)) + " calls " + kinds
+}
+
 pipeline main(harness: Harness) {
   // The `<tool>` single-tag dialect, fenced, invoking a tool the registry does
   // not know — dozens of these appeared in raw model bytes with zero parsed
@@ -90,17 +100,23 @@ pipeline main(harness: Harness) {
   // calls into it, and the parser ran the heredoc grammar — so every call was
   // dropped. The near-miss detector then stayed silent too, because `tool` is a
   // language-shaped label and the labeled-fence rule read Harn's own call fence
-  // as an authored example. A fence label the parser accepts must never read as
-  // documentation here.
+  // as an authored example.
+  //
+  // harn#6752 promoted this from a reported drop to an accepted call: a fence
+  // that names itself a tool block is an attempted call whatever grammar the
+  // route taught. So there is no longer a finding here — because there is no
+  // longer a drop. The call RUNS, and the cross-grammar recovery is named.
+  // Asserting the shape is gone would be indistinguishable from the silent
+  // drop this file exists to forbid, so assert what replaced it.
   harness.stdio.println(
-    shapes(
+    recovered(
       harness.agent,
       "```tool\n{\"name\": \"edit\", \"arguments\": {\"path\": \"src/main.zig\"}}\n```",
     ),
   )
   // Same for a recognized drift spelling.
   harness.stdio.println(
-    shapes(
+    recovered(
       harness.agent,
       "```tool_call\n{\"name\": \"edit\", \"arguments\": {\"path\": \"src/main.zig\"}}\n```",
     ),

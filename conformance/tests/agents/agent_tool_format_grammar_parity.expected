@@ -3,4 +3,5 @@ resolved: text
 taught opener: <tool_call>
 parsed calls: 1
 parse errors: 0
-fenced calls under resolved format: 0
+fenced calls under resolved format: 1
+fenced normalization events: recovered_dialect
