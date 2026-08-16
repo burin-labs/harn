@@ -1,0 +1,15 @@
+# Secret-scanning policy for the `Secret scan` workflow.
+#
+# Extends gitleaks' default rules and adds NOTHING. The allowlist is empty on
+# purpose: the first scan of this repo returned 53 findings across 25
+# files, none of them audited, and an allowlist written from a guess would mask
+# a real leak in exactly the files most likely to hold one. The workflow is
+# report-only (`continue-on-error`) until that audit lands.
+#
+# When it does: add path entries here with a one-line justification each, then
+# drop `continue-on-error` from .github/workflows/secret-scan.yml in the SAME
+# change, so the repo never has a blocking gate and an unjustified waiver at
+# the same time.
+
+[extend]
+useDefault = true
