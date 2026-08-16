@@ -244,6 +244,7 @@
 
 ## Packages and connectors
 
+- [Extend Harn](./extend-harn.md)
 - [Package authoring](./package-authoring.md)
 - [Connector authoring](./connectors/authoring.md)
 - [Connector architecture status](./connectors/architecture.md)
