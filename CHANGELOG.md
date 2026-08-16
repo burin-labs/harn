@@ -9,6 +9,129 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.102
+
+### Added
+
+- `Getting started` now covers picking a model. `harn models recommend` measures
+  the machine and the available credentials and names one model to start with,
+  alongside the local route it offers as an alternative. The page follows it
+  with `harn models install`, `harn local list` / `harn local switch`, and
+  `harn models test`. None of these appeared on any tutorial page before.
+- Added an `Extend Harn` index page. The five extension axes — custom tools,
+  packages, connectors, skills, and CLI subcommands written in `.harn` — were
+  documented in three different sections of the nav with nothing tying them
+  together. The page leads with `harn pack --sign` and `harn pack verify`, since
+  a signed content-addressed `.harnpack` is what makes shipping any of the five
+  safe.
+- Added a `Run an A/B experiment` how-to. It covers the `std/eval/experiment`
+  contract end to end — manifest, registration, randomized-block assignment,
+  anytime-valid decision, explicit promotion to the frozen gate set — and points
+  at `harn eval --structural-experiment` and `harn eval prompt --fleet` for the
+  two lighter comparisons those commands actually do. The library was complete
+  and typed but appeared in no how-to.
+- Added a `Coming from LangChain` how-to that maps LCEL composition, StateGraph,
+  `@tool`, `with_structured_output`, `RunnableRetry`, LangSmith, and the
+  checkpointer onto their Harn equivalents, and says which LangChain concepts have
+  no Harn analogue. The LangGraph vocabulary table in `Coming from elsewhere` is
+  linked rather than duplicated.
+
+### Changed
+
+- Reframed the workflow-crystallization page to match the artifact the codegen
+  actually emits. `harn crystallize` writes a reviewable outline — one
+  `harness.obs.log` per mined step, a warning per fuzzy step, and a
+  `shadow_ready` return — plus a header manifest of capabilities, required
+  secrets, and source trace hashes. It does not emit runnable automation, and the
+  page no longer implies it does. The sample workflow is now the real generated
+  file rather than a hand-written approximation that used the wrong logger and a
+  `const` binding the generator reassigns.
+
+### Fixed
+
+- Fixed the Harn snippets on the day-one documentation path. The `agent_loop`
+  examples in `README.md` and the daemon tutorial passed `harness` twice, which
+  Harn accepts statically and then fails on at run time; the MCP tutorial used
+  `params:` where `tool_define` requires `parameters:`; and `Getting started`
+  told readers to run bare `harn run`, which exits 2. `make check-docs-snippets`
+  now rejects a call that receives the same identifier as both its first and
+  second argument, and the corrected examples opt into full `harn check`.
+- Fixed the eval and code-review tutorials and the examples they point at.
+  `examples/eval-workflow.harn` reassigned a `const` and died at run time, and
+  computed accuracy with integer division so two of three cases passing reported
+  `0`. `examples/code-reviewer.harn` referenced a `task` parameter that
+  `harn run` never binds; it now reads its patch from `argv`. The eval tutorial
+  no longer claims `harn run` writes a `.harn-runs/` record — `workflow_execute`
+  does, and that is what `harn eval` consumes.
+- Corrected the `std/cli/paths` reference. Every signature on the page showed
+  one parameter where the real helpers take three (`env`, `system`, `app_name`),
+  so the page's copy-paste example did not compile. The resolution table now also
+  says what the default `harn run` sandbox does to those paths: it relocates
+  `HOME` and `XDG_CACHE_HOME` under the workspace, so a sandboxed script never
+  sees the user's real config or cache directory. Smaller corrections to
+  `usage.md` (`--project` is ignored under `--all`; `mock` rows are always
+  excluded) and `cli-reference.md` (`--from-session` lives on the `harn runs`
+  subcommands, and `HARN_PROVIDERS_CONFIG` takes precedence over
+  `~/.config/harn/providers.toml`).
+- `harn models recommend` no longer claims a cloud credential on a machine that
+  has none. `vertex` is `platform_managed`, so its credential status is always
+  `Deferred` — a statement about who resolves the credential, not evidence that
+  one exists — and counting that as available meant every one of the twelve
+  no-credential rows in the recommendation table was unreachable, and a user with
+  no cloud account was handed `vertex/claude-sonnet-4-6`. A deferred provider now
+  has to show positive offline evidence first: one of its own declared `auth_env`
+  variables set, or the gcloud application-default credentials file (honouring
+  `CLOUDSDK_CONFIG`). Verified end to end: under `env -i` with an empty `HOME`,
+  `harn models recommend` now answers with a local model, and restoring either
+  evidence source returns it to the cloud recommendation.
+- `Getting started` no longer promises that a machine with no cloud credentials
+  always gets a local recommendation. Measured on a stripped environment with a
+  throwaway `HOME`, `harn models recommend` still names `vertex/claude-sonnet-4-6`,
+  because providers that resolve credentials at call time report `Deferred` and
+  are counted as available — so all twelve no-credential rows in the
+  recommendation table are currently unreachable. The page now tells a reader
+  without a provider account to take the local route named in parentheses, and
+  points at #6738 for the underlying defect.
+- Fixed a class of silently discarded tool calls. Two detectors decided what a
+  tool fence looks like by re-listing labels instead of asking the dialect
+  vocabulary the parser uses, so a fence carrying the label models are *taught*
+  to write was the one case neither could see: `tool_shape`'s near-miss detector
+  read Harn's own ```` ```tool ```` fence as an authored example because the label
+  is language-shaped, and `postturn`'s fenced-attempt detector omitted `tool`
+  from its hand-maintained opener list. A turn full of well-formed calls could
+  therefore produce no call, no parse error, no protocol violation and no nudge.
+  `tool_fence_info_opens_call` now owns that membership test next to the
+  constants it reads, and the parser and both detectors route through it.
+- `check-docs-model-refs` no longer reports a documented model reference as stale
+  just because another provider's route names a different model. `aliases.sonnet`
+  is an anthropic alias, but the check compared every `claude-sonnet-4-*` mention
+  in the docs against it regardless of namespace, so a `vertex/` route — which
+  resolves that provider's own default model — was measured against an unrelated
+  alias. A correct `harn models recommend` example tripped the gate, and the
+  repair that silenced it made the page describe output the CLI does not produce.
+  Bare and `anthropic/`-namespaced references are still checked.
+- Fixed streamed Fireworks calls reporting no token usage. Fireworks ends a
+  streamed completion with a trailing accounting frame (`"choices": []`, populated
+  `usage`) after the finish-reason frame, but the provider catalog left
+  `stream_usage_accounting` unset — which is deliberately fail-closed — so the
+  parser treated the finish-reason frame as terminal and dropped the accounting
+  frame. Every streamed agent call recorded `accounting_status = "unknown"` with
+  `cost_usd = null` and zero input/output tokens, while non-streamed structured
+  calls on the same route priced correctly. Verified against the live API before
+  declaring the capability.
+- Fixed tool calls being silently discarded when a caller pinned `tool_format:
+  "json"` on a route the catalog pins to heredoc `text`. Parity was enforced at
+  channel granularity — `json` and `text` are one class for "can this route carry
+  tool calls in the assistant's content", but the wrong class for "which syntax
+  will the parser run", since the two grammars are mutually unparseable. The pin
+  passed both channel gates untouched, the prompt taught fenced-JSON, the wire
+  used the pinned heredoc grammar, and every call the model made was dropped with
+  no result, no parse error and no nudge. An explicit `json` now steers to the
+  route's pinned grammar. The steer is one-way: an explicit `text` on a
+  `json`-pinned route is left alone, because heredoc is the escape-free body
+  channel and that request is the documented safety valve for it.
+  `tool_format_override_reason` still forces either grammar.
+
 ## v0.10.101
 
 ### Fixed
