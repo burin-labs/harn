@@ -8,6 +8,7 @@ import {
   agent_session_inject_feedback,
   agent_session_record_skill_event,
 } from "std/agent/state"
+import { tool_fence_info_opens_call } from "std/llm/dialects"
 import { missing_tool_call_classifier } from "std/llm/missing_tool_call"
 
 fn __default_done_sentinel(opts) {
@@ -281,6 +282,20 @@ fn __text_family_toolless_turn(opts, has_tool_calls, text) {
  */
 fn __detect_fenced_call_attempt(text) {
   const lowered = lowercase(to_string(text ?? ""))
+  // Ask the dialect vocabulary before the heuristics below. A fence carrying
+  // the label the model was TAUGHT to use is the likeliest attempt of all, and
+  // a hand-maintained list is exactly what let it fall through: `tool` was
+  // absent here while the prompt instructed it, so a turn full of well-formed
+  // calls produced no call and no nudge.
+  for line in split(lowered, "\n") {
+    const trimmed = trim(line)
+    if starts_with(trimmed, "```") {
+      const info = trim(trimmed[3:len(trimmed)])
+      if info != "" && tool_fence_info_opens_call(info) {
+        return info
+      }
+    }
+  }
   const openers = [
     "```tool_code",
     "```call",

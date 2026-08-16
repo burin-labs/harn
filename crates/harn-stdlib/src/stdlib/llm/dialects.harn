@@ -198,6 +198,29 @@ pub const ENVELOPE_OPENERS: list<TagDialect> = [
 /** Tag names that are structural markers, never the name of a tool. */
 pub const STRUCTURAL_MARKER_TAGS: list<string> = ["tool", "tool_call", "tool_calls", "tool_code"]
 
+/**
+ * True when a fence info string opens a tool block: the canonical `tool` label,
+ * a `tool`-prefixed variant, or a recognized drift spelling.
+ *
+ * Every seam that decides whether a fence is an authored example or an
+ * attempted call must ask here rather than re-listing labels. A detector that
+ * keeps its own list drifts from the parser's, and a label the parser accepts
+ * then reads as documentation somewhere else — which is how a well-formed call
+ * becomes a turn with no call, no parse error, and no nudge.
+ */
+pub fn tool_fence_info_opens_call(info: string) -> bool {
+  const normalized = lowercase(trim(to_string(info ?? "")))
+  if normalized == FENCE_OPEN_INFO || FENCE_DRIFT_INFOS.contains(normalized) {
+    return true
+  }
+  for separator in FENCE_INFO_SUFFIX_SEPARATORS {
+    if starts_with(normalized, FENCE_OPEN_INFO + separator) {
+      return true
+    }
+  }
+  return false
+}
+
 // ── JSON envelope key aliases ───────────────────────────────────────────────
 /**
  * Keys that carry the tool NAME, in precedence order. Canonical wins when

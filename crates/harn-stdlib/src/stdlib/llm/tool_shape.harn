@@ -29,6 +29,7 @@
  * says "wrap calls in <tool_call>" carries no body and matches nothing here.
  * Every check below requires an argument-bearing body, not a name.
  */
+import { tool_fence_info_opens_call } from "std/llm/dialects"
 import { ProtocolViolation, protocol_violation } from "std/llm/tool_parse_result"
 
 /** One dropped fragment as reported by the parser. */
@@ -111,6 +112,12 @@ fn __tool_shape_body_has_arguments(body: string) -> bool {
  * so it remains eligible. A labeled fence is an authored example/source block:
  * treating its contents as executable intent would turn documentation into a
  * corrective model turn.
+ *
+ * The one exception is a label that opens a tool block. `tool` is a well-formed
+ * language-shaped label, so the pattern below reads Harn's OWN call fence as
+ * documentation and the near-miss detector goes silent on exactly the calls a
+ * model was taught to write. Ask the dialect vocabulary instead of guessing
+ * from the label's shape.
  */
 fn __tool_shape_in_labeled_fence(text: string, at: int) -> bool {
   const before = text.slice(0, at)
@@ -127,6 +134,9 @@ fn __tool_shape_in_labeled_fence(text: string, at: int) -> bool {
   const after_marker = before.slice(fence_at + 3, len(before))
   const newline_at = after_marker.index_of("\n")
   const label = trim(newline_at >= 0 ? after_marker.slice(0, newline_at) : after_marker)
+  if tool_fence_info_opens_call(label) {
+    return false
+  }
   return regex_match("^[A-Za-z][A-Za-z0-9_+.-]*$", label) != nil
 }
 
