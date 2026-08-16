@@ -22,6 +22,8 @@ ok text pin reports the recovery
 ok text pin does not dispatch a ```json example
 ok mixed turn keeps the taught call
 ok mixed turn still reports the declined fence
+ok cycle bait terminates on a text pin
+ok cycle bait terminates on a json pin
 ok adaptive lands no calls
 ok adaptive fails closed with guidance
 tool_format_contract_parity passed

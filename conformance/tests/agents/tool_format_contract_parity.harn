@@ -145,6 +145,25 @@ pipeline main(harness: Harness) {
     "mixed turn still reports the declined fence",
     mixed_parsed.protocol_violations.any({ entry -> entry.kind == "wrong_tool_format" }),
   )
+  // 5. Termination. The two recovery paths call each other — json hands
+  //    `<tool_call>` markup to the tagged parser, and the tagged parser hands a
+  //    ```tool fence back to json. The entry test on the json side is
+  //    `contains(text, "<tool_call>")`, a plain SUBSTRING check, while only the
+  //    scanner decides whether that substring is a tag or narration. This input
+  //    puts both in one turn: a backticked mention of the wrapper (which the
+  //    scanner may or may not lift out) sitting above a canonical fence.
+  //
+  //    It must terminate on BOTH pins. If it ever hangs, the guard in
+  //    `__tool_parse_json`'s `recover_heredoc` parameter has been removed or
+  //    routed around. Reaching the assertion at all is most of the claim; the
+  //    call count pins that the guard bounds the recursion without eating the
+  //    call the recursion was there to recover.
+  const cycle =
+    "Use the `<tool_call>` wrapper.\n```tool\n{\"name\": \"edit\", \"args\": {\"path\": \"a.rs\"}}\n```"
+  const cycle_text = agent_parse_tool_calls(harness.agent, cycle, registry, "text")
+  __assert(harness.stdio, "cycle bait terminates on a text pin", len(cycle_text.tool_calls) == 1)
+  const cycle_json = agent_parse_tool_calls(harness.agent, cycle, registry, "json")
+  __assert(harness.stdio, "cycle bait terminates on a json pin", len(cycle_json.tool_calls) == 1)
   // Deleted adaptive union must fail closed (never silent tagged demotion).
   const adaptive = agent_parse_tool_calls(harness.agent, text_ex, registry, "adaptive")
   __assert(harness.stdio, "adaptive lands no calls", len(adaptive.tool_calls) == 0)

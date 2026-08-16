@@ -987,7 +987,7 @@ fn __tool_parse_recover_fenced_calls(blocks: list<string>, tools, state: dict) -
   const fenced_calls = if already_called {
     []
   } else {
-    __tool_parse_json(fenced_text, tools)?.calls ?? []
+    __tool_parse_json(fenced_text, tools, false)?.calls ?? []
   }
   if len(fenced_calls) > 0 {
     let canonical = state.canonical
@@ -998,6 +998,7 @@ fn __tool_parse_recover_fenced_calls(blocks: list<string>, tools, state: dict) -
       + {
       calls: state.calls + fenced_calls,
       canonical: canonical,
+      recovered: state.recovered + len(fenced_calls),
       violations: state.violations.appending(
         protocol_violation(
           "recovered_dialect",
@@ -1161,6 +1162,7 @@ fn __tool_parse_tagged(text: string, tools) -> dict {
         prose: prose_parts,
         dropped: dropped,
         violations: violations,
+        recovered: recovered,
       },
     )
     calls = recovered_state.calls
@@ -1168,6 +1170,7 @@ fn __tool_parse_tagged(text: string, tools) -> dict {
     prose_parts = recovered_state.prose
     dropped = recovered_state.dropped
     violations = recovered_state.violations
+    recovered = recovered_state.recovered
   }
   return __tool_parse_tagged_result(
     {
@@ -1526,7 +1529,28 @@ fn __tool_parse_envelope(text: string) -> dict {
   return parsed
 }
 
-fn __tool_parse_json(text: string, tools = nil) -> dict {
+/**
+ * `recover_heredoc` breaks the one cycle between the two grammars.
+ *
+ * The recovery paths call each other: this function hands `<tool_call>` markup
+ * to `__tool_parse_tagged`, and `__tool_parse_recover_fenced_calls` hands a
+ * ```tool fence back here. Left open that is a loop, and its entry test is
+ * looser than what could stop it — `contains(text, "<tool_call>")` fires on the
+ * literal substring, while only the SCANNER decides whether that substring is a
+ * tag or narration. Termination must not depend on the two agreeing.
+ *
+ * So the fence path passes `false`: text arriving from
+ * `__tool_parse_recover_fenced_calls` has already been through the tagged
+ * parser once, and a second heredoc pass cannot find a call the first did not.
+ * Nothing is lost and the cycle cannot close.
+ *
+ * The guard is deliberately NOT symmetric. Disabling fence recovery in the
+ * tagged parser called from here would silently drop the fence in a mixed turn
+ * on a json pin — this branch delegates the WHOLE text to tagged, so tagged's
+ * fence recovery is the only thing that sees it. That would reintroduce exactly
+ * the silent drop this change exists to remove. One direction is enough.
+ */
+fn __tool_parse_json(text: string, tools = nil, recover_heredoc = true) -> dict {
   const envelope = __tool_parse_envelope(text)
   if envelope?.matched ?? false {
     if envelope?.result != nil {
@@ -1538,7 +1562,7 @@ fn __tool_parse_json(text: string, tools = nil) -> dict {
     return empty_parse()
       + {tool_parse_errors: ["chat-template envelope parse failed"], prose: text}
   }
-  if contains(text, "<tool_call>") {
+  if recover_heredoc && contains(text, "<tool_call>") {
     // Accept the heredoc grammar here rather than discarding it. This route is
     // measurably exposed: the only shipped row that is `preferred = json` with
     // `parity = text_only` is llamacpp `*qwen3.6*`, the primary local eval
