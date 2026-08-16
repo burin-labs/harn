@@ -1641,6 +1641,36 @@ pub fn rust_cache_refresh_concurrency_errors(job) -> list<string> {
   return errors
 }
 
+const CACHE_MISS_GUARD = "steps.rust-cache.outputs.cache-hit != 'true'"
+
+/**
+ * GitHub cache entries are immutable, so an exact-key restore leaves the
+ * refresher nothing to write: Swatinem's post step reports "Cache up-to-date."
+ * and the warm build is discarded with the runner. Every step that exists only
+ * to produce the next generation must therefore be guarded on the miss.
+ */
+pub fn rust_cache_refresh_miss_only_errors(job) -> list<string> {
+  let errors: list<string> = []
+  const headroom = step_by_name(job?.steps ?? [], "Prepare Linux cache generation save")
+  if trim(headroom?.if ?? "") != CACHE_MISS_GUARD {
+    errors = errors
+      + ["ci.yml:rust-cache-refresh must prepare a generation only after a cache miss"]
+  }
+  for name in ["Install cargo-nextest", "Warm Cargo graph"] {
+    const step = step_by_name(job?.steps ?? [], name)
+    if step == nil {
+      continue
+    }
+    if !contains(trim(step?.if ?? ""), CACHE_MISS_GUARD) {
+      errors = errors
+        + [
+        "ci.yml:rust-cache-refresh must skip ${name} when the exact cache key already restored",
+      ]
+    }
+  }
+  return errors
+}
+
 /** Keep the post-merge main-scoped cache refresher wired to proof reuse. */
 fn rust_cache_refresh_errors(workflow) -> list<string> {
   const job = workflow?.jobs?.["rust-cache-refresh"]
@@ -1699,12 +1729,10 @@ fn rust_cache_refresh_errors(workflow) -> list<string> {
       "ci.yml:rust-cache-refresh must not set job-level CARGO_BUILD_JOBS (breaks Swatinem key parity)",
     ]
   }
-  const headroom = step_by_name(job?.steps ?? [], "Prepare Linux cache generation save")
-  if trim(headroom?.if ?? "") != "steps.rust-cache.outputs.cache-hit != 'true'" {
-    errors = errors
-      + ["ci.yml:rust-cache-refresh must prepare a generation only after a cache miss"]
-  }
-  const headroom_run = trim(headroom?.run ?? "")
+  errors = errors + rust_cache_refresh_miss_only_errors(job)
+  const headroom_run = trim(
+    step_by_name(job?.steps ?? [], "Prepare Linux cache generation save")?.run ?? "",
+  )
   if !contains(headroom_run, "prune_ci_cache_generations.sh --clear-family-prefix")
     || !contains(
     headroom_run,
