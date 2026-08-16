@@ -292,6 +292,37 @@ fn __parity_conflicts_with_requested(parity, requested) {
   return false
 }
 
+/**
+ * True when the request asks for fenced-JSON on a route the catalog pins to
+ * heredoc `text`.
+ *
+ * Parity above answers "can this route carry tool calls in the assistant's
+ * content at all", and for that question `json` and `text` are correctly one
+ * class. They are the wrong class for "which syntax will the parser run": a
+ * call written as a ```tool fence is invisible to the heredoc reader and a
+ * heredoc call is invisible to the fence reader. Both channel gates — this one
+ * and the Rust `validate_tool_format` — therefore wave an explicit `json`
+ * through on a `text`-pinned route, the prompt teaches the requested grammar,
+ * the wire uses the pinned one, and every call the model makes is discarded
+ * with no result, no parse error and no nudge (burin-code#6388).
+ *
+ * DELIBERATELY ONE-WAY. The mirror case — an explicit `text` on a `json`-pinned
+ * route — is NOT steered, because heredoc is the escape-free body channel and
+ * an explicit `text` request is the documented safety valve for exactly that
+ * (see `__fallback_tool_format`). A JSON string argument forces the model to
+ * escape backslashes the source already needs, which is the corruption this
+ * route class is pinned away from: fenced-JSON mangled Zig multiline bodies in
+ * 3/3 sampled gpt-oss runs. Steering toward `text` can only lose escaping
+ * hazards; steering toward `json` would reintroduce them, so a caller that
+ * asks for heredoc keeps it.
+ *
+ * Cross-channel requests stay governed by `tool_mode_parity` above, so a route
+ * that merely prefers one channel does not lose the other.
+ */
+fn __grammar_conflicts_with_requested(preferred, requested) {
+  return preferred == "text" && requested == "json"
+}
+
 fn __tool_format_override_event(pair, requested, preferred, parity, override_reason) {
   if pair == nil {
     return nil
@@ -440,12 +471,25 @@ pub fn agent_tool_format_resolution(llm: HarnessLlm, options = nil) {
     // wire does so the prompt and the provider request agree. An explicit
     // `tool_format_override_reason` opts out (the author is forcing a known-risky
     // channel deliberately, and the Rust gate is bypassed in mock/replay too).
+    // Same reasoning one level down, at grammar granularity: the channel gates
+    // above cannot tell `json` from `text`, so a pin to the other same-channel
+    // grammar reaches the prompt untouched while the wire uses the route's
+    // declared one. Steer to `preferred` — the catalog's grammar for this route
+    // is an empirical pin, not a preference (gpt-oss is held on heredoc because
+    // fenced-JSON corrupted file bodies in 3/3 sampled runs), so honoring the
+    // request here would trade a silent-drop bug for a corruption bug.
     const steered = if override_reason == nil
       && __parity_conflicts_with_requested(
       __catalog_parity(parity),
       explicit,
     ) {
       __steer_tool_format(__catalog_parity(parity), preferred)
+    } else if override_reason == nil
+      && __grammar_conflicts_with_requested(
+      preferred,
+      explicit,
+    ) {
+      preferred
     } else {
       nil
     }

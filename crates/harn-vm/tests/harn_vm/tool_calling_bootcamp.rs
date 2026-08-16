@@ -409,12 +409,58 @@ fn json_is_a_text_channel_format_for_parity() {
              (silent half-support)"
         ),
     }
+    // The text_only side must ACCEPT json rather than reject it the way the
+    // native_only side does — that is the channel invariant this test exists
+    // for, and it still holds. The resolved GRAMMAR is a separate question:
+    // this fixture pins `preferred_tool_format = "text"`, and json and heredoc
+    // are mutually unparseable, so accepting the request verbatim would teach a
+    // syntax the parser will not run (burin-code#6388). Accepted, then steered
+    // to the route's pinned grammar.
     match resolve_with_parity("bootcamp-text-only-json", "text_only", false, "json") {
         Outcome::Accepted { tool_format, .. } => assert_eq!(
-            tool_format, "json",
-            "text_only model should accept json, a text-channel format"
+            tool_format, "text",
+            "text_only model should accept json and steer it to the route's pinned grammar"
         ),
         Outcome::Rejected(err) => panic!("text_only model rejected json (text channel): {err}"),
+    }
+}
+
+/// burin-code#6388, isolated from parity. `interchangeable` parity means no
+/// channel is forbidden, so nothing above the grammar rule can fire: this pins
+/// the grammar steer on its own. A route whose catalog row names heredoc
+/// `text` must not have its prompt built for fenced-JSON just because a caller
+/// pinned it — the two are mutually unparseable, and in production that taught
+/// the model a syntax the parser would not run, dropping every call it made
+/// with no result, no parse error and no nudge.
+#[test]
+fn json_pin_on_a_text_pinned_route_is_steered_to_the_pinned_grammar() {
+    match resolve_with_parity("bootcamp-json-pin-steer", "interchangeable", false, "json") {
+        Outcome::Accepted { tool_format, .. } => assert_eq!(
+            tool_format, "text",
+            "an explicit json pin must steer to the route's pinned heredoc grammar"
+        ),
+        Outcome::Rejected(err) => panic!("a json pin must be steered, not rejected: {err}"),
+    }
+}
+
+/// The deliberate-force escape hatch still wins over the grammar steer, so a
+/// probe or matrix harness can measure the pinned-away grammar on purpose.
+/// The reverse direction (an explicit `text` on a `json`-pinned route) is left
+/// alone by design and is covered on real catalog cells by
+/// `accepted_format_is_consistent_with_capability_matrix`.
+#[test]
+fn override_reason_keeps_an_explicit_json_pin_on_a_text_pinned_route() {
+    match resolve_with_parity_and_override(
+        "bootcamp-json-pin-forced",
+        "interchangeable",
+        false,
+        "json",
+    ) {
+        Outcome::Accepted { tool_format, .. } => assert_eq!(
+            tool_format, "json",
+            "tool_format_override_reason must still force the requested grammar"
+        ),
+        Outcome::Rejected(err) => panic!("an overridden json pin must be honored: {err}"),
     }
 }
 
