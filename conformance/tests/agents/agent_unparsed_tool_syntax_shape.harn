@@ -86,4 +86,26 @@ pipeline main(harness: Harness) {
   harness.stdio.println(
     shapes(harness.agent, "```\n<tool>\nlook({ file: \"a.rs\" })\n</tool>\n```"),
   )
+  // burin-code#6388. The model was TAUGHT the ```tool fence, wrote well-formed
+  // calls into it, and the parser ran the heredoc grammar — so every call was
+  // dropped. The near-miss detector then stayed silent too, because `tool` is a
+  // language-shaped label and the labeled-fence rule read Harn's own call fence
+  // as an authored example. A fence label the parser accepts must never read as
+  // documentation here.
+  harness.stdio.println(
+    shapes(
+      harness.agent,
+      "```tool\n{\"name\": \"edit\", \"arguments\": {\"path\": \"src/main.zig\"}}\n```",
+    ),
+  )
+  // Same for a recognized drift spelling.
+  harness.stdio.println(
+    shapes(
+      harness.agent,
+      "```tool_call\n{\"name\": \"edit\", \"arguments\": {\"path\": \"src/main.zig\"}}\n```",
+    ),
+  )
+  // Over-match guard: a label that merely starts with the same letters is an
+  // ordinary language label and stays silent.
+  harness.stdio.println(shapes(harness.agent, "```toolkit\nfn main() { println!(\"hi\"); }\n```"))
 }

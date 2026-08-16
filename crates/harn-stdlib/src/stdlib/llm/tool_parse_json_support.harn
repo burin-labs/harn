@@ -6,12 +6,11 @@
  */
 import {
   ARGUMENT_ALIASES,
-  FENCE_DRIFT_INFOS,
-  FENCE_INFO_SUFFIX_SEPARATORS,
   FENCE_OPEN_INFO,
   GENERIC_WRAPPER_NAMES,
   NAME_ALIASES,
   NAME_CHANNEL_MARKERS,
+  tool_fence_info_opens_call,
 } from "std/llm/dialects"
 import { protocol_violation } from "std/llm/tool_parse_result"
 
@@ -293,15 +292,7 @@ fn __tool_parse_tool_fence_info(marker: string, info: string) -> dict {
   if marker == "```" && normalized == FENCE_OPEN_INFO {
     return {tool: true, warning: nil}
   }
-  let has_tool_suffix = false
-  for separator in FENCE_INFO_SUFFIX_SEPARATORS {
-    if starts_with(normalized, FENCE_OPEN_INFO + separator) {
-      has_tool_suffix = true
-    }
-  }
-  if FENCE_DRIFT_INFOS.contains(normalized)
-    || normalized == FENCE_OPEN_INFO
-    || has_tool_suffix {
+  if tool_fence_info_opens_call(normalized) {
     return {
       tool: true,
       warning: protocol_violation(
