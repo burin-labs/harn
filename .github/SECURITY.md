@@ -2,7 +2,7 @@
 
 ## Reporting a vulnerability
 
-Email **security@burinlabs.com** with the details. Encrypt with our public key
+Email **security@harn.cloud** with the details. Encrypt with our public key
 if the report contains exploit material (key available on request).
 
 Please include:
