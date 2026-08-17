@@ -233,6 +233,7 @@ fn __tool_parse_block_unit(unit, tools, state: dict, direct_candidate = nil) -> 
     let calls = state.calls
     let canonical = state.canonical
     let prose = state.prose
+    let violations = state.violations
     if parsed?.call != nil {
       calls = calls.appending(parsed.call)
       canonical = canonical.appending(call_block(parsed.call))
@@ -241,7 +242,20 @@ fn __tool_parse_block_unit(unit, tools, state: dict, direct_candidate = nil) -> 
       prose = prose.appending(narration)
       canonical = canonical.appending(prose_block(narration))
     }
-    return state + {calls: calls, canonical: canonical, prose: prose}
+    // Forgiving a missing close still has to say so. A silent accept would
+    // teach the model that the close tag is optional and would blind every
+    // consumer that reads parse outcomes to detect dialect drift.
+    if kind == "unclosed_block" && parsed?.call != nil {
+      violations = violations.appending(
+        protocol_violation(
+          "recovered_dialect",
+          "Recovered a tool call from a `<tool_call>` block that was never closed. "
+            + "Close every block with `</tool_call>`.",
+        ),
+      )
+    }
+    return state
+      + {calls: calls, canonical: canonical, prose: prose, violations: violations}
   }
   let message = to_string(parsed?.error ?? "tool-call parse failed")
   if kind == "unclosed_block"
@@ -377,7 +391,7 @@ fn __tool_parse_tagged_unit(unit, tools, state: dict, candidates = nil) -> dict 
   if kind == "markup" {
     return __tool_parse_markup_unit(unit, tools, next)
   }
-  if kind == "block" || kind == "unclosed_block" || kind == "reserved_block" {
+  if kind == "block" || kind == "unclosed_block" {
     return __tool_parse_block_unit(unit, tools, next, candidates?.direct)
   }
   if kind == "tag" {

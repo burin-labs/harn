@@ -50,7 +50,8 @@ pub(crate) enum UnitPayload {
         /// was normalized to the canonical tag. Diagnostics only.
         reserved: bool,
     },
-    /// An open tag with no close. `body` is the remainder; consumes to EOF.
+    /// An open tag with no close, spanning as far as the block can defensibly
+    /// claim: to the next call-tag boundary, else to EOF.
     UnclosedBlock {
         tag: String,
         body: String,

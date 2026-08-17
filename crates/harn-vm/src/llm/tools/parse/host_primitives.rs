@@ -577,7 +577,7 @@ fn host_tool_scan_bare_units_builtin(
                     "prose": parsed.prose,
                 }}));
             }
-            if matches!(kind.as_str(), "block" | "unclosed_block" | "reserved_block") {
+            if matches!(kind.as_str(), "block" | "unclosed_block") {
                 let (
                     Some(VmValue::String(body)),
                     Some(VmValue::String(name)),
