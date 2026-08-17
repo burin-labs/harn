@@ -395,7 +395,9 @@ pipeline default(harness: Harness) {
       const calls = harness.llm.mock_calls()
       harness.stdio.println(
         "judged_done.no_missing_nudge="
-          + to_string(!injected_anywhere(calls, "appeared to intend a call")),
+          + to_string(
+          !injected_anywhere(calls, "appeared to intend a call"),
+        ),
       )
       harness.stdio.println(
         "judged_done.no_exemplar="
@@ -429,10 +431,6 @@ pipeline default(harness: Harness) {
           tools: edit_tools(),
           done_judge: true,
           missing_tool_call_recovery: edit_missing_tool_call_recovery(),
-          // A host control policy sees the turn through this callback, so the
-          // claim has to be readable HERE to be worth anything. Keyed on
-          // iteration rather than accumulated, so the assertion does not depend
-          // on how many turns the loop happens to run.
           post_turn_callback: { info ->
             if info?.iteration == 0 {
               harness.stdio.println(
@@ -443,7 +441,9 @@ pipeline default(harness: Harness) {
             if info?.iteration == 1 {
               harness.stdio.println(
                 "claim_fact.repair_turn="
-                  + to_string(info?.prior_turn_claimed_for_repair ?? "missing"),
+                  + to_string(
+                  info?.prior_turn_claimed_for_repair ?? "missing",
+                ),
               )
             }
             return nil
