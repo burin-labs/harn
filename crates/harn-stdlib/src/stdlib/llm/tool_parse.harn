@@ -13,7 +13,7 @@ import {
   tool_fence_info_intent,
 } from "std/llm/dialects"
 import { __tool_parse_call_from_body, __tool_parse_markup } from "std/llm/tool_parse_body"
-import { tool_parse_envelope } from "std/llm/tool_parse_envelope"
+import { tool_envelope_alternate_opener_at, tool_parse_envelope } from "std/llm/tool_parse_envelope"
 import {
   bind_verbatim,
   has_counted_verbatim,
@@ -621,7 +621,19 @@ fn __tool_parse_tagged(text: string, tools) -> dict {
   // recovered the first object of a multi-call body and dropped the rest with
   // nothing said. Ask the one owner instead, so a turn parses the same way on
   // either pin.
-  if !contains(text, "<tool_call>") {
+  const tagged_at = text.index_of("<tool_call>")
+  const alternate_at = tool_envelope_alternate_opener_at(text)
+  // A tagged block first and an alternate opener after it: each span owns only
+  // itself. Reading the whole message as one or the other loses whichever came
+  // second, and losing it here was silent, because an alternate opener is not
+  // tag-shaped and the stray scan has nothing to say about it.
+  if alternate_at > 0 && tagged_at >= 0 && tagged_at < alternate_at {
+    return __tool_parse_join(
+      __tool_parse_tagged(text.slice(0, alternate_at), tools),
+      __tool_parse_tagged(text.slice(alternate_at, len(text)), tools),
+    )
+  }
+  if tagged_at < 0 || (alternate_at >= 0 && alternate_at < tagged_at) {
     const envelope = tool_parse_envelope(
       text,
       fn(body) { return __tool_parse_call_from_body(body, tools, "", "") },
@@ -836,6 +848,33 @@ fn __tool_parse_tagged(text: string, tools) -> dict {
  * Recursion terminates because the envelope always consumes its opener, so
  * each remainder is strictly shorter than the text it came from.
  */
+/**
+ * Join two parses of adjacent halves of one message.
+ *
+ * Used when a message holds spans belonging to different owners, so each half
+ * is read by whoever owns it and the turn is the concatenation. Same shape as
+ * the envelope remainder merge, which does this for a span's leading and
+ * trailing text.
+ */
+fn __tool_parse_join(head: dict, tail: dict) -> dict {
+  const calls = (head?.calls ?? []) + (tail?.calls ?? [])
+  const prose = [to_string(head?.prose ?? ""), to_string(tail?.prose ?? "")].filter(
+    fn(part) { return trim(part) != "" },
+  )
+    .join("\n")
+  return head
+    + {
+    calls: calls,
+    tool_calls: calls,
+    tool_parse_errors: (head?.tool_parse_errors ?? []) + (tail?.tool_parse_errors ?? []),
+    protocol_violations: (head?.protocol_violations ?? [])
+      + (tail?.protocol_violations ?? []),
+    dropped: (head?.dropped ?? []) + (tail?.dropped ?? []),
+    prose: prose,
+    canonical_text: calls.map(fn(call) { return call_block(call) }).join("\n"),
+  }
+}
+
 fn __tool_parse_envelope_remainder(envelope: dict, parse_remainder) -> dict {
   const result = envelope.result
   const leading = to_string(envelope?.prose ?? "")
