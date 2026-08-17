@@ -203,6 +203,12 @@ fn find_native_json_payloads(text: &str) -> Vec<NativeJsonPayload> {
 }
 
 #[cfg(test)]
+#[expect(
+    clippy::string_slice,
+    reason = "these tests slice by the spans the scan returned, which are the byte ranges of \
+              whole JSON values and so are char boundaries by construction; a span that was \
+              not would fail the assertion rather than pass silently"
+)]
 mod tests {
     use std::collections::BTreeSet;
 
