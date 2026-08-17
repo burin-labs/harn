@@ -24,8 +24,9 @@ page.
 Current limitations:
 
 - Multi-tenant mode isolates listener ingress, tenant-scoped secrets, and
-  trigger EventLog topics. Shared scheduler/provider objects remain
-  orchestrator-global.
+  trigger EventLog topics. The trigger/connector registry and shared
+  scheduler/provider objects remain orchestrator-global, so a connector or
+  trigger definition is visible to every tenant in the process.
 
 ## Command
 
