@@ -347,7 +347,61 @@ const ENVELOPE_OPENERS: list<dict> = [
   {open: "[[tool]]", close: "[[/tool]]", kind: "tool_call"},
 ]
 
-pub fn tool_parse_envelope(text: string) -> dict {
+/**
+ * An envelope whose body is not JSON at all, read through the caller's body
+ * ladder.
+ *
+ * This module owns where an envelope starts and ends. It does not own what
+ * grammar the body is written in, and it used to behave as though it did:
+ * requiring JSON meant `[[tool]]look({ ... })[[/tool]]` matched an opener this
+ * module knows, failed its JSON check, and was declined all the way back to the
+ * stray scan, which said nothing. The ladder arrives as a callback because
+ * `tool_parse_body` already imports this module for the label unwrap, so the
+ * dependency can only run one way.
+ */
+fn __tool_parse_envelope_direct_body(
+  raw_body: string,
+  close: string,
+  prose: string,
+  parse_body,
+) -> dict {
+  if parse_body == nil {
+    return {matched: false}
+  }
+  const end = raw_body.index_of(close)
+  if end < 0 {
+    return {matched: false}
+  }
+  const parsed = parse_body(trim(raw_body.slice(0, end)))
+  if !(parsed?.ok ?? false) || parsed?.call == nil {
+    return {matched: false}
+  }
+  return {
+    matched: true,
+    calls: [parsed.call],
+    prose: trim(prose),
+    trailing: trim(raw_body.slice(end + len(close), len(raw_body))),
+  }
+}
+
+/**
+ * Read a chat-template tool envelope out of `text`.
+ *
+ * Finds the earliest known envelope opener, delimits its span, and returns the
+ * calls inside it along with the prose before it and whatever trailed after.
+ * `{matched: false}` means no opener this module knows, which leaves the text
+ * to its caller rather than claiming it.
+ *
+ * `parse_body` is the caller's body ladder, used for an envelope whose body is
+ * not JSON. This module owns where a span starts and ends; it does not own what
+ * grammar the body is written in, and the callback is how that stays true
+ * without an import cycle.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn tool_parse_envelope(text: string, parse_body = nil) -> dict {
   let opener = ""
   let kind = ""
   let close_tag = ""
@@ -375,12 +429,25 @@ pub fn tool_parse_envelope(text: string) -> dict {
   } else {
     {ok: true, body: raw_body, name_hint: ""}
   }
-  if !(unwrapped?.ok ?? false) {
+  // A body this module cannot read as JSON is not thereby a non-envelope. The
+  // opener already said what the span is; the body's grammar is the caller's
+  // ladder to judge.
+  // `<tool_call>` is excluded on purpose: the tagged lane owns that spelling and
+  // reads its heredoc bodies far better than a single-call ladder can, so
+  // declining here is what routes it home. The alternates have no better owner.
+  const direct = if (unwrapped?.ok ?? false) || opener == "<tool_call>" {
+    {matched: false}
+  } else {
+    __tool_parse_envelope_direct_body(raw_body, close_tag, prose, parse_body)
+  }
+  if !(unwrapped?.ok ?? false) && !(direct?.matched ?? false) {
     return {matched: false}
   }
-  const body = to_string(unwrapped.body)
+  const body = to_string(unwrapped?.body ?? "")
   const name_hint = to_string(unwrapped?.name_hint ?? "")
-  let parsed = if kind == "tool_calls" {
+  let parsed = if direct?.matched ?? false {
+    direct
+  } else if kind == "tool_calls" {
     const leading = trim(body)
     if starts_with(leading, "<tool>") || starts_with(leading, "{")
       || starts_with(leading, "</tool>") {

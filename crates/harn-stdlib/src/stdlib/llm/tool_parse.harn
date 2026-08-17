@@ -622,7 +622,10 @@ fn __tool_parse_tagged(text: string, tools) -> dict {
   // nothing said. Ask the one owner instead, so a turn parses the same way on
   // either pin.
   if !contains(text, "<tool_call>") {
-    const envelope = tool_parse_envelope(text)
+    const envelope = tool_parse_envelope(
+      text,
+      fn(body) { return __tool_parse_call_from_body(body, tools, "", "") },
+    )
     if (envelope?.matched ?? false) && envelope?.result != nil
       && len(envelope.result?.calls ?? [])
       > 0 {
@@ -882,7 +885,10 @@ fn __tool_parse_envelope_remainder(envelope: dict, parse_remainder) -> dict {
 }
 
 fn __tool_parse_json(text: string, tools = nil, recover_heredoc = true) -> dict {
-  const envelope = tool_parse_envelope(text)
+  const envelope = tool_parse_envelope(
+    text,
+    fn(body) { return __tool_parse_call_from_body(body, tools, "", "") },
+  )
   if envelope?.matched ?? false {
     if envelope?.result != nil {
       if len(envelope.result?.tool_parse_errors ?? []) > 0 {

@@ -27,10 +27,8 @@
   drop {"reason":"fenced_narration","text":"<<EOF"}
   drop {"reason":"salvaged_as_prose","text":"package main\n\nfunc main() {\n    fmt.Println(\"hello"}
 # fenced call naming a registered tool
-  calls=1 dropped=4
+  calls=1 dropped=2
   drop {"reason":"salvaged_as_prose","text":"```"}
-  drop {"reason":"fenced_narration","text":"<tool>"}
-  drop {"reason":"fenced_narration","text":"</tool>"}
   drop {"reason":"salvaged_as_prose","text":"```"}
 # well formed wrapped call
   calls=1 dropped=0
