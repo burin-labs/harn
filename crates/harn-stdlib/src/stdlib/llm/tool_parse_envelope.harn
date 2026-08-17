@@ -385,6 +385,33 @@ fn __tool_parse_envelope_direct_body(
 }
 
 /**
+ * Offset of the earliest envelope opener that is not `<tool_call>`, or -1.
+ *
+ * The tagged lane owns `<tool_call>` and asks this to decide whether an
+ * alternate opener gets to the text first. Asking "does the text contain a
+ * `<tool_call>` anywhere" instead is what made a mixed message lose a call:
+ * one tagged block far down the turn switched envelope reading off for the
+ * whole message, including an alternate opener that had come before it.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn tool_envelope_alternate_opener_at(text: string) -> int {
+  let at = -1
+  for candidate in ENVELOPE_OPENERS {
+    if candidate.open == "<tool_call>" {
+      continue
+    }
+    const found = text.index_of(candidate.open)
+    if found >= 0 && (at < 0 || found < at) {
+      at = found
+    }
+  }
+  return at
+}
+
+/**
  * Read a chat-template tool envelope out of `text`.
  *
  * Finds the earliest known envelope opener, delimits its span, and returns the
