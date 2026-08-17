@@ -25,13 +25,13 @@
 // Seeds are fixed so a failure is reproducible from the printed seed alone, and
 // so this costs no wall-clock in CI. Widen the range locally to sweep further.
 //
-// The range is NOT "everything we could generate". Widening it to 600 seeds
-// surfaces harn#6787 at seed 329: on a tagged pin only the first fenced call in
-// a message is recovered and the rest are dropped in silence, which predates
-// this harness and is tracked separately. The range stops below that so this
-// file pins what is fixed rather than encoding a known defect as expected. Raise
-// it when #6787 lands; a green run here is evidence about the compositions
-// covered, not a claim that none exist beyond them.
+// The range covers the 600-seed sweep that first surfaced harn#6787 at seed
+// 329: on a tagged pin, a run of JSON call objects collapsed to the first one
+// and the rest were dropped in silence. It stopped below that seed while the
+// defect was open, so this file pinned what was fixed rather than encoding a
+// known defect as expected; the fix landed with this range. A green run is
+// evidence about the compositions covered, not a claim that none exist beyond
+// them.
 import { __parse_feedback_diagnostics } from "std/agent/loop_tool_calls"
 import { agent_parse_tool_calls } from "std/agent/primitives"
 import { corpus_registry } from "_tool_parse_probe"
@@ -169,7 +169,7 @@ fn __check(
 }
 
 fn main(harness: Harness) {
-  const seeds = range(1, 61)
+  const seeds = range(1, 601)
   for seed in seeds {
     const composed = __compose(seed, 1 + seed % 5)
     for pin in PINS {
@@ -211,5 +211,5 @@ fn main(harness: Harness) {
       }
     }
   }
-  harness.stdio.println("parse invariant properties hold over 60 compositions x 3 pins")
+  harness.stdio.println("parse invariant properties hold over 600 compositions x 3 pins")
 }

@@ -1,7 +1,7 @@
 # openai array with string-encoded arguments
   calls=1 errors=0 violations=0 stray=1
   call edit {"action":"create","content":"package main","path":"test.go"}
-  prose=""
+  prose="I'll create the test file now."
   answer=null
   done=null
 # pretty printed array with a non-call id
@@ -19,7 +19,7 @@
 # gpt-oss tool-key dialect after a preamble
   calls=1 errors=0 violations=0 stray=1
   call read {"path":"BatteryInfo.swift"}
-  prose=""
+  prose="We should inspect the model first."
   answer=null
   done=null
 # flat envelope with string-encoded arguments
@@ -50,13 +50,13 @@
 # prose before the array
   calls=1 errors=0 violations=0 stray=1
   call edit {"action":"replace_body","function_name":"TestMain","new_body":"t.Fatal(\"fail\")","path":"test.go"}
-  prose=""
+  prose="Let me read the file first to understand the structure.\n\nNow I'll create the test:"
   answer=null
   done=null
 # non-ascii trailing content after the array
   calls=1 errors=0 violations=0 stray=1
   call edit {"action":"create","content":"pkg","path":"café.go"}
-  prose=""
+  prose="done ✅ — déjà vu 完了"
   answer=null
   done=null
 # prose json with a bare name key is not a call
@@ -81,6 +81,40 @@
   err "Could not parse arguments for tool 'edit': expected ident at line 1 column 2. Raw: not valid json {"
   vio "unparsed_tool_syntax: text shaped like a tool call was not recognized as one and did not run. Emit every call as `<tool_call>name({ ... })</tool_call>`. Unrecognized fragment: …\"name\":\"edit\",\"arguments\":\"not valid json {\"}}]"
   prose=""
+  answer=null
+  done=null
+# a run of flat envelopes is every call, not the first
+  calls=2 errors=0 violations=0 stray=2
+  call read {"path":"a.go"}
+  call read {"path":"b.go"}
+  prose=""
+  answer=null
+  done=null
+# two payloads in ```tool fences
+  calls=2 errors=0 violations=0 stray=2
+  call read {"path":"a.go"}
+  call read {"path":"b.go"}
+  prose=""
+  answer=null
+  done=null
+# narration between two payloads survives
+  calls=2 errors=0 violations=0 stray=2
+  call read {"path":"a.go"}
+  call read {"path":"b.go"}
+  prose="First I will read the entry point.\n\nThen the helper it calls.\n\nThat should be enough to see the shape."
+  answer=null
+  done=null
+# a later unknown name is diagnosed beside a recovered call
+  calls=1 errors=1 violations=0 stray=1
+  call read {"path":"a.go"}
+  err "Unknown tool 'unknown_tool'. Tool calls must be one of: [edit, ledger, load_skill, lookup, read, run, scaffold]."
+  prose=""
+  answer=null
+  done=null
+# prose json after a payload is not a second call
+  calls=1 errors=0 violations=0 stray=1
+  call read {"path":"a.go"}
+  prose="The manifest reads {\"name\":\"my-pkg\",\"version\":\"1.0.0\"} for reference."
   answer=null
   done=null
 # text format takes priority over native json
