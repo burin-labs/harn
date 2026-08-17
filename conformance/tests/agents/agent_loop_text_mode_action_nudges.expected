@@ -22,6 +22,12 @@ claim_fact.first_turn=false
 claim_fact.repair_turn=true
 judge_false.status=done
 judge_false.exemplar=true
+host_advisory.exemplar=true
+host_advisory.suppressed_on_claimed_turn=true
+host_stop.stop_reason=host_said_stop
+host_stop.no_exemplar=true
+single_shot.status=done
+single_shot.not_claimed=true
 invalid_classifier=true
 true
 invalid_enabled=true
