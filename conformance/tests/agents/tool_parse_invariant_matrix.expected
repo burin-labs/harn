@@ -21,11 +21,11 @@ json tagged_json.empty_args parsed
 json tagged_expr.closed parsed
 json tagged_expr.same_line parsed
 json tagged_expr.unclosed parsed
-json tagged_expr.bare_opener rejected
+json tagged_expr.bare_opener parsed
 json tagged_expr.inline_backticks parsed
 json tagged_expr.unknown_tool rejected
 json envelope.markers parsed
-json envelope.function_markup rejected
+json envelope.function_markup parsed
 json envelope.unclosed_marker rejected
 json opener.tag_tool parsed
 json opener.tag_tool_use parsed

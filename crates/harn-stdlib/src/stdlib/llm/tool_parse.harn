@@ -1048,6 +1048,48 @@ fn __tool_parse_json_error(detail: string) -> string {
 }
 
 /**
+ * Last resort on a json pin when the fenced grammar read no call: try the
+ * tagged one.
+ *
+ * Which grammar a route teaches is a steering decision, but which grammar a
+ * model actually emitted is a fact about the bytes, and the two disagree often
+ * enough that pinning the parser to the taught grammar loses real calls.
+ *
+ * The recovery runs in one direction only. Tagged framing says "this is a
+ * call" in the framing itself, so reading it under a json pin cannot mistake
+ * documentation for an action. The fenced grammar has no such guarantee: a
+ * fence info string is the only thing separating a call from an example ABOUT
+ * a call, so a ```json block explaining the shape must stay prose no matter
+ * which pin reads it. `tool_format_contract_parity` pins that floor.
+ *
+ * Only reached when the pinned lane recovered nothing, so no shape that
+ * already parses can change. The recovery always carries a violation:
+ * accepting the wrong grammar silently would teach the model that the pin does
+ * not mean anything.
+ */
+fn __tool_parse_sibling_recovery(text: string, tools, format: string, pinned: dict) -> dict {
+  if format != "json" || len(pinned?.calls ?? []) > 0 {
+    return pinned
+  }
+  const sibling = __tool_parse_tagged(text, tools)
+  if len(sibling?.calls ?? []) == 0 {
+    return pinned
+  }
+  return sibling
+    + {
+    protocol_violations: (sibling?.protocol_violations ?? [])
+      + [
+      protocol_violation(
+        "wrong_tool_format",
+        "Recovered a tool call written in the tagged grammar while `tool_format` "
+          + "is `json`; accepted this turn, but emit each call as a strict JSON "
+          + "object inside a ```tool fence next turn.",
+      ),
+    ],
+  }
+}
+
+/**
  * Parse one model text response.
  *
  * @effects: []
@@ -1071,11 +1113,12 @@ pub fn parse_tool_calls(payload: dict) -> dict {
       prose: trim(text),
     }
   }
-  const parsed = if format == "json" {
+  const pinned = if format == "json" {
     __tool_parse_json(text, payload?.tools)
   } else {
     __tool_parse_tagged(text, payload?.tools)
   }
+  const parsed = __tool_parse_sibling_recovery(text, payload?.tools, format, pinned)
   const unparsed = tool_shape_violations(tool_shape_findings(parsed?.dropped ?? []))
   return parsed + {protocol_violations: (parsed?.protocol_violations ?? []) + unparsed}
 }
