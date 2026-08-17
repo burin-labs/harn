@@ -17,6 +17,7 @@ pub import {
 } from "std/agent/guardrails"
 pub import {
   agent_done_judge_cap,
+  agent_has_done_judge,
   agent_verify_completion_judge_cap,
   agent_verify_or_continue,
 } from "std/agent/judge"

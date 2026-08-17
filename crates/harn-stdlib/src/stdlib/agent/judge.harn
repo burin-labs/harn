@@ -382,6 +382,54 @@ pub fn agent_done_judge_cap(judge_cfg) {
   return __done_judge_cap(judge_cfg)
 }
 
+/**
+ * agent_done_judge_config.
+ *
+ * The one normalized reading of a `done_judge` option value. Returns nil when
+ * no judge can run — absent, `false`, or a value of a type the judge seam
+ * cannot invoke — and the configuration dict otherwise. `true` normalizes to an
+ * empty dict, meaning "a judge with default settings".
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_done_judge_config(opts?.done_judge)
+ */
+pub fn agent_done_judge_config(judge_cfg) -> dict? {
+  if judge_cfg == nil {
+    return nil
+  }
+  if type_of(judge_cfg) == "bool" {
+    return if judge_cfg {
+      {}
+    } else {
+      nil
+    }
+  }
+  if type_of(judge_cfg) == "dict" {
+    return judge_cfg
+  }
+  return nil
+}
+
+/**
+ * agent_has_done_judge.
+ *
+ * Does this run have a completion judge that can actually run? Every consumer
+ * asking that question must ask here rather than testing `done_judge != nil`
+ * itself: the raw test answers `true` for `done_judge: false`, which is a
+ * different question, and two notions of judge presence in one loop is how a
+ * judge ends up governing behavior for a run that disabled it.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_has_done_judge(opts?.done_judge)
+ */
+pub fn agent_has_done_judge(judge_cfg) -> bool {
+  return agent_done_judge_config(judge_cfg) != nil
+}
+
 fn __emit_judge_decision(agent: HarnessAgent, session_id, iteration, verdict) {
   agent_emit_event(
     agent,
@@ -528,7 +576,7 @@ pub fn agent_verify_or_continue(harness: Harness, session, opts, stop_reason, te
     }
   }
   const done_judge_due = opts?._done_judge_due ?? true
-  const done_judge_applies = opts?.done_judge != nil
+  const done_judge_applies = agent_has_done_judge(opts?.done_judge)
     && (stop_reason == "sentinel"
     || stop_reason
     == "natural"

@@ -131,7 +131,7 @@ pub fn __agent_loop_project_final_result(
       },
     }
   }
-  if opts?.done_judge != nil {
+  if agent_has_done_judge(opts?.done_judge) {
     final_result = final_result
       + {
       done_judge: {

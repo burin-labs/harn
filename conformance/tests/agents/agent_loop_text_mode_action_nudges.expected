@@ -14,6 +14,14 @@ kwargshape.status=done
 kwargshape.no_missing=true
 streak.none_after_progress=true
 streak.escalates=true
+judged_stall.missing=true
+judged_stall.exemplar=true
+judged_done.no_missing_nudge=true
+judged_done.no_exemplar=true
+claim_fact.first_turn=false
+claim_fact.repair_turn=true
+judge_false.status=done
+judge_false.exemplar=true
 invalid_classifier=true
 true
 invalid_enabled=true

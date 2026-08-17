@@ -22,6 +22,21 @@ import { llm_text, with_llm_script } from "std/testing"
  *     loop escalate to the `no_progress_streak` nudge; a successful tool call
  *     decays the streak so a later toolless turn does not re-escalate at the
  *     same depth.
+ *
+ * Cases 1-4 run with no completion judge installed, which no serious embedder
+ * does. Cases 5-8 cover the configuration that ships: a `done_judge` present.
+ *
+ *  5. A judged stall STILL gets the content-specific corrective and its
+ *     concrete exemplar. The documented precedence — content nudge wins,
+ *     streak nudge is the fallback — must survive a judge.
+ *  6. The other direction: a judged turn whose classifier declines to affirm an
+ *     intended call is a completion candidate and gets NO corrective. Asking
+ *     the corrective question first must not manufacture nudges on honest
+ *     finished answers.
+ *  7. The claim is published as a typed fact on the next turn's payload, so a
+ *     host control policy can observe it instead of racing it.
+ *  8. `done_judge: false` is not a judge, and the loop must not gate on it as
+ *     though it were.
  */
 fn edit_tools() {
   let tools = tool_registry()
@@ -37,6 +52,22 @@ fn edit_tools() {
     },
   )
   return tools
+}
+
+/**
+ * Scan EVERY call for a marker. The indexed helper below is only valid when
+ * both sides of a comparison share a loop shape; installing a `done_judge`
+ * changes the call count, so the judge cases must not assert on a position.
+ */
+fn injected_anywhere(calls, marker) {
+  for call in calls ?? [] {
+    for message in call.messages {
+      if contains(to_string(message?.content ?? ""), marker) {
+        return true
+      }
+    }
+  }
+  return false
 }
 
 fn injected_kind_in(calls, idx, marker) {
@@ -281,6 +312,179 @@ pipeline default(harness: Harness) {
         }
       }
       harness.stdio.println("streak.escalates=" + to_string(streak_fired))
+    },
+  )
+  // 5. A `done_judge` must NOT suppress the content-specific corrective. The
+  //    documented precedence is that the content nudge wins and the streak
+  //    nudge is the fallback; a completion judge must not invert it. A toolless
+  //    prose turn whose classifier affirms an intended-but-unemitted call is a
+  //    stall, not a completion candidate, and still gets the concrete exemplar.
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text("Voy a edittar el archivo ahora, un momento."),
+      llm_text("<tool_call>\nedit({ path: \"j.txt\" })\n</tool_call>"),
+      llm_text("Done."),
+    ],
+    { ->
+      agent_loop(
+        harness,
+        "Edit j.txt.",
+        nil,
+        {
+          provider: "mock",
+          tool_format: "text",
+          loop_until_done: true,
+          max_iterations: 4,
+          max_nudges: 4,
+          tools: edit_tools(),
+          done_judge: true,
+          missing_tool_call_recovery: edit_missing_tool_call_recovery(),
+        },
+      )
+      const calls = harness.llm.mock_calls()
+      harness.stdio.println(
+        "judged_stall.missing=" + to_string(injected_anywhere(calls, "appeared to intend a call")),
+      )
+      harness.stdio.println(
+        "judged_stall.exemplar=" + to_string(injected_anywhere(calls, "Emit the call now")),
+      )
+    },
+  )
+  // 6. The other direction, and the one that keeps the change honest: a
+  //    genuinely finished turn is ALSO toolless prose. When the classifier
+  //    declines to affirm an intended call, the content-specific corrective
+  //    must NOT be injected — asking the corrective question first must not
+  //    manufacture nudges on honest completions. (The generic streak nudge is a
+  //    separate owner and still fires on churn, so this asserts the specific
+  //    corrective rather than "no directive at all".) Note the run does not
+  //    reach `done` here: with a judge installed, completion is the judge's to
+  //    grant, which is exactly the behavior this change leaves untouched.
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text("The change is complete and the tests pass."),
+      llm_text("Nothing further is required."),
+      llm_text("The result stands as described."),
+    ],
+    { ->
+      agent_loop(
+        harness,
+        "Summarize the result.",
+        nil,
+        {
+          provider: "mock",
+          tool_format: "text",
+          loop_until_done: true,
+          max_iterations: 3,
+          max_nudges: 3,
+          tools: edit_tools(),
+          done_judge: true,
+          missing_tool_call_recovery: {
+            classifier: { _payload ->
+              return {
+                action: "none",
+                confidence: 0.99,
+                evidence: "fixture classifier found no tool action",
+                language: "fixture",
+              }
+            },
+          },
+        },
+      )
+      const calls = harness.llm.mock_calls()
+      harness.stdio.println(
+        "judged_done.no_missing_nudge="
+          + to_string(!injected_anywhere(calls, "appeared to intend a call")),
+      )
+      harness.stdio.println(
+        "judged_done.no_exemplar="
+          + to_string(!injected_anywhere(calls, "Emit the call now")),
+      )
+    },
+  )
+  // 7. The claim is a FACT a host can read, not an ordering it has to infer.
+  //    When the corrective claims a turn for repair, the next turn's post-turn
+  //    payload says so, so a host churn/termination policy looking at the same
+  //    toolless turn shape can tell "the model is spinning" from "the loop
+  //    asked for one specific repair and this is that turn".
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text("Voy a edittar el archivo ahora, un momento."),
+      llm_text("<tool_call>\nedit({ path: \"k.txt\" })\n</tool_call>"),
+      llm_text("Done."),
+    ],
+    { ->
+      agent_loop(
+        harness,
+        "Edit k.txt.",
+        nil,
+        {
+          provider: "mock",
+          tool_format: "text",
+          loop_until_done: true,
+          max_iterations: 4,
+          max_nudges: 4,
+          tools: edit_tools(),
+          done_judge: true,
+          missing_tool_call_recovery: edit_missing_tool_call_recovery(),
+          // A host control policy sees the turn through this callback, so the
+          // claim has to be readable HERE to be worth anything. Keyed on
+          // iteration rather than accumulated, so the assertion does not depend
+          // on how many turns the loop happens to run.
+          post_turn_callback: { info ->
+            if info?.iteration == 0 {
+              harness.stdio.println(
+                "claim_fact.first_turn="
+                  + to_string(info?.prior_turn_claimed_for_repair ?? "missing"),
+              )
+            }
+            if info?.iteration == 1 {
+              harness.stdio.println(
+                "claim_fact.repair_turn="
+                  + to_string(info?.prior_turn_claimed_for_repair ?? "missing"),
+              )
+            }
+            return nil
+          },
+        },
+      )
+    },
+  )
+  // 8. `done_judge: false` means no judge. Pinning the normalized notion of
+  //    judge presence: the loop must not treat a disabled judge as an installed
+  //    one and gate behavior on it. This holds today through a normalization
+  //    step upstream of the consumers, so it pins an invariant rather than
+  //    proving a fix.
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text("Voy a edittar el archivo ahora, un momento."),
+      llm_text("<tool_call>\nedit({ path: \"m.txt\" })\n</tool_call>"),
+      llm_text("Done."),
+    ],
+    { ->
+      const r = agent_loop(
+        harness,
+        "Edit m.txt.",
+        nil,
+        {
+          provider: "mock",
+          tool_format: "text",
+          loop_until_done: true,
+          max_iterations: 4,
+          max_nudges: 4,
+          tools: edit_tools(),
+          done_judge: false,
+          missing_tool_call_recovery: edit_missing_tool_call_recovery(),
+        },
+      )
+      const calls = harness.llm.mock_calls()
+      harness.stdio.println("judge_false.status=" + r.status)
+      harness.stdio.println(
+        "judge_false.exemplar=" + to_string(injected_anywhere(calls, "Emit the call now")),
+      )
     },
   )
   const invalid_classifier = try {
