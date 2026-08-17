@@ -18,10 +18,46 @@ impl OrchestratorRole {
         }
     }
 
+    /// Describe how trigger/connector registries are partitioned under this
+    /// role. This string is printed in the startup banner, so it must describe
+    /// what `build_vm` actually constructs.
+    ///
+    /// Multi-tenant said "per-tenant registries" here for as long as `build_vm`
+    /// had a single shared arm for both roles, which made the banner assert an
+    /// isolation boundary the process had never built. Tenant isolation is
+    /// real, but it lives at ingress, event-log topics, and secret namespaces —
+    /// not in the registry, which stays shared until `build_vm` grows a
+    /// per-tenant arm.
     pub(crate) fn registry_mode(self) -> &'static str {
         match self {
-            Self::SingleTenant => "one shared trigger/connector registry",
-            Self::MultiTenant => "per-tenant registries",
+            Self::SingleTenant | Self::MultiTenant => "one shared trigger/connector registry",
+        }
+    }
+
+    /// The isolation this role's name implies but does not yet deliver, or
+    /// `None` when the role is fully backed.
+    ///
+    /// A deployer picks `--role multi-tenant` to get tenant isolation, and most
+    /// of it arrives: ingress resolves an API key or path tenant, unknown keys
+    /// get 403, suspended tenants get 402, event-log topics are tenant-prefixed,
+    /// and secret lookups are rescoped per tenant with cross-tenant ids denied.
+    /// What does not arrive is registry partitioning — every tenant shares one
+    /// trigger/connector registry, because `build_vm` builds one VM per process
+    /// regardless of role.
+    ///
+    /// That gap is worth saying out loud rather than leaving to a reader of
+    /// `build_vm`: the role is usable, but it is not the whole boundary its name
+    /// suggests, and a deployer sizing a blast radius needs to know which half
+    /// they got.
+    pub(crate) fn unproven_isolation(self) -> Option<&'static str> {
+        match self {
+            Self::SingleTenant => None,
+            Self::MultiTenant => Some(
+                "multi-tenant does not partition the trigger/connector registry: \
+                 every tenant shares one registry in this process. Tenant isolation \
+                 covers ingress, event-log topics, and secret namespaces only. \
+                 See https://github.com/burin-labs/harn/issues/6792",
+            ),
         }
     }
 
@@ -111,5 +147,55 @@ mod tests {
         );
 
         harn_vm::event_log::reset_active_event_log();
+    }
+
+    /// The banner must not promise an isolation boundary `build_vm` never
+    /// builds.
+    ///
+    /// Multi-tenant advertised "per-tenant registries" while `build_vm` had one
+    /// shared arm for both roles, so the startup line asserted registry
+    /// partitioning that no code path produced. This pins the banner to what is
+    /// actually constructed; it fails the moment the description drifts back
+    /// ahead of the implementation.
+    #[test]
+    fn registry_mode_does_not_claim_isolation_build_vm_never_builds() {
+        for role in [
+            OrchestratorRole::SingleTenant,
+            OrchestratorRole::MultiTenant,
+        ] {
+            assert_eq!(
+                role.registry_mode(),
+                "one shared trigger/connector registry",
+                "{} must describe the single registry build_vm constructs",
+                role.as_str(),
+            );
+        }
+    }
+
+    /// Selecting multi-tenant must say which half of the boundary is missing.
+    ///
+    /// The role is genuinely useful — ingress, event-log topics, and secret
+    /// namespaces are all tenant-scoped — so it stays selectable. What it must
+    /// not do is let a deployer infer registry isolation from the role name in
+    /// silence.
+    #[test]
+    fn multi_tenant_warns_about_the_shared_registry_and_single_tenant_does_not() {
+        let gap = OrchestratorRole::MultiTenant
+            .unproven_isolation()
+            .expect("multi-tenant must disclose the shared registry");
+        assert!(
+            gap.contains("shares one registry"),
+            "warning must name the shared registry: {gap}",
+        );
+        assert!(
+            gap.contains("6792"),
+            "warning must point at the tracking issue: {gap}",
+        );
+
+        assert_eq!(
+            OrchestratorRole::SingleTenant.unproven_isolation(),
+            None,
+            "single-tenant delivers the boundary its name implies",
+        );
     }
 }

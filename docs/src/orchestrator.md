@@ -104,7 +104,9 @@ rotating file at `<state-dir>/logs/orchestrator.log`. Set
 log configuration, and the dashboard example.
 
 Use `--role multi-tenant` with `harn orchestrator tenant` to provision API-key
-backed tenants, tenant-prefixed EventLog topics, and tenant-scoped secrets. See
+backed tenants, tenant-prefixed EventLog topics, and tenant-scoped secrets. The
+trigger/connector registry stays shared across tenants; the orchestrator warns
+about that at startup. See
 [Multi-tenant orchestrator](./orchestrator/multi-tenant.md) for the tenant
 lifecycle and isolation model.
 

@@ -139,6 +139,15 @@ async fn orchestrator_lifecycle(
         config.role.as_str(),
         config.role.registry_mode()
     );
+    if let Some(gap) = config.role.unproven_isolation() {
+        eprintln!("[harn] WARNING: {gap}");
+        tracing::warn!(
+            component = "orchestrator",
+            trace_id = "",
+            role = config.role.as_str(),
+            "{gap}"
+        );
+    }
     eprintln!("[harn] orchestrator state dir: {}", state_dir.display());
     tracing::info!(
         component = "orchestrator",
