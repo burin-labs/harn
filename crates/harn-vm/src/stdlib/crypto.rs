@@ -1494,20 +1494,13 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
 ];
 
 #[cfg(test)]
+mod es256_test_keys;
+
+#[cfg(test)]
 mod tests {
+    use super::es256_test_keys::{ES256_PRIVATE_KEY, ES256_PUBLIC_KEY};
     use super::*;
     use crate::vm::Vm;
-
-    const ES256_PRIVATE_KEY: &str = "-----BEGIN PRIVATE KEY-----\n\
-MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgWTFfCGljY6aw3Hrt\n\
-kHmPRiazukxPLb6ilpRAewjW8nihRANCAATDskChT+Altkm9X7MI69T3IUmrQU0L\n\
-950IxEzvw/x5BMEINRMrXLBJhqzO9Bm+d6JbqA21YQmd1Kt4RzLJR1W+\n\
------END PRIVATE KEY-----\n";
-
-    const ES256_PUBLIC_KEY: &str = "-----BEGIN PUBLIC KEY-----\n\
-MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEw7JAoU/gJbZJvV+zCOvU9yFJq0FN\n\
-C/edCMRM78P8eQTBCDUTK1ywSYaszvQZvneiW6gNtWEJndSreEcyyUdVvg==\n\
------END PUBLIC KEY-----\n";
 
     fn vm() -> Vm {
         let mut vm = Vm::new();
