@@ -1201,6 +1201,117 @@ pub fn agent_extract_tool_calls(agent: HarnessAgent, llm_result, opts) {
  * @errors: []
  * @api_stability: experimental
  */
+/**
+ * Option changes a verdict carries, separated from its message.
+ *
+ * `next_options` and `llm_options` are parameters for the next turn, not
+ * directives to the model, so they survive on a turn whose message is held.
+ */
+fn __verdict_option_changes(verdict) -> dict {
+  let out = {}
+  if verdict?.next_options != nil {
+    out = out + {next_options: verdict.next_options}
+  }
+  if verdict?.llm_options != nil {
+    out = out + {llm_options: verdict.llm_options}
+  }
+  return out
+}
+
+/**
+ * THE arbitration point for a stalled toolless turn.
+ *
+ * A turn that dispatched no tools but emitted prose is the one shape several
+ * owners want at once: the content-specific repair corrective, an embedder's
+ * `post_turn_callback` verdict, and completion adjudication each have a
+ * defensible reading of it. Deciding that by statement order is what produced
+ * four separate defects; the order below is the contract instead.
+ *
+ *   1. An embedder verdict that STOPS the loop. Terminating is the embedder's
+ *      authority and nothing may override it.
+ *   2. The content-specific repair corrective. It is the only claimant that can
+ *      tell a stall from a finished answer, because it fires solely on a call
+ *      the model described and never emitted, and it answers with that concrete
+ *      call rather than a generic directive.
+ *   3. A non-stopping embedder verdict: advisory message and option changes.
+ *   4. Completion adjudication.
+ *
+ * When 2 claims the turn, 3's advisory MESSAGE is held for that turn: two
+ * owners issuing different directives in one turn is the contradiction that
+ * stalls a loop, and between the two the corrective's is the actionable one.
+ * Option changes still apply, per `__verdict_option_changes`. The embedder is
+ * not left guessing — the claim reaches it as `prior_turn_claimed_for_repair`
+ * on the next turn's payload.
+ *
+ * No other site may return a post-turn result for this turn shape.
+ */
+fn __arbitrate_stalled_toolless_turn(
+  agent: HarnessAgent,
+  llm: HarnessLlm,
+  session,
+  opts,
+  payload,
+  verdict,
+  text,
+  iteration,
+) {
+  const verdict_stops = verdict?.kind == "stop"
+    || (verdict?.kind == "rich" && (verdict?.stop ?? false))
+  if verdict_stops {
+    const stop_result = __post_turn_verdict_result(agent, session, opts, verdict)
+    if stop_result != nil {
+      return stop_result
+    }
+  }
+  const {loop_until_done = false, daemon = false} = opts ?? {}
+  const has_judge = agent_has_done_judge(opts?.done_judge)
+  // A repair claim only means something if the loop has another turn to give.
+  // A single-shot loop ends ON this turn, so claiming it would replace a clean
+  // completion with a dangling continue asking for a call that can never be
+  // made. This is the reachability the pre-arbitration branches had by accident
+  // of where they sat; here it is stated.
+  const loop_continues = loop_until_done || daemon || has_judge
+  // The fence detector is a text-shape heuristic. A judge-installed loop keeps
+  // it out of the arbitration so an honest completion is never re-opened over
+  // formatting alone; there, the classifier is the only claimant.
+  const format_is_native = lowercase(to_string(opts?.tool_format ?? "")) == "native"
+  const classifier_only = !format_is_native && has_judge
+  const repaired = if loop_continues {
+    __maybe_inject_action_nudge(agent, llm, session, opts, false, text, iteration, classifier_only)
+  } else {
+    false
+  }
+  if repaired {
+    return __repair_claimed_result() + __verdict_option_changes(verdict)
+  }
+  const verdict_result = __post_turn_verdict_result(agent, session, opts, verdict)
+  if verdict_result != nil {
+    return verdict_result
+  }
+  // Completion reasons keep their original relative order: a judge grants
+  // completion, then the native prose-means-done read, then required-tools
+  // satisfaction, then the plain non-looping case. Reordering these would
+  // silently change the reported `stop_reason` when two of them hold at once.
+  if has_judge || __native_tool_text_completion(opts, false, text) {
+    return __completion_result(opts, payload, "natural")
+  }
+  if __required_tools_text_completion(opts, false, text) {
+    return __completion_result(opts, payload, "required_tools_satisfied")
+  }
+  if !loop_until_done && !daemon {
+    return __completion_result(opts, payload, "natural")
+  }
+  const confirmation_nudged = __maybe_inject_completion_confirmation(
+    agent,
+    session,
+    opts,
+    false,
+    text,
+    iteration,
+  )
+  return {kind: "continue", done_judge_due: false, nudged_this_turn: confirmation_nudged}
+}
+
 pub fn agent_compute_post_turn(
   agent: HarnessAgent,
   llm: HarnessLlm,
@@ -1265,55 +1376,34 @@ pub fn agent_compute_post_turn(
     )
   }
   const verdict = __post_turn_callback_verdict(opts, payload)
+  // Every claimant for a stalled toolless turn is arbitrated in one place, so
+  // this shape must not be adjudicated anywhere below.
+  if !has_tool_calls && trim(text) != "" {
+    return __post_turn_with_narrowing(
+      __arbitrate_stalled_toolless_turn(
+        agent,
+        llm,
+        session,
+        opts,
+        payload,
+        verdict,
+        text,
+        iteration,
+      ),
+      narrowing,
+    )
+  }
   const verdict_result = __post_turn_verdict_result(agent, session, opts, verdict)
   if verdict_result != nil {
     return __post_turn_with_narrowing(verdict_result, narrowing)
-  }
-  const format_is_native = lowercase(to_string(opts?.tool_format ?? "")) == "native"
-  const native_action_nudged = if format_is_native {
-    __maybe_inject_action_nudge(agent, llm, session, opts, has_tool_calls, text, iteration)
-  } else {
-    false
-  }
-  if native_action_nudged {
-    return __post_turn_with_narrowing(__repair_claimed_result(), narrowing)
-  }
-  if !has_tool_calls && trim(text) != "" && agent_has_done_judge(opts?.done_judge) {
-    // A toolless prose turn is ambiguous: either a finished answer, or a stall
-    // where the model described the action instead of taking it. Ask the
-    // content-specific corrective first, because it is the only seam that can
-    // tell the two apart — its classifier fires solely on an intended call that
-    // was never emitted, and it answers with the concrete call rather than a
-    // generic "emit something" directive.
-    //
-    // `loop_turn_options.harn` documents that precedence (content nudge wins,
-    // streak nudge is the fallback), but a judge made every toolless turn a
-    // completion candidate first, so the corrective could never run and the
-    // fallback always won. Native took its turn above; asking again here would
-    // double-inject.
-    const stalled_nudged = if format_is_native {
-      false
-    } else {
-      __maybe_inject_action_nudge(agent, llm, session, opts, has_tool_calls, text, iteration, true)
-    }
-    if stalled_nudged {
-      return __post_turn_with_narrowing(__repair_claimed_result(), narrowing)
-    }
-    return __post_turn_with_narrowing(__completion_result(opts, payload, "natural"), narrowing)
-  }
-  if __native_tool_text_completion(opts, has_tool_calls, text) {
-    return __post_turn_with_narrowing(__completion_result(opts, payload, "natural"), narrowing)
-  }
-  if __required_tools_text_completion(opts, has_tool_calls, text) {
-    return __post_turn_with_narrowing(
-      __completion_result(opts, payload, "required_tools_satisfied"),
-      narrowing,
-    )
   }
   const {loop_until_done = false, daemon = false} = opts ?? {}
   if !has_tool_calls && !loop_until_done && !daemon {
     return __post_turn_with_narrowing(__completion_result(opts, payload, "natural"), narrowing)
   }
+  // Only turns that dispatched tools, or emitted nothing at all, reach here —
+  // the corrective's own gates require a toolless turn WITH prose, which the
+  // arbiter above already owns, so there is no action nudge left to inject.
   const confirmation_nudged = __maybe_inject_completion_confirmation(
     agent,
     session,
@@ -1322,18 +1412,8 @@ pub fn agent_compute_post_turn(
     text,
     iteration,
   )
-  const action_nudged = if format_is_native {
-    false
-  } else {
-    __maybe_inject_action_nudge(agent, llm, session, opts, has_tool_calls, text, iteration)
-  }
   return __post_turn_with_narrowing(
-    {
-      kind: "continue",
-      turn_claimed_for_repair: action_nudged,
-      done_judge_due: false,
-      nudged_this_turn: confirmation_nudged || action_nudged,
-    },
+    {kind: "continue", done_judge_due: false, nudged_this_turn: confirmation_nudged},
     narrowing,
   )
 }

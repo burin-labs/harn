@@ -487,6 +487,110 @@ pipeline default(harness: Harness) {
       )
     },
   )
+  // 9. An embedder's advisory verdict must not consume the repair opportunity.
+  //    A stalled toolless turn is contended: the embedder's post-turn callback,
+  //    the content-specific corrective, and completion adjudication all have a
+  //    reading of it. A callback that returns advice without stopping the loop
+  //    is expressing an opinion, not terminating, so it must not silently claim
+  //    the turn and leave the stall unrepaired. The corrective still fires, and
+  //    its concrete exemplar is what the next turn sees.
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text("Voy a edittar el archivo ahora, un momento."),
+      llm_text("<tool_call>\nedit({ path: \"n.txt\" })\n</tool_call>"),
+      llm_text("Done."),
+    ],
+    { ->
+      agent_loop(
+        harness,
+        "Edit n.txt.",
+        nil,
+        {
+          provider: "mock",
+          tool_format: "text",
+          loop_until_done: true,
+          max_iterations: 4,
+          max_nudges: 4,
+          tools: edit_tools(),
+          done_judge: true,
+          missing_tool_call_recovery: edit_missing_tool_call_recovery(),
+          post_turn_callback: { _info -> {message: "Keep making progress."} },
+        },
+      )
+      const calls = harness.llm.mock_calls()
+      harness.stdio.println(
+        "host_advisory.exemplar=" + to_string(injected_anywhere(calls, "Emit the call now")),
+      )
+      // The claimed turn carries ONE directive. Two owners telling the model
+      // different things in the same turn is the contradiction that stalls a
+      // loop, and between the two the corrective is the actionable one.
+      harness.stdio.println(
+        "host_advisory.suppressed_on_claimed_turn="
+          + to_string(
+          !injected_kind_in(calls, 1, "Keep making progress."),
+        ),
+      )
+    },
+  )
+  // 10. The other direction: terminating is the embedder's authority, and the
+  //     corrective must not preempt it. A verdict that stops the loop wins over
+  //     every other claimant on the same turn shape, so the run ends without the
+  //     corrective injecting anything.
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text("Voy a edittar el archivo ahora, un momento."),
+      llm_text("<tool_call>\nedit({ path: \"o.txt\" })\n</tool_call>"),
+      llm_text("Done."),
+    ],
+    { ->
+      const r = agent_loop(
+        harness,
+        "Edit o.txt.",
+        nil,
+        {
+          provider: "mock",
+          tool_format: "text",
+          loop_until_done: true,
+          max_iterations: 4,
+          max_nudges: 4,
+          tools: edit_tools(),
+          done_judge: true,
+          missing_tool_call_recovery: edit_missing_tool_call_recovery(),
+          post_turn_callback: { _info -> {stop: true, stop_reason: "host_said_stop"} },
+        },
+      )
+      const calls = harness.llm.mock_calls()
+      harness.stdio.println("host_stop.stop_reason=" + to_string(r?.stop_reason))
+      harness.stdio.println(
+        "host_stop.no_exemplar=" + to_string(!injected_anywhere(calls, "Emit the call now")),
+      )
+    },
+  )
+  // 11. A repair claim is only meaningful if the loop has another turn to give.
+  //     A single-shot loop (no `loop_until_done`, no daemon, no judge) ends ON
+  //     this turn, so the corrective must not be consulted: claiming the turn
+  //     would replace a clean completion with a dangling continue asking for a
+  //     call that can never be made. The prose here carries a ```python fence,
+  //     which the fence detector would otherwise read as a wrapped call.
+  with_llm_script(
+    harness.llm,
+    [llm_text("The smallest change is:\n\n```python\ndef add(a, b): return a + b\n```")],
+    { ->
+      const r = agent_loop(
+        harness,
+        "State the smallest code change.",
+        nil,
+        {provider: "mock", tool_format: "text", max_iterations: 1, tools: edit_tools()},
+      )
+      const calls = harness.llm.mock_calls()
+      harness.stdio.println("single_shot.status=" + to_string(r.status))
+      harness.stdio.println(
+        "single_shot.not_claimed=" + to_string(!injected_anywhere(calls, "that is ignored")),
+      )
+    },
+  )
   const invalid_classifier = try {
     agent_loop_options(harness, {missing_tool_call_recovery: {classifier: "yes"}})
   }
