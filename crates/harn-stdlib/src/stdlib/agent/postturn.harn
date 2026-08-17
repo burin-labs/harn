@@ -1,3 +1,4 @@
+import { agent_done_judge_config, agent_has_done_judge } from "std/agent/judge"
 import "std/agent/loop_result_status"
 import { agent_render_tool_call_exemplar, agent_tool_call_paradigm } from "std/agent/preflight"
 import { agent_parse_tool_calls } from "std/agent/primitives"
@@ -473,6 +474,15 @@ fn __classify_missing_tool_call(
  * Returns `true` if a content-specific nudge was injected this turn, so the
  * loop can suppress the fallback progress-streak nudge and avoid
  * double-injecting on the same turn.
+ *
+ * `classifier_only` drops case 1 and keeps case 2. Callers pass it on the turn
+ * shape that is ALSO a completion candidate, where the question is not "what
+ * kind of stall is this?" but "is this a stall at all?". Only the classifier
+ * answers that with evidence; the fence detector's opener list is a heuristic
+ * that cannot tell a botched call from an illustrative code block in a genuine
+ * final answer, and treating the latter as a stall would talk over a finished
+ * run. A real fenced attempt is not lost — the classifier reads the same text
+ * and answers it with the concrete exemplar, which is the better corrective.
  */
 fn __maybe_inject_action_nudge(
   agent: HarnessAgent,
@@ -482,6 +492,7 @@ fn __maybe_inject_action_nudge(
   has_tool_calls,
   text,
   iteration,
+  classifier_only = false,
 ) {
   const text_family = __text_family_toolless_turn(opts, has_tool_calls, text)
   const native_mode = __native_completion_context(opts, has_tool_calls, text)
@@ -492,7 +503,7 @@ fn __maybe_inject_action_nudge(
   // format-aware owner, so a `json` lane is told to emit a ```tool block and a
   // `text` lane a `<tool_call>` block — never the wrong grammar.
   const paradigm = agent_tool_call_paradigm(llm, opts)
-  const fenced = if text_family {
+  const fenced = if text_family && !classifier_only {
     __detect_fenced_call_attempt(text)
   } else {
     nil
@@ -555,22 +566,26 @@ fn __maybe_inject_action_nudge(
   return false
 }
 
+/**
+ * The post-turn result for a turn the content-specific corrective claimed.
+ *
+ * `turn_claimed_for_repair` is a narrower fact than `nudged_this_turn`, which
+ * any nudge sets: this one says the loop has asked for one specific repair and
+ * expects the next turn to deliver it. Loop control and host control policies
+ * both read it, so a treatment that would cut or redirect a churning turn can
+ * see the outstanding claim rather than race it.
+ */
+fn __repair_claimed_result() -> dict {
+  return {
+    kind: "continue",
+    done_judge_due: false,
+    nudged_this_turn: true,
+    turn_claimed_for_repair: true,
+  }
+}
+
 fn __done_judge_config(opts) {
-  const judge = opts?.done_judge
-  if judge == nil {
-    return nil
-  }
-  if type_of(judge) == "bool" {
-    return if judge {
-      {}
-    } else {
-      nil
-    }
-  }
-  if type_of(judge) == "dict" {
-    return judge
-  }
-  return nil
+  return agent_done_judge_config(opts?.done_judge)
 }
 
 fn __done_judge_cadence(opts) {
@@ -1222,6 +1237,12 @@ pub fn agent_compute_post_turn(
     rejected_tool_names: rejected_tool_names,
     session_successful_tools: opts?._session_successful_tools ?? successful_tool_names,
     session_rejected_tools: opts?._session_rejected_tools ?? rejected_tool_names,
+    // The corrective claimed the PREVIOUS turn for repair, so this turn is the
+    // repair attempt it asked for. Host control policies that classify a
+    // toolless turn as churn read this to tell "the model is spinning" from
+    // "the loop asked for exactly one more turn and this is it", instead of
+    // inferring it from ordering they cannot see.
+    prior_turn_claimed_for_repair: opts?._prior_turn_claimed_for_repair ?? false,
     text: text,
     visible_text: text,
   }
@@ -1248,18 +1269,36 @@ pub fn agent_compute_post_turn(
   if verdict_result != nil {
     return __post_turn_with_narrowing(verdict_result, narrowing)
   }
-  const native_action_nudged = if lowercase(to_string(opts?.tool_format ?? "")) == "native" {
+  const format_is_native = lowercase(to_string(opts?.tool_format ?? "")) == "native"
+  const native_action_nudged = if format_is_native {
     __maybe_inject_action_nudge(agent, llm, session, opts, has_tool_calls, text, iteration)
   } else {
     false
   }
   if native_action_nudged {
-    return __post_turn_with_narrowing(
-      {kind: "continue", done_judge_due: false, nudged_this_turn: true},
-      narrowing,
-    )
+    return __post_turn_with_narrowing(__repair_claimed_result(), narrowing)
   }
-  if !has_tool_calls && trim(text) != "" && opts?.done_judge != nil {
+  if !has_tool_calls && trim(text) != "" && agent_has_done_judge(opts?.done_judge) {
+    // A toolless prose turn is ambiguous: either a finished answer, or a stall
+    // where the model described the action instead of taking it. Ask the
+    // content-specific corrective first, because it is the only seam that can
+    // tell the two apart — its classifier fires solely on an intended call that
+    // was never emitted, and it answers with the concrete call rather than a
+    // generic "emit something" directive.
+    //
+    // `loop_turn_options.harn` documents that precedence (content nudge wins,
+    // streak nudge is the fallback), but a judge made every toolless turn a
+    // completion candidate first, so the corrective could never run and the
+    // fallback always won. Native took its turn above; asking again here would
+    // double-inject.
+    const stalled_nudged = if format_is_native {
+      false
+    } else {
+      __maybe_inject_action_nudge(agent, llm, session, opts, has_tool_calls, text, iteration, true)
+    }
+    if stalled_nudged {
+      return __post_turn_with_narrowing(__repair_claimed_result(), narrowing)
+    }
     return __post_turn_with_narrowing(__completion_result(opts, payload, "natural"), narrowing)
   }
   if __native_tool_text_completion(opts, has_tool_calls, text) {
@@ -1283,7 +1322,7 @@ pub fn agent_compute_post_turn(
     text,
     iteration,
   )
-  const action_nudged = if lowercase(to_string(opts?.tool_format ?? "")) == "native" {
+  const action_nudged = if format_is_native {
     false
   } else {
     __maybe_inject_action_nudge(agent, llm, session, opts, has_tool_calls, text, iteration)
@@ -1291,6 +1330,7 @@ pub fn agent_compute_post_turn(
   return __post_turn_with_narrowing(
     {
       kind: "continue",
+      turn_claimed_for_repair: action_nudged,
       done_judge_due: false,
       nudged_this_turn: confirmation_nudged || action_nudged,
     },
