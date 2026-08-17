@@ -5,8 +5,9 @@
   answer=null
   done=null
 # unknown tool name beside a valid call
-  calls=1 errors=0 violations=0 stray=1
+  calls=1 errors=1 violations=0 stray=1
   call edit {"action":"create","path":"a.go"}
+  err "Unknown tool 'fictitious_tool'. Tool calls must be one of: [edit, ledger, load_skill, run]."
   prose="fictitious_tool({ x: 1 })"
   answer=null
   done=null

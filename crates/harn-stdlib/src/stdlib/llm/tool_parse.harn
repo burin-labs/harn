@@ -103,6 +103,9 @@ fn __tool_parse_consume_stray(unit, tools, state: dict, bare_candidate = nil) ->
       calls: calls,
       canonical: canonical,
       prose: prose,
+      // Diagnostics raised beside a recovered call are still diagnostics. See
+      // the same carry-through in `__tool_parse_stray_fast`.
+      errors: next.errors + (sniffed?.errors ?? []),
       recovered: next.recovered + len(sniffed.calls),
     }
   }
@@ -506,6 +509,11 @@ fn __tool_parse_stray_fast(unit, candidates, state: dict) -> dict {
         {kind: "bare", calls: sniffed.calls, prose: sniffed_prose},
       ),
       prose: prose,
+      // A unit that produced a call can still have produced a diagnostic
+      // beside it — an unknown name, or arguments that did not decode. Reading
+      // only the calls made the rest of the unit vanish, which is the same
+      // silence one recovered call used to hide the next behind.
+      errors: state.errors + (sniffed?.errors ?? []),
       recovered: state.recovered + len(sniffed.calls),
     }
   }

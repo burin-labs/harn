@@ -135,6 +135,70 @@ Now I'll create the test:
     "[{\"id\":\"call_001\",\"type\":\"function\",\"function\":{\"name\":\"edit\",\"arguments\":\"not valid json {\"}}]",
     native_registry(),
   )
+  // A message can carry more than one payload, and reading only the first one
+  // dropped the rest with no call, no error and no violation (harn#6787). A
+  // provider whose native channel leaks into `content` leaks every call it was
+  // making; a model that batches two reads writes two objects.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "a run of flat envelopes is every call, not the first",
+    """{"name":"read","arguments":{"path":"a.go"}}
+{"name":"read","arguments":{"path":"b.go"}}""",
+    native_registry(),
+  )
+  probe(
+    harness.agent,
+    harness.stdio,
+    "two payloads in ```tool fences",
+    """```tool
+{"name": "read", "arguments": {"path": "a.go"}}
+```
+```tool
+{"name": "read", "arguments": {"path": "b.go"}}
+```""",
+    native_registry(),
+  )
+  // Narration between the payloads belongs to the turn, not to whichever call
+  // it happened to sit next to. Each payload owns its own span and nothing
+  // else; the surrounding bytes come back as prose rather than being deleted
+  // along with the call, which is what made the lost payload untraceable.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "narration between two payloads survives",
+    """First I will read the entry point.
+
+{"name":"read","arguments":{"path":"a.go"}}
+
+Then the helper it calls.
+
+{"name":"read","arguments":{"path":"b.go"}}
+
+That should be enough to see the shape.""",
+    native_registry(),
+  )
+  // A diagnostic raised beside a recovered call is still a diagnostic. Reading
+  // only the calls made the unknown name vanish.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "a later unknown name is diagnosed beside a recovered call",
+    """{"name":"read","arguments":{"path":"a.go"}}
+{"name":"unknown_tool","arguments":{}}""",
+    native_registry(),
+  )
+  // Negative: incidental prose JSON after a real payload stays prose. Resuming
+  // the scan must not widen what counts as a call.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "prose json after a payload is not a second call",
+    """{"name":"read","arguments":{"path":"a.go"}}
+
+The manifest reads {"name":"my-pkg","version":"1.0.0"} for reference.""",
+    native_registry(),
+  )
   // Text format wins when both a bare call and a native array are present.
   probe(
     harness.agent,

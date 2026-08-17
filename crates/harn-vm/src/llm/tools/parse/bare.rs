@@ -400,35 +400,26 @@ pub(super) fn parse_bare_calls_in_body_with_known(
     call_ranges.sort_by_key(|range| range.0);
     call_ranges.dedup_by(|right, left| left.0 == right.0);
 
-    let prose = if call_ranges.is_empty() {
-        strip_empty_fences(text)
-    } else {
-        let mut buf = String::with_capacity(text.len());
-        let mut cursor = 0usize;
-        for (start, end) in &call_ranges {
-            if *start > cursor {
-                buf.push_str(&text[cursor..*start]);
-            }
-            cursor = *end;
-        }
-        if cursor < text.len() {
-            buf.push_str(&text[cursor..]);
-        }
-        collapse_blank_lines(&strip_empty_fences(&buf))
-            .trim()
-            .to_string()
-    };
+    let prose = text_outside(text, &call_ranges);
 
     // Fallback: some function-calling-trained models ignore text-format
     // instructions and emit `[{"id":"call_...","function":{...}}]` raw.
     // Parse and execute directly instead of wasting an iteration.
     if calls.is_empty() && errors.is_empty() {
-        let (native_calls, native_errors) = parse_native_json_tool_calls(text, known);
-        if !native_calls.is_empty() || !native_errors.is_empty() {
+        let native = parse_native_json_tool_calls(text, known);
+        if !native.calls.is_empty() || !native.errors.is_empty() {
             return TextToolParseResult {
-                calls: native_calls,
-                errors: native_errors,
-                prose: String::new(),
+                calls: native.calls,
+                errors: native.errors,
+                // The payloads own their spans and nothing else. What sat
+                // around them is the model's narration, and it goes back to the
+                // turn's owner instead of being deleted with the call — an
+                // emptied prose is why a payload this scan could not read used
+                // to leave no trace at all (harn#6787).
+                prose: text_outside(
+                    text,
+                    &absorb_wrapping_fences(text, &native.spans, &fence_lines),
+                ),
                 violations: Vec::new(),
                 done_marker: None,
                 canonical: String::new(),
@@ -444,6 +435,72 @@ pub(super) fn parse_bare_calls_in_body_with_known(
         done_marker: None,
         canonical: String::new(),
     }
+}
+
+/// Grow each payload span over the fence lines that wrap it.
+///
+/// A fence whose only content is a payload is that payload's envelope, not
+/// narration: the model wrote ```` ```tool ```` to say "this is a call", and
+/// handing the marker back as prose once the call has been taken out leaves the
+/// reader a stray fence. This is the same rule the scan above applies to fences
+/// bracketing a bare call expression, which cannot see native payloads because
+/// they are only found after the scan has finished.
+///
+/// Returns sorted, non-overlapping ranges: two payloads in adjacent fences can
+/// grow into the same marker line.
+fn absorb_wrapping_fences(
+    text: &str,
+    spans: &[(usize, usize)],
+    fence_lines: &[(usize, usize, usize)],
+) -> Vec<(usize, usize)> {
+    let mut merged: Vec<(usize, usize)> = Vec::with_capacity(spans.len());
+    for (span_start, span_end) in spans {
+        let mut start = *span_start;
+        let mut end = *span_end;
+        // Descending, so a run of markers separated only by whitespace is
+        // absorbed one after the other rather than stopping at the nearest.
+        for (fence_start, fence_end, _) in fence_lines.iter().rev() {
+            if *fence_end <= start && text[*fence_end..start].trim().is_empty() {
+                start = *fence_start;
+            }
+        }
+        for (fence_start, fence_end, _) in fence_lines {
+            if *fence_start >= end && text[end..*fence_start].trim().is_empty() {
+                end = *fence_end;
+            }
+        }
+        match merged.last_mut() {
+            Some(last) if start <= last.1 => last.1 = last.1.max(end),
+            _ => merged.push((start, end)),
+        }
+    }
+    merged
+}
+
+/// `text` with `ranges` excised: the bytes no parser in this scan claimed.
+///
+/// `ranges` must be sorted by start and non-overlapping, which is what both
+/// callers produce. This is the tiling rule the scan layer works under — a
+/// parser owns the span it consumed and nothing else, and whatever it did not
+/// consume goes back to the caller rather than disappearing with it.
+fn text_outside(text: &str, ranges: &[(usize, usize)]) -> String {
+    if ranges.is_empty() {
+        return strip_empty_fences(text);
+    }
+    let mut buf = String::with_capacity(text.len());
+    let mut cursor = 0usize;
+    for (start, end) in ranges {
+        if *start > cursor {
+            buf.push_str(&text[cursor..*start]);
+        }
+        cursor = cursor.max(*end);
+    }
+    if cursor < text.len() {
+        buf.push_str(&text[cursor..]);
+    }
+    collapse_blank_lines(&strip_empty_fences(&buf))
+        .trim()
+        .to_string()
 }
 
 fn normalize_harmony_tool_call_lines<'a>(text: &'a str, known: &BTreeSet<String>) -> Cow<'a, str> {
