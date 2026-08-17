@@ -41,8 +41,8 @@ mod tests;
 mod unit;
 
 use super::syntax::{
-    find_close_tag, ident_length, match_block, match_tool_call_block, parse_ts_call_from,
-    skip_heredoc_body, strip_thinking_tags, CloseScan,
+    find_opener_after, find_span_end, ident_length, match_block, match_tool_call_block,
+    parse_ts_call_from, skip_heredoc_body, strip_thinking_tags, SpanEnd,
 };
 use crate::text_index::TextIndex;
 
@@ -90,6 +90,9 @@ struct Scan<'a> {
     /// `<tag` for every call tag, precomputed: the Harmony header tail and the
     /// unknown-tag branch both ask where the next call block starts.
     call_tag_opens: Vec<String>,
+    /// Every spelling that ends one call's span and starts another's: each call
+    /// tag's opener and its close. A block stops at the first of these it meets.
+    call_tag_bounds: Vec<String>,
     cursor: usize,
     /// Byte position just past the most recently consumed top-level block. A
     /// tag that follows a consumed block with only whitespace between them is
@@ -106,6 +109,11 @@ impl<'a> Scan<'a> {
             spec,
             index: TextIndex::build(src),
             call_tag_opens: spec.call_tags.iter().map(|tag| format!("<{tag}")).collect(),
+            call_tag_bounds: spec
+                .call_tags
+                .iter()
+                .flat_map(|tag| [format!("<{tag}"), format!("</{tag}")])
+                .collect(),
             cursor: 0,
             last_block_end: 0,
             units: Vec::new(),
@@ -250,11 +258,19 @@ impl<'a> Scan<'a> {
         // 10. Top-level chat-template function markup.
         for markup in &self.spec.markup_openers {
             if self.src[cursor..].starts_with(&markup.opener) {
-                let end = self.src[cursor..]
-                    .find(&markup.close)
-                    .map_or(self.src.len(), |offset| {
-                        cursor + offset + markup.close.len()
-                    });
+                // Same bound as an unclosed call block: markup that never
+                // closes stops at the next call opener rather than eating it.
+                let end = self.src[cursor..].find(&markup.close).map_or_else(
+                    || {
+                        find_opener_after(
+                            self.src,
+                            cursor + markup.opener.len(),
+                            &self.call_tag_bounds,
+                        )
+                        .unwrap_or(self.src.len())
+                    },
+                    |offset| cursor + offset + markup.close.len(),
+                );
                 let payload = UnitPayload::Markup {
                     opener: markup.opener.clone(),
                     text: self.src[cursor..end].to_string(),
@@ -341,55 +357,67 @@ impl<'a> Scan<'a> {
             self.emit_block(end, payload);
             return true;
         }
+        let body_start = cursor + opener.len();
+        let end = find_opener_after(self.src, body_start, &self.call_tag_bounds)
+            .unwrap_or(self.src.len());
+        let body = &self.src[body_start..end];
         let payload = UnitPayload::UnclosedBlock {
             tag: canonical_tag.clone(),
-            body: tail.to_string(),
-            head: call_head(tail),
+            body: body.to_string(),
+            head: call_head(body),
             reserved: true,
         };
-        self.emit_block(self.src.len(), payload);
+        self.emit_block(end, payload);
         true
     }
 
-    /// Branches 6 and 7. A closed call block, else an open one whose body runs
-    /// to EOF — the signature of an output truncated mid-call, which Harn
-    /// turns into a recovery ladder or a truncation diagnostic.
+    /// Branches 6 and 7. A closed call block, else an open one bounded at the
+    /// next call opener — the signature of an output that abandoned a call,
+    /// which Harn turns into a recovery ladder or a truncation diagnostic.
+    ///
+    /// The scan is string- and heredoc-aware in both directions: a close buried
+    /// in a `command` argument is not a real close, and neither is an opener,
+    /// so bounding one block cannot cut another's body short.
     fn step_call_tag(&mut self, cursor: usize) -> bool {
-        for tag in &self.spec.call_tags {
-            if let Some((body, end)) = match_tool_call_block(self.src, cursor, tag) {
-                let payload = UnitPayload::Block {
-                    tag: tag.clone(),
-                    body: body.to_string(),
-                    head: call_head(body),
-                    reserved: false,
-                };
-                self.emit_block(end, payload);
-                return true;
-            }
-        }
         for tag in &self.spec.call_tags {
             let open = format!("<{tag}>");
             if !self.src[cursor..].starts_with(&open) {
                 continue;
             }
-            // A close buried in a heredoc body is not a real close, so the
-            // scan is heredoc-aware: only `Found` means properly terminated,
-            // and `match_tool_call_block` above already consumed that case.
+            let body_start = cursor + open.len();
             let close = format!("</{tag}>");
-            if matches!(
-                find_close_tag(self.src, cursor + open.len(), &close),
-                CloseScan::Found(_)
-            ) {
-                continue;
-            }
-            let body = &self.src[cursor + open.len()..];
+            // A block never reaches past the next call opener. Letting it
+            // borrow that call's close tag costs both calls: the first is
+            // reported as one over-long body, the second vanishes inside it.
+            let end = match find_span_end(self.src, body_start, &close, &self.call_tag_bounds) {
+                SpanEnd::Closed(idx) => {
+                    let body = &self.src[body_start..idx];
+                    let payload = UnitPayload::Block {
+                        tag: tag.clone(),
+                        body: body.to_string(),
+                        head: call_head(body),
+                        reserved: false,
+                    };
+                    self.emit_block(idx + close.len(), payload);
+                    return true;
+                }
+                SpanEnd::OpenerAt(idx) => idx,
+                SpanEnd::NotFound => self.src.len(),
+                // Past a truncation point the string and heredoc state is
+                // meaningless, so resync on the raw bytes instead.
+                SpanEnd::Truncated => {
+                    find_opener_after(self.src, body_start, &self.call_tag_bounds)
+                        .unwrap_or(self.src.len())
+                }
+            };
+            let body = &self.src[body_start..end];
             let payload = UnitPayload::UnclosedBlock {
                 tag: tag.clone(),
                 body: body.to_string(),
                 head: call_head(body),
                 reserved: false,
             };
-            self.emit_block(self.src.len(), payload);
+            self.emit_block(end, payload);
             return true;
         }
         false

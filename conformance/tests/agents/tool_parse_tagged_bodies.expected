@@ -29,8 +29,9 @@
   answer=null
   done=null
 # nested xml, mismatched inner close, no outer close
-  calls=1 errors=0 violations=0 stray=0
+  calls=1 errors=0 violations=1 stray=0
   call edit {"action":"create","content":"fn a() {}","path":"a.rs"}
+  vio "Recovered a tool call from a `<tool_call>` block that was never closed. Close every block with `</tool_call>`."
   prose=""
   answer=null
   done=null

@@ -188,6 +188,73 @@ fn unclosed_call_block_runs_to_eof() {
 }
 
 #[test]
+fn an_unclosed_block_stops_at_a_later_call_that_closes() {
+    // A body truncated mid-string used to consume the rest of the response,
+    // taking a well-formed later call with it and leaving nothing to report.
+    let source =
+        "<tool_call>\nedit({ content: \"half\n\nRetrying.\n\n<tool_call>\nlook({})\n</tool_call>\n";
+    let (_, units) = scan(source);
+    assert_eq!(kinds(&units), vec!["unclosed_block", "block"]);
+    match &units[0].payload {
+        UnitPayload::UnclosedBlock { body, .. } => assert!(
+            !body.contains("look"),
+            "the abandoned span swallowed the later call: {body:?}"
+        ),
+        other => panic!("expected an unclosed_block unit, got {other:?}"),
+    }
+    match &units[1].payload {
+        UnitPayload::Block { head, .. } => {
+            assert_eq!(head.as_ref().expect("call head").name, "look");
+        }
+        other => panic!("expected a block unit, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_missing_close_does_not_swallow_the_next_call() {
+    // No truncation here at all: the first call is syntactically complete and
+    // only its close tag is absent, so the close scan must stop at the next
+    // opener instead of borrowing that call's close.
+    let source = "<tool_call>\nedit({})\n\nOops.\n\n<tool_call>\nlook({})\n</tool_call>\n";
+    let (_, units) = scan(source);
+    assert_eq!(kinds(&units), vec!["unclosed_block", "block"]);
+    match &units[0].payload {
+        UnitPayload::UnclosedBlock { head, .. } => {
+            assert_eq!(head.as_ref().expect("call head").name, "edit");
+        }
+        other => panic!("expected an unclosed_block unit, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_nested_opener_does_not_borrow_the_outer_close() {
+    let source = "<tool_call>\nedit({})\n<tool_call>\nlook({})\n</tool_call>\n";
+    let (_, units) = scan(source);
+    assert_eq!(kinds(&units), vec!["unclosed_block", "block"]);
+}
+
+#[test]
+fn openers_on_separate_lines_each_get_a_unit() {
+    let source = "<tool_call>\nlook({})\n</tool_call>\n\n<tool_call>\nedit({})\n</tool_call>\n";
+    let (_, units) = scan(source);
+    assert_eq!(kinds(&units), vec!["block", "block"]);
+}
+
+#[test]
+fn a_mismatched_close_spelling_does_not_close_the_block() {
+    let source = "<tool_call>\nlook({})\n</toolcall>\n";
+    let (_, units) = scan(source);
+    assert_eq!(kinds(&units), vec!["unclosed_block", "stray_close"]);
+}
+
+#[test]
+fn unclosed_markup_stops_at_a_later_call_that_closes() {
+    let source = "<invoke name=\"edit\">\n<tool_call>\nlook({})\n</tool_call>\n";
+    let (_, units) = scan(source);
+    assert_eq!(kinds(&units), vec!["markup", "block"]);
+}
+
+#[test]
 fn orphan_close_is_its_own_unit() {
     let (_, units) = scan("</tool_call>");
     match only(units).payload {

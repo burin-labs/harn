@@ -996,6 +996,88 @@ pub(super) fn find_close_tag(src: &str, from: usize, needle: &str) -> CloseScan 
     CloseScan::NotFound
 }
 
+/// Where a tagged block's span ends when a later opener is also a candidate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum SpanEnd {
+    /// The block closed properly, at the offset of its close tag.
+    Closed(usize),
+    /// No close arrived before the next call opener. The block is unclosed and
+    /// its span stops here rather than borrowing the later call's close.
+    OpenerAt(usize),
+    /// The body ran out mid-string or mid-heredoc.
+    Truncated,
+    /// Neither a close nor a later opener before end of input.
+    NotFound,
+}
+
+/// Walk `src[from..]` the way [`find_close_tag`] does, but stop at whichever
+/// comes first: the block's own close, or a line-leading occurrence of any
+/// opener in `openers`.
+///
+/// Sharing one string- and heredoc-aware walk is what keeps the two answers
+/// consistent: an opener quoted inside a `command` argument is content by the
+/// same rule that makes a quoted `</tool_call>` content, so bounding a span at
+/// the next opener cannot cut a legitimate body short.
+pub(super) fn find_span_end(src: &str, from: usize, close: &str, openers: &[String]) -> SpanEnd {
+    let bytes = src.as_bytes();
+    let mut i = from;
+    while i < src.len() {
+        match bytes[i] {
+            b'"' | b'\'' | b'`' => match skip_string_span(src, i) {
+                Some(after) => {
+                    i = after;
+                    continue;
+                }
+                None => return SpanEnd::Truncated,
+            },
+            b'<' if bytes.get(i + 1) == Some(&b'<') => match scan_heredoc(src, i) {
+                Ok(span) => {
+                    i = span.end;
+                    continue;
+                }
+                Err(HeredocError::MissingNewline { .. })
+                | Err(HeredocError::Unterminated { .. }) => return SpanEnd::Truncated,
+                Err(HeredocError::InvalidCount { .. } | HeredocError::MissingTag) => {}
+            },
+            _ => {}
+        }
+        if src[i..].starts_with(close) {
+            return SpanEnd::Closed(i);
+        }
+        if is_line_leading(src, i) && openers.iter().any(|open| src[i..].starts_with(open)) {
+            return SpanEnd::OpenerAt(i);
+        }
+        i += src[i..].chars().next().map_or(1, char::len_utf8);
+    }
+    SpanEnd::NotFound
+}
+
+/// The first line-leading occurrence of any `openers` entry at or after `from`,
+/// read as raw bytes.
+///
+/// Used only once a body is known to be truncated, where string and heredoc
+/// state is meaningless: the model stopped mid-token, so nothing after it can
+/// be trusted to be "inside" anything. Resyncing on the raw bytes is what lets
+/// a later well-formed call survive an abandoned one.
+pub(super) fn find_opener_after(src: &str, from: usize, openers: &[String]) -> Option<usize> {
+    let mut i = from;
+    while i < src.len() {
+        if is_line_leading(src, i) && openers.iter().any(|open| src[i..].starts_with(open)) {
+            return Some(i);
+        }
+        i += src[i..].chars().next().map_or(1, char::len_utf8);
+    }
+    None
+}
+
+/// True when only whitespace separates `at` from the start of its line.
+fn is_line_leading(src: &str, at: usize) -> bool {
+    src[..at]
+        .rsplit('\n')
+        .next()
+        .is_none_or(|line| line.chars().all(char::is_whitespace))
+}
+
 /// Heredoc-aware variant of [`match_block`] for the `<tool_call>` tags: it skips
 /// `<<TAG ... TAG` bodies when locating `</tool_call>`, so a literal close tag
 /// inside a heredoc argument doesn't shred the call. Scoped to the tool-call

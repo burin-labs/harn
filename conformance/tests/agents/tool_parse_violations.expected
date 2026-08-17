@@ -38,8 +38,9 @@
   answer=null
   done=null
 # unclosed wrapper, complete heredoc call
-  calls=1 errors=0 violations=0 stray=0
+  calls=1 errors=0 violations=1 stray=0
   call edit {"action":"create","content":"import Foundation\n\nstruct App {\n    static func main() {\n        print(\"hello\")\n    }\n}","path":"src/main.swift"}
+  vio "Recovered a tool call from a `<tool_call>` block that was never closed. Close every block with `</tool_call>`."
   prose=""
   answer=null
   done=null
