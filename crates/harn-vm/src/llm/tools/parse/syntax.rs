@@ -1078,28 +1078,6 @@ fn is_line_leading(src: &str, at: usize) -> bool {
         .is_none_or(|line| line.chars().all(char::is_whitespace))
 }
 
-/// Heredoc-aware variant of [`match_block`] for the `<tool_call>` tags: it skips
-/// `<<TAG ... TAG` bodies when locating `</tool_call>`, so a literal close tag
-/// inside a heredoc argument doesn't shred the call. Scoped to the tool-call
-/// tags — `match_block` stays a cheap `find` for the prose/done blocks that
-/// never carry heredocs.
-pub(super) fn match_tool_call_block<'a>(
-    src: &'a str,
-    start: usize,
-    tag: &str,
-) -> Option<(&'a str, usize)> {
-    let open = format!("<{tag}>");
-    if !src[start..].starts_with(&open) {
-        return None;
-    }
-    let body_start = start + open.len();
-    let close = format!("</{tag}>");
-    match find_close_tag(src, body_start, &close) {
-        CloseScan::Found(idx) => Some((&src[body_start..idx], idx + close.len())),
-        CloseScan::NeedMore | CloseScan::NotFound => None,
-    }
-}
-
 /// Length of a JavaScript-ish identifier starting at bytes[0]. Returns None
 /// if the first byte is not a valid identifier start.
 pub(crate) fn ident_length(bytes: &[u8]) -> Option<usize> {

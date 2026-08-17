@@ -10,6 +10,8 @@
     reason = "unit offsets come from the scanner's char-boundary cursor and inputs are ASCII"
 )]
 
+use proptest::prelude::*;
+
 use super::spec::ScanSpec;
 use super::{scan_units, Unit, UnitPayload};
 
@@ -655,4 +657,94 @@ fn a_text_unit_declares_it_is_not_fenced() {
     let json = scan_units("plain narration", &spec()).to_json();
     assert_eq!(json["units"][0]["kind"], "text");
     assert_eq!(json["units"][0]["fenced"], false);
+}
+
+// ── Properties over arbitrary compositions ──────────────────────────────────
+//
+// The tests above pin cases someone thought of. These pin the invariants over
+// every arrangement of the fragments models actually emit, which is what makes
+// "a malformed span never costs a later call" a checked property rather than a
+// claim about the arrangements that happened to get written down.
+
+/// The fragment alphabet: one well-formed call, the malformed shapes observed
+/// in real output, and the inert text that surrounds them.
+const FRAGMENTS: &[&str] = &[
+    // Well formed, and the fragment the properties append last.
+    "<tool_call>\nlook({})\n</tool_call>\n",
+    // Cut off mid-string: the close scan cannot get past the open quote.
+    "<tool_call>\nedit({ content: \"half\n",
+    // Complete body, absent close tag.
+    "<tool_call>\nedit({})\n",
+    // A legitimate close tag living inside a heredoc argument.
+    "<tool_call>\nrun({ command: <<EOF\n</tool_call>\nEOF })\n</tool_call>\n",
+    // Chat-template markup that never closes.
+    "<invoke name=\"edit\">\n",
+    // A truncated reserved wire opener.
+    "[[CALL]\nrun({ command: \"x\" })\n",
+    // An orphan close.
+    "</tool_call>\n",
+    // A balanced fence, and plain narration.
+    "```\nsome code\n```\n",
+    "Here is what I am going to do.\n",
+];
+
+/// The fragment every "a later call still survives" property appends.
+const WELL_FORMED: &str = FRAGMENTS[0];
+
+fn compose(picks: &[usize]) -> String {
+    picks
+        .iter()
+        .map(|pick| FRAGMENTS[pick % FRAGMENTS.len()])
+        .collect()
+}
+
+proptest! {
+    /// The tiling invariant over arbitrary compositions. `scan` asserts it on
+    /// every input, so reaching the end without a panic is the property.
+    #[test]
+    fn units_tile_every_composition(picks in proptest::collection::vec(any::<usize>(), 0..14)) {
+        let source = compose(&picks);
+        let (_, units) = scan(&source);
+        for unit in &units {
+            prop_assert!(unit.end > unit.start, "{} unit consumed nothing", unit.kind());
+        }
+    }
+
+    /// The class this fix closes: whatever precedes it, a well-formed call at
+    /// the end of a response is still delimited as its own block. No malformed
+    /// span upstream may consume it.
+    #[test]
+    fn a_trailing_well_formed_call_survives_any_prefix(
+        picks in proptest::collection::vec(any::<usize>(), 0..14),
+    ) {
+        let source = compose(&picks) + WELL_FORMED;
+        let (_, units) = scan(&source);
+        let last = units.last().expect("a call fragment produces at least one unit");
+        match &last.payload {
+            UnitPayload::Block { head, .. } => {
+                prop_assert_eq!(
+                    head.as_ref().map(|head| head.name.as_str()),
+                    Some("look"),
+                    "trailing call lost its head; kinds: {:?}",
+                    kinds(&units)
+                );
+            }
+            other => prop_assert!(
+                false,
+                "trailing well-formed call was not its own block: {other:?}; kinds: {:?}",
+                kinds(&units)
+            ),
+        }
+    }
+
+    /// Nothing is invented. Prose that names no tag and opens no call yields
+    /// text only, however much of it there is.
+    #[test]
+    fn narration_never_becomes_structure(count in 0usize..12) {
+        let source = FRAGMENTS[8].repeat(count);
+        let (_, units) = scan(&source);
+        for unit in &units {
+            prop_assert_eq!(unit.kind(), "text", "narration produced {}", unit.kind());
+        }
+    }
 }

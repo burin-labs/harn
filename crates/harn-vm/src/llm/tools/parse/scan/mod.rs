@@ -41,8 +41,8 @@ mod tests;
 mod unit;
 
 use super::syntax::{
-    find_opener_after, find_span_end, ident_length, match_block, match_tool_call_block,
-    parse_ts_call_from, skip_heredoc_body, strip_thinking_tags, SpanEnd,
+    find_opener_after, find_span_end, ident_length, match_block, parse_ts_call_from,
+    skip_heredoc_body, strip_thinking_tags, SpanEnd,
 };
 use crate::text_index::TextIndex;
 
@@ -342,19 +342,28 @@ impl<'a> Scan<'a> {
         let canonical_open = format!("<{canonical_tag}>");
         let synthetic = format!("{canonical_open}{tail}");
 
-        if let Some((body, after)) = match_tool_call_block(&synthetic, 0, canonical_tag) {
-            // The opener is the only rewritten span, so an offset past it maps
-            // back to the original by the length difference. Expressed as
-            // `after - canonical_open.len()` rather than a signed delta because
-            // the two lengths come from caller data and either may be longer.
-            let end = cursor + opener.len() + (after - canonical_open.len());
+        // The opener is the only rewritten span, so an offset past it maps back
+        // to the original by the length difference. Expressed as a subtraction
+        // rather than a signed delta because the two lengths come from caller
+        // data and either may be longer.
+        let close = format!("</{canonical_tag}>");
+        let to_src = |offset: usize| cursor + opener.len() + (offset - canonical_open.len());
+        // Bounded exactly like a real call tag: a stub that never closes must
+        // not reach past the next call, or normalizing it costs that call.
+        if let SpanEnd::Closed(idx) = find_span_end(
+            &synthetic,
+            canonical_open.len(),
+            &close,
+            &self.call_tag_bounds,
+        ) {
+            let body = &synthetic[canonical_open.len()..idx];
             let payload = UnitPayload::Block {
                 tag: canonical_tag.clone(),
                 body: body.to_string(),
                 head: call_head(body),
                 reserved: true,
             };
-            self.emit_block(end, payload);
+            self.emit_block(to_src(idx + close.len()), payload);
             return true;
         }
         let body_start = cursor + opener.len();
