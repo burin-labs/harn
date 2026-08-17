@@ -41,6 +41,24 @@ runs:
           echo "SCCACHE_GHA_ENABLED=false"
           echo "SCCACHE_DIR=${sccache_dir}"
           echo "SCCACHE_CACHE_SIZE=${HARN_SCCACHE_CACHE_SIZE}"
+          # sccache's server exits after SCCACHE_IDLE_TIMEOUT seconds with no
+          # request; the default is 600. A release lane can easily exceed ten
+          # minutes between compiler invocations -- a long link or a serialized
+          # codegen tail -- and when the server dies mid-build, every remaining
+          # rustc call silently falls back to compiling locally:
+          #
+          #   sccache: warning: The server looks like it shut down unexpectedly,
+          #   compiling locally instead
+          #
+          # Observed on the aarch64-apple-darwin release build of v0.10.103
+          # (37 min), which finished with `Compile requests 0 / Cache hits 0 /
+          # Cache hits rate -` and then saved that empty store back under its
+          # cache key. The wrapper stayed configured and the step stayed green,
+          # so nothing reported that the cache contributed nothing.
+          #
+          # 0 disables the idle exit, which is what a CI job wants: the process
+          # is torn down with the runner anyway.
+          echo "SCCACHE_IDLE_TIMEOUT=0"
         } >> "$GITHUB_ENV"
 
     - name: Mount persistent sccache directory
