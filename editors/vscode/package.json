@@ -203,7 +203,7 @@
     "@types/vscode": "^1.125.0",
     "typescript": "^7.0.2",
     "@vscode/vsce": "^3.9.2",
-    "ovsx": "^1.1.0"
+    "ovsx": "^1.1.1"
   },
   "dependencies": {
     "vscode-languageclient": "^10.1.0"
