@@ -1,0 +1,103 @@
+// Summarize a gitleaks JSON report as a GitHub step-summary table.
+//
+// gitleaks prints only a COUNT at default log level, so without this the secret
+// scan job would report "N leaks" and name none of them. This emits the file
+// path and the rule ids that fired on it, never the matched value: the scan
+// runs with `--redact`, so the report holds no candidate secret to leak, and
+// this script reads no value field regardless.
+//
+// The report must live inside the workspace. Harn's fs sandbox refuses reads
+// outside workspace_roots (HARN-CAP-201), so the caller writes the report under
+// the gitignored `.harn/` tree rather than $RUNNER_TEMP.
+//
+// Usage: harn run scripts/summarize_gitleaks_report.harn -- --report PATH
+/** Read `--flag value` or `--flag=value` out of argv. */
+pub fn flag_value(args: list, flag: string) -> string? {
+  const prefix = flag + "="
+  let want_next = false
+  for a in args {
+    if want_next {
+      return a
+    }
+    if a == flag {
+      want_next = true
+    }
+    if a.starts_with(prefix) {
+      return a.substring(prefix.length, a.length)
+    }
+  }
+  return nil
+}
+
+/**
+ * Group findings into `{file: sorted unique rule ids}`.
+ *
+ * A finding missing `File` or `RuleID` is kept under an explicit placeholder
+ * rather than dropped. A summary that silently omits a finding is worse than
+ * one that admits it could not name it.
+ */
+pub fn group_by_file(findings: list) -> dict {
+  let by_file: dict = {}
+  for f in findings {
+    const file = f["File"] ?? "(unknown file)"
+    const rule = f["RuleID"] ?? "(unknown rule)"
+    const seen = by_file[file] ?? []
+    if !seen.contains(rule) {
+      by_file = by_file + {[file]: seen + [rule]}
+    }
+  }
+  return by_file
+}
+
+/** Render the findings table. Assumes a non-empty grouping. */
+pub fn render_table(findings_count: int, by_file: dict) -> string {
+  const files = by_file.keys().sorted()
+  let lines = [
+    "${findings_count} finding(s) across ${files.count()} file(s).",
+    "",
+    "| File | Rules |",
+    "| --- | --- |",
+  ]
+  for name in files {
+    const rules = (by_file[name] ?? []).sorted().join(", ")
+    lines = lines + ["| `${name}` | ${rules} |"]
+  }
+  return lines.join("\n")
+}
+
+pipeline main(harness: Harness, task) {
+  const report_path = flag_value(argv, "--report")
+  if report_path == nil {
+    harness.stdio.eprintln("usage: summarize_gitleaks_report.harn --report PATH")
+    return 2
+  }
+  const path = report_path ?? ""
+  harness.stdio.println("## Secret scan\n")
+  // "No report" and "no findings" must not render the same. A path mismatch
+  // here would otherwise print a clean bill of health under a green check and
+  // hide every finding the scan actually made.
+  const raw = try {
+    harness.fs.read_text(path)
+  } catch (e) {
+    harness.stdio.println(
+      "NO REPORT at `${path}` (${e}). The scan step produced no readable "
+        + "report, so this run proves nothing about this tree.",
+    )
+    return 0
+  }
+  const findings = try {
+    json_parse(raw)
+  } catch (e) {
+    harness.stdio.println(
+      "UNREADABLE REPORT at `${path}` (${e}). The scan step produced no "
+        + "parseable report, so this run proves nothing about this tree.",
+    )
+    return 0
+  }
+  if findings.count() == 0 {
+    harness.stdio.println("No findings.")
+    return 0
+  }
+  harness.stdio.println(render_table(findings.count(), group_by_file(findings)))
+  return 0
+}
