@@ -108,6 +108,45 @@ some prose
 {"name": "list_dir"}
 ```""",
   )
+  // Arguments emitted as siblings of the name, with no container, are the
+  // call's arguments. Discarding them parses a call that cannot do its work and
+  // reports neither an error nor a violation, so nothing tells the model why.
+  probe_json(
+    harness.agent,
+    harness.stdio,
+    "sibling keys are the arguments when no container is present",
+    """```tool
+{"name": "look", "file": "src/writer.zig", "intent": "read"}
+```""",
+  )
+  // The payload-bearing case: an edit whose body is carried as siblings must not
+  // lose the body.
+  probe_json(
+    harness.agent,
+    harness.stdio,
+    "sibling arguments carry an edit payload",
+    """```tool
+{"name": "edit", "path": "a.py", "action": "create", "content": "x = 1"}
+```""",
+  )
+  // A declared container stays authoritative: siblings beside it are not merged.
+  probe_json(
+    harness.agent,
+    harness.stdio,
+    "a declared container wins over sibling keys",
+    """```tool
+{"name": "look", "args": {"file": "a.py"}, "file": "b.py"}
+```""",
+  )
+  // An explicitly empty container is a declaration, not an absence.
+  probe_json(
+    harness.agent,
+    harness.stdio,
+    "an empty container is not overridden by siblings",
+    """```tool
+{"name": "look", "args": {}, "file": "b.py"}
+```""",
+  )
   // Rejections. A JSON array is a single non-object entry, not a batch — a
   // batch is consecutive objects.
   probe_json(
