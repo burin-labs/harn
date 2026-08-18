@@ -1,3 +1,4 @@
+import { agent_tool_annotations } from "std/agent/tool_annotations"
 // Lanes: tool-surface narrowing keyed off a data-driven classification of
 // the task, generalizing burin-code's `agent_lane_for_task`
 // (`lib/runtime/agent-loop.harn`). Burin classifies a task ONCE, before the
@@ -29,8 +30,7 @@
 // The classified lane rides the verdict's `evidence` string, not a custom
 // field: the native `scope_classifier_verdict` event has a fixed shape and
 // silently drops keys it does not recognize.
-import { __tool_surface_filter_registry, __tool_surface_policy_tools } from "std/agent/postturn"
-import { agent_tool_annotations } from "std/agent/tool_annotations"
+import { __tool_surface_filter_registry, __tool_surface_policy_tools } from "std/agent/tool_surface"
 
 /**
  * A single lane row. `tool_names` and `tool_kinds` are unioned to compute

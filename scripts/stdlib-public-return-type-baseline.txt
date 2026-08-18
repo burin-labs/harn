@@ -39,7 +39,8 @@
 # count   49  crates/harn-stdlib/src/stdlib/agent/options_validation.harn
 # count    5  crates/harn-stdlib/src/stdlib/agent/overlays.harn
 # count   10  crates/harn-stdlib/src/stdlib/agent/pins.harn
-# count    7  crates/harn-stdlib/src/stdlib/agent/postturn.harn
+# count    3  crates/harn-stdlib/src/stdlib/agent/postturn.harn
+# count    4  crates/harn-stdlib/src/stdlib/agent/tool_surface.harn
 # count    6  crates/harn-stdlib/src/stdlib/agent/preflight.harn
 # count    3  crates/harn-stdlib/src/stdlib/agent/presets.harn
 # count    4  crates/harn-stdlib/src/stdlib/agent/primitives.harn
@@ -510,13 +511,13 @@ crates/harn-stdlib/src/stdlib/agent/pins.harn::recognize_no_compact
 crates/harn-stdlib/src/stdlib/agent/pins.harn::strip_no_compact
 crates/harn-stdlib/src/stdlib/agent/pins.harn::unpin
 crates/harn-stdlib/src/stdlib/agent/pins.harn::with_pin_roots
-crates/harn-stdlib/src/stdlib/agent/postturn.harn::__tool_surface_filter_registry
-crates/harn-stdlib/src/stdlib/agent/postturn.harn::__tool_surface_policy_tools
-crates/harn-stdlib/src/stdlib/agent/postturn.harn::agent_apply_tool_surface_narrowing
 crates/harn-stdlib/src/stdlib/agent/postturn.harn::agent_compute_post_turn
 crates/harn-stdlib/src/stdlib/agent/postturn.harn::agent_compute_terminal_callback
 crates/harn-stdlib/src/stdlib/agent/postturn.harn::agent_extract_tool_calls
-crates/harn-stdlib/src/stdlib/agent/postturn.harn::agent_reset_tool_surface_narrowing
+crates/harn-stdlib/src/stdlib/agent/tool_surface.harn::__tool_surface_filter_registry
+crates/harn-stdlib/src/stdlib/agent/tool_surface.harn::__tool_surface_policy_tools
+crates/harn-stdlib/src/stdlib/agent/tool_surface.harn::agent_apply_tool_surface_narrowing
+crates/harn-stdlib/src/stdlib/agent/tool_surface.harn::agent_reset_tool_surface_narrowing
 crates/harn-stdlib/src/stdlib/agent/preflight.harn::__with_prompt_fragment
 crates/harn-stdlib/src/stdlib/agent/preflight.harn::agent_build_turn_messages
 crates/harn-stdlib/src/stdlib/agent/preflight.harn::agent_build_turn_system
