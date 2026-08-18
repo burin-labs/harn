@@ -141,6 +141,7 @@ const HOST_EVENT_POLICIES: &[HostEventPolicy] = &[
     host_event("stance_disarmed", None),
     host_event("completion_confirmation_nudge", None),
     host_event("fenced_call_attempt_nudge", None),
+    host_event("malformed_call_markup_nudge", None),
     host_event("missing_tool_call_nudge", None),
     host_event("no_progress_streak_nudge", None),
     host_event("tool_call_blank_name_dropped", None),
@@ -348,6 +349,10 @@ fn from_host_special(session_id: &str, event_type: &str, payload: &Value) -> Opt
         "fenced_call_attempt_nudge" => feedback(
             "fenced_call_attempt_nudge",
             feedback_content(obj_string(payload, "fence")),
+        ),
+        "malformed_call_markup_nudge" => feedback(
+            "malformed_call_markup_nudge",
+            feedback_content(obj_string(payload, "marker")),
         ),
         "missing_tool_call_nudge" => feedback(
             "missing_tool_call_nudge",
