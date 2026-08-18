@@ -525,8 +525,20 @@ pub fn tool_required_argument_exemplar(registry, tool_name) -> list {
  * every standing prompt and corrective teaches, one `anyOf` branch per tool:
  * `name` is pinned to that tool and `args` must carry the tool's REQUIRED
  * parameter keys (live smoke evidence: with an open arguments object the
- * model lazily emits `{}` and burns a turn re-issuing the call). Argument values stay shallow — presence is enforced
- * by the grammar, value shape by the dispatch-time validator that owns it.
+ * model lazily emits `{}` and burns a turn re-issuing the call). Argument
+ * values stay shallow — presence is enforced by the grammar, value shape by
+ * the dispatch-time validator that owns it. Internal underscore-prefixed
+ * parameters are the harness's to fill, not the model's to write, so they
+ * are left out of the grammar unless the registry marks one required (live
+ * smoke evidence: an offered `_nl_intent` key is what the model reaches for
+ * under constraint).
+ *
+ * When the corrective claimed the turn for one named tool, `claimed_tool`
+ * narrows the schema to that tool's branch: the claim already told the model
+ * which call to make, and the full `anyOf` lets it wander to a different
+ * tool instead (observed live: a `look` claim answered with a junk `search`).
+ * An empty or unrecognized `claimed_tool` keeps every branch.
+ *
  * Returns nil for an empty or unreadable registry, in which case no
  * contract should be applied.
  *
@@ -539,9 +551,11 @@ pub fn tool_required_argument_exemplar(registry, tool_name) -> list {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn tool_call_output_schema(registry) -> any? {
+pub fn tool_call_output_schema(registry, claimed_tool = "") -> any? {
   const tools = __sv_list(__sv_dict(registry)?.tools)
+  const claimed = trim(__sv_string(claimed_tool))
   let branches = []
+  let claimed_branch = nil
   let seen = []
   for entry in tools {
     const direct_name = __sv_string(entry?.name)
@@ -566,8 +580,12 @@ pub fn tool_call_output_schema(registry) -> any? {
     let req = []
     for pname in __sv_dict(entries).keys() {
       const schema = entries[pname]
+      const required = __sv_param_is_required(parameters, pname, schema)
+      if starts_with(pname, "_") && !required {
+        continue
+      }
       props = props + {[pname]: __sv_argument_property_schema(schema)}
-      if __sv_param_is_required(parameters, pname, schema) {
+      if required {
         req = req.appending(pname)
       }
     }
@@ -579,14 +597,19 @@ pub fn tool_call_output_schema(registry) -> any? {
     if len(req) > 0 {
       args_schema = args_schema + {required: req}
     }
-    branches = branches.appending(
-      {
-        type: "object",
-        properties: {name: {type: "string", enum: [name]}, args: args_schema},
-        required: ["name", "args"],
-        additionalProperties: false,
-      },
-    )
+    const branch = {
+      type: "object",
+      properties: {name: {type: "string", enum: [name]}, args: args_schema},
+      required: ["name", "args"],
+      additionalProperties: false,
+    }
+    if claimed != "" && name == claimed {
+      claimed_branch = branch
+    }
+    branches = branches.appending(branch)
+  }
+  if claimed_branch != nil {
+    return claimed_branch
   }
   if len(branches) == 0 {
     return nil

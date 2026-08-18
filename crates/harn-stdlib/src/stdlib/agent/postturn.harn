@@ -498,7 +498,7 @@ fn __maybe_inject_action_nudge(
   const text_family = __text_family_toolless_turn(opts, has_tool_calls, text)
   const native_mode = __native_completion_context(opts, has_tool_calls, text)
   if !text_family && !native_mode {
-    return false
+    return nil
   }
   // The corrective wording renders the taught call syntax from the single
   // format-aware owner, so a `json` lane is told to emit a ```tool block and a
@@ -526,7 +526,9 @@ fn __maybe_inject_action_nudge(
       "fenced_call_attempt_nudge",
       {iteration: iteration, fence: fenced, visible_text_prefix: visible_text_excerpt(text)},
     )
-    return true
+    // The fence nudge claims the turn without naming one call, so the claim
+    // carries no tool.
+    return {tool: ""}
   }
   const missing = __classify_missing_tool_call(agent, llm, session, text, opts, iteration)
   if missing != nil {
@@ -571,9 +573,9 @@ fn __maybe_inject_action_nudge(
         visible_text_prefix: visible_text_excerpt(text),
       },
     )
-    return true
+    return {tool: to_string(tool_name)}
   }
-  return false
+  return nil
 }
 
 /**
@@ -585,12 +587,13 @@ fn __maybe_inject_action_nudge(
  * both read it, so a treatment that would cut or redirect a churning turn can
  * see the outstanding claim rather than race it.
  */
-fn __repair_claimed_result() -> dict {
+fn __repair_claimed_result(claimed_tool: string) -> dict {
   return {
     kind: "continue",
     done_judge_due: false,
     nudged_this_turn: true,
     turn_claimed_for_repair: true,
+    claimed_tool_name: claimed_tool,
   }
 }
 
@@ -1289,10 +1292,10 @@ fn __arbitrate_stalled_toolless_turn(
   const repaired = if loop_continues {
     __maybe_inject_action_nudge(agent, llm, session, opts, false, text, iteration, classifier_only)
   } else {
-    false
+    nil
   }
-  if repaired {
-    return __repair_claimed_result() + __verdict_option_changes(verdict)
+  if repaired != nil {
+    return __repair_claimed_result(repaired.tool ?? "") + __verdict_option_changes(verdict)
   }
   const verdict_result = __post_turn_verdict_result(agent, session, opts, verdict)
   if verdict_result != nil {

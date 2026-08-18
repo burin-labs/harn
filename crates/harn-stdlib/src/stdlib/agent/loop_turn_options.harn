@@ -234,7 +234,10 @@ pub fn __apply_post_turn_options(opts, outcome) {
   // turn it governs instead of racing it. Always assigned, so a claim never
   // outlives the one turn it was made for.
   updated = updated
-    + {_prior_turn_claimed_for_repair: outcome?.turn_claimed_for_repair ?? false}
+    + {
+    _prior_turn_claimed_for_repair: outcome?.turn_claimed_for_repair ?? false,
+    _prior_turn_claimed_tool: outcome?.claimed_tool_name ?? "",
+  }
   const narrowing = outcome?.narrowing
   if narrowing != nil {
     updated = updated

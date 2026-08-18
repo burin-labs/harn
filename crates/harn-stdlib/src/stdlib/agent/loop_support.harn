@@ -196,7 +196,7 @@ pub fn __agent_loop_repair_turn_output_contract(opts) -> any? {
   if type_of(recovery) == "dict" && !(recovery?.output_contract ?? true) {
     return nil
   }
-  return tool_call_output_schema(opts?.tools)
+  return tool_call_output_schema(opts?.tools, opts?._prior_turn_claimed_tool ?? "")
 }
 
 pub fn __agent_loop_effective_llm_options(llm: HarnessLlm, opts) {
