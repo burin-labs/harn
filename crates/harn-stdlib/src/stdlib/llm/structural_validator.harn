@@ -451,17 +451,23 @@ fn __sv_param_is_required(parameters, name, schema) -> bool {
 }
 
 /**
- * The argument skeleton to show when asking a model to emit a call it
- * described but never sent.
+ * The names of a tool's REQUIRED parameters, for the corrective that asks a
+ * model to emit a call it described but never sent.
  *
- * Returns `[{key, value}]` for the tool's REQUIRED parameters, each value a
- * type placeholder (`<string>`) rather than a plausible literal, so a model
- * that copies the exemplar verbatim produces an obviously unfilled call rather
- * than a confidently wrong one. A tool whose parameters are all optional gets
- * its first declared parameter as the placeholder instead of an empty object,
- * because `{}` is a complete, copy-pasteable call that is also wrong. Empty
- * only for an unknown tool or one that declares no parameters at all, which
- * renders a bare call — correct for a zero-argument tool.
+ * Names only, never values. An earlier form of this returned `[{key, value}]`
+ * with a type placeholder for each value (`"<string>"`), on the theory that a
+ * model copying the exemplar verbatim would produce an obviously unfilled call.
+ * It does not: live smoke showed a model copy `"<string>"` into the repair call
+ * and then into every subsequent call for the rest of the session, filling
+ * optional parameters it had never used before with the same token. A
+ * placeholder inside a JSON string is indistinguishable from a value, so the
+ * only safe exemplar is one that carries no values at all — the corrective
+ * renders the bare call envelope and names the required keys in prose.
+ *
+ * Empty for an unknown tool, a tool that declares no parameters, and a tool
+ * whose parameters are all optional. Underscore-prefixed parameters are the
+ * harness's to fill rather than the model's, but a REQUIRED one still has to
+ * be sent, so it is still named.
  *
  * This lives beside the parameter readers because this module already owns the
  * shape tolerance for a tool entry's parameters: JSON-schema
@@ -473,44 +479,18 @@ fn __sv_param_is_required(parameters, name, schema) -> bool {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn tool_required_argument_exemplar(registry, tool_name) -> list {
+pub fn tool_required_argument_names(registry, tool_name) -> list<string> {
   const entry = __sv_registry_tool_entry(registry, __sv_string(tool_name))
   if entry == nil {
     return []
   }
   const parameters = __sv_tool_entry_parameters(entry)
   const entries = __sv_parameter_entries(parameters)
-  let out = []
-  let fallback = []
+  let out: list<string> = []
   for name in __sv_dict(entries).keys() {
-    const schema = entries[name]
-    const types = __sv_schema_type_names(schema)
-    const placeholder = if len(types) > 0 {
-      "<" + types[0] + ">"
-    } else {
-      "<value>"
+    if __sv_param_is_required(parameters, name, entries[name]) {
+      out = out.appending(name)
     }
-    // An underscore prefix marks a parameter the harness fills in, not one the
-    // model is meant to write. Teaching it as the exemplar argument is worse
-    // than teaching nothing: live smoke showed the corrective asking for
-    // `{"args": {"_nl_intent": ...}}`, an argument no caller should ever send.
-    // Required parameters are unaffected — a required underscore parameter is
-    // still required, and the model still has to be told about it.
-    if len(fallback) == 0 && !starts_with(name, "_") {
-      fallback = [{key: name, value: placeholder}]
-    }
-    if !__sv_param_is_required(parameters, name, schema) {
-      continue
-    }
-    out = out.appending({key: name, value: placeholder})
-  }
-  // An all-optional tool must not render a bare `{}` exemplar: that is a
-  // complete, copy-pasteable call that is also wrong, and models copy it
-  // verbatim. Fall back to the first model-facing declared parameter. A tool
-  // whose parameters are all internal (or which declares none) has no honest
-  // exemplar to offer, so it renders none, as before this fallback existed.
-  if len(out) == 0 {
-    return fallback
   }
   return out
 }
@@ -543,7 +523,7 @@ pub fn tool_required_argument_exemplar(registry, tool_name) -> list {
  * contract should be applied.
  *
  * This lives beside the parameter readers for the same reason as
- * `tool_required_argument_exemplar`: this module owns the shape tolerance
+ * `tool_required_argument_names`: this module owns the shape tolerance
  * for tool registry entries, and a second reader would be a second owner of
  * the same policy.
  *

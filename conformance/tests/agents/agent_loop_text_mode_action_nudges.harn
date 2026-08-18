@@ -624,19 +624,23 @@ pipeline default(harness: Harness) {
       harness.stdio.println(
         "exemplar.names_required_arg=" + to_string(injected_anywhere(calls, "path")),
       )
-      // The placeholder marker itself is HTML-escaped inside the directive
-      // envelope, so assert the instruction rather than the escaped glyphs —
-      // the contract is "this is a placeholder", not how `<` is encoded.
+      // Nothing inside the rendered call is copyable as a value. A model that
+      // copied a type placeholder once kept emitting it on every later call, so
+      // the exemplar names required arguments in prose and renders none.
       harness.stdio.println(
-        "exemplar.marks_placeholder="
+        "exemplar.no_placeholder_token="
           + to_string(
-          injected_anywhere(calls, "replace each placeholder with a real value"),
+          !injected_anywhere(calls, "<string>") && !injected_anywhere(calls, "&lt;string&gt;"),
         ),
       )
-      // The empty-argument form must be gone: it is the shape that taught
-      // nothing and still parsed as a complete call.
       harness.stdio.println(
-        "exemplar.not_empty_args=" + to_string(!injected_anywhere(calls, "{ }")),
+        "exemplar.empty_args=" + to_string(injected_anywhere(calls, "edit({})")),
+      )
+      harness.stdio.println(
+        "exemplar.instructs_fill_in="
+          + to_string(
+          injected_anywhere(calls, "Fill in the argument values this call needs"),
+        ),
       )
     },
   )

@@ -1,19 +1,18 @@
 // Run: harn test tests/agent/exemplar_internal_parameter_test.harn
 //
-// `tool_required_argument_exemplar` renders the argument skeleton shown to a
-// model that described a call but never sent it. For an all-optional tool it
-// falls back to a declared parameter rather than a bare `{}`, because `{}` is
-// a complete, copy-pasteable call that is also wrong.
+// The missing-call corrective shows a model the call it described but never
+// sent. It used to show one type placeholder per argument (`"<string>"`), so a
+// model that copied the exemplar verbatim would produce an obviously unfilled
+// call. Live smoke showed the opposite: a model copied `"<string>"` into the
+// repair call and then into every call for the rest of the session, filling
+// optional arguments it had never used with the same token. Inside a JSON
+// string a placeholder is indistinguishable from a value.
 //
-// That fallback must not reach for an internal parameter. An underscore prefix
-// marks a field the harness fills in, so teaching it is worse than teaching
-// nothing: a live run rendered `{"args": {"_nl_intent": ...}}` and asked the
-// model to send an argument no caller should ever write.
-import { tool_required_argument_exemplar } from "std/llm/structural_validator"
-
-fn _keys(exemplar) -> list {
-  return exemplar.map(fn(pair) { return pair.key })
-}
+// So the exemplar carries no values at all. `tool_required_argument_names`
+// answers only "which arguments must this call carry", which the corrective
+// says in prose, and the rendered envelope stays empty.
+import { agent_render_tool_call_exemplar } from "std/agent/preflight"
+import { tool_required_argument_names } from "std/llm/structural_validator"
 
 fn _look(params) {
   return tool_define(
@@ -24,36 +23,64 @@ fn _look(params) {
   )
 }
 
-pipeline test_all_optional_fallback_skips_internal_parameters(harness: Harness, task) {
-  // `_nl_intent` is declared FIRST, so an unguarded "first declared parameter"
-  // fallback picks it. The exemplar must offer `query` instead.
+pipeline test_all_optional_tool_requires_nothing(harness: Harness, task) {
+  // `_nl_intent` is declared FIRST, so the old "first declared parameter"
+  // fallback picked it and taught an argument no caller should ever write.
+  // Nothing here is required, so nothing is named.
   const registry = _look(
     {
       _nl_intent: {type: "string", description: "Internal intent", optional: true},
       query: {type: "string", description: "What to look up", optional: true},
     },
   )
-  assert_eq(_keys(tool_required_argument_exemplar(registry, "look")), ["query"])
+  assert_eq(tool_required_argument_names(registry, "look"), [])
+  assert_eq(tool_required_argument_names(_look({}), "look"), [])
+  assert_eq(tool_required_argument_names(registry, "nonexistent"), [])
 }
 
-pipeline test_all_internal_parameters_render_no_exemplar(harness: Harness, task) {
-  // Nothing here is the model's to write, so there is no honest exemplar to
-  // offer and the fallback declines — same as a tool that declares nothing.
-  const registry = _look(
-    {_nl_intent: {type: "string", description: "Internal intent", optional: true}},
-  )
-  assert_eq(tool_required_argument_exemplar(registry, "look"), [])
-  assert_eq(tool_required_argument_exemplar(_look({}), "look"), [])
-}
-
-pipeline test_required_internal_parameter_is_still_taught(harness: Harness, task) {
-  // The skip governs the all-optional fallback only. A REQUIRED parameter has
-  // to be sent, so the model still has to be told about it.
+pipeline test_required_internal_parameter_is_still_named(harness: Harness, task) {
+  // An underscore prefix marks a parameter the harness fills in, but a REQUIRED
+  // one still has to be sent, so the model still has to be told about it.
   const registry = _look(
     {
       _nl_intent: {type: "string", description: "Internal intent", required: true},
       query: {type: "string", description: "What to look up", optional: true},
     },
   )
-  assert_eq(_keys(tool_required_argument_exemplar(registry, "look")), ["_nl_intent"])
+  assert_eq(tool_required_argument_names(registry, "look"), ["_nl_intent"])
+}
+
+pipeline test_rendered_exemplar_carries_no_placeholder_token(harness: Harness, task) {
+  // The falsifier for the observed defect: whatever the tool declares, the
+  // rendered call must contain no token a model could copy as a value. A
+  // placeholder would show up here as `<`, and a required key rendered with a
+  // stand-in value would show up as a non-empty argument object.
+  const registry = _look(
+    {
+      path: {type: "string", description: "Where to look", required: true},
+      depth: {type: "integer", description: "How deep", optional: true},
+    },
+  )
+  const json = agent_render_tool_call_exemplar(
+    harness.llm,
+    "look",
+    [],
+    {tool_format: "json", tools: registry},
+  )
+  assert_eq(starts_with(json, "```tool\n"), true)
+  assert_eq(contains(json, "\"look\""), true)
+  // An empty argument object, and no token to copy: a placeholder would show up
+  // as `<`, and a stand-in value would show up as a non-empty argument object.
+  assert_eq(contains(json, "{}"), true)
+  assert_eq(contains(json, "<"), false)
+  assert_eq(contains(json, "..."), false)
+  const text = agent_render_tool_call_exemplar(
+    harness.llm,
+    "look",
+    [],
+    {tool_format: "text", tools: registry},
+  )
+  assert_eq(text, "<tool_call>look({})</tool_call>")
+  // The required argument is still known — it is named in prose, not rendered.
+  assert_eq(tool_required_argument_names(registry, "look"), ["path"])
 }

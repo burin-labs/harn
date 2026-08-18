@@ -29,8 +29,9 @@ host_stop.no_exemplar=true
 single_shot.status=done
 single_shot.not_claimed=true
 exemplar.names_required_arg=true
-exemplar.marks_placeholder=true
-exemplar.not_empty_args=true
+exemplar.no_placeholder_token=true
+exemplar.empty_args=true
+exemplar.instructs_fill_in=true
 invalid_classifier=true
 true
 invalid_enabled=true

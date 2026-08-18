@@ -126,6 +126,9 @@ pub fn agent_render_tool_call_exemplar(llm: HarnessLlm, name, args, options = ni
       rendered = rendered + ", " + piece
     }
   }
+  if rendered == "" {
+    return p.call_open + to_string(name) + "({})" + p.call_close
+  }
   return p.call_open + to_string(name) + "({ " + rendered + " })" + p.call_close
 }
 
