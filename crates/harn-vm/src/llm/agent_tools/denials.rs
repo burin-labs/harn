@@ -21,7 +21,17 @@ pub(super) fn denied_tool_result(tool_name: &str, reason: impl Into<String>) -> 
     // vocab they were never shown, read a bare denial, and thrash). The active
     // policy's allowlist is the source of truth; omit the clause when the
     // surface is unbounded (allow-all) so we never assert a misleading list.
-    let allowed = crate::orchestration::current_allowed_tool_names();
+    //
+    // The registry allowlist is only ONE of the gates that can produce this
+    // denial — an approval policy, a sandbox rule, or a host rejection can
+    // block a tool the registry still lists. So the denied tool routinely
+    // appeared in the "available" list of its own denial, telling the model in
+    // one breath that the call is not permitted and that the tool is callable.
+    // Drop it: whatever gate fired, this tool is not available for this call.
+    let allowed: Vec<String> = crate::orchestration::current_allowed_tool_names()
+        .into_iter()
+        .filter(|name| name != tool_name)
+        .collect();
     let available_clause = if allowed.is_empty() {
         String::new()
     } else {
