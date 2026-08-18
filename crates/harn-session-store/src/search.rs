@@ -110,8 +110,24 @@ pub trait Embedder: Send + Sync {
     fn embed(&self, text: &str) -> Vec<f32>;
     fn dim(&self) -> usize;
     fn name(&self) -> &str;
+
+    /// Whether this backend ranks by meaning rather than by surface form.
+    ///
+    /// Defaults to `false`: the claim is earned, never inherited. A backend
+    /// that returns `true` is asserting it can rank a semantically related
+    /// document above a lexically similar decoy, and
+    /// [`conformance::audit_semantic_claim`] is the bar that assertion is
+    /// measured against.
+    ///
+    /// The default direction matters. Under-claiming costs a caller some
+    /// recall it could have had; over-claiming makes
+    /// [`SearchResponse::semantic_floor`] lie, silently converts a
+    /// [`SearchMode::Semantic`] query into surface matching, and suppresses
+    /// the fallback notice that would otherwise tell the caller what
+    /// happened. So an unconsidered backend degrades loudly instead of
+    /// claiming quietly.
     fn is_semantic(&self) -> bool {
-        true
+        false
     }
 
     fn embed_batch(&self, texts: &[String]) -> Vec<Vec<f32>> {
@@ -169,9 +185,10 @@ impl Embedder for LexicalEmbedder {
         "lexical-hash"
     }
 
-    fn is_semantic(&self) -> bool {
-        false
-    }
+    // `is_semantic` is deliberately left to the trait default. The floor is
+    // the one backend whose honesty must follow from the default rather than
+    // from its own override, so a regression in that default surfaces here
+    // instead of hiding behind a local `false`.
 }
 
 pub fn default_embedder() -> Arc<dyn Embedder> {
@@ -489,6 +506,144 @@ fn collect_json_strings(value: &serde_json::Value, parts: &mut Vec<String>) {
     }
 }
 
+/// The measurement behind [`Embedder::is_semantic`].
+///
+/// `is_semantic` is a claim, and this module is the only place that decides
+/// whether the claim holds. Keeping the corpus and the bar here means an
+/// embedder in any crate is judged against one definition of "ranks by
+/// meaning" rather than against whatever each implementor found convincing.
+///
+/// The audit is deliberately usable outside this crate's tests: an embedder
+/// injected through `StoreHooks` can be held to the same bar by its own
+/// author before it ever claims anything.
+pub mod conformance {
+    use super::{cosine, Embedder};
+
+    /// One retrieval probe.
+    ///
+    /// `decoy` shares more surface tokens with `query` than `related` does,
+    /// so surface matching prefers the decoy and only meaning prefers the
+    /// related document. A backend that cannot separate them is ranking by
+    /// form, whatever it calls itself.
+    pub struct RetrievalCase {
+        pub query: &'static str,
+        pub related: &'static str,
+        pub decoy: &'static str,
+    }
+
+    /// The shared corpus. Deliberately domain-generic: these are ordinary
+    /// software concepts, not any embedder's or product's vocabulary.
+    pub const RETRIEVAL_CASES: &[RetrievalCase] = &[
+        RetrievalCase {
+            query: "find authentication code",
+            related: "verifyCredentials checks the caller identity before granting access",
+            decoy: "findCode looks up a numeric status code in a lookup table",
+        },
+        RetrievalCase {
+            query: "where do we log a user in",
+            related: "authenticate establishes a session for the account",
+            decoy: "logWarning writes a user-facing message to the log file",
+        },
+        RetrievalCase {
+            query: "how are invoices sent to customers",
+            related: "deliverReceipt mails the billing document to the account owner",
+            decoy: "customerNotes stores free-form text attached to invoices",
+        },
+        RetrievalCase {
+            query: "retry a failed network request",
+            related: "backoffScheduler reattempts the call after an exponential delay",
+            decoy: "networkRequestLog records every request that failed validation",
+        },
+        RetrievalCase {
+            query: "limit how many requests a client may send",
+            related: "throttle rejects traffic above the configured quota",
+            decoy: "requestClient sends a limited set of headers with each call",
+        },
+        RetrievalCase {
+            query: "clean up temporary files on shutdown",
+            related: "releaseScratchStorage removes working directories when the process exits",
+            decoy: "temporaryFileCache keeps a clean list of the files it has opened",
+        },
+    ];
+
+    /// How many cases a claiming backend must win. One case may be lost, so a
+    /// single unlucky probe does not decide the verdict, but a backend that
+    /// merely tracks surface form cannot reach it.
+    pub fn bar(cases: usize) -> usize {
+        cases.saturating_sub(1)
+    }
+
+    /// What the audit measured, kept separate from what it concludes so a
+    /// caller can report the numbers rather than just a boolean.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct SemanticClaimAudit {
+        /// What the backend says about itself.
+        pub claims_semantic: bool,
+        /// Cases where the related document outscored the decoy.
+        pub wins: usize,
+        /// Cases probed.
+        pub cases: usize,
+        /// Whether `wins` reached [`bar`].
+        pub clears_bar: bool,
+        /// Whether the claim and the measurement agree, in both directions.
+        pub honest: bool,
+    }
+
+    /// Measure `embedder` against [`RETRIEVAL_CASES`].
+    ///
+    /// This never panics and never decides policy; it reports. Ties count as
+    /// losses, since a backend that cannot separate the pair has not
+    /// demonstrated anything.
+    pub fn audit_semantic_claim(embedder: &dyn Embedder) -> SemanticClaimAudit {
+        let mut wins = 0usize;
+        for case in RETRIEVAL_CASES {
+            let query = embedder.embed(case.query);
+            let related = cosine(&query, &embedder.embed(case.related));
+            let decoy = cosine(&query, &embedder.embed(case.decoy));
+            if related > decoy {
+                wins += 1;
+            }
+        }
+        let cases = RETRIEVAL_CASES.len();
+        let clears_bar = wins >= bar(cases);
+        let claims_semantic = embedder.is_semantic();
+        SemanticClaimAudit {
+            claims_semantic,
+            wins,
+            cases,
+            clears_bar,
+            honest: claims_semantic == clears_bar,
+        }
+    }
+
+    /// Assert that `embedder`'s [`Embedder::is_semantic`] answer matches what
+    /// it can actually do.
+    ///
+    /// Both directions are enforced. A backend that claims meaning must clear
+    /// the bar, so the claim cannot be aspirational. A backend that disclaims
+    /// meaning must fail it, so a genuine upgrade cannot land while callers
+    /// are still told they are on the lexical floor.
+    pub fn assert_semantic_claim_is_earned(embedder: &dyn Embedder) {
+        let audit = audit_semantic_claim(embedder);
+        assert!(
+            audit.honest,
+            "backend `{}` reports is_semantic() == {} but won {}/{} retrieval cases (bar is {}). \
+             {}",
+            embedder.name(),
+            audit.claims_semantic,
+            audit.wins,
+            audit.cases,
+            bar(audit.cases),
+            if audit.claims_semantic {
+                "The claim is not earned: either fix the backend or drop the override."
+            } else {
+                "The backend outgrew its disclaimer: override is_semantic() to true so callers \
+                 stop being told they are on the lexical floor."
+            }
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -537,5 +692,133 @@ mod tests {
         let text = format!("{}needle", "İ".repeat(300));
         let rendered = snippet(&text, "needle", 40);
         assert!(rendered.contains("needle"));
+    }
+
+    /// Ranks the corpus perfectly by construction. It exists only to prove the
+    /// audit can return `honest` for a *claiming* backend, so a green suite is
+    /// not just the audit rejecting everything it sees.
+    struct OracleEmbedder;
+
+    impl OracleEmbedder {
+        /// One-hot per case; query and related share an axis, the decoy gets
+        /// its own. Unknown text lands on a spare axis so nothing collides.
+        fn axis(text: &str) -> usize {
+            let cases = conformance::RETRIEVAL_CASES;
+            for (index, case) in cases.iter().enumerate() {
+                if case.query == text || case.related == text {
+                    return index;
+                }
+                if case.decoy == text {
+                    return cases.len() + index;
+                }
+            }
+            cases.len() * 2
+        }
+    }
+
+    impl Embedder for OracleEmbedder {
+        fn embed(&self, text: &str) -> Vec<f32> {
+            let mut vector = vec![0.0; conformance::RETRIEVAL_CASES.len() * 2 + 1];
+            vector[Self::axis(text)] = 1.0;
+            vector
+        }
+
+        fn dim(&self) -> usize {
+            conformance::RETRIEVAL_CASES.len() * 2 + 1
+        }
+
+        #[allow(clippy::unnecessary_literal_bound)]
+        fn name(&self) -> &str {
+            "oracle"
+        }
+
+        fn is_semantic(&self) -> bool {
+            true
+        }
+    }
+
+    /// The oracle's ranking with the disclaimer left on, so the
+    /// under-claiming direction is exercised against a backend that really
+    /// can rank rather than against a contrived one.
+    struct ModestOracle;
+
+    impl Embedder for ModestOracle {
+        fn embed(&self, text: &str) -> Vec<f32> {
+            OracleEmbedder.embed(text)
+        }
+
+        fn dim(&self) -> usize {
+            OracleEmbedder.dim()
+        }
+
+        #[allow(clippy::unnecessary_literal_bound)]
+        fn name(&self) -> &str {
+            "modest-oracle"
+        }
+    }
+
+    /// Claims meaning, ranks by nothing at all.
+    struct BoastfulEmbedder;
+
+    impl Embedder for BoastfulEmbedder {
+        fn embed(&self, _text: &str) -> Vec<f32> {
+            vec![1.0, 0.0]
+        }
+
+        fn dim(&self) -> usize {
+            2
+        }
+
+        #[allow(clippy::unnecessary_literal_bound)]
+        fn name(&self) -> &str {
+            "boastful"
+        }
+
+        fn is_semantic(&self) -> bool {
+            true
+        }
+    }
+
+    #[test]
+    fn lexical_floor_inherits_an_honest_default() {
+        // The floor carries no override, so this pins the trait default
+        // itself: it must both disclaim and fail the bar.
+        let audit = conformance::audit_semantic_claim(&LexicalEmbedder::default());
+        assert!(!audit.claims_semantic, "the floor must not claim meaning");
+        assert!(
+            !audit.clears_bar,
+            "surface matching cleared a bar built to defeat it ({}/{}); the corpus has decayed",
+            audit.wins, audit.cases
+        );
+        // Measured at 0/6 when the corpus was written. Held at most 1 so that
+        // a decoy quietly losing its surface overlap shows up here, while the
+        // gate still has four cases of headroom before it could be at risk.
+        assert!(
+            audit.wins <= 1,
+            "the floor won {}/{} cases; decoys are no longer out-matching the related documents \
+             on surface form, so this corpus is drifting toward vacuity",
+            audit.wins,
+            audit.cases
+        );
+        conformance::assert_semantic_claim_is_earned(&LexicalEmbedder::default());
+    }
+
+    #[test]
+    fn a_backend_that_ranks_may_claim() {
+        let audit = conformance::audit_semantic_claim(&OracleEmbedder);
+        assert_eq!(audit.wins, audit.cases);
+        conformance::assert_semantic_claim_is_earned(&OracleEmbedder);
+    }
+
+    #[test]
+    #[should_panic(expected = "The claim is not earned")]
+    fn a_backend_that_cannot_rank_may_not_claim() {
+        conformance::assert_semantic_claim_is_earned(&BoastfulEmbedder);
+    }
+
+    #[test]
+    #[should_panic(expected = "outgrew its disclaimer")]
+    fn a_backend_that_outgrows_its_disclaimer_is_caught() {
+        conformance::assert_semantic_claim_is_earned(&ModestOracle);
     }
 }
