@@ -11,7 +11,7 @@ Use the provider's native tool channel for the retry. Pass code-bearing argument
 { "name": "edit", "args": { "action": "create", "path": "main.go", "content": "package main\n\n// backticks, quotes, and backslashes all survive as JSON string bytes:\nconst usage = `go run main.go`\n" } }
 ```
 
-The `content` value is an ordinary JSON string: the embedded `` ` `` backtick block and any `<<EOF` / `}` / `</tool>` are literal bytes — escape newlines as \n, quotes as \", backslashes as \\. Emit one ```tool block per call; never use a heredoc, a Markdown fence around the call, or a triple-quoted string.
+The `content` value is an ordinary JSON string: the embedded `` ` `` backtick block and any `<<EOF` / `}` / `</tool>` are literal bytes — escape newlines as \n, quotes as \", backslashes as \\. Emit one ```tool block per call; never pass argument content as a heredoc, a nested Markdown fence, or a triple-quoted string. The ```tool fence around the whole call is the only fence.
 {{ else }}
 edit({
     action: "create",
