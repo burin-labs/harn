@@ -201,6 +201,7 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "llm/structural_validator" => "stdlib/llm/structural_validator.harn",
     "llm/missing_tool_call" => "stdlib/llm/missing_tool_call.harn",
     "llm/tool_shape" => "stdlib/llm/tool_shape.harn",
+    "llm/call_shape" => "stdlib/llm/call_shape.harn",
     "llm/dialects" => "stdlib/llm/dialects.harn",
     "llm/tool_parse" => "stdlib/llm/tool_parse.harn",
     "llm/tool_parse_body" => "stdlib/llm/tool_parse_body.harn",

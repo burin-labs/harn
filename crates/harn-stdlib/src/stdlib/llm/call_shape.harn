@@ -1,0 +1,105 @@
+// @harn-entrypoint-category llm.stdlib
+//
+// std/llm/call_shape — THE taught tool-call shape, one row per tool format.
+//
+// Every corrective a model reads has to name the call syntax it should have
+// used, and every one of them has to name the SAME syntax the active parser
+// accepts. Written out at each call site they drift: one live session told a
+// model to "emit every call as `<tool_call>name({ ... })</tool_call>`" from the
+// unrecognized-span guidance while every other corrective in the same session
+// taught a ```tool fenced JSON object, because that one message was written
+// under the tagged pin and never learned about the others.
+//
+// So the taught syntax is data, keyed by tool format, read by everything that
+// teaches it: the loop's tool contract prompt, the no-progress nudge, the
+// fenced-call and missing-call correctives, parse guidance, and the
+// unrecognized-span violation. Adding a format is an edit to this table.
+// Rewording what a format teaches is an edit to this table. Nothing downstream
+// spells a delimiter out for itself.
+/**
+ * How one tool format is taught and rendered.
+ *
+ * `call_open`/`call_close` and `body_open`/`body_close` are the physical
+ * delimiters an exemplar renders between. The rest is prose the correctives
+ * quote:
+ *
+ * - `call_noun` names one call as a noun phrase, for a sentence that already
+ *   supplies its own verb ("Emit the call as a ```tool JSON block instead.").
+ * - `call_syntax` is the full wire form, for a sentence that has to show the
+ *   shape rather than refer to it.
+ * - `final_answer` is how a finished turn yields its answer.
+ * - `body_hint` is the single answer to "how do I pass a multi-line or
+ *   code-bearing field", which is where weak models lose calls to escaping.
+ */
+pub type ToolCallShape = {
+  kind: string,
+  call_open: string,
+  call_close: string,
+  body_open: string,
+  body_close: string,
+  call_noun: string,
+  call_syntax: string,
+  final_answer: string,
+  body_hint: string,
+}
+
+const __NATIVE_SHAPE: ToolCallShape = {
+  kind: "native",
+  call_open: "",
+  call_close: "",
+  body_open: "\"",
+  body_close: "\"",
+  call_noun: "native tool call",
+  call_syntax: "a native tool call on the provider's tool channel",
+  final_answer: "in concise assistant text",
+  body_hint:
+    "Pass multi-line or code-bearing fields (file contents, replacement text) as ordinary JSON string arguments — the runtime handles escaping.",
+}
+
+const __JSON_SHAPE: ToolCallShape = {
+  kind: "json",
+  call_open: "```tool\n",
+  call_close: "\n```",
+  body_open: "\"",
+  body_close: "\"",
+  call_noun: "```tool JSON block",
+  call_syntax: "a ```tool fenced block wrapping one JSON object with `name` and `args` keys",
+  final_answer: "as plain text",
+  body_hint:
+    "Each tool call is one JSON object `{ \"name\": \"...\", \"args\": { ... } }` in a ```tool fenced block. Pass multi-line or code-bearing fields (file contents, replacement text, exact-match strings) as ordinary JSON string values — escape newlines as \\n, quotes as \\\", backslashes as \\\\. Backticks, `<<EOF`, `}`, and `</tool>` need NO escaping; they are literal bytes inside the JSON string. For several calls in one turn, emit consecutive objects — several ```tool blocks or several objects in one block — never a JSON array. Never pass argument content as a heredoc, a nested Markdown fence, or a triple-quoted string; the ```tool fence around the whole call is the only fence.",
+}
+
+const __TEXT_SHAPE: ToolCallShape = {
+  kind: "text",
+  call_open: "<tool_call>",
+  call_close: "</tool_call>",
+  body_open: "<<EOF\n",
+  body_close: "\nEOF",
+  call_noun: "`<tool_call>` block",
+  call_syntax: "`<tool_call>name({ key: value })</tool_call>`",
+  final_answer: "in a `<user_response>` block",
+  body_hint:
+    "For any multi-line or code-bearing field (file contents, replacement text, exact-match strings) use a heredoc body: write `<<EOF` after the colon, the raw content on the following lines, then a line that is exactly `EOF` (the closing `}`/`)` may follow it). Heredoc bodies need NO escaping — quotes, backslashes, and backticks are all literal. Never wrap code or multi-line text in a quoted string.",
+}
+
+/**
+ * The taught shape for one tool format.
+ *
+ * `text` is the fallback for an empty or unrecognized format because it is the
+ * grammar the parser falls back to, so a corrective rendered from an unpinned
+ * format still names what that turn would actually be read as.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn tool_call_shape(tool_format) -> ToolCallShape {
+  const format = to_string(tool_format ?? "")
+  if format == "native" {
+    return __NATIVE_SHAPE
+  }
+  if format == "json" {
+    return __JSON_SHAPE
+  }
+  return __TEXT_SHAPE
+}

@@ -9,6 +9,7 @@ import {
   agent_session_project_turn,
   agent_session_visible_messages,
 } from "std/agent/state"
+import { ToolCallShape, tool_call_shape } from "std/llm/call_shape"
 
 fn __agent_done_sentinel(opts) {
   const sentinel = opts?.done_sentinel
@@ -23,67 +24,27 @@ fn __agent_tool_format(llm: HarnessLlm, opts) {
 }
 
 /**
- * agent_tool_call_paradigm — the format-aware intermediate representation for
- * tool-call exemplars. Prompt and tool-description authors never hard-code a
- * single wire format; they reference these paradigm fields (rendered into prompt
- * bindings) and the runtime maps them to whatever the CURRENT model expects.
+ * agent_tool_call_paradigm — the session's taught tool-call shape, resolved.
  *
- * Today the three paradigms are `text` (the canonical `name({ key: value })` form
- * with heredoc bodies — the escape-free body channel weak models need), `json`
- * (the ```tool fenced-JSON channel), and `native` (provider JSON tool calls).
- * `body_hint` is the single source of truth for "how do I pass a multi-line /
- * code-bearing field"; `call_noun` and `final_answer` are the single source of
- * truth for the TAUGHT tool-call syntax — the bare noun for one call ("```tool
- * JSON block", "`<tool_call>` block", "native tool call") and the phrase for the
- * final-answer harness.runtime.channel("as plain text", "in a `<user_response>` block", "in
- * concise assistant text"). The loop-completion contract, the no-progress nudge,
- * and the parse-guidance feedback all render from these fields, so the taught
- * syntax never drifts across surfaces. Extend this (not the prompts) to add a new
- * paradigm.
+ * This is the agent-side entry to `std/llm/call_shape`: it answers which tool
+ * format this session is on and hands back that format's row. Prompt and
+ * tool-description authors never hard-code a wire format; they reference these
+ * fields (rendered into prompt bindings) and get whatever the CURRENT model
+ * expects. The loop-completion contract, the no-progress nudge, the missing-call
+ * and fenced-call correctives, and the parse-guidance feedback all render from
+ * here, so the taught syntax never drifts across surfaces.
+ *
+ * Adding or rewording a paradigm is an edit to `std/llm/call_shape`, which the
+ * parse-side correctives read too — a shape spelled out here instead would be
+ * a second owner, and that is exactly how a session came to teach two different
+ * dialects at once.
  *
  * @effects: []
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_tool_call_paradigm(llm: HarnessLlm, options = nil) {
-  const format = __agent_tool_format(llm, options)
-  if format == "native" {
-    return {
-      kind: "native",
-      call_open: "",
-      call_close: "",
-      body_open: "\"",
-      body_close: "\"",
-      call_noun: "native tool call",
-      final_answer: "in concise assistant text",
-      body_hint:
-        "Pass multi-line or code-bearing fields (file contents, replacement text) as ordinary JSON string arguments — the runtime handles escaping.",
-    }
-  }
-  if format == "json" {
-    return {
-      kind: "json",
-      call_open: "```tool\n",
-      call_close: "\n```",
-      body_open: "\"",
-      body_close: "\"",
-      call_noun: "```tool JSON block",
-      final_answer: "as plain text",
-      body_hint:
-        "Each tool call is one JSON object `{ \"name\": \"...\", \"args\": { ... } }` in a ```tool fenced block. Pass multi-line or code-bearing fields (file contents, replacement text, exact-match strings) as ordinary JSON string values — escape newlines as \\n, quotes as \\\", backslashes as \\\\. Backticks, `<<EOF`, `}`, and `</tool>` need NO escaping; they are literal bytes inside the JSON string. For several calls in one turn, emit consecutive objects — several ```tool blocks or several objects in one block — never a JSON array. Never pass argument content as a heredoc, a nested Markdown fence, or a triple-quoted string; the ```tool fence around the whole call is the only fence.",
-    }
-  }
-  return {
-    kind: "text",
-    call_open: "<tool_call>",
-    call_close: "</tool_call>",
-    body_open: "<<EOF\n",
-    body_close: "\nEOF",
-    call_noun: "`<tool_call>` block",
-    final_answer: "in a `<user_response>` block",
-    body_hint:
-      "For any multi-line or code-bearing field (file contents, replacement text, exact-match strings) use a heredoc body: write `<<EOF` after the colon, the raw content on the following lines, then a line that is exactly `EOF` (the closing `}`/`)` may follow it). Heredoc bodies need NO escaping — quotes, backslashes, and backticks are all literal. Never wrap code or multi-line text in a quoted string.",
-  }
+pub fn agent_tool_call_paradigm(llm: HarnessLlm, options = nil) -> ToolCallShape {
+  return tool_call_shape(__agent_tool_format(llm, options))
 }
 
 /**
