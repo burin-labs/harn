@@ -450,6 +450,51 @@ fn __sv_param_is_required(parameters, name, schema) -> bool {
   return true
 }
 
+/**
+ * The argument skeleton to show when asking a model to emit a call it
+ * described but never sent.
+ *
+ * Returns `[{key, value}]` for the tool's REQUIRED parameters, each value a
+ * type placeholder (`<string>`) rather than a plausible literal, so a model
+ * that copies the exemplar verbatim produces an obviously unfilled call rather
+ * than a confidently wrong one. Empty for an unknown tool or one with no
+ * required arguments, which renders a bare call — correct for a zero-argument
+ * tool.
+ *
+ * This lives beside the parameter readers because this module already owns the
+ * shape tolerance for a tool entry's parameters: JSON-schema
+ * `properties`/`required`, and the flat `{name: schema}` form with per-field
+ * `required`/`optional`/`default`. A corrective that re-derived those rules
+ * would be a second owner of the same policy.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn tool_required_argument_exemplar(registry, tool_name) -> list {
+  const entry = __sv_registry_tool_entry(registry, __sv_string(tool_name))
+  if entry == nil {
+    return []
+  }
+  const parameters = __sv_tool_entry_parameters(entry)
+  const entries = __sv_parameter_entries(parameters)
+  let out = []
+  for name in __sv_dict(entries).keys() {
+    const schema = entries[name]
+    if !__sv_param_is_required(parameters, name, schema) {
+      continue
+    }
+    const types = __sv_schema_type_names(schema)
+    const placeholder = if len(types) > 0 {
+      "<" + types[0] + ">"
+    } else {
+      "<value>"
+    }
+    out = out.appending({key: name, value: placeholder})
+  }
+  return out
+}
+
 fn __sv_schema_type_names(schema) {
   let raw = nil
   if type_of(schema) == "string" {

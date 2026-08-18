@@ -28,6 +28,9 @@ host_stop.stop_reason=host_said_stop
 host_stop.no_exemplar=true
 single_shot.status=done
 single_shot.not_claimed=true
+exemplar.names_required_arg=true
+exemplar.marks_placeholder=true
+exemplar.not_empty_args=true
 invalid_classifier=true
 true
 invalid_enabled=true

@@ -591,6 +591,55 @@ pipeline default(harness: Harness) {
       )
     },
   )
+  // 12. The corrective's exemplar must carry the tool's OWN required argument
+  //     names, read from the tool entry. An exemplar showing an empty argument
+  //     object is a complete, copy-pasteable call that is also wrong, and it
+  //     tells the model nothing about what the call needs. `edit` declares a
+  //     required `path`, so the exemplar names it and marks it a placeholder
+  //     rather than inventing a plausible value.
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text("Voy a edittar el archivo ahora, un momento."),
+      llm_text("<tool_call>\nedit({ path: \"p.txt\" })\n</tool_call>"),
+      llm_text("Done."),
+    ],
+    { ->
+      agent_loop(
+        harness,
+        "Edit p.txt.",
+        nil,
+        {
+          provider: "mock",
+          tool_format: "text",
+          loop_until_done: true,
+          max_iterations: 4,
+          max_nudges: 4,
+          tools: edit_tools(),
+          done_judge: true,
+          missing_tool_call_recovery: edit_missing_tool_call_recovery(),
+        },
+      )
+      const calls = harness.llm.mock_calls()
+      harness.stdio.println(
+        "exemplar.names_required_arg=" + to_string(injected_anywhere(calls, "path")),
+      )
+      // The placeholder marker itself is HTML-escaped inside the directive
+      // envelope, so assert the instruction rather than the escaped glyphs —
+      // the contract is "this is a placeholder", not how `<` is encoded.
+      harness.stdio.println(
+        "exemplar.marks_placeholder="
+          + to_string(
+          injected_anywhere(calls, "replace each placeholder with a real value"),
+        ),
+      )
+      // The empty-argument form must be gone: it is the shape that taught
+      // nothing and still parsed as a complete call.
+      harness.stdio.println(
+        "exemplar.not_empty_args=" + to_string(!injected_anywhere(calls, "{ }")),
+      )
+    },
+  )
   const invalid_classifier = try {
     agent_loop_options(harness, {missing_tool_call_recovery: {classifier: "yes"}})
   }
