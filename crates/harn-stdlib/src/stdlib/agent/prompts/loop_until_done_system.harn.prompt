@@ -11,7 +11,7 @@
 {{ else }}
 - Solve the request directly in assistant text. Do not stop early to explain or summarize.
 {{ end }}{{ if sentinel_active }}{{ if exit_when_verified }}
-- {{ if native_done }}Include `{{ done_sentinel }}` exactly once in assistant text{{ else }}Emit `<done>{{ done_sentinel }}</done>` as its own top-level block{{ end }} only after verification passes.
+- {{ if plain_text_done }}Include `{{ done_sentinel }}` exactly once in assistant text{{ else }}Emit `<done>{{ done_sentinel }}</done>` as its own top-level block{{ end }} only after verification passes.
 {{ else }}
-- When the requested work is complete, {{ if native_done }}include `{{ done_sentinel }}` exactly once in assistant text{{ else }}emit `<done>{{ done_sentinel }}</done>` as its own top-level block{{ end }}.
-{{ end }}{{ end }}{{ else }}When you have produced the final answer for the user, {{ if native_done }}include `{{ done_sentinel }}` exactly once in assistant text{{ else }}emit `<done>{{ done_sentinel }}</done>` as its own top-level block{{ end }}.{{ end }}
+- When the requested work is complete, {{ if plain_text_done }}include `{{ done_sentinel }}` exactly once in assistant text{{ else }}emit `<done>{{ done_sentinel }}</done>` as its own top-level block{{ end }}.
+{{ end }}{{ end }}{{ else }}When you have produced the final answer for the user, {{ if plain_text_done }}include `{{ done_sentinel }}` exactly once in assistant text{{ else }}emit `<done>{{ done_sentinel }}</done>` as its own top-level block{{ end }}.{{ end }}

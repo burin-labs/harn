@@ -1,0 +1,66 @@
+// Run: harn test tests/agent/done_sentinel_wording_test.harn
+//
+// The completion contract and the tool contract render into ONE system prompt,
+// and they used to disagree about how to spell the done sentinel: the loop
+// contract taught `<done>##DONE##</done>` as its own top-level block on every
+// non-native route, while the json tool contract taught plain-text `##DONE##`
+// and said explicitly not to put it in a block.
+//
+// Which spelling the detector honors is a property of the tool grammar. Only
+// the tagged text grammar parses a `<done>` block, and only there does a parsed
+// block redirect the sentinel check to its body (std/agent/postturn
+// `__sentinel_hit`); every other route scans the raw response for the sentinel.
+// So the wrapper belongs on the text lane and nowhere else.
+//
+// These tests read the assembled system prompt, not the template, so a binding
+// that stops reaching the asset fails them.
+import { agent_build_turn_system_fragments } from "std/agent/preflight"
+import { agent_session_init } from "std/agent/state"
+
+const WRAPPER = "<done>##DONE##</done>"
+
+const PLAIN = "`##DONE##` exactly once in assistant text"
+
+fn _system_prompt(harness: Harness, format: string) -> string {
+  const opts = {
+    provider: "mock",
+    session_id: "done-wording-" + format + "-" + harness.random.uuid(),
+    tools: tool_define(
+      tool_registry(),
+      "look",
+      "Look something up.",
+      {handler: { _args -> return "ok" }, parameters: {query: {type: "string"}}},
+    ),
+    tool_format: format,
+    loop_until_done: true,
+    done_sentinel: "##DONE##",
+  }
+  const session = agent_session_init(harness.agent, "probe", nil, opts)
+  let out = ""
+  for fragment in agent_build_turn_system_fragments(harness, session, opts, 0) {
+    out = out + to_string(fragment?.text ?? fragment) + "\n"
+  }
+  return out
+}
+
+pipeline test_json_lane_teaches_only_the_plain_text_sentinel(harness: Harness, task) {
+  // The json tool contract already says "as plain text (NOT inside a ```tool
+  // block)". The completion contract must not answer that with a block.
+  const rendered = _system_prompt(harness, "json")
+  assert_eq(contains(rendered, PLAIN), true)
+  assert_eq(contains(rendered, WRAPPER), false)
+}
+
+pipeline test_text_lane_still_teaches_the_done_block(harness: Harness, task) {
+  // The tagged grammar is the one route where a parsed `<done>` block is
+  // authoritative, and its own tool contract teaches the same wrapper.
+  const rendered = _system_prompt(harness, "text")
+  assert_eq(contains(rendered, WRAPPER), true)
+  assert_eq(contains(rendered, PLAIN), false)
+}
+
+pipeline test_native_lane_still_teaches_the_plain_text_sentinel(harness: Harness, task) {
+  const rendered = _system_prompt(harness, "native")
+  assert_eq(contains(rendered, PLAIN), true)
+  assert_eq(contains(rendered, WRAPPER), false)
+}

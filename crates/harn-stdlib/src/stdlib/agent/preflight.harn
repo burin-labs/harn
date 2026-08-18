@@ -189,7 +189,13 @@ fn __agent_loop_contract_prompt(fs: HarnessFs, llm: HarnessLlm, opts) {
       exit_when_verified: opts?.exit_when_verified ?? false,
       has_tools: agent_has_tools(opts),
       native_mode: mode == "native",
-      native_done: mode == "native",
+      // Which spelling of the completion sentinel the detector actually honors
+      // is a property of the tool grammar, not of nativeness. Only the tagged
+      // text grammar parses a `<done>` block, and only there does a parsed
+      // block REDIRECT the sentinel check to its body; on every other route the
+      // check is a bare scan of the raw response, so the wrapper is decoration
+      // the route's own tool contract already tells the model not to write.
+      plain_text_done: mode != "text",
       calls_label: paradigm.call_noun + "s",
       final_answer: paradigm.final_answer,
       sentinel_active: sentinel != nil,
