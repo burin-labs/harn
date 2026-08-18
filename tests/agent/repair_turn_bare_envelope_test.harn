@@ -9,12 +9,15 @@
 // demanding a ```tool fence, for output the harness itself had constrained it
 // to produce.
 //
-// The pair below is the falsifier: the SAME bare envelope, on an armed turn and
-// on an ordinary turn. The armed turn must be silent; the ordinary turn must
-// still report, so the exemption cannot be mistaken for the parser having
-// simply stopped caring. Each run also asserts which side it is on by reading
-// `_output_contract_repair` off the options the loop actually sent, so neither
-// arm can pass by failing to arm.
+// The three runs below are the falsifier: the SAME bare envelope, on a claimed
+// turn that armed the contract, on a claimed turn whose contract never reached
+// the provider (the fallback shape, as when the constrained call times out),
+// and on an ordinary turn. Both claimed turns must be silent; the ordinary turn
+// must still report, so the exemption cannot be mistaken for the parser having
+// simply stopped caring. Each run also asserts which side it is on by counting
+// how many turns carried `_output_contract_repair` in the options the loop
+// actually sent, so no arm can pass by failing to arm or by arming when it was
+// supposed to be the fallback.
 import { agent_capture_events } from "std/agent/events"
 import { agent_loop } from "std/agent/loop"
 
@@ -43,11 +46,21 @@ fn _bump(harness: Harness, cell) {
 }
 
 /**
- * Run one bare-envelope turn with the repair output contract armed or not, and
- * report the loop's own account of it: how many turns the loop sent under the
- * contract, and the two model-facing complaints a `bare_json` verdict produces.
+ * Run one bare-envelope turn and report the loop's own account of it: how many
+ * turns the loop actually sent under the output contract, and the two
+ * model-facing complaints a `bare_json` verdict produces.
+ *
+ * `claimed` is whether the missing-call corrective claimed the previous turn.
+ * `output_contract` is whether the claim is allowed to reach the provider as a
+ * decode grammar; turning it off with the claim still on is how a fallback turn
+ * is shaped — claimed, unconstrained, still answering with a bare envelope.
  */
-fn _run_bare_envelope_turn(harness: Harness, session: string, armed: bool) -> dict {
+fn _run_bare_envelope_turn(
+  harness: Harness,
+  session: string,
+  claimed: bool,
+  output_contract: bool = true,
+) -> dict {
   const turns = harness.runtime.shared_cell(
     {scope: "task_group", key: "rbe-turns-" + session, initial: 0},
   )
@@ -82,7 +95,8 @@ fn _run_bare_envelope_turn(harness: Harness, session: string, armed: bool) -> di
         done_judge: nil,
         max_iterations: 3,
         llm_caller: mock_llm,
-        _prior_turn_claimed_for_repair: armed,
+        missing_tool_call_recovery: {output_contract: output_contract},
+        _prior_turn_claimed_for_repair: claimed,
       },
     ) },
   )
@@ -111,6 +125,26 @@ pipeline test_contracted_bare_envelope_is_not_a_violation(harness: Harness, task
   // The envelope is a first-class call: it ran.
   assert_eq(contains(run.result.tools.successful, "add"), true)
   // ...and the harness said nothing about the shape it forced.
+  assert_eq(run.boundary_failures, 0)
+  assert_eq(run.feedback, 0)
+}
+
+pipeline test_claimed_fallback_turn_is_not_a_violation(harness: Harness, task) {
+  // The fallback shape: the corrective claimed the turn, but the contract never
+  // reached the provider — as when the constrained call times out or the
+  // provider rejects the grammar and the dispatch re-sends unconstrained. The
+  // completion is still the bare envelope the repair prompt asked for, so it is
+  // still not a violation. Keyed on arming rather than on the claim, this arm
+  // took the full scolding path.
+  const run = _run_bare_envelope_turn(
+    harness,
+    "repair-bare-fallback-" + harness.random.uuid(),
+    true,
+    false,
+  )
+  // The contract really was withheld: this is the fallback side, not the armed one.
+  assert_eq(run.contracted_turns, 0)
+  assert_eq(contains(run.result.tools.successful, "add"), true)
   assert_eq(run.boundary_failures, 0)
   assert_eq(run.feedback, 0)
 }
