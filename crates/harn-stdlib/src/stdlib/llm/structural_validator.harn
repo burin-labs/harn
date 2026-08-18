@@ -519,6 +519,10 @@ pub fn tool_required_argument_names(registry, tool_name) -> list<string> {
  * tool instead (observed live: a `look` claim answered with a junk `search`).
  * An empty or unrecognized `claimed_tool` keeps every branch.
  *
+ * A tool with no model-facing parameters gets a bare `{"type": "object"}` args
+ * branch rather than an empty `properties` object, which llama.cpp's grammar
+ * conversion mishandles in a way that fails the whole request.
+ *
  * Returns nil for an empty or unreadable registry, in which case no
  * contract should be applied.
  *
@@ -569,11 +573,25 @@ pub fn tool_call_output_schema(registry, claimed_tool = "") -> any? {
         req = req.appending(pname)
       }
     }
-    // additionalProperties stays false: llama.cpp's grammar conversion treats
-    // an open object as an arbitrary key-value production, which is both slow
-    // and an invitation to hallucinate argument names; every accepted key is
-    // already enumerated from the registry, which dispatch validates against.
-    let args_schema = {type: "object", properties: props, additionalProperties: false}
+    // A tool with nothing for the model to write gets the bare object type, and
+    // in particular no empty `properties`. llama.cpp's grammar conversion
+    // mishandles `{"type": "object", "properties": {}}` (ggml-org/llama.cpp
+    // #25923) and the malformed production fails the WHOLE combined request,
+    // so one zero-parameter tool in the registry would take every other branch
+    // down with it. Nothing is lost by leaving the keys open here: there are no
+    // enumerated keys to close against, and dispatch still rejects an argument
+    // the tool does not declare.
+    //
+    // Otherwise additionalProperties stays false: llama.cpp's grammar
+    // conversion treats an open object as an arbitrary key-value production,
+    // which is both slow and an invitation to hallucinate argument names; every
+    // accepted key is already enumerated from the registry, which dispatch
+    // validates against.
+    let args_schema = if len(__sv_dict(props).keys()) == 0 {
+      {type: "object"}
+    } else {
+      {type: "object", properties: props, additionalProperties: false}
+    }
     if len(req) > 0 {
       args_schema = args_schema + {required: req}
     }
