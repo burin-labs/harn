@@ -84,12 +84,20 @@ fn json_read_call(path) {
 pipeline default(harness: Harness) {
   // 1. Fenced ```python attempt on a json lane → fenced_call_attempt nudge,
   //    rendered in fenced-JSON vocabulary.
+  //
+  // The closing response emits the sentinel itself, as the cases below already
+  // do. It used to end on bare prose and still report `done`, because the mock
+  // provider auto-completes a turn — appending `<done>##DONE##</done>` — when
+  // the system prompt contains the literal `<done>`. A json lane no longer
+  // teaches that spelling, so the auto-complete stopped firing and the run ran
+  // to its iteration cap. The status assertion was never observing the loop
+  // finishing; it was observing the mock finishing for it.
   with_llm_script(
     harness.llm,
     [
       llm_text("Here is the change:\n```python\nedit(path=\"a.txt\")\n```"),
       llm_text(json_call("a.txt")),
-      llm_text("All set."),
+      llm_text("All set. ##DONE##"),
     ],
     { ->
       const r = agent_loop(
@@ -129,7 +137,7 @@ pipeline default(harness: Harness) {
     [
       llm_text("Voy a editar el archivo ahora, un momento."),
       llm_text(json_call("b.txt")),
-      llm_text("Done."),
+      llm_text("Done. ##DONE##"),
     ],
     { ->
       const r = agent_loop(
