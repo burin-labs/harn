@@ -35,6 +35,45 @@ pub type AgentLoopLlmResultProjection = {
 
 pub type AgentLoopLlmProjectionContext = {llm_options: dict, turn_options: dict}
 
+/**
+ * Drop the `bare_json` violation on a turn whose output contract forced one.
+ *
+ * A turn claimed by the missing-tool-call corrective is sent with an `output`
+ * schema, which the provider applies as grammar-constrained decoding: the only
+ * text the model CAN emit is a bare `{"name": ..., "args": {...}}` envelope.
+ * The parser is contract-blind — it sees a `json` pin, sees an unfenced
+ * envelope, and reports `bare_json` — so the loop then charged the model with
+ * a protocol violation, raised a `text_tool_parse` boundary loss, and injected
+ * a corrective instructing it to use a ```tool fence, for output the harness
+ * itself constrained it to produce. The model cannot comply: the fence is not
+ * in the grammar it was given, and the next turn is spent on advice that
+ * contradicts the turn's own contract.
+ *
+ * On a contract-armed turn the bare envelope IS the contractual shape, so it
+ * is a first-class call and nothing here is a violation. The call already
+ * parsed and dispatched before this ran; only the spurious violation record is
+ * removed, which in turn keeps the boundary event and the parse-guidance
+ * injection quiet for that span.
+ *
+ * The exemption is scoped to the armed turn and to `bare_json` alone: an
+ * ordinary turn carries no contract and takes the untouched parse, and every
+ * other violation kind still reports on a contract-armed turn.
+ *
+ * @effects: []
+ * @errors: []
+ */
+fn __agent_loop_exempt_contracted_bare_envelope(parsed, llm_options) {
+  if !(llm_options?._output_contract_repair ?? false) {
+    return parsed
+  }
+  const violations = parsed?.protocol_violations ?? []
+  const kept = violations.filter(fn(violation) { return violation.kind != "bare_json" })
+  if len(kept) == len(violations) {
+    return parsed
+  }
+  return parsed + {protocol_violations: kept}
+}
+
 pub fn __agent_loop_project_result(
   agent: HarnessAgent,
   result,
@@ -45,7 +84,10 @@ pub fn __agent_loop_project_result(
     ?? context.turn_options?.tool_format
     ?? ""
   const raw_text = result?.raw_text ?? result?.text ?? ""
-  const parsed = agent_parse_tool_calls(agent, raw_text, context.turn_options?.tools, tool_format)
+  const parsed = __agent_loop_exempt_contracted_bare_envelope(
+    agent_parse_tool_calls(agent, raw_text, context.turn_options?.tools, tool_format),
+    context.llm_options,
+  )
   const visible_text = __visible_text(parsed, raw_text)
   return {
     raw_text: raw_text,

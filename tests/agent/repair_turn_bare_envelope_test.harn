@@ -1,0 +1,131 @@
+// Run: harn test tests/agent/repair_turn_bare_envelope_test.harn
+//
+// A turn claimed by the missing-tool-call corrective is sent with an output
+// contract, which the provider applies as grammar-constrained decoding: the
+// only text the model CAN emit is a bare `{"name": ..., "args": {...}}`
+// envelope. The parser is contract-blind, so it reported that envelope as a
+// `bare_json` protocol violation — and the loop then charged the model with the
+// violation, raised a `text_tool_parse` boundary loss, and injected a corrective
+// demanding a ```tool fence, for output the harness itself had constrained it
+// to produce.
+//
+// The pair below is the falsifier: the SAME bare envelope, on an armed turn and
+// on an ordinary turn. The armed turn must be silent; the ordinary turn must
+// still report, so the exemption cannot be mistaken for the parser having
+// simply stopped caring. Each run also asserts which side it is on by reading
+// `_output_contract_repair` off the options the loop actually sent, so neither
+// arm can pass by failing to arm.
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
+
+const BARE_ENVELOPE = "{\"name\": \"add\", \"args\": {\"left\": 2, \"right\": 3}}"
+
+fn _tools() {
+  return tool_define(
+    tool_registry(),
+    "add",
+    "Add two integers.",
+    {
+      handler: { args -> args.left + args.right },
+      parameters: {
+        left: {type: "integer", description: "Left operand"},
+        right: {type: "integer", description: "Right operand"},
+      },
+      returns: {type: "integer"},
+      annotations: {kind: "read"},
+    },
+  )
+}
+
+fn _bump(harness: Harness, cell) {
+  const snap = harness.runtime.shared_snapshot(cell)
+  harness.runtime.shared_cas(cell, snap, snap.value + 1)
+}
+
+/**
+ * Run one bare-envelope turn with the repair output contract armed or not, and
+ * report the loop's own account of it: how many turns the loop sent under the
+ * contract, and the two model-facing complaints a `bare_json` verdict produces.
+ */
+fn _run_bare_envelope_turn(harness: Harness, session: string, armed: bool) -> dict {
+  const turns = harness.runtime.shared_cell(
+    {scope: "task_group", key: "rbe-turns-" + session, initial: 0},
+  )
+  const contracted = harness.runtime.shared_cell(
+    {scope: "task_group", key: "rbe-armed-" + session, initial: 0},
+  )
+  const mock_llm = { call ->
+    if call?.opts?._output_contract_repair == true {
+      _bump(harness, contracted)
+    }
+    const seen = harness.runtime.shared_snapshot(turns).value
+    _bump(harness, turns)
+    if seen == 0 {
+      return {ok: true, value: {text: BARE_ENVELOPE, provider: "mock", model: "mock"}}
+    }
+    return {ok: true, value: {text: "Added them. ##DONE##", provider: "mock", model: "mock"}}
+  }
+  const captured = agent_capture_events(
+    harness.agent,
+    session,
+    fn() { return agent_loop(
+      harness,
+      "Add 2 and 3, then finish.",
+      nil,
+      {
+        provider: "mock",
+        session_id: session,
+        tools: _tools(),
+        tool_format: "json",
+        loop_until_done: true,
+        done_sentinel: "##DONE##",
+        done_judge: nil,
+        max_iterations: 3,
+        llm_caller: mock_llm,
+        _prior_turn_claimed_for_repair: armed,
+      },
+    ) },
+  )
+  let boundary_failures = 0
+  let feedback = 0
+  for event in captured.events {
+    if event.type == "boundary_failure" {
+      boundary_failures = boundary_failures + 1
+    }
+    if event.type == "feedback_injected" {
+      feedback = feedback + 1
+    }
+  }
+  return {
+    result: captured.result,
+    contracted_turns: harness.runtime.shared_snapshot(contracted).value,
+    boundary_failures: boundary_failures,
+    feedback: feedback,
+  }
+}
+
+pipeline test_contracted_bare_envelope_is_not_a_violation(harness: Harness, task) {
+  const run = _run_bare_envelope_turn(harness, "repair-bare-armed-" + harness.random.uuid(), true)
+  // The first turn really was sent under the forced-envelope contract.
+  assert_eq(run.contracted_turns > 0, true)
+  // The envelope is a first-class call: it ran.
+  assert_eq(contains(run.result.tools.successful, "add"), true)
+  // ...and the harness said nothing about the shape it forced.
+  assert_eq(run.boundary_failures, 0)
+  assert_eq(run.feedback, 0)
+}
+
+pipeline test_ordinary_turn_still_reports_a_bare_envelope(harness: Harness, task) {
+  const run = _run_bare_envelope_turn(
+    harness,
+    "repair-bare-ordinary-" + harness.random.uuid(),
+    false,
+  )
+  // No contract was armed on any turn, so this is the other side of the pair.
+  assert_eq(run.contracted_turns, 0)
+  // Same bytes, same accept-this-turn dispatch...
+  assert_eq(contains(run.result.tools.successful, "add"), true)
+  // ...but nothing forced them, so the loop still reports and still teaches.
+  assert_eq(run.boundary_failures, 1)
+  assert_eq(run.feedback, 1)
+}
