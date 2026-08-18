@@ -457,9 +457,11 @@ fn __sv_param_is_required(parameters, name, schema) -> bool {
  * Returns `[{key, value}]` for the tool's REQUIRED parameters, each value a
  * type placeholder (`<string>`) rather than a plausible literal, so a model
  * that copies the exemplar verbatim produces an obviously unfilled call rather
- * than a confidently wrong one. Empty for an unknown tool or one with no
- * required arguments, which renders a bare call — correct for a zero-argument
- * tool.
+ * than a confidently wrong one. A tool whose parameters are all optional gets
+ * its first declared parameter as the placeholder instead of an empty object,
+ * because `{}` is a complete, copy-pasteable call that is also wrong. Empty
+ * only for an unknown tool or one that declares no parameters at all, which
+ * renders a bare call — correct for a zero-argument tool.
  *
  * This lives beside the parameter readers because this module already owns the
  * shape tolerance for a tool entry's parameters: JSON-schema
@@ -479,18 +481,28 @@ pub fn tool_required_argument_exemplar(registry, tool_name) -> list {
   const parameters = __sv_tool_entry_parameters(entry)
   const entries = __sv_parameter_entries(parameters)
   let out = []
+  let fallback = []
   for name in __sv_dict(entries).keys() {
     const schema = entries[name]
-    if !__sv_param_is_required(parameters, name, schema) {
-      continue
-    }
     const types = __sv_schema_type_names(schema)
     const placeholder = if len(types) > 0 {
       "<" + types[0] + ">"
     } else {
       "<value>"
     }
+    if len(fallback) == 0 {
+      fallback = [{key: name, value: placeholder}]
+    }
+    if !__sv_param_is_required(parameters, name, schema) {
+      continue
+    }
     out = out.appending({key: name, value: placeholder})
+  }
+  // An all-optional tool must not render a bare `{}` exemplar: that is a
+  // complete, copy-pasteable call that is also wrong, and models copy it
+  // verbatim. Fall back to the first declared parameter as the placeholder.
+  if len(out) == 0 {
+    return fallback
   }
   return out
 }
@@ -500,11 +512,12 @@ pub fn tool_required_argument_exemplar(registry, tool_name) -> list {
  * call and nothing else.
  *
  * Projects the registry into a JSON Schema for the flat call envelope the
- * text parser already accepts (`{"name": .., "arguments": {..}}`), one
- * `anyOf` branch per tool: `name` is pinned to that tool and `arguments`
- * must carry the tool's REQUIRED parameter keys (live smoke evidence: with
- * an open arguments object the model lazily emits `{}` and burns a turn
- * re-issuing the call). Argument values stay shallow — presence is enforced
+ * text parser already accepts, keyed with the CANONICAL argument alias
+ * (`{"name": .., "args": {..}}`) so the forced completion matches the shape
+ * every standing prompt and corrective teaches, one `anyOf` branch per tool:
+ * `name` is pinned to that tool and `args` must carry the tool's REQUIRED
+ * parameter keys (live smoke evidence: with an open arguments object the
+ * model lazily emits `{}` and burns a turn re-issuing the call). Argument values stay shallow — presence is enforced
  * by the grammar, value shape by the dispatch-time validator that owns it.
  * Returns nil for an empty or unreadable registry, in which case no
  * contract should be applied.
@@ -561,8 +574,8 @@ pub fn tool_call_output_schema(registry) -> any? {
     branches = branches.appending(
       {
         type: "object",
-        properties: {name: {type: "string", enum: [name]}, arguments: args_schema},
-        required: ["name", "arguments"],
+        properties: {name: {type: "string", enum: [name]}, args: args_schema},
+        required: ["name", "args"],
         additionalProperties: false,
       },
     )
