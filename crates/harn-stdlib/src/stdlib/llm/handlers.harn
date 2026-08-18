@@ -16,7 +16,10 @@
 // "context_overflow" is an alias of "context_window_exceeded".
 import { agent_emit_event } from "std/agent/state"
 import { cache_get, cache_put } from "std/cache"
-import { llm_response_is_billed_empty } from "std/llm/envelope"
+import {
+  llm_failure_exhausted_request_deadline,
+  llm_response_is_billed_empty,
+} from "std/llm/envelope"
 import { llm_call_options, llm_clear_one_shot_prefill } from "std/llm/options"
 import { parse_first_json, repair_min_max_tokens, with_case_insensitive_keys } from "std/llm/safe"
 import { cosine_similarity } from "std/math"
@@ -156,6 +159,13 @@ fn __retry_default_predicate(envelope) {
     // Billed-empty (`outcome: {kind: "empty", billed: true}`) is a transient
     // provider flake: re-dispatch by default (the S2 billed-noncommittal defense).
     return llm_response_is_billed_empty(envelope?.value)
+  }
+  // The caller's own whole-request deadline elapsed. `next` is re-invoked with
+  // the same request under the same deadline, so the attempt already made is
+  // the whole experiment: retrying spends the budget re-running it and delays
+  // the fallback that could have changed the outcome.
+  if llm_failure_exhausted_request_deadline(envelope) {
+    return false
   }
   const status = to_string(envelope?.status ?? "")
   const retryable_statuses = [

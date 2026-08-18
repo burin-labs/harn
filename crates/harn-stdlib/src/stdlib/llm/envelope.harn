@@ -183,3 +183,40 @@ pub fn llm_response_is_billed_empty(response) -> bool {
 pub fn llm_response_is_truncated(response) -> bool {
   return __envelope_outcome_kind(response) == "truncated"
 }
+
+/**
+ * True when a failure envelope reports the caller's own whole-request deadline
+ * elapsing, rather than the provider stalling or failing.
+ *
+ * The distinction decides whether re-sending the request can succeed. An idle
+ * or first-chunk deadline says the provider went quiet, which the next attempt
+ * may not repeat; a rate limit, a 5xx, or a dropped connection are the same
+ * kind of fact. The TOTAL deadline says the request was still being answered
+ * when the clock the caller set ran out. Re-sending identical bytes under an
+ * identical deadline is the same race with the same result, so a retry policy
+ * that treats it as transient spends the whole budget re-running a request it
+ * has already watched fail, and only then reaches whatever fallback would have
+ * changed the outcome. Observed live: a grammar-constrained repair turn
+ * generating a large argument object timed out, was re-sent unchanged, timed
+ * out again at the same mark, and only then fell back to an unconstrained call.
+ *
+ * Read from the typed provider-stream failure fields that
+ * `build_llm_error_dict` projects (`source`, `deadline`), never from message
+ * text. A non-streaming request that trips the transport deadline carries no
+ * such projection and is not recognized here.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn llm_failure_exhausted_request_deadline(envelope) -> bool {
+  if type_of(envelope) != "dict" || (envelope?.ok ?? false) {
+    return false
+  }
+  const error = envelope?.error
+  if type_of(error) != "dict" {
+    return false
+  }
+  return to_string(error?.source ?? "") == "provider_stream"
+    && to_string(error?.deadline ?? "")
+    == "total"
+}
