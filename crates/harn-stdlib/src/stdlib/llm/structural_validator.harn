@@ -550,7 +550,11 @@ pub fn tool_call_output_schema(registry) -> any? {
         req = req.appending(pname)
       }
     }
-    let args_schema = {type: "object", properties: props, additionalProperties: true}
+    // additionalProperties stays false: llama.cpp's grammar conversion treats
+    // an open object as an arbitrary key-value production, which is both slow
+    // and an invitation to hallucinate argument names; every accepted key is
+    // already enumerated from the registry, which dispatch validates against.
+    let args_schema = {type: "object", properties: props, additionalProperties: false}
     if len(req) > 0 {
       args_schema = args_schema + {required: req}
     }
