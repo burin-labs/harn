@@ -52,6 +52,17 @@ Signing secrets are loaded through a tenant-scoped provider in multi-tenant requ
 references `github/webhook-signing-secret` resolves that name inside `harn.tenant.<tenant-id>`; an
 explicit `harn.tenant.<other-id>/...` lookup is rejected.
 
+### What is not isolated
+
+The trigger/connector registry is **shared across every tenant**. `--role multi-tenant` builds one VM
+per process, so all tenants resolve triggers and connectors out of the same registry; the role
+partitions ingress, event-log topics, and secret namespaces, not registry contents. The orchestrator
+prints this as a startup warning rather than leaving it to be inferred from the role name.
+
+Size your blast radius accordingly: a connector or trigger definition is visible to every tenant in
+the process. If you need registry-level separation today, run one orchestrator process per tenant.
+Tracked in [harn#6792](https://github.com/burin-labs/harn/issues/6792).
+
 ## Tenant lifecycle
 
 ```bash
