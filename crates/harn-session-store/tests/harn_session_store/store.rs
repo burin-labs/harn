@@ -116,6 +116,16 @@ impl Embedder for TestSemanticEmbedder {
     fn name(&self) -> &str {
         "test-semantic"
     }
+
+    // Claimed explicitly, because the claim is what these tests are about:
+    // they cover how the store routes a `Semantic`/`Hybrid` query once a
+    // semantic backend is present, which is unreachable from the floor. This
+    // is a hand-built double over a two-word vocabulary, not a product
+    // backend, so it is deliberately not held to
+    // `search::conformance::assert_semantic_claim_is_earned`.
+    fn is_semantic(&self) -> bool {
+        true
+    }
 }
 
 fn dummy_signer(seed: u8) -> SessionSigner {
