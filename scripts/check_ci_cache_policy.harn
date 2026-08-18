@@ -42,7 +42,7 @@ const RELEASE_WARM_CACHE_PATH_POLICY = ".github/release-warm-cache-paths.yml"
 
 const RELEASE_BINARY_WORKFLOW = "build-release-binaries.yml"
 
-const RELEASE_PATH_FILTER_ACTION = "dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706"
+const RELEASE_PATH_FILTER_ACTION = "dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d"
 
 const CHECKOUT_ACTION_PREFIX = "actions/checkout@"
 
