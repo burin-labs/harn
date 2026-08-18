@@ -490,7 +490,13 @@ pub fn tool_required_argument_exemplar(registry, tool_name) -> list {
     } else {
       "<value>"
     }
-    if len(fallback) == 0 {
+    // An underscore prefix marks a parameter the harness fills in, not one the
+    // model is meant to write. Teaching it as the exemplar argument is worse
+    // than teaching nothing: live smoke showed the corrective asking for
+    // `{"args": {"_nl_intent": ...}}`, an argument no caller should ever send.
+    // Required parameters are unaffected — a required underscore parameter is
+    // still required, and the model still has to be told about it.
+    if len(fallback) == 0 && !starts_with(name, "_") {
       fallback = [{key: name, value: placeholder}]
     }
     if !__sv_param_is_required(parameters, name, schema) {
@@ -500,7 +506,9 @@ pub fn tool_required_argument_exemplar(registry, tool_name) -> list {
   }
   // An all-optional tool must not render a bare `{}` exemplar: that is a
   // complete, copy-pasteable call that is also wrong, and models copy it
-  // verbatim. Fall back to the first declared parameter as the placeholder.
+  // verbatim. Fall back to the first model-facing declared parameter. A tool
+  // whose parameters are all internal (or which declares none) has no honest
+  // exemplar to offer, so it renders none, as before this fallback existed.
   if len(out) == 0 {
     return fallback
   }

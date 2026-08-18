@@ -1,0 +1,59 @@
+// Run: harn test tests/agent/exemplar_internal_parameter_test.harn
+//
+// `tool_required_argument_exemplar` renders the argument skeleton shown to a
+// model that described a call but never sent it. For an all-optional tool it
+// falls back to a declared parameter rather than a bare `{}`, because `{}` is
+// a complete, copy-pasteable call that is also wrong.
+//
+// That fallback must not reach for an internal parameter. An underscore prefix
+// marks a field the harness fills in, so teaching it is worse than teaching
+// nothing: a live run rendered `{"args": {"_nl_intent": ...}}` and asked the
+// model to send an argument no caller should ever write.
+import { tool_required_argument_exemplar } from "std/llm/structural_validator"
+
+fn _keys(exemplar) -> list {
+  return exemplar.map(fn(pair) { return pair.key })
+}
+
+fn _look(params) {
+  return tool_define(
+    tool_registry(),
+    "look",
+    "Look something up.",
+    {handler: { _args -> return "ok" }, parameters: params},
+  )
+}
+
+pipeline test_all_optional_fallback_skips_internal_parameters(harness: Harness, task) {
+  // `_nl_intent` is declared FIRST, so an unguarded "first declared parameter"
+  // fallback picks it. The exemplar must offer `query` instead.
+  const registry = _look(
+    {
+      _nl_intent: {type: "string", description: "Internal intent", optional: true},
+      query: {type: "string", description: "What to look up", optional: true},
+    },
+  )
+  assert_eq(_keys(tool_required_argument_exemplar(registry, "look")), ["query"])
+}
+
+pipeline test_all_internal_parameters_render_no_exemplar(harness: Harness, task) {
+  // Nothing here is the model's to write, so there is no honest exemplar to
+  // offer and the fallback declines — same as a tool that declares nothing.
+  const registry = _look(
+    {_nl_intent: {type: "string", description: "Internal intent", optional: true}},
+  )
+  assert_eq(tool_required_argument_exemplar(registry, "look"), [])
+  assert_eq(tool_required_argument_exemplar(_look({}), "look"), [])
+}
+
+pipeline test_required_internal_parameter_is_still_taught(harness: Harness, task) {
+  // The skip governs the all-optional fallback only. A REQUIRED parameter has
+  // to be sent, so the model still has to be told about it.
+  const registry = _look(
+    {
+      _nl_intent: {type: "string", description: "Internal intent", required: true},
+      query: {type: "string", description: "What to look up", optional: true},
+    },
+  )
+  assert_eq(_keys(tool_required_argument_exemplar(registry, "look")), ["_nl_intent"])
+}
