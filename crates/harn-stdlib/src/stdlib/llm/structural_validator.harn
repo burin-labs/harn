@@ -495,6 +495,58 @@ pub fn tool_required_argument_exemplar(registry, tool_name) -> list {
   return out
 }
 
+/**
+ * The output schema that makes a turn's completion a single parseable tool
+ * call and nothing else.
+ *
+ * Projects the registry into a JSON Schema for the flat call envelope the
+ * text parser already accepts (`{"name": .., "arguments": {..}}`): `name`
+ * is an enum of the registered tool names, so a constrained decoder cannot
+ * invent a tool, and `arguments` is an open object — argument-level
+ * enforcement stays with the structural validator at dispatch time, which
+ * already owns per-parameter shape tolerance. Returns nil for an empty or
+ * unreadable registry, in which case no contract should be applied.
+ *
+ * This lives beside the parameter readers for the same reason as
+ * `tool_required_argument_exemplar`: this module owns the shape tolerance
+ * for tool registry entries, and a second reader would be a second owner of
+ * the same policy.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn tool_call_output_schema(registry) -> any? {
+  const tools = __sv_list(__sv_dict(registry)?.tools)
+  let names = []
+  for entry in tools {
+    const direct_name = __sv_string(entry?.name)
+    const function = entry?.function
+    const function_name = if type_of(function) == "dict" {
+      __sv_string(function?.name)
+    } else {
+      ""
+    }
+    const name = if direct_name != "" {
+      direct_name
+    } else {
+      function_name
+    }
+    if name != "" && !contains(names, name) {
+      names = names.appending(name)
+    }
+  }
+  if len(names) == 0 {
+    return nil
+  }
+  return {
+    type: "object",
+    properties: {name: {type: "string", enum: names}, arguments: {type: "object"}},
+    required: ["name", "arguments"],
+    additionalProperties: false,
+  }
+}
+
 fn __sv_schema_type_names(schema) {
   let raw = nil
   if type_of(schema) == "string" {
