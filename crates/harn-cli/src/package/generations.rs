@@ -10,7 +10,8 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use super::{
-    materialized_hash_matches, validate_package_alias, LockFile, ManifestContext, PackageError,
+    materialized_hash_matches, validate_package_alias, verify_content_hash_or_compute, LockFile,
+    ManifestContext, PackageError,
 };
 
 const LEGACY_PACKAGES_DIR: &str = ".harn/packages";
@@ -51,6 +52,7 @@ where
         .map_err(|error| format!("failed to create {}: {error}", packages_root.display()))?;
 
     let installed = materialize(&packages_root)?;
+    validate_staged_packages(&packages_root, lock)?;
     write_generation_file(
         &prepared.root.join(GENERATION_LOCK_FILE),
         lock_bytes.as_slice(),
@@ -78,6 +80,69 @@ where
 
     publish_pointer_and_collect(ctx, &generation)?;
     Ok(installed)
+}
+
+/// Reject a staged package tree that does not match the lock it claims to
+/// realize, before anything can observe it as a published generation.
+///
+/// Materialization copies each package out of the shared cache with no lock
+/// held on the source, so a partial or contaminated copy is reachable without
+/// any single step reporting an error. Publishing then fsyncs and renames
+/// whatever it was handed, and the reader side only ever re-checks the
+/// lockfile digest — never the tree — so a package missing a file stays
+/// invisible until some later import trips over it, in an unrelated command,
+/// naming a path instead of a cause.
+///
+/// The same predicate already gates *reuse* of a published generation
+/// (`current_generation_matches_lock`). Running it once more on the staged
+/// tree is what makes "published" mean "complete": a generation either
+/// realizes its lock or it never becomes visible.
+fn validate_staged_packages(packages_root: &Path, lock: &LockFile) -> Result<(), PackageError> {
+    for entry in &lock.packages {
+        validate_package_alias(&entry.name)?;
+        let directory = packages_root.join(&entry.name);
+        let file = packages_root.join(format!("{}.harn", entry.name));
+        if entry.source.starts_with("path+") {
+            if !directory.exists() && !file.exists() {
+                return Err(incomplete_generation(
+                    &entry.name,
+                    packages_root,
+                    "nothing was materialized for it",
+                ));
+            }
+            continue;
+        }
+        let Some(expected_hash) = entry.content_hash.as_deref() else {
+            return Err(PackageError::Lockfile(format!(
+                "cannot publish a package generation: {} has no content hash in the lock",
+                entry.name
+            )));
+        };
+        if !directory.is_dir() {
+            return Err(incomplete_generation(
+                &entry.name,
+                packages_root,
+                "its package directory is missing",
+            ));
+        }
+        verify_content_hash_or_compute(&directory, expected_hash).map_err(|error| {
+            incomplete_generation(
+                &entry.name,
+                packages_root,
+                &format!("its materialized contents do not match the lock ({error})"),
+            )
+        })?;
+    }
+    Ok(())
+}
+
+fn incomplete_generation(alias: &str, packages_root: &Path, detail: &str) -> PackageError {
+    PackageError::Lockfile(format!(
+        "refusing to publish an incomplete package generation staged at {}: package {alias} is unusable because {detail}. \
+         This usually means the package cache was written concurrently while it was being copied; re-run the command, \
+         or run `harn install --refetch {alias}` to repopulate the cache from its source.",
+        packages_root.display()
+    ))
 }
 
 fn current_generation_matches_lock(
@@ -758,6 +823,152 @@ mod tests {
         assert!(
             !snapshot.packages_root().join("vendored").exists(),
             "dropped dependency is still importable from the generation"
+        );
+    }
+
+    /// `RuntimeExtensions` hands out bare paths beneath a generation —
+    /// `provider_connectors[].manifest_dir` most importantly — and the files
+    /// behind them are opened lazily, when a connector contract is first
+    /// loaded. That can be long after the struct was built. Holding the
+    /// snapshot is what holds the lease, and the lease is the only thing
+    /// stopping a concurrent publisher from collecting the tree those paths
+    /// point into.
+    #[test]
+    fn runtime_extensions_hold_their_generation_against_collection() {
+        let temp = tempfile::tempdir().unwrap();
+        let ctx = test_context(temp.path());
+        let lock = LockFile::default();
+        publish_package_generation(&ctx, &lock, false, |packages| {
+            let dir = packages.join("connector-pkg/src");
+            fs::create_dir_all(&dir).unwrap();
+            fs::write(dir.join("lib.harn"), "pipeline main() {}\n").unwrap();
+            Ok(0)
+        })
+        .unwrap();
+        let snapshot = PackageSnapshot::acquire(temp.path()).unwrap().unwrap();
+        let generation_root = snapshot.generation_root().to_path_buf();
+        let connector = snapshot.packages_root().join("connector-pkg/src/lib.harn");
+
+        // Exactly what `try_load_runtime_extensions` produces: bare paths into
+        // the generation, plus the snapshot that keeps them resolvable.
+        let extensions = crate::package::RuntimeExtensions {
+            package_snapshot: Some(std::sync::Arc::new(snapshot)),
+            ..crate::package::RuntimeExtensions::default()
+        };
+
+        publish_package_generation(&ctx, &lock, true, |_| Ok(0)).unwrap();
+
+        assert!(
+            connector.is_file(),
+            "a live RuntimeExtensions must keep its connector modules readable \
+             across a concurrent publish; a reader that lost the lease sees a \
+             bare ENOENT on {}",
+            connector.display()
+        );
+        assert_eq!(
+            extensions.package_generation(),
+            Some(generation_root.file_name().unwrap().to_str().unwrap()),
+            "the extensions must report the generation they resolve against"
+        );
+
+        drop(extensions);
+        publish_package_generation(&ctx, &lock, true, |_| Ok(0)).unwrap();
+        assert!(
+            !generation_root.exists(),
+            "once no reader holds the lease the generation must be collectable"
+        );
+    }
+
+    /// Materialization copies each package out of the shared cache holding no
+    /// lock on the source, so a concurrent writer can make that copy lossy
+    /// without any step returning an error. Publishing must not turn a lossy
+    /// copy into a generation other processes then import from: the failure
+    /// has to land here, naming the package, not later as a bare ENOENT on
+    /// whichever file some unrelated command happened to import first.
+    #[test]
+    fn publishing_rejects_a_package_tree_that_is_missing_a_file() {
+        let temp = tempfile::tempdir().unwrap();
+        let ctx = test_context(temp.path());
+        let scratch = tempfile::tempdir().unwrap();
+        let sample = scratch.path().join("vendored");
+        fs::create_dir_all(sample.join("src")).unwrap();
+        fs::write(sample.join("src/lib.harn"), "pipeline main() {}\n").unwrap();
+        fs::write(sample.join("src/extra.harn"), "pipeline extra() {}\n").unwrap();
+        let lock = LockFile {
+            packages: vec![LockEntry {
+                name: "vendored".to_string(),
+                source: "git+https://example.invalid/vendored".to_string(),
+                content_hash: Some(crate::package::compute_content_hash(&sample).unwrap()),
+                ..LockEntry::default()
+            }],
+            ..LockFile::default()
+        };
+
+        // Exactly the observed shape: every directory is created and all but
+        // one file is copied, and the copy itself reports success.
+        let error = publish_package_generation(&ctx, &lock, false, |packages| {
+            let dir = packages.join("vendored/src");
+            fs::create_dir_all(&dir).unwrap();
+            fs::write(dir.join("lib.harn"), "pipeline main() {}\n").unwrap();
+            Ok(1)
+        })
+        .unwrap_err();
+
+        let message = error.to_string();
+        assert!(
+            message.contains("incomplete package generation") && message.contains("vendored"),
+            "publish must fail loudly and name the package, got: {message}"
+        );
+        assert!(
+            PackageSnapshot::acquire(temp.path()).unwrap().is_none(),
+            "an incomplete tree must never become the published generation"
+        );
+    }
+
+    /// A package the materializer skipped entirely is the same defect one step
+    /// further along, and must not reach a reader either.
+    #[test]
+    fn publishing_rejects_a_package_that_was_never_materialized() {
+        let temp = tempfile::tempdir().unwrap();
+        let ctx = test_context(temp.path());
+        let (lock, generation) = publish_vendored_generation(&ctx);
+        let mut lock = lock;
+        lock.packages.push(LockEntry {
+            name: "absent".to_string(),
+            source: "git+https://example.invalid/absent".to_string(),
+            content_hash: Some("sha256-v2:".to_string() + &"ab".repeat(32)),
+            ..LockEntry::default()
+        });
+
+        let error = publish_package_generation(&ctx, &lock, true, |packages| {
+            let dir = packages.join("vendored");
+            fs::create_dir(&dir).unwrap();
+            fs::write(dir.join("main.harn"), "pipeline main() {}\n").unwrap();
+            Ok(2)
+        })
+        .unwrap_err();
+
+        assert!(
+            error.to_string().contains("absent"),
+            "publish must name the package it could not find, got: {error}"
+        );
+        assert_eq!(
+            PackageSnapshot::acquire(temp.path())
+                .unwrap()
+                .unwrap()
+                .generation(),
+            generation,
+            "a rejected publish must leave the previous generation serving"
+        );
+        assert!(
+            fs::read_dir(package_generations_dir(&ctx.dir))
+                .unwrap()
+                .all(|entry| !entry
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(STAGING_PREFIX)),
+            "a rejected publish must not leave its staging directory behind"
         );
     }
 }

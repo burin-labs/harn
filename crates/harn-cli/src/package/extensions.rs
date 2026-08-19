@@ -59,7 +59,7 @@ pub fn try_load_runtime_extensions(anchor: &Path) -> Result<RuntimeExtensions, P
         root_manifest.clone(),
         root_manifest_path.clone(),
         manifest_dir.clone(),
-        package_snapshot,
+        package_snapshot.clone(),
     )?;
     triggers.extend(installed_persona_trigger_configs(&runtime_personas)?);
 
@@ -74,6 +74,7 @@ pub fn try_load_runtime_extensions(anchor: &Path) -> Result<RuntimeExtensions, P
         triggers,
         handoff_routes,
         provider_connectors,
+        package_snapshot,
     })
 }
 
