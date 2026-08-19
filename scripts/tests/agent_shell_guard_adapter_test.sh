@@ -105,4 +105,45 @@ if ! grep -Fq "llm_call' is not permitted" "$fixture_root/model-probe.err"; then
   exit 1
 fi
 
+# A hook holds the agent's shell call open while it runs. If the guard can only
+# be stopped by the harness timeout, a slow policy costs the agent the entire
+# hook budget and still yields no verdict. Prove the adapter enforces its own
+# deadline and fails open well inside that budget.
+cat >"$fixture_root/hanging-harn" <<'STUB'
+#!/usr/bin/env bash
+sleep 120
+STUB
+chmod +x "$fixture_root/hanging-harn"
+
+deadline_start="$(date +%s)"
+hung_output="$(
+  printf '%s' "$payload" \
+    | HARN_BIN="$fixture_root/hanging-harn" \
+      AGENT_SHELL_GUARD_DEADLINE_SECONDS=2 \
+      "$fixture_root/scripts/agent-shell-guard.sh"
+)"
+deadline_elapsed="$(( $(date +%s) - deadline_start ))"
+if [[ -n "$hung_output" ]]; then
+  echo "adapter emitted a decision for a policy that never answered" >&2
+  printf '%s\n' "$hung_output" >&2
+  exit 1
+fi
+if (( deadline_elapsed > 15 )); then
+  echo "adapter waited ${deadline_elapsed}s on a hanging policy instead of failing open at its 2s deadline" >&2
+  exit 1
+fi
+
+# The payload must survive the deadline plumbing: it is handed to the policy
+# through a file precisely because an async command's stdin would otherwise be
+# reassigned to /dev/null, which reads as an empty payload and passes everything.
+still_blocked="$(
+  printf '%s' "$payload" \
+    | HARN_BIN="$HARN_BIN" "$fixture_root/scripts/agent-shell-guard.sh"
+)"
+if [[ "$still_blocked" != *'"permissionDecision":"deny"'* ]]; then
+  echo "adapter lost the payload through the deadline wrapper" >&2
+  printf '%s\n' "$still_blocked" >&2
+  exit 1
+fi
+
 echo "agent_shell_guard_adapter_test: ok"
