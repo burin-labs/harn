@@ -9871,7 +9871,7 @@
         ]
       },
       "tool_support": {
-        "native": false,
+        "native": true,
         "text": true,
         "preferred_format": "json",
         "parity": "text_only",
@@ -9963,7 +9963,7 @@
         ]
       },
       "tool_support": {
-        "native": false,
+        "native": true,
         "text": true,
         "preferred_format": "json",
         "parity": "text_only",
@@ -10031,7 +10031,7 @@
         ]
       },
       "tool_support": {
-        "native": false,
+        "native": true,
         "text": true,
         "preferred_format": "json",
         "parity": "text_only",
@@ -26719,6 +26719,7 @@
       "label": "Qwen3.6 35B (llama.cpp)",
       "family": "qwen",
       "capabilities": [
+        "native_tools",
         "prefers_markdown_scaffolding",
         "streaming",
         "structured_output",
@@ -26736,6 +26737,7 @@
       "label": "Qwen3.6 35B (Unsloth Q4_K_XL, llama.cpp)",
       "family": "qwen",
       "capabilities": [
+        "native_tools",
         "prefers_markdown_scaffolding",
         "streaming",
         "structured_output",
@@ -26753,6 +26755,7 @@
       "label": "Qwen3.6 35B (Unsloth Q5_K_XL, llama.cpp)",
       "family": "qwen",
       "capabilities": [
+        "native_tools",
         "prefers_markdown_scaffolding",
         "streaming",
         "structured_output",

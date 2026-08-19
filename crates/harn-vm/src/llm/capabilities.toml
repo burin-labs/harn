@@ -2109,7 +2109,18 @@ thinking_block_style = "inline"
 # contract until their exact runtime/model/template combinations are probed.
 [[provider.llamacpp]]
 model_match = "*qwen3.6*"
-native_tools = false
+# MEASUREMENT INSTRUMENT, NOT A VERDICT. This branch measures whether the
+# native tool channel works on this route when served by CUDA, because the
+# receipt currently promoting native was taken on Metal and the receipt it
+# overturned was taken on CUDA. With native_tools = false the wire gate strips
+# the tools array before it leaves the process, so the native arm cannot be
+# measured at all: a probe on 2026-08-19 against tornadough resolved
+# tool_format = native, emitted the override event, and still put ZERO tools on
+# two of two chat requests. Opening this flag is what makes the arm exist.
+# `tool_mode_parity` and `preferred_tool_format` are deliberately left alone, so
+# the json arm is measured on unmodified resolution and so this flag cannot be
+# mistaken for the verdict the measurement is supposed to produce.
+native_tools = true
 # Pinned to `json` (fenced-JSON), the GLOBAL text-channel default — same
 # RESOLVED format as the ollama qwen3.6 sibling above. Pinned explicitly rather
 # than left to inherit because the `llamacpp-qwen3.6` alias / catalogued routes
