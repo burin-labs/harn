@@ -5,13 +5,14 @@ description: Use for Harn release prep, version bumps, publishing, tags, and rel
 
 # Harn release
 
-Use the tag-first release flow. The canonical driver is
-`~/projects/harn-bump-fleet/release_harn.harn`; local scripts in this repo are
-building blocks and recovery tools.
+Use the tag-first release flow. `~/projects/harn-bump-fleet/release_harn.harn`
+owns the orchestration and `scripts/run_harn_release.sh` is the canonical
+boundary that invokes it; local scripts in this repo are building blocks and
+recovery tools.
 
 ```bash
 cd ~/projects/harn-bump-fleet
-scripts/with_env.sh harn run --no-sandbox release_harn.harn -- \
+scripts/run_harn_release.sh \
   --repo ~/projects/harn \
   --mode ship-pr \
   --at-sha <exact-origin-main-sha> \
@@ -19,6 +20,19 @@ scripts/with_env.sh harn run --no-sandbox release_harn.harn -- \
   --agent \
   --yes-live-release
 ```
+
+Call the launcher rather than `harn run release_harn.harn` directly. On macOS
+the launcher routes a live `prepare` or `ship-pr` to the canonical hosted Linux
+workflow: the release audit exercises nested OS sandboxes, and Seatbelt refuses
+a second `sandbox-exec` profile under Harn's default-deny outer profile. The
+harness does not self-dispatch, so a direct call on macOS starts a local release
+the gate cannot certify.
+
+The hosted path accepts a closed input tuple — `mode`, `bump`,
+`prerelease_identifier`, `at_sha`, `converge_fleet`, `expected_prs`. Flags
+outside it, `--reject-pr` and `--focus` among them, fail before dispatch rather
+than being silently dropped. Express an exclusion with `--at-sha` and prove it
+with `git merge-base --is-ancestor`.
 
 `ship-pr` does the following:
 
@@ -78,6 +92,9 @@ Terminal proof requires all of these to be successful:
 
 ## Source of truth
 
+- `~/projects/harn-bump-fleet/scripts/run_harn_release.sh` is the canonical
+  release boundary and the command an operator runs. It owns the macOS hosted
+  handoff; the entries below are reached through it or are recovery paths.
 - `~/projects/harn-bump-fleet/release_harn.harn` owns the live release
   orchestration. Run it from the `harn-bump-fleet` checkout so its prompt
   assets resolve from that repo.
@@ -119,6 +136,13 @@ Terminal proof requires all of these to be successful:
 - `.github/workflows/build-release-binaries.yml` ("Build release binaries")
   fires on the tag push and produces binary tarballs plus the GHCR container.
   Use `workflow_dispatch` with `tag=vX.Y.Z` to recover an existing tag.
+- `build-release-binaries.yml` is dispatched by two independent paths, so a
+  release normally shows two near-simultaneous runs on the same commit: a
+  warm-cache refresh and a candidate build. They are distinguishable by job
+  count rather than by title — the warm run builds a single target, the
+  candidate run builds the full five-target matrix. A red run in that pair
+  therefore means nothing until you read its jobs; the candidate-archive gate
+  refuses on the conclusion of the exact run it dispatched.
 - `.github/workflows/bump-release.yml` ("Open version bump PR (recovery)") is
   manual-only recovery for accidental historical release states.
 - `.github/workflows/release-pr-drift-check.yml` can ask you to rerun
