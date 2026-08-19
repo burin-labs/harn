@@ -9,6 +9,85 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.105
+
+### Added
+
+- The typed terminal outcome on a completed `session/prompt` now carries
+  `terminalClass`, so an embedder can say what went wrong and not only who is
+  responsible.
+
+  The fine-grained class — `provider_misconfigured`, `context_overflow`,
+  `rate_limited`, and the rest — was computed at the finalize boundary, used there
+  to split provider- from harness-owned, and then dropped. It reached the result
+  JSON and the transcript journal but never the ACP metadata. The failed-prompt
+  frame did carry it, so for one underlying cause an embedder got the full
+  taxonomy if the failure came back as a JSON-RPC error and only the coarse kind
+  if it came back as a completed prompt whose turn had failed. The practical cost:
+  "the model provider could not finish this task" where the harness knew it was an
+  unresolvable credential and could have said so.
+
+  The class rides on the same `terminalClass` key the error frame uses, so one
+  cause is named the same way on either side of the boundary. The field is
+  additive and omitted entirely when there is no class, so an outcome that never
+  had one serializes to byte-identical metadata and an existing consumer is
+  unaffected.
+
+  Also gives the finalize boundary's outcome construction one named owner,
+  `terminal_outcome_for_finalize`. Classifying the kind, keeping the raw reason,
+  and carrying the class were three inlined steps inside a long async builtin,
+  which is how one of them went missing without anyone noticing; together and
+  named, they are covered by tests that do not need a live session.
+- The reusable bump workflow accepts `apply-behavior-preserving-fixes`, letting a
+  caller decline the unattended `harn fix --apply --safety behavior-preserving`
+  pass that runs over its sources before its own refresh command. It defaults to
+  true and the default path composes a byte-identical refresh command, so no
+  existing caller changes behavior.
+
+  The pass previously had no opt-out: both fix invocations were baked into the
+  exported refresh string, so a caller that did not want its sources rewritten
+  during a version bump had no way to say so. That matters because the
+  `behavior-preserving` tier is the one a bump applies without review, and a
+  repair misclassified into it lands unexamined in a signed PR — see #6837, where
+  optional-chaining was removed from receivers that could be nil at runtime,
+  across 49 files in a single bump, turning a green regression suite red.
+
+  Capability migrations are deliberately not gated by this input. They are what
+  keeps a bump compiling across a keyword or capability break, so a caller that
+  declines normalization still receives them and is not stranded on an
+  incompatible runtime. A caller that opts out keeps its own formatting and lint
+  gates through `validate-command`, which is unaffected; the skipped pass is
+  announced as a workflow notice so a reviewer of the resulting bump PR is not
+  left guessing why a later formatting gate moved.
+
+### Fixed
+
+- An agent loop on a self-hosted provider no longer ends after a single model
+  call. A locally served route bills nothing, so its cost is known to be zero
+  rather than unknown, and it no longer consumes a USD ceiling on the first turn.
+
+  Spend accounting stops a budgeted run as soon as any completed call is unpriced,
+  which is the right fail-closed answer for a paid provider whose rate cannot be
+  resolved. A self-hosted runtime was falling into the same bucket for a different
+  reason: it has no catalog rate because it has no rate, and cost resolution was
+  additionally gated on reported token usage, which a streaming local server may
+  omit entirely. Any preset carrying a cost budget therefore stopped the loop
+  right after its first call, on every locally served route.
+
+  The registry already states which providers serve from hardware the caller owns,
+  by giving them a `local_runtime` table. That declaration is now the single
+  predicate behind "this route bills nothing", read by both the provider-level
+  rate lookup and per-call cost resolution, so the two agree. Reported token counts
+  stay unknown when the server omits them, and `usage_unknown_calls` still says so.
+  Only the cost is now known, because a zero rate does not need token counts.
+
+  A post-call budget stop also reports which ceiling actually stopped it. The loop
+  previously broke out without recording a reason, and the terminal receipt filled
+  the gap with `max_iterations`, so a spend guard that fired on turn one of eight
+  was indistinguishable in the artifacts from an ordinary exhausted iteration
+  budget. The guard now answers with the ceiling it tripped, and a stop that still
+  arrives without a reason is reported as `unattributed` rather than assigned one.
+
 ## v0.10.104
 
 ### Removed
