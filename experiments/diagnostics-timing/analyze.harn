@@ -48,6 +48,14 @@ const CLASS_STALL = "tool_emission_stall"
 
 const CLASS_UNRESOLVED = "unresolved"
 
+const CLASS_INFRA = "infra_error"
+
+// Loop statuses that mean the agent ran to a conclusion of its own. "done" is a
+// normal finish and "budget_exhausted" is the iteration ceiling, which is a
+// genuine resolution failure: the agent kept working and ran out of turns.
+// Anything else means the run never got a fair attempt at the task.
+const COMPLETED_STATUSES = ["done", "budget_exhausted"]
+
 // Column order for the rendered tables. Alphabetical key order reads as noise,
 // so each table names its own sequence.
 const ARM_COLUMNS = [
@@ -55,6 +63,7 @@ const ARM_COLUMNS = [
   "n",
   "scored",
   "stalls",
+  "infra",
   "pass",
   "turns",
   "tools",
@@ -66,7 +75,7 @@ const ARM_COLUMNS = [
   "detour",
 ]
 
-const FIXTURE_COLUMNS = ["fixture", "n", "scored", "stalls", "pass", "turns", "verdict"]
+const FIXTURE_COLUMNS = ["fixture", "n", "scored", "stalls", "infra", "pass", "turns", "verdict"]
 
 const PAIRED_COLUMNS = ["arm", "pairs", "dropped", "compared", "delta", "ci", "d_pass", "verdict"]
 
@@ -198,6 +207,13 @@ pub fn classify_trial(row) -> TrialClass {
   if row?.passed == true {
     return {name: CLASS_RESOLVED, scoreable: true}
   }
+  // An endpoint that errored, timed out, or refused never gave the agent a turn
+  // to spend, so the run says nothing about diagnostic timing. Scoring it as a
+  // resolution failure would let a flaky inference host depress the precision
+  // number of whichever arms happened to draw the bad runs.
+  if !COMPLETED_STATUSES.contains(to_string(row?.status ?? "")) {
+    return {name: CLASS_INFRA, scoreable: false}
+  }
   const terminal = to_string(row?.terminal_kind ?? "")
   if SELF_TERMINATED.contains(terminal) && !emitted_mutation(row) {
     return {name: CLASS_STALL, scoreable: false}
@@ -223,10 +239,24 @@ fn filter_rows(rows: list, field: string, value) -> list {
   return out
 }
 
+fn rows_in_class(rows: list, name: string) -> list {
+  let out = []
+  for row in rows {
+    if row.trial_class == name {
+      out = out.appending(row)
+    }
+  }
+  return out
+}
+
+fn scoreable_class(row) -> bool {
+  return row.trial_class != CLASS_STALL && row.trial_class != CLASS_INFRA
+}
+
 fn scoreable_rows(rows: list) -> list {
   let out = []
   for row in rows {
-    if row.trial_class != CLASS_STALL {
+    if scoreable_class(row) {
       out = out.appending(row)
     }
   }
@@ -234,23 +264,15 @@ fn scoreable_rows(rows: list) -> list {
 }
 
 fn passing_rows(rows: list) -> list {
-  let out = []
-  for row in rows {
-    if row.trial_class == CLASS_RESOLVED {
-      out = out.appending(row)
-    }
-  }
-  return out
+  return rows_in_class(rows, CLASS_RESOLVED)
 }
 
 fn stalled_rows(rows: list) -> list {
-  let out = []
-  for row in rows {
-    if row.trial_class == CLASS_STALL {
-      out = out.appending(row)
-    }
-  }
-  return out
+  return rows_in_class(rows, CLASS_STALL)
+}
+
+fn infra_rows(rows: list) -> list {
+  return rows_in_class(rows, CLASS_INFRA)
 }
 
 pub fn pass_rate(rows: list) -> string {
@@ -285,6 +307,7 @@ fn arm_row(label: string, rows: list) -> dict {
     n: len(rows),
     scored: len(scoreable),
     stalls: len(stalled_rows(rows)),
+    infra: len(infra_rows(rows)),
     pass: pass_rate(rows),
     turns: format_mean(field_values(passing, "iterations"), 1),
     tools: format_mean(field_values(scoreable, "tool_calls"), 1),
@@ -330,6 +353,7 @@ fn fixture_row(name: string, rows: list, arms: list) -> dict {
     n: len(rows),
     scored: len(scoreable),
     stalls: len(stalled_rows(rows)),
+    infra: len(infra_rows(rows)),
     pass: pass_rate(rows),
     turns: format_mean(field_values(passing_rows(rows), "iterations"), 1),
     verdict: fixture_verdict(rows, arms),
@@ -358,8 +382,9 @@ fn paired_row(control_rows: list, arm: string, arm_rows: list, metric: string) -
       continue
     }
     pairs = pairs + 1
-    // A pair where either side stalled says nothing about resolution timing.
-    if a.trial_class == CLASS_STALL || b.trial_class == CLASS_STALL {
+    // A pair where either side stalled, or never got a fair attempt, says
+    // nothing about resolution timing.
+    if !scoreable_class(a) || !scoreable_class(b) {
       dropped = dropped + 1
       continue
     }
@@ -421,6 +446,20 @@ fn provenance_summary(rows: list) -> dict {
     pairs = pairs.appending([field, rendered])
   }
   return dict_from_pairs(pairs)
+}
+
+/**
+ * Name the raw loop statuses behind an excluded set.
+ *
+ * An excluded trial that is never named is an excluded trial nobody can audit,
+ * and a status this classifier does not recognise would otherwise be pooled
+ * silently into the infrastructure bucket.
+ */
+fn status_note(rows: list) -> string {
+  if len(rows) == 0 {
+    return ""
+  }
+  return " (" + join(unique(field_names(rows, "status")).sorted(), ", ") + ")"
 }
 
 fn section(title: string, body: string) -> string {
@@ -494,12 +533,21 @@ fn render_report(rows: list, control_arm: string, metric: string) -> string {
     + "\n"
     + section(
     "Trials: ${len(rows)}   arms: ${len(arms)}   fixtures: ${len(fixtures)}",
-    "  stalls excluded from precision: ${len(stalled_rows(rows))}",
+    join(
+      [
+        "  tool-emission stalls excluded from precision: ${len(stalled_rows(rows))}",
+        "  infrastructure errors excluded from precision: ${len(infra_rows(rows))}"
+          + status_note(
+          infra_rows(rows),
+        ),
+      ],
+      "\n",
+    ),
   )
   out = out + "\nBy arm\n" + render_table(arm_rows, {columns: ARM_COLUMNS}) + "\n"
   out = out
     + "\n  turns is the mean over RESOLVED trials only; read it beside the pass rate.\n"
-    + "  pass is over scored trials; tool-emission stalls are excluded from both.\n"
+    + "  pass is over scored trials; stalls and infrastructure errors are excluded from both.\n"
   out = out + "\nBy fixture\n" + render_table(fixture_rows, {columns: FIXTURE_COLUMNS}) + "\n"
   const falsifier = falsifier_verdict(rows)
   out = out
@@ -526,7 +574,7 @@ fn render_report(rows: list, control_arm: string, metric: string) -> string {
   out = out + "\nPaired 95% bootstrap vs ${control_arm} on ${metric} (negative favours the arm)\n"
   out = out + render_table(paired, {columns: PAIRED_COLUMNS}) + "\n"
   out = out
-    + "\n  dropped counts pairs where either side was a tool-emission stall.\n"
+    + "\n  dropped counts pairs where either side stalled or never got a fair attempt.\n"
     + "  An interval spanning zero is no separation. Say so rather than ranking means.\n"
   return out
 }
@@ -567,6 +615,8 @@ fn report_json(rows: list, control_arm: string, metric: string) -> dict {
     schema_version: 1,
     trials: len(rows),
     stalls: len(stalled_rows(rows)),
+    infra: len(infra_rows(rows)),
+    infra_statuses: unique(field_names(infra_rows(rows), "status")).sorted(),
     control: control_arm,
     metric: metric,
     provenance: provenance_summary(rows),

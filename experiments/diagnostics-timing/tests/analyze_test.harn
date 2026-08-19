@@ -20,6 +20,7 @@ fn trial(overrides: dict) -> dict {
     fixture: "clean-control",
     trial: 1,
     passed: false,
+    status: "done",
     terminal_kind: "natural",
     tool_sequence: [],
     iterations: 3,
@@ -132,6 +133,49 @@ pipeline test_a_run_of_only_stalls_reports_no_pass_rate(harness: Harness) {
   )
   assert(pass_rate(rows) == "n/a", "an empty scoreable set has no pass rate")
   harness.stdio.log("test_a_run_of_only_stalls_reports_no_pass_rate passed")
+}
+
+@test
+pipeline test_a_provider_error_is_infrastructure_not_a_resolution_failure(harness: Harness) {
+  // A host that errored, timed out, or refused never gave the agent a turn to
+  // spend. Scoring it as a resolution failure would let a flaky inference host
+  // depress the precision number of whichever arms drew the bad runs.
+  const verdict = classify_trial(
+    trial({passed: false, status: "provider_error", terminal_kind: "provider_error"}),
+  )
+  assert(verdict.name == "infra_error", "a provider error is an infrastructure outcome")
+  assert(!verdict.scoreable, "an infrastructure error must not count toward precision")
+  harness.stdio.log("test_a_provider_error_is_infrastructure_not_a_resolution_failure passed")
+}
+
+@test
+pipeline test_budget_exhausted_stays_a_resolution_failure(harness: Harness) {
+  // The iteration ceiling is NOT infrastructure. The agent got its turns and
+  // spent them without reaching green, which is exactly what the timing
+  // policies are being raced on.
+  const verdict = classify_trial(
+    trial(
+      {
+        passed: false,
+        status: "budget_exhausted",
+        terminal_kind: "max_iterations",
+        tool_sequence: ["read_file", "edit_file"],
+      },
+    ),
+  )
+  assert(verdict.name == "unresolved", "running out of turns is a resolution failure")
+  assert(verdict.scoreable, "a ceiling hit counts toward precision")
+  harness.stdio.log("test_budget_exhausted_stays_a_resolution_failure passed")
+}
+
+@test
+pipeline test_an_unrecognised_status_does_not_silently_pass(harness: Harness) {
+  // A status this classifier has never seen is excluded from precision rather
+  // than scored as a failure, but the report names the raw status so the
+  // exclusion is auditable instead of invisible.
+  const verdict = classify_trial(trial({passed: false, status: "some_new_harness_status"}))
+  assert(verdict.name == "infra_error", "an unrecognised status is not scored as resolution")
+  harness.stdio.log("test_an_unrecognised_status_does_not_silently_pass passed")
 }
 
 // -------------------------------------------------------------------------------------------------

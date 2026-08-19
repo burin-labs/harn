@@ -64,11 +64,27 @@ classifier is structural, not a threshold fitted to the observed runs:
 | Class | Definition |
 | --- | --- |
 | `resolved` | the trial passed |
+| `infra_error` | the trial did not pass and the loop status is neither `done` nor `budget_exhausted` |
 | `tool_emission_stall` | the trial did not pass, the agent self-terminated, and it emitted no mutating tool call |
 | `unresolved` | any other non-passing trial |
 
-`tool_emission_stall` is **excluded from the pass rate, from the turns-to-green
-mean, and from the paired bootstrap intervals**, and reported in its own column.
+`tool_emission_stall` and `infra_error` are both **excluded from the pass rate,
+from the turns-to-green mean, and from the paired bootstrap intervals**, and
+each is reported in its own column.
+
+`infra_error` was added before the first trial, after a zero-GPU probe against a
+stand-in endpoint showed that a `provider_error` row would otherwise have been
+scored as a resolution failure. A host that errored, timed out, or refused never
+gave the agent a turn to spend, so a flaky endpoint would have depressed the
+precision number of whichever arms happened to draw the bad runs. The iteration
+ceiling is deliberately **not** in this class: `budget_exhausted` means the
+agent got its turns and spent them without reaching green, which is exactly what
+the timing policies are being raced on.
+
+An unrecognised loop status falls into `infra_error` rather than into the
+precision number, and the report prints the raw statuses behind that bucket, so
+an exclusion this classifier did not anticipate is auditable rather than
+invisible.
 The reasoning is the same one that keeps an infrastructure skip out of a failure
 count: a trial that never attempted the task gave no diagnostic timing policy
 anything to act on, so charging it to the post-edit diagnostics path would blame
