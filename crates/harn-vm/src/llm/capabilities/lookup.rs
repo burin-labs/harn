@@ -712,7 +712,13 @@ mod tests {
         let caps = lookup("llamacpp", "unsloth/Qwen3.6-35B-A3B-GGUF");
         assert!(!caps.thinking_modes.is_empty());
         assert!(caps.preserve_thinking);
-        assert!(!caps.native_tools); // the receipted family sweep keeps JSON text
+        // The 2026-07-19 CUDA sweep put this family on JSON text and this
+        // assertion recorded that. The 2026-08-19 CUDA receipt measured the
+        // native channel returning parseable tool calls on the same hardware
+        // class, so the fact it asserts has changed. Text tooling REMAINS
+        // available, which is the part of this route's contract the assertion
+        // below still guards.
+        assert!(caps.native_tools);
         assert!(caps.text_tool_wire_format_supported);
         assert_eq!(caps.server_parser, "none");
     }
