@@ -29,10 +29,17 @@ genuinely accurate at the instant it is produced. Only timing can help.
 3. **unresolved** — structurally incomplete resolution. Collapsed to one labeled
    low-confidence line regardless of how many findings it carried.
 
-`lib/diagnostics.harn` holds both declarations as data. `RESOLVER_COMPLETENESS`
-records how far a language's resolver can be trusted; `RESOLUTION_DEFEATERS`
-records the constructs that void it for a given file. Neither is consulted by
-name at a call site.
+The rig does not decide tier 2 versus tier 3 itself. `ast.undefined_names`
+reports it on `resolution`, because the two things that decide it — the
+language's ceiling and the constructs present in the file — are both parser
+facts. The rig started with its own substring tables, and they were removed once
+the builtin owned the question; keeping them would have been a second copy of
+the policy, free to drift from the first. `lib/diagnostics.harn` now reads
+`resolution.complete` and names `resolution.defeaters` in the demoted line so
+the model can judge for itself.
+
+Because the rig reads a field that exists only in this worktree, `run.sh` uses
+the locally built harn rather than whatever is on `PATH`.
 
 `probe.harn` is the deterministic check that the tiers discriminate:
 

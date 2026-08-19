@@ -12,6 +12,12 @@ set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$here"
 
+# The rig reads `resolution` off ast.undefined_names, so it needs a harn built
+# from this worktree rather than whatever is on PATH. Override with HARN=... to
+# point at a specific binary.
+harn_cmd=${HARN:-"$here/../../scripts/harn_bin.sh --"}
+export HARN_BIN_NO_BUILD=${HARN_BIN_NO_BUILD:-1}
+
 mode="mock"
 llm=""
 trials=1
@@ -60,7 +66,7 @@ for fixture in $fixtures; do
       EXP_TRIAL="$trial" \
       EXP_OUT="$out" \
       EXP_MAX_ITER="$max_iter" \
-        harn playground \
+        $harn_cmd playground \
           --host host.harn \
           --script rig.harn \
           --task "diagnostics-timing" \
