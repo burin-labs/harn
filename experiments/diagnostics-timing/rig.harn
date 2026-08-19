@@ -67,6 +67,7 @@ pipeline default(harness: Harness) {
   // do-not-re-inject rule. `pending` holds diagnostics produced but not yet
   // delivered under the arm's timing.
   let shown = set()
+  let touched = set()
   let pending: list = []
   let idle_events = 0
   let surfaced_transient = 0
@@ -99,14 +100,29 @@ pipeline default(harness: Harness) {
       }
     }
   }
-  // Diagnostics this edit INTRODUCED: present after, absent before, and never
-  // shown already.
+  // What the model should be told about this file after an edit.
+  //
+  // On the FIRST edit to a file, the whole current reading is eligible: there is
+  // no session history for it, and a defect that predates the session is still a
+  // defect worth knowing about once. On every later edit, only what that edit
+  // introduced is eligible.
+  //
+  // Pure delta-from-previous-edit is what the industry ships, and it is subtly
+  // blind: a real typo already sitting in the file is never reported, because it
+  // is never NEW. Measured here — the pre-existing-typo fixture surfaced nothing
+  // in any arm until this first-touch rule existed. The `shown` set still means
+  // nothing is ever repeated, so first-touch costs at most one mention.
   fn introduced(path: string, before: string, after: string) -> list {
     const language = language_of(path)
     if language == "" {
       return []
     }
-    const prior = signatures_of(collect(harness.ast, before, language, path))
+    const prior = if touched.contains(path) {
+      signatures_of(collect(harness.ast, before, language, path))
+    } else {
+      set()
+    }
+    touched = touched.adding(path)
     const current = collect(harness.ast, after, language, path)
     return novel(current, prior, shown)
   }
@@ -227,7 +243,7 @@ pipeline default(harness: Harness) {
         const settle = on_tool_event(false)
         const verify = command_run(
           harness.tools,
-          {argv: [python, "-m", "unittest", "discover", "-s", ".", "-p", "test_*.py"], cwd: root},
+          {argv: [python, "-B", "-m", "unittest", "discover", "-s", ".", "-p", "test_*.py"], cwd: root},
           {capture: {max_inline_bytes: 8000}, timeout_ms: 60000},
         )
         let body = if verify.success {
@@ -316,20 +332,28 @@ pipeline default(harness: Harness) {
   const elapsed_ms = harness.clock.now_ms() - started
   const verify = command_run(
     harness.tools,
-    {argv: [python, "-m", "unittest", "discover", "-s", ".", "-p", "test_*.py"], cwd: root},
+    {argv: [python, "-B", "-m", "unittest", "discover", "-s", ".", "-p", "test_*.py"], cwd: root},
     {capture: {max_inline_bytes: 4000}, timeout_ms: 60000},
   )
-  // A detour call is a tool call made AFTER noise was surfaced whose arguments
-  // name something the task never required touching.
+  // A detour is the model going BACK to a name it was warned about. Writing the
+  // name once is the work the task asked for; the first call mentioning a marker
+  // is therefore never a detour, and every later mention of that same marker is.
+  //
+  // Counting "any call after the flush" would be wrong: the flush is triggered by
+  // the very edit that introduces the name, and the two live in different index
+  // spaces anyway, since host-provided tools do not pass through the rig's own
+  // event counter.
   let detour_calls = 0
-  let index = 0
-  for call in result.tools.calls {
-    index = index + 1
-    if noise_seen_at >= 0 && index > noise_seen_at {
-      const text = json_stringify(call?.arguments ?? {})
-      for marker in markers {
+  if noise_seen_at >= 0 {
+    for marker in markers {
+      let seen_once = false
+      for call in result.tools.calls {
+        const text = json_stringify(call?.arguments ?? {})
         if text.contains(to_string(marker)) {
-          detour_calls = detour_calls + 1
+          if seen_once {
+            detour_calls = detour_calls + 1
+          }
+          seen_once = true
         }
       }
     }

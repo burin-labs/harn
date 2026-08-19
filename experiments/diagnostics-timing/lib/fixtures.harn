@@ -102,12 +102,17 @@ class TypoTest(unittest.TestCase):
 
     def test_average(self):
         self.assertEqual(stats.average([2, 4]), 3)
+
+    def test_median(self):
+        self.assertEqual(stats.median([3, 1, 2]), 2)
+        self.assertEqual(stats.median([4, 1, 2, 3]), 2.5)
 """
 
 const DYNAMIC_CONSTANTS = """
 MAX_RETRIES = 3
 BASE_DELAY = 2
 JITTER = 1
+MAX_DELAY = 6
 """
 
 const DYNAMIC_MAIN = """
@@ -182,7 +187,14 @@ const FIXTURES = {
   },
   "genuine-typo": {
     files: {"stats.py": TYPO_MAIN, "test_stats.py": TYPO_TEST},
-    task: "The tests in test_stats.py are failing. Fix stats.py so they pass.",
+    // The task is to ADD something, so the model touches stats.py for a reason
+    // unrelated to the defect. That is what lets the pre-existing typo be
+    // surfaced at all: a post-edit checker only speaks after an edit, so a bug
+    // the model happens to fix in its first edit is never diagnosed, and the
+    // help direction would be unmeasurable. Measured — with a fix-it-only task
+    // the genuine finding surfaced zero times in all six arms.
+    task:
+      "Add a `median(items)` function to stats.py. Every test in test_stats.py must pass.",
     transient: [],
     permanent_noise: [],
     genuine: ["undefined name 'itmes'"],
@@ -193,10 +205,16 @@ const FIXTURES = {
       "retry.py": DYNAMIC_MAIN,
       "test_retry.py": DYNAMIC_TEST,
     },
+    // The new code must reference MAX_DELAY, which constants.py provides via the
+    // star import but retry.py has never used. That makes the false positive
+    // genuinely NEW to this file, so the novelty filter passes it through and
+    // only the demotion tier can catch it. A name already used in the file would
+    // be filtered as pre-existing and the fixture would prove nothing.
     task:
-      "Add a `backoff_capped(attempt)` function to retry.py that behaves like `backoff` but never returns more than 6. Run the tests to confirm.",
+      "Add a `backoff_capped(attempt)` function to retry.py that behaves like `backoff` but never returns more than MAX_DELAY, which constants.py already defines. Run the tests to confirm.",
     transient: [],
     permanent_noise: [
+      "undefined name 'MAX_DELAY'",
       "undefined name 'MAX_RETRIES'",
       "undefined name 'BASE_DELAY'",
       "undefined name 'JITTER'",

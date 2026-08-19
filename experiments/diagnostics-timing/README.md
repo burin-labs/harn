@@ -78,6 +78,26 @@ flip on which edit the model happens to make first.
 `clean-control` is the rig's own falsifier. If arms differ on it, the rig has an
 artifact and the race is invalid.
 
+Two fixture rules exist because a mock sweep proved they were needed, not
+because they seemed right:
+
+- **First touch reports the whole file; later edits report only the delta.** A
+  pure delta against the previous edit is what the industry ships, and it cannot
+  report a defect that predates the session, because such a defect is never new.
+  With a plain delta the pre-existing-typo fixture surfaced nothing in all six
+  arms. The do-not-re-inject set still applies, so first touch costs at most one
+  mention per finding.
+- **The typo fixture's task is to ADD something.** A post-edit checker only
+  speaks after an edit, so a bug the model fixes in its own first edit is never
+  diagnosed. The model has to touch the file for an unrelated reason before the
+  pre-existing defect can be surfaced at all.
+
+Python runs with `-B`. Fixing `itmes` to `items` leaves the file byte length
+unchanged, so CPython's size-and-mtime bytecode invalidation can miss the edit
+and re-run stale `__pycache__`. That produced arm-correlated false failures
+before it was found: the traceback showed corrected source while raising
+`NameError: name 'itmes' is not defined`.
+
 ## Running
 
 ```sh
