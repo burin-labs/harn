@@ -416,17 +416,21 @@ mod tests {
         // it. Locking the three live serving stacks here makes that explicit.
         reset();
 
-        // llama.cpp (:8001) — the fresh #5162 family sweep used two replicates
-        // across six coding-agent fixtures for each Qwen3.6 quant and found
-        // native unreliable (2/12, 0/12, and 2/12 native passes for Q8, Q5,
-        // and Q4 respectively, versus 8/12 text passes for each). A native
-        // request therefore steers to the receipted JSON text contract.
+        // llama.cpp (:8001) — the 2026-08-18 forced-format sweep re-measured
+        // the same Q4_K_XL quant the #5162 receipt used and found native
+        // returning parseable calls on every measurable cell, so the route no
+        // longer steers away from native. This is the serving-stack contrast
+        // the test exists for: same weights as the Ollama route below, opposite
+        // answer, because the serving stack differs rather than the model.
         let llamacpp = validate_tool_format("llamacpp", "qwen3.6-35b-a3b-ud-q4-k-xl", "native");
         assert_eq!(
-            llamacpp.effective, "json",
-            "llama.cpp Qwen3.6 native route must steer to the measured text contract"
+            llamacpp.effective, "native",
+            "llama.cpp Qwen3.6 serves native tool calls; the sweep retired the JSON steer"
         );
-        assert!(llamacpp.correction.is_some());
+        assert!(
+            llamacpp.correction.is_none(),
+            "an honored request must not carry a correction"
+        );
 
         // Ollama (/v1) — the embedded qwen tool-call parser 500s on text-mode
         // output, so this route is served on the text/json channel: a native

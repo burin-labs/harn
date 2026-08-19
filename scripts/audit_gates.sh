@@ -120,6 +120,12 @@ GATES=(
   check-provider-catalog
   check-provider-catalog-drift
   check-ported-handler-loc
+  # Both run in `make all` and in CI's repository-policy job, but neither was in
+  # this fanout, so a green local audit sweep said nothing about them. Annotating
+  # a public stdlib fn resolves its return-type baseline entry and makes the
+  # entry STALE, which the gate rejects; that failure surfaced only in CI.
+  check-stdlib-strict-types
+  check-stdlib-public-return-types
   check-source-file-lengths
   check-python-boundary
   check-harn-syntax-sensitive-scans

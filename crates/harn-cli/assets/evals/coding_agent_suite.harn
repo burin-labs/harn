@@ -796,15 +796,38 @@ fn __verify_read_only_audit(fs: HarnessFs, root: string, result) {
   )
 }
 
+// Accepted spellings for "this subtracts and should add". The fixture has no
+// tools, so the answer is prose and the oracle has to read prose. It stays
+// deterministic and keeps the bar where the task set it: name the operator
+// being replaced AND the one replacing it. Matching only "subtraction" and
+// "addition" failed correct answers that wrote "subtracts" and "plus operator".
+// Bare "add" is deliberately absent from the target list: the function under
+// diagnosis is named `add`, so it appears in every answer including wrong ones.
+const __DIAGNOSIS_SOURCE_FORMS = ["a - b", "subtract", "minus"]
+
+const __DIAGNOSIS_TARGET_FORMS = ["a + b", "addition", "adds", "plus"]
+
+fn __mentions_any(haystack: string, forms: list<string>) -> bool {
+  for form in forms {
+    if contains(haystack, form) {
+      return true
+    }
+  }
+  return false
+}
+
 fn __verify_no_tool_diagnosis(result) {
   const final_text = __final_text(result)
   const normalized = lowercase(final_text)
-  const describes_change = contains(final_text, "return a + b")
-    || (contains(normalized, "subtraction")
-    && contains(
+  // Quoting the corrected line is sufficient on its own; otherwise the answer
+  // must name both sides of the swap, so "use addition" without identifying
+  // the subtraction still fails.
+  const describes_change = contains(normalized, "a + b")
+    || (__mentions_any(
     normalized,
-    "addition",
-  ))
+    __DIAGNOSIS_SOURCE_FORMS,
+  )
+    && __mentions_any(normalized, __DIAGNOSIS_TARGET_FORMS))
   const success = __tool_call_count(result) == 0
     && contains(final_text, "PATCH_HINT")
     && describes_change

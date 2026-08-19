@@ -712,7 +712,10 @@ mod tests {
         let caps = lookup("llamacpp", "unsloth/Qwen3.6-35B-A3B-GGUF");
         assert!(!caps.thinking_modes.is_empty());
         assert!(caps.preserve_thinking);
-        assert!(!caps.native_tools); // the receipted family sweep keeps JSON text
+        // The 2026-08-18 forced-format sweep is the receipted family sweep the
+        // old JSON pin was waiting on: native returned parseable calls on every
+        // measurable cell. The text channel stays supported as the fallback.
+        assert!(caps.native_tools);
         assert!(caps.text_tool_wire_format_supported);
         assert_eq!(caps.server_parser, "none");
     }

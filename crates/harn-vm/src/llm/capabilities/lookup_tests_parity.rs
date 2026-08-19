@@ -21,9 +21,13 @@ fn tool_mode_parity_reports_whether_anyone_declared_it() {
         Some(ToolModeParitySource::Derived)
     );
 
-    // Same verdict, but authored on the row rather than computed.
+    // A verdict authored on the row rather than computed. The value differs
+    // from the derived case above; what this pins is the provenance.
     let declared = lookup("llamacpp", "qwen3.6-35b-a3b");
-    assert_eq!(declared.tool_mode_parity.as_deref(), Some("text_only"));
+    assert_eq!(
+        declared.tool_mode_parity.as_deref(),
+        Some("interchangeable")
+    );
     assert_eq!(
         declared.tool_mode_parity_source,
         Some(ToolModeParitySource::Declared)
