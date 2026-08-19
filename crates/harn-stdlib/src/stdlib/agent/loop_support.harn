@@ -1,5 +1,9 @@
 pub import { agent_autocompact_if_needed, agent_emergency_compact } from "std/agent/autocompact"
-pub import { agent_budget_post_call_blocked, agent_budget_pre_call_blocked } from "std/agent/budget"
+pub import {
+  agent_budget_post_call_blocked,
+  agent_budget_post_call_stop_reason,
+  agent_budget_pre_call_blocked,
+} from "std/agent/budget"
 pub import {
   agent_loop_apply_command,
   agent_loop_control_invoke,

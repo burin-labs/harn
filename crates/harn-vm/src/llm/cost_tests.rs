@@ -180,6 +180,61 @@ fn calculate_cost_for_provider_falls_back_to_provider_economics() {
 }
 
 #[test]
+fn self_hosted_routes_are_priced_at_zero_and_paid_routes_stay_unpriced() {
+    let _guard = crate::llm::env_guard();
+    crate::llm_config::clear_user_overrides();
+
+    // Every shipped local provider also spells `cost_per_1k_* = 0.0`, so these
+    // would pass without the `local_runtime` fallback below. They pin the
+    // catalog's coherence, not the fallback.
+    for provider in ["llamacpp", "ollama", "mlx", "vllm"] {
+        let cost = pricing_aware_call_cost(provider, "any-locally-served-model", 1_000, 1_000);
+        assert_eq!(
+            cost,
+            Some(0.0),
+            "{provider} declares local_runtime, so its rate is known-zero, not unknown"
+        );
+    }
+
+    // The fallback itself: a self-hosted provider that never spells a rate is
+    // still known-zero. Without this, adding a local runtime and forgetting
+    // `cost_per_1k_*` silently reintroduces the unpriced-call stop.
+    let mut overlay = crate::llm_config::ProvidersConfig::default();
+    overlay.providers.insert(
+        "rateless-local".to_string(),
+        crate::llm_config::ProviderDef {
+            local_runtime: Some(crate::llm_config::LocalRuntimeDef::default()),
+            cost_per_1k_in: None,
+            cost_per_1k_out: None,
+            ..crate::llm_config::ProviderDef::default()
+        },
+    );
+    crate::llm_config::set_user_overrides(Some(overlay));
+    assert!(crate::llm_config::provider_is_self_hosted("rateless-local"));
+    assert_eq!(
+        pricing_aware_call_cost("rateless-local", "whatever", 1_000, 1_000),
+        Some(0.0),
+        "a self-hosted provider that declares no rate is still known-zero"
+    );
+    crate::llm_config::clear_user_overrides();
+
+    // Negative pin: the fix must not launder unknown pricing into a free
+    // ride for a paid provider that simply has no catalog row.
+    assert_eq!(
+        pricing_aware_call_cost("some-unlisted-paid-provider", "whatever", 1_000, 1_000),
+        None,
+        "a provider with neither catalog pricing nor a local runtime stays unpriced"
+    );
+
+    // The predicate both readers resolve "bills nothing" through.
+    assert!(crate::llm_config::provider_is_self_hosted("llamacpp"));
+    assert!(!crate::llm_config::provider_is_self_hosted("openai"));
+    assert!(!crate::llm_config::provider_is_self_hosted(
+        "some-unlisted-paid-provider"
+    ));
+}
+
+#[test]
 fn calculate_cost_for_provider_with_cache_applies_cache_read_discount() {
     let _guard = crate::llm::env_guard();
     crate::llm_config::clear_user_overrides();

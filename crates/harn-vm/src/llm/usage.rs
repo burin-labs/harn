@@ -205,26 +205,35 @@ impl LlmUsage {
             .mock_replay_cost_usd()
             .or(result.telemetry.provider_cost_usd)
             .or_else(|| super::managed_supply::authoritative_cost_usd(result));
-        let cost_usd = authoritative_cost.or_else(|| {
-            if !usage_known {
-                return None;
-            }
-            super::cost::pricing_detail_for_tier(
-                &result.provider,
-                &result.model,
-                result.served_fast,
-                result.input_tokens,
-            )
-            .map(|detail| {
-                super::cost::project_call_cost(
-                    &detail,
+        // A self-hosted route bills nothing whether or not it reported token
+        // counts, so its cost is known before its usage is. Leaving it to the
+        // gate below would price it `None` on any server that omits usage
+        // (streaming llama.cpp among them), and an unpriced call spends a USD
+        // ceiling whole. `usage_unknown_calls` still records that the token
+        // counts were missing: that stays unknown, only the cost does not.
+        let free_route = crate::llm_config::provider_is_self_hosted(&result.provider);
+        let cost_usd = authoritative_cost
+            .or_else(|| free_route.then_some(0.0))
+            .or_else(|| {
+                if !usage_known {
+                    return None;
+                }
+                super::cost::pricing_detail_for_tier(
+                    &result.provider,
+                    &result.model,
+                    result.served_fast,
                     result.input_tokens,
-                    result.output_tokens,
-                    result.cache_read_tokens,
-                    result.cache_write_tokens,
                 )
-            })
-        });
+                .map(|detail| {
+                    super::cost::project_call_cost(
+                        &detail,
+                        result.input_tokens,
+                        result.output_tokens,
+                        result.cache_read_tokens,
+                        result.cache_write_tokens,
+                    )
+                })
+            });
         let cache_hit_ratio = result.cache_supported.then(|| {
             super::cost::cache_hit_ratio(
                 result.input_tokens,
@@ -654,6 +663,53 @@ mod tests {
                 )],
             },
         }
+    }
+
+    /// A locally served call that reports no token usage at all, which is what
+    /// a streaming llama.cpp server sends. Its cost is still known, because the
+    /// route bills nothing; only its token counts are missing.
+    fn self_hosted_result_without_usage() -> LlmResult {
+        LlmResult {
+            input_tokens: 0,
+            output_tokens: 0,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+            cache_supported: false,
+            model: "some-locally-served-model".to_string(),
+            provider: "llamacpp".to_string(),
+            attempts: ProviderAttempts::default(),
+            ..accounted_result()
+        }
+    }
+
+    #[test]
+    fn self_hosted_call_without_reported_usage_is_priced_but_still_usage_unknown() {
+        let usage = self_hosted_result_without_usage().usage();
+
+        // The half that was wrong: an unpriced call spends a whole USD ceiling,
+        // so this is what ended budgeted local runs after one model call.
+        assert_eq!(usage.cost_usd, Some(0.0));
+        assert_eq!(usage.unpriced_calls, 0);
+
+        // The half that must stay honest: nothing here tells us how many
+        // tokens the call used, and the ledger should not pretend otherwise.
+        assert_eq!(usage.usage_unknown_calls, 1);
+        assert_eq!(usage.accounting_status, UsageAccountingStatus::Unknown);
+    }
+
+    #[test]
+    fn paid_call_without_reported_usage_stays_unpriced() {
+        let result = LlmResult {
+            provider: "anthropic".to_string(),
+            ..self_hosted_result_without_usage()
+        };
+        let usage = result.usage();
+
+        assert_eq!(
+            usage.cost_usd, None,
+            "a paid route with no usage counts and no provider cost cannot be priced"
+        );
+        assert_eq!(usage.unpriced_calls, 1);
     }
 
     #[test]
