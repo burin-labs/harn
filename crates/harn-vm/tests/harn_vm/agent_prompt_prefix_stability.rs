@@ -216,6 +216,20 @@ fn assert_append_only(requests: &[CapturedRequest]) {
         "the probe must capture at least two provider requests; got {}",
         requests.len()
     );
+    // "N+1 begins with N" is trivially true when every capture is identical,
+    // which is exactly what a loop that appended nothing would produce. Require
+    // the transcript to have actually grown, or the walk below proves nothing.
+    let (first, last) = (
+        requests.first().expect("checked non-empty above"),
+        requests.last().expect("checked non-empty above"),
+    );
+    assert!(
+        last.len() > first.len(),
+        "the captured requests must differ: the last request has {} messages and the first has \
+         {}, so an append-only walk over them is vacuous",
+        last.len(),
+        first.len(),
+    );
     for window in requests.windows(2) {
         let (previous, next) = (&window[0], &window[1]);
         if let Some(index) = first_divergence(previous, next) {
@@ -255,6 +269,15 @@ fn reminder_placement_keeps_the_request_prefix_append_only() {
         "loop must reach a terminal `done` status; lines: {lines:?}"
     );
     let requests = captured_requests(&lines);
+    // Pin the iteration count exactly. The mock answers the first call with a
+    // tool call and only then finishes, so a run that reached `done` on one
+    // provider call means the loop never took a second turn and the invariant
+    // was never actually exercised.
+    assert_eq!(
+        requests.len(),
+        2,
+        "the loop must have taken exactly two turns; requests: {requests:#?}"
+    );
     assert_append_only(&requests);
 
     // The invariant is satisfiable by a run that emitted no directive at all,
