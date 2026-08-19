@@ -8,9 +8,17 @@ Default live command:
 
 ```bash
 cd ~/projects/harn-bump-fleet
-harn run --no-sandbox release_harn.harn -- \
+scripts/run_harn_release.sh \
   --repo ~/projects/harn --mode ship-pr --agent --yes-live-release
 ```
+
+`scripts/run_harn_release.sh` is the canonical release boundary. Call it rather
+than invoking `release_harn.harn` through `harn run` directly: on macOS it
+intercepts a live `prepare` or `ship-pr` and dispatches the canonical hosted
+Linux workflow, because the release audit exercises nested OS sandboxes that
+Seatbelt refuses to apply under Harn's default-deny outer profile. The harness
+does not perform that handoff itself, so calling it directly on macOS starts a
+local release the gate cannot certify.
 
 `ship-pr` prepares the release content, commits it, pushes the branch, pushes
 the signed `vX.Y.Z` tag at the pinned release commit, opens the `Release
