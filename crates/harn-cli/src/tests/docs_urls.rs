@@ -82,8 +82,21 @@ fn referenced_doc_paths(root: &Path) -> BTreeSet<String> {
 #[test]
 fn every_documentation_link_resolves_to_a_published_page() {
     let root = repo_root();
+    let referenced = referenced_doc_paths(&root);
+
+    // A renamed crate or moved source tree would leave the scan with nothing
+    // to check, and a gate that finds nothing passes for the wrong reason.
+    // The missing-credentials error carries this link, so its absence means
+    // the scan stopped working, not that the link went away.
+    assert!(
+        referenced.contains("provider-setup.html"),
+        "the link scan found no known documentation URL — it is no longer \
+         reading the shipped sources (found {} path(s))",
+        referenced.len()
+    );
+
     let mut broken = Vec::new();
-    for path in referenced_doc_paths(&root) {
+    for path in referenced {
         if PRERENDERED_EXCEPTIONS.contains(&path.as_str()) {
             continue;
         }
