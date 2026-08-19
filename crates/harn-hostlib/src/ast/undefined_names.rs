@@ -29,6 +29,7 @@ use crate::error::HostlibError;
 use crate::tools::args::{build_dict, dict_arg, optional_int, optional_string, str_value};
 
 use super::language::Language;
+use super::name_resolution;
 use super::parse::{parse_source, read_source};
 use super::types::UndefinedName;
 
@@ -78,11 +79,13 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
 
     let diagnostics = diagnose(&tree, &source, language);
     let dlist: Vec<VmValue> = diagnostics.iter().map(UndefinedName::to_vm_value).collect();
+    let resolution = name_resolution::assess(&tree, &source, language);
 
     Ok(build_dict([
         ("path", str_value(path_str.as_deref().unwrap_or(""))),
         ("language", str_value(language.name())),
         ("supported", VmValue::Bool(true)),
+        ("resolution", resolution.to_vm_value()),
         ("diagnostics", VmValue::List(Arc::new(dlist))),
     ]))
 }
@@ -92,15 +95,26 @@ fn unsupported_response(path: Option<&str>, language: Language) -> VmValue {
         ("path", str_value(path.unwrap_or(""))),
         ("language", str_value(language.name())),
         ("supported", VmValue::Bool(false)),
+        (
+            "resolution",
+            name_resolution::Resolution::unanalysed(language).to_vm_value(),
+        ),
         ("diagnostics", VmValue::List(Arc::new(Vec::new()))),
     ])
 }
 
+/// The file parsed badly enough that no name analysis ran. An empty diagnostic
+/// list here means "nothing was checked", never "nothing is wrong", so the
+/// resolution reading must say so.
 fn empty_response(path: Option<&str>, language: Language) -> VmValue {
     build_dict([
         ("path", str_value(path.unwrap_or(""))),
         ("language", str_value(language.name())),
         ("supported", VmValue::Bool(true)),
+        (
+            "resolution",
+            name_resolution::Resolution::unanalysed(language).to_vm_value(),
+        ),
         ("diagnostics", VmValue::List(Arc::new(Vec::new()))),
     ])
 }

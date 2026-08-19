@@ -11,14 +11,51 @@
       "type": "boolean",
       "description": "False when no profile exists for the resolved language. In that case `diagnostics` is empty."
     },
+    "resolution": { "$ref": "#/$defs/Resolution" },
     "diagnostics": {
       "type": "array",
       "items": { "$ref": "#/$defs/Diagnostic" }
     }
   },
-  "required": ["path", "language", "supported", "diagnostics"],
+  "required": ["path", "language", "supported", "resolution", "diagnostics"],
   "additionalProperties": false,
   "$defs": {
+    "Resolution": {
+      "type": "object",
+      "description": "How far this file's name analysis can be trusted. A diagnostic is evidence of a defect only when `complete` is true; otherwise an unresolved name may simply be one this single-file analysis could not see.",
+      "properties": {
+        "complete": {
+          "type": "boolean",
+          "description": "True only when the analysis ran, the language's ceiling is `single_file_complete`, and the file introduced no defeater."
+        },
+        "analysed": {
+          "type": "boolean",
+          "description": "False when no analysis ran at all: an unsupported language, or a file that did not parse. Distinguishes `we looked and found nothing` from `we did not look`."
+        },
+        "ceiling": {
+          "type": "string",
+          "enum": ["single_file_complete", "package_scoped", "runtime_resolved"],
+          "description": "The language's limit. `single_file_complete`: every name must be imported or bound in this file. `package_scoped`: sibling files in the same package contribute names with no import. `runtime_resolved`: names are routinely created at runtime."
+        },
+        "defeaters": {
+          "type": "array",
+          "description": "Constructs found in this file that defeat resolution, each reported once.",
+          "items": {
+            "type": "string",
+            "enum": [
+              "wildcard_import",
+              "dynamic_name_access",
+              "dynamic_method_definition",
+              "eval",
+              "with_scope",
+              "syntax_error"
+            ]
+          }
+        }
+      },
+      "required": ["complete", "analysed", "ceiling", "defeaters"],
+      "additionalProperties": false
+    },
     "Diagnostic": {
       "type": "object",
       "properties": {

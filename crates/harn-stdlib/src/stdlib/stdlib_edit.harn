@@ -846,6 +846,16 @@ fn __refactor_indent_lines(lines, prefix) {
   )
 }
 
+/**
+ * Free names in an extracted snippet, which become the extracted function's
+ * parameters.
+ *
+ * This deliberately ignores the response's `resolution` field. That field
+ * answers "can this FILE's names be resolved", which is the right question for
+ * reporting a defect and the wrong one here: `src` is a fragment, so it is
+ * expected not to parse standalone and expected to reference names bound by its
+ * surrounding scope. Those free names are exactly what we want as parameters.
+ */
 fn __refactor_undef_names(ast: HarnessAst, src, language) {
   const r = ast.undefined_names({content: src, language: language})
   if !(r?.supported ?? false) {
