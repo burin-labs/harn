@@ -902,12 +902,36 @@ pub fn provider_has_feature(provider: &str, feature: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// Whether a provider serves from hardware the caller already owns, which the
+/// registry states by giving it a `local_runtime` table.
+///
+/// This is the single predicate behind "this route bills nothing". Spend
+/// accounting distinguishes a rate that is zero from a rate that is unknown,
+/// and only the second one is allowed to stop a budgeted run, so every reader
+/// of that distinction resolves it here rather than matching provider ids.
+pub fn provider_is_self_hosted(provider: &str) -> bool {
+    provider_config(provider).is_some_and(|p| p.local_runtime.is_some())
+}
+
 /// Provider-level catalog pricing/latency. Model-specific catalog pricing
 /// wins when available; this is the adapter-level fallback used by routing
 /// and portal summaries when a model has no explicit catalog entry.
+///
+/// A self-hosted provider's per-token rate is known to be zero rather than
+/// unknown. Reporting `None` instead would mark its calls unpriced, and an
+/// unpriced call consumes a whole USD ceiling fail-closed.
 pub fn provider_economics(provider: &str) -> (Option<f64>, Option<f64>, Option<u64>) {
     provider_config(provider)
-        .map(|p| (p.cost_per_1k_in, p.cost_per_1k_out, p.latency_p50_ms))
+        .map(|p| {
+            if p.local_runtime.is_some() {
+                return (
+                    Some(p.cost_per_1k_in.unwrap_or(0.0)),
+                    Some(p.cost_per_1k_out.unwrap_or(0.0)),
+                    p.latency_p50_ms,
+                );
+            }
+            (p.cost_per_1k_in, p.cost_per_1k_out, p.latency_p50_ms)
+        })
         .unwrap_or((None, None, None))
 }
 
