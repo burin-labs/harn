@@ -2135,7 +2135,23 @@ structured_output = "native"
 # from a 13-action edit schema, despite the old Q4 one-tool native smoke. Keep
 # every llama.cpp Qwen3.6 variant on the measurable JSON text channel until a
 # receipted forced-format family sweep proves otherwise.
-tool_mode_parity = "text_only"
+# MEASUREMENT INSTRUMENT, NOT A VERDICT, and NOT a claim that native works.
+# `text_only` is not merely a record of a past result here: it is an active
+# steer. `validate_tool_format_with_caps` rewrites a requested `native` to the
+# preferred text format whenever parity forbids the native channel, and that
+# rewrite happens in the Rust option extraction, which does NOT read
+# `tool_format_override_reason`. So a probe that forces native gets a native
+# prompt from the Harn side and a steered, tool-less request on the wire. That
+# is observed, not inferred: on 2026-08-19 against tornadough the run resolved
+# tool_format = native, emitted the override event, and the wire carried zero
+# tools on two of two requests even with native_tools already true.
+# `unknown` is the honest value for a route whose measurement has not concluded.
+# It asserts nothing about either channel, and it removes the steer so the arm
+# under test is the arm that reaches the server. `preferred_tool_format` stays
+# `json`, so the DEFAULT path is unchanged and only an explicit pin moves.
+# Whether this row becomes `interchangeable`, returns to `text_only`, or lands
+# somewhere else is what the CUDA receipt decides.
+tool_mode_parity = "unknown"
 tool_mode_parity_notes = "2026-07-19 #5162 CUDA receipt: freshly restarted ghcr.io/ggml-org/llama.cpp:server-cuda servers used --jinja, --reasoning-format deepseek, --chat-template-kwargs {\"enable_thinking\":false}, -np 1, -fa on, and q8_0 K/V cache. Six coding-agent fixtures were forced through native and JSON text formats with two replicates per format on Q4_K_XL (native 2/12, text 8/12; -ngl 999, -c 65536), Q5_K_XL (native 0/12, text 8/12; -ngl 999, -c 65536), and Q8_0 base (native 2/12, text 8/12; -ngl 35, -c 16384 because the 36.9 GB model does not fit this 32 GiB GPU). All rows reached high classifier confidence; see .harn-runs/coding-agent-bench/latest/tool_mode_parity_overlay.toml and the per-quant receipts. Native remained unreliable across the family, so keep JSON text tooling; server_parser = none."
 # Qwen3.6's tokenizer reserves <tool_call>/</tool_call> as single special
 # tokens; reusing them as text-format delimiters collapses the agent loop into
