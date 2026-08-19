@@ -249,8 +249,8 @@
 #                     valid requests, silently contaminating any eval/meter that
 #                     trusts its numbers. This is the data-driven sibling of the
 #                     route-around fields above: instead of routing AROUND a bad
-#                     upstream it LABELS the measured precision so tooling (the
-#                     Burin meter precision canary) can refuse to trust a
+#                     upstream it LABELS the measured precision so tooling (an
+#                     embedder's meter precision canary) can refuse to trust a
 #                     `degraded` route. Known values: `trusted` (full precision,
 #                     reference-verified), `degraded` (proven reduced quality —
 #                     e.g. SambaNova gpt-oss quantized: 0/5 vs OpenRouter 3/3),

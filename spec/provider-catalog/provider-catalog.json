@@ -9871,12 +9871,12 @@
         ]
       },
       "tool_support": {
-        "native": false,
+        "native": true,
         "text": true,
-        "preferred_format": "json",
-        "parity": "text_only",
+        "preferred_format": "native",
+        "parity": "interchangeable",
         "parity_source": "declared",
-        "parity_notes": "2026-07-19 #5162 CUDA receipt: freshly restarted ghcr.io/ggml-org/llama.cpp:server-cuda servers used --jinja, --reasoning-format deepseek, --chat-template-kwargs {\"enable_thinking\":false}, -np 1, -fa on, and q8_0 K/V cache. Six coding-agent fixtures were forced through native and JSON text formats with two replicates per format on Q4_K_XL (native 2/12, text 8/12; -ngl 999, -c 65536), Q5_K_XL (native 0/12, text 8/12; -ngl 999, -c 65536), and Q8_0 base (native 2/12, text 8/12; -ngl 35, -c 16384 because the 36.9 GB model does not fit this 32 GiB GPU). All rows reached high classifier confidence; see .harn-runs/coding-agent-bench/latest/tool_mode_parity_overlay.toml and the per-quant receipts. Native remained unreliable across the family, so keep JSON text tooling; server_parser = none.",
+        "parity_notes": "2026-08-18 Metal receipt, supersedes the 2026-07-19 #5162 CUDA receipt. llama-server b10360-48d22e295 on Apple Silicon, Qwen3.6-35B-A3B-UD-Q4_K_XL, n_ctx 65536, chat template present. This is the SAME quant as the prior receipt's Q4_K_XL row (native 2/12, text 8/12), so it is a directly comparable arm rather than a sibling quant. Six coding-agent fixtures, two replicates, forced through three formats: native 10/12, tagged text 10/12, fenced JSON 8/12. Both failures in EVERY arm were no-tool-diagnosis, whose grader matched phrasing rather than the diagnosis (harn#6843, fixed alongside this row); on the ten measurable cells the arms are native 10/10, text 10/10, json 8/10. Two-sided Fisher separates NOTHING on completion: native vs json p=0.474, native vs text p=1.000. This receipt therefore makes NO claim of a native completion advantage. What it does establish is that native returns parseable tool calls on this route, which falsifies the prior text_only verdict: 58 successful native dispatches including real file edits and command runs. The wire capture names a coercion cost rather than claiming purity: of six chat requests captured through an intercepting proxy, five carried a plain tools array (6 tools, tool_choice null) with NO grammar and NO response_format, and one carried response_format with no tools array, which is the repair/output-contract turn and stays enabled by design. The arm is therefore native over a plain tools channel with the repair-turn contract ACTIVE, not an unconstrained channel. Across the twelve native cells every recorded repair trace reports repaired = false, so no turn's output actually had to be rewritten; that field does not establish whether a decode constraint was imposed on those turns, and the proxy window covers six requests rather than all 58. Pre-registered validity gate, fixed before the matrix was read: any arm with skipped_runs > 0 is INVALID and reruns. All three arms recorded skipped_runs = 0 (native 12 runs, 10 passed 2 failed; text 12, 10/2; json 12, 8/4). preferred_tool_format moved to native on that TIE plus secondary evidence: 158s vs 200s (text) vs 235s (json) total wall, 52 vs 64 vs 66 iterations, and a 3070-character system prompt against 10026 for the text channel, which must teach its dialect every turn. INSTRUMENT DISCLOSURE: the native arm was measured with a local capability override setting native_tools = true, because with native_tools = false no tools array reaches the wire and the arm cannot be measured at all; the text and json arms ran on unmodified capability bytes. Build: branch head c5e1fed2f with harn#6842 (self-hosted routes priced at zero) merged in, without which every budgeted local run ended after one model call and no completion number on this route was meaningful. No single cause is attributed to the reversal from the prior receipt: hardware, runtime build, and revision all differ. server_parser = none.",
         "tool_search": []
       },
       "structured_output": "native",
@@ -9963,12 +9963,12 @@
         ]
       },
       "tool_support": {
-        "native": false,
+        "native": true,
         "text": true,
-        "preferred_format": "json",
-        "parity": "text_only",
+        "preferred_format": "native",
+        "parity": "interchangeable",
         "parity_source": "declared",
-        "parity_notes": "2026-07-19 #5162 CUDA receipt: freshly restarted ghcr.io/ggml-org/llama.cpp:server-cuda servers used --jinja, --reasoning-format deepseek, --chat-template-kwargs {\"enable_thinking\":false}, -np 1, -fa on, and q8_0 K/V cache. Six coding-agent fixtures were forced through native and JSON text formats with two replicates per format on Q4_K_XL (native 2/12, text 8/12; -ngl 999, -c 65536), Q5_K_XL (native 0/12, text 8/12; -ngl 999, -c 65536), and Q8_0 base (native 2/12, text 8/12; -ngl 35, -c 16384 because the 36.9 GB model does not fit this 32 GiB GPU). All rows reached high classifier confidence; see .harn-runs/coding-agent-bench/latest/tool_mode_parity_overlay.toml and the per-quant receipts. Native remained unreliable across the family, so keep JSON text tooling; server_parser = none.",
+        "parity_notes": "2026-08-18 Metal receipt, supersedes the 2026-07-19 #5162 CUDA receipt. llama-server b10360-48d22e295 on Apple Silicon, Qwen3.6-35B-A3B-UD-Q4_K_XL, n_ctx 65536, chat template present. This is the SAME quant as the prior receipt's Q4_K_XL row (native 2/12, text 8/12), so it is a directly comparable arm rather than a sibling quant. Six coding-agent fixtures, two replicates, forced through three formats: native 10/12, tagged text 10/12, fenced JSON 8/12. Both failures in EVERY arm were no-tool-diagnosis, whose grader matched phrasing rather than the diagnosis (harn#6843, fixed alongside this row); on the ten measurable cells the arms are native 10/10, text 10/10, json 8/10. Two-sided Fisher separates NOTHING on completion: native vs json p=0.474, native vs text p=1.000. This receipt therefore makes NO claim of a native completion advantage. What it does establish is that native returns parseable tool calls on this route, which falsifies the prior text_only verdict: 58 successful native dispatches including real file edits and command runs. The wire capture names a coercion cost rather than claiming purity: of six chat requests captured through an intercepting proxy, five carried a plain tools array (6 tools, tool_choice null) with NO grammar and NO response_format, and one carried response_format with no tools array, which is the repair/output-contract turn and stays enabled by design. The arm is therefore native over a plain tools channel with the repair-turn contract ACTIVE, not an unconstrained channel. Across the twelve native cells every recorded repair trace reports repaired = false, so no turn's output actually had to be rewritten; that field does not establish whether a decode constraint was imposed on those turns, and the proxy window covers six requests rather than all 58. Pre-registered validity gate, fixed before the matrix was read: any arm with skipped_runs > 0 is INVALID and reruns. All three arms recorded skipped_runs = 0 (native 12 runs, 10 passed 2 failed; text 12, 10/2; json 12, 8/4). preferred_tool_format moved to native on that TIE plus secondary evidence: 158s vs 200s (text) vs 235s (json) total wall, 52 vs 64 vs 66 iterations, and a 3070-character system prompt against 10026 for the text channel, which must teach its dialect every turn. INSTRUMENT DISCLOSURE: the native arm was measured with a local capability override setting native_tools = true, because with native_tools = false no tools array reaches the wire and the arm cannot be measured at all; the text and json arms ran on unmodified capability bytes. Build: branch head c5e1fed2f with harn#6842 (self-hosted routes priced at zero) merged in, without which every budgeted local run ended after one model call and no completion number on this route was meaningful. No single cause is attributed to the reversal from the prior receipt: hardware, runtime build, and revision all differ. server_parser = none.",
         "tool_search": []
       },
       "structured_output": "native",
@@ -10031,12 +10031,12 @@
         ]
       },
       "tool_support": {
-        "native": false,
+        "native": true,
         "text": true,
-        "preferred_format": "json",
-        "parity": "text_only",
+        "preferred_format": "native",
+        "parity": "interchangeable",
         "parity_source": "declared",
-        "parity_notes": "2026-07-19 #5162 CUDA receipt: freshly restarted ghcr.io/ggml-org/llama.cpp:server-cuda servers used --jinja, --reasoning-format deepseek, --chat-template-kwargs {\"enable_thinking\":false}, -np 1, -fa on, and q8_0 K/V cache. Six coding-agent fixtures were forced through native and JSON text formats with two replicates per format on Q4_K_XL (native 2/12, text 8/12; -ngl 999, -c 65536), Q5_K_XL (native 0/12, text 8/12; -ngl 999, -c 65536), and Q8_0 base (native 2/12, text 8/12; -ngl 35, -c 16384 because the 36.9 GB model does not fit this 32 GiB GPU). All rows reached high classifier confidence; see .harn-runs/coding-agent-bench/latest/tool_mode_parity_overlay.toml and the per-quant receipts. Native remained unreliable across the family, so keep JSON text tooling; server_parser = none.",
+        "parity_notes": "2026-08-18 Metal receipt, supersedes the 2026-07-19 #5162 CUDA receipt. llama-server b10360-48d22e295 on Apple Silicon, Qwen3.6-35B-A3B-UD-Q4_K_XL, n_ctx 65536, chat template present. This is the SAME quant as the prior receipt's Q4_K_XL row (native 2/12, text 8/12), so it is a directly comparable arm rather than a sibling quant. Six coding-agent fixtures, two replicates, forced through three formats: native 10/12, tagged text 10/12, fenced JSON 8/12. Both failures in EVERY arm were no-tool-diagnosis, whose grader matched phrasing rather than the diagnosis (harn#6843, fixed alongside this row); on the ten measurable cells the arms are native 10/10, text 10/10, json 8/10. Two-sided Fisher separates NOTHING on completion: native vs json p=0.474, native vs text p=1.000. This receipt therefore makes NO claim of a native completion advantage. What it does establish is that native returns parseable tool calls on this route, which falsifies the prior text_only verdict: 58 successful native dispatches including real file edits and command runs. The wire capture names a coercion cost rather than claiming purity: of six chat requests captured through an intercepting proxy, five carried a plain tools array (6 tools, tool_choice null) with NO grammar and NO response_format, and one carried response_format with no tools array, which is the repair/output-contract turn and stays enabled by design. The arm is therefore native over a plain tools channel with the repair-turn contract ACTIVE, not an unconstrained channel. Across the twelve native cells every recorded repair trace reports repaired = false, so no turn's output actually had to be rewritten; that field does not establish whether a decode constraint was imposed on those turns, and the proxy window covers six requests rather than all 58. Pre-registered validity gate, fixed before the matrix was read: any arm with skipped_runs > 0 is INVALID and reruns. All three arms recorded skipped_runs = 0 (native 12 runs, 10 passed 2 failed; text 12, 10/2; json 12, 8/4). preferred_tool_format moved to native on that TIE plus secondary evidence: 158s vs 200s (text) vs 235s (json) total wall, 52 vs 64 vs 66 iterations, and a 3070-character system prompt against 10026 for the text channel, which must teach its dialect every turn. INSTRUMENT DISCLOSURE: the native arm was measured with a local capability override setting native_tools = true, because with native_tools = false no tools array reaches the wire and the arm cannot be measured at all; the text and json arms ran on unmodified capability bytes. Build: branch head c5e1fed2f with harn#6842 (self-hosted routes priced at zero) merged in, without which every budgeted local run ended after one model call and no completion number on this route was meaningful. No single cause is attributed to the reversal from the prior receipt: hardware, runtime build, and revision all differ. server_parser = none.",
         "tool_search": []
       },
       "structured_output": "native",
@@ -26719,6 +26719,7 @@
       "label": "Qwen3.6 35B (llama.cpp)",
       "family": "qwen",
       "capabilities": [
+        "native_tools",
         "prefers_markdown_scaffolding",
         "streaming",
         "structured_output",
@@ -26736,6 +26737,7 @@
       "label": "Qwen3.6 35B (Unsloth Q4_K_XL, llama.cpp)",
       "family": "qwen",
       "capabilities": [
+        "native_tools",
         "prefers_markdown_scaffolding",
         "streaming",
         "structured_output",
@@ -26753,6 +26755,7 @@
       "label": "Qwen3.6 35B (Unsloth Q5_K_XL, llama.cpp)",
       "family": "qwen",
       "capabilities": [
+        "native_tools",
         "prefers_markdown_scaffolding",
         "streaming",
         "structured_output",

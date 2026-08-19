@@ -1,5 +1,7 @@
 //! `tool_support.parity` provenance in the generated catalog artifact (#5885).
 
+use std::collections::{BTreeMap, BTreeSet};
+
 use super::*;
 
 /// #5885: the artifact has to say which kind of thing `parity` is.
@@ -27,16 +29,29 @@ fn tool_support_parity_carries_its_provenance() {
     }
     assert!(declared > 0 && derived > 0, "expected both provenances");
 
-    // The class the issue reported: one verdict reached from both directions.
-    let text_only: Vec<_> = artifact
-        .models
-        .iter()
-        .filter(|model| model.tool_support.parity.as_deref() == Some("text_only"))
-        .map(|model| model.tool_support.parity_source.as_deref())
-        .collect();
+    // The class the issue reported: one verdict reached from both directions,
+    // which is why the verdict alone was ambiguous without its source. Asserted
+    // over whichever verdict is currently dual-sourced rather than a named one,
+    // because which verdict that is follows the catalog data and changes
+    // whenever a row is re-receipted, while the ambiguity class does not.
+    let mut sources_by_verdict: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
+    for model in &artifact.models {
+        let support = &model.tool_support;
+        if let (Some(verdict), Some(source)) =
+            (support.parity.as_deref(), support.parity_source.as_deref())
+        {
+            sources_by_verdict
+                .entry(verdict)
+                .or_default()
+                .insert(source);
+        }
+    }
     assert!(
-        text_only.contains(&Some("declared")) && text_only.contains(&Some("derived")),
-        "text_only should still be reachable both ways; that is why the field alone was ambiguous"
+        sources_by_verdict
+            .values()
+            .any(|sources| sources.contains("declared") && sources.contains("derived")),
+        "at least one verdict must be reachable both ways, or this catalog no longer \
+         exercises the ambiguity that made parity_source necessary; got {sources_by_verdict:?}"
     );
 }
 

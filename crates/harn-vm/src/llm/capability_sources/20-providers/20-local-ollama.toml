@@ -164,23 +164,19 @@ thinking_block_style = "inline"
 # contract until their exact runtime/model/template combinations are probed.
 [[provider.llamacpp]]
 model_match = "*qwen3.6*"
-native_tools = false
-# Pinned to `json` (fenced-JSON), the GLOBAL text-channel default — same
-# RESOLVED format as the ollama qwen3.6 sibling above. Pinned explicitly rather
-# than left to inherit because the `llamacpp-qwen3.6` alias / catalogued routes
-# trip the catalog invariant that every catalogued model/alias rule set
-# native_tools + preferred_tool_format. json's call opener is a ```tool fence,
-# NOT the reserved <tool_call> token, so it sidesteps the opener-repetition
-# collapse that forced the old heredoc pin (see reserved_tool_call_token below).
-preferred_tool_format = "json"
+# The prior row held this at false pending "a receipted forced-format family
+# sweep". That sweep ran (see the notes below) and measured native returning
+# parseable tool calls on every measurable cell, so the pin is retired.
+native_tools = true
+# Native is the default on completion PARITY plus secondary wins, not on a
+# completion advantage: the sweep could not separate the channels on pass rate.
+# What separates them is cost per turn. The text channel has to teach its
+# dialect in every request, which cost ~7k characters of a 65k context window
+# per turn against the same tools declared natively.
+preferred_tool_format = "native"
 structured_output = "native"
-# A single-tool probe must not promote one quant above its family. The 2026-07-17
-# Burin dogfood trace showed constrained native emission omitting required fields
-# from a 13-action edit schema, despite the old Q4 one-tool native smoke. Keep
-# every llama.cpp Qwen3.6 variant on the measurable JSON text channel until a
-# receipted forced-format family sweep proves otherwise.
-tool_mode_parity = "text_only"
-tool_mode_parity_notes = "2026-07-19 #5162 CUDA receipt: freshly restarted ghcr.io/ggml-org/llama.cpp:server-cuda servers used --jinja, --reasoning-format deepseek, --chat-template-kwargs {\"enable_thinking\":false}, -np 1, -fa on, and q8_0 K/V cache. Six coding-agent fixtures were forced through native and JSON text formats with two replicates per format on Q4_K_XL (native 2/12, text 8/12; -ngl 999, -c 65536), Q5_K_XL (native 0/12, text 8/12; -ngl 999, -c 65536), and Q8_0 base (native 2/12, text 8/12; -ngl 35, -c 16384 because the 36.9 GB model does not fit this 32 GiB GPU). All rows reached high classifier confidence; see .harn-runs/coding-agent-bench/latest/tool_mode_parity_overlay.toml and the per-quant receipts. Native remained unreliable across the family, so keep JSON text tooling; server_parser = none."
+tool_mode_parity = "interchangeable"
+tool_mode_parity_notes = "2026-08-18 Metal receipt, supersedes the 2026-07-19 #5162 CUDA receipt. llama-server b10360-48d22e295 on Apple Silicon, Qwen3.6-35B-A3B-UD-Q4_K_XL, n_ctx 65536, chat template present. This is the SAME quant as the prior receipt's Q4_K_XL row (native 2/12, text 8/12), so it is a directly comparable arm rather than a sibling quant. Six coding-agent fixtures, two replicates, forced through three formats: native 10/12, tagged text 10/12, fenced JSON 8/12. Both failures in EVERY arm were no-tool-diagnosis, whose grader matched phrasing rather than the diagnosis (harn#6843, fixed alongside this row); on the ten measurable cells the arms are native 10/10, text 10/10, json 8/10. Two-sided Fisher separates NOTHING on completion: native vs json p=0.474, native vs text p=1.000. This receipt therefore makes NO claim of a native completion advantage. What it does establish is that native returns parseable tool calls on this route, which falsifies the prior text_only verdict: 58 successful native dispatches including real file edits and command runs. The wire capture names a coercion cost rather than claiming purity: of six chat requests captured through an intercepting proxy, five carried a plain tools array (6 tools, tool_choice null) with NO grammar and NO response_format, and one carried response_format with no tools array, which is the repair/output-contract turn and stays enabled by design. The arm is therefore native over a plain tools channel with the repair-turn contract ACTIVE, not an unconstrained channel. Across the twelve native cells every recorded repair trace reports repaired = false, so no turn's output actually had to be rewritten; that field does not establish whether a decode constraint was imposed on those turns, and the proxy window covers six requests rather than all 58. Pre-registered validity gate, fixed before the matrix was read: any arm with skipped_runs > 0 is INVALID and reruns. All three arms recorded skipped_runs = 0 (native 12 runs, 10 passed 2 failed; text 12, 10/2; json 12, 8/4). preferred_tool_format moved to native on that TIE plus secondary evidence: 158s vs 200s (text) vs 235s (json) total wall, 52 vs 64 vs 66 iterations, and a 3070-character system prompt against 10026 for the text channel, which must teach its dialect every turn. INSTRUMENT DISCLOSURE: the native arm was measured with a local capability override setting native_tools = true, because with native_tools = false no tools array reaches the wire and the arm cannot be measured at all; the text and json arms ran on unmodified capability bytes. Build: branch head c5e1fed2f with harn#6842 (self-hosted routes priced at zero) merged in, without which every budgeted local run ended after one model call and no completion number on this route was meaningful. No single cause is attributed to the reversal from the prior receipt: hardware, runtime build, and revision all differ. server_parser = none."
 # Qwen3.6's tokenizer reserves <tool_call>/</tool_call> as single special
 # tokens; reusing them as text-format delimiters collapses the agent loop into
 # opener repetition. Remap to a non-special wire form (validated: 5/5 vs 0/5).
@@ -352,10 +348,10 @@ prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "inline"
 
-# Apple Silicon MLX server. Burin's local MLX route is the coding-tuned
-# Qwen3.6-35B-A3B MoE served via `mlx_lm.server` (text MoE, NOT mlx_vlm) — see
-# burin #2717, which retired the never-downloaded dense vision model
-# `unsloth/Qwen3.6-27B-UD-MLX-4bit`. OpenAI-compat; honors the same
+# Apple Silicon MLX server. The local MLX route is the coding-tuned
+# Qwen3.6-35B-A3B MoE served via `mlx_lm.server` (text MoE, NOT mlx_vlm); a
+# downstream embedder retired the never-downloaded dense vision model
+# `unsloth/Qwen3.6-27B-UD-MLX-4bit` in favor of it. OpenAI-compat; honors the same
 # `chat_template_kwargs.preserve_thinking` knob as vLLM via the HF chat template.
 # These are the SAME weights as the llama.cpp `qwen3.6-35b-a3b` route
 # (shared equivalence_group), so the same tokenizer caveat applies:
