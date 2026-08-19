@@ -70,6 +70,21 @@ const FIXTURE_COLUMNS = ["fixture", "n", "scored", "stalls", "pass", "turns", "v
 
 const PAIRED_COLUMNS = ["arm", "pairs", "dropped", "compared", "delta", "ci", "d_pass", "verdict"]
 
+// The rig's own falsifier. This fixture produces no diagnostics at all, so no
+// timing policy has anything to deliver and the arms must be indistinguishable
+// on every exposure counter. If they are not, the difference came from the rig
+// rather than from the policy under test, and every other number in the run is
+// suspect.
+const FALSIFIER_FIXTURE = "clean-control"
+
+const EXPOSURE_COUNTERS = [
+  "flush_count",
+  "surfaced_transient",
+  "surfaced_noise",
+  "surfaced_genuine",
+  "detour_calls",
+]
+
 // Provenance fields every row must carry so a finished matrix stays readable.
 const PROVENANCE_FIELDS = ["tool_format", "endpoint", "model", "resolved_llm_timeout_s", "rig_sha"]
 
@@ -412,6 +427,42 @@ fn section(title: string, body: string) -> string {
   return title + "\n" + body + "\n"
 }
 
+/**
+ * Evaluate the rig's own falsifier and say plainly whether it held.
+ *
+ * Returns `{status, detail}`. `status` is one of `held`, `violated`, or
+ * `absent`. A run that never exercised the falsifier fixture is reported as
+ * `absent` rather than as a pass, because "we did not look" must never read as
+ * "we looked and found nothing".
+ */
+fn falsifier_verdict(rows: list) -> dict {
+  const subject = filter_rows(rows, "fixture", FALSIFIER_FIXTURE)
+  if len(subject) == 0 {
+    return {
+      status: "absent",
+      detail: "fixture '${FALSIFIER_FIXTURE}' was not run, so the rig was not falsified either way",
+    }
+  }
+  let offenders = []
+  for counter in EXPOSURE_COUNTERS {
+    const observed = unique(field_values(subject, counter))
+    if len(observed) > 1 {
+      offenders = offenders.appending(counter)
+    }
+  }
+  if len(offenders) == 0 {
+    return {
+      status: "held",
+      detail: "arms are indistinguishable on every exposure counter over ${len(subject)} trial(s)",
+    }
+  }
+  return {
+    status: "violated",
+    detail: "arms differ on " + join(offenders, ", ")
+      + "; the race is invalid because the difference came from the rig, not the policy",
+  }
+}
+
 fn render_report(rows: list, control_arm: string, metric: string) -> string {
   const arms = unique(field_names(rows, "arm")).sorted()
   const fixtures = unique(field_names(rows, "fixture")).sorted()
@@ -450,6 +501,14 @@ fn render_report(rows: list, control_arm: string, metric: string) -> string {
     + "\n  turns is the mean over RESOLVED trials only; read it beside the pass rate.\n"
     + "  pass is over scored trials; tool-emission stalls are excluded from both.\n"
   out = out + "\nBy fixture\n" + render_table(fixture_rows, {columns: FIXTURE_COLUMNS}) + "\n"
+  const falsifier = falsifier_verdict(rows)
+  out = out
+    + "\nRig falsifier ('${FALSIFIER_FIXTURE}')\n"
+    + "  "
+    + uppercase(to_string(falsifier.status))
+    + ": "
+    + to_string(falsifier.detail)
+    + "\n"
   const control_rows = filter_rows(rows, "arm", control_arm)
   if len(control_rows) == 0 {
     return out + "\ncontrol arm '${control_arm}' absent; skipping paired intervals\n"
@@ -511,6 +570,7 @@ fn report_json(rows: list, control_arm: string, metric: string) -> dict {
     control: control_arm,
     metric: metric,
     provenance: provenance_summary(rows),
+    falsifier: falsifier_verdict(rows),
     by_arm: by_arm,
     by_fixture: by_fixture,
     paired: paired,
@@ -538,10 +598,20 @@ pipeline main(harness: Harness, task) {
   const rows = classify_all(raw)
   const control_arm = to_string(parsed.control)
   const metric = to_string(parsed.metric)
+  const falsifier = falsifier_verdict(rows)
   if parsed.json {
     harness.stdio.println(json_stringify(report_json(rows, control_arm, metric)))
-    return 0
+  } else {
+    harness.stdio.println(render_report(rows, control_arm, metric))
   }
-  harness.stdio.println(render_report(rows, control_arm, metric))
+  // A violated falsifier is not a footnote on an otherwise readable report. The
+  // arms differed where they had nothing to differ on, so the run measured the
+  // rig. Exiting non-zero is what stops that being scrolled past.
+  if falsifier.status == "violated" {
+    harness.stdio.eprintln(
+      "rig falsifier VIOLATED on '${FALSIFIER_FIXTURE}': " + to_string(falsifier.detail),
+    )
+    return 3
+  }
   return 0
 }

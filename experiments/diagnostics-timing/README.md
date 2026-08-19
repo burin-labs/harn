@@ -149,6 +149,16 @@ it into an aggregate makes the aggregate look better resolved than the evidence
 supports, so the per-fixture table says `constant` and the aggregate is read
 beside it, never instead of it.
 
+**The rig's own falsifier is asserted, not left to the reader.** `clean-control`
+produces no diagnostics, so no arm has anything to deliver and the arms must be
+indistinguishable on every exposure counter. `analyze.harn` checks that
+directly, prints `HELD`, `VIOLATED`, or `ABSENT`, and exits non-zero on a
+violation, because a run where the arms differed with nothing to differ on
+measured the rig rather than the policy. `ABSENT` is a distinct state from
+`HELD` on purpose: a run that never exercised the fixture was not falsified
+either way, and "we did not look" must never read as "we looked and found
+nothing".
+
 Turns to green are reported over resolved trials only and always beside the pass
 rate. An arm that converges fast by giving up is not a winner, and separating
 the two numbers is what makes that visible.

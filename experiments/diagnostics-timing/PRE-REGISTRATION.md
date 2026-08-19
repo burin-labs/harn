@@ -95,7 +95,11 @@ overstate what was measured.
 
 - **The rig's own falsifier.** `clean-control` produces no diagnostics, so the
   arms must not differ on it. If they do, the rig has an artifact and the race
-  is invalid regardless of what the other fixtures show.
+  is invalid regardless of what the other fixtures show. This one is machine
+  checked: `analyze.harn` compares every exposure counter across arms on that
+  fixture and exits non-zero on a violation, and it was verified against a
+  perturbed input to confirm it can actually fail rather than only ever
+  reporting a pass.
 - **The stall prediction.** If `rename-single-file` does **not** stall, or
   stalls on only some arms, this pre-registration was wrong and the writeup says
   so before it says anything else.
