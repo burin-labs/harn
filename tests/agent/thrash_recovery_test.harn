@@ -340,3 +340,138 @@ pipeline test_final_wrapup_tool_call_skip_is_observable(harness: Harness, task) 
   assert_eq(skipped[0].checkpoint.tool_count, 1)
   assert(contains(skipped[0].checkpoint.tool_names, "look"))
 }
+
+// A single prose corrective is not a ladder. When the first monologue rescue
+// does not land, the transcript the model reads back is dominated by its own
+// repeated narration, so the same request produces the same narration. The
+// second rung drops that repeated turn before re-asking, and the loop only
+// reports a terminal stall once every rung it owns has been tried.
+pipeline test_repeated_monologue_gets_a_second_rung_that_drops_the_narration(
+  harness: Harness,
+  task,
+) {
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text("I should inspect app/Models/Entry.php before editing."),
+      llm_text("I still need to inspect the Entry model before editing."),
+      llm_text("REPEATEDNARRATION I keep saying I will read the Entry model."),
+      look_call("look_after_second_rung"),
+      llm_text("Read the Entry model. ##DONE##"),
+    ],
+    { ->
+      const session = "monologue-second-rung-" + harness.random.uuid()
+      const opts: AgentSpec = {
+        provider: "mock",
+        tools: toolset(),
+        tool_format: "native",
+        loop_until_done: true,
+        done_sentinel: "##DONE##",
+        done_judge: nil,
+        max_iterations: 8,
+        final_wrapup: false,
+        session_id: session,
+        stall_diagnostics: {
+          enabled: true,
+          no_progress_messages: 2,
+          hard_stop_after_trips: 1,
+          inject_feedback: true,
+          max_feedback: 2,
+        },
+      }
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(harness, "Edit the target file after inspecting it.", nil, opts) },
+      )
+      assert_eq(captured.result.status, "done")
+      assert(
+        contains(captured.result.tools.successful, "look"),
+        "second-rung recovery look should dispatch",
+      )
+      const decisions = events_of(captured.events, "loop_control_decision").filter(
+        { event -> event.reason == "monologue_recovery_continue" },
+      )
+      assert_eq(len(decisions), 2)
+      const receipts = events_of(captured.events, "typed_checkpoint").filter(
+        { event ->
+          event.checkpoint?.schema == "harn.agent_loop_recovery_receipt.v1"
+            && event.checkpoint?.status
+            == "fired"
+        },
+      )
+      assert_eq(len(receipts), 2)
+      assert_eq(receipts[0].checkpoint.rung, 1)
+      assert_eq(receipts[0].checkpoint.rung_budget, 2)
+      assert_eq(receipts[0].checkpoint.dropped_narration, false)
+      assert_eq(receipts[1].checkpoint.rung, 2)
+      assert_eq(receipts[1].checkpoint.dropped_narration, true)
+      // The repeated narration reaches the second-rung request only as the
+      // quoted intent inside the corrective. Left in place as an assistant
+      // turn as well, it would appear twice.
+      const calls = harness.llm.mock_calls()
+      const second_rung_prompt = json_stringify(calls[3].messages)
+      assert_eq(len(split(second_rung_prompt, "REPEATEDNARRATION")) - 1, 1)
+      assert(contains(second_rung_prompt, "emit exactly one concrete tool call"))
+    },
+  )
+}
+
+// The ladder must not become a way to keep a dead run alive. Once every rung
+// is spent the loop still reports a terminal stuck stop.
+pipeline test_monologue_ladder_still_stops_when_every_rung_is_spent(harness: Harness, task) {
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text("I should inspect app/Models/Entry.php before editing."),
+      llm_text("I still need to inspect the Entry model before editing."),
+      llm_text("I really do need to read the Entry model first."),
+      llm_text("Once more, I intend to read the Entry model."),
+    ],
+    { ->
+      const session = "monologue-ladder-exhausted-" + harness.random.uuid()
+      const opts: AgentSpec = {
+        provider: "mock",
+        tools: toolset(),
+        tool_format: "native",
+        loop_until_done: true,
+        done_sentinel: "##DONE##",
+        done_judge: nil,
+        max_iterations: 10,
+        final_wrapup: false,
+        session_id: session,
+        stall_diagnostics: {
+          enabled: true,
+          no_progress_messages: 2,
+          hard_stop_after_trips: 1,
+          inject_feedback: true,
+          max_feedback: 2,
+        },
+      }
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(harness, "Edit the target file after inspecting it.", nil, opts) },
+      )
+      assert_eq(captured.result.status, "stuck")
+      assert_eq(captured.result.stop_reason, "thrash_hard_stop")
+      const fired = events_of(captured.events, "typed_checkpoint").filter(
+        { event ->
+          event.checkpoint?.schema == "harn.agent_loop_recovery_receipt.v1"
+            && event.checkpoint?.status
+            == "fired"
+        },
+      )
+      assert_eq(len(fired), 2)
+      const skipped = events_of(captured.events, "typed_checkpoint").filter(
+        { event ->
+          event.checkpoint?.schema == "harn.agent_loop_recovery_receipt.v1"
+            && event.checkpoint?.status
+            == "skipped"
+        },
+      )
+      assert(len(skipped) > 0, "an exhausted ladder should record why it stopped")
+      assert_eq(skipped[0].checkpoint.outcome, "rung_limit_exhausted")
+    },
+  )
+}

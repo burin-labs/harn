@@ -760,8 +760,10 @@ pub fn __agent_loop_run(harness: Harness, message, session, initial_opts) {
           }
         }
         if stall_observation.hard_stop {
-          if stall_hard_stop_rescues == 0
+          if stall_hard_stop_rescues
+            < __agent_loop_thrash_recovery_rung_budget(stall_warning)
             && __agent_loop_thrash_recovery_allowed(stall_warning, tool_calls) {
+            const rungs_spent = stall_hard_stop_rescues
             stall_hard_stop_rescues = stall_hard_stop_rescues + 1
             const old_limit = current_max
             current_max = max(current_max, iteration + 1)
@@ -773,6 +775,9 @@ pub fn __agent_loop_run(harness: Harness, message, session, initial_opts) {
                 "skipped",
                 "not dispatched: repeated identical tool call entered bounded thrash recovery",
               )
+            }
+            if __agent_loop_thrash_recovery_drops_narration(stall_warning, rungs_spent) {
+              __agent_loop_pop_structural_veto_turn(harness.agent, session.session_id)
             }
             __inject_feedback_with_tool_repair(
               harness.agent,
@@ -834,6 +839,8 @@ pub fn __agent_loop_run(harness: Harness, message, session, initial_opts) {
               "fired",
               "thrash_rescue",
               recovery_reason,
+              nil,
+              rungs_spent,
             )
             continue
           }
@@ -948,6 +955,7 @@ pub fn __agent_loop_run(harness: Harness, message, session, initial_opts) {
             "stop",
             recovery_skip_outcome,
             recovery_skip_outcome,
+            stall_hard_stop_rescues,
           )
           agent_emit_event(
             harness.agent,
