@@ -193,8 +193,7 @@ const FIXTURES = {
     // the model happens to fix in its first edit is never diagnosed, and the
     // help direction would be unmeasurable. Measured — with a fix-it-only task
     // the genuine finding surfaced zero times in all six arms.
-    task:
-      "Add a `median(items)` function to stats.py. Every test in test_stats.py must pass.",
+    task: "Add a `median(items)` function to stats.py. Every test in test_stats.py must pass.",
     transient: [],
     permanent_noise: [],
     genuine: ["undefined name 'itmes'"],

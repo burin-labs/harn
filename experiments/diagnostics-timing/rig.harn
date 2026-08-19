@@ -73,11 +73,11 @@ pipeline default(harness: Harness) {
   const env_timeout = to_int(timeout_env)
   const catalog_timeout = to_float(info?.catalog?.stream_timeout)
   const resolved_timeout_s = env_timeout
-    ?? (if catalog_timeout == nil {
-      120
-    } else {
-      to_int(ceil(catalog_timeout))
-    })
+    ?? if catalog_timeout == nil {
+    120
+  } else {
+    to_int(ceil(catalog_timeout))
+  }
   // The catalog's tool_format is a recommendation, not the wire: an explicit
   // request is parity-steered by the same policy the loop applies, so record
   // both the request and what will actually run.
@@ -85,16 +85,21 @@ pipeline default(harness: Harness) {
   const effective_tool_format = if info == nil {
     to_string(info?.tool_format ?? "")
   } else {
-    to_string(agent_tool_format(harness.llm, {
-      model: to_string(info?.id ?? ""),
-      provider: to_string(info?.provider ?? ""),
-      tool_format: if requested_tool_format == "" {
-        nil
-      } else {
-        requested_tool_format
-      },
-      tool_format_override_reason: "diagnostics-timing calibration pins the tool channel",
-    }))
+    to_string(
+      agent_tool_format(
+        harness.llm,
+        {
+          model: to_string(info?.id ?? ""),
+          provider: to_string(info?.provider ?? ""),
+          tool_format: if requested_tool_format == "" {
+            nil
+          } else {
+            requested_tool_format
+          },
+          tool_format_override_reason: "diagnostics-timing calibration pins the tool channel",
+        },
+      ),
+    )
   }
   const provenance = {
     endpoint: harness.env.get_or("LLAMACPP_BASE_URL", "(provider default)"),
