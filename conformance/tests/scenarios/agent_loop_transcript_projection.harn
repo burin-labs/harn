@@ -95,8 +95,20 @@ pipeline default(harness: Harness) {
       const raw_messages = transcript_messages(result.transcript)
       const raw_text = json_stringify(raw_messages)
       require harness.runtime.atomic_get(flaky_calls) == 2, "flaky tool was invoked twice"
-      require len(split(raw_text, "tool error: first try")) - 1 == 1,
-        "first tool call failed exactly once"
+      // Count the failure where it is a tool observation. The corrective
+      // directive the failure raises also quotes the error, and directives are
+      // durable transcript messages, so counting over the whole serialized
+      // transcript would conflate the two.
+      let failed_tool_results = 0
+      for message in raw_messages {
+        const role = to_string(message?.role ?? "")
+        if role == "tool" || role == "tool_result" {
+          if contains(to_string(message?.content ?? ""), "tool error: first try") {
+            failed_tool_results = failed_tool_results + 1
+          }
+        }
+      }
+      require failed_tool_results == 1, "first tool call failed exactly once"
       require contains(raw_text, "[result of run]\\nok\\n[end of run result]"),
         "second tool call succeeded"
       harness.stdio.println("raw_message_count:" + to_string(len(raw_messages)))

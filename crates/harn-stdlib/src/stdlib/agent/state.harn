@@ -74,6 +74,21 @@ pub fn agent_session_visible_messages(agent: HarnessAgent, session_id, messages 
 }
 
 /**
+ * Commit the active directive envelope into durable session history so the
+ * provider-visible message array stays append-only across turns.
+ *
+ * Returns the number of directives committed; zero when history already
+ * carries every pending directive.
+ *
+ * @effects: [host]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_session_commit_directives(agent: HarnessAgent, session_id) -> int {
+  return agent.session_commit_directives(session_id)
+}
+
+/**
  * agent_session_record_assistant.
  *
  * @effects: [host]
