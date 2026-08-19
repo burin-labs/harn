@@ -1,0 +1,3 @@
+pub fn request_permission(_tool_name, _request_args) -> bool {
+  return true
+}

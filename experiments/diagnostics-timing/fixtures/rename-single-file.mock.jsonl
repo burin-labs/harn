@@ -1,0 +1,7 @@
+{"text":"Let me look at the file.\n<tool_call>{\"name\":\"read_file\",\"arguments\":{\"path\":\"store.py\"}}</tool_call>","model":"fixture-model"}
+{"text":"Renaming the definition first.\n<tool_call>{\"name\":\"edit_file\",\"arguments\":{\"path\":\"store.py\",\"old_text\":\"def fetch(source):\",\"new_text\":\"def fetch_records(source):\"}}</tool_call>","model":"fixture-model"}
+{"text":"Now the first call site.\n<tool_call>{\"name\":\"edit_file\",\"arguments\":{\"path\":\"store.py\",\"old_text\":\"    rows = fetch(source)\",\"new_text\":\"    rows = fetch_records(source)\"}}</tool_call>","model":"fixture-model"}
+{"text":"Second call site.\n<tool_call>{\"name\":\"edit_file\",\"arguments\":{\"path\":\"store.py\",\"old_text\":\"    found = fetch(source)\",\"new_text\":\"    found = fetch_records(source)\"}}</tool_call>","model":"fixture-model"}
+{"text":"Third call site.\n<tool_call>{\"name\":\"edit_file\",\"arguments\":{\"path\":\"store.py\",\"old_text\":\"    return fetch(source)[:3]\",\"new_text\":\"    return fetch_records(source)[:3]\"}}</tool_call>","model":"fixture-model"}
+{"text":"Running the tests.\n<tool_call>{\"name\":\"run_tests\",\"arguments\":{}}</tool_call>","model":"fixture-model"}
+{"text":"The rename is complete and the tests pass. ##DONE##","model":"fixture-model"}

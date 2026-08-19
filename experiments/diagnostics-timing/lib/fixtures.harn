@@ -1,0 +1,233 @@
+// Experiment fixtures.
+//
+// Each fixture declares its seed files, the task, the verification command, and
+// the diagnostic signatures that are TRANSIENT (they appear mid-change and are
+// resolved by a later edit in the same change) or PERMANENT-NOISE (they never
+// resolve because the name really does exist, just not statically).
+//
+// Fixtures 1 and 2 use a rename. A rename guarantees the mid-flight window in
+// EITHER edit order: rename the definition first and every call site is
+// undefined; rename a call site first and it points at a name not yet defined.
+// That is what makes them a controlled test of mid-flight incompleteness rather
+// than a coin flip on which edit the model happens to make first.
+const RENAME_SINGLE_MAIN = """
+def fetch(source):
+    return [r for r in source if r]
+
+
+def summarize(source):
+    rows = fetch(source)
+    return {"count": len(rows)}
+
+
+def report(source):
+    found = fetch(source)
+    return "\\n".join(str(r) for r in found)
+
+
+def preview(source):
+    return fetch(source)[:3]
+"""
+
+const RENAME_SINGLE_TEST = """
+import unittest
+
+import store
+
+
+class RenameTest(unittest.TestCase):
+    def test_renamed(self):
+        self.assertTrue(hasattr(store, "fetch_records"))
+        self.assertFalse(hasattr(store, "fetch"))
+
+    def test_behavior(self):
+        self.assertEqual(store.summarize([1, 0, 2]), {"count": 2})
+        self.assertEqual(store.preview([1, 2, 3, 4]), [1, 2, 3])
+"""
+
+const RENAME_CROSS_DEF = """
+def fetch(source):
+    return [r for r in source if r]
+"""
+
+const RENAME_CROSS_USE = """
+from store import fetch
+
+
+def summarize(source):
+    return {"count": len(fetch(source))}
+
+
+def preview(source):
+    return fetch(source)[:3]
+"""
+
+const RENAME_CROSS_TEST = """
+import unittest
+
+import report
+import store
+
+
+class RenameTest(unittest.TestCase):
+    def test_renamed(self):
+        self.assertTrue(hasattr(store, "fetch_records"))
+        self.assertFalse(hasattr(store, "fetch"))
+
+    def test_behavior(self):
+        self.assertEqual(report.summarize([1, 0, 2]), {"count": 2})
+        self.assertEqual(report.preview([1, 2, 3, 4]), [1, 2, 3])
+"""
+
+const TYPO_MAIN = """
+def total(items):
+    return sum(itmes)
+
+
+def average(items):
+    if not items:
+        return 0
+    return total(items) / len(items)
+"""
+
+const TYPO_TEST = """
+import unittest
+
+import stats
+
+
+class TypoTest(unittest.TestCase):
+    def test_total(self):
+        self.assertEqual(stats.total([1, 2, 3]), 6)
+
+    def test_average(self):
+        self.assertEqual(stats.average([2, 4]), 3)
+"""
+
+const DYNAMIC_CONSTANTS = """
+MAX_RETRIES = 3
+BASE_DELAY = 2
+JITTER = 1
+"""
+
+const DYNAMIC_MAIN = """
+from constants import *
+
+
+def backoff(attempt):
+    return BASE_DELAY * attempt
+
+
+def should_retry(attempt):
+    return attempt < MAX_RETRIES
+"""
+
+const DYNAMIC_TEST = """
+import unittest
+
+import retry
+
+
+class RetryTest(unittest.TestCase):
+    def test_backoff(self):
+        self.assertEqual(retry.backoff(2), 4)
+
+    def test_should_retry(self):
+        self.assertTrue(retry.should_retry(1))
+        self.assertFalse(retry.should_retry(3))
+
+    def test_ceiling(self):
+        self.assertEqual(retry.backoff_capped(10), 6)
+"""
+
+const CLEAN_MAIN = """
+def greet(name):
+    return "Hello, " + name
+"""
+
+const CLEAN_TEST = """
+import unittest
+
+import greeter
+
+
+class GreetTest(unittest.TestCase):
+    def test_greet(self):
+        self.assertEqual(greeter.greet("Ada"), "Hello, Ada")
+
+    def test_shout(self):
+        self.assertEqual(greeter.shout("Ada"), "HELLO, ADA!")
+"""
+
+const FIXTURES = {
+  "rename-single-file": {
+    files: {"store.py": RENAME_SINGLE_MAIN, "test_store.py": RENAME_SINGLE_TEST},
+    task:
+      "In store.py, rename the function `fetch` to `fetch_records`, updating every call site. Run the tests to confirm.",
+    transient: ["undefined name 'fetch'", "undefined name 'fetch_records'"],
+    permanent_noise: [],
+    genuine: [],
+  },
+  "rename-cross-file": {
+    files: {
+      "store.py": RENAME_CROSS_DEF,
+      "report.py": RENAME_CROSS_USE,
+      "test_rename.py": RENAME_CROSS_TEST,
+    },
+    task:
+      "Rename the function `fetch` in store.py to `fetch_records`, and update report.py which imports and calls it. Run the tests to confirm.",
+    transient: ["undefined name 'fetch'", "undefined name 'fetch_records'"],
+    permanent_noise: [],
+    genuine: [],
+  },
+  "genuine-typo": {
+    files: {"stats.py": TYPO_MAIN, "test_stats.py": TYPO_TEST},
+    task: "The tests in test_stats.py are failing. Fix stats.py so they pass.",
+    transient: [],
+    permanent_noise: [],
+    genuine: ["undefined name 'itmes'"],
+  },
+  "dynamic-runtime-names": {
+    files: {
+      "constants.py": DYNAMIC_CONSTANTS,
+      "retry.py": DYNAMIC_MAIN,
+      "test_retry.py": DYNAMIC_TEST,
+    },
+    task:
+      "Add a `backoff_capped(attempt)` function to retry.py that behaves like `backoff` but never returns more than 6. Run the tests to confirm.",
+    transient: [],
+    permanent_noise: [
+      "undefined name 'MAX_RETRIES'",
+      "undefined name 'BASE_DELAY'",
+      "undefined name 'JITTER'",
+    ],
+    genuine: [],
+  },
+  "clean-control": {
+    files: {"greeter.py": CLEAN_MAIN, "test_greeter.py": CLEAN_TEST},
+    task:
+      "Add a `shout(name)` function to greeter.py that returns the greeting uppercased with an exclamation mark. Run the tests to confirm.",
+    transient: [],
+    permanent_noise: [],
+    genuine: [],
+  },
+}
+
+pub fn fixture_names() -> list {
+  return FIXTURES.keys()
+}
+
+pub fn fixture(name: string) {
+  const found = FIXTURES.get(name, nil)
+  if found == nil {
+    throw "unknown fixture '${name}'; known fixtures: ${join(FIXTURES.keys(), ", ")}"
+  }
+  return found
+}
+
+pub fn seed(fs: HarnessFs, root: string, name: string) {
+  const spec = fixture(name)
+  for path in spec.files.keys() {
+    fs.write_text("${root}/${path}", to_string(spec.files.get(path, "")))
+  }
+}

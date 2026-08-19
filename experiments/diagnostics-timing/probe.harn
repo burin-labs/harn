@@ -1,0 +1,43 @@
+// Precision probe: does the tiering separate a genuine defect from a name the
+// checker simply cannot see? Run after any change to the tier rules.
+import { collect, render } from "./lib/diagnostics.harn"
+
+const GENUINE_TYPO = "def total(items):\n    return sum(itmes)\n"
+
+const STAR_IMPORT =
+  "from constants import *\n\n\ndef budget():\n    return MAX_RETRIES * BASE_DELAY\n"
+
+const EXPLICIT_IMPORT = "from store import fetch\n\n\ndef budget():\n    return fetch([1])\n"
+
+const USE_BEFORE_DEFINE = "def total(items):\n    return sum(normalize(i) for i in items)\n"
+
+const DYNAMIC_ATTR = "def wire(target):\n    setattr(target, 'x', 1)\n    return LATE_BOUND\n"
+
+const SYNTAX_BROKEN = "def total(items:\n    return 1\n"
+
+const RUBY_RUNTIME =
+  "class Post < ActiveRecord::Base\n  def env\n    ENV['RAILS_ENV']\n  end\nend\n"
+
+fn report(harness: Harness, label: string, source: string, language: string) {
+  const diags = collect(harness.ast, source, language, "probe.${language}")
+  harness.stdio.println(
+    json_stringify(
+      {
+        case: label,
+        tiers: diags.map({ d -> "${d.tier}/${d.severity}: ${d.message}" }),
+        rendered_error_block: render(diags, "probe").contains("ERROR:"),
+        rendered_low_conf: render(diags, "probe").contains("low confidence"),
+      },
+    ),
+  )
+}
+
+pipeline default(harness: Harness) {
+  report(harness, "genuine_typo", GENUINE_TYPO, "python")
+  report(harness, "star_import_noise", STAR_IMPORT, "python")
+  report(harness, "explicit_import", EXPLICIT_IMPORT, "python")
+  report(harness, "use_before_define", USE_BEFORE_DEFINE, "python")
+  report(harness, "dynamic_attr", DYNAMIC_ATTR, "python")
+  report(harness, "syntax_broken", SYNTAX_BROKEN, "python")
+  report(harness, "ruby_runtime_names", RUBY_RUNTIME, "ruby")
+}
