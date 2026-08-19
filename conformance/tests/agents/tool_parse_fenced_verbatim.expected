@@ -71,6 +71,36 @@
   prose=""
   answer=null
   done=null
+# collision mid-body fails loud
+  calls=0 errors=1 violations=0 stray=0
+  err "The ```tool block is not valid JSON: verbatim body `<<C` closed early on a line that is exactly `C`, leaving `after` unclaimed. When the body itself contains that line, declare `<<C:N` with N body lines, which closes on the count instead. For a multi-line or code-bearing field, do not hand-escape it: set the value to \"<<BODY\" and put the raw text after the JSON object inside the same ```tool fence, ending with a line that is exactly BODY. Short scalar values stay ordinary JSON strings (escape newlines as \\n, quotes as \\\", backslashes as \\\\); backticks need no escaping."
+  prose=""
+  answer=null
+  done=null
+# collision as the last content line fails loud
+  calls=0 errors=1 violations=0 stray=0
+  err "The ```tool block is not valid JSON: verbatim body `<<C` closed early on a line that is exactly `C`, leaving `C` unclaimed. When the body itself contains that line, declare `<<C:N` with N body lines, which closes on the count instead. For a multi-line or code-bearing field, do not hand-escape it: set the value to \"<<BODY\" and put the raw text after the JSON object inside the same ```tool fence, ending with a line that is exactly BODY. Short scalar values stay ordinary JSON strings (escape newlines as \\n, quotes as \\\", backslashes as \\\\); backticks need no escaping."
+  prose=""
+  answer=null
+  done=null
+# collision cannot mis-bind a second verbatim argument
+  calls=0 errors=1 violations=0 stray=0
+  err "The ```tool block is not valid JSON: verbatim body `<<C` closed early on a line that is exactly `C`, leaving `after` unclaimed. When the body itself contains that line, declare `<<C:N` with N body lines, which closes on the count instead. For a multi-line or code-bearing field, do not hand-escape it: set the value to \"<<BODY\" and put the raw text after the JSON object inside the same ```tool fence, ending with a line that is exactly BODY. Short scalar values stay ordinary JSON strings (escape newlines as \\n, quotes as \\\", backslashes as \\\\); backticks need no escaping."
+  prose=""
+  answer=null
+  done=null
+# collision with a blank residual fails loud
+  calls=0 errors=1 violations=0 stray=0
+  err "The ```tool block is not valid JSON: verbatim body `<<C` closed early on a line that is exactly `C`, leaving `C` unclaimed. When the body itself contains that line, declare `<<C:N` with N body lines, which closes on the count instead. For a multi-line or code-bearing field, do not hand-escape it: set the value to \"<<BODY\" and put the raw text after the JSON object inside the same ```tool fence, ending with a line that is exactly BODY. Short scalar values stay ordinary JSON strings (escape newlines as \\n, quotes as \\\", backslashes as \\\\); backticks need no escaping."
+  prose=""
+  answer=null
+  done=null
+# counted opener still binds the same colliding body
+  calls=1 errors=0 violations=0 stray=0
+  call write_file {"content":"before\nC\nafter\n","path":"a.txt"}
+  prose=""
+  answer=null
+  done=null
 # uncounted body that never closes fails loud
   calls=0 errors=1 violations=0 stray=0
   err "The ```tool block is not valid JSON: verbatim body `<<BODY` never closed; end it with a line that is exactly `BODY`, or declare `<<BODY:N` with N body lines when the body itself contains that line. For a multi-line or code-bearing field, do not hand-escape it: set the value to \"<<BODY\" and put the raw text after the JSON object inside the same ```tool fence, ending with a line that is exactly BODY. Short scalar values stay ordinary JSON strings (escape newlines as \\n, quotes as \\\", backslashes as \\\\); backticks need no escaping."

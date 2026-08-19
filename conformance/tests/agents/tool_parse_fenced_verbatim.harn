@@ -204,6 +204,91 @@ tail
 NEW
 ```""",
   )
+  // TERMINATOR COLLISION — the load-bearing safety property of the uncounted
+  // form. An uncounted body closes on the first line that is exactly its tag,
+  // so a body CONTAINING that line closes early. The only acceptable outcomes
+  // are a loud failure or a correct full bind; a SILENT TRUNCATION that still
+  // dispatches would write a half file and report nothing, which is strictly
+  // worse than the escaping failure this whole lane exists to remove.
+  //
+  // The reason it cannot be silent is structural rather than incidental: an
+  // early close does not consume the rest of the body, so the leftovers stay in
+  // the trailing region, and every trailing block must match a declared opener.
+  // Body text does not, so the call is rejected. Keep these cases if the binder
+  // is ever refactored — they are what stops (a) from quietly becoming (c).
+  probe_json(
+    harness.agent,
+    harness.stdio,
+    "collision mid-body fails loud",
+    """```tool
+{ "name": "write_file", "args": { "path": "a.txt", "content": "<<C" } }
+<<C
+before
+C
+after
+C
+```""",
+  )
+  probe_json(
+    harness.agent,
+    harness.stdio,
+    "collision as the last content line fails loud",
+    """```tool
+{ "name": "write_file", "args": { "path": "a.txt", "content": "<<C" } }
+<<C
+before
+C
+C
+```""",
+  )
+  // The mis-bind case: with a second declaration present, the residual after an
+  // early close must NOT bind to the other argument and dispatch two wrong
+  // bodies.
+  probe_json(
+    harness.agent,
+    harness.stdio,
+    "collision cannot mis-bind a second verbatim argument",
+    """```tool
+{ "name": "edit_file", "args": { "old_string": "<<C", "new_string": "<<D" } }
+<<C
+before
+C
+after
+C
+<<D
+replacement
+D
+```""",
+  )
+  probe_json(
+    harness.agent,
+    harness.stdio,
+    "collision with a blank residual fails loud",
+    """```tool
+{ "name": "write_file", "args": { "path": "a.txt", "content": "<<C" } }
+<<C
+before
+C
+
+C
+```""",
+  )
+  // NEGATIVE PIN for the four cases above: the SAME colliding body is legal
+  // under the counted opener and still binds in full, so the uncounted
+  // production did not take the counted form's turn.
+  probe_json(
+    harness.agent,
+    harness.stdio,
+    "counted opener still binds the same colliding body",
+    """```tool
+{ "name": "write_file", "args": { "path": "a.txt", "content": "<<C:3" } }
+<<C:3
+before
+C
+after
+C
+```""",
+  )
   // A body that never closes is a parse error, never a recovery point.
   probe_json(
     harness.agent,

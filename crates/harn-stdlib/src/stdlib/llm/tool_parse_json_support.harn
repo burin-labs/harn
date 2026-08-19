@@ -326,6 +326,9 @@ pub fn bind_verbatim(calls: list<dict>, trailing: string) -> dict {
     return {ok: false, error: count_error}
   }
   let cursor = 0
+  // Tag of the most recent uncounted body that bound, so a later orphan can be
+  // diagnosed as that body's early close rather than as a nameless mismatch.
+  let last_uncounted_tag = nil
   while cursor < len(lines) && trim(lines[cursor]) == "" {
     cursor = cursor + 1
   }
@@ -341,6 +344,29 @@ pub fn bind_verbatim(calls: list<dict>, trailing: string) -> dict {
       idx = idx + 1
     }
     if request_index < 0 {
+      // Leftover text that is not itself an opener, after an uncounted body has
+      // already bound, has exactly one ordinary cause: that body contained a
+      // line equal to its own tag, so it closed early and the rest of it is
+      // sitting here. Say that and name the remedy, because "no matching
+      // declaration" describes the symptom and leaves the model to guess. The
+      // diagnosis is read off state, not inferred: an uncounted body bound, and
+      // this line does not parse as a declaration.
+      if __tool_parse_verbatim_declaration(opener) == nil && last_uncounted_tag != nil {
+        return {
+          ok: false,
+          error: __tool_parse_json_error(
+            "verbatim body `<<"
+              + last_uncounted_tag
+              + "` closed early on a line that is exactly `"
+              + last_uncounted_tag
+              + "`, leaving `"
+              + opener
+              + "` unclaimed. When the body itself contains that line, declare `<<"
+              + last_uncounted_tag
+              + ":N` with N body lines, which closes on the count instead",
+          ),
+        }
+      }
       return {
         ok: false,
         error: "The ```tool block is not valid JSON: trailing verbatim body `"
@@ -414,6 +440,9 @@ pub fn bind_verbatim(calls: list<dict>, trailing: string) -> dict {
     }
     next_calls[request.call_index].arguments[request.key] = content
     requests[request_index] = request + {bound: true}
+    if !request.counted {
+      last_uncounted_tag = request.tag
+    }
     cursor = close_at + 1
     while cursor < len(lines) && trim(lines[cursor]) == "" {
       cursor = cursor + 1
