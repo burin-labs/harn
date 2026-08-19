@@ -118,6 +118,16 @@ before it was found: the traceback showed corrected source while raising
 Mock mode cannot measure behaviour: a scripted model does not read what it is
 shown. It proves mechanism only. Every behavioural number needs `--mode live`.
 
+Live mode pins the inference endpoint rather than inheriting it. The same port
+serves a different model on this machine's localhost, so an ambient base URL
+silently swaps the box under the measurement and the sweep reports a number from
+a machine nobody chose. `--base-url` overrides the pin explicitly.
+
+Before spending anything, live mode requires `/v1/models` to answer 200 **and**
+to list the model that was requested. A 200 on its own is not enough: a
+reachable server with a different model loaded answers 200 and then measures
+something else entirely. A failed preflight exits 4 without starting a trial.
+
 One JSON row per trial lands in the `--out` file: `passed`, `iterations`,
 `input_tokens`, `output_tokens`, `tool_calls`, `elapsed_ms`, `flush_count`,
 `surfaced_transient`, `surfaced_noise`, `surfaced_genuine`, `detour_calls`, the
