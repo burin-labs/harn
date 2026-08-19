@@ -53,6 +53,11 @@ on:
         required: false
         type: boolean
         default: false
+      apply-behavior-preserving-fixes:
+        description: "Apply the unattended `harn fix --safety behavior-preserving` pass before the caller-owned refresh. Capability migrations are applied either way."
+        required: false
+        type: boolean
+        default: true
     secrets:
       app-client-id:
         description: "GitHub App client id used to mint a signed-commit-capable installation token."
@@ -208,6 +213,7 @@ jobs:
           HARN_BUMP_BASE: ${{ inputs.base }}
           HARN_BUMP_ENABLE_AUTOMERGE: ${{ inputs.enable-auto-merge }}
           HARN_BUMP_PUBLISH_FAILURE_FOR_REPAIR: ${{ inputs.publish-failure-for-repair }}
+          HARN_BUMP_APPLY_BEHAVIOR_PRESERVING_FIXES: ${{ inputs.apply-behavior-preserving-fixes }}
         shell: bash
         run: |
           set -euo pipefail
@@ -217,7 +223,6 @@ jobs:
           # skew: runtimes with BumpApplyOutcome.ok return refresh_failed
           # directly; older runtimes reach validation, whose first operation
           # fails unless refresh completed successfully.
-          # shellcheck disable=SC2016 # expand in the child shell, not here
           # The target runtime owns its capability migration registry. Apply
           # that deterministic codemod before the caller-owned refresh so a
           # runtime bump can carry source compatibility forward in the same
@@ -225,7 +230,22 @@ jobs:
           # migration has settled, before caller-owned generation and strict
           # validation. This callback is reached only after a real version
           # change; the already-current path remains mutation-free.
-          export HARN_BUMP_REFRESH='set -euo pipefail; harn fix --apply --safety surface-changing --capability-migrations-only .; harn fix --apply --safety behavior-preserving .; eval "$HARN_BUMP_REFRESH_COMMAND"; printf "ok\n" > "$HARN_BUMP_REFRESH_SENTINEL"'
+          #
+          # The behavior-preserving pass is separable because it rewrites
+          # caller-owned source under a safety contract the caller may not be
+          # willing to take unattended. Capability migrations are not gated:
+          # they are what keeps a bump compiling.
+          # shellcheck disable=SC2016 # expand in the child shell, not here
+          refresh_migrations='set -euo pipefail; harn fix --apply --safety surface-changing --capability-migrations-only .; '
+          # shellcheck disable=SC2016 # expand in the child shell, not here
+          refresh_behavior_preserving='harn fix --apply --safety behavior-preserving .; '
+          # shellcheck disable=SC2016 # expand in the child shell, not here
+          refresh_caller='eval "$HARN_BUMP_REFRESH_COMMAND"; printf "ok\n" > "$HARN_BUMP_REFRESH_SENTINEL"'
+          if [ "${HARN_BUMP_APPLY_BEHAVIOR_PRESERVING_FIXES}" != "true" ]; then
+            refresh_behavior_preserving=''
+            echo "::notice::Skipping the unattended behavior-preserving fix pass; capability migrations still applied."
+          fi
+          export HARN_BUMP_REFRESH="${refresh_migrations}${refresh_behavior_preserving}${refresh_caller}"
           # shellcheck disable=SC2016 # expand in the child shell, not here
           export HARN_BUMP_VALIDATE='set -euo pipefail; test -f "$HARN_BUMP_REFRESH_SENTINEL"; eval "$HARN_BUMP_VALIDATE_COMMAND"'
           harn --version
