@@ -74,6 +74,14 @@ jobs:
       # with auto-merge disabled so a separately bounded repair lane has a
       # head lease. Ordinary callers should keep the default false.
       publish-failure-for-repair: false
+      # Optional. The shared workflow applies `harn fix --safety
+      # behavior-preserving` to your sources before your refresh command, so a
+      # bump can normalize its own fallout. Set false to decline that pass and
+      # keep the bump limited to the version change plus your own commands.
+      # Capability migrations are applied either way — they are what keeps a
+      # bump compiling — so declining this does not strand you on a keyword or
+      # capability break. Defaults to true.
+      apply-behavior-preserving-fixes: true
     secrets:
       app-client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
       app-private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
