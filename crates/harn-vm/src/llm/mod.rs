@@ -400,7 +400,7 @@ pub use self::model_test::{run_model_smoke_test, ModelSmokeTestOptions, ModelSmo
 pub(crate) use self::provider_auth::provider_auth_status_with_definition;
 pub use self::provider_auth::{
     available_provider_names, no_credentials_message, provider_auth_status, provider_auth_statuses,
-    resolve_api_key, ProviderAuthStatus, ProviderCredentialStatus,
+    resolve_api_key, ProviderAuthStatus, ProviderCredentialStatus, PROVIDER_SETUP_DOCS_URL,
 };
 pub use self::readiness::{selected_model_for_provider, supports_model_readiness_probe};
 pub use self::trace::{

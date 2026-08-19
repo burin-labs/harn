@@ -7,6 +7,409 @@
     "notes": "crates/harn-cli/data/provider_support_notes.toml",
     "empirical": []
   },
+  "credentials": [
+    {
+      "id": "anthropic",
+      "display_name": "Anthropic",
+      "featured": true,
+      "env": [
+        "ANTHROPIC_API_KEY"
+      ],
+      "auth_style": "header"
+    },
+    {
+      "id": "openai",
+      "display_name": "OpenAI",
+      "featured": true,
+      "env": [
+        "OPENAI_API_KEY"
+      ],
+      "auth_style": "bearer"
+    },
+    {
+      "id": "gemini",
+      "display_name": "Google Gemini",
+      "featured": true,
+      "env": [
+        "GEMINI_API_KEY",
+        "GOOGLE_API_KEY"
+      ],
+      "auth_style": "header"
+    },
+    {
+      "id": "openrouter",
+      "display_name": "OpenRouter",
+      "featured": true,
+      "env": [
+        "OPENROUTER_API_KEY"
+      ],
+      "auth_style": "bearer"
+    },
+    {
+      "id": "groq",
+      "display_name": "Groq",
+      "featured": true,
+      "env": [
+        "GROQ_API_KEY"
+      ],
+      "auth_style": "bearer"
+    },
+    {
+      "id": "deepseek",
+      "display_name": "DeepSeek",
+      "featured": true,
+      "env": [
+        "DEEPSEEK_API_KEY"
+      ],
+      "auth_style": "bearer"
+    },
+    {
+      "id": "ollama",
+      "display_name": "Ollama",
+      "featured": true,
+      "env": [],
+      "auth_style": "none"
+    },
+    {
+      "id": "atlas",
+      "display_name": "Atlas",
+      "featured": false,
+      "env": [
+        "ATLAS_API_KEY",
+        "ATLASCLOUD_API_KEY"
+      ],
+      "auth_style": "bearer"
+    },
+    {
+      "id": "azure_openai",
+      "display_name": "Azure Openai",
+      "featured": false,
+      "env": [
+        "AZURE_OPENAI_API_KEY",
+        "AZURE_OPENAI_AD_TOKEN",
+        "AZURE_OPENAI_BEARER_TOKEN"
+      ],
+      "auth_style": "azure_openai"
+    },
+    {
+      "id": "baseten",
+      "display_name": "Baseten",
+      "featured": false,
+      "env": [
+        "BASETEN_API_KEY"
+      ],
+      "auth_style": "bearer"
+    },
+    {
+      "id": "bedrock",
+      "display_name": "Bedrock",
+      "featured": false,
+      "env": [],
+      "auth_style": "aws_sigv4"
+    },
+    {
+      "id": "cerebras",
+      "display_name": "Cerebras",
+      "featured": false,
+      "env": [
+        "CEREBRAS_API_KEY"
+      ],
+      "auth_style": "bearer"
+    },
+    {
+      "id": "cloudflare_ai_gateway",
+      "display_name": "Cloudflare Ai Gateway",
+      "featured": false,
+      "env": [
+        "CLOUDFLARE_API_TOKEN",
+        "CLOUDFLARE_API_KEY"
+      ],
+      "auth_style": "bearer"
+    },
+    {
+      "id": "cohere",
+      "display_name": "Cohere",
+      "featured": false,
+      "env": [
+        "COHERE_API_KEY"
+      ],
+      "auth_style": "bearer"
+    },
+    {
+      "id": "dashscope",
+      "display_name": "Dashscope",
+      "featured": false,
+      "env": [
+        "DASHSCOPE_API_KEY"
+      ],
+      "auth_style": "bearer"
+    },
+    {
+      "id": "deepinfra",
+      "display_name": "Deepinfra",
+      "featured": false,
+      "env": [
+        "DEEPINFRA_API_KEY",
+        "DEEPINFRA_TOKEN"
+      ],
+      "auth_style": "bearer"
+    },
+    {
+      "id": "fireworks",
+      "display_name": "Fireworks",
+      "featured": false,
+      "env": [
+        "FIREWORKS_API_KEY"
+      ],
+      "auth_style": "bearer"
+    },
+    {
+      "id": "flexai",
+      "display_name": "Flexai",
+      "featured": false,
+      "env": [
+        "FLEXAI_API_KEY"
+      ],
+      "auth_style": "bearer"
+    },
+    {
+      "id": "friendli",
+      "display_name": "Friendli",
+      "featured": false,
+      "env": [
+        "FRIENDLI_API_KEY",
+        "FRIENDLI_TOKEN"
+      ],
+      "auth_style": "bearer"
+    },
+    {
+      "id": "github_models",
+      "display_name": "Github Models",
+      "featured": false,
+      "env": [
+        "GITHUB_MODELS_TOKEN"
+      ],
+      "auth_style": "bearer"
+    },
+    {
+      "id": "huggingface",
+      "display_name": "Huggingface",
+      "featured": false,
+      "env": [
+        "HF_TOKEN",
+        "HUGGINGFACE_API_KEY"
+      ],
+      "auth_style": "bearer"
+    },
+    {
+      "id": "hunyuan",
+      "display_name": "Hunyuan",
+      "featured": false,
+      "env": [
+        "HUNYUAN_API_KEY",
+        "TENCENT_HUNYUAN_API_KEY"
+      ],
+      "auth_style": "bearer"
+    },
+    {
+      "id": "hyperbolic",
+      "display_name": "Hyperbolic",
+      "featured": false,
+      "env": [
+        "HYPERBOLIC_API_KEY"
+      ],
+      "auth_style": "bearer"
+    },
+    {
+      "id": "inception",
+      "display_name": "Inception",
+      "featured": false,
+      "env": [
+        "INCEPTION_API_KEY"
+      ],
+      "auth_style": "bearer"
+    },
+    {
+      "id": "llamacpp",
+      "display_name": "Llamacpp",
+      "featured": false,
+      "env": [],
+      "auth_style": "none"
+    },
+    {
+      "id": "local",
+      "display_name": "Local",
+      "featured": false,
+      "env": [],
+      "auth_style": "none"
+    },
+    {
+      "id": "minimax",
+      "display_name": "Minimax",
+      "featured": false,
+      "env": [
+        "MINIMAX_API_KEY"
+      ],
+      "auth_style": "bearer"
+    },
+    {
+      "id": "mistral",
+      "display_name": "Mistral",
+      "featured": false,
+      "env": [
+        "MISTRAL_API_KEY"
+      ],
+      "auth_style": "bearer"
+    },
+    {
+      "id": "mlx",
+      "display_name": "Mlx",
+      "featured": false,
+      "env": [],
+      "auth_style": "none"
+    },
+    {
+      "id": "moonshot",
+      "display_name": "Moonshot",
+      "featured": false,
+      "env": [
+        "MOONSHOT_API_KEY",
+        "MOONSHOT_AI_API_KEY",
+        "KIMI_API_KEY"
+      ],
+      "auth_style": "bearer"
+    },
+    {
+      "id": "nebius",
+      "display_name": "Nebius",
+      "featured": false,
+      "env": [
+        "NEBIUS_API_KEY"
+      ],
+      "auth_style": "bearer"
+    },
+    {
+      "id": "nvidia",
+      "display_name": "Nvidia",
+      "featured": false,
+      "env": [
+        "NVIDIA_API_KEY",
+        "NIM_API_KEY"
+      ],
+      "auth_style": "bearer"
+    },
+    {
+      "id": "parasail",
+      "display_name": "Parasail",
+      "featured": false,
+      "env": [
+        "PARASAIL_API_KEY"
+      ],
+      "auth_style": "bearer"
+    },
+    {
+      "id": "qianfan",
+      "display_name": "Qianfan",
+      "featured": false,
+      "env": [
+        "QIANFAN_API_KEY",
+        "BAIDU_QIANFAN_API_KEY"
+      ],
+      "auth_style": "bearer"
+    },
+    {
+      "id": "sambanova",
+      "display_name": "Sambanova",
+      "featured": false,
+      "env": [
+        "SAMBANOVA_API_KEY"
+      ],
+      "auth_style": "bearer"
+    },
+    {
+      "id": "siliconflow",
+      "display_name": "Siliconflow",
+      "featured": false,
+      "env": [
+        "SILICONFLOW_API_KEY"
+      ],
+      "auth_style": "bearer"
+    },
+    {
+      "id": "tgi",
+      "display_name": "Tgi",
+      "featured": false,
+      "env": [],
+      "auth_style": "none"
+    },
+    {
+      "id": "together",
+      "display_name": "Together",
+      "featured": false,
+      "env": [
+        "TOGETHER_AI_API_KEY"
+      ],
+      "auth_style": "bearer"
+    },
+    {
+      "id": "vercel_ai_gateway",
+      "display_name": "Vercel AI Gateway",
+      "featured": false,
+      "env": [
+        "AI_GATEWAY_API_KEY",
+        "VERCEL_AI_GATEWAY_API_KEY"
+      ],
+      "auth_style": "bearer"
+    },
+    {
+      "id": "vertex",
+      "display_name": "Vertex",
+      "featured": false,
+      "env": [
+        "VERTEX_AI_ACCESS_TOKEN",
+        "GOOGLE_OAUTH_ACCESS_TOKEN",
+        "GOOGLE_APPLICATION_CREDENTIALS"
+      ],
+      "auth_style": "bearer"
+    },
+    {
+      "id": "vllm",
+      "display_name": "Vllm",
+      "featured": false,
+      "env": [],
+      "auth_style": "none"
+    },
+    {
+      "id": "volcengine_ark",
+      "display_name": "Volcengine Ark",
+      "featured": false,
+      "env": [
+        "ARK_API_KEY",
+        "VOLCENGINE_ARK_API_KEY",
+        "VOLCENGINE_API_KEY"
+      ],
+      "auth_style": "bearer"
+    },
+    {
+      "id": "xai",
+      "display_name": "Xai",
+      "featured": false,
+      "env": [
+        "XAI_API_KEY"
+      ],
+      "auth_style": "bearer"
+    },
+    {
+      "id": "zai",
+      "display_name": "Zai",
+      "featured": false,
+      "env": [
+        "ZAI_API_KEY",
+        "ZHIPU_API_KEY"
+      ],
+      "auth_style": "bearer"
+    }
+  ],
   "providers": [
     {
       "id": "anthropic",
@@ -581,7 +984,7 @@
     },
     {
       "id": "deepseek",
-      "display_name": "Deepseek",
+      "display_name": "DeepSeek",
       "catalog_provider": "deepseek",
       "endpoint_style": "OpenAI-compatible chat completions",
       "classification": "hosted",
@@ -1840,7 +2243,7 @@
     },
     {
       "id": "openrouter",
-      "display_name": "Openrouter",
+      "display_name": "OpenRouter",
       "catalog_provider": "openrouter",
       "endpoint_style": "OpenAI-compatible chat completions",
       "classification": "hosted",

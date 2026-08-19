@@ -720,7 +720,7 @@ fn check_provider_credentials() -> Vec<DoctorCheck> {
             label: format!("creds:{name}"),
             detail,
             fix_command,
-            docs_url: Some("https://harnlang.com/docs/llm/providers.html".to_string()),
+            docs_url: Some("https://harnlang.com/llm/providers.html".to_string()),
             blocks: Vec::new(),
         });
     }
@@ -760,7 +760,7 @@ fn check_provider_credentials() -> Vec<DoctorCheck> {
         label: "credentials".to_string(),
         detail: aggregate_detail,
         fix_command: aggregate_fix,
-        docs_url: Some("https://harnlang.com/docs/llm/providers.html".to_string()),
+        docs_url: Some("https://harnlang.com/llm/providers.html".to_string()),
         blocks: aggregate_blocks,
     });
 
@@ -1082,7 +1082,7 @@ fn check_portal() -> Vec<DoctorCheck> {
             label: "portal:deps".to_string(),
             detail: format!("node_modules missing under {}", portal_dir.display()),
             fix_command: Some(format!("(cd {} && npm install)", portal_dir.display())),
-            docs_url: Some("https://harnlang.com/docs/portal.html".to_string()),
+            docs_url: Some("https://harnlang.com/portal.html".to_string()),
             blocks: vec!["portal"],
         }
     };

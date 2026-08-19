@@ -54,7 +54,26 @@ pub(crate) struct ProviderSupportReport {
     pub schema_version: u32,
     pub generated_by: String,
     pub sources: ProviderSupportSources,
+    /// Every catalogued provider and the environment variables it reads for a
+    /// credential. This is the complete answer to "what do I set?", which the
+    /// runtime's short "no credentials" error deliberately does not print.
+    pub credentials: Vec<ProviderCredentialEntry>,
     pub providers: Vec<ProviderSupportEntry>,
+}
+
+/// One provider's credential contract, ordered curated-first for reading.
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct ProviderCredentialEntry {
+    pub id: String,
+    pub display_name: String,
+    /// True for the catalog's curated short list — the providers Harn names
+    /// first in setup messages and pickers.
+    pub featured: bool,
+    /// Accepted credential variables, first match wins. Empty means the
+    /// provider needs no key: a local server, or a platform credential chain
+    /// such as AWS or Google application default credentials.
+    pub env: Vec<String>,
+    pub auth_style: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -288,8 +307,45 @@ fn build_report_from_parts(
             notes: notes_source,
             empirical: empirical.sources.into_iter().collect(),
         },
+        credentials: build_credentials(&catalog),
         providers,
     }
+}
+
+/// Order every catalogued provider the way a reader wants it: the curated
+/// short list first, in catalog order, then everything else alphabetically.
+/// Providers that need no key stay in the table so the page can say so
+/// explicitly instead of leaving a reader to infer it from an absence.
+fn build_credentials(catalog: &ProviderCatalogArtifact) -> Vec<ProviderCredentialEntry> {
+    let featured = harn_vm::llm_config::featured_provider_names();
+    let is_featured = |id: &str| featured.iter().any(|name| name == id);
+    let by_id: BTreeMap<&str, &CatalogProvider> = catalog
+        .providers
+        .iter()
+        .map(|provider| (provider.id.as_str(), provider))
+        .collect();
+
+    let mut ordered: Vec<&CatalogProvider> = featured
+        .iter()
+        .filter_map(|id| by_id.get(id.as_str()).copied())
+        .collect();
+    ordered.extend(
+        catalog
+            .providers
+            .iter()
+            .filter(|provider| !is_featured(&provider.id)),
+    );
+
+    ordered
+        .into_iter()
+        .map(|provider| ProviderCredentialEntry {
+            id: provider.id.clone(),
+            display_name: provider.display_name.clone(),
+            featured: is_featured(&provider.id),
+            env: provider.auth.env.clone(),
+            auth_style: provider.auth.style.clone(),
+        })
+        .collect()
 }
 
 fn build_entry(
@@ -855,6 +911,42 @@ pub(crate) fn render_json(report: &ProviderSupportReport) -> Result<String, Stri
         .map_err(|error| format!("failed to render provider support JSON: {error}"))
 }
 
+/// The credential table. A reader who hits "no LLM provider credentials
+/// found" lands here, so it answers one question — which variable do I set —
+/// before the capability comparison starts.
+fn render_credentials_section(credentials: &[ProviderCredentialEntry]) -> String {
+    let mut out = String::new();
+    out.push_str("## Credential variables\n\n");
+    out.push_str("Set one of a provider's variables to an API key, or to a `harn-secret://namespace/name` reference. Harn reads the variables left to right and uses the first one that is set.\n\n");
+    out.push_str("A star marks the short list Harn names first in setup messages and pickers. The other providers work exactly the same way. To see which variables are already set on your machine, run `harn doctor`.\n\n");
+    out.push_str("| Provider | Catalog id | Credential variables |\n");
+    out.push_str("|---|---|---|\n");
+    for entry in credentials {
+        let variables = if !entry.env.is_empty() {
+            entry
+                .env
+                .iter()
+                .map(|env| format!("`{}`", markdown_escape(env)))
+                .collect::<Vec<_>>()
+                .join(" or ")
+        } else if entry.auth_style == "none" {
+            "none — runs without a key".to_string()
+        } else {
+            "resolved by the platform credential chain".to_string()
+        };
+        out.push_str(&format!(
+            "| {}{} | `{}` | {} |\n",
+            if entry.featured { "\u{2605} " } else { "" },
+            markdown_escape(&entry.display_name),
+            markdown_escape(&entry.id),
+            variables,
+        ));
+    }
+    out.push('\n');
+    out.push_str("## Capability comparison\n\n");
+    out
+}
+
 pub(crate) fn render_markdown(report: &ProviderSupportReport) -> String {
     let mut out = String::new();
     out.push_str("# Provider support recommendations\n\n");
@@ -870,6 +962,7 @@ pub(crate) fn render_markdown(report: &ProviderSupportReport) -> String {
             report.sources.empirical.join("`, `")
         ));
     }
+    out.push_str(&render_credentials_section(&report.credentials));
     out.push_str("| Provider | Endpoint style | Recommended selector | Tool mode | Native tools | Text tools | Structured output | Reasoning knobs | Cache | Batch | Serving tiers | Usage confidence | Empirical |\n");
     out.push_str("|---|---|---|---|---:|---:|---|---|---:|---|---|---|---|\n");
     for entry in &report.providers {

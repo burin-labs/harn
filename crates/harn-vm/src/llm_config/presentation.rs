@@ -17,11 +17,21 @@ pub struct PresentationConfig {
     /// Stable presentation-family id -> ordered dimensions and presets.
     #[serde(default)]
     pub families: BTreeMap<String, ModelFamilyDef>,
+    /// Provider ids Harn names first whenever a surface can only show a few:
+    /// the "no credentials" error, onboarding copy, and host setup pickers.
+    ///
+    /// The order is the display order, not a routing preference. Every other
+    /// catalogued provider stays equally usable; these are the short list a
+    /// person is most likely to already have an account with. Surfaces read
+    /// this list instead of hardcoding provider names, so the curated set has
+    /// one owner and one place to change.
+    #[serde(default)]
+    pub featured_providers: Vec<String>,
 }
 
 impl PresentationConfig {
     pub fn is_empty(&self) -> bool {
-        self.variants.is_empty() && self.families.is_empty()
+        self.variants.is_empty() && self.families.is_empty() && self.featured_providers.is_empty()
     }
 }
 
