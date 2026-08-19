@@ -7,14 +7,14 @@
 # unwrapped function markup
   calls=1 errors=0 violations=1 stray=0
   call run {"command":"go test ./..."}
-  vio "Tool call `run` was emitted as chat-template function markup instead of `<tool_call>run({ ... })</tool_call>`. Recovered this turn so work moves forward; emit the canonical form on subsequent turns."
+  vio "Tool call `run` was emitted as chat-template function markup instead of `<tool_call>run({ key: value })</tool_call>`. Recovered this turn so work moves forward; emit the canonical form on subsequent turns."
   prose=""
   answer=null
   done=null
 # invoke attribute markup
   calls=1 errors=0 violations=1 stray=0
   call run {"command":"cargo check"}
-  vio "Tool call `run` was emitted as chat-template function markup instead of `<tool_call>run({ ... })</tool_call>`. Recovered this turn so work moves forward; emit the canonical form on subsequent turns."
+  vio "Tool call `run` was emitted as chat-template function markup instead of `<tool_call>run({ key: value })</tool_call>`. Recovered this turn so work moves forward; emit the canonical form on subsequent turns."
   prose=""
   answer=null
   done=null
@@ -74,14 +74,14 @@
 # function markup, trailing json object
   calls=1 errors=0 violations=1 stray=0
   call echo_marker {"value":"MK-7Q3Z"}
-  vio "Tool call `echo_marker` was emitted as chat-template function markup instead of `<tool_call>echo_marker({ ... })</tool_call>`. Recovered this turn so work moves forward; emit the canonical form on subsequent turns."
+  vio "Tool call `echo_marker` was emitted as chat-template function markup instead of `<tool_call>echo_marker({ key: value })</tool_call>`. Recovered this turn so work moves forward; emit the canonical form on subsequent turns."
   prose=""
   answer=null
   done=null
 # function markup, enclosed json object
   calls=1 errors=0 violations=1 stray=0
   call echo_marker {"value":"MK-7Q3Z"}
-  vio "Tool call `echo_marker` was emitted as chat-template function markup instead of `<tool_call>echo_marker({ ... })</tool_call>`. Recovered this turn so work moves forward; emit the canonical form on subsequent turns."
+  vio "Tool call `echo_marker` was emitted as chat-template function markup instead of `<tool_call>echo_marker({ key: value })</tool_call>`. Recovered this turn so work moves forward; emit the canonical form on subsequent turns."
   prose=""
   answer=null
   done=null
@@ -94,21 +94,21 @@
 # function markup, empty json object
   calls=1 errors=0 violations=1 stray=0
   call echo_marker {}
-  vio "Tool call `echo_marker` was emitted as chat-template function markup instead of `<tool_call>echo_marker({ ... })</tool_call>`. Recovered this turn so work moves forward; emit the canonical form on subsequent turns."
+  vio "Tool call `echo_marker` was emitted as chat-template function markup instead of `<tool_call>echo_marker({ key: value })</tool_call>`. Recovered this turn so work moves forward; emit the canonical form on subsequent turns."
   prose=""
   answer=null
   done=null
 # function markup, nested json object
   calls=1 errors=0 violations=1 stray=0
   call echo_marker {"meta":{"n":1},"value":"x"}
-  vio "Tool call `echo_marker` was emitted as chat-template function markup instead of `<tool_call>echo_marker({ ... })</tool_call>`. Recovered this turn so work moves forward; emit the canonical form on subsequent turns."
+  vio "Tool call `echo_marker` was emitted as chat-template function markup instead of `<tool_call>echo_marker({ key: value })</tool_call>`. Recovered this turn so work moves forward; emit the canonical form on subsequent turns."
   prose=""
   answer=null
   done=null
 # invoke markup, trailing json object
   calls=1 errors=0 violations=1 stray=0
   call echo_marker {"value":"MK-7Q3Z"}
-  vio "Tool call `echo_marker` was emitted as chat-template function markup instead of `<tool_call>echo_marker({ ... })</tool_call>`. Recovered this turn so work moves forward; emit the canonical form on subsequent turns."
+  vio "Tool call `echo_marker` was emitted as chat-template function markup instead of `<tool_call>echo_marker({ key: value })</tool_call>`. Recovered this turn so work moves forward; emit the canonical form on subsequent turns."
   prose=""
   answer=null
   done=null

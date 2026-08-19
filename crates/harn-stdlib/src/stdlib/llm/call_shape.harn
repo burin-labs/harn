@@ -103,3 +103,31 @@ pub fn tool_call_shape(tool_format) -> ToolCallShape {
   }
   return __TEXT_SHAPE
 }
+
+/**
+ * The taught call syntax for ONE named tool.
+ *
+ * A corrective that has already identified which call the model meant should
+ * name it: "emit `run` like this" is a smaller ask than "emit calls like this",
+ * and the recovery notes that raise it always know the name. Falls back to the
+ * unnamed `call_syntax` for an empty name, so a caller that has no name to
+ * offer still renders the format's shape rather than a hole.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn tool_call_syntax_named(tool_format, name) -> string {
+  const shape = tool_call_shape(tool_format)
+  const called = to_string(name ?? "")
+  if called == "" {
+    return shape.call_syntax
+  }
+  if shape.kind == "native" {
+    return "a native tool call to `" + called + "` on the provider's tool channel"
+  }
+  if shape.kind == "json" {
+    return "a ```tool fenced block wrapping `{\"name\": \"" + called + "\", \"args\": { ... }}`"
+  }
+  return "`<tool_call>" + called + "({ key: value })</tool_call>`"
+}

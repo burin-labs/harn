@@ -45,7 +45,7 @@
 # invoke markup in a function_calls wrapper
   calls=1 errors=0 violations=1 stray=0
   call look {"file":"src/main.zig","intent":"read"}
-  vio "Tool call `look` was emitted as chat-template function markup instead of `<tool_call>look({ ... })</tool_call>`. Recovered this turn so work moves forward; emit the canonical form on subsequent turns."
+  vio "Tool call `look` was emitted as chat-template function markup instead of `<tool_call>look({ key: value })</tool_call>`. Recovered this turn so work moves forward; emit the canonical form on subsequent turns."
   prose=""
   answer=null
   done=null

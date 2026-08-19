@@ -6,7 +6,7 @@
  * prose, canonical replay, and the rule that every consumed non-call is
  * recorded as dropped.
  */
-import { tool_call_shape } from "std/llm/call_shape"
+import { tool_call_shape, tool_call_syntax_named } from "std/llm/call_shape"
 import {
   BACKTICK_FENCE,
   TAGGED_DIALECT,
@@ -341,8 +341,9 @@ fn __tool_parse_markup_unit(unit, tools, state: dict) -> dict {
           "Tool call `"
             + name
             + "` was emitted as chat-template function markup instead of "
-            + to_string(
-            state?.call_syntax ?? tool_call_shape("").call_syntax,
+            + tool_call_syntax_named(
+            to_string(state?.tool_format ?? ""),
+            name,
           )
             + ". Recovered this turn so work moves forward; "
             + "emit the canonical form on subsequent turns.",
@@ -782,7 +783,9 @@ fn __tool_parse_tagged(text: string, tools, tool_format = "") -> dict {
         recovered: recovered,
         pending_response: pending_response,
         unclosed_response_prose: unclosed_response_prose,
-        call_syntax: tool_call_shape(tool_format).call_syntax,
+        // Carried as the format, not as a pre-rendered string: a note that
+        // knows which tool it is talking about renders the named form.
+        tool_format: tool_format,
       },
       candidates,
     )
