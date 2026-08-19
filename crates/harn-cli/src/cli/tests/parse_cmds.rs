@@ -775,6 +775,46 @@ fn test_parses_playground_args() {
 }
 
 #[test]
+fn test_parses_chat_command() {
+    let cli = Cli::parse_from([
+        "harn",
+        "chat",
+        "qwen36-coder",
+        "--provider",
+        "llamacpp",
+        "--system",
+        "be brief",
+        "--verbose",
+    ]);
+
+    let Command::Chat(args) = cli.command.unwrap() else {
+        panic!("expected chat command");
+    };
+    assert_eq!(args.model.as_deref(), Some("qwen36-coder"));
+    assert_eq!(args.provider.as_deref(), Some("llamacpp"));
+    assert_eq!(args.system.as_deref(), Some("be brief"));
+    assert!(args.verbose);
+    assert!(!args.no_stats);
+}
+
+#[test]
+fn test_parses_bare_chat_command() {
+    let cli = Cli::parse_from(["harn", "chat"]);
+    let Command::Chat(args) = cli.command.unwrap() else {
+        panic!("expected chat command");
+    };
+    assert!(args.model.is_none());
+    assert_eq!(args.stats_mode(), "compact");
+}
+
+#[test]
+fn test_chat_rejects_verbose_with_no_stats() {
+    // Asking for both the full breakdown and no breakdown is a contradiction;
+    // clap should say so rather than silently picking one.
+    assert!(Cli::try_parse_from(["harn", "chat", "--verbose", "--no-stats"]).is_err());
+}
+
+#[test]
 fn test_parses_try_command() {
     let cli = Cli::parse_from([
         "harn",

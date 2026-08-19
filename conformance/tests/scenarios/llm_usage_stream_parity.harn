@@ -1,0 +1,52 @@
+import { with_llm_script } from "std/testing"
+
+/**
+ * One owner for one value: `llm_call` and `llm_stream_call` must publish the
+ * *same* `usage`, field for field.
+ *
+ * Both build it through `build_usage_value`, but a shared helper is a code
+ * shape, and a code shape is not a guarantee — a future change could give one
+ * path its own builder and nothing would notice until an accounting number
+ * disagreed with itself. This runs the same scripted turn through both paths
+ * and compares the serialized dicts, so the single owner is pinned
+ * mechanically rather than by review.
+ */
+pipeline default(harness: Harness) {
+  with_llm_script(
+    harness.llm,
+    [
+      {
+        text: "parity check",
+        stop_reason: "stop",
+        input_tokens: 23,
+        output_tokens: 9,
+        cache_read_tokens: 4,
+        cache_write_tokens: 2,
+      },
+      {
+        text: "parity check",
+        stop_reason: "stop",
+        input_tokens: 23,
+        output_tokens: 9,
+        cache_read_tokens: 4,
+        cache_write_tokens: 2,
+      },
+    ],
+    { ->
+      const streamed = stream.collect(
+        harness.llm.stream_call("same prompt", nil, {provider: "mock"}),
+        {max: 8},
+      )
+      const terminal = streamed[len(streamed) - 1]
+      const direct = harness.llm.call("same prompt", nil, {provider: "mock"})
+
+      // Compare the whole dict, not a hand-picked field list: a field added
+      // to one path and not the other is exactly the drift this guards.
+      harness.stdio.println(
+        json_stringify(terminal.usage) == json_stringify(direct.usage),
+      )
+      // Print one side so a failure shows what the shared value actually is.
+      harness.stdio.println(json_stringify(direct.usage))
+    },
+  )
+}

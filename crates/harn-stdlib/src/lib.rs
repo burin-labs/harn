@@ -188,6 +188,8 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "llm/catalog" => "stdlib/llm/catalog.harn",
     "llm/safe" => "stdlib/llm/safe.harn",
     "llm/envelope" => "stdlib/llm/envelope.harn",
+    "llm/speed" => "stdlib/llm/speed.harn",
+    "llm/chat_session" => "stdlib/llm/chat_session.harn",
     "llm/caller" => "stdlib/llm/caller.harn",
     "harness/policy" => "stdlib/harness/policy.harn",
     "llm/budget" => "stdlib/llm/budget.harn",
@@ -448,6 +450,7 @@ pub struct StdlibCliScript {
 pub const STDLIB_CLI_SCRIPTS: &[StdlibCliScript] = embedded_catalog!(StdlibCliScript, name, [
     "codemod" => "stdlib/cli/codemod.harn",
     "canon/check" => "stdlib/cli/canon/check.harn",
+    "chat" => "stdlib/cli/chat.harn",
     "doctor" => "stdlib/cli/doctor.harn",
     "echo" => "stdlib/cli/echo.harn",
     // Helper module for the embedded `eval/*` scripts. Has a stub `main`

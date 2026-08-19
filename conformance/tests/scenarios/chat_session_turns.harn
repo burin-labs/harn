@@ -1,0 +1,51 @@
+import { ChatSessionConfig, chat_session } from "std/llm/chat_session"
+import { llm_stream_text, llm_text, with_llm_script } from "std/testing"
+
+/**
+ * The chat session's canonical path: a person types, tokens stream back, the
+ * conversation accumulates, and slash commands steer without reaching the
+ * model.
+ *
+ * Stats are off here because they report wall-clock time, which no golden can
+ * pin. Their formatting is covered exactly in `stdlib/llm_speed_report`.
+ */
+fn __config() -> ChatSessionConfig {
+  return {provider: "mock", model: "mock-model", label: "mock-model", stats: "off"}
+}
+
+pipeline default(harness: Harness) {
+  // A streamed reply renders as it arrives and lands in the transcript whole.
+  harness.testing.stdin_set("hello there\n")
+  with_llm_script(
+    harness.llm,
+    [llm_stream_text(["Hi. ", "How can ", "I help?"])],
+    { -> harness.stdio.println("exit=" + to_string(chat_session(harness, __config()))) },
+  )
+  harness.testing.stdin_reset()
+  harness.stdio.println("=== slash commands never reach the model ===")
+  // An empty script: any model call would fail the run, so reaching the end
+  // proves /help, /model, /stats and /bye all stayed local.
+  harness.testing.stdin_set("/help\n/model\n/stats verbose\n/bye\nnever sent\n")
+  with_llm_script(
+    harness.llm,
+    [],
+    { -> harness.stdio.println("exit=" + to_string(chat_session(harness, __config()))) },
+  )
+  harness.testing.stdin_reset()
+  harness.stdio.println("=== a fenced message arrives as one turn ===")
+  harness.testing.stdin_set("\"\"\"\nline one\nline two\n\"\"\"\n")
+  with_llm_script(
+    harness.llm,
+    [llm_text("got both lines")],
+    { -> harness.stdio.println("exit=" + to_string(chat_session(harness, __config()))) },
+  )
+  harness.testing.stdin_reset()
+  harness.stdio.println("=== an unknown command is refused, not sent ===")
+  harness.testing.stdin_set("/nonsense\n")
+  with_llm_script(
+    harness.llm,
+    [],
+    { -> harness.stdio.println("exit=" + to_string(chat_session(harness, __config()))) },
+  )
+  harness.testing.stdin_reset()
+}
