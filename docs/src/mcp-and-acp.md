@@ -1083,7 +1083,7 @@ that join from provider and model rows.
 
 Accepted selector forms:
 
-- a known alias from the llm.toml catalog (e.g. `claude-sonnet-5`)
+- a known alias from the provider catalog (e.g. `claude-sonnet-5`)
 - an explicit `provider:model` or `provider/model` pair where the
   provider is in `providers.toml`
 - a model id present in the catalog (`model_catalog_entry`)

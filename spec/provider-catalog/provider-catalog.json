@@ -338,7 +338,7 @@
     },
     {
       "id": "deepseek",
-      "display_name": "Deepseek",
+      "display_name": "DeepSeek",
       "classification": "hosted",
       "endpoint": {
         "base_url": "https://api.deepseek.com/v1",
@@ -463,7 +463,7 @@
     },
     {
       "id": "gemini",
-      "display_name": "Gemini",
+      "display_name": "Google Gemini",
       "classification": "hosted",
       "endpoint": {
         "base_url": "https://generativelanguage.googleapis.com",
@@ -1038,7 +1038,7 @@
     },
     {
       "id": "openai",
-      "display_name": "Openai",
+      "display_name": "OpenAI",
       "classification": "hosted",
       "endpoint": {
         "base_url": "https://api.openai.com/v1",
@@ -1069,7 +1069,7 @@
     },
     {
       "id": "openrouter",
-      "display_name": "Openrouter",
+      "display_name": "OpenRouter",
       "classification": "hosted",
       "endpoint": {
         "base_url": "https://openrouter.ai/api/v1",

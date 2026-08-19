@@ -452,6 +452,23 @@ pub fn provider_names() -> Vec<String> {
     effective_config().providers.keys().cloned().collect()
 }
 
+/// The catalog's curated provider short list, in authored display order.
+///
+/// Surfaces that can only name a few providers — the "no credentials" error,
+/// onboarding copy, setup pickers — read this instead of carrying their own
+/// list. Ids the loaded catalog does not define are dropped, so an overlay
+/// that suppresses a provider cannot leave a dangling recommendation.
+pub fn featured_provider_names() -> Vec<String> {
+    let config = effective_config();
+    config
+        .presentation
+        .featured_providers
+        .iter()
+        .filter(|name| config.providers.contains_key(*name))
+        .cloned()
+        .collect()
+}
+
 /// Return every configured alias name, sorted deterministically.
 pub fn known_model_names() -> Vec<String> {
     effective_config().aliases.keys().cloned().collect()

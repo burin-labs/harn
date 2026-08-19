@@ -9,6 +9,61 @@ This page aggregates Harn's provider/model catalog, runtime capability rules, sm
 
 No benchmark summary is baked into this checked-in page. To layer local empirical results, run `harn provider catalog support --empirical .harn-runs/coding-agent-bench/latest/summary.json`.
 
+## Credential variables
+
+Set one of a provider's variables to an API key, or to a `harn-secret://namespace/name` reference. Harn reads the variables left to right and uses the first one that is set.
+
+A star marks the short list Harn names first in setup messages and pickers. The other providers work exactly the same way. To see which variables are already set on your machine, run `harn doctor`.
+
+| Provider | Catalog id | Credential variables |
+|---|---|---|
+| ★ Anthropic | `anthropic` | `ANTHROPIC_API_KEY` |
+| ★ OpenAI | `openai` | `OPENAI_API_KEY` |
+| ★ Google Gemini | `gemini` | `GEMINI_API_KEY` or `GOOGLE_API_KEY` |
+| ★ OpenRouter | `openrouter` | `OPENROUTER_API_KEY` |
+| ★ Groq | `groq` | `GROQ_API_KEY` |
+| ★ DeepSeek | `deepseek` | `DEEPSEEK_API_KEY` |
+| ★ Ollama | `ollama` | none — runs without a key |
+| Atlas | `atlas` | `ATLAS_API_KEY` or `ATLASCLOUD_API_KEY` |
+| Azure Openai | `azure_openai` | `AZURE_OPENAI_API_KEY` or `AZURE_OPENAI_AD_TOKEN` or `AZURE_OPENAI_BEARER_TOKEN` |
+| Baseten | `baseten` | `BASETEN_API_KEY` |
+| Bedrock | `bedrock` | resolved by the platform credential chain |
+| Cerebras | `cerebras` | `CEREBRAS_API_KEY` |
+| Cloudflare Ai Gateway | `cloudflare_ai_gateway` | `CLOUDFLARE_API_TOKEN` or `CLOUDFLARE_API_KEY` |
+| Cohere | `cohere` | `COHERE_API_KEY` |
+| Dashscope | `dashscope` | `DASHSCOPE_API_KEY` |
+| Deepinfra | `deepinfra` | `DEEPINFRA_API_KEY` or `DEEPINFRA_TOKEN` |
+| Fireworks | `fireworks` | `FIREWORKS_API_KEY` |
+| Flexai | `flexai` | `FLEXAI_API_KEY` |
+| Friendli | `friendli` | `FRIENDLI_API_KEY` or `FRIENDLI_TOKEN` |
+| Github Models | `github_models` | `GITHUB_MODELS_TOKEN` |
+| Huggingface | `huggingface` | `HF_TOKEN` or `HUGGINGFACE_API_KEY` |
+| Hunyuan | `hunyuan` | `HUNYUAN_API_KEY` or `TENCENT_HUNYUAN_API_KEY` |
+| Hyperbolic | `hyperbolic` | `HYPERBOLIC_API_KEY` |
+| Inception | `inception` | `INCEPTION_API_KEY` |
+| Llamacpp | `llamacpp` | none — runs without a key |
+| Local | `local` | none — runs without a key |
+| Minimax | `minimax` | `MINIMAX_API_KEY` |
+| Mistral | `mistral` | `MISTRAL_API_KEY` |
+| Mlx | `mlx` | none — runs without a key |
+| Moonshot | `moonshot` | `MOONSHOT_API_KEY` or `MOONSHOT_AI_API_KEY` or `KIMI_API_KEY` |
+| Nebius | `nebius` | `NEBIUS_API_KEY` |
+| Nvidia | `nvidia` | `NVIDIA_API_KEY` or `NIM_API_KEY` |
+| Parasail | `parasail` | `PARASAIL_API_KEY` |
+| Qianfan | `qianfan` | `QIANFAN_API_KEY` or `BAIDU_QIANFAN_API_KEY` |
+| Sambanova | `sambanova` | `SAMBANOVA_API_KEY` |
+| Siliconflow | `siliconflow` | `SILICONFLOW_API_KEY` |
+| Tgi | `tgi` | none — runs without a key |
+| Together | `together` | `TOGETHER_AI_API_KEY` |
+| Vercel AI Gateway | `vercel_ai_gateway` | `AI_GATEWAY_API_KEY` or `VERCEL_AI_GATEWAY_API_KEY` |
+| Vertex | `vertex` | `VERTEX_AI_ACCESS_TOKEN` or `GOOGLE_OAUTH_ACCESS_TOKEN` or `GOOGLE_APPLICATION_CREDENTIALS` |
+| Vllm | `vllm` | none — runs without a key |
+| Volcengine Ark | `volcengine_ark` | `ARK_API_KEY` or `VOLCENGINE_ARK_API_KEY` or `VOLCENGINE_API_KEY` |
+| Xai | `xai` | `XAI_API_KEY` |
+| Zai | `zai` | `ZAI_API_KEY` or `ZHIPU_API_KEY` |
+
+## Capability comparison
+
 | Provider | Endpoint style | Recommended selector | Tool mode | Native tools | Text tools | Structured output | Reasoning knobs | Cache | Batch | Serving tiers | Usage confidence | Empirical |
 |---|---|---|---|---:|---:|---|---|---:|---|---|---|---|
 | `Anthropic` | Anthropic Messages API | `haiku` | `native` | yes | yes | `tool_use` / `xml_tagged` | `enabled` | yes | Yes (50%) | `fast:premium` | `high` | `not_recorded` |
@@ -21,7 +76,7 @@ No benchmark summary is baked into this checked-in page. To layer local empirica
 | `Cohere` | OpenAI-compatible chat completions | `cohere:command-a-plus-05-2026` | `native` | yes | yes | `native` / `native_json` | `adaptive` | no | No | none | `high` | `not_recorded` |
 | `Dashscope` | OpenAI-compatible chat completions | `dashscope:dashscope/qwen3-coder-next` | `native` | yes | yes | `native` / `delimited` | `disable_directive:/no_think,enabled` | yes | No | none | `high` | `not_recorded` |
 | `Deepinfra` | OpenAI-compatible chat completions | `deepinfra:deepinfra/Qwen/Qwen3-235B-A22B-Instruct-2507` | `native` | yes | yes | `native` / `native_json` | none | no | No | none | `high` | `not_recorded` |
-| `Deepseek` | OpenAI-compatible chat completions | `deepseek:deepseek-v4-flash` | `native` | yes | yes | `native` / `native_json` | `enabled` | yes | No | none | `high` | `not_recorded` |
+| `DeepSeek` | OpenAI-compatible chat completions | `deepseek:deepseek-v4-flash` | `native` | yes | yes | `native` / `native_json` | `enabled` | yes | No | none | `high` | `not_recorded` |
 | `Fireworks` | OpenAI-compatible chat completions | `fireworks:accounts/fireworks/models/gpt-oss-120b` | `text` | no | yes | `none` / `native_json` | `effort,reasoning_effort` | no | Yes (50%) | none | `high` | `not_recorded` |
 | `Flexai` | OpenAI-compatible chat completions | `flexai` | `text` | no | yes | `none` / `none` | none | no | No | none | `provider_default` | `not_recorded` |
 | `Friendli` | OpenAI-compatible chat completions | `friendli` | `text` | no | yes | `none` / `none` | none | no | No | none | `provider_default` | `not_recorded` |
@@ -42,7 +97,7 @@ No benchmark summary is baked into this checked-in page. To layer local empirica
 | `Nvidia` | OpenAI-compatible chat completions | `nvidia:nvidia/minimax-m2.7` | `native` | yes | yes | `delimited` / `delimited` | `enabled` | yes | No | none | `high` | `not_recorded` |
 | `Ollama` | Ollama native chat API | `devstral-small-2` | `text` | no | yes | `format_kw` / `delimited` | none | no | No | none | `high` | `not_recorded` |
 | `OpenAI` | OpenAI chat completions / Responses-compatible routes | `openai:gpt-5.4-mini` | `native` | yes | yes | `native` / `native_json` | `effort,reasoning_effort,reasoning_none` | yes | Yes (50%) | `fast:premium`, `flex:discounted` | `high` | `not_recorded` |
-| `Openrouter` | OpenAI-compatible chat completions | `openrouter:google/gemini-2.5-flash` | `native` | yes | yes | `native` / `native_json` | `effort,enabled` | yes | No | none | `high` | `not_recorded` |
+| `OpenRouter` | OpenAI-compatible chat completions | `openrouter:google/gemini-2.5-flash` | `native` | yes | yes | `native` / `native_json` | `effort,enabled` | yes | No | none | `high` | `not_recorded` |
 | `Parasail` | OpenAI-compatible chat completions | `parasail` | `text` | no | yes | `none` / `none` | none | no | Yes | none | `provider_default` | `not_recorded` |
 | `Qianfan` | OpenAI-compatible chat completions | `qianfan` | `text` | no | yes | `none` / `none` | none | no | No | none | `provider_default` | `not_recorded` |
 | `Sambanova` | OpenAI-compatible chat completions | `sambanova:sambanova/gpt-oss-120b` | `text` | no | yes | `native` / `native_json` | `effort,reasoning_effort` | no | No | none | `high` | `not_recorded` |

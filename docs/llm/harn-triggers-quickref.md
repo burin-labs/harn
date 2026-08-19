@@ -5,7 +5,7 @@
 
 <!-- markdownlint-disable MD013 -->
 
-**Canonical URL:** <https://harnlang.com/docs/llm/harn-triggers-quickref.html>
+**Canonical URL:** <https://harnlang.com/docs/llm/harn-triggers-quickref.md>
 
 Use this with `docs/llm/harn-quickref.md` when writing trigger, connector, or orchestrator code. It covers manifest shape, provider catalog metadata, the pure-Harn connector contract, and example-library commands.
 

@@ -29,7 +29,7 @@ fn check_protocol_artifacts_from(anchor: &Path) -> Vec<DoctorCheck> {
             label: "protocol-artifacts".to_string(),
             detail: format!("unable to read {}", ts_path.display()),
             fix_command: Some("make gen-protocol-artifacts".to_string()),
-            docs_url: Some("https://harnlang.com/docs/protocol-artifacts.html".to_string()),
+            docs_url: Some("https://harnlang.com/protocol-artifacts.html".to_string()),
             blocks: vec!["release"],
         }];
     };
@@ -53,7 +53,7 @@ fn check_protocol_artifacts_from(anchor: &Path) -> Vec<DoctorCheck> {
                 ts_path.display()
             ),
             fix_command: Some("make gen-protocol-artifacts".to_string()),
-            docs_url: Some("https://harnlang.com/docs/protocol-artifacts.html".to_string()),
+            docs_url: Some("https://harnlang.com/protocol-artifacts.html".to_string()),
             blocks: vec!["release"],
         }];
     }
@@ -73,7 +73,7 @@ fn check_protocol_artifacts_from(anchor: &Path) -> Vec<DoctorCheck> {
             label: "protocol-artifacts".to_string(),
             detail: format!("stale: pinned v{pinned_version}, current v{current}"),
             fix_command: Some("make gen-protocol-artifacts".to_string()),
-            docs_url: Some("https://harnlang.com/docs/protocol-artifacts.html".to_string()),
+            docs_url: Some("https://harnlang.com/protocol-artifacts.html".to_string()),
             blocks: vec!["release"],
         }]
     }

@@ -443,7 +443,7 @@ mod no_credentials_tests {
     use crate::llm::{helpers::ResolvedProvider, no_credentials_message};
 
     #[test]
-    fn message_includes_canonical_env_vars_and_doctor_hint() {
+    fn message_includes_curated_env_vars_and_next_steps() {
         let msg = no_credentials_message();
         assert!(
             msg.contains("ANTHROPIC_API_KEY"),
@@ -455,8 +455,31 @@ mod no_credentials_tests {
         );
         assert!(msg.contains("harn doctor"));
         assert!(msg.contains("harn models recommend"));
-        assert!(msg.contains("local Ollama"));
+        assert!(msg.contains("`ollama` runs locally"));
         assert!(msg.contains("harn-secret://namespace/name"));
+        assert!(
+            msg.contains(crate::llm::PROVIDER_SETUP_DOCS_URL),
+            "expected the setup docs URL in: {msg}"
+        );
+    }
+
+    /// The whole point of the curated list is that the error stays readable.
+    /// A catalogued-but-unfeatured provider must reach the reader through
+    /// `harn doctor` and the docs, not by widening this string.
+    #[test]
+    fn message_omits_the_long_tail_of_provider_variables() {
+        let msg = no_credentials_message();
+        for env in ["ZHIPU_API_KEY", "BAIDU_QIANFAN_API_KEY", "PARASAIL_API_KEY"] {
+            assert!(
+                !msg.contains(env),
+                "expected {env} to be omitted from: {msg}"
+            );
+        }
+        assert!(
+            msg.len() < 600,
+            "expected a message short enough to read, got {} chars: {msg}",
+            msg.len()
+        );
     }
 
     #[test]

@@ -17,24 +17,15 @@ pub(super) fn detect_cloud_model() -> Option<CloudModel> {
     None
 }
 
+/// Providers to check for a usable key, best first: the configured default,
+/// then the catalog's curated short list, then everything else alphabetically.
+/// The curated order lives in the catalog so this command and the
+/// "no credentials" error recommend the same providers.
 fn cloud_provider_candidates() -> Vec<String> {
     let mut candidates = Vec::new();
     push_unique(&mut candidates, harn_vm::llm_config::default_provider());
-    for provider in [
-        "anthropic",
-        "openai",
-        "openrouter",
-        "gemini",
-        "together",
-        "groq",
-        "cerebras",
-        "deepseek",
-        "fireworks",
-        "dashscope",
-        "huggingface",
-        "azure_openai",
-    ] {
-        push_unique(&mut candidates, provider.to_string());
+    for provider in harn_vm::llm_config::featured_provider_names() {
+        push_unique(&mut candidates, provider);
     }
     let mut provider_names = harn_vm::llm_config::provider_names();
     provider_names.sort();

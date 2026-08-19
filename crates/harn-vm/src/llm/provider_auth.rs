@@ -164,8 +164,8 @@ fn resolve_api_key_with_definition(
             .map(|path| path.display().to_string())
             .unwrap_or_else(|| "<built-in defaults>".to_string());
         format!(
-            " (provider '{provider}' selected via LLM_PROVIDER / llm.toml @ {config_path}; \
-             set HARN_LLM_PROVIDER=mock or LLM_PROVIDER=mock for offline use)"
+            " (provider '{provider}' comes from HARN_LLM_PROVIDER or the provider catalog at \
+             {config_path}; set HARN_LLM_PROVIDER=mock to run without a provider)"
         )
     };
 
@@ -269,33 +269,103 @@ fn resolve_auth_env_value(env_name: &str, raw: &str) -> Result<String, VmError> 
     }
 }
 
-/// Build the canonical no-credentials guidance from the live catalog.
-pub fn no_credentials_message() -> String {
-    let mut envs = Vec::new();
-    for name in llm_config::provider_names() {
-        if let Some(definition) = llm_config::provider_config(&name) {
-            if definition.auth_style == "none" {
-                continue;
-            }
-            for env in llm_config::auth_env_names(&definition.auth_env) {
-                if !envs.contains(&env) {
-                    envs.push(env);
-                }
+/// Canonical documentation entry point for provider credential setup.
+pub const PROVIDER_SETUP_DOCS_URL: &str = "https://harnlang.com/provider-setup.html";
+
+/// Whether this provider needs a credential at all. Local servers such as
+/// Ollama declare `auth_style = "none"` and are usable with no key.
+fn requires_credential(provider: &str) -> bool {
+    llm_config::provider_config(provider).is_some_and(|definition| definition.auth_style != "none")
+}
+
+/// Credential env vars accepted by the named providers, in their order, with
+/// duplicates removed. Providers that need no key contribute nothing.
+///
+/// `primary_only` keeps just the first variable each provider accepts. A
+/// provider that takes alternatives (Gemini reads `GEMINI_API_KEY` or
+/// `GOOGLE_API_KEY`) would otherwise spend two slots in a short list to say
+/// one thing; `harn doctor` and the docs still name every alternative.
+fn credential_env_names(providers: &[String], primary_only: bool) -> Vec<String> {
+    let mut envs: Vec<String> = Vec::new();
+    for name in providers {
+        let Some(definition) = llm_config::provider_config(name) else {
+            continue;
+        };
+        if definition.auth_style == "none" {
+            continue;
+        }
+        let accepted = llm_config::auth_env_names(&definition.auth_env);
+        let accepted = if primary_only {
+            accepted.into_iter().take(1).collect()
+        } else {
+            accepted
+        };
+        for env in accepted {
+            if !envs.contains(&env) {
+                envs.push(env);
             }
         }
     }
-    envs.sort();
-    envs.dedup();
-    let env_list = if envs.is_empty() {
-        "(no providers declared)".to_string()
-    } else {
-        envs.join(", ")
+    envs
+}
+
+/// Build the canonical no-credentials guidance from the live catalog.
+///
+/// The catalog carries dozens of providers, and printing every accepted
+/// variable buries the one thing a reader needs: a name they recognise and a
+/// next step. So this names the catalog's curated short list, says how many
+/// other providers exist, and points at the two places that hold the complete
+/// answer — `harn doctor` locally and the setup guide online. The short list
+/// is catalog data, not a literal here, so the curated set keeps one owner.
+pub fn no_credentials_message() -> String {
+    let all_providers = llm_config::provider_names();
+    let featured = llm_config::featured_provider_names();
+
+    // An overlay can suppress every featured provider. Falling back to the
+    // full catalog keeps the message useful instead of empty.
+    let shown_envs = match credential_env_names(&featured, true) {
+        envs if envs.is_empty() => credential_env_names(&all_providers, false),
+        envs => envs,
     };
+    if shown_envs.is_empty() {
+        return format!(
+            "No LLM providers are declared in the loaded catalog. Add one, then read \
+             {PROVIDER_SETUP_DOCS_URL}."
+        );
+    }
+
+    let featured_keyed = featured
+        .iter()
+        .filter(|name| requires_credential(name))
+        .count();
+    let catalog_keyed = all_providers
+        .iter()
+        .filter(|name| requires_credential(name))
+        .count();
+    let remaining = catalog_keyed.saturating_sub(featured_keyed);
+    let more_hint = if remaining == 0 {
+        String::new()
+    } else {
+        format!(" Harn supports {remaining} more providers.")
+    };
+
+    let keyless: Vec<String> = featured
+        .iter()
+        .filter(|name| !requires_credential(name))
+        .map(|name| format!("`{name}`"))
+        .collect();
+    let keyless_hint = if keyless.is_empty() {
+        String::new()
+    } else {
+        format!(" {} runs locally and needs no key.", keyless.join(" and "))
+    };
+
     format!(
-        "No LLM providers configured. Set one of these env vars to an API key or \
-         harn-secret://namespace/name reference: {env_list} (or run a local Ollama). \
-         For diagnostics: `harn doctor`. For a recommended setup: `harn models recommend` \
-         (when available)."
+        "No LLM provider credentials found. Set one of these environment variables to an API key \
+         or a harn-secret://namespace/name reference: {envs}.{keyless_hint}{more_hint} \
+         Run `harn doctor` to print every provider and the variable it reads, or read \
+         {PROVIDER_SETUP_DOCS_URL}. `harn models recommend` suggests a setup for this machine.",
+        envs = shown_envs.join(", "),
     )
 }
 

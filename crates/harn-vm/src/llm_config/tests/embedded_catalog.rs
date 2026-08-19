@@ -290,3 +290,67 @@ fn gpt_5_5_fast_serving_tier_rides_service_tier() {
     assert_eq!(request.param, "service_tier");
     assert_eq!(fast.status.as_deref(), Some("ga"));
 }
+
+/// The curated short list is what the "no credentials" error, onboarding copy
+/// and `harn models recommend` all read. A typo would silently shrink that
+/// list to nothing useful, so pin that every id resolves and that the list
+/// stays short enough to print in one line.
+#[test]
+fn featured_providers_resolve_and_stay_short() {
+    let config = default_config();
+    let featured = &config.presentation.featured_providers;
+    assert!(
+        !featured.is_empty(),
+        "the embedded catalog must curate a featured provider list"
+    );
+    assert!(
+        featured.len() <= 8,
+        "featured_providers is a short list, got {}: {featured:?}",
+        featured.len()
+    );
+    for name in featured {
+        assert!(
+            config.providers.contains_key(name),
+            "featured provider {name} is not declared in the catalog"
+        );
+    }
+    let mut seen = std::collections::BTreeSet::new();
+    for name in featured {
+        assert!(seen.insert(name), "featured provider {name} listed twice");
+    }
+    assert!(
+        featured.iter().any(|name| config
+            .providers
+            .get(name)
+            .is_some_and(|provider| provider.auth_style == "none")),
+        "featured_providers should include a keyless local option: {featured:?}"
+    );
+}
+
+/// The setup guide names the curated providers in prose so a reader sees a
+/// familiar name immediately. That copy is a second projection of the catalog
+/// list, so pin it: a provider added to or removed from `featured_providers`
+/// must reach the page people are sent to when their credential is missing.
+#[test]
+fn setup_guide_lists_every_featured_credential_variable() {
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../docs/src/provider-setup.md"
+    );
+    let doc =
+        std::fs::read_to_string(path).unwrap_or_else(|err| panic!("cannot read {path}: {err}"));
+    let config = default_config();
+    for name in &config.presentation.featured_providers {
+        let provider = config
+            .providers
+            .get(name)
+            .unwrap_or_else(|| panic!("featured provider {name} is not in the catalog"));
+        let Some(env) = auth_env_names(&provider.auth_env).first().cloned() else {
+            continue;
+        };
+        assert!(
+            doc.contains(&format!("`{env}`")),
+            "docs/src/provider-setup.md does not name `{env}` for featured provider {name}"
+        );
+    }
+}

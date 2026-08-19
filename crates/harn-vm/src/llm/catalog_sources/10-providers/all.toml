@@ -23,6 +23,7 @@ method = "GET"
 path = "/models"
 
 [providers.openai]
+display_name = "OpenAI"
 cache_usage_accounting = true
 stream_usage_accounting = true
 base_url = "https://api.openai.com/v1"
@@ -40,6 +41,7 @@ method = "GET"
 path = "/models"
 
 [providers.openrouter]
+display_name = "OpenRouter"
 cache_usage_accounting = true
 stream_usage_accounting = true
 base_url = "https://openrouter.ai/api/v1"
@@ -90,6 +92,7 @@ method = "GET"
 path = "/api/tags"
 
 [providers.gemini]
+display_name = "Google Gemini"
 base_url = "https://generativelanguage.googleapis.com"
 base_url_env = "GEMINI_BASE_URL"
 auth_style = "header"
@@ -216,6 +219,7 @@ method = "GET"
 path = "/models"
 
 [providers.deepseek]
+display_name = "DeepSeek"
 cache_usage_accounting = true
 stream_usage_accounting = true
 base_url = "https://api.deepseek.com/v1"

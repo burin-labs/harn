@@ -55,6 +55,7 @@ method = "GET"
 path = "/models"
 
 [providers.openai]
+display_name = "OpenAI"
 cache_usage_accounting = true
 stream_usage_accounting = true
 base_url = "https://api.openai.com/v1"
@@ -72,6 +73,7 @@ method = "GET"
 path = "/models"
 
 [providers.openrouter]
+display_name = "OpenRouter"
 cache_usage_accounting = true
 stream_usage_accounting = true
 base_url = "https://openrouter.ai/api/v1"
@@ -122,6 +124,7 @@ method = "GET"
 path = "/api/tags"
 
 [providers.gemini]
+display_name = "Google Gemini"
 base_url = "https://generativelanguage.googleapis.com"
 base_url_env = "GEMINI_BASE_URL"
 auth_style = "header"
@@ -248,6 +251,7 @@ method = "GET"
 path = "/models"
 
 [providers.deepseek]
+display_name = "DeepSeek"
 cache_usage_accounting = true
 stream_usage_accounting = true
 base_url = "https://api.deepseek.com/v1"
@@ -1921,6 +1925,24 @@ gemini = "gemini-3.5-flash-lite"
 # Host-facing model-selection metadata. These rows describe picker choices and,
 # when backed by automatic_eligibility receipts, the one measured host default.
 # They do not change runtime routing, escalation, or request parameters.
+
+# Providers Harn names first when a surface has room for only a few: the
+# "no credentials" error, onboarding copy, and host setup pickers. Order is
+# display order, not routing preference — every other catalogued provider is
+# equally usable, and `harn doctor` still prints the complete list.
+#
+# Keep this short. Six or seven entries stay readable in a one-line error;
+# a longer list is the wall of names this exists to replace.
+[presentation]
+featured_providers = [
+  "anthropic",
+  "openai",
+  "gemini",
+  "openrouter",
+  "groq",
+  "deepseek",
+  "ollama",
+]
 
 [presentation.variants.fast]
 order = 10
