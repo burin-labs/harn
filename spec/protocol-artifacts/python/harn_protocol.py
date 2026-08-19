@@ -1022,6 +1022,7 @@ class HarnAgentTerminalOutcome(_HarnDataclass):
     kind: AgentTerminalKind
     reason: str
     owner: AgentTerminalOwner
+    terminalClass: Optional[AgentTerminalClass] = None
 
 
 @dataclass

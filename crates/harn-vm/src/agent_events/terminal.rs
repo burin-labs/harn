@@ -149,12 +149,30 @@ const NATURAL_STOP_REASONS: [&str; 9] = [
 ];
 
 /// Typed terminal outcome carried alongside the lossless raw reason. `owner` is
-/// derived from `kind` so a single field pins the responsible party.
+/// derived from `kind` so a single field pins the responsible party, and
+/// `terminal_class` carries the finalize host's fine-grained reason when it
+/// produced one.
+///
+/// The kind says who is responsible; the class says what went wrong. A host
+/// needs both to say more than "the provider failed" — telling an unresolvable
+/// credential from a rate limit is the difference between a remedy the user can
+/// act on and one they cannot. The class rides on the `terminalClass` key the
+/// failed-prompt frame already uses ([`AcpPromptErrorData`]), so one cause is
+/// named the same way whichever side of the JSON-RPC boundary it comes back on.
+///
+/// Additive: absent on any outcome without a class, so a consumer that does not
+/// read it sees byte-identical metadata.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct AgentTerminalOutcome {
     pub kind: AgentTerminalKind,
     pub reason: String,
     pub owner: String,
+    #[serde(
+        rename = "terminalClass",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub terminal_class: Option<AgentTerminalClass>,
 }
 
 impl AgentTerminalOutcome {
@@ -165,15 +183,29 @@ impl AgentTerminalOutcome {
             kind,
             reason: reason.into(),
             owner: kind.owner().to_string(),
+            terminal_class: None,
         }
     }
 
+    /// Attach the finalize host's fine-grained class. Separate from `new` so
+    /// every existing construction keeps compiling and keeps its wire bytes,
+    /// and only the boundary that actually computes a class carries one.
+    #[must_use]
+    pub fn with_terminal_class(mut self, terminal_class: Option<AgentTerminalClass>) -> Self {
+        self.terminal_class = terminal_class;
+        self
+    }
+
     pub fn to_json(&self) -> serde_json::Value {
-        serde_json::json!({
+        let mut value = serde_json::json!({
             "kind": self.kind.as_str(),
             "reason": self.reason,
             "owner": self.owner,
-        })
+        });
+        if let Some(class) = self.terminal_class {
+            value["terminalClass"] = serde_json::Value::String(class.as_str().to_string());
+        }
+        value
     }
 
     /// Project the outcome onto the existing typed-checkpoint event stream.
@@ -193,6 +225,37 @@ impl AgentTerminalOutcome {
             }),
         }
     }
+}
+
+/// Build the terminal outcome a finalized turn reports, from the values the
+/// finalize boundary has in hand.
+///
+/// One owner for four steps that were previously inlined at the call site:
+/// classify the kind (using the class, so an errored turn is attributed rather
+/// than left `Unknown`), keep the lossless raw reason, and carry the class
+/// itself so a consumer can name the cause and not just the owner. Keeping them
+/// together is what makes it visible when one of them is dropped.
+pub fn terminal_outcome_for_finalize(
+    canonical_status: &str,
+    stop_reason: &str,
+    terminal_class: Option<AgentTerminalClass>,
+    has_error: bool,
+) -> AgentTerminalOutcome {
+    let reason = if stop_reason.is_empty() {
+        canonical_status
+    } else {
+        stop_reason
+    };
+    AgentTerminalOutcome::new(
+        classify_agent_terminal_with_class(
+            canonical_status,
+            stop_reason,
+            has_error,
+            terminal_class,
+        ),
+        reason,
+    )
+    .with_terminal_class(terminal_class)
 }
 
 /// Classify an agent-loop terminal condition into a typed [`AgentTerminalKind`].
@@ -494,6 +557,101 @@ mod tests {
             classify_agent_terminal("some_future_status", "whatever", false, None),
             AgentTerminalKind::Unknown,
         );
+    }
+
+    #[test]
+    fn the_finalize_seam_carries_the_class_it_was_given() {
+        // The defect this closes: the class was computed at the finalize
+        // boundary, used only to split provider from harness, and then dropped,
+        // so a consumer reading the outcome could say "the provider failed" but
+        // never "no credential resolved for the selected provider".
+        let outcome = terminal_outcome_for_finalize(
+            "error",
+            "exception",
+            Some(AgentTerminalClass::ProviderMisconfigured),
+            true,
+        );
+
+        assert_eq!(outcome.kind, AgentTerminalKind::ProviderError);
+        assert_eq!(outcome.reason, "exception");
+        assert_eq!(outcome.owner, "provider");
+        assert_eq!(
+            outcome.terminal_class,
+            Some(AgentTerminalClass::ProviderMisconfigured),
+            "the class the boundary computed must reach the consumer"
+        );
+    }
+
+    #[test]
+    fn the_finalize_seam_falls_back_to_the_status_when_there_is_no_stop_reason() {
+        let outcome = terminal_outcome_for_finalize("suspended", "", None, false);
+
+        assert_eq!(outcome.kind, AgentTerminalKind::Suspended);
+        assert_eq!(outcome.reason, "suspended");
+        assert_eq!(outcome.terminal_class, None);
+    }
+
+    #[test]
+    fn the_finalize_seam_reports_a_natural_completion_with_nothing_attached() {
+        let outcome = terminal_outcome_for_finalize("done", "completed", None, false);
+
+        assert_eq!(outcome.kind, AgentTerminalKind::Natural);
+        assert_eq!(outcome.owner, "agent");
+        assert_eq!(outcome.terminal_class, None);
+    }
+
+    #[test]
+    fn a_class_rides_along_with_the_outcome_that_carries_it() {
+        let outcome = AgentTerminalOutcome::new(AgentTerminalKind::ProviderError, "exception")
+            .with_terminal_class(Some(AgentTerminalClass::ProviderMisconfigured));
+
+        assert_eq!(
+            outcome.terminal_class,
+            Some(AgentTerminalClass::ProviderMisconfigured)
+        );
+        // The kind says who is responsible; the class says what went wrong. A
+        // consumer needs both to tell an unresolvable credential from a rate
+        // limit, and the key matches the failed-prompt frame's.
+        assert_eq!(outcome.to_json()["terminalClass"], "provider_misconfigured");
+        assert_eq!(outcome.to_json()["kind"], "provider_error");
+        assert_eq!(outcome.to_json()["owner"], "provider");
+    }
+
+    #[test]
+    fn an_outcome_without_a_class_serializes_exactly_as_it_did_before() {
+        let outcome = AgentTerminalOutcome::new(AgentTerminalKind::PolicyBudget, "max_iterations");
+
+        assert_eq!(outcome.terminal_class, None);
+        assert_eq!(
+            outcome.to_json(),
+            serde_json::json!({
+                "kind": "policy_budget",
+                "reason": "max_iterations",
+                "owner": "policy",
+            }),
+            "the key must be absent, not null, so an existing consumer sees identical bytes"
+        );
+        let encoded = serde_json::to_value(&outcome).unwrap();
+        assert!(encoded.get("terminalClass").is_none());
+    }
+
+    #[test]
+    fn the_class_round_trips_and_an_older_payload_without_it_still_decodes() {
+        let outcome = AgentTerminalOutcome::new(AgentTerminalKind::ProviderError, "error")
+            .with_terminal_class(Some(AgentTerminalClass::RateLimited));
+        let encoded = serde_json::to_value(&outcome).unwrap();
+        assert_eq!(encoded["terminalClass"], "rate_limited");
+        let decoded: AgentTerminalOutcome = serde_json::from_value(encoded).unwrap();
+        assert_eq!(decoded, outcome);
+
+        // A producer that predates this field must keep decoding.
+        let legacy: AgentTerminalOutcome = serde_json::from_value(serde_json::json!({
+            "kind": "unknown",
+            "reason": "exception",
+            "owner": "unknown",
+        }))
+        .expect("a payload without the field still decodes");
+        assert_eq!(legacy.terminal_class, None);
     }
 
     #[test]

@@ -971,6 +971,89 @@ mod tests {
     }
 
     #[test]
+    fn a_failed_turn_carries_its_class_onto_the_prompt_result_wire() {
+        // The point of the change: an embedder reading a COMPLETED
+        // `session/prompt` whose turn failed can now name the cause, not just
+        // the owner. Before this, the class was computed at the finalize
+        // boundary and dropped here, so a missing provider credential and a
+        // rate limit were indistinguishable on this frame.
+        let result = AcpSessionPromptResult {
+            stop_reason: "refusal".to_string(),
+            meta: Some(AcpMeta::terminal(
+                harn_vm::agent_events::AgentTerminalOutcome::new(
+                    harn_vm::agent_events::AgentTerminalKind::ProviderError,
+                    "exception",
+                )
+                .with_terminal_class(Some(
+                    harn_vm::llm::AgentTerminalClass::ProviderMisconfigured,
+                )),
+            )),
+        };
+
+        let wire = serde_json::to_value(&result).expect("serialize prompt result");
+        assert_eq!(
+            wire,
+            serde_json::json!({
+                "stopReason": "refusal",
+                "_meta": {
+                    "harn": {
+                        "terminal": {
+                            "kind": "provider_error",
+                            "reason": "exception",
+                            "owner": "provider",
+                            "terminalClass": "provider_misconfigured",
+                        },
+                    },
+                },
+            })
+        );
+        // Same key the failed-prompt frame uses, so one cause is named the same
+        // way on either side of the JSON-RPC boundary.
+        let error_frame = serde_json::to_value(AcpPromptErrorData::new(
+            harn_vm::llm::AgentTerminalClass::ProviderMisconfigured,
+        ))
+        .expect("serialize prompt error data");
+        assert_eq!(
+            wire["_meta"]["harn"]["terminal"]["terminalClass"],
+            error_frame["terminalClass"]
+        );
+
+        let restored: AcpSessionPromptResult =
+            serde_json::from_value(wire).expect("deserialize prompt result");
+        assert_eq!(restored, result);
+    }
+
+    #[test]
+    fn a_terminal_without_a_class_keeps_the_bytes_it_already_had() {
+        let result = AcpSessionPromptResult {
+            stop_reason: "max_turn_requests".to_string(),
+            meta: Some(AcpMeta::terminal(
+                harn_vm::agent_events::AgentTerminalOutcome::new(
+                    harn_vm::agent_events::AgentTerminalKind::PolicyBudget,
+                    "max_iterations",
+                ),
+            )),
+        };
+
+        assert_eq!(
+            serde_json::to_value(&result).expect("serialize prompt result"),
+            serde_json::json!({
+                "stopReason": "max_turn_requests",
+                "_meta": {
+                    "harn": {
+                        "terminal": {
+                            "kind": "policy_budget",
+                            "reason": "max_iterations",
+                            "owner": "policy",
+                        },
+                    },
+                },
+            }),
+            "additive means absent, not null, for every outcome that has no class"
+        );
+    }
+
+    #[test]
     fn session_prompt_result_preserves_unknown_exception_and_legacy_shape() {
         let unknown: AcpSessionPromptResult = serde_json::from_value(serde_json::json!({
             "stopReason": "end_turn",

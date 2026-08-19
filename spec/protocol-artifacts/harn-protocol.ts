@@ -1073,6 +1073,7 @@ export interface HarnAgentTerminalOutcome {
   kind: AgentTerminalKind
   reason: string
   owner: AgentTerminalOwner
+  terminalClass?: AgentTerminalClass
 }
 
 export interface HarnACPPromptResult {
