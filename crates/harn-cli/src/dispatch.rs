@@ -97,6 +97,31 @@ pub async fn dispatch_to_embedded_script(
     outcome.exit_code
 }
 
+/// Dispatch an *interactive* embedded script, streaming its stdout to the
+/// terminal as it is written rather than buffering it until the run ends.
+///
+/// The ordinary wedge captures stdout into [`RunOutcome`] and flushes once,
+/// which is right for a command that computes an answer and prints it. It is
+/// wrong for a script that prints a prompt and then blocks on `read_line`, or
+/// that renders model tokens as they stream in: buffered, the prompt appears
+/// only after the user has already been asked to type, and a whole session's
+/// output arrives at exit. `harn run` has always enabled passthrough for this
+/// reason; dispatched scripts get the same contract here.
+///
+/// Under passthrough the VM writes stdout directly instead of accumulating it,
+/// so the returned outcome carries no stdout to flush — only stderr.
+///
+/// The rendering itself is not covered at the merge-gating test tier: proving
+/// it means observing a real terminal, and the in-process suites deliberately
+/// capture stdout instead. What is covered is the flag's lifecycle, which is
+/// the part that could regress without anyone noticing.
+pub async fn dispatch_to_interactive_embedded_script(script_name: &str, argv: Vec<String>) -> i32 {
+    let _passthrough = crate::commands::run::StdoutPassthroughGuard::enable();
+    let outcome = run_embedded_script(script_name, argv, false).await;
+    flush_outcome(&outcome);
+    outcome.exit_code
+}
+
 /// Dispatch with an explicit sandbox while preserving the ordinary terminal
 /// forwarding contract.
 pub async fn dispatch_to_embedded_script_with_sandbox(
@@ -343,6 +368,28 @@ fn write_script_to_tempfile(name: &str, source: &str) -> std::io::Result<tempfil
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn interactive_passthrough_is_scoped_to_the_dispatch() {
+        // The guard is what keeps an interactive dispatch from leaking
+        // passthrough into whatever runs next in the same process — a leak
+        // would silently stop later commands from capturing their own output.
+        assert!(
+            !harn_vm::set_stdout_passthrough(false),
+            "test starts from the captured default"
+        );
+        {
+            let _guard = crate::commands::run::StdoutPassthroughGuard::enable();
+            assert!(
+                harn_vm::set_stdout_passthrough(true),
+                "passthrough is on for the duration of the dispatch"
+            );
+        }
+        assert!(
+            !harn_vm::set_stdout_passthrough(false),
+            "and is restored afterwards"
+        );
+    }
 
     #[tokio::test]
     async fn missing_script_returns_software_error() {
