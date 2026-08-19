@@ -8,7 +8,8 @@ if [[ -z "${HARN_BIN:-}" || ! -x "$HARN_BIN" ]]; then
 fi
 
 fixture_root="$(mktemp -d)"
-trap 'rm -rf "$fixture_root"' EXIT
+order_root="$(mktemp -d)"
+trap 'rm -rf "$fixture_root" "$order_root"' EXIT
 mkdir -p "$fixture_root/scripts"
 cp "$repo_root/scripts/agent-shell-guard.sh" "$fixture_root/scripts/"
 cp "$repo_root/scripts/agent_shell_guard.harn" "$fixture_root/scripts/"
@@ -143,6 +144,49 @@ still_blocked="$(
 if [[ "$still_blocked" != *'"permissionDecision":"deny"'* ]]; then
   echo "adapter lost the payload through the deadline wrapper" >&2
   printf '%s\n' "$still_blocked" >&2
+  exit 1
+fi
+
+# Resolution order. This hook runs before every shell call, so a cargo `debug`
+# artifact must never win over a release-grade interpreter -- it starts slower
+# and is the file cargo rewrites mid-build. Stand up a fixture repo whose
+# harn_bin.sh advertises a debug build while a release build also exists.
+mkdir -p "$order_root/scripts" "$order_root/target/release" "$order_root/dev-target/debug"
+cp "$repo_root/scripts/agent-shell-guard.sh" "$order_root/scripts/"
+cp "$repo_root/scripts/agent_shell_guard.harn" "$order_root/scripts/"
+cp "$repo_root/scripts/agent_shell_guard_policy.harn" "$order_root/scripts/"
+
+cat >"$order_root/dev-target/debug/harn" <<'STUB'
+#!/usr/bin/env bash
+echo "DEBUG-INTERPRETER-RAN"
+STUB
+cat >"$order_root/target/release/harn" <<'STUB'
+#!/usr/bin/env bash
+echo "RELEASE-INTERPRETER-RAN"
+STUB
+cat >"$order_root/scripts/harn_bin.sh" <<STUB
+#!/usr/bin/env bash
+printf '%s\n' "$order_root/dev-target/debug/harn"
+STUB
+chmod +x "$order_root/dev-target/debug/harn" \
+  "$order_root/target/release/harn" "$order_root/scripts/harn_bin.sh"
+
+resolved="$(printf '%s' '{}' | env -u HARN_BIN "$order_root/scripts/agent-shell-guard.sh")"
+if [[ "$resolved" != *RELEASE-INTERPRETER-RAN* ]]; then
+  echo "adapter preferred a debug build over an available release interpreter" >&2
+  printf '%s\n' "$resolved" >&2
+  exit 1
+fi
+
+# ...but a debug build still beats no guard at all. With no release build and no
+# harn on PATH, the advertised debug candidate must still be used.
+rm -f "$order_root/target/release/harn"
+fallback_resolved="$(
+  printf '%s' '{}' | env -u HARN_BIN PATH=/usr/bin:/bin "$order_root/scripts/agent-shell-guard.sh"
+)"
+if [[ "$fallback_resolved" != *DEBUG-INTERPRETER-RAN* ]]; then
+  echo "adapter dropped its debug-build fallback and left the shell unguarded" >&2
+  printf '%s\n' "$fallback_resolved" >&2
   exit 1
 fi
 

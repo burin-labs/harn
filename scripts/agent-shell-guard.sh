@@ -18,12 +18,26 @@ cat >"$payload_file"
 
 # Never build from a hook. Prefer an explicit binary, then a repository wrapper
 # that promises not to build, then an existing local or installed binary.
+# A cargo `debug` artifact is the wrong interpreter for a hook that runs before
+# every shell call. It starts slower than a release build of the same revision,
+# and it is the exact file cargo rewrites mid-build, so a resolver that reaches
+# for it first makes hook latency track whatever the developer is compiling.
+# Nothing requires it: the policy is a `.harn` script read from disk, so policy
+# edits take effect under any interpreter, and a developer changing a builtin
+# the policy depends on still has the explicit `HARN_BIN` override above.
+is_debug_build() {
+  case "$1" in
+    */debug/harn|*/debug/harn.exe) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 resolve_harn() {
   if [[ -n "${HARN_BIN:-}" && -x "${HARN_BIN}" ]]; then
     printf '%s\n' "$HARN_BIN"
     return
   fi
-  local repo_root candidate
+  local repo_root candidate debug_fallback=""
   repo_root="$(cd "$script_dir/.." && pwd -P)"
   if [[ -x "$repo_root/scripts/harnw" ]]; then
     printf '%s\n' "$repo_root/scripts/harnw"
@@ -32,14 +46,31 @@ resolve_harn() {
   if [[ -x "$repo_root/scripts/harn_bin.sh" ]]; then
     candidate="$(HARN_BIN_NO_BUILD=1 "$repo_root/scripts/harn_bin.sh" --no-build --print 2>/dev/null || true)"
     if [[ -n "$candidate" && -x "$candidate" ]]; then
+      if is_debug_build "$candidate"; then
+        debug_fallback="$candidate"
+      else
+        printf '%s\n' "$candidate"
+        return
+      fi
+    fi
+  fi
+  if [[ -x "$repo_root/target/release/harn" ]]; then
+    printf '%s\n' "$repo_root/target/release/harn"
+    return
+  fi
+  candidate="$(command -v harn 2>/dev/null || true)"
+  if [[ -n "$candidate" ]]; then
+    if is_debug_build "$candidate"; then
+      [[ -n "$debug_fallback" ]] || debug_fallback="$candidate"
+    else
       printf '%s\n' "$candidate"
       return
     fi
   fi
-  for candidate in "$repo_root/target/release/harn" "$repo_root/target/debug/harn"; do
-    [[ -x "$candidate" ]] && printf '%s\n' "$candidate" && return
-  done
-  command -v harn 2>/dev/null || true
+  # No release-grade interpreter anywhere. A debug build still beats no guard.
+  [[ -n "$debug_fallback" ]] && printf '%s\n' "$debug_fallback" && return
+  [[ -x "$repo_root/target/debug/harn" ]] && printf '%s\n' "$repo_root/target/debug/harn" && return
+  return 0
 }
 
 harn_runner="$(resolve_harn)"
