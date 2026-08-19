@@ -98,7 +98,7 @@ impl BedrockProvider {
                 }));
             }
         }
-        let mut body = serde_json::json!({ "messages": messages });
+        let mut body = serde_json::json!({ "messages": coalesce_consecutive_roles(messages) });
         if !system.is_empty() {
             body["system"] = serde_json::json!(system);
         }
@@ -319,6 +319,47 @@ fn bedrock_tool_use_block(
             "input": input,
         }
     }))
+}
+
+/// Fold each run of consecutive same-role messages into one message carrying
+/// the concatenated content blocks.
+///
+/// Converse rejects consecutive same-role turns, but a faithful transcript
+/// produces them routinely. Parallel tool calls yield one `toolResult` message
+/// per call and every one of them maps to a `user` turn, which is why Converse
+/// specifies parallel results as several `toolResult` blocks inside a single
+/// `user` message. A directive committed into durable history is likewise its
+/// own `user` turn sitting ahead of the turn it precedes.
+///
+/// Coalescing runs after the prefill turn is appended so an assistant prefill
+/// merges into a preceding assistant turn rather than 400ing beside it. A
+/// message whose `content` is not a block array is left as its own turn instead
+/// of being dropped, because losing a turn is worse than a request the provider
+/// rejects loudly.
+fn coalesce_consecutive_roles(messages: Vec<serde_json::Value>) -> Vec<serde_json::Value> {
+    let mut folded: Vec<serde_json::Value> = Vec::with_capacity(messages.len());
+    for message in messages {
+        let merged = folded.last_mut().is_some_and(|last| {
+            if last.get("role") != message.get("role") {
+                return false;
+            }
+            let Some(incoming) = message.get("content").and_then(|value| value.as_array()) else {
+                return false;
+            };
+            let Some(existing) = last
+                .get_mut("content")
+                .and_then(|value| value.as_array_mut())
+            else {
+                return false;
+            };
+            existing.extend(incoming.iter().cloned());
+            true
+        });
+        if !merged {
+            folded.push(message);
+        }
+    }
+    folded
 }
 
 /// Build the `user`-role message that carries a tool result as a Converse
@@ -698,6 +739,90 @@ mod tests {
         // Roles alternate user/assistant/user — no consecutive same-role turns.
         assert_ne!(messages[0]["role"], messages[1]["role"]);
         assert_ne!(messages[1]["role"], messages[2]["role"]);
+    }
+
+    /// A parallel tool call produces one tool-result message per call, and each
+    /// maps to a `user` turn. Converse rejects consecutive same-role turns, so
+    /// the whole fan-out has to arrive as several `toolResult` blocks inside one
+    /// `user` message. This is the tape that 400s without coalescing.
+    #[test]
+    fn converse_body_coalesces_parallel_tool_results_into_one_user_turn() {
+        let mut request = base_request();
+        request.messages = vec![
+            json!({"role": "user", "content": "compare both files"}),
+            json!({"role": "assistant", "content": [
+                {"type": "text", "text": "reading both"},
+                {"type": "tool_use", "id": "t1", "name": "read", "input": {"path": "a"}},
+                {"type": "tool_use", "id": "t2", "name": "read", "input": {"path": "b"}}
+            ]}),
+            json!({"role": "tool_result", "tool_use_id": "t1", "content": "alpha"}),
+            json!({"role": "tool_result", "tool_use_id": "t2", "content": "beta"}),
+        ];
+
+        let body = BedrockProvider::build_request_body(&request);
+        let messages = body["messages"].as_array().expect("messages");
+
+        // Four internal turns collapse to three Converse turns.
+        assert_eq!(messages.len(), 3);
+        assert_eq!(messages[2]["role"], "user");
+        let results = messages[2]["content"].as_array().expect("content blocks");
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0]["toolResult"]["toolUseId"], "t1");
+        assert_eq!(results[0]["toolResult"]["content"][0]["text"], "alpha");
+        assert_eq!(results[1]["toolResult"]["toolUseId"], "t2");
+        assert_eq!(results[1]["toolResult"]["content"][0]["text"], "beta");
+        // Both results survive: coalescing must not drop the trailing turn.
+        assert_ne!(messages[1]["role"], messages[2]["role"]);
+    }
+
+    /// Directives are committed into durable history as their own `user` turn,
+    /// so an append-only transcript routinely puts a directive turn directly
+    /// ahead of the user turn it precedes. Converse 400s on that pair unless the
+    /// adapter folds it, and the directive text must survive the fold.
+    #[test]
+    fn converse_body_coalesces_a_committed_directive_ahead_of_its_user_turn() {
+        let mut request = base_request();
+        request.messages = vec![
+            json!({"role": "user", "content": "<context-directives>\nre-read the file\n</context-directives>"}),
+            json!({"role": "user", "content": "now edit it"}),
+            json!({"role": "assistant", "content": "done"}),
+        ];
+
+        let body = BedrockProvider::build_request_body(&request);
+        let messages = body["messages"].as_array().expect("messages");
+
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0]["role"], "user");
+        let blocks = messages[0]["content"].as_array().expect("content blocks");
+        assert_eq!(blocks.len(), 2);
+        assert!(blocks[0]["text"]
+            .as_str()
+            .expect("directive text")
+            .contains("context-directives"));
+        assert_eq!(blocks[1]["text"], "now edit it");
+        assert_eq!(messages[1]["role"], "assistant");
+    }
+
+    /// An assistant prefill lands after the transcript, so it must fold into a
+    /// trailing assistant turn rather than sit beside it as a second one.
+    #[test]
+    fn converse_body_coalesces_an_assistant_prefill_into_a_trailing_assistant_turn() {
+        let mut request = base_request();
+        request.messages = vec![
+            json!({"role": "user", "content": "hi"}),
+            json!({"role": "assistant", "content": "thinking"}),
+        ];
+        request.prefill = Some("{\"answer\":".to_string());
+
+        let body = BedrockProvider::build_request_body(&request);
+        let messages = body["messages"].as_array().expect("messages");
+
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[1]["role"], "assistant");
+        let blocks = messages[1]["content"].as_array().expect("content blocks");
+        assert_eq!(blocks.len(), 2);
+        assert_eq!(blocks[0]["text"], "thinking");
+        assert_eq!(blocks[1]["text"], "{\"answer\":");
     }
 
     #[test]
