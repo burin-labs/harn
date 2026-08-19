@@ -12,7 +12,7 @@
 //   EXP_MAX_ITER iteration ceiling (default 20)
 import { agent_host_tools } from "std/agent/host_tools"
 import { agent_loop } from "std/agent/loop"
-import { AgentSpec } from "std/agent/options"
+import { AgentSpec, agent_tool_format } from "std/agent/options"
 import { command_run } from "std/command"
 import { edit_apply_old_new_patch } from "std/edit"
 import { append_jsonl } from "std/jsonl"
@@ -78,12 +78,32 @@ pipeline default(harness: Harness) {
     } else {
       to_int(ceil(catalog_timeout))
     })
+  // The catalog's tool_format is a recommendation, not the wire: an explicit
+  // request is parity-steered by the same policy the loop applies, so record
+  // both the request and what will actually run.
+  const requested_tool_format = harness.env.get_or("EXP_TOOL_FORMAT", "")
+  const effective_tool_format = if info == nil {
+    to_string(info?.tool_format ?? "")
+  } else {
+    to_string(agent_tool_format(harness.llm, {
+      model: to_string(info?.id ?? ""),
+      provider: to_string(info?.provider ?? ""),
+      tool_format: if requested_tool_format == "" {
+        nil
+      } else {
+        requested_tool_format
+      },
+      tool_format_override_reason: "diagnostics-timing calibration pins the tool channel",
+    }))
+  }
   const provenance = {
     endpoint: harness.env.get_or("LLAMACPP_BASE_URL", "(provider default)"),
     llm_selector: selector,
     model: to_string(info?.id ?? ""),
     provider: to_string(info?.provider ?? ""),
-    tool_format: to_string(info?.tool_format ?? ""),
+    tool_format_requested: requested_tool_format,
+    tool_format: effective_tool_format,
+    catalog_tool_format: to_string(info?.tool_format ?? ""),
     resolved_llm_timeout_s: resolved_timeout_s,
     llm_timeout_env: if timeout_env == "" {
       "unset"
@@ -362,11 +382,21 @@ pipeline default(harness: Harness) {
     "${SYSTEM_PROMPT}\n${clause}"
   }
   const started = harness.clock.now_ms()
-  const options: AgentSpec = {
-    tools: registry,
-    max_iterations: max_iterations,
-    iteration_budget: {mode: "fixed", initial: max_iterations, max: max_iterations, extend_by: 0},
-    llm_options: {temperature: 0, max_tokens: 2048},
+  const options: AgentSpec = if requested_tool_format == "" {
+    {
+      tools: registry,
+      max_iterations: max_iterations,
+      iteration_budget: {mode: "fixed", initial: max_iterations, max: max_iterations, extend_by: 0},
+      llm_options: {temperature: 0, max_tokens: 2048},
+    }
+  } else {
+    {
+      tools: registry,
+      max_iterations: max_iterations,
+      iteration_budget: {mode: "fixed", initial: max_iterations, max: max_iterations, extend_by: 0},
+      llm_options: {temperature: 0, max_tokens: 2048, tool_format: requested_tool_format},
+      tool_format_override_reason: "diagnostics-timing calibration pins the tool channel",
+    }
   }
   const result = agent_loop(harness, spec.task, system, options)
   const elapsed_ms = harness.clock.now_ms() - started
