@@ -2,6 +2,7 @@ import "std/agent/loop_call_resolution"
 import "std/agent/loop_foundation"
 import "std/agent/loop_result_status"
 import "std/agent/loop_support"
+import { tool_call_history_text } from "std/llm/call_shape"
 import { protocol_violation_messages, violation_reports_lost_call } from "std/llm/tool_parse_result"
 
 // Tool middleware seam — composable tool_caller (mirrors agent_invoke_llm).
@@ -1149,6 +1150,56 @@ pub fn __maybe_inject_blank_name_feedback(
 }
 
 /**
+ * The assistant text this turn is REMEMBERED as, which is not the text it is
+ * SHOWN as.
+ *
+ * The turn's visible text is what a person reads and what the stall and
+ * post-turn readers judge, so it stays the model's own words. The recorded
+ * text is few-shot teaching for every later turn in the session, and the model
+ * copies it: a drifted fence or a placeholder argument that reaches the
+ * transcript once comes back on every turn after, outbidding the instructions.
+ * So the recorded copy is rewritten to the canonical form of the format that
+ * parsed it, from the prose and the calls the parser already separated.
+ *
+ * The rewrite is passed the calls this turn actually DISPATCHED, not the calls
+ * it parsed. They come apart when a duplicate read is collapsed or an unsafe
+ * batch is dropped, and a remembered call with no result reads to the model as
+ * a tool that silently failed.
+ *
+ * Falls back to the visible text whenever there is nothing to canonicalize —
+ * no dispatched calls, a native route, or a turn that produced a
+ * `user_response`, whose visible text is the answer the parser extracted
+ * rather than the raw completion and so was never the drifted bytes.
+ *
+ * A turn that arrived with provider-native calls on a text-channel route is
+ * also left alone, and this one is not optional: the session store already
+ * rewrites that shape into canonical text history, from the same call list.
+ * Rewriting it here as well would render each call twice — once into the text
+ * and once again beside it — which is a worse transcript than the drift.
+ *
+ * @effects: []
+ * @errors: []
+ */
+fn __agent_loop_history_text(normalized, parsed, tool_calls) -> string {
+  const visible = to_string(normalized?.text ?? "")
+  if to_string(parsed?.user_response ?? "") != "" {
+    return visible
+  }
+  if len(normalized?.native_tool_calls ?? []) > 0 {
+    return visible
+  }
+  const canonical = tool_call_history_text(
+    to_string(normalized?._agent_tool_format ?? ""),
+    __strip_internal_verdict_json(to_string(parsed?.prose ?? "")),
+    tool_calls,
+  )
+  if trim(canonical) == "" {
+    return visible
+  }
+  return canonical
+}
+
+/**
  * Record one normalized assistant turn and classify parser feedback once.
  * Partial success remains ordinary tool progress; only a zero-call rejection
  * enters the bounded parse-recovery axis.
@@ -1170,7 +1221,11 @@ pub fn __agent_loop_record_parse_feedback(
   const recorded_assistant = if fallback_outcome.triggered && fallback_outcome.accepted {
     normalized + {tool_calls: tool_calls, native_tool_calls: tool_calls}
   } else {
-    normalized + {tool_calls: tool_calls}
+    normalized
+      + {
+      tool_calls: tool_calls,
+      text: __agent_loop_history_text(normalized, parsed, tool_calls),
+    }
   }
   agent_session_record_assistant(harness.agent, session_id, recorded_assistant)
   const parse_dropped = __maybe_inject_parse_error_feedback(

@@ -16,6 +16,8 @@
 // unrecognized-span violation. Adding a format is an edit to this table.
 // Rewording what a format teaches is an edit to this table. Nothing downstream
 // spells a delimiter out for itself.
+import { call_block, prose_block } from "std/llm/tool_parse_result"
+
 /**
  * How one tool format is taught and rendered.
  *
@@ -130,4 +132,79 @@ pub fn tool_call_syntax_named(tool_format, name) -> string {
     return "a ```tool fenced block wrapping `{\"name\": \"" + called + "\", \"args\": { ... }}`"
   }
   return "`<tool_call>" + called + "({ key: value })</tool_call>`"
+}
+
+/**
+ * Render one assistant turn the way the transcript should REMEMBER it.
+ *
+ * A model learns its call syntax from its own transcript far more strongly
+ * than from its instructions: measured against a local open-weight model, a
+ * session whose persisted turns carried a drifted fence kept reproducing that
+ * fence, and no prompt-side wording rescued it — rewriting those persisted
+ * turns to canonical form did.
+ *
+ * So a turn whose calls were read out of TEXT is written back in the canonical
+ * form of the format that read it, and the model's own delimiters stop being
+ * few-shot teaching. `prose` is what the model actually said, already
+ * separated from its calls by the parser — never the raw completion, which is
+ * the thing being canonicalized away.
+ *
+ * This rewrites the SHAPE of a call, never its content. Argument values are
+ * the model's own and are replayed unchanged; nothing here can tell a copied
+ * placeholder from a value the caller meant. Argument drift propagates through
+ * self-history independently of fence drift and is cut off at its source
+ * instead, by correctives that render no argument values to copy.
+ *
+ * Returns "" when there is nothing to rewrite: no calls to render, a native
+ * route whose calls live on the provider's tool channel instead of in the
+ * text, or calls with no name to render. The caller keeps the turn's own text
+ * in every one of those cases.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn tool_call_history_text(tool_format, prose, calls) -> string {
+  const turn_calls = calls ?? []
+  if len(turn_calls) == 0 {
+    return ""
+  }
+  const shape = tool_call_shape(tool_format)
+  if shape.kind == "native" {
+    return ""
+  }
+  const said = trim(to_string(prose ?? ""))
+  let parts: list<string> = []
+  if said != "" {
+    const opening = if shape.kind == "json" {
+      said
+    } else {
+      prose_block(said)
+    }
+    parts = parts.appending(opening)
+  }
+  for call in turn_calls {
+    const name = trim(to_string(call?.name ?? call?.tool_name ?? ""))
+    if name == "" {
+      continue
+    }
+    // A dispatched call spells its arguments either way, depending on which
+    // side of the tool envelope it came from.
+    const raw_args = call?.arguments ?? call?.tool_args
+    const args = if type_of(raw_args) == "dict" {
+      raw_args
+    } else {
+      {}
+    }
+    const block = if shape.kind == "json" {
+      shape.call_open + json_stringify({name: name, args: args}) + shape.call_close
+    } else {
+      call_block({name: name, arguments: args})
+    }
+    parts = parts.appending(block)
+  }
+  if len(parts) == 0 {
+    return ""
+  }
+  return parts.join("\n\n")
 }

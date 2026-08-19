@@ -1,0 +1,175 @@
+// Run: harn test tests/agent/history_canonicalization_test.harn
+//
+// A model learns its call syntax from its own transcript more strongly than
+// from its instructions. Measured against a local open-weight model, a session
+// whose persisted turns carried a drifted fence kept reproducing that fence on
+// every later turn, and no prompt-side wording rescued it — rewriting the
+// persisted turns to canonical form did.
+//
+// So the assistant turn the session REMEMBERS is not the assistant turn the
+// session SHOWS. The visible text stays the model's own words, for people and
+// for the readers that judge the turn; the recorded copy is rewritten into the
+// canonical form of the format that parsed it, because that copy is few-shot
+// teaching for every turn after it.
+//
+// Each arm below sends the drifted dialect of the OTHER format and then reads
+// the request the next turn actually built, so a pass means the model saw the
+// canonical form — not that a store happened to hold one. The third arm is the
+// falsifier for the rewrite being indiscriminate: a turn with no calls has
+// nothing to canonicalize and must come back verbatim.
+import { agent_loop } from "std/agent/loop"
+
+const FENCED_CALL = "```tool\n{\"name\": \"add\", \"args\": {\"left\": 2, \"right\": 3}}\n```"
+
+const TAGGED_CALL =
+  "<tool_call>\n{\"name\": \"add\", \"args\": {\"left\": 2, \"right\": 3}}\n</tool_call>"
+
+fn _tools() {
+  return tool_define(
+    tool_registry(),
+    "add",
+    "Add two integers.",
+    {
+      handler: { args -> args.left + args.right },
+      parameters: {
+        left: {type: "integer", description: "Left operand"},
+        right: {type: "integer", description: "Right operand"},
+      },
+      returns: {type: "integer"},
+      annotations: {kind: "read"},
+    },
+  )
+}
+
+fn _bump(harness: Harness, cell) {
+  const snap = harness.runtime.shared_snapshot(cell)
+  harness.runtime.shared_cas(cell, snap, snap.value + 1)
+}
+
+/**
+ * Run one turn that answers with `first_text`, then report the assistant
+ * history the NEXT request carried, joined into one string.
+ *
+ * Reading the second call's own `messages` is the point: the claim is about
+ * what the model is taught by its transcript, and the request is where that
+ * teaching lands. A snapshot of the store would only show where it was kept.
+ *
+ * `first_native` puts the turn's calls on the provider's tool channel instead
+ * of in its text, which is the one shape another owner already rewrites.
+ */
+fn _remembered_history(
+  harness: Harness,
+  session: string,
+  tool_format: string,
+  first_text: string,
+  first_native = nil,
+) -> dict {
+  const turns = harness.runtime.shared_cell(
+    {scope: "task_group", key: "hc-turns-" + session, initial: 0},
+  )
+  const history = harness.runtime.shared_cell(
+    {scope: "task_group", key: "hc-history-" + session, initial: ""},
+  )
+  const mock_llm = { call ->
+    const seen = harness.runtime.shared_snapshot(turns).value
+    _bump(harness, turns)
+    if seen == 0 {
+      const first = {text: first_text, provider: "mock", model: "mock"}
+      if first_native == nil {
+        return {ok: true, value: first}
+      }
+      return {ok: true, value: first + {native_tool_calls: first_native}}
+    }
+    if seen == 1 {
+      let joined = ""
+      for message in call?.opts?.messages ?? [] {
+        if to_string(message?.role ?? "") == "assistant" {
+          joined = joined + "\n" + to_string(message?.content ?? "")
+        }
+      }
+      const snap = harness.runtime.shared_snapshot(history)
+      harness.runtime.shared_cas(history, snap, joined)
+    }
+    return {ok: true, value: {text: "Added them. ##DONE##", provider: "mock", model: "mock"}}
+  }
+  const result = agent_loop(
+    harness,
+    "Add 2 and 3, then finish.",
+    nil,
+    {
+      provider: "mock",
+      session_id: session,
+      tools: _tools(),
+      tool_format: tool_format,
+      loop_until_done: true,
+      done_sentinel: "##DONE##",
+      done_judge: nil,
+      max_iterations: 3,
+      llm_caller: mock_llm,
+    },
+  )
+  return {result: result, history: harness.runtime.shared_snapshot(history).value}
+}
+
+pipeline test_a_drifted_tagged_call_is_remembered_as_the_json_dialect(harness: Harness, task) {
+  const run = _remembered_history(harness, "hc-json-" + harness.random.uuid(), "json", TAGGED_CALL)
+  // The drifted call really was read as a call, so this arm is about what the
+  // transcript kept, not about a turn that parsed to nothing.
+  assert_eq(contains(run.result.tools.successful, "add"), true)
+  // The history the second request carried is real.
+  assert(trim(run.history) != "", "the second request carried assistant history")
+  // Taught in the session's own dialect...
+  assert(contains(run.history, "```tool"), "the remembered call is fenced")
+  // ...and the drifted dialect is not there to copy.
+  assert(!contains(run.history, "<tool_call>"), "the drifted markup is not remembered")
+  // The call is still the call the model made.
+  assert(contains(run.history, "\"add\""), "the remembered call names the tool")
+  assert(contains(run.history, "2"), "the remembered call keeps its arguments")
+}
+
+pipeline test_a_drifted_fenced_call_is_remembered_as_the_text_dialect(harness: Harness, task) {
+  const run = _remembered_history(harness, "hc-text-" + harness.random.uuid(), "text", FENCED_CALL)
+  assert_eq(contains(run.result.tools.successful, "add"), true)
+  assert(trim(run.history) != "", "the second request carried assistant history")
+  assert(contains(run.history, "<tool_call>"), "the remembered call is tagged")
+  assert(!contains(run.history, "```tool"), "the drifted fence is not remembered")
+  assert(contains(run.history, "add"), "the remembered call names the tool")
+}
+
+pipeline test_a_turn_with_no_calls_is_remembered_verbatim(harness: Harness, task) {
+  // Nothing was parsed out of this turn, so there is nothing to rewrite it
+  // into. A rewrite that fired here would be replacing the model's words with
+  // a rendering of an empty call list.
+  const run = _remembered_history(
+    harness,
+    "hc-prose-" + harness.random.uuid(),
+    "json",
+    "Let me work out the sum first.",
+  )
+  assert(
+    contains(run.history, "Let me work out the sum first."),
+    "a call-free turn keeps its own words",
+  )
+  assert(!contains(run.history, "```tool"), "a call-free turn invents no call")
+}
+
+pipeline test_a_provider_native_call_is_rewritten_exactly_once(harness: Harness, task) {
+  // The calls came down the provider's tool channel while the route reads
+  // text, and the session store already rewrites that shape into canonical
+  // text history from the same call list. A second rewrite here would render
+  // each call twice — once into the text and once beside it.
+  const run = _remembered_history(
+    harness,
+    "hc-native-" + harness.random.uuid(),
+    "json",
+    "Adding them.",
+    [{name: "add", arguments: {left: 2, right: 3}}],
+  )
+  assert_eq(contains(run.result.tools.successful, "add"), true)
+  assert(trim(run.history) != "", "the second request carried assistant history")
+  assert_eq(
+    len(split(run.history, "```tool")) - 1,
+    1,
+    "the provider-native call is written into history exactly once",
+  )
+}
