@@ -9,9 +9,13 @@ cd "$here"
 # localhost (another lane's server), so an ambient value silently swaps the box
 # under the measurement. No trailing /v1.
 export LLAMACPP_BASE_URL=http://tornadough:8001
-# Native tool channel, pinned for the whole calibration + matrix so arms differ
-# only in diagnostic timing, never in tool wire format.
-export EXP_TOOL_FORMAT=${EXP_TOOL_FORMAT:-native}
+# The tool channel comes from the catalog (preferred_tool_format for this
+# route), which is the authority on provider/model support: this route pins
+# json with tool_mode_parity=text_only from a receipted sweep, and forcing
+# native shipped zero tool schemas (4/4 calibration runs at 0 tool calls).
+# EXP_TOOL_FORMAT stays available as an explicit channel-experiment override;
+# the provenance line records requested, effective, and catalog values.
+export EXP_TOOL_FORMAT=${EXP_TOOL_FORMAT-}
 export HARN_LLM_TRANSCRIPT_DIR=${HARN_LLM_TRANSCRIPT_DIR:-/tmp/diagcalib-llm}
 export HARN_BIN_NO_BUILD=1
 export EXP_RIG_SHA

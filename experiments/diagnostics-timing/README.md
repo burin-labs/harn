@@ -120,5 +120,17 @@ shown. It proves mechanism only. Every behavioural number needs `--mode live`.
 
 One JSON row per trial lands in the `--out` file: `passed`, `iterations`,
 `input_tokens`, `output_tokens`, `tool_calls`, `elapsed_ms`, `flush_count`,
-`surfaced_transient`, `surfaced_noise`, `surfaced_genuine`, `detour_calls`, and
-the tool sequence.
+`surfaced_transient`, `surfaced_noise`, `surfaced_genuine`, `detour_calls`, the
+tool sequence, and a `provenance` record (resolved endpoint, model, tool
+channel, LLM timeout, rig SHA).
+
+## Measurement scope: tool channel
+
+Live results here measure the **json (fenced) tool channel**, resolved from the
+catalog. They are not a general result across tool formats: on the llama.cpp
+qwen3.6 route the catalog declares `native_tools = false` with
+`tool_mode_parity = "text_only"` (receipted 2026-07-19 sweep), and forcing
+`native` ships a request with zero tool schemas — the loop cannot run at all,
+so native is unmeasurable on this serving stack rather than merely worse. Each
+row's `provenance` records the requested, effective, and catalog channel so a
+drifted run is visible in the data.
