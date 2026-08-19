@@ -1,0 +1,179 @@
+// Tests for the diagnostics-timing decision table.
+//
+// These pin the two rules the matrix's readability rests on, so that changing
+// either one is a deliberate edit to a failing test rather than a quiet drift
+// in how results are scored.
+//
+// Run with: harn test experiments/diagnostics-timing/tests/
+import { classify_all, classify_trial, falsifier_verdict, pass_rate } from "../analyze.harn"
+
+/**
+ * Build a trial row from the fields that decide its class.
+ *
+ * A real row carries far more than the classifier reads. Keeping the tests to
+ * the deciding fields means a failure names the rule that broke rather than a
+ * field nobody was asserting on.
+ */
+fn trial(overrides: dict) -> dict {
+  return {
+    arm: "A-push-all",
+    fixture: "clean-control",
+    trial: 1,
+    passed: false,
+    terminal_kind: "natural",
+    tool_sequence: [],
+    iterations: 3,
+    tool_calls: 1,
+    flush_count: 0,
+    surfaced_transient: 0,
+    surfaced_noise: 0,
+    surfaced_genuine: 0,
+    detour_calls: 0,
+    input_tokens: 0,
+    output_tokens: 0,
+    elapsed_ms: 1000,
+  }
+    + overrides
+}
+
+// -------------------------------------------------------------------------------------------------
+
+// Trial classification. A tool-emission stall is a different defect from a
+// resolution failure, and the matrix is unreadable if the two are conflated.
+
+// -------------------------------------------------------------------------------------------------
+
+@test
+pipeline test_a_passing_trial_is_resolved(harness: Harness) {
+  const verdict = classify_trial(trial({passed: true, tool_sequence: ["read_file", "edit_file"]}))
+  assert(verdict.name == "resolved", "a passing trial is resolved")
+  assert(verdict.scoreable, "a resolved trial counts toward precision")
+  harness.stdio.log("test_a_passing_trial_is_resolved passed")
+}
+
+@test
+pipeline test_narrate_without_emit_is_a_tool_emission_stall(harness: Harness) {
+  // The receipted shape from the json calibration runs: the model reads the
+  // file, narrates the rename it is about to make, then stops without ever
+  // emitting the edit.
+  const verdict = classify_trial(
+    trial(
+      {
+        fixture: "rename-single-file",
+        passed: false,
+        terminal_kind: "natural",
+        tool_sequence: ["read_file"],
+        iterations: 3,
+      },
+    ),
+  )
+  assert(verdict.name == "tool_emission_stall", "no mutating call plus a natural stop is a stall")
+  assert(!verdict.scoreable, "a stall must not count toward precision")
+  harness.stdio.log("test_narrate_without_emit_is_a_tool_emission_stall passed")
+}
+
+@test
+pipeline test_a_trial_that_edited_and_failed_is_a_resolution_failure(harness: Harness) {
+  // This is the case a loose classifier would swallow. The agent attempted the
+  // task and did not get it green, which is exactly what the timing policies
+  // are being raced on, so it must stay in the precision number.
+  const verdict = classify_trial(
+    trial({passed: false, terminal_kind: "natural", tool_sequence: ["read_file", "edit_file"]}),
+  )
+  assert(verdict.name == "unresolved", "an attempted-but-failed trial is a resolution failure")
+  assert(verdict.scoreable, "a resolution failure counts toward precision")
+  harness.stdio.log("test_a_trial_that_edited_and_failed_is_a_resolution_failure passed")
+}
+
+@test
+pipeline test_hitting_the_iteration_ceiling_is_not_a_stall(harness: Harness) {
+  // A run cut off by the ceiling did not decide it was finished, so it is not
+  // the narrate-without-emit shape even with an empty tool sequence.
+  const verdict = classify_trial(
+    trial({passed: false, terminal_kind: "max_iterations", tool_sequence: [], iterations: 20}),
+  )
+  assert(verdict.name == "unresolved", "a ceiling cutoff is not a self-terminated stall")
+  harness.stdio.log("test_hitting_the_iteration_ceiling_is_not_a_stall passed")
+}
+
+@test
+pipeline test_the_classifier_does_not_key_on_iteration_count(harness: Harness) {
+  // Registered deliberately: the expected stall arrives at iteration 2 to 3,
+  // but the rule is structural, so a late stall is still a stall rather than
+  // being quietly counted against the resolution work.
+  const verdict = classify_trial(
+    trial({passed: false, terminal_kind: "natural", tool_sequence: ["read_file"], iterations: 9}),
+  )
+  assert(verdict.name == "tool_emission_stall", "a stall at iteration 9 is still a stall")
+  harness.stdio.log("test_the_classifier_does_not_key_on_iteration_count passed")
+}
+
+@test
+pipeline test_stalls_are_excluded_from_the_pass_rate(harness: Harness) {
+  // One resolved trial and one stall must read 1.00, not 0.50. Scoring the
+  // stall as a failure would charge the diagnostics path for a defect in the
+  // tool-call emission stream.
+  const rows = classify_all(
+    [
+      trial({passed: true, tool_sequence: ["edit_file"]}),
+      trial({trial: 2, passed: false, terminal_kind: "natural", tool_sequence: ["read_file"]}),
+    ],
+  )
+  assert(pass_rate(rows) == "1.00", "the stall leaves the denominator, it does not fail it")
+  harness.stdio.log("test_stalls_are_excluded_from_the_pass_rate passed")
+}
+
+@test
+pipeline test_a_run_of_only_stalls_reports_no_pass_rate(harness: Harness) {
+  // Zero scoreable trials is not a zero pass rate. Reporting 0.00 here would
+  // invent a measurement out of an empty denominator.
+  const rows = classify_all(
+    [trial({passed: false, terminal_kind: "natural", tool_sequence: ["read_file"]})],
+  )
+  assert(pass_rate(rows) == "n/a", "an empty scoreable set has no pass rate")
+  harness.stdio.log("test_a_run_of_only_stalls_reports_no_pass_rate passed")
+}
+
+// -------------------------------------------------------------------------------------------------
+
+// The rig's own falsifier. clean-control produces no diagnostics, so the arms
+// have nothing to deliver and must be indistinguishable on every counter.
+
+// -------------------------------------------------------------------------------------------------
+
+@test
+pipeline test_falsifier_holds_when_the_arms_agree(harness: Harness) {
+  const rows = classify_all(
+    [trial({arm: "A-push-all", passed: true}), trial({arm: "D-pull", trial: 1, passed: true})],
+  )
+  const verdict = falsifier_verdict(rows)
+  assert(verdict.status == "held", "identical exposure counters hold the falsifier")
+  harness.stdio.log("test_falsifier_holds_when_the_arms_agree passed")
+}
+
+@test
+pipeline test_falsifier_catches_a_single_differing_counter(harness: Harness) {
+  // One counter, one arm. If this ever stops failing, the falsifier has become
+  // decorative and every result behind it is unguarded.
+  const rows = classify_all(
+    [
+      trial({arm: "A-push-all", passed: true, flush_count: 1}),
+      trial({arm: "D-pull", passed: true, flush_count: 0}),
+    ],
+  )
+  const verdict = falsifier_verdict(rows)
+  assert(verdict.status == "violated", "arms differing on clean-control invalidate the race")
+  assert(contains(verdict.detail, "flush_count"), "the violation names the offending counter")
+  harness.stdio.log("test_falsifier_catches_a_single_differing_counter passed")
+}
+
+@test
+pipeline test_falsifier_reports_absent_rather_than_passing(harness: Harness) {
+  // "We did not look" must never read as "we looked and found nothing", which
+  // is the same distinction the resolution field exists to make.
+  const rows = classify_all([trial({fixture: "genuine-typo", passed: true})])
+  const verdict = falsifier_verdict(rows)
+  assert(verdict.status == "absent", "a run without the fixture was not falsified either way")
+  assert(verdict.status != "held", "absent is not a pass")
+  harness.stdio.log("test_falsifier_reports_absent_rather_than_passing passed")
+}

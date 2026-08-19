@@ -205,7 +205,7 @@ pub fn classify_trial(row) -> TrialClass {
   return {name: CLASS_UNRESOLVED, scoreable: true}
 }
 
-fn classify_all(rows: list) -> list {
+pub fn classify_all(rows: list) -> list {
   let out = []
   for row in rows {
     out = out.appending(row + {trial_class: classify_trial(row).name})
@@ -253,7 +253,7 @@ fn stalled_rows(rows: list) -> list {
   return out
 }
 
-fn pass_rate(rows: list) -> string {
+pub fn pass_rate(rows: list) -> string {
   const scoreable = scoreable_rows(rows)
   if len(scoreable) == 0 {
     return "n/a"
@@ -435,7 +435,7 @@ fn section(title: string, body: string) -> string {
  * `absent` rather than as a pass, because "we did not look" must never read as
  * "we looked and found nothing".
  */
-fn falsifier_verdict(rows: list) -> dict {
+pub fn falsifier_verdict(rows: list) -> dict {
   const subject = filter_rows(rows, "fixture", FALSIFIER_FIXTURE)
   if len(subject) == 0 {
     return {
