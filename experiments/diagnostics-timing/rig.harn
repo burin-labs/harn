@@ -56,6 +56,23 @@ pipeline default(harness: Harness) {
   const python = harness.env.get_or("EXP_PYTHON", "python3")
   const out_path = harness.env.get_or("EXP_OUT", "runs/trials.jsonl")
   const max_iterations = to_int(harness.env.get_or("EXP_MAX_ITER", "20"))
+  // Provenance. The request timeout resolves as explicit > HARN_LLM_TIMEOUT >
+  // the model catalog's stream_timeout > 120s, so an inherited env clamp beats
+  // the catalog silently. Recording the env value per run makes that visible
+  // instead of leaving it to be discovered in the results.
+  const timeout_env = harness.env.get_or("HARN_LLM_TIMEOUT", "")
+  const provenance = {
+    endpoint: harness.env.get_or("LLAMACPP_BASE_URL", "(provider default)"),
+    provider: harness.env.get_or("HARN_LLM_PROVIDER", ""),
+    model: harness.env.get_or("HARN_LLM_MODEL", ""),
+    rig_sha: harness.env.get_or("EXP_RIG_SHA", ""),
+    llm_timeout_env: if timeout_env == "" {
+      "unset"
+    } else {
+      timeout_env
+    },
+  }
+  harness.stdio.eprintln("[provenance] ${json_stringify(provenance)}")
   const config = arm_config(arm_name)
   const spec = fixture(fixture_name)
   const root = harness.fs.mkdtemp_in_workspace("diagtiming")
@@ -243,7 +260,10 @@ pipeline default(harness: Harness) {
         const settle = on_tool_event(false)
         const verify = command_run(
           harness.tools,
-          {argv: [python, "-B", "-m", "unittest", "discover", "-s", ".", "-p", "test_*.py"], cwd: root},
+          {
+            argv: [python, "-B", "-m", "unittest", "discover", "-s", ".", "-p", "test_*.py"],
+            cwd: root,
+          },
           {capture: {max_inline_bytes: 8000}, timeout_ms: 60000},
         )
         let body = if verify.success {

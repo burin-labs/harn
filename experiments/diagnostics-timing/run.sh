@@ -17,6 +17,7 @@ cd "$here"
 # point at a specific binary.
 harn_cmd=${HARN:-"$here/../../scripts/harn_bin.sh --"}
 export HARN_BIN_NO_BUILD=${HARN_BIN_NO_BUILD:-1}
+export EXP_RIG_SHA=${EXP_RIG_SHA:-$(git -C "$here" rev-parse --short HEAD 2>/dev/null || echo unknown)}
 
 mode="mock"
 llm=""
@@ -71,7 +72,7 @@ for fixture in $fixtures; do
           --script rig.harn \
           --task "diagnostics-timing" \
           "${llm_args[@]}" \
-          >/dev/null 2>&1 || echo "   trial errored" >&2
+          2>>"${out%.jsonl}.log" >/dev/null || echo "   trial errored (see ${out%.jsonl}.log)" >&2
     done
   done
 done
