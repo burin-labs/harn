@@ -135,6 +135,10 @@ fn config_from_artifact(artifact: &ProviderCatalogArtifact) -> llm_config::Provi
                     )
                 })
                 .collect(),
+            // A remote artifact carries no curated short list, and an empty
+            // list means "keep the local one" at merge time. Serving a remote
+            // catalog must not silently retire the local setup guidance.
+            featured_providers: Vec::new(),
         },
         ..llm_config::ProvidersConfig::default()
     }

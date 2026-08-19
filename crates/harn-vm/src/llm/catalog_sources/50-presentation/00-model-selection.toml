@@ -2,6 +2,24 @@
 # when backed by automatic_eligibility receipts, the one measured host default.
 # They do not change runtime routing, escalation, or request parameters.
 
+# Providers Harn names first when a surface has room for only a few: the
+# "no credentials" error, onboarding copy, and host setup pickers. Order is
+# display order, not routing preference — every other catalogued provider is
+# equally usable, and `harn doctor` still prints the complete list.
+#
+# Keep this short. Six or seven entries stay readable in a one-line error;
+# a longer list is the wall of names this exists to replace.
+[presentation]
+featured_providers = [
+  "anthropic",
+  "openai",
+  "gemini",
+  "openrouter",
+  "groq",
+  "deepseek",
+  "ollama",
+]
+
 [presentation.variants.fast]
 order = 10
 label = "Fast"

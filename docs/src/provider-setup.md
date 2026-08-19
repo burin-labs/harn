@@ -37,8 +37,15 @@ one.
 
 ## 3. Set the provider credential
 
-Set the credential in your shell or secret manager. Common cloud providers use
-these variables:
+Each provider reads its key from one environment variable. Set the one for the
+provider you picked:
+
+```bash
+export ANTHROPIC_API_KEY="sk-ant-..."
+```
+
+Harn names these providers first, because most people already have an account
+with one of them:
 
 | Provider | Environment variable |
 |---|---|
@@ -46,14 +53,34 @@ these variables:
 | OpenAI | `OPENAI_API_KEY` |
 | Google Gemini | `GEMINI_API_KEY` |
 | OpenRouter | `OPENROUTER_API_KEY` |
-| Together AI | `TOGETHER_AI_API_KEY` |
-| DeepInfra | `DEEPINFRA_API_KEY` |
-| NVIDIA NIM | `NVIDIA_API_KEY` |
-| Hugging Face | `HUGGINGFACE_API_KEY` |
+| Groq | `GROQ_API_KEY` |
+| DeepSeek | `DEEPSEEK_API_KEY` |
+| Ollama | none — runs locally without a key |
 
-The exact provider configuration can change. Use the provider reference for
-[API details](./llm/providers.md#provider-api-details), or run
-`harn doctor --check-providers` after setting the variable.
+Harn supports dozens more. For every provider and the variable it reads, see
+[credential variables](./provider-support.md#credential-variables). To see
+which variables are already set on this machine, run `harn doctor`.
+
+### Keep the key out of your shell
+
+A variable can hold a secret reference instead of the key itself:
+
+```bash
+export ANTHROPIC_API_KEY="harn-secret://work/anthropic"
+```
+
+Harn resolves the reference when it makes the call, so the key never lands in
+your shell history or a config file. See
+[secrets](./orchestrator/secrets.md) for how to store one.
+
+After you set the variable, confirm the provider resolves:
+
+```bash
+harn doctor --check-providers
+```
+
+That command reports which providers have a working credential path. It never
+prints a secret value.
 
 ## 4. Test the connection
 

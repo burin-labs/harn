@@ -11,20 +11,12 @@ harn models list --provider anthropic
 harn models info <model>
 ```
 
-Set the provider credential in the environment. The most common variables are:
-
-| Provider | Environment variable |
-|---|---|
-| Anthropic | `ANTHROPIC_API_KEY` |
-| OpenAI | `OPENAI_API_KEY` |
-| Gemini | `GEMINI_API_KEY` |
-| OpenRouter | `OPENROUTER_API_KEY` |
-| Together AI | `TOGETHER_AI_API_KEY` |
-| DeepInfra | `DEEPINFRA_API_KEY` |
-| NVIDIA NIM | `NVIDIA_API_KEY` |
-| Hugging Face | `HUGGINGFACE_API_KEY` |
-| Ollama | `OLLAMA_HOST` (optional) |
-| Local server | `LOCAL_LLM_BASE_URL` |
+Set the provider credential in the environment. Every provider and the
+variable it reads are listed in
+[credential variables](../provider-support.md#credential-variables), which is
+generated from this catalog. Two local providers take a location instead of a
+key: `OLLAMA_HOST` for Ollama and `LOCAL_LLM_BASE_URL` for an
+OpenAI-compatible server.
 
 Do not rely on an implicit model in an example. Select a current model from the
 catalog and set it explicitly in a call. See [Configure a model

@@ -240,6 +240,14 @@ impl ProvidersConfig {
         self.presentation
             .families
             .extend(overlay.presentation.families.clone());
+        // The featured list is one ordered array, so a later layer that names
+        // it owns it outright — same whole-array replace rule the merge uses
+        // everywhere else.
+        if !overlay.presentation.featured_providers.is_empty() {
+            self.presentation
+                .featured_providers
+                .clone_from(&overlay.presentation.featured_providers);
+        }
     }
 }
 
