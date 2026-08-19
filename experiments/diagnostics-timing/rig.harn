@@ -16,6 +16,7 @@ import { AgentSpec } from "std/agent/options"
 import { command_run } from "std/command"
 import { edit_apply_old_new_patch } from "std/edit"
 import { append_jsonl } from "std/jsonl"
+import { model_info } from "std/llm/catalog"
 import { collect, novel, render, signatures_of } from "./lib/diagnostics.harn"
 import { fixture, seed } from "./lib/fixtures.harn"
 import { arm_config, arm_prompt_clause } from "./lib/policy.harn"
@@ -57,20 +58,39 @@ pipeline default(harness: Harness) {
   const out_path = harness.env.get_or("EXP_OUT", "runs/trials.jsonl")
   const max_iterations = to_int(harness.env.get_or("EXP_MAX_ITER", "20"))
   // Provenance. The request timeout resolves as explicit > HARN_LLM_TIMEOUT >
-  // the model catalog's stream_timeout > 120s, so an inherited env clamp beats
-  // the catalog silently. Recording the env value per run makes that visible
-  // instead of leaving it to be discovered in the results.
+  // the model catalog's stream_timeout > 120s (options.rs resolve_timeout), so
+  // an inherited env clamp beats the catalog silently. This rig passes no
+  // explicit timeout, so mirroring the env > catalog > 120 tail here yields the
+  // value the requests will actually run under, and stamping it on every row
+  // makes a clamped run visible in the results instead of discovered from them.
+  const selector = harness.env.get_or("EXP_LLM", "")
+  const info = if selector == "" {
+    nil
+  } else {
+    model_info(harness.llm, selector)
+  }
   const timeout_env = harness.env.get_or("HARN_LLM_TIMEOUT", "")
+  const env_timeout = to_int(timeout_env)
+  const catalog_timeout = to_float(info?.catalog?.stream_timeout)
+  const resolved_timeout_s = env_timeout
+    ?? (if catalog_timeout == nil {
+      120
+    } else {
+      to_int(ceil(catalog_timeout))
+    })
   const provenance = {
     endpoint: harness.env.get_or("LLAMACPP_BASE_URL", "(provider default)"),
-    provider: harness.env.get_or("HARN_LLM_PROVIDER", ""),
-    model: harness.env.get_or("HARN_LLM_MODEL", ""),
-    rig_sha: harness.env.get_or("EXP_RIG_SHA", ""),
+    llm_selector: selector,
+    model: to_string(info?.id ?? ""),
+    provider: to_string(info?.provider ?? ""),
+    tool_format: to_string(info?.tool_format ?? ""),
+    resolved_llm_timeout_s: resolved_timeout_s,
     llm_timeout_env: if timeout_env == "" {
       "unset"
     } else {
       timeout_env
     },
+    rig_sha: harness.env.get_or("EXP_RIG_SHA", ""),
   }
   harness.stdio.eprintln("[provenance] ${json_stringify(provenance)}")
   const config = arm_config(arm_name)
@@ -401,6 +421,7 @@ pipeline default(harness: Harness) {
     terminal_reason: to_string(result?.terminal?.reason ?? ""),
     final_text: to_string(result?.final_text ?? ""),
     workspace_root: root,
+    provenance: provenance,
   }
   append_jsonl(harness.fs, out_path, row)
   harness.stdio.println(json_stringify(row))

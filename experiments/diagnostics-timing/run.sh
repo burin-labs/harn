@@ -65,6 +65,7 @@ for fixture in $fixtures; do
       EXP_ARM="$arm" \
       EXP_FIXTURE="$fixture" \
       EXP_TRIAL="$trial" \
+      EXP_LLM="$llm" \
       EXP_OUT="$out" \
       EXP_MAX_ITER="$max_iter" \
         $harn_cmd playground \
