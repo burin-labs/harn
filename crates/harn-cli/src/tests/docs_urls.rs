@@ -64,14 +64,15 @@ fn referenced_doc_paths(root: &Path) -> BTreeSet<String> {
         let Ok(text) = std::fs::read_to_string(&source) else {
             continue;
         };
-        for (index, _) in text.match_indices(PREFIX) {
-            let tail = &text[index + PREFIX.len()..];
-            let end = tail
-                .find(|c: char| !(c.is_ascii_alphanumeric() || "._/-#".contains(c)))
-                .unwrap_or(tail.len());
-            let path = tail[..end].split('#').next().unwrap_or_default();
-            if path.ends_with(".html") || path.ends_with(".md") {
-                referenced.insert(path.to_string());
+        for tail in text.split(PREFIX).skip(1) {
+            let url_path: String = tail
+                .chars()
+                .take_while(|c| c.is_ascii_alphanumeric() || "._/-#".contains(*c))
+                .collect();
+            // A fragment addresses a heading on the page, not another page.
+            let page = url_path.split('#').next().unwrap_or_default();
+            if page.ends_with(".html") || page.ends_with(".md") {
+                referenced.insert(page.to_string());
             }
         }
     }

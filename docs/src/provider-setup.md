@@ -37,7 +37,7 @@ one.
 
 ## 3. Set the provider credential
 
-Each provider reads its key from one environment variable. Set the one for the
+Each provider reads its key from an environment variable. Set the one for the
 provider you picked:
 
 ```bash
@@ -57,9 +57,12 @@ with one of them:
 | DeepSeek | `DEEPSEEK_API_KEY` |
 | Ollama | none — runs locally without a key |
 
-Harn supports dozens more. For every provider and the variable it reads, see
-[credential variables](./provider-support.md#credential-variables). To see
-which variables are already set on this machine, run `harn doctor`.
+Harn supports dozens more, and some accept more than one variable. For every
+provider and the variables it reads, see
+[credential variables](./provider-support.md#credential-variables); for the
+endpoint and header details behind them, see the
+[provider reference](./llm/providers.md#provider-api-details). To see which
+variables are already set on this machine, run `harn doctor`.
 
 ### Keep the key out of your shell
 

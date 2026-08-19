@@ -11,12 +11,12 @@ harn models list --provider anthropic
 harn models info <model>
 ```
 
-Set the provider credential in the environment. Every provider and the
-variable it reads are listed in
-[credential variables](../provider-support.md#credential-variables), which is
-generated from this catalog. Two local providers take a location instead of a
-key: `OLLAMA_HOST` for Ollama and `LOCAL_LLM_BASE_URL` for an
-OpenAI-compatible server.
+Set the provider credential in the environment. The complete list of providers
+and the variables each one reads is in
+[credential variables](../provider-support.md#credential-variables), generated
+from this catalog. Two local providers take a location instead of a key:
+`OLLAMA_HOST` for Ollama and `LOCAL_LLM_BASE_URL` for an OpenAI-compatible
+server.
 
 Do not rely on an implicit model in an example. Select a current model from the
 catalog and set it explicitly in a call. See [Configure a model
