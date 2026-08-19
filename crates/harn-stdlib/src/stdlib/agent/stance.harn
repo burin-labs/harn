@@ -1,3 +1,5 @@
+import { agent_emit_event, agent_session_messages } from "std/agent/state"
+import { agent_tool_is_read_only } from "std/agent/tool_annotations"
 // Read-only stance: an intent-armed, least-privilege tool window with a
 // justified, consent-verified escape hatch.
 //
@@ -24,9 +26,7 @@
 // phases 2-3): the window is derived from intent, mounting derives policy
 // from annotations, and elevation is verified, evidenced, and traced.
 // Ships default-OFF and experimental.
-import { __tool_surface_filter_registry, __tool_surface_policy_tools } from "std/agent/postturn"
-import { agent_emit_event, agent_session_messages } from "std/agent/state"
-import { agent_tool_is_read_only } from "std/agent/tool_annotations"
+import { __tool_surface_filter_registry, __tool_surface_policy_tools } from "std/agent/tool_surface"
 
 fn __stance_config(opts) {
   return opts?.read_only_stance ?? {}

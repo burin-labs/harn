@@ -388,3 +388,93 @@ async fn harness_start_waits_for_topic_pumps_before_ready() {
         .await
         .expect("harness shutdown");
 }
+
+/// Boot the orchestrator in each role and read back what it actually told the
+/// operator about registry isolation.
+///
+/// The role's own unit tests assert the strings in isolation, which is not the
+/// same claim: they would still pass if `orchestrator_lifecycle` never consulted
+/// `unproven_isolation` at all. This one drives the real start path and asserts
+/// the disclosure reached the lifecycle log, so deleting the emission fails a
+/// test instead of quietly restoring the silence the role used to boot with.
+///
+/// Multi-tenant shares one trigger/connector registry across every tenant
+/// because `build_vm` makes one VM per process; single-tenant delivers the
+/// boundary its name implies and must stay quiet, or the warning becomes noise
+/// operators learn to skip.
+#[tokio::test(flavor = "multi_thread")]
+async fn multi_tenant_boot_records_the_shared_registry_gap_and_single_tenant_does_not() {
+    async fn isolation_gap_payload_after_boot(
+        role: crate::commands::orchestrator::role::OrchestratorRole,
+    ) -> Option<serde_json::Value> {
+        let temp = tempfile::TempDir::new().unwrap();
+        let marker_path = temp.path().join("stream-handler.json");
+        write_test_file(temp.path(), "harn.toml", stream_manifest_fixture());
+        write_test_file(
+            temp.path(),
+            "lib.harn",
+            &stream_handler_fixture(&marker_path),
+        );
+
+        let mut config =
+            OrchestratorConfig::for_test(temp.path().join("harn.toml"), temp.path().join("state"));
+        config.role = role;
+
+        let harness = OrchestratorHarness::start(config)
+            .await
+            .expect("harness start");
+        let topic = Topic::new("orchestrator.lifecycle").unwrap();
+        let lifecycle = harness
+            .event_log()
+            .read_range(&topic, None, usize::MAX)
+            .await
+            .expect("read lifecycle");
+        let gap = lifecycle
+            .iter()
+            .find(|(_, event)| event.kind == "isolation_gap")
+            .map(|(_, event)| event.payload.clone());
+
+        harness
+            .shutdown(std::time::Duration::from_secs(5))
+            .await
+            .expect("harness shutdown");
+        gap
+    }
+
+    let _env_lock = crate::tests::common::harn_state_lock::lock_harn_state_async().await;
+    let _secret_providers = crate::env_guard::ScopedEnvVar::set("HARN_SECRET_PROVIDERS", "env");
+
+    let multi_tenant = isolation_gap_payload_after_boot(
+        crate::commands::orchestrator::role::OrchestratorRole::MultiTenant,
+    )
+    .await
+    .expect("multi-tenant boot must record the isolation gap it ships with");
+    let gap = multi_tenant
+        .get("gap")
+        .and_then(serde_json::Value::as_str)
+        .expect("isolation_gap payload carries the gap text");
+    assert!(
+        gap.contains("shares one registry"),
+        "recorded gap must name the shared registry: {multi_tenant}"
+    );
+    assert!(
+        gap.contains("6792"),
+        "recorded gap must point at the tracking issue: {multi_tenant}"
+    );
+    assert_eq!(
+        multi_tenant
+            .get("registry_mode")
+            .and_then(serde_json::Value::as_str),
+        Some("one shared trigger/connector registry"),
+        "recorded registry mode must match what build_vm constructs: {multi_tenant}"
+    );
+
+    assert_eq!(
+        isolation_gap_payload_after_boot(
+            crate::commands::orchestrator::role::OrchestratorRole::SingleTenant,
+        )
+        .await,
+        None,
+        "single-tenant delivers its boundary and must not warn"
+    );
+}

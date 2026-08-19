@@ -644,6 +644,113 @@ pipeline default(harness: Harness) {
       )
     },
   )
+  // 13. Malformed call markup is an ATTEMPTED call, not an absent one. A
+  //     message ending in a dangling closing marker means the model reached for
+  //     the emission and the parser rejected it, so answering "you did not call
+  //     it" describes the turn wrongly and teaches nothing. Observed live as
+  //     prose ending in `</tool>` on a lane whose grammar is the ```tool block.
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text("Let me read the full contents of the two files now. </tool>"),
+      llm_text("<tool_call>\nedit({ path: \"q.txt\" })\n</tool_call>"),
+      llm_text("Done."),
+    ],
+    { ->
+      agent_loop(
+        harness,
+        "Edit q.txt.",
+        nil,
+        {
+          provider: "mock",
+          tool_format: "text",
+          loop_until_done: true,
+          max_iterations: 4,
+          max_nudges: 4,
+          tools: edit_tools(),
+        },
+      )
+      const calls = harness.llm.mock_calls()
+      harness.stdio.println(
+        "malformed.diagnosed=" + to_string(injected_anywhere(calls, "call markup was malformed")),
+      )
+      // It must NOT be described as a turn that never intended a call.
+      harness.stdio.println(
+        "malformed.not_absent_call="
+          + to_string(
+          !injected_anywhere(calls, "appeared to intend a call"),
+        ),
+      )
+    },
+  )
+  // 14. The other direction, and the one that makes case 13 safe: ordinary
+  //     prose that merely MENTIONS the marker mid-sentence is not an attempt,
+  //     and an honest finished turn must never be re-opened by this detector.
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text("The parser ignores a stray </tool> marker inside prose, which is why I checked."),
+      llm_text("<tool_call>\nedit({ path: \"r.txt\" })\n</tool_call>"),
+      llm_text("Done."),
+    ],
+    { ->
+      agent_loop(
+        harness,
+        "Edit r.txt.",
+        nil,
+        {
+          provider: "mock",
+          tool_format: "text",
+          loop_until_done: true,
+          max_iterations: 4,
+          max_nudges: 4,
+          tools: edit_tools(),
+        },
+      )
+      const calls = harness.llm.mock_calls()
+      harness.stdio.println(
+        "malformed.silent_on_prose="
+          + to_string(
+          !injected_anywhere(calls, "call markup was malformed"),
+        ),
+      )
+    },
+  )
+  // 15. The third direction, found by a cardinality test rather than by design:
+  //     a COMPLETE call block whose arguments the parser rejected also ends in a
+  //     closing marker, but that turn already has an owner — the parse-rejection
+  //     path. Two owners answering one turn is the contradiction this whole seam
+  //     exists to prevent, so the detector requires the marker to be dangling.
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text("<tool_call>\nedit({ path: })\n</tool_call>"),
+      llm_text("<tool_call>\nedit({ path: \"s.txt\" })\n</tool_call>"),
+      llm_text("Done."),
+    ],
+    { ->
+      agent_loop(
+        harness,
+        "Edit s.txt.",
+        nil,
+        {
+          provider: "mock",
+          tool_format: "text",
+          loop_until_done: true,
+          max_iterations: 4,
+          max_nudges: 4,
+          tools: edit_tools(),
+        },
+      )
+      const calls = harness.llm.mock_calls()
+      harness.stdio.println(
+        "malformed.silent_on_parse_rejection="
+          + to_string(
+          !injected_anywhere(calls, "call markup was malformed"),
+        ),
+      )
+    },
+  )
   const invalid_classifier = try {
     agent_loop_options(harness, {missing_tool_call_recovery: {classifier: "yes"}})
   }

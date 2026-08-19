@@ -204,7 +204,7 @@ jobs:
       - name: Detect release build inputs
         id: release-build-inputs
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 # v4.0.2
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         with:
           filters: .github/release-warm-cache-paths.yml
 
@@ -1155,7 +1155,7 @@ jobs:
         # that outcome — install unconditionally on the measured target so a
         # budget failure can always produce its own attribution.
         if: matrix.target == 'x86_64-unknown-linux-gnu'
-        uses: taiki-e/install-action@67729d5c413db75907f0ad1e39bb04b9c868ff60 # v2.85.7
+        uses: taiki-e/install-action@7f4eb899022d8fe70b20c4f3de697aa85c309026 # v2.85.11
         with:
           tool: cargo-bloat
 
@@ -1770,7 +1770,7 @@ jobs:
         # Recovery runs load current policy from main but build an older tag.
         # A custom predicate records that checked-out source; the verifier also
         # pins the signer workflow and certificate-backed policy revision.
-        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: ${{ steps.release-provenance.outputs.archive }}
           predicate-type: https://harnlang.com/attestations/release-archive/v1

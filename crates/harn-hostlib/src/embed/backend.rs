@@ -415,4 +415,17 @@ mod tests {
         let e = StaticEmbedder::from_json(json).expect("parse");
         assert_eq!(e.dim(), 3);
     }
+
+    #[test]
+    fn static_embedder_does_not_claim_meaning_it_has_not_shown() {
+        // Token pooling is not by itself evidence of meaning ranking, and the
+        // table this backend loads is supplied at runtime rather than pinned
+        // here, so the claim cannot be made once for every possible asset.
+        // Whoever wires a table that does rank by meaning re-earns the claim
+        // through the shared audit rather than by overriding a boolean.
+        let json = r#"{ "dim": 2, "vectors": { "rate": [1.0, 0.0], "limit": [0.0, 1.0] } }"#;
+        let embedder = StaticEmbedder::from_json(json).expect("parse");
+        assert!(!embedder.is_semantic());
+        harn_session_store::search::conformance::assert_semantic_claim_is_earned(&embedder);
+    }
 }

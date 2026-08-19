@@ -38,12 +38,7 @@ pub import {
   agent_sanitize_model_options,
   agent_tool_format,
 } from "std/agent/options"
-pub import {
-  agent_apply_tool_surface_narrowing,
-  agent_compute_post_turn,
-  agent_compute_terminal_callback,
-  agent_reset_tool_surface_narrowing,
-} from "std/agent/postturn"
+pub import { agent_compute_post_turn, agent_compute_terminal_callback } from "std/agent/postturn"
 pub import { agent_take_one_shot_prefill } from "std/agent/prefill"
 pub import {
   agent_build_turn_messages,
@@ -114,6 +109,10 @@ pub import {
   agent_tool_search_inject_if_needed,
   agent_tool_search_record_results,
 } from "std/agent/tool_search"
+pub import {
+  agent_apply_tool_surface_narrowing,
+  agent_reset_tool_surface_narrowing,
+} from "std/agent/tool_surface"
 pub import {
   agent_await_resumption,
   agent_lifecycle_tools,

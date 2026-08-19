@@ -24,8 +24,9 @@ page.
 Current limitations:
 
 - Multi-tenant mode isolates listener ingress, tenant-scoped secrets, and
-  trigger EventLog topics. Shared scheduler/provider objects remain
-  orchestrator-global.
+  trigger EventLog topics. The trigger/connector registry and shared
+  scheduler/provider objects remain orchestrator-global, so a connector or
+  trigger definition is visible to every tenant in the process.
 
 ## Command
 
@@ -104,7 +105,9 @@ rotating file at `<state-dir>/logs/orchestrator.log`. Set
 log configuration, and the dashboard example.
 
 Use `--role multi-tenant` with `harn orchestrator tenant` to provision API-key
-backed tenants, tenant-prefixed EventLog topics, and tenant-scoped secrets. See
+backed tenants, tenant-prefixed EventLog topics, and tenant-scoped secrets. The
+trigger/connector registry stays shared across tenants; the orchestrator warns
+about that at startup. See
 [Multi-tenant orchestrator](./orchestrator/multi-tenant.md) for the tenant
 lifecycle and isolation model.
 

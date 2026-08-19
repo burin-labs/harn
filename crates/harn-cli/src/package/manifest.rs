@@ -1002,6 +1002,29 @@ pub struct RuntimeExtensions {
     pub triggers: Vec<ResolvedTriggerConfig>,
     pub handoff_routes: Vec<harn_vm::HandoffRouteConfig>,
     pub provider_connectors: Vec<ResolvedProviderConnectorConfig>,
+    /// The package generation these paths point into, held for as long as they
+    /// are reachable.
+    ///
+    /// `hooks`, `triggers`, and `provider_connectors` carry bare paths beneath
+    /// `.harn/package-generations/<generation>/`, and their files are read
+    /// lazily — a connector module is only opened when its contract is first
+    /// loaded, which can be long after this struct was built. A generation is
+    /// deleted once no reader holds a shared lease on its `lease.lock`, so
+    /// dropping the snapshot here while the paths survive would let a
+    /// concurrent publisher collect the tree out from under them; the paths
+    /// then fail with a bare "No such file or directory". Keeping the snapshot
+    /// keeps the lease, which is what makes those paths remain valid.
+    pub(crate) package_snapshot: Option<Arc<harn_modules::package_snapshot::PackageSnapshot>>,
+}
+
+impl RuntimeExtensions {
+    /// The package generation `hooks`, `triggers`, and `provider_connectors`
+    /// resolve against, for as long as this value is alive.
+    pub fn package_generation(&self) -> Option<&str> {
+        self.package_snapshot
+            .as_ref()
+            .map(|snapshot| snapshot.generation())
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]

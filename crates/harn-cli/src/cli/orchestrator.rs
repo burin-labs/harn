@@ -182,7 +182,9 @@ pub(crate) struct OrchestratorServeArgs {
         default_value_t = OrchestratorLogFormat::Text
     )]
     pub log_format: OrchestratorLogFormat,
-    /// Runtime role to boot. Multi-tenant is a stub for now.
+    /// Runtime role to boot. Multi-tenant isolates ingress, event-log topics,
+    /// and secret namespaces per tenant, but shares one trigger/connector
+    /// registry across tenants (harn#6792).
     #[arg(
         long,
         env = "HARN_ORCHESTRATOR_ROLE",

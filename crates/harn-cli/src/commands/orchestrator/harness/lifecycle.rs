@@ -139,6 +139,15 @@ async fn orchestrator_lifecycle(
         config.role.as_str(),
         config.role.registry_mode()
     );
+    if let Some(gap) = config.role.unproven_isolation() {
+        eprintln!("[harn] WARNING: {gap}");
+        tracing::warn!(
+            component = "orchestrator",
+            trace_id = "",
+            role = config.role.as_str(),
+            "{gap}"
+        );
+    }
     eprintln!("[harn] orchestrator state dir: {}", state_dir.display());
     tracing::info!(
         component = "orchestrator",
@@ -157,6 +166,24 @@ async fn orchestrator_lifecycle(
     let event_log = harn_vm::event_log::active_event_log()
         .ok_or_else(|| "event log was not installed during VM initialization".to_string())?;
     let event_log_description = event_log.describe();
+
+    // The stderr warning above is the loud copy; this is the durable one. An
+    // operator reading `orchestrator.lifecycle` after the fact, or running with
+    // `--log-format json`, should be able to see which isolation boundary the
+    // role did not build without having caught the boot banner scrolling past.
+    if let Some(gap) = config.role.unproven_isolation() {
+        append_lifecycle_event(
+            &event_log,
+            "isolation_gap",
+            json!({
+                "role": config.role.as_str(),
+                "registry_mode": config.role.registry_mode(),
+                "gap": gap,
+            }),
+        )
+        .await?;
+    }
+
     let tenant_store = if config.role == OrchestratorRole::MultiTenant {
         let store = harn_vm::TenantStore::load(&state_dir)?;
         let active_tenants = store

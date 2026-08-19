@@ -32,6 +32,10 @@ exemplar.names_required_arg=true
 exemplar.no_placeholder_token=true
 exemplar.empty_args=true
 exemplar.instructs_fill_in=true
+malformed.diagnosed=true
+malformed.not_absent_call=true
+malformed.silent_on_prose=true
+malformed.silent_on_parse_rejection=true
 invalid_classifier=true
 true
 invalid_enabled=true
