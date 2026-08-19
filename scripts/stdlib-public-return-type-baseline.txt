@@ -523,7 +523,6 @@ crates/harn-stdlib/src/stdlib/agent/preflight.harn::agent_build_turn_messages
 crates/harn-stdlib/src/stdlib/agent/preflight.harn::agent_build_turn_system
 crates/harn-stdlib/src/stdlib/agent/preflight.harn::agent_build_turn_system_fragments
 crates/harn-stdlib/src/stdlib/agent/preflight.harn::agent_render_tool_call_exemplar
-crates/harn-stdlib/src/stdlib/agent/preflight.harn::agent_tool_call_paradigm
 crates/harn-stdlib/src/stdlib/agent/presets.harn::agent_preset
 crates/harn-stdlib/src/stdlib/agent/presets.harn::agent_preset_kinds
 crates/harn-stdlib/src/stdlib/agent/presets.harn::agent_preset_register

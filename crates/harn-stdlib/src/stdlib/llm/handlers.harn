@@ -160,10 +160,8 @@ fn __retry_default_predicate(envelope) {
     // provider flake: re-dispatch by default (the S2 billed-noncommittal defense).
     return llm_response_is_billed_empty(envelope?.value)
   }
-  // The caller's own whole-request deadline elapsed. `next` is re-invoked with
-  // the same request under the same deadline, so the attempt already made is
-  // the whole experiment: retrying spends the budget re-running it and delays
-  // the fallback that could have changed the outcome.
+  // The caller's own whole-request deadline elapsed, so a retry re-runs a race
+  // it already watched end. `std/agent/retry` carries the full reasoning.
   if llm_failure_exhausted_request_deadline(envelope) {
     return false
   }

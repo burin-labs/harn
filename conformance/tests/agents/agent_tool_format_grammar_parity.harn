@@ -36,7 +36,7 @@ pipeline main(harness: Harness) {
   // 2. TAUGHT. The paradigm is the single source of truth for the syntax the
   // prompt instructs, so this is what the contract fragment renders.
   const paradigm = agent_tool_call_paradigm(harness.llm, opts)
-  harness.stdio.println("taught opener: " + to_string(paradigm?.call_open ?? "?"))
+  harness.stdio.println("taught opener: " + to_string(paradigm.call_open))
   // 3. PARSED. A call written in the taught syntax must actually parse under
   // the resolved format. This is the link whose absence made the failure
   // silent: well-formed calls, zero parsed, zero errors.

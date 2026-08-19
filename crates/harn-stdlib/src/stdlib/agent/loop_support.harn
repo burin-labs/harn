@@ -198,6 +198,38 @@ pub fn __agent_loop_repair_turn_output_contract(opts) -> any? {
   return tool_call_output_schema(opts?.tools, opts?._prior_turn_claimed_tool ?? "")
 }
 
+/**
+ * Record that this turn was sent under the repair contract.
+ *
+ * The receipt is what makes the contract auditable after the fact: whether a
+ * turn was grammar-constrained is otherwise only visible in the request that
+ * has already gone. It reads the same options the dispatch reads and stays
+ * beside the function that decides the contract, so a turn cannot be reported
+ * as constrained by one rule and constrained by another.
+ *
+ * `tool_count` is how many tools the completion could have named — one for a
+ * claim pinned to a single tool, the branch count when the claim is open.
+ *
+ * Takes the zero-based `iteration_index` and reports the one-based iteration,
+ * matching every other receipt the loop emits from the same position.
+ *
+ * @effects: [agent]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn __agent_loop_repair_receipt(agent: HarnessAgent, session_id, opts, iteration_index) -> nil {
+  const contract = __agent_loop_repair_turn_output_contract(opts)
+  if contract == nil {
+    return nil
+  }
+  agent_emit_event(
+    agent,
+    session_id,
+    "repair_output_contract_applied",
+    {iteration: iteration_index + 1, tool_count: len(contract?.anyOf ?? [contract])},
+  )
+}
+
 pub fn __agent_loop_effective_llm_options(llm: HarnessLlm, opts) {
   const base = opts ?? {}
   let merged = agent_merge_llm_options(base, __agent_loop_llm_overrides(base))

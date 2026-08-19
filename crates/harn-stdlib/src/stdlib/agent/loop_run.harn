@@ -156,10 +156,8 @@ pub fn __agent_loop_run(harness: Harness, message, session, initial_opts) {
             model: iteration_opts?.model ?? "",
           },
         )
-        try {
+        let _ = try {
           __host_drain_file_edits(session.session_id)
-        } catch (e) {
-          nil
         }
         agent_stage(
           harness.agent,
@@ -190,18 +188,7 @@ pub fn __agent_loop_run(harness: Harness, message, session, initial_opts) {
           command_hold_cap_tokens = nil
         }
         const turn_llm_opts = __agent_loop_effective_llm_options(harness.llm, turn_opts)
-        const repair_contract = __agent_loop_repair_turn_output_contract(turn_opts)
-        if repair_contract != nil {
-          agent_emit_event(
-            harness.agent,
-            session.session_id,
-            "repair_output_contract_applied",
-            {
-              iteration: iteration_index + 1,
-              tool_count: len(repair_contract?.anyOf ?? [repair_contract]),
-            },
-          )
-        }
+        __agent_loop_repair_receipt(harness.agent, session.session_id, turn_opts, iteration_index)
         agent_stage(
           harness.agent,
           session.session_id,
