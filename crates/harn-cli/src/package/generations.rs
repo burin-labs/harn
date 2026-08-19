@@ -847,10 +847,7 @@ mod tests {
         .unwrap();
         let snapshot = PackageSnapshot::acquire(temp.path()).unwrap().unwrap();
         let generation_root = snapshot.generation_root().to_path_buf();
-        let connector = snapshot
-            .packages_root()
-            .join("connector-pkg/src/lib.harn")
-            .to_path_buf();
+        let connector = snapshot.packages_root().join("connector-pkg/src/lib.harn");
 
         // Exactly what `try_load_runtime_extensions` produces: bare paths into
         // the generation, plus the snapshot that keeps them resolvable.
