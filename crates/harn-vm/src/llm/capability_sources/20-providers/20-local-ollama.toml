@@ -348,10 +348,10 @@ prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "inline"
 
-# Apple Silicon MLX server. Burin's local MLX route is the coding-tuned
-# Qwen3.6-35B-A3B MoE served via `mlx_lm.server` (text MoE, NOT mlx_vlm) — see
-# burin #2717, which retired the never-downloaded dense vision model
-# `unsloth/Qwen3.6-27B-UD-MLX-4bit`. OpenAI-compat; honors the same
+# Apple Silicon MLX server. The local MLX route is the coding-tuned
+# Qwen3.6-35B-A3B MoE served via `mlx_lm.server` (text MoE, NOT mlx_vlm); a
+# downstream embedder retired the never-downloaded dense vision model
+# `unsloth/Qwen3.6-27B-UD-MLX-4bit` in favor of it. OpenAI-compat; honors the same
 # `chat_template_kwargs.preserve_thinking` knob as vLLM via the HF chat template.
 # These are the SAME weights as the llama.cpp `qwen3.6-35b-a3b` route
 # (shared equivalence_group), so the same tokenizer caveat applies:

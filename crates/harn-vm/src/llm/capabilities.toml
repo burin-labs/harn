@@ -253,8 +253,8 @@
 #                     valid requests, silently contaminating any eval/meter that
 #                     trusts its numbers. This is the data-driven sibling of the
 #                     route-around fields above: instead of routing AROUND a bad
-#                     upstream it LABELS the measured precision so tooling (the
-#                     Burin meter precision canary) can refuse to trust a
+#                     upstream it LABELS the measured precision so tooling (an
+#                     embedder's meter precision canary) can refuse to trust a
 #                     `degraded` route. Known values: `trusted` (full precision,
 #                     reference-verified), `degraded` (proven reduced quality —
 #                     e.g. SambaNova gpt-oss quantized: 0/5 vs OpenRouter 3/3),
@@ -2293,10 +2293,10 @@ prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "inline"
 
-# Apple Silicon MLX server. Burin's local MLX route is the coding-tuned
-# Qwen3.6-35B-A3B MoE served via `mlx_lm.server` (text MoE, NOT mlx_vlm) — see
-# burin #2717, which retired the never-downloaded dense vision model
-# `unsloth/Qwen3.6-27B-UD-MLX-4bit`. OpenAI-compat; honors the same
+# Apple Silicon MLX server. The local MLX route is the coding-tuned
+# Qwen3.6-35B-A3B MoE served via `mlx_lm.server` (text MoE, NOT mlx_vlm); a
+# downstream embedder retired the never-downloaded dense vision model
+# `unsloth/Qwen3.6-27B-UD-MLX-4bit` in favor of it. OpenAI-compat; honors the same
 # `chat_template_kwargs.preserve_thinking` knob as vLLM via the HF chat template.
 # These are the SAME weights as the llama.cpp `qwen3.6-35b-a3b` route
 # (shared equivalence_group), so the same tokenizer caveat applies:
@@ -5956,7 +5956,7 @@ requires_tool_result_adjacency = true
 # external bug reports caught clients still sending stale `enable_thinking`
 # booleans (https://github.com/openclaw/openclaw/issues/58680). Keep the wire
 # shape in Harn's capability matrix via provider_defaults.zai instead of making
-# each host or Burin learn that quirk.
+# each host or embedder learn that quirk.
 
 [[provider.zai]]
 model_match = "glm-5.2*"

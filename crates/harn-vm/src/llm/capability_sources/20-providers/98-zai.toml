@@ -33,7 +33,7 @@
 # external bug reports caught clients still sending stale `enable_thinking`
 # booleans (https://github.com/openclaw/openclaw/issues/58680). Keep the wire
 # shape in Harn's capability matrix via provider_defaults.zai instead of making
-# each host or Burin learn that quirk.
+# each host or embedder learn that quirk.
 
 [[provider.zai]]
 model_match = "glm-5.2*"
