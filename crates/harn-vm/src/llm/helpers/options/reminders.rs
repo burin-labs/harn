@@ -17,6 +17,33 @@ impl RenderedReminder {
     }
 }
 
+/// Wrap rendered directive blocks in the one model-facing envelope. Both the
+/// legacy per-request projection and append-only placement render through
+/// here, so the model-visible text is identical under either placement.
+pub(crate) fn directive_envelope(rendered: &[RenderedReminder]) -> Option<String> {
+    let blocks: Vec<&str> = rendered
+        .iter()
+        .map(|reminder| match reminder {
+            RenderedReminder::SystemText(text) => text.as_str(),
+        })
+        .collect();
+    if blocks.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "<context-directives>\nFollow these active directives. Contract directives override corrective directives; corrective directives override advisory directives.\n{}\n</context-directives>",
+        blocks.join("\n")
+    ))
+}
+
+/// One trailing `user` message carrying the directive envelope.
+pub(crate) fn directive_envelope_message(
+    rendered: &[RenderedReminder],
+) -> Option<serde_json::Value> {
+    directive_envelope(rendered)
+        .map(|envelope| serde_json::json!({"role": "user", "content": envelope}))
+}
+
 pub(super) fn reminder_directive_text(reminder: &SystemReminder) -> String {
     format!(
         "<directive authority=\"{}\">\n{}\n</directive>",
@@ -256,20 +283,32 @@ pub(crate) fn apply_rendered_reminder_messages(
     rendered: &[RenderedReminder],
 ) -> Vec<serde_json::Value> {
     let mut messages = messages;
-    let mut system_text_blocks: Vec<&str> = Vec::new();
-    for reminder in rendered {
-        match reminder {
-            RenderedReminder::SystemText(text) => system_text_blocks.push(text),
-        }
+    let Some(envelope) = directive_envelope(rendered) else {
+        return messages;
+    };
+    if !try_append_user_reminder_text(&mut messages, &envelope) {
+        messages.push(serde_json::json!({"role": "user", "content": envelope}));
     }
-    if !system_text_blocks.is_empty() {
-        let coalesced = format!(
-            "<context-directives>\nFollow these active directives. Contract directives override corrective directives; corrective directives override advisory directives.\n{}\n</context-directives>",
-            system_text_blocks.join("\n")
-        );
-        if !try_append_user_reminder_text(&mut messages, &coalesced) {
-            messages.push(serde_json::json!({"role": "user", "content": coalesced}));
-        }
+    messages
+}
+
+/// Append-only placement. Directives already committed to durable history are
+/// not re-issued, and the envelope never folds into an existing turn — the
+/// bytes of every earlier message stay exactly as the model already saw them.
+///
+/// Under this placement the projection is normally a no-op: the turn boundary
+/// has already committed the envelope into durable history, so nothing is
+/// left uncommitted by the time a request is built. The tail append remains
+/// for callers that read the visible projection without a turn boundary of
+/// their own.
+pub(crate) fn apply_append_only_reminder_messages(
+    messages: Vec<serde_json::Value>,
+    rendered: &[RenderedReminder],
+) -> Vec<serde_json::Value> {
+    let mut messages = messages;
+    let pending = super::append_only_directives::uncommitted_directives(&messages, rendered);
+    if let Some(message) = directive_envelope_message(&pending) {
+        messages.push(message);
     }
     messages
 }

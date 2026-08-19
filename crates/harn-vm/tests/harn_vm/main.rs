@@ -24,6 +24,7 @@ mod agent_loop_output_schema;
 mod agent_loop_steering_seams;
 mod agent_mcp_mid_conversation;
 mod agent_mcp_tool_ceiling;
+mod agent_prompt_prefix_stability;
 mod agent_sessions;
 mod builtin_call_dispatch;
 mod builtin_registry_alignment;

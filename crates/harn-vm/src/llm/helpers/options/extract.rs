@@ -321,6 +321,13 @@ pub(crate) fn extract_llm_options(
     };
     let messages = if opt_bool(&options, "_directives_rendered") {
         messages
+    } else if super::append_only_directives::append_only_enabled(
+        options
+            .as_ref()
+            .and_then(|resolved| resolved.get("_append_only_directives"))
+            .map(crate::value::VmValue::is_truthy),
+    ) {
+        super::reminders::apply_append_only_reminder_messages(messages, &rendered_reminders)
     } else {
         apply_rendered_reminder_messages(messages, &rendered_reminders)
     };

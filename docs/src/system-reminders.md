@@ -342,6 +342,52 @@ identity—source, tags, dedupe key, and runtime feedback kind—stays in typed
 events and is never copied into the model-visible envelope. `role_hint` remains
 readable on historical transcripts but does not create a second rendering path.
 
+## Append-only placement
+
+Default placement re-derives the envelope on every request, so the turn that
+carried it at one request no longer carries it at the next. Provider prompt
+caches are prefix caches: Anthropic requires byte-identical segments up to the
+breakpoint, OpenAI matches an initial run of tokens, vLLM chains one hash per KV
+block over the tokens before it, and a llama.cpp slot re-prefills from the first
+divergent token to the end. A directive that moves therefore invalidates the
+whole prompt on every turn.
+
+Append-only placement holds one invariant instead:
+
+> the serialized message array at request N+1 begins with the serialized message
+> array at request N.
+
+Under it, the envelope is committed into durable history at the turn boundary
+that emits it, and later turns re-send those exact bytes at the same index:
+
+- content and authority semantics are unchanged; only placement moves;
+- the envelope is always its own trailing `user` turn and never folds into an
+  existing message;
+- deduplication becomes "do not re-issue" — a directive whose rendered text is
+  already committed is not emitted again, and no earlier turn is edited to
+  remove a stale one;
+- turns are immutable once their boundary passes. Compaction stays the one
+  sanctioned prefix break, and it is already evented.
+
+Because placement is model-visible, it is off by default. Enable it per loop and
+measure the route's cache behavior before relying on it:
+
+```harn,ignore
+agent_loop(harness, task, system, {
+  reminders: {append_only: true},
+})
+```
+
+`HARN_REMINDERS_APPEND_ONLY=1` is the environment fallback for embedders that
+cannot thread loop options through to the turn builder.
+
+Two consequences are worth planning for. A directive stays visible for the rest
+of the session rather than expiring at its `ttl_turns` boundary, because
+withdrawing it would rewrite history; write directives that stay true, or let a
+later directive supersede an earlier one. And the first commit places a `user`
+turn directly after the task's `user` turn, so a route that rejects consecutive
+same-role turns needs its adapter to coalesce them first.
+
 ## Compaction interaction
 
 Reminders live in transcript events, not durable messages. Normal

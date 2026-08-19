@@ -69,8 +69,50 @@ pub fn agent_session_messages(agent: HarnessAgent, session_id) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_session_visible_messages(agent: HarnessAgent, session_id, messages = nil) -> list {
-  return agent.session_visible_messages(session_id, messages)
+pub fn agent_session_visible_messages(
+  agent: HarnessAgent,
+  session_id,
+  messages = nil,
+  append_only = nil,
+) -> list {
+  return agent.session_visible_messages(session_id, messages, append_only)
+}
+
+/**
+ * Commit the active directive envelope into durable session history so the
+ * provider-visible message array stays append-only across turns.
+ *
+ * Returns the number of directives committed; zero when append-only placement
+ * is off or when history already carries every pending directive.
+ *
+ * @effects: [host]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_session_commit_directives(agent: HarnessAgent, session_id, append_only = nil) -> int {
+  return agent.session_commit_directives(session_id, append_only)
+}
+
+/**
+ * Read the append-only directive placement gate from agent-loop options.
+ *
+ * Off by default: the placement is model-visible, so an embedder opts in and
+ * measures prompt-cache behavior before anyone proposes changing the default.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn __agent_append_only_directives(opts) -> bool? {
+  const reminders = opts?.reminders
+  if type_of(reminders) != "dict" {
+    return nil
+  }
+  const requested = reminders?.append_only
+  if type_of(requested) != "bool" {
+    return nil
+  }
+  return requested
 }
 
 /**

@@ -604,8 +604,19 @@ capability_method!(
     // runtime-owned, not model-facing state effects. Inflated contracts
     // reject under agent-loop execution policy and abort turns mid-flight.
     [],
-    "__cap_agent_session_visible_messages(session_id: string, messages?: list|nil) -> list",
+    "__cap_agent_session_visible_messages(session_id: string, messages?: list|nil, append_only?: bool|nil) -> list",
     "Project an agent session's provider-visible messages."
+);
+capability_method!(
+    agent_session_commit_directives,
+    "harness.agent.session_commit_directives",
+    // Match the corresponding `__host_agent_*` runtime_internal builtin
+    // (effects = []): live session journal / reminder / budget seams are
+    // runtime-owned, not model-facing state effects. Inflated contracts
+    // reject under agent-loop execution policy and abort turns mid-flight.
+    [],
+    "__cap_agent_session_commit_directives(session_id: string, append_only?: bool|nil) -> int",
+    "Commit the active directive envelope into durable session history."
 );
 capability_method!(
     agent_session_record_assistant,

@@ -10,6 +10,7 @@
 //! options, [`tool_search`] tool-search options, and [`extract`] the
 //! `extract_llm_options` orchestrator that drives them.
 
+mod append_only_directives;
 mod defaults;
 mod extract;
 mod json;
@@ -21,8 +22,12 @@ mod thinking;
 mod tool_search;
 mod validate;
 
+pub(crate) use append_only_directives::{
+    append_only_enabled as append_only_directives_enabled, uncommitted_directives,
+};
 pub(crate) use reminders::{
-    apply_rendered_reminder_messages, pending_reminders_from_session, render_pending_reminders,
+    apply_append_only_reminder_messages, apply_rendered_reminder_messages,
+    directive_envelope_message, pending_reminders_from_session, render_pending_reminders,
 };
 pub(crate) use validate::{project_llm_options, validate_llm_option_keys};
 

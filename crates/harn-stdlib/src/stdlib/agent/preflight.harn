@@ -5,6 +5,7 @@ import {
   agent_scratchpad_recitation_fragment,
 } from "std/agent/scratchpad"
 import {
+  __agent_append_only_directives,
   agent_session_messages,
   agent_session_project_turn,
   agent_session_visible_messages,
@@ -726,8 +727,14 @@ pub fn agent_build_turn_messages(
   const raw_messages = agent_session_messages(agent, session.session_id)
   const projected_messages = __agent_apply_projection(agent, session.session_id, raw_messages, opts)
   const decorator = opts?.message_decorator ?? opts?.decorate_message
+  const append_only = __agent_append_only_directives(opts)
   if !(opts?.timestamp_messages ?? opts?.message_timestamps ?? false) && decorator == nil {
-    return agent_session_visible_messages(agent, session.session_id, projected_messages)
+    return agent_session_visible_messages(
+      agent,
+      session.session_id,
+      projected_messages,
+      append_only,
+    )
   }
   const timestamp = clock.date_iso()
   let out = []
@@ -738,5 +745,5 @@ pub fn agent_build_turn_messages(
     )
     index = index + 1
   }
-  return agent_session_visible_messages(agent, session.session_id, out)
+  return agent_session_visible_messages(agent, session.session_id, out, append_only)
 }
