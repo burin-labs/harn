@@ -141,7 +141,7 @@ fn generate_file() -> String {
     out.push_str("<!-- Sources of truth: crates/harn-vm/src/triggers/event.rs ProviderCatalog metadata and connector contract v1 docs. -->\n\n");
     out.push_str("<!-- markdownlint-disable MD013 -->\n\n");
     out.push_str(
-        "**Canonical URL:** <https://harnlang.com/docs/llm/harn-triggers-quickref.html>\n\n",
+        "**Canonical URL:** <https://harnlang.com/docs/llm/harn-triggers-quickref.md>\n\n",
     );
     out.push_str("Use this with `docs/llm/harn-quickref.md` when writing trigger, connector, or orchestrator code. It covers manifest shape, provider catalog metadata, the pure-Harn connector contract, and example-library commands.\n\n");
     out.push_str("**Reminders ≠ triggers.** Triggers spawn or schedule tasks from external or timed events; system reminders modify a running agent session by injecting typed ambient context. See `docs/src/system-reminders.md` and the Reminders section in `docs/llm/harn-quickref.md`.\n\n");

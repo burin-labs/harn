@@ -270,7 +270,7 @@ fn resolve_auth_env_value(env_name: &str, raw: &str) -> Result<String, VmError> 
 }
 
 /// Canonical documentation entry point for provider credential setup.
-pub const PROVIDER_SETUP_DOCS_URL: &str = "https://harnlang.com/docs/provider-setup.html";
+pub const PROVIDER_SETUP_DOCS_URL: &str = "https://harnlang.com/provider-setup.html";
 
 /// Whether this provider needs a credential at all. Local servers such as
 /// Ollama declare `auth_style = "none"` and are usable with no key.
@@ -280,7 +280,12 @@ fn requires_credential(provider: &str) -> bool {
 
 /// Credential env vars accepted by the named providers, in their order, with
 /// duplicates removed. Providers that need no key contribute nothing.
-fn credential_env_names(providers: &[String]) -> Vec<String> {
+///
+/// `primary_only` keeps just the first variable each provider accepts. A
+/// provider that takes alternatives (Gemini reads `GEMINI_API_KEY` or
+/// `GOOGLE_API_KEY`) would otherwise spend two slots in a short list to say
+/// one thing; `harn doctor` and the docs still name every alternative.
+fn credential_env_names(providers: &[String], primary_only: bool) -> Vec<String> {
     let mut envs: Vec<String> = Vec::new();
     for name in providers {
         let Some(definition) = llm_config::provider_config(name) else {
@@ -289,7 +294,13 @@ fn credential_env_names(providers: &[String]) -> Vec<String> {
         if definition.auth_style == "none" {
             continue;
         }
-        for env in llm_config::auth_env_names(&definition.auth_env) {
+        let accepted = llm_config::auth_env_names(&definition.auth_env);
+        let accepted = if primary_only {
+            accepted.into_iter().take(1).collect()
+        } else {
+            accepted
+        };
+        for env in accepted {
             if !envs.contains(&env) {
                 envs.push(env);
             }
@@ -312,8 +323,8 @@ pub fn no_credentials_message() -> String {
 
     // An overlay can suppress every featured provider. Falling back to the
     // full catalog keeps the message useful instead of empty.
-    let shown_envs = match credential_env_names(&featured) {
-        envs if envs.is_empty() => credential_env_names(&all_providers),
+    let shown_envs = match credential_env_names(&featured, true) {
+        envs if envs.is_empty() => credential_env_names(&all_providers, false),
         envs => envs,
     };
     if shown_envs.is_empty() {
