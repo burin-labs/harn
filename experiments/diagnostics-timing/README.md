@@ -124,6 +124,35 @@ One JSON row per trial lands in the `--out` file: `passed`, `iterations`,
 tool sequence, and a `provenance` record (resolved endpoint, model, tool
 channel, LLM timeout, rig SHA).
 
+## Analysis
+
+```sh
+harn run analyze.harn -- runs/stage1.jsonl --control A-push-all
+harn run analyze.harn -- runs/stage1.jsonl --json
+```
+
+`analyze.harn` turns the trial rows into a decision table. Two of its rules are
+structural rather than left to whoever reads the output.
+
+**A tool-emission stall is its own outcome class.** A trial that stops of its
+own accord without ever emitting a mutating call did not fail to resolve a
+diagnostic; it never attempted the task, so no timing policy had anything to act
+on. Those trials are counted separately and excluded from the pass rate and the
+paired intervals, the same way an infrastructure skip is not a failure. Letting
+them depress the precision number would charge the post-edit diagnostics path
+for a defect in the tool-call emission stream, which is a different subsystem
+and which every arm inherits equally.
+
+**Every fixture is reported on its own line, and constants are named.** A
+fixture whose outcome is identical on every arm discriminates nothing. Rolling
+it into an aggregate makes the aggregate look better resolved than the evidence
+supports, so the per-fixture table says `constant` and the aggregate is read
+beside it, never instead of it.
+
+Turns to green are reported over resolved trials only and always beside the pass
+rate. An arm that converges fast by giving up is not a winner, and separating
+the two numbers is what makes that visible.
+
 ## Measurement scope: tool channel
 
 Live results here measure the **json (fenced) tool channel**, resolved from the

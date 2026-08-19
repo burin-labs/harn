@@ -1,0 +1,547 @@
+// Aggregate diagnostics-timing trial rows into a decision table.
+//
+//   harn run experiments/diagnostics-timing/analyze.harn -- runs/stage1.jsonl
+//   harn run experiments/diagnostics-timing/analyze.harn -- runs/stage1.jsonl \
+//     --control A-push-all --metric iterations
+//
+// Reports, per arm and per fixture, the outcome mix, turns to green, and the
+// diagnostic-exposure counters, plus a paired 95% bootstrap interval against
+// the control arm. Pairing is by (fixture, trial), which holds the fixture and
+// the trial index fixed so the arm is the only thing that differs.
+//
+// Two reporting rules are structural here rather than left to the reader.
+//
+// A trial that never emits the mutating call the task requires, and then stops
+// of its own accord, did not fail to RESOLVE a diagnostic; it failed to EMIT a
+// tool call. That is a defect in the tool-call emission stream, not in the
+// post-edit diagnostics path this experiment measures, and every arm inherits
+// it equally. Those trials are counted in their own class and excluded from the
+// precision numbers, the same way an infrastructure skip is not a failure.
+//
+// A fixture whose outcome is identical across every arm is a constant. It
+// discriminates nothing, and averaging it into an aggregate makes the aggregate
+// look better resolved than the evidence supports. Every fixture is reported on
+// its own line and constants are named as constants.
+import { help_requested, parse, parser } from "std/cli/argparse"
+import { dict_from_pairs, index_by, unique } from "std/collections"
+import { bootstrap_mean_ci } from "std/eval/stats"
+import { read_jsonl } from "std/jsonl"
+import { render_table } from "std/table"
+
+const BOOTSTRAP_RESAMPLES = 10000
+
+const BOOTSTRAP_ALPHA = 0.05
+
+const BOOTSTRAP_SEED = 17
+
+// Calls that change the workspace. A trial that emits none of these never
+// attempted the task, however much it narrated about attempting it.
+const MUTATING_TOOLS = ["edit_file", "batch_edit", "write_file", "apply_patch"]
+
+// Terminal kinds that mean the agent stopped because it decided it was done,
+// as opposed to hitting the iteration ceiling or erroring out.
+const SELF_TERMINATED = ["natural", "final_answer", "stop"]
+
+const CLASS_RESOLVED = "resolved"
+
+const CLASS_STALL = "tool_emission_stall"
+
+const CLASS_UNRESOLVED = "unresolved"
+
+// Column order for the rendered tables. Alphabetical key order reads as noise,
+// so each table names its own sequence.
+const ARM_COLUMNS = [
+  "arm",
+  "n",
+  "scored",
+  "stalls",
+  "pass",
+  "turns",
+  "tools",
+  "tok",
+  "wall_s",
+  "shown",
+  "trans",
+  "noise",
+  "detour",
+]
+
+const FIXTURE_COLUMNS = ["fixture", "n", "scored", "stalls", "pass", "turns", "verdict"]
+
+const PAIRED_COLUMNS = ["arm", "pairs", "dropped", "compared", "delta", "ci", "d_pass", "verdict"]
+
+// Provenance fields every row must carry so a finished matrix stays readable.
+const PROVENANCE_FIELDS = ["tool_format", "endpoint", "model", "resolved_llm_timeout_s", "rig_sha"]
+
+type TrialClass = {name: string, scoreable: bool}
+
+fn usage() -> string {
+  return join(
+    [
+      "usage: analyze.harn <trials.jsonl> [--control ARM] [--metric FIELD] [--json]",
+      "",
+      "  --control ARM    arm every other arm is paired against (default A-push-all)",
+      "  --metric FIELD   numeric row field the paired interval runs on (default iterations)",
+      "  --json           emit the report as JSON instead of tables",
+    ],
+    "\n",
+  )
+}
+
+fn arg_spec() {
+  return parser(
+    {
+      name: "analyze",
+      args: [
+        {kind: "positional", name: "path", parse: "string"},
+        {kind: "flag", name: "control", long: "--control", parse: "string", default: "A-push-all"},
+        {kind: "flag", name: "metric", long: "--metric", parse: "string", default: "iterations"},
+        {kind: "switch", name: "json", long: "--json", default: false},
+      ],
+    },
+  )
+}
+
+fn number(value) -> float {
+  return to_float(value) ?? 0.0
+}
+
+fn format_fixed(value, places: int) -> string {
+  const raw = to_float(value)
+  if raw == nil {
+    return "n/a"
+  }
+  let scale = 1
+  let i = 0
+  while i < places {
+    scale = scale * 10
+    i = i + 1
+  }
+  const sign = if raw < 0.0 {
+    "-"
+  } else {
+    ""
+  }
+  const scaled = to_int(round(abs(raw) * to_float(scale))) ?? 0
+  const whole = scaled / scale
+  if places == 0 {
+    return sign + to_string(whole)
+  }
+  let frac_text = to_string(scaled % scale)
+  while len(frac_text) < places {
+    frac_text = "0" + frac_text
+  }
+  return sign + to_string(whole) + "." + frac_text
+}
+
+fn mean_of(values: list) -> float? {
+  if len(values) == 0 {
+    return nil
+  }
+  let total = 0.0
+  for value in values {
+    total = total + number(value)
+  }
+  return total / to_float(len(values))
+}
+
+fn format_mean(values: list, places: int) -> string {
+  const value = mean_of(values)
+  if value == nil {
+    return "n/a"
+  }
+  return format_fixed(value, places)
+}
+
+fn field_values(rows: list, field: string) -> list {
+  let out = []
+  for row in rows {
+    out = out.appending(number(row[field]))
+  }
+  return out
+}
+
+fn emitted_mutation(row) -> bool {
+  for call in row?.tool_sequence ?? [] {
+    if MUTATING_TOOLS.contains(to_string(call)) {
+      return true
+    }
+  }
+  return false
+}
+
+/**
+ * Classify one trial row.
+ *
+ * `resolved` and `unresolved` are the two outcomes this experiment is trying to
+ * separate. `tool_emission_stall` is neither: the agent stopped on its own
+ * without ever emitting a mutating call, so no diagnostic timing policy had
+ * anything to act on. Scoring it as a resolution failure would charge the
+ * post-edit diagnostics path for a defect in the tool-call emission stream.
+ */
+pub fn classify_trial(row) -> TrialClass {
+  if row?.passed == true {
+    return {name: CLASS_RESOLVED, scoreable: true}
+  }
+  const terminal = to_string(row?.terminal_kind ?? "")
+  if SELF_TERMINATED.contains(terminal) && !emitted_mutation(row) {
+    return {name: CLASS_STALL, scoreable: false}
+  }
+  return {name: CLASS_UNRESOLVED, scoreable: true}
+}
+
+fn classify_all(rows: list) -> list {
+  let out = []
+  for row in rows {
+    out = out.appending(row + {trial_class: classify_trial(row).name})
+  }
+  return out
+}
+
+fn filter_rows(rows: list, field: string, value) -> list {
+  let out = []
+  for row in rows {
+    if row[field] == value {
+      out = out.appending(row)
+    }
+  }
+  return out
+}
+
+fn scoreable_rows(rows: list) -> list {
+  let out = []
+  for row in rows {
+    if row.trial_class != CLASS_STALL {
+      out = out.appending(row)
+    }
+  }
+  return out
+}
+
+fn passing_rows(rows: list) -> list {
+  let out = []
+  for row in rows {
+    if row.trial_class == CLASS_RESOLVED {
+      out = out.appending(row)
+    }
+  }
+  return out
+}
+
+fn stalled_rows(rows: list) -> list {
+  let out = []
+  for row in rows {
+    if row.trial_class == CLASS_STALL {
+      out = out.appending(row)
+    }
+  }
+  return out
+}
+
+fn pass_rate(rows: list) -> string {
+  const scoreable = scoreable_rows(rows)
+  if len(scoreable) == 0 {
+    return "n/a"
+  }
+  return format_fixed(to_float(len(passing_rows(rows))) / to_float(len(scoreable)), 2)
+}
+
+fn token_totals(rows: list) -> list {
+  let out = []
+  for row in rows {
+    out = out.appending(number(row.input_tokens) + number(row.output_tokens))
+  }
+  return out
+}
+
+fn wall_seconds(rows: list) -> list {
+  let out = []
+  for row in rows {
+    out = out.appending(number(row.elapsed_ms) / 1000.0)
+  }
+  return out
+}
+
+fn arm_row(label: string, rows: list) -> dict {
+  const scoreable = scoreable_rows(rows)
+  const passing = passing_rows(rows)
+  return {
+    arm: label,
+    n: len(rows),
+    scored: len(scoreable),
+    stalls: len(stalled_rows(rows)),
+    pass: pass_rate(rows),
+    turns: format_mean(field_values(passing, "iterations"), 1),
+    tools: format_mean(field_values(scoreable, "tool_calls"), 1),
+    tok: format_mean(token_totals(scoreable), 0),
+    wall_s: format_mean(wall_seconds(scoreable), 1),
+    shown: format_mean(field_values(scoreable, "flush_count"), 2),
+    trans: format_mean(field_values(scoreable, "surfaced_transient"), 2),
+    noise: format_mean(field_values(scoreable, "surfaced_noise"), 2),
+    detour: format_mean(field_values(scoreable, "detour_calls"), 2),
+  }
+}
+
+/**
+ * Per-fixture verdict on whether the fixture separated the arms at all.
+ *
+ * A fixture every arm stalls on, or every arm passes, carries no signal about
+ * diagnostic timing. Saying so on its own line is what stops an aggregate from
+ * quietly averaging a constant into the result.
+ */
+fn fixture_verdict(rows: list, arms: list) -> string {
+  const stalls = len(stalled_rows(rows))
+  if stalls == len(rows) && len(rows) > 0 {
+    return "constant: every arm stalls, discriminates nothing"
+  }
+  let outcomes = []
+  for arm in arms {
+    const arm_rows = filter_rows(rows, "arm", arm)
+    if len(arm_rows) == 0 {
+      continue
+    }
+    outcomes = outcomes.appending(pass_rate(arm_rows))
+  }
+  if len(unique(outcomes)) <= 1 {
+    return "constant: identical outcome on every arm, discriminates nothing"
+  }
+  return "separates arms"
+}
+
+fn fixture_row(name: string, rows: list, arms: list) -> dict {
+  const scoreable = scoreable_rows(rows)
+  return {
+    fixture: name,
+    n: len(rows),
+    scored: len(scoreable),
+    stalls: len(stalled_rows(rows)),
+    pass: pass_rate(rows),
+    turns: format_mean(field_values(passing_rows(rows), "iterations"), 1),
+    verdict: fixture_verdict(rows, arms),
+  }
+}
+
+fn pair_key(row) -> string {
+  return to_string(row.fixture) + "\\u{1f}" + to_string(row.trial)
+}
+
+fn index_by_pair(rows: list) -> dict {
+  return index_by(rows, { row -> pair_key(row) })
+}
+
+fn paired_row(control_rows: list, arm: string, arm_rows: list, metric: string) -> dict? {
+  const control = index_by_pair(control_rows)
+  const other = index_by_pair(arm_rows)
+  let metric_deltas = []
+  let pass_deltas = []
+  let pairs = 0
+  let dropped = 0
+  for key in keys(control).sorted() {
+    const a = control[key]
+    const b = other[key]
+    if b == nil {
+      continue
+    }
+    pairs = pairs + 1
+    // A pair where either side stalled says nothing about resolution timing.
+    if a.trial_class == CLASS_STALL || b.trial_class == CLASS_STALL {
+      dropped = dropped + 1
+      continue
+    }
+    const a_passed = if a.trial_class == CLASS_RESOLVED {
+      1
+    } else {
+      0
+    }
+    const b_passed = if b.trial_class == CLASS_RESOLVED {
+      1
+    } else {
+      0
+    }
+    pass_deltas = pass_deltas.appending(to_float(b_passed - a_passed))
+    if a_passed == 1 && b_passed == 1 {
+      metric_deltas = metric_deltas.appending(number(b[metric]) - number(a[metric]))
+    }
+  }
+  if pairs == 0 {
+    return nil
+  }
+  const ci = bootstrap_mean_ci(metric_deltas, BOOTSTRAP_RESAMPLES, BOOTSTRAP_ALPHA, BOOTSTRAP_SEED)
+  const verdict = if len(metric_deltas) < 2 {
+    "too few paired passes"
+  } else if ci.hi < 0.0 {
+    "better"
+  } else if ci.lo > 0.0 {
+    "worse"
+  } else {
+    "no separation"
+  }
+  return {
+    arm: arm,
+    pairs: pairs,
+    dropped: dropped,
+    compared: len(metric_deltas),
+    delta: format_mean(metric_deltas, 2),
+    ci: "[" + format_fixed(ci.lo, 2) + ", " + format_fixed(ci.hi, 2) + "]",
+    d_pass: format_mean(pass_deltas, 2),
+    verdict: verdict,
+  }
+}
+
+fn provenance_summary(rows: list) -> dict {
+  let pairs = []
+  for field in PROVENANCE_FIELDS {
+    let seen = []
+    for row in rows {
+      const value = row?.provenance?.[field]
+      if value != nil {
+        seen = unique(seen.appending(to_string(value)))
+      }
+    }
+    const rendered = if len(seen) == 0 {
+      "unrecorded"
+    } else {
+      join(seen.sorted(), " | ")
+    }
+    pairs = pairs.appending([field, rendered])
+  }
+  return dict_from_pairs(pairs)
+}
+
+fn section(title: string, body: string) -> string {
+  return title + "\n" + body + "\n"
+}
+
+fn render_report(rows: list, control_arm: string, metric: string) -> string {
+  const arms = unique(field_names(rows, "arm")).sorted()
+  const fixtures = unique(field_names(rows, "fixture")).sorted()
+  let arm_rows = []
+  for arm in arms {
+    arm_rows = arm_rows.appending(arm_row(arm, filter_rows(rows, "arm", arm)))
+  }
+  let fixture_rows = []
+  for fixture in fixtures {
+    fixture_rows = fixture_rows.appending(
+      fixture_row(fixture, filter_rows(rows, "fixture", fixture), arms),
+    )
+  }
+  const provenance = provenance_summary(rows)
+  let out = section(
+    "Provenance",
+    join(
+      [
+        "  tool channel (resolved): " + to_string(provenance.tool_format),
+        "  endpoint:                " + to_string(provenance.endpoint),
+        "  model:                   " + to_string(provenance.model),
+        "  request timeout (s):     " + to_string(provenance.resolved_llm_timeout_s),
+        "  rig sha:                 " + to_string(provenance.rig_sha),
+      ],
+      "\n",
+    ),
+  )
+  out = out
+    + "\n"
+    + section(
+    "Trials: ${len(rows)}   arms: ${len(arms)}   fixtures: ${len(fixtures)}",
+    "  stalls excluded from precision: ${len(stalled_rows(rows))}",
+  )
+  out = out + "\nBy arm\n" + render_table(arm_rows, {columns: ARM_COLUMNS}) + "\n"
+  out = out
+    + "\n  turns is the mean over RESOLVED trials only; read it beside the pass rate.\n"
+    + "  pass is over scored trials; tool-emission stalls are excluded from both.\n"
+  out = out + "\nBy fixture\n" + render_table(fixture_rows, {columns: FIXTURE_COLUMNS}) + "\n"
+  const control_rows = filter_rows(rows, "arm", control_arm)
+  if len(control_rows) == 0 {
+    return out + "\ncontrol arm '${control_arm}' absent; skipping paired intervals\n"
+  }
+  let paired = []
+  for arm in arms {
+    if arm == control_arm {
+      continue
+    }
+    const entry = paired_row(control_rows, arm, filter_rows(rows, "arm", arm), metric)
+    if entry != nil {
+      paired = paired.appending(entry)
+    }
+  }
+  out = out + "\nPaired 95% bootstrap vs ${control_arm} on ${metric} (negative favours the arm)\n"
+  out = out + render_table(paired, {columns: PAIRED_COLUMNS}) + "\n"
+  out = out
+    + "\n  dropped counts pairs where either side was a tool-emission stall.\n"
+    + "  An interval spanning zero is no separation. Say so rather than ranking means.\n"
+  return out
+}
+
+fn field_names(rows: list, field: string) -> list {
+  let out = []
+  for row in rows {
+    out = out.appending(to_string(row[field]))
+  }
+  return out
+}
+
+fn report_json(rows: list, control_arm: string, metric: string) -> dict {
+  const arms = unique(field_names(rows, "arm")).sorted()
+  const fixtures = unique(field_names(rows, "fixture")).sorted()
+  let by_arm = []
+  for arm in arms {
+    by_arm = by_arm.appending(arm_row(arm, filter_rows(rows, "arm", arm)))
+  }
+  let by_fixture = []
+  for fixture in fixtures {
+    by_fixture = by_fixture.appending(
+      fixture_row(fixture, filter_rows(rows, "fixture", fixture), arms),
+    )
+  }
+  let paired = []
+  const control_rows = filter_rows(rows, "arm", control_arm)
+  for arm in arms {
+    if arm == control_arm {
+      continue
+    }
+    const entry = paired_row(control_rows, arm, filter_rows(rows, "arm", arm), metric)
+    if entry != nil {
+      paired = paired.appending(entry)
+    }
+  }
+  return {
+    schema_version: 1,
+    trials: len(rows),
+    stalls: len(stalled_rows(rows)),
+    control: control_arm,
+    metric: metric,
+    provenance: provenance_summary(rows),
+    by_arm: by_arm,
+    by_fixture: by_fixture,
+    paired: paired,
+  }
+}
+
+pipeline main(harness: Harness, task) {
+  if help_requested(argv) {
+    harness.stdio.println(usage())
+    return 0
+  }
+  const parsed_result = parse(arg_spec(), argv)
+  if is_err(parsed_result) {
+    harness.stdio.eprintln(unwrap_err(parsed_result).message)
+    harness.stdio.eprintln("\n" + usage())
+    return 2
+  }
+  const parsed = unwrap(parsed_result).options
+  const path = to_string(parsed.path)
+  const raw = read_jsonl(harness.fs, path)
+  if len(raw) == 0 {
+    harness.stdio.eprintln("no rows in ${path}")
+    return 1
+  }
+  const rows = classify_all(raw)
+  const control_arm = to_string(parsed.control)
+  const metric = to_string(parsed.metric)
+  if parsed.json {
+    harness.stdio.println(json_stringify(report_json(rows, control_arm, metric)))
+    return 0
+  }
+  harness.stdio.println(render_report(rows, control_arm, metric))
+  return 0
+}
