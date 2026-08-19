@@ -9,6 +9,347 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.104
+
+### Removed
+
+- Eighteen environment variable names that nothing read are gone from the
+  registry. The registry's drift tests only ran one way: they proved that every
+  `HARN_*` name a source reads is registered, and nothing proved the reverse, so
+  a name whose reader was deleted stayed registered forever and kept reading as a
+  supported knob that silently did nothing. Two of the entries were never
+  variables at all, only `HARN_*`-shaped sample strings inside test data that the
+  forward scan mistook for readers. A reverse gate now requires every registered
+  name to have a reader somewhere outside build output and release notes, and its
+  allowlist is empty.
+
+### Fixed
+
+- Closed the silent-loss class in tool-call parsing: an emission containing a
+  tool-call-shaped span now either parses to the full call — the right tool AND
+  every argument the model wrote — or is rejected with a diagnostic that reaches
+  model feedback. Six defects shared that shape. Arguments written beside `name`
+  instead of under `args` were read as an empty argument dict, so a complete
+  `edit` dispatched with no path and no content on the default fenced route. A
+  `<tool_call>` opener followed by a label token was discarded outright, and on
+  the text route its body was reclassified as prose with no call, no error, and
+  no drop record. A truncated body reached the model as narration. A bare call
+  expression on a fenced route vanished. And a turn whose call was dropped as a
+  protocol violation received no corrective guidance off the tagged route, having
+  had the remediation constructed and then filtered out one step short of the
+  prompt. Name and argument resolution now has one owner shared by every
+  JSON-bearing grammar, `<tool_call>` label tolerance has one owner shared by both
+  parsers, and violations reporting a lost call are separated at the type from
+  those reporting prose form, which is what made the feedback filter safe to open.
+- Tool-call parsing now treats the message, not the span, as the unit it must not
+  lose. A chat-template envelope used to claim the whole turn — everything before
+  its opener became prose and, with no closing tag, everything after it became its
+  body — so one malformed envelope destroyed the well-formed calls sharing the
+  turn with it, in either order. The text an envelope did not consume is now
+  parsed by the lane that owns the turn and merged back in document order.
+  Alongside that, the opener spellings models substitute for the canonical one
+  (`<tool>`, `<tool_use>`, `[[tool]]`) are recognized wherever they carry a JSON
+  call body, and they are recognized identically on every route pin rather than
+  falling to a generic scan that recovered the first object of a multi-call body
+  and dropped the rest without a word. Recognition costs nothing in precision:
+  the body still has to be a JSON call object to match at all.
+- Pinned the fenced-JSON grammar's handling of arguments written beside the tool
+  name rather than inside an `args` container. `{"name": "edit", "path": "a.py",
+  "action": "create", "content": "x = 1"}` used to parse as a call to `edit` with
+  no arguments at all — the path, the action and the file body discarded at
+  decode, with the parse reporting success and zero protocol violations, so the
+  call failed downstream on required-parameter validation and read as the model
+  having omitted parameters it had in fact sent.
+
+  The behavior fix ships with the parse class-kill; these are the fenced-grammar
+  regressions that hold it. The conformance corpus had a hole exactly where the
+  grammars disagreed: every sibling-key probe sat inside a chat-template
+  envelope, which already recovered them, and no ```tool fence probe carried
+  sibling keys at all — so the two readings were never compared on the one shape
+  where they differed. Four cases close it: the recovery itself, a
+  payload-bearing `edit`, a declared container still winning over sibling keys,
+  and an explicitly empty container still counting as a declaration rather than
+  an absence. The first reuses the envelope precedent's exact body, so the two
+  grammars' expectations can be read side by side.
+- An abandoned `<tool_call>` block no longer swallows the rest of the response.
+  A block that never closes now stops at the next call-tag boundary instead of
+  consuming every remaining byte, so a well-formed call written after a bad one
+  is parsed and dispatched normally.
+
+  Two shapes were losing work. When a block was cut off mid-string, the scan ran
+  to end of input and the resulting oversized body was handed to the recovery
+  ladder, which could reconstruct the abandoned call with the model's own later
+  prose captured inside a string argument — a corrupted call dispatched with no
+  error and no violation raised. When a block was merely missing its `</tool_call>`
+  tag, the scan borrowed the *next* call's close, produced one span holding two
+  calls, and rejected the pair, losing both.
+
+  Both now behave: the cut-off call is reported as truncated and the later call
+  survives, and the unterminated-but-complete call is recovered along with its
+  successor. Recovering a call from a block that never closed always raises a
+  protocol violation, so a forgiven accept is never silent and consumers that
+  watch parse outcomes for dialect drift keep seeing it.
+- A route pinned to the fenced JSON grammar no longer discards a call the model
+  wrote in the tagged grammar. When the fenced parser reads no call at all, the
+  tagged parser now gets a turn, and anything it recovers is dispatched with a
+  `wrong_tool_format` violation so the model is still told which grammar the
+  route expects.
+
+  Which grammar a route teaches is a steering decision, but which grammar a model
+  actually emitted is a fact about the bytes, and the two disagree often enough
+  that pinning the parser to the taught grammar was losing real calls. Replayed
+  against archived model output, this moves 17 more spans from "complained about"
+  to "recovered" and brings the generated-mutation coverage of the JSON pin up to
+  match the tagged pin exactly, 57 of 71 shapes on both.
+
+  The recovery runs in one direction only. Tagged framing declares itself a call
+  in the framing, so reading it under a JSON pin cannot mistake documentation for
+  an action. A fence carries no such guarantee: its info string is the only thing
+  separating a call from an example about a call, so a ```json block explaining
+  the shape stays prose under every pin.
+- A tool call written inside an alternate chat-template envelope is no longer
+  dropped in silence. `[[tool]]look({ ... })[[/tool]]` and its siblings named a
+  tool, carried complete arguments, and closed properly, but the envelope reader
+  accepted only JSON bodies, so a call expression inside a known opener was
+  declined all the way back to the stray scan, which said nothing at all.
+
+  The envelope reader owns where a span starts and ends. It does not own what
+  grammar the body is written in, and it now stops behaving as though it did: a
+  body it cannot read as JSON goes to the same call-body ladder every other
+  recovery path uses. `<tool_call>` is deliberately excluded, because the tagged
+  lane owns that spelling and reads its heredoc bodies better than a single-call
+  ladder can.
+
+  This was the last span in the replay corpus that the parser neither read nor
+  complained about.
+- A message carrying more than one JSON tool-call object no longer keeps only the
+  first. Two `{"name": ..., "arguments": ...}` objects — bare, in one ```tool
+  fence, or in a fence each — now yield both calls on a tagged route; before, the
+  second and every later one was dropped with no call, no error and no violation,
+  so a model that batched two reads got one of them and the turn read as success.
+
+  The native-JSON scan returned at the first payload it accepted instead of
+  resuming past the span it had consumed, and the caller then blanked the prose,
+  so the lost payload was not even retained as narration. Each payload now owns
+  exactly the bytes it occupies, plus the fence that wraps it and nothing else,
+  and whatever sat between the payloads comes back as the turn's prose rather
+  than being deleted along with the call.
+
+  Diagnostics raised beside a recovered call are no longer discarded either: a
+  unit that produced one call and one unknown name reported only the call.
+
+  The generated-composition property harness over the parse seam now sweeps the
+  full 600-seed range that found this, rather than stopping below it.
+- A message that mixes tool-call opener spellings no longer loses whichever call
+  came second. A `[[tool]]` block followed by a `<tool_call>` block, or the same
+  pair in the other order, now yields both calls; before, one of them was dropped
+  with no call, no error and no violation.
+
+  The tagged lane decided whether to consult the chat-template envelope by asking
+  whether the message contained `<tool_call>` anywhere at all, so a single tagged
+  block far down a turn switched envelope reading off for the whole message,
+  including an alternate opener that had come before it. Each span now owns only
+  itself: the lane splits the message at the first alternate opener and reads each
+  half with whoever owns it.
+
+  Also adds a generated-composition property harness over the parse seam,
+  asserting on every arrangement of the fragments models really emit that a call
+  is never lost in silence, never invented, and never returned with an argument
+  value that is not the bytes the model wrote. It found both halves of the defect
+  above.
+- A completion judge no longer suppresses the corrective that shows the model
+  the tool call it forgot to emit. On a toolless prose turn the loop now asks the
+  content-specific corrective first, and only treats the turn as a finished answer
+  when that corrective declines it.
+
+  The loop documents this precedence for itself: the content-specific nudge
+  (fence / missing-call recovery) takes precedence, and the escalating streak
+  nudge is the fallback for toolless churn. Installing a `done_judge` made every
+  toolless prose turn a completion candidate before the corrective was ever asked,
+  so the corrective could not run and the fallback always won. For any embedder
+  that installs a judge — which is the ordinary configuration for an agent loop —
+  that meant the loop permanently ran its own degraded path: the model was told in
+  prose to emit a call, repeatedly, and never shown one, while the seam that
+  renders the exact call it should write sat behind an unreachable branch.
+
+  The corrective is classifier-backed, so a turn whose classifier does not affirm
+  an intended-but-unemitted call completes exactly as before. On the completion
+  path the fence heuristic is deliberately not consulted: it cannot tell a botched
+  call from an illustrative code block in a genuine final answer, and a real
+  fenced attempt is answered by the classifier with a concrete exemplar anyway.
+
+  Claiming a turn for repair is now a typed fact rather than an ordering. The
+  post-turn result carries `turn_claimed_for_repair`, and the next turn's payload
+  carries `prior_turn_claimed_for_repair`, so a host churn or termination policy
+  looking at the same toolless turn shape can see that the loop has asked for one
+  specific repair and that this turn is it, instead of cutting the loop on the
+  turn the repair was landing.
+
+  Judge presence now has one normalized reading, `agent_has_done_judge`, which
+  every consumer shares. `done_judge: false` means no judge everywhere, rather than
+  in some places and not others.
+- The orchestrator no longer advertises "per-tenant registries" for
+  `--role multi-tenant`. Every tenant has always shared one trigger/connector
+  registry, because the VM builder constructs one VM per process regardless of
+  role; the startup banner asserted an isolation boundary that no code path built.
+  The banner now describes the shared registry, and multi-tenant boots with an
+  explicit warning naming the gap so a deployer sizing a blast radius sees which
+  half of the boundary they got. The same disclosure is appended to
+  `orchestrator.lifecycle` as an `isolation_gap` event, so it survives a boot
+  banner nobody was watching. Tenant isolation of ingress, event-log topics, and
+  secret namespaces is unchanged.
+- A turn that dispatched no tools but emitted prose is now arbitrated in one
+  place, against a written precedence contract, instead of being decided by
+  statement order in `agent_compute_post_turn`. Four defects came from that seam;
+  the fourth is fixed here. An embedder's `post_turn_callback` returning a
+  non-stopping verdict used to return before the content-specific repair
+  corrective was ever consulted, so on any loop whose callback answers on toolless
+  turns the corrective was structurally unreachable — measured at 6 short-circuits
+  on 6 toolless turns with the corrective branch reached zero times. The declared
+  order is: a verdict that stops the loop wins, then the repair corrective, then a
+  non-stopping advisory, then completion adjudication.
+
+  Behavior change for embedders whose callback answers on stalled toolless turns:
+  when the corrective claims the turn, the advisory **message** is held for that
+  turn, because two owners issuing different directives in one turn is the
+  contradiction that stalls a loop. Option changes (`next_options`, `llm_options`)
+  still apply — those are parameters, not directives. The claim reaches the
+  embedder as `prior_turn_claimed_for_repair` on the next turn's payload. The
+  corrective is enabled by default, so this is not limited to callers who opted
+  in.
+
+  The arbitration also states a precondition the old branches only held by
+  accident of their position: the corrective is consulted only when the loop has
+  another turn to give (`loop_until_done`, daemon, or an installed completion
+  judge). A single-shot loop now still completes cleanly on a toolless turn
+  instead of being claimed for a repair it could never deliver.
+- The missing-tool-call corrective now shows the tool's own required argument
+  names instead of an empty argument object. Previously it rendered
+  `{"args":{},"name":"look"}` and asked the model to "fill in the arguments" it
+  had never been shown — a complete, copy-pasteable call that was also wrong, and
+  that communicated nothing about what the call required. The exemplar now reads
+  `edit({ path: "<string>" })` with type placeholders rather than plausible
+  literals, so a model copying it verbatim produces an obviously unfilled call
+  rather than a confidently wrong one.
+
+  The argument names come from the tool entry's declared parameters, via
+  `tool_required_argument_exemplar` beside the existing parameter readers that
+  already own shape tolerance for JSON-schema `properties`/`required` and the
+  flat `{name: schema}` form. The corrective does not hand-write argument shapes,
+  so there is one owner of that policy rather than two.
+
+  Measured motivation: on an embedder's local-model lane the corrective converted
+  0 of 70 claims into a tool call on the following turn, with nine of thirteen
+  runs producing no tool call at all after it first fired. This change is the
+  first and cheapest suspect for that; it is not yet shown to move the conversion
+  rate.
+- A toolless turn whose text ends in a dangling closing call marker is now
+  answered as an attempted call with a parse diagnostic, instead of being told it
+  never intended a call at all. Previously a message ending `</tool>` produced no
+  parsed call, so the missing-tool-call corrective fired and replied "you appeared
+  to intend a call to `look` but did not call it" — a false description of the
+  turn, and one that named nothing the model could correct. The new feedback names
+  the marker that was seen and renders the route's actual call form from the
+  format-aware owner, so a model that drifted into a different dialect's spelling
+  is told which spelling this route reads.
+
+  The diagnosis runs ahead of the intent classifier, because a dangling marker
+  already answers the question "did this turn intend a call" from the text alone,
+  and answering it there also avoids spending a classifier call on it.
+
+  Two properties are pinned in conformance, and the second is the one that
+  matters for loops that are already finishing correctly: the check fires on the
+  malformed emission, and it stays silent on ordinary prose that merely mentions
+  the marker mid-sentence. A syntax heuristic that re-opens an honest finished
+  turn would be worse than no check at all.
+
+  Malformed markup is one of two sub-shapes seen in the stall transcripts behind
+  this; the other is an unemitted multi-call batch, which this does not address.
+- An embedding backend no longer reports that it ranks by meaning just because
+  it did not say otherwise. `Embedder::is_semantic` defaulted to `true`, so the
+  claim was inherited rather than earned, and the one non-lexical backend in the
+  tree was inheriting it: static token pooling reported itself as semantic
+  without ever being asked to separate a related document from a lexically
+  similar decoy.
+
+  The claim decides real behavior, which is why an inherited one was costly. It
+  gates whether semantic scoring runs, whether a `Semantic` or `Hybrid` query
+  keeps its requested mode or is downgraded to full-text search, and whether
+  `semantic_floor` and its fallback reason report that downgrade. An
+  over-claiming backend therefore suppressed the very signal that would have
+  told a caller it was returning surface matches for a semantic query.
+
+  The default is now `false`, and `search::conformance` owns the corpus and the
+  bar the claim is measured against. The audit is public, so a backend injected
+  through `StoreHooks` can be held to the same bar by its own author instead of
+  each implementor inventing one. It ratchets in both directions: a backend that
+  claims meaning must clear the bar, and a backend that disclaims it must fail
+  the bar, so an upgrade cannot land quietly while callers are still told they
+  are on the lexical floor.
+- A package generation that does not realize its lock is no longer published, and
+  a generation whose paths are still in use is no longer collected.
+
+  Materialization copies each package out of the shared git/archive cache into a
+  staging generation. The cache entry is content-hash verified, but that check
+  completes and releases the cache lock before the copy begins, and nothing
+  re-checks the result: the copy is stamped with the *expected* hash rather than
+  the one its contents produce. Publishing then fsyncs and renames whatever it was
+  handed, and readers only re-verify the generation's `harn.lock` digest, never
+  the `packages/` tree. A package that lost a file during that unlocked copy was
+  therefore served as valid, and surfaced far from its cause — some later command
+  importing a module that is not there and failing with `No such file or
+  directory` naming a path, in a command unrelated to the one that built the tree.
+
+  Publishing now validates the staged tree against the lock before the rename,
+  using the same per-entry predicate that already gates reuse of a published
+  generation. A generation either realizes its lock or never becomes visible, and
+  the error names the package and what is wrong with it. Note this is the narrow
+  window between the cache verification and the copy; a bad *cache* entry was
+  already rejected and still is.
+
+  Separately, `RuntimeExtensions` handed out bare paths beneath a generation —
+  `provider_connectors[].manifest_dir` above all — while dropping the
+  `PackageSnapshot` whose lease is the only thing preventing that generation from
+  being collected. Connector contracts are loaded lazily, so those paths were read
+  after the lease was gone and a concurrent publisher's collection pass was free
+  to delete the tree underneath them. This compounded: one tree that does not
+  match its lock makes every subsequent process publish a fresh generation and
+  collect the previous one, while lease-less readers are still resolving paths
+  into it. `RuntimeExtensions` now keeps its snapshot, so the lease lives exactly
+  as long as the paths that need it.
+
+  Embedders running several Harn processes concurrently against one project root
+  — a CI job fanning out, for instance — are the ones that could hit this; a cold
+  package cache is what opens the window.
+- A turn that ended on a classified failure no longer reports itself as `unknown`
+  just because the status it sealed was one the terminal table had not seen.
+
+  The classifier's catch-all arm returned `unknown` unconditionally, discarding
+  the `has_error` and `terminal_class` arguments the finalize boundary had just
+  computed and handed it. A pipeline is free to seal a `final_status` outside the
+  known set, and when it did, a failure the harness had already classified as
+  `provider_misconfigured` reached the embedder as
+  `{kind: "unknown", reason: "exception"}` — while the same turn's terminal
+  transcript event carried the real class. An embedder keying its recovery wording
+  off the typed outcome had nothing to offer but "stopped for an unknown reason",
+  for a cause the harness knew throughout.
+
+  An unrecognized status that carries an error or a class now goes through the
+  same provider-versus-harness splitter a recognized one does. `unknown` keeps its
+  documented meaning and its reachability: a terminal condition with no error and
+  no matching rule, where the raw reason really is the only fact there is.
+
+### Security
+
+- Added a `Secret scan` CI workflow that runs gitleaks over the working tree on
+  every pull request, every push to `main`, and weekly. It is report-only for
+  now: `.gitleaks.toml` extends the default ruleset and allowlists nothing, and
+  the job carries `continue-on-error`, so findings are reported without blocking
+  a merge. The first scan returned 53 findings across 25 files, dominated by the
+  redaction and secret-scanning test corpora — files that hold secret-shaped
+  strings by design. Those are unaudited, so the gate stays non-blocking until
+  an audit lands and an allowlist is written from it.
+
 ## v0.10.103
 
 ### Fixed
