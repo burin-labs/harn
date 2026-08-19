@@ -320,7 +320,25 @@ pub fn classify_agent_terminal_with_class(
                 AgentTerminalKind::PolicyStop
             }
         }
-        _ => AgentTerminalKind::Unknown,
+        // An unrecognized status is not the same as an unattributed outcome. A
+        // pipeline is free to seal a status this table has never heard of, and
+        // when that turn also recorded a terminal error the finalize host has
+        // already classified it into a fine-grained `terminal_class`. Reporting
+        // `Unknown` there throws that classification away and leaves an
+        // embedder unable to tell a missing provider credential from a
+        // tool-policy refusal — so its only honest presentation is "stopped for
+        // an unknown reason", for a cause the harness knew all along.
+        //
+        // `Unknown` stays reserved for what it means: a terminal condition with
+        // no error and no rule that matched, where the raw `reason` really is
+        // the only fact there is.
+        _ => {
+            if has_error || terminal_class.is_some() {
+                classify_error(terminal_class)
+            } else {
+                AgentTerminalKind::Unknown
+            }
+        }
     }
 }
 
@@ -634,6 +652,63 @@ mod tests {
         }))
         .expect("a payload without the field still decodes");
         assert_eq!(legacy.terminal_class, None);
+    }
+
+    #[test]
+    fn an_unrecognized_status_still_attributes_a_classified_error() {
+        // The reported symptom: a turn that died on a missing provider
+        // credential reached its embedder as kind `unknown`, reason
+        // `exception`, because the status the pipeline sealed was not in the
+        // table above — even though the finalize host had already classified
+        // the failure as `provider_misconfigured`.
+        assert_eq!(
+            classify_agent_terminal(
+                "exception",
+                "exception",
+                true,
+                Some("provider_misconfigured"),
+            ),
+            AgentTerminalKind::ProviderError,
+        );
+        assert_eq!(
+            classify_agent_terminal("exception", "exception", true, Some("generic_throw")),
+            AgentTerminalKind::RuntimeError,
+        );
+        // An error with no class at all is still owned by the harness rather
+        // than left unattributed.
+        assert_eq!(
+            classify_agent_terminal("exception", "exception", true, None),
+            AgentTerminalKind::RuntimeError,
+        );
+    }
+
+    #[test]
+    fn unknown_stays_reserved_for_terminal_conditions_with_nothing_to_attribute() {
+        for status in ["some_future_status", "exception", "weird"] {
+            assert_eq!(
+                classify_agent_terminal(status, "whatever", false, None),
+                AgentTerminalKind::Unknown,
+                "status {status} with no error and no class is genuinely unknown"
+            );
+        }
+    }
+
+    #[test]
+    fn every_terminal_class_attributes_an_unrecognized_status_to_a_real_owner() {
+        for class in AgentTerminalClass::ALL {
+            let kind =
+                classify_agent_terminal_with_class("exception", "exception", true, Some(class));
+            assert_ne!(
+                kind,
+                AgentTerminalKind::Unknown,
+                "{class:?} carries enough to attribute an owner"
+            );
+            assert_eq!(
+                kind == AgentTerminalKind::ProviderError,
+                class.is_provider_error(),
+                "{class:?} must split provider from harness the same way a known status does"
+            );
+        }
     }
 
     #[test]
