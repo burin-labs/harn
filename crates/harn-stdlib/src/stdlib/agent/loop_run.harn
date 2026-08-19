@@ -1136,8 +1136,10 @@ pub fn __agent_loop_run(harness: Harness, message, session, initial_opts) {
             stop_reason = skipped_exhaustion.kind
             break
           }
-          if agent_budget_post_call_blocked(totals_skipped, turn_opts) {
+          const skipped_budget_stop = agent_budget_post_call_stop_reason(totals_skipped, turn_opts)
+          if skipped_budget_stop != "" {
             final_status = "budget_exhausted"
+            stop_reason = skipped_budget_stop
             break
           }
           consecutive_text_only = __next_text_only_count(0, consecutive_text_only)
@@ -1251,8 +1253,10 @@ pub fn __agent_loop_run(harness: Harness, message, session, initial_opts) {
           stop_reason = exhaustion.kind
           break
         }
-        if agent_budget_post_call_blocked(totals, turn_opts) {
+        const budget_stop = agent_budget_post_call_stop_reason(totals, turn_opts)
+        if budget_stop != "" {
           final_status = "budget_exhausted"
+          stop_reason = budget_stop
           break
         }
         // Command hold. A no-tool-call segment while an `awaited` handle is

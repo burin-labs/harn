@@ -66,8 +66,8 @@ pub use sinks::{
     MultiSink, PersistedAgentEvent,
 };
 pub use terminal::{
-    classify_agent_terminal, classify_agent_terminal_with_class, AgentTerminalKind,
-    AgentTerminalOutcome,
+    classify_agent_terminal, classify_agent_terminal_with_class, terminal_outcome_for_finalize,
+    AgentTerminalKind, AgentTerminalOutcome,
 };
 pub use tool::{
     DenialGate, SideEffectCeilingDetails, SideEffectCeilingRemedy, ToolCallErrorCategory,

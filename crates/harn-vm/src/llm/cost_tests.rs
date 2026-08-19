@@ -180,6 +180,38 @@ fn calculate_cost_for_provider_falls_back_to_provider_economics() {
 }
 
 #[test]
+fn self_hosted_routes_are_priced_at_zero_and_paid_routes_stay_unpriced() {
+    let _guard = crate::llm::env_guard();
+    crate::llm_config::clear_user_overrides();
+
+    // A self-hosted runtime bills nothing, and saying so is what keeps its
+    // calls out of the unpriced bucket that consumes a USD ceiling whole.
+    for provider in ["llamacpp", "ollama", "mlx", "vllm"] {
+        let cost = pricing_aware_call_cost(provider, "any-locally-served-model", 1_000, 1_000);
+        assert_eq!(
+            cost,
+            Some(0.0),
+            "{provider} declares local_runtime, so its rate is known-zero, not unknown"
+        );
+    }
+
+    // Negative pin: the fix must not launder unknown pricing into a free
+    // ride for a paid provider that simply has no catalog row.
+    assert_eq!(
+        pricing_aware_call_cost("some-unlisted-paid-provider", "whatever", 1_000, 1_000),
+        None,
+        "a provider with neither catalog pricing nor a local runtime stays unpriced"
+    );
+
+    // The predicate both readers resolve "bills nothing" through.
+    assert!(crate::llm_config::provider_is_self_hosted("llamacpp"));
+    assert!(!crate::llm_config::provider_is_self_hosted("openai"));
+    assert!(!crate::llm_config::provider_is_self_hosted(
+        "some-unlisted-paid-provider"
+    ));
+}
+
+#[test]
 fn calculate_cost_for_provider_with_cache_applies_cache_read_discount() {
     let _guard = crate::llm::env_guard();
     crate::llm_config::clear_user_overrides();

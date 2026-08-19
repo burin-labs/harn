@@ -18,32 +18,48 @@ pub fn agent_budget_pre_call_blocked(agent: HarnessAgent, session, opts) {
 }
 
 /**
- * agent_budget_post_call_blocked.
+ * agent_budget_post_call_stop_reason.
+ *
+ * Which post-call ceiling stopped the loop, or "" when none did. Callers that
+ * end a run on this answer must record the reason they were given: a stop
+ * attributed to the wrong ceiling reads as an ordinary iteration cap and hides
+ * the spend guard that actually fired.
  *
  * @effects: []
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_budget_post_call_blocked(totals, opts) {
+pub fn agent_budget_post_call_stop_reason(totals, opts) -> string {
   const envelope = __budget_envelope(opts)
   if envelope == nil && opts?.token_budget == nil {
-    return false
+    return ""
   }
   if opts?.token_budget != nil && totals?.tokens_used != nil {
     if totals.tokens_used >= opts.token_budget {
-      return true
+      return "token_budget"
     }
   }
   if envelope?.total_budget_usd != nil && totals?.cost_usd != nil {
     if totals.cost_usd >= envelope.total_budget_usd {
-      return true
+      return "total_cost"
     }
   }
   // A configured USD ceiling cannot be proven safe once any completed call is
   // unpriced. Stop at the same post-call boundary instead of treating unknown
   // spend as zero and allowing the loop to continue unbounded.
   if envelope?.total_budget_usd != nil && (totals?.unpriced_calls ?? 0) > 0 {
-    return true
+    return "unpriced_call"
   }
-  return false
+  return ""
+}
+
+/**
+ * agent_budget_post_call_blocked.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_budget_post_call_blocked(totals, opts) -> bool {
+  return agent_budget_post_call_stop_reason(totals, opts) != ""
 }

@@ -829,18 +829,11 @@ async fn host_agent_session_finalize(
     );
     let terminal_class = agent_terminal_class(&final_status, &stop_reason, terminal_error.as_ref());
     // Classify once at the loop boundary; the bridge carries this exact value to ACP.
-    let terminal_outcome = crate::agent_events::AgentTerminalOutcome::new(
-        crate::agent_events::classify_agent_terminal_with_class(
-            &canonical_status,
-            &stop_reason,
-            terminal_error.is_some(),
-            terminal_class,
-        ),
-        if stop_reason.is_empty() {
-            canonical_status.clone()
-        } else {
-            stop_reason.clone()
-        },
+    let terminal_outcome = crate::agent_events::terminal_outcome_for_finalize(
+        &canonical_status,
+        &stop_reason,
+        terminal_class,
+        terminal_error.is_some(),
     );
     if let Some(bridge) = super::agent_runtime::current_host_bridge() {
         bridge.set_prompt_outcome(acp_stop_reason, &terminal_outcome);

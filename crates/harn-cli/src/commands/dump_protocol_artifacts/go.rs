@@ -561,6 +561,7 @@ type HarnAgentTerminalOutcome struct {
 	Kind AgentTerminalKind `json:"kind"`
 	Reason string `json:"reason"`
 	Owner AgentTerminalOwner `json:"owner"`
+	TerminalClass AgentTerminalClass `json:"terminalClass,omitempty"`
 }
 
 // HarnACPPromptResultHarnMetadata contains Harn prompt-result extensions.

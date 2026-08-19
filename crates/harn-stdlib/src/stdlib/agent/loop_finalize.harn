@@ -25,7 +25,11 @@ pub fn __agent_loop_finalize_session(harness: Harness, message, session, state) 
     )
       + {
       exhausted: true,
-      kind: stop_reason ?? "max_iterations",
+      // Naming a default ceiling here would invent a cause: a break that left
+      // `stop_reason` unset reached this seam without one, and guessing
+      // "max_iterations" reads as a spent iteration budget even at iteration 1
+      // of 8. Say the reason is missing and let the reader go look.
+      kind: stop_reason ?? "unattributed",
       iteration: state.iteration,
       max_iterations: state.current_max,
     }
