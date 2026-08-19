@@ -8,10 +8,16 @@ Use the provider's native tool channel for the retry. Pass code-bearing argument
 {{ else }}
 {{ if is_json_format }}
 ```tool
-{ "name": "edit", "args": { "action": "create", "path": "main.go", "content": "package main\n\n// backticks, quotes, and backslashes all survive as JSON string bytes:\nconst usage = `go run main.go`\n" } }
+{ "name": "edit", "args": { "action": "create", "path": "main.go", "content": "<<BODY" } }
+<<BODY
+package main
+
+// backticks, quotes, and backslashes are all literal bytes here:
+const usage = `go run main.go`
+BODY
 ```
 
-The `content` value is an ordinary JSON string: the embedded `` ` `` backtick block and any `<<EOF` / `}` / `</tool>` are literal bytes — escape newlines as \n, quotes as \", backslashes as \\. Emit one ```tool block per call; never use a heredoc, a Markdown fence around the call, or a triple-quoted string.
+Do not re-send the same hand-escaped string. Put the file body in a verbatim block instead: set the value to `"<<BODY"`, write the raw text on the lines after the JSON object inside the same ```tool fence, and close it with a line that is exactly `BODY`. Nothing in that block is escaped, so a missed `\"`, a stray backslash, or an unbalanced brace cannot lose the call. Use `"<<BODY:N"` with N body lines only when the body itself contains a line that is exactly `BODY`. Short scalar values stay ordinary JSON strings. Emit one ```tool block per call.
 {{ else }}
 edit({
     action: "create",

@@ -16,7 +16,7 @@ import { __tool_parse_call_from_body, __tool_parse_markup } from "std/llm/tool_p
 import { tool_envelope_alternate_opener_at, tool_parse_envelope } from "std/llm/tool_parse_envelope"
 import {
   bind_verbatim,
-  has_counted_verbatim,
+  has_verbatim_declaration,
   json_call,
   json_chunks,
 } from "std/llm/tool_parse_json_support"
@@ -1000,7 +1000,7 @@ fn __tool_parse_json(text: string, tools = nil, recover_heredoc = true) -> dict 
     }
     const trailing = trim(source.slice(stream?.end ?? 0, len(source)))
     if len(body_calls) > 0
-      && (has_counted_verbatim(body_calls)
+      && (has_verbatim_declaration(body_calls)
       || starts_with(trailing, "<<")) {
       const bound = bind_verbatim(body_calls, trailing)
       if bound?.ok ?? false {

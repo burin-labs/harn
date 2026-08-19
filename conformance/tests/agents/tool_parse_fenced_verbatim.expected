@@ -41,9 +41,39 @@
   prose=""
   answer=null
   done=null
-# literal heredoc opener value without a body
+# bare opener value with no body fails loud
+  calls=0 errors=1 violations=0 stray=0
+  err "The ```tool block is not valid JSON: verbatim declaration `<<EOF` has 0 matching bodies, expected 1. For a multi-line or code-bearing field, do not hand-escape it: set the value to \"<<BODY\" and put the raw text after the JSON object inside the same ```tool fence, ending with a line that is exactly BODY. Short scalar values stay ordinary JSON strings (escape newlines as \\n, quotes as \\\", backslashes as \\\\); backticks need no escaping."
+  prose=""
+  answer=null
+  done=null
+# uncounted body round trips
   calls=1 errors=0 violations=0 stray=0
-  call write_file {"content":"<<EOF","path":"a"}
+  call write_file {"content":"package main\n\nfunc main() {}","path":"a.go"}
+  prose=""
+  answer=null
+  done=null
+# uncounted body carrying fences and openers
+  calls=1 errors=0 violations=0 stray=0
+  call write_file {"content":"```sh\necho hi\n```\n<<EOF\n}\n</tool_calls>","path":"README.md"}
+  prose=""
+  answer=null
+  done=null
+# empty uncounted body
+  calls=1 errors=0 violations=0 stray=0
+  call write_file {"content":"","path":"empty.txt"}
+  prose=""
+  answer=null
+  done=null
+# uncounted and counted bodies in one call
+  calls=1 errors=0 violations=0 stray=0
+  call edit_file {"new_string":"after\nNEW\ntail\n","old_string":"before"}
+  prose=""
+  answer=null
+  done=null
+# uncounted body that never closes fails loud
+  calls=0 errors=1 violations=0 stray=0
+  err "The ```tool block is not valid JSON: verbatim body `<<BODY` never closed; end it with a line that is exactly `BODY`, or declare `<<BODY:N` with N body lines when the body itself contains that line. For a multi-line or code-bearing field, do not hand-escape it: set the value to \"<<BODY\" and put the raw text after the JSON object inside the same ```tool fence, ending with a line that is exactly BODY. Short scalar values stay ordinary JSON strings (escape newlines as \\n, quotes as \\\", backslashes as \\\\); backticks need no escaping."
   prose=""
   answer=null
   done=null
@@ -55,49 +85,49 @@
   done=null
 # wrong declared count fails loud
   calls=0 errors=1 violations=0 stray=0
-  err "The ```tool block is not valid JSON: verbatim heredoc `<<C:5` did not close on the line its `:N` count declared; recount the body lines and re-emit the whole call. Pass multi-line or code-bearing fields as ordinary JSON string values (escape newlines as \\n, quotes as \\\", backslashes as \\\\); backticks need no escaping."
+  err "The ```tool block is not valid JSON: verbatim body `<<C:5` did not close on the line its `:N` count declared; recount the body lines, or drop the `:N` and close with a line that is exactly `C`. For a multi-line or code-bearing field, do not hand-escape it: set the value to \"<<BODY\" and put the raw text after the JSON object inside the same ```tool fence, ending with a line that is exactly BODY. Short scalar values stay ordinary JSON strings (escape newlines as \\n, quotes as \\\", backslashes as \\\\); backticks need no escaping."
   prose=""
   answer=null
   done=null
 # count overflow never downgrades
   calls=0 errors=1 violations=0 stray=0
-  err "The ```tool block is not valid JSON: verbatim heredoc `<<C:184467440737095516160` did not close on the line its `:N` count declared; recount the body lines and re-emit the whole call. Pass multi-line or code-bearing fields as ordinary JSON string values (escape newlines as \\n, quotes as \\\", backslashes as \\\\); backticks need no escaping."
+  err "The ```tool block is not valid JSON: verbatim declaration `<<C:184467440737095516160` states a line count that is not a usable number; re-emit the call with `<<C` and close the body with a line that is exactly `C`. For a multi-line or code-bearing field, do not hand-escape it: set the value to \"<<BODY\" and put the raw text after the JSON object inside the same ```tool fence, ending with a line that is exactly BODY. Short scalar values stay ordinary JSON strings (escape newlines as \\n, quotes as \\\", backslashes as \\\\); backticks need no escaping."
   prose=""
   answer=null
   done=null
 # counted close with a trailing suffix
   calls=0 errors=1 violations=0 stray=0
-  err "The ```tool block is not valid JSON: verbatim heredoc `<<C:1` did not close on the line its `:N` count declared; recount the body lines and re-emit the whole call. Pass multi-line or code-bearing fields as ordinary JSON string values (escape newlines as \\n, quotes as \\\", backslashes as \\\\); backticks need no escaping."
+  err "The ```tool block is not valid JSON: verbatim body `<<C:1` did not close on the line its `:N` count declared; recount the body lines, or drop the `:N` and close with a line that is exactly `C`. For a multi-line or code-bearing field, do not hand-escape it: set the value to \"<<BODY\" and put the raw text after the JSON object inside the same ```tool fence, ending with a line that is exactly BODY. Short scalar values stay ordinary JSON strings (escape newlines as \\n, quotes as \\\", backslashes as \\\\); backticks need no escaping."
   prose=""
   answer=null
   done=null
 # counted declaration with no body
   calls=0 errors=1 violations=0 stray=0
-  err "The ```tool block is not valid JSON: counted verbatim declaration `<<C:1` has 0 matching bodies, expected 1. Pass multi-line or code-bearing fields as ordinary JSON string values (escape newlines as \\n, quotes as \\\", backslashes as \\\\); backticks need no escaping."
+  err "The ```tool block is not valid JSON: verbatim declaration `<<C:1` has 0 matching bodies, expected 1. For a multi-line or code-bearing field, do not hand-escape it: set the value to \"<<BODY\" and put the raw text after the JSON object inside the same ```tool fence, ending with a line that is exactly BODY. Short scalar values stay ordinary JSON strings (escape newlines as \\n, quotes as \\\", backslashes as \\\\); backticks need no escaping."
   prose=""
   answer=null
   done=null
 # counted body with a mismatched tag
   calls=0 errors=1 violations=0 stray=0
-  err "The ```tool block is not valid JSON: counted verbatim declaration `<<C:1` has 0 matching bodies, expected 1. Pass multi-line or code-bearing fields as ordinary JSON string values (escape newlines as \\n, quotes as \\\", backslashes as \\\\); backticks need no escaping."
+  err "The ```tool block is not valid JSON: verbatim declaration `<<C:1` has 0 matching bodies, expected 1. For a multi-line or code-bearing field, do not hand-escape it: set the value to \"<<BODY\" and put the raw text after the JSON object inside the same ```tool fence, ending with a line that is exactly BODY. Short scalar values stay ordinary JSON strings (escape newlines as \\n, quotes as \\\", backslashes as \\\\); backticks need no escaping."
   prose=""
   answer=null
   done=null
 # one of two counted bodies missing
   calls=0 errors=1 violations=0 stray=0
-  err "The ```tool block is not valid JSON: counted verbatim declaration `<<NEW:1` has 0 matching bodies, expected 1. Pass multi-line or code-bearing fields as ordinary JSON string values (escape newlines as \\n, quotes as \\\", backslashes as \\\\); backticks need no escaping."
+  err "The ```tool block is not valid JSON: verbatim declaration `<<NEW:1` has 0 matching bodies, expected 1. For a multi-line or code-bearing field, do not hand-escape it: set the value to \"<<BODY\" and put the raw text after the JSON object inside the same ```tool fence, ending with a line that is exactly BODY. Short scalar values stay ordinary JSON strings (escape newlines as \\n, quotes as \\\", backslashes as \\\\); backticks need no escaping."
   prose=""
   answer=null
   done=null
 # duplicate declarations need distinct bodies
   calls=0 errors=1 violations=0 stray=0
-  err "The ```tool block is not valid JSON: counted verbatim declaration `<<BODY:1` has 1 matching bodies, expected 2. Pass multi-line or code-bearing fields as ordinary JSON string values (escape newlines as \\n, quotes as \\\", backslashes as \\\\); backticks need no escaping."
+  err "The ```tool block is not valid JSON: verbatim declaration `<<BODY:1` has 1 matching bodies, expected 2. For a multi-line or code-bearing field, do not hand-escape it: set the value to \"<<BODY\" and put the raw text after the JSON object inside the same ```tool fence, ending with a line that is exactly BODY. Short scalar values stay ordinary JSON strings (escape newlines as \\n, quotes as \\\", backslashes as \\\\); backticks need no escaping."
   prose=""
   answer=null
   done=null
 # orphan trailing heredoc
   calls=0 errors=1 violations=0 stray=0
-  err "The ```tool block is not valid JSON: a verbatim heredoc `<<ORPHAN:1` trails the block but no argument's value declared it. Pass multi-line or code-bearing fields as ordinary JSON string values (escape newlines as \\n, quotes as \\\", backslashes as \\\\); backticks need no escaping."
+  err "The ```tool block is not valid JSON: a verbatim heredoc `<<ORPHAN:1` trails the block but no argument's value declared it. For a multi-line or code-bearing field, do not hand-escape it: set the value to \"<<BODY\" and put the raw text after the JSON object inside the same ```tool fence, ending with a line that is exactly BODY. Short scalar values stay ordinary JSON strings (escape newlines as \\n, quotes as \\\", backslashes as \\\\); backticks need no escaping."
   prose=""
   answer=null
   done=null

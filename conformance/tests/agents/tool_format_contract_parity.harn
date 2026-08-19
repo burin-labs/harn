@@ -60,7 +60,12 @@ pipeline main(harness: Harness) {
   __assert(harness.stdio, "json paradigm kind", json_paradigm.kind == "json")
   __assert(
     harness.stdio,
-    "json body_hint teaches escaped strings",
+    "json body_hint teaches the verbatim body for code-bearing fields",
+    contains(json_paradigm.body_hint, "<<BODY"),
+  )
+  __assert(
+    harness.stdio,
+    "json body_hint keeps JSON strings for short scalars",
     contains(json_paradigm.body_hint, "JSON string"),
   )
   const json_ex = agent_render_tool_call_exemplar(

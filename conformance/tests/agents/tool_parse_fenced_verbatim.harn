@@ -1,12 +1,24 @@
-// The verbatim content lane: count-anchored heredocs trailing a ```tool block.
+// The verbatim content lane: heredoc bodies trailing a ```tool block.
 //
 // JSON-escaping a large file body is where the fenced lane used to lose data —
-// a doubled backslash transform mangled a 900-line payload on the way through.
-// The fix is to let an argument value be the opener `<<TAG:N`, with the real
-// bytes following the JSON header as `<<TAG:N` ... `TAG`, where N is the exact
-// newline count of the body. The count, not the tag, is authoritative: that is
-// what lets the body contain a line equal to the close tag, a ```tool
-// separator, `<<EOF`, `</tool_calls>`, or a bare `}` and still round-trip.
+// a doubled backslash transform mangled a 900-line payload on the way through,
+// and a model that hand-escapes ~10KB loses the whole call to one unbalanced
+// brace. The fix is to let an argument value be a heredoc opener, with the real
+// bytes following the JSON header.
+//
+// Two openers, matching the text dialect's grammar:
+//
+//   `<<TAG`   closes on the first following line that is exactly TAG. The
+//             everyday form: it asks for a delimiter the model already wrote,
+//             not for an arithmetic fact about text it is still emitting.
+//   `<<TAG:N` closes after exactly N body lines. Required only when the body
+//             itself contains a line that is exactly TAG, where the terminator
+//             alone would be ambiguous. The count, not the tag, is then
+//             authoritative.
+//
+// Under either opener the body carries a ```tool separator, `<<EOF`,
+// `</tool_calls>`, a bare `}`, or backticks and still round-trips: the chunker
+// holds the fence open for the whole declared body.
 //
 // Everything ambiguous fails loud with zero calls: a wrong count, a declared
 // body that never arrives, a body whose tag does not match its declaration, two
@@ -115,13 +127,93 @@ C
     "crlf counted close round trips",
     "```tool\r\n{\"name\":\"write_file\",\"args\":{\"content\":\"<<C:1\"}}\r\n<<C:1\r\nbody\r\n  C\r\n```",
   )
-  // A value that is literally `<<EOF` with no trailing body stays a string.
+  // BEHAVIOR CHANGE: `<<TAG` is now an opener in the fenced lane, so a value
+  // that is exactly an opener with no body is a missing body, not a literal
+  // string. Failing loud is the only safe reading: binding it as a literal
+  // would write the text `<<EOF` into the file the model meant to fill.
   probe_json(
     harness.agent,
     harness.stdio,
-    "literal heredoc opener value without a body",
+    "bare opener value with no body fails loud",
     """```tool
 {"name": "write_file", "args": {"path": "a", "content": "<<EOF"}}
+```""",
+  )
+  // The everyday form: no count, closed by its own tag line.
+  probe_json(
+    harness.agent,
+    harness.stdio,
+    "uncounted body round trips",
+    """```tool
+{ "name": "write_file", "args": { "path": "a.go", "content": "<<BODY" } }
+<<BODY
+package main
+
+func main() {}
+BODY
+```""",
+  )
+  // The fence-immunity promise holds without a count: the chunker keeps the
+  // ```tool block open until the tag line, so fenced content survives.
+  probe_json(
+    harness.agent,
+    harness.stdio,
+    "uncounted body carrying fences and openers",
+    """```tool
+{ "name": "write_file", "args": { "path": "README.md", "content": "<<BODY" } }
+<<BODY
+```sh
+echo hi
+```
+<<EOF
+}
+</tool_calls>
+BODY
+```""",
+  )
+  // An empty uncounted body is a valid segment.
+  probe_json(
+    harness.agent,
+    harness.stdio,
+    "empty uncounted body",
+    """```tool
+{ "name": "write_file", "args": { "path": "empty.txt", "content": "<<BODY" } }
+<<BODY
+BODY
+```""",
+  )
+  // Mixed openers in one call: each binds by its own opener string, and each
+  // carries its own newline contract. `<<OLD` yields "before" because the
+  // newline before the tag is the delimiter, matching the text dialect's
+  // heredoc; `<<NEW:3` yields "after\nNEW\ntail\n" because the count makes each
+  // of the three lines content, terminator included. The difference is the
+  // openers, not an inconsistency to normalize away.
+  probe_json(
+    harness.agent,
+    harness.stdio,
+    "uncounted and counted bodies in one call",
+    """```tool
+{ "name": "edit_file", "args": { "old_string": "<<OLD", "new_string": "<<NEW:3" } }
+<<OLD
+before
+OLD
+<<NEW:3
+after
+NEW
+tail
+NEW
+```""",
+  )
+  // A body that never closes is a parse error, never a recovery point.
+  probe_json(
+    harness.agent,
+    harness.stdio,
+    "uncounted body that never closes fails loud",
+    """```tool
+{ "name": "write_file", "args": { "path": "a", "content": "<<BODY" } }
+<<BODY
+line one
+line two
 ```""",
   )
   // A pure-JSON block is untouched by the verbatim lane.

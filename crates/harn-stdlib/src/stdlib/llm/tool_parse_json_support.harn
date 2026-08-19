@@ -145,9 +145,51 @@ pub fn json_call(value, allow_flat_argument_string: bool) -> dict {
 fn __tool_parse_json_error(detail: string) -> string {
   return "The ```tool block is not valid JSON: "
     + detail
-    + ". Pass multi-line or code-bearing fields as ordinary JSON string values "
-    + "(escape newlines as \\n, quotes as \\\", backslashes as \\\\); "
-    + "backticks need no escaping."
+    + ". For a multi-line or code-bearing field, do not hand-escape it: set the "
+    + "value to \"<<BODY\" and put the raw text after the JSON object inside the "
+    + "same ```tool fence, ending with a line that is exactly BODY. Short scalar "
+    + "values stay ordinary JSON strings (escape newlines as \\n, quotes as \\\", "
+    + "backslashes as \\\\); backticks need no escaping."
+}
+
+/**
+ * Parse one argument value as a verbatim body declaration, or return nil.
+ *
+ * Two forms, matching the text dialect's heredoc grammar (`scan_heredoc`):
+ *
+ * - `<<TAG` closes on the first trailing line that is exactly `TAG`. This is
+ *   the everyday form: it asks the model for a delimiter it already wrote, not
+ *   for an arithmetic fact about text it is still emitting.
+ * - `<<TAG:N` closes after exactly `N` body lines. Required only when the body
+ *   itself contains a line that is exactly `TAG`, where the terminator alone
+ *   would be ambiguous.
+ *
+ * The single owner of the declaration syntax: requests, both predicates, and
+ * the error messages all read the shape from here.
+ *
+ * `counted` records which OPENER was written, independently of whether its
+ * digits produced a usable number. A count too large to represent leaves
+ * `count` nil with `counted` true, so the binder rejects it instead of
+ * silently reading it as the terminator-closed form — a downgrade would hand a
+ * body different bytes than the one the model declared.
+ */
+fn __tool_parse_verbatim_declaration(value) {
+  if type_of(value) != "string" {
+    return nil
+  }
+  const counted = regex_captures("^<<([A-Za-z_][A-Za-z0-9_.-]*):(\\d+)$", value)
+  if len(counted) > 0 {
+    return {
+      tag: to_string(counted[0].groups[0]),
+      count: to_int(counted[0].groups[1]),
+      counted: true,
+    }
+  }
+  const tagged = regex_captures("^<<([A-Za-z_][A-Za-z0-9_.-]*)$", value)
+  if len(tagged) > 0 {
+    return {tag: to_string(tagged[0].groups[0]), count: nil, counted: false}
+  }
+  return nil
 }
 
 /**
@@ -159,10 +201,25 @@ pub fn has_counted_verbatim(calls: list<dict>) -> bool {
   for call in calls {
     const arguments = call?.arguments ?? {}
     for key in keys(arguments) {
-      const value = arguments[key]
-      if type_of(value) == "string"
-        && len(regex_captures("^<<[A-Za-z_][A-Za-z0-9_.-]*:\\d+$", value))
-        > 0 {
+      const declaration = __tool_parse_verbatim_declaration(arguments[key])
+      if declaration != nil && declaration.counted {
+        return true
+      }
+    }
+  }
+  return false
+}
+
+/**
+ * Return whether any call declares a verbatim argument body in either form.
+ * @effects: []
+ * @errors: []
+ */
+pub fn has_verbatim_declaration(calls: list<dict>) -> bool {
+  for call in calls {
+    const arguments = call?.arguments ?? {}
+    for key in keys(arguments) {
+      if __tool_parse_verbatim_declaration(arguments[key]) != nil {
         return true
       }
     }
@@ -176,21 +233,18 @@ fn __tool_parse_verbatim_requests(calls: list<dict>) -> list<dict> {
   while call_index < len(calls) {
     for key in keys(calls[call_index].arguments) {
       const value = calls[call_index].arguments[key]
-      if type_of(value) != "string" {
+      const declaration = __tool_parse_verbatim_declaration(value)
+      if declaration == nil {
         continue
       }
-      const captures = regex_captures("^<<([A-Za-z_][A-Za-z0-9_.-]*):(\\d+)$", value)
-      if len(captures) == 0 {
-        continue
-      }
-      const count = to_int(captures[0].groups[1])
       requests = requests.appending(
         {
           call_index: call_index,
           key: key,
           opener: value,
-          tag: to_string(captures[0].groups[0]),
-          count: count,
+          tag: declaration.tag,
+          count: declaration.count,
+          counted: declaration.counted,
           bound: false,
         },
       )
@@ -216,7 +270,7 @@ fn __tool_parse_verbatim_count_error(requests: list<dict>, lines: list<string>) 
     }
     if available < required {
       return __tool_parse_json_error(
-        "counted verbatim declaration `"
+        "verbatim declaration `"
           + request.opener
           + "` has "
           + to_string(available)
@@ -229,7 +283,23 @@ fn __tool_parse_verbatim_count_error(requests: list<dict>, lines: list<string>) 
 }
 
 /**
- * Bind trailing counted-verbatim bodies to their declared call arguments.
+ * Index of the line that closes an uncounted `<<TAG` body: the first line at or
+ * after `body_start` whose trimmed text is exactly `tag`. Returns -1 when the
+ * body never closes, which is a parse error rather than a recovery point.
+ */
+fn __tool_parse_verbatim_terminator(lines: list<string>, body_start: int, tag: string) -> int {
+  let index = body_start
+  while index < len(lines) {
+    if trim(lines[index]) == tag {
+      return index
+    }
+    index = index + 1
+  }
+  return -1
+}
+
+/**
+ * Bind trailing verbatim bodies to their declared call arguments.
  * @effects: []
  * @errors: []
  */
@@ -280,31 +350,66 @@ pub fn bind_verbatim(calls: list<dict>, trailing: string) -> dict {
     }
     const request = requests[request_index] ?? {}
     const body_start = cursor + 1
-    if request.count == nil {
+    if request.counted && request.count == nil {
       return {
         ok: false,
         error: __tool_parse_json_error(
-          "verbatim heredoc `"
+          "verbatim declaration `"
             + request.opener
-            + "` did not close on the line its `:N` count declared; "
-            + "recount the body lines and re-emit the whole call",
+            + "` states a line count that is not a usable number; re-emit the "
+            + "call with `<<"
+            + request.tag
+            + "` and close the body with a line that is exactly `"
+            + request.tag
+            + "`",
         ),
       }
     }
-    const close_at = body_start + request.count
+    // `<<TAG:N` is anchored by the count, so a body line that is exactly `TAG`
+    // stays body. `<<TAG` closes on the first such line. Neither form guesses:
+    // when the declared close is not where it must be, the call is rejected.
+    const close_at = if request.counted {
+      body_start + request.count
+    } else {
+      __tool_parse_verbatim_terminator(lines, body_start, request.tag)
+    }
+    if close_at < 0 {
+      return {
+        ok: false,
+        error: __tool_parse_json_error(
+          "verbatim body `"
+            + request.opener
+            + "` never closed; end it with a line that is exactly `"
+            + request.tag
+            + "`, or declare `<<"
+            + request.tag
+            + ":N` with N body lines when the body itself contains that line",
+        ),
+      }
+    }
     if close_at >= len(lines) || trim(lines[close_at]) != request.tag {
       return {
         ok: false,
         error: __tool_parse_json_error(
-          "verbatim heredoc `"
+          "verbatim body `"
             + request.opener
             + "` did not close on the line its `:N` count declared; "
-            + "recount the body lines and re-emit the whole call",
+            + "recount the body lines, or drop the `:N` and close with a line "
+            + "that is exactly `"
+            + request.tag
+            + "`",
         ),
       }
     }
+    // The two openers carry the two established newline contracts, and the
+    // opener is what says which: `<<TAG:N` is count-anchored, so each of its N
+    // lines keeps its terminator (a 1-line body is "x\n"); `<<TAG` matches the
+    // text dialect's heredoc, where the newline before the close tag is the
+    // delimiter rather than content (a 1-line body is "x", and a trailing blank
+    // line is how a body asks for a final newline). Keeping `<<TAG` identical
+    // across the two dialects is what lets one taught grammar mean one thing.
     let content = lines.slice(body_start, close_at).join("\n")
-    if request.count > 0 {
+    if request.counted && close_at > body_start {
       content = content + "\n"
     }
     next_calls[request.call_index].arguments[request.key] = content
@@ -319,7 +424,7 @@ pub fn bind_verbatim(calls: list<dict>, trailing: string) -> dict {
       return {
         ok: false,
         error: __tool_parse_json_error(
-          "counted verbatim declaration `"
+          "verbatim declaration `"
             + request.opener
             + "` has 0 matching bodies, expected 1",
         ),
@@ -363,6 +468,12 @@ pub fn json_chunks(text: string) -> dict {
   let active_tool = false
   let active_body: list<string> = []
   let verbatim_remaining = 0
+  // Tag of an open `<<TAG` body. While set, every line rides through untouched
+  // until the line that is exactly `TAG`, so a body containing a ``` fence or a
+  // ~~~ fence cannot close the tool block that carries it. The counted form
+  // gets the same immunity from `verbatim_remaining`; both must agree with
+  // `bind_verbatim`, which re-reads the same declarations.
+  let verbatim_tag = ""
   for line in text.split("\n") {
     const trimmed = trim(line)
     const marker = if starts_with(trimmed, "```") {
@@ -378,6 +489,13 @@ pub fn json_chunks(text: string) -> dict {
         verbatim_remaining = verbatim_remaining - 1
         continue
       }
+      if active_tool && verbatim_tag != "" {
+        active_body = active_body.appending(line)
+        if trimmed == verbatim_tag {
+          verbatim_tag = ""
+        }
+        continue
+      }
       if active_tool {
         const counted = regex_captures("^<<[A-Za-z_][A-Za-z0-9_.-]*:(\\d+)$", trimmed)
         if len(counted) > 0 {
@@ -385,6 +503,12 @@ pub fn json_chunks(text: string) -> dict {
           if count != nil {
             verbatim_remaining = count + 1
           }
+          active_body = active_body.appending(line)
+          continue
+        }
+        const tagged = regex_captures("^<<([A-Za-z_][A-Za-z0-9_.-]*)$", trimmed)
+        if len(tagged) > 0 {
+          verbatim_tag = to_string(tagged[0].groups[0])
           active_body = active_body.appending(line)
           continue
         }
@@ -405,12 +529,14 @@ pub fn json_chunks(text: string) -> dict {
         active_tool = false
         active_body = []
         verbatim_remaining = 0
+        verbatim_tag = ""
       } else if active_tool && starts_with(trimmed, active_marker + FENCE_OPEN_INFO) {
         bodies = bodies.appending(active_body.join("\n"))
         const info = trim(trimmed.slice(3, len(trimmed)))
         const classified = __tool_parse_tool_fence_info(active_marker, info)
         active_tool = classified.tool
         active_body = []
+        verbatim_tag = ""
         if classified.warning != nil {
           violations = violations.appending(classified.warning)
         }
@@ -426,6 +552,7 @@ pub fn json_chunks(text: string) -> dict {
       active_tool = classified.tool
       active_body = []
       verbatim_remaining = 0
+      verbatim_tag = ""
       if classified.warning != nil {
         violations = violations.appending(classified.warning)
       }

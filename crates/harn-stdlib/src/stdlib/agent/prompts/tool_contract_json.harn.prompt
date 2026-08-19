@@ -15,7 +15,9 @@ Rules the runtime enforces:
 - Each tool call is ONE JSON object `{ "name": ..., "args": { ... } }`. To call SEVERAL tools in one turn, emit the objects one after another — either as several ```` ```tool ```` blocks OR as several objects inside one ```` ```tool ```` block (one object per line). Both mean the same ordered batch of calls, run in sequence. Do NOT wrap calls in a JSON array `[ ... ]` — a batch is consecutive objects, not an array.
 - `name` is a non-empty string naming the tool. `args` is a JSON object; omit it (or use `{}`) only when the tool takes no arguments.
 - {{ body_hint }}
-- The body channel is a JSON string, so backticks (```` ``` ````), `<<EOF`, `}`, and `</tool>` need NO escaping — they are literal bytes inside the quoted string. Never use a heredoc (`<<EOF`), a Markdown code fence around the call, or a triple-quoted string for argument content.
+- For a multi-line or code-bearing field (file contents, replacement text), use a VERBATIM BODY instead of escaping it into a JSON string: set the value to `"<<BODY"`, then write the raw text on the lines after the JSON object, inside the same ```` ```tool ```` fence, and end it with a line that is exactly `BODY`. Nothing in a verbatim body is escaped — quotes, backslashes, newlines, and backticks are literal bytes. This is the reliable way to write a whole file: a long hand-escaped string is where calls are lost.
+- Use `"<<BODY:N"`, where N is the exact number of body lines, ONLY when the body itself contains a line that is exactly `BODY`. Otherwise prefer the plain `"<<BODY"` form, which needs no counting.
+- Short scalar values stay ordinary JSON strings. Inside a quoted string, backticks (```` ``` ````), `}`, and `</tool>` need no escaping; newlines are `\n`, quotes `\"`, backslashes `\\`. Never wrap the call itself in a Markdown code fence other than ```` ```tool ````, and never use a triple-quoted string.
 - Do not open the block with ```` ```json ````, ```` ```tool_code ````, ```` ```python ````, or any other info string — only ```` ```tool ```` opens a tool call. A bare ```` ``` ```` line closes it.
 - Put any short narration as plain text OUTSIDE the ```` ```tool ```` blocks. Do not paste source code, file contents, or command transcripts into narration — wrap those in the relevant tool call instead.
 {{ if done_sentinel }}- When the task is complete and verified and no more tool calls are needed, give the final user-facing answer as plain text and include `{{ done_sentinel }}` exactly once as plain text (NOT inside a ```` ```tool ```` block).{{ else }}- When the task is complete and no more tool calls are needed, give the final user-facing answer as plain text and stop emitting ```` ```tool ```` blocks; that signals completion.{{ end }}
@@ -34,10 +36,27 @@ These are the only tools you can call. Any name not listed here will be rejected
 
 ## Example (illustrative shape only — `<tool>` stands in for a real tool from the list above)
 
-Content that contains a backtick code block survives untouched because it rides inside the JSON string:
+A whole-file body rides the verbatim channel, so nothing in it is escaped:
 
 ```tool
-{ "name": "<tool>", "args": { "path": "README.md", "content": "# Title\n\nUse a fenced block:\n\n```sh\necho hi\n```\n\nDone.\n" } }
+{ "name": "<tool>", "args": { "path": "README.md", "content": "<<BODY" } }
+<<BODY
+# Title
+
+Use a fenced block:
+
+```sh
+echo hi
+```
+
+Done.
+BODY
+```
+
+A short value stays an ordinary JSON string:
+
+```tool
+{ "name": "<tool>", "args": { "path": "README.md", "old_string": "Done.\n", "new_string": "Done!\n" } }
 ```
 {{ if done_sentinel }}
 After the work is verified, finish with plain text and the sentinel:

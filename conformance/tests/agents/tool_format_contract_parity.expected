@@ -7,7 +7,8 @@ ok text exemplar has no parse errors
 ok text exemplar name is edit
 ok text exemplar preserves body bytes
 ok json paradigm kind
-ok json body_hint teaches escaped strings
+ok json body_hint teaches the verbatim body for code-bearing fields
+ok json body_hint keeps JSON strings for short scalars
 ok json exemplar opens ```tool
 ok json exemplar carries name field
 ok json exemplar lands one call
