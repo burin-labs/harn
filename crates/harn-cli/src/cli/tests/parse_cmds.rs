@@ -307,6 +307,44 @@ fn test_test_bench_run_help_discloses_wasi_feature_gate() {
 }
 
 #[test]
+fn test_parses_chat_command() {
+    let cli = Cli::parse_from([
+        "harn",
+        "chat",
+        "qwen36-coder",
+        "--provider",
+        "llamacpp",
+        "--system",
+        "be brief",
+        "--verbose",
+    ]);
+
+    let Command::Chat(args) = cli.command.unwrap() else {
+        panic!("expected chat command");
+    };
+    assert_eq!(args.model.as_deref(), Some("qwen36-coder"));
+    assert_eq!(args.provider.as_deref(), Some("llamacpp"));
+    assert_eq!(args.system.as_deref(), Some("be brief"));
+    assert!(args.verbose);
+    assert!(!args.no_stats);
+}
+
+#[test]
+fn test_parses_bare_chat_command() {
+    let cli = Cli::parse_from(["harn", "chat"]);
+    let Command::Chat(args) = cli.command.unwrap() else {
+        panic!("expected chat command");
+    };
+    assert!(args.model.is_none());
+    assert_eq!(args.stats_mode(), "compact");
+}
+
+#[test]
+fn test_chat_rejects_verbose_with_no_stats() {
+    assert!(Cli::try_parse_from(["harn", "chat", "--verbose", "--no-stats"]).is_err());
+}
+
+#[test]
 fn bench_portable_rejects_out_of_range_counts_during_parsing() {
     for (flag, value) in [
         ("--iterations", "0"),

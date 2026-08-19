@@ -1,0 +1,57 @@
+import { chat_session } from "std/llm/chat_session"
+
+/**
+ * `harn chat` — start an interactive chat session with the live model.
+ *
+ * The loop itself lives in `std/llm/chat_session` so it can be driven by a
+ * test, and by any other surface that wants the same conversation. This script
+ * only turns the dispatch shim's environment into that module's config.
+ *
+ * Inputs (from the dispatch shim in crates/harn-cli/src/commands/chat.rs):
+ *   HARN_CHAT_PROVIDER — resolved provider, or empty to let the catalog route
+ *   HARN_CHAT_MODEL    — resolved model id or alias
+ *   HARN_CHAT_LABEL    — display name for the banner (alias when there is one)
+ *   HARN_CHAT_ENDPOINT — resolved endpoint, named in the banner
+ *   HARN_CHAT_SYSTEM   — optional system prompt for the session
+ *   HARN_CHAT_STATS    — "off" | "compact" | "verbose"
+ */
+fn __trimmed_env(env: HarnessEnv, key: string) {
+  const value = trim(env.get_or(key, ""))
+  if value == "" {
+    return nil
+  }
+  return value
+}
+
+fn main(harness: Harness) -> int {
+  const env = harness.env
+  // Each key is added only when the shim set it: `ChatSessionConfig`'s
+  // optional fields mean "the key may be absent", so handing one an explicit
+  // nil is not the same as leaving it out.
+  let config = {}
+  const provider = __trimmed_env(env, "HARN_CHAT_PROVIDER")
+  if provider != nil {
+    config = config + {provider: provider}
+  }
+  const model = __trimmed_env(env, "HARN_CHAT_MODEL")
+  if model != nil {
+    config = config + {model: model}
+  }
+  const label = __trimmed_env(env, "HARN_CHAT_LABEL") ?? model
+  if label != nil {
+    config = config + {label: label}
+  }
+  const endpoint = __trimmed_env(env, "HARN_CHAT_ENDPOINT")
+  if endpoint != nil {
+    config = config + {endpoint: endpoint}
+  }
+  const system = __trimmed_env(env, "HARN_CHAT_SYSTEM")
+  if system != nil {
+    config = config + {system: system}
+  }
+  const stats = __trimmed_env(env, "HARN_CHAT_STATS")
+  if stats != nil {
+    config = config + {stats: stats}
+  }
+  return chat_session(harness, config)
+}

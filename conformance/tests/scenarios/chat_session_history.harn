@@ -1,0 +1,53 @@
+import { ChatSessionConfig, chat_session } from "std/llm/chat_session"
+import { with_llm_script } from "std/testing"
+
+/**
+ * History is append-only across turns, and `/clear` is the only thing that
+ * drops it.
+ *
+ * Each scripted turn carries a `match` glob asserting what that request
+ * actually contained. A dropped, reordered, or rewritten history would fail to
+ * match, and an unmatched call fails the run — so these globs are the
+ * falsifier, not the printed output.
+ */
+fn __config() -> ChatSessionConfig {
+  return {provider: "mock", model: "mock-model", label: "mock-model", stats: "off"}
+}
+
+pipeline default(harness: Harness) {
+  // Turn two must carry turn one's question *and* its answer, in order,
+  // ahead of the new question.
+  harness.testing.stdin_set("first question\nsecond question\n")
+  with_llm_script(
+    harness.llm,
+    [
+      {match: "*first question*", text: "answer one"},
+      {match: "*first question*answer one*second question*", text: "answer two"},
+    ],
+    { -> chat_session(harness, __config()) },
+  )
+  harness.testing.stdin_reset()
+  harness.stdio.println("=== /clear starts the conversation over ===")
+  // The second entry is scripted to match only a request that STILL carries
+  // the first exchange. If `/clear` worked, nothing matches it, the turn
+  // fails, and the word "leaked" never reaches the transcript below. A plain
+  // `*second question*` glob would match either way and prove nothing.
+  harness.testing.stdin_set("first question\n/clear\nsecond question\n")
+  with_llm_script(
+    harness.llm,
+    [
+      {match: "*first question*", text: "answer one"},
+      {match: "*answer one*second question*", text: "leaked"},
+    ],
+    { -> chat_session(harness, __config()) },
+  )
+  harness.testing.stdin_reset()
+  harness.stdio.println("=== a system prompt reaches every turn ===")
+  harness.testing.stdin_set("hello\n")
+  with_llm_script(
+    harness.llm,
+    [{match: "*answer only in haiku*hello*", text: "ok"}],
+    { -> chat_session(harness, __config() + {system: "answer only in haiku"}) },
+  )
+  harness.testing.stdin_reset()
+}

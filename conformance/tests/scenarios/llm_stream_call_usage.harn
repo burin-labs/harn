@@ -1,0 +1,39 @@
+import { with_llm_script } from "std/testing"
+
+/**
+ * A streamed turn must account for itself exactly as a non-streamed one does.
+ *
+ * `llm_stream_call` used to drop the finished result's accounting on the
+ * floor, so a caller could render tokens but never report what the turn cost
+ * or how fast the server produced it. The terminal chunk now carries the same
+ * `usage` value `llm_call` publishes; non-terminal chunks carry none, because
+ * accounting is only known once the turn is over.
+ */
+pipeline default(harness: Harness) {
+  with_llm_script(
+    harness.llm,
+    [
+      {text: "one two three", stop_reason: "stop", input_tokens: 11, output_tokens: 7},
+      {text: "one two three", stop_reason: "stop", input_tokens: 11, output_tokens: 7},
+    ],
+    { ->
+      const chunks = stream.collect(
+        harness.llm.stream_call("count for me", nil, {provider: "mock"}),
+        {max: 8},
+      )
+      const final = chunks[len(chunks) - 1]
+      const direct = harness.llm.call("count for me", nil, {provider: "mock"})
+      harness.stdio.println(chunks[0].usage == nil)
+      harness.stdio.println(final.usage != nil)
+      harness.stdio.println(final.usage.input_tokens == direct.usage.input_tokens)
+      harness.stdio.println(final.usage.output_tokens == direct.usage.output_tokens)
+      harness.stdio.println(final.usage.output_tokens)
+      // Provider timings ride along under the same key the non-streamed
+      // envelope uses. Only the streamed side is asserted here: the
+      // `llm_call` builtin's declared return shape omits
+      // `provider_telemetry`, so naming it on `direct.usage` fails the
+      // typechecker even though the runtime value carries it (#6855).
+      harness.stdio.println(final.usage.provider_telemetry != nil)
+    },
+  )
+}

@@ -1,0 +1,160 @@
+/**
+ * std/llm/speed — turn a response's `usage` into a readable speed report.
+ *
+ * Every surface that wants to tell a person how fast a model answered needs
+ * the same arithmetic: pick the server's own timings when it reported them,
+ * fall back to the client's wall clock when it did not, and never print a
+ * number the provider never sent. Doing that once here keeps a CLI, a TUI and
+ * an editor from each inventing their own idea of "tokens per second".
+ *
+ * The input is the `usage` dict from an `llm_call` envelope or from an
+ * `llm_stream_call` terminal chunk — the same value in both cases, including
+ * `provider_telemetry` when the provider supplied timings (llama.cpp
+ * `timings`, Ollama durations, OpenAI usage).
+ *
+ * Absent is not zero. `provider_telemetry` deliberately omits fields a
+ * provider did not report, and every line here is omitted rather than
+ * rendered as `0`, so a missing measurement never reads as a slow one.
+ */
+/**
+ * Render a duration the way a person reads it: sub-second stays in
+ * milliseconds, past a second switches to seconds with one decimal.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn format_duration(ms) -> string {
+  const value = to_float(ms) ?? 0.0
+  if value < 1000.0 {
+    return to_string(round(value)) + "ms"
+  }
+  return to_string(round(value / 100.0) / 10.0) + "s"
+}
+
+/**
+ * Render a token rate as `<n> tok/s`, rounded to two decimals.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn format_rate(tokens, ms) -> string {
+  const count = to_float(tokens) ?? 0.0
+  const duration = to_float(ms) ?? 0.0
+  const per_second = count / (duration / 1000.0)
+  return to_string(round(per_second * 100.0) / 100.0) + " tok/s"
+}
+
+/**
+ * A rate is only meaningful with both a positive token count and a positive
+ * duration; anything else would divide by zero or report a rate for work that
+ * never happened.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn has_rate(tokens, ms) -> bool {
+  return (to_float(tokens) ?? 0.0) > 0.0 && (to_float(ms) ?? 0.0) > 0.0
+}
+
+/**
+ * The decode rate, preferring the server's own generation timing over the
+ * caller's wall clock. The server knows how long it actually spent
+ * generating; wall time also contains queueing, prefill, and transport, so it
+ * understates the model. Returns nil when neither source supports a rate.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn decode_rate(usage: dict, wall_ms) -> string? {
+  const telemetry = usage["provider_telemetry"] ?? {}
+  const server_tokens = telemetry["server_output_tokens"] ?? usage["output_tokens"]
+  if has_rate(server_tokens, telemetry["server_generation_ms"]) {
+    return format_rate(server_tokens, telemetry["server_generation_ms"])
+  }
+  if has_rate(usage["output_tokens"], wall_ms) {
+    return format_rate(usage["output_tokens"], wall_ms)
+  }
+  return nil
+}
+
+/**
+ * One line, short enough to read at a glance between turns:
+ * `49.31 tok/s · 143 tokens · first token 210ms · 3.1s total`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn format_speed_line(usage: dict, ttft_ms, wall_ms) -> string {
+  let parts = []
+  const rate = decode_rate(usage, wall_ms)
+  if rate != nil {
+    parts = parts.appending(rate)
+  }
+  const output_tokens = to_int(usage["output_tokens"] ?? 0) ?? 0
+  if output_tokens > 0 {
+    parts = parts.appending(to_string(output_tokens) + " tokens")
+  }
+  if ttft_ms != nil {
+    parts = parts.appending("first token " + format_duration(ttft_ms))
+  }
+  parts = parts.appending(format_duration(wall_ms) + " total")
+  return join(parts, " · ")
+}
+
+fn __stat_line(label: string, value: string) -> string {
+  return "  " + label + repeat(" ", max(1, 22 - len(label))) + value
+}
+
+/**
+ * The full breakdown as a list of lines, in the shape `ollama run --verbose`
+ * reports it so the numbers are comparable to what a user already knows.
+ * Lines whose measurement the provider did not report are omitted.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn format_speed_report(usage: dict, ttft_ms, wall_ms) -> list {
+  const telemetry = usage["provider_telemetry"] ?? {}
+  let lines = [__stat_line("total duration:", format_duration(wall_ms))]
+  if telemetry["server_load_ms"] != nil {
+    lines = lines.appending(
+      __stat_line("load duration:", format_duration(telemetry["server_load_ms"])),
+    )
+  }
+  if ttft_ms != nil {
+    lines = lines.appending(__stat_line("time to first token:", format_duration(ttft_ms)))
+  }
+  const prompt_tokens = telemetry["server_prompt_tokens"] ?? usage["input_tokens"]
+  if prompt_tokens != nil {
+    lines = lines.appending(
+      __stat_line("prompt eval count:", to_string(prompt_tokens) + " token(s)"),
+    )
+  }
+  if telemetry["server_prompt_eval_ms"] != nil {
+    lines = lines.appending(
+      __stat_line("prompt eval duration:", format_duration(telemetry["server_prompt_eval_ms"])),
+    )
+    if has_rate(prompt_tokens, telemetry["server_prompt_eval_ms"]) {
+      lines = lines.appending(
+        __stat_line(
+          "prompt eval rate:",
+          format_rate(prompt_tokens, telemetry["server_prompt_eval_ms"]),
+        ),
+      )
+    }
+  }
+  const eval_tokens = telemetry["server_output_tokens"] ?? usage["output_tokens"]
+  if eval_tokens != nil {
+    lines = lines.appending(__stat_line("eval count:", to_string(eval_tokens) + " token(s)"))
+  }
+  if telemetry["server_generation_ms"] != nil {
+    lines = lines.appending(
+      __stat_line("eval duration:", format_duration(telemetry["server_generation_ms"])),
+    )
+  }
+  const rate = decode_rate(usage, wall_ms)
+  if rate != nil {
+    lines = lines.appending(__stat_line("eval rate:", rate))
+  }
+  return lines
+}

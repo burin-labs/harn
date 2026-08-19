@@ -265,6 +265,26 @@ fn build_usage_dict(result: &LlmResult) -> crate::value::DictMap {
     result.usage().to_vm_dict(&result.attempts)
 }
 
+/// Build the `usage` value that every envelope publishes: the accounting
+/// ledger plus provider-side timings under `provider_telemetry`.
+///
+/// One owner for one value. `llm_call`'s envelope and `llm_stream_call`'s
+/// terminal chunk both call this, so a streamed turn and a non-streamed turn
+/// report accounting identically instead of drifting apart.
+pub(crate) fn build_usage_value(result: &LlmResult) -> VmValue {
+    let mut usage = build_usage_dict(result);
+    // Provider-side timings (Ollama load_duration, prompt_eval_duration,
+    // eval_duration; OpenAI usage; llama.cpp `timings`). Absent fields stay
+    // absent rather than collapsing to zero.
+    if let Some(telemetry_dict) = result.telemetry.as_vm_dict() {
+        usage.insert(
+            crate::value::intern_key("provider_telemetry"),
+            telemetry_dict,
+        );
+    }
+    VmValue::dict(usage)
+}
+
 /// Some local/open-weight routes emit their reasoning INLINE in the text
 /// channel as `<think>...</think>` blocks (Qwen3 via vLLM, local Ollama /
 /// llama.cpp reasoning models, Kimi) instead of in a separate provider
@@ -636,20 +656,10 @@ pub(crate) fn vm_build_llm_result(
     }
     // `usage` is the single owner of ALL accounting (tokens, cache, cost,
     // served tier, provider timings). No accounting key is duplicated at the
-    // top level: one spelling, one place.
-    let mut usage = build_usage_dict(result);
-    // Provider-side timings (Ollama load_duration, prompt_eval_duration,
-    // eval_duration; OpenAI usage; llama.cpp `timings`). Evals key off
+    // top level: one spelling, one place. Evals key off
     // `usage.provider_telemetry` for cold-vs-steady-state and
-    // prefill-vs-generation breakdowns; absent fields stay absent rather than
-    // collapsing to zero.
-    if let Some(telemetry_dict) = result.telemetry.as_vm_dict() {
-        usage.insert(
-            crate::value::intern_key("provider_telemetry"),
-            telemetry_dict,
-        );
-    }
-    dict.insert(crate::value::intern_key("usage"), VmValue::dict(usage));
+    // prefill-vs-generation breakdowns.
+    dict.insert(crate::value::intern_key("usage"), build_usage_value(result));
 
     if let Some(json_val) = parsed_json {
         dict.insert(crate::value::intern_key("data"), json_val);
