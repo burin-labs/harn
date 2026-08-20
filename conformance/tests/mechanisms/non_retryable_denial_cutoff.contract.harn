@@ -1,0 +1,222 @@
+// MECHANISM CONTRACT (onramp tier): repeated permanent-denial termination.
+//
+// Contract = {trigger, effect, negative}:
+//   trigger  — two consecutive identical approval-policy denials carry
+//              retryable:false;
+//   effect   — the loop emits a typed cutoff receipt and terminates as
+//              harness-owned infrastructure;
+//   negative — retryable denials and a permitted-progress pivot do not cut.
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
+import { llm_text, with_llm_script } from "std/testing"
+import { contract_effect, contract_negative } from "./lib/mechanism_contract"
+
+fn toolset() {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "edit",
+    "Edit a file.",
+    {
+      handler: { args -> "wrote " + args.path },
+      parameters: {
+        path: {type: "string", description: "Path to edit"},
+        text: {type: "string", description: "Replacement text"},
+      },
+      returns: {type: "string"},
+      annotations: {kind: "write"},
+    },
+  )
+  tools = tool_define(
+    tools,
+    "look",
+    "Read a file.",
+    {
+      handler: { args -> "contents of " + args.path },
+      parameters: {path: {type: "string", description: "Path to read"}},
+      returns: {type: "string"},
+      annotations: {kind: "read"},
+    },
+  )
+  return tools
+}
+
+fn edit_call(id) {
+  return {
+    text: "",
+    tool_calls: [{id: id, name: "edit", arguments: {path: "src/app.rs", text: "fixed"}}],
+  }
+}
+
+fn look_call(id) {
+  return {text: "", tool_calls: [{id: id, name: "look", arguments: {path: "src/app.rs"}}]}
+}
+
+fn base_opts(session, extra = {}) {
+  return {
+    provider: "mock",
+    tools: toolset(),
+    tool_format: "native",
+    loop_until_done: true,
+    done_sentinel: "##DONE##",
+    done_judge: nil,
+    max_iterations: 4,
+    final_wrapup: false,
+    session_id: session,
+    stall_diagnostics: {enabled: false},
+  }
+    + extra
+}
+
+fn failed_denials(events) {
+  return events.filter({ event -> event.type == "tool_call_update" && event.status == "failed" })
+}
+
+fn cutoff_count(events) {
+  return len(
+    events.filter(
+      { event ->
+        event.type == "typed_checkpoint"
+          && event.checkpoint?.schema
+          == "harn.agent_non_retryable_denial_cutoff.v1"
+      },
+    ),
+  )
+}
+
+fn permanent_denial_case(harness: Harness) {
+  with_llm_script(
+    harness.llm,
+    [edit_call("edit-1"), edit_call("edit-2"), edit_call("edit-3")],
+    { ->
+      const session = "contract-permanent-denial-" + harness.random.uuid()
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(
+          harness,
+          "Edit src/app.rs.",
+          nil,
+          base_opts(session, {approval_policy: {auto_deny: ["edit"]}}),
+        ) },
+      )
+      const denials = failed_denials(captured.events)
+      contract_effect(
+        harness.stdio,
+        "trigger_repeated_permanent_denial",
+        len(denials) == 2
+          && type_of(denials[0].raw_output.denial.retryable) == "bool"
+          && !denials[0].raw_output.denial
+          .retryable
+          && type_of(denials[1].raw_output.denial.retryable) == "bool"
+          && !denials[1].raw_output.denial
+          .retryable
+          && denials[0].raw_output.denial.gate == denials[1].raw_output.denial.gate
+          && denials[0]
+          .raw_output.denial.reason
+          == denials[1].raw_output.denial.reason,
+      )
+      contract_effect(
+        harness.stdio,
+        "effect_typed_cutoff_at_two",
+        cutoff_count(captured.events) == 1 && len(harness.llm.mock_calls()) == 2,
+      )
+      contract_effect(
+        harness.stdio,
+        "effect_harness_infra_terminal",
+        captured.result.terminal_class == "tool_policy_rejected"
+          && captured.result.terminal.kind
+          == "runtime_error"
+          && captured.result.terminal.owner == "harness",
+      )
+    },
+  )
+}
+
+fn retryable_denial_case(harness: Harness) {
+  with_llm_script(
+    harness.llm,
+    [edit_call("retryable-1"), edit_call("retryable-2"), llm_text("Recovered. ##DONE##")],
+    { ->
+      const session = "contract-retryable-denial-" + harness.random.uuid()
+      const retryable_caller = { envelope, _next ->
+        const denial = {
+          gate: "arg_constraint",
+          capability: "workspace.write_text",
+          denied_paths: [envelope.tool_args.path],
+          retryable: true,
+          reason: "Use a path inside the allowed workspace scope.",
+        }
+        return {
+          ok: false,
+          status: "error",
+          tool_name: envelope.tool_name,
+          tool_call_id: envelope.call_id,
+          arguments: envelope.tool_args,
+          result: {error: "permission_denied", denial: denial},
+          error: "permission_denied",
+          error_category: "permission_denied",
+          denial: denial,
+          observation: "[result of edit]\npermission_denied\n[end of edit result]\n",
+          mutation_status: "not_applied",
+        }
+      }
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(
+          harness,
+          "Edit the permitted file.",
+          nil,
+          base_opts(session, {tool_caller: retryable_caller}),
+        ) },
+      )
+      contract_negative(
+        harness.stdio,
+        "negative_retryable_denial_not_cut",
+        cutoff_count(captured.events) > 0
+          || captured.result.status != "done"
+          || len(harness.llm.mock_calls()) != 3,
+      )
+    },
+  )
+}
+
+fn permitted_progress_case(harness: Harness) {
+  with_llm_script(
+    harness.llm,
+    [
+      edit_call("recover-edit-1"),
+      look_call("recover-look"),
+      edit_call("recover-edit-2"),
+      llm_text("Used the permitted read path to recover. ##DONE##"),
+    ],
+    { ->
+      const session = "contract-permitted-progress-" + harness.random.uuid()
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(
+          harness,
+          "Inspect src/app.rs and report the required edit.",
+          nil,
+          base_opts(session, {approval_policy: {auto_deny: ["edit"]}}),
+        ) },
+      )
+      contract_negative(
+        harness.stdio,
+        "negative_permitted_progress_not_cut",
+        cutoff_count(captured.events) > 0
+          || captured.result.status != "done"
+          || !contains(captured.result.tools.successful, "look")
+          || len(harness.llm.mock_calls()) != 4,
+      )
+    },
+  )
+}
+
+pipeline default(harness: Harness) {
+  permanent_denial_case(harness)
+  retryable_denial_case(harness)
+  permitted_progress_case(harness)
+}

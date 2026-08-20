@@ -8,6 +8,7 @@ import {
   command_wait_normalize,
 } from "std/agent/command_ledger"
 import "std/agent/loop_call_resolution"
+import "std/agent/loop_denial_cutoff"
 import "std/agent/loop_finalize"
 import "std/agent/loop_foundation"
 import "std/agent/loop_resource_dispatch"
@@ -1184,7 +1185,6 @@ pub fn __agent_loop_run(harness: Harness, message, session, initial_opts) {
           __agent_loop_clock_now_ms(harness.clock),
           command_wait,
         )
-        stall_prev_dispatch = dispatch
         audit_background_tasks = __spawn_audit_flushes(
           audit_background_tasks,
           dispatched.audit_flushes,
@@ -1198,39 +1198,29 @@ pub fn __agent_loop_run(harness: Harness, message, session, initial_opts) {
           rejected_tools_seen,
           __tool_names_by_status(dispatch, false),
         )
-        const totals = agent_session_record_usage(
-          harness.agent,
+        const post_dispatch = __agent_loop_post_dispatch(
+          harness,
           session.session_id,
           llm_result,
           turn_llm_opts,
-          iteration_index + 1,
+          iteration_index,
+          tool_calls,
+          visible_text,
+          loop_start_ms,
+          current_max,
+          dispatch,
+          stall_prev_dispatch,
         )
+        const totals = post_dispatch.totals
         const tool_count = len(tool_calls)
-        agent_emit_event(
-          harness.agent,
-          session.session_id,
-          "iteration_end",
-          {
-            iteration: iteration_index + 1,
-            iteration_info: __agent_loop_iteration_info(
-              harness.agent,
-              harness.clock,
-              session.session_id,
-              llm_result,
-              tool_count,
-              visible_text,
-              totals,
-              loop_start_ms,
-            ),
-          },
-        )
-        const post_dispatch_checkpoint = agent_stage(
-          harness.agent,
-          session.session_id,
-          "post_tool_dispatch",
-          {iteration: iteration_index + 1},
-        )
-        const bridge_step_delivered = post_dispatch_checkpoint.delivered
+        const bridge_step_delivered = post_dispatch.bridge_step_delivered
+        if post_dispatch.terminal != nil {
+          final_status = "error"
+          stop_reason = post_dispatch.terminal.reason
+          terminal_error = post_dispatch.terminal.error
+          break
+        }
+        stall_prev_dispatch = dispatch
         const exhaustion = __agent_loop_budget_exhaustion(
           harness.agent,
           harness.clock,
