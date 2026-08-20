@@ -764,9 +764,13 @@ fn test_user_overrides_add_provider_and_alias() {
 fn test_default_tool_format_uses_capability_matrix() {
     reset_overrides();
 
+    // The self-hosted llama.cpp Qwen3.6 route resolves NATIVE by default as of
+    // the 2026-08-19 CUDA receipt. Named explicitly rather than derived from the
+    // matrix, because this assertion is the guard on a product default: if the
+    // row drifts back to a text grammar, this line is what fails.
     assert_eq!(
         default_tool_format("qwen3.6-35b-a3b-ud-q4-k-xl", "llamacpp"),
-        "json"
+        "native"
     );
     // devstral dropped its stale heredoc `text` pin (it has no reserved-token
     // constraint, so there was no structural reason to stay on heredoc) and

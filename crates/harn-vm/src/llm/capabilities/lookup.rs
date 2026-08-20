@@ -719,6 +719,12 @@ mod tests {
         // available, which is the part of this route's contract the assertion
         // below still guards.
         assert!(caps.native_tools);
+        // Named explicitly, not derived, so an unintended drift back to a text
+        // grammar fails here rather than passing quietly. This is the product
+        // DEFAULT for every self-hosted user on this route, so it is the value
+        // most worth pinning by name.
+        assert_eq!(caps.preferred_tool_format.as_deref(), Some("native"));
+        assert_eq!(caps.tool_mode_parity.as_deref(), Some("interchangeable"));
         assert!(caps.text_tool_wire_format_supported);
         assert_eq!(caps.server_parser, "none");
     }
