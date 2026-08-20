@@ -168,10 +168,30 @@ while IFS=$'\t' read -r run_id head_sha run_status workflow_name created_epoch; 
   latest_status="$(gh api "repos/$repo/actions/runs/$run_id" --jq '.status' 2>/dev/null || true)"
   if [[ "$latest_status" == "completed" ]]; then
     printf 'settled run=%s status=completed\n' "$run_id"
-  else
-    printf 'failed run=%s latest_status=%s\n' "$run_id" "${latest_status:-unknown}" >&2
-    failed_count=$((failed_count + 1))
+    continue
   fi
+
+  # An OBSERVED zombie, as opposed to the predicted one above. The jobless
+  # pre-check catches the common shape, but GitHub also retains long-queued
+  # records that DO carry a job row, and those refuse both cancellation
+  # endpoints in exactly the same way. Predicting unkillability from a job
+  # count was too narrow to hold: one such run failed this controller on every
+  # merge group for over a day while cancelling nothing, which is precisely the
+  # state in which a genuinely stuck run would go unnoticed.
+  #
+  # Deciding AFTER both endpoints have actually refused needs no prediction at
+  # all, and keeps the alarm meaningful: a run that is recent, or not queued,
+  # or that fails cancellation for any other reason still fails the job.
+  if [[ "$run_status" == "queued" && "$latest_status" == "queued" \
+    && $((now_epoch - created_epoch)) -gt "$queued_zombie_age_seconds" ]]; then
+    zombie_count=$((zombie_count + 1))
+    printf 'zombie run=%s sha=%s status=%s workflow=%s action=none reason=uncancellable\n' \
+      "$run_id" "$head_sha" "$run_status" "$workflow_name"
+    continue
+  fi
+
+  printf 'failed run=%s latest_status=%s\n' "$run_id" "${latest_status:-unknown}" >&2
+  failed_count=$((failed_count + 1))
 done < "$runs"
 
 printf 'summary current_heads=%s stale_runs=%s cancelled=%s zombies=%s apply=%s\n' \

@@ -35,11 +35,25 @@ if [[ "$1" == "api" && "$2" == "--paginate" ]]; then
       if [[ "${FAKE_STALE_QUEUED_ZOMBIE:-0}" == "1" ]]; then
         printf '%s\n' $'104\tdddddddddddddddddddddddddddddddddddddddd\tqueued\tSDK codegen\t0'
       fi
+      # An ancient queued run that DOES carry a job row. Unkillable in exactly
+      # the same way, but invisible to the jobless pre-check.
+      if [[ "${FAKE_UNCANCELLABLE_ANCIENT:-0}" == "1" ]]; then
+        printf '%s\n' $'105\teeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\tqueued\tLean embedding surface\t0'
+      fi
+      # The same refusal on a RECENT run, which must still fail the job.
+      if [[ "${FAKE_UNCANCELLABLE_RECENT:-0}" == "1" ]]; then
+        printf '%s\n' $'106\tffffffffffffffffffffffffffffffffffffffff\tqueued\tLean embedding surface\t'"$created_epoch"
+      fi
       ;;
   esac
   exit 0
 fi
 if [[ "$1" == "api" && "$2" == "--method" && "$3" == "POST" ]]; then
+  # Runs 105 and 106 refuse BOTH cancellation endpoints, as GitHub does for a
+  # queued record whose merge-group ref has been destroyed.
+  if [[ "$4" == *'/runs/105/'* || "$4" == *'/runs/106/'* ]]; then
+    exit 1
+  fi
   if [[ "${FAKE_NORMAL_CANCEL_FAILURE:-0}" == "1" && "$4" == */cancel ]]; then
     exit 1
   fi
@@ -47,6 +61,15 @@ if [[ "$1" == "api" && "$2" == "--method" && "$3" == "POST" ]]; then
 fi
 if [[ "$1" == "api" && "$2" == *'/runs/104/jobs?per_page=1' ]]; then
   printf '0\n'
+  exit 0
+fi
+if [[ "$1" == "api" && "$2" == *'/jobs?per_page=1' ]]; then
+  # Carries a job row, so the jobless pre-check does not classify it.
+  printf '1\n'
+  exit 0
+fi
+if [[ "$1" == "api" && ( "$2" == *'/runs/105' || "$2" == *'/runs/106' ) ]]; then
+  printf 'queued\n'
   exit 0
 fi
 echo "unexpected fake gh call: $*" >&2
@@ -137,6 +160,43 @@ grep -Fq 'zombie run=104 sha=dddddddddddddddddddddddddddddddddddddddd status=que
 grep -Fq 'summary current_heads=2 stale_runs=2 cancelled=1 zombies=1 apply=true' <<< "$zombie_output"
 if grep -Fq 'runs/104/cancel' "$calls"; then
   echo "ancient jobless queue metadata reached cancellation" >&2
+  exit 1
+fi
+
+: > "$calls"
+uncancellable_output="$(
+  PATH="$fixture_root/bin:$PATH" \
+  FAKE_GH_CALLS="$calls" \
+  FAKE_QUEUE_JSON="$queue_json" \
+  FAKE_UNCANCELLABLE_ANCIENT=1 \
+    "$script" --repo burin-labs/harn --apply
+)"
+# It reaches cancellation, unlike the jobless case: unkillability is OBSERVED
+# here, not predicted, which is the whole point of the second classification.
+grep -Fq 'runs/105/cancel' "$calls"
+grep -Fq 'runs/105/force-cancel' "$calls"
+grep -Fq 'zombie run=105 sha=eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee status=queued workflow=Lean embedding surface action=none reason=uncancellable' <<< "$uncancellable_output"
+grep -Fq 'summary current_heads=2 stale_runs=2 cancelled=1 zombies=1 apply=true' <<< "$uncancellable_output"
+
+# NEGATIVE CONTROL. The same double refusal on a RECENT run must still fail the
+# job. Without this, the branch above could swallow every cancellation failure
+# and the controller would report success while cancelling nothing.
+: > "$calls"
+recent_status=0
+recent_output="$(
+  PATH="$fixture_root/bin:$PATH" \
+  FAKE_GH_CALLS="$calls" \
+  FAKE_QUEUE_JSON="$queue_json" \
+  FAKE_UNCANCELLABLE_RECENT=1 \
+    "$script" --repo burin-labs/harn --apply 2>&1
+)" || recent_status=$?
+if [[ "$recent_status" -eq 0 ]]; then
+  echo "a recent uncancellable run did not fail the controller" >&2
+  exit 1
+fi
+grep -Fq 'failed run=106 latest_status=queued' <<< "$recent_output"
+if grep -Fq 'zombie run=106' <<< "$recent_output"; then
+  echo "a recent uncancellable run was misclassified as a zombie" >&2
   exit 1
 fi
 
