@@ -40,6 +40,18 @@ printf 'npm %s\n' "$*"
 EOF
 chmod +x "$tmp_root/bin/npm"
 
+# Process substitutions are asynchronous. If the retry script sends its log
+# through tee again, this delay makes its immediate classification reliably
+# observe an empty file. Synchronous capture never invokes this shim.
+cat >"$tmp_root/bin/tee" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'invoked\n' >>"${FAKE_NPM_STATE}/tee-invocations"
+/bin/sleep 1
+exec /usr/bin/tee "$@"
+EOF
+chmod +x "$tmp_root/bin/tee"
+
 cat >"$tmp_root/bin/sleep" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -67,6 +79,8 @@ run_case() {
 }
 
 run_case transient-once transient-once 0 2
+grep -Fq 'npm error ECONNRESET: socket hang up' "$tmp_root/transient-once/output"
+grep -Fq 'npm ci' "$tmp_root/transient-once/output"
 grep -Fq 'retrying in 5s (attempt 2/4)' "$tmp_root/transient-once/output"
 [[ "$(<"$tmp_root/transient-once/sleeps")" == "5" ]]
 run_case transient-three transient-three 0 4
@@ -75,5 +89,6 @@ run_case transient-always transient-always 18 4
 [[ "$(paste -sd, "$tmp_root/transient-always/sleeps")" == "5,20,60" ]]
 run_case deterministic deterministic 19 1
 [[ ! -e "$tmp_root/deterministic/sleeps" ]]
+[[ ! -e "$tmp_root/transient-once/tee-invocations" ]]
 
 echo "npm ci bounded retry tests passed"
