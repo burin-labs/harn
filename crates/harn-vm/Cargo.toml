@@ -140,7 +140,7 @@ strsim = "0.11"
 # serde/rustc/syn use to keep deeply nested data from overflowing the OS
 # thread stack and aborting the process. See `value::recursion`.
 stacker = "0.1"
-blake3 = "1"
+blake3 = "1.8.7"
 md-5 = "0.11"
 aes-gcm = "0.11"
 hkdf = "0.13"
