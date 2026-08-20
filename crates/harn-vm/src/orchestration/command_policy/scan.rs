@@ -1038,7 +1038,10 @@ pub(super) fn path_outside_workspace(ctx: &JsonValue) -> bool {
     if cwd.as_ref().is_some_and(|cwd| !under_any_root(cwd, &roots)) {
         return true;
     }
-    for path in absolute_path_candidates(&command_text(ctx)) {
+    // `floor_command_text`, not `command_text`: the latter space-joins argv with
+    // no quoting, so `["sed", "-E", "s/^func //"]` flattens into a line whose
+    // tokenization no longer matches the argv the program would receive.
+    for path in absolute_path_candidates(&floor_command_text(ctx)) {
         if !under_any_root(&normalize_path(&path), &roots) {
             return true;
         }
@@ -1046,10 +1049,27 @@ pub(super) fn path_outside_workspace(ctx: &JsonValue) -> bool {
     false
 }
 
+/// Absolute paths the command would actually hand to a program.
+///
+/// Tokenizing is delegated to the floor's shell tokenizer rather than done here
+/// with `split_whitespace`. Splitting on whitespace is quote-blind, so a single
+/// space inside a quoted argument produced a fragment that began with `/` and
+/// was read as an absolute path: `sed -E 's/^func //'` yielded `//'`, and
+/// `awk '/TODO/{print}'` yielded a word already starting with `/`. Both are
+/// ordinary workspace-relative commands, and both were labelled
+/// `outside_workspace` and sent for approval.
+///
+/// The delegation also keeps the `sh -c` wrapper closed: the shared tokenizer
+/// expands chained segments and recurses into nested shell payloads, so
+/// `sh -c "cat /etc/passwd"` still yields `/etc/passwd` even though the payload
+/// is one quoted word at the outer level.
 pub(super) fn absolute_path_candidates(text: &str) -> Vec<String> {
-    text.split_whitespace()
-        .filter_map(|part| {
-            let trimmed = part.trim_matches(|c| matches!(c, '"' | '\'' | ',' | ';' | ')'));
+    super::catastrophic::command_argument_words(text)
+        .into_iter()
+        .filter_map(|word| {
+            // The tokenizer removes quoting; trailing punctuation can still ride
+            // along from subshell and list syntax the segment splitter leaves in.
+            let trimmed = word.trim_end_matches([',', ';', ')']);
             trimmed.starts_with('/').then(|| trimmed.to_string())
         })
         .collect()

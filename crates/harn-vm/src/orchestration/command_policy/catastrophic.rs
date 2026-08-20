@@ -50,6 +50,65 @@ pub(super) fn command_segments(command: &str) -> Vec<String> {
     command_segments_inner(command, 0)
 }
 
+/// Every word a POSIX shell would hand to a program as one argument, across all
+/// chained segments and every nested `sh -c` payload.
+///
+/// This is the tokenizer the floor already uses, exposed so that no other
+/// classifier has to grow a second, weaker one. Splitting a command on
+/// whitespace alone is quote-blind: `sed -E 's/^func //'` yields a fragment
+/// `//'`, which any rule keyed on a leading `/` then reads as an absolute path.
+/// Quoting is what says whether a space separates two arguments or sits inside
+/// one, so it has to be respected here rather than compensated for downstream.
+///
+/// Segment expansion is what keeps the nesting closed: a quoted `sh -c` payload
+/// is one word at the outer level, and would hide its own arguments from a
+/// caller that only looked at outer words.
+pub(super) fn command_argument_words(command: &str) -> Vec<String> {
+    let mut words: Vec<String> = Vec::new();
+    collect_argument_words(command, 0, &mut words);
+    words
+}
+
+/// Tokenize each command text ONCE and recurse into nested shell payloads from
+/// their own strings.
+///
+/// Deliberately not built on `command_segments`: that expansion re-joins already
+/// tokenized words with plain spaces, which is fine for the substring rules that
+/// consume it but throws away the very quoting this function exists to respect.
+/// Feeding its output back through a tokenizer reintroduces the split it was
+/// meant to prevent — `s/x /y/` comes back as `s/x` and `/y/`.
+fn collect_argument_words(command: &str, depth: usize, words: &mut Vec<String>) {
+    if depth > MAX_DEPTH {
+        return;
+    }
+    for segment in split_chained_command(command) {
+        let tokens = shell_words(&segment);
+        let mut start = 0;
+        while start < tokens.len() {
+            let end = next_pipeline_boundary(&tokens, start);
+            if start < end {
+                let command_index = unwrapped_command_index(&tokens, start, end);
+                if command_index < end
+                    && matches!(
+                        command_basename(&tokens[command_index]),
+                        "bash" | "sh" | "zsh"
+                    )
+                {
+                    if let Some(script) = shell_c_script(&tokens[(command_index + 1)..end]) {
+                        collect_argument_words(script, depth + 1, words);
+                    }
+                }
+                for token in &tokens[start..end] {
+                    if !words.iter().any(|existing| existing == token) {
+                        words.push(token.clone());
+                    }
+                }
+            }
+            start = end + 1;
+        }
+    }
+}
+
 /// Parse a shell command into chain groups and pipeline stages. This is the
 /// shared shell boundary for policy written outside Rust; consumers receive
 /// normalized argv while the original stage text remains available for
