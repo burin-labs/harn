@@ -9,6 +9,71 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.106
+
+### Added
+
+- **Embedding hosts can layer provider catalogs without shadowing user config
+  (#6867).** `HARN_HOST_PROVIDERS_CONFIG` now installs a product-owned provider
+  overlay below the existing `HARN_PROVIDERS_CONFIG` or home-file layer, so
+  host aliases and tuning coexist with user overrides.
+
+### Changed
+
+- The "no LLM provider credentials" error now names a curated short list of
+  providers instead of every environment variable in the catalog — roughly 60
+  names collapse to six plus the keyless local option. The full list stays one
+  command away (`harn doctor`) and one link away
+  (<https://harnlang.com/provider-setup.html>). The curated order is catalog
+  data (`[presentation] featured_providers`), so the error, `harn models
+  recommend`, and the docs read the same list.
+
+  The generated provider support page gains a **Credential variables** table
+  covering every provider, and the same error's provider-selection hint no longer
+  points at `LLM_PROVIDER` or `llm.toml`, neither of which Harn reads.
+- Self-hosted llama.cpp Qwen3.6 routes now use provider-native tool calling by
+  default. The capability row previously said the native channel does not return
+  parseable tool calls on this route, and that verdict also acted as a steer: an
+  explicit `tool_format = "native"` was silently rewritten to the fenced-JSON text
+  contract, so the native channel could not be reached at all.
+
+  A 36-run forced-format receipt on CUDA hardware (six coding-agent fixtures, two
+  replicates, three channels, no skipped runs) measured native returning parseable
+  tool calls on every measurable cell, matching an earlier Apple Silicon receipt
+  exactly. Completion is a tie and is not the reason the default moved. What moved
+  it: on turns where a call was expected, the native arm produced no call attempt
+  on 0 of 45, against 17 of 61 for fenced JSON; native finished all 12 runs without
+  exhausting its iteration budget where fenced JSON exhausted 6 of 12; and its
+  system prompt is 2444 characters against 8473, because the native channel has no
+  dialect to teach. A text channel also makes the model hand-serialize every call,
+  so one dropped token voids an otherwise correct payload; a native channel cannot
+  emit that failure at all.
+
+  Recorded against the move: wall time favored the text channel on this hardware,
+  and native drew the highest rejected-call rate, though every run carrying a
+  rejection still passed. Reverting is one value in one capability row.
+
+  The same receipt establishes why the earlier contrary verdict was wrong. That
+  run cleared the tool-format gate through an override but never cleared the
+  separate capability gate, so no tools array could reach the server and its
+  native arm was never a native arm.
+
+### Fixed
+
+- The shared shell guard now enforces its own deadline and fails open when it
+  overruns, instead of relying on the agent harness timeout. A slow policy
+  previously blocked the agent's shell call for the entire hook budget and still
+  returned no verdict; it now yields after 5s (override with
+  `AGENT_SHELL_GUARD_DEADLINE_SECONDS`).
+- **npm install retries classify complete attempt logs (#6863).** The bounded
+  retry gate no longer mistakes transient network failures for deterministic
+  failures when asynchronous log forwarding has not flushed yet.
+- The shared shell guard no longer prefers a cargo `debug` build when a
+  release-grade interpreter is available. A debug artifact starts slower and is the
+  file cargo rewrites mid-build, which tied hook latency to whatever was being
+  compiled; it is now the last resort rather than the first choice. `HARN_BIN`
+  still overrides the choice outright.
+
 ## v0.10.105
 
 ### Added
