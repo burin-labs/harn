@@ -768,10 +768,11 @@ my-fast = { id = "vendor/model-fast", provider = "my_proxy" }
 Load order is:
 
 1. built-in defaults
-2. `HARN_PROVIDERS_CONFIG` when set, otherwise `~/.config/harn/providers.toml`
-3. the root project's `[llm]` table
+2. the embedding host's `HARN_HOST_PROVIDERS_CONFIG` overlay, when set
+3. `HARN_PROVIDERS_CONFIG` when set, otherwise `~/.config/harn/providers.toml`
+4. the root project's `[llm]` table
 
-The provider files in steps 2-3 are overlays, so a starter file can set
+The provider files in steps 2-4 are overlays, so a starter file can set
 `default_provider` or aliases without copying every built-in provider
 definition. Project manifests can therefore configure provider adapters and
 model aliases without editing Rust-side registration code.
