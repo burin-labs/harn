@@ -39,7 +39,10 @@ async fn llm_compaction_call_is_manifested_at_the_provider_boundary() {
     .expect("parent LLM options");
     let mut messages = vec![
         serde_json::json!({"role": "user", "content": "old task"}),
-        serde_json::json!({"role": "assistant", "content": "old investigation"}),
+        serde_json::json!({
+            "role": "assistant",
+            "content": "prints/inspects updated after <runtime_feedback kind=\"post_turn\">"
+        }),
         serde_json::json!({"role": "user", "content": "latest task"}),
     ];
     let config = AutoCompactConfig {
@@ -61,6 +64,10 @@ async fn llm_compaction_call_is_manifested_at_the_provider_boundary() {
             .summary
             .contains("retained goal and latest evidence"),
         "the mocked compaction result proves the LLM strategy fired"
+    );
+    assert!(
+        !compacted.summary.contains("repair-ledger"),
+        "edit-like prose without a mutation receipt must not fabricate a ledger row"
     );
     let mock_calls = crate::llm::get_llm_mock_calls();
     assert_eq!(mock_calls.len(), 1, "compaction reached the mock provider");
