@@ -17,7 +17,7 @@ if ! grep -Fq "$dispatch_timeout" "$workflow"; then
 fi
 
 if ! grep -Fq \
-  'scripts/ci/run_rust_test_lane.sh cargo nextest run --workspace --profile ci' \
+  'scripts/ci/run_rust_test_lane.sh cargo nextest run --locked --workspace --profile ci' \
   "$workflow"; then
   echo "macOS nightly must use the canonical Rust test environment" >&2
   exit 1
@@ -27,7 +27,7 @@ performance_id_line="$(grep -Fn 'id: release-test-case-performance' "$workflow" 
 performance_command_line="$(grep -Fn 'run: make check-test-case-performance' "$workflow" | cut -d: -f1)"
 performance_binary_line="$(grep -Fn 'HARN_BIN: ./target/debug/harn' "$workflow" | cut -d: -f1)"
 performance_profile_line="$(grep -Fn 'HARN_TEST_CASE_PERFORMANCE_PROFILE: macos_hosted_arm64' "$workflow" | cut -d: -f1)"
-nextest_line="$(grep -Fn 'scripts/ci/run_rust_test_lane.sh cargo nextest run --workspace --profile ci' "$workflow" | cut -d: -f1)"
+nextest_line="$(grep -Fn 'scripts/ci/run_rust_test_lane.sh cargo nextest run --locked --workspace --profile ci' "$workflow" | cut -d: -f1)"
 
 if [[ -z "$performance_id_line" || -z "$performance_command_line" || -z "$performance_binary_line" || -z "$performance_profile_line" ]]; then
   echo "macOS nightly must own the exact release test-case performance proof" >&2

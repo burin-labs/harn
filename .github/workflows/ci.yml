@@ -1178,6 +1178,17 @@ jobs:
       - run: make check-grammar-fitness
       - run: make check-vm-exposures
       - run: make check-generated-registry
+      # Workflow-file contracts. These are registered in `make all` but were
+      # never invoked by any workflow, so they only ran on a developer's
+      # machine. `check_runner_tier.harn` says in its own header that it is
+      # "NOT allowed to skip" because the failure it guards is silent — it
+      # was skipping entirely. `audit-scripts` is gated on the catch-all
+      # `rust` filter, which includes .github/**, so these fire on exactly
+      # the edits they police.
+      - run: make check-cargo-lock-contract
+      - run: make check-rust-test-lane-policy
+      - run: make check-ci-cache-policy
+      - run: make lint-actions-harn
       - run: '"${HARN_BIN:?HARN_BIN not set}" run scripts/verify_release_metadata.harn'
       - name: Check no retroactive CHANGELOG edits
         # GitHub checks out PRs and merge groups as synthetic merge commits.

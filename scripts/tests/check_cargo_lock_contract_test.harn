@@ -1,0 +1,130 @@
+// Tests for scripts/check_cargo_lock_contract.harn — which shell commands
+// count as resolving cargo invocations, and the two structural exemptions.
+//
+// The cases below are the real shapes this check has to survive in
+// .github/workflows, not invented ones: a cargo call inside `$( )`, one behind
+// `if !`, one behind a lane wrapper script, a quoted `-E` filter carrying
+// parentheses, and an `echo` line that merely mentions the word cargo.
+import "../check_cargo_lock_contract.harn"
+
+const ECHO_MENTIONING_CARGO = "echo \"windows: cargo package args: \${package_args[*]}\""
+
+const WRAPPED = "scripts/ci/run_rust_test_lane.sh cargo nextest run --workspace --profile ci"
+
+const FILTERED =
+  "cargo nextest run --profile ci -E 'not (test(a) or test(b))' --workspace"
+
+@test
+pipeline test_bare_invocation_is_a_violation(harness: Harness, task) {
+  const step = {run: "cargo build -p harn-cli --bin harn"}
+  const violations = step_violations("w.yml", "job", step)
+  assert_eq(len(violations), 1)
+  assert_eq(violations[0]?.workflow, "w.yml")
+  assert_eq(violations[0]?.job, "job")
+}
+
+@test
+pipeline test_locked_and_frozen_both_satisfy(harness: Harness, task) {
+  assert_eq(len(step_violations("w.yml", "j", {run: "cargo build --locked -p harn-cli"})), 0)
+  assert_eq(len(step_violations("w.yml", "j", {run: "cargo build --frozen -p harn-cli"})), 0)
+}
+
+@test
+pipeline test_archive_replay_is_exempt_because_nextest_rejects_locked(harness: Harness, task) {
+  // nextest errors with "the argument '--archive-file <PATH>' cannot be used
+  // with: ... --locked", so demanding the flag here would break the lane.
+  const step = {run: "cargo nextest run --profile ci --archive-file /tmp/t.tar.zst"}
+  assert_eq(len(step_violations("w.yml", "j", step)), 0)
+}
+
+@test
+pipeline test_cargo_install_is_exempt_because_fresh_resolution_is_the_point(
+  harness: Harness,
+  task,
+) {
+  assert_eq(len(step_violations("w.yml", "j", {run: "cargo install harn-cli"})), 0)
+  assert_eq(resolves_dependencies("cargo install harn-cli --version 1.2.3"), false)
+}
+
+@test
+pipeline test_echo_mentioning_cargo_is_not_an_invocation(harness: Harness, task) {
+  // The false positive that a substring match would produce. The program word
+  // is `echo`, so the fragment never reaches the subcommand test.
+  assert_eq(fragment_program(ECHO_MENTIONING_CARGO), "echo")
+  assert_eq(resolves_dependencies(ECHO_MENTIONING_CARGO), false)
+  assert_eq(len(step_violations("w.yml", "j", {run: ECHO_MENTIONING_CARGO})), 0)
+}
+
+@test
+pipeline test_comment_is_prose(harness: Harness, task) {
+  assert_eq(resolves_dependencies("# cargo build -p harn-cli"), false)
+}
+
+@test
+pipeline test_lane_wrapper_prefix_is_seen_through(harness: Harness, task) {
+  assert_eq(fragment_program(WRAPPED), "cargo")
+  assert_eq(resolves_dependencies(WRAPPED), true)
+  assert_eq(len(step_violations("w.yml", "j", {run: WRAPPED})), 1)
+}
+
+@test
+pipeline test_command_substitution_starts_a_command_position(harness: Harness, task) {
+  const run = "BUMP=\"\$(cargo run --quiet --bin harn -- run scripts/detect_bump_type.harn)\""
+  const violations = step_violations("w.yml", "j", {run: run})
+  assert_eq(len(violations), 1)
+}
+
+@test
+pipeline test_shell_keyword_prefix_is_seen_through(harness: Harness, task) {
+  assert_eq(resolves_dependencies("if ! cargo nextest run --workspace"), true)
+}
+
+@test
+pipeline test_quoted_filter_parentheses_do_not_split_the_invocation(harness: Harness, task) {
+  // Splitting on `(` would tear `--workspace` off and, worse, could tear a
+  // `--locked` off an invocation that carries one. The parenthesised filter
+  // must stay attached.
+  const violations = step_violations("w.yml", "j", {run: FILTERED})
+  assert_eq(len(violations), 1)
+  assert_eq(len(step_violations("w.yml", "j", {run: FILTERED + " --locked"})), 0)
+}
+
+@test
+pipeline test_cross_forwards_to_cargo(harness: Harness, task) {
+  assert_eq(resolves_dependencies("cross check --workspace --target x86_64-pc-windows-gnu"), true)
+}
+
+@test
+pipeline test_non_resolving_programs_are_ignored(harness: Harness, task) {
+  assert_eq(resolves_dependencies("make test"), false)
+  assert_eq(resolves_dependencies("rustup toolchain install stable"), false)
+  assert_eq(resolves_dependencies("cargo"), false)
+}
+
+@test
+pipeline test_env_prefix_is_seen_through(harness: Harness, task) {
+  assert_eq(fragment_program("CARGO_INCREMENTAL=0 cargo build -p harn-cli"), "cargo")
+  assert_eq(resolves_dependencies("CARGO_INCREMENTAL=0 cargo build -p harn-cli"), true)
+}
+
+@test
+pipeline test_separate_lines_are_judged_separately(harness: Harness, task) {
+  const step = {run: "cargo build --locked -p harn-cli\ncargo test -p harn-vm"}
+  const violations = step_violations("w.yml", "j", step)
+  assert_eq(len(violations), 1)
+  assert_eq(violations[0]?.invocation, "cargo test -p harn-vm")
+}
+
+@test
+pipeline test_workflow_violations_walks_every_job(harness: Harness, task) {
+  const document = {
+    jobs: {
+      a: {steps: [{run: "cargo build -p x"}]},
+      b: {steps: [{run: "cargo build --locked -p y"}, {run: "cargo test -p z"}]},
+    },
+  }
+  const violations = workflow_violations("w.yml", document)
+  assert_eq(len(violations), 2)
+  assert_eq(violations[0]?.job, "a")
+  assert_eq(violations[1]?.job, "b")
+}
