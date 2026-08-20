@@ -146,6 +146,7 @@ pub type LlmCallOptions = {
   tool_choice?: string | dict,
   tool_search?: bool | string | dict,
   tool_format?: string,
+  tool_format_override_reason?: string,
   // Caching, budgets, transport.
   cache?: bool,
   prompt_cache_ttl?: "5m" | "1h",

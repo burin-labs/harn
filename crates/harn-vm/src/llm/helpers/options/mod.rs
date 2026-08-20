@@ -41,6 +41,8 @@ mod route_policy_cutover_tests;
 #[cfg(test)]
 mod routing_credential_tests;
 #[cfg(test)]
+mod routing_override_tests;
+#[cfg(test)]
 mod routing_responses_tests;
 #[cfg(test)]
 mod routing_test_support;

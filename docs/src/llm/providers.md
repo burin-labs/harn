@@ -523,13 +523,16 @@ contract is the reliable tool path, and can mark `tool_mode_parity` /
 interchangeable. If a caller explicitly forces a conflicting `tool_format`,
 the agent loop emits a `tool_format_override` transcript event; pass
 `tool_format_override_reason` when intentionally forcing a catalog-marked
-unreliable side. `harn check` rejects that same conflict when the provider,
-model, and format are all literal, so known-bad compositions fail before they
-consume tokens. Dynamic routes stay under the runtime guard. Custom generation
-routes remain open-world, while explicit prompt-cache controls require authored
-capability facts because their lowering is provider-specific. Raw tool-bearing
-`llm_call` options have no override event, so they must use a viable catalog
-format. Model-catalog display tags are derived
+unreliable side. The non-empty reason also crosses the runtime admission seam,
+so the requested channel and its tool schemas reach the provider unchanged.
+`harn check` rejects that same conflict when the provider, model, and format are
+all literal, so known-bad compositions fail before they consume tokens. Dynamic
+routes stay under the runtime guard. Custom generation routes remain open-world,
+while explicit prompt-cache controls require authored capability facts because
+their lowering is provider-specific. Raw tool-bearing `llm_call` options can use
+the same reason to force a deliberate probe; they have no agent-loop override
+event, but provider-call records expose the effective `tool_format` and
+`native_tool_count`. Model-catalog display tags are derived
 from this matrix too;
 legacy `models.*.capabilities` entries are parsed for backwards compatibility
 but do not override runtime capability resolution.

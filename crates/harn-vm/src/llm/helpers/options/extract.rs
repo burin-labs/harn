@@ -394,6 +394,13 @@ pub(crate) fn extract_llm_options(
     let requested_tool_format = opt_str(&options, "tool_format").unwrap_or_else(|| {
         crate::llm_config::default_tool_format(&capability_model, &capability_provider)
     });
+    // A non-empty reason is the explicit acknowledgment used by probes and
+    // matrices to measure a catalog-marked unsafe channel deliberately. It
+    // must cross this owning boundary: honoring it only in the stdlib prompt
+    // resolver can otherwise pair native instructions with a request whose
+    // native schemas were steered away or rejected here.
+    let force_tool_format = opt_str(&options, "tool_format_override_reason")
+        .is_some_and(|reason| !reason.trim().is_empty());
     // FOOTGUN-REMOVAL: a tool-bearing call must use a tool_format whose channel
     // the capability registry trusts to return parseable tool calls for this
     // route. An explicit pin (or alias) can request a channel the route is
@@ -405,7 +412,7 @@ pub(crate) fn extract_llm_options(
     // `validate_tool_format` would pass such a combo through unchanged; on a
     // tool-bearing call that can only yield a silent empty tool stream, so name
     // the bad combo and a suggested alternative up front instead of dispatching.
-    if enforce_capability_gates && tools_val.is_some() {
+    if enforce_capability_gates && tools_val.is_some() && !force_tool_format {
         if let Some(message) = crate::llm::capabilities::no_viable_tool_channel_with_caps(
             &capability_provider,
             &capability_model,
@@ -416,7 +423,7 @@ pub(crate) fn extract_llm_options(
             ))));
         }
     }
-    let tool_format = if enforce_capability_gates && tools_val.is_some() {
+    let tool_format = if enforce_capability_gates && tools_val.is_some() && !force_tool_format {
         let decision = crate::llm::capabilities::validate_tool_format_with_caps(
             &capability_provider,
             &capability_model,
@@ -434,6 +441,7 @@ pub(crate) fn extract_llm_options(
         && tools_val.is_some()
         && tool_format == "native"
         && !caps.native_tools
+        && !force_tool_format
     {
         return Err(unsupported_option_error(
             "tools",
