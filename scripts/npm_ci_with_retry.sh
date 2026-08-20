@@ -19,11 +19,11 @@ trap 'rm -f "$log_file"' EXIT
 retry_delays=(5 20 60)
 attempt=1
 while :; do
-  : >"$log_file"
   set +e
-  (cd "$package_dir" && npm ci) > >(tee "$log_file") 2>&1
+  (cd "$package_dir" && npm ci) >"$log_file" 2>&1
   status=$?
   set -e
+  cat "$log_file"
   [[ "$status" -eq 0 ]] && exit 0
 
   # Package/script failures are deterministic and must fail immediately. Retry
