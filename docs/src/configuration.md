@@ -36,16 +36,17 @@ schema is available at `docs/src/schemas/harn-config.schema.json`.
 Layers are merged from lowest to highest precedence:
 
 1. Built-in defaults compiled into `harn-vm`.
-2. Legacy provider compatibility from `HARN_PROVIDERS_CONFIG` or
+2. Embedding-host provider defaults from `HARN_HOST_PROVIDERS_CONFIG`.
+3. Legacy provider compatibility from `HARN_PROVIDERS_CONFIG` or
    `~/.config/harn/providers.toml`.
-3. Runtime install defaults.
-4. Remote defaults from an explicitly trusted URL.
-5. User config.
-6. Project config from the nearest `harn.config.toml`.
-7. Repo manifest config from the nearest `harn.toml` `[config]` table.
-8. Explicit `--config` files.
-9. Managed policy files.
-10. Environment overrides.
+4. Runtime install defaults.
+5. Remote defaults from an explicitly trusted URL.
+6. User config.
+7. Project config from the nearest `harn.config.toml`.
+8. Repo manifest config from the nearest `harn.toml` `[config]` table.
+9. Explicit `--config` files.
+10. Managed policy files.
+11. Environment overrides.
 
 Managed policies are merged before environment overrides so organizations can
 choose which fields stay adjustable. A managed file can set:
@@ -297,7 +298,8 @@ local_ml() // spotlight + trifecta gate + on-device injection detection
 ## Compatibility
 
 Existing provider config keeps working. `HARN_PROVIDERS_CONFIG` and
-`~/.config/harn/providers.toml` are still consumed by the LLM runtime, and
+`~/.config/harn/providers.toml` are still consumed by the LLM runtime above
+an optional host-owned `HARN_HOST_PROVIDERS_CONFIG` overlay, and
 `harn config inspect --explain` projects that legacy provider surface into the
 canonical `models` section so teams can see where those values came from.
 

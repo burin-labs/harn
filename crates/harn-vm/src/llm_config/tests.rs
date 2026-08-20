@@ -378,6 +378,92 @@ fn global_provider_file_is_an_overlay_on_builtin_defaults() {
 }
 
 #[test]
+fn host_and_user_provider_files_layer_with_user_precedence() {
+    let directory = tempfile::tempdir().expect("temporary config directory");
+    let host_path = directory.path().join("host-providers.toml");
+    let user_path = directory.path().join("user-providers.toml");
+    std::fs::write(
+        &host_path,
+        r#"
+            default_provider = "ollama"
+            [aliases.host-only]
+            id = "host/model"
+            provider = "ollama"
+            [aliases.collision]
+            id = "host/loses"
+            provider = "ollama"
+            "#,
+    )
+    .expect("write host overlay");
+    std::fs::write(
+        &user_path,
+        r#"
+            default_provider = "openai"
+            [aliases.user-only]
+            id = "user/model"
+            provider = "openai"
+            [aliases.collision]
+            id = "user/wins"
+            provider = "openai"
+            "#,
+    )
+    .expect("write user overlay");
+
+    let (config, loaded_paths) = super::loading::load_external_config_layers(
+        default_config(),
+        host_path.to_str(),
+        user_path.to_str(),
+        None,
+        false,
+    );
+
+    assert!(config.aliases.contains_key("host-only"));
+    assert!(config.aliases.contains_key("user-only"));
+    assert_eq!(config.aliases["collision"].id, "user/wins");
+    assert_eq!(config.default_provider.as_deref(), Some("openai"));
+    assert_eq!(loaded_paths, vec![host_path, user_path]);
+}
+
+#[test]
+fn explicit_user_provider_file_preserves_home_fallback_contract() {
+    let directory = tempfile::tempdir().expect("temporary config directory");
+    let explicit_path = directory.path().join("explicit-providers.toml");
+    let missing_path = directory.path().join("missing-providers.toml");
+    let home_path = directory.path().join("home-providers.toml");
+    std::fs::write(
+        &explicit_path,
+        "[aliases.explicit-only]\nid = \"explicit/model\"\nprovider = \"openai\"\n",
+    )
+    .expect("write explicit user overlay");
+    std::fs::write(
+        &home_path,
+        "[aliases.home-only]\nid = \"home/model\"\nprovider = \"ollama\"\n",
+    )
+    .expect("write home user overlay");
+
+    let (explicit, explicit_paths) = super::loading::load_external_config_layers(
+        default_config(),
+        None,
+        explicit_path.to_str(),
+        home_path.to_str(),
+        false,
+    );
+    assert!(explicit.aliases.contains_key("explicit-only"));
+    assert!(!explicit.aliases.contains_key("home-only"));
+    assert_eq!(explicit_paths, vec![explicit_path]);
+
+    let (fallback, fallback_paths) = super::loading::load_external_config_layers(
+        default_config(),
+        None,
+        missing_path.to_str(),
+        home_path.to_str(),
+        false,
+    );
+    assert!(fallback.aliases.contains_key("home-only"));
+    assert_eq!(fallback_paths, vec![home_path]);
+}
+
+#[test]
 fn partial_provider_overlay_preserves_builtin_provider_metadata() {
     let overlay = parse_config_toml(
         r#"

@@ -430,6 +430,7 @@ with later layers winning per key:
    generated `provider-catalog.json` when the client cannot load TOML
    directly)
 2. product or managed `providers.toml` overlay
+   (`HARN_HOST_PROVIDERS_CONFIG` for an embedding host)
 3. user-global `providers.toml` (`HARN_PROVIDERS_CONFIG` or
    `~/.config/harn/providers.toml`)
 4. workspace/package `[llm]` tables for the current run

@@ -1969,10 +1969,11 @@ LLM provider endpoints, model aliases, inference rules, and default parameters
 are configured via a TOML file. The VM searches for config in this order:
 
 1. Built-in defaults (Anthropic, OpenAI, OpenRouter, HuggingFace, Ollama, Local, llama.cpp)
-2. `HARN_PROVIDERS_CONFIG` if set, otherwise `~/.config/harn/providers.toml`
-3. The nearest project `harn.toml` `[llm]` table
+2. `HARN_HOST_PROVIDERS_CONFIG` when supplied by an embedding host
+3. `HARN_PROVIDERS_CONFIG` if set, otherwise `~/.config/harn/providers.toml`
+4. The nearest project `harn.toml` `[llm]` table
 
-The files in steps 2-3 are overlays on the built-in defaults. The `[llm]`
+The files in steps 2-4 are overlays on the built-in defaults. The `[llm]`
 section uses the same schema as `providers.toml`, so project and package
 manifest can configure provider adapters declaratively:
 

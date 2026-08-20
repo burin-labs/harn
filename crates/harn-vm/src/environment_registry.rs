@@ -507,6 +507,12 @@ mod tests {
         assert_eq!(timeout.value_shape, EnvironmentValueShape::UnsignedInteger);
         let token = variable_spec("HARN_PACKAGE_REGISTRY_TOKEN").unwrap();
         assert_eq!(token.sensitivity, EnvironmentSensitivity::Credential);
+        let host_providers = variable_spec(crate::llm_config::HOST_PROVIDERS_CONFIG_ENV).unwrap();
+        assert_eq!(host_providers.consumer, EnvironmentConsumer::Runtime);
+        assert_eq!(
+            host_providers.value_shape,
+            EnvironmentValueShape::OwnerValidated
+        );
     }
 
     #[test]

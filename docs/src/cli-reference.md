@@ -1646,9 +1646,9 @@ The command exits non-zero when at least one check is `fail`.
   directory when run inside the repo.
 - **Platform capabilities** — `notify` file-watcher backend availability and
   the system browser opener used by OAuth and `harn portal`.
-- **Provider configuration** — `HARN_PROVIDERS_CONFIG`, `HARN_LLM_PROVIDER`,
-  the resolved secret-provider chain, and per-provider env vars (printed by
-  name only — never by value).
+- **Provider configuration** — `HARN_HOST_PROVIDERS_CONFIG`,
+  `HARN_PROVIDERS_CONFIG`, `HARN_LLM_PROVIDER`, the resolved secret-provider
+  chain, and per-provider env vars (printed by name only — never by value).
 - **Manifest** — nearest `harn.toml`, declared MCP servers, and registered
   triggers.
 - **Runtime state** — event log backend, metadata cache, loaded skills,

@@ -755,9 +755,10 @@ The `[llm]` table accepts the same schema as `providers.toml`
 When Harn starts from a file inside a workspace, it merges:
 
 1. built-in defaults,
-2. the global provider file (`HARN_PROVIDERS_CONFIG` or
+2. the embedding host's provider overlay (`HARN_HOST_PROVIDERS_CONFIG`),
+3. the global provider file (`HARN_PROVIDERS_CONFIG` or
    `~/.config/harn/providers.toml`),
-3. the root project's `[llm]` table.
+4. the root project's `[llm]` table.
 
 Installed package manifests do not auto-merge runtime extensions such as
 `[llm]`, `[capabilities]`, `[[hooks]]`, or `[[triggers]]` into the host

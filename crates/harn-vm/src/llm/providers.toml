@@ -11,15 +11,17 @@
 # overrides. `harn provider catalog generate` concatenates these fragments into
 # llm/providers.toml and every checked-in provider catalog projection. The
 # provider TOML deserializes into `ProvidersConfig` via the same
-# Serde pipeline that loads HARN_PROVIDERS_CONFIG /
-# ~/.config/harn/providers.toml / harn.toml [providers] /
+# Serde pipeline that loads HARN_HOST_PROVIDERS_CONFIG /
+# HARN_PROVIDERS_CONFIG / ~/.config/harn/providers.toml / harn.toml [providers] /
 # package-manifest [llm] sections at runtime.
 #
 # Resolution order at startup (later overlays win on per-key basis):
 #   1. Generated llm/providers.toml (embedded into the VM via include_str!)
-#   2. ~/.config/harn/providers.toml (user-global override)
-#   3. HARN_PROVIDERS_CONFIG env var (explicit per-process override)
-#   4. Per-run programmatic overlays installed by hosts via
+#   2. HARN_HOST_PROVIDERS_CONFIG (embedding-host defaults)
+#   3. HARN_PROVIDERS_CONFIG, otherwise ~/.config/harn/providers.toml
+#      (user-global override)
+#   4. harn.toml [llm] and package-manifest [llm] sections
+#   5. Per-run programmatic overlays installed by hosts via
 #      llm_config::set_user_overrides()
 #
 # Edit these fragments to change defaults, then run

@@ -4,13 +4,18 @@
 //! catalog.
 use std::cell::RefCell;
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 use std::sync::{Arc, OnceLock, RwLock};
 
 use super::*;
 
 static CONFIG: OnceLock<Arc<ProvidersConfig>> = OnceLock::new();
-static CONFIG_PATH: OnceLock<String> = OnceLock::new();
+static CONFIG_PATHS: OnceLock<Vec<PathBuf>> = OnceLock::new();
 static RUNTIME_CATALOG_OVERLAY: OnceLock<RwLock<Option<ProvidersConfig>>> = OnceLock::new();
+
+/// Lowest-precedence external provider overlay supplied by an embedding host.
+/// The existing user-global config still layers on top of this file.
+pub const HOST_PROVIDERS_CONFIG_ENV: &str = "HARN_HOST_PROVIDERS_CONFIG";
 
 thread_local! {
     /// Provider config overlays for the currently-polled Harn execution.
@@ -95,7 +100,6 @@ pub fn load_config() -> &'static ProvidersConfig {
 
 fn load_config_snapshot() -> &'static Arc<ProvidersConfig> {
     CONFIG.get_or_init(|| {
-        let mut config = default_config();
         let verbose_config_logging = matches!(
             std::env::var("HARN_VERBOSE_CONFIG").ok().as_deref(),
             Some("1" | "true" | "TRUE" | "yes" | "YES")
@@ -103,25 +107,59 @@ fn load_config_snapshot() -> &'static Arc<ProvidersConfig> {
             std::env::var("HARN_ACP_VERBOSE").ok().as_deref(),
             Some("1" | "true" | "TRUE" | "yes" | "YES")
         );
-        if let Ok(path) = std::env::var("HARN_PROVIDERS_CONFIG") {
-            if let Some(overlay) = read_external_config(&path, verbose_config_logging) {
-                config.merge_from(&overlay);
-                let _ = CONFIG_PATH.set(path);
-                return Arc::new(config);
-            }
-        }
-        if should_load_home_config() {
-            if let Some(home) = dirs_or_home() {
-                let path = format!("{home}/.config/harn/providers.toml");
-                if let Some(overlay) = read_external_config(&path, false) {
-                    config.merge_from(&overlay);
-                    let _ = CONFIG_PATH.set(path);
-                    return Arc::new(config);
-                }
-            }
-        }
+        let host_path = std::env::var(HOST_PROVIDERS_CONFIG_ENV).ok();
+        let user_path = std::env::var("HARN_PROVIDERS_CONFIG").ok();
+        let home_path = should_load_home_config()
+            .then(dirs_or_home)
+            .flatten()
+            .map(|home| format!("{home}/.config/harn/providers.toml"));
+        let (config, paths) = load_external_config_layers(
+            default_config(),
+            host_path.as_deref(),
+            user_path.as_deref(),
+            home_path.as_deref(),
+            verbose_config_logging,
+        );
+        let _ = CONFIG_PATHS.set(paths);
         Arc::new(config)
     })
+}
+
+/// Merge the host layer and then the user-global layer. An explicit user path
+/// keeps the established fallback to the home file when it cannot be loaded.
+pub(super) fn load_external_config_layers(
+    mut config: ProvidersConfig,
+    host_path: Option<&str>,
+    user_path: Option<&str>,
+    home_path: Option<&str>,
+    verbose: bool,
+) -> (ProvidersConfig, Vec<PathBuf>) {
+    let mut loaded_paths = Vec::new();
+    if let Some(path) = host_path {
+        merge_external_config(&mut config, path, verbose, &mut loaded_paths);
+    }
+    let user_loaded = user_path
+        .is_some_and(|path| merge_external_config(&mut config, path, verbose, &mut loaded_paths));
+    if !user_loaded {
+        if let Some(path) = home_path {
+            merge_external_config(&mut config, path, false, &mut loaded_paths);
+        }
+    }
+    (config, loaded_paths)
+}
+
+fn merge_external_config(
+    config: &mut ProvidersConfig,
+    path: &str,
+    verbose: bool,
+    loaded_paths: &mut Vec<PathBuf>,
+) -> bool {
+    let Some(overlay) = read_external_config(path, verbose) else {
+        return false;
+    };
+    config.merge_from(&overlay);
+    loaded_paths.push(PathBuf::from(path));
+    true
 }
 
 fn read_external_config(path: &str, verbose: bool) -> Option<ProvidersConfig> {
@@ -418,12 +456,17 @@ const fn local_memory_patch_schema() -> PatchSchema {
         nested: &[],
     }
 }
-/// Returns the filesystem path of the currently-loaded providers config, if
-/// any. Returns `None` when built-in defaults are active.
+/// Returns the highest-precedence loaded provider config path, if any.
+/// Returns `None` when built-in defaults are active.
 pub fn loaded_config_path() -> Option<std::path::PathBuf> {
-    // Force lazy init so CONFIG_PATH is populated if a file was loaded.
+    loaded_config_paths().last().cloned()
+}
+
+/// Returns every loaded external provider config path in merge order.
+pub fn loaded_config_paths() -> &'static [PathBuf] {
+    // Force lazy init so CONFIG_PATHS is populated even when no file loads.
     let _ = load_config();
-    CONFIG_PATH.get().map(std::path::PathBuf::from)
+    CONFIG_PATHS.get().map(Vec::as_slice).unwrap_or_default()
 }
 
 /// Install per-run provider config overlays. The overlay uses the same shape as
@@ -585,11 +628,11 @@ const EMBEDDED_PROVIDERS_TOML: &str = include_str!("../llm/providers.toml");
 /// Parse the embedded generated `providers.toml` into the runtime
 /// `ProvidersConfig`.
 ///
-/// Hosts overlay this base via `HARN_PROVIDERS_CONFIG`,
-/// `~/.config/harn/providers.toml`, `harn.toml`, package-manifest
-/// `[llm]` sections, and per-run `set_user_overrides(...)`. The same
-/// Serde shape applies at every layer, so there is exactly one schema to
-/// keep coherent — no parallel Rust-literal catalog.
+/// Hosts overlay this base via `HARN_HOST_PROVIDERS_CONFIG`; users then layer
+/// `HARN_PROVIDERS_CONFIG`, `~/.config/harn/providers.toml`, `harn.toml`,
+/// package-manifest `[llm]` sections, and per-run `set_user_overrides(...)`.
+/// The same Serde shape applies at every layer, so there is exactly one schema
+/// to keep coherent — no parallel Rust-literal catalog.
 ///
 /// We `expect` on parse failure because the file is bundled into the
 /// binary at compile time; a malformed embedded catalog is a build-time
