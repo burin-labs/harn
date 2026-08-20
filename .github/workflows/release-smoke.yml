@@ -344,7 +344,7 @@ jobs:
           # spend most of its wall time in a link step that is not meaningfully
           # cacheable, while published release binaries already use thin LTO.
           CARGO_PROFILE_RELEASE_LTO: thin
-        run: cargo build --release -p harn-cli --bin harn
+        run: cargo build --locked --release -p harn-cli --bin harn
       - name: Run release smoke
         shell: bash
         timeout-minutes: 10

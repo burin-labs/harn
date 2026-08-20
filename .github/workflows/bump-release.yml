@@ -81,7 +81,7 @@ jobs:
         id: bump
         run: |
           set +e
-          BUMP="$(cargo run --quiet --bin harn -- run scripts/detect_bump_type.harn)"
+          BUMP="$(cargo run --locked --quiet --bin harn -- run scripts/detect_bump_type.harn)"
           rc=$?
           set -e
           if [[ $rc -eq 2 ]]; then
