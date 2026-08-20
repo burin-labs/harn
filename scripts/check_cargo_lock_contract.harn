@@ -1,0 +1,271 @@
+/*
+ * Every CI cargo invocation that RESOLVES dependencies must pass `--locked`.
+ *
+ * A bare `cargo build` / `cargo test` / `cargo nextest run` is permitted to
+ * re-resolve the dependency graph and rewrite `Cargo.lock` in place. When it
+ * does, the thing CI measured stops being the thing the lock pins, and nothing
+ * reports that it happened. On the release lanes that is worse than a
+ * measurement gap: `build-release-binaries.yml` builds the binaries we publish.
+ *
+ * CI invocations should refuse lock drift, not silently repair it.
+ *
+ * Two exemptions, both structural rather than an allowlist of paths:
+ *
+ *   1. `--archive-file` steps. nextest REJECTS `--locked` alongside
+ *      `--archive-file` ("the argument '--archive-file <PATH>' cannot be used
+ *      with: ... --locked"). Those steps replay prebuilt binaries and never
+ *      resolve, so there is no lock for the flag to hold. Requiring the flag
+ *      here would make the lane fail to start.
+ *
+ *   2. `cargo install`. That subcommand is how `install-smoke.yml` reproduces
+ *      what a user typing the documented command gets, and a fresh resolution
+ *      is the whole measurement. Pinning it would delete what the gate tests.
+ *
+ * `--frozen` also satisfies the contract: it implies `--locked` plus
+ * `--offline`.
+ *
+ * Scope note: this judges the workflow files. Cargo invocations inside shell
+ * scripts under `scripts/` are not read here.
+ */
+import { read_yaml } from "std/fs"
+import { logical_commands } from "./check_rust_test_lane_policy.harn"
+import { empty_scope_failure } from "./guard_scope.harn"
+
+const WORKFLOW_GLOB = ".github/workflows/*.yml"
+
+/** Subcommands that read the dependency graph and may rewrite `Cargo.lock`. */
+const RESOLVING_SUBCOMMANDS = [
+  "build",
+  "test",
+  "nextest",
+  "check",
+  "clippy",
+  "doc",
+  "bench",
+  "run",
+  "tree",
+  "metadata",
+  "fix",
+  "package",
+  "publish",
+]
+
+/** Deliberately out of scope; see the header. */
+const EXEMPT_SUBCOMMANDS = ["install"]
+
+/** Shell words that may sit in front of `cargo` inside one command position. */
+const LEADING_NOISE = [
+  "if",
+  "then",
+  "else",
+  "elif",
+  "do",
+  "while",
+  "until",
+  "!",
+  "time",
+  "exec",
+  "sudo",
+  "command",
+]
+
+/** Wrapper entrypoints that exec the cargo invocation that follows them. */
+const WRAPPER_SCRIPTS = ["scripts/ci/run_rust_test_lane.sh", "scripts/ci/run_rust_lint_lane.sh"]
+
+const SEPARATOR = "<<HARN_CMD_SEP>>"
+
+/**
+ * Operators that start a new command position. `$(` precedes `(` deliberately,
+ * and `||` precedes `|`, so the longer form is consumed first.
+ *
+ * `(`, `{`, and backtick are NOT split on: they occur inside quoted cargo
+ * arguments (`-E 'not (test(a) or test(b))'`, `"${package_args[@]}"`), and
+ * splitting there would tear a flag away from the invocation that carries it.
+ */
+const COMMAND_OPERATORS = ["&&", "||", ";", "$(", "|", "\n"]
+
+pub type LockViolation = {workflow: string, job: string, command: string, invocation: string}
+
+fn list_has(items: list<string>, value: string) -> bool {
+  for item in items {
+    if item == value {
+      return true
+    }
+  }
+  return false
+}
+
+/** Split one logical command into the fragments that begin a new command. */
+pub fn command_positions(command: string) -> list<string> {
+  let text = command
+  for operator in COMMAND_OPERATORS {
+    text = text.replace(operator, SEPARATOR)
+  }
+  let fragments: list<string> = []
+  for raw in text.split(SEPARATOR) {
+    const fragment = trim(raw)
+    if fragment != "" {
+      fragments = fragments + [fragment]
+    }
+  }
+  return fragments
+}
+
+/**
+ * The program a fragment actually runs, skipping shell keywords, `VAR=value`
+ * prefixes, and lane wrapper scripts that exec what follows them.
+ */
+pub fn fragment_program(fragment: string) -> string {
+  let words: list<string> = []
+  for raw in fragment.split(" ") {
+    const word = trim(raw)
+    if word != "" {
+      words = words + [word]
+    }
+  }
+  for word in words {
+    if list_has(LEADING_NOISE, word) {
+      continue
+    }
+    if list_has(WRAPPER_SCRIPTS, word) {
+      continue
+    }
+    // `FOO=bar` env prefixes, but not a flag like `--profile=ci`.
+    if contains(word, "=") && !word.starts_with("-") {
+      continue
+    }
+    return word
+  }
+  return ""
+}
+
+/** The first non-flag word after the program name, e.g. `nextest` or `build`. */
+pub fn fragment_subcommand(fragment: string) -> string {
+  let seen_program = false
+  for raw in fragment.split(" ") {
+    const word = trim(raw)
+    if word == "" {
+      continue
+    }
+    if !seen_program {
+      if word == fragment_program(fragment) {
+        seen_program = true
+      }
+      continue
+    }
+    if word.starts_with("-") {
+      continue
+    }
+    return word
+  }
+  return ""
+}
+
+/**
+ * True when this fragment invokes cargo (or cross, which forwards to cargo) on
+ * a subcommand that resolves dependencies. Prose and `echo` lines that merely
+ * mention cargo do not reach here: their program word is `echo`, not `cargo`.
+ */
+pub fn resolves_dependencies(fragment: string) -> bool {
+  if fragment.starts_with("#") {
+    return false
+  }
+  const program = fragment_program(fragment)
+  if program != "cargo" && program != "cross" {
+    return false
+  }
+  const subcommand = fragment_subcommand(fragment)
+  if list_has(EXEMPT_SUBCOMMANDS, subcommand) {
+    return false
+  }
+  return list_has(RESOLVING_SUBCOMMANDS, subcommand)
+}
+
+/**
+ * Judged on the WHOLE logical command, not the fragment: the flag and the
+ * exemption marker can sit past a quoted argument that fragment splitting is
+ * deliberately not aggressive enough to cut on.
+ */
+pub fn command_is_satisfied(command: string) -> bool {
+  if contains(command, "--archive-file") {
+    return true
+  }
+  return contains(command, "--locked") || contains(command, "--frozen")
+}
+
+pub fn step_violations(workflow: string, job: string, step: dict) -> list<LockViolation> {
+  const run = trim(step?.run ?? "")
+  if run == "" {
+    return []
+  }
+  let violations: list<LockViolation> = []
+  for command in logical_commands(run) {
+    if command_is_satisfied(command) {
+      continue
+    }
+    for fragment in command_positions(command) {
+      if !resolves_dependencies(fragment) {
+        continue
+      }
+      violations = violations
+        + [
+        {workflow: workflow, job: job, command: command, invocation: fragment},
+      ]
+    }
+  }
+  return violations
+}
+
+pub fn workflow_violations(workflow: string, document: dict) -> list<LockViolation> {
+  let violations: list<LockViolation> = []
+  const jobs = document?.jobs ?? {}
+  for job in jobs.keys().sorted() {
+    for step in jobs[job]?.steps ?? [] {
+      violations = violations + step_violations(workflow, job, step)
+    }
+  }
+  return violations
+}
+
+fn workflow_name(path: string) -> string {
+  const parts = path.split("/")
+  return parts[len(parts) - 1]
+}
+
+pub fn main(harness: Harness) {
+  let violations: list<LockViolation> = []
+  let scanned = 0
+  for path in harness.fs.glob(WORKFLOW_GLOB).sorted() {
+    const document = read_yaml(harness.fs, path, nil)
+    if document == nil {
+      continue
+    }
+    scanned = scanned + 1
+    violations = violations + workflow_violations(workflow_name(path), document)
+  }
+  const empty = empty_scope_failure("Cargo lock contract", scanned, WORKFLOW_GLOB)
+  if empty != "" {
+    harness.stdio.eprintln(empty)
+    harness.runtime.exit(1)
+  }
+  if len(violations) > 0 {
+    harness.stdio.eprintln("Cargo lock contract violated:")
+    for violation in violations {
+      harness.stdio.eprintln("  ${violation.workflow}:${violation.job}")
+      harness.stdio.eprintln("    ${violation.invocation}")
+    }
+    harness.stdio.eprintln("")
+    harness.stdio.eprintln(
+      "A bare cargo invocation may re-resolve and rewrite Cargo.lock, so CI stops",
+    )
+    harness.stdio.eprintln(
+      "measuring the dependency set the lock pins. Add --locked (or --frozen).",
+    )
+    harness.stdio.eprintln(
+      "Exempt: --archive-file replay steps (nextest rejects --locked there) and",
+    )
+    harness.stdio.eprintln("`cargo install`, where fresh resolution is the measurement.")
+    harness.runtime.exit(1)
+  }
+  harness.stdio.println("Cargo lock contract: OK (${scanned} workflow(s))")
+}

@@ -1203,9 +1203,9 @@ jobs:
           # via argv[0] dispatch; we ship them as symlinks/copies at package
           # time. Building only `harn` runs the expensive final LTO link once
           # per target instead of three times.
-          cargo build --release -p harn-cli --bin harn --target "$HARN_RELEASE_TARGET"
+          cargo build --locked --release -p harn-cli --bin harn --target "$HARN_RELEASE_TARGET"
           if [[ "$HARN_RELEASE_TARGET" == *unknown-linux-gnu ]]; then
-            cargo build --release -p harn-cli --bin harn-container-probe --target "$HARN_RELEASE_TARGET"
+            cargo build --locked --release -p harn-cli --bin harn-container-probe --target "$HARN_RELEASE_TARGET"
           fi
           duration=$((SECONDS - start))
           echo "duration_seconds=${duration}" >> "$GITHUB_OUTPUT"

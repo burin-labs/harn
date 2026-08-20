@@ -119,7 +119,7 @@ jobs:
 
       - name: Build test binaries
         if: steps.touched.outputs.has_tests == 'true'
-        run: cargo test --no-run --workspace
+        run: cargo test --locked --no-run --workspace
 
       - name: Budget-aware flake rerun
         if: steps.touched.outputs.has_tests == 'true'
@@ -207,7 +207,7 @@ jobs:
             iter=$(( completed + 1 ))
             printf -- '--- Iteration %d/%d (%ds budget left) ---\n' "$iter" "$ceiling" "$remaining"
             start=$(date +%s)
-            if ! cargo nextest run \
+            if ! cargo nextest run --locked \
               --workspace \
               --profile flake-detection \
               --test-threads 8 \

@@ -861,6 +861,9 @@ jobs:
         id: release-audit-rust-test
         env:
           HARN_LLM_CALLS_DISABLED: "1"
+        # No --locked: nextest rejects it alongside --archive-file. This step
+        # replays prebuilt binaries and never resolves dependencies, so there is
+        # no lock for the flag to hold.
         run: >-
           scripts/ci/run_rust_test_lane.sh
           cargo nextest run --profile ci
@@ -915,6 +918,9 @@ jobs:
           "$GITHUB_SHA"
       - name: Run Linux sandbox tests
         id: release-audit-rust-security
+        # No --locked: nextest rejects it alongside --archive-file. This step
+        # replays prebuilt binaries and never resolves dependencies, so there is
+        # no lock for the flag to hold.
         run: >-
           scripts/ci/run_rust_test_lane.sh
           cargo nextest run --profile ci
@@ -1172,6 +1178,17 @@ jobs:
       - run: make check-grammar-fitness
       - run: make check-vm-exposures
       - run: make check-generated-registry
+      # Workflow-file contracts. These are registered in `make all` but were
+      # never invoked by any workflow, so they only ran on a developer's
+      # machine. `check_runner_tier.harn` says in its own header that it is
+      # "NOT allowed to skip" because the failure it guards is silent — it
+      # was skipping entirely. `audit-scripts` is gated on the catch-all
+      # `rust` filter, which includes .github/**, so these fire on exactly
+      # the edits they police.
+      - run: make check-cargo-lock-contract
+      - run: make check-rust-test-lane-policy
+      - run: make check-ci-cache-policy
+      - run: make lint-actions-harn
       - run: '"${HARN_BIN:?HARN_BIN not set}" run scripts/verify_release_metadata.harn'
       - name: Check no retroactive CHANGELOG edits
         # GitHub checks out PRs and merge groups as synthetic merge commits.
@@ -1424,14 +1441,14 @@ jobs:
             # Some affected crate sets compile Windows-only surfaces but have
             # no tests matching the core unit filter; the compile itself is
             # still the smoke gate for those PRs.
-            cargo nextest run "${package_args[@]}" --profile ci -E "$windows_filter" --no-tests=warn
+            cargo nextest run --locked "${package_args[@]}" --profile ci -E "$windows_filter" --no-tests=warn
           else
-            cargo test "${package_args[@]}" --no-run
-            cargo test -p harn-lexer -p harn-parser -p harn-stdlib -p harn-vm -p harn-hostlib -p harn-terminal -p harn-fmt -p harn-lint -p harn-modules
+            cargo test --locked "${package_args[@]}" --no-run
+            cargo test --locked -p harn-lexer -p harn-parser -p harn-stdlib -p harn-vm -p harn-hostlib -p harn-terminal -p harn-fmt -p harn-lint -p harn-modules
           fi
           target_dir="${CARGO_TARGET_DIR:-target}"
           if [[ ! -f "$target_dir/debug/harn.exe" ]]; then
-            cargo build -p harn-cli --bin harn
+            cargo build --locked -p harn-cli --bin harn
           fi
       - name: Smoke test harn run
         shell: bash
@@ -1488,7 +1505,7 @@ jobs:
           # the required gate reliable by not depending on dev-only deps
           # cross-compiling cleanly. The recurring cfg-gate break class lives in
           # lib/bin code; test-only cfg breaks stay covered by windows-nightly.yml.
-          cross check --workspace --target x86_64-pc-windows-gnu
+          cross check --locked --workspace --target x86_64-pc-windows-gnu
 
   macos-plan:
     name: macOS CI routing
@@ -1630,7 +1647,7 @@ jobs:
       - name: Verify canonical package hash parity
         run: >-
           scripts/ci/run_rust_test_lane.sh
-          cargo test -p harn-modules canonical_content_hash_projection_is_platform_independent
+          cargo test --locked -p harn-modules canonical_content_hash_projection_is_platform_independent
       - name: Typecheck generated Swift protocol bindings
         shell: bash
         run: xcrun swiftc -typecheck spec/protocol-artifacts/HarnProtocol.swift

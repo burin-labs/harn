@@ -59,6 +59,6 @@ jobs:
       - name: Run full suite at ${{ matrix.threads }} threads
         run: >-
           scripts/ci/run_rust_test_lane.sh
-          cargo nextest run --workspace --test-threads=${{ matrix.threads }}
+          cargo nextest run --locked --workspace --test-threads=${{ matrix.threads }}
         env:
           NEXTEST_PROFILE: ci

@@ -47,6 +47,7 @@ exempt_checks = [
   "check-loud-boundaries",          # loud-boundary invariant registry (#5142), not a generated mirror
   "check-ci-cache-policy",           # validates workflow cache ownership, not a generated mirror
   "check-rust-test-lane-policy",     # validates the CI test-lane stack contract, not a generated mirror
+  "check-cargo-lock-contract",       # validates CI cargo invocations pin the lock, not a generated mirror
   "check-trigger-examples",         # validates example projects parse, not a mirror
   "check-docs-model-refs",          # validates docs track provider aliases, not a mirror
   "check-docs-snippets",            # validates ```harn blocks parse, not a mirror
@@ -580,6 +581,7 @@ make_all = false  # excluded from `make all` for the same reason (no sibling che
 "check-ci-cache-policy" = "source"
 "check-vm-exposures" = "source"
 "check-rust-test-lane-policy" = "source"
+"check-cargo-lock-contract" = "source"
 "lint-test-patterns" = "source"
 "lint-diagnostic-codes" = "source"
 "lint-no-xfail-regression" = "source"
