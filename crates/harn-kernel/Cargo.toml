@@ -10,7 +10,7 @@ description = "Portable compiler, program artifact, and deterministic execution 
 
 [dependencies]
 arcstr = "1"
-blake3 = "1"
+blake3 = "1.8.7"
 harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.107" }
 harn-builtin-registry = { path = "../harn-builtin-registry", version = "=0.10.107" }
 harn-capability-contracts = { path = "../harn-capability-contracts", version = "=0.10.107" }
