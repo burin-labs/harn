@@ -662,9 +662,13 @@ user-message inject. `session/inject` accepts `{sessionId, mode, content}`
 where `content` is a string or ACP content-block array, then responds
 immediately with `status: "accepted"` and an agent-owned `messageId`. Harn
 later delivers the same id as `session/update` with `sessionUpdate:
-"user_message"`. `mode: "steer"` maps to the next safe operation boundary, and
-`mode: "queue"` maps to end-of-interaction delivery. Pending injects can be
-revoked with `session/revoke_inject` or edited in place with
+"user_message"`. `mode: "interrupt_immediate"` drains at the next eligible
+checkpoint and skips a pending tool batch when it arrives before dispatch,
+`mode: "steer"` maps to the next safe operation boundary, and `mode: "queue"`
+maps to end-of-interaction delivery. Agents advertise the modes they support under
+`agentCapabilities.session.inject.modes`; clients should use that capability to
+degrade to `steer` when immediate interruption is unavailable. Pending injects
+can be revoked with `session/revoke_inject` or edited in place with
 `session/replace_inject` before delivery; successful mutation responses return
 `status: "revoked"`, `"already_revoked"`, or `"replaced"`. Races return
 structured error data with `reason: "already_delivered"`,

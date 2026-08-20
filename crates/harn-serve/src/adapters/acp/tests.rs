@@ -1390,7 +1390,7 @@ fn acp_agent_capabilities_use_canonical_initialize_shape() {
     assert_eq!(
         capabilities["session"]["inject"],
         serde_json::json!({
-            "modes": ["queue", "steer"],
+            "modes": ["queue", "steer", "interrupt_immediate"],
             "pending": {"replace": true},
         })
     );

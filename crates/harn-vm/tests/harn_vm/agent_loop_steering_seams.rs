@@ -104,22 +104,32 @@ fn out_lines(raw: &str) -> Vec<String> {
         .collect()
 }
 
-/// Harn pipeline that exercises `pre_tool_dispatch`. When
-/// `push_stop_before_dispatch` is true the stub LLM caller queues an
-/// `interrupt_immediate` bridge injection before returning the tool
-/// call, simulating a host that pressed "STOP" mid-turn. Otherwise the
-/// same script runs without the inject, so the tool dispatches
-/// normally — that's the control case.
-fn race_window_pipeline(session_id: &str, push_stop_before_dispatch: bool) -> String {
-    let push_line = if push_stop_before_dispatch {
-        format!(
+/// Harn pipeline that exercises `pre_tool_dispatch`. The stub LLM caller can
+/// queue either an `interrupt_immediate` reminder or user message before
+/// returning the tool call, simulating a host that pressed "STOP" mid-turn.
+/// The no-injection variant proves the same tool dispatches normally.
+#[derive(Clone, Copy)]
+enum RaceWindowInjection {
+    None,
+    Reminder,
+    User,
+}
+
+fn race_window_pipeline(session_id: &str, injection: RaceWindowInjection) -> String {
+    let push_line = match injection {
+        RaceWindowInjection::Reminder => format!(
             r#"      harness.agent.session_push_bridge_injection(
         "{session_id}",
         {{body: "STOP — abort the push", mode: "interrupt_immediate", role_hint: "system"}},
       )"#
-        )
-    } else {
-        String::new()
+        ),
+        RaceWindowInjection::User => format!(
+            r#"      harness.agent.session_push_user_message(
+        "{session_id}",
+        {{content: "STOP — abort the push", mode: "interrupt_immediate"}},
+      )"#
+        ),
+        RaceWindowInjection::None => String::new(),
     };
     format!(
         r#"
@@ -202,6 +212,21 @@ pipeline main(harness: Harness, task) {{
     }}
   }}
   harness.stdio.log(placeholder_count)
+  let interrupt_user_count = 0
+  for message in messages {{
+    if message?.role == "user" && message?.content == "STOP — abort the push" {{
+      interrupt_user_count = interrupt_user_count + 1
+    }}
+  }}
+  harness.stdio.log(interrupt_user_count)
+  const reminder_events = transcript_events_by_kind(result.transcript, "system_reminder")
+  let stop_reminder_count = 0
+  for event in reminder_events {{
+    if event?.reminder?.body == "STOP — abort the push" {{
+      stop_reminder_count = stop_reminder_count + 1
+    }}
+  }}
+  harness.stdio.log(stop_reminder_count)
 }}
 "#
     )
@@ -211,7 +236,7 @@ pipeline main(harness: Harness, task) {{
 fn pre_tool_dispatch_skips_when_interrupt_immediate_queued_mid_turn() {
     let raw = run_with_bridge(&race_window_pipeline(
         &fresh_session_id("race-window-stops-dispatch"),
-        true,
+        RaceWindowInjection::Reminder,
     ))
     .expect("script must run");
     let lines = out_lines(&raw);
@@ -242,13 +267,54 @@ fn pre_tool_dispatch_skips_when_interrupt_immediate_queued_mid_turn() {
         lines[4], "1",
         "placeholder should carry the interrupted marker; lines: {lines:?}"
     );
+    assert_eq!(
+        lines[5], "0",
+        "reminders must not become user turns; lines: {lines:?}"
+    );
+    assert_eq!(
+        lines[6], "1",
+        "expected one reminder event; lines: {lines:?}"
+    );
+}
+
+#[test]
+fn pre_tool_dispatch_skips_for_interrupt_immediate_user_message() {
+    let raw = run_with_bridge(&race_window_pipeline(
+        &fresh_session_id("race-window-user-stops-dispatch"),
+        RaceWindowInjection::User,
+    ))
+    .expect("script must run");
+    let lines = out_lines(&raw);
+
+    assert_eq!(lines[0], "done", "lines: {lines:?}");
+    assert_eq!(
+        lines[1], "1",
+        "expected one skipped dispatch; lines: {lines:?}"
+    );
+    assert_eq!(
+        lines[2], "1",
+        "expected one placeholder result; lines: {lines:?}"
+    );
+    assert_eq!(lines[3], "0", "the tool must not run; lines: {lines:?}");
+    assert_eq!(
+        lines[4], "1",
+        "expected interrupted placeholder; lines: {lines:?}"
+    );
+    assert_eq!(
+        lines[5], "1",
+        "expected one user-role interrupt; lines: {lines:?}"
+    );
+    assert_eq!(
+        lines[6], "0",
+        "user input must not become a reminder; lines: {lines:?}"
+    );
 }
 
 #[test]
 fn pre_tool_dispatch_dispatches_when_no_injection_queued() {
     let raw = run_with_bridge(&race_window_pipeline(
         &fresh_session_id("race-window-no-stop"),
-        false,
+        RaceWindowInjection::None,
     ))
     .expect("script must run");
     let lines = out_lines(&raw);
@@ -273,6 +339,14 @@ fn pre_tool_dispatch_dispatches_when_no_injection_queued() {
     assert_eq!(
         lines[4], "0",
         "control run must not synthesize placeholders; lines: {lines:?}"
+    );
+    assert_eq!(
+        lines[5], "0",
+        "control must not add a user interrupt; lines: {lines:?}"
+    );
+    assert_eq!(
+        lines[6], "0",
+        "control must not add a reminder; lines: {lines:?}"
     );
 }
 

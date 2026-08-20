@@ -409,8 +409,9 @@ fn bridge_mode_for_session_inject(params: &serde_json::Value) -> Result<&'static
         // is `audit_only` (harn#2212).
         Some("queue") => Ok("audit_only"),
         Some("steer") => Ok("finish_step"),
+        Some("interrupt_immediate" | "interrupt") => Ok("interrupt_immediate"),
         Some(other) => Err(format!(
-            "session/inject: unsupported mode `{other}`; expected `queue` or `steer`"
+            "session/inject: unsupported mode `{other}`; expected `queue`, `steer`, or `interrupt_immediate`"
         )),
         None => Err("session/inject requires mode".to_string()),
     }

@@ -689,7 +689,8 @@ During `initialize`, Harn mirrors the public `agentCapabilities` object from
 upstream ACP: `loadSession`, `promptCapabilities`, `mcpCapabilities`,
 `session.inject`, and the canonical `sessionCapabilities.close` and
 `sessionCapabilities.list` flags are advertised in their upstream locations.
-Harn advertises `session.inject.modes = ["queue", "steer"]` and
+Harn advertises
+`session.inject.modes = ["queue", "steer", "interrupt_immediate"]` and
 `session.inject.pending.replace = true`. Harn also advertises
 `session.remind.modes = ["interrupt_immediate", "finish_step", "audit_only"]`
 and `session.remind.pending = {list: true, revoke: true}` for host-side
@@ -1219,9 +1220,11 @@ Pending inject payload shape:
 }
 ```
 
-`mode: "steer"` delivers at the next safe operation boundary. `mode: "queue"`
-delivers at end-of-interaction. While the message is pending, callers can
-revoke it with `session/revoke_inject` or replace only its content with
+`mode: "interrupt_immediate"` delivers at the next eligible checkpoint. If it
+arrives before tool dispatch, Harn skips the pending tool batch. `mode: "steer"`
+delivers at the next safe operation boundary. `mode: "queue"` delivers at
+end-of-interaction. While the message is pending, callers can revoke it with
+`session/revoke_inject` or replace only its content with
 `session/replace_inject`; replacement preserves the original `messageId`, mode,
 and queue position. Revoke is idempotent for known revoked ids. Revoke or
 replace after delivery returns an `already_delivered` error, and unknown ids
@@ -1253,6 +1256,9 @@ Reminder `mode` values:
 
 Pending inject runtime behavior:
 
+- `interrupt_immediate`: drain at the next immediate checkpoint. If the message
+  arrives before tool dispatch, skip the pending tool batch and deliver the text
+  as a user message on the next model turn.
 - `steer`: deliver after the current operation finishes.
 - `queue`: deliver at the end of the current interaction.
 - Pending injects are session-scoped and survive `session/cancel` and
