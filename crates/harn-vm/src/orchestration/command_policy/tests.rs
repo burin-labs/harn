@@ -91,6 +91,91 @@ fn deterministic_scan_detects_outside_workspace_paths() {
     assert!(labels(&scan).contains(&"outside_workspace".to_string()));
 }
 
+fn is_outside_workspace(command: &str) -> bool {
+    labels(&command_risk_scan_json(&shell_ctx(command), None))
+        .contains(&"outside_workspace".to_string())
+}
+
+/// A space inside a quoted argument does not make its second half a path.
+///
+/// The pairs below hold the regex delimiter constant and move ONE space, so a
+/// failure cannot be explained by anything else. Before the shared tokenizer
+/// owned this, `sed -E 's/^func //'` split into `'s/^func` and `//'`, and the
+/// second fragment was read as an absolute path.
+#[test]
+fn deterministic_scan_does_not_read_a_quoted_regex_as_an_absolute_path() {
+    for command in [
+        "sed 's/x/y/' notes.txt",
+        "sed 's/x /y/' notes.txt",
+        "sed -E 's/^func //' notes.txt",
+        "git log --oneline | sed 's/^/  /'",
+        "echo x/tmp",
+    ] {
+        assert!(
+            !is_outside_workspace(command),
+            "workspace-relative command labelled outside_workspace: {command}"
+        );
+    }
+}
+
+/// KNOWN RESIDUAL, pinned rather than hidden.
+///
+/// An argument that genuinely BEGINS with a slash after quoting is removed is
+/// still read as an absolute path, so an awk pattern such as `/TODO/{print}` is
+/// labelled `outside_workspace`. Quote awareness cannot separate this one: the
+/// word really does start with `/`, and telling it from `/etc/passwd` needs a
+/// judgement about argument position that no tool-agnostic rule here can make.
+///
+/// This test exists so the residual is a recorded decision rather than a
+/// surprise, and so that a later fix has to come here and say what changed.
+#[test]
+fn deterministic_scan_still_flags_a_leading_slash_regex_argument() {
+    assert!(
+        is_outside_workspace("awk '/TODO/{print}' notes.txt"),
+        "if this now passes, the residual was fixed: update this test and say how"
+    );
+}
+
+/// The same change must not relax a real escape, including one hidden behind a
+/// quoted `sh -c` payload that is a single word at the outer level.
+#[test]
+fn deterministic_scan_still_detects_absolute_paths_through_quoting_and_wrappers() {
+    for command in [
+        "cat /etc/passwd",
+        "cat '/etc/passwd'",
+        "cat \"/etc/passwd\"",
+        "sh -c \"cat /etc/passwd\"",
+        "sh -c 'cat /etc/passwd'",
+        "bash -c \"sh -c 'cat /etc/passwd'\"",
+        "echo /tmp",
+        "cat /tmp/work/../secret",
+    ] {
+        assert!(
+            is_outside_workspace(command),
+            "escape not labelled outside_workspace: {command}"
+        );
+    }
+}
+
+/// argv mode must classify identically to the shell string it represents.
+///
+/// `command_text` space-joins argv without quoting, so the argv form of a
+/// quoted regex flattened into a line whose tokenization no longer matched the
+/// arguments the program would receive.
+#[test]
+fn deterministic_scan_reads_argv_boundaries_when_looking_for_paths() {
+    let scan = command_risk_scan_json(&ctx(&["sed", "-E", "s/^func //", "notes.txt"]), None);
+    assert!(
+        !labels(&scan).contains(&"outside_workspace".to_string()),
+        "argv boundaries must survive into the path scan"
+    );
+    let escape = command_risk_scan_json(&ctx(&["sh", "-c", "cat /etc/passwd"]), None);
+    assert!(
+        labels(&escape).contains(&"outside_workspace".to_string()),
+        "the argv wrapper bypass stays closed"
+    );
+}
+
 fn has_write_label(cmd: &str) -> bool {
     let scan = command_risk_scan_json(&ctx(&["sh", "-c", cmd]), None);
     labels(&scan).contains(&"write_intent".to_string())
