@@ -612,6 +612,113 @@ mod tests {
         );
     }
 
+    /// The `HARN_*` names a workflow file ASSIGNS.
+    ///
+    /// Only the assigning forms count. A name that is merely referenced cannot
+    /// put itself into a child process's environment, so it cannot trip
+    /// `validate_startup_environment`; a name a workflow sets can, and will.
+    /// `harn_name_tokens` cannot serve here because it anchors on `"HARN_`,
+    /// and a YAML mapping key is bare.
+    fn workflow_assigned_names(source: &str) -> std::collections::BTreeSet<String> {
+        let mut names = std::collections::BTreeSet::new();
+        for line in source.lines() {
+            let trimmed = line.trim_start();
+            let candidate = trimmed.strip_prefix("export ").unwrap_or(trimmed);
+            let Some(rest) = candidate.strip_prefix("HARN_") else {
+                continue;
+            };
+            let end = rest
+                .find(|c: char| !(c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_'))
+                .unwrap_or(rest.len());
+            if end == 0 {
+                continue;
+            }
+            // `NAME:` is a YAML mapping key and `NAME=` is a shell assignment.
+            // Anything else is prose or a reference on a right-hand side.
+            if !matches!(rest[end..].chars().next(), Some(':') | Some('=')) {
+                continue;
+            }
+            names.insert(format!("HARN_{}", &rest[..end]));
+        }
+        names
+    }
+
+    #[test]
+    fn workflow_name_scan_reads_assignments_and_ignores_references() {
+        let source = concat!(
+            "        env:\n",
+            "          HARN_BUMP_BRANCH: main\n",
+            "        run: |\n",
+            "          export HARN_BUMP_REFRESH=\"$HARN_BUMP_REFRESH_COMMAND\"\n",
+            "          echo \"$HARN_BUMP_TOKEN\"\n",
+            "          # HARN_BUMP_NOT_A_KEY: prose\n",
+        );
+        let names = workflow_assigned_names(source);
+        assert!(names.contains("HARN_BUMP_BRANCH"), "reads a YAML env key");
+        assert!(names.contains("HARN_BUMP_REFRESH"), "reads a shell export");
+        assert!(
+            !names.contains("HARN_BUMP_REFRESH_COMMAND"),
+            "a reference on a right-hand side is not an assignment"
+        );
+        assert!(
+            !names.contains("HARN_BUMP_TOKEN"),
+            "an echoed reference is not an assignment"
+        );
+        assert!(
+            !names.contains("HARN_BUMP_NOT_A_KEY"),
+            "a comment is not an assignment"
+        );
+    }
+
+    /// A workflow that sets an unregistered `HARN_*` name ships a job that dies
+    /// on `HARN-ENV-001` the first time it starts a Harn process. The compiled
+    /// and Harn-script censuses above never see it, because a workflow is
+    /// neither. This closes that hole.
+    #[test]
+    fn every_workflow_assigned_name_is_registered() {
+        let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .nth(2)
+            .expect("harn-vm lives below workspace/crates");
+        let workflows = workspace_root.join(".github/workflows");
+        assert!(
+            workflows.is_dir(),
+            "no workflow directory at {}; this gate would pass by seeing nothing",
+            workflows.display()
+        );
+        let mut scanned = 0usize;
+        let mut missing = std::collections::BTreeSet::new();
+        for entry in walkdir::WalkDir::new(&workflows)
+            .into_iter()
+            .filter_map(Result::ok)
+            .filter(|entry| {
+                entry.file_type().is_file()
+                    && matches!(
+                        entry.path().extension().and_then(OsStr::to_str),
+                        Some("yml") | Some("yaml")
+                    )
+            })
+        {
+            let source = std::fs::read_to_string(entry.path()).expect("read workflow");
+            scanned += 1;
+            for name in workflow_assigned_names(&source) {
+                if variable_spec(&name).is_none() {
+                    missing.insert(format!("{}: {name}", entry.path().display()));
+                }
+            }
+        }
+        assert!(
+            scanned > 0,
+            "scanned no workflow files; the gate cannot see anything"
+        );
+        assert!(
+            missing.is_empty(),
+            "workflow-assigned HARN_* names missing from \
+             environment_registry_names.txt:\n{}",
+            missing.into_iter().collect::<Vec<_>>().join("\n")
+        );
+    }
+
     /// Registered names that no repository source reads, and why they must
     /// stay. Every entry is a standing exception to the reverse drift gate, so
     /// it carries the reason a reader cannot exist in this tree. An entry whose
