@@ -621,6 +621,70 @@ mod budget_rearm_tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
+    async fn active_prompt_interrupt_inject_reaches_the_immediate_checkpoint() {
+        let controls = ConcurrentSessionControls::default();
+        let control = ConcurrentSessionControl::new();
+        control.set_prompt_active(true);
+        controls.register("session-1", control.clone());
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let output = AcpOutput::Channel(tx);
+
+        let handled = controls
+            .preempt_active_prompt_inject(
+                &json!({
+                    "jsonrpc": "2.0",
+                    "id": 8,
+                    "method": "session/inject",
+                    "params": {
+                        "sessionId": "session-1",
+                        "mode": "interrupt_immediate",
+                        "content": "stop before the next tool",
+                    },
+                }),
+                &output,
+            )
+            .await;
+
+        assert!(handled);
+        let response: serde_json::Value =
+            serde_json::from_str(&rx.recv().await.expect("injection response")).expect("json");
+        assert_eq!(response["result"]["status"], "accepted");
+
+        let pending = control.inject_state.pending_injections_json().await;
+        assert_eq!(pending["pendingCount"], 1);
+        assert_eq!(pending["injections"][0]["kind"], "user");
+        assert_eq!(pending["injections"][0]["mode"], "interrupt_immediate");
+        assert_eq!(
+            pending["injections"][0]["content"],
+            "stop before the next tool"
+        );
+
+        let bridge =
+            harn_vm::bridge::HostBridge::from_parts_with_writer_cancel_notify_and_injection_state(
+                Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+                Arc::new(AtomicBool::new(false)),
+                Arc::new(tokio::sync::Notify::new()),
+                Arc::new(|_: &str| Ok(())),
+                1,
+                Some(control.inject_state.clone()),
+            );
+        assert!(
+            bridge
+                .take_queued_user_messages_for(
+                    harn_vm::bridge::DeliveryCheckpoint::AfterCurrentOperation
+                )
+                .await
+                .is_empty(),
+            "interrupt_immediate must not be downgraded to finish_step"
+        );
+        let delivered = bridge
+            .take_queued_user_messages_for(harn_vm::bridge::DeliveryCheckpoint::InterruptImmediate)
+            .await;
+        assert_eq!(delivered.len(), 1);
+        assert_eq!(delivered[0].content, "stop before the next tool");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
     async fn active_prompt_takeover_is_handled_on_the_preemptive_control_lane() {
         let session_id = format!("session-{}", uuid::Uuid::now_v7());
         harn_vm::agent_sessions::open_or_create(Some(session_id.clone()));

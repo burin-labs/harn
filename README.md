@@ -289,8 +289,10 @@ harn replay .harn-runs/<run>.json
 harn eval .harn-runs/<run>.json
 ```
 
-Queued human messages reach an in-flight agent with `session/inject` — `steer` injects after the current
-tool boundary; `queue` defers until the agent yields control.
+Queued human messages reach an in-flight agent with `session/inject` —
+`interrupt_immediate` stops a pending tool batch at the pre-dispatch checkpoint,
+`steer` injects after the current tool boundary, and `queue` defers until the
+agent yields control.
 
 ## Documentation
 

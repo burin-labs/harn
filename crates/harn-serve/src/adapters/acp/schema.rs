@@ -237,7 +237,7 @@ pub(super) fn acp_agent_capabilities() -> serde_json::Value {
         "loadSession": true,
         "session": {
             "inject": {
-                "modes": ["queue", "steer"],
+                "modes": ["queue", "steer", "interrupt_immediate"],
                 "pending": {
                     "replace": true,
                 },

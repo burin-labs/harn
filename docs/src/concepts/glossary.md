@@ -200,12 +200,12 @@ wait for something.
 reminder, queuing a user message, revoking a pending injection, cancelling an
 in-flight tool call. See [Steering seams](./steering-seams.md).
 
-**Inject mode.** The bridge-injection variant for system reminders. Three
-values: `interrupt_immediate` (drain at the next safe seam, including
-`pre_tool_dispatch` — the model's pending tool batch is skipped when one
-arrives there), `finish_step` (drain at the next iteration boundary),
-`audit_only` (drain at loop exit and append to the transcript; the model
-never sees these — use `finish_step` if the model must react before the
+**Inject mode.** The bridge-injection delivery variant for queued user messages
+and system reminders. Three runtime values: `interrupt_immediate` (drain at the
+next safe seam, including `pre_tool_dispatch` — the model's pending tool batch
+is skipped when one arrives there), `finish_step` (drain at the next iteration
+boundary), `audit_only` (drain at loop exit and append to the transcript; the
+model never sees these — use `finish_step` if the model must react before the
 agent terminates). The full seam catalog lives in
 [Steering seams](./steering-seams.md).
 

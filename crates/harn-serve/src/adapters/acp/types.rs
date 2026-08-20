@@ -699,6 +699,8 @@ pub struct AcpEmbeddedResource {
 pub enum AcpSessionInjectMode {
     Queue,
     Steer,
+    #[serde(alias = "interrupt")]
+    InterruptImmediate,
 }
 
 /// `session/inject` content accepts either a plain string or ACP content blocks.
@@ -1107,6 +1109,26 @@ mod tests {
                     "content": [{"type": "text", "text": "interrupt after this step"}],
                 },
             })
+        );
+    }
+
+    #[test]
+    fn session_inject_interrupt_mode_accepts_the_bridge_alias() {
+        let params: AcpSessionInjectParams = serde_json::from_value(serde_json::json!({
+            "sessionId": "sess-1",
+            "mode": "interrupt",
+            "content": "stop before dispatch",
+        }))
+        .expect("interrupt alias deserializes");
+
+        assert_eq!(params.mode, AcpSessionInjectMode::InterruptImmediate);
+        assert_eq!(
+            serde_json::to_value(params.mode).expect("mode serializes"),
+            serde_json::json!("interrupt_immediate")
+        );
+        assert_eq!(
+            super::super::bridge_mode_for_session_inject(&serde_json::json!({"mode": "interrupt"})),
+            Ok("interrupt_immediate")
         );
     }
 
