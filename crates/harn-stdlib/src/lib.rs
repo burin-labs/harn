@@ -195,6 +195,7 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "llm/prompts" => "stdlib/llm/prompts.harn",
     "llm/defaults" => "stdlib/llm/defaults.harn",
     "llm/handlers" => "stdlib/llm/handlers.harn",
+    "llm/resilience" => "stdlib/llm/resilience.harn",
     "llm/tool_telemetry" => "stdlib/llm/tool_telemetry.harn",
     "llm/tool_middleware" => "stdlib/llm/tool_middleware.harn",
     "llm/tool_binder" => "stdlib/llm/tool_binder.harn",
