@@ -9,6 +9,38 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.107
+
+### Added
+
+- Allow ACP clients to inject user-authored steering with `interrupt_immediate`, so it can stop a pending tool batch
+  without misclassifying the text as a host reminder.
+
+### Changed
+
+- **CI now refuses dependency-lock drift instead of silently repairing it.** Every
+  workflow invocation that resolves dependencies passes `--locked`, including the
+  release lanes that build published binaries, which previously resolved freshly at
+  build time. A new `check-cargo-lock-contract` gate keeps this true: it reads the
+  workflow files and fails on a resolving cargo invocation without `--locked` or
+  `--frozen`, exempting only `--archive-file` replay steps (nextest rejects
+  `--locked` there) and `cargo install`, where a fresh resolution is the
+  measurement. Three existing workflow-file contracts that were registered in
+  `make all` but invoked by no workflow now run in CI as well.
+
+### Fixed
+
+- List and range sequence accessors now retain their runtime nilability in the
+  typechecker. This prevents `HARN-LNT-051` from classifying a load-bearing
+  optional-chain guard as a behavior-preserving repair after values flow through
+  `first()`, `last()`, `find()`, bindings, or `??`.
+- The command risk scan no longer reads a quoted regex as an absolute path. It
+  tokenized commands by splitting on whitespace, so a single space inside a quoted
+  argument produced a fragment beginning with `/` — `sed -E 's/^func //'` yielded
+  `//'` — and the command was labelled `outside_workspace` and sent for approval.
+  Path candidates now come from the shell tokenizer the command floor already
+  uses, which respects quoting and still recurses into nested `sh -c` payloads.
+
 ## v0.10.106
 
 ### Added
