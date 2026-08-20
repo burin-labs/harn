@@ -27,7 +27,8 @@ pipeline default(harness: Harness) {
   harness.stdio.println(github_event.raw_payload.issue.title)
   harness.stdio.println(
     github_event.action_intents.find({ intent -> intent.kind == "convert_to_task" })
-      .requires_approval,
+      ?.requires_approval
+      ?? false,
   )
   const missing_source = try {
     triage_normalize(

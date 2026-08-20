@@ -18,5 +18,7 @@ pipeline default(harness: Harness) {
   harness.stdio.println(default_timezone_for_country("US") == nil)
   harness.stdio.println(country_info("ZZ") == nil)
   const all_countries: list<CalendarCountry> = countries()
-  harness.stdio.println(all_countries.find({ country -> country.code == "JP" }).currency_code)
+  harness.stdio.println(
+    all_countries.find({ country -> country.code == "JP" })?.currency_code ?? "missing",
+  )
 }
