@@ -97,12 +97,18 @@ pipeline test(harness: Harness, task) {
   )
   const repair_messages = [
     {role: "user", content: "Fix the include path"},
-    {role: "tool", name: "edit", content: "Applied edit to src/main.cpp: fixed include path"},
+    {
+      role: "tool",
+      name: "edit",
+      content: "Applied edit to src/main.cpp: fixed include path",
+      data: {mutation_status: "applied", changed_paths: ["src/main.cpp"]},
+    },
     {role: "tool", name: "run", content: "src/main.cpp:1:10: error: missing generated/widget.h"},
     {
       role: "tool",
       name: "edit",
       content: "Applied edit to src/main.cpp: included generated/widget.h",
+      data: {mutation_status: "applied", changed_paths: ["src/main.cpp"]},
     },
     {role: "tool", name: "run", content: "All tests passed\nexit code 0"},
     {role: "user", content: "What remains?"},

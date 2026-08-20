@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 const SCHEMA: &str = "harn.agent.repair_ledger.v1";
@@ -27,6 +27,20 @@ struct RepairLedger {
     fixes: Vec<RepairFix>,
     current_diagnostics: Vec<String>,
     open_loops: Vec<RepairLoop>,
+}
+
+#[derive(Deserialize)]
+struct MutationReceipt {
+    mutation_status: MutationStatus,
+    changed_paths: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum MutationStatus {
+    Applied,
+    Unchanged,
+    NotApplied,
 }
 
 pub(super) fn append_repair_ledger_to_summary(summary: String, archived: &[Value]) -> String {
@@ -62,13 +76,15 @@ fn build_repair_ledger(archived: &[Value]) -> Option<RepairLedger> {
                 current_diagnostics = diagnostic_lines;
             }
         }
-        if is_edit_message(tool_name.as_deref(), &text) && !has_diagnostics {
-            fixes.push(RepairFix {
-                file: extract_path(&text).unwrap_or_else(|| "unknown".to_string()),
-                summary: first_meaningful_line(&text),
-                status: "unverified",
-                message_index,
-            });
+        if !has_diagnostics {
+            for file in applied_changed_paths(message) {
+                fixes.push(RepairFix {
+                    summary: trim_for_ledger(&format!("Applied change to {file}")),
+                    file,
+                    status: "unverified",
+                    message_index,
+                });
+            }
         }
     }
 
@@ -160,25 +176,24 @@ fn tool_name(message: &Value) -> Option<String> {
         .map(|name| name.to_ascii_lowercase())
 }
 
-fn is_edit_message(tool_name: Option<&str>, text: &str) -> bool {
-    let lower = text.to_ascii_lowercase();
-    tool_name.is_some_and(|name| {
-        [
-            "edit", "write", "patch", "replace", "create", "delete", "move", "rename",
-        ]
-        .iter()
-        .any(|needle| name.contains(needle))
-    }) || [
-        "applied edit",
-        "updated ",
-        "created ",
-        "deleted ",
-        "wrote ",
-        "patched ",
-        "replaced ",
-    ]
-    .iter()
-    .any(|needle| lower.contains(needle))
+fn applied_changed_paths(message: &Value) -> Vec<String> {
+    let Some(data) = message.get("data") else {
+        return Vec::new();
+    };
+    let Ok(receipt) = serde_json::from_value::<MutationReceipt>(data.clone()) else {
+        return Vec::new();
+    };
+    if !matches!(receipt.mutation_status, MutationStatus::Applied) {
+        return Vec::new();
+    }
+
+    let mut changed_paths = Vec::new();
+    for path in receipt.changed_paths.iter().map(|path| path.trim()) {
+        if !path.is_empty() && !changed_paths.iter().any(|seen| seen == path) {
+            changed_paths.push(path.to_string());
+        }
+    }
+    changed_paths
 }
 
 fn is_verify_message(tool_name: Option<&str>, text: &str) -> bool {
@@ -224,13 +239,6 @@ fn failure_lines(text: &str) -> Vec<String> {
         .collect()
 }
 
-fn first_meaningful_line(text: &str) -> String {
-    text.lines()
-        .find(|line| !line.trim().is_empty())
-        .map(trim_for_ledger)
-        .unwrap_or_else(|| trim_for_ledger(text))
-}
-
 fn trim_for_ledger(text: &str) -> String {
     let trimmed = text.trim();
     if trimmed.chars().count() <= MAX_TEXT_CHARS {
@@ -241,51 +249,6 @@ fn trim_for_ledger(text: &str) -> String {
     clipped
 }
 
-fn extract_path(text: &str) -> Option<String> {
-    text.split_whitespace()
-        .map(|token| {
-            token.trim_matches(|c: char| {
-                matches!(
-                    c,
-                    '`' | '\'' | '"' | ',' | ';' | '(' | ')' | '[' | ']' | '{' | '}'
-                )
-            })
-        })
-        .find_map(normalize_path_token)
-}
-
-fn normalize_path_token(token: &str) -> Option<String> {
-    let trimmed = token
-        .trim_end_matches('.')
-        .trim_end_matches(':')
-        .trim_end_matches(',');
-    if !(trimmed.contains('/') || trimmed.contains('\\')) {
-        return None;
-    }
-    let path = trim_diagnostic_suffix(trimmed);
-    if path.contains('.') || path.contains('/') || path.contains('\\') {
-        Some(path.to_string())
-    } else {
-        None
-    }
-}
-
-#[expect(
-    clippy::string_slice,
-    reason = "idx is a match_indices offset of the ASCII ':' separator"
-)]
-fn trim_diagnostic_suffix(token: &str) -> &str {
-    let mut end = token.len();
-    for (idx, _) in token.match_indices(':') {
-        let rest = &token[idx + 1..];
-        if rest.chars().next().is_some_and(|c| c.is_ascii_digit()) {
-            end = idx;
-            break;
-        }
-    }
-    &token[..end]
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -294,7 +257,12 @@ mod tests {
     #[test]
     fn appends_verified_repair_ledger() {
         let archived = vec![
-            json!({"role": "tool", "name": "edit", "content": "Applied edit to src/main.cpp: fixed include path"}),
+            json!({
+                "role": "tool",
+                "name": "edit",
+                "content": "Applied edit to src/main.cpp: fixed include path",
+                "data": {"mutation_status": "applied", "changed_paths": ["src/main.cpp"]}
+            }),
             json!({"role": "tool", "name": "run", "content": "All tests passed\nexit code 0"}),
         ];
 
@@ -332,13 +300,69 @@ mod tests {
     }
 
     #[test]
+    fn rejects_edit_like_prose_without_a_mutation_receipt() {
+        let archived = vec![json!({
+            "role": "tool",
+            "name": "run",
+            "content": "prints/inspects updated after <runtime_feedback kind=\"post_turn\">"
+        })];
+
+        assert_eq!(
+            append_repair_ledger_to_summary("plain".to_string(), &archived),
+            "plain"
+        );
+    }
+
+    #[test]
+    fn uses_applied_changed_paths_instead_of_paths_from_rendered_prose() {
+        let archived = vec![json!({
+            "role": "tool",
+            "name": "edit",
+            "content": "<runtime_feedback kind=\"post_turn\">\nGuardrail prose mentions prints/inspects",
+            "data": {
+                "mutation_status": "applied",
+                "changed_paths": ["src/lib.rs"]
+            }
+        })];
+
+        let ledger = build_repair_ledger(&archived).expect("ledger");
+
+        assert_eq!(ledger.fixes.len(), 1);
+        assert_eq!(ledger.fixes[0].file, "src/lib.rs");
+        assert!(!ledger.fixes[0].summary.contains("runtime_feedback"));
+        assert!(!ledger.fixes[0].summary.contains("prints/inspects"));
+    }
+
+    #[test]
+    fn rejects_unapplied_or_malformed_mutation_receipts() {
+        for data in [
+            json!({"mutation_status": "not_applied", "changed_paths": ["src/lib.rs"]}),
+            json!({"mutation_status": "applied", "changed_paths": ["src/lib.rs", 7]}),
+            json!({"mutation_status": "applied"}),
+        ] {
+            let archived = vec![json!({
+                "role": "tool",
+                "name": "edit",
+                "content": "Applied edit to src/lib.rs",
+                "data": data
+            })];
+
+            assert!(build_repair_ledger(&archived).is_none());
+        }
+    }
+
+    #[test]
     fn bounds_fixes_and_preserves_unverified_entries() {
         let archived = (0..12)
             .map(|idx| {
                 json!({
                     "role": "tool",
                     "name": "edit",
-                    "content": format!("Applied edit to src/file{idx}.rs")
+                    "content": format!("Applied edit to src/file{idx}.rs"),
+                    "data": {
+                        "mutation_status": "applied",
+                        "changed_paths": [format!("src/file{idx}.rs")]
+                    }
                 })
             })
             .collect::<Vec<_>>();
