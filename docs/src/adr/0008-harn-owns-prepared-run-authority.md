@@ -4,8 +4,9 @@
 
 Accepted on 2026-08-14 for
 [#6662](https://github.com/burin-labs/harn/issues/6662), and extended by
-[#6666](https://github.com/burin-labs/harn/issues/6666) and
-[#6667](https://github.com/burin-labs/harn/issues/6667).
+[#6666](https://github.com/burin-labs/harn/issues/6666),
+[#6667](https://github.com/burin-labs/harn/issues/6667), and
+[#6860](https://github.com/burin-labs/harn/issues/6860).
 
 ## Context
 
@@ -50,6 +51,13 @@ requirement through the same canonical permission evaluator used by execution.
 Network requirements additionally use the canonical `NetPolicy` evaluator.
 Reviewable requirements are grouped by semantic authority family and
 fingerprinted as one approval batch.
+
+The host constructs a `RunApprovalPolicy` from one `RunAuthorityPosture` that
+contains interactivity, approval availability, and workspace trust. A
+host-materialized isolated workspace is a declared run fact, not a path pattern
+or durable trust-store entry. When a non-interactive run cannot obtain
+approval, construction resolves every `ask` disposition to `deny` before
+preparation or tool dispatch can use the policy.
 
 A successful decision creates an opaque, time-bounded `AuthorityLease` bound
 to the plan, exact normalized requirements, canonical policies, and deciders.

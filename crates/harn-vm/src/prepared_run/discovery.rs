@@ -27,7 +27,7 @@ impl<E> PreparedRun<E> {
         let probe_fingerprint = requirement_fingerprint(&probe_requirement);
         let mut diagnostics = validate_probe(lease, &probe_requirement, &probe_fingerprint, now_ms);
         let evaluation = evaluate_requirement(
-            &lease.approval_policy,
+            lease.approval_policy.effective(),
             &lease.net_policy,
             &probe_requirement,
         );
@@ -101,7 +101,8 @@ impl<E> PreparedRun<E> {
         }
 
         if !diagnostics.is_empty() {
-            if lease.approval_availability == ApprovalAvailability::Available
+            if lease.approval_policy.posture().approval_availability
+                == ApprovalAvailability::Available
                 && lease.plan.interactivity == RunInteractivity::Interactive
             {
                 lease.prior_denied.extend(denied);

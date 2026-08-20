@@ -3,7 +3,11 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-use crate::orchestration::{CapabilityPolicy, ToolApprovalPolicy};
+use crate::orchestration::CapabilityPolicy;
+
+pub use crate::orchestration::{
+    ApprovalAvailability, RunApprovalPolicy, RunAuthorityPosture, RunInteractivity, WorkspaceTrust,
+};
 
 use super::receipt::RunAuthorityReceipt;
 
@@ -11,20 +15,6 @@ pub const RUN_AUTHORITY_PLAN_SCHEMA: &str = "harn.run_authority_plan.v1";
 pub const RUN_AUTHORITY_RECEIPT_SCHEMA: &str = "harn.run_authority.v1";
 pub const RUN_AUTHORITY_PLAN_V1_SCHEMA_JSON: &str =
     include_str!("../../schemas/run-authority-plan.v1.json");
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum RunInteractivity {
-    Interactive,
-    NonInteractive,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ApprovalAvailability {
-    Available,
-    Unavailable,
-}
 
 /// Prepared-run receipts reuse the canonical permission activity decider
 /// vocabulary rather than defining a host-specific approval taxonomy.
@@ -403,8 +393,7 @@ pub struct RunIntent {
 #[derive(Clone, Debug)]
 pub struct HostFacts {
     pub capability_ceiling: CapabilityPolicy,
-    pub approval_policy: ToolApprovalPolicy,
-    pub approval_availability: ApprovalAvailability,
+    pub approval_policy: RunApprovalPolicy,
     pub approved_batches: BTreeMap<String, AuthorityDecider>,
     pub net_policy: crate::harness_net::NetPolicy,
     pub secret_bindings: BTreeSet<SecretRequirement>,
@@ -527,10 +516,9 @@ pub struct AuthorityLease {
     pub(crate) plan: RunAuthorityPlanV1,
     pub(crate) requested_fingerprints: BTreeMap<String, AuthorityRequirement>,
     pub(crate) requirement_fingerprints: BTreeMap<String, AuthorityRequirement>,
-    pub(crate) approval_policy: ToolApprovalPolicy,
+    pub(crate) approval_policy: RunApprovalPolicy,
     pub(crate) net_policy: crate::harness_net::NetPolicy,
     pub(crate) deciders: BTreeMap<String, AuthorityDecider>,
-    pub(crate) approval_availability: ApprovalAvailability,
     pub(crate) prior_used: BTreeSet<String>,
     pub(crate) prior_denied: Vec<super::receipt::DeniedAuthority>,
     pub(crate) prior_policy_decisions: Vec<super::receipt::PolicyDecisionEvidence>,
@@ -553,5 +541,9 @@ impl AuthorityLease {
 
     pub fn plan(&self) -> &RunAuthorityPlanV1 {
         &self.plan
+    }
+
+    pub fn posture(&self) -> RunAuthorityPosture {
+        self.approval_policy.posture()
     }
 }

@@ -7,6 +7,7 @@ mod effect_call_cache;
 mod effects;
 mod nested_budget;
 mod operator_grant;
+mod run_approval;
 mod runtime_effect_state;
 pub(crate) mod tool_enforcement;
 mod types;
@@ -55,6 +56,9 @@ pub(crate) use operator_grant::{
 pub use operator_grant::{
     current_operator_approval_grant, install_operator_approval_grant, OperatorApprovalGrant,
     OperatorApprovalGrantGuard,
+};
+pub use run_approval::{
+    ApprovalAvailability, RunApprovalPolicy, RunAuthorityPosture, RunInteractivity, WorkspaceTrust,
 };
 pub(crate) use runtime_effect_state::RuntimeEffectState;
 pub use tool_enforcement::enforce_current_policy_for_tool;

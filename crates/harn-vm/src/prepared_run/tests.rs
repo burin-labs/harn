@@ -7,8 +7,8 @@ use serde_json::json;
 
 use crate::harness_net::{NetPolicy, NetPolicyDefault, NetPolicyRule, OnViolation};
 use crate::orchestration::{
-    CapabilityPolicy, ProcessSandboxPolicy, ProcessSandboxPreset, SandboxProfile,
-    ToolApprovalPolicy,
+    CapabilityPolicy, ProcessSandboxPolicy, ProcessSandboxPreset, RunApprovalPolicy,
+    RunAuthorityPosture, SandboxProfile, ToolApprovalPolicy, WorkspaceTrust,
 };
 
 use super::*;
@@ -217,6 +217,21 @@ fn approval_policy() -> ToolApprovalPolicy {
     .expect("approval policy")
 }
 
+fn run_approval_policy(
+    interactivity: RunInteractivity,
+    approval_availability: ApprovalAvailability,
+    workspace_trust: WorkspaceTrust,
+) -> RunApprovalPolicy {
+    RunApprovalPolicy::construct(
+        RunAuthorityPosture {
+            interactivity,
+            approval_availability,
+            workspace_trust,
+        },
+        |_| approval_policy(),
+    )
+}
+
 fn net_policy() -> NetPolicy {
     NetPolicy {
         allow: Arc::new(vec![NetPolicyRule::parse_host(
@@ -233,8 +248,11 @@ fn net_policy() -> NetPolicy {
 fn host_facts() -> HostFacts {
     HostFacts {
         capability_ceiling: capability_policy(),
-        approval_policy: approval_policy(),
-        approval_availability: ApprovalAvailability::Available,
+        approval_policy: run_approval_policy(
+            RunInteractivity::NonInteractive,
+            ApprovalAvailability::Available,
+            WorkspaceTrust::Trusted,
+        ),
         approved_batches: BTreeMap::new(),
         net_policy: net_policy(),
         secret_bindings: BTreeSet::from([provider_secret("openai")]),
@@ -327,6 +345,140 @@ fn approved_lease<E>(
             authority_lease, ..
         } => authority_lease,
         other => panic!("approved plan must be ready, got {other:?}"),
+    }
+}
+
+fn unattended_policy(workspace_trust: WorkspaceTrust) -> RunApprovalPolicy {
+    RunApprovalPolicy::construct(
+        RunAuthorityPosture {
+            interactivity: RunInteractivity::NonInteractive,
+            approval_availability: ApprovalAvailability::Unavailable,
+            workspace_trust,
+        },
+        |posture| {
+            let rules = if posture.workspace_trust.permits_project_policy() {
+                json!([])
+            } else {
+                json!([{
+                    "id": "workspace-untrusted-read-only",
+                    "action": "deny",
+                    "match": {"tool": "prepared_run.filesystem"},
+                    "reason": "workspace is untrusted"
+                }])
+            };
+            serde_json::from_value(json!({
+                "allow_sensitive_paths": true,
+                "allow_external_paths": true,
+                "rules": rules
+            }))
+            .expect("unattended policy")
+        },
+    )
+}
+
+#[test]
+fn host_materialized_workspace_is_ready_without_path_inference_or_approval() {
+    let model_calls = Arc::new(AtomicUsize::new(0));
+    let run = PreparedRun::with_clock(
+        FixtureExecutor {
+            requirements: vec![AuthorityRequirement::FilesystemWrite {
+                root: "/workspace".to_string(),
+            }],
+            model_calls: model_calls.clone(),
+        },
+        Arc::new(MemoryAuthorityReceiptSink::default()),
+        Arc::new(|| NOW_MS),
+    );
+
+    let mut materialized_host = host_facts();
+    materialized_host.approval_policy = unattended_policy(WorkspaceTrust::HostMaterialized);
+    let lease = match run.prepare(intent(), materialized_host) {
+        PreparationOutcome::Ready {
+            authority_lease,
+            receipt,
+        } => {
+            assert!(receipt
+                .policy_decisions
+                .iter()
+                .all(|decision| { decision.policy_decision["action"] == "allow" }));
+            authority_lease
+        }
+        other => panic!("declared host-materialized workspace must be ready, got {other:?}"),
+    };
+    assert_eq!(
+        lease.posture().workspace_trust,
+        WorkspaceTrust::HostMaterialized
+    );
+    match run.execute(lease) {
+        ExecutionOutcome::Completed { .. } => {}
+        ExecutionOutcome::Failed { error, .. } => panic!("materialized run failed: {error}"),
+    }
+    assert_eq!(model_calls.load(Ordering::SeqCst), 1);
+
+    let mut untrusted_host = host_facts();
+    untrusted_host.approval_policy = unattended_policy(WorkspaceTrust::Untrusted);
+    match run.prepare(intent(), untrusted_host) {
+        PreparationOutcome::Blocked { diagnostics, .. } => assert!(diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "policy_denied"
+                && diagnostic.message == "workspace is untrusted")),
+        other => panic!("untrusted control must still block, got {other:?}"),
+    }
+}
+
+#[test]
+fn unavailable_noninteractive_asks_are_decided_during_policy_construction() {
+    let run = PreparedRun::with_clock(
+        FixtureExecutor {
+            requirements: Vec::new(),
+            model_calls: Arc::new(AtomicUsize::new(0)),
+        },
+        Arc::new(MemoryAuthorityReceiptSink::default()),
+        Arc::new(|| NOW_MS),
+    );
+    let mut host = host_facts();
+    host.approval_policy = run_approval_policy(
+        RunInteractivity::NonInteractive,
+        ApprovalAvailability::Unavailable,
+        WorkspaceTrust::Trusted,
+    );
+
+    match run.prepare(intent(), host) {
+        PreparationOutcome::Blocked { diagnostics, .. } => {
+            assert!(diagnostics.iter().any(|diagnostic| {
+                diagnostic.code == "policy_denied"
+                    && diagnostic.message.starts_with("approval unavailable:")
+            }));
+            assert!(!diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "approval_unavailable"));
+        }
+        other => panic!("unsatisfiable asks must be resolved to policy denials, got {other:?}"),
+    }
+}
+
+#[test]
+fn prepared_run_rejects_policy_constructed_for_another_interactivity_posture() {
+    let run = PreparedRun::with_clock(
+        FixtureExecutor {
+            requirements: Vec::new(),
+            model_calls: Arc::new(AtomicUsize::new(0)),
+        },
+        Arc::new(MemoryAuthorityReceiptSink::default()),
+        Arc::new(|| NOW_MS),
+    );
+    let mut host = host_facts();
+    host.approval_policy = run_approval_policy(
+        RunInteractivity::Interactive,
+        ApprovalAvailability::Available,
+        WorkspaceTrust::Trusted,
+    );
+
+    match run.prepare(intent(), host) {
+        PreparationOutcome::Blocked { diagnostics, .. } => assert!(diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "approval_policy_posture_mismatch")),
+        other => panic!("mismatched construction posture must block, got {other:?}"),
     }
 }
 
@@ -884,7 +1036,7 @@ fn malicious_toolchain_probe_widening_blocks_noninteractive_execution() {
     let mut host = host_facts();
     host.toolchain_probes.insert(probe.clone());
     let mut lease = approved_lease(&run, &run_intent, &host);
-    lease.approval_availability = ApprovalAvailability::Unavailable;
+    lease.approval_policy = unattended_policy(WorkspaceTrust::HostMaterialized);
 
     let outcome = run.discover_toolchain(
         &mut lease,
@@ -943,6 +1095,11 @@ fn interactive_toolchain_widening_returns_one_semantically_grouped_batch() {
     run_intent.interactivity = RunInteractivity::Interactive;
     run_intent.toolchain_probes = vec![probe.clone()];
     let mut host = host_facts();
+    host.approval_policy = run_approval_policy(
+        RunInteractivity::Interactive,
+        ApprovalAvailability::Available,
+        WorkspaceTrust::Trusted,
+    );
     host.toolchain_probes.insert(probe.clone());
     let mut lease = approved_lease(&run, &run_intent, &host);
 
