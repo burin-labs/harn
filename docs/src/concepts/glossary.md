@@ -64,6 +64,14 @@ authority-free portable-kernel program artifact.
 host-owned authority. The host may deny it or resume the authenticated
 snapshot with a matching typed result.
 
+**Run authority posture.** The typed combination of run interactivity,
+approval availability, and workspace trust used to construct one run approval
+policy before execution.
+
+**Host-materialized workspace.** An isolated workspace created by the host for
+one run. Its trust is a run fact and is not written to a durable per-path trust
+store.
+
 **Child VM.** The isolated interpreter instance created for a `spawn` or
 `parallel` child task. Captured values are copied into it. Explicit shared
 handles such as channels, shared cells/maps, mailboxes, and sync permits are

@@ -7,8 +7,14 @@ hosts, headless runners, and hosted schedulers that embed `harn-vm`.
 The host constructs a value-free `RunIntent` from the workflow's compiled
 `CapabilityPolicy` and its additional network, secret-consumer, environment,
 socket, MCP, budget, provenance, and startup requirements. `HostFacts` contains
-observed ceilings and the canonical permission and network evaluators. Calling
-`prepare` yields one of three outcomes:
+observed ceilings and the canonical permission and network evaluators. Its
+permission evaluator is a `RunApprovalPolicy`, constructed from one typed
+`RunAuthorityPosture`: run interactivity, approval availability, and workspace
+trust. Hosts use `WorkspaceTrust::HostMaterialized` for isolated workspaces they
+created for CI, eval, scheduled, or hosted execution; this is a run fact, not a
+durable per-path trust-store entry. `permits_project_policy` returns false for
+`WorkspaceTrust::Untrusted` and true for `Trusted` and `HostMaterialized`.
+Calling `prepare` yields one of three outcomes:
 
 - `Ready` contains an opaque fingerprinted lease and a persisted readiness
   receipt.
@@ -35,6 +41,14 @@ non-interactive access and cannot invoke GUI-capable keyring APIs. Environment
 and dotenv credentials should be moved into a zeroizing process-local provider
 and scrubbed from the process environment before workload execution. Durable
 secrets remain behind a host broker outside the workload sandbox.
+
+When a run is both non-interactive and unable to obtain approval,
+`RunApprovalPolicy::construct` resolves every rule, legacy pattern, and repeat
+guard whose disposition is `ask` to a deterministic denial. The resulting
+policy can therefore never defer to a human who does not exist. The host's
+construction callback receives the same posture and selects its workspace
+policy layers from `workspace_trust`; it must not infer this fact from a path
+layout.
 
 `discover_toolchain` is the only command-derived root path. Preparation reviews
 the exact command and a read-root ceiling, then persists readiness. Only after

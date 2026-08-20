@@ -104,7 +104,7 @@ impl<E> PreparedRun<E> {
         let mut deciders = BTreeMap::new();
         for authority in &requested {
             let evaluation = evaluate_requirement(
-                &host_facts.approval_policy,
+                host_facts.approval_policy.effective(),
                 &host_facts.net_policy,
                 &authority.requirement,
             );
@@ -154,7 +154,9 @@ impl<E> PreparedRun<E> {
         if let Some(batch) = approval_batch.as_ref() {
             let approved = host_facts.approved_batches.get(&batch.batch_fingerprint);
             if approved.is_none() {
-                if host_facts.approval_availability == ApprovalAvailability::Unavailable {
+                if host_facts.approval_policy.posture().approval_availability
+                    == ApprovalAvailability::Unavailable
+                {
                     let mut diagnostics = vec![diagnostic(
                         "approval_unavailable",
                         "the prepared run requires approval but this host cannot obtain one",
@@ -217,6 +219,7 @@ impl<E> PreparedRun<E> {
                 &plan_fingerprint,
                 requirement_fingerprints.keys().collect::<Vec<_>>(),
                 &deciders,
+                host_facts.approval_policy.posture(),
                 now_ms,
                 expires_at_ms,
             ),
@@ -231,7 +234,6 @@ impl<E> PreparedRun<E> {
             approval_policy: host_facts.approval_policy,
             net_policy: host_facts.net_policy,
             deciders: deciders.clone(),
-            approval_availability: host_facts.approval_availability,
             prior_used: BTreeSet::new(),
             prior_denied: Vec::new(),
             prior_policy_decisions: Vec::new(),
@@ -288,7 +290,7 @@ impl<E> PreparedRun<E> {
             ));
         }
         match evaluate_requirement(
-            &authority_lease.approval_policy,
+            authority_lease.approval_policy.effective(),
             &authority_lease.net_policy,
             &requirement,
         ) {
@@ -413,7 +415,7 @@ impl<'a> AuthorityUse<'a> {
             );
         };
         let evaluation = match evaluate_requirement(
-            &self.lease.approval_policy,
+            self.lease.approval_policy.effective(),
             &self.lease.net_policy,
             requirement,
         ) {
@@ -708,6 +710,14 @@ fn validate_host_facts(
     now_ms: u64,
 ) -> Vec<AuthorityDiagnostic> {
     let mut diagnostics = Vec::new();
+    if host.approval_policy.posture().interactivity != plan.interactivity {
+        diagnostics.push(diagnostic(
+            "approval_policy_posture_mismatch",
+            "approval policy was constructed for a different run interactivity posture",
+            None,
+            "Construct the approval policy from the same typed posture as the run intent.",
+        ));
+    }
     if plan.intent_id.is_empty() {
         diagnostics.push(diagnostic(
             "empty_intent_id",
