@@ -1,2 +1,6 @@
-repeated_error
-true
+harn.agent_non_retryable_denial_cutoff.v1
+2
+tool_policy_rejected
+runtime_error
+harness
+repeated_non_retryable_denial

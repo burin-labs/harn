@@ -1,0 +1,201 @@
+// Run: harn test tests/agent/non_retryable_denial_cutoff_test.harn
+//
+// Regression coverage for #6865: two consecutive identical permanent tool
+// denials terminate as a harness-owned policy rejection. Retryable denials and
+// permanent denials separated by a successful permitted approach remain live.
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
+import { AgentSpec } from "std/agent/options"
+import { llm_text, with_llm_script } from "std/testing"
+
+fn toolset() {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "edit",
+    "Edit a file.",
+    {
+      handler: { args -> "wrote " + args.path },
+      parameters: {
+        path: {type: "string", description: "Path to edit"},
+        text: {type: "string", description: "Replacement text"},
+      },
+      returns: {type: "string"},
+      annotations: {kind: "write"},
+    },
+  )
+  tools = tool_define(
+    tools,
+    "look",
+    "Read a file.",
+    {
+      handler: { args -> "contents of " + args.path },
+      parameters: {path: {type: "string", description: "Path to read"}},
+      returns: {type: "string"},
+      annotations: {kind: "read"},
+    },
+  )
+  return tools
+}
+
+fn edit_call(id) {
+  return {
+    text: "",
+    tool_calls: [{id: id, name: "edit", arguments: {path: "src/app.rs", text: "fixed"}}],
+  }
+}
+
+fn look_call(id) {
+  return {text: "", tool_calls: [{id: id, name: "look", arguments: {path: "src/app.rs"}}]}
+}
+
+fn terminal_lifecycle(events) {
+  return events.filter({ event -> event.type == "tool_call_update" && event.status == "failed" })
+}
+
+fn cutoff_receipts(events) {
+  return events.filter(
+    { event ->
+      event.type == "typed_checkpoint"
+        && event.checkpoint?.schema
+        == "harn.agent_non_retryable_denial_cutoff.v1"
+    },
+  )
+}
+
+fn base_opts(session, extra = {}) {
+  const opts: AgentSpec = {
+    provider: "mock",
+    tools: toolset(),
+    tool_format: "native",
+    loop_until_done: true,
+    done_sentinel: "##DONE##",
+    done_judge: nil,
+    max_iterations: 4,
+    final_wrapup: false,
+    session_id: session,
+    stall_diagnostics: {enabled: false},
+  }
+  return opts + extra
+}
+
+pipeline test_repeated_permanent_denial_cuts_as_harness_infra(harness: Harness, task) {
+  with_llm_script(
+    harness.llm,
+    [edit_call("edit-1"), edit_call("edit-2"), edit_call("edit-3"), edit_call("edit-4")],
+    { ->
+      const session = "permanent-denial-cutoff-" + harness.random.uuid()
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(
+          harness,
+          "Edit src/app.rs.",
+          nil,
+          base_opts(session, {approval_policy: {auto_deny: ["edit"]}}),
+        ) },
+      )
+      const denials = terminal_lifecycle(captured.events)
+      assert_eq(len(denials), 2)
+      assert_eq(denials[0].tool_name, "edit")
+      assert_eq(denials[1].tool_name, "edit")
+      assert_eq(denials[0].raw_output.denial.retryable, false)
+      assert_eq(denials[1].raw_output.denial.retryable, false)
+      assert_eq(denials[0].raw_output.denial.gate, denials[1].raw_output.denial.gate)
+      assert_eq(denials[0].raw_output.denial.reason, denials[1].raw_output.denial.reason)
+      assert_eq(len(harness.llm.mock_calls()), 2)
+      assert_eq(captured.result.status, "error")
+      assert_eq(captured.result.terminal_class, "tool_policy_rejected")
+      assert_eq(captured.result.terminal.kind, "runtime_error")
+      assert_eq(captured.result.terminal.owner, "harness")
+      assert_eq(captured.result.stop_reason, "repeated_non_retryable_denial")
+      const receipts = cutoff_receipts(captured.events)
+      assert_eq(len(receipts), 1)
+      assert_eq(receipts[0].checkpoint.kind, "non_retryable_denial_cutoff")
+      assert_eq(receipts[0].checkpoint.repeat_count, 2)
+      assert_eq(receipts[0].checkpoint.tool_names, ["edit"])
+    },
+  )
+}
+
+pipeline test_retryable_denial_does_not_cut(harness: Harness, task) {
+  with_llm_script(
+    harness.llm,
+    [edit_call("retryable-1"), edit_call("retryable-2"), llm_text("Recovered. ##DONE##")],
+    { ->
+      const session = "retryable-denial-" + harness.random.uuid()
+      const retryable_caller = { envelope, _next ->
+        const denial = {
+          gate: "arg_constraint",
+          capability: "workspace.write_text",
+          denied_paths: [envelope.tool_args.path],
+          retryable: true,
+          reason: "Use a path inside the allowed workspace scope.",
+        }
+        return {
+          ok: false,
+          status: "error",
+          tool_name: envelope.tool_name,
+          tool_call_id: envelope.call_id,
+          arguments: envelope.tool_args,
+          result: {error: "permission_denied", denial: denial},
+          error: "permission_denied",
+          error_category: "permission_denied",
+          denial: denial,
+          observation: "[result of edit]\npermission_denied\n[end of edit result]\n",
+          mutation_status: "not_applied",
+        }
+      }
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(
+          harness,
+          "Edit the permitted file.",
+          nil,
+          base_opts(session, {tool_caller: retryable_caller}),
+        ) },
+      )
+      const denials = terminal_lifecycle(captured.events)
+      assert_eq(len(denials), 2)
+      assert_eq(denials[0].raw_output.denial.retryable, true)
+      assert_eq(denials[1].raw_output.denial.retryable, true)
+      assert_eq(captured.result.status, "done")
+      assert_eq(len(harness.llm.mock_calls()), 3)
+      assert_eq(len(cutoff_receipts(captured.events)), 0)
+    },
+  )
+}
+
+pipeline test_permanent_denial_with_permitted_progress_does_not_cut(harness: Harness, task) {
+  with_llm_script(
+    harness.llm,
+    [
+      edit_call("recover-edit-1"),
+      look_call("recover-look"),
+      edit_call("recover-edit-2"),
+      llm_text("Used the permitted read path to recover. ##DONE##"),
+    ],
+    { ->
+      const session = "permanent-denial-recovery-" + harness.random.uuid()
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(
+          harness,
+          "Inspect src/app.rs and report the required edit.",
+          nil,
+          base_opts(session, {approval_policy: {auto_deny: ["edit"]}}),
+        ) },
+      )
+      const denials = terminal_lifecycle(captured.events)
+      assert_eq(len(denials), 2)
+      assert_eq(denials[0].raw_output.denial.retryable, false)
+      assert_eq(denials[1].raw_output.denial.retryable, false)
+      assert(contains(captured.result.tools.successful, "look"))
+      assert_eq(captured.result.status, "done")
+      assert_eq(len(harness.llm.mock_calls()), 4)
+      assert_eq(len(cutoff_receipts(captured.events)), 0)
+    },
+  )
+}

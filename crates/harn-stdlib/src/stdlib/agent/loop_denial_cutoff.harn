@@ -1,0 +1,201 @@
+import "std/agent/loop_result_status"
+import "std/agent/loop_turn_options"
+import { agent_emit_event, agent_session_record_usage } from "std/agent/state"
+
+pub type AgentPostDispatchUsage = {
+  tokens_used: int,
+  cost_usd: float?,
+  known_cost_usd: float,
+  input_tokens?: int,
+  output_tokens?: int,
+  cache_read_tokens: int,
+  cache_write_tokens: int,
+  unpriced_calls: int,
+  usage_unknown_calls: int,
+}
+
+pub type AgentPostDispatchTerminal = {
+  reason: string,
+  error: {
+    terminal_class: string,
+    category: string,
+    error_category: string,
+    reason: string,
+    message: string,
+  },
+}
+
+pub type AgentPostDispatchResult = {
+  totals: AgentPostDispatchUsage,
+  bridge_step_delivered: int,
+  terminal: AgentPostDispatchTerminal?,
+}
+
+fn __tool_result_denial(result) {
+  if type_of(result?.denial) == "dict" {
+    return result.denial
+  }
+  if type_of(result?.result?.denial) == "dict" {
+    return result.result.denial
+  }
+  return nil
+}
+
+/**
+ * Return a secret-safe identity for a dispatch made entirely of permanent
+ * denials. Call IDs and denial repeat counters are deliberately excluded: a
+ * model reissuing the same call receives a fresh ID, and some gates increment
+ * their own diagnostic counter on every refusal.
+ *
+ * A mixed batch returns nil. In particular, one successful or retryable result
+ * proves that this dispatch still had a live route and must not trip the
+ * permanent-denial cutoff.
+ *
+ * @effects: []
+ * @errors: []
+ */
+fn __non_retryable_denial_signature(dispatch) {
+  const results = __dispatch_results_list(dispatch)
+  if len(results) == 0 {
+    return nil
+  }
+  let identities = []
+  for result in results {
+    const denial = __tool_result_denial(result)
+    if denial == nil || denial?.retryable != false || __tool_result_ok(result) {
+      return nil
+    }
+    identities = identities.appending(
+      {
+        tool_name: __tool_result_name(result),
+        arguments: result?.arguments ?? {},
+        gate: denial?.gate ?? "",
+        capability: denial?.capability,
+        denied_paths: denial?.denied_paths ?? [],
+        reason: denial?.reason ?? "",
+        denial_class: denial?.denial_class,
+        side_effect_ceiling: denial?.side_effect_ceiling,
+        machine_reason: denial?.machine_reason,
+      },
+    )
+  }
+  return "sha256:" + sha256(json_stringify(identities))
+}
+
+fn __emit_non_retryable_denial_cutoff(
+  agent: HarnessAgent,
+  session_id,
+  iteration,
+  current_max,
+  dispatch,
+  denial_signature,
+) {
+  agent_emit_event(
+    agent,
+    session_id,
+    "typed_checkpoint",
+    {
+      schema: "harn.agent_non_retryable_denial_cutoff.v1",
+      kind: "non_retryable_denial_cutoff",
+      iteration: iteration,
+      repeat_count: 2,
+      tool_names: __tool_names_by_status(dispatch, false),
+      denial_signature: denial_signature,
+    },
+  )
+  agent_emit_event(
+    agent,
+    session_id,
+    "loop_control_decision",
+    {
+      iteration: iteration,
+      action: "stop",
+      old_limit: current_max,
+      new_limit: current_max,
+      reason: "repeated_non_retryable_denial",
+      status: "error",
+    },
+  )
+}
+
+/**
+ * Own post-dispatch accounting and the permanent-denial terminal decision.
+ * Returning the terminal envelope keeps the loop driver responsible only for
+ * assigning its mutable terminal state and leaving the iteration loop.
+ *
+ * @effects: [agent]
+ * @errors: []
+ */
+pub fn __agent_loop_post_dispatch(
+  harness: Harness,
+  session_id,
+  llm_result,
+  turn_llm_opts,
+  iteration_index,
+  tool_calls,
+  visible_text,
+  loop_start_ms,
+  current_max,
+  dispatch,
+  prior_dispatch,
+) -> AgentPostDispatchResult {
+  const iteration = iteration_index + 1
+  const totals = agent_session_record_usage(
+    harness.agent,
+    session_id,
+    llm_result,
+    turn_llm_opts,
+    iteration,
+  )
+  agent_emit_event(
+    harness.agent,
+    session_id,
+    "iteration_end",
+    {
+      iteration: iteration,
+      iteration_info: __agent_loop_iteration_info(
+        harness.agent,
+        harness.clock,
+        session_id,
+        llm_result,
+        len(tool_calls),
+        visible_text,
+        totals,
+        loop_start_ms,
+      ),
+    },
+  )
+  const checkpoint = agent_stage(
+    harness.agent,
+    session_id,
+    "post_tool_dispatch",
+    {iteration: iteration},
+  )
+  const denial_signature = __non_retryable_denial_signature(dispatch)
+  const prior_signature = __non_retryable_denial_signature(prior_dispatch)
+  if denial_signature != nil && denial_signature == prior_signature {
+    __emit_non_retryable_denial_cutoff(
+      harness.agent,
+      session_id,
+      iteration,
+      current_max,
+      dispatch,
+      denial_signature,
+    )
+    return {
+      totals: totals,
+      bridge_step_delivered: checkpoint.delivered,
+      terminal: {
+        reason: "repeated_non_retryable_denial",
+        error: {
+          terminal_class: "tool_policy_rejected",
+          category: "tool_rejected",
+          error_category: "permission_denied",
+          reason: "repeated_non_retryable_denial",
+          message: "The same non-retryable tool denial occurred twice consecutively.",
+        },
+      },
+    }
+  }
+  return {totals: totals, bridge_step_delivered: checkpoint.delivered, terminal: nil}
+}

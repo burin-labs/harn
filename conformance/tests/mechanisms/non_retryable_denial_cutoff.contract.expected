@@ -1,0 +1,5 @@
+trigger_repeated_permanent_denial=true
+effect_typed_cutoff_at_two=true
+effect_harness_infra_terminal=true
+negative_retryable_denial_not_cut=true
+negative_permitted_progress_not_cut=true

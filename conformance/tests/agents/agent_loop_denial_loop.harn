@@ -5,9 +5,10 @@ import { with_llm_script } from "std/testing"
 /**
  * A tool that the capability policy refuses comes back as a structured,
  * terminal denial (ok: false, error_category "permission_denied", with a
- * `denial` record). Re-issuing it can never succeed, so the stall detector
- * must count the repeats as a loop instead of letting the agent burn turns
- * retrying a denied call (#2780).
+ * `denial` record). Re-issuing it can never succeed, so the dedicated cutoff
+ * must stop the second identical denial as harness-owned infrastructure
+ * instead of letting the agent burn turns retrying a denied call (#2780,
+ * #6865).
  */
 fn events_of(events, kind) {
   return events.filter({ event -> event.type == kind })
@@ -59,10 +60,29 @@ pipeline default(harness: Harness) {
           },
         ) },
       )
-      const stalls = events_of(captured.events, "agent_loop_stall_warning")
-      require len(stalls) >= 1, "repeated terminal denials must trip the loop detector"
-      harness.stdio.println(stalls[0].warning.pattern)
-      harness.stdio.println(captured.result.suspected_loop)
+      const denials = captured.events.filter(
+        { event -> event.type == "tool_call_update" && event.status == "failed" },
+      )
+      const cutoffs = events_of(captured.events, "typed_checkpoint").filter(
+        { event ->
+          event.checkpoint?.schema
+            == "harn.agent_non_retryable_denial_cutoff.v1"
+        },
+      )
+      require len(denials) == 2, "the second identical permanent denial must stop the loop"
+      require len(cutoffs) == 1, "the cutoff must emit its typed checkpoint"
+      require len(harness.llm.mock_calls()) == 2, "unused scripted turns prove the early cutoff"
+      require captured.result.status == "error", "the cutoff must be terminal"
+      require captured.result.terminal_class == "tool_policy_rejected", "policy owns the class"
+      require captured.result.terminal.kind == "runtime_error", "the cutoff is INFRA"
+      require captured.result.terminal.owner == "harness", "the harness owns the cutoff"
+      require captured.result.stop_reason == "repeated_non_retryable_denial", "reason is typed"
+      harness.stdio.println(cutoffs[0].checkpoint.schema)
+      harness.stdio.println(cutoffs[0].checkpoint.repeat_count)
+      harness.stdio.println(captured.result.terminal_class)
+      harness.stdio.println(captured.result.terminal.kind)
+      harness.stdio.println(captured.result.terminal.owner)
+      harness.stdio.println(captured.result.stop_reason)
     },
   )
 }
