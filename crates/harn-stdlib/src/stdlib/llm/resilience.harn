@@ -1,0 +1,295 @@
+// @harn-entrypoint-category llm.stdlib
+//
+// Retry and fallback middleware for the std/llm/handlers facade.
+import { agent_emit_event } from "std/agent/state"
+import { llm_response_is_billed_empty } from "std/llm/envelope"
+import { llm_clear_one_shot_prefill } from "std/llm/options"
+import { http_retry_after_ms } from "std/net"
+
+fn __opts_dict(opts) {
+  if type_of(opts) == "dict" {
+    return opts
+  }
+  return {}
+}
+
+fn __llm_handler_is_callable(value) -> bool {
+  const kind = type_of(value)
+  return kind == "function" || kind == "closure" || kind == "fn"
+}
+
+fn __safe_invoke(next, call) {
+  const envelope = try {
+    next(call)
+  }
+  if is_err(envelope) {
+    return {ok: false, status: "exception", error: unwrap_err(envelope)}
+  }
+  const value = unwrap(envelope)
+  if type_of(value) != "dict" {
+    return {ok: false, status: "exception", error: "caller returned non-dict"}
+  }
+  return value
+}
+
+fn __partial_with_harness(handler_impl, harness: Harness, opts) {
+  return { next -> handler_impl(harness, next, opts) }
+}
+
+fn __emit_event(agent: HarnessAgent, session_id, name, payload) {
+  if to_string(session_id) == "" {
+    return
+  }
+  const _ = try {
+    agent_emit_event(agent, session_id, name, payload)
+  }
+}
+
+fn __retry_default_predicate(envelope) {
+  if type_of(envelope) != "dict" {
+    return false
+  }
+  if envelope?.ok ?? false {
+    // Billed-empty (`outcome: {kind: "empty", billed: true}`) is a transient
+    // provider flake: re-dispatch by default (the S2 billed-noncommittal defense).
+    return llm_response_is_billed_empty(envelope?.value)
+  }
+  const status = to_string(envelope?.status ?? "")
+  const retryable_statuses = [
+    "transient",
+    "rate_limited",
+    "timeout",
+    "exception",
+    "network",
+    "provider_5xx",
+    "stream_interrupt",
+  ]
+  const never_retry = [
+    "schema_validation",
+    "auth",
+    "budget_exhausted",
+    "context_window_exceeded",
+    // `std/llm/safe` emits "context_overflow" for the same condition; alias it.
+    "context_overflow",
+    "policy_blocked",
+    "caller_aborted",
+    "caller_skipped",
+    "circuit_open",
+    // Terminal provider classes: retrying the same route cannot succeed.
+    "provider_error",
+  ]
+  if contains(never_retry, status) {
+    return false
+  }
+  if contains(retryable_statuses, status) {
+    return true
+  }
+  // explicit retryable hint wins for unknown statuses
+  if envelope?.retryable ?? false {
+    return true
+  }
+  return false
+}
+
+fn __retry_after_ms(clock: HarnessClock, envelope) {
+  if type_of(envelope) != "dict" {
+    return 0
+  }
+  const err = envelope?.error
+  if type_of(err) == "dict" {
+    const ra = to_int(err?.retry_after_ms)
+    if ra != nil {
+      return ra
+    }
+    const headers = err?.headers
+    if type_of(headers) == "dict" {
+      for k in headers.keys() {
+        if lowercase(to_string(k)) == "retry-after" {
+          // Shared RFC 9110 parser: date-form headers used to crash the loop.
+          return http_retry_after_ms(clock, headers[k]) ?? 0
+        }
+      }
+    }
+  }
+  return 0
+}
+
+fn __backoff_delay(random: HarnessRandom, attempt, base_ms, max_ms, backoff, jitter) {
+  if attempt < 1 {
+    return 0
+  }
+  let delay = base_ms
+  if backoff == "linear" {
+    delay = base_ms * attempt
+  } else {
+    // exponential (default) and jittered share the same base curve
+    let factor = 1
+    let i = 1
+    while i < attempt {
+      factor = factor * 2
+      i = i + 1
+    }
+    delay = base_ms * factor
+  }
+  if delay > max_ms {
+    delay = max_ms
+  }
+  if backoff == "jittered" || jitter == "full" {
+    const r = random.f64()
+    delay = to_int(r * to_float(delay))
+  } else if jitter == "equal" {
+    const half = delay / 2
+    const r = random.f64()
+    delay = half + to_int(r * to_float(half))
+  }
+  if delay < 0 {
+    delay = 0
+  }
+  return delay
+}
+
+// -------------------------------------------------------------------------------------------------
+// with_retry
+// -------------------------------------------------------------------------------------------------
+
+/**
+ * with_retry(harness, next, opts) -> caller
+ *
+ * Wraps `next` with bounded retry. Default opts:
+ *   {max_attempts: 3, base_ms: 250, max_ms: 8000,
+ *    backoff: "exponential", jitter: "full", honor_retry_after: true}
+ *
+ * The default predicate retries on these statuses:
+ *   transient, rate_limited, timeout, exception, network,
+ *   provider_5xx, stream_interrupt
+ *
+ * The default predicate NEVER retries:
+ *   schema_validation, auth, budget_exhausted, context_window_exceeded,
+ *   context_overflow, policy_blocked, caller_aborted, caller_skipped,
+ *   circuit_open
+ *
+ * `opts.predicate(envelope) -> bool` overrides the default.
+ * Honors `error.retry_after_ms` and case-insensitive `Retry-After` header
+ * when honor_retry_after is true.
+ *
+ * Returns the LAST envelope unchanged plus `retries_attempted: N`.
+ * Never throws — raw throws from `next` become {ok: false, status: "exception"}.
+ *
+ * @effects: [llm.call]
+ * @errors: []
+ */
+pub fn with_retry(harness: Harness, next, opts = nil) {
+  if !__llm_handler_is_callable(next) {
+    return __partial_with_harness(with_retry, harness, next)
+  }
+  const cfg = __opts_dict(opts)
+  const {max_attempts = 3, base_ms = 250, max_ms = 8000, backoff = "exponential", jitter = "full", honor_retry_after = true} =
+    cfg
+    ?? {}
+  const predicate = cfg?.predicate
+  return { call ->
+    const base_turn = call?.turn ?? {iteration: 0, session_id: "", attempt: 1}
+    let attempt = 1
+    let last_envelope = {ok: false, status: "exception", error: "with_retry: no attempts"}
+    while attempt <= max_attempts {
+      let attempt_call = call + {turn: base_turn + {attempt: attempt}}
+      if attempt > 1 {
+        attempt_call = attempt_call + {opts: llm_clear_one_shot_prefill(call?.opts)}
+      }
+      const envelope = __safe_invoke(next, attempt_call)
+      last_envelope = envelope
+      const should_retry = if predicate != nil {
+        const r = try {
+          predicate(envelope)
+        }
+        if is_err(r) {
+          false
+        } else {
+          unwrap(r)
+        }
+      } else {
+        __retry_default_predicate(envelope)
+      }
+      if !should_retry || attempt >= max_attempts {
+        return envelope + {retries_attempted: attempt - 1}
+      }
+      const header_delay = if honor_retry_after {
+        __retry_after_ms(harness.clock, envelope)
+      } else {
+        0
+      }
+      const backoff_delay = __backoff_delay(
+        harness.random,
+        attempt,
+        base_ms,
+        max_ms,
+        backoff,
+        jitter,
+      )
+      const delay = if header_delay > backoff_delay {
+        header_delay
+      } else {
+        backoff_delay
+      }
+      if delay > 0 {
+        harness.clock.sleep_ms(delay)
+      }
+      attempt = attempt + 1
+    }
+    return last_envelope + {retries_attempted: max_attempts - 1}
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// with_fallback
+// -------------------------------------------------------------------------------------------------
+
+/**
+ * with_fallback(callers) -> caller
+ *
+ * Try each caller in `callers` (a list of caller closures) in order; advance
+ * on {ok: false}. Emits an `llm_fallback_attempt` event per attempt when
+ * call.turn.session_id is non-empty.
+ *
+ * On success: result + {fallback_index, fallback_total}.
+ * On all-fail: last envelope + {fallback_total}.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn with_fallback(agent: HarnessAgent, callers) {
+  const total = if type_of(callers) == "list" {
+    len(callers)
+  } else {
+    0
+  }
+  return { call ->
+    if total == 0 {
+      return {ok: false, status: "caller_skipped", error: "with_fallback: empty caller list"}
+    }
+    let last_envelope = {ok: false, status: "caller_skipped"}
+    let idx = 0
+    const session_id = to_string(call?.turn?.session_id ?? "")
+    while idx < total {
+      const inner = callers[idx]
+      const envelope = __safe_invoke(inner, call)
+      last_envelope = envelope
+      __emit_event(
+        agent,
+        session_id,
+        "llm_fallback_attempt",
+        {
+          fallback_index: idx,
+          fallback_total: total,
+          ok: envelope?.ok ?? false,
+          status: to_string(envelope?.status ?? ""),
+        },
+      )
+      if envelope?.ok ?? false {
+        return envelope + {fallback_index: idx, fallback_total: total}
+      }
+      idx = idx + 1
+    }
+    return last_envelope + {fallback_total: total}
+  }
+}

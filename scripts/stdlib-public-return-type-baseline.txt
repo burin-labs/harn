@@ -88,7 +88,7 @@
 # count    8  crates/harn-stdlib/src/stdlib/llm/defaults.harn
 # count    7  crates/harn-stdlib/src/stdlib/llm/economics.harn
 # count    4  crates/harn-stdlib/src/stdlib/llm/ensemble.harn
-# count   15  crates/harn-stdlib/src/stdlib/llm/handlers.harn
+# count   13  crates/harn-stdlib/src/stdlib/llm/handlers.harn
 # count    1  crates/harn-stdlib/src/stdlib/llm/judge.harn
 # count    9  crates/harn-stdlib/src/stdlib/llm/media.harn
 # count    1  crates/harn-stdlib/src/stdlib/llm/missing_tool_call.harn
@@ -96,6 +96,7 @@
 # count    1  crates/harn-stdlib/src/stdlib/llm/options.harn
 # count    4  crates/harn-stdlib/src/stdlib/llm/prompts.harn
 # count    3  crates/harn-stdlib/src/stdlib/llm/refine.harn
+# count    2  crates/harn-stdlib/src/stdlib/llm/resilience.harn
 # count   18  crates/harn-stdlib/src/stdlib/llm/safe.harn
 # count    1  crates/harn-stdlib/src/stdlib/llm/scope_classifier.harn
 # count    1  crates/harn-stdlib/src/stdlib/llm/structural_validator.harn
@@ -790,12 +791,10 @@ crates/harn-stdlib/src/stdlib/llm/handlers.harn::with_budget
 crates/harn-stdlib/src/stdlib/llm/handlers.harn::with_cache
 crates/harn-stdlib/src/stdlib/llm/handlers.harn::with_circuit_breaker
 crates/harn-stdlib/src/stdlib/llm/handlers.harn::with_coerce
-crates/harn-stdlib/src/stdlib/llm/handlers.harn::with_fallback
 crates/harn-stdlib/src/stdlib/llm/handlers.harn::with_logging
 crates/harn-stdlib/src/stdlib/llm/handlers.harn::with_prompt_rewrite
 crates/harn-stdlib/src/stdlib/llm/handlers.harn::with_repair
 crates/harn-stdlib/src/stdlib/llm/handlers.harn::with_result_schema
-crates/harn-stdlib/src/stdlib/llm/handlers.harn::with_retry
 crates/harn-stdlib/src/stdlib/llm/handlers.harn::with_routing
 crates/harn-stdlib/src/stdlib/llm/handlers.harn::with_semantic_cache
 crates/harn-stdlib/src/stdlib/llm/handlers.harn::with_shadow
@@ -820,6 +819,8 @@ crates/harn-stdlib/src/stdlib/llm/prompts.harn::tool_use_prelude
 crates/harn-stdlib/src/stdlib/llm/refine.harn::propose_instructions
 crates/harn-stdlib/src/stdlib/llm/refine.harn::refine_caller
 crates/harn-stdlib/src/stdlib/llm/refine.harn::refine_prompt
+crates/harn-stdlib/src/stdlib/llm/resilience.harn::with_fallback
+crates/harn-stdlib/src/stdlib/llm/resilience.harn::with_retry
 crates/harn-stdlib/src/stdlib/llm/safe.harn::__wrap_llm_result
 crates/harn-stdlib/src/stdlib/llm/safe.harn::dict_get_ci
 crates/harn-stdlib/src/stdlib/llm/safe.harn::extract_first_json_object
