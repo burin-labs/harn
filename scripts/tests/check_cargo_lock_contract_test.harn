@@ -11,8 +11,7 @@ const ECHO_MENTIONING_CARGO = "echo \"windows: cargo package args: \${package_ar
 
 const WRAPPED = "scripts/ci/run_rust_test_lane.sh cargo nextest run --workspace --profile ci"
 
-const FILTERED =
-  "cargo nextest run --profile ci -E 'not (test(a) or test(b))' --workspace"
+const FILTERED = "cargo nextest run --profile ci -E 'not (test(a) or test(b))' --workspace"
 
 @test
 pipeline test_bare_invocation_is_a_violation(harness: Harness, task) {
@@ -69,7 +68,7 @@ pipeline test_lane_wrapper_prefix_is_seen_through(harness: Harness, task) {
 
 @test
 pipeline test_command_substitution_starts_a_command_position(harness: Harness, task) {
-  const run = "BUMP=\"\$(cargo run --quiet --bin harn -- run scripts/detect_bump_type.harn)\""
+  const run = "BUMP=\"$(cargo run --quiet --bin harn -- run scripts/detect_bump_type.harn)\""
   const violations = step_violations("w.yml", "j", {run: run})
   assert_eq(len(violations), 1)
 }

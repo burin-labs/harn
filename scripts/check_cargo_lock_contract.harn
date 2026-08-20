@@ -70,10 +70,7 @@ const LEADING_NOISE = [
 ]
 
 /** Wrapper entrypoints that exec the cargo invocation that follows them. */
-const WRAPPER_SCRIPTS = [
-  "scripts/ci/run_rust_test_lane.sh",
-  "scripts/ci/run_rust_lint_lane.sh",
-]
+const WRAPPER_SCRIPTS = ["scripts/ci/run_rust_test_lane.sh", "scripts/ci/run_rust_lint_lane.sh"]
 
 const SEPARATOR = "<<HARN_CMD_SEP>>"
 
@@ -211,7 +208,9 @@ pub fn step_violations(workflow: string, job: string, step: dict) -> list<LockVi
         continue
       }
       violations = violations
-        + [{workflow: workflow, job: job, command: command, invocation: fragment}]
+        + [
+        {workflow: workflow, job: job, command: command, invocation: fragment},
+      ]
     }
   }
   return violations
