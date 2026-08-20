@@ -1292,7 +1292,7 @@ streams, and agent-loop dispatch; unknown and removed keys are errors.
 | Output | `output`, `schema_retries`, `schema_retry_nudge`, `retries`, `schema_recover`, `repair` |
 | Reasoning | `thinking`, `effort`, `reasoning_policy`, `reasoning_scale`, `reasoning_task`, `interleaved_thinking`, `anthropic_beta_features` |
 | Modalities | `vision`, `audio`, `pdf`, `video` |
-| Tools | `tools`, `provider_tools`, `tool_choice`, `tool_search`, `tool_format` |
+| Tools | `tools`, `provider_tools`, `tool_choice`, `tool_search`, `tool_format`, `tool_format_override_reason` |
 | Transport | `cache`, `prompt_cache_ttl`, `budget`, `timeout_ms`, `idle_timeout_ms`, `stream`, `speed` |
 | OpenAI Responses | `store`, `background`, `truncation`, `compact`, `include`, `max_tool_calls` |
 | Extension | `provider_options`, `metadata`, `reminders`, `structural_experiment` |
@@ -1683,8 +1683,9 @@ const caps = harness.llm.provider_capabilities("anthropic", "claude-opus-4-7")
 // emits a `capability_gap` warning event.
 // An explicit `tool_format` that disagrees with `preferred_tool_format` or
 // chooses the catalog-marked unreliable side emits a `tool_format_override`
-// transcript event. Pass `tool_format_override_reason` when you intentionally
-// force `native_unreliable` or `text_unreliable` routes.
+// transcript event. A non-empty `tool_format_override_reason` deliberately
+// forces the requested channel past both prompt and runtime capability gates;
+// provider-call records expose the effective format and native tool count.
 
 if "bm25" in caps.tool_search {
   // opt into progressive disclosure

@@ -8,7 +8,9 @@
 - Put a provider-native control below `provider_options.<provider>` instead of spelling it as a portable top-level option.
 - Omit `tool_format` to use the catalog default, or select the catalog-recommended format.
 - Choose a provider/model route whose declared tool-calling channel supports the requested format.
-- For a deliberate agent-loop probe, add a non-empty `tool_format_override_reason`; Harn records the override in the transcript.
+- For a deliberate probe, add a non-empty `tool_format_override_reason`;
+  agent loops record the override event, and provider-call records expose the
+  effective format and native tool count.
 
 Dynamic values remain under the runtime guard. Custom generation routes remain
 open-world, but custom cache controls require authored capability facts because

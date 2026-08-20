@@ -372,9 +372,17 @@ require it.
 | `tool_choice` | string \| dict | Automatic, disabled, required, or named tool selection. |
 | `tool_search` | bool \| string \| dict | Progressive tool disclosure. |
 | `tool_format` | string | Tool-call wire format override. |
+| `tool_format_override_reason` | string | Non-empty acknowledgment that deliberately forces `tool_format` past catalog channel gates. |
 
 Harn executes, approves, and audits `tools`. The provider executes
 `provider_tools`; Harn records their blocks but never dispatches them locally.
+Normally Harn steers a tool-bearing call away from a channel the capability
+catalog marks unsafe. A probe or matrix can force the requested channel with a
+non-empty `tool_format_override_reason`; Harn then preserves the requested
+format and, for `native`, sends the tool schemas even when the route does not
+advertise native tools. Provider-call transcript records expose the effective
+`tool_format` and `native_tool_count`, so the measured arm is visible at the
+wire boundary. Blank reasons do not bypass the catalog gates.
 
 #### Cache, budget, and transport
 

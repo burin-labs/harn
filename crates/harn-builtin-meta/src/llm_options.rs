@@ -113,6 +113,7 @@ pub const LLM_CALL_OPTION_FIELDS: &[ShapeFieldDescriptor] = &[
     ShapeFieldDescriptor::optional("tool_choice", TY_STRING_OR_DICT),
     ShapeFieldDescriptor::optional("tool_search", TY_BOOL_OR_STRING_OR_DICT),
     ShapeFieldDescriptor::optional("tool_format", TY_STRING),
+    ShapeFieldDescriptor::optional("tool_format_override_reason", TY_STRING),
     // --- Caching, budgets, transport ---
     ShapeFieldDescriptor::optional("cache", TY_BOOL_OR_DICT),
     ShapeFieldDescriptor::optional("prompt_cache_ttl", TY_STRING),
