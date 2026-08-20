@@ -416,17 +416,26 @@ mod tests {
         // it. Locking the three live serving stacks here makes that explicit.
         reset();
 
-        // llama.cpp (:8001) — the fresh #5162 family sweep used two replicates
-        // across six coding-agent fixtures for each Qwen3.6 quant and found
-        // native unreliable (2/12, 0/12, and 2/12 native passes for Q8, Q5,
-        // and Q4 respectively, versus 8/12 text passes for each). A native
-        // request therefore steers to the receipted JSON text contract.
+        // llama.cpp (:8001) — the #5162 family sweep found native unreliable
+        // here and this route used to steer native -> json. The 2026-08-19 CUDA
+        // receipt re-measured the same quant on the same hardware class and
+        // found the native channel returning parseable tool calls on every
+        // measurable cell, so the row is now `interchangeable` and an explicit
+        // native pin is HONORED rather than rewritten.
+        //
+        // This strengthens the divergence this test exists to lock rather than
+        // weakening it: llama.cpp and Ollama serve the SAME Qwen3.6 weights and
+        // now resolve a native request to DIFFERENT channels, which is the
+        // (model x serving-stack) insight stated as sharply as it gets.
         let llamacpp = validate_tool_format("llamacpp", "qwen3.6-35b-a3b-ud-q4-k-xl", "native");
         assert_eq!(
-            llamacpp.effective, "json",
-            "llama.cpp Qwen3.6 native route must steer to the measured text contract"
+            llamacpp.effective, "native",
+            "llama.cpp Qwen3.6 native route is receipted working and must not be steered"
         );
-        assert!(llamacpp.correction.is_some());
+        assert!(
+            llamacpp.correction.is_none(),
+            "a working channel must pass through without a correction message"
+        );
 
         // Ollama (/v1) — the embedded qwen tool-call parser 500s on text-mode
         // output, so this route is served on the text/json channel: a native

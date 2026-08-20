@@ -27,16 +27,36 @@ fn tool_support_parity_carries_its_provenance() {
     }
     assert!(declared > 0 && derived > 0, "expected both provenances");
 
-    // The class the issue reported: one verdict reached from both directions.
-    let text_only: Vec<_> = artifact
-        .models
+    // The class the issue reported: one verdict reached from BOTH directions,
+    // which is what makes the verdict alone ambiguous and `parity_source`
+    // load-bearing.
+    //
+    // This used to name `text_only` specifically. That was never the subject:
+    // the subject is the ambiguity class, and pinning it to one verdict made
+    // the test break whenever a row was re-receipted. The 2026-08-19 CUDA
+    // receipt moved the last declared `text_only` row, so the class is now
+    // carried by a different verdict. Find whichever verdict currently carries
+    // it instead of asserting which one that must be.
+    let mut sources_by_verdict: std::collections::BTreeMap<&str, std::collections::BTreeSet<&str>> =
+        Default::default();
+    for model in &artifact.models {
+        if let (Some(parity), Some(source)) = (
+            model.tool_support.parity.as_deref(),
+            model.tool_support.parity_source.as_deref(),
+        ) {
+            sources_by_verdict.entry(parity).or_default().insert(source);
+        }
+    }
+    let dual_sourced: Vec<&str> = sources_by_verdict
         .iter()
-        .filter(|model| model.tool_support.parity.as_deref() == Some("text_only"))
-        .map(|model| model.tool_support.parity_source.as_deref())
+        .filter(|(_, sources)| sources.contains("declared") && sources.contains("derived"))
+        .map(|(verdict, _)| *verdict)
         .collect();
     assert!(
-        text_only.contains(&Some("declared")) && text_only.contains(&Some("derived")),
-        "text_only should still be reachable both ways; that is why the field alone was ambiguous"
+        !dual_sourced.is_empty(),
+        "at least one parity verdict must be reachable BOTH ways, or the field would be \
+         unambiguous and `parity_source` would have nothing to disambiguate; \
+         verdict sources today: {sources_by_verdict:?}"
     );
 }
 

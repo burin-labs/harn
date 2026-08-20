@@ -164,23 +164,51 @@ thinking_block_style = "inline"
 # contract until their exact runtime/model/template combinations are probed.
 [[provider.llamacpp]]
 model_match = "*qwen3.6*"
-native_tools = false
-# Pinned to `json` (fenced-JSON), the GLOBAL text-channel default — same
-# RESOLVED format as the ollama qwen3.6 sibling above. Pinned explicitly rather
-# than left to inherit because the `llamacpp-qwen3.6` alias / catalogued routes
-# trip the catalog invariant that every catalogued model/alias rule set
-# native_tools + preferred_tool_format. json's call opener is a ```tool fence,
-# NOT the reserved <tool_call> token, so it sidesteps the opener-repetition
-# collapse that forced the old heredoc pin (see reserved_tool_call_token below).
-preferred_tool_format = "json"
+# 2026-08-19 CUDA receipt. The prior row held native_tools = false pending "a
+# receipted forced-format family sweep", and its verdict came from a CUDA sweep.
+# A Metal sweep then measured the same quant and disagreed, and could not say
+# which of hardware, runtime build, or revision caused the reversal. This row is
+# the CUDA arm that removes that confound, and the reversal is now attributed:
+# native holds on CUDA too, so it was not hardware, and the #5162 arm was never a
+# native arm at all. See the notes below for the two-gate mechanism and the
+# static read that establishes it. The defect corrected here was in REQUEST
+# ASSEMBLY, which the model_match shares across the family, not in decoding,
+# which is the only place a quant could plausibly matter.
+native_tools = true
+# Moved to native, and NOT on completion, which is a tie this receipt refuses to
+# read as a win. Two things carry it instead.
+#
+# The measured one: on turns where a call was expected, the native arm produced
+# NO call attempt on 0 of 45, against 6 of 62 for tagged text and 17 of 61 for
+# fenced JSON. Native finished all 12 runs without once exhausting its iteration
+# budget; fenced JSON exhausted 6 of 12. Narration-in-place-of-a-call is the
+# dominant local failure mode, and this is the channel that does not do it. The
+# system prompt is also 2444 characters against 8473, because the native channel
+# has no dialect to teach.
+#
+# The structural one: a text channel makes the model hand-serialize every call,
+# so a single dropped token voids an otherwise correct payload with no partial
+# credit. A native channel cannot emit that failure. The class is removed rather
+# than made rarer.
+#
+# Recorded against the move, because it is real and this row should not hide it:
+# wall time favors the TEXT channel on this hardware, 35.9s against 41.0s over 12
+# runs each, and native drew the highest rejected-call rate at 12.7% against 7.1%
+# and 5.8%, though every run carrying a rejection passed and native simply made
+# more calls. Rollback is one value in this row if meter-grade evidence later
+# shows native losing.
+preferred_tool_format = "native"
 structured_output = "native"
-# A single-tool probe must not promote one quant above its family. The 2026-07-17
-# Burin dogfood trace showed constrained native emission omitting required fields
-# from a 13-action edit schema, despite the old Q4 one-tool native smoke. Keep
-# every llama.cpp Qwen3.6 variant on the measurable JSON text channel until a
-# receipted forced-format family sweep proves otherwise.
-tool_mode_parity = "text_only"
-tool_mode_parity_notes = "2026-07-19 #5162 CUDA receipt: freshly restarted ghcr.io/ggml-org/llama.cpp:server-cuda servers used --jinja, --reasoning-format deepseek, --chat-template-kwargs {\"enable_thinking\":false}, -np 1, -fa on, and q8_0 K/V cache. Six coding-agent fixtures were forced through native and JSON text formats with two replicates per format on Q4_K_XL (native 2/12, text 8/12; -ngl 999, -c 65536), Q5_K_XL (native 0/12, text 8/12; -ngl 999, -c 65536), and Q8_0 base (native 2/12, text 8/12; -ngl 35, -c 16384 because the 36.9 GB model does not fit this 32 GiB GPU). All rows reached high classifier confidence; see .harn-runs/coding-agent-bench/latest/tool_mode_parity_overlay.toml and the per-quant receipts. Native remained unreliable across the family, so keep JSON text tooling; server_parser = none."
+# `interchangeable` is a completion verdict about two channels, not a preference.
+# It also removes an ACTIVE STEER: `text_only` made
+# `validate_tool_format_with_caps` rewrite any requested `native` to the text
+# format, in the Rust option extraction, which does not read
+# `tool_format_override_reason`. A probe that forced native therefore received a
+# native system prompt and a steered, tool-less request, and recorded a native
+# arm with zero tool calls that reads like a model declining to use tools. That
+# is a measured state on this route, not a hypothetical.
+tool_mode_parity = "interchangeable"
+tool_mode_parity_notes = "2026-08-19 CUDA receipt, llama-server b9994-14d3ba45f on an RTX 5090 host, Qwen3.6-35B-A3B-UD-Q4_K_XL, n_ctx 65536, chat template sha256 55d4931433fe, harn 0.10.105. Independent replication of the 2026-08-18 Metal receipt (llama-server b10360-48d22e295), which superseded the 2026-07-19 #5162 CUDA receipt. That reversal is now ATTRIBUTED, where the Metal receipt could only say hardware, runtime build, and revision all differed. This arm holds hardware at CUDA and still finds native working, so it was not hardware; and the #5162 arm was never a native arm at all. The mechanism is the one this row already states about the Metal arm: with native_tools = false no tools array reaches the wire and the arm cannot be measured. #5162's surviving invocation and stderr show it passed a tool_format override, which clears the FORMAT gate only, and no capability override. A static read of the July revision 38067db78 confirms the two gates are independent: the format gate is cleared by override_reason, a separate gate rewrites native to json on a text_only route with no override argument, and the tools array is attached only when the RESOLVED format is native, so no branch at that revision could put tools on the wire for this row. #5162 therefore measured the half-cleared state and never measured native. Stated at its true strength: the invocation and its output were read and the July-era code has no path that could have served a tools array, but no July request body survives to be read, and an unrecorded capability override in that lane cannot be excluded by observation, only judged unlikely because such an override is a deliberate act that the Metal receipt's author documented explicitly when they used it. Six coding-agent fixtures, two replicates, three forced formats, 36 runs, pre-registered validity gate held with skipped_runs = 0 in every arm. Completion: native 10/12, tagged text 10/12, fenced JSON 8/12, cell-for-cell identical to the Metal receipt. Six of the eight failures are no-tool-diagnosis failing 0/2 in ALL THREE arms; that is the grader defect harn#6843, which is fixed on the Metal receipt's branch and NOT on this one, so it reproduces as expected and is not a capability read. On the ten measurable cells: native 10/10, text 10/10, json 8/10. NO CLAIM of a native completion advantage is made: 12 runs per arm cannot separate 10/12 from 8/12, and the generated overlay's preferred_tool_format = native is the classifier's TIEBREAK DEFAULT rather than an empirical result, while its confidence = high means only that sample size and replicate count cleared a floor. What the receipt does establish is that the native channel returns parseable tool calls on this route under CUDA: 57 requests carried a tools array of up to 6 tools and 63 native tool calls came back on the structured channel, counted twice by independent paths (an intercepting proxy on the wire and the per-run rows) which agree exactly, and not read from a parsed_tool_calls field. CONSTRAINED DECODING IS NOT INVOKED: zero of the 57 tool-bearing requests carried grammar, json_schema, response_format, or any guided_* field. All 29 response_format requests carried NO tools and are repair/output-contract turns, reproducing on CUDA the correction the Metal receipt made about its own arm; the arm is therefore native over a plain tools channel with the repair-turn contract active. THROUGHPUT, which neither prior receipt measured: excluding 22 of 225 degenerate sub-20-token completions whose per-second rates are division artifacts, tool-bearing requests ran a median 247.1 tok/s (p10 244.8, p90 248.8, n=55) against 247.4 tok/s (p10 233.9, p90 250.0, n=148) without tools. The 30-40% constrained-decoding tax seen on grammar-bearing routes does not appear here, consistent with no grammar being applied. Prompt cost measured on the wire: native median 2444 system-prompt characters against 8473 for the text channel, which must teach its dialect every turn. Secondary, over 12 runs per arm: wall 41.0s native / 35.9s text / 49.4s json; iterations 57 / 66 / 68; tool calls 63 / 56 / 52; REJECTED tool calls 8 / 4 / 3, the most on native. BLIND SPOTS: one quant, one host, one llama.cpp build, where the July sweep covered three quants; two replicates is the classifier's floor and not convergence grade; the 29 repair turns cannot be attributed to particular arms by request shape, only shown to carry no tools; the server held a warm 21k-token prompt cache at the start and that was not controlled for, though the rig interleaves formats; and the #5162 attribution above rests on that run's invocation, its stderr, and a static read of its revision, NOT on any surviving request body, because none does. server_parser = none."
 # Qwen3.6's tokenizer reserves <tool_call>/</tool_call> as single special
 # tokens; reusing them as text-format delimiters collapses the agent loop into
 # opener repetition. Remap to a non-special wire form (validated: 5/5 vs 0/5).
