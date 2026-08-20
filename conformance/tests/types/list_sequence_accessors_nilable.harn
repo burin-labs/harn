@@ -1,0 +1,18 @@
+type Location = {path: string, line: int}
+
+fn lookup(key: string) -> Location? {
+  if key == "" {
+    return nil
+  }
+  return {path: key, line: 1}
+}
+
+pipeline main(harness: Harness) {
+  const items: list<Location> = []
+  const found = lookup("") ?? items.first()
+  harness.stdio.println(found?.path ?? "nil")
+  const populated: list<Location> = [{path: "ok", line: 1}]
+  harness.stdio.println(populated.last()?.path ?? "nil")
+  const missing = populated.find({ item -> item.path == "missing" })
+  harness.stdio.println(missing?.path ?? "nil")
+}

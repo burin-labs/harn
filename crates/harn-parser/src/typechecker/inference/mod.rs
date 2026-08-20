@@ -25,6 +25,7 @@ mod literal_union;
 mod match_patterns;
 mod pipe;
 mod record_arguments;
+mod sequence_types;
 mod statements;
 mod subtyping;
 mod variance;

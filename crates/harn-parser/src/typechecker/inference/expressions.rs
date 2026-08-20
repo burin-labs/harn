@@ -876,6 +876,14 @@ impl TypeChecker {
                     name: "Pair".into(),
                     args: vec![k, v],
                 };
+                if let Some(sequence_type) = Self::sequence_method_return_type(
+                    resolved_recv.as_ref(),
+                    method,
+                    args.len(),
+                    list_elem.as_ref(),
+                ) {
+                    return Some(result(sequence_type));
+                }
                 match method.as_str() {
                     // Shared: bool-returning methods
                     "contains" | "starts_with" | "ends_with" | "empty" | "has" | "any" | "all" => {
@@ -1439,21 +1447,6 @@ impl TypeChecker {
         } else {
             field.type_expr.clone()
         })
-    }
-
-    fn list_property_type(
-        item_type: Option<&TypeExpr>,
-        property: &str,
-        optional_access: bool,
-    ) -> InferredType {
-        match property {
-            "count" => Some(TypeExpr::Named("int".into())),
-            "empty" => Some(TypeExpr::Named("bool".into())),
-            "first" | "last" => item_type
-                .map(|inner| simplify_union(vec![inner.clone(), TypeExpr::Named("nil".into())])),
-            _ if optional_access => Some(TypeExpr::Named("nil".into())),
-            _ => None,
-        }
     }
 
     fn string_property_type(property: &str, optional_access: bool) -> InferredType {

@@ -98,3 +98,54 @@ fn test_unguarded_nilable_return_still_rejected() {
         "expected a nilable-return rejection, got: {errs:?}"
     );
 }
+
+/// Empty sequence access remains nilable through a binding and a coalesce.
+/// Otherwise HARN-LNT-051 offers an unsound behavior-preserving repair that
+/// turns the guarded property read into a runtime error (harn#6837).
+#[test]
+fn test_list_first_coalesce_nilable_fallback_keeps_safe_navigation() {
+    let diagnostics = check_source_with_source(
+        r#"type Location = {path: string, line: int}
+
+fn lookup(key: string) -> Location? {
+  if key == "" { return nil }
+  return {path: key, line: 1}
+}
+
+fn collect(keys: list<string>, items: list<Location>) -> list {
+  const fallback = items.first()
+  let out: list = []
+  for key in keys {
+    const found = lookup(key) ?? fallback
+    out = out + [{path: found?.path}]
+  }
+  return out
+}"#,
+    );
+    assert!(
+        diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.code != Code::LintUnnecessarySafeNavigation),
+        "safe navigation over a possibly empty list fallback must not be repaired: {diagnostics:?}"
+    );
+}
+
+#[test]
+fn test_list_sequence_accessors_expose_runtime_nilability() {
+    for accessor in [
+        "first()",
+        "last()",
+        "find({ item -> item.path == \"missing\" })",
+    ] {
+        let errs = errors(&format!(
+            r"type Location = {{path: string, line: int}}
+fn read(items: list<Location>) -> string {{
+  return items.{accessor}.path
+}}"
+        ));
+        assert!(
+            errs.iter().any(|error| error.contains("nilable type")),
+            "{accessor} can return nil at runtime and must require guarded access: {errs:?}"
+        );
+    }
+}
