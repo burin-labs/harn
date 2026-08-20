@@ -627,18 +627,27 @@ mod tests {
             let Some(rest) = candidate.strip_prefix("HARN_") else {
                 continue;
             };
-            let end = rest
-                .find(|c: char| !(c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_'))
-                .unwrap_or(rest.len());
-            if end == 0 {
+            let mut name = String::from("HARN_");
+            let mut terminator = None;
+            for character in rest.chars() {
+                if character.is_ascii_uppercase() || character.is_ascii_digit() || character == '_'
+                {
+                    name.push(character);
+                } else {
+                    terminator = Some(character);
+                    break;
+                }
+            }
+            if name == "HARN_" {
                 continue;
             }
             // `NAME:` is a YAML mapping key and `NAME=` is a shell assignment.
-            // Anything else is prose or a reference on a right-hand side.
-            if !matches!(rest[end..].chars().next(), Some(':') | Some('=')) {
+            // Anything else is prose, a reference on a right-hand side, or a
+            // bare token that assigns nothing.
+            if !matches!(terminator, Some(':') | Some('=')) {
                 continue;
             }
-            names.insert(format!("HARN_{}", &rest[..end]));
+            names.insert(name);
         }
         names
     }
