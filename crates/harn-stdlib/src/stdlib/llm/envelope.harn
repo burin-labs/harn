@@ -41,9 +41,9 @@ pub type LlmOutcome = {kind: LlmOutcomeKind, billed: bool}
  * envelope's top level.
  *
  * `cost_usd` is nil (not 0) when catalog pricing is unknown. `cache_hit_ratio`
- * is nil with `cache_visibility: "unsupported"` when the provider reports no
- * cache accounting at all (native Ollama), so a local model is never scored as
- * a 100% cache miss.
+ * is nil when cache accounting is either declared `"unsupported"` or
+ * `"undeclared"`. Undeclared routes preserve any parsed cache tokens, but a
+ * zero is not scored as a measured 0% cache hit rate.
  */
 /**
  * Provider-request accounting for one logical call.

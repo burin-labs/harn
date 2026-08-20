@@ -273,6 +273,9 @@ fn install_openai_stub_provider(provider: &str, addr: std::net::SocketAddr) {
 #[path = "transport_managed_supply_tests.rs"]
 mod managed_supply_tests;
 
+#[path = "transport_cache_accounting_tests.rs"]
+mod cache_accounting_tests;
+
 #[test]
 fn capability_admission_rejects_before_transport_egress() {
     let _guard = env_guard();

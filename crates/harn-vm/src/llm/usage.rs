@@ -42,6 +42,12 @@ pub struct LlmUsage {
     pub cache_read_tokens: i64,
     pub cache_write_tokens: i64,
     pub cache_supported: bool,
+    /// Route-level `cache_usage_accounting` declaration carried from
+    /// `ProviderTelemetry`. `None` covers undeclared routes and ledgers
+    /// recorded before the field existed; both read as undeclared rather
+    /// than borrowing `cache_supported`'s false precision.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_accounting_declared: Option<bool>,
     pub cache_hit_ratio: Option<f64>,
     pub cache_savings_usd: f64,
     pub cache_hit: bool,
@@ -113,6 +119,16 @@ impl LlmUsage {
         let cache_write_tokens = usages.iter().map(|usage| usage.cache_write_tokens).sum();
         let certainty = summarize_usage_cost_certainty(usages);
         let cache_supported = usages.iter().all(|usage| usage.cache_supported);
+        // One undeclared member poisons the aggregate to undeclared: totals
+        // that include uninformative zeros must not read as audited numbers.
+        // Declared members agree on `true` or fall to `false` when mixed,
+        // matching `cache_supported`'s all() conservatism above.
+        let cache_accounting_declared = usages
+            .iter()
+            .map(|usage| usage.cache_accounting_declared)
+            .try_fold(true, |all_true, declared| {
+                declared.map(|declared| all_true && declared)
+            });
         Self {
             input_tokens,
             output_tokens,
@@ -120,9 +136,16 @@ impl LlmUsage {
             cache_read_tokens,
             cache_write_tokens,
             cache_supported,
-            cache_hit_ratio: cache_supported.then(|| {
-                super::cost::cache_hit_ratio(input_tokens, cache_read_tokens, cache_write_tokens)
-            }),
+            cache_accounting_declared,
+            cache_hit_ratio: (cache_accounting_declared == Some(true) && cache_supported).then(
+                || {
+                    super::cost::cache_hit_ratio(
+                        input_tokens,
+                        cache_read_tokens,
+                        cache_write_tokens,
+                    )
+                },
+            ),
             cache_savings_usd: usages.iter().map(|usage| usage.cache_savings_usd).sum(),
             cache_hit: usages.iter().any(|usage| usage.cache_hit),
             served_fast: usages.iter().any(|usage| usage.served_fast),
@@ -180,9 +203,10 @@ impl LlmUsage {
             cache_write_tokens: 0,
             // No response means no evidence against sibling responses' cache
             // support. These neutral values keep aggregation from turning one
-            // transport-unknown attempt into "cache unsupported" for the
-            // completed logical call.
+            // transport-unknown attempt into "cache unsupported" (or
+            // undeclared) for the completed logical call.
             cache_supported: true,
+            cache_accounting_declared: Some(true),
             cache_hit_ratio: Some(0.0),
             cache_savings_usd: 0.0,
             cache_hit: false,
@@ -234,13 +258,15 @@ impl LlmUsage {
                     )
                 })
             });
-        let cache_hit_ratio = result.cache_supported.then(|| {
-            super::cost::cache_hit_ratio(
-                result.input_tokens,
-                result.cache_read_tokens,
-                result.cache_write_tokens,
-            )
-        });
+        let cache_hit_ratio = (result.telemetry.cache_accounting_declared == Some(true)
+            && result.cache_supported)
+            .then(|| {
+                super::cost::cache_hit_ratio(
+                    result.input_tokens,
+                    result.cache_read_tokens,
+                    result.cache_write_tokens,
+                )
+            });
         Self {
             input_tokens: result.input_tokens,
             output_tokens: result.output_tokens,
@@ -248,6 +274,7 @@ impl LlmUsage {
             cache_read_tokens: result.cache_read_tokens,
             cache_write_tokens: result.cache_write_tokens,
             cache_supported: result.cache_supported,
+            cache_accounting_declared: result.telemetry.cache_accounting_declared,
             cache_hit_ratio,
             cache_savings_usd: super::cost::cache_savings_usd_for_provider(
                 &result.provider,
@@ -285,6 +312,7 @@ impl LlmUsage {
             cache_read_tokens: 0,
             cache_write_tokens: 0,
             cache_supported: false,
+            cache_accounting_declared: None,
             cache_hit_ratio: None,
             cache_savings_usd: 0.0,
             cache_hit: false,
@@ -345,10 +373,11 @@ impl LlmUsage {
             crate::value::intern_key("cache_hit_ratio"),
             self.cache_hit_ratio.map_or(VmValue::Nil, VmValue::Float),
         );
-        if self.cache_supported {
-            usage.insert(crate::value::intern_key("cache_visibility"), VmValue::Nil);
-        } else {
-            usage.put_str("cache_visibility", "unsupported");
+        match self.cache_visibility() {
+            None => {
+                usage.insert(crate::value::intern_key("cache_visibility"), VmValue::Nil);
+            }
+            Some(state) => usage.put_str("cache_visibility", state),
         }
         usage.insert(
             crate::value::intern_key("cache_savings_usd"),
@@ -364,6 +393,20 @@ impl LlmUsage {
         );
         usage.put_str("accounting_status", self.accounting_status.as_str());
         usage
+    }
+
+    /// Three-state cache visibility. `None` (projected as null) means the
+    /// cache numbers are visible and audited. `"unsupported"` means the route
+    /// declares it reports nothing, so the zeros are intentional.
+    /// `"undeclared"` means nobody declared either way: the numbers are
+    /// preserved as parsed, and a zero carries no information — it must not
+    /// read as a well-formed 0% hit rate.
+    fn cache_visibility(&self) -> Option<&'static str> {
+        match (self.cache_accounting_declared, self.cache_supported) {
+            (None, _) => Some("undeclared"),
+            (Some(false), _) | (Some(true), false) => Some("unsupported"),
+            (Some(true), true) => None,
+        }
     }
 
     /// Mechanically add the canonical accounting fields to the flat provider
@@ -411,11 +454,8 @@ impl LlmUsage {
         );
         fields.insert(
             "cache_visibility".to_string(),
-            if self.cache_supported {
-                Value::Null
-            } else {
-                Value::String("unsupported".to_string())
-            },
+            self.cache_visibility()
+                .map_or(Value::Null, |state| Value::String(state.to_string())),
         );
         fields.insert(
             "cache_savings_usd".to_string(),
@@ -649,7 +689,10 @@ mod tests {
             served_fast: false,
             blocks: Vec::new(),
             logprobs: Vec::new(),
-            telemetry: ProviderTelemetry::default(),
+            telemetry: ProviderTelemetry {
+                cache_accounting_declared: Some(true),
+                ..ProviderTelemetry::default()
+            },
             attempts: ProviderAttempts {
                 total: 3,
                 rate_limited: 1,
@@ -677,6 +720,10 @@ mod tests {
             cache_supported: false,
             model: "some-locally-served-model".to_string(),
             provider: "llamacpp".to_string(),
+            telemetry: ProviderTelemetry {
+                cache_accounting_declared: Some(false),
+                ..ProviderTelemetry::default()
+            },
             attempts: ProviderAttempts::default(),
             ..accounted_result()
         }
@@ -991,5 +1038,58 @@ mod tests {
 
         assert_eq!(usage.input_tokens, Some(10));
         assert_eq!(usage.output_tokens, Some(2));
+    }
+
+    fn usage_with_declaration(declared: Option<bool>) -> LlmUsage {
+        let mut result = accounted_result();
+        result.telemetry.cache_accounting_declared = declared;
+        result.attempts = ProviderAttempts::default();
+        LlmUsage::from_result(&result)
+    }
+
+    #[test]
+    fn cache_visibility_projects_three_states() {
+        let declared_true = usage_with_declaration(Some(true));
+        let mut fields = serde_json::Map::new();
+        declared_true.project_onto_fields(&mut fields);
+        assert_eq!(fields["cache_visibility"], serde_json::Value::Null);
+
+        let declared_false = usage_with_declaration(Some(false));
+        assert_eq!(declared_false.cache_hit_ratio, None);
+        let mut fields = serde_json::Map::new();
+        declared_false.project_onto_fields(&mut fields);
+        assert_eq!(fields["cache_visibility"], json!("unsupported"));
+
+        // The load-bearing state: an undeclared route's zeros carry no
+        // information, and must not read as either audited or unsupported.
+        let undeclared = usage_with_declaration(None);
+        assert_eq!(undeclared.cache_hit_ratio, None);
+        let mut fields = serde_json::Map::new();
+        undeclared.project_onto_fields(&mut fields);
+        assert_eq!(fields["cache_hit_ratio"], serde_json::Value::Null);
+        assert_eq!(fields["cache_visibility"], json!("undeclared"));
+    }
+
+    #[test]
+    fn one_undeclared_call_poisons_the_aggregate_to_undeclared() {
+        let declared = usage_with_declaration(Some(true));
+        let undeclared = usage_with_declaration(None);
+
+        let all_declared = LlmUsage::aggregate(&[declared.clone(), declared.clone()]);
+        assert_eq!(all_declared.cache_accounting_declared, Some(true));
+
+        let poisoned = LlmUsage::aggregate(&[declared, undeclared]);
+        assert_eq!(poisoned.cache_accounting_declared, None);
+        assert_eq!(poisoned.cache_hit_ratio, None);
+        let mut fields = serde_json::Map::new();
+        poisoned.project_onto_fields(&mut fields);
+        assert_eq!(fields["cache_visibility"], json!("undeclared"));
+    }
+
+    #[test]
+    fn unknown_attempts_stay_neutral_for_the_accounting_declaration() {
+        let declared = usage_with_declaration(Some(true));
+        let usage = LlmUsage::aggregate_with_unknown_attempts(&[declared], 1);
+        assert_eq!(usage.cache_accounting_declared, Some(true));
     }
 }

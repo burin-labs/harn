@@ -103,7 +103,14 @@ pub(super) async fn vm_call_llm_api(
     let resolved = crate::llm::helpers::ResolvedProvider::resolve(&opts.provider);
     let mut result = vm_call_llm_api_inner(opts, delta_tx).await?;
     result.telemetry.serving_base_url = resolved.telemetry_base_url();
-    if !resolved.reports_cache_usage() {
+    let declaration = resolved.cache_accounting_declaration();
+    result.telemetry.cache_accounting_declared = declaration;
+    // Only a declared-`false` route zeroes the parsed cache fields: those
+    // entries exist precisely because the route reports nothing and a zero is
+    // intentional. An undeclared route keeps whatever the response mapping
+    // parsed — collapsing absent into false here silently destroyed cache
+    // telemetry the provider actually reported.
+    if declaration == Some(false) {
         result.cache_read_tokens = 0;
         result.cache_write_tokens = 0;
         result.cache_supported = false;
