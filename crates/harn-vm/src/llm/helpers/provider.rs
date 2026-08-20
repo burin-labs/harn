@@ -416,11 +416,14 @@ impl ResolvedProvider {
         Some(url.to_string().trim_end_matches('/').to_string())
     }
 
-    pub fn reports_cache_usage(&self) -> bool {
+    /// The provider block's `cache_usage_accounting` declaration. Absent
+    /// (`None`) must stay distinguishable from declared-`false`: an absent
+    /// declaration preserves whatever the response mapping parsed, while
+    /// declared-`false` zeroes it at the transport boundary.
+    pub fn cache_accounting_declaration(&self) -> Option<bool> {
         self.pdef
             .as_ref()
             .and_then(|provider| provider.cache_usage_accounting)
-            .unwrap_or(false)
     }
 
     pub fn apply_headers(

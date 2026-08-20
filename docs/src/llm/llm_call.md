@@ -143,9 +143,9 @@ or derive cache behavior independently.
 | `cost_usd` | float \| nil | Cache- and serving-tier-adjusted catalog price for this response; `nil` (not `0`) when pricing is unknown |
 | `cache_read_tokens` | int | Prompt tokens served from provider-side cache |
 | `cache_write_tokens` | int | Prompt tokens written into provider-side cache |
-| `cache_supported` | bool | Whether the provider reports prompt-cache accounting |
-| `cache_hit_ratio` | float \| nil | Fraction of prompt tokens served from cache; `nil` when the provider reports no cache accounting |
-| `cache_visibility` | string | `"unsupported"` when the provider exposes no cache accounting (e.g. native Ollama), so a local model is never scored as a 100% cache miss |
+| `cache_supported` | bool | Compatibility flag that is `false` for explicitly unsupported routes; use `cache_visibility` for declaration certainty |
+| `cache_hit_ratio` | float \| nil | Fraction of prompt tokens served from cache; `nil` when cache accounting is unsupported or undeclared |
+| `cache_visibility` | string \| nil | `nil` when cache accounting is declared supported, `"unsupported"` when it is declared unavailable (e.g. native Ollama), and `"undeclared"` when the provider catalog makes no claim. Undeclared routes preserve parsed cache tokens, but a zero is not treated as a measured miss. |
 | `accounting_status` | string | `"reported"` when token or authoritative cost telemetry was observed; `"unknown"` when a completed response omitted accounting telemetry. Unknown usage keeps `cost_usd` nil rather than treating the call as free. |
 | `cache_savings_usd` | float | Estimated prompt-cache savings versus full input-token price; negative when cache writes cost more than normal input |
 | `served_fast` | bool | `true` when the provider confirmed it served this request at the accelerated ("fast mode") tier; drives premium-tier billing |

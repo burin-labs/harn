@@ -73,6 +73,14 @@ pub struct ProviderTelemetry {
     /// strings, and fragments are removed at the transport boundary.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub serving_base_url: Option<String>,
+    /// The provider block's `cache_usage_accounting` declaration for the
+    /// route that served this call. `Some(true)`: the cache token fields are
+    /// provider-audited and a zero is a real miss. `Some(false)`: the route
+    /// reports no cache fields and the transport zeroes them deliberately.
+    /// `None`: undeclared — parsed values are preserved as received, and a
+    /// zero carries no information.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_accounting_declared: Option<bool>,
     /// Total server-side wall clock (Ollama `total_duration`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub server_total_ms: Option<u64>,
@@ -173,6 +181,7 @@ impl ProviderTelemetry {
         let Self {
             source,
             serving_base_url,
+            cache_accounting_declared,
             server_total_ms,
             server_load_ms,
             server_prompt_eval_ms,
@@ -192,6 +201,7 @@ impl ProviderTelemetry {
         } = self;
         source.is_empty()
             && serving_base_url.is_none()
+            && cache_accounting_declared.is_none()
             && server_total_ms.is_none()
             && server_load_ms.is_none()
             && server_prompt_eval_ms.is_none()

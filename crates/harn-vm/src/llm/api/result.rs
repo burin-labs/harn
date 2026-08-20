@@ -108,8 +108,11 @@ pub(crate) struct LlmResult {
     /// omits `prompt_tokens_details` — so `cache_read_tokens: 0` there means
     /// "unknown", NOT a real 100% cache miss. When `false`, cache hit-ratio is
     /// surfaced as `cache_visibility: "unsupported"` with a null ratio rather
-    /// than scoring a local model as a 0.0-ratio total miss. Defaults to `true`
-    /// for every provider that does report cache counts.
+    /// than scoring a local model as a 0.0-ratio total miss. A route whose
+    /// catalog declaration is absent is surfaced separately as `"undeclared"`;
+    /// parsed cache tokens survive, but its ratio remains null because a zero
+    /// cannot be distinguished from an omitted field. Defaults to `true` for
+    /// every provider that does report cache counts.
     #[serde(default = "default_true", skip_serializing_if = "is_true")]
     pub cache_supported: bool,
     pub model: String,

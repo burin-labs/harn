@@ -318,6 +318,7 @@ mod telemetry_tests {
             cache_read_tokens: 40,
             cache_write_tokens: 8,
             cache_supported: true,
+            cache_accounting_declared: Some(true),
             cache_hit_ratio: Some(0.4),
             cache_savings_usd: 0.001,
             cache_hit: true,
