@@ -1,0 +1,463 @@
+// Diagnostics timing experiment rig.
+//
+// Races policies for WHEN parser/AST diagnostics reach a coding agent. Every arm
+// shares one producer and one set of precision tiers, so a measured difference
+// is timing, not content.
+//
+//   EXP_ARM      arm name (see lib/policy.harn)
+//   EXP_FIXTURE  fixture name (see lib/fixtures.harn)
+//   EXP_TRIAL    trial index, recorded on the row
+//   EXP_PYTHON   python interpreter (default python3)
+//   EXP_OUT      JSONL path for the trial row (default runs/trials.jsonl)
+//   EXP_MAX_ITER iteration ceiling (default 20)
+import { agent_host_tools } from "std/agent/host_tools"
+import { agent_loop } from "std/agent/loop"
+import { AgentSpec, agent_tool_format } from "std/agent/options"
+import { command_run } from "std/command"
+import { edit_apply_old_new_patch } from "std/edit"
+import { append_jsonl } from "std/jsonl"
+import { model_info } from "std/llm/catalog"
+import { collect, novel, render, signatures_of } from "./lib/diagnostics.harn"
+import { fixture, seed } from "./lib/fixtures.harn"
+import { arm_config, arm_prompt_clause } from "./lib/policy.harn"
+
+const SYSTEM_PROMPT = """
+You are a coding agent working in a small Python workspace. Make the smallest
+change that satisfies the task, then run the tests to confirm. Do not rewrite
+files you were not asked to change.
+"""
+
+fn language_of(path: string) -> string {
+  if path.ends_with(".py") {
+    return "python"
+  }
+  return ""
+}
+
+fn noise_names(spec) -> list {
+  let out: list = []
+  for signature in spec.permanent_noise {
+    const text = to_string(signature)
+    const start = text.index_of("'")
+    if start >= 0 {
+      const rest = text.slice(start + 1, len(text))
+      const stop = rest.index_of("'")
+      if stop > 0 {
+        out = out.appending(rest.slice(0, stop))
+      }
+    }
+  }
+  return out
+}
+
+pipeline default(harness: Harness) {
+  const arm_name = harness.env.get_or("EXP_ARM", "A-push-all")
+  const fixture_name = harness.env.get_or("EXP_FIXTURE", "rename-single-file")
+  const trial = to_int(harness.env.get_or("EXP_TRIAL", "1"))
+  const python = harness.env.get_or("EXP_PYTHON", "python3")
+  const out_path = harness.env.get_or("EXP_OUT", "runs/trials.jsonl")
+  const max_iterations = to_int(harness.env.get_or("EXP_MAX_ITER", "20"))
+  // Provenance. The request timeout resolves as explicit > HARN_LLM_TIMEOUT >
+  // the model catalog's stream_timeout > 120s (options.rs resolve_timeout), so
+  // an inherited env clamp beats the catalog silently. This rig passes no
+  // explicit timeout, so mirroring the env > catalog > 120 tail here yields the
+  // value the requests will actually run under, and stamping it on every row
+  // makes a clamped run visible in the results instead of discovered from them.
+  const selector = harness.env.get_or("EXP_LLM", "")
+  const info = if selector == "" {
+    nil
+  } else {
+    model_info(harness.llm, selector)
+  }
+  const timeout_env = harness.env.get_or("HARN_LLM_TIMEOUT", "")
+  const env_timeout = to_int(timeout_env)
+  const catalog_timeout = to_float(info?.catalog?.stream_timeout)
+  const resolved_timeout_s = env_timeout
+    ?? if catalog_timeout == nil {
+    120
+  } else {
+    to_int(ceil(catalog_timeout))
+  }
+  // The catalog's tool_format is a recommendation, not the wire: an explicit
+  // request is parity-steered by the same policy the loop applies, so record
+  // both the request and what will actually run.
+  const requested_tool_format = harness.env.get_or("EXP_TOOL_FORMAT", "")
+  const effective_tool_format = if info == nil {
+    to_string(info?.tool_format ?? "")
+  } else {
+    to_string(
+      agent_tool_format(
+        harness.llm,
+        {
+          model: to_string(info?.id ?? ""),
+          provider: to_string(info?.provider ?? ""),
+          tool_format: if requested_tool_format == "" {
+            nil
+          } else {
+            requested_tool_format
+          },
+          tool_format_override_reason: "diagnostics-timing calibration pins the tool channel",
+        },
+      ),
+    )
+  }
+  const provenance = {
+    endpoint: harness.env.get_or("LLAMACPP_BASE_URL", "(provider default)"),
+    llm_selector: selector,
+    model: to_string(info?.id ?? ""),
+    provider: to_string(info?.provider ?? ""),
+    tool_format_requested: requested_tool_format,
+    tool_format: effective_tool_format,
+    catalog_tool_format: to_string(info?.tool_format ?? ""),
+    resolved_llm_timeout_s: resolved_timeout_s,
+    llm_timeout_env: if timeout_env == "" {
+      "unset"
+    } else {
+      timeout_env
+    },
+    rig_sha: harness.env.get_or("EXP_RIG_SHA", ""),
+  }
+  harness.stdio.eprintln("[provenance] ${json_stringify(provenance)}")
+  const config = arm_config(arm_name)
+  const spec = fixture(fixture_name)
+  const root = harness.fs.mkdtemp_in_workspace("diagtiming")
+  seed(harness.fs, root, fixture_name)
+  // ---- experiment state, mutated by the tool handlers below ----------------
+  // Novelty comes from diffing the pre-edit against the post-edit reading of the
+  // same file, so a finding that was already there is never charged to this
+  // edit. `shown` is every signature already surfaced once: the
+  // do-not-re-inject rule. `pending` holds diagnostics produced but not yet
+  // delivered under the arm's timing.
+  let shown = set()
+  let touched = set()
+  let pending: list = []
+  let idle_events = 0
+  let surfaced_transient = 0
+  let surfaced_noise = 0
+  let surfaced_genuine = 0
+  let flush_count = 0
+  let noise_seen_at = -1
+  let tool_index = 0
+  const markers = noise_names(spec)
+  fn classify_surfaced(diags: list) {
+    for diag in diags {
+      const signature = to_string(diag.signature)
+      for known in spec.transient {
+        if signature.contains(to_string(known)) {
+          surfaced_transient = surfaced_transient + 1
+        }
+      }
+      for known in spec.permanent_noise {
+        if signature.contains(to_string(known)) {
+          surfaced_noise = surfaced_noise + 1
+          if noise_seen_at < 0 {
+            noise_seen_at = tool_index
+          }
+        }
+      }
+      for known in spec.genuine {
+        if signature.contains(to_string(known)) {
+          surfaced_genuine = surfaced_genuine + 1
+        }
+      }
+    }
+  }
+  // What the model should be told about this file after an edit.
+  //
+  // On the FIRST edit to a file, the whole current reading is eligible: there is
+  // no session history for it, and a defect that predates the session is still a
+  // defect worth knowing about once. On every later edit, only what that edit
+  // introduced is eligible.
+  //
+  // Pure delta-from-previous-edit is what the industry ships, and it is subtly
+  // blind: a real typo already sitting in the file is never reported, because it
+  // is never NEW. Measured here — the pre-existing-typo fixture surfaced nothing
+  // in any arm until this first-touch rule existed. The `shown` set still means
+  // nothing is ever repeated, so first-touch costs at most one mention.
+  fn introduced(path: string, before: string, after: string) -> list {
+    const language = language_of(path)
+    if language == "" {
+      return []
+    }
+    const prior = if touched.contains(path) {
+      signatures_of(collect(harness.ast, before, language, path))
+    } else {
+      set()
+    }
+    touched = touched.adding(path)
+    const current = collect(harness.ast, after, language, path)
+    return novel(current, prior, shown)
+  }
+  // Deliver pending diagnostics, honouring the tier filter the arm asks for.
+  fn flush(tier_filter: string) -> string {
+    if len(pending) == 0 {
+      return ""
+    }
+    let taken: list = []
+    let held: list = []
+    for diag in pending {
+      if tier_filter == "all" || to_string(diag.tier) == tier_filter {
+        taken = taken.appending(diag)
+      } else {
+        held = held.appending(diag)
+      }
+    }
+    pending = held
+    if len(taken) == 0 {
+      return ""
+    }
+    shown = shown.union(signatures_of(taken))
+    classify_surfaced(taken)
+    flush_count = flush_count + 1
+    return render(taken, "the edited files")
+  }
+  // Every tool call passes through here so the settle timer sees the whole event
+  // stream, not just edits.
+  fn on_tool_event(is_edit: bool) -> string {
+    tool_index = tool_index + 1
+    if is_edit {
+      idle_events = 0
+      return ""
+    }
+    if config.settle_k <= 0 {
+      return ""
+    }
+    idle_events = idle_events + 1
+    if idle_events >= config.settle_k {
+      idle_events = 0
+      return flush("all")
+    }
+    return ""
+  }
+  fn apply_edit(path: string, old_text: string, new_text: string) {
+    const full = "${root}/${path}"
+    const before = harness.fs.read_text(full)
+    const patch = edit_apply_old_new_patch(
+      before,
+      old_text,
+      new_text,
+      {strip_line_numbers: true, structural_require_anchored_lines: "either"},
+    )
+    if patch.ok {
+      harness.fs.write_text(full, patch.patched)
+    }
+    return {
+      ok: patch.ok,
+      message: to_string(patch?.message ?? ""),
+      path: full,
+      before: before,
+      after: if patch.ok {
+        to_string(patch.patched)
+      } else {
+        before
+      },
+    }
+  }
+  let registry = agent_host_tools(
+    harness,
+    nil,
+    {
+      root: root,
+      cwd: root,
+      max_inline_bytes: 8000,
+      enabled_tools: ["read_file", "list_directory", "search_files"],
+      search_exclude_globs: ["__pycache__/**"],
+    },
+  )
+  registry = tool_define(
+    registry,
+    "edit_file",
+    "Replace one exact text region in a file. Provide the existing text and its replacement.",
+    {
+      parameters: {path: {type: "string"}, old_text: {type: "string"}, new_text: {type: "string"}},
+      returns: {type: "string"},
+      annotations: {kind: "edit", side_effect_level: "workspace_write"},
+      handler: { args ->
+        const applied = apply_edit(
+          to_string(args.path),
+          to_string(args.old_text),
+          to_string(args.new_text),
+        )
+        on_tool_event(true)
+        if !applied.ok {
+          return "edit failed: ${applied.message}"
+        }
+        pending = pending + introduced(applied.path, applied.before, applied.after)
+        let body = "edited ${args.path}"
+        if config.push_syntax_on_edit && config.push_semantic_on_edit {
+          body = body + flush("all")
+        } else if config.push_syntax_on_edit {
+          body = body + flush("syntax")
+        }
+        return body
+      },
+    },
+  )
+  registry = tool_define(
+    registry,
+    "run_tests",
+    "Run the workspace test suite.",
+    {
+      parameters: {},
+      returns: {type: "string"},
+      annotations: {kind: "verify", side_effect_level: "read_only"},
+      handler: { _args ->
+        const settle = on_tool_event(false)
+        const verify = command_run(
+          harness.tools,
+          {
+            argv: [python, "-B", "-m", "unittest", "discover", "-s", ".", "-p", "test_*.py"],
+            cwd: root,
+          },
+          {capture: {max_inline_bytes: 8000}, timeout_ms: 60000},
+        )
+        let body = if verify.success {
+          "tests passed\n${verify.stdout}${verify.stderr}"
+        } else {
+          "tests failed (exit ${verify.exit_code})\n${verify.stdout}${verify.stderr}"
+        }
+        body = body + settle
+        if config.flush_on_verify {
+          body = body + flush("all")
+        }
+        return body
+      },
+    },
+  )
+  if config.expose_pull {
+    registry = tool_define(
+      registry,
+      "get_diagnostics",
+      "Report outstanding problems for the files you have edited. Call it when a change is complete, not between edits that belong together.",
+      {
+        parameters: {},
+        returns: {type: "string"},
+        annotations: {kind: "read", side_effect_level: "read_only"},
+        handler: { _args ->
+          const settle = on_tool_event(false)
+          const body = flush("all")
+          if body == "" && settle == "" {
+            return "no outstanding problems"
+          }
+          return body + settle
+        },
+      },
+    )
+  }
+  if config.expose_batch {
+    registry = tool_define(
+      registry,
+      "batch_edit",
+      "Apply several edits that belong to one change. Problems are reported once, after every edit lands.",
+      {
+        parameters: {edits: {type: "array"}},
+        returns: {type: "string"},
+        annotations: {kind: "edit", side_effect_level: "workspace_write"},
+        handler: { args ->
+          on_tool_event(true)
+          let notes: list = []
+          for item in args.edits ?? [] {
+            const applied = apply_edit(
+              to_string(item?.path ?? ""),
+              to_string(item?.old_text ?? ""),
+              to_string(item?.new_text ?? ""),
+            )
+            if applied.ok {
+              notes = notes.appending("edited ${item?.path}")
+              pending = pending + introduced(applied.path, applied.before, applied.after)
+            } else {
+              notes = notes.appending("failed ${item?.path}: ${applied.message}")
+            }
+          }
+          let body = join(notes, "\n")
+          if config.push_syntax_on_edit && config.push_semantic_on_edit {
+            body = body + flush("all")
+          } else if config.push_syntax_on_edit {
+            body = body + flush("syntax")
+          }
+          return body
+        },
+      },
+    )
+  }
+  const clause = arm_prompt_clause(arm_name)
+  const system = if clause == "" {
+    SYSTEM_PROMPT
+  } else {
+    "${SYSTEM_PROMPT}\n${clause}"
+  }
+  const started = harness.clock.now_ms()
+  const options: AgentSpec = if requested_tool_format == "" {
+    {
+      tools: registry,
+      max_iterations: max_iterations,
+      iteration_budget: {mode: "fixed", initial: max_iterations, max: max_iterations, extend_by: 0},
+      llm_options: {temperature: 0, max_tokens: 2048},
+    }
+  } else {
+    {
+      tools: registry,
+      max_iterations: max_iterations,
+      iteration_budget: {mode: "fixed", initial: max_iterations, max: max_iterations, extend_by: 0},
+      llm_options: {temperature: 0, max_tokens: 2048, tool_format: requested_tool_format},
+      tool_format_override_reason: "diagnostics-timing calibration pins the tool channel",
+    }
+  }
+  const result = agent_loop(harness, spec.task, system, options)
+  const elapsed_ms = harness.clock.now_ms() - started
+  const verify = command_run(
+    harness.tools,
+    {argv: [python, "-B", "-m", "unittest", "discover", "-s", ".", "-p", "test_*.py"], cwd: root},
+    {capture: {max_inline_bytes: 4000}, timeout_ms: 60000},
+  )
+  // A detour is the model going BACK to a name it was warned about. Writing the
+  // name once is the work the task asked for; the first call mentioning a marker
+  // is therefore never a detour, and every later mention of that same marker is.
+  //
+  // Counting "any call after the flush" would be wrong: the flush is triggered by
+  // the very edit that introduces the name, and the two live in different index
+  // spaces anyway, since host-provided tools do not pass through the rig's own
+  // event counter.
+  let detour_calls = 0
+  if noise_seen_at >= 0 {
+    for marker in markers {
+      let seen_once = false
+      for call in result.tools.calls {
+        const text = json_stringify(call?.arguments ?? {})
+        if text.contains(to_string(marker)) {
+          if seen_once {
+            detour_calls = detour_calls + 1
+          }
+          seen_once = true
+        }
+      }
+    }
+  }
+  const row = {
+    schema_version: 1,
+    arm: arm_name,
+    fixture: fixture_name,
+    trial: trial,
+    passed: verify.success,
+    status: to_string(result.status),
+    terminal_kind: to_string(result?.terminal?.kind ?? ""),
+    iterations: result.llm.iterations,
+    input_tokens: result.llm.input_tokens,
+    output_tokens: result.llm.output_tokens,
+    tool_calls: len(result.tools.calls),
+    elapsed_ms: elapsed_ms,
+    flush_count: flush_count,
+    surfaced_transient: surfaced_transient,
+    surfaced_noise: surfaced_noise,
+    surfaced_genuine: surfaced_genuine,
+    detour_calls: detour_calls,
+    tool_sequence: result.tools.successful,
+    rejected_tools: result.tools.rejected,
+    terminal_reason: to_string(result?.terminal?.reason ?? ""),
+    final_text: to_string(result?.final_text ?? ""),
+    workspace_root: root,
+    provenance: provenance,
+  }
+  append_jsonl(harness.fs, out_path, row)
+  harness.stdio.println(json_stringify(row))
+}

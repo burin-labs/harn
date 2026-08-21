@@ -1,0 +1,110 @@
+// The timing policies under test, as one data table.
+//
+// Every arm is the SAME producer and the SAME precision tiers. Arms differ only
+// in WHEN a diagnostic reaches the model, so any measured difference is timing
+// and not content.
+//
+//   push_syntax_on_edit    attach syntax findings to the edit result itself
+//   push_semantic_on_edit  attach semantic findings to the edit result itself
+//   flush_on_verify        attach everything still pending to the verify result
+//   settle_k               flush pending after K consecutive non-edit tool
+//                          events (0 disables the settle timer)
+//   expose_pull            register a `get_diagnostics` tool the model calls
+//   expose_batch           register a `batch_edit` tool carrying several edits,
+//                          with diagnostics computed once after the batch
+const ARMS = {
+  "A-push-all": {
+    push_syntax_on_edit: true,
+    push_semantic_on_edit: true,
+    flush_on_verify: true,
+    settle_k: 0,
+    expose_pull: false,
+    expose_batch: false,
+  },
+  "B-verify-time": {
+    push_syntax_on_edit: false,
+    push_semantic_on_edit: false,
+    flush_on_verify: true,
+    settle_k: 0,
+    expose_pull: false,
+    expose_batch: false,
+  },
+  "C-settle": {
+    push_syntax_on_edit: false,
+    push_semantic_on_edit: false,
+    flush_on_verify: true,
+    settle_k: 2,
+    expose_pull: false,
+    expose_batch: false,
+  },
+  "D-pull": {
+    push_syntax_on_edit: false,
+    push_semantic_on_edit: false,
+    flush_on_verify: false,
+    settle_k: 0,
+    expose_pull: true,
+    expose_batch: false,
+  },
+  "E-hybrid": {
+    push_syntax_on_edit: true,
+    push_semantic_on_edit: false,
+    flush_on_verify: true,
+    settle_k: 0,
+    expose_pull: true,
+    expose_batch: false,
+  },
+  "F-hybrid-batch": {
+    push_syntax_on_edit: true,
+    push_semantic_on_edit: false,
+    flush_on_verify: true,
+    settle_k: 0,
+    expose_pull: true,
+    expose_batch: true,
+  },
+}
+
+pub fn arm_names() -> list {
+  return ARMS.keys()
+}
+
+pub fn arm_config(arm: string) {
+  const config = ARMS.get(arm, nil)
+  if config == nil {
+    throw "unknown arm '${arm}'; known arms: ${join(ARMS.keys(), ", ")}"
+  }
+  return config
+}
+
+// The prompt clause each arm needs so the model knows how diagnostics reach it.
+// An arm that hides diagnostics behind a tool MUST teach that tool, or the arm
+// is testing "no diagnostics" rather than "pull diagnostics".
+pub fn arm_prompt_clause(arm: string) -> string {
+  const config = arm_config(arm)
+  let clauses: list = []
+  if config.push_syntax_on_edit && config.push_semantic_on_edit {
+    clauses = clauses.appending(
+      "After every edit you will be shown any new problems that edit introduced.",
+    )
+  } else if config.push_syntax_on_edit {
+    clauses = clauses.appending(
+      "After every edit you will be shown any new SYNTAX errors that edit introduced. Deeper checks do not run on every edit.",
+    )
+  }
+  if config.expose_pull {
+    clauses = clauses.appending(
+      "Call get_diagnostics when you have finished a coherent unit of work and want the current problems for a file. Do not call it between two edits that belong to the same change.",
+    )
+  }
+  if config.flush_on_verify {
+    clauses = clauses.appending("Running the tests also reports any outstanding problems.")
+  }
+  if config.expose_batch {
+    clauses = clauses.appending(
+      "When a single change needs several edits, send them together with batch_edit. Problems are reported once, after the whole batch.",
+    )
+  }
+  if len(clauses) == 0 {
+    return ""
+  }
+  return join(clauses, " ")
+}

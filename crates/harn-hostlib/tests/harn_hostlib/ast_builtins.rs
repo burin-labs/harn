@@ -603,6 +603,132 @@ fn undefined_names_marks_unsupported_languages() {
     assert!(diagnostics.is_empty());
 }
 
+fn undefined_names_resolution(content: &str, language: &str) -> VmValue {
+    let registry = ast_registry();
+    let payload = dict(&[
+        ("content", VmValue::String(arcstr::ArcStr::from(content))),
+        ("language", VmValue::String(arcstr::ArcStr::from(language))),
+    ]);
+    let result = invoke(&registry, "hostlib_ast_undefined_names", payload);
+    dict_field(&result, "resolution")
+}
+
+fn resolution_is_complete(resolution: &VmValue) -> bool {
+    match dict_field(resolution, "complete") {
+        VmValue::Bool(b) => b,
+        other => panic!("expected bool, got {other:?}"),
+    }
+}
+
+fn resolution_defeaters(resolution: &VmValue) -> Vec<String> {
+    list_value(&dict_field(resolution, "defeaters"))
+        .iter()
+        .map(|d| string_value(d).to_string())
+        .collect()
+}
+
+#[test]
+fn undefined_names_reports_complete_resolution_for_a_plainly_written_file() {
+    let resolution =
+        undefined_names_resolution("import os\n\n\ndef f():\n    return os\n", "python");
+    assert!(resolution_is_complete(&resolution));
+    assert!(resolution_defeaters(&resolution).is_empty());
+    assert_eq!(
+        string_value(&dict_field(&resolution, "ceiling")).to_string(),
+        "single_file_complete"
+    );
+}
+
+#[test]
+fn undefined_names_demotes_a_file_whose_names_arrive_by_wildcard_import() {
+    // The names really do exist at runtime; the analysis simply cannot see
+    // them. Reporting them as confident errors is the false-positive class
+    // this field exists to prevent.
+    let resolution = undefined_names_resolution(
+        "from constants import *\n\n\ndef f():\n    return MAX\n",
+        "python",
+    );
+    assert!(!resolution_is_complete(&resolution));
+    assert_eq!(resolution_defeaters(&resolution), vec!["wildcard_import"]);
+}
+
+#[test]
+fn undefined_names_never_claims_complete_resolution_for_a_runtime_resolved_language() {
+    let resolution = undefined_names_resolution("def total(a)\n  a + 1\nend\n", "ruby");
+    assert!(!resolution_is_complete(&resolution));
+    assert_eq!(
+        string_value(&dict_field(&resolution, "ceiling")).to_string(),
+        "runtime_resolved"
+    );
+}
+
+#[test]
+fn undefined_names_unsupported_language_reports_no_analysis_rather_than_completeness() {
+    // An empty diagnostic list here means "nothing was checked". The reading
+    // must not read as "nothing is wrong".
+    let resolution = undefined_names_resolution("fn main() {}\n", "rust");
+    assert!(!resolution_is_complete(&resolution));
+    assert!(
+        !matches!(dict_field(&resolution, "analysed"), VmValue::Bool(true)),
+        "an unsupported language was never analysed"
+    );
+}
+
+#[test]
+fn undefined_names_unparseable_file_reports_no_analysis() {
+    let resolution = undefined_names_resolution("def f(:\n  ???\n", "python");
+    assert!(!resolution_is_complete(&resolution));
+}
+
+/// The response schema closes both its root and its nested objects, so a field
+/// added to the builtin without a matching schema edit is a contract break the
+/// type system cannot catch. Every branch that builds a response is checked,
+/// including the two that return early.
+#[test]
+fn undefined_names_responses_match_their_schema() {
+    let schema = harn_hostlib::schemas::lookup(
+        "ast",
+        "undefined_names",
+        harn_hostlib::schemas::SchemaKind::Response,
+    )
+    .expect("undefined_names response schema");
+    let schema: serde_json::Value = serde_json::from_str(schema).expect("schema JSON");
+    let schema = harn_vm::json_to_vm_value(&schema);
+    let schema = harn_vm::schema::canonicalize_json_schema(&schema).expect("canonical schema");
+
+    let cases: &[(&str, &str, &str)] = &[
+        (
+            "clean python",
+            "import os\n\n\ndef f():\n    return os\n",
+            "python",
+        ),
+        (
+            "undefined name",
+            "def f():\n    return missing()\n",
+            "python",
+        ),
+        (
+            "wildcard import",
+            "from c import *\n\n\ndef f():\n    return MAX\n",
+            "python",
+        ),
+        ("runtime resolved", "def total(a)\n  a + 1\nend\n", "ruby"),
+        ("unsupported language", "fn main() {}\n", "rust"),
+        ("unparseable", "def f(:\n  ???\n", "python"),
+    ];
+
+    for (label, content, language) in cases {
+        let registry = ast_registry();
+        let payload = dict(&[
+            ("content", VmValue::String(arcstr::ArcStr::from(*content))),
+            ("language", VmValue::String(arcstr::ArcStr::from(*language))),
+        ]);
+        let result = invoke(&registry, "hostlib_ast_undefined_names", payload);
+        harn_vm::schema::validate_value_against_canonical_schema(&result, &schema, true)
+            .unwrap_or_else(|error| panic!("{label} response violates the schema: {error}"));
+    }
+}
+
 fn structural_diff_payload(before: &str, after: &str, extra: &[(&str, VmValue)]) -> VmValue {
     let before_path = structural_diff_fixture_path(before);
     let after_path = structural_diff_fixture_path(after);

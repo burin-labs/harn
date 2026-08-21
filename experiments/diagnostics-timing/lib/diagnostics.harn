@@ -1,0 +1,151 @@
+// Tiered diagnostic producer for the timing experiment.
+//
+// Three tiers, per the precision shape under test:
+//   1. syntax     -- the parser is authoritative; always surfaced as an error.
+//   2. semantic   -- surfaced as a confident error only where the analysis could
+//                    see the whole symbol space.
+//   3. unresolved -- structurally incomplete resolution; demoted to one labeled
+//                    low-confidence line, or suppressed entirely.
+//
+// Whether the analysis could see the whole symbol space is NOT decided here.
+// `ast.undefined_names` reports it on `resolution`, because the two things that
+// decide it -- the language's ceiling and the constructs in the file -- are both
+// parser facts. Re-deriving them here from substrings would be a second copy of
+// the policy that drifts from the first.
+//
+// Signatures are location-stripped on purpose. A diagnostic that shifts line
+// number as the file grows is the SAME diagnostic; keying on `line` would defeat
+// both the novelty filter and the do-not-re-inject rule.
+/**
+ * Collect every diagnostic for one source, already tiered and signed.
+ *
+ * Signatures are qualified by `path` so the same unresolved name in two files
+ * stays two diagnostics.
+ */
+pub fn collect(ast: HarnessAst, source: string, language: string, path: string) -> list {
+  let out: list = []
+  const parse = ast.parse_errors({content: source, language: language})
+  if (parse?.supported ?? false) && (parse?.had_errors ?? false) {
+    for err in parse?.errors ?? [] {
+      const message = to_string(err?.message ?? "parse error")
+      out = out
+        + [
+        {
+          tier: "syntax",
+          severity: "ERROR",
+          line: to_int(err?.start_row ?? 0) + 1,
+          message: message,
+          reason: "",
+          signature: "${path}|syntax:${message}",
+        },
+      ]
+    }
+    // A file that does not parse makes every semantic reading noise, so stop.
+    return out
+  }
+  const undef = ast.undefined_names({content: source, language: language})
+  if !(undef?.supported ?? false) {
+    return out
+  }
+  const resolution = undef?.resolution
+  const complete = resolution?.complete ?? false
+  const tier = if complete {
+    "semantic"
+  } else {
+    "unresolved"
+  }
+  const defeaters = resolution?.defeaters ?? []
+  const reason = if complete {
+    ""
+  } else if len(defeaters) > 0 {
+    join(defeaters, ", ")
+  } else {
+    to_string(resolution?.ceiling ?? "unknown")
+  }
+  for diag in undef?.diagnostics ?? [] {
+    const name = to_string(diag?.name ?? "")
+    out = out
+      + [
+      {
+        tier: tier,
+        severity: if complete {
+          "ERROR"
+        } else {
+          "LOW-CONFIDENCE"
+        },
+        line: to_int(diag?.row ?? 0) + 1,
+        message: "undefined name '${name}'",
+        reason: reason,
+        signature: "${path}|${tier}:undefined name '${name}'",
+      },
+    ]
+  }
+  return out
+}
+
+/**
+ * Keep only diagnostics whose signature is absent from `baseline` (the pre-edit
+ * reading) and from `suppressed` (everything already shown to the model once).
+ */
+pub fn novel(current: list, baseline, suppressed) -> list {
+  let out: list = []
+  for diag in current {
+    const signature = to_string(diag.signature)
+    if baseline.contains(signature) {
+      continue
+    }
+    if suppressed.contains(signature) {
+      continue
+    }
+    out = out.appending(diag)
+  }
+  return out
+}
+
+pub fn signatures_of(diags: list) {
+  let out = set()
+  for diag in diags {
+    out = out.adding(to_string(diag.signature))
+  }
+  return out
+}
+
+/**
+ * Render the model-facing block. Confident errors get fix-first framing; the
+ * demoted tier collapses to ONE labeled line no matter how many findings it
+ * carried, so an unresolvable framework namespace cannot flood the turn, and it
+ * names why it was demoted so the model can judge for itself.
+ */
+pub fn render(diags: list, path: string) -> string {
+  if len(diags) == 0 {
+    return ""
+  }
+  let error_lines: list = []
+  let low_names: list = []
+  let low_reason: string = ""
+  for diag in diags {
+    if to_string(diag.severity) == "ERROR" {
+      if len(error_lines) < 8 {
+        error_lines = error_lines.appending("  L${diag.line} ERROR: ${diag.message}")
+      }
+    } else {
+      low_names = low_names.appending(to_string(diag.message))
+      if low_reason == "" {
+        low_reason = to_string(diag?.reason ?? "")
+      }
+    }
+  }
+  let lines: list = []
+  if len(error_lines) > 0 {
+    lines = lines + ["\n## Diagnostics for ${path} (${len(error_lines)} error(s))"]
+    lines = lines + error_lines
+    lines = lines + ["-> Fix these before verifying."]
+  }
+  if len(low_names) > 0 {
+    lines = lines
+      + [
+      "\n## Note for ${path} (low confidence, not verified): ${len(low_names)} name(s) could not be resolved statically because of ${low_reason}, e.g. ${low_names.first()}. Names provided by a framework or an import this checker cannot follow look identical to real mistakes here. Do not act on this unless verification agrees.",
+    ]
+  }
+  return join(lines, "\n")
+}

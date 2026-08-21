@@ -1,0 +1,4 @@
+{"text":"Let me read the module.\n<tool_call>{\"name\":\"read_file\",\"arguments\":{\"path\":\"retry.py\"}}</tool_call>","model":"fixture-model"}
+{"text":"Adding the capped variant.\n<tool_call>{\"name\":\"edit_file\",\"arguments\":{\"path\":\"retry.py\",\"old_text\":\"def should_retry(attempt):\",\"new_text\":\"def backoff_capped(attempt):\\n    return min(backoff(attempt), MAX_DELAY)\\n\\n\\ndef should_retry(attempt):\"}}</tool_call>","model":"fixture-model"}
+{"text":"Running the tests.\n<tool_call>{\"name\":\"run_tests\",\"arguments\":{}}</tool_call>","model":"fixture-model"}
+{"text":"Done. ##DONE##","model":"fixture-model"}
