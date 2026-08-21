@@ -1,10 +1,13 @@
 # System reminders
 
-System reminders are typed, ephemeral transcript injections for a running
-agent session. They let Harn add ambient context at turn boundaries, such
-as token-pressure warnings, idle-session nudges, truncated-tool-output
-notices, post-compact recaps, host file-change alerts, and runtime corrective
-feedback without adding synthetic turns to the durable message list.
+System reminders are typed transcript injections for a running agent session.
+They let Harn add ambient context at turn boundaries, such as token-pressure
+warnings, idle-session nudges, truncated-tool-output notices, post-compact
+recaps, host file-change alerts, and runtime corrective feedback, without a
+producer having to place a turn itself. Producers work in lifecycle terms —
+body, tags, TTL, authority — and the runtime decides when a directive is
+delivered and where it lands. Embedders can opt into durable delivery; see
+[append-only placement](#append-only-placement).
 
 A reminder is always a structured `system_reminder` transcript event. It
 has a stable lifecycle shape, can be deduped, can expire after a finite
@@ -333,8 +336,10 @@ reminders and runtime feedback:
 3. survivors are ordered `contract`, `corrective`, then `advisory`;
 4. every survivor renders as `<directive authority="...">...</directive>` in
    one `<context-directives>` envelope;
-5. the envelope is appended to the trailing user turn, or becomes one new
-   trailing user turn when the conversation ends in another role.
+5. by default, the envelope keeps the legacy projection: it folds into a
+   trailing user turn or becomes a new trailing user turn after another role;
+6. in append-only mode, the envelope always becomes one new trailing user turn
+   and never folds into an existing message.
 
 This slot and register are identical for Anthropic, OpenAI, Gemini, and local
 routes. The system string remains byte-stable as directives change. Diagnostic
@@ -342,12 +347,66 @@ identity—source, tags, dedupe key, and runtime feedback kind—stays in typed
 events and is never copied into the model-visible envelope. `role_hint` remains
 readable on historical transcripts but does not create a second rendering path.
 
+## Append-only placement
+
+Append-only placement is experimental and off by default because changing
+directive placement is model-visible. Enable it per loop:
+
+```harn,ignore
+agent_loop(harness, task, system, {
+  reminders: {append_only: true},
+})
+```
+
+Embedders that cannot thread loop options through the turn builder can set
+`HARN_REMINDERS_APPEND_ONLY=1`. An explicit `append_only: false` overrides the
+environment fallback.
+
+Provider prompt caches are prefix caches. Anthropic requires byte-identical
+segments up to the breakpoint, OpenAI matches an initial run of tokens, vLLM
+chains one hash per KV block over the tokens before it, and a llama.cpp slot
+re-prefills from the first divergent token to the end. A directive that moves
+between requests therefore invalidates the whole prompt on every turn.
+
+Transcript construction holds one invariant:
+
+> the serialized message array at request N+1 begins with the serialized message
+> array at request N.
+
+When enabled, the envelope is committed into durable history at the turn
+boundary that emits it, and later turns re-send those exact bytes at the same
+index:
+
+- the envelope is always its own trailing `user` turn and never folds into an
+  existing message;
+- deduplication means "do not re-issue" — a directive whose rendered text is
+  already committed is not emitted again, and no earlier turn is edited to
+  remove a stale one;
+- turns are immutable once their boundary passes. Compaction stays the one
+  sanctioned prefix break, and it is already evented.
+
+Two opt-in consequences follow. A directive stays visible for the rest of the
+session rather than expiring at its `ttl_turns` boundary, because withdrawing it would
+rewrite history; write directives that stay true, or let a later directive
+supersede an earlier one. And directives are ordinary transcript messages, so a
+transcript now contains one `user` turn per distinct directive emission — code
+that counts messages, or scans the serialized transcript for text that also
+appears in a directive, should filter by role.
+
+`ttl_turns`, `preserve_on_compact`, and `dedupe_key` still govern the pending
+queue and compaction. They decide whether a directive is *re-issued*, not
+whether an already-delivered one is withdrawn.
+
 ## Compaction interaction
 
-Reminders live in transcript events, not durable messages. Normal
-agent-session post-turn processing decrements finite `ttl_turns`.
-`ttl_turns: 1` expires at the next post-turn boundary and emits an expiry
-lifecycle event when an EventLog is active.
+In append-only mode, the pending queue lives in transcript events while a
+delivered directive is a durable message. TTL governs the queue, so it decides
+how long a directive keeps being *re-issued*, not how long a delivered one
+stays visible. Normal agent-session post-turn processing decrements finite
+`ttl_turns`. `ttl_turns: 1` expires at
+the next post-turn boundary and emits an expiry lifecycle event when an
+EventLog is active. Compaction is what removes a delivered directive from the
+model's view, and it is the one sanctioned prefix break.
 
 `transcript_compact(...)` applies reminder lifecycle processing before it
 rebuilds the transcript:

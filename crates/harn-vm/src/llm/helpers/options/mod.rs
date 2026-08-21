@@ -11,6 +11,7 @@
 //! `extract_llm_options` orchestrator that drives them.
 
 mod defaults;
+mod directive_placement;
 mod extract;
 mod json;
 mod output;
@@ -21,8 +22,10 @@ mod thinking;
 mod tool_search;
 mod validate;
 
+pub(crate) use directive_placement::uncommitted_directives;
 pub(crate) use reminders::{
-    apply_rendered_reminder_messages, pending_reminders_from_session, render_pending_reminders,
+    apply_rendered_reminder_messages, directive_envelope_message, pending_reminders_from_session,
+    render_pending_reminders,
 };
 pub(crate) use validate::{project_llm_options, validate_llm_option_keys};
 

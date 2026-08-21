@@ -81,6 +81,7 @@ pub import {
   agent_emit_event,
   agent_record_native_tool_fallback,
   agent_reminder_providers_fire,
+  agent_session_commit_directives,
   agent_session_drain_bridge_injections,
   agent_session_drain_feedback,
   agent_session_drain_host_injections,
@@ -129,6 +130,7 @@ pub import {
   llm_clear_one_shot_prefill,
   llm_enable_equivalent_failover,
 } from "std/llm/options"
+pub import { env_bool } from "std/os"
 
 pub fn __agent_loop_llm_overrides(opts) {
   const overrides = opts?.llm_options
@@ -307,6 +309,18 @@ pub fn __agent_loop_with_llm_render_context(harness: Harness, opts, render) {
 }
 
 pub fn __agent_loop_build_turn_prompt(harness: Harness, session, opts, iteration) {
+  const append_only = if type_of(opts?.reminders) == "dict"
+    && opts.reminders?.append_only != nil {
+    opts.reminders.append_only
+  } else {
+    env_bool(harness.env, "HARN_REMINDERS_APPEND_ONLY", false)
+  }
+  if append_only {
+    // Commit the active directives into one durable trailing user message
+    // before this turn's history is read, so every later request re-sends those
+    // exact bytes at the same index instead of moving the envelope.
+    let _ = agent_session_commit_directives(harness.agent, session.session_id)
+  }
   return __agent_loop_with_llm_render_context(
     harness,
     opts,
@@ -321,6 +335,7 @@ pub fn __agent_loop_build_turn_prompt(harness: Harness, session, opts, iteration
       for fragment in fragments {
         parts = parts.appending(fragment.body)
       }
+      const prompt_opts = effective + {_reminders_append_only: append_only}
       return {
         fragments: fragments,
         system: join(parts, "\n\n"),
@@ -328,7 +343,7 @@ pub fn __agent_loop_build_turn_prompt(harness: Harness, session, opts, iteration
           render_harness.agent,
           render_harness.clock,
           session,
-          effective,
+          prompt_opts,
           iteration,
         ),
       }

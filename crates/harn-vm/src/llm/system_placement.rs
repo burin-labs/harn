@@ -86,8 +86,10 @@ fn system_reminder_block(text: &str) -> String {
 }
 
 /// Append `text` to a message's `content`, preserving whatever shape it already
-/// uses (string or content-block array). Mirrors the reminder channel's
-/// `append_text_to_message_content` so folded directives land the same way.
+/// uses (string or content-block array). This fold is a deterministic function
+/// of the durable message array — the same script-placed system message folds
+/// at the same index on every request — so it does not disturb the append-only
+/// prefix the reminder channel maintains.
 fn append_text_to_content(content: &mut Value, text: &str) {
     match content {
         Value::Array(blocks) => blocks.push(serde_json::json!({"type": "text", "text": text})),

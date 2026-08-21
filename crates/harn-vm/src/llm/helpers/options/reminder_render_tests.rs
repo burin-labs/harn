@@ -80,6 +80,7 @@ fn system_text_reminders_are_excluded_from_system_string() {
     let messages = apply_rendered_reminder_messages(
         vec![serde_json::json!({"role": "assistant", "content": "ok"})],
         &[RenderedReminder::SystemText("reminder".to_string())],
+        true,
     );
     let last = messages.last().expect("trailing message");
     assert_eq!(last["role"], "user");
@@ -171,27 +172,30 @@ fn system_string_is_byte_stable_across_changing_reminder_sets() {
     );
     assert!(!turn_n.contains("context-directives"));
 
-    // The reminder is present on turn N+1 — as the trailing user message,
-    // not in the system string.
+    // The reminder is present on turn N+1 — as its own trailing user message,
+    // not in the system string and not merged into the turn already there.
     let base_messages = || vec![serde_json::json!({"role": "user", "content": "hello"})];
-    let msgs_n = apply_rendered_reminder_messages(base_messages(), &[]);
+    let msgs_n = apply_rendered_reminder_messages(base_messages(), &[], true);
     let msgs_n_plus_1 = apply_rendered_reminder_messages(
         base_messages(),
         &[RenderedReminder::SystemText(pressure.to_string())],
+        true,
     );
     // Turn N: no reminder anywhere in the message array.
     assert!(!serde_json::to_string(&msgs_n)
         .unwrap()
         .contains("context-directives"));
-    // Turn N+1: reminder folded into the trailing user turn (merged with
-    // the existing user message rather than appended as a second user msg).
-    assert_eq!(msgs_n_plus_1.len(), 1);
-    let last = msgs_n_plus_1.last().expect("trailing message");
-    assert_eq!(last["role"], "user");
+    // Turn N+1 extends turn N rather than editing it: message 0 is untouched,
+    // and the envelope arrives as a new message after it. That is what keeps
+    // the provider's prompt prefix reusable across the two requests.
+    assert_eq!(msgs_n_plus_1.len(), 2);
+    assert_eq!(msgs_n_plus_1[0], msgs_n[0]);
+    assert_eq!(msgs_n_plus_1[0]["content"], "hello");
+    assert_eq!(msgs_n_plus_1[1]["role"], "user");
     assert_eq!(
-        last["content"],
+        msgs_n_plus_1[1]["content"],
         format!(
-            "hello\n\n<context-directives>\nFollow these active directives. Contract directives override corrective directives; corrective directives override advisory directives.\n{pressure}\n</context-directives>"
+            "<context-directives>\nFollow these active directives. Contract directives override corrective directives; corrective directives override advisory directives.\n{pressure}\n</context-directives>"
         )
     );
 }
@@ -220,6 +224,7 @@ fn system_text_reminder_appends_new_user_message_after_assistant_tail() {
         &[RenderedReminder::SystemText(
             "<directive authority=\"contract\">\nR\n</directive>".to_string(),
         )],
+        true,
     );
     assert_eq!(out.len(), 5);
     // The original assistant tool_call/tool_result ordering is preserved.
@@ -254,6 +259,7 @@ fn multiple_system_text_reminders_coalesce_into_one_trailing_message() {
                 "<directive authority=\"corrective\">\nB\n</directive>".to_string(),
             ),
         ],
+        true,
     );
     assert_eq!(out.len(), 2);
     assert_eq!(out[1]["role"], "user");
