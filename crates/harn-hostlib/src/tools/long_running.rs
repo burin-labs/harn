@@ -35,7 +35,7 @@
 //! cancellation can opt into waiting for the waiter result through
 //! `cancel_handle`.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -55,6 +55,11 @@ use crate::tools::proc::{self, CaptureConfig, CommandStatus, EnvMode};
 
 /// Atomic counter for generating unique handle IDs within this process.
 static HANDLE_COUNTER: AtomicU64 = AtomicU64::new(1);
+
+/// Maximum number of completed command receipts retained for idempotent
+/// observation. Session teardown removes its own receipts eagerly; this cap is
+/// the process-wide backstop for callers that never close a session.
+const TERMINAL_RESULT_CAPACITY: usize = 256;
 
 /// Shared cancellation state between the store entry and its waiter thread.
 ///
@@ -205,11 +210,49 @@ struct HandleEntry {
     started_at: String,
     /// Canonical directory in which the child executes.
     cwd: PathBuf,
+    /// Session teardown clears terminal receipts and prevents an in-flight
+    /// waiter from recreating one after cleanup has begun.
+    retain_terminal_result: bool,
+}
+
+#[derive(Clone)]
+struct TerminalResult {
+    session_id: String,
+    value: VmValue,
 }
 
 #[derive(Default)]
 struct HandleStore {
     entries: BTreeMap<String, HandleEntry>,
+    terminal_results: BTreeMap<String, TerminalResult>,
+    terminal_order: VecDeque<String>,
+}
+
+impl HandleStore {
+    fn terminal_result(&self, handle_id: &str) -> Option<VmValue> {
+        self.terminal_results
+            .get(handle_id)
+            .map(|entry| entry.value.clone())
+    }
+
+    fn record_terminal_result(&mut self, handle_id: String, result: TerminalResult) {
+        if !self.terminal_results.contains_key(&handle_id) {
+            self.terminal_order.push_back(handle_id.clone());
+        }
+        self.terminal_results.insert(handle_id, result);
+        while self.terminal_order.len() > TERMINAL_RESULT_CAPACITY {
+            if let Some(oldest) = self.terminal_order.pop_front() {
+                self.terminal_results.remove(&oldest);
+            }
+        }
+    }
+
+    fn remove_session_terminal_results(&mut self, session_id: &str) {
+        self.terminal_results
+            .retain(|_, result| result.session_id != session_id);
+        self.terminal_order
+            .retain(|handle_id| self.terminal_results.contains_key(handle_id));
+    }
 }
 
 static HANDLE_STORE: LazyLock<Mutex<HandleStore>> =
@@ -220,20 +263,27 @@ type HandleNotifiers = (
     Vec<std::sync::mpsc::SyncSender<VmValue>>,
 );
 
-fn take_handle_notifiers(handle_id: &str) -> HandleNotifiers {
+fn complete_handle(handle_id: &str, result: &VmValue) -> HandleNotifiers {
     let mut store = HANDLE_STORE
         .lock()
         .expect("long-running handle store poisoned");
-    store
-        .entries
-        .remove(handle_id)
-        .map(|mut entry| {
-            (
-                entry.completion_tx.take(),
-                std::mem::take(&mut entry.result_txs),
-            )
-        })
-        .unwrap_or((None, Vec::new()))
+    let Some(mut entry) = store.entries.remove(handle_id) else {
+        return (None, Vec::new());
+    };
+    let notifiers = (
+        entry.completion_tx.take(),
+        std::mem::take(&mut entry.result_txs),
+    );
+    if entry.retain_terminal_result {
+        store.record_terminal_result(
+            handle_id.to_string(),
+            TerminalResult {
+                session_id: entry.session_id,
+                value: result.clone(),
+            },
+        );
+    }
+    notifiers
 }
 
 /// Metadata returned to the caller immediately when a long-running spawn
@@ -464,6 +514,7 @@ pub(crate) fn spawn_long_running_with_options(
                 command_display: command_display.clone(),
                 started_at: started_at.clone(),
                 cwd: effective_cwd.clone(),
+                retain_terminal_result: true,
             },
         );
     }
@@ -758,7 +809,7 @@ fn waiter_thread(context: WaiterContext, cancel_state: Arc<CancelState>, capture
     // the child has exited but artifacts are still being finalized; waking that
     // waiter after the inbox push lets `wait_command` consume the matching
     // inbox entry and preserve the old no-duplicate-feedback contract.
-    let (completion_tx, result_txs) = take_handle_notifiers(&context.handle_id);
+    let (completion_tx, result_txs) = complete_handle(&context.handle_id, &result_value);
     for tx in result_txs {
         let _ = tx.try_send(result_value.clone());
     }
@@ -966,7 +1017,7 @@ pub(crate) fn cancel_handle_with_options(handle_id: &str, options: CancelOptions
         else {
             return CancelOutcome {
                 cancelled: false,
-                result: None,
+                result: store.terminal_result(handle_id),
             };
         };
         let result_rx = options.wait_result.map(|_| {
@@ -1005,24 +1056,38 @@ pub(crate) fn cancel_handle_with_options(handle_id: &str, options: CancelOptions
 
 /// Wait for a live long-running handle to finalize and return its result.
 ///
-/// Returns `None` when the handle is already gone or the timeout elapses. The
-/// result is also published through the session inbox for normal agent-loop
-/// delivery; callers that use this direct synchronizer should drain the
-/// matching inbox item after receiving the value if they are consuming it.
+/// Replays a retained terminal receipt when the handle already completed, and
+/// returns `None` when the handle is unknown or the timeout elapses. The result
+/// is also published through the session inbox for normal agent-loop delivery;
+/// callers that use this direct synchronizer should drain the matching inbox
+/// item after receiving the value if they are consuming it.
 pub(crate) fn wait_for_result(handle_id: &str, timeout: Duration) -> Option<VmValue> {
-    if timeout.is_zero() {
-        return None;
-    }
     let rx = {
         let mut store = HANDLE_STORE
             .lock()
             .expect("long-running handle store poisoned");
+        if let Some(result) = store.terminal_result(handle_id) {
+            return Some(result);
+        }
+        if timeout.is_zero() {
+            return None;
+        }
         let entry = store.entries.get_mut(handle_id)?;
         let (tx, rx) = std::sync::mpsc::sync_channel::<VmValue>(1);
         entry.result_txs.push(tx);
         rx
     };
-    rx.recv_timeout(timeout).ok()
+    rx.recv_timeout(timeout)
+        .ok()
+        .or_else(|| terminal_result_for_handle(handle_id))
+}
+
+/// Return the immutable terminal receipt retained for a completed handle.
+pub(crate) fn terminal_result_for_handle(handle_id: &str) -> Option<VmValue> {
+    HANDLE_STORE
+        .lock()
+        .expect("long-running handle store poisoned")
+        .terminal_result(handle_id)
 }
 
 /// Live handles for `session_id`, for the agent loop's ledger reconciliation and
@@ -1065,9 +1130,10 @@ type SessionKillEntry = (Arc<dyn ProcessKiller>, Arc<CancelState>);
 /// session-end hook to avoid orphaned processes.
 pub fn cancel_session_handles(session_id: &str) {
     let to_kill: Vec<SessionKillEntry> = {
-        let store = HANDLE_STORE
+        let mut store = HANDLE_STORE
             .lock()
             .expect("long-running handle store poisoned");
+        store.remove_session_terminal_results(session_id);
         let matching: Vec<String> = store
             .entries
             .iter()
@@ -1077,7 +1143,8 @@ pub fn cancel_session_handles(session_id: &str) {
         matching
             .into_iter()
             .filter_map(|id| {
-                let entry = store.entries.get(&id)?;
+                let entry = store.entries.get_mut(&id)?;
+                entry.retain_terminal_result = false;
                 Some((entry.killer.clone(), entry.cancel_state.clone()))
             })
             .collect()
@@ -1114,16 +1181,20 @@ fn decode_exit_status(status: process_handle::ExitStatus) -> (i32, Option<String
 
 /// Register a completion notifier for `handle_id`. The waiter thread sends
 /// `()` on the returned receiver after it pushes the feedback item to the
-/// global queue. Returns `None` if the handle is no longer in the store
-/// (e.g. already cancelled or completed). Used by tests to await waiter
-/// completion deterministically — no polling, no `thread::sleep`.
+/// global queue. A retained terminal handle replays completion immediately;
+/// `None` means the handle is neither live nor retained. Used by tests to await
+/// waiter completion deterministically — no polling, no `thread::sleep`.
 pub fn register_completion_notifier(handle_id: &str) -> Option<std::sync::mpsc::Receiver<()>> {
     let (tx, rx) = std::sync::mpsc::sync_channel::<()>(1);
     let mut store = HANDLE_STORE
         .lock()
         .expect("long-running handle store poisoned");
-    let entry = store.entries.get_mut(handle_id)?;
-    entry.completion_tx = Some(tx);
+    if store.terminal_results.contains_key(handle_id) {
+        let _ = tx.try_send(());
+    } else {
+        let entry = store.entries.get_mut(handle_id)?;
+        entry.completion_tx = Some(tx);
+    }
     Some(rx)
 }
 
@@ -1137,8 +1208,12 @@ pub fn register_result_notifier(handle_id: &str) -> Option<std::sync::mpsc::Rece
     let mut store = HANDLE_STORE
         .lock()
         .expect("long-running handle store poisoned");
-    let entry = store.entries.get_mut(handle_id)?;
-    entry.result_txs.push(tx);
+    if let Some(result) = store.terminal_result(handle_id) {
+        let _ = tx.try_send(result);
+    } else {
+        let entry = store.entries.get_mut(handle_id)?;
+        entry.result_txs.push(tx);
+    }
     Some(rx)
 }
 
@@ -1147,7 +1222,9 @@ mod tests {
     use std::sync::{mpsc, Arc};
     use std::time::Duration;
 
-    use super::{next_progress_interval, CancelState};
+    use super::{
+        next_progress_interval, CancelState, HandleStore, TerminalResult, TERMINAL_RESULT_CAPACITY,
+    };
     use crate::process::ProcessCleanupReport;
 
     #[test]
@@ -1210,5 +1287,46 @@ mod tests {
             state.begin_cancellation(false).is_none(),
             "a completed terminal result must not be retroactively cancelled"
         );
+    }
+
+    #[test]
+    fn terminal_result_ledger_is_bounded_and_evicts_oldest() {
+        let mut store = HandleStore::default();
+        for index in 0..=TERMINAL_RESULT_CAPACITY {
+            store.record_terminal_result(
+                format!("handle-{index}"),
+                TerminalResult {
+                    session_id: "session".to_string(),
+                    value: harn_vm::VmValue::Int(index as i64),
+                },
+            );
+        }
+
+        assert_eq!(store.terminal_results.len(), TERMINAL_RESULT_CAPACITY);
+        assert!(store.terminal_result("handle-0").is_none());
+        assert!(store
+            .terminal_result(&format!("handle-{TERMINAL_RESULT_CAPACITY}"))
+            .is_some());
+    }
+
+    #[test]
+    fn session_cleanup_removes_only_its_terminal_results() {
+        let mut store = HandleStore::default();
+        for (handle_id, session_id) in [("a", "ended"), ("b", "live"), ("c", "ended")] {
+            store.record_terminal_result(
+                handle_id.to_string(),
+                TerminalResult {
+                    session_id: session_id.to_string(),
+                    value: harn_vm::VmValue::String(handle_id.into()),
+                },
+            );
+        }
+
+        store.remove_session_terminal_results("ended");
+
+        assert!(store.terminal_result("a").is_none());
+        assert!(store.terminal_result("c").is_none());
+        assert!(store.terminal_result("b").is_some());
+        assert_eq!(store.terminal_order.iter().collect::<Vec<_>>(), vec!["b"]);
     }
 }

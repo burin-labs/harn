@@ -111,6 +111,36 @@ fn wait_command_waits_for_live_handle_result_and_consumes_feedback() {
         leftover.is_empty(),
         "explicit wait must consume matching tool_result feedback, got {leftover:?}"
     );
+
+    // Terminal state is monotonic: consuming the one normal inbox delivery
+    // must not make a later observation regress to `running`.
+    let mut replay_req = dict();
+    replay_req.insert("handle_id".into(), vstr(&handle_id));
+    let replayed = require_dict(call("hostlib_tools_wait_command", replay_req).unwrap());
+    assert_eq!(require_str(&replayed, "status"), "completed");
+    assert_eq!(require_str(&replayed, "feedback_kind"), "tool_result");
+    assert_eq!(require_str(&replayed, "handle_id"), handle_id);
+    assert_eq!(require_str(&replayed, "stdout"), "direct\n");
+    assert!(
+        harn_vm::orchestration::agent_inbox::drain(&session_id).is_empty(),
+        "replay must not manufacture a second inbox delivery"
+    );
+
+    // Cancellation observes the same immutable receipt rather than
+    // ambiguously reporting that the handle might still be running.
+    let mut cancel_req = dict();
+    cancel_req.insert("handle_id".into(), vstr(&handle_id));
+    let cancel = require_dict(call("hostlib_tools_cancel_handle", cancel_req).unwrap());
+    assert!(matches!(
+        cancel.get("cancelled"),
+        Some(VmValue::Bool(false))
+    ));
+    let terminal = match cancel.get("result") {
+        Some(VmValue::Dict(result)) => (**result).clone(),
+        other => panic!("completed cancellation must replay its receipt, got {other:?}"),
+    };
+    assert_eq!(require_str(&terminal, "status"), "completed");
+    assert_eq!(require_str(&terminal, "handle_id"), handle_id);
 }
 
 #[test]
