@@ -949,6 +949,14 @@ and never returns a partial line. Contract pages preserve `malformed`,
 line and its location. Use `fold_jsonl_file` when the whole file need not reside
 in memory; `read_jsonl` remains the list-materializing compatibility helper.
 
+For a file that is actively growing, use `read_jsonl_append_page_result`.
+It parses only newline-committed records, leaves an incomplete final row behind
+the cursor, and returns `partial_tail_bytes`. The cursor includes opaque file
+identity, observed size, and an optional caller `generation`. Replacement,
+truncation, or a generation change restarts from byte zero with a typed
+`reset_reason`; persist the returned cursor as one dict without reconstructing
+filesystem state in the caller.
+
 For schema-first code, `schema_report(value, schema, apply_defaults?)` returns
 `{ok, message, errors, issues, value?}` without throwing. Import `std/schema`
 for builder/composition helpers such as `schema_object(...)`,

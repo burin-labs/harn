@@ -328,6 +328,7 @@ pub fn harness_fs_replacement(name: &str) -> Option<&'static str> {
         "move_file" => Some("harness.fs.rename"),
         "read_lines" => Some("harness.fs.read_lines"),
         "read_lines_page_result" => Some("harness.fs.read_lines_page_result"),
+        "read_lines_append_page_result" => Some("harness.fs.read_lines_append_page_result"),
         "walk_dir" => Some("harness.fs.walk"),
         "glob" => Some("harness.fs.glob"),
         "find_text" => Some("harness.fs.find_text"),

@@ -661,6 +661,7 @@
     "read_file_bytes",
     "read_file_result",
     "read_lines",
+    "read_lines_append_page_result",
     "read_lines_page_result",
     "read_stdin",
     "receive",

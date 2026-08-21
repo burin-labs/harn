@@ -327,6 +327,13 @@ capability_method!(
     "Read a page of lines without throwing."
 );
 capability_method!(
+    fs_read_lines_append_page_result,
+    "harness.fs.read_lines_append_page_result",
+    ["fs.read@arg0"],
+    "__cap_fs_read_lines_append_page_result(path: string, options?: dict) -> Result<dict, dict>",
+    "Incrementally read newline-committed lines without throwing."
+);
+capability_method!(
     fs_walk,
     "harness.fs.walk",
     ["fs.read@arg0"],
