@@ -99,25 +99,15 @@ GATES=(
   fmt-harn
   check-highlight
   check-prompt-grammar
-  check-language-spec
   check-grammar-keywords
   check-tree-sitter-parser
   verify-tree-sitter-parse
-  check-trigger-quickref
-  check-provider-matrix
-  check-provider-support
-  check-connector-matrix
-  check-trigger-examples
-  check-docs-model-refs
-  check-docs-snippets
-  check-docs-cli-flags
-  check-diagnostics-catalog
+  check-docs
   check-protocol-artifacts
   check-connector-schemas
   check-harness-migrations
   check-openapi-snapshot
   check-session-bundle-schema
-  check-provider-catalog
   check-provider-catalog-drift
   check-ported-handler-loc
   check-source-file-lengths
@@ -128,7 +118,6 @@ GATES=(
   check-rust-test-lane-policy
   check-crate-sibling-versions
   check-dependabot-groups
-  check-docs-workflow-quickstart
   check-release-audit-contract
   check-vm-rss-soak
 )

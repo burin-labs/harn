@@ -94,6 +94,7 @@ jobs:
       rust_cache_refresh: ${{ steps.force.outputs.rust_cache_refresh }}
       portal: ${{ steps.surface_filter.outputs.portal }}
       docs_site: ${{ steps.surface_filter.outputs.docs_site }}
+      docs_checks: ${{ steps.surface_filter.outputs.docs_checks }}
       vscode: ${{ steps.surface_filter.outputs.vscode }}
       prompt_prose: ${{ steps.surface_filter.outputs.prompt_prose }}
       setup_action: ${{ steps.surface_filter.outputs.setup_action }}
@@ -125,6 +126,26 @@ jobs:
               - '.github/workflows/ci.yml'
               - 'docs/**'
               - 'scripts/build_docs_site.sh'
+              - 'website/**'
+            # This is intentionally broad. The job below runs only when the
+            # heavy Rust lanes are skipped; on source changes those lanes use
+            # the exact-commit Harn binary and own the same `make check-docs`
+            # target. Every path the lightweight job or its checks read is
+            # covered here, so a docs-only change cannot silently skip proof.
+            docs_checks:
+              - '.github/workflows/ci.yml'
+              - '.github/actions/setup-harn/**'
+              - '.harn-version'
+              - 'Makefile'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - '*.md'
+              - '*.toml'
+              - 'crates/**'
+              - 'docs/**'
+              - 'examples/**'
+              - 'scripts/**'
+              - 'spec/**'
               - 'website/**'
             prompt_prose:
               - '.github/workflows/ci.yml'
@@ -1717,6 +1738,29 @@ jobs:
       - run: npm run build
         working-directory: website
 
+  docs-checks:
+    name: Documentation checks
+    needs: changes
+    if: >-
+      needs.changes.outputs.docs_checks == 'true'
+      && needs.changes.outputs.rust != 'true'
+    # Docs-only changes use the pinned, checksum-verified release instead of
+    # compiling Harn. Source changes still run this exact Make target in the
+    # heavy audit lane with a binary built from the candidate commit.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install pinned Harn release
+        id: harn
+        uses: ./.github/actions/setup-harn
+      - name: Check documentation contracts
+        env:
+          HARN_BIN: ${{ steps.harn.outputs.path }}
+        run: make -j4 check-docs
+
   actions:
     name: GitHub Actions hygiene
     # ~18 s job. `go install` + actionlint runs on ephemeral images quickly
@@ -1852,6 +1896,7 @@ jobs:
         portal,
         vscode,
         docs-site,
+        docs-checks,
         actions,
         setup-harn-action,
       ]
@@ -2097,6 +2142,20 @@ jobs:
           echo "Docs site: $docs_site_result"
           if [ "$docs_site_result" != "success" ] && [ "$docs_site_result" != "skipped" ]; then
             echo "::error::Docs site failed."
+            exit 1
+          fi
+
+          docs_checks_result="${{ needs['docs-checks'].result }}"
+          docs_checks_expected="${{ needs.changes.outputs.docs_checks }}"
+          rust_expected="${{ needs.changes.outputs.rust }}"
+          echo "Documentation checks: $docs_checks_result"
+          if [ "$docs_checks_expected" = "true" ] && [ "$rust_expected" != "true" ]; then
+            if [ "$docs_checks_result" != "success" ]; then
+              echo "::error::Documentation checks failed or skipped for a docs-only change."
+              exit 1
+            fi
+          elif [ "$docs_checks_result" != "success" ] && [ "$docs_checks_result" != "skipped" ]; then
+            echo "::error::Documentation checks failed."
             exit 1
           fi
 

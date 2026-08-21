@@ -435,8 +435,7 @@ run_docs_audit() {
   fi
   time_phase "markdownlint" npx markdownlint-cli2 "**/*.md"
   time_phase "docs site build" ./scripts/build_docs_site.sh
-  time_phase "docs model refs" harn_cmd run scripts/check_docs_model_refs.harn
-  time_phase "docs snippets" harn_cmd run scripts/check_docs_snippets.harn
+  time_phase "documentation contracts" make -j4 check-docs
 }
 
 run_generated_audit() {

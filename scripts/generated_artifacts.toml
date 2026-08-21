@@ -49,6 +49,7 @@ exempt_checks = [
   "check-rust-test-lane-policy",     # validates the CI test-lane stack contract, not a generated mirror
   "check-cargo-lock-contract",       # validates CI cargo invocations pin the lock, not a generated mirror
   "check-trigger-examples",         # validates example projects parse, not a mirror
+  "check-docs",                     # semantic documentation-check aggregator
   "check-docs-model-refs",          # validates docs track provider aliases, not a mirror
   "check-docs-snippets",            # validates ```harn blocks parse, not a mirror
   "check-docs-cli-flags",           # validates docs bash/sh harn flags, not a mirror
@@ -625,5 +626,6 @@ make_all = false  # excluded from `make all` for the same reason (no sibling che
 "check-docs-workflow-quickstart" = "excluded" # executes workflow fixtures (behavioural runtime guard)
 "check-vm-rss-soak" = "excluded"              # RSS perf soak (build + run)
 "check-test-case-performance" = "excluded"    # per-test perf ratchet (build + run)
+"check-docs" = "excluded"                     # semantic documentation-check aggregator
 "check-drift" = "excluded"                    # the source-tier aggregator itself
 "check-drift-binary" = "excluded"             # the binary-tier aggregator itself
