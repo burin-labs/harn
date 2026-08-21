@@ -1,0 +1,50 @@
+{
+  "$comment": "Targets in `make all` that intentionally do NOT run in CI. Checked by scripts/check_make_gate_coverage.sh. Adding a row is a deliberate decision to let a gate fire only on a developer's machine; every row needs a reason someone can audit. Prefer wiring the target into a workflow or into GATES in scripts/audit_gates.sh.",
+  "schema_version": 1,
+  "intentionally_local": [
+    {
+      "target": "lint-md",
+      "reason": "CI lints markdown with DavidAnson/markdownlint-cli2-action (ci.yml) against the same .markdownlint-cli2.jsonc, so the rules are enforced; the make target is the local convenience wrapper."
+    },
+    {
+      "target": "lint-actions",
+      "reason": "CI runs the workflow linter through lint-actions-source and lint-actions-harn, which are wired separately; this aggregate target exists for local use."
+    },
+    {
+      "target": "test",
+      "reason": "CI runs the Rust test suite through cargo-nextest directly (ci.yml) with per-lane sharding that the single make target cannot express."
+    },
+    {
+      "target": "test-rust-lint-lane-cache",
+      "reason": "Runs in CI as a prerequisite of test-pr-gate-post-warm-integrations (ci.yml), which needs the warm HARN_BIN. Registered rather than resolved by dependency graph so the reason is written down."
+    },
+    {
+      "target": "test-pr-gate-scripts-build",
+      "reason": "Build-bearing half of the shell gate tests; each spawns a real cargo build. Runs in CI as part of test-pr-gate-post-warm-integrations, after the warm Rust toolchain is restored."
+    },
+    {
+      "target": "mcp-conformance",
+      "reason": "UNWIRED — needs a decision. Not run by any workflow. Tracked for wiring; see the gate-coverage ratchet PR."
+    },
+    {
+      "target": "replay-oracle",
+      "reason": "UNWIRED — needs a decision. Not run by any workflow. Tracked for wiring; see the gate-coverage ratchet PR."
+    },
+    {
+      "target": "replay-bench",
+      "reason": "UNWIRED — needs a decision. Benchmark-shaped, so it may belong on a nightly lane rather than the PR path."
+    },
+    {
+      "target": "check-run-view-fixtures",
+      "reason": "UNWIRED — needs a decision. Not run by any workflow. Tracked for wiring; see the gate-coverage ratchet PR."
+    },
+    {
+      "target": "check-site-snippets",
+      "reason": "UNWIRED — needs a decision. Not run by any workflow. Tracked for wiring; see the gate-coverage ratchet PR."
+    },
+    {
+      "target": "portal-check",
+      "reason": "UNWIRED — needs a decision. Not run by any workflow. Tracked for wiring; see the gate-coverage ratchet PR."
+    }
+  ]
+}

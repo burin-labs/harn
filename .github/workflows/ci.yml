@@ -1185,6 +1185,14 @@ jobs:
       # was skipping entirely. `audit-scripts` is gated on the catch-all
       # `rust` filter, which includes .github/**, so these fire on exactly
       # the edits they police.
+      # Shell gate tests. These were registered in `make all` but named in no
+      # workflow, so ~56 of them ran only on a developer's machine — the third
+      # round of the same rot (see the note above, and audit_gates.sh:91).
+      # `check_make_gate_coverage_test.sh` inside this target is the ratchet
+      # that now fails a PR which adds a `make all` gate nothing runs.
+      # Build-bearing siblings live in test-pr-gate-scripts-build, which runs
+      # in test-pr-gate-post-warm-integrations above once the toolchain is warm.
+      - run: make test-pr-gate-scripts
       - run: make check-cargo-lock-contract
       - run: make check-rust-test-lane-policy
       - run: make check-ci-cache-policy
