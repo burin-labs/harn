@@ -55,6 +55,13 @@ pub type HostLeaseDeferReceipt = {
   active?: HostLeaseHandle,
 }
 
+pub type HostLeaseQueueEvidence = {
+  waiter_id: string,
+  requested_at_ms: int,
+  position: int,
+  predecessor_waiter_id?: string,
+}
+
 pub type HostLeaseAcquireReceipt = {
   schema_version: int,
   status: "acquired" | "deferred",
@@ -65,6 +72,7 @@ pub type HostLeaseAcquireReceipt = {
   guard?: unknown,
   recovered_stale_lease: bool,
   recovered?: HostLeaseHandle,
+  queue?: HostLeaseQueueEvidence,
 }
 
 pub type HostLeaseReleaseReceipt = {

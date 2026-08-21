@@ -59,6 +59,29 @@ pub(super) fn create_current_lease_table(tx: &Transaction<'_>) -> Result<(), Hos
     Ok(())
 }
 
+pub(super) fn create_waiter_table(tx: &Transaction<'_>) -> Result<(), HostLeaseError> {
+    tx.execute_batch(
+        "CREATE TABLE IF NOT EXISTS host_lease_waiters (
+            waiter_id TEXT PRIMARY KEY,
+            host TEXT NOT NULL,
+            resource_class TEXT NOT NULL,
+            domain TEXT NOT NULL,
+            priority_class TEXT NOT NULL,
+            priority_rank INTEGER NOT NULL,
+            requested_at_ms INTEGER NOT NULL,
+            deadline_at_ms INTEGER NOT NULL,
+            owner_pid INTEGER,
+            owner_process_identity INTEGER,
+            recoverable INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS host_lease_waiters_order
+            ON host_lease_waiters (
+                host, resource_class, domain, priority_rank, requested_at_ms, waiter_id
+            );",
+    )?;
+    Ok(())
+}
+
 pub(super) fn migrate_legacy_lease_table(tx: &Transaction<'_>) -> Result<(), HostLeaseError> {
     tx.execute_batch("ALTER TABLE host_leases RENAME TO host_leases_v1;")?;
     create_current_lease_table(tx)?;

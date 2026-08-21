@@ -4,7 +4,6 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
 
 use harn_vm::clock::{now_wall_ms, RealClock};
 
@@ -325,24 +324,7 @@ pub(super) fn run_cargo_worker(args: HostLeaseRunCargoWorkerArgs) -> i32 {
         eprintln!("error: worker context does not match its durable run receipt");
         return 1;
     }
-    let resource = pending.resource;
-    let request = harn_hostlib::HostLeaseRequest {
-        host: resource.machine,
-        resource_class: resource.resource_class,
-        domain: resource.domain,
-        execution_context: Some(context),
-        owner: pending.owner,
-        priority_class: pending.priority_class,
-        ttl_ms: None,
-        owner_pid: Some(std::process::id()),
-        reason: Some("supervised cargo workload".to_string()),
-        metadata: BTreeMap::new(),
-    };
-    let acquisition = if pending.wait_limit_ms == 0 {
-        store.try_acquire(request)
-    } else {
-        store.acquire_wait(request, Duration::from_millis(pending.wait_limit_ms))
-    };
+    let acquisition = store.acquire_wait_for_run(&args.run_id, std::process::id());
     let acquisition = match acquisition {
         Ok(receipt) if receipt.status == harn_hostlib::HostLeaseAcquireStatus::Acquired => receipt,
         Ok(receipt) => {

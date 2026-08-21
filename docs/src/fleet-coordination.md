@@ -214,6 +214,14 @@ returns a typed `host_lease_contended` receipt and exit status 75. Add
 lease's expiry, or a bounded owner-liveness recheck instead of a fixed polling
 loop.
 
+Waiting acquisitions join one durable queue per machine, resource class, and
+domain. Higher priority classes are admitted first; requests within one class
+are FIFO by original request time with a stable waiter-id tie break. Each
+acquisition receipt includes `queue` evidence with the waiter id, original
+request time, one-based position, and immediate predecessor. A supervised run
+reuses its run id and original request time after a worker restart, so a later
+process cannot steal its place.
+
 A contended wait should stay near idle until one of those events occurs. Harn
 uses a dedicated lease-change signal for this path; routine SQLite registry
 traffic does not wake the waiter. If an older Harn process uses substantial CPU
@@ -276,7 +284,8 @@ in a kill-on-close Job Object before spawning Cargo, so losing the worker also
 terminates its descendants before the lease can be recovered. On normal
 completion the supervisor writes a redacted receipt under
 `~/.harn/host-leases/receipts/` containing wait time, hold time, exit status,
-resource identity, and hashed workspace/target/build identities.
+resource identity, queue evidence, and hashed workspace/target/build
+identities.
 
 The worktree Cargo wrapper uses this boundary by default for commands that may
 compile or mutate build artifacts: build, check, clean, clippy, doc, fix,
@@ -318,12 +327,11 @@ capacity-one lease.
 State defaults to `~/.harn/host-leases`. Set `HARN_HOST_LEASE_ROOT` to isolate
 tests or relocate state for processes running under the same OS account. A
 cross-user registry requires a privileged host service and is not provided by
-this local capability. Priority class is preserved in receipts in this
-registry slice; queue ordering remains owned by Harn's worker scheduler. The
-worker scheduler maps low-priority dispatch to deferrable work, promotes it
-after a bounded 30-minute wait on the default FIFO path, and returns a typed
-claim-time scheduling receipt. Host leases continue to serialize scarce native
-resources without introducing a second queue-policy owner.
+this local capability. The host-lease store owns priority and FIFO admission
+for native resources. Harn's worker scheduler separately owns orchestration
+queue policy, including low-priority promotion after a bounded 30-minute wait;
+the two queues coordinate different resources and expose separate typed
+receipts.
 
 ## Forward compatibility
 

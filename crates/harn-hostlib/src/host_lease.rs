@@ -6,6 +6,7 @@
 //! watcher on the database directory wakes waiting callers after release or
 //! renewal; expiry and caller deadlines remain timer wakeups.
 
+mod admission;
 mod db;
 mod execution;
 mod schema;
@@ -27,9 +28,10 @@ use serde::{Deserialize, Serialize};
 use sysinfo::System;
 use uuid::Uuid;
 
+use self::admission::WaiterIdentity;
 use self::schema::{
-    add_domain_key, add_execution_context_column, create_current_lease_table, lease_table_layout,
-    migrate_legacy_lease_table, LeaseTableLayout,
+    add_domain_key, add_execution_context_column, create_current_lease_table, create_waiter_table,
+    lease_table_layout, migrate_legacy_lease_table, LeaseTableLayout,
 };
 
 /// Overrides the machine-global directory containing host lease state.
@@ -46,8 +48,8 @@ const RUN_RECEIPTS_DIR: &str = "receipts";
 const SQLITE_MUTATION_BUSY_TIMEOUT: Duration = Duration::from_secs(30);
 const REGISTRY_BUSY_RETRY_INTERVAL: Duration = Duration::from_millis(250);
 const PROCESS_LIVENESS_RECHECK_INTERVAL: Duration = Duration::from_secs(5);
-const SCHEMA_VERSION: u32 = 3;
-const RUN_RECEIPT_SCHEMA_VERSION: u32 = 3;
+const SCHEMA_VERSION: u32 = 4;
+const RUN_RECEIPT_SCHEMA_VERSION: u32 = 4;
 const WHOLE_MACHINE_RESOURCE_CLASS: &str = "whole-machine";
 /// Coordination domain used when callers do not name one explicitly.
 pub const DEFAULT_HOST_LEASE_DOMAIN: &str = "default";
@@ -139,6 +141,15 @@ impl HostLeasePriorityClass {
             other => Err(HostLeaseError::InvalidRequest(format!(
                 "unknown priority class `{other}`"
             ))),
+        }
+    }
+
+    const fn queue_rank(self) -> i64 {
+        match self {
+            Self::Interactive => 0,
+            Self::Measurement => 1,
+            Self::CiVerify => 2,
+            Self::Deferrable => 3,
         }
     }
 }
@@ -338,6 +349,9 @@ pub enum HostLeaseDeferReason {
     /// Another live lease owns the same host resource.
     #[serde(rename = "host_lease_contended")]
     Contended,
+    /// An older or higher-priority waiter owns the next admission turn.
+    #[serde(rename = "host_lease_queued")]
+    Queued,
     /// Another registry transaction briefly owns SQLite's write lock.
     #[serde(rename = "host_lease_registry_busy")]
     RegistryBusy,
@@ -348,6 +362,7 @@ impl HostLeaseDeferReason {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Contended => "host_lease_contended",
+            Self::Queued => "host_lease_queued",
             Self::RegistryBusy => "host_lease_registry_busy",
         }
     }
@@ -380,6 +395,20 @@ pub struct HostLeaseDeferReceipt {
     pub active: Option<HostLeaseHandle>,
 }
 
+/// Durable ordering evidence for one contended acquisition.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HostLeaseQueueEvidence {
+    /// Stable waiter identity. Supervised runs reuse their run identifier.
+    pub waiter_id: String,
+    /// Original request timestamp retained across worker restarts.
+    pub requested_at_ms: i64,
+    /// One-based position within the same machine/resource/domain queue.
+    pub position: u64,
+    /// Immediate predecessor when this waiter is not currently eligible.
+    #[serde(default)]
+    pub predecessor_waiter_id: Option<String>,
+}
+
 /// Versioned result of an immediate or waiting acquire operation.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HostLeaseAcquireReceipt {
@@ -402,6 +431,9 @@ pub struct HostLeaseAcquireReceipt {
     #[serde(default)]
     /// Exact stale or dead-owner authority removed by this acquisition.
     pub recovered: Option<HostLeaseHandle>,
+    #[serde(default)]
+    /// Queue ordering observed during the final atomic acquisition attempt.
+    pub queue: Option<HostLeaseQueueEvidence>,
 }
 
 /// Current authoritative lease state for one host.
@@ -554,21 +586,40 @@ impl HostLeaseStore {
             resource.resource_class,
             &resource.domain,
         )?;
+        let requested_at_ms = unix_now_ms()?;
+        let run_id = Uuid::now_v7().to_string();
+        let queue = if wait_limit_ms == 0 {
+            None
+        } else {
+            Some(self.enqueue_waiter(
+                &resource,
+                priority_class,
+                &WaiterIdentity {
+                    waiter_id: run_id.clone(),
+                    requested_at_ms,
+                    recoverable: true,
+                },
+                requested_at_ms.saturating_add(u64_ms_i64(wait_limit_ms)),
+                None,
+            )?)
+        };
         let receipt = HostLeaseRunReceipt {
             schema_version: RUN_RECEIPT_SCHEMA_VERSION,
-            run_id: Uuid::now_v7().to_string(),
+            run_id,
             owner: normalize_component("owner", owner)?,
             priority_class,
             wait_limit_ms,
             resource,
             execution_context,
-            status: HostLeaseRunState::Pending {
-                requested_at_ms: unix_now_ms()?,
-            },
+            queue,
+            status: HostLeaseRunState::Pending { requested_at_ms },
         };
         let path = self.run_receipt_path(&receipt.run_id)?;
         let bytes = serde_json::to_vec_pretty(&receipt)?;
-        harn_vm::atomic_io::atomic_write(&path, &bytes)?;
+        if let Err(error) = harn_vm::atomic_io::atomic_write(&path, &bytes) {
+            let _ = self.remove_waiter(&receipt.run_id);
+            return Err(error.into());
+        }
         Ok(receipt)
     }
 
@@ -595,6 +646,9 @@ impl HostLeaseStore {
         let path = self.run_receipt_path(run_id)?;
         let bytes = serde_json::to_vec_pretty(&receipt)?;
         harn_vm::atomic_io::atomic_write(&path, &bytes)?;
+        if !matches!(receipt.status, HostLeaseRunState::Pending { .. }) {
+            self.remove_waiter(&receipt.run_id)?;
+        }
         Ok(receipt)
     }
 
@@ -619,7 +673,25 @@ impl HostLeaseStore {
         &self,
         request: HostLeaseRequest,
     ) -> Result<HostLeaseAcquireReceipt, HostLeaseError> {
-        self.try_acquire_once(request, None, None)
+        let requested_at_ms = unix_now_ms()?;
+        let identity = WaiterIdentity {
+            waiter_id: Uuid::now_v7().to_string(),
+            requested_at_ms,
+            recoverable: false,
+        };
+        let receipt = self.try_acquire_once(
+            request,
+            None,
+            // Bound cleanup for a process that dies during an immediate attempt.
+            // Leave enough headroom for the connection's 30s SQLite busy timeout
+            // so the waiter cannot expire before its transaction begins.
+            Some(requested_at_ms.saturating_add(60_000)),
+            &identity,
+        )?;
+        if receipt.status == HostLeaseAcquireStatus::Deferred {
+            self.remove_waiter(&identity.waiter_id)?;
+        }
+        Ok(receipt)
     }
 
     /// Wait on cross-process notifications and expiry, then retry atomically.
@@ -631,6 +703,62 @@ impl HostLeaseStore {
         if wait_timeout.is_zero() {
             return self.try_acquire(request);
         }
+        let started_at_ms = unix_now_ms()?;
+        let identity = WaiterIdentity {
+            waiter_id: Uuid::now_v7().to_string(),
+            requested_at_ms: started_at_ms,
+            recoverable: false,
+        };
+        self.acquire_wait_ordered(request, wait_timeout, identity)
+    }
+
+    /// Resume the durable FIFO position owned by a supervised run receipt.
+    pub fn acquire_wait_for_run(
+        &self,
+        run_id: &str,
+        owner_pid: u32,
+    ) -> Result<HostLeaseAcquireReceipt, HostLeaseError> {
+        let run = self.load_run(run_id)?;
+        let HostLeaseRunState::Pending { requested_at_ms } = run.status else {
+            return Err(HostLeaseError::InvalidRequest(
+                "only a pending run can acquire its host lease".to_string(),
+            ));
+        };
+        let elapsed_ms = unix_now_ms()?.saturating_sub(requested_at_ms) as u64;
+        let remaining_ms = run.wait_limit_ms.saturating_sub(elapsed_ms);
+        let request = HostLeaseRequest {
+            host: run.resource.machine,
+            resource_class: run.resource.resource_class,
+            domain: run.resource.domain,
+            execution_context: Some(run.execution_context),
+            owner: run.owner,
+            priority_class: run.priority_class,
+            ttl_ms: None,
+            owner_pid: Some(owner_pid),
+            reason: Some("supervised workload".to_string()),
+            metadata: BTreeMap::new(),
+        };
+        if remaining_ms == 0 {
+            self.remove_waiter(run_id)?;
+            return self.try_acquire(request);
+        }
+        self.acquire_wait_ordered(
+            request,
+            Duration::from_millis(remaining_ms),
+            WaiterIdentity {
+                waiter_id: run_id.to_string(),
+                requested_at_ms,
+                recoverable: true,
+            },
+        )
+    }
+
+    fn acquire_wait_ordered(
+        &self,
+        request: HostLeaseRequest,
+        wait_timeout: Duration,
+        identity: WaiterIdentity,
+    ) -> Result<HostLeaseAcquireReceipt, HostLeaseError> {
         let started_at_ms = unix_now_ms()?;
         let started_at = Instant::now();
         let deadline = started_at.checked_add(wait_timeout).ok_or_else(|| {
@@ -647,9 +775,16 @@ impl HostLeaseStore {
             .map_err(|error| HostLeaseError::Watch(error.to_string()))?;
 
         loop {
-            let receipt =
-                self.try_acquire_once(request.clone(), Some(started_at), Some(deadline_at_ms))?;
+            let receipt = self.try_acquire_once(
+                request.clone(),
+                Some(started_at),
+                Some(deadline_at_ms),
+                &identity,
+            )?;
             if receipt.status == HostLeaseAcquireStatus::Acquired || Instant::now() >= deadline {
+                if receipt.status == HostLeaseAcquireStatus::Deferred {
+                    self.remove_waiter(&identity.waiter_id)?;
+                }
                 return Ok(receipt);
             }
             let wake_at = receipt
@@ -915,6 +1050,7 @@ impl HostLeaseStore {
             LeaseTableLayout::CurrentWithoutDomain => add_domain_key(&tx)?,
             LeaseTableLayout::Current => {}
         }
+        create_waiter_table(&tx)?;
         tx.commit()?;
         Ok(())
     }
@@ -935,170 +1071,6 @@ impl HostLeaseStore {
     fn with_busy_handler(mut self, handler: fn(i32) -> bool) -> Self {
         self.busy_handler = Some(handler);
         self
-    }
-
-    fn try_acquire_once(
-        &self,
-        request: HostLeaseRequest,
-        started_at: Option<Instant>,
-        deadline_at_ms: Option<i64>,
-    ) -> Result<HostLeaseAcquireReceipt, HostLeaseError> {
-        self.try_acquire_once_with_registry_timeout(
-            request,
-            started_at,
-            deadline_at_ms,
-            SQLITE_MUTATION_BUSY_TIMEOUT,
-        )
-    }
-
-    fn try_acquire_once_with_registry_timeout(
-        &self,
-        request: HostLeaseRequest,
-        started_at: Option<Instant>,
-        deadline_at_ms: Option<i64>,
-        registry_timeout: Duration,
-    ) -> Result<HostLeaseAcquireReceipt, HostLeaseError> {
-        let request = normalize_request(request)?;
-        // `try_acquire` is immediate with respect to lease availability, not
-        // SQLite's internal writer serialization. Distinct named domains are
-        // independent resources even though their rows share one registry;
-        // give that registry the same bounded mutation window as release and
-        // status before reporting a typed `RegistryBusy` deferral.
-        let mut conn = self.connection(registry_timeout)?;
-        let tx = match conn.transaction_with_behavior(TransactionBehavior::Immediate) {
-            Ok(tx) => tx,
-            Err(error) if sqlite_is_busy(&error) => {
-                let now = unix_now_ms()?;
-                return Ok(registry_busy_receipt(
-                    request.host,
-                    request.resource_class,
-                    request.domain,
-                    now,
-                    started_at.map(|started| duration_ms_u64(started.elapsed())),
-                    deadline_at_ms,
-                ));
-            }
-            Err(error) => return Err(error.into()),
-        };
-        let now = unix_now_ms()?;
-        let waited_ms = started_at
-            .map(|started| duration_ms_u64(started.elapsed()))
-            .unwrap_or(0);
-        let host = request.host.clone();
-        let resource_class = request.resource_class;
-        let domain = request.domain.clone();
-        match self.acquire_in_transaction(tx, request, now, deadline_at_ms, waited_ms) {
-            Err(HostLeaseError::Database(error)) if sqlite_is_busy(&error) => {
-                Ok(registry_busy_receipt(
-                    host,
-                    resource_class,
-                    domain,
-                    now,
-                    Some(waited_ms),
-                    deadline_at_ms,
-                ))
-            }
-            result => result,
-        }
-    }
-
-    #[cfg(test)]
-    fn try_acquire_at(
-        &self,
-        request: HostLeaseRequest,
-        now: i64,
-        deadline_at_ms: Option<i64>,
-        waited_ms: u64,
-    ) -> Result<HostLeaseAcquireReceipt, HostLeaseError> {
-        let request = normalize_request(request)?;
-        let mut conn = self.connection(SQLITE_MUTATION_BUSY_TIMEOUT)?;
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        self.acquire_in_transaction(tx, request, now, deadline_at_ms, waited_ms)
-    }
-
-    fn acquire_in_transaction(
-        &self,
-        tx: Transaction<'_>,
-        request: HostLeaseRequest,
-        now: i64,
-        deadline_at_ms: Option<i64>,
-        waited_ms: u64,
-    ) -> Result<HostLeaseAcquireReceipt, HostLeaseError> {
-        let owner_process_identity = request
-            .owner_pid
-            .map(|pid| match self.process_inspector.observe(pid) {
-                ProcessObservation::Alive { identity } => Ok(identity),
-                ProcessObservation::Dead => Err(HostLeaseError::InvalidRequest(
-                    "owner_pid is not a live local process".to_string(),
-                )),
-                ProcessObservation::Unknown => Err(HostLeaseError::InvalidRequest(
-                    "owner_pid liveness could not be verified".to_string(),
-                )),
-            })
-            .transpose()?;
-        let (active, recovered) = active_handle(
-            &tx,
-            &request.host,
-            request.resource_class,
-            &request.domain,
-            now,
-            self.process_inspector.as_ref(),
-        )?;
-        if let Some(active) = active {
-            let defer = HostLeaseDeferReceipt {
-                host: request.host,
-                resource_class: request.resource_class,
-                domain: request.domain,
-                deferred_reason: HostLeaseDeferReason::Contended,
-                observed_at_ms: now,
-                next_wake_at_ms: Some(next_lease_wake_at(&active, now, deadline_at_ms)),
-                deadline_at_ms,
-                active: Some(active),
-            };
-            tx.commit()?;
-            return Ok(HostLeaseAcquireReceipt {
-                schema_version: SCHEMA_VERSION,
-                status: HostLeaseAcquireStatus::Deferred,
-                observed_at_ms: now,
-                waited_ms,
-                handle: None,
-                defer: Some(defer),
-                recovered_stale_lease: recovered.is_some(),
-                recovered,
-            });
-        }
-
-        let handle = HostLeaseHandle {
-            schema_version: SCHEMA_VERSION,
-            host: request.host,
-            resource_class: request.resource_class,
-            domain: request.domain,
-            execution_context: request.execution_context,
-            lease_id: Uuid::now_v7().to_string(),
-            owner: request.owner,
-            priority_class: request.priority_class,
-            acquired_at_ms: now,
-            updated_at_ms: now,
-            expires_at_ms: request
-                .ttl_ms
-                .map(|ttl| now.saturating_add(u64_ms_i64(ttl))),
-            owner_pid: request.owner_pid,
-            owner_process_identity,
-            reason: request.reason,
-            metadata: request.metadata,
-        };
-        write_handle(&tx, &handle)?;
-        tx.commit()?;
-        Ok(HostLeaseAcquireReceipt {
-            schema_version: SCHEMA_VERSION,
-            status: HostLeaseAcquireStatus::Acquired,
-            observed_at_ms: now,
-            waited_ms,
-            handle: Some(handle),
-            defer: None,
-            recovered_stale_lease: recovered.is_some(),
-            recovered,
-        })
     }
 
     #[cfg(test)]
@@ -1302,6 +1274,7 @@ fn registry_busy_receipt(
         }),
         recovered_stale_lease: false,
         recovered: None,
+        queue: None,
     }
 }
 
