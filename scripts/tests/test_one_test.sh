@@ -10,9 +10,13 @@ args_log="$tmp_root/args.log"
 cat > "$fake_cargo" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
-: "${HARN_TEST_ONE_ARGS_LOG:?}"
-printf '%s\0' "$@" > "$HARN_TEST_ONE_ARGS_LOG"
-case "${HARN_TEST_ONE_FAKE_MODE:-success}" in
+if env | grep -q '^HARN_TEST_ONE_'; then
+  echo 'test-one control variables leaked into the Cargo runner' >&2
+  exit 19
+fi
+: "${TEST_ONE_ARGS_LOG:?}"
+printf '%s\0' "$@" > "$TEST_ONE_ARGS_LOG"
+case "${TEST_ONE_FAKE_MODE:-success}" in
   success)
     printf '%s\n' \
       'running 1 test' \
@@ -29,7 +33,7 @@ case "${HARN_TEST_ONE_FAKE_MODE:-success}" in
     exit 17
     ;;
   *)
-    echo "unexpected fake mode: $HARN_TEST_ONE_FAKE_MODE" >&2
+    echo "unexpected fake mode: $TEST_ONE_FAKE_MODE" >&2
     exit 2
     ;;
 esac
@@ -38,7 +42,7 @@ chmod +x "$fake_cargo"
 
 injection_target="$tmp_root/should-not-run"
 exact_name="package::module::case; \$(touch $injection_target)"
-HARN_TEST_ONE_ARGS_LOG="$args_log" \
+TEST_ONE_ARGS_LOG="$args_log" \
   HARN_TEST_ONE_CARGO_RUNNER="$fake_cargo" \
   "$repo_root/scripts/test_one.sh" --package harn-cli --lib "$exact_name" \
   > "$tmp_root/success.out"
@@ -54,7 +58,7 @@ if [[ -e "$injection_target" ]]; then
   exit 1
 fi
 
-HARN_TEST_ONE_ARGS_LOG="$args_log" \
+TEST_ONE_ARGS_LOG="$args_log" \
   HARN_TEST_ONE_CARGO_RUNNER="$fake_cargo" \
   "$repo_root/scripts/test_one.sh" --package harn-cli \
   --test harn_cli_fast package::module::case > "$tmp_root/binary.out"
@@ -66,9 +70,9 @@ if ! cmp -s "$tmp_root/expected-binary-args.log" "$args_log"; then
   exit 1
 fi
 
-if HARN_TEST_ONE_ARGS_LOG="$args_log" \
+if TEST_ONE_ARGS_LOG="$args_log" \
   HARN_TEST_ONE_CARGO_RUNNER="$fake_cargo" \
-  HARN_TEST_ONE_FAKE_MODE=zero \
+  TEST_ONE_FAKE_MODE=zero \
   "$repo_root/scripts/test_one.sh" --package harn-cli --lib missing::test \
   > "$tmp_root/zero.out" 2> "$tmp_root/zero.err"; then
   echo "zero-match exact test unexpectedly succeeded" >&2
@@ -81,9 +85,9 @@ if ! grep -Fq "did not produce a one-test success receipt" "$tmp_root/zero.err";
 fi
 
 set +e
-HARN_TEST_ONE_ARGS_LOG="$args_log" \
+TEST_ONE_ARGS_LOG="$args_log" \
   HARN_TEST_ONE_CARGO_RUNNER="$fake_cargo" \
-  HARN_TEST_ONE_FAKE_MODE=failure \
+  TEST_ONE_FAKE_MODE=failure \
   "$repo_root/scripts/test_one.sh" --package harn-cli --lib package::module::case \
   > "$tmp_root/failure.out" 2> "$tmp_root/failure.err"
 failure_status=$?
@@ -106,7 +110,7 @@ if "$repo_root/scripts/test_one.sh" --package harn-cli --lib \
 fi
 
 HARN_TEST_ONE_NAME=package::module::case \
-  HARN_TEST_ONE_ARGS_LOG="$args_log" \
+  TEST_ONE_ARGS_LOG="$args_log" \
   HARN_TEST_ONE_CARGO_RUNNER="$fake_cargo" \
   make -s -C "$repo_root" test-one > "$tmp_root/make.out"
 

@@ -77,6 +77,13 @@ if [[ -z "$package" || ${#selector[@]} -eq 0 || -z "$test_name" ]]; then
 fi
 
 cargo_runner="${HARN_TEST_ONE_CARGO_RUNNER:-$repo_root/scripts/cargo_with_worktree_build_dir.sh}"
+# `HARN_TEST_ONE_*` belongs to this shell boundary. Leaving any current or
+# future control exported makes the strict Harn CLI reject it as an unknown
+# runtime variable when the Cargo wrapper probes a lease runner. Consume the
+# namespace before invoking either Harn or Cargo.
+while IFS= read -r variable; do
+  unset "$variable"
+done < <(compgen -A variable HARN_TEST_ONE_)
 if [[ ! -x "$cargo_runner" ]]; then
   echo "error: Cargo runner is not executable: $cargo_runner" >&2
   exit 2
