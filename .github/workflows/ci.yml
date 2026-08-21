@@ -166,9 +166,10 @@ jobs:
           BEFORE_SHA: ${{ github.event.before || '' }}
         run: |
           set -euo pipefail
+          source .github/scripts/release-ref.sh
           release_metadata_only=false
 
-          if [[ "$EVENT_NAME" == "pull_request" && "$PR_HEAD_REF" =~ ^release/v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+          if [[ "$EVENT_NAME" == "pull_request" ]] && is_release_head_ref "$PR_HEAD_REF"; then
             changed_files="$RUNNER_TEMP/release-metadata-changed-files.txt"
 
             if [[ -n "$PR_BASE_REF" ]]; then
