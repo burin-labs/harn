@@ -113,6 +113,7 @@ struct Stats {
 struct PrecompileArtifacts {
     entry_chunk: harn_vm::Chunk,
     module_artifact: Option<ModuleArtifact>,
+    module_compilation_context: harn_vm::module_artifact::ModuleCompilationContext,
 }
 
 /// Rust compiler entrypoint used by the `.harn` directory-walk driver for
@@ -220,7 +221,10 @@ fn precompile_one(
 
     if let Some(module_artifact) = &artifacts.module_artifact {
         let module_source = harn_vm::module_source::ModuleSource::from_text(source.as_str());
-        let module_key = harn_vm::bytecode_cache::CacheKey::from_module_source(&module_source);
+        let module_key = harn_vm::bytecode_cache::CacheKey::from_module_source(
+            &module_source,
+            &artifacts.module_compilation_context,
+        );
         let module_dest = output_path(source_path, source_root, out_root, MODULE_CACHE_EXTENSION)?;
         harn_vm::bytecode_cache::store_module_at(&module_dest, &module_key, module_artifact)
             .map_err(|e| format!("write {}: {e}", module_dest.display()))?;
@@ -244,22 +248,18 @@ fn compile_artifacts(
     let imported = imported_symbols_for_source(source_path, source);
     let entry_chunk = authority
         .compiler_with_imported_symbols(
-            imported.enum_candidates.iter().cloned(),
-            imported.callable_names.iter().cloned(),
+            imported.enum_candidates().iter().cloned(),
+            imported.source_callable_names().iter().cloned(),
         )
         .compile(program)
         .map_err(|e| format!("compile error: {e}"))?;
     let module_artifact = authority
-        .compile_module_with_imported_symbols(
-            source_path,
-            source,
-            imported.enum_candidates,
-            imported.callable_names,
-        )
+        .compile_module_with_imported_symbols(source_path, source, &imported)
         .map_err(|e| format!("module compile error: {e}"))
         .ok();
     Ok(PrecompileArtifacts {
         entry_chunk,
         module_artifact,
+        module_compilation_context: imported,
     })
 }

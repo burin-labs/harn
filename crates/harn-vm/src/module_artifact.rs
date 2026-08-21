@@ -15,17 +15,100 @@ use std::sync::{Mutex, OnceLock};
 
 use harn_modules::{public_declarations, DefKind};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use crate::chunk::{CachedChunk, CachedCompiledFunction};
 use crate::value::VmError;
 
-#[derive(Clone, Default)]
-struct ImportedSymbolProjection {
+/// The complete imported interface that can affect one module's bytecode.
+///
+/// Dependency bodies remain independently cached. Only the canonical names and
+/// kinds consulted during lowering belong here, so every in-memory, on-disk,
+/// precompiled, and warm-link identity can share this one typed owner.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct ModuleCompilationContext {
     enum_candidates: Vec<String>,
     source_callable_names: Vec<String>,
 }
 
-type ImportedSymbolCache = BTreeMap<PathBuf, ([u8; 32], ImportedSymbolProjection)>;
+impl ModuleCompilationContext {
+    pub fn new(
+        enum_candidates: impl IntoIterator<Item = String>,
+        source_callable_names: impl IntoIterator<Item = String>,
+    ) -> Self {
+        let mut enum_candidates = enum_candidates.into_iter().collect::<Vec<_>>();
+        enum_candidates.sort_unstable();
+        enum_candidates.dedup();
+        let mut source_callable_names = source_callable_names.into_iter().collect::<Vec<_>>();
+        source_callable_names.sort_unstable();
+        source_callable_names.dedup();
+        Self {
+            enum_candidates,
+            source_callable_names,
+        }
+    }
+
+    pub fn from_graph(graph: &harn_modules::ModuleGraph, source_path: &Path) -> Self {
+        Self::new(
+            graph
+                .imported_names_by_kind_for_file(source_path, DefKind::Enum)
+                .unwrap_or_default(),
+            graph
+                .imported_callable_names_for_file(source_path)
+                .unwrap_or_default(),
+        )
+    }
+
+    /// Project only names that this source's syntax can consult during
+    /// lowering. This keeps eager graph prewarming and lazy compilation on the
+    /// same canonical identity without forcing graph work for insensitive
+    /// modules.
+    pub fn for_source_in_graph(
+        graph: &harn_modules::ModuleGraph,
+        source_path: &Path,
+        source: &str,
+    ) -> Result<Self, VmError> {
+        let program = parse_module_source(source_path, source)?;
+        Ok(if needs_imported_symbol_projection(&program) {
+            Self::from_graph(graph, source_path)
+        } else {
+            Self::default()
+        })
+    }
+
+    pub fn enum_candidates(&self) -> &[String] {
+        &self.enum_candidates
+    }
+
+    pub fn source_callable_names(&self) -> &[String] {
+        &self.source_callable_names
+    }
+
+    /// Stable, framed identity for cache keys. The domain tag makes future
+    /// context families non-aliasing without coupling callers to this layout.
+    pub fn digest(&self) -> [u8; 32] {
+        let mut hasher = Sha256::new();
+        hasher.update(b"harn-module-compilation-context-v1\0");
+        hash_names(&mut hasher, b"enum\0", &self.enum_candidates);
+        hash_names(
+            &mut hasher,
+            b"source-callable\0",
+            &self.source_callable_names,
+        );
+        hasher.finalize().into()
+    }
+}
+
+fn hash_names(hasher: &mut Sha256, label: &[u8], names: &[String]) {
+    hasher.update(label);
+    hasher.update((names.len() as u64).to_le_bytes());
+    for name in names {
+        hasher.update((name.len() as u64).to_le_bytes());
+        hasher.update(name.as_bytes());
+    }
+}
+
+type ImportedSymbolCache = BTreeMap<PathBuf, ([u8; 32], ModuleCompilationContext)>;
 
 /// Authority provenance carried by a compiled module.
 ///
@@ -33,7 +116,9 @@ type ImportedSymbolCache = BTreeMap<PathBuf, ([u8; 32], ImportedSymbolProjection
 /// Privileged variants can only be selected through explicit trusted-embedder
 /// entry points; there is no source annotation, filename convention, or
 /// environment switch that grants them.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
+)]
 pub enum ModuleProvenance {
     #[default]
     User,
@@ -542,6 +627,21 @@ pub fn compile_module_artifact_from_source(
     )
 }
 
+/// Resolve the exact imported interface consulted while lowering `source`.
+/// Callers that cache or precompile the resulting artifact must carry this
+/// value alongside the source identity rather than reconstructing it later.
+pub fn module_compilation_context_for_source(
+    source_path: &Path,
+    source: &str,
+) -> Result<ModuleCompilationContext, VmError> {
+    let program = parse_module_source(source_path, source)?;
+    Ok(imported_symbol_projection_for_program(
+        source_path,
+        source,
+        &program,
+    ))
+}
+
 /// Compile a trusted embedder-owned module that may call
 /// [`BuiltinExposure::PrivilegedWire`](harn_builtin_meta::BuiltinExposure)
 /// primitives.
@@ -611,16 +711,26 @@ pub fn compile_trusted_host_dispatch_module_artifact_from_source_with_imported_s
     imported_enum_candidates: impl IntoIterator<Item = String>,
     imported_source_callable_names: impl IntoIterator<Item = String>,
 ) -> Result<ModuleArtifact, VmError> {
+    let context =
+        ModuleCompilationContext::new(imported_enum_candidates, imported_source_callable_names);
+    compile_trusted_host_dispatch_module_artifact_from_source_with_context(
+        source_path,
+        source,
+        &context,
+    )
+}
+
+pub fn compile_trusted_host_dispatch_module_artifact_from_source_with_context(
+    source_path: &Path,
+    source: &str,
+    context: &ModuleCompilationContext,
+) -> Result<ModuleArtifact, VmError> {
     let program = parse_module_source(source_path, source)?;
-    let imported_enum_candidates = imported_enum_candidates.into_iter().collect::<Vec<_>>();
-    let imported_source_callable_names = imported_source_callable_names
-        .into_iter()
-        .collect::<Vec<_>>();
     compile_module_artifact_with_provenance(
         &program,
         Some(source_path.display().to_string()),
-        &imported_enum_candidates,
-        &imported_source_callable_names,
+        context.enum_candidates(),
+        context.source_callable_names(),
         ModuleProvenance::TrustedHostDispatch,
     )
 }
@@ -634,9 +744,9 @@ fn imported_symbol_projection_for_program(
     source_path: &Path,
     source: &str,
     program: &[harn_parser::SNode],
-) -> ImportedSymbolProjection {
+) -> ModuleCompilationContext {
     if !needs_imported_symbol_projection(program) {
-        return ImportedSymbolProjection::default();
+        return ModuleCompilationContext::default();
     }
     let source_hash = *blake3::hash(source.as_bytes()).as_bytes();
     let cache_key = harn_modules::canonical_path(source_path);
@@ -696,23 +806,8 @@ fn imported_symbol_projection_for_program(
 fn sorted_imported_symbol_projection(
     graph: &harn_modules::ModuleGraph,
     source_path: &Path,
-) -> ImportedSymbolProjection {
-    let mut enum_candidates = graph
-        .imported_names_by_kind_for_file(source_path, DefKind::Enum)
-        .unwrap_or_default()
-        .into_iter()
-        .collect::<Vec<_>>();
-    enum_candidates.sort_unstable();
-    let mut source_callable_names = graph
-        .imported_callable_names_for_file(source_path)
-        .unwrap_or_default()
-        .into_iter()
-        .collect::<Vec<_>>();
-    source_callable_names.sort_unstable();
-    ImportedSymbolProjection {
-        enum_candidates,
-        source_callable_names,
-    }
+) -> ModuleCompilationContext {
+    ModuleCompilationContext::from_graph(graph, source_path)
 }
 
 fn is_immutable_stdlib_path(path: &Path) -> bool {
@@ -797,16 +892,22 @@ pub fn compile_module_artifact_from_source_with_imported_symbols(
     imported_enum_candidates: impl IntoIterator<Item = String>,
     imported_source_callable_names: impl IntoIterator<Item = String>,
 ) -> Result<ModuleArtifact, VmError> {
+    let context =
+        ModuleCompilationContext::new(imported_enum_candidates, imported_source_callable_names);
+    compile_module_artifact_from_source_with_context(source_path, source, &context)
+}
+
+pub fn compile_module_artifact_from_source_with_context(
+    source_path: &Path,
+    source: &str,
+    context: &ModuleCompilationContext,
+) -> Result<ModuleArtifact, VmError> {
     let program = parse_module_source(source_path, source)?;
-    let imported_enum_candidates = imported_enum_candidates.into_iter().collect::<Vec<_>>();
-    let imported_source_callable_names = imported_source_callable_names
-        .into_iter()
-        .collect::<Vec<_>>();
     compile_module_artifact_with_imported_symbols(
         &program,
         Some(source_path.display().to_string()),
-        &imported_enum_candidates,
-        &imported_source_callable_names,
+        context.enum_candidates(),
+        context.source_callable_names(),
     )
 }
 

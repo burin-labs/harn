@@ -19,9 +19,9 @@
 //! only ever save work, never decide a hit on its own.
 //!
 //! A manifest that re-checks clean is also the graph's link table. It records
-//! each file's digest, which is the only part of that file's module artifact key
-//! that depends on the file — so [`GraphLinkTable`] hands module loading the
-//! identities it would otherwise re-read 5.7 MB of source to rederive.
+//! each file's digest plus the typed imported interface consulted by lowering,
+//! so [`GraphLinkTable`] hands module loading the complete identities it would
+//! otherwise re-read 5.7 MB of source and rebuild the graph to rederive.
 //!
 //! Stat identity is already the trust boundary inside a process:
 //! [`crate::module_source`] memoizes reads on `(path, len, mtime_ns)`. This
@@ -52,6 +52,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use crate::module_artifact::ModuleCompilationContext;
 use crate::module_source::{self, ModuleSource};
 
 /// One transitively reachable source file, plus the path that must stay absent
@@ -71,9 +72,13 @@ pub struct ManifestFile {
     ///
     /// Two things read it. A racily-clean entry is decided by content when
     /// stats cannot decide. And a manifest that re-checked clean hands these
-    /// digests to the module loader as a [`GraphLinkTable`], because this is
-    /// also the only per-file component of the file's module artifact key.
+    /// digests to the module loader as a [`GraphLinkTable`], paired with the
+    /// imported-interface context below to form the module artifact key.
     pub content_hash: [u8; 32],
+    /// Imported names and kinds that participate in this file's lowering.
+    /// The validated link table must carry the same typed context as the
+    /// prepared and on-disk module keys; a content digest alone is incomplete.
+    pub compilation_context: ModuleCompilationContext,
     /// Extensionless sibling that would shadow this file if it appeared.
     ///
     /// `resolve_local_import` probes `base.join(import)` *before* appending
@@ -218,14 +223,15 @@ impl ContextManifest {
 }
 
 /// A re-checked manifest, indexed the way module loading asks questions:
-/// canonical path to the digest that names that module's artifact.
+/// canonical path to the source digest and imported-interface context that
+/// together name that module's artifact.
 ///
 /// The walk that built the manifest read and digested every reachable file.
 /// Proving that manifest current proves those digests still describe the bytes
-/// on disk — and a module artifact's cache key depends on its file through
-/// nothing but that digest, everything else being process-global. So a validated
-/// manifest already holds what module loading was re-reading the whole graph to
-/// rediscover: not the sources, which it no longer needs, but their identities.
+/// on disk. The same graph walk records the imported names and kinds that can
+/// alter lowering. So a validated manifest already holds what module loading
+/// was re-reading and rebuilding the whole graph to rediscover: not dependency
+/// bodies, which independently key their artifacts, but complete identities.
 ///
 /// A table is a shortcut, never an authority. Its digest names an artifact;
 /// whether one is on disk under that name is a separate question, and a module
@@ -237,24 +243,32 @@ impl ContextManifest {
 /// why there is no way to assemble one from observations nothing has validated.
 #[derive(Debug)]
 pub struct GraphLinkTable {
-    content_hash_by_path: HashMap<PathBuf, [u8; 32]>,
+    module_identity_by_path: HashMap<PathBuf, ([u8; 32], ModuleCompilationContext)>,
 }
 
 impl GraphLinkTable {
     pub(crate) fn from_validated(manifest: &ContextManifest) -> Self {
         Self {
-            content_hash_by_path: manifest
+            module_identity_by_path: manifest
                 .files
                 .iter()
-                .map(|file| (file.path.clone(), file.content_hash))
+                .map(|file| {
+                    (
+                        file.path.clone(),
+                        (file.content_hash, file.compilation_context.clone()),
+                    )
+                })
                 .collect(),
         }
     }
 
-    /// The digest recorded for `canonical`, or `None` when this graph does not
-    /// contain it.
-    pub(crate) fn content_hash(&self, canonical: &Path) -> Option<[u8; 32]> {
-        self.content_hash_by_path.get(canonical).copied()
+    /// The complete cache identity recorded for `canonical`, or `None` when
+    /// this graph does not contain it.
+    pub(crate) fn module_identity(
+        &self,
+        canonical: &Path,
+    ) -> Option<([u8; 32], ModuleCompilationContext)> {
+        self.module_identity_by_path.get(canonical).cloned()
     }
 }
 
@@ -284,6 +298,7 @@ impl ManifestFile {
             len,
             mtime_ns,
             content_hash: source.sha256(),
+            compilation_context: ModuleCompilationContext::default(),
             shadow: shadow_path(path),
         })
     }

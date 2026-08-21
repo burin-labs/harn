@@ -89,8 +89,12 @@ fn expected_entry_artifact(cache_dir: &Path, source_path: &Path) -> PathBuf {
 /// relocatable artifact — so only the text is hashed.
 fn expected_module_artifact(cache_dir: &Path, source_path: &Path) -> PathBuf {
     let source = fs::read_to_string(source_path).expect("read module source");
+    let compilation_context =
+        harn_vm::module_artifact::module_compilation_context_for_source(source_path, &source)
+            .expect("resolve module compilation context");
     let key = harn_vm::bytecode_cache::CacheKey::from_module_source(
         &harn_vm::module_source::ModuleSource::from_text(source),
+        &compilation_context,
     );
     cache_dir.join(key.module_filename())
 }

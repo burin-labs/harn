@@ -112,28 +112,30 @@ pub fn link_program(
         if path == entrypoint {
             continue;
         }
-        let imported_enums = build
-            .graph
-            .imported_names_by_kind_for_file(&path, harn_modules::DefKind::Enum)
-            .unwrap_or_default();
-        let imported_callables = build
-            .graph
-            .imported_callable_names_for_file(&path)
-            .unwrap_or_default();
-        let compile_path = runtime_compile_path(&path);
-        let full =
-            crate::module_artifact::compile_module_artifact_from_source_with_imported_symbols(
-                &compile_path,
+        let compilation_context =
+            crate::module_artifact::ModuleCompilationContext::for_source_in_graph(
+                &build.graph,
+                &path,
                 &parsed.source,
-                imported_enums,
-                imported_callables,
             )
             .map_err(|error| {
                 LinkedProgramError::invalid(format!(
-                    "module compile failed for {}: {error}",
+                    "module context failed for {}: {error}",
                     path.display()
                 ))
             })?;
+        let compile_path = runtime_compile_path(&path);
+        let full = crate::module_artifact::compile_module_artifact_from_source_with_context(
+            &compile_path,
+            &parsed.source,
+            &compilation_context,
+        )
+        .map_err(|error| {
+            LinkedProgramError::invalid(format!(
+                "module compile failed for {}: {error}",
+                path.display()
+            ))
+        })?;
         let full_symbols = artifact_symbols(&full);
         let input_bytes = postcard::to_allocvec(&full)
             .map_err(|error| LinkedProgramError::invalid(format!("module size failed: {error}")))?

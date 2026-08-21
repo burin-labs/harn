@@ -4,20 +4,22 @@
 //! still receives fresh closures, function registries, module state, and init
 //! execution; only the serialized-to-runtime bytecode conversion is reused.
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::BTreeMap;
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use harn_modules::DefKind;
-use parking_lot::Mutex;
+use quick_cache::sync::{Cache, GuardResult};
+use quick_cache::{DefaultHashBuilder, Lifecycle, UnitWeighter};
 
 use crate::chunk::{Chunk, CompiledFunction};
 use crate::module_artifact::{
-    compile_module_artifact_from_source, compile_module_artifact_from_source_with_imported_symbols,
-    compile_trusted_host_dispatch_module_artifact_from_source,
-    compile_trusted_host_dispatch_module_artifact_from_source_with_imported_symbols,
-    ModuleArtifact, ModuleImportSpec, ModuleProvenance,
+    compile_module_artifact_from_source_with_context,
+    compile_trusted_host_dispatch_module_artifact_from_source_with_context,
+    module_compilation_context_for_source, ModuleArtifact, ModuleCompilationContext,
+    ModuleImportSpec, ModuleProvenance,
 };
 use crate::module_source::ModuleSource;
 use crate::{ModulePhaseRecorder, ModulePhaseStats, VmError};
@@ -69,7 +71,7 @@ impl PreparedModuleArtifact {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 struct PreparedModuleCacheKey {
     canonical_path: PathBuf,
     source_hash: [u8; 32],
@@ -77,6 +79,7 @@ struct PreparedModuleCacheKey {
     harn_version: &'static str,
     codegen_fingerprint: &'static str,
     optimizations_enabled: bool,
+    compilation_context_digest: [u8; 32],
 }
 
 impl PreparedModuleCacheKey {
@@ -84,7 +87,22 @@ impl PreparedModuleCacheKey {
     /// artifact. Keying on it rather than a second digest of the same bytes
     /// means a warm module load hashes its source once, and lets a caller
     /// holding a recorded digest find a prepared artifact without the bytes.
+    #[cfg(test)]
     fn new(canonical_path: PathBuf, source_hash: [u8; 32], provenance: ModuleProvenance) -> Self {
+        Self::with_context(
+            canonical_path,
+            source_hash,
+            provenance,
+            &ModuleCompilationContext::default(),
+        )
+    }
+
+    fn with_context(
+        canonical_path: PathBuf,
+        source_hash: [u8; 32],
+        provenance: ModuleProvenance,
+        compilation_context: &ModuleCompilationContext,
+    ) -> Self {
         Self {
             canonical_path,
             source_hash,
@@ -93,19 +111,52 @@ impl PreparedModuleCacheKey {
             codegen_fingerprint: crate::bytecode_cache::CODEGEN_FINGERPRINT,
             optimizations_enabled: crate::compiler::CompilerOptions::from_env()
                 .optimizations_enabled(),
+            compilation_context_digest: compilation_context.digest(),
         }
     }
 }
 
 #[derive(Default)]
-struct PreparedModuleCacheInner {
-    entries: BTreeMap<PreparedModuleCacheKey, Arc<PreparedModuleArtifact>>,
-    insertion_order: VecDeque<PreparedModuleCacheKey>,
-    hits: u64,
-    misses: u64,
-    insertions: u64,
-    evictions: u64,
+struct PreparedModuleCacheCounters {
+    hits: AtomicU64,
+    misses: AtomicU64,
+    insertions: AtomicU64,
+    evictions: AtomicU64,
 }
+
+fn saturating_increment(counter: &AtomicU64) {
+    let _ = counter.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
+        Some(value.saturating_add(1))
+    });
+}
+
+#[derive(Clone)]
+struct PreparedModuleCacheLifecycle {
+    counters: Arc<PreparedModuleCacheCounters>,
+}
+
+impl Lifecycle<PreparedModuleCacheKey, Arc<PreparedModuleArtifact>>
+    for PreparedModuleCacheLifecycle
+{
+    type RequestState = ();
+
+    fn on_evict(
+        &self,
+        _state: &mut Self::RequestState,
+        _key: PreparedModuleCacheKey,
+        _artifact: Arc<PreparedModuleArtifact>,
+    ) {
+        saturating_increment(&self.counters.evictions);
+    }
+}
+
+type PreparedArtifactCache = Cache<
+    PreparedModuleCacheKey,
+    Arc<PreparedModuleArtifact>,
+    UnitWeighter,
+    DefaultHashBuilder,
+    PreparedModuleCacheLifecycle,
+>;
 
 /// Typed counters for a [`PreparedModuleCache`] lifetime.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -114,6 +165,8 @@ pub struct PreparedModuleCacheStats {
     pub hits: u64,
     pub misses: u64,
     pub insertions: u64,
+    /// Artifacts discarded by the bounded cache, including cold scan
+    /// candidates rejected by S3-FIFO admission before becoming residents.
     pub evictions: u64,
     pub entries: usize,
 }
@@ -123,10 +176,12 @@ pub struct PreparedModuleCacheStats {
 /// The handle is explicit so embedders can scope reuse to one test suite,
 /// worker, watch generation, or VM baseline. Dropping the final handle releases
 /// every prepared artifact; historical user source never accumulates globally.
+/// Concurrent misses for one exact key share a single preparation owner, while
+/// unrelated modules remain independently preparable.
 #[derive(Clone)]
 pub struct PreparedModuleCache {
-    max_entries: NonZeroUsize,
-    inner: Arc<Mutex<PreparedModuleCacheInner>>,
+    entries: Arc<PreparedArtifactCache>,
+    counters: Arc<PreparedModuleCacheCounters>,
 }
 
 impl Default for PreparedModuleCache {
@@ -139,20 +194,30 @@ impl Default for PreparedModuleCache {
 
 impl PreparedModuleCache {
     pub fn with_capacity(max_entries: NonZeroUsize) -> Self {
+        let counters = Arc::new(PreparedModuleCacheCounters::default());
+        let lifecycle = PreparedModuleCacheLifecycle {
+            counters: Arc::clone(&counters),
+        };
+        let capacity = max_entries.get();
         Self {
-            max_entries,
-            inner: Arc::new(Mutex::new(PreparedModuleCacheInner::default())),
+            entries: Arc::new(Cache::with(
+                capacity,
+                capacity as u64,
+                UnitWeighter,
+                DefaultHashBuilder::default(),
+                lifecycle,
+            )),
+            counters,
         }
     }
 
     pub fn stats(&self) -> PreparedModuleCacheStats {
-        let inner = self.inner.lock();
         PreparedModuleCacheStats {
-            hits: inner.hits,
-            misses: inner.misses,
-            insertions: inner.insertions,
-            evictions: inner.evictions,
-            entries: inner.entries.len(),
+            hits: self.counters.hits.load(Ordering::Relaxed),
+            misses: self.counters.misses.load(Ordering::Relaxed),
+            insertions: self.counters.insertions.load(Ordering::Relaxed),
+            evictions: self.counters.evictions.load(Ordering::Relaxed),
+            entries: self.entries.len(),
         }
     }
 
@@ -209,25 +274,17 @@ impl PreparedModuleCache {
                     Err(_) => continue,
                 }
             };
-            let mut imported_enum_candidates = graph
-                .imported_names_by_kind_for_file(&path, DefKind::Enum)
-                .unwrap_or_default()
-                .into_iter()
-                .collect::<Vec<_>>();
-            imported_enum_candidates.sort_unstable();
-            let mut imported_source_callable_names = graph
-                .imported_callable_names_for_file(&path)
-                .unwrap_or_default()
-                .into_iter()
-                .collect::<Vec<_>>();
-            imported_source_callable_names.sort_unstable();
+            let Ok(compilation_context) =
+                ModuleCompilationContext::for_source_in_graph(&graph, &path, source.as_str())
+            else {
+                continue;
+            };
             let canonical = harn_modules::canonical_path(&path);
             let _ = self.prepare(
                 &path,
                 &canonical,
                 &source,
-                Some(&imported_enum_candidates),
-                Some(&imported_source_callable_names),
+                Some(&compilation_context),
                 Some(&recorder),
                 provenance,
             );
@@ -236,47 +293,114 @@ impl PreparedModuleCache {
         recorder.snapshot()
     }
 
+    #[cfg(test)]
     pub(crate) fn get(
         &self,
         canonical_path: &Path,
         source_hash: [u8; 32],
         provenance: ModuleProvenance,
     ) -> Option<Arc<PreparedModuleArtifact>> {
-        let key =
-            PreparedModuleCacheKey::new(canonical_path.to_path_buf(), source_hash, provenance);
-        let mut inner = self.inner.lock();
-        let artifact = inner.entries.get(&key).cloned();
+        self.get_with_context(
+            canonical_path,
+            source_hash,
+            provenance,
+            &ModuleCompilationContext::default(),
+        )
+    }
+
+    pub(crate) fn get_with_context(
+        &self,
+        canonical_path: &Path,
+        source_hash: [u8; 32],
+        provenance: ModuleProvenance,
+        compilation_context: &ModuleCompilationContext,
+    ) -> Option<Arc<PreparedModuleArtifact>> {
+        let key = PreparedModuleCacheKey::with_context(
+            canonical_path.to_path_buf(),
+            source_hash,
+            provenance,
+            compilation_context,
+        );
+        let artifact = self.entries.get(&key);
         if artifact.is_some() {
-            inner.hits = inner.hits.saturating_add(1);
+            saturating_increment(&self.counters.hits);
         } else {
-            inner.misses = inner.misses.saturating_add(1);
+            saturating_increment(&self.counters.misses);
         }
         artifact
     }
 
+    #[cfg(test)]
     pub(crate) fn insert(
         &self,
         canonical_path: PathBuf,
         source_hash: [u8; 32],
         artifact: Arc<PreparedModuleArtifact>,
     ) -> Arc<PreparedModuleArtifact> {
-        let key = PreparedModuleCacheKey::new(canonical_path, source_hash, artifact.provenance);
-        let mut inner = self.inner.lock();
-        if let Some(existing) = inner.entries.get(&key) {
-            return Arc::clone(existing);
-        }
-        while inner.entries.len() >= self.max_entries.get() {
-            let Some(oldest) = inner.insertion_order.pop_front() else {
-                break;
-            };
-            if inner.entries.remove(&oldest).is_some() {
-                inner.evictions = inner.evictions.saturating_add(1);
+        self.insert_with_context(
+            canonical_path,
+            source_hash,
+            &ModuleCompilationContext::default(),
+            artifact,
+        )
+    }
+
+    pub(crate) fn insert_with_context(
+        &self,
+        canonical_path: PathBuf,
+        source_hash: [u8; 32],
+        compilation_context: &ModuleCompilationContext,
+        artifact: Arc<PreparedModuleArtifact>,
+    ) -> Arc<PreparedModuleArtifact> {
+        let key = PreparedModuleCacheKey::with_context(
+            canonical_path,
+            source_hash,
+            artifact.provenance,
+            compilation_context,
+        );
+        match self.entries.get_value_or_guard(&key, None) {
+            GuardResult::Value(existing) => existing,
+            GuardResult::Guard(guard) => {
+                if guard.insert(Arc::clone(&artifact)).is_ok() {
+                    saturating_increment(&self.counters.insertions);
+                }
+                artifact
             }
+            GuardResult::Timeout => unreachable!("an unbounded cache wait cannot time out"),
         }
-        inner.insertion_order.push_back(key.clone());
-        inner.entries.insert(key, Arc::clone(&artifact));
-        inner.insertions = inner.insertions.saturating_add(1);
-        artifact
+    }
+
+    fn prepare_exact_key(
+        &self,
+        key: &PreparedModuleCacheKey,
+        recorder: Option<&ModulePhaseRecorder>,
+        prepare: impl FnOnce() -> Result<Arc<PreparedModuleArtifact>, VmError>,
+    ) -> Result<Arc<PreparedModuleArtifact>, VmError> {
+        let prepared = {
+            let _load_span = recorder.map(ModulePhaseRecorder::load_span);
+            self.entries.get(key)
+        };
+        if let Some(prepared) = prepared {
+            saturating_increment(&self.counters.hits);
+            return Ok(prepared);
+        }
+        saturating_increment(&self.counters.misses);
+
+        let guarded = {
+            let _load_span = recorder.map(ModulePhaseRecorder::load_span);
+            self.entries.get_value_or_guard(key, None)
+        };
+        match guarded {
+            GuardResult::Value(prepared) => Ok(prepared),
+            GuardResult::Guard(guard) => {
+                let prepared = prepare()?;
+                if guard.insert(Arc::clone(&prepared)).is_ok() {
+                    saturating_increment(&self.counters.insertions);
+                }
+                Ok(prepared)
+            }
+            GuardResult::Timeout => unreachable!("an unbounded cache wait cannot time out"),
+        }
     }
 
     pub(crate) fn prepare(
@@ -284,86 +408,79 @@ impl PreparedModuleCache {
         source_path: &Path,
         canonical_path: &Path,
         source: &ModuleSource,
-        imported_enum_candidates: Option<&[String]>,
-        imported_source_callable_names: Option<&[String]>,
+        compilation_context: Option<&ModuleCompilationContext>,
         recorder: Option<&ModulePhaseRecorder>,
         provenance: ModuleProvenance,
     ) -> Result<Arc<PreparedModuleArtifact>, VmError> {
-        let prepared = {
+        let source_hash = {
             let _load_span = recorder.map(ModulePhaseRecorder::load_span);
-            self.get(canonical_path, source.sha256(), provenance)
+            source.sha256()
         };
-        if let Some(prepared) = prepared {
-            return Ok(prepared);
-        }
-
-        // Disk cache hits skip parse + compile. The scoped prepared cache
-        // additionally skips deserialization and chunk hydration on later
-        // fresh VMs without sharing any runtime module state.
-        let cached = if provenance == ModuleProvenance::TrustedHostDispatch {
-            let mut compile_span = recorder.map(ModulePhaseRecorder::compile_span);
-            let compiled = match (imported_enum_candidates, imported_source_callable_names) {
-                (Some(enum_candidates), Some(callable_names)) => {
-                    compile_trusted_host_dispatch_module_artifact_from_source_with_imported_symbols(
+        let compilation_context = match compilation_context {
+            Some(context) => context.clone(),
+            None => module_compilation_context_for_source(source_path, source.as_str())?,
+        };
+        let key = PreparedModuleCacheKey::with_context(
+            canonical_path.to_path_buf(),
+            source_hash,
+            provenance,
+            &compilation_context,
+        );
+        self.prepare_exact_key(&key, recorder, || {
+            // Disk cache hits skip parse + compile. The scoped prepared cache
+            // additionally skips deserialization and chunk hydration on later
+            // fresh VMs without sharing any runtime module state.
+            let cached = if provenance == ModuleProvenance::TrustedHostDispatch {
+                let mut compile_span = recorder.map(ModulePhaseRecorder::compile_span);
+                let compiled =
+                    compile_trusted_host_dispatch_module_artifact_from_source_with_context(
                         source_path,
                         source.as_str(),
-                        enum_candidates.iter().cloned(),
-                        callable_names.iter().cloned(),
-                    )?
-                }
-                _ => compile_trusted_host_dispatch_module_artifact_from_source(
-                    source_path,
-                    source.as_str(),
-                )?,
-            };
-            if let Some(span) = &mut compile_span {
-                span.mark_compile_succeeded();
-            }
-            drop(compile_span);
-            compiled
-        } else {
-            // Only ordinary user bytecode enters the process-wide disk cache.
-            // Trusted host-dispatch artifacts remain in this explicitly scoped,
-            // provenance-keyed in-memory cache.
-            let lookup = {
-                let _load_span = recorder.map(ModulePhaseRecorder::load_span);
-                crate::bytecode_cache::load_module(source_path, source)
-            };
-            if let Some(artifact) = lookup.artifact {
-                artifact
-            } else {
-                let mut compile_span = recorder.map(ModulePhaseRecorder::compile_span);
-                let compiled = match (imported_enum_candidates, imported_source_callable_names) {
-                    (Some(enum_candidates), Some(callable_names)) => {
-                        compile_module_artifact_from_source_with_imported_symbols(
-                            source_path,
-                            source.as_str(),
-                            enum_candidates.iter().cloned(),
-                            callable_names.iter().cloned(),
-                        )?
-                    }
-                    _ => compile_module_artifact_from_source(source_path, source.as_str())?,
-                };
+                        &compilation_context,
+                    )?;
                 if let Some(span) = &mut compile_span {
                     span.mark_compile_succeeded();
                 }
                 drop(compile_span);
-                if let Err(err) = crate::bytecode_cache::store_module(&lookup.key, &compiled) {
-                    if std::env::var_os("HARN_BYTECODE_CACHE_DEBUG").is_some() {
-                        eprintln!(
-                            "[harn] module cache write skipped for {}: {err}",
-                            source_path.display()
-                        );
-                    }
-                }
                 compiled
-            }
-        };
-        let prepared = {
-            let _load_span = recorder.map(ModulePhaseRecorder::load_span);
-            Arc::new(PreparedModuleArtifact::from_cached(cached))
-        };
-        Ok(self.insert(canonical_path.to_path_buf(), source.sha256(), prepared))
+            } else {
+                // Only ordinary user bytecode enters the process-wide disk cache.
+                // Trusted host-dispatch artifacts remain in this explicitly scoped,
+                // provenance-keyed in-memory cache.
+                let lookup = {
+                    let _load_span = recorder.map(ModulePhaseRecorder::load_span);
+                    crate::bytecode_cache::load_module(source_path, source, &compilation_context)
+                };
+                if let Some(artifact) = lookup.artifact {
+                    artifact
+                } else {
+                    let mut compile_span = recorder.map(ModulePhaseRecorder::compile_span);
+                    let compiled = compile_module_artifact_from_source_with_context(
+                        source_path,
+                        source.as_str(),
+                        &compilation_context,
+                    )?;
+                    if let Some(span) = &mut compile_span {
+                        span.mark_compile_succeeded();
+                    }
+                    drop(compile_span);
+                    if let Err(err) = crate::bytecode_cache::store_module(&lookup.key, &compiled) {
+                        if std::env::var_os("HARN_BYTECODE_CACHE_DEBUG").is_some() {
+                            eprintln!(
+                                "[harn] module cache write skipped for {}: {err}",
+                                source_path.display()
+                            );
+                        }
+                    }
+                    compiled
+                }
+            };
+            let prepared = {
+                let _load_span = recorder.map(ModulePhaseRecorder::load_span);
+                Arc::new(PreparedModuleArtifact::from_cached(cached))
+            };
+            Ok(prepared)
+        })
     }
 }
 
@@ -373,6 +490,7 @@ mod tests {
     use crate::module_artifact::{compile_module_artifact_from_source, ModuleImportBinding};
     use crate::module_source::ModuleSource;
     use harn_parser::TypeExpr;
+    use std::sync::Barrier;
 
     fn named_list_element(type_expr: &Option<TypeExpr>) -> &str {
         match type_expr {
@@ -430,17 +548,29 @@ mod tests {
     }
 
     #[test]
-    fn bounded_cache_evicts_oldest_exact_key() {
+    fn bounded_cache_rejects_a_one_off_scan_without_leaking_artifacts() {
         let cache = PreparedModuleCache::with_capacity(NonZeroUsize::new(1).unwrap());
         let first_source = ModuleSource::from_text("pub fn first() { 1 }");
         let second_source = ModuleSource::from_text("pub fn second() { 2 }");
         let first = empty_artifact();
-        let _ = cache.insert(PathBuf::from("first.harn"), first_source.sha256(), first);
-        let _ = cache.insert(
+        let first_weak = Arc::downgrade(&first);
+        drop(cache.insert(
+            PathBuf::from("first.harn"),
+            first_source.sha256(),
+            Arc::clone(&first),
+        ));
+        drop(first);
+
+        // quick_cache's scan-resistant admission deliberately preserves the
+        // resident hot key when a new key appears only once at capacity.
+        let scanned = empty_artifact();
+        let scanned_weak = Arc::downgrade(&scanned);
+        drop(cache.insert(
             PathBuf::from("second.harn"),
             second_source.sha256(),
-            empty_artifact(),
-        );
+            Arc::clone(&scanned),
+        ));
+        drop(scanned);
 
         assert!(cache
             .get(
@@ -448,16 +578,22 @@ mod tests {
                 first_source.sha256(),
                 ModuleProvenance::User,
             )
-            .is_none());
+            .is_some());
         assert!(cache
             .get(
                 Path::new("second.harn"),
                 second_source.sha256(),
                 ModuleProvenance::User,
             )
-            .is_some());
+            .is_none());
+        assert!(first_weak.upgrade().is_some());
+        assert!(scanned_weak.upgrade().is_none());
+        assert_eq!(cache.stats().insertions, 2);
         assert_eq!(cache.stats().evictions, 1);
         assert_eq!(cache.stats().entries, 1);
+
+        drop(cache);
+        assert!(first_weak.upgrade().is_none());
     }
 
     #[test]
@@ -475,6 +611,85 @@ mod tests {
     }
 
     #[test]
+    fn cache_counters_saturate_instead_of_wrapping() {
+        let counter = AtomicU64::new(u64::MAX);
+        saturating_increment(&counter);
+        assert_eq!(counter.load(Ordering::Relaxed), u64::MAX);
+    }
+
+    #[test]
+    fn cache_key_separates_imported_symbol_compilation_context() {
+        let source_path = PathBuf::from("context-sensitive.harn");
+        let source = ModuleSource::from_text(
+            r#"
+import "./library"
+
+pub fn exercise(value: any) -> string {
+  match value {
+    Color.Ready(message) -> { return message }
+    _ -> { return "fallback" }
+  }
+}
+"#,
+        );
+        let without_imported_enum = compile_module_artifact_from_source_with_context(
+            &source_path,
+            source.as_str(),
+            &ModuleCompilationContext::default(),
+        )
+        .expect("compile dynamically-resolved pattern");
+        let imported_enum_context =
+            ModuleCompilationContext::new(["Color".to_string()], Vec::<String>::new());
+        let with_imported_enum = compile_module_artifact_from_source_with_context(
+            &source_path,
+            source.as_str(),
+            &imported_enum_context,
+        )
+        .expect("compile imported-enum-resolved pattern");
+        assert_ne!(
+            postcard::to_allocvec(&without_imported_enum.functions["exercise"])
+                .expect("serialize dynamically-resolved function"),
+            postcard::to_allocvec(&with_imported_enum.functions["exercise"])
+                .expect("serialize imported-enum-resolved function"),
+            "the imported enum projection must demonstrably alter bytecode"
+        );
+
+        let cache = PreparedModuleCache::default();
+        let without_imported_enum = cache
+            .prepare(
+                &source_path,
+                &source_path,
+                &source,
+                Some(&ModuleCompilationContext::default()),
+                None,
+                ModuleProvenance::User,
+            )
+            .expect("prepare dynamically-resolved artifact");
+        let with_imported_enum = cache
+            .prepare(
+                &source_path,
+                &source_path,
+                &source,
+                Some(&imported_enum_context),
+                None,
+                ModuleProvenance::User,
+            )
+            .expect("prepare imported-enum-resolved artifact");
+
+        assert!(
+            !Arc::ptr_eq(&without_imported_enum, &with_imported_enum),
+            "one source/path/provenance with distinct imported projections must not alias"
+        );
+        assert_ne!(
+            postcard::to_allocvec(&without_imported_enum.functions["exercise"].freeze_for_cache(),)
+                .expect("serialize cached dynamically-resolved function"),
+            postcard::to_allocvec(&with_imported_enum.functions["exercise"].freeze_for_cache(),)
+                .expect("serialize cached imported-enum-resolved function")
+        );
+        assert_eq!(cache.stats().insertions, 2);
+    }
+
+    #[test]
     fn dropping_last_cache_handle_releases_prepared_artifacts() {
         let cache = PreparedModuleCache::default();
         let path = PathBuf::from("module.harn");
@@ -488,6 +703,97 @@ mod tests {
         assert!(weak.upgrade().is_some());
         drop(clone);
         assert!(weak.upgrade().is_none());
+    }
+
+    #[test]
+    fn concurrent_identical_misses_compile_one_immutable_artifact() {
+        const WORKERS: usize = 8;
+
+        let cache = PreparedModuleCache::default();
+        let source = Arc::new(ModuleSource::from_text(
+            (0..128)
+                .map(|index| format!("pub fn value_{index}() {{ return {index} }}\n"))
+                .collect::<String>(),
+        ));
+        let source_path = Arc::new(PathBuf::from("shared-runtime-module.harn"));
+        let start = Arc::new(Barrier::new(WORKERS + 1));
+        let mut handles = Vec::with_capacity(WORKERS);
+
+        for _ in 0..WORKERS {
+            let cache = cache.clone();
+            let source = Arc::clone(&source);
+            let source_path = Arc::clone(&source_path);
+            let start = Arc::clone(&start);
+            handles.push(std::thread::spawn(move || {
+                let recorder = ModulePhaseRecorder::new();
+                start.wait();
+                let artifact = cache
+                    .prepare(
+                        &source_path,
+                        &source_path,
+                        &source,
+                        None,
+                        Some(&recorder),
+                        ModuleProvenance::TrustedHostDispatch,
+                    )
+                    .expect("compile shared immutable module");
+                (artifact, recorder.snapshot())
+            }));
+        }
+
+        start.wait();
+        let outcomes = handles
+            .into_iter()
+            .map(|handle| handle.join().expect("module compiler worker joins"))
+            .collect::<Vec<_>>();
+        let first = &outcomes[0].0;
+
+        assert!(
+            outcomes
+                .iter()
+                .all(|(artifact, _)| Arc::ptr_eq(first, artifact)),
+            "all workers must consume the same immutable prepared artifact"
+        );
+        assert_eq!(
+            outcomes
+                .iter()
+                .map(|(_, phases)| phases.modules_compiled)
+                .sum::<u64>(),
+            1,
+            "one exact cache key must have one compilation owner regardless of worker count"
+        );
+        assert_eq!(cache.stats().insertions, 1);
+    }
+
+    #[test]
+    fn failed_preparation_is_not_cached_or_poisoned() {
+        let cache = PreparedModuleCache::default();
+        let key = PreparedModuleCacheKey::new(
+            PathBuf::from("recoverable.harn"),
+            ModuleSource::from_text("pub fn value() { return 1 }").sha256(),
+            ModuleProvenance::TrustedHostDispatch,
+        );
+
+        let failed = cache.prepare_exact_key(&key, None, || {
+            Err(VmError::Runtime(
+                "synthetic compilation failure".to_string(),
+            ))
+        });
+        assert!(
+            matches!(failed, Err(VmError::Runtime(message)) if message == "synthetic compilation failure")
+        );
+        assert_eq!(cache.stats().entries, 0);
+        assert_eq!(cache.stats().insertions, 0);
+
+        let expected = empty_artifact_with_provenance(ModuleProvenance::TrustedHostDispatch);
+        let prepared = cache
+            .prepare_exact_key(&key, None, || Ok(Arc::clone(&expected)))
+            .expect("a failed owner must release the exact-key preparation slot");
+
+        assert!(Arc::ptr_eq(&prepared, &expected));
+        assert_eq!(cache.stats().misses, 2);
+        assert_eq!(cache.stats().insertions, 1);
+        assert_eq!(cache.stats().entries, 1);
     }
 
     #[test]

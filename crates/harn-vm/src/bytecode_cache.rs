@@ -11,8 +11,9 @@
 //! the content of every transitively-imported user file because they compile
 //! the complete program. Module artifacts compile exactly one file and retain
 //! unresolved import specs, so their context includes compiler and embedded
-//! stdlib identity but deliberately excludes user dependencies. Any change to
-//! an artifact's actual compilation inputs flips the key and recompiles it.
+//! stdlib identity plus the typed imported interface (names and kinds, not
+//! dependency bodies). Any change to an artifact's actual compilation inputs
+//! flips the key and recompiles it.
 //!
 //! File layout — little-endian throughout:
 //!
@@ -55,7 +56,7 @@ use crate::context_manifest::{
     ContextManifest, GraphLinkTable, ManifestCheck, ManifestFile, ManifestUnreadable,
     ManifestUnresolved,
 };
-use crate::module_artifact::ModuleArtifact;
+use crate::module_artifact::{ModuleArtifact, ModuleCompilationContext};
 use crate::module_source::{self, ModuleSource};
 
 /// Header magic for all bytecode-cache artifact families.
@@ -79,7 +80,9 @@ pub const MAGIC: &[u8; 8] = b"HARNBC\0\0";
 /// manifest a capture time, so a rewrite inside the filesystem's timestamp
 /// granularity cannot present itself as unchanged (#5582).
 /// v10: module namespace imports carry conservative static member demand.
-pub const SCHEMA_VERSION: u32 = 10;
+/// v11: manifest link entries carry the typed imported interface needed to
+/// reconstruct an exact module compilation key.
+pub const SCHEMA_VERSION: u32 = 11;
 
 /// Compile-time Harn release. Cache files written by a different release
 /// are rejected on load.
@@ -224,26 +227,31 @@ impl CacheKey {
     /// Compute the cache key for one independently-compiled module artifact.
     ///
     /// A [`ModuleArtifact`] stores unresolved import specs and never compiles
-    /// dependency contents into the parent artifact. Walking the transitive
-    /// graph here therefore adds cold-start I/O without protecting correctness:
-    /// the runtime loads every dependency under its own source-local key.
+    /// dependency bodies into the parent artifact. Its lowering can still
+    /// depend on the imported interface supplied explicitly here; every
+    /// dependency body remains protected by its own source-local key.
     /// Diagnostic paths are rebound when the artifact is loaded, so adjacent
     /// and packaged artifacts remain relocatable without aliasing attribution.
-    pub fn from_module_source(source: &ModuleSource) -> Self {
-        Self::from_module_content_hash(source.sha256())
+    pub fn from_module_source(
+        source: &ModuleSource,
+        compilation_context: &ModuleCompilationContext,
+    ) -> Self {
+        Self::from_module_content_hash(source.sha256(), compilation_context)
     }
 
     /// As [`from_module_source`](Self::from_module_source), but from a digest
     /// recorded earlier instead of bytes in hand.
     ///
-    /// The digest is the only part of a module key that depends on the file;
-    /// every other component is process-global. That asymmetry is what lets a
-    /// validated [`GraphLinkTable`] name a module's artifact without the file
-    /// being read again.
-    pub fn from_module_content_hash(content_hash: [u8; 32]) -> Self {
+    /// The source digest and typed imported interface are the graph-local parts
+    /// of a module key. A validated [`GraphLinkTable`] carries both so it can
+    /// name an artifact without reading the file or rebuilding the graph.
+    pub fn from_module_content_hash(
+        content_hash: [u8; 32],
+        compilation_context: &ModuleCompilationContext,
+    ) -> Self {
         Self {
             source_hash: content_hash,
-            context_hash: module_compilation_context_hash(),
+            context_hash: module_compilation_context_hash(compilation_context),
             harn_version: Cow::Borrowed(HARN_VERSION),
             compiler_tag: compiler_options_tag(CompilerOptions::from_env()),
         }
@@ -510,8 +518,15 @@ pub fn store_at(path: &Path, key: &CacheKey, chunk: &Chunk) -> io::Result<()> {
 
 /// Look up the [`ModuleArtifact`] for `source_path` (whose contents are
 /// `source`). Mirrors [`load`] but for the `.harnmod` family.
-pub fn load_module(source_path: &Path, source: &ModuleSource) -> ModuleLookupOutcome {
-    load_module_for_key(source_path, CacheKey::from_module_source(source))
+pub fn load_module(
+    source_path: &Path,
+    source: &ModuleSource,
+    compilation_context: &ModuleCompilationContext,
+) -> ModuleLookupOutcome {
+    load_module_for_key(
+        source_path,
+        CacheKey::from_module_source(source, compilation_context),
+    )
 }
 
 /// As [`load_module`], but for a key already known without reading the source.
@@ -913,20 +928,26 @@ fn embedded_stdlib_digest() -> &'static [u8; 32] {
 
 /// Stable compilation context for a source-local module artifact.
 ///
-/// Module compilation does not inspect user dependencies. Artifact-local
-/// compiler and stdlib identity belongs in the key; the source path does not,
-/// because it is load context and is rebound after deserialization.
-fn module_compilation_context_hash() -> [u8; 32] {
-    module_compilation_context_hash_fingerprinted(CODEGEN_FINGERPRINT)
+/// Module compilation does not embed user dependency bodies. Artifact-local
+/// compiler and stdlib identity plus the imported interface belong in the key;
+/// the source path does not, because it is load context and is rebound after
+/// deserialization.
+fn module_compilation_context_hash(compilation_context: &ModuleCompilationContext) -> [u8; 32] {
+    module_compilation_context_hash_fingerprinted(CODEGEN_FINGERPRINT, compilation_context.digest())
 }
 
-fn module_compilation_context_hash_fingerprinted(codegen_fingerprint: &str) -> [u8; 32] {
+fn module_compilation_context_hash_fingerprinted(
+    codegen_fingerprint: &str,
+    imported_interface_digest: [u8; 32],
+) -> [u8; 32] {
     let mut hasher = Sha256::new();
-    hasher.update(b"module-artifact-source-local-v3\0");
+    hasher.update(b"module-artifact-source-local-v4\0");
     hasher.update(b"stdlib-digest\0");
     hasher.update(embedded_stdlib_digest());
     hasher.update(b"\0codegen-fingerprint\0");
     hasher.update(codegen_fingerprint.as_bytes());
+    hasher.update(b"\0imported-interface\0");
+    hasher.update(imported_interface_digest);
     hasher.finalize().into()
 }
 
@@ -1087,6 +1108,45 @@ fn walk_import_graph_fingerprinted(
                     });
                 }
             }
+        }
+    }
+
+    // The entry manifest is also the authority for warm module linking. Build
+    // the imported-interface projection once for the complete graph and carry
+    // it beside each source digest; content alone has not been a complete
+    // module compilation identity since imported callable lowering shipped.
+    if let Some(recorded) = manifest.as_ref() {
+        let graph = harn_modules::build_with_source(source_path, source);
+        let contexts = recorded
+            .files
+            .iter()
+            .map(|file| match visited.get(&file.path) {
+                Some(ImportNode::Resolved { content }) => {
+                    ModuleCompilationContext::for_source_in_graph(
+                        &graph,
+                        &file.path,
+                        content.as_ref(),
+                    )
+                    .ok()
+                }
+                _ => None,
+            })
+            .collect::<Option<Vec<_>>>();
+        if let Some(contexts) = contexts {
+            for (file, context) in manifest
+                .as_mut()
+                .expect("the manifest was just borrowed")
+                .files
+                .iter_mut()
+                .zip(contexts)
+            {
+                file.compilation_context = context;
+            }
+        } else {
+            // An invalid module cannot produce a trustworthy warm module key.
+            // Drop only the optimization; the canonical graph hash still owns
+            // entry compilation's diagnostic path.
+            manifest = None;
         }
     }
 
