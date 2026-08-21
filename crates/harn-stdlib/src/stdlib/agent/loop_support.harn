@@ -114,6 +114,7 @@ pub import {
   agent_tool_search_inject_if_needed,
   agent_tool_search_record_results,
 } from "std/agent/tool_search"
+import { __tool_surface_tool_allowed } from "std/agent/tool_surface"
 pub import {
   agent_apply_tool_surface_narrowing,
   agent_reset_tool_surface_narrowing,
@@ -130,7 +131,7 @@ pub import {
   llm_clear_one_shot_prefill,
   llm_enable_equivalent_failover,
 } from "std/llm/options"
-import { tool_call_output_schema } from "std/llm/structural_validator"
+import { exact_tool_call_output_schema } from "std/llm/structural_validator"
 pub import { env_bool } from "std/os"
 
 pub fn __agent_loop_llm_overrides(opts) {
@@ -172,47 +173,81 @@ pub fn __agent_loop_ordinary_turn_llm_options(opts) {
   return omit(opts, ["output"])
 }
 
-pub fn __agent_loop_repair_turn_output_contract(opts) -> any? {
-  if !(opts?._prior_turn_claimed_for_repair ?? false) {
+pub fn __agent_loop_next_tool_output_contract(opts) -> any? {
+  const claim = opts?._next_tool_claim
+  if claim == nil {
     return nil
   }
-  const recovery = opts?.missing_tool_call_recovery
-  if type_of(recovery) == "bool" && !recovery {
-    return nil
+  if claim?.source == "missing_tool_call_recovery" {
+    const recovery = opts?.missing_tool_call_recovery
+    if type_of(recovery) == "bool" && !recovery {
+      return nil
+    }
+    if type_of(recovery) == "dict" && !(recovery?.output_contract ?? true) {
+      return nil
+    }
   }
-  if type_of(recovery) == "dict" && !(recovery?.output_contract ?? true) {
-    return nil
+  const tool_name = claim?.tool_name ?? ""
+  if !__tool_surface_tool_allowed(opts?.tools, opts?.policy, tool_name) {
+    throw "agent_loop: next-turn `next_tool_claim` names unavailable or policy-denied tool `"
+      + tool_name
+      + "`"
   }
-  return tool_call_output_schema(opts?.tools, opts?._prior_turn_claimed_tool ?? "")
+  const schema = exact_tool_call_output_schema(opts?.tools, tool_name)
+  if schema == nil {
+    throw "agent_loop: next-turn `next_tool_claim` names unavailable tool `" + tool_name + "`"
+  }
+  return schema
 }
 
-pub fn __agent_loop_repair_receipt(agent: HarnessAgent, session_id, opts, iteration_index) -> nil {
-  if !(opts?._output_contract_repair ?? false) {
+pub fn __agent_loop_next_tool_claim_receipt(
+  agent: HarnessAgent,
+  session_id,
+  opts,
+  iteration_index,
+) -> nil {
+  if !(opts?._next_tool_claim_applied ?? false) {
     return nil
   }
-  const contract = opts?.output?.schema
+  const claim = opts?._next_tool_claim
   agent_emit_event(
     agent,
     session_id,
-    "repair_output_contract_applied",
-    {iteration: iteration_index + 1, tool_count: len(contract?.anyOf ?? [contract])},
+    "typed_checkpoint",
+    {
+      schema: "harn.agent_next_tool_claim_receipt.v1",
+      kind: "next_tool_claim_applied",
+      receipt_kind: "next_tool_claim_applied",
+      status: "applied",
+      iteration: iteration_index + 1,
+      tool_name: claim?.tool_name ?? "",
+      source: claim?.source ?? "post_turn_callback",
+    },
   )
 }
 
 pub fn __turn_llm_opts(harness: Harness, session, opts, iteration_index) -> dict {
-  const effective = __agent_loop_effective_llm_options(harness.llm, opts)
-  __agent_loop_repair_receipt(harness.agent, session.session_id, effective, iteration_index)
-  return effective
+  return __agent_loop_effective_llm_options(harness.llm, opts)
 }
 
 pub fn __agent_loop_effective_llm_options(llm: HarnessLlm, opts) {
   const base = opts ?? {}
   let merged = agent_merge_llm_options(base, __agent_loop_llm_overrides(base))
-  const repair_schema = __agent_loop_repair_turn_output_contract(merged)
-  if repair_schema != nil {
-    merged = merged + {output: {schema: repair_schema}, _output_contract_repair: true}
+  const claim_schema = __agent_loop_next_tool_output_contract(merged)
+  if claim_schema != nil {
+    merged = merged
+      + {
+      output: {schema: claim_schema},
+      _next_tool_claim_applied: true,
+      // JSON Schema constrains a text response to the canonical bare call
+      // envelope regardless of the ambient tool dialect. Result projection
+      // consumes this marker so parser and contract cannot diverge.
+      _next_tool_claim_parser_format: "json",
+    }
   }
-  const call_opts = if merged?._output_contract_repair ?? false {
+  const call_opts = if (merged?._next_tool_claim_applied ?? false)
+    || (merged?._output_contract_repair
+    ?? false) {
     merged
   } else {
     __agent_loop_ordinary_turn_llm_options(merged)

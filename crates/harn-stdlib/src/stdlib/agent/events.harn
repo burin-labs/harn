@@ -289,6 +289,30 @@ pub fn agent_convergence_guard_receipt_schema() {
   )
 }
 
+/**
+ * Schema for a one-turn exact-tool contract applied to a model request. This
+ * receipt proves request actuation, not successful provider completion or tool
+ * execution; those have their own lifecycle events.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_next_tool_claim_receipt_schema() -> dict {
+  return schema_object(
+    {
+      iteration: __agent_event_nonnegative_int_schema(),
+      kind: schema_literal("next_tool_claim_applied"),
+      receipt_kind: schema_literal("next_tool_claim_applied"),
+      schema: schema_literal("harn.agent_next_tool_claim_receipt.v1"),
+      source: schema_string() + {min_length: 1},
+      status: schema_literal("applied"),
+      tool_name: schema_string() + {min_length: 1},
+    },
+    {additional_properties: false},
+  )
+}
+
 fn __agent_event_contract_report(value) {
   if type_of(value) != "dict" {
     return nil

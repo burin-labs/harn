@@ -2828,6 +2828,8 @@ shape; new keys are additive):
   dispatch: list | dict | nil,
   tool_count: int,                   // calls dispatched this turn
   tool_results: list<dict>,          // structured per-call results
+  available_tool_names: list<string>, // current turn's usage-narrowed surface
+  claimable_tool_names: list<string>, // canonical authority capped by explicit policy
   successful_tool_names: list<string>, // excludes typed result payloads with ok/success=false
   rejected_tool_names: list<string>,
   session_successful_tools: list<string>,
@@ -2845,6 +2847,11 @@ The return value drives the loop. Accepted shapes:
 - dict with any combination of:
   - `message: string` — same as the bare-string shape
   - `stop: bool` — terminate the loop after this turn
+  - `next_tool_claim: {tool_name: string}` — constrain exactly the immediately
+    following model turn to a tool in `claimable_tool_names` and its
+    registry-owned argument schema; claims are validated against canonical
+    pre-usage-narrow authority capped by explicit policy, then clear after that
+    one turn
   - `next_options: dict` — merge into the next loop iteration's options
   - `llm_options: dict` — merge into the next LLM call's `llm_options`
 
@@ -2885,6 +2892,28 @@ const finalize_after_evidence = { info ->
   nil
 }
 ```
+
+When a policy knows the exact next action, prefer a typed tool claim over prose
+or a provider-specific tool-choice option:
+
+```harn
+const verify_after_edit = { info ->
+  if info?.successful_tool_names?.contains("edit") {
+    return {
+      message: "Verify the edit before taking another action.",
+      next_tool_claim: {tool_name: "verify"},
+    }
+  }
+  nil
+}
+```
+
+`available_tool_names` reports the current turn's already-narrowed surface;
+`claimable_tool_names` reports the canonical pre-usage-narrow authority after
+explicit tool policy. Harn rejects a name outside the latter set at the callback
+boundary. An applied claim emits a `typed_checkpoint` carrying
+`schema: "harn.agent_next_tool_claim_receipt.v1"`, and the subsequent turn is
+unconstrained unless a new verdict makes another claim.
 
 Other strategies compose from existing primitives — no new runtime
 mechanics required:

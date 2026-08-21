@@ -15,7 +15,7 @@
 // and on an ordinary turn. Both claimed turns must be silent; the ordinary turn
 // must still report, so the exemption cannot be mistaken for the parser having
 // simply stopped caring. Each run also asserts which side it is on by counting
-// how many turns carried `_output_contract_repair` in the options the loop
+// how many turns carried `_next_tool_claim_applied` in the options the loop
 // actually sent, so no arm can pass by failing to arm or by arming when it was
 // supposed to be the fallback.
 import { agent_capture_events } from "std/agent/events"
@@ -68,7 +68,7 @@ fn _run_bare_envelope_turn(
     {scope: "task_group", key: "rbe-armed-" + session, initial: 0},
   )
   const mock_llm = { call ->
-    if call?.opts?._output_contract_repair == true {
+    if call?.opts?._next_tool_claim_applied == true {
       _bump(harness, contracted)
     }
     const seen = harness.runtime.shared_snapshot(turns).value
@@ -96,7 +96,11 @@ fn _run_bare_envelope_turn(
         max_iterations: 3,
         llm_caller: mock_llm,
         missing_tool_call_recovery: {output_contract: output_contract},
-        _prior_turn_claimed_for_repair: claimed,
+        _next_tool_claim: if claimed {
+          {tool_name: "add", source: "missing_tool_call_recovery"}
+        } else {
+          nil
+        },
       },
     ) },
   )
@@ -110,7 +114,9 @@ fn _run_bare_envelope_turn(
     if event.type == "feedback_injected" {
       feedback = feedback + 1
     }
-    if event.type == "repair_output_contract_applied" {
+    if event.type == "typed_checkpoint"
+      && event?.checkpoint?.schema
+      == "harn.agent_next_tool_claim_receipt.v1" {
       repair_receipts = repair_receipts + 1
     }
   }

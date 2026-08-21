@@ -10,12 +10,21 @@ import {
 } from "std/agent/state"
 import {
   __tool_surface_attempted_names,
+  __tool_surface_claim_authority,
+  __tool_surface_claimable_names,
   __tool_surface_current_names,
   __tool_surface_narrowing_post_turn,
+  __tool_surface_tool_allowed,
 } from "std/agent/tool_surface"
 import { tool_fence_info_opens_call } from "std/llm/dialects"
 import { missing_tool_call_classifier } from "std/llm/missing_tool_call"
-import { tool_required_argument_names } from "std/llm/structural_validator"
+import {
+  exact_tool_call_output_schema,
+  tool_required_argument_names,
+} from "std/llm/structural_validator"
+
+/** One exact registry tool claimed for the immediately following model turn. */
+pub type AgentNextToolClaim = {tool_name: string}
 
 fn __default_done_sentinel(opts) {
   return opts?.done_sentinel
@@ -37,7 +46,7 @@ fn __post_turn_callback_verdict(opts, payload) {
     return {kind: "none"}
   }
   const verdict = cb(payload)
-  return __interpret_verdict(verdict)
+  return __interpret_verdict(verdict, opts)
 }
 
 fn __callback_feedback_kind(verdict) -> string? {
@@ -58,7 +67,37 @@ fn __callback_feedback_kind(verdict) -> string? {
   return normalized
 }
 
-fn __interpret_verdict(verdict) {
+fn __next_tool_claim(verdict, opts) -> AgentNextToolClaim? {
+  const raw = verdict?.next_tool_claim
+  if raw == nil {
+    return nil
+  }
+  if type_of(raw) != "dict" {
+    throw "agent_loop: callback verdict `next_tool_claim` must be a {tool_name: string} record or nil; got "
+      + type_of(
+      raw,
+    )
+  }
+  const raw_name = raw?.tool_name
+  if type_of(raw_name) != "string" || trim(raw_name) == "" {
+    throw "agent_loop: callback verdict `next_tool_claim.tool_name` must be a non-empty string"
+  }
+  const tool_name = trim(raw_name)
+  const authority = __tool_surface_claim_authority(opts)
+  if !__tool_surface_tool_allowed(authority?.tools, authority?.policy, tool_name)
+    || exact_tool_call_output_schema(
+    authority?.tools,
+    tool_name,
+  )
+    == nil {
+    throw "agent_loop: callback verdict `next_tool_claim.tool_name` names unavailable tool `"
+      + tool_name
+      + "`"
+  }
+  return {tool_name: tool_name}
+}
+
+fn __interpret_verdict(verdict, opts) {
   if verdict == nil || verdict == "" {
     return {kind: "none"}
   }
@@ -93,6 +132,14 @@ fn __interpret_verdict(verdict) {
       feedback_kind: __callback_feedback_kind(verdict),
       next_options: verdict?.next_options,
       llm_options: llm_options,
+      // Stop authority wins before claim validation. A terminal verdict cannot
+      // manufacture a dangling next-turn contract, and an irrelevant malformed
+      // claim cannot prevent the requested stop.
+      next_tool_claim: if stop {
+        nil
+      } else {
+        __next_tool_claim(verdict, opts)
+      },
     }
   }
   return {kind: "none"}
@@ -111,7 +158,7 @@ fn __terminal_callback_verdict(opts, payload) {
     return {kind: "none"}
   }
   const verdict = cb(payload)
-  return __interpret_verdict(verdict)
+  return __interpret_verdict(verdict, opts)
 }
 
 fn __successful_tool_names(dispatch) {
@@ -711,19 +758,16 @@ fn __maybe_inject_action_nudge(
 /**
  * The post-turn result for a turn the content-specific corrective claimed.
  *
- * `turn_claimed_for_repair` is a narrower fact than `nudged_this_turn`, which
- * any nudge sets: this one says the loop has asked for one specific repair and
- * expects the next turn to deliver it. Loop control and host control policies
- * both read it, so a treatment that would cut or redirect a churning turn can
- * see the outstanding claim rather than race it.
+ * The missing-call corrective produces the same one-turn tool claim as an
+ * embedder callback. Its source label remains available to loop and host
+ * control policies that distinguish corrective recovery from other claims.
  */
 fn __repair_claimed_result(claimed_tool: string) -> dict {
   return {
     kind: "continue",
     done_judge_due: false,
     nudged_this_turn: true,
-    turn_claimed_for_repair: true,
-    claimed_tool_name: claimed_tool,
+    next_tool_claim: {tool_name: claimed_tool, source: "missing_tool_call_recovery"},
   }
 }
 
@@ -867,11 +911,15 @@ fn __post_turn_verdict_result(
       llm_options: verdict?.llm_options,
     }
   }
-  if verdict.message != nil || verdict?.next_options != nil || verdict?.llm_options != nil {
+  if verdict.message != nil
+    || verdict?.next_options != nil
+    || verdict?.llm_options != nil
+    || verdict?.next_tool_claim != nil {
     return {
       kind: "continue",
       next_options: verdict?.next_options,
       llm_options: verdict?.llm_options,
+      next_tool_claim: verdict?.next_tool_claim,
     }
   }
   return nil
@@ -953,8 +1001,9 @@ fn __verdict_option_changes(verdict) -> dict {
  * owners issuing different directives in one turn is the contradiction that
  * stalls a loop, and between the two the corrective's is the actionable one.
  * Option changes still apply, per `__verdict_option_changes`. The embedder is
- * not left guessing — the claim reaches it as `prior_turn_claimed_for_repair`
- * on the next turn's payload.
+ * not left guessing — the typed claim reaches it as
+ * `prior_turn_next_tool_claim` on the next turn's payload (with the narrower
+ * repair-source compatibility fact retained alongside it).
  *
  * No other site may return a post-turn result for this turn shape.
  */
@@ -1054,6 +1103,7 @@ pub fn agent_compute_post_turn(
     tool_names: tool_names,
     tools: opts?.tools,
     available_tool_names: __tool_surface_current_names(opts),
+    claimable_tool_names: __tool_surface_claimable_names(opts),
     provider: opts?.provider,
     model: opts?.model,
     tool_format: opts?.tool_format,
@@ -1066,7 +1116,9 @@ pub fn agent_compute_post_turn(
     // toolless turn as churn read this to tell "the model is spinning" from
     // "the loop asked for exactly one more turn and this is it", instead of
     // inferring it from ordering they cannot see.
-    prior_turn_claimed_for_repair: opts?._prior_turn_claimed_for_repair ?? false,
+    prior_turn_claimed_for_repair: opts?._next_tool_claim?.source
+      == "missing_tool_call_recovery",
+    prior_turn_next_tool_claim: opts?._next_tool_claim,
     text: text,
     visible_text: text,
   }

@@ -290,7 +290,7 @@ pub fn __agent_loop_run(harness: Harness, message, session, initial_opts) {
         } else {
           base_llm_opts
         }
-        let call = __invoke_llm_with_autocontinue(
+        let call = __agent_loop_invoke_main_request(
           harness,
           message,
           turn_prompt.system,
@@ -454,7 +454,7 @@ pub fn __agent_loop_run(harness: Harness, message, session, initial_opts) {
           harness.fs,
           llm_result,
           parsed,
-          turn_opts,
+          projected.tool_options,
           fallback_index,
           session.session_id,
           iteration_index,
@@ -469,7 +469,7 @@ pub fn __agent_loop_run(harness: Harness, message, session, initial_opts) {
           harness.llm,
           parsed,
           tool_calls,
-          turn_opts,
+          projected.tool_options,
         )
         tool_calls = agent_collapse_duplicate_read_calls(
           recovered_batch_drop.tool_calls,
@@ -485,7 +485,7 @@ pub fn __agent_loop_run(harness: Harness, message, session, initial_opts) {
           parsed,
           recovered_batch_drop.feedback,
           llm_result,
-          turn_opts,
+          projected.tool_options,
         )
         last_turn_parse_dropped = parse_feedback.parse_dropped
         const had_parse_errors = parse_feedback.had_parse_errors

@@ -1,0 +1,587 @@
+// Run: harn test tests/agent/next_tool_claim_test.harn
+//
+// A post-turn policy may know the exact next action even when feedback prose is
+// too weak to make a small local model take it. The claim is therefore an
+// execution contract: the next request is narrowed to the named registry tool,
+// its actual dispatch must be that tool with its exact argument shape, and the
+// contract must disappear after that one turn.
+//
+// This full-loop test is deliberately adversarial. Its model attempts `look`
+// unless the request carries the exact `verify({})` schema. The expected
+// dispatch sequence proves the contract reached the model call, produced no
+// intervening read, fired exactly once, and left the later turn unpinned.
+import { agent_capture_events, agent_next_tool_claim_receipt_schema } from "std/agent/events"
+import { compose_post_turn } from "std/agent/governors"
+import { agent_loop } from "std/agent/loop"
+import { __agent_loop_effective_llm_options } from "std/agent/loop_support"
+import { AgentSpec } from "std/agent/options"
+import { agent_parse_tool_calls } from "std/agent/primitives"
+import { agent_apply_tool_surface_narrowing } from "std/agent/tool_surface"
+
+const LOOK_CALL = "```tool\n{\"name\": \"look\", \"args\": {}}\n```"
+
+const VERIFY_CALL = "{\"name\": \"verify\", \"args\": {}}"
+
+fn _bump(runtime: HarnessRuntime, cell) {
+  const snap = runtime.shared_snapshot(cell)
+  runtime.shared_cas(cell, snap, snap.value + 1)
+}
+
+fn _record(runtime: HarnessRuntime, cell, value: string) {
+  const snap = runtime.shared_snapshot(cell)
+  runtime.shared_cas(cell, snap, snap.value.appending(value))
+}
+
+fn _claimed_name(options) -> string {
+  return options?.output?.schema?.properties?.name?.enum?.[0] ?? ""
+}
+
+fn _tool_names(registry) -> list<string> {
+  return (registry?.tools ?? []).map(fn(entry) { return entry?.name ?? "" }).to_list()
+}
+
+fn _ordinary_tool_result(format: string, name: string, id: string) -> dict {
+  const base = {text: "", provider: "mock", model: "mock"}
+  if format == "native" {
+    return base + {native_tool_calls: [{id: id, name: name, arguments: {}}]}
+  }
+  if format == "text" {
+    return base + {text: "<tool_call>" + name + "({})</tool_call>"}
+  }
+  return base + {text: "```tool\n{\"name\": \"" + name + "\", \"args\": {}}\n```"}
+}
+
+fn _assistant_history(messages) -> string {
+  let joined = ""
+  for message in messages ?? [] {
+    if to_string(message?.role ?? "") == "assistant" {
+      joined = joined + "\n" + to_string(message?.content ?? "")
+    }
+  }
+  return joined
+}
+
+fn _claim_receipts(events) -> list {
+  let receipts = []
+  for event in events ?? [] {
+    if event.type == "typed_checkpoint"
+      && event?.checkpoint?.schema
+      == "harn.agent_next_tool_claim_receipt.v1" {
+      receipts = receipts.appending(event.checkpoint)
+    }
+  }
+  return receipts
+}
+
+fn _event_types(events) -> list<string> {
+  return (events ?? []).map(fn(event) { return to_string(event?.type ?? "") }).to_list()
+}
+
+fn _has_feedback_kind(events, kind: string) -> bool {
+  for event in events ?? [] {
+    if event?.type == "feedback_injected" && event?.kind == kind {
+      return true
+    }
+  }
+  return false
+}
+
+fn _normalized_calls(raw_calls) -> list {
+  let calls = []
+  for call in raw_calls ?? [] {
+    const raw_args = call?.arguments ?? call?.tool_args ?? call?.function?.arguments ?? {}
+    const args = if type_of(raw_args) == "string" {
+      json_parse(raw_args)
+    } else {
+      raw_args
+    }
+    calls = calls.appending(
+      {name: call?.name ?? call?.tool_name ?? call?.function?.name ?? "", args: args},
+    )
+  }
+  return calls
+}
+
+fn _history_calls(messages) -> list {
+  let calls = []
+  for message in messages ?? [] {
+    if to_string(message?.role ?? "") == "assistant" {
+      calls = calls
+        + _normalized_calls(message?.tool_calls ?? message?.native_tool_calls ?? [])
+    }
+  }
+  return calls
+}
+
+fn _tools(runtime: HarnessRuntime, calls = nil) {
+  const tools = tool_define(
+    tool_registry(),
+    "look",
+    "Inspect the workspace.",
+    {
+      parameters: {},
+      handler: { _args ->
+        if calls != nil {
+          _record(runtime, calls, "look")
+        }
+        return "workspace inspected"
+      },
+    },
+  )
+  return tool_define(
+    tools,
+    "verify",
+    "Verify the workspace.",
+    {
+      parameters: {},
+      handler: { _args ->
+        if calls != nil {
+          _record(runtime, calls, "verify")
+        }
+        return "verification passed"
+      },
+    },
+  )
+}
+
+pipeline test_post_turn_next_tool_claim_dispatches_exactly_once(harness: Harness, task) {
+  const calls = harness.runtime.shared_cell(
+    {scope: "task_group", key: "next-tool-calls-" + harness.random.uuid(), initial: []},
+  )
+  const model_turns = harness.runtime.shared_cell(
+    {scope: "task_group", key: "next-tool-model-turns-" + harness.random.uuid(), initial: 0},
+  )
+  const pinned_turns = harness.runtime.shared_cell(
+    {scope: "task_group", key: "next-tool-pinned-turns-" + harness.random.uuid(), initial: 0},
+  )
+  const unpinned_after_claim = harness.runtime.shared_cell(
+    {scope: "task_group", key: "next-tool-unpinned-" + harness.random.uuid(), initial: 0},
+  )
+  const narrowed_claim_turns = harness.runtime.shared_cell(
+    {scope: "task_group", key: "next-tool-narrowed-" + harness.random.uuid(), initial: 0},
+  )
+  const tools = _tools(harness.runtime, calls)
+  const mock_llm = { call ->
+    const turn = harness.runtime.shared_snapshot(model_turns).value
+    _bump(harness.runtime, model_turns)
+    if turn == 0 {
+      if !contains(_tool_names(call?.opts?.tools), "verify") {
+        _bump(harness.runtime, narrowed_claim_turns)
+      }
+      return {ok: true, value: {text: LOOK_CALL, provider: "mock", model: "mock"}}
+    }
+    if turn == 1 {
+      if _claimed_name(call.opts) == "verify" {
+        _bump(harness.runtime, pinned_turns)
+        return {ok: true, value: {text: VERIFY_CALL, provider: "mock", model: "mock"}}
+      }
+      // The qwen-like failure mode: prose alone is ignored and another read is
+      // emitted. This is the falsifier for a claim that never reached dispatch.
+      return {ok: true, value: {text: LOOK_CALL, provider: "mock", model: "mock"}}
+    }
+    if turn == 2 {
+      if call?.opts?.output == nil {
+        _bump(harness.runtime, unpinned_after_claim)
+      }
+      return {ok: true, value: {text: LOOK_CALL, provider: "mock", model: "mock"}}
+    }
+    if call?.opts?.output == nil {
+      _bump(harness.runtime, unpinned_after_claim)
+    }
+    return {
+      ok: true,
+      value: {text: "Verified and finished. ##DONE##", provider: "mock", model: "mock"},
+    }
+  }
+  const session = "next-tool-claim-" + harness.random.uuid()
+  const base_opts: AgentSpec = {
+    provider: "mock",
+    session_id: session,
+    tools: tools,
+    tool_format: "json",
+    loop_until_done: true,
+    done_sentinel: "##DONE##",
+    max_iterations: 5,
+    llm_caller: mock_llm,
+    post_turn_callback: { info ->
+      if info.iteration == 0 {
+        assert_eq(contains(info?.available_tool_names ?? [], "verify"), false)
+        assert_eq(contains(info?.claimable_tool_names ?? [], "verify"), true)
+        return {
+          message: "Verify before doing anything else.",
+          next_tool_claim: {tool_name: "verify"},
+        }
+      }
+      return nil
+    },
+  }
+  // The claim-producing turn has already hidden `verify`. The callback must
+  // validate against the canonical registry, then make the claimed tool
+  // reachable for exactly the following turn.
+  const opts = base_opts + {_tool_surface_narrowed_tools: ["look"]}
+  const captured = agent_capture_events(
+    harness.agent,
+    session,
+    fn() { return agent_loop(harness, "Inspect, verify, inspect once more, then finish.", nil, opts) },
+  )
+  const receipts = _claim_receipts(captured.events)
+  assert_eq(harness.runtime.shared_snapshot(calls).value, ["look", "verify", "look"])
+  assert_eq(harness.runtime.shared_snapshot(narrowed_claim_turns).value, 1)
+  assert_eq(harness.runtime.shared_snapshot(pinned_turns).value, 1)
+  assert_eq(harness.runtime.shared_snapshot(unpinned_after_claim).value, 2)
+  assert_eq(len(receipts), 1)
+  assert_eq(receipts[0]?.kind, "next_tool_claim_applied")
+  assert_eq(receipts[0]?.status, "applied")
+  assert_eq(receipts[0]?.tool_name, "verify")
+  assert(schema_is(receipts[0], agent_next_tool_claim_receipt_schema()))
+  assert_eq(captured.result.status, "done")
+}
+
+pipeline test_schema_claim_dispatches_and_canonicalizes_in_every_dialect(harness: Harness, task) {
+  for format in ["json", "text", "native"] {
+    const suffix = format + "-" + harness.random.uuid()
+    const calls = harness.runtime.shared_cell(
+      {scope: "task_group", key: "next-tool-dialect-calls-" + suffix, initial: []},
+    )
+    const turns = harness.runtime.shared_cell(
+      {scope: "task_group", key: "next-tool-dialect-turns-" + suffix, initial: 0},
+    )
+    const contract_requests = harness.runtime.shared_cell(
+      {scope: "task_group", key: "next-tool-dialect-contract-" + suffix, initial: 0},
+    )
+    const canonical_history = harness.runtime.shared_cell(
+      {scope: "task_group", key: "next-tool-dialect-history-" + suffix, initial: ""},
+    )
+    const canonical_calls = harness.runtime.shared_cell(
+      {scope: "task_group", key: "next-tool-dialect-history-calls-" + suffix, initial: []},
+    )
+    const canonical_messages = harness.runtime.shared_cell(
+      {scope: "task_group", key: "next-tool-dialect-messages-" + suffix, initial: ""},
+    )
+    const tools = _tools(harness.runtime, calls)
+    const mock_llm = { call ->
+      const turn = harness.runtime.shared_snapshot(turns).value
+      _bump(harness.runtime, turns)
+      if turn == 0 {
+        return {ok: true, value: _ordinary_tool_result(format, "look", "look-0")}
+      }
+      if turn == 1 {
+        if _claimed_name(call?.opts) == "verify"
+          && call?.opts?._next_tool_claim_parser_format
+          == "json"
+          && call?.opts?.tool_format
+          == format {
+          _bump(harness.runtime, contract_requests)
+        }
+        // All providers return this same grammar-constrained text envelope.
+        // Result projection, not the ambient dialect, owns how it is parsed.
+        return {ok: true, value: {text: VERIFY_CALL, provider: "mock", model: "mock"}}
+      }
+      if turn == 2 {
+        const history = _assistant_history(call?.opts?.messages)
+        const history_snap = harness.runtime.shared_snapshot(canonical_history)
+        harness.runtime.shared_cas(canonical_history, history_snap, history)
+        const calls_snap = harness.runtime.shared_snapshot(canonical_calls)
+        harness.runtime.shared_cas(
+          canonical_calls,
+          calls_snap,
+          if format == "native" {
+            _history_calls(call?.opts?.messages)
+          } else {
+            _normalized_calls(
+              agent_parse_tool_calls(harness.agent, history, tools, format)?.calls ?? [],
+            )
+          },
+        )
+        const messages_snap = harness.runtime.shared_snapshot(canonical_messages)
+        harness.runtime.shared_cas(
+          canonical_messages,
+          messages_snap,
+          to_string(call?.opts?.messages ?? []),
+        )
+      }
+      return {
+        ok: true,
+        value: {text: "Verified and finished. ##DONE##", provider: "mock", model: "mock"},
+      }
+    }
+    const session = "next-tool-dialect-" + suffix
+    const opts: AgentSpec = {
+      provider: "mock",
+      session_id: session,
+      tools: tools,
+      tool_format: format,
+      loop_until_done: true,
+      done_sentinel: "##DONE##",
+      max_iterations: 4,
+      llm_caller: mock_llm,
+      post_turn_callback: { info ->
+        if info.iteration == 0 {
+          return {next_tool_claim: {tool_name: "verify"}}
+        }
+        return nil
+      },
+    }
+    const captured = agent_capture_events(
+      harness.agent,
+      session,
+      fn() { return agent_loop(
+        harness,
+        "Inspect once, verify, then finish.",
+        nil,
+        opts + {_tool_surface_narrowed_tools: ["look"]},
+      ) },
+    )
+    assert(
+      harness.runtime.shared_snapshot(calls).value == ["look", "verify"],
+      "dialect `"
+        + format
+        + "` must dispatch look then verify; calls="
+        + to_string(
+        harness.runtime.shared_snapshot(calls).value,
+      )
+        + ", turns="
+        + to_string(harness.runtime.shared_snapshot(turns).value)
+        + ", status="
+        + to_string(captured.result.status)
+        + ", contract_requests="
+        + to_string(harness.runtime.shared_snapshot(contract_requests).value)
+        + ", events="
+        + to_string(_event_types(captured.events)),
+    )
+    assert_eq(harness.runtime.shared_snapshot(contract_requests).value, 1)
+    assert(
+      harness.runtime.shared_snapshot(canonical_calls).value
+        == [
+        {name: "look", args: {}},
+        {name: "verify", args: {}},
+      ],
+      "history projection for `"
+        + format
+        + "`: content="
+        + harness.runtime.shared_snapshot(canonical_history).value
+        + ", messages="
+        + harness.runtime.shared_snapshot(canonical_messages).value,
+    )
+    const history = harness.runtime.shared_snapshot(canonical_history).value
+    if format == "json" {
+      assert(contains(history, "```tool") && contains(history, "\"verify\""))
+    } else if format == "text" {
+      assert(contains(history, "<tool_call>\nverify({})\n</tool_call>"), "text history=" + history)
+    } else {
+      assert_eq(contains(history, "```tool") || contains(history, "<tool_call>"), false)
+      assert_eq(contains(history, "\"name\": \"verify\""), false)
+      assert_eq(_has_feedback_kind(captured.events, "native_tool_contract"), false)
+    }
+    assert_eq(len(_claim_receipts(captured.events)), 1)
+    assert_eq(captured.result.status, "done")
+  }
+}
+
+pipeline test_stopping_verdict_outranks_and_clears_claim(harness: Harness, task) {
+  const turns = harness.runtime.shared_cell(
+    {scope: "task_group", key: "next-tool-stop-turns-" + harness.random.uuid(), initial: 0},
+  )
+  const mock_llm = { _call ->
+    _bump(harness.runtime, turns)
+    return {
+      ok: true,
+      value: {text: "Host policy should stop here.", provider: "mock", model: "mock"},
+    }
+  }
+  const session = "next-tool-stop-" + harness.random.uuid()
+  const opts: AgentSpec = {
+    provider: "mock",
+    session_id: session,
+    tools: _tools(harness.runtime),
+    tool_format: "json",
+    loop_until_done: true,
+    max_iterations: 3,
+    llm_caller: mock_llm,
+    post_turn_callback: { _info ->
+      return {
+        stop: true,
+        stop_reason: "host_policy_stop",
+        next_tool_claim: {tool_name: "not_registered"},
+      }
+    },
+  }
+  const captured = agent_capture_events(
+    harness.agent,
+    session,
+    fn() { return agent_loop(harness, "Stop after one turn.", nil, opts) },
+  )
+  const receipts = captured.events.filter(
+    { event ->
+      event.type == "typed_checkpoint"
+        && event?.checkpoint?.schema
+        == "harn.agent_next_tool_claim_receipt.v1"
+    },
+  )
+  assert_eq(captured.result.stop_reason, "host_policy_stop")
+  assert_eq(harness.runtime.shared_snapshot(turns).value, 1)
+  assert_eq(len(receipts), 0)
+}
+
+pipeline test_unavailable_next_tool_claim_fails_at_typed_boundary(harness: Harness, task) {
+  const turns = harness.runtime.shared_cell(
+    {scope: "task_group", key: "next-tool-invalid-turns-" + harness.random.uuid(), initial: 0},
+  )
+  const mock_llm = { _call ->
+    _bump(harness.runtime, turns)
+    return {ok: true, value: {text: LOOK_CALL, provider: "mock", model: "mock"}}
+  }
+  const opts: AgentSpec = {
+    provider: "mock",
+    tools: _tools(harness.runtime),
+    tool_format: "json",
+    loop_until_done: true,
+    max_iterations: 3,
+    llm_caller: mock_llm,
+    post_turn_callback: { _info -> return {next_tool_claim: {tool_name: "not_registered"}} },
+  }
+  let message = ""
+  try {
+    agent_loop(harness, "Reject an unavailable exact-tool claim.", nil, opts)
+  } catch (err) {
+    message = to_string(err)
+  }
+  assert(
+    contains(message, "next_tool_claim.tool_name` names unavailable tool `not_registered`"),
+    "unknown claims must fail instead of degrading to the full registry schema",
+  )
+  assert_eq(harness.runtime.shared_snapshot(turns).value, 1)
+}
+
+pipeline test_policy_denied_next_tool_claim_fails_at_typed_boundary(harness: Harness, task) {
+  const turns = harness.runtime.shared_cell(
+    {scope: "task_group", key: "next-tool-policy-turns-" + harness.random.uuid(), initial: 0},
+  )
+  const mock_llm = { _call ->
+    _bump(harness.runtime, turns)
+    return {ok: true, value: {text: LOOK_CALL, provider: "mock", model: "mock"}}
+  }
+  const opts: AgentSpec = {
+    provider: "mock",
+    tools: _tools(harness.runtime),
+    policy: {tools: ["look"]},
+    tool_format: "json",
+    loop_until_done: true,
+    max_iterations: 3,
+    llm_caller: mock_llm,
+    post_turn_callback: { info ->
+      assert_eq(contains(info?.claimable_tool_names ?? [], "verify"), false)
+      return {next_tool_claim: {tool_name: "verify"}}
+    },
+  }
+  let message = ""
+  try {
+    agent_loop(
+      harness,
+      "Reject a policy-denied exact-tool claim.",
+      nil,
+      opts + {_tool_surface_narrowed_tools: ["look"]},
+    )
+  } catch (err) {
+    message = to_string(err)
+  }
+  assert(
+    contains(message, "next_tool_claim.tool_name` names unavailable tool `verify`"),
+    "an exact claim must not bypass an explicit policy allowlist",
+  )
+  assert_eq(harness.runtime.shared_snapshot(turns).value, 1)
+}
+
+pipeline test_guardrail_stop_emits_no_request_applied_receipt(harness: Harness, task) {
+  const turns = harness.runtime.shared_cell(
+    {scope: "task_group", key: "next-tool-guardrail-turns-" + harness.random.uuid(), initial: 0},
+  )
+  const mock_llm = { _call ->
+    _bump(harness.runtime, turns)
+    return {ok: true, value: {text: VERIFY_CALL, provider: "mock", model: "mock"}}
+  }
+  const session = "next-tool-guardrail-" + harness.random.uuid()
+  const captured = agent_capture_events(
+    harness.agent,
+    session,
+    fn() { return agent_loop(
+      harness,
+      "The guardrail must stop this claimed turn before dispatch.",
+      nil,
+      {
+        provider: "mock",
+        session_id: session,
+        tools: _tools(harness.runtime),
+        policy: {tools: ["verify"]},
+        tool_format: "json",
+        llm_caller: mock_llm,
+        _next_tool_claim: {tool_name: "verify", source: "post_turn_callback"},
+        input_guardrail: { _payload ->
+          return {
+            tripwire: true,
+            reason: "blocked before request",
+            label: "blocked",
+            confidence: 1.0,
+          }
+        },
+      },
+    ) },
+  )
+  assert_eq(harness.runtime.shared_snapshot(turns).value, 0)
+  assert_eq(len(_claim_receipts(captured.events)), 0)
+  assert_eq(captured.result.status, "input_guardrail")
+}
+
+pipeline test_all_tool_formats_share_registry_derived_claim_schema(harness: Harness, task) {
+  const tools = _tools(harness.runtime)
+  for format in ["json", "text", "native"] {
+    const narrowed = agent_apply_tool_surface_narrowing(
+      {
+        tools: tools,
+        policy: {tools: ["look", "verify"]},
+        _tool_surface_narrowed_tools: ["look"],
+        _next_tool_claim: {tool_name: "verify", source: "post_turn_callback"},
+      },
+    )
+    const effective = __agent_loop_effective_llm_options(
+      harness.llm,
+      narrowed
+        + {provider: "mock", tool_format: format},
+    )
+    assert_eq(_claimed_name(effective), "verify")
+    assert_eq(effective?._next_tool_claim_applied, true)
+    assert_eq(
+      contains(effective?.output?.schema?.properties?.args.keys(), "properties"),
+      false,
+      "the zero-argument verify schema should come from the registry owner",
+    )
+  }
+}
+
+pipeline test_composed_post_turn_preserves_one_claim(harness: Harness, task) {
+  const callback = compose_post_turn(
+    [
+      { _payload -> return {next_tool_claim: {tool_name: "verify"}} },
+      { _payload -> return {message: "Run the claimed verification now."} },
+    ],
+  )
+  const verdict = callback({})
+  assert_eq(verdict?.next_tool_claim?.tool_name, "verify")
+  assert_eq(verdict?.message, "Run the claimed verification now.")
+  const conflicting = compose_post_turn(
+    [
+      { _payload -> return {next_tool_claim: {tool_name: "verify"}} },
+      { _payload -> return {next_tool_claim: {tool_name: "look"}} },
+    ],
+  )
+  let message = ""
+  try {
+    conflicting({})
+  } catch (err) {
+    message = to_string(err)
+  }
+  assert(
+    contains(message, "conflicting `next_tool_claim`"),
+    "composition must reject ambiguity instead of choosing a tool by callback order",
+  )
+}
