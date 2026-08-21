@@ -213,7 +213,7 @@ pub async fn run_tests_with_progress(
     run_tests_with_options(path, &options).await
 }
 
-fn diagnose_enabled_via_env() -> bool {
+pub(crate) fn diagnose_enabled_via_env() -> bool {
     let Ok(raw) = std::env::var("HARN_TEST_DIAGNOSE") else {
         return false;
     };

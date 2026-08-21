@@ -417,7 +417,7 @@ pipeline test_beta(task) {
 }
 
 #[test]
-fn cold_import_graph_is_reported_before_user_test_execution() {
+fn diagnose_environment_reports_cold_import_graph_before_user_test_execution() {
     let temp = tempfile::TempDir::new().expect("tempdir");
     let suite = temp.path().join("suite");
     std::fs::create_dir_all(&suite).expect("create suite");
@@ -447,15 +447,32 @@ pipeline test_cold_graph(_task) { assert_eq(value_0(), 511) }
     )
     .expect("write test");
 
-    let output = Command::new(binary_path())
-        .env("HARN_CACHE_DIR", temp.path().join("bytecode-cache"))
+    let quiet_output = Command::new(binary_path())
+        .env("HARN_CACHE_DIR", temp.path().join("quiet-bytecode-cache"))
         .args([
             "test",
             suite.to_str().expect("suite path is UTF-8"),
             "--timeout",
             "5000",
             "--timing",
-            "--diagnose",
+        ])
+        .output()
+        .expect("spawn harn test without diagnostics");
+    assert!(quiet_output.status.success());
+    assert!(
+        !String::from_utf8_lossy(&quiet_output.stderr).contains("[harn test diag]"),
+        "diagnostics must remain opt-in"
+    );
+
+    let output = Command::new(binary_path())
+        .env("HARN_CACHE_DIR", temp.path().join("bytecode-cache"))
+        .env("HARN_TEST_DIAGNOSE", "1")
+        .args([
+            "test",
+            suite.to_str().expect("suite path is UTF-8"),
+            "--timeout",
+            "5000",
+            "--timing",
         ])
         .output()
         .expect("spawn harn test");
