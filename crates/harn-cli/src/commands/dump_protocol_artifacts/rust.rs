@@ -312,43 +312,14 @@ pub(super) fn generate_rust_for_version(
     );
     out.push_str(&rust_wire_types());
 
-    out.push_str(&rust_const_group(
-        "ACP_AGENT_METHOD",
-        "ACP_AGENT_METHODS",
-        "Stable host-facing ACP agent methods (matches the TypeScript/Swift/Python/Go bindings).",
-        ACP_AGENT_METHODS,
-    ));
-    out.push_str(&rust_const_group(
-        "ACP_DISPATCHED_METHOD",
-        "ACP_DISPATCHED_METHODS",
-        "Every JSON-RPC method the ACP adapter actually dispatches, including the \
-         workspace-management, workflow-control, and HITL methods the stable \
-         bindings do not yet expose as typed enums. Reconciled against the \
-         `match` arms in `harn-serve`'s ACP adapter.",
-        ACP_DISPATCHED_METHODS,
-    ));
-    out.push_str(&rust_const_group(
-        "ACP_TRANSPORT_CONTROL_METHOD",
-        "ACP_TRANSPORT_CONTROL_METHODS",
-        "ACP control frames consumed by the transport before regular adapter \
-         dispatch.",
-        ACP_TRANSPORT_CONTROL_METHODS,
-    ));
-    let handled_methods =
-        concat_unique_wire_values(&[ACP_TRANSPORT_CONTROL_METHODS, ACP_DISPATCHED_METHODS]);
-    out.push_str(&rust_const_group_owned(
-        "ACP_HANDLED_METHOD",
-        "ACP_HANDLED_METHODS",
-        "Every inbound ACP method Harn handles, whether by transport preemption \
-         or regular adapter dispatch.",
-        &handled_methods,
-    ));
-    out.push_str(&rust_const_group(
-        "ACP_CLIENT_METHOD",
-        "ACP_CLIENT_METHODS",
-        "ACP client methods the agent calls back into the host for.",
-        ACP_CLIENT_METHODS,
-    ));
+    for vocabulary in acp_method_vocabularies() {
+        out.push_str(&rust_const_group_owned(
+            vocabulary.rust_const_prefix,
+            vocabulary.rust_slice_name,
+            vocabulary.rust_doc,
+            &vocabulary.values,
+        ));
+    }
     out.push_str(&rust_const_group(
         "HARN_SESSION_TIMELINE_METHOD",
         "HARN_SESSION_TIMELINE_METHODS",

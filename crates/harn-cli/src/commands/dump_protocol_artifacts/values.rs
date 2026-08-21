@@ -12,6 +12,71 @@ use harn_vm::tool_annotations::{SideEffectLevel, ToolKind};
 use serde::Serialize;
 use serde_json::{json, Value as JsonValue};
 
+use super::constants::*;
+use super::support::concat_unique_wire_values;
+
+pub(super) struct AcpMethodVocabulary {
+    pub(super) rust_const_prefix: &'static str,
+    pub(super) rust_slice_name: &'static str,
+    pub(super) rust_doc: &'static str,
+    pub(super) swift_enum_name: &'static str,
+    pub(super) values: Vec<String>,
+    pub(super) deprecated_values: &'static [DeprecatedWireValue],
+}
+
+/// Method families projected into both the Rust and Swift artifacts.
+///
+/// Keeping the family list here makes adding a Rust routing vocabulary also
+/// add the corresponding Swift enum. Other language bindings intentionally
+/// expose only their stable host-facing subsets for now.
+pub(super) fn acp_method_vocabularies() -> Vec<AcpMethodVocabulary> {
+    vec![
+        AcpMethodVocabulary {
+            rust_const_prefix: "ACP_AGENT_METHOD",
+            rust_slice_name: "ACP_AGENT_METHODS",
+            rust_doc: "Stable host-facing ACP agent methods (matches the TypeScript/Swift/Python/Go bindings).",
+            swift_enum_name: "HarnACPAgentMethod",
+            values: strs_to_strings(ACP_AGENT_METHODS),
+            deprecated_values: ACP_DEPRECATED_AGENT_METHODS,
+        },
+        AcpMethodVocabulary {
+            rust_const_prefix: "ACP_DISPATCHED_METHOD",
+            rust_slice_name: "ACP_DISPATCHED_METHODS",
+            rust_doc: "Every JSON-RPC method the ACP adapter actually dispatches, including workspace-management, workflow-control, and HITL methods. Reconciled against the `match` arms in `harn-serve`'s ACP adapter.",
+            swift_enum_name: "HarnACPDispatchedMethod",
+            values: strs_to_strings(ACP_DISPATCHED_METHODS),
+            deprecated_values: &[],
+        },
+        AcpMethodVocabulary {
+            rust_const_prefix: "ACP_TRANSPORT_CONTROL_METHOD",
+            rust_slice_name: "ACP_TRANSPORT_CONTROL_METHODS",
+            rust_doc: "ACP control frames consumed by the transport before regular adapter dispatch.",
+            swift_enum_name: "HarnACPTransportControlMethod",
+            values: strs_to_strings(ACP_TRANSPORT_CONTROL_METHODS),
+            deprecated_values: &[],
+        },
+        AcpMethodVocabulary {
+            rust_const_prefix: "ACP_HANDLED_METHOD",
+            rust_slice_name: "ACP_HANDLED_METHODS",
+            rust_doc: "Every inbound ACP method Harn handles, whether by transport preemption or regular adapter dispatch.",
+            swift_enum_name: "HarnACPHandledMethod",
+            values: concat_unique_wire_values(&[
+                ACP_TRANSPORT_CONTROL_METHODS,
+                ACP_DISPATCHED_METHODS,
+            ]),
+            deprecated_values: &[],
+        },
+        AcpMethodVocabulary {
+            rust_const_prefix: "ACP_CLIENT_METHOD",
+            rust_slice_name: "ACP_CLIENT_METHODS",
+            rust_doc: "ACP client methods the agent calls back into the host for.",
+            swift_enum_name: "HarnACPClientMethod",
+            values: strs_to_strings(ACP_CLIENT_METHODS),
+            deprecated_values: &[],
+        },
+    ]
+}
+
 pub(super) fn all_acp_session_updates() -> Vec<String> {
     unique_ordered(
         ACP_SESSION_UPDATE_VARIANTS
