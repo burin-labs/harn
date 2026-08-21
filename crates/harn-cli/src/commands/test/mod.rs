@@ -39,7 +39,9 @@ use reporting::{
     ConformanceJsonResult, ConformanceJsonSummary,
 };
 
-pub(crate) async fn run_command(args: TestArgs) {
+pub(crate) async fn run_command(mut args: TestArgs) {
+    args.diagnose |= test_runner::diagnose_enabled_via_env();
+
     #[cfg(feature = "hostlib")]
     if supervisor::requires_supervision(&args) && !supervisor::is_payload() {
         match supervisor::run_current_invocation().await {
