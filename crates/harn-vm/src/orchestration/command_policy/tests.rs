@@ -46,6 +46,23 @@ fn deterministic_scan_classifies_high_risk_commands() {
 }
 
 #[test]
+fn deterministic_scan_keeps_sensitive_commands_separate_from_interpreter_payloads() {
+    for context in [ctx(&["cat", ".env"]), shell_ctx("sh -c 'cat .env'")] {
+        assert!(
+            labels(&command_risk_scan_json(&context, None))
+                .contains(&"credential_file_read".to_string()),
+            "direct credential-file read was not classified"
+        );
+    }
+
+    let payload = command_risk_scan_json(&ctx(&["python", "-c", "print('.env')"]), None);
+    assert!(
+        !labels(&payload).contains(&"credential_file_read".to_string()),
+        "interpreter payload was classified as a credential-file read"
+    );
+}
+
+#[test]
 fn deterministic_scan_projects_quote_aware_shell_command_groups() {
     let scan = command_risk_scan_json(
         &shell_ctx(

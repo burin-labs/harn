@@ -479,7 +479,6 @@ struct EvaluationContext {
     capabilities: Vec<String>,
     path_entries: Vec<WorkspacePathInfo>,
     path_candidates: Vec<String>,
-    string_candidates: Vec<String>,
     command_candidates: Vec<String>,
     command_identities: Vec<String>,
     urls: Vec<String>,
@@ -547,7 +546,6 @@ impl EvaluationContext {
             capabilities,
             path_entries,
             path_candidates,
-            string_candidates,
             command_candidates,
             command_identities,
             urls,
@@ -890,6 +888,7 @@ fn evaluate_context(policy: &ToolApprovalPolicy, ctx: EvaluationContext) -> Poli
 fn default_guard(policy: &ToolApprovalPolicy, ctx: &EvaluationContext) -> Option<Candidate> {
     if !policy.allow_sensitive_paths {
         if let Some(path) = first_sensitive_candidate(policy, ctx) {
+            let path = crate::text::truncate_end(&path, SENSITIVE_PATH_EVIDENCE_MAX_CHARS);
             return Some(Candidate {
                 source: "default_sensitive_path".to_string(),
                 index: None,
@@ -1151,7 +1150,6 @@ fn first_sensitive_candidate(
     let custom = &policy.sensitive_path_patterns;
     ctx.path_candidates
         .iter()
-        .chain(ctx.string_candidates.iter())
         .find(|candidate| {
             if custom.is_empty() {
                 is_sensitive_path_candidate(
@@ -1173,11 +1171,11 @@ fn is_sensitive_path_candidate<'a>(
     let basename = normalized.rsplit('/').next().unwrap_or(normalized.as_str());
     patterns.into_iter().any(|pattern| {
         let pattern = pattern.to_ascii_lowercase();
-        super::super::glob_match(&pattern, &normalized)
-            || super::super::glob_match(&pattern, basename)
-            || glob_or_contains(&pattern, &normalized)
+        harn_glob::match_path(&pattern, &normalized) || harn_glob::match_path(&pattern, basename)
     })
 }
+
+const SENSITIVE_PATH_EVIDENCE_MAX_CHARS: usize = 240;
 
 const DEFAULT_SENSITIVE_PATH_PATTERNS: &[&str] = &[
     ".env",
