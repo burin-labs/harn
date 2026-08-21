@@ -464,10 +464,14 @@ fields plus `rules`, a compact allow/ask/deny DSL. A rule may be written as
 string fields accept glob patterns. Deny beats ask, ask beats allow, and
 unmatched tools are approved.
 
-When an approval policy is active, sensitive path strings such as `.env`,
-private keys, and credential files are denied by default unless
-`allow_sensitive_paths: true` is set. Declared host-absolute paths outside the
-workspace are denied unless `external_roots` covers the path or
+When an approval policy is active, sensitive paths such as `.env`, private
+keys, and credential files are denied by default unless
+`allow_sensitive_paths: true` is set. Candidates come from declared
+`arg_schema.path_params`, conventional path-field aliases at the direct-policy
+compatibility boundary, and effective file-reader operands produced by the
+quote-aware command parser. Arbitrary string arguments and inert interpreter
+source are not paths. Declared host-absolute paths outside the workspace are
+denied unless `external_roots` covers the path or
 `allow_external_paths: true` is set. `ask` decisions call the host via
 `session/request_permission` and fail closed when no host bridge is attached.
 Each approval decision produces a `harn.permission_policy_decision.v1` receipt

@@ -13,6 +13,7 @@ use crate::workspace_path::{WorkspacePathInfo, WorkspacePathKind};
 use super::ToolApprovalPolicy;
 
 mod host_request;
+mod sensitive_paths;
 pub use host_request::ToolApprovalRequest;
 
 const POLICY_RECEIPT_TYPE: &str = "harn.permission_policy_decision.v1";
@@ -479,7 +480,6 @@ struct EvaluationContext {
     capabilities: Vec<String>,
     path_entries: Vec<WorkspacePathInfo>,
     path_candidates: Vec<String>,
-    string_candidates: Vec<String>,
     command_candidates: Vec<String>,
     command_identities: Vec<String>,
     urls: Vec<String>,
@@ -502,6 +502,17 @@ impl EvaluationContext {
         for entry in &path_entries {
             path_candidates.extend(entry.policy_candidates());
         }
+        // The public ToolApprovalPolicy API predates tool annotations. Preserve
+        // its narrow compatibility contract for conventional path fields when
+        // no typed schema is in scope; annotated tools always use their
+        // declared path parameters instead of guessing from argument names.
+        if annotations.is_none() {
+            path_candidates.extend(path_values(args));
+        }
+        // Commands are parsed by command_policy, the sole shell/argv owner.
+        // Approval consumes only its semantic reader-path projection, never
+        // flattened command prose or arbitrary argument strings.
+        path_candidates.extend(super::super::command_policy::credential_read_path_candidates(args));
         dedup(&mut path_candidates);
 
         let mut string_candidates = Vec::new();
@@ -547,7 +558,6 @@ impl EvaluationContext {
             capabilities,
             path_entries,
             path_candidates,
-            string_candidates,
             command_candidates,
             command_identities,
             urls,
@@ -889,7 +899,8 @@ fn evaluate_context(policy: &ToolApprovalPolicy, ctx: EvaluationContext) -> Poli
 
 fn default_guard(policy: &ToolApprovalPolicy, ctx: &EvaluationContext) -> Option<Candidate> {
     if !policy.allow_sensitive_paths {
-        if let Some(path) = first_sensitive_candidate(policy, ctx) {
+        if let Some(path) = sensitive_paths::first_candidate(policy, &ctx.path_candidates) {
+            let path = sensitive_paths::bounded_evidence(&path);
             return Some(Candidate {
                 source: "default_sensitive_path".to_string(),
                 index: None,
@@ -1143,55 +1154,6 @@ fn risk_labels_for_rule(rule: &PolicyRule) -> Vec<String> {
     }
     labels
 }
-
-fn first_sensitive_candidate(
-    policy: &ToolApprovalPolicy,
-    ctx: &EvaluationContext,
-) -> Option<String> {
-    let custom = &policy.sensitive_path_patterns;
-    ctx.path_candidates
-        .iter()
-        .chain(ctx.string_candidates.iter())
-        .find(|candidate| {
-            if custom.is_empty() {
-                is_sensitive_path_candidate(
-                    candidate,
-                    DEFAULT_SENSITIVE_PATH_PATTERNS.iter().copied(),
-                )
-            } else {
-                is_sensitive_path_candidate(candidate, custom.iter().map(String::as_str))
-            }
-        })
-        .cloned()
-}
-
-fn is_sensitive_path_candidate<'a>(
-    candidate: &str,
-    patterns: impl IntoIterator<Item = &'a str>,
-) -> bool {
-    let normalized = candidate.replace('\\', "/").to_ascii_lowercase();
-    let basename = normalized.rsplit('/').next().unwrap_or(normalized.as_str());
-    patterns.into_iter().any(|pattern| {
-        let pattern = pattern.to_ascii_lowercase();
-        super::super::glob_match(&pattern, &normalized)
-            || super::super::glob_match(&pattern, basename)
-            || glob_or_contains(&pattern, &normalized)
-    })
-}
-
-const DEFAULT_SENSITIVE_PATH_PATTERNS: &[&str] = &[
-    ".env",
-    ".env.*",
-    "**/.env",
-    "**/.env.*",
-    "id_rsa",
-    "id_ed25519",
-    "**/.aws/credentials",
-    "**/.npmrc",
-    "**/.netrc",
-    "*.pem",
-    "*.key",
-];
 
 fn under_external_root(path: &str, roots: &[String]) -> bool {
     if roots.is_empty() {

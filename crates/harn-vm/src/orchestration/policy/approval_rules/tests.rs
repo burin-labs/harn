@@ -82,15 +82,161 @@ fn deny_beats_ask_and_allow_regardless_of_order() {
 
 #[test]
 fn sensitive_paths_are_denied_by_default() {
+    policy_with_path_annotation("read_file", ToolKind::Read);
     let policy = ToolApprovalPolicy::default();
-    let decision = evaluate_tool_approval_policy(
+    let decisions = [
+        "config/.env",
+        ".env.local",
+        "/home/agent/.ssh/id_rsa",
+        "/home/agent/.aws/credentials",
+        "certificates/client.pem",
+        "certificates/client.key",
+    ]
+    .map(|path| {
+        evaluate_tool_approval_policy(
+            &policy,
+            "read_file",
+            &serde_json::json!({"path": path}),
+            None,
+        )
+    });
+    pop_execution_policy();
+
+    for decision in decisions {
+        assert!(decision.is_deny(), "sensitive path was allowed");
+        assert!(decision.risk_labels.contains(&"sensitive_path".to_string()));
+    }
+}
+
+#[test]
+fn unannotated_approval_api_preserves_conventional_path_safety() {
+    let policy = ToolApprovalPolicy::default();
+    assert!(evaluate_tool_approval_policy(
         &policy,
         "read_file",
-        &serde_json::json!({"path": "config/.env"}),
+        &serde_json::json!({"path": ".env"}),
+        None,
+    )
+    .is_deny());
+    assert!(evaluate_tool_approval_policy(
+        &policy,
+        "render",
+        &serde_json::json!({"content": "document cat .env here"}),
+        None,
+    )
+    .is_allow());
+}
+
+#[test]
+fn sensitive_command_reads_use_structural_command_facts() {
+    let policy = ToolApprovalPolicy::default();
+    for arguments in [
+        serde_json::json!({"argv": ["cat", ".env"]}),
+        serde_json::json!({"command": "sh -c 'cat .env'"}),
+    ] {
+        assert!(
+            evaluate_tool_approval_policy(&policy, "run_command", &arguments, None).is_deny(),
+            "sensitive command read was allowed: {arguments}"
+        );
+    }
+    let payload = serde_json::json!({"argv": ["python", "-c", "print('cat .env')"]});
+    assert!(
+        evaluate_tool_approval_policy(&policy, "run_command", &payload, None).is_allow(),
+        "inert interpreter payload was treated as a command"
+    );
+}
+
+#[test]
+fn sensitive_path_default_does_not_classify_edit_content_as_a_path() {
+    policy_with_path_annotation("edit_file", ToolKind::Edit);
+    let policy = ToolApprovalPolicy::default();
+    let decisions = [
+        "value = os.environ['API_KEY']\n",
+        "const value = process.env.API_KEY;\n",
+        "for key in config.keys():\n    print(key)\n",
+        "documentation = 'read config/.env before starting'\n",
+    ]
+    .map(|content| {
+        evaluate_tool_approval_policy(
+            &policy,
+            "edit_file",
+            &serde_json::json!({"path": "src/example.py", "content": content}),
+            None,
+        )
+    });
+    pop_execution_policy();
+
+    for decision in decisions {
+        assert!(
+            decision.is_allow(),
+            "non-path content was denied: {}",
+            decision.reason
+        );
+    }
+}
+
+#[test]
+fn sensitive_path_default_uses_path_globs_not_substrings() {
+    policy_with_path_annotation("read_file", ToolKind::Read);
+    let policy = ToolApprovalPolicy::default();
+    let decisions = ["src/os.environment.rs", "src/thing.keyword"].map(|path| {
+        evaluate_tool_approval_policy(
+            &policy,
+            "read_file",
+            &serde_json::json!({"path": path}),
+            None,
+        )
+    });
+    pop_execution_policy();
+
+    for decision in decisions {
+        assert!(
+            decision.is_allow(),
+            "lookalike path was denied: {}",
+            decision.reason
+        );
+    }
+}
+
+#[test]
+fn sensitive_path_denial_reason_has_bounded_evidence() {
+    policy_with_path_annotation("read_file", ToolKind::Read);
+    let long_path = format!("{}/.env", "directory".repeat(128));
+    let decision = evaluate_tool_approval_policy(
+        &ToolApprovalPolicy::default(),
+        "read_file",
+        &serde_json::json!({"path": long_path}),
         None,
     );
+    pop_execution_policy();
+
     assert!(decision.is_deny());
-    assert!(decision.risk_labels.contains(&"sensitive_path".to_string()));
+    assert!(decision.reason.chars().count() < 300, "{}", decision.reason);
+    assert!(decision.reason.contains('…'), "{}", decision.reason);
+    assert!(decision.reason.contains("/.env"), "{}", decision.reason);
+}
+
+#[test]
+fn custom_sensitive_path_patterns_preserve_full_glob_grammar() {
+    let policy = ToolApprovalPolicy {
+        sensitive_path_patterns: vec![
+            "secret[0-9].txt".to_string(),
+            "config/{prod,stage}/credentials.json".to_string(),
+        ],
+        ..Default::default()
+    };
+    for path in ["secret7.txt", "config/prod/credentials.json"] {
+        assert!(
+            evaluate_tool_approval_policy(
+                &policy,
+                "read_file",
+                &serde_json::json!({"path": path}),
+                None,
+            )
+            .is_deny(),
+            "custom sensitive glob did not match {path}"
+        );
+    }
 }
 
 #[test]
@@ -107,6 +253,14 @@ fn explicit_sensitive_opt_out_allows_regular_evaluation() {
     );
     assert!(decision.is_allow());
     assert!(!decision.has_audit_signal());
+
+    let command = evaluate_tool_approval_policy(
+        &policy,
+        "run_command",
+        &serde_json::json!({"argv": ["cat", ".env"]}),
+        None,
+    );
+    assert!(command.is_allow());
 }
 
 #[test]

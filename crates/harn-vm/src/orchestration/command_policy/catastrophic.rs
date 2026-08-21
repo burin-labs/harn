@@ -133,6 +133,51 @@ pub(super) fn shell_command_groups(command: &str) -> Vec<Vec<ShellCommandStage>>
         .collect()
 }
 
+/// Effective program invocations in execution order, recursively unwrapping
+/// only actual POSIX shell `-c` payloads.
+///
+/// This is the shared structural boundary for semantic command classifiers.
+/// Looking for verbs in flattened command text confuses inert interpreter
+/// source (for example `python -c "print('cat .env')"`) with a command the
+/// shell will execute. Conversely, inspecting only the outer argv misses a
+/// real `cat .env` nested under `sh -c`. Consumers receive the wrapper-stripped
+/// argv of each effective pipeline stage and never need their own shell parser.
+pub(super) fn effective_command_stages(command: &str) -> Vec<ShellCommandStage> {
+    let mut stages = Vec::new();
+    collect_effective_command_stages(command, 0, &mut stages);
+    stages
+}
+
+fn collect_effective_command_stages(
+    command: &str,
+    depth: usize,
+    stages: &mut Vec<ShellCommandStage>,
+) {
+    if depth > MAX_DEPTH {
+        return;
+    }
+    for group in split_chained_command(command) {
+        for text in split_pipeline_command(&group) {
+            let tokens = shell_words(&text);
+            let index = unwrapped_command_index(&tokens, 0, tokens.len());
+            if index >= tokens.len() {
+                continue;
+            }
+            let argv = tokens[index..].to_vec();
+            if matches!(command_basename(&argv[0]), "bash" | "sh" | "zsh") {
+                if let Some(script) = shell_c_script(&argv[1..]) {
+                    collect_effective_command_stages(script, depth + 1, stages);
+                    continue;
+                }
+            }
+            stages.push(ShellCommandStage {
+                text: text.trim().to_string(),
+                argv,
+            });
+        }
+    }
+}
+
 fn command_segments_inner(command: &str, depth: usize) -> Vec<String> {
     if depth > MAX_DEPTH {
         return Vec::new();

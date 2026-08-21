@@ -2656,8 +2656,12 @@ Deny beats ask, and ask beats allow regardless of rule order. Legacy
 same precedence model, so old policy bags remain valid while the richer DSL is
 available. Tools that match no pattern default to `AutoApproved`.
 
-When an `approval_policy` is active, Harn denies sensitive path strings such as
-`.env`, private keys, and credential files by default. Declared host-absolute
+When an `approval_policy` is active, Harn denies sensitive paths such as `.env`,
+private keys, and credential files by default. Paths come from annotated
+`arg_schema.path_params`; the direct policy API retains conventional path-field
+aliases for unannotated callers. Effective file-reader command operands are
+projected by the command policy's quote-aware parser, so a real `cat .env` is
+denied while source code that merely mentions it is not. Declared host-absolute
 paths outside the workspace are also denied unless `external_roots` explicitly
 allows the root or `allow_external_paths: true` is set. Set
 `allow_sensitive_paths: true` only when a host already mediates secret reads.
