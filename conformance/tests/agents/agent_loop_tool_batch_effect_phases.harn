@@ -153,6 +153,8 @@ fn receipt_counts(events) {
   let executed = 0
   let deferred = 0
   let skipped = 0
+  let skipped_blockers = []
+  let executed_mutations = []
   let reproposed = 0
   let total = 0
   for event in events {
@@ -169,10 +171,14 @@ fn receipt_counts(events) {
     const receipt = event.receipt
     if receipt.disposition == "executed" {
       executed = executed + 1
+      if receipt.tool_name == "edit_state" {
+        executed_mutations = executed_mutations.appending(receipt.tool_call_id)
+      }
     } else if receipt.disposition == "deferred" {
       deferred = deferred + 1
     } else if receipt.disposition == "skipped_after_blocking_result" {
       skipped = skipped + 1
+      skipped_blockers = skipped_blockers.appending(receipt.blocking_tool_call_id)
     }
     if receipt.proposal_status == "re_proposed" {
       reproposed = reproposed + 1
@@ -193,6 +199,8 @@ fn receipt_counts(events) {
     executed: executed,
     deferred: deferred,
     skipped: skipped,
+    skipped_blockers: skipped_blockers,
+    executed_mutations: executed_mutations,
     reproposed: reproposed,
   }
 }
@@ -255,7 +263,7 @@ fn run_phased(harness: Harness, counters) {
   }
 }
 
-fn run_blocked_then_recovered(harness: Harness, counters) {
+fn run_blocked_then_consumed(harness: Harness, counters) {
   reset_counts(harness.runtime, counters)
   const session = "effect-phases-blocked-" + harness.random.uuid()
   const captured = agent_capture_events(
@@ -273,15 +281,8 @@ fn run_blocked_then_recovered(harness: Harness, counters) {
             ],
           },
           {tool_calls: [verify_call("blocked-verify-2"), done_call("blocked-done-2")]},
-          {
-            tool_calls: [
-              edit_call(false, "recovery-edit-3"),
-              verify_call("recovery-verify-3"),
-              done_call("recovery-done-3"),
-            ],
-          },
-          {tool_calls: [verify_call("recovery-verify-4"), done_call("recovery-done-4")]},
-          {tool_calls: [done_call("recovery-done-5")]},
+          {tool_calls: [verify_call("recovery-verify-3"), done_call("recovery-done-3")]},
+          {tool_calls: [done_call("recovery-done-4")]},
         ],
         { ->
           const opts: AgentSpec = {
@@ -289,7 +290,7 @@ fn run_blocked_then_recovered(harness: Harness, counters) {
             tools: phase_tools(harness.runtime, counters),
             tool_format: "native",
             loop_until_done: true,
-            max_iterations: 7,
+            max_iterations: 6,
             max_concurrent_tools: 4,
             stop_after_successful_tools: ["done"],
             session_id: session,
@@ -309,6 +310,47 @@ fn run_blocked_then_recovered(harness: Harness, counters) {
     events: captured.events,
     receipts: receipt_counts(captured.events),
   }
+}
+
+fn run_rearmed_barrier(harness: Harness, counters) {
+  reset_counts(harness.runtime, counters)
+  const session = "effect-phases-rearmed-" + harness.random.uuid()
+  const captured = agent_capture_events(
+    harness.agent,
+    session,
+    { ->
+      return with_llm_script(
+        harness.llm,
+        [
+          {tool_calls: [edit_call(true, "first-edit"), verify_call("first-verify-1")]},
+          {tool_calls: [verify_call("first-verify-2")]},
+          {tool_calls: [edit_call(true, "second-edit"), verify_call("second-verify-1")]},
+          {tool_calls: [verify_call("second-verify-2")]},
+          {tool_calls: [verify_call("recovered-verify"), done_call("recovered-done-1")]},
+          {tool_calls: [done_call("recovered-done-2")]},
+        ],
+        { ->
+          const opts: AgentSpec = {
+            provider: "mock",
+            tools: phase_tools(harness.runtime, counters),
+            tool_format: "native",
+            loop_until_done: true,
+            max_iterations: 7,
+            max_concurrent_tools: 4,
+            stop_after_successful_tools: ["done"],
+            session_id: session,
+          }
+          return agent_loop(
+            harness,
+            "Recover after two independently rejected mutations.",
+            nil,
+            opts,
+          )
+        },
+      )
+    },
+  )
+  return {result: captured.result, receipts: receipt_counts(captured.events)}
 }
 
 pipeline main(harness: Harness) {
@@ -339,15 +381,18 @@ pipeline main(harness: Harness) {
   harness.stdio.println("phased.executed=" + to_string(phased.receipts.executed))
   harness.stdio.println("phased.deferred=" + to_string(phased.receipts.deferred))
   harness.stdio.println("phased.reproposed=" + to_string(phased.receipts.reproposed))
-  const blocked = run_blocked_then_recovered(harness, counters)
-  require blocked.result.status == "done", "a fresh mutation should recover a blocked batch"
-  require harness.runtime.atomic_get(counters.edit) == 2,
-    "the rejected mutation and its recovery should both execute"
+  const blocked = run_blocked_then_consumed(harness, counters)
+  require blocked.result.status == "done", "the observed barrier should be consumed once"
+  require harness.runtime.atomic_get(counters.edit) == 1,
+    "recovery after observing a rejection must not require a synthetic mutation"
   require harness.runtime.atomic_get(counters.verify) == 1,
-    "verification re-proposed behind a blocking mutation result must not launch"
+    "only the first dependent verification proposal should be blocked"
   require harness.runtime.atomic_get(counters.done) == 1,
     "completion must wait for recovered verification"
   require blocked.receipts.skipped == 2, "verify and done should be skipped behind the barrier"
+  const blocked_edit_id = blocked.receipts.executed_mutations[0]
+  require blocked.receipts.skipped_blockers == [blocked_edit_id, blocked_edit_id],
+    "the consumed receipts must preserve the exact original blocker"
   harness.stdio.println("blocked.status=" + blocked.result.status)
   harness.stdio.println("blocked.skipped=" + to_string(blocked.receipts.skipped))
   harness.stdio.println(
@@ -356,4 +401,14 @@ pipeline main(harness: Harness) {
   harness.stdio.println(
     "blocked.counters.done=" + to_string(harness.runtime.atomic_get(counters.done)),
   )
+  const rearmed = run_rearmed_barrier(harness, counters)
+  require rearmed.result.status == "done", "a later rejected mutation should re-arm the barrier"
+  require harness.runtime.atomic_get(counters.edit) == 2,
+    "both independently rejected mutations should execute"
+  require harness.runtime.atomic_get(counters.verify) == 1,
+    "each new barrier should skip exactly one dependent verification proposal"
+  require rearmed.receipts.skipped_blockers == rearmed.receipts.executed_mutations,
+    "each consumed barrier must identify the mutation that armed it"
+  harness.stdio.println("rearmed.status=" + rearmed.result.status)
+  harness.stdio.println("rearmed.skipped=" + to_string(rearmed.receipts.skipped))
 }
