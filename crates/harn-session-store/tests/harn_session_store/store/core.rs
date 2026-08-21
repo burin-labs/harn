@@ -402,6 +402,142 @@ async fn canonical_semantic_search_uses_the_injected_embedding_backend() {
 }
 
 #[tokio::test]
+async fn canonical_hybrid_search_fuses_lexical_and_semantic_rankings() {
+    let hooks = StoreHooks {
+        embedder: Arc::new(FusionTestEmbedder),
+        ..StoreHooks::default()
+    };
+    run_with_hooks(hooks, |store| async move {
+        let session = store
+            .create(CreateSession {
+                id: Some("hybrid-fusion".into()),
+                project_scope: Some("project-hybrid".into()),
+                ..CreateSession::default()
+            })
+            .await
+            .expect("create");
+        let lexical_winner = store
+            .append(
+                &session.id,
+                AppendEvent::new(
+                    SessionEventKind::Message,
+                    json!({"text": "fusion query fusion query"}),
+                ),
+            )
+            .await
+            .expect("append lexical winner");
+        let joint_candidate = store
+            .append(
+                &session.id,
+                AppendEvent::new(
+                    SessionEventKind::Message,
+                    json!({"text": "fusion query joint-candidate with a longer lexical tail"}),
+                ),
+            )
+            .await
+            .expect("append joint candidate");
+        let semantic_winner = store
+            .append(
+                &session.id,
+                AppendEvent::new(
+                    SessionEventKind::Message,
+                    json!({"text": "semantic-only-winner"}),
+                ),
+            )
+            .await
+            .expect("append semantic winner");
+
+        let search = |mode| SearchQuery {
+            query: "fusion query".into(),
+            mode,
+            filter: SearchFilter {
+                project_scope: Some("project-hybrid".into()),
+                ..SearchFilter::default()
+            },
+            limit: Some(2),
+        };
+        let lexical = store
+            .search(search(SearchMode::Fts))
+            .await
+            .expect("FTS search");
+        let semantic = store
+            .search(search(SearchMode::Semantic))
+            .await
+            .expect("semantic search");
+        let hybrid = store
+            .search(search(SearchMode::Hybrid))
+            .await
+            .expect("hybrid search");
+
+        assert_eq!(lexical.hits[0].event_id, lexical_winner.event_id);
+        assert_eq!(semantic.hits[0].event_id, semantic_winner.event_id);
+        assert_eq!(hybrid.hits[0].event_id, joint_candidate.event_id);
+        assert_eq!(hybrid.requested_mode, SearchMode::Hybrid);
+        assert_eq!(hybrid.effective_mode, SearchMode::Hybrid);
+        assert!(!hybrid.semantic_floor);
+        assert!(hybrid.fallback_reason.is_none());
+        assert!(hybrid.hits[0].fts_score.is_some());
+        assert!(hybrid.hits[0].semantic_score.is_some());
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn floor_hybrid_hits_are_byte_identical_to_lexical_hits() {
+    run_with_hooks(StoreHooks::default(), |store| async move {
+        let session = store
+            .create(CreateSession {
+                id: Some("hybrid-floor".into()),
+                project_scope: Some("project-floor".into()),
+                ..CreateSession::default()
+            })
+            .await
+            .expect("create");
+        for text in [
+            "alpha beta alpha beta",
+            "alpha beta with a longer lexical tail",
+            "alpha appears before some filler and beta",
+        ] {
+            store
+                .append(
+                    &session.id,
+                    AppendEvent::new(SessionEventKind::Message, json!({"text": text})),
+                )
+                .await
+                .expect("append searchable event");
+        }
+
+        let search = |mode| SearchQuery {
+            query: "alpha beta".into(),
+            mode,
+            filter: SearchFilter {
+                project_scope: Some("project-floor".into()),
+                ..SearchFilter::default()
+            },
+            limit: Some(3),
+        };
+        let lexical = store
+            .search(search(SearchMode::Fts))
+            .await
+            .expect("FTS search");
+        let hybrid = store
+            .search(search(SearchMode::Hybrid))
+            .await
+            .expect("hybrid search");
+
+        assert_eq!(hybrid.requested_mode, SearchMode::Hybrid);
+        assert_eq!(hybrid.effective_mode, SearchMode::Fts);
+        assert!(hybrid.semantic_floor);
+        assert!(hybrid.fallback_reason.is_some());
+        assert_eq!(
+            serde_json::to_vec(&hybrid.hits).expect("serialize hybrid hits"),
+            serde_json::to_vec(&lexical.hits).expect("serialize lexical hits")
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
 async fn sqlite_rebuilds_a_missing_search_index_on_reopen() {
     let dir = TempDir::new().expect("tempdir");
     let path = dir.path().join("search-rebuild.sqlite");
