@@ -263,6 +263,9 @@ harn_run_cargo_probe_with_deadline() (
       fi
       sleep 0.01
     done
+    # A watchdog or descendant must never inherit the command-substitution
+    # output pipe. If a platform delays process-group teardown, an inherited
+    # writer keeps the caller blocked on EOF even after the probe has returned.
     (
       sleep "$timeout_seconds"
       if kill -0 "$probe_pid" 2>/dev/null; then
@@ -271,7 +274,7 @@ harn_run_cargo_probe_with_deadline() (
         sleep 1
         harn_kill_process_group KILL "$probe_pid"
       fi
-    ) &
+    ) </dev/null >"$state_dir/watchdog-stdout" 2>"$state_dir/watchdog-stderr" &
     watchdog_pid=$!
 
     wait "$probe_pid" || status=$?

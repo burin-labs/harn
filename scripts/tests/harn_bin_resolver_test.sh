@@ -3,6 +3,17 @@ set -euo pipefail
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 real_sleep=$(command -v sleep)
+allow_cargo_integration="${HARN_BIN_RESOLVER_TEST_ALLOW_CARGO:-0}"
+case "$allow_cargo_integration" in
+  0 | 1) ;;
+  *)
+    echo "HARN_BIN_RESOLVER_TEST_ALLOW_CARGO must be 0 or 1" >&2
+    exit 2
+    ;;
+esac
+# Test selection belongs to this harness process, not to Harn or Cargo's typed
+# environment contract.
+unset HARN_BIN_RESOLVER_TEST_ALLOW_CARGO
 # shellcheck source=scripts/lib/harn_bin.sh
 source "$repo_root/scripts/lib/harn_bin.sh"
 
@@ -408,6 +419,7 @@ fi
 # ignored .harn inputs, then use the production resolver and Cargo's real
 # top-level dep-info. The target and source paths contain spaces so the pinned
 # typed depfile parser, rather than shell tokenization, owns Make escaping.
+if [[ "$allow_cargo_integration" == "1" ]]; then
 unset HARN_CARGO_LEASE_MODE
 cargo_fixture="$tmp_root/cargo fixture with spaces"
 cargo_target="$cargo_fixture/build output with spaces"
@@ -908,6 +920,7 @@ for producer in "$repo_root/scripts/dev_setup.sh" "$repo_root/scripts/release_ga
     exit 1
   fi
 done
+fi
 
 # Return to hermetic fake-Cargo policy probes after the production-shaped
 # fixture releases its real shared lease.
@@ -1216,5 +1229,12 @@ while IFS= read -r name; do
     exit 1
   fi
 done <<<"$resolver_names"
+
+if ! grep -Fq \
+  'HARN_BIN_RESOLVER_TEST_ALLOW_CARGO=1 ./scripts/tests/harn_bin_resolver_test.sh' \
+  "$repo_root/Makefile"; then
+  echo "production-shaped resolver falsifiers are not projected into the post-warm CI lane" >&2
+  exit 1
+fi
 
 echo "harn_bin_resolver_test: ok"
