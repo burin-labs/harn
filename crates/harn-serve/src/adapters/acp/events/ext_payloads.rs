@@ -148,6 +148,7 @@ pub(super) fn documented_stdlib_event(
             iteration,
             host_directive,
             terminal_kind,
+            unconsumed_tool_call,
         } => (
             "final_wrapup",
             session_id,
@@ -157,6 +158,13 @@ pub(super) fn documented_stdlib_event(
                 "iteration": iteration,
                 "hostDirective": host_directive,
                 "terminalKind": terminal_kind,
+                "unconsumedToolCall": unconsumed_tool_call.as_ref().map(|evidence| serde_json::json!({
+                    "parseStatus": evidence.parse_status,
+                    "parsedCallCount": evidence.parsed_call_count,
+                    "toolNames": evidence.tool_names,
+                    "diagnostics": evidence.diagnostics,
+                    "evidenceLine": evidence.evidence_line,
+                })),
             }),
         ),
         AgentEvent::PackThinkingStripped {

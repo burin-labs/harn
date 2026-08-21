@@ -497,12 +497,43 @@ fn documented_stdlib_events_are_typed_and_journaled() {
             "iteration": 4,
             "host_directive": false,
             "terminal_kind": "max_iterations",
+            "unconsumed_tool_call": {
+                "parse_status": "partial",
+                "parsed_call_count": 1,
+                "tool_names": ["edit"],
+                "diagnostics": ["second call was malformed"],
+                "evidence_line": "the final summary contained an unconsumed tool call",
+            },
         }),
     )
     .expect("final_wrapup");
     assert!(matches!(
         final_wrapup,
-        AgentEvent::FinalWrapup { iteration: 4, .. }
+        AgentEvent::FinalWrapup {
+            iteration: 4,
+            unconsumed_tool_call: Some(ref evidence),
+            ..
+        } if evidence.parsed_call_count == 1
+    ));
+
+    let legacy_final_wrapup = AgentEvent::from_host_payload(
+        "s1",
+        "final_wrapup",
+        &json!({
+            "final_status": "max_iterations",
+            "stop_reason": "iteration_limit",
+            "iteration": 4,
+            "host_directive": false,
+            "terminal_kind": "max_iterations",
+        }),
+    )
+    .expect("legacy final_wrapup");
+    assert!(matches!(
+        legacy_final_wrapup,
+        AgentEvent::FinalWrapup {
+            unconsumed_tool_call: None,
+            ..
+        }
     ));
 
     let thinking = AgentEvent::from_host_payload(

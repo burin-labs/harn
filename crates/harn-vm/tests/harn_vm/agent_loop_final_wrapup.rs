@@ -202,6 +202,90 @@ pipeline main(harness: Harness, task) {{
     )
 }
 
+fn unconsumed_wrapup_call_pipeline(session_id: &str, wrapup_response: &str) -> String {
+    let wrapup_response = serde_json::to_string(wrapup_response).expect("encode wrap-up response");
+    format!(
+        r#"
+import {{ agent_capture_events }} from "std/agent/events"
+
+pipeline main(harness: Harness, task) {{
+  const dispatch_counter = harness.runtime.shared_cell(
+    {{scope: "task_group", key: "wrapup-unconsumed-dispatch-{session_id}", initial: 0}},
+  )
+  let registry = tool_registry()
+  let tools = tool_define(
+    registry,
+    "keep_exploring",
+    "Test stand-in for a tool that must not dispatch from wrap-up.",
+    {{parameters: {{}}, handler: {{ _args ->
+      const snapshot = harness.runtime.shared_snapshot(dispatch_counter)
+      harness.runtime.shared_cas(dispatch_counter, snapshot, snapshot.value + 1)
+      return "explored"
+    }}}},
+  )
+  const caller = {{ call ->
+    if call?.opts?._final_wrapup == true {{
+      return {{
+        ok: true,
+        value: {{
+          text: {wrapup_response},
+          tool_calls: [],
+          provider: "mock",
+          model: "mock",
+        }},
+      }}
+    }}
+    return {{
+      ok: true,
+      value: {{
+        text: "",
+        tool_calls: [{{id: "call_explore", name: "keep_exploring", arguments: {{}}}}],
+        provider: "mock",
+        model: "mock",
+      }},
+    }}
+  }}
+  const captured = agent_capture_events(
+    harness.agent,
+    "{session_id}",
+    fn() {{ return agent_loop(harness,
+      "do the work",
+      nil,
+      {{
+        provider: "mock",
+        tools: tools,
+        tool_format: "text",
+        max_iterations: 1,
+        loop_until_done: true,
+        done_sentinel: "FINISHED",
+        session_id: "{session_id}",
+        llm_caller: caller,
+      }},
+    ) }},
+  )
+  const final_events = captured.events.filter({{ event -> event.type == "final_wrapup" }})
+  const skipped = captured.events.filter({{ event ->
+    event.type == "typed_checkpoint"
+      && event.checkpoint?.kind == "final_wrapup_tool_calls_skipped"
+  }})
+  const terminal = final_events[0]
+  harness.stdio.log(captured.result.status)
+  harness.stdio.log(harness.runtime.shared_get(dispatch_counter))
+  harness.stdio.log(len(final_events))
+  harness.stdio.log(len(skipped))
+  const evidence = terminal.unconsumed_tool_call
+  harness.stdio.log(evidence != nil)
+  harness.stdio.log(evidence.parse_status)
+  harness.stdio.log(evidence.parsed_call_count)
+  harness.stdio.log(evidence.tool_names.join(","))
+  harness.stdio.log(len(evidence.diagnostics))
+  harness.stdio.log(contains(evidence.evidence_line, "final summary contained an unconsumed tool call"))
+  harness.stdio.log(contains(captured.result.text, "Stopped after the hard cap"))
+}}
+"#
+    )
+}
+
 /// Pipeline whose stub LLM finishes cleanly on the first turn (no tool call,
 /// emits the sentinel). The natural `done` exit must NOT trigger a wrap-up.
 fn clean_done_pipeline(session_id: &str) -> String {
@@ -271,6 +355,104 @@ fn exhaustion_mid_tool_use_fires_wrapup_and_surfaces_sentinel() {
     assert_eq!(
         lines[3], "true",
         "expected surfaced text to contain the wrap-up summary; lines: {lines:?}"
+    );
+}
+
+#[test]
+fn final_wrapup_records_and_surfaces_a_parsed_unconsumed_tool_call() {
+    let response = r#"<user_response>Stopped after the hard cap.</user_response>
+<tool_call>
+keep_exploring({})
+</tool_call>"#;
+    let raw = run_with_bridge(&unconsumed_wrapup_call_pipeline(
+        "wrapup-unconsumed-parsed",
+        response,
+    ))
+    .expect("script must run");
+    let lines = out_lines(&raw);
+    assert_eq!(lines[0], "budget_exhausted", "lines: {lines:?}");
+    assert_eq!(
+        lines[1], "1",
+        "wrap-up call must not dispatch; lines: {lines:?}"
+    );
+    assert_eq!(
+        lines[2], "1",
+        "expected one final-wrap-up event; lines: {lines:?}"
+    );
+    assert_eq!(
+        lines[3], "1",
+        "expected one skipped-call receipt; lines: {lines:?}"
+    );
+    assert_eq!(
+        lines[4], "true",
+        "terminal event must flag the call; lines: {lines:?}"
+    );
+    assert_eq!(lines[5], "parsed", "lines: {lines:?}");
+    assert_eq!(lines[6], "1", "lines: {lines:?}");
+    assert_eq!(lines[7], "keep_exploring", "lines: {lines:?}");
+    assert_eq!(
+        lines[8], "0",
+        "well-formed call needs no diagnostic; lines: {lines:?}"
+    );
+    assert_eq!(
+        lines[9], "true",
+        "evidence line must be human-readable; lines: {lines:?}"
+    );
+    assert_eq!(
+        lines[10], "true",
+        "summary prose must remain visible; lines: {lines:?}"
+    );
+}
+
+#[test]
+fn final_wrapup_surfaces_a_malformed_unconsumed_tool_call_diagnostic() {
+    let response = r#"<user_response>Stopped after the hard cap.</user_response>
+<tool_call>
+{"name":"keep_exploring","args":{
+</tool_call>"#;
+    let raw = run_with_bridge(&unconsumed_wrapup_call_pipeline(
+        "wrapup-unconsumed-malformed",
+        response,
+    ))
+    .expect("script must run");
+    let lines = out_lines(&raw);
+    assert_eq!(lines[0], "budget_exhausted", "lines: {lines:?}");
+    assert_eq!(
+        lines[1], "1",
+        "wrap-up call must not dispatch; lines: {lines:?}"
+    );
+    assert_eq!(
+        lines[2], "1",
+        "expected one final-wrap-up event; lines: {lines:?}"
+    );
+    assert_eq!(
+        lines[3], "0",
+        "malformed calls have no skipped result; lines: {lines:?}"
+    );
+    assert_eq!(
+        lines[4], "true",
+        "terminal event must flag the call; lines: {lines:?}"
+    );
+    assert_eq!(lines[5], "malformed", "lines: {lines:?}");
+    assert_eq!(
+        lines[6], "0",
+        "no malformed call may be counted as parsed; lines: {lines:?}"
+    );
+    assert_eq!(
+        lines[7], "",
+        "a malformed call has no trusted tool name; lines: {lines:?}"
+    );
+    assert_ne!(
+        lines[8], "0",
+        "malformed call needs a diagnostic; lines: {lines:?}"
+    );
+    assert_eq!(
+        lines[9], "true",
+        "evidence line must be human-readable; lines: {lines:?}"
+    );
+    assert_eq!(
+        lines[10], "true",
+        "summary prose must remain visible; lines: {lines:?}"
     );
 }
 
