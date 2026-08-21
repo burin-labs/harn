@@ -8,14 +8,18 @@
 /// `truncate -s 0` of a tracked project file, and `>`/`>>` redirection onto a
 /// tracked project file) through adversarial quoting, chained-command splitting, `bash -c`
 /// recursion, and the `sudo`/`env`/`nice`/`nohup`/`time`/`timeout`/`command`/
-/// `builtin`/`exec` wrapper family.
+/// `builtin`/`exec` wrapper family. Executable identity and nesting come from
+/// the shared shell AST; the remaining text checks only inspect syntax that is
+/// not an executable command (fork-bomb grammar and tracked-file redirects).
 use std::path::Path;
 
 mod project_delete;
+mod semantic_shell;
 mod shell;
 mod tracked_writes;
 
-use project_delete::segment_deletes_project;
+use project_delete::argv_deletes_project;
+pub(super) use semantic_shell::{analyze_argv, analyze_shell, ShellAnalysis};
 use shell::*;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -38,75 +42,27 @@ const FORK_BOMB_REASON: &str =
 /// inside one of them); an empty slice means "no root context", under which
 /// every absolute path is conservatively treated as an escape. Returns the
 /// blocking reason.
-pub(super) fn reason_at(
-    command: &str,
+pub(super) fn reason_at_with_analysis(
+    analysis: &ShellAnalysis,
     workspace_roots: &[String],
     active_cwd: Option<&Path>,
 ) -> Option<String> {
-    reason_inner(command, workspace_roots, active_cwd, 0)
+    reason_from_analysis(analysis, workspace_roots, active_cwd, 0)
+}
+
+/// Classify already-resolved argv without interpreting ordinary arguments as
+/// shell syntax. Only an actual POSIX shell `-c` payload re-enters `reason_at`.
+pub(super) fn reason_argv(
+    argv: &[String],
+    workspace_roots: &[String],
+    active_cwd: Option<&Path>,
+) -> Option<String> {
+    let analysis = analyze_argv(argv);
+    reason_at_with_analysis(&analysis, workspace_roots, active_cwd)
 }
 
 pub(super) fn command_segments(command: &str) -> Vec<String> {
     command_segments_inner(command, 0)
-}
-
-/// Every word a POSIX shell would hand to a program as one argument, across all
-/// chained segments and every nested `sh -c` payload.
-///
-/// This is the tokenizer the floor already uses, exposed so that no other
-/// classifier has to grow a second, weaker one. Splitting a command on
-/// whitespace alone is quote-blind: `sed -E 's/^func //'` yields a fragment
-/// `//'`, which any rule keyed on a leading `/` then reads as an absolute path.
-/// Quoting is what says whether a space separates two arguments or sits inside
-/// one, so it has to be respected here rather than compensated for downstream.
-///
-/// Segment expansion is what keeps the nesting closed: a quoted `sh -c` payload
-/// is one word at the outer level, and would hide its own arguments from a
-/// caller that only looked at outer words.
-pub(super) fn command_argument_words(command: &str) -> Vec<String> {
-    let mut words: Vec<String> = Vec::new();
-    collect_argument_words(command, 0, &mut words);
-    words
-}
-
-/// Tokenize each command text ONCE and recurse into nested shell payloads from
-/// their own strings.
-///
-/// Deliberately not built on `command_segments`: that expansion re-joins already
-/// tokenized words with plain spaces, which is fine for the substring rules that
-/// consume it but throws away the very quoting this function exists to respect.
-/// Feeding its output back through a tokenizer reintroduces the split it was
-/// meant to prevent — `s/x /y/` comes back as `s/x` and `/y/`.
-fn collect_argument_words(command: &str, depth: usize, words: &mut Vec<String>) {
-    if depth > MAX_DEPTH {
-        return;
-    }
-    for segment in split_chained_command(command) {
-        let tokens = shell_words(&segment);
-        let mut start = 0;
-        while start < tokens.len() {
-            let end = next_pipeline_boundary(&tokens, start);
-            if start < end {
-                let command_index = unwrapped_command_index(&tokens, start, end);
-                if command_index < end
-                    && matches!(
-                        command_basename(&tokens[command_index]),
-                        "bash" | "sh" | "zsh"
-                    )
-                {
-                    if let Some(script) = shell_c_script(&tokens[(command_index + 1)..end]) {
-                        collect_argument_words(script, depth + 1, words);
-                    }
-                }
-                for token in &tokens[start..end] {
-                    if !words.iter().any(|existing| existing == token) {
-                        words.push(token.clone());
-                    }
-                }
-            }
-            start = end + 1;
-        }
-    }
 }
 
 /// Parse a shell command into chain groups and pipeline stages. This is the
@@ -121,7 +77,7 @@ pub(super) fn shell_command_groups(command: &str) -> Vec<Vec<ShellCommandStage>>
                 .into_iter()
                 .filter_map(|text| {
                     let tokens = shell_words(&text);
-                    let index = unwrapped_command_index(&tokens, 0, tokens.len());
+                    let index = unwrapped_shell_command_index(&tokens, 0, tokens.len());
                     (index < tokens.len()).then(|| ShellCommandStage {
                         text: text.trim().to_string(),
                         argv: tokens[index..].to_vec(),
@@ -131,51 +87,6 @@ pub(super) fn shell_command_groups(command: &str) -> Vec<Vec<ShellCommandStage>>
             (!stages.is_empty()).then_some(stages)
         })
         .collect()
-}
-
-/// Effective program invocations in execution order, recursively unwrapping
-/// only actual POSIX shell `-c` payloads.
-///
-/// This is the shared structural boundary for semantic command classifiers.
-/// Looking for verbs in flattened command text confuses inert interpreter
-/// source (for example `python -c "print('cat .env')"`) with a command the
-/// shell will execute. Conversely, inspecting only the outer argv misses a
-/// real `cat .env` nested under `sh -c`. Consumers receive the wrapper-stripped
-/// argv of each effective pipeline stage and never need their own shell parser.
-pub(super) fn effective_command_stages(command: &str) -> Vec<ShellCommandStage> {
-    let mut stages = Vec::new();
-    collect_effective_command_stages(command, 0, &mut stages);
-    stages
-}
-
-fn collect_effective_command_stages(
-    command: &str,
-    depth: usize,
-    stages: &mut Vec<ShellCommandStage>,
-) {
-    if depth > MAX_DEPTH {
-        return;
-    }
-    for group in split_chained_command(command) {
-        for text in split_pipeline_command(&group) {
-            let tokens = shell_words(&text);
-            let index = unwrapped_command_index(&tokens, 0, tokens.len());
-            if index >= tokens.len() {
-                continue;
-            }
-            let argv = tokens[index..].to_vec();
-            if matches!(command_basename(&argv[0]), "bash" | "sh" | "zsh") {
-                if let Some(script) = shell_c_script(&argv[1..]) {
-                    collect_effective_command_stages(script, depth + 1, stages);
-                    continue;
-                }
-            }
-            stages.push(ShellCommandStage {
-                text: text.trim().to_string(),
-                argv,
-            });
-        }
-    }
 }
 
 fn command_segments_inner(command: &str, depth: usize) -> Vec<String> {
@@ -191,7 +102,7 @@ fn command_segments_inner(command: &str, depth: usize) -> Vec<String> {
             let end = next_pipeline_boundary(&tokens, start);
             if start < end {
                 push_unique(&mut segments, &tokens[start..end].join(" "));
-                let command_index = unwrapped_command_index(&tokens, start, end);
+                let command_index = unwrapped_shell_command_index(&tokens, start, end);
                 if command_index < end {
                     let command = command_basename(&tokens[command_index]);
                     if matches!(command, "bash" | "sh" | "zsh") {
@@ -222,46 +133,46 @@ fn reason_inner(
     active_cwd: Option<&Path>,
     depth: usize,
 ) -> Option<String> {
+    let analysis = analyze_shell(command);
+    reason_from_analysis(&analysis, roots, active_cwd, depth)
+}
+
+fn reason_from_analysis(
+    analysis: &ShellAnalysis,
+    roots: &[String],
+    active_cwd: Option<&Path>,
+    depth: usize,
+) -> Option<String> {
     if depth > MAX_DEPTH {
         return None;
     }
     // Fork bomb is checked on the WHOLE command first: splitting on `;`/`&`
     // would tear `:(){ :|:& };:` apart before it can be recognized.
-    if is_fork_bomb(command) {
+    if analysis.fork_bomb {
         return Some(FORK_BOMB_REASON.to_string());
     }
-    for segment in split_chained_command(command) {
-        if let Some(hit) = segment_catastrophe(&segment, roots, active_cwd, depth) {
-            return Some(hit);
+    for redirect in &analysis.redirects {
+        if redirect.writes_file() && !redirect.dynamic {
+            if let Some(destination) = redirect.destination.as_deref() {
+                if let Some(reason) = tracked_writes::redirect_target_over_tracked_reason(
+                    destination,
+                    active_cwd,
+                    roots,
+                ) {
+                    return Some(reason);
+                }
+            }
         }
-        if segment_deletes_project(&segment) {
+    }
+    for stage in &analysis.stages {
+        if argv_deletes_project(&stage.argv) {
             return Some(PROJECT_DELETE_REASON.to_string());
         }
-    }
-    None
-}
-
-fn segment_catastrophe(
-    segment: &str,
-    roots: &[String],
-    active_cwd: Option<&Path>,
-    depth: usize,
-) -> Option<String> {
-    // Redirect-onto-source is a whole-segment property → check raw text.
-    if let Some(reason) = tracked_writes::redirect_over_tracked_reason(segment, active_cwd, roots) {
-        return Some(reason);
-    }
-    if is_fork_bomb(segment) {
-        return Some(FORK_BOMB_REASON.to_string());
-    }
-    let tokens = shell_words(segment);
-    let mut start = 0;
-    while start < tokens.len() {
-        let end = next_pipeline_boundary(&tokens, start);
-        if let Some(hit) = invocation_catastrophe(&tokens, start, end, roots, active_cwd, depth) {
+        if let Some(hit) =
+            invocation_catastrophe(&stage.argv, 0, stage.argv.len(), roots, active_cwd, depth)
+        {
             return Some(hit);
         }
-        start = end + 1;
     }
     None
 }
@@ -445,11 +356,6 @@ fn chmod_catastrophe(args: &[String]) -> Option<String> {
     (recursive && strips_all).then(|| {
         "`chmod -R 000` is blocked: recursively stripping all permissions can lock you out of the tree.".to_string()
     })
-}
-
-fn is_fork_bomb(segment: &str) -> bool {
-    let compact: String = segment.chars().filter(|c| !c.is_whitespace()).collect();
-    compact.contains(":(){:|:&};:") || compact.contains(":(){:|:&;}:")
 }
 
 fn path_escapes_root(target: &str, roots: &[String]) -> bool {

@@ -1,63 +1,31 @@
 //! Detection of recursive commands that wipe the active project root.
 
-use super::{shell::*, strip_trailing_slashes, MAX_DEPTH};
+use super::{command_basename, strip_trailing_slashes};
 
 // ---- In-root project-wipe family (`rm -rf .` / `*` / `${PWD}/*` / … ) ----
 
-fn command_deletes_project(command: &str, depth: usize) -> bool {
-    if depth > MAX_DEPTH {
+/// Whether one structurally resolved program invocation recursively wipes the
+/// current project. Wrapper and shell nesting are owned by `ShellAnalysis`, so
+/// this classifier consumes argv directly and never reparses command text.
+pub(super) fn argv_deletes_project(argv: &[String]) -> bool {
+    let Some((program, args)) = argv.split_first() else {
+        return false;
+    };
+    if command_basename(program) != "rm" {
         return false;
     }
-    split_chained_command(command)
-        .iter()
-        .any(|segment| segment_deletes_project_inner(segment, depth))
-}
-
-pub(super) fn segment_deletes_project(segment: &str) -> bool {
-    segment_deletes_project_inner(segment, 0)
-}
-
-fn segment_deletes_project_inner(segment: &str, depth: usize) -> bool {
-    let tokens = shell_words(segment);
-    let mut start = 0;
-    while start < tokens.len() {
-        let end = next_pipeline_boundary(&tokens, start);
-        if invocation_deletes_project(&tokens, start, end, depth) {
-            return true;
-        }
-        start = end + 1;
-    }
-    false
-}
-
-fn invocation_deletes_project(tokens: &[String], start: usize, end: usize, depth: usize) -> bool {
-    let mut command_index = unwrapped_command_index(tokens, start, end);
-    if command_index >= end {
-        return false;
-    }
-    let command = command_basename(&tokens[command_index]);
-    if shell_c_invocation_deletes_project(command, tokens, command_index, end, depth) {
-        return true;
-    }
-    if command != "rm" {
-        return false;
-    }
-    command_index += 1;
     let mut saw_force = false;
     let mut saw_recursive = false;
     let mut saw_project_target = false;
     let mut parsing_options = true;
-    while command_index < end {
-        let token = &tokens[command_index];
+    for token in args {
         if parsing_options && token == "--" {
             parsing_options = false;
-            command_index += 1;
             continue;
         }
         if parsing_options && token.starts_with("--") {
             saw_force = saw_force || token == "--force";
             saw_recursive = saw_recursive || token == "--recursive";
-            command_index += 1;
             continue;
         }
         if parsing_options && token.starts_with('-') && token != "-" {
@@ -65,46 +33,12 @@ fn invocation_deletes_project(tokens: &[String], start: usize, end: usize, depth
                 saw_force = saw_force || flag == 'f';
                 saw_recursive = saw_recursive || flag == 'r' || flag == 'R';
             }
-            command_index += 1;
             continue;
         }
         parsing_options = false;
         saw_project_target = saw_project_target || is_project_target(token);
-        command_index += 1;
     }
     saw_force && saw_recursive && saw_project_target
-}
-
-fn shell_c_invocation_deletes_project(
-    command: &str,
-    tokens: &[String],
-    command_index: usize,
-    end: usize,
-    depth: usize,
-) -> bool {
-    if !matches!(command, "bash" | "sh" | "zsh") {
-        return false;
-    }
-    let mut index = command_index + 1;
-    while index < end {
-        let token = &tokens[index];
-        if token == "--" {
-            index += 1;
-            continue;
-        }
-        if token.starts_with('-') && token != "-" {
-            if token.chars().skip(1).any(|flag| flag == 'c') {
-                return tokens
-                    .get(index + 1)
-                    .map(|script| command_deletes_project(script, depth + 1))
-                    .unwrap_or(false);
-            }
-            index += 1;
-            continue;
-        }
-        return false;
-    }
-    false
 }
 
 fn is_project_target(token: &str) -> bool {

@@ -1,11 +1,17 @@
 use super::*;
 
+mod request;
+use request::*;
+
+pub(super) const EXECUTION_SEMANTICS_UNRESOLVED_LABEL: &str = "execution_semantics_unresolved";
+
 pub(super) fn scan_command_risk_scan_json(
     ctx: &JsonValue,
     policy: Option<&CommandPolicy>,
 ) -> JsonValue {
     let command_text = command_text(ctx);
     let lower = command_text.to_ascii_lowercase();
+    let command_analysis = security_command_analysis(ctx);
     let shell_command_groups = super::catastrophic::shell_command_groups(&command_text)
         .into_iter()
         .map(|group| {
@@ -44,9 +50,10 @@ pub(super) fn scan_command_risk_scan_json(
                 .and_then(|value| value.as_str())
         })
         .map(Path::new);
-    let catastrophe = super::catastrophic::reason_at(
-        &floor_command_text(ctx),
-        &scan_workspace_roots(ctx),
+    let workspace_roots = scan_workspace_roots(ctx);
+    let catastrophe = super::catastrophic::reason_at_with_analysis(
+        &command_analysis,
+        &workspace_roots,
         active_cwd,
     );
     if catastrophe.is_some() {
@@ -66,9 +73,16 @@ pub(super) fn scan_command_risk_scan_json(
         labels.insert("curl_pipe_shell".to_string());
         rationale.push("download piped into shell detected");
     }
-    if has_credential_file_read(&floor_command_text(ctx)) {
+    if credential_read_path_candidates_from_stages(&command_analysis.stages)
+        .iter()
+        .any(|candidate| contains_secret_like_text(&candidate.to_ascii_lowercase()))
+    {
         labels.insert("credential_file_read".to_string());
         rationale.push("credential-like file read detected");
+    }
+    if command_analysis.unresolved {
+        labels.insert(EXECUTION_SEMANTICS_UNRESOLVED_LABEL.to_string());
+        rationale.push("execution syntax, dialect, or dynamic dispatch left semantics unresolved");
     }
     if has_network_exfil(&lower) {
         labels.insert("network_exfil".to_string());
@@ -90,7 +104,7 @@ pub(super) fn scan_command_risk_scan_json(
         labels.insert("process_kill".to_string());
         rationale.push("process kill command detected");
     }
-    if path_outside_workspace(ctx) {
+    if path_outside_workspace(ctx, &command_analysis) {
         labels.insert("outside_workspace".to_string());
         rationale.push("cwd or absolute path is outside workspace roots");
     }
@@ -251,23 +265,47 @@ pub(super) fn deny_pattern_matches(pattern: &str, candidate: &str) -> bool {
 }
 
 pub(super) fn command_text(ctx: &JsonValue) -> String {
-    if let Some(argv) = ctx
-        .pointer("/request/argv")
-        .and_then(|value| value.as_array())
-    {
-        let joined = argv
-            .iter()
-            .filter_map(|value| value.as_str())
-            .collect::<Vec<_>>()
-            .join(" ");
-        if !joined.is_empty() {
-            return joined;
+    if request_mode(ctx) == Some("argv") {
+        if let Some(argv) = ctx
+            .pointer("/request/argv")
+            .and_then(|value| value.as_array())
+        {
+            let joined = argv
+                .iter()
+                .filter_map(|value| value.as_str())
+                .collect::<Vec<_>>()
+                .join(" ");
+            if !joined.is_empty() {
+                return joined;
+            }
         }
     }
     ctx.pointer("/request/command")
         .and_then(|value| value.as_str())
         .unwrap_or_default()
         .to_string()
+}
+
+/// Preserve typed argv exactly and parse only actual shell programs. This is
+/// the sole security-semantic entry point for a process request; display and
+/// compatibility projections may keep their historical string shape.
+pub(super) fn security_command_analysis(ctx: &JsonValue) -> super::catastrophic::ShellAnalysis {
+    match request_mode(ctx) {
+        Some("argv") => match request_argv(ctx) {
+            Ok(Some(argv)) => return super::catastrophic::analyze_argv(&argv),
+            Ok(None) | Err(()) => return super::catastrophic::ShellAnalysis::unresolved(),
+        },
+        Some("shell") => {}
+        _ => return super::catastrophic::ShellAnalysis::unresolved(),
+    }
+    if !request_uses_supported_posix_shell(ctx) {
+        return super::catastrophic::ShellAnalysis::unresolved();
+    }
+    super::catastrophic::analyze_shell(
+        ctx.pointer("/request/command")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default(),
+    )
 }
 
 /// Reconstruct the command line the catastrophic floor classifies, PRESERVING
@@ -282,17 +320,19 @@ pub(super) fn command_text(ctx: &JsonValue) -> String {
 /// element makes argv-mode classify identically to the equivalent shell-mode
 /// string (the `-c` payload survives as a single token and recurses correctly).
 pub(super) fn floor_command_text(ctx: &JsonValue) -> String {
-    if let Some(argv) = ctx
-        .pointer("/request/argv")
-        .and_then(|value| value.as_array())
-    {
-        let parts = argv
-            .iter()
-            .filter_map(|value| value.as_str())
-            .map(shell_quote_arg)
-            .collect::<Vec<_>>();
-        if !parts.is_empty() {
-            return parts.join(" ");
+    if request_mode(ctx) == Some("argv") {
+        if let Some(argv) = ctx
+            .pointer("/request/argv")
+            .and_then(|value| value.as_array())
+        {
+            let parts = argv
+                .iter()
+                .filter_map(|value| value.as_str())
+                .map(shell_quote_arg)
+                .collect::<Vec<_>>();
+            if !parts.is_empty() {
+                return parts.join(" ");
+            }
         }
     }
     ctx.pointer("/request/command")
@@ -327,11 +367,10 @@ pub(super) fn scan_universal_catastrophic_reason(
     workspace_roots: &[String],
     active_cwd: &Path,
 ) -> Option<String> {
-    let mut parts = Vec::with_capacity(args.len() + 1);
-    parts.push(shell_quote_arg(program));
-    parts.extend(args.iter().map(|arg| shell_quote_arg(arg)));
-    let command = parts.join(" ");
-    super::catastrophic::reason_at(&command, workspace_roots, Some(active_cwd))
+    let mut argv = Vec::with_capacity(args.len() + 1);
+    argv.push(program.to_string());
+    argv.extend_from_slice(args);
+    super::catastrophic::reason_argv(&argv, workspace_roots, Some(active_cwd))
 }
 
 /// Quote a single argv element so that re-joining the elements with spaces
@@ -955,12 +994,6 @@ pub(super) fn has_curl_pipe_shell(lower: &str) -> bool {
         && (lower.contains(" sh") || lower.contains(" bash") || lower.contains(" zsh"))
 }
 
-pub(super) fn has_credential_file_read(command: &str) -> bool {
-    credential_read_path_candidates(command)
-        .iter()
-        .any(|candidate| contains_secret_like_text(&candidate.to_ascii_lowercase()))
-}
-
 /// Path operands consumed by effective file-reader commands.
 ///
 /// Command identity and argv boundaries come from the catastrophic floor's
@@ -968,8 +1001,15 @@ pub(super) fn has_credential_file_read(command: &str) -> bool {
 /// interpreter payloads: source code that mentions `cat .env` is not a file
 /// read, while the same command under a real `sh -c` wrapper is.
 pub(super) fn credential_read_path_candidates(command: &str) -> Vec<String> {
+    let analysis = super::catastrophic::analyze_shell(command);
+    credential_read_path_candidates_from_stages(&analysis.stages)
+}
+
+pub(super) fn credential_read_path_candidates_from_stages(
+    stages: &[super::catastrophic::ShellCommandStage],
+) -> Vec<String> {
     let mut candidates = Vec::new();
-    for stage in super::catastrophic::effective_command_stages(command) {
+    for stage in stages {
         let Some(program) = stage.argv.first() else {
             continue;
         };
@@ -1173,7 +1213,10 @@ pub(super) fn has_process_kill(lower: &str) -> bool {
         || lower.contains(" killall ")
 }
 
-pub(super) fn path_outside_workspace(ctx: &JsonValue) -> bool {
+pub(super) fn path_outside_workspace(
+    ctx: &JsonValue,
+    analysis: &super::catastrophic::ShellAnalysis,
+) -> bool {
     let roots = ctx
         .get("workspace_roots")
         .and_then(|value| value.as_array())
@@ -1194,10 +1237,10 @@ pub(super) fn path_outside_workspace(ctx: &JsonValue) -> bool {
     if cwd.as_ref().is_some_and(|cwd| !under_any_root(cwd, &roots)) {
         return true;
     }
-    // `floor_command_text`, not `command_text`: the latter space-joins argv with
-    // no quoting, so `["sed", "-E", "s/^func //"]` flattens into a line whose
-    // tokenization no longer matches the argv the program would receive.
-    for path in absolute_path_candidates(&floor_command_text(ctx)) {
+    // The shared analysis keeps resolved argv lossless and obtains shell words
+    // from the same AST that owns executable discovery. This avoids rebuilding
+    // argv from the display-only, space-joined `command_text` projection.
+    for path in absolute_path_candidates_from_words(&analysis.argument_words) {
         if !under_any_root(&normalize_path(&path), &roots) {
             return true;
         }
@@ -1207,21 +1250,13 @@ pub(super) fn path_outside_workspace(ctx: &JsonValue) -> bool {
 
 /// Absolute paths the command would actually hand to a program.
 ///
-/// Tokenizing is delegated to the floor's shell tokenizer rather than done here
-/// with `split_whitespace`. Splitting on whitespace is quote-blind, so a single
-/// space inside a quoted argument produced a fragment that began with `/` and
-/// was read as an absolute path: `sed -E 's/^func //'` yielded `//'`, and
-/// `awk '/TODO/{print}'` yielded a word already starting with `/`. Both are
-/// ordinary workspace-relative commands, and both were labelled
-/// `outside_workspace` and sent for approval.
-///
-/// The delegation also keeps the `sh -c` wrapper closed: the shared tokenizer
-/// expands chained segments and recurses into nested shell payloads, so
-/// `sh -c "cat /etc/passwd"` still yields `/etc/passwd` even though the payload
-/// is one quoted word at the outer level.
-pub(super) fn absolute_path_candidates(text: &str) -> Vec<String> {
-    super::catastrophic::command_argument_words(text)
-        .into_iter()
+/// Words come from the structural shell-analysis seam rather than
+/// `split_whitespace`. Quoted whitespace therefore stays inside one argument,
+/// while real `sh -c`, substitution, pipeline, and compound-command children
+/// contribute their own words. Exact argv never passes through shell parsing.
+pub(super) fn absolute_path_candidates_from_words(words: &[String]) -> Vec<String> {
+    words
+        .iter()
         .filter_map(|word| {
             // The tokenizer removes quoting; trailing punctuation can still ride
             // along from subshell and list syntax the segment splitter leaves in.

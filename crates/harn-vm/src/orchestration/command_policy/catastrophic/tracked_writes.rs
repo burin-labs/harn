@@ -47,78 +47,17 @@ pub(super) fn truncate_catastrophe(
     })
 }
 
-pub(super) fn redirect_over_tracked_reason(
-    segment: &str,
+pub(super) fn redirect_target_over_tracked_reason(
+    target: &str,
     active_cwd: Option<&Path>,
     workspace_roots: &[String],
 ) -> Option<String> {
-    let chars: Vec<char> = segment.chars().collect();
-    let mut in_single = false;
-    let mut in_double = false;
-    let mut index = 0;
-    while index < chars.len() {
-        let ch = chars[index];
-        match ch {
-            '\\' if !in_single => {
-                index += 2;
-                continue;
-            }
-            '\'' if !in_double => in_single = !in_single,
-            '"' if !in_single => in_double = !in_double,
-            '>' if !in_single && !in_double => {
-                let mut cursor = index + 1;
-                if cursor < chars.len() && matches!(chars[cursor], '>' | '|') {
-                    cursor += 1;
-                }
-                while cursor < chars.len() && chars[cursor].is_whitespace() {
-                    cursor += 1;
-                }
-                if cursor < chars.len() && chars[cursor] == '&' {
-                    index = cursor + 1;
-                    continue;
-                }
-                let (target, end) = redirect_target(&chars, cursor);
-                if is_protected_project_file(&target, active_cwd, workspace_roots) {
-                    return Some(format!(
-                        "shell redirection (`>`/`>>`) onto the tracked project file `{target}` is blocked: it would replace or append to reviewed project state. Use the edit tool to change it."
-                    ));
-                }
-                index = end;
-                continue;
-            }
-            _ => {}
-        }
-        index += 1;
+    if is_protected_project_file(target, active_cwd, workspace_roots) {
+        return Some(format!(
+            "shell redirection onto the tracked project file `{target}` is blocked: it would replace or append to reviewed project state. Use the edit tool to change it."
+        ));
     }
     None
-}
-
-fn redirect_target(chars: &[char], mut cursor: usize) -> (String, usize) {
-    let mut target = String::new();
-    let mut in_single = false;
-    let mut in_double = false;
-    while cursor < chars.len() {
-        let ch = chars[cursor];
-        match ch {
-            '\\' if !in_single => {
-                cursor += 1;
-                if let Some(escaped) = chars.get(cursor) {
-                    target.push(*escaped);
-                }
-            }
-            '\'' if !in_double => in_single = !in_single,
-            '"' if !in_single => in_double = !in_double,
-            _ if !in_single
-                && !in_double
-                && (ch.is_whitespace() || matches!(ch, ';' | '|' | '&' | '<' | '>')) =>
-            {
-                break;
-            }
-            _ => target.push(ch),
-        }
-        cursor += 1;
-    }
-    (target, cursor)
 }
 
 fn is_protected_project_file(
@@ -218,10 +157,10 @@ mod tests {
         let cwd = temp.path();
         init_git(cwd);
 
-        assert!(redirect_over_tracked_reason("printf x > generated.rs", Some(cwd), &[]).is_none());
+        assert!(redirect_target_over_tracked_reason("generated.rs", Some(cwd), &[]).is_none());
         std::fs::write(cwd.join("generated.rs"), "old").unwrap();
         git(cwd, &["add", "generated.rs"]);
-        assert!(redirect_over_tracked_reason("printf x > generated.rs", Some(cwd), &[]).is_some());
+        assert!(redirect_target_over_tracked_reason("generated.rs", Some(cwd), &[]).is_some());
     }
 
     #[test]
@@ -248,7 +187,7 @@ mod tests {
         init_git(cwd);
         std::fs::write(cwd.join("generated.rs"), "old").unwrap();
 
-        assert!(redirect_over_tracked_reason("printf x > generated.rs", Some(cwd), &[]).is_none());
+        assert!(redirect_target_over_tracked_reason("generated.rs", Some(cwd), &[]).is_none());
     }
 
     #[test]
@@ -257,7 +196,7 @@ mod tests {
         let cwd = temp.path();
         init_git(cwd);
 
-        assert!(redirect_over_tracked_reason("printf x > /dev/null", Some(cwd), &[]).is_none());
+        assert!(redirect_target_over_tracked_reason("/dev/null", Some(cwd), &[]).is_none());
     }
 
     #[test]
@@ -265,20 +204,18 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let cwd = temp.path();
 
-        assert!(redirect_over_tracked_reason(
-            "printf x > \"$HARN_OUTPUTS_DIR/result.txt\"",
+        assert!(redirect_target_over_tracked_reason(
+            "$HARN_OUTPUTS_DIR/result.txt",
             Some(cwd),
             &[],
         )
         .is_none());
-        assert!(redirect_over_tracked_reason("printf x > $OUTPUT", None, &[]).is_none());
+        assert!(redirect_target_over_tracked_reason("$OUTPUT", None, &[]).is_none());
 
         init_git(cwd);
-        assert!(
-            redirect_over_tracked_reason("printf x > $PWD/result.txt", Some(cwd), &[],).is_none()
-        );
-        assert!(redirect_over_tracked_reason(
-            "printf x > \"$workspace/harn.toml\"",
+        assert!(redirect_target_over_tracked_reason("$PWD/result.txt", Some(cwd), &[],).is_none());
+        assert!(redirect_target_over_tracked_reason(
+            "$workspace/harn.toml",
             Some(cwd),
             &[cwd.display().to_string()],
         )
@@ -287,8 +224,8 @@ mod tests {
 
     #[test]
     fn absolute_paths_outside_a_non_git_cwd_are_not_project_state() {
-        assert!(redirect_over_tracked_reason(
-            "printf x > /dev/null",
+        assert!(redirect_target_over_tracked_reason(
+            "/dev/null",
             Some(Path::new("/workspace/project")),
             &[],
         )
@@ -304,28 +241,21 @@ mod tests {
         git(cwd, &["add", "tracked-without-extension"]);
         std::fs::remove_file(cwd.join("tracked-without-extension")).unwrap();
 
-        assert!(redirect_over_tracked_reason(
-            "printf x > tracked-without-extension",
-            Some(cwd),
-            &[],
-        )
-        .is_some());
+        assert!(
+            redirect_target_over_tracked_reason("tracked-without-extension", Some(cwd), &[],)
+                .is_some()
+        );
     }
 
     #[test]
-    fn quoted_and_escaped_tracked_targets_remain_protected() {
+    fn normalized_tracked_destination_remains_protected() {
         let temp = tempfile::tempdir().unwrap();
         let cwd = temp.path();
         init_git(cwd);
         std::fs::write(cwd.join("tracked file"), "old").unwrap();
         git(cwd, &["add", "tracked file"]);
 
-        assert!(
-            redirect_over_tracked_reason("printf x >| \"tracked file\"", Some(cwd), &[]).is_some()
-        );
-        assert!(
-            redirect_over_tracked_reason("printf x > tracked\\ file", Some(cwd), &[]).is_some()
-        );
+        assert!(redirect_target_over_tracked_reason("tracked file", Some(cwd), &[]).is_some());
     }
 
     fn init_git(root: &Path) {

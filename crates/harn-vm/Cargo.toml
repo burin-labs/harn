@@ -133,6 +133,11 @@ sha2 = "0.11"
 sha3 = "0.12"
 # POSIX-correct argv quoting; see the note in harn-cli's manifest.
 shell-words = "1.1"
+# Full POSIX/bash syntax ownership for command-policy semantics. These versions
+# match harn-hostlib's existing AST family, so policy adds no parallel parser or
+# dependency graph. Kernel child confinement remains the security boundary.
+tree-sitter = "0.26"
+tree-sitter-bash = "0.25"
 strip-ansi-escapes = "0.2"
 strsim = "0.11"
 # On-demand native stack growth for recursive walks over arbitrarily deep

@@ -19,6 +19,10 @@ fn shell_ctx(command: &str) -> JsonValue {
             "mode": "shell",
             "command": command,
             "cwd": "/tmp/work",
+            // These fixtures exercise POSIX/Bash syntax independent of the
+            // CI host. Dialect-specific Windows fixtures provide their own
+            // explicit `pwsh`/`cmd` identity below.
+            "shell": { "id": "sh", "platform": "unix" },
         },
         "workspace_roots": ["/tmp/work"],
     })
@@ -50,6 +54,11 @@ fn deterministic_scan_keeps_sensitive_commands_separate_from_interpreter_payload
     for context in [
         ctx(&["cat", ".env"]),
         shell_ctx("sh -c 'cat .env'"),
+        shell_ctx("printf '%s\\n' \"$(cat .env)\""),
+        shell_ctx("printf '%s\\n' \"`cat .env`\""),
+        shell_ctx("diff <(cat .env) README.md"),
+        shell_ctx("printf '%s\\n' \"$(sh -c 'cat .env')\""),
+        shell_ctx("(cat .env)"),
         shell_ctx("grep password .env"),
         ctx(&["head", "-q", ".env"]),
         ctx(&["tail", "-n", "5", ".env"]),
@@ -76,6 +85,238 @@ fn deterministic_scan_keeps_sensitive_commands_separate_from_interpreter_payload
     assert!(
         !labels(&reader_option).contains(&"credential_file_read".to_string()),
         "reader option value was classified as a path operand"
+    );
+
+    let literal_argv = command_risk_scan_json(&ctx(&["printf", "$(cat .env)"]), None);
+    assert!(
+        !labels(&literal_argv).contains(&"credential_file_read".to_string()),
+        "resolved argv was incorrectly reinterpreted as shell syntax"
+    );
+    assert!(
+        !labels(&literal_argv).contains(&EXECUTION_SEMANTICS_UNRESOLVED_LABEL.to_string()),
+        "resolved argv must not become unresolved shell text"
+    );
+}
+
+#[test]
+fn deterministic_scan_fails_closed_when_shell_semantics_are_unresolved() {
+    for command in ["$READER .env", "eval \"$COMMAND\"", "printf '%s"] {
+        let scan = command_risk_scan_json(&shell_ctx(command), None);
+        assert!(
+            labels(&scan).contains(&EXECUTION_SEMANTICS_UNRESOLVED_LABEL.to_string()),
+            "dynamic or malformed command silently classified as resolved: {command}"
+        );
+        assert_eq!(scan["recommended_action"], "require_approval");
+    }
+
+    let dynamic_argument = command_risk_scan_json(&shell_ctx("printf '%s\\n' \"$MESSAGE\""), None);
+    assert!(
+        !labels(&dynamic_argument).contains(&EXECUTION_SEMANTICS_UNRESOLVED_LABEL.to_string()),
+        "a resolved executable with a dynamic argument is not an unknown executable"
+    );
+    let static_find_exec =
+        command_risk_scan_json(&shell_ctx("find . -exec printf '%s' {} \\;"), None);
+    assert!(
+        !labels(&static_find_exec).contains(&EXECUTION_SEMANTICS_UNRESOLVED_LABEL.to_string()),
+        "a static find child with a dynamic path argument has resolved executable identity"
+    );
+}
+
+#[test]
+fn deterministic_scan_marks_dynamic_dispatch_dialects_and_malformed_argv_unresolved() {
+    for command in [
+        "source payload.sh",
+        ". payload.sh",
+        "bash payload.sh",
+        "env -S \"$PAYLOAD\"",
+        "env -S'$PAYLOAD'",
+        "printf x | xargs git reset --hard",
+        "parallel sh -c 'git reset --hard' ::: x",
+        "find . -exec {} \\;",
+        "sudo \"$COMMAND\"",
+        "env \"$COMMAND\"",
+        "command \"$COMMAND\"",
+        "timeout 1 \"$COMMAND\"",
+        "printf x > \"$TARGET\"",
+    ] {
+        let scan = command_risk_scan_json(&shell_ctx(command), None);
+        assert!(
+            labels(&scan).contains(&EXECUTION_SEMANTICS_UNRESOLVED_LABEL.to_string()),
+            "dynamic dispatch silently classified as resolved: {command}"
+        );
+    }
+    let inert_env_split =
+        command_risk_scan_json(&shell_ctx("env -S'echo $(git reset --hard)'"), None);
+    assert!(labels(&inert_env_split).contains(&EXECUTION_SEMANTICS_UNRESOLVED_LABEL.to_string()));
+    assert!(
+        !labels(&inert_env_split).contains(&"catastrophic".to_string()),
+        "env split-string text must not be reinterpreted as Bash"
+    );
+    for command in [
+        "env echo '-Sgit reset --hard'",
+        "env FOO=bar echo '--split-string=git reset --hard'",
+    ] {
+        let scan = command_risk_scan_json(&shell_ctx(command), None);
+        assert!(
+            !labels(&scan).contains(&"catastrophic".to_string()),
+            "an env command argument was reinterpreted as an env option: {command}"
+        );
+    }
+
+    let unsupported_dialect = serde_json::json!({
+        "request": {
+            "mode": "shell",
+            "command": "Remove-Item -Recurse .",
+            "cwd": "/tmp/work",
+            "shell": { "id": "pwsh", "platform": "windows" },
+        },
+        "workspace_roots": ["/tmp/work"],
+    });
+    assert!(labels(&command_risk_scan_json(&unsupported_dialect, None))
+        .contains(&EXECUTION_SEMANTICS_UNRESOLVED_LABEL.to_string()));
+
+    let malformed_argv = serde_json::json!({
+        "request": {
+            "mode": "argv",
+            "argv": ["printf", 7, "safe"],
+            "cwd": "/tmp/work",
+        },
+        "workspace_roots": ["/tmp/work"],
+    });
+    let scan = command_risk_scan_json(&malformed_argv, None);
+    assert!(labels(&scan).contains(&EXECUTION_SEMANTICS_UNRESOLVED_LABEL.to_string()));
+    assert_eq!(scan["recommended_action"], "require_approval");
+}
+
+#[test]
+fn canonical_context_binds_mode_argv_shape_and_resolved_shell_once() {
+    let mut malformed = crate::value::DictMap::new();
+    malformed.put_str("mode", "argv");
+    malformed.insert(
+        crate::value::intern_key("argv"),
+        VmValue::List(std::sync::Arc::new(vec![
+            VmValue::String(arcstr::ArcStr::from("printf")),
+            VmValue::Int(7),
+        ])),
+    );
+    let malformed_context =
+        command_context_json(&malformed, &CommandPolicy::default(), JsonValue::Null);
+    assert!(labels(&command_risk_scan_json(&malformed_context, None))
+        .contains(&EXECUTION_SEMANTICS_UNRESOLVED_LABEL.to_string()));
+
+    let mut fish = crate::value::DictMap::new();
+    fish.put_str("id", "fish");
+    fish.put_str("path", "/opt/example/bin/fish");
+    fish.put_str("platform", "unix");
+    let mut shell = shell_params("echo safe");
+    shell.insert(crate::value::intern_key("shell"), VmValue::dict(fish));
+    let shell_context = command_context_json(&shell, &CommandPolicy::default(), JsonValue::Null);
+    assert_eq!(shell_context["request"]["shell"]["id"], "fish");
+    assert!(labels(&command_risk_scan_json(&shell_context, None))
+        .contains(&EXECUTION_SEMANTICS_UNRESOLVED_LABEL.to_string()));
+}
+
+#[test]
+fn rewrite_and_scan_cannot_disagree_about_the_active_command_representation() {
+    let mut params = argv_params(&["printf", "safe"]);
+    let mut rewrite = crate::value::DictMap::new();
+    rewrite.put_str("mode", "shell");
+    rewrite.put_str("command", "git reset --hard");
+    let mut shell = crate::value::DictMap::new();
+    shell.put_str("id", "sh");
+    shell.put_str("path", "/bin/sh");
+    shell.put_str("platform", "unix");
+    rewrite.insert(crate::value::intern_key("shell"), VmValue::dict(shell));
+    apply_command_rewrite(&mut params, &rewrite).unwrap();
+    assert!(params.get("argv").is_none());
+
+    let context = command_context_json(&params, &CommandPolicy::default(), JsonValue::Null);
+    let scan = command_risk_scan_json(&context, None);
+    assert!(labels(&scan).contains(&"catastrophic".to_string()));
+
+    // Even an externally supplied redundant representation is interpreted by
+    // the same mode discriminator as the executor.
+    let redundant = serde_json::json!({
+        "request": {
+            "mode": "shell",
+            "argv": ["printf", "safe"],
+            "command": "git reset --hard",
+            "shell": {"id": "sh", "path": "/bin/sh", "platform": "unix"},
+            "cwd": "/tmp/work",
+        },
+        "workspace_roots": ["/tmp/work"],
+    });
+    assert!(labels(&command_risk_scan_json(&redundant, None)).contains(&"catastrophic".to_string()));
+}
+
+#[test]
+fn catastrophic_floor_reaches_commands_inside_substitutions() {
+    for command in [
+        "printf '%s\\n' \"$(rm -rf /)\"",
+        "printf '%s\\n' \"`git reset --hard`\"",
+        "diff <(mkfs.ext4 /dev/nvme0n1) README.md",
+        "trap 'git reset --hard' EXIT",
+        "find . -maxdepth 0 -exec git reset --hard \\;",
+        "find . -maxdepth 0 -ok git reset --hard \\;",
+        "printf x | xargs git reset --hard",
+        "printf x | xargs -- git reset --hard",
+        "parallel git reset --hard ::: x",
+        "parallel -- git reset --hard ::: x",
+        "parallel 'git reset --hard' ::: x",
+        "parallel -- 'git reset --hard' ::: x",
+        "env -S'git reset --hard'",
+        "env -S git reset --hard",
+        "env -S'-i git reset --hard'",
+        "env -S'-- git reset --hard'",
+        "env - -S'git reset --hard'",
+        "env -iS'git reset --hard'",
+        "env -vS'git reset --hard'",
+        "eval 'git reset --hard'",
+    ] {
+        let scan = command_risk_scan_json(&shell_ctx(command), None);
+        assert!(
+            labels(&scan).contains(&"catastrophic".to_string()),
+            "nested catastrophic command bypassed the floor: {command}"
+        );
+        assert_eq!(scan["recommended_action"], "deny");
+    }
+
+    let invalid_env = command_risk_scan_json(
+        &shell_ctx("env --ignore-environment=bogus git reset --hard"),
+        None,
+    );
+    assert!(labels(&invalid_env).contains(&EXECUTION_SEMANTICS_UNRESOLVED_LABEL.to_string()));
+    assert!(
+        !labels(&invalid_env).contains(&"catastrophic".to_string()),
+        "an invalid env option must not hard-deny an inert child"
+    );
+    for command in [
+        "env -0 git reset --hard",
+        "env -P /usr/bin git reset --hard",
+        "env --argv0 fake git reset --hard",
+        "printf x | xargs --definitely-invalid git reset --hard",
+        "parallel --tagstring git reset --hard ::: x",
+        "printf x | xargs FOO=bar git reset --hard",
+    ] {
+        assert!(
+            !labels(&command_risk_scan_json(&shell_ctx(command), None))
+                .contains(&"catastrophic".to_string()),
+            "an opaque, ambiguous, or non-executing wrapper must not invent a hard-deny child: {command}"
+        );
+    }
+
+    let literal_assignment_argv = serde_json::json!({
+        "request": {
+            "mode": "argv",
+            "argv": ["FOO=bar", "git", "reset", "--hard"],
+            "cwd": "/tmp/work",
+        },
+        "workspace_roots": ["/tmp/work"],
+    });
+    assert!(
+        !labels(&command_risk_scan_json(&literal_assignment_argv, None))
+            .contains(&"catastrophic".to_string()),
+        "literal argv must not reinterpret its executable as shell assignment syntax"
     );
 }
 
@@ -598,6 +839,7 @@ fn cat_ctx(cmd: &str, roots: &[&str]) -> JsonValue {
             "mode": "shell",
             "command": cmd,
             "cwd": active_cwd,
+            "shell": { "id": "sh", "path": "/bin/sh", "platform": "unix" },
         },
         "active_cwd": active_cwd,
         "workspace_roots": roots,
@@ -690,6 +932,8 @@ fn floor_allows_normal_commands() {
             "chmod 644 src/main.rs",
             "truncate -s 100 image.bin",
             "dd if=/dev/zero bs=1M count=1 status=none",
+            "printf '%s' ':(){ :|:& };:'",
+            ":(){ printf '%s' ':|:&'; }; :",
             "swift build",
         ] {
             let reason = cat_reason(cmd, &[ROOT]);
@@ -734,12 +978,11 @@ fn floor_documented_evasions_are_not_caught() {
     // These indirection forms are intentionally out of scope (precision over
     // recall); they are pinned so a future change that starts catching them
     // is a deliberate, reviewed decision.
-    for cmd in ["R=--hard; git reset $R", "eval \"git reset --hard\""] {
-        assert!(
-            !is_cat_root(cmd),
-            "documented evasion stays uncaught: {cmd}"
-        );
-    }
+    let cmd = "R=--hard; git reset $R";
+    assert!(
+        !is_cat_root(cmd),
+        "documented evasion stays uncaught: {cmd}"
+    );
 }
 
 #[test]
@@ -925,6 +1168,10 @@ fn floor_blocks_argv_sh_c_wrapper_seam() {
         &["sh", "-c", "echo pwned > lib/foo.ts"],
         &[root],
     ));
+    assert!(is_cat_argv(
+        &["sh", "-c", "printf '%s' \"$(: > src/main.rs)\""],
+        &[root],
+    ));
     assert!(!is_cat_argv(
         &["sh", "-c", "truncate -s 0 generated.rs"],
         &[root],
@@ -975,6 +1222,14 @@ fn shell_params(command: &str) -> crate::value::DictMap {
     let mut params = crate::value::DictMap::new();
     params.put_str("mode", "shell");
     params.put_str("command", command);
+    let mut shell = crate::value::DictMap::new();
+    shell.put_str("id", "sh");
+    // A full descriptor keeps this POSIX fixture host-independent. An id-only
+    // descriptor is resolved through the native shell catalog, where `sh` is
+    // intentionally absent on Windows.
+    shell.put_str("path", "/bin/sh");
+    shell.put_str("platform", "unix");
+    params.insert(crate::value::intern_key("shell"), VmValue::dict(shell));
     params
 }
 
@@ -1026,6 +1281,37 @@ async fn no_policy_backstop_blocks_universal_catastrophes() {
     assert_floor_blocked(&preflight_argv(&["sh", "-c", ":(){ :|:& };:"]).await);
     assert_floor_blocked(&preflight_argv(&["mkfs.ext4", "/dev/sda"]).await);
     assert_floor_blocked(&preflight_argv(&["dd", "of=/dev/sda", "if=/dev/zero"]).await);
+    clear_command_policies();
+}
+
+#[tokio::test]
+async fn unresolved_execution_uses_a_real_policy_consent_gate() {
+    clear_command_policies();
+    for command in ["$READER .env", "eval \"$COMMAND\"", "source payload.sh"] {
+        assert_proceed(&preflight_shell(command).await);
+    }
+
+    push_command_policy(CommandPolicy::default());
+    match preflight_shell("eval \"$COMMAND\"").await {
+        CommandPolicyPreflight::Blocked {
+            status, decisions, ..
+        } => {
+            assert_eq!(status, "blocked");
+            assert!(decisions.iter().any(|decision| {
+                decision.action == "require_approval"
+                    && decision.source == "deterministic"
+                    && decision
+                        .risk_labels
+                        .iter()
+                        .any(|label| label == EXECUTION_SEMANTICS_UNRESOLVED_LABEL)
+            }));
+        }
+        other => panic!("installed policy silently allowed unresolved execution: {other:?}"),
+    }
+    clear_command_policies();
+
+    // Dynamic arguments do not obscure the already-resolved executable.
+    assert_proceed(&preflight_shell("printf '%s\\n' \"$MESSAGE\"").await);
     clear_command_policies();
 }
 
