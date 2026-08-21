@@ -199,25 +199,54 @@ fn parse_template_renders(path: &Path) -> Result<Vec<PortalTemplateRender>, Stri
     let content = fs::read_to_string(path)
         .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
     let mut out = Vec::new();
+    let mut capability_snapshots = HashMap::<String, serde_json::Value>::new();
     let policy = harn_vm::redact::current_policy();
     for line in content.lines().filter(|line| !line.trim().is_empty()) {
         let mut raw: serde_json::Value = match serde_json::from_str(line) {
             Ok(value) => value,
             Err(_) => continue,
         };
-        policy.redact_json_in_place(&mut raw);
-        if raw.get("type").and_then(|v| v.as_str()) != Some("template.render") {
-            continue;
+        match raw.get("type").and_then(|v| v.as_str()) {
+            Some(harn_vm::llm::CAPABILITY_SNAPSHOT_EVENT_TYPE) => {
+                if raw.get("schema").and_then(|v| v.as_str())
+                    != Some(harn_vm::llm::CAPABILITY_SNAPSHOT_SCHEMA)
+                {
+                    continue;
+                }
+                let Some(snapshot_id) = raw.get("snapshot_id").and_then(|v| v.as_str()) else {
+                    continue;
+                };
+                let Some(llm) = raw.get("llm").filter(|value| value.is_object()) else {
+                    continue;
+                };
+                if harn_vm::llm::capability_snapshot_id(llm) != snapshot_id {
+                    continue;
+                }
+                let mut retained_llm = llm.clone();
+                policy.redact_json_in_place(&mut retained_llm);
+                // Content-addressed definitions are immutable. Preserve the
+                // first observed value if a damaged or hostile transcript
+                // repeats an identifier with a different body.
+                capability_snapshots
+                    .entry(snapshot_id.to_string())
+                    .or_insert(retained_llm);
+            }
+            Some("template.render") => {
+                policy.redact_json_in_place(&mut raw);
+                if let Some(record) = extract_template_render(&raw, &capability_snapshots) {
+                    out.push(record);
+                }
+            }
+            _ => {}
         }
-        let Some(record) = extract_template_render(&raw) else {
-            continue;
-        };
-        out.push(record);
     }
     Ok(out)
 }
 
-fn extract_template_render(raw: &serde_json::Value) -> Option<PortalTemplateRender> {
+fn extract_template_render(
+    raw: &serde_json::Value,
+    capability_snapshots: &HashMap<String, serde_json::Value>,
+) -> Option<PortalTemplateRender> {
     let template_uri = raw
         .get("template_uri")
         .and_then(|v| v.as_str())
@@ -233,23 +262,36 @@ fn extract_template_render(raw: &serde_json::Value) -> Option<PortalTemplateRend
         .and_then(|v| v.as_u64())
         .unwrap_or_default() as usize;
     let llm = raw.get("llm")?;
-    let provider = llm
-        .get("provider")
+    let snapshot_ref = llm
+        .get("capability_snapshot_ref")
+        .and_then(|value| value.as_str());
+    let retained_llm = snapshot_ref.and_then(|snapshot_id| capability_snapshots.get(snapshot_id));
+    let legacy_inline_llm = snapshot_ref.is_none().then_some(llm);
+    // A verified content-addressed definition is authoritative for the whole
+    // LLM identity. Once an event claims a snapshot reference, never fall back
+    // to inline fields when that reference is missing or invalid: doing so
+    // would turn a failed integrity check into legacy-format acceptance.
+    let provider = retained_llm
+        .and_then(|snapshot| snapshot.get("provider"))
+        .or_else(|| legacy_inline_llm.and_then(|inline| inline.get("provider")))
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
-    let model = llm
-        .get("model")
+    let model = retained_llm
+        .and_then(|snapshot| snapshot.get("model"))
+        .or_else(|| legacy_inline_llm.and_then(|inline| inline.get("model")))
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
-    let family = llm
-        .get("family")
+    let family = retained_llm
+        .and_then(|snapshot| snapshot.get("family"))
+        .or_else(|| legacy_inline_llm.and_then(|inline| inline.get("family")))
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
-    let capabilities = llm
-        .get("capabilities")
+    let capabilities = retained_llm
+        .and_then(|snapshot| snapshot.get("capabilities"))
+        .or_else(|| legacy_inline_llm.and_then(|inline| inline.get("capabilities")))
         .and_then(|v| v.as_object())
         .map(|map| {
             map.iter()

@@ -28,6 +28,8 @@ use super::state::PortalState;
 use super::transcript::discover_transcript_steps;
 use super::util::{date_ms, owning_stage, portal_now_rfc3339, portal_unique_id, preview_text};
 
+mod capability_snapshot_tests;
+
 fn test_portal_state(run_dir: &Path) -> Arc<PortalState> {
     test_portal_state_with_mutations(run_dir, true)
 }

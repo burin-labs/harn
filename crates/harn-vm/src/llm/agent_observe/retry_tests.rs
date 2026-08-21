@@ -240,19 +240,50 @@ fn template_render_event_round_trips_through_jsonl() {
         .expect("render");
         assert!(rendered.contains("native"));
         assert!(rendered.contains("<task>"));
+        render_template_to_string("{{ if llm }}same snapshot{{ end }}", None, None, None)
+            .expect("second render");
     }
     pop_llm_transcript_dir();
     let transcript =
         std::fs::read_to_string(dir.path().join("llm_transcript.jsonl")).expect("read transcript");
-    let line = transcript
+    let events = transcript
         .lines()
-        .find(|line| line.contains("\"template.render\""))
-        .expect("template.render event present");
-    let event: serde_json::Value = serde_json::from_str(line).expect("parse event");
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("parse event"))
+        .collect::<Vec<_>>();
+    let snapshots = events
+        .iter()
+        .filter(|event| event["type"] == crate::llm::CAPABILITY_SNAPSHOT_EVENT_TYPE)
+        .collect::<Vec<_>>();
+    let renders = events
+        .iter()
+        .filter(|event| event["type"] == "template.render")
+        .collect::<Vec<_>>();
+    assert_eq!(snapshots.len(), 1, "an exact snapshot is retained once");
+    assert_eq!(renders.len(), 2, "each render remains observable");
+
+    let snapshot = snapshots[0];
+    let event = renders[0];
     assert_eq!(event["type"], "template.render");
     assert_eq!(event["llm"]["provider"], "anthropic");
     assert_eq!(event["llm"]["family"], "anthropic-claude");
-    assert_eq!(event["llm"]["capabilities"]["native_tools"], true);
+    assert!(
+        event["llm"].get("capabilities").is_none(),
+        "render events must not repeat the heavy capability payload"
+    );
+    assert_eq!(
+        event["llm"]["capability_snapshot_ref"],
+        snapshot["snapshot_id"]
+    );
+    assert_eq!(
+        renders[1]["llm"]["capability_snapshot_ref"], snapshot["snapshot_id"],
+        "later renders resolve the same retained snapshot"
+    );
+    assert_eq!(snapshot["schema"], crate::llm::CAPABILITY_SNAPSHOT_SCHEMA);
+    assert_eq!(snapshot["llm"]["provider"], "anthropic");
+    assert_eq!(snapshot["llm"]["capabilities"]["native_tools"], true);
+    assert!(snapshot["snapshot_id"]
+        .as_str()
+        .is_some_and(|id| id.starts_with("blake3:")));
     let branches = event["branches"].as_array().expect("branches array");
     let if_branch = branches
         .iter()
@@ -265,6 +296,120 @@ fn template_render_event_round_trips_through_jsonl() {
         .expect("section branch present");
     assert_eq!(section_branch["branch_id"], "xml");
     assert_eq!(section_branch["branch_label"], "task");
+}
+
+#[test]
+fn template_render_snapshots_distinct_capabilities_and_redacts_before_hashing() {
+    use crate::stdlib::template::{
+        render_template_to_string, LlmRenderContext, LlmRenderContextGuard,
+    };
+    use crate::value::VmValue;
+
+    let local_context = || LlmRenderContext {
+        provider: "local".to_string(),
+        model: "model-a".to_string(),
+        family: "test".to_string(),
+        capabilities: VmValue::dict(crate::value::DictMap::from_iter([
+            (
+                crate::value::intern_key("native_tools"),
+                VmValue::Bool(false),
+            ),
+            (
+                crate::value::intern_key("api_key"),
+                VmValue::String(arcstr::ArcStr::from("must-not-survive")),
+            ),
+        ])),
+    };
+    let dir = tempfile::tempdir().expect("tempdir");
+    push_llm_transcript_dir(dir.path().to_str().expect("utf8"));
+    {
+        let _ctx = LlmRenderContextGuard::enter(local_context());
+        render_template_to_string("first", None, None, None).expect("first render");
+    }
+    {
+        let _ctx =
+            LlmRenderContextGuard::enter(LlmRenderContext::resolve("anthropic", "claude-opus-4-7"));
+        render_template_to_string("second", None, None, None).expect("second render");
+    }
+    {
+        let _ctx = LlmRenderContextGuard::enter(local_context());
+        render_template_to_string("third", None, None, None).expect("third render");
+    }
+    pop_llm_transcript_dir();
+
+    let transcript =
+        std::fs::read_to_string(dir.path().join("llm_transcript.jsonl")).expect("read transcript");
+    assert!(
+        !transcript.contains("must-not-survive"),
+        "snapshot values must be redacted before retention"
+    );
+    let snapshots = transcript
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("parse event"))
+        .filter(|event| event["type"] == crate::llm::CAPABILITY_SNAPSHOT_EVENT_TYPE)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        snapshots.len(),
+        2,
+        "distinct snapshots need distinct definitions"
+    );
+    assert_ne!(snapshots[0]["snapshot_id"], snapshots[1]["snapshot_id"]);
+    assert_eq!(
+        snapshots[0]["llm"]["capabilities"]["api_key"],
+        crate::redact::REDACTED_PLACEHOLDER
+    );
+    let renders = transcript
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("parse event"))
+        .filter(|event| event["type"] == "template.render")
+        .collect::<Vec<_>>();
+    assert_eq!(renders.len(), 3);
+    assert_eq!(
+        renders[0]["llm"]["capability_snapshot_ref"], renders[2]["llm"]["capability_snapshot_ref"],
+        "A/B/A must reuse A's content-addressed definition"
+    );
+}
+
+#[test]
+fn failed_snapshot_write_is_retried_before_the_next_reference() {
+    use crate::stdlib::template::{
+        render_template_to_string, LlmRenderContext, LlmRenderContextGuard,
+    };
+
+    let root = tempfile::tempdir().expect("tempdir");
+    let transcript_dir = root.path().join("transcript");
+    std::fs::write(&transcript_dir, "blocks directory creation").expect("blocking file");
+    push_llm_transcript_dir(transcript_dir.to_str().expect("utf8"));
+    {
+        let _ctx =
+            LlmRenderContextGuard::enter(LlmRenderContext::resolve("anthropic", "claude-opus-4-7"));
+        render_template_to_string("first write fails", None, None, None).expect("first render");
+        std::fs::remove_file(&transcript_dir).expect("remove blocking file");
+        std::fs::create_dir(&transcript_dir).expect("repair transcript directory");
+        render_template_to_string("second write retries", None, None, None).expect("second render");
+    }
+    pop_llm_transcript_dir();
+
+    let transcript =
+        std::fs::read_to_string(transcript_dir.join("llm_transcript.jsonl")).expect("transcript");
+    let events = transcript
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("event"))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        events.len(),
+        2,
+        "definition must precede the surviving reference"
+    );
+    assert_eq!(
+        events[0]["type"],
+        crate::llm::CAPABILITY_SNAPSHOT_EVENT_TYPE
+    );
+    assert_eq!(events[1]["type"], "template.render");
+    assert_eq!(
+        events[1]["llm"]["capability_snapshot_ref"],
+        events[0]["snapshot_id"]
+    );
 }
 
 // Fix B regression: for text-format local models (llamacpp/qwen3.6) the

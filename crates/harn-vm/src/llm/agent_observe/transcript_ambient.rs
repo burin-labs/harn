@@ -1,6 +1,7 @@
 //! Ambient transcript routing and per-scope deduplication state.
 
 use std::cell::RefCell;
+use std::collections::BTreeSet;
 
 thread_local! {
     /// Last-emitted hashes for the current transcript. These avoid writing
@@ -8,6 +9,10 @@ thread_local! {
     static LAST_SYSTEM_PROMPT_HASH: RefCell<Option<u64>> = const { RefCell::new(None) };
     static LAST_CONTEXT_MANIFEST_HASH: RefCell<Option<u64>> = const { RefCell::new(None) };
     static LAST_TOOL_SCHEMAS_HASH: RefCell<Option<u64>> = const { RefCell::new(None) };
+    /// Content-addressed LLM capability snapshots already written to the
+    /// active transcript. Unlike prompt/schema state, template renders carry
+    /// an explicit snapshot reference, so A/B/A may safely emit A only once.
+    static EMITTED_CAPABILITY_SNAPSHOT_IDS: RefCell<BTreeSet<String>> = const { RefCell::new(BTreeSet::new()) };
     static TRANSCRIPT_DIR_STACK: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
 }
 
@@ -19,6 +24,7 @@ pub(crate) struct LlmTranscriptAmbient {
     system_prompt_hash: Option<u64>,
     context_manifest_hash: Option<u64>,
     tool_schemas_hash: Option<u64>,
+    capability_snapshot_ids: BTreeSet<String>,
     transcript_dirs: Vec<String>,
 }
 
@@ -34,6 +40,9 @@ pub(crate) fn swap_llm_transcript_ambient(
         }),
         tool_schemas_hash: LAST_TOOL_SCHEMAS_HASH
             .with(|slot| std::mem::replace(&mut *slot.borrow_mut(), replacement.tool_schemas_hash)),
+        capability_snapshot_ids: EMITTED_CAPABILITY_SNAPSHOT_IDS.with(|slot| {
+            std::mem::replace(&mut *slot.borrow_mut(), replacement.capability_snapshot_ids)
+        }),
         transcript_dirs: TRANSCRIPT_DIR_STACK
             .with(|slot| std::mem::replace(&mut *slot.borrow_mut(), replacement.transcript_dirs)),
     }
@@ -43,6 +52,7 @@ fn reset_deduplication() {
     LAST_SYSTEM_PROMPT_HASH.with(|hash| *hash.borrow_mut() = None);
     LAST_CONTEXT_MANIFEST_HASH.with(|hash| *hash.borrow_mut() = None);
     LAST_TOOL_SCHEMAS_HASH.with(|hash| *hash.borrow_mut() = None);
+    EMITTED_CAPABILITY_SNAPSHOT_IDS.with(|ids| ids.borrow_mut().clear());
 }
 
 pub(super) fn system_prompt_changed(current: u64) -> bool {
@@ -55,6 +65,29 @@ pub(super) fn context_manifest_changed(current: u64) -> bool {
 
 pub(super) fn tool_schemas_changed(current: u64) -> bool {
     hash_changed(&LAST_TOOL_SCHEMAS_HASH, current)
+}
+
+/// Whether this transcript scope still needs a capability definition.
+///
+/// Without an explicit transcript directory there is no durable scope in
+/// which a prior definition is guaranteed to remain reachable (run-event and
+/// event-log sinks may turn over independently), so callers conservatively
+/// emit the definition beside every reference.
+pub(super) fn capability_snapshot_needs_definition(snapshot_id: &str) -> bool {
+    if current_transcript_dir().is_none() {
+        return true;
+    }
+    EMITTED_CAPABILITY_SNAPSHOT_IDS.with(|ids| !ids.borrow().contains(snapshot_id))
+}
+
+/// Mark a definition only after its transcript write succeeds. Claiming before
+/// the append would let one transient I/O failure poison every later reference.
+pub(super) fn record_capability_snapshot_definition(snapshot_id: &str) {
+    if current_transcript_dir().is_some() {
+        EMITTED_CAPABILITY_SNAPSHOT_IDS.with(|ids| {
+            ids.borrow_mut().insert(snapshot_id.to_string());
+        });
+    }
 }
 
 fn hash_changed(slot: &'static std::thread::LocalKey<RefCell<Option<u64>>>, current: u64) -> bool {
@@ -100,6 +133,35 @@ mod tests {
     use crate::orchestration::{scope_ambient, AmbientExecutionScope};
 
     use super::*;
+
+    #[test]
+    fn capability_snapshot_claims_are_scoped_to_a_pushed_transcript() {
+        let saved = swap_llm_transcript_ambient(LlmTranscriptAmbient::default());
+        assert!(
+            capability_snapshot_needs_definition("blake3:unscoped"),
+            "an unscoped event sink needs a definition beside every reference"
+        );
+        assert!(capability_snapshot_needs_definition("blake3:unscoped"));
+
+        push_llm_transcript_dir("/tmp/harn-capability-snapshot-scope");
+        assert!(capability_snapshot_needs_definition("blake3:a"));
+        assert!(
+            capability_snapshot_needs_definition("blake3:a"),
+            "checking cannot claim a definition before persistence"
+        );
+        record_capability_snapshot_definition("blake3:a");
+        assert!(!capability_snapshot_needs_definition("blake3:a"));
+        assert!(capability_snapshot_needs_definition("blake3:b"));
+        pop_llm_transcript_dir();
+
+        push_llm_transcript_dir("/tmp/harn-capability-snapshot-scope");
+        assert!(
+            capability_snapshot_needs_definition("blake3:a"),
+            "a new pushed scope cannot inherit a prior file's definitions"
+        );
+        pop_llm_transcript_dir();
+        let _ = swap_llm_transcript_ambient(saved);
+    }
 
     #[tokio::test(flavor = "current_thread")]
     async fn transcript_dir_is_isolated_across_interleaving_and_cancelled_tasks() {
