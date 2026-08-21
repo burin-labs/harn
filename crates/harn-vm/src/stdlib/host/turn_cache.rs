@@ -1,11 +1,14 @@
 //! Per-turn memoization of turn-stable host capability reads.
 //!
-//! Context assembly reads `runtime.pipeline_input` many times per agent-loop
-//! iteration — harn#5190 measured ~20 identical round-trips per turn, a cost
-//! that grows as hosts deliver more data through that channel. This module
+//! Context assembly repeatedly reads the same host facts per agent-loop
+//! iteration. harn#5190 measured ~20 identical `runtime.pipeline_input`
+//! round-trips per turn; Burin H-063 later measured roughly 164 repeated
+//! `project.metadata_get` calls in an ordinary context build. This module
 //! front-runs the thread-local `HOST_CALL_BRIDGE` with a per-turn memo so those
-//! reads collapse to one host round-trip per turn, leaving every call site
-//! unchanged. The allowlist ([`is_turn_stable`]) is deliberately narrow.
+//! reads collapse to one host round-trip per exact argument set, leaving every
+//! call site unchanged. The allowlist ([`is_turn_stable`]) is deliberately
+//! narrow, and metadata mutations invalidate the whole memo before and after
+//! dispatch so inherited read-after-write values cannot be stale.
 //!
 //! The memoized value is stable only *within* a turn: the host re-projects
 //! `runtime.pipeline_input` each turn (e.g. so a mid-session model switch is
@@ -53,6 +56,30 @@ fn current_epoch() -> u64 {
     TURN_EPOCH.load(Ordering::Acquire)
 }
 
+/// Cache semantics for a canonical host operation.
+///
+/// This is the single owner of both admission and invalidation: adding a
+/// stable read without naming its mutators (or adding a mutator in a separate
+/// string table) is therefore visible in one exhaustive match.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum TurnCacheDisposition {
+    StableRead,
+    Invalidates,
+    Live,
+}
+
+fn disposition(capability: &str, operation: &str) -> TurnCacheDisposition {
+    match (capability, operation) {
+        ("runtime", "pipeline_input") | ("project", "metadata_get") => {
+            TurnCacheDisposition::StableRead
+        }
+        ("project", "metadata_set" | "metadata_save" | "metadata_refresh_hashes") => {
+            TurnCacheDisposition::Invalidates
+        }
+        _ => TurnCacheDisposition::Live,
+    }
+}
+
 /// True for host capabilities whose result is stable for the duration of a
 /// single agent-loop iteration: pure, side-effect-free reads that project the
 /// current turn's host input.
@@ -63,26 +90,47 @@ fn current_epoch() -> u64 {
 /// interactive prompt, or any value a host can change mid-turn is never served
 /// stale.
 ///
-/// Only `runtime.pipeline_input` qualifies today: every Burin host recomputes it
-/// per turn from per-turn-stable inputs (model selection, task, dry-run), so a
-/// mid-turn re-read never diverges. Deliberately excluded after auditing the
-/// producers:
+/// The qualifying reads are:
+/// - `runtime.pipeline_input`: every Burin host recomputes it per turn from
+///   per-turn-stable inputs (model selection, task, dry-run), so a mid-turn
+///   re-read never diverges.
+/// - `project.metadata_get`: directory metadata is coherent for a turn unless
+///   the canonical metadata mutation operations change it. Those writes
+///   invalidate the global epoch on both sides of dispatch; parameterized keys
+///   keep directories and namespaces distinct.
+///
+/// Deliberately excluded after auditing the producers:
 /// - `session.active_roots` — the IDE host serves it live from the mutable
 ///   workspace root set (also used live for path validation), so a user adding
 ///   a root mid-turn would be served stale within the turn.
+/// - `project.metadata_inspect` / `metadata_stale` — their freshness fields can
+///   change when workspace files change, independently of metadata mutations.
 /// - `runtime.task` / `runtime.dry_run` / `runtime.approved_plan` — not served
 ///   as standalone host ops by the Burin hosts at all; their values ride inside
 ///   `pipeline_input` (already cached here), so caching the standalone op buys
 ///   nothing.
 fn is_turn_stable(capability: &str, operation: &str) -> bool {
-    matches!((capability, operation), ("runtime", "pipeline_input"))
+    disposition(capability, operation) == TurnCacheDisposition::StableRead
+}
+
+/// True when a host operation can change a memoized fact.
+///
+/// Metadata resolution is hierarchical: writing an ancestor can change a
+/// descendant read, and saving can make host-managed metadata visible through
+/// a different backend. Exact-key eviction would therefore be unsound. The
+/// caller opens a fresh global epoch both before and after these operations,
+/// which also makes concurrent cross-thread refills conservative rather than
+/// stale. Writes are rare, so invalidating `runtime.pipeline_input` alongside
+/// metadata is a cheaper and safer seam than a second metadata-only epoch.
+pub(crate) fn invalidates_turn_stable_reads(capability: &str, operation: &str) -> bool {
+    disposition(capability, operation) == TurnCacheDisposition::Invalidates
 }
 
 /// Cache key for a turn-stable host call. Keyed on capability, operation, and a
-/// canonical fingerprint of the params so a (future) parameterized read caches
-/// per distinct argument set; the current allowlist is all no-arg reads that
-/// take the cheap empty-params path. serde_json's `Map` is key-sorted here (no
-/// `preserve_order` feature), so the fingerprint is stable.
+/// canonical fingerprint of the params so `project.metadata_get` caches per
+/// distinct directory/namespace while no-arg reads retain the cheap fast path.
+/// serde_json's `Map` is key-sorted here (no `preserve_order` feature), so the
+/// fingerprint is stable.
 fn cache_key(capability: &str, operation: &str, params: &DictMap) -> String {
     if params.is_empty() {
         return format!("{capability}.{operation}");
@@ -114,9 +162,10 @@ where
     if let Some(cached) = lookup(capability, operation, params) {
         return Ok(Some(cached));
     }
+    let dispatch_epoch = current_epoch();
     let result = dispatch().await?;
     if let Some(value) = &result {
-        store(capability, operation, params, value);
+        store_at_epoch(capability, operation, params, value, dispatch_epoch);
     }
     Ok(result)
 }
@@ -148,13 +197,34 @@ pub fn lookup(capability: &str, operation: &str, params: &DictMap) -> Option<VmV
 /// Non-allowlisted `(capability, operation)` pairs are ignored, so a caller
 /// cannot widen the allowlist by calling this directly. See [`lookup`].
 pub fn store(capability: &str, operation: &str, params: &DictMap, value: &VmValue) {
+    store_at_epoch(capability, operation, params, value, current_epoch());
+}
+
+/// Store a value only in the epoch in which its host dispatch began.
+///
+/// A read can be in flight while a metadata mutation opens a new epoch. It may
+/// still return its result to that original caller, but tagging the memo entry
+/// with the captured epoch makes the stale refill unreadable. Loading the
+/// current epoch and then storing with it would let a slow pre-write read poison
+/// the post-write cache after the mutator's trailing reset.
+fn store_at_epoch(
+    capability: &str,
+    operation: &str,
+    params: &DictMap,
+    value: &VmValue,
+    dispatch_epoch: u64,
+) {
     if !is_turn_stable(capability, operation) {
         return;
     }
+    if current_epoch() != dispatch_epoch {
+        return;
+    }
     let key = cache_key(capability, operation, params);
-    let epoch = current_epoch();
     TURN_STABLE_HOST_CACHE.with(|cache| {
-        cache.borrow_mut().insert(key, (epoch, value.clone()));
+        cache
+            .borrow_mut()
+            .insert(key, (dispatch_epoch, value.clone()));
     });
 }
 
@@ -235,6 +305,41 @@ mod tests {
     /// every op, so a test can assert how many times the host was actually hit.
     struct CountingRuntimeBridge {
         counts: Arc<Mutex<std::collections::HashMap<(String, String), usize>>>,
+    }
+
+    struct VersionedMetadataBridge {
+        generation: Arc<std::sync::atomic::AtomicUsize>,
+        counts: Arc<Mutex<std::collections::HashMap<(String, String), usize>>>,
+    }
+
+    impl HostCallBridge for VersionedMetadataBridge {
+        fn dispatch<'a>(
+            &'a self,
+            capability: &'a str,
+            operation: &'a str,
+            params: &'a DictMap,
+        ) -> super::super::HostCallDispatchFuture<'a> {
+            *self
+                .counts
+                .lock()
+                .unwrap()
+                .entry((capability.to_string(), operation.to_string()))
+                .or_insert(0) += 1;
+            if capability == "project" && operation == "metadata_set" {
+                self.generation
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                return super::super::host_call_ready(Ok(Some(VmValue::Nil)));
+            }
+            let generation = self.generation.load(std::sync::atomic::Ordering::SeqCst);
+            let dir = params.get("dir").map(VmValue::display).unwrap_or_default();
+            let namespace = params
+                .get("namespace")
+                .map(VmValue::display)
+                .unwrap_or_default();
+            super::super::host_call_ready(Ok(Some(VmValue::String(arcstr::ArcStr::from(format!(
+                "v{generation}:{dir}:{namespace}"
+            ))))))
+        }
     }
 
     impl HostCallBridge for CountingRuntimeBridge {
@@ -334,6 +439,125 @@ mod tests {
         });
     }
 
+    #[test]
+    fn metadata_reads_are_parameterized_and_writes_invalidate_inherited_values() {
+        let _guard = super::epoch_test_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        run_async(|| async {
+            reset_host_state();
+            let counts = Arc::new(Mutex::new(std::collections::HashMap::new()));
+            let generation = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            set_host_call_bridge(Arc::new(VersionedMetadataBridge {
+                generation,
+                counts: counts.clone(),
+            }));
+
+            let count = |op: &str| -> usize {
+                counts
+                    .lock()
+                    .unwrap()
+                    .get(&("project".to_string(), op.to_string()))
+                    .copied()
+                    .unwrap_or(0)
+            };
+            let descendant_facts = DictMap::from_iter([
+                (
+                    crate::value::intern_key("dir"),
+                    VmValue::String(arcstr::ArcStr::from("src/nested")),
+                ),
+                (
+                    crate::value::intern_key("namespace"),
+                    VmValue::String(arcstr::ArcStr::from("facts")),
+                ),
+            ]);
+            let descendant_test = DictMap::from_iter([
+                (
+                    crate::value::intern_key("dir"),
+                    VmValue::String(arcstr::ArcStr::from("src/nested")),
+                ),
+                (
+                    crate::value::intern_key("namespace"),
+                    VmValue::String(arcstr::ArcStr::from("test")),
+                ),
+            ]);
+
+            for _ in 0..100 {
+                let value = dispatch_host_operation("project", "metadata_get", &descendant_facts)
+                    .await
+                    .expect("metadata_get");
+                assert_eq!(value.display(), "v0:src/nested:facts");
+            }
+            assert_eq!(
+                count("metadata_get"),
+                1,
+                "100 exact reads must dispatch once"
+            );
+
+            dispatch_host_operation("project", "metadata_get", &descendant_test)
+                .await
+                .expect("parameter-distinct metadata_get");
+            assert_eq!(
+                count("metadata_get"),
+                2,
+                "a distinct namespace must retain its own memo entry"
+            );
+
+            let ancestor_write = DictMap::from_iter([
+                (
+                    crate::value::intern_key("dir"),
+                    VmValue::String(arcstr::ArcStr::from("src")),
+                ),
+                (
+                    crate::value::intern_key("namespace"),
+                    VmValue::String(arcstr::ArcStr::from("facts")),
+                ),
+                (
+                    crate::value::intern_key("value"),
+                    VmValue::dict(DictMap::new()),
+                ),
+            ]);
+            dispatch_host_operation("project", "metadata_set", &ancestor_write)
+                .await
+                .expect("metadata_set");
+            assert_eq!(count("metadata_set"), 1);
+
+            let refreshed = dispatch_host_operation("project", "metadata_get", &descendant_facts)
+                .await
+                .expect("read after ancestor write");
+            assert_eq!(
+                refreshed.display(),
+                "v1:src/nested:facts",
+                "an ancestor write must invalidate a cached descendant read"
+            );
+            assert_eq!(count("metadata_get"), 3);
+
+            reset();
+            dispatch_host_operation("project", "metadata_get", &descendant_facts)
+                .await
+                .expect("next-turn metadata_get");
+            assert_eq!(count("metadata_get"), 4, "the next turn must re-read once");
+
+            clear_host_call_bridge();
+        });
+    }
+
+    #[test]
+    fn every_canonical_metadata_mutator_invalidates_turn_stable_reads() {
+        for operation in ["metadata_set", "metadata_save", "metadata_refresh_hashes"] {
+            assert!(
+                super::invalidates_turn_stable_reads("project", operation),
+                "project.{operation} must invalidate the metadata read memo"
+            );
+        }
+        for operation in ["metadata_get", "metadata_inspect", "metadata_stale"] {
+            assert!(
+                !super::invalidates_turn_stable_reads("project", operation),
+                "read-only project.{operation} must not open a new epoch"
+            );
+        }
+    }
+
     /// A turn boundary observed on a *different* thread must still invalidate
     /// entries cached here.
     ///
@@ -362,6 +586,37 @@ mod tests {
         assert!(
             super::lookup("runtime", "pipeline_input", &params).is_none(),
             "a turn boundary observed on another thread must invalidate this thread's entry"
+        );
+    }
+
+    /// A host read that began before a mutation may complete after the
+    /// mutator's trailing reset. The result is valid for its original caller,
+    /// but it must not refill the new epoch's memo.
+    #[test]
+    fn pre_mutation_read_cannot_poison_the_post_mutation_epoch() {
+        let _guard = super::epoch_test_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        reset();
+        let params = DictMap::from_iter([(
+            crate::value::intern_key("dir"),
+            VmValue::String(arcstr::ArcStr::from("src")),
+        )]);
+        let dispatch_epoch = super::current_epoch();
+
+        // Models a metadata write completing while this read is in flight.
+        reset();
+        super::store_at_epoch(
+            "project",
+            "metadata_get",
+            &params,
+            &VmValue::String(arcstr::ArcStr::from("stale")),
+            dispatch_epoch,
+        );
+
+        assert!(
+            super::lookup("project", "metadata_get", &params).is_none(),
+            "an old dispatch result must not become the new epoch's cached value"
         );
     }
 

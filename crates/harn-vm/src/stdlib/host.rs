@@ -806,6 +806,26 @@ pub async fn dispatch_host_operation_with_ctx(
     operation: &str,
     params: &crate::value::DictMap,
 ) -> Result<VmValue, VmError> {
+    let invalidates_turn_cache = turn_cache::invalidates_turn_stable_reads(capability, operation);
+    if invalidates_turn_cache {
+        // Invalidate before dispatch so no concurrent reader can keep an old
+        // value alive across a metadata mutation. The matching post-dispatch
+        // reset below rejects any stale refill that raced the write itself.
+        turn_cache::reset();
+    }
+    let result = dispatch_host_operation_with_ctx_inner(ctx, capability, operation, params).await;
+    if invalidates_turn_cache {
+        turn_cache::reset();
+    }
+    result
+}
+
+async fn dispatch_host_operation_with_ctx_inner(
+    ctx: Option<&AsyncBuiltinCtx>,
+    capability: &str,
+    operation: &str,
+    params: &crate::value::DictMap,
+) -> Result<VmValue, VmError> {
     if let Some(ctx) = ctx {
         let vm = ctx.child_vm();
         if let Some(fixtured) = vm.harness().and_then(|harness| {
@@ -860,9 +880,10 @@ pub async fn dispatch_host_operation_with_ctx(
 
     let bridge = HOST_CALL_BRIDGE.with(|b| b.borrow().clone());
     if let Some(bridge) = bridge {
-        // Serve turn-stable reads (e.g. `runtime.pipeline_input`) from the
-        // per-turn memo so context assembly pays one host round-trip per turn
-        // instead of once per shard. harn#5190.
+        // Serve exact turn-stable reads from the per-turn memo so context
+        // assembly pays one host round-trip per argument set instead of once
+        // per shard. Metadata writes invalidate on both sides of dispatch.
+        // harn#5190, harn#6914.
         let dispatched = turn_cache::cached_or(capability, operation, params, || {
             bridge.dispatch(capability, operation, params)
         })
