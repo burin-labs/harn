@@ -226,6 +226,15 @@ Code's release pipeline runs `harn precompile` against its bundled
 `Sources/BurinCore/Resources/pipelines/` so the shipped DMG already
 contains both artifact files for every script the user might run.
 
+Directory precompile treats the walked tree as a relocatable artifact set:
+entry keys identify imported files by their path relative to each entrypoint,
+so moving an unchanged complete tree to another checkout or machine keeps its
+adjacent artifacts valid. A single-file precompile keeps the ordinary
+host-path-anchored key because Harn cannot prove that an independently moved
+dependency graph is complete. Build tooling can query the exact compatibility
+token with `harn precompile --artifact-contract`; it must not infer artifact
+relocatability from a Harn version string.
+
 ## Toggles and environment
 
 - `HARN_CACHE_DIR=<path>` — relocate the cache directory.

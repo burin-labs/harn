@@ -32,10 +32,14 @@ use crate::env_guard::ScopedEnvVar;
 use crate::parse_source_file;
 use crate::typecheck_imports::checker_with_resolved_imports;
 
+mod artifact_path;
+use artifact_path::output_path;
+
 /// Env var the embedded `cli/precompile` script reads to find the
 /// running `harn` binary path. Set from `std::env::current_exe()` so
 /// the child invocation is robust to $PATH ordering / test sandboxes.
 pub const PRECOMPILE_BIN_ENV: &str = "HARN_CLI_SELF_EXE";
+pub const PRECOMPILE_ARTIFACT_CONTRACT: &str = "harn.precompile.artifacts/relocatable-v1";
 
 /// Output directory the script forwards to its per-file child via
 /// `--out`. Cleared on drop so a follow-on invocation in the same
@@ -46,6 +50,10 @@ const PRECOMPILE_QUIET_ENV: &str = "HARN_PRECOMPILE_QUIET";
 pub const PRECOMPILE_INNER_ENV: &str = "HARN_PRECOMPILE_INNER";
 
 pub async fn run(args: PrecompileArgs) {
+    if args.artifact_contract {
+        println!("{PRECOMPILE_ARTIFACT_CONTRACT}");
+        return;
+    }
     if std::env::var(PRECOMPILE_INNER_ENV).as_deref() == Ok("1") {
         run_inner_compile(args);
         return;
@@ -71,7 +79,11 @@ pub async fn run(args: PrecompileArgs) {
         None
     };
 
-    let argv = vec![args.target.to_string_lossy().into_owned()];
+    let target = args
+        .target
+        .as_ref()
+        .unwrap_or_else(|| command_error("precompile target is required"));
+    let argv = vec![target.to_string_lossy().into_owned()];
     // Use the no-sandbox dispatch: precompile's target is whatever path
     // the user passed, which is typically outside the script's
     // tempfile-derived workspace root. The actual compile work still
@@ -106,12 +118,15 @@ struct PrecompileArtifacts {
 /// Rust compiler entrypoint used by the `.harn` directory-walk driver for
 /// each source file.
 pub fn run_inner_compile(args: PrecompileArgs) {
-    let target = args.target.clone();
+    let target = args
+        .target
+        .clone()
+        .unwrap_or_else(|| command_error("precompile target is required"));
     if !target.exists() {
         command_error(&format!("target does not exist: {}", target.display()));
     }
 
-    let (sources, source_root) = if target.is_dir() {
+    let (sources, mut source_root) = if target.is_dir() {
         let mut files = Vec::new();
         collect_harn_files(&target, &mut files);
         files.sort();
@@ -121,6 +136,9 @@ pub fn run_inner_compile(args: PrecompileArgs) {
     } else {
         (vec![target.clone()], None)
     };
+    if source_root.is_none() && args.relocatable {
+        source_root = target.parent().map(Path::to_path_buf);
+    }
 
     if sources.is_empty() {
         command_error(&format!("no .harn files found under {}", target.display()));
@@ -190,7 +208,11 @@ fn precompile_one(
     }
 
     let artifacts = compile_artifacts(source_path, &source, &program, authority)?;
-    let entry_key = harn_vm::bytecode_cache::CacheKey::from_source(source_path, &source);
+    let entry_key = if source_root.is_some() {
+        harn_vm::bytecode_cache::CacheKey::from_relocatable_source(source_path, &source)
+    } else {
+        harn_vm::bytecode_cache::CacheKey::from_source(source_path, &source)
+    };
 
     let entry_dest = output_path(source_path, source_root, out_root, CACHE_EXTENSION)?;
     harn_vm::bytecode_cache::store_at(&entry_dest, &entry_key, &artifacts.entry_chunk)
@@ -240,45 +262,4 @@ fn compile_artifacts(
         entry_chunk,
         module_artifact,
     })
-}
-
-/// Map a source path under (optional) `source_root` to its destination
-/// under (optional) `out_root` with the given file extension. When no
-/// `out_root` is given the artifact lands adjacent to the source.
-fn output_path(
-    source_path: &Path,
-    source_root: Option<&Path>,
-    out_root: Option<&Path>,
-    extension: &str,
-) -> Result<PathBuf, String> {
-    let stem = source_path
-        .file_stem()
-        .ok_or_else(|| format!("source has no file stem: {}", source_path.display()))?;
-    let Some(out_root) = out_root else {
-        let parent = source_path.parent().unwrap_or_else(|| Path::new(""));
-        let mut adjacent = parent.join(stem);
-        adjacent.set_extension(extension);
-        return Ok(adjacent);
-    };
-    let relative = match source_root {
-        Some(root) => {
-            let canonical = source_path
-                .canonicalize()
-                .unwrap_or_else(|_| source_path.to_path_buf());
-            canonical
-                .strip_prefix(root)
-                .map(Path::to_path_buf)
-                .unwrap_or_else(|_| {
-                    PathBuf::from(source_path.file_name().unwrap_or(source_path.as_os_str()))
-                })
-        }
-        None => PathBuf::from(
-            source_path
-                .file_name()
-                .ok_or_else(|| format!("source has no file name: {}", source_path.display()))?,
-        ),
-    };
-    let mut dest = out_root.join(&relative);
-    dest.set_extension(extension);
-    Ok(dest)
 }

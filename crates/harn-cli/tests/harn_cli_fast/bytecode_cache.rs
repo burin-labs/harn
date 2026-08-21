@@ -239,7 +239,9 @@ fn precompile_then_run_skips_compile() {
             // wrapper (`precompile::run`) spawns child processes which
             // wouldn't see the in-process state these tests are pinning.
             precompile::run_inner_compile(PrecompileArgs {
-                target,
+                target: Some(target),
+                artifact_contract: false,
+                relocatable: false,
                 out: None,
                 keep_going: false,
                 quiet: true,
@@ -303,7 +305,9 @@ fn relocated_precompiled_module_uses_adjacent_artifact_and_rebinds_diagnostics()
             // wrapper (`precompile::run`) spawns child processes which
             // wouldn't see the in-process state these tests are pinning.
             precompile::run_inner_compile(PrecompileArgs {
-                target,
+                target: Some(target),
+                artifact_contract: false,
+                relocatable: false,
                 out: None,
                 keep_going: false,
                 quiet: true,

@@ -103,6 +103,7 @@ fn __spawn_precompile(
   bin: string,
   source_path: string,
   per_file_out: string,
+  source_root: string,
 ) -> dict {
   // Always force the child into the Rust compiler entrypoint: this script IS
   // the .harn dispatch target, so leaving HARN_PRECOMPILE_INNER unset would
@@ -112,12 +113,14 @@ fn __spawn_precompile(
   // parent script owns the user-visible output so the byte-for-byte
   // shape is preserved when this port becomes the default.
   let args = ["precompile", "--quiet", source_path]
+  if source_root != "" {
+    args = args.appending("--relocatable")
+  }
   if per_file_out != "" {
     args = args.appending("--out")
     args = args.appending(per_file_out)
   }
-  const env = {HARN_PRECOMPILE_INNER: "1"}
-  return process.run({program: bin, args: args, env: env})
+  return process.run({program: bin, args: args, env: {HARN_PRECOMPILE_INNER: "1"}})
 }
 
 fn __render_failure(source: string, child: dict) -> string {
@@ -182,7 +185,7 @@ fn main(harness: Harness) {
       __ensure_parent(harness.fs, dest)
       path_parent(dest)
     }
-    const child = __spawn_precompile(harness.process, bin, source, per_file_out)
+    const child = __spawn_precompile(harness.process, bin, source, per_file_out, source_root)
     const exit_code = child["exit_code"] ?? -1
     if exit_code == 0 {
       compiled = compiled + 1

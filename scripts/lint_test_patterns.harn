@@ -166,6 +166,10 @@ const E2E_SUBPROCESS_PATHS: list<string> = [
   "crates/harn-cli/tests/harn_cli_e2e/orchestrator_cli_e2e.rs",
   "crates/harn-cli/tests/harn_cli_e2e/orchestrator_cli_e2e/support.rs",
   "crates/harn-cli/tests/harn_cli_e2e/persona_activation_cli_e2e.rs",
+  // Precompile's contract covers real child dispatch, adjacent artifacts, and
+  // relocation across process boundaries; the shared helper amortizes CLI
+  // startup without weakening that canonical-path evidence.
+  "crates/harn-cli/tests/harn_cli_e2e/precompile_dispatch.rs",
   // Cross-process package lease coverage must exercise two real commands
   // against the same installed generation.
   "crates/harn-cli/tests/harn_cli_e2e/package_generation_concurrency_cli_e2e.rs",
@@ -207,7 +211,6 @@ const DIRECT_HARN_BINARY_BASELINE = [
   {path: "crates/harn-cli/tests/harn_cli_e2e/native_rule_libraries.rs", count: 1},
   {path: "crates/harn-cli/tests/harn_cli_e2e/parse_tokens_cli.rs", count: 1},
   {path: "crates/harn-cli/tests/harn_cli_e2e/pg_codegen_cli.rs", count: 1},
-  {path: "crates/harn-cli/tests/harn_cli_e2e/precompile_dispatch.rs", count: 1},
   {path: "crates/harn-cli/tests/harn_cli_e2e/replay_session_cli.rs", count: 1},
   {path: "crates/harn-cli/tests/harn_cli_e2e/routes_cli.rs", count: 1},
   {path: "crates/harn-cli/tests/harn_cli_e2e/rule_discovery_dispatch.rs", count: 1},
