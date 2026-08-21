@@ -87,9 +87,16 @@ agent_loop(harness, "summarize the diff", nil, {
 Streaming transports emit text deltas as soon as the provider sends them. Native
 tool-call streams also surface partial argument deltas in agent trace events:
 `raw_input` when the bytes parse as JSON, or `raw_input_partial` while the JSON
-object is still incomplete. Harn sends these intermediate states to live agent
-event subscribers and persists them for deterministic replay, including in
-headless sessions.
+object is still incomplete. Harn sends every intermediate state to live agent
+event subscribers. Durable agent-event sinks retain the first cumulative
+argument snapshot, successive power-of-two prefix-growth checkpoints, and every
+settled or anomalous transition. This keeps replay and crash evidence available
+without rewriting the same growing argument body on every transport tick.
+
+The durable projection depends only on event order, never on whether a live
+subscriber happens to be attached. A prior subscriber-gated policy made the
+same execution produce different evidence under headless and interactive hosts;
+that topology-dependent design is intentionally not used.
 
 Final token usage is recorded after the provider response completes. Read it
 from the `llm_call` / `agent_loop` result, from `harness.obs.llm_usage()`, or from the
