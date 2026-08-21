@@ -128,6 +128,37 @@ impl Embedder for TestSemanticEmbedder {
     }
 }
 
+#[derive(Clone)]
+struct FusionTestEmbedder;
+
+impl Embedder for FusionTestEmbedder {
+    fn embed(&self, text: &str) -> Vec<f32> {
+        let folded = text.to_ascii_lowercase();
+        if folded.trim() == "fusion query" || folded.contains("semantic-only-winner") {
+            vec![1.0, 0.0]
+        } else if folded.contains("joint-candidate") {
+            vec![0.8, 0.6]
+        } else {
+            vec![0.0, 1.0]
+        }
+    }
+
+    fn dim(&self) -> usize {
+        2
+    }
+
+    #[allow(clippy::unnecessary_literal_bound)]
+    fn name(&self) -> &str {
+        "fusion-test-semantic"
+    }
+
+    fn is_semantic(&self) -> bool {
+        // This synthetic backend exists only to make both RRF inputs
+        // observable. It makes no product-quality claim.
+        true
+    }
+}
+
 fn dummy_signer(seed: u8) -> SessionSigner {
     SessionSigner::from_seed([seed; 32])
 }
