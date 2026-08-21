@@ -66,7 +66,7 @@ pub(super) fn scan_command_risk_scan_json(
         labels.insert("curl_pipe_shell".to_string());
         rationale.push("download piped into shell detected");
     }
-    if has_credential_file_read(&lower) {
+    if has_credential_file_read(&floor_command_text(ctx)) {
         labels.insert("credential_file_read".to_string());
         rationale.push("credential-like file read detected");
     }
@@ -955,13 +955,169 @@ pub(super) fn has_curl_pipe_shell(lower: &str) -> bool {
         && (lower.contains(" sh") || lower.contains(" bash") || lower.contains(" zsh"))
 }
 
-pub(super) fn has_credential_file_read(lower: &str) -> bool {
-    let readish = lower.contains("cat ")
-        || lower.contains("less ")
-        || lower.contains("head ")
-        || lower.contains("tail ")
-        || lower.contains("grep ");
-    readish && contains_secret_like_text(lower)
+pub(super) fn has_credential_file_read(command: &str) -> bool {
+    credential_read_path_candidates(command)
+        .iter()
+        .any(|candidate| contains_secret_like_text(&candidate.to_ascii_lowercase()))
+}
+
+/// Path operands consumed by effective file-reader commands.
+///
+/// Command identity and argv boundaries come from the catastrophic floor's
+/// quote-aware parser. This deliberately excludes arbitrary argv strings and
+/// interpreter payloads: source code that mentions `cat .env` is not a file
+/// read, while the same command under a real `sh -c` wrapper is.
+pub(super) fn credential_read_path_candidates(command: &str) -> Vec<String> {
+    let mut candidates = Vec::new();
+    for stage in super::catastrophic::effective_command_stages(command) {
+        let Some(program) = stage.argv.first() else {
+            continue;
+        };
+        let program = Path::new(program)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or(program)
+            .to_ascii_lowercase();
+        let operands = match program.as_str() {
+            "cat" => positional_operands(&stage.argv[1..], &[]),
+            "less" | "more" => positional_operands(
+                &stage.argv[1..],
+                &[
+                    "-b",
+                    "-D",
+                    "-j",
+                    "-k",
+                    "-o",
+                    "-O",
+                    "-p",
+                    "-P",
+                    "-t",
+                    "-T",
+                    "-x",
+                    "-y",
+                    "-z",
+                    "--buffers",
+                    "--color",
+                    "--jump-target",
+                    "--lesskey-file",
+                    "--log-file",
+                    "--LOG-FILE",
+                    "--pattern",
+                    "--prompt",
+                    "--tag",
+                    "--tag-file",
+                    "--tabs",
+                    "--max-forw-scroll",
+                    "--window",
+                ],
+            ),
+            "head" => positional_operands(&stage.argv[1..], &["-n", "--lines", "-c", "--bytes"]),
+            "tail" => positional_operands(
+                &stage.argv[1..],
+                &[
+                    "-n",
+                    "--lines",
+                    "-c",
+                    "--bytes",
+                    "-b",
+                    "-s",
+                    "--sleep-interval",
+                    "--pid",
+                ],
+            ),
+            "grep" => grep_path_operands(&stage.argv[1..]),
+            _ => Vec::new(),
+        };
+        for operand in operands {
+            if operand != "-" && !candidates.iter().any(|existing| existing == &operand) {
+                candidates.push(operand);
+            }
+        }
+    }
+    candidates
+}
+
+fn positional_operands(args: &[String], options_with_values: &[&str]) -> Vec<String> {
+    let mut operands = Vec::new();
+    let mut options = true;
+    let mut index = 0;
+    while index < args.len() {
+        let arg = &args[index];
+        if options && arg == "--" {
+            options = false;
+        } else if options && options_with_values.contains(&arg.as_str()) {
+            index += 1;
+        } else if options && arg.starts_with('-') && arg != "-" {
+            // Reader flags either carry their value in this token or are
+            // switches. Known split-value flags were handled above.
+        } else {
+            operands.push(arg.clone());
+        }
+        index += 1;
+    }
+    operands
+}
+
+fn grep_path_operands(args: &[String]) -> Vec<String> {
+    let mut paths = Vec::new();
+    let mut options = true;
+    let mut pattern_supplied = false;
+    let mut index = 0;
+    while index < args.len() {
+        let arg = &args[index];
+        if options && arg == "--" {
+            options = false;
+        } else if options && matches!(arg.as_str(), "-e" | "--regexp") {
+            pattern_supplied = true;
+            index += 1;
+        } else if options && matches!(arg.as_str(), "-f" | "--file") {
+            pattern_supplied = true;
+            if let Some(path) = args.get(index + 1) {
+                paths.push(path.clone());
+            }
+            index += 1;
+        } else if options && grep_option_takes_value(arg) {
+            index += 1;
+        } else if options && arg.starts_with('-') && arg != "-" {
+            if arg.starts_with("-e") && arg.len() > 2 {
+                pattern_supplied = true;
+            } else if arg.starts_with("-f") && arg.len() > 2 {
+                pattern_supplied = true;
+                if let Some(path) = arg.strip_prefix("-f").filter(|path| !path.is_empty()) {
+                    paths.push(path.to_string());
+                }
+            }
+        } else if !pattern_supplied {
+            pattern_supplied = true;
+        } else {
+            paths.push(arg.clone());
+        }
+        index += 1;
+    }
+    paths
+}
+
+fn grep_option_takes_value(arg: &str) -> bool {
+    matches!(
+        arg,
+        "-A" | "-B"
+            | "-C"
+            | "-D"
+            | "-d"
+            | "-m"
+            | "--after-context"
+            | "--before-context"
+            | "--binary-files"
+            | "--context"
+            | "--devices"
+            | "--directories"
+            | "--exclude"
+            | "--exclude-dir"
+            | "--exclude-from"
+            | "--include"
+            | "--label"
+            | "--max-count"
+    )
 }
 
 pub(super) fn contains_secret_like_text(lower: &str) -> bool {

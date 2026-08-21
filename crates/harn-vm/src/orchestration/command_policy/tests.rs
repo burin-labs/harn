@@ -47,7 +47,13 @@ fn deterministic_scan_classifies_high_risk_commands() {
 
 #[test]
 fn deterministic_scan_keeps_sensitive_commands_separate_from_interpreter_payloads() {
-    for context in [ctx(&["cat", ".env"]), shell_ctx("sh -c 'cat .env'")] {
+    for context in [
+        ctx(&["cat", ".env"]),
+        shell_ctx("sh -c 'cat .env'"),
+        shell_ctx("grep password .env"),
+        ctx(&["head", "-q", ".env"]),
+        ctx(&["tail", "-n", "5", ".env"]),
+    ] {
         assert!(
             labels(&command_risk_scan_json(&context, None))
                 .contains(&"credential_file_read".to_string()),
@@ -55,10 +61,21 @@ fn deterministic_scan_keeps_sensitive_commands_separate_from_interpreter_payload
         );
     }
 
-    let payload = command_risk_scan_json(&ctx(&["python", "-c", "print('.env')"]), None);
+    let payload = command_risk_scan_json(&ctx(&["python", "-c", "print('cat .env')"]), None);
     assert!(
         !labels(&payload).contains(&"credential_file_read".to_string()),
         "interpreter payload was classified as a credential-file read"
+    );
+
+    let grep_pattern = command_risk_scan_json(&shell_ctx("grep '.env' src/config.py"), None);
+    assert!(
+        !labels(&grep_pattern).contains(&"credential_file_read".to_string()),
+        "grep pattern was classified as a path operand"
+    );
+    let reader_option = command_risk_scan_json(&ctx(&["less", "-P", ".env", "README"]), None);
+    assert!(
+        !labels(&reader_option).contains(&"credential_file_read".to_string()),
+        "reader option value was classified as a path operand"
     );
 }
 
@@ -1009,6 +1026,38 @@ async fn no_policy_backstop_blocks_universal_catastrophes() {
     assert_floor_blocked(&preflight_argv(&["sh", "-c", ":(){ :|:& };:"]).await);
     assert_floor_blocked(&preflight_argv(&["mkfs.ext4", "/dev/sda"]).await);
     assert_floor_blocked(&preflight_argv(&["dd", "of=/dev/sda", "if=/dev/zero"]).await);
+    clear_command_policies();
+}
+
+#[tokio::test]
+async fn credential_read_policy_blocks_real_commands_not_interpreter_prose() {
+    clear_command_policies();
+    push_command_policy(CommandPolicy {
+        workspace_roots: vec!["/tmp/work".to_string()],
+        default_shell_mode: DEFAULT_SHELL_MODE.to_string(),
+        require_approval: std::iter::once("credential_file_read".to_string()).collect(),
+        ..Default::default()
+    });
+
+    for preflight in [
+        preflight_argv(&["cat", ".env"]).await,
+        preflight_argv(&["sh", "-c", "cat .env"]).await,
+    ] {
+        match preflight {
+            CommandPolicyPreflight::Blocked { decisions, .. } => {
+                assert!(decisions
+                    .iter()
+                    .any(|decision| decision.action == "require_approval"
+                        && decision
+                            .risk_labels
+                            .contains(&"credential_file_read".to_string())));
+            }
+            CommandPolicyPreflight::Proceed { .. } => {
+                panic!("credential-file read bypassed command preflight")
+            }
+        }
+    }
+    assert_proceed(&preflight_argv(&["python", "-c", "print('cat .env')"]).await);
     clear_command_policies();
 }
 

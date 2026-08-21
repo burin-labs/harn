@@ -121,6 +121,43 @@ pub fn current_command_policy() -> Option<CommandPolicy> {
     COMMAND_POLICY_STACK.with(|stack| stack.borrow().last().cloned())
 }
 
+/// Semantic file-reader operands projected from a tool-call argument object.
+///
+/// Approval policy consumes this narrow fact instead of parsing shell text or
+/// scanning arbitrary strings itself. Command policy remains the sole owner of
+/// argv quoting, shell-wrapper recursion, command identities, and reader
+/// operand grammar.
+pub(crate) fn credential_read_path_candidates(args: &JsonValue) -> Vec<String> {
+    let mut commands = Vec::new();
+    for key in ["command", "cmd"] {
+        if let Some(command) = args.get(key).and_then(JsonValue::as_str) {
+            if !command.trim().is_empty() {
+                commands.push(command.to_string());
+            }
+        }
+    }
+    if let Some(argv) = args.get("argv").and_then(JsonValue::as_array) {
+        let parts = argv
+            .iter()
+            .filter_map(JsonValue::as_str)
+            .map(scan::shell_quote_arg)
+            .collect::<Vec<_>>();
+        if !parts.is_empty() {
+            commands.push(parts.join(" "));
+        }
+    }
+
+    let mut paths = Vec::new();
+    for command in commands {
+        for path in scan::credential_read_path_candidates(&command) {
+            if !paths.iter().any(|existing| existing == &path) {
+                paths.push(path);
+            }
+        }
+    }
+    paths
+}
+
 /// Per-task ambient-scope swap of the command-policy stack and hook depth. See
 /// `orchestration::ambient_scope` — these move whole stacks so a spawned worker
 /// task can carry its own command scope across `.await` without leaking into
