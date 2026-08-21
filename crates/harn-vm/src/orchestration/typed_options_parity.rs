@@ -20,6 +20,7 @@ use super::{CompactionPolicy, ModelPolicy, RetryPolicy, StageContract, TurnPolic
 use crate::llm::cost::LlmBudgetEnvelope;
 
 const LLM_OPTIONS_MODULE: &str = "llm/options";
+const LLM_ENVELOPE_MODULE: &str = "llm/envelope";
 const AGENT_OPTIONS_MODULE: &str = "agent/options";
 const AGENT_OPTIONS_TYPES_MODULE: &str = "agent/options_types";
 const AGENT_CONTRACTS_MODULE: &str = "agent/contracts";
@@ -44,6 +45,10 @@ fn stdlib_source(module: &str) -> &'static str {
 
 fn llm_options_harn() -> &'static str {
     stdlib_source(LLM_OPTIONS_MODULE)
+}
+
+fn llm_envelope_harn() -> &'static str {
+    stdlib_source(LLM_ENVELOPE_MODULE)
 }
 
 fn agent_options_harn() -> &'static str {
@@ -362,6 +367,30 @@ fn llm_call_options_alias_matches_registry_bidirectionally() {
          (alias-only: {alias_only:?}, registry-only: {registry_only:?}) — \
          fix crates/harn-stdlib/src/stdlib/llm/options.harn or \
          crates/harn-builtin-meta/src/llm_options.rs"
+    );
+}
+
+/// The runtime producer is the behavioral owner of `llm_call().usage`.
+/// Compare its real emitted keys with both typed projections so adding or
+/// removing a field on any one surface fails in both drift directions.
+#[test]
+fn llm_usage_runtime_and_typed_projections_match_bidirectionally() {
+    let runtime_keys = crate::llm::api::result::test_public_usage_keys();
+    let builtin_keys: BTreeSet<String> = match harn_builtin_meta::shapes::LLM_USAGE {
+        harn_builtin_meta::Ty::Shape(fields) => {
+            fields.iter().map(|field| field.name.to_string()).collect()
+        }
+        other => panic!("LLM_USAGE must remain a closed shape, got {other:?}"),
+    };
+    let stdlib_keys = harn_alias_keys(llm_envelope_harn(), "LlmUsage");
+
+    assert_eq!(
+        builtin_keys, runtime_keys,
+        "builtin LLM_USAGE drifted from the runtime-emitted llm_call usage envelope"
+    );
+    assert_eq!(
+        stdlib_keys, runtime_keys,
+        "stdlib LlmUsage drifted from the runtime-emitted llm_call usage envelope"
     );
 }
 

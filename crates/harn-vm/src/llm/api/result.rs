@@ -807,6 +807,25 @@ pub(super) fn mock_completion_response(prefix: &str, suffix: Option<&str>) -> Ll
     }
 }
 
+/// Return the keys on the real Harn-facing usage envelope, including the
+/// conditional provider telemetry path. Cross-surface parity tests use the
+/// producer rather than maintaining another list of runtime keys.
+#[cfg(test)]
+pub(crate) fn test_public_usage_keys() -> std::collections::BTreeSet<String> {
+    let mut result = mock_completion_response("usage parity", None);
+    result.telemetry = ProviderTelemetry::new("usage_parity_test");
+    let projection = test_text_projection(&result, None);
+    let envelope = vm_build_llm_result(&result, None, None, &projection);
+    envelope
+        .as_dict()
+        .and_then(|dict| dict.get("usage"))
+        .and_then(VmValue::as_dict)
+        .expect("llm result contains a usage dict")
+        .keys()
+        .map(|key| key.to_string())
+        .collect()
+}
+
 #[cfg(test)]
 mod cache_supported_serde_tests {
     use crate::value::VmValue;
