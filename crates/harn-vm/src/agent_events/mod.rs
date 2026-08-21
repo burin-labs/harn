@@ -25,6 +25,7 @@
 //!    of truth for session-scoped VM state.
 
 mod agent;
+mod durable_projection;
 mod from_host;
 mod host_injection;
 mod lifecycle;
@@ -45,6 +46,7 @@ pub use agent::{
     AgentEvent, FinalWrapupToolCallParseStatus, FinalWrapupUnconsumedToolCall, StagedWriteSummary,
     ToolBatchDisposition, ToolBatchDispositionReceipt, ToolBatchPhase, ToolBatchProposalStatus,
 };
+pub use durable_projection::DurableAgentEventProjector;
 pub use host_injection::{
     AttachmentFlavor, AttachmentRendering, HostInjectionProvenance, InjectionDelivery,
     SanitizationAction, SanitizationVerdict,

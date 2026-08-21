@@ -5,6 +5,7 @@ use super::*;
 use crate::llm::receipts::ToolCallReceipt;
 use crate::orchestration::MutationSessionRecord;
 
+mod durable_projection;
 mod event_log_sink;
 mod jsonl_sink;
 

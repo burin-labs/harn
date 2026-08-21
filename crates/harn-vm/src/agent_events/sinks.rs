@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::event_log::{AnyEventLog, EventLog, LogEvent as EventLogRecord, Topic};
 
 use super::AgentEvent;
+use super::DurableAgentEventProjector;
 
 /// External consumers of the event stream (e.g. the harn-cli ACP server,
 /// which translates events into JSON-RPC notifications).
@@ -122,6 +123,7 @@ struct JsonlEventSinkState {
     bytes_written: u64,
     rotation: u32,
     first_error: Option<AgentEventSinkError>,
+    projector: DurableAgentEventProjector,
 }
 
 impl JsonlEventSink {
@@ -150,6 +152,7 @@ impl JsonlEventSink {
                 bytes_written: 0,
                 rotation: 0,
                 first_error: None,
+                projector: DurableAgentEventProjector::new(),
             }),
             base_path,
         }))
@@ -173,6 +176,14 @@ impl JsonlEventSink {
     /// events are in this run" run-record summary.
     pub fn event_count(&self) -> u64 {
         self.state.lock().expect("jsonl sink mutex poisoned").index
+    }
+
+    #[cfg(test)]
+    pub(crate) fn force_rotation_after_next_write(&self) {
+        self.state
+            .lock()
+            .expect("jsonl sink mutex poisoned")
+            .bytes_written = Self::ROTATE_BYTES;
     }
 
     fn rotate_if_needed(&self, state: &mut JsonlEventSinkState) -> std::io::Result<()> {
@@ -215,6 +226,7 @@ pub struct EventLogSink {
     dispatch: EventLogSinkDispatch,
     session_id: String,
     first_error: Arc<Mutex<Option<AgentEventSinkError>>>,
+    projector: Mutex<DurableAgentEventProjector>,
 }
 
 enum EventLogSinkDispatch {
@@ -252,6 +264,7 @@ impl EventLogSink {
             dispatch,
             session_id,
             first_error,
+            projector: Mutex::new(DurableAgentEventProjector::new()),
         })
     }
 
@@ -372,6 +385,9 @@ impl AgentEventSink for JsonlEventSink {
             record_sink_failure(&mut state.first_error, error);
             return;
         }
+        if !state.projector.should_persist(event) {
+            return;
+        }
         let index = state.index;
         let emitted_at_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -433,6 +449,13 @@ impl AgentEventSink for JsonlEventSink {
 
 impl AgentEventSink for EventLogSink {
     fn handle_event(&self, event: &AgentEvent) {
+        let mut projector = self
+            .projector
+            .lock()
+            .expect("event-log projector mutex poisoned");
+        if !projector.should_persist(event) {
+            return;
+        }
         let event_json = match serde_json::to_value(event) {
             Ok(value) => value,
             Err(error) => {
