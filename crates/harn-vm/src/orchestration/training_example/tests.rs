@@ -295,7 +295,7 @@ fn projects_a_native_channel_run() {
             "model": "claude-opus-5",
             "text": "",
             "tool_calls": [native_call],
-            "parsed_tool_calls": [native_call],
+            "parsed_tool_calls_ref": "tool_calls",
             "input_tokens": 10,
             "output_tokens": 5,
         }),
@@ -351,6 +351,20 @@ fn projects_a_native_channel_run() {
         Some("call_abc")
     );
     assert_eq!(example.provenance.effective_tool_format, "native");
+}
+
+#[test]
+fn rejects_an_unknown_parsed_tool_call_reference() {
+    let mut rows = text_channel_rows();
+    let at = row_at(&rows, "provider_call_response", 0);
+    let response = rows[at].as_object_mut().unwrap();
+    response.remove("parsed_tool_calls");
+    response.insert("parsed_tool_calls_ref".to_string(), json!("raw_tool_calls"));
+
+    let error = expect_failure(&rows, "malformed_tool_call_projection");
+    assert!(error
+        .message
+        .contains("unsupported `parsed_tool_calls_ref` value `raw_tool_calls`"));
 }
 
 /// Locate a row by shape rather than by ordinal, so adding an event to the

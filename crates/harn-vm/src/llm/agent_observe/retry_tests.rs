@@ -530,6 +530,10 @@ summary: Listed the workspace\n\
     let parsed = event["parsed_tool_calls"]
         .as_array()
         .expect("parsed_tool_calls array");
+    assert!(
+        event.get("parsed_tool_calls_ref").is_none(),
+        "a text-only parsed view must remain inline"
+    );
     assert_eq!(
         parsed.len(),
         1,

@@ -43,15 +43,21 @@ Every model response is appended as a `provider_call_response` event on the
 `agent.transcript.llm` topic in `.harn/events.sqlite`. In addition to the raw
 response `text`, the event includes:
 
-- `parsed_tool_calls`: Harn's normalized tool-call parse. Provider-native calls
-  take precedence; otherwise this contains calls parsed from Harn's text tool
-  protocol, including the legacy `name({...})` form.
+- `parsed_tool_calls` or `parsed_tool_calls_ref`: Harn's normalized tool-call
+  parse. When a non-empty view is structurally identical to the provider-native
+  `tool_calls` array, the response stores `parsed_tool_calls_ref: "tool_calls"`
+  instead of serializing the array twice. Empty and distinct views stay in the
+  smaller inline `parsed_tool_calls` representation, including calls parsed
+  from Harn's text tool protocol and its legacy `name({...})` form. Rust
+  consumers should use
+  `harn_vm::llm::response_tool_calls::resolve`; absence without a reference is
+  a historical/partial row, not an alias.
 - `loop_state`: a decoded object when the response contains a complete
   `## LOOP_STATE` / `## END_LOOP_STATE` block. Booleans, numbers, `null`, and
   `nil` become JSON primitives; other values remain strings. The field is
   `null` when no complete block exists.
-- `tool_calls`: the provider-native receipt only. It can be empty even when
-  `parsed_tool_calls` contains text-protocol calls.
+- `tool_calls`: the provider-native receipt only. It can be empty even when an
+  inline `parsed_tool_calls` projection contains text-protocol calls.
 
 These projections are redacted by the same transcript policy as `text` before
 they reach SQLite. Correlate a response with its request and related records by

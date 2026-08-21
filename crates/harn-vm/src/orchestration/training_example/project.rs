@@ -440,7 +440,17 @@ impl Walk<'_> {
         self.output_tokens += event.u64_field("output_tokens").unwrap_or_default();
         let native_calls = tool_calls_from_array(event, "tool_calls")?;
         let merged_calls = {
-            let merged = tool_calls_from_array(event, "parsed_tool_calls")?;
+            let merged = crate::llm::response_tool_calls::resolve(&event.value)
+                .map_err(|error| {
+                    TrainingExampleError::at(
+                        "malformed_tool_call_projection",
+                        event.index,
+                        error.to_string(),
+                    )
+                })?
+                .map(|calls| tool_calls_from_values(calls, event.index))
+                .transpose()?
+                .unwrap_or_default();
             if merged.is_empty() {
                 native_calls.clone()
             } else {
@@ -944,9 +954,16 @@ fn tool_calls_from_array(
     let Some(calls) = event.value.get(key).and_then(JsonValue::as_array) else {
         return Ok(Vec::new());
     };
+    tool_calls_from_values(calls, event.index)
+}
+
+fn tool_calls_from_values(
+    calls: &[JsonValue],
+    event_index: usize,
+) -> Result<Vec<TrainingToolCall>, TrainingExampleError> {
     calls
         .iter()
-        .map(|call| normalize_tool_call(call, event.index))
+        .map(|call| normalize_tool_call(call, event_index))
         .collect()
 }
 

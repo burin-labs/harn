@@ -353,8 +353,9 @@ pub type ProviderCallResponseEvent = {
   cache_hit?: bool,
   stop_reason?: string?,
   response_ms?: int,
-  tool_calls?: unknown,
-  parsed_tool_calls?: unknown,
+  tool_calls?: list<unknown>,
+  parsed_tool_calls?: list<unknown>,
+  parsed_tool_calls_ref?: "tool_calls",
   raw_tool_calls?: unknown,
   loop_state?: unknown,
   // MODEL-authored text; not deterministic.
@@ -365,6 +366,35 @@ pub type ProviderCallResponseEvent = {
   provider_telemetry?: unknown,
   structural_experiment?: unknown,
   schema_version?: int,
+}
+
+/**
+ * Resolve the normalized tool-call view from current and historical provider
+ * response rows. Current native-channel rows carry the explicit
+ * `parsed_tool_calls_ref: "tool_calls"` alias; distinct text-channel parses
+ * remain inline. Historical rows with neither field fall back to the native
+ * array. Malformed or conflicting projections fail closed.
+ *
+ * @effects: []
+ * @errors: [validation]
+ */
+pub fn provider_response_tool_calls(event: ProviderCallResponseEvent) -> list<unknown> {
+  const inline = event.parsed_tool_calls
+  const reference = event.parsed_tool_calls_ref
+  const native = event.tool_calls
+  if inline != nil && reference != nil {
+    throw "std/agent/artifacts: provider response carries conflicting tool-call projections"
+  }
+  if inline != nil {
+    return inline
+  }
+  if reference != nil {
+    if native == nil {
+      throw "std/agent/artifacts: parsed_tool_calls_ref requires a tool_calls list"
+    }
+    return native
+  }
+  return native ?? []
 }
 
 pub type ResolvedDispatchEvent = {

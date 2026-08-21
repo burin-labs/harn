@@ -30,3 +30,7 @@ native
 1:1:1
 true
 version_mismatch
+text_call
+native_call
+historical_call
+std/agent/artifacts: provider response carries conflicting tool-call projections
