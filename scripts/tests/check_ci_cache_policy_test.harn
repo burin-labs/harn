@@ -1,5 +1,6 @@
 import {
   CiCachePolicy,
+  NATIVE_CACHE_INPUTS,
   actions_cache_capacity_errors,
   ci_cache_policy_errors,
   ci_cache_policy_parse,
@@ -15,12 +16,54 @@ import {
   rust_cache_refresh_concurrency_errors,
   rust_cache_refresh_miss_only_errors,
   setup_harn_cache_action_errors,
+  windows_pr_native_feedback_errors,
   windows_release_certify_warm_errors,
   windows_shared_cache_errors,
 } from "../check_ci_cache_policy"
 
 fn gha_expression(body: string) -> string {
   return "$" + "{{ " + body + " }}"
+}
+
+fn windows_runner_expression() -> string {
+  return gha_expression(
+    "vars.HARN_CI_DISABLE_BLACKSMITH_WINDOWS == 'true' && 'windows-latest' || ((github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'blacksmith-8vcpu-windows-2025' || 'windows-latest')",
+  )
+}
+
+fn windows_tier_expression() -> string {
+  return gha_expression(
+    "vars.HARN_CI_DISABLE_BLACKSMITH_WINDOWS == 'true' && 'github-hosted' || ((github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'blacksmith' || 'github-hosted')",
+  )
+}
+
+fn windows_warm_restore_step() {
+  return {
+    name: "Restore Windows workspace warm artifact",
+    id: "windows-warm-restore",
+    "continue-on-error": true,
+    env: {GH_TOKEN: gha_expression("github.token")},
+    run:
+      "./scripts/ci/windows_workspace_warm_artifact.sh download-and-restore --repo owner/repo\necho windows_warm_restore=miss >> $GITHUB_OUTPUT",
+  }
+}
+
+fn windows_warm_report_step() {
+  return {
+    name: "Report Windows warm restore outcome",
+    if: "always()",
+    env: {
+      RESTORE_RESULT: gha_expression(
+        "steps.windows-warm-restore.outputs.windows_warm_restore || 'miss'",
+      ),
+      RESTORE_PRODUCER_COMMIT: gha_expression(
+        "steps.windows-warm-restore.outputs.windows_warm_restore_producer_commit || 'unavailable'",
+      ),
+      RESTORE_RUN_ID: gha_expression(
+        "steps.windows-warm-restore.outputs.windows_warm_restore_run_id || 'unavailable'",
+      ),
+    },
+  }
 }
 
 fn ci_concurrency() {
@@ -421,11 +464,21 @@ fn workflows() {
           ],
         },
         windows: {
+          "runs-on": windows_runner_expression(),
+          permissions: {contents: "read", actions: "read"},
+          env: {HARN_RUNNER_TIER: windows_tier_expression()},
           steps: [
             {uses: "actions/checkout@exact-pin"},
             {uses: "samypr100/setup-dev-drive@exact-pin"},
             {uses: "./.github/actions/rust-toolchain"},
-            {uses: "./.github/actions/rust-cache", with: windows_cache_inputs()},
+            windows_warm_restore_step(),
+            {
+              uses: "./.github/actions/rust-cache",
+              if: "steps.windows-warm-restore.outputs.windows_warm_restore != 'hit'",
+              with: windows_cache_inputs(),
+            },
+            windows_warm_report_step(),
+            {name: "Compile Windows tests and run unit slice", env: {RUST_MIN_STACK: "16777216"}},
           ],
         },
       },
@@ -445,6 +498,7 @@ fn workflows() {
       permissions: {contents: "read", actions: "write"},
       jobs: {
         nextest: {
+          "runs-on": "windows-latest",
           steps: [
             {uses: "actions/checkout@exact-pin"},
             {
@@ -489,6 +543,7 @@ fn workflows() {
               uses: "taiki-e/install-action@exact-pin",
               with: {tool: "nextest@0.9.132"},
             },
+            {name: "Run workspace nextest", env: {RUST_MIN_STACK: "16777216"}},
           ],
         },
       },
@@ -789,6 +844,11 @@ pipeline test_ci_cache_policy_accepts_declared_main_guarded_writers(harness: Har
       declared["ci.yml"],
       declared["windows-nightly.yml"],
     )
+      + windows_pr_native_feedback_errors(
+      policy(),
+      declared["ci.yml"],
+      declared["windows-nightly.yml"],
+    )
       + windows_release_certify_warm_errors(policy(), declared["windows-nightly.yml"])
       + nextest_version_errors(
       policy(),
@@ -805,9 +865,206 @@ pipeline test_windows_shared_cache_targets_dev_drive_with_one_stable_restore_own
 ) {
   const declared = workflows()
   assert_eq(windows_shared_cache_errors(declared["ci.yml"], declared["windows-nightly.yml"]), [])
+  assert_eq(
+    windows_pr_native_feedback_errors(
+      policy(),
+      declared["ci.yml"],
+      declared["windows-nightly.yml"],
+    ),
+    [],
+  )
   assert_eq(windows_release_certify_warm_errors(policy(), declared["windows-nightly.yml"]), [])
   assert_eq(nextest_version_errors(policy(), declared), [])
   assert_eq(actions_cache_capacity_errors(policy()), [])
+}
+
+pipeline test_windows_pr_runner_requires_internal_blacksmith_with_safe_fallbacks(
+  harness: Harness,
+  task,
+) {
+  const declared = workflows()
+  const windows = declared["ci.yml"].jobs.windows
+  const hosted_only = {
+    ...declared["ci.yml"],
+    jobs: {...declared["ci.yml"].jobs, windows: {...windows, "runs-on": "windows-latest"}},
+  }
+  assert(
+    windows_pr_native_feedback_errors(policy(), hosted_only, declared["windows-nightly.yml"])
+      .contains(
+        "ci.yml:windows must route merge_group and same-repository pull_request to blacksmith-8vcpu-windows-2025, with HARN_CI_DISABLE_BLACKSMITH_WINDOWS=true and external events falling back to windows-latest",
+      ),
+  )
+  const wrong_tier = {
+    ...declared["ci.yml"],
+    jobs: {
+      ...declared["ci.yml"].jobs,
+      windows: {...windows, env: {...windows.env, HARN_RUNNER_TIER: "blacksmith"}},
+    },
+  }
+  assert(
+    windows_pr_native_feedback_errors(policy(), wrong_tier, declared["windows-nightly.yml"])
+      .contains("ci.yml:windows must mirror its Blacksmith/hosted runner tier"),
+  )
+  const no_artifact_authority = {
+    ...declared["ci.yml"],
+    jobs: {...declared["ci.yml"].jobs, windows: {...windows, permissions: {contents: "read"}}},
+  }
+  assert(
+    windows_pr_native_feedback_errors(
+      policy(),
+      no_artifact_authority,
+      declared["windows-nightly.yml"],
+    )
+      .contains(
+        "ci.yml:windows must grant only contents: read and actions: read for artifact discovery",
+      ),
+  )
+}
+
+pipeline test_windows_pr_warm_artifact_is_primary_fail_open_and_provenanced(
+  harness: Harness,
+  task,
+) {
+  const declared = workflows()
+  const windows = declared["ci.yml"].jobs.windows
+  const cache = windows.steps.filter(
+    { step -> return step?.uses == "./.github/actions/rust-cache" },
+  )
+    .first()
+  // GitHub evaluates this exact guard after the receipt-producing restore:
+  // hit skips the provider cache; miss or absent output runs the fallback.
+  assert_eq(cache.if, "steps.windows-warm-restore.outputs.windows_warm_restore != 'hit'")
+  assert_eq(windows.permissions, {contents: "read", actions: "read"})
+  const reversed = {
+    ...declared["ci.yml"],
+    jobs: {
+      ...declared["ci.yml"].jobs,
+      windows: {
+        ...windows,
+        steps: windows.steps.slice(0, 3)
+          + [windows.steps[4], windows.steps[3]]
+          + windows.steps.slice(5),
+      },
+    },
+  }
+  assert(
+    windows_pr_native_feedback_errors(policy(), reversed, declared["windows-nightly.yml"])
+      .contains(
+        "ci.yml:windows must try the main warm artifact before its provider-local rust-cache fallback",
+      ),
+  )
+  const layered = {
+    ...declared["ci.yml"],
+    jobs: {
+      ...declared["ci.yml"].jobs,
+      windows: {
+        ...windows,
+        steps: windows.steps.map(
+          { step ->
+            if step?.uses == "./.github/actions/rust-cache" {
+              return {...step, if: nil}
+            }
+            return step
+          },
+        )
+          .to_list(),
+      },
+    },
+  }
+  assert(
+    windows_pr_native_feedback_errors(policy(), layered, declared["windows-nightly.yml"]).contains(
+      "ci.yml:windows must use rust-cache only when the provider-neutral warm artifact misses",
+    ),
+  )
+  const restore = windows.steps[3]
+  const closed = {
+    ...declared["ci.yml"],
+    jobs: {
+      ...declared["ci.yml"].jobs,
+      windows: {
+        ...windows,
+        steps: windows.steps.slice(0, 3)
+          + [
+          {...restore, "continue-on-error": false, run: restore.run.split("\n")[0]},
+        ]
+          + windows.steps.slice(4),
+      },
+    },
+  }
+  assert(
+    windows_pr_native_feedback_errors(policy(), closed, declared["windows-nightly.yml"]).contains(
+      "ci.yml:windows must fail-open through one output-producing workspace-windows-warm restore",
+    ),
+  )
+  const silent = {
+    ...declared["ci.yml"],
+    jobs: {
+      ...declared["ci.yml"].jobs,
+      windows: {
+        ...windows,
+        steps: windows.steps.filter(
+          { step -> return trim(step?.name ?? "") != "Report Windows warm restore outcome" },
+        )
+          .to_list(),
+      },
+    },
+  }
+  assert(
+    windows_pr_native_feedback_errors(policy(), silent, declared["windows-nightly.yml"]).contains(
+      "ci.yml:windows must always report warm-artifact outcome, producer commit, and source run",
+    ),
+  )
+}
+
+pipeline test_windows_test_stack_is_runtime_only_and_exact_on_both_jobs(harness: Harness, task) {
+  const declared = workflows()
+  const nightly = declared["windows-nightly.yml"]
+  const cache_polluted = {...nightly, env: {RUST_MIN_STACK: "16777216"}}
+  assert(
+    windows_pr_native_feedback_errors(policy(), declared["ci.yml"], cache_polluted).contains(
+      "Windows RUST_MIN_STACK is test-runtime-only and must not enter producer or consumer cache-action environments",
+    ),
+  )
+  const producer = nightly.jobs.nextest
+  const wrong_stack = {
+    ...nightly,
+    jobs: {
+      nextest: {
+        ...producer,
+        steps: producer.steps.map(
+          { step ->
+            if trim(step?.name ?? "") == "Run workspace nextest" {
+              return {...step, env: {RUST_MIN_STACK: "8388608"}}
+            }
+            return step
+          },
+        )
+          .to_list(),
+      },
+    },
+  }
+  assert(
+    windows_pr_native_feedback_errors(policy(), declared["ci.yml"], wrong_stack).contains(
+      "Windows test steps must set identical RUST_MIN_STACK=16777216 runtime stacks",
+    ),
+  )
+  const migrated_writer = {
+    ...nightly,
+    jobs: {nextest: {...producer, "runs-on": "blacksmith-8vcpu-windows-2025"}},
+  }
+  assert(
+    windows_pr_native_feedback_errors(policy(), declared["ci.yml"], migrated_writer).contains(
+      "windows-nightly.yml:nextest must remain on windows-latest",
+    ),
+  )
+}
+
+pipeline test_native_cache_inputs_exclude_test_runtime_stack(harness: Harness, task) {
+  assert_eq(
+    NATIVE_CACHE_INPUTS,
+    ["CARGO_INCREMENTAL", "CARGO_TERM_COLOR", "RUSTC_WRAPPER", "RUSTFLAGS"],
+  )
+  assert(!NATIVE_CACHE_INPUTS.contains("RUST_MIN_STACK"))
 }
 
 pipeline test_windows_shared_cache_requires_release_certification_bypass(harness: Harness, task) {
