@@ -834,6 +834,7 @@ fn cat_ctx(cmd: &str, roots: &[&str]) -> JsonValue {
             "mode": "shell",
             "command": cmd,
             "cwd": active_cwd,
+            "shell": { "id": "sh", "path": "/bin/sh", "platform": "unix" },
         },
         "active_cwd": active_cwd,
         "workspace_roots": roots,
@@ -1218,6 +1219,10 @@ fn shell_params(command: &str) -> crate::value::DictMap {
     params.put_str("command", command);
     let mut shell = crate::value::DictMap::new();
     shell.put_str("id", "sh");
+    // A full descriptor keeps this POSIX fixture host-independent. An id-only
+    // descriptor is resolved through the native shell catalog, where `sh` is
+    // intentionally absent on Windows.
+    shell.put_str("path", "/bin/sh");
     shell.put_str("platform", "unix");
     params.insert(crate::value::intern_key("shell"), VmValue::dict(shell));
     params
