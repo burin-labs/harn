@@ -631,6 +631,8 @@ mod schema_stream_abort_tests;
 #[cfg(test)]
 mod sse_read_error_tests;
 #[cfg(test)]
+mod sse_telemetry_tests;
+#[cfg(test)]
 mod streaming_tool_call_tests;
 #[cfg(test)]
 mod tests;

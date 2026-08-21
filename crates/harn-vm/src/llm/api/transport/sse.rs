@@ -1121,7 +1121,14 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
                     .get("id")
                     .and_then(serde_json::Value::as_str)
                     .filter(|value| !value.is_empty());
+                // The usage frame replaces the envelope wholesale, but the
+                // serving fingerprint is stream-scoped: a server that
+                // announces it only on the opening chunk would otherwise have
+                // it erased by the frame carrying the counters. Re-capture
+                // below still lets this frame's own value win.
+                let carried_fingerprint = telemetry.serving_fingerprint.take();
                 telemetry = ProviderTelemetry::from_openai_usage(usage, request_id);
+                telemetry.serving_fingerprint = carried_fingerprint;
             }
             telemetry.capture_provider_metadata(&json);
         }

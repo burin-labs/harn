@@ -73,6 +73,24 @@ pub struct ProviderTelemetry {
     /// strings, and fragments are removed at the transport boundary.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub serving_base_url: Option<String>,
+    /// Opaque identifier the server reported for the backend build or
+    /// configuration that served this call (`system_fingerprint` on
+    /// OpenAI-shaped responses; llama.cpp reports its build string there).
+    ///
+    /// This is a build discriminator, not host identity. It narrows — but
+    /// does not close — the ambiguity left by
+    /// [`serving_base_url`](Self::serving_base_url), which cannot separate
+    /// several hosts serving byte-identical artifacts on the same local URL.
+    /// It compares in one direction only: two different values prove two
+    /// different server builds, while two equal values mean the servers
+    /// agreed on a build, not that one of them served both calls.
+    /// Attributing a call to a machine additionally needs an executing-host
+    /// fact, which this envelope does not carry.
+    ///
+    /// Absent means the provider reported nothing — never "the same build as
+    /// the last call".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub serving_fingerprint: Option<String>,
     /// The provider block's `cache_usage_accounting` declaration for the
     /// route that served this call. `Some(true)`: the cache token fields are
     /// provider-audited and a zero is a real miss. `Some(false)`: the route
@@ -181,6 +199,7 @@ impl ProviderTelemetry {
         let Self {
             source,
             serving_base_url,
+            serving_fingerprint,
             cache_accounting_declared,
             server_total_ms,
             server_load_ms,
@@ -201,6 +220,7 @@ impl ProviderTelemetry {
         } = self;
         source.is_empty()
             && serving_base_url.is_none()
+            && serving_fingerprint.is_none()
             && cache_accounting_declared.is_none()
             && server_total_ms.is_none()
             && server_load_ms.is_none()
@@ -373,6 +393,13 @@ impl ProviderTelemetry {
         {
             self.response_model = Some(model.to_string());
         }
+        if let Some(fingerprint) = response
+            .get("system_fingerprint")
+            .and_then(serde_json::Value::as_str)
+            .filter(|value| !value.is_empty())
+        {
+            self.serving_fingerprint = Some(fingerprint.to_string());
+        }
         if let Some(metadata) = response
             .get("provider_metadata")
             .filter(|value| !value.is_null())
@@ -430,6 +457,9 @@ impl ProviderTelemetry {
         }
         if let Some(ref serving_base_url) = self.serving_base_url {
             dict.put_str("serving_base_url", serving_base_url.as_str());
+        }
+        if let Some(ref serving_fingerprint) = self.serving_fingerprint {
+            dict.put_str("serving_fingerprint", serving_fingerprint.as_str());
         }
         insert_opt_u64(&mut dict, "server_total_ms", self.server_total_ms);
         insert_opt_u64(&mut dict, "server_load_ms", self.server_load_ms);
@@ -781,5 +811,75 @@ mod tests {
             dict.get("response_model").map(VmValue::display).as_deref(),
             Some("served-adapter")
         );
+    }
+
+    #[test]
+    fn system_fingerprint_is_captured_and_projected() {
+        let response = serde_json::json!({
+            "model": "served-adapter",
+            "system_fingerprint": "b10360-48d22e295"
+        });
+        let mut telemetry = ProviderTelemetry::default();
+        telemetry.capture_provider_metadata(&response);
+
+        assert_eq!(
+            telemetry.serving_fingerprint.as_deref(),
+            Some("b10360-48d22e295")
+        );
+        let value = telemetry
+            .as_vm_dict()
+            .expect("fingerprint makes telemetry visible");
+        let dict = value.as_dict().expect("dict body");
+        assert_eq!(
+            dict.get("serving_fingerprint")
+                .map(VmValue::display)
+                .as_deref(),
+            Some("b10360-48d22e295")
+        );
+    }
+
+    #[test]
+    fn absent_system_fingerprint_stays_absent() {
+        // A server that reports no fingerprint must not read as one that
+        // reported an empty build id: "" would compare equal across two
+        // different hosts and silently re-create the ambiguity this field
+        // exists to remove.
+        let response = serde_json::json!({"model": "served-adapter"});
+        let mut telemetry = ProviderTelemetry::default();
+        telemetry.capture_provider_metadata(&response);
+
+        assert_eq!(telemetry.serving_fingerprint, None);
+        let value = telemetry.as_vm_dict().expect("model keeps telemetry alive");
+        let dict = value.as_dict().expect("dict body");
+        assert!(dict.get("serving_fingerprint").is_none());
+    }
+
+    #[test]
+    fn empty_system_fingerprint_does_not_overwrite_a_reported_build() {
+        let mut telemetry = ProviderTelemetry::default();
+        telemetry.capture_provider_metadata(&serde_json::json!({
+            "system_fingerprint": "b10360-48d22e295"
+        }));
+        telemetry.capture_provider_metadata(&serde_json::json!({
+            "system_fingerprint": ""
+        }));
+
+        assert_eq!(
+            telemetry.serving_fingerprint.as_deref(),
+            Some("b10360-48d22e295")
+        );
+    }
+
+    #[test]
+    fn fingerprint_alone_makes_the_envelope_non_empty() {
+        // `is_empty` gates `as_vm_dict`; if the new field were left out of
+        // that destructure a fingerprint-only envelope would serialize to
+        // nothing and the discriminator would never reach a run record.
+        let telemetry = ProviderTelemetry {
+            serving_fingerprint: Some("b10360-48d22e295".to_string()),
+            ..ProviderTelemetry::default()
+        };
+        assert!(!telemetry.is_empty());
+        assert!(telemetry.as_vm_dict().is_some());
     }
 }
