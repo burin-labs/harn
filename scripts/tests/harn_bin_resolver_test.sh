@@ -570,7 +570,19 @@ echo "no-build freshness verification invoked Cargo" >&2
 exit 97
 SH
 chmod +x "$no_cargo_bin/cargo"
-fixture_binary_mtime_before="$(stat -f '%m' "$cargo_fixture_bin" 2>/dev/null || stat -c '%Y' "$cargo_fixture_bin")"
+binary_mtime_seconds() {
+  local value=""
+  if value="$(stat -c '%Y' "$1" 2>/dev/null)"; then
+    printf '%s\n' "$value"
+  elif value="$(stat -f '%m' "$1" 2>/dev/null)"; then
+    printf '%s\n' "$value"
+  else
+    echo "could not read binary modification time: $1" >&2
+    return 1
+  fi
+}
+
+fixture_binary_mtime_before="$(binary_mtime_seconds "$cargo_fixture_bin")"
 for reuse_round in 1 2; do
   (
     cd "$cargo_fixture"
@@ -583,7 +595,7 @@ for reuse_round in 1 2; do
     exit 1
   fi
 done
-fixture_binary_mtime_after="$(stat -f '%m' "$cargo_fixture_bin" 2>/dev/null || stat -c '%Y' "$cargo_fixture_bin")"
+fixture_binary_mtime_after="$(binary_mtime_seconds "$cargo_fixture_bin")"
 if [[ "$fixture_binary_mtime_before" != "$fixture_binary_mtime_after" ]]; then
   echo "unchanged no-build reuse modified the binary" >&2
   exit 1
