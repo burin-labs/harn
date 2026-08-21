@@ -14,6 +14,7 @@ pub type AgentIterationInfo = {
   provider: string,
   model: string,
   serving_base_url: string,
+  serving_fingerprint?: string,
   cache_supported: bool,
   cache_read_tokens: int,
   cache_write_tokens: int,
@@ -369,6 +370,14 @@ pub fn __iteration_info_payload(
     0
   }
   const extra = aggregates ?? {}
+  // Absence stays absent: an unreported serving fingerprint must not read as
+  // an empty build id that compares equal across two different servers.
+  const serving_fingerprint = telemetry?.serving_fingerprint
+  const serving_identity = if type_of(serving_fingerprint) == "string" {
+    {serving_fingerprint: serving_fingerprint}
+  } else {
+    {}
+  }
   return {
     tool_count: tool_count,
     text: visible_text,
@@ -383,6 +392,7 @@ pub fn __iteration_info_payload(
     output_tokens: llm_result?.usage?.output_tokens ?? 0,
     thinking_chars: thinking_chars,
   }
+    + serving_identity
     + extra
 }
 

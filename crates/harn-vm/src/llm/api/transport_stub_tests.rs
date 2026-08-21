@@ -225,6 +225,30 @@ fn spawn_openai_success_stub() -> LlmStub {
     })
 }
 
+/// Same success shape as [`spawn_openai_success_stub`], plus the
+/// `system_fingerprint` an OpenAI-compatible server publishes to identify the
+/// backend build it served the call with. The body is transcribed from an
+/// observed llama.cpp non-streaming response, including its top-level field
+/// placement and `timings` extension.
+fn spawn_openai_fingerprint_stub() -> LlmStub {
+    spawn_llm_stub("OpenAI-compatible fingerprint stub", |stream| {
+        use std::io::{Read, Write};
+        let mut buf = vec![0u8; 16_384];
+        let n = stream.read(&mut buf).expect("read request");
+        let request = String::from_utf8_lossy(&buf[..n]);
+        assert!(request.starts_with("POST /v1/chat/completions HTTP/1.1\r\n"));
+        let body = r#"{"choices":[{"finish_reason":"stop","index":0,"message":{"role":"assistant","content":"hello"}}],"created":0,"model":"qwen3.6-35b-a3b-ud-q4-k-xl","system_fingerprint":"b9994-14d3ba45f","object":"chat.completion","usage":{"completion_tokens":1,"prompt_tokens":3,"total_tokens":4},"id":"ok","timings":{"prompt_n":3,"prompt_ms":37.102,"predicted_n":1,"predicted_ms":33.096}}"#;
+        let response = format!(
+            "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        stream
+            .write_all(response.as_bytes())
+            .expect("write response");
+    })
+}
+
 fn spawn_openai_empty_stub_many(
     request_count: std::sync::Arc<std::sync::atomic::AtomicUsize>,
     max_requests: usize,
@@ -609,6 +633,91 @@ fn llamacpp_openai_transport_reports_route_and_unsupported_cache_accounting() {
             .expect("OpenAI-compatible call should succeed");
         assert_eq!(supported.cache_read_tokens, 0);
         assert!(supported.cache_supported);
+
+        crate::llm_config::clear_user_overrides();
+        crate::llm_config::clear_runtime_provider_endpoint_overrides();
+        drop(server);
+    });
+}
+
+#[test]
+fn openai_transport_records_the_served_build_fingerprint() {
+    // Two hosts can serve a byte-identical artifact on the same loopback URL,
+    // so `serving_base_url` cannot tell a run record which one produced the
+    // tokens. The server already publishes its build; this pins that the
+    // non-streaming transport carries it all the way onto the result, and
+    // that a server which reports none leaves the field absent rather than
+    // empty.
+    let _guard = env_guard();
+    let _allow_llm_transport = allow_stubbed_llm_transport();
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .worker_threads(2)
+        .build()
+        .expect("runtime");
+
+    runtime.block_on(async {
+        let server = spawn_openai_fingerprint_stub();
+        let addr = server.addr();
+        install_openai_stub_provider("llamacpp", addr);
+        crate::llm_config::set_runtime_provider_endpoint_overrides(
+            crate::llm_config::RuntimeProviderEndpointOverrides::single(
+                "llamacpp",
+                format!("http://{addr}/v1"),
+            )
+            .expect("valid stub endpoint"),
+        );
+
+        let mut opts = base_opts("llamacpp");
+        opts.model = "qwen3.6-35b-a3b-ud-q4-k-xl".to_string();
+        opts.stream = false;
+        opts.cache = false;
+        let result = vm_call_llm_full(&opts)
+            .await
+            .expect("llama.cpp-compatible call should succeed");
+
+        assert_eq!(
+            result.telemetry.serving_fingerprint.as_deref(),
+            Some("b9994-14d3ba45f")
+        );
+        // The discriminator has to reach the projected record, not just the
+        // in-memory envelope.
+        let dict = result
+            .telemetry
+            .as_vm_dict()
+            .expect("telemetry should project");
+        let dict = dict.as_dict().expect("dict body");
+        assert_eq!(
+            dict.get("serving_fingerprint")
+                .map(crate::value::VmValue::display)
+                .as_deref(),
+            Some("b9994-14d3ba45f")
+        );
+
+        crate::llm_config::clear_user_overrides();
+        crate::llm_config::clear_runtime_provider_endpoint_overrides();
+        drop(server);
+
+        // Absence control: the same transport against a server that reports
+        // no fingerprint must leave the field unset.
+        let server = spawn_openai_success_stub();
+        let addr = server.addr();
+        install_openai_stub_provider("llamacpp", addr);
+        crate::llm_config::set_runtime_provider_endpoint_overrides(
+            crate::llm_config::RuntimeProviderEndpointOverrides::single(
+                "llamacpp",
+                format!("http://{addr}/v1"),
+            )
+            .expect("valid stub endpoint"),
+        );
+        let mut opts = base_opts("llamacpp");
+        opts.model = "qwen3.6-35b-a3b-ud-q4-k-xl".to_string();
+        opts.stream = false;
+        opts.cache = false;
+        let silent = vm_call_llm_full(&opts)
+            .await
+            .expect("llama.cpp-compatible call should succeed");
+        assert_eq!(silent.telemetry.serving_fingerprint, None);
 
         crate::llm_config::clear_user_overrides();
         crate::llm_config::clear_runtime_provider_endpoint_overrides();
