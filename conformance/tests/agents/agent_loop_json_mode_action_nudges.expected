@@ -1,3 +1,4 @@
+fenced.no_claim=true
 fenced.status=done
 fenced.nudge=true
 fenced.vocab_json=true

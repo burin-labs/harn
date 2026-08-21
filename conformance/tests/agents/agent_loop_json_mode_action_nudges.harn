@@ -103,6 +103,14 @@ pipeline default(harness: Harness) {
           max_iterations: 4,
           max_nudges: 4,
           tools: edit_tools(),
+          post_turn_callback: { info ->
+            if info?.iteration == 1 {
+              harness.stdio.println(
+                "fenced.no_claim=" + to_string(info?.prior_turn_next_tool_claim == nil),
+              )
+            }
+            return nil
+          },
         },
       )
       const calls = harness.llm.mock_calls()

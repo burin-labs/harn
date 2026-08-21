@@ -450,7 +450,23 @@ pipeline test_unavailable_next_tool_claim_fails_at_typed_boundary(harness: Harne
     contains(message, "next_tool_claim.tool_name` names unavailable tool `not_registered`"),
     "unknown claims must fail instead of degrading to the full registry schema",
   )
-  assert_eq(harness.runtime.shared_snapshot(turns).value, 1)
+  let empty_message = ""
+  try {
+    agent_loop(
+      harness,
+      "Reject an empty explicit exact-tool claim.",
+      nil,
+      opts
+        + {post_turn_callback: { _info -> return {next_tool_claim: {tool_name: ""}} }},
+    )
+  } catch (err) {
+    empty_message = to_string(err)
+  }
+  assert(
+    contains(empty_message, "next_tool_claim.tool_name` must be a non-empty string"),
+    "an explicit empty claim must fail closed instead of being treated as a generic nudge",
+  )
+  assert_eq(harness.runtime.shared_snapshot(turns).value, 2)
 }
 
 pipeline test_policy_denied_next_tool_claim_fails_at_typed_boundary(harness: Harness, task) {

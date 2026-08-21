@@ -758,17 +758,22 @@ fn __maybe_inject_action_nudge(
 /**
  * The post-turn result for a turn the content-specific corrective claimed.
  *
- * The missing-call corrective produces the same one-turn tool claim as an
- * embedder callback. Its source label remains available to loop and host
- * control policies that distinguish corrective recovery from other claims.
+ * Every content-specific corrective owns the turn and suppresses competing
+ * nudges. Only a corrective that identifies one concrete tool also produces
+ * the same one-turn tool claim as an embedder callback. Shape-only fence and
+ * malformed-markup nudges deliberately continue without narrowing the next
+ * request: they know how the emission was malformed, not which tool it meant.
+ *
+ * The concrete claim's source label remains available to loop and host control
+ * policies that distinguish missing-call recovery from embedder claims.
  */
-fn __repair_claimed_result(claimed_tool: string) -> dict {
-  return {
-    kind: "continue",
-    done_judge_due: false,
-    nudged_this_turn: true,
-    next_tool_claim: {tool_name: claimed_tool, source: "missing_tool_call_recovery"},
+fn __repair_claimed_result(claimed_tool: string?) -> dict {
+  const base = {kind: "continue", done_judge_due: false, nudged_this_turn: true}
+  const tool_name = trim(to_string(claimed_tool ?? ""))
+  if tool_name == "" {
+    return base
   }
+  return base + {next_tool_claim: {tool_name: tool_name, source: "missing_tool_call_recovery"}}
 }
 
 fn __done_judge_config(opts) {
@@ -1044,7 +1049,7 @@ fn __arbitrate_stalled_toolless_turn(
     nil
   }
   if repaired != nil {
-    return __repair_claimed_result(repaired.tool ?? "") + __verdict_option_changes(verdict)
+    return __repair_claimed_result(repaired?.tool) + __verdict_option_changes(verdict)
   }
   const verdict_result = __post_turn_verdict_result(agent, session, opts, verdict)
   if verdict_result != nil {

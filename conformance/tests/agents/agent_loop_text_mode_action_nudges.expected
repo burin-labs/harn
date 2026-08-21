@@ -1,3 +1,4 @@
+fenced.no_claim=true
 fenced.status=done
 fenced.nudge=true
 fenced.no_missing=true
@@ -20,6 +21,7 @@ judged_done.no_missing_nudge=true
 judged_done.no_exemplar=true
 claim_fact.first_turn=false
 claim_fact.repair_turn=true
+claim_fact.tool=edit
 judge_false.status=done
 judge_false.exemplar=true
 host_advisory.exemplar=true
