@@ -59,6 +59,14 @@ struct AppendLinePage {
     caught_up: bool,
 }
 
+struct AppendReadWindow {
+    bytes: Vec<u8>,
+    length: u64,
+    identity: String,
+    options: PageOptions,
+    reset_reason: Option<&'static str>,
+}
+
 fn invalid(message: impl AsRef<str>) -> VmValue {
     super::io_error_value_with_kind("invalid_input", message)
 }
@@ -218,31 +226,30 @@ fn parse_append_options(args: &[VmValue]) -> Result<AppendPageOptions, VmValue> 
 }
 
 #[cfg(unix)]
-fn metadata_identity(metadata: &std::fs::Metadata) -> std::io::Result<String> {
+fn file_identity(_file: &std::fs::File, metadata: &std::fs::Metadata) -> std::io::Result<String> {
     use std::os::unix::fs::MetadataExt;
     Ok(format!("unix:{}:{}", metadata.dev(), metadata.ino()))
 }
 
 #[cfg(windows)]
-fn metadata_identity(metadata: &std::fs::Metadata) -> std::io::Result<String> {
-    use std::os::windows::fs::MetadataExt;
-    let volume = metadata.volume_serial_number().ok_or_else(|| {
-        std::io::Error::new(
-            std::io::ErrorKind::Unsupported,
-            "volume serial number is unavailable for append cursor identity",
-        )
-    })?;
-    let index = metadata.file_index().ok_or_else(|| {
-        std::io::Error::new(
-            std::io::ErrorKind::Unsupported,
-            "file index is unavailable for append cursor identity",
-        )
-    })?;
+fn file_identity(file: &std::fs::File, _metadata: &std::fs::Metadata) -> std::io::Result<String> {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Storage::FileSystem::{
+        GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION,
+    };
+
+    let mut info = BY_HANDLE_FILE_INFORMATION::default();
+    let ok = unsafe { GetFileInformationByHandle(file.as_raw_handle(), &mut info) };
+    if ok == 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    let volume = info.dwVolumeSerialNumber;
+    let index = (u64::from(info.nFileIndexHigh) << 32) | u64::from(info.nFileIndexLow);
     Ok(format!("windows:{volume}:{index}"))
 }
 
 #[cfg(not(any(unix, windows)))]
-fn metadata_identity(_metadata: &std::fs::Metadata) -> std::io::Result<String> {
+fn file_identity(_file: &std::fs::File, _metadata: &std::fs::Metadata) -> std::io::Result<String> {
     Err(std::io::Error::new(
         std::io::ErrorKind::Unsupported,
         "exact append cursor file identity is unavailable on this platform",
@@ -273,7 +280,7 @@ fn reset_for_snapshot(
 fn read_append_window(
     path: &Path,
     options: &AppendPageOptions,
-) -> std::io::Result<(Vec<u8>, u64, String, PageOptions, Option<&'static str>)> {
+) -> std::io::Result<AppendReadWindow> {
     let limit = options.max_bytes.saturating_add(1);
     if let Some(result) = crate::testbench::overlay_fs::active_overlay().and_then(|overlay| {
         overlay.with_append_snapshot(path, |contents, length, identity| {
@@ -287,18 +294,18 @@ fn read_append_window(
                 .unwrap_or(usize::MAX)
                 .min(contents.len());
             let end = start.saturating_add(limit).min(contents.len());
-            Ok((
-                contents[start..end].to_vec(),
+            Ok(AppendReadWindow {
+                bytes: contents[start..end].to_vec(),
                 length,
                 identity,
-                PageOptions {
+                options: PageOptions {
                     offset,
                     line,
                     max_lines: options.max_lines,
                     max_bytes: options.max_bytes,
                 },
                 reset_reason,
-            ))
+            })
         })
     }) {
         return result;
@@ -306,7 +313,7 @@ fn read_append_window(
     let mut file = std::fs::File::open(path)?;
     let metadata = file.metadata()?;
     let length = metadata.len();
-    let identity = metadata_identity(&metadata)?;
+    let identity = file_identity(&file, &metadata)?;
     let (offset, line, reset_reason) = reset_for_snapshot(
         options.cursor.as_ref(),
         &identity,
@@ -317,18 +324,18 @@ fn read_append_window(
     let available = length.saturating_sub(offset).min(limit as u64) as usize;
     let mut bytes = Vec::with_capacity(available);
     file.take(available as u64).read_to_end(&mut bytes)?;
-    Ok((
+    Ok(AppendReadWindow {
         bytes,
         length,
         identity,
-        PageOptions {
+        options: PageOptions {
             offset,
             line,
             max_lines: options.max_lines,
             max_bytes: options.max_bytes,
         },
         reset_reason,
-    ))
+    })
 }
 
 fn read_window(path: &Path, options: PageOptions) -> std::io::Result<(Vec<u8>, u64)> {
@@ -646,7 +653,13 @@ fn read_lines_append_page_result_builtin(
         )));
     }
     match read_append_window(&resolved, &options).and_then(
-        |(bytes, length, identity, page_options, reset_reason)| {
+        |AppendReadWindow {
+             bytes,
+             length,
+             identity,
+             options: page_options,
+             reset_reason,
+         }| {
             append_page_window(
                 &bytes,
                 length,
@@ -848,8 +861,13 @@ mod tests {
             max_lines: 10,
             max_bytes: 64,
         };
-        let (bytes, length, identity, page_options, reset) =
-            read_append_window(&path, &initial).unwrap();
+        let AppendReadWindow {
+            bytes,
+            length,
+            identity,
+            options: page_options,
+            reset_reason: reset,
+        } = read_append_window(&path, &initial).unwrap();
         let first = append_page_window(
             &bytes,
             length,
@@ -866,14 +884,19 @@ mod tests {
             cursor: Some(first.next_cursor),
             ..initial.clone()
         };
-        let (bytes, length, identity, page_options, reset) =
-            read_append_window(&path, &after_truncate).unwrap();
+        let AppendReadWindow {
+            bytes,
+            length,
+            identity,
+            options: page_options,
+            reset_reason: reset,
+        } = read_append_window(&path, &after_truncate).unwrap();
         let reset_page = append_page_window(
             &bytes,
             length,
             identity,
             page_options,
-            after_truncate.generation.clone(),
+            after_truncate.generation,
             reset,
         )
         .unwrap();
@@ -891,8 +914,13 @@ mod tests {
             cursor: Some(reset_page.next_cursor),
             ..initial
         };
-        let (bytes, length, identity, page_options, reset) =
-            read_append_window(&path, &repaired).unwrap();
+        let AppendReadWindow {
+            bytes,
+            length,
+            identity,
+            options: page_options,
+            reset_reason: reset,
+        } = read_append_window(&path, &repaired).unwrap();
         let repaired_page = append_page_window(
             &bytes,
             length,
