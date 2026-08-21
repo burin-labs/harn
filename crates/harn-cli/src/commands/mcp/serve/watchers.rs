@@ -1,16 +1,15 @@
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
 use notify::Watcher;
 
-use harn_serve::FilePromptCatalog;
+use super::derived_state::ManifestDerivedState;
 
 pub(super) fn start_cache_refresh_watcher(
     project_root: PathBuf,
     config_path: PathBuf,
-    manifest_source_cache: Arc<Mutex<String>>,
-    prompt_catalog: Arc<Mutex<FilePromptCatalog>>,
+    derived_state: Arc<ManifestDerivedState>,
 ) -> Option<notify::RecommendedWatcher> {
     let project_root_for_callback = project_root.clone();
     let watcher = notify::recommended_watcher(move |result: notify::Result<notify::Event>| {
@@ -36,12 +35,7 @@ pub(super) fn start_cache_refresh_watcher(
 
         if prompt_changed || manifest_changed || package_changed {
             let manifest_source = std::fs::read_to_string(&config_path).unwrap_or_default();
-            refresh_manifest_derived_state_cache(
-                &project_root_for_callback,
-                &manifest_source_cache,
-                &prompt_catalog,
-                manifest_source,
-            );
+            derived_state.refresh(manifest_source);
         }
     })
     .ok()?;
@@ -98,19 +92,6 @@ fn watch_with_deadline(
             None
         }
     }
-}
-
-pub(super) fn refresh_manifest_derived_state_cache(
-    project_root: &Path,
-    manifest_source_cache: &Arc<Mutex<String>>,
-    prompt_catalog: &Arc<Mutex<FilePromptCatalog>>,
-    manifest_source: String,
-) {
-    *manifest_source_cache
-        .lock()
-        .expect("manifest source poisoned") = manifest_source;
-    let updated = FilePromptCatalog::discover(project_root);
-    *prompt_catalog.lock().expect("prompt catalog poisoned") = updated;
 }
 
 fn is_prompt_reload_path(path: &Path) -> bool {

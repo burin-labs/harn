@@ -10,16 +10,15 @@ use tokio::sync::{mpsc, oneshot, Notify};
 use crate::commands::orchestrator::listener::ListenerAuth;
 
 use super::super::oauth_resource::OAuthResourceServer;
-use harn_serve::FilePromptCatalog;
+use super::derived_state::ManifestDerivedState;
 
 #[derive(Clone)]
 pub(crate) struct McpOrchestratorService {
     pub(super) config_path: PathBuf,
     pub(super) state_dir: PathBuf,
-    pub(super) manifest_source: Arc<Mutex<String>>,
+    pub(super) derived_state: Arc<ManifestDerivedState>,
     pub(super) auth: ListenerAuth,
     pub(super) oauth: Option<OAuthResourceServer>,
-    pub(super) prompt_catalog: Arc<Mutex<FilePromptCatalog>>,
     /// The orchestrator's own event log, opened on first use and shared.
     ///
     /// Not the same database as `log_event_log`, which is the listener's auth

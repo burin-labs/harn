@@ -99,11 +99,7 @@ impl McpOrchestratorService {
     }
 
     pub(super) fn handle_prompts_list(&self, id: JsonValue, params: &JsonValue) -> JsonValue {
-        let prompts = self
-            .prompt_catalog
-            .lock()
-            .expect("prompt catalog poisoned")
-            .list();
+        let prompts = self.derived_state.prompt_list();
         paginated_list_response(id, "prompts/list", "prompts", params, prompts)
     }
 
@@ -116,11 +112,7 @@ impl McpOrchestratorService {
             .get("arguments")
             .cloned()
             .unwrap_or_else(|| json!({}));
-        let result = self
-            .prompt_catalog
-            .lock()
-            .expect("prompt catalog poisoned")
-            .get(name, &arguments);
+        let result = self.derived_state.prompt_get(name, &arguments);
         match result {
             Ok(value) => harn_vm::jsonrpc::response(id, value),
             Err(error)
@@ -174,10 +166,8 @@ impl McpOrchestratorService {
             .and_then(JsonValue::as_str)
             .unwrap_or_default();
         let result = self
-            .prompt_catalog
-            .lock()
-            .expect("prompt catalog poisoned")
-            .complete(name, argument_name, value);
+            .derived_state
+            .prompt_complete(name, argument_name, value);
         match result {
             Ok(completion) => harn_vm::jsonrpc::response(id, json!({ "completion": completion })),
             Err(error) => harn_vm::jsonrpc::error_response(id, -32602, &error),
