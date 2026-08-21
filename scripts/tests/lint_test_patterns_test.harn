@@ -103,6 +103,10 @@ pipeline test_e2e_exact_entry(harness: Harness, task) {
     true,
   )
   assert_eq(
+    is_e2e_subprocess_path("crates/harn-cli/tests/harn_cli_e2e/precompile_dispatch.rs"),
+    true,
+  )
+  assert_eq(
     is_e2e_subprocess_path("crates/harn-cli/tests/harn_cli_e2e/run_eval_cleanup_e2e.rs"),
     true,
   )

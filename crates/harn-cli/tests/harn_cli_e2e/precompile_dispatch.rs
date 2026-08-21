@@ -22,7 +22,8 @@
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+
+use crate::test_util::process::harn_e2e_command;
 
 #[test]
 fn single_file_dispatch_matches_inner_compile() {
@@ -85,6 +86,83 @@ fn directory_dispatch_emits_artifacts_for_every_source() {
     // Both reports should mention every source by stdout line, just
     // possibly in a different stream-flush order.
     assert_eq!(sort_lines(&harn.stdout), sort_lines(&inner.stdout));
+}
+
+#[test]
+fn directory_precompile_entry_artifact_hits_after_tree_relocation() {
+    let workdir = tempfile::tempdir().expect("workdir");
+    let build_root = workdir.path().join("build");
+    let run_root = workdir.path().join("run");
+    let cache = tempfile::tempdir().expect("isolated bytecode cache");
+    std::fs::create_dir(&build_root).expect("create build root");
+    std::fs::write(
+        build_root.join("lib.harn"),
+        "pub fn answer() -> int { return 42 }\n",
+    )
+    .expect("write imported module");
+    std::fs::write(
+        build_root.join("main.harn"),
+        "import { answer } from \"./lib\"\npipeline main() { const value = answer() }\n",
+    )
+    .expect("write importing entry");
+
+    let precompile = run_precompile(&[build_root.to_string_lossy().as_ref()], &[]);
+    assert_eq!(
+        precompile.exit_code, 0,
+        "directory precompile failed: {}",
+        precompile.stderr
+    );
+    std::fs::rename(&build_root, &run_root).expect("relocate complete source tree");
+
+    let output = harn_e2e_command()
+        .args(["time", "run", "--json"])
+        .arg(run_root.join("main.harn"))
+        .env("HARN_CACHE_DIR", cache.path())
+        .output()
+        .expect("run relocated precompiled entry");
+    assert!(
+        output.status.success(),
+        "relocated entry failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let receipt: serde_json::Value =
+        serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {
+            panic!(
+                "time receipt was not JSON ({error}); stdout={} stderr={}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            )
+        });
+    let compile_phase = receipt["data"]["phases"]
+        .as_array()
+        .and_then(|phases| {
+            phases
+                .iter()
+                .find(|phase| phase["name"] == "bytecode_compile")
+        })
+        .expect("bytecode_compile phase");
+    assert_eq!(
+        compile_phase["cache"], "hit",
+        "moved directory entry must use its adjacent root-relative artifact: {receipt}"
+    );
+}
+
+#[test]
+fn precompile_reports_a_machine_readable_artifact_contract() {
+    let output = harn_e2e_command()
+        .args(["precompile", "--artifact-contract"])
+        .output()
+        .expect("query precompile artifact contract");
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        harn_cli::commands::precompile::PRECOMPILE_ARTIFACT_CONTRACT
+    );
 }
 
 /// A pipeline that calls a stdlib export whose name collides with a
@@ -280,7 +358,7 @@ struct PrecompileOutcome {
 }
 
 fn run_precompile(argv: &[&str], extra_env: &[(&str, &str)]) -> PrecompileOutcome {
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_harn"));
+    let mut cmd = harn_e2e_command();
     cmd.arg("precompile");
     for arg in argv {
         cmd.arg(arg);

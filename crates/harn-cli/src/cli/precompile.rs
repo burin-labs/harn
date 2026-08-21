@@ -7,7 +7,18 @@ use clap::Args;
 pub struct PrecompileArgs {
     /// File or directory to precompile. Directories are walked recursively
     /// for `.harn` files.
-    pub target: PathBuf,
+    #[arg(required_unless_present = "artifact_contract")]
+    pub target: Option<PathBuf>,
+    /// Print the machine-readable adjacent-artifact compatibility contract.
+    #[arg(
+        long,
+        conflicts_with_all = ["target", "relocatable", "out", "keep_going", "quiet"]
+    )]
+    pub artifact_contract: bool,
+    /// Use a path-independent import-graph key for an artifact that moves
+    /// with its complete source tree. Used by the directory-walk child.
+    #[arg(long, hide = true)]
+    pub relocatable: bool,
     /// Output directory for compiled `.harnbc` artifacts. When omitted,
     /// each artifact is written next to its source. The directory tree
     /// under `target` is mirrored under `--out` so per-source pathing is
