@@ -430,7 +430,9 @@ pub const STDLIB_PROMPT_ASSETS: &[StdlibPromptAsset] = embedded_catalog!(StdlibP
     "workflow/prompts/stage.harn.prompt" => "stdlib/workflow/prompts/stage.harn.prompt",
     "workflow/prompts/verification_context_intro.harn.prompt" => "stdlib/workflow/prompts/verification_context_intro.harn.prompt",
     "orchestration/prompts/compaction_summary.harn.prompt" => "stdlib/orchestration/prompts/compaction_summary.harn.prompt",
+    "orchestration/prompts/compaction_policy_extension.harn.prompt" => "stdlib/orchestration/prompts/compaction_policy_extension.harn.prompt",
     "orchestration/prompts/compaction_policy_replacement.harn.prompt" => "stdlib/orchestration/prompts/compaction_policy_replacement.harn.prompt",
+    "orchestration/prompts/compaction_state_grounding.harn.prompt" => "stdlib/orchestration/prompts/compaction_state_grounding.harn.prompt",
 ]);
 
 /// Embedded `.harn` script that backs a CLI subcommand. Looked up by
@@ -909,7 +911,9 @@ mod tests {
             "std/agent/prompts/completion_judge_default.harn.prompt",
             "std/workflow/prompts/stage.harn.prompt",
             "std/orchestration/prompts/compaction_summary.harn.prompt",
+            "std/orchestration/prompts/compaction_policy_extension.harn.prompt",
             "std/orchestration/prompts/compaction_policy_replacement.harn.prompt",
+            "std/orchestration/prompts/compaction_state_grounding.harn.prompt",
         ] {
             assert!(
                 get_stdlib_prompt_asset(path).is_some(),
