@@ -122,8 +122,30 @@ fn is_turn_stable(capability: &str, operation: &str) -> bool {
 /// which also makes concurrent cross-thread refills conservative rather than
 /// stale. Writes are rare, so invalidating `runtime.pipeline_input` alongside
 /// metadata is a cheaper and safer seam than a second metadata-only epoch.
-pub(crate) fn invalidates_turn_stable_reads(capability: &str, operation: &str) -> bool {
+fn invalidates_turn_stable_reads(capability: &str, operation: &str) -> bool {
     disposition(capability, operation) == TurnCacheDisposition::Invalidates
+}
+
+/// Invalidates turn-stable reads around a host mutation, including early
+/// returns and errors from the canonical dispatcher.
+pub(crate) struct InvalidationScope {
+    invalidates: bool,
+}
+
+impl Drop for InvalidationScope {
+    fn drop(&mut self) {
+        if self.invalidates {
+            reset();
+        }
+    }
+}
+
+pub(crate) fn invalidation_scope(capability: &str, operation: &str) -> InvalidationScope {
+    let invalidates = invalidates_turn_stable_reads(capability, operation);
+    if invalidates {
+        reset();
+    }
+    InvalidationScope { invalidates }
 }
 
 /// Cache key for a turn-stable host call. Keyed on capability, operation, and a
@@ -556,6 +578,35 @@ mod tests {
                 "read-only project.{operation} must not open a new epoch"
             );
         }
+    }
+
+    #[test]
+    fn mutation_scope_invalidates_before_and_after_every_return_path() {
+        let _guard = super::epoch_test_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let before = super::current_epoch();
+        {
+            let _scope = super::invalidation_scope("project", "metadata_set");
+            assert!(
+                super::current_epoch() > before,
+                "mutation must invalidate before dispatch"
+            );
+        }
+        let after_mutation = super::current_epoch();
+        assert!(
+            after_mutation > before + 1,
+            "scope drop must invalidate after dispatch"
+        );
+
+        {
+            let _scope = super::invalidation_scope("project", "metadata_get");
+        }
+        assert_eq!(
+            super::current_epoch(),
+            after_mutation,
+            "read-only dispatch must not invalidate the memo"
+        );
     }
 
     /// A turn boundary observed on a *different* thread must still invalidate

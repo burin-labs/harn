@@ -795,37 +795,16 @@ pub async fn dispatch_host_operation(
 /// Cross-cutting behaviour added here therefore reaches editor-hosted sessions
 /// automatically — mocks, command-policy preflight, the process-handle
 /// registry, and the per-turn memo included.
-///
 /// Editor-owned *builtins* (`exec`, `shell`, `run_command`) remain ACP
 /// overrides; that intentional ownership is separate from `host_call` routing.
-/// Direct `host_call("process.exec", ...)` always passes through the policy
-/// gates below and cannot bypass them by going to the editor first.
+/// Direct `host_call("process.exec", ...)` always passes through the policy gates.
 pub async fn dispatch_host_operation_with_ctx(
     ctx: Option<&AsyncBuiltinCtx>,
     capability: &str,
     operation: &str,
     params: &crate::value::DictMap,
 ) -> Result<VmValue, VmError> {
-    let invalidates_turn_cache = turn_cache::invalidates_turn_stable_reads(capability, operation);
-    if invalidates_turn_cache {
-        // Invalidate before dispatch so no concurrent reader can keep an old
-        // value alive across a metadata mutation. The matching post-dispatch
-        // reset below rejects any stale refill that raced the write itself.
-        turn_cache::reset();
-    }
-    let result = dispatch_host_operation_with_ctx_inner(ctx, capability, operation, params).await;
-    if invalidates_turn_cache {
-        turn_cache::reset();
-    }
-    result
-}
-
-async fn dispatch_host_operation_with_ctx_inner(
-    ctx: Option<&AsyncBuiltinCtx>,
-    capability: &str,
-    operation: &str,
-    params: &crate::value::DictMap,
-) -> Result<VmValue, VmError> {
+    let _invalidation = turn_cache::invalidation_scope(capability, operation);
     if let Some(ctx) = ctx {
         let vm = ctx.child_vm();
         if let Some(fixtured) = vm.harness().and_then(|harness| {
