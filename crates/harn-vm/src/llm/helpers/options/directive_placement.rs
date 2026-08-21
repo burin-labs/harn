@@ -50,10 +50,7 @@ fn message_text(message: &serde_json::Value) -> String {
 fn directive_blocks(text: &str) -> Vec<String> {
     let mut blocks = Vec::new();
     let mut rest = text;
-    loop {
-        let Some(start) = rest.find(DIRECTIVE_OPEN_PREFIX) else {
-            break;
-        };
+    while let Some(start) = rest.find(DIRECTIVE_OPEN_PREFIX) {
         let Some(after_start) = rest.get(start..) else {
             break;
         };
