@@ -1,12 +1,12 @@
-//! `harn-guard` — the downloadable on-device prompt-injection classifier for
-//! Harn (security Layer 2).
+//! `harn-guard` — management and inference for downloadable on-device models.
 //!
-//! This crate is the **management layer**: a catalog of upstream, already-hosted
-//! models ([`catalog`]), an on-disk store that installs and verifies them
-//! ([`store`]), and selector resolution ([`resolve_dir`]). It hosts nothing,
-//! bundles no weights, and makes no network calls itself — the CLI downloads
-//! from the catalog's upstream URLs on the user's machine and hands the bytes to
-//! [`GuardStore::install`] for SHA-256 verification + atomic install.
+//! This crate is the **management layer**: a purpose-tagged catalog of upstream,
+//! already-hosted models ([`catalog`]), an on-disk store that installs and
+//! verifies them ([`store`]), and purpose-scoped selector resolution
+//! ([`resolve_dir`]). It hosts nothing, bundles no weights, and makes no network
+//! calls itself — the CLI downloads from the catalog's upstream URLs on the
+//! user's machine and hands the bytes to [`GuardStore::install`] for SHA-256
+//! verification + atomic install.
 //!
 //! The heavy inference runtime (ONNX) lives behind the off-by-default `neural`
 //! feature, so the default binary never links a model runtime. When built
@@ -26,7 +26,7 @@ pub mod store;
 #[cfg(feature = "neural")]
 mod neural;
 
-pub use catalog::{CatalogFile, CatalogModel, ModelFormat, DEFAULT_MODEL};
+pub use catalog::{CatalogFile, CatalogModel, ModelFormat, ModelPurpose, DEFAULT_MODEL};
 pub use error::{GuardError, Result};
 pub use resolve::resolve_dir;
 pub use store::{sha256_hex, GuardStore, Manifest, ManifestFile};
@@ -48,7 +48,7 @@ pub fn load_classifier(
     selector: &str,
 ) -> Option<Box<dyn harn_vm::security::InjectionClassifier>> {
     let store = GuardStore::new(base_dir);
-    let dir = match resolve_dir(&store, selector) {
+    let dir = match resolve_dir(&store, selector, ModelPurpose::InjectionClassification) {
         Ok(Some(dir)) => dir,
         Ok(None) => return None,
         Err(error) => {

@@ -1,4 +1,4 @@
-//! The built-in catalog of downloadable injection-detection models.
+//! The built-in catalog of downloadable on-device models.
 //!
 //! Catalog entries are *pointers* to already-hosted upstream model repositories
 //! (Hugging Face). Harn hosts nothing and bundles no weights — `harn guard
@@ -8,6 +8,20 @@
 //! trust-on-install.
 
 use serde::{Deserialize, Serialize};
+
+/// The capability an installed model package provides.
+///
+/// Catalog lookup is always scoped by this value so callers cannot resolve a
+/// model registered for a different use.
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ModelPurpose {
+    /// Classify untrusted text for prompt-injection attempts.
+    InjectionClassification,
+    /// Encode text into vectors for semantic retrieval.
+    Embedding,
+}
 
 /// On-disk weight format a model ships in.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -46,8 +60,11 @@ pub struct CatalogFile {
 /// A catalog entry: an upstream, already-hosted model the user may install.
 #[derive(Clone, Copy, Debug)]
 pub struct CatalogModel {
-    /// Stable catalog id used on the CLI and in config (`guard_model`).
+    /// Stable catalog id used by purpose-specific CLI and config surfaces.
+    /// Injection classifiers use this as `guard_model`.
     pub name: &'static str,
+    /// Capability this model provides.
+    pub purpose: ModelPurpose,
     /// Human-facing name.
     pub display_name: &'static str,
     /// One-line description.
@@ -82,7 +99,7 @@ impl CatalogModel {
     }
 }
 
-/// The default model: ungated, permissively licensed, zero-friction.
+/// The default injection-classification model: ungated and permissively licensed.
 pub const DEFAULT_MODEL: &str = "deberta-v3-prompt-injection-v2";
 
 // ProtectAI DeBERTa-v3 prompt-injection classifier — Apache-2.0, ungated. The
@@ -136,6 +153,7 @@ const PROMPT_GUARD_2_86M_FILES: &[CatalogFile] = &[
 const CATALOG: &[CatalogModel] = &[
     CatalogModel {
         name: DEFAULT_MODEL,
+        purpose: ModelPurpose::InjectionClassification,
         display_name: "ProtectAI DeBERTa-v3 prompt-injection v2",
         description: "Apache-2.0, ungated. Recommended default — no account or license gate.",
         repo: "protectai/deberta-v3-base-prompt-injection-v2",
@@ -149,6 +167,7 @@ const CATALOG: &[CatalogModel] = &[
     },
     CatalogModel {
         name: "llama-prompt-guard-2-86m",
+        purpose: ModelPurpose::InjectionClassification,
         display_name: "Meta Llama Prompt Guard 2 (86M, ONNX)",
         description: "Higher recall, but GATED — needs Hugging Face access + HF_TOKEN.",
         repo: "gravitee-io/Llama-Prompt-Guard-2-86M-onnx",
@@ -161,19 +180,20 @@ const CATALOG: &[CatalogModel] = &[
     },
 ];
 
-/// All catalog models.
-pub fn all() -> &'static [CatalogModel] {
-    CATALOG
+/// Catalog models registered for `purpose`.
+pub fn for_purpose(purpose: ModelPurpose) -> impl Iterator<Item = &'static CatalogModel> {
+    CATALOG.iter().filter(move |model| model.purpose == purpose)
 }
 
-/// Find a catalog model by its stable `name`.
-pub fn find(name: &str) -> Option<&'static CatalogModel> {
-    CATALOG.iter().find(|m| m.name == name)
+/// Find a catalog model by its purpose and stable `name`.
+pub fn find(purpose: ModelPurpose, name: &str) -> Option<&'static CatalogModel> {
+    for_purpose(purpose).find(|model| model.name == name)
 }
 
 /// The recommended default model entry.
 pub fn default_model() -> &'static CatalogModel {
-    find(DEFAULT_MODEL).expect("default model is always present in the catalog")
+    find(ModelPurpose::InjectionClassification, DEFAULT_MODEL)
+        .expect("default guard model is always present in the catalog")
 }
 
 #[cfg(test)]
@@ -184,6 +204,7 @@ mod tests {
     fn default_model_is_ungated_and_present() {
         let model = default_model();
         assert_eq!(model.name, DEFAULT_MODEL);
+        assert_eq!(model.purpose, ModelPurpose::InjectionClassification);
         assert!(!model.gated, "the recommended default must be ungated");
         assert_eq!(model.license_id, "Apache-2.0");
     }
@@ -197,8 +218,14 @@ mod tests {
 
     #[test]
     fn catalog_entries_are_well_formed() {
-        for model in all() {
+        let mut names = std::collections::HashSet::new();
+        for model in CATALOG {
             assert!(!model.name.is_empty());
+            assert!(
+                names.insert(model.name),
+                "{} is duplicated in the shared install namespace",
+                model.name
+            );
             assert!(!model.files.is_empty(), "{} has no files", model.name);
             assert!(
                 model.base_url.starts_with("https://"),
@@ -222,6 +249,19 @@ mod tests {
     }
 
     #[test]
+    fn listing_and_lookup_are_scoped_by_purpose() {
+        let injection_models: Vec<_> = for_purpose(ModelPurpose::InjectionClassification).collect();
+        assert_eq!(injection_models.len(), CATALOG.len());
+        assert!(injection_models
+            .iter()
+            .all(|model| model.purpose == ModelPurpose::InjectionClassification));
+
+        assert!(for_purpose(ModelPurpose::Embedding).next().is_none());
+        assert!(find(ModelPurpose::Embedding, DEFAULT_MODEL).is_none());
+        assert!(find(ModelPurpose::InjectionClassification, DEFAULT_MODEL).is_some());
+    }
+
+    #[test]
     fn url_for_joins_base_and_remote() {
         let model = default_model();
         let file = &model.files[0];
@@ -233,7 +273,11 @@ mod tests {
 
     #[test]
     fn gated_model_is_opt_in_only() {
-        let gated = find("llama-prompt-guard-2-86m").expect("present");
+        let gated = find(
+            ModelPurpose::InjectionClassification,
+            "llama-prompt-guard-2-86m",
+        )
+        .expect("present");
         assert!(gated.gated);
         // We never pin digests we cannot fetch anonymously.
         assert!(gated.files.iter().all(|f| f.sha256.is_none()));

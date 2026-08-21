@@ -7,12 +7,14 @@
 
 use std::path::PathBuf;
 
-use harn_guard::{catalog, GuardStore};
+use harn_guard::{catalog, GuardStore, ModelPurpose};
 
 use crate::{
     cli::{GuardInstallArgs, GuardListArgs, GuardRemoveArgs, GuardStatusArgs},
     net,
 };
+
+const GUARD_MODEL_PURPOSE: ModelPurpose = ModelPurpose::InjectionClassification;
 
 fn store() -> GuardStore {
     let home = harn_vm::user_dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
@@ -54,7 +56,7 @@ async fn fetch_file(
 
 pub(crate) fn run_list(args: &GuardListArgs) {
     let store = store();
-    let installed = store.installed();
+    let installed = store.installed(GUARD_MODEL_PURPOSE);
     println!("Installed models ({}):", installed.len());
     if installed.is_empty() {
         println!("  (none) — run `harn guard install` to add the recommended model");
@@ -68,7 +70,7 @@ pub(crate) fn run_list(args: &GuardListArgs) {
 
     if args.catalog {
         println!("\nAvailable to install:");
-        for model in catalog::all() {
+        for model in catalog::for_purpose(GUARD_MODEL_PURPOSE) {
             let gated = if model.gated {
                 "  (gated — needs HF_TOKEN)"
             } else {
@@ -92,7 +94,11 @@ pub(crate) fn run_status(args: &GuardStatusArgs) {
     let store = store();
     let names: Vec<String> = match &args.model {
         Some(name) => vec![name.clone()],
-        None => store.installed().into_iter().map(|m| m.name).collect(),
+        None => store
+            .installed(GUARD_MODEL_PURPOSE)
+            .into_iter()
+            .map(|m| m.name)
+            .collect(),
     };
     if names.is_empty() {
         println!("No models installed.");
@@ -100,7 +106,7 @@ pub(crate) fn run_status(args: &GuardStatusArgs) {
     }
     for name in names {
         match store.read_manifest(&name) {
-            Ok(manifest) => {
+            Ok(manifest) if manifest.purpose == GUARD_MODEL_PURPOSE => {
                 let integrity = match store.verify_installed(&name) {
                     Ok(true) => "ok",
                     Ok(false) => "FAILED — re-install",
@@ -120,7 +126,7 @@ pub(crate) fn run_status(args: &GuardStatusArgs) {
                     );
                 }
             }
-            Err(_) => println!("{name} — not installed"),
+            Ok(_) | Err(_) => println!("{name} — not installed"),
         }
     }
 }
@@ -140,7 +146,7 @@ pub(crate) async fn run_install(args: &GuardInstallArgs) {
         .model
         .clone()
         .unwrap_or_else(|| catalog::DEFAULT_MODEL.to_owned());
-    let Some(model) = catalog::find(&name) else {
+    let Some(model) = catalog::find(GUARD_MODEL_PURPOSE, &name) else {
         crate::command_error(&format!(
             "unknown model `{name}` — run `harn guard list --catalog` to see available models"
         ));
@@ -156,7 +162,7 @@ pub(crate) async fn run_install(args: &GuardInstallArgs) {
         return;
     }
 
-    if store.is_installed(model.name) && !args.force {
+    if store.is_installed(model.name, GUARD_MODEL_PURPOSE) && !args.force {
         println!(
             "`{}` is already installed (use --force to re-download).",
             model.name
