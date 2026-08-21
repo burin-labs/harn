@@ -328,7 +328,16 @@
         "kind": "final_wrapup",
         "sessionId": "session-1",
         "stopReason": "iteration_limit",
-        "terminalKind": "max_iterations"
+        "terminalKind": "max_iterations",
+        "unconsumedToolCall": {
+          "diagnostics": [],
+          "evidenceLine": "the final summary contained an unconsumed tool call",
+          "parseStatus": "parsed",
+          "parsedCallCount": 1,
+          "toolNames": [
+            "edit"
+          ]
+        }
       }
     },
     {

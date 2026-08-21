@@ -50,6 +50,26 @@ pub enum ToolBatchProposalStatus {
     ReProposed,
 }
 
+/// How completely the final-wrap-up parser recovered a tool call that could
+/// not run because the agent loop had already reached its hard stop.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FinalWrapupToolCallParseStatus {
+    Parsed,
+    Partial,
+    Malformed,
+}
+
+/// Evidence that the tools-disabled final summary still contained a tool call.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct FinalWrapupUnconsumedToolCall {
+    pub parse_status: FinalWrapupToolCallParseStatus,
+    pub parsed_call_count: usize,
+    pub tool_names: Vec<String>,
+    pub diagnostics: Vec<String>,
+    pub evidence_line: String,
+}
+
 /// Auditable decision for one call in a model-proposed tool batch.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ToolBatchDispositionReceipt {
@@ -463,8 +483,9 @@ pub enum AgentEvent {
         recurrence_hints: Vec<String>,
         metadata: serde_json::Value,
     },
-    /// The loop recorded the extra, tools-disabled terminal answer produced by
-    /// its final-wrap-up turn.
+    /// The loop inspected the extra, tools-disabled terminal response produced
+    /// by its final-wrap-up turn. Emitted when the response contributed visible
+    /// text or contained an unconsumed tool call.
     FinalWrapup {
         session_id: String,
         final_status: String,
@@ -472,6 +493,8 @@ pub enum AgentEvent {
         iteration: usize,
         host_directive: bool,
         terminal_kind: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        unconsumed_tool_call: Option<FinalWrapupUnconsumedToolCall>,
     },
     /// `llm::pack_for` removed an unsupported manual thinking policy while
     /// lowering options for an adaptive-thinking model.

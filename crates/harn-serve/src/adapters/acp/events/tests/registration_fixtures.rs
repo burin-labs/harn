@@ -1,4 +1,6 @@
-use harn_vm::agent_events::AgentEvent;
+use harn_vm::agent_events::{
+    AgentEvent, FinalWrapupToolCallParseStatus, FinalWrapupUnconsumedToolCall,
+};
 
 pub(super) fn events() -> Vec<AgentEvent> {
     vec![
@@ -23,6 +25,13 @@ pub(super) fn events() -> Vec<AgentEvent> {
             iteration: 4,
             host_directive: false,
             terminal_kind: "max_iterations".to_string(),
+            unconsumed_tool_call: Some(FinalWrapupUnconsumedToolCall {
+                parse_status: FinalWrapupToolCallParseStatus::Parsed,
+                parsed_call_count: 1,
+                tool_names: vec!["edit".to_string()],
+                diagnostics: Vec::new(),
+                evidence_line: "the final summary contained an unconsumed tool call".to_string(),
+            }),
         },
         AgentEvent::PackThinkingStripped {
             session_id: "session-1".to_string(),
