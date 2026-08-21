@@ -9,6 +9,140 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.109
+
+### Added
+
+- `ast.undefined_names` now reports how far its reading can be trusted, on a new
+  `resolution` field. A caller can tell a name that is genuinely undefined from
+  one this single-file analysis simply could not see, instead of treating every
+  finding as equally certain.
+
+  Completeness needs two things to hold. The language sets a ceiling
+  (`single_file_complete` for Python, JavaScript and TypeScript, where every name
+  must be imported or bound in the same file; `package_scoped` for Go, where a
+  sibling file contributes names with no import; `runtime_resolved` for Ruby,
+  where names are routinely created at runtime). The file can then defeat an
+  otherwise complete ceiling with a wildcard import, an `eval`, a `setattr`, a
+  `method_missing`, or a syntax error, and each such construct is named in
+  `defeaters`. An `analysed` flag distinguishes a file that was checked and came
+  back clean from one that was never checked at all.
+- **Provider telemetry now records the backend build that served each call.**
+  OpenAI-compatible responses carry a `system_fingerprint` identifying the
+  server build or configuration behind a route (llama.cpp reports its build
+  string there), and it is now captured as
+  `provider_telemetry.serving_fingerprint` on both the streaming and
+  non-streaming paths. It is a build discriminator, not host identity: two
+  different values prove two different server builds, while two equal values
+  only mean the servers agreed on a build. That narrows — without closing —
+  the ambiguity when several hosts serve byte-identical artifacts on the same
+  local URL and `serving_base_url` cannot tell them apart. Absence means the
+  provider reported nothing, never "the same build as before".
+
+### Changed
+
+- Split the oversized ACP event sink and LLM handler toolbox behind their existing
+  public interfaces so the source-length ratchet can enforce its 1,500-line
+  ceiling again.
+- **Reminder placement can be append-only, so the provider prompt prefix stays
+  cacheable (#6849, #6850).** The context-directive envelope is normally re-derived on
+  every provider request and folded into the trailing `user` turn, so the turn
+  carrying it was rewritten once the conversation grew past it — a divergence at
+  the first user turn, which invalidates the prompt prefix on every provider
+  that caches one. Opt in with `reminders: {append_only: true}` or
+  `HARN_REMINDERS_APPEND_ONLY=1`; the gate is off by default. In append-only
+  mode the envelope is committed into durable session history at the turn
+  boundary that emits it, so request N+1 begins with request N. Directive
+  content, authority ordering, and the `<context-directives>` envelope are
+  unchanged; deduplication means "do not re-issue" rather than an edit to
+  history, and compaction remains the one deliberate prefix break. **Behavior
+  change for consumers who opt in:** delivered directives are ordinary
+  transcript messages, so a transcript carries one
+  `user` turn per distinct directive emission and message counts rise
+  accordingly; `ttl_turns` now bounds how long a directive keeps being
+  re-issued rather than withdrawing one already delivered.
+- The fenced-JSON tool dialect now accepts the everyday heredoc opener `<<TAG`
+  alongside the count-anchored `<<TAG:N`, and the contract teaches it. A
+  multi-line argument — a file body, a replacement span — can be written raw
+  after the JSON object inside the same ```` ```tool ```` fence and closed with a
+  line that is exactly `TAG`, with no escaping and no counting. `<<TAG:N` stays
+  the disambiguating form for a body that contains a line equal to its own
+  terminator.
+
+  This removes the dialect's worst failure: to write a file, a model had to
+  hand-serialize the whole body into one JSON string, and a single unbalanced
+  brace or missed `\"` discarded the entire call with no partial credit. The
+  capability to avoid that already existed, but only in the counted form, and the
+  taught contract said "never use a heredoc" — so the prompt, the exemplars, and
+  the parse-failure guidance all steered models into the failure. All three now
+  teach the verbatim body, from the one paradigm record they render from.
+
+  Two behavior notes. An argument value that is exactly `<<TAG` is now a body
+  declaration, so a missing body is a loud parse error instead of a literal
+  string — binding it as a literal would write the text `<<TAG` into the file the
+  call meant to fill. And `<<TAG` carries the text dialect's newline contract (the
+  newline before the terminator is the delimiter, not content), while `<<TAG:N`
+  keeps its own (each of the N lines includes its terminator); the opener says
+  which, and the same opener now means the same bytes in both dialects.
+
+  No parser leniency was added: every ambiguous shape — a body that never closes,
+  a declaration with no body, a body no argument declared, a wrong count — still
+  fails with zero calls.
+
+### Fixed
+
+- **Explicit LLM providers stay authoritative during model-tier resolution
+  (#6839).** When `HARN_LLM_PROVIDER` or an `llm_call` provider option names a
+  provider without credentials, Harn now reports that provider's missing key
+  instead of silently pairing the route with a reachable provider's model.
+- Tagged tool-call bytes now have the same caller-visible outcome under `json`
+  and `text` route pins. Missing required arguments produce retryable diagnostics
+  on either pin, and an unclosed labeled block containing several JSON calls
+  recovers the complete batch instead of refusing it only on the text route.
+- **Undeclared provider cache accounting no longer erases reported cache tokens
+  (#6854).** Routes without a `cache_usage_accounting` declaration now preserve
+  parsed cache reads and writes, expose `cache_visibility: "undeclared"`, and
+  avoid presenting an ambiguous zero as a measured cache miss. Explicitly
+  unsupported routes still zero cache telemetry.
+- **`llm_call` usage fields now type-check against the runtime envelope
+  (#6855).** The builtin signature and `LlmUsage` stdlib alias include the
+  ledger's telemetry, retry, cache, and cost-certainty fields, and a
+  bidirectional parity gate prevents any of the three surfaces from drifting.
+- LLM transcript compaction now gives the summarizer the newer retained tail and
+  instructs current workspace, diagnostic, build, test, and completion claims to
+  follow the newest relevant evidence.
+- Repair ledgers emitted during transcript compaction now include only file
+  changes backed by typed applied-mutation receipts, so prose that merely
+  resembles an edit cannot fabricate a structured fix row.
+- Let unattended embedders construct approval policy from declared run
+  interactivity, approval availability, and host-materialized workspace trust, so
+  no run asks a human who cannot answer or needs path-shaped trust heuristics.
+- **Forced tool-format probes now reach the requested provider channel (#6861).**
+  A non-empty `tool_format_override_reason` now bypasses the runtime capability
+  strip and parity steer as well as the agent-loop prompt gate, so a forced
+  native arm sends its tool schemas instead of recording native while silently
+  dispatching a tool-less request. Blank reasons retain the catalog safeguards.
+- Stop agent loops after two consecutive identical non-retryable tool denials and classify the terminal as a
+  harness-owned infrastructure rejection instead of exhausting the remaining budget.
+- **Sensitive-path approval checks now consume declared path facts instead of
+  arbitrary tool payload strings (#6890).** Editing source that mentions
+  environment APIs, keys, or secret-file names no longer produces a false
+  denial, while genuine sensitive paths remain denied with bounded evidence.
+- Focused Rust tests now acquire configured rust-heavy host leases instead of
+  silently bypassing them when invoked through Make.
+- **Published crates no longer resolve through yanked `arrayref` releases.**
+  Harn now requires BLAKE3 1.8.7, which removed that dependency, so fresh
+  installations and package verification resolve from the live registry again.
+- **Bedrock Converse no longer rejects a transcript with consecutive same-role
+  turns.** A parallel tool call produces one tool-result turn per call and each
+  maps to a `user` turn, so any fan-out wider than one returned a 400 from
+  Converse, which requires alternating roles and specifies parallel results as
+  several `toolResult` blocks inside a single `user` message. The adapter now
+  folds each run of consecutive same-role turns into one turn carrying the
+  concatenated content blocks, which also covers an assistant prefill landing
+  behind a trailing assistant turn. Content, ordering, and tool-use ids are
+  unchanged; only the turn boundaries move.
+
 ## v0.10.108
 
 ### Fixed
