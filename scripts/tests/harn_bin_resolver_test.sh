@@ -420,7 +420,23 @@ fi
 # top-level dep-info. The target and source paths contain spaces so the pinned
 # typed depfile parser, rather than shell tokenization, owns Make escaping.
 if [[ "$allow_cargo_integration" == "1" ]]; then
-unset HARN_CARGO_LEASE_MODE
+# The production lease-overlap invariant is exercised above with the explicit
+# fake lease runner. This tiny freshness fixture intentionally is not a full
+# Harn (`harn host` exits 2), so keep its Cargo builds hermetic instead of
+# silently borrowing an ambient installed Harn as a lease runner. Clean CI has
+# no such ambient executable; developer machines commonly do.
+export HARN_CARGO_LEASE_MODE=off
+fixture_lease_runner_marker="$tmp_root/cargo-fixture-lease-runner-invoked"
+fixture_lease_runner="$tmp_root/cargo-fixture-unsupported-lease-runner"
+cat > "$fixture_lease_runner" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+: > "${FIXTURE_LEASE_RUNNER_MARKER:?}"
+exit 97
+SH
+chmod +x "$fixture_lease_runner"
+export FIXTURE_LEASE_RUNNER_MARKER="$fixture_lease_runner_marker"
+export HARN_CARGO_LEASE_RUNNER="$fixture_lease_runner"
 cargo_fixture="$tmp_root/cargo fixture with spaces"
 cargo_target="$cargo_fixture/build output with spaces"
 mkdir -p "$cargo_fixture/src"
@@ -932,6 +948,11 @@ for producer in "$repo_root/scripts/dev_setup.sh" "$repo_root/scripts/release_ga
     exit 1
   fi
 done
+if [[ -e "$fixture_lease_runner_marker" ]]; then
+  echo "Cargo freshness fixture invoked an out-of-scope ambient lease runner" >&2
+  exit 1
+fi
+unset FIXTURE_LEASE_RUNNER_MARKER HARN_CARGO_LEASE_RUNNER
 fi
 
 # Return to hermetic fake-Cargo policy probes after the production-shaped
