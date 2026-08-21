@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::catalog::{CatalogModel, ModelFormat};
+use crate::catalog::{CatalogModel, ModelFormat, ModelPurpose};
 use crate::error::{GuardError, Result};
 
 const MANIFEST_NAME: &str = "manifest.json";
@@ -35,6 +35,10 @@ pub struct ManifestFile {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Manifest {
     pub name: String,
+    /// Capability provided by this installed package. Manifests written before
+    /// purpose tagging were all injection classifiers.
+    #[serde(default = "legacy_manifest_purpose")]
+    pub purpose: ModelPurpose,
     pub display_name: String,
     pub repo: String,
     pub license_id: String,
@@ -43,6 +47,10 @@ pub struct Manifest {
     pub license_accepted: bool,
     pub format: ModelFormat,
     pub files: Vec<ManifestFile>,
+}
+
+fn legacy_manifest_purpose() -> ModelPurpose {
+    ModelPurpose::InjectionClassification
 }
 
 /// The model store rooted at `<state>/guard/`.
@@ -75,9 +83,10 @@ impl GuardStore {
         self.model_dir(name).join(MANIFEST_NAME)
     }
 
-    /// Whether `name` is installed (has a manifest).
-    pub fn is_installed(&self, name: &str) -> bool {
-        self.manifest_path(name).is_file()
+    /// Whether `name` has a readable installed manifest for `purpose`.
+    pub fn is_installed(&self, name: &str, purpose: ModelPurpose) -> bool {
+        self.read_manifest(name)
+            .is_ok_and(|manifest| manifest.purpose == purpose)
     }
 
     /// Read an installed model's manifest.
@@ -92,7 +101,7 @@ impl GuardStore {
 
     /// List installed models (directories holding a readable manifest), sorted
     /// by name.
-    pub fn installed(&self) -> Vec<Manifest> {
+    pub fn installed(&self, purpose: ModelPurpose) -> Vec<Manifest> {
         let Ok(entries) = fs::read_dir(&self.root) else {
             return Vec::new();
         };
@@ -101,6 +110,7 @@ impl GuardStore {
             .filter(|entry| entry.path().is_dir())
             .filter_map(|entry| entry.file_name().into_string().ok())
             .filter_map(|name| self.read_manifest(&name).ok())
+            .filter(|manifest| manifest.purpose == purpose)
             .collect();
         out.sort_by(|a, b| a.name.cmp(&b.name));
         out
@@ -151,6 +161,7 @@ impl GuardStore {
 
         let manifest = Manifest {
             name: model.name.to_owned(),
+            purpose: model.purpose,
             display_name: model.display_name.to_owned(),
             repo: model.repo.to_owned(),
             license_id: model.license_id.to_owned(),
@@ -263,7 +274,11 @@ mod tests {
     #[test]
     fn install_requires_license_acceptance() {
         let (_temp_dir, store) = temp_store();
-        let model = catalog::find("llama-prompt-guard-2-86m").unwrap();
+        let model = catalog::find(
+            ModelPurpose::InjectionClassification,
+            "llama-prompt-guard-2-86m",
+        )
+        .unwrap();
         let stub = payload(&[
             ("model.onnx", b"a"),
             ("tokenizer.json", b"b"),
@@ -277,7 +292,11 @@ mod tests {
     fn install_unpinned_model_roundtrips_and_verifies() {
         let (_temp_dir, store) = temp_store();
         // The gated entry pins nothing, so stub bytes install cleanly (TOFU).
-        let model = catalog::find("llama-prompt-guard-2-86m").unwrap();
+        let model = catalog::find(
+            ModelPurpose::InjectionClassification,
+            "llama-prompt-guard-2-86m",
+        )
+        .unwrap();
         let files = payload(&[
             ("model.onnx", b"weights"),
             ("tokenizer.json", b"tok"),
@@ -285,27 +304,40 @@ mod tests {
         ]);
         let manifest = store.install(model, &files, true).unwrap();
         assert_eq!(manifest.name, "llama-prompt-guard-2-86m");
+        assert_eq!(manifest.purpose, ModelPurpose::InjectionClassification);
         assert!(manifest.license_accepted);
         assert_eq!(manifest.files.len(), 3);
 
-        assert!(store.is_installed("llama-prompt-guard-2-86m"));
+        assert!(store.is_installed(
+            "llama-prompt-guard-2-86m",
+            ModelPurpose::InjectionClassification
+        ));
+        assert!(!store.is_installed("llama-prompt-guard-2-86m", ModelPurpose::Embedding));
         let read = store.read_manifest("llama-prompt-guard-2-86m").unwrap();
         assert_eq!(read, manifest);
         assert!(store.verify_installed("llama-prompt-guard-2-86m").unwrap());
 
-        let listed = store.installed();
+        let listed = store.installed(ModelPurpose::InjectionClassification);
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].name, "llama-prompt-guard-2-86m");
+        assert!(store.installed(ModelPurpose::Embedding).is_empty());
 
         assert!(store.remove("llama-prompt-guard-2-86m").unwrap());
-        assert!(!store.is_installed("llama-prompt-guard-2-86m"));
+        assert!(!store.is_installed(
+            "llama-prompt-guard-2-86m",
+            ModelPurpose::InjectionClassification
+        ));
         assert!(!store.remove("llama-prompt-guard-2-86m").unwrap());
     }
 
     #[test]
     fn missing_file_in_payload_errors() {
         let (_temp_dir, store) = temp_store();
-        let model = catalog::find("llama-prompt-guard-2-86m").unwrap();
+        let model = catalog::find(
+            ModelPurpose::InjectionClassification,
+            "llama-prompt-guard-2-86m",
+        )
+        .unwrap();
         let incomplete = payload(&[("model.onnx", b"weights")]);
         let err = store.install(model, &incomplete, true).unwrap_err();
         assert!(matches!(err, GuardError::MissingFile(f) if f == "tokenizer.json"));
@@ -314,7 +346,11 @@ mod tests {
     #[test]
     fn verify_detects_corruption() {
         let (_temp_dir, store) = temp_store();
-        let model = catalog::find("llama-prompt-guard-2-86m").unwrap();
+        let model = catalog::find(
+            ModelPurpose::InjectionClassification,
+            "llama-prompt-guard-2-86m",
+        )
+        .unwrap();
         let files = payload(&[
             ("model.onnx", b"weights"),
             ("tokenizer.json", b"tok"),
@@ -324,5 +360,22 @@ mod tests {
         // Corrupt a file on disk.
         fs::write(store.model_dir(model.name).join("config.json"), b"tampered").unwrap();
         assert!(!store.verify_installed(model.name).unwrap());
+    }
+
+    #[test]
+    fn legacy_manifest_defaults_to_injection_classification() {
+        let manifest: Manifest = serde_json::from_value(serde_json::json!({
+            "name": "legacy",
+            "display_name": "Legacy guard model",
+            "repo": "example/legacy",
+            "license_id": "Apache-2.0",
+            "license_url": "https://example.com/license",
+            "license_accepted": true,
+            "format": "onnx",
+            "files": []
+        }))
+        .unwrap();
+
+        assert_eq!(manifest.purpose, ModelPurpose::InjectionClassification);
     }
 }
