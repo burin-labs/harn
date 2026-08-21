@@ -205,8 +205,69 @@ env -u HARN_CARGO_LEASE_MODE -u CI \
   CARGO_TARGET_DIR="$target_dir" \
   FAKE_HARN_LEASE_RECORD="$lease_record" \
   "$repo_root/scripts/cargo_with_worktree_build_dir.sh" test -p harn-vm
-if ! diff -u "$tmp_root/expected-auto-harn-lease-record.txt" "$lease_record"; then
+cat > "$tmp_root/expected-windows-harn-lease-record.txt" <<EOF
+CARGO_HARN_HOST_LEASE_ACTIVE=1
+host
+lease
+run
+cargo
+--owner
+cargo-wrapper
+--workspace
+$repo_root
+--target-dir
+$target_dir
+--wait-ms
+3600000
+--priority-class
+interactive
+--
+test
+-p
+harn-vm
+EOF
+if ! diff -u "$tmp_root/expected-windows-harn-lease-record.txt" "$lease_record"; then
   echo "Windows wrapper did not use the independently installed Harn runner" >&2
+  exit 1
+fi
+if grep -Fq -- '--build-dir' "$lease_record"; then
+  echo "Windows wrapper synthesized a Cargo build-dir with unsafe verbatim paths" >&2
+  exit 1
+fi
+
+: > "$lease_record"
+env -u HARN_CARGO_LEASE_MODE -u CI \
+  OS=Windows_NT \
+  PATH="$fake_bin:$PATH" \
+  CARGO_TARGET_DIR="$target_dir" \
+  CARGO_BUILD_BUILD_DIR="$custom_build_dir" \
+  FAKE_HARN_LEASE_RECORD="$lease_record" \
+  "$repo_root/scripts/cargo_with_worktree_build_dir.sh" test -p harn-vm
+cat > "$tmp_root/expected-windows-custom-build-dir-record.txt" <<EOF
+CARGO_HARN_HOST_LEASE_ACTIVE=1
+host
+lease
+run
+cargo
+--owner
+cargo-wrapper
+--workspace
+$repo_root
+--target-dir
+$target_dir
+--build-dir
+$custom_build_dir
+--wait-ms
+3600000
+--priority-class
+interactive
+--
+test
+-p
+harn-vm
+EOF
+if ! diff -u "$tmp_root/expected-windows-custom-build-dir-record.txt" "$lease_record"; then
+  echo "Windows wrapper did not preserve an explicit caller-owned Cargo build-dir" >&2
   exit 1
 fi
 rm -f "$fake_bin/harn" "$target_dir/debug/harn.exe"
