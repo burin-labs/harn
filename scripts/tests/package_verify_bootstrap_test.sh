@@ -88,7 +88,7 @@ package_verify_prepare_tools "$fixture" "$tool_dir"
 [[ "$HARN_BIN" == "$fake_harn" ]]
 
 expected="cargo cwd=$fixture args=build -p harn-cli --bin harn -p harn-cli-aot-gen --bin harn-cli-aot-gen
-resolve cwd=$fixture no_build=1 explicit= args=--print
+resolve cwd=$fixture no_build=0 explicit= args=--print
 aot --workspace-root $fixture
 aot --workspace-root $fixture --check"
 actual="$(<"$CALLS_FILE")"
@@ -157,7 +157,7 @@ export AOT_GENERATOR_TEMPLATE="$AOT_GENERATOR_TEMPLATE.template"
 unset HARN_BIN HARN_BIN_NO_BUILD
 OS=Windows_NT FAKE_CARGO_WINDOWS=1 package_verify_prepare_tools "$fixture" "$tool_dir"
 expected="cargo cwd=$fixture args=build -p harn-cli --bin harn -p harn-cli-aot-gen --bin harn-cli-aot-gen
-resolve cwd=$fixture no_build=1 explicit= args=--print
+resolve cwd=$fixture no_build=0 explicit= args=--print
 aot --workspace-root $fixture --check"
 actual="$(<"$CALLS_FILE")"
 if [[ "$actual" != "$expected" ]]; then

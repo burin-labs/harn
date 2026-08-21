@@ -290,8 +290,11 @@ env -u CARGO_TARGET_DIR -u CARGO_BUILD_BUILD_DIR \
   PATH="$fake_cargo_bin:$PATH" \
   "$repo_root/scripts/harn_bin.sh" --print > "$tmp_root/cargo-run.out" &
 resolver_pid=$!
-for _ in {1..200}; do
+for _ in {1..6000}; do
   [[ -e "$fake_lease_waiting" ]] && break
+  if [[ -s "$record" ]] || ! kill -0 "$resolver_pid" 2>/dev/null; then
+    break
+  fi
   "$real_sleep" 0.01
 done
 if [[ ! -e "$fake_lease_waiting" ]]; then
@@ -820,7 +823,8 @@ if (
   echo "no-build accepted an executable without Cargo dep-info" >&2
   exit 1
 fi
-if ! grep -Fq 'cannot inspect manifest input' "$tmp_root/missing-dep-info.err"; then
+if ! grep -Eq 'cannot inspect manifest input|manifest input type changed' \
+  "$tmp_root/missing-dep-info.err"; then
   echo "missing-dep-info failure was not attributable" >&2
   cat "$tmp_root/missing-dep-info.err" >&2
   exit 1

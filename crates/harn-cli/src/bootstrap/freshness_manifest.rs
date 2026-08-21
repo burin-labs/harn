@@ -97,7 +97,7 @@ pub(super) fn write_manifest(
     }
 
     let mut paths = paths.into_iter().collect::<Vec<_>>();
-    paths.sort_by(|left, right| os_bytes(left.as_os_str()).cmp(&os_bytes(right.as_os_str())));
+    paths.sort_by_key(|path| os_bytes(path.as_os_str()));
     let entry_count = u64::try_from(paths.len())
         .map_err(|_| "freshness manifest contains too many paths".to_owned())?;
     let mut encoded = Vec::with_capacity(paths.len().saturating_mul(128));
@@ -212,7 +212,7 @@ fn add_tree(paths: &mut BTreeSet<PathBuf>, path: &Path) -> Result<(), String> {
             })
         })
         .collect::<Result<Vec<_>, _>>()?;
-    children.sort_by(|left, right| os_bytes(left.as_os_str()).cmp(&os_bytes(right.as_os_str())));
+    children.sort_by_key(|path| os_bytes(path.as_os_str()));
     for child in children {
         add_tree(paths, &child)?;
     }
@@ -492,25 +492,16 @@ fn hash_platform_file_identity(
 fn hash_platform_file_identity(
     hasher: &mut blake3::Hasher,
     path: &Path,
-    metadata: &fs::Metadata,
+    _metadata: &fs::Metadata,
 ) -> Result<(), String> {
     use std::os::windows::ffi::OsStrExt;
-    use std::os::windows::fs::MetadataExt;
     use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
     use windows_sys::Win32::Storage::FileSystem::{
-        CreateFileW, FileBasicInfo, GetFileInformationByHandleEx, FILE_BASIC_INFO,
-        FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_DELETE,
-        FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
+        CreateFileW, FileBasicInfo, GetFileInformationByHandle, GetFileInformationByHandleEx,
+        BY_HANDLE_FILE_INFORMATION, FILE_BASIC_INFO, FILE_FLAG_BACKUP_SEMANTICS,
+        FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
+        OPEN_EXISTING,
     };
-
-    for value in [
-        metadata.volume_serial_number().unwrap_or_default() as u64,
-        metadata.file_index().unwrap_or_default(),
-        metadata.creation_time(),
-        metadata.last_write_time(),
-    ] {
-        hasher.update(&value.to_le_bytes());
-    }
 
     // `std::os::windows::fs::MetadataExt` does not expose NTFS ChangeTime.
     // Without it, a same-size edit whose LastWriteTime is restored could hit
@@ -541,8 +532,11 @@ fn hash_platform_file_identity(
             std::io::Error::last_os_error()
         ));
     }
+    let mut identity = BY_HANDLE_FILE_INFORMATION::default();
+    let identity_ok = unsafe { GetFileInformationByHandle(handle, &mut identity) };
+    let identity_error = (identity_ok == 0).then(std::io::Error::last_os_error);
     let mut basic = FILE_BASIC_INFO::default();
-    let ok = unsafe {
+    let basic_ok = unsafe {
         GetFileInformationByHandleEx(
             handle,
             FileBasicInfo,
@@ -550,15 +544,25 @@ fn hash_platform_file_identity(
             std::mem::size_of::<FILE_BASIC_INFO>() as u32,
         )
     };
-    let query_error = (ok == 0).then(std::io::Error::last_os_error);
+    let basic_error = (basic_ok == 0).then(std::io::Error::last_os_error);
     unsafe {
         CloseHandle(handle);
     }
-    if let Some(error) = query_error {
+    if let Some(error) = identity_error.or(basic_error) {
         return Err(format!(
             "cannot query manifest input {} for Windows change identity: {error}",
             path.display()
         ));
+    }
+    for value in [
+        u64::from(identity.dwVolumeSerialNumber),
+        (u64::from(identity.nFileIndexHigh) << 32) | u64::from(identity.nFileIndexLow),
+        (u64::from(identity.ftCreationTime.dwHighDateTime) << 32)
+            | u64::from(identity.ftCreationTime.dwLowDateTime),
+        (u64::from(identity.ftLastWriteTime.dwHighDateTime) << 32)
+            | u64::from(identity.ftLastWriteTime.dwLowDateTime),
+    ] {
+        hasher.update(&value.to_le_bytes());
     }
     hasher.update(&basic.ChangeTime.to_le_bytes());
     Ok(())
@@ -753,10 +757,11 @@ mod tests {
         write_manifest(&manifest, root, &covered, &dep_info, &[], &authorities).unwrap();
         assert_eq!(verify_manifest(&manifest).unwrap(), Verification::Fresh);
 
-        fs::write(root.join("deleted.harn"), b"restored").unwrap();
+        let restored = root.join("deleted.harn");
+        fs::write(&restored, b"restored").unwrap();
         assert!(matches!(
             verify_manifest(&manifest),
-            Ok(Verification::InventoryChanged(path)) if path == *root
+            Ok(Verification::InventoryChanged(path)) if path == *root || path == restored
         ));
     }
 

@@ -279,7 +279,7 @@ fn hash_path(
             })
         })
         .collect::<Result<Vec<_>, _>>()?;
-    entries.sort_by(|left, right| os_bytes(left.as_os_str()).cmp(&os_bytes(right.as_os_str())));
+    entries.sort_by_key(|path| os_bytes(path.as_os_str()));
     for entry in entries {
         hash_path(hasher, &entry, root, repo_root, target_dir, git_covered)?;
     }
