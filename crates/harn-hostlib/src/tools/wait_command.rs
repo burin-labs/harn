@@ -26,6 +26,9 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     if let Some(result) = drain_matching_result(&session_id, &handle_id) {
         return Ok(result);
     }
+    if let Some(result) = super::long_running::terminal_result_for_handle(&handle_id) {
+        return Ok(mark_tool_result(result));
+    }
 
     if timeout_ms > 0 {
         let deadline = Instant::now() + Duration::from_millis(timeout_ms);

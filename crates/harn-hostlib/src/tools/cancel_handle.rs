@@ -4,11 +4,12 @@
 //! lets the waiter drain artifacts. Returns:
 //!
 //! ```json
-//! { "handle_id": "...", "cancelled": true|false }
+//! { "handle_id": "...", "cancelled": true|false, "result": { ... }? }
 //! ```
 //!
-//! `cancelled: false` means the handle was not found — either it already
-//! completed or the id was invalid.
+//! `cancelled: false` with `result` means the handle had already completed and
+//! its immutable terminal receipt was replayed. Without `result`, the id was
+//! neither live nor retained.
 
 use harn_vm::VmDictExt;
 use std::collections::BTreeMap;
