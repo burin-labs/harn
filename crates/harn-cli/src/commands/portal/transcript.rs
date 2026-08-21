@@ -168,9 +168,19 @@ fn parse_transcript_steps(path: &Path) -> Result<Vec<PortalTranscriptStep>, Stri
                         .get("thinking")
                         .and_then(|value| value.as_str())
                         .map(str::to_string);
-                    let response_tool_calls = raw
-                        .get("tool_calls")
-                        .and_then(|value| value.as_array())
+                    let parsed_tool_calls = harn_vm::llm::response_tool_calls::resolve(&raw)
+                        .map_err(|error| {
+                            format!(
+                                "invalid provider response tool-call projection for {call_id}: {error}"
+                            )
+                        })?;
+                    let response_tool_calls = parsed_tool_calls
+                        .filter(|calls| !calls.is_empty())
+                        .or_else(|| {
+                            raw.get("tool_calls")
+                                .and_then(|value| value.as_array())
+                                .map(Vec::as_slice)
+                        })
                         .map(|items| {
                             items
                                 .iter()

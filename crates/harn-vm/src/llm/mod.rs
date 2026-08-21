@@ -91,6 +91,7 @@ pub(crate) mod reminder_iteration;
 pub(crate) mod reminder_providers;
 mod rerank;
 pub mod resolved_dispatch;
+pub mod response_tool_calls;
 pub(crate) mod routing;
 pub(crate) mod routing_verifier;
 pub(crate) mod schema_recover;

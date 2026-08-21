@@ -1,19 +1,5 @@
 //! Provider-native tool-call projection for response transcript events.
 
-/// Build the observability-only merged view without mutating request history.
-pub(super) fn merged_tool_calls_for_observability(
-    result: &crate::llm::api::LlmResult,
-) -> Vec<serde_json::Value> {
-    if !result.tool_calls.is_empty() {
-        return result.tool_calls.clone();
-    }
-    result
-        .text_projection
-        .as_deref()
-        .map(|projection| projection.merged_tool_calls(result))
-        .unwrap_or_default()
-}
-
 pub(super) fn project_onto_event(
     event: &mut serde_json::Value,
     result: &crate::llm::api::LlmResult,
@@ -46,6 +32,12 @@ mod tests {
 
         let event = response_event(&dir);
         assert_eq!(event["tool_calls"][0]["name"], "look");
+        assert_eq!(event["parsed_tool_calls_ref"], "tool_calls");
+        assert!(event.get("parsed_tool_calls").is_none());
+        assert_eq!(
+            crate::llm::response_tool_calls::resolve(&event).unwrap(),
+            event["tool_calls"].as_array().map(Vec::as_slice)
+        );
         assert_eq!(event["raw_tool_calls"][0]["function"]["name"], "tool_call");
         assert_eq!(
             event["raw_tool_calls"][0]["function"]["arguments"],

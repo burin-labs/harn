@@ -568,7 +568,7 @@ pub(super) fn dump_llm_response(
         .unwrap_or(None)
         .unwrap_or(serde_json::Value::Null);
     let telemetry = serde_json::to_value(&result.telemetry).unwrap_or(serde_json::Value::Null);
-    let parsed_tool_calls = raw_tool_receipts::merged_tool_calls_for_observability(result);
+    let parsed_tool_calls = crate::llm::response_tool_calls::merged_from_result(result);
     let loop_state = decode_loop_state(&result.text);
     let usage = result.usage();
     let mut event = serde_json::json!({
@@ -581,15 +581,6 @@ pub(super) fn dump_llm_response(
         "model": result.model,
         "text": result.text,
         "tool_calls": result.tool_calls,
-        // Observability-only merged view: provider-native calls when present,
-        // otherwise the calls parsed out of the inline tagged `<tool_call>`
-        // blocks in `text`. Text-format local models (llamacpp/qwen3.6) carry
-        // their calls only inline, so `tool_calls` (native) is empty for them;
-        // this sidecar makes the response record self-describing. Distinct from
-        // `tool_calls` so consumers can tell native vs. text-parsed apart. This
-        // does NOT touch the request-construction / history path — the model's
-        // next-turn payload is unchanged.
-        "parsed_tool_calls": parsed_tool_calls,
         // Some agent prompts emit a machine-readable LOOP_STATE block in the
         // response text. Decode it once at Harn's transcript boundary so
         // observability consumers do not each maintain their own text parser.
@@ -611,6 +602,11 @@ pub(super) fn dump_llm_response(
         "provider_telemetry": telemetry,
         "structural_experiment": structural_experiment,
     });
+    crate::llm::response_tool_calls::project_onto_response(
+        &mut event,
+        &result.tool_calls,
+        parsed_tool_calls,
+    );
     usage.project_onto_event(&mut event);
     raw_tool_receipts::project_onto_event(&mut event, result);
     append_llm_transcript_entry(&event);

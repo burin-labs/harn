@@ -51,12 +51,13 @@
 //!   request/response sidecars under `raw-provider/` and emit
 //!   `provider_raw_capture` pointer events for extraction-drop debugging.
 //! - `provider_call_response` core `{call_id, iteration, model, provider,
-//!   text, tool_calls, parsed_tool_calls, input_tokens, output_tokens,
+//!   text, tool_calls, parsed_tool_calls?, parsed_tool_calls_ref?, input_tokens, output_tokens,
 //!   response_ms}`. `tool_calls` is the provider-native tool-call array
-//!   (empty for text-format local models); `parsed_tool_calls` is the
-//!   merged view (native when present, otherwise the calls parsed out of
-//!   the inline tagged `<tool_call>` blocks in `text`) so the record is
-//!   self-describing for text-format runs. `raw_tool_calls` is present only
+//!   (empty for text-format local models). The canonical parsed view is either
+//!   an inline `parsed_tool_calls` array when it differs or the explicit
+//!   `parsed_tool_calls_ref: "tool_calls"` alias when a non-empty view is
+//!   structurally identical to the native array. Empty views stay inline
+//!   because that encoding is smaller. `raw_tool_calls` is present only
 //!   when the provider supplied native object receipts before normalization;
 //!   dispatch continues to use `tool_calls`. Also carries diagnostics
 //!   `{cost_usd, cache_* (cache_read_tokens, cache_write_tokens,

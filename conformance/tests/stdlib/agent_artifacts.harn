@@ -130,5 +130,68 @@ pipeline test(harness: Harness, task) {
   harness.stdio.println(is_ok(parsed_ok))
   const parsed_bad = check_versioned(json_parse(WRONG_VERSION_RESULT), agent_result_contract())
   harness.stdio.println(unwrap_err(parsed_bad).kind)
+  // ---- One compatibility accessor owns inline, alias, and historical rows.
+  const inline_calls = provider_response_tool_calls(
+    {
+      type: "provider_call_response",
+      timestamp: "8.0",
+      iteration: 3,
+      call_id: "c3",
+      provider: "p",
+      model: "m",
+      input_tokens: 1,
+      output_tokens: 1,
+      tool_calls: [],
+      parsed_tool_calls: [{name: "text_call"}],
+    },
+  )
+  harness.stdio.println(inline_calls[0].name)
+  const aliased_calls = provider_response_tool_calls(
+    {
+      type: "provider_call_response",
+      timestamp: "9.0",
+      iteration: 4,
+      call_id: "c4",
+      provider: "p",
+      model: "m",
+      input_tokens: 1,
+      output_tokens: 1,
+      tool_calls: [{name: "native_call"}],
+      parsed_tool_calls_ref: "tool_calls",
+    },
+  )
+  harness.stdio.println(aliased_calls[0].name)
+  const historical_calls = provider_response_tool_calls(
+    {
+      type: "provider_call_response",
+      timestamp: "10.0",
+      iteration: 5,
+      call_id: "c5",
+      provider: "p",
+      model: "m",
+      input_tokens: 1,
+      output_tokens: 1,
+      tool_calls: [{name: "historical_call"}],
+    },
+  )
+  harness.stdio.println(historical_calls[0].name)
+  const conflict = try {
+    provider_response_tool_calls(
+      {
+        type: "provider_call_response",
+        timestamp: "11.0",
+        iteration: 6,
+        call_id: "c6",
+        provider: "p",
+        model: "m",
+        input_tokens: 1,
+        output_tokens: 1,
+        tool_calls: [],
+        parsed_tool_calls: [],
+        parsed_tool_calls_ref: "tool_calls",
+      },
+    )
+  }
+  harness.stdio.println(unwrap_err(conflict))
   harness.fs.delete(root)
 }
