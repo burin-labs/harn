@@ -293,6 +293,29 @@ mod tests {
     }
 
     #[test]
+    fn explicit_env_provider_without_credentials_remains_authoritative_for_model_tier() {
+        let _guard = crate::llm::env_guard();
+        let env = crate::test_env::test_env_guard();
+        env.set("HARN_LLM_PROVIDER", "openai");
+        env.set("HARN_LLM_MODEL", "gpt-5.6-luna");
+
+        let options = Some(crate::value::DictMap::from_iter([(
+            crate::value::intern_key("model_tier"),
+            VmValue::String(arcstr::ArcStr::from("small")),
+        )]));
+        let provider = vm_resolve_provider(&options);
+        let model = vm_resolve_model(&options, &provider);
+
+        assert_eq!(provider, "openai");
+        assert_eq!(model, "gpt-5.6-luna");
+
+        let error = resolve_api_key(&provider).expect_err("missing OpenAI credential should fail");
+        let message = error.to_string();
+        assert!(message.contains("OPENAI_API_KEY"), "got: {message}");
+        assert!(message.contains("provider 'openai'"), "got: {message}");
+    }
+
+    #[test]
     fn raw_env_model_is_accepted_when_env_provider_matches() {
         let _guard = crate::llm::env_guard();
         let env = crate::test_env::test_env_guard();

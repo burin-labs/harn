@@ -104,16 +104,18 @@ fn env_selected_model_for_tier() -> Option<(String, String)> {
     let selected_model = crate::stdlib::process::session_env_value("HARN_LLM_MODEL")
         .or_else(|| crate::stdlib::process::session_env_value("LOCAL_LLM_MODEL"))?;
 
-    let selected_provider = crate::stdlib::process::session_env_value("HARN_LLM_PROVIDER")
+    if let Some(selected_provider) = crate::stdlib::process::session_env_value("HARN_LLM_PROVIDER")
         .filter(|provider| !provider.is_empty())
-        .or_else(|| {
-            if crate::stdlib::process::session_env_value("LOCAL_LLM_BASE_URL").is_some() {
-                Some("local".to_string())
-            } else {
-                None
-            }
-        })
-        .unwrap_or_else(|| llm_config::infer_provider(&selected_model));
+    {
+        return Some((selected_model, selected_provider));
+    }
+
+    let selected_provider =
+        if crate::stdlib::process::session_env_value("LOCAL_LLM_BASE_URL").is_some() {
+            "local".to_string()
+        } else {
+            llm_config::infer_provider(&selected_model)
+        };
 
     if crate::llm::provider_auth_status(&selected_provider).available {
         Some((selected_model, selected_provider))
@@ -155,19 +157,36 @@ fn preferred_provider_order(preferred_provider: Option<&str>) -> Vec<String> {
     providers
 }
 
-fn resolve_available_tier_model(
+fn resolve_tier_model_for_route(
     target: &str,
-    preferred_provider: Option<&str>,
+    selected_provider: Option<&str>,
 ) -> Option<(String, String)> {
     use crate::llm_config;
 
-    let requested = llm_config::resolve_tier_model(target, preferred_provider);
-    if let Some((model, provider)) = requested.as_ref() {
-        if preferred_provider == Some(provider.as_str())
-            && crate::llm::provider_auth_status(provider).available
+    let requested = llm_config::resolve_tier_model(target, selected_provider);
+    // A provider supplied by the caller is a constraint, not a hint. Credential
+    // availability determines whether dispatch succeeds; it must not rewrite an
+    // explicit route into a model from whichever unrelated provider is reachable
+    // on this machine. Keeping the selected provider here lets resolve_api_key
+    // report the credential that route actually requires.
+    if let Some(selected_provider) = selected_provider {
+        if let Some((model, provider)) =
+            env_selected_model_for_tier().filter(|(_, provider)| provider == selected_provider)
+        {
+            return Some((model, provider));
+        }
+        if let Some((model, provider)) = requested.as_ref() {
+            if provider == selected_provider {
+                return Some((model.clone(), provider.clone()));
+            }
+        }
+        if let Some((model, provider)) = llm_config::tier_candidates(target)
+            .iter()
+            .find(|(_, provider)| provider == selected_provider)
         {
             return Some((model.clone(), provider.clone()));
         }
+        return None;
     }
 
     if let Some((model, provider)) = env_selected_model_for_tier() {
@@ -186,7 +205,7 @@ fn resolve_available_tier_model(
     }
 
     let candidates = llm_config::tier_candidates(target);
-    for provider in preferred_provider_order(preferred_provider) {
+    for provider in preferred_provider_order(None) {
         if !crate::llm::provider_auth_status(&provider).available {
             continue;
         }
@@ -292,7 +311,7 @@ pub(crate) fn vm_resolve_provider(options: &Option<crate::value::DictMap>) -> St
         .and_then(|o| o.get("model_tier"))
         .map(|v| v.display())
     {
-        if let Some((_, provider)) = resolve_available_tier_model(&tier, None) {
+        if let Some((_, provider)) = resolve_tier_model_for_route(&tier, None) {
             return provider;
         }
     }
@@ -331,7 +350,7 @@ pub(crate) fn vm_resolve_model(options: &Option<crate::value::DictMap>, provider
         .and_then(|o| o.get("model_tier"))
         .map(|v| v.display())
     {
-        if let Some((resolved, _)) = resolve_available_tier_model(&tier, Some(provider)) {
+        if let Some((resolved, _)) = resolve_tier_model_for_route(&tier, Some(provider)) {
             return resolved;
         }
     }
