@@ -44,6 +44,45 @@ pub(crate) fn directive_envelope_message(
         .map(|envelope| serde_json::json!({"role": "user", "content": envelope}))
 }
 
+/// Append `text` to a message's `content`, preserving whatever shape the
+/// content already uses (string or array of content blocks).
+fn append_text_to_message_content(content: &mut serde_json::Value, text: &str) {
+    if let serde_json::Value::Array(existing) = content {
+        existing.push(serde_json::json!({"type": "text", "text": text}));
+        return;
+    }
+    if let serde_json::Value::String(existing) = content {
+        *existing = format!("{existing}\n\n{text}");
+        return;
+    }
+    if content.is_null() {
+        *content = serde_json::Value::String(text.to_string());
+        return;
+    }
+    *content = serde_json::Value::Array(vec![
+        std::mem::take(content),
+        serde_json::json!({"type": "text", "text": text}),
+    ]);
+}
+
+/// Preserve the pre-append-only placement while the rollout gate is off.
+fn try_append_user_reminder_text(messages: &mut [serde_json::Value], text: &str) -> bool {
+    let Some(last) = messages.last_mut() else {
+        return false;
+    };
+    let Some(last_obj) = last.as_object_mut() else {
+        return false;
+    };
+    if last_obj.get("role").and_then(serde_json::Value::as_str) != Some("user") {
+        return false;
+    }
+    let content = last_obj
+        .entry("content".to_string())
+        .or_insert(serde_json::Value::Null);
+    append_text_to_message_content(content, text);
+    true
+}
+
 pub(super) fn reminder_directive_text(reminder: &SystemReminder) -> String {
     format!(
         "<directive authority=\"{}\">\n{}\n</directive>",
@@ -233,11 +272,10 @@ fn dedupe_and_order_directives(reminders: Vec<SystemReminder>) -> Vec<SystemRemi
 
 /// Project pending directives into the provider-visible message array.
 ///
-/// Directives already committed to durable history are not re-issued, and the
-/// envelope is always its own trailing `user` turn — it never folds into an
-/// existing message, so the bytes of every earlier turn stay exactly as the
-/// model already saw them. Appending strictly after the final message also
-/// guarantees we never split a `tool_call`/`tool_result` pair.
+/// With `append_only`, directives already committed to durable history are not
+/// re-issued, and the envelope is always its own trailing `user` turn. The
+/// default preserves the legacy fold-first projection while embedders measure
+/// the model-visible placement change.
 ///
 /// This is normally a no-op inside an agent loop: the turn boundary has
 /// already committed the envelope, so nothing is left uncommitted by the time
@@ -246,8 +284,17 @@ fn dedupe_and_order_directives(reminders: Vec<SystemReminder>) -> Vec<SystemRemi
 pub(crate) fn apply_rendered_reminder_messages(
     messages: Vec<serde_json::Value>,
     rendered: &[RenderedReminder],
+    append_only: bool,
 ) -> Vec<serde_json::Value> {
     let mut messages = messages;
+    if !append_only {
+        if let Some(envelope) = directive_envelope(rendered) {
+            if !try_append_user_reminder_text(&mut messages, &envelope) {
+                messages.push(serde_json::json!({"role": "user", "content": envelope}));
+            }
+        }
+        return messages;
+    }
     let pending = super::directive_placement::uncommitted_directives(&messages, rendered);
     if let Some(message) = directive_envelope_message(&pending) {
         messages.push(message);

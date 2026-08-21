@@ -92,7 +92,12 @@ fn out_lines(raw: &str) -> Vec<String> {
 /// captured bytes exactly the array the loop handed the transport, and keeps
 /// embedded newlines (the directive envelope has several) from splitting the
 /// capture across log lines.
-fn prefix_probe_pipeline(session_id: &str) -> String {
+fn prefix_probe_pipeline(session_id: &str, append_only: bool) -> String {
+    let placement_option = if append_only {
+        "reminders: {append_only: true},"
+    } else {
+        ""
+    };
     format!(
         r#"
 pipeline main(harness: Harness, task) {{
@@ -162,6 +167,7 @@ pipeline main(harness: Harness, task) {{
       loop_until_done: true,
       session_id: "{session_id}",
       llm_caller: mock_llm,
+      {placement_option}
     }},
   )
   harness.stdio.log("status " + result.status)
@@ -259,9 +265,10 @@ fn assert_append_only(requests: &[CapturedRequest]) {
 /// every provider re-prefilled the entire prompt on every turn.
 #[test]
 fn reminder_placement_keeps_the_request_prefix_append_only() {
-    let raw = run_with_bridge(&prefix_probe_pipeline(&fresh_session_id(
-        "prefix-append-only",
-    )))
+    let raw = run_with_bridge(&prefix_probe_pipeline(
+        &fresh_session_id("prefix-append-only"),
+        true,
+    ))
     .expect("script must run");
     let lines = out_lines(&raw);
     assert!(
@@ -311,6 +318,36 @@ fn reminder_placement_keeps_the_request_prefix_append_only() {
         last.contains(envelope),
         "the committed envelope must reappear verbatim in the later request"
     );
+}
+
+/// The rollout gate is off by default. The legacy arm must keep its old
+/// placement until an embedder opts in, and this real two-turn probe makes the
+/// flag load-bearing rather than merely checking option plumbing.
+#[test]
+fn legacy_reminder_placement_still_rewrites_an_earlier_turn() {
+    let raw = run_with_bridge(&prefix_probe_pipeline(
+        &fresh_session_id("prefix-legacy"),
+        false,
+    ))
+    .expect("script must run");
+    let lines = out_lines(&raw);
+    assert!(
+        lines.iter().any(|line| line == "status done"),
+        "loop must reach a terminal `done` status; lines: {lines:?}"
+    );
+    let requests = captured_requests(&lines);
+    assert_eq!(
+        requests.len(),
+        2,
+        "the loop must have taken exactly two turns; requests: {requests:#?}"
+    );
+    assert_eq!(
+        first_divergence(&requests[0], &requests[1]),
+        Some(0),
+        "the default-off arm must preserve the legacy first-turn rewrite"
+    );
+    assert!(requests[0][0].1.contains("context-directives"));
+    assert_eq!(requests[1][0].1, "summarize the module");
 }
 
 /// The comparator has to be able to fail, or the contract test above proves

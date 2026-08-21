@@ -2129,8 +2129,8 @@ is justified, consent-verified, and traced.
 ## Reminders
 
 System reminders are typed `system_reminder` transcript events for nudging a
-running agent without pretending the nudge is user input and without adding it
-to durable messages. They support `ttl_turns`, `dedupe_key`,
+running agent without pretending the nudge is user input. They support
+`ttl_turns`, `dedupe_key`,
 `preserve_on_compact`, `propagate`, and an explicit `authority` tier:
 `contract`, `corrective`, or `advisory`. Full reference:
 `docs/src/system-reminders.md`.
@@ -2227,9 +2227,18 @@ or a session-hook effect list. Hosts inject ambient context with the
 bridge `session/remind` notification; `session/inject` remains user-role
 input.
 
-Rendering is provider-neutral. Every route receives exactly one trailing user
-message containing a `<context-directives>` envelope. Its directives are
-ordered by authority (`contract`, `corrective`, `advisory`) and then lifecycle
+Append-only placement is experimental and off by default. Enable it with
+`reminders: {append_only: true}` or `HARN_REMINDERS_APPEND_ONLY=1`; an explicit
+`false` overrides the environment fallback. The runtime then commits each
+emitted envelope as one durable trailing user turn, and later requests retain
+those exact bytes at the same message index. This preserves provider prompt
+prefixes; compaction remains the deliberate prefix break.
+
+Rendering is provider-neutral. Every route receives one
+`<context-directives>` envelope, folded into the trailing user message by
+default or emitted as its own trailing user message in append-only mode. Its
+directives are ordered by authority (`contract`, `corrective`, `advisory`) and
+then lifecycle
 order; internal tags, dedupe keys, and runtime signatures are not rendered.
 The system prompt remains byte-stable as reminders change. Persisted
 `role_hint` values remain accepted for replay compatibility but do not control
