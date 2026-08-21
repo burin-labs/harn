@@ -1957,7 +1957,7 @@ pub const ACP_DISPATCHED_METHOD_HARN_MCP_OAUTH_CALLBACK: &str = "harn.mcp.oauth_
 pub const ACP_DISPATCHED_METHOD_MCP_IMPORT_TOKEN: &str = "mcp/import_token";
 pub const ACP_DISPATCHED_METHOD_HARN_MCP_IMPORT_TOKEN: &str = "harn.mcp.import_token";
 
-/// Every JSON-RPC method the ACP adapter actually dispatches, including the workspace-management, workflow-control, and HITL methods the stable bindings do not yet expose as typed enums. Reconciled against the `match` arms in `harn-serve`'s ACP adapter.
+/// Every JSON-RPC method the ACP adapter actually dispatches, including workspace-management, workflow-control, and HITL methods. Reconciled against the `match` arms in `harn-serve`'s ACP adapter.
 pub const ACP_DISPATCHED_METHODS: &[&str] = &[
     "initialize",
     "authenticate",

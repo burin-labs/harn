@@ -278,15 +278,13 @@ pub(super) fn generate_swift_for_version(
          }\n\n",
     );
 
-    out.push_str(&swift_enum_with_deprecations(
-        "HarnACPAgentMethod",
-        &strs_to_strings(ACP_AGENT_METHODS),
-        ACP_DEPRECATED_AGENT_METHODS,
-    ));
-    out.push_str(&swift_enum(
-        "HarnACPClientMethod",
-        &strs_to_strings(ACP_CLIENT_METHODS),
-    ));
+    for vocabulary in acp_method_vocabularies() {
+        out.push_str(&swift_enum_with_deprecations(
+            vocabulary.swift_enum_name,
+            &vocabulary.values,
+            vocabulary.deprecated_values,
+        ));
+    }
     out.push_str(&swift_enum(
         "HarnACPAgentNotification",
         &strs_to_strings(ACP_AGENT_NOTIFICATIONS),

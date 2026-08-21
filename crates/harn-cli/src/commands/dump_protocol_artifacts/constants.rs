@@ -47,14 +47,13 @@ pub(super) const ACP_CLIENT_METHODS: &[&str] = &[
 /// `crates/harn-serve/src/adapters/acp/dispatch.rs`.
 ///
 /// `ACP_AGENT_METHODS` is the stable, hand-curated host-facing contract that
-/// the TypeScript/Swift/Python/Go bindings publish. The dispatcher additionally
-/// services workspace-management, workflow-control, and HITL methods that those
-/// bindings intentionally do not expose as typed enums yet. The Rust artifact
-/// is the first binding to publish the *complete* handled surface so downstream
-/// Rust hosts (e.g. a cloud platform) can route every method without
-/// re-deriving it from the dispatcher by hand. Keep this list in lockstep with
-/// the `match method.as_str()` arms; `dispatched_acp_methods_match_artifact`
-/// guards against drift.
+/// every binding publishes. The dispatcher additionally services
+/// workspace-management, workflow-control, and HITL methods. Rust and Swift
+/// publish that *complete* handled surface so embedders can route every method
+/// without re-deriving it from the dispatcher by hand; TypeScript, Python, and
+/// Go still expose the stable subset. Keep this list in lockstep with the
+/// `match method.as_str()` arms; `dispatched_acp_methods_match_artifact` guards
+/// against drift.
 pub(super) const ACP_DISPATCHED_METHODS: &[&str] = &[
     "initialize",
     "authenticate",

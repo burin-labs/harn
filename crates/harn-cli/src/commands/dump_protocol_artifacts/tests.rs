@@ -105,6 +105,9 @@ fn generated_types_include_harn_wire_vocabularies() {
     }
     let swift = generate_swift();
     assert!(swift.contains("public enum HarnACPAgentMethod"));
+    assert!(swift.contains("public enum HarnACPDispatchedMethod"));
+    assert!(swift.contains("public enum HarnACPTransportControlMethod"));
+    assert!(swift.contains("public enum HarnACPHandledMethod"));
     assert!(swift.contains("mcpProtocolVersion = \"2026-07-28\""));
     assert!(swift.contains("public struct HarnMCPRequestMeta"));
     assert!(swift.contains("public struct HarnMCPDiscoverResult"));
@@ -166,6 +169,59 @@ fn generated_types_include_harn_wire_vocabularies() {
         assert!(ts.contains(&value), "TypeScript artifact missing {value}");
         assert!(swift.contains(&value), "Swift artifact missing {value}");
     }
+}
+
+#[test]
+fn swift_and_rust_publish_identical_acp_method_vocabularies() {
+    fn generated_json_string_array(artifact: &str, start: &str, end: &str) -> BTreeSet<String> {
+        let (_, after_start) = artifact
+            .split_once(start)
+            .unwrap_or_else(|| panic!("generated artifact missing {start:?}"));
+        let (body, _) = after_start
+            .split_once(end)
+            .unwrap_or_else(|| panic!("generated artifact missing {end:?} after {start:?}"));
+
+        body.lines()
+            .filter_map(|line| line.trim().strip_suffix(','))
+            .filter_map(|literal| serde_json::from_str::<String>(literal).ok())
+            .collect()
+    }
+
+    let swift = generate_swift();
+    let rust = generate_rust();
+
+    for vocabulary in acp_method_vocabularies() {
+        let (_, swift_enum) = swift
+            .split_once(&format!(
+                "public enum {}: String, Codable, Sendable, CaseIterable {{\n",
+                vocabulary.swift_enum_name
+            ))
+            .unwrap_or_else(|| {
+                panic!(
+                    "Swift artifact missing method vocabulary {}",
+                    vocabulary.swift_enum_name
+                )
+            });
+        let swift_values = generated_json_string_array(
+            swift_enum,
+            "    public static let allCases: [Self] = [\n",
+            "    ].map { Self(rawValue: $0)! }",
+        );
+        let rust_values = generated_json_string_array(
+            &rust,
+            &format!("pub const {}: &[&str] = &[\n", vocabulary.rust_slice_name),
+            "];",
+        );
+
+        assert_eq!(
+            swift_values, rust_values,
+            "Swift {} drifted from Rust {}",
+            vocabulary.swift_enum_name, vocabulary.rust_slice_name
+        );
+    }
+
+    assert!(swift.contains("case workflowPause = \"workflow/pause\""));
+    assert!(swift.contains("case workflowResume = \"workflow/resume\""));
 }
 
 #[test]

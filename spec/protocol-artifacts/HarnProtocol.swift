@@ -982,6 +982,300 @@ public enum HarnACPAgentMethod: String, Codable, Sendable, CaseIterable {
     ].map { Self(rawValue: $0)! }
 }
 
+public enum HarnACPDispatchedMethod: String, Codable, Sendable, CaseIterable {
+    case initialize = "initialize"
+    case authenticate = "authenticate"
+    case harnProviderCatalog = "_harn/providerCatalog"
+    case harnSessionTimelineQuery = "harn.session_timeline.query"
+    case harnSessionViewQuery = "harn.session_view.query"
+    case harnSessionTimelineSubscribe = "harn.session_timeline.subscribe"
+    case harnSessionTimelineUnsubscribe = "harn.session_timeline.unsubscribe"
+    case sessionNew = "session/new"
+    case sessionLoad = "session/load"
+    case sessionAttach = "session/attach"
+    case sessionDetach = "session/detach"
+    case sessionHeartbeat = "session/heartbeat"
+    case sessionLiveClients = "session/live_clients"
+    case sessionTakeover = "session/takeover"
+    case sessionResume = "session/resume"
+    case sessionFork = "session/fork"
+    case sessionTruncate = "session/truncate"
+    case sessionRollback = "session/rollback"
+    case sessionRedo = "session/redo"
+    case sessionSetMode = "session/set_mode"
+    case sessionSetConfigOption = "session/set_config_option"
+    case sessionPlanDocumentMutate = "session/plan_document/mutate"
+    case sessionFsMode = "session/fs_mode"
+    case sessionFsCommitStaged = "session/fs_commit_staged"
+    case sessionFsDiscardStaged = "session/fs_discard_staged"
+    case sessionRestoreToolCall = "session/restore_tool_call"
+    case sessionPrompt = "session/prompt"
+    case sessionCancel = "session/cancel"
+    case sessionCancelToolCall = "session/cancel_tool_call"
+    case sessionClose = "session/close"
+    case sessionStop = "session/stop"
+    case sessionInject = "session/inject"
+    case sessionInjectHostEvent = "session/inject_host_event"
+    case sessionRevokeInject = "session/revoke_inject"
+    case sessionReplaceInject = "session/replace_inject"
+    case sessionRemind = "session/remind"
+    case sessionPendingInjections = "session/pending_injections"
+    case sessionRevokeReminder = "session/revoke_reminder"
+    case sessionList = "session/list"
+    case harnSessionWorkspaceRoots = "harn.session_workspace_roots"
+    case harnSessionAddRoot = "harn.session_add_root"
+    case harnSessionReanchor = "harn.session_reanchor"
+    case harnSessionRollback = "harn.session_rollback"
+    case harnSessionRedo = "harn.session_redo"
+    case agentResume = "agent/resume"
+    case harnHitlRespond = "harn.hitl.respond"
+    case workflowSignal = "workflow/signal"
+    case harnWorkflowSignal = "harn.workflow.signal"
+    case workflowQuery = "workflow/query"
+    case harnWorkflowQuery = "harn.workflow.query"
+    case workflowUpdate = "workflow/update"
+    case harnWorkflowUpdate = "harn.workflow.update"
+    case workflowPause = "workflow/pause"
+    case harnWorkflowPause = "harn.workflow.pause"
+    case workflowResume = "workflow/resume"
+    case harnWorkflowResume = "harn.workflow.resume"
+    case mcpCatalog = "mcp/catalog"
+    case harnMcpCatalog = "harn.mcp.catalog"
+    case mcpStatus = "mcp/status"
+    case harnMcpStatus = "harn.mcp.status"
+    case mcpAuthorize = "mcp/authorize"
+    case harnMcpAuthorize = "harn.mcp.authorize"
+    case mcpAuthorizeBatch = "mcp/authorize_batch"
+    case harnMcpAuthorizeBatch = "harn.mcp.authorize_batch"
+    case mcpOauthCallback = "mcp/oauth_callback"
+    case harnMcpOauthCallback = "harn.mcp.oauth_callback"
+    case mcpImportToken = "mcp/import_token"
+    case harnMcpImportToken = "harn.mcp.import_token"
+
+    public static let allCases: [Self] = [
+        "initialize",
+        "authenticate",
+        "_harn/providerCatalog",
+        "harn.session_timeline.query",
+        "harn.session_view.query",
+        "harn.session_timeline.subscribe",
+        "harn.session_timeline.unsubscribe",
+        "session/new",
+        "session/load",
+        "session/attach",
+        "session/detach",
+        "session/heartbeat",
+        "session/live_clients",
+        "session/takeover",
+        "session/resume",
+        "session/fork",
+        "session/truncate",
+        "session/rollback",
+        "session/redo",
+        "session/set_mode",
+        "session/set_config_option",
+        "session/plan_document/mutate",
+        "session/fs_mode",
+        "session/fs_commit_staged",
+        "session/fs_discard_staged",
+        "session/restore_tool_call",
+        "session/prompt",
+        "session/cancel",
+        "session/cancel_tool_call",
+        "session/close",
+        "session/stop",
+        "session/inject",
+        "session/inject_host_event",
+        "session/revoke_inject",
+        "session/replace_inject",
+        "session/remind",
+        "session/pending_injections",
+        "session/revoke_reminder",
+        "session/list",
+        "harn.session_workspace_roots",
+        "harn.session_add_root",
+        "harn.session_reanchor",
+        "harn.session_rollback",
+        "harn.session_redo",
+        "agent/resume",
+        "harn.hitl.respond",
+        "workflow/signal",
+        "harn.workflow.signal",
+        "workflow/query",
+        "harn.workflow.query",
+        "workflow/update",
+        "harn.workflow.update",
+        "workflow/pause",
+        "harn.workflow.pause",
+        "workflow/resume",
+        "harn.workflow.resume",
+        "mcp/catalog",
+        "harn.mcp.catalog",
+        "mcp/status",
+        "harn.mcp.status",
+        "mcp/authorize",
+        "harn.mcp.authorize",
+        "mcp/authorize_batch",
+        "harn.mcp.authorize_batch",
+        "mcp/oauth_callback",
+        "harn.mcp.oauth_callback",
+        "mcp/import_token",
+        "harn.mcp.import_token",
+    ].map { Self(rawValue: $0)! }
+}
+
+public enum HarnACPTransportControlMethod: String, Codable, Sendable, CaseIterable {
+    case sessionSetBudget = "session/set_budget"
+
+    public static let allCases: [Self] = [
+        "session/set_budget",
+    ].map { Self(rawValue: $0)! }
+}
+
+public enum HarnACPHandledMethod: String, Codable, Sendable, CaseIterable {
+    case sessionSetBudget = "session/set_budget"
+    case initialize = "initialize"
+    case authenticate = "authenticate"
+    case harnProviderCatalog = "_harn/providerCatalog"
+    case harnSessionTimelineQuery = "harn.session_timeline.query"
+    case harnSessionViewQuery = "harn.session_view.query"
+    case harnSessionTimelineSubscribe = "harn.session_timeline.subscribe"
+    case harnSessionTimelineUnsubscribe = "harn.session_timeline.unsubscribe"
+    case sessionNew = "session/new"
+    case sessionLoad = "session/load"
+    case sessionAttach = "session/attach"
+    case sessionDetach = "session/detach"
+    case sessionHeartbeat = "session/heartbeat"
+    case sessionLiveClients = "session/live_clients"
+    case sessionTakeover = "session/takeover"
+    case sessionResume = "session/resume"
+    case sessionFork = "session/fork"
+    case sessionTruncate = "session/truncate"
+    case sessionRollback = "session/rollback"
+    case sessionRedo = "session/redo"
+    case sessionSetMode = "session/set_mode"
+    case sessionSetConfigOption = "session/set_config_option"
+    case sessionPlanDocumentMutate = "session/plan_document/mutate"
+    case sessionFsMode = "session/fs_mode"
+    case sessionFsCommitStaged = "session/fs_commit_staged"
+    case sessionFsDiscardStaged = "session/fs_discard_staged"
+    case sessionRestoreToolCall = "session/restore_tool_call"
+    case sessionPrompt = "session/prompt"
+    case sessionCancel = "session/cancel"
+    case sessionCancelToolCall = "session/cancel_tool_call"
+    case sessionClose = "session/close"
+    case sessionStop = "session/stop"
+    case sessionInject = "session/inject"
+    case sessionInjectHostEvent = "session/inject_host_event"
+    case sessionRevokeInject = "session/revoke_inject"
+    case sessionReplaceInject = "session/replace_inject"
+    case sessionRemind = "session/remind"
+    case sessionPendingInjections = "session/pending_injections"
+    case sessionRevokeReminder = "session/revoke_reminder"
+    case sessionList = "session/list"
+    case harnSessionWorkspaceRoots = "harn.session_workspace_roots"
+    case harnSessionAddRoot = "harn.session_add_root"
+    case harnSessionReanchor = "harn.session_reanchor"
+    case harnSessionRollback = "harn.session_rollback"
+    case harnSessionRedo = "harn.session_redo"
+    case agentResume = "agent/resume"
+    case harnHitlRespond = "harn.hitl.respond"
+    case workflowSignal = "workflow/signal"
+    case harnWorkflowSignal = "harn.workflow.signal"
+    case workflowQuery = "workflow/query"
+    case harnWorkflowQuery = "harn.workflow.query"
+    case workflowUpdate = "workflow/update"
+    case harnWorkflowUpdate = "harn.workflow.update"
+    case workflowPause = "workflow/pause"
+    case harnWorkflowPause = "harn.workflow.pause"
+    case workflowResume = "workflow/resume"
+    case harnWorkflowResume = "harn.workflow.resume"
+    case mcpCatalog = "mcp/catalog"
+    case harnMcpCatalog = "harn.mcp.catalog"
+    case mcpStatus = "mcp/status"
+    case harnMcpStatus = "harn.mcp.status"
+    case mcpAuthorize = "mcp/authorize"
+    case harnMcpAuthorize = "harn.mcp.authorize"
+    case mcpAuthorizeBatch = "mcp/authorize_batch"
+    case harnMcpAuthorizeBatch = "harn.mcp.authorize_batch"
+    case mcpOauthCallback = "mcp/oauth_callback"
+    case harnMcpOauthCallback = "harn.mcp.oauth_callback"
+    case mcpImportToken = "mcp/import_token"
+    case harnMcpImportToken = "harn.mcp.import_token"
+
+    public static let allCases: [Self] = [
+        "session/set_budget",
+        "initialize",
+        "authenticate",
+        "_harn/providerCatalog",
+        "harn.session_timeline.query",
+        "harn.session_view.query",
+        "harn.session_timeline.subscribe",
+        "harn.session_timeline.unsubscribe",
+        "session/new",
+        "session/load",
+        "session/attach",
+        "session/detach",
+        "session/heartbeat",
+        "session/live_clients",
+        "session/takeover",
+        "session/resume",
+        "session/fork",
+        "session/truncate",
+        "session/rollback",
+        "session/redo",
+        "session/set_mode",
+        "session/set_config_option",
+        "session/plan_document/mutate",
+        "session/fs_mode",
+        "session/fs_commit_staged",
+        "session/fs_discard_staged",
+        "session/restore_tool_call",
+        "session/prompt",
+        "session/cancel",
+        "session/cancel_tool_call",
+        "session/close",
+        "session/stop",
+        "session/inject",
+        "session/inject_host_event",
+        "session/revoke_inject",
+        "session/replace_inject",
+        "session/remind",
+        "session/pending_injections",
+        "session/revoke_reminder",
+        "session/list",
+        "harn.session_workspace_roots",
+        "harn.session_add_root",
+        "harn.session_reanchor",
+        "harn.session_rollback",
+        "harn.session_redo",
+        "agent/resume",
+        "harn.hitl.respond",
+        "workflow/signal",
+        "harn.workflow.signal",
+        "workflow/query",
+        "harn.workflow.query",
+        "workflow/update",
+        "harn.workflow.update",
+        "workflow/pause",
+        "harn.workflow.pause",
+        "workflow/resume",
+        "harn.workflow.resume",
+        "mcp/catalog",
+        "harn.mcp.catalog",
+        "mcp/status",
+        "harn.mcp.status",
+        "mcp/authorize",
+        "harn.mcp.authorize",
+        "mcp/authorize_batch",
+        "harn.mcp.authorize_batch",
+        "mcp/oauth_callback",
+        "harn.mcp.oauth_callback",
+        "mcp/import_token",
+        "harn.mcp.import_token",
+    ].map { Self(rawValue: $0)! }
+}
+
 public enum HarnACPClientMethod: String, Codable, Sendable, CaseIterable {
     case fsReadTextFile = "fs/read_text_file"
     case fsWriteTextFile = "fs/write_text_file"
