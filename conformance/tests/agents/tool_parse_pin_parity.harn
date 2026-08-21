@@ -1,0 +1,84 @@
+// Identical tagged call bytes must have the same caller-visible fate under the
+// json and text route pins. The pin may change teaching feedback; it may not
+// decide whether a call runs, is diagnosed, or disappears.
+import { __parse_feedback_diagnostics } from "std/agent/loop_tool_calls"
+import { agent_parse_tool_calls } from "std/agent/primitives"
+
+fn registry() -> dict {
+  return {
+    _type: "tool_registry",
+    tools: [
+      {name: "look", description: "Read a file.", parameters: {file: {type: "string"}}},
+      {name: "edit", description: "Edit a file.", parameters: {path: {type: "string"}}},
+    ],
+  }
+}
+
+fn outcome(
+  capabilities: {agent: HarnessAgent, llm: HarnessLlm},
+  text: string,
+  pin: string,
+  tools,
+) -> dict {
+  const opts = {tool_format: pin, tools: tools}
+  const parsed = agent_parse_tool_calls(capabilities.agent, text, tools, pin)
+  const feedback = __parse_feedback_diagnostics(capabilities.llm, parsed, opts)
+  let substantive = 0
+  for call in parsed.tool_calls {
+    if type_of(call?.arguments) == "dict" && len(keys(call.arguments)) > 0 {
+      substantive = substantive + 1
+    }
+  }
+  const kind = if substantive > 0 {
+    "recovered"
+  } else if len(feedback) > 0 {
+    "diagnosed"
+  } else {
+    "refused"
+  }
+  return {kind: kind, calls: parsed.tool_calls}
+}
+
+fn assert_parity(harness: Harness, label: string, text: string, expected: string) -> nil {
+  const tools = registry()
+  const capabilities = {agent: harness.agent, llm: harness.llm}
+  const json = outcome(capabilities, text, "json", tools)
+  const tagged = outcome(capabilities, text, "text", tools)
+  require json.kind == tagged.kind,
+    "${label}: identical bytes changed outcome with the pin: json=${json.kind}, text=${tagged.kind}"
+  require json.kind == expected, "${label}: expected ${expected}, got ${json.kind}"
+  require len(json.calls) == len(tagged.calls),
+    "${label}: pin changed call count: json=${len(json.calls)}, text=${len(tagged.calls)}"
+  const names = json.calls.map(fn(call) { return to_string(call.name) }).join(",")
+  harness.stdio.println("${label} ${json.kind} calls=${len(json.calls)} names=${names}")
+  return nil
+}
+
+fn main(harness: Harness) {
+  assert_parity(harness, "expr-look-empty", "<tool_call>look({})</tool_call>", "diagnosed")
+  assert_parity(
+    harness,
+    "json-look-empty",
+    "<tool_call>\n{\"name\": \"look\", \"arguments\": {}}\n</tool_call>",
+    "diagnosed",
+  )
+  assert_parity(
+    harness,
+    "json-edit-empty",
+    "<tool_call>\n{\"name\":\"edit\",\"arguments\": {}}\n</tool_call>",
+    "diagnosed",
+  )
+  assert_parity(
+    harness,
+    "unclosed-label-multi",
+    """Now let me examine the experiment repository and models to understand the actual behavior.
+
+<tool_call>tool
+{"name": "look", "file": "src/mltrack/db/repositories/experiment_repo.py"}
+{"name": "look", "file": "src/mltrack/db/models/experiment.py"}
+{"name": "look", "file": "src/mltrack/core/exceptions.py"}
+{"name": "look", "file": "src/mltrack/core/pagination.py"}
+""",
+    "recovered",
+  )
+}

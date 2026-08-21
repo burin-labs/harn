@@ -73,9 +73,9 @@ text opener.brackets parsed
 text opener.brackets_unclosed parsed
 text opener.brackets_two_calls parsed
 text opener.prose_then_tag parsed
-text mixed.envelope_then_fence rejected
+text mixed.envelope_then_fence parsed
 text mixed.fence_then_envelope rejected
-text mixed.prose_around_envelope rejected
+text mixed.prose_around_envelope parsed
 native fence.nested parsed
 native fence.flat parsed
 native fence.empty_args parsed

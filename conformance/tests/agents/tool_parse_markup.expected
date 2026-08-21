@@ -92,8 +92,9 @@
   answer=null
   done=null
 # function markup, empty json object
-  calls=1 errors=0 violations=1 stray=0
+  calls=1 errors=1 violations=1 stray=0
   call echo_marker {}
+  err "Tool 'echo_marker' is missing required parameter(s): value. Provide all required parameters and try again."
   vio "Tool call `echo_marker` was emitted as chat-template function markup instead of `<tool_call>echo_marker({ ... })</tool_call>`. Recovered this turn so work moves forward; emit the canonical form on subsequent turns."
   prose=""
   answer=null
