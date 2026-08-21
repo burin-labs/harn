@@ -121,6 +121,23 @@ write_paths release_meta Cargo.lock changelog.d/123.fixed.md
 assert_plan false --platform windows --event push --changed-files "$tmp_dir/release_meta"
 assert_plan false --platform macos --event push --changed-files "$tmp_dir/release_meta"
 
+# A release PR's own head ref must reach the metadata-only skip. The pull_request
+# arm used to test `^release/v<semver>$`, which the harness stopped producing on
+# 2026-08-09 in favour of `release-attempt/v<ver>/<sha>` — so the skip silently
+# stopped firing and every release PR paid a full hosted native build. Pin BOTH
+# shapes, and pin a non-release ref as the negative control so a matcher that
+# accepts everything cannot pass this block.
+assert_plan false --platform windows --event pull_request \
+  --head-ref release-attempt/v0.10.108/3cfcd38bf22ef4586671d403881e293b39e0de1d \
+  --changed-files "$tmp_dir/release_meta"
+assert_plan false --platform macos --event pull_request \
+  --head-ref release-attempt/v0.10.108/3cfcd38bf22ef4586671d403881e293b39e0de1d \
+  --changed-files "$tmp_dir/release_meta"
+assert_plan false --platform windows --event pull_request \
+  --head-ref release/v0.10.68 --changed-files "$tmp_dir/release_meta"
+assert_plan true --platform windows --event pull_request \
+  --head-ref feature/not-a-release --changed-files "$tmp_dir/release_meta"
+
 write_paths release_workflow .github/workflows/build-release-binaries.yml
 write_policy_diff release_control.diff .github/workflows/build-release-binaries.yml '@@ -20,1 +20,1 @@
 -      - run: scripts/release_runner_matrix.sh --mode primary

@@ -265,8 +265,11 @@ const CLI_COLD_START_JOB_TIMEOUT_MINUTES = 30
 
 const CLI_COLD_START_BUILD_TIMEOUT_MINUTES = 25
 
+// Both release head-ref shapes, matching `.github/scripts/release-ref.sh`. A
+// GitHub Actions `if:` cannot source that helper, so this constant is what
+// keeps the expression from drifting back to one shape.
 const CLI_COLD_START_JOB_IF =
-  "(github.event_name != 'workflow_dispatch' || !startsWith(github.ref_name, 'release/v'))"
+  "(github.event_name != 'workflow_dispatch' || !(startsWith(github.ref_name, 'release/v') || startsWith(github.ref_name, 'release-attempt/v')))"
 
 const WINDOWS_CACHE_KEY = "workspace-windows"
 

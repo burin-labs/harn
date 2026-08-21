@@ -38,7 +38,7 @@ jobs:
     # matrix already builds official artifacts, so this budget lane would add
     # noise without new coverage.
     if: >-
-      (github.event_name != 'workflow_dispatch' || !startsWith(github.ref_name, 'release/v'))
+      (github.event_name != 'workflow_dispatch' || !(startsWith(github.ref_name, 'release/v') || startsWith(github.ref_name, 'release-attempt/v')))
     # This advisory workflow can run on GitHub-hosted runners before it is part
     # of the required CI aggregate. Keep an explicit ceiling so a wedged release
     # build does not burn the platform default timeout.

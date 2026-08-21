@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# One owner for release head-ref recognition; see the header there.
+# shellcheck source=.github/scripts/release-ref.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/.github/scripts/release-ref.sh"
+
 usage() {
   cat <<'EOF'
 usage: scripts/native_platform_ci_plan.sh --platform windows|macos --event EVENT \
@@ -222,7 +226,7 @@ if [[ "$event_name" != "push" && "$event_name" != "pull_request" ]]; then
   exit 0
 fi
 
-if [[ ( "$event_name" == "pull_request" && "$head_ref" =~ ^release/v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ) || "$event_name" == "push" ]] \
+if { { [[ "$event_name" == "pull_request" ]] && is_release_head_ref "$head_ref"; } || [[ "$event_name" == "push" ]]; } \
   && release_metadata_only "$changed_files"; then
   echo false
   exit 0
