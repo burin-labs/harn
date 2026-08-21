@@ -1,6 +1,7 @@
 name: Release PR drift check
 
-# Guards `release/v*.*.*` PRs against stale release pins and silent
+# Guards immutable `release-attempt/v*.*.*/*` PRs (and legacy `release/v*.*.*`
+# PRs) against stale release pins and silent
 # CHANGELOG `## Unreleased` drift absorption. When a release PR sits on
 # a frozen pin SHA and another PR merges to main, GitHub's automatic
 # 3-way merge can stay textually clean and `mergeable: MERGEABLE` while
@@ -21,9 +22,9 @@ name: Release PR drift check
 # — that re-pins on fresh `main`, runs the smart-subtract, and force-pushes
 # the PR.
 #
-# Wire `release-pr-drift-check` as a required status check on a ruleset
-# scoped to PRs from `release/v*` head refs so branch protection
-# evaluates the most recent posted check_run on the PR head SHA.
+# The repository `release drift required` ruleset requires the `drift` job on
+# the default branch. Keep that job name and the merge_group no-op stable so
+# the merge queue receives the required status for every queued PR.
 #
 # Background: burin-labs/harn-bump-fleet#39.
 
@@ -73,14 +74,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          source .github/scripts/release-pr-drift.sh
           if [ "$EVENT" = "pull_request" ]; then
-            if [[ "$PR_HEAD_REF" =~ ^release/v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
-              jq -nc \
-                --arg ref "$PR_HEAD_REF" \
-                --arg sha "$PR_HEAD_SHA" \
-                --arg pr "$PR_NUMBER" \
-                '[{ref:$ref, sha:$sha, pr:$pr}]' > targets.json
+            if release_pr_target_json \
+              "$PR_HEAD_REF" "$PR_HEAD_SHA" "$PR_NUMBER" > target.json; then
+              jq -s '.' target.json > targets.json
             else
+              status=$?
+              if [ "$status" -ne 64 ]; then
+                exit "$status"
+              fi
               echo '[]' > targets.json
               echo "Head ref '$PR_HEAD_REF' is not a release branch; nothing to check." >> "$GITHUB_STEP_SUMMARY"
             fi
@@ -114,12 +117,23 @@ jobs:
                 --repo "$GITHUB_REPOSITORY" \
                 --state open \
                 --base main \
-                --json number,headRefName,headRefOid \
-                --jq '[
-                  .[]
-                  | select(.headRefName | test("^release/v[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?$"))
-                  | {ref:.headRefName, sha:.headRefOid, pr:(.number|tostring)}
-                ]' > targets.json; then
+                --json number,headRefName,headRefOid > candidates.json; then
+                : > targets.ndjson
+                while read -r candidate; do
+                  ref=$(jq -r '.headRefName' <<< "$candidate")
+                  if target=$(release_pr_target_json \
+                    "$ref" \
+                    "$(jq -r '.headRefOid' <<< "$candidate")" \
+                    "$(jq -r '.number' <<< "$candidate")"); then
+                    printf '%s\n' "$target" >> targets.ndjson
+                  else
+                    status=$?
+                    if [ "$status" -ne 64 ]; then
+                      exit "$status"
+                    fi
+                  fi
+                done < <(jq -c '.[]' candidates.json)
+                jq -s '.' targets.ndjson > targets.json
                 break
               fi
               list_failed=1
@@ -144,26 +158,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
-          # Body of the first `## Unreleased` up to the next `## ` heading,
-          # with leading/trailing blank lines stripped. Matches the harness's
-          # `trim(text[unreleased.end:next_heading.start])`. Single awk pass
-          # so an early `exit` cannot SIGPIPE the upstream `git show` and
-          # trip `pipefail`.
-          extract_unreleased() {
-            awk '
-              !done && /^## [Uu]nreleased[[:space:]]*$/ { in_section = 1; next }
-              in_section && /^## / { in_section = 0; done = 1 }
-              in_section { lines[++n] = $0 }
-              END {
-                first = 1
-                while (first <= n && lines[first] ~ /^[[:space:]]*$/) first++
-                last = n
-                while (last >= first && lines[last] ~ /^[[:space:]]*$/) last--
-                for (i = first; i <= last; i++) print lines[i]
-              }
-            '
-          }
+          source .github/scripts/release-pr-drift.sh
 
           post_check() {
             local sha="$1" conclusion="$2" title="$3" summary_file="$4"
@@ -182,7 +177,7 @@ jobs:
             ref=$(jq -r '.ref' <<< "$target")
             sha=$(jq -r '.sha' <<< "$target")
             pr=$(jq -r '.pr' <<< "$target")
-            ver=${ref#release/v}
+            ver=$(jq -r '.version' <<< "$target")
 
             git fetch origin "$ref" --quiet || true
             pin=$(git merge-base "$sha" origin/main)
