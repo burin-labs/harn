@@ -70,7 +70,7 @@ pub fn agent_tool_call_paradigm(llm: HarnessLlm, options = nil) {
       call_noun: "```tool JSON block",
       final_answer: "as plain text",
       body_hint:
-        "Each tool call is one JSON object `{ \"name\": \"...\", \"args\": { ... } }` in a ```tool fenced block. Pass multi-line or code-bearing fields (file contents, replacement text, exact-match strings) as ordinary JSON string values — escape newlines as \\n, quotes as \\\", backslashes as \\\\. Backticks, `<<EOF`, `}`, and `</tool>` need NO escaping; they are literal bytes inside the JSON string. For several calls in one turn, emit consecutive objects — several ```tool blocks or several objects in one block — never a JSON array. Never use a heredoc, a Markdown fence around the call, or a triple-quoted string.",
+        "Each tool call is one JSON object `{ \"name\": \"...\", \"args\": { ... } }` in a ```tool fenced block. For a multi-line or code-bearing field (file contents, replacement text, exact-match strings) use a verbatim body instead of escaping: set the value to `\"<<BODY\"`, then put the raw text after the JSON object INSIDE the same ```tool fence, ending with a line that is exactly `BODY`. A verbatim body needs NO escaping at all — quotes, backslashes, newlines, and backticks are literal bytes. Use `\"<<BODY:N\"`, where N is the exact number of body lines, only when the body itself contains a line that is exactly `BODY`. Short scalar values stay ordinary JSON strings (escape newlines as \\n, quotes as \\\", backslashes as \\\\). For several calls in one turn, emit consecutive objects — several ```tool blocks or several objects in one block — never a JSON array. Never wrap the call itself in a Markdown fence other than ```tool, and never use a triple-quoted string.",
     }
   }
   return {
@@ -84,6 +84,25 @@ pub fn agent_tool_call_paradigm(llm: HarnessLlm, options = nil) {
     body_hint:
       "For any multi-line or code-bearing field (file contents, replacement text, exact-match strings) use a heredoc body: write `<<EOF` after the colon, the raw content on the following lines, then a line that is exactly `EOF` (the closing `}`/`)` may follow it). Heredoc bodies need NO escaping — quotes, backslashes, and backticks are all literal. Never wrap code or multi-line text in a quoted string.",
   }
+}
+
+/**
+ * A close tag no line of `body_lines` can impersonate. `BODY` reads best in a
+ * prompt, so it is tried first and only decorated when the body would close
+ * itself; `index` keeps two bodies in one call from sharing a tag.
+ */
+fn __verbatim_exemplar_tag(body_lines: list<string>, index: int) -> string {
+  let tag = if index == 1 {
+    "BODY"
+  } else {
+    "BODY" + to_string(index)
+  }
+  let suffix = 0
+  while body_lines.any({ line -> trim(line) == tag }) {
+    suffix = suffix + 1
+    tag = "BODY" + to_string(index) + "_" + to_string(suffix)
+  }
+  return tag
 }
 
 /**
@@ -102,14 +121,30 @@ pub fn agent_render_tool_call_exemplar(llm: HarnessLlm, name, args, options = ni
   const p = agent_tool_call_paradigm(llm, options)
   if p.kind == "json" {
     // Fenced-JSON: one ```tool block wrapping a single {name, args} object.
-    // Both `body` and scalar args are ordinary JSON string/values — the JSON
-    // encoder handles escaping, so the `body` flag is a no-op here.
+    // A `body` arg rides the verbatim channel — declared as `<<TAG` in the JSON
+    // and emitted raw after the object, inside the same fence — so an exemplar
+    // never teaches a model to hand-escape a file body. Scalars stay JSON.
     let pairs = []
+    let bodies = ""
+    let body_index = 0
     for a in args ?? [] {
-      pairs = pairs.appending([to_string(a?.key), a?.value])
+      if a?.body ?? false {
+        body_index = body_index + 1
+        const body_lines = to_string(a?.value).split("\n")
+        // Splitting on "\n" and closing with the tag is the exact inverse of
+        // how `bind_verbatim` reads an uncounted body, so the exemplar a model
+        // is shown round-trips byte for byte, trailing newline included. The
+        // tag is chosen so no body line can close the body early, which is what
+        // keeps every exemplar on the one form the contract teaches first.
+        const tag = __verbatim_exemplar_tag(body_lines, body_index)
+        pairs = pairs.appending([to_string(a?.key), "<<" + tag])
+        bodies = bodies + "\n<<" + tag + "\n" + body_lines.join("\n") + "\n" + tag
+      } else {
+        pairs = pairs.appending([to_string(a?.key), a?.value])
+      }
     }
     const call_obj = {name: to_string(name), args: dict_from_pairs(pairs)}
-    return p.call_open + json_stringify(call_obj) + p.call_close
+    return p.call_open + json_stringify(call_obj) + bodies + p.call_close
   }
   let rendered = ""
   let first = true
