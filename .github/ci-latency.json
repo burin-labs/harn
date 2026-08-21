@@ -45,6 +45,7 @@
       "portal": { "budget_ms": 30000 },
       "vscode": { "budget_ms": 90000 },
       "docs-site": { "budget_ms": 60000 },
+      "docs-checks": { "budget_ms": 120000 },
       "actions": { "budget_ms": 30000 },
       "setup-harn-action": { "budget_ms": 60000 }
     }

@@ -22,8 +22,8 @@ pub(crate) struct UsageArgs {
     #[arg(long)]
     pub since: Option<String>,
 
-    /// Only include calls strictly before this date (exclusive). Accepts
-    /// `YYYY-MM-DD` or an RFC3339 timestamp.
+    /// Only include calls before this boundary. A bare `YYYY-MM-DD` includes
+    /// that whole UTC day; an RFC3339 timestamp remains exclusive.
     #[arg(long)]
     pub until: Option<String>,
 
