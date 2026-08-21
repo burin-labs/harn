@@ -222,6 +222,11 @@ fn rewrite_and_scan_cannot_disagree_about_the_active_command_representation() {
     let mut rewrite = crate::value::DictMap::new();
     rewrite.put_str("mode", "shell");
     rewrite.put_str("command", "git reset --hard");
+    let mut shell = crate::value::DictMap::new();
+    shell.put_str("id", "sh");
+    shell.put_str("path", "/bin/sh");
+    shell.put_str("platform", "unix");
+    rewrite.insert(crate::value::intern_key("shell"), VmValue::dict(shell));
     apply_command_rewrite(&mut params, &rewrite).unwrap();
     assert!(params.get("argv").is_none());
 
