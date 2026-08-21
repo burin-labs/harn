@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use crate::cli::{McpServeArgs, McpServeTransport};
 
+mod derived_state;
 mod http;
 mod protocol;
 mod resources;

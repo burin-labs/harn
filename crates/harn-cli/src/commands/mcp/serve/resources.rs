@@ -154,13 +154,7 @@ impl McpOrchestratorService {
 
     pub(super) async fn read_resource(&self, uri: &str) -> Result<(String, &'static str), String> {
         if uri == "harn://manifest" {
-            return Ok((
-                self.manifest_source
-                    .lock()
-                    .expect("manifest source poisoned")
-                    .clone(),
-                "application/toml",
-            ));
+            return Ok((self.derived_state.manifest_source(), "application/toml"));
         }
         if let Some(event_id) = uri.strip_prefix("harn://event/") {
             let detail = self.event_resource(event_id).await?;

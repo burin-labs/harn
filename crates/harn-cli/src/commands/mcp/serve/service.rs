@@ -6,9 +6,9 @@ use crate::cli::{McpServeArgs, OrchestratorLocalArgs};
 use crate::commands::orchestrator::listener::ListenerAuth;
 
 use super::super::oauth_resource::OAuthResourceServer;
+use super::derived_state::ManifestDerivedState;
 use super::types::McpOrchestratorService;
-use super::watchers::{refresh_manifest_derived_state_cache, start_cache_refresh_watcher};
-use harn_serve::FilePromptCatalog;
+use super::watchers::start_cache_refresh_watcher;
 
 impl McpOrchestratorService {
     pub(super) fn new(args: &McpServeArgs) -> Result<Self, String> {
@@ -30,21 +30,18 @@ impl McpOrchestratorService {
             .parent()
             .unwrap_or_else(|| Path::new("."))
             .to_path_buf();
-        let prompt_catalog = Arc::new(Mutex::new(FilePromptCatalog::discover(&project_root)));
-        let manifest_source = Arc::new(Mutex::new(manifest_source));
-        let cache_watcher = start_cache_refresh_watcher(
-            project_root,
-            local.config.clone(),
-            manifest_source.clone(),
-            prompt_catalog.clone(),
-        );
+        let derived_state = Arc::new(ManifestDerivedState::discover(
+            &project_root,
+            manifest_source,
+        ));
+        let cache_watcher =
+            start_cache_refresh_watcher(project_root, local.config.clone(), derived_state.clone());
         Ok(Self {
             config_path: local.config,
             state_dir: local.state_dir,
-            manifest_source,
+            derived_state,
             auth,
             oauth,
-            prompt_catalog,
             orchestrator_event_log: std::sync::OnceLock::new(),
             tasks: Arc::new(Mutex::new(BTreeMap::new())),
             _list_watcher: Arc::new(Mutex::new(cache_watcher)),
@@ -98,16 +95,6 @@ impl McpOrchestratorService {
     }
 
     pub(super) fn refresh_manifest_derived_state(&self, manifest_source: String) {
-        let project_root = self
-            .config_path
-            .parent()
-            .unwrap_or_else(|| Path::new("."))
-            .to_path_buf();
-        refresh_manifest_derived_state_cache(
-            &project_root,
-            &self.manifest_source,
-            &self.prompt_catalog,
-            manifest_source,
-        );
+        self.derived_state.refresh(manifest_source);
     }
 }
