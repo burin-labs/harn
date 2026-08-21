@@ -61,6 +61,14 @@ fn request(owner: &str) -> HostLeaseRequest {
     }
 }
 
+fn waiter(waiter_id: &str, requested_at_ms: i64) -> WaiterIdentity {
+    WaiterIdentity {
+        waiter_id: waiter_id.to_string(),
+        requested_at_ms,
+        recoverable: false,
+    }
+}
+
 #[test]
 fn acquire_blocks_second_owner_until_release() {
     let temp = TempDir::new().unwrap();
@@ -142,6 +150,260 @@ fn immediate_transaction_allows_at_most_one_race_winner() {
             Some(HostLeaseDeferReason::Contended)
         ));
     }
+}
+
+#[test]
+fn same_class_waiters_are_fifo_across_reversed_wake_order_and_restart() {
+    for run in 0..32 {
+        let temp = TempDir::new().unwrap();
+        let store = store(&temp);
+        let mut holder_request = request("holder-c");
+        holder_request.priority_class = HostLeasePriorityClass::Interactive;
+        let holder = store.try_acquire(holder_request).unwrap().handle.unwrap();
+        let resource = HostLeaseResourceKey {
+            machine: holder.host.clone(),
+            resource_class: holder.resource_class,
+            domain: holder.domain.clone(),
+        };
+        let a = WaiterIdentity {
+            waiter_id: format!("waiter-a-{run}"),
+            requested_at_ms: 1_000,
+            recoverable: true,
+        };
+        let b = WaiterIdentity {
+            waiter_id: format!("waiter-b-{run}"),
+            requested_at_ms: 2_000,
+            recoverable: true,
+        };
+        let deadline = unix_now_ms().unwrap().saturating_add(60_000);
+        let first_a = store
+            .enqueue_waiter(
+                &resource,
+                HostLeasePriorityClass::Interactive,
+                &a,
+                deadline,
+                None,
+            )
+            .unwrap();
+        assert_eq!(first_a.position, 1);
+        let first_b = store
+            .enqueue_waiter(
+                &resource,
+                HostLeasePriorityClass::Interactive,
+                &b,
+                deadline,
+                None,
+            )
+            .unwrap();
+        assert_eq!(first_b.position, 2);
+        assert_eq!(
+            first_b.predecessor_waiter_id.as_deref(),
+            Some(a.waiter_id.as_str())
+        );
+
+        let restarted_a = store
+            .enqueue_waiter(
+                &resource,
+                HostLeasePriorityClass::Interactive,
+                &a,
+                deadline,
+                Some(std::process::id()),
+            )
+            .unwrap();
+        assert_eq!(restarted_a, first_a);
+
+        assert!(
+            store
+                .release_for_domain(
+                    &holder.host,
+                    holder.resource_class,
+                    &holder.domain,
+                    &holder.lease_id,
+                )
+                .unwrap()
+                .released
+        );
+
+        // Exercise the losing wake order deliberately: B retries before A.
+        let mut b_request = request("waiter-b");
+        b_request.priority_class = HostLeasePriorityClass::Interactive;
+        let b_early = store
+            .try_acquire_once(b_request.clone(), None, Some(deadline), &b)
+            .unwrap();
+        assert_eq!(b_early.status, HostLeaseAcquireStatus::Deferred);
+        assert_eq!(
+            b_early.defer.unwrap().deferred_reason,
+            HostLeaseDeferReason::Queued
+        );
+        assert_eq!(b_early.queue.unwrap().position, 2);
+
+        let mut a_request = request("waiter-a");
+        a_request.priority_class = HostLeasePriorityClass::Interactive;
+        let acquired_a = store
+            .try_acquire_once(a_request, None, Some(deadline), &a)
+            .unwrap();
+        assert_eq!(acquired_a.status, HostLeaseAcquireStatus::Acquired);
+        assert_eq!(acquired_a.queue.as_ref().unwrap().position, 1);
+        let acquired_a = acquired_a.handle.unwrap();
+        assert!(
+            store
+                .release(&acquired_a.host, &acquired_a.lease_id)
+                .unwrap()
+                .released
+        );
+
+        let acquired_b = store
+            .try_acquire_once(b_request, None, Some(deadline), &b)
+            .unwrap();
+        assert_eq!(acquired_b.status, HostLeaseAcquireStatus::Acquired);
+        assert_eq!(acquired_b.queue.unwrap().position, 1);
+    }
+}
+
+#[test]
+fn higher_priority_waiter_preempts_an_older_lower_priority_waiter() {
+    let temp = TempDir::new().unwrap();
+    let store = store(&temp);
+    let resource = HostLeaseResourceKey {
+        machine: "mac-local".to_string(),
+        resource_class: HostLeaseResourceClass::WholeMachine,
+        domain: DEFAULT_HOST_LEASE_DOMAIN.to_string(),
+    };
+    let low = WaiterIdentity {
+        waiter_id: "low-priority".to_string(),
+        requested_at_ms: 1_000,
+        recoverable: true,
+    };
+    let high = WaiterIdentity {
+        waiter_id: "high-priority".to_string(),
+        requested_at_ms: 2_000,
+        recoverable: true,
+    };
+    let deadline = unix_now_ms().unwrap().saturating_add(60_000);
+    store
+        .enqueue_waiter(
+            &resource,
+            HostLeasePriorityClass::Deferrable,
+            &low,
+            deadline,
+            None,
+        )
+        .unwrap();
+    let high_evidence = store
+        .enqueue_waiter(
+            &resource,
+            HostLeasePriorityClass::Interactive,
+            &high,
+            deadline,
+            None,
+        )
+        .unwrap();
+    assert_eq!(high_evidence.position, 1);
+
+    let mut high_request = request("high-priority");
+    high_request.priority_class = HostLeasePriorityClass::Interactive;
+    let acquired = store
+        .try_acquire_once(high_request, None, Some(deadline), &high)
+        .unwrap();
+    assert_eq!(acquired.status, HostLeaseAcquireStatus::Acquired);
+    assert_eq!(acquired.queue.unwrap().position, 1);
+}
+
+#[test]
+fn supervised_waiters_handoff_fifo_on_the_public_restart_path() {
+    let mut handoff_micros = Vec::new();
+    for run in 0..8 {
+        let temp = TempDir::new().unwrap();
+        let store = Arc::new(store(&temp));
+        let mut holder_request = request("holder-c");
+        holder_request.priority_class = HostLeasePriorityClass::Interactive;
+        let holder = store.try_acquire(holder_request).unwrap().handle.unwrap();
+        let resource = HostLeaseResourceKey {
+            machine: holder.host.clone(),
+            resource_class: holder.resource_class,
+            domain: holder.domain.clone(),
+        };
+        let context = HostLeaseExecutionContext::cargo(
+            Path::new("/workspace/project"),
+            Path::new("/tmp/target"),
+            None,
+        );
+        let a = store
+            .begin_run(
+                &format!("waiter-a-{run}"),
+                HostLeasePriorityClass::Interactive,
+                resource.clone(),
+                context.clone(),
+                5_000,
+            )
+            .unwrap();
+        let b = store
+            .begin_run(
+                &format!("waiter-b-{run}"),
+                HostLeasePriorityClass::Interactive,
+                resource,
+                context,
+                5_000,
+            )
+            .unwrap();
+        assert_eq!(a.queue.as_ref().unwrap().position, 1);
+        assert_eq!(b.queue.as_ref().unwrap().position, 2);
+
+        let barrier = Arc::new(Barrier::new(3));
+        let b_worker = {
+            let store = Arc::clone(&store);
+            let barrier = Arc::clone(&barrier);
+            let run_id = b.run_id.clone();
+            thread::spawn(move || {
+                barrier.wait();
+                store
+                    .acquire_wait_for_run(&run_id, std::process::id())
+                    .unwrap()
+            })
+        };
+        let a_worker = {
+            let store = Arc::clone(&store);
+            let barrier = Arc::clone(&barrier);
+            let run_id = a.run_id.clone();
+            thread::spawn(move || {
+                barrier.wait();
+                store
+                    .acquire_wait_for_run(&run_id, std::process::id())
+                    .unwrap()
+            })
+        };
+        barrier.wait();
+        let released_at = Instant::now();
+        assert!(
+            store
+                .release_for_domain(
+                    &holder.host,
+                    holder.resource_class,
+                    &holder.domain,
+                    &holder.lease_id,
+                )
+                .unwrap()
+                .released
+        );
+        let acquired_a = a_worker.join().unwrap();
+        handoff_micros.push(released_at.elapsed().as_micros());
+        assert_eq!(acquired_a.status, HostLeaseAcquireStatus::Acquired);
+        assert_eq!(acquired_a.queue.as_ref().unwrap().waiter_id, a.run_id);
+        let acquired_a = acquired_a.handle.unwrap();
+        assert!(
+            store
+                .release(&acquired_a.host, &acquired_a.lease_id)
+                .unwrap()
+                .released
+        );
+        let acquired_b = b_worker.join().unwrap();
+        assert_eq!(acquired_b.status, HostLeaseAcquireStatus::Acquired);
+        assert_eq!(acquired_b.queue.as_ref().unwrap().waiter_id, b.run_id);
+    }
+    eprintln!(
+        "supervised FIFO handoff latency over 8 runs: max={} us",
+        handoff_micros.into_iter().max().unwrap()
+    );
 }
 
 #[test]
@@ -780,7 +1042,13 @@ fn registry_write_contention_returns_a_typed_defer_receipt() {
         .unwrap();
 
     let receipt = store
-        .try_acquire_once_with_registry_timeout(request("codex-0"), None, None, Duration::ZERO)
+        .try_acquire_once_with_registry_timeout(
+            request("codex-0"),
+            None,
+            None,
+            &waiter("codex-0", 1_000),
+            Duration::ZERO,
+        )
         .unwrap();
     assert_eq!(receipt.status, HostLeaseAcquireStatus::Deferred);
     let defer = receipt.defer.unwrap();
@@ -821,7 +1089,12 @@ fn concurrent_fresh_stores_survive_the_wal_conversion_race() {
                 barrier.wait();
                 let store = HostLeaseStore::for_root(root).unwrap();
                 store
-                    .try_acquire_once(request(&format!("owner-{worker}")), None, None)
+                    .try_acquire_once(
+                        request(&format!("owner-{worker}")),
+                        None,
+                        None,
+                        &waiter(&format!("owner-{worker}"), worker as i64),
+                    )
                     .unwrap();
             })
         })

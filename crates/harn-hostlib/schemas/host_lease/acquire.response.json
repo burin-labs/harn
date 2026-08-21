@@ -28,9 +28,15 @@
         {"type": "null"},
         {"$ref": "#/$defs/handle"}
       ]
+    },
+    "queue": {
+      "oneOf": [
+        {"type": "null"},
+        {"$ref": "#/$defs/queue"}
+      ]
     }
   },
-  "required": ["schema_version", "status", "observed_at_ms", "waited_ms", "handle", "defer", "guard", "recovered_stale_lease", "recovered"],
+  "required": ["schema_version", "status", "observed_at_ms", "waited_ms", "handle", "defer", "guard", "recovered_stale_lease", "recovered", "queue"],
   "additionalProperties": false,
   "$defs": {
     "handle": {
@@ -72,6 +78,17 @@
         }
       },
       "required": ["host", "resource_class", "domain", "deferred_reason", "observed_at_ms", "next_wake_at_ms", "deadline_at_ms", "active"],
+      "additionalProperties": false
+    },
+    "queue": {
+      "type": "object",
+      "properties": {
+        "waiter_id": {"type": "string", "minLength": 1},
+        "requested_at_ms": {"type": "integer"},
+        "position": {"type": "integer", "minimum": 1},
+        "predecessor_waiter_id": {"type": ["string", "null"]}
+      },
+      "required": ["waiter_id", "requested_at_ms", "position", "predecessor_waiter_id"],
       "additionalProperties": false
     }
   }
