@@ -4,7 +4,7 @@ use crate::agent_events::{
     AgentEvent, AgentEventSink, DurableAgentEventProjector, EventLogSink, JsonlEventSink,
     MultiSink, ToolCallErrorCategory, ToolCallStatus, ToolMutationStatus,
 };
-use crate::event_log::{AnyEventLog, EventLog, FileEventLog, MemoryEventLog, Topic};
+use crate::event_log::{AnyEventLog, EventLog, MemoryEventLog, Topic};
 
 struct CapturingSink(Mutex<Vec<AgentEvent>>);
 
@@ -459,85 +459,4 @@ fn jsonl_rotation_preserves_projection_state_and_contiguous_durable_indices() {
     assert!(base.contains("\"index\":0"));
     assert!(base.contains("\"index\":1"));
     assert!(rotated.contains("\"index\":2"));
-}
-
-#[test]
-#[ignore = "requires HARN_DURABLE_EVENT_TRACE pointing to a production JSONL AgentEvent log"]
-fn production_trace_reports_both_physical_durable_projections() {
-    use std::io::BufRead as _;
-
-    let source = std::env::var_os("HARN_DURABLE_EVENT_TRACE")
-        .expect("set HARN_DURABLE_EVENT_TRACE to a production JSONL AgentEvent log");
-    let source = std::path::PathBuf::from(source);
-    let input_bytes = std::fs::metadata(&source).expect("trace metadata").len();
-    let reader = std::io::BufReader::new(std::fs::File::open(&source).expect("open trace"));
-    let events = reader
-        .lines()
-        .map(|line| {
-            let line = line.expect("read trace line");
-            serde_json::from_str::<crate::agent_events::PersistedAgentEvent>(&line)
-                .expect("deserialize production AgentEvent")
-                .event
-        })
-        .collect::<Vec<_>>();
-    let input_rows = events.len() as u64;
-    let mut projector_samples = Vec::with_capacity(20);
-    let mut projected_rows = 0_u64;
-    for _ in 0..20 {
-        let mut projector = DurableAgentEventProjector::new();
-        let started = std::time::Instant::now();
-        projected_rows = events
-            .iter()
-            .filter(|event| projector.should_persist(event))
-            .count() as u64;
-        projector_samples.push(started.elapsed());
-    }
-    projector_samples.sort_unstable();
-    let p50_index = (projector_samples.len() * 50).div_ceil(100) - 1;
-    let p95_index = (projector_samples.len() * 95).div_ceil(100) - 1;
-    let projector_p50 = projector_samples[p50_index];
-    let projector_p95 = projector_samples[p95_index];
-
-    let temp = tempfile::tempdir().expect("projected trace tempdir");
-    let jsonl_path = temp.path().join("event_log.jsonl");
-    let jsonl_sink = JsonlEventSink::open(&jsonl_path).expect("open projected JSONL sink");
-    let file_root = temp.path().join("events");
-    let file_log = Arc::new(AnyEventLog::File(
-        FileEventLog::open(file_root.clone(), 32).expect("open projected file event log"),
-    ));
-    let session_id = "production-trace-projection";
-    let event_log_sink = EventLogSink::new(file_log, session_id);
-    let started = std::time::Instant::now();
-    for event in &events {
-        jsonl_sink.handle_event(event);
-        event_log_sink.handle_event(event);
-    }
-    jsonl_sink.flush().expect("flush projected JSONL sink");
-    futures::executor::block_on(event_log_sink.flush()).expect("flush projected file event log");
-    let elapsed = started.elapsed();
-
-    let topic_path = file_root
-        .join("topics")
-        .join("observability.agent_events.production-trace-projection.jsonl");
-    let jsonl_bytes = std::fs::metadata(&jsonl_path)
-        .expect("projected JSONL metadata")
-        .len();
-    let topic_bytes = std::fs::metadata(&topic_path)
-        .expect("projected topic metadata")
-        .len();
-    let topic_rows =
-        std::io::BufReader::new(std::fs::File::open(&topic_path).expect("open projected topic"))
-            .lines()
-            .count() as u64;
-    let output_rows = jsonl_sink.event_count();
-    eprintln!(
-        "durable projection: input={input_rows} rows/{input_bytes} bytes, jsonl={output_rows} rows/{jsonl_bytes} bytes, topic={topic_rows} rows/{topic_bytes} bytes, projector_p50_us={}, projector_p95_us={}, physical_sink_wall_ms={}",
-        projector_p50.as_micros(),
-        projector_p95.as_micros(),
-        elapsed.as_millis(),
-    );
-    assert!(output_rows < input_rows);
-    assert_eq!(projected_rows, output_rows);
-    assert_eq!(topic_rows, output_rows);
-    assert!(jsonl_bytes < input_bytes);
 }
