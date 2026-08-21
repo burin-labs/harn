@@ -386,10 +386,16 @@ fn __tool_batch_dispatch(harness: Harness, tool_calls, tools, options, cap) {
     }
     return {
       results: blocked_results,
-      state: plan.previous
-        + {
+      state: {
+        schema: "harn.agent_tool_batch_state.v1",
         batch_id: plan.batch_id,
+        selected_phase: plan.selected_phase,
         deferred_signatures: __tool_batch_deferred_signatures(plan.entries),
+        // The synthetic results above are the observation boundary for this
+        // dependency. Keeping the blocker would reject every later process or
+        // terminal proposal until the model happened to emit another
+        // mutation, turning one rejected edit into a permanent barrier.
+        blocking_result: nil,
       },
     }
   }

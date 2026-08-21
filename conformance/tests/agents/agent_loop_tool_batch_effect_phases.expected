@@ -6,3 +6,5 @@ blocked.status=done
 blocked.skipped=2
 blocked.counters.verify=1
 blocked.counters.done=1
+rearmed.status=done
+rearmed.skipped=2
