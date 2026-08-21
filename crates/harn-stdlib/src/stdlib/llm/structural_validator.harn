@@ -649,6 +649,30 @@ pub fn tool_call_output_schema(registry, claimed_tool = "") -> any? {
 }
 
 /**
+ * Project one named registry tool into the canonical call-envelope schema.
+ *
+ * Unlike `tool_call_output_schema`, this fails closed for an absent name. A
+ * one-turn execution claim must never degrade into the full tool union: doing
+ * so would turn "call verify next" into "call anything next" while still
+ * looking structurally constrained to its caller.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn exact_tool_call_output_schema(registry, claimed_tool: string) -> any? {
+  const claimed = trim(claimed_tool)
+  if claimed == "" {
+    return nil
+  }
+  const schema = tool_call_output_schema(registry, claimed)
+  if schema == nil || schema?.properties?.name?.enum != [claimed] {
+    return nil
+  }
+  return schema
+}
+
+/**
  * A deliberately shallow JSON-Schema fragment for one tool argument.
  *
  * Only a single unambiguous scalar/container type is projected; anything

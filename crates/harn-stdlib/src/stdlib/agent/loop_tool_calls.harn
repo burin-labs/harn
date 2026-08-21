@@ -32,6 +32,7 @@ pub type AgentLoopLlmResultProjection = {
   parsed: dict,
   visible_text: string,
   normalized: dict,
+  tool_options: dict,
 }
 
 pub type AgentLoopLlmProjectionContext = {llm_options: dict, turn_options: dict}
@@ -68,7 +69,7 @@ pub type AgentLoopLlmProjectionContext = {llm_options: dict, turn_options: dict}
  * @errors: []
  */
 fn __agent_loop_exempt_claimed_bare_envelope(parsed, turn_options) {
-  if !(turn_options?._prior_turn_claimed_for_repair ?? false) {
+  if turn_options?._next_tool_claim == nil {
     return parsed
   }
   const violations = parsed?.protocol_violations ?? []
@@ -84,13 +85,15 @@ pub fn __agent_loop_project_result(
   result,
   context: AgentLoopLlmProjectionContext,
 ) -> AgentLoopLlmResultProjection {
-  const tool_format = result?._effective_tool_format
+  const request_tool_format = result?._effective_tool_format
     ?? context.llm_options?.tool_format
     ?? context.turn_options?.tool_format
     ?? ""
+  const parser_tool_format = context.llm_options?._next_tool_claim_parser_format
+    ?? request_tool_format
   const raw_text = result?.raw_text ?? result?.text ?? ""
   const parsed = __agent_loop_exempt_claimed_bare_envelope(
-    agent_parse_tool_calls(agent, raw_text, context.turn_options?.tools, tool_format),
+    agent_parse_tool_calls(agent, raw_text, context.turn_options?.tools, parser_tool_format),
     context.turn_options,
   )
   const visible_text = __visible_text(parsed, raw_text)
@@ -98,11 +101,18 @@ pub fn __agent_loop_project_result(
     raw_text: raw_text,
     parsed: parsed,
     visible_text: visible_text,
+    tool_options: context.turn_options + {tool_format: parser_tool_format},
     normalized: result
       + {
       text: visible_text,
       visible_text: visible_text,
-      _agent_tool_format: tool_format,
+      // History remains canonical in the request's ambient dialect. The
+      // parser grammar is a separate disposition fact when an exact output
+      // schema constrains this one response to a JSON call envelope.
+      _agent_tool_format: request_tool_format,
+      _agent_result_parser_format: parser_tool_format,
+      _agent_next_tool_claim_contract_applied: context.llm_options?._next_tool_claim_applied
+        ?? false,
     },
   }
 }
@@ -1218,8 +1228,21 @@ pub fn __agent_loop_record_parse_feedback(
   llm_result,
   turn_opts,
 ) -> dict {
-  const recorded_assistant = if fallback_outcome.triggered && fallback_outcome.accepted {
+  const claimed_native_projection = normalized?._agent_next_tool_claim_contract_applied
+    == true
+    && normalized?._agent_tool_format
+    == "native"
+    && normalized?._agent_result_parser_format
+    == "json"
+    && len(tool_calls) > 0
+  const recorded_assistant = if (fallback_outcome.triggered && fallback_outcome.accepted)
+    || claimed_native_projection {
     normalized + {tool_calls: tool_calls, native_tool_calls: tool_calls}
+      + if claimed_native_projection {
+      {text: "", visible_text: ""}
+    } else {
+      {}
+    }
   } else {
     normalized
       + {

@@ -739,6 +739,7 @@ fn __normalize_verdict(verdict) -> dict {
     return {
       llm_options: verdict?.llm_options,
       message: to_string(verdict?.message ?? ""),
+      next_tool_claim: verdict?.next_tool_claim,
       next_options: verdict?.next_options,
       prefill: verdict?.prefill,
       stop: verdict?.stop ?? false,
@@ -764,6 +765,7 @@ pub fn compose_post_turn(callbacks: list) {
   return { payload ->
     let messages = []
     let result = nil
+    let next_tool_claim = nil
     for callback in callbacks {
       if callback == nil {
         continue
@@ -781,11 +783,26 @@ pub fn compose_post_turn(callbacks: list) {
       if to_string(norm?.message ?? "") != "" {
         messages = messages.appending(norm.message)
       }
+      if norm?.next_tool_claim != nil {
+        if next_tool_claim != nil
+          && next_tool_claim?.tool_name != norm?.next_tool_claim?.tool_name {
+          throw "compose_post_turn: callbacks returned conflicting `next_tool_claim` values"
+        }
+        next_tool_claim = norm.next_tool_claim
+      }
     }
     if result != nil {
       result
-    } else if len(messages) > 0 {
-      {message: join(messages, "\n")}
+    } else if len(messages) > 0 || next_tool_claim != nil {
+      let combined = if len(messages) > 0 {
+        {message: join(messages, "\n")}
+      } else {
+        {}
+      }
+      if next_tool_claim != nil {
+        combined = combined + {next_tool_claim: next_tool_claim}
+      }
+      combined
     } else {
       nil
     }

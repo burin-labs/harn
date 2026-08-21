@@ -227,18 +227,10 @@ pub fn __apply_post_turn_options(opts, outcome) {
   let updated = opts
   const next_patch = __strip_internal_keys(outcome?.next_options)
   updated = __merge_hook_dict(updated, next_patch, "next_options")
-  // Carry an outstanding repair claim into the next turn. The content-specific
-  // corrective claims a turn by naming the call the model should emit, which
-  // makes the FOLLOWING turn the repair the loop asked for. Publishing it as a
-  // fact here — rather than leaving it implicit in when the corrective ran —
-  // lets loop control and host churn/termination policies read the claim on the
-  // turn it governs instead of racing it. Always assigned, so a claim never
-  // outlives the one turn it was made for.
-  updated = updated
-    + {
-    _prior_turn_claimed_for_repair: outcome?.turn_claimed_for_repair ?? false,
-    _prior_turn_claimed_tool: outcome?.claimed_tool_name ?? "",
-  }
+  // Carry one typed tool claim into the immediately following turn. Always
+  // assigned: after that turn's post-turn outcome, absence clears the claim,
+  // including fallback and error-recovery completions.
+  updated = updated + {_next_tool_claim: outcome?.next_tool_claim}
   const narrowing = outcome?.narrowing
   if narrowing != nil {
     updated = updated

@@ -207,6 +207,35 @@ pub fn __invoke_llm_with_autocontinue(
 }
 
 /**
+ * Dispatch one main-loop logical request after pre-turn controls have passed.
+ * The claim receipt lives here so it fires once for the request lifecycle,
+ * outside transport auto-continue and context-overflow retries.
+ *
+ * @effects: [agent, llm]
+ * @errors: []
+ */
+pub fn __agent_loop_invoke_main_request(
+  harness: Harness,
+  message,
+  turn_system,
+  llm_opts,
+  turn_opts,
+  session_id,
+  iteration_index,
+) -> dict {
+  __agent_loop_next_tool_claim_receipt(harness.agent, session_id, llm_opts, iteration_index)
+  return __invoke_llm_with_autocontinue(
+    harness,
+    message,
+    turn_system,
+    llm_opts,
+    turn_opts,
+    session_id,
+    iteration_index,
+  )
+}
+
+/**
  * Context-overflow recovery.
  *
  * A provider can reject a turn with a `context_overflow` error when the

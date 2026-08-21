@@ -47,6 +47,69 @@ pub fn __tool_surface_current_names(opts) -> list {
   return names
 }
 
+fn __tool_surface_policy_allows(policy, tool_name) -> bool {
+  if type_of(policy) != "dict" {
+    return policy == nil
+  }
+  const allowed = policy?.tools
+  if type_of(allowed) != "list" || len(allowed) == 0 {
+    return true
+  }
+  return contains(allowed, tool_name)
+}
+
+/**
+ * Whether one named tool exists in a registry and survives its explicit policy
+ * ceiling. This is the shared typed boundary for exact-tool claims: registry
+ * presence alone must never bypass a non-empty policy allowlist.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn __tool_surface_tool_allowed(registry, policy, tool_name) -> bool {
+  const name = trim(to_string(tool_name ?? ""))
+  if name == "" || !contains(__tool_surface_current_names({tools: registry}), name) {
+    return false
+  }
+  return __tool_surface_policy_allows(policy, name)
+}
+
+/**
+ * The registry and policy immediately before usage-based narrowing. A
+ * post-turn owner may claim a tool hidden only by that narrowing, but cannot
+ * resurrect an unregistered or explicitly policy-denied tool.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn __tool_surface_claim_authority(opts) -> dict {
+  const carried = opts?._tool_surface_claim_authority
+  if type_of(carried) == "dict" {
+    return carried
+  }
+  return {tools: opts?.tools, policy: opts?.policy}
+}
+
+/**
+ * Tool names a post-turn callback may claim for exactly the next turn.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn __tool_surface_claimable_names(opts) -> list {
+  const authority = __tool_surface_claim_authority(opts)
+  let names = []
+  for name in __tool_surface_current_names({tools: authority?.tools}) {
+    if __tool_surface_tool_allowed(authority?.tools, authority?.policy, name) {
+      names = names.appending(name)
+    }
+  }
+  return names
+}
+
 fn __tool_surface_call_name(call) {
   return call?.name ?? call?.function?.name ?? call?.tool ?? call?.tool_name ?? ""
 }
@@ -437,14 +500,22 @@ pub fn __tool_surface_policy_tools(policy, names) {
  * @api_stability: experimental
  */
 pub fn agent_apply_tool_surface_narrowing(opts) {
+  const base = opts
+    + {_tool_surface_claim_authority: {tools: opts?.tools, policy: opts?.policy}}
   const names = opts?._tool_surface_narrowed_tools
   if len(names ?? []) == 0 {
-    return opts
+    return base
   }
-  return opts
+  const claimed_tool = trim(to_string(opts?._next_tool_claim?.tool_name ?? ""))
+  const effective_names = if claimed_tool != "" && !contains(names, claimed_tool) {
+    names.appending(claimed_tool)
+  } else {
+    names
+  }
+  return base
     + {
-    tools: __tool_surface_filter_registry(opts?.tools, names),
-    policy: __tool_surface_policy_tools(opts?.policy, names),
+    tools: __tool_surface_filter_registry(opts?.tools, effective_names),
+    policy: __tool_surface_policy_tools(opts?.policy, effective_names),
   }
 }
 
