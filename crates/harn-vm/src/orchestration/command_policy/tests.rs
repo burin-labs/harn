@@ -1267,35 +1267,29 @@ async fn no_policy_backstop_blocks_universal_catastrophes() {
 }
 
 #[tokio::test]
-async fn unresolved_execution_requires_a_consent_gate_without_policy() {
+async fn unresolved_execution_uses_a_real_policy_consent_gate() {
     clear_command_policies();
     for command in ["$READER .env", "eval \"$COMMAND\"", "source payload.sh"] {
-        match preflight_shell(command).await {
-            CommandPolicyPreflight::Blocked {
-                status, decisions, ..
-            } => {
-                assert_eq!(status, "blocked");
-                assert!(decisions.iter().any(|decision| {
-                    decision.action == "require_approval"
-                        && decision.source == "deterministic"
-                        && decision
-                            .risk_labels
-                            .iter()
-                            .any(|label| label == EXECUTION_SEMANTICS_UNRESOLVED_LABEL)
-                }));
-            }
-            other => panic!("unresolved execution proceeded without consent: {other:?}"),
-        }
+        assert_proceed(&preflight_shell(command).await);
     }
 
     push_command_policy(CommandPolicy::default());
-    assert!(matches!(
-        preflight_shell("eval \"$COMMAND\"").await,
+    match preflight_shell("eval \"$COMMAND\"").await {
         CommandPolicyPreflight::Blocked {
-            status: "blocked",
-            ..
+            status, decisions, ..
+        } => {
+            assert_eq!(status, "blocked");
+            assert!(decisions.iter().any(|decision| {
+                decision.action == "require_approval"
+                    && decision.source == "deterministic"
+                    && decision
+                        .risk_labels
+                        .iter()
+                        .any(|label| label == EXECUTION_SEMANTICS_UNRESOLVED_LABEL)
+            }));
         }
-    ));
+        other => panic!("installed policy silently allowed unresolved execution: {other:?}"),
+    }
     clear_command_policies();
 
     // Dynamic arguments do not obscure the already-resolved executable.

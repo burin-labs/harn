@@ -360,25 +360,12 @@ pub(crate) async fn run_command_policy_preflight_with_origin(
                 decisions: vec![deny],
             });
         }
-        let risk_labels = risk_labels_from_scan(&scan);
-        if risk_labels
-            .iter()
-            .any(|label| label == EXECUTION_SEMANTICS_UNRESOLVED_LABEL)
-        {
-            let msg = "command execution semantics could not be resolved; an explicit consent gate is required".to_string();
-            return Ok(CommandPolicyPreflight::Blocked {
-                status: "blocked",
-                message: msg.clone(),
-                context,
-                decisions: vec![decision(
-                    "require_approval",
-                    Some(msg),
-                    "deterministic",
-                    risk_labels,
-                    1.0,
-                )],
-            });
-        }
+        // Absence of a command policy also means there is no consent control
+        // plane to consult. Keep the OS sandbox and universal catastrophic
+        // floor authoritative, but do not synthesize an unfulfillable
+        // approval requirement for ordinary Harn runtime subprocesses. When a
+        // policy is installed, `approval_required_label` below always routes
+        // unresolved execution through its real consent gate.
         return Ok(CommandPolicyPreflight::Proceed {
             params: params.clone(),
             context: JsonValue::Null,
