@@ -291,6 +291,7 @@ pub(super) const HARNESS_MIGRATIONS: &[(&str, &str)] = &[
     ("random_shuffle", "harness.random.shuffle"),
     ("read_file", "harness.tools.read_file"),
     ("read_lines", "harness.fs.read_lines"),
+    ("read_lines_append_page_result", "harness.fs.read_lines_append_page_result"),
     ("read_lines_page_result", "harness.fs.read_lines_page_result"),
     ("read_stdin", "harness.stdio.read_stdin"),
     ("receive", "harness.runtime.receive"),

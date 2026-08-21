@@ -1,5 +1,14 @@
 // std/jsonl - bounded JSON Lines readers and simple writers.
-import { FileLine, FileLinePageOptions, FsFailure, read_lines_page_result } from "std/fs"
+import {
+  FileAppendCursor,
+  FileAppendPageOptions,
+  FileAppendResetReason,
+  FileLine,
+  FileLinePageOptions,
+  FsFailure,
+  read_lines_append_page_result,
+  read_lines_page_result,
+} from "std/fs"
 import { SchemaContract, ValidationIssue, schema_contract_check } from "std/schema"
 
 pub type ReadJsonlOptions = {strict?: bool, max_records?: int, max_bytes?: int, on_error?: any}
@@ -32,6 +41,26 @@ pub type JsonlPage<T> = {
 
 pub type JsonlPageResult<T> = Result<JsonlPage<T>, FsFailure>
 
+pub type JsonlAppendCursor = FileAppendCursor
+
+pub type JsonlAppendPageOptions = {
+  cursor?: JsonlAppendCursor,
+  generation?: string,
+  max_records?: int,
+  max_bytes?: int,
+}
+
+pub type JsonlAppendPage<T> = {
+  records: list<JsonlRecord<T>>,
+  issues: list<JsonlRecordFailure>,
+  next_cursor: JsonlAppendCursor,
+  reset_reason?: FileAppendResetReason,
+  partial_tail_bytes: int,
+  caught_up: bool,
+}
+
+pub type JsonlAppendPageResult<T> = Result<JsonlAppendPage<T>, FsFailure>
+
 fn __read_options(options) -> ResolvedReadJsonlOptions {
   const opts = options ?? {}
   return {
@@ -51,6 +80,31 @@ fn __page_options(options: JsonlPageOptions) -> FileLinePageOptions {
     max_lines: opts.max_records ?? 256,
     max_bytes: opts.max_bytes ?? 1048576,
   }
+}
+
+fn __append_page_options(options: JsonlAppendPageOptions) -> FileAppendPageOptions {
+  const opts = options ?? {}
+  let resolved: FileAppendPageOptions = {
+    max_lines: opts.max_records ?? 256,
+    max_bytes: opts.max_bytes ?? 1048576,
+  }
+  if opts.cursor != nil {
+    const cursor = opts.cursor
+    let file_cursor: FileAppendCursor = {
+      offset: cursor.offset,
+      line: cursor.line,
+      file_identity: cursor.file_identity,
+      observed_size: cursor.observed_size,
+    }
+    if cursor.generation != nil {
+      file_cursor = file_cursor + {generation: cursor.generation}
+    }
+    resolved = resolved + {cursor: file_cursor}
+  }
+  if opts.generation != nil {
+    resolved = resolved + {generation: opts.generation}
+  }
+  return resolved
 }
 
 fn __malformed(line: FileLine, failure) -> JsonlRecordFailure {
@@ -112,6 +166,49 @@ pub fn read_jsonl_page_result(
       issues: issues,
       next_cursor: {offset: lines.next_offset, line: lines.next_line},
       done: lines.done,
+    },
+  )
+}
+
+/**
+ * Incrementally read complete JSONL records from a growing file.
+ *
+ * Only newline-terminated physical lines are parsed. An incomplete tail remains
+ * behind `next_cursor` until a later append commits it. File replacement,
+ * truncation, and caller-generation changes restart the page at byte zero and
+ * return an explicit `reset_reason`; malformed committed rows remain issues.
+ *
+ * @effects: [fs.read]
+ * @errors: []
+ */
+pub fn read_jsonl_append_page_result(
+  fs: HarnessFs,
+  path: string,
+  options: JsonlAppendPageOptions = {},
+) -> JsonlAppendPageResult<unknown> {
+  const source = read_lines_append_page_result(fs, path, __append_page_options(options))
+  if !is_ok(source) {
+    return Err(unwrap_err(source))
+  }
+  const lines = unwrap(source)
+  let records: list<JsonlRecord<unknown>> = []
+  let issues: list<JsonlRecordFailure> = []
+  for line in lines.lines {
+    const parsed = __parse_line(line)
+    if !is_ok(parsed) {
+      issues = issues + [unwrap_err(parsed)]
+    } else if unwrap(parsed) != nil {
+      records = records + [unwrap(parsed)]
+    }
+  }
+  return Ok(
+    {
+      records: records,
+      issues: issues,
+      next_cursor: lines.next_cursor,
+      reset_reason: lines.reset_reason,
+      partial_tail_bytes: lines.partial_tail_bytes,
+      caught_up: lines.caught_up,
     },
   )
 }

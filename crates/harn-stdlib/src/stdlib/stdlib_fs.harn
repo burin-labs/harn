@@ -69,6 +69,31 @@ pub type FileLine = {line: int, offset: int, text: string}
 
 pub type FileLinePage = {lines: list<FileLine>, next_offset: int, next_line: int, done: bool}
 
+pub type FileAppendCursor = {
+  offset: int,
+  line: int,
+  file_identity: string,
+  observed_size: int,
+  generation?: string,
+}
+
+pub type FileAppendResetReason = "generation_changed" | "file_replaced" | "file_truncated"
+
+pub type FileAppendPageOptions = {
+  cursor?: FileAppendCursor,
+  generation?: string,
+  max_lines?: int,
+  max_bytes?: int,
+}
+
+pub type FileAppendPage = {
+  lines: list<FileLine>,
+  next_cursor: FileAppendCursor,
+  reset_reason?: FileAppendResetReason,
+  partial_tail_bytes: int,
+  caught_up: bool,
+}
+
 pub type StructuredDataFormat = "json" | "yaml" | "toml"
 
 pub type StructuredReadFailureKind = "absent" | "unreadable" | "malformed" | "recursion_limit"
@@ -114,6 +139,27 @@ pub fn read_lines_page_result(
   options: FileLinePageOptions = {},
 ) -> Result<FileLinePage, FsFailure> {
   const result: any = fs.read_lines_page_result(path, options ?? {})
+  return result
+}
+
+/**
+ * Read one bounded page of newline-committed UTF-8 lines from a growing file.
+ *
+ * An unterminated tail is not returned and does not advance `next_cursor`.
+ * Resume with that cursor after the writer appends more bytes. File replacement,
+ * truncation, and caller-generation changes restart at byte zero and are reported
+ * through `reset_reason`. The cursor retains its generation on resume; pass a
+ * different `generation` only when starting a new logical producer.
+ *
+ * @effects: [fs.read]
+ * @errors: []
+ */
+pub fn read_lines_append_page_result(
+  fs: HarnessFs,
+  path: string,
+  options: FileAppendPageOptions = {},
+) -> Result<FileAppendPage, FsFailure> {
+  const result: any = fs.read_lines_append_page_result(path, options ?? {})
   return result
 }
 

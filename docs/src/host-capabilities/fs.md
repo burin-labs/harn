@@ -34,6 +34,7 @@ same call.
 | `harness.fs.rename(src, dst)` | `workspace.write_text` |
 | `harness.fs.read_lines(path)` | `workspace.read_text` |
 | `harness.fs.read_lines_page_result(path, options?)` | `workspace.read_text` |
+| `harness.fs.read_lines_append_page_result(path, options?)` | `workspace.read_text` |
 | `harness.fs.walk(path, options?)` | `workspace.list` |
 | `harness.fs.glob(pattern, base_or_options?, options?)` | `workspace.list` |
 | `harness.fs.find_text(root, pattern, options?)` | `workspace.list` + `workspace.read_text` |
@@ -49,6 +50,15 @@ lines plus an exact byte-and-line cursor. `max_lines` and `max_bytes` bound each
 page; a larger individual line returns `file_too_large` rather than partial
 text. Application code normally imports the typed wrapper from `std/fs` or the
 JSONL readers from `std/jsonl`.
+
+`harness.fs.read_lines_append_page_result(path, options?)` is the growing-file
+variant. It returns only newline-terminated lines and leaves an unterminated
+tail behind the committed byte offset. Its opaque file identity and observed
+size distinguish append from replacement or truncation. Pass a stable
+`generation` (for example a launch id) initially, or override the generation on
+a later call to reject a cursor reused by another logical producer. Resets
+restart at byte zero and report `generation_changed`,
+`file_replaced`, or `file_truncated` instead of requiring stat/prose heuristics.
 
 The replacement methods update a complete file only when the optional
 `expected_sha256` lease still matches. They return `created`, `replaced`,

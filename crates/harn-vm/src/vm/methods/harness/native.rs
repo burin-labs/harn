@@ -253,6 +253,7 @@ impl crate::vm::Vm {
             "rename" => "move_file",
             "read_lines" => "read_lines",
             "read_lines_page_result" => "read_lines_page_result",
+            "read_lines_append_page_result" => "read_lines_append_page_result",
             "walk" => "walk_dir",
             "glob" => "glob",
             "find_text" => "find_text",

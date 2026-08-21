@@ -14,6 +14,7 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use crate::testbench::tape::{self, TapeRecordKind};
@@ -38,7 +39,7 @@ pub enum DiffKind {
 
 #[derive(Debug, Clone)]
 enum OverlayEntry {
-    File(Vec<u8>),
+    File { contents: Vec<u8>, generation: u64 },
     Deleted,
     Directory,
 }
@@ -47,6 +48,7 @@ enum OverlayEntry {
 pub struct OverlayFs {
     root: PathBuf,
     layer: Mutex<BTreeMap<PathBuf, OverlayEntry>>,
+    next_generation: AtomicU64,
 }
 
 impl OverlayFs {
@@ -61,6 +63,7 @@ impl OverlayFs {
         Self {
             root: normalize_logical(&canonical),
             layer: Mutex::new(BTreeMap::new()),
+            next_generation: AtomicU64::new(1),
         }
     }
 
@@ -118,7 +121,7 @@ impl OverlayFs {
         let key = self.key(path);
         let layer = self.layer.lock().expect("overlay layer poisoned");
         match layer.get(&key) {
-            Some(OverlayEntry::File(bytes)) => Ok(bytes.clone()),
+            Some(OverlayEntry::File { contents, .. }) => Ok(contents.clone()),
             Some(OverlayEntry::Deleted) => Err(std::io::Error::new(
                 std::io::ErrorKind::NotFound,
                 format!("overlay: {} was deleted", key.display()),
@@ -149,8 +152,8 @@ impl OverlayFs {
         let key = self.key(path);
         let layer = self.layer.lock().expect("overlay layer poisoned");
         match layer.get(&key) {
-            Some(OverlayEntry::File(bytes)) => {
-                let length = bytes.len() as u64;
+            Some(OverlayEntry::File { contents, .. }) => {
+                let length = contents.len() as u64;
                 if offset > length {
                     return Some(Err(std::io::Error::new(
                         std::io::ErrorKind::InvalidInput,
@@ -158,8 +161,38 @@ impl OverlayFs {
                     )));
                 }
                 let start = offset as usize;
-                let end = start.saturating_add(limit).min(bytes.len());
-                Some(Ok((bytes[start..end].to_vec(), length)))
+                let end = start.saturating_add(limit).min(contents.len());
+                Some(Ok((contents[start..end].to_vec(), length)))
+            }
+            Some(OverlayEntry::Deleted) => Some(Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("overlay: {} was deleted", key.display()),
+            ))),
+            Some(OverlayEntry::Directory) => Some(Err(std::io::Error::new(
+                std::io::ErrorKind::IsADirectory,
+                format!("overlay: {} is a directory", key.display()),
+            ))),
+            None => None,
+        }
+    }
+
+    pub(crate) fn with_append_snapshot<T>(
+        &self,
+        path: &Path,
+        inspect: impl FnOnce(&[u8], u64, String) -> std::io::Result<T>,
+    ) -> Option<std::io::Result<T>> {
+        if !self.within_root(path) {
+            return None;
+        }
+        let key = self.key(path);
+        let layer = self.layer.lock().expect("overlay layer poisoned");
+        match layer.get(&key) {
+            Some(OverlayEntry::File {
+                contents,
+                generation,
+            }) => {
+                let length = contents.len() as u64;
+                Some(inspect(contents, length, format!("overlay:{generation}")))
             }
             Some(OverlayEntry::Deleted) => Some(Err(std::io::Error::new(
                 std::io::ErrorKind::NotFound,
@@ -187,7 +220,13 @@ impl OverlayFs {
         }
         let key = self.key(path);
         let mut layer = self.layer.lock().expect("overlay layer poisoned");
-        layer.insert(key, OverlayEntry::File(contents.to_vec()));
+        layer.insert(
+            key,
+            OverlayEntry::File {
+                contents: contents.to_vec(),
+                generation: self.next_generation.fetch_add(1, Ordering::Relaxed),
+            },
+        );
         Ok(())
     }
 
@@ -198,7 +237,7 @@ impl OverlayFs {
         let key = self.key(path);
         let layer = self.layer.lock().expect("overlay layer poisoned");
         match layer.get(&key) {
-            Some(OverlayEntry::File(bytes)) => return Ok(bytes.clone()),
+            Some(OverlayEntry::File { contents, .. }) => return Ok(contents.clone()),
             Some(OverlayEntry::Deleted) => {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::NotFound,
@@ -264,13 +303,44 @@ impl OverlayFs {
                 .open(path)
                 .and_then(|mut file| std::io::Write::write_all(&mut file, contents));
         }
-        let mut combined = match self.read(path) {
-            Ok(bytes) => bytes,
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Vec::new(),
-            Err(err) => return Err(err),
-        };
-        combined.extend_from_slice(contents);
-        self.write(path, &combined)
+        let key = self.key(path);
+        let mut layer = self.layer.lock().expect("overlay layer poisoned");
+        match layer.get_mut(&key) {
+            Some(OverlayEntry::File {
+                contents: existing, ..
+            }) => existing.extend_from_slice(contents),
+            Some(OverlayEntry::Deleted) => {
+                layer.insert(
+                    key,
+                    OverlayEntry::File {
+                        contents: contents.to_vec(),
+                        generation: self.next_generation.fetch_add(1, Ordering::Relaxed),
+                    },
+                );
+            }
+            None => {
+                let mut combined = match std::fs::read(path) {
+                    Ok(bytes) => bytes,
+                    Err(err) if err.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+                    Err(err) => return Err(err),
+                };
+                combined.extend_from_slice(contents);
+                layer.insert(
+                    key,
+                    OverlayEntry::File {
+                        contents: combined,
+                        generation: self.next_generation.fetch_add(1, Ordering::Relaxed),
+                    },
+                );
+            }
+            Some(OverlayEntry::Directory) => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::IsADirectory,
+                    format!("overlay: {} is a directory", key.display()),
+                ));
+            }
+        }
+        Ok(())
     }
 
     pub fn copy(&self, src: &Path, dst: &Path) -> std::io::Result<u64> {
@@ -293,7 +363,7 @@ impl OverlayFs {
         let key = self.key(path);
         let layer = self.layer.lock().expect("overlay layer poisoned");
         match layer.get(&key) {
-            Some(OverlayEntry::File(_)) | Some(OverlayEntry::Directory) => true,
+            Some(OverlayEntry::File { .. }) | Some(OverlayEntry::Directory) => true,
             Some(OverlayEntry::Deleted) => false,
             None => path.exists(),
         }
@@ -307,7 +377,7 @@ impl OverlayFs {
         let layer = self.layer.lock().expect("overlay layer poisoned");
         match layer.get(&key) {
             Some(OverlayEntry::Directory) => true,
-            Some(OverlayEntry::File(_)) | Some(OverlayEntry::Deleted) => false,
+            Some(OverlayEntry::File { .. }) | Some(OverlayEntry::Deleted) => false,
             None => path.is_dir(),
         }
     }
@@ -345,7 +415,7 @@ impl OverlayFs {
         let key = self.key(path);
         let mut layer = self.layer.lock().expect("overlay layer poisoned");
         match layer.get(&key) {
-            Some(OverlayEntry::File(_)) | Some(OverlayEntry::Directory) => {
+            Some(OverlayEntry::File { .. }) | Some(OverlayEntry::Directory) => {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::AlreadyExists,
                     format!("overlay: {} already exists", key.display()),
@@ -367,7 +437,7 @@ impl OverlayFs {
         })?;
         match layer.get(parent) {
             Some(OverlayEntry::Directory) => {}
-            Some(OverlayEntry::File(_)) => {
+            Some(OverlayEntry::File { .. }) => {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::NotADirectory,
                     format!("overlay: {} parent is a file", key.display()),
@@ -443,7 +513,7 @@ impl OverlayFs {
                         format!("overlay: {} was deleted", dir_key.display()),
                     ));
                 }
-                Some(OverlayEntry::File(_)) => {
+                Some(OverlayEntry::File { .. }) => {
                     return Err(std::io::Error::new(
                         std::io::ErrorKind::NotADirectory,
                         format!("overlay: {} is a file", dir_key.display()),
@@ -479,7 +549,7 @@ impl OverlayFs {
                 continue;
             }
             match entry {
-                OverlayEntry::File(_) => {
+                OverlayEntry::File { .. } => {
                     entries.insert(
                         key.clone(),
                         OverlayDirEntry {
@@ -519,7 +589,9 @@ impl OverlayFs {
         let mut diff = Vec::new();
         for (path, entry) in layer.iter() {
             match entry {
-                OverlayEntry::File(content) => {
+                OverlayEntry::File {
+                    contents: content, ..
+                } => {
                     if path.exists() {
                         let underlying = std::fs::read(path).unwrap_or_default();
                         if &underlying != content {

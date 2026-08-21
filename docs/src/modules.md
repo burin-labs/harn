@@ -1331,14 +1331,16 @@ consuming unbounded memory before deterministic global truncation.
 
 ### std/jsonl
 
-Use bounded pages for logs, transcripts, and other JSONL files that may be
-large or actively growing. A page cursor contains the exact byte offset and
-next physical line number, so callers can persist it and resume without
-rescanning earlier records.
+Use bounded pages for logs, transcripts, and other large JSONL files. Static
+page cursors contain an exact byte offset and next physical line number. For an
+actively growing file, use the append reader: its cursor additionally owns file
+identity, observed size, optional caller generation, and incomplete-tail
+semantics so callers can resume without rebuilding filesystem heuristics.
 
 | Function | Description |
 |---|---|
 | `read_jsonl_page_result(path, options?)` | Read at most `max_records` physical lines and `max_bytes`, preserving malformed rows as per-record issues |
+| `read_jsonl_append_page_result(path, options?)` | Incrementally read only newline-committed records, retaining a partial tail and reporting typed cursor resets |
 | `read_jsonl_page(path, options?)` | Throwing filesystem-failure form of the bounded raw reader |
 | `read_jsonl_contract_page_result<T>(path, contract, options?)` | Apply structural schema validation and named rules to each parsed record, preserving all record failures |
 | `read_jsonl_contract_page<T>(path, contract, options?)` | Throwing filesystem-failure form of the bounded contract reader |

@@ -1,0 +1,108 @@
+import "std/jsonl"
+
+pipeline default(harness: Harness, task) {
+  const root = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-jsonl-append-pages-" + harness.random.uuid_v7(),
+  )
+  harness.fs.mkdir(root)
+  const path = path_join(root, "events.jsonl")
+  harness.fs.write_text(path, "{\"id\":1}\r\n{\"id\":\"")
+  const first = unwrap(
+    read_jsonl_append_page_result(
+      harness.fs,
+      path,
+      {generation: "launch-1", max_records: 10, max_bytes: 128},
+    ),
+  )
+  harness.stdio.println(
+    to_string(first.records[0].value.id)
+      + ":"
+      + to_string(first.next_cursor.line)
+      + ":"
+      + to_string(first.partial_tail_bytes)
+      + ":"
+      + to_string(first.caught_up),
+  )
+  const parity_path = path_join(root, "parity.jsonl")
+  harness.fs.write_text(parity_path, "{\"n\":1}\n{\"n\":")
+  const parity_first = unwrap(
+    read_jsonl_append_page_result(harness.fs, parity_path, {generation: "parity"}),
+  )
+  harness.fs.append(parity_path, "2}\r")
+  const parity_second = unwrap(
+    read_jsonl_append_page_result(
+      harness.fs,
+      parity_path,
+      {cursor: parity_first.next_cursor, generation: "parity"},
+    ),
+  )
+  harness.fs.append(parity_path, "\n\n{\"n\":3}\n")
+  const parity_third = unwrap(
+    read_jsonl_append_page_result(
+      harness.fs,
+      parity_path,
+      {cursor: parity_second.next_cursor, generation: "parity"},
+    ),
+  )
+  const full = read_jsonl(harness.fs, parity_path, {strict: true})
+  harness.stdio.println(
+    to_string(len(full))
+      + ":"
+      + to_string(parity_first.records[0].value.n)
+      + ":"
+      + to_string(parity_third.records[0].value.n)
+      + ":"
+      + to_string(parity_third.records[1].value.n),
+  )
+  harness.fs.append(path, "π\"}\n{bad}\n")
+  const second = unwrap(
+    read_jsonl_append_page_result(
+      harness.fs,
+      path,
+      {cursor: first.next_cursor, generation: "launch-1", max_records: 10, max_bytes: 128},
+    ),
+  )
+  harness.stdio.println(
+    second.records[0].value.id
+      + ":"
+      + second.issues[0].kind
+      + ":"
+      + to_string(second.issues[0].line)
+      + ":"
+      + to_string(second.partial_tail_bytes),
+  )
+  harness.fs.write_text(path, "{\"id\":9}\n")
+  const replaced = unwrap(
+    read_jsonl_append_page_result(
+      harness.fs,
+      path,
+      {cursor: second.next_cursor, generation: "launch-1"},
+    ),
+  )
+  harness.stdio.println(replaced.reset_reason + ":" + to_string(replaced.records[0].value.id))
+  harness.fs.write_text(path, "{\"id\":8}\n")
+  const same_size = unwrap(
+    read_jsonl_append_page_result(
+      harness.fs,
+      path,
+      {cursor: replaced.next_cursor, generation: "launch-1"},
+    ),
+  )
+  harness.stdio.println(same_size.reset_reason + ":" + to_string(same_size.records[0].value.id))
+  const relaunched = unwrap(
+    read_jsonl_append_page_result(
+      harness.fs,
+      path,
+      {cursor: same_size.next_cursor, generation: "launch-2"},
+    ),
+  )
+  harness.stdio.println(
+    relaunched.reset_reason
+      + ":"
+      + relaunched.next_cursor.generation
+      + ":"
+      + to_string(relaunched.records[0].value.id),
+  )
+  harness.fs.delete(root)
+}
