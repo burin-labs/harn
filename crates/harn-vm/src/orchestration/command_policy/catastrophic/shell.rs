@@ -1,9 +1,34 @@
 //! Shell tokenization and wrapper unwrapping for the catastrophic-command classifier.
 
+pub(super) struct EnvSplit<'a> {
+    pub(super) payload_index: usize,
+    pub(super) payload: &'a str,
+    pub(super) trailing_start: usize,
+}
+
+pub(super) struct EnvInvocation<'a> {
+    pub(super) command_index: usize,
+    pub(super) split: Option<EnvSplit<'a>>,
+    pub(super) resolved: bool,
+}
+
 pub(super) fn unwrapped_command_index(tokens: &[String], start: usize, end: usize) -> usize {
+    unwrapped_command_index_inner(tokens, start, end, false)
+}
+
+pub(super) fn unwrapped_shell_command_index(tokens: &[String], start: usize, end: usize) -> usize {
+    unwrapped_command_index_inner(tokens, start, end, true)
+}
+
+fn unwrapped_command_index_inner(
+    tokens: &[String],
+    start: usize,
+    end: usize,
+    shell_assignments: bool,
+) -> usize {
     let mut index = start;
     while index < end {
-        if is_shell_assignment(&tokens[index]) {
+        if shell_assignments && is_shell_assignment(&tokens[index]) {
             index += 1;
             continue;
         }
@@ -88,25 +113,115 @@ pub(super) fn skip_sudo_wrapper(tokens: &[String], start: usize, end: usize) -> 
 }
 
 pub(super) fn skip_env_wrapper(tokens: &[String], start: usize, end: usize) -> usize {
+    let invocation = parse_env_invocation(tokens, start, end);
+    if invocation.resolved {
+        invocation.command_index
+    } else {
+        start.saturating_sub(1)
+    }
+}
+
+pub(super) fn parse_env_invocation<'a>(
+    tokens: &'a [String],
+    start: usize,
+    end: usize,
+) -> EnvInvocation<'a> {
     let mut index = start;
     while index < end {
         let token = &tokens[index];
         if token == "--" {
-            return index + 1;
+            return env_command(index + 1);
         }
         if is_shell_assignment(token) {
             index += 1;
             continue;
         }
         if !token.starts_with('-') {
-            break;
+            return env_command(index);
         }
-        index += 1;
-        if env_option_consumes_argument(token) && index < end {
+        if token == "-" {
             index += 1;
+            continue;
         }
+        if token.starts_with("--") {
+            // Long options and other implementation-specific spellings differ
+            // across BSD, GNU, and uutils env. Without a resolved executable
+            // capability they remain consent-gated rather than guessed.
+            return env_unresolved(start);
+        }
+
+        let Some(options) = token.strip_prefix('-') else {
+            return env_unresolved(start);
+        };
+        let mut consumed = 1;
+        for (offset, option) in options.char_indices() {
+            match option {
+                'i' | 'v' => {}
+                '0' => return env_command(end),
+                'S' => {
+                    let payload = options
+                        .get(offset + option.len_utf8()..)
+                        .unwrap_or_default();
+                    return if payload.is_empty() {
+                        tokens.get(index + 1).map_or_else(
+                            || env_unresolved(start),
+                            |payload| env_split(index + 1, payload, index + 2, end),
+                        )
+                    } else {
+                        env_split(index, payload, index + 1, end)
+                    };
+                }
+                'u' | 'C' => {
+                    if options
+                        .get(offset + option.len_utf8()..)
+                        .is_none_or(str::is_empty)
+                    {
+                        if index + 1 >= end {
+                            return env_unresolved(start);
+                        }
+                        consumed = 2;
+                    }
+                    break;
+                }
+                _ => return env_unresolved(start),
+            }
+        }
+        index += consumed;
     }
-    index
+    env_command(end)
+}
+
+fn env_command(index: usize) -> EnvInvocation<'static> {
+    EnvInvocation {
+        command_index: index,
+        split: None,
+        resolved: true,
+    }
+}
+
+fn env_unresolved(index: usize) -> EnvInvocation<'static> {
+    EnvInvocation {
+        command_index: index,
+        split: None,
+        resolved: false,
+    }
+}
+
+fn env_split(
+    payload_index: usize,
+    payload: &str,
+    trailing_start: usize,
+    end: usize,
+) -> EnvInvocation<'_> {
+    EnvInvocation {
+        command_index: end,
+        split: Some(EnvSplit {
+            payload_index,
+            payload,
+            trailing_start,
+        }),
+        resolved: true,
+    }
 }
 
 pub(super) fn skip_nice_wrapper(tokens: &[String], start: usize, end: usize) -> usize {
@@ -195,13 +310,6 @@ pub(super) fn sudo_option_consumes_argument(option: &str) -> bool {
             | "--role"
             | "--type"
             | "--user"
-    )
-}
-
-pub(super) fn env_option_consumes_argument(option: &str) -> bool {
-    matches!(
-        option,
-        "-C" | "-S" | "-u" | "--chdir" | "--split-string" | "--unset"
     )
 }
 

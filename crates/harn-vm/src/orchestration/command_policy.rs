@@ -360,6 +360,25 @@ pub(crate) async fn run_command_policy_preflight_with_origin(
                 decisions: vec![deny],
             });
         }
+        let risk_labels = risk_labels_from_scan(&scan);
+        if risk_labels
+            .iter()
+            .any(|label| label == EXECUTION_SEMANTICS_UNRESOLVED_LABEL)
+        {
+            let msg = "command execution semantics could not be resolved; an explicit consent gate is required".to_string();
+            return Ok(CommandPolicyPreflight::Blocked {
+                status: "blocked",
+                message: msg.clone(),
+                context,
+                decisions: vec![decision(
+                    "require_approval",
+                    Some(msg),
+                    "deterministic",
+                    risk_labels,
+                    1.0,
+                )],
+            });
+        }
         return Ok(CommandPolicyPreflight::Proceed {
             params: params.clone(),
             context: JsonValue::Null,
@@ -444,10 +463,7 @@ pub(crate) async fn run_command_policy_preflight_with_origin(
     }
 
     let risk_labels = risk_labels_from_scan(&scan);
-    let matched_approval = risk_labels
-        .iter()
-        .find(|label| policy.require_approval.contains(label.as_str()))
-        .cloned();
+    let matched_approval = approval_required_label(&policy, &risk_labels);
     if let Some(label) = matched_approval {
         let msg = format!("command requires approval for risk class {label}");
         decisions.push(decision(
@@ -640,10 +656,7 @@ pub(crate) async fn run_command_policy_preflight_with_origin(
             });
         }
         let risk_labels = risk_labels_from_scan(&scan);
-        let matched_approval = risk_labels
-            .iter()
-            .find(|label| policy.require_approval.contains(label.as_str()))
-            .cloned();
+        let matched_approval = approval_required_label(&policy, &risk_labels);
         if let Some(label) = matched_approval {
             let msg = format!("rewritten command requires approval for risk class {label}");
             decisions.push(decision(
@@ -695,6 +708,19 @@ pub(crate) async fn run_command_policy_preflight_with_origin(
         context,
         decisions,
     })
+}
+
+fn approval_required_label(policy: &CommandPolicy, risk_labels: &[String]) -> Option<String> {
+    risk_labels
+        .iter()
+        .find(|label| label.as_str() == EXECUTION_SEMANTICS_UNRESOLVED_LABEL)
+        .cloned()
+        .or_else(|| {
+            risk_labels
+                .iter()
+                .find(|label| policy.require_approval.contains(label.as_str()))
+                .cloned()
+        })
 }
 
 /// The universal classifier intentionally treats every textual force push as
@@ -1097,8 +1123,8 @@ fn apply_command_rewrite(
 ) -> Result<(), VmError> {
     for (key, value) in rewrite {
         match key.as_str() {
-            "mode" | "argv" | "command" | "shell" | "cwd" | "env" | "env_remove" | "env_mode"
-            | "stdin" | "timeout" | "timeout_ms" | "capture" | "capture_stderr"
+            "mode" | "argv" | "command" | "shell" | "shell_id" | "cwd" | "env" | "env_remove"
+            | "env_mode" | "stdin" | "timeout" | "timeout_ms" | "capture" | "capture_stderr"
             | "max_inline_bytes" => {
                 params.insert(key.clone(), value.clone());
             }
@@ -1108,6 +1134,17 @@ fn apply_command_rewrite(
                 )));
             }
         }
+    }
+    match string_field_raw(params, "mode").as_deref() {
+        Some("shell") => {
+            params.remove("argv");
+        }
+        Some("argv") => {
+            params.remove("command");
+            params.remove("shell");
+            params.remove("shell_id");
+        }
+        _ => {}
     }
     Ok(())
 }
@@ -1166,11 +1203,22 @@ fn command_request_json(params: &crate::value::DictMap) -> JsonValue {
         VmValue::List(values) => Some(
             values
                 .iter()
-                .map(|value| value.display())
+                .map(crate::llm::vm_value_to_json)
                 .collect::<Vec<_>>(),
         ),
         _ => None,
     });
+    let (shell, shell_resolution_error) = if mode == "shell" {
+        match crate::shells::resolve_shell_from_vm_params(params) {
+            Ok(shell) => (
+                crate::llm::vm_value_to_json(&crate::shells::shell_descriptor_to_vm_value(&shell)),
+                false,
+            ),
+            Err(_) => (JsonValue::Null, true),
+        }
+    } else {
+        (JsonValue::Null, false)
+    };
     let stdin = string_field_raw(params, "stdin").unwrap_or_default();
     let mut env_diff = JsonMap::new();
     if let Some(env) = params.get("env").and_then(|value| value.as_dict()) {
@@ -1189,7 +1237,8 @@ fn command_request_json(params: &crate::value::DictMap) -> JsonValue {
         "mode": mode,
         "argv": argv,
         "command": command,
-        "shell": params.get("shell").map(crate::llm::vm_value_to_json).unwrap_or(JsonValue::Null),
+        "shell": shell,
+        "shell_resolution_error": shell_resolution_error,
         "cwd": string_field_raw(params, "cwd").unwrap_or_else(|| crate::stdlib::process::execution_root_path().display().to_string()),
         "env_diff": env_diff,
         "env_mode": string_field_raw(params, "env_mode"),
