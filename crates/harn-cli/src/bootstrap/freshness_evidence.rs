@@ -371,6 +371,10 @@ mod tests {
         Evidence::collect(dep_info, target, temp.path(), &covered, None)
     }
 
+    fn depfile_path(path: &Path) -> std::borrow::Cow<'_, str> {
+        depfile::escape(path.to_str().expect("temporary test path must be UTF-8"))
+    }
+
     #[test]
     fn depfile_parser_decodes_make_and_windows_escaping_without_loss() {
         let input = concat!(
@@ -396,13 +400,13 @@ mod tests {
         let target = temp.path().join("harn");
         File::create(&target).unwrap().write_all(b"binary").unwrap();
         let dep_info = temp.path().join("harn.d");
-        fs::write(&dep_info, format!("{}:\nother:\n", target.display())).unwrap();
+        fs::write(&dep_info, format!("{}:\nother:\n", depfile_path(&target))).unwrap();
         let error = collect(&temp, &dep_info, &target).unwrap_err();
         assert!(error.contains("exactly one target rule"));
 
         fs::write(
             &dep_info,
-            format!("{}: {}\n", target.display(), temp.path().display()),
+            format!("{}: {}\n", depfile_path(&target), depfile_path(temp.path())),
         )
         .unwrap();
         assert!(collect(&temp, &dep_info, &target).is_ok());
@@ -420,7 +424,7 @@ mod tests {
         let dep_info = temp.path().join("harn.d");
         fs::write(
             &dep_info,
-            format!("{}: {}\n", target.display(), watched.display()),
+            format!("{}: {}\n", depfile_path(&target), depfile_path(&watched)),
         )
         .unwrap();
         let before = collect(&temp, &dep_info, &target).unwrap();
@@ -435,7 +439,7 @@ mod tests {
         let target = temp.path().join("harn");
         fs::write(&target, b"binary-one").unwrap();
         let dep_info = temp.path().join("harn.d");
-        fs::write(&dep_info, format!("{}:\n", target.display())).unwrap();
+        fs::write(&dep_info, format!("{}:\n", depfile_path(&target))).unwrap();
         let evidence = collect(&temp, &dep_info, &target).unwrap();
         assert!(!evidence.build_id.is_empty());
         assert!(evidence
