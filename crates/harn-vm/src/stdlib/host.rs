@@ -795,17 +795,16 @@ pub async fn dispatch_host_operation(
 /// Cross-cutting behaviour added here therefore reaches editor-hosted sessions
 /// automatically — mocks, command-policy preflight, the process-handle
 /// registry, and the per-turn memo included.
-///
 /// Editor-owned *builtins* (`exec`, `shell`, `run_command`) remain ACP
 /// overrides; that intentional ownership is separate from `host_call` routing.
-/// Direct `host_call("process.exec", ...)` always passes through the policy
-/// gates below and cannot bypass them by going to the editor first.
+/// Direct `host_call("process.exec", ...)` always passes through the policy gates.
 pub async fn dispatch_host_operation_with_ctx(
     ctx: Option<&AsyncBuiltinCtx>,
     capability: &str,
     operation: &str,
     params: &crate::value::DictMap,
 ) -> Result<VmValue, VmError> {
+    let _invalidation = turn_cache::invalidation_scope(capability, operation);
     if let Some(ctx) = ctx {
         let vm = ctx.child_vm();
         if let Some(fixtured) = vm.harness().and_then(|harness| {
@@ -860,9 +859,10 @@ pub async fn dispatch_host_operation_with_ctx(
 
     let bridge = HOST_CALL_BRIDGE.with(|b| b.borrow().clone());
     if let Some(bridge) = bridge {
-        // Serve turn-stable reads (e.g. `runtime.pipeline_input`) from the
-        // per-turn memo so context assembly pays one host round-trip per turn
-        // instead of once per shard. harn#5190.
+        // Serve exact turn-stable reads from the per-turn memo so context
+        // assembly pays one host round-trip per argument set instead of once
+        // per shard. Metadata writes invalidate on both sides of dispatch.
+        // harn#5190, harn#6914.
         let dispatched = turn_cache::cached_or(capability, operation, params, || {
             bridge.dispatch(capability, operation, params)
         })

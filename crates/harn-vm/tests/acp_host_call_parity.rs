@@ -52,6 +52,14 @@ pub struct CrossCuttingBehaviour {
 /// the dispatch.
 pub const HOST_CALL_CROSS_CUTTING: &[CrossCuttingBehaviour] = &[
     CrossCuttingBehaviour {
+        callee: "turn_cache::invalidation_scope",
+        owner: SemanticsOwner::Runtime,
+        acp_observes: true,
+        tracked_by: None,
+        rationale: "Canonical metadata mutations invalidate the runtime-owned per-turn memo \
+                    before dispatch and again on every return path, including errors.",
+    },
+    CrossCuttingBehaviour {
         callee: "dispatch_host",
         owner: SemanticsOwner::Runtime,
         acp_observes: true,

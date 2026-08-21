@@ -70,6 +70,94 @@ async fn turn_stable_read_is_served_without_an_acp_round_trip() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn metadata_write_invalidates_a_memoized_acp_read_before_the_next_dispatch() {
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let mut server =
+        AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx.clone()));
+    let bridge = test_bridge(tx, &server);
+    install_acp_host_bridge(bridge);
+
+    let read_params = harn_vm::value::DictMap::from_iter([
+        (
+            harn_vm::value::intern_key("dir"),
+            VmValue::String(arcstr::ArcStr::from("src/nested")),
+        ),
+        (
+            harn_vm::value::intern_key("namespace"),
+            VmValue::String(arcstr::ArcStr::from("facts")),
+        ),
+    ]);
+    harn_vm::host_turn_cache::store(
+        "project",
+        "metadata_get",
+        &read_params,
+        &VmValue::String(arcstr::ArcStr::from("stale")),
+    );
+
+    let cached = dispatch_host_operation("project", "metadata_get", &read_params)
+        .await
+        .expect("memoized metadata read");
+    assert_eq!(cached.display(), "stale");
+    assert!(
+        rx.try_recv().is_err(),
+        "a metadata memo hit must not emit an ACP host/call frame"
+    );
+
+    let write_params = harn_vm::value::DictMap::from_iter([
+        (
+            harn_vm::value::intern_key("dir"),
+            VmValue::String(arcstr::ArcStr::from("src")),
+        ),
+        (
+            harn_vm::value::intern_key("namespace"),
+            VmValue::String(arcstr::ArcStr::from("facts")),
+        ),
+        (
+            harn_vm::value::intern_key("value"),
+            VmValue::dict(harn_vm::value::DictMap::new()),
+        ),
+    ]);
+    let write = dispatch_host_operation("project", "metadata_set", &write_params);
+    tokio::pin!(write);
+    let outgoing_write = tokio::select! {
+        message = recv_json(&mut rx) => message,
+        result = &mut write => panic!("metadata_set completed before host response: {result:?}"),
+    };
+    assert_eq!(outgoing_write["method"], "host/call");
+    assert_eq!(outgoing_write["params"]["name"], "project.metadata_set");
+    server
+        .handle_incoming_message(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": outgoing_write["id"].clone(),
+            "result": null
+        }))
+        .await;
+    write.await.expect("metadata_set response");
+
+    let refreshed = dispatch_host_operation("project", "metadata_get", &read_params);
+    tokio::pin!(refreshed);
+    let outgoing_read = tokio::select! {
+        message = recv_json(&mut rx) => message,
+        result = &mut refreshed => panic!("stale metadata memo survived mutation: {result:?}"),
+    };
+    assert_eq!(outgoing_read["method"], "host/call");
+    assert_eq!(outgoing_read["params"]["name"], "project.metadata_get");
+    server
+        .handle_incoming_message(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": outgoing_read["id"].clone(),
+            "result": "fresh"
+        }))
+        .await;
+    assert_eq!(
+        refreshed.await.expect("fresh metadata read").display(),
+        "fresh"
+    );
+
+    harn_vm::clear_host_call_bridge();
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn non_turn_stable_read_still_reaches_the_editor() {
     // The memo must not silently widen: a live read has to keep round-tripping,
     // or a mid-turn change on the host would be served stale.
