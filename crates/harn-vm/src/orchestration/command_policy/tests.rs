@@ -19,6 +19,10 @@ fn shell_ctx(command: &str) -> JsonValue {
             "mode": "shell",
             "command": command,
             "cwd": "/tmp/work",
+            // These fixtures exercise POSIX/Bash syntax independent of the
+            // CI host. Dialect-specific Windows fixtures provide their own
+            // explicit `pwsh`/`cmd` identity below.
+            "shell": { "id": "sh", "platform": "unix" },
         },
         "workspace_roots": ["/tmp/work"],
     })
@@ -1212,6 +1216,10 @@ fn shell_params(command: &str) -> crate::value::DictMap {
     let mut params = crate::value::DictMap::new();
     params.put_str("mode", "shell");
     params.put_str("command", command);
+    let mut shell = crate::value::DictMap::new();
+    shell.put_str("id", "sh");
+    shell.put_str("platform", "unix");
+    params.insert(crate::value::intern_key("shell"), VmValue::dict(shell));
     params
 }
 
