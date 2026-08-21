@@ -11,7 +11,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-const FORMAT: &[u8] = b"harn-freshness-manifest-v2\0";
+const FORMAT: &[u8] = b"harn-freshness-manifest-v3\0";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum EntryKind {
@@ -278,10 +278,58 @@ fn content_identity(
             })?;
             Some(blake3::hash(&os_bytes(target.as_os_str())))
         }
-        EntryKind::Directory => None,
+        EntryKind::Directory => Some(directory_inventory_identity(path)?),
         EntryKind::Missing => None,
     };
     Ok(content)
+}
+
+fn directory_inventory_identity(path: &Path) -> Result<blake3::Hash, String> {
+    let mut children = fs::read_dir(path)
+        .map_err(|error| {
+            format!(
+                "cannot enumerate manifest directory {}: {error}",
+                path.display()
+            )
+        })?
+        .map(|entry| {
+            let entry = entry.map_err(|error| {
+                format!(
+                    "cannot enumerate manifest directory {}: {error}",
+                    path.display()
+                )
+            })?;
+            let file_type = entry.file_type().map_err(|error| {
+                format!(
+                    "cannot inspect manifest directory child {}: {error}",
+                    entry.path().display()
+                )
+            })?;
+            let kind = if file_type.is_file() {
+                EntryKind::File
+            } else if file_type.is_dir() {
+                EntryKind::Directory
+            } else if file_type.is_symlink() {
+                EntryKind::Symlink
+            } else {
+                return Err(format!(
+                    "manifest directory child has unsupported type: {}",
+                    entry.path().display()
+                ));
+            };
+            Ok((os_bytes(&entry.file_name()), kind))
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    children.sort_by(|(left, _), (right, _)| left.cmp(right));
+
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(b"harn-directory-inventory-v3\0");
+    for (name, kind) in children {
+        hasher.update(&(name.len() as u64).to_le_bytes());
+        hasher.update(&name);
+        hasher.update(kind.marker().as_bytes());
+    }
+    Ok(hasher.finalize())
 }
 
 pub(super) fn verify_manifest(path: &Path) -> Result<Verification, String> {
@@ -310,7 +358,7 @@ pub(super) fn verify_manifest(path: &Path) -> Result<Verification, String> {
         }
         previous_path = Some(path_bytes.clone());
         let stat = read_hash(&mut input, "stat identity")?;
-        let content = if matches!(kind, EntryKind::Directory | EntryKind::Missing) {
+        let content = if kind == EntryKind::Missing {
             None
         } else {
             Some(read_hash(&mut input, "content identity")?)
@@ -340,8 +388,8 @@ pub(super) fn verify_manifest(path: &Path) -> Result<Verification, String> {
             .map(|chunk| {
                 scope.spawn(move || {
                     let mut content_buffer = vec![0_u8; 1024 * 1024];
-                    for (entry_path, recorded_kind, recorded_stat, recorded_content) in chunk {
-                        let (current_kind, current_stat, metadata) = inspect(entry_path)?;
+                    for (entry_path, recorded_kind, _recorded_stat, recorded_content) in chunk {
+                        let (current_kind, _current_stat, metadata) = inspect(entry_path)?;
                         if *recorded_kind == EntryKind::Missing {
                             if current_kind == EntryKind::Missing {
                                 continue;
@@ -355,7 +403,13 @@ pub(super) fn verify_manifest(path: &Path) -> Result<Verification, String> {
                             ));
                         }
                         if *recorded_kind == EntryKind::Directory {
-                            if current_stat != *recorded_stat {
+                            if content_identity(
+                                entry_path,
+                                current_kind,
+                                metadata.as_ref(),
+                                &mut content_buffer,
+                            )? != *recorded_content
+                            {
                                 return Ok(Verification::InventoryChanged(entry_path.clone()));
                             }
                             continue;
@@ -739,11 +793,43 @@ mod tests {
         let manifest = temp.path().join("manifest");
         write_manifest(&manifest, root, &covered, &dep_info, &[], &authorities).unwrap();
 
+        let recorded_mtime = fs::metadata(root).unwrap().modified().unwrap();
         fs::write(root.join("new.harn"), b"new").unwrap();
-        assert!(matches!(
-            verify_manifest(&manifest).unwrap(),
-            Verification::InventoryChanged(path) if path == *root
-        ));
+        #[cfg(unix)]
+        File::open(root)
+            .unwrap()
+            .set_times(fs::FileTimes::new().set_modified(recorded_mtime))
+            .unwrap();
+        let verification = verify_manifest(&manifest);
+        assert!(
+            matches!(
+                &verification,
+                Ok(Verification::InventoryChanged(path)) if path == root
+            ),
+            "unexpected verification result: {verification:?}"
+        );
+    }
+
+    #[test]
+    fn restored_directory_inventory_is_fresh_despite_metadata_churn() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = &temp.path().join("repo");
+        fs::create_dir(root).unwrap();
+        let input = root.join("input.harn");
+        fs::write(&input, b"source").unwrap();
+        let covered = BTreeSet::from([PathBuf::from("input.harn")]);
+        let dep_info = temp.path().join("harn.d");
+        fs::write(&dep_info, b"target:\n").unwrap();
+        let authorities = temp.path().join("authorities");
+        fs::write(&authorities, []).unwrap();
+        let manifest = temp.path().join("manifest");
+        write_manifest(&manifest, root, &covered, &dep_info, &[], &authorities).unwrap();
+
+        let transient = root.join("transient.harn");
+        fs::write(&transient, b"transient").unwrap();
+        fs::remove_file(transient).unwrap();
+
+        assert_eq!(verify_manifest(&manifest).unwrap(), Verification::Fresh);
     }
 
     #[test]

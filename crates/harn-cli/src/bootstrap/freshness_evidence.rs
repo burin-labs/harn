@@ -10,7 +10,7 @@ use std::{
 use super::freshness_manifest::{artifact_stat_id, platform_build_id, write_manifest};
 
 const COMMAND: &str = "__internal-freshness-evidence-v4";
-const FORMAT: &str = "harn-artifact-evidence-v4-depfile-0.1.1-manifest-2";
+const FORMAT: &str = "harn-artifact-evidence-v4-depfile-0.1.1-manifest-3";
 
 pub(super) fn handle(raw_args: &[String]) -> bool {
     let (command, dep_info, target, repo_root, git_covered_list, manifest) = match raw_args {

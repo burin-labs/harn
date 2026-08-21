@@ -16,7 +16,7 @@ use std::{
 };
 
 const RECEIPT_FORMAT: &str = "harn-bin-freshness-v4";
-const EVIDENCE_FORMAT: &str = "harn-artifact-evidence-v4-depfile-0.1.1-manifest-2";
+const EVIDENCE_FORMAT: &str = "harn-artifact-evidence-v4-depfile-0.1.1-manifest-3";
 const CHECKER_FORMAT: &str = "harn-freshness-check-v2";
 
 fn main() -> ExitCode {

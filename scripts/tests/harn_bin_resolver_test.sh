@@ -36,9 +36,9 @@ if [[ "${1:-}" = "__internal-freshness-evidence-v4" ]]; then
   binary_hash="$(git hash-object --no-filters -- "$3")000000000000000000000000"
   dep_hash="$(git hash-object --no-filters -- "$2")000000000000000000000000"
   if [[ -n "${7:-}" ]]; then
-    printf 'harn-freshness-manifest-v2\n' >"$7"
+    printf 'harn-freshness-manifest-v3\n' >"$7"
   fi
-  printf 'harn-artifact-evidence-v4-depfile-0.1.1-manifest-2\nbuild-freshness=%s\nbuild-id=%s\nartifact-stat=%s\ndep-info=%s\ndependencies=%s\n' \
+  printf 'harn-artifact-evidence-v4-depfile-0.1.1-manifest-3\nbuild-freshness=%s\nbuild-id=%s\nartifact-stat=%s\ndep-info=%s\ndependencies=%s\n' \
     "$(cat "$3.build-freshness" 2>/dev/null || true)" "$binary_hash" \
     "$binary_hash" "$dep_hash" "$dep_hash"
   exit 0
@@ -181,9 +181,9 @@ if [[ "${1:-}" = "__internal-freshness-evidence-v4" ]]; then
   binary_hash="$(git hash-object --no-filters -- "$3")000000000000000000000000"
   dep_hash="$(git hash-object --no-filters -- "$2")000000000000000000000000"
   if [[ -n "${7:-}" ]]; then
-    printf 'harn-freshness-manifest-v2\n' >"$7"
+    printf 'harn-freshness-manifest-v3\n' >"$7"
   fi
-  printf 'harn-artifact-evidence-v4-depfile-0.1.1-manifest-2\nbuild-freshness=%s\nbuild-id=%s\nartifact-stat=%s\ndep-info=%s\ndependencies=%s\n' \
+  printf 'harn-artifact-evidence-v4-depfile-0.1.1-manifest-3\nbuild-freshness=%s\nbuild-id=%s\nartifact-stat=%s\ndep-info=%s\ndependencies=%s\n' \
     "$(cat "$3.build-freshness")" "$binary_hash" "$binary_hash" \
     "$dep_hash" "$dep_hash"
   exit 0
@@ -510,7 +510,7 @@ fn main() {
                 Path::new(&args[2]), &dependencies, Path::new(&args[6]),
             ).unwrap();
         }
-        println!("harn-artifact-evidence-v4-depfile-0.1.1-manifest-2");
+        println!("harn-artifact-evidence-v4-depfile-0.1.1-manifest-3");
         println!("build-freshness={BUILD_FRESHNESS}");
         println!("build-id={}", digest(&[&args[3]]));
         println!("artifact-stat={}", freshness_manifest::artifact_stat_id(Path::new(&args[3])).unwrap());
