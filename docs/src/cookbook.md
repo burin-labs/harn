@@ -28,7 +28,7 @@ Single-shot prompt with a system message. Set `ANTHROPIC_API_KEY` (or
 the appropriate key for your provider) before running.
 
 ```harn
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness) {
   const response = harness.llm.call(
     "Explain the builder pattern in three sentences.",
     "You are a software engineering tutor. Be concise."
@@ -40,7 +40,7 @@ pipeline default(harness: Harness, task) {
 To switch provider or model, pass an options dict:
 
 ```harn
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness) {
   const response = harness.llm.call(
     "Explain the builder pattern in three sentences.",
     "You are a software engineering tutor. Be concise.",
@@ -57,7 +57,7 @@ shape before using it. Wrap the parse in `retry` so a malformed first
 attempt does not end the run.
 
 ```harn
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness) {
   const system = """
 You are a task planner. Given a task description, break it into steps.
 Respond with ONLY a JSON array of objects, each with "step" (string) and
@@ -124,7 +124,8 @@ prompt that describes them, then let the LLM call tools in a loop. For
 typed tools and Tool Vault, see [LLM tools](./llm/tools.md).
 
 ```harn
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness) {
+  const task = "Inspect this project and summarize the main risks."
   let tools = tool_registry()
 
   tools = tool_define(tools, "read", "Read a file from disk", {
@@ -179,7 +180,8 @@ writing the loop yourself.
 Spawn workers for different roles and collect their results.
 
 ```harn
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness) {
+  const task = "Review this project."
   const roles = ["research", "analyze", "summarize"]
 
   const results = parallel each roles { role ->
@@ -240,7 +242,7 @@ queries accept any capture name.
 ```harn,ignore
 import "std/edit"
 
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness) {
   const result = edit_apply_node(harness.ast, {
     path: "src/lib.rs",
     query: "(function_item name: (identifier) @name (#eq? @name \"greet\") body: (block) @target)",
@@ -262,7 +264,7 @@ The default selector is `"unique"`: more than one match returns
 ```harn,ignore
 import "std/edit"
 
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness) {
   // Rewrite every `fn foo() { … }` body in a file.
   const result = edit_apply_node(harness.ast, {
     path: "src/lib.rs",
@@ -282,7 +284,7 @@ rejection.
 ```harn,ignore
 import "std/edit"
 
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness) {
   const result = edit_apply_node(harness.ast, {
     path: "src/lib.rs",
     query: "(function_item body: (block) @target)",
@@ -302,7 +304,7 @@ alongside any sibling staged writes.
 ```harn,ignore
 import "std/edit"
 
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness) {
   const preview = edit_apply_node(harness.ast, {
     path: "src/lib.rs",
     query: "(function_item body: (block) @target)",
@@ -331,7 +333,7 @@ or "add a new variant before the trailing `}`". Where `apply_node`
 ```harn,ignore
 import "std/edit"
 
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness) {
   // src/lib.rs contains:
   //
   //   #[cfg(test)]
@@ -366,7 +368,7 @@ target.
 ```harn,ignore
 import "std/edit"
 
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness) {
   // src/index.ts contains:
   //
   //   import { a } from "./a";
@@ -405,7 +407,7 @@ has no tree-sitter grammar and you still need collision safety.
 ```harn,ignore
 import { edit_safe_text_patch } from "std/edit"
 
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness) {
   const snapshot = harness.fs.staged_read_text({path: "src/lib.rs"})
   const result = edit_safe_text_patch(harness.fs, harness.random, {
     path: "src/lib.rs",
@@ -450,7 +452,7 @@ reviewer UI.
 ```harn,ignore
 import "std/edit"
 
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness) {
   const bundle = edit_dry_run({
     plan: [
       {
@@ -508,7 +510,7 @@ can't end up with two identically named definitions in the same scope.
 ```harn,ignore
 import { edit_rename_symbol } from "std/edit"
 
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness) {
   const result = edit_rename_symbol(harness.code_index, {
     symbol_ref: {name: "Widget", path: "src/lib.rs", kind: "Type"},
     new_name: "Gadget",
@@ -570,7 +572,7 @@ react to.
 ```harn,ignore
 import { edit_safe_text_patch } from "std/edit"
 
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness) {
   const snapshot = harness.fs.staged_read_text({path: "CHANGELOG.md"})
   const result = edit_safe_text_patch(harness.fs, harness.random, {
     path: "CHANGELOG.md",
@@ -638,7 +640,7 @@ Connect to an MCP-compatible tool server, list available tools, and call
 them. This example uses the filesystem MCP server.
 
 ```harn
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness) {
   const client = harness.tools.mcp_connect("npx", ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"])
 
   const info = harness.tools.mcp_server_info(client)
@@ -677,7 +679,7 @@ Connect to an MCP server and feed its tools to `agent_loop`. The LLM
 chooses which to call.
 
 ```harn
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness) {
   const client = harness.tools.mcp_connect("npx", ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"])
   const mcp_tool_list = harness.tools.mcp_list_tools(client)
 
@@ -713,7 +715,7 @@ Use `parallel` when the unit of work is "N independent operations" and
 you want them indexed by position.
 
 ```harn
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness) {
   const prompts = [
     "Write a haiku about Rust",
     "Write a haiku about concurrency",
@@ -741,7 +743,7 @@ task needs to hand work to another and you want backpressure rather
 than an unbounded queue.
 
 ```harn
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness) {
   const ch = channel("work", 10)
   const results_ch = channel("results", 10)
 
@@ -793,7 +795,7 @@ Tail-recursive functions are optimized by the VM, so deep recursion does
 not overflow even across thousands of iterations.
 
 ```harn
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness) {
   const items = ["Refactor auth module", "Add input validation", "Write unit tests"]
 
   fn process(remaining, results) {
@@ -826,7 +828,7 @@ For non-LLM workloads, tail-call optimization handles deep recursion
 without issue:
 
 ```harn
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness) {
   fn sum_to(n, acc) {
     if n <= 0 {
       return acc
@@ -847,7 +849,7 @@ failures. Use a typed catch when you want different handling per error
 kind.
 
 ```harn
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness) {
   enum AgentError {
     LlmFailure(message)
     ParseFailure(raw)
@@ -898,7 +900,8 @@ Gather context in parallel, merge it into a single dict, and feed it to
 the model.
 
 ```harn
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness) {
+  const task = "Improve error handling in this project."
   fn read_or_empty(path) {
     try {
       return harness.fs.read_text(path)
@@ -956,7 +959,8 @@ fn gather_context(task) {
 ```harn,ignore
 import "lib/context"
 
-pipeline review(harness: Harness, task) {
+pipeline review(harness: Harness) {
+  const task = "Review this project."
   const ctx = gather_context(task)
   const prompt = "Review this project.\n\nREADME:\n${ctx.readme}\n\nTask: ${ctx.task}"
   const result = harness.llm.call(prompt, "You are a code reviewer.")
@@ -969,7 +973,7 @@ pipeline review(harness: Harness, task) {
 ```harn,ignore
 import "lib/review"
 
-pipeline default(harness: Harness, task) extends review {
+pipeline default(harness: Harness) extends review {
   override setup() {
     harness.stdio.log("Starting custom review pipeline")
   }
@@ -982,7 +986,7 @@ pipeline default(harness: Harness, task) extends review {
 and sets.
 
 ```harn
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness) {
   const allowed_extensions = [".rs", ".harn", ".toml"]
   const files = harness.fs.list_dir("src")
 
@@ -1010,7 +1014,7 @@ Sets give O(1)-style membership testing and are immutable —
 `set_add` returns a new set rather than mutating in place.
 
 ```harn
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness) {
   const urls = [
     "https://example.com/a",
     "https://example.com/b",
@@ -1047,7 +1051,7 @@ body runs if a caller passes the wrong type; `harn check` rejects most
 of these statically.
 
 ```harn,ignore
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness) {
   fn summarize(text: string, max_words: int) -> string {
     const words = text.split(" ")
     if words.count <= max_words {
@@ -1089,7 +1093,8 @@ analysis. Track accuracy, latency, token usage, and failure counts
 during agent execution.
 
 ```harn
-pipeline default(harness: Harness, task) {
+pipeline default(harness: Harness) {
+  const task = "Explain this project in three sentences."
   const result = harness.llm.call(task, "Be concise.")
   const usage = harness.obs.llm_usage()
 
