@@ -1526,6 +1526,24 @@ jobs:
           if [[ ! -f "$target_dir/debug/harn.exe" ]]; then
             cargo build --locked -p harn-cli --bin harn
           fi
+          # Exercise the typed Cargo depfile owner and native Windows artifact
+          # identity APIs, including drive-colon/backslash/space fixtures.
+          cargo test --locked -p harn-cli --lib \
+            bootstrap::freshness -- --nocapture
+          cargo test --locked -p harn-cli --bin harn-freshness-check \
+            --features internal-freshness-checker -- --nocapture
+          # The build above intentionally does not manufacture a receipt. The
+          # canonical resolver must converge compiled provenance, publish one,
+          # and then prove buildless reuse on the native Git-Bash path.
+          resolved="$(HARN_BIN='' HARN_BIN_NO_BUILD=0 ./scripts/harn_bin.sh --print)"
+          reused="$(HARN_BIN='' HARN_BIN_NO_BUILD=1 ./scripts/harn_bin.sh --no-build --print)"
+          test "$resolved" = "$reused"
+          test "$resolved" = "$target_dir/debug/harn.exe"
+          hook_resolved="$(
+            CARGO_TARGET_DIR="$target_dir" sh -c \
+              '. .githooks/lib.sh; hook_find_fresh_worktree_harn_bin'
+          )"
+          test "$hook_resolved" = "$target_dir/debug/harn.exe"
       - name: Smoke test harn run
         shell: bash
         run: |

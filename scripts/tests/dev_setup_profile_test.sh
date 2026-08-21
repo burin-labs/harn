@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# This suite owns fake toolchains, not shared rust-heavy scheduling.
+export HARN_CARGO_LEASE_MODE=off
+
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 tmp_root=$(mktemp -d)
 cleanup() {
@@ -41,12 +44,25 @@ make_fixture_repo() {
   printf '#!/usr/bin/env bash\nset -euo pipefail\n' > "$repo/scripts/sign_local_macos.sh"
   printf '#!/usr/bin/env bash\nset -euo pipefail\nexec cargo "$@"\n' \
     > "$repo/scripts/cargo_with_worktree_build_dir.sh"
+  cat > "$repo/scripts/harn_bin.sh" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'HARN_BIN=%s HARN_BIN_NO_BUILD=%s args=%s\n' \
+  "${HARN_BIN-__unset__}" "${HARN_BIN_NO_BUILD-__unset__}" "$*" \
+  >> "${DEV_SETUP_TEST_RESOLVER_RECORD:-/dev/null}"
+if [[ "${1:-}" == "--record-receipt" ]]; then
+  exit 0
+fi
+target_dir=$(sed -n 's/^[[:space:]]*target-dir = "\([^"]*\)".*/\1/p' .cargo/config.toml)
+printf '%s/debug/harn\n' "$target_dir"
+SH
   {
     printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail'
     printf '%s\n' 'printf "%s\\n" "$PWD" >> "$DEV_SETUP_TEST_PRUNE_RECORD"'
   } > "$repo/scripts/prune_stale_targets.sh"
   chmod +x "$repo/scripts/configure_merge_drivers.sh" "$repo/scripts/sign_local_macos.sh" \
-    "$repo/scripts/prune_stale_targets.sh" "$repo/scripts/cargo_with_worktree_build_dir.sh"
+    "$repo/scripts/prune_stale_targets.sh" "$repo/scripts/cargo_with_worktree_build_dir.sh" \
+    "$repo/scripts/harn_bin.sh"
   {
     printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail'
     printf '%s\n' 'printf "%s\\n" "$*" >> "$DEV_SETUP_TEST_CARGO_RECORD"'
@@ -94,6 +110,7 @@ run_setup() {
     HARN_DEV_SETUP_STATE_DIR="$tmp_root/state-$profile" \
     HARN_DEV_TARGET_WORKTREE_PATH="${SETUP_TEST_WORKTREE_PATH:-$repo}" \
     DEV_SETUP_TEST_CARGO_RECORD="$cargo_record" \
+    DEV_SETUP_TEST_RESOLVER_RECORD="$tmp_root/resolver-$profile.txt" \
     DEV_SETUP_TEST_PRUNE_RECORD="$tmp_root/prune-$profile.txt" \
     "$repo/scripts/dev_setup.sh" > "$output" 2>&1
 }
@@ -105,6 +122,17 @@ run_setup "$rust_repo" rust "$tmp_root/rust-output.txt" "$rust_cargo"
 
 if ! grep -Fxq 'build --locked -p harn-cli --bin harn' "$rust_cargo"; then
   echo "rust setup did not build the canonical linked Harn CLI" >&2
+  exit 1
+fi
+if ! grep -Fxq 'HARN_BIN= HARN_BIN_NO_BUILD=0 args=--print' "$tmp_root/resolver-rust.txt"; then
+  echo "rust setup did not clear inherited resolver policy before recording freshness" >&2
+  cat "$tmp_root/resolver-rust.txt" >&2
+  exit 1
+fi
+if ! grep -Fxq 'HARN_BIN= HARN_BIN_NO_BUILD=__unset__ args=--record-receipt' \
+  "$tmp_root/resolver-rust.txt"; then
+  echo "rust setup did not refresh the receipt after local signing" >&2
+  cat "$tmp_root/resolver-rust.txt" >&2
   exit 1
 fi
 rust_target_dir="$tmp_root/cache-rust/harn/dev-setup/harn-target/$(basename "$tmp_root")-rust"

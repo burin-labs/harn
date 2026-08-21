@@ -14,7 +14,8 @@
 #      still appear because there's no Apple-anchored signature.
 #
 # Idempotent: safe to re-run after every `cargo build`. No-op on non-macOS.
-# Signs all three binaries (harn, harn-dap, harn-lsp) in target/{debug,release}.
+# Signs Harn's product binaries and the private worktree freshness checker in
+# target/{debug,release}.
 
 set -euo pipefail
 
@@ -63,7 +64,7 @@ sign_one() {
 
 signed_any=0
 for profile in debug release; do
-  for bin in harn harn-dap harn-lsp; do
+  for bin in harn harn-dap harn-lsp harn-freshness-check; do
     path="$target_dir/$profile/$bin"
     [ -x "$path" ] || continue
     sign_one "$path"
@@ -72,5 +73,5 @@ for profile in debug release; do
 done
 
 if [ "$signed_any" = "1" ] && [ "${HARN_LOCAL_SIGN_QUIET:-0}" != "1" ]; then
-  echo "scripts/sign_local_macos.sh: signed harn/harn-dap/harn-lsp in $target_dir/{debug,release} (mode=$mode)."
+  echo "scripts/sign_local_macos.sh: signed Harn binaries in $target_dir/{debug,release} (mode=$mode)."
 fi

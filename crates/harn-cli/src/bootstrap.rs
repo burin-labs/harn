@@ -1,5 +1,8 @@
 use std::{env, process};
 
+mod freshness_evidence;
+mod freshness_manifest;
+
 const INTERNAL_EXECUTABLE_PATH_COMMAND: &str = "__internal-executable-path";
 
 pub(crate) fn args_after_pre_runtime_command() -> Vec<String> {
@@ -11,6 +14,9 @@ pub(crate) fn args_after_pre_runtime_command() -> Vec<String> {
 }
 
 fn handle_pre_runtime_command(raw_args: &[String]) -> bool {
+    if freshness_evidence::handle(raw_args) {
+        return true;
+    }
     if !is_internal_executable_path_command(raw_args) {
         return false;
     }

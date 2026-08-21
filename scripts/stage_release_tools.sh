@@ -24,6 +24,7 @@ for source in \
   publish.sh \
   publish.harn \
   publish_plan.harn \
+  cargo_with_worktree_build_dir.sh \
   harn_bin.sh
 do
   cp "$repo_root/scripts/$source" "$destination/$source"

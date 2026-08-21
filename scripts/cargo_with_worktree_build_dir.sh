@@ -2,7 +2,9 @@
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-workspace="$(cd "$script_dir/.." && pwd -P)"
+workspace_request="${HARN_CARGO_LEASE_WORKSPACE:-$script_dir/..}"
+workspace="$(cd "$workspace_request" && pwd -P)"
+unset HARN_CARGO_LEASE_WORKSPACE
 # shellcheck source=scripts/lib/cargo_env.sh
 source "$script_dir/lib/cargo_env.sh"
 

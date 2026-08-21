@@ -7,11 +7,31 @@ real_sleep=$(command -v sleep)
 source "$repo_root/scripts/lib/harn_bin.sh"
 
 tmp_root=$(mktemp -d)
-trap 'rm -rf "$tmp_root"' EXIT
+cleanup() {
+  rm -rf "$tmp_root"
+  harn_refresh_cargo_target_dir_cache >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
 
 fake_bin="$tmp_root/harn"
 cat > "$fake_bin" <<'SH'
 #!/usr/bin/env bash
+set -euo pipefail
+if [[ "${1:-}" = "__internal-freshness-evidence-v4" ]]; then
+  if [[ ! -r "$2" ]]; then
+    echo "Cargo dep-info is missing at $2" >&2
+    exit 1
+  fi
+  binary_hash="$(git hash-object --no-filters -- "$3")000000000000000000000000"
+  dep_hash="$(git hash-object --no-filters -- "$2")000000000000000000000000"
+  if [[ -n "${7:-}" ]]; then
+    printf 'harn-freshness-manifest-v2\n' >"$7"
+  fi
+  printf 'harn-artifact-evidence-v4-depfile-0.1.1-manifest-2\nbuild-freshness=%s\nbuild-id=%s\nartifact-stat=%s\ndep-info=%s\ndependencies=%s\n' \
+    "$(cat "$3.build-freshness" 2>/dev/null || true)" "$binary_hash" \
+    "$binary_hash" "$dep_hash" "$dep_hash"
+  exit 0
+fi
 if [[ "${1:-}" = "--print-inherited-harn-bin" ]]; then
   printf '%s\n' "${HARN_BIN-}"
 else
@@ -72,8 +92,22 @@ mkdir -p "$fake_cargo_bin" "$target_dir/debug"
 cat > "$fake_cargo_bin/cargo" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
+normalized_args="$*"
+if [[ "${1:-}" = "--config" && \
+      "${2:-}" = env.HARN_BUILD_FRESHNESS_ID=* ]]; then
+  build_freshness_id="${2#env.HARN_BUILD_FRESHNESS_ID=}"
+  build_freshness_id="${build_freshness_id#\'}"
+  build_freshness_id="${build_freshness_id%\'}"
+  if [[ ! "$build_freshness_id" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]]; then
+    echo "fake Cargo received malformed build freshness config" >&2
+    exit 2
+  fi
+  export HARN_BUILD_FRESHNESS_ID="$build_freshness_id"
+  shift 2
+  normalized_args="--config env.HARN_BUILD_FRESHNESS_ID='<freshness>' $*"
+fi
 {
-  printf 'args=%s\n' "$*"
+  printf 'args=%s\n' "$normalized_args"
   printf 'CARGO_TARGET_DIR=%s\n' "${CARGO_TARGET_DIR-__unset__}"
   printf 'CARGO_BUILD_BUILD_DIR=%s\n' "${CARGO_BUILD_BUILD_DIR-__unset__}"
   printf 'RUSTC_WRAPPER=%s\n' "${RUSTC_WRAPPER-__unset__}"
@@ -120,11 +154,29 @@ case "$*" in
   "metadata --format-version=1 --no-deps")
     printf '{"target_directory":"%s"}\n' "${FAKE_METADATA_TARGET_DIR:?}"
     ;;
-  "run --quiet --bin harn -- __internal-executable-path")
+  "build --quiet --bin harn --bin harn-freshness-check --features internal-freshness-checker")
     mkdir -p "${CARGO_TARGET_DIR:?}/debug"
     cat > "$CARGO_TARGET_DIR/debug/harn" <<'BIN'
 #!/usr/bin/env bash
 set -euo pipefail
+if [[ "${1:-}" = "host" ]]; then
+  exit 2
+fi
+if [[ "${1:-}" = "__internal-executable-path" ]]; then
+  printf '%s\n' "$0"
+  exit 0
+fi
+if [[ "${1:-}" = "__internal-freshness-evidence-v4" ]]; then
+  binary_hash="$(git hash-object --no-filters -- "$3")000000000000000000000000"
+  dep_hash="$(git hash-object --no-filters -- "$2")000000000000000000000000"
+  if [[ -n "${7:-}" ]]; then
+    printf 'harn-freshness-manifest-v2\n' >"$7"
+  fi
+  printf 'harn-artifact-evidence-v4-depfile-0.1.1-manifest-2\nbuild-freshness=%s\nbuild-id=%s\nartifact-stat=%s\ndep-info=%s\ndependencies=%s\n' \
+    "$(cat "$3.build-freshness")" "$binary_hash" "$binary_hash" \
+    "$dep_hash" "$dep_hash"
+  exit 0
+fi
 if [[ "${1:-}" = "--print-inherited-harn-bin" ]]; then
   printf '%s\n' "${HARN_BIN-}"
 else
@@ -132,7 +184,22 @@ else
 fi
 BIN
     chmod +x "$CARGO_TARGET_DIR/debug/harn"
-    printf '%s\n' "$CARGO_TARGET_DIR/debug/harn"
+    cat > "$CARGO_TARGET_DIR/debug/harn-freshness-check" <<'CHECKER'
+#!/usr/bin/env bash
+set -euo pipefail
+case "${1:-}" in
+  record-evidence)
+    printf 'harn-freshness-check-v2\nrepo-path=%064d\nchecker-build-id=aa\nchecker-stat=%064d\nchecker-path=%064d\nmanifest=%064d\n' 0 0 0 0
+    ;;
+  verify) exit 0 ;;
+  *) exit 2 ;;
+esac
+CHECKER
+    chmod +x "$CARGO_TARGET_DIR/debug/harn-freshness-check"
+    printf '%s\n' "${HARN_BUILD_FRESHNESS_ID:?}" \
+      > "$CARGO_TARGET_DIR/debug/harn.build-freshness"
+    escaped_harn="${CARGO_TARGET_DIR// /\\ }/debug/harn"
+    printf '%s:\n' "$escaped_harn" > "$CARGO_TARGET_DIR/debug/harn.d"
     ;;
   *)
     echo "unexpected cargo invocation: $*" >&2
@@ -177,24 +244,81 @@ SH
 chmod +x "$fake_cargo_bin/sleep"
 export FAKE_REAL_SLEEP="$real_sleep"
 
+fake_lease_runner="$fake_cargo_bin/harn-lease-runner"
+cat > "$fake_lease_runner" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$*" = "host lease run cargo --help" ]]; then
+  exit 0
+fi
+while [[ $# -gt 0 && "$1" != "--" ]]; do shift; done
+if [[ $# -eq 0 ]]; then
+  echo "fake lease runner did not receive a Cargo command" >&2
+  exit 2
+fi
+shift
+lock="${FAKE_CARGO_LEASE_LOCK:?}"
+while ! mkdir "$lock" 2>/dev/null; do
+  : > "${FAKE_CARGO_LEASE_WAITING:?}"
+  sleep 0.01
+done
+cleanup_fake_lease() { rmdir "$lock" 2>/dev/null || true; }
+trap cleanup_fake_lease EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+export CARGO_HARN_HOST_LEASE_ACTIVE=1
+cargo "$@"
+SH
+chmod +x "$fake_lease_runner"
+
 # The resolver's explicit binary and build policy are a coupled input. This
 # test supplies both independently below, so do not inherit either from the
 # caller (notably `make all` with a prebuilt Harn binary).
 unset HARN_BIN HARN_BIN_NO_BUILD
 
+fake_lease_lock="$tmp_root/fake-rust-heavy.lock"
+fake_lease_waiting="$tmp_root/fake-rust-heavy.waiting"
+mkdir "$fake_lease_lock"
 env -u CARGO_TARGET_DIR -u CARGO_BUILD_BUILD_DIR \
   CARGO_TARGET_DIR="$target_dir" \
   FAKE_CARGO_RECORD="$record" \
+  FAKE_CARGO_LEASE_LOCK="$fake_lease_lock" \
+  FAKE_CARGO_LEASE_WAITING="$fake_lease_waiting" \
+  HARN_CARGO_LEASE_RUNNER="$fake_lease_runner" \
+  HARN_CARGO_LEASE_MODE=required \
   PATH="$fake_cargo_bin:$PATH" \
-  "$repo_root/scripts/harn_bin.sh" --print > "$tmp_root/cargo-run.out"
+  "$repo_root/scripts/harn_bin.sh" --print > "$tmp_root/cargo-run.out" &
+resolver_pid=$!
+for _ in {1..200}; do
+  [[ -e "$fake_lease_waiting" ]] && break
+  "$real_sleep" 0.01
+done
+if [[ ! -e "$fake_lease_waiting" ]]; then
+  rmdir "$fake_lease_lock"
+  wait "$resolver_pid" || true
+  echo "harn_bin resolver did not wait behind the active Cargo lease" >&2
+  exit 1
+fi
+if [[ -s "$record" ]]; then
+  rmdir "$fake_lease_lock"
+  wait "$resolver_pid" || true
+  echo "harn_bin resolver overlapped an active leased Cargo job" >&2
+  cat "$record" >&2
+  exit 1
+fi
+rmdir "$fake_lease_lock"
+wait "$resolver_pid"
 expected_bin="$target_dir/debug/harn"
 if ! grep -Fxq "$expected_bin" "$tmp_root/cargo-run.out"; then
   echo "harn_bin resolver did not return Cargo's executable-path probe result" >&2
   cat "$tmp_root/cargo-run.out" >&2
   exit 1
 fi
-if ! grep -Fxq "args=run --quiet --bin harn -- __internal-executable-path" "$record"; then
-  echo "harn_bin resolver did not delegate binary resolution to cargo run" >&2
+leased_probe_args="args=--config env.HARN_BUILD_FRESHNESS_ID='<freshness>' build --quiet --bin harn --bin harn-freshness-check --features internal-freshness-checker"
+probe_args='args=build --quiet --bin harn --bin harn-freshness-check --features internal-freshness-checker'
+if ! grep -Fxq "$leased_probe_args" "$record"; then
+  echo "harn_bin resolver did not delegate binary resolution to Cargo" >&2
   cat "$record" >&2
   exit 1
 fi
@@ -203,6 +327,10 @@ if ! grep -Fxq "CARGO_BUILD_BUILD_DIR=$target_dir" "$record"; then
   cat "$record" >&2
   exit 1
 fi
+# The fake lease runner above owns the integration assertion. Keep the
+# remaining timeout/policy probes hermetic: they test the resolver watchdog,
+# not the machine's real shared lease queue.
+export HARN_CARGO_LEASE_MODE=off
 
 auto_child_bin="$(CARGO_TARGET_DIR="$target_dir" \
   FAKE_CARGO_RECORD="$record" \
@@ -230,6 +358,11 @@ if [[ -s "$record" ]]; then
 fi
 
 : > "$record"
+# The preceding explicit CARGO_TARGET_DIR probe must not inherit this
+# worktree's production target-dir cache into the independent metadata
+# discovery case. A missing cache is the boundary this case owns; cleanup
+# restores the canonical cache after the suite.
+rm -f "$(harn_target_dir_cache_path)"
 env -u CARGO_TARGET_DIR -u CARGO_BUILD_BUILD_DIR \
   FAKE_CARGO_RECORD="$record" \
   FAKE_METADATA_TARGET_DIR="$target_dir" \
@@ -245,7 +378,7 @@ if ! grep -Fxq "args=metadata --format-version=1 --no-deps" "$record"; then
   cat "$record" >&2
   exit 1
 fi
-if grep -Fq "args=run " "$record"; then
+if grep -Fq "args=build " "$record"; then
   echo "harn_bin --no-build attempted to build after metadata discovery" >&2
   cat "$record" >&2
   exit 1
@@ -268,6 +401,513 @@ if [[ -s "$record" ]]; then
   exit 1
 fi
 
+# Canonical falsifier: let Cargo build a tiny CLI that embeds tracked and
+# ignored .harn inputs, then use the production resolver and Cargo's real
+# top-level dep-info. The target and source paths contain spaces so the pinned
+# typed depfile parser, rather than shell tokenization, owns Make escaping.
+unset HARN_CARGO_LEASE_MODE
+cargo_fixture="$tmp_root/cargo fixture with spaces"
+cargo_target="$cargo_fixture/build output with spaces"
+mkdir -p "$cargo_fixture/src"
+cat > "$cargo_fixture/Cargo.toml" <<'TOML'
+[package]
+name = "harn"
+version = "0.0.0"
+edition = "2021"
+
+[features]
+internal-freshness-checker = []
+
+[dependencies]
+blake3 = "1.8.7"
+buildid = "=1.0.5"
+hex = "0.4"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = [
+    "Win32_Foundation",
+    "Win32_Storage_FileSystem",
+] }
+TOML
+mkdir -p "$cargo_fixture/src/bin" "$cargo_fixture/src/bootstrap"
+cp "$repo_root/crates/harn-cli/src/bin/harn-freshness-check.rs" \
+  "$cargo_fixture/src/bin/harn-freshness-check.rs"
+cp "$repo_root/crates/harn-cli/src/bootstrap/freshness_manifest.rs" \
+  "$cargo_fixture/src/bootstrap/freshness_manifest.rs"
+cat > "$cargo_fixture/src/main.rs" <<'RS'
+#[path = "bootstrap/freshness_manifest.rs"]
+mod freshness_manifest;
+
+const TRACKED: &str = include_str!("../embedded tracked.harn");
+const IGNORED: &str = include_str!("../embedded ignored.harn");
+const BUILD_FRESHNESS: &str = match option_env!("HARN_BUILD_FRESHNESS_ID") {
+    Some(value) => value,
+    None => "",
+};
+
+fn main() {
+    let args = std::env::args().collect::<Vec<_>>();
+    if args.get(1).map(String::as_str) == Some("host") {
+        std::process::exit(2);
+    } else if args.get(1).map(String::as_str) == Some("__internal-executable-path") {
+        println!("{}", std::env::current_exe().unwrap().display());
+    } else if args.get(1).map(String::as_str) == Some("__fixture-build-freshness-id") {
+        println!("{BUILD_FRESHNESS}");
+    } else if args.get(1).map(String::as_str) == Some("__internal-freshness-evidence-v4") {
+        use std::{collections::{BTreeSet, hash_map::DefaultHasher}, fs, hash::{Hash, Hasher}, path::{Path, PathBuf}};
+        fn digest(paths: &[&str]) -> String {
+            let mut hasher = DefaultHasher::new();
+            for path in paths { fs::read(path).unwrap().hash(&mut hasher); }
+            format!("{0:016x}{0:016x}{0:016x}{0:016x}", hasher.finish())
+        }
+        fn covered_paths(path: &str) -> BTreeSet<PathBuf> {
+            fs::read(path).unwrap().split(|byte| *byte == 0)
+                .filter(|value| !value.is_empty())
+                .map(|value| PathBuf::from(String::from_utf8(value.to_vec()).unwrap()))
+                .collect()
+        }
+        if args.len() == 8 {
+            let repo = Path::new(&args[4]);
+            let dependencies = [
+                (repo.join("Cargo.toml"), true),
+                (repo.join("src/main.rs"), true),
+                (repo.join("embedded tracked.harn"), true),
+                (repo.join("embedded ignored.harn"), false),
+            ];
+            freshness_manifest::write_manifest(
+                Path::new(&args[7]), repo, &covered_paths(&args[5]),
+                Path::new(&args[2]), &dependencies, Path::new(&args[6]),
+            ).unwrap();
+        }
+        println!("harn-artifact-evidence-v4-depfile-0.1.1-manifest-2");
+        println!("build-freshness={BUILD_FRESHNESS}");
+        println!("build-id={}", digest(&[&args[3]]));
+        println!("artifact-stat={}", freshness_manifest::artifact_stat_id(Path::new(&args[3])).unwrap());
+        println!("dep-info={}", digest(&[&args[2]]));
+        println!("dependencies={}", digest(&[
+            "Cargo.toml", "src/main.rs", "embedded tracked.harn", "embedded ignored.harn"
+        ]));
+    } else {
+        println!("{}:{}", TRACKED, IGNORED);
+    }
+}
+RS
+printf 'tracked-v1\n' > "$cargo_fixture/embedded tracked.harn"
+printf 'ignored-v1\n' > "$cargo_fixture/embedded ignored.harn"
+cat > "$cargo_fixture/.gitignore" <<'EOF'
+/build output with spaces/
+/embedded ignored.harn
+EOF
+printf '*.harn diff=hostile\n' > "$cargo_fixture/.gitattributes"
+hostile_diff_marker="$tmp_root/hostile-diff-ran"
+hostile_diff="$tmp_root/hostile-diff"
+cat > "$hostile_diff" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+: > "${FRESHNESS_TEST_DIFF_MARKER:?}"
+exit 91
+SH
+chmod +x "$hostile_diff"
+export FRESHNESS_TEST_DIFF_MARKER="$hostile_diff_marker"
+git -C "$cargo_fixture" init -q
+git -C "$cargo_fixture" config user.name 'Harn Resolver Test'
+git -C "$cargo_fixture" config user.email 'harn-resolver-test@example.invalid'
+git -C "$cargo_fixture" config diff.hostile.command "$hostile_diff"
+git -C "$cargo_fixture" config diff.hostile.textconv "$hostile_diff"
+git -C "$cargo_fixture" add Cargo.toml src/main.rs 'embedded tracked.harn' \
+  .gitignore .gitattributes
+git -C "$cargo_fixture" commit -qm 'fixture'
+# Establish old timestamps before the first build. Later edits preserve both
+# size and these exact mtimes, so producer provenance and ignored-dependency
+# recovery cannot pass merely because Git or Cargo notices timestamp recency.
+touch -t 200001010000 "$cargo_fixture/embedded tracked.harn" \
+  "$cargo_fixture/embedded ignored.harn"
+
+(
+  cd "$cargo_fixture"
+  CARGO_TARGET_DIR="$cargo_target" "$repo_root/scripts/harn_bin.sh" --print \
+    > "$tmp_root/cargo-fixture-build.out"
+)
+cargo_fixture_bin="$cargo_target/debug/harn"
+if ! grep -Fxq "$cargo_fixture_bin" "$tmp_root/cargo-fixture-build.out"; then
+  echo "harn_bin did not resolve the Cargo fixture binary" >&2
+  cat "$tmp_root/cargo-fixture-build.out" >&2
+  exit 1
+fi
+if [[ ! -r "$cargo_fixture_bin.d" ]] || \
+   [[ ! -r "$cargo_fixture_bin.freshness" ]] || \
+   [[ ! -r "$cargo_fixture_bin.freshness.manifest" ]]; then
+  echo "build-mode resolution did not produce Cargo dep-info and exact freshness evidence" >&2
+  exit 1
+fi
+if grep -Eq 'tracked-v1|ignored-v1' \
+  "$cargo_fixture_bin.freshness" "$cargo_fixture_bin.freshness.manifest"; then
+  echo "freshness receipt leaked dependency content instead of content identities" >&2
+  cat "$cargo_fixture_bin.freshness" >&2
+  exit 1
+fi
+
+no_cargo_bin="$tmp_root/no-cargo-bin"
+mkdir -p "$no_cargo_bin"
+cat > "$no_cargo_bin/cargo" <<'SH'
+#!/usr/bin/env bash
+echo "no-build freshness verification invoked Cargo" >&2
+exit 97
+SH
+chmod +x "$no_cargo_bin/cargo"
+fixture_binary_mtime_before="$(stat -f '%m' "$cargo_fixture_bin" 2>/dev/null || stat -c '%Y' "$cargo_fixture_bin")"
+for reuse_round in 1 2; do
+  (
+    cd "$cargo_fixture"
+    CARGO_TARGET_DIR="$cargo_target" PATH="$no_cargo_bin:$PATH" \
+      "$repo_root/scripts/harn_bin.sh" --no-build --print \
+      > "$tmp_root/cargo-fixture-reuse-$reuse_round.out"
+  )
+  if ! grep -Fxq "$cargo_fixture_bin" "$tmp_root/cargo-fixture-reuse-$reuse_round.out"; then
+    echo "unchanged no-build reuse did not return the Cargo fixture binary" >&2
+    exit 1
+  fi
+done
+fixture_binary_mtime_after="$(stat -f '%m' "$cargo_fixture_bin" 2>/dev/null || stat -c '%Y' "$cargo_fixture_bin")"
+if [[ "$fixture_binary_mtime_before" != "$fixture_binary_mtime_after" ]]; then
+  echo "unchanged no-build reuse modified the binary" >&2
+  exit 1
+fi
+cp -p "$cargo_fixture_bin" "$tmp_root/cargo-fixture-source-v1-bin"
+
+# A tracked content edit remains stale even when its mtime is forced older than
+# the executable. This is the blind spot of a timestamp-only depfile query and
+# the reason the receipt composes Git content identity with Cargo recency.
+printf 'tracked-v2\n' > "$cargo_fixture/embedded tracked.harn"
+touch -t 200001010000 "$cargo_fixture/embedded tracked.harn"
+if (
+  cd "$cargo_fixture"
+  CARGO_TARGET_DIR="$cargo_target" PATH="$no_cargo_bin:$PATH" \
+    "$repo_root/scripts/harn_bin.sh" --no-build --print \
+    > "$tmp_root/cargo-fixture-tracked-stale.out" \
+    2> "$tmp_root/cargo-fixture-tracked-stale.err"
+); then
+  echo "no-build accepted an older-mtime tracked embedded .harn edit" >&2
+  exit 1
+fi
+if ! grep -Fq 'manifest input content changed' "$tmp_root/cargo-fixture-tracked-stale.err"; then
+  echo "tracked content-stale error did not identify the receipt proof" >&2
+  cat "$tmp_root/cargo-fixture-tracked-stale.err" >&2
+  exit 1
+fi
+if [[ -e "$hostile_diff_marker" ]]; then
+  echo "Git fingerprint executed a configured external diff or textconv driver" >&2
+  exit 1
+fi
+
+# Restore exact content with an old mtime: the content-addressed proofs accept
+# the original build again without compiling.
+printf 'tracked-v1\n' > "$cargo_fixture/embedded tracked.harn"
+touch -t 200001010000 "$cargo_fixture/embedded tracked.harn"
+(
+  cd "$cargo_fixture"
+  CARGO_TARGET_DIR="$cargo_target" PATH="$no_cargo_bin:$PATH" \
+    "$repo_root/scripts/harn_bin.sh" --no-build --print \
+    > "$tmp_root/cargo-fixture-restored.out"
+)
+
+# A binary compiled from another exact source fingerprint cannot masquerade as
+# the current artifact, even when its timestamp is copied from the current
+# build. Compiled provenance owns this semantic identity; the platform build
+# ID and artifact-stat tuple provide independent accidental-replacement proof.
+printf 'tracked-v2\n' > "$cargo_fixture/embedded tracked.harn"
+touch -t 200001010000 "$cargo_fixture/embedded tracked.harn"
+(
+  cd "$cargo_fixture"
+  CARGO_TARGET_DIR="$cargo_target" "$repo_root/scripts/harn_bin.sh" --print \
+    > "$tmp_root/cargo-fixture-source-v2-build.out"
+)
+cp -p "$cargo_fixture_bin" "$tmp_root/cargo-fixture-source-v2-bin"
+source_v1_freshness_id="$(
+  "$tmp_root/cargo-fixture-source-v1-bin" __fixture-build-freshness-id
+)"
+source_v2_freshness_id="$(
+  "$tmp_root/cargo-fixture-source-v2-bin" __fixture-build-freshness-id
+)"
+if [[ ! "$source_v1_freshness_id" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]] || \
+   [[ ! "$source_v2_freshness_id" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]] || \
+   [[ "$source_v1_freshness_id" = "$source_v2_freshness_id" ]]; then
+  echo "compiled provenance did not distinguish exact source fingerprints" >&2
+  exit 1
+fi
+cp "$tmp_root/cargo-fixture-source-v1-bin" "$cargo_fixture_bin"
+touch -r "$tmp_root/cargo-fixture-source-v2-bin" "$cargo_fixture_bin"
+if (
+  cd "$cargo_fixture"
+  CARGO_TARGET_DIR="$cargo_target" PATH="$no_cargo_bin:$PATH" \
+    "$repo_root/scripts/harn_bin.sh" --no-build --print \
+    > "$tmp_root/cargo-fixture-foreign-source-bin.out" \
+    2> "$tmp_root/cargo-fixture-foreign-source-bin.err"
+); then
+  echo "no-build accepted a same-mtime binary from another source fingerprint" >&2
+  exit 1
+fi
+if ! grep -Fq 'worktree Harn executable changed' \
+  "$tmp_root/cargo-fixture-foreign-source-bin.err"; then
+  echo "foreign-source binary failure did not identify artifact evidence" >&2
+  cat "$tmp_root/cargo-fixture-foreign-source-bin.err" >&2
+  exit 1
+fi
+
+# Restore the original source state through the supported build path so the
+# subsequent byte-mutation falsifier starts from a valid receipt.
+printf 'tracked-v1\n' > "$cargo_fixture/embedded tracked.harn"
+touch -t 200001010000 "$cargo_fixture/embedded tracked.harn"
+(
+  cd "$cargo_fixture"
+  CARGO_TARGET_DIR="$cargo_target" "$repo_root/scripts/harn_bin.sh" --print \
+    > "$tmp_root/cargo-fixture-source-v1-rebuild.out"
+)
+
+# The auto-resolved worktree path binds ordinary filesystem identity as well as
+# semantic provenance. A byte-identical copy remains a valid caller-owned
+# explicit pin, but replacing the canonical artifact with that copy is
+# unproven and must fail until Cargo relinks it.
+cp -p "$cargo_fixture_bin" "$tmp_root/cargo-fixture-identical-copy"
+explicit_copy="$(HARN_BIN="$tmp_root/cargo-fixture-identical-copy" \
+  "$repo_root/scripts/harn_bin.sh" --print)"
+if [[ "$explicit_copy" != "$tmp_root/cargo-fixture-identical-copy" ]]; then
+  echo "explicit HARN_BIN did not retain caller-owned byte-identical copy semantics" >&2
+  exit 1
+fi
+rm "$cargo_fixture_bin"
+cp "$tmp_root/cargo-fixture-identical-copy" "$cargo_fixture_bin"
+touch -r "$tmp_root/cargo-fixture-identical-copy" "$cargo_fixture_bin"
+if (
+  cd "$cargo_fixture"
+  CARGO_TARGET_DIR="$cargo_target" PATH="$no_cargo_bin:$PATH" \
+    "$repo_root/scripts/harn_bin.sh" --no-build --print \
+    > "$tmp_root/cargo-fixture-identical-replacement.out" \
+    2> "$tmp_root/cargo-fixture-identical-replacement.err"
+); then
+  echo "no-build accepted a byte-identical replacement at the canonical path" >&2
+  exit 1
+fi
+(
+  cd "$cargo_fixture"
+  CARGO_TARGET_DIR="$cargo_target" "$repo_root/scripts/harn_bin.sh" --print \
+    > "$tmp_root/cargo-fixture-identical-recovered.out"
+)
+
+# Replacing the artifact bytes without changing its timestamp must fail even
+# when every source and dependency remains unchanged.
+cp -p "$cargo_fixture_bin" "$tmp_root/cargo-fixture-bin.saved"
+printf '\nreplacement-bytes\n' >> "$cargo_fixture_bin"
+touch -r "$tmp_root/cargo-fixture-bin.saved" "$cargo_fixture_bin"
+if (
+  cd "$cargo_fixture"
+  CARGO_TARGET_DIR="$cargo_target" PATH="$no_cargo_bin:$PATH" \
+    "$repo_root/scripts/harn_bin.sh" --no-build --print \
+    > "$tmp_root/cargo-fixture-binary-stale.out" \
+    2> "$tmp_root/cargo-fixture-binary-stale.err"
+); then
+  echo "no-build accepted a same-mtime replacement Harn binary" >&2
+  exit 1
+fi
+if ! grep -Fq 'worktree Harn executable changed' \
+  "$tmp_root/cargo-fixture-binary-stale.err"; then
+  echo "binary replacement failure did not identify artifact evidence" >&2
+  cat "$tmp_root/cargo-fixture-binary-stale.err" >&2
+  exit 1
+fi
+cp "$tmp_root/cargo-fixture-bin.saved" "$cargo_fixture_bin"
+
+# Build mode must not merely bless the replaced artifact. It removes an
+# unproven canonical output and makes Cargo relink it before publishing a new
+# receipt, even when Cargo's own fingerprint would otherwise report fresh.
+(
+  cd "$cargo_fixture"
+  CARGO_TARGET_DIR="$cargo_target" "$repo_root/scripts/harn_bin.sh" --print \
+    > "$tmp_root/cargo-fixture-recovered-binary.out"
+)
+if [[ "$("$cargo_fixture_bin")" != $'tracked-v1\n:ignored-v1' ]]; then
+  echo "build-mode recovery did not restore the exact embedded fixture inputs" >&2
+  exit 1
+fi
+
+# Ignored/generated or external dependencies are outside Git ownership. Exact
+# Cargo prerequisite hashing catches their edits even when mtimes roll back.
+printf 'ignored-v2\n' > "$cargo_fixture/embedded ignored.harn"
+touch -t 200001010000 "$cargo_fixture/embedded ignored.harn"
+if (
+  cd "$cargo_fixture"
+  CARGO_TARGET_DIR="$cargo_target" PATH="$no_cargo_bin:$PATH" \
+    "$repo_root/scripts/harn_bin.sh" --no-build --print \
+    > "$tmp_root/cargo-fixture-ignored-stale.out" \
+    2> "$tmp_root/cargo-fixture-ignored-stale.err"
+); then
+  echo "no-build accepted an older-mtime ignored embedded .harn dependency" >&2
+  exit 1
+fi
+if ! grep -Fq 'manifest input content changed' "$tmp_root/cargo-fixture-ignored-stale.err"; then
+  echo "ignored dependency-stale error did not identify exact artifact evidence" >&2
+  cat "$tmp_root/cargo-fixture-ignored-stale.err" >&2
+  exit 1
+fi
+
+# The supported recovery must also defeat Cargo's mtime-only blind spot: an
+# invalid receipt causes the exact output to be relinked with current compiled
+# provenance instead of allowing a stale executable to be re-certified.
+(
+  cd "$cargo_fixture"
+  CARGO_TARGET_DIR="$cargo_target" "$repo_root/scripts/harn_bin.sh" --print \
+    > "$tmp_root/cargo-fixture-ignored-rebuild.out"
+)
+if [[ "$("$cargo_fixture_bin")" != $'tracked-v1\n:ignored-v2' ]]; then
+  echo "build mode did not relink an older-mtime ignored dependency edit" >&2
+  exit 1
+fi
+
+# Return the canonical fixture to its original exact state for fail-closed
+# missing/invalid dependency-evidence probes below.
+printf 'ignored-v1\n' > "$cargo_fixture/embedded ignored.harn"
+touch -t 200001010000 "$cargo_fixture/embedded ignored.harn"
+(
+  cd "$cargo_fixture"
+  CARGO_TARGET_DIR="$cargo_target" "$repo_root/scripts/harn_bin.sh" --print \
+    > "$tmp_root/cargo-fixture-ignored-restored.out"
+)
+
+# Missing and malformed receipt evidence must fail closed. These use a
+# separate executable so the canonical fixture receipt remains attributable;
+# dep-info corruption below is exercised against the canonical fixture.
+unproven_target="$tmp_root/unproven target"
+mkdir -p "$unproven_target/debug"
+cp "$snapshot" "$unproven_target/debug/harn"
+escaped_unproven="${unproven_target// /\\ }/debug/harn"
+printf '%s:\n' "$escaped_unproven" > "$unproven_target/debug/harn.d"
+if CARGO_TARGET_DIR="$unproven_target" PATH="$no_cargo_bin:$PATH" \
+  "$repo_root/scripts/harn_bin.sh" --no-build --print \
+  > "$tmp_root/missing-receipt.out" 2> "$tmp_root/missing-receipt.err"; then
+  echo "no-build accepted an executable without a build receipt" >&2
+  exit 1
+fi
+if ! grep -Fq 'build receipt is missing' "$tmp_root/missing-receipt.err"; then
+  echo "missing-receipt failure was not attributable" >&2
+  cat "$tmp_root/missing-receipt.err" >&2
+  exit 1
+fi
+
+printf 'not-a-receipt\n' > "$unproven_target/debug/harn.freshness"
+cp "$cargo_fixture_bin.freshness.manifest" \
+  "$unproven_target/debug/harn.freshness.manifest"
+cp "$cargo_target/debug/harn-freshness-check" \
+  "$unproven_target/debug/harn-freshness-check"
+if CARGO_TARGET_DIR="$unproven_target" PATH="$no_cargo_bin:$PATH" \
+  "$repo_root/scripts/harn_bin.sh" --no-build --print \
+  > "$tmp_root/malformed-receipt.out" 2> "$tmp_root/malformed-receipt.err"; then
+  echo "no-build accepted a malformed build receipt" >&2
+  exit 1
+fi
+if ! grep -Fq 'malformed Harn freshness receipt' "$tmp_root/malformed-receipt.err"; then
+  echo "malformed-receipt failure was not attributable" >&2
+  cat "$tmp_root/malformed-receipt.err" >&2
+  exit 1
+fi
+
+mv "$cargo_fixture_bin.d" "$cargo_fixture_bin.d.saved"
+if (
+  cd "$cargo_fixture"
+  CARGO_TARGET_DIR="$cargo_target" PATH="$no_cargo_bin:$PATH" \
+  "$repo_root/scripts/harn_bin.sh" --no-build --print \
+    > "$tmp_root/missing-dep-info.out" 2> "$tmp_root/missing-dep-info.err"
+); then
+  echo "no-build accepted an executable without Cargo dep-info" >&2
+  exit 1
+fi
+if ! grep -Fq 'cannot inspect manifest input' "$tmp_root/missing-dep-info.err"; then
+  echo "missing-dep-info failure was not attributable" >&2
+  cat "$tmp_root/missing-dep-info.err" >&2
+  exit 1
+fi
+mv "$cargo_fixture_bin.d.saved" "$cargo_fixture_bin.d"
+
+mv "$cargo_fixture_bin.freshness.manifest" \
+  "$cargo_fixture_bin.freshness.manifest.saved"
+if (
+  cd "$cargo_fixture"
+  CARGO_TARGET_DIR="$cargo_target" PATH="$no_cargo_bin:$PATH" \
+    "$repo_root/scripts/harn_bin.sh" --no-build --print \
+    > "$tmp_root/missing-manifest.out" 2> "$tmp_root/missing-manifest.err"
+); then
+  echo "no-build accepted an executable without its exact input manifest" >&2
+  exit 1
+fi
+if ! grep -Fq 'input manifest is missing' "$tmp_root/missing-manifest.err"; then
+  echo "missing-manifest failure was not attributable" >&2
+  cat "$tmp_root/missing-manifest.err" >&2
+  exit 1
+fi
+mv "$cargo_fixture_bin.freshness.manifest.saved" \
+  "$cargo_fixture_bin.freshness.manifest"
+
+cp "$cargo_fixture_bin.d" "$cargo_fixture_bin.d.saved"
+printf 'this is not make syntax\n' > "$cargo_fixture_bin.d"
+if (
+  cd "$cargo_fixture"
+  CARGO_TARGET_DIR="$cargo_target" PATH="$no_cargo_bin:$PATH" \
+  "$repo_root/scripts/harn_bin.sh" --no-build --print \
+    > "$tmp_root/malformed-dep-info.out" 2> "$tmp_root/malformed-dep-info.err"
+); then
+  echo "no-build accepted malformed Cargo dep-info" >&2
+  exit 1
+fi
+if ! grep -Fq 'manifest input content changed' \
+  "$tmp_root/malformed-dep-info.err"; then
+  echo "malformed-dep-info failure was not attributable" >&2
+  cat "$tmp_root/malformed-dep-info.err" >&2
+  exit 1
+fi
+mv "$cargo_fixture_bin.d.saved" "$cargo_fixture_bin.d"
+
+# Windows auto-resolution uses harn.exe but Cargo still names the top-level
+# dep-info harn.d. Exercise that suffix contract with Git-Bash path semantics.
+windows_target="$tmp_root/windows target"
+mkdir -p "$windows_target/debug"
+cp "$fake_exe" "$windows_target/debug/harn.exe"
+escaped_windows="${windows_target// /\\ }/debug/harn.exe"
+printf '%s:\n' "$escaped_windows" > "$windows_target/debug/harn.d"
+if [[ "$(OS=Windows_NT harn_binary_dep_info_path "$windows_target/debug/harn.exe")" != \
+      "$windows_target/debug/harn.d" ]]; then
+  echo "Windows harn.exe resolution did not preserve Cargo's harn.d contract" >&2
+  exit 1
+fi
+
+# Canonical producers must refresh the worktree receipt even when their parent
+# process carries an unrelated exact binary pin or no-build policy.
+make -C "$repo_root" -n build-harn HARN_BIN="$snapshot" HARN_BIN_NO_BUILD=1 \
+  > "$tmp_root/build-harn-dry-run.out"
+if ! grep -Fq "HARN_BIN='' HARN_BIN_NO_BUILD=0 ./scripts/harn_bin.sh --print" \
+  "$tmp_root/build-harn-dry-run.out"; then
+  echo "build-harn did not clear inherited resolver policy before recording freshness" >&2
+  cat "$tmp_root/build-harn-dry-run.out" >&2
+  exit 1
+fi
+if [[ "$(grep -nE 'harn_bin.sh --print|sign_local_macos|record-receipt' \
+      "$tmp_root/build-harn-dry-run.out" | cut -d: -f2- | sed -n '1p')" != *'harn_bin.sh --print'* ]] || \
+   [[ "$(grep -nE 'harn_bin.sh --print|sign_local_macos|record-receipt' \
+      "$tmp_root/build-harn-dry-run.out" | cut -d: -f2- | sed -n '2p')" != *'sign_local_macos'* ]] || \
+   [[ "$(grep -nE 'harn_bin.sh --print|sign_local_macos|record-receipt' \
+      "$tmp_root/build-harn-dry-run.out" | cut -d: -f2- | sed -n '3p')" != *'record-receipt'* ]]; then
+  echo "build-harn did not converge, sign, and then refresh the receipt in order" >&2
+  cat "$tmp_root/build-harn-dry-run.out" >&2
+  exit 1
+fi
+for producer in "$repo_root/scripts/dev_setup.sh" "$repo_root/scripts/release_gate.sh"; do
+  if ! grep -Fq "HARN_BIN='' HARN_BIN_NO_BUILD=0" "$producer"; then
+    echo "canonical receipt producer does not clear inherited HARN_BIN: $producer" >&2
+    exit 1
+  fi
+done
+
+# Return to hermetic fake-Cargo policy probes after the production-shaped
+# fixture releases its real shared lease.
+export HARN_CARGO_LEASE_MODE=off
 missing_target="$tmp_root/missing-target"
 : > "$record"
 if CARGO_TARGET_DIR="$missing_target" \
@@ -322,7 +962,7 @@ if [[ "$status" -ne 17 ]]; then
   cat "$tmp_root/ordinary-failure.err" >&2
   exit 1
 fi
-if [[ "$(grep -Fc 'args=run --quiet --bin harn -- __internal-executable-path' "$record")" -ne 1 ]]; then
+if [[ "$(grep -Fc "$probe_args" "$record")" -ne 1 ]]; then
   echo "ordinary Cargo failure was retried" >&2
   cat "$record" >&2
   exit 1
@@ -353,7 +993,7 @@ if [[ "$exit_code" -ne 124 ]]; then
   cat "$tmp_root/default-timeout.err" >&2
   exit 1
 fi
-if [[ "$(grep -Fc 'args=run --quiet --bin harn -- __internal-executable-path' "$record")" -ne 1 ]]; then
+if [[ "$(grep -Fc "$probe_args" "$record")" -ne 1 ]]; then
   echo "compiler-wrapper timeout amplified contention with another Cargo probe" >&2
   cat "$record" >&2
   exit 1
@@ -392,7 +1032,7 @@ if ! grep -Fq "retrying Cargo harn binary probe with the compiler wrapper disabl
   cat "$tmp_root/timeout-recovery.err" >&2
   exit 1
 fi
-if [[ "$(grep -Fc 'args=run --quiet --bin harn -- __internal-executable-path' "$record")" -ne 2 ]]; then
+if [[ "$(grep -Fc "$probe_args" "$record")" -ne 2 ]]; then
   echo "compiler-wrapper timeout did not run exactly one retry" >&2
   cat "$record" >&2
   exit 1
@@ -446,7 +1086,7 @@ if [[ "$(grep -Fc 'hint: to reuse a binary you already built:' "$tmp_root/retry-
   cat "$tmp_root/retry-timeout.err" >&2
   exit 1
 fi
-if [[ "$(grep -Fc 'args=run --quiet --bin harn -- __internal-executable-path' "$record")" -ne 2 ]]; then
+if [[ "$(grep -Fc "$probe_args" "$record")" -ne 2 ]]; then
   echo "wrapper-disabled retry timeout did not run exactly two probes" >&2
   cat "$record" >&2
   exit 1

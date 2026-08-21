@@ -182,14 +182,18 @@ configure-merge-drivers:
 # truth: scripts/sign_local_macos.sh.
 build:
 	$(HARN_CARGO_CMD) build
+	@HARN_BIN='' HARN_BIN_NO_BUILD=0 ./scripts/harn_bin.sh --print >/dev/null
 	@HARN_LOCAL_SIGN_QUIET=1 ./scripts/sign_local_macos.sh
+	@HARN_BIN='' ./scripts/harn_bin.sh --record-receipt
 
 # Focused canonical CLI build for product-path iteration. This retains the
 # worktree target isolation and signing contract without compiling unrelated
 # workspace binaries.
 build-harn:
 	$(HARN_CARGO_CMD) build -p harn-cli --bin harn
+	@HARN_BIN='' HARN_BIN_NO_BUILD=0 ./scripts/harn_bin.sh --print >/dev/null
 	@HARN_LOCAL_SIGN_QUIET=1 ./scripts/sign_local_macos.sh
+	@HARN_BIN='' ./scripts/harn_bin.sh --record-receipt
 
 build-release:
 	$(HARN_CARGO_CMD) build --release
@@ -199,7 +203,9 @@ build-release:
 # pulling, switching worktrees, or any path that touched target/ without
 # going through `make build` (e.g. `cargo run` with sccache).
 sign-local:
+	@HARN_BIN='' HARN_BIN_NO_BUILD=0 ./scripts/harn_bin.sh --print >/dev/null
 	./scripts/sign_local_macos.sh
+	@HARN_BIN='' ./scripts/harn_bin.sh --record-receipt
 
 # Format all code
 fmt: fmt-app-host
@@ -223,6 +229,8 @@ check-app-host:
 # Run clippy lints (deny warnings in CI)
 lint: lint-no-rust-prompt-prose lint-no-xfail-regression
 	$(HARN_CARGO_CMD) clippy --workspace --all-targets -- -D warnings
+	$(HARN_CARGO_CMD) clippy -p harn-cli --bin harn-freshness-check \
+		--features internal-freshness-checker -- -D warnings
 
 # Detect unused workspace dependencies. cargo-machete is fast and good enough
 # for CI; false positives can be silenced via [package.metadata.cargo-machete]

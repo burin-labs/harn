@@ -16,13 +16,16 @@ case "${HARN_BIN_NO_BUILD:-0}" in
     ;;
 esac
 print_only=0
+record_receipt_only=0
 
 usage() {
   cat <<'EOF'
-usage: scripts/harn_bin.sh [--print] [--no-build] [--] [harn args...]
+usage: scripts/harn_bin.sh [--print] [--no-build] [--record-receipt] [--] [harn args...]
 
 Resolves a worktree harn binary through Cargo unless HARN_BIN is explicit. With
-command arguments, executes the resolved binary.
+command arguments, executes the resolved binary. No-build auto-resolution
+requires the Cargo dependency and Git content receipt written by a successful
+build-mode resolution; explicit HARN_BIN remains a caller-owned exact pin.
 
 Environment:
   HARN_BIN           explicit executable to validate and use; the resolved path
@@ -44,6 +47,10 @@ while [[ $# -gt 0 ]]; do
       mode="no-build"
       shift
       ;;
+    --record-receipt)
+      record_receipt_only=1
+      shift
+      ;;
     --)
       shift
       break
@@ -57,6 +64,23 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+if [[ "$record_receipt_only" = "1" ]]; then
+  if [[ "$print_only" = "1" || $# -ne 0 ]]; then
+    echo "error: --record-receipt does not accept --print or harn arguments" >&2
+    exit 2
+  fi
+  # This producer intentionally ignores an inherited explicit HARN_BIN. A
+  # receipt is proof for the canonical worktree artifact, never a caller-owned
+  # pin. Recording still fails closed unless compiled provenance matches the
+  # current Git and Cargo dependency identities.
+  if [[ -z "${CARGO_TARGET_DIR:-}" ]]; then
+    harn_refresh_cargo_target_dir_cache >/dev/null
+  fi
+  bin="$(harn_debug_binary_path)"
+  harn_record_binary_freshness "$bin"
+  exit 0
+fi
 
 bin="$(harn_resolve_binary "$mode")"
 if [[ "$print_only" = "1" ]]; then

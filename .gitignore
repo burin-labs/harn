@@ -2,6 +2,7 @@
 /target/
 .target-*/
 .cargo/config.toml
+.cargo/harn-target-dir
 
 # Local environment and machine-specific files.
 .env

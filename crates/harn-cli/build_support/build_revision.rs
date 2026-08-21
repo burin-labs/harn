@@ -1,7 +1,9 @@
 const BUILD_REVISION_ENV: &str = "HARN_BUILD_REVISION";
+const BUILD_FRESHNESS_ENV: &str = "HARN_BUILD_FRESHNESS_ID";
 
 pub fn emit() {
     println!("cargo:rerun-if-env-changed={BUILD_REVISION_ENV}");
+    println!("cargo:rerun-if-env-changed={BUILD_FRESHNESS_ENV}");
 
     let raw = std::env::var(BUILD_REVISION_ENV).ok();
     let revision = normalize(raw.as_deref())
@@ -9,6 +11,13 @@ pub fn emit() {
     println!(
         "cargo:rustc-env={BUILD_REVISION_ENV}={}",
         revision.unwrap_or_default()
+    );
+    let raw_freshness = std::env::var(BUILD_FRESHNESS_ENV).ok();
+    let freshness = normalize(raw_freshness.as_deref())
+        .unwrap_or_else(|message| panic!("{BUILD_FRESHNESS_ENV} {message}"));
+    println!(
+        "cargo:rustc-env={BUILD_FRESHNESS_ENV}={}",
+        freshness.unwrap_or_default()
     );
 }
 

@@ -27,19 +27,50 @@ case "$*" in
     cat > "$CARGO_TARGET_DIR/debug/harn" <<'BIN'
 #!/usr/bin/env bash
 set -euo pipefail
+if [[ "${1:-}" = "__internal-freshness-evidence-v4" ]]; then
+  if [[ -n "${7:-}" ]]; then printf "harn-freshness-manifest-v2\n" >"$7"; fi
+  binary_hash="$(git hash-object --no-filters -- "$3")000000000000000000000000"
+  dep_hash="$(git hash-object --no-filters -- "$2")000000000000000000000000"
+  printf 'harn-artifact-evidence-v4-depfile-0.1.1-manifest-2\nbuild-freshness=%s\nbuild-id=%s\nartifact-stat=%s\ndep-info=%s\ndependencies=%s\n' \
+    "$(cat "$3.build-freshness")" "$binary_hash" "$binary_hash" \
+    "$dep_hash" "$dep_hash"
+  exit 0
+fi
 printf '%s\n' "$*" >> "$FAKE_HARN_RECORD"
 BIN
     chmod +x "$CARGO_TARGET_DIR/debug/harn"
+    printf '%s\n' "${HARN_BUILD_FRESHNESS_ID:?}" \
+      > "$CARGO_TARGET_DIR/debug/harn.build-freshness"
+    escaped_harn="${CARGO_TARGET_DIR// /\\ }/debug/harn"
+    printf '%s:\n' "$escaped_harn" > "$CARGO_TARGET_DIR/debug/harn.d"
     ;;
-  "run --quiet --bin harn -- __internal-executable-path")
+  "build --quiet --bin harn --bin harn-freshness-check --features internal-freshness-checker")
     mkdir -p "${CARGO_TARGET_DIR:?}/debug"
     cat > "$CARGO_TARGET_DIR/debug/harn" <<'BIN'
 #!/usr/bin/env bash
 set -euo pipefail
+if [[ "${1:-}" = "__internal-freshness-evidence-v4" ]]; then
+  if [[ -n "${7:-}" ]]; then printf "harn-freshness-manifest-v2\n" >"$7"; fi
+  binary_hash="$(git hash-object --no-filters -- "$3")000000000000000000000000"
+  dep_hash="$(git hash-object --no-filters -- "$2")000000000000000000000000"
+  printf 'harn-artifact-evidence-v4-depfile-0.1.1-manifest-2\nbuild-freshness=%s\nbuild-id=%s\nartifact-stat=%s\ndep-info=%s\ndependencies=%s\n' \
+    "$(cat "$3.build-freshness")" "$binary_hash" "$binary_hash" \
+    "$dep_hash" "$dep_hash"
+  exit 0
+fi
+if [[ "${1:-}" = "__internal-executable-path" ]]; then
+  printf '%s\n' "$0"
+  exit 0
+fi
 printf '%s\n' "$*" >> "$FAKE_HARN_RECORD"
 BIN
     chmod +x "$CARGO_TARGET_DIR/debug/harn"
-    printf '%s\n' "$CARGO_TARGET_DIR/debug/harn"
+    cp "$FAKE_FRESHNESS_CHECKER" "$CARGO_TARGET_DIR/debug/harn-freshness-check"
+    chmod +x "$CARGO_TARGET_DIR/debug/harn-freshness-check"
+    printf '%s\n' "${HARN_BUILD_FRESHNESS_ID:?}" \
+      > "$CARGO_TARGET_DIR/debug/harn.build-freshness"
+    escaped_harn="${CARGO_TARGET_DIR// /\\ }/debug/harn"
+    printf '%s:\n' "$escaped_harn" > "$CARGO_TARGET_DIR/debug/harn.d"
     ;;
   "metadata --format-version=1 --no-deps")
     printf '{"target_directory":"%s"}\n' "$CARGO_TARGET_DIR"
@@ -51,16 +82,28 @@ BIN
 esac
 SH
 chmod +x "$fake_bin/cargo"
+export FAKE_FRESHNESS_CHECKER="$repo_root/scripts/tests/fixtures/harn_bin/fake_freshness_checker.sh"
 # Resolver tests below own both the explicit binary and build policy. Clear the
 # pair so callers that intentionally reuse a prebuilt Harn binary cannot change
 # the fake-Cargo path under test.
 unset HARN_BIN HARN_BIN_NO_BUILD
+export HARN_CARGO_LEASE_MODE=off
 
 hook_repo="$tmp_root/hook-repo"
 mkdir -p "$hook_repo/.githooks" "$hook_repo/scripts/lib"
 cp "$repo_root/.githooks/lib.sh" "$hook_repo/.githooks/lib.sh"
 cp "$repo_root/scripts/lib/cargo_env.sh" "$hook_repo/scripts/lib/cargo_env.sh"
+cp "$repo_root/scripts/lib/harn_bin.sh" "$hook_repo/scripts/lib/harn_bin.sh"
+cp "$repo_root/scripts/lib/harn_bin_freshness.sh" \
+  "$hook_repo/scripts/lib/harn_bin_freshness.sh"
+cp "$repo_root/scripts/harn_bin.sh" "$hook_repo/scripts/harn_bin.sh"
+cp "$repo_root/scripts/cargo_with_worktree_build_dir.sh" \
+  "$hook_repo/scripts/cargo_with_worktree_build_dir.sh"
 git -C "$hook_repo" init --quiet
+git -C "$hook_repo" config user.name 'Harn Hook Test'
+git -C "$hook_repo" config user.email 'harn-hook-test@example.invalid'
+git -C "$hook_repo" add .githooks scripts
+git -C "$hook_repo" commit -qm fixture
 
 (
   cd "$hook_repo"
@@ -80,8 +123,8 @@ if [[ "$(cat "$tmp_root/hook-harn-path.txt")" != "$target_dir/debug/harn" ]]; th
   exit 1
 fi
 
-if ! grep -Fxq "args=build --quiet --bin harn" "$record"; then
-  echo "hook_ensure_harn did not build the harn binary" >&2
+if ! grep -Fxq "args=build --quiet --bin harn --bin harn-freshness-check --features internal-freshness-checker" "$record"; then
+  echo "hook_ensure_harn did not resolve the harn binary through the exact wrapper" >&2
   cat "$record" >&2
   exit 1
 fi
@@ -128,29 +171,15 @@ if [[ "$(cat "$tmp_root/fresh-hook-harn-path.txt")" != "$target_dir/debug/harn" 
   cat "$tmp_root/fresh-hook-harn-path.txt" >&2
   exit 1
 fi
-if ! grep -Fxq "args=build --quiet --bin harn" "$record"; then
-  echo "hook_export_fresh_worktree_harn_bin did not build a fresh harn binary" >&2
-  cat "$record" >&2
-  exit 1
-fi
-if ! grep -Fxq "CARGO_BUILD_BUILD_DIR=$target_dir" "$record"; then
-  echo "hook_export_fresh_worktree_harn_bin did not reuse CARGO_TARGET_DIR for Cargo intermediates" >&2
-  cat "$record" >&2
-  exit 1
-fi
-if ! grep -Fxq "RUSTC_WRAPPER=" "$record"; then
-  echo "hook_export_fresh_worktree_harn_bin did not clear RUSTC_WRAPPER" >&2
-  cat "$record" >&2
-  exit 1
-fi
-if ! grep -Fxq "CARGO_BUILD_RUSTC_WRAPPER=" "$record"; then
-  echo "hook_export_fresh_worktree_harn_bin did not clear CARGO_BUILD_RUSTC_WRAPPER" >&2
+if [[ -s "$record" ]]; then
+  echo "hook_export_fresh_worktree_harn_bin rebuilt despite an exact fresh receipt" >&2
   cat "$record" >&2
   exit 1
 fi
 
 : > "$record"
 custom_build_dir="$tmp_root/custom build dir"
+rm -f "$target_dir/debug/harn.freshness"
 (
   cd "$hook_repo"
   # shellcheck source=/dev/null
@@ -185,8 +214,8 @@ RUSTC_WRAPPER=sccache \
   PATH="$fake_bin:$PATH" \
   "$repo_root/scripts/check_no_rust_prompt_prose.sh"
 
-if [[ "$(grep -c '^args=run --quiet --bin harn -- __internal-executable-path$' "$record")" -ne 1 ]]; then
-  echo "check_no_rust_prompt_prose did not resolve harn through cargo run exactly once" >&2
+if [[ "$(grep -c '^args=build --quiet --bin harn --bin harn-freshness-check --features internal-freshness-checker$' "$record")" -ne 1 ]]; then
+  echo "check_no_rust_prompt_prose did not resolve harn through Cargo exactly once" >&2
   cat "$record" >&2
   exit 1
 fi

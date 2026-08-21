@@ -36,6 +36,11 @@ include = [
 name = "harn"
 path = "src/main.rs"
 
+[[bin]]
+name = "harn-freshness-check"
+path = "src/bin/harn-freshness-check.rs"
+required-features = ["internal-freshness-checker"]
+
 [dependencies]
 # `name` is needed for model-id pattern matching; harn-vm already enables it,
 # so this costs no additional build.
@@ -102,6 +107,17 @@ notify = "8"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "blocking", "stream"] }
 futures = "0.3"
 blake3 = "1.8.7"
+# Read the linker-owned ELF build-id, Mach-O LC_UUID, or Windows CodeView
+# GUID/age from the running artifact. This identifies stale/copy-substituted
+# builds in O(1) without hashing a 400+ MiB debug executable on every check.
+buildid = "=1.0.5"
+# Cargo/rustc dep-info is Make syntax. Keep its grammar in one small typed
+# dependency instead of reimplementing escaping and Windows drive-path rules in
+# shell. This crate is intentionally exact-pinned; bootstrap.rs wraps its broad
+# API with Harn's stricter single-target freshness contract. Its full 0.1.1
+# source was audited at adoption; sparse one-commit upstream maintenance is the
+# explicit residual, contained by the pin, wrapper, and Harn's own fixtures.
+depfile = "=0.1.1"
 sha2 = "0.11"
 # POSIX-correct argv quoting for every emitted shell command line. Hand-rolled
 # quoters disagreed on the safe-character set and dropped empty arguments.
@@ -143,6 +159,16 @@ arcstr = { version = "1", features = ["serde", "std"] }
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
+[target.'cfg(windows)'.dependencies]
+# Stable Rust metadata omits NTFS ChangeTime. The freshness checker queries it
+# through the owning OS API so same-size edits with restored write times cannot
+# evade content re-hashing on Windows.
+windows-sys = { version = "0.61.2", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Storage_FileSystem",
+] }
+
 # The build script validates and embeds an optional package-local CLI AOT
 # payload. Compilation happens in the normal dependency graph through
 # `harn-cli-aot-gen`, keeping harn-vm out of Cargo's resolver-isolated
@@ -154,6 +180,11 @@ sha2 = "0.11"
 
 [features]
 default = ["hostlib", "mimalloc"]
+# Private worktree bootstrap target. Keeping this off the default feature set
+# prevents `cargo install harn-cli` from projecting an implementation-detail
+# executable into users' PATH; scripts/harn_bin.sh builds and signs it beside
+# the canonical debug binary when it writes a no-build freshness receipt.
+internal-freshness-checker = []
 # Link mimalloc as the global allocator for the `harn` binary (see the
 # dependency note above). Default-on; disable with `--no-default-features`
 # to fall back to the system allocator.

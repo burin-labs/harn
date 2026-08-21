@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# This suite owns fake Cargo behavior, not shared rust-heavy scheduling.
+export HARN_CARGO_LEASE_MODE=off
+
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 tmp_root=$(mktemp -d)
 trap 'rm -rf "$tmp_root"' EXIT
@@ -11,7 +14,10 @@ fake_bin="$tmp_root/fake bin"
 mkdir -p "$release_root" "$release_tools/lib" "$fake_bin"
 cp "$repo_root/scripts/release_gate.sh" "$release_tools/release_gate.sh"
 cp "$repo_root/scripts/harn_bin.sh" "$release_tools/harn_bin.sh"
+cp "$repo_root/scripts/cargo_with_worktree_build_dir.sh" \
+  "$release_tools/cargo_with_worktree_build_dir.sh"
 cp -R "$repo_root/scripts/lib/." "$release_tools/lib/"
+chmod +x "$release_tools/cargo_with_worktree_build_dir.sh"
 
 cat > "$release_root/Cargo.toml" <<'EOF'
 [workspace]
@@ -31,6 +37,19 @@ fake_harn="$fake_bin/harn"
 cat > "$fake_harn" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
+if [[ "${1:-}" == "__internal-freshness-evidence-v4" ]]; then
+  if [[ -n "${7:-}" ]]; then printf "harn-freshness-manifest-v2\n" >"$7"; fi
+  binary_hash="$(git hash-object --no-filters -- "$3")000000000000000000000000"
+  dep_hash="$(git hash-object --no-filters -- "$2")000000000000000000000000"
+  printf 'harn-artifact-evidence-v4-depfile-0.1.1-manifest-2\nbuild-freshness=%s\nbuild-id=%s\nartifact-stat=%s\ndep-info=%s\ndependencies=%s\n' \
+    "$(cat "$3.build-freshness")" "$binary_hash" "$binary_hash" \
+    "$dep_hash" "$dep_hash"
+  exit 0
+fi
+if [[ "${1:-}" == "__internal-executable-path" ]]; then
+  printf '%s\n' "$0"
+  exit 0
+fi
 if [[ "${1:-}" == "run" && "${2:-}" == "scripts/release_audit_contract.harn" ]]; then
   printf 'meta\tfalse\ttest\n'
   case "${FAKE_AUDIT_LANE:-security}" in
@@ -131,8 +150,30 @@ case "${1:-}" in
       exit 101
     fi
     mkdir -p "$CARGO_TARGET_DIR/debug"
-    cp "$HARN_BIN" "$CARGO_TARGET_DIR/debug/harn"
+    cp "${0%/*}/harn" "$CARGO_TARGET_DIR/debug/harn"
     chmod +x "$CARGO_TARGET_DIR/debug/harn"
+    if [[ "$*" == *"--bin harn-freshness-check"* ]]; then
+      cp "${0%/*}/harn-freshness-check" "$CARGO_TARGET_DIR/debug/harn-freshness-check"
+      chmod +x "$CARGO_TARGET_DIR/debug/harn-freshness-check"
+    fi
+    cp "$CARGO_TARGET_DIR/debug/harn" "$CARGO_TARGET_DIR/debug/harn.fixture-template"
+    escaped_harn="${CARGO_TARGET_DIR// /\\ }/debug/harn"
+    printf '%s:\n' "$escaped_harn" > "$CARGO_TARGET_DIR/debug/harn.d"
+    printf '%s\n' "${HARN_BUILD_FRESHNESS_ID:-0000000000000000000000000000000000000000}" \
+      > "$CARGO_TARGET_DIR/debug/harn.build-freshness"
+    ;;
+  run)
+    if [[ "$*" != "run --quiet --bin harn -- __internal-executable-path" ]]; then
+      echo "unexpected fake cargo invocation: $*" >&2
+      exit 2
+    fi
+    if [[ ! -x "$CARGO_TARGET_DIR/debug/harn" ]]; then
+      cp "$CARGO_TARGET_DIR/debug/harn.fixture-template" "$CARGO_TARGET_DIR/debug/harn"
+      chmod +x "$CARGO_TARGET_DIR/debug/harn"
+    fi
+    printf '%s\n' "${HARN_BUILD_FRESHNESS_ID:?}" \
+      > "$CARGO_TARGET_DIR/debug/harn.build-freshness"
+    printf '%s/debug/harn\n' "$CARGO_TARGET_DIR"
     ;;
   clean)
     if [[ -n "${FAKE_CARGO_ENV_RECORD:-}" ]]; then
@@ -156,6 +197,9 @@ case "${1:-}" in
 esac
 SH
 chmod +x "$fake_bin/cargo"
+cp "$repo_root/scripts/tests/fixtures/harn_bin/fake_freshness_checker.sh" \
+  "$fake_bin/harn-freshness-check"
+chmod +x "$fake_bin/harn-freshness-check"
 
 cat > "$fake_bin/cargo-nextest" <<'SH'
 #!/usr/bin/env bash
@@ -293,6 +337,7 @@ assert_failed_without_recovery() {
 success_state=$(run_case success stale-then-success)
 if [[ "$(<"$success_state/status")" -ne 0 ]]; then
   cat "$success_state/output" >&2
+  cat "$success_state/cargo-record" >&2
   exit 1
 fi
 if [[ "$(grep -c '^build -p harn-cli --bin harn --quiet$' "$success_state/cargo-record")" -ne 2 ]]; then
