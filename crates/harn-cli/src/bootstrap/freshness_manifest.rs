@@ -342,6 +342,12 @@ pub(super) fn verify_manifest(path: &Path) -> Result<Verification, String> {
                     let mut content_buffer = vec![0_u8; 1024 * 1024];
                     for (entry_path, recorded_kind, recorded_stat, recorded_content) in chunk {
                         let (current_kind, current_stat, metadata) = inspect(entry_path)?;
+                        if *recorded_kind == EntryKind::Missing {
+                            if current_kind == EntryKind::Missing {
+                                continue;
+                            }
+                            return Ok(Verification::InventoryChanged(entry_path.clone()));
+                        }
                         if current_kind != *recorded_kind {
                             return Err(format!(
                                 "manifest input type changed: {}",
@@ -352,9 +358,6 @@ pub(super) fn verify_manifest(path: &Path) -> Result<Verification, String> {
                             if current_stat != *recorded_stat {
                                 return Ok(Verification::InventoryChanged(entry_path.clone()));
                             }
-                            continue;
-                        }
-                        if *recorded_kind == EntryKind::Missing {
                             continue;
                         }
                         if content_identity(
@@ -759,10 +762,14 @@ mod tests {
 
         let restored = root.join("deleted.harn");
         fs::write(&restored, b"restored").unwrap();
-        assert!(matches!(
-            verify_manifest(&manifest),
-            Ok(Verification::InventoryChanged(path)) if path == *root || path == restored
-        ));
+        let verification = verify_manifest(&manifest);
+        assert!(
+            matches!(
+                &verification,
+                Ok(Verification::InventoryChanged(path)) if path == root || path == &restored
+            ),
+            "unexpected verification result: {verification:?}"
+        );
     }
 
     #[cfg(unix)]
