@@ -188,3 +188,16 @@ pub fn llm_response_is_billed_empty(response) -> bool {
 pub fn llm_response_is_truncated(response) -> bool {
   return __envelope_outcome_kind(response) == "truncated"
 }
+
+pub fn llm_failure_exhausted_request_deadline(envelope) -> bool {
+  if type_of(envelope) != "dict" || (envelope?.ok ?? false) {
+    return false
+  }
+  const error = envelope?.error
+  if type_of(error) != "dict" {
+    return false
+  }
+  return to_string(error?.source ?? "") == "provider_stream"
+    && to_string(error?.deadline ?? "")
+    == "total"
+}

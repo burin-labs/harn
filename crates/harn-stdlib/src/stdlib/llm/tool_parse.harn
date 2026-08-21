@@ -6,6 +6,7 @@
  * prose, canonical replay, and the rule that every consumed non-call is
  * recorded as dropped.
  */
+import { tool_call_shape, tool_call_syntax_named } from "std/llm/call_shape"
 import {
   BACKTICK_FENCE,
   TAGGED_DIALECT,
@@ -340,9 +341,11 @@ fn __tool_parse_markup_unit(unit, tools, state: dict) -> dict {
           "Tool call `"
             + name
             + "` was emitted as chat-template function markup instead of "
-            + "`<tool_call>"
-            + name
-            + "({ ... })</tool_call>`. Recovered this turn so work moves forward; "
+            + tool_call_syntax_named(
+            to_string(state?.tool_format ?? ""),
+            name,
+          )
+            + ". Recovered this turn so work moves forward; "
             + "emit the canonical form on subsequent turns.",
         ),
       ),
@@ -617,7 +620,7 @@ fn __tool_parse_recover_fenced_calls(blocks: list<string>, tools, state: dict) -
   }
 }
 
-fn __tool_parse_tagged(text: string, tools) -> dict {
+fn __tool_parse_tagged(text: string, tools, tool_format = "") -> dict {
   const provider_dialect = parse_provider_dialect(text, tools)
   if provider_dialect != nil {
     return provider_dialect
@@ -637,8 +640,8 @@ fn __tool_parse_tagged(text: string, tools) -> dict {
   // tag-shaped and the stray scan has nothing to say about it.
   if alternate_at > 0 && tagged_at >= 0 && tagged_at < alternate_at {
     return __tool_parse_join(
-      __tool_parse_tagged(text.slice(0, alternate_at), tools),
-      __tool_parse_tagged(text.slice(alternate_at, len(text)), tools),
+      __tool_parse_tagged(text.slice(0, alternate_at), tools, tool_format),
+      __tool_parse_tagged(text.slice(alternate_at, len(text)), tools, tool_format),
     )
   }
   if tagged_at < 0 || (alternate_at >= 0 && alternate_at < tagged_at) {
@@ -651,7 +654,7 @@ fn __tool_parse_tagged(text: string, tools) -> dict {
       > 0 {
       const recovered = __tool_parse_envelope_remainder(
         envelope,
-        fn(part) { return __tool_parse_tagged(part, tools) },
+        fn(part) { return __tool_parse_tagged(part, tools, tool_format) },
       )
       // The envelope phrases its violation for the fenced grammar because that
       // is the pin it was written for. Say it in this lane's own vocabulary.
@@ -661,7 +664,10 @@ fn __tool_parse_tagged(text: string, tools) -> dict {
           protocol_violation(
             "recovered_dialect",
             "Recovered a tool call from a chat-template envelope. Emit each call as "
-              + "`<tool_call>name({ ... })</tool_call>` next turn.",
+              + tool_call_shape(
+              tool_format,
+            ).call_syntax
+              + " next turn.",
           ),
         ],
       }
@@ -769,6 +775,7 @@ fn __tool_parse_tagged(text: string, tools) -> dict {
         recovered: recovered,
         pending_response: pending_response,
         unclosed_response_prose: unclosed_response_prose,
+        tool_format: tool_format,
       },
       candidates,
     )
@@ -957,7 +964,7 @@ fn __tool_parse_json(text: string, tools = nil, recover_heredoc = true) -> dict 
     // turn parsed 1 fenced call, 0 heredoc calls, and 0 errors — a silent total
     // drop of exactly the grammar most open-weight models reach for. The two
     // grammars are mutually unambiguous, so forgiving one costs no soundness.
-    const recovered = __tool_parse_tagged(text, tools)
+    const recovered = __tool_parse_tagged(text, tools, "json")
     const violation = protocol_violation(
       "recovered_dialect",
       "Recovered `<tool_call>...</tool_call>` markup while `tool_format` is `json`; "
@@ -1136,7 +1143,7 @@ fn __tool_parse_sibling_recovery(text: string, tools, format: string, pinned: di
   const sibling = if text_to_json {
     __tool_parse_json(text, tools, false)
   } else {
-    __tool_parse_tagged(text, tools)
+    __tool_parse_tagged(text, tools, format)
   }
   if len(sibling?.calls ?? []) == 0 {
     return pinned
@@ -1195,9 +1202,9 @@ pub fn parse_tool_calls(payload: dict) -> dict {
   const pinned = if format == "json" {
     __tool_parse_json(text, payload?.tools)
   } else {
-    __tool_parse_tagged(text, payload?.tools)
+    __tool_parse_tagged(text, payload?.tools, format)
   }
   const parsed = __tool_parse_sibling_recovery(text, payload?.tools, format, pinned)
-  const unparsed = tool_shape_violations(tool_shape_findings(parsed?.dropped ?? []))
+  const unparsed = tool_shape_violations(tool_shape_findings(parsed?.dropped ?? []), format)
   return parsed + {protocol_violations: (parsed?.protocol_violations ?? []) + unparsed}
 }

@@ -1214,6 +1214,18 @@ impl AgentEventSink for AcpAgentEventSink {
                 session_id,
                 ext_payloads::missing_tool_call_verdict(event),
             ),
+            AgentEvent::RepairOutputContractApplied {
+                session_id,
+                iteration,
+                tool_count,
+            } => self.emit_agent_event_ext(
+                "repair_output_contract_applied",
+                session_id,
+                serde_json::json!({
+                    "iteration": iteration,
+                    "toolCount": tool_count,
+                }),
+            ),
             AgentEvent::SubagentJoin { .. }
             | AgentEvent::SubagentStop { .. }
             | AgentEvent::RequireSuccessfulToolsViolation { .. }

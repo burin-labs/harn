@@ -143,6 +143,7 @@ const HOST_EVENT_POLICIES: &[HostEventPolicy] = &[
     host_event("fenced_call_attempt_nudge", None),
     host_event("malformed_call_markup_nudge", None),
     host_event("missing_tool_call_nudge", None),
+    host_event("repair_output_contract_applied", None),
     host_event("no_progress_streak_nudge", None),
     host_event("tool_call_blank_name_dropped", None),
     host_event("llm_auto_continue", None),

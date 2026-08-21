@@ -451,15 +451,23 @@ fn __sv_param_is_required(parameters, name, schema) -> bool {
 }
 
 /**
- * The argument skeleton to show when asking a model to emit a call it
- * described but never sent.
+ * The names of a tool's REQUIRED parameters, for the corrective that asks a
+ * model to emit a call it described but never sent.
  *
- * Returns `[{key, value}]` for the tool's REQUIRED parameters, each value a
- * type placeholder (`<string>`) rather than a plausible literal, so a model
- * that copies the exemplar verbatim produces an obviously unfilled call rather
- * than a confidently wrong one. Empty for an unknown tool or one with no
- * required arguments, which renders a bare call — correct for a zero-argument
- * tool.
+ * Names only, never values. An earlier form of this returned `[{key, value}]`
+ * with a type placeholder for each value (`"<string>"`), on the theory that a
+ * model copying the exemplar verbatim would produce an obviously unfilled call.
+ * It does not: live smoke showed a model copy `"<string>"` into the repair call
+ * and then into every subsequent call for the rest of the session, filling
+ * optional parameters it had never used before with the same token. A
+ * placeholder inside a JSON string is indistinguishable from a value, so the
+ * only safe exemplar is one that carries no values at all — the corrective
+ * renders the bare call envelope and names the required keys in prose.
+ *
+ * Empty for an unknown tool, a tool that declares no parameters, and a tool
+ * whose parameters are all optional. Underscore-prefixed parameters are the
+ * harness's to fill rather than the model's, but a REQUIRED one still has to
+ * be sent, so it is still named.
  *
  * This lives beside the parameter readers because this module already owns the
  * shape tolerance for a tool entry's parameters: JSON-schema
@@ -471,20 +479,42 @@ fn __sv_param_is_required(parameters, name, schema) -> bool {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn tool_required_argument_exemplar(registry, tool_name) -> list {
+pub fn tool_required_argument_names(registry, tool_name) -> list<string> {
   const entry = __sv_registry_tool_entry(registry, __sv_string(tool_name))
   if entry == nil {
     return []
   }
   const parameters = __sv_tool_entry_parameters(entry)
   const entries = __sv_parameter_entries(parameters)
-  let out = []
+  let out: list<string> = []
   for name in __sv_dict(entries).keys() {
-    const schema = entries[name]
-    if !__sv_param_is_required(parameters, name, schema) {
-      continue
+    if __sv_param_is_required(parameters, name, entries[name]) {
+      out = out.appending(name)
     }
-    const types = __sv_schema_type_names(schema)
+  }
+  return out
+}
+
+/**
+ * Compatibility projection for embedders that consumed the former exemplar
+ * helper. New model-facing code must use `tool_required_argument_names` and
+ * keep placeholder values out of the call envelope; this function preserves
+ * the published experimental API without making it a second owner of which
+ * parameters are required.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn tool_required_argument_exemplar(registry, tool_name) -> list {
+  const entry = __sv_registry_tool_entry(registry, __sv_string(tool_name))
+  if entry == nil {
+    return []
+  }
+  const entries = __sv_parameter_entries(__sv_tool_entry_parameters(entry))
+  let out = []
+  for name in tool_required_argument_names(registry, tool_name) {
+    const types = __sv_schema_type_names(entries[name])
     const placeholder = if len(types) > 0 {
       "<" + types[0] + ">"
     } else {
@@ -493,6 +523,177 @@ pub fn tool_required_argument_exemplar(registry, tool_name) -> list {
     out = out.appending({key: name, value: placeholder})
   }
   return out
+}
+
+/**
+ * The output schema that makes a turn's completion a single parseable tool
+ * call and nothing else.
+ *
+ * Projects the registry into a JSON Schema for the flat call envelope the
+ * text parser already accepts, keyed with the CANONICAL argument alias
+ * (`{"name": .., "args": {..}}`) so the forced completion matches the shape
+ * every standing prompt and corrective teaches, one `anyOf` branch per tool:
+ * `name` is pinned to that tool and `args` must carry the tool's REQUIRED
+ * parameter keys (live smoke evidence: with an open arguments object the
+ * model lazily emits `{}` and burns a turn re-issuing the call). Argument
+ * values stay shallow — presence is enforced by the grammar, value shape by
+ * the dispatch-time validator that owns it. Internal underscore-prefixed
+ * parameters are the harness's to fill, not the model's to write, so they
+ * are left out of the grammar unless the registry marks one required (live
+ * smoke evidence: an offered `_nl_intent` key is what the model reaches for
+ * under constraint).
+ *
+ * When the corrective claimed the turn for one named tool, `claimed_tool`
+ * narrows the schema to that tool's branch: the claim already told the model
+ * which call to make, and the full `anyOf` lets it wander to a different
+ * tool instead (observed live: a `look` claim answered with a junk `search`).
+ * An empty or unrecognized `claimed_tool` keeps every branch.
+ *
+ * A tool with no model-facing parameters gets a bare `{"type": "object"}` args
+ * branch rather than an empty `properties` object, which llama.cpp's grammar
+ * conversion mishandles in a way that fails the whole request.
+ *
+ * Returns nil for an empty or unreadable registry, in which case no
+ * contract should be applied.
+ *
+ * This lives beside the parameter readers for the same reason as
+ * `tool_required_argument_names`: this module owns the shape tolerance
+ * for tool registry entries, and a second reader would be a second owner of
+ * the same policy.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn tool_call_output_schema(registry, claimed_tool = "") -> any? {
+  const tools = __sv_list(__sv_dict(registry)?.tools)
+  const claimed = trim(__sv_string(claimed_tool))
+  let branches = []
+  let claimed_branch = nil
+  let seen = []
+  for entry in tools {
+    const direct_name = __sv_string(entry?.name)
+    const function = entry?.function
+    const function_name = if type_of(function) == "dict" {
+      __sv_string(function?.name)
+    } else {
+      ""
+    }
+    const name = if direct_name != "" {
+      direct_name
+    } else {
+      function_name
+    }
+    if name == "" || contains(seen, name) {
+      continue
+    }
+    seen = seen.appending(name)
+    const parameters = __sv_tool_entry_parameters(entry)
+    const entries = __sv_parameter_entries(parameters)
+    let props = {}
+    let req = []
+    for pname in __sv_dict(entries).keys() {
+      const schema = entries[pname]
+      const required = __sv_param_is_required(parameters, pname, schema)
+      if starts_with(pname, "_") && !required {
+        continue
+      }
+      props = props + {[pname]: __sv_argument_property_schema(schema)}
+      if required {
+        req = req.appending(pname)
+      }
+    }
+    // A tool with nothing for the model to write gets the bare object type, and
+    // in particular no empty `properties`. llama.cpp's grammar conversion
+    // mishandles `{"type": "object", "properties": {}}` (ggml-org/llama.cpp
+    // #25923) and the malformed production fails the WHOLE combined request,
+    // so one zero-parameter tool in the registry would take every other branch
+    // down with it. Nothing is lost by leaving the keys open here: there are no
+    // enumerated keys to close against, and dispatch still rejects an argument
+    // the tool does not declare.
+    //
+    // Otherwise additionalProperties stays false: llama.cpp's grammar
+    // conversion treats an open object as an arbitrary key-value production,
+    // which is both slow and an invitation to hallucinate argument names; every
+    // accepted key is already enumerated from the registry, which dispatch
+    // validates against.
+    let args_schema = if len(__sv_dict(props).keys()) == 0 {
+      {type: "object"}
+    } else {
+      {type: "object", properties: props, additionalProperties: false}
+    }
+    if len(req) > 0 {
+      args_schema = args_schema + {required: req}
+    }
+    const branch = {
+      type: "object",
+      properties: {name: {type: "string", enum: [name]}, args: args_schema},
+      required: ["name", "args"],
+      additionalProperties: false,
+    }
+    if claimed != "" && name == claimed {
+      claimed_branch = branch
+    }
+    branches = branches.appending(branch)
+  }
+  if claimed_branch != nil {
+    return claimed_branch
+  }
+  if len(branches) == 0 {
+    return nil
+  }
+  if len(branches) == 1 {
+    return branches[0]
+  }
+  return {anyOf: branches}
+}
+
+/**
+ * A deliberately shallow JSON-Schema fragment for one tool argument.
+ *
+ * Only a single unambiguous scalar/container type is projected; anything
+ * richer (unions, nested objects, enums) becomes a permissive `{}` so the
+ * decode grammar never forbids a value the dispatch-time validator would
+ * accept. Constrained emission against a deep union schema is a known
+ * field-dropping hazard on llama.cpp; presence is enforced here, shape is
+ * enforced where it is owned — at dispatch.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+fn __sv_argument_property_schema(schema) -> dict {
+  const types = __sv_schema_type_names(schema)
+  if len(types) != 1 {
+    return {}
+  }
+  const mapped = __sv_json_schema_type_name(types[0])
+  if mapped == "" {
+    return {}
+  }
+  return {type: mapped}
+}
+
+fn __sv_json_schema_type_name(name) -> string {
+  if name == "string" {
+    return "string"
+  }
+  if name == "integer" || name == "int" {
+    return "integer"
+  }
+  if name == "number" || name == "float" {
+    return "number"
+  }
+  if name == "boolean" || name == "bool" {
+    return "boolean"
+  }
+  if name == "array" || name == "list" {
+    return "array"
+  }
+  if name == "object" || name == "dict" {
+    return "object"
+  }
+  return ""
 }
 
 fn __sv_schema_type_names(schema) {

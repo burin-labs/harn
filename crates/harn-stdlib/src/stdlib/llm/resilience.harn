@@ -2,7 +2,10 @@
 //
 // Retry and fallback middleware for the std/llm/handlers facade.
 import { agent_emit_event } from "std/agent/state"
-import { llm_response_is_billed_empty } from "std/llm/envelope"
+import {
+  llm_failure_exhausted_request_deadline,
+  llm_response_is_billed_empty,
+} from "std/llm/envelope"
 import { llm_clear_one_shot_prefill } from "std/llm/options"
 import { http_retry_after_ms } from "std/net"
 
@@ -53,6 +56,9 @@ fn __retry_default_predicate(envelope) {
     // Billed-empty (`outcome: {kind: "empty", billed: true}`) is a transient
     // provider flake: re-dispatch by default (the S2 billed-noncommittal defense).
     return llm_response_is_billed_empty(envelope?.value)
+  }
+  if llm_failure_exhausted_request_deadline(envelope) {
+    return false
   }
   const status = to_string(envelope?.status ?? "")
   const retryable_statuses = [

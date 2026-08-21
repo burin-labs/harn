@@ -15,7 +15,7 @@ import {
 } from "std/agent/tool_surface"
 import { tool_fence_info_opens_call } from "std/llm/dialects"
 import { missing_tool_call_classifier } from "std/llm/missing_tool_call"
-import { tool_required_argument_exemplar } from "std/llm/structural_validator"
+import { tool_required_argument_names } from "std/llm/structural_validator"
 
 fn __default_done_sentinel(opts) {
   return opts?.done_sentinel
@@ -469,6 +469,29 @@ fn __classify_missing_tool_call(
 }
 
 /**
+ * The clause naming a tool's required arguments, or empty when it has none.
+ *
+ * The missing-call corrective says this in prose rather than showing it in the
+ * exemplar, because anything rendered inside the call envelope is a token the
+ * model can copy as if it were a value.
+ */
+fn __required_argument_sentence(tool_name: string, names: list<string>) -> string {
+  if len(names) == 0 {
+    return ""
+  }
+  let rendered = ""
+  for entry in names.enumerate() {
+    const quoted = "`" + entry.value + "`"
+    rendered = if entry.index == 0 {
+      quoted
+    } else {
+      rendered + ", " + quoted
+    }
+  }
+  return " `" + tool_name + "` requires " + rendered + "."
+}
+
+/**
  * Corrective nudges for a toolless turn. Text mode also detects fenced calls;
  * both text and native modes use the same typed missing-tool-call classifier.
  * Native callers invoke this before accepting prose as natural completion.
@@ -574,7 +597,7 @@ fn __maybe_inject_action_nudge(
   const text_family = __text_family_toolless_turn(opts, has_tool_calls, text)
   const native_mode = __native_completion_context(opts, has_tool_calls, text)
   if !text_family && !native_mode {
-    return false
+    return nil
   }
   // The corrective wording renders the taught call syntax from the single
   // format-aware owner, so a `json` lane is told to emit a ```tool block and a
@@ -602,7 +625,9 @@ fn __maybe_inject_action_nudge(
       "fenced_call_attempt_nudge",
       {iteration: iteration, fence: fenced, visible_text_prefix: visible_text_excerpt(text)},
     )
-    return true
+    // The fence nudge claims the turn without naming one call, so the claim
+    // carries no tool.
+    return {tool: ""}
   }
   // An attempted-but-rejected emission is diagnosable from the text alone, so
   // answer it before spending a classifier call on the question "did this turn
@@ -629,7 +654,9 @@ fn __maybe_inject_action_nudge(
       "malformed_call_markup_nudge",
       {iteration: iteration, marker: malformed, visible_text_prefix: visible_text_excerpt(text)},
     )
-    return true
+    // Like the fence nudge above, this claims the turn on the shape of the
+    // text without reading a call out of it, so the claim names no tool.
+    return {tool: ""}
   }
   const missing = __classify_missing_tool_call(agent, llm, session, text, opts, iteration)
   if missing != nil {
@@ -639,18 +666,20 @@ fn __maybe_inject_action_nudge(
         + to_string(tool_name)
         + "` now using the available native tool interface. Do not describe the action again."
     } else {
-      // Show the call with the tool's OWN required argument names, sourced
-      // from the tool entry rather than a template here. An exemplar carrying
-      // an empty argument object is a complete, copy-pasteable call that is
-      // also wrong, and it tells a model nothing about what the call needs.
+      // The exemplar is the bare call envelope and carries no argument values.
+      // It used to carry a type placeholder per required argument; a model
+      // copied that token into the repair call and then into every call for
+      // the rest of the session. Inside a JSON string a placeholder is
+      // indistinguishable from a value, so what the call needs is said in
+      // prose, from the tool's own declared required parameters.
       "Emit the call now: "
-        + agent_render_tool_call_exemplar(
-        llm,
+        + agent_render_tool_call_exemplar(llm, to_string(tool_name), [], opts)
+        + " Fill in the argument values this call needs and leave out the ones it does not."
+        + __required_argument_sentence(
         to_string(tool_name),
-        tool_required_argument_exemplar(opts?.tools, tool_name),
-        opts,
+        tool_required_argument_names(opts?.tools, tool_name),
       )
-        + " (replace each placeholder with a real value). Do not describe the action again."
+        + " Do not describe the action again."
     }
     agent_session_inject_feedback(
       agent,
@@ -674,9 +703,9 @@ fn __maybe_inject_action_nudge(
         visible_text_prefix: visible_text_excerpt(text),
       },
     )
-    return true
+    return {tool: to_string(tool_name)}
   }
-  return false
+  return nil
 }
 
 /**
@@ -688,12 +717,13 @@ fn __maybe_inject_action_nudge(
  * both read it, so a treatment that would cut or redirect a churning turn can
  * see the outstanding claim rather than race it.
  */
-fn __repair_claimed_result() -> dict {
+fn __repair_claimed_result(claimed_tool: string) -> dict {
   return {
     kind: "continue",
     done_judge_due: false,
     nudged_this_turn: true,
     turn_claimed_for_repair: true,
+    claimed_tool_name: claimed_tool,
   }
 }
 
@@ -962,10 +992,10 @@ fn __arbitrate_stalled_toolless_turn(
   const repaired = if loop_continues {
     __maybe_inject_action_nudge(agent, llm, session, opts, false, text, iteration, classifier_only)
   } else {
-    false
+    nil
   }
-  if repaired {
-    return __repair_claimed_result() + __verdict_option_changes(verdict)
+  if repaired != nil {
+    return __repair_claimed_result(repaired.tool ?? "") + __verdict_option_changes(verdict)
   }
   const verdict_result = __post_turn_verdict_result(agent, session, opts, verdict)
   if verdict_result != nil {

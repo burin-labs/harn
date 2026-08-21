@@ -29,6 +29,7 @@
  * says "wrap calls in <tool_call>" carries no body and matches nothing here.
  * Every check below requires an argument-bearing body, not a name.
  */
+import { tool_call_shape } from "std/llm/call_shape"
 import { tool_fence_info_opens_call } from "std/llm/dialects"
 import { ProtocolViolation, protocol_violation } from "std/llm/tool_parse_result"
 
@@ -346,17 +347,30 @@ pub fn tool_shape_findings(dropped: list<DroppedFragment>) -> list<ToolShapeFind
 /**
  * Project structural findings into the shared typed violation contract.
  *
+ * `tool_format` is the turn's pin, and the syntax this teaches comes from
+ * `std/llm/call_shape` rather than from a delimiter written out here. This
+ * corrective fires on every pin — the dropped span is by definition not in the
+ * grammar the turn was parsed with — so a hard-coded form is wrong for every
+ * session on another format. Observed live: this message told a model to emit
+ * `<tool_call>name({ ... })</tool_call>` while every other corrective in the
+ * same session taught a ```tool fenced JSON object.
+ *
  * @effects: []
  * @errors: []
  * @api_stability: experimental
  */
-pub fn tool_shape_violations(findings: list<ToolShapeFinding>) -> list<ProtocolViolation> {
+pub fn tool_shape_violations(
+  findings: list<ToolShapeFinding>,
+  tool_format = "",
+) -> list<ProtocolViolation> {
+  const call_syntax = tool_call_shape(tool_format).call_syntax
   return findings.map(
     fn(finding) { return protocol_violation(
       "unparsed_tool_syntax",
       "unparsed_tool_syntax: text shaped like a tool call was not "
         + "recognized as one and did not run. Emit every call as "
-        + "`<tool_call>name({ ... })</tool_call>`. Unrecognized fragment: "
+        + call_syntax
+        + ". Unrecognized fragment: "
         + finding.excerpt,
       finding.excerpt,
       finding.dropped_reason,
@@ -374,6 +388,8 @@ pub fn tool_shape_violations(findings: list<ToolShapeFinding>) -> list<ProtocolV
  * @errors: []
  * @api_stability: experimental
  */
-pub fn tool_shape_feedback(findings: list<ToolShapeFinding>) -> list<string> {
-  return tool_shape_violations(findings).map(fn(violation) { return violation.message })
+pub fn tool_shape_feedback(findings: list<ToolShapeFinding>, tool_format = "") -> list<string> {
+  return tool_shape_violations(findings, tool_format).map(
+    fn(violation) { return violation.message },
+  )
 }

@@ -130,6 +130,7 @@ pub import {
   llm_clear_one_shot_prefill,
   llm_enable_equivalent_failover,
 } from "std/llm/options"
+import { tool_call_output_schema } from "std/llm/structural_validator"
 pub import { env_bool } from "std/os"
 
 pub fn __agent_loop_llm_overrides(opts) {
@@ -171,9 +172,46 @@ pub fn __agent_loop_ordinary_turn_llm_options(opts) {
   return omit(opts, ["output"])
 }
 
+pub fn __agent_loop_repair_turn_output_contract(opts) -> any? {
+  if !(opts?._prior_turn_claimed_for_repair ?? false) {
+    return nil
+  }
+  const recovery = opts?.missing_tool_call_recovery
+  if type_of(recovery) == "bool" && !recovery {
+    return nil
+  }
+  if type_of(recovery) == "dict" && !(recovery?.output_contract ?? true) {
+    return nil
+  }
+  return tool_call_output_schema(opts?.tools, opts?._prior_turn_claimed_tool ?? "")
+}
+
+pub fn __agent_loop_repair_receipt(agent: HarnessAgent, session_id, opts, iteration_index) -> nil {
+  if !(opts?._output_contract_repair ?? false) {
+    return nil
+  }
+  const contract = opts?.output?.schema
+  agent_emit_event(
+    agent,
+    session_id,
+    "repair_output_contract_applied",
+    {iteration: iteration_index + 1, tool_count: len(contract?.anyOf ?? [contract])},
+  )
+}
+
+pub fn __turn_llm_opts(harness: Harness, session, opts, iteration_index) -> dict {
+  const effective = __agent_loop_effective_llm_options(harness.llm, opts)
+  __agent_loop_repair_receipt(harness.agent, session.session_id, effective, iteration_index)
+  return effective
+}
+
 pub fn __agent_loop_effective_llm_options(llm: HarnessLlm, opts) {
   const base = opts ?? {}
   let merged = agent_merge_llm_options(base, __agent_loop_llm_overrides(base))
+  const repair_schema = __agent_loop_repair_turn_output_contract(merged)
+  if repair_schema != nil {
+    merged = merged + {output: {schema: repair_schema}, _output_contract_repair: true}
+  }
   const call_opts = if merged?._output_contract_repair ?? false {
     merged
   } else {

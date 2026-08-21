@@ -420,6 +420,15 @@ pub enum AgentEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         error: Option<String>,
     },
+    /// The repair-turn output contract was armed for one turn: the loop forced
+    /// a tool-call envelope on a turn the missing-call corrective claimed.
+    /// Pairs with `MissingToolCallVerdict` so contract firings and the claims
+    /// that caused them are both countable from the event log alone.
+    RepairOutputContractApplied {
+        session_id: String,
+        iteration: usize,
+        tool_count: usize,
+    },
     MissingToolCallVerdict {
         session_id: String,
         iteration: usize,
@@ -1228,6 +1237,7 @@ impl AgentEvent {
             | Self::ScopeClassifierVerdict { session_id, .. }
             | Self::InputGuardrailVerdict { session_id, .. }
             | Self::MissingToolCallVerdict { session_id, .. }
+            | Self::RepairOutputContractApplied { session_id, .. }
             | Self::RequireSuccessfulToolsViolation { session_id, .. }
             | Self::FinalWrapup { session_id, .. }
             | Self::PackThinkingStripped { session_id, .. }

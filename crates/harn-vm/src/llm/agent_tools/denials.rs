@@ -21,7 +21,17 @@ pub(super) fn denied_tool_result(tool_name: &str, reason: impl Into<String>) -> 
     // vocab they were never shown, read a bare denial, and thrash). The active
     // policy's allowlist is the source of truth; omit the clause when the
     // surface is unbounded (allow-all) so we never assert a misleading list.
-    let allowed = crate::orchestration::current_allowed_tool_names();
+    //
+    // The registry allowlist is only ONE of the gates that can produce this
+    // denial — an approval policy, a sandbox rule, or a host rejection can
+    // block a tool the registry still lists. So the denied tool routinely
+    // appeared in the "available" list of its own denial, telling the model in
+    // one breath that the call is not permitted and that the tool is callable.
+    // Drop it: whatever gate fired, this tool is not available for this call.
+    let allowed: Vec<String> = crate::orchestration::current_allowed_tool_names()
+        .into_iter()
+        .filter(|name| name != tool_name)
+        .collect();
     let available_clause = if allowed.is_empty() {
         String::new()
     } else {
@@ -64,4 +74,29 @@ pub(super) fn side_effect_ceiling_tool_result(
         "reason": reason,
         "next_step": next_step,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::denied_tool_result;
+    use crate::orchestration::{pop_execution_policy, push_execution_policy, CapabilityPolicy};
+
+    #[test]
+    fn a_denied_tool_is_excluded_from_its_own_available_list() {
+        push_execution_policy(CapabilityPolicy {
+            tools: vec!["denied".into(), "usable".into()],
+            ..Default::default()
+        });
+        let result = denied_tool_result("denied", "blocked by approval policy");
+        pop_execution_policy();
+
+        let available = result["next_step"]
+            .as_str()
+            .unwrap()
+            .split_once("Available tools:")
+            .unwrap()
+            .1;
+        assert!(!available.contains("denied"));
+        assert!(available.contains("usable"));
+    }
 }
