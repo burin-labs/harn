@@ -793,6 +793,7 @@ mod tests {
         let manifest = temp.path().join("manifest");
         write_manifest(&manifest, root, &covered, &dep_info, &[], &authorities).unwrap();
 
+        #[cfg(unix)]
         let recorded_mtime = fs::metadata(root).unwrap().modified().unwrap();
         fs::write(root.join("new.harn"), b"new").unwrap();
         #[cfg(unix)]
