@@ -23,6 +23,11 @@
 //!   input whenever capability or system-placement normalization changes them.
 //! - `tool_schemas` `{schemas, hash, content_hash}` — deduped schemas with a
 //!   stable redacted `blake3:` content hash.
+//! - `llm.capability_snapshot` `{schema, snapshot_id, llm}` — one retained,
+//!   redacted provider/model/family/capability definition per distinct
+//!   snapshot in an ambient transcript scope. `template.render` events carry
+//!   `llm.capability_snapshot_ref` instead of repeating the heavy capability
+//!   object on every prompt partial.
 //! - `message` `{role, content, iteration?}` — single message appended to
 //!   the visible conversation. Emitted every time a message lands in the
 //!   transcript (user task, nudge, assistant reply, tool result, host
@@ -101,7 +106,8 @@ mod served_context_receipts;
 mod transcript_ambient;
 
 use transcript_ambient::{
-    context_manifest_changed, current_transcript_dir, system_prompt_changed, tool_schemas_changed,
+    capability_snapshot_needs_definition, context_manifest_changed, current_transcript_dir,
+    record_capability_snapshot_definition, system_prompt_changed, tool_schemas_changed,
 };
 pub(crate) use transcript_ambient::{
     pop_llm_transcript_dir, push_llm_transcript_dir, swap_llm_transcript_ambient,

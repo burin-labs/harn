@@ -8,6 +8,20 @@
 //! - `helpers`: option extraction, provider/model/key resolution, and JSON conversion
 //! - `mock`, `trace`, and `stream`: process-local test doubles, tracing, and streaming support
 
+/// Event discriminator for a retained LLM capability snapshot in the
+/// append-only transcript stream.
+pub const CAPABILITY_SNAPSHOT_EVENT_TYPE: &str = "llm.capability_snapshot";
+/// Versioned shape named by [`CAPABILITY_SNAPSHOT_EVENT_TYPE`].
+pub const CAPABILITY_SNAPSHOT_SCHEMA: &str = "harn.llm.capability_snapshot.v1";
+
+/// Stable identity of the redacted bytes retained in a capability snapshot.
+/// Writers and readers share this owner so a damaged or hostile transcript
+/// cannot alias an arbitrary body behind a trusted content-addressed ID.
+pub fn capability_snapshot_id(snapshot: &serde_json::Value) -> String {
+    let retained = crate::canonical_json::to_vec(snapshot);
+    format!("blake3:{}", blake3::hash(&retained).to_hex())
+}
+
 pub(crate) mod acp_permission;
 mod agent_config;
 mod agent_host_primitives;

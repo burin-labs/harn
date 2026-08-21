@@ -13,10 +13,14 @@ use super::*;
 /// drop.
 pub(super) fn append_llm_transcript_entry(entry: &serde_json::Value) {
     let dir = current_transcript_dir();
-    append_llm_transcript_entry_to_dir(entry, dir.as_deref());
+    let _ = try_append_llm_transcript_entry_to_dir(entry, dir.as_deref());
 }
 
 pub(super) fn append_llm_transcript_entry_to_dir(entry: &serde_json::Value, dir: Option<&str>) {
+    let _ = try_append_llm_transcript_entry_to_dir(entry, dir);
+}
+
+fn try_append_llm_transcript_entry_to_dir(entry: &serde_json::Value, dir: Option<&str>) -> bool {
     let mut redacted = entry.clone();
     if let (Some(object), Some(run)) = (
         redacted.as_object_mut(),
@@ -27,28 +31,32 @@ pub(super) fn append_llm_transcript_entry_to_dir(entry: &serde_json::Value, dir:
     }
     crate::redact::current_policy().redact_json_in_place(&mut redacted);
     forward_transcript_run_events(&redacted);
-    append_llm_transcript_event_log(&redacted);
+    let event_log_persisted = append_llm_transcript_event_log(&redacted);
     let Some(dir) = dir else {
-        return;
+        return false;
     };
     let _ = std::fs::create_dir_all(dir);
     let path = format!("{dir}/llm_transcript.jsonl");
     let Ok(line) = serde_json::to_string(&redacted) else {
-        return;
+        return false;
     };
     static WRITE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
     let _guard = WRITE_LOCK
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    if let Ok(mut f) = std::fs::OpenOptions::new()
+    let Ok(mut file) = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
         .open(&path)
-    {
-        use std::io::Write;
-        let _ = f.write_all(line.as_bytes());
-        let _ = f.write_all(b"\n");
-    }
+    else {
+        return false;
+    };
+    use std::io::Write;
+    let file_persisted = file
+        .write_all(line.as_bytes())
+        .and_then(|()| file.write_all(b"\n"))
+        .is_ok();
+    file_persisted && event_log_persisted
 }
 
 /// Fan transcript entries out to the run-events sink (`harn run
@@ -137,9 +145,9 @@ pub(super) fn forward_transcript_run_events(entry: &serde_json::Value) {
     });
 }
 
-pub(super) fn append_llm_transcript_event_log(entry: &serde_json::Value) {
+pub(super) fn append_llm_transcript_event_log(entry: &serde_json::Value) -> bool {
     let Some(log) = crate::event_log::active_event_log() else {
-        return;
+        return true;
     };
     let topic = crate::event_log::Topic::new(crate::event_log::HARN_LLM_TRANSCRIPT_TOPIC)
         .expect("static transcript topic should be valid");
@@ -189,15 +197,18 @@ pub(super) fn append_llm_transcript_event_log(entry: &serde_json::Value) {
     // blocking fs), so a private `futures::executor::block_on` runs the append
     // to completion on this thread without touching the ambient runtime. This
     // is the same path the non-runtime branch already used.
-    let _ = futures::executor::block_on(log.append(&topic, event));
+    futures::executor::block_on(log.append(&topic, event)).is_ok()
 }
 
 /// Record a `template.render` transcript event for a `render()` /
 /// `render_prompt()` call that resolved under an LLM-aware frame.
-/// Captures the active LLM identity + capability snapshot plus the
-/// branch trace produced during rendering. Replay determinism is
-/// guaranteed by the renderer itself; this function is purely a
-/// serializer.
+/// Captures the active LLM identity + a content-addressed capability snapshot
+/// reference plus the branch trace produced during rendering. The retained
+/// snapshot is emitted once per distinct value in the ambient transcript
+/// scope; this keeps a render self-describing without serializing the same
+/// multi-kilobyte capability object for every prompt partial. Replay
+/// determinism is guaranteed by the renderer itself; this function is purely
+/// a serializer.
 pub fn record_template_render(
     template_uri: &str,
     template_revision_hash: &str,
@@ -232,11 +243,40 @@ pub fn record_template_render(
             serde_json::Value::Object(entry)
         })
         .collect::<Vec<_>>();
-    let llm = serde_json::json!({
+    let llm_snapshot = serde_json::json!({
         "provider": ctx.provider,
         "model": ctx.model,
         "family": ctx.family,
         "capabilities": vm_value_to_json(&ctx.capabilities),
+    });
+    // Hash the bytes operators are allowed to retain, not pre-redaction input:
+    // references then remain stable across writer and reader redaction passes
+    // without disclosing equality against a sensitive original value.
+    let llm_snapshot = crate::redact::current_policy().redact_json(&llm_snapshot);
+    let snapshot_id = crate::llm::capability_snapshot_id(&llm_snapshot);
+    if capability_snapshot_needs_definition(&snapshot_id)
+        && try_append_llm_observability_entry(
+            crate::llm::CAPABILITY_SNAPSHOT_EVENT_TYPE,
+            serde_json::Map::from_iter([
+                (
+                    "schema".to_string(),
+                    serde_json::json!(crate::llm::CAPABILITY_SNAPSHOT_SCHEMA),
+                ),
+                (
+                    "snapshot_id".to_string(),
+                    serde_json::Value::String(snapshot_id.clone()),
+                ),
+                ("llm".to_string(), llm_snapshot),
+            ]),
+        )
+    {
+        record_capability_snapshot_definition(&snapshot_id);
+    }
+    let llm = serde_json::json!({
+        "provider": ctx.provider,
+        "model": ctx.model,
+        "family": ctx.family,
+        "capability_snapshot_ref": snapshot_id,
     });
     let mut fields = serde_json::Map::new();
     fields.insert(
@@ -278,8 +318,15 @@ pub(super) fn vm_value_to_json(value: &crate::value::VmValue) -> serde_json::Val
 
 pub(crate) fn append_llm_observability_entry(
     event_type: &str,
-    mut fields: serde_json::Map<String, serde_json::Value>,
+    fields: serde_json::Map<String, serde_json::Value>,
 ) {
+    let _ = try_append_llm_observability_entry(event_type, fields);
+}
+
+fn try_append_llm_observability_entry(
+    event_type: &str,
+    mut fields: serde_json::Map<String, serde_json::Value>,
+) -> bool {
     fields.insert("type".to_string(), serde_json::json!(event_type));
     fields
         .entry("timestamp".to_string())
@@ -287,7 +334,8 @@ pub(crate) fn append_llm_observability_entry(
     fields
         .entry("span_id".to_string())
         .or_insert_with(|| serde_json::json!(crate::tracing::current_span_id()));
-    append_llm_transcript_entry(&serde_json::Value::Object(fields));
+    let dir = current_transcript_dir();
+    try_append_llm_transcript_entry_to_dir(&serde_json::Value::Object(fields), dir.as_deref())
 }
 
 pub(super) fn emit_system_prompt_if_changed(system: Option<&str>) {
