@@ -31,25 +31,41 @@ import {
 } from "std/checkpoint"
 ```
 
-#### checkpoint_stage(name, fn) -> value
+#### checkpoint_stage(runtime, name, fn) -> value
 
-Runs `fn()` and caches the result under `name`. On subsequent calls with the
-same name, returns the cached result without running `fn()` again. This is the
-primary primitive for building resumable pipelines.
+Runs `fn()` and caches the result under `name`. Pass `harness.runtime` as the
+runtime value. On later calls with the same name, Harn returns the cached result
+without running `fn()` again. This is the main building block for resumable
+pipelines.
 
-```harn
+```harn,check
 import { checkpoint_stage } from "std/checkpoint"
 
 fn fetch_dataset(url) { url }
-fn clean(data) { data }
-fn run_model(cleaned) { cleaned }
-fn upload(result) { harness.obs.log(result) }
 
-pipeline process(harness: Harness, task) {
+fn clean(data) { data }
+
+fn run_model(cleaned) { cleaned }
+
+fn upload(result) { result }
+
+pipeline process(harness: Harness) {
   const url = "https://example.com/data.csv"
-  const data    = checkpoint_stage("fetch",   fn() { fetch_dataset(url) })
-  const cleaned = checkpoint_stage("clean",   fn() { clean(data) })
-  const result  = checkpoint_stage("process", fn() { run_model(cleaned) })
+  const data = checkpoint_stage(
+    harness.runtime,
+    "fetch",
+    fn() { fetch_dataset(url) },
+  )
+  const cleaned = checkpoint_stage(
+    harness.runtime,
+    "clean",
+    fn() { clean(data) },
+  )
+  const result = checkpoint_stage(
+    harness.runtime,
+    "process",
+    fn() { run_model(cleaned) },
+  )
   upload(result)
 }
 ```
@@ -57,7 +73,7 @@ pipeline process(harness: Harness, task) {
 On first run all three stages execute. On a resumed run (pipeline restarted
 after a crash), completed stages are skipped automatically.
 
-#### checkpoint_stage_keyed(name, identity, fn) -> value
+#### checkpoint_stage_keyed(runtime, name, identity, fn) -> value
 
 Use `checkpoint_stage_keyed` when completion is valid only for specific inputs.
 Harn canonicalizes the structured `identity`, persists only its SHA-256 digest,
@@ -65,37 +81,47 @@ and reuses the cached result only when the digest matches. Missing, legacy,
 malformed, or mismatched records execute the stage and replace completion after
 success.
 
-```harn
+```harn,check
 import { checkpoint_stage_keyed } from "std/checkpoint"
 
-const prepared = checkpoint_stage_keyed(
-  "prepare",
-  {source_sha: "abc123", lock_sha: "def456", toolchain: "rust-1.90"},
-  fn() { return {ready: true} },
-)
+fn main(harness: Harness) {
+  checkpoint_stage_keyed(
+    harness.runtime,
+    "prepare",
+    {source_sha: "abc123", lock_sha: "def456", toolchain: "rust-1.90"},
+    fn() { return {ready: true} },
+  )
+}
 ```
 
-`checkpoint_stage_keyed_retry(name, identity, max_retries, fn)` adds the same
-identity binding to retrying stages and never caches failed attempts.
+`checkpoint_stage_keyed_retry(runtime, name, identity, max_retries, fn)` adds
+the same identity binding to retrying stages and never caches failed attempts.
 
 Checkpointed stages have at-least-once crash semantics. Keep stage effects
 idempotent: a process can stop after the effect succeeds but before its result is
 persisted, so the resumed run may execute that stage again.
 
-#### checkpoint_stage_retry(name, max_retries, fn) -> value
+#### checkpoint_stage_retry(runtime, name, max_retries, fn) -> value
 
 Like `checkpoint_stage`, but retries `fn()` up to `max_retries` times on
 failure before propagating the error. Once successful, the result is cached so
 retries are never needed on resume.
 
-```harn
+```harn,check
 import { checkpoint_stage_retry } from "std/checkpoint"
 
 fn fetch_with_timeout(url) { url }
 
-const url = "https://example.com/data.csv"
-const data = checkpoint_stage_retry("fetch", 3, fn() { fetch_with_timeout(url) })
-harness.obs.log(data)
+fn main(harness: Harness) {
+  const url = "https://example.com/data.csv"
+  const data = checkpoint_stage_retry(
+    harness.runtime,
+    "fetch",
+    3,
+    fn() { fetch_with_timeout(url) },
+  )
+  harness.obs.log(data)
+}
 ```
 
 ### File location
