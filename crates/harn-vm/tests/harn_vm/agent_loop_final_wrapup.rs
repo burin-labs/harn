@@ -360,10 +360,10 @@ fn exhaustion_mid_tool_use_fires_wrapup_and_surfaces_sentinel() {
 
 #[test]
 fn final_wrapup_records_and_surfaces_a_parsed_unconsumed_tool_call() {
-    let response = r#"<user_response>Stopped after the hard cap.</user_response>
+    let response = r"<user_response>Stopped after the hard cap.</user_response>
 <tool_call>
 keep_exploring({})
-</tool_call>"#;
+</tool_call>";
     let raw = run_with_bridge(&unconsumed_wrapup_call_pipeline(
         "wrapup-unconsumed-parsed",
         response,
