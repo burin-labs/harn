@@ -540,6 +540,15 @@ would exceed the configured or discovered context budget. The default policy is
 verbatim, summarize older messages, and fall back to truncation if the summary
 still exceeds the hard limit.
 
+For model-authored summaries, Harn also sends the retained tail to the
+summarizer as grounding evidence. Retained messages are newer than the archived
+prefix and remain verbatim after the summary. The compaction prompt directs the
+summarizer to use the newest relevant evidence for file contents, diagnostics,
+build or test status, and task completion, and to omit a current-state claim
+when that evidence does not establish it. This grounding contract also wraps
+custom `summarize_prompt` assets and policies that set
+`extend_default_instructions: false`.
+
 ```harn
 import { AgentSpec } from "std/agent/options"
 

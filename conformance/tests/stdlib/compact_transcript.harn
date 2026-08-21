@@ -62,6 +62,8 @@ pipeline test(harness: Harness, task) {
       const prompt = llm_calls[0].messages[0].content
       harness.stdio.println(prompt.contains("Compact prompt from asset."))
       harness.stdio.println(prompt.contains("Archived count: 2"))
+      harness.stdio.println(prompt.contains("Retained tail message count: 2"))
+      harness.stdio.println(prompt.contains("ASSISTANT: I found three likely hotspots."))
       const policy_extended = harness.agent.compact_transcript(
         base,
         {

@@ -4,8 +4,10 @@ use crate::llm::{vm_call_llm_full, vm_value_to_json};
 use crate::value::{VmDictExt, VmError, VmValue};
 use serde::{Deserialize, Serialize};
 
+mod prompt;
 mod tool_output;
 use crate::vm::AsyncBuiltinCtx;
+use prompt::render_llm_compaction_prompt;
 pub use tool_output::{
     microcompact_tool_output, microcompact_tool_output_result, MicrocompactedToolOutput,
 };
@@ -787,25 +789,6 @@ fn snap_to_line_start(s: &str, start_byte: usize) -> &str {
     }
 }
 
-fn format_compaction_messages(messages: &[serde_json::Value]) -> String {
-    messages
-        .iter()
-        .map(|msg| {
-            let role = msg
-                .get("role")
-                .and_then(|v| v.as_str())
-                .unwrap_or("user")
-                .to_uppercase();
-            let content = msg
-                .get("content")
-                .and_then(|v| v.as_str())
-                .unwrap_or_default();
-            format!("{role}: {content}")
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
 fn truncate_compaction_summary(
     old_messages: &[serde_json::Value],
     archived_count: usize,
@@ -878,21 +861,26 @@ fn compact_summary_text_from_value(value: &VmValue) -> Result<String, VmError> {
 
 async fn llm_compaction_summary(
     old_messages: &[serde_json::Value],
+    retained_messages: &[serde_json::Value],
     archived_count: usize,
     llm_opts: &crate::llm::api::LlmCallOptions,
     summarize_prompt: Option<&str>,
     policy: &CompactionPolicy,
 ) -> Result<String, VmError> {
     let mut compact_opts = llm_opts.clone();
-    let formatted = format_compaction_messages(old_messages);
     compact_opts.system = None;
     compact_opts.transcript_summary = None;
     compact_opts.native_tools = None;
     compact_opts.tool_choice = None;
     compact_opts.output_format = crate::llm::api::OutputFormat::Text;
     compact_opts.output_schema = None;
-    let prompt =
-        render_llm_compaction_prompt(summarize_prompt, &formatted, archived_count, policy)?;
+    let prompt = render_llm_compaction_prompt(
+        summarize_prompt,
+        old_messages,
+        retained_messages,
+        archived_count,
+        policy,
+    )?;
     compact_opts.messages = vec![serde_json::json!({
         "role": "user",
         "content": prompt,
@@ -913,66 +901,6 @@ async fn llm_compaction_summary(
             "[auto-compacted {archived_count} older messages]\n{summary}"
         ))
     }
-}
-
-fn render_llm_compaction_prompt(
-    summarize_prompt: Option<&str>,
-    formatted: &str,
-    archived_count: usize,
-    policy: &CompactionPolicy,
-) -> Result<String, VmError> {
-    if policy.has_prompt_directives() && policy.extend_default_instructions == Some(false) {
-        return render_replacement_compaction_prompt(policy, formatted, archived_count);
-    }
-    let mut bindings = crate::value::DictMap::new();
-    bindings.put_str("formatted_messages", formatted);
-    bindings.insert(
-        crate::value::intern_key("archived_count"),
-        VmValue::Int(archived_count as i64),
-    );
-    let Some(path) = summarize_prompt.filter(|path| !path.trim().is_empty()) else {
-        let prompt = crate::stdlib::template::render_stdlib_prompt_asset(
-            "orchestration/prompts/compaction_summary.harn.prompt",
-            Some(&bindings),
-        )?;
-        return Ok(extend_compaction_prompt(prompt, policy));
-    };
-
-    let asset = crate::stdlib::template::TemplateAsset::render_target(path)
-        .map_err(|error| VmError::Runtime(format!("compaction summarize_prompt: {error}")))?;
-    let prompt = crate::stdlib::template::render_asset_result(&asset, Some(&bindings))
-        .map_err(VmError::from)?;
-    Ok(extend_compaction_prompt(prompt, policy))
-}
-
-fn render_replacement_compaction_prompt(
-    policy: &CompactionPolicy,
-    formatted: &str,
-    archived_count: usize,
-) -> Result<String, VmError> {
-    let directives = policy.prompt_directives().unwrap_or_default();
-    let mut bindings = crate::value::DictMap::new();
-    bindings.put_str("directives", directives);
-    bindings.put_str("formatted_messages", formatted);
-    bindings.insert(
-        crate::value::intern_key("archived_count"),
-        VmValue::Int(archived_count as i64),
-    );
-    crate::stdlib::template::render_stdlib_prompt_asset(
-        "orchestration/prompts/compaction_policy_replacement.harn.prompt",
-        Some(&bindings),
-    )
-}
-
-fn extend_compaction_prompt(mut prompt: String, policy: &CompactionPolicy) -> String {
-    let Some(directives) = policy.prompt_directives() else {
-        return prompt;
-    };
-    prompt.push_str(
-        "\n\nAdditional compaction instructions: use these directives to shape the summary, but do not quote this section unless it explicitly requests a model-visible note.\n",
-    );
-    prompt.push_str(&directives);
-    prompt
 }
 
 async fn custom_compaction_summary(
@@ -1443,6 +1371,7 @@ struct CompactionStrategyInputs<'a> {
     ctx: Option<&'a AsyncBuiltinCtx>,
     strategy: &'a CompactStrategy,
     old_messages: &'a [serde_json::Value],
+    retained_messages: &'a [serde_json::Value],
     archived_count: usize,
     llm_opts: Option<&'a crate::llm::api::LlmCallOptions>,
     custom_compactor: Option<&'a VmValue>,
@@ -1463,6 +1392,7 @@ async fn apply_compaction_strategy(
     let CompactionStrategyInputs {
         strategy,
         old_messages,
+        retained_messages,
         archived_count,
         llm_opts,
         custom_compactor,
@@ -1480,6 +1410,7 @@ async fn apply_compaction_strategy(
         )),
         CompactStrategy::Llm => llm_compaction_summary(
             old_messages,
+            retained_messages,
             archived_count,
             llm_opts.ok_or_else(|| {
                 VmError::Runtime(
@@ -1630,6 +1561,7 @@ pub(crate) async fn auto_compact_messages_with_result_with_ctx(
             ctx,
             strategy: &config.compact_strategy,
             old_messages: &old_messages,
+            retained_messages: messages.as_slice(),
             archived_count,
             llm_opts,
             custom_compactor: config.custom_compactor.as_ref(),
@@ -1659,6 +1591,7 @@ pub(crate) async fn auto_compact_messages_with_result_with_ctx(
                         ctx,
                         strategy: &config.hard_limit_strategy,
                         old_messages: &tier1_as_messages,
+                        retained_messages: messages.as_slice(),
                         archived_count,
                         llm_opts,
                         custom_compactor: config.custom_compactor.as_ref(),
@@ -1889,13 +1822,16 @@ mod tests {
             instructions: Some("Keep the failing test names.".to_string()),
             ..Default::default()
         };
-        let prompt = render_llm_compaction_prompt(None, "[user] old context", 1, &policy)
+        let archived = [serde_json::json!({"role": "user", "content": "old context"})];
+        let retained = [serde_json::json!({"role": "tool", "content": "new evidence"})];
+        let prompt = render_llm_compaction_prompt(None, &archived, &retained, 1, &policy)
             .expect("prompt renders");
 
         assert_eq!(policy.instruction_mode(), "extend");
         assert!(prompt.contains("Preserve goals, constraints"));
         assert!(prompt.contains("Additional compaction instructions"));
         assert!(prompt.contains("Keep the failing test names."));
+        assert!(prompt.contains("TOOL: new evidence"));
     }
 
     #[test]
@@ -1905,13 +1841,17 @@ mod tests {
             extend_default_instructions: Some(false),
             ..Default::default()
         };
-        let prompt = render_llm_compaction_prompt(None, "[user] old context", 1, &policy)
+        let archived = [serde_json::json!({"role": "user", "content": "old context"})];
+        let retained = [serde_json::json!({"role": "tool", "content": "new evidence"})];
+        let prompt = render_llm_compaction_prompt(None, &archived, &retained, 1, &policy)
             .expect("prompt renders");
 
         assert_eq!(policy.instruction_mode(), "replace");
         assert!(prompt.contains("according to these instructions"));
         assert!(prompt.contains("Only keep repro steps."));
         assert!(!prompt.contains("Preserve goals, constraints"));
+        assert!(prompt.contains("newer than every archived message"));
+        assert!(prompt.contains("TOOL: new evidence"));
     }
 
     #[test]
