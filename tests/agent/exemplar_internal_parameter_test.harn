@@ -1,0 +1,99 @@
+// Run: harn test tests/agent/exemplar_internal_parameter_test.harn
+//
+// The missing-call corrective shows a model the call it described but never
+// sent. It used to show one type placeholder per argument (`"<string>"`), so a
+// model that copied the exemplar verbatim would produce an obviously unfilled
+// call. Live smoke showed the opposite: a model copied `"<string>"` into the
+// repair call and then into every call for the rest of the session, filling
+// optional arguments it had never used with the same token. Inside a JSON
+// string a placeholder is indistinguishable from a value.
+//
+// So the exemplar carries no values at all. `tool_required_argument_names`
+// answers only "which arguments must this call carry", which the corrective
+// says in prose, and the rendered envelope stays empty.
+import { agent_render_tool_call_exemplar } from "std/agent/preflight"
+import {
+  tool_required_argument_exemplar,
+  tool_required_argument_names,
+} from "std/llm/structural_validator"
+
+fn _look(params) {
+  return tool_define(
+    tool_registry(),
+    "look",
+    "Look something up.",
+    {handler: { _args -> return "ok" }, parameters: params},
+  )
+}
+
+pipeline test_all_optional_tool_requires_nothing(harness: Harness, task) {
+  // `_nl_intent` is declared FIRST, so the old "first declared parameter"
+  // fallback picked it and taught an argument no caller should ever write.
+  // Nothing here is required, so nothing is named.
+  const registry = _look(
+    {
+      _nl_intent: {type: "string", description: "Internal intent", optional: true},
+      query: {type: "string", description: "What to look up", optional: true},
+    },
+  )
+  assert_eq(tool_required_argument_names(registry, "look"), [])
+  assert_eq(tool_required_argument_names(_look({}), "look"), [])
+  assert_eq(tool_required_argument_names(registry, "nonexistent"), [])
+}
+
+pipeline test_required_internal_parameter_is_still_named(harness: Harness, task) {
+  // An underscore prefix marks a parameter the harness fills in, but a REQUIRED
+  // one still has to be sent, so the model still has to be told about it.
+  const registry = _look(
+    {
+      _nl_intent: {type: "string", description: "Internal intent", required: true},
+      query: {type: "string", description: "What to look up", optional: true},
+    },
+  )
+  assert_eq(tool_required_argument_names(registry, "look"), ["_nl_intent"])
+}
+
+pipeline test_rendered_exemplar_carries_no_placeholder_token(harness: Harness, task) {
+  // The falsifier for the observed defect: whatever the tool declares, the
+  // rendered call must contain no token a model could copy as a value. A
+  // placeholder would show up here as `<`, and a required key rendered with a
+  // stand-in value would show up as a non-empty argument object.
+  const registry = _look(
+    {
+      path: {type: "string", description: "Where to look", required: true},
+      depth: {type: "integer", description: "How deep", optional: true},
+    },
+  )
+  const json = agent_render_tool_call_exemplar(
+    harness.llm,
+    "look",
+    [],
+    {tool_format: "json", tools: registry},
+  )
+  assert_eq(starts_with(json, "```tool\n"), true)
+  assert_eq(contains(json, "\"look\""), true)
+  // An empty argument object, and no token to copy: a placeholder would show up
+  // as `<`, and a stand-in value would show up as a non-empty argument object.
+  assert_eq(contains(json, "{}"), true)
+  assert_eq(contains(json, "<"), false)
+  assert_eq(contains(json, "..."), false)
+  const text = agent_render_tool_call_exemplar(
+    harness.llm,
+    "look",
+    [],
+    {tool_format: "text", tools: registry},
+  )
+  assert_eq(text, "<tool_call>look({})</tool_call>")
+  // The required argument is still known — it is named in prose, not rendered.
+  assert_eq(tool_required_argument_names(registry, "look"), ["path"])
+}
+
+pipeline test_published_exemplar_helper_remains_compatible(harness: Harness, task) {
+  const registry = _look(
+    {
+      path: {type: "string", description: "Where to look", required: true},
+      depth: {type: "integer", description: "How deep", optional: true},
+    },
+  )
+  assert_eq(tool_required_argument_exemplar(registry, "look"), [{key: "path", value: "<string>"}])
+}

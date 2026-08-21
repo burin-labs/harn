@@ -1,0 +1,210 @@
+// @harn-entrypoint-category llm.stdlib
+//
+// std/llm/call_shape — THE taught tool-call shape, one row per tool format.
+//
+// Every corrective a model reads has to name the call syntax it should have
+// used, and every one of them has to name the SAME syntax the active parser
+// accepts. Written out at each call site they drift: one live session told a
+// model to "emit every call as `<tool_call>name({ ... })</tool_call>`" from the
+// unrecognized-span guidance while every other corrective in the same session
+// taught a ```tool fenced JSON object, because that one message was written
+// under the tagged pin and never learned about the others.
+//
+// So the taught syntax is data, keyed by tool format, read by everything that
+// teaches it: the loop's tool contract prompt, the no-progress nudge, the
+// fenced-call and missing-call correctives, parse guidance, and the
+// unrecognized-span violation. Adding a format is an edit to this table.
+// Rewording what a format teaches is an edit to this table. Nothing downstream
+// spells a delimiter out for itself.
+import { call_block, prose_block } from "std/llm/tool_parse_result"
+
+/**
+ * How one tool format is taught and rendered.
+ *
+ * `call_open`/`call_close` and `body_open`/`body_close` are the physical
+ * delimiters an exemplar renders between. The rest is prose the correctives
+ * quote:
+ *
+ * - `call_noun` names one call as a noun phrase, for a sentence that already
+ *   supplies its own verb ("Emit the call as a ```tool JSON block instead.").
+ * - `call_syntax` is the full wire form, for a sentence that has to show the
+ *   shape rather than refer to it.
+ * - `final_answer` is how a finished turn yields its answer.
+ * - `body_hint` is the single answer to "how do I pass a multi-line or
+ *   code-bearing field", which is where weak models lose calls to escaping.
+ */
+pub type ToolCallShape = {
+  kind: string,
+  call_open: string,
+  call_close: string,
+  body_open: string,
+  body_close: string,
+  call_noun: string,
+  call_syntax: string,
+  final_answer: string,
+  body_hint: string,
+}
+
+const __NATIVE_SHAPE: ToolCallShape = {
+  kind: "native",
+  call_open: "",
+  call_close: "",
+  body_open: "\"",
+  body_close: "\"",
+  call_noun: "native tool call",
+  call_syntax: "a native tool call on the provider's tool channel",
+  final_answer: "in concise assistant text",
+  body_hint:
+    "Pass multi-line or code-bearing fields (file contents, replacement text) as ordinary JSON string arguments — the runtime handles escaping.",
+}
+
+const __JSON_SHAPE: ToolCallShape = {
+  kind: "json",
+  call_open: "```tool\n",
+  call_close: "\n```",
+  body_open: "\"",
+  body_close: "\"",
+  call_noun: "```tool JSON block",
+  call_syntax: "a ```tool fenced block wrapping one JSON object with `name` and `args` keys",
+  final_answer: "as plain text",
+  body_hint:
+    "Each tool call is one JSON object `{ \"name\": \"...\", \"args\": { ... } }` in a ```tool fenced block. For a multi-line or code-bearing field (file contents, replacement text, exact-match strings) use a verbatim body instead of escaping: set the value to `\"<<BODY\"`, then put the raw text after the JSON object INSIDE the same ```tool fence, ending with a line that is exactly `BODY`. A verbatim body needs NO escaping at all — quotes, backslashes, newlines, and backticks are literal bytes. Use `\"<<BODY:N\"`, where N is the exact number of body lines, only when the body itself contains a line that is exactly `BODY`. Short scalar values stay ordinary JSON strings (escape newlines as \\n, quotes as \\\", backslashes as \\\\). For several calls in one turn, emit consecutive objects — several ```tool blocks or several objects in one block — never a JSON array. Never wrap the call itself in a Markdown fence other than ```tool, and never use a triple-quoted string.",
+}
+
+const __TEXT_SHAPE: ToolCallShape = {
+  kind: "text",
+  call_open: "<tool_call>",
+  call_close: "</tool_call>",
+  body_open: "<<EOF\n",
+  body_close: "\nEOF",
+  call_noun: "`<tool_call>` block",
+  call_syntax: "`<tool_call>name({ ... })</tool_call>`",
+  final_answer: "in a `<user_response>` block",
+  body_hint:
+    "For any multi-line or code-bearing field (file contents, replacement text, exact-match strings) use a heredoc body: write `<<EOF` after the colon, the raw content on the following lines, then a line that is exactly `EOF` (the closing `}`/`)` may follow it). Heredoc bodies need NO escaping — quotes, backslashes, and backticks are all literal. Never wrap code or multi-line text in a quoted string.",
+}
+
+/**
+ * The taught shape for one tool format.
+ *
+ * `text` is the fallback for an empty or unrecognized format because it is the
+ * grammar the parser falls back to, so a corrective rendered from an unpinned
+ * format still names what that turn would actually be read as.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn tool_call_shape(tool_format) -> ToolCallShape {
+  const format = to_string(tool_format ?? "")
+  if format == "native" {
+    return __NATIVE_SHAPE
+  }
+  if format == "json" {
+    return __JSON_SHAPE
+  }
+  return __TEXT_SHAPE
+}
+
+/**
+ * The taught call syntax for ONE named tool.
+ *
+ * A corrective that has already identified which call the model meant should
+ * name it: "emit `run` like this" is a smaller ask than "emit calls like this",
+ * and the recovery notes that raise it always know the name. Falls back to the
+ * unnamed `call_syntax` for an empty name, so a caller that has no name to
+ * offer still renders the format's shape rather than a hole.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn tool_call_syntax_named(tool_format, name) -> string {
+  const shape = tool_call_shape(tool_format)
+  const called = to_string(name ?? "")
+  if called == "" {
+    return shape.call_syntax
+  }
+  if shape.kind == "native" {
+    return "a native tool call to `" + called + "` on the provider's tool channel"
+  }
+  if shape.kind == "json" {
+    return "a ```tool fenced block wrapping `{\"name\": \"" + called + "\", \"args\": { ... }}`"
+  }
+  return "`<tool_call>" + called + "({ ... })</tool_call>`"
+}
+
+/**
+ * Render one assistant turn the way the transcript should REMEMBER it.
+ *
+ * A model learns its call syntax from its own transcript far more strongly
+ * than from its instructions: measured against a local open-weight model, a
+ * session whose persisted turns carried a drifted fence kept reproducing that
+ * fence, and no prompt-side wording rescued it — rewriting those persisted
+ * turns to canonical form did.
+ *
+ * So a turn whose calls were read out of TEXT is written back in the canonical
+ * form of the format that read it, and the model's own delimiters stop being
+ * few-shot teaching. `prose` is what the model actually said, already
+ * separated from its calls by the parser — never the raw completion, which is
+ * the thing being canonicalized away.
+ *
+ * This rewrites the SHAPE of a call, never its content. Argument values are
+ * the model's own and are replayed unchanged; nothing here can tell a copied
+ * placeholder from a value the caller meant. Argument drift propagates through
+ * self-history independently of fence drift and is cut off at its source
+ * instead, by correctives that render no argument values to copy.
+ *
+ * Returns "" when there is nothing to rewrite: no calls to render, a native
+ * route whose calls live on the provider's tool channel instead of in the
+ * text, or calls with no name to render. The caller keeps the turn's own text
+ * in every one of those cases.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn tool_call_history_text(tool_format, prose, calls) -> string {
+  const turn_calls = calls ?? []
+  if len(turn_calls) == 0 {
+    return ""
+  }
+  const shape = tool_call_shape(tool_format)
+  if shape.kind == "native" {
+    return ""
+  }
+  const said = trim(to_string(prose ?? ""))
+  let parts: list<string> = []
+  if said != "" {
+    const opening = if shape.kind == "json" {
+      said
+    } else {
+      prose_block(said)
+    }
+    parts = parts.appending(opening)
+  }
+  for call in turn_calls {
+    const name = trim(to_string(call?.name ?? call?.tool_name ?? ""))
+    if name == "" {
+      continue
+    }
+    // A dispatched call spells its arguments either way, depending on which
+    // side of the tool envelope it came from.
+    const raw_args = call?.arguments ?? call?.tool_args
+    const args = if type_of(raw_args) == "dict" {
+      raw_args
+    } else {
+      {}
+    }
+    const block = if shape.kind == "json" {
+      shape.call_open + json_stringify({name: name, args: args}) + shape.call_close
+    } else {
+      call_block({name: name, arguments: args})
+    }
+    parts = parts.appending(block)
+  }
+  if len(parts) == 0 {
+    return ""
+  }
+  return parts.join("\n\n")
+}

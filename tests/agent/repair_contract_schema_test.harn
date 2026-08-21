@@ -1,0 +1,99 @@
+// Run: harn test tests/agent/repair_contract_schema_test.harn
+//
+// The repair turn's decode grammar is projected from the tool registry by
+// `tool_call_output_schema`. Every branch it emits has to be a shape the
+// provider's grammar conversion can actually compile, because a malformed
+// production is not contained: llama.cpp fails the WHOLE combined request, so
+// one bad branch takes every other tool's branch down with it.
+//
+// The known trap is an empty `properties` object (ggml-org/llama.cpp#25923),
+// which is exactly what a tool with no model-facing parameters would produce.
+// A registry is free to hold one — a zero-argument tool is ordinary, and so is
+// a tool whose only declared parameters are internal — so the branch for it
+// must carry the bare object type and no `properties` key at all.
+import { tool_call_output_schema } from "std/llm/structural_validator"
+
+fn _define(registry, name: string, params) {
+  return tool_define(
+    registry,
+    name,
+    "Test tool " + name,
+    {handler: { _args -> return "ok" }, parameters: params},
+  )
+}
+
+fn _args_branch(schema) {
+  return schema?.properties?.args
+}
+
+fn _branch_for(schema, name: string) {
+  for branch in schema?.anyOf ?? [] {
+    if contains(branch?.properties?.name?.enum ?? [], name) {
+      return branch
+    }
+  }
+  return nil
+}
+
+pipeline test_zero_parameter_tool_emits_no_empty_properties(harness: Harness, task) {
+  const schema = tool_call_output_schema(_define(tool_registry(), "ping", {}), "")
+  const args = _args_branch(schema)
+  // The bare object type, and nothing else. Both keys are checked by absence
+  // rather than by value, because an empty `properties` and a `false`
+  // `additionalProperties` are each independently the malformed production.
+  assert_eq(args?.type, "object")
+  assert_eq(contains(args.keys(), "properties"), false)
+  assert_eq(contains(args.keys(), "additionalProperties"), false)
+  assert_eq(contains(args.keys(), "required"), false)
+}
+
+pipeline test_all_internal_parameters_reach_the_same_branch(harness: Harness, task) {
+  // Internal parameters are the harness's to fill, so they are left out of the
+  // grammar — which empties `properties` for a tool that declares nothing else.
+  // That is the same trap by a different route.
+  const registry = _define(
+    tool_registry(),
+    "ping",
+    {_nl_intent: {type: "string", description: "Internal intent", optional: true}},
+  )
+  const args = _args_branch(tool_call_output_schema(registry, ""))
+  assert_eq(args?.type, "object")
+  assert_eq(contains(args.keys(), "properties"), false)
+}
+
+pipeline test_tool_with_parameters_still_closes_its_arguments(harness: Harness, task) {
+  // The other side of the pair: a tool that does enumerate keys still gets them
+  // closed, so the guard cannot be mistaken for the grammar going open.
+  const registry = _define(
+    tool_registry(),
+    "look",
+    {
+      path: {type: "string", description: "Where to look", required: true},
+      depth: {type: "integer", description: "How deep", optional: true},
+    },
+  )
+  const args = _args_branch(tool_call_output_schema(registry, ""))
+  assert_eq(args?.type, "object")
+  assert_eq(args?.additionalProperties, false)
+  assert_eq(args?.required, ["path"])
+  assert_eq(contains(args?.properties.keys(), "path"), true)
+  assert_eq(contains(args?.properties.keys(), "depth"), true)
+}
+
+pipeline test_one_zero_parameter_tool_does_not_spoil_the_registry(harness: Harness, task) {
+  // The reason this matters: the branches share one request. A registry holding
+  // both must emit a compilable branch for each.
+  let registry = _define(tool_registry(), "ping", {})
+  registry = _define(registry, "look", {path: {type: "string", required: true}})
+  const schema = tool_call_output_schema(registry, "")
+  const ping = _branch_for(schema, "ping")
+  const look = _branch_for(schema, "look")
+  assert_eq(ping != nil, true)
+  assert_eq(look != nil, true)
+  assert_eq(contains(ping?.properties?.args.keys(), "properties"), false)
+  assert_eq(look?.properties?.args?.additionalProperties, false)
+  // And when the claim narrows the grammar to the zero-parameter tool, the one
+  // branch that survives is still the compilable one.
+  const claimed = tool_call_output_schema(registry, "ping")
+  assert_eq(contains(_args_branch(claimed).keys(), "properties"), false)
+}

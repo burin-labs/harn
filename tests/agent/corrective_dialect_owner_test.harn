@@ -1,0 +1,100 @@
+// Run: harn test tests/agent/corrective_dialect_owner_test.harn
+//
+// Every corrective a model reads names the call syntax it should have used, and
+// every one has to name the SAME syntax the active parser accepts. Written out
+// at each call site they drift. One live session showed both dialects at once:
+// the unrecognized-span guidance said "emit every call as
+// `<tool_call>name({ ... })</tool_call>`" while the loop contract, the
+// missing-call corrective, and the parse guidance in the same session all
+// taught a ```tool fenced JSON object.
+//
+// `std/llm/call_shape` is the one owner. These runs assert that the correctives
+// on both sides of the seam — the agent's exemplar renderer and the parser's
+// recovery notes — quote that owner's row for the session's format, and that
+// neither side ever names the other format's delimiters.
+import { agent_tool_call_paradigm } from "std/agent/preflight"
+import { tool_call_shape, tool_call_syntax_named } from "std/llm/call_shape"
+import { parse_tool_calls } from "std/llm/tool_parse"
+import { tool_shape_feedback } from "std/llm/tool_shape"
+
+// Chat-template function markup: recognized and recovered on either pin, so the
+// note it raises is read by a `json` session and a `text` session alike.
+const MARKUP_CALL = "<function=add>{\"left\": 1, \"right\": 2}</function>"
+
+fn _tools() {
+  return tool_define(
+    tool_registry(),
+    "add",
+    "Add two integers.",
+    {
+      handler: { args -> args.left + args.right },
+      parameters: {left: {type: "integer"}, right: {type: "integer"}},
+    },
+  )
+}
+
+fn _finding() {
+  return [{shape: "bare_call", dropped_reason: "salvaged_as_prose", excerpt: "add(left=1)"}]
+}
+
+fn _violation_messages(text: string, format: string) -> list<string> {
+  const parsed = parse_tool_calls({text: text, tools: _tools(), tool_format: format})
+  return (parsed?.protocol_violations ?? []).map(fn(violation) { return violation.message })
+    .to_list()
+}
+
+fn _mentions(messages: list<string>, marker: string) -> bool {
+  for message in messages {
+    if contains(message, marker) {
+      return true
+    }
+  }
+  return false
+}
+
+pipeline test_agent_and_parser_correctives_share_one_owner(harness: Harness, task) {
+  for format in ["json", "text", "native"] {
+    const owned = tool_call_shape(format)
+    // The agent-side renderer resolves the session's format and returns the
+    // owner's row rather than a table of its own.
+    assert_eq(agent_tool_call_paradigm(harness.llm, {tool_format: format}), owned)
+    // The parser-side unrecognized-span corrective quotes the same row.
+    assert_eq(_mentions(tool_shape_feedback(_finding(), format), owned.call_syntax), true)
+  }
+}
+
+pipeline test_a_recovered_call_is_named_in_its_own_corrective(harness: Harness, task) {
+  // A note that already knows which call the model meant should name it — "emit
+  // `add` like this" is a smaller ask than "emit calls like this". The named
+  // form comes from the same owner, and an empty name falls back to the
+  // unnamed shape rather than rendering a hole.
+  for format in ["json", "text", "native"] {
+    assert_eq(contains(tool_call_syntax_named(format, "add"), "add"), true)
+    assert_eq(tool_call_syntax_named(format, ""), tool_call_shape(format).call_syntax)
+  }
+  // The recovery note for chat-template markup carries the tool's name through
+  // to the model on both pins.
+  assert_eq(_mentions(_violation_messages(MARKUP_CALL, "json"), "add"), true)
+  assert_eq(_mentions(_violation_messages(MARKUP_CALL, "text"), "add"), true)
+}
+
+pipeline test_json_session_is_never_taught_the_tagged_dialect(harness: Harness, task) {
+  // The falsifier for the observed defect. Under a `json` pin every corrective
+  // the turn produces must teach the fenced form, including the ones raised by
+  // the tagged recovery lane that the pinned lane falls back to.
+  const messages = _violation_messages(MARKUP_CALL, "json")
+  assert_eq(len(messages) > 0, true)
+  assert_eq(_mentions(messages, "```tool"), true)
+  assert_eq(_mentions(messages, "<tool_call>"), false)
+  assert_eq(_mentions(tool_shape_feedback(_finding(), "json"), "<tool_call>"), false)
+}
+
+pipeline test_text_session_is_never_taught_the_fenced_dialect(harness: Harness, task) {
+  // The other side of the pair: the same recovery under a `text` pin must still
+  // teach the tagged form, so the fix cannot be "stop naming a dialect".
+  const messages = _violation_messages(MARKUP_CALL, "text")
+  assert_eq(len(messages) > 0, true)
+  assert_eq(_mentions(messages, "<tool_call>"), true)
+  assert_eq(_mentions(messages, "```tool"), false)
+  assert_eq(_mentions(tool_shape_feedback(_finding(), "text"), "<tool_call>"), true)
+}

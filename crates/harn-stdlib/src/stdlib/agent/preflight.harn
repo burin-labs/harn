@@ -9,6 +9,7 @@ import {
   agent_session_project_turn,
   agent_session_visible_messages,
 } from "std/agent/state"
+import { tool_call_shape } from "std/llm/call_shape"
 
 fn __agent_done_sentinel(opts) {
   const sentinel = opts?.done_sentinel
@@ -46,44 +47,7 @@ fn __agent_tool_format(llm: HarnessLlm, opts) {
  * @api_stability: experimental
  */
 pub fn agent_tool_call_paradigm(llm: HarnessLlm, options = nil) {
-  const format = __agent_tool_format(llm, options)
-  if format == "native" {
-    return {
-      kind: "native",
-      call_open: "",
-      call_close: "",
-      body_open: "\"",
-      body_close: "\"",
-      call_noun: "native tool call",
-      final_answer: "in concise assistant text",
-      body_hint:
-        "Pass multi-line or code-bearing fields (file contents, replacement text) as ordinary JSON string arguments — the runtime handles escaping.",
-    }
-  }
-  if format == "json" {
-    return {
-      kind: "json",
-      call_open: "```tool\n",
-      call_close: "\n```",
-      body_open: "\"",
-      body_close: "\"",
-      call_noun: "```tool JSON block",
-      final_answer: "as plain text",
-      body_hint:
-        "Each tool call is one JSON object `{ \"name\": \"...\", \"args\": { ... } }` in a ```tool fenced block. For a multi-line or code-bearing field (file contents, replacement text, exact-match strings) use a verbatim body instead of escaping: set the value to `\"<<BODY\"`, then put the raw text after the JSON object INSIDE the same ```tool fence, ending with a line that is exactly `BODY`. A verbatim body needs NO escaping at all — quotes, backslashes, newlines, and backticks are literal bytes. Use `\"<<BODY:N\"`, where N is the exact number of body lines, only when the body itself contains a line that is exactly `BODY`. Short scalar values stay ordinary JSON strings (escape newlines as \\n, quotes as \\\", backslashes as \\\\). For several calls in one turn, emit consecutive objects — several ```tool blocks or several objects in one block — never a JSON array. Never wrap the call itself in a Markdown fence other than ```tool, and never use a triple-quoted string.",
-    }
-  }
-  return {
-    kind: "text",
-    call_open: "<tool_call>",
-    call_close: "</tool_call>",
-    body_open: "<<EOF\n",
-    body_close: "\nEOF",
-    call_noun: "`<tool_call>` block",
-    final_answer: "in a `<user_response>` block",
-    body_hint:
-      "For any multi-line or code-bearing field (file contents, replacement text, exact-match strings) use a heredoc body: write `<<EOF` after the colon, the raw content on the following lines, then a line that is exactly `EOF` (the closing `}`/`)` may follow it). Heredoc bodies need NO escaping — quotes, backslashes, and backticks are all literal. Never wrap code or multi-line text in a quoted string.",
-  }
+  return tool_call_shape(__agent_tool_format(llm, options))
 }
 
 /**
@@ -161,6 +125,9 @@ pub fn agent_render_tool_call_exemplar(llm: HarnessLlm, name, args, options = ni
       rendered = rendered + ", " + piece
     }
   }
+  if rendered == "" {
+    return p.call_open + to_string(name) + "({})" + p.call_close
+  }
   return p.call_open + to_string(name) + "({ " + rendered + " })" + p.call_close
 }
 
@@ -224,7 +191,13 @@ fn __agent_loop_contract_prompt(fs: HarnessFs, llm: HarnessLlm, opts) {
       exit_when_verified: opts?.exit_when_verified ?? false,
       has_tools: agent_has_tools(opts),
       native_mode: mode == "native",
-      native_done: mode == "native",
+      // Which spelling of the completion sentinel the detector actually honors
+      // is a property of the tool grammar, not of nativeness. Only the tagged
+      // text grammar parses a `<done>` block, and only there does a parsed
+      // block REDIRECT the sentinel check to its body; on every other route the
+      // check is a bare scan of the raw response, so the wrapper is decoration
+      // the route's own tool contract already tells the model not to write.
+      plain_text_done: mode != "text",
       calls_label: paradigm.call_noun + "s",
       final_answer: paradigm.final_answer,
       sentinel_active: sentinel != nil,

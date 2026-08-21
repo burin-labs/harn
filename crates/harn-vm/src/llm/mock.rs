@@ -10,6 +10,11 @@ use super::mock_store::{MockQueue, QueueMatch};
 use crate::orchestration::ToolCallRecord;
 use crate::value::{VmError, VmValue};
 
+/// The completion sentinel the simulator knows how to answer with. Fixtures
+/// that pin a different one script their own responses; this is the default
+/// the agent loop teaches, and the only spelling worth recognizing here.
+const MOCK_DONE_SENTINEL: &str = "##DONE##";
+
 /// LLM replay mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LlmReplayMode {
@@ -1315,11 +1320,18 @@ pub(crate) fn mock_llm_response(
         }
     }
 
-    // Preserve the historical auto-complete behavior for tagged text-tool
-    // prompts only. Bare `##DONE##` in no-tool/native prompts changes
-    // loop semantics by completing runs that used to exhaust budget unless
-    // a fixture explicitly returned the sentinel.
+    // Finish a run only when the prompt asked for a completion sentinel, and
+    // finish it in the spelling that prompt taught. A prompt that never
+    // mentions one still exhausts its budget: auto-completing those would
+    // change loop semantics for every fixture that means to run out.
+    //
+    // Keying this on the `<done>` block alone made the simulator agree with
+    // exactly one tool grammar. The tagged text grammar teaches the block and
+    // the others teach the bare sentinel, so when a route moved to the bare
+    // spelling its runs silently stopped completing — the fixtures did not
+    // change, the prompt they were answering did.
     let tagged_done = system.is_some_and(|s| s.contains("<done>"));
+    let plain_done = !tagged_done && system.is_some_and(|s| s.contains(MOCK_DONE_SENTINEL));
 
     let prose_body = if prompt_text.is_empty() {
         "Mock LLM response".to_string()
@@ -1331,7 +1343,11 @@ pub(crate) fn mock_llm_response(
         )
     };
     let response = if tagged_done {
-        format!("<assistant_prose>{prose_body}</assistant_prose>\n<done>##DONE##</done>")
+        format!(
+            "<assistant_prose>{prose_body}</assistant_prose>\n<done>{MOCK_DONE_SENTINEL}</done>"
+        )
+    } else if plain_done {
+        format!("{prose_body} {MOCK_DONE_SENTINEL}")
     } else {
         prose_body
     };

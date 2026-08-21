@@ -1,3 +1,4 @@
+import { llm_failure_exhausted_request_deadline } from "std/llm/envelope"
 import { with_retry } from "std/llm/handlers"
 
 pub type LlmRetryBackoff = "exponential" | "linear" | "jittered"
@@ -136,6 +137,16 @@ fn __agent_loop_retry_config(opts: AgentRetryOptionBag) -> AgentLoopRetryOptions
 
 pub fn agent_loop_default_retry_predicate(envelope) -> bool {
   if type_of(envelope) != "dict" || (envelope?.ok ?? false) {
+    return false
+  }
+  // A `timeout` status covers two different facts. A stalled provider (idle or
+  // first-chunk deadline, a 408, a 504) may answer the next attempt. The
+  // caller's own whole-request deadline elapsing does not: the retry re-sends
+  // identical bytes under an identical deadline, so it re-runs a race it has
+  // already watched end, burns the attempt budget, and postpones the fallback
+  // that could have changed the outcome. Checked before the status vocabulary,
+  // which cannot tell the two apart.
+  if llm_failure_exhausted_request_deadline(envelope) {
     return false
   }
   const status = __agent_retry_text(envelope?.status)

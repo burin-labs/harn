@@ -1,0 +1,92 @@
+// Run: harn test tests/agent/retry_request_deadline_test.harn
+//
+// A `timeout` status covers two different facts, and the retry policy used to
+// treat them as one. A stalled provider — an idle or first-chunk deadline, a
+// 408, a dropped connection — may answer the next attempt. The caller's own
+// whole-request deadline elapsing does not: `with_retry` re-invokes `next` with
+// the same request under the same deadline, so the retry re-runs a race it has
+// already watched end.
+//
+// Observed live: a grammar-constrained repair turn generating a large argument
+// object hit the request deadline, was re-sent unchanged, hit it again at the
+// same mark, and only then fell back to an unconstrained call — two full
+// deadlines spent before the one thing that could change the outcome.
+//
+// The discriminator is typed, not sniffed from a message: `build_llm_error_dict`
+// projects `source: "provider_stream"` and the deadline that fired.
+import { agent_loop_default_retry_predicate } from "std/agent/retry"
+import { with_retry } from "std/llm/handlers"
+
+fn _timeout_envelope(which: string) -> dict {
+  return {
+    ok: false,
+    status: "timeout",
+    error: {
+      category: "timeout",
+      kind: "transient",
+      reason: "timeout",
+      message: "local request error (timeout): operation timed out",
+      source: "provider_stream",
+      deadline: which,
+      partial: true,
+      provider: "local",
+      model: "local-model",
+    },
+  }
+}
+
+/**
+ * Invoke `with_retry` over a caller that always fails the same way, and report
+ * how many times the request was actually sent.
+ */
+fn _attempts_for(harness: Harness, envelope: dict) -> int {
+  const sent = harness.runtime.shared_cell(
+    {scope: "task_group", key: "retry-deadline-" + harness.random.uuid(), initial: 0},
+  )
+  const next = { _call ->
+    const snap = harness.runtime.shared_snapshot(sent)
+    harness.runtime.shared_cas(sent, snap, snap.value + 1)
+    return envelope
+  }
+  const retrying = with_retry(
+    harness,
+    next,
+    {max_attempts: 3, base_ms: 0, max_ms: 0, predicate: agent_loop_default_retry_predicate},
+  )
+  const _ = retrying({prompt: "hi", system: nil, opts: {}, turn: {iteration: 0, attempt: 1}})
+  return harness.runtime.shared_snapshot(sent).value
+}
+
+pipeline test_request_deadline_is_not_retried(harness: Harness, task) {
+  const envelope = _timeout_envelope("total")
+  assert_eq(agent_loop_default_retry_predicate(envelope), false)
+  // The falsifier for the observed defect: one send, not three.
+  assert_eq(_attempts_for(harness, envelope), 1)
+}
+
+pipeline test_stalled_provider_is_still_retried(harness: Harness, task) {
+  // The other side of the pair. A provider that went quiet may answer the next
+  // attempt, so the exemption must not be mistaken for "timeouts are terminal".
+  for which in ["idle", "first_chunk"] {
+    const envelope = _timeout_envelope(which)
+    assert_eq(agent_loop_default_retry_predicate(envelope), true)
+    assert_eq(_attempts_for(harness, envelope), 3)
+  }
+}
+
+pipeline test_untyped_timeout_keeps_its_old_verdict(harness: Harness, task) {
+  // A timeout with no provider-stream projection (a non-streaming request, or a
+  // gateway saying it gave up) is not the caller's deadline and is unchanged.
+  const gateway = {
+    ok: false,
+    status: "timeout",
+    error: {category: "timeout", kind: "transient", reason: "timeout", status: 504},
+  }
+  assert_eq(agent_loop_default_retry_predicate(gateway), true)
+  const stream_failure_without_deadline = {
+    ok: false,
+    status: "stream_interrupt",
+    error: {category: "transient_network", source: "provider_stream", deadline: nil},
+  }
+  assert_eq(agent_loop_default_retry_predicate(stream_failure_without_deadline), true)
+}

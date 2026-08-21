@@ -318,6 +318,67 @@ fn cli_mock_native_tool_calls_reach_the_live_result() {
     );
 }
 
+// --- Generated-prose completion sentinel ---
+
+/// Build a request whose system prompt is `system`, with one throwaway user
+/// message and no tools, so the generated-prose path is what answers it — the
+/// shared fixture declares a tool, which would take the auto-tool-call branch
+/// instead and never reach the prose the sentinel is written into.
+fn request_with_system(system: &str) -> LlmRequestPayload {
+    let mut opts = crate::llm::api::options::base_opts("mock");
+    opts.messages = vec![serde_json::json!({"role": "user", "content": "do the thing"})];
+    opts.system = Some(system.to_string());
+    opts.tools = None;
+    opts.native_tools = None;
+    LlmRequestPayload::from(&opts)
+}
+
+/// The simulator has to finish a run in whichever spelling of the sentinel the
+/// prompt taught. Keyed on the `<done>` block alone it agreed with exactly one
+/// tool grammar, so when a route moved to the bare spelling its fixtures
+/// stopped completing and ran out their iteration budget instead — with no
+/// change to the fixtures, only to the prompt they were answering.
+#[test]
+fn generated_prose_completes_in_the_spelling_the_prompt_taught() {
+    reset_llm_mock_state();
+
+    let tagged = mock_llm_response(&request_with_system(
+        "Emit `<done>##DONE##</done>` as its own top-level block.",
+    ))
+    .expect("tagged response");
+    assert!(
+        tagged.text.contains("<done>##DONE##</done>"),
+        "tagged prompt gets the block spelling: {}",
+        tagged.text
+    );
+
+    let plain = mock_llm_response(&request_with_system(
+        "Include `##DONE##` exactly once in assistant text.",
+    ))
+    .expect("plain response");
+    assert!(
+        plain.text.contains("##DONE##"),
+        "bare-sentinel prompt still completes: {}",
+        plain.text
+    );
+    assert!(
+        !plain.text.contains("<done>"),
+        "and completes without inventing the block: {}",
+        plain.text
+    );
+
+    // A prompt that never asks for a sentinel must still exhaust its budget.
+    // Completing those would change loop semantics for every fixture that
+    // means to run out.
+    let silent =
+        mock_llm_response(&request_with_system("Answer the user.")).expect("silent response");
+    assert!(
+        !silent.text.contains("##DONE##"),
+        "a prompt with no sentinel gets no sentinel: {}",
+        silent.text
+    );
+}
+
 // --- Versioned mock-fixture contract (#4984) ---
 
 /// Build a request that draws from `scope`, carrying `prompt` as the sole
