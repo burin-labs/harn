@@ -14,6 +14,26 @@ use harn_parser::{check_source, DiagnosticSeverity, PipelineError, TypeDiagnosti
 use tempfile::TempDir;
 
 #[test]
+fn check_accepts_runtime_backed_llm_usage_telemetry() {
+    harn_parser::install_builtin_manifest(harn_vm::stdlib::all_builtin_manifest());
+    let source = include_str!("../fixtures/llm_usage_provider_telemetry.harn");
+
+    let diagnostics = match check_source(source) {
+        Ok((_program, diagnostics)) => diagnostics,
+        Err(PipelineError::TypeCheck(diagnostic)) => vec![*diagnostic],
+        Err(other) => panic!("unexpected non-type-check pipeline error: {other:?}"),
+    };
+    let errors: Vec<_> = diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error)
+        .collect();
+    assert!(
+        errors.is_empty(),
+        "harn check must accept runtime-backed usage.provider_telemetry; got: {errors:#?}"
+    );
+}
+
+#[test]
 fn check_reports_unknown_struct_type_with_precise_location() {
     let temp = TempDir::new().unwrap();
     let script = temp.path().join("main.harn");

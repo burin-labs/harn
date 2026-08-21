@@ -1,0 +1,4 @@
+pipeline default(harness: Harness) {
+  const result = harness.llm.call("hi", nil, {provider: "mock"})
+  harness.stdio.println(to_string(result.usage.provider_telemetry != nil))
+}

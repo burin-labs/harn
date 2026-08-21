@@ -141,6 +141,10 @@ or derive cache behavior independently.
 | `input_tokens` | int | Input/prompt token count |
 | `output_tokens` | int | Output/completion token count |
 | `cost_usd` | float \| nil | Cache- and serving-tier-adjusted catalog price for this response; `nil` (not `0`) when pricing is unknown |
+| `known_cost_usd` | float | Priced lower bound across all physical provider calls, retained when `cost_usd` is unknown because one call was unpriced |
+| `provider_call_count` | int | Physical provider calls represented by this logical call, including retries |
+| `unpriced_calls` | int | Physical calls without known catalog pricing |
+| `usage_unknown_calls` | int | Physical calls that returned no authoritative token or cost accounting |
 | `cache_read_tokens` | int | Prompt tokens served from provider-side cache |
 | `cache_write_tokens` | int | Prompt tokens written into provider-side cache |
 | `cache_supported` | bool | Compatibility flag that is `false` for explicitly unsupported routes; use `cache_visibility` for declaration certainty |

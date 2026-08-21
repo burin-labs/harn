@@ -68,21 +68,26 @@ pub type LlmUsage = {
   input_tokens: int,
   output_tokens: int,
   cost_usd?: float,
+  known_cost_usd: float,
+  provider_call_count: int,
+  unpriced_calls: int,
+  usage_unknown_calls: int,
   cache_read_tokens: int,
   cache_write_tokens: int,
+  cache_supported: bool,
   cache_hit_ratio?: float,
   cache_visibility?: string,
   cache_savings_usd: float,
-  served_fast: bool,
-  /* Optional only for replay compatibility with recordings made before this field existed. */
-  accounting_status?: "reported" | "unknown",
-  provider_telemetry?: dict,
   /*
    * Optional because a replayed recording captured before this field existed
    * carries no attempts, which is "unknown" rather than "one clean request".
    * Every live call emits it.
    */
   provider_attempts?: LlmProviderAttempts,
+  served_fast: bool,
+  /* Optional only for replay compatibility with recordings made before this field existed. */
+  accounting_status?: "reported" | "unknown",
+  provider_telemetry?: dict,
 }
 
 /**

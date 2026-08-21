@@ -406,16 +406,40 @@ pub const SESSION_SNAPSHOT: Ty = Ty::Shape(&[
     ShapeFieldDescriptor::optional("state", TY_STRING),
 ]);
 
-/// Token and provider-cache accounting embedded in `llm_call` results.
+const LLM_ACCOUNTING_STATUS: Ty = Ty::Union(&[Ty::LitString("reported"), Ty::LitString("unknown")]);
+
+/// Physical provider requests made for one logical `llm_call`.
+pub const LLM_PROVIDER_ATTEMPTS: Ty = Ty::Shape(&[
+    ShapeFieldDescriptor::new("total", TY_INT),
+    ShapeFieldDescriptor::new("retries", TY_INT),
+    ShapeFieldDescriptor::new("rate_limited", TY_INT),
+    ShapeFieldDescriptor::new("empty_completion", TY_INT),
+    ShapeFieldDescriptor::new("other", TY_INT),
+]);
+
+/// Canonical usage envelope emitted by the LLM accounting ledger.
+///
+/// `harn-vm` has a bidirectional parity gate between this shape, the real
+/// runtime producer, and `std/llm/envelope::LlmUsage`. Do not add a field to
+/// one projection without moving the complete public contract together.
 pub const LLM_USAGE: Ty = Ty::Shape(&[
     ShapeFieldDescriptor::new("input_tokens", TY_INT),
     ShapeFieldDescriptor::new("output_tokens", TY_INT),
     ShapeFieldDescriptor::new("cost_usd", TY_FLOAT_OR_NIL),
+    ShapeFieldDescriptor::new("known_cost_usd", TY_FLOAT),
+    ShapeFieldDescriptor::new("provider_call_count", TY_INT),
+    ShapeFieldDescriptor::new("unpriced_calls", TY_INT),
+    ShapeFieldDescriptor::new("usage_unknown_calls", TY_INT),
     ShapeFieldDescriptor::new("cache_read_tokens", TY_INT),
     ShapeFieldDescriptor::new("cache_write_tokens", TY_INT),
-    ShapeFieldDescriptor::new("cache_creation_input_tokens", TY_INT),
-    ShapeFieldDescriptor::new("cache_hit_ratio", TY_FLOAT),
+    ShapeFieldDescriptor::new("cache_supported", TY_BOOL),
+    ShapeFieldDescriptor::new("cache_hit_ratio", TY_FLOAT_OR_NIL),
+    ShapeFieldDescriptor::new("cache_visibility", TY_STRING_OR_NIL),
     ShapeFieldDescriptor::new("cache_savings_usd", TY_FLOAT),
+    ShapeFieldDescriptor::new("provider_attempts", LLM_PROVIDER_ATTEMPTS),
+    ShapeFieldDescriptor::new("served_fast", TY_BOOL),
+    ShapeFieldDescriptor::new("accounting_status", LLM_ACCOUNTING_STATUS),
+    ShapeFieldDescriptor::optional("provider_telemetry", TY_DICT),
 ]);
 
 /// Harn-facing response dict assembled by `vm_build_llm_result` for

@@ -29,5 +29,7 @@ pipeline default(harness: Harness) {
   harness.stdio.println(r.prose == nil)
   harness.stdio.println(r.private_reasoning == nil)
   harness.stdio.println(r.parsed_done_marker == nil)
-  harness.stdio.println(r.usage.cache_creation_input_tokens == nil)
+  // Dynamic lookup preserves the runtime absence assertion without asking the
+  // closed usage type to expose this dead provider-wire alias.
+  harness.stdio.println(r.usage["cache_creation_input_tokens"] == nil)
 }
