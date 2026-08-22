@@ -273,7 +273,6 @@ fn __goal_judge_system(g) {
 pub fn goal_judge(g: GoalSpec, opts: GoalJudgeOptions? = nil) -> JudgeConfig {
   const o = opts ?? {}
   return {
-    enabled: true,
     fail_open_on_error: o?.fail_open_on_error ?? false,
     feedback_fallback: o?.feedback_fallback
       ?? "The goal is not yet met; keep working toward the success criteria.",
