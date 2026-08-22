@@ -159,6 +159,9 @@ const E2E_SUBPROCESS_PATHS: list<string> = [
   "crates/harn-cli/tests/harn_cli_fast/flow_ship_cli.rs",
   "crates/harn-cli/tests/harn_cli_e2e/host_lease_cli.rs",
   "crates/harn-cli/tests/harn_cli_e2e/host_lease_crash_cli.rs",
+  // Agents API authority must cross the real HTTP and CLI process boundary;
+  // an in-process server would not prove the `serve api` runtime projection.
+  "crates/harn-cli/tests/harn_cli_e2e/harn_serve_api_cli.rs",
   "crates/harn-cli/tests/harn_cli_e2e/harn_serve_mcp_cli.rs",
   "crates/harn-cli/tests/harn_cli_fast/llm_mock_cli.rs",
   "crates/harn-cli/tests/harn_cli_e2e/mcp_server_cli.rs",
