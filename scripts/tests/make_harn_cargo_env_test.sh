@@ -38,6 +38,23 @@ esac
 SH
 chmod +x "$fake_bin/cargo"
 
+cat > "$fake_bin/cygpath" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$#" -ne 2 || "$1" != "-u" ]]; then
+  echo "unexpected cygpath invocation: $*" >&2
+  exit 2
+fi
+case "$2" in
+  'C:\cargo target\nested') printf '/c/cargo target/nested\n' ;;
+  *)
+    echo "unexpected native Windows path: $2" >&2
+    exit 2
+    ;;
+esac
+SH
+chmod +x "$fake_bin/cygpath"
+
 cat > "$fake_bin/harn-lease" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -463,30 +480,61 @@ if [[ -d "$configured_target/debug/.fingerprint" ]]; then
 fi
 
 : > "$record"
-set +e
 PATH="$fake_bin:$PATH" \
+  OS=Windows_NT \
   FAKE_CARGO_RECORD="$record" \
-  FAKE_METADATA_JSON='{"packages":[]}' \
-  "$repo_root/scripts/cargo_with_worktree_build_dir.sh" run --quiet --bin harn -- fmt --check \
-  > "$tmp_root/missing-target-stdout.txt" \
-  2> "$tmp_root/missing-target-stderr.txt"
-missing_target_status=$?
-set -e
-if [[ "$missing_target_status" -eq 0 ]]; then
-  echo "wrapper accepted cargo metadata without target_directory" >&2
+  FAKE_METADATA_JSON='{"target_directory":"C:\\cargo target\\nested"}' \
+  "$repo_root/scripts/cargo_with_worktree_build_dir.sh" \
+    run --quiet --bin harn -- fmt --check
+if ! grep -Fxq 'CARGO_TARGET_DIR=/c/cargo target/nested' "$record"; then
+  echo "wrapper did not JSON-decode and normalize Cargo's native Windows target_directory" >&2
   cat "$record" >&2
   exit 1
 fi
-if ! grep -Fq "cargo metadata did not report a simple target_directory" "$tmp_root/missing-target-stderr.txt"; then
-  echo "wrapper did not explain missing target_directory" >&2
-  cat "$tmp_root/missing-target-stderr.txt" >&2
-  exit 1
-fi
-if grep -Fxq "args=run --quiet --bin harn -- fmt --check" "$record"; then
-  echo "wrapper ran cargo after malformed metadata" >&2
+if grep -Fq 'CARGO_BUILD_BUILD_DIR=/c/cargo target/nested' "$record"; then
+  echo "wrapper synthesized a Windows build-dir after metadata target normalization" >&2
   cat "$record" >&2
   exit 1
 fi
+
+assert_invalid_metadata_fails_closed() {
+  local name="$1"
+  local metadata_json="$2"
+  local status=0
+
+  : > "$record"
+  set +e
+  PATH="$fake_bin:$PATH" \
+    FAKE_CARGO_RECORD="$record" \
+    FAKE_METADATA_JSON="$metadata_json" \
+    "$repo_root/scripts/cargo_with_worktree_build_dir.sh" \
+      run --quiet --bin harn -- fmt --check \
+    > "$tmp_root/$name-stdout.txt" \
+    2> "$tmp_root/$name-stderr.txt"
+  status=$?
+  set -e
+  if [[ "$status" -eq 0 ]]; then
+    echo "wrapper accepted $name cargo metadata" >&2
+    cat "$record" >&2
+    exit 1
+  fi
+  if ! grep -Fq "cargo metadata did not report a supported nonempty target_directory" \
+      "$tmp_root/$name-stderr.txt"; then
+    echo "wrapper did not explain $name cargo metadata" >&2
+    cat "$tmp_root/$name-stderr.txt" >&2
+    exit 1
+  fi
+  if grep -Fxq "args=run --quiet --bin harn -- fmt --check" "$record"; then
+    echo "wrapper ran cargo after $name metadata" >&2
+    cat "$record" >&2
+    exit 1
+  fi
+}
+
+assert_invalid_metadata_fails_closed missing-target '{"packages":[]}'
+assert_invalid_metadata_fails_closed malformed-json '{"target_directory":'
+assert_invalid_metadata_fails_closed non-string-target '{"target_directory":42}'
+assert_invalid_metadata_fails_closed newline-target '{"target_directory":"first\nsecond"}'
 
 : > "$record"
 printf 'example.harn\0' \

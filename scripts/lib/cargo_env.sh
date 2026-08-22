@@ -7,12 +7,45 @@
 # that boundary as well.
 
 harn_cargo_metadata_target_dir() (
+  restricted_decoder=0
   metadata=$(cargo metadata --format-version=1 --no-deps) || exit $?
-  target_dir=$(printf '%s\n' "$metadata" | sed -n 's/.*"target_directory":"\([^"\\]*\)".*/\1/p')
+  if command -v jq >/dev/null 2>&1; then
+    # Cargo owns this path and exposes it through a JSON contract. Delegate
+    # JSON decoding to jq so escaped native Windows separators, drive colons,
+    # spaces, and Unicode are data rather than shell/regex syntax. The cache
+    # below is line-oriented, so fail closed on paths it cannot represent.
+    target_dir=$(printf '%s\n' "$metadata" | jq -er '
+      .target_directory
+      | strings
+      | select(length > 0)
+      | select((contains("\n") or contains("\r")) | not)
+    ') || target_dir=
+  else
+    restricted_decoder=1
+    # Keep Rust-only Unix checkouts usable without adding jq as a build
+    # prerequisite. This fallback intentionally accepts only Cargo JSON whose
+    # target path needs no JSON escapes; anything broader requires a real JSON
+    # decoder instead of hand-rolled unescaping.
+    target_dir=$(printf '%s\n' "$metadata" \
+      | sed -n 's/.*"target_directory":"\([^"\\]*\)".*/\1/p')
+  fi
   if [ -z "$target_dir" ]; then
-    echo "error: cargo metadata did not report a simple target_directory" >&2
+    if [ "$restricted_decoder" = 1 ]; then
+      echo "error: jq is required when Cargo's target_directory contains JSON escapes" >&2
+    fi
+    echo "error: cargo metadata did not report a supported nonempty target_directory" >&2
     exit 1
   fi
+
+  case "${OS:-$(uname -s)}" in
+    Windows_NT | MINGW* | MSYS* | CYGWIN*)
+      if ! command -v cygpath >/dev/null 2>&1; then
+        echo "error: cannot normalize Cargo's native Windows target_directory without cygpath" >&2
+        exit 1
+      fi
+      target_dir=$(cygpath -u "$target_dir") || exit $?
+      ;;
+  esac
   printf '%s\n' "$target_dir"
 )
 

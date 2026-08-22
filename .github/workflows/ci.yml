@@ -1519,6 +1519,7 @@ jobs:
           # intentionally does not carry the top-level dep-info/receipt pair.
           # Let Cargo resolve the exact graph the canonical resolver uses;
           # never infer freshness from harn.exe existence.
+          jq --version
           cargo build --locked -p harn-cli \
             --bin harn --bin harn-freshness-check \
             --features internal-freshness-checker
