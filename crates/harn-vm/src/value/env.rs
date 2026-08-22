@@ -501,31 +501,35 @@ impl VmEnv {
             if !existing.mutable() {
                 return Err(VmError::ImmutableAssignment(name.to_string()));
             }
-            match existing {
+            let cell = match existing {
+                Binding::Cell { cell, .. } => Some(Arc::clone(cell)),
+                Binding::Value { .. } => None,
+            };
+            match cell {
                 // Write *through* the shared cell: the entry is not replaced,
                 // so the scope-map copy-on-write is sidestepped and every
                 // holder of this cell (the defining frame, sibling closures)
                 // observes the update.
-                Binding::Cell { cell, .. } => {
+                Some(cell) => {
                     let previous = std::mem::replace(&mut *cell.lock(), value);
                     super::recursion::dismantle(previous);
                 }
-                Binding::Value { .. } => {
-                    // Iterative teardown so overwriting a deeply nested binding
-                    // cannot overflow the stack on drop (scalars are a no-op).
-                    // The prior binding here is always a `Value` (a name is
-                    // either always boxed or never — see the compiler's capture
-                    // pre-pass), so only that arm needs draining.
-                    if let Some(Binding::Value { value, .. }) = Arc::make_mut(&mut scope.vars)
-                        .insert(
-                            name.to_string(),
-                            Binding::Value {
-                                value,
-                                mutable: true,
-                            },
-                        )
+                None => {
+                    // Overwrite the existing entry's value in place: the
+                    // binding was just verified mutable, so no flag changes,
+                    // and `get_mut` spares both the `String` key allocation
+                    // and the map re-insertion a fresh `insert` would pay.
+                    // Iterative teardown so overwriting a deeply nested
+                    // binding cannot overflow the stack on drop (scalars are
+                    // a no-op). The prior binding here is always a `Value` (a
+                    // name is either always boxed or never — see the
+                    // compiler's capture pre-pass), so only that arm needs
+                    // draining.
+                    if let Some(Binding::Value { value: slot, .. }) =
+                        Arc::make_mut(&mut scope.vars).get_mut(name)
                     {
-                        super::recursion::dismantle(value);
+                        let previous = std::mem::replace(slot, value);
+                        super::recursion::dismantle(previous);
                     }
                 }
             }

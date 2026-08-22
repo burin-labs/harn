@@ -24,7 +24,12 @@ impl super::Vm {
                         let idx = if f.ip > 0 { f.ip - 1 } else { 0 };
                         let line = f.chunk.lines.get(idx).copied().unwrap_or(0) as usize;
                         let col = f.chunk.columns.get(idx).copied().unwrap_or(0) as usize;
-                        (f.fn_name.clone(), line, col, f.chunk.source_file.clone())
+                        (
+                            f.fn_name.to_string(),
+                            line,
+                            col,
+                            f.chunk.source_file.clone(),
+                        )
                     })
                     .collect()
             };

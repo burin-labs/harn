@@ -66,7 +66,9 @@ pub enum VmIter {
     /// Snapshot over a dict; yields `Pair(key, value)` items.
     Dict {
         entries: Arc<crate::value::DictMap>,
-        keys: Vec<String>,
+        /// `HarnStr` clones of the map's own keys — a refcount bump per key
+        /// to build, and yielding a pair re-shares the same allocation.
+        keys: Vec<crate::value::HarnStr>,
         idx: usize,
     },
     /// Unicode scalar iteration over a string.
@@ -220,11 +222,11 @@ impl VmIter {
             }
             VmIter::Dict { entries, keys, idx } => {
                 if *idx < keys.len() {
-                    let k = &keys[*idx];
-                    let v = entries.get(k.as_str()).cloned().unwrap_or(VmValue::Nil);
+                    let k = keys[*idx].clone();
+                    let v = entries.get(&k).cloned().unwrap_or(VmValue::Nil);
                     *idx += 1;
                     Ok(Some(VmValue::Pair(std::sync::Arc::new((
-                        VmValue::String(arcstr::ArcStr::from(k.as_str())),
+                        VmValue::String(k),
                         v,
                     )))))
                 } else {
@@ -1171,7 +1173,7 @@ pub fn iter_from_value(v: VmValue) -> Result<VmValue, VmError> {
             idx: 0,
         },
         VmValue::Dict(entries) => {
-            let keys: Vec<String> = entries.keys().map(|k| k.to_string()).collect();
+            let keys: Vec<crate::value::HarnStr> = entries.keys().cloned().collect();
             VmIter::Dict {
                 entries,
                 keys,

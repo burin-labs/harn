@@ -193,7 +193,12 @@ pub struct Chunk {
     /// Lazily-materialized shared string cache for `Constant::String` entries,
     /// parallel to `constants`. String constants are materialized once per
     /// unique constant; subsequent pushes are a [`HarnStr`] refcount bump.
-    constant_strings: Arc<Mutex<Vec<Option<crate::value::HarnStr>>>>,
+    /// Per-slot `OnceLock`s keep the steady-state read lock-free — the
+    /// previous `Mutex<Vec<..>>` paid an uncontended lock round-trip on every
+    /// string-constant push. Sized to the constant pool at construction;
+    /// constants appended afterwards (compile-time emission) fall back to
+    /// uncached materialization in [`Chunk::constant_string_rc`].
+    constant_strings: Arc<Vec<std::sync::OnceLock<crate::value::HarnStr>>>,
     /// Source-name metadata for slot-indexed locals in this chunk.
     pub(crate) local_slots: Vec<LocalSlotInfo>,
     /// Declared types for annotated `let` / `const` sites in this chunk,
@@ -255,7 +260,8 @@ impl Clone for Chunk {
                 InlineCacheEntry::Empty;
                 self.inline_cache_slot_count()
             ])),
-            constant_strings: Arc::new(Mutex::new(vec![None; self.constants.len()])),
+            // Same immutable constants — share the materialized-string cache.
+            constant_strings: Arc::clone(&self.constant_strings),
             local_slots: self.local_slots.clone(),
             binding_types: self.binding_types.clone(),
             references_outer_names: self.references_outer_names,
@@ -385,7 +391,9 @@ impl ParamSlot {
 /// A compiled function (closure body).
 #[derive(Debug, Clone)]
 pub struct CompiledFunction {
-    pub name: String,
+    /// Shared so per-call consumers (the call frame, stack traces) take a
+    /// refcount bump instead of a heap-allocating `String` clone.
+    pub name: crate::value::HarnStr,
     /// Generic type parameters declared by this function. Runtime
     /// validation treats these as static-only constraints because the VM
     /// does not monomorphize function bodies.
@@ -414,7 +422,7 @@ pub struct CompiledFunction {
 impl CompiledFunction {
     pub(crate) fn from_portable(portable: harn_kernel::CompiledFunction) -> Self {
         Self {
-            name: portable.name,
+            name: crate::value::HarnStr::from(portable.name),
             type_params: portable.type_params,
             nominal_type_names: portable.nominal_type_names,
             params: portable
@@ -487,7 +495,7 @@ impl CompiledFunction {
 
     pub(crate) fn freeze_for_cache(&self) -> CachedCompiledFunction {
         CachedCompiledFunction {
-            name: self.name.clone(),
+            name: self.name.to_string(),
             type_params: self.type_params.clone(),
             nominal_type_names: self.nominal_type_names.clone(),
             params: self
@@ -506,7 +514,7 @@ impl CompiledFunction {
 
     pub(crate) fn from_cached(cached: CachedCompiledFunction) -> Self {
         Self {
-            name: cached.name,
+            name: crate::value::HarnStr::from(cached.name),
             type_params: cached.type_params,
             nominal_type_names: cached.nominal_type_names,
             params: cached
@@ -687,7 +695,11 @@ impl Chunk {
                 InlineCacheEntry::Empty;
                 inline_cache_count
             ])),
-            constant_strings: Arc::new(Mutex::new(vec![None; constant_count])),
+            constant_strings: Arc::new(
+                (0..constant_count)
+                    .map(|_| std::sync::OnceLock::new())
+                    .collect(),
+            ),
             local_slots: portable
                 .local_slots
                 .into_iter()
@@ -728,7 +740,7 @@ impl Chunk {
             inline_cache_slots: BTreeMap::new(),
             inline_cache_index: Vec::new(),
             inline_caches: Arc::new(Mutex::new(Vec::new())),
-            constant_strings: Arc::new(Mutex::new(Vec::new())),
+            constant_strings: Arc::new(Vec::new()),
             local_slots: Vec::new(),
             binding_types: Vec::new(),
             references_outer_names: false,
@@ -1040,22 +1052,27 @@ impl Chunk {
     /// Returns `None` when the constant at `idx` is not a string (the
     /// caller should fall back to the regular `Constant` match).
     pub(crate) fn constant_string_rc(&self, idx: usize) -> Option<crate::value::HarnStr> {
-        // Borrow the side table mutably so we can lazily extend / fill
-        // entries. The borrow is scope-confined to this function; the
-        // VM never re-enters constant_string_rc for the same chunk
-        // during a single materialization, so no nested-borrow risk.
-        let mut entries = self.constant_strings.lock();
-        if entries.len() < self.constants.len() {
-            entries.resize(self.constants.len(), None);
-        }
-        if let Some(Some(existing)) = entries.get(idx) {
+        let slot = match self.constant_strings.get(idx) {
+            Some(slot) => slot,
+            // Constant appended after the cache was sized (a chunk still
+            // being emitted into, e.g. tests executing hand-built chunks):
+            // correct but uncached.
+            None => {
+                return match self.constants.get(idx)? {
+                    Constant::String(s) => Some(crate::value::HarnStr::from(s.as_str())),
+                    _ => None,
+                }
+            }
+        };
+        if let Some(existing) = slot.get() {
             return Some(existing.clone());
         }
         let materialized = match self.constants.get(idx)? {
             Constant::String(s) => crate::value::HarnStr::from(s.as_str()),
             _ => return None,
         };
-        entries[idx] = Some(materialized.clone());
+        // A concurrent initializer stored an identical value; either wins.
+        let _ = slot.set(materialized.clone());
         Some(materialized)
     }
 
@@ -1186,7 +1203,11 @@ impl Chunk {
                 InlineCacheEntry::Empty;
                 inline_cache_count
             ])),
-            constant_strings: Arc::new(Mutex::new(vec![None; constants_count])),
+            constant_strings: Arc::new(
+                (0..constants_count)
+                    .map(|_| std::sync::OnceLock::new())
+                    .collect(),
+            ),
             local_slots,
             binding_types,
             references_outer_names,

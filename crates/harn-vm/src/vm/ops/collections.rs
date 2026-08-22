@@ -443,13 +443,12 @@ impl super::super::Vm {
     }
 
     pub(super) fn execute_get_property(&mut self, optional: bool) -> Result<(), VmError> {
-        let (chunk, cache_site, name_idx) = {
+        let (cache_site, name_idx) = {
             let frame = self.frames.last_mut().unwrap();
-            let chunk = Arc::clone(&frame.chunk);
             let cache_site = frame.inline_cache_site_for_previous_op();
             let name_idx = frame.chunk.read_u16(frame.ip);
             frame.ip += 2;
-            (chunk, cache_site, name_idx)
+            (cache_site, name_idx)
         };
         let cached_property = cache_site
             .slot
@@ -463,6 +462,10 @@ impl super::super::Vm {
         {
             self.stack.push(result);
         } else {
+            // Slow path only: the chunk `Arc` bump (two atomic RMWs with the
+            // matching drop) is deferred off the cache-hit path, which never
+            // reads the constant pool.
+            let chunk = Arc::clone(&self.frames.last().expect("frame exists above").chunk);
             let (result, target) = {
                 let name = Self::const_str(&chunk.constants[name_idx as usize])?;
                 (
@@ -739,6 +742,15 @@ impl super::super::Vm {
         let count = frame.chunk.read_u16(frame.ip) as usize;
         frame.ip += 2;
         let start = self.stack.len().saturating_sub(count);
+        // A one-part concat of an existing string (`"${name}"`) is already
+        // the value being produced — re-share it instead of copying it into
+        // a fresh String and then again into a fresh ArcStr.
+        if let [VmValue::String(text)] = &self.stack[start..] {
+            let text = text.clone();
+            self.stack.truncate(start);
+            self.stack.push(VmValue::String(text));
+            return;
+        }
         let result = Self::concat_display_values(&self.stack[start..]);
         self.stack.truncate(start);
         self.stack

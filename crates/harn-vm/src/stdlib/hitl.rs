@@ -711,7 +711,7 @@ async fn dual_control_impl(ctx: &AsyncBuiltinCtx, args: &[VmValue]) -> Result<Vm
     let action_name = if action.func.name.is_empty() {
         "anonymous".to_string()
     } else {
-        action.func.name.clone()
+        action.func.name.to_string()
     };
     let agent = keys
         .as_ref()

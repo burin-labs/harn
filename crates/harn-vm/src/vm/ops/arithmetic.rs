@@ -155,18 +155,14 @@ impl super::super::Vm {
 
         let shape = BinaryShape::for_values(op, &a, &b);
 
-        if let Some((result, next_state)) = Self::try_specialized_binary(op, cached_state, &a, &b) {
-            if let Some(slot) = cache_slot {
-                self.set_inline_cache_entry_by_index(
-                    cache_set,
-                    slot_count,
-                    slot,
-                    InlineCacheEntry::AdaptiveBinary {
-                        op,
-                        state: next_state,
-                    },
-                );
-            }
+        if let Some(result) = Self::try_specialized_binary(op, cached_state, &a, &b) {
+            // Steady-state specialized hit: the cached entry already holds
+            // this op and shape, so there is nothing semantic to write back.
+            // Advancing the `hits` counter would rewrite the whole entry on
+            // the hottest arithmetic path, and nothing reads it beyond the
+            // `>= ADAPTIVE_QUICKEN_THRESHOLD` promotion check that already
+            // passed — deopt decisions are driven by `misses` alone. The
+            // counter therefore freezes at its promotion value.
             Ok(result)
         } else {
             let result = Self::generic_binary_result(self, op, a, b)?;
@@ -188,35 +184,21 @@ impl super::super::Vm {
 
     /// Adaptive-binary specialization fast path. The caller supplies the
     /// peeked `Copy` state after filtering for the current op, which keeps
-    /// this helper focused on shape matching and result production. Returns
-    /// `(result, next_state)` on a hit; the caller wraps `next_state` into an
-    /// `InlineCacheEntry` before writing it back.
+    /// this helper focused on shape matching and result production. A hit
+    /// leaves the cache entry untouched (see the caller for why).
     fn try_specialized_binary(
         op: AdaptiveBinaryOp,
         cached_state: Option<AdaptiveBinaryState>,
         a: &VmValue,
         b: &VmValue,
-    ) -> Option<(VmValue, AdaptiveBinaryState)> {
-        let AdaptiveBinaryState::Specialized {
-            shape,
-            hits,
-            misses,
-        } = cached_state?
-        else {
+    ) -> Option<VmValue> {
+        let AdaptiveBinaryState::Specialized { shape, .. } = cached_state? else {
             return None;
         };
         if Some(shape) != BinaryShape::for_values(op, a, b) {
             return None;
         }
-        let result = Self::specialized_binary_result(op, shape, a, b)?;
-        Some((
-            result,
-            AdaptiveBinaryState::Specialized {
-                shape,
-                hits: hits.saturating_add(1),
-                misses,
-            },
-        ))
+        Self::specialized_binary_result(op, shape, a, b)
     }
 
     /// Compute the next adaptive-binary cache state from the peeked

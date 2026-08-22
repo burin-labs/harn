@@ -488,7 +488,7 @@ impl DirectCallStateReadFixture {
 
 fn synthetic_direct_call_closure() -> Arc<VmClosure> {
     let func = CompiledFunction {
-        name: "synthetic_direct_call_target".to_string(),
+        name: arcstr::literal!("synthetic_direct_call_target"),
         type_params: Vec::new(),
         nominal_type_names: Vec::new(),
         params: Vec::new(),
@@ -572,7 +572,7 @@ impl NonModuleClosureCallFixture {
 
 fn synthetic_closure(name: &str, env: VmEnv) -> VmClosure {
     let func = CompiledFunction {
-        name: name.to_string(),
+        name: crate::value::HarnStr::from(name),
         type_params: Vec::new(),
         nominal_type_names: Vec::new(),
         params: Vec::new(),

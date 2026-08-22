@@ -519,11 +519,11 @@ pub fn answer(items: list<string>) {
             .collect::<Vec<_>>();
         let (function_key, function) = artifact.functions.first_key_value().unwrap();
         let function_key = function_key.as_ptr();
-        let function_name = function.name.as_ptr();
+        let function_name = function.name.clone();
         let function_code = function.chunk.code.as_ptr();
         let param_name = function.params[0].name.as_ptr();
         let param_type_name = named_list_element(&function.params[0].type_expr).as_ptr();
-        let nested_name = function.chunk.functions[0].name.as_ptr();
+        let nested_name = function.chunk.functions[0].name.clone();
         let nested_code = function.chunk.functions[0].chunk.code.as_ptr();
         let public_export_name = artifact
             .public_exports
@@ -558,7 +558,9 @@ pub fn answer(items: list<string>) {
         let (hydrated_function_key, hydrated_function) =
             hydrated.functions.first_key_value().unwrap();
         assert_eq!(hydrated_function_key.as_ptr(), function_key);
-        assert_eq!(hydrated_function.name.as_ptr(), function_name);
+        // Function names convert into a shared `HarnStr` at hydration (one
+        // short copy) so per-call consumers can share them; compare by value.
+        assert_eq!(hydrated_function.name.as_str(), function_name);
         assert_eq!(hydrated_function.chunk.code.as_ptr(), function_code);
         assert_eq!(hydrated_function.params[0].name.as_ptr(), param_name);
         assert_eq!(
@@ -566,7 +568,7 @@ pub fn answer(items: list<string>) {
             param_type_name
         );
         assert_eq!(
-            hydrated_function.chunk.functions[0].name.as_ptr(),
+            hydrated_function.chunk.functions[0].name.as_str(),
             nested_name
         );
         assert_eq!(

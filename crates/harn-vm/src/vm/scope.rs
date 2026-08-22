@@ -149,9 +149,11 @@ impl Vm {
         closure: &VmClosure,
         args: &CallArgs<'_>,
     ) -> Result<Option<Vec<VmValue>>, VmError> {
-        if self.global("harness").is_none() {
-            return Ok(None);
-        }
+        // Runs on every closure entry, so the common case — a callee whose
+        // leading parameter is not capability-typed — must bail out before
+        // any allocation or global lookup: the `map_while` breaks on the
+        // first ordinary parameter, and the `harness` global (an OrdMap
+        // string lookup) is only consulted once a capability prefix exists.
         let capability_types: Vec<&str> = closure
             .func
             .params
@@ -167,6 +169,9 @@ impl Vm {
             })
             .collect();
         if capability_types.is_empty() {
+            return Ok(None);
+        }
+        if self.global("harness").is_none() {
             return Ok(None);
         }
         let first_type = capability_types[0];
@@ -248,8 +253,11 @@ impl Vm {
         // push_closure_frame is called from deep inside the call
         // dispatcher — the cleanest place for the debugger to observe
         // a consistent state is at the next line-change check.
-        if self.function_breakpoints.contains(&closure.func.name) {
-            self.pending_function_bp = Some(closure.func.name.clone());
+        if self
+            .function_breakpoints
+            .contains(closure.func.name.as_str())
+        {
+            self.pending_function_bp = Some(closure.func.name.to_string());
         }
 
         let chunk = Arc::clone(&closure.func.chunk);

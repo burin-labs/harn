@@ -242,7 +242,7 @@ fn cached_chunk_hydration_moves_owned_storage() {
     let mut nested_chunk = Chunk::new();
     nested_chunk.emit(Op::Return, 7);
     let nested = CompiledFunction {
-        name: "nested".to_string(),
+        name: arcstr::literal!("nested"),
         type_params: vec!["T".to_string()],
         nominal_type_names: vec!["Widget".to_string()],
         params: vec![ParamSlot {
@@ -275,7 +275,6 @@ fn cached_chunk_hydration_moves_owned_storage() {
     let columns = cached.columns.as_ptr();
     let source_file = cached.source_file.as_ref().unwrap().as_ptr();
     let local_slots = cached.local_slots.as_ptr();
-    let function_name = cached.functions[0].name.as_ptr();
     let type_params = cached.functions[0].type_params.as_ptr();
     let nominal_type_names = cached.functions[0].nominal_type_names.as_ptr();
     let param_name = cached.functions[0].params[0].name.as_ptr();
@@ -290,7 +289,11 @@ fn cached_chunk_hydration_moves_owned_storage() {
     assert_eq!(hydrated.columns.as_ptr(), columns);
     assert_eq!(hydrated.source_file.as_ref().unwrap().as_ptr(), source_file);
     assert_eq!(hydrated.local_slots.as_ptr(), local_slots);
-    assert_eq!(hydrated.functions[0].name.as_ptr(), function_name);
+    // The function name is the one deliberate exception to zero-copy
+    // hydration: it converts once into a shared `HarnStr` here so every
+    // subsequent call frame takes a refcount bump instead of a `String`
+    // clone. Value equality is the contract; storage is intentionally new.
+    assert_eq!(hydrated.functions[0].name, "nested");
     assert_eq!(hydrated.functions[0].type_params.as_ptr(), type_params);
     assert_eq!(
         hydrated.functions[0].nominal_type_names.as_ptr(),
@@ -917,7 +920,7 @@ fn synthetic_direct_call_target() -> DirectCallTarget {
     use crate::value::VmClosure;
     use crate::{CompiledFunction, VmEnv};
     let func = CompiledFunction {
-        name: "synthetic".to_string(),
+        name: arcstr::literal!("synthetic"),
         type_params: Vec::new(),
         nominal_type_names: Vec::new(),
         params: Vec::new(),

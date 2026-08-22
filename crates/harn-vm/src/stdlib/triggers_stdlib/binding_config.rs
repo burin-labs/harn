@@ -339,7 +339,7 @@ fn parse_handler_value(
 ) -> Result<(TriggerHandlerSpec, serde_json::Value), VmError> {
     match value {
         VmValue::Closure(closure) => {
-            let raw = closure.func.name.clone();
+            let raw = closure.func.name.to_string();
             Ok((
                 TriggerHandlerSpec::Local {
                     raw: raw.clone(),

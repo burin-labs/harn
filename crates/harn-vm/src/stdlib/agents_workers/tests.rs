@@ -23,7 +23,7 @@ fn vm_dict(pairs: Vec<(&str, VmValue)>) -> VmValue {
 fn vm_closure(name: &str) -> VmValue {
     VmValue::Closure(Arc::new(crate::value::VmClosure {
         func: Arc::new(crate::chunk::CompiledFunction {
-            name: name.to_string(),
+            name: crate::value::HarnStr::from(name),
             type_params: Vec::new(),
             nominal_type_names: Vec::new(),
             params: Vec::new(),

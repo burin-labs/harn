@@ -39,7 +39,7 @@ impl super::super::Vm {
                     .push(super::super::IterState::Vec { items, idx: 0 });
             }
             VmValue::Dict(map) => {
-                let keys = map.keys().map(|k| k.to_string()).collect();
+                let keys = map.keys().cloned().collect();
                 self.iterators.push(super::super::IterState::Dict {
                     entries: map,
                     keys,
@@ -130,14 +130,16 @@ impl super::super::Vm {
             }
             Some(super::super::IterState::Dict { entries, keys, idx }) => {
                 if *idx < keys.len() {
-                    let key = &keys[*idx];
-                    let value = entries.get(key.as_str()).cloned().unwrap_or(VmValue::Nil);
-                    let entry_key = VmValue::String(arcstr::ArcStr::from(key.as_str()));
+                    let key = keys[*idx].clone();
+                    let value = entries.get(&key).cloned().unwrap_or(VmValue::Nil);
                     *idx += 1;
+                    // Static entry keys: `intern_key` takes a process-global
+                    // lock, which is pure overhead for two fixed literals on
+                    // a per-iteration path.
                     self.stack
                         .push(VmValue::dict(crate::value::DictMap::from_iter([
-                            (crate::value::intern_key("key"), entry_key),
-                            (crate::value::intern_key("value"), value),
+                            (arcstr::literal!("key"), VmValue::String(key)),
+                            (arcstr::literal!("value"), value),
                         ])));
                 } else {
                     self.iterators.pop();
@@ -389,7 +391,7 @@ mod tests {
                     idx,
                 } => {
                     assert!(Arc::ptr_eq(&entries, iter_entries));
-                    assert_eq!(keys.as_slice(), ["a".to_string(), "b".to_string()]);
+                    assert_eq!(keys.as_slice(), ["a", "b"]);
                     assert_eq!(*idx, 0);
                 }
                 _ => panic!("expected dict iterator state"),

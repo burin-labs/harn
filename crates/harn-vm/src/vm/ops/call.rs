@@ -580,7 +580,9 @@ impl super::super::Vm {
             .slot
             .and_then(|slot| self.peek_direct_call_state_by_index(cache_site.cache_set, slot));
         let callee_idx = self.stack.len().checked_sub(argc + 1)?;
-        let closure = match self.try_cached_direct_call(cached_state.as_ref(), argc, callee_idx) {
+        let cached_hit = self.try_cached_direct_call(cached_state.as_ref(), argc, callee_idx);
+        let specialized_hit = cached_hit.is_some();
+        let closure = match cached_hit {
             Some(closure) => closure,
             None => match self.stack.get(callee_idx)? {
                 VmValue::Closure(c) => Arc::clone(c),
@@ -591,7 +593,12 @@ impl super::super::Vm {
             return None;
         }
 
-        if let Some(slot) = cache_site.slot {
+        // Steady-state specialized hit: the entry already holds exactly this
+        // target and argc, so rewriting it would clone the target `Arc` out
+        // and back in per call purely to advance a `hits` counter nothing
+        // reads past the promotion threshold (deopt is driven by `misses`).
+        // The counter freezes at its promotion value instead.
+        if let (Some(slot), false) = (cache_site.slot, specialized_hit) {
             let next_entry = Self::next_direct_call_entry(
                 cached_state,
                 argc,
