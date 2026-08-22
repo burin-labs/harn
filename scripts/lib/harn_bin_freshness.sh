@@ -473,3 +473,25 @@ harn_require_binary_freshness_receipt() (
     return 1
   fi
 )
+
+# Return the compiled identity from a receipt only after the canonical checker
+# has rebound that receipt to the current executable, manifest, and checkout.
+# CI exports this build input to later Cargo invocations so they cannot relink
+# the proven binary with a different `rerun-if-env-changed` value.
+harn_verified_build_freshness_id() (
+  local bin="$1"
+  local receipt=""
+  local identity=""
+  local count=""
+
+  harn_require_binary_freshness_receipt "$bin" || return $?
+  receipt="$(harn_binary_freshness_receipt_path "$bin")" || return $?
+  count="$(grep -c '^build-freshness=' "$receipt" || true)"
+  identity="$(sed -n 's/^build-freshness=//p' "$receipt")"
+  if [[ "$count" != "1" ]] \
+    || [[ ! "$identity" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]]; then
+    echo "error: Harn freshness receipt has a missing, duplicate, or malformed build identity" >&2
+    return 1
+  fi
+  printf '%s\n' "$identity"
+)

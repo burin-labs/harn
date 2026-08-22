@@ -21,7 +21,8 @@ set -euo pipefail
   printf 'CARGO_BUILD_BUILD_DIR=%s\n' "${CARGO_BUILD_BUILD_DIR-__unset__}"
 } >> "$FAKE_CARGO_RECORD"
 case "$*" in
-  "build --quiet --bin harn --bin harn-freshness-check --features internal-freshness-checker")
+  "build --quiet --locked --bin harn --bin harn-freshness-check --features internal-freshness-checker"|\
+  "build --quiet --locked --profile test --bin harn --bin harn-freshness-check --features internal-freshness-checker")
     mkdir -p "${CARGO_TARGET_DIR:?}/debug"
     cat > "$CARGO_TARGET_DIR/debug/harn" <<'BIN'
 #!/usr/bin/env bash
@@ -69,7 +70,7 @@ env -u CARGO_TARGET_DIR -u CARGO_BUILD_BUILD_DIR \
   "$repo_root/scripts/ci_warm_harn_bin.sh" > "$tmp_root/warm.out"
 
 expected_bin="$target_dir/debug/harn"
-if ! grep -Fxq "args=build --quiet --bin harn --bin harn-freshness-check --features internal-freshness-checker" "$record"; then
+if ! grep -Fxq "args=build --quiet --locked --bin harn --bin harn-freshness-check --features internal-freshness-checker" "$record"; then
   echo "ci_warm_harn_bin did not resolve harn through Cargo" >&2
   cat "$record" >&2
   exit 1
@@ -91,6 +92,11 @@ if ! grep -Fxq "ok: harn-bin ($expected_bin)" "$tmp_root/warm.out"; then
 fi
 if ! grep -Fxq "HARN_BIN=$expected_bin" "$github_env"; then
   echo "ci_warm_harn_bin did not write HARN_BIN to GITHUB_ENV" >&2
+  cat "$github_env" >&2
+  exit 1
+fi
+if ! grep -Eq '^HARN_BUILD_FRESHNESS_ID=([0-9a-f]{40}|[0-9a-f]{64})$' "$github_env"; then
+  echo "ci_harn_bin_warm did not persist the receipt-bound Cargo build identity" >&2
   cat "$github_env" >&2
   exit 1
 fi
@@ -134,6 +140,47 @@ fi
 if ! grep -Fxq "HARN_BIN=$expected_bin" "$github_env"; then
   echo "ci_warm_harn_bin did not persist the reused HARN_BIN" >&2
   cat "$github_env" >&2
+  exit 1
+fi
+
+# CI may compile native tests in Cargo's test profile. The producer must use
+# that exact graph, publish the ordinary freshness receipt, and leave a later
+# no-build consumer incapable of launching Cargo.
+rm -f "$target_dir/debug/harn" \
+  "$target_dir/debug/harn.d" \
+  "$target_dir/debug/harn.freshness" \
+  "$target_dir/debug/harn.freshness.manifest" \
+  "$target_dir/debug/harn-freshness-check"
+: > "$record"
+CARGO_TARGET_DIR="$target_dir" \
+  FAKE_CARGO_RECORD="$record" \
+  PATH="$fake_bin:$PATH" \
+  "$repo_root/scripts/ci_warm_harn_bin.sh" --profile test \
+  > "$tmp_root/warm-test-profile.out"
+
+if ! grep -Fxq "args=build --quiet --locked --profile test --bin harn --bin harn-freshness-check --features internal-freshness-checker" "$record"; then
+  echo "ci_warm_harn_bin did not keep the binary producer in Cargo's test profile" >&2
+  cat "$record" >&2
+  exit 1
+fi
+if ! grep -Eq '^ok: harn-bin-receipt \(([0-9a-f]{40}|[0-9a-f]{64})\)$' \
+  "$tmp_root/warm-test-profile.out"; then
+  echo "test-profile producer did not report its verified build identity" >&2
+  exit 1
+fi
+producer_cargo_calls="$(grep -c '^args=' "$record")"
+resolved="$({
+  HARN_BIN='' HARN_BIN_NO_BUILD=1 CARGO_TARGET_DIR="$target_dir" \
+    FAKE_CARGO_RECORD="$record" PATH="$fake_bin:$PATH" \
+    "$repo_root/scripts/harn_bin.sh" --no-build --print
+})"
+if [[ "$resolved" != "$expected_bin" ]]; then
+  echo "test-profile receipt did not resolve the exact produced binary" >&2
+  exit 1
+fi
+if [[ "$(grep -c '^args=' "$record")" != "$producer_cargo_calls" ]]; then
+  echo "test-profile no-build consumer launched a duplicate Cargo build" >&2
+  cat "$record" >&2
   exit 1
 fi
 

@@ -526,9 +526,19 @@ fn workflows() {
               run: "./scripts/ci/windows_storage_budget.sh report after_restore",
             },
             {
+              name: "Produce exact Windows Harn binary",
+              run:
+                "HARN_BIN='' ./scripts/ci_warm_harn_bin.sh --profile test --github-env \"$GITHUB_ENV\"",
+            },
+            {
               name: "Compile Windows tests and run unit slice",
               env: {RUST_MIN_STACK: "16777216"},
-              run: "cargo build --locked --profile test -p harn-cli",
+              run: "HARN_BIN='' HARN_BIN_NO_BUILD=1 ./scripts/harn_bin.sh --no-build --print",
+            },
+            {
+              name: "Smoke test harn run",
+              run:
+                "harn_bin=\"$(HARN_BIN='' HARN_BIN_NO_BUILD=1 ./scripts/harn_bin.sh --no-build --print)\"\n\"$harn_bin\" run smoke.harn",
             },
             {
               name: "Report Windows storage (terminal)",
@@ -1080,7 +1090,7 @@ pipeline test_windows_storage_budget_rejects_small_full_drive_duplicate_profile_
         ...windows,
         steps: windows.steps.map(
           { step ->
-            if trim(step?.name ?? "") != "Compile Windows tests and run unit slice" {
+            if trim(step?.name ?? "") != "Produce exact Windows Harn binary" {
               return step
             }
             return {...step, run: "cargo build --locked -p harn-cli"}
@@ -1092,7 +1102,57 @@ pipeline test_windows_storage_budget_rejects_small_full_drive_duplicate_profile_
   }
   assert(
     windows_pr_native_feedback_errors(policy(), duplicate_profile, declared["windows-nightly.yml"])
-      .contains("ci.yml:windows must build freshness binaries in Cargo test profile before nextest"),
+      .contains(
+        "ci.yml:windows must publish its freshness receipt from the Cargo test profile before nextest",
+      ),
+  )
+  const rebuilding_tail = {
+    ...declared["ci.yml"],
+    jobs: {
+      ...declared["ci.yml"].jobs,
+      windows: {
+        ...windows,
+        steps: windows.steps.map(
+          { step ->
+            if trim(step?.name ?? "") != "Compile Windows tests and run unit slice" {
+              return step
+            }
+            return {...step, run: step.run + "\nHARN_BIN_NO_BUILD=0 ./scripts/harn_bin.sh --print"}
+          },
+        )
+          .to_list(),
+      },
+    },
+  }
+  assert(
+    windows_pr_native_feedback_errors(policy(), rebuilding_tail, declared["windows-nightly.yml"])
+      .contains(
+        "ci.yml:windows must consume the produced Harn receipt without a fallback build after native tests",
+      ),
+  )
+  const direct_smoke = {
+    ...declared["ci.yml"],
+    jobs: {
+      ...declared["ci.yml"].jobs,
+      windows: {
+        ...windows,
+        steps: windows.steps.map(
+          { step ->
+            if trim(step?.name ?? "") != "Smoke test harn run" {
+              return step
+            }
+            return {...step, run: "target/debug/harn.exe\" run smoke.harn"}
+          },
+        )
+          .to_list(),
+      },
+    },
+  }
+  assert(
+    windows_pr_native_feedback_errors(policy(), direct_smoke, declared["windows-nightly.yml"])
+      .contains(
+        "ci.yml:windows smoke must fail closed through receipt-validated no-build Harn resolution",
+      ),
   )
   const silent_tail = {
     ...declared["ci.yml"],

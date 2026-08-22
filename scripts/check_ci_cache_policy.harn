@@ -319,6 +319,10 @@ const WINDOWS_CACHE_FALLBACK_GUARD =
 
 const WINDOWS_TEST_STEP = "Compile Windows tests and run unit slice"
 
+const WINDOWS_BINARY_PRODUCER_STEP = "Produce exact Windows Harn binary"
+
+const WINDOWS_SMOKE_STEP = "Smoke test harn run"
+
 const WINDOWS_NIGHTLY_TEST_STEP = "Run workspace nextest"
 
 const WINDOWS_TEST_STACK_BYTES = "16777216"
@@ -1588,15 +1592,46 @@ fn windows_storage_budget_errors(job) -> list<string> {
       "ci.yml:windows must give the pre-cache storage receipt its cache-parity exclusion id",
     ]
   }
-  const test_step = step_by_name(job?.steps ?? [], WINDOWS_TEST_STEP)
-  if test_step == nil
+  const steps = job?.steps ?? []
+  const producer_step = step_by_name(steps, WINDOWS_BINARY_PRODUCER_STEP)
+  const test_step = step_by_name(steps, WINDOWS_TEST_STEP)
+  if producer_step == nil
     || !contains(
-    trim(test_step?.run ?? ""),
-    "cargo build --locked --profile test -p harn-cli",
+    trim(producer_step?.run ?? ""),
+    "HARN_BIN='' ./scripts/ci_warm_harn_bin.sh --profile test --github-env \"$GITHUB_ENV\"",
+  )
+    || step_index_by_name(steps, WINDOWS_BINARY_PRODUCER_STEP)
+    >= step_index_by_name(
+    steps,
+    WINDOWS_TEST_STEP,
   ) {
     errors = errors
       + [
-      "ci.yml:windows must build freshness binaries in Cargo test profile before nextest",
+      "ci.yml:windows must publish its freshness receipt from the Cargo test profile before nextest",
+    ]
+  }
+  const test_body = trim(test_step?.run ?? "")
+  if contains(test_body, "HARN_BIN_NO_BUILD=0")
+    || !contains(
+    test_body,
+    "HARN_BIN_NO_BUILD=1 ./scripts/harn_bin.sh --no-build --print",
+  ) {
+    errors = errors
+      + [
+      "ci.yml:windows must consume the produced Harn receipt without a fallback build after native tests",
+    ]
+  }
+  const smoke_step = step_by_name(job?.steps ?? [], WINDOWS_SMOKE_STEP)
+  const smoke_body = trim(smoke_step?.run ?? "")
+  if smoke_step == nil
+    || !contains(
+    smoke_body,
+    "HARN_BIN_NO_BUILD=1 ./scripts/harn_bin.sh --no-build --print",
+  )
+    || contains(smoke_body, "/debug/harn.exe\" run") {
+    errors = errors
+      + [
+      "ci.yml:windows smoke must fail closed through receipt-validated no-build Harn resolution",
     ]
   }
   return errors

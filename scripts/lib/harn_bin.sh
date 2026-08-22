@@ -193,6 +193,8 @@ harn_kill_process_group() {
 
 harn_run_cargo_probe_with_deadline() (
   local predicted_bin="$1"
+  local cargo_profile="${2:-dev}"
+  local cargo_lock_mode="${3:-unlocked}"
   local timeout_seconds=""
   local probe_pid=""
   local watchdog_pid=""
@@ -203,8 +205,26 @@ harn_run_cargo_probe_with_deadline() (
   local -a cargo_config_args=()
   local clear_freshness_environment=0
   local lease_mode=""
+  local -a cargo_profile_args=()
+  local -a cargo_lock_args=()
 
   timeout_seconds="$(harn_cargo_probe_timeout_seconds)" || return $?
+  case "$cargo_profile" in
+    dev) ;;
+    test) cargo_profile_args+=(--profile test) ;;
+    *)
+      echo "error: Harn binary Cargo profile must be dev or test" >&2
+      return 2
+      ;;
+  esac
+  case "$cargo_lock_mode" in
+    unlocked) ;;
+    locked) cargo_lock_args+=(--locked) ;;
+    *)
+      echo "error: Harn binary Cargo lock mode must be locked or unlocked" >&2
+      return 2
+      ;;
+  esac
   if [[ ! "$build_freshness_id" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]]; then
     echo "error: internal Harn build freshness identity is missing or malformed" >&2
     return 1
@@ -254,6 +274,7 @@ harn_run_cargo_probe_with_deadline() (
       fi
       HARN_CARGO_LEASE_WORKSPACE="$(harn_repo_root)" \
       "$cargo_wrapper" "${cargo_config_args[@]}" build --quiet \
+        "${cargo_lock_args[@]}" "${cargo_profile_args[@]}" \
         --bin harn --bin harn-freshness-check \
         --features internal-freshness-checker &&
         "$predicted_bin" "$(harn_internal_executable_path_command)"
@@ -338,6 +359,8 @@ harn_compiler_wrapper_configured() {
 
 harn_resolve_binary() (
   local mode="${1:-build}"
+  local cargo_profile="${2:-dev}"
+  local cargo_lock_mode="${3:-unlocked}"
   local bin=""
   local retry_without_wrapper=""
   local status=0
@@ -366,6 +389,21 @@ harn_resolve_binary() (
     printf '%s\n' "$HARN_BIN"
     return 0
   fi
+
+  case "$cargo_profile" in
+    dev|test) ;;
+    *)
+      echo "error: Harn binary Cargo profile must be dev or test" >&2
+      return 2
+      ;;
+  esac
+  case "$cargo_lock_mode" in
+    locked|unlocked) ;;
+    *)
+      echo "error: Harn binary Cargo lock mode must be locked or unlocked" >&2
+      return 2
+      ;;
+  esac
 
   if [[ "$mode" = "no-build" ]]; then
     if ! bin="$(harn_debug_binary_path)"; then
@@ -451,7 +489,8 @@ harn_resolve_binary() (
   if harn_worktree_unconfigured; then
     echo "warning: $(harn_repo_root) has no .cargo/config.toml; 'make setup' has not run here, so this build starts cold" >&2
   fi
-  bin="$(harn_run_cargo_probe_with_deadline "$predicted_bin")" || status=$?
+  bin="$(harn_run_cargo_probe_with_deadline \
+    "$predicted_bin" "$cargo_profile" "$cargo_lock_mode")" || status=$?
   if [[ "$status" -ne 0 ]]; then
     if [[ "$status" -ne 124 ]]; then
       return "$status"
@@ -475,7 +514,8 @@ harn_resolve_binary() (
       CARGO_BUILD_RUSTC_WRAPPER='' \
       CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER='' \
       SCCACHE_DISABLE=1 \
-      harn_run_cargo_probe_with_deadline "$predicted_bin"
+      harn_run_cargo_probe_with_deadline \
+        "$predicted_bin" "$cargo_profile" "$cargo_lock_mode"
     )" || status=$?
     if [[ "$status" -ne 0 ]]; then
       if [[ "$status" -eq 124 ]]; then
@@ -496,7 +536,8 @@ harn_resolve_binary() (
     # Cargo's rerun-if-env-changed edge converges the compiled provenance.
     HARN_BUILD_FRESHNESS_ID="$current_freshness"
     export HARN_BUILD_FRESHNESS_ID
-    bin="$(harn_run_cargo_probe_with_deadline "$predicted_bin")" || return $?
+    bin="$(harn_run_cargo_probe_with_deadline \
+      "$predicted_bin" "$cargo_profile" "$cargo_lock_mode")" || return $?
     bin="$(harn_shell_executable_path "$bin")" || return $?
     harn_require_executable_bin "$bin" || return $?
     current_freshness="$(harn_build_freshness_id "$bin" 1)" || return $?
