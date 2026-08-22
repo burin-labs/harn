@@ -20,6 +20,13 @@ fn non_empty(value: Option<&OsStr>) -> Option<PathBuf> {
     value.filter(|v| !v.is_empty()).map(PathBuf::from)
 }
 
+fn non_blank(value: Option<&OsStr>) -> Option<PathBuf> {
+    value
+        .and_then(OsStr::to_str)
+        .filter(|value| !value.trim().is_empty())
+        .map(PathBuf::from)
+}
+
 /// Resolve a home directory from explicit `$HOME` / `%USERPROFILE%` values.
 ///
 /// Prefers `home` (the Unix convention), falling back to `userprofile` (the
@@ -58,13 +65,33 @@ pub fn package_cache_dir_from(home: &Path, xdg_cache_home: Option<&OsStr>) -> Pa
     }
 }
 
-/// [`package_cache_dir_from`] against the current process environment.
+/// Resolve Harn's package-cache root from the complete environment contract.
 ///
-/// This is the default only. `HARN_CACHE_DIR` overrides it, and resolving that
-/// override stays with the package layer that owns the setting.
+/// `HARN_CACHE_DIR` is the cache root itself. `XDG_CACHE_HOME`, by contrast,
+/// is only a platform cache base and therefore receives the `harn` suffix.
+/// Keeping that distinction in this pure owner prevents callers such as
+/// `harn install` and the process sandbox from interpreting the override in
+/// different ways. Blank overrides are treated as absent, matching the CLI's
+/// historical behavior. Values that cannot cross Harn's UTF-8 environment
+/// boundary are likewise treated as absent, so the installer and child do not
+/// select paths that cannot be forwarded exactly.
+pub fn package_cache_dir_from_environment(
+    harn_cache_dir: Option<&OsStr>,
+    home: Option<&Path>,
+    xdg_cache_home: Option<&OsStr>,
+) -> Option<PathBuf> {
+    non_blank(harn_cache_dir)
+        .or_else(|| home.map(|home| package_cache_dir_from(home, xdg_cache_home)))
+}
+
+/// [`package_cache_dir_from_environment`] against the current process
+/// environment.
 pub fn package_cache_dir() -> Option<PathBuf> {
-    home_dir()
-        .map(|home| package_cache_dir_from(&home, std::env::var_os("XDG_CACHE_HOME").as_deref()))
+    package_cache_dir_from_environment(
+        std::env::var_os("HARN_CACHE_DIR").as_deref(),
+        home_dir().as_deref(),
+        std::env::var_os("XDG_CACHE_HOME").as_deref(),
+    )
 }
 
 /// Prefixes that stand in for the home directory, longest first so `"$HOME/"`
@@ -252,5 +279,54 @@ mod tests {
     fn empty_xdg_cache_home_falls_back_to_the_home_default() {
         let resolved = package_cache_dir_from(Path::new("/home/u"), Some(OsStr::new("")));
         assert!(resolved.starts_with("/home/u"), "got {resolved:?}");
+    }
+
+    #[test]
+    fn explicit_package_cache_root_wins_without_being_treated_as_an_xdg_base() {
+        let resolved = package_cache_dir_from_environment(
+            os("/work/.shared"),
+            Some(Path::new("/home/u")),
+            os("/work/.shared"),
+        );
+        assert_eq!(resolved, Some(PathBuf::from("/work/.shared")));
+    }
+
+    #[test]
+    fn package_cache_root_falls_back_when_the_override_is_missing_or_blank() {
+        let home = Some(Path::new("/home/u"));
+        let xdg = os("/xdg/cache");
+        let expected = package_cache_dir_from(Path::new("/home/u"), xdg);
+
+        assert_eq!(
+            package_cache_dir_from_environment(None, home, xdg),
+            Some(expected.clone())
+        );
+        assert_eq!(
+            package_cache_dir_from_environment(os("  \t "), home, xdg),
+            Some(expected)
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn malformed_non_utf8_package_cache_root_falls_back() {
+        use std::os::unix::ffi::OsStrExt;
+
+        let home = Path::new("/home/u");
+        let xdg = OsStr::new("/xdg/cache");
+        let malformed = OsStr::from_bytes(b"/cache/\xff");
+        assert_eq!(
+            package_cache_dir_from_environment(Some(malformed), Some(home), Some(xdg)),
+            Some(package_cache_dir_from(home, Some(xdg)))
+        );
+    }
+
+    #[test]
+    fn explicit_package_cache_root_does_not_require_a_home_directory() {
+        assert_eq!(
+            package_cache_dir_from_environment(os("/cache/harn"), None, None),
+            Some(PathBuf::from("/cache/harn"))
+        );
+        assert_eq!(package_cache_dir_from_environment(None, None, None), None);
     }
 }

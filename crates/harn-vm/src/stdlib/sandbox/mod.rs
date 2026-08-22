@@ -69,8 +69,12 @@ pub(crate) mod process_cwd;
 use process_cwd::enforce_process_cwd_for_policy;
 mod policy;
 mod replace;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+mod toolchain_cache;
 #[cfg(target_os = "windows")]
 mod windows;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub(crate) use toolchain_cache::process_roots as process_sandbox_developer_toolchain_cache_roots;
 pub(crate) mod workspace_env;
 #[cfg(all(test, unix))]
 mod workspace_env_integration;
@@ -2059,19 +2063,6 @@ pub(crate) fn process_sandbox_package_manager_config_read_roots(
 // recursive home-scoped cache roots (see `windows.rs`). Gating to those two
 // targets keeps `-D warnings` happy on Windows, where this would otherwise be
 // dead code.
-#[cfg(any(target_os = "linux", target_os = "macos"))]
-pub(crate) fn process_sandbox_developer_toolchain_cache_roots(
-    policy: &CapabilityPolicy,
-) -> Vec<PathBuf> {
-    if !process_sandbox_presets(policy).contains(&ProcessSandboxPreset::DeveloperToolchains) {
-        return Vec::new();
-    }
-    let Some(home) = sandbox_user_home_dir() else {
-        return Vec::new();
-    };
-    developer_toolchain_cache_write_roots_for_home(&home)
-}
-
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 fn sandbox_user_home_dir() -> Option<PathBuf> {
     // Only an absolute home grounds the user-scope read-roots below; a

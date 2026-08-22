@@ -58,7 +58,10 @@ fn workspace_local_toolchain_cache(policy: &CapabilityPolicy) -> Option<PathBuf>
     )
 }
 
-fn workspace_toolchain_env(policy: &CapabilityPolicy) -> Vec<(String, String)> {
+fn workspace_toolchain_env_with_package_cache(
+    policy: &CapabilityPolicy,
+    package_cache: Option<PathBuf>,
+) -> Vec<(String, String)> {
     let Some(root) = workspace_local_toolchain_cache(policy) else {
         return Vec::new();
     };
@@ -78,6 +81,16 @@ fn workspace_toolchain_env(policy: &CapabilityPolicy) -> Vec<(String, String)> {
         ("PYTHONUSERBASE".to_string(), path("python-user")),
     ];
 
+    // Harn's package cache is resolved before HOME/XDG are relocated. In
+    // particular, HARN_CACHE_DIR already names the root itself; treating it as
+    // an XDG base and appending `harn` would split install and nested-run state.
+    if let Some(package_cache) = package_cache {
+        env.push((
+            "HARN_CACHE_DIR".to_string(),
+            package_cache.display().to_string(),
+        ));
+    }
+
     // HOME is intentionally relocated, but immutable user toolchains and
     // package-manager configuration still resolve through their existing
     // process-only preset roots. Cargo's mutable registry/git cache already
@@ -85,25 +98,6 @@ fn workspace_toolchain_env(policy: &CapabilityPolicy) -> Vec<(String, String)> {
     // there also preserves private-registry configuration without copying
     // credentials into the workspace.
     if let Some(home) = crate::user_dirs::home_dir().filter(|home| home.is_absolute()) {
-        // Harn's own package cache has to survive the same relocation, and it
-        // is the one cache above that cannot simply be rebuilt in the
-        // workspace. Every entry in it is content-addressed and was fetched
-        // from a source the sandboxed child usually cannot reach: no network,
-        // and package fetches deliberately carry no credentials. Letting
-        // `HARN_CACHE_DIR` fall through to the relocated `HOME` pointed the
-        // child at an empty cache, so it re-fetched packages the host had
-        // already materialized and failed closed on the denied network. The
-        // only error that surfaced was the fetch's, which named DNS or
-        // repository access and never the relocation that caused it.
-        env.push((
-            "HARN_CACHE_DIR".to_string(),
-            crate::user_dirs::package_cache_dir_from(
-                &home,
-                std::env::var_os("XDG_CACHE_HOME").as_deref(),
-            )
-            .display()
-            .to_string(),
-        ));
         env.push((
             "CARGO_HOME".to_string(),
             home.join(".cargo").display().to_string(),
@@ -123,6 +117,10 @@ fn workspace_toolchain_env(policy: &CapabilityPolicy) -> Vec<(String, String)> {
         }
     }
     env
+}
+
+fn workspace_toolchain_env(policy: &CapabilityPolicy) -> Vec<(String, String)> {
+    workspace_toolchain_env_with_package_cache(policy, crate::user_dirs::package_cache_dir())
 }
 
 pub(crate) fn inject_workspace_tmpdir(env: &mut Vec<(String, String)>, policy: &CapabilityPolicy) {
@@ -259,5 +257,27 @@ mod tests {
         let mut env = Vec::new();
         inject_workspace_process_env(&mut env, &unrestricted);
         assert!(env.is_empty());
+    }
+
+    #[test]
+    fn explicit_package_cache_root_is_forwarded_exactly() {
+        let workspace = tempfile::tempdir().unwrap();
+        let cache = workspace.path().join("operator-cache");
+        let env: BTreeMap<_, _> = workspace_toolchain_env_with_package_cache(
+            &policy(workspace.path()),
+            Some(cache.clone()),
+        )
+        .into_iter()
+        .collect();
+
+        assert_eq!(
+            env.get("HARN_CACHE_DIR"),
+            Some(&cache.display().to_string())
+        );
+        assert_ne!(
+            env.get("HARN_CACHE_DIR"),
+            Some(&cache.join("harn").display().to_string()),
+            "HARN_CACHE_DIR is already the cache root, not an XDG base"
+        );
     }
 }

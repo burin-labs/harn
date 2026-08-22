@@ -14,7 +14,6 @@ use url::Url;
 
 const CONTENT_HASH_FILE: &str = harn_modules::package_execution::CONTENT_HASH_FILE;
 const CACHE_METADATA_FILE: &str = harn_modules::package_execution::CACHE_METADATA_FILE;
-const HARN_CACHE_DIR_ENV: &str = "HARN_CACHE_DIR";
 const HARN_PACKAGE_REGISTRY_ENV: &str = "HARN_PACKAGE_REGISTRY";
 const HARN_PACKAGE_REGISTRY_TOKEN_ENV: &str = "HARN_PACKAGE_REGISTRY_TOKEN";
 const DEFAULT_PACKAGE_REGISTRY_URL: &str = "https://packages.harnlang.com/harn-package-index.toml";
