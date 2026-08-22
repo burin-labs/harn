@@ -1615,10 +1615,14 @@ fn windows_storage_budget_errors(job) -> list<string> {
     || !contains(
     test_body,
     "HARN_BIN_NO_BUILD=1 ./scripts/harn_bin.sh --no-build --print",
+  )
+    || !contains(
+    test_body,
+    "--features internal-freshness-checker",
   ) {
     errors = errors
       + [
-      "ci.yml:windows must consume the produced Harn receipt without a fallback build after native tests",
+      "ci.yml:windows must consume the produced Harn receipt without a fallback or feature-drift rebuild",
     ]
   }
   const smoke_step = step_by_name(job?.steps ?? [], WINDOWS_SMOKE_STEP)

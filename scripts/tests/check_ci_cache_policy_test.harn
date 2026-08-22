@@ -533,7 +533,8 @@ fn workflows() {
             {
               name: "Compile Windows tests and run unit slice",
               env: {RUST_MIN_STACK: "16777216"},
-              run: "HARN_BIN='' HARN_BIN_NO_BUILD=1 ./scripts/harn_bin.sh --no-build --print",
+              run:
+                "HARN_BIN='' HARN_BIN_NO_BUILD=1 ./scripts/harn_bin.sh --no-build --print\ncargo nextest run --features internal-freshness-checker",
             },
             {
               name: "Smoke test harn run",
@@ -1127,7 +1128,34 @@ pipeline test_windows_storage_budget_rejects_small_full_drive_duplicate_profile_
   assert(
     windows_pr_native_feedback_errors(policy(), rebuilding_tail, declared["windows-nightly.yml"])
       .contains(
-        "ci.yml:windows must consume the produced Harn receipt without a fallback build after native tests",
+        "ci.yml:windows must consume the produced Harn receipt without a fallback or feature-drift rebuild",
+      ),
+  )
+  const feature_drift = {
+    ...declared["ci.yml"],
+    jobs: {
+      ...declared["ci.yml"].jobs,
+      windows: {
+        ...windows,
+        steps: windows.steps.map(
+          { step ->
+            if trim(step?.name ?? "") != "Compile Windows tests and run unit slice" {
+              return step
+            }
+            return {
+              ...step,
+              run: "HARN_BIN='' HARN_BIN_NO_BUILD=1 ./scripts/harn_bin.sh --no-build --print\ncargo nextest run",
+            }
+          },
+        )
+          .to_list(),
+      },
+    },
+  }
+  assert(
+    windows_pr_native_feedback_errors(policy(), feature_drift, declared["windows-nightly.yml"])
+      .contains(
+        "ci.yml:windows must consume the produced Harn receipt without a fallback or feature-drift rebuild",
       ),
   )
   const direct_smoke = {

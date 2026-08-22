@@ -1554,14 +1554,18 @@ jobs:
             # Some affected crate sets compile Windows-only surfaces but have
             # no tests matching the core unit filter; the compile itself is
             # still the smoke gate for those PRs.
-            cargo nextest run --locked "${package_args[@]}" --profile ci -E "$windows_filter" --no-tests=warn
+            cargo nextest run --locked "${package_args[@]}" \
+              --features internal-freshness-checker \
+              --profile ci -E "$windows_filter" --no-tests=warn
           else
-            cargo test --locked "${package_args[@]}" --no-run
+            cargo test --locked "${package_args[@]}" \
+              --features internal-freshness-checker --no-run
             cargo test --locked -p harn-lexer -p harn-parser -p harn-stdlib -p harn-vm -p harn-hostlib -p harn-terminal -p harn-fmt -p harn-lint -p harn-modules
           fi
           # Exercise the typed Cargo depfile owner and native Windows artifact
           # identity APIs, including drive-colon/backslash/space fixtures.
           cargo test --locked -p harn-cli --lib \
+            --features internal-freshness-checker \
             bootstrap::freshness -- --nocapture
           cargo test --locked -p harn-cli --bin harn-freshness-check \
             --features internal-freshness-checker -- --nocapture
