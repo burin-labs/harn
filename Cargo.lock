@@ -4038,6 +4038,7 @@ dependencies = [
  "rustls",
  "scraper",
  "seccompiler",
+ "security-framework",
  "serde",
  "serde_ignored",
  "serde_json",

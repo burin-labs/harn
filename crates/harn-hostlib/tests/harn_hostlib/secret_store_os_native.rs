@@ -6,6 +6,9 @@
 //! * Are skipped when `HARN_SECRET_STORE_BACKEND=file` is set in the
 //!   environment — CI matrices that explicitly opt into the file backend
 //!   should not trigger keychain prompts.
+//! * Skip with a typed capability reason when the native store is linked but
+//!   inaccessible to the current desktop session. A missing adapter remains a
+//!   hard failure so feature-wiring regressions cannot pass vacuously.
 //! * Use a unique account name per run so concurrent CI invocations and
 //!   leftover entries from prior failed runs cannot cause cross-contamination.
 //! * Always clean up after themselves, even on assertion failure.
@@ -17,8 +20,10 @@
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use harn_hostlib::{secret_store::SecretStoreCapability, BuiltinRegistry, HostlibCapability};
-use harn_vm::VmValue;
+use harn_hostlib::{
+    secret_store::SecretStoreCapability, BuiltinRegistry, HostlibCapability, HostlibError,
+};
+use harn_vm::{secrets::NativeKeyringUnavailable, VmValue};
 
 fn registry() -> BuiltinRegistry {
     let mut registry = BuiltinRegistry::new();
@@ -71,6 +76,23 @@ fn skip_if_file_backend_forced() -> bool {
     )
 }
 
+fn native_operation_or_skip(result: Result<VmValue, HostlibError>) -> bool {
+    match result {
+        Ok(_) => true,
+        Err(HostlibError::NativeSecretStoreUnavailable {
+            reason:
+                reason @ (NativeKeyringUnavailable::StorageInaccessible
+                | NativeKeyringUnavailable::InteractionRequired),
+            message,
+            ..
+        }) => {
+            eprintln!("skipping: native secret store unavailable ({reason}): {message}");
+            false
+        }
+        Err(error) => panic!("native secret-store operation failed: {error}"),
+    }
+}
+
 #[test]
 fn os_native_round_trip_get_set_delete_list() {
     if skip_if_file_backend_forced() {
@@ -108,12 +130,13 @@ fn os_native_round_trip_get_set_delete_list() {
         keys: vec![key1, key2],
     };
 
-    (set.handler)(&dict_arg(&[
+    if !native_operation_or_skip((set.handler)(&dict_arg(&[
         ("account", vm_string(&account)),
         ("key", vm_string(key1)),
         ("value", vm_string("value-1")),
-    ]))
-    .unwrap();
+    ]))) {
+        return;
+    }
     (set.handler)(&dict_arg(&[
         ("account", vm_string(&account)),
         ("key", vm_string(key2)),
@@ -170,12 +193,13 @@ fn os_native_overwrite_replaces_existing_value() {
 
     let _cleanup = scopeguard_delete(delete, account.clone(), key);
 
-    (set.handler)(&dict_arg(&[
+    if !native_operation_or_skip((set.handler)(&dict_arg(&[
         ("account", vm_string(&account)),
         ("key", vm_string(key)),
         ("value", vm_string("first")),
-    ]))
-    .unwrap();
+    ]))) {
+        return;
+    }
     (set.handler)(&dict_arg(&[
         ("account", vm_string(&account)),
         ("key", vm_string(key)),

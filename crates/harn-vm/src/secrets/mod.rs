@@ -13,7 +13,9 @@ mod keyring;
 mod memory;
 
 pub use env::EnvSecretProvider;
-pub use keyring::{KeyringSecretProvider, NativeKeyring, NativeKeyringError};
+pub use keyring::{
+    KeyringSecretProvider, NativeKeyring, NativeKeyringError, NativeKeyringUnavailable,
+};
 pub use memory::MemorySecretProvider;
 
 pub const DEFAULT_SECRET_PROVIDER_CHAIN: &str = "env,keyring";
