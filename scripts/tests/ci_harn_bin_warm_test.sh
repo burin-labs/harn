@@ -10,7 +10,12 @@ fake_bin="$tmp_root/bin"
 target_dir="$tmp_root/target dir"
 record="$tmp_root/cargo-record.txt"
 github_env="$tmp_root/github-env.txt"
+ambient_github_env="$tmp_root/ambient-github-env.txt"
 mkdir -p "$fake_bin" "$target_dir/debug"
+# A fixture must never publish its disposable binary into the runner's real
+# cross-step environment. Keep a hostile ambient path set throughout the suite
+# so every producer case has to declare its output boundary explicitly.
+export GITHUB_ENV="$ambient_github_env"
 
 cat > "$fake_bin/cargo" <<'SH'
 #!/usr/bin/env bash
@@ -154,6 +159,7 @@ rm -f "$target_dir/debug/harn" \
 : > "$record"
 CARGO_TARGET_DIR="$target_dir" \
   FAKE_CARGO_RECORD="$record" \
+  GITHUB_ENV='' \
   PATH="$fake_bin:$PATH" \
   "$repo_root/scripts/ci_warm_harn_bin.sh" --profile test \
   > "$tmp_root/warm-test-profile.out"
@@ -181,6 +187,11 @@ fi
 if [[ "$(grep -c '^args=' "$record")" != "$producer_cargo_calls" ]]; then
   echo "test-profile no-build consumer launched a duplicate Cargo build" >&2
   cat "$record" >&2
+  exit 1
+fi
+if [[ -e "$ambient_github_env" ]]; then
+  echo "ci_harn_bin_warm fixture leaked its disposable binary into ambient GITHUB_ENV" >&2
+  cat "$ambient_github_env" >&2
   exit 1
 fi
 
