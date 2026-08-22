@@ -60,6 +60,13 @@ closed with parse guidance to choose `json`, `text`, or `native`.
 Reserved-token routes may remap `<tool_call>` ↔ `[[CALL]]` on the wire
 (`tool_delimiter.rs`); the parser and transcript stay on the canonical tags.
 
+## Host-authored completion guidance
+
+Hosts render product-specific completion wording from the stable
+`agent_completion_prompt_bindings` projection. See
+[Rendering host completion guidance](src/llm/agent_loop.md#rendering-host-completion-guidance)
+for the binding contract and checked Harn example.
+
 ## Demux survivability (openai-compat text routes)
 
 Some Harmony hosts (notably Fireworks gpt-oss) demux model text into OpenAI

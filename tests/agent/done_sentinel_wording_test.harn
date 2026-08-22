@@ -14,12 +14,102 @@
 //
 // These tests read the assembled system prompt, not the template, so a binding
 // that stops reaching the asset fails them.
-import { agent_build_turn_system_fragments } from "std/agent/preflight"
+import {
+  agent_build_turn_system_fragments,
+  agent_completion_prompt_bindings,
+} from "std/agent/preflight"
 import { agent_session_init } from "std/agent/state"
 
 const WRAPPER = "<done>##DONE##</done>"
 
 const PLAIN = "`##DONE##` exactly once in assistant text"
+
+pipeline test_hosts_receive_exact_completion_prompt_bindings(harness: Harness, task) {
+  const json = agent_completion_prompt_bindings(
+    harness.llm,
+    {tool_format: "json", done_sentinel: "##DONE##"},
+  )
+  assert_eq(
+    json,
+    {
+      tool_format: "json",
+      final_answer: "as plain text",
+      done_sentinel: "##DONE##",
+      done_sentinel_form: "plain_text",
+      done_sentinel_rendered: "##DONE##",
+    },
+  )
+  assert_eq(
+    harness.fs.render_template("Give the final user-facing answer {{ final_answer }}.", json),
+    "Give the final user-facing answer as plain text.",
+  )
+  assert_eq(
+    agent_completion_prompt_bindings(harness.llm, {tool_format: "text", done_sentinel: "##DONE##"}),
+    {
+      tool_format: "text",
+      final_answer: "in a `<user_response>` block",
+      done_sentinel: "##DONE##",
+      done_sentinel_form: "done_block",
+      done_sentinel_rendered: "<done>##DONE##</done>",
+    },
+  )
+  assert_eq(
+    agent_completion_prompt_bindings(harness.llm, {tool_format: "native"}),
+    {
+      tool_format: "native",
+      final_answer: "in concise assistant text",
+      done_sentinel: nil,
+      done_sentinel_form: "none",
+      done_sentinel_rendered: "",
+    },
+  )
+}
+
+pipeline test_completion_prompt_bindings_follow_missing_and_malformed_input_policy(
+  harness: Harness,
+  task,
+) {
+  const missing = agent_completion_prompt_bindings(harness.llm)
+  assert_eq(missing.tool_format, "json")
+  assert_eq(missing.final_answer, "as plain text")
+  assert_eq(missing.done_sentinel_form, "none")
+  const malformed_format = try {
+    agent_completion_prompt_bindings(harness.llm, {tool_format: "jsonish"})
+  }
+  assert_eq(is_err(malformed_format), true)
+  assert_eq(
+    contains(to_string(unwrap_err(malformed_format)), "must be one of native, text, json"),
+    true,
+  )
+  const malformed_sentinel = try {
+    agent_completion_prompt_bindings(harness.llm, {tool_format: "json", done_sentinel: 7})
+  }
+  assert_eq(is_err(malformed_sentinel), true)
+  assert_eq(contains(to_string(unwrap_err(malformed_sentinel)), "done_sentinel"), true)
+}
+
+pipeline test_completion_prompt_bindings_preserve_denied_format_policy(harness: Harness, task) {
+  harness.llm.provider_capabilities_install(
+    """
+[[provider.completionbindingtest]]
+model_match = "native-only-*"
+native_tools = true
+preferred_tool_format = "native"
+tool_mode_parity = "native_only"
+""",
+  )
+  defer {
+    harness.llm.provider_capabilities_clear()
+  }
+  const denied = try {
+    agent_completion_prompt_bindings(
+      harness.llm,
+      {provider: "completionbindingtest", model: "native-only-model", tool_format: "json"},
+    )
+  }
+  assert_eq(is_err(denied), true)
+  assert_eq(contains(to_string(unwrap_err(denied)), "catalog parity native_only"), true)
+}
 
 fn _system_prompt(harness: Harness, format: string) -> string {
   const opts = {
