@@ -45,6 +45,7 @@ cloud-aws = ["dep:aws-config", "dep:aws-credential-types", "dep:aws-sigv4"]
 # lean embedders and reports no default store until the product opts in.
 native-keyring = [
     "dep:apple-native-keyring-store",
+    "dep:security-framework",
     "dep:windows-native-keyring-store",
     "dep:zbus-secret-service-keyring-store",
 ]
@@ -222,6 +223,7 @@ seccompiler = "0.5"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 apple-native-keyring-store = { version = "1.0", features = ["keychain"], optional = true }
+security-framework = { version = "3.7", optional = true }
 
 [target.'cfg(target_os = "ios")'.dependencies]
 apple-native-keyring-store = { version = "1.0", features = ["protected"], optional = true }

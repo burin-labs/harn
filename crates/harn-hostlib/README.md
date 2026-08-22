@@ -28,8 +28,8 @@ into what they need:
 - `ast` — the code-intelligence layer: tree-sitter parsing + AST edit
   primitives **and** the `code_index` symbol graph built on top of them.
   Pulls tree-sitter and (via `grammars-all`) every grammar family. The
-  deterministic tools, search, file staging, and secret store are always
-  compiled; only this code-intelligence layer is gated.
+  deterministic tools, search, file staging, and the portable secret-store
+  contract are always compiled; only this code-intelligence layer is gated.
 - Grammar families — `grammar-web`, `grammar-systems`, `grammar-scripting`,
   `grammar-jvm`, `grammar-enterprise`, `grammar-data`. Each is a set of
   C-compiled tree-sitter grammars; enabling a subset compiles only those
@@ -40,6 +40,9 @@ into what they need:
   registers the typed terminal host contract. Calls still require the
   runtime `terminal:session` opt-in. The `full` feature enables this crate
   feature; lean embedders may omit it.
+- `native-secret-store` — links the operating system credential-store adapter
+  used by the secret-store contract. `full` enables it; lean embedders can
+  omit it and retain the portable file backend.
 
 See `docs/src/embedding-rust.md` for how `harn-serve` exposes these to
 embedders (`hostlib`, `hostlib-full`, `full`).

@@ -20,6 +20,61 @@ pub enum NativeKeyringError {
     Utf8(#[from] std::string::FromUtf8Error),
 }
 
+/// A stable reason that the operating-system credential store cannot service
+/// requests in the current process. Callers may use this to distinguish an
+/// unavailable desktop session from an operational keyring failure.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum NativeKeyringUnavailable {
+    /// No platform adapter was linked into this product build.
+    AdapterMissing,
+    /// The platform store exists but cannot be accessed by this process.
+    StorageInaccessible,
+    /// The operation requires desktop interaction that this process cannot show.
+    InteractionRequired,
+}
+
+impl NativeKeyringUnavailable {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::AdapterMissing => "adapter_missing",
+            Self::StorageInaccessible => "storage_inaccessible",
+            Self::InteractionRequired => "interaction_required",
+        }
+    }
+}
+
+impl fmt::Display for NativeKeyringUnavailable {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+impl NativeKeyringError {
+    /// Classify errors that mean the native store is unavailable to this
+    /// process. Other platform failures remain operational errors.
+    pub fn unavailable_reason(&self) -> Option<NativeKeyringUnavailable> {
+        match self {
+            Self::Keyring(KeyringError::NoDefaultStore) => {
+                Some(NativeKeyringUnavailable::AdapterMissing)
+            }
+            Self::Keyring(KeyringError::NoStorageAccess(_)) => {
+                Some(NativeKeyringUnavailable::StorageInaccessible)
+            }
+            #[cfg(all(feature = "native-keyring", target_os = "macos"))]
+            Self::Keyring(KeyringError::PlatformFailure(error))
+                if error
+                    .downcast_ref::<security_framework::base::Error>()
+                    .is_some_and(|error| error.code() == -25308) =>
+            {
+                // errSecInteractionNotAllowed: common for SSH/headless agents
+                // whose login keychain cannot present an unlock prompt.
+                Some(NativeKeyringUnavailable::InteractionRequired)
+            }
+            _ => None,
+        }
+    }
+}
+
 /// Cross-platform access to the operating system's native credential store.
 ///
 /// The keyring ecosystem owns the platform mappings and secure-storage API
