@@ -21,7 +21,12 @@ pub type AgentLoopDeadlineContract = {
   source: "deadline_ms" | "iteration_budget.wall_clock_ms",
 }
 
-/** Resolve the earliest configured loop deadline in the caller's monotonic clock domain. */
+/**
+ * Resolve the earliest configured loop deadline in the caller's monotonic clock domain.
+ *
+ * @effects: []
+ * @errors: []
+ */
 pub fn __agent_loop_deadline_contract(
   now_ms: int,
   deadline_ms: int?,

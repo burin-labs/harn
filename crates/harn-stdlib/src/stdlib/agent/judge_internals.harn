@@ -49,7 +49,12 @@ pub type JudgeCheckpointRequest = {
   schema: dict,
 }
 
-/** Pure completion-judge deadline admission core. */
+/**
+ * Pure completion-judge deadline admission core.
+ *
+ * @effects: []
+ * @errors: []
+ */
 pub fn __judge_completion_admission(
   now_ms: int,
   deadline_at_ms: int?,

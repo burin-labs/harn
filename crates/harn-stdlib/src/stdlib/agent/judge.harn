@@ -1244,7 +1244,12 @@ fn __completion_policy_evaluate(
   return evaluation
 }
 
-/** Evaluate one verification/completion boundary and return one typed directive. */
+/**
+ * Evaluate one verification/completion boundary and return one typed directive.
+ *
+ * @effects: [agent, host, llm.call]
+ * @errors: []
+ */
 pub fn agent_evaluate_completion(
   harness: Harness,
   session,

@@ -28,7 +28,12 @@ pub fn __profile_defaults(profile) {
   throw "agent_loop: profile must be one of tool_using, researcher, verifier, completer"
 }
 
-/** Normalize the outer judge union once; nested enable switches do not exist. */
+/**
+ * Normalize the outer judge union once; nested enable switches do not exist.
+ *
+ * @effects: []
+ * @errors: []
+ */
 pub fn __normalize_judge_config(value) -> JudgeConfig? {
   if value == nil {
     return nil
@@ -46,7 +51,12 @@ pub fn __normalize_judge_config(value) -> JudgeConfig? {
   return nil
 }
 
-/** Normalize a configured completion judge and materialize shorthand defaults. */
+/**
+ * Normalize a configured completion judge and materialize shorthand defaults.
+ *
+ * @effects: [fs.read]
+ * @errors: []
+ */
 pub fn __normalize_completion_judge_config(fs: HarnessFs, value, opts) -> JudgeConfig? {
   const config = __normalize_judge_config(value)
   if config == nil {

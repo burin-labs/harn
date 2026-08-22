@@ -122,6 +122,9 @@ pub type AgentLoopPostTurnResult = {action: AgentLoopPostTurnAction, state: Agen
  * Arbitrate a no-tool turn while the loop owns awaited command handles.
  * The result names the outer-loop action instead of leaking continue semantics
  * across the module seam.
+ *
+ * @effects: [agent, host]
+ * @errors: []
  */
 pub fn agent_loop_command_hold_transition(
   harness: Harness,

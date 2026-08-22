@@ -66,8 +66,8 @@ pipeline main(harness: Harness) {
       )
       harness.stdio.println(terminal?.data?.command_status == "succeeded")
       harness.stdio.println(terminal?.data?.run_outcome?.exit_code == 0)
-      harness.stdio.println(message?.data?.command_status == "succeeded")
-      harness.stdio.println(message?.data?.run_outcome?.exit_code == 0)
+      harness.stdio.println(message?._harn?.data?.command_status == "succeeded")
+      harness.stdio.println(message?._harn?.data?.run_outcome?.exit_code == 0)
       harness.stdio.println(captured.result.status == "done")
     },
   )
