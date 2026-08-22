@@ -1513,6 +1513,17 @@ jobs:
           fi
 
           echo "windows: cargo package args: ${package_args[*]}"
+          target_dir="${CARGO_TARGET_DIR:-target}"
+          if [[ ! -f "$target_dir/debug/harn.exe" ]]; then
+            cargo build --locked -p harn-cli --bin harn
+          fi
+          # Fail before the expensive test graph when the exact top-level
+          # artifact/dep-info pair the canonical resolver will consume cannot
+          # produce typed freshness evidence. Repeat this proof immediately
+          # before resolution below: intervening Cargo test commands may
+          # legitimately update shared package artifacts.
+          source ./scripts/lib/harn_bin.sh
+          harn_build_freshness_id "$target_dir/debug/harn.exe" 1 >/dev/null
           if command -v cargo-nextest >/dev/null 2>&1; then
             # Some affected crate sets compile Windows-only surfaces but have
             # no tests matching the core unit filter; the compile itself is
@@ -1522,16 +1533,13 @@ jobs:
             cargo test --locked "${package_args[@]}" --no-run
             cargo test --locked -p harn-lexer -p harn-parser -p harn-stdlib -p harn-vm -p harn-hostlib -p harn-terminal -p harn-fmt -p harn-lint -p harn-modules
           fi
-          target_dir="${CARGO_TARGET_DIR:-target}"
-          if [[ ! -f "$target_dir/debug/harn.exe" ]]; then
-            cargo build --locked -p harn-cli --bin harn
-          fi
           # Exercise the typed Cargo depfile owner and native Windows artifact
           # identity APIs, including drive-colon/backslash/space fixtures.
           cargo test --locked -p harn-cli --lib \
             bootstrap::freshness -- --nocapture
           cargo test --locked -p harn-cli --bin harn-freshness-check \
             --features internal-freshness-checker -- --nocapture
+          harn_build_freshness_id "$target_dir/debug/harn.exe" 1 >/dev/null
           # The build above intentionally does not manufacture a receipt. The
           # canonical resolver must converge compiled provenance, publish one,
           # and then prove buildless reuse on the native Git-Bash path.

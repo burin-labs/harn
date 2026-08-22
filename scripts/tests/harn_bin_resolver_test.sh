@@ -29,6 +29,12 @@ cat > "$fake_bin" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
 if [[ "${1:-}" = "__internal-freshness-evidence-v4" ]]; then
+  if [[ "${FAKE_HARN_OVERSIZED_EVIDENCE_ERROR:-0}" = "1" ]]; then
+    for index in 1 2 3 4 5 6; do
+      printf 'typed-reason-%s:%02048d\n' "$index" 0 >&2
+    done
+    exit 1
+  fi
   if [[ ! -r "$2" ]]; then
     echo "Cargo dep-info is missing at $2" >&2
     exit 1
@@ -72,6 +78,48 @@ fi
 rm "$fake_bin"
 if [[ "$("$snapshot")" != "fake harn" ]]; then
   echo "harn binary snapshot still depended on the mutable source path" >&2
+  exit 1
+fi
+
+# A post-build identity failure is a release-gate diagnostic, not a best-effort
+# probe. Preserve the typed producer reason and the exact structural input
+# states so native CI can distinguish a missing dep-info file from a stale or
+# non-executable artifact without logging any dependency contents.
+diagnostic_target="$tmp_root/diagnostic target"
+mkdir -p "$diagnostic_target/debug"
+cp "$snapshot" "$diagnostic_target/debug/harn"
+if harn_build_freshness_id "$diagnostic_target/debug/harn" 1 \
+  >"$tmp_root/artifact-diagnostic.out" \
+  2>"$tmp_root/artifact-diagnostic.err"; then
+  echo "post-build freshness identity accepted missing Cargo dep-info" >&2
+  exit 1
+fi
+if ! grep -Fq \
+    'binary=regular-readable-executable' "$tmp_root/artifact-diagnostic.err" || \
+   ! grep -Fq 'dep-info=missing' "$tmp_root/artifact-diagnostic.err" || \
+   ! grep -Fq 'Harn artifact evidence producer: Cargo dep-info is missing at' \
+    "$tmp_root/artifact-diagnostic.err"; then
+  echo "post-build freshness diagnostic omitted its typed artifact state" >&2
+  cat "$tmp_root/artifact-diagnostic.err" >&2
+  exit 1
+fi
+if [[ -s "$tmp_root/artifact-diagnostic.out" ]]; then
+  echo "post-build freshness diagnostic leaked evidence on stdout" >&2
+  cat "$tmp_root/artifact-diagnostic.out" >&2
+  exit 1
+fi
+if FAKE_HARN_OVERSIZED_EVIDENCE_ERROR=1 \
+  harn_build_freshness_id "$diagnostic_target/debug/harn" 1 \
+    >"$tmp_root/bounded-diagnostic.out" \
+    2>"$tmp_root/bounded-diagnostic.err"; then
+  echo "post-build freshness identity accepted a rejected artifact" >&2
+  exit 1
+fi
+if [[ "$(grep -Fc 'Harn artifact evidence producer:' \
+      "$tmp_root/bounded-diagnostic.err")" != "4" ]] || \
+   [[ "$(wc -c <"$tmp_root/bounded-diagnostic.err")" -gt 4800 ]]; then
+  echo "post-build freshness producer diagnostic was not bounded" >&2
+  wc -c "$tmp_root/bounded-diagnostic.err" >&2
   exit 1
 fi
 

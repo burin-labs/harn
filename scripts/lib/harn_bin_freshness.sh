@@ -92,6 +92,48 @@ harn_build_freshness_id_from_parts() {
     | git -C "$(harn_repo_root)" hash-object --stdin
 }
 
+harn_freshness_input_state() {
+  local path="$1"
+  local executable="${2:-0}"
+
+  if [[ ! -e "$path" && ! -L "$path" ]]; then
+    printf 'missing\n'
+  elif [[ ! -f "$path" ]]; then
+    printf 'non-regular\n'
+  elif [[ "$executable" = "1" && ! -x "$path" ]]; then
+    printf 'regular-not-executable\n'
+  elif [[ ! -r "$path" ]]; then
+    printf 'regular-not-readable\n'
+  elif [[ "$executable" = "1" ]]; then
+    printf 'regular-readable-executable\n'
+  else
+    printf 'regular-readable\n'
+  fi
+}
+
+harn_report_artifact_freshness_failure() {
+  local bin="$1"
+  local dep_info="$2"
+  local producer_error="$3"
+  local line=""
+  local line_count=0
+  local LC_ALL=C
+
+  echo "error: cannot compute post-build Harn freshness identity from Cargo dep-info" >&2
+  printf 'error: Harn freshness artifact state: binary=%s path=%q; dep-info=%s path=%q\n' \
+    "$(harn_freshness_input_state "$bin" 1)" "$bin" \
+    "$(harn_freshness_input_state "$dep_info")" "$dep_info" >&2
+  if [[ ! -s "$producer_error" ]]; then
+    echo "error: Harn artifact evidence producer exited without a diagnostic" >&2
+    return
+  fi
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    printf 'error: Harn artifact evidence producer: %.1024s\n' "$line" >&2
+    line_count=$((line_count + 1))
+    [[ "$line_count" -lt 4 ]] || break
+  done <"$producer_error"
+}
+
 # Compute the exact semantic input identity Cargo embeds into the next Harn
 # link. Git owns source/provenance content; Cargo dep-info owns ignored,
 # generated, and external prerequisites. On a first build there is no prior
@@ -105,11 +147,14 @@ harn_build_freshness_id() (
   local git_covered_list=""
   local worktree_hash=""
   local artifact_evidence=""
+  local artifact_error=""
+  local dep_info=""
   local dep_info_hash="bootstrap"
   local dependencies_hash="bootstrap"
 
   cleanup_git_covered_list() {
     [[ -z "$git_covered_list" ]] || rm -f "$git_covered_list"
+    [[ -z "$artifact_error" ]] || rm -f "$artifact_error"
   }
   trap cleanup_git_covered_list EXIT
   trap 'exit 129' HUP
@@ -117,15 +162,17 @@ harn_build_freshness_id() (
   trap 'exit 143' TERM
 
   target_dir="$(harn_binary_target_dir "$bin")" || return $?
+  dep_info="$(harn_binary_dep_info_path "$bin")" || return $?
   git_covered_list="$(mktemp "${TMPDIR:-/tmp}/harn-bin-git-covered.XXXXXX")" || return $?
+  artifact_error="$(mktemp "${TMPDIR:-/tmp}/harn-bin-artifact-error.XXXXXX")" || return $?
   worktree_hash="$(harn_worktree_content_fingerprint "$target_dir" "$git_covered_list")" || return $?
   if [[ -x "$bin" ]] && artifact_evidence="$(
-    harn_collect_artifact_freshness_evidence "$bin" "$git_covered_list" 2>/dev/null
+    harn_collect_artifact_freshness_evidence "$bin" "$git_covered_list" 2>"$artifact_error"
   )"; then
     dep_info_hash="$(printf '%s\n' "$artifact_evidence" | sed -n '5s/^dep-info=//p')"
     dependencies_hash="$(printf '%s\n' "$artifact_evidence" | sed -n '6s/^dependencies=//p')"
   elif [[ "$require_artifact" = "1" ]]; then
-    echo "error: cannot compute post-build Harn freshness identity from Cargo dep-info" >&2
+    harn_report_artifact_freshness_failure "$bin" "$dep_info" "$artifact_error"
     return 1
   fi
   if [[ ! "$dep_info_hash" =~ ^(bootstrap|[0-9a-f]{64})$ ]] || \
