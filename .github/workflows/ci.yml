@@ -1514,9 +1514,14 @@ jobs:
 
           echo "windows: cargo package args: ${package_args[*]}"
           target_dir="${CARGO_TARGET_DIR:-target}"
-          if [[ ! -f "$target_dir/debug/harn.exe" ]]; then
-            cargo build --locked -p harn-cli --bin harn
-          fi
+          # A transported executable is not proof of a current Cargo target:
+          # the provider-neutral warm artifact may come from an older main and
+          # intentionally does not carry the top-level dep-info/receipt pair.
+          # Let Cargo resolve the exact graph the canonical resolver uses;
+          # never infer freshness from harn.exe existence.
+          cargo build --locked -p harn-cli \
+            --bin harn --bin harn-freshness-check \
+            --features internal-freshness-checker
           # Fail before the expensive test graph when the exact top-level
           # artifact/dep-info pair the canonical resolver will consume cannot
           # produce typed freshness evidence. Repeat this proof immediately
