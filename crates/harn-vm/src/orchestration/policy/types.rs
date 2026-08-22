@@ -285,6 +285,16 @@ pub struct ProcessSandboxPolicy {
     pub write_roots: Vec<String>,
 }
 
+/// Runtime-owned forwarding endpoints for a managed child-process egress
+/// proxy. Naming a loopback endpoint is authority because the OS sandbox grants
+/// it; only the host may install this transport state. Destination decisions
+/// remain owned by `crate::egress`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ProcessNetworkProxy {
+    pub http_port: u16,
+    pub socks_port: u16,
+}
+
 impl ProcessSandboxPolicy {
     pub fn effective_presets(&self) -> Vec<ProcessSandboxPreset> {
         self.presets
@@ -351,6 +361,10 @@ pub struct CapabilityPolicy {
     /// Process-only filesystem allowances layered into OS subprocess
     /// sandboxes without widening Harn file builtins.
     pub process_sandbox: ProcessSandboxPolicy,
+    /// Managed proxy endpoints installed by the host for child traffic.
+    /// `None` preserves the existing deny-all/unrestricted socket ceiling
+    /// selected by `side_effect_level`.
+    pub process_network_proxy: Option<ProcessNetworkProxy>,
 }
 
 const DENY_ALL_SENTINEL: &str = "\0harn:deny-all";
@@ -372,6 +386,12 @@ struct CapabilityPolicyWire {
     tool_annotations: BTreeMap<String, ToolAnnotations>,
     sandbox_profile: SandboxProfile,
     process_sandbox: ProcessSandboxPolicy,
+    // Host-runtime transport state must never enter a serialized/nested
+    // policy request: an untrusted requester could otherwise name an
+    // arbitrary loopback service as its "proxy" and make the OS profile grant
+    // that port. The outer host installs this only after binding the proxy.
+    #[serde(skip)]
+    process_network_proxy: Option<ProcessNetworkProxy>,
 }
 
 impl From<&CapabilityPolicy> for CapabilityPolicyWire {
@@ -399,6 +419,7 @@ impl From<&CapabilityPolicy> for CapabilityPolicyWire {
             tool_annotations: policy.tool_annotations.clone(),
             sandbox_profile: policy.sandbox_profile,
             process_sandbox: policy.process_sandbox.clone(),
+            process_network_proxy: policy.process_network_proxy,
         }
     }
 }
@@ -428,6 +449,7 @@ impl From<CapabilityPolicyWire> for CapabilityPolicy {
             tool_annotations: wire.tool_annotations,
             sandbox_profile: wire.sandbox_profile,
             process_sandbox: wire.process_sandbox,
+            process_network_proxy: wire.process_network_proxy,
         }
     }
 }
@@ -677,6 +699,10 @@ impl CapabilityPolicy {
         let sandbox_profile =
             strictest_sandbox_profile(self.sandbox_profile, requested.sandbox_profile);
         let process_sandbox = self.process_sandbox.intersect(&requested.process_sandbox);
+        // Only the outer/ceiling policy may contribute transport endpoints.
+        // Never inherit them from a nested request: naming a loopback port is
+        // authority because the OS sandbox will grant that exact destination.
+        let process_network_proxy = self.process_network_proxy;
 
         Ok(CapabilityPolicy {
             tools,
@@ -689,6 +715,7 @@ impl CapabilityPolicy {
             tool_annotations,
             sandbox_profile,
             process_sandbox,
+            process_network_proxy,
         })
     }
 

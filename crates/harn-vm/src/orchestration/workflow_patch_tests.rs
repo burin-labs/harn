@@ -25,6 +25,7 @@ fn parent_ceiling_act_with_approval() -> CapabilityPolicy {
         tool_annotations: BTreeMap::new(),
         sandbox_profile: crate::orchestration::SandboxProfile::default(),
         process_sandbox: Default::default(),
+        process_network_proxy: None,
     }
 }
 
@@ -42,6 +43,7 @@ fn parent_ceiling_read_only() -> CapabilityPolicy {
         tool_annotations: BTreeMap::new(),
         sandbox_profile: crate::orchestration::SandboxProfile::default(),
         process_sandbox: Default::default(),
+        process_network_proxy: None,
     }
 }
 

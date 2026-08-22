@@ -257,6 +257,7 @@ fn default_run_policy_only_raises_the_requested_side_effect_ceiling() {
     assert_eq!(network.capabilities, default.capabilities);
     assert_eq!(network.sandbox_profile, default.sandbox_profile);
     assert_eq!(network.process_sandbox, default.process_sandbox);
+    assert_eq!(network.process_network_proxy, None);
 }
 
 #[test]
@@ -274,6 +275,10 @@ fn run_sandbox_attestation_reports_effective_policy() {
         workspace_roots: vec![workspace.display().to_string()],
         read_only_roots: vec![shared.display().to_string()],
         sandbox_profile: harn_vm::orchestration::SandboxProfile::OsHardened,
+        process_network_proxy: Some(harn_vm::orchestration::ProcessNetworkProxy {
+            http_port: 3128,
+            socks_port: 1080,
+        }),
         ..harn_vm::orchestration::CapabilityPolicy::default()
     };
     harn_vm::orchestration::push_execution_policy(policy);
@@ -300,6 +305,14 @@ fn run_sandbox_attestation_reports_effective_policy() {
     assert_eq!(metadata["profile"], "os_hardened");
     assert_eq!(metadata["process_network_requested"], false);
     assert_eq!(metadata["process_network_enabled"], true);
+    assert_eq!(
+        metadata["process_network_mode"],
+        if cfg!(target_os = "macos") {
+            "managed"
+        } else {
+            "unsupported_fail_closed"
+        }
+    );
     assert_eq!(metadata["side_effect_level"], "desktop_control");
     assert_eq!(metadata["egress"], "host_policy");
     harn_vm::reset_thread_local_state();

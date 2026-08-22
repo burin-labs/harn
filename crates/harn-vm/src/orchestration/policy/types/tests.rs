@@ -7,8 +7,54 @@ use std::collections::BTreeMap;
 
 use super::{
     intersect_roots, sandbox_profile_strictness, CapabilityPolicy, ModelPolicy,
-    RequiredSuccessfulTool, SandboxProfile,
+    ProcessNetworkProxy, RequiredSuccessfulTool, SandboxProfile,
 };
+
+#[test]
+fn serialized_policy_cannot_inject_or_disclose_host_proxy_endpoints() {
+    let requested: CapabilityPolicy = serde_json::from_value(serde_json::json!({
+        "process_network_proxy": {"http_port": 3128, "socks_port": 1080}
+    }))
+    .unwrap();
+    assert_eq!(requested.process_network_proxy, None);
+
+    let installed = CapabilityPolicy {
+        process_network_proxy: Some(ProcessNetworkProxy {
+            http_port: 3128,
+            socks_port: 1080,
+        }),
+        ..Default::default()
+    };
+    let serialized = serde_json::to_value(installed).unwrap();
+    assert!(serialized.get("process_network_proxy").is_none());
+}
+
+#[test]
+fn policy_intersection_preserves_only_the_outer_host_proxy() {
+    let endpoint = |http_port, socks_port| ProcessNetworkProxy {
+        http_port,
+        socks_port,
+    };
+    let outer = CapabilityPolicy {
+        process_network_proxy: Some(endpoint(3128, 1080)),
+        ..Default::default()
+    };
+    let requested = CapabilityPolicy {
+        process_network_proxy: Some(endpoint(9000, 9001)),
+        ..Default::default()
+    };
+    assert_eq!(
+        outer.intersect(&requested).unwrap().process_network_proxy,
+        Some(endpoint(3128, 1080))
+    );
+    assert_eq!(
+        CapabilityPolicy::default()
+            .intersect(&requested)
+            .unwrap()
+            .process_network_proxy,
+        None
+    );
+}
 
 #[test]
 fn a_neutral_policy_leaves_the_parent_confinement_untouched() {

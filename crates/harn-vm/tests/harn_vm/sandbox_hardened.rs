@@ -27,6 +27,7 @@ fn policy_with(profile: SandboxProfile, workspace: &std::path::Path) -> Capabili
         tool_annotations: BTreeMap::new(),
         sandbox_profile: profile,
         process_sandbox: Default::default(),
+        process_network_proxy: None,
     }
 }
 

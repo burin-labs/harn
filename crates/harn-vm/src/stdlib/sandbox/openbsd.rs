@@ -11,7 +11,7 @@ use std::process::Command;
 use super::{
     policy_allows_network, policy_allows_workspace_write, process_sandbox_policy_read_roots,
     process_sandbox_policy_write_roots, process_sandbox_readonly_roots, process_sandbox_roots,
-    PrepareOutcome, SandboxBackend,
+    sandbox_rejection, PrepareOutcome, SandboxBackend,
 };
 use crate::orchestration::{CapabilityPolicy, SandboxProfile};
 use crate::value::VmError;
@@ -66,6 +66,11 @@ struct ProcessProfile {
 }
 
 fn profile_setup(policy: &CapabilityPolicy) -> Result<ProcessProfile, VmError> {
+    if policy.process_network_proxy.is_some() {
+        return Err(sandbox_rejection(
+            "managed child-process egress is not available on OpenBSD".to_string(),
+        ));
+    }
     let workspace_permissions = if policy_allows_workspace_write(policy) {
         "rwcx"
     } else {

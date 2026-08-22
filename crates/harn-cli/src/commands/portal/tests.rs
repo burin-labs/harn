@@ -1410,6 +1410,7 @@ fn build_policy_summary_reads_validation_metadata() {
             tool_annotations: BTreeMap::new(),
             sandbox_profile: harn_vm::orchestration::SandboxProfile::default(),
             process_sandbox: Default::default(),
+            process_network_proxy: None,
         },
         metadata: BTreeMap::from([(
             "validation".to_string(),
