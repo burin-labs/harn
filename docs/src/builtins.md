@@ -2264,7 +2264,7 @@ without a `files` section load unchanged.
 | `harness.project.metadata_refresh_hashes(request)` | request: dict | nil | Recompute content hashes |
 | `harness.project.content_hash(dir)` | dir: string | string | Hash of directory contents |
 | `harness.project.path_metadata_get(request)` | request: `{path, namespace?, kind?}` | dict \| nil | Read metadata at an exact path. File entries (default) do not inherit; `kind: "dir"` falls back to hierarchical resolution. |
-| `harness.project.path_metadata_set(request)` | request: `{path, namespace, value, kind?}` | nil | Write metadata at an exact path. Defaults to `kind: "file"`. |
+| `harness.project.path_metadata_set(request)` | request: `{path, namespace, value, kind?}` | nil | Write metadata durably at an exact path before returning. Defaults to `kind: "file"`. |
 | `harness.project.path_metadata_entries(request?)` | request: `{namespace?, kind?}` | list | List stored entries keyed by normalized relative path. Defaults to files only. |
 | `harness.project.scan_directory(path?, options?)` | path: string, options: dict | list | Enumerate files and directories with optional `pattern`, `max_depth`, `include_hidden`, `include_dirs`, and `include_files` |
 

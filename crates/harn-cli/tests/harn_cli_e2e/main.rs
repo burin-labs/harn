@@ -72,6 +72,7 @@ mod package_generation_concurrency_cli_e2e;
 mod package_registry_verify_cli;
 mod package_verify_cli;
 mod parse_tokens_cli;
+mod path_metadata_persistence_cli;
 mod persona_activation_cli_e2e;
 mod pg_codegen_cli;
 mod precompile_dispatch;
