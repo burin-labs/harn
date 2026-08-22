@@ -21,7 +21,7 @@ pub type AgentLoopBudget = {
   consecutive_failures: dict?,
 }
 
-type AgentLoopBudgetDecision = {
+pub type AgentLoopBudgetDecision = {
   iteration: int,
   action: string,
   old_limit: int,

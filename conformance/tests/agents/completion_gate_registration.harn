@@ -1,5 +1,4 @@
-import { agent_capture_events } from "std/agent/events"
-// Live-shape / registration proof for `agent_completion_gate` (std/agent/judge).
+// Live-shape / registration proof for `agent_completion_gate`.
 //
 // Catches dead-since-inception drift: it proves the gate bundle produced by
 // `agent_completion_gate` is actually consulted by `agent_loop` at done-time (via
@@ -16,7 +15,8 @@ import { agent_capture_events } from "std/agent/events"
 //   C. a source write + red verifier is a STRICT veto the budget never converts.
 //   D. no host-fact callbacks -> graceful judge-only degradation, surfaced via the
 //      bundle's `_completion_gate.facts_available` flag (never a silent pass).
-import { agent_completion_gate } from "std/agent/judge"
+import { agent_completion_gate } from "std/agent/completion_gate"
+import { agent_capture_events } from "std/agent/events"
 import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
 

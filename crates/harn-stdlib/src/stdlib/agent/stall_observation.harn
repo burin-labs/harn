@@ -1,4 +1,5 @@
 import { agent_feedback_emit } from "std/agent/feedback"
+import { AgentToolDispatch, __dispatch_results_list } from "std/agent/loop_result_status"
 import {
   agent_monologue_actuation_config,
   agent_monologue_actuation_initial_state,
@@ -106,15 +107,11 @@ pub fn __agent_clip_head_tail(text, cap) {
  * @effects: [agent]
  * @errors: []
  */
-pub fn __agent_stall_turn_result(prev_dispatch) {
+pub fn __agent_stall_turn_result(prev_dispatch: AgentToolDispatch) {
   if prev_dispatch == nil {
     return nil
   }
-  const results = if type_of(prev_dispatch) == "list" {
-    prev_dispatch
-  } else {
-    prev_dispatch?.results ?? []
-  }
+  const results = __dispatch_results_list(prev_dispatch)
   let first = nil
   for result in results {
     if !__agent_stall_result_ok(result) {
@@ -191,7 +188,7 @@ pub fn __agent_stall_gate_failure(gate) -> bool {
 pub fn __agent_stall_fold_diagnostic(
   agent: HarnessAgent,
   state: AgentStallState,
-  prev_dispatch,
+  prev_dispatch: AgentToolDispatch,
   turn_made_edit: bool,
 ) -> AgentStallState {
   // Edit bookkeeping first: a successful workspace mutation advances the epoch,
@@ -671,7 +668,7 @@ pub fn __agent_stall_observe_core(
   raw_config,
   state: AgentStallState,
   defer_feedback: bool,
-  prev_dispatch = nil,
+  prev_dispatch: AgentToolDispatch = nil,
   turn_text = "",
   had_parse_errors = false,
   turn_stop_reason = "",
@@ -812,7 +809,7 @@ pub fn agent_stall_observe_completed_dispatch(
   agent: HarnessAgent,
   session_id: string,
   tool_calls: list,
-  dispatch,
+  dispatch: AgentToolDispatch,
   iteration: int,
   raw_config,
   state: AgentStallState,
@@ -956,7 +953,7 @@ pub fn __agent_stall_apply_repair(
   config: AgentStallConfig,
   observation: AgentStallObservation,
   iteration: int,
-  prev_dispatch,
+  prev_dispatch: AgentToolDispatch,
   turn_made_edit: bool,
   defer_feedback: bool,
 ) -> AgentStallObservation {
@@ -1218,7 +1215,7 @@ pub fn agent_stall_observe_tool_calls(
   raw_config,
   state: AgentStallState,
   defer_feedback: bool,
-  prev_dispatch = nil,
+  prev_dispatch: AgentToolDispatch = nil,
   turn_text = "",
   had_parse_errors = false,
   turn_made_edit = false,

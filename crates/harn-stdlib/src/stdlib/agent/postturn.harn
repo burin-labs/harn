@@ -1,5 +1,9 @@
 import { agent_has_done_judge, agent_judge_config } from "std/agent/judge"
-import "std/agent/loop_result_status"
+import {
+  AgentToolDispatch,
+  __dispatch_results_list,
+  __tool_names_by_status,
+} from "std/agent/loop_result_status"
 import { agent_render_tool_call_exemplar, agent_tool_call_paradigm } from "std/agent/preflight"
 import { agent_parse_tool_calls } from "std/agent/primitives"
 import { agent_required_tools_missing_from_session } from "std/agent/required_tools"
@@ -154,15 +158,15 @@ fn __terminal_callback_verdict(opts, payload) {
   return __interpret_verdict(verdict, opts)
 }
 
-fn __successful_tool_names(dispatch) {
+fn __successful_tool_names(dispatch: AgentToolDispatch) -> list<string> {
   return __tool_names_by_status(dispatch, true)
 }
 
-fn __rejected_tool_names(dispatch) {
+fn __rejected_tool_names(dispatch: AgentToolDispatch) -> list<string> {
   return __tool_names_by_status(dispatch, false)
 }
 
-fn __stop_after_successful_tools(opts, dispatch) {
+fn __stop_after_successful_tools(opts, dispatch: AgentToolDispatch) -> bool {
   const names = opts?.stop_after_successful_tools
   if names == nil || len(names) == 0 {
     return false
@@ -1074,7 +1078,7 @@ pub fn agent_compute_post_turn(
   llm: HarnessLlm,
   session,
   llm_result,
-  dispatch,
+  dispatch: AgentToolDispatch,
   opts,
   iteration,
 ) {
@@ -1201,7 +1205,7 @@ pub fn agent_compute_terminal_callback(agent: HarnessAgent, session, opts, termi
     max_iterations: terminal?.max_iterations ?? 0,
     iteration_budget: terminal?.iteration_budget,
     has_tool_calls: false,
-    dispatch: {results: []},
+    dispatch: [],
     tool_results: [],
     tool_count: 0,
     tool_names: [],

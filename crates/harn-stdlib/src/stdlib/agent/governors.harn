@@ -875,7 +875,7 @@ pub fn agent_governed_preset(harness: Harness, kind, options = nil, governance =
  */
 pub fn governors_selftest(agent: HarnessAgent) -> dict {
   const live_payload = {
-    dispatch: {results: []},
+    dispatch: [],
     has_tool_calls: true,
     iteration: 4,
     rejected_tool_names: [],

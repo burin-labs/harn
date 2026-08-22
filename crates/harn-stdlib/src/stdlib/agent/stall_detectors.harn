@@ -171,11 +171,7 @@ pub fn __token_runaway_is_verification_result(result) -> bool {
  * @api_stability: experimental
  */
 pub fn token_runaway_made_progress(agent: HarnessAgent, payload) -> bool {
-  const results = if type_of(payload?.tool_results) == "list" {
-    payload.tool_results
-  } else {
-    payload?.dispatch?.results ?? []
-  }
+  const results = payload?.tool_results ?? []
   for result in results {
     if !__token_runaway_is_verification_result(result) {
       continue

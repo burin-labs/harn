@@ -249,6 +249,7 @@
             "policy_no_progress",
             "policy_guardrail",
             "policy_stop",
+            "completion_unverified",
             "provider_error",
             "runtime_error",
             "suspended",

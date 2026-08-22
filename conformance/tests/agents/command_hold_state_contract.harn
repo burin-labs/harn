@@ -1,0 +1,16 @@
+import { AgentLoopCommandHoldResult } from "std/agent/loop_post_turn"
+
+fn next_hold_state(result: AgentLoopCommandHoldResult) -> {reentries: int} {
+  return result.hold_state
+}
+
+pipeline default(harness: Harness) {
+  const transition: AgentLoopCommandHoldResult = {
+    action: "proceed",
+    ledger: [],
+    hold_state: {reentries: 0},
+    reentry_cap: nil,
+    reset_progress: false,
+  }
+  harness.stdio.println(next_hold_state(transition).reentries)
+}

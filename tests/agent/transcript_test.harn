@@ -57,12 +57,7 @@ pipeline test_agent_transcript_normalizes_modern_native_messages(harness: Harnes
       name: "look",
       tool_call_id: "call-look",
       content: "[result of look]\nsource text",
-      _harn: {
-        kind: "tool_result",
-        tool_call_id: "call-look",
-        tool_name: "look",
-        outcome: "ok",
-      },
+      _harn: {kind: "tool_result", tool_call_id: "call-look", tool_name: "look", outcome: "ok"},
     },
   ]
   const rows = agent_transcript_normalize(records)
@@ -83,10 +78,7 @@ pipeline test_agent_transcript_normalizes_modern_native_messages(harness: Harnes
   assert(is_type(report, agent_transcript_report_schema()), "report satisfies schema")
 }
 
-pipeline test_agent_transcript_uses_dispatch_outcome_not_result_prose(
-  harness: Harness,
-  _task,
-) {
+pipeline test_agent_transcript_uses_dispatch_outcome_not_result_prose(harness: Harness, _task) {
   const rows = agent_transcript_normalize(
     [
       {

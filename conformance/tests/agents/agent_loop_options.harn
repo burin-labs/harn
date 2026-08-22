@@ -18,8 +18,8 @@ pipeline default(harness: Harness) {
     harness,
     {provider: "mock", done_judge: false, verify_completion_judge: false},
   )
-  assert_eq(disabled_judges.done_judge, nil)
-  assert_eq(disabled_judges.verify_completion_judge, nil)
+  require disabled_judges.done_judge == nil, "false disables done_judge"
+  require disabled_judges.verify_completion_judge == nil, "false disables completion judge"
   const client_search = agent_loop_options(
     harness,
     {provider: "mock", tools: tool_registry(), tool_search: {mode: "client"}},
@@ -134,10 +134,10 @@ pipeline default(harness: Harness) {
     const rejected = try {
       agent_loop_options(harness, case.options)
     }
-    assert_eq(is_err(rejected), true)
+    require is_err(rejected), "removed judge option must fail"
     const message = to_string(unwrap_err(rejected))
-    assert(contains(message, case.removed))
-    assert(contains(message, case.replacement))
+    require contains(message, case.removed), "error names removed judge option"
+    require contains(message, case.replacement), "error names replacement judge option"
   }
   const invalid_expose_decisions = try {
     agent_loop_options(

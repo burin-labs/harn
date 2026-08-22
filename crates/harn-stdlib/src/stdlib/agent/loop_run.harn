@@ -1,16 +1,17 @@
 import {
-  command_ledger_has_awaited,
-  command_ledger_hold,
+  CommandHoldState,
   command_ledger_ingest,
   command_ledger_new,
-  command_ledger_release,
-  command_ledger_should_hold,
   command_wait_normalize,
 } from "std/agent/command_ledger"
 import "std/agent/loop_call_resolution"
 import "std/agent/loop_denial_cutoff"
 import "std/agent/loop_finalize"
 import "std/agent/loop_foundation"
+import {
+  agent_loop_command_hold_transition,
+  agent_loop_post_turn_transition,
+} from "std/agent/loop_post_turn"
 import "std/agent/loop_resource_dispatch"
 import "std/agent/loop_result_status"
 import "std/agent/loop_support"
@@ -80,7 +81,7 @@ pub fn __agent_loop_run(harness: Harness, message, session, initial_opts) {
     // linked hosts predating `command_wait` receive the defaults.
     const command_wait = command_wait_normalize(opts?.command_wait)
     let command_ledger = command_ledger_new()
-    let command_hold_state = {reentries: 0}
+    let command_hold_state: CommandHoldState = {reentries: 0}
     // One-shot output cap after a progress-only hold: deciding "keep waiting"
     // needs no reasoning budget. Nil for normal/result turns and cleared after
     // exactly one application.
@@ -1241,395 +1242,101 @@ pub fn __agent_loop_run(harness: Harness, message, session, initial_opts) {
           stop_reason = budget_stop
           break
         }
-        // Command hold. A no-tool-call segment while an `awaited` handle is
-        // live does not end the turn: the loop parks on the inbox (zero
-        // inference) and re-enters the model only on its own sparse,
-        // delta-gated schedule with one coalesced `command_status` digest. A
-        // done attempt with pending awaited leases lands here too
-        // (`tool_count == 0`), so it cannot silently finish over a running
-        // build — it gets a forced-resolution re-entry.
-        if tool_count == 0 && command_ledger_should_hold(command_ledger, tool_count) {
-          const hold = command_ledger_hold(
-            harness,
-            session.session_id,
-            command_ledger,
-            command_wait,
-            command_hold_state,
-          )
-          command_ledger = hold.ledger
-          command_hold_state = hold.hold_state
-          agent_stage(
-            harness.agent,
-            session.session_id,
-            "command_hold",
-            {iteration: iteration_index + 1},
-          )
-          agent_emit_event(
-            harness.agent,
-            session.session_id,
-            "typed_checkpoint",
-            {
-              schema: "harn.command_hold.v1",
-              kind: "command_hold",
-              iteration: iteration_index + 1,
-              outcome: hold.outcome,
-              reentries: command_hold_state.reentries,
-              awaited: command_ledger_has_awaited(command_ledger),
-            },
-          )
-          if hold.outcome == "digest" {
-            agent_session_inject_feedback(
-              harness.agent,
-              session.session_id,
-              "command_status",
-              hold.digest,
-            )
-            command_hold_cap_tokens = hold?.reentry_cap
-            // Only a fully retired, green terminal digest may arbitrate same-turn DONE.
-            if !(hold?.terminal_succeeded && !command_ledger_has_awaited(command_ledger)) {
-              consecutive_text_only = 0
-              turns_since_progress = 0
-              continue
-            }
-          }
-          if hold.outcome == "interrupted" {
-            // A non-command inbox entry (user interrupt / peer message) woke
-            // the inclusive park; re-enter so the normal `iteration_start`
-            // drains deliver it.
-            continue
-          }
-          if hold.outcome == "exhausted" {
-            // Re-entry budget spent: signal `await_exhausted` into the stuck-
-            // detector adapter (recovery, not a kill) and flip the awaited rows
-            // to service leases so the hold cannot busy-loop — the processes
-            // keep running until the session-end reaper.
-            for row in command_ledger {
-              if row?.lease == "awaited" {
-                command_ledger = command_ledger_release(command_ledger, row.handle_id)
-              }
-            }
-            agent_session_inject_feedback(
-              harness.agent,
-              session.session_id,
-              "await_exhausted",
-              "Background commands are still running after repeated waits. Take a different action now: "
-                + "act on what you have, kill_command to abort, or release_command to leave them running.",
-            )
+        const hold_transition = agent_loop_command_hold_transition(
+          harness,
+          session.session_id,
+          {
+            ledger: command_ledger,
+            command_wait: command_wait,
+            hold_state: command_hold_state,
+            reentry_cap: command_hold_cap_tokens,
+            iteration: iteration_index + 1,
+            tool_count: tool_count,
+          },
+        )
+        command_ledger = hold_transition.ledger
+        command_hold_state = hold_transition.hold_state
+        command_hold_cap_tokens = hold_transition.reentry_cap
+        if hold_transition.action == "continue" {
+          if hold_transition.reset_progress {
             consecutive_text_only = 0
             turns_since_progress = 0
-            continue
           }
-          // outcome == "resolved": every awaited handle is terminal / killed /
-          // released and its completion was already surfaced; fall through to
-          // the loop's normal done resolution.
+          continue
         }
-        consecutive_text_only = __next_text_only_count(tool_count, consecutive_text_only)
-        last_tool_count = tool_count
-        const turn_successful = __tool_names_by_status(dispatch, true)
-        const turn_rejected = __tool_names_by_status(dispatch, false)
-        const made_progress = len(turn_successful) > 0
-        turns_since_progress = __next_progress_count(made_progress, turns_since_progress)
-        const turn_max_nudges = turn_opts?.max_nudges ?? 8
-        const turn_loop_until_done = turn_opts?.loop_until_done ?? false
-        const text_only_nudge_budget_exceeded = turn_loop_until_done
-          && tool_count == 0
-          && consecutive_text_only > turn_max_nudges
-        const missing_required_for_loop = agent_required_tools_missing_from_session(
-          opts,
-          successful_tools_seen,
-        )
-        const cadence_loop_state = agent_loop_snapshot_state(
-          {
-            iteration: iteration,
-            current_limit: current_max,
-            budget_max: budget.max,
-            extensions_used: extensions_used,
-            tool_count: tool_count,
-            turn_successful: turn_successful,
-            turn_rejected: turn_rejected,
-            visible_text: visible_text,
-            turn_native_fallback_used: fallback_outcome.triggered && fallback_outcome.accepted,
-            session_successful: successful_tools_seen,
-            session_rejected: rejected_tools_seen,
-            missing_required_tools: missing_required_for_loop,
-            completion_proposed: false,
-            verdict: nil,
-          }
-            + __agent_loop_state_budget_fields(
-            harness.agent,
-            harness.clock,
-            session.session_id,
-            totals,
-            loop_start_ms,
-            budget,
-            consecutive_failure_count,
-          ),
-        )
-        const post_turn_opts = __sync_tool_search_state(turn_opts, dispatched.turn_opts)
-          + {
-          _session_successful_tools: successful_tools_seen,
-          _session_rejected_tools: rejected_tools_seen,
-          _consecutive_text_only: consecutive_text_only,
-          _done_judge_invocations: done_judge_invocations,
-          _done_judge_loop_state: cadence_loop_state,
-          _turn_tool_call_feedback: (fallback_outcome.triggered && !fallback_outcome.accepted)
-            || had_parse_errors,
-        }
-        const outcome = __agent_loop_with_llm_render_context(
+        const post_turn_transition = agent_loop_post_turn_transition(
           harness,
-          turn_llm_opts,
-          { render_harness, _effective ->
-            agent_compute_post_turn(
-              render_harness.agent,
-              render_harness.llm,
-              session,
-              normalized + {raw_text: raw_text, parsed_done_marker: parsed?.done_marker ?? ""},
-              dispatch,
-              post_turn_opts,
-              iteration_index,
-            )
-          },
-        )
-        opts = __apply_post_turn_options(opts, outcome)
-        opts = agent_stance_post_turn(harness.agent, harness.runtime, session, opts)
-        const repair_cfg = agent_stall_repair_config(turn_opts?.stall_diagnostics)
-        const reverify_mandated = __agent_loop_post_edit_reverify_mandated(
-          repair_cfg,
-          turn_opts,
-          stall_state,
-          dispatch,
-          opts?.tools,
-        )
-        if __turn_made_edit(dispatch, opts?.tools) {
-          terminal_write_unverified = true
-          made_source_write = true
-        }
-        let should_continue = outcome.kind == "continue" || bridge_step_delivered > 0
-        let verdict_record = nil
-        let post_edit_reverify_confirmed = false
-        if should_continue && reverify_mandated && verify_attempts < max_verify_attempts {
-          const reverify_opts = turn_opts
-            + {
-            _done_judge_due: false,
-            _done_judge_invocations: done_judge_invocations,
-            _verify_completion_judge_invocations: verify_completion_judge_invocations,
-            _feedback_history: feedback_history,
-          }
-          const reverdict = agent_evaluate_completion(
-            harness,
-            session,
-            reverify_opts,
-            "post_edit_reverify",
-            llm_result.text,
-            iteration_index,
-          )
-          verdict_record = reverdict
-          feedback_history = reverdict?.feedback_history ?? feedback_history
-          verify_completion_judge_invocations += __completion_judge_hit(reverdict)
-          if reverdict.action == "stop_unverified" {
-            final_status = "completion_unverified"
-            stop_reason = __completion_stop_reason(reverdict)
-            break
-          } else if reverdict.action == "continue" {
-            verify_attempts = verify_attempts + 1
-            verify_completion_judge_vetoes += __completion_judge_hit(reverdict)
-          } else {
-            stall_state = stall_state + {reverify_owed: false}
-            post_edit_reverify_confirmed = true
-            terminal_write_unverified = false
-          }
-        }
-        if should_continue {
-          if opts?.daemon && len(tool_calls) == 0 {
-            agent_daemon_step(harness.agent, harness.fs, session, opts, iteration)
-          }
-        } else {
-          if outcome.needs_verify || reverify_mandated {
-            if verify_attempts >= max_verify_attempts {
-              final_status = "verify_exhausted"
-              stop_reason = outcome.stop_reason
-              break
-            }
-            const verify_opts = turn_opts
-              + {
-              _done_judge_due: outcome?.done_judge_due ?? true,
-              _done_judge_invocations: done_judge_invocations,
-              _verify_completion_judge_invocations: verify_completion_judge_invocations,
-              _feedback_history: feedback_history,
-            }
-            const verdict = agent_evaluate_completion(
-              harness,
-              session,
-              verify_opts,
-              outcome.stop_reason,
-              llm_result.text,
-              iteration_index,
-            )
-            verdict_record = verdict
-            feedback_history = verdict?.feedback_history ?? feedback_history
-            done_judge_invocations += __done_judge_hit(verdict)
-            verify_completion_judge_invocations += __completion_judge_hit(verdict)
-            if verdict.action == "stop_unverified" {
-              final_status = "completion_unverified"
-              stop_reason = __completion_stop_reason(verdict)
-              break
-            } else if verdict.action == "continue" {
-              verify_attempts = verify_attempts + 1
-              should_continue = true
-              done_judge_vetoes += __done_judge_hit(verdict)
-              verify_completion_judge_vetoes += __completion_judge_hit(verdict)
-            } else {
-              stall_state = stall_state + {reverify_owed: false}
-              terminal_write_unverified = false
-              if reverify_mandated {
-                post_edit_reverify_confirmed = true
-              }
-            }
-          }
-          const missing_now = agent_required_tools_missing_from_session(opts, successful_tools_seen)
-          if !should_continue && len(missing_now) > 0 {
-            agent_required_tools_inject_feedback(harness.agent, session.session_id, missing_now)
-            should_continue = true
-          }
-          if !should_continue {
-            stop_reason = outcome.stop_reason
-            break
-          }
-        }
-        if should_continue && post_edit_reverify_confirmed && iteration >= current_max {
-          const missing_after_reverify = agent_required_tools_missing_from_session(
-            opts,
-            successful_tools_seen,
-          )
-          if len(missing_after_reverify) == 0 {
-            final_status = "done"
-            stop_reason = "post_edit_reverify"
-            break
-          }
-        }
-        if should_continue {
-          const repeated_verified_pass = agent_stall_repeated_verified_pass(
-            turn_opts?.stall_diagnostics,
-            stall_state,
-          )
-          if repeated_verified_pass && len(turn_rejected) == 0 && trim(visible_text) == "" {
-            const missing_after_verified_pass = agent_required_tools_missing_from_session(
-              opts,
-              successful_tools_seen,
-            )
-            if len(missing_after_verified_pass) == 0 {
-              final_status = "done"
-              stop_reason = "repeated_verified_pass"
-              break
-            }
-          }
-          if text_only_nudge_budget_exceeded {
-            final_status = "stuck"
-            stop_reason = "max_nudges"
-            break
-          }
-          agent_scratchpad_reorganize_if_due(
-            harness.agent,
-            harness.llm,
-            session,
-            opts,
-            iteration_index,
-            {
-              reason: "iteration_end",
-              outcome_kind: outcome.kind,
-              bridge_step_delivered: bridge_step_delivered,
-              tool_count: tool_count,
-            },
-          )
-          if turns_since_progress >= 2
-            && turns_since_progress <= turn_max_nudges
-            && !(outcome?.nudged_this_turn ?? false)
-            && len(turn_rejected) == 0 {
-            const has_tools = len(opts?.tools?.tools ?? []) > 0
-            const paradigm = agent_tool_call_paradigm(harness.llm, turn_opts)
-            const made_tool_calls = tool_count > 0
-            const nudge_text = __loop_progress_nudge_text(
-              turns_since_progress,
-              has_tools,
-              paradigm,
-              made_tool_calls,
-            )
-            __inject_feedback_with_tool_repair(
-              harness.agent,
-              session.session_id,
-              "no_progress_streak",
-              nudge_text,
-            )
-            agent_emit_event(
-              harness.agent,
-              session.session_id,
-              "no_progress_streak_nudge",
-              {
-                iteration: iteration_index,
-                content: nudge_text,
-                streak: turns_since_progress,
-                turns_since_progress: turns_since_progress,
-                has_tools: has_tools,
-                made_tool_calls: made_tool_calls,
-              },
-            )
-          }
-        }
-        const loop_no_net_progress = agent_stall_no_net_progress(
-          turn_opts?.stall_diagnostics,
-          stall_state,
-        )
-          || agent_stall_repeated_verified_pass(turn_opts?.stall_diagnostics, stall_state)
-        const loop_state = agent_loop_snapshot_state(
+          session,
           {
-            iteration: iteration,
-            current_limit: current_max,
-            budget_max: budget.max,
-            extensions_used: extensions_used,
-            tool_count: tool_count,
-            turn_successful: turn_successful,
-            turn_rejected: turn_rejected,
-            visible_text: visible_text,
-            turn_native_fallback_used: fallback_outcome.triggered && fallback_outcome.accepted,
-            session_successful: successful_tools_seen,
-            session_rejected: rejected_tools_seen,
-            missing_required_tools: missing_required_for_loop,
-            completion_proposed: outcome.kind == "break",
-            verdict: verdict_record,
-            progress_no_net_advance: loop_no_net_progress,
-            progress_no_information_gain: completed_observation.no_information_gain,
-          }
-            + __agent_loop_state_budget_fields(
-            harness.agent,
-            harness.clock,
-            session.session_id,
-            totals,
-            loop_start_ms,
-            budget,
-            consecutive_failure_count,
-          ),
-        )
-        const command = agent_loop_control_invoke(opts, budget, loop_state)
-        const applied = agent_loop_apply_command(
-          harness.agent,
-          {
-            command: command,
-            session_id: session.session_id,
-            iteration: iteration,
-            current_max: current_max,
-            extensions_used: extensions_used,
-            decisions: budget_decisions,
             budget: budget,
+            bridge_step_delivered: bridge_step_delivered,
+            completed_no_information_gain: completed_observation.no_information_gain,
+            consecutive_failure_count: consecutive_failure_count,
+            dispatch: dispatch,
+            dispatched_turn_opts: dispatched.turn_opts,
+            fallback_accepted: fallback_outcome.accepted,
+            fallback_triggered: fallback_outcome.triggered,
+            had_parse_errors: had_parse_errors,
+            iteration: iteration,
+            iteration_index: iteration_index,
+            llm_result: llm_result,
+            loop_start_ms: loop_start_ms,
+            normalized: normalized,
+            parsed_done_marker: parsed?.done_marker ?? "",
+            raw_text: raw_text,
+            rejected_tools_seen: rejected_tools_seen,
+            successful_tools_seen: successful_tools_seen,
+            tool_calls: tool_calls,
+            totals: totals,
+            turn_llm_opts: turn_llm_opts,
+            turn_opts: turn_opts,
+            visible_text: visible_text,
           },
+          {
+            budget_decisions: budget_decisions,
+            consecutive_text_only: consecutive_text_only,
+            current_max: current_max,
+            done_judge_invocations: done_judge_invocations,
+            done_judge_vetoes: done_judge_vetoes,
+            extensions_used: extensions_used,
+            feedback_history: feedback_history,
+            final_status: final_status,
+            last_tool_count: last_tool_count,
+            made_source_write: made_source_write,
+            opts: opts,
+            stall_state: stall_state,
+            stop_reason: stop_reason,
+            terminal_write_unverified: terminal_write_unverified,
+            turns_since_progress: turns_since_progress,
+            verify_attempts: verify_attempts,
+            verify_completion_judge_invocations: verify_completion_judge_invocations,
+            verify_completion_judge_vetoes: verify_completion_judge_vetoes,
+          },
+          max_verify_attempts,
         )
-        current_max = applied.current_max
-        extensions_used = applied.extensions_used
-        budget_decisions = applied.decisions
-        if applied.stop {
-          final_status = applied.final_status
-          stop_reason = applied.stop_reason
+        const post_turn_state = post_turn_transition.state
+        budget_decisions = post_turn_state.budget_decisions
+        consecutive_text_only = post_turn_state.consecutive_text_only
+        current_max = post_turn_state.current_max
+        done_judge_invocations = post_turn_state.done_judge_invocations
+        done_judge_vetoes = post_turn_state.done_judge_vetoes
+        extensions_used = post_turn_state.extensions_used
+        feedback_history = post_turn_state.feedback_history
+        final_status = post_turn_state.final_status
+        last_tool_count = post_turn_state.last_tool_count
+        made_source_write = post_turn_state.made_source_write
+        opts = post_turn_state.opts
+        stall_state = post_turn_state.stall_state
+        stop_reason = post_turn_state.stop_reason
+        terminal_write_unverified = post_turn_state.terminal_write_unverified
+        turns_since_progress = post_turn_state.turns_since_progress
+        verify_attempts = post_turn_state.verify_attempts
+        verify_completion_judge_invocations = post_turn_state.verify_completion_judge_invocations
+        verify_completion_judge_vetoes = post_turn_state.verify_completion_judge_vetoes
+        if post_turn_transition.action == "break" {
           break
         }
+        continue
       }
       const terminal_boundary = __agent_loop_terminal_boundary(
         harness,

@@ -23,6 +23,7 @@ ACPRequest = _RoundTrip
 ACPResponse = _RoundTrip
 ACPSessionUpdateNotification = _RoundTrip
 HarnAgentEventNotification = _RoundTrip
+HarnToolAnnotations = _RoundTrip
 A2ATask = _RoundTrip
 MCPTool = _RoundTrip
 MCPDiscoverResult = _RoundTrip
@@ -74,6 +75,11 @@ fn fixture_payload(version: string) -> dict {
     harnAgentEventMethod: "harn/agent_event",
     harnProviderCatalogMethod: "harn/provider_catalog",
     envelopes: envelopes,
+    harnToolAnnotations: {
+      kind: "execute",
+      side_effect_level: "read_only",
+      completion_evidence_role: "verification",
+    },
     a2aTask: {id: "task-1", state: "completed"},
     mcpTool: {name: "read_file", description: "Read"},
     mcpDiscoverResult: {tools: []},

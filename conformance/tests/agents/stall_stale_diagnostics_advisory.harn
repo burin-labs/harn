@@ -9,21 +9,19 @@ fn call() {
 }
 
 fn dispatch(hash: string, current_hash: string) {
-  return {
-    results: [
-      {
-        tool_name: "verify",
-        ok: false,
-        status: "error",
-        error: "src/writer.zig:10:2: error: missing writeEscaped",
-        rung: "R2",
-        rowId: "zig/test",
-        at: "2026-07-03T00:00:00Z",
-        snapshot: {"src/writer.zig": hash},
-        current_hashes: {"src/writer.zig": current_hash},
-      },
-    ],
-  }
+  return [
+    {
+      tool_name: "verify",
+      ok: false,
+      status: "error",
+      error: "src/writer.zig:10:2: error: missing writeEscaped",
+      rung: "R2",
+      rowId: "zig/test",
+      at: "2026-07-03T00:00:00Z",
+      snapshot: {"src/writer.zig": hash},
+      current_hashes: {"src/writer.zig": current_hash},
+    },
+  ]
 }
 
 fn run(agent: HarnessAgent, random: HarnessRandom, dispatches, config) {

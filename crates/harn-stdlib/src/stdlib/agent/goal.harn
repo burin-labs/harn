@@ -272,15 +272,20 @@ fn __goal_judge_system(g) {
  */
 pub fn goal_judge(g: GoalSpec, opts: GoalJudgeOptions? = nil) -> JudgeConfig {
   const o = opts ?? {}
-  return {
+  let config: JudgeConfig = {
     fail_open_on_error: o?.fail_open_on_error ?? false,
     feedback_fallback: o?.feedback_fallback
       ?? "The goal is not yet met; keep working toward the success criteria.",
     max_invocations: o?.max_invocations ?? __GOAL_MAX_RELOOPS,
-    model: o?.model,
-    provider: o?.provider,
     system: __goal_judge_system(g),
   }
+  if o?.model != nil {
+    config.model = o.model
+  }
+  if o?.provider != nil {
+    config.provider = o.provider
+  }
+  return config
 }
 
 /**

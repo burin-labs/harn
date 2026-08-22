@@ -4,14 +4,15 @@ import {
   agent_tool_result_outcome,
 } from "std/agent/tool_lifecycle"
 
-pub fn __dispatch_results_list(dispatch) {
-  if dispatch == nil {
-    return []
-  }
-  if type_of(dispatch) == "list" {
-    return dispatch
-  }
-  return dispatch?.results ?? []
+/**
+ * Host dispatches are canonically a result list; a turn without tools has no
+ * dispatch. Normalize the absent case here so downstream policy stays shape
+ * agnostic.
+ */
+pub type AgentToolDispatch = list?
+
+pub fn __dispatch_results_list(dispatch: AgentToolDispatch) -> list {
+  return dispatch ?? []
 }
 
 fn __error_category_is_dispatch_rejection(category) -> bool {
@@ -82,7 +83,7 @@ pub fn __tool_result_name(result) {
   return result?.tool_name ?? result?.name ?? ""
 }
 
-pub fn __tool_names_by_status(dispatch, want_ok) {
+pub fn __tool_names_by_status(dispatch: AgentToolDispatch, want_ok: bool) -> list<string> {
   const results = __dispatch_results_list(dispatch)
   let names = []
   for result in results {

@@ -20,11 +20,11 @@ import {
 // harn#4456: the owning boundary normalizes defaults once, callers pass only
 // overrides). No per-language logic; the ledger is language-agnostic.
 //
-// Determinism: every deadline reads `harness.clock.now_ms()` — the SAME clock
-// `agent_session_await_inbox` parks on — so a `PausedClock` drives both the
-// schedule and the park. The pure decision functions below take `now_ms` as an
-// argument and touch no clock or inbox, so they are exercised with synthetic
-// snapshots and virtual time and zero real sleeps (see
+// Determinism: every duration reads `harness.clock.monotonic_ms()` from the
+// SAME harness clock `agent_session_await_inbox` parks on, so a `PausedClock`
+// drives both the schedule and the park. The pure decision functions below
+// take `now_ms` as an argument and touch no clock or inbox, so they are
+// exercised with synthetic snapshots and virtual time and zero real sleeps (see
 // `pipeline-tests`/`tests/agent`). The park/wake ordering itself is proven by
 // the Rust `agent_inbox` PausedClock tests.
 
@@ -67,6 +67,20 @@ pub type CommandWaitOptions = {
   hold_reentry_budget?: int,
   auto_resolve?: string,
   wording?: dict,
+}
+
+pub type CommandHoldState = {reentries: int}
+
+pub type CommandHoldOutcome = "digest" | "resolved" | "interrupted" | "exhausted"
+
+pub type CommandHoldResult = {
+  ledger: list,
+  outcome: CommandHoldOutcome,
+  hold_state: CommandHoldState,
+  digest?: string,
+  terminal_succeeded?: bool,
+  reentry_cap?: int?,
+  receipts: list,
 }
 
 fn __cl_pos_int(value, fallback: int) -> int {
@@ -694,14 +708,14 @@ pub fn command_ledger_apply_ceiling(
 // -------------------------------------------------------------------------------------------------
 
 fn __cl_now_ms(clock: HarnessClock) -> int {
-  return clock.now_ms()
+  return clock.monotonic_ms()
 }
 
 /**
  * Run one command hold. `hold_state = {reentries}` carries the separate
  * `hold_reentries` budget class across successive holds in the loop (a long
  * build never eats the work-iteration budget). Returns:
- *   {ledger, outcome, hold_state, digest?, reentry_max_tokens?, receipts?}
+ *   {ledger, outcome, hold_state, digest?, reentry_cap?, receipts?}
  * where `outcome` is one of:
  *   "digest"      — inject `digest` as a `command_status` feedback block and run
  *                   ONE re-entry inference capped at `reentry_max_tokens`.
@@ -720,13 +734,15 @@ fn __cl_now_ms(clock: HarnessClock) -> int {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn command_ledger_hold(harness: Harness, session_id, ledger, cw, hold_state) -> dict {
+pub fn command_ledger_hold(
+  harness: Harness,
+  session_id,
+  ledger,
+  cw,
+  hold_state: CommandHoldState,
+) -> CommandHoldResult {
   let live = ledger
-  let state = if type_of(hold_state) == "dict" {
-    hold_state
-  } else {
-    {reentries: 0}
-  }
+  let state = hold_state
   let receipts = []
   while true {
     if len(__cl_awaited_running(live)) == 0 && !__cl_has_terminal_awaited(live) {
