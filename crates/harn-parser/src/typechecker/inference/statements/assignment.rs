@@ -9,6 +9,7 @@ impl TypeChecker {
         span: Span,
         scope: &mut TypeScope,
     ) {
+        self.check_assignment_target_references(target, scope);
         let path_slot_type = if matches!(&target.node, Node::Identifier(_)) {
             None
         } else {
@@ -150,6 +151,26 @@ impl TypeChecker {
         }
         if op.is_none() {
             self.narrow_after_assignment(target, value, scope);
+        }
+    }
+
+    /// Resolve every value read while locating an assignment slot without
+    /// checking the slot as an ordinary read. Property/subscript semantics
+    /// are checked separately by `assignment_path_slot_type` in write mode.
+    fn check_assignment_target_references(&mut self, target: &SNode, scope: &mut TypeScope) {
+        match &target.node {
+            Node::Identifier(name) => {
+                self.check_value_identifier_resolves(name, target.span, scope);
+            }
+            Node::PropertyAccess { object, .. } | Node::OptionalPropertyAccess { object, .. } => {
+                self.check_assignment_target_references(object, scope);
+            }
+            Node::SubscriptAccess { object, index }
+            | Node::OptionalSubscriptAccess { object, index } => {
+                self.check_assignment_target_references(object, scope);
+                self.check_node(index, scope);
+            }
+            _ => self.check_node(target, scope),
         }
     }
 

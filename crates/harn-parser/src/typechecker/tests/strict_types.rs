@@ -357,6 +357,50 @@ fn test_cross_module_unresolved_value_identifier_errors() {
 }
 
 #[test]
+fn test_cross_module_unresolved_assignment_targets_error() {
+    let diags = check_source_with_imports(
+        r"pipeline t(task) {
+  missing = 1
+  let values = [1]
+  values[missing_index] = 2
+}",
+        &[],
+    );
+    let unresolved: Vec<&str> = diags
+        .iter()
+        .filter(|diagnostic| diagnostic.code == Code::UndefinedVariable)
+        .filter_map(|diagnostic| match diagnostic.details.as_ref() {
+            Some(DiagnosticDetails::UnresolvedName { name }) => Some(name.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(unresolved, ["missing", "missing_index"]);
+}
+
+#[test]
+fn test_discard_name_is_only_valid_in_binding_positions() {
+    let diags = check_source_with_imports(
+        r"pipeline t(task) {
+  const _ = 1
+  let _ = try { 2 } catch { nil }
+  const piped = 1 |> (_ + 1)
+  _ = 3
+  log(_)
+}",
+        &[],
+    );
+    let unresolved: Vec<&str> = diags
+        .iter()
+        .filter(|diagnostic| diagnostic.code == Code::UndefinedVariable)
+        .filter_map(|diagnostic| match diagnostic.details.as_ref() {
+            Some(DiagnosticDetails::UnresolvedName { name }) => Some(name.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(unresolved, ["_", "_"]);
+}
+
+#[test]
 fn test_cross_module_imported_value_identifier_is_allowed() {
     let diags = check_source_with_imports(
         r"pipeline t(task) {

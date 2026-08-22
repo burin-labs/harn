@@ -2,9 +2,26 @@
 
 use crate::ast::{Node, SNode};
 
-use super::super::TypeChecker;
+use super::super::{TypeChecker, TypeScope};
 
 impl TypeChecker {
+    pub(in crate::typechecker) fn check_pipe_operands(
+        &mut self,
+        op: &str,
+        left: &SNode,
+        right: &SNode,
+        scope: &mut TypeScope,
+    ) -> bool {
+        self.check_node(left, scope);
+        if op != "|>" || !Self::contains_pipe_placeholder(right) {
+            return false;
+        }
+        let mut pipe_scope = scope.child();
+        pipe_scope.define_pipe_placeholder(self.infer_type(left, scope));
+        self.check_node(right, &mut pipe_scope);
+        true
+    }
+
     pub(in crate::typechecker) fn contains_pipe_placeholder(node: &SNode) -> bool {
         match &node.node {
             Node::Identifier(name) if name == "_" => true,

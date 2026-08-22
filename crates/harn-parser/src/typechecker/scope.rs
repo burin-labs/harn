@@ -614,6 +614,12 @@ impl TypeScope {
         self.vars.insert(name.to_string(), ty);
     }
 
+    /// Bind `_` as the contextual value inside a pipe expression. Ordinary
+    /// declarations route through `define_var` and keep `_` unbound.
+    pub(super) fn define_pipe_placeholder(&mut self, ty: InferredType) {
+        self.vars.insert("_".to_string(), ty);
+    }
+
     /// Pre-narrowing type recorded for a flow-narrowed variable, walking
     /// the lexical scope chain. Narrowing applied by an outer branch
     /// condition is still a narrowing from the perspective of a nested
