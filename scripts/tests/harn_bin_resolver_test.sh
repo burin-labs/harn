@@ -14,6 +14,8 @@ esac
 # Test selection belongs to this harness process, not to Harn or Cargo's typed
 # environment contract.
 unset HARN_BIN_RESOLVER_TEST_ALLOW_CARGO
+# shellcheck source=scripts/lib/cargo_env.sh
+source "$repo_root/scripts/lib/cargo_env.sh"
 # shellcheck source=scripts/lib/harn_bin.sh
 source "$repo_root/scripts/lib/harn_bin.sh"
 
