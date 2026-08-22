@@ -1090,6 +1090,29 @@ pub(crate) fn terminal_result_for_handle(handle_id: &str) -> Option<VmValue> {
         .terminal_result(handle_id)
 }
 
+/// Atomically consume feedback for one long-running handle while leaving all
+/// other session entries in their original order with their original sequence.
+///
+/// `kinds` narrows consumption to the lifecycle phases the caller owns:
+/// `wait_command` consumes terminal `tool_result` feedback, while the
+/// `background_after_ms` boundary consumes both buffered progress and terminal
+/// feedback because it projects the latest one into its inline response.
+pub(crate) fn drain_handle_feedback(
+    session_id: &str,
+    handle_id: &str,
+    kinds: &[&str],
+) -> Vec<harn_vm::orchestration::agent_inbox::InboxEntry> {
+    harn_vm::orchestration::agent_inbox::drain_where(session_id, |entry| {
+        if !kinds.contains(&entry.kind.as_str()) {
+            return false;
+        }
+        let Ok(payload) = serde_json::from_str::<serde_json::Value>(&entry.content) else {
+            return false;
+        };
+        payload.get("handle_id").and_then(serde_json::Value::as_str) == Some(handle_id)
+    })
+}
+
 /// Live handles for `session_id`, for the agent loop's ledger reconciliation and
 /// digest rendering. Each row carries the spawn-time lease tag, command display,
 /// and start timestamp; scheduling and lease transitions live in the loop. An

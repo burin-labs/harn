@@ -186,18 +186,27 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
             },
         )?;
         if let Some(wait_ms) = background_after_ms.filter(|wait_ms| *wait_ms > 0) {
-            // Wait for an initial progress entry first (this also lets in-flight
-            // output settle before we snapshot), then build the snapshot as the
-            // single owner of the background-after response shape — it carries
-            // every schema-required key. When a progress entry landed, overlay
-            // its live fields onto the snapshot rather than returning the raw
-            // inbox payload, which omits required keys such as `pid`,
-            // `timed_out`, `output_sha256`, `sandbox`, and `audit_id`.
-            let feedback =
-                wait_for_initial_background_feedback(&session_id, &info.handle_id, wait_ms);
+            // The inline window is terminal-or-deadline. Progress is useful for
+            // the running snapshot when the deadline wins, but must not shorten
+            // the independent background_after_ms budget. The direct result
+            // synchronizer is deliberately separate from the session inbox, so
+            // progress can accumulate without waking this wait early.
+            let terminal = super::long_running::wait_for_result(
+                &info.handle_id,
+                Duration::from_millis(wait_ms),
+            );
+            let feedback = drain_background_feedback(&session_id, &info.handle_id);
             let mut response =
                 initial_background_snapshot(&info, wait_ms, progress_max_inline_bytes);
-            if let Some(feedback) = feedback {
+            if let Some(terminal) =
+                terminal.and_then(|value| background_feedback_from_value(value, "tool_result"))
+            {
+                // Build from the canonical snapshot so terminal results retain
+                // response-schema fields owned by run_command (pid, sandbox,
+                // audit id) while overlaying the finalized output and opaque
+                // snapshot binding from the continuation.
+                overlay_progress_feedback(&mut response, terminal);
+            } else if let Some(feedback) = feedback {
                 overlay_progress_feedback(&mut response, feedback);
             }
             return Ok(VmValue::dict(response));
@@ -221,48 +230,48 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     Ok(proc::build_response(outcome, None, policy_context))
 }
 
-/// An initial background-progress inbox entry selected for a handle: the parsed
-/// progress payload plus the inbox entry's feedback kind.
-struct InitialBackgroundFeedback {
+/// Background inbox feedback selected for a handle: the parsed payload plus
+/// the inbox entry's feedback kind.
+struct BackgroundFeedback {
     payload: harn_vm::value::DictMap,
     kind: String,
 }
 
-fn wait_for_initial_background_feedback(
-    session_id: &str,
-    handle_id: &str,
-    wait_ms: u64,
-) -> Option<InitialBackgroundFeedback> {
-    let timeout = Duration::from_millis(wait_ms);
-    if !harn_vm::orchestration::agent_inbox::wait_sync(session_id, timeout) {
-        return None;
-    }
-    let mut kept = Vec::new();
-    let mut selected = None;
-    for entry in harn_vm::orchestration::agent_inbox::drain(session_id) {
-        let parsed = serde_json::from_str::<serde_json::Value>(&entry.content).ok();
-        let matches_handle = parsed
-            .as_ref()
-            .and_then(|value| value.get("handle_id"))
-            .and_then(serde_json::Value::as_str)
-            == Some(handle_id);
-        if matches_handle && selected.is_none() {
-            if let Some(payload) = parsed {
-                if let VmValue::Dict(map) = harn_vm::json_to_vm_value(&payload) {
-                    selected = Some(InitialBackgroundFeedback {
-                        payload: (*map).clone(),
-                        kind: entry.kind.clone(),
-                    });
-                    continue;
-                }
-            }
+fn drain_background_feedback(session_id: &str, handle_id: &str) -> Option<BackgroundFeedback> {
+    let entries = super::long_running::drain_handle_feedback(
+        session_id,
+        handle_id,
+        &["tool_progress", "tool_result"],
+    );
+    let mut latest_progress = None;
+    let mut terminal = None;
+    for entry in entries {
+        let Ok(payload) = serde_json::from_str::<serde_json::Value>(&entry.content) else {
+            continue;
+        };
+        let Some(feedback) = background_feedback_from_value(
+            harn_vm::json_to_vm_value(&payload),
+            entry.kind.as_str(),
+        ) else {
+            continue;
+        };
+        if entry.kind == "tool_result" {
+            terminal = Some(feedback);
+        } else {
+            latest_progress = Some(feedback);
         }
-        kept.push(entry);
     }
-    for entry in kept.into_iter().rev() {
-        harn_vm::orchestration::agent_inbox::requeue_front(entry);
-    }
-    selected
+    terminal.or(latest_progress)
+}
+
+fn background_feedback_from_value(value: VmValue, kind: &str) -> Option<BackgroundFeedback> {
+    let VmValue::Dict(payload) = value else {
+        return None;
+    };
+    Some(BackgroundFeedback {
+        payload: (*payload).clone(),
+        kind: kind.to_string(),
+    })
 }
 
 /// Overlay a selected progress payload's live fields onto the canonical
@@ -271,11 +280,8 @@ fn wait_for_initial_background_feedback(
 /// signal, snapshot_binding, ...); keys absent from the payload keep the
 /// snapshot's schema-required values. `feedback_kind` becomes the inbox entry's
 /// kind, replacing the snapshot-only `tool_progress` literal.
-fn overlay_progress_feedback(
-    response: &mut harn_vm::value::DictMap,
-    feedback: InitialBackgroundFeedback,
-) {
-    let InitialBackgroundFeedback { payload, kind } = feedback;
+fn overlay_progress_feedback(response: &mut harn_vm::value::DictMap, feedback: BackgroundFeedback) {
+    let BackgroundFeedback { payload, kind } = feedback;
     for (key, value) in payload.iter() {
         response.insert(key.clone(), value.clone());
     }
