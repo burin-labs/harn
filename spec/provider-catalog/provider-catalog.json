@@ -2119,11 +2119,11 @@
         ],
         "max_tools": 10000
       },
-      "structured_output": "tool_use",
+      "structured_output": "native",
       "format_preferences": {
         "prefers_xml_scaffolding": true,
         "prefers_markdown_scaffolding": false,
-        "structured_output_mode": "xml_tagged",
+        "structured_output_mode": "native_json",
         "supports_assistant_prefill": true,
         "prefers_role_developer": false,
         "prefers_xml_tools": true,
@@ -25880,7 +25880,7 @@
         "prompt_caching",
         "streaming",
         "structured_output",
-        "structured_output_mode:xml_tagged",
+        "structured_output_mode:native_json",
         "text_tools",
         "thinking",
         "tool_search",
