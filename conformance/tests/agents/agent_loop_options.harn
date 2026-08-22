@@ -14,6 +14,12 @@ pipeline default(harness: Harness) {
   )
   harness.stdio.println(judged.done_sentinel)
   harness.stdio.println(type_of(judged.done_judge))
+  const disabled_judges = agent_loop_options(
+    harness,
+    {provider: "mock", done_judge: false, verify_completion_judge: false},
+  )
+  assert_eq(disabled_judges.done_judge, nil)
+  assert_eq(disabled_judges.verify_completion_judge, nil)
   const client_search = agent_loop_options(
     harness,
     {provider: "mock", tools: tool_registry(), tool_search: {mode: "client"}},

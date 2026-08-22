@@ -28,35 +28,43 @@ pub fn __profile_defaults(profile) {
   throw "agent_loop: profile must be one of tool_using, researcher, verifier, completer"
 }
 
-pub fn __completion_judge_defaults(fs: HarnessFs, value, opts) {
-  if type_of(value) == "bool" && value {
-    return {
+/** Normalize the outer judge union once; nested enable switches do not exist. */
+pub fn __normalize_judge_config(value) -> JudgeConfig? {
+  if value == nil {
+    return nil
+  }
+  if type_of(value) == "bool" {
+    return if value {
+      {}
+    } else {
+      nil
+    }
+  }
+  if type_of(value) == "dict" {
+    return value
+  }
+  return nil
+}
+
+/** Normalize a configured completion judge and materialize shorthand defaults. */
+pub fn __normalize_completion_judge_config(fs: HarnessFs, value, opts) -> JudgeConfig? {
+  const config = __normalize_judge_config(value)
+  if config == nil {
+    return nil
+  }
+  return if type_of(value) == "bool" {
+    config
+      + {
       system: completion_judge_system_prompt(fs, opts),
       feedback_fallback: completion_judge_feedback_prompt(fs, opts),
     }
+  } else {
+    config
   }
-  return value
 }
 
 pub fn __has_key(opts, key) {
   return contains(opts.keys(), key)
-}
-
-pub fn __judge_enabled(value) {
-  if value == nil {
-    return false
-  }
-  if type_of(value) == "bool" {
-    return value
-  }
-  if type_of(value) == "dict" {
-    const enabled = value?.enabled
-    if enabled == nil {
-      return true
-    }
-    return enabled
-  }
-  return true
 }
 
 pub fn __client_tool_search_requested(value) {

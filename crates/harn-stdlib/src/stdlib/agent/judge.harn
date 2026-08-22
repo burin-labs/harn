@@ -8,6 +8,7 @@ import {
   __completion_gate_ladder,
   __judge_run_checkpoint,
 } from "std/agent/judge_internals"
+import { __normalize_judge_config } from "std/agent/options_formats"
 import { JudgeConfig } from "std/agent/options_types"
 import { __with_prompt_fragment } from "std/agent/preflight"
 import { completion_judge_user_prompt } from "std/agent/prompts"
@@ -928,20 +929,7 @@ pub fn agent_done_judge_cap(judge_cfg) -> int? {
  * @example: agent_judge_config(opts?.done_judge)
  */
 pub fn agent_judge_config(judge_cfg) -> JudgeConfig? {
-  if judge_cfg == nil {
-    return nil
-  }
-  if type_of(judge_cfg) == "bool" {
-    return if judge_cfg {
-      {}
-    } else {
-      nil
-    }
-  }
-  if type_of(judge_cfg) == "dict" {
-    return judge_cfg
-  }
-  return nil
+  return __normalize_judge_config(judge_cfg)
 }
 
 /**
