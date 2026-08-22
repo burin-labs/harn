@@ -6,8 +6,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::shared_state::ScopedKey;
+use crate::stdlib::args::{Args, ErrorKind};
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
-use crate::stdlib::options::{non_negative_millis_from_value, ErrorKind};
 use crate::value::{
     DeadlockError, VmAtomicHandle, VmChannelCloseState, VmChannelHandle, VmError, VmValue,
 };
@@ -211,8 +211,7 @@ fn optional_timeout_ms(value: Option<&VmValue>) -> Option<u64> {
 }
 
 fn optional_timeout_scalar_ms(value: &VmValue) -> Option<u64> {
-    match non_negative_millis_from_value(value, "channel_select", "timeout_ms", ErrorKind::Runtime)
-    {
+    match Args::single("channel_select", ErrorKind::Runtime, value).millis(0, "timeout_ms") {
         Ok(ms) => Some(ms),
         Err(_) if is_negative_millis_value(value) => Some(0),
         Err(_) => None,
@@ -1313,7 +1312,7 @@ async fn sleep_builtin(
 ) -> Result<VmValue, VmError> {
     let ms = match args.first() {
         Some(value) if is_negative_millis_value(value) => 0,
-        Some(value) => non_negative_millis_from_value(value, "sleep", "ms", ErrorKind::Runtime)?,
+        Some(value) => Args::single("sleep", ErrorKind::Runtime, value).millis(0, "ms")?,
         _ => 0,
     };
     if ms == 0 {

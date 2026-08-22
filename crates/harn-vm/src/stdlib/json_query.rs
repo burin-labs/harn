@@ -550,6 +550,7 @@ impl<'a> Parser<'a> {
         }
         self.expect_char(']')?;
         let Some(index) = start else {
+            // not-a-harn-type: jq path syntax names JSON shapes.
             return Err("jq: expected array index or slice bound".to_string());
         };
         Ok(PathStep::Index(index))
@@ -567,6 +568,7 @@ impl<'a> Parser<'a> {
                 self.parse_string()?
             } else {
                 self.try_parse_ident()
+                    // not-a-harn-type: jq path syntax names JSON shapes.
                     .ok_or_else(|| format!("jq: expected object key near '{}'", self.remaining()))?
             };
             self.expect_char(':')?;

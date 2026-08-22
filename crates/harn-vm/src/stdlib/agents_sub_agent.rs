@@ -4,7 +4,7 @@ use super::{SubAgentExecutionResult, SubAgentRunSpec};
 use crate::orchestration::CapabilityPolicy;
 #[cfg(test)]
 use crate::orchestration::{annotate_nested_execution_options, NestedExecutionKind};
-use crate::stdlib::options::{ErrorKind, OptionsParser};
+use crate::stdlib::args::{ErrorKind, Options};
 use crate::value::VmDictExt;
 use crate::value::{VmError, VmValue};
 use crate::vm::AsyncBuiltinCtx;
@@ -114,24 +114,24 @@ fn inherited_reminders_from_parent(
 
 pub(super) fn parse_sub_agent_request(args: &[VmValue]) -> Result<ParsedSubAgentRequest, VmError> {
     let request = validate_sub_agent_request_envelope(args)?;
-    let mut parser = OptionsParser::new(SUB_AGENT_RUN_FN, request, ErrorKind::Runtime);
-    if parser.optional_string_raw("_type")?.as_deref() != Some("sub_agent_request") {
+    let mut parser = Options::new(SUB_AGENT_RUN_FN, ErrorKind::Runtime, Some(request));
+    if parser.opt_string("_type")?.as_deref() != Some("sub_agent_request") {
         return Err(invalid_sub_agent_request());
     }
-    let task = parser.required_string("task")?;
+    let task = parser.non_empty_string("task")?.to_string();
     let background = parser.bool_or("background", false)?;
     let policies = resolve_sub_agent_policies(request, &mut parser)?;
     let returns_schema = sub_agent_returns_schema(&mut parser)?;
-    let system = non_empty_raw_string(parser.optional_string_raw("system")?);
-    let session_id = non_empty_raw_string(parser.optional_string_raw("session_id")?)
+    let system = non_empty_raw_string(parser.opt_string("system")?.map(str::to_string));
+    let session_id = non_empty_raw_string(parser.opt_string("session_id")?.map(str::to_string))
         .unwrap_or_else(|| format!("sub_agent_session_{}", uuid::Uuid::now_v7()));
     let mut options =
         prepare_sub_agent_options(&mut parser, &session_id, policies.requested_policy.as_ref())?;
-    let name = non_empty_raw_string(parser.optional_string_raw("name")?)
+    let name = non_empty_raw_string(parser.opt_string("name")?.map(str::to_string))
         .unwrap_or_else(|| "sub-agent".to_string());
     let (run_id, parent_session_id, parent_run_id) =
         lifecycle::initialize_run_identity(&mut options, &name);
-    let reminder_propagation = match parser.optional_list("reminder_propagation")? {
+    let reminder_propagation = match parser.opt_list("reminder_propagation")? {
         Some(reminders) => reminders
             .iter()
             .map(parse_reminder_propagation_value)
@@ -139,7 +139,7 @@ pub(super) fn parse_sub_agent_request(args: &[VmValue]) -> Result<ParsedSubAgent
         None => inherited_reminders_from_parent(parent_session_id.as_deref()),
     };
     let requested_workspace_anchor = parse_sub_agent_workspace_anchor(&mut parser)?;
-    parser.finish_strict(&[])?;
+    parser.finish(&[])?;
     let workspace_anchor = resolve_sub_agent_workspace_anchor(
         parent_session_id.as_deref(),
         requested_workspace_anchor,
@@ -170,7 +170,7 @@ pub(super) fn parse_sub_agent_request(args: &[VmValue]) -> Result<ParsedSubAgent
 }
 
 fn parse_sub_agent_workspace_anchor(
-    parser: &mut OptionsParser<'_>,
+    parser: &mut Options<'_>,
 ) -> Result<Option<crate::workspace_anchor::WorkspaceAnchor>, VmError> {
     let Some(value) = parser.raw("anchor") else {
         return Ok(None);
@@ -271,7 +271,7 @@ fn invalid_sub_agent_request() -> VmError {
 
 fn resolve_sub_agent_policies(
     request: &crate::value::DictMap,
-    parser: &mut OptionsParser<'_>,
+    parser: &mut Options<'_>,
 ) -> Result<SubAgentPolicyResolution, VmError> {
     let allowed_tools =
         parse_string_list(parser.raw("allowed_tools"), "sub_agent_run.allowed_tools")?;
@@ -288,24 +288,21 @@ fn resolve_sub_agent_policies(
     })
 }
 
-fn sub_agent_returns_schema(parser: &mut OptionsParser<'_>) -> Result<Option<VmValue>, VmError> {
+fn sub_agent_returns_schema(parser: &mut Options<'_>) -> Result<Option<VmValue>, VmError> {
     let returns_schema_value = parser
         .raw("returns_schema")
         .filter(|value| !matches!(value, VmValue::Nil))
         .cloned();
-    let returns = parser.optional_dict("returns")?;
+    let returns = parser.opt_dict("returns")?;
     Ok(returns_schema_value.or_else(|| returns.and_then(|dict| dict.get("schema")).cloned()))
 }
 
 fn prepare_sub_agent_options(
-    parser: &mut OptionsParser<'_>,
+    parser: &mut Options<'_>,
     session_id: &str,
     requested_policy: Option<&CapabilityPolicy>,
 ) -> Result<crate::value::DictMap, VmError> {
-    let mut options = parser
-        .optional_dict("options")?
-        .cloned()
-        .unwrap_or_default();
+    let mut options = parser.opt_dict("options")?.cloned().unwrap_or_default();
     inject_sub_agent_skill_context(&mut options);
     options.put_str("session_id", session_id);
     match requested_policy {

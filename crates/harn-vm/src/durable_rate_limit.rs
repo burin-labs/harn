@@ -7,8 +7,8 @@ use std::time::{Duration, Instant};
 use rusqlite::{params, Connection, ErrorCode, TransactionBehavior};
 
 use crate::runtime_sqlite::{initialize_runtime_sqlite, RuntimeSqliteError, RuntimeSqliteSchema};
+use crate::stdlib::args::{Args, ErrorKind};
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
-use crate::stdlib::options::{non_negative_millis_from_value, ErrorKind};
 use crate::stdlib::sandbox::{self, FsAccess};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
@@ -342,13 +342,9 @@ fn optional_duration_ms(
 ) -> Result<Option<u64>, VmError> {
     match dict.get(key) {
         None | Some(VmValue::Nil) => Ok(None),
-        Some(value) => non_negative_millis_from_value(
-            value,
-            "durable_rate_limit_acquire",
-            key,
-            ErrorKind::Runtime,
-        )
-        .map(Some),
+        Some(value) => Args::single("durable_rate_limit_acquire", ErrorKind::Runtime, value)
+            .millis(0, key)
+            .map(Some),
     }
 }
 

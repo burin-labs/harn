@@ -8,8 +8,8 @@ use crate::value::VmDictExt;
 use std::path::PathBuf;
 
 use crate::agent_sessions;
+use crate::stdlib::args::{Args, ErrorKind, Options};
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
-use crate::stdlib::options::{self, ErrorKind};
 use crate::value::{ErrorCategory, VmError, VmValue};
 
 /// Sessions raise catchable errors (callers may `try`/`recover`).
@@ -72,26 +72,29 @@ fn err(msg: impl Into<String>) -> VmError {
     ERR_KIND.err(msg.into())
 }
 
-/// Thin local re-exports so each builtin can keep its call sites short. The
-/// shared helpers in [`crate::stdlib::options`] handle the actual logic and
-/// error-kind selection.
+/// Thin local adapters over the shared argument contract, so each builtin can
+/// keep its call sites short while [`crate::stdlib::args`] owns the type
+/// checks, the error kind, and the wording.
+///
+/// The one deviation from [`Args`]'s defaults is deliberate: session ids are
+/// not trimmed, because nested-id round-trips carry whitespace-only ids.
+fn session_args<'a>(fn_name: &'a str, args: &'a [VmValue]) -> Args<'a> {
+    Args::thrown(fn_name, args)
+}
+
+fn session_options<'a>(fn_name: &'a str, opts: &'a crate::value::DictMap) -> Options<'a> {
+    Options::new(fn_name, ERR_KIND, Some(opts))
+}
+
 fn arg_string_opt(
     args: &[VmValue],
     idx: usize,
     fn_name: &'static str,
     arg_name: &str,
 ) -> Result<Option<String>, VmError> {
-    // Preserve the prior contract: do *not* trim — sessions accept whitespace
-    // strings for nested-id round-trips.
-    match args.get(idx) {
-        None | Some(VmValue::Nil) => Ok(None),
-        Some(VmValue::String(s)) => Ok(Some(s.to_string())),
-        _ => Err(options::fn_err(
-            fn_name,
-            ERR_KIND,
-            format_args!("`{arg_name}` must be a string or nil"),
-        )),
-    }
+    Ok(session_args(fn_name, args)
+        .opt_string(idx, arg_name)?
+        .map(str::to_string))
 }
 
 fn arg_string_required(
@@ -100,16 +103,9 @@ fn arg_string_required(
     fn_name: &'static str,
     arg_name: &str,
 ) -> Result<String, VmError> {
-    // Preserve the prior contract: accept empty strings here (sessions used
-    // `arg_string_required` without trim/empty checks).
-    match args.get(idx) {
-        Some(VmValue::String(s)) => Ok(s.to_string()),
-        _ => Err(options::fn_err(
-            fn_name,
-            ERR_KIND,
-            format_args!("`{arg_name}` must be a string"),
-        )),
-    }
+    session_args(fn_name, args)
+        .string(idx, arg_name)
+        .map(str::to_string)
 }
 
 fn arg_int_required(
@@ -118,60 +114,34 @@ fn arg_int_required(
     fn_name: &'static str,
     arg_name: &str,
 ) -> Result<i64, VmError> {
-    options::required_int_arg(args, idx, fn_name, arg_name, ERR_KIND)
+    session_args(fn_name, args).int(idx, arg_name)
 }
 
 fn arg_bool_opt(
     opts: &crate::value::DictMap,
     fn_name: &str,
-    arg_name: &str,
+    arg_name: &'static str,
     default: bool,
 ) -> Result<bool, VmError> {
-    match opts.get(arg_name) {
-        None | Some(VmValue::Nil) => Ok(default),
-        Some(VmValue::Bool(value)) => Ok(*value),
-        _ => Err(err(format!("{fn_name}: `{arg_name}` must be a bool"))),
-    }
+    session_options(fn_name, opts).bool_or(arg_name, default)
 }
 
 fn opt_string(
     opts: &crate::value::DictMap,
     fn_name: &str,
-    arg_name: &str,
+    arg_name: &'static str,
 ) -> Result<Option<String>, VmError> {
-    match opts.get(arg_name) {
-        None | Some(VmValue::Nil) => Ok(None),
-        Some(VmValue::String(value)) => {
-            let trimmed = value.trim();
-            if trimmed.is_empty() {
-                Ok(None)
-            } else {
-                Ok(Some(trimmed.to_string()))
-            }
-        }
-        _ => Err(err(format!(
-            "{fn_name}: `{arg_name}` must be a string or nil"
-        ))),
-    }
+    Ok(session_options(fn_name, opts)
+        .opt_non_empty_string(arg_name)?
+        .map(str::to_string))
 }
 
 fn opt_usize(
     opts: &crate::value::DictMap,
     fn_name: &str,
-    arg_name: &str,
+    arg_name: &'static str,
 ) -> Result<Option<usize>, VmError> {
-    match opts.get(arg_name) {
-        None | Some(VmValue::Nil) => Ok(None),
-        Some(value) => {
-            let Some(raw) = value.as_int() else {
-                return Err(err(format!("{fn_name}: `{arg_name}` must be an int")));
-            };
-            if raw < 0 {
-                return Err(err(format!("{fn_name}: `{arg_name}` must be >= 0")));
-            }
-            Ok(Some(raw as usize))
-        }
-    }
+    session_options(fn_name, opts).opt_usize(arg_name)
 }
 
 fn opt_json(opts: &crate::value::DictMap, arg_name: &str) -> serde_json::Value {
@@ -183,17 +153,16 @@ fn opt_json(opts: &crate::value::DictMap, arg_name: &str) -> serde_json::Value {
 fn opt_dict_json(
     opts: &crate::value::DictMap,
     fn_name: &str,
-    arg_name: &str,
+    arg_name: &'static str,
 ) -> Result<serde_json::Value, VmError> {
-    match opts.get(arg_name) {
-        None | Some(VmValue::Nil) => Ok(serde_json::Value::Null),
-        Some(VmValue::Dict(_)) => Ok(crate::llm::helpers::vm_value_to_json(
-            opts.get(arg_name).expect("checked above"),
-        )),
-        _ => Err(err(format!(
-            "{fn_name}: `{arg_name}` must be a dict or nil"
-        ))),
-    }
+    // Type-check through the shared contract, then hand the original value
+    // to the JSON converter rather than rebuilding it from the borrowed map.
+    session_options(fn_name, opts).opt_dict(arg_name)?;
+    Ok(opts
+        .get(arg_name)
+        .filter(|value| !matches!(value, VmValue::Nil))
+        .map(crate::llm::helpers::vm_value_to_json)
+        .unwrap_or(serde_json::Value::Null))
 }
 
 fn opts_dict_arg(
@@ -201,11 +170,10 @@ fn opts_dict_arg(
     idx: usize,
     fn_name: &str,
 ) -> Result<crate::value::DictMap, VmError> {
-    match args.get(idx) {
-        None | Some(VmValue::Nil) => Ok(crate::value::DictMap::new()),
-        Some(VmValue::Dict(opts)) => Ok(opts.as_ref().clone()),
-        _ => Err(err(format!("{fn_name}: `opts` must be a dict or nil"))),
-    }
+    Ok(session_args(fn_name, args)
+        .opt_dict(idx, "opts")?
+        .cloned()
+        .unwrap_or_default())
 }
 
 fn reject_unknown_opts(

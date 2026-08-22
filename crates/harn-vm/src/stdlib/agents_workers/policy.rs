@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use super::super::parse_context_policy;
 use super::WorkerCarryPolicy;
 use crate::orchestration::{select_artifacts, ArtifactRecord, CapabilityPolicy, ContextPolicy};
-use crate::stdlib::options::{ErrorKind, OptionsParser};
+use crate::stdlib::args::{ErrorKind, Options};
 use crate::value::{VmError, VmValue};
 
 const SPAWN_AGENT_FN: &str = "spawn_agent";
@@ -38,12 +38,12 @@ fn display_non_empty(value: Option<&VmValue>) -> Option<String> {
 pub(in crate::stdlib::agents) fn parse_worker_carry_policy(
     dict: &crate::value::DictMap,
 ) -> Result<WorkerCarryPolicy, VmError> {
-    let mut parent = OptionsParser::new(SPAWN_AGENT_FN, dict, ErrorKind::Runtime);
-    let Some(carry) = parent.optional_dict("carry")? else {
+    let mut parent = Options::new(SPAWN_AGENT_FN, ErrorKind::Runtime, Some(dict));
+    let Some(carry) = parent.opt_dict("carry")? else {
         return Ok(default_worker_carry_policy());
     };
 
-    let mut parser = OptionsParser::new(SPAWN_AGENT_FN, carry, ErrorKind::Runtime);
+    let mut parser = Options::new(SPAWN_AGENT_FN, ErrorKind::Runtime, Some(carry));
     let artifacts_alias = parser.raw("artifacts");
     let transcript_alias = parser.raw("transcript");
     let context_policy_value = parser.raw("context_policy");
@@ -61,7 +61,7 @@ pub(in crate::stdlib::agents) fn parse_worker_carry_policy(
     let resume_workflow = parser.bool_or("resume_workflow", true)?;
     let persist_state = parser.bool_or("persist_state", true)?;
     let retriggerable = parser.bool_or("retriggerable", false)?;
-    parser.finish_strict(&["policy", "tools"])?;
+    parser.finish(&["policy", "tools"])?;
 
     Ok(WorkerCarryPolicy {
         artifact_mode,

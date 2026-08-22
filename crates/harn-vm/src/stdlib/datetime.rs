@@ -563,7 +563,7 @@ fn component_i64(
         Some(VmValue::Int(value)) => Ok(*value),
         Some(VmValue::Float(value)) if value.fract() == 0.0 => Ok(*value as i64),
         Some(other) => Err(vm_error(format!(
-            "date_from_components: {key} must be an integer, got {}",
+            "date_from_components: {key} must be an int, got {}",
             other.type_name()
         ))),
         None => default.ok_or_else(|| vm_error(format!("date_from_components: missing {key}"))),
@@ -612,7 +612,7 @@ fn duration_from_number(
         }
         other => {
             return Err(vm_error(format!(
-                "{builtin}: expected number, got {}",
+                "{builtin}: expected an int or a float, got {}",
                 other.type_name()
             )));
         }

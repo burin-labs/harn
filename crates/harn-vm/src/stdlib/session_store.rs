@@ -20,9 +20,9 @@ use serde_json::{json, Value as JsonValue};
 use sha2::{Digest, Sha256};
 
 use crate::llm::vm_value_to_json;
+use crate::stdlib::args::Args;
 use crate::stdlib::json_to_vm_value;
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
-use crate::stdlib::options::{optional_dict_arg, required_string_arg, ErrorKind};
 use crate::value::{categorized_error, DictMap, ErrorCategory, VmError, VmValue};
 use crate::vm::Vm;
 
@@ -87,23 +87,11 @@ async fn session_store_append_impl(
     _ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
-    let session_id = required_string_arg(
-        &args,
-        0,
-        "__session_store_append",
-        "session_id",
-        ErrorKind::Runtime,
-    )?
-    .trim()
-    .to_string();
+    let session_id = Args::runtime("__session_store_append", &args)
+        .non_empty_string(0, "session_id")?
+        .to_string();
     let payload = args.get(1).map(vm_value_to_json).unwrap_or(JsonValue::Null);
-    let options = optional_dict_arg(
-        &args,
-        2,
-        "__session_store_append",
-        "options",
-        ErrorKind::Runtime,
-    )?;
+    let options = Args::runtime("__session_store_append", &args).opt_dict(2, "options")?;
     reject_retired_now(options)?;
     let state_dir = store_state_dir(options)?;
     let store = open_store(&state_dir)?;
@@ -143,22 +131,10 @@ async fn session_store_events_impl(
     _ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
-    let session_id = required_string_arg(
-        &args,
-        0,
-        "__session_store_events",
-        "session_id",
-        ErrorKind::Runtime,
-    )?
-    .trim()
-    .to_string();
-    let options = optional_dict_arg(
-        &args,
-        1,
-        "__session_store_events",
-        "options",
-        ErrorKind::Runtime,
-    )?;
+    let session_id = Args::runtime("__session_store_events", &args)
+        .non_empty_string(0, "session_id")?
+        .to_string();
+    let options = Args::runtime("__session_store_events", &args).opt_dict(1, "options")?;
     let tenant_id = option_string(options, "tenant_id")?;
     let state_dir = store_state_dir(options)?;
     let Some(store) = open_read_session(&state_dir, &session_id, tenant_id).await? else {
@@ -183,13 +159,7 @@ async fn session_store_list_impl(
     _ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
-    let options = optional_dict_arg(
-        &args,
-        0,
-        "__session_store_list",
-        "options",
-        ErrorKind::Runtime,
-    )?;
+    let options = Args::runtime("__session_store_list", &args).opt_dict(0, "options")?;
     let status = match option_string(options, "status")?.as_deref() {
         None => None,
         Some("open") => Some(SessionStatus::Open),
@@ -265,22 +235,10 @@ async fn session_store_verify_impl(
     _ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
-    let session_id = required_string_arg(
-        &args,
-        0,
-        "__session_store_verify",
-        "session_id",
-        ErrorKind::Runtime,
-    )?
-    .trim()
-    .to_string();
-    let options = optional_dict_arg(
-        &args,
-        1,
-        "__session_store_verify",
-        "options",
-        ErrorKind::Runtime,
-    )?;
+    let session_id = Args::runtime("__session_store_verify", &args)
+        .non_empty_string(0, "session_id")?
+        .to_string();
+    let options = Args::runtime("__session_store_verify", &args).opt_dict(1, "options")?;
     let tenant_id = option_string(options, "tenant_id")?;
     let state_dir = store_state_dir(options)?;
     let Some(store) = open_read_session(&state_dir, &session_id, tenant_id).await? else {
@@ -316,20 +274,8 @@ async fn session_store_search_impl(
     _ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
-    let query = required_string_arg(
-        &args,
-        0,
-        "__session_store_search",
-        "query",
-        ErrorKind::Runtime,
-    )?;
-    let options = optional_dict_arg(
-        &args,
-        1,
-        "__session_store_search",
-        "options",
-        ErrorKind::Runtime,
-    )?;
+    let query = Args::runtime("__session_store_search", &args).non_empty_string(0, "query")?;
+    let options = Args::runtime("__session_store_search", &args).opt_dict(1, "options")?;
     let mode = match option_string(options, "mode")?.as_deref() {
         None | Some("hybrid") => SearchMode::Hybrid,
         Some("fts") => SearchMode::Fts,
@@ -344,7 +290,7 @@ async fn session_store_search_impl(
     let store = open_read_or_empty_store(&store_state_dir(options)?)?;
     let response = store
         .search(SearchQuery {
-            query,
+            query: query.to_string(),
             mode,
             filter: SearchFilter {
                 tenant_id: option_string(options, "tenant_id")?,
@@ -374,23 +320,11 @@ async fn session_store_path_impl(
     _ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
-    let session_id = required_string_arg(
-        &args,
-        0,
-        "__session_store_path",
-        "session_id",
-        ErrorKind::Runtime,
-    )?
-    .trim()
-    .to_string();
+    let session_id = Args::runtime("__session_store_path", &args)
+        .non_empty_string(0, "session_id")?
+        .to_string();
     validate_session_id(&session_id)?;
-    let options = optional_dict_arg(
-        &args,
-        1,
-        "__session_store_path",
-        "options",
-        ErrorKind::Runtime,
-    )?;
+    let options = Args::runtime("__session_store_path", &args).opt_dict(1, "options")?;
     Ok(VmValue::String(arcstr::ArcStr::from(
         legacy_session_path(&store_state_dir(options)?, &session_id)?
             .to_string_lossy()
@@ -409,13 +343,7 @@ async fn session_store_database_path_impl(
     _ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
-    let options = optional_dict_arg(
-        &args,
-        0,
-        "__session_store_database_path",
-        "options",
-        ErrorKind::Runtime,
-    )?;
+    let options = Args::runtime("__session_store_database_path", &args).opt_dict(0, "options")?;
     Ok(VmValue::String(arcstr::ArcStr::from(
         store_path(&store_state_dir(options)?)
             .to_string_lossy()
@@ -888,7 +816,7 @@ fn option_positive_usize(options: Option<&DictMap>, key: &str) -> Result<Option<
             "session_store: options.{key} must be positive"
         ))),
         Some(_) => Err(VmError::Runtime(format!(
-            "session_store: options.{key} must be an integer"
+            "session_store: options.{key} must be an int"
         ))),
     }
 }

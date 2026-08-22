@@ -284,7 +284,7 @@ fn assert_approx_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
         None | Some(VmValue::Nil) => DEFAULT_APPROX_TOLERANCE,
         Some(v) => numeric(v).ok_or_else(|| {
             fail(format!(
-                "assert_approx: tolerance must be a number, got {}.",
+                "assert_approx: tolerance must be an int or a float, got {}.",
                 v.type_name()
             ))
         })?,
@@ -821,7 +821,7 @@ mod tests {
                 assert_approx_impl,
                 &[VmValue::Float(1.0), VmValue::Float(1.0), s("loose")]
             ),
-            "assert_approx: tolerance must be a number, got string."
+            "assert_approx: tolerance must be an int or a float, got string."
         );
         assert_eq!(
             failure_text(

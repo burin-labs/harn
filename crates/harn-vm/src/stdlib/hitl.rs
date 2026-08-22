@@ -17,8 +17,8 @@ use crate::event_log::{
 };
 use crate::runtime_limits::RuntimeLimits;
 use crate::schema::schema_expect_value;
+use crate::stdlib::args::{Args, ErrorKind};
 use crate::stdlib::macros::{harn_builtin, BuiltinSignature, Param, VmBuiltinDef, TY_ANY, TY_DICT};
-use crate::stdlib::options::{duration_from_value, ErrorKind};
 use crate::stdlib::waitpoint::{
     cancel_waitpoint_on, complete_waitpoint_on, create_waitpoint_on, inspect_waitpoint_on,
     wait_on_waitpoints, WaitpointRecord, WaitpointStatus, WaitpointWaitFailure,
@@ -1647,7 +1647,7 @@ fn optional_string_list(value: Option<&VmValue>, builtin: &str) -> Result<Vec<St
 }
 
 fn parse_duration_value(value: &VmValue) -> Result<StdDuration, VmError> {
-    duration_from_value(value, "hitl", "timeout", ErrorKind::Runtime)
+    Args::single("hitl", ErrorKind::Runtime, value).duration(0, "timeout")
 }
 
 fn ensure_hitl_event_log() -> Arc<AnyEventLog> {

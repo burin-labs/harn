@@ -269,7 +269,7 @@ fn resolve_max_rounds(value: Option<&VmValue>) -> Result<usize, VmError> {
             "self_review: max_rounds must be greater than 0".to_string(),
         )),
         Some(other) => Err(VmError::Runtime(format!(
-            "self_review: expected integer max_rounds, got {}",
+            "self_review: `max_rounds` must be an int, got {}",
             other.type_name()
         ))),
     }

@@ -790,7 +790,7 @@ fn required_f64(args: &[VmValue], index: usize, builtin: &str, name: &str) -> Re
         Some(VmValue::Float(n)) => Ok(*n),
         Some(VmValue::Int(n)) => Ok(*n as f64),
         Some(other) => Err(VmError::Runtime(format!(
-            "{builtin}: argument `{name}` must be a number, got {}",
+            "{builtin}: argument `{name}` must be an int or a float, got {}",
             other.type_name()
         ))),
         None => Err(VmError::Runtime(format!(

@@ -377,6 +377,7 @@ fn validate_vega_data_refs(value: &JsonValue, path: &str) -> Result<(), VmError>
 
 fn validate_vega_data(value: &JsonValue, path: &str) -> Result<(), VmError> {
     let Some(object) = value.as_object() else {
+        // not-a-harn-type: Vega-Lite specs are JSON documents.
         return Err(err(format!("{path} must be an object")));
     };
     if object.contains_key("url") {
@@ -387,6 +388,7 @@ fn validate_vega_data(value: &JsonValue, path: &str) -> Result<(), VmError> {
     if let Some(values) = object.get("values") {
         match values {
             JsonValue::Array(_) | JsonValue::Object(_) => {}
+            // not-a-harn-type: Vega-Lite specs are JSON documents.
             _ => return Err(err(format!("{path}.values must be an array or object"))),
         }
     }
@@ -506,6 +508,7 @@ fn validate_table(spec: JsonValue) -> Result<JsonValue, VmError> {
                 }
             }
             JsonValue::Object(_) => {}
+            // not-a-harn-type: table rows arrive as JSON.
             _ => return Err(err(format!("table row {index} must be an array or object"))),
         }
     }
@@ -624,6 +627,7 @@ fn validate_artifact_manifest(spec: JsonValue) -> Result<JsonValue, VmError> {
     let artifacts = object
         .get("artifacts")
         .and_then(JsonValue::as_array)
+        // not-a-harn-type: the manifest is a JSON document.
         .ok_or_else(|| err("artifact_manifest `artifacts` must be an array"))?;
     let artifact_count = required_u64(object, "artifact_count")?;
     if artifact_count as usize != artifacts.len() {
@@ -731,6 +735,7 @@ fn optional_spec_object(
         return Ok(None);
     };
     if !value.is_object() {
+        // not-a-harn-type: the spec is a JSON document.
         return Err(err(format!("spec `{key}` must be an object")));
     }
     let size = serde_json::to_vec(value)

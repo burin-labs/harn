@@ -6,8 +6,8 @@ use std::time::Duration;
 
 use sha2::{Digest, Sha256};
 
+use crate::stdlib::args::Args;
 use crate::stdlib::macros::harn_builtin;
-use crate::stdlib::options::{expect_string_arg, ErrorKind};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
@@ -298,8 +298,9 @@ async fn files_upload_builtin(
     _ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
-    let path = expect_string_arg(&args, 0, "__files_upload", ErrorKind::Runtime)?.to_string();
-    let provider = expect_string_arg(&args, 1, "__files_upload", ErrorKind::Runtime)?.to_string();
+    let upload = Args::runtime("__files_upload", &args);
+    let path = upload.string(0, "path")?.to_string();
+    let provider = upload.string(1, "provider")?.to_string();
     let file_id = upload_file(path, provider).await?;
     Ok(VmValue::String(arcstr::ArcStr::from(file_id)))
 }

@@ -1,5 +1,5 @@
+use crate::stdlib::args::Args;
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
-use crate::stdlib::options::{expect_bytes_arg, expect_int_arg, expect_string_arg, ErrorKind};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
@@ -19,7 +19,7 @@ pub(crate) fn register_bytes_builtins(vm: &mut Vm) {
     sig = "bytes_from_string(text: string?) -> bytes", category = "bytes"
 )]
 fn bytes_from_string_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    let text = expect_string_arg(args, 0, "bytes_from_string", ErrorKind::Runtime)?;
+    let text = Args::runtime("bytes_from_string", args).string(0, "text")?;
     Ok(VmValue::Bytes(std::sync::Arc::new(
         text.as_bytes().to_vec(),
     )))
@@ -31,7 +31,7 @@ fn bytes_from_string_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue
     sig = "bytes_to_string(input: bytes) -> string", category = "bytes"
 )]
 fn bytes_to_string_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    let bytes = expect_bytes_arg(args, 0, "bytes_to_string", ErrorKind::Runtime)?;
+    let bytes = Args::runtime("bytes_to_string", args).bytes(0, "input")?;
     let text = std::str::from_utf8(bytes)
         .map_err(|error| runtime_error(format!("bytes_to_string: {error}")))?;
     Ok(VmValue::String(arcstr::ArcStr::from(text)))
@@ -44,7 +44,7 @@ fn bytes_to_string_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
     category = "bytes"
 )]
 fn bytes_to_string_lossy_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    let bytes = expect_bytes_arg(args, 0, "bytes_to_string_lossy", ErrorKind::Runtime)?;
+    let bytes = Args::runtime("bytes_to_string_lossy", args).bytes(0, "input")?;
     Ok(VmValue::String(arcstr::ArcStr::from(
         String::from_utf8_lossy(bytes).into_owned(),
     )))
@@ -56,7 +56,7 @@ fn bytes_to_string_lossy_impl(args: &[VmValue], _out: &mut String) -> Result<VmV
     sig = "bytes_to_hex(input: bytes) -> string", category = "bytes"
 )]
 fn bytes_to_hex_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    let bytes = expect_bytes_arg(args, 0, "bytes_to_hex", ErrorKind::Runtime)?;
+    let bytes = Args::runtime("bytes_to_hex", args).bytes(0, "input")?;
     Ok(VmValue::String(arcstr::ArcStr::from(hex::encode(bytes))))
 }
 
@@ -66,7 +66,7 @@ fn bytes_to_hex_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
     sig = "bytes_from_hex(text: string?) -> bytes", category = "bytes"
 )]
 fn bytes_from_hex_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    let text = expect_string_arg(args, 0, "bytes_from_hex", ErrorKind::Runtime)?;
+    let text = Args::runtime("bytes_from_hex", args).string(0, "text")?;
     let bytes =
         hex::decode(text).map_err(|error| runtime_error(format!("bytes_from_hex: {error}")))?;
     Ok(VmValue::Bytes(std::sync::Arc::new(bytes)))
@@ -80,7 +80,7 @@ fn bytes_from_hex_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 fn bytes_to_base64_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     use base64::Engine;
 
-    let bytes = expect_bytes_arg(args, 0, "bytes_to_base64", ErrorKind::Runtime)?;
+    let bytes = Args::runtime("bytes_to_base64", args).bytes(0, "input")?;
     Ok(VmValue::String(arcstr::ArcStr::from(
         base64::engine::general_purpose::STANDARD.encode(bytes),
     )))
@@ -94,7 +94,7 @@ fn bytes_to_base64_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
 fn bytes_from_base64_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     use base64::Engine;
 
-    let text = expect_string_arg(args, 0, "bytes_from_base64", ErrorKind::Runtime)?;
+    let text = Args::runtime("bytes_from_base64", args).string(0, "text")?;
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(text.as_bytes())
         .map_err(|error| runtime_error(format!("bytes_from_base64: {error}")))?;
@@ -133,7 +133,7 @@ fn decode_base64url_bytes(text: &str) -> Result<Vec<u8>, base64::DecodeError> {
     category = "bytes"
 )]
 fn bytes_from_base64url_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    let text = expect_string_arg(args, 0, "bytes_from_base64url", ErrorKind::Runtime)?;
+    let text = Args::runtime("bytes_from_base64url", args).string(0, "text")?;
     let bytes = decode_base64url_bytes(text)
         .map_err(|error| runtime_error(format!("bytes_from_base64url: {error}")))?;
     Ok(VmValue::Bytes(std::sync::Arc::new(bytes)))
@@ -145,7 +145,7 @@ fn bytes_from_base64url_impl(args: &[VmValue], _out: &mut String) -> Result<VmVa
     sig = "bytes_len(input: bytes) -> int", category = "bytes"
 )]
 fn bytes_len_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    let bytes = expect_bytes_arg(args, 0, "bytes_len", ErrorKind::Runtime)?;
+    let bytes = Args::runtime("bytes_len", args).bytes(0, "input")?;
     Ok(VmValue::Int(bytes.len() as i64))
 }
 
@@ -156,8 +156,9 @@ fn bytes_len_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
     category = "bytes"
 )]
 fn bytes_concat_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    let left = expect_bytes_arg(args, 0, "bytes_concat", ErrorKind::Runtime)?;
-    let right = expect_bytes_arg(args, 1, "bytes_concat", ErrorKind::Runtime)?;
+    let concat = Args::runtime("bytes_concat", args);
+    let left = concat.bytes(0, "left")?;
+    let right = concat.bytes(1, "right")?;
     let mut out = Vec::with_capacity(left.len() + right.len());
     out.extend_from_slice(left);
     out.extend_from_slice(right);
@@ -171,10 +172,11 @@ fn bytes_concat_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
     category = "bytes"
 )]
 fn bytes_slice_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    let bytes = expect_bytes_arg(args, 0, "bytes_slice", ErrorKind::Runtime)?;
+    let slice_args = Args::runtime("bytes_slice", args);
+    let bytes = slice_args.bytes(0, "input")?;
     let len = bytes.len() as i64;
-    let start = expect_int_arg(args, 1, "bytes_slice", ErrorKind::Runtime)?.clamp(0, len) as usize;
-    let end = expect_int_arg(args, 2, "bytes_slice", ErrorKind::Runtime)?.clamp(0, len) as usize;
+    let start = slice_args.int(1, "start")?.clamp(0, len) as usize;
+    let end = slice_args.int(2, "end")?.clamp(0, len) as usize;
     let slice = if start >= end {
         Vec::new()
     } else {
@@ -192,8 +194,9 @@ fn bytes_slice_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 fn bytes_eq_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     use subtle::ConstantTimeEq;
 
-    let left = expect_bytes_arg(args, 0, "bytes_eq", ErrorKind::Runtime)?;
-    let right = expect_bytes_arg(args, 1, "bytes_eq", ErrorKind::Runtime)?;
+    let eq = Args::runtime("bytes_eq", args);
+    let left = eq.bytes(0, "left")?;
+    let right = eq.bytes(1, "right")?;
     Ok(VmValue::Bool(bool::from(left.ct_eq(right))))
 }
 

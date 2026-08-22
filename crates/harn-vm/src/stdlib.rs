@@ -16,6 +16,8 @@
 
 pub mod macros;
 
+pub(crate) mod args;
+
 mod agent_sessions;
 pub mod agent_state;
 pub(crate) mod agents;
@@ -80,7 +82,6 @@ mod net_policy;
 mod oauth_dynreg;
 mod oauth_storage;
 pub(crate) mod observability;
-pub(crate) mod options;
 mod package_snapshot;
 pub(crate) use package_snapshot::PackageSnapshotRegistry;
 mod path;

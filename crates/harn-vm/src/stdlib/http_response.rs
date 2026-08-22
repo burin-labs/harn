@@ -294,7 +294,7 @@ async fn http_sse_impl(
         }
         Some(other) => {
             return Err(thrown_err(format!(
-                "http_sse: retry_ms must be an integer (got {})",
+                "http_sse: retry_ms must be an int, got {}",
                 other.type_name()
             )));
         }
@@ -350,7 +350,7 @@ fn require_status(value: Option<&VmValue>, fn_name: &str) -> Result<i64, VmError
         Some(VmValue::Int(value)) => *value,
         Some(other) => {
             return Err(thrown_err(format!(
-                "{fn_name}: status must be an integer (got {})",
+                "{fn_name}: status must be an int, got {}",
                 other.type_name()
             )));
         }

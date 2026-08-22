@@ -14,7 +14,7 @@ use super::{
     WorkerState,
 };
 use crate::orchestration::{ArtifactRecord, MutationSessionRecord, WorkflowGraph};
-use crate::stdlib::options::{ErrorKind, OptionsParser};
+use crate::stdlib::args::{ErrorKind, Options};
 use crate::value::{VmError, VmValue};
 
 const SPAWN_AGENT_FN: &str = "spawn_agent";
@@ -119,6 +119,7 @@ fn sub_agent_spec_to_json(spec: &SubAgentRunSpec) -> Result<serde_json::Value, V
 
 fn sub_agent_spec_from_json(value: &serde_json::Value) -> Result<SubAgentRunSpec, VmError> {
     let dict = value.as_object().ok_or_else(|| {
+        // not-a-harn-type: the snapshot is JSON on disk, not a Harn value.
         VmError::Runtime("worker snapshot sub-agent spec must be an object".to_string())
     })?;
     let options = dict
@@ -221,9 +222,13 @@ fn worker_config_from_json(value: &serde_json::Value) -> Result<WorkerConfig, Vm
                 .collect::<crate::value::DictMap>()
         })
         .unwrap_or_default();
-    let mut parser = OptionsParser::new(WORKER_SNAPSHOT_CONFIG, &parser_dict, ErrorKind::Runtime);
-    let mode = parser.optional_string_raw("mode")?.unwrap_or_default();
-    match mode.as_str() {
+    let mut parser = Options::new(
+        WORKER_SNAPSHOT_CONFIG,
+        ErrorKind::Runtime,
+        Some(&parser_dict),
+    );
+    let mode = parser.opt_string("mode")?.unwrap_or_default();
+    match mode {
         "workflow" => {
             parser.allow("graph");
             parser.allow("artifacts");
@@ -236,11 +241,8 @@ fn worker_config_from_json(value: &serde_json::Value) -> Result<WorkerConfig, Vm
                     .map_err(|e| {
                         VmError::Runtime(format!("worker snapshot artifacts parse error: {e}"))
                     })?;
-            let options = parser
-                .optional_dict("options")?
-                .cloned()
-                .unwrap_or_default();
-            parser.finish_strict(&[])?;
+            let options = parser.opt_dict("options")?.cloned().unwrap_or_default();
+            parser.finish(&[])?;
             Ok(WorkerConfig::Workflow {
                 graph: Box::new(graph),
                 artifacts,
@@ -261,7 +263,7 @@ fn worker_config_from_json(value: &serde_json::Value) -> Result<WorkerConfig, Vm
                         VmError::Runtime(format!("worker snapshot artifacts parse error: {e}"))
                     })?;
             let transcript = value.get("transcript").map(crate::stdlib::json_to_vm_value);
-            parser.finish_strict(&[])?;
+            parser.finish(&[])?;
             Ok(WorkerConfig::Stage {
                 node: Box::new(node),
                 artifacts,
@@ -275,7 +277,7 @@ fn worker_config_from_json(value: &serde_json::Value) -> Result<WorkerConfig, Vm
                     .map_err(|e| {
                         VmError::Runtime(format!("worker snapshot sub-agent parse error: {e}"))
                     })?;
-            parser.finish_strict(&[])?;
+            parser.finish(&[])?;
             Ok(WorkerConfig::SubAgent {
                 spec: Box::new(spec),
             })
@@ -535,12 +537,13 @@ pub(in super::super) fn parse_worker_config(value: &VmValue) -> Result<WorkerIni
     let dict = value
         .as_dict()
         .ok_or_else(|| VmError::Runtime(format!("{SPAWN_AGENT_FN}: config must be a dict")))?;
-    let mut parser = OptionsParser::new(SPAWN_AGENT_FN, dict, ErrorKind::Runtime);
-    let task = parser.required_string("task")?;
+    let mut parser = Options::new(SPAWN_AGENT_FN, ErrorKind::Runtime, Some(dict));
+    let task = parser.non_empty_string("task")?.to_string();
     let name = parser
-        .optional_string_raw("name")?
+        .opt_string("name")?
         .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| "worker".to_string());
+        .unwrap_or("worker")
+        .to_string();
     let wait = parser.bool_or("wait", false)?;
     parser.allow("carry");
     parser.allow("policy");
@@ -555,10 +558,7 @@ pub(in super::super) fn parse_worker_config(value: &VmValue) -> Result<WorkerIni
     let artifacts_value = parser.raw("artifacts");
     let permissions = parser.raw("permissions").cloned();
     let transcript = parser.raw("transcript").cloned();
-    let options = parser
-        .optional_dict("options")?
-        .cloned()
-        .unwrap_or_default();
+    let options = parser.opt_dict("options")?.cloned().unwrap_or_default();
 
     let config = if let Some(graph_value) = graph_value {
         let graph = crate::orchestration::normalize_workflow_value(graph_value)?;
@@ -593,7 +593,7 @@ pub(in super::super) fn parse_worker_config(value: &VmValue) -> Result<WorkerIni
             transcript,
         }
     };
-    parser.finish_strict(&[])?;
+    parser.finish(&[])?;
     Ok(WorkerInit {
         name,
         task,

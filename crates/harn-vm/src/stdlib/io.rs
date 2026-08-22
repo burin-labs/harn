@@ -10,8 +10,8 @@ use std::sync::Mutex;
 #[cfg(unix)]
 use std::time::{Duration, Instant};
 
+use crate::stdlib::args::Args;
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
-use crate::stdlib::options::{self, ErrorKind, OptionsParser};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
@@ -333,44 +333,20 @@ fn read_line_result(outcome: ReadLineOutcome) -> VmValue {
 
 const READ_LINE_FN: &str = "std/io.read_line";
 
-fn parse_read_line_timeout_ms(value: Option<&VmValue>) -> Result<Option<u64>, VmError> {
-    match value {
-        None | Some(VmValue::Nil) => Ok(None),
-        Some(VmValue::Int(value)) | Some(VmValue::Duration(value)) => {
-            if *value < 0 {
-                return Err(VmError::Runtime(format!(
-                    "{READ_LINE_FN}: `timeout_ms` must be non-negative"
-                )));
-            }
-            Ok(Some(*value as u64))
-        }
-        Some(value) => Err(VmError::Runtime(format!(
-            "{READ_LINE_FN}: `timeout_ms` must be an int, duration, or nil (got {})",
-            value.type_name()
-        ))),
-    }
-}
-
 fn parse_read_line_options(args: &[VmValue]) -> Result<ReadLineOptions, VmError> {
-    if args.len() > 1 {
-        return Err(VmError::Runtime(format!(
-            "{READ_LINE_FN}: expected at most one options dict"
-        )));
-    }
-    let Some(dict) =
-        options::optional_dict_arg(args, 0, READ_LINE_FN, "options", ErrorKind::Runtime)?
-    else {
-        return Ok(ReadLineOptions::default());
-    };
-    let mut parser = OptionsParser::new(READ_LINE_FN, dict, ErrorKind::Runtime);
+    let reader = Args::runtime(READ_LINE_FN, args);
+    reader.arity(0, 1)?;
+    let mut parser = reader.options(0, "options")?;
     let options = ReadLineOptions {
-        prompt: parser.optional_string_raw("prompt")?.unwrap_or_default(),
-        timeout_ms: parse_read_line_timeout_ms(parser.raw("timeout_ms"))?,
+        // The prompt is written to the terminal verbatim, so trailing
+        // whitespace in `{ prompt: "name: " }` is part of the contract.
+        prompt: parser.opt_string("prompt")?.unwrap_or_default().to_string(),
+        timeout_ms: parser.opt_millis("timeout_ms")?,
         trim: parser.bool_or("trim", true)?,
         echo: parser.bool_or("echo", true)?,
         raw: parser.bool_or("raw", false)?,
     };
-    parser.finish_strict(&[])?;
+    parser.finish(&[])?;
     Ok(options)
 }
 
