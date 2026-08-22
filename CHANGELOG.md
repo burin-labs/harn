@@ -9,6 +9,37 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.111
+
+### Changed
+
+- Provider response transcripts now use an explicit typed reference when the
+  normalized tool-call view is identical to the provider-native array, avoiding
+  duplicate large edit arguments while preserving text-channel and historical
+  records through one compatibility accessor.
+
+### Fixed
+
+- Documentation-only pull requests now run Harn's semantic documentation checks
+  without waiting for a Rust build, and cookbook examples no longer require
+  host-only task input.
+- `HARN_TEST_DIAGNOSE=1` now enables `harn test` diagnostics as documented, without also requiring `--diagnose`.
+- CI cache policy checks now accept routine `dorny/paths-filter` commit-pin
+  updates without requiring the checker to duplicate the workflow's SHA.
+- Reject stale auto-resolved Harn executables in no-build test, hook, and eval
+  lanes with compiled source provenance plus exact Git and Cargo-input receipts.
+- Host-lease waiters now acquire deterministically by priority and FIFO request
+  order, retain their place across supervised-worker restarts, and expose queue
+  position and predecessor evidence in receipts.
+- Agent loops now close on an exact completion response when the same turn consumes
+  a successful terminal background-command digest. Failed or still-running handles
+  continue to require another model turn, and terminal replays cannot reopen a handle.
+- ACP sessions now emit typed, rate-limited live progress while lazily preparing
+  modules, without masking stuck compilation or adding transcript events.
+- Allow trusted hosts to dispatch one exact lease-bound verifier command through
+  command policy without weakening arbitrary process requests or the catastrophic
+  command floor.
+
 ## v0.10.110
 
 ### Added
