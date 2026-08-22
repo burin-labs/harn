@@ -22,13 +22,32 @@ harn_binary_freshness_manifest_path() {
   printf '%s.freshness.manifest\n' "$1"
 }
 
-harn_binary_freshness_checker_path() {
+harn_cargo_freshness_checker_path() {
   local bin="$1"
   local suffix=""
   case "$bin" in
     *.exe) suffix=".exe" ;;
   esac
   printf '%s/harn-freshness-check%s\n' "${bin%/*}" "$suffix"
+}
+
+# The proof checker is a producer-owned snapshot, not Cargo's mutable top-level
+# output. Later test-profile commands may legitimately relink
+# harn-freshness-check while retaining the exact Harn executable; receipt
+# verification must bind the checker that was actually published, not an
+# adjacent build output whose lifecycle Cargo still owns.
+harn_binary_freshness_checker_path() {
+  local bin="$1"
+  local directory="${bin%/*}"
+  local name="${bin##*/}"
+  local suffix=""
+  case "$name" in
+    *.exe)
+      name="${name%.exe}"
+      suffix=".exe"
+      ;;
+  esac
+  printf '%s/%s.freshness-check%s\n' "$directory" "$name" "$suffix"
 }
 
 harn_binary_target_dir() {
@@ -372,6 +391,8 @@ harn_record_binary_freshness() (
   local receipt=""
   local manifest=""
   local checker=""
+  local cargo_checker=""
+  local temporary_checker=""
   local temporary_receipt=""
   local temporary_manifest=""
   local worktree_hash=""
@@ -388,6 +409,7 @@ harn_record_binary_freshness() (
   cleanup_temporary_files() {
     [[ -z "$temporary_receipt" ]] || rm -f "$temporary_receipt"
     [[ -z "$temporary_manifest" ]] || rm -f "$temporary_manifest"
+    [[ -z "$temporary_checker" ]] || rm -f "$temporary_checker"
     [[ -z "$git_covered_list" ]] || rm -f "$git_covered_list"
     [[ -z "$authority_list" ]] || rm -f "$authority_list"
   }
@@ -399,8 +421,9 @@ harn_record_binary_freshness() (
   harn_require_executable_bin "$bin" || return $?
   receipt="$(harn_binary_freshness_receipt_path "$bin")" || return $?
   manifest="$(harn_binary_freshness_manifest_path "$bin")" || return $?
+  cargo_checker="$(harn_cargo_freshness_checker_path "$bin")" || return $?
+  harn_require_executable_bin "$cargo_checker" || return $?
   checker="$(harn_binary_freshness_checker_path "$bin")" || return $?
-  harn_require_executable_bin "$checker" || return $?
   target_dir="$(harn_binary_target_dir "$bin")" || return $?
   git_covered_list="$(mktemp "${TMPDIR:-/tmp}/harn-bin-git-covered.XXXXXX")" || return $?
   authority_list="$(mktemp "${TMPDIR:-/tmp}/harn-bin-authorities.XXXXXX")" || return $?
@@ -418,10 +441,15 @@ harn_record_binary_freshness() (
     echo "error: cannot record Harn freshness: compiled build identity does not match current source and Cargo inputs" >&2
     return 1
   fi
+  temporary_checker="$(mktemp "${checker}.tmp.XXXXXX")" || return $?
+  cp "$cargo_checker" "$temporary_checker" || return $?
+  chmod +x "$temporary_checker" || return $?
+  mv "$temporary_checker" "$checker" || return $?
+  temporary_checker=""
   checker_evidence="$("$checker" record-evidence \
     "$bin" "$temporary_manifest" "$(harn_repo_root)")" || return $?
   temporary_receipt="$(mktemp "${receipt}.tmp.XXXXXX")" || return $?
-  printf 'harn-bin-freshness-v4\nworktree=%s\n%s\n%s\n' \
+  printf 'harn-bin-freshness-v6\nworktree=%s\n%s\n%s\n' \
     "$worktree_hash" "$artifact_evidence" "$checker_evidence" >"$temporary_receipt" || return $?
   mv "$temporary_manifest" "$manifest" || return $?
   temporary_manifest=""
@@ -472,4 +500,26 @@ harn_require_binary_freshness_receipt() (
     harn_print_binary_freshness_recovery
     return 1
   fi
+)
+
+# Return the compiled identity from a receipt only after the canonical checker
+# has rebound that receipt to the current executable, manifest, and checkout.
+# CI exports this build input to later Cargo invocations so they cannot relink
+# the proven binary with a different `rerun-if-env-changed` value.
+harn_verified_build_freshness_id() (
+  local bin="$1"
+  local receipt=""
+  local identity=""
+  local count=""
+
+  harn_require_binary_freshness_receipt "$bin" || return $?
+  receipt="$(harn_binary_freshness_receipt_path "$bin")" || return $?
+  count="$(grep -c '^build-freshness=' "$receipt" || true)"
+  identity="$(sed -n 's/^build-freshness=//p' "$receipt")"
+  if [[ "$count" != "1" ]] \
+    || [[ ! "$identity" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]]; then
+    echo "error: Harn freshness receipt has a missing, duplicate, or malformed build identity" >&2
+    return 1
+  fi
+  printf '%s\n' "$identity"
 )
