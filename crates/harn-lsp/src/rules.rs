@@ -731,4 +731,56 @@ regex = "debugger;"
             "[no-debugger] remove debugger statements"
         );
     }
+
+    #[test]
+    fn rule_workspace_holds_its_package_generation_lease() {
+        let temp = tempfile::tempdir().unwrap();
+        write(
+            &temp.path().join("harn.toml"),
+            "[package]\nname = \"app\"\n",
+        );
+        let package = publish_package_generation(temp.path(), "rules-alias", "acme/rules");
+        write(
+            &package.join("harn.toml"),
+            "[rules]\nruleDirs = [\"rules\"]\n",
+        );
+        write(
+            &package.join("rules/no-debugger.toml"),
+            r#"
+id = "no-debugger"
+language = "typescript"
+message = "remove debugger statements"
+severity = "warning"
+
+[rule]
+regex = "debugger;"
+"#,
+        );
+
+        let workspace = RuleWorkspace::load(
+            Some(temp.path().to_path_buf()),
+            RuleSettings {
+                rule_packs: vec!["acme/rules".to_string()],
+                ..RuleSettings::default()
+            },
+        );
+        let uri = Url::from_file_path(temp.path().join("src/main.ts")).unwrap();
+        let diagnostics =
+            workspace.diagnostics_for_document(&uri, "typescript", &SourceText::new("debugger;"));
+        assert_eq!(diagnostics.len(), 1, "the package rule must be live");
+        let lease_path = package
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join(harn_modules::package_snapshot::GENERATION_LEASE_FILE);
+        let lease = std::fs::File::open(lease_path).unwrap();
+        assert!(
+            lease.try_lock().is_err(),
+            "the rule workspace must retain the generation it loaded"
+        );
+
+        drop(workspace);
+        lease.try_lock().unwrap();
+    }
 }
