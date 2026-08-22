@@ -28,7 +28,7 @@ fake_bin="$tmp_root/harn"
 cat > "$fake_bin" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
-if [[ "${1:-}" = "__internal-freshness-evidence-v4" ]]; then
+if [[ "${1:-}" = "__internal-freshness-evidence-v5" ]]; then
   if [[ "${FAKE_HARN_OVERSIZED_EVIDENCE_ERROR:-0}" = "1" ]]; then
     for index in 1 2 3 4 5 6; do
       printf 'typed-reason-%s:%02048d\n' "$index" 0 >&2
@@ -44,7 +44,7 @@ if [[ "${1:-}" = "__internal-freshness-evidence-v4" ]]; then
   if [[ -n "${7:-}" ]]; then
     printf 'harn-freshness-manifest-v3\n' >"$7"
   fi
-  printf 'harn-artifact-evidence-v4-depfile-0.1.1-manifest-3\nbuild-freshness=%s\nbuild-id=%s\nartifact-stat=%s\ndep-info=%s\ndependencies=%s\n' \
+  printf 'harn-artifact-evidence-v5-cargo-output-dep-info-v1-manifest-3\nbuild-freshness=%s\nbuild-id=%s\nartifact-stat=%s\ndep-info=%s\ndependencies=%s\n' \
     "$(cat "$3.build-freshness" 2>/dev/null || true)" "$binary_hash" \
     "$binary_hash" "$dep_hash" "$dep_hash"
   exit 0
@@ -230,13 +230,13 @@ if [[ "${1:-}" = "__internal-executable-path" ]]; then
   printf '%s\n' "$0"
   exit 0
 fi
-if [[ "${1:-}" = "__internal-freshness-evidence-v4" ]]; then
+if [[ "${1:-}" = "__internal-freshness-evidence-v5" ]]; then
   binary_hash="$(git hash-object --no-filters -- "$3")000000000000000000000000"
   dep_hash="$(git hash-object --no-filters -- "$2")000000000000000000000000"
   if [[ -n "${7:-}" ]]; then
     printf 'harn-freshness-manifest-v3\n' >"$7"
   fi
-  printf 'harn-artifact-evidence-v4-depfile-0.1.1-manifest-3\nbuild-freshness=%s\nbuild-id=%s\nartifact-stat=%s\ndep-info=%s\ndependencies=%s\n' \
+  printf 'harn-artifact-evidence-v5-cargo-output-dep-info-v1-manifest-3\nbuild-freshness=%s\nbuild-id=%s\nartifact-stat=%s\ndep-info=%s\ndependencies=%s\n' \
     "$(cat "$3.build-freshness")" "$binary_hash" "$binary_hash" \
     "$dep_hash" "$dep_hash"
   exit 0
@@ -500,8 +500,9 @@ fi
 
 # Canonical falsifier: let Cargo build a tiny CLI that embeds tracked and
 # ignored .harn inputs, then use the production resolver and Cargo's real
-# top-level dep-info. The target and source paths contain spaces so the pinned
-# typed depfile parser, rather than shell tokenization, owns Make escaping.
+# top-level dep-info. The target and source paths contain spaces so the typed
+# Cargo-output adapter, rather than shell tokenization, owns Cargo's
+# spaces-only escaping and native Windows path dialect.
 if [[ "$allow_cargo_integration" == "1" ]]; then
 # The production lease-overlap invariant is exercised above with the explicit
 # fake lease runner. This tiny freshness fixture intentionally is not a full
@@ -567,7 +568,7 @@ fn main() {
         println!("{}", std::env::current_exe().unwrap().display());
     } else if args.get(1).map(String::as_str) == Some("__fixture-build-freshness-id") {
         println!("{BUILD_FRESHNESS}");
-    } else if args.get(1).map(String::as_str) == Some("__internal-freshness-evidence-v4") {
+    } else if args.get(1).map(String::as_str) == Some("__internal-freshness-evidence-v5") {
         use std::{collections::{BTreeSet, hash_map::DefaultHasher}, fs, hash::{Hash, Hasher}, path::{Path, PathBuf}};
         fn digest(paths: &[&str]) -> String {
             let mut hasher = DefaultHasher::new();
@@ -593,7 +594,7 @@ fn main() {
                 Path::new(&args[2]), &dependencies, Path::new(&args[6]),
             ).unwrap();
         }
-        println!("harn-artifact-evidence-v4-depfile-0.1.1-manifest-3");
+        println!("harn-artifact-evidence-v5-cargo-output-dep-info-v1-manifest-3");
         println!("build-freshness={BUILD_FRESHNESS}");
         println!("build-id={}", digest(&[&args[3]]));
         println!("artifact-stat={}", freshness_manifest::artifact_stat_id(Path::new(&args[3])).unwrap());

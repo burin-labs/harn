@@ -45,11 +45,11 @@ harn_collect_artifact_freshness_evidence() {
   local dep_info=""
   dep_info="$(harn_binary_dep_info_path "$bin")" || return $?
   if [[ -n "$authority_list" && -n "$manifest" ]]; then
-    "$bin" __internal-freshness-evidence-v4 \
+    "$bin" __internal-freshness-evidence-v5 \
       "$dep_info" "$bin" "$(harn_repo_root)" "$git_covered_list" \
       "$authority_list" "$manifest"
   else
-    "$bin" __internal-freshness-evidence-v4 \
+    "$bin" __internal-freshness-evidence-v5 \
       "$dep_info" "$bin" "$(harn_repo_root)" "$git_covered_list"
   fi
 }

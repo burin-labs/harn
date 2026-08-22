@@ -9,8 +9,8 @@ use std::{
 
 use super::freshness_manifest::{artifact_stat_id, platform_build_id, write_manifest};
 
-const COMMAND: &str = "__internal-freshness-evidence-v4";
-const FORMAT: &str = "harn-artifact-evidence-v4-depfile-0.1.1-manifest-3";
+const COMMAND: &str = "__internal-freshness-evidence-v5";
+const FORMAT: &str = "harn-artifact-evidence-v5-cargo-output-dep-info-v1-manifest-3";
 
 pub(super) fn handle(raw_args: &[String]) -> bool {
     let (command, dep_info, target, repo_root, git_covered_list, manifest) = match raw_args {
@@ -93,17 +93,10 @@ impl Evidence {
                 error.valid_up_to()
             )
         })?;
-        let parsed = depfile::parse(dep_info_text)
-            .map_err(|offset| format!("Cargo dep-info syntax is invalid at byte {offset}"))?;
-        if parsed.len() != 1 {
-            return Err(format!(
-                "Cargo dep-info must contain exactly one target rule, found {}",
-                parsed.len()
-            ));
-        }
-        let (declared_target, dependencies) = parsed.iter().next().expect("one rule was required");
+        let parsed = CargoOutputDepInfo::parse(dep_info_text)
+            .map_err(|error| format!("Cargo dep-info syntax is invalid: {error}"))?;
         let declared_target = absolute_existing_regular_file(
-            Path::new(declared_target),
+            Path::new(&parsed.target),
             &repo_root,
             "Cargo dep-info target",
         )?;
@@ -115,9 +108,9 @@ impl Evidence {
             ));
         }
 
-        let mut resolved = Vec::with_capacity(dependencies.len());
-        for dependency in dependencies {
-            let dependency = Path::new(dependency.as_ref());
+        let mut resolved = Vec::with_capacity(parsed.dependencies.len());
+        for dependency in &parsed.dependencies {
+            let dependency = Path::new(dependency);
             let candidate = if dependency.is_absolute() {
                 dependency.to_path_buf()
             } else {
@@ -185,6 +178,82 @@ impl Evidence {
             dependencies: dependency_hasher.finalize(),
         })
     }
+}
+
+/// Parser for Cargo's externally emitted top-level dep-info dialect. Cargo's
+/// producer writes exactly one `target: dependencies` rule, escapes spaces
+/// only, and leaves native Windows drive/UNC backslashes literal. This is not
+/// general GNU Make syntax; keeping the adapter this narrow mirrors Cargo's
+/// own consumer and avoids reinterpreting native separators as Make escapes.
+#[derive(Debug)]
+struct CargoOutputDepInfo {
+    target: String,
+    dependencies: Vec<String>,
+}
+
+impl CargoOutputDepInfo {
+    fn parse(source: &str) -> Result<Self, CargoOutputDepInfoError> {
+        let mut rules = source.lines().filter(|line| !line.trim().is_empty());
+        let line = rules.next().ok_or(CargoOutputDepInfoError::MissingRule)?;
+        if rules.next().is_some() {
+            return Err(CargoOutputDepInfoError::MultipleRules);
+        }
+        let (target, dependencies) = if let Some((target, dependencies)) = line.split_once(": ") {
+            (target, dependencies)
+        } else if let Some(target) = line.strip_suffix(':') {
+            (target, "")
+        } else {
+            return Err(CargoOutputDepInfoError::MissingRuleDelimiter);
+        };
+        let mut target = decode_cargo_dep_info_paths(target)?;
+        if target.len() != 1 {
+            return Err(CargoOutputDepInfoError::AmbiguousTarget);
+        }
+        Ok(Self {
+            target: target.pop().expect("one target was required"),
+            dependencies: decode_cargo_dep_info_paths(dependencies)?,
+        })
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum CargoOutputDepInfoError {
+    MissingRule,
+    MultipleRules,
+    MissingRuleDelimiter,
+    AmbiguousTarget,
+    TrailingSpaceEscape,
+}
+
+impl std::fmt::Display for CargoOutputDepInfoError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let message = match self {
+            Self::MissingRule => "missing target rule",
+            Self::MultipleRules => "contains multiple target rules",
+            Self::MissingRuleDelimiter => "target rule has no `: ` delimiter",
+            Self::AmbiguousTarget => "target is empty or contains unescaped whitespace",
+            Self::TrailingSpaceEscape => "path ends with a space escape",
+        };
+        formatter.write_str(message)
+    }
+}
+
+fn decode_cargo_dep_info_paths(source: &str) -> Result<Vec<String>, CargoOutputDepInfoError> {
+    let mut words = source.split_whitespace();
+    let mut paths = Vec::new();
+    while let Some(word) = words.next() {
+        let mut path = word.to_owned();
+        while path.ends_with('\\') {
+            path.pop();
+            let continuation = words
+                .next()
+                .ok_or(CargoOutputDepInfoError::TrailingSpaceEscape)?;
+            path.push(' ');
+            path.push_str(continuation);
+        }
+        paths.push(path);
+    }
+    Ok(paths)
 }
 
 impl std::fmt::Display for Evidence {
@@ -371,45 +440,101 @@ mod tests {
         Evidence::collect(dep_info, target, temp.path(), &covered, None)
     }
 
-    fn depfile_path(path: &Path) -> std::borrow::Cow<'_, str> {
-        depfile::escape(path.to_str().expect("temporary test path must be UTF-8"))
+    fn cargo_dep_info_path(path: &Path) -> String {
+        path.to_str()
+            .expect("temporary test path must be UTF-8")
+            .replace(' ', "\\ ")
     }
 
     #[test]
-    fn depfile_parser_decodes_make_and_windows_escaping_without_loss() {
+    fn cargo_output_dep_info_decodes_native_windows_paths_without_loss() {
         let input = concat!(
-            "C\\:\\\\build\\ dir\\\\harn.exe: ",
-            "C\\:\\\\source\\ dir\\\\embedded\\ file.harn ",
-            "D\\:\\\\generated\\\\schema.rs\\\n",
+            r"C:\build\ dir\harn.exe: ",
+            r"C:\source\ dir\embedded\ file.harn ",
+            r"D:/generated/schema.rs ",
+            r"\\server\share\generated\schema.rs ",
+            "\\\\?\\E:\\target\\generated\\asset.harn\r\n",
         );
-        let parsed = depfile::parse(input).unwrap();
-        let (target, dependencies) = parsed.iter().next().unwrap();
-        assert_eq!(target, r"C:\build dir\harn.exe");
+        let parsed = CargoOutputDepInfo::parse(input).unwrap();
+        assert_eq!(parsed.target, r"C:\build dir\harn.exe");
         assert_eq!(
-            dependencies.iter().map(AsRef::as_ref).collect::<Vec<_>>(),
+            parsed.dependencies,
             [
                 r"C:\source dir\embedded file.harn",
-                r"D:\generated\schema.rs"
+                r"D:/generated/schema.rs",
+                r"\\server\share\generated\schema.rs",
+                r"\\?\E:\target\generated\asset.harn",
             ]
         );
     }
 
     #[test]
-    fn evidence_rejects_multiple_rules_and_non_regular_dependencies() {
+    fn cargo_output_dep_info_rejects_ambiguous_or_malformed_rules() {
+        assert_eq!(
+            CargoOutputDepInfo::parse("C:\\build\\harn.exe:\nD:\\other\\harn.exe:\n").unwrap_err(),
+            CargoOutputDepInfoError::MultipleRules
+        );
+        assert_eq!(
+            CargoOutputDepInfo::parse("C:\\build\\harn.exe: trailing\\\n").unwrap_err(),
+            CargoOutputDepInfoError::TrailingSpaceEscape
+        );
+        assert_eq!(
+            CargoOutputDepInfo::parse("target without delimiter\n").unwrap_err(),
+            CargoOutputDepInfoError::MissingRuleDelimiter
+        );
+        assert_eq!(
+            CargoOutputDepInfo::parse(": dependency\n").unwrap_err(),
+            CargoOutputDepInfoError::AmbiguousTarget
+        );
+        assert_eq!(
+            CargoOutputDepInfo::parse("C:\\build\\harn.exe:\r\n")
+                .unwrap()
+                .dependencies,
+            Vec::<String>::new()
+        );
+    }
+
+    #[test]
+    fn evidence_rejects_multiple_rules_and_accepts_directory_dependencies() {
         let temp = tempfile::tempdir().unwrap();
         let target = temp.path().join("harn");
         File::create(&target).unwrap().write_all(b"binary").unwrap();
         let dep_info = temp.path().join("harn.d");
-        fs::write(&dep_info, format!("{}:\nother:\n", depfile_path(&target))).unwrap();
+        fs::write(
+            &dep_info,
+            format!("{}:\nother:\n", cargo_dep_info_path(&target)),
+        )
+        .unwrap();
         let error = collect(&temp, &dep_info, &target).unwrap_err();
-        assert!(error.contains("exactly one target rule"));
+        assert!(error.contains("multiple target rules"));
 
         fs::write(
             &dep_info,
-            format!("{}: {}\n", depfile_path(&target), depfile_path(temp.path())),
+            format!(
+                "{}: {}\n",
+                cargo_dep_info_path(&target),
+                cargo_dep_info_path(temp.path())
+            ),
         )
         .unwrap();
         assert!(collect(&temp, &dep_info, &target).is_ok());
+    }
+
+    #[test]
+    fn evidence_rejects_a_different_existing_declared_target() {
+        let temp = tempfile::tempdir().unwrap();
+        let target = temp.path().join("harn");
+        let other = temp.path().join("other-harn");
+        fs::write(&target, b"requested binary").unwrap();
+        fs::write(&other, b"different binary").unwrap();
+        let dep_info = temp.path().join("harn.d");
+        fs::write(&dep_info, format!("{}:\n", cargo_dep_info_path(&other))).unwrap();
+
+        let error = collect(&temp, &dep_info, &target).unwrap_err();
+        assert!(
+            error.contains("does not resolve to requested binary"),
+            "unexpected error: {error}"
+        );
     }
 
     #[test]
@@ -424,7 +549,11 @@ mod tests {
         let dep_info = temp.path().join("harn.d");
         fs::write(
             &dep_info,
-            format!("{}: {}\n", depfile_path(&target), depfile_path(&watched)),
+            format!(
+                "{}: {}\n",
+                cargo_dep_info_path(&target),
+                cargo_dep_info_path(&watched)
+            ),
         )
         .unwrap();
         let before = collect(&temp, &dep_info, &target).unwrap();
@@ -439,7 +568,7 @@ mod tests {
         let target = temp.path().join("harn");
         fs::write(&target, b"binary-one").unwrap();
         let dep_info = temp.path().join("harn.d");
-        fs::write(&dep_info, format!("{}:\n", depfile_path(&target))).unwrap();
+        fs::write(&dep_info, format!("{}:\n", cargo_dep_info_path(&target))).unwrap();
         let evidence = collect(&temp, &dep_info, &target).unwrap();
         assert!(!evidence.build_id.is_empty());
         assert!(evidence
