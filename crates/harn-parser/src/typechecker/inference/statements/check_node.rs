@@ -721,9 +721,10 @@ impl TypeChecker {
                 self.check_match_exhaustiveness(value, arms, scope, span);
             }
 
-            // Recurse into nested expressions + validate binary op types
             Node::BinaryOp { op, left, right } => {
-                self.check_node(left, scope);
+                if self.check_pipe_operands(op, left, right, scope) {
+                    return;
+                }
                 if op == "&&" || op == "||" {
                     let refs = self.extract_refinements(left, scope);
                     let mut right_scope = scope.child();
@@ -736,7 +737,6 @@ impl TypeChecker {
                     return;
                 }
                 self.check_node(right, scope);
-                // Validate operator/type compatibility
                 let lt = self.infer_type(left, scope);
                 let rt = self.infer_type(right, scope);
                 if op == "??" {

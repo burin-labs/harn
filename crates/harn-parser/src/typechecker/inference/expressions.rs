@@ -1858,7 +1858,7 @@ impl TypeChecker {
 
         if Self::contains_pipe_placeholder(right) {
             let mut pipe_scope = scope.child();
-            pipe_scope.vars.insert("_".into(), left_type);
+            pipe_scope.define_pipe_placeholder(left_type);
             return self.infer_type(right, &pipe_scope);
         }
 

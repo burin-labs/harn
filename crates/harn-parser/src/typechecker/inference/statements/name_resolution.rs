@@ -9,6 +9,15 @@ impl TypeChecker {
         span: Span,
         scope: &TypeScope,
     ) {
+        if is_discard_name(name) && scope.get_var(name).is_none() {
+            self.unresolved_name_error_at(
+                name,
+                "discard name `_` is valid only in a binding or pattern".to_string(),
+                span,
+                Some("use `const _ = value` or `let _ = value` to discard a result".to_string()),
+            );
+            return;
+        }
         // Root authority is never ambient. Enforce this even in parser-only
         // checks that have no resolved import catalog; treating the canonical
         // spelling as a magical global would defeat capability attenuation.
@@ -27,8 +36,7 @@ impl TypeChecker {
         let Some(imported) = self.imported_names.as_ref() else {
             return;
         };
-        if name == "_"
-            || scope.get_var(name).is_some()
+        if scope.get_var(name).is_some()
             || scope.get_fn(name).is_some()
             || scope.resolve_type(name).is_some()
             || scope.get_enum(name).is_some()
