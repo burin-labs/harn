@@ -9,20 +9,7 @@ Urgent: Build a tree CLI.
 - Input: src -> Output: src/main.harn
 - Input: tests -> Output: tests/tree.expected
 </examples>
-<output_format>
-Return output matching this JSON Schema:
-{
-  "properties": {
-    "tree": {
-      "type": "string"
-    }
-  },
-  "required": [
-    "tree"
-  ],
-  "type": "object"
-}
-</output_format>
+
 <tools>
 [
   {

@@ -20,7 +20,7 @@ pipeline test(harness: Harness, task) {
   assert(opus.vision_supported, "Opus 4.7 accepts image content")
   assert(opus.max_tools == 10000, "Opus 4.7 max_tools cap is 10000")
   assert(opus.prefers_xml_scaffolding, "Opus 4.7 prefers XML prompt sections")
-  assert(opus.structured_output_mode == "xml_tagged", "Opus 4.7 prefers XML-tagged output")
+  assert(opus.structured_output_mode == "native_json", "Opus 4.7 uses native JSON output")
   assert(!opus.supports_assistant_prefill, "Opus 4.7 rejects assistant prefill")
   assert(opus.prefers_xml_tools, "Opus 4.7 prefers XML-rendered text tools")
   assert(opus.thinking_block_style == "thinking_blocks", "Opus 4.7 uses thinking blocks")
