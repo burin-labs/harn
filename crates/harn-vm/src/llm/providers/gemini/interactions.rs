@@ -546,11 +546,11 @@ fn generation_config(opts: &LlmRequestPayload) -> Option<Map<String, Value>> {
         config.insert("response_logprobs".to_string(), json!(true));
     }
     // Interactions replaces `generationConfig.thinkingConfig.thinkingBudget`
-    // with a coarse level and has no "off" rung: `minimal` is the floor, so a
-    // request to disable thinking becomes the cheapest level rather than an
-    // error. Token budgets have no representation here and are dropped; the
-    // request audit reports the omission.
-    if let Some(level) = thinking_level(&opts.thinking) {
+    // with a coarse level and has no "off" rung. The floor comes from the
+    // model capability row because current model generations do not all expose
+    // the same ladder. Token budgets have no representation here and are
+    // dropped; the request audit reports the omission.
+    if let Some(level) = thinking_level(&opts.thinking, &caps) {
         config.insert("thinking_level".to_string(), json!(level));
     }
     // `generateContent` returns thinking as `thought: true` parts for free;
@@ -570,16 +570,35 @@ fn generation_config(opts: &LlmRequestPayload) -> Option<Map<String, Value>> {
 ///
 /// `None` means "send nothing and let the model pick", which is the only honest
 /// projection of a token budget onto a four-rung ladder.
-pub(crate) fn thinking_level(thinking: &ThinkingConfig) -> Option<&'static str> {
+pub(crate) fn thinking_level(
+    thinking: &ThinkingConfig,
+    caps: &crate::llm::capabilities::Capabilities,
+) -> Option<String> {
+    let floor = || {
+        ["minimal", "low", "medium", "high", "xhigh", "max"]
+            .into_iter()
+            .find(|candidate| {
+                caps.reasoning_effort_levels.is_empty()
+                    || caps
+                        .reasoning_effort_levels
+                        .iter()
+                        .any(|supported| supported == candidate)
+            })
+            .unwrap_or("minimal")
+            .to_string()
+    };
     match thinking {
-        ThinkingConfig::Disabled => Some("minimal"),
+        ThinkingConfig::Disabled => Some(floor()),
         ThinkingConfig::Enabled { .. } | ThinkingConfig::Adaptive => None,
-        ThinkingConfig::Effort { level } => Some(match level {
-            ReasoningEffort::None | ReasoningEffort::Minimal => "minimal",
-            ReasoningEffort::Low => "low",
-            ReasoningEffort::Medium => "medium",
-            ReasoningEffort::High | ReasoningEffort::XHigh | ReasoningEffort::Max => "high",
-        }),
+        ThinkingConfig::Effort { level } => Some(
+            match level {
+                ReasoningEffort::None | ReasoningEffort::Minimal => return Some(floor()),
+                ReasoningEffort::Low => "low",
+                ReasoningEffort::Medium => "medium",
+                ReasoningEffort::High | ReasoningEffort::XHigh | ReasoningEffort::Max => "high",
+            }
+            .to_string(),
+        ),
     }
 }
 

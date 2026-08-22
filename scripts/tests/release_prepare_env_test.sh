@@ -77,6 +77,7 @@ touch \
 git -C "$release_root" init --quiet
 git -C "$release_root" config user.name "Release Test"
 git -C "$release_root" config user.email "release-test@example.com"
+git -C "$release_root" config commit.gpgsign false
 git -C "$release_root" add .
 git -C "$release_root" commit --quiet -m "initial"
 git -C "$release_root" checkout --quiet -b release/v1.2.4
@@ -346,6 +347,7 @@ PATH="$real_path" cargo generate-lockfile --manifest-path "$real_release_root/Ca
 git -C "$real_release_root" init --quiet
 git -C "$real_release_root" config user.name "Release Test"
 git -C "$real_release_root" config user.email "release-test@example.com"
+git -C "$real_release_root" config commit.gpgsign false
 git -C "$real_release_root" add .
 git -C "$real_release_root" commit --quiet -m "initial"
 fake_make_only="$tmp_root/fake-make-only"

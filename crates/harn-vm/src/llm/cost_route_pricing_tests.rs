@@ -21,6 +21,7 @@ fn install_banded_pricing_model() {
             input_multiplier: 2.0,
             output_multiplier: 1.5,
         }],
+        promotions: Vec::new(),
     });
     overlay
         .models

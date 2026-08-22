@@ -19,6 +19,8 @@ pipeline default(harness: Harness) {
   run_git(harness.process, root, ["git", "init", "-b", "main"])
   run_git(harness.process, root, ["git", "config", "user.email", "harn@example.test"])
   run_git(harness.process, root, ["git", "config", "user.name", "Harn Test"])
+  run_git(harness.process, root, ["git", "config", "commit.gpgsign", "false"])
+  run_git(harness.process, root, ["git", "config", "tag.gpgsign", "false"])
   harness.fs.write_text(path_join(root, "README.md"), "initial\n")
   run_git(harness.process, root, ["git", "add", "README.md"])
   run_git(harness.process, root, ["git", "commit", "-m", "initial"])

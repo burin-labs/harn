@@ -102,6 +102,7 @@ cp "$repo_root/scripts/cargo_with_worktree_build_dir.sh" \
 git -C "$hook_repo" init --quiet
 git -C "$hook_repo" config user.name 'Harn Hook Test'
 git -C "$hook_repo" config user.email 'harn-hook-test@example.invalid'
+git -C "$hook_repo" config commit.gpgsign false
 git -C "$hook_repo" add .githooks scripts
 git -C "$hook_repo" commit -qm fixture
 

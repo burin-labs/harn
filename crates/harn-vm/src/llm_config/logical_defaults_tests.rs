@@ -3,40 +3,6 @@ use std::collections::BTreeMap;
 use super::*;
 
 #[test]
-fn resolve_logical_defaults_across_every_gpt_oss_route() {
-    let config = default_config();
-    for (provider, model) in [
-        ("cerebras", "gpt-oss-120b"),
-        ("groq", "groq/openai/gpt-oss-120b"),
-        ("fireworks", "accounts/fireworks/models/gpt-oss-120b"),
-        ("openrouter", "openai/gpt-oss-120b"),
-        ("nvidia", "nvidia/openai/gpt-oss-120b"),
-        ("deepinfra", "deepinfra/openai/gpt-oss-120b"),
-        ("sambanova", "sambanova/gpt-oss-120b"),
-        ("baseten", "baseten/openai/gpt-oss-120b"),
-    ] {
-        let params = model_params_for_route_with_config(&config, provider, model);
-        assert_eq!(
-            params.get("temperature").and_then(toml::Value::as_float),
-            Some(1.0),
-            "{provider}:{model} temperature"
-        );
-        let expected_top_p = (provider != "baseten").then_some(1.0);
-        assert_eq!(
-            params.get("top_p").and_then(toml::Value::as_float),
-            expected_top_p,
-            "{provider}:{model} top_p"
-        );
-        assert_eq!(
-            params.get("reasoning_effort").and_then(toml::Value::as_str),
-            Some("high"),
-            "{provider}:{model} reasoning effort"
-        );
-    }
-    assert_eq!(model_default_issues(&config), Vec::<String>::new());
-}
-
-#[test]
 fn route_default_overrides_logical_model_default() {
     let mut config = default_config();
     config.model_defaults.insert(

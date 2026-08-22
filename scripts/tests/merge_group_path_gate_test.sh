@@ -13,6 +13,7 @@ new_repo() {
   git -C "$dir" init -q
   git -C "$dir" config user.name "Harn Test"
   git -C "$dir" config user.email "harn-test@example.invalid"
+  git -C "$dir" config commit.gpgsign false
   printf '%s\n' "$dir"
 }
 

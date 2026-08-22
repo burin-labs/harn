@@ -34,6 +34,27 @@ pub type PriceChange = {
   evidence: string,
 }
 
+pub type PriceRates = {
+  input_per_mtok: float,
+  output_per_mtok: float,
+  cache_read_per_mtok?: float,
+  cache_write_per_mtok?: float,
+}
+
+pub type PromotionChange = {
+  kind: "promotion",
+  provider: string,
+  model_id: string,
+  effective_date: string,
+  promotion_id: string,
+  ends_on?: string,
+  review_after?: string,
+  source_url: string,
+  old_value: PriceRates,
+  new_value: PriceRates,
+  evidence: string,
+}
+
 pub type RetirementChange = {
   kind: "retirement",
   provider: string,
@@ -68,6 +89,7 @@ pub type CapabilityChange = {
 }
 
 pub type ProviderCatalogCandidate = PriceChange \
+  | PromotionChange \
   | RetirementChange \
   | EndpointChange \
   | CapabilityChange

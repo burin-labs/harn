@@ -25,7 +25,8 @@
 # name and are authoritative on overlap.
 #
 # Supported per-rule fields:
-#   model_match     : glob pattern matched against the lowercased model ID.
+#   model_match     : glob pattern, or a non-empty list of patterns that share
+#                     one rule, matched against the lowercased model ID.
 #   version_min     : [major, minor] lower bound, provider-aware parse.
 #   native_tools    : whether the model accepts native tool-call wire shape.
 #   message_wire_format:

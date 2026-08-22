@@ -1,6 +1,6 @@
 # OpenAI ─ pricing pages: https://platform.openai.com/docs/pricing.
 
-# OpenAI section verified 2026-07-30 against the models and pricing docs
+# OpenAI section verified 2026-08-22 against the models and pricing docs
 # (platform.openai.com now redirects to developers.openai.com). Current
 # lineup: the GPT-5.6 family (Sol/Terra/Luna), gpt-5.5 / gpt-5.5-pro,
 # the gpt-5.4 tier family, and gpt-5.3-codex for agentic coding. The entire
@@ -22,14 +22,14 @@ context_window = 1050000
 logical_model = "gpt-5.6-sol"
 equivalence_group = "gpt-5.6-sol"
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 5.00, output_per_mtok = 30.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }] }
+pricing = { input_per_mtok = 5.00, output_per_mtok = 30.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }], promotions = [{ id = "openai-2026-08-sol", starts_on = "2026-08-21", review_after = "2026-11-21", source_url = "https://developers.openai.com/api/docs/models/gpt-5.6-sol", input_per_mtok = 4.00, output_per_mtok = 20.00, cache_read_per_mtok = 0.40, cache_write_per_mtok = 5.00 }] }
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "tool_use", "long_context", "vision", "agentic"]
 complementary_with = ["anthropic-claude", "google-gemini", "qwen", "deepseek", "kimi"]
 serving_tiers = [
-  { id = "fast", label = "Fast mode", mode = "synchronous", economics = "premium", request = { param = "service_tier", value = "fast", response_values = ["fast", "priority"] }, otps_speedup = 2.5, cost_multiplier = 2.0, status = "ga", pricing = { input_per_mtok = 10.00, output_per_mtok = 60.00, cache_read_per_mtok = 1.00, cache_write_per_mtok = 12.50 }, latency = "up to 2.5x faster output with more consistent latency for user-facing traffic", reliability = "provider may downgrade ramp-limited traffic to standard rates and echo service_tier=default", unsuitable_workloads = ["batch"], note = "OpenAI renamed Priority processing to Fast mode on 2026-07-30. Requests use service_tier=fast; GPT-5.6 responses still echo service_tier=priority when the premium tier was served." },
-  { id = "flex", label = "Flex processing", mode = "synchronous", economics = "discounted", request = { param = "service_tier", value = "flex" }, discount_percent = 50, status = "beta", pricing = { input_per_mtok = 2.50, output_per_mtok = 15.00, cache_read_per_mtok = 0.25, cache_write_per_mtok = 3.125 }, latency = "slower and variable synchronous latency", reliability = "best-effort availability; provider can return resource unavailable", suitable_workloads = ["offline_eval", "corpus", "bulk_judge"], unsuitable_workloads = ["interactive_chat"] },
+  { id = "fast", label = "Fast mode", mode = "synchronous", economics = "premium", request = { param = "service_tier", value = "fast", response_values = ["fast", "priority"] }, otps_speedup = 2.5, cost_multiplier = 2.0, status = "ga", latency = "up to 2.5x faster output with more consistent latency for user-facing traffic", reliability = "provider may downgrade ramp-limited traffic to standard rates and echo service_tier=default", unsuitable_workloads = ["batch"], note = "OpenAI renamed Priority processing to Fast mode on 2026-07-30. Requests use service_tier=fast; GPT-5.6 responses still echo service_tier=priority when the premium tier was served." },
+  { id = "flex", label = "Flex processing", mode = "synchronous", economics = "discounted", request = { param = "service_tier", value = "flex" }, discount_percent = 50, status = "beta", latency = "slower and variable synchronous latency", reliability = "best-effort availability; provider can return resource unavailable", suitable_workloads = ["offline_eval", "corpus", "bulk_judge"], unsuitable_workloads = ["interactive_chat"] },
 ]
 
 [models."gpt-5.6-terra"]
@@ -287,12 +287,11 @@ strengths = ["reasoning", "coding", "cheap"]
 benchmarks = { swe_bench_verified = 49.3 }
 
 # Google Gemini ─ pricing: https://ai.google.dev/gemini-api/docs/pricing,
-# verified 2026-07-02. Gemini 1.0 / 1.5 already retired; Gemini 2.0
+# verified 2026-08-22. Gemini 1.0 / 1.5 already retired; Gemini 2.0
 # Flash + Flash-Lite shut down 2026-06-01 per the deprecations page.
 # The 2.5 family remains served alongside the current 3.x lineup
-# (gemini-3.6-flash and gemini-3.5-flash-lite are the current GA routes,
-# followed by gemini-3.5-flash, gemini-3.1-pro-preview, and
-# gemini-3.1-flash-lite). Thinking tokens bill as output; implicit
+# (Gemini 3.7 Flash, Gemini 3.6 Flash, and Gemini 3.5 Flash-Lite are
+# current GA routes). Thinking tokens bill as output; implicit
 # caching is automatic (90% discount on cache hits), explicit caching
 # adds hourly storage.
 # NOTE: this row previously carried Flash-Lite's $0.10/$0.40 rates.
@@ -330,8 +329,26 @@ serving_tiers = [
   { id = "priority", label = "Priority inference", mode = "synchronous", economics = "premium", request = { param = "service_tier", value = "priority" }, status = "research_preview", latency = "predictable low-latency serving for user-facing traffic", reliability = "traffic can gracefully downgrade to standard when dynamic priority limits are exceeded", unsuitable_workloads = ["batch"], note = "GenerateContent responses expose downgrade via x-gemini-service-tier." },
 ]
 
-# Gemini 3.6 Flash — GA July 2026. The current Gemini API model guide lists a
-# 1M context window, 64k output ceiling, native tools, and $1.50/$7.50 pricing.
+# Gemini 3.7 Flash — GA August 2026. Google lists a 1M context window,
+# 64k output ceiling, native tools, and $1.50/$7.50 regular pricing after its
+# introductory period.
+[models."gemini-3.7-flash"]
+name = "Gemini 3.7 Flash"
+provider = "gemini"
+context_window = 1048576
+capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
+pricing = { input_per_mtok = 1.50, output_per_mtok = 7.50, cache_read_per_mtok = 0.15, promotions = [{ id = "google-gemini-3.7-intro", starts_on = "2026-08-13", ends_on = "2026-12-31", source_url = "https://ai.google.dev/gemini-api/docs/pricing", input_per_mtok = 0.75, output_per_mtok = 3.75, cache_read_per_mtok = 0.075 }] }
+tier = "frontier"
+open_weight = false
+strengths = ["speed", "coding", "reasoning", "long_context", "vision", "tool_use", "agentic"]
+complementary_with = ["anthropic-claude", "openai-gpt", "qwen", "deepseek", "kimi"]
+serving_tiers = [
+  { id = "flex", label = "Flex inference", mode = "synchronous", economics = "discounted", request = { param = "service_tier", value = "flex" }, discount_percent = 50, status = "research_preview", latency = "variable synchronous latency for latency-tolerant workloads", reliability = "best-effort availability; resource unavailability is possible", suitable_workloads = ["offline_eval", "corpus", "bulk_judge"], unsuitable_workloads = ["interactive_chat"], note = "Flex is synchronous and distinct from Gemini Batch. Cache and batch discounts do not stack; cache-hit discount takes precedence where documented." },
+  { id = "priority", label = "Priority inference", mode = "synchronous", economics = "premium", request = { param = "service_tier", value = "priority" }, cost_multiplier = 1.8, status = "research_preview", latency = "predictable low-latency serving for user-facing traffic", reliability = "traffic can gracefully downgrade to standard when dynamic priority limits are exceeded", unsuitable_workloads = ["batch"], note = "GenerateContent responses expose downgrade via x-gemini-service-tier." },
+]
+
+# Gemini 3.6 Flash — GA July 2026. Google applies the 3.7 introductory
+# price to 3.6 through December 31, 2026.
 # This model uses the Interactions live endpoint; its capability row also
 # removes the deprecated sampling knobs and maps Harn effort to thinking_level.
 [models."gemini-3.6-flash"]
@@ -339,14 +356,14 @@ name = "Gemini 3.6 Flash"
 provider = "gemini"
 context_window = 1048576
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 1.50, output_per_mtok = 7.50, cache_read_per_mtok = 0.15 }
+pricing = { input_per_mtok = 1.50, output_per_mtok = 7.50, cache_read_per_mtok = 0.15, promotions = [{ id = "google-gemini-3.6-intro", starts_on = "2026-08-13", ends_on = "2026-12-31", source_url = "https://ai.google.dev/gemini-api/docs/pricing", input_per_mtok = 0.75, output_per_mtok = 3.75, cache_read_per_mtok = 0.075 }] }
 tier = "frontier"
 open_weight = false
 strengths = ["speed", "long_context", "vision", "tool_use", "agentic"]
 complementary_with = ["anthropic-claude", "openai-gpt", "qwen", "deepseek", "kimi"]
 serving_tiers = [
   { id = "flex", label = "Flex inference", mode = "synchronous", economics = "discounted", request = { param = "service_tier", value = "flex" }, discount_percent = 50, status = "research_preview", latency = "variable synchronous latency for latency-tolerant workloads", reliability = "best-effort availability; resource unavailability is possible", suitable_workloads = ["offline_eval", "corpus", "bulk_judge"], unsuitable_workloads = ["interactive_chat"], note = "Flex is synchronous and distinct from Gemini Batch. Cache and batch discounts do not stack; cache-hit discount takes precedence where documented." },
-  { id = "priority", label = "Priority inference", mode = "synchronous", economics = "premium", request = { param = "service_tier", value = "priority" }, status = "research_preview", latency = "predictable low-latency serving for user-facing traffic", reliability = "traffic can gracefully downgrade to standard when dynamic priority limits are exceeded", unsuitable_workloads = ["batch"], note = "GenerateContent responses expose downgrade via x-gemini-service-tier." },
+  { id = "priority", label = "Priority inference", mode = "synchronous", economics = "premium", request = { param = "service_tier", value = "priority" }, cost_multiplier = 1.8, status = "research_preview", latency = "predictable low-latency serving for user-facing traffic", reliability = "traffic can gracefully downgrade to standard when dynamic priority limits are exceeded", unsuitable_workloads = ["batch"], note = "GenerateContent responses expose downgrade via x-gemini-service-tier." },
 ]
 
 # Gemini 3.5 Flash-Lite — GA July 2026. Google positions this as the
@@ -435,10 +452,20 @@ name = "Gemini 3.6 Flash (via OpenRouter)"
 provider = "openrouter"
 context_window = 1048576
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 1.50, output_per_mtok = 7.50, cache_read_per_mtok = 0.15 }
+pricing = { input_per_mtok = 1.50, output_per_mtok = 7.50, cache_read_per_mtok = 0.15, promotions = [{ id = "openrouter-google-gemini-3.6-intro", starts_on = "2026-08-13", ends_on = "2026-12-31", source_url = "https://openrouter.ai/api/v1/models", input_per_mtok = 0.75, output_per_mtok = 3.75 }] }
 tier = "frontier"
 open_weight = false
 strengths = ["speed", "long_context", "vision", "tool_use", "agentic"]
+complementary_with = ["anthropic-claude", "openai-gpt", "qwen", "deepseek", "kimi"]
+[models."google/gemini-3.7-flash"]
+name = "Gemini 3.7 Flash (via OpenRouter)"
+provider = "openrouter"
+context_window = 1048576
+capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
+pricing = { input_per_mtok = 1.50, output_per_mtok = 7.50, cache_read_per_mtok = 0.15, promotions = [{ id = "openrouter-google-gemini-3.7-intro", starts_on = "2026-08-13", ends_on = "2026-12-31", source_url = "https://openrouter.ai/api/v1/models", input_per_mtok = 0.375, output_per_mtok = 1.875, cache_read_per_mtok = 0.0375, cache_write_per_mtok = 0.0208333333333333 }] }
+tier = "frontier"
+open_weight = false
+strengths = ["speed", "coding", "reasoning", "long_context", "vision", "tool_use", "agentic"]
 complementary_with = ["anthropic-claude", "openai-gpt", "qwen", "deepseek", "kimi"]
 [models."google/gemini-3.5-flash-lite"]
 name = "Gemini 3.5 Flash-Lite (via OpenRouter)"

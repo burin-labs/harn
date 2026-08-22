@@ -182,6 +182,34 @@ pipeline test_build_drift_reports_removal_when_provider_observed(harness: Harnes
 }
 
 @test
+pipeline test_build_drift_ignores_already_deprecated_removals(harness: Harness, task) {
+  const catalog = {
+    models: [
+      {id: "served", provider: "provider", deprecation: {status: "active"}},
+      {id: "missing", provider: "provider", deprecation: {status: "active"}},
+      {id: "retired", provider: "provider", deprecation: {status: "deprecated"}},
+    ],
+  }
+  const observed = [
+    observation(
+      "provider",
+      "served",
+      {},
+      {
+        source_url: "https://provider.example/models",
+        source_kind: "json",
+        source_owner: "provider",
+        confidence: "high",
+        observed_at: "2026-08-22T00:00:00Z",
+      },
+    ),
+  ]
+  const drift = build_drift(observed, catalog)
+  assert_eq(len(drift.removed), 1)
+  assert_eq(drift.removed[0].id, "missing")
+}
+
+@test
 pipeline test_build_drift_keys_catalog_identity_by_provider_and_model(harness: Harness, task) {
   const catalog = {
     models: [
@@ -208,6 +236,38 @@ pipeline test_build_drift_keys_catalog_identity_by_provider_and_model(harness: H
   const drift = build_drift([observed], catalog)
   assert_eq(len(drift.changed), 0)
   assert_eq(len(drift.removed), 0)
+}
+
+@test
+pipeline test_build_drift_matches_provider_wire_model(harness: Harness, task) {
+  const catalog = {
+    models: [
+      {
+        id: "gateway/acme-model",
+        wire_model: "acme-model",
+        provider: "gateway",
+        pricing: {input_per_mtok: 1.0, output_per_mtok: 2.0},
+      },
+    ],
+  }
+  const observed = [
+    observation(
+      "gateway",
+      "acme-model",
+      {pricing: {input_per_mtok: 1.0, output_per_mtok: 2.0}},
+      {
+        source_url: "https://gateway.example/models",
+        source_kind: "json",
+        source_owner: "provider",
+        confidence: "high",
+        observed_at: "2026-08-22T00:00:00Z",
+      },
+    ),
+  ]
+  const drift = build_drift(observed, catalog)
+  assert(len(drift.added) == 0)
+  assert(len(drift.removed) == 0)
+  assert(len(drift.changed) == 0)
 }
 
 @test
@@ -250,7 +310,11 @@ pipeline test_render_markdown_report_includes_diagnostics(harness: Harness, task
 
 @test
 pipeline test_render_candidate_toml_emits_added_and_changed_only(harness: Harness, task) {
-  const added_obs = provider_obs("claude-haiku-5-20260601", nil, 250000)
+  const added_obs = provider_obs(
+    "claude-haiku-5-20260601",
+    {input_per_mtok: 0.8, output_per_mtok: 4.0},
+    250000,
+  )
   const changed_obs = provider_obs(
     "claude-opus-4-7-20260301",
     {

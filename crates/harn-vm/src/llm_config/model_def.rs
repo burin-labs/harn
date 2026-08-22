@@ -3,6 +3,7 @@
 //! local runtime/memory, and aliases) that make up a `ModelDef`.
 use std::collections::BTreeMap;
 
+use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
@@ -342,6 +343,28 @@ pub struct ModelPricing {
     /// than applying marginal pricing only above the boundary.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub input_token_bands: Vec<InputTokenPricingBand>,
+    /// Dated provider promotions. The base fields remain the durable rate
+    /// card, so a temporary discount never destroys the price to restore.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub promotions: Vec<PromotionalPricing>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+pub struct PromotionalPricing {
+    pub id: String,
+    pub starts_on: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ends_on: Option<String>,
+    /// Earliest date maintainers should confirm an open-ended promotion.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub review_after: Option<String>,
+    pub source_url: String,
+    pub input_per_mtok: f64,
+    pub output_per_mtok: f64,
+    #[serde(default)]
+    pub cache_read_per_mtok: Option<f64>,
+    #[serde(default)]
+    pub cache_write_per_mtok: Option<f64>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
@@ -353,6 +376,79 @@ pub struct InputTokenPricingBand {
 }
 
 impl ModelPricing {
+    /// Resolve the rate card for the current UTC date.
+    ///
+    /// Deterministic callers and tests should use [`Self::effective_on`].
+    pub fn effective_today(&self) -> Self {
+        use harn_clock::Clock as _;
+
+        let today = harn_clock::RealClock::new().now_utc().date();
+        let date = NaiveDate::from_ymd_opt(
+            today.year(),
+            u8::from(today.month()).into(),
+            today.day().into(),
+        )
+        .expect("harn clock returned a valid UTC date");
+        self.effective_on(date)
+    }
+
+    /// Resolve the rate card on a caller-supplied date. Invalid dates are
+    /// ignored here and reported by catalog validation.
+    pub fn effective_on(&self, date: NaiveDate) -> Self {
+        let active = self
+            .promotions
+            .iter()
+            .filter_map(|promotion| {
+                let starts_on = NaiveDate::parse_from_str(&promotion.starts_on, "%Y-%m-%d").ok()?;
+                let ends_on = promotion
+                    .ends_on
+                    .as_deref()
+                    .map(|value| NaiveDate::parse_from_str(value, "%Y-%m-%d"))
+                    .transpose()
+                    .ok()?;
+                (starts_on <= date && ends_on.is_none_or(|end| date <= end))
+                    .then_some((starts_on, promotion))
+            })
+            .max_by_key(|(starts_on, _)| *starts_on)
+            .map(|(_, promotion)| promotion);
+        let Some(promotion) = active else {
+            return self.clone();
+        };
+        Self {
+            input_per_mtok: promotion.input_per_mtok,
+            output_per_mtok: promotion.output_per_mtok,
+            cache_read_per_mtok: promotion.cache_read_per_mtok,
+            cache_write_per_mtok: promotion.cache_write_per_mtok,
+            input_token_bands: self.input_token_bands.clone(),
+            promotions: self.promotions.clone(),
+        }
+    }
+
+    pub fn scaled(&self, multiplier: f64) -> Self {
+        Self {
+            input_per_mtok: self.input_per_mtok * multiplier,
+            output_per_mtok: self.output_per_mtok * multiplier,
+            cache_read_per_mtok: self.cache_read_per_mtok.map(|rate| rate * multiplier),
+            cache_write_per_mtok: self.cache_write_per_mtok.map(|rate| rate * multiplier),
+            input_token_bands: self.input_token_bands.clone(),
+            promotions: self
+                .promotions
+                .iter()
+                .map(|promotion| PromotionalPricing {
+                    input_per_mtok: promotion.input_per_mtok * multiplier,
+                    output_per_mtok: promotion.output_per_mtok * multiplier,
+                    cache_read_per_mtok: promotion
+                        .cache_read_per_mtok
+                        .map(|rate| rate * multiplier),
+                    cache_write_per_mtok: promotion
+                        .cache_write_per_mtok
+                        .map(|rate| rate * multiplier),
+                    ..promotion.clone()
+                })
+                .collect(),
+        }
+    }
+
     /// Resolve the whole-request rates for provider-reported input usage.
     /// `max_by_key` keeps runtime selection correct even before catalog
     /// validation reports an authoring-order mistake.
@@ -376,6 +472,7 @@ impl ModelPricing {
                 .cache_write_per_mtok
                 .map(|rate| rate * band.input_multiplier),
             input_token_bands: self.input_token_bands.clone(),
+            promotions: self.promotions.clone(),
         }
     }
 }

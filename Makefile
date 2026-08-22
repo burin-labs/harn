@@ -184,7 +184,7 @@ build:
 	$(HARN_CARGO_CMD) build
 	@HARN_BIN='' HARN_BIN_NO_BUILD=0 ./scripts/harn_bin.sh --print >/dev/null
 	@HARN_LOCAL_SIGN_QUIET=1 ./scripts/sign_local_macos.sh
-	@HARN_BIN='' ./scripts/harn_bin.sh --record-receipt
+	@HARN_BIN='' HARN_BIN_NO_BUILD=0 ./scripts/harn_bin.sh --record-receipt
 
 # Focused canonical CLI build for product-path iteration. This retains the
 # worktree target isolation and signing contract without compiling unrelated
@@ -193,7 +193,7 @@ build-harn:
 	$(HARN_CARGO_CMD) build -p harn-cli --bin harn
 	@HARN_BIN='' HARN_BIN_NO_BUILD=0 ./scripts/harn_bin.sh --print >/dev/null
 	@HARN_LOCAL_SIGN_QUIET=1 ./scripts/sign_local_macos.sh
-	@HARN_BIN='' ./scripts/harn_bin.sh --record-receipt
+	@HARN_BIN='' HARN_BIN_NO_BUILD=0 ./scripts/harn_bin.sh --record-receipt
 
 build-release:
 	$(HARN_CARGO_CMD) build --release
@@ -205,7 +205,7 @@ build-release:
 sign-local:
 	@HARN_BIN='' HARN_BIN_NO_BUILD=0 ./scripts/harn_bin.sh --print >/dev/null
 	./scripts/sign_local_macos.sh
-	@HARN_BIN='' ./scripts/harn_bin.sh --record-receipt
+	@HARN_BIN='' HARN_BIN_NO_BUILD=0 ./scripts/harn_bin.sh --record-receipt
 
 # Format all code
 fmt: fmt-app-host

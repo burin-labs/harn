@@ -80,6 +80,7 @@ EOF
 git -C "$release_root" init -q
 git -C "$release_root" config user.email test@example.com
 git -C "$release_root" config user.name test
+git -C "$release_root" config commit.gpgsign false
 git -C "$release_root" add Cargo.toml
 git -C "$release_root" commit -qm init
 
@@ -293,6 +294,7 @@ printf 'jobs: {}\n' > "$audit_root/.github/workflows/ci.yml"
 git -C "$audit_root" init -q
 git -C "$audit_root" config user.email test@example.com
 git -C "$audit_root" config user.name test
+git -C "$audit_root" config commit.gpgsign false
 git -C "$audit_root" add .
 git -C "$audit_root" commit -qm init
 cat > "$audit_root/scripts/verify_crate_packages.sh" <<'SH'

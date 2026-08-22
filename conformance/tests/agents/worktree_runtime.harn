@@ -13,7 +13,7 @@ pipeline main(harness: Harness) {
   harness.stdio.println(
     harness.process.shell_at(
       repo,
-      "git -c user.name='Harn' -c user.email='harn@example.com' commit -m init",
+      "git -c user.name='Harn' -c user.email='harn@example.com' -c commit.gpgsign=false commit -m init",
     )?.success,
   )
   const worktree = worktree_create(

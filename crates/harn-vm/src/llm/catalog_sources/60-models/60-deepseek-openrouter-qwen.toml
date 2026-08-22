@@ -81,6 +81,7 @@ strengths = ["speed", "cheap", "tool_use", "reasoning", "long_context"]
 [models."Qwen/Qwen3.5-9B"]
 name = "Qwen3.5 9B"
 provider = "openrouter"
+wire_model = "qwen/qwen3.5-9b"
 context_window = 131072
 capabilities = ["tools", "streaming"]
 # Inline metadata keeps this row independent of fragment-order defaults.

@@ -1,7 +1,62 @@
-use super::routing_test_support::{extract_with_options, test_equivalent_model, test_provider};
+use super::routing_test_support::{
+    extract_with_options, one_tool_list, test_equivalent_model, test_provider, ScopedEnvVar,
+};
 use super::*;
 use crate::llm::helpers::options::routing::equivalent_failover_requirements_for_options;
 use crate::llm_config::ProvidersConfig;
+
+#[test]
+fn gpt_5_6_reasoning_tools_auto_route_to_responses() {
+    let _openai_key = ScopedEnvVar::set("OPENAI_API_KEY", "test-key");
+    crate::llm::capabilities::clear_user_overrides();
+    crate::llm_config::clear_user_overrides();
+
+    let extract = |effort: Option<&str>, explicit_api: Option<&str>| {
+        let mut options = crate::value::DictMap::from_iter([
+            (
+                crate::value::intern_key("provider"),
+                VmValue::String(arcstr::ArcStr::from("openai")),
+            ),
+            (
+                crate::value::intern_key("model"),
+                VmValue::String(arcstr::ArcStr::from("gpt-5.6-terra")),
+            ),
+            (crate::value::intern_key("tools"), one_tool_list()),
+        ]);
+        if let Some(effort) = effort {
+            options.insert(
+                crate::value::intern_key("effort"),
+                VmValue::String(arcstr::ArcStr::from(effort)),
+            );
+        }
+        if let Some(api) = explicit_api {
+            options.insert(
+                crate::value::intern_key("api_mode"),
+                VmValue::String(arcstr::ArcStr::from(api)),
+            );
+        }
+        extract_with_options(options).expect("GPT-5.6 tool options")
+    };
+
+    assert_eq!(
+        extract(None, None).api_mode,
+        crate::llm::api::LlmApiMode::Responses,
+        "omitting effort preserves the provider's reasoning default"
+    );
+    assert_eq!(
+        extract(Some("medium"), None).api_mode,
+        crate::llm::api::LlmApiMode::Responses
+    );
+    assert_eq!(
+        extract(Some("none"), None).api_mode,
+        crate::llm::api::LlmApiMode::ChatCompletions
+    );
+    assert_eq!(
+        extract(Some("medium"), Some("chat_completions")).api_mode,
+        crate::llm::api::LlmApiMode::Responses,
+        "the provider compatibility constraint must prevent an invalid request"
+    );
+}
 
 #[test]
 fn equivalent_failover_filters_by_provider_tool_requirements() {

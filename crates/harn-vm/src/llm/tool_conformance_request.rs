@@ -186,17 +186,24 @@ pub(super) fn probe_request_payload_for_format(
         true,
     )
     .map_err(|error| error.to_string())?;
+    let api_mode = crate::llm::api::effective_tool_api_mode(
+        LlmApiMode::ChatCompletions,
+        provider,
+        &caps,
+        &thinking,
+        native_tools.as_ref().is_some_and(|tools| !tools.is_empty()),
+    );
     let max_tokens = tool_probe_max_tokens(default_int("max_tokens"), &thinking);
     let mut payload = LlmRequestPayload {
         provider: provider.to_string(),
         model: model.to_string(),
         region: None,
-        api_key: String::new(),
-        api_mode: LlmApiMode::ChatCompletions,
+        api_key: crate::llm::resolve_api_key(provider).unwrap_or_default(),
+        api_mode,
         messages: Vec::new(),
         system: probe_tool_contract(tool_format)?,
         max_tokens,
-        temperature: Some(default_float("temperature").unwrap_or(0.0)),
+        temperature: default_float("temperature"),
         top_p: default_float("top_p"),
         top_k: default_int("top_k"),
         logprobs: false,
@@ -426,6 +433,9 @@ fn signed_thinking_probe_messages(provider: &str, marker: &str) -> Vec<Value> {
 }
 
 fn provider_compatible_probe_request_body(payload: &LlmRequestPayload) -> Value {
+    if payload.api_mode == LlmApiMode::Responses {
+        return crate::llm::providers::OpenAiResponsesProvider::build_request_body(payload);
+    }
     match payload.provider.as_str() {
         "azure_openai" => {
             return crate::llm::providers::AzureOpenAiProvider::build_request_body(payload);
@@ -443,7 +453,7 @@ fn request_body_warnings(
     body: &Value,
 ) -> Vec<ToolConformanceRequestWarning> {
     let caps = crate::llm::managed_supply::capabilities_for(&payload.provider, &payload.model);
-    let dialect = request_validation_dialect(&payload.provider, &caps);
+    let dialect = request_validation_dialect(&payload.provider, &caps, body);
     let mut omitted = Vec::new();
 
     match dialect.as_str() {

@@ -129,7 +129,7 @@ if ! grep -Fxq 'HARN_BIN= HARN_BIN_NO_BUILD=0 args=--print' "$tmp_root/resolver-
   cat "$tmp_root/resolver-rust.txt" >&2
   exit 1
 fi
-if ! grep -Fxq 'HARN_BIN= HARN_BIN_NO_BUILD=__unset__ args=--record-receipt' \
+if ! grep -Fxq 'HARN_BIN= HARN_BIN_NO_BUILD=0 args=--record-receipt' \
   "$tmp_root/resolver-rust.txt"; then
   echo "rust setup did not refresh the receipt after local signing" >&2
   cat "$tmp_root/resolver-rust.txt" >&2

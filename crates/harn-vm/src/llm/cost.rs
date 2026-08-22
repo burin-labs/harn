@@ -659,10 +659,10 @@ pub(crate) fn pricing_per_1k_for(provider: &str, model: &str) -> Option<(f64, f6
 }
 
 /// Resolve pricing for a (provider, model) pair, billing at the premium
-/// accelerated-serving tier when `served_fast` is set and the catalog
-/// declares `serving_tiers[].pricing`. Falls back to standard pricing when the
-/// request was served at the standard tier (e.g. a capacity downgrade) or
-/// the fast tier omits explicit rates.
+/// accelerated-serving tier when `served_fast` is set and the catalog declares
+/// explicit tier rates or an economic multiplier. Falls back to standard
+/// pricing when the request was served at the standard tier, such as after a
+/// capacity downgrade.
 pub(crate) fn pricing_detail_for_tier(
     provider: &str,
     model: &str,

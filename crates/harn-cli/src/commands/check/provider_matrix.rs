@@ -84,8 +84,8 @@ pub(crate) fn generate_markdown(
     for row in rows {
         out.push_str(&format!(
             "| `{}` | `{}` | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | `{}` | {} | `{}` | `{}` | `{}` | `{}` | {} | {} | `{}` | {} | {} |\n",
-            row.provider,
-            row.model,
+            escape_md(&row.provider),
+            escape_md(&row.model),
             markdown_cell(&version_min_cell(row)),
             markdown_cell(&thinking_cell(row)),
             yes_no(row.vision),

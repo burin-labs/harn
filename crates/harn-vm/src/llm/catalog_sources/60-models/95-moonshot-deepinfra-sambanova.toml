@@ -275,7 +275,7 @@ served_variant = "sambanova-rdu"
 api_dialect = "openai_chat"
 context_window = 196608
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 0.60, output_per_mtok = 2.40 }
+pricing = { input_per_mtok = 0.60, output_per_mtok = 2.40, cache_read_per_mtok = 0.06, cache_write_per_mtok = 0.0 }
 tier = "frontier"
 open_weight = true
 strengths = ["speed", "coding", "agentic", "tool_use", "reasoning", "long_context"]

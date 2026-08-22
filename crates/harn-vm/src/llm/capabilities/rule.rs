@@ -15,20 +15,13 @@ use super::model::{
     LiveEndpointFamily, ProviderDefaults, ReasoningHistoryWireField, ReasoningRoundTripPolicy,
     ScreenshotScaling, SystemMessagePlacement, ToolModeParitySource, WireDialect,
 };
-use crate::llm::providers::anthropic::claude_generation;
-use crate::llm::providers::openai_compat::gpt_generation;
-
-// Model-pattern matching for capability rules. Shared workspace semantics live
-// in `harn-glob`; keep capability and provider matching on that helper instead
-// of mirroring glob behavior locally.
-use harn_glob::match_name as glob_match;
+use super::pattern::{rule_matches, ModelPatterns};
 
 /// One row of the capability matrix.
 #[derive(Debug, Clone, Deserialize)]
 pub struct ProviderRule {
-    /// Glob pattern (supports leading / trailing `*` and a single mid-`*`).
-    /// Matched case-insensitively against the model ID.
-    pub model_match: String,
+    /// One glob pattern, or a list of aliases that share one contract.
+    pub model_match: ModelPatterns,
     /// Optional `[major, minor]` lower bound. When set, the model ID
     /// must parse via the provider's version extractor AND compare ≥
     /// this tuple. Rules with an unparseable `version_min` for the
@@ -519,6 +512,14 @@ pub struct ProviderRule {
 }
 
 impl ProviderRule {
+    pub(crate) fn match_patterns(&self) -> impl Iterator<Item = &str> {
+        self.model_match.iter()
+    }
+
+    pub(crate) fn match_label(&self) -> String {
+        self.match_patterns().collect::<Vec<_>>().join(" | ")
+    }
+
     /// Fill every capability field that `self` (the accumulated `extends`
     /// fall-through chain so far) has NOT explicitly set from `other`, a
     /// later matching rule with lower precedence. "Explicitly set" is the
@@ -852,7 +853,7 @@ impl RuleResolution {
         if self.provider.is_none() {
             self.provider = Some(layer_provider.to_string());
         }
-        self.matched_patterns.push(rule.model_match.clone());
+        self.matched_patterns.push(rule.match_label());
         match &mut self.merged {
             None => self.merged = Some(rule.clone()),
             Some(merged) => merged.fill_missing_from(rule),
@@ -1067,7 +1068,7 @@ fn merged_provider_defaults(
 
 fn defaults_to_caps(defaults: &ProviderDefaults) -> Capabilities {
     let empty = ProviderRule {
-        model_match: "*".to_string(),
+        model_match: ModelPatterns::One("*".to_string()),
         version_min: None,
         extends: false,
         native_tools: None,
@@ -1465,36 +1466,4 @@ pub(super) fn rule_thinking_block_style(rule: &ProviderRule) -> String {
             "none".to_string()
         }
     })
-}
-
-pub(crate) fn rule_matches(rule: &ProviderRule, model: &str) -> bool {
-    let lower = model.to_lowercase();
-    if !glob_match(&rule.model_match.to_lowercase(), &lower) {
-        return false;
-    }
-    if let Some(version_min) = &rule.version_min {
-        if version_min.len() != 2 {
-            return false;
-        }
-        let want = (version_min[0], version_min[1]);
-        let have = match extract_version(model) {
-            Some(v) => v,
-            // `version_min` was set but the model ID can't be parsed.
-            // Fail closed: skip this rule so more permissive catch-all
-            // rules below can still match.
-            None => return false,
-        };
-        if have < want {
-            return false;
-        }
-    }
-    true
-}
-
-/// Extract `(major, minor)` from a model ID by trying the Anthropic
-/// parser first (for `claude-*` shapes) then the OpenAI parser (`gpt-*`).
-/// Both parsers return `None` for shapes they don't recognise so this
-/// never mis-parses across families.
-fn extract_version(model: &str) -> Option<(u32, u32)> {
-    claude_generation(model).or_else(|| gpt_generation(model))
 }

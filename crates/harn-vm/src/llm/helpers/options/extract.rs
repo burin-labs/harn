@@ -478,13 +478,13 @@ pub(crate) fn extract_llm_options(
         None
     };
     let mut provider_tools = parse_provider_tools_option(options.as_ref())?;
-    if provider == "openai"
-        && caps.reasoning_tools_require_responses
-        && thinking.is_enabled()
-        && native_tools.as_ref().is_some_and(|tools| !tools.is_empty())
-    {
-        api_mode = LlmApiMode::Responses;
-    }
+    api_mode = crate::llm::api::effective_tool_api_mode(
+        api_mode,
+        &provider,
+        &caps,
+        &thinking,
+        native_tools.as_ref().is_some_and(|tools| !tools.is_empty()),
+    );
     if enforce_capability_gates && !provider_tools.is_empty() && api_mode != LlmApiMode::Responses {
         return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             "provider_tools requires api_mode: \"responses\"",

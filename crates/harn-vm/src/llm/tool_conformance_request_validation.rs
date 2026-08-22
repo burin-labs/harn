@@ -47,7 +47,7 @@ pub(in crate::llm::tool_conformance) fn validate_probe_request_body_for_format(
     body: &Value,
 ) -> ToolConformanceRequestValidation {
     let caps = crate::llm::capabilities::lookup(provider, model);
-    let dialect = request_validation_dialect(provider, &caps);
+    let dialect = request_validation_dialect(provider, &caps, body);
     if probe_case == ToolProbeCase::SignedThinkingToolResultFollowup
         && !crate::llm::tool_scorecard::signed_thinking_tool_history_supported(provider, model)
     {
@@ -89,6 +89,9 @@ pub(in crate::llm::tool_conformance) fn validate_probe_request_body_for_format(
         "ollama" => validate_ollama_probe_request(body, probe_case, &mut issues),
         "openai_compat" => {
             validate_openai_compat_probe_request(body, probe_case, &caps, &mut issues);
+        }
+        "openai_responses" => {
+            validate_openai_responses_probe_request(body, probe_case, request_profile, &mut issues);
         }
         _ => issues.push(format!("unsupported validation dialect `{dialect}`")),
     }
@@ -135,12 +138,16 @@ fn validate_text_channel_probe_request(
 pub(super) fn request_validation_dialect(
     provider: &str,
     caps: &crate::llm::capabilities::Capabilities,
+    body: &Value,
 ) -> String {
     if provider == "bedrock" {
         return "bedrock".to_string();
     }
     if provider == "vertex" {
         return "vertex".to_string();
+    }
+    if provider == "openai" && caps.responses_api && body.get("input").is_some() {
+        return "openai_responses".to_string();
     }
     match caps.message_wire_format {
         crate::llm::capabilities::WireDialect::Anthropic => "anthropic".to_string(),
@@ -156,6 +163,53 @@ pub(super) fn request_validation_dialect(
         },
         crate::llm::capabilities::WireDialect::Ollama => "ollama".to_string(),
         crate::llm::capabilities::WireDialect::OpenAiCompat => "openai_compat".to_string(),
+    }
+}
+
+fn validate_openai_responses_probe_request(
+    body: &Value,
+    probe_case: ToolProbeCase,
+    request_profile: ToolProbeRequestProfile,
+    issues: &mut Vec<String>,
+) {
+    require_array(body, "/input", issues);
+    reject_present(body, "/messages", "OpenAI Responses request", issues);
+    if !probe_case.request_uses_probe_tool() {
+        reject_present(body, "/tools", "OpenAI Responses no-tool request", issues);
+        return;
+    }
+    require_string_eq(
+        body,
+        "/tools/0/type",
+        "function",
+        "OpenAI Responses tool type",
+        issues,
+    );
+    require_string_eq(
+        body,
+        "/tools/0/name",
+        TOOL_PROBE_TOOL_NAME,
+        "OpenAI Responses tool name",
+        issues,
+    );
+    if probe_case.requires_probe_tool() {
+        if request_profile == ToolProbeRequestProfile::ParameterEdges {
+            require_string_eq(
+                body,
+                "/tool_choice",
+                "required",
+                "OpenAI Responses required tool choice",
+                issues,
+            );
+        } else {
+            require_string_eq(
+                body,
+                "/tool_choice/name",
+                TOOL_PROBE_TOOL_NAME,
+                "OpenAI Responses tool choice",
+                issues,
+            );
+        }
     }
 }
 
@@ -797,6 +851,7 @@ fn validate_generation_parameter_ranges(body: &Value, dialect: &str, issues: &mu
             require_optional_integer_min(body, "/top_k", 1, issues);
             require_optional_integer_min(body, "/max_tokens", 1, issues);
             require_optional_integer_min(body, "/max_completion_tokens", 1, issues);
+            require_optional_integer_min(body, "/max_output_tokens", 1, issues);
         }
     }
 }

@@ -844,7 +844,8 @@ pub fn model_pricing_per_mtok(model_id: &str) -> Option<ModelPricing> {
     effective_config()
         .models
         .get(model_id)
-        .and_then(|model| model.pricing.clone())
+        .and_then(|model| model.pricing.as_ref())
+        .map(ModelPricing::effective_today)
 }
 
 pub fn model_pricing_per_mtok_for_route(provider: &str, model_id: &str) -> Option<ModelPricing> {
@@ -867,15 +868,22 @@ pub fn model_pricing_for_route_input_tokens(
         .map(|pricing| pricing.for_input_tokens(input_tokens))
 }
 
-/// Per-MTok pricing for a named serving tier, when the catalog declares one.
-/// Returns `None` for models with no matching tier or a tier that omits
-/// explicit pricing — callers fall back to standard pricing in that case.
+/// Per-MTok pricing for a named serving tier. Explicit rates win; otherwise
+/// the tier's multiplier or discount is applied to the effective standard
+/// rate so dated promotions cannot drift from alternate serving modes.
 pub fn model_serving_tier_pricing_per_mtok(model_id: &str, tier_id: &str) -> Option<ModelPricing> {
-    effective_config()
-        .models
-        .get(model_id)
-        .and_then(|model| model.serving_tiers.iter().find(|tier| tier.id == tier_id))
-        .and_then(|tier| tier.pricing.clone())
+    let config = effective_config();
+    let model = config.models.get(model_id)?;
+    let tier = model.serving_tiers.iter().find(|tier| tier.id == tier_id)?;
+    if let Some(pricing) = &tier.pricing {
+        return Some(pricing.effective_today());
+    }
+    let standard = model.pricing.as_ref()?.effective_today();
+    let multiplier = tier.cost_multiplier.or_else(|| {
+        tier.discount_percent
+            .map(|percent| 1.0 - f64::from(percent) / 100.0)
+    })?;
+    Some(standard.scaled(multiplier))
 }
 
 pub fn model_serving_tier_pricing_per_mtok_for_route(

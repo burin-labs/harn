@@ -16,6 +16,7 @@ cd "$fake_repo"
 git init -q
 git config user.email test@example.com
 git config user.name "Test User"
+git config commit.gpgsign false
 cat > Cargo.toml <<'TOML'
 [workspace]
 members = ["crates/*"]

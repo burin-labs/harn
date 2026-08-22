@@ -33,8 +33,6 @@ const CAPABILITY_KEYS = [
   "thinking_modes",
 ]
 
-const PRICING_EPSILON = 0.0001
-
 fn __confidence_rank(value) {
   return CONFIDENCE_RANK[value] ?? 0
 }
@@ -236,16 +234,14 @@ fn __catalog_model_by_route(catalog) {
   let by_id: dict = {}
   for model in catalog?.models ?? [] {
     by_id = by_id + {[model.provider + ":" + model.id]: model}
+    if model?.wire_model != nil && model.wire_model != model.id {
+      by_id = by_id + {[model.provider + ":" + model.wire_model]: model}
+    }
+    if model.provider == "gemini" && starts_with(model.id, "models/") {
+      by_id = by_id + {[model.provider + ":" + model.id.slice(7)]: model}
+    }
   }
   return by_id
-}
-
-fn __abs_diff(left, right) {
-  const diff = left - right
-  if diff < 0 {
-    return 0 - diff
-  }
-  return diff
 }
 
 fn __pricing_change(catalog_pricing, observed_pricing) {
@@ -258,13 +254,38 @@ fn __pricing_change(catalog_pricing, observed_pricing) {
     }
     if cat == nil {
       changes = changes + [{key: key, from: nil, to: obs}]
-    } else if obs == nil {
-      changes = changes + [{key: key, from: cat, to: nil}]
-    } else if __abs_diff(cat, obs) > PRICING_EPSILON {
+    } else if obs != nil && decimal(to_string(cat)) != decimal(to_string(obs)) {
       changes = changes + [{key: key, from: cat, to: obs}]
     }
   }
   return changes
+}
+
+fn __effective_catalog_pricing(pricing, observed_at) {
+  if pricing == nil || observed_at == nil {
+    return pricing
+  }
+  const date = to_string(observed_at).slice(0, 10)
+  let active = nil
+  for promotion in pricing?.promotions ?? [] {
+    const started = promotion?.starts_on != nil && promotion.starts_on <= date
+    const not_ended = promotion?.ends_on == nil || date <= promotion.ends_on
+    if started
+      && not_ended
+      && (active == nil || promotion.starts_on > active.starts_on) {
+      active = promotion
+    }
+  }
+  if active == nil {
+    return pricing
+  }
+  let effective = pricing
+  for field in PRICING_KEYS {
+    if active?.[field] != nil {
+      effective = effective + {[field]: active[field]}
+    }
+  }
+  return effective
 }
 
 fn __dict_to_pairs(value) -> list<dict> {
@@ -352,7 +373,6 @@ pub fn build_drift(observations: list<dict>, catalog: dict) -> dict {
   let requires_key: list<dict> = []
   for obs in observations {
     const route = __observation_key(obs)
-    seen = seen + {[route]: true}
     if __confidence_rank(obs.confidence) < __confidence_rank("high") {
       low_confidence = low_confidence + [obs]
     }
@@ -366,7 +386,11 @@ pub fn build_drift(observations: list<dict>, catalog: dict) -> dict {
       added = added + [obs]
     } else {
       const cat = by_route[route]
-      const pricing_changes = __pricing_change(cat.pricing, obs.pricing)
+      seen = seen + {[cat.provider + ":" + cat.id]: true}
+      const pricing_changes = __pricing_change(
+        __effective_catalog_pricing(cat.pricing, obs.observed_at),
+        obs.pricing,
+      )
       const capability_changes = __capability_changes(cat?.capabilities, obs?.capabilities)
       let ctx_change: dict? = nil
       if obs.context_window != nil && obs.context_window != cat.context_window {
@@ -390,7 +414,8 @@ pub fn build_drift(observations: list<dict>, catalog: dict) -> dict {
   let removed: list<dict> = []
   for model in catalog?.models ?? [] {
     const route = model.provider + ":" + model.id
-    if !seen[route] && observed_providers[model.provider] {
+    const deprecated = model?.deprecated ?? (model?.deprecation?.status == "deprecated")
+    if !deprecated && !seen[route] && observed_providers[model.provider] {
       removed = removed + [model]
     }
   }
@@ -656,9 +681,7 @@ pub fn render_candidate_toml(drift: dict, meta: dict) -> string {
   ]
   let emitted = 0
   for obs in drift.added {
-    const has_actionable_metadata = obs.pricing != nil
-      || obs.context_window != nil
-      || obs.capabilities != nil
+    const has_actionable_metadata = obs.pricing != nil || obs.capabilities != nil
     if obs.source_owner == "provider"
       && __confidence_rank(obs.confidence)
         >= __confidence_rank("high")

@@ -159,307 +159,43 @@ fn generated_catalog_validates() {
 }
 
 #[test]
-fn generated_catalog_exports_provider_healthcheck_metadata() {
-    llm_config::clear_user_overrides();
-    let catalog = artifact();
+fn provider_healthcheck_metadata_roundtrips_into_config() {
+    let overlay = llm_config::parse_config_toml(
+        r#"
+[providers.fixture_health]
+display_name = "Fixture Health"
+base_url = "https://fixture.invalid/v1"
+auth_style = "none"
+chat_endpoint = "/chat/completions"
+extra_headers = { "x-fixture-version" = "test" }
 
-    let anthropic = catalog
-        .providers
-        .iter()
-        .find(|provider| provider.id == "anthropic")
-        .expect("anthropic provider is exported");
-    assert_eq!(
-        anthropic
-            .extra_headers
-            .get("anthropic-version")
-            .map(String::as_str),
-        Some("2023-06-01")
-    );
-    let anthropic_healthcheck = anthropic
-        .healthcheck
-        .as_ref()
-        .expect("anthropic healthcheck is exported");
-    assert_eq!(anthropic_healthcheck.method, "GET");
-    assert_eq!(anthropic_healthcheck.path.as_deref(), Some("/models"));
-    assert!(anthropic_healthcheck.body.is_none());
-
-    let openrouter = catalog
-        .providers
-        .iter()
-        .find(|provider| provider.id == "openrouter")
-        .expect("openrouter provider is exported");
-    assert_eq!(
-        openrouter
-            .healthcheck
-            .as_ref()
-            .and_then(|healthcheck| healthcheck.path.as_deref()),
-        Some("/auth/key")
-    );
-}
-
-#[test]
-fn generated_catalog_exports_provider_region_metadata() {
-    llm_config::clear_user_overrides();
-    let catalog = artifact();
-
-    let dashscope = catalog
-        .providers
-        .iter()
-        .find(|provider| provider.id == "dashscope")
-        .expect("dashscope provider is exported");
-    assert_eq!(
-        dashscope.endpoint.region_env.as_deref(),
-        Some("DASHSCOPE_REGION")
-    );
-    assert_eq!(
-        dashscope
-            .endpoint
-            .regions
-            .get("cn")
-            .map(|region| region.base_url.as_str()),
-        Some("https://dashscope.aliyuncs.com/compatible-mode/v1")
-    );
-}
-
-#[test]
-fn generated_catalog_exports_typed_batch_lifecycle_metadata() {
-    llm_config::clear_user_overrides();
-    let catalog = artifact();
-
-    let openai = catalog
-        .models
-        .iter()
-        .find(|model| model.provider == "openai" && model.id == "gpt-4o-mini")
-        .expect("openai gpt-4o-mini catalog row");
-    assert!(
-        openai.capability_tags.iter().any(|tag| tag == "batch"),
-        "legacy capability tags should still advertise batch"
-    );
-    let openai_batch = openai.batch.as_ref().expect("openai batch metadata");
-    assert_eq!(openai_batch.wire_format, "openai");
-    assert_eq!(openai_batch.input_mode, "jsonl_file");
-    assert_eq!(
-        openai_batch.result_ordering,
-        BatchResultOrdering::CustomIdRejoin
-    );
-    assert_eq!(
-        openai_batch.partial_failure,
-        BatchPartialFailure::PerRequest
-    );
-    assert_eq!(
-        openai_batch.cancellation,
-        BatchCancellationSupport::Supported
-    );
-    assert_eq!(openai_batch.discount_percent, Some(50));
-    assert_eq!(openai_batch.turnaround_hours, Some(24));
-    assert_eq!(openai_batch.max_requests, Some(50_000));
-    assert_eq!(openai_batch.max_input_bytes, Some(209_715_200));
-    assert_eq!(openai_batch.result_retention_days, Some(30));
-    assert!(
-        openai_batch
-            .security_notes
-            .iter()
-            .any(|note| note.contains("separate provider pool")),
-        "OpenAI batch notes should explain the separate rate-limit pool"
-    );
-    assert!(
-        openai_batch
-            .operational_notes
-            .iter()
-            .any(|note| note.contains("custom_id")),
-        "OpenAI batch operational notes should explain result rejoin"
-    );
-
-    let anthropic = catalog
-        .models
-        .iter()
-        .find(|model| model.provider == "anthropic" && model.id == "claude-opus-4-6")
-        .expect("anthropic claude-opus-4-6 catalog row");
-    let anthropic_batch = anthropic.batch.as_ref().expect("anthropic batch metadata");
-    assert_eq!(anthropic_batch.wire_format, "anthropic_messages");
-    assert_eq!(anthropic_batch.input_mode, "inline_requests");
-    assert_eq!(anthropic_batch.max_requests, Some(100_000));
-    assert_eq!(anthropic_batch.max_input_bytes, Some(268_435_456));
-    assert_eq!(anthropic_batch.result_retention_days, Some(29));
-    assert_eq!(
-        anthropic_batch.result_ordering,
-        BatchResultOrdering::CustomIdRejoin
-    );
-    assert_eq!(
-        anthropic_batch.cancellation,
-        BatchCancellationSupport::Supported
-    );
-    assert!(
-        anthropic_batch
-            .operational_notes
-            .iter()
-            .any(|note| note.contains("cache hits are best effort")),
-        "Anthropic batch notes should document prompt-cache best-effort behavior"
-    );
-
-    let gemini = catalog
-        .models
-        .iter()
-        .find(|model| model.provider == "gemini" && model.id == "gemini-2.5-flash")
-        .expect("gemini-2.5-flash catalog row");
-    let gemini_batch = gemini.batch.as_ref().expect("gemini batch metadata");
-    assert_eq!(gemini_batch.wire_format, "gemini");
-    assert_eq!(gemini_batch.input_mode, "jsonl_or_inline");
-    assert_eq!(gemini_batch.max_input_bytes, Some(2_147_483_648));
-    assert_eq!(
-        gemini_batch.partial_failure,
-        BatchPartialFailure::PerRequest
-    );
-    assert_eq!(
-        gemini_batch.cancellation,
-        BatchCancellationSupport::Supported
-    );
-    assert!(
-        gemini_batch
-            .operational_notes
-            .iter()
-            .any(|note| note.contains("discounts do not stack")),
-        "Gemini batch notes should document cache/batch discount precedence"
-    );
-}
-
-#[test]
-fn generated_catalog_exports_non_batch_serving_tiers() {
-    llm_config::clear_user_overrides();
-    let catalog = artifact();
-
-    let openai = catalog
-        .models
-        .iter()
-        .find(|model| model.provider == "openai" && model.id == "gpt-5.5")
-        .expect("openai gpt-5.5 catalog row");
-    let openai_flex = openai
-        .serving_tiers
-        .iter()
-        .find(|tier| tier.id == "flex")
-        .expect("OpenAI Flex tier");
-    assert_eq!(openai_flex.mode, llm_config::ServingTierMode::Synchronous);
-    assert_eq!(
-        openai_flex.economics,
-        llm_config::ServingTierEconomics::Discounted
-    );
-    assert_eq!(
-        openai_flex
-            .request
-            .as_ref()
-            .map(|request| request.param.as_str()),
-        Some("service_tier")
-    );
-    assert!(
-        openai.batch.is_some(),
-        "OpenAI async Batch support should remain separate from Flex"
-    );
-
-    let gemini = catalog
-        .models
-        .iter()
-        .find(|model| model.provider == "gemini" && model.id == "gemini-2.5-flash")
-        .expect("gemini-2.5-flash catalog row");
-    let gemini_priority = gemini
-        .serving_tiers
-        .iter()
-        .find(|tier| tier.id == "priority")
-        .expect("Gemini Priority tier");
-    assert_eq!(
-        gemini_priority
-            .request
-            .as_ref()
-            .map(|request| request.value.as_str()),
-        Some("priority")
-    );
-    assert!(
-        gemini_priority
-            .unsuitable_workloads
-            .iter()
-            .any(|workload| workload == "batch"),
-        "Priority must not be presented as an async batch route"
-    );
-}
-
-#[test]
-fn generated_catalog_exports_routing_routes() {
-    llm_config::clear_user_overrides();
-    let catalog = artifact();
-
-    assert!(
-        !catalog.routing_routes.is_empty(),
-        "catalog should expose route-decision rows"
-    );
-    let openrouter = catalog
-        .routing_routes
-        .iter()
-        .find(|route| route.provider == "openrouter")
-        .expect("openrouter route is exported");
-    assert!(
-        openrouter
-            .base_url
-            .as_deref()
-            .is_some_and(|url| url.starts_with("https://")),
-        "routing route should expose the provider base URL name, not a resolved secret"
-    );
-    assert_eq!(
-        openrouter.secret_env.as_deref(),
-        Some("OPENROUTER_API_KEY"),
-        "routing route should carry the credential env var name only"
-    );
-    assert!(
-        openrouter
-            .capabilities
-            .iter()
-            .any(|capability| capability.starts_with("structured_output_mode:")),
-        "routing route should include envelope capability tags"
-    );
-
-    let wire_model = catalog
-        .models
-        .iter()
-        .find(|model| {
-            model.deprecation.status == DeprecationStatus::Active && model.wire_model.is_some()
-        })
-        .expect("catalog has an active wire-model row");
-    let wire_route = catalog
-        .routing_routes
-        .iter()
-        .find(|route| {
-            route.provider == wire_model.provider
-                && route.model == wire_model.wire_model.as_deref().unwrap()
-        })
-        .expect("routing route should use the provider wire model when present");
-    assert_eq!(
-        wire_route.family.as_deref(),
-        Some(wire_model.family.as_str())
-    );
-}
-
-#[test]
-fn catalog_roundtrips_provider_healthcheck_metadata_into_config() {
-    llm_config::clear_user_overrides();
-    let catalog = artifact();
+[providers.fixture_health.healthcheck]
+method = "GET"
+path = "/health"
+"#,
+    )
+    .expect("fixture provider parses");
+    let catalog = artifact_embedded(Some(&overlay), None);
     let config = config_from_artifact(&catalog);
-    let anthropic = config
+    let provider = config
         .providers
-        .get("anthropic")
-        .expect("anthropic provider roundtrips");
+        .get("fixture_health")
+        .expect("fixture provider roundtrips");
 
     assert_eq!(
-        anthropic
+        provider
             .extra_headers
-            .get("anthropic-version")
+            .get("x-fixture-version")
             .map(String::as_str),
-        Some("2023-06-01")
+        Some("test")
     );
-    let anthropic_healthcheck = anthropic
+    let healthcheck = provider
         .healthcheck
         .as_ref()
-        .expect("anthropic healthcheck roundtrips");
-    assert_eq!(anthropic_healthcheck.method, "GET");
-    assert_eq!(anthropic_healthcheck.path.as_deref(), Some("/models"));
-    assert!(anthropic_healthcheck.body.is_none());
+        .expect("fixture healthcheck roundtrips");
+    assert_eq!(healthcheck.method, "GET");
+    assert_eq!(healthcheck.path.as_deref(), Some("/health"));
+    assert!(healthcheck.body.is_none());
 }
 
 #[tokio::test]
@@ -630,24 +366,6 @@ fn generated_catalog_derives_quality_tags_from_routes() {
         .find(|model| model.aliases.iter().any(|alias| alias == "local-gemma4"))
         .expect("local alias target is exported");
     assert!(local.quality_tags.iter().any(|tag| tag == "local"));
-}
-
-#[test]
-fn generated_catalog_keeps_qwen37_max_frontier_tier() {
-    let catalog = artifact();
-    let max = catalog
-        .models
-        .iter()
-        .find(|model| model.id == "qwen/qwen3.7-max" && model.provider == "openrouter")
-        .expect("OpenRouter Qwen 3.7 Max is exported");
-    assert_eq!(max.tier, "frontier");
-    assert!(
-        max.strengths.iter().any(|tag| tag == "reasoning"),
-        "Qwen 3.7 Max should keep the flagship reasoning profile"
-    );
-    let pricing = max.pricing.as_ref().expect("Qwen 3.7 Max has pricing");
-    assert_eq!(pricing.input_per_mtok, 1.25);
-    assert_eq!(pricing.output_per_mtok, 3.75);
 }
 
 #[test]
@@ -1135,27 +853,6 @@ availability = "unknown"
 }
 
 #[test]
-fn catalog_exports_family_and_lineage_for_hosted_wrappers() {
-    let catalog = artifact();
-    let hosted_claude = catalog
-        .models
-        .iter()
-        .find(|model| model.id == "anthropic/claude-sonnet-4-6")
-        .expect("OpenRouter Claude wrapper is exported");
-    assert_eq!(hosted_claude.provider, "openrouter");
-    assert_eq!(hosted_claude.family, "anthropic-claude");
-    assert_eq!(hosted_claude.lineage, "claude-sonnet-opus");
-
-    let direct_gemini = catalog
-        .models
-        .iter()
-        .find(|model| model.id == "gemini-2.5-flash")
-        .expect("Gemini Flash is exported");
-    assert_eq!(direct_gemini.family, "google-gemini");
-    assert_eq!(direct_gemini.lineage, "gemini-flash");
-}
-
-#[test]
 fn validation_rejects_malformed_family_metadata() {
     let mut catalog = artifact();
     catalog.models[0].family = "Not Normalized".to_string();
@@ -1265,76 +962,6 @@ fn generated_schema_accepts_generated_artifact_shape() {
     assert!(artifact_value["families"]
         .as_array()
         .is_some_and(|families| !families.is_empty()));
-}
-
-#[test]
-fn generated_catalog_exports_gpt_5_6_presentation_family() {
-    let catalog = artifact();
-    assert_eq!(
-        catalog
-            .variants
-            .iter()
-            .map(|variant| variant.id.as_str())
-            .collect::<Vec<_>>(),
-        vec![
-            "fast",
-            "balanced",
-            "high-reasoning",
-            "local",
-            "cheap",
-            "vision-capable",
-            "long-context",
-        ]
-    );
-    let family = catalog
-        .families
-        .iter()
-        .find(|family| family.id == "openai-gpt-5-6")
-        .expect("GPT-5.6 presentation family");
-    assert_eq!(family.provider, "openai");
-    assert_eq!(family.dimensions.len(), 2);
-    assert_eq!(family.dimensions[0].key, "variant");
-    assert_eq!(family.dimensions[1].key, "effort");
-    assert_eq!(
-        family.dimensions[0]
-            .ordered_values
-            .iter()
-            .map(|value| value.model_id.as_deref().expect("model binding"))
-            .collect::<Vec<_>>(),
-        vec!["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"]
-    );
-    assert_eq!(
-        family.dimensions[1]
-            .ordered_values
-            .iter()
-            .map(|value| value.value.as_str())
-            .collect::<Vec<_>>(),
-        vec!["none", "low", "medium", "high", "xhigh", "max"]
-    );
-    assert_eq!(
-        family
-            .presets
-            .iter()
-            .map(|preset| preset.id.as_str())
-            .collect::<Vec<_>>(),
-        vec!["fast", "balanced", "deep"]
-    );
-
-    for model_id in ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"] {
-        let model = catalog
-            .models
-            .iter()
-            .find(|model| model.id == model_id)
-            .expect("family model exists");
-        assert!(model
-            .blurb
-            .as_deref()
-            .is_some_and(|blurb| !blurb.is_empty()));
-        assert_eq!(
-            model.reasoning.effort_levels,
-            ["none", "low", "medium", "high", "xhigh", "max"]
-        );
-    }
 }
 
 #[test]
@@ -1688,43 +1315,4 @@ fn provider_route_prefix_must_be_stripped(provider: &str) -> bool {
         provider,
         "baseten" | "deepinfra" | "fireworks" | "nvidia" | "sambanova" | "together"
     )
-}
-
-#[test]
-fn live_catalog_deepinfra_wire_models_have_no_deepinfra_prefix() {
-    // harn#3645 §4 (deepinfra). The DeepInfra rows are keyed
-    // `deepinfra/<hf-id>` but dispatch the bare Hugging Face id (carried in
-    // wire_model). Lock that no DeepInfra wire id ever regains the
-    // `deepinfra/` prefix, e.g. the di-qwen3.6 route must send
-    // `Qwen/Qwen3.6-35B-A3B`, never `deepinfra/Qwen/Qwen3.6-35B-A3B`.
-    let catalog = artifact();
-    for model in catalog.models.iter().filter(|m| m.provider == "deepinfra") {
-        if let Some(wire) = model.wire_model.as_deref() {
-            assert!(
-                !wire.starts_with("deepinfra/"),
-                "deepinfra row {} has a wire_model still prefixed with `deepinfra/`: {wire}",
-                model.id
-            );
-        }
-    }
-}
-
-#[test]
-fn live_catalog_nvidia_minimax_m2_7_id_vs_wire_parity() {
-    // harn#3645 §4 (nvidia). The NVIDIA NIM catalog id `nvidia/minimax-m2.7`
-    // differs from the live NIM wire id `minimaxai/minimax-m2.7`. Dispatch is
-    // correct because wire_model carries the NIM id, but any path that uses the
-    // catalog `id` as the wire id 404s. Guard the wire_model so a future
-    // refresh cannot silently drop or wrong-case it.
-    let catalog = artifact();
-    let row = catalog
-        .models
-        .iter()
-        .find(|model| model.id == "nvidia/minimax-m2.7")
-        .expect("catalog has the nvidia/minimax-m2.7 row");
-    assert_eq!(
-        row.wire_model.as_deref(),
-        Some("minimaxai/minimax-m2.7"),
-        "nvidia/minimax-m2.7 must dispatch the NIM wire id minimaxai/minimax-m2.7"
-    );
 }

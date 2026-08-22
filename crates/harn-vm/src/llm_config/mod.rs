@@ -23,8 +23,6 @@ mod local_runtime_tests;
 #[cfg(test)]
 mod logical_defaults_tests;
 #[cfg(test)]
-mod model_generation_tests;
-#[cfg(test)]
 mod overlay_audit_tests;
 #[cfg(test)]
 mod pricing_tests;

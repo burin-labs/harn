@@ -328,7 +328,7 @@ pub(crate) struct ProviderToolProbeArgs {
         hide_possible_values = true
     )]
     pub model: String,
-    /// Override the configured provider base URL.
+    /// Test a raw compatible endpoint instead of Harn's provider adapter.
     #[arg(long = "base-url")]
     pub base_url: Option<String>,
     /// Probe only one transport mode instead of both.

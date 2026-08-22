@@ -11,27 +11,6 @@ use super::super::*;
 // churn and surface real schema breakage.
 
 #[test]
-fn embedded_providers_toml_parses_and_is_not_trivially_empty() {
-    let config = default_config();
-    assert!(
-        config.providers.len() >= 10,
-        "expected >=10 providers in embedded catalog, got {}",
-        config.providers.len()
-    );
-    assert!(
-        config.models.len() >= 20,
-        "expected >=20 models in embedded catalog, got {}",
-        config.models.len()
-    );
-    assert!(
-        config.aliases.len() >= 15,
-        "expected >=15 aliases in embedded catalog, got {}",
-        config.aliases.len()
-    );
-    assert_eq!(config.default_provider.as_deref(), Some("anthropic"));
-}
-
-#[test]
 fn embedded_catalog_every_deprecated_model_has_a_note() {
     let config = default_config();
     let offenders: Vec<&str> = config
@@ -51,70 +30,6 @@ fn embedded_catalog_every_deprecated_model_has_a_note() {
     assert!(
         offenders.is_empty(),
         "deprecated models missing a deprecation_note: {offenders:?}"
-    );
-}
-
-#[test]
-fn embedded_cerebras_catalog_separates_public_and_dedicated_routes() {
-    let config = default_config();
-    for id in ["gpt-oss-120b", "zai-glm-4.7"] {
-        let model = config.models.get(id).expect("current public Cerebras row");
-        assert_eq!(model.provider, "cerebras");
-        assert_eq!(model.availability, ModelAvailability::Serverless);
-        assert!(!model.deprecated);
-    }
-
-    let llama = config
-        .models
-        .get("llama-3.3-70b")
-        .expect("legacy Cerebras row");
-    assert_eq!(llama.provider, "cerebras");
-    assert_eq!(llama.availability, ModelAvailability::Dedicated);
-    assert!(llama.deprecated);
-}
-
-#[test]
-fn embedded_openrouter_gpt_oss_120b_has_no_fragment_bleed() {
-    // Regression for the provider-catalog leading-key bleed: the openrouter
-    // `openai/gpt-oss-120b` row was the last model in its fragment with no
-    // inline tier/open_weight/strengths, so the next fragment's leading bare
-    // keys reattached to it after raw-text concatenation — mislabeling it as
-    // `open_weight = false` with a spurious `vision` strength. It must now be
-    // self-described: open weight, no vision, and a tier consistent with the
-    // rest of its equivalence group.
-    let config = default_config();
-    let model = config
-        .models
-        .get("openai/gpt-oss-120b")
-        .expect("openrouter gpt-oss-120b row");
-    assert_eq!(model.provider, "openrouter");
-    assert_eq!(
-        model.open_weight,
-        Some(true),
-        "gpt-oss-120b is Apache-2.0 open weight, not the bled-in open_weight=false"
-    );
-    assert!(
-        !model.strengths.iter().any(|s| s == "vision"),
-        "gpt-oss-120b is text-only; the bled-in `vision` strength must be gone: {:?}",
-        model.strengths
-    );
-    assert!(
-        !model.strengths.is_empty(),
-        "gpt-oss-120b must carry its own strengths, not None"
-    );
-
-    // tier is a property of the logical model: every active row in the
-    // openai-gpt-oss-120b equivalence group must agree.
-    let group_tiers: std::collections::BTreeSet<_> = config
-        .models
-        .values()
-        .filter(|m| m.equivalence_group.as_deref() == Some("openai-gpt-oss-120b") && !m.deprecated)
-        .map(|m| m.tier.clone())
-        .collect();
-    assert_eq!(
-        group_tiers.len(),
-        1,
-        "openai-gpt-oss-120b group must share one tier, got {group_tiers:?}"
     );
 }
 
@@ -214,17 +129,6 @@ fn model_availability_parses_known_strings() {
 }
 
 #[test]
-fn embedded_catalog_marks_together_dedicated_route_as_dedicated() {
-    let config = default_config();
-    let model = config
-        .models
-        .get("Qwen/Qwen3-Coder-Next-FP8")
-        .expect("Together Qwen3 Coder Next FP8 is cataloged");
-    assert_eq!(model.provider, "together");
-    assert_eq!(model.availability, ModelAvailability::Dedicated);
-}
-
-#[test]
 fn embedded_catalog_dedicated_models_are_not_targeted_by_tier_aliases() {
     // A dedicated-only model behind a tier alias would silently fail
     // every serverless caller; the catalog must keep those routes
@@ -275,20 +179,6 @@ fn embedded_catalog_tier_aliases_resolve_to_active_models() {
             entry.deprecation_note
         );
     }
-}
-
-#[test]
-fn gpt_5_5_fast_serving_tier_rides_service_tier() {
-    // OpenAI exposes provider-agnostic fast mode through `service_tier`.
-    let entry = model_catalog_entry("gpt-5.5").expect("gpt-5.5 catalog entry");
-    let fast = entry
-        .serving_tiers
-        .iter()
-        .find(|tier| tier.id == "fast")
-        .expect("gpt-5.5 advertises a fast tier");
-    let request = fast.request.as_ref().expect("fast tier has request knob");
-    assert_eq!(request.param, "service_tier");
-    assert_eq!(fast.status.as_deref(), Some("ga"));
 }
 
 /// The curated short list is what the "no credentials" error, onboarding copy

@@ -124,6 +124,32 @@ vision = false
 }
 
 @test
+pipeline test_promotion_preserves_the_durable_rate_card(harness: Harness, task) {
+  const candidate = {
+    kind: "promotion",
+    provider: "anthropic",
+    model_id: "claude-haiku-4-5-20251001",
+    effective_date: "2026-08-21",
+    review_after: "2026-11-21",
+    promotion_id: "summer-price",
+    source_url: "https://provider.example/pricing",
+    old_value: {input_per_mtok: 1.0, output_per_mtok: 5.0},
+    new_value: {input_per_mtok: 0.8, output_per_mtok: 4.0},
+    evidence: "Provider rate notice",
+  }
+  const source = """
+[models."claude-haiku-4-5-20251001"]
+name = "Claude Haiku"
+pricing = { input_per_mtok = 1.00, output_per_mtok = 5.00 }
+"""
+  const updated = unwrap(apply_candidate_to_source(source, candidate))
+  assert(contains(updated, "input_per_mtok = 1.00"))
+  assert(contains(updated, "id = \"summer-price\""))
+  assert(contains(updated, "input_per_mtok = 0.8"))
+  assert(contains(updated, "review_after = \"2026-11-21\""))
+}
+
+@test
 pipeline test_source_mutation_refuses_ambiguous_owner(harness: Harness, task) {
   const candidate = fixture(harness.fs, "carried-update").extraction.candidate
   const duplicate = """
