@@ -228,7 +228,7 @@ fn __run_case(harness: Harness, case, classifier) {
   }
   const skipped_main_turn = captured.result?.status == "scope_alert"
     && captured.result?.stop_reason
-    == "out_of_scope"
+      == "out_of_scope"
   const main_calls = if skipped_main_turn {
     0
   } else {

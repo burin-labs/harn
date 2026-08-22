@@ -142,9 +142,7 @@ fn __check(
   //    call-shaped spans, whatever recovery it went through.
   require len(calls) <= shaped,
     where + " invented calls: " + to_string(len(calls)) + " from "
-    + to_string(
-    shaped,
-  )
+    + to_string(shaped)
     + " spans"
   // 1. No quiet loss.
   require len(calls) >= planted || loud,
@@ -203,9 +201,7 @@ fn main(harness: Harness) {
       if pin != "json" {
         require len(documented?.calls ?? []) == 0,
           "a documented call dispatched: seed="
-          + to_string(
-          seed,
-        )
+          + to_string(seed)
           + " pin="
           + pin
       }

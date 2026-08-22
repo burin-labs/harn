@@ -45,9 +45,7 @@ fn fire_tier(runtime: HarnessRuntime, handle: TriggerHandle, unique: string) -> 
 pipeline test(harness: Harness, task) {
   harness.testing.clear()
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
-    + to_string(
-    harness.random.range(100000, 999999),
-  )
+    + to_string(harness.random.range(100000, 999999))
   const shadow_agent = "autonomy-shadow-" + unique
   const shadow = fire_tier(
     harness.runtime,
@@ -98,7 +96,7 @@ pipeline test(harness: Harness, task) {
   harness.stdio.println(
     approved.result?.file_exists && len(approved_records) == 1
       && approved_records[0]?.outcome
-      == "success",
+        == "success",
   )
   harness.testing.clear()
   const auto_agent = "autonomy-auto-" + unique
@@ -127,7 +125,7 @@ pipeline test(harness: Harness, task) {
   harness.stdio.println(
     !harness.fs.exists(scoped_path) && len(scoped_records) == 1
       && scoped_records[0]?.outcome
-      == "denied",
+        == "denied",
   )
   for path in [
     shadow.result?.file_path,

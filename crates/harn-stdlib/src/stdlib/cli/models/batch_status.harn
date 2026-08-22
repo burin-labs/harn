@@ -39,35 +39,33 @@ import {
 /** Poll submitted batches and persist normalized lifecycle receipts. */
 fn __status_job_base(job: dict, dry_run: bool) -> dict {
   return __batch_lifecycle_job_base(job, dry_run)
-    + {
-    request_count: __safe_int(job["request_count"]) ?? 0,
-  }
+    + {request_count: __safe_int(job["request_count"]) ?? 0}
 }
 
 fn __cached_status_job(job: dict, dry_run: bool) -> dict {
   const provider_status = job["provider_status"] ?? job["status"]
   return __status_job_base(job, dry_run)
     + {
-    status: __provider_batch_status(provider_status),
-    provider_status: provider_status,
-    status_checked: false,
-    output_file_id: job["output_file_id"],
-    error_file_id: job["error_file_id"],
-    output_file: job["output_file"],
-    error_file: job["error_file"],
-    results_url: job["results_url"],
-    responses_file: job["responses_file"],
-    input_dataset_id: job["input_dataset_id"],
-    input_dataset_resource: job["input_dataset_resource"],
-    output_dataset_id: job["output_dataset_id"],
-    output_dataset_resource: job["output_dataset_resource"],
-    job_progress: job["job_progress"],
-    provider_batch_handle: job["provider_batch_handle"],
-    region: job["region"],
-    input_s3_uri: job["input_s3_uri"],
-    output_s3_uri: job["output_s3_uri"],
-    response: job["response"],
-  }
+      status: __provider_batch_status(provider_status),
+      provider_status: provider_status,
+      status_checked: false,
+      output_file_id: job["output_file_id"],
+      error_file_id: job["error_file_id"],
+      output_file: job["output_file"],
+      error_file: job["error_file"],
+      results_url: job["results_url"],
+      responses_file: job["responses_file"],
+      input_dataset_id: job["input_dataset_id"],
+      input_dataset_resource: job["input_dataset_resource"],
+      output_dataset_id: job["output_dataset_id"],
+      output_dataset_resource: job["output_dataset_resource"],
+      job_progress: job["job_progress"],
+      provider_batch_handle: job["provider_batch_handle"],
+      region: job["region"],
+      input_s3_uri: job["input_s3_uri"],
+      output_s3_uri: job["output_s3_uri"],
+      response: job["response"],
+    }
 }
 
 fn __poll_openai_compatible_status(harness: Harness, job: dict, provider: string) -> dict {
@@ -105,14 +103,14 @@ fn __poll_openai_compatible_status(harness: Harness, job: dict, provider: string
     ok: true,
     job: base_job
       + {
-      status: __provider_batch_status(provider_status),
-      provider_status: provider_status,
-      status_checked: true,
-      output_file_id: body["output_file_id"],
-      error_file_id: body["error_file_id"],
-      response_status: response["status"],
-      response: body,
-    },
+        status: __provider_batch_status(provider_status),
+        provider_status: provider_status,
+        status_checked: true,
+        output_file_id: body["output_file_id"],
+        error_file_id: body["error_file_id"],
+        response_status: response["status"],
+        response: body,
+      },
     errors: [],
   }
 }
@@ -147,13 +145,13 @@ fn __poll_anthropic_status(harness: Harness, job: dict) -> dict {
     ok: true,
     job: base_job
       + {
-      status: __provider_batch_status(provider_status),
-      provider_status: provider_status,
-      status_checked: true,
-      results_url: body["results_url"],
-      response_status: response["status"],
-      response: body,
-    },
+        status: __provider_batch_status(provider_status),
+        provider_status: provider_status,
+        status_checked: true,
+        results_url: body["results_url"],
+        response_status: response["status"],
+        response: body,
+      },
     errors: [],
   }
 }
@@ -196,16 +194,16 @@ fn __poll_bedrock_status(harness: Harness, job: dict) -> dict {
     ok: true,
     job: base_job
       + {
-      status: __provider_batch_status(provider_status),
-      provider_status: provider_status,
-      status_checked: true,
-      provider_batch_handle: handle,
-      region: region,
-      input_s3_uri: job["input_s3_uri"],
-      output_s3_uri: safe_string(output_config["s3Uri"], safe_string(job["output_s3_uri"], "")),
-      response_status: response["status"],
-      response: body,
-    },
+        status: __provider_batch_status(provider_status),
+        provider_status: provider_status,
+        status_checked: true,
+        provider_batch_handle: handle,
+        region: region,
+        input_s3_uri: job["input_s3_uri"],
+        output_s3_uri: safe_string(output_config["s3Uri"], safe_string(job["output_s3_uri"], "")),
+        response_status: response["status"],
+        response: body,
+      },
     errors: [],
   }
 }
@@ -240,14 +238,14 @@ fn __poll_mistral_status(harness: Harness, job: dict) -> dict {
     ok: true,
     job: base_job
       + {
-      status: __provider_batch_status(provider_status),
-      provider_status: provider_status,
-      status_checked: true,
-      output_file: body["output_file"],
-      error_file: body["error_file"],
-      response_status: response["status"],
-      response: body,
-    },
+        status: __provider_batch_status(provider_status),
+        provider_status: provider_status,
+        status_checked: true,
+        output_file: body["output_file"],
+        error_file: body["error_file"],
+        response_status: response["status"],
+        response: body,
+      },
     errors: [],
   }
 }
@@ -312,25 +310,25 @@ fn __poll_fireworks_status(harness: Harness, job: dict) -> dict {
     ok: true,
     job: base_job
       + {
-      status: __provider_batch_status(provider_status),
-      provider_status: provider_status,
-      status_checked: true,
-      input_dataset_id: job["input_dataset_id"],
-      input_dataset_resource: job["input_dataset_resource"],
-      output_dataset_id: if starts_with(output_dataset, "accounts/") {
-        safe_string(job["output_dataset_id"], output_dataset)
-      } else {
-        output_dataset
+        status: __provider_batch_status(provider_status),
+        provider_status: provider_status,
+        status_checked: true,
+        input_dataset_id: job["input_dataset_id"],
+        input_dataset_resource: job["input_dataset_resource"],
+        output_dataset_id: if starts_with(output_dataset, "accounts/") {
+          safe_string(job["output_dataset_id"], output_dataset)
+        } else {
+          output_dataset
+        },
+        output_dataset_resource: if starts_with(output_dataset, "accounts/") {
+          output_dataset
+        } else {
+          __fireworks_dataset_resource(account_id, output_dataset)
+        },
+        job_progress: body["jobProgress"],
+        response_status: response["status"],
+        response: body,
       },
-      output_dataset_resource: if starts_with(output_dataset, "accounts/") {
-        output_dataset
-      } else {
-        __fireworks_dataset_resource(account_id, output_dataset)
-      },
-      job_progress: body["jobProgress"],
-      response_status: response["status"],
-      response: body,
-    },
     errors: [],
   }
 }
@@ -368,13 +366,13 @@ fn __poll_xai_status(harness: Harness, job: dict) -> dict {
     ok: true,
     job: base_job
       + {
-      status: __provider_batch_status(provider_status),
-      provider_status: provider_status,
-      status_checked: true,
-      results_url: __xai_results_url(harness.env, batch_id, ""),
-      response_status: response["status"],
-      response: body,
-    },
+        status: __provider_batch_status(provider_status),
+        provider_status: provider_status,
+        status_checked: true,
+        results_url: __xai_results_url(harness.env, batch_id, ""),
+        response_status: response["status"],
+        response: body,
+      },
     errors: [],
   }
 }
@@ -412,14 +410,14 @@ fn __poll_gemini_status(harness: Harness, job: dict) -> dict {
     ok: true,
     job: base_job
       + {
-      status: __provider_batch_status(provider_status),
-      provider_status: provider_status,
-      status_checked: true,
-      input_file_name: job["input_file_name"],
-      responses_file: __gemini_responses_file(body),
-      response_status: response["status"],
-      response: body,
-    },
+        status: __provider_batch_status(provider_status),
+        provider_status: provider_status,
+        status_checked: true,
+        input_file_name: job["input_file_name"],
+        responses_file: __gemini_responses_file(body),
+        response_status: response["status"],
+        response: body,
+      },
     errors: [],
   }
 }
@@ -477,7 +475,7 @@ fn __aggregate_status(jobs: list, errors: list, dry_run: bool) -> string {
       const status = safe_string(safe_dict(job)["status"], "")
       if status == "completed" || status == "running" || status == "ready" || status == "unknown"
         || status
-        == "canceling"
+          == "canceling"
         || status == "canceled" {
         return "partial"
       }

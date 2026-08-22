@@ -103,9 +103,7 @@ fn __scope_classifier_anchor_summary(anchor) {
 
 fn __scope_classifier_prompt(payload, context) {
   return "You are a scope-classification agent.\n\n"
-    + __scope_classifier_anchor_summary(
-    payload?.workspace_anchor,
-  )
+    + __scope_classifier_anchor_summary(payload?.workspace_anchor)
     + "\n\nUser message:\n"
     + to_string(payload?.user_message ?? "")
     + "\n\nRecent context JSON:\n"
@@ -140,17 +138,17 @@ fn __scope_classifier_normalize(raw, threshold, skip_main_turn) {
   const evidence = trim(to_string(raw?.evidence ?? raw?.reason ?? raw?.reasoning ?? ""))
   return raw
     + {
-    label: label,
-    original_label: original_label,
-    confidence: confidence,
-    confidence_threshold: threshold,
-    evidence: if evidence == "" {
-      "no evidence provided"
-    } else {
-      evidence
-    },
-    skip_main_turn: skip_main_turn,
-  }
+      label: label,
+      original_label: original_label,
+      confidence: confidence,
+      confidence_threshold: threshold,
+      evidence: if evidence == "" {
+        "no evidence provided"
+      } else {
+        evidence
+      },
+      skip_main_turn: skip_main_turn,
+    }
 }
 
 fn __scope_classifier_fail_open(error, threshold) {
@@ -211,10 +209,10 @@ pub fn pre_turn_scope_classifier(agent: HarnessAgent, llm: HarnessLlm, opts = ni
     const recent_context = __scope_classifier_recent_context(source_messages, context_window)
     const classifier_payload = payload
       + {
-      recent_context: recent_context,
-      context_window: context_window,
-      confidence_threshold: threshold,
-    }
+        recent_context: recent_context,
+        context_window: context_window,
+        confidence_threshold: threshold,
+      }
     if classifier != nil {
       const custom = try {
         classifier(classifier_payload)
@@ -227,9 +225,7 @@ pub fn pre_turn_scope_classifier(agent: HarnessAgent, llm: HarnessLlm, opts = ni
         return __scope_classifier_fail_open(err, threshold)
       }
       return __scope_classifier_normalize(unwrap(custom), threshold, skip_main_turn)
-        + {
-        classifier_kind: "custom",
-      }
+        + {classifier_kind: "custom"}
     }
     const schema = __scope_classifier_schema()
     let llm_opts = {
@@ -258,17 +254,9 @@ pub fn pre_turn_scope_classifier(agent: HarnessAgent, llm: HarnessLlm, opts = ni
     )
     if !checkpoint.ok {
       return __scope_classifier_fail_open(checkpoint.error, threshold)
-        + {
-        classifier_kind: "llm",
-        model: model,
-        typed_checkpoint: checkpoint,
-      }
+        + {classifier_kind: "llm", model: model, typed_checkpoint: checkpoint}
     }
     return __scope_classifier_normalize(checkpoint.data, threshold, skip_main_turn)
-      + {
-      classifier_kind: "llm",
-      model: model,
-      typed_checkpoint: checkpoint,
-    }
+      + {classifier_kind: "llm", model: model, typed_checkpoint: checkpoint}
   }
 }

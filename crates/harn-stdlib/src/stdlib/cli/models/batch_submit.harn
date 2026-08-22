@@ -80,13 +80,13 @@ fn __submit_anthropic(harness: Harness, job: dict, payload: dict) -> dict {
     ok: true,
     job: base_job
       + {
-      status: "submitted",
-      provider_batch_id: safe_string(body["id"], ""),
-      provider_status: body["processing_status"],
-      results_url: body["results_url"],
-      response_status: response["status"],
-      response: body,
-    },
+        status: "submitted",
+        provider_batch_id: safe_string(body["id"], ""),
+        provider_status: body["processing_status"],
+        results_url: body["results_url"],
+        response_status: response["status"],
+        response: body,
+      },
     errors: [],
   }
 }
@@ -168,12 +168,12 @@ fn __submit_fireworks(harness: Harness, job: dict, payload: dict) -> dict {
       ok: false,
       job: base_job
         + {
-        status: "failed",
-        input_dataset: input_dataset,
-        upload: upload,
-        response_status: response["status"],
-        response: body,
-      },
+          status: "failed",
+          input_dataset: input_dataset,
+          upload: upload,
+          response_status: response["status"],
+          response: body,
+        },
       errors: ["fireworks batch job create failed for job " + safe_string(job["id"], "")],
     }
   }
@@ -182,19 +182,19 @@ fn __submit_fireworks(harness: Harness, job: dict, payload: dict) -> dict {
     ok: true,
     job: base_job
       + {
-      status: "submitted",
-      provider_batch_id: provider_batch_id,
-      provider_status: body["state"],
-      input_dataset_id: input_dataset_id,
-      input_dataset_resource: __fireworks_dataset_resource(account_id, input_dataset_id),
-      output_dataset_id: output_dataset_id,
-      output_dataset_resource: __fireworks_dataset_resource(account_id, output_dataset_id),
-      job_progress: body["jobProgress"],
-      input_dataset: input_dataset,
-      upload: upload,
-      response_status: response["status"],
-      response: body,
-    },
+        status: "submitted",
+        provider_batch_id: provider_batch_id,
+        provider_status: body["state"],
+        input_dataset_id: input_dataset_id,
+        input_dataset_resource: __fireworks_dataset_resource(account_id, input_dataset_id),
+        output_dataset_id: output_dataset_id,
+        output_dataset_resource: __fireworks_dataset_resource(account_id, output_dataset_id),
+        job_progress: body["jobProgress"],
+        input_dataset: input_dataset,
+        upload: upload,
+        response_status: response["status"],
+        response: body,
+      },
     errors: [],
   }
 }
@@ -277,17 +277,17 @@ fn __submit_bedrock(harness: Harness, job: dict, payload: dict) -> dict {
     ok: true,
     job: base_job
       + {
-      status: "submitted",
-      provider_batch_id: safe_string(body["jobArn"], job_name),
-      provider_batch_handle: job_name,
-      provider_status: body["status"] ?? "Submitted",
-      input_s3_uri: input_s3_uri,
-      output_s3_uri: output_s3_uri,
-      region: region,
-      client_request_token: client_token,
-      response_status: response["status"],
-      response: body,
-    },
+        status: "submitted",
+        provider_batch_id: safe_string(body["jobArn"], job_name),
+        provider_batch_handle: job_name,
+        provider_status: body["status"] ?? "Submitted",
+        input_s3_uri: input_s3_uri,
+        output_s3_uri: output_s3_uri,
+        region: region,
+        client_request_token: client_token,
+        response_status: response["status"],
+        response: body,
+      },
     errors: [],
   }
 }
@@ -358,12 +358,7 @@ fn __submit_openai_compatible(
     return {
       ok: false,
       job: base_job
-        + {
-        status: "failed",
-        upload: upload,
-        response_status: response["status"],
-        response: body,
-      },
+        + {status: "failed", upload: upload, response_status: response["status"], response: body},
       errors: [provider + " batch create failed for job " + safe_string(job["id"], "")],
     }
   }
@@ -371,16 +366,16 @@ fn __submit_openai_compatible(
     ok: true,
     job: base_job
       + {
-      status: "submitted",
-      provider_batch_id: safe_string(batch_body["id"], ""),
-      provider_status: batch_body["status"],
-      input_file_id: safe_string(upload["file_id"], ""),
-      output_file_id: batch_body["output_file_id"],
-      error_file_id: batch_body["error_file_id"],
-      upload: upload,
-      response_status: response["status"],
-      response: body,
-    },
+        status: "submitted",
+        provider_batch_id: safe_string(batch_body["id"], ""),
+        provider_status: batch_body["status"],
+        input_file_id: safe_string(upload["file_id"], ""),
+        output_file_id: batch_body["output_file_id"],
+        error_file_id: batch_body["error_file_id"],
+        upload: upload,
+        response_status: response["status"],
+        response: body,
+      },
     errors: [],
   }
 }
@@ -434,12 +429,7 @@ fn __submit_mistral(harness: Harness, job: dict, payload: dict) -> dict {
     return {
       ok: false,
       job: base_job
-        + {
-        status: "failed",
-        upload: upload,
-        response_status: response["status"],
-        response: body,
-      },
+        + {status: "failed", upload: upload, response_status: response["status"], response: body},
       errors: ["mistral batch job create failed for job " + safe_string(job["id"], "")],
     }
   }
@@ -447,16 +437,16 @@ fn __submit_mistral(harness: Harness, job: dict, payload: dict) -> dict {
     ok: true,
     job: base_job
       + {
-      status: "submitted",
-      provider_batch_id: safe_string(body["id"], ""),
-      provider_status: body["status"],
-      input_files: body["input_files"] ?? [safe_string(upload["file_id"], "")],
-      output_file: body["output_file"],
-      error_file: body["error_file"],
-      upload: upload,
-      response_status: response["status"],
-      response: body,
-    },
+        status: "submitted",
+        provider_batch_id: safe_string(body["id"], ""),
+        provider_status: body["status"],
+        input_files: body["input_files"] ?? [safe_string(upload["file_id"], "")],
+        output_file: body["output_file"],
+        error_file: body["error_file"],
+        upload: upload,
+        response_status: response["status"],
+        response: body,
+      },
     errors: [],
   }
 }
@@ -502,12 +492,7 @@ fn __submit_xai(harness: Harness, job: dict, payload: dict) -> dict {
     return {
       ok: false,
       job: base_job
-        + {
-        status: "failed",
-        upload: upload,
-        response_status: response["status"],
-        response: body,
-      },
+        + {status: "failed", upload: upload, response_status: response["status"], response: body},
       errors: ["xai batch create failed for job " + safe_string(job["id"], "")],
     }
   }
@@ -515,15 +500,15 @@ fn __submit_xai(harness: Harness, job: dict, payload: dict) -> dict {
     ok: true,
     job: base_job
       + {
-      status: "submitted",
-      provider_batch_id: safe_string(body["batch_id"], ""),
-      provider_status: __xai_provider_status(body),
-      input_file_id: safe_string(upload["file_id"], ""),
-      results_url: __xai_results_url(harness.env, safe_string(body["batch_id"], ""), ""),
-      upload: upload,
-      response_status: response["status"],
-      response: body,
-    },
+        status: "submitted",
+        provider_batch_id: safe_string(body["batch_id"], ""),
+        provider_status: __xai_provider_status(body),
+        input_file_id: safe_string(upload["file_id"], ""),
+        results_url: __xai_results_url(harness.env, safe_string(body["batch_id"], ""), ""),
+        upload: upload,
+        response_status: response["status"],
+        response: body,
+      },
     errors: [],
   }
 }
@@ -577,12 +562,7 @@ fn __submit_gemini(harness: Harness, job: dict, payload: dict) -> dict {
     return {
       ok: false,
       job: base_job
-        + {
-        status: "failed",
-        upload: upload,
-        response_status: response["status"],
-        response: body,
-      },
+        + {status: "failed", upload: upload, response_status: response["status"], response: body},
       errors: ["gemini batch create failed for job " + safe_string(job["id"], "")],
     }
   }
@@ -590,15 +570,15 @@ fn __submit_gemini(harness: Harness, job: dict, payload: dict) -> dict {
     ok: true,
     job: base_job
       + {
-      status: "submitted",
-      provider_batch_id: safe_string(body["name"], ""),
-      provider_status: __gemini_provider_status(body),
-      input_file_name: safe_string(upload["file_name"], ""),
-      responses_file: __gemini_responses_file(body),
-      upload: upload,
-      response_status: response["status"],
-      response: body,
-    },
+        status: "submitted",
+        provider_batch_id: safe_string(body["name"], ""),
+        provider_status: __gemini_provider_status(body),
+        input_file_name: safe_string(upload["file_name"], ""),
+        responses_file: __gemini_responses_file(body),
+        upload: upload,
+        response_status: response["status"],
+        response: body,
+      },
     errors: [],
   }
 }

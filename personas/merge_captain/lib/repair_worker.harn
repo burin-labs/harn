@@ -44,10 +44,10 @@ pub fn default_executor(harness: Harness, bundle, options) {
     schema,
     merged
       + {
-      repair: false,
-      output: {schema: schema, strict: true, validation: "error"},
-      validator_retries: merged?.validator_retries ?? 1,
-    },
+        repair: false,
+        output: {schema: schema, strict: true, validation: "error"},
+        validator_retries: merged?.validator_retries ?? 1,
+      },
     fn(output) { return validate_all(bundle, output) },
   )
   const agent_meta = {
@@ -117,12 +117,7 @@ fn _empty_output_run(clock: HarnessClock, args) {
 pub fn invoke(clock: HarnessClock, process: HarnessProcess, args) {
   const bundle = args.bundle
   const parent_receipt_ref = args.parent_receipt_ref
-    ?? {
-    sweep_id: "",
-    repo: bundle.repo,
-    pr_number: bundle.pr_number,
-    prior_state: "discovered",
-  }
+    ?? {sweep_id: "", repo: bundle.repo, pr_number: bundle.pr_number, prior_state: "discovered"}
   const started_at = _started(clock)
   const bundle_err = validate_bundle(bundle)
   if bundle_err != nil {
@@ -272,12 +267,12 @@ pub fn invoke_for_ci_failure(clock: HarnessClock, process: HarnessProcess, args)
   const policy = args.policy
   const parent = args.parent_receipt_ref
     ?? {
-    sweep_id: args.sweep_id ?? "",
-    repo: observation.repo,
-    pr_number: observation.number,
-    prior_state: args.prior_state ?? "discovered",
-    classification_reason: args.classification_reason ?? "",
-  }
+      sweep_id: args.sweep_id ?? "",
+      repo: observation.repo,
+      pr_number: observation.number,
+      prior_state: args.prior_state ?? "discovered",
+      classification_reason: args.classification_reason ?? "",
+    }
   const failing = (observation.failed_required_checks ?? []).map(
     { name -> {name: name, conclusion: "failure"} },
   )
@@ -328,12 +323,12 @@ pub fn invoke_for_merge_conflict(clock: HarnessClock, process: HarnessProcess, a
   const policy = args.policy
   const parent = args.parent_receipt_ref
     ?? {
-    sweep_id: args.sweep_id ?? "",
-    repo: observation.repo,
-    pr_number: observation.number,
-    prior_state: args.prior_state ?? "discovered",
-    classification_reason: args.classification_reason ?? "",
-  }
+      sweep_id: args.sweep_id ?? "",
+      repo: observation.repo,
+      pr_number: observation.number,
+      prior_state: args.prior_state ?? "discovered",
+      classification_reason: args.classification_reason ?? "",
+    }
   const bundle = build(
     {
       kind: "merge_conflict",
@@ -382,12 +377,7 @@ pub fn invoke_for_release_audit(clock: HarnessClock, process: HarnessProcess, ar
     {
       kind: "release_audit",
       parent: args.parent_receipt_ref
-        ?? {
-        sweep_id: "",
-        repo: args.repo,
-        pr_number: 0,
-        prior_state: "discovered",
-      },
+        ?? {sweep_id: "", repo: args.repo, pr_number: 0, prior_state: "discovered"},
       repo: args.repo,
       pr_number: args.pr_number ?? 0,
       base_sha: args.base_sha ?? "",
@@ -400,11 +390,7 @@ pub fn invoke_for_release_audit(clock: HarnessClock, process: HarnessProcess, ar
         ?? [],
       required_verification: policy?.local_verification ?? [],
       push_target: args.push_target
-        ?? {
-        remote: "origin",
-        branch: args.head_ref ?? "",
-        force_with_lease: false,
-      },
+        ?? {remote: "origin", branch: args.head_ref ?? "", force_with_lease: false},
       approval_required_for: args.approval_required_for ?? ["semantic_repair", "release_tag"],
     },
   )

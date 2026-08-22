@@ -96,12 +96,12 @@ fn __receipt_failure(
 fn __catalog_normalized(catalog: ExperimentAdapterCatalog) -> ExperimentAdapterCatalog {
   return catalog
     + {
-    interventions: catalog.interventions.sorted_by(
-      { adapter -> adapter.id + "\\u0000" + adapter.variant_id },
-    ),
-    outcomes: catalog.outcomes.sorted_by({ outcome -> outcome.id }),
-    populations: catalog.populations.sorted_by({ population -> population.id }),
-  }
+      interventions: catalog.interventions.sorted_by(
+        { adapter -> adapter.id + "\\u0000" + adapter.variant_id },
+      ),
+      outcomes: catalog.outcomes.sorted_by({ outcome -> outcome.id }),
+      populations: catalog.populations.sorted_by({ population -> population.id }),
+    }
 }
 
 fn __find_intervention(
@@ -144,31 +144,30 @@ fn __budget_diagnostics(
     || request.max_trials_per_case < request.min_trials_per_case {
     diagnostics = diagnostics
       + [
-      __diagnostic(
-        "experiment.invalid_trial_budget",
-        "budget_request",
-        "trial budgets must be positive and min_trials_per_case must not exceed max_trials_per_case",
-      ),
-    ]
+        __diagnostic(
+          "experiment.invalid_trial_budget",
+          "budget_request",
+          "trial budgets must be positive and min_trials_per_case must not exceed max_trials_per_case",
+        ),
+      ]
   }
   if request.max_trials_per_case > ceiling.max_trials_per_case
     || request.max_wall_clock_ms
-    > ceiling
-    .max_wall_clock_ms
+      > ceiling.max_wall_clock_ms
     || request.max_compute_ms > ceiling.max_compute_ms
     || request.max_tokens > ceiling.max_tokens
     || request.max_api_calls > ceiling.max_api_calls
     || request.max_spend_usd > ceiling.max_spend_usd
     || request.max_concurrency
-    > ceiling.max_concurrency {
+      > ceiling.max_concurrency {
     diagnostics = diagnostics
       + [
-      __diagnostic(
-        "experiment.budget_ceiling",
-        "budget_request",
-        "requested resources exceed the host ceiling",
-      ),
-    ]
+        __diagnostic(
+          "experiment.budget_ceiling",
+          "budget_request",
+          "requested resources exceed the host ceiling",
+        ),
+      ]
   }
   if request.max_spend_usd <= 0.0
     || request.max_wall_clock_ms <= 0
@@ -178,12 +177,12 @@ fn __budget_diagnostics(
     || request.max_concurrency < 1 {
     diagnostics = diagnostics
       + [
-      __diagnostic(
-        "experiment.invalid_resource_budget",
-        "budget_request",
-        "resource ceilings must be positive (token and API ceilings may be zero)",
-      ),
-    ]
+        __diagnostic(
+          "experiment.invalid_resource_budget",
+          "budget_request",
+          "resource ceilings must be positive (token and API ceilings may be zero)",
+        ),
+      ]
   }
   return diagnostics
 }
@@ -195,44 +194,37 @@ fn __catalog_diagnostics(catalog: ExperimentAdapterCatalog) -> list<ExperimentCo
     const key = adapter.id + "\\u0000" + adapter.variant_id
     if seen_interventions[key] ?? false {
       diagnostics = diagnostics
-        + [
-        __diagnostic("experiment.duplicate_intervention", "catalog.interventions", key),
-      ]
+        + [__diagnostic("experiment.duplicate_intervention", "catalog.interventions", key)]
     }
     seen_interventions = seen_interventions + {[key]: true}
     if !experiment_placement_well_formed(adapter.capabilities.placement) {
       diagnostics = diagnostics
         + [
-        __diagnostic(
-          "experiment.invalid_placement",
-          "catalog.interventions",
-          "placement resource_class must be omitted or non-empty for '" + adapter.id + "'",
-        ),
-      ]
+          __diagnostic(
+            "experiment.invalid_placement",
+            "catalog.interventions",
+            "placement resource_class must be omitted or non-empty for '" + adapter.id + "'",
+          ),
+        ]
     }
     diagnostics = diagnostics
-      + experiment_capability_policy_diagnostics(
-      adapter.capabilities,
-      "catalog.interventions",
-    )
+      + experiment_capability_policy_diagnostics(adapter.capabilities, "catalog.interventions")
     if adapter.reversible != adapter.capabilities.mutation.reversible {
       diagnostics = diagnostics
         + [
-        __diagnostic(
-          "experiment.reversibility_mismatch",
-          "catalog.interventions",
-          "adapter and capability mutation reversibility must agree for '" + adapter.id + "'",
-        ),
-      ]
+          __diagnostic(
+            "experiment.reversibility_mismatch",
+            "catalog.interventions",
+            "adapter and capability mutation reversibility must agree for '" + adapter.id + "'",
+          ),
+        ]
     }
   }
   let seen_outcomes: dict<string, bool> = {}
   for outcome in catalog.outcomes {
     if seen_outcomes[outcome.id] ?? false {
       diagnostics = diagnostics
-        + [
-        __diagnostic("experiment.duplicate_outcome", "catalog.outcomes", outcome.id),
-      ]
+        + [__diagnostic("experiment.duplicate_outcome", "catalog.outcomes", outcome.id)]
     }
     seen_outcomes = seen_outcomes + {[outcome.id]: true}
   }
@@ -240,9 +232,7 @@ fn __catalog_diagnostics(catalog: ExperimentAdapterCatalog) -> list<ExperimentCo
   for population in catalog.populations {
     if seen_populations[population.id] ?? false {
       diagnostics = diagnostics
-        + [
-        __diagnostic("experiment.duplicate_population", "catalog.populations", population.id),
-      ]
+        + [__diagnostic("experiment.duplicate_population", "catalog.populations", population.id)]
     }
     seen_populations = seen_populations + {[population.id]: true}
   }
@@ -264,12 +254,12 @@ fn __citation_diagnostics(
     if allowed[citation.id] != __fingerprint(citation) || !starts_with(citation.url, "https://") {
       diagnostics = diagnostics
         + [
-        __diagnostic(
-          "experiment.untrusted_citation",
-          "citations",
-          "citations must exactly match a host-supplied HTTPS research record",
-        ),
-      ]
+          __diagnostic(
+            "experiment.untrusted_citation",
+            "citations",
+            "citations must exactly match a host-supplied HTTPS research record",
+          ),
+        ]
     }
   }
   return diagnostics
@@ -417,8 +407,8 @@ fn __instrumentation_questions(intent: ExperimentIntentInput) -> list<string> {
   if len(questions) == 0 {
     questions = questions
       + [
-      "Which assumption or source of confounding must be resolved before a causal experiment is valid?",
-    ]
+        "Which assumption or source of confounding must be resolved before a causal experiment is valid?",
+      ]
   }
   return questions
 }
@@ -432,34 +422,34 @@ fn __arm_relation_diagnostics(
   if baseline != nil && baseline.domain != intent.domain {
     diagnostics = diagnostics
       + [
-      __diagnostic(
-        "experiment.domain_mismatch",
-        "comparator",
-        "comparator domain differs from intent",
-      ),
-    ]
+        __diagnostic(
+          "experiment.domain_mismatch",
+          "comparator",
+          "comparator domain differs from intent",
+        ),
+      ]
   }
   if candidate != nil && candidate.domain != intent.domain {
     diagnostics = diagnostics
       + [
-      __diagnostic(
-        "experiment.domain_mismatch",
-        "intervention",
-        "intervention domain differs from intent",
-      ),
-    ]
+        __diagnostic(
+          "experiment.domain_mismatch",
+          "intervention",
+          "intervention domain differs from intent",
+        ),
+      ]
   }
   if baseline != nil && candidate != nil
     && baseline.id == candidate.id
     && baseline.variant_id == candidate.variant_id {
     diagnostics = diagnostics
       + [
-      __diagnostic(
-        "experiment.identical_arms",
-        "comparator",
-        "intervention and comparator must differ",
-      ),
-    ]
+        __diagnostic(
+          "experiment.identical_arms",
+          "comparator",
+          "intervention and comparator must differ",
+        ),
+      ]
   }
   return diagnostics
 }
@@ -472,25 +462,24 @@ fn __population_relation_diagnostics(
   if population != nil && population.domain != intent.domain {
     diagnostics = diagnostics
       + [
-      __diagnostic(
-        "experiment.domain_mismatch",
-        "population_id",
-        "population domain differs from intent",
-      ),
-    ]
+        __diagnostic(
+          "experiment.domain_mismatch",
+          "population_id",
+          "population domain differs from intent",
+        ),
+      ]
   }
   if population != nil && intent.assignment_unit != nil
     && population.assignment_unit
-    != intent
-    .assignment_unit {
+      != intent.assignment_unit {
     diagnostics = diagnostics
       + [
-      __diagnostic(
-        "experiment.assignment_unit_mismatch",
-        "assignment_unit",
-        "intent assignment unit differs from the registered population",
-      ),
-    ]
+        __diagnostic(
+          "experiment.assignment_unit_mismatch",
+          "assignment_unit",
+          "intent assignment unit differs from the registered population",
+        ),
+      ]
   }
   return diagnostics
 }
@@ -511,8 +500,12 @@ fn __resolve_intent_adapters(
     if baseline == nil {
       diagnostics = diagnostics
         + [
-        __diagnostic("experiment.unknown_comparator", "comparator", "comparator is not registered"),
-      ]
+          __diagnostic(
+            "experiment.unknown_comparator",
+            "comparator",
+            "comparator is not registered",
+          ),
+        ]
     }
   }
   if intent.intervention != nil {
@@ -524,12 +517,12 @@ fn __resolve_intent_adapters(
     if candidate == nil {
       diagnostics = diagnostics
         + [
-        __diagnostic(
-          "experiment.unknown_intervention",
-          "intervention",
-          "intervention is not registered",
-        ),
-      ]
+          __diagnostic(
+            "experiment.unknown_intervention",
+            "intervention",
+            "intervention is not registered",
+          ),
+        ]
     }
   }
   diagnostics = diagnostics + __arm_relation_diagnostics(intent, baseline, candidate)
@@ -539,12 +532,12 @@ fn __resolve_intent_adapters(
     if population == nil {
       diagnostics = diagnostics
         + [
-        __diagnostic(
-          "experiment.unknown_population",
-          "population_id",
-          "population is not registered",
-        ),
-      ]
+          __diagnostic(
+            "experiment.unknown_population",
+            "population_id",
+            "population is not registered",
+          ),
+        ]
     }
   }
   diagnostics = diagnostics + __population_relation_diagnostics(intent, population)
@@ -554,49 +547,47 @@ fn __resolve_intent_adapters(
   for outcome_id in intent.outcome_ids {
     if seen_outcome_ids[outcome_id] ?? false {
       diagnostics = diagnostics
-        + [
-        __diagnostic("experiment.duplicate_outcome_ref", "outcome_ids", outcome_id),
-      ]
+        + [__diagnostic("experiment.duplicate_outcome_ref", "outcome_ids", outcome_id)]
     }
     seen_outcome_ids = seen_outcome_ids + {[outcome_id]: true}
     const outcome = __find_outcome(catalog, outcome_id)
     if outcome == nil {
       diagnostics = diagnostics
         + [
-        __diagnostic(
-          "experiment.unknown_outcome",
-          "outcome_ids",
-          "outcome '" + outcome_id + "' is not registered",
-        ),
-      ]
+          __diagnostic(
+            "experiment.unknown_outcome",
+            "outcome_ids",
+            "outcome '" + outcome_id + "' is not registered",
+          ),
+        ]
     } else if !outcome.observable {
       diagnostics = diagnostics
         + [
-        __diagnostic(
-          "experiment.unobservable_outcome",
-          "outcome_ids",
-          "outcome '" + outcome_id + "' is not observable",
-        ),
-      ]
+          __diagnostic(
+            "experiment.unobservable_outcome",
+            "outcome_ids",
+            "outcome '" + outcome_id + "' is not observable",
+          ),
+        ]
     } else if outcome.domain != intent.domain {
       diagnostics = diagnostics
         + [
-        __diagnostic(
-          "experiment.domain_mismatch",
-          "outcome_ids",
-          "outcome domain differs from intent",
-        ),
-      ]
+          __diagnostic(
+            "experiment.domain_mismatch",
+            "outcome_ids",
+            "outcome domain differs from intent",
+          ),
+        ]
     } else if outcome.guardrail {
       if outcome.alarm == nil {
         diagnostics = diagnostics
           + [
-          __diagnostic(
-            "experiment.guardrail_alarm",
-            "outcome_ids",
-            "guardrail '" + outcome_id + "' has no alarm",
-          ),
-        ]
+            __diagnostic(
+              "experiment.guardrail_alarm",
+              "outcome_ids",
+              "guardrail '" + outcome_id + "' has no alarm",
+            ),
+          ]
       }
       guardrails = guardrails + [outcome]
     } else if primary == nil {
@@ -604,12 +595,12 @@ fn __resolve_intent_adapters(
     } else {
       diagnostics = diagnostics
         + [
-        __diagnostic(
-          "experiment.multiple_primary",
-          "outcome_ids",
-          "exactly one non-guardrail outcome is allowed",
-        ),
-      ]
+          __diagnostic(
+            "experiment.multiple_primary",
+            "outcome_ids",
+            "exactly one non-guardrail outcome is allowed",
+          ),
+        ]
     }
   }
   return {
@@ -627,7 +618,7 @@ fn __must_observe_only(intent: ExperimentIntent, resolved: ResolvedIntentAdapter
     || intent.requested_lane == "observational"
     || intent.requested_lane == "quasi_experimental"
     || intent.requested_lane
-    == "exploratory_instrumentation"
+      == "exploratory_instrumentation"
     || intent.requested_lane == "non_experimental_research"
     || resolved.baseline == nil
     || resolved.candidate == nil
@@ -719,10 +710,7 @@ fn __observe_only_plan(
     threats: intent.threats,
   }
   const provenance: PlanProvenance = context.provenance
-    + {
-    intent_fingerprint: intent_fingerprint,
-    catalog_fingerprint: catalog_fingerprint,
-  }
+    + {intent_fingerprint: intent_fingerprint, catalog_fingerprint: catalog_fingerprint}
   const identity = {
     kind: "observe_only",
     hypothesis_id: hypothesis_id,
@@ -889,8 +877,7 @@ pub fn compile_experiment_intent(
     }
   }
   if baseline.capabilities.mutation.rollback_adapter_id
-    != candidate.capabilities.mutation
-    .rollback_adapter_id {
+    != candidate.capabilities.mutation.rollback_adapter_id {
     return __receipt_failure(
       intent_fingerprint,
       catalog_fingerprint,
@@ -907,9 +894,7 @@ pub fn compile_experiment_intent(
     )
   }
   if json_stringify(baseline.capabilities.placement)
-    != json_stringify(
-    candidate.capabilities.placement,
-  ) {
+    != json_stringify(candidate.capabilities.placement) {
     return __receipt_failure(
       intent_fingerprint,
       catalog_fingerprint,
@@ -1042,10 +1027,7 @@ pub fn compile_experiment_intent(
     threats: intent.threats,
   }
   const provenance: PlanProvenance = context.provenance
-    + {
-    intent_fingerprint: intent_fingerprint,
-    catalog_fingerprint: catalog_fingerprint,
-  }
+    + {intent_fingerprint: intent_fingerprint, catalog_fingerprint: catalog_fingerprint}
   const identity = {
     kind: "registered_experiment",
     hypothesis_id: hypothesis_id,
@@ -1099,7 +1081,7 @@ fn __validate_plan_identity(plan: HypothesisPlan) -> string {
     plan.design.hypothesis_id == hypothesis_id
       && plan.design.intent_fingerprint == intent_fingerprint
       && plan.provenance.intent_fingerprint
-      == intent_fingerprint,
+        == intent_fingerprint,
     "intent identity is inconsistent",
   )
   __require_plan(trim(plan.provenance.catalog_fingerprint) != "", "catalog fingerprint is empty")
@@ -1124,29 +1106,22 @@ fn __validate_observe_only_plan(plan: ObserveOnlyHypothesisPlan, hypothesis_id: 
     plan.design.capabilities.side_effect_level == "none"
       && len(plan.design.capabilities.tools) == 0
       && len(plan.design.capabilities.capabilities) == 0
-      && len(
-      plan.design.capabilities.workspace_roots,
-    )
-      == 0
+      && len(plan.design.capabilities.workspace_roots)
+        == 0
       && len(plan.design.capabilities.read_only_roots) == 0
-      && len(
-      plan.design.capabilities.process.commands,
-    )
-      == 0
+      && len(plan.design.capabilities.process.commands)
+        == 0
       && len(plan.design.capabilities.process.read_roots) == 0
-      && len(
-      plan.design.capabilities.process.write_roots,
-    )
-      == 0
+      && len(plan.design.capabilities.process.write_roots)
+        == 0
       && len(plan.design.capabilities.network.domains) == 0
-      && !plan.design.capabilities.network
-      .allow_private
+      && !plan.design.capabilities.network.allow_private
       && len(plan.design.capabilities.connectors) == 0
       && len(plan.design.capabilities.database_scopes)
-      == 0
+        == 0
       && len(plan.design.capabilities.provider_ids) == 0
       && len(plan.design.capabilities.secret_refs)
-      == 0
+        == 0
       && customer_state.access == "none"
       && len(customer_state.scopes) == 0
       && len(models.model_ids) == 0
@@ -1186,9 +1161,7 @@ fn __validate_registered_plan(plan: RegisteredExperimentPlan, hypothesis_id: str
   }
   __require_plan(
     experiment_placement_well_formed(baseline.capabilities.placement)
-      && experiment_placement_well_formed(
-      candidate.capabilities.placement,
-    ),
+      && experiment_placement_well_formed(candidate.capabilities.placement),
     "placement resource_class is empty",
   )
   __require_plan(
@@ -1232,38 +1205,26 @@ fn __validate_registered_plan(plan: RegisteredExperimentPlan, hypothesis_id: str
     plan.manifest.experiment_id == hypothesis_id
       && plan.manifest.hypothesis == plan.intent.hypothesis
       && plan.manifest.baseline.id
-      == baseline
-      .variant_id
+        == baseline.variant_id
       && __same(plan.manifest.baseline.config, baseline.config)
       && plan.manifest.baseline.complexity
-      == baseline
-      .complexity
+        == baseline.complexity
       && len(plan.manifest.candidates) == 1
       && plan.manifest.candidates[0]?.id == candidate.variant_id
-      && __same(
-      plan.manifest.candidates[0]?.config,
-      candidate.config,
-    )
+      && __same(plan.manifest.candidates[0]?.config, candidate.config)
       && plan.manifest.candidates[0]?.complexity == candidate.complexity
-      && plan.manifest.metrics
-      .primary.id
-      == primary.id
+      && plan.manifest.metrics.primary.id
+        == primary.id
       && plan.manifest.metrics.primary.direction == primary.direction
-      && __same(
-      plan.manifest.metrics.primary.bounds,
-      primary.bounds,
-    )
+      && __same(plan.manifest.metrics.primary.bounds, primary.bounds)
       && plan.manifest.decision.delta == plan.design.evidence.delta
       && plan.manifest.decision.epsilon
-      == plan
-      .design.evidence.epsilon
+        == plan.design.evidence.epsilon
       && __same(plan.manifest.decision.ladder, plan.design.evidence.ladder)
-      && plan.manifest.budget
-      .max_spend_usd
-      == plan.design.budget.max_spend_usd
+      && plan.manifest.budget.max_spend_usd
+        == plan.design.budget.max_spend_usd
       && plan.manifest.budget.max_trials_per_case
-      == plan.design.budget
-      .max_trials_per_case,
+        == plan.design.budget.max_trials_per_case,
     "manifest differs from the compiled design",
   )
   const identity = {

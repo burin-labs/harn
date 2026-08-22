@@ -76,8 +76,7 @@ pipeline default(harness: Harness) {
       harness.stdio.println(!contains(calls[1].system, "/workspace/b"))
       harness.stdio.println(
         first.transcript.metadata.system_prompt.sha256
-          == second.transcript.metadata.system_prompt
-          .sha256,
+          == second.transcript.metadata.system_prompt.sha256,
       )
       harness.stdio.println(contains(first_body, "primary: /workspace/a"))
       harness.stdio.println(contains(second_body, "primary: /workspace/b"))

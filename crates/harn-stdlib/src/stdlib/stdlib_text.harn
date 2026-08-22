@@ -77,10 +77,7 @@ pub fn extract_paths(text) {
             trim(word),
           )
           while ends_with(clean, ".") || ends_with(clean, ",") || ends_with(clean, ":")
-            || ends_with(
-            clean,
-            ";",
-          ) {
+            || ends_with(clean, ";") {
             clean = substring(clean, 0, len(clean) - 1)
           }
           return clean

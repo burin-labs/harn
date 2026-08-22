@@ -195,9 +195,7 @@ fn __ui_strokes(raw) -> list<UiStroke> {
       checked_points = checked_points + [__ui_point(point)]
     }
     checked = checked
-      + [
-      {id: id, points: checked_points, color: to_string(stroke?.color ?? ""), width: width},
-    ]
+      + [{id: id, points: checked_points, color: to_string(stroke?.color ?? ""), width: width}]
     ids = ids + [id]
   }
   return checked
@@ -365,8 +363,8 @@ pub fn update(document: UiDocument, effects = []) -> UiUpdate {
     }
     if effect.kind == "download"
       && (__ui_app_text(effect.name) == ""
-      || __ui_app_text(effect.data_base64)
-      == "") {
+        || __ui_app_text(effect.data_base64)
+          == "") {
       throw "std/ui: download effect requires a name and data"
     }
     checked_effects = checked_effects + [effect]

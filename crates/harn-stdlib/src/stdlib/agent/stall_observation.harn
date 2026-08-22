@@ -40,18 +40,18 @@ import { agent_tool_calls_are_read_only } from "std/agent/tool_annotations"
 pub fn __agent_stall_reset_action(state: AgentStallState) -> AgentStallState {
   return state
     + {
-    last_signature: "",
-    streak: 0,
-    last_observation_signature: "",
-    last_outcome_kind: "",
-    same_observation_streak: 0,
-    same_success_streak: 0,
-    same_error_streak: 0,
-    context_window_error_streak: 0,
-    ping_pong_a: "",
-    ping_pong_b: "",
-    ping_pong_alternations: 0,
-  }
+      last_signature: "",
+      streak: 0,
+      last_observation_signature: "",
+      last_outcome_kind: "",
+      same_observation_streak: 0,
+      same_success_streak: 0,
+      same_error_streak: 0,
+      context_window_error_streak: 0,
+      ping_pong_a: "",
+      ping_pong_b: "",
+      ping_pong_alternations: 0,
+    }
 }
 
 /**
@@ -228,41 +228,32 @@ pub fn __agent_stall_fold_diagnostic(
       if turn_made_edit && state.last_diagnostic_class == "fail" {
         return state
           + {
-          write_epoch: new_write_epoch,
-          edit_since_failure: true,
-          reverify_owed: true,
-          turns_since_clean_verify: new_turns_since_clean_verify,
-        }
+            write_epoch: new_write_epoch,
+            edit_since_failure: true,
+            reverify_owed: true,
+            turns_since_clean_verify: new_turns_since_clean_verify,
+          }
       }
       return state
-        + {
-        write_epoch: new_write_epoch,
-        turns_since_clean_verify: new_turns_since_clean_verify,
-      }
+        + {write_epoch: new_write_epoch, turns_since_clean_verify: new_turns_since_clean_verify}
     }
     if turn_made_edit {
       if state.last_diagnostic_class == "fail" {
         return state
           + {
-          write_epoch: new_write_epoch,
-          edit_since_failure: true,
-          reverify_owed: true,
-          turns_since_clean_verify: new_turns_since_clean_verify,
-        }
+            write_epoch: new_write_epoch,
+            edit_since_failure: true,
+            reverify_owed: true,
+            turns_since_clean_verify: new_turns_since_clean_verify,
+          }
       }
       return state
-        + {
-        write_epoch: new_write_epoch,
-        turns_since_clean_verify: new_turns_since_clean_verify,
-      }
+        + {write_epoch: new_write_epoch, turns_since_clean_verify: new_turns_since_clean_verify}
     }
     if result == nil {
       // No verification evidence and no edit-on-failure: leave the model alone.
       return state
-        + {
-        write_epoch: new_write_epoch,
-        turns_since_clean_verify: new_turns_since_clean_verify,
-      }
+        + {write_epoch: new_write_epoch, turns_since_clean_verify: new_turns_since_clean_verify}
     }
     // A passing verification clears the current-failure model.
     const pass_signature = if delta != nil {
@@ -277,20 +268,20 @@ pub fn __agent_stall_fold_diagnostic(
     }
     return state
       + {
-      last_diagnostic_class: "pass",
-      last_diagnostic_signature: pass_signature,
-      last_diagnostic_snippet: "",
-      last_diagnostic_delta_current: {},
-      last_diagnostic_delta_status: delta?.status ?? "cleared",
-      last_diagnostic_delta_reason: delta?.reason ?? "current_result_is_passing",
-      write_epoch: new_write_epoch,
-      same_diagnostic_streak: 0,
-      failing_verify_turns: 0,
-      turns_since_clean_verify: 0,
-      edit_since_failure: false,
-      reverify_owed: false,
-      verified_write_epoch: verified_epoch,
-    }
+        last_diagnostic_class: "pass",
+        last_diagnostic_signature: pass_signature,
+        last_diagnostic_snippet: "",
+        last_diagnostic_delta_current: {},
+        last_diagnostic_delta_status: delta?.status ?? "cleared",
+        last_diagnostic_delta_reason: delta?.reason ?? "current_result_is_passing",
+        write_epoch: new_write_epoch,
+        same_diagnostic_streak: 0,
+        failing_verify_turns: 0,
+        turns_since_clean_verify: 0,
+        edit_since_failure: false,
+        reverify_owed: false,
+        verified_write_epoch: verified_epoch,
+      }
   }
   // Gate-bearing failure: fold against the prior failure model. The diagnostic
   // delta status is the progress signal, so the streak advances only when the
@@ -319,20 +310,20 @@ pub fn __agent_stall_fold_diagnostic(
   // NEXT edit after this failure re-arms them.
   return state
     + {
-    last_diagnostic_class: "fail",
-    last_diagnostic_signature: signature,
-    last_diagnostic_snippet: __agent_stall_result_snippet(result),
-    last_diagnostic_delta_current: delta.current,
-    last_diagnostic_delta_status: delta.status,
-    last_diagnostic_delta_reason: delta.reason,
-    write_epoch: new_write_epoch,
-    same_diagnostic_streak: new_streak,
-    failing_verify_turns: failing_turns,
-    turns_since_clean_verify: new_turns_since_clean_verify,
-    edit_since_failure: false,
-    reverify_owed: false,
-    verify_signature_counts: sig_counts + {[signature]: sig_total},
-  }
+      last_diagnostic_class: "fail",
+      last_diagnostic_signature: signature,
+      last_diagnostic_snippet: __agent_stall_result_snippet(result),
+      last_diagnostic_delta_current: delta.current,
+      last_diagnostic_delta_status: delta.status,
+      last_diagnostic_delta_reason: delta.reason,
+      write_epoch: new_write_epoch,
+      same_diagnostic_streak: new_streak,
+      failing_verify_turns: failing_turns,
+      turns_since_clean_verify: new_turns_since_clean_verify,
+      edit_since_failure: false,
+      reverify_owed: false,
+      verify_signature_counts: sig_counts + {[signature]: sig_total},
+    }
 }
 
 pub type AgentStallWarningInput = {
@@ -531,10 +522,10 @@ pub fn __agent_stall_emit_diagnostic_trip(
     config,
   )
     + {
-    diagnostic_class: tripped.last_diagnostic_class,
-    diagnostic_signature: tripped.last_diagnostic_signature,
-    diagnostic_snippet: tripped.last_diagnostic_snippet,
-  }
+      diagnostic_class: tripped.last_diagnostic_class,
+      diagnostic_signature: tripped.last_diagnostic_signature,
+      diagnostic_snippet: tripped.last_diagnostic_snippet,
+    }
   if remediation_delivered {
     warning = warning + {remediation_delivered: true}
   }
@@ -839,11 +830,7 @@ pub fn agent_stall_observe_completed_dispatch(
     const tool_name = __agent_tool_call_name(call)
     const read_only = tool_name != ""
       && !contains(config.exempt_tools, tool_name)
-      && agent_tool_calls_are_read_only(
-      [call],
-      registry,
-      policy,
-    )
+      && agent_tool_calls_are_read_only([call], registry, policy)
     const result = __agent_stall_completed_result(dispatch, call, index)
     if !read_only || result == nil || !__agent_stall_result_ok(result) {
       all_repeated = false
@@ -861,10 +848,9 @@ pub fn agent_stall_observe_completed_dispatch(
     all_repeated = all_repeated && recurrence.count > 1
     if !config.enabled
       || recurrence.count
-      != config.repeat_same_observation
+        != config.repeat_same_observation
       || next_state.same_observation_streak
-      >= config
-      .repeat_same_observation {
+        >= config.repeat_same_observation {
       continue
     }
     // Cumulative recurrence is information evidence, never a hard-stop rung.
@@ -961,9 +947,7 @@ pub fn __agent_stall_eval_remediation(state: AgentStallState, signature: string,
     }
   }
   throw "agent_loop: stall_diagnostics.remediation_delivered callback must return a bool, an int cumulative count, or nil; got "
-    + type_of(
-    raw,
-  )
+    + type_of(raw)
 }
 
 pub fn __agent_stall_apply_repair(
@@ -998,11 +982,9 @@ pub fn __agent_stall_apply_repair(
   const hard_cap_due = config.no_net_progress_extend_guard
     && folded.last_diagnostic_class == "fail"
     && folded.failing_verify_turns
-    >= config
-    .no_net_progress_hard_cap_after
+      >= config.no_net_progress_hard_cap_after
     && observation.state.failing_verify_turns
-    < config
-    .no_net_progress_hard_cap_after
+      < config.no_net_progress_hard_cap_after
   if hard_cap_due {
     const tripped = __agent_stall_register_immediate_hard_stop(folded)
     return __agent_stall_emit_diagnostic_trip(
@@ -1026,11 +1008,9 @@ pub fn __agent_stall_apply_repair(
   // behavior is byte-identical.
   const clean_floor_due = config.turns_since_clean_verify != nil
     && folded.turns_since_clean_verify
-    >= config
-    .turns_since_clean_verify
+      >= config.turns_since_clean_verify
     && observation.state.turns_since_clean_verify
-    < config
-    .turns_since_clean_verify
+      < config.turns_since_clean_verify
   if clean_floor_due {
     const tripped = __agent_stall_register_immediate_hard_stop(folded)
     return __agent_stall_emit_diagnostic_trip(
@@ -1058,11 +1038,10 @@ pub fn __agent_stall_apply_repair(
   // turn that does not otherwise qualify) leaves behavior byte-identical. Fires
   // regardless of `repair_aware` (it keys on the fact, not the repair nudge).
   const delivered_streak_advanced = folded.same_diagnostic_streak
-    > observation.state
-    .same_diagnostic_streak
+    > observation.state.same_diagnostic_streak
   const delivered_candidate = config.remediation_delivered != nil
     && folded.last_diagnostic_class
-    == "fail"
+      == "fail"
     && folded.same_diagnostic_streak >= STALL_DELIVERED_FIX_AFTER
     && delivered_streak_advanced
     && observation.warning == nil
@@ -1086,9 +1065,9 @@ pub fn __agent_stall_apply_repair(
     )
     current = folded
       + {
-      remediation_delivered_count: evaluated.count,
-      remediation_delivered_signature: evaluated.signature,
-    }
+        remediation_delivered_count: evaluated.count,
+        remediation_delivered_signature: evaluated.signature,
+      }
     if evaluated.delivered {
       const tripped = __agent_stall_register_trip(current, config)
       return __agent_stall_emit_diagnostic_trip(
@@ -1210,15 +1189,15 @@ pub fn __agent_stall_observe_monologue_actuation(
 ) -> AgentStallObservation {
   return observation
     + {
-    state: observation.state
-      + {
-      monologue_actuation: agent_monologue_actuation_observe(
-        observation.state.monologue_actuation,
-        observation.config.monologue_actuation,
-        to_string(observation.warning?.pattern ?? ""),
-      ),
-    },
-  }
+      state: observation.state
+        + {
+          monologue_actuation: agent_monologue_actuation_observe(
+            observation.state.monologue_actuation,
+            observation.config.monologue_actuation,
+            to_string(observation.warning?.pattern ?? ""),
+          ),
+        },
+    }
 }
 
 /**
@@ -1290,13 +1269,13 @@ pub fn agent_stall_observe_tool_calls(
   if observation.config.progress_signal != nil {
     resolved = resolved
       + {
-      state: __agent_stall_fold_verify_state(
-        resolved.state,
-        observation.config,
-        payload,
-        turn_made_edit,
-      ),
-    }
+        state: __agent_stall_fold_verify_state(
+          resolved.state,
+          observation.config,
+          payload,
+          turn_made_edit,
+        ),
+      }
   }
   return __agent_stall_observe_monologue_actuation(resolved)
 }

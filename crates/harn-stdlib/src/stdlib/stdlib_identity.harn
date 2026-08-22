@@ -59,20 +59,18 @@ fn __scope_claims(node: dict, path: string) -> dict {
   if node?.scopes != nil {
     if type_of(node.scopes) != "list" {
       issues = issues
-        + [
-        __issue("actor_chain.scopes_type", path + ".scopes", "scopes must be a list of strings"),
-      ]
+        + [__issue("actor_chain.scopes_type", path + ".scopes", "scopes must be a list of strings")]
     } else {
       for {index, value} in node.scopes.enumerate() {
         if type_of(value) != "string" {
           issues = issues
             + [
-            __issue(
-              "actor_chain.scope_type",
-              path + ".scopes[" + to_string(index) + "]",
-              "scope entries must be strings",
-            ),
-          ]
+              __issue(
+                "actor_chain.scope_type",
+                path + ".scopes[" + to_string(index) + "]",
+                "scope entries must be strings",
+              ),
+            ]
         } else {
           scopes = __append_unique(scopes, value)
         }
@@ -83,12 +81,12 @@ fn __scope_claims(node: dict, path: string) -> dict {
     if type_of(node.scope) != "string" {
       issues = issues
         + [
-        __issue(
-          "actor_chain.scope_type",
-          path + ".scope",
-          "scope must be a whitespace-delimited string",
-        ),
-      ]
+          __issue(
+            "actor_chain.scope_type",
+            path + ".scope",
+            "scope must be a whitespace-delimited string",
+          ),
+        ]
     } else {
       for value in split(node.scope, " ") {
         scopes = __append_unique(scopes, value)

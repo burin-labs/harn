@@ -257,7 +257,7 @@ fn __token_is_stale(token, now_s) {
   }
   const threshold = to_int(issued)
     + lifetime * __TTL_PREREFRESH_NUMERATOR
-    / __TTL_PREREFRESH_DENOMINATOR
+      / __TTL_PREREFRESH_DENOMINATOR
   return now_s >= threshold
 }
 
@@ -323,7 +323,7 @@ fn __post_token_request(
       {}
     }
     const detail = (error_body?.error_description ?? error_body?.error
-      ?? "token endpoint returned status ")
+        ?? "token endpoint returned status ")
       + to_string(response?.status ?? 0)
     throw "std/oauth/client: token request failed: " + to_string(detail)
   }
@@ -539,9 +539,7 @@ fn __same_token_identity(stored, observed_token) -> bool {
   }
   return __same_access_token(stored, observed_token)
     && to_string(stored?.refresh_token ?? "")
-    == to_string(
-    observed_token?.refresh_token ?? "",
-  )
+      == to_string(observed_token?.refresh_token ?? "")
 }
 
 fn __refresh_needed(stored, now_s, reason, observed_token = nil) -> bool {
@@ -759,19 +757,14 @@ fn __validate_token_exchange(
 ) {
   if !__list_allows(capability?.subject_token_types, subject_token_type) {
     throw "std/oauth/client: subject_token_type `" + subject_token_type + "` is not supported by "
-      + capability
-      .id
+      + capability.id
   }
   if actor_token_type != nil && !__list_allows(capability?.actor_token_types, actor_token_type) {
     throw "std/oauth/client: actor_token_type `" + actor_token_type + "` is not supported by "
-      + capability
-      .id
+      + capability.id
   }
   if requested_token_type != nil
-    && !__list_allows(
-    capability?.requested_token_types,
-    requested_token_type,
-  ) {
+    && !__list_allows(capability?.requested_token_types, requested_token_type) {
     throw "std/oauth/client: requested_token_type `" + requested_token_type
       + "` is not supported by "
       + capability.id
@@ -826,9 +819,9 @@ fn __token_exchange(harness: Harness, cfg, opts) {
   if has_actor {
     form = form
       + [
-      {key: "actor_token", value: actor_token},
-      {key: "actor_token_type", value: actor_token_type},
-    ]
+        {key: "actor_token", value: actor_token},
+        {key: "actor_token_type", value: actor_token_type},
+      ]
   }
   if opts?.extra_params != nil {
     for key in opts.extra_params.keys() {
@@ -849,19 +842,18 @@ fn __token_exchange(harness: Harness, cfg, opts) {
   )
   if !__list_allows(capability?.issued_token_types, issued_token_type) {
     throw "std/oauth/client: issued_token_type `" + issued_token_type + "` is not supported by "
-      + capability
-      .id
+      + capability.id
   }
   let token_set = __build_token_set(parsed, __scope_list(opts?.scope), issued_at, nil)
   const mode = has_actor ? "delegation" : "impersonation"
   token_set = token_set
     + {
-    issued_token_type: issued_token_type,
-    token_exchange_mode: mode,
-    subject_token_type: subject_token_type,
-    actor_token_type: actor_token_type,
-    requested_token_type: requested_token_type,
-  }
+      issued_token_type: issued_token_type,
+      token_exchange_mode: mode,
+      subject_token_type: subject_token_type,
+      actor_token_type: actor_token_type,
+      requested_token_type: requested_token_type,
+    }
   let storage_key = nil
   if opts?.store ?? false {
     storage_key = trim(to_string(opts?.storage_key ?? ""))

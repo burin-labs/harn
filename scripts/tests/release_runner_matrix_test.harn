@@ -237,10 +237,7 @@ pipeline test_release_runner_policy_rejects_unsafe_requests(harness: Harness, ta
       {
         ...policy,
         targets: [{...policy.targets[0], release_codegen_units: 0}]
-          + policy.targets.slice(
-          1,
-          len(policy.targets),
-        ),
+          + policy.targets.slice(1, len(policy.targets)),
       },
       "--mode primary",
     ).success,

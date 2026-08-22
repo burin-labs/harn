@@ -153,9 +153,7 @@ fn __row_trials(row: dict) -> int {
     return __int(explicit)
   }
   return __row_passes(row) + __int(__field(row, ["fails", "fail_count", "failCount"]))
-    + __row_skips(
-    row,
-  )
+    + __row_skips(row)
 }
 
 fn __row_fails(row: dict) -> int {
@@ -434,9 +432,7 @@ pub fn aggregate_trials(name: string, outcomes: list, metadata: dict = {}) -> di
       timeout_count = timeout_count + 1
     }
     wall_seconds = wall_seconds
-      + [
-      __float(__outcome_number(outcome, ["wallTimeSeconds", "wall_time_seconds"])),
-    ]
+      + [__float(__outcome_number(outcome, ["wallTimeSeconds", "wall_time_seconds"]))]
     const cost = __outcome_number(outcome, ["costUsd", "cost_usd"])
     if cost != nil {
       const cost_float = __float(cost)
@@ -474,8 +470,7 @@ pub fn aggregate_trials(name: string, outcomes: list, metadata: dict = {}) -> di
   const group = __text(metadata?.group ?? metadata?.language ?? "")
   const case_fingerprint = metadata?.caseFingerprint ?? metadata?.case_fingerprint
   const harness_config_fingerprint = metadata?.harnessConfigFingerprint
-    ?? metadata
-    ?.harness_config_fingerprint
+    ?? metadata?.harness_config_fingerprint
     ?? metadata?.harnessFingerprint
     ?? metadata?.harness_fingerprint
   return {
@@ -676,12 +671,12 @@ pub fn skip_rate(rows: list) -> float {
     const trials = __float(__row_trials(row))
     fractions = fractions
       + [
-      if trials > 0.0 {
-        __float(__row_skips(row)) / trials
-      } else {
-        0.0
-      },
-    ]
+        if trials > 0.0 {
+          __float(__row_skips(row)) / trials
+        } else {
+          0.0
+        },
+      ]
   }
   return __mean(fractions)
 }
@@ -702,12 +697,12 @@ pub fn timeout_rate(rows: list) -> float {
     const trials = __float(__row_trials(row))
     fractions = fractions
       + [
-      if trials > 0.0 {
-        __float(__row_timeouts(row)) / trials
-      } else {
-        0.0
-      },
-    ]
+        if trials > 0.0 {
+          __float(__row_timeouts(row)) / trials
+        } else {
+          0.0
+        },
+      ]
   }
   return __mean(fractions)
 }
@@ -777,10 +772,8 @@ pub fn estimate_cost_usd(pricing: dict?, usage: dict) -> float? {
   }
   const cache_read_cost = cache_read_tokens / 1000000.0 * cache_read_rate
   const cache_write_cost = cache_write_tokens / 1000000.0
-    * (to_float(
-    pricing?.cacheWritePerMTok ?? pricing?.inputPerMTok ?? 0,
-  )
-    ?? 0.0)
+    * (to_float(pricing?.cacheWritePerMTok ?? pricing?.inputPerMTok ?? 0)
+      ?? 0.0)
   return __round_digits(input_cost + output_cost + cache_read_cost + cache_write_cost, 6)
 }
 

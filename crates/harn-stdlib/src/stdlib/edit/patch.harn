@@ -94,12 +94,12 @@ fn __edit_candidate_contexts(parts, old_text, max_contexts) {
     const start_line = __edit_start_line(prefix)
     contexts = contexts
       + [
-      {
-        start_line: start_line,
-        end_line: start_line + needle_lines - 1,
-        snippet: __edit_context(prefix, old_text, parts[idx + 1]),
-      },
-    ]
+        {
+          start_line: start_line,
+          end_line: start_line + needle_lines - 1,
+          snippet: __edit_context(prefix, old_text, parts[idx + 1]),
+        },
+      ]
     prefix = prefix + old_text
     idx = idx + 1
   }
@@ -119,9 +119,7 @@ fn __edit_line_candidate_contexts(text, candidates, max_contexts) {
     const suffix_end = min(end_line_exclusive + 2, len(lines))
     const snippet = trim(join(lines[prefix_start:suffix_end], "\n"))
     contexts = contexts
-      + [
-      {start_line: start_line, end_line: end_line_exclusive - 1, snippet: snippet},
-    ]
+      + [{start_line: start_line, end_line: end_line_exclusive - 1, snippet: snippet}]
     idx = idx + 1
   }
   return contexts
@@ -353,9 +351,7 @@ fn __edit_line_candidates(text, old_text, structural, options) {
       const segment = join(lines[start:start + width], "\n")
       if __edit_signature(segment, false) == target {
         candidates = candidates
-          + [
-          {start_line: start, end_line_exclusive: start + width, text: segment},
-        ]
+          + [{start_line: start, end_line_exclusive: start + width, text: segment}]
       }
       start = start + 1
     }
@@ -655,15 +651,15 @@ pub fn edit_changed_regions(before, after) {
     const next_after = resync.after_index
     regions = regions
       + [
-      __edit_hunk(
-        before_start,
-        after_start,
-        next_before - 1,
-        next_after - 1,
-        next_before,
-        next_after,
-      ),
-    ]
+        __edit_hunk(
+          before_start,
+          after_start,
+          next_before - 1,
+          next_after - 1,
+          next_before,
+          next_after,
+        ),
+      ]
     before_index = next_before
     after_index = next_after
   }
@@ -912,12 +908,12 @@ pub fn edit_validate_changed_regions(before, after, expected_regions, options = 
     if !matched {
       errors = errors
         + [
-        {
-          code: "unexpected_changed_region",
-          message: "changed region falls outside expected patch range",
-          region: region,
-        },
-      ]
+          {
+            code: "unexpected_changed_region",
+            message: "changed region falls outside expected patch range",
+            region: region,
+          },
+        ]
     }
   }
   return {

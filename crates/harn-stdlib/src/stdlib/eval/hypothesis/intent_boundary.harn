@@ -96,13 +96,13 @@ fn __semantic_diagnostics(intent: ExperimentIntent) -> list<ExperimentCompileDia
     if trim(field.value) == "" {
       diagnostics = diagnostics
         + [
-        __diagnostic(
-          "experiment.required",
-          field.path,
-          field.path + " must be non-empty",
-          __repair("set", field.path, "a non-empty value"),
-        ),
-      ]
+          __diagnostic(
+            "experiment.required",
+            field.path,
+            field.path + " must be non-empty",
+            __repair("set", field.path, "a non-empty value"),
+          ),
+        ]
     }
   }
   let alternative_ids: dict<string, bool> = {}
@@ -110,23 +110,23 @@ fn __semantic_diagnostics(intent: ExperimentIntent) -> list<ExperimentCompileDia
     if trim(alternative.id) == "" || trim(alternative.statement) == "" {
       diagnostics = diagnostics
         + [
-        __diagnostic(
-          "experiment.invalid_alternative",
-          "alternative_hypotheses",
-          "alternative hypothesis IDs and statements must be non-empty",
-          __repair("set", "alternative_hypotheses", "unique non-empty IDs and statements"),
-        ),
-      ]
+          __diagnostic(
+            "experiment.invalid_alternative",
+            "alternative_hypotheses",
+            "alternative hypothesis IDs and statements must be non-empty",
+            __repair("set", "alternative_hypotheses", "unique non-empty IDs and statements"),
+          ),
+        ]
     } else if alternative_ids[alternative.id] ?? false {
       diagnostics = diagnostics
         + [
-        __diagnostic(
-          "experiment.duplicate_alternative",
-          "alternative_hypotheses",
-          "alternative hypothesis IDs must be unique",
-          __repair("set", "alternative_hypotheses", "unique alternative IDs"),
-        ),
-      ]
+          __diagnostic(
+            "experiment.duplicate_alternative",
+            "alternative_hypotheses",
+            "alternative hypothesis IDs must be unique",
+            __repair("set", "alternative_hypotheses", "unique alternative IDs"),
+          ),
+        ]
     }
     alternative_ids = alternative_ids + {[alternative.id]: true}
   }
@@ -134,81 +134,81 @@ fn __semantic_diagnostics(intent: ExperimentIntent) -> list<ExperimentCompileDia
   if intent.requested_lane != "quasi_experimental" && design != nil {
     diagnostics = diagnostics
       + [
-      __diagnostic(
-        "experiment.quasi_design_lane",
-        "quasi_experiment",
-        "quasi-experimental policy is only valid with the quasi_experimental lane",
-        __repair("remove", "quasi_experiment", "omit quasi policy or select its lane"),
-      ),
-    ]
+        __diagnostic(
+          "experiment.quasi_design_lane",
+          "quasi_experiment",
+          "quasi-experimental policy is only valid with the quasi_experimental lane",
+          __repair("remove", "quasi_experiment", "omit quasi policy or select its lane"),
+        ),
+      ]
   }
   if intent.requested_lane == "quasi_experimental" && design == nil {
     diagnostics = diagnostics
       + [
-      __diagnostic(
-        "experiment.quasi_design_required",
-        "quasi_experiment",
-        "quasi_experimental intent requires an identifying design contract",
-        __repair("set", "quasi_experiment", "a registered quasi-experimental design"),
-      ),
-    ]
+        __diagnostic(
+          "experiment.quasi_design_required",
+          "quasi_experiment",
+          "quasi_experimental intent requires an identifying design contract",
+          __repair("set", "quasi_experiment", "a registered quasi-experimental design"),
+        ),
+      ]
   }
   if design != nil {
     if trim(design.assignment_mechanism) == "" {
       diagnostics = diagnostics
         + [
-        __diagnostic(
-          "experiment.quasi_assignment_required",
-          "quasi_experiment.assignment_mechanism",
-          "quasi-experimental intent must explain the non-random assignment mechanism",
-          __repair(
-            "set",
+          __diagnostic(
+            "experiment.quasi_assignment_required",
             "quasi_experiment.assignment_mechanism",
-            "a non-empty assignment mechanism",
+            "quasi-experimental intent must explain the non-random assignment mechanism",
+            __repair(
+              "set",
+              "quasi_experiment.assignment_mechanism",
+              "a non-empty assignment mechanism",
+            ),
           ),
-        ),
-      ]
+        ]
     }
     if len(design.identifying_assumptions) == 0 {
       diagnostics = diagnostics
         + [
-        __diagnostic(
-          "experiment.quasi_assumptions_required",
-          "quasi_experiment.identifying_assumptions",
-          "quasi-experimental intent must name its identifying assumptions",
-          __repair(
-            "set",
+          __diagnostic(
+            "experiment.quasi_assumptions_required",
             "quasi_experiment.identifying_assumptions",
-            "one or more explicit identifying assumptions",
+            "quasi-experimental intent must name its identifying assumptions",
+            __repair(
+              "set",
+              "quasi_experiment.identifying_assumptions",
+              "one or more explicit identifying assumptions",
+            ),
           ),
-        ),
-      ]
+        ]
     }
     if design.design == "matched_comparison" && design.matching == nil {
       diagnostics = diagnostics
         + [
-        __diagnostic(
-          "experiment.matching_policy_required",
-          "quasi_experiment.matching",
-          "matched comparison requires an explicit matching policy",
-          __repair("set", "quasi_experiment.matching", "method and matching covariates"),
-        ),
-      ]
+          __diagnostic(
+            "experiment.matching_policy_required",
+            "quasi_experiment.matching",
+            "matched comparison requires an explicit matching policy",
+            __repair("set", "quasi_experiment.matching", "method and matching covariates"),
+          ),
+        ]
     }
     if design.matching != nil && len(design.matching.covariates) == 0 {
       diagnostics = diagnostics
         + [
-        __diagnostic(
-          "experiment.matching_covariates_required",
-          "quasi_experiment.matching.covariates",
-          "matching policy must name at least one pre-treatment covariate",
-          __repair(
-            "set",
+          __diagnostic(
+            "experiment.matching_covariates_required",
             "quasi_experiment.matching.covariates",
-            "one or more pre-treatment covariates",
+            "matching policy must name at least one pre-treatment covariate",
+            __repair(
+              "set",
+              "quasi_experiment.matching.covariates",
+              "one or more pre-treatment covariates",
+            ),
           ),
-        ),
-      ]
+        ]
     }
   }
   return diagnostics

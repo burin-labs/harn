@@ -131,9 +131,7 @@ pub fn scripted_argv<T>(entries: list<ScriptedArgvStep<T>>) -> ScriptedArgv<T> {
       const remaining = __testing_argv_remaining(entries, cursor)
       require len(remaining) == 0,
         "scripted_argv: expected every command to be consumed; remaining: "
-        + to_string(
-        remaining,
-      )
+        + to_string(remaining)
       return nil
     },
   }
@@ -194,18 +192,18 @@ fn __testing_golden_match(expected, actual) -> bool {
     const kind = type_of(actual)
     return kind == "int" || kind == "float"
       || (kind == "string"
-      && len(regex_captures("^[0-9]+$", actual))
-      == 1)
+        && len(regex_captures("^[0-9]+$", actual))
+          == 1)
   }
   if expected == "<uuid>" {
     return type_of(actual) == "string"
       && len(
-      regex_captures(
-        "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
-        actual,
-      ),
-    )
-      == 1
+        regex_captures(
+          "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+          actual,
+        ),
+      )
+        == 1
   }
   if expected == "<any>" {
     return actual != nil
@@ -506,8 +504,8 @@ pub fn assert_receipt_field(receipt, path: string, expected, message = nil) {
   require diff == nil,
     message
     ?? ("assert_receipt_field: the receipt field " + path
-    + " does not match.\n"
-    + to_string(diff))
+      + " does not match.\n"
+      + to_string(diff))
   return actual
 }
 
@@ -529,11 +527,9 @@ pub fn assert_golden_transcript(actual, golden, message = nil) {
   require __testing_golden_match(golden, actual),
     message
     ?? ("assert_golden_transcript: the value does not match the golden.\n    golden    "
-    + to_string(
-    golden,
-  )
-    + "\n    actual    "
-    + to_string(actual))
+      + to_string(golden)
+      + "\n    actual    "
+      + to_string(actual))
   return actual
 }
 
@@ -712,11 +708,9 @@ pub fn assert_error_contains(body, substring: string, message = nil) -> any {
   require contains(rendered, substring),
     message
     ?? ("assert_error_contains: expected thrown error to contain "
-    + to_string(
-    substring,
-  )
-    + ", got: "
-    + rendered)
+      + to_string(substring)
+      + ", got: "
+      + rendered)
   return captured
 }
 
@@ -740,9 +734,7 @@ pub fn assert_no_throw(body, message = nil) -> any {
     require false,
       message
       ?? ("assert_no_throw: expected the body not to throw, but it threw: "
-      + to_string(
-      e,
-    ))
+        + to_string(e))
   }
   return value
 }
@@ -835,8 +827,8 @@ pub fn assert_contains(haystack: string | list, needle: any, message = nil) -> a
   require contains(haystack, needle),
     message
     ?? ("assert_contains: expected " + to_string(haystack)
-    + " to contain "
-    + to_string(needle))
+      + " to contain "
+      + to_string(needle))
   return haystack
 }
 
@@ -1087,10 +1079,7 @@ pub fn assert_snapshot(
   if !fs.exists(path) {
     require false,
       "snapshot '" + name + "' does not exist at " + path
-      + __testing_snapshot_guidance(
-      env,
-      "create it",
-    )
+      + __testing_snapshot_guidance(env, "create it")
     return actual
   }
   const golden = fs.read_text(path)

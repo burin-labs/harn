@@ -55,13 +55,13 @@ pub fn publishable_workspace_packages_from_metadata(
     const manifest_path = require_string(package?.manifest_path, "packages[].manifest_path")
     packages = packages
       + [
-      {
-        dir: rel_path(dirname(manifest_path) ?? ".", root),
-        manifest_path: manifest_path,
-        name: name,
-        version: version,
-      },
-    ]
+        {
+          dir: rel_path(dirname(manifest_path) ?? ".", root),
+          manifest_path: manifest_path,
+          name: name,
+          version: version,
+        },
+      ]
   }
   return packages.sorted_by({ package -> package.name })
 }
@@ -84,10 +84,9 @@ pub fn verify_crate_packages_plan_rows(meta: dict, root: string) -> list<string>
     ensure_no_tabs(package.dir, "package dir")
     rows = rows
       + [
-      "package\t" + package.name + "\t" + package.version + "\t" + package.manifest_path + "\t"
-        + package
-        .dir,
-    ]
+        "package\t" + package.name + "\t" + package.version + "\t" + package.manifest_path + "\t"
+          + package.dir,
+      ]
   }
   return rows
 }

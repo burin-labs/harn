@@ -1,0 +1,154 @@
+import { command_wait_normalize } from "std/agent/command_ledger"
+import { AgentLoopBudget } from "std/agent/control"
+import {
+  __agent_loop_finalize_session,
+  __agent_loop_project_final_result,
+} from "std/agent/loop_finalize"
+import { __agent_loop_clock_now_ms } from "std/agent/loop_foundation"
+import { __agent_loop_effective_llm_options } from "std/agent/loop_support"
+import { agent_stall_repair_config } from "std/agent/stall_verification"
+
+pub type AgentLoopRunSettings = {
+  primary_provider: string,
+  primary_model: string,
+  primary_tool_format: string,
+  max_verify_attempts: int,
+  budget: AgentLoopBudget,
+  current_max: int,
+  loop_start_ms: int,
+  reserve_cfg: dict,
+  terminal_verify_reserve_remaining: int,
+  command_wait: dict,
+}
+
+/**
+ * Normalize the immutable settings shared by every turn in one agent loop.
+ *
+ * @effects: [clock]
+ * @errors: []
+ */
+pub fn agent_loop_run_settings(
+  llm: HarnessLlm,
+  clock: HarnessClock,
+  opts: dict,
+) -> AgentLoopRunSettings {
+  const primary_llm_opts = __agent_loop_effective_llm_options(llm, opts)
+  const budget: AgentLoopBudget = opts?.iteration_budget
+    ?? {
+      mode: "fixed",
+      initial: opts?.max_iterations ?? 50,
+      max: opts?.max_iterations ?? 50,
+      extend_by: 0,
+      expose_decisions: false,
+      wall_clock_ms: nil,
+      total_cost_usd: nil,
+      consecutive_failures: nil,
+    }
+  const reserve_cfg = agent_stall_repair_config(opts?.stall_diagnostics)
+  const terminal_verify_reserve_remaining = if reserve_cfg.reserved_terminal_verify
+    || reserve_cfg.zero_write_terminal_verify {
+    reserve_cfg.reserved_terminal_verify_iterations
+  } else {
+    0
+  }
+  return {
+    primary_provider: to_string(primary_llm_opts?.provider ?? ""),
+    primary_model: to_string(primary_llm_opts?.model ?? ""),
+    primary_tool_format: to_string(primary_llm_opts?.tool_format ?? ""),
+    max_verify_attempts: opts?.max_verify_attempts ?? 20,
+    budget: budget,
+    current_max: budget.initial,
+    loop_start_ms: __agent_loop_clock_now_ms(clock),
+    reserve_cfg: reserve_cfg,
+    terminal_verify_reserve_remaining: terminal_verify_reserve_remaining,
+    command_wait: command_wait_normalize(opts?.command_wait),
+  }
+}
+
+pub type AgentLoopCompletionState = {
+  opts: dict,
+  final_status: string,
+  stop_reason: any,
+  iteration: int,
+  loop_start_ms: int,
+  suspend_result: any,
+  terminal_error: any,
+  audit_background_tasks: list,
+  budget: AgentLoopBudget,
+  budget_exhausted_emitted: bool,
+  budget_decisions: list,
+  current_max: int,
+  extensions_used: int,
+  last_tool_count: int,
+  stall_state: dict,
+  stall_enabled_seen: bool,
+  verify_completion_judge_invocations: int,
+  verify_completion_judge_vetoes: int,
+  done_judge_invocations: int,
+  done_judge_vetoes: int,
+}
+
+/**
+ * Finalize the session and project its public terminal result exactly once.
+ *
+ * @effects: [agent]
+ * @errors: [runtime]
+ */
+pub fn agent_loop_complete(
+  harness: Harness,
+  message,
+  session: dict,
+  state: AgentLoopCompletionState,
+) -> dict {
+  const finalized = __agent_loop_finalize_session(
+    harness,
+    message,
+    session,
+    {
+      opts: state.opts,
+      final_status: state.final_status,
+      stop_reason: state.stop_reason,
+      iteration: state.iteration,
+      loop_start_ms: state.loop_start_ms,
+      suspend_result: state.suspend_result,
+      terminal_error: state.terminal_error,
+      audit_background_tasks: state.audit_background_tasks,
+      budget: state.budget,
+      budget_exhausted_emitted: state.budget_exhausted_emitted,
+      budget_decisions: state.budget_decisions,
+      current_max: state.current_max,
+      extensions_used: state.extensions_used,
+      last_tool_count: state.last_tool_count,
+      stall_state: state.stall_state,
+      stall_enabled_seen: state.stall_enabled_seen,
+      verify_completion_judge_invocations: state.verify_completion_judge_invocations,
+      verify_completion_judge_vetoes: state.verify_completion_judge_vetoes,
+      done_judge_invocations: state.done_judge_invocations,
+      done_judge_vetoes: state.done_judge_vetoes,
+    },
+  )
+  return __agent_loop_project_final_result(
+    harness,
+    finalized.result,
+    message,
+    session,
+    {
+      opts: state.opts,
+      final_status: state.final_status,
+      stop_reason: state.stop_reason,
+      iteration: state.iteration,
+      suspend_result: state.suspend_result,
+      terminal_error: state.terminal_error,
+      budget: state.budget,
+      budget_decisions: finalized.budget_decisions,
+      current_max: state.current_max,
+      extensions_used: state.extensions_used,
+      stall_state: state.stall_state,
+      stall_enabled_seen: state.stall_enabled_seen,
+      verify_completion_judge_invocations: state.verify_completion_judge_invocations,
+      verify_completion_judge_vetoes: state.verify_completion_judge_vetoes,
+      done_judge_invocations: state.done_judge_invocations,
+      done_judge_vetoes: state.done_judge_vetoes,
+    },
+  )
+}

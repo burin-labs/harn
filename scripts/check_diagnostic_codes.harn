@@ -380,11 +380,7 @@ pipeline main(harness: Harness, task) {
   errors = errors + scan_struct_literals(harness.fs, "LintDiagnostic", "crates/harn-lint/src")
   errors = errors + scan_struct_literals(harness.fs, "TypeDiagnostic", "crates/harn-parser/src")
   errors = errors
-    + scan_struct_literals(
-    harness.fs,
-    "PreflightDiagnostic",
-    "crates/harn-cli/src/commands/check",
-  )
+    + scan_struct_literals(harness.fs, "PreflightDiagnostic", "crates/harn-cli/src/commands/check")
   errors = errors + scan_helper_calls(harness.fs, "crates/harn-parser/src/typechecker")
   errors = errors + scan_constructor_calls(harness.fs, "crates/harn-fmt/src", "FormatError::new")
   errors = errors + scan_unknown_variants(harness.fs, code_names)

@@ -19,10 +19,7 @@ pipeline test(harness: Harness, task) {
       harness.runtime.atomic_set(first_context_ok, 1)
     }
     if index == 2
-      && contains(
-      call?.system ?? "",
-      "ctx provider=openrouter model=anthropic/claude-sonnet-4-6",
-    ) {
+      && contains(call?.system ?? "", "ctx provider=openrouter model=anthropic/claude-sonnet-4-6") {
       harness.runtime.atomic_set(second_context_ok, 1)
     }
     if index == 1

@@ -130,12 +130,12 @@ fn __invoke(harness: Harness, judge_cfg, opts, payload) {
   )
   return outcome
     + {
-    reasoning: reasoning,
-    critique: critique,
-    confidence: confidence,
-    judge_duration_ms: duration_ms,
-    typed_checkpoint: checkpoint,
-  }
+      reasoning: reasoning,
+      critique: critique,
+      confidence: confidence,
+      judge_duration_ms: duration_ms,
+      typed_checkpoint: checkpoint,
+    }
 }
 
 fn __emit_decision(agent: HarnessAgent, session_id, iteration, on_veto, verdict) {
@@ -163,10 +163,10 @@ fn __emit_decision(agent: HarnessAgent, session_id, iteration, on_veto, verdict)
       iteration: iteration,
       verdict: verdict?.verdict
         ?? if verdict.vetoed {
-        "revise"
-      } else {
-        "pass"
-      },
+          "revise"
+        } else {
+          "pass"
+        },
       reasoning: verdict?.reasoning ?? "",
       critique: verdict?.critique ?? "",
       confidence: verdict?.confidence ?? 1.0,

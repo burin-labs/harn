@@ -593,10 +593,7 @@ fn __batch_endpoint(group: dict) -> string {
 
 fn __prepare_file_stem(group: dict) -> string {
   const seed = safe_string(group["id"], "") + ":" + safe_string(group["provider"], "") + ":"
-    + safe_string(
-    group["model"],
-    "",
-  )
+    + safe_string(group["model"], "")
   return "batch_group_" + substring(sha256(seed), 0, 16)
 }
 
@@ -755,14 +752,14 @@ fn __prepare_artifact(out_dir: string, group: dict) -> dict {
     const body = __body_from_row_for_batch_wire(raw_row, safe_string(group["model"], ""), wire)
     errors = errors
       + __non_streaming_batch_errors(
-      __batch_request_location(
-        "group " + safe_string(group["id"], ""),
-        safe_string(req["custom_id"], ""),
-        __safe_int(req["source_line"]) ?? 0,
-      ),
-      raw_row,
-      body,
-    )
+        __batch_request_location(
+          "group " + safe_string(group["id"], ""),
+          safe_string(req["custom_id"], ""),
+          __safe_int(req["source_line"]) ?? 0,
+        ),
+        raw_row,
+        body,
+      )
     records = records.appending(__provider_request_record(group, req, endpoint, body))
   }
   if len(errors) > 0 {
@@ -848,10 +845,7 @@ fn __build_manifest(
         "line "
           + to_string(line_no)
           + ": model discount below --min-discount-percent for "
-          + safe_string(
-          candidate["provider"],
-          "",
-        )
+          + safe_string(candidate["provider"], "")
           + "/"
           + safe_string(candidate["id"], ""),
       )
@@ -863,10 +857,7 @@ fn __build_manifest(
         "line "
           + to_string(line_no)
           + ": model turnaround exceeds --max-turnaround-hours for "
-          + safe_string(
-          candidate["provider"],
-          "",
-        )
+          + safe_string(candidate["provider"], "")
           + "/"
           + safe_string(candidate["id"], ""),
       )

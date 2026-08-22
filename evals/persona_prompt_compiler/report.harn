@@ -20,16 +20,16 @@ fn __aggregate_rows(rows: list) -> list {
     const first = trials[0]
     aggregated = aggregated
       + [
-      aggregate_trials(
-        name,
-        trials,
-        (first.metadata ?? {})
-          + {
-          case_fingerprint: first.case_fingerprint,
-          harness_config_fingerprint: first.harness_config_fingerprint,
-        },
-      ),
-    ]
+        aggregate_trials(
+          name,
+          trials,
+          (first.metadata ?? {})
+            + {
+              case_fingerprint: first.case_fingerprint,
+              harness_config_fingerprint: first.harness_config_fingerprint,
+            },
+        ),
+      ]
   }
   return aggregated
 }
@@ -118,15 +118,11 @@ pub fn persona_prompt_eval_comparison(request: PersonaPromptEvalComparisonReques
   const baseline_identity_matches = baseline.fingerprint_integrity.case_fingerprints
     == expected_case_fingerprints
     && baseline.fingerprint_integrity.harness_fingerprints
-    == [
-    expected_harness_fingerprint,
-  ]
+      == [expected_harness_fingerprint]
   const treatment_identity_matches = treatment.fingerprint_integrity.case_fingerprints
     == expected_case_fingerprints
     && treatment.fingerprint_integrity.harness_fingerprints
-    == [
-    expected_harness_fingerprint,
-  ]
+      == [expected_harness_fingerprint]
   const paired = paired_delta_report(baseline.rows, treatment.rows)
   const regression = regression_gate(baseline.rows, treatment.rows)
   const gate_evaluable = minimum_trials >= 5
@@ -188,11 +184,11 @@ fn main(harness: Harness) -> int {
   const ledger_path = harness.env.get_or("HARN_EVENT_LOG_SQLITE_PATH", "")
   const shared_ledger = harness.env.get_or("HARN_EVENT_LOG_BACKEND", "") == "sqlite"
     && ledger_path
-    != ""
+      != ""
     && is_absolute(ledger_path)
   if baseline_commit == "" || treatment_commit == "" || baseline_commit == treatment_commit
     || provider
-    == ""
+      == ""
     || model == ""
     || !contains(["meter-tune", "meter-holdout"], split)
     || minimum_trials < 5

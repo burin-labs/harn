@@ -24,9 +24,7 @@ pipeline test(harness: Harness, task) {
   const projected = llm_options(call_opts)
   harness.stdio.log(
     "llm provider=" + to_string(projected.provider) + " budget="
-      + to_string(
-      projected.budget?.max_cost_usd,
-    ),
+      + to_string(projected.budget?.max_cost_usd),
   )
   const ladder: ModelLadder = [
     "mock-small",
@@ -49,9 +47,7 @@ pipeline test(harness: Harness, task) {
   const typed_loop = agent_options(loop_opts)
   harness.stdio.log(
     "loop until_done=" + to_string(typed_loop.loop_until_done) + " prose_cap="
-      + to_string(
-      typed_loop.turn_policy?.max_prose_chars,
-    ),
+      + to_string(typed_loop.turn_policy?.max_prose_chars),
   )
   const preset_overrides: AgentPresetOptions = {
     provider: "mock",
@@ -73,8 +69,6 @@ pipeline test(harness: Harness, task) {
   const typed_stage = workflow_stage_spec(stage)
   harness.stdio.log(
     "stage id=" + to_string(typed_stage.id) + " retries="
-      + to_string(
-      typed_stage.retry_policy?.max_attempts,
-    ),
+      + to_string(typed_stage.retry_policy?.max_attempts),
   )
 }

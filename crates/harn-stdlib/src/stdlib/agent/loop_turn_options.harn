@@ -49,20 +49,20 @@ pub fn __agent_loop_completed_dispatch_stall(args) -> AgentLoopCompletedDispatch
   )
   const state = completed.state
     + {
-    monologue_actuation: agent_monologue_actuation_observe_completed_dispatch(
-      completed.state.monologue_actuation,
-      args.stall_config.monologue_actuation,
-      args.prior_read_streak,
-      len(results) > 0
-        && len(results) == len(args.tool_calls)
-        && results.all({ result -> __tool_result_ok(result) })
-        && agent_tool_calls_are_read_only(
-        args.tool_calls,
-        args.turn_opts?.tools,
-        args.turn_opts?.policy,
+      monologue_actuation: agent_monologue_actuation_observe_completed_dispatch(
+        completed.state.monologue_actuation,
+        args.stall_config.monologue_actuation,
+        args.prior_read_streak,
+        len(results) > 0
+          && len(results) == len(args.tool_calls)
+          && results.all({ result -> __tool_result_ok(result) })
+          && agent_tool_calls_are_read_only(
+            args.tool_calls,
+            args.turn_opts?.tools,
+            args.turn_opts?.policy,
+          ),
       ),
-    ),
-  }
+    }
   return {state: state, no_information_gain: completed.no_information_gain}
 }
 
@@ -235,9 +235,9 @@ pub fn __apply_post_turn_options(opts, outcome) {
   if narrowing != nil {
     updated = updated
       + {
-      _tool_surface_narrowing_history: narrowing?.history ?? [],
-      _tool_surface_narrowed_tools: narrowing?.narrowed_tools,
-    }
+        _tool_surface_narrowing_history: narrowing?.history ?? [],
+        _tool_surface_narrowed_tools: narrowing?.narrowed_tools,
+      }
   }
   const llm_patch = outcome?.llm_options
   if llm_patch != nil {
@@ -250,10 +250,11 @@ pub fn __apply_post_turn_options(opts, outcome) {
     const route_patch_seen = route_patch_has_provider || route_patch_has_model
     updated = updated
       + {
-      llm_options: base_llm_options + llm_patch,
-      _agent_loop_last_llm_route_patch_seen: route_patch_seen,
-      _agent_loop_last_llm_route_patch_complete: route_patch_has_provider && route_patch_has_model,
-    }
+        llm_options: base_llm_options + llm_patch,
+        _agent_loop_last_llm_route_patch_seen: route_patch_seen,
+        _agent_loop_last_llm_route_patch_complete: route_patch_has_provider
+          && route_patch_has_model,
+      }
   }
   return updated
 }
@@ -305,8 +306,7 @@ pub fn __next_progress_count(made_progress, turns_since_progress) {
 pub fn __loop_progress_nudge_text(depth, has_tools, paradigm, made_tool_calls = false) {
   const action = if has_tools {
     "Emit exactly one well-formed " + paradigm.call_noun + " now, or state your final answer "
-      + paradigm
-      .final_answer
+      + paradigm.final_answer
       + " and stop."
   } else {
     "Make concrete progress in your reply now, or state your final answer and stop."
@@ -455,33 +455,17 @@ pub fn __agent_loop_budget_exhaustion(
   const aggregates = __agent_loop_budget_aggregates(agent, clock, session_id, totals, loop_start_ms)
   if budget?.wall_clock_ms != nil && aggregates.wall_clock_ms >= budget.wall_clock_ms {
     return aggregates
-      + {
-      exhausted: true,
-      kind: "wall_clock",
-      iteration: iteration,
-      max_iterations: max_iterations,
-    }
+      + {exhausted: true, kind: "wall_clock", iteration: iteration, max_iterations: max_iterations}
   }
   if budget?.total_cost_usd != nil
     && (aggregates.unpriced_calls > 0
-    || aggregates.cost_usd
-    >= budget
-    .total_cost_usd) {
+      || aggregates.cost_usd
+        >= budget.total_cost_usd) {
     return aggregates
-      + {
-      exhausted: true,
-      kind: "total_cost",
-      iteration: iteration,
-      max_iterations: max_iterations,
-    }
+      + {exhausted: true, kind: "total_cost", iteration: iteration, max_iterations: max_iterations}
   }
   return aggregates
-    + {
-    exhausted: false,
-    kind: "",
-    iteration: iteration,
-    max_iterations: max_iterations,
-  }
+    + {exhausted: false, kind: "", iteration: iteration, max_iterations: max_iterations}
 }
 
 pub fn __agent_loop_emit_budget_exhausted(agent: HarnessAgent, session_id, exhaustion) {
@@ -515,13 +499,13 @@ pub fn __agent_loop_record_budget_stop(decisions, iteration, current_max, reason
 pub fn __stall_judge_opts(turn_opts, completion_judge_invocations, done_judge_invocations) -> dict {
   return turn_opts
     + {
-    _done_judge_due: true,
-    _done_judge_trigger: "stalled",
-    _done_judge_invocations: done_judge_invocations,
-    _verify_completion_judge_trigger: "stalled",
-    _verify_completion_judge_invocations: completion_judge_invocations,
-    _defer_judge_feedback: true,
-  }
+      _done_judge_due: true,
+      _done_judge_trigger: "stalled",
+      _done_judge_invocations: done_judge_invocations,
+      _verify_completion_judge_trigger: "stalled",
+      _verify_completion_judge_invocations: completion_judge_invocations,
+      _defer_judge_feedback: true,
+    }
 }
 
 pub fn __done_judge_hit(verdict) -> int {
@@ -674,18 +658,18 @@ pub fn __agent_loop_failure_matches_kind(error, wanted) {
   if wanted == "transient" {
     return kind == "transient" || category == "transient_network" || category == "timeout"
       || reason
-      == "timeout"
+        == "timeout"
   }
   if wanted == "rate_limit" {
     return kind == "rate_limit" || category == "rate_limit" || category == "rate_limited"
       || reason
-      == "rate_limit"
+        == "rate_limit"
       || status == 429
   }
   if wanted == "provider_5xx" {
     return kind == "provider_5xx" || category == "server_error" || category == "overloaded"
       || reason
-      == "server_error"
+        == "server_error"
       || (status >= 500 && status < 600)
   }
   return category == wanted || reason == wanted || kind == wanted
@@ -723,10 +707,7 @@ pub fn __agent_loop_is_escalation_transport_failure(error) {
     return true
   }
   return __agent_loop_failure_matches_kind(error, "transient")
-    || __agent_loop_failure_matches_kind(
-    error,
-    "rate_limit",
-  )
+    || __agent_loop_failure_matches_kind(error, "rate_limit")
     || __agent_loop_failure_matches_kind(error, "provider_5xx")
 }
 
@@ -775,17 +756,17 @@ pub fn __agent_loop_emit_provider_error(
       iteration: iteration_index + 1,
       iteration_info: aggregates
         + {
-        dispatch_skipped: true,
-        skip_reason: skip_reason,
-        provider_error: call?.error ?? {},
-        provider: to_string(llm_opts?.provider ?? ""),
-        model: to_string(llm_opts?.model ?? ""),
-        provider_status: to_string(call?.status ?? ""),
-        provider_error_message: to_string(call?.error?.message ?? call?.error ?? ""),
-        consecutive_failures: 0,
-        escalation_fallback: escalation_fallback,
-        escalation_transport_abort: skip_reason == "escalation_aborted_provider_transport",
-      },
+          dispatch_skipped: true,
+          skip_reason: skip_reason,
+          provider_error: call?.error ?? {},
+          provider: to_string(llm_opts?.provider ?? ""),
+          model: to_string(llm_opts?.model ?? ""),
+          provider_status: to_string(call?.status ?? ""),
+          provider_error_message: to_string(call?.error?.message ?? call?.error ?? ""),
+          consecutive_failures: 0,
+          escalation_fallback: escalation_fallback,
+          escalation_transport_abort: skip_reason == "escalation_aborted_provider_transport",
+        },
     },
   )
 }
@@ -852,7 +833,7 @@ pub fn __agent_stage_modes(kind: AgentStage) {
   }
   if kind == __AGENT_LOOP_CHECKPOINT_ITERATION_START
     || kind
-    == __AGENT_LOOP_CHECKPOINT_POST_TOOL_DISPATCH
+      == __AGENT_LOOP_CHECKPOINT_POST_TOOL_DISPATCH
     || kind == "iteration_end" {
     const typed_delivery = if kind == __AGENT_LOOP_CHECKPOINT_ITERATION_START {
       __AGENT_LOOP_HOST_INJECTION_TURN_BOUNDARY
@@ -1028,11 +1009,11 @@ pub fn __agent_loop_fire_resume_continuity(agent: HarnessAgent, session, opts) {
     "worker_resumed",
     payload
       + {
-      session_id: session.session_id,
-      session: {id: session.session_id},
-      turn: payload?.turn ?? 0,
-      iteration: payload?.iteration ?? 0,
-    },
+        session_id: session.session_id,
+        session: {id: session.session_id},
+        turn: payload?.turn ?? 0,
+        iteration: payload?.iteration ?? 0,
+      },
     opts,
   )
   return omit(opts, ["_resume_continuity"])
@@ -1048,11 +1029,11 @@ pub fn __agent_loop_fire_resume_continuity(agent: HarnessAgent, session, opts) {
 pub fn agent_direct_llm_options(turn_llm_opts, turn_prompt, session_id, iteration) -> dict {
   return turn_llm_opts
     + {
-    messages: turn_prompt.messages,
-    session_id: session_id,
-    tool_format: turn_llm_opts.tool_format,
-    _directives_rendered: true,
-    _iteration: iteration,
-    _system_fragments: turn_prompt.fragments,
-  }
+      messages: turn_prompt.messages,
+      session_id: session_id,
+      tool_format: turn_llm_opts.tool_format,
+      _directives_rendered: true,
+      _iteration: iteration,
+      _system_fragments: turn_prompt.fragments,
+    }
 }

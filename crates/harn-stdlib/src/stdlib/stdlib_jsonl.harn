@@ -268,9 +268,7 @@ pub fn read_jsonl_contract_page_result<T>(
       continue
     }
     records = records
-      + [
-      {line: record.line, offset: record.offset, raw: record.raw, value: unwrap(checked)},
-    ]
+      + [{line: record.line, offset: record.offset, raw: record.raw, value: unwrap(checked)}]
   }
   return Ok({records: records, issues: issues, next_cursor: page.next_cursor, done: page.done})
 }

@@ -129,10 +129,10 @@ pub fn __agent_input_guardrail_normalize(raw, opts = nil, context = nil) {
   const options = opts ?? {}
   const threshold_source = options?.confidence_threshold
     ?? if type_of(raw) == "dict" {
-    raw?.confidence_threshold ?? raw?.threshold
-  } else {
-    nil
-  }
+      raw?.confidence_threshold ?? raw?.threshold
+    } else {
+      nil
+    }
   const threshold = __input_guardrail_threshold(threshold_source)
   const action = if type_of(raw) == "dict" {
     __input_guardrail_action(raw?.action ?? raw?.verdict ?? raw?.label)

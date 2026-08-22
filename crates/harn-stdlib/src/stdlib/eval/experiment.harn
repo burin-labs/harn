@@ -83,8 +83,7 @@ pub fn promote_experiment(
   }
   if decision.spend_usd < registration.prior_spend_usd
     || decision.spend_usd
-    > registration.budget
-    .max_spend_usd {
+      > registration.budget.max_spend_usd {
     throw "std/eval/experiment: decision spend is outside the frozen budget"
   }
   const identity = {

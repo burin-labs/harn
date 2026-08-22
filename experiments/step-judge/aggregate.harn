@@ -89,9 +89,7 @@ fn __format_md(groups, results_dir: string) {
       }
       lines = lines.appending(
         "| " + cell + " | " + to_string(stats.runs) + " | " + to_string(stats.passed) + " | "
-          + to_string(
-          stats.pass_rate_pct,
-        )
+          + to_string(stats.pass_rate_pct)
           + "% | "
           + to_string(stats.cost_usd)
           + " | "
@@ -133,9 +131,7 @@ fn __format_md(groups, results_dir: string) {
       const stats = __cell_stats(groups[cell])
       lines = lines.appending(
         "| " + cell + " | " + to_string(stats.runs) + " | " + to_string(stats.passed) + " | "
-          + to_string(
-          stats.pass_rate_pct,
-        )
+          + to_string(stats.pass_rate_pct)
           + "% | "
           + to_string(stats.cost_usd)
           + " |",

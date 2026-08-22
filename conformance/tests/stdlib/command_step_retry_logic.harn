@@ -6,6 +6,7 @@ import {
   command_steps_append,
   command_steps_failed,
 } from "std/command"
+import { command_step_ref_impl } from "std/command/step_ref"
 
 fn failed_result(code, text) {
   return {status: "completed", exit_code: code, stdout: text, stderr: "", timed_out: false}
@@ -92,6 +93,9 @@ pipeline default(harness: Harness) {
   assert_eq(command_last_failed_step(appended.steps).name, "classified")
   assert_eq(command_last_failed_step(appended.steps, {is_recovered: recovered}), nil)
   const compact = command_step_ref(appended.step, {tail_bytes: 4})
+  require json_stringify(compact)
+    == json_stringify(command_step_ref_impl(appended.step, {tail_bytes: 4})),
+    "std/command step-ref facade must match its implementation"
   assert_eq(compact.name, "classified")
   assert_eq(compact.status, "completed")
   assert_eq(compact.tail, "nied")

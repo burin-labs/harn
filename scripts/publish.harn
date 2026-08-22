@@ -125,8 +125,7 @@ pub fn publish_failure_category(output: string) -> PublishFailureCategory {
   const text = output.lower()
   if text.contains("already exists on crates.io index")
     || (text.contains("crate version")
-    && text
-    .contains("already uploaded")) {
+      && text.contains("already uploaded")) {
     return "already_present"
   }
   if text.contains("429") || text.contains("too many requests") {
@@ -144,13 +143,9 @@ pub fn publish_failure_category(output: string) -> PublishFailureCategory {
     return "transient_network"
   }
   if text.contains("packages remain in plan")
-    || text.contains(
-    "timeout while waiting for published dependencies",
-  )
+    || text.contains("timeout while waiting for published dependencies")
     || text.contains("timed out waiting for")
-    || text.contains(
-    "failed to select a version for the requirement",
-  ) {
+    || text.contains("failed to select a version for the requirement") {
     return "propagation"
   }
   return "permanent"
@@ -354,9 +349,7 @@ fn tree_requires_allow_dirty(fs: HarnessFs, tools: HarnessTools) -> bool {
     return true
   }
   return fs.exists("crates/harn-cli/generated/cli-bytecode-manifest.json")
-    || fs.exists(
-    "crates/harn-cli/portal-dist",
-  )
+    || fs.exists("crates/harn-cli/portal-dist")
 }
 
 /**

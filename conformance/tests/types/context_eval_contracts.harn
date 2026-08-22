@@ -47,10 +47,7 @@ pipeline test(harness: Harness, task) {
   )
   // A deterministic score given model-authored text is rejected.
   const wrong_score: any = sample_report_core()
-    + {
-    manifest_id: "m1",
-    aggregate: sample_aggregate() + {mean_final_correctness: "high"},
-  }
+    + {manifest_id: "m1", aggregate: sample_aggregate() + {mean_final_correctness: "high"}}
   assert(
     !schema_report(wrong_score, ContextEvalReport).ok,
     "non-numeric deterministic score is rejected",

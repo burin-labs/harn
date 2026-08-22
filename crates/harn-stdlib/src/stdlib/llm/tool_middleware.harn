@@ -342,7 +342,7 @@ pub fn tool_inject_param(entry, name, schema_fragment, opts = nil) {
   const params = entry?.[schema_key]
   if type_of(params) == "dict" && contains(params.keys(), "type")
     && to_string(params.type)
-    == "object" {
+      == "object" {
     const props = __tool_mw_dict(params?.properties)
     if contains(props.keys(), name) {
       return entry
@@ -1452,12 +1452,12 @@ pub fn with_timeout(clock: HarnessClock, opts) {
     }
     const breached = result
       + {
-      ok: false,
-      status: "error",
-      error: message + " (elapsed: " + to_string(elapsed) + "ms, limit: " + to_string(limit)
-        + "ms)",
-      error_category: "timeout",
-    }
+        ok: false,
+        status: "error",
+        error: message + " (elapsed: " + to_string(elapsed) + "ms, limit: " + to_string(limit)
+          + "ms)",
+        error_category: "timeout",
+      }
     return __tool_mw_attach_audit(
       breached,
       {layers: [{name: "with_timeout", status: "timeout", elapsed_ms: elapsed, limit_ms: limit}]},

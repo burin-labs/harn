@@ -39,11 +39,11 @@ fn run_format(harness: Harness, options) {
     nil,
     options
       + {
-      tools: sample_tools(),
-      llm_caller: format_echo_caller(),
-      max_iterations: 1,
-      done_judge: false,
-    },
+        tools: sample_tools(),
+        llm_caller: format_echo_caller(),
+        max_iterations: 1,
+        done_judge: false,
+      },
   )
 }
 

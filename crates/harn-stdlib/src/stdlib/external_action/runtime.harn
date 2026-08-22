@@ -101,9 +101,9 @@ fn __external_action_adapter_result(
   const raw_outcome = lowercase(trim(to_string(raw?.outcome ?? "")))
   if raw_outcome != "confirmed" && raw_outcome != "failed_before_dispatch"
     && raw_outcome
-    != "rejected"
+      != "rejected"
     && raw_outcome
-    != "indeterminate" {
+      != "indeterminate" {
     return Err(
       external_action_error(
         "malformed_adapter_result",
@@ -226,21 +226,21 @@ fn __external_action_receipt_fields(
     schema: EXTERNAL_ACTION_RECEIPT_SCHEMA,
     id: "receipt_"
       + substring(
-      sha256(
-        json_stringify(
-          {
-            action: intent.fingerprint,
-            adapter: adapter_id,
-            outcome: outcome,
-            provider_action_id: provider_action_id,
-            reconciliation: reconciliation,
-            error_code: error?.code,
-          },
+        sha256(
+          json_stringify(
+            {
+              action: intent.fingerprint,
+              adapter: adapter_id,
+              outcome: outcome,
+              provider_action_id: provider_action_id,
+              reconciliation: reconciliation,
+              error_code: error?.code,
+            },
+          ),
         ),
+        0,
+        24,
       ),
-      0,
-      24,
-    ),
     action_id: intent.id,
     effect_fingerprint: intent.effect_fingerprint,
     intent_fingerprint: intent.fingerprint,
@@ -514,9 +514,7 @@ pub fn external_action_execute(
     previous_terminal_receipt == nil
   } else {
     previous_terminal_receipt != nil
-      && is_ok(
-      external_action_retry_check(intent, previous_terminal_receipt),
-    )
+      && is_ok(external_action_retry_check(intent, previous_terminal_receipt))
   }
   if !retry_check {
     const denied = __external_action_denied_receipt(
@@ -579,9 +577,7 @@ pub fn external_action_execute(
         let disclosure: ExternalActionDisclosure? = nil
         if intent.protected_disclosure != nil {
           if disclosure_resolver == nil
-            || !__external_action_is_callable(
-            disclosure_resolver.disclose,
-          ) {
+            || !__external_action_is_callable(disclosure_resolver.disclose) {
             const denied = __external_action_denied_receipt(
               intent,
               adapter_id,
@@ -716,7 +712,7 @@ pub fn external_action_reconcile(
     "external_action_reconcile: intent fingerprint mismatch"
   require receipt.intent_fingerprint == intent.fingerprint
     && receipt.status
-    == "reconciliation_required",
+      == "reconciliation_required",
     "external_action_reconcile: receipt is not reconcilable"
   const grant_integrity = external_action_grant_integrity_check(intent, grant)
   require is_ok(grant_integrity), "external_action_reconcile: grant does not match the action"
@@ -776,8 +772,7 @@ pub fn external_action_reconcile(
   require type_of(completed) == "dict"
     && completed?.schema == "harn.external_action_receipt.v1"
     && completed?.intent_fingerprint
-    == intent
-    .fingerprint,
+      == intent.fingerprint,
     "external_action_reconcile: checkpoint returned an invalid receipt"
   const typed: any = completed
   return typed

@@ -18,14 +18,14 @@ fn __web_tag_fragments(html, tag) {
   for capture in regex_captures(pattern, html ?? "") {
     fragments = fragments
       + [
-      {
-        index: index,
-        tag: tag,
-        attributes: capture.groups[0] ?? "",
-        content: capture.groups[1] ?? "",
-        raw: capture.match,
-      },
-    ]
+        {
+          index: index,
+          tag: tag,
+          attributes: capture.groups[0] ?? "",
+          content: capture.groups[1] ?? "",
+          raw: capture.match,
+        },
+      ]
     index = index + 1
   }
   return fragments
@@ -100,13 +100,13 @@ fn __web_fragment_pattern_errors(fragments, patterns) {
       if len(matches) > 0 {
         errors = errors
           + [
-          __web_error(
-            pattern.code,
-            pattern.message,
-            fragment.tag + "[" + to_string(fragment.index) + "]",
-            matches,
-          ),
-        ]
+            __web_error(
+              pattern.code,
+              pattern.message,
+              fragment.tag + "[" + to_string(fragment.index) + "]",
+              matches,
+            ),
+          ]
       }
     }
   }
@@ -119,14 +119,14 @@ fn __web_secret_errors(html) {
     const title = finding?.title ?? finding?.detector ?? "secret"
     errors = errors
       + [
-      {
-        severity: "error",
-        code: "inline_secret",
-        message: "artifact contains a secret-like value: " + title,
-        fragment: "document",
-        finding: finding,
-      },
-    ]
+        {
+          severity: "error",
+          code: "inline_secret",
+          message: "artifact contains a secret-like value: " + title,
+          fragment: "document",
+          finding: finding,
+        },
+      ]
   }
   return errors
 }
@@ -236,164 +236,160 @@ pub fn web_artifact_validate(html, options = nil) {
   if !(opts?.allow_network ?? false) {
     errors = errors
       + __web_fragment_pattern_errors(
-      extracted.scripts,
-      [
-        {
-          code: "network_call",
-          fragment: "script",
-          regex: "\\bfetch\\s*\\(",
-          message: "artifact contains a fetch() network call",
-        },
-        {
-          code: "network_call",
-          fragment: "script",
-          regex: "\\bXMLHttpRequest\\b",
-          message: "artifact contains an XMLHttpRequest network call",
-        },
-        {
-          code: "network_call",
-          fragment: "script",
-          regex: "\\bnavigator\\.sendBeacon\\s*\\(",
-          message: "artifact contains a sendBeacon network call",
-        },
-        {
-          code: "network_call",
-          fragment: "script",
-          regex: "\\bWebSocket\\s*\\(",
-          message: "artifact contains a WebSocket network call",
-        },
-        {
-          code: "network_call",
-          fragment: "script",
-          regex: "\\bEventSource\\s*\\(",
-          message: "artifact contains an EventSource network call",
-        },
-        {
-          code: "network_call",
-          fragment: "script",
-          regex: "\\bimport\\s*\\(",
-          message: "artifact contains dynamic import()",
-        },
-      ],
-    )
+        extracted.scripts,
+        [
+          {
+            code: "network_call",
+            fragment: "script",
+            regex: "\\bfetch\\s*\\(",
+            message: "artifact contains a fetch() network call",
+          },
+          {
+            code: "network_call",
+            fragment: "script",
+            regex: "\\bXMLHttpRequest\\b",
+            message: "artifact contains an XMLHttpRequest network call",
+          },
+          {
+            code: "network_call",
+            fragment: "script",
+            regex: "\\bnavigator\\.sendBeacon\\s*\\(",
+            message: "artifact contains a sendBeacon network call",
+          },
+          {
+            code: "network_call",
+            fragment: "script",
+            regex: "\\bWebSocket\\s*\\(",
+            message: "artifact contains a WebSocket network call",
+          },
+          {
+            code: "network_call",
+            fragment: "script",
+            regex: "\\bEventSource\\s*\\(",
+            message: "artifact contains an EventSource network call",
+          },
+          {
+            code: "network_call",
+            fragment: "script",
+            regex: "\\bimport\\s*\\(",
+            message: "artifact contains dynamic import()",
+          },
+        ],
+      )
     errors = errors
       + __web_pattern_errors(
-      source,
-      [
-        {
-          code: "network_call",
-          fragment: "html",
-          regex:
-            "(?is)<(?:script|link|img|iframe)\\b[^>]*(?:src|href)\\s*=\\s*['\"]?(?:https?://|//)",
-          message: "artifact references an external network resource",
-        },
-      ],
-    )
+        source,
+        [
+          {
+            code: "network_call",
+            fragment: "html",
+            regex:
+              "(?is)<(?:script|link|img|iframe)\\b[^>]*(?:src|href)\\s*=\\s*['\"]?(?:https?://|//)",
+            message: "artifact references an external network resource",
+          },
+        ],
+      )
     errors = errors
       + __web_fragment_pattern_errors(
-      extracted.styles,
-      [
-        {
-          code: "network_call",
-          fragment: "style",
-          regex: "(?is)url\\(\\s*['\"]?(?:https?://|//)",
-          message: "artifact CSS references an external network resource",
-        },
-        {
-          code: "network_call",
-          fragment: "style",
-          regex: "(?is)@import\\s+(?:url\\()?\\s*['\"]?(?:https?://|//)",
-          message: "artifact CSS imports an external network resource",
-        },
-      ],
-    )
+        extracted.styles,
+        [
+          {
+            code: "network_call",
+            fragment: "style",
+            regex: "(?is)url\\(\\s*['\"]?(?:https?://|//)",
+            message: "artifact CSS references an external network resource",
+          },
+          {
+            code: "network_call",
+            fragment: "style",
+            regex: "(?is)@import\\s+(?:url\\()?\\s*['\"]?(?:https?://|//)",
+            message: "artifact CSS imports an external network resource",
+          },
+        ],
+      )
   }
   if !(opts?.allow_host_bridge ?? false) {
     errors = errors
       + __web_fragment_pattern_errors(
-      extracted.scripts,
-      [
-        {
-          code: "host_bridge_call",
-          fragment: "script",
-          regex: "\\bwindow\\.parent\\b",
-          message: "artifact reaches across the iframe parent boundary",
-        },
-        {
-          code: "host_bridge_call",
-          fragment: "script",
-          regex: "\\bparent\\.postMessage\\s*\\(",
-          message: "artifact calls parent.postMessage",
-        },
-        {
-          code: "host_bridge_call",
-          fragment: "script",
-          regex: "\\bacquireVsCodeApi\\s*\\(",
-          message: "artifact calls a host bridge API",
-        },
-        {
-          code: "host_bridge_call",
-          fragment: "script",
-          regex: "\\bwindow\\.webkit\\.messageHandlers\\b",
-          message: "artifact calls a native WebKit message handler",
-        },
-        {
-          code: "host_bridge_call",
-          fragment: "script",
-          regex: "\\b(hostBridge|harnHost)\\b",
-          message: "artifact calls a forbidden host bridge object",
-        },
-      ],
-    )
+        extracted.scripts,
+        [
+          {
+            code: "host_bridge_call",
+            fragment: "script",
+            regex: "\\bwindow\\.parent\\b",
+            message: "artifact reaches across the iframe parent boundary",
+          },
+          {
+            code: "host_bridge_call",
+            fragment: "script",
+            regex: "\\bparent\\.postMessage\\s*\\(",
+            message: "artifact calls parent.postMessage",
+          },
+          {
+            code: "host_bridge_call",
+            fragment: "script",
+            regex: "\\bacquireVsCodeApi\\s*\\(",
+            message: "artifact calls a host bridge API",
+          },
+          {
+            code: "host_bridge_call",
+            fragment: "script",
+            regex: "\\bwindow\\.webkit\\.messageHandlers\\b",
+            message: "artifact calls a native WebKit message handler",
+          },
+          {
+            code: "host_bridge_call",
+            fragment: "script",
+            regex: "\\b(hostBridge|harnHost)\\b",
+            message: "artifact calls a forbidden host bridge object",
+          },
+        ],
+      )
   }
   errors = errors
     + __web_fragment_pattern_errors(
-    extracted.scripts,
-    [
-      {
-        code: "dangerous_navigation",
-        fragment: "script",
-        regex: "\\blocation\\.(href|assign|replace)\\b",
-        message: "artifact mutates browser location",
-      },
-      {
-        code: "dangerous_navigation",
-        fragment: "script",
-        regex: "\\bwindow\\.open\\s*\\(",
-        message: "artifact opens a new browsing context",
-      },
-      {
-        code: "dangerous_navigation",
-        fragment: "script",
-        regex: "\\btop\\.location\\b",
-        message: "artifact navigates the top-level browsing context",
-      },
-    ],
-  )
+      extracted.scripts,
+      [
+        {
+          code: "dangerous_navigation",
+          fragment: "script",
+          regex: "\\blocation\\.(href|assign|replace)\\b",
+          message: "artifact mutates browser location",
+        },
+        {
+          code: "dangerous_navigation",
+          fragment: "script",
+          regex: "\\bwindow\\.open\\s*\\(",
+          message: "artifact opens a new browsing context",
+        },
+        {
+          code: "dangerous_navigation",
+          fragment: "script",
+          regex: "\\btop\\.location\\b",
+          message: "artifact navigates the top-level browsing context",
+        },
+      ],
+    )
   errors = errors
     + __web_pattern_errors(
-    source,
-    [
-      {
-        code: "dangerous_navigation",
-        fragment: "html",
-        regex: "(?is)<meta\\b[^>]*http-equiv\\s*=\\s*['\"]?refresh",
-        message: "artifact contains a meta refresh navigation",
-      },
-    ],
-  )
+      source,
+      [
+        {
+          code: "dangerous_navigation",
+          fragment: "html",
+          regex: "(?is)<meta\\b[^>]*http-equiv\\s*=\\s*['\"]?refresh",
+          message: "artifact contains a meta refresh navigation",
+        },
+      ],
+    )
   errors = errors + __web_secret_errors(source)
   if len(extracted.scripts) == 0 {
     warnings = warnings
-      + [
-      __web_warning("no_script_fragment", "artifact has no <script> fragment", "script"),
-    ]
+      + [__web_warning("no_script_fragment", "artifact has no <script> fragment", "script")]
   }
   if len(extracted.styles) == 0 {
     warnings = warnings
-      + [
-      __web_warning("no_style_fragment", "artifact has no <style> fragment", "style"),
-    ]
+      + [__web_warning("no_style_fragment", "artifact has no <style> fragment", "style")]
   }
   const error_codes = __web_unique_codes(errors)
   const warning_codes = __web_unique_codes(warnings)

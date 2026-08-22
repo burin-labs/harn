@@ -74,10 +74,10 @@ pipeline default(harness: Harness) {
   const catalog_timeout = to_float(info?.catalog?.stream_timeout)
   const resolved_timeout_s = env_timeout
     ?? if catalog_timeout == nil {
-    120
-  } else {
-    to_int(ceil(catalog_timeout))
-  }
+      120
+    } else {
+      to_int(ceil(catalog_timeout))
+    }
   // The catalog's tool_format is a recommendation, not the wire: an explicit
   // request is parity-steered by the same policy the loop applies, so record
   // both the request and what will actually run.

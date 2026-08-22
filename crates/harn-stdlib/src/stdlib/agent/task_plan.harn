@@ -380,9 +380,9 @@ fn __task_plan_validate_kind_fields(plan, report) {
     }
     if kind == "workflow_map"
       && (node?.map == nil
-      || (node.map?.items == nil
-      && node.map?.item_artifact_kind
-      == nil)) {
+        || (node.map?.items == nil
+          && node.map?.item_artifact_kind
+            == nil)) {
       out = __task_plan_push_error(
         out,
         "map_missing_inputs",
@@ -447,8 +447,8 @@ fn __task_plan_validate_scalar_loop_budgets(explicit, report) {
   let out = report
   if explicit?.wall_clock_ms != nil
     && (type_of(explicit.wall_clock_ms) != "int"
-    || explicit.wall_clock_ms
-    < 1) {
+      || explicit.wall_clock_ms
+        < 1) {
     out = __task_plan_push_error(
       out,
       "budget_wall_clock_ms",
@@ -459,10 +459,8 @@ fn __task_plan_validate_scalar_loop_budgets(explicit, report) {
   const total_cost_kind = type_of(explicit?.total_cost_usd)
   if explicit?.total_cost_usd != nil
     && ((total_cost_kind != "float" && total_cost_kind != "int")
-    || to_float(
-    explicit.total_cost_usd,
-  )
-    <= 0.0) {
+      || to_float(explicit.total_cost_usd)
+        <= 0.0) {
     out = __task_plan_push_error(
       out,
       "budget_total_cost_usd",
@@ -528,8 +526,8 @@ fn __task_plan_validate_consecutive_failure_budget(explicit, report) {
   out = __task_plan_validate_failure_kind_items(__task_plan_failure_kinds(failures), out)
   if failures?.paused_for_ms != nil
     && (type_of(failures.paused_for_ms) != "int"
-    || failures.paused_for_ms
-    < 0) {
+      || failures.paused_for_ms
+        < 0) {
     out = __task_plan_push_error(
       out,
       "budget_consecutive_failures_pause",
@@ -617,12 +615,12 @@ fn __task_plan_validate_reachability(plan, report) {
   }
   return out
     + {
-    graph_stats: {
-      node_count: len(__task_plan_collect_node_ids(plan)),
-      edge_count: len(plan?.edges ?? []),
-      reachable_count: len(reach.reachable),
-    },
-  }
+      graph_stats: {
+        node_count: len(__task_plan_collect_node_ids(plan)),
+        edge_count: len(plan?.edges ?? []),
+        reachable_count: len(reach.reachable),
+      },
+    }
 }
 
 fn __task_plan_finalize(report) {
@@ -873,9 +871,8 @@ fn __task_plan_compile_node(node_id, node, budget_policy) {
   )
   const capability_policy = __task_plan_capability_policy(node)
   const base_meta = {task_plan_kind: node?.kind, task_plan_purpose: node?.purpose ?? ""}
-    + (node
-    ?.metadata
-    ?? {})
+    + (node?.metadata
+      ?? {})
     + __task_plan_kind_metadata(node)
   let workflow_node = {
     id: node_id,
@@ -909,9 +906,7 @@ fn __task_plan_compile_nodes(plan) {
   const budget_policy = __task_plan_loop_budget_policy(plan)
   for entry in plan?.nodes ?? {} {
     compiled = compiled
-      + {
-      [entry.key]: __task_plan_compile_node(entry.key, entry.value, budget_policy),
-    }
+      + {[entry.key]: __task_plan_compile_node(entry.key, entry.value, budget_policy)}
   }
   return compiled
 }
@@ -1051,9 +1046,9 @@ pub fn task_plan_render_mermaid(plan) {
     }
     lines = lines
       + [
-      "  " + node_id + shape_open + "\"" + node_id + ": " + kind + "\\n" + label + "\""
-        + shape_close,
-    ]
+        "  " + node_id + shape_open + "\"" + node_id + ": " + kind + "\\n" + label + "\""
+          + shape_close,
+      ]
   }
   for edge in plan?.edges ?? [] {
     const arrow = if edge?.branch == nil {

@@ -265,13 +265,13 @@ pub fn plan_approved(plan, approval: ApprovalRecord) -> PlanArtifact {
   }
   return artifact
     + {
-    approval: {
-      state: state,
-      reviewers: approval.reviewers,
-      approved_at: approval.approved_at,
-      reason: approval.reason,
-    },
-  }
+      approval: {
+        state: state,
+        reviewers: approval.reviewers,
+        approved_at: approval.approved_at,
+        reason: approval.reason,
+      },
+    }
 }
 
 /**

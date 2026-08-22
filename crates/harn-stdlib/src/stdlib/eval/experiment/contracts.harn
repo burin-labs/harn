@@ -228,19 +228,23 @@ fn __metric_issues(manifest: ExperimentManifest) -> list<ValidationIssue> {
     if seen[guardrail.id] ?? false {
       issues = issues
         + [
-        validation_issue("experiment.duplicate_metric", "metric ids must be unique", path + ".id"),
-      ]
+          validation_issue(
+            "experiment.duplicate_metric",
+            "metric ids must be unique",
+            path + ".id",
+          ),
+        ]
     }
     seen = seen + {[guardrail.id]: true}
     if guardrail.alarm.threshold <= 0.0 {
       issues = issues
         + [
-        validation_issue(
-          "experiment.alarm_threshold",
-          "guardrail alarm thresholds must be positive",
-          path + ".alarm.threshold",
-        ),
-      ]
+          validation_issue(
+            "experiment.alarm_threshold",
+            "guardrail alarm thresholds must be positive",
+            path + ".alarm.threshold",
+          ),
+        ]
     }
     index = index + 1
   }
@@ -253,22 +257,22 @@ fn __arm_issues(manifest: ExperimentManifest) -> list<ValidationIssue> {
   if manifest.baseline.complexity < 0 {
     issues = issues
       + [
-      validation_issue(
-        "experiment.arm_complexity",
-        "arm complexity must be nonnegative",
-        "baseline.complexity",
-      ),
-    ]
+        validation_issue(
+          "experiment.arm_complexity",
+          "arm complexity must be nonnegative",
+          "baseline.complexity",
+        ),
+      ]
   }
   if len(manifest.candidates) == 0 {
     issues = issues
       + [
-      validation_issue(
-        "experiment.candidates",
-        "at least one candidate arm is required",
-        "candidates",
-      ),
-    ]
+        validation_issue(
+          "experiment.candidates",
+          "at least one candidate arm is required",
+          "candidates",
+        ),
+      ]
   }
   let seen: dict<string, bool> = {[manifest.baseline.id]: true}
   let index = 0
@@ -278,23 +282,23 @@ fn __arm_issues(manifest: ExperimentManifest) -> list<ValidationIssue> {
     if seen[arm.id] ?? false {
       issues = issues
         + [
-        validation_issue(
-          "experiment.duplicate_arm",
-          "baseline and candidate arm ids must be unique",
-          path + ".id",
-        ),
-      ]
+          validation_issue(
+            "experiment.duplicate_arm",
+            "baseline and candidate arm ids must be unique",
+            path + ".id",
+          ),
+        ]
     }
     seen = seen + {[arm.id]: true}
     if arm.complexity < 0 {
       issues = issues
         + [
-        validation_issue(
-          "experiment.arm_complexity",
-          "arm complexity must be nonnegative",
-          path + ".complexity",
-        ),
-      ]
+          validation_issue(
+            "experiment.arm_complexity",
+            "arm complexity must be nonnegative",
+            path + ".complexity",
+          ),
+        ]
     }
     index = index + 1
   }
@@ -305,33 +309,31 @@ fn __policy_issues(manifest: ExperimentManifest) -> list<ValidationIssue> {
   let issues: list<ValidationIssue> = []
   if manifest.decision.delta <= 0.0 || manifest.decision.delta >= 1.0 {
     issues = issues
-      + [
-      validation_issue("experiment.delta", "decision.delta must be in (0, 1)", "decision.delta"),
-    ]
+      + [validation_issue("experiment.delta", "decision.delta must be in (0, 1)", "decision.delta")]
   }
   const primary_width = manifest.metrics.primary.bounds.hi
   -manifest.metrics.primary.bounds.lo
   if manifest.decision.epsilon <= 0.0 || manifest.decision.epsilon >= primary_width {
     issues = issues
       + [
-      validation_issue(
-        "experiment.epsilon",
-        "decision.epsilon must be positive and smaller than the primary metric range",
-        "decision.epsilon",
-      ),
-    ]
+        validation_issue(
+          "experiment.epsilon",
+          "decision.epsilon must be positive and smaller than the primary metric range",
+          "decision.epsilon",
+        ),
+      ]
   }
   let previous = 0
   for rung in manifest.decision.ladder {
     if rung <= previous {
       issues = issues
         + [
-        validation_issue(
-          "experiment.ladder",
-          "decision.ladder must be non-empty, positive, and strictly increasing",
-          "decision.ladder",
-        ),
-      ]
+          validation_issue(
+            "experiment.ladder",
+            "decision.ladder must be non-empty, positive, and strictly increasing",
+            "decision.ladder",
+          ),
+        ]
       break
     }
     previous = rung
@@ -339,28 +341,32 @@ fn __policy_issues(manifest: ExperimentManifest) -> list<ValidationIssue> {
   if len(manifest.decision.ladder) == 0 {
     issues = issues
       + [
-      validation_issue("experiment.ladder", "decision.ladder must be non-empty", "decision.ladder"),
-    ]
+        validation_issue(
+          "experiment.ladder",
+          "decision.ladder must be non-empty",
+          "decision.ladder",
+        ),
+      ]
   }
   if manifest.budget.max_spend_usd <= 0.0 {
     issues = issues
       + [
-      validation_issue(
-        "experiment.spend_budget",
-        "budget.max_spend_usd must be positive",
-        "budget.max_spend_usd",
-      ),
-    ]
+        validation_issue(
+          "experiment.spend_budget",
+          "budget.max_spend_usd must be positive",
+          "budget.max_spend_usd",
+        ),
+      ]
   }
   if manifest.budget.max_trials_per_case < previous {
     issues = issues
       + [
-      validation_issue(
-        "experiment.trial_ceiling",
-        "budget.max_trials_per_case must cover the deepest ladder rung",
-        "budget.max_trials_per_case",
-      ),
-    ]
+        validation_issue(
+          "experiment.trial_ceiling",
+          "budget.max_trials_per_case must cover the deepest ladder rung",
+          "budget.max_trials_per_case",
+        ),
+      ]
   }
   return issues
 }
@@ -372,8 +378,8 @@ fn __case_set_issues(case_set: CaseSet, path: string) -> list<ValidationIssue> {
   if len(case_set.cases) == 0 {
     issues = issues
       + [
-      validation_issue("experiment.case_set", path + ".cases must be non-empty", path + ".cases"),
-    ]
+        validation_issue("experiment.case_set", path + ".cases must be non-empty", path + ".cases"),
+      ]
   }
   let seen: dict<string, bool> = {}
   let index = 0
@@ -381,12 +387,12 @@ fn __case_set_issues(case_set: CaseSet, path: string) -> list<ValidationIssue> {
     if trim(case_id) == "" || (seen[case_id] ?? false) {
       issues = issues
         + [
-        validation_issue(
-          "experiment.case_set",
-          path + ".cases must contain unique non-empty ids",
-          path + ".cases[" + to_string(index) + "]",
-        ),
-      ]
+          validation_issue(
+            "experiment.case_set",
+            path + ".cases must contain unique non-empty ids",
+            path + ".cases[" + to_string(index) + "]",
+          ),
+        ]
     }
     seen = seen + {[case_id]: true}
     index = index + 1
@@ -407,23 +413,23 @@ fn __manifest_rules(manifest: ExperimentManifest) -> list<ValidationIssue> {
   if manifest.splits.iterate.digest == manifest.splits.gate.digest {
     issues = issues
       + [
-      validation_issue(
-        "experiment.split_alias",
-        "iterate and gate case sets must have different digests",
-        "splits",
-      ),
-    ]
+        validation_issue(
+          "experiment.split_alias",
+          "iterate and gate case sets must have different digests",
+          "splits",
+        ),
+      ]
   }
   for case_id in manifest.splits.iterate.cases {
     if manifest.splits.gate.cases.contains(case_id) {
       issues = issues
         + [
-        validation_issue(
-          "experiment.split_overlap",
-          "iterate and gate case sets must be disjoint",
-          "splits",
-        ),
-      ]
+          validation_issue(
+            "experiment.split_overlap",
+            "iterate and gate case sets must be disjoint",
+            "splits",
+          ),
+        ]
       break
     }
   }
@@ -457,21 +463,21 @@ fn __blocking_issues(
     if trim(factor) == "" || (seen[factor] ?? false) {
       issues = issues
         + [
-        validation_issue(
-          "experiment.blocking_factor",
-          "blocking factors must be unique non-empty ids",
-          "assignment.blocking_factors[" + to_string(index) + "]",
-        ),
-      ]
+          validation_issue(
+            "experiment.blocking_factor",
+            "blocking factors must be unique non-empty ids",
+            "assignment.blocking_factors[" + to_string(index) + "]",
+          ),
+        ]
     } else if !context.supported_blocking_factors.contains(factor) {
       issues = issues
         + [
-        validation_issue(
-          "experiment.unknown_blocking_factor",
-          "the executing host does not support blocking factor '" + factor + "'",
-          "assignment.blocking_factors[" + to_string(index) + "]",
-        ),
-      ]
+          validation_issue(
+            "experiment.unknown_blocking_factor",
+            "the executing host does not support blocking factor '" + factor + "'",
+            "assignment.blocking_factors[" + to_string(index) + "]",
+          ),
+        ]
     }
     seen = seen + {[factor]: true}
     index = index + 1
@@ -479,12 +485,12 @@ fn __blocking_issues(
   if context.host_identity_available && !manifest.assignment.blocking_factors.contains("host") {
     issues = issues
       + [
-      validation_issue(
-        "experiment.host_block_required",
-        "host must be a blocking factor when host identity is available",
-        "assignment.blocking_factors",
-      ),
-    ]
+        validation_issue(
+          "experiment.host_block_required",
+          "host must be a blocking factor when host identity is available",
+          "assignment.blocking_factors",
+        ),
+      ]
   }
   return issues
 }

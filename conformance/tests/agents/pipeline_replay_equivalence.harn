@@ -56,8 +56,8 @@ pipeline default(harness: Harness) {
       harness.stdio.println(
         "seq_monotonic="
           + to_string(
-          first.payload.seq < second.payload.seq && second.payload.seq < third.payload.seq,
-        ),
+            first.payload.seq < second.payload.seq && second.payload.seq < third.payload.seq,
+          ),
       )
       return return_value
     },

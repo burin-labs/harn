@@ -16,9 +16,7 @@ import "std/triggers"
 pipeline test(harness: Harness, task) {
   const _ = lifecycle_audit_log_take(harness.obs)
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
-    + to_string(
-    harness.random.range(100000, 999999),
-  )
+    + to_string(harness.random.range(100000, 999999))
   const handle: TriggerHandle = harness.runtime.trigger_register(
     {
       id: "trigger-channel-reminder-current-" + unique,

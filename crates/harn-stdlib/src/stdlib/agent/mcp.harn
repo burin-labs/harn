@@ -67,10 +67,7 @@ fn __mcp_bootstrap_and_admit(tools: HarnessTools, session, opts, specs) {
   const result = tools.mcp_bootstrap(session.session_id, specs)
   const prior_info = opts?._mcp_server_info ?? []
   const out = opts
-    + {
-    _mcp_bootstrap: result,
-    _mcp_server_info: prior_info + (result?.server_info ?? []),
-  }
+    + {_mcp_bootstrap: result, _mcp_server_info: prior_info + (result?.server_info ?? [])}
   return __mcp_admit_tools(out, result)
 }
 

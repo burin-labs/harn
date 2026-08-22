@@ -142,9 +142,8 @@ fn __external_action_policy_money(raw) -> Result<list<ExternalActionMoney>, Exte
     }
     const currency = uppercase(trim(to_string(item?.currency ?? "")))
     if regex_match("^[A-Z]{3}$", currency) == nil || type_of(item?.amount_minor) != "int"
-      || item
-      .amount_minor
-      < 0 {
+      || item.amount_minor
+        < 0 {
       return Err(
         __external_action_policy_error(
           "invalid_max_external_spend",
@@ -282,9 +281,7 @@ pub fn external_action_managed_policy_check(
   policy: ExternalActionManagedPolicy,
 ) -> Result<ExternalActionGrant, ExternalActionError> {
   if !external_action_intent_is_exact(intent)
-    || !is_ok(
-    external_action_grant_integrity_check(intent, grant),
-  ) {
+    || !is_ok(external_action_grant_integrity_check(intent, grant)) {
     return Err(
       __external_action_policy_error(
         "invalid_action_authority",
@@ -310,9 +307,7 @@ pub fn external_action_managed_policy_check(
     )
   }
   if policy.automatic_approval_forbidden
-    && __external_action_automatic_method(
-    grant.authorization_method,
-  ) {
+    && __external_action_automatic_method(grant.authorization_method) {
     return Err(
       __external_action_policy_error(
         "automatic_approval_forbidden",
@@ -355,9 +350,7 @@ pub fn external_action_managed_policy_check(
     )
   }
   if __external_action_assurance_rank(grant.authentication_assurance)
-    < __external_action_assurance_rank(
-    policy.minimum_authentication_assurance,
-  ) {
+    < __external_action_assurance_rank(policy.minimum_authentication_assurance) {
     return Err(
       __external_action_policy_error(
         "authentication_too_weak",

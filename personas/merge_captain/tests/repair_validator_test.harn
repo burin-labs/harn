@@ -90,9 +90,7 @@ pipeline test_validate_tests_rejects_empty_when_required(harness: Harness, task)
 pipeline test_validate_tests_rejects_missing_required_command(harness: Harness, task) {
   const bundle = _bundle({required_verification: [{name: "lint", command: "make lint"}]})
   const bad = _good_output()
-    + {
-    tests_run: [{name: "tests", command: "make test", status: "ok", exit_code: 0}],
-  }
+    + {tests_run: [{name: "tests", command: "make test", status: "ok", exit_code: 0}]}
   const v = validate_tests(bundle, bad)
   assert(!v.ok)
   assert(v.errors[0].contains("missing tests"))
@@ -102,9 +100,7 @@ pipeline test_validate_tests_rejects_missing_required_command(harness: Harness, 
 pipeline test_validate_tests_rejects_failing(harness: Harness, task) {
   const bundle = _bundle({})
   const bad = _good_output()
-    + {
-    tests_run: [{name: "tests", command: "make test", status: "failed", exit_code: 1}],
-  }
+    + {tests_run: [{name: "tests", command: "make test", status: "failed", exit_code: 1}]}
   const v = validate_tests(bundle, bad)
   assert(!v.ok)
   assert(v.errors[0].contains("failing tests"))
@@ -114,11 +110,11 @@ pipeline test_validate_write_scope_blocks_outside(harness: Harness, task) {
   const bundle = _bundle({})
   const bad = _good_output()
     + {
-    files_changed: [
-      {path: "src/foo.rs", action: "modified"},
-      {path: "secrets/key.pem", action: "created"},
-    ],
-  }
+      files_changed: [
+        {path: "src/foo.rs", action: "modified"},
+        {path: "secrets/key.pem", action: "created"},
+      ],
+    }
   const v = validate_write_scope(bundle, bad)
   assert(!v.ok)
   assert(v.errors[0].contains("unexpected write scope"))
@@ -189,10 +185,10 @@ pipeline test_validate_all_aggregates_errors(harness: Harness, task) {
   const bundle = _bundle({})
   const bad = _good_output()
     + {
-    files_changed: [{path: "secrets/key.pem", action: "created"}],
-    tests_run: [{name: "tests", command: "make test", status: "failed", exit_code: 1}],
-    push_result: {pushed: false, ref: "feat"},
-  }
+      files_changed: [{path: "secrets/key.pem", action: "created"}],
+      tests_run: [{name: "tests", command: "make test", status: "failed", exit_code: 1}],
+      push_result: {pushed: false, ref: "feat"},
+    }
   const v = validate_all(bundle, bad)
   assert(!v.ok)
   // tests + write scope + push together produce 3 distinct errors.

@@ -72,11 +72,7 @@ pipeline default(harness: Harness) {
   assert(!agent_stall_no_net_progress({enabled: true}, base_state), "parity: guard off => false")
   // Guard ON + a failing same-diagnostic streak past the extend-after => true.
   const failing = base_state
-    + {
-    last_diagnostic_class: "fail",
-    same_diagnostic_streak: 3,
-    failing_verify_turns: 3,
-  }
+    + {last_diagnostic_class: "fail", same_diagnostic_streak: 3, failing_verify_turns: 3}
   const sig_cfg = {
     enabled: true,
     no_net_progress_extend_guard: true,

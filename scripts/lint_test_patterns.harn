@@ -865,79 +865,79 @@ pipeline main(harness: Harness, task) {
   harness.stdio.println("--- std::thread::sleep ---")
   violations = violations
     + report_pattern(
-    harness.stdio,
-    test_files,
-    { rel -> THREAD_SLEEP_ALLOWLIST.contains(rel) },
-    thread_sleep_pattern(),
-    ["    hint: Use tokio::time::pause() + advance(), or wait on an event/channel instead."],
-  )
+      harness.stdio,
+      test_files,
+      { rel -> THREAD_SLEEP_ALLOWLIST.contains(rel) },
+      thread_sleep_pattern(),
+      ["    hint: Use tokio::time::pause() + advance(), or wait on an event/channel instead."],
+    )
   harness.stdio.println("--- tokio::time::sleep ---")
   violations = violations
     + report_pattern(
-    harness.stdio,
-    test_files,
-    { rel -> TOKIO_SLEEP_ALLOWLIST.contains(rel) },
-    tokio_sleep_pattern(),
-    [
-      "    hint: Use tokio::time::pause() + advance() in a #[tokio::test(start_paused = true)] context.",
-    ],
-  )
+      harness.stdio,
+      test_files,
+      { rel -> TOKIO_SLEEP_ALLOWLIST.contains(rel) },
+      tokio_sleep_pattern(),
+      [
+        "    hint: Use tokio::time::pause() + advance() in a #[tokio::test(start_paused = true)] context.",
+      ],
+    )
   harness.stdio.println("--- Instant::now() deadline comparison (wall-clock poll) ---")
   // Catches `Instant::now() < deadline`, `>= deadline`, etc. — the smell is
   // the comparison itself, regardless of whether it sits inside a `while`,
   // a `loop`, or an `assert!` macro inside a loop body.
   violations = violations
     + report_pattern(
-    harness.stdio,
-    test_files,
-    { rel -> INSTANT_NOW_DEADLINE_ALLOWLIST.contains(rel) },
-    instant_deadline_pattern(),
-    [
-      "    hint: Subscribe to an EventLog channel, use OrchestratorHarness, or wrap a poll in tokio::time::timeout instead.",
-    ],
-  )
+      harness.stdio,
+      test_files,
+      { rel -> INSTANT_NOW_DEADLINE_ALLOWLIST.contains(rel) },
+      instant_deadline_pattern(),
+      [
+        "    hint: Subscribe to an EventLog channel, use OrchestratorHarness, or wrap a poll in tokio::time::timeout instead.",
+      ],
+    )
   harness.stdio.println("--- SystemTime::now() in tests ---")
   violations = violations
     + report_pattern(
-    harness.stdio,
-    test_files,
-    { rel -> SYSTEM_TIME_ALLOWLIST.contains(rel) },
-    system_time_pattern(),
-    ["    hint: Inject a MockClock or use the stdlib clock() builtin via a test harness."],
-  )
+      harness.stdio,
+      test_files,
+      { rel -> SYSTEM_TIME_ALLOWLIST.contains(rel) },
+      system_time_pattern(),
+      ["    hint: Inject a MockClock or use the stdlib clock() builtin via a test harness."],
+    )
   harness.stdio.println("--- recv_timeout with explicit sub-second Duration ---")
   violations = violations
     + report_pattern(
-    harness.stdio,
-    test_files,
-    { rel -> RECV_TIMEOUT_MILLIS_ALLOWLIST.contains(rel) },
-    recv_timeout_pattern(),
-    [
-      "    hint: Use an event-driven wait (channel recv with tokio::time::timeout) instead of busy-polling.",
-    ],
-  )
+      harness.stdio,
+      test_files,
+      { rel -> RECV_TIMEOUT_MILLIS_ALLOWLIST.contains(rel) },
+      recv_timeout_pattern(),
+      [
+        "    hint: Use an event-driven wait (channel recv with tokio::time::timeout) instead of busy-polling.",
+      ],
+    )
   harness.stdio.println("--- wall-clock millisecond budget asserted in a test ---")
   violations = violations
     + report_pattern(
-    harness.stdio,
-    test_files,
-    { rel -> false },
-    elapsed_millis_budget_pattern(),
-    [
-      "    hint: Assert the correctness contract here and move the latency budget to the benchmark gate; `make test` shares hosts with release audit lanes, so a sub-second budget measures contention.",
-    ],
-  )
+      harness.stdio,
+      test_files,
+      { rel -> false },
+      elapsed_millis_budget_pattern(),
+      [
+        "    hint: Assert the correctness contract here and move the latency budget to the benchmark gate; `make test` shares hosts with release audit lanes, so a sub-second budget measures contention.",
+      ],
+    )
   harness.stdio.println("--- obsolete harn_command helper ---")
   violations = violations
     + report_pattern(
-    harness.stdio,
-    test_files,
-    { rel -> false },
-    harn_command_pattern(),
-    [
-      "    hint: harn_command was retired; use in-process APIs in fast tests or harn_e2e_command in the E2E suite.",
-    ],
-  )
+      harness.stdio,
+      test_files,
+      { rel -> false },
+      harn_command_pattern(),
+      [
+        "    hint: harn_command was retired; use in-process APIs in fast tests or harn_e2e_command in the E2E suite.",
+      ],
+    )
   harness.stdio.println("--- direct Cargo harn binary access (file-level ratchet) ---")
   for path in direct_harn_binary_baseline_duplicates() {
     harness.stdio.println("  duplicate baseline path: " + path)
@@ -947,7 +947,7 @@ pipeline main(harness: Harness, task) {
   for f in test_files {
     if !f.rel.starts_with("crates/harn-cli/tests/")
       || f.rel
-      == "crates/harn-cli/tests/test_util/process.rs" {
+        == "crates/harn-cli/tests/test_util/process.rs" {
       continue
     }
     const actual = find_hits(f.text, direct_harn_binary_pattern()).count
@@ -993,52 +993,54 @@ pipeline main(harness: Harness, task) {
   harness.stdio.println("--- Harn E2E subprocess helper outside E2E tests ---")
   violations = violations
     + report_pattern(
-    harness.stdio,
-    test_files,
-    is_e2e_subprocess_path,
-    harn_e2e_command_pattern(),
-    ["    hint: Harn E2E helpers are E2E-only; use in-process command/library APIs in fast tests."],
-  )
+      harness.stdio,
+      test_files,
+      is_e2e_subprocess_path,
+      harn_e2e_command_pattern(),
+      [
+        "    hint: Harn E2E helpers are E2E-only; use in-process command/library APIs in fast tests.",
+      ],
+    )
   harness.stdio.println("--- spawn_orchestrator outside E2E subprocess tests ---")
   violations = violations
     + report_pattern(
-    harness.stdio,
-    test_files,
-    is_e2e_subprocess_path,
-    spawn_orchestrator_pattern(),
-    ["    hint: spawn_orchestrator is E2E-only; use OrchestratorHarness in fast tests."],
-  )
+      harness.stdio,
+      test_files,
+      is_e2e_subprocess_path,
+      spawn_orchestrator_pattern(),
+      ["    hint: spawn_orchestrator is E2E-only; use OrchestratorHarness in fast tests."],
+    )
   harness.stdio.println("--- #[ignore] outside slow harn-cli integration tests ---")
   violations = violations
     + report_pattern(
-    harness.stdio,
-    test_files,
-    { rel -> rel.starts_with("crates/harn-cli/tests/") },
-    ignore_attr_pattern(),
-    [
-      "    hint: Default-suite Rust tests must run by default. Move slow subprocess coverage to the harn-cli E2E profile instead of using #[ignore].",
-    ],
-  )
+      harness.stdio,
+      test_files,
+      { rel -> rel.starts_with("crates/harn-cli/tests/") },
+      ignore_attr_pattern(),
+      [
+        "    hint: Default-suite Rust tests must run by default. Move slow subprocess coverage to the harn-cli E2E profile instead of using #[ignore].",
+      ],
+    )
   harness.stdio.println("--- copied conformance subprocess wait helpers ---")
   violations = violations
     + report_pattern(
-    harness.stdio,
-    harn_files,
-    { rel -> CONFORMANCE_HELPER_ALLOWLIST.contains(rel) },
-    wait_helper_pattern(),
-    [
-      "    hint: Import the shared helper from conformance/tests/_common.harn so retry ceilings stay consistent.",
-    ],
-  )
+      harness.stdio,
+      harn_files,
+      { rel -> CONFORMANCE_HELPER_ALLOWLIST.contains(rel) },
+      wait_helper_pattern(),
+      [
+        "    hint: Import the shared helper from conformance/tests/_common.harn so retry ceilings stay consistent.",
+      ],
+    )
   harness.stdio.println("--- random fixed-port conformance server allocation ---")
   violations = violations
     + report_pattern(
-    harness.stdio,
-    harn_files,
-    { rel -> false },
-    random_fixed_port_pattern(),
-    ["    hint: Bind test servers to port 0 and read the selected port from the readiness log."],
-  )
+      harness.stdio,
+      harn_files,
+      { rel -> false },
+      random_fixed_port_pattern(),
+      ["    hint: Bind test servers to port 0 and read the selected port from the readiness log."],
+    )
   harness.stdio.println("--- conformance sleep with fixed literal duration ---")
   // Fixtures that drive timing via `harness.testing.clock_set(...)` / `harness.testing.clock_advance(...)`
   // auto-deflake their `sleep(...)` calls (the unified test clock advances
@@ -1085,14 +1087,14 @@ pipeline main(harness: Harness, task) {
   harness.stdio.println("--- Non-test wall-clock reads (harn-vm/harn-cli runtime) ---")
   violations = violations
     + report_pattern(
-    harness.stdio,
-    runtime_files,
-    { rel -> NON_TEST_WALL_CLOCK_ALLOWLIST.contains(rel) },
-    wall_clock_pattern(),
-    [
-      "    hint: route time reads through an injected harn_clock::Clock; if the host wall clock is the source of truth (observability, JWT claim, retry-after, etc.), append this file to NON_TEST_WALL_CLOCK_ALLOWLIST in scripts/lint_test_patterns.harn with a one-line justification.",
-    ],
-  )
+      harness.stdio,
+      runtime_files,
+      { rel -> NON_TEST_WALL_CLOCK_ALLOWLIST.contains(rel) },
+      wall_clock_pattern(),
+      [
+        "    hint: route time reads through an injected harn_clock::Clock; if the host wall clock is the source of truth (observability, JWT claim, retry-after, etc.), append this file to NON_TEST_WALL_CLOCK_ALLOWLIST in scripts/lint_test_patterns.harn with a one-line justification.",
+      ],
+    )
   harness.stdio.println("")
   if violations > 0 {
     harness.stdio.println("FAIL: ${violations} forbidden test pattern violation(s) found.")

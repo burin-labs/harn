@@ -10,7 +10,7 @@ type AgentLoopCommand = {
   status: string,
 }
 
-type AgentLoopBudget = {
+pub type AgentLoopBudget = {
   mode: string,
   initial: int,
   max: int,
@@ -179,9 +179,7 @@ fn __agent_interpret_loop_command(command) -> AgentLoopCommand {
   const action = command?.action ?? "none"
   if action != "none" && action != "extend" && action != "stop" {
     throw "agent_loop: loop_control action must be \"none\", \"extend\", or \"stop\"; got "
-      + to_string(
-      action,
-    )
+      + to_string(action)
   }
   const by = command?.by ?? 0
   if type_of(by) != "int" {

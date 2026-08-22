@@ -66,7 +66,7 @@ fn _claim_receipts(events) -> list {
   for event in events ?? [] {
     if event.type == "typed_checkpoint"
       && event?.checkpoint?.schema
-      == "harn.agent_next_tool_claim_receipt.v1" {
+        == "harn.agent_next_tool_claim_receipt.v1" {
       receipts = receipts.appending(event.checkpoint)
     }
   }
@@ -268,9 +268,9 @@ pipeline test_schema_claim_dispatches_and_canonicalizes_in_every_dialect(harness
       if turn == 1 {
         if _claimed_name(call?.opts) == "verify"
           && call?.opts?._next_tool_claim_parser_format
-          == "json"
+            == "json"
           && call?.opts?.tool_format
-          == format {
+            == format {
           _bump(harness.runtime, contract_requests)
         }
         // All providers return this same grammar-constrained text envelope.
@@ -337,9 +337,7 @@ pipeline test_schema_claim_dispatches_and_canonicalizes_in_every_dialect(harness
       "dialect `"
         + format
         + "` must dispatch look then verify; calls="
-        + to_string(
-        harness.runtime.shared_snapshot(calls).value,
-      )
+        + to_string(harness.runtime.shared_snapshot(calls).value)
         + ", turns="
         + to_string(harness.runtime.shared_snapshot(turns).value)
         + ", status="
@@ -352,10 +350,7 @@ pipeline test_schema_claim_dispatches_and_canonicalizes_in_every_dialect(harness
     assert_eq(harness.runtime.shared_snapshot(contract_requests).value, 1)
     assert(
       harness.runtime.shared_snapshot(canonical_calls).value
-        == [
-        {name: "look", args: {}},
-        {name: "verify", args: {}},
-      ],
+        == [{name: "look", args: {}}, {name: "verify", args: {}}],
       "history projection for `"
         + format
         + "`: content="
@@ -415,7 +410,7 @@ pipeline test_stopping_verdict_outranks_and_clears_claim(harness: Harness, task)
     { event ->
       event.type == "typed_checkpoint"
         && event?.checkpoint?.schema
-        == "harn.agent_next_tool_claim_receipt.v1"
+          == "harn.agent_next_tool_claim_receipt.v1"
     },
   )
   assert_eq(captured.result.stop_reason, "host_policy_stop")

@@ -391,9 +391,7 @@ fn __render_html(report) -> string {
   out = out + ".err{color:#b00}.skip{color:#888;font-style:italic}"
   out = out + "</style></head><body>"
   out = out + "<h1>harn eval prompt</h1><div class=\"meta\">"
-    + __html_escape(
-    __safe_string(report["template_path"], ""),
-  )
+    + __html_escape(__safe_string(report["template_path"], ""))
     + " · mode: "
     + __safe_string(report["mode"], "")
     + "</div>"

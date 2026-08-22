@@ -20,9 +20,7 @@ pipeline test(harness: Harness, task) {
     [{text: "no", input_tokens: 10, output_tokens: 5, model: "gpt-4o-mini"}],
     { ->
       const unique = to_string(to_int(harness.clock.timestamp())) + "-"
-        + to_string(
-        harness.random.range(100000, 999999),
-      )
+        + to_string(harness.random.range(100000, 999999))
       const handle: TriggerHandle = harness.runtime.trigger_register(
         {
           id: "llm-predicate-false-" + unique,

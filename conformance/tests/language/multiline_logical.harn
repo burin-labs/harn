@@ -7,7 +7,7 @@ pipeline default(harness: Harness) {
   harness.stdio.println(b)
   // Mixed multiline
   const c = false || (true
-    && true)
+      && true)
   harness.stdio.println(c)
   // Multiline + should work
   const d = "hello"

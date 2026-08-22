@@ -159,11 +159,7 @@ pipeline main(harness: Harness, task) {
       harness.stdio.println(
         to_string(
           canon_resolve_root(harness.env, harness.fs, {project_root: dir})
-            == path_join(
-            dir,
-            ".harn",
-            "canon",
-          ),
+            == path_join(dir, ".harn", "canon"),
         ),
       )
       const slice = canon_slice_from_files([{path: "src/main.foo", text: "const bad = true;"}])

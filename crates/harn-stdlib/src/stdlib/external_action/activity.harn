@@ -165,8 +165,7 @@ fn __activity_reconciliation(receipt: ExternalActionReceipt) -> ExternalActionRe
 fn __receipt_matches_intent(receipt: ExternalActionReceipt, intent: ExternalActionIntent) -> bool {
   return receipt.action_id == intent.id
     && (receipt.effect_fingerprint ?? receipt.intent_fingerprint)
-    == intent
-    .effect_fingerprint
+      == intent.effect_fingerprint
     && receipt.intent_fingerprint == intent.fingerprint
     && receipt.provider == intent.provider
     && receipt.capability == intent.capability
@@ -176,17 +175,16 @@ fn __receipt_matches_intent(receipt: ExternalActionReceipt, intent: ExternalActi
 
 fn __receipt_lifecycle_is_consistent(receipt: ExternalActionReceipt) -> bool {
   const status_matches_outcome = (receipt.outcome == "confirmed" && receipt.status == "confirmed")
-    || (receipt
-    .outcome
-    == "denied"
-    && receipt.status == "denied")
+    || (receipt.outcome
+      == "denied"
+      && receipt.status == "denied")
     || (receipt.outcome == "failed_before_dispatch"
-    && receipt.status
-    == "failed_before_dispatch")
+      && receipt.status
+        == "failed_before_dispatch")
     || (receipt.outcome == "rejected" && receipt.status == "rejected")
     || (receipt.outcome
-    == "indeterminate"
-    && receipt.status == "reconciliation_required")
+      == "indeterminate"
+      && receipt.status == "reconciliation_required")
   const dispatch_matches_outcome = if receipt.outcome == "confirmed"
     || receipt.outcome == "rejected"
     || receipt.outcome == "indeterminate" {

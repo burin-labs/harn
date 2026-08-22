@@ -141,16 +141,16 @@ pub fn sibling_dep_errors_from_text_with_context(
     }
     errors = errors
       + sibling_dep_errors_from_line_with_context(
-      {
-        path: path,
-        line_no: line_no,
-        line: line,
-        expected_version: expected,
-        section: section,
-        unpublished_sibling_names: unpublished_sibling_names,
-        manifest_is_publishable: manifest_is_publishable,
-      },
-    )
+        {
+          path: path,
+          line_no: line_no,
+          line: line,
+          expected_version: expected,
+          section: section,
+          unpublished_sibling_names: unpublished_sibling_names,
+          manifest_is_publishable: manifest_is_publishable,
+        },
+      )
     line_no = line_no + 1
   }
   return errors
@@ -198,12 +198,12 @@ pipeline main(harness: Harness, task) {
     const text = harness.fs.read_text(path)
     errors = errors
       + sibling_dep_errors_from_text_with_context(
-      path,
-      text,
-      workspace_version,
-      unpublished_sibling_names,
-      manifest_is_publishable_from_text(text),
-    )
+        path,
+        text,
+        workspace_version,
+        unpublished_sibling_names,
+        manifest_is_publishable_from_text(text),
+      )
   }
   if errors.count > 0 {
     harness.stdio.eprintln("Harn sibling crate dependency pin check failed:")
@@ -214,9 +214,7 @@ pipeline main(harness: Harness, task) {
   }
   harness.stdio.println(
     "Harn sibling crate dependency pins match workspace version "
-      + expected_dependency_version(
-      workspace_version,
-    ),
+      + expected_dependency_version(workspace_version),
   )
   return 0
 }

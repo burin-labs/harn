@@ -81,9 +81,7 @@ pipeline default(harness: Harness) {
   harness.stdio.println(contains(reminder.body, "decision"))
   harness.stdio.println(contains(reminder.body, "confidence 0.91"))
   const refresh_opts = provider_opts
-    + {
-    reminders: provider_opts.reminders + {providers: ["-token_pressure"]},
-  }
+    + {reminders: provider_opts.reminders + {providers: ["-token_pressure"]}}
   const below_refresh = agent_reminder_providers_fire(
     harness.agent,
     session,

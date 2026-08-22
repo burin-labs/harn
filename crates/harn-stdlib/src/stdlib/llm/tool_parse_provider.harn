@@ -17,8 +17,9 @@ import { protocol_violation, provider_result, registry_names } from "std/llm/too
 fn __tool_parse_mistral(text: string, tools) -> dict {
   const marker_at = text.index_of(MISTRAL_CALL_MARKER)
   const prose = marker_at >= 0 ? text.slice(0, marker_at) : text
-  const payload =
-    marker_at >= 0 ? trim(text.slice(marker_at + len(MISTRAL_CALL_MARKER), len(text))) : ""
+  const payload = marker_at >= 0 ? trim(
+    text.slice(marker_at + len(MISTRAL_CALL_MARKER), len(text)),
+  ) : ""
   let calls: list<dict> = []
   let errors: list<string> = []
   const known = registry_names(tools)
@@ -27,9 +28,7 @@ fn __tool_parse_mistral(text: string, tools) -> dict {
     if len(stream?.values ?? []) == 0 {
       errors = errors.appending(
         "Mistral [TOOL_CALLS] JSON payload did not parse: "
-          + to_string(
-          stream?.error ?? "empty payload",
-        )
+          + to_string(stream?.error ?? "empty payload")
           + ".",
       )
     } else {

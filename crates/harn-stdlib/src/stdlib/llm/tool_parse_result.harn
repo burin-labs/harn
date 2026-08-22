@@ -191,11 +191,11 @@ pub fn provider_result(calls, errors, prose: string, violations) -> dict {
   }
   return empty_parse()
     + {
-    calls: calls,
-    tool_calls: calls,
-    tool_parse_errors: errors,
-    protocol_violations: violations,
-    prose: trim(prose),
-    canonical_text: canonical(parts),
-  }
+      calls: calls,
+      tool_calls: calls,
+      tool_parse_errors: errors,
+      protocol_violations: violations,
+      prose: trim(prose),
+      canonical_text: canonical(parts),
+    }
 }

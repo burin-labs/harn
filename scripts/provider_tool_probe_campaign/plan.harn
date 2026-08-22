@@ -135,18 +135,18 @@ pub fn __planned_cell(
   if behavior.runner == "provider_tool_probe" {
     return cell
       + {
-      command: __tool_probe_command(
-        {
-          harn_bin: harn_bin,
-          route: route,
-          mode: mode,
-          probe_case: to_string(behavior.probe_case ?? "single_tool_call"),
-          format: format,
-          repeat: repeat,
-          timeout_secs: timeout_secs,
-        },
-      ),
-    }
+        command: __tool_probe_command(
+          {
+            harn_bin: harn_bin,
+            route: route,
+            mode: mode,
+            probe_case: to_string(behavior.probe_case ?? "single_tool_call"),
+            format: format,
+            repeat: repeat,
+            timeout_secs: timeout_secs,
+          },
+        ),
+      }
   }
   return cell
 }
@@ -230,7 +230,7 @@ pub fn provider_tool_probe_campaign_planned_cells_sliced_with_options(
         }
         if behavior.runner == "provider_tool_probe" && max_probes > 0
           && executable_units_selected
-          >= max_probes {
+            >= max_probes {
           probe_units_excluded_by_cap = probe_units_excluded_by_cap + 1
           continue
         }
@@ -240,9 +240,7 @@ pub fn provider_tool_probe_campaign_planned_cells_sliced_with_options(
         }
         for format in behavior.tool_formats {
           cells = cells
-            + [
-            __planned_cell(llm, route, behavior, mode, format, harn_bin, repeat, timeout_secs),
-          ]
+            + [__planned_cell(llm, route, behavior, mode, format, harn_bin, repeat, timeout_secs)]
         }
       }
     }

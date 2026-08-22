@@ -98,18 +98,18 @@ pipeline run(harness: Harness, task) {
     latencies = latencies + [r1.elapsed_ms]
     per_question = per_question
       + [
-      {
-        cache_hit_on_replay: r2.cache_hit,
-        elapsed_ms: r1.elapsed_ms,
-        expected: len(q.expected),
-        hits: hits,
-        id: q.id,
-        mcts_depth: r1.mcts_depth,
-        mcts_expansions: r1.mcts_expansions,
-        nl: q.nl,
-        path: r1.path,
-      },
-    ]
+        {
+          cache_hit_on_replay: r2.cache_hit,
+          elapsed_ms: r1.elapsed_ms,
+          expected: len(q.expected),
+          hits: hits,
+          id: q.id,
+          mcts_depth: r1.mcts_depth,
+          mcts_expansions: r1.mcts_expansions,
+          nl: q.nl,
+          path: r1.path,
+        },
+      ]
   }
   const sorted_ms = latencies.sorted()
   const p50 = _percentile(sorted_ms, 0.5)

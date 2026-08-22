@@ -725,13 +725,13 @@ fn __debate_options(raw) {
   }
   return raw
     + {
-    prompt: __debate_prompt_value(raw),
-    debaters: __debate_debaters(raw),
-    n_rounds: __debate_int(raw?.n_rounds ?? raw?.rounds ?? raw?.max_rounds, 3, "n_rounds"),
-    adaptive_stop: raw?.adaptive_stop ?? false,
-    stability_threshold: threshold,
-    stability_patience: 2,
-  }
+      prompt: __debate_prompt_value(raw),
+      debaters: __debate_debaters(raw),
+      n_rounds: __debate_int(raw?.n_rounds ?? raw?.rounds ?? raw?.max_rounds, 3, "n_rounds"),
+      adaptive_stop: raw?.adaptive_stop ?? false,
+      stability_threshold: threshold,
+      stability_patience: 2,
+    }
 }
 
 fn __copy_top_level_llm_options(opts, base) {
@@ -988,10 +988,10 @@ pub fn debate(llm: HarnessLlm, obs: HarnessObs, opts) -> DebateResult {
       stability = stability.appending(round_stability)
       round = round
         + {
-        max_round_drift: round_stability.max_round_drift,
-        stable: round_stability.stable,
-        drifts: round_stability.drifts,
-      }
+          max_round_drift: round_stability.max_round_drift,
+          stable: round_stability.stable,
+          drifts: round_stability.drifts,
+        }
       if config.adaptive_stop {
         if round_stability.stable {
           consecutive_stable += 1

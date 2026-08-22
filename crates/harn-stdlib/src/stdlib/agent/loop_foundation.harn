@@ -69,17 +69,15 @@ pub fn __autocontinue_max_continuations(llm_opts) {
  */
 pub fn __autocontinue_raised_cap(current, llm_opts) {
   const base = if type_of(llm_opts?.truncation_auto_continue_base) == "int"
-    && llm_opts
-    .truncation_auto_continue_base
-    > 0 {
+    && llm_opts.truncation_auto_continue_base
+      > 0 {
     llm_opts.truncation_auto_continue_base
   } else {
     16384
   }
   const ceiling = if type_of(llm_opts?.truncation_auto_continue_ceiling) == "int"
-    && llm_opts
-    .truncation_auto_continue_ceiling
-    > 0 {
+    && llm_opts.truncation_auto_continue_ceiling
+      > 0 {
     llm_opts.truncation_auto_continue_ceiling
   } else {
     32768
@@ -197,10 +195,7 @@ pub fn __invoke_llm_with_autocontinue(
     )
     cap = raised
     const retry_opts = retry_llm_opts
-      + {
-      max_tokens: raised,
-      _truncation_auto_continue_attempt: attempts,
-    }
+      + {max_tokens: raised, _truncation_auto_continue_attempt: attempts}
     call = agent_invoke_llm(harness, message, turn_system, retry_opts)
   }
   return call
@@ -326,10 +321,10 @@ pub fn __agent_loop_recover_context_overflow(
     const turn_prompt = __agent_loop_build_turn_prompt(harness, session, llm_opts, iteration_index)
     const retry_opts = llm_clear_one_shot_prefill(llm_opts)
       + {
-      messages: turn_prompt.messages,
-      _system_fragments: turn_prompt.fragments,
-      _context_overflow_recovery_attempt: attempt,
-    }
+        messages: turn_prompt.messages,
+        _system_fragments: turn_prompt.fragments,
+        _context_overflow_recovery_attempt: attempt,
+      }
     current = __invoke_llm_with_autocontinue(
       harness,
       message,

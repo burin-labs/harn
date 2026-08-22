@@ -172,10 +172,7 @@ fn __render_human(stdio: HarnessStdio, report: dict) {
   )
   stdio.println(
     "  dataset coverage: text_tool_rows="
-      + safe_int_string(
-      dataset_audit["assistant_tool_text_rows"],
-      "0",
-    )
+      + safe_int_string(dataset_audit["assistant_tool_text_rows"], "0")
       + " native_tool_rows="
       + safe_int_string(dataset_audit["native_tool_call_rows"], "0")
       + " no_tool_rows="
@@ -187,10 +184,7 @@ fn __render_human(stdio: HarnessStdio, report: dict) {
   )
   stdio.println(
     "  dataset repairs: schema_repaired="
-      + safe_int_string(
-      dataset_audit["schema_repaired_rows"],
-      "0",
-    )
+      + safe_int_string(dataset_audit["schema_repaired_rows"], "0")
       + " unavailable_tool="
       + safe_int_string(dataset_audit["unavailable_tool_rows"], "0")
       + " tool_result_rows="

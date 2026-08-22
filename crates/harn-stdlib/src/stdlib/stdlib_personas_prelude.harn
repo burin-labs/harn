@@ -342,9 +342,9 @@ pub fn bounded_loop(clock: HarnessClock, state_init, step_fn, options = nil) {
     const step_value = unwrap(step_outcome)
     const is_envelope = type_of(step_value) == "dict"
       && (step_value?.state != nil
-      || step_value?.done != nil
-      || step_value?.progress != nil
-      || step_value?.progress_made != nil)
+        || step_value?.done != nil
+        || step_value?.progress != nil
+        || step_value?.progress_made != nil)
     const next_state = if is_envelope && step_value?.state != nil {
       step_value.state
     } else {
@@ -607,7 +607,7 @@ pub fn parallel_sweep_with_circuit_breaker(harness: Harness, items, step_fn, opt
     // `abandoned_indexes` is ascending, so one cursor keeps this O(n).
     if abandoned_cursor < len(outcome.abandoned_indexes)
       && outcome.abandoned_indexes[abandoned_cursor]
-      == position {
+        == position {
       abandoned_cursor += 1
       position += 1
       continue
@@ -1115,21 +1115,20 @@ pub fn persona_crystallization_candidates(history, options = nil) {
       ?? record?.agent_loop?.llm?.input_tokens
       ?? 0
     const output_tokens_inc = record?.agent_loop?.output_tokens
-      ?? record?.agent_loop?.llm
-      ?.output_tokens
+      ?? record?.agent_loop?.llm?.output_tokens
       ?? 0
     const cost_usd_inc = record?.agent_loop?.cost_usd ?? 0.0
     const wall_ms_inc = record?.agent_loop?.wall_ms ?? record?.duration_ms ?? 0
     groups[key] = group
       + {
-      count: group.count + 1,
-      examples: group.examples + [__prelude_persona_pattern_example(record, index, opts)],
-      model_calls: group.model_calls + model_calls_inc,
-      input_tokens: group.input_tokens + input_tokens_inc,
-      output_tokens: group.output_tokens + output_tokens_inc,
-      cost_usd: group.cost_usd + cost_usd_inc,
-      wall_ms: group.wall_ms + wall_ms_inc,
-    }
+        count: group.count + 1,
+        examples: group.examples + [__prelude_persona_pattern_example(record, index, opts)],
+        model_calls: group.model_calls + model_calls_inc,
+        input_tokens: group.input_tokens + input_tokens_inc,
+        output_tokens: group.output_tokens + output_tokens_inc,
+        cost_usd: group.cost_usd + cost_usd_inc,
+        wall_ms: group.wall_ms + wall_ms_inc,
+      }
     index += 1
   }
   let candidates = []
@@ -1139,9 +1138,7 @@ pub fn persona_crystallization_candidates(history, options = nil) {
       candidates = candidates + [__prelude_persona_candidate(group, opts)]
     } else {
       rejected = rejected
-        + [
-        {pattern_key: key, reason: "fewer than min_examples", examples: group.count},
-      ]
+        + [{pattern_key: key, reason: "fewer than min_examples", examples: group.count}]
     }
   }
   return {
@@ -1187,10 +1184,9 @@ pub fn persona_crystallization_bundle(history, options = nil) {
   for current in report.candidates {
     if len(current.examples) > len(candidate.examples)
       || (len(current.examples)
-      == len(candidate.examples)
-      && current.savings.model_calls_avoided
-      > candidate.savings
-      .model_calls_avoided) {
+        == len(candidate.examples)
+        && current.savings.model_calls_avoided
+          > candidate.savings.model_calls_avoided) {
       candidate = current
     }
   }

@@ -91,9 +91,7 @@ pipeline default(harness: Harness, _task) {
   const made = dispatch(harness.tools, tools, "create_directory", {path: "build/artifacts/logs"})
   harness.stdio.println(
     "create_directory -> ok=" + to_string(made.ok) + " is_dir="
-      + to_string(
-      harness.fs.stat(path_join(root, "build/artifacts/logs")).is_dir,
-    ),
+      + to_string(harness.fs.stat(path_join(root, "build/artifacts/logs")).is_dir),
   )
   // 5. delete_path guardrail: a non-empty directory needs recursive:true.
   const refuse = dispatch(harness.tools, tools, "delete_path", {path: "src"})
@@ -103,9 +101,7 @@ pipeline default(harness: Harness, _task) {
   const purge_data = json_parse(purge.rendered_result)
   harness.stdio.println(
     "delete_path (recursive) -> removed=" + to_string(purge_data.removed) + " exists="
-      + to_string(
-      harness.fs.exists(path_join(root, "src")),
-    ),
+      + to_string(harness.fs.exists(path_join(root, "src"))),
   )
   harness.stdio.println("")
   // 6. Middleware seam: the SAME named tools, wrapped with consent + audit.
@@ -147,9 +143,7 @@ pipeline default(harness: Harness, _task) {
   harness.stdio.println("wrapped write_file -> status=" + mw_result.status)
   harness.stdio.println(
     "  consent fired=" + to_string(harness.runtime.atomic_get(consent_hits)) + " audit fired="
-      + to_string(
-      harness.runtime.atomic_get(audit_hits),
-    ),
+      + to_string(harness.runtime.atomic_get(audit_hits)),
   )
   harness.stdio.println(
     "  wrote: " + json_stringify(harness.fs.read_text(path_join(root, "audited/note.txt"))),

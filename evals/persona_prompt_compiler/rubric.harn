@@ -149,7 +149,7 @@ pub fn persona_prompt_fire_verdict(
       && receipt.result.ok
       && contains(["completed", "success"], receipt.result.status)
       && receipt.result.receipt.status
-      == "success",
+        == "success",
     "persona dispatch result did not prove successful workflow completion",
     failures,
   )

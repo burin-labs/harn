@@ -43,7 +43,7 @@ fn cc_toolchain_command_options(overrides = nil) -> dict {
   }
   return {sandbox_profile: "workspace_paths", env_mode: "replace", env: isolated_runtime}
     + (overrides
-    ?? {})
+      ?? {})
 }
 
 fn cc_recent_evidence(harness: Harness, options = nil) -> list {
@@ -209,8 +209,8 @@ fn cc_validate_artifact(harness: Harness, artifact: dict, options = nil) -> dict
     // on success, where the terminal persistence boundary needs them.
     return passed ? diagnostics
       + {
-      artifact: artifact + {source: normalized_source, test_source: normalized_test},
-    } : diagnostics
+        artifact: artifact + {source: normalized_source, test_source: normalized_test},
+      } : diagnostics
   } catch (e) {
     harness.fs.delete(dir)
     return {outcome: "fail", error: to_string(e)}
@@ -294,10 +294,7 @@ fn cc_scaffold_tool(
     const server = capabilities.fs.read_text(path_join(dir, "server.harn"))
     const test = capabilities.fs.read_text(path_join(dir, "tests/test_tool.harn"))
     const projected_server = library + "\n\n"
-      + server.replace(
-      "import { tools } from \"lib/tools\"\n\n",
-      "",
-    )
+      + server.replace("import { tools } from \"lib/tools\"\n\n", "")
     const projected_test = test.replace(
       "import { tools } from \"../lib/tools\"",
       "import { tools } from \"./server\"",
@@ -398,9 +395,7 @@ fn cc_prepare_valid_proposals(harness: Harness, proposals: list, options = nil) 
     const checked = cc_validate_artifact(harness, proposal?.artifact ?? {}, options)
     if checked?.outcome != "pass" {
       throw "submit_crystallization_batch: executable package did not pass strict check and authored tests; repair it before resubmitting.\n"
-        + json_stringify(
-        checked,
-      )
+        + json_stringify(checked)
     }
     prepared = prepared + [proposal + {artifact: checked.artifact}]
   }
@@ -587,25 +582,25 @@ pub fn crystallization_curate(harness: Harness, options = nil) -> dict {
   const route = options?.agent ?? {}
   let agent_options = route
     + {
-    tools: cc_tools(harness, evidence, options),
-    allowed_tools: [
-      "inspect_session_evidence",
-      "lookup_harn_skill",
-      "scaffold_harn_tool",
-      "search_harn_builtins",
-      "validate_harn_candidate",
-      "submit_crystallization_batch",
-    ],
-    require_successful_tools: ["submit_crystallization_batch"],
-    stop_after_successful_tools: ["submit_crystallization_batch"],
-    loop_until_done: true,
-    max_iterations: min(max(2, route?.max_iterations ?? 8), 24),
-    max_nudges: 2,
-    session_id: route?.session_id ?? ("crystallization-curator-" + harness.random.uuid_v7()),
-    budget: route?.budget ?? {max_cost_usd: 0.75, max_total_tokens: 60000},
-    // A curator reviews evidence; it must never recursively become evidence.
-    workflow_learning_eligibility: "excluded",
-  }
+      tools: cc_tools(harness, evidence, options),
+      allowed_tools: [
+        "inspect_session_evidence",
+        "lookup_harn_skill",
+        "scaffold_harn_tool",
+        "search_harn_builtins",
+        "validate_harn_candidate",
+        "submit_crystallization_batch",
+      ],
+      require_successful_tools: ["submit_crystallization_batch"],
+      stop_after_successful_tools: ["submit_crystallization_batch"],
+      loop_until_done: true,
+      max_iterations: min(max(2, route?.max_iterations ?? 8), 24),
+      max_nudges: 2,
+      session_id: route?.session_id ?? ("crystallization-curator-" + harness.random.uuid_v7()),
+      budget: route?.budget ?? {max_cost_usd: 0.75, max_total_tokens: 60000},
+      // A curator reviews evidence; it must never recursively become evidence.
+      workflow_learning_eligibility: "excluded",
+    }
   if route?.provider == nil
     && route?.model == nil
     && route?.models == nil

@@ -266,8 +266,6 @@ pipeline default(harness: Harness) {
   assert(summary.state_version == 2, "state snapshot reflects reloaded binding version")
   harness.stdio.log(
     "orchestrator hot reload versions: " + to_string(summary.versions[0]) + ","
-      + to_string(
-      summary.versions[1],
-    ),
+      + to_string(summary.versions[1]),
   )
 }

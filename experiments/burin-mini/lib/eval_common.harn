@@ -199,8 +199,8 @@ fn verification_outcome_lines(run) {
   for item in run?.observability?.verification_outcomes ?? [] {
     lines = lines
       + [
-      "- ${item?.node_id ?? "unknown"}: status=${item?.status ?? ""}, passed=${item?.passed ?? "n/a"}, summary=${item?.summary ?? ""}",
-    ]
+        "- ${item?.node_id ?? "unknown"}: status=${item?.status ?? ""}, passed=${item?.passed ?? "n/a"}, summary=${item?.summary ?? ""}",
+      ]
   }
   return lines
 }
@@ -210,8 +210,8 @@ fn planner_round_lines(run) {
   for round in run?.observability?.planner_rounds ?? [] {
     lines = lines
       + [
-      "- ${round?.node_id ?? "unknown"}: status=${round?.status ?? ""}/${round?.outcome ?? ""}, iterations=${round?.iteration_count ?? 0}, tools=${render_csv(round?.tools_used ?? [])}",
-    ]
+        "- ${round?.node_id ?? "unknown"}: status=${round?.status ?? ""}/${round?.outcome ?? ""}, iterations=${round?.iteration_count ?? 0}, tools=${render_csv(round?.tools_used ?? [])}",
+      ]
   }
   return lines
 }
@@ -323,8 +323,8 @@ pub fn heuristic_semantic_eval(report, run, reference) {
     if (round?.iteration_count ?? 0) > max_iterations {
       churn = churn
         + [
-        "${round?.node_id ?? "unknown"} exceeded the ideal stage iteration budget (${round?.iteration_count ?? 0} > ${max_iterations})",
-      ]
+          "${round?.node_id ?? "unknown"} exceeded the ideal stage iteration budget (${round?.iteration_count ?? 0} > ${max_iterations})",
+        ]
     }
   }
   let gating_failures = []
@@ -341,15 +341,11 @@ pub fn heuristic_semantic_eval(report, run, reference) {
   let architecture_issues = []
   if !text_contains_all(signal_text, reference?.required_strings ?? []) {
     architecture_issues = architecture_issues
-      + [
-      "Run artifacts did not clearly preserve the key reference identifiers.",
-    ]
+      + ["Run artifacts did not clearly preserve the key reference identifiers."]
   }
   if !text_contains_all(signal_text, reference?.expected_paths ?? []) {
     architecture_issues = architecture_issues
-      + [
-      "Run artifacts did not clearly preserve the expected workspace paths.",
-    ]
+      + ["Run artifacts did not clearly preserve the expected workspace paths."]
   }
   const completion_score = if len(gating_failures) == 0 {
     10
@@ -370,14 +366,9 @@ pub fn heuristic_semantic_eval(report, run, reference) {
     strengths = strengths + ["No stage exceeded the reference iteration budget."]
   }
   if text_contains_all(signal_text, reference?.required_strings ?? [])
-    && text_contains_all(
-    signal_text,
-    reference?.expected_paths ?? [],
-  ) {
+    && text_contains_all(signal_text, reference?.expected_paths ?? []) {
     strengths = strengths
-      + [
-      "The run artifacts preserve the expected identifiers, paths, and architecture cues.",
-    ]
+      + ["The run artifacts preserve the expected identifiers, paths, and architecture cues."]
   }
   let weaknesses = []
   for item in gating_failures {
@@ -392,9 +383,7 @@ pub fn heuristic_semantic_eval(report, run, reference) {
   let fixes = []
   if len(churn) > 0 {
     fixes = fixes
-      + [
-      "Tighten the stage prompt or stop condition so repeated non-progress turns end earlier.",
-    ]
+      + ["Tighten the stage prompt or stop condition so repeated non-progress turns end earlier."]
   }
   if len(failed) > 0 {
     fixes = fixes + ["Address the failing workflow stage before trusting semantic scores."]
@@ -402,8 +391,8 @@ pub fn heuristic_semantic_eval(report, run, reference) {
   if len(architecture_issues) > 0 {
     fixes = fixes
       + [
-      "Make the batch summaries and final report explicitly mention the architecture invariants being preserved.",
-    ]
+        "Make the batch summaries and final report explicitly mention the architecture invariants being preserved.",
+      ]
   }
   if len(fixes) == 0 {
     fixes = ["No harness fix is required from the heuristic pass."]

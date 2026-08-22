@@ -91,7 +91,7 @@ fn __take_first(ranked: list<RankedArm>) -> RankedArm {
   for candidate in ranked {
     if candidate.score < first.score
       || (candidate.score == first.score
-      && candidate.arm_id < first.arm_id) {
+        && candidate.arm_id < first.arm_id) {
       first = candidate
     }
   }

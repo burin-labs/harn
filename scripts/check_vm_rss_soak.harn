@@ -186,13 +186,7 @@ pipeline main(harness: Harness, task) {
   const argv_prefix = harn_bench_argv(harness)
   const bin = argv_prefix[0]
   const bench_args = argv_prefix.slice(1, argv_prefix.count)
-    + [
-    FIXTURE,
-    "--iterations",
-    "${iterations}",
-    "--profile-json",
-    report_path,
-  ]
+    + [FIXTURE, "--iterations", "${iterations}", "--profile-json", report_path]
   const bench = harness.process.run({program: bin, args: bench_args})
   /* Python inherits stdout/stderr for the bench child, so its (timing,
    * nondeterministic) output streams through. Re-emit the captured streams

@@ -53,9 +53,7 @@ pipeline default(harness: Harness, task) {
   const c = "found"
   harness.stdio.log("Coalesce: ${a ?? b ?? c}")
   const processed = "  Hello, World!  " |> { s -> s.trim() } |> { s -> s.lowercase() }
-    |> { s ->
-    s.replace("world", "harn")
-  }
+    |> { s -> s.replace("world", "harn") }
   harness.stdio.log("Processed: ${processed}")
   harness.stdio.log("All stress tests passed!")
 }

@@ -281,10 +281,10 @@ pub fn pin_compaction_policy(pins, opts = nil) {
       base?.instructions,
       base
         + {
-        author: base?.author ?? "pins",
-        mode: base?.mode ?? "pins",
-        preserve: base?.preserve ?? pin_preserve,
-      },
+          author: base?.author ?? "pins",
+          mode: base?.mode ?? "pins",
+          preserve: base?.preserve ?? pin_preserve,
+        },
     )
   }
   // Merge-with-existing (+ optional label-preserve).

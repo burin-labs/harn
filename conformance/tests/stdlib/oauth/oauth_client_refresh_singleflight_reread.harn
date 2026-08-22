@@ -22,11 +22,11 @@ fn provider(id) {
 fn locking_store(inner, rotated_token) {
   return inner
     + {
-    with_refresh_lock: { key, body ->
-      inner.set(key, rotated_token, 3600)
-      return body()
-    },
-  }
+      with_refresh_lock: { key, body ->
+        inner.set(key, rotated_token, 3600)
+        return body()
+      },
+    }
 }
 
 fn require_eq(label, actual, expected) {
@@ -52,11 +52,11 @@ fn exercise_fresh_token_no_lock(harness: Harness) {
   const lock_calls = harness.runtime.atomic(0)
   const store = inner
     + {
-    with_refresh_lock: { key, body ->
-      harness.runtime.atomic_add(lock_calls, 1)
-      return body()
-    },
-  }
+      with_refresh_lock: { key, body ->
+        harness.runtime.atomic_add(lock_calls, 1)
+        return body()
+      },
+    }
   const cli = client(harness, provider("freshNoLock"), {client_id: "cli-id", storage: store})
   harness.testing.http_mock_clear()
   harness.testing.http_mock(

@@ -26,9 +26,7 @@ pipeline test(harness: Harness, task) {
     harness.stdio.println(
       to_string(e3).contains("b")
         && (to_string(e3).contains("expected int")
-        || to_string(e3).contains(
-        "expected type 'int'",
-      )),
+          || to_string(e3).contains("expected type 'int'")),
     )
   }
 }

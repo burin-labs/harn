@@ -74,7 +74,7 @@ pipeline default(harness: Harness, task) {
       && first_data.summary.responses == 1
       && first_data.responses[0].outcome?.status == "dlq"
       && first_data.responses[0].outcome?.error
-      != nil,
+        != nil,
   )
   // Poll a later drain until the deferred claim expires. The first drain must
   // keep its failed claim alive until it exits; otherwise it can reclaim and
@@ -119,14 +119,12 @@ pipeline default(harness: Harness, task) {
     first_has_response
       && second_has_response
       && second_data.responses[0].job_event_id
-      == first_data.responses[0]
-      .job_event_id
+        == first_data.responses[0].job_event_id
       && second_data.responses[0].outcome?.status == "succeeded",
   )
   harness.stdio.println(
     second_data.summary.ready == 0 && second_data.summary.in_flight == 0
-      && second_data.summary
-      .responses
-      == 2,
+      && second_data.summary.responses
+        == 2,
   )
 }

@@ -183,15 +183,15 @@ pub fn agent_private_stream_delta(state = nil, delta = "", config = nil) {
   }
   const next = existing
     + {
-    config: cfg,
-    pending: pending,
-    private_open: private_open,
-    raw_text: __stream_string(existing?.raw_text) + raw_delta,
-    visible_text: __stream_string(existing?.visible_text) + visible_delta,
-    chunks: to_int(existing?.chunks ?? 0) + 1,
-    withheld_suffix: len(pending) > 0,
-    unterminated_private: private_open,
-  }
+      config: cfg,
+      pending: pending,
+      private_open: private_open,
+      raw_text: __stream_string(existing?.raw_text) + raw_delta,
+      visible_text: __stream_string(existing?.visible_text) + visible_delta,
+      chunks: to_int(existing?.chunks ?? 0) + 1,
+      withheld_suffix: len(pending) > 0,
+      unterminated_private: private_open,
+    }
   return {
     state: next,
     visible_delta: visible_delta,
@@ -224,12 +224,12 @@ pub fn agent_private_stream_finish(state = nil, config = nil) {
   const visible = __stream_string(existing?.visible_text) + final_delta
   const next = existing
     + {
-    config: cfg,
-    pending: pending,
-    visible_text: visible,
-    withheld_suffix: len(pending) > 0,
-    unterminated_private: private_open,
-  }
+      config: cfg,
+      pending: pending,
+      visible_text: visible,
+      withheld_suffix: len(pending) > 0,
+      unterminated_private: private_open,
+    }
   return {
     state: next,
     ok: true,

@@ -183,8 +183,7 @@ fn check_scalar_fields(bundle: dict, want: dict) -> list<string> {
   }
   if contains(want_keys, "required_worktree_policy")
     && bundle.environment.worktree_policy
-    != want
-    .required_worktree_policy {
+      != want.required_worktree_policy {
     out = out + ["environment.worktree_policy != " + want.required_worktree_policy]
   }
   return out
@@ -196,34 +195,34 @@ fn check_collection_fields(bundle: dict, want: dict) -> list<string> {
   if contains(want_keys, "required_node_ids") {
     out = out
       + missing_members(
-      want.required_node_ids,
-      keys(bundle.workflow.nodes),
-      "workflow.nodes missing ",
-    )
+        want.required_node_ids,
+        keys(bundle.workflow.nodes),
+        "workflow.nodes missing ",
+      )
   }
   if contains(want_keys, "required_trigger_kinds") {
     out = out
       + missing_members(
-      want.required_trigger_kinds,
-      project(bundle.triggers, "kind"),
-      "triggers missing kind ",
-    )
+        want.required_trigger_kinds,
+        project(bundle.triggers, "kind"),
+        "triggers missing kind ",
+      )
   }
   if contains(want_keys, "required_connector_ids") {
     out = out
       + missing_members(
-      want.required_connector_ids,
-      project(bundle.connectors, "id"),
-      "connectors missing ",
-    )
+        want.required_connector_ids,
+        project(bundle.connectors, "id"),
+        "connectors missing ",
+      )
   }
   if contains(want_keys, "required_approval_nodes") {
     out = out
       + missing_members(
-      want.required_approval_nodes,
-      bundle.policy.approval_required,
-      "policy.approval_required missing ",
-    )
+        want.required_approval_nodes,
+        bundle.policy.approval_required,
+        "policy.approval_required missing ",
+      )
   }
   return out
 }

@@ -153,10 +153,10 @@ pub fn pack_for(_agent: HarnessAgent, llm: HarnessLlm, opts) {
     result
       + opts
       + {
-      reasoning_policy: opts?.reasoning_policy ?? "auto",
-      reasoning_scale: opts?.reasoning_scale ?? "medium",
-      reasoning_task: __reasoning_task(reasoning_task),
-    },
+        reasoning_policy: opts?.reasoning_policy ?? "auto",
+        reasoning_scale: opts?.reasoning_scale ?? "medium",
+        reasoning_task: __reasoning_task(reasoning_task),
+      },
   )
   // 4. Recommended max_tokens when caller supplied a prompt and no catalog,
   //    task, or caller setting already supplies one.

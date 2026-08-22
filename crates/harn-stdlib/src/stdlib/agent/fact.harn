@@ -381,12 +381,12 @@ fn __fact_recall_hit(clock: HarnessClock, record) {
   return filter_nil(
     fact_value
       + {
-      score: record?.score,
-      memory_record_id: record?.id,
-      memory_key: record?.key,
-      memory_namespace: record?.namespace,
-      stored_at: record?.stored_at,
-    },
+        score: record?.score,
+        memory_record_id: record?.id,
+        memory_key: record?.key,
+        memory_namespace: record?.namespace,
+        stored_at: record?.stored_at,
+      },
   )
 }
 

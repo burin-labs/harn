@@ -84,15 +84,11 @@ pipeline main(harness: Harness) {
       )
       harness.stdio.println(
         "reminder_present_on_resumed_turn="
-          + to_string(
-          contains(resumed_tail, "You were suspended at turn"),
-        ),
+          + to_string(contains(resumed_tail, "You were suspended at turn")),
       )
       harness.stdio.println(
         "reminder_consumed_after_one_turn="
-          + to_string(
-          !contains(next_tail, "You were suspended at turn"),
-        ),
+          + to_string(!contains(next_tail, "You were suspended at turn")),
       )
     },
   )

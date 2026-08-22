@@ -90,14 +90,14 @@ type Storage = dict
 fn __wrap_host_handle(auth: HarnessAuth, inner) {
   return inner
     + {
-    _namespace: "oauth_storage",
-    get: { key -> auth.oauth_storage_get(inner, key) },
-    set: { key, token_set, ttl_seconds = nil ->
-      auth.oauth_storage_set(inner, key, token_set, ttl_seconds)
-    },
-    delete: { key -> auth.oauth_storage_delete(inner, key) },
-    with_refresh_lock: { key, body -> auth.oauth_storage_with_refresh_lock(inner, key, body) },
-  }
+      _namespace: "oauth_storage",
+      get: { key -> auth.oauth_storage_get(inner, key) },
+      set: { key, token_set, ttl_seconds = nil ->
+        auth.oauth_storage_set(inner, key, token_set, ttl_seconds)
+      },
+      delete: { key -> auth.oauth_storage_delete(inner, key) },
+      with_refresh_lock: { key, body -> auth.oauth_storage_with_refresh_lock(inner, key, body) },
+    }
 }
 
 /**

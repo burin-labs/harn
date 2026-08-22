@@ -225,9 +225,7 @@ fn baseline_errors(entry: ReleaseBinarySizeTargetPolicy) -> list<string> {
   )
     == 0 {
     errors = errors
-      + [
-      "${entry.target}: baseline.observed_at must be a UTC second-resolution timestamp",
-    ]
+      + ["${entry.target}: baseline.observed_at must be a UTC second-resolution timestamp"]
   }
   if baseline.build_identity.profile == "" {
     errors = errors + ["${entry.target}: baseline.build_identity.profile must not be empty"]
@@ -256,14 +254,14 @@ fn fuse_errors(entry: ReleaseBinarySizeTargetPolicy) -> list<string> {
   if entry.distribution_fuse_bytes < min_fuse {
     errors = errors
       + [
-      "${entry.target}: distribution_fuse_bytes must leave at least ${MIN_FUSE_HEADROOM_PERCENT}% headroom above the baseline (>= ${min_fuse})",
-    ]
+        "${entry.target}: distribution_fuse_bytes must leave at least ${MIN_FUSE_HEADROOM_PERCENT}% headroom above the baseline (>= ${min_fuse})",
+      ]
   }
   if entry.distribution_fuse_bytes > max_fuse {
     errors = errors
       + [
-      "${entry.target}: distribution_fuse_bytes must stay within ${MAX_FUSE_HEADROOM_PERCENT}% of the baseline (<= ${max_fuse})",
-    ]
+        "${entry.target}: distribution_fuse_bytes must stay within ${MAX_FUSE_HEADROOM_PERCENT}% of the baseline (<= ${max_fuse})",
+      ]
   }
   return errors
 }
@@ -280,8 +278,8 @@ fn growth_errors(entry: ReleaseBinarySizeTargetPolicy) -> list<string> {
     if accepted.against_baseline_sha != entry.baseline.source_sha {
       errors = errors
         + [
-        "${entry.target}: accepted_growth.against_baseline_sha must be the current baseline ${entry.baseline.source_sha}, got ${accepted.against_baseline_sha}",
-      ]
+          "${entry.target}: accepted_growth.against_baseline_sha must be the current baseline ${entry.baseline.source_sha}, got ${accepted.against_baseline_sha}",
+        ]
     }
     if accepted.bytes <= 0 {
       errors = errors + ["${entry.target}: accepted_growth.bytes must be positive"]
@@ -389,8 +387,8 @@ pub fn evaluate_release_binary_size(
   if fuse == "breached" {
     failures = failures
       + [
-      "distribution fuse: ${measurement.bytes} bytes exceeds the ${entry.distribution_fuse_bytes}-byte ceiling for ${entry.target}",
-    ]
+        "distribution fuse: ${measurement.bytes} bytes exceeds the ${entry.distribution_fuse_bytes}-byte ceiling for ${entry.target}",
+      ]
   }
   const divergent = divergent_identity_fields(
     entry.baseline.build_identity,
@@ -404,8 +402,7 @@ pub fn evaluate_release_binary_size(
     growth = "not-comparable"
   } else if delta_bytes >= entry.growth.warn_bytes
     && delta_percent_hundredths
-    >= entry.growth
-    .warn_percent_hundredths {
+      >= entry.growth.warn_percent_hundredths {
     // Both axes must be crossed. A few megabytes on a 200+ MiB artifact is
     // measurement noise, and a large ratio on a small one is not a
     // distribution concern.
@@ -419,8 +416,8 @@ pub fn evaluate_release_binary_size(
   if growth == "warn" {
     failures = failures
       + [
-      "growth signal: ${measurement.source_sha} is ${delta_bytes} bytes (${delta_percent_hundredths} hundredths of a percent) above the ${entry.baseline.version} baseline, and no accepted_growth entry covers it",
-    ]
+        "growth signal: ${measurement.source_sha} is ${delta_bytes} bytes (${delta_percent_hundredths} hundredths of a percent) above the ${entry.baseline.version} baseline, and no accepted_growth entry covers it",
+      ]
   }
   return {
     target: entry.target,
@@ -508,9 +505,7 @@ pub fn elf_section_deltas(
       continue
     }
     deltas = deltas
-      + [
-      {name: name, before: before_bytes, after: after_bytes, delta: after_bytes - before_bytes},
-    ]
+      + [{name: name, before: before_bytes, after: after_bytes, delta: after_bytes - before_bytes}]
   }
   // Descending magnitude. `names` is built in a deterministic order and the
   // sort is stable, so equal-magnitude sections keep a fixed relative order.

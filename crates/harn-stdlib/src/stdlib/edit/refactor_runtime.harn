@@ -285,13 +285,13 @@ pub fn __refactor_run(
         removed = removed + artifact.deletions
         diffs = diffs
           + [
-          {
-            path: path,
-            diff: artifact.diff,
-            lines_added: artifact.insertions,
-            lines_removed: artifact.deletions,
-          },
-        ]
+            {
+              path: path,
+              diff: artifact.diff,
+              lines_added: artifact.insertions,
+              lines_removed: artifact.deletions,
+            },
+          ]
       }
     }
   }

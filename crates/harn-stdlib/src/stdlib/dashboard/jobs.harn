@@ -658,13 +658,7 @@ pub fn dashboard_job_event(kind, input = nil, options = nil) -> DashboardJobEven
   const dlq = __job_dlq(input, payload, opts)
   const privacy = __job_privacy(input, opts)
   const dedupe_key = opts.dedupe_key ?? input?.dedupe_key
-    ?? dashboard_job_dedupe_key(
-    resolved_kind,
-    job_id,
-    run_id,
-    timestamp,
-    source.id,
-  )
+    ?? dashboard_job_dedupe_key(resolved_kind, job_id, run_id, timestamp, source.id)
   const event = {
     schema: DASHBOARD_JOB_EVENT_SCHEMA,
     id: opts.id ?? input?.dashboard_event_id
@@ -688,11 +682,9 @@ pub fn dashboard_job_event(kind, input = nil, options = nil) -> DashboardJobEven
     )
       ?? job_id,
     summary: __job_first([opts.summary, input?.summary, payload?.summary])
-      ?? (__job_status_for_kind(
-      resolved_kind,
-    )
-      + ": "
-      + job_id),
+      ?? (__job_status_for_kind(resolved_kind)
+        + ": "
+        + job_id),
     priority: __job_first([opts.priority, input?.priority, payload?.priority]),
     queue_depth: opts.queue_depth ?? input?.queue_depth ?? payload?.queue_depth,
     attempt: opts.attempt ?? input?.attempt ?? payload?.attempt,
@@ -706,14 +698,14 @@ pub fn dashboard_job_event(kind, input = nil, options = nil) -> DashboardJobEven
     related_refs: __job_related_refs(input, payload, opts),
     action_intents: opts.action_intents ?? input?.action_intents
       ?? __job_default_actions(
-      resolved_kind,
-      job_id,
-      run_id,
-      approval,
-      dlq,
-      receipt_refs,
-      replay_refs,
-    ),
+        resolved_kind,
+        job_id,
+        run_id,
+        approval,
+        dlq,
+        receipt_refs,
+        replay_refs,
+      ),
     privacy: privacy,
     raw_payload: privacy.raw_payload_retained ? payload : {},
   }
@@ -784,9 +776,7 @@ fn __job_append_refs(existing, refs) {
     let found = false
     for current in out {
       const current_key = __job_text(current.kind) + ":" + __job_text(current.id) + ":"
-        + __job_text(
-        current.url,
-      )
+        + __job_text(current.url)
       if current_key == key {
         found = true
       }

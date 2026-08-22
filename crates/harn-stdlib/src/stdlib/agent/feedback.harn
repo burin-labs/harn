@@ -80,16 +80,16 @@ fn __feedback_merge(left, right) -> dict {
   }
   return winner
     + {
-    sources: __feedback_unique(left.sources + right.sources),
-    reasons: __feedback_unique(left.reasons + right.reasons),
-    next_step: if winner.next_step != "" {
-      winner.next_step
-    } else if left.next_step != "" {
-      left.next_step
-    } else {
-      right.next_step
-    },
-  }
+      sources: __feedback_unique(left.sources + right.sources),
+      reasons: __feedback_unique(left.reasons + right.reasons),
+      next_step: if winner.next_step != "" {
+        winner.next_step
+      } else if left.next_step != "" {
+        left.next_step
+      } else {
+        right.next_step
+      },
+    }
 }
 
 fn __feedback_has_stop(messages) -> bool {
@@ -138,10 +138,10 @@ pub fn agent_feedback_compose(candidates, context = nil) -> dict {
     }
     if candidate.next_step != ""
       && candidate.next_step
-      == to_string(history?.next_step ?? "")
+        == to_string(history?.next_step ?? "")
       && knowledge_state != ""
       && knowledge_state
-      == to_string(history?.knowledge_state ?? "") {
+        == to_string(history?.knowledge_state ?? "") {
       suppressed = suppressed.appending(
         {
           source: candidate.sources[0],

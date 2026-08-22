@@ -300,9 +300,7 @@ pub fn ecosystem_errors(entry: EcosystemGroups, policy: EcosystemPolicy) -> list
   const catch_all = groups.get(catch_all_name)
   if catch_all.update_types.sorted() != policy.catch_all_update_types.sorted() {
     return errors
-      + [
-      error_at("catch_all_update_types", entry, catch_all_name, catch_all.update_types.sorted()),
-    ]
+      + [error_at("catch_all_update_types", entry, catch_all_name, catch_all.update_types.sorted())]
   }
   return errors
 }

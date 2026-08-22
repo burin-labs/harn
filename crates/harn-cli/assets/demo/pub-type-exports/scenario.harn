@@ -49,9 +49,7 @@ pipeline default(harness: Harness, _task) {
   const report: GradeReport = graded.data
   harness.stdio.println(
     "harness.llm.call(output: GradeReport):  [" + verdict_label(report.verdict) + "] "
-      + describe(
-      report,
-    ),
+      + describe(report),
   )
   harness.stdio.println("")
   const receipt = {

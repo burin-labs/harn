@@ -489,8 +489,6 @@ pub fn __tool_parse_call_from_body(
   return {
     ok: false,
     error: "<tool_call> body did not contain a bare `name({ ... })` expression. Got: "
-      + json_stringify(
-      trimmed,
-    ),
+      + json_stringify(trimmed),
   }
 }

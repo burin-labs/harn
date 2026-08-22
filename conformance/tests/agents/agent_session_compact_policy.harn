@@ -17,9 +17,7 @@ pipeline test(harness: Harness, task) {
       custom_compactor: { archived, _reminders, policy ->
         {
           summary: "host compact " + policy.mode + " " + policy.author + " "
-            + to_string(
-            len(archived),
-          ),
+            + to_string(len(archived)),
         }
       },
       policy: compact_for_bug_fix_resumption({author: "host"}),

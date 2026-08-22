@@ -67,14 +67,14 @@ fn __rerank_note_score(scores, index, outcome, confidence) {
   const confidence_sum = prior_confidence_sum + confidence
   next_scores[index] = current
     + {
-    wins: wins,
-    losses: losses,
-    ties: ties,
-    comparisons: comparisons,
-    score: (wins - losses) * 1.0,
-    avg_confidence: confidence_sum / (comparisons * 1.0),
-    confidence_sum: confidence_sum,
-  }
+      wins: wins,
+      losses: losses,
+      ties: ties,
+      comparisons: comparisons,
+      score: (wins - losses) * 1.0,
+      avg_confidence: confidence_sum / (comparisons * 1.0),
+      confidence_sum: confidence_sum,
+    }
   return next_scores
 }
 
@@ -179,12 +179,12 @@ fn __rerank_llm_options(opts) {
   const base = llm_call_options(opts?.llm_options ?? opts ?? {})
   return base
     + {
-    max_tokens: base?.max_tokens ?? 128,
-    temperature: base?.temperature ?? 0.0,
-    stream: false,
-    system: base?.system ?? opts?.system
-      ?? "You are a pairwise reward model. Pick the candidate that better satisfies the task and return only schema-valid JSON.",
-  }
+      max_tokens: base?.max_tokens ?? 128,
+      temperature: base?.temperature ?? 0.0,
+      stream: false,
+      system: base?.system ?? opts?.system
+        ?? "You are a pairwise reward model. Pick the candidate that better satisfies the task and return only schema-valid JSON.",
+    }
 }
 
 fn __rerank_compare(fs: HarnessFs, llm: HarnessLlm, left, right, opts) {

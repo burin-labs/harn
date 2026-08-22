@@ -85,9 +85,7 @@ fn cost_for_tokens(
   const p = or_pricing_usd_per_m(stdio, model)
   return to_float(input_tokens) / 1000000.0 * to_float(p.input)
     + to_float(output_tokens) / 1000000.0
-    * to_float(
-    p.output,
-  )
+      * to_float(p.output)
 }
 
 fn extract_first_fenced_harn(text: string) -> string {

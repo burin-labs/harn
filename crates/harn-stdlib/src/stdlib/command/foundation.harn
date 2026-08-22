@@ -1,0 +1,173 @@
+import { command_combined } from "std/command/output"
+import { CommandResult } from "std/command/results"
+
+const COMMAND_COMMON_OPTION_KEYS = [
+  "cwd",
+  "env",
+  "env_remove",
+  "env_mode",
+  "stdin",
+  "timeout_ms",
+  "sandbox_profile",
+  "background",
+  "background_after_ms",
+  "progress_interval_ms",
+  "progress_max_inline_bytes",
+  "policy_context",
+]
+
+/**
+ * Normalize omitted command options to an empty dictionary.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn __command_options(options) -> dict {
+  return options ?? {}
+}
+
+fn __command_require_argv(argv) {
+  if type_of(argv) != "list" || len(argv) == 0 {
+    throw "command_run: argv must be a non-empty list"
+  }
+  return argv
+}
+
+fn __command_copy_common(req, source) {
+  if source == nil {
+    return req
+  }
+  let out = req
+  for key in COMMAND_COMMON_OPTION_KEYS {
+    if source?.[key] != nil {
+      out = out + {[key]: source[key]}
+    }
+  }
+  let capture = source?.capture
+  if source?.max_inline_bytes != nil {
+    const base_capture = capture ?? {}
+    capture = base_capture + {max_inline_bytes: source.max_inline_bytes}
+  }
+  if capture != nil {
+    out = out + {capture: capture}
+  }
+  return out
+}
+
+fn __command_apply_option_defaults(req, options) {
+  const opts = __command_options(options)
+  let out = req
+  for key in COMMAND_COMMON_OPTION_KEYS {
+    if out?.[key] == nil && opts[key] != nil {
+      out = out + {[key]: opts[key]}
+    }
+  }
+  if out.mode == "shell" {
+    for key in ["shell", "shell_id", "login", "interactive"] {
+      if out?.[key] == nil && opts[key] != nil {
+        out = out + {[key]: opts[key]}
+      }
+    }
+  }
+  let capture = out?.capture ?? opts?.capture
+  if opts?.max_inline_bytes != nil && capture?.max_inline_bytes == nil {
+    const base_capture = capture ?? {}
+    capture = base_capture + {max_inline_bytes: opts.max_inline_bytes}
+  }
+  if capture != nil {
+    out = out + {capture: capture}
+  }
+  return out
+}
+
+fn __command_request(spec, options) {
+  if type_of(spec) == "list" {
+    return __command_apply_option_defaults(
+      {mode: "argv", argv: __command_require_argv(spec)},
+      options,
+    )
+  }
+  if type_of(spec) != "dict" {
+    throw "command_run: spec must be an argv list or command spec dict"
+  }
+  const mode = spec?.mode ?? "argv"
+  let req = {}
+  if mode == "argv" {
+    if spec?.command != nil && spec?.argv == nil {
+      throw "command_run: shell mode requires mode: \"shell\""
+    }
+    req = {mode: "argv", argv: __command_require_argv(spec?.argv)}
+  } else if mode == "shell" {
+    if type_of(spec?.command) != "string" || trim(spec.command) == "" {
+      throw "command_run: shell mode requires a non-empty command"
+    }
+    req = {mode: "shell", command: spec.command}
+    for key in ["shell", "shell_id", "login", "interactive"] {
+      if spec?.[key] != nil {
+        req = req + {[key]: spec[key]}
+      }
+    }
+  } else {
+    throw "command_run: unsupported mode " + to_string(mode)
+  }
+  return __command_apply_option_defaults(__command_copy_common(req, spec), options)
+}
+
+fn __command_success(result) -> bool {
+  if result?.success != nil {
+    return result.success ? true : false
+  }
+  const {status = "completed", exit_code = -1} = result ?? {}
+  return status == "completed" && exit_code == 0 && !(result?.timed_out ?? false)
+}
+
+/**
+ * Project one host command result into the shared command-result contract.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn __command_normalize_result(result) -> CommandResult {
+  const raw = result ?? {}
+  const success = __command_success(raw)
+  const status = if raw?.status != nil {
+    raw.status
+  } else if success {
+    "completed"
+  } else {
+    "failed"
+  }
+  return raw
+    + {
+      ok: success,
+      success: success,
+      status: status,
+      exit_code: raw?.exit_code,
+      cwd: raw?.cwd ?? "",
+      timed_out: raw?.timed_out ?? (raw?.status == "timed_out"),
+      command_id: raw?.command_id,
+      handle_id: raw?.handle_id,
+      stdout: raw?.stdout ?? "",
+      stderr: raw?.stderr ?? "",
+      combined: command_combined(raw),
+      output_path: raw?.output_path,
+      stdout_path: raw?.stdout_path,
+      stderr_path: raw?.stderr_path,
+      byte_count: raw?.byte_count,
+      line_count: raw?.line_count,
+      output_sha256: raw?.output_sha256,
+      started_at: raw?.started_at,
+      ended_at: raw?.ended_at,
+      duration_ms: raw?.duration_ms,
+    }
+}
+
+/**
+ * Run an argv-first host command and normalize its result for `std/command`.
+ *
+ * @effects: [process]
+ * @errors: [process_spawn]
+ */
+pub fn command_run_impl(tools: HarnessTools, spec, options = nil) -> CommandResult {
+  return __command_normalize_result(tools.run_command(__command_request(spec, options)))
+}

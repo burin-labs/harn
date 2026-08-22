@@ -202,7 +202,7 @@ fn __missing_tool_call_normalize(
   const tool_name = __missing_tool_call_tool_name(raw?.tool_name ?? raw?.tool, candidate_tools)
   const action = if original_action == "tool_call_intended" && confidence >= threshold
     && tool_name
-    != "" {
+      != "" {
     "tool_call_intended"
   } else if original_action == "no_tool_call_intended" && confidence >= threshold {
     "no_tool_call_intended"
@@ -212,17 +212,17 @@ fn __missing_tool_call_normalize(
   const evidence = __missing_tool_call_string(raw?.evidence ?? raw?.reason ?? raw?.reasoning)
   return raw
     + {
-    action: action,
-    original_action: original_action,
-    tool_name: tool_name,
-    confidence: confidence,
-    confidence_threshold: threshold,
-    evidence: if evidence == "" {
-      "no evidence provided"
-    } else {
-      evidence
-    },
-  }
+      action: action,
+      original_action: original_action,
+      tool_name: tool_name,
+      confidence: confidence,
+      confidence_threshold: threshold,
+      evidence: if evidence == "" {
+        "no evidence provided"
+      } else {
+        evidence
+      },
+    }
 }
 
 fn __missing_tool_call_fail_open(error, threshold: float) -> MissingToolCallVerdict {
@@ -296,10 +296,10 @@ pub fn missing_tool_call_classifier(
     }
     const classifier_payload = payload
       + {
-      candidate_tools: candidate_tools,
-      tool_names: __missing_tool_call_tool_names(candidate_tools),
-      confidence_threshold: threshold,
-    }
+        candidate_tools: candidate_tools,
+        tool_names: __missing_tool_call_tool_names(candidate_tools),
+        confidence_threshold: threshold,
+      }
     if classifier != nil {
       const custom = try {
         classifier(classifier_payload)
@@ -312,9 +312,7 @@ pub fn missing_tool_call_classifier(
         return __missing_tool_call_fail_open(err, threshold) + {classifier_kind: "custom"}
       }
       return __missing_tool_call_normalize(unwrap(custom), candidate_tools, threshold)
-        + {
-        classifier_kind: "custom",
-      }
+        + {classifier_kind: "custom"}
     }
     const schema = __missing_tool_call_schema()
     let llm_opts = {
@@ -344,17 +342,9 @@ pub fn missing_tool_call_classifier(
     )
     if !checkpoint.ok {
       return __missing_tool_call_fail_open(checkpoint.error, threshold)
-        + {
-        classifier_kind: "llm",
-        model: model,
-        typed_checkpoint: checkpoint,
-      }
+        + {classifier_kind: "llm", model: model, typed_checkpoint: checkpoint}
     }
     return __missing_tool_call_normalize(checkpoint.data, candidate_tools, threshold)
-      + {
-      classifier_kind: "llm",
-      model: model,
-      typed_checkpoint: checkpoint,
-    }
+      + {classifier_kind: "llm", model: model, typed_checkpoint: checkpoint}
   }
 }

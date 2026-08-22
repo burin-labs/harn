@@ -3,14 +3,14 @@ import "std/calendar"
 pipeline default(harness: Harness) {
   const us: CalendarCountry = country_info("us")
     ?? {
-    code: "US",
-    name: "missing",
-    timezones: [],
-    default_timezone_ambiguous: true,
-    currency_code: "USD",
-    currency_name: "United States dollar",
-    holiday_calendars: [],
-  }
+      code: "US",
+      name: "missing",
+      timezones: [],
+      default_timezone_ambiguous: true,
+      currency_code: "USD",
+      currency_name: "United States dollar",
+      holiday_calendars: [],
+    }
   harness.stdio.println(us.name)
   harness.stdio.println(us.default_timezone == nil)
   harness.stdio.println(country_timezones("US")?.[0])

@@ -134,9 +134,7 @@ pipeline default(harness: Harness) {
       harness.stdio.println("fenced.status=" + r.status)
       harness.stdio.println(
         "fenced.nudge="
-          + to_string(
-          injected_kind_in(calls, 1, "<directive authority=\"corrective\">"),
-        ),
+          + to_string(injected_kind_in(calls, 1, "<directive authority=\"corrective\">")),
       )
       harness.stdio.println(
         "fenced.no_missing="
@@ -171,9 +169,7 @@ pipeline default(harness: Harness) {
       harness.stdio.println("missing.status=" + r.status)
       harness.stdio.println(
         "missing.nudge="
-          + to_string(
-          injected_kind_in(calls, 1, "<directive authority=\"corrective\">"),
-        ),
+          + to_string(injected_kind_in(calls, 1, "<directive authority=\"corrective\">")),
       )
       harness.stdio.println(
         "missing.not_fenced=" + to_string(!injected_kind_in(calls, 1, "wrapped a tool call")),
@@ -208,9 +204,7 @@ pipeline default(harness: Harness) {
       harness.stdio.println("multilingual.status=" + r.status)
       harness.stdio.println(
         "multilingual.nudge="
-          + to_string(
-          injected_kind_in(calls, 1, "<directive authority=\"corrective\">"),
-        ),
+          + to_string(injected_kind_in(calls, 1, "<directive authority=\"corrective\">")),
       )
       harness.stdio.println(
         "multilingual.not_fenced="
@@ -309,9 +303,7 @@ pipeline default(harness: Harness) {
       const calls = harness.llm.mock_calls()
       harness.stdio.println(
         "streak.none_after_progress="
-          + to_string(
-          !injected_kind_in(calls, 1, "<directive authority=\"corrective\">"),
-        ),
+          + to_string(!injected_kind_in(calls, 1, "<directive authority=\"corrective\">")),
       )
       let streak_fired = false
       for i in range(2, len(calls)) {
@@ -403,9 +395,7 @@ pipeline default(harness: Harness) {
       const calls = harness.llm.mock_calls()
       harness.stdio.println(
         "judged_done.no_missing_nudge="
-          + to_string(
-          !injected_anywhere(calls, "appeared to intend a call"),
-        ),
+          + to_string(!injected_anywhere(calls, "appeared to intend a call")),
       )
       harness.stdio.println(
         "judged_done.no_exemplar="
@@ -449,15 +439,11 @@ pipeline default(harness: Harness) {
             if info?.iteration == 1 {
               harness.stdio.println(
                 "claim_fact.repair_turn="
-                  + to_string(
-                  info?.prior_turn_claimed_for_repair ?? "missing",
-                ),
+                  + to_string(info?.prior_turn_claimed_for_repair ?? "missing"),
               )
               harness.stdio.println(
                 "claim_fact.tool="
-                  + to_string(
-                  info?.prior_turn_next_tool_claim?.tool_name ?? "missing",
-                ),
+                  + to_string(info?.prior_turn_next_tool_claim?.tool_name ?? "missing"),
               )
             }
             return nil
@@ -541,9 +527,7 @@ pipeline default(harness: Harness) {
       // loop, and between the two the corrective is the actionable one.
       harness.stdio.println(
         "host_advisory.suppressed_on_claimed_turn="
-          + to_string(
-          !injected_kind_in(calls, 1, "Keep making progress."),
-        ),
+          + to_string(!injected_kind_in(calls, 1, "Keep making progress.")),
       )
     },
   )
@@ -643,9 +627,7 @@ pipeline default(harness: Harness) {
       // the contract is "this is a placeholder", not how `<` is encoded.
       harness.stdio.println(
         "exemplar.marks_placeholder="
-          + to_string(
-          injected_anywhere(calls, "replace each placeholder with a real value"),
-        ),
+          + to_string(injected_anywhere(calls, "replace each placeholder with a real value")),
       )
       // The empty-argument form must be gone: it is the shape that taught
       // nothing and still parsed as a complete call.
@@ -687,9 +669,7 @@ pipeline default(harness: Harness) {
       // It must NOT be described as a turn that never intended a call.
       harness.stdio.println(
         "malformed.not_absent_call="
-          + to_string(
-          !injected_anywhere(calls, "appeared to intend a call"),
-        ),
+          + to_string(!injected_anywhere(calls, "appeared to intend a call")),
       )
     },
   )
@@ -720,9 +700,7 @@ pipeline default(harness: Harness) {
       const calls = harness.llm.mock_calls()
       harness.stdio.println(
         "malformed.silent_on_prose="
-          + to_string(
-          !injected_anywhere(calls, "call markup was malformed"),
-        ),
+          + to_string(!injected_anywhere(calls, "call markup was malformed")),
       )
     },
   )
@@ -755,9 +733,7 @@ pipeline default(harness: Harness) {
       const calls = harness.llm.mock_calls()
       harness.stdio.println(
         "malformed.silent_on_parse_rejection="
-          + to_string(
-          !injected_anywhere(calls, "call markup was malformed"),
-        ),
+          + to_string(!injected_anywhere(calls, "call markup was malformed")),
       )
     },
   )
@@ -789,9 +765,7 @@ pipeline default(harness: Harness) {
   const threshold_error = unwrap_err(invalid_threshold)
   harness.stdio.println(
     "invalid_threshold.code="
-      + to_string(
-      threshold_error.error == "missing_tool_call.invalid_confidence_threshold",
-    ),
+      + to_string(threshold_error.error == "missing_tool_call.invalid_confidence_threshold"),
   )
   harness.stdio.println(
     "invalid_threshold.field=" + to_string(threshold_error.field == "confidence_threshold"),

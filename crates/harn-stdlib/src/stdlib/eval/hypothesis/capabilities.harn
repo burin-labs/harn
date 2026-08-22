@@ -266,41 +266,39 @@ pub fn experiment_capability_policy_diagnostics(
   let diagnostics: list<ExperimentCompileDiagnostic> = []
   if (customer.access == "none" && len(customer.scopes) > 0)
     || (customer.access != "none"
-    && len(
-    customer.scopes,
-  )
-    == 0) {
+      && len(customer.scopes)
+        == 0) {
     diagnostics = diagnostics
       + [
-      __diagnostic(
-        "experiment.invalid_customer_state_policy",
-        path + ".customer_state",
-        "customer-state scopes must be empty for no access and non-empty for declared access",
-        __policy_repair(path + ".customer_state", "access and scopes that agree"),
-      ),
-    ]
+        __diagnostic(
+          "experiment.invalid_customer_state_policy",
+          path + ".customer_state",
+          "customer-state scopes must be empty for no access and non-empty for declared access",
+          __policy_repair(path + ".customer_state", "access and scopes that agree"),
+        ),
+      ]
   }
   if models.dynamic_routing && len(models.model_ids) == 0 {
     diagnostics = diagnostics
       + [
-      __diagnostic(
-        "experiment.invalid_model_policy",
-        path + ".models",
-        "dynamic model routing requires an explicit model allowlist",
-        __policy_repair(path + ".models", "an explicit non-empty model allowlist"),
-      ),
-    ]
+        __diagnostic(
+          "experiment.invalid_model_policy",
+          path + ".models",
+          "dynamic model routing requires an explicit model allowlist",
+          __policy_repair(path + ".models", "an explicit non-empty model allowlist"),
+        ),
+      ]
   }
   if privacy.cross_tenant && len(privacy.data_classes) == 0 {
     diagnostics = diagnostics
       + [
-      __diagnostic(
-        "experiment.invalid_privacy_policy",
-        path + ".privacy",
-        "cross-tenant data handling requires explicit data classes",
-        __policy_repair(path + ".privacy", "explicit non-empty data classes"),
-      ),
-    ]
+        __diagnostic(
+          "experiment.invalid_privacy_policy",
+          path + ".privacy",
+          "cross-tenant data handling requires explicit data classes",
+          __policy_repair(path + ".privacy", "explicit non-empty data classes"),
+        ),
+      ]
   }
   return diagnostics
 }
@@ -332,11 +330,11 @@ fn __placement_satisfied(
   const platform_ok = required.platform == "any"
     || ceiling.platform == "any"
     || required.platform
-    == ceiling.platform
+      == ceiling.platform
   const gpu_ok = !required.requires_gpu || ceiling.requires_gpu
   const resource_ok = required.resource_class == nil
     || required.resource_class
-    == ceiling.resource_class
+      == ceiling.resource_class
   return mode_ok && platform_ok && gpu_ok && resource_ok
 }
 
@@ -398,31 +396,22 @@ pub fn experiment_capability_ceiling_diagnostics(
   if __side_effect_rank(required.side_effect_level)
     > __side_effect_rank(ceiling.side_effect_level)
     || __sandbox_rank(required.sandbox_profile)
-    > __sandbox_rank(
-    ceiling.sandbox_profile,
-  )
+      > __sandbox_rank(ceiling.sandbox_profile)
     || (required.network.allow_private && !ceiling.network.allow_private)
-    || (required.mutation
-    .requires_approval
-    && !ceiling.mutation.requires_approval)
+    || (required.mutation.requires_approval
+      && !ceiling.mutation.requires_approval)
     || (!required.mutation.reversible
-    && ceiling.mutation.reversible)
+      && ceiling.mutation.reversible)
     || __customer_state_rank(required_customer.access)
-    > __customer_state_rank(
-    ceiling_customer.access,
-  )
+      > __customer_state_rank(ceiling_customer.access)
     || (required_models.dynamic_routing && !ceiling_models.dynamic_routing)
-    || __retention_rank(
-    required_privacy.retention,
-  )
-    > __retention_rank(ceiling_privacy.retention)
+    || __retention_rank(required_privacy.retention)
+      > __retention_rank(ceiling_privacy.retention)
     || (required_privacy.cross_tenant
-    && !ceiling_privacy
-    .cross_tenant)
+      && !ceiling_privacy.cross_tenant)
     || (required.mutation.rollback_adapter_id != nil
-    && required.mutation.rollback_adapter_id
-    != ceiling
-    .mutation.rollback_adapter_id)
+      && required.mutation.rollback_adapter_id
+        != ceiling.mutation.rollback_adapter_id)
     || len(missing) > 0 {
     return [
       __diagnostic(

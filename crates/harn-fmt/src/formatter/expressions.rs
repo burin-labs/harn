@@ -5,6 +5,64 @@ use crate::helpers::*;
 
 use super::Formatter;
 
+/// The physical placement an expression may use when it decides where its own
+/// continuation lines belong. Parent expressions derive a new layout whenever
+/// they move an operand instead of making each child reconstruct that context.
+#[derive(Clone, Copy)]
+struct ExprLayout {
+    indent: usize,
+    column: usize,
+    suffix_width: usize,
+}
+
+impl ExprLayout {
+    fn new(indent: usize, column: usize) -> Self {
+        Self {
+            indent,
+            column,
+            suffix_width: 0,
+        }
+    }
+
+    fn with_suffix_width(self, suffix_width: usize) -> Self {
+        Self {
+            suffix_width,
+            ..self
+        }
+    }
+
+    fn grouped_left(self, grouped: bool) -> Self {
+        Self {
+            indent: self.indent + usize::from(grouped),
+            column: self.column + usize::from(grouped),
+            suffix_width: 0,
+        }
+    }
+
+    fn inline_right(self, left: &str, operator: &str, grouped: bool) -> Self {
+        Self {
+            indent: self.indent + usize::from(grouped),
+            column: column_after(self.column, left)
+                + 1
+                + text_width(operator)
+                + 1
+                + usize::from(grouped),
+            suffix_width: self.suffix_width,
+        }
+    }
+
+    fn continued_right(self, operator: &str, grouped: bool) -> Self {
+        let operator_column = (self.indent + 1) * 2;
+        Self {
+            // The operand now starts on the parent's continuation line. Any
+            // continuation it emits must therefore be one level deeper.
+            indent: self.indent + 1,
+            column: operator_column + text_width(operator) + 1 + usize::from(grouped),
+            suffix_width: self.suffix_width,
+        }
+    }
+}
+
 impl Formatter<'_> {
     pub(super) fn format_require_stmt(
         &self,
@@ -60,6 +118,15 @@ impl Formatter<'_> {
     /// node wraps onto multiple lines, its closing delimiter aligns to
     /// `indent` and its inner contents land at `indent + 1`.
     pub(crate) fn format_expr(&self, node: &SNode, indent: usize, column: usize) -> String {
+        self.format_expr_in_layout(node, ExprLayout::new(indent, column))
+    }
+
+    fn format_expr_in_layout(&self, node: &SNode, layout: ExprLayout) -> String {
+        let indent = layout.indent;
+        // A suffix that the parent appends occupies real columns on this
+        // expression's final line. Shift only the measurement origin; emitted
+        // indentation still comes from the physical `layout.column`/`indent`.
+        let column = layout.column + layout.suffix_width;
         match &node.node {
             Node::StringLiteral(s) => {
                 if node.span.line != node.span.end_line {
@@ -96,18 +163,27 @@ impl Formatter<'_> {
                 if op == "+" && plus_chain_depth(left) >= 64 {
                     return self.format_deep_plus_chain(node, indent, column);
                 }
-                let mut l = self.format_expr(left, indent, column);
-                let mut r = self.format_expr(right, indent, column_after(column, &l));
                 let op_str = if op == "not_in" {
                     "not in"
                 } else {
                     op.as_str()
                 };
-
-                if child_needs_parens(op, &left.node, false) {
+                let left_grouped = child_needs_parens(op, &left.node, false);
+                let right_grouped = child_needs_parens(op, &right.node, true);
+                let left_layout = layout.grouped_left(left_grouped);
+                let mut l = self.format_expr_in_layout(left, left_layout);
+                if left_grouped {
                     l = format!("({l})");
                 }
-                if child_needs_parens(op, &right.node, true) {
+
+                // Rendering an expression may claim comments. Snapshot only
+                // the right-hand side's claims so a moved operand can be
+                // rendered once more at its real continuation column without
+                // dropping or duplicating those comments.
+                let emitted_before_right = self.emitted_lines.borrow().clone();
+                let inline_right_layout = layout.inline_right(&l, op_str, right_grouped);
+                let mut r = self.format_expr_in_layout(right, inline_right_layout);
+                if right_grouped {
                     r = format!("({r})");
                 }
 
@@ -116,6 +192,12 @@ impl Formatter<'_> {
                     || column + text_width(&inline) > self.line_width;
 
                 if should_break {
+                    *self.emitted_lines.borrow_mut() = emitted_before_right;
+                    let continued_right_layout = layout.continued_right(op_str, right_grouped);
+                    r = self.format_expr_in_layout(right, continued_right_layout);
+                    if right_grouped {
+                        r = format!("({r})");
+                    }
                     let pad = "  ".repeat(indent + 1);
                     if op_safe_after_newline(op_str) {
                         // Claim any trailing comment on the left operand's last
@@ -317,12 +399,36 @@ impl Formatter<'_> {
                 let cond =
                     paren_if_range(self.format_expr(condition, indent, column), &condition.node);
                 let t_col = column_after(column, &cond) + 3;
-                let t = paren_if_range(self.format_expr(true_expr, indent, t_col), &true_expr.node);
-                let f_col = column_after(t_col, &t) + 3;
-                let f = paren_if_range(
+                let emitted_before_true = self.emitted_lines.borrow().clone();
+                let mut t =
+                    paren_if_range(self.format_expr(true_expr, indent, t_col), &true_expr.node);
+                let mut f_col = column_after(t_col, &t) + 3;
+                let mut f = paren_if_range(
                     self.format_expr(false_expr, indent, f_col),
                     &false_expr.node,
                 );
+
+                // ` : false_expr` belongs to the true branch's final line.
+                // If that real suffix overflows, let the true branch choose a
+                // new layout with the suffix reserved instead of relying on a
+                // stale speculative column to over-wrap it by accident.
+                let false_first_width = f.lines().next().map_or(0, text_width);
+                let true_suffix_width = 3 + false_first_width;
+                if column_after(t_col, &t) + true_suffix_width > self.line_width {
+                    *self.emitted_lines.borrow_mut() = emitted_before_true;
+                    t = paren_if_range(
+                        self.format_expr_in_layout(
+                            true_expr,
+                            ExprLayout::new(indent, t_col).with_suffix_width(true_suffix_width),
+                        ),
+                        &true_expr.node,
+                    );
+                    f_col = column_after(t_col, &t) + 3;
+                    f = paren_if_range(
+                        self.format_expr(false_expr, indent, f_col),
+                        &false_expr.node,
+                    );
+                }
                 format!("{cond} ? {t} : {f}")
             }
             Node::Assignment {

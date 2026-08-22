@@ -146,10 +146,7 @@ pub fn agent_stance_default_consent_check(
     required: ["consent", "reasoning"],
   }
   const llm_options = (options ?? {})
-    + {
-    output: {schema: schema, strict: true, validation: "error"},
-    temperature: 0,
-  }
+    + {output: {schema: schema, strict: true, validation: "error"}, temperature: 0}
   const outcome = try {
     llm.call(prompt, nil, llm_options)
   } catch (e) {
@@ -284,11 +281,7 @@ pub fn agent_stance_prepare(harness: Harness, session, message, opts) {
   )
   return opts
     + policy_patch
-    + {
-    tools: tools,
-    _read_only_stance_tools: allowed,
-    _read_only_stance_grant: grant_flag,
-  }
+    + {tools: tools, _read_only_stance_tools: allowed, _read_only_stance_grant: grant_flag}
 }
 
 /**
@@ -313,9 +306,9 @@ pub fn agent_stance_apply(turn_opts) {
   const allowed = __stance_read_only_names(turn_opts?.tools, turn_opts?.policy, names, "")
   return turn_opts
     + {
-    tools: __tool_surface_filter_registry(turn_opts?.tools, allowed),
-    policy: __tool_surface_policy_tools(turn_opts?.policy, allowed),
-  }
+      tools: __tool_surface_filter_registry(turn_opts?.tools, allowed),
+      policy: __tool_surface_policy_tools(turn_opts?.policy, allowed),
+    }
 }
 
 /**

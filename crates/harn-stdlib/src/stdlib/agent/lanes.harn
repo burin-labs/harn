@@ -354,10 +354,10 @@ pub fn lane_policy(rows, task, agent_options = nil, options = nil) {
   }
   return opts
     + {
-    _lane_verdict: verdict + {tool_names: names},
-    policy: __tool_surface_policy_tools(opts?.policy, names),
-    tools: __tool_surface_filter_registry(opts?.tools, names),
-  }
+      _lane_verdict: verdict + {tool_names: names},
+      policy: __tool_surface_policy_tools(opts?.policy, names),
+      tools: __tool_surface_filter_registry(opts?.tools, names),
+    }
 }
 
 /**
@@ -581,9 +581,7 @@ pub fn stage_gate_label(base_label, gate, options = nil) {
     __stage_gate_reject_delimiters("allowed_tools token", tool_token)
   }
   const marker = prefix + "lane=" + lane + " stage=" + stage + " kinds="
-    + __stage_gate_token_string(
-    kinds,
-  )
+    + __stage_gate_token_string(kinds)
     + " tools="
     + __stage_gate_token_string(tools)
     + "]"

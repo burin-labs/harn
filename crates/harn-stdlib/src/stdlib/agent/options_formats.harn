@@ -169,9 +169,7 @@ fn __tool_format_is_text_channel(format) {
 fn __validate_explicit_tool_format(value) {
   if __valid_tool_format(value) == nil {
     throw "agent_loop: `tool_format` must be one of native, text, json, auto (or omitted); got "
-      + to_string(
-      value,
-    )
+      + to_string(value)
   }
 }
 
@@ -373,8 +371,8 @@ pub fn agent_tool_format_override_warning_text(event) {
   const override_reason = trim(to_string(payload?.override_reason ?? ""))
   const needs_reason = (parity == "native_unreliable" && requested == "native")
     || (parity
-    == "text_unreliable"
-    && requested == "text")
+      == "text_unreliable"
+      && requested == "text")
   let line = "warning: tool_format override: "
     + provider
     + ":"
@@ -479,16 +477,10 @@ pub fn agent_tool_format_resolution(llm: HarnessLlm, options = nil) {
     // fenced-JSON corrupted file bodies in 3/3 sampled runs), so honoring the
     // request here would trade a silent-drop bug for a corruption bug.
     const steered = if override_reason == nil
-      && __parity_conflicts_with_requested(
-      __catalog_parity(parity),
-      explicit,
-    ) {
+      && __parity_conflicts_with_requested(__catalog_parity(parity), explicit) {
       __steer_tool_format(__catalog_parity(parity), preferred)
     } else if override_reason == nil
-      && __grammar_conflicts_with_requested(
-      preferred,
-      explicit,
-    ) {
+      && __grammar_conflicts_with_requested(preferred, explicit) {
       preferred
     } else {
       nil

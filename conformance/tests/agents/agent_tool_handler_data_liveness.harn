@@ -58,7 +58,7 @@ pipeline main(harness: Harness) {
         { event ->
           return event.type == "tool_call_update" && event.tool_name == "run"
             && event.status
-            == "completed"
+              == "completed"
         },
       )
       const message = agent_session_messages(harness.agent, session).find(

@@ -36,21 +36,21 @@ import {
 fn __cancel_status(job: dict, dry_run: bool) -> dict {
   return __batch_lifecycle_job_base(job, dry_run)
     + {
-    request_count: __safe_int(job["request_count"]) ?? 0,
-    provider_status: job["provider_status"],
-    source_status: safe_string(job["status"], ""),
-    output_file_id: job["output_file_id"],
-    error_file_id: job["error_file_id"],
-    output_file: job["output_file"],
-    error_file: job["error_file"],
-    results_url: job["results_url"],
-    responses_file: job["responses_file"],
-    input_dataset_id: job["input_dataset_id"],
-    input_dataset_resource: job["input_dataset_resource"],
-    output_dataset_id: job["output_dataset_id"],
-    output_dataset_resource: job["output_dataset_resource"],
-    job_progress: job["job_progress"],
-  }
+      request_count: __safe_int(job["request_count"]) ?? 0,
+      provider_status: job["provider_status"],
+      source_status: safe_string(job["status"], ""),
+      output_file_id: job["output_file_id"],
+      error_file_id: job["error_file_id"],
+      output_file: job["output_file"],
+      error_file: job["error_file"],
+      results_url: job["results_url"],
+      responses_file: job["responses_file"],
+      input_dataset_id: job["input_dataset_id"],
+      input_dataset_resource: job["input_dataset_resource"],
+      output_dataset_id: job["output_dataset_id"],
+      output_dataset_resource: job["output_dataset_resource"],
+      job_progress: job["job_progress"],
+    }
 }
 
 fn __cancel_operation(
@@ -98,7 +98,7 @@ fn __batch_cancel_skip_reason(job: dict) -> string {
   const state = __batch_lifecycle_state(job["status"])
   if state == "completed" || state == "downloaded" || state == "canceled" || state == "failed"
     || state
-    == "not_ready" {
+      == "not_ready" {
     return "job " + safe_string(job["id"], "") + " is terminal (" + to_string(state) + ")"
   }
   const cancellation = safe_string(safe_dict(job["batch"])["cancellation"], "unknown")
@@ -123,11 +123,11 @@ fn __dry_run_cancel_job(env: HarnessEnv, job: dict, provider: string) -> dict {
     ok: true,
     job: base
       + {
-      status: __batch_lifecycle_state(job["status"]),
-      cancel_requested: false,
-      skipped: false,
-      cancel_operation: __cancel_operation_for_job(env, job, provider),
-    },
+        status: __batch_lifecycle_state(job["status"]),
+        cancel_requested: false,
+        skipped: false,
+        cancel_operation: __cancel_operation_for_job(env, job, provider),
+      },
     skipped: false,
     errors: [],
   }
@@ -137,12 +137,7 @@ fn __skipped_cancel_job(job: dict, dry_run: bool, reason: string) -> dict {
   return {
     ok: true,
     job: __cancel_status(job, dry_run)
-      + {
-      status: "skipped",
-      cancel_requested: false,
-      skipped: true,
-      skip_reason: reason,
-    },
+      + {status: "skipped", cancel_requested: false, skipped: true, skip_reason: reason},
     skipped: true,
     errors: [],
   }
@@ -182,16 +177,16 @@ fn __cancel_openai_compatible(harness: Harness, job: dict, provider: string) -> 
     ok: true,
     job: base_job
       + {
-      status: __provider_batch_status(provider_status),
-      provider_status: provider_status,
-      cancel_requested: true,
-      skipped: false,
-      cancel_operation: __cancel_operation_for_job(harness.env, job, provider),
-      output_file_id: body["output_file_id"] ?? job["output_file_id"],
-      error_file_id: body["error_file_id"] ?? job["error_file_id"],
-      response_status: response["status"],
-      response: body,
-    },
+        status: __provider_batch_status(provider_status),
+        provider_status: provider_status,
+        cancel_requested: true,
+        skipped: false,
+        cancel_operation: __cancel_operation_for_job(harness.env, job, provider),
+        output_file_id: body["output_file_id"] ?? job["output_file_id"],
+        error_file_id: body["error_file_id"] ?? job["error_file_id"],
+        response_status: response["status"],
+        response: body,
+      },
     errors: [],
   }
 }
@@ -225,15 +220,15 @@ fn __cancel_anthropic(harness: Harness, job: dict) -> dict {
     ok: true,
     job: base_job
       + {
-      status: __provider_batch_status(provider_status),
-      provider_status: provider_status,
-      cancel_requested: true,
-      skipped: false,
-      cancel_operation: __cancel_operation_for_job(harness.env, job, "anthropic"),
-      results_url: body["results_url"] ?? job["results_url"],
-      response_status: response["status"],
-      response: body,
-    },
+        status: __provider_batch_status(provider_status),
+        provider_status: provider_status,
+        cancel_requested: true,
+        skipped: false,
+        cancel_operation: __cancel_operation_for_job(harness.env, job, "anthropic"),
+        results_url: body["results_url"] ?? job["results_url"],
+        response_status: response["status"],
+        response: body,
+      },
     errors: [],
   }
 }
@@ -270,14 +265,14 @@ fn __cancel_gemini(harness: Harness, job: dict) -> dict {
     ok: true,
     job: base_job
       + {
-      status: "canceling",
-      provider_status: "canceling",
-      cancel_requested: true,
-      skipped: false,
-      cancel_operation: __cancel_operation_for_job(harness.env, job, "gemini"),
-      response_status: response["status"],
-      response: body,
-    },
+        status: "canceling",
+        provider_status: "canceling",
+        cancel_requested: true,
+        skipped: false,
+        cancel_operation: __cancel_operation_for_job(harness.env, job, "gemini"),
+        response_status: response["status"],
+        response: body,
+      },
     errors: [],
   }
 }
@@ -320,20 +315,20 @@ fn __cancel_bedrock(harness: Harness, job: dict) -> dict {
     ok: true,
     job: base_job
       + {
-      status: __provider_batch_status(provider_status),
-      provider_status: provider_status,
-      provider_batch_handle: handle,
-      region: region,
-      cancel_requested: true,
-      skipped: false,
-      cancel_operation: {
-        provider: "bedrock",
-        operation: "POST " + __redact_download_url(url),
-        auth: "aws_sdk_default_chain",
+        status: __provider_batch_status(provider_status),
+        provider_status: provider_status,
+        provider_batch_handle: handle,
+        region: region,
+        cancel_requested: true,
+        skipped: false,
+        cancel_operation: {
+          provider: "bedrock",
+          operation: "POST " + __redact_download_url(url),
+          auth: "aws_sdk_default_chain",
+        },
+        response_status: response["status"],
+        response: body,
       },
-      response_status: response["status"],
-      response: body,
-    },
     errors: [],
   }
 }
@@ -396,7 +391,7 @@ fn __cancel_status_summary(jobs: list, errors: list, dry_run: bool) -> string {
   if len(errors) > 0 {
     if __count_jobs_with_status(jobs, "canceling") > 0
       || __count_jobs_with_status(jobs, "canceled")
-      > 0 {
+        > 0 {
       return "partial"
     }
     return "failed"

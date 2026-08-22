@@ -140,20 +140,11 @@ pub fn graphql_rate_limit_meta(headers = nil) {
   return filter_nil(
     {
       requests_limit: __graphql_int_header(headers, "x-ratelimit-requests-limit")
-        ?? __graphql_int_header(
-        headers,
-        "x-ratelimit-limit",
-      ),
+        ?? __graphql_int_header(headers, "x-ratelimit-limit"),
       requests_remaining: __graphql_int_header(headers, "x-ratelimit-requests-remaining")
-        ?? __graphql_int_header(
-        headers,
-        "x-ratelimit-remaining",
-      ),
+        ?? __graphql_int_header(headers, "x-ratelimit-remaining"),
       requests_reset: __graphql_int_header(headers, "x-ratelimit-requests-reset")
-        ?? __graphql_int_header(
-        headers,
-        "x-ratelimit-reset",
-      ),
+        ?? __graphql_int_header(headers, "x-ratelimit-reset"),
       endpoint_requests_limit: __graphql_int_header(headers, "x-ratelimit-endpoint-requests-limit"),
       endpoint_requests_remaining: __graphql_int_header(
         headers,
@@ -242,10 +233,7 @@ pub fn graphql_normalize_response(response, options = nil) {
         status: status,
         operation_name: options?.operation_name ?? options?.operationName,
         request_id: __graphql_header(headers, "x-request-id")
-          ?? __graphql_header(
-          headers,
-          "linear-request-id",
-        )
+          ?? __graphql_header(headers, "linear-request-id")
           ?? __graphql_header(headers, "apollographql-client-request-id"),
         rate_limit: graphql_rate_limit_meta(headers),
         persisted_query: options?.persisted_query ?? options?.persistedQuery,
@@ -378,10 +366,7 @@ pub fn graphql_operation(name, document, options = nil) {
       name: name,
       document: document,
       operation_name: options?.operation_name ?? options?.operationName
-        ?? __graphql_operation_name(
-        document,
-        name,
-      ),
+        ?? __graphql_operation_name(document, name),
       root_field: options?.root_field ?? __graphql_root_field_from_query(document),
       persisted_query: options?.persisted_query ?? options?.persistedQuery,
     },

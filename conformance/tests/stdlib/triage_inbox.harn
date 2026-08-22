@@ -11,9 +11,9 @@ pipeline default(harness: Harness) {
   const notion = fixture(harness.fs, "notion_page")
   const github_retry = github
     + {
-    dedupe_key: "github-delivery-1507-retry",
-    provider_payload: github.provider_payload + {delivery_id: "github-delivery-1507-retry"},
-  }
+      dedupe_key: "github-delivery-1507-retry",
+      provider_payload: github.provider_payload + {delivery_id: "github-delivery-1507-retry"},
+    }
   const github_event = triage_normalize(github)
   const slack_event = triage_normalize(slack)
   const notion_event = triage_normalize(notion)

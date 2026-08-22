@@ -271,10 +271,10 @@ pub fn drift_report(base: string, drift: list<string>) -> string {
   let lines = []
   lines = lines
     + [
-    "error: CHANGELOG.md sections for already-published versions were modified in this change (compared against "
-      + base
-      + "):",
-  ]
+      "error: CHANGELOG.md sections for already-published versions were modified in this change (compared against "
+        + base
+        + "):",
+    ]
   for version in drift {
     lines = lines + ["  - v" + version]
   }
@@ -341,16 +341,13 @@ pipeline main(harness: Harness, task) {
   const base_show = git_show_at(harness.process, base, CHANGELOG_REL)
   harness.stdio.println(
     "check_changelog_no_retroactive_edits: base=" + base + " resolved="
-      + resolved.sha.substring(
-      0,
-      12,
-    )
+      + resolved.sha.substring(0, 12)
       + " base_file="
       + if base_show.found {
-      "read"
-    } else {
-      "absent"
-    },
+        "read"
+      } else {
+        "absent"
+      },
   )
   if base_show.error != "" {
     harness.stdio.eprintln(

@@ -80,10 +80,8 @@ pub fn __live_cells(request: ProviderToolProbeLiveCellsRequest) -> dict {
           continue
         }
         const ready_provider_probe = behavior.runner == "provider_tool_probe"
-          && len(
-          __missing_env_keys(route, env),
-        )
-          == 0
+          && len(__missing_env_keys(route, env))
+            == 0
         if ready_provider_probe && max_probes > 0 && executable_units_selected >= max_probes {
           probe_units_excluded_by_cap = probe_units_excluded_by_cap + 1
           continue
@@ -92,9 +90,7 @@ pub fn __live_cells(request: ProviderToolProbeLiveCellsRequest) -> dict {
         if behavior.runner != "provider_tool_probe" {
           for format in behavior.tool_formats {
             cells = cells
-              + [
-              __planned_cell(llm, route, behavior, mode, format, harn_bin, repeat, timeout_secs),
-            ]
+              + [__planned_cell(llm, route, behavior, mode, format, harn_bin, repeat, timeout_secs)]
           }
           continue
         }
@@ -113,19 +109,19 @@ pub fn __live_cells(request: ProviderToolProbeLiveCellsRequest) -> dict {
               + {tool_formats: [format]}
             cells = cells
               + __run_tool_probe(
-              llm,
-              fs,
-              process,
-              route,
-              one_format_behavior,
-              mode,
-              harn_bin,
-              env,
-              1,
-              timeout_secs,
-              output_dir,
-              trial,
-            )
+                llm,
+                fs,
+                process,
+                route,
+                one_format_behavior,
+                mode,
+                harn_bin,
+                env,
+                1,
+                timeout_secs,
+                output_dir,
+                trial,
+              )
             probe_executions_selected = probe_executions_selected + 1
           }
         }
@@ -147,10 +143,10 @@ pub fn __live_cells(request: ProviderToolProbeLiveCellsRequest) -> dict {
       },
     )
       + {
-      probe_executions_selected: probe_executions_selected,
-      probe_executions_excluded_by_budget: probe_executions_excluded_by_budget,
-      budget_stopped: budget_stopped,
-    },
+        probe_executions_selected: probe_executions_selected,
+        probe_executions_excluded_by_budget: probe_executions_excluded_by_budget,
+        budget_stopped: budget_stopped,
+      },
   }
 }
 
@@ -169,12 +165,9 @@ pub fn __runner_summary(cells: list<ProviderToolProbeCell>) -> dict {
       ?? {total: 0, pass: 0, fail: 0, error: 0, skip: 0, planned: 0}
     summary = summary
       + {
-      [cell.runner]: current
-        + {
-        total: (current.total ?? 0) + 1,
-        [cell.status]: (current[cell.status] ?? 0) + 1,
-      },
-    }
+        [cell.runner]: current
+          + {total: (current.total ?? 0) + 1, [cell.status]: (current[cell.status] ?? 0) + 1},
+      }
   }
   return summary
 }
@@ -230,10 +223,10 @@ pub fn __estimated_spend(
       const observed_attempts = cell?.observed?.telemetry?.request_attempt_count ?? 0
       executable_probe_count = executable_probe_count
         + if observed_attempts > 0 {
-        observed_attempts
-      } else {
-        1
-      }
+          observed_attempts
+        } else {
+          1
+        }
     }
   }
   const base = {
@@ -254,21 +247,21 @@ pub fn __estimated_spend(
     return base
       + observed
       + {
-      unaccounted_probe_count: unaccounted_probe_count,
-      actual_usd_known: accounting_complete,
-      accounting: if accounting_complete {
-        "summed from runtime-priced per-case usage receipts"
-      } else {
-        "stopped after a live case without runtime-priced usage; no further provider calls were made"
-      },
-      budget_status: if !accounting_complete {
-        "stopped_unpriced"
-      } else if observed.actual_usd >= max_cost_usd {
-        "exhausted"
-      } else {
-        "within_cap"
-      },
-    }
+        unaccounted_probe_count: unaccounted_probe_count,
+        actual_usd_known: accounting_complete,
+        accounting: if accounting_complete {
+          "summed from runtime-priced per-case usage receipts"
+        } else {
+          "stopped after a live case without runtime-priced usage; no further provider calls were made"
+        },
+        budget_status: if !accounting_complete {
+          "stopped_unpriced"
+        } else if observed.actual_usd >= max_cost_usd {
+          "exhausted"
+        } else {
+          "within_cap"
+        },
+      }
   }
   return base + {estimated_usd: 0.0, actual_usd: 0.0, estimated_usd_known: true}
 }

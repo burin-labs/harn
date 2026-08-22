@@ -58,10 +58,7 @@ pipeline default(harness: Harness, _task) {
       "fn scale(value: i64, factor: i64, offset: i64)",
     ),
     add_param_calls_filled: contains(add_param.unified_diff[0].diff, "scale(2, 3, 0)")
-      && contains(
-      add_param.unified_diff[0].diff,
-      "scale(6, 7, 0)",
-    ),
+      && contains(add_param.unified_diff[0].diff, "scale(6, 7, 0)"),
     return_type_result: ret.result,
   }
   harness.stdio.println(json_stringify(receipt))

@@ -307,14 +307,14 @@ fn __judge_invoke_structured(harness: Harness, judge_cfg, opts, payload) {
   )
   return outcome
     + {
-    accepted_evidence: accepted_evidence,
-    reasoning: reasoning,
-    next_step: next_step,
-    judge_duration_ms: duration_ms,
-    source: "llm",
-    specific_gaps: specific_gaps,
-    typed_checkpoint: checkpoint,
-  }
+      accepted_evidence: accepted_evidence,
+      reasoning: reasoning,
+      next_step: next_step,
+      judge_duration_ms: duration_ms,
+      source: "llm",
+      specific_gaps: specific_gaps,
+      typed_checkpoint: checkpoint,
+    }
 }
 
 /**
@@ -439,10 +439,10 @@ fn __emit_judge_decision(agent: HarnessAgent, session_id, iteration, verdict) {
       iteration: iteration,
       verdict: verdict?.verdict
         ?? if verdict.vetoed {
-        "continue"
-      } else {
-        "done"
-      },
+          "continue"
+        } else {
+          "done"
+        },
       reasoning: verdict?.reasoning ?? "",
       next_step: verdict?.next_step ?? "",
       judge_duration_ms: verdict?.judge_duration_ms ?? 0,
@@ -517,23 +517,22 @@ pub fn agent_done_contract(options = {}) {
     {}
   }
   const max_invocations = opts?.max_invocations ?? opts?.max_feedback ?? judge?.max_invocations
-    ?? judge
-    ?.max_feedback
+    ?? judge?.max_feedback
     ?? 3
   const bundle = {
     done_judge: judge
       + {
-      enabled: true,
-      fail_open: opts?.fail_open ?? judge?.fail_open ?? false,
-      fail_open_on_error: opts?.fail_open_on_error ?? judge?.fail_open_on_error,
-      feedback_fallback: opts?.feedback_fallback
-        ?? judge?.feedback_fallback
-        ?? "The done claim is not yet justified; address the specific gaps before finishing.",
-      max_invocations: max_invocations,
-      model: opts?.model ?? judge?.model,
-      provider: opts?.provider ?? judge?.provider,
-      system: opts?.system ?? judge?.system ?? __done_contract_judge_system(opts),
-    },
+        enabled: true,
+        fail_open: opts?.fail_open ?? judge?.fail_open ?? false,
+        fail_open_on_error: opts?.fail_open_on_error ?? judge?.fail_open_on_error,
+        feedback_fallback: opts?.feedback_fallback
+          ?? judge?.feedback_fallback
+          ?? "The done claim is not yet justified; address the specific gaps before finishing.",
+        max_invocations: max_invocations,
+        model: opts?.model ?? judge?.model,
+        provider: opts?.provider ?? judge?.provider,
+        system: opts?.system ?? judge?.system ?? __done_contract_judge_system(opts),
+      },
     loop_until_done: opts?.loop_until_done ?? true,
   }
   return __with_prompt_fragment(
@@ -578,9 +577,9 @@ pub fn agent_verify_or_continue(harness: Harness, session, opts, stop_reason, te
   const done_judge_due = opts?._done_judge_due ?? true
   const done_judge_applies = agent_has_done_judge(opts?.done_judge)
     && (stop_reason == "sentinel"
-    || stop_reason
-    == "natural"
-    || stop_reason == "stalled")
+      || stop_reason
+        == "natural"
+      || stop_reason == "stalled")
     && done_judge_due
   let done_judge_cap_reached = false
   const prior_done_judge_invocations = opts?._done_judge_invocations ?? 0
@@ -617,11 +616,11 @@ pub fn agent_verify_or_continue(harness: Harness, session, opts, stop_reason, te
   }
   return verdict
     + {
-    verify_completion_judge_invoked: completion_judge_invoked,
-    verify_completion_judge_cap_reached: completion_judge_cap_reached,
-    done_judge_cap_reached: done_judge_cap_reached,
-    feedback_history: feedback_composition?.history ?? opts?._feedback_history ?? {},
-  }
+      verify_completion_judge_invoked: completion_judge_invoked,
+      verify_completion_judge_cap_reached: completion_judge_cap_reached,
+      done_judge_cap_reached: done_judge_cap_reached,
+      feedback_history: feedback_composition?.history ?? opts?._feedback_history ?? {},
+    }
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -758,32 +757,23 @@ fn __completion_gate_validate_options(opts) {
   }
   if opts?.escalation_threshold != nil
     && (type_of(opts.escalation_threshold) != "int"
-    || opts
-    .escalation_threshold
-    < 1) {
+      || opts.escalation_threshold
+        < 1) {
     throw "agent_completion_gate: `escalation_threshold` must be a positive int; got "
-      + to_string(
-      opts.escalation_threshold,
-    )
+      + to_string(opts.escalation_threshold)
   }
   if opts?.escalation_target != nil
     && (type_of(opts.escalation_target) != "string"
-    || trim(
-    opts.escalation_target,
-  )
-    == "") {
+      || trim(opts.escalation_target)
+        == "") {
     throw "agent_completion_gate: `escalation_target` must be a non-empty string; got "
-      + to_string(
-      opts.escalation_target,
-    )
+      + to_string(opts.escalation_target)
   }
   if opts?.judge_seam != nil
     && opts.judge_seam != "verify_completion_judge"
     && opts.judge_seam != "done_judge" {
     throw "agent_completion_gate: `judge_seam` must be \"verify_completion_judge\" or \"done_judge\"; got "
-      + to_string(
-      opts.judge_seam,
-    )
+      + to_string(opts.judge_seam)
   }
   const templates = opts?.feedback_templates
   if templates != nil {
@@ -799,9 +789,7 @@ fn __completion_gate_validate_options(opts) {
       }
       if type_of(templates[key]) != "string" {
         throw "agent_completion_gate: `feedback_templates." + key + "` must be a string; got "
-          + type_of(
-          templates[key],
-        )
+          + type_of(templates[key])
       }
     }
   }

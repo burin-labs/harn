@@ -77,15 +77,15 @@ fn append_checked(
 fn verify_approval_gate() {
   const intent = hypothesis_fixture_intent()
     + {
-    question: "Does the production candidate improve bounded success?",
-    hypothesis: "The production candidate improves bounded success.",
-    null_hypothesis: "The production candidate does not improve bounded success.",
-  }
+      question: "Does the production candidate improve bounded success?",
+      hypothesis: "The production candidate improves bounded success.",
+      null_hypothesis: "The production candidate does not improve bounded success.",
+    }
   const context = hypothesis_fixture_context()
     + {
-    approval_id: "approval-production-1",
-    risk_floor: hypothesis_fixture_context().risk_floor + {touches_production: true},
-  }
+      approval_id: "approval-production-1",
+      risk_floor: hypothesis_fixture_context().risk_floor + {touches_production: true},
+    }
   const compiled = compile_experiment_intent(intent, context)
   if compiled.plan == nil || compiled.plan.kind != "registered_experiment" {
     throw "approval fixture did not compile to a registered experiment"
@@ -151,17 +151,17 @@ fn verify_approval_gate() {
 fn verify_observe_only_gate() {
   const intent = hypothesis_fixture_intent()
     + {
-    question: "Which instrumentation should precede an experiment?",
-    hypothesis: "The missing instrumentation can be identified.",
-    null_hypothesis: "No useful instrumentation can be identified.",
-    requested_lane: "non_experimental_research",
-    requested_evidence: "observational",
-    intervention: nil,
-    comparator: nil,
-    assignment_unit: nil,
-    population_id: nil,
-    outcome_ids: [],
-  }
+      question: "Which instrumentation should precede an experiment?",
+      hypothesis: "The missing instrumentation can be identified.",
+      null_hypothesis: "No useful instrumentation can be identified.",
+      requested_lane: "non_experimental_research",
+      requested_evidence: "observational",
+      intervention: nil,
+      comparator: nil,
+      assignment_unit: nil,
+      population_id: nil,
+      outcome_ids: [],
+    }
   const compiled = compile_experiment_intent(intent, hypothesis_fixture_context())
   if compiled.plan == nil || compiled.plan.kind != "observe_only" {
     throw "observe-only lifecycle fixture did not compile"
@@ -719,10 +719,7 @@ pipeline default(harness: Harness, _task) {
     "the projection preserves spend and terminal state"
   const report = hypothesis_report(snapshot)
   require contains(report.markdown, "## What actually executed")
-    && contains(
-    report.markdown,
-    "Cannot conclude:",
-  ),
+    && contains(report.markdown, "Cannot conclude:"),
     "the report separates execution from claim limits"
   require !contains(report.markdown, "<script>") && contains(report.markdown, "&lt;script&gt;"),
     "persisted narrative cannot inject raw HTML into the report"

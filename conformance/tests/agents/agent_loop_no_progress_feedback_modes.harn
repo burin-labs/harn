@@ -106,9 +106,7 @@ pipeline default(harness: Harness) {
       harness.stdio.println("native.status=" + native_result.status)
       harness.stdio.println(
         "native.has_streak="
-          + to_string(
-          contains(native_retry, "<directive authority=\"corrective\">"),
-        ),
+          + to_string(contains(native_retry, "<directive authority=\"corrective\">")),
       )
       harness.stdio.println(
         "native.has_native_final=" + to_string(contains(native_retry, "concise assistant text")),

@@ -186,28 +186,20 @@ fn __tool_surface_entry_class(entry) {
   const annotations = __tool_surface_annotations(entry)
   const side_effect = __tool_surface_text(
     annotations?.side_effect_level ?? annotations?.sideEffectLevel ?? annotations?.side_effect
-      ?? annotations
-      ?.sideEffect,
+      ?? annotations?.sideEffect,
   )
   const kind = __tool_surface_text(
     annotations?.kind ?? annotations?.tool_kind ?? annotations?.toolKind,
   )
   const name = __tool_surface_text(__tool_surface_name(entry))
   if __tool_surface_enabled(annotations?.agent_lifecycle)
-    || __tool_surface_enabled(
-    annotations?.structural,
-  )
+    || __tool_surface_enabled(annotations?.structural)
     || contains(["session_control", "lifecycle", "suspend", "resume"], kind)
-    || contains(
-    ["load_skill", "agent_await_resumption", "subagent_pause", "subagent_resume"],
-    name,
-  ) {
+    || contains(["load_skill", "agent_await_resumption", "subagent_pause", "subagent_resume"], name) {
     return "session_control"
   }
   if __tool_surface_enabled(annotations?.approval)
-    || __tool_surface_enabled(
-    annotations?.requires_approval,
-  )
+    || __tool_surface_enabled(annotations?.requires_approval)
     || contains(["approval", "human_gate"], kind) {
     return "approval"
   }
@@ -215,9 +207,7 @@ fn __tool_surface_entry_class(entry) {
     return "progress"
   }
   if __tool_surface_enabled(annotations?.result_reader)
-    || __tool_surface_enabled(
-    annotations?.result_polling,
-  )
+    || __tool_surface_enabled(annotations?.result_polling)
     || kind == "result_polling"
     || starts_with(name, "read_command_output") {
     return "result_polling"
@@ -250,9 +240,7 @@ fn __tool_surface_entry_class(entry) {
     return "read_only"
   }
   if __tool_surface_enabled(annotations?.readOnlyHint)
-    && !__tool_surface_enabled(
-    annotations?.destructiveHint,
-  ) {
+    && !__tool_surface_enabled(annotations?.destructiveHint) {
     return "read_only"
   }
   return "unknown"
@@ -266,8 +254,7 @@ fn __tool_surface_entry_detail(entry, class, reason) {
     kind: __tool_surface_text(annotations?.kind ?? annotations?.tool_kind ?? annotations?.toolKind),
     side_effect_level: __tool_surface_text(
       annotations?.side_effect_level ?? annotations?.sideEffectLevel ?? annotations?.side_effect
-        ?? annotations
-        ?.sideEffect,
+        ?? annotations?.sideEffect,
     ),
     reason: reason,
   }
@@ -514,9 +501,9 @@ pub fn agent_apply_tool_surface_narrowing(opts) {
   }
   return base
     + {
-    tools: __tool_surface_filter_registry(opts?.tools, effective_names),
-    policy: __tool_surface_policy_tools(opts?.policy, effective_names),
-  }
+      tools: __tool_surface_filter_registry(opts?.tools, effective_names),
+      policy: __tool_surface_policy_tools(opts?.policy, effective_names),
+    }
 }
 
 /**

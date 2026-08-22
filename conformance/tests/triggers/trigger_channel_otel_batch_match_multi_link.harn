@@ -20,9 +20,7 @@ pipeline default(harness: Harness) {
   harness.obs.enable_tracing(true)
   const stream = harness.obs.event_log_subscribe({topic: "transcript.channel.lifecycle"})
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
-    + to_string(
-    harness.random.range(100000, 999999),
-  )
+    + to_string(harness.random.range(100000, 999999))
   const _ = harness.runtime.trigger_register(
     {
       id: "channel-otel-batch-" + unique,

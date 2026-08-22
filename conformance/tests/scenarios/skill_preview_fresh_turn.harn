@@ -30,9 +30,7 @@ pipeline test(harness: Harness, _task) {
   assert(tool_names(preview) == tool_names(live), "fresh preview and live tool projections match")
   assert(
     to_string(harness.agent.prompt_explain(preview)?.system ?? "")
-      == to_string(
-      harness.agent.prompt_explain(live)?.system ?? "",
-    ),
+      == to_string(harness.agent.prompt_explain(live)?.system ?? ""),
     "fresh preview and live skill prompts match",
   )
   harness.agent.close(session_id)

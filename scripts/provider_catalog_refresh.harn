@@ -184,12 +184,12 @@ fn __merge_observations(base, incoming) {
   const new_sources = prior_sources + [__source_entry(secondary)]
   const merged = primary
     + {
-    name: name_outcome.value,
-    context_window: context_outcome.value,
-    pricing: pricing_outcome.value,
-    capabilities: capabilities_outcome.value,
-    sources: new_sources,
-  }
+      name: name_outcome.value,
+      context_window: context_outcome.value,
+      pricing: pricing_outcome.value,
+      capabilities: capabilities_outcome.value,
+      sources: new_sources,
+    }
   let conflicts = pricing_outcome.conflicts + capabilities_outcome.conflicts
   if name_outcome.conflict != nil {
     conflicts = conflicts + [name_outcome.conflict + {field: "name"}]
@@ -413,9 +413,7 @@ fn __format_currency(value) -> string {
 
 fn __format_change_line(change) -> string {
   return "  - " + change.key + ": " + __format_currency(change.from) + " → "
-    + __format_currency(
-    change.to,
-  )
+    + __format_currency(change.to)
 }
 
 fn __format_capability_change(change) -> string {
@@ -472,9 +470,7 @@ fn __added_lines(added) -> list<string> {
     const pricing = obs.pricing ?? {}
     const price_summary = if pricing?.input_per_mtok != nil || pricing?.output_per_mtok != nil {
       " — in " + __format_currency(pricing?.input_per_mtok) + " / out "
-        + __format_currency(
-        pricing?.output_per_mtok,
-      )
+        + __format_currency(pricing?.output_per_mtok)
     } else {
       ""
     }
@@ -487,8 +483,9 @@ fn __added_lines(added) -> list<string> {
       + ["- `" + obs.model_id + "` (" + obs.provider + ")" + context_text + price_summary]
     lines = lines
       + [
-      "  source: " + obs.source + " (" + obs.source_kind + ", confidence: " + obs.confidence + ")",
-    ]
+        "  source: " + obs.source + " (" + obs.source_kind + ", confidence: " + obs.confidence
+          + ")",
+      ]
   }
   return lines
 }
@@ -508,16 +505,15 @@ fn __changed_lines(changed) -> list<string> {
     lines = lines + ["- `" + obs.model_id + "` (" + obs.provider + ")"]
     lines = lines
       + [
-      "  source: " + obs.source + " (" + obs.source_kind + ", confidence: " + obs.confidence + ")",
-    ]
+        "  source: " + obs.source + " (" + obs.source_kind + ", confidence: " + obs.confidence
+          + ")",
+      ]
     if c.context_window_change != nil {
       lines = lines
         + [
-        "  - context_window: " + to_string(c.context_window_change.from) + " → "
-          + to_string(
-          c.context_window_change.to,
-        ),
-      ]
+          "  - context_window: " + to_string(c.context_window_change.from) + " → "
+            + to_string(c.context_window_change.to),
+        ]
     }
     for pc in c.pricing_changes {
       lines = lines + [__format_change_line(pc)]
@@ -545,10 +541,10 @@ fn __conflict_lines(conflicts) -> list<string> {
     const dropped_text = json_stringify(c.dropped)
     lines = lines
       + [
-      "- `" + c.model_id + "` (" + c.provider + ") `" + c.field + "`: kept " + kept_text
-        + " (provider-owned) over "
-        + dropped_text,
-    ]
+        "- `" + c.model_id + "` (" + c.provider + ") `" + c.field + "`: kept " + kept_text
+          + " (provider-owned) over "
+          + dropped_text,
+      ]
   }
   return lines
 }
@@ -579,27 +575,18 @@ pub fn render_markdown_report(
   const parts = header
     + sources_section
     + __section("Added models", __added_lines(drift.added))
-    + __section(
-    "Removed models",
-    __removed_lines(drift.removed),
-  )
+    + __section("Removed models", __removed_lines(drift.removed))
     + __section("Changed models", __changed_lines(drift.changed))
-    + __section(
-    "Cross-source conflicts (provider-owned wins)",
-    __conflict_lines(conflicts),
-  )
+    + __section("Cross-source conflicts (provider-owned wins)", __conflict_lines(conflicts))
     + __section("Unknown pricing", __obs_summary_lines(drift.unknown_pricing, "source"))
-    + __section(
-    "Low-confidence observations",
-    __obs_summary_lines(drift.low_confidence, "source"),
-  )
+    + __section("Low-confidence observations", __obs_summary_lines(drift.low_confidence, "source"))
     + __section("Key-required observations", __obs_summary_lines(drift.requires_key, "source"))
     + [
-    "---",
-    "",
-    "Review the candidate patch under `.harn-runs/provider_catalog/candidate.toml` before merging.",
-    "",
-  ]
+      "---",
+      "",
+      "Review the candidate patch under `.harn-runs/provider_catalog/candidate.toml` before merging.",
+      "",
+    ]
   return join(parts, "\n")
 }
 
@@ -674,7 +661,7 @@ pub fn render_candidate_toml(drift: dict, meta: dict) -> string {
       || obs.capabilities != nil
     if obs.source_owner == "provider"
       && __confidence_rank(obs.confidence)
-      >= __confidence_rank("high")
+        >= __confidence_rank("high")
       && has_actionable_metadata {
       lines = lines + ["# added"] + __format_model_section(obs)
       emitted = emitted + 1
@@ -684,7 +671,7 @@ pub fn render_candidate_toml(drift: dict, meta: dict) -> string {
     const obs = entry.observation
     if obs.source_owner == "provider"
       && __confidence_rank(obs.confidence)
-      >= __confidence_rank("high") {
+        >= __confidence_rank("high") {
       lines = lines + ["# changed (was: " + entry.catalog.id + ")"]
         + __format_model_section(obs)
       emitted = emitted + 1
@@ -692,10 +679,7 @@ pub fn render_candidate_toml(drift: dict, meta: dict) -> string {
   }
   if emitted == 0 {
     lines = lines
-      + [
-      "# No provider-owned, high-confidence metadata additions or changes detected.",
-      "",
-    ]
+      + ["# No provider-owned, high-confidence metadata additions or changes detected.", ""]
   }
   return join(lines, "\n")
 }

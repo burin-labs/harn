@@ -97,7 +97,7 @@ pub fn parse_args(args: list<string>, defaults) {
     }
     if a == "--target" || a == "--bin" || a == "--fuse-mb" || a == "--report-dir"
       || a
-      == "--baseline-sections" {
+        == "--baseline-sections" {
       if i + 1 >= args.count {
         const noun = if a == "--bin" || a == "--report-dir" || a == "--baseline-sections" {
           "path"
@@ -507,8 +507,8 @@ pipeline main(harness: Harness, task) {
     if before.count > 0 {
       lines = lines
         + section_report_lines(
-        elf_section_deltas(before, observed_sections(harness.process, harn_bin)),
-      )
+          elf_section_deltas(before, observed_sections(harness.process, harn_bin)),
+        )
     }
     for failure in verdict.failures {
       size_ok = false

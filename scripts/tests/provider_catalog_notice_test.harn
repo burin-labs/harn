@@ -51,11 +51,11 @@ pipeline test_ambiguous_current_identity_fails_closed(harness: Harness, task) {
   const input = fixture(harness.fs, "ambiguous")
   const catalog = BASE_CATALOG
     + {
-    models: [
-      {provider: "anthropic", id: "shared", pricing: {input_per_mtok: 1.0}, capabilities: []},
-      {provider: "anthropic", id: "shared", pricing: {input_per_mtok: 1.0}, capabilities: []},
-    ],
-  }
+      models: [
+        {provider: "anthropic", id: "shared", pricing: {input_per_mtok: 1.0}, capabilities: []},
+        {provider: "anthropic", id: "shared", pricing: {input_per_mtok: 1.0}, capabilities: []},
+      ],
+    }
   const plan = plan_notice(harness, input.notice, input.extraction, catalog)
   assert_eq(plan.receipt.disposition, "rejected")
   assert(contains(plan.receipt.reason, "ambiguous"))
@@ -103,31 +103,16 @@ capabilities = ["tools", "streaming"]
   assert(contains(priced, "input_per_mtok = 0.8"))
   assert(contains(priced, "output_per_mtok = 5.00"))
   const endpoint = price
-    + {
-    kind: "endpoint",
-    field: "chat_endpoint",
-    old_value: "/messages",
-    new_value: "/v2/messages",
-  }
+    + {kind: "endpoint", field: "chat_endpoint", old_value: "/messages", new_value: "/v2/messages"}
   const endpoint_out = unwrap(apply_candidate_to_source(source, endpoint))
   assert(contains(endpoint_out, "chat_endpoint = \"/v2/messages\""))
   const retirement = price
-    + {
-    kind: "retirement",
-    old_value: false,
-    new_value: true,
-    replacement: "claude-haiku-next",
-  }
+    + {kind: "retirement", old_value: false, new_value: true, replacement: "claude-haiku-next"}
   const retirement_out = unwrap(apply_candidate_to_source(source, retirement))
   assert(contains(retirement_out, "deprecated = true"))
   assert(contains(retirement_out, "Use claude-haiku-next"))
   const capability = price
-    + {
-    kind: "capability",
-    capability: "vision",
-    old_value: false,
-    new_value: true,
-  }
+    + {kind: "capability", capability: "vision", old_value: false, new_value: true}
   const capability_source = """
 [[provider.anthropic]]
 model_match = "claude-haiku-4-5-20251001"
@@ -179,11 +164,11 @@ pipeline test_canonical_catalog_shapes_validate_all_non_price_variants(harness: 
     classification: "candidate",
     candidate: common
       + {
-      kind: "endpoint",
-      field: "chat_endpoint",
-      old_value: "/messages",
-      new_value: "/v2/messages",
-    },
+        kind: "endpoint",
+        field: "chat_endpoint",
+        old_value: "/messages",
+        new_value: "/v2/messages",
+      },
   }
   assert_eq(plan_notice(harness, input.notice, endpoint, canonical).receipt.disposition, "patch")
   const retirement = {
@@ -194,12 +179,7 @@ pipeline test_canonical_catalog_shapes_validate_all_non_price_variants(harness: 
   const capability = {
     classification: "candidate",
     candidate: common
-      + {
-      kind: "capability",
-      capability: "native_tools",
-      old_value: true,
-      new_value: false,
-    },
+      + {kind: "capability", capability: "native_tools", old_value: true, new_value: false},
   }
   assert_eq(plan_notice(harness, input.notice, capability, canonical).receipt.disposition, "patch")
 }

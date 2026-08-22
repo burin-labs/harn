@@ -113,20 +113,20 @@ pub fn github_enterprise(base_url, overrides = nil) -> OAuthProvider {
   return __with_overrides(
     __github_record()
       + {
-      id: "github_enterprise",
-      label: "GitHub Enterprise Server",
-      auth_url: web_url + "/login/oauth/authorize",
-      token_url: web_url + "/login/oauth/access_token",
-      device_code_url: web_url + "/login/device/code",
-      revoke_url: api_url + "/applications/{client_id}/token",
-      userinfo_url: api_url + "/user",
-      documentation_url:
-        "https://docs.github.com/en/enterprise-server@latest/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps",
-      documented_quirks: __github_record().documented_quirks
-        + [
-        "Use the instance web base URL for browser/device endpoints and /api/v3 for REST endpoints.",
-      ],
-    },
+        id: "github_enterprise",
+        label: "GitHub Enterprise Server",
+        auth_url: web_url + "/login/oauth/authorize",
+        token_url: web_url + "/login/oauth/access_token",
+        device_code_url: web_url + "/login/device/code",
+        revoke_url: api_url + "/applications/{client_id}/token",
+        userinfo_url: api_url + "/user",
+        documentation_url:
+          "https://docs.github.com/en/enterprise-server@latest/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps",
+        documented_quirks: __github_record().documented_quirks
+          + [
+            "Use the instance web base URL for browser/device endpoints and /api/v3 for REST endpoints.",
+          ],
+      },
     overrides,
   )
 }
@@ -555,11 +555,11 @@ pub fn provider_catalog(overrides = nil) {
 pub fn providers(overrides = nil) {
   return provider_catalog(overrides)
     + {
-    github_enterprise: { base_url, factory_overrides = nil ->
-      github_enterprise(base_url, factory_overrides)
-    },
-    custom: { config, factory_overrides = nil -> custom(config, factory_overrides) },
-  }
+      github_enterprise: { base_url, factory_overrides = nil ->
+        github_enterprise(base_url, factory_overrides)
+      },
+      custom: { config, factory_overrides = nil -> custom(config, factory_overrides) },
+    }
 }
 
 /**
@@ -592,13 +592,13 @@ pub fn custom(config, overrides = nil) -> OAuthProvider {
       token_exchange: config?.token_exchange,
       refresh_handling: config?.refresh_handling
         ?? __refresh(
-        "custom provider; use token response metadata and provider documentation",
-        "custom",
-        false,
-        [
-          "Validate endpoint, scope, refresh, and revocation behavior against the provider's primary docs.",
-        ],
-      ),
+          "custom provider; use token response metadata and provider documentation",
+          "custom",
+          false,
+          [
+            "Validate endpoint, scope, refresh, and revocation behavior against the provider's primary docs.",
+          ],
+        ),
       documented_quirks: config?.documented_quirks ?? [],
       documentation_url: config?.documentation_url,
     },

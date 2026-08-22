@@ -334,7 +334,7 @@ fn main(harness: Harness) {
   const harn_version = harness.env.get_or("HARN_TOOL_HARN_VERSION", "")
   if name == "" || dest == "" || ident == "" || handler == "" || harn_range == ""
     || harn_version
-    == "" {
+      == "" {
     harness.stdio.eprintln(
       "tool new: HARN_TOOL_{NAME,DEST,IDENT,HANDLER,HARN_RANGE,HARN_VERSION} must be set",
     )

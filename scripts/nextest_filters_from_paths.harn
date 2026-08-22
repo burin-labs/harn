@@ -137,9 +137,7 @@ pub fn filter_for_path(
     // root is `main.rs`, e.g. `harn_cli_fast`/`harn_cli_e2e`/`harn_vm`). Either
     // way the nextest binary name is `<dir>`.
     if fs.exists(path_join(root, crate_dir, "tests", dir + ".rs"))
-      || fs.exists(
-      path_join(root, crate_dir, "tests", dir, "main.rs"),
-    ) {
+      || fs.exists(path_join(root, crate_dir, "tests", dir, "main.rs")) {
       return "binary(" + dir + ")"
     }
     return "package(" + package + ")"

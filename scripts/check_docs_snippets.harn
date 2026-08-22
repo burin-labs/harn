@@ -236,9 +236,7 @@ pub fn extract_blocks(text: string) -> list {
       in_block = false
       if !skip {
         events = events
-          + [
-          {kind: "block", idx: idx, mode: block_mode, content: body.join("\n") + "\n"},
-        ]
+          + [{kind: "block", idx: idx, mode: block_mode, content: body.join("\n") + "\n"}]
       }
       continue
     }

@@ -191,9 +191,8 @@ pub fn __verification_ladder_candidate(profile_match, opts) {
   }
   if opts?.allow_stale_prone == false
     && (check?.staleProne ?? check?.stale_prone ?? row?.staleProne
-    ?? row
-    ?.stale_prone
-    ?? false) {
+      ?? row?.stale_prone
+      ?? false) {
     return {entry: nil, skip: __verification_skip(row_id, "stale_prone_filtered", profile_match)}
   }
   const command = __verification_row_command(row, check)

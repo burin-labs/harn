@@ -45,10 +45,7 @@ fn __agent_host_tool_enabled(options, key, group) {
   const opts = __agent_host_options(options)
   const enabled = opts?.enabled_tools ?? opts?.tools
   if enabled != nil && !__agent_host_list_contains(enabled, "all")
-    && !__agent_host_list_contains(
-    enabled,
-    group,
-  )
+    && !__agent_host_list_contains(enabled, group)
     && !__agent_host_list_contains(enabled, key) {
     return false
   }
@@ -63,31 +60,21 @@ fn __agent_host_lifecycle_tool_enabled(options, key) {
   const opts = __agent_host_options(options)
   const enabled = opts?.enabled_tools ?? opts?.tools
   const explicitly_enabled = __agent_host_list_contains(enabled, key)
-    || __agent_host_list_contains(
-    enabled,
-    "command_lifecycle",
-  )
+    || __agent_host_list_contains(enabled, "command_lifecycle")
   const opted_in = opts?.background_commands ?? opts?.enable_background_commands
-    ?? opts
-    ?.command_lifecycle_tools
+    ?? opts?.command_lifecycle_tools
     ?? false
   if !opted_in && !explicitly_enabled {
     return false
   }
   const disabled = opts?.disabled_tools ?? []
   if __agent_host_list_contains(disabled, "command")
-    || __agent_host_list_contains(
-    disabled,
-    "command_lifecycle",
-  )
+    || __agent_host_list_contains(disabled, "command_lifecycle")
     || __agent_host_list_contains(disabled, key) {
     return false
   }
   if enabled != nil && !explicitly_enabled && !__agent_host_list_contains(enabled, "all")
-    && !__agent_host_list_contains(
-    enabled,
-    "command",
-  ) {
+    && !__agent_host_list_contains(enabled, "command") {
     return false
   }
   return true
@@ -233,29 +220,20 @@ fn __agent_host_search_request(args, options) {
   }
   req = req + {path: __agent_host_resolve_path(search_path, options)}
   const default_max_matches = __agent_host_options(options)?.search_max_matches
-    ?? __agent_host_options(
-    options,
-  )?.max_search_matches
+    ?? __agent_host_options(options)?.max_search_matches
     ?? 50
   if args?.max_matches == nil && default_max_matches != nil {
     req = req + {max_matches: default_max_matches}
   }
   const default_max_line_bytes = __agent_host_options(options)?.search_max_line_bytes
-    ?? __agent_host_options(
-    options,
-  )?.max_search_line_bytes
+    ?? __agent_host_options(options)?.max_search_line_bytes
   if args?.max_line_bytes == nil && default_max_line_bytes != nil {
     req = req + {max_line_bytes: default_max_line_bytes}
   }
   const configured_exclude_globs = __agent_host_options(options)?.search_exclude_globs
-    ?? __agent_host_options(
-    options,
-  )?.exclude_globs
+    ?? __agent_host_options(options)?.exclude_globs
   const exclude_globs = __agent_host_string_list(configured_exclude_globs, "exclude_globs")
-    + __agent_host_string_list(
-    args?.exclude_globs,
-    "exclude_globs",
-  )
+    + __agent_host_string_list(args?.exclude_globs, "exclude_globs")
   if len(exclude_globs) > 0 {
     req = req + {exclude_globs: exclude_globs}
   }
@@ -409,7 +387,7 @@ fn __agent_host_apply_command_policy(request, args, options) {
     const blocked_value = verdict?.blocked
     if (type_of(allow_value) == "bool" && !allow_value)
       || (type_of(blocked_value) == "bool"
-      && blocked_value) {
+        && blocked_value) {
       return __agent_host_policy_blocked(
         verdict?.reason ?? "command_policy rejected command",
         request,
@@ -624,9 +602,9 @@ fn __agent_host_read_command_request(args, options) {
   let req = __agent_host_reader_locator(args)
   req = req
     + {
-    offset: args?.offset ?? 0,
-    length: args?.length ?? __agent_host_options(options)?.read_bytes ?? 65536,
-  }
+      offset: args?.offset ?? 0,
+      length: args?.length ?? __agent_host_options(options)?.read_bytes ?? 65536,
+    }
   return req
 }
 

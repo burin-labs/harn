@@ -532,18 +532,16 @@ fn render_report(rows: list, control_arm: string, metric: string) -> string {
   out = out
     + "\n"
     + section(
-    "Trials: ${len(rows)}   arms: ${len(arms)}   fixtures: ${len(fixtures)}",
-    join(
-      [
-        "  tool-emission stalls excluded from precision: ${len(stalled_rows(rows))}",
-        "  infrastructure errors excluded from precision: ${len(infra_rows(rows))}"
-          + status_note(
-          infra_rows(rows),
-        ),
-      ],
-      "\n",
-    ),
-  )
+      "Trials: ${len(rows)}   arms: ${len(arms)}   fixtures: ${len(fixtures)}",
+      join(
+        [
+          "  tool-emission stalls excluded from precision: ${len(stalled_rows(rows))}",
+          "  infrastructure errors excluded from precision: ${len(infra_rows(rows))}"
+            + status_note(infra_rows(rows)),
+        ],
+        "\n",
+      ),
+    )
   out = out + "\nBy arm\n" + render_table(arm_rows, {columns: ARM_COLUMNS}) + "\n"
   out = out
     + "\n  turns is the mean over RESOLVED trials only; read it beside the pass rate.\n"

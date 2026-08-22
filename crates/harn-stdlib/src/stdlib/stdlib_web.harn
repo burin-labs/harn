@@ -95,15 +95,15 @@ fn __web_not_modified(source_url, response, previous, fetched_at) {
   let next = previous
   next = next
     + {
-    ok: true,
-    status: 304,
-    headers: headers,
-    fetched_at: fetched_at,
-    cache_status: "not_modified",
-    source_url: source_url,
-    final_url: response?.final_url ?? previous?.final_url ?? source_url,
-    not_modified: true,
-  }
+      ok: true,
+      status: 304,
+      headers: headers,
+      fetched_at: fetched_at,
+      cache_status: "not_modified",
+      source_url: source_url,
+      final_url: response?.final_url ?? previous?.final_url ?? source_url,
+      not_modified: true,
+    }
   const etag = __web_header(headers, "etag")
   if etag != nil {
     next = next + {etag: etag}
@@ -289,10 +289,10 @@ fn __web_search_backend(env: HarnessEnv, opts) {
   if type_of(explicit) == "dict" {
     return explicit
       + {
-      kind: explicit?.kind ?? explicit?.type ?? "curated_index",
-      id: explicit?.id ?? explicit?.name ?? explicit?.kind ?? "configured",
-      deterministic: true,
-    }
+        kind: explicit?.kind ?? explicit?.type ?? "curated_index",
+        id: explicit?.id ?? explicit?.name ?? explicit?.kind ?? "configured",
+        deterministic: true,
+      }
   }
   if type_of(explicit) == "string" {
     return {kind: explicit, id: explicit, deterministic: true}
@@ -433,15 +433,19 @@ fn __web_search_api_item(item, api) {
   }
   return item
     + {
-    title: __web_search_path_get(item, api?.title_path ?? "title", item?.title ?? item?.name),
-    url: __web_search_path_get(item, api?.url_path ?? "url", item?.url ?? item?.href),
-    snippet: __web_search_path_get(
-      item,
-      api?.snippet_path ?? "snippet",
-      item?.snippet ?? item?.description ?? item?.text,
-    ),
-    source_url: __web_search_path_get(item, api?.source_url_path ?? "source_url", item?.source_url),
-  }
+      title: __web_search_path_get(item, api?.title_path ?? "title", item?.title ?? item?.name),
+      url: __web_search_path_get(item, api?.url_path ?? "url", item?.url ?? item?.href),
+      snippet: __web_search_path_get(
+        item,
+        api?.snippet_path ?? "snippet",
+        item?.snippet ?? item?.description ?? item?.text,
+      ),
+      source_url: __web_search_path_get(
+        item,
+        api?.source_url_path ?? "source_url",
+        item?.source_url,
+      ),
+    }
 }
 
 fn __web_search_api(harness: Harness, query, opts, backend) {
@@ -457,16 +461,14 @@ fn __web_search_api(harness: Harness, query, opts, backend) {
     const headers = __web_search_merge_headers(fetch_options?.headers, api?.headers)
     fetch_options = fetch_options
       + {
-      method: method,
-      headers: headers,
-      body: api?.body ?? json_stringify({query: query, limit: limit}),
-    }
+        method: method,
+        headers: headers,
+        body: api?.body ?? json_stringify({query: query, limit: limit}),
+      }
   }
   if api?.headers != nil && method == "GET" {
     fetch_options = fetch_options
-      + {
-      headers: __web_search_merge_headers(fetch_options?.headers, api.headers),
-    }
+      + {headers: __web_search_merge_headers(fetch_options?.headers, api.headers)}
   }
   const fetched = web_fetch(harness, api.url, fetch_options)
   const parsed_result: Result<unknown, JsonParseFailure> = try {

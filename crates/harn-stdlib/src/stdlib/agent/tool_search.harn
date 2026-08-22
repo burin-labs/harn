@@ -215,7 +215,7 @@ fn __tool_search_run(args, state) {
     state.strategy(query, state.deferred_registry, {variant: state.variant})
   } else if type_of(state.strategy) == "dict"
     && type_of(state.strategy?.handler)
-    == "closure" {
+      == "closure" {
     state.strategy.handler(query, state.deferred_registry, state.strategy)
   } else {
     __host_tool_search_score(
@@ -367,7 +367,7 @@ fn __tool_search_apply_budget(state, names) {
   for name in names {
     if !__tool_search_contains(promoted, name)
       && __tool_search_find_tool(state.deferred_tools, name)
-      != nil {
+        != nil {
       promoted = promoted.appending(name)
     }
   }

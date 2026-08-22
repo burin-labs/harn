@@ -227,14 +227,12 @@ fn pl_run_has_eligible_natural_terminal(events: list) -> bool {
     const headers = event?.headers ?? {}
     if pl_session_event_kind(event) != "agent_run_terminal"
       && pl_text(transcript_event?.kind)
-      != "agent_run_terminal" {
+        != "agent_run_terminal" {
       continue
     }
     if pl_text(transcript_event?.metadata?.terminal?.kind) == "natural"
-      && pl_text(
-      headers["harn.workflow_learning.eligibility"],
-    )
-      == "eligible" {
+      && pl_text(headers["harn.workflow_learning.eligibility"])
+        == "eligible" {
       return true
     }
   }
@@ -308,9 +306,7 @@ pub fn pattern_learning_import_session_records(harness: Harness, options = nil) 
       const run_id = pl_text(run?.run_id)
       const evidence_key = pl_session_run_key(session_id, run_id)
       if observed_evidence_keys.contains(evidence_key)
-        || observed_evidence_keys.contains(
-        "legacy_session:" + session_id,
-      ) {
+        || observed_evidence_keys.contains("legacy_session:" + session_id) {
         skipped_existing = skipped_existing + 1
         continue
       }
@@ -396,7 +392,7 @@ pub fn pattern_learning_curator_evidence(harness: Harness, options = nil) -> lis
     { item ->
       return pl_is_run_provenance_evidence(item)
         || (allow_manual
-        && pl_text(item?.evidence_kind) == "manual")
+          && pl_text(item?.evidence_kind) == "manual")
     },
   )
     .to_list()
@@ -553,10 +549,7 @@ fn pl_make_prompt_proposal(
   const description = "Reusable guidance learned from " + to_string(len(observations))
     + " similar prompts."
   const when_to_use = "Use when the request matches these recurring prompt terms: "
-    + key.replace(
-    "-",
-    ", ",
-  )
+    + key.replace("-", ", ")
     + "."
   const sequence = pl_representative_tool_sequence(observations)
   return {
@@ -596,10 +589,7 @@ fn pl_make_tool_proposal(
   const description = "Reusable guidance learned from " + to_string(len(observations))
     + " runs with the same tool sequence."
   const when_to_use = "Use when the task is likely to follow this tool sequence: "
-    + join(
-    sequence,
-    " -> ",
-  )
+    + join(sequence, " -> ")
     + "."
   return {
     id: id,
@@ -668,9 +658,8 @@ fn pl_frontmatter_value(body: string, key: string) -> string {
       let value = trimmed[len(prefix):].trim()
       if len(value) >= 2
         && ((value.starts_with("\"") && value.ends_with("\""))
-        || (value.starts_with("'")
-        && value
-        .ends_with("'"))) {
+          || (value.starts_with("'")
+            && value.ends_with("'"))) {
         value = value[1:len(value) - 1]
       }
       return value.replace("\\\"", "\"").replace("\\\\", "\\")
@@ -743,8 +732,8 @@ fn pl_sorted_proposal_insert(proposals: list, proposal: dict) -> list {
   for existing in proposals {
     const before = proposal.support > (existing?.support ?? 0)
       || (proposal.support
-      == (existing?.support ?? 0)
-      && proposal.id < existing.id)
+        == (existing?.support ?? 0)
+        && proposal.id < existing.id)
     if before && !inserted {
       out = out + [proposal]
       inserted = true
@@ -836,13 +825,13 @@ pub fn pattern_learning_refresh(harness: Harness, options = nil) -> list {
       proposal,
       options
         + {
-        id: pl_unique_record_id(
-          harness.clock,
-          harness.random,
-          "pending_" + proposal.id.replace("-", "_"),
-          options,
-        ),
-      },
+          id: pl_unique_record_id(
+            harness.clock,
+            harness.random,
+            "pending_" + proposal.id.replace("-", "_"),
+            options,
+          ),
+        },
     )
   }
   return proposals
@@ -913,13 +902,13 @@ pub fn pattern_learning_record_curated_batch(
       normalized,
       options
         + {
-        id: pl_unique_record_id(
-          harness.clock,
-          harness.random,
-          "pending_" + normalized.id.replace("-", "_"),
-          options,
-        ),
-      },
+          id: pl_unique_record_id(
+            harness.clock,
+            harness.random,
+            "pending_" + normalized.id.replace("-", "_"),
+            options,
+          ),
+        },
     )
     accepted = accepted + [normalized]
   }
@@ -1048,9 +1037,8 @@ fn pl_insert_match(matches: list, item: dict) -> list {
   for existing in matches {
     const before = item.score > existing.score
       || (item.score == existing.score
-      && item.learned_skill.name
-      < existing
-      .learned_skill.name)
+        && item.learned_skill.name
+          < existing.learned_skill.name)
     if before && !inserted {
       out = out + [item]
       inserted = true
@@ -1128,15 +1116,15 @@ fn pattern_learning_context_inner(
     )
     lines = lines
       + [
-      "<provenance_chip>Loaded learned skills: " + loaded + "</provenance_chip>",
-      "<learned_skills>",
-    ]
+        "<provenance_chip>Loaded learned skills: " + loaded + "</provenance_chip>",
+        "<learned_skills>",
+      ]
     for candidate in matches {
       lines = lines
         + [
-        "- `" + candidate.learned_skill.name + "`: " + candidate.learned_skill.description,
-        "  why: " + candidate.reason,
-      ]
+          "- `" + candidate.learned_skill.name + "`: " + candidate.learned_skill.description,
+          "  why: " + candidate.reason,
+        ]
       if pl_text(candidate.learned_skill.when_to_use) != "" {
         lines = lines + ["  when: " + candidate.learned_skill.when_to_use]
       }
@@ -1147,9 +1135,9 @@ fn pattern_learning_context_inner(
     const suffix = len(pending) == 1 ? "" : "s"
     lines = lines
       + [
-      "<learning_review>" + to_string(len(pending)) + " proposal" + suffix
-        + " pending; run `/learn list` to review.</learning_review>",
-    ]
+        "<learning_review>" + to_string(len(pending)) + " proposal" + suffix
+          + " pending; run `/learn list` to review.</learning_review>",
+      ]
   }
   const names = join(matches.map({ candidate -> "`" + candidate.learned_skill.name + "`" }), ", ")
   const match_suffix = len(matches) == 1 ? "" : "s"
@@ -1225,11 +1213,11 @@ fn pl_write_candidate(
   )
   const manifest = proposal
     + {
-    schema: "harn.crystallization.authored-candidate.v1",
-    status: "staged",
-    candidate_dir: candidate_dir,
-    staged_at: pl_now(capabilities.clock, options),
-  }
+      schema: "harn.crystallization.authored-candidate.v1",
+      status: "staged",
+      candidate_dir: candidate_dir,
+      staged_at: pl_now(capabilities.clock, options),
+    }
   capabilities.fs.write_text(path_join(candidate_dir, "proposal.json"), json_stringify(manifest))
   return {
     staged: true,
@@ -1309,11 +1297,11 @@ pub fn pattern_learning_reject(harness: Harness, id: string, options = nil) -> d
   const state = pattern_learning_state(harness, options)
   const suppressed = (state?.suppressed_until ?? {})
     + {
-    [clean]: pl_add_days_iso(
-      pl_now(harness.clock, options),
-      options?.suppression_days ?? DEFAULT_SUPPRESSION_DAYS,
-    ),
-  }
+      [clean]: pl_add_days_iso(
+        pl_now(harness.clock, options),
+        options?.suppression_days ?? DEFAULT_SUPPRESSION_DAYS,
+      ),
+    }
   pl_replace_state(harness, state + {suppressed_until: suppressed}, options)
   return {rejected: true}
 }
@@ -1386,13 +1374,13 @@ fn pl_migrate_pending(harness: Harness, options = nil) -> nil {
         normalized,
         options
           + {
-          id: pl_unique_record_id(
-            harness.clock,
-            harness.random,
-            "pending_" + normalized.id.replace("-", "_"),
-            options,
-          ),
-        },
+            id: pl_unique_record_id(
+              harness.clock,
+              harness.random,
+              "pending_" + normalized.id.replace("-", "_"),
+              options,
+            ),
+          },
       )
     }
   }

@@ -205,9 +205,7 @@ pub fn grammar_drift(committed_text: string, candidate_text: string) -> list<Gra
     const prior = before.filter({ earlier -> earlier?.language == language })
     if prior.count == 1 && grammar_identity(prior[0]) != grammar_identity(row) {
       drift = drift
-        + [
-        {language: language, from: grammar_identity(prior[0]), to: grammar_identity(row)},
-      ]
+        + [{language: language, from: grammar_identity(prior[0]), to: grammar_identity(row)}]
     }
   }
   return drift
@@ -234,19 +232,19 @@ fn render_receipt(fs: HarnessFs) -> string {
     const row = corpus_row_by_language(corpus.rows, mapping.language)
     languages = languages
       + [
-      {
-        language: mapping.language,
-        package: {
-          name: mapping.package,
-          version: package.version,
-          source: package?.source ?? "workspace-path",
-          checksum: package?.checksum,
-          artifact_digest: artifact_digest(fs, package),
+        {
+          language: mapping.language,
+          package: {
+            name: mapping.package,
+            version: package.version,
+            source: package?.source ?? "workspace-path",
+            checksum: package?.checksum,
+            artifact_digest: artifact_digest(fs, package),
+          },
+          operations: row.operations,
+          authority: row.authority,
         },
-        operations: row.operations,
-        authority: row.authority,
-      },
-    ]
+      ]
   }
   const receipt = {
     schema_version: 1,

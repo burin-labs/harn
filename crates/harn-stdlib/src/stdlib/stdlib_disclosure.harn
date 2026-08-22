@@ -425,14 +425,12 @@ fn __slack_customize(fs: HarnessFs, surface_config: dict, ctx: DisclosureContext
   }
   if surface_config?.customize_icon_url != nil
     && trim(to_string(surface_config.customize_icon_url))
-    != "" {
+      != "" {
     customize["icon_url"] = to_string(surface_config.customize_icon_url)
   }
   if surface_config?.customize_icon_emoji != nil
-    && trim(
-    to_string(surface_config.customize_icon_emoji),
-  )
-    != "" {
+    && trim(to_string(surface_config.customize_icon_emoji))
+      != "" {
     customize["icon_emoji"] = to_string(surface_config.customize_icon_emoji)
   }
   return customize

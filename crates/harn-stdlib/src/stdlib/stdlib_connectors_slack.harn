@@ -193,16 +193,12 @@ pub fn message_source(channel = nil, options = nil) {
       const payload = __slack_payload(log_event)
       return event?.provider == "slack"
         && (event?.kind == "message" || event?.kind == "app_mention"
-        || starts_with(
-        event?.kind ?? "",
-        "message.",
-      ))
+          || starts_with(event?.kind ?? "", "message."))
         && __slack_channel_matches(payload, channel)
         && __slack_user_matches(payload, options?.user)
         && (options?.thread_ts == nil
-        || payload?.thread_ts
-        == options
-        .thread_ts)
+          || payload?.thread_ts
+            == options.thread_ts)
         && __slack_text_matches(payload, options?.text_contains)
     },
   }
@@ -235,9 +231,9 @@ pub fn reaction_source(channel = nil, reaction = nil, options = nil) {
         && event?.kind == "reaction_added"
         && (reaction == nil || payload?.reaction == reaction)
         && (channel == nil
-        || payload?.item?.channel
-        == channel
-        || payload?.channel_id == channel)
+          || payload?.item?.channel
+            == channel
+          || payload?.channel_id == channel)
         && __slack_user_matches(payload, options?.user)
     },
   }

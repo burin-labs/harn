@@ -40,8 +40,7 @@ pub fn right_trim(s: string) -> string {
 /** True when `c` is a word character or hyphen ([A-Za-z0-9_-]). */
 pub fn is_word_or_hyphen(c: string) -> bool {
   return c == "-" || c == "_"
-    || "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
-    .contains(c)
+    || "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789".contains(c)
 }
 
 /**
@@ -531,9 +530,7 @@ pipeline main(harness: Harness, task) {
         if tokens == nil {
           if logical.command.contains("harn") {
             parse_errors = parse_errors
-              + [
-              {file: md_file, line_no: logical.line_no, command: logical.command},
-            ]
+              + [{file: md_file, line_no: logical.line_no, command: logical.command}]
           }
           continue
         }
@@ -550,14 +547,14 @@ pipeline main(harness: Harness, task) {
           if res.missing.count > 0 {
             failures = failures
               + [
-              {
-                file: md_file,
-                line_no: logical.line_no,
-                command: segment.join(" "),
-                path: res.path,
-                missing: res.missing,
-              },
-            ]
+                {
+                  file: md_file,
+                  line_no: logical.line_no,
+                  command: segment.join(" "),
+                  path: res.path,
+                  missing: res.missing,
+                },
+              ]
           }
         }
       }

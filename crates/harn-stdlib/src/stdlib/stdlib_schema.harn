@@ -140,12 +140,12 @@ pub fn schema_contract_check<T>(
     for issue in unwrap(checked) {
       issues = issues
         + [
-        if issue.rule == nil {
-          issue + {rule: rule.name}
-        } else {
-          issue
-        },
-      ]
+          if issue.rule == nil {
+            issue + {rule: rule.name}
+          } else {
+            issue
+          },
+        ]
     }
   }
   if len(issues) > 0 {

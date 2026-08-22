@@ -227,46 +227,46 @@ fn summarize_hook_timing_groups(
     if previous == nil {
       by_key = by_key
         + {
-        [key]: {
-          repository: event.repository,
-          repo: repo,
-          hook: event.hook,
-          profile: event.profile,
-          count: 1,
-          failures: if (event.exit_code ?? 0) == 0 {
-            0
-          } else {
-            1
+          [key]: {
+            repository: event.repository,
+            repo: repo,
+            hook: event.hook,
+            profile: event.profile,
+            count: 1,
+            failures: if (event.exit_code ?? 0) == 0 {
+              0
+            } else {
+              1
+            },
+            total_ms: event.duration_ms,
+            max_ms: event.duration_ms,
+            durations: [event.duration_ms],
           },
-          total_ms: event.duration_ms,
-          max_ms: event.duration_ms,
-          durations: [event.duration_ms],
-        },
-      }
+        }
     } else {
       by_key = by_key
         + {
-        [key]: {
-          repository: previous.repository,
-          repo: previous.repo,
-          hook: previous.hook,
-          profile: previous.profile,
-          count: previous.count + 1,
-          failures: previous.failures
-            + if (event.exit_code ?? 0) == 0 {
-            0
-          } else {
-            1
+          [key]: {
+            repository: previous.repository,
+            repo: previous.repo,
+            hook: previous.hook,
+            profile: previous.profile,
+            count: previous.count + 1,
+            failures: previous.failures
+              + if (event.exit_code ?? 0) == 0 {
+                0
+              } else {
+                1
+              },
+            total_ms: previous.total_ms + event.duration_ms,
+            durations: previous.durations + [event.duration_ms],
+            max_ms: if event.duration_ms > previous.max_ms {
+              event.duration_ms
+            } else {
+              previous.max_ms
+            },
           },
-          total_ms: previous.total_ms + event.duration_ms,
-          durations: previous.durations + [event.duration_ms],
-          max_ms: if event.duration_ms > previous.max_ms {
-            event.duration_ms
-          } else {
-            previous.max_ms
-          },
-        },
-      }
+        }
     }
   }
   let groups: list<HookTimingGroup> = []
@@ -275,20 +275,20 @@ fn summarize_hook_timing_groups(
     const stats = duration_stats(value.durations)
     groups = groups
       + [
-      {
-        repository: value.repository,
-        repo: value.repo,
-        hook: value.hook,
-        profile: value.profile,
-        count: stats.count,
-        failures: value.failures,
-        total_ms: stats.total_ms,
-        max_ms: stats.max_ms,
-        avg_ms: stats.avg_ms,
-        p50_ms: stats.p50_ms,
-        p95_ms: stats.p95_ms,
-      },
-    ]
+        {
+          repository: value.repository,
+          repo: value.repo,
+          hook: value.hook,
+          profile: value.profile,
+          count: stats.count,
+          failures: value.failures,
+          total_ms: stats.total_ms,
+          max_ms: stats.max_ms,
+          avg_ms: stats.avg_ms,
+          p50_ms: stats.p50_ms,
+          p95_ms: stats.p95_ms,
+        },
+      ]
   }
   return groups.sorted_by({ group -> 0 - group.total_ms })
 }
@@ -306,14 +306,14 @@ pub fn summarize_hook_timing_phases(events: list<HookTimingEvent>) -> list<HookT
       if previous == nil {
         by_key = by_key
           + {
-          [key]: {
-            repository: event.repository,
-            hook: event.hook,
-            profile: event.profile,
-            phase: phase.key,
-            durations: [phase.value],
-          },
-        }
+            [key]: {
+              repository: event.repository,
+              hook: event.hook,
+              profile: event.profile,
+              phase: phase.key,
+              durations: [phase.value],
+            },
+          }
       } else {
         by_key = by_key + {[key]: previous + {durations: previous.durations + [phase.value]}}
       }
@@ -326,14 +326,14 @@ pub fn summarize_hook_timing_phases(events: list<HookTimingEvent>) -> list<HookT
         if previous == nil {
           by_key = by_key
             + {
-            [key]: {
-              repository: event.repository,
-              hook: event.hook,
-              profile: event.profile,
-              phase: "unattributed",
-              durations: [unattributed_ms],
-            },
-          }
+              [key]: {
+                repository: event.repository,
+                hook: event.hook,
+                profile: event.profile,
+                phase: "unattributed",
+                durations: [unattributed_ms],
+              },
+            }
         } else {
           by_key = by_key + {[key]: previous + {durations: previous.durations + [unattributed_ms]}}
         }
@@ -346,19 +346,19 @@ pub fn summarize_hook_timing_phases(events: list<HookTimingEvent>) -> list<HookT
     const stats = duration_stats(value.durations)
     groups = groups
       + [
-      {
-        repository: value.repository,
-        hook: value.hook,
-        profile: value.profile,
-        phase: value.phase,
-        count: stats.count,
-        total_ms: stats.total_ms,
-        max_ms: stats.max_ms,
-        avg_ms: stats.avg_ms,
-        p50_ms: stats.p50_ms,
-        p95_ms: stats.p95_ms,
-      },
-    ]
+        {
+          repository: value.repository,
+          hook: value.hook,
+          profile: value.profile,
+          phase: value.phase,
+          count: stats.count,
+          total_ms: stats.total_ms,
+          max_ms: stats.max_ms,
+          avg_ms: stats.avg_ms,
+          p50_ms: stats.p50_ms,
+          p95_ms: stats.p95_ms,
+        },
+      ]
   }
   return groups.sorted_by({ group -> 0 - group.total_ms })
 }
@@ -391,27 +391,27 @@ pub fn derive_hook_timing_budgets(events: list<HookTimingEvent>) -> HookTimingBu
       { event ->
         event.repository == group.repository && event.profile == group.profile
           && event.hook
-          == group.hook
+            == group.hook
       },
     )
       .to_list()
     const surface = "hook/" + group.repository + "/" + group.profile + "/" + group.hook
     limits = limits
       + {
-      [surface]: {
-        intent: "budget",
-        valueMs: to_int(ceil((to_float(group.p95_ms) ?? 0.0) * 1.2)) ?? group.p95_ms,
-        source: "derived",
-        rule: "p95*1.2",
-        observed: {
-          p50: group.p50_ms,
-          p95: group.p95_ms,
-          max: group.max_ms,
-          n: group.count,
-          window: observation_window(samples),
+        [surface]: {
+          intent: "budget",
+          valueMs: to_int(ceil((to_float(group.p95_ms) ?? 0.0) * 1.2)) ?? group.p95_ms,
+          source: "derived",
+          rule: "p95*1.2",
+          observed: {
+            p50: group.p50_ms,
+            p95: group.p95_ms,
+            max: group.max_ms,
+            n: group.count,
+            window: observation_window(samples),
+          },
         },
-      },
-    }
+      }
   }
   return {schemaVersion: 1, limits: limits}
 }
@@ -448,9 +448,7 @@ pub fn filter_hook_timings(
 
 fn render_group(group: HookTimingGroup) -> string {
   return "- " + group.repository + " " + group.profile + " " + group.hook + ": total="
-    + to_string(
-    group.total_ms,
-  )
+    + to_string(group.total_ms)
     + "ms"
     + " count="
     + to_string(group.count)
@@ -485,8 +483,7 @@ fn render_phase_group(group: HookTimingPhaseGroup) -> string {
 
 fn render_worktree_group(group: HookTimingGroup) -> string {
   return "- " + group.repository + " " + (group.repo ?? "unknown") + " " + group.profile + " "
-    + group
-    .hook
+    + group.hook
     + ": total="
     + to_string(group.total_ms)
     + "ms count="
@@ -501,9 +498,7 @@ fn render_worktree_group(group: HookTimingGroup) -> string {
 
 fn render_event(event: HookTimingEvent) -> string {
   let line = "- " + event.repository + " " + event.profile + " " + event.hook + ": "
-    + to_string(
-    event.duration_ms,
-  )
+    + to_string(event.duration_ms)
     + "ms"
   if event.exit_code != nil {
     line = line + " exit=" + to_string(event.exit_code)
@@ -523,16 +518,16 @@ pub fn render_hook_timing_report(report: HookTimingReport, limit: int) -> string
     "invalid_lines: " + to_string(report.invalid_lines),
     "filters: repo="
       + if report.filters.repo == "" {
-      "*"
-    } else {
-      report.filters.repo
-    }
+        "*"
+      } else {
+        report.filters.repo
+      }
       + " hook="
       + if report.filters.hook == "" {
-      "*"
-    } else {
-      report.filters.hook
-    }
+        "*"
+      } else {
+        report.filters.hook
+      }
       + " min_ms="
       + to_string(report.filters.min_ms),
     "",

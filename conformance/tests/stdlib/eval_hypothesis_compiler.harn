@@ -43,11 +43,11 @@ fn test_versioned_intent_normalization() {
 fn test_quasi_experiment_contract() {
   const missing = hypothesis_fixture_intent_v2()
     + {
-    requested_lane: "quasi_experimental",
-    requested_evidence: "observational",
-    intervention: nil,
-    comparator: nil,
-  }
+      requested_lane: "quasi_experimental",
+      requested_evidence: "observational",
+      intervention: nil,
+      comparator: nil,
+    }
   const missing_receipt = compile_experiment_intent(missing, hypothesis_fixture_context())
   require !missing_receipt.ok, "a quasi-experimental label cannot omit its identifying design"
   require missing_receipt.failure?.diagnostics?.[0]?.code
@@ -57,18 +57,18 @@ fn test_quasi_experiment_contract() {
     "the missing contract names a typed repair operation"
   const quasi = missing
     + {
-    quasi_experiment: {
-      design: "matched_comparison",
-      assignment_mechanism: "Operators choose rollout eligibility before measurement.",
-      identifying_assumptions: ["No unmeasured confounding after matching."],
-      matching: {
-        method: "exact",
-        covariates: ["team", "baseline_volume"],
-        caliper: nil,
-        with_replacement: false,
+      quasi_experiment: {
+        design: "matched_comparison",
+        assignment_mechanism: "Operators choose rollout eligibility before measurement.",
+        identifying_assumptions: ["No unmeasured confounding after matching."],
+        matching: {
+          method: "exact",
+          covariates: ["team", "baseline_volume"],
+          caliper: nil,
+          with_replacement: false,
+        },
       },
-    },
-  }
+    }
   const receipt = compile_experiment_intent(quasi, hypothesis_fixture_context())
   require receipt.ok && receipt.plan?.kind == "observe_only",
     "supported quasi-experimental intent compiles without manufacturing randomization"
@@ -85,28 +85,25 @@ fn test_explicit_capability_policy() {
   const candidate = hypothesis_fixture_intervention("candidate", 1)
   const excessive = candidate
     + {
-    capabilities: candidate.capabilities
-      + {
-      customer_state: {access: "reversible_write", scopes: ["tenant:customer-1"]},
-      models: {model_ids: ["mock", "unregistered-model"], dynamic_routing: true},
-      privacy: {data_classes: ["personal"], retention: "durable", cross_tenant: true},
-    },
-  }
+      capabilities: candidate.capabilities
+        + {
+          customer_state: {access: "reversible_write", scopes: ["tenant:customer-1"]},
+          models: {model_ids: ["mock", "unregistered-model"], dynamic_routing: true},
+          privacy: {data_classes: ["personal"], retention: "durable", cross_tenant: true},
+        },
+    }
   const receipt = compile_experiment_intent(
     hypothesis_fixture_intent_v2(),
     context
-      + {
-      catalog: context.catalog + {interventions: [context.catalog.interventions[0], excessive]},
-    },
+      + {catalog: context.catalog + {interventions: [context.catalog.interventions[0], excessive]}},
   )
   require !receipt.ok && receipt.failure?.kind == "unsafe_plan",
     "customer, model, and privacy authority stay below the host ceiling"
   require receipt.failure?.diagnostics?.[0]?.code == "experiment.capability_ceiling",
     "the existing capability refusal owns the expanded policy"
   require receipt.failure?.diagnostics?.[0]?.repair?.owner == "catalog"
-    && receipt.failure?.diagnostics?.[0]
-    ?.repair?.operation
-    == "reduce",
+    && receipt.failure?.diagnostics?.[0]?.repair?.operation
+      == "reduce",
     "over-capability execution returns a typed least-authority repair"
 }
 
@@ -137,17 +134,15 @@ fn test_executable_compile() {
   }
   const drifted = plan
     + {
-    design: plan.design
-      + {
-      intervention: candidate
+      design: plan.design
         + {
-        capabilities: candidate.capabilities
-          + {
-          placement: hypothesis_fixture_placement() + {platform: "macos"},
+          intervention: candidate
+            + {
+              capabilities: candidate.capabilities
+                + {placement: hypothesis_fixture_placement() + {platform: "macos"}},
+            },
         },
-      },
-    },
-  }
+    }
   const replay = try {
     validate_compiled_hypothesis_plan(drifted)
   }
@@ -165,14 +160,14 @@ fn test_executable_compile() {
 fn test_honest_non_experimental_compile() {
   const research = hypothesis_fixture_intent()
     + {
-    requested_lane: "non_experimental_research",
-    requested_evidence: "observational",
-    intervention: nil,
-    comparator: nil,
-    assignment_unit: nil,
-    population_id: nil,
-    outcome_ids: [],
-  }
+      requested_lane: "non_experimental_research",
+      requested_evidence: "observational",
+      intervention: nil,
+      comparator: nil,
+      assignment_unit: nil,
+      population_id: nil,
+      outcome_ids: [],
+    }
   const receipt = compile_experiment_intent(research, hypothesis_fixture_context())
   require receipt.ok, "a non-experimental question still compiles"
   if receipt.plan == nil || receipt.plan.kind != "observe_only" {
@@ -187,9 +182,9 @@ fn test_honest_non_experimental_compile() {
 fn test_fail_closed_boundaries() {
   const trusted_risk = hypothesis_fixture_context()
     + {
-    risk_floor: hypothesis_fixture_context().risk_floor + {touches_production: true},
-    approval_id: "approval-native-1",
-  }
+      risk_floor: hypothesis_fixture_context().risk_floor + {touches_production: true},
+      approval_id: "approval-native-1",
+    }
   const approval = compile_experiment_intent(hypothesis_fixture_intent(), trusted_risk)
   require approval.ok, "risk escalation still compiles for review"
   if approval.plan == nil || approval.plan.kind != "registered_experiment" {
@@ -216,9 +211,7 @@ fn test_fail_closed_boundaries() {
   require unknown_diagnostic.code == "experiment.unknown_intervention",
     "the deterministic diagnostic supports bounded planner repair"
   const over_budget = hypothesis_fixture_context()
-    + {
-    budget_request: hypothesis_fixture_budget() + {max_spend_usd: 3.0},
-  }
+    + {budget_request: hypothesis_fixture_budget() + {max_spend_usd: 3.0}}
   const budget_receipt = compile_experiment_intent(hypothesis_fixture_intent(), over_budget)
   require !budget_receipt.ok, "host budget ceilings are enforced during compilation"
   if budget_receipt.failure == nil {
@@ -231,9 +224,7 @@ fn test_fail_closed_boundaries() {
   require budget_diagnostic.code == "experiment.budget_ceiling",
     "budget rejection is machine-readable"
   const missing_capability = hypothesis_fixture_context()
-    + {
-    capability_ceiling: hypothesis_fixture_capabilities() + {tools: []},
-  }
+    + {capability_ceiling: hypothesis_fixture_capabilities() + {tools: []}}
   const capability_receipt = compile_experiment_intent(
     hypothesis_fixture_intent(),
     missing_capability,
@@ -246,11 +237,9 @@ fn test_fail_closed_boundaries() {
     "capability refusal is distinct from invalid model data"
   const placement_ceiling = hypothesis_fixture_context()
     + {
-    capability_ceiling: hypothesis_fixture_capabilities()
-      + {
-      placement: hypothesis_fixture_placement() + {platform: "macos"},
-    },
-  }
+      capability_ceiling: hypothesis_fixture_capabilities()
+        + {placement: hypothesis_fixture_placement() + {platform: "macos"}},
+    }
   const placement_receipt = compile_experiment_intent(
     hypothesis_fixture_intent(),
     placement_ceiling,
@@ -263,28 +252,28 @@ fn test_fail_closed_boundaries() {
   const candidate = hypothesis_fixture_intervention("candidate", 1)
   const rollback_context = hypothesis_fixture_context()
     + {
-    catalog: hypothesis_fixture_context().catalog
-      + {
-      interventions: [
-        baseline
-          + {
-          capabilities: baseline.capabilities
-            + {
-            mutation: baseline.capabilities.mutation
-              + {rollback_adapter_id: "rollback-baseline"},
-          },
+      catalog: hypothesis_fixture_context().catalog
+        + {
+          interventions: [
+            baseline
+              + {
+                capabilities: baseline.capabilities
+                  + {
+                    mutation: baseline.capabilities.mutation
+                      + {rollback_adapter_id: "rollback-baseline"},
+                  },
+              },
+            candidate
+              + {
+                capabilities: candidate.capabilities
+                  + {
+                    mutation: candidate.capabilities.mutation
+                      + {rollback_adapter_id: "rollback-candidate"},
+                  },
+              },
+          ],
         },
-        candidate
-          + {
-          capabilities: candidate.capabilities
-            + {
-            mutation: candidate.capabilities.mutation
-              + {rollback_adapter_id: "rollback-candidate"},
-          },
-        },
-      ],
-    },
-  }
+    }
   const rollback_receipt = compile_experiment_intent(hypothesis_fixture_intent(), rollback_context)
   require !rollback_receipt.ok, "different rollback owners fail closed"
   require rollback_receipt.failure?.diagnostics?.[0]?.code
@@ -292,20 +281,18 @@ fn test_fail_closed_boundaries() {
     "rollback-owner rejection is machine-readable"
   const placement_context = hypothesis_fixture_context()
     + {
-    catalog: hypothesis_fixture_context().catalog
-      + {
-      interventions: [
-        baseline,
-        candidate
-          + {
-          capabilities: candidate.capabilities
-            + {
-            placement: hypothesis_fixture_placement() + {resource_class: "gpu-large"},
-          },
+      catalog: hypothesis_fixture_context().catalog
+        + {
+          interventions: [
+            baseline,
+            candidate
+              + {
+                capabilities: candidate.capabilities
+                  + {placement: hypothesis_fixture_placement() + {resource_class: "gpu-large"}},
+              },
+          ],
         },
-      ],
-    },
-  }
+    }
   const placement_mismatch = compile_experiment_intent(
     hypothesis_fixture_intent(),
     placement_context,
@@ -316,20 +303,18 @@ fn test_fail_closed_boundaries() {
     "arm placement mismatch is machine-readable"
   const malformed_context = hypothesis_fixture_context()
     + {
-    catalog: hypothesis_fixture_context().catalog
-      + {
-      interventions: [
-        baseline
-          + {
-          capabilities: baseline.capabilities
-            + {
-            placement: hypothesis_fixture_placement() + {resource_class: "  "},
-          },
+      catalog: hypothesis_fixture_context().catalog
+        + {
+          interventions: [
+            baseline
+              + {
+                capabilities: baseline.capabilities
+                  + {placement: hypothesis_fixture_placement() + {resource_class: "  "}},
+              },
+            candidate,
+          ],
         },
-        candidate,
-      ],
-    },
-  }
+    }
   const malformed_placement = compile_experiment_intent(
     hypothesis_fixture_intent(),
     malformed_context,

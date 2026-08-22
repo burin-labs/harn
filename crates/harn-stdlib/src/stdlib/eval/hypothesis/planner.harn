@@ -154,10 +154,13 @@ pub fn design_hypothesis(
   )
   const max_tokens = opts.max_tokens
     ?? if opts.model != nil {
-    recommend_max_output_tokens(harness.llm, {prompt: prompt, model: opts.model, task_kind: "json"})
-  } else {
-    1600
-  }
+      recommend_max_output_tokens(
+        harness.llm,
+        {prompt: prompt, model: opts.model, task_kind: "json"},
+      )
+    } else {
+      1600
+    }
   const checkpoint = typed_output_checkpoint(
     harness.agent,
     harness.llm,
@@ -169,10 +172,10 @@ pub fn design_hypothesis(
       model: opts.model,
       model_tier: opts.model_tier
         ?? if opts.provider == nil && opts.model == nil {
-        "mid"
-      } else {
-        nil
-      },
+          "mid"
+        } else {
+          nil
+        },
       max_tokens: max_tokens,
       schema_retries: 0,
       validator_retries: retries,

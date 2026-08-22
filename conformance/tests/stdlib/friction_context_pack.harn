@@ -87,10 +87,7 @@ pipeline main(harness: Harness) {
   harness.stdio.println(
     len(events) == 2
       && contains(events[0].redacted_summary, "redacted")
-      && !contains(
-      events[0].redacted_summary,
-      "token=secret",
-    ),
+      && !contains(events[0].redacted_summary, "token=secret"),
   )
   harness.stdio.println(events[0].metadata.api_key == "[redacted]")
   harness.stdio.println(

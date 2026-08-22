@@ -82,13 +82,12 @@ pipeline test_terminal_callback_can_continue_max_iteration_exit(harness: Harness
       for event in reminders {
         if event?.reminder?.dedupe_key == "runtime_feedback/post_turn"
           && event?.reminder?.authority
-          == "corrective" {
+            == "corrective" {
           saw_post_turn_feedback = true
         }
         if event?.reminder?.dedupe_key == "runtime_feedback/terminal_callback"
-          && event?.reminder
-          ?.authority
-          == "corrective" {
+          && event?.reminder?.authority
+            == "corrective" {
           saw_terminal_feedback = true
         }
       }

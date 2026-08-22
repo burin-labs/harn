@@ -65,10 +65,8 @@ pub fn pl_curated_proposal(
     }
     if (kind == "harn_tool" || kind == "hybrid")
       && (type_of(artifact?.tool_names) != "list"
-      || len(
-      artifact.tool_names,
-    )
-      == 0) {
+        || len(artifact.tool_names)
+          == 0) {
       throw "HARN-PATTERN-003: tool proposals require at least one artifact.tool_names entry"
     }
   }
@@ -86,20 +84,20 @@ pub fn pl_curated_proposal(
   }
   return proposal
     + {
-    id: "curated-" + pl_short_hash(name + ":" + join(evidence_ids, ":")),
-    kind: kind,
-    source: "agent_curator",
-    name: name,
-    title: title,
-    description: description,
-    when_to_use: when_to_use,
-    body: body,
-    support: len(evidence_ids),
-    evidence_ids: evidence_ids,
-    sample_prompts: samples,
-    tool_sequence: proposal?.tool_sequence ?? sequence,
-    created_at: now,
-    last_seen_at: now,
-    curator_session_id: agent.current_id(),
-  }
+      id: "curated-" + pl_short_hash(name + ":" + join(evidence_ids, ":")),
+      kind: kind,
+      source: "agent_curator",
+      name: name,
+      title: title,
+      description: description,
+      when_to_use: when_to_use,
+      body: body,
+      support: len(evidence_ids),
+      evidence_ids: evidence_ids,
+      sample_prompts: samples,
+      tool_sequence: proposal?.tool_sequence ?? sequence,
+      created_at: now,
+      last_seen_at: now,
+      curator_session_id: agent.current_id(),
+    }
 }

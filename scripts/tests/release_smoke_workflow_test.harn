@@ -48,15 +48,13 @@ fn release_smoke_workflow_errors(workflow, text: string) -> list<string> {
   if resolve_if.contains("github.event.workflow_run.event == 'push'") {
     errors = errors
       + [
-      "resolve job must not require workflow_run.event == 'push' (recovery / release-attempt dispatches that finalize must also smoke)",
-    ]
+        "resolve job must not require workflow_run.event == 'push' (recovery / release-attempt dispatches that finalize must also smoke)",
+      ]
   }
   const timeout = resolve?.get("timeout-minutes")
   if type_of(timeout) != "int" || timeout > 10 {
     errors = errors
-      + [
-      "resolve job must stay short because it validates assets once instead of waiting",
-    ]
+      + ["resolve job must stay short because it validates assets once instead of waiting"]
   }
   const resolve_step = (resolve?.steps ?? []).find({ step -> step?.id == "resolve" })
   if resolve_step == nil {
@@ -65,15 +63,11 @@ fn release_smoke_workflow_errors(workflow, text: string) -> list<string> {
     const run = to_string(resolve_step?.run ?? "")
     if !run.contains("Create GitHub release") {
       errors = errors
-        + [
-        "resolve step must require the triggering run's Create GitHub release job to succeed",
-      ]
+        + ["resolve step must require the triggering run's Create GitHub release job to succeed"]
     }
     if !run.contains("extract_release_tag") {
       errors = errors
-        + [
-        "resolve step must extract vX.Y.Z from tag and release-branch head_branch shapes",
-      ]
+        + ["resolve step must extract vX.Y.Z from tag and release-branch head_branch shapes"]
     }
     if regex_captures("gh release view", run).count != 1 {
       errors = errors + ["resolve step must inspect release assets exactly once"]
@@ -103,9 +97,7 @@ fn release_smoke_workflow_errors(workflow, text: string) -> list<string> {
   } else if to_string(checkout?.with?.ref ?? "")
     != "$" + "{{ needs.resolve.outputs.tag || github.sha }}" {
     errors = errors
-      + [
-      "artifact smoke must check out the release tag, while source smoke keeps github.sha",
-    ]
+      + ["artifact smoke must check out the release tag, while source smoke keeps github.sha"]
   }
   const run_smoke = (smoke?.steps ?? []).find({ step -> step?.name == "Run release smoke" })
   if run_smoke == nil {

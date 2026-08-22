@@ -139,13 +139,13 @@ fn __agent_recurring_facts(
     }
     facts = facts
       + [
-      {
-        signature: signatures[0],
-        category: __agent_recurring_category(entry, categories),
-        location: __agent_recurring_location(entry),
-        message: __agent_recurring_message(entry),
-      },
-    ]
+        {
+          signature: signatures[0],
+          category: __agent_recurring_category(entry, categories),
+          location: __agent_recurring_location(entry),
+          message: __agent_recurring_message(entry),
+        },
+      ]
   }
   return facts.sorted_by({ fact -> fact.signature })
 }
@@ -199,9 +199,9 @@ pub fn agent_unheeded_recurring_diagnostic(
   const diagnostic_count = delta.current.count
   const unchanged = previous != nil
     && previous.signatures
-    == signatures
+      == signatures
     && previous.diagnostic_count
-    == diagnostic_count
+      == diagnostic_count
   const state: RecurringDiagnosticState = {
     signatures: signatures,
     diagnostic_count: diagnostic_count,

@@ -298,15 +298,15 @@ pub fn code_librarian_member_surface(
     if !(member_keys[key] ?? false) {
       members = members
         + [
-        {
-          name: name,
-          kind: kind,
-          path: path,
-          line: line,
-          signature: signature,
-          access_level: __code_librarian_optional_string(row?.access_level),
-        },
-      ]
+          {
+            name: name,
+            kind: kind,
+            path: path,
+            line: line,
+            signature: signature,
+            access_level: __code_librarian_optional_string(row?.access_level),
+          },
+        ]
       member_keys = member_keys + {[key]: true}
     }
   }
@@ -791,22 +791,20 @@ fn __nl_mcts_probe(code_index: HarnessCodeIndex, term, all_terms, depth_cap, bud
         expansions = expansions + 1
         candidates = candidates
           + [
-          {
-            kind: to_string(seed?.kind ?? ""),
-            name: to_string(seed?.name ?? ""),
-            path: to_string(seed?.path ?? ""),
-            score: __nl_score(seed, all_terms),
-          },
-        ]
+            {
+              kind: to_string(seed?.kind ?? ""),
+              name: to_string(seed?.name ?? ""),
+              path: to_string(seed?.path ?? ""),
+              score: __nl_score(seed, all_terms),
+            },
+          ]
       }
     }
   }
   let depth = 1
   while depth <= depth_cap && expansions < budget {
     const cypher = "MATCH (s:Function {name: '" + __nl_escape(term) + "'})-[:CALLS*1.."
-      + to_string(
-      depth,
-    )
+      + to_string(depth)
       + "]->(n) RETURN n.path AS path, n.name AS name, n.kind AS kind"
     const hop = try {
       const raw = code_index.cypher({query: cypher})
@@ -822,13 +820,13 @@ fn __nl_mcts_probe(code_index: HarnessCodeIndex, term, all_terms, depth_cap, bud
           expansions = expansions + 1
           candidates = candidates
             + [
-            {
-              kind: to_string(n?.kind ?? ""),
-              name: to_string(n?.name ?? ""),
-              path: to_string(n?.path ?? ""),
-              score: __nl_score(n, all_terms),
-            },
-          ]
+              {
+                kind: to_string(n?.kind ?? ""),
+                name: to_string(n?.name ?? ""),
+                path: to_string(n?.path ?? ""),
+                score: __nl_score(n, all_terms),
+              },
+            ]
         }
       }
     }
@@ -853,13 +851,13 @@ fn __nl_mcts_probe(code_index: HarnessCodeIndex, term, all_terms, depth_cap, bud
         expansions = expansions + 1
         candidates = candidates
           + [
-          {
-            kind: to_string(c?.kind ?? ""),
-            name: to_string(c?.name ?? ""),
-            path: to_string(c?.path ?? ""),
-            score: __nl_score(c, all_terms),
-          },
-        ]
+            {
+              kind: to_string(c?.kind ?? ""),
+              name: to_string(c?.name ?? ""),
+              path: to_string(c?.path ?? ""),
+              score: __nl_score(c, all_terms),
+            },
+          ]
       }
     }
   }
@@ -873,9 +871,7 @@ fn __nl_mcts_probe(code_index: HarnessCodeIndex, term, all_terms, depth_cap, bud
 
 fn __nl_node_key(row) -> string {
   return to_string(row?.kind ?? "") + ":" + to_string(row?.path ?? "") + ":"
-    + to_string(
-    row?.name ?? "",
-  )
+    + to_string(row?.name ?? "")
 }
 
 fn __nl_dedupe_candidates(cands) -> list {

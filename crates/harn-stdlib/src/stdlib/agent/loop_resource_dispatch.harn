@@ -103,36 +103,28 @@ fn __tool_batch_call_classification(call, tools, options = {}) {
   )
   const side_effect = __intra_turn_annotation_text(
     annotations?.side_effect_level ?? annotations?.sideEffectLevel ?? annotations?.side_effect
-      ?? annotations
-      ?.sideEffect,
+      ?? annotations?.sideEffect,
   )
   const mutation = __intra_turn_annotation_text(
     annotations?.mutation_classification ?? annotations?.mutationClassification
-      ?? annotations
-      ?.mutation,
+      ?? annotations?.mutation,
   )
   if __tool_batch_entry_executor(entry) == "provider_native" {
     return {phase: "provider_native", declared_mutation: false}
   }
   if (annotations?.terminal ?? false)
     || contains(__TOOL_BATCH_TERMINAL_KINDS, kind)
-    || contains(
-    options?._stop_after_successful_tools ?? [],
-    tool_name,
-  ) {
+    || contains(options?._stop_after_successful_tools ?? [], tool_name) {
     return {phase: "terminal", declared_mutation: false}
   }
   if !(annotations?.destructiveHint ?? false)
     && ((annotations?.readOnlyHint
-    ?? annotations?.read_only_hint)
-    || contains(__TOOL_BATCH_OBSERVATION_KINDS, kind)
-    || side_effect == "none"
-    || side_effect == "read_only")
+        ?? annotations?.read_only_hint)
+      || contains(__TOOL_BATCH_OBSERVATION_KINDS, kind)
+      || side_effect == "none"
+      || side_effect == "read_only")
     && !contains(__TOOL_BATCH_MUTATION_KINDS, kind)
-    && !contains(
-    __TOOL_BATCH_MUTATING_SIDE_EFFECTS,
-    side_effect,
-  )
+    && !contains(__TOOL_BATCH_MUTATING_SIDE_EFFECTS, side_effect)
     && mutation != "workspace_write" {
     return {phase: "observation", declared_mutation: false}
   }
@@ -143,10 +135,7 @@ fn __tool_batch_call_classification(call, tools, options = {}) {
   return {
     phase: "mutation",
     declared_mutation: (annotations?.destructiveHint ?? false)
-      || contains(
-      __TOOL_BATCH_MUTATION_KINDS,
-      kind,
-    )
+      || contains(__TOOL_BATCH_MUTATION_KINDS, kind)
       || contains(__TOOL_BATCH_MUTATING_SIDE_EFFECTS, side_effect)
       || mutation == "workspace_write",
   }
@@ -273,8 +262,7 @@ fn __tool_batch_deferred_result(
   const name = receipt.tool_name
   const observation = "[deferred `" + name + "` tool call]\n"
     + "This call was NOT executed. The current response crossed from effect phase `"
-    + plan
-    .selected_phase
+    + plan.selected_phase
     + "` into `"
     + entry.phase
     + "`. Harn executed only the maximal independent `"
@@ -322,9 +310,7 @@ fn __tool_batch_blocked_result(
     + "This call was NOT executed. The prior mutation `"
     + to_string(blocking_result?.tool_name ?? "")
     + "` did not establish a usable post-mutation state (mutation_status="
-    + to_string(
-    blocking_result?.mutation_status ?? "unknown",
-  )
+    + to_string(blocking_result?.mutation_status ?? "unknown")
     + "). Observe current state or issue a corrected mutation before verification or completion."
   const result = {
     ok: false,
@@ -420,7 +406,7 @@ fn __tool_batch_dispatch(harness: Harness, tool_calls, tools, options, cap) {
     let receipt_timing = timing
     if raw_result?.status == "blocked_by_prior_same_resource_failure"
       || raw_result?.status
-      == "collapsed_identical_failure" {
+        == "collapsed_identical_failure" {
       disposition = "skipped_after_blocking_result"
       reason = to_string(raw_result?.status)
       receipt_timing = nil
@@ -535,16 +521,14 @@ pub fn __intra_turn_annotations_mutate_resource(annotations) -> bool {
   }
   const side_effect = __intra_turn_annotation_text(
     annotations?.side_effect_level ?? annotations?.sideEffectLevel ?? annotations?.side_effect
-      ?? annotations
-      ?.sideEffect,
+      ?? annotations?.sideEffect,
   )
   if side_effect == "workspace_write" {
     return true
   }
   const mutation = __intra_turn_annotation_text(
     annotations?.mutation_classification ?? annotations?.mutationClassification
-      ?? annotations
-      ?.mutation,
+      ?? annotations?.mutation,
   )
   return mutation == "workspace_write"
 }
@@ -554,8 +538,7 @@ pub fn __intra_turn_annotation_path_params(annotations) {
     return []
   }
   const direct = annotations?.path_params ?? annotations?.pathParams
-    ?? annotations
-    ?.resource_path_params
+    ?? annotations?.resource_path_params
     ?? annotations?.resourcePathParams
   if type_of(direct) == "list" {
     return direct
@@ -579,8 +562,7 @@ pub fn __intra_turn_annotation_dependency_key_params(annotations) {
     return []
   }
   const direct = annotations?.dependency_key_params ?? annotations?.dependencyKeyParams
-    ?? annotations
-    ?.resource_dependency_params
+    ?? annotations?.resource_dependency_params
     ?? annotations?.resourceDependencyParams
     ?? annotations?.resource_key_params
     ?? annotations?.resourceKeyParams
@@ -592,8 +574,7 @@ pub fn __intra_turn_annotation_dependency_key_params(annotations) {
   }
   const schema = annotations?.arg_schema ?? annotations?.argSchema ?? {}
   const params = schema?.dependency_key_params ?? schema?.dependencyKeyParams
-    ?? schema
-    ?.resource_dependency_params
+    ?? schema?.resource_dependency_params
     ?? schema?.resourceDependencyParams
     ?? schema?.resource_key_params
     ?? schema?.resourceKeyParams
@@ -612,8 +593,7 @@ pub fn __intra_turn_annotation_dependency_range_params(annotations) {
     return []
   }
   const direct = annotations?.dependency_range_params ?? annotations?.dependencyRangeParams
-    ?? annotations
-    ?.resource_dependency_ranges
+    ?? annotations?.resource_dependency_ranges
     ?? annotations?.resourceDependencyRanges
     ?? annotations?.resource_range_params
     ?? annotations?.resourceRangeParams
@@ -625,8 +605,7 @@ pub fn __intra_turn_annotation_dependency_range_params(annotations) {
   }
   const schema = annotations?.arg_schema ?? annotations?.argSchema ?? {}
   const params = schema?.dependency_range_params ?? schema?.dependencyRangeParams
-    ?? schema
-    ?.resource_dependency_ranges
+    ?? schema?.resource_dependency_ranges
     ?? schema?.resourceDependencyRanges
     ?? schema?.resource_range_params
     ?? schema?.resourceRangeParams
@@ -646,8 +625,7 @@ pub fn __intra_turn_annotation_arg_aliases(annotations) {
   }
   const schema = annotations?.arg_schema ?? annotations?.argSchema ?? {}
   const aliases = schema?.arg_aliases ?? schema?.argAliases ?? annotations?.arg_aliases
-    ?? annotations
-    ?.argAliases
+    ?? annotations?.argAliases
     ?? {}
   if type_of(aliases) == "dict" {
     return aliases
@@ -889,11 +867,9 @@ pub fn __intra_turn_intersects(keys, failed_keys) -> bool {
 
 pub fn __intra_turn_ranges_overlap(current, failed) -> bool {
   return to_string(current?.resource_key ?? "") == to_string(failed?.resource_key ?? "")
-    && (to_int(
-    current?.start,
-  )
-    ?? 0)
-    <= (to_int(failed?.end) ?? -1)
+    && (to_int(current?.start)
+        ?? 0)
+      <= (to_int(failed?.end) ?? -1)
     && (to_int(failed?.start) ?? 0) <= (to_int(current?.end) ?? -1)
 }
 
@@ -951,11 +927,11 @@ pub fn __intra_turn_guard_render_keys(resource_guard) {
 pub fn __intra_turn_failed_guard_record(call, index, resource_guard, result) {
   return resource_guard
     + {
-    failed_call_index: index,
-    failed_tool_name: to_string(call?.name ?? call?.tool_name ?? ""),
-    failed_tool_call_id: to_string(call?.id ?? call?.tool_call_id ?? ""),
-    failed_mutation_status: __intra_turn_result_mutation_status(result),
-  }
+      failed_call_index: index,
+      failed_tool_name: to_string(call?.name ?? call?.tool_name ?? ""),
+      failed_tool_call_id: to_string(call?.id ?? call?.tool_call_id ?? ""),
+      failed_mutation_status: __intra_turn_result_mutation_status(result),
+    }
 }
 
 pub fn __intra_turn_dependent_suffix_count(
@@ -1302,12 +1278,12 @@ pub fn __invoke_tool_with_index(harness: Harness, call, index, tools, options) {
   const finished_at_ms = harness.clock.monotonic_ms()
   return result
     + {
-    _tool_dispatch_timing: {
-      started_at_ms: started_at_ms,
-      finished_at_ms: finished_at_ms,
-      duration_ms: finished_at_ms - started_at_ms,
-    },
-  }
+      _tool_dispatch_timing: {
+        started_at_ms: started_at_ms,
+        finished_at_ms: finished_at_ms,
+        duration_ms: finished_at_ms - started_at_ms,
+      },
+    }
 }
 
 pub fn __dispatch_tool_calls_with_middleware(harness: Harness, tool_calls, tools, options, cap) {
@@ -1320,11 +1296,7 @@ pub fn __dispatch_tool_calls_with_middleware(harness: Harness, tool_calls, tools
   // declaration order still match.
   const resource_fail_fast = options?._intra_turn_resource_fail_fast ?? true
   const keyed_mutating_batch = resource_fail_fast
-    && __intra_turn_has_keyed_mutating_calls(
-    tool_calls,
-    tools,
-    options,
-  )
+    && __intra_turn_has_keyed_mutating_calls(tool_calls, tools, options)
   if cap <= 1 || len(tool_calls) <= 1 || keyed_mutating_batch {
     // Intra-turn failing-fan-out cap (#A4). Dispatch serially; track the count
     // of consecutive byte-identical FAILING results. Once that streak reaches
@@ -1382,7 +1354,7 @@ pub fn __dispatch_tool_calls_with_middleware(harness: Harness, tool_calls, tools
       }
       if fanout_cap > 0 && capped_call_signature != nil
         && __intra_turn_call_signature(call)
-        == capped_call_signature {
+          == capped_call_signature {
         // Same failing call as the one that tripped the cap — skip dispatch.
         if !collapsed_emitted {
           const collapsed = __intra_turn_collapsed_result(call, capped_sample)
@@ -1407,9 +1379,7 @@ pub fn __dispatch_tool_calls_with_middleware(harness: Harness, tool_calls, tools
       // independent later edit to the same file is NOT stale and may run.
       // Unknown still poisons, preserving today's conservative behavior.
       if resource_guard != nil && !__tool_result_ok(result)
-        && __intra_turn_failure_poisons_resource(
-        result,
-      ) {
+        && __intra_turn_failure_poisons_resource(result) {
         failed_resource_guards = failed_resource_guards.appending(
           __intra_turn_failed_guard_record(call, index, resource_guard, result),
         )

@@ -179,11 +179,11 @@ pub fn __auth_readiness(routes: list<ProviderToolProbeRoute>, env: dict, env_sou
       missing_by_provider = __increment_key(missing_by_provider, route.provider)
       missing_env_candidates_by_provider = missing_env_candidates_by_provider
         + {
-        [route.provider]: __merge_unique_strings(
-          missing_env_candidates_by_provider[route.provider] ?? [],
-          missing,
-        ),
-      }
+          [route.provider]: __merge_unique_strings(
+            missing_env_candidates_by_provider[route.provider] ?? [],
+            missing,
+          ),
+        }
     }
   }
   return {
@@ -211,19 +211,19 @@ pub fn __skipped_cells_for_missing_env(
   for format in behavior.tool_formats {
     cells = cells
       + [
-      __base_cell(
-        {
-          llm: llm,
-          route: route,
-          behavior: behavior,
-          mode: mode,
-          format: format,
-          status: "skip",
-          reason: "missing provider environment key; set one of: " + join(missing, ", "),
-          observed: {missing_env_keys: missing, any_env_key_satisfies_route: true},
-        },
-      ),
-    ]
+        __base_cell(
+          {
+            llm: llm,
+            route: route,
+            behavior: behavior,
+            mode: mode,
+            format: format,
+            status: "skip",
+            reason: "missing provider environment key; set one of: " + join(missing, ", "),
+            observed: {missing_env_keys: missing, any_env_key_satisfies_route: true},
+          },
+        ),
+      ]
   }
   return cells
 }
@@ -280,36 +280,36 @@ pub fn __run_tool_probe(
     if parsed == nil {
       cells = cells
         + [
-        __base_cell(
-          {
-            llm: llm,
-            route: route,
-            behavior: behavior,
-            mode: mode,
-            format: format,
-            status: "error",
-            reason: if trim(stdout) == "" {
-              trim(child.stderr ?? "provider tool-probe failed before producing JSON")
-            } else {
-              "provider tool-probe produced non-JSON stdout"
-            },
-            observed: {
-              exit_code: child.exit_code,
-              stderr: trim(child.stderr ?? ""),
-              telemetry: {
-                actual_usd: 0.0,
-                observed_cost_count: 0,
-                unpriced_case_count: 1,
-                request_attempt_count: 1,
-                retry_count: 0,
-                retry_accounting:
-                  "the child process produced no parseable receipt; the campaign conservatively counts one unpriced attempt",
+          __base_cell(
+            {
+              llm: llm,
+              route: route,
+              behavior: behavior,
+              mode: mode,
+              format: format,
+              status: "error",
+              reason: if trim(stdout) == "" {
+                trim(child.stderr ?? "provider tool-probe failed before producing JSON")
+              } else {
+                "provider tool-probe produced non-JSON stdout"
+              },
+              observed: {
+                exit_code: child.exit_code,
+                stderr: trim(child.stderr ?? ""),
+                telemetry: {
+                  actual_usd: 0.0,
+                  observed_cost_count: 0,
+                  unpriced_case_count: 1,
+                  request_attempt_count: 1,
+                  retry_count: 0,
+                  retry_accounting:
+                    "the child process produced no parseable receipt; the campaign conservatively counts one unpriced attempt",
+                },
               },
             },
-          },
-        )
-          + {command: command},
-      ]
+          )
+            + {command: command},
+        ]
       continue
     }
     cells = cells

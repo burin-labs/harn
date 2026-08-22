@@ -1,0 +1,39 @@
+/**
+ * Normalize the combined inline output carried by a command result.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn command_combined(result) -> string {
+  if result?.combined != nil {
+    return result.combined
+  }
+  if result?.inline_output != nil {
+    return result.inline_output
+  }
+  const {stdout = "", stderr = ""} = result ?? {}
+  return stdout + stderr
+}
+
+/**
+ * command_output_text returns stdout, stderr, combined, tail, or failure_tail from a command result.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn command_output_text_impl(result, stream: string = "combined") -> string {
+  const mode = stream ?? "combined"
+  if mode == "stdout" {
+    return result?.stdout ?? ""
+  }
+  if mode == "stderr" {
+    return result?.stderr ?? ""
+  }
+  if mode == "tail" {
+    return result?.tail ?? ""
+  }
+  if mode == "failure_tail" {
+    return result?.failure_tail ?? result?.tail ?? ""
+  }
+  return command_combined(result)
+}

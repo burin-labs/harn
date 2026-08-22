@@ -204,7 +204,7 @@ fn __batch_lifecycle_terminal(state: BatchLifecycleState, dry_run: bool) -> bool
   }
   return state == "completed" || state == "failed" || state == "downloaded" || state == "not_ready"
     || state
-    == "canceled"
+      == "canceled"
 }
 
 fn __batch_lifecycle_result_available(state: BatchLifecycleState) -> bool {
@@ -292,11 +292,8 @@ pub fn __batch_receipt_lifecycle(
     dry_run: dry_run,
     terminal: __batch_lifecycle_terminal(state, dry_run),
     result_available: __count_jobs_with_status(jobs, "completed") > 0
-      || __count_jobs_with_status(
-      jobs,
-      "downloaded",
-    )
-      > 0
+      || __count_jobs_with_status(jobs, "downloaded")
+        > 0
       || __count_jobs_with_status(jobs, "canceled") > 0,
     partial: state == "partial",
     counts: __batch_lifecycle_counts(jobs),

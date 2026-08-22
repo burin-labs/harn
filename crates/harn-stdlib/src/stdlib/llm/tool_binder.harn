@@ -247,9 +247,7 @@ fn __binder_validate_opts(llm: HarnessLlm, cfg) {
   let typed = __binder_typed_opts(cfg)
   if typed.max_retries != 0 {
     throw "with_natural_language_executor: `max_retries` must be 0; retries defeat the latency win; got "
-      + to_string(
-      typed.max_retries,
-    )
+      + to_string(typed.max_retries)
   }
   let intent_field = trim(typed.intent_field)
   if intent_field == "" {
@@ -258,9 +256,7 @@ fn __binder_validate_opts(llm: HarnessLlm, cfg) {
   let binder_fn = if typed?.binder_fn != nil {
     if !__binder_is_callable(typed.binder_fn) {
       throw "with_natural_language_executor: `binder_fn` must be callable; got "
-        + type_of(
-        typed.binder_fn,
-      )
+        + type_of(typed.binder_fn)
     }
     typed.binder_fn
   } else {
@@ -428,9 +424,7 @@ pub fn with_natural_language_executor(harness: Harness, opts) {
         fail_ctx,
         "timeout",
         "binder hop exceeded timeout_ms=" + to_string(ctx.timeout_ms) + " (elapsed="
-          + to_string(
-          elapsed,
-        )
+          + to_string(elapsed)
           + "ms)",
       )
     }

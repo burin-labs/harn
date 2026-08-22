@@ -384,13 +384,7 @@ pub fn bulletin_propose(clock: HarnessClock, input, options = nil) -> ProfileBul
   const review_after = __bulletin_first([opts?.review_after, input?.review_after])
   const supersedes = __bulletin_string_list(opts?.supersedes ?? input?.supersedes)
   const id = __bulletin_first([opts?.id, input?.id])
-    ?? bulletin_id(
-    scope,
-    scope_key,
-    subject,
-    assertion,
-    persona,
-  )
+    ?? bulletin_id(scope, scope_key, subject, assertion, persona)
   const bulletin = {
     schema: BULLETIN_SCHEMA,
     id: id,

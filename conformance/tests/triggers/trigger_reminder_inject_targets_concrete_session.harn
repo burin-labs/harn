@@ -12,9 +12,7 @@ pipeline test(harness: Harness, task) {
   const target_session = harness.agent.open("trigger-reminder-inject-concrete")
   harness.agent.reset(target_session)
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
-    + to_string(
-    harness.random.range(100000, 999999),
-  )
+    + to_string(harness.random.range(100000, 999999))
   const trigger_id = "trigger-reminder-inject-concrete-" + unique
   const handle: TriggerHandle = harness.runtime.trigger_register(
     {

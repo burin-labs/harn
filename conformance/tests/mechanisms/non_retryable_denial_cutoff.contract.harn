@@ -78,7 +78,7 @@ fn cutoff_count(events) {
       { event ->
         event.type == "typed_checkpoint"
           && event.checkpoint?.schema
-          == "harn.agent_non_retryable_denial_cutoff.v1"
+            == "harn.agent_non_retryable_denial_cutoff.v1"
       },
     ),
   )
@@ -106,15 +106,12 @@ fn permanent_denial_case(harness: Harness) {
         "trigger_repeated_permanent_denial",
         len(denials) == 2
           && type_of(denials[0].raw_output.denial.retryable) == "bool"
-          && !denials[0].raw_output.denial
-          .retryable
+          && !denials[0].raw_output.denial.retryable
           && type_of(denials[1].raw_output.denial.retryable) == "bool"
-          && !denials[1].raw_output.denial
-          .retryable
+          && !denials[1].raw_output.denial.retryable
           && denials[0].raw_output.denial.gate == denials[1].raw_output.denial.gate
-          && denials[0]
-          .raw_output.denial.reason
-          == denials[1].raw_output.denial.reason,
+          && denials[0].raw_output.denial.reason
+            == denials[1].raw_output.denial.reason,
       )
       contract_effect(
         harness.stdio,
@@ -126,7 +123,7 @@ fn permanent_denial_case(harness: Harness) {
         "effect_harness_infra_terminal",
         captured.result.terminal_class == "tool_policy_rejected"
           && captured.result.terminal.kind
-          == "runtime_error"
+            == "runtime_error"
           && captured.result.terminal.owner == "harness",
       )
     },

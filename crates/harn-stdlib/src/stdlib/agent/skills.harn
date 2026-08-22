@@ -449,10 +449,7 @@ fn __skill_score_metadata(context, registry) {
       continue
     }
     const keyword_hits = __skill_score_term_hits(query_tokens, entry?.description ?? "")
-      + __skill_score_term_hits(
-      query_tokens,
-      entry?.when_to_use ?? "",
-    )
+      + __skill_score_term_hits(query_tokens, entry?.when_to_use ?? "")
     const id_match = __skill_score_id_match(query_tokens, id)
     const path_hits = __skill_score_path_hits(entry?.paths ?? [], working_files)
     let score = 0.0

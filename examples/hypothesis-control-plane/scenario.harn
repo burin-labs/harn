@@ -27,7 +27,7 @@ fn require_plan(receipt) {
 fn needs_advance(result: HypothesisWorkflowResult) -> bool {
   return result.state == "running"
     || (result.state == "completed"
-    && result.ledger.snapshot.decision == nil)
+      && result.ledger.snapshot.decision == nil)
 }
 
 fn advance_to_terminal(
@@ -82,8 +82,8 @@ fn execute(
   )
   if inspected.state == "running"
     || (inspected.state == "completed"
-    && inspected.ledger.snapshot.decision
-    == nil) {
+      && inspected.ledger.snapshot.decision
+        == nil) {
     const recovered = advance_to_terminal(harness.obs, inspected)
     return {scenario: scenario, planner: planned, result: recovered}
   }

@@ -30,15 +30,15 @@ pub fn collect(ast: HarnessAst, source: string, language: string, path: string) 
       const message = to_string(err?.message ?? "parse error")
       out = out
         + [
-        {
-          tier: "syntax",
-          severity: "ERROR",
-          line: to_int(err?.start_row ?? 0) + 1,
-          message: message,
-          reason: "",
-          signature: "${path}|syntax:${message}",
-        },
-      ]
+          {
+            tier: "syntax",
+            severity: "ERROR",
+            line: to_int(err?.start_row ?? 0) + 1,
+            message: message,
+            reason: "",
+            signature: "${path}|syntax:${message}",
+          },
+        ]
     }
     // A file that does not parse makes every semantic reading noise, so stop.
     return out
@@ -66,19 +66,19 @@ pub fn collect(ast: HarnessAst, source: string, language: string, path: string) 
     const name = to_string(diag?.name ?? "")
     out = out
       + [
-      {
-        tier: tier,
-        severity: if complete {
-          "ERROR"
-        } else {
-          "LOW-CONFIDENCE"
+        {
+          tier: tier,
+          severity: if complete {
+            "ERROR"
+          } else {
+            "LOW-CONFIDENCE"
+          },
+          line: to_int(diag?.row ?? 0) + 1,
+          message: "undefined name '${name}'",
+          reason: reason,
+          signature: "${path}|${tier}:undefined name '${name}'",
         },
-        line: to_int(diag?.row ?? 0) + 1,
-        message: "undefined name '${name}'",
-        reason: reason,
-        signature: "${path}|${tier}:undefined name '${name}'",
-      },
-    ]
+      ]
   }
   return out
 }
@@ -144,8 +144,8 @@ pub fn render(diags: list, path: string) -> string {
   if len(low_names) > 0 {
     lines = lines
       + [
-      "\n## Note for ${path} (low confidence, not verified): ${len(low_names)} name(s) could not be resolved statically because of ${low_reason}, e.g. ${low_names.first()}. Names provided by a framework or an import this checker cannot follow look identical to real mistakes here. Do not act on this unless verification agrees.",
-    ]
+        "\n## Note for ${path} (low confidence, not verified): ${len(low_names)} name(s) could not be resolved statically because of ${low_reason}, e.g. ${low_names.first()}. Names provided by a framework or an import this checker cannot follow look identical to real mistakes here. Do not act on this unless verification agrees.",
+      ]
   }
   return join(lines, "\n")
 }

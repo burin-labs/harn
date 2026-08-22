@@ -164,9 +164,7 @@ fn receipt_counts(events) {
     const schema_report = agent_event_report(event, agent_tool_batch_disposition_event_schema())
     require schema_report.ok,
       "tool batch disposition events must satisfy their public schema: "
-      + json_stringify(
-      {event: event, report: schema_report},
-    )
+      + json_stringify({event: event, report: schema_report})
     total = total + 1
     const receipt = event.receipt
     if receipt.disposition == "executed" {

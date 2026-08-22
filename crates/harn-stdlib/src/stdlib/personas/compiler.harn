@@ -96,15 +96,15 @@ pub fn persona_blueprint_schema() -> dict {
   return schema_closed_object(
     __persona_blueprint_common_schema_fields()
       + {
-      cron: schema_field(
-        schema_closed_object({cron: schema_string(), timezone: schema_string()}),
-        false,
-      ),
-      external: schema_field(
-        schema_closed_object({provider: schema_string(), event: schema_string()}),
-        false,
-      ),
-    },
+        cron: schema_field(
+          schema_closed_object({cron: schema_string(), timezone: schema_string()}),
+          false,
+        ),
+        external: schema_field(
+          schema_closed_object({provider: schema_string(), event: schema_string()}),
+          false,
+        ),
+      },
   )
 }
 
@@ -313,9 +313,7 @@ pub fn persona_blueprint_validate(
     report = __persona_blueprint_validate_cron(blueprint, catalog, report) + {source_kind: "cron"}
   } else {
     report = __persona_blueprint_validate_external(blueprint, catalog, report)
-      + {
-      source_kind: "external",
-    }
+      + {source_kind: "external"}
   }
   return __persona_blueprint_finalize(report)
 }

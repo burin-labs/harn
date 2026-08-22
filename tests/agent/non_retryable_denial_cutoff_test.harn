@@ -58,7 +58,7 @@ fn cutoff_receipts(events) {
     { event ->
       event.type == "typed_checkpoint"
         && event.checkpoint?.schema
-        == "harn.agent_non_retryable_denial_cutoff.v1"
+          == "harn.agent_non_retryable_denial_cutoff.v1"
     },
   )
 }

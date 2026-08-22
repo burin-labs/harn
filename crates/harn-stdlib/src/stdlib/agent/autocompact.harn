@@ -20,7 +20,7 @@ fn __compaction_engine_strategy(label) {
   }
   if label == "summarize_all" || label == "summarize_middle" || label == "summarize"
     || label
-    == "hybrid"
+      == "hybrid"
     || label == "llm" {
     return "llm"
   }
@@ -48,10 +48,8 @@ fn __has_compaction_policy(policy) {
     || policy?.mode != nil
     || policy?.scope != nil
     || len(__compaction_policy_list(policy?.preserve)) > 0
-    || len(
-    __compaction_policy_list(policy?.drop),
-  )
-    > 0
+    || len(__compaction_policy_list(policy?.drop))
+      > 0
     || policy?.extend_default_instructions != nil
     || policy?.author != nil
 }
@@ -119,7 +117,7 @@ fn __compaction_instruction_mode(policy) {
   }
   const has_directives = policy?.instructions != nil
     || len(__compaction_policy_list(policy?.preserve))
-    > 0
+      > 0
     || len(__compaction_policy_list(policy?.drop)) > 0
   if !has_directives {
     return "default"
@@ -142,9 +140,9 @@ fn __compaction_policy_event_fields(policy) {
   if type_of(policy?.author) == "string" && policy.author != "" {
     fields = fields
       + {
-      instruction_source: policy.author,
-      compaction_policy: fields.compaction_policy + {instruction_source: policy.author},
-    }
+        instruction_source: policy.author,
+        compaction_policy: fields.compaction_policy + {instruction_source: policy.author},
+      }
   }
   return fields
 }
@@ -193,9 +191,7 @@ fn __compact_options(opts, engine_strategy, keep_last) {
     compact_opts = compact_opts + {model: opts.model}
   }
   const policy = __compaction_policy_from_options(compact_opts)
-    ?? __compaction_policy_from_options(
-    {policy: opts?.compaction_policy},
-  )
+    ?? __compaction_policy_from_options({policy: opts?.compaction_policy})
     ?? __compaction_policy_from_options({policy: opts?.compaction?.policy})
   if policy != nil && !contains(compact_opts.keys(), "policy") {
     compact_opts = compact_opts + {policy: policy}
@@ -283,16 +279,16 @@ pub fn compact_for_bug_fix_resumption(opts = nil) {
       + extra,
     base
       + {
-      mode: base?.mode ?? "bug_fix_resumption",
-      preserve: base?.preserve
-        ?? [
-        "root cause",
-        "changed files",
-        "test failures",
-        "verification commands",
-        "next action",
-      ],
-    },
+        mode: base?.mode ?? "bug_fix_resumption",
+        preserve: base?.preserve
+          ?? [
+            "root cause",
+            "changed files",
+            "test failures",
+            "verification commands",
+            "next action",
+          ],
+      },
   )
 }
 
@@ -319,17 +315,11 @@ pub fn compact_preserving_test_failures(opts = nil) {
       + extra,
     base
       + {
-      mode: base?.mode ?? "preserve_test_failures",
-      preserve: base?.preserve
-        ?? [
-        "failing test names",
-        "commands",
-        "error messages",
-        "stack traces",
-        "exit codes",
-      ],
-      drop: base?.drop ?? ["repetitive build output"],
-    },
+        mode: base?.mode ?? "preserve_test_failures",
+        preserve: base?.preserve
+          ?? ["failing test names", "commands", "error messages", "stack traces", "exit codes"],
+        drop: base?.drop ?? ["repetitive build output"],
+      },
   )
 }
 
@@ -357,17 +347,17 @@ pub fn compact_retaining_current_plan(opts = nil) {
       + extra,
     base
       + {
-      mode: base?.mode ?? "retain_current_plan",
-      preserve: base?.preserve
-        ?? [
-        "current plan",
-        "completed steps",
-        "in-progress step",
-        "blockers",
-        "verification status",
-        "remaining actions",
-      ],
-    },
+        mode: base?.mode ?? "retain_current_plan",
+        preserve: base?.preserve
+          ?? [
+            "current plan",
+            "completed steps",
+            "in-progress step",
+            "blockers",
+            "verification status",
+            "remaining actions",
+          ],
+      },
   )
 }
 
@@ -448,12 +438,12 @@ pub fn agent_autocompact_if_needed(agent: HarnessAgent, session, opts) {
     agent_record_compaction(agent, session.session_id, metadata)
     const post_payload = pre_payload
       + {
-      archived_messages: archived,
-      new_summary_len: len(summary),
-      remaining_messages: len(compacted),
-      summary: summary,
-      estimated_tokens_after: estimate_tokens(compacted),
-    }
+        archived_messages: archived,
+        new_summary_len: len(summary),
+        remaining_messages: len(compacted),
+        summary: summary,
+        estimated_tokens_after: estimate_tokens(compacted),
+      }
       + policy_fields
     __host_fire_session_hook("post_compact", post_payload)
     agent_reminder_providers_fire(agent, session.session_id, "post_compact", post_payload, opts)
@@ -550,12 +540,12 @@ pub fn agent_emergency_compact(agent: HarnessAgent, session, opts, attempt) {
     agent_record_compaction(agent, session.session_id, metadata)
     const post_payload = pre_payload
       + {
-      archived_messages: archived,
-      new_summary_len: len(summary),
-      remaining_messages: len(compacted),
-      summary: summary,
-      estimated_tokens_after: estimate_tokens(compacted),
-    }
+        archived_messages: archived,
+        new_summary_len: len(summary),
+        remaining_messages: len(compacted),
+        summary: summary,
+        estimated_tokens_after: estimate_tokens(compacted),
+      }
     __host_fire_session_hook("post_compact", post_payload)
     agent_reminder_providers_fire(agent, session.session_id, "post_compact", post_payload, opts)
   }

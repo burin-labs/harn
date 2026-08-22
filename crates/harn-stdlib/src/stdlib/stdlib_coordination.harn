@@ -5,283 +5,32 @@
 // host-local mailboxes or user-visible prose protocols.
 import { filter_nil } from "std/collections"
 import * as append_metadata from "std/coordination/append_metadata"
+import { COORD_RECEIPT_SCHEMA, COORD_SCHEMA, coord_kind } from "std/coordination/schema"
+pub import {
+  coord_actor_schema,
+  coord_event_message_schema,
+  coord_inbox_report,
+  coord_inbox_schema,
+  coord_message_report,
+  coord_message_schema,
+  coord_message_value,
+  coord_receipt_report,
+  coord_receipt_schema,
+  coord_receipt_value,
+  coord_ref_schema,
+  coord_wait_reply_report,
+  coord_wait_reply_schema,
+} from "std/coordination/schema"
 import { ensure_parent_dir, read_json_result, write_json } from "std/fs"
 import { memory_store } from "std/memory"
-import "std/schema"
-
-const __COORD_SCHEMA = "harn.coordination.message.v1"
-
-const __COORD_RECEIPT_SCHEMA = "harn.coordination.receipt.v1"
 
 const __COORD_DIR_LOCK_SCHEMA = "harn.coordination.dir_lock.v1"
 
 const __COORD_CHANNEL_PREFIX = "coord"
 
-const __COORD_KINDS = [
-  "status",
-  "claim",
-  "ack",
-  "done",
-  "finding",
-  "checkin",
-  "heartbeat",
-  "handoff",
-  "blocker",
-  "decision",
-  "request",
-  "fact",
-]
-
 const __COORD_DIR_LOCK_TTL_MS = 10 * 60 * 1000
 
 const __COORD_DIR_LOCK_REAPER_TTL_MS = 60 * 1000
-
-fn __coord_number_schema() {
-  return schema_union([schema_int(), schema_float()])
-}
-
-/**
- * Schema for normalized coordination actor/address dictionaries.
- *
- * @effects: []
- * @errors: []
- * @api_stability: experimental
- */
-pub fn coord_actor_schema() {
-  return schema_object(
-    {
-      agent: schema_field(schema_string(), false),
-      session_id: schema_field(schema_string(), false),
-      root_session_id: schema_field(schema_string(), false),
-      worker_id: schema_field(schema_string(), false),
-      run_id: schema_field(schema_string(), false),
-      task_id: schema_field(schema_string(), false),
-      root_task_id: schema_field(schema_string(), false),
-    },
-    {additional_properties: schema_any()},
-  )
-}
-
-/**
- * Schema for normalized coordination references.
- *
- * @effects: []
- * @errors: []
- * @api_stability: experimental
- */
-pub fn coord_ref_schema() {
-  return schema_object(
-    {
-      kind: schema_field(schema_string(), false),
-      ref: schema_field(schema_string(), false),
-      url: schema_field(schema_string(), false),
-      title: schema_field(schema_string(), false),
-    },
-    {additional_properties: schema_any()},
-  )
-}
-
-/**
- * Schema for durable coordination messages returned by `coord_post`,
- * `coord_read`, `coord_inbox`, and `coord_wait_reply`.
- *
- * @effects: []
- * @errors: []
- * @api_stability: experimental
- */
-pub fn coord_message_schema() {
-  return schema_object(
-    {
-      schema: schema_literal(__COORD_SCHEMA),
-      id: schema_string(),
-      scope: schema_enum(["session", "pipeline", "tenant", "workspace", "task"]),
-      scope_id: schema_string(),
-      room: schema_string(),
-      kind: schema_enum(__COORD_KINDS),
-      from: coord_actor_schema(),
-      to: schema_field(
-        schema_union([schema_string(), coord_actor_schema(), schema_list(schema_any())]),
-        false,
-      ),
-      subject: schema_string(),
-      body: schema_string(),
-      data: schema_field(schema_any(), false),
-      refs: schema_list(coord_ref_schema()),
-      related_ids: schema_list(schema_string()),
-      reply_to: schema_field(schema_string(), false),
-      thread_id: schema_field(schema_string(), false),
-      dedupe_key: schema_field(schema_string(), false),
-      ts: schema_field(schema_string(), false),
-      seq: schema_field(schema_int(), false),
-      created_at: schema_string(),
-      ttl: schema_field(schema_any(), false),
-      privacy: schema_field(schema_any(), false),
-    },
-    {additional_properties: schema_any()},
-  )
-}
-
-/**
- * Schema for receipts returned by `coord_post`, `coord_send`,
- * `coord_request`, and `coord_reply`.
- *
- * @effects: []
- * @errors: []
- * @api_stability: experimental
- */
-pub fn coord_receipt_schema() {
-  return schema_object(
-    {
-      schema: schema_literal(__COORD_RECEIPT_SCHEMA),
-      id: schema_string(),
-      event_id: schema_union([schema_string(), schema_int()]),
-      duplicate: schema_bool(),
-      scope: schema_enum(["session", "pipeline", "tenant", "workspace", "task"]),
-      scope_id: schema_string(),
-      room: schema_string(),
-      kind: schema_enum(__COORD_KINDS),
-      subject: schema_string(),
-      channel: schema_dict(schema_any()),
-      message: coord_message_schema(),
-    },
-    {additional_properties: schema_any()},
-  )
-}
-
-/**
- * Schema for event/message wrappers returned by `coord_read` and `coord_inbox`
- * when callers pass `{include_events: true}`.
- *
- * @effects: []
- * @errors: []
- * @api_stability: experimental
- */
-pub fn coord_event_message_schema() {
-  return schema_object(
-    {event: schema_dict(schema_any()), message: coord_message_schema()},
-    {additional_properties: schema_any()},
-  )
-}
-
-fn __coord_inbox_message_schema() {
-  return schema_union([coord_message_schema(), coord_event_message_schema()])
-}
-
-/**
- * Schema for `coord_inbox` results.
- *
- * @effects: []
- * @errors: []
- * @api_stability: experimental
- */
-pub fn coord_inbox_schema() {
-  return schema_object(
-    {
-      consumer_id: schema_string(),
-      from_cursor: schema_field(schema_any(), false),
-      last_scanned_cursor: schema_field(schema_any(), false),
-      next_cursor: schema_field(schema_any(), false),
-      scanned: schema_int(),
-      messages: schema_list(__coord_inbox_message_schema()),
-    },
-    {additional_properties: schema_any()},
-  )
-}
-
-/**
- * Schema for `coord_wait_reply` results.
- *
- * @effects: []
- * @errors: []
- * @api_stability: experimental
- */
-pub fn coord_wait_reply_schema() {
-  return schema_object(
-    {
-      status: schema_enum(["matched", "timeout"]),
-      matched: schema_bool(),
-      timed_out: schema_bool(),
-      request_id: schema_string(),
-      thread_id: schema_string(),
-      consumer_id: schema_string(),
-      reply: schema_field(__coord_inbox_message_schema(), false),
-      replies: schema_list(__coord_inbox_message_schema()),
-      inbox: schema_field(coord_inbox_schema(), false),
-      next_cursor: schema_field(schema_any(), false),
-      acknowledged: schema_field(schema_any(), false),
-      elapsed_ms: __coord_number_schema(),
-    },
-    {additional_properties: schema_any()},
-  )
-}
-
-/**
- * Validate a coordination message and return a structured schema report.
- *
- * @effects: []
- * @errors: []
- * @api_stability: experimental
- */
-pub fn coord_message_report(value, apply_defaults = false) {
-  return get_typed_report(value, coord_message_schema(), apply_defaults)
-}
-
-/**
- * Validate a coordination message and return the typed value, throwing on
- * validation failure.
- *
- * @effects: []
- * @errors: [runtime]
- * @api_stability: experimental
- */
-pub fn coord_message_value(value, apply_defaults = false) {
-  return get_typed_value(value, coord_message_schema(), apply_defaults)
-}
-
-/**
- * Validate a coordination receipt and return a structured schema report.
- *
- * @effects: []
- * @errors: []
- * @api_stability: experimental
- */
-pub fn coord_receipt_report(value, apply_defaults = false) {
-  return get_typed_report(value, coord_receipt_schema(), apply_defaults)
-}
-
-/**
- * Validate a coordination receipt and return the typed value, throwing on
- * validation failure.
- *
- * @effects: []
- * @errors: [runtime]
- * @api_stability: experimental
- */
-pub fn coord_receipt_value(value, apply_defaults = false) {
-  return get_typed_value(value, coord_receipt_schema(), apply_defaults)
-}
-
-/**
- * Validate a coordination inbox result and return a structured schema report.
- *
- * @effects: []
- * @errors: []
- * @api_stability: experimental
- */
-pub fn coord_inbox_report(value, apply_defaults = false) {
-  return get_typed_report(value, coord_inbox_schema(), apply_defaults)
-}
-
-/**
- * Validate a `coord_wait_reply` result and return a structured schema report.
- *
- * @effects: []
- * @errors: []
- * @api_stability: experimental
- */
-pub fn coord_wait_reply_report(value, apply_defaults = false) {
-  return get_typed_report(value, coord_wait_reply_schema(), apply_defaults)
-}
 
 fn __coord_string(value) {
   if value == nil {
@@ -608,14 +357,14 @@ fn __coord_wait_reply_options(runtime: HarnessRuntime, request, options) {
   return filter_nil(
     opts
       + {
-      consumer_id: consumer_id,
-      to: opts?.to ?? opts?.recipient ?? request?.from ?? consumer_id,
-      from: opts?.response_from ?? opts?.reply_from ?? opts?.from,
-      reply_to: request.id,
-      thread_id: opts?.thread_id ?? request?.thread_id ?? request.id,
-      kind: opts?.response_kind ?? opts?.reply_kind ?? opts?.kind,
-      subject: opts?.response_subject ?? opts?.reply_subject ?? opts?.subject,
-    },
+        consumer_id: consumer_id,
+        to: opts?.to ?? opts?.recipient ?? request?.from ?? consumer_id,
+        from: opts?.response_from ?? opts?.reply_from ?? opts?.from,
+        reply_to: request.id,
+        thread_id: opts?.thread_id ?? request?.thread_id ?? request.id,
+        kind: opts?.response_kind ?? opts?.reply_kind ?? opts?.kind,
+        subject: opts?.response_subject ?? opts?.reply_subject ?? opts?.subject,
+      },
   )
 }
 
@@ -640,14 +389,6 @@ fn __coord_message_matches(message, options, default_to) {
     return false
   }
   return true
-}
-
-fn __coord_kind(message, options) {
-  const kind = lowercase(trim(__coord_string(options?.kind ?? message?.kind ?? "status")))
-  if !contains(__COORD_KINDS, kind) {
-    throw "std/coordination: unsupported message kind `" + kind + "`"
-  }
-  return kind
 }
 
 fn __coord_dir_lock_path(resource_path, options) {
@@ -704,12 +445,12 @@ fn __coord_dir_lock_owner(runtime: HarnessRuntime, random: HarnessRandom, owner,
   return filter_nil(
     raw
       + {
-      id: owner_id,
-      agent: raw?.agent ?? opts?.agent ?? ctx?.agent ?? ctx?.persona,
-      session_id: raw?.session_id ?? opts?.session_id ?? ctx?.agent_session_id,
-      worker_id: raw?.worker_id ?? opts?.worker_id ?? ctx?.worker_id,
-      run_id: raw?.run_id ?? opts?.run_id ?? ctx?.run_id,
-    },
+        id: owner_id,
+        agent: raw?.agent ?? opts?.agent ?? ctx?.agent ?? ctx?.persona,
+        session_id: raw?.session_id ?? opts?.session_id ?? ctx?.agent_session_id,
+        worker_id: raw?.worker_id ?? opts?.worker_id ?? ctx?.worker_id,
+        run_id: raw?.run_id ?? opts?.run_id ?? ctx?.run_id,
+      },
   )
 }
 
@@ -836,11 +577,11 @@ fn __coord_dir_lock_reaper_options(random: HarnessRandom, options, lock_path) {
   )
   return opts
     + {
-    lock_path: __coord_dir_lock_reaper_path(lock_path),
-    ttl_ms: ttl_ms,
-    reason: opts?.reaper_reason ?? "coord_dir_lock_stale_cleanup",
-    token: "coord-lock-reaper-token-" + random.uuid_v7(),
-  }
+      lock_path: __coord_dir_lock_reaper_path(lock_path),
+      ttl_ms: ttl_ms,
+      reason: opts?.reaper_reason ?? "coord_dir_lock_stale_cleanup",
+      token: "coord-lock-reaper-token-" + random.uuid_v7(),
+    }
 }
 
 fn __coord_dir_lock_reaper_conflict(
@@ -969,14 +710,14 @@ fn __coord_actor(message, options, ctx) {
   return filter_nil(
     raw
       + {
-      agent: raw?.agent ?? options?.agent ?? ctx?.agent ?? ctx?.persona,
-      session_id: raw?.session_id ?? ctx?.agent_session_id,
-      root_session_id: raw?.root_session_id ?? ctx?.root_agent_session_id,
-      worker_id: raw?.worker_id ?? ctx?.worker_id,
-      run_id: raw?.run_id ?? ctx?.run_id,
-      task_id: raw?.task_id ?? ctx?.task_id,
-      root_task_id: raw?.root_task_id ?? ctx?.root_task_id,
-    },
+        agent: raw?.agent ?? options?.agent ?? ctx?.agent ?? ctx?.persona,
+        session_id: raw?.session_id ?? ctx?.agent_session_id,
+        root_session_id: raw?.root_session_id ?? ctx?.root_agent_session_id,
+        worker_id: raw?.worker_id ?? ctx?.worker_id,
+        run_id: raw?.run_id ?? ctx?.run_id,
+        task_id: raw?.task_id ?? ctx?.task_id,
+        root_task_id: raw?.root_task_id ?? ctx?.root_task_id,
+      },
   )
 }
 
@@ -1013,10 +754,10 @@ fn __coord_envelope(runtime: HarnessRuntime, random: HarnessRandom, scope, room,
   )
   const body = __coord_body(message, opts)
   const subject = __coord_subject(msg, opts, body)
-  const kind = __coord_kind(msg, opts)
+  const kind = coord_kind(opts?.kind ?? msg?.kind ?? "status")
   return filter_nil(
     {
-      schema: __COORD_SCHEMA,
+      schema: COORD_SCHEMA,
       id: id,
       scope: resolution.logical_scope,
       scope_id: resolution.logical_scope_id,
@@ -1075,10 +816,10 @@ pub fn coord_request(
     msg,
     opts
       + {
-      id: request_id,
-      kind: opts?.request_kind ?? "request",
-      thread_id: opts?.thread_id ?? request_id,
-    },
+        id: request_id,
+        kind: opts?.request_kind ?? "request",
+        thread_id: opts?.thread_id ?? request_id,
+      },
   )
 }
 
@@ -1347,11 +1088,11 @@ pub fn coord_reply(
     message,
     opts
       + {
-      to: opts?.to ?? parent?.from,
-      reply_to: parent.id,
-      thread_id: opts?.thread_id ?? parent?.thread_id ?? parent.id,
-      related_ids: related,
-    },
+        to: opts?.to ?? parent?.from,
+        reply_to: parent.id,
+        thread_id: opts?.thread_id ?? parent?.thread_id ?? parent.id,
+        related_ids: related,
+      },
   )
 }
 
@@ -1385,7 +1126,7 @@ pub fn coord_post(
   const envelope = append_metadata.message_from_event(appended)
   const channel = appended + {payload: envelope}
   return {
-    schema: __COORD_RECEIPT_SCHEMA,
+    schema: COORD_RECEIPT_SCHEMA,
     id: envelope.id,
     event_id: channel.event_id,
     duplicate: channel.duplicate,
@@ -1567,14 +1308,7 @@ pub fn coord_inbox(runtime: HarnessRuntime, channels: HarnessChannels, scope, ro
   const opts = __coord_dict(options)
   const consumer_id = __coord_consumer_id(runtime, opts)
   const from_cursor = opts?.from_cursor ?? opts?.cursor
-    ?? coord_cursor(
-    runtime,
-    channels,
-    scope,
-    room,
-    consumer_id,
-    opts,
-  )
+    ?? coord_cursor(runtime, channels, scope, room, consumer_id, opts)
   const scanned = coord_read(
     runtime,
     channels,
@@ -1662,7 +1396,7 @@ pub fn coord_subscribe(
 pub fn coord_remember(memory: HarnessMemory, message_or_receipt, options = nil) {
   const opts = __coord_dict(options)
   const message = message_or_receipt?.message ?? message_or_receipt
-  if type_of(message) != "dict" || message?.schema != __COORD_SCHEMA {
+  if type_of(message) != "dict" || message?.schema != COORD_SCHEMA {
     throw "std/coordination: coord_remember expects a coordination message or receipt"
   }
   const namespace = opts?.namespace ?? ("coordination/" + message.scope + "/" + message.room)

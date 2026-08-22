@@ -1,0 +1,407 @@
+import {
+  ci_cache_policy_errors,
+  ci_cache_policy_parse,
+  macos_shared_cache_errors,
+  setup_harn_cache_action_errors,
+} from "../../check_ci_cache_policy.harn"
+import "./fixtures.harn"
+
+@test
+pub pipeline test_setup_harn_cache_accepts_default_branch_writer_and_ephemeral_restore(
+  harness: Harness,
+  task,
+) {
+  assert_eq(setup_harn_cache_action_errors(setup_harn_action()), [])
+}
+
+@test
+pub pipeline test_setup_harn_cache_rejects_ephemeral_writer_or_incompatible_key(
+  harness: Harness,
+  task,
+) {
+  const invalid = {
+    runs: {
+      steps: [
+        {
+          uses: "actions/cache/restore@exact-pin",
+          if: "github.ref != 'refs/heads/main'",
+          with: {path: "restore", key: "setup-harn-v2-restore"},
+        },
+        {
+          uses: "actions/cache@exact-pin",
+          if: "github.ref != 'refs/heads/main'",
+          with: {path: "writer", key: "setup-harn-v2-writer"},
+        },
+      ],
+    },
+  }
+  const errors = setup_harn_cache_action_errors(invalid)
+  assert(
+    errors.contains(
+      ".github/actions/setup-harn/action.yml must use restore-only caching away from the caller's default branch",
+    ),
+  )
+  assert(
+    errors.contains(
+      ".github/actions/setup-harn/action.yml must save archives only on the caller's default branch",
+    ),
+  )
+  assert(
+    errors.contains(
+      ".github/actions/setup-harn/action.yml restore-only consumers and default-branch writer must share one versioned path and key",
+    ),
+  )
+  assert(
+    errors.contains(
+      ".github/actions/setup-harn/action.yml must keep cache-service failures non-fatal",
+    ),
+  )
+}
+
+pub pipeline test_ci_cache_policy_rejects_missing_broad_rust_cache_fallback(
+  harness: Harness,
+  task,
+) {
+  const invalid_action = {
+    runs: {
+      steps: [
+        {
+          uses: "Swatinem/rust-cache@exact-pin",
+          "continue-on-error": true,
+          with: {
+            "save-if": gha_expression("inputs.save == 'true' && github.ref == 'refs/heads/main'"),
+          },
+        },
+      ],
+    },
+  }
+  assert(
+    ci_cache_policy_errors(policy(), invalid_action, node_action(), workflows()).contains(
+      ".github/actions/rust-cache/action.yml must contain one pinned restore-only broad Rust cache fallback step",
+    ),
+  )
+}
+
+pub pipeline test_ci_cache_policy_rejects_ignored_rust_cache_source_fingerprint(
+  harness: Harness,
+  task,
+) {
+  const valid_action = action()
+  const invalid_action = {
+    ...valid_action,
+    runs: {
+      ...valid_action.runs,
+      steps: [
+        valid_action.runs.steps[0],
+        valid_action.runs.steps[1],
+        {
+          ...valid_action.runs.steps[2],
+          with: {
+            ...valid_action.runs.steps[2]?.with ?? {},
+            "shared-key": gha_expression("inputs.shared-key"),
+            key: gha_expression("inputs.source-key"),
+          },
+        },
+      ],
+    },
+  }
+  assert(
+    ci_cache_policy_errors(policy(), invalid_action, node_action(), workflows()).contains(
+      ".github/actions/rust-cache/action.yml must compose source-key and workspace retention into the effective upstream shared-key",
+    ),
+  )
+}
+
+pub pipeline test_ci_cache_policy_rejects_uncoupled_workspace_retention(harness: Harness, task) {
+  const valid_action = action()
+  const cache = valid_action.runs.steps[2]
+  const invalid_action = {
+    ...valid_action,
+    runs: {
+      ...valid_action.runs,
+      steps: valid_action.runs.steps.slice(0, 2)
+        + [
+          {
+            ...cache,
+            with: {
+              ...cache?.with ?? {},
+              "shared-key": gha_expression(
+                "inputs.source-key != '' && format('{0}-{1}', inputs.shared-key, inputs.source-key) || inputs.shared-key",
+              ),
+              "cache-workspace-crates": nil,
+            },
+          },
+        ],
+    },
+  }
+  const errors = ci_cache_policy_errors(policy(), invalid_action, node_action(), workflows())
+  assert(
+    errors.contains(
+      ".github/actions/rust-cache/action.yml must compose source-key and workspace retention into the effective upstream shared-key",
+    ),
+  )
+  assert(
+    errors.contains(
+      ".github/actions/rust-cache/action.yml must pass an opt-in workspace-crate retention input to Swatinem",
+    ),
+  )
+}
+
+pub pipeline test_ci_cache_policy_rejects_open_or_duplicate_config(harness: Harness, task) {
+  assert_eq(ci_cache_policy_parse({...policy(), unexpected: true}), nil)
+  assert_eq(ci_cache_policy_parse({...policy(), writers: policy().writers + policy().writers}), nil)
+  assert_eq(ci_cache_policy_parse({...policy(), writers: []}), nil)
+}
+
+pub pipeline test_ci_cache_policy_rejects_writer_key_drift(harness: Harness, task) {
+  const invalid = {
+    ...workflows(),
+    "windows-nightly.yml": {
+      jobs: {
+        nextest: {
+          steps: [
+            {
+              uses: "./.github/actions/rust-cache",
+              with: {"shared-key": "workspace-windows-renamed", save: true},
+            },
+          ],
+        },
+      },
+    },
+  }
+  const errors = ci_cache_policy_errors(policy(), action(), node_action(), invalid)
+  assert(
+    errors.contains(
+      "windows-nightly.yml:nextest:workspace-windows-renamed is not an authorized persistent cache writer",
+    ),
+  )
+  assert(
+    errors.contains(
+      "authorized persistent cache writer is not active: windows-nightly.yml:nextest:workspace-windows",
+    ),
+  )
+}
+
+pub pipeline test_ci_cache_policy_rejects_ownerless_or_incompatible_macos_cache(
+  harness: Harness,
+  task,
+) {
+  const invalid = {
+    ...workflows(),
+    "ci.yml": {
+      ...workflows()["ci.yml"],
+      jobs: {
+        ...workflows()["ci.yml"].jobs,
+        macos: {
+          ...workflows()["ci.yml"].jobs.macos,
+          steps: [
+            {uses: "actions/checkout@exact-pin"},
+            {uses: "mozilla-actions/sccache-action@exact-pin"},
+            {uses: "./.github/actions/configure-cargo-sccache"},
+            {uses: "./.github/actions/rust-cache", with: {"shared-key": "workspace-macos"}},
+            {name: "Clippy all targets (deny warnings)", run: "cargo clippy -- -D warnings"},
+          ],
+        },
+      },
+    },
+    "macos-nightly.yml": {
+      ...workflows()["macos-nightly.yml"],
+      jobs: {
+        nextest: {
+          ...workflows()["macos-nightly.yml"].jobs.nextest,
+          steps: [
+            {uses: "actions/checkout@exact-pin"},
+            {uses: "./.github/actions/rust-toolchain"},
+            {uses: "./.github/actions/rust-cache", with: {"shared-key": "workspace-macos"}},
+          ],
+        },
+      },
+    },
+  }
+  const errors = ci_cache_policy_errors(policy(), action(), node_action(), invalid)
+    + macos_shared_cache_errors(invalid["ci.yml"], invalid["macos-nightly.yml"])
+  assert(
+    errors.contains(
+      "authorized persistent cache writer is not active: macos-nightly.yml:nextest:workspace-macos",
+    ),
+  )
+  assert(
+    errors.any(
+      { error -> error.starts_with("workspace-macos producer and consumer must use plain rustc:") },
+    ),
+  )
+  assert(
+    errors.contains(
+      "workspace-macos producer and consumer must use the canonical source fingerprint",
+    ),
+  )
+  assert(errors.any({ error -> error.starts_with("workspace-macos cache-key inputs drift:") }))
+  assert(
+    errors.contains(
+      "ci.yml:macos must route strict Clippy through the cache-safe Rust lint entrypoint",
+    ),
+  )
+}
+
+pub pipeline test_ci_cache_policy_rejects_advisory_budget_reporter(harness: Harness, task) {
+  const invalid = {
+    ...workflows(),
+    "build-release-binaries.yml": {
+      jobs: {
+        build: workflows()["build-release-binaries.yml"].jobs.build,
+        cache_budget: {
+          permissions: {actions: "read", contents: "read"},
+          steps: [{run: "./scripts/report_ci_cache_budget.sh", "continue-on-error": true}],
+        },
+      },
+    },
+  }
+  const errors = ci_cache_policy_errors(policy(), action(), node_action(), invalid)
+  assert(
+    errors.contains("build-release-binaries.yml:cache_budget must fail when cache telemetry fails"),
+  )
+}
+
+pub pipeline test_ci_cache_policy_rejects_unbounded_release_writer(harness: Harness, task) {
+  const bounded = workflows()["build-release-binaries.yml"].jobs.build
+  const release_cache = bounded.steps[0]
+  const invalid = {
+    ...workflows(),
+    "build-release-binaries.yml": {
+      jobs: {
+        build: {
+          ...bounded,
+          permissions: {actions: "read", contents: "write"},
+          steps: [
+            {
+              ...release_cache,
+              with: {...release_cache.with, "prune-superseded-release-generations": false},
+            },
+          ],
+        },
+        cache_budget: workflows()["build-release-binaries.yml"].jobs.cache_budget,
+      },
+    },
+  }
+  const errors = ci_cache_policy_errors(policy(), action(), node_action(), invalid)
+  assert(errors.contains("build-release-binaries.yml:build must grant actions: write"))
+  assert(
+    errors.contains(
+      "build-release-binaries.yml:build must prune superseded release generations before saving",
+    ),
+  )
+}
+
+pub pipeline test_ci_cache_policy_rejects_unpartitioned_release_exact_cache(
+  harness: Harness,
+  task,
+) {
+  const bounded = workflows()["build-release-binaries.yml"].jobs.build
+  const release_cache = bounded.steps[0]
+  const invalid = {
+    ...workflows(),
+    "build-release-binaries.yml": {
+      jobs: {
+        build: {
+          ...bounded,
+          steps: [{...release_cache, with: {...release_cache.with, "source-key": ""}}],
+        },
+        cache_budget: workflows()["build-release-binaries.yml"].jobs.cache_budget,
+      },
+    },
+  }
+  const errors = ci_cache_policy_errors(policy(), action(), node_action(), invalid)
+  assert(
+    errors.contains(
+      "build-release-binaries.yml:build must bind the exact release cache to the runner-compatibility projection",
+    ),
+  )
+}
+
+pub pipeline test_ci_cache_policy_rejects_candidate_cache_starvation(harness: Harness, task) {
+  const bounded = workflows()["build-release-binaries.yml"].jobs.build
+  const release_cache = bounded.steps[0]
+  const invalid = {
+    ...workflows(),
+    "build-release-binaries.yml": {
+      jobs: {
+        build: {
+          ...bounded,
+          env: {
+            HARN_RELEASE_CACHE_SAVE_ENABLED: gha_expression(
+              "github.event_name == 'workflow_dispatch' && inputs.warm_cache_only",
+            ),
+          },
+          steps: [
+            {
+              ...release_cache,
+              with: {...release_cache.with, save: gha_expression("inputs.warm_cache_only")},
+            },
+          ],
+        },
+        cache_budget: workflows()["build-release-binaries.yml"].jobs.cache_budget,
+      },
+    },
+  }
+  const errors = ci_cache_policy_errors(policy(), action(), node_action(), invalid)
+  assert(
+    errors.contains(
+      "build-release-binaries.yml:build must let main warm runs and exact candidate builds refresh the release cache",
+    ),
+  )
+  assert(
+    errors.contains(
+      "build-release-binaries.yml:build must derive the release cache write from HARN_RELEASE_CACHE_SAVE_ENABLED",
+    ),
+  )
+}
+
+pub pipeline test_ci_cache_policy_rejects_cold_start_pr_trigger(harness: Harness, task) {
+  const invalid = {
+    ...workflows(),
+    "cli-cold-start-budget.yml": {
+      on: {
+        pull_request: {
+          paths: [
+            "Cargo.toml",
+            "crates/harn-cli/src/cli/**",
+            "bench/cli/**",
+            "scripts/bench_cli_cold_start.sh",
+            "scripts/bench_cli_cold_start.harn",
+            ".github/workflows/cli-cold-start-budget.yml",
+          ],
+        },
+        workflow_dispatch: {},
+      },
+      jobs: {
+        "cold-start-budget": {
+          if: "github.event_name != 'pull_request' || !startsWith(github.head_ref, 'release/v')",
+          "timeout-minutes": 45,
+          steps: [{name: "Build release harn", "timeout-minutes": 40}],
+        },
+      },
+    },
+  }
+  const errors = ci_cache_policy_errors(policy(), action(), node_action(), invalid)
+  assert(
+    errors.contains(
+      "cli-cold-start-budget.yml must not run release-build cold-start benchmarks on pull_request",
+    ),
+  )
+  assert(
+    errors.contains("cli-cold-start-budget.yml must keep a scheduled main-branch advisory run"),
+  )
+  assert(
+    errors.contains("cli-cold-start-budget.yml:cold-start-budget must skip release manual refs"),
+  )
+  assert(
+    errors.contains(
+      "cli-cold-start-budget.yml:cold-start-budget must cap total runtime at 30 minutes",
+    ),
+  )
+  assert(
+    errors.contains(
+      "cli-cold-start-budget.yml:cold-start-budget release build step must cap runtime at 25 minutes",
+    ),
+  )
+}

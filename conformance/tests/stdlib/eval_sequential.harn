@@ -70,9 +70,7 @@ fn run_corrected_null(seed: int, delta: float) -> string {
         let trial_index = previous_n
         while trial_index < current_n {
           values = values
-            + [
-            paired_null_delta(seed_mix(seed, arm_channel, 97, 13), case_index, trial_index),
-          ]
+            + [paired_null_delta(seed_mix(seed, arm_channel, 97, 13), case_index, trial_index)]
           trial_index = trial_index + 1
         }
         case_index = case_index + 1
@@ -313,9 +311,7 @@ fn test_anytime_valid_null_and_broken_control(stdio: HarnessStdio) {
   const broken_rate = to_float(broken_winners) / to_float(simulations)
   stdio.eprintln(
     "sequential null control: corrected=" + to_string(corrected_rate) + " broken="
-      + to_string(
-      broken_rate,
-    ),
+      + to_string(broken_rate),
   )
   require corrected_rate <= delta, "anytime-valid racer must control null false winners"
   require broken_rate > delta, "known-broken repeated-look racer must visibly inflate false winners"

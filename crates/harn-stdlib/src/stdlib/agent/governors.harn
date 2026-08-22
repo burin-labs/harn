@@ -349,17 +349,17 @@ pub fn convergence_guard_decision(
 pub fn convergence_guard_receipt(decision: dict, payload: dict = {}) -> dict {
   const receipt = decision?.receipt
     ?? __convergence_guard_receipt(
-    to_string(decision?.shape ?? "none"),
-    to_float(decision?.confidence ?? 0.0),
-    to_string(decision?.reason ?? "external_verdict"),
-    decision?.evidence ?? {},
-    decision?.recovery,
-  )
+      to_string(decision?.shape ?? "none"),
+      to_float(decision?.confidence ?? 0.0),
+      to_string(decision?.reason ?? "external_verdict"),
+      decision?.evidence ?? {},
+      decision?.recovery,
+    )
   return receipt
     + {
-    iteration: to_int(payload?.iteration ?? 0) ?? 0,
-    session_id: to_string(payload?.session_id ?? payload?.session?.id ?? ""),
-  }
+      iteration: to_int(payload?.iteration ?? 0) ?? 0,
+      session_id: to_string(payload?.session_id ?? payload?.session?.id ?? ""),
+    }
 }
 
 fn __governor_abort(reason: string, signal: string, fraction: float) -> dict {
@@ -611,10 +611,7 @@ fn __governor_observe(agent: HarnessAgent, policy: GovernorPolicy, payload: dict
   const signal = to_string(policy.signal ?? "iterations")
   if !contains(GOVERNOR_RECOGNIZED_SIGNALS, signal) {
     throw "agent_loop: governor `policy.signal` must be one of "
-      + join(
-      GOVERNOR_RECOGNIZED_SIGNALS,
-      ", ",
-    )
+      + join(GOVERNOR_RECOGNIZED_SIGNALS, ", ")
       + "; got "
       + json_stringify(signal)
   }
@@ -711,10 +708,7 @@ pub fn governor_post_turn(agent: HarnessAgent, policy: GovernorPolicy) {
     if !__governor_shape_ok(payload) {
       {
         message: "Budget governor: DISABLED — the live post-turn payload is missing one of "
-          + join(
-          GOVERNOR_REQUIRED_PAYLOAD_KEYS,
-          ", ",
-        )
+          + join(GOVERNOR_REQUIRED_PAYLOAD_KEYS, ", ")
           + ". Stopping rather than running an unmetered budget.",
         stop: true,
         stop_reason: "budget_governor:payload_shape_drift",

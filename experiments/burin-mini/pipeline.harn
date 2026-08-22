@@ -102,13 +102,13 @@ fn planner_prompt(task, workspace_root, profile, facts, round_no, force_ready) {
     + "Research tool names may only be: read, search.\n"
     + "Action tool names may only be: read, search, write, run.\n"
     + if force_ready {
-    "Research budget is exhausted for this task.\n"
-      + "Do not ask more research questions.\n"
-      + "Return the best concrete action list you can support from the current facts, target paths, verifier contract, and completion bar.\n"
-      + "If a write batch may need one supporting read later, encode that in the action via allowed_tools instead of requesting another planner research round.\n"
-  } else {
-    ""
-  }
+      "Research budget is exhausted for this task.\n"
+        + "Do not ask more research questions.\n"
+        + "Return the best concrete action list you can support from the current facts, target paths, verifier contract, and completion bar.\n"
+        + "If a write batch may need one supporting read later, encode that in the action via allowed_tools instead of requesting another planner research round.\n"
+    } else {
+      ""
+    }
     + "Return strict JSON only with exactly these keys:\n"
     + "- ready: bool\n"
     + "- plan_summary: string\n"
@@ -143,11 +143,11 @@ fn planner_system(force_ready) {
     + "- Do not treat a currently single-argument helper as a planning blocker when the requested change can be expressed by nesting or locally composing the existing helper in the target file.\n"
     + "- For read-only tasks, leave actions empty and put the user-facing answer in final_response.\n"
     + if force_ready {
-    "- Research budget is exhausted. Return `ready: true` with the best concrete action graph you can justify from the existing facts.\n"
-      + "- Do not emit more research questions in this final planning pass.\n"
-  } else {
-    ""
-  }
+      "- Research budget is exhausted. Return `ready: true` with the best concrete action graph you can justify from the existing facts.\n"
+        + "- Do not emit more research questions in this final planning pass.\n"
+    } else {
+      ""
+    }
     + "- Return strict JSON only."
 }
 
@@ -204,10 +204,7 @@ fn run_planner(harness: Harness, task, workspace_root, profile, facts, round_no,
     harness,
     planner_prompt(task, workspace_root, profile, facts, round_no, force_ready),
     generator_options(harness.env, planner_system(force_ready), tool_registry(), [])
-      + {
-      output: "json",
-      returns: {schema: planner_schema()},
-    },
+      + {output: "json", returns: {schema: planner_schema()}},
   )
   if result?.ok {
     const parsed = result?.data ?? parse_json_object(result?.summary ?? "")
@@ -215,10 +212,8 @@ fn run_planner(harness: Harness, task, workspace_root, profile, facts, round_no,
   }
   const recovered = normalize_plan(profile, parse_json_object(result?.summary ?? ""))
   if type_of(recovered?.ready) == "bool" || len(recovered?.questions ?? []) > 0
-    || len(
-    recovered?.actions ?? [],
-  )
-    > 0
+    || len(recovered?.actions ?? [])
+      > 0
     || trim(recovered?.plan_summary ?? "") != "" {
     return {ok: true, error: nil, data: recovered}
   }
@@ -240,10 +235,10 @@ fn run_research(harness: Harness, workspace_root, profile, question) {
       question?.tools ?? [],
     )
       + {
-      output: "json",
-      returns: {schema: research_schema()},
-      turn_policy: {require_action_or_yield: true, allow_done_sentinel: true},
-    },
+        output: "json",
+        returns: {schema: research_schema()},
+        turn_policy: {require_action_or_yield: true, allow_done_sentinel: true},
+      },
   )
   if result?.ok {
     return {ok: true, error: nil, data: normalize_research_fact(question, result?.data ?? {})}
@@ -286,17 +281,17 @@ fn research_artifacts(facts, profile) {
   for fact in facts {
     artifacts = artifacts
       + [
-      artifact(
-        {
-          kind: "summary",
-          title: "Grounded research fact",
-          text: render_facts([fact]),
-          data: {fact: fact},
-          relevance: 1.0,
-          metadata: {evidence_paths: fact?.evidence_paths ?? []},
-        },
-      ),
-    ]
+        artifact(
+          {
+            kind: "summary",
+            title: "Grounded research fact",
+            text: render_facts([fact]),
+            data: {fact: fact},
+            relevance: 1.0,
+            metadata: {evidence_paths: fact?.evidence_paths ?? []},
+          },
+        ),
+      ]
   }
   return artifacts
 }
@@ -470,9 +465,7 @@ fn stage_visible_outputs(execution) {
       continue
     }
     outputs = outputs
-      + [
-      {node_id: stage?.node_id ?? stage?.kind ?? "", text: cleaned, status: stage?.status ?? ""},
-    ]
+      + [{node_id: stage?.node_id ?? stage?.kind ?? "", text: cleaned, status: stage?.status ?? ""}]
   }
   return outputs
 }

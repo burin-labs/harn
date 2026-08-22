@@ -86,7 +86,7 @@ pub fn provider_tool_probe_campaign_catalog_snapshot(
   }
   if type_of(parsed) != "dict" || type_of(parsed?.providers) != "list"
     || type_of(parsed?.models)
-    != "list"
+      != "list"
     || type_of(parsed?.routing_routes) != "list" {
     return {
       receipt: __catalog_receipt(
@@ -170,8 +170,8 @@ pub fn provider_tool_probe_campaign_runtime_receipt(
   const raw_revision = parsed?.data?.source_revision
   const revision_valid = raw_revision == nil
     || (type_of(raw_revision) == "string"
-    && trim(raw_revision)
-    != "")
+      && trim(raw_revision)
+        != "")
   if parsed?.schemaVersion != 1 || parsed?.ok != true || name != "harn-cli" || version == ""
     || !revision_valid {
     return {
@@ -571,20 +571,20 @@ pub fn __catalog_routes_from_models(
     }
     routes = routes
       + [
-      {
-        id: __slug(provider + "-" + model_id),
-        provider: provider,
-        model: model_id,
-        env_keys: __as_string_list(meta.auth?.env ?? meta.auth_envs),
-        local: local,
-        cheap: cheap,
-        metadata: {
-          source: "catalog_model",
-          catalog_model_id: model_id,
-          catalog_wire_model: model.wire_model,
+        {
+          id: __slug(provider + "-" + model_id),
+          provider: provider,
+          model: model_id,
+          env_keys: __as_string_list(meta.auth?.env ?? meta.auth_envs),
+          local: local,
+          cheap: cheap,
+          metadata: {
+            source: "catalog_model",
+            catalog_model_id: model_id,
+            catalog_wire_model: model.wire_model,
+          },
         },
-      },
-    ]
+      ]
   }
   return routes
 }

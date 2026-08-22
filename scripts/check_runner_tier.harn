@@ -135,10 +135,10 @@ fn runner_environment_errors(job_name: string, job) -> list<string> {
     if contains(entry, "runner.environment") {
       errors = errors
         + [
-        "ci.yml:${job_name} uses runner.environment on a Blacksmith-capable "
-          + "job, which cannot tell vendor capacity from our own boxes — "
-          + "branch on env.${TIER_ENV} instead\n      at ${entry}",
-      ]
+          "ci.yml:${job_name} uses runner.environment on a Blacksmith-capable "
+            + "job, which cannot tell vendor capacity from our own boxes — "
+            + "branch on env.${TIER_ENV} instead\n      at ${entry}",
+        ]
     }
   }
   return errors

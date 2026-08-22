@@ -67,9 +67,9 @@ pipeline default(harness: Harness) {
       "/.harn/session-store/" + sid + ".jsonl",
     )
       && ends_with(
-      session_store_database_path(harness.agent, {root: root}),
-      "/.harn/session-store.sqlite",
-    ),
+        session_store_database_path(harness.agent, {root: root}),
+        "/.harn/session-store.sqlite",
+      ),
   )
   harness.fs.delete(root)
 }

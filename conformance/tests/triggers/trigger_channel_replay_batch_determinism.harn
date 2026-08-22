@@ -26,9 +26,7 @@ pipeline default(harness: Harness) {
     {topic: "lifecycle.channel.audit", kind_prefix: "channel_emit_receipt"},
   )
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
-    + to_string(
-    harness.random.range(100000, 999999),
-  )
+    + to_string(harness.random.range(100000, 999999))
   const _ = harness.runtime.trigger_register(
     {
       id: "channel-replay-batch-" + unique,

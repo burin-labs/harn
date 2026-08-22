@@ -62,17 +62,17 @@ pipeline default(harness: Harness) {
             session_id: session,
           }
             + agent_completion_gate(
-            harness.runtime,
-            {
-              facts: fn(ctx) {
-                harness.runtime.store_set(
-                  calls_key,
-                  (harness.runtime.store_get(calls_key) ?? 0) + 1,
-                )
-                return {source_write_count: 0, cosmetic_write_count: 1, requires_write: true}
+              harness.runtime,
+              {
+                facts: fn(ctx) {
+                  harness.runtime.store_set(
+                    calls_key,
+                    (harness.runtime.store_get(calls_key) ?? 0) + 1,
+                  )
+                  return {source_write_count: 0, cosmetic_write_count: 1, requires_write: true}
+                },
               },
-            },
-          ),
+            ),
         ) },
       )
       const decisions = events_of(captured.events, "judge_decision")
@@ -105,19 +105,19 @@ pipeline default(harness: Harness) {
             session_id: session,
           }
             + agent_completion_gate(
-            harness.runtime,
-            {
-              facts: fn(ctx) {
-                harness.runtime.store_set(probe + ".session_matches", ctx.session_id == session)
-                harness.runtime.store_set(probe + ".has_task", ctx.task != "")
-                harness.runtime.store_set(
-                  probe + ".messages_is_list",
-                  type_of(ctx.messages) == "list",
-                )
-                return {source_write_count: 1, verify: {ok: true}}
+              harness.runtime,
+              {
+                facts: fn(ctx) {
+                  harness.runtime.store_set(probe + ".session_matches", ctx.session_id == session)
+                  harness.runtime.store_set(probe + ".has_task", ctx.task != "")
+                  harness.runtime.store_set(
+                    probe + ".messages_is_list",
+                    type_of(ctx.messages) == "list",
+                  )
+                  return {source_write_count: 1, verify: {ok: true}}
+                },
               },
-            },
-          ),
+            ),
         ) },
       )
       const decisions = events_of(captured.events, "judge_decision")
@@ -157,13 +157,13 @@ pipeline default(harness: Harness) {
             session_id: session,
           }
             + agent_completion_gate(
-            harness.runtime,
-            {
-              max_vetoes: 1,
-              facts:
-                fn(ctx) { return {source_write_count: 1, verify: {ok: false, findings: "boom"}} },
-            },
-          ),
+              harness.runtime,
+              {
+                max_vetoes: 1,
+                facts:
+                  fn(ctx) { return {source_write_count: 1, verify: {ok: false, findings: "boom"}} },
+              },
+            ),
         ) },
       )
       harness.stdio.println("C.status=" + captured.result.status)
@@ -235,24 +235,24 @@ pipeline default(harness: Harness) {
             session_id: session,
           }
             + agent_completion_gate(
-            harness.runtime,
-            {
-              escalation_target: "frontier",
-              facts: fn(_ctx) { return {
-                consecutive_failed_after_write: 3,
-                source_write_count: 1,
-                verification_failures_converging: false,
-                verify: {findings: "boom", ok: false},
-              } },
-              feedback_decorator: fn(reason, feedback, verdict) {
-                harness.runtime.store_set(
-                  decorated_key,
-                  reason + ":" + to_string(verdict?.escalation_target ?? ""),
-                )
-                return feedback + " Use language-specific repair guidance."
+              harness.runtime,
+              {
+                escalation_target: "frontier",
+                facts: fn(_ctx) { return {
+                  consecutive_failed_after_write: 3,
+                  source_write_count: 1,
+                  verification_failures_converging: false,
+                  verify: {findings: "boom", ok: false},
+                } },
+                feedback_decorator: fn(reason, feedback, verdict) {
+                  harness.runtime.store_set(
+                    decorated_key,
+                    reason + ":" + to_string(verdict?.escalation_target ?? ""),
+                  )
+                  return feedback + " Use language-specific repair guidance."
+                },
               },
-            },
-          ),
+            ),
         ) },
       )
       const decisions = events_of(captured.events, "judge_decision")

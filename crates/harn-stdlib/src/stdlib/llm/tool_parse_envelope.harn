@@ -18,16 +18,16 @@ fn __tool_parse_envelope_error(kind: string, detail: string, prose: string) -> d
     matched: true,
     result: empty_parse()
       + {
-      tool_parse_errors: [
-        "The `<"
-          + kind
-          + ">` chat-template envelope is malformed: "
-          + detail
-          + ". Re-emit complete calls as canonical ```tool JSON blocks; "
-          + "incomplete entries were not executed.",
-      ],
-      prose: trim(prose),
-    },
+        tool_parse_errors: [
+          "The `<"
+            + kind
+            + ">` chat-template envelope is malformed: "
+            + detail
+            + ". Re-emit complete calls as canonical ```tool JSON blocks; "
+            + "incomplete entries were not executed.",
+        ],
+        prose: trim(prose),
+      },
   }
 }
 
@@ -102,10 +102,7 @@ fn __tool_parse_envelope_json_list(
   if len(stream?.values ?? []) == 0 {
     const detail =
       stream?.eof ?? false ? "a JSON tool object ended before its closing `}`" : "expected a JSON tool object, found `"
-      + trim(
-      body,
-    )
-      .slice(0, 80)
+      + trim(body).slice(0, 80)
       + "`"
     return __tool_parse_envelope_error("tool_calls", detail, prose)
   }

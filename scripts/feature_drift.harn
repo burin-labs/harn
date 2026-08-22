@@ -83,11 +83,11 @@ pub fn render_feature_drift(drift: list<FeatureDrift>, baseline_ref: string) -> 
   }
   return (lines
     + [
-    "",
-    to_string(drift.count) + " package(s) drifted. This is advisory, not a failure:",
-    "feature drift is often intended. Confirm each one is understood, and",
-    "that none of them changes behavior the test suite does not cover.",
-  ])
+      "",
+      to_string(drift.count) + " package(s) drifted. This is advisory, not a failure:",
+      "feature drift is often intended. Confirm each one is understood, and",
+      "that none of them changes behavior the test suite does not cover.",
+    ])
     .join("\n")
 }
 

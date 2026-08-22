@@ -39,30 +39,30 @@ fn trial_rows(
       const pass = trial < passes
       rows = rows
         + [
-        {
-          case_name: case_name,
-          trial: trial + 1,
-          verification: if pass {
-            "PASS"
-          } else if trial >= trials - skips {
-            "SKIP"
-          } else {
-            "FAIL"
-          },
-          wall_time_seconds: 1.0,
-          cost_usd: 0.01,
-          case_fingerprint: "case-" + case_name,
-          harness_config_fingerprint: harness_fingerprint,
-          metadata: {
-            group: if case_name == "cron-case" {
-              "cron"
+          {
+            case_name: case_name,
+            trial: trial + 1,
+            verification: if pass {
+              "PASS"
+            } else if trial >= trials - skips {
+              "SKIP"
             } else {
-              "external"
+              "FAIL"
             },
+            wall_time_seconds: 1.0,
+            cost_usd: 0.01,
+            case_fingerprint: "case-" + case_name,
+            harness_config_fingerprint: harness_fingerprint,
+            metadata: {
+              group: if case_name == "cron-case" {
+                "cron"
+              } else {
+                "external"
+              },
+            },
+            commit: commit,
           },
-          commit: commit,
-        },
-      ]
+        ]
     }
   }
   return rows

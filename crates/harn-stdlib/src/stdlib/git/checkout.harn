@@ -157,12 +157,12 @@ fn __checkout_find(plan, kind) {
 fn __checkout_record(step, result) -> GitCheckoutStepReceipt {
   return step
     + {
-    success: result?.success ?? result?.ok ?? false,
-    status: result?.status ?? "failed",
-    exit_code: result?.exit_code,
-    stdout: result?.stdout ?? "",
-    stderr: result?.stderr ?? "",
-  }
+      success: result?.success ?? result?.ok ?? false,
+      status: result?.status ?? "failed",
+      exit_code: result?.exit_code,
+      stdout: result?.stdout ?? "",
+      stderr: result?.stderr ?? "",
+    }
 }
 
 fn __checkout_recovery(cfg, stashed, failure_kind) -> string {
@@ -275,10 +275,10 @@ pub fn git_checkout_run(options: GitCheckoutOptions) -> GitCheckoutReceipt {
     state = state + {steps: ran.steps}
     const local_status = ran.result.exit_code
       ?? if ran.result.success {
-      0
-    } else {
-      2
-    }
+        0
+      } else {
+        2
+      }
     if !ran.result.success && local_status != 1 {
       return __checkout_fail(cfg, state, "local_base_failed")
     }

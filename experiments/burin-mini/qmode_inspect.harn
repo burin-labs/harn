@@ -449,10 +449,7 @@ fn inspect_llm_mock(
         findings,
         "FAIL",
         "llm-mock call " + to_string(index) + " has multiple terminal tools: "
-          + join(
-          terminal_names,
-          ", ",
-        ),
+          + join(terminal_names, ", "),
         print_lines,
       )
     }

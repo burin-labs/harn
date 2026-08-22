@@ -29,9 +29,7 @@ pipeline default(harness: Harness) {
   for attempt in attempts {
     harness.stdio.println(
       to_string(attempt.attempt) + "|" + attempt.status + "|" + attempt.outcome + "|"
-        + to_string(
-        attempt.branch,
-      ),
+        + to_string(attempt.branch),
     )
     harness.stdio.println(attempt.error == nil)
     harness.stdio.println(attempt.verification.ok)

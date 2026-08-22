@@ -310,11 +310,7 @@ fn __model_job_finish(
 ) -> Result<ModelJobReceipt, ModelJobError> {
   if job.state == "failed" {
     const error = job.error
-      ?? model_job_error(
-      "backend",
-      "model job failed",
-      {backend: job.backend, job_id: job.id},
-    )
+      ?? model_job_error("backend", "model job failed", {backend: job.backend, job_id: job.id})
     if len(events) == 0 || events[len(events) - 1]?.kind != "failed" {
       __model_job_emit_failure({agent: harness.agent, clock: harness.clock}, job, error, options)
     }

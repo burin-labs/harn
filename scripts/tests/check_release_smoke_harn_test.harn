@@ -41,10 +41,10 @@ pipeline test_release_smoke_direct_and_release_branch_coverage(harness: Harness,
     release_smoke_run_covers(
       (RUNS[1] ?? {})
         + {
-        displayTitle: "Release smoke",
-        headBranch: "release-attempt/v0.10.23/retry",
-        event: "workflow_dispatch",
-      },
+          displayTitle: "Release smoke",
+          headBranch: "release-attempt/v0.10.23/retry",
+          event: "workflow_dispatch",
+        },
       "v0.10.23",
     ),
     true,

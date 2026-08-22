@@ -159,13 +159,13 @@ pipeline test_timeout_is_preserved_without_wall_clock_waiting(harness: Harness, 
 pipeline test_watch_deadline_without_readiness_fails_after_cancellation(harness: Harness, task) {
   const adapters = ready_adapters()
     + {
-    wait: { _started, _options ->
-      {success: false, status: "running", stdout: "", stderr: "", exit_code: nil}
-    },
-    cancel: { _started, _options ->
-      {cancelled: true, result: command_result_fail(1, "stopped", {status: "cancelled"})}
-    },
-  }
+      wait: { _started, _options ->
+        {success: false, status: "running", stdout: "", stderr: "", exit_code: nil}
+      },
+      cancel: { _started, _options ->
+        {cancelled: true, result: command_result_fail(1, "stopped", {status: "cancelled"})}
+      },
+    }
   const report = run_release_smoke(harness.tools, harness.clock, config(), adapters)
   assert_eq(report.failed.count, 1)
   assert_eq(report.failed[0].name, "harn watch boot")
@@ -176,9 +176,9 @@ pipeline test_watch_deadline_without_readiness_fails_after_cancellation(harness:
 pipeline test_watch_early_exit_and_cleanup_failure_are_distinct_failures(harness: Harness, task) {
   const early_exit = ready_adapters()
     + {
-    wait: { _started, _options -> command_result_fail(9, "watch crashed") },
-    cancel: { _started, _options -> {cancelled: false} },
-  }
+      wait: { _started, _options -> command_result_fail(9, "watch crashed") },
+      cancel: { _started, _options -> {cancelled: false} },
+    }
   const early_report = run_release_smoke(harness.tools, harness.clock, config(), early_exit)
   assert_eq(early_report.failed[0].timed_out, false)
   assert_eq(contains(early_report.failed[0].stderr, "before reporting readiness"), true)

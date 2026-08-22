@@ -158,6 +158,19 @@ fn test_multiline_binary_operand_comments_preserved() {
 }
 
 #[test]
+fn reflowed_nested_binary_operand_claims_its_comment_once() {
+    let source = "fn validate() {\n  const applies = config != nil && (reason == \"sentinel\" // keep nested\n    || reason == \"natural\" || reason == \"stalled\") && due\n}\n";
+    let result = format_source(source).unwrap();
+
+    assert_eq!(
+        result.matches("// keep nested").count(),
+        1,
+        "speculative and final operand layouts must share one comment claim:\n{result}"
+    );
+    assert_roundtrip(source);
+}
+
+#[test]
 fn test_plain_double_slash_comment_preserved_verbatim() {
     let source = "// plain comment\npub fn exposed() -> string {\n  return \"x\"\n}\n";
     let result = format_source(source).unwrap();

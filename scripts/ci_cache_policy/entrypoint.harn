@@ -1,0 +1,108 @@
+import { read_json_result, read_yaml } from "std/fs"
+import { empty_scope_failure } from "../guard_scope.harn"
+import "./linux_checks.harn"
+import "./native_checks.harn"
+import "./policy_core.harn"
+
+/**
+ * The pin is load-bearing, not hygiene. sccache allows one server per user and
+ * a client whose version differs from the running server shuts it down, so an
+ * unpinned install on a many-worker self-hosted host kills the shared server
+ * under whatever unrelated job is mid-compile. The upstream action installs the
+ * LATEST sccache when no version is given, so an absent `version` is a delayed
+ * outage, not a style nit. Keep this in step with ~/.local/bin/sccache and the
+ * `sccache-server` systemd unit on the self-hosted Linux runners.
+ */
+fn sccache_install_action_errors(install_action) -> list<string> {
+  guard install_action != nil else {
+    return ["${SCCACHE_INSTALL_ACTION_PATH} must exist as the sole sccache install point"]
+  }
+  // `matching_steps` compares `uses` exactly; the upstream reference carries a
+  // `@<sha>` suffix, so match on the prefix here instead.
+  const upstream = (install_action?.runs?.steps ?? []).filter(
+    { step -> step_uses(step).starts_with(UPSTREAM_SCCACHE_PREFIX) },
+  )
+    .to_list()
+  if len(upstream) != 1 {
+    return [
+      "${SCCACHE_INSTALL_ACTION_PATH} must contain exactly one ${UPSTREAM_SCCACHE_PREFIX} step",
+    ]
+  }
+  const version = trim(to_string(upstream[0]?.with?.version ?? ""))
+  if version == "" {
+    return [
+      "${SCCACHE_INSTALL_ACTION_PATH} must pin an explicit sccache `version`; unpinned installs track LATEST and version-kill the shared self-hosted server",
+    ]
+  }
+  return []
+}
+
+pub fn run_ci_cache_policy(harness: Harness) {
+  const loaded = read_json_result(harness.fs, POLICY_PATH)
+  guard is_ok(loaded) else {
+    harness.stdio.eprintln(json_stringify(unwrap_err(loaded)))
+    harness.runtime.exit(1)
+  }
+  const policy = ci_cache_policy_parse(unwrap(loaded))
+  guard policy != nil else {
+    harness.stdio.eprintln("invalid CI cache policy: " + POLICY_PATH)
+    harness.runtime.exit(1)
+  }
+  const release_warm_cache_path_policy = release_warm_cache_path_policy_parse(
+    read_yaml(harness.fs, RELEASE_WARM_CACHE_PATH_POLICY, nil),
+  )
+  guard release_warm_cache_path_policy != nil else {
+    harness.stdio.eprintln(
+      "invalid release warm-cache path policy: " + RELEASE_WARM_CACHE_PATH_POLICY,
+    )
+    harness.runtime.exit(1)
+  }
+  const action = read_yaml(harness.fs, ACTION_PATH, nil)
+  const node_action = read_yaml(harness.fs, NODE_ACTION_PATH, nil)
+  const setup_harn_action = read_yaml(harness.fs, SETUP_HARN_ACTION_PATH, nil)
+  const sccache_install_action = read_yaml(harness.fs, SCCACHE_INSTALL_ACTION_PATH, nil)
+  let workflows = {}
+  for path in harness.fs.glob(WORKFLOW_GLOB).sorted() {
+    workflows[workflow_name(path)] = read_yaml(harness.fs, path, nil)
+  }
+  const empty = empty_scope_failure("CI cache policy", len(workflows.keys()), WORKFLOW_GLOB)
+  if empty != "" {
+    harness.stdio.eprintln(empty)
+    harness.runtime.exit(1)
+  }
+  const error_groups: list<list<string>> = [
+    ci_cache_policy_errors(policy, action, node_action, workflows),
+    release_warm_cache_path_policy_errors(
+      release_warm_cache_path_policy,
+      workflows[RELEASE_BINARY_WORKFLOW],
+    ),
+    release_warm_cache_concurrency_errors(workflows[RELEASE_BINARY_WORKFLOW]),
+    release_aot_runner_errors(workflows[RELEASE_BINARY_WORKFLOW]),
+    release_warm_cache_prune_errors(workflows[RELEASE_BINARY_WORKFLOW]),
+    setup_harn_cache_action_errors(setup_harn_action),
+    sccache_install_action_errors(sccache_install_action),
+    ci_workflow_concurrency_errors(workflows["ci.yml"]),
+    ci_linux_lane_policy_errors(workflows["ci.yml"]),
+    windows_shared_cache_errors(workflows["ci.yml"], workflows["windows-nightly.yml"]),
+    windows_pr_native_feedback_errors(
+      policy,
+      workflows["ci.yml"],
+      workflows["windows-nightly.yml"],
+    ),
+    windows_release_certify_warm_errors(policy, workflows["windows-nightly.yml"]),
+    nextest_version_errors(policy, workflows),
+    actions_cache_capacity_errors(policy),
+    macos_shared_cache_errors(workflows["ci.yml"], workflows["macos-nightly.yml"]),
+  ]
+  const errors = error_groups.flat_map({ group -> group }).to_list()
+  if len(errors) > 0 {
+    harness.stdio.eprintln("CI cache policy violations:")
+    for error in errors {
+      harness.stdio.eprintln("  - " + error)
+    }
+    harness.runtime.exit(1)
+  }
+  harness.stdio.println(
+    "CI cache policy: OK (${len(workflows.keys())} workflows, ${len(policy.writers)} Rust writer)",
+  )
+}

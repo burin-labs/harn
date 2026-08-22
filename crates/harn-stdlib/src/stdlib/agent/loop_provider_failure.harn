@@ -1,0 +1,233 @@
+import { __agent_loop_clock_sleep_ms } from "std/agent/loop_foundation"
+import { __agent_loop_route_options } from "std/agent/loop_support"
+import {
+  __agent_loop_budget_aggregates,
+  __agent_loop_consecutive_failure_config,
+  __agent_loop_emit_budget_exhausted,
+  __agent_loop_emit_provider_error,
+  __agent_loop_is_escalation_transport_failure,
+  __agent_loop_record_budget_stop,
+  __agent_loop_tracks_failure,
+  __agent_loop_transport_abort_error,
+} from "std/agent/loop_turn_options"
+import { agent_emit_event } from "std/agent/state"
+
+pub type AgentLoopProviderFailureState = {
+  primary_provider: string,
+  primary_model: string,
+  primary_tool_format: string,
+  opts: dict,
+  budget: dict,
+  iteration: int,
+  iteration_index: int,
+  consecutive_failure_count: int,
+  loop_start_ms: int,
+  current_max: int,
+  escalation_retry_pending: bool,
+  budget_exhausted_emitted: bool,
+  budget_decisions: list,
+}
+
+pub type AgentLoopProviderFailureOutcome = {
+  action: "continue" | "break",
+  opts: dict,
+  iteration: int,
+  consecutive_failure_count: int,
+  escalation_retry_pending: bool,
+  budget_exhausted_emitted: bool,
+  budget_decisions: list,
+  final_status: string,
+  stop_reason: string,
+  terminal_error: any,
+}
+
+fn __provider_failure_outcome(
+  state: AgentLoopProviderFailureState,
+  updates: dict,
+) -> AgentLoopProviderFailureOutcome {
+  return {
+    action: updates.action,
+    opts: updates?.opts ?? state.opts,
+    iteration: updates?.iteration ?? state.iteration,
+    consecutive_failure_count: updates?.consecutive_failure_count
+      ?? state.consecutive_failure_count,
+    escalation_retry_pending: updates?.escalation_retry_pending
+      ?? state.escalation_retry_pending,
+    budget_exhausted_emitted: updates?.budget_exhausted_emitted
+      ?? state.budget_exhausted_emitted,
+    budget_decisions: updates?.budget_decisions ?? state.budget_decisions,
+    final_status: updates?.final_status ?? "",
+    stop_reason: updates?.stop_reason ?? "",
+    terminal_error: updates?.terminal_error,
+  }
+}
+
+/**
+ * Resolve one failed provider call into the loop's next control action.
+ *
+ * @effects: [agent, clock]
+ * @errors: [runtime]
+ */
+pub fn agent_loop_provider_failure(
+  agent: HarnessAgent,
+  clock: HarnessClock,
+  session_id: string,
+  call: dict,
+  turn_llm_opts: dict,
+  state: AgentLoopProviderFailureState,
+) -> AgentLoopProviderFailureOutcome {
+  const failed_provider = to_string(turn_llm_opts?.provider ?? "")
+  const failed_model = to_string(turn_llm_opts?.model ?? "")
+  const was_escalated = (state.primary_provider != "" || state.primary_model != "")
+    && (failed_provider
+      != state.primary_provider
+      || failed_model != state.primary_model)
+  const failure_config = __agent_loop_consecutive_failure_config(state.budget)
+  if was_escalated
+    && __agent_loop_tracks_failure(call?.error, failure_config)
+    && __agent_loop_is_escalation_transport_failure(call?.error) {
+    const iteration = state.iteration + 1
+    __agent_loop_emit_provider_error(
+      agent,
+      clock,
+      session_id,
+      state.iteration_index,
+      call,
+      turn_llm_opts,
+      state.loop_start_ms,
+      false,
+      "escalation_aborted_provider_transport",
+    )
+    return __provider_failure_outcome(
+      state,
+      {
+        action: "break",
+        iteration: iteration,
+        final_status: "provider_error",
+        stop_reason: "escalation_aborted_provider_transport",
+        terminal_error: __agent_loop_transport_abort_error(call?.error),
+      },
+    )
+  }
+  if __agent_loop_tracks_failure(call?.error, failure_config) {
+    const iteration = state.iteration + 1
+    const consecutive_failure_count = state.consecutive_failure_count + 1
+    const failure_aggregates = __agent_loop_budget_aggregates(
+      agent,
+      clock,
+      session_id,
+      nil,
+      state.loop_start_ms,
+    )
+    agent_emit_event(
+      agent,
+      session_id,
+      "iteration_end",
+      {
+        iteration: state.iteration_index + 1,
+        iteration_info: failure_aggregates
+          + {
+            dispatch_skipped: true,
+            skip_reason: "provider_failure",
+            provider_error: call?.error ?? {},
+            consecutive_failures: consecutive_failure_count,
+          },
+      },
+    )
+    if consecutive_failure_count >= failure_config.max {
+      const paused_for_ms = failure_config?.paused_for_ms ?? 0
+      agent_emit_event(
+        agent,
+        session_id,
+        "budget_circuit_breaker",
+        {
+          kind: "consecutive_failures",
+          consecutive_count: consecutive_failure_count,
+          paused_for_ms: paused_for_ms,
+        },
+      )
+      if paused_for_ms > 0 {
+        __agent_loop_clock_sleep_ms(clock, paused_for_ms)
+      }
+      const exhaustion = __agent_loop_budget_aggregates(
+        agent,
+        clock,
+        session_id,
+        nil,
+        state.loop_start_ms,
+      )
+        + {
+          exhausted: true,
+          kind: "consecutive_failures",
+          iteration: iteration,
+          max_iterations: state.current_max,
+        }
+      __agent_loop_emit_budget_exhausted(agent, session_id, exhaustion)
+      return __provider_failure_outcome(
+        state,
+        {
+          action: "break",
+          iteration: iteration,
+          consecutive_failure_count: consecutive_failure_count,
+          budget_exhausted_emitted: true,
+          budget_decisions: __agent_loop_record_budget_stop(
+            state.budget_decisions,
+            iteration,
+            state.current_max,
+            exhaustion.kind,
+          ),
+          final_status: "budget_exhausted",
+          stop_reason: "circuit_breaker",
+          terminal_error: call?.error,
+        },
+      )
+    }
+    return __provider_failure_outcome(
+      state,
+      {
+        action: "continue",
+        iteration: iteration,
+        consecutive_failure_count: consecutive_failure_count,
+      },
+    )
+  }
+  const can_retry_primary = was_escalated && !state.escalation_retry_pending
+  __agent_loop_emit_provider_error(
+    agent,
+    clock,
+    session_id,
+    state.iteration_index,
+    call,
+    turn_llm_opts,
+    state.loop_start_ms,
+    can_retry_primary,
+    "",
+  )
+  if can_retry_primary {
+    const primary_route = __agent_loop_route_options(
+      state.primary_provider,
+      state.primary_model,
+      state.primary_tool_format,
+    )
+    return __provider_failure_outcome(
+      state,
+      {
+        action: "continue",
+        opts: state.opts
+          + primary_route
+          + {llm_options: (state.opts?.llm_options ?? {}) + primary_route},
+        escalation_retry_pending: true,
+        iteration: state.iteration + 1,
+      },
+    )
+  }
+  return __provider_failure_outcome(
+    state,
+    {
+      action: "break",
+      final_status: call.status,
+      stop_reason: call?.stop_reason ?? call.status,
+      terminal_error: call?.error,
+    },
+  )
+}

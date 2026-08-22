@@ -835,16 +835,16 @@ pipeline test_provider_tool_probe_campaign_stops_after_unreceipted_child_attempt
     [
       cell
         + {
-        observed: {
-          telemetry: {
-            actual_usd: 0.0,
-            observed_cost_count: 0,
-            unpriced_case_count: 1,
-            request_attempt_count: 1,
-            retry_count: 0,
+          observed: {
+            telemetry: {
+              actual_usd: 0.0,
+              observed_cost_count: 0,
+              unpriced_case_count: 1,
+              request_attempt_count: 1,
+              retry_count: 0,
+            },
           },
         },
-      },
     ],
   )
   assert_eq(spend.actual_usd, 0.0)
@@ -884,17 +884,17 @@ pipeline test_provider_tool_probe_campaign_live_spend_uses_runtime_pricing(harne
   const cells = [
     unwrap(planned[0])
       + {
-      status: "pass",
-      observed: {
-        telemetry: {
-          actual_usd: 0.003,
-          observed_cost_count: 2,
-          unpriced_case_count: 0,
-          request_attempt_count: 2,
-          retry_count: 0,
+        status: "pass",
+        observed: {
+          telemetry: {
+            actual_usd: 0.003,
+            observed_cost_count: 2,
+            unpriced_case_count: 0,
+            request_attempt_count: 2,
+            retry_count: 0,
+          },
         },
       },
-    },
   ]
   const report = provider_tool_probe_campaign_report(
     routes,

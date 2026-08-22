@@ -104,16 +104,16 @@ pub fn __agent_loop_project_result(
     tool_options: context.turn_options + {tool_format: parser_tool_format},
     normalized: result
       + {
-      text: visible_text,
-      visible_text: visible_text,
-      // History remains canonical in the request's ambient dialect. The
-      // parser grammar is a separate disposition fact when an exact output
-      // schema constrains this one response to a JSON call envelope.
-      _agent_tool_format: request_tool_format,
-      _agent_result_parser_format: parser_tool_format,
-      _agent_next_tool_claim_contract_applied: context.llm_options?._next_tool_claim_applied
-        ?? false,
-    },
+        text: visible_text,
+        visible_text: visible_text,
+        // History remains canonical in the request's ambient dialect. The
+        // parser grammar is a separate disposition fact when an exact output
+        // schema constrains this one response to a JSON call envelope.
+        _agent_tool_format: request_tool_format,
+        _agent_result_parser_format: parser_tool_format,
+        _agent_next_tool_claim_contract_applied: context.llm_options?._next_tool_claim_applied
+          ?? false,
+      },
   }
 }
 
@@ -231,12 +231,12 @@ pub fn __default_invoke_tool(
 ) {
   const next_call = original_call
     + {
-    id: envelope.call_id,
-    tool_call_id: envelope.call_id,
-    name: envelope.tool_name,
-    tool_name: envelope.tool_name,
-    arguments: envelope.tool_args,
-  }
+      id: envelope.call_id,
+      tool_call_id: envelope.call_id,
+      name: envelope.tool_name,
+      tool_name: envelope.tool_name,
+      arguments: envelope.tool_args,
+    }
   return agent_dispatch_tool_call(tool_runtime, next_call, registry, options)
 }
 
@@ -588,15 +588,9 @@ pub fn __internal_verdict_object(value) -> bool {
     return false
   }
   const completion = contains(["done", "continue"], verdict)
-    && __dict_has_any(
-    value,
-    ["reasoning", "reason", "next_step", "nextStep"],
-  )
+    && __dict_has_any(value, ["reasoning", "reason", "next_step", "nextStep"])
   const judged = contains(["revise", "pass", "fail", "unclear", "allow", "warn", "block"], verdict)
-    && __dict_has_any(
-    value,
-    ["critique", "confidence", "category", "error"],
-  )
+    && __dict_has_any(value, ["critique", "confidence", "category", "error"])
   if !(completion || judged) {
     return false
   }
@@ -881,9 +875,7 @@ pub fn __parse_feedback_annotation_enabled(value) -> bool {
 pub fn __parse_feedback_tool_is_structural(entry) -> bool {
   const annotations = __parse_feedback_tool_annotations(entry)
   return __parse_feedback_annotation_enabled(annotations?.structural)
-    || __parse_feedback_annotation_enabled(
-    annotations?.agent_lifecycle,
-  )
+    || __parse_feedback_annotation_enabled(annotations?.agent_lifecycle)
 }
 
 pub fn __parse_feedback_has_non_structural_tools(turn_opts) -> bool {
@@ -1231,24 +1223,21 @@ pub fn __agent_loop_record_parse_feedback(
   const claimed_native_projection = normalized?._agent_next_tool_claim_contract_applied
     == true
     && normalized?._agent_tool_format
-    == "native"
+      == "native"
     && normalized?._agent_result_parser_format
-    == "json"
+      == "json"
     && len(tool_calls) > 0
   const recorded_assistant = if (fallback_outcome.triggered && fallback_outcome.accepted)
     || claimed_native_projection {
     normalized + {tool_calls: tool_calls, native_tool_calls: tool_calls}
       + if claimed_native_projection {
-      {text: "", visible_text: ""}
-    } else {
-      {}
-    }
+        {text: "", visible_text: ""}
+      } else {
+        {}
+      }
   } else {
     normalized
-      + {
-      tool_calls: tool_calls,
-      text: __agent_loop_history_text(normalized, parsed, tool_calls),
-    }
+      + {tool_calls: tool_calls, text: __agent_loop_history_text(normalized, parsed, tool_calls)}
   }
   agent_session_record_assistant(harness.agent, session_id, recorded_assistant)
   const parse_dropped = __maybe_inject_parse_error_feedback(

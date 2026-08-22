@@ -79,12 +79,12 @@ fn __openai_input_result(
     const encoded = bytes_to_base64(harness.fs.read_bytes(asset.path))
     content = content
       + [
-      {
-        type: "input_image",
-        image_url: "data:" + asset.mime_type + ";base64," + encoded,
-        detail: "auto",
-      },
-    ]
+        {
+          type: "input_image",
+          image_url: "data:" + asset.mime_type + ";base64," + encoded,
+          detail: "auto",
+        },
+      ]
   }
   return Ok([{role: "user", content: content}])
 }
@@ -131,17 +131,17 @@ fn __openai_outputs_result(
       }
       outputs = outputs
         + [
-        {
-          name: to_string(item?.id ?? "openai-image") + "." + to_string(format),
-          mime_type: mime_type,
-          bytes: unwrap(decoded),
-          metadata: {
-            response_id: response?.id,
-            image_call_id: item?.id,
-            revised_prompt: item?.revised_prompt,
+          {
+            name: to_string(item?.id ?? "openai-image") + "." + to_string(format),
+            mime_type: mime_type,
+            bytes: unwrap(decoded),
+            metadata: {
+              response_id: response?.id,
+              image_call_id: item?.id,
+              revised_prompt: item?.revised_prompt,
+            },
           },
-        },
-      ]
+        ]
     }
   }
   return Ok(outputs)
