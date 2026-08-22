@@ -30,38 +30,49 @@ pub(super) fn request_argv(ctx: &JsonValue) -> Result<Option<Vec<String>>, ()> {
     Ok((!argv.is_empty()).then_some(argv))
 }
 
-pub(super) fn request_uses_supported_posix_shell(ctx: &JsonValue) -> bool {
+pub(super) fn request_shell_dialect(
+    ctx: &JsonValue,
+) -> Option<super::super::catastrophic::ShellDialect> {
     if ctx
         .pointer("/request/shell_resolution_error")
         .and_then(JsonValue::as_bool)
         .unwrap_or(false)
     {
-        return false;
+        return None;
     }
     let shell = ctx.pointer("/request/shell");
     let platform = shell
         .and_then(|value| value.get("platform"))
         .and_then(JsonValue::as_str)
         .map(str::to_ascii_lowercase);
-    if platform.as_deref() == Some("windows") {
-        return false;
-    }
     let identity = shell.and_then(|value| {
         value
             .get("id")
             .or_else(|| value.get("path"))
             .and_then(JsonValue::as_str)
     });
-    match identity.map(|value| {
+    let identity = identity.map(|value| {
         value
             .rsplit(['/', '\\'])
             .next()
             .unwrap_or(value)
             .to_ascii_lowercase()
-    }) {
-        Some(identity) => matches!(identity.as_str(), "sh" | "bash" | "zsh"),
-        None => crate::shells::get_default_shell()
-            .map(|shell| matches!(shell.id.as_str(), "sh" | "bash" | "zsh"))
-            .unwrap_or(false),
+    });
+    match identity.as_deref() {
+        Some("sh" | "bash" | "zsh") => Some(super::super::catastrophic::ShellDialect::Posix),
+        Some("powershell" | "powershell.exe" | "pwsh" | "pwsh.exe") => {
+            Some(super::super::catastrophic::ShellDialect::PowerShell)
+        }
+        Some("cmd" | "cmd.exe") => Some(super::super::catastrophic::ShellDialect::Cmd),
+        Some(_) => None,
+        None if platform.as_deref() == Some("windows") => {
+            Some(super::super::catastrophic::ShellDialect::PowerShell)
+        }
+        None => crate::shells::get_default_shell().and_then(|shell| match shell.id.as_str() {
+            "sh" | "bash" | "zsh" => Some(super::super::catastrophic::ShellDialect::Posix),
+            "powershell" | "pwsh" => Some(super::super::catastrophic::ShellDialect::PowerShell),
+            "cmd" => Some(super::super::catastrophic::ShellDialect::Cmd),
+            _ => None,
+        }),
     }
 }
