@@ -24,6 +24,7 @@ use std::collections::BTreeMap;
 
 use sha2::{Digest, Sha256};
 
+use crate::stdlib::args::{ArgError, Args};
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
@@ -611,63 +612,19 @@ fn http_etag_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
     category = "http_response"
 )]
 fn http_choose_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    let accept = optional_string_arg(args.first(), "http_choose", "accept")?;
-    let offers_value = args
-        .get(1)
-        .ok_or_else(|| thrown_err("http_choose: offers is required"))?;
-    let offers = expect_string_list(offers_value, "http_choose", "offers")?;
+    let choose = Args::thrown("http_choose", args);
+    let accept = choose.opt_string(0, "accept")?;
+    let offers = choose.string_list(1, "offers")?;
     if offers.is_empty() {
-        return Err(thrown_err("http_choose: offers must be non-empty"));
+        return Err(ArgError::empty(choose.fn_name(), choose.kind(), "offers"));
     }
-    let default = optional_string_arg(args.get(2), "http_choose", "default")?
-        .unwrap_or_else(|| offers[0].clone());
+    let default = choose.opt_string(2, "default")?.unwrap_or(offers[0]);
 
-    let chosen = match accept.as_deref() {
+    let chosen = match accept {
         None | Some("") | Some("*/*") => default,
         Some(header) => negotiate_accept(header, &offers).unwrap_or(default),
     };
     Ok(VmValue::String(arcstr::ArcStr::from(chosen)))
-}
-
-fn optional_string_arg(
-    value: Option<&VmValue>,
-    builtin: &str,
-    arg_name: &str,
-) -> Result<Option<String>, VmError> {
-    match value {
-        None | Some(VmValue::Nil) => Ok(None),
-        Some(VmValue::String(text)) => Ok(Some(text.to_string())),
-        Some(other) => Err(thrown_err(format!(
-            "{builtin}: {arg_name} must be a string or nil (got {})",
-            other.type_name()
-        ))),
-    }
-}
-
-fn expect_string_list(
-    value: &VmValue,
-    builtin: &str,
-    arg_name: &str,
-) -> Result<Vec<String>, VmError> {
-    let items = match value {
-        VmValue::List(items) => items,
-        other => {
-            return Err(thrown_err(format!(
-                "{builtin}: {arg_name} must be a list (got {})",
-                other.type_name()
-            )));
-        }
-    };
-    items
-        .iter()
-        .map(|value| match value {
-            VmValue::String(text) => Ok(text.to_string()),
-            other => Err(thrown_err(format!(
-                "{builtin}: {arg_name} must contain strings (got {})",
-                other.type_name()
-            ))),
-        })
-        .collect()
 }
 
 #[harn_builtin(
@@ -948,7 +905,7 @@ fn value_as_bytes(value: &VmValue) -> Vec<u8> {
 /// gets a `q` (1.0 by default); each offer is scored by its
 /// best-matching range, with ties broken by offer order. Wildcard
 /// matches (`type/*`, `*/*`) score below exact-type matches.
-fn negotiate_accept(header: &str, offers: &[String]) -> Option<String> {
+fn negotiate_accept<'a>(header: &str, offers: &[&'a str]) -> Option<&'a str> {
     let ranges: Vec<MediaRange> = header
         .split(',')
         .filter_map(MediaRange::parse)
@@ -983,7 +940,7 @@ fn negotiate_accept(header: &str, offers: &[String]) -> Option<String> {
             });
         }
     }
-    best.map(|(index, _, _)| offers[index].clone())
+    best.map(|(index, _, _)| offers[index])
 }
 
 struct MediaRange<'a> {

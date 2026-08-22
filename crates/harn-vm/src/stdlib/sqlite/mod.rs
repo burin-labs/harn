@@ -11,6 +11,7 @@ use rusqlite::{params_from_iter, Connection, OpenFlags};
 use tokio::sync::Mutex;
 
 use crate::llm::vm_value_to_json;
+use crate::stdlib::args::Args;
 use crate::stdlib::macros::{
     harn_builtin, BuiltinSignature, Param, VmBuiltinDef, TY_ANY, TY_BOOL, TY_DICT, TY_LIST,
     TY_RESOURCE,
@@ -137,8 +138,9 @@ async fn sqlite_query_impl(
     let target = args
         .first()
         .ok_or_else(|| runtime_error("sqlite_query: database or transaction handle is required"))?;
-    let sql = required_string_arg(&args, 1, "sqlite_query", "sql")?;
-    let params = params_arg(args.get(2), "sqlite_query")?;
+    let call = Args::runtime("sqlite_query", &args);
+    let sql = call.non_empty_string(1, "sql")?.to_string();
+    let params = params_arg(&call, 2)?;
     let rows = query_rows(target, &sql, &params, "sqlite_query").await?;
     Ok(VmValue::List(Arc::new(rows)))
 }
@@ -158,8 +160,9 @@ async fn sqlite_query_one_impl(
     let target = args.first().ok_or_else(|| {
         runtime_error("sqlite_query_one: database or transaction handle is required")
     })?;
-    let sql = required_string_arg(&args, 1, "sqlite_query_one", "sql")?;
-    let params = params_arg(args.get(2), "sqlite_query_one")?;
+    let call = Args::runtime("sqlite_query_one", &args);
+    let sql = call.non_empty_string(1, "sql")?.to_string();
+    let params = params_arg(&call, 2)?;
     let rows = query_rows(target, &sql, &params, "sqlite_query_one").await?;
     Ok(rows.into_iter().next().unwrap_or(VmValue::Nil))
 }
@@ -179,8 +182,9 @@ async fn sqlite_execute_impl(
     let target = args.first().ok_or_else(|| {
         runtime_error("sqlite_execute: database or transaction handle is required")
     })?;
-    let sql = required_string_arg(&args, 1, "sqlite_execute", "sql")?;
-    let params = params_arg(args.get(2), "sqlite_execute")?;
+    let call = Args::runtime("sqlite_execute", &args);
+    let sql = call.non_empty_string(1, "sql")?.to_string();
+    let params = params_arg(&call, 2)?;
     execute_stmt(target, &sql, &params, "sqlite_execute").await
 }
 
@@ -198,7 +202,9 @@ async fn sqlite_transaction_impl(
 ) -> Result<VmValue, VmError> {
     if is_resource_kind(args.first(), HANDLE_MOCK) {
         let target = args.first().expect("checked above");
-        let closure = closure_arg(args.get(1), "sqlite_transaction")?;
+        let closure = Args::runtime("sqlite_transaction", &args)
+            .closure(1, "body")?
+            .clone();
         let mut child_vm = ctx.child_vm();
         let result = child_vm.call_closure_pub(&closure, &[target.clone()]).await;
         ctx.forward_output(&child_vm.take_output());
@@ -206,7 +212,9 @@ async fn sqlite_transaction_impl(
     }
 
     let record = db_handle(args.first(), "sqlite_transaction")?;
-    let closure = closure_arg(args.get(1), "sqlite_transaction")?;
+    let closure = Args::runtime("sqlite_transaction", &args)
+        .closure(1, "body")?
+        .clone();
     ensure_db_open(&record, "sqlite_transaction")?;
     if record.read_only {
         return Err(runtime_error(
@@ -575,7 +583,9 @@ async fn savepoint_op(
     let target = args
         .first()
         .ok_or_else(|| runtime_error(format!("{builtin}: transaction handle is required")))?;
-    let name = required_string_arg(args, 1, builtin, "name")?;
+    let name = Args::runtime(builtin, args)
+        .non_empty_string(1, "name")?
+        .to_string();
     validate_identifier(&name, builtin, "savepoint name")?;
     let sql = render_savepoint_sql(op, &name);
     if is_resource_kind(Some(target), HANDLE_MOCK) {
@@ -976,39 +986,9 @@ fn ensure_db_open(record: &DbRecord, builtin: &str) -> Result<(), VmError> {
     }
 }
 
-fn closure_arg(
-    value: Option<&VmValue>,
-    builtin: &'static str,
-) -> Result<Arc<crate::value::VmClosure>, VmError> {
-    match value {
-        Some(VmValue::Closure(closure)) => Ok(closure.clone()),
-        _ => Err(runtime_error(format!(
-            "{builtin}: second argument must be a closure"
-        ))),
-    }
-}
-
-fn required_string_arg(
-    args: &[VmValue],
-    index: usize,
-    builtin: &'static str,
-    label: &'static str,
-) -> Result<String, VmError> {
-    let value = args.get(index).map(VmValue::display).unwrap_or_default();
-    if value.trim().is_empty() {
-        return Err(runtime_error(format!("{builtin}: {label} is required")));
-    }
-    Ok(value)
-}
-
-fn params_arg(value: Option<&VmValue>, builtin: &'static str) -> Result<Vec<VmValue>, VmError> {
-    match value {
-        None | Some(VmValue::Nil) => Ok(Vec::new()),
-        Some(VmValue::List(items)) => Ok((**items).clone()),
-        Some(_) => Err(runtime_error(format!(
-            "{builtin}: params must be a list when provided"
-        ))),
-    }
+/// Positional `params` list, defaulting to empty.
+fn params_arg(args: &Args<'_>, index: usize) -> Result<Vec<VmValue>, VmError> {
+    Ok(args.opt_list(index, "params")?.unwrap_or_default().to_vec())
 }
 
 fn dir_arg(dict: &crate::value::DictMap, key: &str) -> Result<PathBuf, VmError> {
@@ -1046,11 +1026,14 @@ fn option_int(options: Option<&crate::value::DictMap>, key: &str) -> Option<i64>
         })
 }
 
+/// A string option, or `None` when absent. Non-string values are ignored
+/// rather than rendered: `display` would have turned a dict into its own
+/// text and fed that to SQLite.
 fn option_string(options: Option<&crate::value::DictMap>, key: &str) -> Option<String> {
-    options
-        .and_then(|opts| opts.get(key))
-        .map(VmValue::display)
-        .filter(|value| !value.trim().is_empty())
+    match options?.get(key)? {
+        VmValue::String(text) if !text.trim().is_empty() => Some(text.to_string()),
+        _ => None,
+    }
 }
 
 fn begin_sql(mode: &str) -> Result<&'static str, VmError> {

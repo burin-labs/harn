@@ -397,6 +397,44 @@ pub(crate) fn register_bytes_builtins(vm: &mut Vm) {
 }
 ```
 
+### Reading arguments
+
+Turn `&[VmValue]` into typed Rust values through `stdlib::args`, not by
+matching on `VmValue` at the call site. `Args` reads positional arguments
+and `Options` reads the trailing option-bag dict:
+
+```rust
+use crate::stdlib::args::Args;
+
+fn jwt_sign_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let sign = Args::new("jwt_sign", args);
+    let algorithm = sign.string(0, "alg")?;        // &str, borrowed
+    let claims = sign.dict(1, "claims")?;          // &DictMap
+    let mut options = sign.options(2, "options")?; // empty when absent
+    let kid = options.opt_string("kid")?;
+    options.finish(&[])?;                          // reject unknown options
+    // ...
+}
+```
+
+Use the argument names from the builtin's own `sig`, so a diagnostic and
+the documented signature agree. Pick the constructor that matches how the
+builtin fails: `Args::new` for a wrong type that should bubble,
+`Args::runtime` for a runtime error, and `Args::thrown` when scripts are
+expected to `try` / `recover` the failure.
+
+The reader owns the wording, so builtins do not write "must be a …"
+messages themselves. When a message must name a type anyway, spell it the
+way `type_of` does — `int`, not `integer`; `bool`, not `boolean`; `dict`,
+not `record` or `object`. A test in `stdlib::args::drift_tests` walks the
+stdlib source and fails on the other spellings; a message genuinely about
+a JSON document or a file name opts out with a `// not-a-harn-type:`
+comment.
+
+`Args` and `Options` carry the accessors the stdlib uses today. Add the
+one you need — the pattern is a few lines, and `Expected` composes the
+type names from `TypeTag` so a new accessor cannot invent a spelling.
+
 Wire-up checklist:
 
 1. Annotate the handler with `#[harn_builtin(sig = "...", category = "...")]`.
@@ -409,7 +447,9 @@ Wire-up checklist:
 4. Make sure your module's `register_*_builtins(vm)` is called from one of
    `register_core_stdlib`, `register_io_stdlib`, or
    `register_agent_stdlib_{before,after}_llm` in the same file.
-5. Add or update a `harn explain <name>` snapshot / conformance fixture
+5. Read the arguments through `Args` / `Options` (see
+   [Reading arguments](#reading-arguments)).
+6. Add or update a `harn explain <name>` snapshot / conformance fixture
    if the builtin is publicly callable.
 
 A handful of names (`len`, `split`, method-dispatched helpers, etc.) that

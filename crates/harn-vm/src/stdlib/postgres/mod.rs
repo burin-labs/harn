@@ -2271,11 +2271,8 @@ fn option_int(options: Option<&crate::value::DictMap>, key: &str) -> Option<i64>
 }
 
 fn option_duration_ms(options: Option<&crate::value::DictMap>, key: &str) -> Option<u64> {
-    options.and_then(|opts| opts.get(key)).and_then(|value| {
-        Args::single("postgres", ErrorKind::Runtime, value)
-            .millis(0, key)
-            .ok()
-    })
+    let reader = Args::single("postgres", ErrorKind::Runtime, options?.get(key)?);
+    reader.millis(0, key).ok()
 }
 
 pub(super) fn runtime_error(message: impl Into<String>) -> VmError {

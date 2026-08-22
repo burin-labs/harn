@@ -431,7 +431,7 @@ fn multipart_parse_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValu
     let limits = parse_limits(opts, "multipart_parse")?;
     let boundary = boundary_from_content_type(content_type, "multipart_parse")?;
     let total_bytes = body.len() as i64;
-    let fields = parse_multipart_body(&body, &boundary, &limits, "multipart_parse")?;
+    let fields = parse_multipart_body(body, &boundary, &limits, "multipart_parse")?;
     let field_count = fields.len() as i64;
 
     let mut result = crate::value::DictMap::new();

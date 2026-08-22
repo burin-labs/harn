@@ -51,7 +51,7 @@ use crate::value::{DictMap, VmClosure, VmError, VmValue};
 pub(crate) use options::Options;
 #[cfg(test)]
 pub(crate) use tag::tag_is_canonical;
-pub(crate) use tag::{Expected, TypeTag};
+pub(crate) use tag::Expected;
 
 /// Whether an argument failure bubbles as a runtime error or as a value the
 /// script can `try` / `recover`.
@@ -134,26 +134,6 @@ impl ArgError {
     /// ``{fn}: `{name}` must not be empty``
     pub(crate) fn empty(fn_name: &str, kind: ErrorKind, name: &str) -> VmError {
         fn_err(fn_name, kind, format_args!("`{name}` must not be empty"))
-    }
-
-    /// ``{fn}: `{name}` must be one of `a`, `b`; got `c` ``
-    pub(crate) fn not_one_of(
-        fn_name: &str,
-        kind: ErrorKind,
-        name: &str,
-        allowed: &[&str],
-        got: &str,
-    ) -> VmError {
-        let allowed = allowed
-            .iter()
-            .map(|value| format!("`{value}`"))
-            .collect::<Vec<_>>()
-            .join(", ");
-        fn_err(
-            fn_name,
-            kind,
-            format_args!("`{name}` must be one of {allowed}; got `{got}`"),
-        )
     }
 
     /// ``{fn}: `{name}` {constraint}`` — for range and shape rules a type
@@ -242,10 +222,6 @@ impl<'a> Args<'a> {
         self.kind
     }
 
-    pub(crate) fn len(&self) -> usize {
-        self.values.len()
-    }
-
     /// Build an error in this reader's kind, prefixed with the builtin name.
     pub(crate) fn err(&self, message: impl std::fmt::Display) -> VmError {
         fn_err(self.fn_name, self.kind, message)
@@ -322,39 +298,6 @@ impl<'a> Args<'a> {
         }
     }
 
-    /// An optional string, trimmed, where a whitespace-only value means
-    /// "not supplied" rather than "supplied as empty".
-    pub(crate) fn opt_non_empty_string(
-        &self,
-        index: usize,
-        name: &str,
-    ) -> Result<Option<&'a str>, VmError> {
-        Ok(self
-            .opt_string(index, name)?
-            .map(str::trim)
-            .filter(|text| !text.is_empty()))
-    }
-
-    /// A required string restricted to a closed set of spellings.
-    pub(crate) fn enum_string(
-        &self,
-        index: usize,
-        name: &str,
-        allowed: &[&str],
-    ) -> Result<&'a str, VmError> {
-        let text = self.string(index, name)?;
-        if allowed.contains(&text) {
-            return Ok(text);
-        }
-        Err(ArgError::not_one_of(
-            self.fn_name,
-            self.kind,
-            name,
-            allowed,
-            text,
-        ))
-    }
-
     // ---- numbers ----------------------------------------------------------
 
     /// A required int. Floats are rejected; use [`Args::number`] where a
@@ -374,60 +317,7 @@ impl<'a> Args<'a> {
         }
     }
 
-    /// A required non-negative int, narrowed to `usize`.
-    pub(crate) fn usize(&self, index: usize, name: &str) -> Result<usize, VmError> {
-        let value = self.int(index, name)?;
-        usize::try_from(value)
-            .map_err(|_| ArgError::constraint(self.fn_name, self.kind, name, "must be >= 0"))
-    }
-
-    pub(crate) fn opt_usize(&self, index: usize, name: &str) -> Result<Option<usize>, VmError> {
-        let Some(value) = self.opt_int(index, name)? else {
-            return Ok(None);
-        };
-        usize::try_from(value)
-            .map(Some)
-            .map_err(|_| ArgError::constraint(self.fn_name, self.kind, name, "must be >= 0"))
-    }
-
-    /// A required number, accepting an int or a float and yielding `f64`.
-    pub(crate) fn number(&self, index: usize, name: &str) -> Result<f64, VmError> {
-        match self.required_at(index, name)? {
-            VmValue::Int(value) => Ok(*value as f64),
-            VmValue::Float(value) => Ok(*value),
-            other => Err(self.wrong(name, Expected::INT_OR_FLOAT, other)),
-        }
-    }
-
-    pub(crate) fn opt_number(&self, index: usize, name: &str) -> Result<Option<f64>, VmError> {
-        match self.get(index) {
-            None => Ok(None),
-            Some(VmValue::Int(value)) => Ok(Some(*value as f64)),
-            Some(VmValue::Float(value)) => Ok(Some(*value)),
-            Some(other) => Err(self.wrong_optional(name, Expected::INT_OR_FLOAT, other)),
-        }
-    }
-
     // ---- bools ------------------------------------------------------------
-
-    pub(crate) fn bool(&self, index: usize, name: &str) -> Result<bool, VmError> {
-        match self.required_at(index, name)? {
-            VmValue::Bool(value) => Ok(*value),
-            other => Err(self.wrong(name, Expected::BOOL, other)),
-        }
-    }
-
-    pub(crate) fn opt_bool(&self, index: usize, name: &str) -> Result<Option<bool>, VmError> {
-        match self.get(index) {
-            None => Ok(None),
-            Some(VmValue::Bool(value)) => Ok(Some(*value)),
-            Some(other) => Err(self.wrong_optional(name, Expected::BOOL, other)),
-        }
-    }
-
-    pub(crate) fn bool_or(&self, index: usize, name: &str, default: bool) -> Result<bool, VmError> {
-        Ok(self.opt_bool(index, name)?.unwrap_or(default))
-    }
 
     // ---- containers -------------------------------------------------------
 
@@ -529,18 +419,6 @@ impl<'a> Args<'a> {
         }
     }
 
-    pub(crate) fn opt_closure(
-        &self,
-        index: usize,
-        name: &str,
-    ) -> Result<Option<&'a VmClosure>, VmError> {
-        match self.get(index) {
-            None => Ok(None),
-            Some(VmValue::Closure(closure)) => Ok(Some(closure.as_ref())),
-            Some(other) => Err(self.wrong_optional(name, Expected::CLOSURE, other)),
-        }
-    }
-
     // ---- durations --------------------------------------------------------
 
     /// A non-negative millisecond count, from a `duration`, an int, or a
@@ -554,23 +432,8 @@ impl<'a> Args<'a> {
         self.millis_from(value, name)
     }
 
-    pub(crate) fn opt_millis(&self, index: usize, name: &str) -> Result<Option<u64>, VmError> {
-        match self.get(index) {
-            None => Ok(None),
-            Some(value) => self.millis_from(value, name).map(Some),
-        }
-    }
-
     pub(crate) fn duration(&self, index: usize, name: &str) -> Result<StdDuration, VmError> {
         self.millis(index, name).map(StdDuration::from_millis)
-    }
-
-    pub(crate) fn opt_duration(
-        &self,
-        index: usize,
-        name: &str,
-    ) -> Result<Option<StdDuration>, VmError> {
-        Ok(self.opt_millis(index, name)?.map(StdDuration::from_millis))
     }
 
     fn millis_from(&self, value: &VmValue, name: &str) -> Result<u64, VmError> {

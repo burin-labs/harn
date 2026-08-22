@@ -13,7 +13,6 @@
 //! bag or not.
 
 use std::collections::BTreeSet;
-use std::time::Duration as StdDuration;
 
 use crate::value::{DictMap, VmError, VmValue};
 
@@ -39,16 +38,6 @@ impl<'a> Options<'a> {
         }
     }
 
-    /// True when the caller passed no bag at all, or an empty one.
-    pub(crate) fn is_empty(&self) -> bool {
-        self.dict.is_none_or(DictMap::is_empty)
-    }
-
-    /// The underlying dict, for the few builtins that forward the whole bag.
-    pub(crate) fn dict(&self) -> Option<&'a DictMap> {
-        self.dict
-    }
-
     fn lookup(&mut self, key: &'static str) -> Option<&'a VmValue> {
         self.seen.insert(key);
         match self.dict?.get(key) {
@@ -66,10 +55,6 @@ impl<'a> Options<'a> {
     /// The raw value for `key`, marking it consumed.
     pub(crate) fn raw(&mut self, key: &'static str) -> Option<&'a VmValue> {
         self.lookup(key)
-    }
-
-    pub(crate) fn err(&self, message: impl std::fmt::Display) -> VmError {
-        super::fn_err(self.fn_name, self.kind, message)
     }
 
     fn wrong(&self, key: &str, expected: Expected, got: &VmValue) -> VmError {
@@ -115,35 +100,6 @@ impl<'a> Options<'a> {
             .filter(|text| !text.is_empty()))
     }
 
-    pub(crate) fn string_or(
-        &mut self,
-        key: &'static str,
-        default: &'a str,
-    ) -> Result<&'a str, VmError> {
-        Ok(self.opt_string(key)?.unwrap_or(default))
-    }
-
-    /// An option restricted to a closed set of spellings.
-    pub(crate) fn opt_enum_string(
-        &mut self,
-        key: &'static str,
-        allowed: &[&str],
-    ) -> Result<Option<&'a str>, VmError> {
-        let Some(text) = self.opt_string(key)? else {
-            return Ok(None);
-        };
-        if allowed.contains(&text) {
-            return Ok(Some(text));
-        }
-        Err(ArgError::not_one_of(
-            self.fn_name,
-            self.kind,
-            key,
-            allowed,
-            text,
-        ))
-    }
-
     // ---- numbers ----------------------------------------------------------
 
     pub(crate) fn opt_int(&mut self, key: &'static str) -> Result<Option<i64>, VmError> {
@@ -154,10 +110,6 @@ impl<'a> Options<'a> {
         }
     }
 
-    pub(crate) fn int_or(&mut self, key: &'static str, default: i64) -> Result<i64, VmError> {
-        Ok(self.opt_int(key)?.unwrap_or(default))
-    }
-
     pub(crate) fn opt_usize(&mut self, key: &'static str) -> Result<Option<usize>, VmError> {
         let Some(value) = self.opt_int(key)? else {
             return Ok(None);
@@ -165,15 +117,6 @@ impl<'a> Options<'a> {
         usize::try_from(value)
             .map(Some)
             .map_err(|_| ArgError::constraint(self.fn_name, self.kind, key, "must be >= 0"))
-    }
-
-    pub(crate) fn opt_number(&mut self, key: &'static str) -> Result<Option<f64>, VmError> {
-        match self.lookup(key) {
-            None => Ok(None),
-            Some(VmValue::Int(value)) => Ok(Some(*value as f64)),
-            Some(VmValue::Float(value)) => Ok(Some(*value)),
-            Some(other) => Err(self.wrong(key, Expected::INT_OR_FLOAT, other)),
-        }
     }
 
     // ---- bools ------------------------------------------------------------
@@ -208,44 +151,6 @@ impl<'a> Options<'a> {
         }
     }
 
-    /// A nested option bag, read with the same reader type.
-    pub(crate) fn opt_options(&mut self, key: &'static str) -> Result<Options<'a>, VmError> {
-        Ok(Options::new(self.fn_name, self.kind, self.opt_dict(key)?))
-    }
-
-    pub(crate) fn opt_string_list(
-        &mut self,
-        key: &'static str,
-    ) -> Result<Option<Vec<&'a str>>, VmError> {
-        let Some(list) = self.opt_list(key)? else {
-            return Ok(None);
-        };
-        list.iter()
-            .map(|value| match value {
-                VmValue::String(text) => Ok(text.as_str()),
-                other => Err(ArgError::wrong_type(
-                    self.fn_name,
-                    self.kind,
-                    key,
-                    Expected::STRING_LIST,
-                    other,
-                )),
-            })
-            .collect::<Result<Vec<_>, _>>()
-            .map(Some)
-    }
-
-    pub(crate) fn opt_closure(
-        &mut self,
-        key: &'static str,
-    ) -> Result<Option<&'a crate::value::VmClosure>, VmError> {
-        match self.lookup(key) {
-            None => Ok(None),
-            Some(VmValue::Closure(closure)) => Ok(Some(closure.as_ref())),
-            Some(other) => Err(self.wrong(key, Expected::CLOSURE, other)),
-        }
-    }
-
     // ---- durations --------------------------------------------------------
 
     pub(crate) fn opt_millis(&mut self, key: &'static str) -> Result<Option<u64>, VmError> {
@@ -277,13 +182,6 @@ impl<'a> Options<'a> {
                 other,
             )),
         }
-    }
-
-    pub(crate) fn opt_duration(
-        &mut self,
-        key: &'static str,
-    ) -> Result<Option<StdDuration>, VmError> {
-        Ok(self.opt_millis(key)?.map(StdDuration::from_millis))
     }
 
     // ---- closing ----------------------------------------------------------

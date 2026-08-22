@@ -87,16 +87,16 @@ fn floats_are_not_ints() {
         message(&args.int(0, "digits").unwrap_err()),
         "round: `digits` must be an int, got float"
     );
-    assert_eq!(args.number(0, "digits").unwrap(), 3.0);
 }
 
 #[test]
 fn usize_rejects_negatives_with_the_constraint_not_the_type() {
-    let values = vec![VmValue::Int(-1)];
-    let args = Args::new("bytes_slice", &values);
+    let values = vec![dict_value(&[("limit", VmValue::Int(-1))])];
+    let args = Args::new("event_log_read", &values);
+    let mut options = args.options(0, "options").unwrap();
     assert_eq!(
-        message(&args.usize(0, "start").unwrap_err()),
-        "bytes_slice: `start` must be >= 0"
+        message(&options.opt_usize("limit").unwrap_err()),
+        "event_log_read: `limit` must be >= 0"
     );
 }
 
@@ -110,16 +110,6 @@ fn string_list_names_the_offending_element_type() {
     assert_eq!(
         message(&args.string_list(0, "paths").unwrap_err()),
         "git_add: `paths` must be a list<string>, got int"
-    );
-}
-
-#[test]
-fn enum_string_lists_what_was_allowed() {
-    let values = vec![string("HS256")];
-    let args = Args::new("jwt_sign", &values);
-    assert_eq!(
-        message(&args.enum_string(0, "alg", &["ES256", "RS256"]).unwrap_err()),
-        "jwt_sign: `alg` must be one of `ES256`, `RS256`; got `HS256`"
     );
 }
 
@@ -190,7 +180,6 @@ fn an_absent_option_bag_reads_as_empty() {
     let values: Vec<VmValue> = Vec::new();
     let args = Args::new("agent_spawn", &values);
     let mut options = args.options(0, "options").unwrap();
-    assert!(options.is_empty());
     assert_eq!(options.opt_string("task").unwrap(), None);
     assert!(options.bool_or("wait", true).unwrap());
     options.finish(&[]).unwrap();
@@ -230,20 +219,5 @@ fn a_non_dict_option_bag_is_rejected_before_any_key_is_read() {
     assert_eq!(
         message(&args.options(0, "options").unwrap_err()),
         "agent_spawn: `options` must be a dict or nil, got string"
-    );
-}
-
-#[test]
-fn nested_option_bags_keep_the_builtin_name() {
-    let values = vec![dict_value(&[(
-        "retry",
-        dict_value(&[("attempts", string("three"))]),
-    )])];
-    let args = Args::new("http_get", &values);
-    let mut options = args.options(0, "options").unwrap();
-    let mut retry = options.opt_options("retry").unwrap();
-    assert_eq!(
-        message(&retry.opt_int("attempts").unwrap_err()),
-        "http_get: `attempts` must be an int or nil, got string"
     );
 }

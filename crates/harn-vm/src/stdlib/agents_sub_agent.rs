@@ -115,7 +115,7 @@ fn inherited_reminders_from_parent(
 pub(super) fn parse_sub_agent_request(args: &[VmValue]) -> Result<ParsedSubAgentRequest, VmError> {
     let request = validate_sub_agent_request_envelope(args)?;
     let mut parser = Options::new(SUB_AGENT_RUN_FN, ErrorKind::Runtime, Some(request));
-    if parser.opt_string("_type")?.as_deref() != Some("sub_agent_request") {
+    if parser.opt_string("_type")? != Some("sub_agent_request") {
         return Err(invalid_sub_agent_request());
     }
     let task = parser.non_empty_string("task")?.to_string();

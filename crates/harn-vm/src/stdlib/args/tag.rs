@@ -24,15 +24,11 @@ pub(crate) enum TypeTag {
     String,
     Bytes,
     Int,
-    Float,
-    Decimal,
     Bool,
     List,
     Dict,
     Closure,
     Duration,
-    Channel,
-    Struct,
 }
 
 impl TypeTag {
@@ -42,32 +38,25 @@ impl TypeTag {
             Self::String => "string",
             Self::Bytes => "bytes",
             Self::Int => "int",
-            Self::Float => "float",
-            Self::Decimal => "decimal",
             Self::Bool => "bool",
             Self::List => "list",
             Self::Dict => "dict",
             Self::Closure => "closure",
             Self::Duration => "duration",
-            Self::Channel => "channel",
-            Self::Struct => "struct",
         }
     }
 
     /// Every variant, so the canonical-tag test cannot miss one.
+    #[cfg(test)]
     pub(crate) const ALL: &'static [Self] = &[
         Self::String,
         Self::Bytes,
         Self::Int,
-        Self::Float,
-        Self::Decimal,
         Self::Bool,
         Self::List,
         Self::Dict,
         Self::Closure,
         Self::Duration,
-        Self::Channel,
-        Self::Struct,
     ];
 }
 
@@ -78,6 +67,7 @@ impl fmt::Display for TypeTag {
 }
 
 /// Whether `tag` is a string `type_of` can actually return.
+#[cfg(test)]
 pub(crate) fn tag_is_canonical(tag: &str) -> bool {
     harn_builtin_meta::runtime_type_tags::ALL.contains(&tag)
 }
@@ -100,7 +90,6 @@ impl Expected {
     pub(crate) const STRING: Self = Self::One(TypeTag::String);
     pub(crate) const BYTES: Self = Self::One(TypeTag::Bytes);
     pub(crate) const INT: Self = Self::One(TypeTag::Int);
-    pub(crate) const FLOAT: Self = Self::One(TypeTag::Float);
     pub(crate) const BOOL: Self = Self::One(TypeTag::Bool);
     pub(crate) const LIST: Self = Self::One(TypeTag::List);
     pub(crate) const DICT: Self = Self::One(TypeTag::Dict);
@@ -108,7 +97,6 @@ impl Expected {
     pub(crate) const STRING_LIST: Self = Self::ListOf(TypeTag::String);
     pub(crate) const BYTES_OR_STRING: Self = Self::Either(TypeTag::Bytes, TypeTag::String);
     pub(crate) const DURATION_OR_INT: Self = Self::Either(TypeTag::Duration, TypeTag::Int);
-    pub(crate) const INT_OR_FLOAT: Self = Self::Either(TypeTag::Int, TypeTag::Float);
 }
 
 /// `a` or `an`, by the tag's first letter. Written out rather than pulled
