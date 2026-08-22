@@ -261,6 +261,17 @@ pipeline test_after_digest_retires_terminal_and_resets_cursor(harness: Harness, 
   assert(row.reentries == 1)
 }
 
+pipeline test_terminal_replay_does_not_reopen_retired_handle(harness: Harness, task) {
+  const cw = command_wait_normalize(nil)
+  const terminal = _terminal_entry("hto-1", 0)
+  let ledger = command_ledger_ingest(command_ledger_new(), [_running_result("hto-1", 0)], 0, cw)
+  ledger = command_ledger_apply_updates(ledger, [terminal], 1000, cw)
+  ledger = command_ledger_after_digest(ledger, 1000, cw)
+  assert(len(ledger) == 0)
+  ledger = command_ledger_apply_updates(ledger, [terminal], 2000, cw)
+  assert(len(ledger) == 0, "an immutable terminal replay cannot recreate an active row")
+}
+
 // --- lease transitions ------------------------------------------------------
 pipeline test_release_flips_to_service_off_schedule(harness: Harness, task) {
   const cw = command_wait_normalize(nil)
