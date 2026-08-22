@@ -4,7 +4,9 @@
 
 use super::options::base_opts;
 use super::test_support::ScopedEnvVar;
-use super::{vm_call_llm_full, vm_call_llm_full_streaming, LlmRequestPayload, ThinkingConfig};
+use super::{
+    vm_call_llm_full, vm_call_llm_full_streaming, LlmRequestPayload, OutputFormat, ThinkingConfig,
+};
 use crate::llm::env_guard;
 
 #[test]
@@ -263,10 +265,12 @@ fn anthropic_thinking_preserves_extended_for_opus_4_6() {
 fn anthropic_prefill_preserved_for_or_opus_dotted_older_generations() {
     use crate::llm::providers::AnthropicProvider;
 
-    // Dotted "claude-opus-4.5" style should NOT hit the 4.6 gate.
+    // Dotted "claude-opus-4.5" style supports prefill when no incompatible
+    // native schema contract is requested.
     let mut opts = base_opts("anthropic");
     opts.model = "anthropic/claude-opus-4.5".to_string();
     opts.prefill = Some("<done>##DONE##</done>".to_string());
+    opts.output_format = OutputFormat::Text;
     let payload = LlmRequestPayload::from(&opts);
     let body = AnthropicProvider::build_request_body(&payload);
 
