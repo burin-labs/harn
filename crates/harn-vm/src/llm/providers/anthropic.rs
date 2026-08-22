@@ -1937,8 +1937,12 @@ mod tests {
     }
 
     #[test]
-    fn output_format_json_schema_forces_anthropic_tool_use() {
+    fn output_format_json_schema_uses_native_format_with_thinking_and_tools() {
         let mut payload = base_payload();
+        payload.model = "claude-haiku-4-5".to_string();
+        payload.thinking = crate::llm::api::ThinkingConfig::Enabled {
+            budget_tokens: Some(1024),
+        };
         payload.output_format = crate::llm::api::OutputFormat::JsonSchema {
             schema: serde_json::json!({
                 "type": "object",
@@ -1951,22 +1955,25 @@ mod tests {
         let body = AnthropicProvider::build_request_body(&payload);
 
         assert_eq!(
-            body["tool_choice"],
-            serde_json::json!({"type": "tool", "name": "json_response"})
+            body["output_config"]["format"]["type"],
+            serde_json::json!("json_schema")
+        );
+        let sent_schema = &body["output_config"]["format"]["schema"];
+        assert_eq!(sent_schema["properties"]["answer"]["type"], "string");
+        assert_eq!(sent_schema["additionalProperties"], false);
+        assert!(sent_schema["properties"]["answer"].get("pattern").is_none());
+        assert_eq!(
+            body["thinking"],
+            serde_json::json!({"type": "enabled", "budget_tokens": 1024}),
+            "native schema output must preserve the requested reasoning mode"
+        );
+        assert!(
+            body.get("tool_choice").is_none(),
+            "native schema output must not force a synthetic tool"
         );
         let tools = body["tools"].as_array().expect("tools array");
-        let json_tool = tools
-            .iter()
-            .find(|tool| tool.get("name").and_then(|value| value.as_str()) == Some("json_response"))
-            .expect("json_response tool");
-        assert_eq!(
-            json_tool["input_schema"]["properties"]["answer"]["type"],
-            "string"
-        );
-        assert_eq!(json_tool["input_schema"]["additionalProperties"], false);
-        assert!(json_tool["input_schema"]["properties"]["answer"]
-            .get("pattern")
-            .is_none());
+        assert_eq!(tools.len(), 1, "the caller's tool surface stays reachable");
+        assert_eq!(tools[0]["name"], "read_file");
     }
 
     #[test]
