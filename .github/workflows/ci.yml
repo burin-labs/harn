@@ -1233,42 +1233,66 @@ jobs:
   windows-plan:
     name: Windows CI routing
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
     outputs:
       run_windows: ${{ steps.detect.outputs.run_windows }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # Full history on PR and push so the diff base (PR base SHA / pushed
-          # `before` SHA) is reachable for the path detection below. merge_group
-          # keeps the shallow checkout (it never diffs — run stays false).
-          fetch-depth: ${{ (github.event_name == 'pull_request' || github.event_name == 'push') && '0' || '1' }}
+          # Full history makes each event's owning diff base reachable: PR base,
+          # merge-group base, or the pushed ref's previous tip.
+          fetch-depth: 0
       - name: Detect Windows-relevant changes
         id: detect
         shell: bash
         env:
           EVENT_NAME: ${{ github.event_name }}
           BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
+          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha || '' }}
           PR_HEAD_REF: ${{ github.event.pull_request.head.ref || '' }}
           # Previous tip of the pushed ref — the diff base for `push` events.
           # Routed through env (never inlined into the script) to avoid a
           # template-injection sink, matching how BASE_SHA is handled.
           BEFORE_SHA: ${{ github.event.before || '' }}
+          GITHUB_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          COMMIT_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
           run_windows=false
 
-          # Pick the diff base per event. push diffs against the previous tip;
-          # pull_request diffs against the PR base. merge_group leaves
-          # run_windows=false (the merge queue never path-gates the platform
-          # plan jobs — unchanged behavior).
+          # A successful native job on the exact merge-group candidate is the
+          # admission proof for the identical main SHA. Any missing, skipped,
+          # failed, cancelled, or ambiguous proof falls through to the normal
+          # main-push backstop.
+          if [[ "$EVENT_NAME" == "push" ]]; then
+            if proven="$(
+              ./scripts/ci_merge_group_proof.sh \
+                "$REPOSITORY" ci.yml "$COMMIT_SHA" \
+                --require-job "Rust on Windows (build + smoke test)"
+            )" && [[ "$proven" == "true" ]]; then
+              echo "::notice::windows: exact merge-group candidate already passed native Windows; skipping duplicate main proof."
+              echo "run_windows=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "::notice::windows: exact native merge-group proof unavailable; retaining the main fallback."
+          fi
+
+          # Pick the canonical diff base per event. Internal PR heads do not
+          # run native Windows: the merge-group candidate is the sole pre-merge
+          # admission owner and exercises the queued tree, not a nearby head.
           diff_base=""
           if [[ "$EVENT_NAME" == "push" ]]; then
             diff_base="$BEFORE_SHA"
           elif [[ "$EVENT_NAME" == "pull_request" ]]; then
             diff_base="$BASE_SHA"
+          elif [[ "$EVENT_NAME" == "merge_group" ]]; then
+            diff_base="$MERGE_GROUP_BASE_SHA"
           fi
 
-          if [[ "$EVENT_NAME" == "push" || "$EVENT_NAME" == "pull_request" ]]; then
+          if [[ "$EVENT_NAME" == "push" || "$EVENT_NAME" == "pull_request" || "$EVENT_NAME" == "merge_group" ]]; then
             if [[ -z "$diff_base" || "$diff_base" == "0000000000000000000000000000000000000000" ]]; then
               # New branch / first push / force-push / missing PR base — the diff
               # base is invalid, so run the full build defensively.
@@ -1320,20 +1344,19 @@ jobs:
 
   windows:
     name: Rust on Windows (build + smoke test)
-    runs-on: ${{ vars.HARN_CI_DISABLE_BLACKSMITH_WINDOWS == 'true' && 'windows-latest' || ((github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'blacksmith-8vcpu-windows-2025' || 'windows-latest') }}
+    runs-on: ${{ vars.HARN_CI_DISABLE_BLACKSMITH_WINDOWS == 'true' && 'windows-latest' || 'blacksmith-8vcpu-windows-2025' }}
     permissions:
       contents: read
       actions: read
     timeout-minutes: 60
     needs: windows-plan
-    # Windows coverage stays off the default PR / merge-queue path, but runs
-    # before merge for Windows-sensitive process, sandbox, workflow, and release
-    # smoke changes. Other PRs still rely on the non-metadata main-push
-    # backstop plus the full windows-nightly.yml surface so routine edits avoid
-    # the 15-25 minute Windows compile long pole.
+    # Windows-sensitive candidates run once at merge-group admission. An exact
+    # successful candidate proof suppresses the identical main-push run; every
+    # uncertain or non-identical case retains the main backstop. Nightly keeps
+    # its independent full Windows surface.
     if: needs.windows-plan.outputs.run_windows == 'true'
     env:
-      HARN_RUNNER_TIER: ${{ vars.HARN_CI_DISABLE_BLACKSMITH_WINDOWS == 'true' && 'github-hosted' || ((github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'blacksmith' || 'github-hosted') }}
+      HARN_RUNNER_TIER: ${{ vars.HARN_CI_DISABLE_BLACKSMITH_WINDOWS == 'true' && 'github-hosted' || 'blacksmith' }}
       # EXPERIMENT (toggle via the HARN_WINDOWS_LLD repo variable): drive rustc
       # at the toolchain-bundled rust-lld instead of MSVC link.exe — the Windows
       # analog of the `-Clink-arg=-fuse-ld=mold` the Linux rust-checks lane uses.
@@ -2218,10 +2241,10 @@ jobs:
             fi
           fi
 
-          # The Windows job runs on `push` to main and on pull requests whose
-          # diff touches Windows-sensitive process/sandbox/workflow paths. It
-          # skips on routine PRs and merge_group events. Treat `skipped` as
-          # passing here; only an actual failure should fail the gate.
+          # Native Windows runs once on a Windows-sensitive merge-group
+          # candidate. Its exact successful proof suppresses the identical
+          # main push; missing or unsafe proof retains the main fallback.
+          # Treat a planned skip as passing; only an actual failure fails.
           windows_result="${{ needs.windows.result }}"
           echo "Rust on Windows (build + smoke test): $windows_result"
           if [ "$windows_result" != "success" ] && [ "$windows_result" != "skipped" ]; then

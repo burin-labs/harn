@@ -221,12 +221,20 @@ path_matches_platform() {
   esac
 }
 
-if [[ "$event_name" != "push" && "$event_name" != "pull_request" ]]; then
+if [[ "$event_name" != "push" && "$event_name" != "pull_request" && "$event_name" != "merge_group" ]]; then
   echo false
   exit 0
 fi
 
-if { { [[ "$event_name" == "pull_request" ]] && is_release_head_ref "$head_ref"; } || [[ "$event_name" == "push" ]]; } \
+# Native Windows admission belongs to the queued candidate. A PR-head build is
+# nearby evidence, not proof of the rebased/squashed tree that will land.
+if [[ "$platform" == "windows" && "$event_name" == "pull_request" ]]; then
+  echo false
+  exit 0
+fi
+
+if { { [[ "$event_name" == "pull_request" ]] && is_release_head_ref "$head_ref"; } \
+  || [[ "$event_name" == "push" || "$event_name" == "merge_group" ]]; } \
   && release_metadata_only "$changed_files"; then
   echo false
   exit 0

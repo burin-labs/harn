@@ -1462,17 +1462,13 @@ pub fn windows_release_certify_warm_errors(
 }
 
 fn windows_blacksmith_runner_expression() -> string {
-  const eligible_event =
-    "(github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))"
   return "$"
-    + "{{ vars.${WINDOWS_BLACKSMITH_DISABLE_VAR} == 'true' && '${HOSTED_WINDOWS_RUNNER}' || (${eligible_event} && '${BLACKSMITH_8CPU_WINDOWS_RUNNER}' || '${HOSTED_WINDOWS_RUNNER}') }}"
+    + "{{ vars.${WINDOWS_BLACKSMITH_DISABLE_VAR} == 'true' && '${HOSTED_WINDOWS_RUNNER}' || '${BLACKSMITH_8CPU_WINDOWS_RUNNER}' }}"
 }
 
 fn windows_blacksmith_tier_expression() -> string {
-  const eligible_event =
-    "(github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))"
   return "$"
-    + "{{ vars.${WINDOWS_BLACKSMITH_DISABLE_VAR} == 'true' && '${HOSTED_RUNNER_TIER}' || (${eligible_event} && '${BLACKSMITH_RUNNER_TIER}' || '${HOSTED_RUNNER_TIER}') }}"
+    + "{{ vars.${WINDOWS_BLACKSMITH_DISABLE_VAR} == 'true' && '${HOSTED_RUNNER_TIER}' || '${BLACKSMITH_RUNNER_TIER}' }}"
 }
 
 fn windows_pr_dev_drive_guard() -> string {
@@ -1503,7 +1499,7 @@ fn windows_pr_runner_errors(policy: CiCachePolicy, job, producer) -> list<string
   if trim(job?.["runs-on"] ?? "") != windows_blacksmith_runner_expression() {
     errors = errors
       + [
-      "ci.yml:windows must route merge_group and same-repository pull_request to ${BLACKSMITH_8CPU_WINDOWS_RUNNER}, with ${WINDOWS_BLACKSMITH_DISABLE_VAR}=true and external events falling back to ${HOSTED_WINDOWS_RUNNER}",
+      "ci.yml:windows must use ${BLACKSMITH_8CPU_WINDOWS_RUNNER} for candidate and main fallback proof, with ${WINDOWS_BLACKSMITH_DISABLE_VAR}=true falling back to ${HOSTED_WINDOWS_RUNNER}",
     ]
   }
   if trim(job?.env?.[RUNNER_TIER_ENV] ?? "") != windows_blacksmith_tier_expression() {
