@@ -526,15 +526,14 @@ fn workflows() {
               run: "./scripts/ci/windows_storage_budget.sh report after_restore",
             },
             {
+              name: "Compile Windows tests and run unit slice",
+              env: {RUST_MIN_STACK: "16777216"},
+              run: "cargo nextest run --features internal-freshness-checker",
+            },
+            {
               name: "Produce exact Windows Harn binary",
               run:
                 "HARN_BIN='' ./scripts/ci_warm_harn_bin.sh --profile test --github-env \"$GITHUB_ENV\"",
-            },
-            {
-              name: "Compile Windows tests and run unit slice",
-              env: {RUST_MIN_STACK: "16777216"},
-              run:
-                "HARN_BIN='' HARN_BIN_NO_BUILD=1 ./scripts/harn_bin.sh --no-build --print\ncargo nextest run --features internal-freshness-checker",
             },
             {
               name: "Smoke test harn run",
@@ -1104,7 +1103,30 @@ pipeline test_windows_storage_budget_rejects_small_full_drive_duplicate_profile_
   assert(
     windows_pr_native_feedback_errors(policy(), duplicate_profile, declared["windows-nightly.yml"])
       .contains(
-        "ci.yml:windows must publish its freshness receipt from the Cargo test profile before nextest",
+        "ci.yml:windows must publish its test-profile freshness receipt after native Cargo and before smoke",
+      ),
+  )
+  const early_producer = {
+    ...declared["ci.yml"],
+    jobs: {
+      ...declared["ci.yml"].jobs,
+      windows: {
+        ...windows,
+        steps: windows.steps.filter(
+          { step -> trim(step?.name ?? "") == "Produce exact Windows Harn binary" },
+        )
+          .to_list()
+          + windows.steps.filter(
+          { step -> trim(step?.name ?? "") != "Produce exact Windows Harn binary" },
+        )
+          .to_list(),
+      },
+    },
+  }
+  assert(
+    windows_pr_native_feedback_errors(policy(), early_producer, declared["windows-nightly.yml"])
+      .contains(
+        "ci.yml:windows must publish its test-profile freshness receipt after native Cargo and before smoke",
       ),
   )
   const rebuilding_tail = {
@@ -1128,7 +1150,7 @@ pipeline test_windows_storage_budget_rejects_small_full_drive_duplicate_profile_
   assert(
     windows_pr_native_feedback_errors(policy(), rebuilding_tail, declared["windows-nightly.yml"])
       .contains(
-        "ci.yml:windows must consume the produced Harn receipt without a fallback or feature-drift rebuild",
+        "ci.yml:windows native tests must keep the producer feature graph aligned without resolving Harn",
       ),
   )
   const feature_drift = {
@@ -1142,11 +1164,7 @@ pipeline test_windows_storage_budget_rejects_small_full_drive_duplicate_profile_
             if trim(step?.name ?? "") != "Compile Windows tests and run unit slice" {
               return step
             }
-            return {
-              ...step,
-              run:
-                "HARN_BIN='' HARN_BIN_NO_BUILD=1 ./scripts/harn_bin.sh --no-build --print\ncargo nextest run",
-            }
+            return {...step, run: "cargo nextest run"}
           },
         )
           .to_list(),
@@ -1156,7 +1174,7 @@ pipeline test_windows_storage_budget_rejects_small_full_drive_duplicate_profile_
   assert(
     windows_pr_native_feedback_errors(policy(), feature_drift, declared["windows-nightly.yml"])
       .contains(
-        "ci.yml:windows must consume the produced Harn receipt without a fallback or feature-drift rebuild",
+        "ci.yml:windows native tests must keep the producer feature graph aligned without resolving Harn",
       ),
   )
   const direct_smoke = {

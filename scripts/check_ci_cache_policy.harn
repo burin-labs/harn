@@ -1601,25 +1601,29 @@ fn windows_storage_budget_errors(job) -> list<string> {
     "HARN_BIN='' ./scripts/ci_warm_harn_bin.sh --profile test --github-env \"$GITHUB_ENV\"",
   )
     || step_index_by_name(steps, WINDOWS_BINARY_PRODUCER_STEP)
-    >= step_index_by_name(
+    <= step_index_by_name(
     steps,
     WINDOWS_TEST_STEP,
+  )
+    || step_index_by_name(steps, WINDOWS_BINARY_PRODUCER_STEP)
+    >= step_index_by_name(
+    steps,
+    WINDOWS_SMOKE_STEP,
   ) {
     errors = errors
       + [
-      "ci.yml:windows must publish its freshness receipt from the Cargo test profile before nextest",
+      "ci.yml:windows must publish its test-profile freshness receipt after native Cargo and before smoke",
     ]
   }
   const test_body = trim(test_step?.run ?? "")
-  if contains(test_body, "HARN_BIN_NO_BUILD=0")
+  if contains(test_body, "./scripts/harn_bin.sh")
     || !contains(
     test_body,
-    "HARN_BIN_NO_BUILD=1 ./scripts/harn_bin.sh --no-build --print",
-  )
-    || !contains(test_body, "--features internal-freshness-checker") {
+    "--features internal-freshness-checker",
+  ) {
     errors = errors
       + [
-      "ci.yml:windows must consume the produced Harn receipt without a fallback or feature-drift rebuild",
+      "ci.yml:windows native tests must keep the producer feature graph aligned without resolving Harn",
     ]
   }
   const smoke_step = step_by_name(job?.steps ?? [], WINDOWS_SMOKE_STEP)

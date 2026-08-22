@@ -750,11 +750,9 @@ cp -p "$cargo_fixture_bin" "$tmp_root/cargo-fixture-source-v1-bin"
 
 # Cargo owns its top-level checker output and may replace it while compiling
 # later test targets. The receipt binds the producer's immutable checker
-# snapshot instead, so ordinary Cargo checker churn cannot invalidate Harn;
-# mutation of the published proof checker itself still fails closed.
+# snapshot instead, so ordinary Cargo checker churn cannot invalidate Harn.
 cargo_fixture_cargo_checker="$(harn_cargo_freshness_checker_path "$cargo_fixture_bin")"
 cargo_fixture_proof_checker="$(harn_binary_freshness_checker_path "$cargo_fixture_bin")"
-cp -p "$cargo_fixture_cargo_checker" "$tmp_root/cargo-checker.saved"
 printf '\nlegitimate-cargo-relink\n' >> "$cargo_fixture_cargo_checker"
 (
   cd "$cargo_fixture"
@@ -762,25 +760,6 @@ printf '\nlegitimate-cargo-relink\n' >> "$cargo_fixture_cargo_checker"
     "$repo_root/scripts/harn_bin.sh" --no-build --print \
     > "$tmp_root/cargo-checker-churn.out"
 )
-cp -p "$cargo_fixture_proof_checker" "$tmp_root/proof-checker.saved"
-printf '\nunproven-proof-replacement\n' >> "$cargo_fixture_proof_checker"
-if (
-  cd "$cargo_fixture"
-  CARGO_TARGET_DIR="$cargo_target" PATH="$no_cargo_bin:$PATH" \
-    "$repo_root/scripts/harn_bin.sh" --no-build --print \
-    > "$tmp_root/proof-checker-stale.out" \
-    2> "$tmp_root/proof-checker-stale.err"
-); then
-  echo "no-build accepted a changed published freshness checker" >&2
-  exit 1
-fi
-if ! grep -Fq 'freshness checker or manifest changed' \
-  "$tmp_root/proof-checker-stale.err"; then
-  echo "changed proof-checker failure was not attributable" >&2
-  cat "$tmp_root/proof-checker-stale.err" >&2
-  exit 1
-fi
-cp -p "$tmp_root/proof-checker.saved" "$cargo_fixture_proof_checker"
 
 # A tracked content edit remains stale even when its mtime is forced older than
 # the executable. This is the blind spot of a timestamp-only depfile query and
@@ -1118,6 +1097,27 @@ for producer in "$repo_root/scripts/dev_setup.sh" "$repo_root/scripts/release_ga
     exit 1
   fi
 done
+
+# The producer-owned checker snapshot is itself part of the proof. Exercise
+# that terminal falsifier last: restoring bytes cannot restore filesystem
+# identity, and no later assertion should pretend the receipt is valid again.
+printf '\nunproven-proof-replacement\n' >> "$cargo_fixture_proof_checker"
+if (
+  cd "$cargo_fixture"
+  CARGO_TARGET_DIR="$cargo_target" PATH="$no_cargo_bin:$PATH" \
+    "$repo_root/scripts/harn_bin.sh" --no-build --print \
+    > "$tmp_root/proof-checker-stale.out" \
+    2> "$tmp_root/proof-checker-stale.err"
+); then
+  echo "no-build accepted a changed published freshness checker" >&2
+  exit 1
+fi
+if ! grep -Fq 'freshness checker or manifest changed' \
+  "$tmp_root/proof-checker-stale.err"; then
+  echo "changed proof-checker failure was not attributable" >&2
+  cat "$tmp_root/proof-checker-stale.err" >&2
+  exit 1
+fi
 if [[ -e "$fixture_lease_runner_marker" ]]; then
   echo "Cargo freshness fixture invoked an out-of-scope ambient lease runner" >&2
   exit 1

@@ -1488,9 +1488,6 @@ jobs:
       # three times in separate artifact sets; nextest package selection keeps
       # compile coverage focused while the filter limits the tests that
       # actually execute.
-      - name: Produce exact Windows Harn binary
-        shell: bash
-        run: HARN_BIN='' ./scripts/ci_warm_harn_bin.sh --profile test --github-env "$GITHUB_ENV"
       - name: Compile Windows tests and run unit slice
         shell: bash
         env:
@@ -1537,19 +1534,6 @@ jobs:
           fi
 
           echo "windows: cargo package args: ${package_args[*]}"
-          target_dir="${CARGO_TARGET_DIR:-target}"
-          # A transported executable is not proof of a current Cargo target.
-          # The preceding producer converged the exact test-profile binary and
-          # exported its receipt-bound build identity to every Cargo consumer.
-          jq --version
-          # Cargo metadata and current_exe() both return an absolute native
-          # target path. Normalize the shell-owned expectation once so this
-          # proof compares identities rather than relative/absolute spellings.
-          target_dir="$(cd "$target_dir" && pwd -P)"
-          # Fail before the expensive test graph unless the producer's receipt
-          # can be consumed without Cargo. The same no-build resolution after
-          # nextest proves intervening test commands retained that identity.
-          resolved="$(HARN_BIN='' HARN_BIN_NO_BUILD=1 ./scripts/harn_bin.sh --no-build --print)"
           if command -v cargo-nextest >/dev/null 2>&1; then
             # Some affected crate sets compile Windows-only surfaces but have
             # no tests matching the core unit filter; the compile itself is
@@ -1569,27 +1553,29 @@ jobs:
             bootstrap::freshness -- --nocapture
           cargo test --locked -p harn-cli --bin harn-freshness-check \
             --features internal-freshness-checker -- --nocapture
-          reused="$(HARN_BIN='' HARN_BIN_NO_BUILD=1 ./scripts/harn_bin.sh --no-build --print)"
-          if ! [[ "$resolved" == "$reused" && "$resolved" == "$target_dir/debug/harn.exe" ]]; then
-            printf 'Windows resolver mismatch: resolved=%q reused=%q expected=%q\n' \
-              "$resolved" "$reused" "$target_dir/debug/harn.exe" >&2
-            exit 1
-          fi
-          hook_resolved="$(
-            CARGO_TARGET_DIR="$target_dir" sh -c \
-              '. .githooks/lib.sh; hook_find_fresh_worktree_harn_bin'
-          )"
-          if [[ "$hook_resolved" != "$target_dir/debug/harn.exe" ]]; then
-            printf 'Windows hook mismatch: resolved=%q expected=%q\n' \
-              "$hook_resolved" "$target_dir/debug/harn.exe" >&2
-            exit 1
-          fi
           printf 'HARN_NATIVE_TEST_COMPLETED_EPOCH=%s\n' "$(date +%s)" >> "$GITHUB_ENV"
+      # Cargo owns every top-level target artifact until the last native test
+      # command returns. Publish the one receipt only after that mutation
+      # boundary; smoke then has no legal path that can relink the artifact.
+      - name: Produce exact Windows Harn binary
+        shell: bash
+        run: HARN_BIN='' ./scripts/ci_warm_harn_bin.sh --profile test --github-env "$GITHUB_ENV"
       - name: Smoke test harn run
         shell: bash
         run: |
           smoke_started="$(date +%s)"
           harn_bin="$(HARN_BIN='' HARN_BIN_NO_BUILD=1 ./scripts/harn_bin.sh --no-build --print)"
+          target_dir="$(cd "${CARGO_TARGET_DIR:-target}" && pwd -P)"
+          hook_resolved="$(
+            CARGO_TARGET_DIR="$target_dir" sh -c \
+              '. .githooks/lib.sh; hook_find_fresh_worktree_harn_bin'
+          )"
+          if [[ "$harn_bin" != "$target_dir/debug/harn.exe" \
+            || "$hook_resolved" != "$harn_bin" ]]; then
+            printf 'Windows proof mismatch: resolved=%q hook=%q expected=%q\n' \
+              "$harn_bin" "$hook_resolved" "$target_dir/debug/harn.exe" >&2
+            exit 1
+          fi
           echo 'fn main(harness: Harness) { harness.stdio.println("ok") }' > smoke.harn
           "$harn_bin" run smoke.harn
           printf 'windows_native_test_to_smoke_seconds=%s\n' \
