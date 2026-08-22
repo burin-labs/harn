@@ -443,7 +443,7 @@ fi
 if [[ "${1:-}" == "check-protocol-artifacts" && -n "${FAKE_WARMED_HARN_VERSION:-}" ]]; then
   workspace_version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -1)"
   if [[ "$workspace_version" != "$FAKE_WARMED_HARN_VERSION" ]] &&
-    [[ " $* " != *" HARN_PROTOCOL_ARTIFACT_VERSION=$workspace_version "* ]]; then
+    [[ " $* " != *" PROTOCOL_ARTIFACT_VERSION=$workspace_version "* ]]; then
     echo "older warmed Harn binary checked bumped protocol artifacts without the workspace version" >&2
     exit 20
   fi
@@ -924,7 +924,7 @@ preserved_harn="$(grep -F "dump-protocol-artifacts --artifact-version 1.2.4" "$a
 # A later generated audit must tell that binary to check the workspace version,
 # not the version embedded when the binary was built.
 FAKE_WARMED_HARN_VERSION=1.2.3 run_audit bumped-metadata --receipt "$receipt"
-if ! grep -Fq "make check-protocol-artifacts HARN_PROTOCOL_ARTIFACT_VERSION=1.2.4" "$audit_record"; then
+if ! grep -Fq "make check-protocol-artifacts PROTOCOL_ARTIFACT_VERSION=1.2.4" "$audit_record"; then
   echo "release audit did not check bumped protocol artifacts against the workspace version" >&2
   cat "$audit_record" >&2
   exit 1

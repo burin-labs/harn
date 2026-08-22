@@ -522,6 +522,11 @@ mod tests {
 
     #[test]
     fn every_compiled_harn_name_is_registered_or_structurally_owned() {
+        let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .nth(2)
+            .expect("harn-vm lives below workspace/crates");
+        let protocol_symbols = protocol_artifact_symbol_names(workspace_root);
         let crates_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .expect("harn-vm lives below crates");
@@ -536,12 +541,14 @@ mod tests {
                         .path()
                         .components()
                         .any(|component| component.as_os_str() == "src")
+                    && !is_protocol_artifact_projection(entry.path())
                     && entry.file_name() != "environment_registry.rs"
             })
         {
             let source = std::fs::read_to_string(entry.path()).expect("read Rust source");
             for token in harn_name_tokens(&source) {
                 if variable_spec(token).is_none()
+                    && !protocol_symbols.contains(token)
                     && !matches!(token, "HARN_LLM_" | "HARN_LLM_ROLE_" | "HARN_SECRET_")
                 {
                     missing.insert(format!("{}: {token}", entry.path().display()));
@@ -573,6 +580,7 @@ mod tests {
             "scripts",
             "tests",
         ];
+        let protocol_symbols = protocol_artifact_symbol_names(workspace_root);
         let mut missing = std::collections::BTreeSet::new();
         for source_root in source_roots {
             let source_root = workspace_root.join(source_root);
@@ -590,6 +598,7 @@ mod tests {
                 let source = std::fs::read_to_string(entry.path()).expect("read Harn source");
                 for token in harn_name_tokens(&source) {
                     if variable_spec(token).is_none()
+                        && !protocol_symbols.contains(token)
                         && !matches!(
                             token,
                             "HARN_AGENT"
@@ -728,16 +737,17 @@ mod tests {
         );
     }
 
-    /// Registered names that no repository source reads, and why they must
+    /// Registered names that have no repository-owned reference, and why they must
     /// stay. Every entry is a standing exception to the reverse drift gate, so
-    /// it carries the reason a reader cannot exist in this tree. An entry whose
-    /// name gains a reader is rejected too, which keeps the list from rotting.
+    /// it carries the reason a source reference cannot exist in this tree. An
+    /// entry that gains an owner is rejected too, which keeps the list from
+    /// rotting.
     const UNREAD_NAME_ALLOWLIST: &[(&str, &str)] = &[];
 
     /// Build output, caches, vendored dependencies, and nested checkouts are
-    /// not sources of truth for who reads a variable. A nested worktree is the
-    /// dangerous one: it carries its own copy of the registry and of every
-    /// reader, so walking into it would make any name look alive.
+    /// not sources of truth for variable ownership. A nested worktree is the
+    /// dangerous one: it carries its own copy of the registry and literals, so
+    /// walking into it would make any name look alive.
     fn is_pruned_reference_directory(entry: &walkdir::DirEntry) -> bool {
         if !entry.file_type().is_dir() {
             return false;
@@ -764,11 +774,25 @@ mod tests {
             )
     }
 
+    /// Generated protocol names describe wire contracts; they are not process
+    /// environment reads. Exclude both their generator and generated output so
+    /// a public constant cannot accidentally keep an environment variable alive.
+    fn is_protocol_artifact_projection(path: &std::path::Path) -> bool {
+        path.components().any(|component| {
+            matches!(
+                component.as_os_str().to_str(),
+                Some("dump_protocol_artifacts" | "protocol-artifacts")
+            )
+        })
+    }
+
     /// Prose can mention a retired name forever, so release notes and docs do
-    /// not count as a reader. The registry itself is excluded for the same
-    /// reason the forward gates exclude it: listing a name is not reading it.
+    /// not count as owners. Registries and protocol projections are excluded
+    /// for the same reason: listing a name is not an environment contract.
     fn is_reference_source(path: &std::path::Path) -> bool {
-        if path.extension().and_then(OsStr::to_str) == Some("md") {
+        if path.extension().and_then(OsStr::to_str) == Some("md")
+            || is_protocol_artifact_projection(path)
+        {
             return false;
         }
         !matches!(
@@ -777,11 +801,75 @@ mod tests {
         )
     }
 
+    /// The generated Rust projection is the authority for public protocol
+    /// symbol names. Deriving this set keeps the environment registry from
+    /// maintaining a second list of `HARN_*` constants.
+    fn protocol_artifact_symbol_names(
+        workspace_root: &std::path::Path,
+    ) -> std::collections::BTreeSet<String> {
+        let path = workspace_root.join("spec/protocol-artifacts/harn-protocol.rs");
+        let source = std::fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+        bounded_harn_tokens(&source).map(str::to_string).collect()
+    }
+
+    #[test]
+    fn protocol_artifact_names_are_not_environment_references() {
+        let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .nth(2)
+            .expect("harn-vm lives below workspace/crates");
+        let protocol_symbols = protocol_artifact_symbol_names(workspace_root);
+        let generator = std::path::Path::new(
+            "crates/harn-cli/src/commands/dump_protocol_artifacts/typescript.rs",
+        );
+        let projection = std::path::Path::new("spec/protocol-artifacts/harn-protocol.ts");
+        let runtime = std::path::Path::new("crates/harn-vm/src/llm/call.rs");
+
+        assert!(is_protocol_artifact_projection(generator));
+        assert!(is_protocol_artifact_projection(projection));
+        assert!(!is_reference_source(generator));
+        assert!(!is_reference_source(projection));
+        assert!(is_reference_source(runtime));
+        assert!(variable_spec("HARN_AGENT_EVENT_KINDS").is_none());
+        assert!(variable_spec("HARN_WORKER_STATUSES").is_none());
+        assert!(protocol_symbols.contains("HARN_PROTOCOL_ARTIFACT_VERSION"));
+        assert!(protocol_symbols.contains("HARN_AGENT_EVENT_KINDS"));
+        assert!(!protocol_symbols.contains("HARN_ACP_VERBOSE"));
+    }
+
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    enum EnvironmentReferenceSyntax {
+        StringLiteral,
+        ShellLike,
+    }
+
+    fn environment_reference_syntax(path: &std::path::Path) -> EnvironmentReferenceSyntax {
+        let file_name = path.file_name().and_then(OsStr::to_str).unwrap_or_default();
+        let extension = path.extension().and_then(OsStr::to_str).unwrap_or_default();
+        if matches!(file_name, "Makefile" | "GNUmakefile")
+            || file_name.starts_with(".env")
+            || matches!(
+                extension,
+                "bash" | "bat" | "cmd" | "fish" | "mk" | "ps1" | "sh" | "yaml" | "yml" | "zsh"
+            )
+        {
+            EnvironmentReferenceSyntax::ShellLike
+        } else {
+            EnvironmentReferenceSyntax::StringLiteral
+        }
+    }
+
+    fn environment_reference_tokens<'a>(path: &std::path::Path, source: &'a str) -> Vec<&'a str> {
+        match environment_reference_syntax(path) {
+            EnvironmentReferenceSyntax::StringLiteral => harn_name_tokens(source).collect(),
+            EnvironmentReferenceSyntax::ShellLike => bounded_harn_tokens(source).collect(),
+        }
+    }
+
     /// Every maximal `HARN_*` token that starts at an identifier boundary.
-    ///
-    /// The left boundary matters: `FAKE_HARN_RECORD` and `STDLIB_HARN_DIR` are
-    /// unrelated local identifiers that merely end in a registered name, and
-    /// counting them as readers is what let dead entries look alive.
+    /// Shell, Make, and YAML reference variables without quoting their names;
+    /// compiled languages use the literal-only scanner instead.
     #[expect(
         clippy::string_slice,
         reason = "start/end bound an ASCII HARN_* token found by match_indices"
@@ -807,18 +895,18 @@ mod tests {
         })
     }
 
-    /// The forward gates only prove that every name a source reads is
-    /// registered. Without the reverse direction, a name whose reader is
-    /// deleted—or that was never a variable at all—stays registered forever,
-    /// keeps passing startup validation, and reads as a supported knob that
-    /// silently does nothing.
+    /// The forward gates prove that every environment-shaped source reference
+    /// is registered. The reverse direction rejects rows whose owner vanished,
+    /// while generated protocol identifiers cannot keep unrelated environment
+    /// knobs alive in compiled languages.
     #[test]
-    fn every_registered_name_is_read_somewhere_in_the_tree() {
+    fn every_registered_name_has_a_non_projection_source_reference() {
         let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .ancestors()
             .nth(2)
             .expect("harn-vm lives below workspace/crates");
         let mut referenced = std::collections::BTreeSet::new();
+        let protocol_symbols = protocol_artifact_symbol_names(workspace_root);
         for entry in walkdir::WalkDir::new(workspace_root)
             .into_iter()
             .filter_entry(|entry| !is_pruned_reference_directory(entry))
@@ -828,8 +916,10 @@ mod tests {
             let Ok(source) = std::fs::read_to_string(entry.path()) else {
                 continue;
             };
-            for token in bounded_harn_tokens(&source) {
-                referenced.insert(token.to_string());
+            for token in environment_reference_tokens(entry.path(), &source) {
+                if !protocol_symbols.contains(token) {
+                    referenced.insert(token.to_string());
+                }
             }
         }
 
@@ -847,15 +937,15 @@ mod tests {
             "allowlisted names are not in environment_registry_names.txt:\n{}",
             unregistered_allowlist.join("\n")
         );
-        let readable_allowlist = allowed
+        let owned_allowlist = allowed
             .iter()
             .copied()
             .filter(|name| referenced.contains(*name))
             .collect::<Vec<_>>();
         assert!(
-            readable_allowlist.is_empty(),
-            "allowlisted names now have readers; drop them from UNREAD_NAME_ALLOWLIST:\n{}",
-            readable_allowlist.join("\n")
+            owned_allowlist.is_empty(),
+            "allowlisted names now have source owners; drop them from UNREAD_NAME_ALLOWLIST:\n{}",
+            owned_allowlist.join("\n")
         );
 
         let unread = registered_names()
@@ -865,9 +955,35 @@ mod tests {
             .collect::<Vec<_>>();
         assert!(
             unread.is_empty(),
-            "registered names no source reads; delete them from \
+            "registered names have no source owner; delete them from \
              environment_registry_names.txt or allowlist them with a reason:\n{}",
             unread.join("\n")
+        );
+    }
+
+    #[test]
+    fn environment_reference_scan_dispatches_by_source_syntax() {
+        let compiled = concat!(
+            "const HARN_AGENT_EVENT_KINDS: &[&str] = &[];\n",
+            "const ENV: &str = \"HARN_REAL_ENVIRONMENT_KNOB\";\n",
+        );
+        assert_eq!(
+            environment_reference_tokens(std::path::Path::new("runtime.rs"), compiled),
+            vec!["HARN_REAL_ENVIRONMENT_KNOB"]
+        );
+        assert_eq!(
+            environment_reference_tokens(
+                std::path::Path::new("bench.sh"),
+                "cache=${HARN_BENCH_CACHE_DIR:-target}\n",
+            ),
+            vec!["HARN_BENCH_CACHE_DIR"]
+        );
+        assert_eq!(
+            environment_reference_tokens(
+                std::path::Path::new("Makefile"),
+                "HARN_BIN_ASSIGN = harn_bin\n",
+            ),
+            vec!["HARN_BIN_ASSIGN"]
         );
     }
 
