@@ -182,6 +182,20 @@ if [[ -e "$tmpdir/restored/debug/deps/libharn_vm-def456.rlib" ]]; then
   exit 1
 fi
 
+echo "restore resolves a workspace-relative target before entering staging"
+rm -rf "$tmpdir/work/relative-target"
+(
+  cd "$tmpdir/work"
+  env \
+    PATH="$tmpdir/bin:$PATH" \
+    HARN_CACHE_POLICY_PATH="$HARN_CACHE_POLICY_PATH" \
+    FAKE_RUSTC_IDENTITY="rustc 1.95.0 (fake)" \
+    CARGO_INCREMENTAL=0 \
+    RUSTFLAGS="-D warnings" \
+    "$script" restore "$tmpdir/out/staging" relative-target
+)
+test -f "$tmpdir/work/relative-target/debug/deps/libserde-abc123.rlib"
+
 echo "restore rejects rustflags drift"
 if (
   cd "$tmpdir/work"
