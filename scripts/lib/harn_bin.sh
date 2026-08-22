@@ -202,13 +202,15 @@ harn_run_cargo_probe_with_deadline() (
   local build_freshness_id="${HARN_BUILD_FRESHNESS_ID:-}"
   local -a cargo_config_args=()
   local clear_freshness_environment=0
+  local lease_mode=""
 
   timeout_seconds="$(harn_cargo_probe_timeout_seconds)" || return $?
   if [[ ! "$build_freshness_id" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]]; then
     echo "error: internal Harn build freshness identity is missing or malformed" >&2
     return 1
   fi
-  if [[ "${HARN_CARGO_LEASE_MODE:-}" != "off" ]]; then
+  lease_mode="$(harn_effective_cargo_lease_mode)" || return $?
+  if [[ "$lease_mode" != "off" ]]; then
     clear_freshness_environment=1
     cargo_config_args+=(--config "env.HARN_BUILD_FRESHNESS_ID='$build_freshness_id'")
   fi
@@ -347,6 +349,7 @@ harn_resolve_binary() (
   local lease_runner_snapshot=""
   local installed_lease_runner=""
   local configured_lease_runner=""
+  local lease_mode=""
 
   cleanup_lease_runner_snapshot() {
     [[ -z "$lease_runner_snapshot_dir" ]] || rm -rf "$lease_runner_snapshot_dir"
@@ -379,6 +382,9 @@ harn_resolve_binary() (
   fi
 
   retry_without_wrapper="$(harn_retry_without_wrapper)" || return $?
+  lease_mode="$(harn_effective_cargo_lease_mode)" || return $?
+  HARN_CARGO_LEASE_MODE="$lease_mode"
+  export HARN_CARGO_LEASE_MODE
 
   harn_export_cargo_build_dir_for_target "${CARGO_TARGET_DIR:-}" || true
   if [[ -z "${CARGO_TARGET_DIR:-}" ]]; then

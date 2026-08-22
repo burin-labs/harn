@@ -16,6 +16,33 @@ harn_cargo_metadata_target_dir() (
   printf '%s\n' "$target_dir"
 )
 
+# Resolve the lease policy once for every Cargo entry point. CI intentionally
+# runs without a local cross-process lease unless a caller explicitly supplies
+# one; developer shells default to auto-discovery, while an explicit runner is
+# a required authority. Keeping this policy here prevents wrappers and their
+# callers from disagreeing about whether control environment must traverse a
+# lease supervisor.
+harn_effective_cargo_lease_mode() {
+  lease_mode=${HARN_CARGO_LEASE_MODE:-}
+  if [ -z "$lease_mode" ]; then
+    if [ -n "${HARN_CARGO_LEASE_RUNNER:-}" ]; then
+      lease_mode=required
+    elif [ "${CI:-}" = "true" ]; then
+      lease_mode=off
+    else
+      lease_mode=auto
+    fi
+  fi
+
+  case "$lease_mode" in
+    auto | off | required) printf '%s\n' "$lease_mode" ;;
+    *)
+      echo "error: HARN_CARGO_LEASE_MODE must be auto, off, or required" >&2
+      return 2
+      ;;
+  esac
+}
+
 harn_export_cargo_build_dir_for_target() {
   target_dir=${1:-${CARGO_TARGET_DIR:-}}
   if [ -z "$target_dir" ]; then

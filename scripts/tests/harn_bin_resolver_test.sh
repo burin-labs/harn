@@ -126,6 +126,11 @@ fi
   printf 'CARGO_BUILD_RUSTC_WRAPPER=%s\n' "${CARGO_BUILD_RUSTC_WRAPPER-__unset__}"
   printf 'CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER=%s\n' "${CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER-__unset__}"
   printf 'SCCACHE_DISABLE=%s\n' "${SCCACHE_DISABLE-__unset__}"
+  if [[ -n "${HARN_BUILD_FRESHNESS_ID:-}" ]]; then
+    printf 'HARN_BUILD_FRESHNESS_ID=<set>\n'
+  else
+    printf 'HARN_BUILD_FRESHNESS_ID=__unset__\n'
+  fi
 } >> "$FAKE_CARGO_RECORD"
 
 case "${FAKE_CARGO_MODE:-success}" in
@@ -339,6 +344,36 @@ fi
 if ! grep -Fxq "CARGO_BUILD_BUILD_DIR=$target_dir" "$record"; then
   echo "harn_bin resolver did not align Cargo build-dir with CARGO_TARGET_DIR" >&2
   cat "$record" >&2
+  exit 1
+fi
+
+# CI's default lease policy is off. The resolver and Cargo wrapper must agree
+# on that default so the build freshness input remains an ordinary process env
+# edge owned by harn-cli's build script. Injecting it through Cargo `--config`
+# invalidates unrelated package fingerprints and previously forced a second
+# native-Windows C/C++ dependency graph after the workspace tests were warm.
+ci_target_dir="$tmp_root/ci target"
+mkdir -p "$ci_target_dir/debug"
+: > "$record"
+env -u HARN_CARGO_LEASE_MODE -u HARN_CARGO_LEASE_RUNNER \
+  CI=true \
+  CARGO_TARGET_DIR="$ci_target_dir" \
+  FAKE_CARGO_RECORD="$record" \
+  PATH="$fake_cargo_bin:$PATH" \
+  "$repo_root/scripts/harn_bin.sh" --print > "$tmp_root/ci-cargo-run.out"
+if grep -Fq 'args=--config env.HARN_BUILD_FRESHNESS_ID=' "$record"; then
+  echo "CI-off resolver transported freshness through global Cargo config" >&2
+  cat "$record" >&2
+  exit 1
+fi
+if ! grep -Fxq "$probe_args" "$record" || \
+   ! grep -Fxq 'HARN_BUILD_FRESHNESS_ID=<set>' "$record"; then
+  echo "CI-off resolver did not preserve the scoped process freshness input" >&2
+  cat "$record" >&2
+  exit 1
+fi
+if [[ "$(cat "$tmp_root/ci-cargo-run.out")" != "$ci_target_dir/debug/harn" ]]; then
+  echo "CI-off resolver did not return the canonical built artifact" >&2
   exit 1
 fi
 # The fake lease runner above owns the integration assertion. Keep the

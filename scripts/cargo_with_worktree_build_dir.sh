@@ -13,26 +13,9 @@ lease_owner="${HARN_CARGO_LEASE_OWNER:-cargo-wrapper}"
 lease_host="${HARN_CARGO_LEASE_HOST:-}"
 lease_wait_ms="${HARN_CARGO_LEASE_WAIT_MS:-3600000}"
 lease_priority_class="${HARN_CARGO_LEASE_PRIORITY_CLASS:-interactive}"
-lease_mode="${HARN_CARGO_LEASE_MODE:-}"
-if [[ -z "$lease_mode" ]]; then
-  if [[ -n "$lease_runner_request" ]]; then
-    lease_mode="required"
-  elif [[ "${CI:-}" == "true" ]]; then
-    lease_mode="off"
-  else
-    lease_mode="auto"
-  fi
-fi
+lease_mode="$(harn_effective_cargo_lease_mode)" || exit $?
 unset HARN_CARGO_LEASE_RUNNER HARN_CARGO_LEASE_OWNER HARN_CARGO_LEASE_HOST \
   HARN_CARGO_LEASE_WAIT_MS HARN_CARGO_LEASE_PRIORITY_CLASS HARN_CARGO_LEASE_MODE
-
-case "$lease_mode" in
-  auto | off | required) ;;
-  *)
-    echo "error: HARN_CARGO_LEASE_MODE must be auto, off, or required" >&2
-    exit 2
-    ;;
-esac
 
 cargo_subcommand() {
   local arg=""
