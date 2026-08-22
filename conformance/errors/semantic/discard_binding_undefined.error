@@ -1,1 +1,1 @@
-Undefined variable: _
+discard name `_` is valid only in a binding or pattern
