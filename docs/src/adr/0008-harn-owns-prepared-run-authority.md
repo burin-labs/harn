@@ -76,7 +76,10 @@ Command-derived toolchain roots use a post-readiness discovery phase on the
 same lease. The plan reviews an exact probe command and root ceiling. The
 startup and readiness receipts exist before the probe runs, and every observed
 operation becomes a typed delta. Accepted roots attenuate the reviewed ceiling;
-any widening invalidates the lease and requires a new grouped decision.
+any widening is refused and receipted. The parent lease remains executable so
+the caller can decide whether discovery is optional or a startup precondition.
+Expiry, a probe outside the fingerprinted lease, or failed receipt persistence
+still invalidates the lease.
 
 Platform identity is distinct from secret lookup. A consumer-bound broker
 advertises its interaction, GUI, sandbox, renewal, source, and exact binding

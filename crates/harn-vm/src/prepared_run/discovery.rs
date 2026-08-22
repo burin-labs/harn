@@ -3,10 +3,15 @@ use serde_json::json;
 use crate::orchestration::PolicyEvaluation;
 
 use super::engine::{
-    approval_batch, diagnostic, evaluate_requirement, persist_terminally, policy_evidence,
-    receipted_requirements,
+    approval_batch, diagnostic, evaluate_requirement, policy_evidence, receipted_requirements,
 };
 use super::*;
+
+#[derive(Clone, Copy)]
+enum DiscoveryFailure {
+    Refusal,
+    Integrity,
+}
 
 pub trait ToolchainProbeRunner {
     fn run(&self, probe: &ToolchainProbeRequirement) -> Result<ToolchainProbeResult, String>;
@@ -25,15 +30,32 @@ impl<E> PreparedRun<E> {
         let now_ms = (self.now_ms)();
         let probe_requirement = AuthorityRequirement::ToolchainProbe(probe.clone());
         let probe_fingerprint = requirement_fingerprint(&probe_requirement);
-        let mut diagnostics = validate_probe(lease, &probe_requirement, &probe_fingerprint, now_ms);
+        let integrity_diagnostics =
+            validate_probe(lease, &probe_requirement, &probe_fingerprint, now_ms);
+        if !integrity_diagnostics.is_empty() {
+            return self.block_discovery(
+                lease,
+                integrity_diagnostics,
+                Vec::new(),
+                now_ms,
+                DiscoveryFailure::Integrity,
+            );
+        }
         let evaluation = evaluate_requirement(
             lease.approval_policy.effective(),
             &lease.net_policy,
             &probe_requirement,
         );
+        let mut diagnostics = Vec::new();
         validate_probe_policy(lease, &probe_fingerprint, &evaluation, &mut diagnostics);
         if !diagnostics.is_empty() {
-            return self.block_discovery(lease, diagnostics, Vec::new(), now_ms);
+            return self.block_discovery(
+                lease,
+                diagnostics,
+                Vec::new(),
+                now_ms,
+                DiscoveryFailure::Refusal,
+            );
         }
 
         lease.prior_used.insert(probe_fingerprint.clone());
@@ -44,17 +66,18 @@ impl<E> PreparedRun<E> {
         }
         let result = match runner.run(probe) {
             Ok(result) => result,
-            Err(error) => {
+            Err(_error) => {
                 return self.block_discovery(
                     lease,
                     vec![diagnostic(
                         "toolchain_probe_failed",
-                        error,
+                        "toolchain probe failed before producing discovery data",
                         Some(probe_fingerprint),
                         "Repair the exact probe command or choose a host with that toolchain.",
                     )],
                     Vec::new(),
                     now_ms,
+                    DiscoveryFailure::Refusal,
                 )
             }
         };
@@ -119,7 +142,13 @@ impl<E> PreparedRun<E> {
                 None,
                 "Run interactively or add the exact requirement to a newly prepared non-interactive run.",
             ));
-            return self.block_discovery(lease, diagnostics, denied, now_ms);
+            return self.block_discovery(
+                lease,
+                diagnostics,
+                denied,
+                now_ms,
+                DiscoveryFailure::Refusal,
+            );
         }
 
         let decider = lease
@@ -179,14 +208,9 @@ impl<E> PreparedRun<E> {
                 )],
                 Vec::new(),
                 now_ms,
+                DiscoveryFailure::Integrity,
             );
         }
-        lease.invalidated = Some(diagnostic(
-            "discovery_requires_reprepare",
-            "discovered authority requires a new grouped decision",
-            None,
-            "Add the reviewed requirements to a new run intent and prepare again.",
-        ));
         ToolchainDiscoveryOutcome::NeedsApproval {
             batched_requests: batch,
             receipt,
@@ -199,9 +223,10 @@ impl<E> PreparedRun<E> {
         mut diagnostics: Vec<AuthorityDiagnostic>,
         denied: Vec<DeniedAuthority>,
         now_ms: u64,
+        failure: DiscoveryFailure,
     ) -> ToolchainDiscoveryOutcome {
         lease.prior_denied.extend(denied);
-        let blocker = diagnostics.first().cloned().unwrap_or_else(|| {
+        let primary = diagnostics.first().cloned().unwrap_or_else(|| {
             diagnostic(
                 "toolchain_discovery_blocked",
                 "toolchain discovery was blocked",
@@ -209,12 +234,24 @@ impl<E> PreparedRun<E> {
                 "Inspect the authority receipt before retrying.",
             )
         });
-        lease.invalidated = Some(blocker);
+        if matches!(failure, DiscoveryFailure::Integrity) {
+            lease.invalidated = Some(primary);
+        }
         let mut receipt = discovery_receipt(lease, now_ms);
         receipt.stage = AuthorityReceiptStage::Blocked;
         receipt.status = AuthorityReceiptStatus::Blocked;
         receipt.diagnostics = diagnostics.clone();
-        persist_terminally(&*self.receipts, &mut diagnostics, &receipt);
+        if let Err(error) = self.receipts.persist(&receipt) {
+            let persistence = diagnostic(
+                "discovery_receipt_persistence",
+                error,
+                None,
+                "Repair receipt persistence before retrying discovery or executing the parent lease.",
+            );
+            lease.invalidated = Some(persistence.clone());
+            receipt.diagnostics.push(persistence.clone());
+            diagnostics.push(persistence);
+        }
         ToolchainDiscoveryOutcome::Blocked {
             diagnostics,
             receipt,
