@@ -41,12 +41,40 @@ pub fn state_root(base_dir: &Path) -> PathBuf {
     )
 }
 
+/// Resolve the state root for a path stored in a portable record.
+pub fn state_root_reference(base_dir: &Path) -> PathBuf {
+    let state_env_value = std::env::var(HARN_STATE_DIR_ENV).ok();
+    root_reference_value(
+        base_dir,
+        state_env_value.as_deref(),
+        ".harn",
+        nextest_attempt_root().as_deref(),
+        None,
+    )
+}
+
 pub fn run_root(base_dir: &Path) -> PathBuf {
     let run_env_value = std::env::var(HARN_RUN_DIR_ENV).ok();
     run_root_value(
         base_dir,
         run_env_value.as_deref(),
         nextest_attempt_root().as_deref(),
+    )
+}
+
+/// Resolve the run root for a path stored in a portable record.
+///
+/// The ordinary checkout-local default remains the relative `.harn-runs`
+/// reference existing records use. An explicit override or an isolated test
+/// attempt names a different physical root and therefore remains absolute.
+pub fn run_root_reference(base_dir: &Path) -> PathBuf {
+    let run_env_value = std::env::var(HARN_RUN_DIR_ENV).ok();
+    root_reference_value(
+        base_dir,
+        run_env_value.as_deref(),
+        ".harn-runs",
+        nextest_attempt_root().as_deref(),
+        Some("runs"),
     )
 }
 
@@ -141,6 +169,26 @@ fn run_root_value(
         nextest_root,
         Some("runs"),
     )
+}
+
+fn root_reference_value(
+    base_dir: &Path,
+    explicit_value: Option<&str>,
+    default_relative: &str,
+    nextest_root: Option<&Path>,
+    nextest_child: Option<&str>,
+) -> PathBuf {
+    if explicit_value.is_none_or(|value| value.trim().is_empty()) && nextest_root.is_none() {
+        PathBuf::from(default_relative)
+    } else {
+        attempt_scoped_root_value(
+            base_dir,
+            explicit_value,
+            default_relative,
+            nextest_root,
+            nextest_child,
+        )
+    }
 }
 
 fn attempt_scoped_root_value(
@@ -238,6 +286,14 @@ mod tests {
         assert_eq!(state_root_value(base, None, Some(&first)), first);
         assert_eq!(run_root_value(base, None, Some(&first)), first.join("runs"));
         assert_eq!(
+            root_reference_value(base, None, ".harn-runs", Some(&first), Some("runs")),
+            first.join("runs")
+        );
+        assert_eq!(
+            root_reference_value(base, None, ".harn", Some(&first), None),
+            first
+        );
+        assert_eq!(
             worktree_root_value(base, None, None, Some(&first)),
             first.join("worktrees")
         );
@@ -255,6 +311,20 @@ mod tests {
         );
         assert_eq!(
             run_root_value(base, Some("relative-runs"), Some(&other)),
+            base.join("relative-runs")
+        );
+        assert_eq!(
+            root_reference_value(base, None, ".harn-runs", None, Some("runs")),
+            PathBuf::from(".harn-runs")
+        );
+        assert_eq!(
+            root_reference_value(
+                base,
+                Some("relative-runs"),
+                ".harn-runs",
+                Some(&other),
+                Some("runs"),
+            ),
             base.join("relative-runs")
         );
         assert_eq!(
