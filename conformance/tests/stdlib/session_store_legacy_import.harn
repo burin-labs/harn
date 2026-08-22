@@ -37,6 +37,9 @@ pipeline default(harness: Harness) {
   harness.fs.write_text(legacy_path, json_stringify(legacy_event) + "\n")
   const legacy_before = harness.fs.read_text(legacy_path)
   const first = session_store_events(harness.agent, sid, {root: root})
+  if harness.fs.exists(path_join(root, ".harn", "session-store.sqlite")) {
+    throw "legacy inspection must project in memory instead of migrating durably"
+  }
   harness.stdio.println(len(first))
   const imported = first[0]
   if imported == nil {

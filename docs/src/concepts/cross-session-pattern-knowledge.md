@@ -35,17 +35,18 @@ agents and cloud agents share the same read/write path.
 ## Migration
 
 Burin previously wrote Swift-owned JSONL stores under
-`.harn/session-store/burin.agent_context.pattern_learning.*.jsonl`. On first
-use, the Harn module imports those observation, pending, and state records into
-`.harn/memory/project/pattern-learning/events.jsonl`, then writes
-`.burin-session-store-migrated-v1.json` inside that namespace. Hosts should call
-the Harn primitive on launch or first review instead of maintaining a parallel
-store.
+`.harn/session-store/burin.agent_context.pattern_learning.*.jsonl`.
+`pattern_learning_ensure_migrated` imports those observation, pending, and
+state records into `.harn/memory/project/pattern-learning/events.jsonl`, then
+writes `.burin-session-store-migrated-v1.json` inside that namespace. Mutating
+pattern-learning operations call that migration automatically. Read operations
+never migrate or write, so hosts that need legacy records during inspection
+should call the explicit migration once during a writable launch phase.
 
 Those per-stream files are migration inputs, not the current session-store
 backend. `std/session-store` now writes all streams through the canonical
 `harn-session-store` SQLite database at `.harn/session-store.sqlite`.
 
-The migration is intentionally lazy: projects that never used the old store pay
-no startup cost, and projects that did keep auditability because the imported
-records become ordinary append-only memory events.
+The migration remains lazy on writable paths: projects that never used the old
+store pay no startup cost, and projects that did keep auditability because the
+imported records become ordinary append-only memory events.
