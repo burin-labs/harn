@@ -42,7 +42,7 @@ const RELEASE_WARM_CACHE_PATH_POLICY = ".github/release-warm-cache-paths.yml"
 
 const RELEASE_BINARY_WORKFLOW = "build-release-binaries.yml"
 
-const RELEASE_PATH_FILTER_ACTION = "dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d"
+pub const RELEASE_PATH_FILTER_ACTION = "dorny/paths-filter"
 
 const CHECKOUT_ACTION_PREFIX = "actions/checkout@"
 
@@ -478,6 +478,14 @@ fn release_setup_checkout_errors(steps: list) -> list<string> {
   return []
 }
 
+fn release_path_filter_action_is_pinned(uses: string) -> bool {
+  const parts = uses.split("@")
+  if len(parts) != 2 || parts[0] != RELEASE_PATH_FILTER_ACTION {
+    return false
+  }
+  return regex_match(r"^[0-9a-fA-F]{40}$", parts[1]) != nil
+}
+
 /**
  * Keep warm-cache classification tied to compile/build topology, and prove the
  * workflow consumes the typed path policy rather than maintaining a second
@@ -509,10 +517,10 @@ pub fn release_warm_cache_path_policy_errors(
     ]
   }
   const filter_step = filter_steps[0]
-  if step_uses(filter_step) != RELEASE_PATH_FILTER_ACTION {
+  if !release_path_filter_action_is_pinned(step_uses(filter_step)) {
     errors = errors
       + [
-      "${RELEASE_BINARY_WORKFLOW}:setup must use the pinned release path-filter action",
+      "${RELEASE_BINARY_WORKFLOW}:setup must use ${RELEASE_PATH_FILTER_ACTION} pinned to a full commit SHA",
     ]
   }
   if trim(filter_step?.if ?? "") != RELEASE_PATH_FILTER_IF {
