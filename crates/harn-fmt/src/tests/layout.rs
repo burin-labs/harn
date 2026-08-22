@@ -162,22 +162,53 @@ fn wrapped_binary_operand_uses_its_actual_nested_layout() {
         once,
         r#"fn validate(opts) {
   const applies = config != nil
-    && (reason == "sentinel"
-      || reason == "natural"
-      || reason == "stalled")
+    && (reason == "sentinel" || reason == "natural" || reason == "stalled")
     && due
-  if opts?.threshold != nil
-    && (type_of(opts.threshold) != "int"
-      || opts.threshold < 1) {
+  if opts?.threshold != nil && (type_of(opts.threshold) != "int" || opts.threshold < 1) {
     return nil
   }
 }
 "#,
-        "a nested operand must not inherit the outer operator's indent or its abandoned inline column"
+        "a nested operand must use its real continuation indent and column without forcing an arbitrary vertical style"
+    );
+    assert!(
+        !once.lines().any(|line| line.trim_start().starts_with("||")),
+        "a grouped child that fits at its real column must not keep a shallow speculative continuation:\n{once}"
+    );
+    assert!(
+        once.contains("opts.threshold < 1"),
+        "the short comparison must fit at its real column:\n{once}"
     );
 
     let twice = format_source_opts(&once, &options).unwrap();
     assert_eq!(once, twice, "the nested layout must be byte-idempotent");
+    assert_roundtrip(source);
+}
+
+/// When a parent appends syntax to a branch's final line, that suffix is part
+/// of the branch's real width budget. Reflowing at the correct start column
+/// must not trade stale-column over-wrapping for a final-line overflow.
+#[test]
+fn reflowed_expression_reserves_its_parent_suffix() {
+    let source = r#"fn validate(passed, diagnostics, artifact, normalized_source, normalized_test) {
+  return passed ? diagnostics + {artifact: artifact + {source: normalized_source, test_source: normalized_test}} : diagnostics
+}
+"#;
+
+    let once = formatted(source);
+    assert!(
+        line_width_violations(&once, LINE_WIDTH_DEFAULT).is_empty(),
+        "a reflowed branch must reserve the suffix its parent appends:\n{once}"
+    );
+    assert!(
+        once.contains("\n    +"),
+        "the fixture must exercise a wrapped true branch:\n{once}"
+    );
+    assert_eq!(
+        once,
+        formatted(&once),
+        "the suffix-aware layout must settle"
+    );
     assert_roundtrip(source);
 }
 
