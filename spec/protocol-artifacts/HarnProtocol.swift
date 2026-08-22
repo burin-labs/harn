@@ -1496,6 +1496,18 @@ public enum HarnSideEffectLevel: String, Codable, Sendable, CaseIterable {
     ].map { Self(rawValue: $0)! }
 }
 
+public enum HarnCompletionEvidenceRole: String, Codable, Sendable, CaseIterable {
+    case observation = "observation"
+    case mutation = "mutation"
+    case verification = "verification"
+
+    public static let allCases: [Self] = [
+        "observation",
+        "mutation",
+        "verification",
+    ].map { Self(rawValue: $0)! }
+}
+
 public enum HarnWorkerStatus: String, Codable, Sendable, CaseIterable {
     case running = "running"
     case progressed = "progressed"
@@ -1598,6 +1610,7 @@ public enum HarnAgentTerminalKind: String, Codable, Sendable, CaseIterable {
     case natural = "natural"
     case userCancelled = "user_cancelled"
     case policyBudget = "policy_budget"
+    case completionUnverified = "completion_unverified"
     case policyNoProgress = "policy_no_progress"
     case policyGuardrail = "policy_guardrail"
     case policyStop = "policy_stop"
@@ -1610,6 +1623,7 @@ public enum HarnAgentTerminalKind: String, Codable, Sendable, CaseIterable {
         "natural",
         "user_cancelled",
         "policy_budget",
+        "completion_unverified",
         "policy_no_progress",
         "policy_guardrail",
         "policy_stop",
@@ -2695,6 +2709,7 @@ public struct HarnToolArgSchema: Codable, Sendable, Equatable {
 public struct HarnToolAnnotations: Codable, Sendable, Equatable {
     public var kind: HarnACPToolKind
     public var sideEffectLevel: HarnSideEffectLevel
+    public var completionEvidenceRole: HarnCompletionEvidenceRole?
     public var argSchema: HarnToolArgSchema
     public var capabilities: [String: [String]]
     public var emitsArtifacts: Bool
@@ -2704,6 +2719,7 @@ public struct HarnToolAnnotations: Codable, Sendable, Equatable {
     enum CodingKeys: String, CodingKey {
         case kind
         case sideEffectLevel = "side_effect_level"
+        case completionEvidenceRole = "completion_evidence_role"
         case argSchema = "arg_schema"
         case capabilities
         case emitsArtifacts = "emits_artifacts"

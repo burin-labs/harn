@@ -156,6 +156,7 @@ export const AGENT_TERMINAL_KINDS = [
   "natural",
   "user_cancelled",
   "policy_budget",
+  "completion_unverified",
   "policy_no_progress",
   "policy_guardrail",
   "policy_stop",
@@ -293,6 +294,13 @@ export const HARN_SIDE_EFFECT_LEVELS = [
   "desktop_control",
 ] as const
 export type HarnSideEffectLevel = (typeof HARN_SIDE_EFFECT_LEVELS)[number]
+
+export const HARN_COMPLETION_EVIDENCE_ROLES = [
+  "observation",
+  "mutation",
+  "verification",
+] as const
+export type HarnCompletionEvidenceRole = (typeof HARN_COMPLETION_EVIDENCE_ROLES)[number]
 
 export const HARN_WORKER_STATUSES = [
   "running",
@@ -1364,6 +1372,7 @@ export interface HarnToolArgSchema {
 export interface HarnToolAnnotations {
   kind: ACPToolKind
   side_effect_level: HarnSideEffectLevel
+  completion_evidence_role?: HarnCompletionEvidenceRole
   arg_schema: HarnToolArgSchema
   capabilities: Record<string, string[]>
   emits_artifacts: boolean

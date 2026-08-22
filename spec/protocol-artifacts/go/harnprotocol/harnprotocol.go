@@ -298,6 +298,16 @@ var HarnSideEffectLevels = []HarnSideEffectLevel{
 	"desktop_control",
 }
 
+// HarnCompletionEvidenceRole is the typed alias for the HarnCompletionEvidenceRoles wire vocabulary.
+type HarnCompletionEvidenceRole = string
+
+// HarnCompletionEvidenceRoles enumerates every wire value Harn currently emits for HarnCompletionEvidenceRole.
+var HarnCompletionEvidenceRoles = []HarnCompletionEvidenceRole{
+	"observation",
+	"mutation",
+	"verification",
+}
+
 // HarnWorkerStatus is the typed alias for the HarnWorkerStatuses wire vocabulary.
 type HarnWorkerStatus = string
 
@@ -371,6 +381,7 @@ var AgentTerminalKinds = []AgentTerminalKind{
 	"natural",
 	"user_cancelled",
 	"policy_budget",
+	"completion_unverified",
 	"policy_no_progress",
 	"policy_guardrail",
 	"policy_stop",
@@ -1060,13 +1071,14 @@ type HarnToolArgSchema struct {
 
 // HarnToolAnnotations describes Harn-side metadata for a tool.
 type HarnToolAnnotations struct {
-	Kind            string              `json:"kind"`
-	SideEffectLevel string              `json:"side_effect_level"`
-	ArgSchema       HarnToolArgSchema   `json:"arg_schema"`
-	Capabilities    map[string][]string `json:"capabilities"`
-	EmitsArtifacts  bool                `json:"emits_artifacts"`
-	ResultReaders   []string            `json:"result_readers"`
-	InlineResult    bool                `json:"inline_result"`
+	Kind                   ACPToolKind                 `json:"kind"`
+	SideEffectLevel        HarnSideEffectLevel         `json:"side_effect_level"`
+	CompletionEvidenceRole *HarnCompletionEvidenceRole `json:"completion_evidence_role,omitempty"`
+	ArgSchema              HarnToolArgSchema           `json:"arg_schema"`
+	Capabilities           map[string][]string         `json:"capabilities"`
+	EmitsArtifacts         bool                        `json:"emits_artifacts"`
+	ResultReaders          []string                    `json:"result_readers"`
+	InlineResult           bool                        `json:"inline_result"`
 }
 
 // A2AMessage is one message inside an A2A task history.
