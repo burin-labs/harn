@@ -460,10 +460,11 @@ fn cmd_payload(args: &[String]) -> Option<String> {
 }
 
 /// Ask PowerShell's parser whether input is syntactically complete without
-/// evaluating the input. The command itself is base64 data passed to a fixed
-/// parser program; it is never interpolated into `-Command`.
+/// evaluating the input. The command itself is base64 data passed through the
+/// child environment to a fixed parser program; it is never interpolated into
+/// `-Command`.
 fn native_powershell_accepts(command: &str) -> Option<bool> {
-    const PARSER: &str = "$s=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($args[0]));$t=$null;$e=$null;[System.Management.Automation.Language.Parser]::ParseInput($s,[ref]$t,[ref]$e)>$null;if($e.Count){exit 2}";
+    const PARSER: &str = "$s=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:HARN_POWERSHELL_PARSE_PAYLOAD));$t=$null;$e=$null;[System.Management.Automation.Language.Parser]::ParseInput($s,[ref]$t,[ref]$e)>$null;if($e.Count){exit 2}";
     let payload = BASE64_STANDARD.encode(command.as_bytes());
     for executable in native_powershell_candidates() {
         let mut parser = Command::new(&executable);
@@ -480,8 +481,8 @@ fn native_powershell_accepts(command: &str) -> Option<bool> {
                 "-NonInteractive",
                 "-Command",
                 PARSER,
-                &payload,
             ])
+            .env("HARN_POWERSHELL_PARSE_PAYLOAD", &payload)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
