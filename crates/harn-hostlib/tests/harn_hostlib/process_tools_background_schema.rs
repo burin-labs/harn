@@ -234,11 +234,17 @@ fn run_command_background_after_progress_overlay_satisfies_response_schema() {
         "expected progress-overlay duration below the wait budget"
     );
     let foreign = harn_vm::orchestration::agent_inbox::drain(&session_id);
-    assert_eq!(foreign.len(), 2);
-    assert_eq!(foreign[0].content, "first");
-    assert_eq!(foreign[0].sequence, 1);
-    assert_eq!(foreign[1].content, "second");
-    assert_eq!(foreign[1].sequence, 2);
+    // The process can publish another progress entry after the driver restores
+    // the inbox. Only the two unrelated notices are part of this invariant.
+    let notices: Vec<_> = foreign
+        .iter()
+        .filter(|entry| entry.content == "first" || entry.content == "second")
+        .collect();
+    assert_eq!(notices.len(), 2);
+    assert_eq!(notices[0].content, "first");
+    assert_eq!(notices[0].sequence, 1);
+    assert_eq!(notices[1].content, "second");
+    assert_eq!(notices[1].sequence, 2);
     cancel_handle(&require_str(&resp, "handle_id"));
 }
 

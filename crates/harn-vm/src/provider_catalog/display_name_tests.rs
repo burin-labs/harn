@@ -1,16 +1,7 @@
 use super::*;
 
 #[test]
-fn generated_catalog_owns_compact_model_display_names() {
-    let catalog = artifact();
-    let llama_cpp = catalog
-        .models
-        .iter()
-        .find(|model| model.id == "qwen3.6-35b-a3b-ud-q4-k-xl" && model.provider == "llamacpp")
-        .expect("llama.cpp Qwen3.6 route is exported");
-    assert_eq!(llama_cpp.name, "Qwen3.6 35B (Unsloth Q4_K_XL, llama.cpp)");
-    assert_eq!(llama_cpp.display_name, "Qwen3.6 35B Q4");
-
+fn compact_model_display_names_remove_route_noise() {
     assert_eq!(
         compact_model_display_name("Acme Model (regional route)"),
         "Acme Model"

@@ -539,6 +539,17 @@ pub struct ToolProbeUsage {
 }
 
 impl ToolProbeUsage {
+    pub(crate) fn from_llm_result(result: &LlmResult) -> Self {
+        Self::from_totals(
+            &result.provider,
+            &result.model,
+            UsageTotals {
+                input_tokens: Some(result.input_tokens),
+                output_tokens: Some(result.output_tokens),
+            },
+        )
+    }
+
     fn from_totals(provider: &str, model: &str, totals: UsageTotals) -> Self {
         if let Some((input_tokens, output_tokens)) = totals.input_tokens.zip(totals.output_tokens) {
             let usage = LlmUsage::from_probe_counts(provider, model, input_tokens, output_tokens);

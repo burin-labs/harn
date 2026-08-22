@@ -53,9 +53,8 @@ strengths = ["speed", "cheap", "tool_use", "reasoning", "long_context"]
 [models."zai-org/GLM-5.2"]
 name = "GLM 5.2 (Together)"
 provider = "together"
-# Together serves GLM-5.2 at 262K (fp4), not the model's full 1M window
-# — per-host context caps differ; verified 2026-07-02 on together.ai.
-context_window = 262144
+# Together's models API reports the full 1M-token serverless window.
+context_window = 1048575
 equivalence_group = "frontier-agent-coding"
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 1.40, output_per_mtok = 4.40, cache_read_per_mtok = 0.26 }

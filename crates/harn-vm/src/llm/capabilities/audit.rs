@@ -312,7 +312,7 @@ fn rule_to_matrix_row(
     let (parity_verdict, parity_source) = rule_tool_mode_parity(rule);
     ProviderCapabilityMatrixRow {
         provider: provider.to_string(),
-        model: rule.model_match.clone(),
+        model: rule.match_label(),
         version_min: rule.version_min.clone(),
         extends: rule.extends,
         thinking: rule_thinking_modes(rule),
@@ -395,7 +395,8 @@ mod tests {
                     def.id,
                     matched
                         .as_ref()
-                        .map(|matched| matched.rule.model_match.as_str())
+                        .map(|matched| matched.rule.match_label())
+                        .as_deref()
                         .unwrap_or("<none>")
                 ));
             }
@@ -445,6 +446,7 @@ preferred_tool_format = "native"
                         cache_read_per_mtok: None,
                         cache_write_per_mtok: None,
                         input_token_bands: Vec::new(),
+                        promotions: Vec::new(),
                     }),
                     deprecated: false,
                     deprecation_note: None,

@@ -31,3 +31,7 @@ temperature = 1.0
 # without leaking Moonshot-specific request logic into callers.
 [model_defaults."moonshot/kimi-k3"]
 reasoning_effort = "max"
+
+# GLM-5.3 rejects disabled reasoning. Low is its least expensive valid mode.
+[model_defaults."zai/glm-5.3"]
+reasoning_effort = "low"

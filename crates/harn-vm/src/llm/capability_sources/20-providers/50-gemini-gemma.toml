@@ -32,7 +32,7 @@ prefers_xml_tools = false
 thinking_block_style = "reasoning_summary"
 
 [[provider.openrouter]]
-model_match = "google/gemini-3.6*"
+model_match = ["google/gemini-3.6*", "google/gemini-3.7*"]
 native_tools = true
 preferred_tool_format = "native"
 thinking_modes = ["enabled", "adaptive", "effort"]
@@ -96,22 +96,7 @@ thinking_block_style = "reasoning_summary"
 # effort modes. Both the bare id and the `models/` REST resource name resolve to
 # the same model. Ahead of the broader gemini rules (first match wins).
 [[provider.gemini]]
-model_match = "gemma-4*"
-native_tools = true
-preferred_tool_format = "native"
-structured_output = "native"
-thinking_modes = ["enabled"]
-vision_supported = true
-prefers_xml_scaffolding = false
-prefers_markdown_scaffolding = true
-structured_output_mode = "native_json"
-supports_assistant_prefill = false
-prefers_role_developer = false
-prefers_xml_tools = false
-thinking_block_style = "inline"
-
-[[provider.gemini]]
-model_match = "models/gemma-4*"
+model_match = ["gemma-4*", "models/gemma-4*"]
 native_tools = true
 preferred_tool_format = "native"
 structured_output = "native"
@@ -134,31 +119,14 @@ thinking_block_style = "inline"
 # wins). Effort levels map to budgets in the provider: minimal/low -> 1024,
 # medium -> 8192, high/xhigh -> this ceiling.
 [[provider.gemini]]
-model_match = "gemini-3.6*"
-native_tools = true
-preferred_tool_format = "native"
-live_endpoint_family = "gemini_interactions"
-structured_output = "native"
-thinking_modes = ["enabled", "adaptive", "effort"]
-reasoning_disable_supported = false
-vision_supported = true
-audio_supported = true
-pdf_supported = true
-files_api_supported = true
-prompt_caching = true
-temperature_supported = false
-top_p_supported = false
-top_k_supported = false
-prefers_xml_scaffolding = true
-prefers_markdown_scaffolding = true
-structured_output_mode = "native_json"
-supports_assistant_prefill = false
-prefers_role_developer = false
-prefers_xml_tools = false
-thinking_block_style = "reasoning_summary"
+model_match = ["gemini-3.7*", "models/gemini-3.7*"]
+extends = true
+reasoning_effort_supported = true
+reasoning_effort_levels = ["low", "medium", "high"]
+reasoning_none_supported = false
 
 [[provider.gemini]]
-model_match = "models/gemini-3.6*"
+model_match = ["gemini-3.6*", "models/gemini-3.6*", "gemini-3.7*", "models/gemini-3.7*"]
 native_tools = true
 preferred_tool_format = "native"
 live_endpoint_family = "gemini_interactions"

@@ -1,6 +1,7 @@
 use super::extract::*;
 use super::routing_test_support::{
-    extract_with_options, test_equivalent_model, test_equivalent_model_with_context, test_provider,
+    extract_with_options, one_tool_list, test_equivalent_model, test_equivalent_model_with_context,
+    test_provider, ScopedEnvVar,
 };
 use super::*;
 use crate::value::VmDictExt;
@@ -1066,47 +1067,6 @@ fn assert_unsupported_local_option(option: &str, extra: Vec<(&str, VmValue)>) {
     assert!(message.contains("harn provider catalog matrix"));
 }
 
-fn one_tool_list() -> VmValue {
-    VmValue::List(std::sync::Arc::new(vec![VmValue::Dict(
-        std::sync::Arc::new(crate::value::DictMap::from_iter([
-            (
-                crate::value::intern_key("name"),
-                VmValue::String(arcstr::ArcStr::from("lookup")),
-            ),
-            (
-                crate::value::intern_key("description"),
-                VmValue::String(arcstr::ArcStr::from("Look something up")),
-            ),
-            (
-                crate::value::intern_key("parameters"),
-                VmValue::dict(crate::value::DictMap::new()),
-            ),
-        ])),
-    )]))
-}
-
-struct ScopedEnvVar {
-    key: &'static str,
-    previous: Option<String>,
-}
-
-impl ScopedEnvVar {
-    fn set(key: &'static str, value: &str) -> Self {
-        let previous = std::env::var(key).ok();
-        std::env::set_var(key, value);
-        Self { key, previous }
-    }
-}
-
-impl Drop for ScopedEnvVar {
-    fn drop(&mut self) {
-        match &self.previous {
-            Some(value) => std::env::set_var(self.key, value),
-            None => std::env::remove_var(self.key),
-        }
-    }
-}
-
 #[test]
 fn unsupported_capability_options_error_with_provider_matrix_hint() {
     assert_unsupported_local_option("thinking", vec![("thinking", VmValue::Bool(true))]);
@@ -1205,57 +1165,6 @@ fn text_tool_format_does_not_emit_native_provider_tools() {
 
     assert!(opts.tools.is_some());
     assert!(opts.native_tools.is_none());
-}
-
-#[test]
-fn gpt_5_6_reasoning_tools_auto_route_to_responses() {
-    let _openai_key = ScopedEnvVar::set("OPENAI_API_KEY", "test-key");
-    crate::llm::capabilities::clear_user_overrides();
-    crate::llm_config::clear_user_overrides();
-
-    let extract = |effort: &str, explicit_api: Option<&str>| {
-        let mut options = crate::value::DictMap::from_iter([
-            (
-                crate::value::intern_key("provider"),
-                VmValue::String(arcstr::ArcStr::from("openai")),
-            ),
-            (
-                crate::value::intern_key("model"),
-                VmValue::String(arcstr::ArcStr::from("gpt-5.6-terra")),
-            ),
-            (
-                crate::value::intern_key("effort"),
-                VmValue::String(arcstr::ArcStr::from(effort)),
-            ),
-            (crate::value::intern_key("tools"), one_tool_list()),
-        ]);
-        if let Some(api) = explicit_api {
-            options.insert(
-                crate::value::intern_key("api_mode"),
-                VmValue::String(arcstr::ArcStr::from(api)),
-            );
-        }
-        extract_llm_options(&[
-            VmValue::String(arcstr::ArcStr::from("hello")),
-            VmValue::Nil,
-            VmValue::dict(options),
-        ])
-        .expect("GPT-5.6 tool options")
-    };
-
-    assert_eq!(
-        extract("medium", None).api_mode,
-        crate::llm::api::LlmApiMode::Responses
-    );
-    assert_eq!(
-        extract("none", None).api_mode,
-        crate::llm::api::LlmApiMode::ChatCompletions
-    );
-    assert_eq!(
-        extract("medium", Some("chat_completions")).api_mode,
-        crate::llm::api::LlmApiMode::Responses,
-        "the provider compatibility constraint must prevent an invalid request"
-    );
 }
 
 #[test]

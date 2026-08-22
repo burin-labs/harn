@@ -30,6 +30,9 @@ provider = "cerebras"
 context_window = 131072
 capabilities = ["tools", "streaming", "thinking"]
 pricing = { input_per_mtok = 2.25, output_per_mtok = 2.75 }
+deprecated = true
+deprecation_note = "Absent from Cerebras public model discovery on 2026-08-22. Use glm-5.3 on Z.AI or OpenRouter."
+superseded_by = "glm-5.3"
 tier = "frontier"
 open_weight = true
 strengths = ["speed", "coding", "agentic", "tool_use", "reasoning"]

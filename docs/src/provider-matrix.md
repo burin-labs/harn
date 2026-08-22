@@ -88,10 +88,9 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `fireworks` | `*qwen*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
 | `flexai` | `*` | `any` | no | no | no | no | no | yes | no | `native` | `plain` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
 | `friendli` | `*` | `any` | no | no | no | no | no | yes | no | `native` | `plain` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
-| `gemini` | `gemma-4*` | `any` | `enabled` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
-| `gemini` | `models/gemma-4*` | `any` | `enabled` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
-| `gemini` | `gemini-3.6*` | `any` | `enabled,adaptive,effort` | yes | yes | yes | no | yes | yes | `native` | `xml,markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
-| `gemini` | `models/gemini-3.6*` | `any` | `enabled,adaptive,effort` | yes | yes | yes | no | yes | yes | `native` | `xml,markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
+| `gemini` | `gemma-4* \| models/gemma-4*` | `any` | `enabled` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
+| `gemini` | `gemini-3.7* \| models/gemini-3.7*` | `any; extends` | no | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `reasoning_summary` | `json` | no | yes | `text_only` | yes | no |
+| `gemini` | `gemini-3.6* \| models/gemini-3.6* \| gemini-3.7* \| models/gemini-3.7*` | `any` | `enabled,adaptive,effort` | yes | yes | yes | no | yes | yes | `native` | `xml,markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
 | `gemini` | `gemini-3.5-flash-lite` | `any` | `enabled,adaptive,effort` | yes | yes | yes | no | yes | yes | `native` | `xml,markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
 | `gemini` | `models/gemini-3.5-flash-lite` | `any` | `enabled,adaptive,effort` | yes | yes | yes | no | yes | yes | `native` | `xml,markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
 | `gemini` | `gemini-2.5-flash*` | `any` | `enabled,adaptive,effort` | yes | yes | yes | no | yes | yes | `native` | `xml,markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | no |
@@ -218,7 +217,7 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `openrouter` | `moonshotai/kimi-k2.7-code` | `any` | `enabled` | yes | no | no | yes | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `text` | yes | yes | `native_unreliable` | yes | yes |
 | `openrouter` | `moonshotai/kimi-k2*` | `any` | `enabled` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
 | `openrouter` | `google/gemini-2.5*` | `any` | `enabled,effort` | yes | yes | yes | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
-| `openrouter` | `google/gemini-3.6*` | `any` | `enabled,adaptive,effort` | yes | yes | yes | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
+| `openrouter` | `google/gemini-3.6* \| google/gemini-3.7*` | `any` | `enabled,adaptive,effort` | yes | yes | yes | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
 | `openrouter` | `google/gemini-3.5-flash-lite` | `any` | `enabled,adaptive,effort` | yes | yes | yes | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
 | `openrouter` | `google/gemini-3.5*` | `any` | `enabled,adaptive` | yes | yes | yes | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
 | `openrouter` | `google/gemma-4*` | `any` | no | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
@@ -267,6 +266,7 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `vertex` | `gemini-*` | `any` | no | no | no | no | no | yes | no | no | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
 | `volcengine_ark` | `*` | `any` | no | no | no | no | no | yes | no | `native` | `plain` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
 | `xai` | `grok-*` | `any` | `adaptive` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
+| `zai` | `glm-5.3*` | `any` | `effort` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
 | `zai` | `glm-5.2*` | `any` | `enabled,effort` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
 | `zai` | `glm-5.1*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
 | `zai` | `glm-4*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
@@ -348,6 +348,7 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `gemini` | `gemini-3.5-flash` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `gemini` | `gemini-3.5-flash-lite` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `gemini` | `gemini-3.6-flash` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `gemini` | `gemini-3.7-flash` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `gemini` | `models/gemma-4-26b-a4b-it` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `gemini` | `models/gemma-4-31b-it` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `groq` | `groq/compound` | `none` | `unsupported` | - | - | - | - | - | `data not yet collected` |
@@ -447,6 +448,7 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `openrouter` | `google/gemini-3.5-flash` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `google/gemini-3.5-flash-lite` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `google/gemini-3.6-flash` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `openrouter` | `google/gemini-3.7-flash` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `google/gemma-4-26b-a4b-it` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `google/gemma-4-31b-it` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `kwaipilot/kat-coder-pro-v2` | `native` | `interchangeable` | - | - | - | - | - | catalog note: Live OpenRouter probe on 2026-06-12 returned a valid provider-native tool call for KAT-Coder-Pro V2. |
@@ -488,6 +490,7 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `openrouter` | `z-ai/glm-5` | `native` | `unknown` | - | - | - | - | - | catalog note: 2026-08-15 cross-host native re-probe: single clean `message.tool_calls`, empty content, no `<tool_call>` markup. OpenRouter z-ai/glm-5.2 verified on tool_choice=auto and required, sync and streaming. |
 | `openrouter` | `z-ai/glm-5.1` | `native` | `unknown` | - | - | - | - | - | catalog note: 2026-08-15 cross-host native re-probe: single clean `message.tool_calls`, empty content, no `<tool_call>` markup. OpenRouter z-ai/glm-5.2 verified on tool_choice=auto and required, sync and streaming. |
 | `openrouter` | `z-ai/glm-5.2` | `native` | `unknown` | - | - | - | - | - | catalog note: 2026-08-15 cross-host native re-probe: single clean `message.tool_calls`, empty content, no `<tool_call>` markup. OpenRouter z-ai/glm-5.2 verified on tool_choice=auto and required, sync and streaming. |
+| `openrouter` | `z-ai/glm-5.3` | `native` | `unknown` | - | - | - | - | - | catalog note: 2026-08-15 cross-host native re-probe: single clean `message.tool_calls`, empty content, no `<tool_call>` markup. OpenRouter z-ai/glm-5.2 verified on tool_choice=auto and required, sync and streaming. |
 | `openrouter` | `z-ai/glm-5v-turbo` | `native` | `unknown` | - | - | - | - | - | catalog note: 2026-08-15 cross-host native re-probe: single clean `message.tool_calls`, empty content, no `<tool_call>` markup. OpenRouter z-ai/glm-5.2 verified on tool_choice=auto and required, sync and streaming. |
 | `sambanova` | `sambanova/DeepSeek-V3.2` | `native` | `interchangeable` | - | - | - | - | - | catalog note: 2026-06-20 Harn agent-loop smoke: SambaNova DeepSeek-V3.2 completed both native and JSON tool loops with reasoning disabled. Earlier native false negatives were caused by Harn's parser treating terse final answers as billed no-ops; keep native preferred. |
 | `sambanova` | `sambanova/DeepSeek-V4-Pro` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
@@ -528,3 +531,4 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `zai` | `glm-5-turbo` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `zai` | `glm-5.1` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `zai` | `glm-5.2` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `zai` | `glm-5.3` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |

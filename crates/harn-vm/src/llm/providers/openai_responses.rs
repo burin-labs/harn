@@ -151,7 +151,7 @@ impl OpenAiResponsesProvider {
             body["max_tool_calls"] = serde_json::json!(max_tool_calls);
         }
         if let Some(ref tool_choice) = opts.tool_choice {
-            body["tool_choice"] = tool_choice.clone();
+            body["tool_choice"] = responses_tool_choice(tool_choice);
         }
         if let Some(reasoning) = responses_reasoning_config(&opts.thinking) {
             body["reasoning"] = reasoning;
@@ -210,6 +210,17 @@ impl OpenAiResponsesProvider {
         }
         body
     }
+}
+
+fn responses_tool_choice(choice: &serde_json::Value) -> serde_json::Value {
+    let Some(name) = choice
+        .get("function")
+        .and_then(|function| function.get("name"))
+        .and_then(serde_json::Value::as_str)
+    else {
+        return choice.clone();
+    };
+    serde_json::json!({"type": "function", "name": name})
 }
 
 fn responses_reasoning_config(thinking: &ThinkingConfig) -> Option<serde_json::Value> {
@@ -917,6 +928,25 @@ mod tests {
         assert_eq!(body["tools"][1]["name"], "deploy");
         assert_eq!(body["tools"][1]["namespace"], "ops");
         assert_eq!(body["tools"][1]["defer_loading"], true);
+    }
+
+    #[test]
+    fn responses_flattens_named_function_tool_choice() {
+        let mut opts = crate::llm::api::options::base_opts("openai");
+        opts.model = "gpt-5.6-sol".to_string();
+        opts.api_mode = LlmApiMode::Responses;
+        opts.tool_choice = Some(serde_json::json!({
+            "type": "function",
+            "function": {"name": "echo_marker"},
+        }));
+        let payload = LlmRequestPayload::from(&opts);
+
+        let body = OpenAiResponsesProvider::build_request_body(&payload);
+
+        assert_eq!(
+            body["tool_choice"],
+            serde_json::json!({"type": "function", "name": "echo_marker"})
+        );
     }
 
     #[test]

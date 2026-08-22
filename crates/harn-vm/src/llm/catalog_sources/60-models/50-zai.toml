@@ -1,21 +1,13 @@
 # Z.AI GLM family, served via the OpenAI-compatible `/api/paas/v4` endpoint
-# (the `.../v1` base 404s). The live `/models` listing on 2026-08-15 reports:
+# (the `.../v1` base 404s). The live `/models` listing on 2026-08-22 reports:
 # glm-4.5, glm-4.5-air, glm-4.6, glm-4.7, glm-5, glm-5-turbo, glm-5.1,
-# glm-5.2 — unchanged from the 2026-07-03 read. GLM-5.2 is the current
-# 1M-context open-weight flagship; the GLM-4.x line stays catalogued as the
+# glm-5.2, and glm-5.3. The GLM-4.x line stays catalogued as the
 # cheap independent-bucket coding/judge routes (glm-4.6 is confirmed serving
 # 200 at paas/v4). Pricing per docs.z.ai.
 #
-# GLM-5.3 (announced 2026-08-14) is deliberately NOT catalogued yet. It is real
-# — Z.AI's API distinguishes an unknown model (error 1214 "modelCode: does not
-# exist", which is what `glm-9.9` returns) from a known but unentitled one
-# (error 1220 "You do not have permission to access ..."), and `glm-5.3`
-# returns 1220. But it is gated to the paid Coding Plan, it is absent from the
-# public `/models` listing and from every reseller (OpenRouter, Together,
-# Fireworks, DeepInfra all top out at GLM-5.2), and Z.AI has not published a
-# per-token rate card for it. Cataloguing it now would mean inventing pricing
-# and shipping a route nothing here can reach. Add it when the standard API
-# serves it and docs.z.ai publishes the tariff.
+# GLM-5.3 joined the public model list and OpenRouter on 2026-08-22. Z.AI has
+# not added it to the public per-token rate card, so the direct route is
+# available but unpriced.
 
 # GLM-4.6 — 200K-context coding model, confirmed serving at paas/v4.
 [models."glm-4.6"]
@@ -106,6 +98,15 @@ tier = "frontier"
 open_weight = true
 strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
 benchmarks = { swe_bench_pro_lead = 1.0 }
+[models."glm-5.3"]
+name = "GLM 5.3"
+provider = "zai"
+context_window = 1048576
+equivalence_group = "frontier-agent-coding"
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
 
 # OpenRouter mirror of GLM-5 family so callers without a Z.AI key still
 # resolve a route. OR doesn't list GLM-4.6/4.7 — the canonical OR slugs
@@ -136,6 +137,16 @@ context_window = 1048576
 equivalence_group = "frontier-agent-coding"
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 0.91, output_per_mtok = 2.86, cache_read_per_mtok = 0.169 }
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
+[models."z-ai/glm-5.3"]
+name = "GLM 5.3 (via OpenRouter)"
+provider = "openrouter"
+context_window = 1048576
+equivalence_group = "frontier-agent-coding"
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 1.40, output_per_mtok = 4.40, cache_read_per_mtok = 0.26 }
 tier = "frontier"
 open_weight = true
 strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]

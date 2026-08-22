@@ -13,7 +13,12 @@ fn require_git() -> bool {
 
 fn git(cwd: &Path, args: &[&str]) {
     let mut command = Command::new("git");
-    command.args(args).current_dir(cwd);
+    // Test repositories must not inherit a developer's global signing policy.
+    // They use disposable identities and have no access to an agent socket.
+    command
+        .args(["-c", "commit.gpgsign=false"])
+        .args(args)
+        .current_dir(cwd);
     // Mirror the production `exec_argv` env scrub so these tests
     // also pass when invoked from inside a git hook (which sets
     // `GIT_DIR=.git` for the hook process and its descendants —

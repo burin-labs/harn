@@ -845,6 +845,88 @@ fn validate_pricing(
             }
         }
     }
+
+    let mut promotion_ids = BTreeSet::new();
+    let mut promotion_windows = Vec::new();
+    for promotion in &pricing.promotions {
+        if promotion.id.trim().is_empty() || !promotion_ids.insert(promotion.id.as_str()) {
+            result.errors.push(format!(
+                "model {} pricing.promotions must use unique non-empty ids",
+                model.id
+            ));
+        }
+        if promotion.source_url.trim().is_empty() {
+            result.errors.push(format!(
+                "model {} pricing.promotions[{}].source_url cannot be empty",
+                model.id, promotion.id
+            ));
+        }
+        for (field, value) in [
+            ("input_per_mtok", Some(promotion.input_per_mtok)),
+            ("output_per_mtok", Some(promotion.output_per_mtok)),
+            ("cache_read_per_mtok", promotion.cache_read_per_mtok),
+            ("cache_write_per_mtok", promotion.cache_write_per_mtok),
+        ] {
+            if value.is_some_and(|value| value < 0.0) {
+                result.errors.push(format!(
+                    "model {} pricing.promotions[{}].{} must be non-negative",
+                    model.id, promotion.id, field
+                ));
+            }
+        }
+        let Ok(starts_on) = NaiveDate::parse_from_str(&promotion.starts_on, "%Y-%m-%d") else {
+            result.errors.push(format!(
+                "model {} pricing.promotions[{}].starts_on must be YYYY-MM-DD",
+                model.id, promotion.id
+            ));
+            continue;
+        };
+        let ends_on = match promotion.ends_on.as_deref() {
+            Some(value) => match NaiveDate::parse_from_str(value, "%Y-%m-%d") {
+                Ok(date) => Some(date),
+                Err(_) => {
+                    result.errors.push(format!(
+                        "model {} pricing.promotions[{}].ends_on must be YYYY-MM-DD",
+                        model.id, promotion.id
+                    ));
+                    continue;
+                }
+            },
+            None => None,
+        };
+        if ends_on.is_some_and(|end| end < starts_on) {
+            result.errors.push(format!(
+                "model {} pricing.promotions[{}].ends_on precedes starts_on",
+                model.id, promotion.id
+            ));
+        }
+        if let Some(value) = promotion.review_after.as_deref() {
+            match NaiveDate::parse_from_str(value, "%Y-%m-%d") {
+                Ok(date) if date >= starts_on => {}
+                Ok(_) => result.errors.push(format!(
+                    "model {} pricing.promotions[{}].review_after precedes starts_on",
+                    model.id, promotion.id
+                )),
+                Err(_) => result.errors.push(format!(
+                    "model {} pricing.promotions[{}].review_after must be YYYY-MM-DD",
+                    model.id, promotion.id
+                )),
+            }
+        }
+        promotion_windows.push((promotion.id.as_str(), starts_on, ends_on));
+    }
+    for (index, (left_id, left_start, left_end)) in promotion_windows.iter().enumerate() {
+        for (right_id, right_start, right_end) in promotion_windows.iter().skip(index + 1) {
+            let left_reaches_right = left_end.is_none_or(|end| *right_start <= end);
+            let right_reaches_left = right_end.is_none_or(|end| *left_start <= end);
+            if left_reaches_right && right_reaches_left {
+                result.errors.push(format!(
+                    "model {} pricing promotions {:?} and {:?} overlap",
+                    model.id, left_id, right_id
+                ));
+            }
+        }
+    }
 }
 
 fn validate_batch_support(

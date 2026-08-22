@@ -1358,14 +1358,14 @@
         "GROQ_API_KEY"
       ],
       "recommended": {
-        "selector": "groq:llama-3.1-8b-instant",
+        "selector": "groq:qwen/qwen3.6-27b",
         "provider": "groq",
-        "model": "llama-3.1-8b-instant",
-        "display_name": "Llama 3.1 8B Instant (Groq)",
+        "model": "qwen/qwen3.6-27b",
+        "display_name": "Qwen3.6 27B (Groq)",
         "tool_format": "native",
         "harn_options": [
           "provider = \"groq\"",
-          "model = \"llama-3.1-8b-instant\"",
+          "model = \"qwen/qwen3.6-27b\"",
           "tool_format = \"native\"",
           "structured_output_mode = \"native_json\""
         ]
@@ -1379,7 +1379,7 @@
         "structured_output_mode": "native_json",
         "streaming": true,
         "reasoning_knobs": [],
-        "prompt_or_context_cache": false,
+        "prompt_or_context_cache": true,
         "batch_api": true,
         "batch_discount_percent": 50,
         "serving_tiers": [],
@@ -2033,14 +2033,14 @@
         "NIM_API_KEY"
       ],
       "recommended": {
-        "selector": "nvidia:nvidia/minimax-m2.7",
+        "selector": "nvidia:nvidia/minimax-m3",
         "provider": "nvidia",
-        "model": "nvidia/minimax-m2.7",
-        "display_name": "MiniMax M2.7 (NVIDIA NIM)",
+        "model": "nvidia/minimax-m3",
+        "display_name": "MiniMax M3 (NVIDIA NIM)",
         "tool_format": "native",
         "harn_options": [
           "provider = \"nvidia\"",
-          "model = \"nvidia/minimax-m2.7\"",
+          "model = \"nvidia/minimax-m3\"",
           "tool_format = \"native\"",
           "structured_output_mode = \"delimited\""
         ]
@@ -2054,7 +2054,7 @@
         "structured_output_mode": "delimited",
         "streaming": true,
         "reasoning_knobs": [
-          "enabled"
+          "adaptive"
         ],
         "prompt_or_context_cache": true,
         "batch_api": false,

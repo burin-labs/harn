@@ -115,8 +115,8 @@ fn __base_receipt(
 }
 
 fn __candidate_common_error(notice: ProviderNotice, candidate: dict) -> string? {
-  if !contains(["price", "retirement", "endpoint", "capability"], candidate?.kind) {
-    return "candidate.kind must be price, retirement, endpoint, or capability"
+  if !contains(["price", "promotion", "retirement", "endpoint", "capability"], candidate?.kind) {
+    return "candidate.kind must be price, promotion, retirement, endpoint, or capability"
   }
   if !__nonempty(candidate?.provider) || !__nonempty(candidate?.model_id) {
     return "candidate provider and model_id are required"
@@ -136,6 +136,34 @@ fn __candidate_common_error(notice: ProviderNotice, candidate: dict) -> string? 
   return nil
 }
 
+fn __promotion_candidate_error(candidate: dict) -> string? {
+  if !__nonempty(candidate?.promotion_id) || !__nonempty(candidate?.source_url) {
+    return "promotion candidate requires promotion_id and source_url"
+  }
+  for date in [candidate?.ends_on, candidate?.review_after] {
+    if date != nil && regex_match("^[0-9]{4}-[0-9]{2}-[0-9]{2}$", date) == nil {
+      return "promotion end and review dates must be YYYY-MM-DD"
+    }
+  }
+  if candidate?.ends_on != nil && candidate.ends_on < candidate.effective_date {
+    return "promotion ends_on must not precede effective_date"
+  }
+  if candidate?.review_after != nil && candidate.review_after < candidate.effective_date {
+    return "promotion review_after must not precede effective_date"
+  }
+  for rates in [candidate?.old_value, candidate?.new_value] {
+    if type_of(rates?.input_per_mtok) != "float"
+      && type_of(rates?.input_per_mtok) != "int" {
+      return "promotion input price must be numeric"
+    }
+    if type_of(rates?.output_per_mtok) != "float"
+      && type_of(rates?.output_per_mtok) != "int" {
+      return "promotion output price must be numeric"
+    }
+  }
+  return nil
+}
+
 fn __candidate_variant_error(candidate: dict) -> string? {
   if candidate.kind == "price" {
     if !contains(
@@ -148,6 +176,9 @@ fn __candidate_variant_error(candidate: dict) -> string? {
       return "price candidate new_value must be numeric"
     }
     return nil
+  }
+  if candidate.kind == "promotion" {
+    return __promotion_candidate_error(candidate)
   }
   if candidate.kind == "retirement" {
     if type_of(candidate?.old_value) != "bool" || type_of(candidate?.new_value) != "bool" {
@@ -186,6 +217,9 @@ fn __candidate_variant_error(candidate: dict) -> string? {
 fn __current_value(candidate: dict, provider_row: dict, model_row: dict) {
   if candidate.kind == "price" {
     return model_row?.pricing?.[candidate.field]
+  }
+  if candidate.kind == "promotion" {
+    return model_row?.pricing
   }
   if candidate.kind == "retirement" {
     if model_row?.deprecation?.status != nil {
@@ -231,6 +265,37 @@ fn __values_equal(left, right) -> bool {
   return left == right
 }
 
+fn __price_rates_equal(current, expected) -> bool {
+  for field in ["input_per_mtok", "output_per_mtok", "cache_read_per_mtok", "cache_write_per_mtok"] {
+    const wanted = expected?.[field]
+    if wanted != nil && !__values_equal(current?.[field], wanted) {
+      return false
+    }
+  }
+  return true
+}
+
+fn __promotion_by_id(pricing, promotion_id) {
+  for promotion in pricing?.promotions ?? [] {
+    if promotion?.id == promotion_id {
+      return promotion
+    }
+  }
+  return nil
+}
+
+fn __promotion_matches(promotion, candidate: dict) -> bool {
+  if promotion == nil
+    || promotion?.starts_on != candidate.effective_date
+    || promotion?.ends_on != candidate?.ends_on
+    || promotion?.review_after != candidate?.review_after
+    || promotion?.source_url
+      != candidate.source_url {
+    return false
+  }
+  return __price_rates_equal(promotion, candidate.new_value)
+}
+
 fn __patch_descriptor(candidate: dict) -> dict {
   if candidate.kind == "price" {
     return {
@@ -238,6 +303,19 @@ fn __patch_descriptor(candidate: dict) -> dict {
       field: "pricing." + candidate.field,
       old_value: candidate.old_value,
       new_value: candidate.new_value,
+    }
+  }
+  if candidate.kind == "promotion" {
+    return {
+      table_kind: "model",
+      field: "pricing.promotions",
+      old_value: candidate.old_value,
+      new_value: candidate.new_value,
+      promotion_id: candidate.promotion_id,
+      starts_on: candidate.effective_date,
+      ends_on: candidate?.ends_on,
+      review_after: candidate?.review_after,
+      source_url: candidate.source_url,
     }
   }
   if candidate.kind == "retirement" {
@@ -368,13 +446,23 @@ pub fn plan_notice(
     return {receipt: __base_receipt(harness, notice, "rejected", "model identity is ambiguous")}
   }
   const current = __current_value(candidate, providers[0], models[0])
-  if !__values_equal(current, candidate.old_value) {
+  const current_promotion = if candidate.kind == "promotion" {
+    __promotion_by_id(current, candidate.promotion_id)
+  } else {
+    nil
+  }
+  const already_applied = if candidate.kind == "promotion" {
+    __promotion_matches(current_promotion, candidate)
+  } else {
+    __values_equal(current, candidate.new_value)
+  }
+  if already_applied {
     return {
       receipt: __base_receipt(
         harness,
         notice,
-        "rejected",
-        "candidate old_value conflicts with the current catalog row",
+        "no_op",
+        "current catalog already contains the proposed value",
       )
         + {
           model_id: candidate.model_id,
@@ -385,13 +473,18 @@ pub fn plan_notice(
       candidate: candidate,
     }
   }
-  if __values_equal(current, candidate.new_value) {
+  const current_matches = if candidate.kind == "promotion" {
+    current_promotion == nil && __price_rates_equal(current, candidate.old_value)
+  } else {
+    __values_equal(current, candidate.old_value)
+  }
+  if !current_matches {
     return {
       receipt: __base_receipt(
         harness,
         notice,
-        "no_op",
-        "current catalog already contains the proposed value",
+        "rejected",
+        "candidate old_value conflicts with the current catalog row",
       )
         + {
           model_id: candidate.model_id,
@@ -554,6 +647,53 @@ fn __apply_price(
   return Ok(__replace_line(lines, index, updated))
 }
 
+fn __promotion_fields(candidate: dict) -> list<string> {
+  let fields = [
+    "id = " + json_stringify(candidate.promotion_id),
+    "starts_on = " + json_stringify(candidate.effective_date),
+  ]
+  if candidate?.ends_on != nil {
+    fields = fields + ["ends_on = " + json_stringify(candidate.ends_on)]
+  }
+  if candidate?.review_after != nil {
+    fields = fields + ["review_after = " + json_stringify(candidate.review_after)]
+  }
+  fields = fields + ["source_url = " + json_stringify(candidate.source_url)]
+  for field in ["input_per_mtok", "output_per_mtok", "cache_read_per_mtok", "cache_write_per_mtok"] {
+    if candidate.new_value?.[field] != nil {
+      fields = fields + [field + " = " + to_string(candidate.new_value[field])]
+    }
+  }
+  return fields
+}
+
+fn __apply_promotion(
+  lines: list<string>,
+  bounds: dict,
+  candidate: dict,
+) -> Result<list<string>, string> {
+  const found = __find_field_line(lines, bounds, "pricing")
+  if is_err(found) {
+    return Err(unwrap_err(found))
+  }
+  const index = unwrap(found)
+  let current = lines[index] ?? ""
+  if contains(current, "id = " + json_stringify(candidate.promotion_id)) {
+    return Err("promotion id already exists in the owning pricing row")
+  }
+  const promotion = "{ " + join(__promotion_fields(candidate), ", ") + " }"
+  if contains(current, "promotions = [") {
+    current = regex_replace(r"promotions\s*=\s*\[", "promotions = [" + promotion + ", ", current)
+  } else {
+    const updated = regex_replace(r"\s*}\s*$", ", promotions = [" + promotion + "] }", current)
+    if updated == current {
+      return Err("pricing must be an inline table for promotion insertion")
+    }
+    current = updated
+  }
+  return Ok(__replace_line(lines, index, current))
+}
+
 fn __apply_endpoint(
   lines: list<string>,
   bounds: dict,
@@ -671,6 +811,8 @@ pub fn apply_candidate_to_source(
   const bounds = unwrap(bounds_result)
   const outcome = if candidate.kind == "price" {
     __apply_price(lines, bounds, candidate)
+  } else if candidate.kind == "promotion" {
+    __apply_promotion(lines, bounds, candidate)
   } else if candidate.kind == "retirement" {
     __apply_retirement(lines, bounds, candidate)
   } else if candidate.kind == "endpoint" {
@@ -688,7 +830,7 @@ pub fn extraction_prompt(notice: ProviderNotice) -> string {
   return """
 Extract at most one provider-catalog change from this trusted notice.
 Return classification "irrelevant" when it does not explicitly change a model price,
-retirement, provider endpoint, or model capability. Never infer missing identifiers
+temporary promotion, retirement, provider endpoint, or model capability. Never infer missing identifiers
 or values. Preserve a short supporting excerpt or immutable link as evidence.
 
 Neutral notice:

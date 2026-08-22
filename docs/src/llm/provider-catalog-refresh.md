@@ -15,16 +15,14 @@ aid: diff it against the TOML fragments under
 `crates/harn-vm/src/llm/capability_sources/`, or your project's
 `harn.toml` overlay before landing changes.
 
-Static catalog pricing should reflect the provider's durable rate card,
-not launch promotions or short discount windows returned by aggregator
-APIs. When a provider publishes time-limited promotional rates, keep the
-normal post-promotion rate in the catalog source fragments and capture
-the promotion only in human review notes unless the catalog schema grows
-an explicit promotion-period field.
+Keep the provider's durable rate card in the main pricing fields. Put a dated
+discount in `pricing.promotions`. Harn uses an active promotion for cost
+estimates and returns to the durable rate when it ends. Use `review_after` when
+a provider gives a minimum duration but no firm end date.
 
 The markdown report includes aggregator discoveries for awareness, but the
 candidate TOML contains only provider-owned, high-confidence changes and
-additions with actionable pricing, context-window, or capability metadata. This
+additions with actionable pricing or capability metadata. This
 keeps broad discovery APIs such as OpenRouter's useful without turning bare
 model IDs or uncurated mirrors into apparent review-ready catalog rows.
 Catalog identity is always the `(provider, model id)` pair; equal model ids on
@@ -76,7 +74,7 @@ shape. `provenance` is `authenticated`, `verified_link`, `unverified`, or
 
 The model is limited to a schema-constrained extraction:
 
-- `price`, `retirement`, `endpoint`, and `capability` are distinct typed
+- `price`, `promotion`, `retirement`, `endpoint`, and `capability` are distinct typed
   variants;
 - provider, model id, effective date, old/new values, and supporting evidence
   are retained;
@@ -132,9 +130,26 @@ product state is not part of the workflow contract.
 
 ## Measuring tool-call routes
 
-Catalog tool-support claims can be checked with the spend-capped campaign
-before a reviewer edits any source fragment. Dry-run mode performs request and
-credential readiness checks without provider calls:
+Use the built-in probe for one route. It sends the request through the same
+provider adapter, request builder, stream parser, and response normalizer as
+`llm_call`. No probe script or temporary Harn file is needed.
+
+```bash
+# Inspect the request without calling the provider.
+harn provider tool-probe openai --model gpt-5.6-sol --dry-run-request
+
+# Check non-streaming and streaming native tool calls.
+harn provider tool-probe openai --model gpt-5.6-sol --mode both
+```
+
+The probe reads the provider's normal API-key environment variable. Pass
+`--base-url` only to test a raw compatible endpoint; that override bypasses the
+provider adapter. Each JSON result records the observed tool-call shape,
+latency, token use, and catalog-priced cost.
+
+Use the spend-capped campaign to measure several routes or repeat a stochastic
+claim. Dry-run mode performs request and credential readiness checks without
+provider calls:
 
 ```bash
 harn run --no-sandbox scripts/provider_tool_probe_campaign.harn -- \
@@ -202,6 +217,18 @@ Direct edits to `crates/harn-vm/src/llm/providers.toml` and
 checked in so Harn can still embed known-good offline snapshots with
 `include_str!`, but `make check-provider-catalog` proves every checked-in
 provider catalog projection matches the fragments.
+
+One capability rule may cover exact aliases without copying its body:
+
+```toml
+[[provider.gemini]]
+model_match = ["gemini-3.7*", "models/gemini-3.7*"]
+native_tools = true
+```
+
+The list is one ordered rule. Keep separate rows when precedence or capability
+values differ. Model routes stay separate across providers because their
+prices, wire IDs, quotas, and availability can change independently.
 
 Harn also checks in generated artifacts under `spec/provider-catalog/`
 so downstream hosts do not need to parse Harn internals:
@@ -505,7 +532,8 @@ replace them without forking the entry script.
   `{added, removed, changed, unknown_pricing, low_confidence,
   requires_key}`. Removals only fire when at least one source for
   that provider successfully reported, so a missing API key never
-  silently looks like a removal.
+  silently looks like a removal. Missing price fields mean “not reported,”
+  not “removed.” Active dated promotions are used for price comparison.
 - `render_markdown_report(drift, conflicts, adapter_runs, meta)` —
   renders the section-by-section markdown report (adapter status,
   added/removed/changed models, conflicts, unknown pricing,

@@ -180,7 +180,7 @@ fn audit_capabilities_with_families(
                     if !offending.is_empty() {
                         report.footguns.push(CapabilityFootgun {
                             provider: provider.clone(),
-                            model_match: rule.model_match.clone(),
+                            model_match: rule.match_label(),
                             message: format!(
                                 "declares reasoning_required_for_tools = true but also pins \
                                  auto_reasoning_overrides {{ {} = \"off\" }}; this route calls \
@@ -206,7 +206,7 @@ fn audit_capabilities_with_families(
                 if !pinned {
                     report.footguns.push(CapabilityFootgun {
                         provider: provider.clone(),
-                        model_match: rule.model_match.clone(),
+                        model_match: rule.match_label(),
                         message: "is an OpenRouter route with \
                             reasoning_required_for_tools = true (a Harmony-style tool route on \
                             the OpenRouter sub-provider lottery) but declares no \
@@ -231,7 +231,7 @@ fn audit_capabilities_with_families(
             {
                 report.footguns.push(CapabilityFootgun {
                     provider: provider.clone(),
-                    model_match: rule.model_match.clone(),
+                    model_match: rule.match_label(),
                     message: "declares preferred_tool_format = \"native\" without \
                         native_tools = true. Native tool format is only coherent \
                         for rows that enable native tool calls; either set \
@@ -249,7 +249,7 @@ fn audit_capabilities_with_families(
             {
                 report.footguns.push(CapabilityFootgun {
                     provider: provider.clone(),
-                    model_match: rule.model_match.clone(),
+                    model_match: rule.match_label(),
                     message: "declares allowed_tool_choice_modes while native_tools is \
                         not true. Tool-choice modes are native request-shape \
                         capabilities; enable native_tools or remove the native \
@@ -271,12 +271,14 @@ fn audit_capabilities_with_families(
                 .map(|format| format.eq_ignore_ascii_case("native"))
                 .unwrap_or(false);
             if pins_native {
-                let model_match_lower = rule.model_match.to_ascii_lowercase();
                 for (family, evidence) in native_unreliable_families {
-                    if model_match_lower.contains(family) {
+                    if rule
+                        .match_patterns()
+                        .any(|pattern| pattern.to_ascii_lowercase().contains(family))
+                    {
                         report.footguns.push(CapabilityFootgun {
                             provider: provider.clone(),
-                            model_match: rule.model_match.clone(),
+                            model_match: rule.match_label(),
                             message: format!(
                                 "pins preferred_tool_format = \"native\" for the \
                                  native-unreliable `{family}` family. {evidence} Steer this \

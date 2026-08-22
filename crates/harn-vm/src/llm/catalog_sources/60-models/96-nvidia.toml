@@ -107,6 +107,8 @@ served_variant = "nvidia-nim"
 api_dialect = "openai_chat"
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 0.30, output_per_mtok = 1.20, cache_read_per_mtok = 0.06 }
+deprecated = true
+deprecation_note = "NVIDIA retired the free endpoint; the model remains available through partner or self-hosted deployments."
 tier = "frontier"
 open_weight = true
 strengths = ["speed", "coding", "agentic", "tool_use", "reasoning", "long_context"]
@@ -137,6 +139,8 @@ equivalence_group = "mistral-medium-3.5-128b"
 served_variant = "nvidia-nim"
 api_dialect = "openai_chat"
 capabilities = ["tools", "streaming"]
+deprecated = true
+deprecation_note = "Absent from NVIDIA's hosted model discovery on 2026-08-22."
 architecture = { parameter_count_b = 128.0, source_url = "https://build.nvidia.com/models", last_verified = "2026-06-20" }
 tier = "frontier"
 open_weight = true
@@ -186,6 +190,9 @@ served_variant = "nvidia-nim"
 api_dialect = "openai_chat"
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 1.40, output_per_mtok = 4.40, cache_read_per_mtok = 0.26 }
+deprecated = true
+deprecation_note = "Absent from NVIDIA's hosted model discovery on 2026-08-22. Use glm-5.3 on Z.AI or OpenRouter."
+superseded_by = "glm-5.3"
 tier = "frontier"
 open_weight = true
 strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]

@@ -252,6 +252,7 @@ fn architecture_to_vm_value(architecture: &llm_config::ModelArchitectureDef) -> 
 }
 
 fn pricing_to_vm_value(pricing: &llm_config::ModelPricing) -> VmValue {
+    let pricing = pricing.effective_today();
     let mut dict = crate::value::DictMap::new();
     dict.insert(
         crate::value::intern_key("input_per_mtok"),

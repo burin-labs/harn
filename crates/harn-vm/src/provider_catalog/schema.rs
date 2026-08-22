@@ -415,7 +415,27 @@ pub fn schema_value() -> Value {
                             },
                             "additionalProperties": false
                         }
+                    },
+                    "promotions": {
+                        "type": "array",
+                        "items": {"$ref": "#/$defs/promotional_pricing"}
                     }
+                },
+                "additionalProperties": false
+            },
+            "promotional_pricing": {
+                "type": "object",
+                "required": ["id", "starts_on", "source_url", "input_per_mtok", "output_per_mtok"],
+                "properties": {
+                    "id": {"type": "string", "minLength": 1},
+                    "starts_on": {"type": "string", "format": "date"},
+                    "ends_on": {"type": "string", "format": "date"},
+                    "review_after": {"type": "string", "format": "date"},
+                    "source_url": {"type": "string", "minLength": 1},
+                    "input_per_mtok": {"type": "number", "minimum": 0},
+                    "output_per_mtok": {"type": "number", "minimum": 0},
+                    "cache_read_per_mtok": {"type": ["number", "null"], "minimum": 0},
+                    "cache_write_per_mtok": {"type": ["number", "null"], "minimum": 0}
                 },
                 "additionalProperties": false
             },

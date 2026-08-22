@@ -76,6 +76,41 @@ pub(crate) use transport::vm_call_llm_api_with_body;
 
 use transport::vm_call_llm_api;
 
+/// Resolve the transport required by a native-tool request.
+///
+/// An omitted reasoning option preserves the provider's model default. It is
+/// not the same as an explicit `effort: "none"` request.
+pub(crate) fn effective_tool_api_mode(
+    requested: LlmApiMode,
+    provider: &str,
+    caps: &crate::llm::capabilities::Capabilities,
+    thinking: &ThinkingConfig,
+    has_native_tools: bool,
+) -> LlmApiMode {
+    if caps.chat_completions_unsupported
+        || (provider == "openai"
+            && caps.reasoning_tools_require_responses
+            && has_native_tools
+            && !matches!(
+                thinking,
+                ThinkingConfig::Effort {
+                    level: ReasoningEffort::None
+                }
+            ))
+    {
+        LlmApiMode::Responses
+    } else {
+        requested
+    }
+}
+
+/// Send one already-normalized request through Harn's real provider adapter.
+/// Provider probes use this boundary so they cannot drift into a second set of
+/// endpoint, auth, request, streaming, and response rules.
+pub(crate) async fn probe_llm_request(request: &LlmRequestPayload) -> Result<LlmResult, VmError> {
+    vm_call_llm_api(request, None).await
+}
+
 #[derive(Debug, Clone)]
 struct OffthreadLlmError {
     message: String,

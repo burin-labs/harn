@@ -218,6 +218,19 @@ export interface HarnModelPricing {
   cache_read_per_mtok?: number | null
   cache_write_per_mtok?: number | null
   input_token_bands?: HarnInputTokenPricingBand[]
+  promotions?: HarnPromotionalPricing[]
+}
+
+export interface HarnPromotionalPricing {
+  id: string
+  starts_on: string
+  ends_on?: string
+  review_after?: string
+  source_url: string
+  input_per_mtok: number
+  output_per_mtok: number
+  cache_read_per_mtok?: number | null
+  cache_write_per_mtok?: number | null
 }
 
 export interface HarnInputTokenPricingBand {

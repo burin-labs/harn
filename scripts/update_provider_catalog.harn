@@ -18,7 +18,6 @@
 // `scripts/provider_catalog_fixtures/expected_drift_report.md`. Run
 // `--check --update` to refresh the golden after intentional adapter
 // or library changes.
-import { create, domain } from "std/net_policy"
 import "./provider_catalog_refresh.harn"
 import "./provider_catalog_sources.harn"
 
@@ -35,14 +34,6 @@ const BASELINE_CATALOG_PATH = "scripts/provider_catalog_fixtures/baseline_catalo
 const FIXED_OBSERVED_AT = "2026-05-11T00:00:00Z"
 
 const FIXED_FETCHED_AT = "fixture-time"
-
-fn __domain_rules(names: list<string>) -> list {
-  let rules = []
-  for name in names {
-    rules = rules + [domain(name)]
-  }
-  return rules
-}
 
 fn __install_fixture_mocks(harness: Harness) -> Harness {
   harness.testing.http_mock_clear()
@@ -85,62 +76,55 @@ fn __install_fixture_mocks(harness: Harness) -> Harness {
       body: harness.fs.read_text(path_join(FIXTURE_DIR, "openrouter_models.json")),
     },
   )
-  return harness.with_net_policy(
-    create(
-      {
-        allow: __domain_rules(["www.anthropic.com", "platform.openai.com", "openrouter.ai"]),
-        default: "deny",
-      },
-    ),
+  harness.net.egress_policy(
+    {allow: ["www.anthropic.com", "platform.openai.com", "openrouter.ai"], default: "deny"},
   )
+  return harness
 }
 
 fn __install_live_egress_policy(harness: Harness) -> Harness {
-  return harness.with_net_policy(
-    create(
-      {
-        allow: __domain_rules(
-          [
-            "www.anthropic.com",
-            "anthropic.com",
-            "claude.com",
-            "platform.openai.com",
-            "developers.openai.com",
-            "openai.com",
-            "openrouter.ai",
-            "api.anthropic.com",
-            "api.openai.com",
-            "router.huggingface.co",
-            "generativelanguage.googleapis.com",
-            "api.mistral.ai",
-            "api.cohere.ai",
-            "api.x.ai",
-            "api.together.xyz",
-            "api.groq.com",
-            "api.cerebras.ai",
-            "api.deepseek.com",
-            "api.fireworks.ai",
-            "dashscope-intl.aliyuncs.com",
-            "api.minimax.io",
-            "api.z.ai",
-            "api.moonshot.ai",
-            "inference.baseten.co",
-            "api.deepinfra.com",
-            "api.sambanova.ai",
-            "integrate.api.nvidia.com",
-            "api.tokenfactory.nebius.com",
-            "tokens.flex.ai",
-            "api.hyperbolic.xyz",
-            "api.siliconflow.com",
-            "api.siliconflow.cn",
-            "api.parasail.io",
-            "api.atlascloud.ai",
-          ],
-        ),
-        default: "deny",
-      },
-    ),
+  harness.net.egress_policy(
+    {
+      allow: [
+        "www.anthropic.com",
+        "anthropic.com",
+        "claude.com",
+        "platform.openai.com",
+        "developers.openai.com",
+        "openai.com",
+        "openrouter.ai",
+        "api.anthropic.com",
+        "api.openai.com",
+        "router.huggingface.co",
+        "generativelanguage.googleapis.com",
+        "api.mistral.ai",
+        "api.cohere.ai",
+        "api.x.ai",
+        "api.together.xyz",
+        "api.groq.com",
+        "api.cerebras.ai",
+        "api.deepseek.com",
+        "api.fireworks.ai",
+        "dashscope-intl.aliyuncs.com",
+        "api.minimax.io",
+        "api.z.ai",
+        "api.moonshot.ai",
+        "inference.baseten.co",
+        "api.deepinfra.com",
+        "api.sambanova.ai",
+        "integrate.api.nvidia.com",
+        "api.tokenfactory.nebius.com",
+        "tokens.flex.ai",
+        "api.hyperbolic.xyz",
+        "api.siliconflow.com",
+        "api.siliconflow.cn",
+        "api.parasail.io",
+        "api.atlascloud.ai",
+      ],
+      default: "deny",
+    },
   )
+  return harness
 }
 
 fn __rate_per_mtok_from_per_token(value) {
@@ -164,11 +148,19 @@ fn __openrouter_mapper(payload) {
     let pricing_dict = {}
     const input_rate = __rate_per_mtok_from_per_token(pricing?.prompt)
     const output_rate = __rate_per_mtok_from_per_token(pricing?.completion)
+    const cache_read = __rate_per_mtok_from_per_token(pricing?.input_cache_read)
+    const cache_write = __rate_per_mtok_from_per_token(pricing?.input_cache_write)
     if input_rate != nil {
       pricing_dict = pricing_dict + {input_per_mtok: input_rate}
     }
     if output_rate != nil {
       pricing_dict = pricing_dict + {output_per_mtok: output_rate}
+    }
+    if cache_read != nil {
+      pricing_dict = pricing_dict + {cache_read_per_mtok: cache_read}
+    }
+    if cache_write != nil {
+      pricing_dict = pricing_dict + {cache_write_per_mtok: cache_write}
     }
     const pricing_value = if len(pricing_dict) == 0 {
       nil
@@ -197,6 +189,9 @@ fn __pricing_from_per_token_record(pricing) {
   const cache_read = __rate_per_mtok_from_per_token(
     pricing?.input_cache_read ?? pricing?.cache_read,
   )
+  const cache_write = __rate_per_mtok_from_per_token(
+    pricing?.input_cache_write ?? pricing?.cache_write,
+  )
   if input_rate != nil {
     pricing_dict = pricing_dict + {input_per_mtok: input_rate}
   }
@@ -205,6 +200,9 @@ fn __pricing_from_per_token_record(pricing) {
   }
   if cache_read != nil {
     pricing_dict = pricing_dict + {cache_read_per_mtok: cache_read}
+  }
+  if cache_write != nil {
+    pricing_dict = pricing_dict + {cache_write_per_mtok: cache_write}
   }
   if len(pricing_dict) == 0 {
     return nil
@@ -220,6 +218,7 @@ fn __pricing_from_mtok_record(record) {
   const input_rate = record?.input_per_mtok ?? record?.input_per_million_tokens
   const output_rate = record?.output_per_mtok ?? record?.output_per_million_tokens
   const cache_read = record?.cache_read_per_mtok ?? record?.cached_input_per_mtok
+  const cache_write = record?.cache_write_per_mtok
   if input_rate != nil {
     pricing_dict = pricing_dict + {input_per_mtok: to_float(input_rate)}
   }
@@ -228,6 +227,9 @@ fn __pricing_from_mtok_record(record) {
   }
   if cache_read != nil {
     pricing_dict = pricing_dict + {cache_read_per_mtok: to_float(cache_read)}
+  }
+  if cache_write != nil {
+    pricing_dict = pricing_dict + {cache_write_per_mtok: to_float(cache_write)}
   }
   if len(pricing_dict) == 0 {
     return nil
@@ -263,6 +265,42 @@ fn __generic_models_mapper(payload) {
       pricing: pricing_value,
     }
     entries = entries + [entry]
+  }
+  return entries
+}
+
+fn __gemini_models_mapper(payload) {
+  let entries = []
+  for record in payload?.models ?? [] {
+    const resource = record?.name ?? ""
+    const id = if starts_with(resource, "models/") {
+      resource.slice(7)
+    } else {
+      resource
+    }
+    if id != "" {
+      entries = entries
+        + [{model_id: id, name: record?.displayName ?? id, context_window: record?.inputTokenLimit}]
+    }
+  }
+  return entries
+}
+
+fn __together_models_mapper(payload) {
+  let entries = []
+  for record in payload ?? [] {
+    const id = record?.id
+    if id != nil && id != "" {
+      entries = entries
+        + [
+          {
+            model_id: id,
+            name: record?.display_name ?? id,
+            context_window: record?.context_length,
+            pricing: __pricing_from_mtok_record(record?.pricing),
+          },
+        ]
+    }
   }
   return entries
 }
@@ -445,7 +483,12 @@ fn __live_adapter_specs() {
       "gemini",
       "https://generativelanguage.googleapis.com/v1beta/models",
       ["GEMINI_API_KEY", "GOOGLE_API_KEY"],
-      {auth_header: "x-goog-api-key", auth_prefix: "", terms_notes: "Gemini API model index."},
+      {
+        auth_header: "x-goog-api-key",
+        auth_prefix: "",
+        mapper: __gemini_models_mapper,
+        terms_notes: "Gemini API model index.",
+      },
     ),
     __keyed_models_spec(
       "mistral-models-api",
@@ -473,7 +516,10 @@ fn __live_adapter_specs() {
       "together",
       "https://api.together.xyz/v1/models",
       ["TOGETHER_AI_API_KEY"],
-      {terms_notes: "Provider-owned /v1/models endpoint."},
+      {
+        mapper: __together_models_mapper,
+        terms_notes: "Provider-owned /v1/models endpoint; prices are already per million tokens.",
+      },
     ),
     __keyed_models_spec(
       "groq-models-api",
@@ -513,7 +559,7 @@ fn __live_adapter_specs() {
     __keyed_models_spec(
       "zai-models-api",
       "zai",
-      "https://api.z.ai/v1/models",
+      "https://api.z.ai/api/paas/v4/models",
       ["ZAI_API_KEY", "ZHIPU_API_KEY"],
       {terms_notes: "Z.AI OpenAI-compatible /models endpoint."},
     ),

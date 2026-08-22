@@ -247,6 +247,19 @@ export interface HarnModelPricing {
   cache_read_per_mtok?: number | null
   cache_write_per_mtok?: number | null
   input_token_bands?: HarnInputTokenPricingBand[]
+  promotions?: HarnPromotionalPricing[]
+}
+
+export interface HarnPromotionalPricing {
+  id: string
+  starts_on: string
+  ends_on?: string
+  review_after?: string
+  source_url: string
+  input_per_mtok: number
+  output_per_mtok: number
+  cache_read_per_mtok?: number | null
+  cache_write_per_mtok?: number | null
 }
 
 export interface HarnInputTokenPricingBand {
@@ -888,6 +901,7 @@ public struct HarnModelPricing: Codable, Sendable, Equatable {
     public let cacheReadPerMTok: Double?
     public let cacheWritePerMTok: Double?
     public let inputTokenBands: [HarnInputTokenPricingBand]?
+    public let promotions: [HarnPromotionalPricing]?
 
     enum CodingKeys: String, CodingKey {
         case inputPerMTok = "input_per_mtok"
@@ -895,6 +909,31 @@ public struct HarnModelPricing: Codable, Sendable, Equatable {
         case cacheReadPerMTok = "cache_read_per_mtok"
         case cacheWritePerMTok = "cache_write_per_mtok"
         case inputTokenBands = "input_token_bands"
+        case promotions
+    }
+}
+
+public struct HarnPromotionalPricing: Codable, Sendable, Equatable {
+    public let id: String
+    public let startsOn: String
+    public let endsOn: String?
+    public let reviewAfter: String?
+    public let sourceURL: String
+    public let inputPerMTok: Double
+    public let outputPerMTok: Double
+    public let cacheReadPerMTok: Double?
+    public let cacheWritePerMTok: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case startsOn = "starts_on"
+        case endsOn = "ends_on"
+        case reviewAfter = "review_after"
+        case sourceURL = "source_url"
+        case inputPerMTok = "input_per_mtok"
+        case outputPerMTok = "output_per_mtok"
+        case cacheReadPerMTok = "cache_read_per_mtok"
+        case cacheWritePerMTok = "cache_write_per_mtok"
     }
 }
 

@@ -1085,9 +1085,70 @@
         "output_per_mtok": {
           "minimum": 0,
           "type": "number"
+        },
+        "promotions": {
+          "items": {
+            "$ref": "#/$defs/promotional_pricing"
+          },
+          "type": "array"
         }
       },
       "required": [
+        "input_per_mtok",
+        "output_per_mtok"
+      ],
+      "type": "object"
+    },
+    "promotional_pricing": {
+      "additionalProperties": false,
+      "properties": {
+        "cache_read_per_mtok": {
+          "minimum": 0,
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "cache_write_per_mtok": {
+          "minimum": 0,
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "ends_on": {
+          "format": "date",
+          "type": "string"
+        },
+        "id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "input_per_mtok": {
+          "minimum": 0,
+          "type": "number"
+        },
+        "output_per_mtok": {
+          "minimum": 0,
+          "type": "number"
+        },
+        "review_after": {
+          "format": "date",
+          "type": "string"
+        },
+        "source_url": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "starts_on": {
+          "format": "date",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "starts_on",
+        "source_url",
         "input_per_mtok",
         "output_per_mtok"
       ],

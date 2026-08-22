@@ -57,6 +57,7 @@ mod lookup_tests_support;
 mod lookup_tests_system_placement;
 mod model;
 mod overrides;
+mod pattern;
 mod rule;
 #[cfg(test)]
 mod rule_tests;

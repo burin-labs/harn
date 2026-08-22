@@ -560,7 +560,7 @@ if [[ "${SETUP_PROFILE}" != "bootstrap" ]]; then
   # Signing mutates the canonical artifact identity, so refresh the receipt
   # only after the final bytes are in place and before publishing a target seed.
   ./scripts/sign_local_macos.sh
-  HARN_BIN='' ./scripts/harn_bin.sh --record-receipt
+  HARN_BIN='' HARN_BIN_NO_BUILD=0 ./scripts/harn_bin.sh --record-receipt
   if [[ -x ./scripts/cargo_target_seed.sh ]] \
     && grep -Fxq "target-dir = \"${cargo_target_root}\" # ${MANAGED_CARGO_CONFIG_MARKER}" \
       .cargo/config.toml; then

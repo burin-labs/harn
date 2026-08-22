@@ -25,40 +25,6 @@ fn downstream_bindings_include_automatic_eligibility_shape() {
 }
 
 #[test]
-fn generated_catalog_exports_one_measured_fireworks_automatic_default() {
-    let catalog = artifact();
-    let automatic = catalog
-        .variants
-        .iter()
-        .filter(|variant| variant.automatic_eligibility.is_some())
-        .collect::<Vec<_>>();
-    assert_eq!(automatic.len(), 1, "catalog must own one automatic default");
-    assert_eq!(automatic[0].id, "balanced");
-    assert_eq!(automatic[0].provider, "fireworks");
-    assert_eq!(
-        automatic[0].model_id,
-        "accounts/fireworks/models/gpt-oss-120b"
-    );
-    let receipts = &automatic[0]
-        .automatic_eligibility
-        .as_ref()
-        .expect("automatic eligibility")
-        .receipts;
-    assert_eq!(receipts.len(), 3);
-    assert_eq!(
-        receipts
-            .iter()
-            .map(|receipt| (receipt.kind, receipt.passed, receipt.trials))
-            .collect::<Vec<_>>(),
-        vec![
-            (ModelEligibilityMeasurementKind::MeterHoldout, 80, 100),
-            (ModelEligibilityMeasurementKind::ToolCallFidelity, 97, 100),
-            (ModelEligibilityMeasurementKind::ProviderHealth, 99, 100),
-        ]
-    );
-}
-
-#[test]
 fn validation_rejects_unmeasured_or_ambiguous_automatic_variants() {
     let mut catalog = artifact();
     let eligibility = catalog

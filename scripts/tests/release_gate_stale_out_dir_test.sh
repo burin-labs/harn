@@ -30,6 +30,7 @@ touch "$release_root/README.md" "$release_root/CLAUDE.md"
 git -C "$release_root" init -q
 git -C "$release_root" config user.email test@example.com
 git -C "$release_root" config user.name test
+git -C "$release_root" config commit.gpgsign false
 git -C "$release_root" add .
 git -C "$release_root" commit -qm init
 

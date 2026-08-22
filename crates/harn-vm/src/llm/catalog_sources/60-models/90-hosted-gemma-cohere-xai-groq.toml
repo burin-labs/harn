@@ -58,7 +58,7 @@ served_variant = "groq-lpu"
 wire_model = "openai/gpt-oss-120b"
 api_dialect = "openai_chat"
 capabilities = ["tools", "streaming", "thinking"]
-pricing = { input_per_mtok = 0.15, output_per_mtok = 0.60 }
+pricing = { input_per_mtok = 0.15, output_per_mtok = 0.60, cache_read_per_mtok = 0.075 }
 rate_limits = { rpm = 1000, tpm = 250000, tier = "developer", source_url = "https://console.groq.com/docs/models", last_verified = "2026-06-05" }
 architecture = { parameter_count_b = 117.0, active_parameter_count_b = 5.1, moe = true, license = "Apache-2.0", source_url = "https://developers.openai.com/api/docs/models/gpt-oss-120b", last_verified = "2026-06-05" }
 tier = "mid"
@@ -75,7 +75,7 @@ served_variant = "groq-lpu"
 wire_model = "openai/gpt-oss-20b"
 api_dialect = "openai_chat"
 capabilities = ["tools", "streaming", "thinking"]
-pricing = { input_per_mtok = 0.10, output_per_mtok = 0.50 }
+pricing = { input_per_mtok = 0.075, output_per_mtok = 0.30, cache_read_per_mtok = 0.0375 }
 rate_limits = { rpm = 1000, tpm = 250000, tier = "developer", source_url = "https://console.groq.com/docs/models", last_verified = "2026-06-20" }
 architecture = { parameter_count_b = 21.0, active_parameter_count_b = 3.6, moe = true, license = "Apache-2.0", source_url = "https://developers.openai.com/api/docs/models/gpt-oss-20b", last_verified = "2026-06-20" }
 tier = "mid"
@@ -218,7 +218,7 @@ capabilities = ["tools", "streaming", "thinking"]
 # ~500 output tok/s on Groq LPUs; rate verified 2026-07-02 on
 # groq.com/pricing. Dense 27B, hybrid Gated DeltaNet+Attention; SWE-bench
 # Verified 77.2 per the Qwen3.6-27B model card.
-pricing = { input_per_mtok = 0.60, output_per_mtok = 3.00 }
+pricing = { input_per_mtok = 0.60, output_per_mtok = 3.00, cache_read_per_mtok = 0.30 }
 architecture = { parameter_count_b = 27.0, moe = false, license = "Apache-2.0", source_url = "https://huggingface.co/Qwen/Qwen3.6-27B", last_verified = "2026-07-02" }
 benchmarks = { swe_bench_verified = 77.2 }
 tier = "mid"
@@ -235,6 +235,9 @@ served_variant = "groq-lpu"
 api_dialect = "openai_chat"
 capabilities = ["tools", "streaming"]
 pricing = { input_per_mtok = 0.05, output_per_mtok = 0.08 }
+deprecated = true
+deprecation_note = "Groq shut down this developer-tier route on 2026-08-16. Enterprise committed-spend routes are unaffected. Use openai/gpt-oss-20b."
+superseded_by = "openai/gpt-oss-20b"
 rate_limits = { rpm = 1000, tpm = 250000, tier = "developer", source_url = "https://console.groq.com/docs/models", last_verified = "2026-06-05" }
 architecture = { parameter_count_b = 8.0, moe = false, license = "Llama 3.1 Community", source_url = "https://console.groq.com/docs/models", last_verified = "2026-06-05" }
 tier = "small"

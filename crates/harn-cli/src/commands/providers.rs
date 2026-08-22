@@ -1,3 +1,4 @@
+use std::ffi::OsString;
 use std::fs;
 
 use tokio::process::Command;
@@ -59,16 +60,7 @@ pub(crate) async fn run_refresh(args: &ProvidersRefreshArgs) -> Result<(), Strin
     let exe = std::env::current_exe()
         .map_err(|error| format!("failed to resolve current executable: {error}"))?;
     let mut command = Command::new(exe);
-    command.arg("run").arg(&args.script).arg("--");
-    if args.live {
-        command.arg("--live");
-    }
-    if args.check || args.update {
-        command.arg("--check");
-    }
-    if args.update {
-        command.arg("--update");
-    }
+    command.args(refresh_run_args(args));
     let status = command
         .status()
         .await
@@ -84,6 +76,25 @@ pub(crate) async fn run_refresh(args: &ProvidersRefreshArgs) -> Result<(), Strin
                 .unwrap_or_else(|| "signal".to_string())
         ))
     }
+}
+
+fn refresh_run_args(args: &ProvidersRefreshArgs) -> Vec<OsString> {
+    let mut command = vec![
+        OsString::from("run"),
+        OsString::from("--allow-process-network"),
+        args.script.as_os_str().to_owned(),
+        OsString::from("--"),
+    ];
+    if args.live {
+        command.push(OsString::from("--live"));
+    }
+    if args.check || args.update {
+        command.push(OsString::from("--check"));
+    }
+    if args.update {
+        command.push(OsString::from("--update"));
+    }
+    command
 }
 
 pub(crate) fn run_matrix(args: &ProvidersMatrixArgs) -> Result<(), String> {

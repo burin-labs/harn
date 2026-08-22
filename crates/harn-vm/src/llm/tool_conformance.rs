@@ -25,7 +25,10 @@ pub use super::usage::ToolProbeUsage;
 pub(super) use helpers::{aggregate_stream_text, probe_tool_registry};
 #[cfg(test)]
 use request::validate_probe_request_body;
-use request::{probe_request_body_for_format, probe_request_body_with_warnings_for_format};
+use request::{
+    probe_request_body_for_format, probe_request_body_with_warnings_for_format,
+    probe_request_payload_for_format,
+};
 use response::{
     content_sample, extract_content, extract_native_tool_calls, first_non_empty,
     has_raw_model_tool_tag, sample_content, sample_failure,
@@ -387,7 +390,7 @@ pub async fn run_tool_conformance_probe(
                 execute_live_probe_case(
                     &provider,
                     &model_id,
-                    base_url.as_deref(),
+                    options.base_url.as_deref(),
                     *mode,
                     ToolProbeFormatPolicy {
                         format: options.tool_format,
@@ -964,6 +967,52 @@ async fn execute_live_probe_case(
 ) -> ToolConformanceCase {
     let clock = harn_clock::RealClock::arc();
     let started_ms = clock.monotonic_ms();
+    if base_url.is_none() {
+        let request = match probe_request_payload_for_format(
+            provider,
+            model,
+            mode,
+            format_policy.format,
+            probe_case,
+            ToolProbeRequestProfile::CatalogDefault,
+            marker,
+        ) {
+            Ok(request) => request,
+            Err(message) => {
+                return ToolConformanceCase::transport_error(
+                    mode,
+                    message,
+                    Some(elapsed_ms(&*clock, started_ms)),
+                );
+            }
+        };
+        let result = match crate::llm::api::probe_llm_request(&request).await {
+            Ok(result) => result,
+            Err(error) => {
+                return ToolConformanceCase::transport_error(
+                    mode,
+                    error.to_string(),
+                    Some(elapsed_ms(&*clock, started_ms)),
+                );
+            }
+        };
+        let usage = Some(ToolProbeUsage::from_llm_result(&result));
+        let response = json!({
+            "content": result.text,
+            "tool_calls": result.tool_calls,
+        });
+        return classify_tool_probe_response(
+            mode,
+            &response,
+            format_policy,
+            probe_case,
+            marker,
+            None,
+            Some(elapsed_ms(&*clock, started_ms)),
+            usage,
+        )
+        .await;
+    }
     let Some(def) = llm_config::provider_config(provider) else {
         return ToolConformanceCase::transport_error(
             mode,

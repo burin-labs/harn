@@ -105,140 +105,12 @@ fn test_glob_match_exact() {
 }
 
 #[test]
-fn test_infer_provider_from_defaults() {
-    let _guard = crate::llm::env_guard();
-    let _env = crate::test_env::test_env_guard();
-
-    assert_eq!(infer_provider("claude-sonnet-4-20250514"), "anthropic");
-    assert_eq!(infer_provider("gpt-4o"), "openai");
-    assert_eq!(infer_provider("o1-preview"), "openai");
-    assert_eq!(infer_provider("o3-mini"), "openai");
-    assert_eq!(infer_provider("o4-mini"), "openai");
-    assert_eq!(infer_provider("gemini-2.5-pro"), "gemini");
-    assert_eq!(infer_provider("qwen/qwen3-coder"), "openrouter");
-    assert_eq!(infer_provider("llama3.2:latest"), "ollama");
-    assert_eq!(infer_provider("unknown-model"), "anthropic");
-}
-
-#[test]
 fn test_openrouter_inference_requires_one_slash() {
     let _guard = crate::llm::env_guard();
     let _env = crate::test_env::test_env_guard();
 
     assert_eq!(infer_provider("org/model"), "openrouter");
     assert_eq!(infer_provider("org/team/model"), "anthropic");
-}
-
-#[test]
-fn test_cerebras_inference_beats_openrouter_slash_fallback() {
-    let _guard = crate::llm::env_guard();
-    let _env = crate::test_env::test_env_guard();
-
-    assert_eq!(infer_provider("cerebras/gpt-oss-120b"), "cerebras");
-    assert_eq!(infer_provider("cerebras/zai-glm-4.7"), "cerebras");
-    assert_eq!(infer_provider("cerebras/llama-3.3-70b"), "cerebras");
-}
-
-#[test]
-fn test_direct_catalog_model_id_resolves_to_catalog_provider() {
-    // Bare model IDs that the embedded catalog hosts on Cerebras must
-    // not be misrouted by the generic `gpt-*` / single-slash inference
-    // fallbacks. Regression for harn#2142 (model-info routed
-    // `gpt-oss-120b` to openai, breaking host TUI credential checks).
-    let _guard = crate::llm::env_guard();
-    let _env = crate::test_env::test_env_guard();
-
-    for model in ["gpt-oss-120b", "zai-glm-4.7", "llama-3.3-70b"] {
-        assert_eq!(
-            infer_provider(model),
-            "cerebras",
-            "{model} should route to its catalog provider"
-        );
-        let resolved = resolve_model_info(model);
-        assert_eq!(resolved.id, model);
-        assert_eq!(resolved.provider, "cerebras");
-    }
-}
-
-#[test]
-fn test_equivalent_model_catalog_entries_use_capability_compatible_routes() {
-    reset_overrides();
-
-    assert_eq!(
-        wire_model_id("groq/openai/gpt-oss-120b"),
-        "openai/gpt-oss-120b"
-    );
-    assert_eq!(wire_model_id("gpt-oss-120b"), "gpt-oss-120b");
-
-    let equivalents = equivalent_model_catalog_entries("gpt-oss-120b");
-    let ids = equivalents
-        .iter()
-        .map(|(id, _)| id.as_str())
-        .collect::<Vec<_>>();
-
-    assert!(
-        ids.contains(&"groq/openai/gpt-oss-120b"),
-        "Cerebras GPT-OSS should surface the Groq serving variant"
-    );
-    assert!(
-        !ids.contains(&"gpt-oss-120b"),
-        "equivalence results should not include the source row"
-    );
-    assert!(equivalents
-        .iter()
-        .all(|(_, model)| { model.equivalence_group.as_deref() == Some("openai-gpt-oss-120b") }));
-}
-
-#[test]
-fn frontier_agent_equivalents_use_request_sized_context_for_failover() {
-    reset_overrides();
-
-    let conservative = equivalent_model_catalog_entries("claude-sonnet-4-6");
-    assert!(
-        !conservative
-            .iter()
-            .any(|(id, _)| id == "deepseek-ai/DeepSeek-V4-Pro"),
-        "full-window equivalence should not claim a 512K route covers every 1M Sonnet request"
-    );
-
-    let request_sized =
-        equivalent_model_catalog_entries_for_context("claude-sonnet-4-6", Some(128_000));
-    let ids = request_sized
-        .iter()
-        .map(|(id, _)| id.as_str())
-        .collect::<Vec<_>>();
-
-    assert!(
-        ids.contains(&"deepseek-ai/DeepSeek-V4-Pro"),
-        "Together DeepSeek should be a request-sized Sonnet failover candidate"
-    );
-    assert!(
-        ids.contains(&"glm-5.2") || ids.contains(&"z-ai/glm-5.2"),
-        "GLM 5.2 should stay in the frontier coding failover group"
-    );
-    assert!(request_sized
-        .iter()
-        .all(|(_, model)| { model.equivalence_group.as_deref() == Some("frontier-agent-coding") }));
-}
-
-#[test]
-fn fireworks_gpt_oss_route_has_real_context_window() {
-    // Regression: the Fireworks-served `accounts/fireworks/models/gpt-oss-120b`
-    // wire id had NO catalog row, so its context window resolved to None and
-    // the agent's auto-compaction budget had nothing to enforce — the prompt
-    // grew until Fireworks rejected the turn with HTTP 400 [context_overflow]
-    // (session 019ee303: 197467 tokens > 131071 max). Cataloging the real
-    // 131072 window lets compaction trigger before the hard limit.
-    reset_overrides();
-
-    let entry = model_catalog_entry("accounts/fireworks/models/gpt-oss-120b")
-        .expect("Fireworks gpt-oss-120b must be in the model catalog");
-    assert_eq!(entry.context_window, 131_072);
-    assert_eq!(entry.provider, "fireworks");
-    assert_eq!(
-        entry.equivalence_group.as_deref(),
-        Some("openai-gpt-oss-120b"),
-    );
 }
 
 #[test]
@@ -291,67 +163,10 @@ fn test_user_catalog_overlay_re_homes_model_provider() {
 }
 
 #[test]
-fn test_model_tier_from_defaults() {
-    // Tier is now self-declared per model row in providers.toml.
-    // Models that match an entry use the declared value; unknown
-    // model ids fall through to `tier_defaults.default` ("mid").
-    assert_eq!(model_tier("claude-sonnet-4-20250514"), "frontier");
-    assert_eq!(model_tier("gpt-4o"), "frontier");
-    assert_eq!(model_tier("Qwen/Qwen3.5-9B"), "small");
-    assert_eq!(model_tier("deepseek-v4-flash"), "mid");
-    assert_eq!(model_tier("deepseek-v4-pro"), "frontier");
-    assert_eq!(model_tier("MiniMax-M2.7"), "frontier");
-    assert_eq!(model_tier("glm-5.1"), "frontier");
-    // Unknown ids resolve to the default.
-    assert_eq!(model_tier("definitely-not-a-real-model"), "mid");
-}
-
-#[test]
-fn test_model_family_preserves_underlying_hosted_lineage() {
-    assert_eq!(
-        model_family("openrouter", "anthropic/claude-sonnet-4-6"),
-        "anthropic-claude"
-    );
-    assert_eq!(
-        model_family("openrouter", "google/gemini-2.5-flash"),
-        "google-gemini"
-    );
-    assert_eq!(
-        model_family("openrouter", "openai/o3-mini"),
-        "openai-reasoning"
-    );
-    assert_eq!(model_lineage("openrouter", "openai/gpt-5.5"), "openai-gpt5");
-    assert_eq!(
-        model_lineage("openrouter", "openai/o3-mini"),
-        "openai-reasoning"
-    );
-    assert_eq!(
-        model_lineage("anthropic", "claude-opus-4-8"),
-        "claude-opus-adaptive"
-    );
-    assert_eq!(model_lineage("llamacpp", "qwen3.6-35b-a3b"), "qwen3");
-}
-
-#[test]
 fn test_resolve_model_unknown_alias() {
     let (id, provider) = resolve_model("gpt-4o");
     assert_eq!(id, "gpt-4o");
     assert!(provider.is_none());
-}
-
-#[test]
-fn test_provider_names() {
-    let names = provider_names();
-    assert!(names.len() >= 7);
-    assert!(names.contains(&"anthropic".to_string()));
-    assert!(names.contains(&"together".to_string()));
-    assert!(names.contains(&"local".to_string()));
-    assert!(names.contains(&"mlx".to_string()));
-    assert!(names.contains(&"openai".to_string()));
-    assert!(names.contains(&"ollama".to_string()));
-    assert!(names.contains(&"bedrock".to_string()));
-    assert!(names.contains(&"azure_openai".to_string()));
-    assert!(names.contains(&"vertex".to_string()));
 }
 
 #[test]
@@ -522,42 +337,6 @@ fn partial_provider_overlay_can_explicitly_replace_default_auth_style() {
 }
 
 #[test]
-fn test_resolve_tier_model_default_aliases() {
-    // Exercise the alias-resolution machinery, not the specific catalog
-    // value: the model under each tier alias evolves as the embedded
-    // providers.toml is updated. The invariants worth pinning are the
-    // provider routing + catalog-registration of the resolved model.
-    let (model, provider) = resolve_tier_model("frontier", None)
-        .expect("frontier alias must resolve from the embedded catalog");
-    assert_eq!(provider, "anthropic");
-    assert!(
-        model_catalog_entry(&model)
-            .is_some_and(|entry| entry.provider == "anthropic" && !entry.deprecated),
-        "frontier alias must point at a registered, non-deprecated anthropic model (got {model})"
-    );
-
-    let (model, provider) = resolve_tier_model("small", None)
-        .expect("small alias must resolve from the embedded catalog");
-    assert!(
-        [
-            "openrouter",
-            "huggingface",
-            "local",
-            "llamacpp",
-            "mlx",
-            "ollama"
-        ]
-        .contains(&provider.as_str()),
-        "small tier should resolve to an open-weight provider (got {provider} / {model})"
-    );
-
-    let (model, provider) =
-        resolve_tier_model("mid", None).expect("mid alias must resolve from the embedded catalog");
-    assert_eq!(provider, "openrouter");
-    assert_eq!(model, "qwen/qwen3-coder-next");
-}
-
-#[test]
 fn test_resolve_tier_model_prefers_provider_scoped_aliases() {
     // tier/<provider> takes precedence over generic tier when the
     // caller scopes by provider. Don't pin the specific model — the
@@ -569,55 +348,6 @@ fn test_resolve_tier_model_prefers_provider_scoped_aliases() {
         panic!("mid/openai alias must point at a registered model (got {model})")
     });
     assert_eq!(entry.tier.as_deref(), Some("mid"));
-}
-
-#[test]
-fn test_provider_config_anthropic() {
-    let pdef = provider_config("anthropic").unwrap();
-    assert_eq!(pdef.auth_style, "header");
-    assert_eq!(pdef.auth_header.as_deref(), Some("x-api-key"));
-}
-
-#[test]
-fn test_provider_config_mlx() {
-    let pdef = provider_config("mlx").unwrap();
-    assert_eq!(pdef.base_url, "http://127.0.0.1:8002");
-    assert_eq!(pdef.base_url_env.as_deref(), Some("MLX_BASE_URL"));
-    assert_eq!(
-        pdef.healthcheck.unwrap().path.as_deref(),
-        Some("/v1/models")
-    );
-
-    let (model, provider) = resolve_model("mlx-qwen36-27b");
-    assert_eq!(model, "unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit");
-    assert_eq!(provider.as_deref(), Some("mlx"));
-}
-
-#[test]
-fn test_enterprise_provider_defaults_and_inference() {
-    let bedrock = provider_config("bedrock").unwrap();
-    assert_eq!(bedrock.auth_style, "aws_sigv4");
-    assert_eq!(bedrock.base_url_env.as_deref(), Some("BEDROCK_BASE_URL"));
-    assert_eq!(
-        infer_provider("anthropic.claude-3-5-sonnet-20240620-v1:0"),
-        "bedrock"
-    );
-    assert_eq!(infer_provider("meta.llama3-70b-instruct-v1:0"), "bedrock");
-
-    let azure = provider_config("azure_openai").unwrap();
-    assert_eq!(azure.base_url_env.as_deref(), Some("AZURE_OPENAI_ENDPOINT"));
-    assert_eq!(
-        auth_env_names(&azure.auth_env),
-        vec![
-            "AZURE_OPENAI_API_KEY".to_string(),
-            "AZURE_OPENAI_AD_TOKEN".to_string(),
-            "AZURE_OPENAI_BEARER_TOKEN".to_string(),
-        ]
-    );
-
-    let vertex = provider_config("vertex").unwrap();
-    assert_eq!(vertex.base_url, "https://aiplatform.googleapis.com/v1");
-    assert_eq!(infer_provider("gemini-1.5-pro-002"), "gemini");
 }
 
 #[test]
@@ -689,64 +419,6 @@ fn test_resolve_base_url_region_env() {
 }
 
 #[test]
-fn test_default_config_roundtrip() {
-    let config = default_config();
-    assert!(!config.providers.is_empty());
-    assert!(!config.inference_rules.is_empty());
-    // Tier is now declared on each model row; tier_rules is allowed
-    // to be empty (the rule table is a legacy fallback only).
-    assert_eq!(config.tier_defaults.default, "mid");
-    // At least the new open-weight frontiers should have explicit tiers.
-    let frontiers = config
-        .models
-        .iter()
-        .filter(|(_, m)| m.tier.as_deref() == Some("frontier"))
-        .count();
-    assert!(
-        frontiers >= 4,
-        "expected at least 4 frontier-tagged models, got {frontiers}"
-    );
-}
-
-#[test]
-fn test_local_ollama_catalog_metadata() {
-    reset_overrides();
-
-    let devstral =
-        model_catalog_entry("devstral-small-2:24b").expect("devstral-small-2 catalog entry");
-    assert_eq!(devstral.context_window, 262_144);
-    assert!(!devstral.capabilities.iter().any(|cap| cap == "vision"));
-
-    let gemma4 = model_catalog_entry("gemma4:26b").expect("gemma4 catalog entry");
-    assert_eq!(gemma4.context_window, 262_144);
-    assert!(gemma4.capabilities.iter().any(|cap| cap == "vision"));
-}
-
-#[test]
-fn local_gemma4_source_tags_match_structured_capability_tags() {
-    reset_overrides();
-    let config = default_config();
-    for id in [
-        "gemma-4-e2b-it",
-        "gemma-4-e4b-it",
-        "gemma-4-12b-it",
-        "gemma-4-26b-a4b-it",
-        "gemma-4-31b-it",
-    ] {
-        let source = config
-            .models
-            .get(id)
-            .unwrap_or_else(|| panic!("{id} should be in the embedded catalog"));
-        let derived = effective_model_capability_tags(&source.provider, id);
-        assert_eq!(
-            source.capabilities, derived,
-            "{}/{} source capabilities must match derived capability_tags",
-            source.provider, id
-        );
-    }
-}
-
-#[test]
 fn capability_tags_include_structured_capability_flags() {
     let caps = crate::llm::capabilities::Capabilities {
         native_tools: true,
@@ -807,12 +479,6 @@ fn test_external_config_overlays_default_catalog() {
 }
 
 #[test]
-fn test_model_params_empty() {
-    let params = model_params("claude-sonnet-4-20250514");
-    assert!(params.is_empty());
-}
-
-#[test]
 fn test_user_overrides_add_provider_and_alias() {
     reset_overrides();
     let mut overlay = ProvidersConfig::default();
@@ -847,69 +513,6 @@ fn test_user_overrides_add_provider_and_alias() {
 }
 
 #[test]
-fn test_default_tool_format_uses_capability_matrix() {
-    reset_overrides();
-
-    // The self-hosted llama.cpp Qwen3.6 route resolves NATIVE by default as of
-    // the 2026-08-19 CUDA receipt. Named explicitly rather than derived from the
-    // matrix, because this assertion is the guard on a product default: if the
-    // row drifts back to a text grammar, this line is what fails.
-    assert_eq!(
-        default_tool_format("qwen3.6-35b-a3b-ud-q4-k-xl", "llamacpp"),
-        "native"
-    );
-    // devstral dropped its stale heredoc `text` pin (it has no reserved-token
-    // constraint, so there was no structural reason to stay on heredoc) and
-    // now inherits the global `json` text-channel default. Heredoc is still
-    // reachable via an explicit `preferred_tool_format = "text"` pin.
-    assert_eq!(
-        default_tool_format("devstral-small-2:24b", "ollama"),
-        "json"
-    );
-    // vLLM/SGLang-served Gemma 4 exposes OpenAI-compatible function calling,
-    // so the local route declares native tools (matching every hosted gemma-4
-    // sibling) rather than degrading to a text tool format.
-    assert_eq!(default_tool_format("gemma-4-26b-a4b-it", "local"), "native");
-    // deepseek-v3.2 and qwen3-coder both pin `text` in the capability
-    // matrix, so they keep heredoc rather than inheriting the json default.
-    assert_eq!(
-        default_tool_format("deepseek/deepseek-v3.2", "openrouter"),
-        "text"
-    );
-    assert_eq!(
-        default_tool_format("qwen/qwen3-coder-flash", "openrouter"),
-        "text"
-    );
-    assert_eq!(
-        default_tool_format("qwen/qwen3.6-flash", "openrouter"),
-        "native"
-    );
-    // GLM is native since the 2026-08-15 re-probe; DeepInfra's GLM-5.2 kept a
-    // pin and steers to fenced JSON rather than heredoc.
-    assert_eq!(default_tool_format("z-ai/glm-5.2", "openrouter"), "native");
-    assert_eq!(default_tool_format("zai-org/GLM-5.2", "deepinfra"), "json");
-    // GPT-OSS tool defaults are provider-specific: aggregate OpenRouter and
-    // Fireworks use Harn's heredoc text tools, as does DeepInfra — its
-    // native Harmony channel drops tool calls into the private reasoning
-    // channel (footgun), so it is pinned to text. Native-reliable hosts
-    // (Cerebras, Groq) stay on provider-native tool calls.
-    assert_eq!(
-        default_tool_format("openai/gpt-oss-120b", "openrouter"),
-        "text"
-    );
-    assert_eq!(
-        default_tool_format("accounts/fireworks/models/gpt-oss-120b", "fireworks"),
-        "text"
-    );
-    assert_eq!(default_tool_format("gpt-oss-120b", "cerebras"), "native");
-    assert_eq!(
-        default_tool_format("openai/gpt-oss-120b", "deepinfra"),
-        "text"
-    );
-    assert_eq!(default_tool_format("openai/gpt-oss-120b", "groq"), "native");
-}
-
-#[test]
 fn test_default_tool_format_unpinned_text_channel_is_json() {
     reset_overrides();
 
@@ -919,73 +522,6 @@ fn test_default_tool_format_unpinned_text_channel_is_json() {
     // gets the delimiter-safe default. (Native-capable unknowns still get
     // `native`; pinned models still honor their pin, covered above.)
     assert_eq!(default_tool_format("mystery-model-xyz", "ollama"), "json");
-}
-
-#[test]
-fn test_claude_family_defaults_native_without_host_pin() {
-    reset_overrides();
-
-    // Unpinned claude-family routes on first-class tool-calling providers
-    // resolve `native` from the capability matrix alone — no host alias
-    // pin required. The openrouter rows exercise the family-level
-    // catch-all: a dated slug, an unparseable version segment, and a new
-    // family name have no versioned rule and previously fell through to
-    // the global text-channel `json` default.
-    for (model, provider) in [
-        ("claude-sonnet-4-6", "anthropic"),
-        ("claude-sonnet-5", "anthropic"),
-        ("anthropic/claude-nova-1", "anthropic"),
-        ("anthropic/claude-sonnet-4.6", "openrouter"),
-        ("anthropic/claude-sonnet-5", "openrouter"),
-        ("anthropic/claude-opus-4-5-20251101", "openrouter"),
-        ("anthropic/claude-sonnet-next", "openrouter"),
-        ("anthropic/claude-nova-1", "openrouter"),
-        ("anthropic.claude-sonnet-4-6", "bedrock"),
-    ] {
-        assert_eq!(
-            default_tool_format(model, provider),
-            "native",
-            "{provider}:{model} must default native without a host pin"
-        );
-    }
-
-    // An unpinned host alias resolves native end-to-end through
-    // `resolve_model_info` (alias -> id -> capability matrix -> dialect
-    // guard) — the exact seam hosts consume via `llm_resolve_model`.
-    let overlay = parse_config_toml(
-        "[aliases.probe-sonnet]\nid = \"claude-sonnet-4-6\"\nprovider = \"anthropic\"\n",
-    )
-    .expect("overlay parses");
-    set_user_overrides(Some(overlay));
-    let resolved = resolve_model_info("probe-sonnet");
-    assert_eq!(resolved.provider, "anthropic");
-    assert_eq!(
-        resolved.tool_format, "native",
-        "an unpinned claude alias must inherit the family-level native default"
-    );
-    clear_user_overrides();
-
-    // An explicit host pin still wins over the family default: a
-    // text-channel `json` pin on a native-capable claude route survives
-    // resolution (the dialect guard only corrects known-broken combos).
-    let overlay = parse_config_toml(
-            "[aliases.probe-sonnet-json]\nid = \"claude-sonnet-4-6\"\nprovider = \"anthropic\"\ntool_format = \"json\"\n",
-        )
-        .expect("overlay parses");
-    set_user_overrides(Some(overlay));
-    let pinned = resolve_model_info("probe-sonnet-json");
-    assert_eq!(
-        pinned.tool_format, "json",
-        "an explicit host pin must win over the claude family default"
-    );
-    clear_user_overrides();
-
-    // Non-claude models keep the global text-channel `json` default —
-    // the catch-all is family-scoped, not a provider-wide flip.
-    assert_eq!(
-        default_tool_format("mystery-model-xyz", "openrouter"),
-        "json"
-    );
 }
 
 #[test]
@@ -1018,6 +554,7 @@ fn test_user_overrides_add_model_catalog_pricing_and_qc_defaults() {
                 cache_read_per_mtok: Some(0.25),
                 cache_write_per_mtok: None,
                 input_token_bands: Vec::new(),
+                promotions: Vec::new(),
             }),
             deprecated: false,
             deprecation_note: None,

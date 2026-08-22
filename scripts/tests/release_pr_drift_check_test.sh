@@ -70,6 +70,7 @@ init_fixture() {
   git -C "$repo" init -q
   git -C "$repo" config user.email test@example.com
   git -C "$repo" config user.name test
+  git -C "$repo" config commit.gpgsign false
   git -C "$repo" switch -qc main
 }
 

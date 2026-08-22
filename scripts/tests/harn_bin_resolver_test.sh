@@ -672,6 +672,7 @@ export FRESHNESS_TEST_DIFF_MARKER="$hostile_diff_marker"
 git -C "$cargo_fixture" init -q
 git -C "$cargo_fixture" config user.name 'Harn Resolver Test'
 git -C "$cargo_fixture" config user.email 'harn-resolver-test@example.invalid'
+git -C "$cargo_fixture" config commit.gpgsign false
 git -C "$cargo_fixture" config diff.hostile.command "$hostile_diff"
 git -C "$cargo_fixture" config diff.hostile.textconv "$hostile_diff"
 git -C "$cargo_fixture" add Cargo.toml src/main.rs 'embedded tracked.harn' \

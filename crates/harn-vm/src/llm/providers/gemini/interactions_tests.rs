@@ -6,7 +6,7 @@
 //! `invalid_request`, which is why the signature assertions are positional
 //! rather than "somewhere in the body".
 
-use super::interactions::{parse_response, GeminiInteractions};
+use super::interactions::{parse_response, thinking_level, GeminiInteractions};
 use super::interactions_stream::{InteractionStream, StreamAction};
 use super::test_support::gemini_payload;
 use crate::llm::api::{OutputFormat, ReasoningEffort, ThinkingConfig};
@@ -84,6 +84,19 @@ fn current_gemini_models_route_to_interactions_and_strip_sampling_controls() {
         assert!(body.get("contents").is_none());
         assert!(body.get("tools").is_none(), "fixture has no tools");
     }
+}
+
+#[test]
+fn disabled_thinking_uses_the_models_lowest_supported_interactions_level() {
+    let caps = crate::llm::capabilities::Capabilities {
+        reasoning_effort_levels: vec!["low".into(), "medium".into(), "high".into()],
+        ..Default::default()
+    };
+
+    assert_eq!(
+        thinking_level(&ThinkingConfig::Disabled, &caps).as_deref(),
+        Some("low")
+    );
 }
 
 #[test]

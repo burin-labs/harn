@@ -11,6 +11,47 @@ pub(super) fn extract_with_options(
     ])
 }
 
+pub(super) fn one_tool_list() -> VmValue {
+    VmValue::List(std::sync::Arc::new(vec![VmValue::Dict(
+        std::sync::Arc::new(crate::value::DictMap::from_iter([
+            (
+                crate::value::intern_key("name"),
+                VmValue::String(arcstr::ArcStr::from("lookup")),
+            ),
+            (
+                crate::value::intern_key("description"),
+                VmValue::String(arcstr::ArcStr::from("Look something up")),
+            ),
+            (
+                crate::value::intern_key("parameters"),
+                VmValue::dict(crate::value::DictMap::new()),
+            ),
+        ])),
+    )]))
+}
+
+pub(super) struct ScopedEnvVar {
+    key: &'static str,
+    previous: Option<String>,
+}
+
+impl ScopedEnvVar {
+    pub(super) fn set(key: &'static str, value: &str) -> Self {
+        let previous = std::env::var(key).ok();
+        std::env::set_var(key, value);
+        Self { key, previous }
+    }
+}
+
+impl Drop for ScopedEnvVar {
+    fn drop(&mut self) {
+        match &self.previous {
+            Some(value) => std::env::set_var(self.key, value),
+            None => std::env::remove_var(self.key),
+        }
+    }
+}
+
 pub(super) fn test_provider(url: &str) -> ProviderDef {
     ProviderDef {
         base_url: url.to_string(),
