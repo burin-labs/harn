@@ -65,7 +65,7 @@
     "background_after_ms": {
       "type": "integer",
       "minimum": 0,
-      "description": "Spawn the command in the background, wait this many milliseconds for an initial progress snapshot, then return either the snapshot or the running handle."
+      "description": "Spawn the command in the background and wait up to this many milliseconds for its terminal result. Progress does not shorten this window; if the deadline wins, return a running snapshot seeded from the latest progress."
     },
     "progress_interval_ms": {
       "type": "integer",

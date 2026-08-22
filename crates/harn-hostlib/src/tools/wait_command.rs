@@ -98,19 +98,17 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
 }
 
 pub(crate) fn drain_matching_result(session_id: &str, handle_id: &str) -> Option<VmValue> {
-    let entries = harn_vm::orchestration::agent_inbox::drain(session_id);
-    let mut kept = Vec::new();
+    let entries =
+        super::long_running::drain_handle_feedback(session_id, handle_id, &["tool_result"]);
     let mut selected = None;
 
     for entry in entries {
         let parsed = serde_json::from_str::<serde_json::Value>(&entry.content).ok();
-        let matches = entry.kind == "tool_result"
-            && parsed
-                .as_ref()
-                .and_then(|value| value.get("handle_id"))
-                .and_then(serde_json::Value::as_str)
-                == Some(handle_id);
-        if matches && selected.is_none() {
+        // A handle has one immutable terminal receipt. Consume every matching
+        // inbox copy in this atomic drain and project the first valid payload;
+        // retaining an accidental duplicate would replay stale completion on a
+        // later wait even though the receipt is already observable by handle.
+        if selected.is_none() {
             if let Some(mut payload) = parsed {
                 if let Some(object) = payload.as_object_mut() {
                     object.insert(
@@ -122,14 +120,8 @@ pub(crate) fn drain_matching_result(session_id: &str, handle_id: &str) -> Option
                         .or_insert(serde_json::Value::Bool(false));
                 }
                 selected = Some(harn_vm::json_to_vm_value(&payload));
-                continue;
             }
         }
-        kept.push(entry);
-    }
-
-    for entry in kept.into_iter().rev() {
-        harn_vm::orchestration::agent_inbox::requeue_front(entry);
     }
 
     selected
@@ -263,6 +255,20 @@ mod tests {
         assert_eq!(leftover.len(), 1);
         let parsed: serde_json::Value = serde_json::from_str(&leftover[0].content).expect("json");
         assert_eq!(parsed.get("handle_id").and_then(|v| v.as_str()), Some("H2"));
+    }
+
+    #[test]
+    fn drain_consumes_duplicate_terminal_feedback_once() {
+        let session = fresh_session_id();
+        agent_inbox::push(&session, "tool_result", &result_for("H1"), "test");
+        agent_inbox::push(&session, "tool_result", &result_for("H1"), "test");
+
+        let value = drain_matching_result(&session, "H1").expect("terminal result");
+        assert_eq!(status_of(&value).as_deref(), Some("completed"));
+        assert!(
+            agent_inbox::drain(&session).is_empty(),
+            "duplicate terminal feedback must not replay after one consumption",
+        );
     }
 
     /// The `timeout_ms == 0` non-blocking poll must not park: a missing handle
