@@ -660,6 +660,54 @@ mod tests {
     }
 
     #[test]
+    fn loaded_package_skill_holds_its_generation_lease() {
+        let _env = lock_harn_state();
+        let temp = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let _home = set_home(home.path());
+        fs::write(
+            temp.path().join("harn.toml"),
+            "[package]\nname = \"skill-project\"\nversion = \"0.0.0\"\n",
+        )
+        .unwrap();
+        let source = temp.path().join("main.harn");
+        fs::write(&source, "fn main() {}\n").unwrap();
+        let packages_root =
+            crate::package::test_support::create_test_package_generation(temp.path());
+        crate::package::test_support::write_test_generation_lock(
+            temp.path(),
+            "version = 4\n\n[[package]]\nname = \"pack\"\nsource = \"path+fixture\"\n",
+        );
+        write_skill(
+            &packages_root.join("pack/skills"),
+            "review",
+            "review",
+            "Review the project",
+        );
+
+        let loaded = load_skills(&SkillLoaderInputs {
+            cli_dirs: vec![],
+            source_path: Some(source),
+        });
+        let lease = fs::File::open(
+            packages_root
+                .parent()
+                .unwrap()
+                .join(harn_modules::package_snapshot::GENERATION_LEASE_FILE),
+        )
+        .unwrap();
+        assert!(
+            lease.try_lock().is_err(),
+            "loaded skills must retain the generation backing deferred fetches"
+        );
+        let fetched = (loaded.fetcher)("review").unwrap();
+        assert_eq!(fetched.body, "Review the project");
+
+        drop(loaded);
+        lease.try_lock().unwrap();
+    }
+
+    #[test]
     fn unknown_frontmatter_fields_surface_as_warnings() {
         // `load_skills` reads `HARN_REQUIRE_SIGNED_SKILLS`, which
         // `global_require_signed_skills_omits_unsigned_skill` sets. Without the
