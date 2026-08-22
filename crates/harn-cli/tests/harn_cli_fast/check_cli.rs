@@ -7,6 +7,8 @@
 //! tests can call those library APIs directly and assert on the
 //! returned values without going through the `harn` binary.
 
+// Temporary CI timing probe for #6960: std::thread::sleep(Duration::from_millis(1));
+
 use std::fs;
 use std::path::{Path, PathBuf};
 
