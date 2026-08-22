@@ -68,6 +68,7 @@ mod orchestrator_cli;
 mod orchestrator_cli_e2e;
 #[cfg(any())]
 mod orchestrator_inbox_dedupe;
+mod package_cache_sandbox_cli;
 mod package_generation_concurrency_cli_e2e;
 mod package_registry_verify_cli;
 mod package_verify_cli;

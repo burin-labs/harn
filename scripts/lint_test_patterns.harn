@@ -173,6 +173,9 @@ const E2E_SUBPROCESS_PATHS: list<string> = [
   // Cross-process package lease coverage must exercise two real commands
   // against the same installed generation.
   "crates/harn-cli/tests/harn_cli_e2e/package_generation_concurrency_cli_e2e.rs",
+  // Install and a nested sandboxed run must cross real CLI, package-cache,
+  // environment-forwarding, and process-authority boundaries.
+  "crates/harn-cli/tests/harn_cli_e2e/package_cache_sandbox_cli.rs",
   "crates/harn-cli/tests/harn_cli_fast/persona_cli.rs",
   "crates/harn-cli/tests/harn_cli_e2e/test_worker_cli_e2e.rs",
   "crates/harn-cli/tests/harn_cli_e2e/run_eval_cleanup_e2e.rs",

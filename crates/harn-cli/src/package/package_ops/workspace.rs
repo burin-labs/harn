@@ -61,11 +61,11 @@ impl PackageWorkspace {
             return Ok(cache_dir.clone());
         }
         if self.read_process_env {
-            if let Ok(value) = std::env::var(HARN_CACHE_DIR_ENV) {
-                if !value.trim().is_empty() {
-                    return Ok(PathBuf::from(value));
-                }
-            }
+            return harn_vm::user_dirs::package_cache_dir().ok_or_else(|| {
+                "neither HOME nor USERPROFILE is set and HARN_CACHE_DIR was not provided"
+                    .to_string()
+                    .into()
+            });
         }
 
         let home = harn_vm::user_dirs::home_dir().ok_or_else(|| {
