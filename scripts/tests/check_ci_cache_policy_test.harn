@@ -1144,7 +1144,8 @@ pipeline test_windows_storage_budget_rejects_small_full_drive_duplicate_profile_
             }
             return {
               ...step,
-              run: "HARN_BIN='' HARN_BIN_NO_BUILD=1 ./scripts/harn_bin.sh --no-build --print\ncargo nextest run",
+              run:
+                "HARN_BIN='' HARN_BIN_NO_BUILD=1 ./scripts/harn_bin.sh --no-build --print\ncargo nextest run",
             }
           },
         )

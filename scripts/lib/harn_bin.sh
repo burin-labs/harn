@@ -429,7 +429,7 @@ harn_resolve_binary() (
     harn_refresh_cargo_target_dir_cache >/dev/null || return $?
   fi
   predicted_bin="$(harn_debug_binary_path)" || return $?
-  predicted_checker="$(harn_binary_freshness_checker_path "$predicted_bin")" || return $?
+  predicted_checker="$(harn_cargo_freshness_checker_path "$predicted_bin")" || return $?
   mkdir -p "$(harn_binary_target_dir "$predicted_bin")" || return $?
   configured_lease_runner="${HARN_CARGO_LEASE_RUNNER:-}"
   if [[ -n "$configured_lease_runner" && "$configured_lease_runner" != */* ]]; then

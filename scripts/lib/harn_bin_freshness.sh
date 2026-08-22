@@ -22,13 +22,32 @@ harn_binary_freshness_manifest_path() {
   printf '%s.freshness.manifest\n' "$1"
 }
 
-harn_binary_freshness_checker_path() {
+harn_cargo_freshness_checker_path() {
   local bin="$1"
   local suffix=""
   case "$bin" in
     *.exe) suffix=".exe" ;;
   esac
   printf '%s/harn-freshness-check%s\n' "${bin%/*}" "$suffix"
+}
+
+# The proof checker is a producer-owned snapshot, not Cargo's mutable top-level
+# output. Later test-profile commands may legitimately relink
+# harn-freshness-check while retaining the exact Harn executable; receipt
+# verification must bind the checker that was actually published, not an
+# adjacent build output whose lifecycle Cargo still owns.
+harn_binary_freshness_checker_path() {
+  local bin="$1"
+  local directory="${bin%/*}"
+  local name="${bin##*/}"
+  local suffix=""
+  case "$name" in
+    *.exe)
+      name="${name%.exe}"
+      suffix=".exe"
+      ;;
+  esac
+  printf '%s/%s.freshness-check%s\n' "$directory" "$name" "$suffix"
 }
 
 harn_binary_target_dir() {
@@ -372,6 +391,8 @@ harn_record_binary_freshness() (
   local receipt=""
   local manifest=""
   local checker=""
+  local cargo_checker=""
+  local temporary_checker=""
   local temporary_receipt=""
   local temporary_manifest=""
   local worktree_hash=""
@@ -388,6 +409,7 @@ harn_record_binary_freshness() (
   cleanup_temporary_files() {
     [[ -z "$temporary_receipt" ]] || rm -f "$temporary_receipt"
     [[ -z "$temporary_manifest" ]] || rm -f "$temporary_manifest"
+    [[ -z "$temporary_checker" ]] || rm -f "$temporary_checker"
     [[ -z "$git_covered_list" ]] || rm -f "$git_covered_list"
     [[ -z "$authority_list" ]] || rm -f "$authority_list"
   }
@@ -399,8 +421,9 @@ harn_record_binary_freshness() (
   harn_require_executable_bin "$bin" || return $?
   receipt="$(harn_binary_freshness_receipt_path "$bin")" || return $?
   manifest="$(harn_binary_freshness_manifest_path "$bin")" || return $?
+  cargo_checker="$(harn_cargo_freshness_checker_path "$bin")" || return $?
+  harn_require_executable_bin "$cargo_checker" || return $?
   checker="$(harn_binary_freshness_checker_path "$bin")" || return $?
-  harn_require_executable_bin "$checker" || return $?
   target_dir="$(harn_binary_target_dir "$bin")" || return $?
   git_covered_list="$(mktemp "${TMPDIR:-/tmp}/harn-bin-git-covered.XXXXXX")" || return $?
   authority_list="$(mktemp "${TMPDIR:-/tmp}/harn-bin-authorities.XXXXXX")" || return $?
@@ -418,6 +441,11 @@ harn_record_binary_freshness() (
     echo "error: cannot record Harn freshness: compiled build identity does not match current source and Cargo inputs" >&2
     return 1
   fi
+  temporary_checker="$(mktemp "${checker}.tmp.XXXXXX")" || return $?
+  cp "$cargo_checker" "$temporary_checker" || return $?
+  chmod +x "$temporary_checker" || return $?
+  mv "$temporary_checker" "$checker" || return $?
+  temporary_checker=""
   checker_evidence="$("$checker" record-evidence \
     "$bin" "$temporary_manifest" "$(harn_repo_root)")" || return $?
   temporary_receipt="$(mktemp "${receipt}.tmp.XXXXXX")" || return $?

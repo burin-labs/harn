@@ -592,6 +592,8 @@ cp "$repo_root/crates/harn-cli/src/bootstrap/freshness_manifest.rs" \
 cp "$repo_root/crates/harn-cli/src/path_policy.rs" \
   "$cargo_fixture/src/path_policy.rs"
 cat > "$cargo_fixture/src/main.rs" <<'RS'
+#![allow(dead_code)]
+
 #[path = "bootstrap/freshness_manifest.rs"]
 mod freshness_manifest;
 mod path_policy;
@@ -694,7 +696,8 @@ if ! grep -Fxq "$cargo_fixture_bin" "$tmp_root/cargo-fixture-build.out"; then
 fi
 if [[ ! -r "$cargo_fixture_bin.d" ]] || \
    [[ ! -r "$cargo_fixture_bin.freshness" ]] || \
-   [[ ! -r "$cargo_fixture_bin.freshness.manifest" ]]; then
+   [[ ! -r "$cargo_fixture_bin.freshness.manifest" ]] || \
+   [[ ! -x "$(harn_binary_freshness_checker_path "$cargo_fixture_bin")" ]]; then
   echo "build-mode resolution did not produce Cargo dep-info and exact freshness evidence" >&2
   exit 1
 fi
@@ -744,6 +747,40 @@ if [[ "$fixture_binary_mtime_before" != "$fixture_binary_mtime_after" ]]; then
   exit 1
 fi
 cp -p "$cargo_fixture_bin" "$tmp_root/cargo-fixture-source-v1-bin"
+
+# Cargo owns its top-level checker output and may replace it while compiling
+# later test targets. The receipt binds the producer's immutable checker
+# snapshot instead, so ordinary Cargo checker churn cannot invalidate Harn;
+# mutation of the published proof checker itself still fails closed.
+cargo_fixture_cargo_checker="$(harn_cargo_freshness_checker_path "$cargo_fixture_bin")"
+cargo_fixture_proof_checker="$(harn_binary_freshness_checker_path "$cargo_fixture_bin")"
+cp -p "$cargo_fixture_cargo_checker" "$tmp_root/cargo-checker.saved"
+printf '\nlegitimate-cargo-relink\n' >> "$cargo_fixture_cargo_checker"
+(
+  cd "$cargo_fixture"
+  CARGO_TARGET_DIR="$cargo_target" PATH="$no_cargo_bin:$PATH" \
+    "$repo_root/scripts/harn_bin.sh" --no-build --print \
+    > "$tmp_root/cargo-checker-churn.out"
+)
+cp -p "$cargo_fixture_proof_checker" "$tmp_root/proof-checker.saved"
+printf '\nunproven-proof-replacement\n' >> "$cargo_fixture_proof_checker"
+if (
+  cd "$cargo_fixture"
+  CARGO_TARGET_DIR="$cargo_target" PATH="$no_cargo_bin:$PATH" \
+    "$repo_root/scripts/harn_bin.sh" --no-build --print \
+    > "$tmp_root/proof-checker-stale.out" \
+    2> "$tmp_root/proof-checker-stale.err"
+); then
+  echo "no-build accepted a changed published freshness checker" >&2
+  exit 1
+fi
+if ! grep -Fq 'freshness checker or manifest changed' \
+  "$tmp_root/proof-checker-stale.err"; then
+  echo "changed proof-checker failure was not attributable" >&2
+  cat "$tmp_root/proof-checker-stale.err" >&2
+  exit 1
+fi
+cp -p "$tmp_root/proof-checker.saved" "$cargo_fixture_proof_checker"
 
 # A tracked content edit remains stale even when its mtime is forced older than
 # the executable. This is the blind spot of a timestamp-only depfile query and
@@ -966,8 +1003,9 @@ fi
 printf 'not-a-receipt\n' > "$unproven_target/debug/harn.freshness"
 cp "$cargo_fixture_bin.freshness.manifest" \
   "$unproven_target/debug/harn.freshness.manifest"
-cp "$cargo_target/debug/harn-freshness-check" \
-  "$unproven_target/debug/harn-freshness-check"
+unproven_checker="$(harn_binary_freshness_checker_path \
+  "$unproven_target/debug/harn")"
+cp "$cargo_fixture_proof_checker" "$unproven_checker"
 if CARGO_TARGET_DIR="$unproven_target" PATH="$no_cargo_bin:$PATH" \
   "$repo_root/scripts/harn_bin.sh" --no-build --print \
   > "$tmp_root/malformed-receipt.out" 2> "$tmp_root/malformed-receipt.err"; then
@@ -1046,6 +1084,11 @@ printf '%s:\n' "$escaped_windows" > "$windows_target/debug/harn.d"
 if [[ "$(OS=Windows_NT harn_binary_dep_info_path "$windows_target/debug/harn.exe")" != \
       "$windows_target/debug/harn.d" ]]; then
   echo "Windows harn.exe resolution did not preserve Cargo's harn.d contract" >&2
+  exit 1
+fi
+if [[ "$(harn_binary_freshness_checker_path "$windows_target/debug/harn.exe")" != \
+      "$windows_target/debug/harn.freshness-check.exe" ]]; then
+  echo "Windows proof checker snapshot did not preserve an executable suffix" >&2
   exit 1
 fi
 
