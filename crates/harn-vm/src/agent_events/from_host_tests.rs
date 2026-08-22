@@ -32,6 +32,39 @@ fn from_host_deserializes_generic_variant() {
 }
 
 #[test]
+fn capability_gap_preserves_unresolved_route_diagnosis() {
+    let event = AgentEvent::from_host_payload(
+        "s1",
+        "capability_gap",
+        &json!({
+            "level": "warning",
+            "capability": "preferred_tool_format",
+            "provider": "anthropic",
+            "model": "unknown",
+            "resolution": "unresolved",
+            "reason": "missing_model",
+            "fallback_tool_format": "json",
+            "message": "route is unresolved",
+        }),
+    )
+    .expect("capability_gap");
+
+    match event {
+        AgentEvent::CapabilityGap {
+            resolution,
+            reason,
+            fallback_tool_format,
+            ..
+        } => {
+            assert_eq!(resolution.as_deref(), Some("unresolved"));
+            assert_eq!(reason.as_deref(), Some("missing_model"));
+            assert_eq!(fallback_tool_format, "json");
+        }
+        other => panic!("expected CapabilityGap, got {other:?}"),
+    }
+}
+
+#[test]
 fn from_host_tool_call_defaults_status_and_audit() {
     // No `status` in the payload -> Pending; audit comes from the (absent)
     // ambient mutation session -> None, never from the payload.

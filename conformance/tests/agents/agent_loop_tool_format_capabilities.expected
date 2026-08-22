@@ -9,6 +9,15 @@ testcatalog
 uncatalogued-model
 preferred_tool_format
 json
+format=json
+1
+unresolved
+missing_model
+json
+```tool
+
+1
+0
 format=text
 1
 testcatalog

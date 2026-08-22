@@ -112,6 +112,74 @@ fn accepted_field(out: &[String], key: &str) -> String {
         .to_string()
 }
 
+fn resolution_fields(opts: &str) -> Vec<String> {
+    let src = format!(
+        r#"
+import {{ agent_tool_format_resolution }} from "std/agent/options"
+pipeline main(harness: Harness, task) {{
+  const r = agent_tool_format_resolution(harness.llm, {opts})
+  harness.stdio.log("tool_format=" + to_string(r.tool_format))
+  harness.stdio.log("source=" + to_string(r.source))
+  harness.stdio.log("provider=" + to_string(r?.provider ?? ""))
+  harness.stdio.log("model=" + to_string(r?.model ?? ""))
+  harness.stdio.log("gap_reason=" + to_string(r?.capability_gap_event?.reason ?? ""))
+  harness.stdio.log("gap_resolution=" + to_string(r?.capability_gap_event?.resolution ?? ""))
+  harness.stdio.log("gap_fallback=" + to_string(r?.capability_gap_event?.fallback_tool_format ?? ""))
+}}
+"#
+    );
+    lines(&src).expect("tool format resolution probe")
+}
+
+#[test]
+fn route_resolution_covers_explicit_catalog_and_unresolved_inputs() {
+    let explicit = resolution_fields(r#"{tool_format: "text"}"#);
+    assert_eq!(accepted_field(&explicit, "tool_format"), "text");
+    assert_eq!(accepted_field(&explicit, "source"), "explicit");
+    assert_eq!(accepted_field(&explicit, "gap_reason"), "");
+
+    let catalog = resolution_fields(
+        r#"{provider: "anthropic", model: "claude-sonnet-4-6", tool_format: "auto"}"#,
+    );
+    assert_eq!(accepted_field(&catalog, "tool_format"), "native");
+    assert_eq!(accepted_field(&catalog, "source"), "capabilities");
+    assert_eq!(accepted_field(&catalog, "gap_reason"), "");
+
+    let inferred_provider =
+        resolution_fields(r#"{model: "claude-sonnet-4-6", tool_format: "auto"}"#);
+    assert_eq!(accepted_field(&inferred_provider, "tool_format"), "native");
+    assert_eq!(accepted_field(&inferred_provider, "provider"), "anthropic");
+    assert_eq!(accepted_field(&inferred_provider, "source"), "capabilities");
+
+    let missing_model = resolution_fields(r#"{provider: "anthropic", tool_format: "auto"}"#);
+    assert_eq!(accepted_field(&missing_model, "tool_format"), "json");
+    assert_eq!(accepted_field(&missing_model, "source"), "unresolved");
+    assert_eq!(
+        accepted_field(&missing_model, "gap_reason"),
+        "missing_model"
+    );
+    assert_eq!(
+        accepted_field(&missing_model, "gap_resolution"),
+        "unresolved"
+    );
+    assert_eq!(accepted_field(&missing_model, "gap_fallback"), "json");
+
+    let unknown_route = resolution_fields(
+        r#"{provider: "unknown-provider", model: "unknown-model", tool_format: "auto"}"#,
+    );
+    assert_eq!(accepted_field(&unknown_route, "tool_format"), "json");
+    assert_eq!(accepted_field(&unknown_route, "source"), "fallback");
+    assert_eq!(
+        accepted_field(&unknown_route, "gap_reason"),
+        "unknown_route"
+    );
+    assert_eq!(
+        accepted_field(&unknown_route, "gap_resolution"),
+        "unresolved"
+    );
+    assert_eq!(accepted_field(&unknown_route, "gap_fallback"), "json");
+}
+
 // ---------------------------------------------------------------------------
 // Invariant 1 — reject-or-work-well over the requested-format axis.
 //
