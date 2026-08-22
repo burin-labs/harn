@@ -589,9 +589,12 @@ cp "$repo_root/crates/harn-cli/src/bin/harn-freshness-check.rs" \
   "$cargo_fixture/src/bin/harn-freshness-check.rs"
 cp "$repo_root/crates/harn-cli/src/bootstrap/freshness_manifest.rs" \
   "$cargo_fixture/src/bootstrap/freshness_manifest.rs"
+cp "$repo_root/crates/harn-cli/src/path_policy.rs" \
+  "$cargo_fixture/src/path_policy.rs"
 cat > "$cargo_fixture/src/main.rs" <<'RS'
 #[path = "bootstrap/freshness_manifest.rs"]
 mod freshness_manifest;
+mod path_policy;
 
 const TRACKED: &str = include_str!("../embedded tracked.harn");
 const IGNORED: &str = include_str!("../embedded ignored.harn");
