@@ -29,7 +29,12 @@ pub fn parse_expression(
 }
 
 /// Build the lexer `parse_expression` uses, for callers that need the tokens.
-pub fn lexer(source: Option<&str>, segment: &str, line: usize, column: usize) -> Lexer {
+pub fn lexer<'seg>(
+    source: Option<&str>,
+    segment: &'seg str,
+    line: usize,
+    column: usize,
+) -> Lexer<'seg> {
     let offset = source
         .and_then(|source| harn_lexer::byte_offset_for_position(source, line, column))
         .unwrap_or_default();
