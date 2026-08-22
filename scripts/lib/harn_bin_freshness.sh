@@ -449,7 +449,7 @@ harn_record_binary_freshness() (
   checker_evidence="$("$checker" record-evidence \
     "$bin" "$temporary_manifest" "$(harn_repo_root)")" || return $?
   temporary_receipt="$(mktemp "${receipt}.tmp.XXXXXX")" || return $?
-  printf 'harn-bin-freshness-v5\nworktree=%s\n%s\n%s\n' \
+  printf 'harn-bin-freshness-v6\nworktree=%s\n%s\n%s\n' \
     "$worktree_hash" "$artifact_evidence" "$checker_evidence" >"$temporary_receipt" || return $?
   mv "$temporary_manifest" "$manifest" || return $?
   temporary_manifest=""

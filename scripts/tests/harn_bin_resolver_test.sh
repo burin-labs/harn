@@ -255,7 +255,7 @@ BIN
 set -euo pipefail
 case "${1:-}" in
   record-evidence)
-    printf 'harn-freshness-check-v3\nrepo-path=%064d\nchecker-build-id=aa\nchecker-content=%064d\nchecker-path=%064d\nmanifest=%064d\n' 0 0 0 0
+    printf 'harn-freshness-check-v4\nrepo-path=%064d\nchecker-build-id=aa\nchecker-content=%064d\nmanifest=%064d\n' 0 0 0
     ;;
   verify) exit 0 ;;
   *) exit 2 ;;
