@@ -210,6 +210,25 @@ func TestRoundTripFixture(t *testing.T) {
 		assertRoundTrip(t, "HarnAgentEventNotification", envelopes["agentEventNotification"], out)
 	})
 
+	t.Run("HarnToolAnnotations", func(t *testing.T) {
+		raw, ok := fixture["harnToolAnnotations"]
+		if !ok {
+			t.Fatal("fixture missing harnToolAnnotations")
+		}
+		var annotations HarnToolAnnotations
+		if err := json.Unmarshal(raw, &annotations); err != nil {
+			t.Fatalf("decode Harn tool annotations: %v", err)
+		}
+		if annotations.CompletionEvidenceRole == nil || *annotations.CompletionEvidenceRole != HarnCompletionEvidenceRole("verification") {
+			t.Fatalf("expected completion evidence role verification, got %#v", annotations.CompletionEvidenceRole)
+		}
+		out, err := json.Marshal(annotations)
+		if err != nil {
+			t.Fatalf("encode Harn tool annotations: %v", err)
+		}
+		assertRoundTrip(t, "HarnToolAnnotations", raw, out)
+	})
+
 	t.Run("A2ATask", func(t *testing.T) {
 		raw, ok := fixture["a2aTask"]
 		if !ok {
@@ -412,6 +431,7 @@ func TestVocabulariesArePopulated(t *testing.T) {
 		{"ACPToolCallStatuses", ACPToolCallStatuses},
 		{"HarnToolCallErrorCategories", HarnToolCallErrorCategories},
 		{"HarnSideEffectLevels", HarnSideEffectLevels},
+		{"HarnCompletionEvidenceRoles", HarnCompletionEvidenceRoles},
 		{"ToolCallReceiptStatuses", ToolCallReceiptStatuses},
 		{"ToolCallReceiptExecutors", ToolCallReceiptExecutors},
 		{"A2ATaskStates", A2ATaskStates},

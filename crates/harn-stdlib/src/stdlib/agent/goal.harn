@@ -1,3 +1,4 @@
+import { JudgeConfig } from "std/agent/options_types"
 // Goal object: a typed, long-running objective the agent converges on. A goal
 // bundles an `objective`, machine-checkable `success_criteria`, `constraints`,
 // and a `budget`. It renders into the outbound prompt through the existing
@@ -44,6 +45,14 @@ pub type GoalSpec = {
   success_criteria?: list<GoalCriterion>,
   constraints?: list<string>,
   budget?: dict,
+}
+
+pub type GoalJudgeOptions = {
+  model?: string,
+  provider?: string,
+  max_invocations?: int,
+  fail_open_on_error?: bool,
+  feedback_fallback?: string,
 }
 
 fn __string_list(value) {
@@ -241,7 +250,7 @@ pub fn goal_check(g, facts = nil) {
 fn __goal_judge_system(g) {
   let lines = [
     "You are the goal completion judge. Decide whether the stated goal is fully met by the work so far.",
-    "Reply `done` ONLY if every success criterion is satisfied; otherwise reply `continue` with one concrete next_step.",
+    "Return `action: \"accept\"` only if every success criterion is satisfied. Otherwise return `action: \"continue\"` with one concrete repair and the remaining specific gaps.",
     "",
     __render_goal_text(g),
   ]
@@ -252,24 +261,20 @@ fn __goal_judge_system(g) {
  * goal_judge(goal, opts?) returns a `done_judge` JudgeConfig (see
  * `std/agent/judge`) whose system prompt embeds the goal. Spread it into
  * agent_loop options as `done_judge:` — it composes with the existing
- * `agent_verify_or_continue` done-judge seam (the semantic ceiling). Pair with
+ * `agent_evaluate_completion` done-judge seam (the semantic ceiling). Pair with
  * `goal_check` host-fact callbacks for the deterministic floor. `opts` may carry
- * `model`, `provider`, `max_invocations`, and `fail_open`.
+ * `model`, `provider`, `max_invocations`, and `fail_open_on_error`.
  *
  * @effects: []
  * @errors: []
  * @api_stability: stable
  * @example: agent_loop(harness, task, nil, {done_judge: goal_judge(g), loop_until_done: true})
  */
-pub fn goal_judge(g, opts = nil) {
-  const o = if type_of(opts) == "dict" {
-    opts
-  } else {
-    {}
-  }
+pub fn goal_judge(g: GoalSpec, opts: GoalJudgeOptions? = nil) -> JudgeConfig {
+  const o = opts ?? {}
   return {
     enabled: true,
-    fail_open: o?.fail_open ?? false,
+    fail_open_on_error: o?.fail_open_on_error ?? false,
     feedback_fallback: o?.feedback_fallback
       ?? "The goal is not yet met; keep working toward the success criteria.",
     max_invocations: o?.max_invocations ?? __GOAL_MAX_RELOOPS,
@@ -281,7 +286,7 @@ pub fn goal_judge(g, opts = nil) {
 
 /**
  * Feedback that threads the unmet success criteria (the findings) into the next
- * attempt. agent_verify_or_continue injects this into the transcript on a vetoed
+ * attempt. agent_evaluate_completion injects this into the transcript on a vetoed
  * completion, so the re-run agent sees exactly which criteria remain.
  */
 fn __goal_unmet_feedback(g, unmet_ids) {

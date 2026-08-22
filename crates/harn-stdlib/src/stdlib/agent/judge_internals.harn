@@ -15,6 +15,68 @@ import { agent_emit_event } from "std/agent/state"
  */
 const __JUDGE_LLM_OVERRIDE_KEYS = ["temperature", "max_tokens", "top_p", "tool_format", "effort"]
 
+const __COMPLETION_JUDGE_DEFAULT_TIMEOUT_MS = 60000
+
+const __COMPLETION_JUDGE_DEFAULT_DEADLINE_RESERVE_MS = 5000
+
+pub type CompletionJudgeAdmission = {
+  schema?: "harn.completion_judge_admission.v1",
+  checkpoint_name?: string,
+  admitted: bool,
+  remaining_ms: int?,
+  operation_budget_ms: int?,
+  deadline_reserve_ms: int?,
+  provider_timeout_ms?: int?,
+  prompt_chars?: int,
+  prompt_token_estimate?: int | float,
+  outcome: string,
+  duration_ms?: int | float,
+}
+
+pub type JudgeCheckpointRun = {
+  checkpoint: dict,
+  duration_ms: int | float,
+  admission: CompletionJudgeAdmission,
+}
+
+pub type JudgeCheckpointRequest = {
+  judge_cfg: dict,
+  opts: dict,
+  payload: dict,
+  checkpoint_name: string,
+  system: string,
+  user: string,
+  schema: dict,
+}
+
+/** Pure completion-judge deadline admission core. */
+pub fn __judge_completion_admission(
+  now_ms: int,
+  deadline_at_ms: int?,
+  operation_budget_ms: int,
+  reserve_ms: int,
+) -> CompletionJudgeAdmission {
+  const remaining_ms = if deadline_at_ms == nil {
+    nil
+  } else {
+    to_int(deadline_at_ms) - to_int(now_ms)
+  }
+  const admitted = remaining_ms == nil
+    || remaining_ms
+    >= to_int(operation_budget_ms) + to_int(reserve_ms)
+  return {
+    admitted: admitted,
+    remaining_ms: remaining_ms,
+    operation_budget_ms: operation_budget_ms,
+    deadline_reserve_ms: reserve_ms,
+    outcome: if admitted {
+      "admitted"
+    } else {
+      "deadline_budget_insufficient"
+    },
+  }
+}
+
 /**
  * Apply per-judge LLM overrides on top of an already-built `llm_opts`
  * dict. Mirrors the `for key in [...]` block that lived inline at both
@@ -24,7 +86,7 @@ const __JUDGE_LLM_OVERRIDE_KEYS = ["temperature", "max_tokens", "top_p", "tool_f
  * @errors: []
  * @api_stability: internal
  */
-pub fn __judge_apply_llm_overrides(llm_opts, judge_cfg) {
+pub fn __judge_apply_llm_overrides(llm_opts: dict, judge_cfg: dict) -> dict {
   let out = llm_opts
   for key in __JUDGE_LLM_OVERRIDE_KEYS {
     if judge_cfg[key] != nil {
@@ -48,14 +110,15 @@ pub fn __judge_apply_llm_overrides(llm_opts, judge_cfg) {
  */
 pub fn __judge_run_checkpoint(
   harness: Harness,
-  judge_cfg,
-  opts,
-  payload,
-  checkpoint_name,
-  system,
-  user,
-  schema,
-) {
+  request: JudgeCheckpointRequest,
+) -> JudgeCheckpointRun {
+  const judge_cfg = request.judge_cfg
+  const opts = request.opts
+  const payload = request.payload
+  const checkpoint_name = request.checkpoint_name
+  const system = request.system
+  const user = request.user
+  const schema = request.schema
   const base = opts?.llm_options ?? {}
   const mock_scope = if checkpoint_name == "agent.completion_judge" {
     "completion.judge"
@@ -64,16 +127,88 @@ pub fn __judge_run_checkpoint(
   } else {
     "default"
   }
+  const operation_budget_ms = if checkpoint_name == "agent.completion_judge" {
+    max(1, to_int(judge_cfg?.operation_timeout_ms) ?? __COMPLETION_JUDGE_DEFAULT_TIMEOUT_MS)
+  } else {
+    nil
+  }
+  const provider_timeout_ms = if checkpoint_name == "agent.completion_judge" {
+    min(
+      operation_budget_ms,
+      max(1, to_int(judge_cfg?.timeout_ms ?? base?.timeout_ms) ?? operation_budget_ms),
+    )
+  } else {
+    to_int(judge_cfg?.timeout_ms ?? base?.timeout_ms)
+  }
+  const deadline_reserve_ms = if checkpoint_name == "agent.completion_judge" {
+    max(
+      0,
+      to_int(judge_cfg?.deadline_reserve_ms)
+        ?? __COMPLETION_JUDGE_DEFAULT_DEADLINE_RESERVE_MS,
+    )
+  } else {
+    nil
+  }
+  const deadline_at_ms = to_int(opts?._deadline_at_ms)
+  const admission_now_ms = harness.clock.monotonic_ms()
+  const deadline_admission = if checkpoint_name == "agent.completion_judge" {
+    __judge_completion_admission(
+      admission_now_ms,
+      deadline_at_ms,
+      operation_budget_ms,
+      deadline_reserve_ms,
+    )
+  } else {
+    {
+      admitted: true,
+      remaining_ms: nil,
+      operation_budget_ms: nil,
+      deadline_reserve_ms: nil,
+      outcome: "not_applicable",
+    }
+  }
+  const admitted = deadline_admission.admitted
+  const admission = deadline_admission
+    + {
+    schema: "harn.completion_judge_admission.v1",
+    checkpoint_name: checkpoint_name,
+    admitted: admitted,
+    provider_timeout_ms: provider_timeout_ms,
+    prompt_chars: len(system) + len(user),
+    prompt_token_estimate: ceil((len(system) + len(user)) / 4.0),
+  }
+  if checkpoint_name == "agent.completion_judge" {
+    agent_emit_event(harness.agent, payload.session_id, "typed_checkpoint", admission)
+  }
+  if !admitted {
+    return {
+      checkpoint: {
+        ok: false,
+        status: "admission_refused",
+        error:
+          "completion judge was not started because its request budget cannot fit before the terminal deadline",
+        receipt: admission,
+      },
+      duration_ms: 0,
+      admission: admission,
+    }
+  }
+  const completion_timeout_opts = if checkpoint_name == "agent.completion_judge" {
+    {timeout_ms: provider_timeout_ms, operation_timeout_ms: operation_budget_ms}
+  } else {
+    {}
+  }
   const llm_opts = __judge_apply_llm_overrides(
     base
       + {
-        model: judge_cfg?.model ?? opts?.model,
-        provider: judge_cfg?.provider ?? opts?.provider,
-        output: {schema: schema, strict: true, validation: "error"},
-        session_id: payload.session_id,
-        system: system,
-        mock_scope: base?.mock_scope ?? mock_scope,
-      },
+      model: judge_cfg?.model ?? opts?.model,
+      provider: judge_cfg?.provider ?? opts?.provider,
+      output: {schema: schema, strict: true, validation: "error"},
+      session_id: payload.session_id,
+      system: system,
+      mock_scope: base?.mock_scope ?? mock_scope,
+    }
+      + completion_timeout_opts,
     judge_cfg,
   )
   const started = harness.clock.monotonic_ms()
@@ -104,8 +239,22 @@ pub fn __judge_run_checkpoint(
         cache_used: cache_read_tokens > 0,
       },
     )
+    agent_emit_event(
+      harness.agent,
+      payload.session_id,
+      "typed_checkpoint",
+      admission
+        + {
+        outcome: if checkpoint?.ok ?? false {
+          "completed"
+        } else {
+          to_string(checkpoint?.status ?? "error")
+        },
+        duration_ms: duration_ms,
+      },
+    )
   }
-  return {checkpoint: checkpoint, duration_ms: duration_ms}
+  return {checkpoint: checkpoint, duration_ms: duration_ms, admission: admission}
 }
 
 /**
@@ -191,7 +340,7 @@ pub fn __judge_leading_word(normalized) {
  * to `feedback_default` when nothing else is set.
  *
  * Used by `agent_step_judge` (pass tokens like "pass"/"yes"/"approve") and
- * by `agent_verify_or_continue` (pass tokens like "done"/"complete").
+ * by `agent_evaluate_completion` (pass tokens like "done"/"complete").
  * The raw verdict is normalized through `__judge_verdict_token` first, then
  * reduced to its leading word so a decorated enum value (`"done."`,
  * `"done — all tests pass"`) still classifies. The stored/emitted `verdict`

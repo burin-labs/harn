@@ -2,7 +2,7 @@
    - `done_judge.cadence.max_invocations` remains a cadence gate; this fixture
      covers the separate top-level veto-loop cap.
    - when the judge repeatedly vetoes, the loop stops with status
-     `verify_capped` and stop_reason `done_judge_cap_reached`.
+     `completion_unverified` and stop_reason `done_judge_cap_reached`.
    - the run record carries structured `done_judge` counters.
    - `max_invocations: 0` disables the terminal cap and leaves the existing
      `max_verify_attempts` exhaustion behavior in charge. */
@@ -20,11 +20,11 @@ fn run_capped(harness: Harness) {
     [
       llm_text("Round one. ##DONE##"),
       llm_text(
-        "{\"verdict\":\"continue\",\"reasoning\":\"veto one\",\"next_step\":\"keep going\"}",
+        "{\"action\":\"continue\",\"reason\":\"veto one\",\"repair\":\"keep going\",\"specific_gaps\":[],\"accepted_evidence\":[]}",
       ),
       llm_text("Round two. ##DONE##"),
       llm_text(
-        "{\"verdict\":\"continue\",\"reasoning\":\"veto two\",\"next_step\":\"keep going\"}",
+        "{\"action\":\"continue\",\"reason\":\"veto two\",\"repair\":\"keep going\",\"specific_gaps\":[],\"accepted_evidence\":[]}",
       ),
       llm_text("Round three. ##DONE##"),
     ],
@@ -68,7 +68,9 @@ fn run_approved(harness: Harness) {
     harness.llm,
     [
       llm_text("Final answer. ##DONE##"),
-      llm_text("{\"verdict\":\"done\",\"reasoning\":\"looks complete\"}"),
+      llm_text(
+        "{\"action\":\"accept\",\"reason\":\"looks complete\",\"repair\":\"\",\"specific_gaps\":[],\"accepted_evidence\":[]}",
+      ),
     ],
     { ->
       const session_id = "done-judge-approve-" + harness.random.uuid()
@@ -101,9 +103,13 @@ fn run_cap_disabled(harness: Harness) {
     harness.llm,
     [
       llm_text("Try one. ##DONE##"),
-      llm_text("{\"verdict\":\"continue\",\"reasoning\":\"veto one\"}"),
+      llm_text(
+        "{\"action\":\"continue\",\"reason\":\"veto one\",\"repair\":\"keep going\",\"specific_gaps\":[],\"accepted_evidence\":[]}",
+      ),
       llm_text("Try two. ##DONE##"),
-      llm_text("{\"verdict\":\"continue\",\"reasoning\":\"veto two\"}"),
+      llm_text(
+        "{\"action\":\"continue\",\"reason\":\"veto two\",\"repair\":\"keep going\",\"specific_gaps\":[],\"accepted_evidence\":[]}",
+      ),
       llm_text("Try three. ##DONE##"),
     ],
     { ->

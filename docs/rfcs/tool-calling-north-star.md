@@ -756,7 +756,7 @@ literal `<tool_call>` repeated to token cap, JSON quotes double-escaped; this is
 structured-output *judge* call, not the agent tool loop:
 
 ```text
-{"verdict":"done\",\"reasoning\":\"…emitted ##DONE##.\",\"next_step\":\"\"}<tool_call><tool_call><tool_call>…
+{"action":"accept","reason":"…emitted ##DONE##.","repair":"","specific_gaps":[],"accepted_evidence":["verified output"]}<tool_call><tool_call><tool_call>…
 ```
 
 **S7 — Groq free-tier TPM 413 (9; 3 exhausted).**

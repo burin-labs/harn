@@ -93,7 +93,7 @@ one of these is a plain stdlib module that composes onto `agent_loop` options
 
 | Concern | Lives in | Reach for |
 |---|---|---|
-| **"Are we actually done?"** completion gate | [`std/agent/judge`](../llm/agent_loop.md#completion-gate-agent_completion_gate) | `agent_completion_gate(options)` — a deterministic veto ladder plus an optional bounded LLM judge, spread into `agent_loop`. |
+| **"Are we actually done?"** completion gate | [`std/agent/judge`](../llm/agent_loop.md#completion-gate-agent_completion_gate) | `agent_completion_gate(runtime, options)` checks host write and verification facts and can add a bounded LLM judge. |
 | **Pace / budget governors** | [`std/agent/governors`](../stdlib/governors.md) | `with_governance(...)`, `governor_decision(...)` — bound cost and cadence. |
 | **Progress / stall detectors** (unified) | [`std/agent/stall`](../stdlib/governors.md#unified-detectors) | `agent_stall_initial_state()` + `agent_stall_observe_tool_calls(...)` / `agent_stall_no_net_progress(...)` — ping-pong, no-net-progress, and repeated-verified-pass detection in one place. |
 | **Tool-surface narrowing** (lanes) | [`std/agent/lanes`](../stdlib/agent-lanes-overlays.md) | `lane_policy(rows, task, opts)` — classify the task, hide the tools it can't need. |

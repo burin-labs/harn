@@ -74,6 +74,7 @@ pub(super) fn tool_result_message_for_provider(
     name: &str,
     tool_call_id: &str,
     observation: &str,
+    ok: bool,
     screenshots: &[VmValue],
     data: Option<&VmValue>,
 ) -> VmValue {
@@ -129,13 +130,19 @@ pub(super) fn tool_result_message_for_provider(
         content.extend(screenshots.iter().cloned());
         msg.put("content", VmValue::List(std::sync::Arc::new(content)));
     }
-    // Keep declared producer facts in the session transcript for hosts and
-    // replay consumers. Provider adapters project only their canonical message
-    // fields, so this storage-only field never leaks into provider requests.
-    if let Some(data) = data {
-        msg.put("data", data.clone());
-    }
-    VmValue::dict(msg)
+    // Native provider adapters consume this exact outcome when their wire
+    // protocol supports error-marked tool results. Other adapters strip it.
+    msg.insert(crate::value::intern_key("is_error"), VmValue::Bool(!ok));
+    // Provider adapters strip the storage-only `_harn` envelope before egress.
+    // Keep result identity, outcome, and declared producer facts together in
+    // that one typed contract instead of adding parallel top-level metadata.
+    crate::llm::pairing_receipts::attach_tool_result_facts(
+        VmValue::dict(msg),
+        tool_call_id,
+        name,
+        ok,
+        data,
+    )
 }
 
 /// A short text summary for a screenshot tool result, stripped of the giant
@@ -339,6 +346,7 @@ pub(super) fn synthesize_orphan_tool_results(
             &block.name,
             &block.id,
             feedback,
+            false,
             // A synthesized orphan-repair result is plain feedback text — never
             // an image.
             &[],

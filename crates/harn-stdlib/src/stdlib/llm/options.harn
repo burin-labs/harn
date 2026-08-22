@@ -152,6 +152,7 @@ pub type LlmCallOptions = {
   prompt_cache_ttl?: "5m" | "1h",
   budget?: LlmBudget | float,
   timeout_ms?: int,
+  operation_timeout_ms?: int,
   idle_timeout_ms?: int,
   stream?: bool,
   speed?: "standard" | "fast",

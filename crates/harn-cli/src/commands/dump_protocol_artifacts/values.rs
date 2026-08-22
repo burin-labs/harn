@@ -8,7 +8,7 @@ use harn_vm::agent_events::{
     ToolCallStatus, ToolMutationStatus,
 };
 use harn_vm::llm::AgentTerminalClass;
-use harn_vm::tool_annotations::{SideEffectLevel, ToolKind};
+use harn_vm::tool_annotations::{CompletionEvidenceRole, SideEffectLevel, ToolKind};
 use serde::Serialize;
 use serde_json::{json, Value as JsonValue};
 
@@ -88,6 +88,13 @@ pub(super) fn all_acp_session_updates() -> Vec<String> {
 
 pub(super) fn tool_kind_values() -> Vec<String> {
     ToolKind::ALL.iter().map(serde_wire_string).collect()
+}
+
+pub(super) fn completion_evidence_role_values() -> Vec<String> {
+    CompletionEvidenceRole::ALL
+        .iter()
+        .map(serde_wire_string)
+        .collect()
 }
 
 pub(super) fn tool_call_status_values() -> Vec<String> {

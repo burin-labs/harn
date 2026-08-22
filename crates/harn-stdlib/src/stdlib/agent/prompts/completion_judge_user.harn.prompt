@@ -9,8 +9,9 @@ Latest assistant text:
 
 Decide whether this agent loop may yield to the user now. Consider the original request, latest assistant prose, and the bounded action evidence together. The packet retains the latest effect-bearing and verification actions, omits read-only exploration, and reports any older actions it omitted. If the latest assistant message included a tool call, do not require an extra prose-only turn when the assistant text plus tool result already form a clear final answer.
 
-Return JSON with `verdict`, `reasoning`, and `next_step`.
-- Set `verdict` to `"done"` only when the current visible answer satisfies the request and does not leave required verification or high-risk authorization unresolved.
-- Otherwise set `verdict` to `"continue"` and make `next_step` a concrete instruction for the next turn.
-- Use `reasoning` for one short rationale, not chain-of-thought.
-- If there is no next step, use an empty string for `next_step`.
+Return the exact requested JSON shape.
+- Set `action` to `"accept"` only when the current visible answer satisfies the request and does not leave required verification or high-risk authorization unresolved.
+- Otherwise set `action` to `"continue"` and make `repair` a concrete instruction for the next turn.
+- Use `reason` for one short rationale, not chain-of-thought.
+- Always return both evidence lists. Use empty lists when they do not apply.
+- On `accept`, use an empty string for `repair`; on `continue`, name the smallest behavior-sensitive repair.

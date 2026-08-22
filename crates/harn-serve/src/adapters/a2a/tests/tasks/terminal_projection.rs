@@ -9,6 +9,7 @@ fn agent_result_terminal_projects_to_a2a_status_and_pause_metadata() {
         (Kind::Natural, TaskStatus::Completed),
         (Kind::UserCancelled, TaskStatus::Cancelled),
         (Kind::PolicyBudget, TaskStatus::Cancelled),
+        (Kind::CompletionUnverified, TaskStatus::Failed),
         (Kind::PolicyNoProgress, TaskStatus::Cancelled),
         (Kind::PolicyGuardrail, TaskStatus::Cancelled),
         (Kind::PolicyStop, TaskStatus::Cancelled),

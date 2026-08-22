@@ -153,6 +153,11 @@ pub(super) fn generate_typescript_for_version(
         "HarnSideEffectLevel",
     ));
     out.push_str(&ts_array_owned(
+        "HARN_COMPLETION_EVIDENCE_ROLES",
+        &completion_evidence_role_values(),
+        "HarnCompletionEvidenceRole",
+    ));
+    out.push_str(&ts_array_owned(
         "HARN_WORKER_STATUSES",
         &worker_status_values(),
         "HarnWorkerStatus",
@@ -904,6 +909,7 @@ export interface HarnToolArgSchema {
 export interface HarnToolAnnotations {
   kind: ACPToolKind
   side_effect_level: HarnSideEffectLevel
+  completion_evidence_role?: HarnCompletionEvidenceRole
   arg_schema: HarnToolArgSchema
   capabilities: Record<string, string[]>
   emits_artifacts: boolean

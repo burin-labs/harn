@@ -29,6 +29,8 @@ pub(crate) mod openai_compat;
 mod openai_compat_tests;
 pub(crate) mod openai_responses;
 mod schema_compat;
+#[cfg(test)]
+mod storage_metadata_egress_tests;
 pub(crate) mod vertex;
 
 pub(crate) use acp::AcpProvider;

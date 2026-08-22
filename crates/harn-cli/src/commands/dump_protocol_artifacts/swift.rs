@@ -314,6 +314,10 @@ pub(super) fn generate_swift_for_version(
         "HarnSideEffectLevel",
         &side_effect_level_values(),
     ));
+    out.push_str(&swift_enum(
+        "HarnCompletionEvidenceRole",
+        &completion_evidence_role_values(),
+    ));
     out.push_str(&swift_enum("HarnWorkerStatus", &worker_status_values()));
     out.push_str(&swift_enum(
         "HarnAgentLifecycleState",
@@ -1250,6 +1254,7 @@ public struct HarnToolArgSchema: Codable, Sendable, Equatable {
 public struct HarnToolAnnotations: Codable, Sendable, Equatable {
     public var kind: HarnACPToolKind
     public var sideEffectLevel: HarnSideEffectLevel
+    public var completionEvidenceRole: HarnCompletionEvidenceRole?
     public var argSchema: HarnToolArgSchema
     public var capabilities: [String: [String]]
     public var emitsArtifacts: Bool
@@ -1259,6 +1264,7 @@ public struct HarnToolAnnotations: Codable, Sendable, Equatable {
     enum CodingKeys: String, CodingKey {
         case kind
         case sideEffectLevel = "side_effect_level"
+        case completionEvidenceRole = "completion_evidence_role"
         case argSchema = "arg_schema"
         case capabilities
         case emitsArtifacts = "emits_artifacts"

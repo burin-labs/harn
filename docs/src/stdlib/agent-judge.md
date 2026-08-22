@@ -1,47 +1,22 @@
 # Completion gate (`std/agent/judge`)
 
-A tool-using agent stops when the model says it's done. That is the model's
-opinion, not a fact. The completion gate turns "done" into something you can
-check: a deterministic veto built from write and verifier evidence, with an
-optional bounded LLM judge on top. It is the peer of the
-[governors](./governors.md) and [lanes and overlays](./agent-lanes-overlays.md)
-— one concern, one module, one value you fold into the `agent_loop` options dict.
-
-`agent_completion_gate` composes existing loop seams rather than adding a hook:
-the deterministic part rides the `verify_completion` closure the loop already
-consults at done-time, and the optional judge rides the capped
-`verify_completion_judge` / `done_judge` seam. Harn owns the veto arithmetic;
-your host supplies every domain fact (what counts as a source write, whether the
-verifier is green) through callbacks.
+`agent_completion_gate(runtime, options)` returns an options fragment for
+`agent_loop`. It checks host-supplied write and verification facts and can add a
+bounded LLM judge. Harn owns the decision rules. The host supplies facts such as
+which writes changed source and whether verification passed.
 
 ## `agent_completion_gate`
 
 ```text
-agent_completion_gate(options: CompletionGateOptions = {}) -> dict
+agent_completion_gate(runtime: HarnessRuntime, options: CompletionGateOptions = {}) -> dict
 ```
 
-Returns an options fragment you spread into your `agent_loop` options. The
-fragment carries a `verify_completion` closure (the deterministic ladder) plus a
-`_completion_gate` metadata row; when `judge` is set it also carries the judge
-seam config.
-
-```harn
-import { agent_completion_gate } from "std/agent/judge"
-
-const gate = agent_completion_gate({
-  facts: { ctx -> {source_write_count: 1, verify: {ok: true}} },
-  max_vetoes: 3,
-})
-harness.stdio.log(gate._completion_gate.facts_available)
-harness.stdio.log(gate._completion_gate.max_vetoes)
-```
-
-To use it, spread the fragment into your base options:
+Spread the returned fragment into the loop's base options:
 
 ```harn,ignore
 import { agent_completion_gate } from "std/agent/judge"
 
-agent_loop(harness, task, system, base_opts + agent_completion_gate({
+agent_loop(harness, task, system, base_opts + agent_completion_gate(harness.runtime, {
   facts: fn(ctx) { return host_completion_facts(ctx.session_id) },
   verify_command: fn() { return host_run_verify() },
   judge: true,          // optional bounded LLM judge, capped at 5 by default
@@ -93,7 +68,7 @@ verifier facts, first match wins:
 | Reason | Result | Condition |
 | --- | --- | --- |
 | `no_source_write` | veto (soft) | task requires a source change, but only cosmetic / zero source writes so far |
-| `verification_after_write_red` | veto (**strict**) | a source write with a red verifier and no streak fact — backward-compatible path |
+| `verification_after_write_red` | veto (**strict**) | a source write with a red verifier and no streak fact |
 | `failed_verification` | veto (**strict**) | streak-aware red verifier below the threshold, or diagnostic churn is still converging |
 | `repeated_verification_failures` | veto (**strict**) + escalation | non-converging red verifier at or above `escalation_threshold` |
 | `verified_after_write` / `verified` | allow | verifier is green |
@@ -105,7 +80,7 @@ Only **source** writes count as progress toward done. A cosmetic final write (a
 comment, a `.md` typo) is not evidence: it can't flip an already-green run back
 to unverified, and a run that wrote only cosmetics can't claim done. A **strict**
 veto (a source write with a red or missing verifier) is never released by the
-veto budget — the run does not get to declare victory on a failing build.
+veto budget, so a failing build cannot end as verified.
 
 Each deterministic decision emits a `judge_decision` event with
 `trigger: "verify_completion"`, `confirm`, and the stable `reason` above. When
@@ -122,21 +97,21 @@ language-specific repair cues without parsing the default prose.
 
 ### Degraded mode
 
-With **no** host-fact callbacks (`facts`, `verify_command`, and `classify_write`
-all absent), the deterministic gate has nothing to assert, so it abstains — it
+With neither `facts` nor `verify_command`, the deterministic gate has nothing
+to assert, so it abstains: it
 allows, and marks `_completion_gate.facts_available = false` with a verdict
 reason of `facts_unavailable`. It never fabricates a pass. Any configured LLM
 judge still runs, so this is judge-only mode, not no-op mode.
 
 ## The optional bounded judge
 
-Set `judge` to add an LLM check on top of the deterministic ladder. `judge:
-true` uses defaults; a dict passes through provider, model, system prompt, and
-cap overrides. The judge rides the capped `verify_completion_judge` seam by
-default (or `done_judge` via `judge_seam`), so it inherits that seam's
-per-session veto cap — 5 by default. Past the cap the judge stops firing and the
-loop ends with status `verify_capped`; set `max_invocations: 0` to disable the
-cap. Two helpers surface the resolved cap for run records:
+Set `judge` to add an LLM check after the deterministic ladder. `judge: true`
+uses defaults. A dict may set the provider, model, system prompt, timeouts, and
+invocation cap. The judge uses `verify_completion_judge` by default; set
+`judge_seam: "done_judge"` to use that completion trigger instead. The default
+cap is 5 calls per session. Past the cap, the loop ends with status
+`completion_unverified`. Set `max_invocations: 0` to disable the cap. Two
+helpers expose the resolved cap:
 
 ```text
 agent_verify_completion_judge_cap(judge_cfg) -> int | nil

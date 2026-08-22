@@ -1,6 +1,6 @@
 /* Verifies the per-session cap on `verify_completion_judge` veto loops:
    - a judge that always vetoes stops firing once `max_invocations` is hit,
-     finalizing as `verify_capped` with stop_reason `completion_judge_cap_reached`,
+     finalizing as `completion_unverified` with stop_reason `completion_judge_cap_reached`,
    - the run record carries structured `completion_judge` counters so a
      harness can report loop count and cap-hit status without transcript mining,
    - a judge that approves completes normally with `cap_reached: false`,
@@ -30,11 +30,11 @@ fn run_capped(harness: Harness) {
     [
       llm_text("Round one. ##DONE##"),
       llm_text(
-        "{\"verdict\":\"continue\",\"reasoning\":\"veto one\",\"next_step\":\"keep going\"}",
+        "{\"action\":\"continue\",\"reason\":\"veto one\",\"repair\":\"keep going\",\"specific_gaps\":[],\"accepted_evidence\":[]}",
       ),
       llm_text("Round two. ##DONE##"),
       llm_text(
-        "{\"verdict\":\"continue\",\"reasoning\":\"veto two\",\"next_step\":\"keep going\"}",
+        "{\"action\":\"continue\",\"reason\":\"veto two\",\"repair\":\"keep going\",\"specific_gaps\":[],\"accepted_evidence\":[]}",
       ),
       llm_text("Round three. ##DONE##"),
     ],
@@ -81,7 +81,9 @@ fn run_approved(harness: Harness) {
     harness.llm,
     [
       llm_text("Final answer. ##DONE##"),
-      llm_text("{\"verdict\":\"done\",\"reasoning\":\"looks complete\"}"),
+      llm_text(
+        "{\"action\":\"accept\",\"reason\":\"looks complete\",\"repair\":\"\",\"specific_gaps\":[],\"accepted_evidence\":[]}",
+      ),
     ],
     { ->
       const session_id = "verify-judge-approve-" + harness.random.uuid()
@@ -114,9 +116,13 @@ fn run_cap_disabled(harness: Harness) {
     harness.llm,
     [
       llm_text("Try one. ##DONE##"),
-      llm_text("{\"verdict\":\"continue\",\"reasoning\":\"veto one\"}"),
+      llm_text(
+        "{\"action\":\"continue\",\"reason\":\"veto one\",\"repair\":\"keep going\",\"specific_gaps\":[],\"accepted_evidence\":[]}",
+      ),
       llm_text("Try two. ##DONE##"),
-      llm_text("{\"verdict\":\"continue\",\"reasoning\":\"veto two\"}"),
+      llm_text(
+        "{\"action\":\"continue\",\"reason\":\"veto two\",\"repair\":\"keep going\",\"specific_gaps\":[],\"accepted_evidence\":[]}",
+      ),
       llm_text("Try three. ##DONE##"),
     ],
     { ->
@@ -158,10 +164,12 @@ fn run_diagnosis_recovery(harness: Harness) {
     [
       llm_text("Malformed tool-call loop. ##DONE##"),
       llm_text(
-        "{\"verdict\":\"continue\",\"reasoning\":\"task remains incomplete\",\"diagnosis\":\"assistant is stuck in a loop sending malformed tool calls\",\"next_step\":\"use a different tool-call shape\"}",
+        "{\"action\":\"continue\",\"reason\":\"task remains incomplete: assistant is stuck in a loop sending malformed tool calls\",\"repair\":\"use a different tool-call shape\",\"specific_gaps\":[\"assistant is stuck in a loop sending malformed tool calls\"],\"accepted_evidence\":[]}",
       ),
       llm_text("Recovered after applying the diagnosis. ##DONE##"),
-      llm_text("{\"verdict\":\"done\",\"reasoning\":\"recovery succeeded\"}"),
+      llm_text(
+        "{\"action\":\"accept\",\"reason\":\"recovery succeeded\",\"repair\":\"\",\"specific_gaps\":[],\"accepted_evidence\":[]}",
+      ),
     ],
     { ->
       const session_id = "verify-judge-diagnosis-" + harness.random.uuid()

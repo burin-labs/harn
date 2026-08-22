@@ -110,7 +110,7 @@ impl std::fmt::Display for AgentTerminalClass {
 pub(crate) fn session_status_indicates_error(final_status: &str) -> bool {
     matches!(
         final_status,
-        "error" | "failed" | "provider_error" | "verify_exhausted" | "verify_capped" | "stuck"
+        "error" | "failed" | "provider_error" | "verify_exhausted" | "stuck"
     )
 }
 
@@ -545,6 +545,36 @@ mod tests {
             Some(AgentTerminalClass::GenericThrow)
         );
         assert_eq!(agent_terminal_class("done", "", None), None);
+    }
+
+    #[test]
+    fn completion_unverified_is_a_policy_failure_without_a_runtime_error() {
+        let final_status = "completion_unverified";
+        let stop_reason = "done_judge_cap_reached";
+
+        assert!(
+            !session_status_indicates_error(final_status),
+            "a failed lifecycle state must not fire the SessionError hook without an error"
+        );
+        assert_eq!(agent_terminal_class(final_status, stop_reason, None), None);
+
+        let outcome = crate::agent_events::terminal_outcome_for_finalize(
+            final_status,
+            stop_reason,
+            None,
+            false,
+        );
+        assert_eq!(
+            outcome.kind,
+            crate::agent_events::AgentTerminalKind::CompletionUnverified
+        );
+        assert_eq!(
+            outcome.kind.lifecycle_state(),
+            crate::agent_events::AgentLifecycleState::Failed
+        );
+        assert_eq!(outcome.reason, stop_reason);
+        assert_eq!(outcome.owner, "policy");
+        assert_eq!(outcome.terminal_class, None);
     }
 
     #[test]

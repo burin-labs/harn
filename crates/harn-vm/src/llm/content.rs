@@ -773,6 +773,11 @@ pub(crate) fn ollama_message(mut message: serde_json::Value) -> serde_json::Valu
     let Some(object) = message.as_object_mut() else {
         return message;
     };
+    // `_harn` is durable session evidence, never provider input. Other provider
+    // families rebuild or allow-list their wire messages; Ollama preserves an
+    // OpenAI-like message object, so strip the storage envelope explicitly at
+    // this egress boundary.
+    object.remove("_harn");
     let Some(content) = object.get("content").cloned() else {
         return message;
     };

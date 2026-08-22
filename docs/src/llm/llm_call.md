@@ -597,6 +597,12 @@ repair state without hand-rolling parse / repair chains. It never
 throws on transport or schema failures — `ok: false` plus
 `error_category` distinguishes the failure mode.
 
+Set `operation_timeout_ms` to cap the entire structured operation, including
+schema retries, native-to-prompt fallback, and repair. This is distinct from
+`timeout_ms`, which bounds each provider request. On expiry the in-flight scope
+is cancelled and the envelope returns `error_category: "timeout"` plus the
+configured `operation_timeout_ms`.
+
 ```harn
 import { LlmCallOptions } from "std/llm/options"
 

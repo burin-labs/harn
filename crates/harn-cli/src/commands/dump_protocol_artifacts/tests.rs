@@ -77,6 +77,58 @@ fn typescript_artifact_has_no_dangling_type_references() {
 }
 
 #[test]
+fn tool_annotations_project_typed_completion_evidence_roles_to_every_binding() {
+    assert_eq!(
+        completion_evidence_role_values(),
+        vec![
+            "observation".to_string(),
+            "mutation".to_string(),
+            "verification".to_string(),
+        ]
+    );
+
+    for (binding, type_declaration, field_declaration) in [
+        (
+            generate_typescript(),
+            "export type HarnCompletionEvidenceRole =",
+            "completion_evidence_role?: HarnCompletionEvidenceRole",
+        ),
+        (
+            generate_swift(),
+            "public enum HarnCompletionEvidenceRole:",
+            "public var completionEvidenceRole: HarnCompletionEvidenceRole?",
+        ),
+        (
+            generate_python(),
+            "class HarnCompletionEvidenceRole(str, Enum):",
+            "completion_evidence_role: Optional[HarnCompletionEvidenceRole] = None",
+        ),
+        (
+            generate_go(),
+            "type HarnCompletionEvidenceRole string",
+            "CompletionEvidenceRole *HarnCompletionEvidenceRole `json:\"completion_evidence_role,omitempty\"`",
+        ),
+        (
+            generate_rust(),
+            "pub enum HarnCompletionEvidenceRole {",
+            "pub completion_evidence_role: Option<HarnCompletionEvidenceRole>",
+        ),
+    ] {
+        assert!(
+            binding.contains(type_declaration),
+            "binding omitted typed completion-evidence vocabulary: {type_declaration}"
+        );
+        assert!(
+            binding.contains(field_declaration),
+            "binding omitted optional typed annotation field: {field_declaration}"
+        );
+        for role in completion_evidence_role_values() {
+            assert!(binding.contains(&role), "binding omitted role `{role}`");
+        }
+    }
+}
+
+#[test]
 fn generated_types_include_harn_wire_vocabularies() {
     let ts = generate_typescript();
     assert!(ts.contains("export type JsonRpcId = number | string | null"));
@@ -1221,6 +1273,10 @@ fn round_trip_fixture_matches_python_and_go_field_set() {
         json!("composition_child_call")
     );
     assert_eq!(fixture["a2aTask"]["status"]["state"], json!("working"));
+    assert_eq!(
+        fixture["harnToolAnnotations"]["completion_evidence_role"],
+        json!("verification")
+    );
     assert_eq!(
         fixture["mcpDiscoverResult"]["supportedVersions"][0],
         json!(MCP_PROTOCOL_VERSION)

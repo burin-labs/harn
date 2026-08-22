@@ -97,7 +97,7 @@ Stop, wait, stand down, and pivot are controls, not suggestions.
 - Gate on required artifacts, checks, receipts, or landed state.
 - Use deterministic checks before an LLM judge.
 - Calibrate model judges against representative accepted and rejected cases.
-- Cap repeated vetoes and expose the reason for `verify_capped`.
+- Cap repeated vetoes and expose why completion remains unverified.
 - Preserve residual risk in the handoff.
 
 ## Recovery

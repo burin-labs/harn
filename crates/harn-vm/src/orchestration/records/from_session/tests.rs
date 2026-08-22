@@ -612,7 +612,12 @@ async fn typed_terminal_projects_suspension_and_cancellation_without_reclassific
     for (final_status, stop_reason, expected_status, expected_kind) in [
         ("suspended", "awaiting_ci", "suspended", "suspended"),
         ("cancelled", "user_cancelled", "cancelled", "user_cancelled"),
-        ("verify_capped", "verify_capped", "stopped", "policy_budget"),
+        (
+            "completion_unverified",
+            "completion_unverified",
+            "failed",
+            "completion_unverified",
+        ),
     ] {
         let store = MemorySessionStore::default();
         let meta = store

@@ -1,7 +1,8 @@
 // Run: harn test tests/agent/transcript_test.harn
 //
-// Canonical transcript normalization tests. These cover the shapes produced by
-// modern provider-native agent loops and by older JSONL scorer fixtures.
+// Canonical transcript normalization tests. These cover the durable lifecycle
+// facts produced by every current tool channel plus lossless analysis of older
+// JSONL scorer fixtures.
 import {
   agent_transcript_issue_schema,
   agent_transcript_normalize,
@@ -12,6 +13,7 @@ import {
   agent_transcript_text,
   agent_transcript_tool_call,
   agent_transcript_tool_events,
+  agent_transcript_tool_lifecycle_report,
   agent_transcript_tool_result_blocks,
   agent_transcript_tool_results,
 } from "std/agent/transcript"
@@ -38,6 +40,16 @@ pipeline test_agent_transcript_normalizes_modern_native_messages(harness: Harnes
       },
       llm: {provider: "cerebras", model: "gpt-oss-120b", input_tokens: 100, output_tokens: 20},
       response_ms: 42,
+      _harn: {
+        kind: "assistant",
+        tool_calls: [
+          {
+            type: "function",
+            id: "call-look",
+            function: {name: "look", arguments: "{\"file\":\"src/app.py\",\"intent\":\"read\"}"},
+          },
+        ],
+      },
     },
     {
       type: "message",
@@ -45,6 +57,12 @@ pipeline test_agent_transcript_normalizes_modern_native_messages(harness: Harnes
       name: "look",
       tool_call_id: "call-look",
       content: "[result of look]\nsource text",
+      _harn: {
+        kind: "tool_result",
+        tool_call_id: "call-look",
+        tool_name: "look",
+        outcome: "ok",
+      },
     },
   ]
   const rows = agent_transcript_normalize(records)
@@ -63,6 +81,76 @@ pipeline test_agent_transcript_normalizes_modern_native_messages(harness: Harnes
   assert(report.ok, "valid transcript report passes")
   assert(is_type(report.rows[1], agent_transcript_row_schema()), "assistant row satisfies schema")
   assert(is_type(report, agent_transcript_report_schema()), "report satisfies schema")
+}
+
+pipeline test_agent_transcript_uses_dispatch_outcome_not_result_prose(
+  harness: Harness,
+  _task,
+) {
+  const rows = agent_transcript_normalize(
+    [
+      {
+        role: "user",
+        content: "0 errors reported, but the host marked this operation failed",
+        _harn: {
+          kind: "tool_result",
+          tool_call_id: "typed-error",
+          tool_name: "verify",
+          outcome: "error",
+        },
+      },
+      {
+        role: "user",
+        content: "historical failure count: 0",
+        _harn: {
+          kind: "tool_result",
+          tool_call_id: "typed-success",
+          tool_name: "verify",
+          outcome: "ok",
+        },
+      },
+      {role: "tool", name: "verify", tool_call_id: "untyped", content: "failed with error"},
+    ],
+  )
+  assert_eq(rows[0].outcome, "error", "dispatch-owned failure wins over ambiguous prose")
+  assert_eq(rows[1].outcome, "ok", "dispatch-owned success prevents a false prose failure")
+  assert_eq(rows[2].outcome, "unknown", "untyped historical prose is never guessed")
+}
+
+pipeline test_agent_transcript_lifecycle_report_fails_closed_on_pairing_anomalies(
+  harness: Harness,
+  _task,
+) {
+  const records = [
+    {
+      role: "assistant",
+      tool_calls: [
+        {id: "dup", name: "edit", arguments: {path: "a"}},
+        {id: "dup", name: "verify", arguments: {}},
+        {name: "edit", arguments: {path: "b"}},
+        {id: "pending", name: "verify", arguments: {}},
+      ],
+    },
+    {role: "tool", name: "other", tool_call_id: "dup", content: "first"},
+    {role: "tool", name: "edit", tool_call_id: "dup", content: "second"},
+    {role: "tool", name: "verify", tool_call_id: "orphan", content: "11 passed"},
+  ]
+  const report = agent_transcript_tool_lifecycle_report(records)
+  assert(!report.ok, "pairing anomalies are never silently normalized away")
+  assert_eq(len(report.calls), 4)
+  assert_eq(report.calls[0].status, "ambiguous")
+  assert_eq(len(report.calls[0].results), 2)
+  assert_eq(report.calls[0].results[0].text, "first")
+  assert_eq(report.calls[0].results[1].text, "second")
+  assert_eq(report.calls[2].status, "ambiguous")
+  assert_eq(report.calls[3].status, "pending")
+  assert_eq(len(report.unmatched_results), 1)
+  const codes = report.issues.map({ issue -> issue.code }).to_list()
+  assert(contains(codes, "duplicate_tool_call_id"))
+  assert(contains(codes, "duplicate_tool_result"))
+  assert(contains(codes, "tool_call_missing_id"))
+  assert(contains(codes, "tool_call_result_missing"))
+  assert(contains(codes, "orphan_tool_result"))
 }
 
 pipeline test_agent_transcript_normalizes_legacy_response_and_cumulative_request(
@@ -111,7 +199,7 @@ pipeline test_agent_transcript_normalizes_legacy_response_and_cumulative_request
   assert(len(results) == 2, "cumulative request results deduped")
   assert(results[0].name == "edit", "first result")
   assert(results[1].name == "run", "second result")
-  assert(results[1].is_error, "error marker classified")
+  assert_eq(results[1].outcome, "unknown", "legacy prose is preserved without inventing outcome")
 }
 
 pipeline test_agent_transcript_helpers_cover_provider_variants(harness: Harness, _task) {

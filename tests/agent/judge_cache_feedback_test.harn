@@ -13,7 +13,7 @@ fn checkpoints(events, schema: string) -> list {
 pipeline test_judge_reuses_stable_prefix_and_suppresses_stale_next_step(harness: Harness, task) {
   const continue_verdict = {
     text:
-      "{\"verdict\":\"continue\",\"reasoning\":\"tests are still missing\",\"next_step\":\"run the focused test\"}",
+      "{\"action\":\"continue\",\"reason\":\"tests are still missing\",\"repair\":\"run the focused test\",\"specific_gaps\":[\"focused test missing\"],\"accepted_evidence\":[]}",
     input_tokens: 120,
     output_tokens: 20,
     cache_write_tokens: 80,
@@ -29,7 +29,8 @@ pipeline test_judge_reuses_stable_prefix_and_suppresses_stale_next_step(harness:
       cached_continue_verdict,
       llm_text("The work is complete. ##DONE##"),
       {
-        text: "{\"verdict\":\"done\",\"reasoning\":\"tests now pass\"}",
+        text:
+          "{\"action\":\"accept\",\"reason\":\"tests now pass\",\"repair\":\"\",\"specific_gaps\":[],\"accepted_evidence\":[\"focused tests pass\"]}",
         input_tokens: 120,
         output_tokens: 12,
         cache_read_tokens: 80,

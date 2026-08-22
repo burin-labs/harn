@@ -1,4 +1,4 @@
-verify_capped
+completion_unverified
 1
 1
 stalled
@@ -12,6 +12,8 @@ done.cap_reached=false
 2
 false
 true
+deferred
+1
 5
 budget_exhausted
 1

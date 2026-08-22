@@ -125,8 +125,9 @@ opts = with_governance(opts, {
 })
 
 // An independent "are we actually done?" gate, not the model's own say-so.
-opts = {...opts, ...agent_completion_gate({
-  require: { result -> contains(to_string(result?.text), "test result: ok") },
+opts = {...opts, ...agent_completion_gate(harness.runtime, {
+  facts: fn(ctx) { return host_completion_facts(ctx.session_id) },
+  verify_command: fn() { return host_run_verify() },
 })}
 
 // Hide tools this task can't need, and fill in a prompt nudge — both are

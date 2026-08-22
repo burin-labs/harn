@@ -1,35 +1,210 @@
 import { agent_feedback_emit } from "std/agent/feedback"
 import {
+  CompletionJudgeAdmission,
   __completion_gate_apply_budget,
   __completion_gate_classify_writes,
   __completion_gate_combine_verify,
   __completion_gate_feedback_keys,
   __completion_gate_ladder,
-  __judge_classify_verdict,
   __judge_run_checkpoint,
 } from "std/agent/judge_internals"
+import { JudgeConfig } from "std/agent/options_types"
 import { __with_prompt_fragment } from "std/agent/preflight"
 import { completion_judge_user_prompt } from "std/agent/prompts"
 import { agent_emit_event, agent_session_messages } from "std/agent/state"
 import { agent_tool_annotations, agent_tool_is_read_only } from "std/agent/tool_annotations"
+import {
+  AgentTranscriptIssue,
+  AgentTranscriptToolLifecycle,
+  AgentTranscriptToolLifecycleReport,
+  AgentTranscriptToolLifecycleStatus,
+  agent_transcript_tool_lifecycle_report,
+} from "std/agent/transcript"
 
 // Conservative default cap on how many times the completion-judge LLM may
 // veto a proposed completion within one session. Each veto is a paid model
 // call plus an injected feedback message, so a weak model that never satisfies
 // the judge can otherwise burn calls up to `max_verify_attempts` (default 20)
 // with no structured signal. Callers raise it via
-// `verify_completion_judge.max_invocations` (or `max_feedback`), or disable the
-// cap entirely with `0`.
+// `verify_completion_judge.max_invocations`, or disable the cap entirely with
+// `0`.
 const __VERIFY_COMPLETION_JUDGE_DEFAULT_CAP = 5
 
 // The completion judge is a terminal checkpoint, not a second agent loop. Give
 // it the latest effect-bearing actions and their observations without replaying
 // an unbounded session or the full callable schemas it cannot use.
-const __JUDGE_EVIDENCE_ACTION_LIMIT = 3
-
 const __JUDGE_EVIDENCE_FIELD_CHAR_LIMIT = 4500
 
-fn __unique_names(names) {
+const __JUDGE_EVIDENCE_LABEL_CHAR_LIMIT = 160
+
+/** Action the completion-judge model is allowed to return. */
+pub type CompletionJudgeAction = "accept" | "continue"
+
+/** Runtime completion decision after deadline and policy enforcement. */
+pub type CompletionDirectiveAction = CompletionJudgeAction | "stop_unverified"
+
+pub type CompletionEvidenceRole = "observation" | "mutation" | "verification" | "other"
+
+pub type CompletionToolSemantics = {
+  name: string,
+  kind: string,
+  side_effect_level: string,
+  read_only: bool,
+  evidence_role: CompletionEvidenceRole,
+}
+
+pub type CompletionEvidenceAction = {
+  ordinal: int,
+  evidence_index: int,
+  tool_call_id: string,
+  name: string,
+  semantics: CompletionToolSemantics,
+  lifecycle_status: AgentTranscriptToolLifecycleStatus,
+  arguments: string,
+  observation: string,
+  result_facts: string,
+  has_error_result: bool,
+}
+
+pub type CompletionEvidenceIssue = {
+  code: string,
+  record_index: int,
+  message: string,
+  details: string,
+}
+
+pub type CompletionEvidencePacket = {
+  schema: "harn.completion_judge_evidence.v2",
+  raw_message_count: int,
+  raw_transcript_digest: string,
+  relevant_action_count: int,
+  omitted_read_only_call_count: int,
+  omitted_older_action_count: int,
+  lifecycle_issue_count: int,
+  lifecycle_issues: list<CompletionEvidenceIssue>,
+  actions: list<CompletionEvidenceAction>,
+  fallback_observations: list<CompletionEvidenceAction>,
+}
+
+pub type CompletionEvidenceProjectionStats = {
+  schema: "harn.completion_judge_evidence_projection.v1",
+  raw_message_count: int,
+  relevant_call_count: int,
+  included_action_count: int,
+  included_fallback_observation_count: int,
+  omitted_read_only_call_count: int,
+  omitted_older_action_count: int,
+  lifecycle_issue_count: int,
+  serialized_chars: int,
+  raw_transcript_digest: string,
+}
+
+pub type CompletionEvidenceProjection = {
+  packet: CompletionEvidencePacket,
+  serialized: string,
+  stats: CompletionEvidenceProjectionStats,
+}
+
+pub type CompletionEvidenceSnapshot = {
+  schema: "harn.completion_evidence_snapshot.v1",
+  evidence_id: string,
+  session_id: string,
+  task: string,
+  stop_reason: string,
+  text: string,
+  visible_text: string,
+  last_text: string,
+  transcript: string,
+  judge_evidence: string,
+  judge_evidence_projection: CompletionEvidenceProjectionStats,
+  all_tools_used: string,
+  successful_tools_used: string,
+  iteration: int,
+  knowledge_state: string,
+}
+
+pub type CompletionJudgeInvocations = {
+  deterministic: bool,
+  verify_completion_judge: bool,
+  done_judge: bool,
+}
+
+pub type CompletionFeedbackDelivery = "none" | "deferred" | "delivered"
+
+pub type CompletionDirectiveReceipt = {
+  schema: "harn.completion_directive_receipt.v1",
+  evidence_id: string,
+  action: CompletionDirectiveAction,
+  trigger: string,
+  source: string,
+  outcome: string,
+  reason: string,
+  invoked: CompletionJudgeInvocations,
+  feedback_delivery: CompletionFeedbackDelivery,
+  projection: CompletionEvidenceProjectionStats,
+  admission?: CompletionJudgeAdmission?,
+  checkpoint?: dict?,
+}
+
+pub type CompletionDirective = {
+  action: CompletionDirectiveAction,
+  evidence_id: string,
+  feedback?: string?,
+  repair?: string?,
+  receipt: CompletionDirectiveReceipt,
+  feedback_history: dict,
+}
+
+/** Normalized result from either a deterministic or model completion check. */
+type CompletionStageVerdict = {
+  vetoed: bool,
+  confirm?: bool,
+  verdict?: string,
+  feedback?: string?,
+  reasoning?: string,
+  next_step?: string,
+  source?: string,
+  trigger?: string?,
+  reason?: string?,
+  converted_from?: string?,
+  escalation_recommended?: bool?,
+  escalation_target?: string?,
+  specific_gaps?: list<string>,
+  accepted_evidence?: list<string>,
+  judge_duration_ms?: int | float,
+  judge_outcome?: string?,
+  terminal_judge_reason?: string?,
+  terminal_evidence_preserved?: bool,
+  admission?: CompletionJudgeAdmission?,
+  typed_checkpoint?: dict?,
+}
+
+/** Stable identity for the two model-judge positions in the completion plan. */
+enum CompletionJudgeSlot {
+  Verification
+  Completion
+}
+
+/** Ordered checks evaluated at one completion boundary. */
+enum CompletionPolicyStage {
+  Deterministic(check: any)
+  ModelJudge(
+    slot: CompletionJudgeSlot,
+    config: JudgeConfig,
+    trigger: string?,
+    prior_invocations: int,
+    max_invocations: int?,
+  )
+}
+
+type CompletionPolicyEvaluation = {
+  verdict: CompletionStageVerdict,
+  invoked: CompletionJudgeInvocations,
+  verification_judge_cap_reached: bool,
+  completion_judge_cap_reached: bool,
+}
+
+fn __unique_names(names) -> list<string> {
   let unique = []
   for name in names {
     if name != "" && !contains(unique, name) {
@@ -39,11 +214,19 @@ fn __unique_names(names) {
   return unique
 }
 
-fn __session_tool_names(messages) {
+fn __session_tool_names(lifecycle: AgentTranscriptToolLifecycleReport) -> list<string> {
   let names = []
-  for message in messages {
-    if message?.role == "tool" {
-      names = names.appending(message?.name ?? "")
+  for call in lifecycle.calls {
+    names = names.appending(call.name)
+  }
+  return __unique_names(names)
+}
+
+fn __session_successful_tool_names(lifecycle: AgentTranscriptToolLifecycleReport) -> list<string> {
+  let names: list<string> = []
+  for call in lifecycle.calls {
+    if call.status == "completed" && call.result?.outcome == "ok" {
+      names = names + [call.name]
     }
   }
   return __unique_names(names)
@@ -73,33 +256,56 @@ fn __judge_tool_entry(opts, name) {
   return nil
 }
 
-fn __judge_tool_descriptor(opts, name) {
+fn __judge_declared_evidence_role(value) -> CompletionEvidenceRole? {
+  const role = lowercase(to_string(value ?? ""))
+  if role == "observation" || role == "mutation" || role == "verification" {
+    return role
+  }
+  return nil
+}
+
+fn __judge_evidence_role(
+  declared: CompletionEvidenceRole?,
+  kind: string,
+  effect: string,
+  read_only: bool,
+) -> CompletionEvidenceRole {
+  if declared != nil {
+    return declared
+  }
+  if kind == "edit" || effect == "workspace_write" {
+    return "mutation"
+  }
+  if read_only {
+    return "observation"
+  }
+  return "other"
+}
+
+fn __judge_tool_descriptor(opts, name) -> CompletionToolSemantics {
   const entry = __judge_tool_entry(opts, name)
   const annotations = agent_tool_annotations(entry, opts?.policy, name)
+  const read_only = entry != nil && agent_tool_is_read_only(entry, opts?.policy, name)
+  const kind = lowercase(to_string(annotations?.kind ?? ""))
+  const effect = lowercase(to_string(annotations?.side_effect_level ?? ""))
+  const declared_role = __judge_declared_evidence_role(annotations?.completion_evidence_role)
+  const evidence_role = __judge_evidence_role(declared_role, kind, effect, read_only)
   return {
-    name: name,
-    kind: to_string(annotations?.kind ?? annotations?.tool_kind ?? annotations?.toolKind ?? ""),
-    side_effect_level: to_string(
+    name: __judge_clip_evidence(name, __JUDGE_EVIDENCE_LABEL_CHAR_LIMIT),
+    kind: __judge_clip_evidence(
+      annotations?.kind ?? annotations?.tool_kind ?? annotations?.toolKind ?? "",
+      __JUDGE_EVIDENCE_LABEL_CHAR_LIMIT,
+    ),
+    side_effect_level: __judge_clip_evidence(
       annotations?.side_effect_level ?? annotations?.sideEffectLevel ?? annotations?.side_effect
         ?? annotations
         ?.sideEffect
         ?? "",
+      __JUDGE_EVIDENCE_LABEL_CHAR_LIMIT,
     ),
-    read_only: entry != nil && agent_tool_is_read_only(entry, opts?.policy, name),
+    read_only: read_only,
+    evidence_role: evidence_role,
   }
-}
-
-fn __judge_tool_schemas(opts) {
-  let schemas = []
-  for entry in __judge_tool_entries(opts) {
-    const function = entry?.function
-    const name = to_string(entry?.name ?? function?.name ?? "")
-    if name == "" {
-      continue
-    }
-    schemas = schemas.appending(__judge_tool_descriptor(opts, name))
-  }
-  return schemas
 }
 
 fn __judge_clip_evidence(value, limit) -> string {
@@ -121,120 +327,158 @@ fn __judge_clip_evidence(value, limit) -> string {
     + substring(text, len(text) - tail_chars, len(text))
 }
 
-fn __judge_call_name(call) -> string {
-  return to_string(call?.name ?? call?.tool_name ?? call?.function?.name ?? "")
+fn __judge_descriptor_is_verifier(descriptor) -> bool {
+  return descriptor?.evidence_role == "verification"
 }
 
-fn __judge_call_id(call) -> string {
-  return to_string(call?.id ?? call?.tool_call_id ?? "")
+fn __judge_descriptor_is_mutation(descriptor) -> bool {
+  return descriptor?.evidence_role == "mutation"
 }
 
-fn __judge_call_arguments(call) {
-  return call?.arguments ?? call?.tool_args ?? call?.function?.arguments ?? {}
+fn __judge_descriptor_is_observation(descriptor) -> bool {
+  return descriptor?.evidence_role == "observation"
 }
 
-fn __judge_message_calls(message) {
-  return message?.tool_calls ?? message?.message?.tool_calls ?? []
+fn __judge_lifecycle_action(
+  lifecycle: AgentTranscriptToolLifecycle,
+  opts,
+) -> CompletionEvidenceAction {
+  const descriptor = __judge_tool_descriptor(opts, lifecycle.name)
+  const result = lifecycle.result
+  let observations = []
+  for matched in lifecycle.results {
+    observations = observations + [matched.text]
+  }
+  return {
+    ordinal: lifecycle.ordinal,
+    evidence_index: lifecycle.evidence_index,
+    tool_call_id: __judge_clip_evidence(lifecycle.tool_call_id, __JUDGE_EVIDENCE_LABEL_CHAR_LIMIT),
+    name: descriptor.name,
+    semantics: descriptor,
+    lifecycle_status: lifecycle.status,
+    arguments: __judge_clip_evidence(lifecycle.args, __JUDGE_EVIDENCE_FIELD_CHAR_LIMIT),
+    observation: __judge_clip_evidence(join(observations, "\n"), __JUDGE_EVIDENCE_FIELD_CHAR_LIMIT),
+    result_facts: __judge_clip_evidence(result?.data ?? {}, __JUDGE_EVIDENCE_FIELD_CHAR_LIMIT),
+    has_error_result: lifecycle.results.any({ matched -> matched.outcome == "error" }),
+  }
+}
+
+fn __judge_latest(
+  current: CompletionEvidenceAction?,
+  candidate: CompletionEvidenceAction?,
+) -> CompletionEvidenceAction? {
+  if candidate == nil {
+    return current
+  }
+  if current == nil || candidate.evidence_index >= current.evidence_index {
+    return candidate
+  }
+  return current
+}
+
+fn __judge_unique_slot_actions(
+  candidates: list<CompletionEvidenceAction?>,
+) -> list<CompletionEvidenceAction> {
+  let selected: list<CompletionEvidenceAction> = []
+  let seen = {}
+  for candidate in candidates {
+    if candidate == nil {
+      continue
+    }
+    const key = to_string(candidate.ordinal) + ":" + to_string(candidate.evidence_index)
+    if seen[key] ?? false {
+      continue
+    }
+    seen = seen + {[key]: true}
+    selected = selected + [candidate]
+  }
+  return selected
+}
+
+fn __judge_issue_evidence(issue: AgentTranscriptIssue) -> CompletionEvidenceIssue {
+  return {
+    code: __judge_clip_evidence(issue.code, __JUDGE_EVIDENCE_LABEL_CHAR_LIMIT),
+    record_index: issue.record_index,
+    message: __judge_clip_evidence(issue.message, __JUDGE_EVIDENCE_LABEL_CHAR_LIMIT),
+    details: __judge_clip_evidence(issue.details, __JUDGE_EVIDENCE_FIELD_CHAR_LIMIT),
+  }
 }
 
 /**
  * Build the bounded evidence packet sent to the completion-judge LLM. The raw
  * transcript remains on the canonical payload for deterministic gates, replay,
  * and audit. Selection is structural: explicitly read-only calls are omitted;
- * workspace writes, process execution/verification, and unknown effects are
- * retained. Unknown annotations therefore fail closed into judge evidence.
+ * explicit mutation and verification roles are retained. Canonical edit and
+ * workspace-write annotations imply mutation; execute tools must declare a
+ * completion evidence role instead of being guessed from provider prose or
+ * process capability.
  *
  * @effects: []
  * @errors: []
  * @api_stability: internal
  */
-pub fn __judge_evidence_projection(messages, opts, raw_transcript_digest = nil) -> dict {
-  let calls = {}
+fn __judge_evidence_projection_from_lifecycle(
+  messages,
+  lifecycle: AgentTranscriptToolLifecycleReport,
+  opts,
+  raw_transcript_digest = nil,
+) -> CompletionEvidenceProjection {
   let relevant_call_count = 0
   let omitted_read_only_call_count = 0
-  for message in messages {
-    for call in __judge_message_calls(message) {
-      const name = __judge_call_name(call)
-      const descriptor = __judge_tool_descriptor(opts, name)
-      if descriptor.read_only {
-        omitted_read_only_call_count = omitted_read_only_call_count + 1
-        continue
-      }
-      relevant_call_count = relevant_call_count + 1
-      const call_id = __judge_call_id(call)
-      if call_id != "" {
-        calls = calls
-          + {
-          [call_id]: {
-            name: name,
-            semantics: descriptor,
-            arguments: __judge_clip_evidence(
-              __judge_call_arguments(call),
-              __JUDGE_EVIDENCE_FIELD_CHAR_LIMIT,
-            ),
-          },
-        }
-      }
-    }
-  }
-  let actions = []
-  let read_observations = []
-  for message in messages {
-    if message?.role != "tool" {
+  let latest_mutation = nil
+  let latest_verification = nil
+  let latest_problem = nil
+  let latest_observation = nil
+  for call in lifecycle.calls {
+    const action = __judge_lifecycle_action(call, opts)
+    if action.semantics.read_only {
+      omitted_read_only_call_count = omitted_read_only_call_count + 1
+      latest_observation = __judge_latest(latest_observation, action)
       continue
     }
-    const call_id = to_string(message?.tool_call_id ?? message?.call_id ?? "")
-    const call = calls[call_id]
-    const name = to_string(message?.name ?? call?.name ?? "")
-    const descriptor = call?.semantics ?? __judge_tool_descriptor(opts, name)
-    if descriptor.read_only {
-      read_observations = read_observations.appending(
-        {
-          name: name,
-          semantics: descriptor,
-          observation: __judge_clip_evidence(
-            message?.content ?? "",
-            __JUDGE_EVIDENCE_FIELD_CHAR_LIMIT,
-          ),
-        },
-      )
-      continue
+    relevant_call_count = relevant_call_count + 1
+    if __judge_descriptor_is_observation(action.semantics) {
+      latest_observation = __judge_latest(latest_observation, action)
     }
-    actions = actions.appending(
-      {
-        tool_call_id: call_id,
-        name: name,
-        semantics: descriptor,
-        arguments: call?.arguments ?? "",
-        observation: __judge_clip_evidence(
-          message?.content ?? "",
-          __JUDGE_EVIDENCE_FIELD_CHAR_LIMIT,
-        ),
-      },
-    )
+    if __judge_descriptor_is_mutation(action.semantics) {
+      latest_mutation = __judge_latest(latest_mutation, action)
+    }
+    if __judge_descriptor_is_verifier(action.semantics) {
+      latest_verification = __judge_latest(latest_verification, action)
+    }
+    if action.lifecycle_status != "completed" || action.has_error_result {
+      latest_problem = __judge_latest(latest_problem, action)
+    }
   }
-  const start = max(len(actions) - __JUDGE_EVIDENCE_ACTION_LIMIT, 0)
-  const selected = actions.slice(start, len(actions))
-  // Answer/research loops may have no side effects at all. Preserve the latest
-  // bounded observation for that case instead of presenting the judge with an
-  // empty evidence packet; mutation-bearing loops stay focused on their effect
-  // and verification spine.
-  const selected_observations = if len(selected) == 0 && len(read_observations) > 0 {
-    read_observations.slice(len(read_observations) - 1, len(read_observations))
+  let issue_tail = lifecycle.issues
+  if len(issue_tail) > 3 {
+    issue_tail = issue_tail.slice(len(issue_tail) - 3, len(issue_tail))
+  }
+  let latest_issues = []
+  for issue in issue_tail {
+    latest_issues = latest_issues + [__judge_issue_evidence(issue)]
+  }
+  const selected = __judge_unique_slot_actions(
+    [latest_mutation, latest_verification, latest_problem],
+  )
+  const observation_fallback = if len(selected) == 0 && latest_observation != nil {
+    [latest_observation]
   } else {
     []
   }
   const raw_digest = raw_transcript_digest
     ?? ("sha256:" + sha256(json_stringify(messages)))
   const packet = {
-    schema: "harn.completion_judge_evidence.v1",
+    schema: "harn.completion_judge_evidence.v2",
     raw_message_count: len(messages),
     raw_transcript_digest: raw_digest,
-    relevant_action_count: len(actions),
+    relevant_action_count: relevant_call_count,
     omitted_read_only_call_count: omitted_read_only_call_count,
-    omitted_older_action_count: len(actions) - len(selected),
+    omitted_older_action_count: max(relevant_call_count - len(selected), 0),
+    lifecycle_issue_count: lifecycle.invalid_count,
+    lifecycle_issues: latest_issues,
     actions: selected,
-    fallback_observations: selected_observations,
+    fallback_observations: observation_fallback,
   }
   const serialized = json_stringify(packet)
   return {
@@ -245,32 +489,48 @@ pub fn __judge_evidence_projection(messages, opts, raw_transcript_digest = nil) 
       raw_message_count: len(messages),
       relevant_call_count: relevant_call_count,
       included_action_count: len(selected),
-      included_fallback_observation_count: len(selected_observations),
+      included_fallback_observation_count: len(observation_fallback),
       omitted_read_only_call_count: omitted_read_only_call_count,
-      omitted_older_action_count: len(actions) - len(selected),
+      omitted_older_action_count: max(relevant_call_count - len(selected), 0),
+      lifecycle_issue_count: lifecycle.invalid_count,
       serialized_chars: len(serialized),
       raw_transcript_digest: packet.raw_transcript_digest,
     },
   }
 }
 
-fn __judge_knowledge_state(messages, text) -> string {
+pub fn __judge_evidence_projection(
+  messages,
+  opts,
+  raw_transcript_digest = nil,
+) -> CompletionEvidenceProjection {
+  return __judge_evidence_projection_from_lifecycle(
+    messages,
+    agent_transcript_tool_lifecycle_report(messages),
+    opts,
+    raw_transcript_digest,
+  )
+}
+
+fn __judge_knowledge_state(lifecycle: AgentTranscriptToolLifecycleReport, text: string) -> string {
   let tool_evidence = []
-  for message in messages {
-    if message?.role == "tool" {
-      tool_evidence = tool_evidence.appending(
-        {
-          name: message?.name ?? "",
-          content: message?.content ?? "",
-          tool_call_id: message?.tool_call_id ?? "",
-        },
-      )
-    }
+  for call in lifecycle.calls {
+    tool_evidence = tool_evidence.appending(
+      {
+        name: call.name,
+        tool_call_id: call.tool_call_id,
+        status: call.status,
+        results: call.results.map(
+          { result -> {outcome: result.outcome, text: result.text, data: result.data} },
+        )
+          .to_list(),
+      },
+    )
   }
   return "sha256:" + sha256(json_stringify({latest_text: text, tool_evidence: tool_evidence}))
 }
 
-fn __judge_string_list(value) {
+fn __judge_string_list(value) -> list<string> {
   if value == nil {
     return []
   }
@@ -291,16 +551,21 @@ fn __judge_string_list(value) {
   return [text]
 }
 
-fn __judge_gap_feedback(gaps) {
+fn __judge_gap_feedback(gaps: list<string>) -> string {
   if len(gaps) == 0 {
     return ""
   }
   return "Address these specific gaps before finishing:\n- " + join(gaps, "\n- ")
 }
 
-fn __judge_recovery_feedback(next_step, specific_gaps, recovery_details, fallback) {
+fn __judge_recovery_feedback(
+  repair,
+  specific_gaps: list<string>,
+  recovery_details,
+  fallback,
+) -> string {
   let parts = []
-  const step = trim(to_string(next_step ?? ""))
+  const step = trim(to_string(repair ?? ""))
   if step != "" {
     parts = parts.appending(step)
   }
@@ -319,12 +584,41 @@ fn __judge_recovery_feedback(next_step, specific_gaps, recovery_details, fallbac
   return join(parts, "\n\n")
 }
 
-fn __judge_payload(agent: HarnessAgent, session, opts, stop_reason, text, iteration) {
+fn __judge_payload(
+  agent: HarnessAgent,
+  session,
+  opts,
+  stop_reason: string,
+  text: string,
+  iteration: int,
+) -> CompletionEvidenceSnapshot {
   const messages = agent_session_messages(agent, session.session_id)
-  const tool_names = __session_tool_names(messages)
+  const lifecycle = agent_transcript_tool_lifecycle_report(messages)
+  const tool_names = __session_tool_names(lifecycle)
+  const successful_tool_names = __session_successful_tool_names(lifecycle)
   const transcript = json_stringify(messages)
-  const evidence = __judge_evidence_projection(messages, opts, "sha256:" + sha256(transcript))
+  const evidence = __judge_evidence_projection_from_lifecycle(
+    messages,
+    lifecycle,
+    opts,
+    "sha256:" + sha256(transcript),
+  )
+  const evidence_id = "sha256:"
+    + sha256(
+    json_stringify(
+      {
+        task: session?.task ?? "",
+        trigger: stop_reason,
+        candidate_text: text,
+        actions: evidence.packet.actions,
+        fallback_observations: evidence.packet.fallback_observations,
+        lifecycle_issues: evidence.packet.lifecycle_issues,
+      },
+    ),
+  )
   return {
+    schema: "harn.completion_evidence_snapshot.v1",
+    evidence_id: evidence_id,
     session_id: session.session_id,
     task: session?.task ?? "",
     stop_reason: stop_reason,
@@ -335,9 +629,9 @@ fn __judge_payload(agent: HarnessAgent, session, opts, stop_reason, text, iterat
     judge_evidence: evidence.serialized,
     judge_evidence_projection: evidence.stats,
     all_tools_used: join(tool_names, ", "),
-    successful_tools_used: join(tool_names, ", "),
+    successful_tools_used: join(successful_tool_names, ", "),
     iteration: iteration,
-    knowledge_state: __judge_knowledge_state(messages, text),
+    knowledge_state: __judge_knowledge_state(lifecycle, text),
   }
 }
 
@@ -352,15 +646,14 @@ fn __judge_stable_prefix(judge_cfg, opts, payload, system, schema) -> string {
     + "\n\nStable completion goal:\n"
     + payload.task
     + rubric_block
-    + "\n\nAvailable tool semantics (the judge cannot call these tools):\n"
-    + json_stringify(
-    __judge_tool_schemas(opts),
-  )
     + "\n\nRequired verdict schema:\n"
     + json_stringify(schema)
 }
 
-fn __judge_invoke_closure(verify_completion, payload) {
+fn __judge_invoke_closure(
+  verify_completion,
+  payload: CompletionEvidenceSnapshot,
+) -> CompletionStageVerdict {
   const result = verify_completion(payload)
   if result == nil || result == "" {
     return {vetoed: false, confirm: true, source: "deterministic", trigger: "verify_completion"}
@@ -378,51 +671,73 @@ fn __judge_invoke_closure(verify_completion, payload) {
     }
   }
   if type_of(result) == "dict" {
-    const confirm = result?.confirm ?? false
-    const message = result?.message ?? result?.feedback
+    const confirm = result?.confirm == true
+    const message = to_string(result?.message ?? result?.feedback ?? "")
     return {
       vetoed: !confirm,
       feedback: message,
       confirm: confirm,
       source: "deterministic",
-      reason: result?.reason,
-      converted_from: result?.converted_from,
-      escalation_recommended: result?.escalation_recommended,
-      escalation_target: result?.escalation_target,
-      trigger: result?.trigger ?? "verify_completion",
+      reason: if result?.reason == nil {
+        nil
+      } else {
+        to_string(result.reason)
+      },
+      converted_from: if result?.converted_from == nil {
+        nil
+      } else {
+        to_string(result.converted_from)
+      },
+      escalation_recommended: if result?.escalation_recommended == nil {
+        nil
+      } else {
+        result.escalation_recommended
+      },
+      escalation_target: if result?.escalation_target == nil {
+        nil
+      } else {
+        to_string(result.escalation_target)
+      },
+      trigger: to_string(result?.trigger ?? "verify_completion"),
     }
   }
-  return {vetoed: false, confirm: true, source: "deterministic", trigger: "verify_completion"}
+  return {
+    vetoed: false,
+    confirm: false,
+    source: "deterministic",
+    trigger: "verify_completion",
+    reason: "completion_verifier_invalid_result",
+    terminal_judge_reason: "completion_verifier_invalid_result",
+    terminal_evidence_preserved: true,
+  }
 }
 
-fn __judge_invoke_structured(harness: Harness, judge_cfg, opts, payload) {
-  const system = judge_cfg?.system ?? ""
+fn __judge_invoke_structured(
+  harness: Harness,
+  judge_cfg: JudgeConfig,
+  opts,
+  payload: CompletionEvidenceSnapshot,
+) -> CompletionStageVerdict {
+  const system = judge_cfg.system ?? ""
   const schema = {
     type: "object",
     properties: {
-      verdict: {type: "string", description: "Use `done` or `continue`."},
-      reasoning: {type: "string"},
-      rationale: {
-        type: "string",
-        description: "Alias for reasoning; accepted for stricter contracts.",
-      },
-      diagnosis: {
-        type: "string",
-        description: "Concrete failure diagnosis; accepted as an alias for reasoning.",
-      },
-      next_step: {type: "string"},
+      action: {type: "string", enum: ["accept", "continue"]},
+      reason: {type: "string"},
+      repair: {type: "string"},
       specific_gaps: {
         type: "list",
         items: {type: "string"},
-        description: "Concrete gaps to repair when verdict is `continue`.",
+        description: "Concrete gaps to repair when action is `continue`.",
       },
       accepted_evidence: {
         type: "list",
         items: {type: "string"},
-        description: "Evidence accepted when verdict is `done`.",
+        description: "Evidence accepted when action is `accept`.",
       },
     },
-    required: ["verdict"],
+    required: ["action", "reason", "repair", "specific_gaps", "accepted_evidence"],
+    additionalProperties: false,
   }
   agent_emit_event(
     harness.agent,
@@ -434,94 +749,114 @@ fn __judge_invoke_structured(harness: Harness, judge_cfg, opts, payload) {
   const user = completion_judge_user_prompt(harness.fs, payload)
   const ran = __judge_run_checkpoint(
     harness,
-    judge_cfg,
-    opts,
-    payload,
-    "agent.completion_judge",
-    stable_prefix,
-    user,
-    schema,
+    {
+      judge_cfg: judge_cfg,
+      opts: opts,
+      payload: payload,
+      checkpoint_name: "agent.completion_judge",
+      system: stable_prefix,
+      user: user,
+      schema: schema,
+    },
   )
   const checkpoint = ran.checkpoint
   const duration_ms = ran.duration_ms
   if !checkpoint.ok {
-    if judge_cfg?.fail_open_on_error ?? judge_cfg?.fail_open ?? false {
+    const unavailable = checkpoint?.status == "admission_refused"
+      || checkpoint?.status == "timeout"
+      || checkpoint?.error_category == "timeout"
+      || checkpoint?.error?.status == "timeout"
+    if unavailable {
+      const judge_outcome = if checkpoint?.status == "admission_refused" {
+        "admission_refused"
+      } else {
+        "timeout"
+      }
+      const terminal_reason = if judge_outcome == "admission_refused" {
+        "completion_judge_deadline_admission_refused"
+      } else {
+        "completion_judge_deadline_timeout"
+      }
       return {
         vetoed: false,
-        verdict: "done",
-        reasoning: checkpoint.error,
+        confirm: false,
+        verdict: "unavailable",
+        reasoning: to_string(checkpoint.error),
         next_step: "",
         judge_duration_ms: duration_ms,
         source: "llm",
+        judge_outcome: judge_outcome,
+        reason: terminal_reason,
+        terminal_judge_reason: terminal_reason,
+        terminal_evidence_preserved: true,
+        admission: ran.admission,
+        typed_checkpoint: checkpoint,
+      }
+    }
+    if judge_cfg.fail_open_on_error ?? false {
+      return {
+        vetoed: false,
+        verdict: "done",
+        reasoning: to_string(checkpoint.error),
+        next_step: "",
+        judge_duration_ms: duration_ms,
+        source: "llm",
+        admission: ran.admission,
         typed_checkpoint: checkpoint,
       }
     }
     return {
       vetoed: true,
-      feedback: checkpoint.error,
+      feedback: to_string(checkpoint.error),
       verdict: "continue",
-      reasoning: checkpoint.error,
-      next_step: checkpoint.error,
+      reasoning: to_string(checkpoint.error),
+      next_step: to_string(checkpoint.error),
       judge_duration_ms: duration_ms,
       source: "llm",
+      admission: ran.admission,
       typed_checkpoint: checkpoint,
     }
   }
   const result = checkpoint.data
-  const reasoning_candidates = __judge_string_list(
-    [result?.reasoning, result?.rationale, result?.diagnosis],
-  )
-  const reasoning = if len(reasoning_candidates) > 0 {
-    reasoning_candidates[0]
-  } else {
-    ""
-  }
-  const next_step = to_string(result?.next_step ?? result?.nextStep ?? "")
-  const specific_gaps = __judge_string_list(result?.specific_gaps ?? result?.specificGaps)
-  const accepted_evidence = __judge_string_list(
-    result?.accepted_evidence ?? result?.acceptedEvidence,
-  )
-  // The done-judge prompt only ever asks for `done` or `continue`. A reflexive
-  // `"yes"` from a cheap model usually means "yes, keep going" (continue), and
-  // a bare `"true"` is just as ambiguous — classifying either as DONE
-  // terminates incomplete work. Both are dropped from the allow-list.
-  const done_verdicts = [
-    "done",
-    "pass",
-    "passed",
-    "safe",
-    "yield",
-    "yield_to_user",
-    "complete",
-    "completed",
-  ]
-  const feedback_default = judge_cfg?.feedback_fallback ?? ""
-  const outcome = __judge_classify_verdict(
-    result?.verdict ?? "continue",
-    done_verdicts,
-    [__judge_recovery_feedback(next_step, specific_gaps, reasoning_candidates, feedback_default)],
+  const action = to_string(result.action)
+  const reasoning = to_string(result.reason)
+  const next_step = to_string(result.repair)
+  const specific_gaps = __judge_string_list(result.specific_gaps)
+  const accepted_evidence = __judge_string_list(result.accepted_evidence)
+  const feedback_default = judge_cfg.feedback_fallback ?? ""
+  const feedback = __judge_recovery_feedback(
+    next_step,
+    specific_gaps,
+    [reasoning],
     feedback_default,
   )
-  return outcome
-    + {
-      accepted_evidence: accepted_evidence,
-      reasoning: reasoning,
-      next_step: next_step,
-      judge_duration_ms: duration_ms,
-      source: "llm",
-      specific_gaps: specific_gaps,
-      typed_checkpoint: checkpoint,
-    }
+  return {
+    vetoed: action == "continue",
+    verdict: action,
+    feedback: if action == "continue" {
+      feedback
+    } else {
+      nil
+    },
+    accepted_evidence: accepted_evidence,
+    reasoning: reasoning,
+    next_step: next_step,
+    judge_duration_ms: duration_ms,
+    source: "llm",
+    specific_gaps: specific_gaps,
+    admission: ran.admission,
+    typed_checkpoint: checkpoint,
+  }
 }
 
 /**
  * Resolve the per-session veto cap for the completion judge. Returns nil when
- * the cap is disabled (`max_invocations`/`max_feedback` set to 0), otherwise a
- * positive integer ceiling on judge invocations.
+ * the cap is disabled (`max_invocations` set to 0), otherwise a positive
+ * integer ceiling on judge invocations.
  */
-fn __verify_completion_judge_cap(judge_cfg) {
+fn __verify_completion_judge_cap(judge_cfg) -> int? {
   const configured = if type_of(judge_cfg) == "dict" {
-    judge_cfg?.max_invocations ?? judge_cfg?.max_feedback
+    judge_cfg?.max_invocations
   } else {
     nil
   }
@@ -538,11 +873,11 @@ fn __verify_completion_judge_cap(judge_cfg) {
  * judge may fire up to the cap, then the loop finalizes instead of silently
  * continuing until the iteration budget expires.
  */
-fn __done_judge_cap(judge_cfg) {
+fn __done_judge_cap(judge_cfg) -> int? {
   if type_of(judge_cfg) != "dict" {
     return nil
   }
-  const cap = judge_cfg?.max_invocations ?? judge_cfg?.max_feedback
+  const cap = judge_cfg?.max_invocations
   if cap == nil || cap <= 0 {
     return nil
   }
@@ -560,7 +895,7 @@ fn __done_judge_cap(judge_cfg) {
  * @api_stability: experimental
  * @example: agent_verify_completion_judge_cap(opts?.verify_completion_judge)
  */
-pub fn agent_verify_completion_judge_cap(judge_cfg) {
+pub fn agent_verify_completion_judge_cap(judge_cfg) -> int? {
   return __verify_completion_judge_cap(judge_cfg)
 }
 
@@ -575,14 +910,14 @@ pub fn agent_verify_completion_judge_cap(judge_cfg) {
  * @api_stability: experimental
  * @example: agent_done_judge_cap(opts?.done_judge)
  */
-pub fn agent_done_judge_cap(judge_cfg) {
+pub fn agent_done_judge_cap(judge_cfg) -> int? {
   return __done_judge_cap(judge_cfg)
 }
 
 /**
- * agent_done_judge_config.
+ * agent_judge_config.
  *
- * The one normalized reading of a `done_judge` option value. Returns nil when
+ * Normalize a `done_judge` or `verify_completion_judge` option. Returns nil when
  * no judge can run — absent, `false`, or a value of a type the judge seam
  * cannot invoke — and the configuration dict otherwise. `true` normalizes to an
  * empty dict, meaning "a judge with default settings".
@@ -590,9 +925,9 @@ pub fn agent_done_judge_cap(judge_cfg) {
  * @effects: []
  * @errors: []
  * @api_stability: experimental
- * @example: agent_done_judge_config(opts?.done_judge)
+ * @example: agent_judge_config(opts?.done_judge)
  */
-pub fn agent_done_judge_config(judge_cfg) -> dict? {
+pub fn agent_judge_config(judge_cfg) -> JudgeConfig? {
   if judge_cfg == nil {
     return nil
   }
@@ -624,7 +959,7 @@ pub fn agent_done_judge_config(judge_cfg) -> dict? {
  * @example: agent_has_done_judge(opts?.done_judge)
  */
 pub fn agent_has_done_judge(judge_cfg) -> bool {
-  return agent_done_judge_config(judge_cfg) != nil
+  return agent_judge_config(judge_cfg) != nil
 }
 
 fn __emit_judge_decision(agent: HarnessAgent, session_id, iteration, verdict) {
@@ -636,10 +971,10 @@ fn __emit_judge_decision(agent: HarnessAgent, session_id, iteration, verdict) {
       iteration: iteration,
       verdict: verdict?.verdict
         ?? if verdict.vetoed {
-          "continue"
-        } else {
-          "done"
-        },
+        "continue"
+      } else {
+        "done"
+      },
       reasoning: verdict?.reasoning ?? "",
       next_step: verdict?.next_step ?? "",
       judge_duration_ms: verdict?.judge_duration_ms ?? 0,
@@ -652,6 +987,8 @@ fn __emit_judge_decision(agent: HarnessAgent, session_id, iteration, verdict) {
       escalation_target: verdict?.escalation_target,
       specific_gaps: verdict?.specific_gaps ?? [],
       accepted_evidence: verdict?.accepted_evidence ?? [],
+      judge_outcome: verdict?.judge_outcome,
+      terminal_evidence_preserved: verdict?.terminal_evidence_preserved ?? false,
     },
   )
 }
@@ -673,10 +1010,10 @@ fn __done_contract_judge_system(opts) {
   let lines = [
     "You are a strict done-contract judge for an autonomous agent.",
     "Decide whether the latest completion claim is justified by the task, transcript, tool results, and changed artifacts.",
-    "Return `done` only when the claim covers the visible request and names adequate evidence.",
+    "Return `accept` only when the claim covers the visible request and names adequate evidence.",
     "Return `continue` when evidence is missing, self-authored tests are too weak, or visible requirements are unaddressed.",
-    "On `done`, provide `reasoning` and `accepted_evidence`.",
-    "On `continue`, provide `reasoning` and `specific_gaps`; each gap must be concrete enough to inject as repair feedback.",
+    "On `accept`, provide `reason` and `accepted_evidence`.",
+    "On `continue`, provide `reason`, `repair`, and `specific_gaps`; each gap must be concrete enough to inject as repair feedback.",
   ]
   if extra != "" {
     lines = lines.appending("Additional rubric:\n" + extra)
@@ -702,7 +1039,7 @@ fn __done_contract_judge_system(opts) {
  * @errors: [runtime]
  * @api_stability: experimental
  */
-pub fn agent_done_contract(options = {}) {
+pub fn agent_done_contract(options = {}) -> dict {
   const opts = if type_of(options) == "dict" {
     options
   } else {
@@ -713,23 +1050,19 @@ pub fn agent_done_contract(options = {}) {
   } else {
     {}
   }
-  const max_invocations = opts?.max_invocations ?? opts?.max_feedback ?? judge?.max_invocations
-    ?? judge?.max_feedback
-    ?? 3
+  const max_invocations = opts?.max_invocations ?? judge?.max_invocations ?? 3
   const bundle = {
     done_judge: judge
       + {
-        enabled: true,
-        fail_open: opts?.fail_open ?? judge?.fail_open ?? false,
-        fail_open_on_error: opts?.fail_open_on_error ?? judge?.fail_open_on_error,
-        feedback_fallback: opts?.feedback_fallback
-          ?? judge?.feedback_fallback
-          ?? "The done claim is not yet justified; address the specific gaps before finishing.",
-        max_invocations: max_invocations,
-        model: opts?.model ?? judge?.model,
-        provider: opts?.provider ?? judge?.provider,
-        system: opts?.system ?? judge?.system ?? __done_contract_judge_system(opts),
-      },
+      fail_open_on_error: opts?.fail_open_on_error ?? judge?.fail_open_on_error ?? false,
+      feedback_fallback: opts?.feedback_fallback
+        ?? judge?.feedback_fallback
+        ?? "The done claim is not yet justified; address the specific gaps before finishing.",
+      max_invocations: max_invocations,
+      model: opts?.model ?? judge?.model,
+      provider: opts?.provider ?? judge?.provider,
+      system: opts?.system ?? judge?.system ?? __done_contract_judge_system(opts),
+    },
     loop_until_done: opts?.loop_until_done ?? true,
   }
   return __with_prompt_fragment(
@@ -738,61 +1071,219 @@ pub fn agent_done_contract(options = {}) {
   )
 }
 
-/**
- * agent_verify_or_continue.
- *
- * @effects: []
- * @errors: []
- * @api_stability: experimental
- */
-pub fn agent_verify_or_continue(harness: Harness, session, opts, stop_reason, text, iteration = 0) {
-  const payload = __judge_payload(harness.agent, session, opts, stop_reason, text, iteration)
-  let verdict = {vetoed: false}
+fn __judge_directive(
+  verdict,
+  payload,
+  invoked,
+  completion_judge_cap_reached,
+  done_judge_cap_reached,
+  feedback_composition,
+  feedback_history: dict,
+  defer_feedback: bool,
+) -> CompletionDirective {
+  const terminal_reason = trim(to_string(verdict?.terminal_judge_reason ?? ""))
+  const reason = if terminal_reason != "" {
+    terminal_reason
+  } else if completion_judge_cap_reached {
+    "completion_judge_cap_reached"
+  } else if done_judge_cap_reached {
+    "done_judge_cap_reached"
+  } else {
+    to_string(verdict?.reason ?? verdict?.reasoning ?? "")
+  }
+  const action = if terminal_reason != ""
+    || completion_judge_cap_reached
+    || done_judge_cap_reached {
+    "stop_unverified"
+  } else if verdict.vetoed {
+    "continue"
+  } else {
+    "accept"
+  }
+  const has_feedback = verdict.vetoed
+    && trim(to_string(verdict?.feedback ?? "")) != ""
+  const feedback_delivery = if len(feedback_composition?.messages ?? []) > 0 {
+    "delivered"
+  } else if has_feedback && defer_feedback {
+    "deferred"
+  } else {
+    "none"
+  }
+  const receipt = {
+    schema: "harn.completion_directive_receipt.v1",
+    evidence_id: payload.evidence_id,
+    action: action,
+    trigger: verdict?.trigger ?? payload.stop_reason,
+    source: verdict?.source ?? "policy",
+    outcome: verdict?.judge_outcome ?? verdict?.verdict ?? action,
+    reason: reason,
+    invoked: invoked,
+    feedback_delivery: feedback_delivery,
+    projection: payload.judge_evidence_projection,
+    admission: verdict?.admission,
+    checkpoint: verdict?.typed_checkpoint,
+  }
+  return {
+    action: action,
+    evidence_id: payload.evidence_id,
+    feedback: verdict?.feedback,
+    repair: verdict?.next_step,
+    receipt: receipt,
+    feedback_history: feedback_history,
+  }
+}
+
+fn __completion_judge_applies(stop_reason: string, due: bool) -> bool {
+  if !due {
+    return false
+  }
+  return contains(["sentinel", "natural", "stalled"], stop_reason)
+}
+
+/** Build the one ordered plan for a completion boundary. */
+fn __completion_policy_plan(opts, stop_reason: string) -> list<CompletionPolicyStage> {
+  let stages: list<CompletionPolicyStage> = []
   if opts?.verify_completion != nil {
-    verdict = __judge_invoke_closure(opts.verify_completion, payload)
-    __emit_judge_decision(harness.agent, session.session_id, iteration, verdict)
+    stages = stages + [CompletionPolicyStage.Deterministic(opts.verify_completion)]
   }
-  let completion_judge_invoked = false
-  let completion_judge_cap_reached = false
-  const prior_judge_invocations = opts?._verify_completion_judge_invocations ?? 0
-  if !verdict.vetoed && opts?.verify_completion_judge != nil {
-    const cap = __verify_completion_judge_cap(opts.verify_completion_judge)
-    if cap != nil && prior_judge_invocations >= cap {
-      // Cap reached: stop firing the judge (and injecting its feedback). The
-      // loop surfaces this as stop_reason `completion_judge_cap_reached` plus a
-      // structured `completion_judge` block in the run record. The prior
-      // `judge_decision` events already record each veto for loop counting, so
-      // no extra event type is needed here.
-      completion_judge_cap_reached = true
-    } else {
-      verdict = __judge_invoke_structured(harness, opts.verify_completion_judge, opts, payload)
-      verdict = verdict + {trigger: opts?._verify_completion_judge_trigger}
-      completion_judge_invoked = true
-      __emit_judge_decision(harness.agent, session.session_id, iteration, verdict)
+  const verification_config = agent_judge_config(opts?.verify_completion_judge)
+  if verification_config != nil {
+    stages = stages
+      + [
+      CompletionPolicyStage.ModelJudge(
+        CompletionJudgeSlot.Verification(),
+        verification_config,
+        opts?._verify_completion_judge_trigger,
+        opts?._verify_completion_judge_invocations ?? 0,
+        __verify_completion_judge_cap(verification_config),
+      ),
+    ]
+  }
+  const completion_config = agent_judge_config(opts?.done_judge)
+  if completion_config != nil
+    && __completion_judge_applies(
+    stop_reason,
+    opts?._done_judge_due ?? true,
+  ) {
+    stages = stages
+      + [
+      CompletionPolicyStage.ModelJudge(
+        CompletionJudgeSlot.Completion(),
+        completion_config,
+        opts?._done_judge_trigger,
+        opts?._done_judge_invocations ?? 0,
+        __done_judge_cap(completion_config),
+      ),
+    ]
+  }
+  return stages
+}
+
+fn __completion_policy_initial_evaluation() -> CompletionPolicyEvaluation {
+  return {
+    verdict: {vetoed: false},
+    invoked: {deterministic: false, verify_completion_judge: false, done_judge: false},
+    verification_judge_cap_reached: false,
+    completion_judge_cap_reached: false,
+  }
+}
+
+fn __completion_policy_can_advance(evaluation: CompletionPolicyEvaluation) -> bool {
+  return !evaluation.verdict.vetoed
+    && trim(to_string(evaluation.verdict.terminal_judge_reason ?? ""))
+    == ""
+    && !evaluation.verification_judge_cap_reached
+    && !evaluation.completion_judge_cap_reached
+}
+
+fn __completion_policy_mark_cap(
+  evaluation: CompletionPolicyEvaluation,
+  slot: CompletionJudgeSlot,
+) -> CompletionPolicyEvaluation {
+  match slot {
+    Verification() -> { return evaluation + {verification_judge_cap_reached: true} }
+    Completion() -> { return evaluation + {completion_judge_cap_reached: true} }
+  }
+}
+
+fn __completion_policy_mark_model_invoked(
+  evaluation: CompletionPolicyEvaluation,
+  slot: CompletionJudgeSlot,
+  invoked: bool,
+) -> CompletionPolicyEvaluation {
+  const prior = evaluation.invoked
+  match slot {
+    Verification() -> { return evaluation
+      + {invoked: prior + {verify_completion_judge: invoked}} }
+    Completion() -> { return evaluation + {invoked: prior + {done_judge: invoked}} }
+  }
+}
+
+fn __completion_policy_run_stage(
+  harness: Harness,
+  opts,
+  payload: CompletionEvidenceSnapshot,
+  iteration: int,
+  evaluation: CompletionPolicyEvaluation,
+  stage: CompletionPolicyStage,
+) -> CompletionPolicyEvaluation {
+  match stage {
+    Deterministic(check) -> {
+      const verdict = __judge_invoke_closure(check, payload)
+      __emit_judge_decision(harness.agent, payload.session_id, iteration, verdict)
+      return evaluation
+        + {verdict: verdict, invoked: evaluation.invoked + {deterministic: true}}
+    }
+    ModelJudge(slot, config, trigger, prior_invocations, max_invocations) -> {
+      if max_invocations != nil && prior_invocations >= max_invocations {
+        return __completion_policy_mark_cap(evaluation, slot)
+      }
+      let verdict = __judge_invoke_structured(harness, config, opts, payload)
+      verdict = verdict + {trigger: trigger}
+      __emit_judge_decision(harness.agent, payload.session_id, iteration, verdict)
+      const next = evaluation + {verdict: verdict}
+      return __completion_policy_mark_model_invoked(
+        next,
+        slot,
+        verdict.judge_outcome != "admission_refused",
+      )
     }
   }
-  const done_judge_due = opts?._done_judge_due ?? true
-  const done_judge_applies = agent_has_done_judge(opts?.done_judge)
-    && (stop_reason == "sentinel"
-      || stop_reason
-        == "natural"
-      || stop_reason == "stalled")
-    && done_judge_due
-  let done_judge_cap_reached = false
-  const prior_done_judge_invocations = opts?._done_judge_invocations ?? 0
-  if !verdict.vetoed && !completion_judge_cap_reached && done_judge_applies {
-    const cap = __done_judge_cap(opts.done_judge)
-    if cap != nil && prior_done_judge_invocations >= cap {
-      done_judge_cap_reached = true
-    } else {
-      verdict = __judge_invoke_structured(harness, opts.done_judge, opts, payload)
-      verdict = verdict + {done_judge_invoked: true, trigger: opts?._done_judge_trigger}
-      __emit_judge_decision(harness.agent, session.session_id, iteration, verdict)
+}
+
+fn __completion_policy_evaluate(
+  harness: Harness,
+  opts,
+  payload: CompletionEvidenceSnapshot,
+  iteration: int,
+  stages: list<CompletionPolicyStage>,
+) -> CompletionPolicyEvaluation {
+  let evaluation = __completion_policy_initial_evaluation()
+  for stage in stages {
+    if !__completion_policy_can_advance(evaluation) {
+      break
     }
+    evaluation = __completion_policy_run_stage(harness, opts, payload, iteration, evaluation, stage)
   }
+  return evaluation
+}
+
+/** Evaluate one verification/completion boundary and return one typed directive. */
+pub fn agent_evaluate_completion(
+  harness: Harness,
+  session,
+  opts,
+  stop_reason: string,
+  text: string,
+  iteration: int = 0,
+) -> CompletionDirective {
+  const payload = __judge_payload(harness.agent, session, opts, stop_reason, text, iteration)
+  const stages = __completion_policy_plan(opts, stop_reason)
+  const evaluation = __completion_policy_evaluate(harness, opts, payload, iteration, stages)
+  const verdict = evaluation.verdict
   let feedback_composition = nil
   if verdict.vetoed
-    && verdict?.feedback != nil
+    && verdict.feedback != nil
     && verdict.feedback != ""
     && !(opts?._defer_judge_feedback ?? false) {
     feedback_composition = agent_feedback_emit(
@@ -802,22 +1293,27 @@ pub fn agent_verify_or_continue(harness: Harness, session, opts, stop_reason, te
         {
           kind: "verify_completion",
           content: verdict.feedback,
-          source: verdict?.trigger ?? "completion_judge",
+          source: verdict.trigger ?? "completion_judge",
           reason: "judge_veto",
           action: "continue",
-          next_step: verdict?.next_step ?? "",
+          next_step: verdict.next_step ?? "",
         },
       ],
       {history: opts?._feedback_history ?? {}, knowledge_state: payload.knowledge_state},
     )
   }
-  return verdict
-    + {
-      verify_completion_judge_invoked: completion_judge_invoked,
-      verify_completion_judge_cap_reached: completion_judge_cap_reached,
-      done_judge_cap_reached: done_judge_cap_reached,
-      feedback_history: feedback_composition?.history ?? opts?._feedback_history ?? {},
-    }
+  const directive = __judge_directive(
+    verdict,
+    payload,
+    evaluation.invoked,
+    evaluation.verification_judge_cap_reached,
+    evaluation.completion_judge_cap_reached,
+    feedback_composition,
+    feedback_composition?.history ?? opts?._feedback_history ?? {},
+    opts?._defer_judge_feedback ?? false,
+  )
+  agent_emit_event(harness.agent, session.session_id, "typed_checkpoint", directive.receipt)
+  return directive
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -954,23 +1450,32 @@ fn __completion_gate_validate_options(opts) {
   }
   if opts?.escalation_threshold != nil
     && (type_of(opts.escalation_threshold) != "int"
-      || opts.escalation_threshold
-        < 1) {
+    || opts
+    .escalation_threshold
+    < 1) {
     throw "agent_completion_gate: `escalation_threshold` must be a positive int; got "
-      + to_string(opts.escalation_threshold)
+      + to_string(
+      opts.escalation_threshold,
+    )
   }
   if opts?.escalation_target != nil
     && (type_of(opts.escalation_target) != "string"
-      || trim(opts.escalation_target)
-        == "") {
+    || trim(
+    opts.escalation_target,
+  )
+    == "") {
     throw "agent_completion_gate: `escalation_target` must be a non-empty string; got "
-      + to_string(opts.escalation_target)
+      + to_string(
+      opts.escalation_target,
+    )
   }
   if opts?.judge_seam != nil
     && opts.judge_seam != "verify_completion_judge"
     && opts.judge_seam != "done_judge" {
     throw "agent_completion_gate: `judge_seam` must be \"verify_completion_judge\" or \"done_judge\"; got "
-      + to_string(opts.judge_seam)
+      + to_string(
+      opts.judge_seam,
+    )
   }
   const templates = opts?.feedback_templates
   if templates != nil {
@@ -986,7 +1491,9 @@ fn __completion_gate_validate_options(opts) {
       }
       if type_of(templates[key]) != "string" {
         throw "agent_completion_gate: `feedback_templates." + key + "` must be a string; got "
-          + type_of(templates[key])
+          + type_of(
+          templates[key],
+        )
       }
     }
   }
@@ -1072,7 +1579,7 @@ fn __completion_gate_class_vetoes_used(runtime: HarnessRuntime, session_id, reas
  * @api_stability: experimental
  * @example: agent_completion_gate_veto_counts(session_id).by_class.no_source_write
  */
-pub fn agent_completion_gate_veto_counts(runtime: HarnessRuntime, session_id) {
+pub fn agent_completion_gate_veto_counts(runtime: HarnessRuntime, session_id) -> dict {
   const sid = to_string(session_id ?? "")
   let by_class = {}
   for reason in __COMPLETION_GATE_VETO_CLASSES {
@@ -1222,7 +1729,7 @@ fn __completion_gate_evaluate(runtime: HarnessRuntime, payload, opts, facts_avai
  * @api_stability: experimental
  * @example: agent_completion_gate(harness.runtime, {facts: host_facts, verify_command: host_verify})
  */
-pub fn agent_completion_gate(runtime: HarnessRuntime, options: CompletionGateOptions = {}) {
+pub fn agent_completion_gate(runtime: HarnessRuntime, options: CompletionGateOptions = {}) -> dict {
   const opts = options ?? {}
   __completion_gate_validate_options(opts)
   // `classify_write` only refines the write counts `facts` returns, so it never
@@ -1248,8 +1755,7 @@ pub fn agent_completion_gate(runtime: HarnessRuntime, options: CompletionGateOpt
       {}
     }
     const seam = opts.judge_seam ?? "verify_completion_judge"
-    const cap = judge_cfg?.max_invocations ?? judge_cfg?.max_feedback
-      ?? __VERIFY_COMPLETION_JUDGE_DEFAULT_CAP
+    const cap = judge_cfg?.max_invocations ?? __VERIFY_COMPLETION_JUDGE_DEFAULT_CAP
     out = out + {[seam]: judge_cfg + {max_invocations: cap}}
   }
   return out

@@ -53,6 +53,8 @@ pipeline test(harness: Harness) {
   const judge = goal_judge(g)
   assert(judge.enabled, "judge enabled")
   assert(judge.system.contains("Fix the flaky login test"), "judge system embeds the goal")
+  assert(judge.system.contains("action: \"accept\""), "judge system uses the completion action contract")
+  assert(judge.fail_open_on_error == false, "goal judge fails closed by default")
   assert(judge.max_invocations == 3, "bounded done-judge veto cap")
   // Rendering + pin bridge.
   assert(goal_text(g).contains("## Goal"), "renders the goal block")

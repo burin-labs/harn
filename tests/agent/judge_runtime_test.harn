@@ -5,7 +5,9 @@
 // without reparsing provider text.
 import { agent_capture_events } from "std/agent/events"
 import { __judge_evidence_projection } from "std/agent/judge"
+import { __judge_completion_admission } from "std/agent/judge_internals"
 import { agent_loop } from "std/agent/loop"
+import { __agent_loop_deadline_contract } from "std/agent/loop_foundation"
 import { AgentSpec } from "std/agent/options"
 import { llm_done, llm_text, with_llm_script } from "std/testing"
 
@@ -19,6 +21,67 @@ fn __feedback_contents(captured, kind: string) -> list<string> {
   return contents
 }
 
+fn __completion_receipts(events) {
+  return events.filter(
+    { event ->
+      event.type == "typed_checkpoint"
+        && event?.checkpoint?.schema
+        == "harn.completion_directive_receipt.v1"
+    },
+  )
+    .map({ event -> event.checkpoint })
+    .to_list()
+}
+
+fn __assistant_facts(text: string, tool_calls: list) -> dict {
+  return {role: "assistant", content: text, _harn: {kind: "assistant", tool_calls: tool_calls}}
+}
+
+fn __result_facts(
+  name: string,
+  tool_call_id: string,
+  content: string,
+  outcome: "ok" | "error",
+  data: dict = {},
+) -> dict {
+  // Use the text-channel role deliberately. Lifecycle identity and outcome
+  // come from dispatch-owned facts, not from provider-specific message roles.
+  return {
+    role: "user",
+    content: content,
+    _harn: {
+      kind: "tool_result",
+      tool_call_id: tool_call_id,
+      tool_name: name,
+      outcome: outcome,
+      data: data,
+    },
+  }
+}
+
+pipeline test_completion_judge_admission_has_exact_budget_boundary(harness: Harness, task) {
+  const refused = __judge_completion_admission(1000, 65999, 60000, 5000)
+  const admitted = __judge_completion_admission(1000, 66000, 60000, 5000)
+  assert(!refused.admitted)
+  assert_eq(refused.remaining_ms, 64999)
+  assert(admitted.admitted)
+  assert_eq(admitted.remaining_ms, 65000)
+}
+
+pipeline test_agent_loop_deadline_uses_earliest_duration_in_one_clock_domain(
+  harness: Harness,
+  task,
+) {
+  const configured = __agent_loop_deadline_contract(9000, 70000, nil)
+  const budget = __agent_loop_deadline_contract(9000, 70000, 45000)
+  assert_eq(configured.deadline_at_ms, 79000)
+  assert_eq(configured.source, "deadline_ms")
+  assert_eq(budget.deadline_at_ms, 54000)
+  assert_eq(budget.duration_ms, 45000)
+  assert_eq(budget.source, "iteration_budget.wall_clock_ms")
+  assert_eq(__agent_loop_deadline_contract(9000, nil, nil), nil)
+}
+
 pipeline test_completion_judge_projects_bounded_structural_evidence(harness: Harness, task) {
   const huge_read = "READ_ONLY_TRANSCRIPT_BULK".repeat(1000)
   const huge_edit = "EDIT_HEAD\n" + "implementation body\n".repeat(700)
@@ -28,47 +91,46 @@ pipeline test_completion_judge_projects_bounded_structural_evidence(harness: Har
   const huge_success = "VERIFY_SUCCESS_HEAD\n" + "passing output\n".repeat(900)
     + "VERIFY_SUCCESS_TAIL"
   const messages = [
-    {
-      role: "assistant",
-      content: "Inspect first.",
-      tool_calls: [{id: "read-1", function: {name: "look", arguments: {file: "large.txt"}}}],
-    },
-    {role: "tool", name: "look", tool_call_id: "read-1", content: huge_read},
-    {
-      role: "assistant",
-      content: "Write the focused test.",
-      tool_calls: [{id: "edit-1", function: {name: "edit", arguments: {content: huge_edit}}}],
-    },
-    {role: "tool", name: "edit", tool_call_id: "edit-1", content: "write applied"},
-    {
-      role: "assistant",
-      content: "Verify.",
-      tool_calls: [{id: "verify-1", function: {name: "verify", arguments: {}}}],
-    },
-    {role: "tool", name: "verify", tool_call_id: "verify-1", content: huge_failure},
-    {
-      role: "assistant",
-      content: "Verify the repair.",
-      tool_calls: [{id: "verify-2", function: {name: "verify", arguments: {}}}],
-    },
-    {role: "tool", name: "verify", tool_call_id: "verify-2", content: huge_success},
+    __assistant_facts(
+      "Inspect first.",
+      [{id: "read-1", function: {name: "look", arguments: {file: "large.txt"}}}],
+    ),
+    __result_facts("look", "read-1", huge_read, "ok"),
+    __assistant_facts(
+      "Write the focused test.",
+      [{id: "edit-1", function: {name: "edit", arguments: {content: huge_edit}}}],
+    ),
+    __result_facts("edit", "edit-1", "write applied", "ok", {mutation_status: "applied"}),
+    __assistant_facts("Verify.", [{id: "verify-1", function: {name: "verify", arguments: {}}}]),
+    __result_facts("verify", "verify-1", huge_failure, "error"),
+    __assistant_facts(
+      "Verify the repair.",
+      [{id: "verify-2", function: {name: "verify", arguments: {}}}],
+    ),
+    __result_facts("verify", "verify-2", huge_success, "ok", {passed: 11, failed: 0}),
   ]
   const opts = {
     tools: [
       {name: "look", annotations: {kind: "read", side_effect_level: "read_only"}},
       {name: "edit", annotations: {kind: "edit", side_effect_level: "workspace_write"}},
-      {name: "verify", annotations: {kind: "verification", side_effect_level: "process"}},
+      {
+        name: "verify",
+        annotations: {
+          kind: "execute",
+          side_effect_level: "process_exec",
+          completion_evidence_role: "verification",
+        },
+      },
     ],
   }
   const projected = __judge_evidence_projection(messages, opts)
-  assert_eq(projected.packet.schema, "harn.completion_judge_evidence.v1")
+  assert_eq(projected.packet.schema, "harn.completion_judge_evidence.v2")
+  assert_eq(projected.packet.raw_transcript_digest, "sha256:" + sha256(json_stringify(messages)))
   assert_eq(projected.packet.raw_message_count, 8)
   assert_eq(projected.packet.omitted_read_only_call_count, 1)
   assert_eq(projected.packet.relevant_action_count, 3)
-  assert_eq(
-    projected.packet.actions.map({ action -> action.name }).to_list(),
-    ["edit", "verify", "verify"],
-  )
+  assert_eq(len(projected.packet.actions), 3)
+  assert(contains(projected.packet.actions.map({ action -> action.name }).to_list(), "edit"))
   assert(!contains(projected.serialized, "READ_ONLY_TRANSCRIPT_BULK"))
   assert(contains(projected.serialized, "EDIT_HEAD"))
   assert(contains(projected.serialized, "assert not hasattr"))
@@ -82,20 +144,86 @@ pipeline test_completion_judge_projects_bounded_structural_evidence(harness: Har
   )
 }
 
+pipeline test_completion_evidence_is_identical_across_text_and_native_channels(
+  harness: Harness,
+  task,
+) {
+  const calls = [
+    {id: "edit-1", name: "edit", arguments: {path: "src/lib.rs"}},
+    {id: "verify-1", name: "verify", arguments: {command: "make test"}},
+  ]
+  const text_messages = [
+    __assistant_facts("<tool_call>...</tool_call>", calls),
+    __result_facts("edit", "edit-1", "0 errors, 0 failed", "ok", {mutation_status: "applied"}),
+    __result_facts("verify", "verify-1", "command completed", "error", {exit_code: 1}),
+  ]
+  const native_messages = [
+    text_messages[0] + {tool_calls: calls},
+    text_messages[1] + {role: "tool", name: "edit", tool_call_id: "edit-1"},
+    text_messages[2] + {role: "tool", name: "verify", tool_call_id: "verify-1"},
+  ]
+  const opts = {
+    tools: [
+      {name: "edit", annotations: {kind: "edit", side_effect_level: "workspace_write"}},
+      {
+        name: "verify",
+        annotations: {
+          kind: "execute",
+          side_effect_level: "process_exec",
+          completion_evidence_role: "verification",
+        },
+      },
+    ],
+  }
+  const text_projection = __judge_evidence_projection(text_messages, opts)
+  const native_projection = __judge_evidence_projection(native_messages, opts)
+  assert_eq(text_projection.packet.actions, native_projection.packet.actions)
+  assert_eq(text_projection.packet.lifecycle_issues, native_projection.packet.lifecycle_issues)
+  assert(!text_projection.packet.actions[0].has_error_result)
+  assert(text_projection.packet.actions[1].has_error_result)
+}
+
 pipeline test_completion_judge_keeps_one_observation_for_read_only_answer(harness: Harness, task) {
   const projected = __judge_evidence_projection(
     [
-      {
-        role: "assistant",
-        tool_calls: [{id: "read-1", function: {name: "look", arguments: {file: "fact.txt"}}}],
-      },
-      {role: "tool", name: "look", tool_call_id: "read-1", content: "decisive observed fact"},
+      __assistant_facts(
+        "",
+        [{id: "read-1", function: {name: "look", arguments: {file: "fact.txt"}}}],
+      ),
+      __result_facts("look", "read-1", "decisive observed fact", "ok"),
     ],
     {tools: [{name: "look", annotations: {kind: "read", side_effect_level: "read_only"}}]},
   )
   assert_eq(projected.stats.included_action_count, 0)
   assert_eq(projected.stats.included_fallback_observation_count, 1)
   assert(contains(projected.serialized, "decisive observed fact"))
+}
+
+pipeline test_completion_judge_keeps_declared_execute_observation_without_guessing(
+  harness: Harness,
+  task,
+) {
+  const projected = __judge_evidence_projection(
+    [
+      __assistant_facts("", [{id: "inspect-1", name: "inspect", arguments: {handle: "h1"}}]),
+      __result_facts("inspect", "inspect-1", "artifact evidence", "ok"),
+    ],
+    {
+      tools: [
+        {
+          name: "inspect",
+          annotations: {
+            kind: "execute",
+            side_effect_level: "process_exec",
+            completion_evidence_role: "observation",
+          },
+        },
+      ],
+    },
+  )
+  assert_eq(projected.stats.included_action_count, 0)
+  assert_eq(projected.stats.included_fallback_observation_count, 1)
+  assert(contains(projected.serialized, "artifact evidence"))
 }
 
 pipeline test_completion_judge_prompt_uses_projection_not_callable_schema(harness: Harness, task) {
@@ -129,7 +257,10 @@ pipeline test_completion_judge_prompt_uses_projection_not_callable_schema(harnes
         tool_calls: [{id: "edit-1", name: "edit", arguments: {content: "WRITE_ARG_MARKER"}}],
       },
       llm_done(),
-      {text: "{\"verdict\":\"done\",\"reasoning\":\"write and verification are sufficient\"}"},
+      {
+        text:
+          "{\"action\":\"accept\",\"reason\":\"write and verification are sufficient\",\"repair\":\"\",\"specific_gaps\":[],\"accepted_evidence\":[\"write and verification\"]}",
+      },
     ],
     { ->
       const session = "judge-projection-prompt-" + harness.random.uuid()
@@ -154,8 +285,9 @@ pipeline test_completion_judge_prompt_uses_projection_not_callable_schema(harnes
       const judge = calls[3]
       assert(!contains(judge.system, "UNUSED_READ_SCHEMA_BULK"))
       assert(!contains(judge.system, "UNUSED_EDIT_SCHEMA_BULK"))
-      assert(contains(judge.system, "workspace_write"))
+      assert(!contains(judge.system, "workspace_write"))
       const user = judge.messages[0].content
+      assert(contains(user, "workspace_write"))
       assert(contains(user, "WRITE_ARG_MARKER"))
       assert(contains(user, "WRITE_RESULT_MARKER"))
       assert(!contains(user, "READ_ONLY_RESULT_BULK"))
@@ -178,10 +310,228 @@ pipeline test_completion_judge_prompt_uses_projection_not_callable_schema(harnes
   )
 }
 
+pipeline test_completion_judge_keeps_mutation_and_lifecycle_anomaly_after_many_verifiers(
+  harness: Harness,
+  task,
+) {
+  let messages = [
+    __assistant_facts(
+      "",
+      [{id: "edit-1", name: "edit", arguments: {content: "NEGATIVE_ASSERTION"}}],
+    ),
+    __result_facts("edit", "edit-1", "write applied", "ok"),
+  ]
+  let index = 0
+  while index < 8 {
+    const id = "verify-" + to_string(index)
+    messages = messages
+      + [
+      __assistant_facts("", [{id: id, name: "verify", arguments: {}}]),
+      __result_facts("verify", id, "verification passed", "ok"),
+    ]
+    index = index + 1
+  }
+  messages = messages
+    + [__assistant_facts("", [{id: "pending", name: "run", arguments: {}}])]
+  let registry = [
+    {name: "edit", annotations: {kind: "edit", side_effect_level: "workspace_write"}},
+    {
+      name: "verify",
+      annotations: {
+        kind: "execute",
+        side_effect_level: "process_exec",
+        completion_evidence_role: "verification",
+      },
+    },
+    {name: "run", annotations: {kind: "execute", side_effect_level: "process_exec"}},
+  ]
+  let tool_index = 0
+  while tool_index < 500 {
+    registry = registry
+      + [
+      {
+        name: "unused-" + to_string(tool_index) + "-" + "x".repeat(300),
+        description: "UNBOUNDED_REGISTRY_BULK".repeat(100),
+      },
+    ]
+    tool_index = tool_index + 1
+  }
+  const projected = __judge_evidence_projection(messages, {tools: registry})
+  assert(contains(projected.serialized, "NEGATIVE_ASSERTION"))
+  assert(contains(projected.serialized, "pending"))
+  assert(contains(projected.serialized, "tool_call_result_missing"))
+  assert(!contains(projected.serialized, "UNBOUNDED_REGISTRY_BULK"))
+  assert(
+    projected.stats.serialized_chars < 18000,
+    "semantic slots bound registry and history growth",
+  )
+}
+
+pipeline test_completion_judge_preserves_ambiguous_result_evidence(harness: Harness, task) {
+  const projected = __judge_evidence_projection(
+    [
+      __assistant_facts("", [{id: "edit-1", name: "edit", arguments: {content: "MUTATION_BODY"}}]),
+      __result_facts("edit", "edit-1", "FIRST_RECEIPT", "ok"),
+      __result_facts("edit", "edit-1", "SECOND_RECEIPT", "ok"),
+    ],
+    {tools: [{name: "edit", annotations: {kind: "edit", side_effect_level: "workspace_write"}}]},
+  )
+  assert_eq(projected.packet.actions[0].lifecycle_status, "ambiguous")
+  assert(contains(projected.serialized, "MUTATION_BODY"))
+  assert(contains(projected.serialized, "FIRST_RECEIPT"))
+  assert(contains(projected.serialized, "SECOND_RECEIPT"))
+  assert(contains(projected.serialized, "duplicate_tool_result"))
+}
+
+pipeline test_completion_judge_transports_veto_and_repair_from_compact_packet(
+  harness: Harness,
+  task,
+) {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "edit",
+    "Edit a file.",
+    {
+      handler: { _args -> "write applied" },
+      parameters: {content: {type: "string", required: true}},
+      annotations: {kind: "edit", side_effect_level: "workspace_write"},
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [
+      {
+        text: "",
+        tool_calls: [
+          {
+            id: "edit-1",
+            name: "edit",
+            arguments: {content: "assert not hasattr(service, 'delete_experiment')"},
+          },
+        ],
+      },
+      llm_done(),
+      {
+        text: json_stringify(
+          {
+            action: "continue",
+            reason: "The assertion only proves absence and never exercises deletion behavior.",
+            repair: "Replace the hollow negative with a behavior-sensitive test.",
+            specific_gaps: ["Deletion behavior is not exercised."],
+            accepted_evidence: [],
+          },
+        ),
+      },
+      llm_done(),
+    ],
+    { ->
+      const session = "judge-hollow-negative-" + harness.random.uuid()
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(
+          harness,
+          "Implement experiment deletion with a behavior-sensitive regression.",
+          nil,
+          {
+            provider: "mock",
+            session_id: session,
+            tools: tools,
+            tool_format: "native",
+            loop_until_done: true,
+            done_sentinel: "##DONE##",
+            max_iterations: 4,
+            verify_completion_judge: {provider: "mock", max_invocations: 1},
+          },
+        ) },
+      )
+      assert_eq(captured.result.status, "completion_unverified")
+      const judge_call = harness.llm.mock_calls()[2]
+      assert(contains(judge_call.messages[0].content, "assert not hasattr"))
+      assert(
+        contains(join(__feedback_contents(captured, "verify_completion"), "\n"), "hollow negative"),
+        "the compact packet drives a real completion veto and repair receipt",
+      )
+      const receipts = __completion_receipts(captured.events)
+      assert_eq(receipts[0].action, "continue")
+      assert(contains(receipts[0].evidence_id, "sha256:"))
+      assert_eq(receipts[len(receipts) - 1].action, "stop_unverified")
+      assert_eq(receipts[len(receipts) - 1].reason, "completion_judge_cap_reached")
+    },
+  )
+}
+
+pipeline test_completion_judge_refuses_request_that_cannot_fit_terminal_deadline(
+  harness: Harness,
+  task,
+) {
+  with_llm_script(
+    harness.llm,
+    [llm_done()],
+    { ->
+      const session = "judge-deadline-admission-" + harness.random.uuid()
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(
+          harness,
+          "Finish with a typed terminal receipt.",
+          nil,
+          {
+            provider: "mock",
+            session_id: session,
+            loop_until_done: true,
+            done_sentinel: "##DONE##",
+            max_iterations: 2,
+            deadline_ms: 1,
+            verify_completion_judge: {
+              provider: "mock",
+              max_invocations: 1,
+              operation_timeout_ms: 100,
+              deadline_reserve_ms: 0,
+            },
+            done_judge: {provider: "mock", max_invocations: 1},
+          },
+        ) },
+      )
+      assert_eq(len(harness.llm.mock_calls()), 1, "only the primary model turn may dispatch")
+      assert_eq(captured.result.status, "completion_unverified")
+      assert_eq(captured.result.stop_reason, "completion_judge_deadline_admission_refused")
+      const admissions = captured.events.filter(
+        { event ->
+          event.type == "typed_checkpoint"
+            && event?.checkpoint?.schema
+            == "harn.completion_judge_admission.v1"
+        },
+      )
+        .to_list()
+      assert_eq(len(admissions), 1, "one refused judge admission receipt")
+      assert(!admissions[0].checkpoint.admitted)
+      assert_eq(admissions[0].checkpoint.outcome, "deadline_budget_insufficient")
+      const decisions = captured.events.filter(
+        { event ->
+          event.type == "judge_decision"
+            && event?.verdict == "unavailable"
+            && event?.reason
+            == "completion_judge_deadline_admission_refused"
+        },
+      )
+        .to_list()
+      assert_eq(len(decisions), 1, "one unavailable judge decision")
+      const receipts = __completion_receipts(captured.events)
+      assert_eq(len(receipts), 1, "one terminal completion directive")
+      assert_eq(receipts[0].action, "stop_unverified")
+      assert_eq(receipts[0].reason, "completion_judge_deadline_admission_refused")
+      assert(!receipts[0].invoked.verify_completion_judge)
+    },
+  )
+}
+
 pipeline test_fenced_completion_judge_uses_typed_checkpoint(harness: Harness, task) {
   const judge_response = {
     text:
-      "```json\n{\"verdict\":\"continue\",\"reasoning\":\"The verifier has not run.\",\"next_step\":\"Run `harn test tests/agent/judge_runtime_test.harn` now.\",\"specific_gaps\":[\"Run the narrow verifier.\"]}\n```",
+      "```json\n{\"action\":\"continue\",\"reason\":\"The verifier has not run.\",\"repair\":\"Run `harn test tests/agent/judge_runtime_test.harn` now.\",\"specific_gaps\":[\"Run the narrow verifier.\"],\"accepted_evidence\":[]}\n```",
   }
   with_llm_script(
     harness.llm,
@@ -208,8 +558,76 @@ pipeline test_fenced_completion_judge_uses_typed_checkpoint(harness: Harness, ta
           "Run `harn test tests/agent/judge_runtime_test.harn` now.\n\nAddress these specific gaps before finishing:\n- Run the narrow verifier.\n\nThe verifier has not run.",
         ],
       )
-      assert_eq(captured.result.status, "verify_capped")
+      assert_eq(captured.result.status, "completion_unverified")
       assert_eq(captured.result.stop_reason, "completion_judge_cap_reached")
+    },
+  )
+}
+
+pipeline test_invalid_deterministic_completion_result_stops_unverified(harness: Harness, task) {
+  with_llm_script(
+    harness.llm,
+    [llm_done()],
+    { ->
+      const session = "judge-invalid-deterministic-" + harness.random.uuid()
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(
+          harness,
+          "Finish only after the deterministic completion check decides.",
+          nil,
+          {
+            provider: "mock",
+            session_id: session,
+            loop_until_done: true,
+            done_sentinel: "##DONE##",
+            max_iterations: 1,
+            verify_completion: { _payload -> 42 },
+          },
+        ) },
+      )
+      assert_eq(captured.result.status, "completion_unverified")
+      assert_eq(captured.result.stop_reason, "completion_verifier_invalid_result")
+      const receipts = __completion_receipts(captured.events)
+      assert_eq(len(receipts), 1)
+      assert_eq(receipts[0].action, "stop_unverified")
+      assert(receipts[0].invoked.deterministic)
+    },
+  )
+}
+
+pipeline test_deterministic_veto_short_circuits_model_judges(harness: Harness, task) {
+  with_llm_script(
+    harness.llm,
+    [llm_done()],
+    { ->
+      const session = "judge-short-circuit-" + harness.random.uuid()
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(
+          harness,
+          "Do not spend a model judge call after a deterministic veto.",
+          nil,
+          {
+            provider: "mock",
+            session_id: session,
+            loop_until_done: true,
+            done_sentinel: "##DONE##",
+            max_iterations: 1,
+            verify_completion: { _payload -> "deterministic repair" },
+            verify_completion_judge: {provider: "mock", max_invocations: 1},
+            done_judge: {provider: "mock", max_invocations: 1},
+          },
+        ) },
+      )
+      assert_eq(len(harness.llm.mock_calls()), 1)
+      const receipts = __completion_receipts(captured.events)
+      assert_eq(len(receipts), 1)
+      assert(receipts[0].invoked.deterministic)
+      assert(!receipts[0].invoked.verify_completion_judge)
+      assert(!receipts[0].invoked.done_judge)
     },
   )
 }

@@ -1,4 +1,4 @@
-import { agent_done_judge_config, agent_has_done_judge } from "std/agent/judge"
+import { agent_has_done_judge, agent_judge_config } from "std/agent/judge"
 import "std/agent/loop_result_status"
 import { agent_render_tool_call_exemplar, agent_tool_call_paradigm } from "std/agent/preflight"
 import { agent_parse_tool_calls } from "std/agent/primitives"
@@ -767,7 +767,7 @@ fn __repair_claimed_result(claimed_tool: string?) -> dict {
 }
 
 fn __done_judge_config(opts) {
-  return agent_done_judge_config(opts?.done_judge)
+  return agent_judge_config(opts?.done_judge)
 }
 
 fn __done_judge_cadence(opts) {

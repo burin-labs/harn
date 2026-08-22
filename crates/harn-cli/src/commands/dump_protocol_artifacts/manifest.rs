@@ -9,6 +9,9 @@ use harn_vm::llm::receipts::{
     tool_call_receipt_schema, TOOL_CALL_RECEIPT_EXECUTORS, TOOL_CALL_RECEIPT_SCHEMA_ARTIFACT,
     TOOL_CALL_RECEIPT_SCHEMA_VERSION, TOOL_CALL_RECEIPT_STATUSES,
 };
+use harn_vm::tool_annotations::{
+    CompletionEvidenceRole, SideEffectLevel, ToolAnnotations, ToolKind,
+};
 use serde_json::json;
 use std::path::Path;
 
@@ -461,6 +464,12 @@ pub(super) fn generate_round_trip_fixture_for_version(
             "properties": {"x": {"type": "string"}}
         }
     });
+    let harn_tool_annotations = ToolAnnotations {
+        kind: ToolKind::Execute,
+        side_effect_level: SideEffectLevel::ProcessExec,
+        completion_evidence_role: Some(CompletionEvidenceRole::Verification),
+        ..ToolAnnotations::default()
+    };
     let mcp_discover_result = json!({
         "resultType": "complete",
         "supportedVersions": MCP_PROTOCOL_VERSIONS,
@@ -521,6 +530,7 @@ pub(super) fn generate_round_trip_fixture_for_version(
         },
         "a2aTask": a2a_task,
         "mcpTool": mcp_tool,
+        "harnToolAnnotations": harn_tool_annotations,
         "mcpDiscoverResult": mcp_discover_result,
         "mcpInputRequiredResult": mcp_input_required_result,
         "mcpUnsupportedProtocolVersionError": mcp_unsupported_version_error,

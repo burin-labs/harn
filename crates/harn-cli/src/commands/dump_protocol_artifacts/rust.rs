@@ -212,6 +212,33 @@ pub(super) fn generate_rust_for_version(
         "Closed side-effect levels owned by Harn's tool annotation registry.",
         &side_effect_level_values(),
     ));
+    out.push_str(&rust_string_enum(
+        "HarnCompletionEvidenceRole",
+        "Closed completion-evidence roles owned by Harn's tool annotation registry.",
+        &completion_evidence_role_values(),
+    ));
+    out.push_str(
+        "#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]\n\
+         pub struct HarnToolArgSchema {\n\
+         \x20   pub path_params: Vec<String>,\n\
+         \x20   pub dependency_key_params: Vec<String>,\n\
+         \x20   pub dependency_range_params: Vec<std::collections::BTreeMap<String, String>>,\n\
+         \x20   pub arg_aliases: std::collections::BTreeMap<String, String>,\n\
+         \x20   pub required: Vec<String>,\n\
+         }\n\n\
+         #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]\n\
+         pub struct HarnToolAnnotations {\n\
+         \x20   pub kind: HarnACPToolKind,\n\
+         \x20   pub side_effect_level: HarnSideEffectLevel,\n\
+         \x20   #[serde(skip_serializing_if = \"Option::is_none\")]\n\
+         \x20   pub completion_evidence_role: Option<HarnCompletionEvidenceRole>,\n\
+         \x20   pub arg_schema: HarnToolArgSchema,\n\
+         \x20   pub capabilities: std::collections::BTreeMap<String, Vec<String>>,\n\
+         \x20   pub emits_artifacts: bool,\n\
+         \x20   pub result_readers: Vec<String>,\n\
+         \x20   pub inline_result: bool,\n\
+         }\n\n",
+    );
     out.push_str(
         "#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]\n\
          pub struct HarnToolPermissionScope {\n\

@@ -1115,7 +1115,7 @@ fn assistant_message_from_llm_result(llm_result: &VmValue) -> VmValue {
         &native_calls_json,
         thinking.as_deref(),
     ) {
-        return message;
+        return crate::llm::pairing_receipts::attach_assistant_facts(message, llm_result);
     }
     if native_calls_json.is_empty() {
         // gpt-oss / harmony channel-leak backstop. A native-tools model is
@@ -1168,7 +1168,10 @@ fn assistant_message_from_llm_result(llm_result: &VmValue) -> VmValue {
                     &provider,
                     &model,
                 );
-                return json_to_vm(&msg);
+                return crate::llm::pairing_receipts::attach_assistant_facts(
+                    json_to_vm(&msg),
+                    llm_result,
+                );
             }
         }
         let mut msg = crate::value::DictMap::new();
@@ -1181,11 +1184,17 @@ fn assistant_message_from_llm_result(llm_result: &VmValue) -> VmValue {
                 &provider,
                 &model,
             );
-            return json_to_vm(&message);
+            return crate::llm::pairing_receipts::attach_assistant_facts(
+                json_to_vm(&message),
+                llm_result,
+            );
         }
         msg.put_str("role", "assistant");
         msg.put_str("content", text);
-        return VmValue::dict(msg);
+        return crate::llm::pairing_receipts::attach_assistant_facts(
+            VmValue::dict(msg),
+            llm_result,
+        );
     }
 
     let msg = build_assistant_response_message(
@@ -1196,7 +1205,7 @@ fn assistant_message_from_llm_result(llm_result: &VmValue) -> VmValue {
         &provider,
         &model,
     );
-    json_to_vm(&msg)
+    crate::llm::pairing_receipts::attach_assistant_facts(json_to_vm(&msg), llm_result)
 }
 
 /// Append the assistant turn from an llm_call result to the session log.
@@ -1653,6 +1662,7 @@ fn host_agent_session_record_tool_results_builtin(
                 &name,
                 &tool_call_id,
                 &observation,
+                ok,
                 &screenshots,
                 transcript_data.as_ref(),
             ),

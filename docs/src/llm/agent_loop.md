@@ -27,7 +27,7 @@ const result = agent_loop(harness,
   opts,
 )
 harness.stdio.log(result.text)           // the accumulated output
-harness.stdio.log(result.status)         // "done", "stuck", "budget_exhausted", "idle", "watchdog", or "failed"
+harness.stdio.log(result.status)         // "done", "completion_unverified", "stuck", or another terminal state
 harness.stdio.log(result.llm.iterations) // number of LLM round-trips
 ```
 
@@ -69,9 +69,9 @@ top-level keys before `v0.8`).
 
 | Field | Type | Description |
 |---|---|---|
-| `status` | string | Terminal state: `"done"` (natural completion), `"error"` (a harness-owned failure such as `terminal_class: "parse_dropped"`), `"input_guardrail"` (a configured input guardrail tripped before the first main model turn), `"suspended"` (worker yielded at a cooperative suspend checkpoint), `"stuck"` (exceeded `max_nudges` consecutive text-only turns), `"budget_exhausted"` (hit a limit without a more specific terminal cause), `"verify_capped"` (a structured completion-judge veto cap was reached; see `stop_reason: "completion_judge_cap_reached"` or `"done_judge_cap_reached"`), `"provider_error"` (provider/tool-protocol request failed and was captured in `error`), `"idle"` (daemon yielded with no remaining wake source), `"watchdog"` (daemon idle-wait tripped the `idle_watchdog_attempts` limit), or `"failed"` (`require_successful_tools` not satisfied). |
+| `status` | string | Terminal state: `"done"` (completion accepted), `"completion_unverified"` (the judge could not accept completion before a deadline or policy limit), `"error"` (a harness-owned failure such as `terminal_class: "parse_dropped"`), `"input_guardrail"` (an input guardrail tripped), `"suspended"`, `"stuck"`, `"budget_exhausted"`, `"provider_error"`, `"idle"`, `"watchdog"`, or `"failed"` (`require_successful_tools` was not satisfied). Read `stop_reason` and `terminal` for the precise cause. |
 | `error` | dict or nil | Structured terminal failure: `{terminal_class?, category, reason, kind?, provider?, model?, message, phase?, tool_format?, after_tool_result?}`. `terminal_class: "parse_dropped"` means the last tool-shaped model turn was lost at the parser boundary and exhausted its repair budget; it is harness-owned, not a model failure. |
-| `terminal` | `AgentTerminalOutcome` | Producer-owned `{kind, reason, owner}` classification. `kind` distinguishes `natural`, user cancellation, policy budget/no-progress/guardrail/custom stops, provider/runtime errors, suspension, and unknown future states. ACP receives the same value as a typed checkpoint and prompt metadata; A2A receives it in `metadata.harn.terminal`; replay run records preserve it in `metadata.terminal`. Only `kind: "natural"` proves completion. |
+| `terminal` | `AgentTerminalOutcome` | Producer-owned `{kind, reason, owner}` classification. `kind` distinguishes `natural`, `completion_unverified`, user cancellation, policy stops, provider/runtime errors, suspension, and unknown future states. ACP receives the same value as a typed checkpoint and prompt metadata; A2A receives it in `metadata.harn.terminal`; replay run records preserve it in `metadata.terminal`. Only `kind: "natural"` proves completion. A2A maps `completion_unverified` to `failed`, not `cancelled`. |
 | `text` | string | Accumulated text output from all iterations |
 | `visible_text` | string | Human-visible accumulated output |
 | `output` | any | Present when an `output` contract is set and the loop completed (`status` `"done"`). The terminal answer parsed as JSON and, for schema contracts, validated against the schema. |
@@ -100,12 +100,10 @@ next_step, trigger, escalation_recommended?, escalation_target?}`.
 `verify_completion` closures, `verify_completion_judge`,
 and `done_judge` all use this event, so harnesses can measure completion-gate
 class fire rates from structured fields instead of parsing feedback prose.
-Structured completion judges keep the task, rubric, tool schemas, and verdict
-schema in a stable system prefix while per-turn transcript evidence stays in the
-user message. Each invocation emits a `harn.completion_judge_cache.v1` typed
-checkpoint with the stable-prefix hash and cache read/write token counts.
-Repeated judge feedback with the same `next_step` is not reinjected until the
-latest assistant or tool evidence changes.
+The completion judge receives the task, rubric, and a small snapshot of the
+latest meaningful actions. It does not receive the whole transcript or tools it
+cannot call. Repeated feedback is withheld until the agent produces new
+assistant or tool evidence.
 
 Parser, stall, and completion-judge feedback pass through the same deterministic
 composer. Its `harn.agent_feedback_composition.v1` typed checkpoint records the
@@ -356,9 +354,10 @@ Same as `llm_call`, plus additional options:
 | `message_decorator` | closure | nil | Per-message hook called as `message_decorator(message, context)` before each LLM call. The context includes `session_id`, `iteration`, `index`, and `timestamp` |
 | `prompts` / `prompt_overrides` | dict | nil | Override validated logical agent prompt ids such as `agent.loop_contract`, `agent.tool_contract_text`, and `agent.completion_judge_system` with a prompt asset path, `{text}`, `{path}`, or render closure. Unknown ids are rejected. For typo-resistant authoring, pass the typed override shape through `agent_prompt_overrides(...)` from `std/agent/prompts` |
 | `post_turn_callback` | closure | nil | Hook called after each turn. Receives turn metadata and may inject a message, request an immediate stage stop, claim one exact next tool with `next_tool_claim: {tool_name}`, or merge next-turn options such as `llm_options: {tool_choice: "none"}`. Rich verdicts may include `feedback_kind: string` to give injected feedback a stable semantic identity |
+| `deadline_ms` | int | nil | Monotonic duration from `agent_loop` entry. The earliest of this value and `iteration_budget.wall_clock_ms` is the enclosing terminal deadline used for completion-judge admission. It is a duration, never a cross-process absolute timestamp. |
 | `verify_completion` | closure | nil | Hook called when the loop is about to stop naturally. Return `nil`/`true` to accept the stop or feedback text to veto and continue |
-| `verify_completion_judge` | bool/dict | nil | Built-in structured judge for any natural stop. `true` uses defaults; a dict may set `provider`, `model`, `system`, `feedback_fallback`, and `max_invocations` (alias `max_feedback`, default `5`) to cap repeated vetoes. Once the cap is hit the judge stops firing and the loop ends with status `verify_capped` and stop_reason `completion_judge_cap_reached`; set `max_invocations: 0` to disable the cap |
-| `done_judge` | bool/dict | nil | Completion structured judge. It runs when the model naturally completes a native-tool loop or emits the done sentinel, and may veto by returning `verdict: "continue"` plus `next_step` or `reasoning`. Dict configs may include `max_invocations` (alias `max_feedback`) to terminally cap repeated vetoes, plus `cadence: {every?, when?, max_invocations?, min_iterations_before_first?}` to control when the judge is due |
+| `verify_completion_judge` | bool/dict | nil | Structured judge for a proposed stop. `true` uses defaults. A dict may set `provider`, `model`, `system`, `feedback_fallback`, `operation_timeout_ms` (default `60000`), `deadline_reserve_ms` (default `5000`), and `max_invocations` (default `5`; `0` disables the cap). The loop ends as `completion_unverified` when the judge cannot fit before the loop deadline, times out, or reaches its cap. |
+| `done_judge` | bool/dict | nil | Structured judge for natural completion or a done sentinel. The model must return `accept` or `continue`; a continuation carries `reason`, `repair`, and `specific_gaps`. Harn produces `stop_unverified` when a deadline or policy limit prevents a verdict. It shares the timeout fields above and supports `max_invocations` plus `cadence: {every?, when?, max_invocations?, min_iterations_before_first?}`. |
 | `step_judge` | dict | nil | Per-turn structured judge that runs after an assistant turn and before tool dispatch. Dict configs may include `provider`, `model`, `on_veto` (`"replace"` or `"retain"`), `max_attempts`, `skip_when_empty`, `skip_when_stalled`, and `skip_when_iterations_remaining` (default `1`, skips when no regeneration turn remains). Skips emit `step_judge_decision` with `skipped: true` |
 | `input_guardrail` | closure | nil | Pre-loop guardrail closure. It runs before the first main model turn with `{session_id, task, user_message, messages, recent_context, provider, model}` and returns `{tripwire, reason, label?, confidence?}`. A tripwire emits `input_guardrail_verdict` and stops as `status: "input_guardrail"` / `stop_reason: "input_guardrail_tripwire"` without spending the main loop turn. Build the closure with `agent_input_guardrail(...)` from `std/agent/guardrails` |
 | `llm_caller_transport` | dict | nil | Explicit guarantees for a custom `llm_caller`. `{forwards_assistant_prefill: true}` permits one-shot assistant-prefill recoveries only when the caller forwards that request option unchanged; absence stays fail-closed. Provider capability and multi-route safety gates still apply. |
@@ -993,20 +992,23 @@ When `loop_until_done: true`, the system prompt is automatically extended with:
 > tagged text-tool stages use `<done>##DONE##</done>`, and no-tool sentinel
 > stages use bare `##DONE##`.
 
-`done_judge` adds a second gate after completion is detected. The loop renders
-the transcript for a structured judge call and expects
-`verdict: "done" | "continue"` plus optional `reasoning` and `next_step`.
-`diagnosis` is accepted as a `reasoning` alias. On a veto, the loop preserves
-`next_step`, specific gaps, and the diagnosis together as recovery feedback.
+### Completion judges
+
+`done_judge` adds a second gate after completion is detected. The loop projects
+the lossless transcript into bounded effect and verification evidence, then
+expects one strict object with `action: "accept" | "continue"`, `reason`,
+`repair`, `specific_gaps`, and `accepted_evidence`. It accepts no aliases or
+additional fields. On a continuation, the loop preserves the repair, gaps, and
+reason together as recovery feedback.
 A veto injects runtime feedback and the loop continues until the judge accepts,
 `done_judge.max_invocations` is reached, or `max_verify_attempts` is exhausted.
 Every judge call emits `JudgeDecision`
 with `session_id`, `iteration`, `verdict`, `reasoning`, `next_step`, and
 `judge_duration_ms`, plus optional `trigger`.
 
-Set top-level `done_judge.max_invocations` (alias `max_feedback`) to a positive
-integer to cap repeated done-judge vetoes. Once reached, the loop stops with
-`status: "verify_capped"` and `stop_reason: "done_judge_cap_reached"`, and the
+Set top-level `done_judge.max_invocations` to a positive integer to cap repeated
+done-judge vetoes. Once reached, the loop stops with
+`status: "completion_unverified"` and `stop_reason: "done_judge_cap_reached"`, and the
 result carries `{done_judge: {invocations, vetoes, max_invocations,
 cap_reached}}`. Set it to `0` to disable the terminal cap.
 
@@ -1016,8 +1018,8 @@ on; `max_invocations` caps total done-judge calls; `min_iterations_before_first`
 skips the first K turns; `when` accepts `"always"`, `"stalled"`, or a closure
 that receives the same loop-state shape as `loop_control`.
 When `when: "stalled"` is configured, a stall warning can fire the judge
-directly. A `done` verdict stops the loop with `stalled_done_judge` before the
-repeated tool call is dispatched. A `continue` verdict also skips that pending
+directly. An `accept` action stops the loop with `stalled_done_judge` before the
+repeated tool call is dispatched. A `continue` action also skips that pending
 call and starts the next turn with the judge recovery; generic stall feedback is
 used only when the judge returned no recovery text. The corresponding
 `JudgeDecision` event carries `trigger: "stalled"`.
@@ -1037,6 +1039,9 @@ agent_loop(harness, task, system, judged_opts)
 `when: "stalled"` does not fire on ordinary completion candidates. It is the
 policy hook used by stall diagnostics so completion checks happen on a signal
 rather than a fixed "are you done?" prompt.
+
+Implementation details and trace schemas live in
+[Agent plane ownership](../dev/agent-loops.md#completion-checkpoints).
 
 ### Input guardrail (`agent_input_guardrail`)
 
@@ -1064,63 +1069,20 @@ same `{tripwire, reason, label, confidence}` shape.
 
 ### Completion gate (`agent_completion_gate`)
 
-`agent_completion_gate(options)` (from `std/agent/judge`) builds a ready-made
-done-time gate by **composing** the seams above: it returns a `verify_completion`
-closure carrying a deterministic veto ladder plus an optional bounded LLM judge
-on the `verify_completion_judge` / `done_judge` seam. Spread it into your loop
-options. It generalizes the completion-verification policy proven out in
-burin-code — the source-write evidence requirement, the per-session veto budget,
-and AND-of-oracles verify composition — while keeping every **domain fact** a
-host callback (the "Harn owns orchestration policy; hosts supply facts" split).
-
-The gate never keys on a done-sentinel string: it decides purely from write and
-verifier facts. Its default veto ladder (first match wins):
-
-| Reason | Result | Condition |
-| --- | --- | --- |
-| `no_source_write` | veto (soft) | task requires a source change, but only cosmetic / zero source writes so far |
-| `verification_after_write_red` | veto (**strict**) | a source write with a red verifier and no streak fact — never released by the budget |
-| `failed_verification` | veto (**strict**) | streak-aware red verifier below the threshold, or diagnostic churn is converging |
-| `repeated_verification_failures` | veto (**strict**) + escalation | non-converging red verifier at or above the configured threshold |
-| `verified_after_write` / `verified` | allow | verifier is green |
-| `missing_verification` | veto (**strict**) | source written, verifier configured, not yet run — never released by the budget (a source write always needs a fresh green verifier) |
-| `no_workspace_write` | allow | task does not require a source change |
-| `veto_budget_exhausted` | allow | a soft veto after `max_vetoes` (default 3) — an attributable end |
-
-Each deterministic gate decision emits a `judge_decision` event with
-`trigger: "verify_completion"`, `confirm`, and the stable `reason` above. When
-the veto budget converts a soft veto into an allow, the event uses
-`reason: "veto_budget_exhausted"` and also carries `converted_from` with the
-original veto class. Escalated streak decisions carry
-`escalation_recommended: true` and the configured `escalation_target`.
-
-Only **source** writes count as progress toward "done" — a cosmetic final write
-(a comment, a `.md` typo) is not evidence, so it cannot flip an already-passed
-run back to unverified, and a run that only wrote cosmetics cannot claim done.
-
-Host-fact callbacks (all optional): `facts(ctx)` returns
-`{consecutive_failed_after_write?, source_write_count?, cosmetic_write_count?,
-writes?, verify?, verification_failures_converging?, requires_write?}`;
-`classify_write(path, diff?)` labels one write `"source"`/`"cosmetic"`/…;
-`verify_command()` runs the verifier oracle; and
-`feedback_decorator(reason, feedback, verdict)` adds host repair cues keyed by
-the resolved ladder reason. With **no** callbacks the gate
-degrades to judge-only mode and surfaces the degraded state on the returned bundle
-(`_completion_gate.facts_available = false`) rather than fabricating a pass.
+`agent_completion_gate(runtime, options)` returns an options fragment for
+`agent_loop`. It checks host-supplied write and verification facts through
+`verify_completion` and can add a bounded LLM judge. Spread the fragment into
+the loop options.
 
 ```harn,ignore
 import { agent_completion_gate } from "std/agent/judge"
 
-agent_loop(harness, task, system, base_opts + agent_completion_gate({
+agent_loop(harness, task, system, base_opts + agent_completion_gate(harness.runtime, {
   facts: fn(ctx) { return host_completion_facts(ctx.session_id) },
   verify_command: fn() { return host_run_verify() },
   judge: true,          // optional bounded LLM judge, capped at 5 by default
 }))
 ```
-
-Presets can carry a default gate: the `completion_gate` pack row holds a
-`CompletionGateOptions` spec that a consumer lowers with
-`agent_completion_gate(...)`.
 
 See [Completion gate (`std/agent/judge`)](../stdlib/agent-judge.md) for the full
 reference: the option table, the fact types, the veto ladder, and the bounded

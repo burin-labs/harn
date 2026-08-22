@@ -30,6 +30,95 @@
 
 use crate::orchestration::{TOOL_CALL_RECEIPT_VERSION, TOOL_RESULT_RECEIPT_VERSION};
 use crate::value::VmValue;
+use serde::Serialize;
+
+const SESSION_MESSAGE_FACTS_KEY: &str = "_harn";
+
+#[derive(Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum SessionMessageFacts {
+    Assistant {
+        tool_calls: Vec<serde_json::Value>,
+    },
+    ToolResult {
+        tool_call_id: String,
+        tool_name: String,
+        outcome: ToolResultOutcome,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        data: Option<serde_json::Value>,
+    },
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "snake_case")]
+enum ToolResultOutcome {
+    Ok,
+    Error,
+}
+
+fn attach_session_message_facts(message: VmValue, facts: &SessionMessageFacts) -> VmValue {
+    let Some(existing) = message.as_dict() else {
+        return message;
+    };
+    let mut enriched = existing.clone();
+    let encoded = serde_json::to_value(facts).expect("session message facts must serialize");
+    enriched.insert(
+        crate::value::intern_key(SESSION_MESSAGE_FACTS_KEY),
+        crate::stdlib::json_to_vm_value(&encoded),
+    );
+    VmValue::dict(enriched)
+}
+
+/// Attach provider-neutral parsed call facts to a durable assistant message.
+/// The unified post-parse `tool_calls` list is authoritative; direct host
+/// embeddings that supply only `native_tool_calls` retain those as a fallback.
+/// Provider adapters strip `_harn` before egress, so transcript consumers read
+/// one lifecycle shape without altering provider-visible history.
+pub(crate) fn attach_assistant_facts(message: VmValue, llm_result: &VmValue) -> VmValue {
+    let tool_calls = ["tool_calls", "native_tool_calls"]
+        .iter()
+        .filter_map(|key| {
+            llm_result
+                .as_dict()
+                .and_then(|result| result.get(*key))
+                .and_then(|value| match value {
+                    VmValue::List(items) if !items.is_empty() => Some(
+                        items
+                            .iter()
+                            .map(crate::llm::helpers::vm_value_to_json)
+                            .collect::<Vec<_>>(),
+                    ),
+                    _ => None,
+                })
+        })
+        .next()
+        .unwrap_or_default();
+    attach_session_message_facts(message, &SessionMessageFacts::Assistant { tool_calls })
+}
+
+/// Attach the dispatch-owned result identity and outcome to a durable result
+/// message on every provider/tool-format channel.
+pub(crate) fn attach_tool_result_facts(
+    message: VmValue,
+    tool_call_id: &str,
+    tool_name: &str,
+    ok: bool,
+    data: Option<&VmValue>,
+) -> VmValue {
+    attach_session_message_facts(
+        message,
+        &SessionMessageFacts::ToolResult {
+            tool_call_id: tool_call_id.to_string(),
+            tool_name: tool_name.to_string(),
+            outcome: if ok {
+                ToolResultOutcome::Ok
+            } else {
+                ToolResultOutcome::Error
+            },
+            data: data.map(crate::llm::helpers::vm_value_to_json),
+        },
+    )
+}
 
 /// Record the calls a batch is about to dispatch, with the ids their results
 /// will answer under.

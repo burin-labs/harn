@@ -2429,18 +2429,18 @@ instead of composing with `agent_loop`.
 Pass `done_judge: true` or `done_judge: {...}` to run a structured
 completion judge after a native-tool loop naturally completes or after
 the model emits `##DONE##` in a sentinel loop.
-The judge returns `verdict: "done" | "continue"` plus optional
-`reasoning` and `next_step`. A veto injects feedback and the loop
-continues until the judge accepts, `done_judge.max_invocations` is reached, or
-`max_verify_attempts` is exhausted.
-Each judge call emits a `JudgeDecision` agent event with optional `trigger`.
+The judge returns exactly `{action: "accept" | "continue", reason, repair,
+specific_gaps, accepted_evidence}`. A `continue` action injects repair and the
+loop continues until the judge accepts, `done_judge.max_invocations` is
+reached, or `max_verify_attempts` is exhausted. Each judge call emits a
+`JudgeDecision` agent event with optional `trigger`.
 Use
 `verify_completion_judge` instead when every natural stop should be
 judged.
 
-Set top-level `done_judge.max_invocations` (alias `max_feedback`) to a positive
-integer to cap repeated vetoes. Once reached, the loop stops with
-`status: "verify_capped"` and `stop_reason: "done_judge_cap_reached"`; the
+Set top-level `done_judge.max_invocations` to a positive integer to cap repeated
+vetoes. Once reached, the loop stops with `status: "completion_unverified"` and
+`stop_reason: "done_judge_cap_reached"`; the
 result carries structured `done_judge` counters. Set it to `0` to disable the
 terminal cap.
 
@@ -2465,7 +2465,7 @@ agent_loop(harness, task, system, cadence_opts)
 ```
 
 With `when: "stalled"`, stall diagnostics run the judge when
-`agent_loop_stall_warning` fires. `done` stops the loop with
+`agent_loop_stall_warning` fires. `accept` stops the loop with
 `stalled_done_judge`; `continue` keeps the normal stall feedback fallback. The
 judge event includes `trigger: "stalled"`.
 

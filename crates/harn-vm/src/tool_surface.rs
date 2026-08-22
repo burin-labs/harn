@@ -11,7 +11,8 @@ use serde::{Deserialize, Serialize};
 use crate::llm::tools::text_tool_call_tag_pairs;
 use crate::orchestration::{CapabilityPolicy, ToolApprovalPolicy};
 use crate::tool_annotations::{
-    SideEffectLevel, ToolAnnotations, ToolArgSchema, ToolDependencyRangeParams, ToolKind,
+    CompletionEvidenceRole, SideEffectLevel, ToolAnnotations, ToolArgSchema,
+    ToolDependencyRangeParams, ToolKind,
 };
 use crate::value::VmValue;
 
@@ -221,6 +222,9 @@ fn parse_tool_annotations(map: &serde_json::Map<String, serde_json::Value>) -> T
     ToolAnnotations {
         kind,
         side_effect_level,
+        completion_evidence_role: policy
+            .get("completion_evidence_role")
+            .and_then(|value| serde_json::from_value::<CompletionEvidenceRole>(value.clone()).ok()),
         arg_schema,
         capabilities,
         emits_artifacts: policy

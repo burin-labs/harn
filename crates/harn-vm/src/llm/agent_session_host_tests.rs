@@ -674,73 +674,82 @@ fn initial_user_content_falls_back_to_text_message() {
 
 #[test]
 fn tool_results_replay_with_provider_appropriate_ids() {
-    let local = vm_to_json(&tool_result_message_for_provider(
-        "local",
-        "Qwen/Qwen3.6-35B-A3B",
-        "native",
-        "release_run",
-        "call_001",
-        "ok",
-        &[],
-        None,
-    ));
-    assert_eq!(local["role"], "tool");
-    assert_eq!(local["name"], "release_run");
-    assert_eq!(local["tool_call_id"], "call_001");
-
-    let anthropic = vm_to_json(&tool_result_message_for_provider(
-        "anthropic",
-        "claude-opus-4-7",
-        "native",
-        "release_run",
-        "call_002",
-        "ok",
-        &[],
-        None,
-    ));
-    assert_eq!(anthropic["role"], "tool_result");
-    assert_eq!(anthropic["tool_use_id"], "call_002");
-
-    let bedrock_claude = vm_to_json(&tool_result_message_for_provider(
-        "bedrock",
-        "anthropic.claude-3-5-sonnet-20240620-v1:0",
-        "native",
-        "release_run",
-        "call_003",
-        "ok",
-        &[],
-        None,
-    ));
-    assert_eq!(bedrock_claude["role"], "tool_result");
-    assert_eq!(bedrock_claude["tool_use_id"], "call_003");
-
-    let gemini = vm_to_json(&tool_result_message_for_provider(
-        "gemini",
-        "gemini-2.5-flash",
-        "native",
-        "release_run",
-        "call_004",
-        "ok",
-        &[],
-        None,
-    ));
-    assert_eq!(gemini["role"], "tool");
-    assert_eq!(gemini["name"], "release_run");
-    assert_eq!(gemini["tool_call_id"], "call_004");
-
-    let text_mode = vm_to_json(&tool_result_message_for_provider(
-        "ollama",
-        "devstral-small-2:24b",
-        "text",
-        "release_run",
-        "call_005",
-        "ok",
-        &[],
-        None,
-    ));
-    assert_eq!(text_mode["role"], "user");
-    assert!(text_mode.get("tool_call_id").is_none());
-    assert!(text_mode.get("tool_use_id").is_none());
+    for (provider, model, format, id, expected_role, wire_id_key, ok) in [
+        (
+            "local",
+            "Qwen/Qwen3.6-35B-A3B",
+            "native",
+            "call_001",
+            "tool",
+            Some("tool_call_id"),
+            true,
+        ),
+        (
+            "anthropic",
+            "claude-opus-4-7",
+            "native",
+            "call_002",
+            "tool_result",
+            Some("tool_use_id"),
+            true,
+        ),
+        (
+            "bedrock",
+            "anthropic.claude-3-5-sonnet-20240620-v1:0",
+            "native",
+            "call_003",
+            "tool_result",
+            Some("tool_use_id"),
+            true,
+        ),
+        (
+            "gemini",
+            "gemini-2.5-flash",
+            "native",
+            "call_004",
+            "tool",
+            Some("tool_call_id"),
+            true,
+        ),
+        (
+            "ollama",
+            "devstral-small-2:24b",
+            "text",
+            "call_005",
+            "user",
+            None,
+            false,
+        ),
+    ] {
+        let message = vm_to_json(&tool_result_message_for_provider(
+            provider,
+            model,
+            format,
+            "release_run",
+            id,
+            if ok {
+                "0 errors, 0 failed"
+            } else {
+                "command completed"
+            },
+            ok,
+            &[],
+            None,
+        ));
+        assert_eq!(message["role"], expected_role);
+        assert_eq!(message["_harn"]["kind"], "tool_result");
+        assert_eq!(message["_harn"]["tool_call_id"], id);
+        assert_eq!(message["_harn"]["tool_name"], "release_run");
+        assert_eq!(message["_harn"]["outcome"], if ok { "ok" } else { "error" });
+        assert_eq!(message["is_error"], !ok);
+        match wire_id_key {
+            Some(key) => assert_eq!(message[key], id),
+            None => {
+                assert!(message.get("tool_call_id").is_none());
+                assert!(message.get("tool_use_id").is_none());
+            }
+        }
+    }
 }
 
 #[test]
@@ -774,6 +783,7 @@ fn computer_tool_result_carries_screenshot_as_block_list() {
         "computer",
         "call_shot",
         "Captured screenshot 1024x768.",
+        true,
         &screenshots,
         None,
     ));
@@ -815,6 +825,7 @@ fn multi_screenshot_tool_result_delivers_every_frame() {
         "computer",
         "call_multi",
         "Captured two frames.",
+        true,
         &screenshots,
         None,
     ));
