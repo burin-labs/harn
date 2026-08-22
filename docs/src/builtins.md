@@ -1722,6 +1722,20 @@ Configuration cannot approve a command rejected by this floor. Add other risk
 labels to the same tier with `deny_labels`; use `require_approval` for labels a
 user may approve.
 
+Trusted host integrations may attach a `sealed_dispatch` record to a command
+policy when one exact, host-predeclared command must retain bounded fixture-write
+authority. The record uses schema `harn.command_policy.sealed_dispatch.v1`,
+`source: "host"`, non-empty intent plus `blake3:` lease/plan fingerprints,
+`sha256:` workspace-root and trimmed-command fingerprints, a `binding_sha256`,
+and a non-empty subset of `execution_semantics_unresolved`, `outside_workspace`,
+and `write_intent` in `allow_risk_labels`. The binding hashes those fields in
+that order, with sorted labels comma-joined and all fields newline-joined. Harn
+revalidates the binding, exact command, and one active workspace root before
+suppressing only the named labels. A pre-hook rewrite is revalidated. The
+catastrophic floor, deny patterns, deny labels, and every unrelated approval
+label remain active. A `sealed_dispatch` key in `process.exec` request arguments
+has no authority; only the installed policy can carry the seal.
+
 ## Async and timing
 
 | Function | Parameters | Returns | Description |
