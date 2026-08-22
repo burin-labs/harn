@@ -5,6 +5,49 @@ use crate::helpers::*;
 
 use super::Formatter;
 
+/// The physical placement an expression may use when it decides where its own
+/// continuation lines belong. Parent expressions derive a new layout whenever
+/// they move an operand instead of making each child reconstruct that context.
+#[derive(Clone, Copy)]
+struct ExprLayout {
+    indent: usize,
+    column: usize,
+}
+
+impl ExprLayout {
+    fn new(indent: usize, column: usize) -> Self {
+        Self { indent, column }
+    }
+
+    fn grouped_left(self, grouped: bool) -> Self {
+        Self {
+            indent: self.indent + usize::from(grouped),
+            column: self.column + usize::from(grouped),
+        }
+    }
+
+    fn inline_right(self, left: &str, operator: &str, grouped: bool) -> Self {
+        Self {
+            indent: self.indent + usize::from(grouped),
+            column: column_after(self.column, left)
+                + 1
+                + text_width(operator)
+                + 1
+                + usize::from(grouped),
+        }
+    }
+
+    fn continued_right(self, operator: &str, grouped: bool) -> Self {
+        let operator_column = (self.indent + 1) * 2;
+        Self {
+            // The operand now starts on the parent's continuation line. Any
+            // continuation it emits must therefore be one level deeper.
+            indent: self.indent + 1,
+            column: operator_column + text_width(operator) + 1 + usize::from(grouped),
+        }
+    }
+}
+
 impl Formatter<'_> {
     pub(super) fn format_require_stmt(
         &self,
@@ -96,18 +139,33 @@ impl Formatter<'_> {
                 if op == "+" && plus_chain_depth(left) >= 64 {
                     return self.format_deep_plus_chain(node, indent, column);
                 }
-                let mut l = self.format_expr(left, indent, column);
-                let mut r = self.format_expr(right, indent, column_after(column, &l));
                 let op_str = if op == "not_in" {
                     "not in"
                 } else {
                     op.as_str()
                 };
+                let left_grouped = child_needs_parens(op, &left.node, false);
+                let right_grouped = child_needs_parens(op, &right.node, true);
+                let layout = ExprLayout::new(indent, column);
 
-                if child_needs_parens(op, &left.node, false) {
+                let left_layout = layout.grouped_left(left_grouped);
+                let mut l = self.format_expr(left, left_layout.indent, left_layout.column);
+                if left_grouped {
                     l = format!("({l})");
                 }
-                if child_needs_parens(op, &right.node, true) {
+
+                // Rendering an expression may claim comments. Snapshot only
+                // the right-hand side's claims so a moved operand can be
+                // rendered once more at its real continuation column without
+                // dropping or duplicating those comments.
+                let emitted_before_right = self.emitted_lines.borrow().clone();
+                let inline_right_layout = layout.inline_right(&l, op_str, right_grouped);
+                let mut r = self.format_expr(
+                    right,
+                    inline_right_layout.indent,
+                    inline_right_layout.column,
+                );
+                if right_grouped {
                     r = format!("({r})");
                 }
 
@@ -116,6 +174,16 @@ impl Formatter<'_> {
                     || column + text_width(&inline) > self.line_width;
 
                 if should_break {
+                    *self.emitted_lines.borrow_mut() = emitted_before_right;
+                    let continued_right_layout = layout.continued_right(op_str, right_grouped);
+                    r = self.format_expr(
+                        right,
+                        continued_right_layout.indent,
+                        continued_right_layout.column,
+                    );
+                    if right_grouped {
+                        r = format!("({r})");
+                    }
                     let pad = "  ".repeat(indent + 1);
                     if op_safe_after_newline(op_str) {
                         // Claim any trailing comment on the left operand's last

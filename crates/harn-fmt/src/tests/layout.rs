@@ -140,6 +140,47 @@ fn nested_unwrapped_chain_counts_indent_at_width_twenty() {
     );
 }
 
+/// A child expression that moves onto a binary continuation line must be
+/// re-laid out at that physical column. Its own continuations belong one level
+/// deeper than the operator that introduced it.
+#[test]
+fn wrapped_binary_operand_uses_its_actual_nested_layout() {
+    let source = r#"fn validate(opts) {
+  const applies = config != nil && (reason == "sentinel" || reason == "natural" || reason == "stalled") && due
+  if opts?.threshold != nil && (type_of(opts.threshold) != "int" || opts.threshold < 1) {
+    return nil
+  }
+}
+"#;
+    let options = FmtOptions {
+        line_width: 100,
+        ..FmtOptions::default()
+    };
+
+    let once = format_source_opts(source, &options).unwrap();
+    assert_eq!(
+        once,
+        r#"fn validate(opts) {
+  const applies = config != nil
+    && (reason == "sentinel"
+      || reason == "natural"
+      || reason == "stalled")
+    && due
+  if opts?.threshold != nil
+    && (type_of(opts.threshold) != "int"
+      || opts.threshold < 1) {
+    return nil
+  }
+}
+"#,
+        "a nested operand must not inherit the outer operator's indent or its abandoned inline column"
+    );
+
+    let twice = format_source_opts(&once, &options).unwrap();
+    assert_eq!(once, twice, "the nested layout must be byte-idempotent");
+    assert_roundtrip(source);
+}
+
 /// The wrap decision has to budget for the whole line: `)`, the return type,
 /// and the ` {` the caller appends. Counting only the prefix let signatures
 /// land past the declared width.
