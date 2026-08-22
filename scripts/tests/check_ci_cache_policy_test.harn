@@ -167,19 +167,21 @@ fn windows_cache_inputs(save: bool = false) {
 fn windows_warm_policy() {
   return {
     artifact_name: "workspace-windows-warm",
-    manifest_schema: "harn.windows_workspace_warm.v1",
+    manifest_schema: "harn.windows_workspace_warm.v2",
     workflow: "windows-nightly.yml",
     job: "nextest",
     retention_days: 3,
     max_bytes: 8589934592,
+    build_headroom_bytes: 17179869184,
     dev_drive_size_default: "25GB",
+    dev_drive_size_full_workspace: "50GB",
     dev_drive_size_release_certify: "50GB",
   }
 }
 
 fn policy() -> CiCachePolicy {
   return {
-    schema_version: 4,
+    schema_version: 5,
     rust_cache_action: "./.github/actions/rust-cache",
     node_cache_action: "./.github/actions/node-cache",
     persistent_ref: "refs/heads/main",
@@ -497,16 +499,42 @@ fn workflows() {
                 "vars.HARN_WINDOWS_DEVDRIVE == 'on' && env.HARN_RUNNER_TIER == 'github-hosted'",
               ),
               uses: "samypr100/setup-dev-drive@exact-pin",
+              with: {
+                "drive-size": gha_expression(
+                  "github.event_name == 'pull_request' && '25GB' || '50GB'",
+                ),
+              },
             },
             {uses: "./.github/actions/rust-toolchain"},
+            {
+              name: "Report Windows storage (initial)",
+              id: "windows-storage-initial",
+              if: "always()",
+              run: "./scripts/ci/windows_storage_budget.sh report initial",
+            },
             windows_warm_restore_step(),
             {
               uses: "./.github/actions/rust-cache",
-              if: "steps.windows-warm-restore.outputs.windows_warm_restore != 'hit'",
+              if:
+                "steps.windows-warm-restore.outputs.windows_warm_restore != 'hit' && steps.windows-warm-restore.outputs.windows_warm_restore_reason != 'insufficient_space'",
               with: windows_cache_inputs(),
             },
             windows_warm_report_step(),
-            {name: "Compile Windows tests and run unit slice", env: {RUST_MIN_STACK: "16777216"}},
+            {
+              name: "Report Windows storage (after restore)",
+              if: "always()",
+              run: "./scripts/ci/windows_storage_budget.sh report after_restore",
+            },
+            {
+              name: "Compile Windows tests and run unit slice",
+              env: {RUST_MIN_STACK: "16777216"},
+              run: "cargo build --locked --profile test -p harn-cli",
+            },
+            {
+              name: "Report Windows storage (terminal)",
+              if: "always()",
+              run: "./scripts/ci/windows_storage_budget.sh report terminal",
+            },
           ],
         },
       },
@@ -572,7 +600,17 @@ fn workflows() {
               uses: "taiki-e/install-action@exact-pin",
               with: {tool: "nextest@0.9.132"},
             },
+            {
+              name: "Report Windows storage (before build)",
+              if: "always()",
+              run: "./scripts/ci/windows_storage_budget.sh report before_build",
+            },
             {name: "Run workspace nextest", env: {RUST_MIN_STACK: "16777216"}},
+            {
+              name: "Report Windows storage (terminal)",
+              if: "always()",
+              run: "./scripts/ci/windows_storage_budget.sh report terminal",
+            },
           ],
         },
       },
@@ -1004,6 +1042,79 @@ pipeline test_windows_pr_runner_requires_internal_blacksmith_with_safe_fallbacks
   )
 }
 
+pipeline test_windows_storage_budget_rejects_small_full_drive_duplicate_profile_and_silent_tail(
+  harness: Harness,
+  task,
+) {
+  const declared = workflows()
+  const windows = declared["ci.yml"].jobs.windows
+  const small_drive = {
+    ...declared["ci.yml"],
+    jobs: {
+      ...declared["ci.yml"].jobs,
+      windows: {
+        ...windows,
+        steps: windows.steps.map(
+          { step ->
+            if trim(step?.name ?? "") != "Set up Dev Drive" {
+              return step
+            }
+            return {...step, with: {...step.with, "drive-size": "25GB"}}
+          },
+        )
+          .to_list(),
+      },
+    },
+  }
+  assert(
+    windows_pr_native_feedback_errors(policy(), small_drive, declared["windows-nightly.yml"])
+      .contains(
+        "ci.yml:windows Dev Drive must reserve the full-workspace ceiling outside pull requests",
+      ),
+  )
+  const duplicate_profile = {
+    ...declared["ci.yml"],
+    jobs: {
+      ...declared["ci.yml"].jobs,
+      windows: {
+        ...windows,
+        steps: windows.steps.map(
+          { step ->
+            if trim(step?.name ?? "") != "Compile Windows tests and run unit slice" {
+              return step
+            }
+            return {...step, run: "cargo build --locked -p harn-cli"}
+          },
+        )
+          .to_list(),
+      },
+    },
+  }
+  assert(
+    windows_pr_native_feedback_errors(policy(), duplicate_profile, declared["windows-nightly.yml"])
+      .contains("ci.yml:windows must build freshness binaries in Cargo test profile before nextest"),
+  )
+  const silent_tail = {
+    ...declared["ci.yml"],
+    jobs: {
+      ...declared["ci.yml"].jobs,
+      windows: {
+        ...windows,
+        steps: windows.steps.filter(
+          { step -> return trim(step?.name ?? "") != "Report Windows storage (terminal)" },
+        )
+          .to_list(),
+      },
+    },
+  }
+  assert(
+    windows_pr_native_feedback_errors(policy(), silent_tail, declared["windows-nightly.yml"])
+      .contains(
+        "ci.yml:windows must always emit the terminal storage receipt through the shared budget owner",
+      ),
+  )
+}
+
 pipeline test_windows_pr_warm_artifact_is_primary_fail_open_and_provenanced(
   harness: Harness,
   task,
@@ -1016,7 +1127,10 @@ pipeline test_windows_pr_warm_artifact_is_primary_fail_open_and_provenanced(
     .first()
   // GitHub evaluates this exact guard after the receipt-producing restore:
   // hit skips the provider cache; miss or absent output runs the fallback.
-  assert_eq(cache.if, "steps.windows-warm-restore.outputs.windows_warm_restore != 'hit'")
+  assert_eq(
+    cache.if,
+    "steps.windows-warm-restore.outputs.windows_warm_restore != 'hit' && steps.windows-warm-restore.outputs.windows_warm_restore_reason != 'insufficient_space'",
+  )
   assert_eq(windows.permissions, {contents: "read", actions: "read"})
   const reversed = {
     ...declared["ci.yml"],
@@ -1024,9 +1138,9 @@ pipeline test_windows_pr_warm_artifact_is_primary_fail_open_and_provenanced(
       ...declared["ci.yml"].jobs,
       windows: {
         ...windows,
-        steps: windows.steps.slice(0, 3)
-          + [windows.steps[4], windows.steps[3]]
-          + windows.steps.slice(5),
+        steps: windows.steps.slice(0, 4)
+          + [windows.steps[5], windows.steps[4]]
+          + windows.steps.slice(6),
       },
     },
   }
@@ -1059,18 +1173,18 @@ pipeline test_windows_pr_warm_artifact_is_primary_fail_open_and_provenanced(
       "ci.yml:windows must use rust-cache only when the provider-neutral warm artifact misses",
     ),
   )
-  const restore = windows.steps[3]
+  const restore = windows.steps[4]
   const closed = {
     ...declared["ci.yml"],
     jobs: {
       ...declared["ci.yml"].jobs,
       windows: {
         ...windows,
-        steps: windows.steps.slice(0, 3)
+        steps: windows.steps.slice(0, 4)
           + [
           {...restore, "continue-on-error": false, run: restore.run.split("\n")[0]},
         ]
-          + windows.steps.slice(4),
+          + windows.steps.slice(5),
       },
     },
   }
@@ -1221,6 +1335,23 @@ pipeline test_windows_release_certify_warm_requires_artifact_path_and_larger_dri
       "windows-nightly.yml:nextest Dev Drive size must follow cache-policy.json windows_workspace_warm ceilings",
     ),
   )
+  const silent_terminal = {
+    ...producer,
+    jobs: {
+      nextest: {
+        ...producer.jobs.nextest,
+        steps: producer.jobs.nextest.steps.filter(
+          { step -> return trim(step?.name ?? "") != "Report Windows storage (terminal)" },
+        )
+          .to_list(),
+      },
+    },
+  }
+  assert(
+    windows_release_certify_warm_errors(declared_policy, silent_terminal).contains(
+      "windows-nightly.yml:nextest must always emit the terminal storage receipt through the shared budget owner",
+    ),
+  )
 }
 
 pipeline test_nextest_version_locks_every_workflow_pin(harness: Harness, task) {
@@ -1289,7 +1420,7 @@ pipeline test_actions_cache_capacity_keeps_warm_artifact_below_pool(harness: Har
   }
   assert(
     actions_cache_capacity_errors(flat_drive).contains(
-      "cache-policy.json windows_workspace_warm must give release-certify a larger Dev Drive ceiling than the default",
+      "cache-policy.json windows_workspace_warm must give full-workspace and release-certify runs larger Dev Drive ceilings than the default",
     ),
   )
 }
