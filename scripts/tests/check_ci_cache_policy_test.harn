@@ -527,8 +527,10 @@ fn workflows() {
             },
             {
               name: "Compile Windows tests and run unit slice",
+              id: "windows-native-tests",
               env: {RUST_MIN_STACK: "16777216"},
-              run: "cargo nextest run --features internal-freshness-checker",
+              run:
+                "cargo nextest run --features internal-freshness-checker\nprintf 'completed_epoch=%s\\n' \"$(date +%s)\" >> \"$GITHUB_OUTPUT\"",
             },
             {
               name: "Produce exact Windows Harn binary",
@@ -537,8 +539,13 @@ fn workflows() {
             },
             {
               name: "Smoke test harn run",
+              env: {
+                WINDOWS_NATIVE_TEST_COMPLETED_EPOCH: gha_expression(
+                  "steps.windows-native-tests.outputs.completed_epoch",
+                ),
+              },
               run:
-                "harn_bin=\"$(HARN_BIN='' HARN_BIN_NO_BUILD=1 ./scripts/harn_bin.sh --no-build --print)\"\n\"$harn_bin\" run smoke.harn",
+                "harn_bin=\"$(HARN_BIN='' HARN_BIN_NO_BUILD=1 ./scripts/harn_bin.sh --no-build --print)\"\n\"$harn_bin\" run smoke.harn\necho \"$WINDOWS_NATIVE_TEST_COMPLETED_EPOCH\"",
             },
             {
               name: "Report Windows storage (terminal)",
@@ -1176,6 +1183,46 @@ pipeline test_windows_storage_budget_rejects_small_full_drive_duplicate_profile_
       .contains(
         "ci.yml:windows native tests must keep the producer feature graph aligned without resolving Harn",
       ),
+  )
+  const ambient_harn_telemetry = {
+    ...declared["ci.yml"],
+    jobs: {
+      ...declared["ci.yml"].jobs,
+      windows: {
+        ...windows,
+        steps: windows.steps.map(
+          { step ->
+            if trim(step?.name ?? "") == "Compile Windows tests and run unit slice" {
+              return {
+                ...step,
+                run: step.run
+                  + "\nprintf 'HARN_NATIVE_TEST_COMPLETED_EPOCH=%s\\n' 0 >> \"$GITHUB_ENV\"",
+              }
+            }
+            if trim(step?.name ?? "") == "Smoke test harn run" {
+              return {...step, env: {...step.env, HARN_NATIVE_TEST_COMPLETED_EPOCH: "0"}}
+            }
+            return step
+          },
+        )
+          .to_list(),
+      },
+    },
+  }
+  const ambient_harn_errors = windows_pr_native_feedback_errors(
+    policy(),
+    ambient_harn_telemetry,
+    declared["windows-nightly.yml"],
+  )
+  assert(
+    ambient_harn_errors.contains(
+      "ci.yml:windows native completion telemetry must use its typed step output, not Harn's reserved environment namespace",
+    ),
+  )
+  assert(
+    ambient_harn_errors.contains(
+      "ci.yml:windows smoke must consume native completion telemetry through the typed step output without ambient Harn variables",
+    ),
   )
   const direct_smoke = {
     ...declared["ci.yml"],
