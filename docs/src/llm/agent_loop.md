@@ -977,116 +977,10 @@ result `trace` summary. Look for `native_text_tool_fallbacks`,
 `native_text_tool_fallback_rejections`, and `empty_completion_retries` when
 debugging provider contract drift or OpenAI-compatible empty completions.
 
-Default nudge message:
+## Completion control
 
-> The nudge is mode-aware:
-> In tagged text-tool stages it asks for concrete tool progress and reserves `<done>##DONE##</done>` for real completion.
-> In native-tool stages it asks for concrete tool progress and treats final text with no tool calls as completion.
-> In no-tool sentinel stages it asks for concrete progress and reserves bare `##DONE##` for completion.
-
-When `loop_until_done: true`, the system prompt is automatically extended with:
-
-> IMPORTANT: You MUST keep working until the task is complete.
-> The completion instruction is mode-aware:
-> native-tool stages complete by returning final text with no tool calls,
-> tagged text-tool stages use `<done>##DONE##</done>`, and no-tool sentinel
-> stages use bare `##DONE##`.
-
-### Completion judges
-
-`done_judge` adds a second gate after completion is detected. The loop projects
-the lossless transcript into bounded effect and verification evidence, then
-expects one strict object with `action: "accept" | "continue"`, `reason`,
-`repair`, `specific_gaps`, and `accepted_evidence`. It accepts no aliases or
-additional fields. On a continuation, the loop preserves the repair, gaps, and
-reason together as recovery feedback.
-A veto injects runtime feedback and the loop continues until the judge accepts,
-`done_judge.max_invocations` is reached, or `max_verify_attempts` is exhausted.
-Every judge call emits `JudgeDecision`
-with `session_id`, `iteration`, `verdict`, `reasoning`, `next_step`, and
-`judge_duration_ms`, plus optional `trigger`.
-
-Set top-level `done_judge.max_invocations` to a positive integer to cap repeated
-done-judge vetoes. Once reached, the loop stops with
-`status: "completion_unverified"` and `stop_reason: "done_judge_cap_reached"`, and the
-result carries `{done_judge: {invocations, vetoes, max_invocations,
-cap_reached}}`. Set it to `0` to disable the terminal cap.
-
-Use `done_judge.cadence` to gate the judge. Omit it to preserve the default:
-every completion candidate is judged. `every: N` judges turns `N`, `2N`, and so
-on; `max_invocations` caps total done-judge calls; `min_iterations_before_first`
-skips the first K turns; `when` accepts `"always"`, `"stalled"`, or a closure
-that receives the same loop-state shape as `loop_control`.
-When `when: "stalled"` is configured, a stall warning can fire the judge
-directly. An `accept` action stops the loop with `stalled_done_judge` before the
-repeated tool call is dispatched. A `continue` action also skips that pending
-call and starts the next turn with the judge recovery; generic stall feedback is
-used only when the judge returned no recovery text. The corresponding
-`JudgeDecision` event carries `trigger: "stalled"`.
-
-```harn
-import { AgentSpec } from "std/agent/options"
-
-const judged_opts: AgentSpec = {
-  loop_until_done: true,
-  done_judge: {
-    cadence: {every: 5, when: "always", max_invocations: 3},
-  },
-}
-agent_loop(harness, task, system, judged_opts)
-```
-
-`when: "stalled"` does not fire on ordinary completion candidates. It is the
-policy hook used by stall diagnostics so completion checks happen on a signal
-rather than a fixed "are you done?" prompt.
-
-Implementation details and trace schemas live in
-[Agent plane ownership](../dev/agent-loops.md#completion-checkpoints).
-
-### Input guardrail (`agent_input_guardrail`)
-
-`agent_input_guardrail(classifier?, options?)` (from `std/agent/guardrails`)
-builds the input-side bookend for `agent_completion_gate`: a cheap classifier
-that runs before the first main `agent_loop` model turn. The returned bundle
-spreads into loop options as `input_guardrail`. A tripwire records an
-`input_guardrail_verdict` event, writes a zero-token assistant explanation, and
-stops the loop with `status: "input_guardrail"` and
-`stop_reason: "input_guardrail_tripwire"`.
-
-```harn,ignore
-import { agent_input_guardrail } from "std/agent/guardrails"
-
-const guardrail_opts = agent_input_guardrail(
-  { payload -> return cheap_policy_classifier(payload.user_message) },
-  {confidence_threshold: 0.8},
-)
-agent_loop(harness, task, system, base_opts + guardrail_opts)
-```
-
-For scripts that want an explicit preflight verdict instead of loop composition,
-use `agent_input_guardrail_check(task, classifier?, options?)`, which returns the
-same `{tripwire, reason, label, confidence}` shape.
-
-### Completion gate (`agent_completion_gate`)
-
-`agent_completion_gate(runtime, options)` returns an options fragment for
-`agent_loop`. It checks host-supplied write and verification facts through
-`verify_completion` and can add a bounded LLM judge. Spread the fragment into
-the loop options.
-
-```harn,ignore
-import { agent_completion_gate } from "std/agent/judge"
-
-agent_loop(harness, task, system, base_opts + agent_completion_gate(harness.runtime, {
-  facts: fn(ctx) { return host_completion_facts(ctx.session_id) },
-  verify_command: fn() { return host_run_verify() },
-  judge: true,          // optional bounded LLM judge, capped at 5 by default
-}))
-```
-
-See [Completion gate (`std/agent/judge`)](../stdlib/agent-judge.md) for the full
-reference: the option table, the fact types, the veto ladder, and the bounded
-judge.
+Completion instructions, judges, input guardrails, and the deterministic gate
+are documented together in [Completion control](./completion-control.md).
 
 ## Editing source from inside an agent loop
 
@@ -1213,7 +1107,7 @@ The callback receives:
   session_id: string,
   iteration: int,
   has_tool_calls: bool,
-  dispatch: list | dict | nil,
+  dispatch: list | nil,
   tool_results: list,
   tool_count: int,
   tool_names: list,

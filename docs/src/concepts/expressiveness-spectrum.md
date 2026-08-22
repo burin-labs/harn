@@ -110,7 +110,7 @@ stays the loop.
 ```harn,ignore
 import { agent_preset } from "std/agent/presets"
 import { with_governance } from "std/agent/governors"
-import { agent_completion_gate } from "std/agent/judge"
+import { agent_completion_gate } from "std/agent/completion_gate"
 import { lane_policy } from "std/agent/lanes"
 import { with_overlay } from "std/agent/overlays"
 
@@ -140,7 +140,7 @@ const run = agent_loop(harness, task, opts?.system, opts)
 
 Every one of those lines is opt-in. Governors bound spend
 ([`std/agent/governors`](../stdlib/governors.md)). Detectors catch loops and
-stalls. The completion gate ([`std/agent/judge`](../stdlib/agent-judge.md))
+stalls. The completion gate ([`std/agent/completion_gate`](../stdlib/agent-judge.md))
 is a deterministic veto plus an optional bounded judge, so "done" is a fact you
 control, not a mood the model is in. Lanes narrow the tool surface; overlays add
 data-driven prompt nudges ([`std/agent/lanes` and `std/agent/overlays`](../stdlib/agent-lanes-overlays.md)).

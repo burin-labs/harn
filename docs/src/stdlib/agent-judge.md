@@ -1,4 +1,4 @@
-# Completion gate (`std/agent/judge`)
+# Completion gate (`std/agent/completion_gate`)
 
 `agent_completion_gate(runtime, options)` returns an options fragment for
 `agent_loop`. It checks host-supplied write and verification facts and can add a
@@ -14,7 +14,7 @@ agent_completion_gate(runtime: HarnessRuntime, options: CompletionGateOptions = 
 Spread the returned fragment into the loop's base options:
 
 ```harn,ignore
-import { agent_completion_gate } from "std/agent/judge"
+import { agent_completion_gate } from "std/agent/completion_gate"
 
 agent_loop(harness, task, system, base_opts + agent_completion_gate(harness.runtime, {
   facts: fn(ctx) { return host_completion_facts(ctx.session_id) },
@@ -124,7 +124,7 @@ Both return `nil` when the cap is disabled.
 
 - [Agent guardrails](./agent-guardrails.md) — the input-side bookend that can
   stop before the first main model turn.
-- [Agent loops: completion gate](../llm/agent_loop.md#completion-gate-agent_completion_gate)
+- [Completion control](../llm/completion-control.md#completion-gate-agent_completion_gate)
   — the same gate in the context of the loop's other completion seams
   (`verify_completion`, `verify_completion_judge`, `done_judge`).
 - [Host-supplied facts](./fact-intake-seams.md) — the broader

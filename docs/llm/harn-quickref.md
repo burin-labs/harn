@@ -2833,7 +2833,7 @@ shape; new keys are additive):
   session_id: string,                // live agent_session id (use this with agent_session_*)
   iteration: int,                    // 0-based turn index
   has_tool_calls: bool,
-  dispatch: list | dict | nil,
+  dispatch: list | nil,
   tool_count: int,                   // calls dispatched this turn
   tool_results: list<dict>,          // structured per-call results
   available_tool_names: list<string>, // current turn's usage-narrowed surface
