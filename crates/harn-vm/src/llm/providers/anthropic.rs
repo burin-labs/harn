@@ -95,14 +95,6 @@ fn anthropic_cache_control(ttl: Option<crate::llm::api::PromptCacheTtl>) -> serd
     cache_control
 }
 
-/// True for Claude 4.6 and later — the generation where Anthropic
-/// deprecated the assistant-prefill feature. Opus 4.7, Sonnet 4.6/4.7,
-/// any future -4.8+ model all return 400 when the last message has
-/// role=assistant.
-fn is_claude_4_6_or_later(model: &str) -> bool {
-    matches!(claude_generation(model), Some((major, minor)) if (major, minor) >= (4, 6))
-}
-
 /// True for Opus 4.7+ — the generation where Anthropic made non-default
 /// `temperature`, `top_p`, and `top_k` return HTTP 400. Sonnet/Haiku 4.7
 /// will inherit this restriction if they ship with the same API surface.
@@ -223,10 +215,6 @@ fn set_output_config_field(body: &mut serde_json::Value, key: &str, value: serde
     output_config[key] = value;
 }
 
-fn model_supports_anthropic_prefill(model: &str) -> bool {
-    !is_claude_4_6_or_later(model)
-}
-
 /// True for Claude models that support the `tool_search_tool_*_20251119`
 /// server-side tools and the `defer_loading: true` flag on tool definitions.
 /// Per Anthropic's tool-search docs: Claude Mythos Preview, Sonnet 4.0+,
@@ -248,15 +236,14 @@ pub(crate) fn claude_model_supports_tool_search(model: &str) -> bool {
     }
 }
 
-fn warn_anthropic_prefill_skipped(model: &str) {
+fn warn_anthropic_prefill_skipped(model: &str, reason: &str) {
     ANTHROPIC_PREFILL_WARN_ONCE.with(|seen| {
         let mut seen = seen.borrow_mut();
         if seen.insert(model.to_string()) {
             crate::events::log_warn(
                 "llm.prefill",
                 &format!(
-                    "assistant prefill requested for {model}, but Anthropic 4.6+ \
-                     deprecated prefill; sending without it",
+                    "assistant prefill requested for {model}, but {reason}; sending without it",
                 ),
             );
         }
@@ -534,17 +521,29 @@ impl AnthropicProvider {
         let mut messages = enforce_tool_result_adjacency(messages);
         preserve_orphan_results_as_text(&mut messages);
         if let Some(ref prefill) = opts.prefill {
-            // Claude 4.6+ deprecated the assistant-prefill feature and
-            // returns HTTP 400 when the final message is role=assistant.
-            // Skip the prefill for those models with a one-time warning
-            // rather than fighting the deprecation.
-            if model_supports_anthropic_prefill(&opts.model) {
+            let uses_native_schema = matches!(
+                &opts.output_format,
+                crate::llm::api::OutputFormat::JsonSchema { .. }
+            ) && caps.structured_output.as_deref() == Some("native");
+            // Anthropic rejects message prefill both on models that removed
+            // the feature and on requests using native structured output.
+            // The capability catalog is the semantic owner of model support;
+            // the request shape adds the one per-call incompatibility.
+            if caps.supports_assistant_prefill && !uses_native_schema {
                 messages.push(serde_json::json!({
                     "role": "assistant",
                     "content": prefill,
                 }));
+            } else if uses_native_schema {
+                warn_anthropic_prefill_skipped(
+                    &opts.model,
+                    "Anthropic native structured output is incompatible with prefill",
+                );
             } else {
-                warn_anthropic_prefill_skipped(&opts.model);
+                warn_anthropic_prefill_skipped(
+                    &opts.model,
+                    "this Anthropic model does not support prefill",
+                );
             }
         }
         let wire_model = crate::llm_config::wire_model_id(&opts.model);
@@ -1973,6 +1972,7 @@ mod tests {
         payload.thinking = crate::llm::api::ThinkingConfig::Enabled {
             budget_tokens: Some(1024),
         };
+        payload.prefill = Some("begin JSON".to_string());
         payload.output_format = crate::llm::api::OutputFormat::JsonSchema {
             schema: serde_json::json!({
                 "type": "object",
@@ -2000,6 +2000,12 @@ mod tests {
         assert!(
             body.get("tool_choice").is_none(),
             "native schema output must not force a synthetic tool"
+        );
+        assert!(
+            body["messages"].as_array().is_some_and(|messages| messages
+                .iter()
+                .all(|message| message["content"] != "begin JSON")),
+            "Anthropic rejects assistant prefill alongside native schema output"
         );
         let tools = body["tools"].as_array().expect("tools array");
         assert_eq!(tools.len(), 1, "the caller's tool surface stays reachable");
