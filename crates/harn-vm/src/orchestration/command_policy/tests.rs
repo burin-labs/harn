@@ -1,6 +1,7 @@
 use super::*;
 
 mod process_result;
+mod sealed_dispatch;
 
 fn ctx(argv: &[&str]) -> JsonValue {
     serde_json::json!({
@@ -573,6 +574,7 @@ fn deny_pattern_policy(patterns: &[&str]) -> CommandPolicy {
         post: None,
         consent: None,
         allow_recursive: false,
+        sealed_dispatch: None,
     }
 }
 
@@ -1067,6 +1069,7 @@ fn hard_deny_decision_enforces_floor_over_approval_and_deny_labels() {
         post: None,
         consent: None,
         allow_recursive: false,
+        sealed_dispatch: None,
     };
     let scan = command_risk_scan_json(&cat_ctx("git reset --hard", &[ROOT]), Some(&policy));
     let labels = risk_labels_from_scan(&scan);

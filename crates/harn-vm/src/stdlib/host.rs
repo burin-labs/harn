@@ -1820,12 +1820,7 @@ mod tests {
                 workspace_roots: Vec::new(),
                 default_shell_mode: "shell".to_string(),
                 deny_patterns: vec!["cat *".to_string()],
-                require_approval: Default::default(),
-                deny_labels: Default::default(),
-                pre: None,
-                post: None,
-                consent: None,
-                allow_recursive: false,
+                ..Default::default()
             });
 
             let result = dispatch_host_operation(

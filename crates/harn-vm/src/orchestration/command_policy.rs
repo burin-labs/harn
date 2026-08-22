@@ -13,11 +13,18 @@ use std::sync::Arc;
 
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use serde_json::{Map as JsonMap, Value as JsonValue};
+use sha2::{Digest, Sha256};
 
 use crate::value::{VmClosure, VmError, VmValue};
 
 const DEFAULT_SHELL_MODE: &str = "argv_only";
 const INLINE_OUTPUT_LIMIT: usize = 8_192;
+const SEALED_DISPATCH_AUTHORITY_SCHEMA: &str = "harn.command_policy.sealed_dispatch.v1";
+const SEALED_DISPATCH_ALLOWED_RISK_LABELS: [&str; 3] = [
+    "execution_semantics_unresolved",
+    "outside_workspace",
+    "write_intent",
+];
 
 thread_local! {
     static COMMAND_POLICY_STACK: RefCell<Vec<CommandPolicy>> = const { RefCell::new(Vec::new()) };
@@ -51,6 +58,25 @@ pub struct CommandPolicy {
     /// default (no consent) path stays byte-identical.
     pub consent: Option<Arc<VmClosure>>,
     pub allow_recursive: bool,
+    /// Exact host-only authority for one predeclared shell command. Harn
+    /// scripts can close this record over a tool handler, but process request
+    /// arguments cannot opt themselves into it. A matching seal may suppress
+    /// only the bounded labels in [`SEALED_DISPATCH_ALLOWED_RISK_LABELS`]; the
+    /// catastrophic floor and every unrelated policy label stay authoritative.
+    pub sealed_dispatch: Option<SealedDispatchAuthority>,
+}
+
+#[derive(Clone, Debug)]
+pub struct SealedDispatchAuthority {
+    schema: String,
+    source: String,
+    intent_id: String,
+    lease_fingerprint: String,
+    plan_fingerprint: String,
+    workspace_root_sha256: String,
+    command_sha256: String,
+    binding_sha256: String,
+    allow_risk_labels: BTreeSet<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -207,7 +233,145 @@ pub fn parse_command_policy_value(
         post: closure_field(map, "post")?,
         consent: closure_field(map, "consent")?,
         allow_recursive: bool_field(map, "allow_recursive")?.unwrap_or(false),
+        sealed_dispatch: parse_sealed_dispatch_authority(map, label)?,
     }))
+}
+
+fn parse_sealed_dispatch_authority(
+    policy: &crate::value::DictMap,
+    label: &str,
+) -> Result<Option<SealedDispatchAuthority>, VmError> {
+    let Some(raw) = policy.get("sealed_dispatch") else {
+        return Ok(None);
+    };
+    if matches!(raw, VmValue::Nil) {
+        return Ok(None);
+    }
+    let Some(map) = raw.as_dict() else {
+        return Err(VmError::Runtime(format!(
+            "{label}: sealed_dispatch must be a dict"
+        )));
+    };
+    let required = |field: &str| -> Result<String, VmError> {
+        let value = string_field(map, field)?.unwrap_or_default();
+        if value.trim().is_empty() {
+            return Err(VmError::Runtime(format!(
+                "{label}: sealed_dispatch.{field} is required"
+            )));
+        }
+        Ok(value)
+    };
+    let authority = SealedDispatchAuthority {
+        schema: required("schema")?,
+        source: required("source")?,
+        intent_id: required("intent_id")?,
+        lease_fingerprint: required("lease_fingerprint")?,
+        plan_fingerprint: required("plan_fingerprint")?,
+        workspace_root_sha256: required("workspace_root_sha256")?,
+        command_sha256: required("command_sha256")?,
+        binding_sha256: required("binding_sha256")?,
+        allow_risk_labels: string_list_field(map, "allow_risk_labels")?
+            .unwrap_or_default()
+            .into_iter()
+            .collect(),
+    };
+    if authority.schema != SEALED_DISPATCH_AUTHORITY_SCHEMA || authority.source != "host" {
+        return Err(VmError::Runtime(format!(
+            "{label}: sealed_dispatch schema/source is invalid"
+        )));
+    }
+    if !valid_sha256_fingerprint(&authority.workspace_root_sha256)
+        || !valid_sha256_fingerprint(&authority.command_sha256)
+        || !valid_sha256_fingerprint(&authority.binding_sha256)
+    {
+        return Err(VmError::Runtime(format!(
+            "{label}: sealed_dispatch command/workspace fingerprints must be sha256:<64 lowercase hex>"
+        )));
+    }
+    if !valid_lease_fingerprint(&authority.lease_fingerprint)
+        || !valid_lease_fingerprint(&authority.plan_fingerprint)
+    {
+        return Err(VmError::Runtime(format!(
+            "{label}: sealed_dispatch lease/plan fingerprints are invalid"
+        )));
+    }
+    if authority.allow_risk_labels.is_empty()
+        || authority
+            .allow_risk_labels
+            .iter()
+            .any(|risk| !SEALED_DISPATCH_ALLOWED_RISK_LABELS.contains(&risk.as_str()))
+    {
+        return Err(VmError::Runtime(format!(
+            "{label}: sealed_dispatch.allow_risk_labels must be a non-empty subset of {SEALED_DISPATCH_ALLOWED_RISK_LABELS:?}"
+        )));
+    }
+    Ok(Some(authority))
+}
+
+fn valid_sha256_fingerprint(value: &str) -> bool {
+    value.strip_prefix("sha256:").is_some_and(|hex| {
+        hex.len() == 64
+            && hex
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+    })
+}
+
+fn valid_lease_fingerprint(value: &str) -> bool {
+    value.strip_prefix("blake3:").is_some_and(|digest| {
+        !digest.is_empty()
+            && digest
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
+    })
+}
+
+fn sha256_fingerprint(value: &str) -> String {
+    format!("sha256:{}", hex::encode(Sha256::digest(value.as_bytes())))
+}
+
+impl SealedDispatchAuthority {
+    fn expected_binding_sha256(&self) -> String {
+        sha256_fingerprint(
+            &[
+                self.schema.as_str(),
+                self.source.as_str(),
+                self.intent_id.as_str(),
+                self.lease_fingerprint.as_str(),
+                self.plan_fingerprint.as_str(),
+                self.workspace_root_sha256.as_str(),
+                self.command_sha256.as_str(),
+                &self
+                    .allow_risk_labels
+                    .iter()
+                    .map(String::as_str)
+                    .collect::<Vec<_>>()
+                    .join(","),
+            ]
+            .join("\n"),
+        )
+    }
+
+    fn matches(&self, context: &JsonValue) -> bool {
+        let command_matches =
+            self.command_sha256 == sha256_fingerprint(command_text(context).trim());
+        let root_matches = context
+            .get("workspace_roots")
+            .and_then(JsonValue::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(JsonValue::as_str)
+            .any(|root| self.workspace_root_sha256 == sha256_fingerprint(root));
+        // Shape validation makes these fields non-empty and typed. Read them
+        // here so the accepted decision is explicitly bound to the full lease,
+        // not merely to command/root hashes.
+        command_matches
+            && root_matches
+            && self.binding_sha256 == self.expected_binding_sha256()
+            && !self.intent_id.is_empty()
+            && !self.lease_fingerprint.is_empty()
+            && !self.plan_fingerprint.is_empty()
+    }
 }
 
 pub fn normalize_command_policy_value(config: &VmValue) -> Result<VmValue, VmError> {
@@ -430,6 +594,40 @@ pub(crate) async fn run_command_policy_preflight_with_origin(
         });
     }
 
+    let sealed_dispatch = policy
+        .sealed_dispatch
+        .as_ref()
+        .filter(|authority| authority.matches(&context));
+    if let Some(authority) = sealed_dispatch {
+        let suppressed = risk_labels_from_scan(&scan)
+            .into_iter()
+            .filter(|label| authority.allow_risk_labels.contains(label))
+            .collect::<Vec<_>>();
+        decisions.push(decision(
+            "authorize",
+            Some("exact command and workspace match the host-sealed dispatch authority".into()),
+            "sealed_dispatch_authority",
+            suppressed,
+            1.0,
+        ));
+    } else if policy.sealed_dispatch.is_some() {
+        let rejected = decision(
+            "reject",
+            Some("sealed dispatch command/workspace binding mismatch".into()),
+            "sealed_dispatch_authority",
+            Vec::new(),
+            1.0,
+        );
+        let message = rejected.reason.clone().unwrap_or_default();
+        decisions.push(rejected);
+        return Ok(CommandPolicyPreflight::Blocked {
+            status: "blocked",
+            message,
+            context,
+            decisions,
+        });
+    }
+
     if let Some(matched) = first_deny_pattern(&policy, &context) {
         let msg = if matched.candidate == command_text(&context) {
             format!("command denied by policy pattern {:?}", matched.pattern)
@@ -450,7 +648,7 @@ pub(crate) async fn run_command_policy_preflight_with_origin(
     }
 
     let risk_labels = risk_labels_from_scan(&scan);
-    let matched_approval = approval_required_label(&policy, &risk_labels);
+    let matched_approval = approval_required_label(&policy, &risk_labels, sealed_dispatch);
     if let Some(label) = matched_approval {
         let msg = format!("command requires approval for risk class {label}");
         decisions.push(decision(
@@ -643,7 +841,32 @@ pub(crate) async fn run_command_policy_preflight_with_origin(
             });
         }
         let risk_labels = risk_labels_from_scan(&scan);
-        let matched_approval = approval_required_label(&policy, &risk_labels);
+        // A rewrite invalidates the original command hash unless it happens to
+        // reproduce the exact sealed bytes. Revalidate instead of carrying the
+        // pre-hook authority decision across mutation.
+        let rewritten_sealed_dispatch = policy
+            .sealed_dispatch
+            .as_ref()
+            .filter(|authority| authority.matches(&context));
+        if policy.sealed_dispatch.is_some() && rewritten_sealed_dispatch.is_none() {
+            let rejected = decision(
+                "reject",
+                Some("pre-hook rewrite invalidated the sealed dispatch binding".into()),
+                "sealed_dispatch_authority",
+                Vec::new(),
+                1.0,
+            );
+            let message = rejected.reason.clone().unwrap_or_default();
+            decisions.push(rejected);
+            return Ok(CommandPolicyPreflight::Blocked {
+                status: "blocked",
+                message,
+                context,
+                decisions,
+            });
+        }
+        let matched_approval =
+            approval_required_label(&policy, &risk_labels, rewritten_sealed_dispatch);
         if let Some(label) = matched_approval {
             let msg = format!("rewritten command requires approval for risk class {label}");
             decisions.push(decision(
@@ -697,15 +920,28 @@ pub(crate) async fn run_command_policy_preflight_with_origin(
     })
 }
 
-fn approval_required_label(policy: &CommandPolicy, risk_labels: &[String]) -> Option<String> {
+fn approval_required_label(
+    policy: &CommandPolicy,
+    risk_labels: &[String],
+    sealed_dispatch: Option<&SealedDispatchAuthority>,
+) -> Option<String> {
     risk_labels
         .iter()
-        .find(|label| label.as_str() == EXECUTION_SEMANTICS_UNRESOLVED_LABEL)
+        .find(|label| {
+            label.as_str() == EXECUTION_SEMANTICS_UNRESOLVED_LABEL
+                && !sealed_dispatch
+                    .is_some_and(|authority| authority.allow_risk_labels.contains(label.as_str()))
+        })
         .cloned()
         .or_else(|| {
             risk_labels
                 .iter()
-                .find(|label| policy.require_approval.contains(label.as_str()))
+                .find(|label| {
+                    policy.require_approval.contains(label.as_str())
+                        && !sealed_dispatch.is_some_and(|authority| {
+                            authority.allow_risk_labels.contains(label.as_str())
+                        })
+                })
                 .cloned()
         })
 }
