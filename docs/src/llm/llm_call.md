@@ -257,6 +257,11 @@ replacement. Keys beginning with `_` are reserved for internal host plumbing.
 `models`, `ladder`, explicit `model`/`provider`, and `routing` are competing
 route owners. Do not combine them.
 
+`equivalent_failover` does not add automatic alternatives for local providers
+such as `ollama`, `mlx`, `vllm`, `llamacpp`, or `tgi` because the catalog does
+not prove which models are installed. Use an explicit `routing` policy when
+those local routes are known to be available.
+
 Use `harness.llm.model_ladder(name)` to inspect the label and ordered steps of
 a named ladder without starting a call. Keep reusable provider/model lists in
 catalog source data and pass only the stable ladder name from policy code.

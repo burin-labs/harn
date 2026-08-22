@@ -49,6 +49,17 @@ pub(crate) fn build_equivalent_failover_policy(
         return None;
     }
 
+    // Catalog equivalence describes compatible model families, not the models
+    // currently installed in a local runtime. Keep an explicit local selection
+    // exact unless the caller supplies its own routing policy with known-good
+    // fallback routes.
+    if crate::llm_config::provider_config(provider)
+        .as_ref()
+        .is_some_and(|config| config.local_runtime.is_some())
+    {
+        return None;
+    }
+
     let mut chain = vec![ChainLink {
         provider: provider.to_string(),
         model: model.to_string(),
