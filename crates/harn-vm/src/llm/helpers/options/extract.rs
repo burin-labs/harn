@@ -3,7 +3,7 @@ use super::{
     defaults::*, json::*, output::*, reminders::*, routing::*, system_prompt::*, thinking::*,
     tool_search::*,
 };
-use crate::llm::resolve_api_key;
+use crate::llm::{resolve_api_key_for_selection, ProviderSelectionSource};
 
 /// Extract all LLM call options from the standard (prompt, system, options) args.
 pub(crate) fn extract_llm_options(
@@ -34,6 +34,15 @@ pub(crate) fn extract_llm_options(
     let user_pinned_route = explicit_options.as_ref().is_some_and(|raw| {
         option_is_explicitly_set(raw, "model") || option_is_explicitly_set(raw, "provider")
     });
+    let caller_selected_provider = explicit_options.as_ref().is_some_and(|raw| {
+        option_is_explicitly_set(raw, "provider")
+            && raw
+                .get("provider")
+                .is_some_and(|value| !value.display().eq_ignore_ascii_case("auto"))
+    });
+    let caller_selected_model = explicit_options
+        .as_ref()
+        .is_some_and(|raw| option_is_explicitly_set(raw, "model"));
     let options = crate::llm::cost_route::merge_context_options(explicit_options);
 
     // If we're inside an `@step`-annotated persona function and the
@@ -136,6 +145,19 @@ pub(crate) fn extract_llm_options(
     }
     let (capability_provider, capability_model) =
         crate::llm::managed_supply::logical_route(&provider, &model)?;
+    let selection_source = if routing_policy.is_some() || routing_decision.is_some() {
+        ProviderSelectionSource::RoutingPolicy
+    } else if caller_selected_provider {
+        ProviderSelectionSource::CallOption
+    } else if crate::stdlib::process::session_env_value("HARN_LLM_PROVIDER")
+        .is_some_and(|selected| selected == provider)
+    {
+        ProviderSelectionSource::Environment
+    } else if caller_selected_model {
+        ProviderSelectionSource::ModelSelection
+    } else {
+        crate::llm::inferred_provider_selection_source(&provider)
+    };
     let api_key = if routing_policy
         .as_ref()
         .is_some_and(|policy| policy.chain.len() > 1)
@@ -144,7 +166,7 @@ pub(crate) fn extract_llm_options(
     {
         String::new()
     } else {
-        resolve_api_key(&provider)?
+        resolve_api_key_for_selection(&provider, selection_source)?
     };
     let caps = crate::llm::capabilities::lookup(&capability_provider, &capability_model);
     let mut api_mode = parse_api_mode_option(options.as_ref())?;

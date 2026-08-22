@@ -127,6 +127,9 @@ fn single_route_still_reports_missing_credentials_during_extraction() {
     assert!(err
         .to_string()
         .contains("Missing API key: set HARN_TEST_MISSING_SINGLE_ROUTE_KEY environment variable"));
+    assert!(err
+        .to_string()
+        .contains("provider 'needs-key-single' selected via the llm_call `provider` option"));
 
     crate::llm_config::clear_user_overrides();
 }
