@@ -124,7 +124,11 @@ fn verify(receipt: &Path, manifest: &Path, binary: &Path, repo_root: &Path) -> R
     let current_evidence = record_evidence(binary, manifest, repo_root)?;
     let recorded_evidence = format!("{}\n", lines[8..].join("\n"));
     if current_evidence != recorded_evidence {
-        return Err("freshness checker or manifest changed after the build receipt".into());
+        let mismatch = evidence_mismatch_detail(&recorded_evidence, &current_evidence)
+            .unwrap_or_else(|| "evidence-shape changed".into());
+        return Err(format!(
+            "freshness checker or manifest changed after the build receipt: {mismatch}"
+        ));
     }
     let recorded_binary_stat = lines[5]
         .strip_prefix("artifact-stat=")
@@ -133,6 +137,18 @@ fn verify(receipt: &Path, manifest: &Path, binary: &Path, repo_root: &Path) -> R
         return Err("worktree Harn executable changed after the build receipt".into());
     }
     Ok(())
+}
+
+fn evidence_mismatch_detail(recorded: &str, current: &str) -> Option<String> {
+    recorded
+        .lines()
+        .zip(current.lines())
+        .find(|(recorded, current)| recorded != current)
+        .map(|(recorded, current)| {
+            let (field, recorded_value) = recorded.split_once('=').unwrap_or((recorded, recorded));
+            let current_value = current.split_once('=').map_or(current, |(_, value)| value);
+            format!("{field} recorded={recorded_value} current={current_value}")
+        })
 }
 
 fn valid_keyed_hex_range(line: &str, key: &str, minimum: usize, maximum: usize) -> bool {
@@ -174,6 +190,16 @@ mod tests {
             &[16]
         ));
         assert!(!valid_keyed_hash("manifest=xyz", "manifest", &[3]));
+    }
+
+    #[test]
+    fn evidence_mismatch_names_the_exact_hash_field_without_source_bytes() {
+        let recorded = "harn-freshness-check-v3\nchecker-content=aa\nmanifest=bb\n";
+        let current = "harn-freshness-check-v3\nchecker-content=cc\nmanifest=bb\n";
+        assert_eq!(
+            evidence_mismatch_detail(recorded, current).as_deref(),
+            Some("checker-content recorded=aa current=cc")
+        );
     }
 
     #[test]
