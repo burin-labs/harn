@@ -14,9 +14,9 @@ use harn_vm::{VmResourceGuardHandle, VmValue};
 use crate::error::HostlibError;
 use crate::host_lease::{
     HostLeaseAcquireReceipt, HostLeaseAcquireStatus, HostLeaseDeferReceipt, HostLeaseHandle,
-    HostLeaseMetadataUpdateReceipt, HostLeasePriorityClass, HostLeaseReleaseReceipt,
-    HostLeaseRequest, HostLeaseResourceClass, HostLeaseState, HostLeaseStore,
-    DEFAULT_HOST_LEASE_DOMAIN,
+    HostLeaseMetadataUpdateReceipt, HostLeasePriorityClass, HostLeaseQueueEvidence,
+    HostLeaseReleaseReceipt, HostLeaseRequest, HostLeaseResourceClass, HostLeaseState,
+    HostLeaseStore, DEFAULT_HOST_LEASE_DOMAIN,
 };
 use crate::registry::{BuiltinRegistry, HostlibCapability};
 use crate::tools::args::{
@@ -330,7 +330,34 @@ fn acquire_to_value(
                 .transpose()?
                 .unwrap_or(VmValue::Nil),
         ),
+        (
+            "queue",
+            receipt
+                .queue
+                .as_ref()
+                .map(queue_to_value)
+                .unwrap_or(VmValue::Nil),
+        ),
     ]))
+}
+
+fn queue_to_value(queue: &HostLeaseQueueEvidence) -> VmValue {
+    build_dict([
+        ("waiter_id", str_value(&queue.waiter_id)),
+        ("requested_at_ms", VmValue::Int(queue.requested_at_ms)),
+        (
+            "position",
+            VmValue::Int(i64::try_from(queue.position).unwrap_or(i64::MAX)),
+        ),
+        (
+            "predecessor_waiter_id",
+            queue
+                .predecessor_waiter_id
+                .as_ref()
+                .map(str_value)
+                .unwrap_or(VmValue::Nil),
+        ),
+    ])
 }
 
 fn defer_to_value(defer: &HostLeaseDeferReceipt) -> Result<VmValue, HostlibError> {

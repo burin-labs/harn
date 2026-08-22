@@ -298,6 +298,9 @@ pub struct HostLeaseRunReceipt {
     pub resource: HostLeaseResourceKey,
     /// Typed, redacted workload identity.
     pub execution_context: HostLeaseExecutionContext,
+    /// Durable admission evidence captured when the run joined the queue.
+    #[serde(default)]
+    pub queue: Option<super::HostLeaseQueueEvidence>,
     /// Current durable lifecycle state.
     pub status: HostLeaseRunState,
 }

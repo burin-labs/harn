@@ -1753,9 +1753,20 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Resolve the published workspace version
+        id: harn-version
+        shell: bash
+        run: |
+          version="$(cargo metadata --locked --no-deps --format-version 1 \
+            | jq -er '[.packages[] | select(.name == "harn-cli") | .version] \
+              | unique | if length == 1 then .[0] \
+              else error("expected one harn-cli version") end')"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
       - name: Install pinned Harn release
         id: harn
         uses: ./.github/actions/setup-harn
+        with:
+          version: ${{ steps.harn-version.outputs.version }}
       - name: Check documentation contracts
         env:
           HARN_BIN: ${{ steps.harn.outputs.path }}
