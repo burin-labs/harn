@@ -42,8 +42,8 @@ const MCPUnsupportedProtocolVersionErrorMessage = "Unsupported protocol version"
 // MCPUnsupportedProtocolVersionErrorCode is the JSON-RPC server error for unsupported versions.
 const MCPUnsupportedProtocolVersionErrorCode = -32022
 
-// ACPAgentMethod is the typed alias for the ACPAgentMethods wire vocabulary.
-type ACPAgentMethod = string
+// ACPAgentMethod is the named string type for the ACPAgentMethods wire vocabulary.
+type ACPAgentMethod string
 
 // ACPAgentMethods enumerates every wire value Harn currently emits for ACPAgentMethod.
 var ACPAgentMethods = []ACPAgentMethod{
@@ -67,8 +67,8 @@ var ACPAgentMethods = []ACPAgentMethod{
 	"session/stop",
 }
 
-// ACPClientMethod is the typed alias for the ACPClientMethods wire vocabulary.
-type ACPClientMethod = string
+// ACPClientMethod is the named string type for the ACPClientMethods wire vocabulary.
+type ACPClientMethod string
 
 // ACPClientMethods enumerates every wire value Harn currently emits for ACPClientMethod.
 var ACPClientMethods = []ACPClientMethod{
@@ -79,8 +79,8 @@ var ACPClientMethods = []ACPClientMethod{
 	"session/request_permission",
 }
 
-// ACPAgentNotification is the typed alias for the ACPAgentNotifications wire vocabulary.
-type ACPAgentNotification = string
+// ACPAgentNotification is the named string type for the ACPAgentNotifications wire vocabulary.
+type ACPAgentNotification string
 
 // ACPAgentNotifications enumerates every wire value Harn currently emits for ACPAgentNotification.
 var ACPAgentNotifications = []ACPAgentNotification{
@@ -89,8 +89,8 @@ var ACPAgentNotifications = []ACPAgentNotification{
 	"terminal/output",
 }
 
-// ACPSessionUpdate is the typed alias for the ACPSessionUpdates wire vocabulary.
-type ACPSessionUpdate = string
+// ACPSessionUpdate is the named string type for the ACPSessionUpdates wire vocabulary.
+type ACPSessionUpdate string
 
 // ACPSessionUpdates enumerates every wire value Harn currently emits for ACPSessionUpdate.
 var ACPSessionUpdates = []ACPSessionUpdate{
@@ -129,8 +129,8 @@ var ACPSessionUpdates = []ACPSessionUpdate{
 	"worker_update",
 }
 
-// HarnACPSessionUpdateExtension is the typed alias for the HarnACPSessionUpdateExtensions wire vocabulary.
-type HarnACPSessionUpdateExtension = string
+// HarnACPSessionUpdateExtension is the named string type for the HarnACPSessionUpdateExtensions wire vocabulary.
+type HarnACPSessionUpdateExtension string
 
 // HarnACPSessionUpdateExtensions enumerates every wire value Harn currently emits for HarnACPSessionUpdateExtension.
 var HarnACPSessionUpdateExtensions = []HarnACPSessionUpdateExtension{
@@ -156,8 +156,8 @@ var HarnACPSessionUpdateExtensions = []HarnACPSessionUpdateExtension{
 	"worker_update",
 }
 
-// HarnAgentEventKind is the typed alias for the HarnAgentEventKinds wire vocabulary.
-type HarnAgentEventKind = string
+// HarnAgentEventKind is the named string type for the HarnAgentEventKinds wire vocabulary.
+type HarnAgentEventKind string
 
 // HarnAgentEventKinds enumerates every wire value Harn currently emits for HarnAgentEventKind.
 var HarnAgentEventKinds = []HarnAgentEventKind{
@@ -206,16 +206,16 @@ var HarnAgentEventKinds = []HarnAgentEventKind{
 	"typed_checkpoint",
 }
 
-// HarnPromptResultExtensionField is the typed alias for the HarnPromptResultExtensionFields wire vocabulary.
-type HarnPromptResultExtensionField = string
+// HarnPromptResultExtensionField is the named string type for the HarnPromptResultExtensionFields wire vocabulary.
+type HarnPromptResultExtensionField string
 
 // HarnPromptResultExtensionFields enumerates every wire value Harn currently emits for HarnPromptResultExtensionField.
 var HarnPromptResultExtensionFields = []HarnPromptResultExtensionField{
 	"terminal",
 }
 
-// ACPContentBlockType is the typed alias for the ACPContentBlockTypes wire vocabulary.
-type ACPContentBlockType = string
+// ACPContentBlockType is the named string type for the ACPContentBlockTypes wire vocabulary.
+type ACPContentBlockType string
 
 // ACPContentBlockTypes enumerates every wire value Harn currently emits for ACPContentBlockType.
 var ACPContentBlockTypes = []ACPContentBlockType{
@@ -226,8 +226,8 @@ var ACPContentBlockTypes = []ACPContentBlockType{
 	"audio",
 }
 
-// ACPToolKind is the typed alias for the ACPToolKinds wire vocabulary.
-type ACPToolKind = string
+// ACPToolKind is the named string type for the ACPToolKinds wire vocabulary.
+type ACPToolKind string
 
 // ACPToolKinds enumerates every wire value Harn currently emits for ACPToolKind.
 var ACPToolKinds = []ACPToolKind{
@@ -242,8 +242,8 @@ var ACPToolKinds = []ACPToolKind{
 	"other",
 }
 
-// ACPToolCallStatus is the typed alias for the ACPToolCallStatuses wire vocabulary.
-type ACPToolCallStatus = string
+// ACPToolCallStatus is the named string type for the ACPToolCallStatuses wire vocabulary.
+type ACPToolCallStatus string
 
 // ACPToolCallStatuses enumerates every wire value Harn currently emits for ACPToolCallStatus.
 var ACPToolCallStatuses = []ACPToolCallStatus{
@@ -253,8 +253,8 @@ var ACPToolCallStatuses = []ACPToolCallStatus{
 	"failed",
 }
 
-// HarnToolCallErrorCategory is the typed alias for the HarnToolCallErrorCategories wire vocabulary.
-type HarnToolCallErrorCategory = string
+// HarnToolCallErrorCategory is the named string type for the HarnToolCallErrorCategories wire vocabulary.
+type HarnToolCallErrorCategory string
 
 // HarnToolCallErrorCategories enumerates every wire value Harn currently emits for HarnToolCallErrorCategory.
 var HarnToolCallErrorCategories = []HarnToolCallErrorCategory{
@@ -274,8 +274,8 @@ var HarnToolCallErrorCategories = []HarnToolCallErrorCategory{
 	"unknown",
 }
 
-// HarnToolMutationStatus is the typed alias for the HarnToolMutationStatuses wire vocabulary.
-type HarnToolMutationStatus = string
+// HarnToolMutationStatus is the named string type for the HarnToolMutationStatuses wire vocabulary.
+type HarnToolMutationStatus string
 
 // HarnToolMutationStatuses enumerates every wire value Harn currently emits for HarnToolMutationStatus.
 var HarnToolMutationStatuses = []HarnToolMutationStatus{
@@ -285,8 +285,8 @@ var HarnToolMutationStatuses = []HarnToolMutationStatus{
 	"unknown",
 }
 
-// HarnSideEffectLevel is the typed alias for the HarnSideEffectLevels wire vocabulary.
-type HarnSideEffectLevel = string
+// HarnSideEffectLevel is the named string type for the HarnSideEffectLevels wire vocabulary.
+type HarnSideEffectLevel string
 
 // HarnSideEffectLevels enumerates every wire value Harn currently emits for HarnSideEffectLevel.
 var HarnSideEffectLevels = []HarnSideEffectLevel{
@@ -298,8 +298,8 @@ var HarnSideEffectLevels = []HarnSideEffectLevel{
 	"desktop_control",
 }
 
-// HarnCompletionEvidenceRole is the typed alias for the HarnCompletionEvidenceRoles wire vocabulary.
-type HarnCompletionEvidenceRole = string
+// HarnCompletionEvidenceRole is the named string type for the HarnCompletionEvidenceRoles wire vocabulary.
+type HarnCompletionEvidenceRole string
 
 // HarnCompletionEvidenceRoles enumerates every wire value Harn currently emits for HarnCompletionEvidenceRole.
 var HarnCompletionEvidenceRoles = []HarnCompletionEvidenceRole{
@@ -308,8 +308,8 @@ var HarnCompletionEvidenceRoles = []HarnCompletionEvidenceRole{
 	"verification",
 }
 
-// HarnWorkerStatus is the typed alias for the HarnWorkerStatuses wire vocabulary.
-type HarnWorkerStatus = string
+// HarnWorkerStatus is the named string type for the HarnWorkerStatuses wire vocabulary.
+type HarnWorkerStatus string
 
 // HarnWorkerStatuses enumerates every wire value Harn currently emits for HarnWorkerStatus.
 var HarnWorkerStatuses = []HarnWorkerStatus{
@@ -323,8 +323,8 @@ var HarnWorkerStatuses = []HarnWorkerStatus{
 	"cancelled",
 }
 
-// HarnAgentLifecycleState is the typed alias for the HarnAgentLifecycleStates wire vocabulary.
-type HarnAgentLifecycleState = string
+// HarnAgentLifecycleState is the named string type for the HarnAgentLifecycleStates wire vocabulary.
+type HarnAgentLifecycleState string
 
 // HarnAgentLifecycleStates enumerates every wire value Harn currently emits for HarnAgentLifecycleState.
 var HarnAgentLifecycleStates = []HarnAgentLifecycleState{
@@ -338,8 +338,8 @@ var HarnAgentLifecycleStates = []HarnAgentLifecycleState{
 	"cancelled",
 }
 
-// HarnAgentLifecycleEvent is the typed alias for the HarnAgentLifecycleEvents wire vocabulary.
-type HarnAgentLifecycleEvent = string
+// HarnAgentLifecycleEvent is the named string type for the HarnAgentLifecycleEvents wire vocabulary.
+type HarnAgentLifecycleEvent string
 
 // HarnAgentLifecycleEvents enumerates every wire value Harn currently emits for HarnAgentLifecycleEvent.
 var HarnAgentLifecycleEvents = []HarnAgentLifecycleEvent{
@@ -355,8 +355,8 @@ var HarnAgentLifecycleEvents = []HarnAgentLifecycleEvent{
 	"Joined",
 }
 
-// AgentTerminalClass is the typed alias for the AgentTerminalClasses wire vocabulary.
-type AgentTerminalClass = string
+// AgentTerminalClass is the named string type for the AgentTerminalClasses wire vocabulary.
+type AgentTerminalClass string
 
 // AgentTerminalClasses enumerates every wire value Harn currently emits for AgentTerminalClass.
 var AgentTerminalClasses = []AgentTerminalClass{
@@ -373,8 +373,8 @@ var AgentTerminalClasses = []AgentTerminalClass{
 	"generic_throw",
 }
 
-// AgentTerminalKind is the typed alias for the AgentTerminalKinds wire vocabulary.
-type AgentTerminalKind = string
+// AgentTerminalKind is the named string type for the AgentTerminalKinds wire vocabulary.
+type AgentTerminalKind string
 
 // AgentTerminalKinds enumerates every wire value Harn currently emits for AgentTerminalKind.
 var AgentTerminalKinds = []AgentTerminalKind{
@@ -391,8 +391,8 @@ var AgentTerminalKinds = []AgentTerminalKind{
 	"unknown",
 }
 
-// AgentTerminalOwner is the typed alias for the AgentTerminalOwners wire vocabulary.
-type AgentTerminalOwner = string
+// AgentTerminalOwner is the named string type for the AgentTerminalOwners wire vocabulary.
+type AgentTerminalOwner string
 
 // AgentTerminalOwners enumerates every wire value Harn currently emits for AgentTerminalOwner.
 var AgentTerminalOwners = []AgentTerminalOwner{
@@ -404,8 +404,8 @@ var AgentTerminalOwners = []AgentTerminalOwner{
 	"unknown",
 }
 
-// ToolCallReceiptStatus is the typed alias for the ToolCallReceiptStatuses wire vocabulary.
-type ToolCallReceiptStatus = string
+// ToolCallReceiptStatus is the named string type for the ToolCallReceiptStatuses wire vocabulary.
+type ToolCallReceiptStatus string
 
 // ToolCallReceiptStatuses enumerates every wire value Harn currently emits for ToolCallReceiptStatus.
 var ToolCallReceiptStatuses = []ToolCallReceiptStatus{
@@ -416,8 +416,8 @@ var ToolCallReceiptStatuses = []ToolCallReceiptStatus{
 	"error",
 }
 
-// ToolCallReceiptExecutor is the typed alias for the ToolCallReceiptExecutors wire vocabulary.
-type ToolCallReceiptExecutor = string
+// ToolCallReceiptExecutor is the named string type for the ToolCallReceiptExecutors wire vocabulary.
+type ToolCallReceiptExecutor string
 
 // ToolCallReceiptExecutors enumerates every wire value Harn currently emits for ToolCallReceiptExecutor.
 var ToolCallReceiptExecutors = []ToolCallReceiptExecutor{
@@ -427,8 +427,8 @@ var ToolCallReceiptExecutors = []ToolCallReceiptExecutor{
 	"provider_native",
 }
 
-// A2ATaskState is the typed alias for the A2ATaskStates wire vocabulary.
-type A2ATaskState = string
+// A2ATaskState is the named string type for the A2ATaskStates wire vocabulary.
+type A2ATaskState string
 
 // A2ATaskStates enumerates every wire value Harn currently emits for A2ATaskState.
 var A2ATaskStates = []A2ATaskState{
@@ -443,8 +443,8 @@ var A2ATaskStates = []A2ATaskState{
 	"auth-required",
 }
 
-// A2ATaskEventType is the typed alias for the A2ATaskEventTypes wire vocabulary.
-type A2ATaskEventType = string
+// A2ATaskEventType is the named string type for the A2ATaskEventTypes wire vocabulary.
+type A2ATaskEventType string
 
 // A2ATaskEventTypes enumerates every wire value Harn currently emits for A2ATaskEventType.
 var A2ATaskEventTypes = []A2ATaskEventType{
@@ -453,16 +453,16 @@ var A2ATaskEventTypes = []A2ATaskEventType{
 	"worker_update",
 }
 
-// MCPProtocolVersionValue is the typed alias for the MCPProtocolVersions wire vocabulary.
-type MCPProtocolVersionValue = string
+// MCPProtocolVersionValue is the named string type for the MCPProtocolVersions wire vocabulary.
+type MCPProtocolVersionValue string
 
 // MCPProtocolVersions enumerates every wire value Harn currently emits for MCPProtocolVersionValue.
 var MCPProtocolVersions = []MCPProtocolVersionValue{
 	"2026-07-28",
 }
 
-// MCPMethod is the typed alias for the MCPMethods wire vocabulary.
-type MCPMethod = string
+// MCPMethod is the named string type for the MCPMethods wire vocabulary.
+type MCPMethod string
 
 // MCPMethods enumerates every wire value Harn currently emits for MCPMethod.
 var MCPMethods = []MCPMethod{
@@ -483,8 +483,8 @@ var MCPMethods = []MCPMethod{
 	"tasks/cancel",
 }
 
-// MCPCacheScope is the typed alias for the MCPCacheScopes wire vocabulary.
-type MCPCacheScope = string
+// MCPCacheScope is the named string type for the MCPCacheScopes wire vocabulary.
+type MCPCacheScope string
 
 // MCPCacheScopes enumerates every wire value Harn currently emits for MCPCacheScope.
 var MCPCacheScopes = []MCPCacheScope{
@@ -492,8 +492,8 @@ var MCPCacheScopes = []MCPCacheScope{
 	"public",
 }
 
-// MCPResultType is the typed alias for the MCPResultTypes wire vocabulary.
-type MCPResultType = string
+// MCPResultType is the named string type for the MCPResultTypes wire vocabulary.
+type MCPResultType string
 
 // MCPResultTypes enumerates every wire value Harn currently emits for MCPResultType.
 var MCPResultTypes = []MCPResultType{
@@ -502,8 +502,8 @@ var MCPResultTypes = []MCPResultType{
 	"task",
 }
 
-// MCPLoggingLevel is the typed alias for the MCPLoggingLevels wire vocabulary.
-type MCPLoggingLevel = string
+// MCPLoggingLevel is the named string type for the MCPLoggingLevels wire vocabulary.
+type MCPLoggingLevel string
 
 // MCPLoggingLevels enumerates every wire value Harn currently emits for MCPLoggingLevel.
 var MCPLoggingLevels = []MCPLoggingLevel{

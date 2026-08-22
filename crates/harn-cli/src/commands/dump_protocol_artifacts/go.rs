@@ -965,8 +965,8 @@ pub(super) fn go_typed_array(type_name: &str, slice_name: &str, values: &[&str])
 
 pub(super) fn go_typed_array_owned(type_name: &str, slice_name: &str, values: &[String]) -> String {
     let mut out =
-        format!("// {type_name} is the typed alias for the {slice_name} wire vocabulary.\n");
-    out.push_str(&format!("type {type_name} = string\n\n"));
+        format!("// {type_name} is the named string type for the {slice_name} wire vocabulary.\n");
+    out.push_str(&format!("type {type_name} string\n\n"));
     out.push_str(&format!(
         "// {slice_name} enumerates every wire value Harn currently emits for {type_name}.\n"
     ));
