@@ -1,6 +1,7 @@
 import {
   CiCachePolicy,
   NATIVE_CACHE_INPUTS,
+  RELEASE_PATH_FILTER_ACTION,
   actions_cache_capacity_errors,
   ci_cache_policy_errors,
   ci_cache_policy_parse,
@@ -263,7 +264,7 @@ fn release_binary_workflow() {
           {
             id: "release-build-inputs",
             if: "github.event_name == 'push' && github.ref == 'refs/heads/main'",
-            uses: "dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d",
+            uses: RELEASE_PATH_FILTER_ACTION + "@0123456789abcdef0123456789abcdef01234567",
             with: {filters: ".github/release-warm-cache-paths.yml"},
           },
           {
@@ -300,6 +301,27 @@ fn release_binary_workflow() {
       cache_budget: {
         if:
           "always() && needs.setup.outputs.build_mode == 'warm' && needs.setup.outputs.should_build_binaries == 'true' && needs.build.result != 'cancelled'",
+      },
+    },
+  }
+}
+
+fn release_binary_workflow_with_filter_uses(uses: string) {
+  const workflow = release_binary_workflow()
+  return {
+    ...workflow,
+    jobs: {
+      ...workflow.jobs,
+      setup: {
+        ...workflow.jobs.setup,
+        steps: workflow.jobs.setup.steps.map(
+          { step ->
+            if step?.id == "release-build-inputs" {
+              return {...step, uses: uses}
+            }
+            return step
+          },
+        ),
       },
     },
   }
@@ -588,6 +610,32 @@ pipeline test_release_warm_cache_policy_accepts_build_inputs_and_typed_workflow_
   assert_eq(release_warm_cache_concurrency_errors(workflow), [])
   assert_eq(release_aot_runner_errors(workflow), [])
   assert_eq(release_warm_cache_prune_errors(workflow), [])
+}
+
+pipeline test_release_warm_cache_policy_accepts_a_rotated_full_commit_pin(harness: Harness, task) {
+  const rotated = release_binary_workflow_with_filter_uses(
+    RELEASE_PATH_FILTER_ACTION + "@fedcba9876543210fedcba9876543210fedcba98",
+  )
+  assert_eq(release_warm_cache_path_policy_errors(release_warm_cache_path_policy(), rotated), [])
+}
+
+pipeline test_release_warm_cache_policy_rejects_mutable_or_malformed_action_refs(
+  harness: Harness,
+  task,
+) {
+  const invalid_uses = [
+    RELEASE_PATH_FILTER_ACTION + "@v4",
+    RELEASE_PATH_FILTER_ACTION + "@0123456789abcdef0123456789abcdef0123456",
+    RELEASE_PATH_FILTER_ACTION + "@0123456789abcdef0123456789abcdef0123456g",
+    "other/paths-filter@0123456789abcdef0123456789abcdef01234567",
+  ]
+  for uses in invalid_uses {
+    const invalid = release_binary_workflow_with_filter_uses(uses)
+    assert_eq(
+      release_warm_cache_path_policy_errors(release_warm_cache_path_policy(), invalid),
+      ["build-release-binaries.yml:setup must use dorny/paths-filter pinned to a full commit SHA"],
+    )
+  }
 }
 
 pipeline test_release_warm_cache_policy_classifies_representative_paths(harness: Harness, task) {
