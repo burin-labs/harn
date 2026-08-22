@@ -74,47 +74,48 @@ assert_plan() {
 }
 
 write_paths docs docs/readme.md
-assert_plan false --platform windows --event pull_request --changed-files "$tmp_dir/docs"
+assert_plan false --platform windows --event merge_group --changed-files "$tmp_dir/docs"
 assert_plan false --platform macos --event pull_request --changed-files "$tmp_dir/docs"
 
 write_paths windows_source crates/harn-hostlib/src/lib.rs
-assert_plan true --platform windows --event pull_request --changed-files "$tmp_dir/windows_source"
+assert_plan true --platform windows --event merge_group --changed-files "$tmp_dir/windows_source"
+assert_plan false --platform windows --event pull_request --changed-files "$tmp_dir/windows_source"
 assert_plan false --platform macos --event pull_request --changed-files "$tmp_dir/windows_source"
 
 write_paths native_hostlib_tests \
   crates/harn-hostlib/tests/harn_hostlib/secret_store_os_native.rs \
   crates/harn-hostlib/tests/harn_hostlib/sandbox_npm_offline_install.rs
-assert_plan true --platform windows --event pull_request --changed-files "$tmp_dir/native_hostlib_tests"
+assert_plan true --platform windows --event merge_group --changed-files "$tmp_dir/native_hostlib_tests"
 assert_plan true --platform macos --event pull_request --changed-files "$tmp_dir/native_hostlib_tests"
 
 write_paths windows_selector scripts/ci/affected_crate_args.sh
-assert_plan true --platform windows --event pull_request --changed-files "$tmp_dir/windows_selector"
+assert_plan true --platform windows --event merge_group --changed-files "$tmp_dir/windows_selector"
 assert_plan false --platform macos --event pull_request --changed-files "$tmp_dir/windows_selector"
 
 write_paths package_content_hash crates/harn-modules/src/package_execution/content_hash.rs
-assert_plan true --platform windows --event pull_request --changed-files "$tmp_dir/package_content_hash"
+assert_plan true --platform windows --event merge_group --changed-files "$tmp_dir/package_content_hash"
 assert_plan true --platform macos --event pull_request --changed-files "$tmp_dir/package_content_hash"
 
 write_paths other_package_paths \
   crates/harn-modules/src/package_imports.rs \
   crates/harn-modules/src/package_snapshot.rs
-assert_plan true --platform windows --event pull_request --changed-files "$tmp_dir/other_package_paths"
+assert_plan true --platform windows --event merge_group --changed-files "$tmp_dir/other_package_paths"
 assert_plan false --platform macos --event pull_request --changed-files "$tmp_dir/other_package_paths"
 
 write_paths swift_protocol_paths \
   crates/harn-cli/src/commands/dump_protocol_artifacts/swift.rs \
   spec/protocol-artifacts/HarnProtocol.swift
-assert_plan false --platform windows --event pull_request --changed-files "$tmp_dir/swift_protocol_paths"
+assert_plan false --platform windows --event merge_group --changed-files "$tmp_dir/swift_protocol_paths"
 assert_plan true --platform macos --event pull_request --changed-files "$tmp_dir/swift_protocol_paths"
 
 write_paths vm_macos_sandbox_test crates/harn-vm/tests/harn_vm/sandbox_hardened.rs
-assert_plan false --platform windows --event pull_request --changed-files "$tmp_dir/vm_macos_sandbox_test"
+assert_plan false --platform windows --event merge_group --changed-files "$tmp_dir/vm_macos_sandbox_test"
 assert_plan true --platform macos --event pull_request --changed-files "$tmp_dir/vm_macos_sandbox_test"
 
 # The VM runtime tests are a directory module; the per-OS process-sandbox cases
 # live in a submodule, so both native lanes must route on the directory form.
 write_paths vm_runtime_tests_dir crates/harn-vm/src/vm/tests_runtime/process_sandbox.rs
-assert_plan true --platform windows --event pull_request --changed-files "$tmp_dir/vm_runtime_tests_dir"
+assert_plan true --platform windows --event merge_group --changed-files "$tmp_dir/vm_runtime_tests_dir"
 assert_plan true --platform macos --event pull_request --changed-files "$tmp_dir/vm_runtime_tests_dir"
 
 write_paths release_meta Cargo.lock changelog.d/123.fixed.md
@@ -135,63 +136,63 @@ assert_plan false --platform macos --event pull_request \
   --changed-files "$tmp_dir/release_meta"
 assert_plan false --platform windows --event pull_request \
   --head-ref release/v0.10.68 --changed-files "$tmp_dir/release_meta"
-assert_plan true --platform windows --event pull_request \
+assert_plan true --platform macos --event pull_request \
   --head-ref feature/not-a-release --changed-files "$tmp_dir/release_meta"
 
 write_paths release_workflow .github/workflows/build-release-binaries.yml
 write_policy_diff release_control.diff .github/workflows/build-release-binaries.yml '@@ -20,1 +20,1 @@
 -      - run: scripts/release_runner_matrix.sh --mode primary
 +      - run: scripts/release_runner_matrix.sh --mode policy'
-assert_plan false --platform windows --event pull_request --changed-files "$tmp_dir/release_workflow" --policy-diff "$tmp_dir/release_control.diff"
+assert_plan false --platform windows --event merge_group --changed-files "$tmp_dir/release_workflow" --policy-diff "$tmp_dir/release_control.diff"
 assert_plan false --platform macos --event pull_request --changed-files "$tmp_dir/release_workflow" --policy-diff "$tmp_dir/release_control.diff"
 
 write_policy_diff release_windows.diff .github/workflows/build-release-binaries.yml '@@ -20,1 +20,1 @@
 -          target: x86_64-pc-windows-msvc
 +          target: x86_64-pc-windows-msvc
 +          shell: pwsh'
-assert_plan true --platform windows --event pull_request --changed-files "$tmp_dir/release_workflow" --policy-diff "$tmp_dir/release_windows.diff"
+assert_plan true --platform windows --event merge_group --changed-files "$tmp_dir/release_workflow" --policy-diff "$tmp_dir/release_windows.diff"
 assert_plan false --platform macos --event pull_request --changed-files "$tmp_dir/release_workflow" --policy-diff "$tmp_dir/release_windows.diff"
 
 write_policy_diff release_macos.diff .github/workflows/build-release-binaries.yml '@@ -20,1 +20,1 @@
 -          target: aarch64-apple-darwin
 +          target: aarch64-apple-darwin
 +          runner: macos-latest'
-assert_plan false --platform windows --event pull_request --changed-files "$tmp_dir/release_workflow" --policy-diff "$tmp_dir/release_macos.diff"
+assert_plan false --platform windows --event merge_group --changed-files "$tmp_dir/release_workflow" --policy-diff "$tmp_dir/release_macos.diff"
 assert_plan true --platform macos --event pull_request --changed-files "$tmp_dir/release_workflow" --policy-diff "$tmp_dir/release_macos.diff"
 
-assert_plan true --platform windows --event pull_request --changed-files "$tmp_dir/release_workflow" --policy-diff "$tmp_dir/missing-policy.diff"
+assert_plan true --platform windows --event merge_group --changed-files "$tmp_dir/release_workflow" --policy-diff "$tmp_dir/missing-policy.diff"
 
 write_paths ci_only .github/workflows/ci.yml
 write_diff package.diff '@@ -4,1 +4,1 @@
 -      - run: make package-audit
 +      - run: make package-audit-fast'
-assert_plan false --platform windows --event pull_request --changed-files "$tmp_dir/ci_only" --ci-diff "$tmp_dir/package.diff"
+assert_plan false --platform windows --event merge_group --changed-files "$tmp_dir/ci_only" --ci-diff "$tmp_dir/package.diff"
 assert_plan false --platform macos --event pull_request --changed-files "$tmp_dir/ci_only" --ci-diff "$tmp_dir/package.diff"
 
 write_diff windows.diff '@@ -7,1 +7,1 @@
 -      - run: echo windows route
 +      - run: echo windows route v2'
-assert_plan false --platform windows --event pull_request --changed-files "$tmp_dir/ci_only" --ci-diff "$tmp_dir/windows.diff"
+assert_plan false --platform windows --event merge_group --changed-files "$tmp_dir/ci_only" --ci-diff "$tmp_dir/windows.diff"
 assert_plan false --platform macos --event pull_request --changed-files "$tmp_dir/ci_only" --ci-diff "$tmp_dir/windows.diff"
 
 write_diff windows_job.diff '@@ -10,1 +10,1 @@
 -      - run: cargo test --target windows
 +      - run: cargo test --target windows --locked'
-assert_plan true --platform windows --event pull_request --changed-files "$tmp_dir/ci_only" --ci-diff "$tmp_dir/windows_job.diff"
+assert_plan true --platform windows --event merge_group --changed-files "$tmp_dir/ci_only" --ci-diff "$tmp_dir/windows_job.diff"
 assert_plan false --platform macos --event pull_request --changed-files "$tmp_dir/ci_only" --ci-diff "$tmp_dir/windows_job.diff"
 
 write_diff macos.diff '@@ -13,1 +13,1 @@
 -      - run: echo macos route
 +      - run: echo macos route v2'
-assert_plan false --platform windows --event pull_request --changed-files "$tmp_dir/ci_only" --ci-diff "$tmp_dir/macos.diff"
+assert_plan false --platform windows --event merge_group --changed-files "$tmp_dir/ci_only" --ci-diff "$tmp_dir/macos.diff"
 assert_plan false --platform macos --event pull_request --changed-files "$tmp_dir/ci_only" --ci-diff "$tmp_dir/macos.diff"
 
 write_diff macos_job.diff '@@ -16,1 +16,1 @@
 -      - run: cargo clippy
 +      - run: cargo clippy --locked'
-assert_plan false --platform windows --event pull_request --changed-files "$tmp_dir/ci_only" --ci-diff "$tmp_dir/macos_job.diff"
+assert_plan false --platform windows --event merge_group --changed-files "$tmp_dir/ci_only" --ci-diff "$tmp_dir/macos_job.diff"
 assert_plan true --platform macos --event pull_request --changed-files "$tmp_dir/ci_only" --ci-diff "$tmp_dir/macos_job.diff"
 
-assert_plan true --platform windows --event pull_request --changed-files "$tmp_dir/ci_only" --ci-diff "$tmp_dir/missing.diff"
+assert_plan true --platform windows --event merge_group --changed-files "$tmp_dir/ci_only" --ci-diff "$tmp_dir/missing.diff"
 
 echo "native_platform_ci_plan_test: ok"

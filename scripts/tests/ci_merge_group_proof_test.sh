@@ -35,7 +35,7 @@ run_proof() {
     FAKE_CURL_RUNS_RESPONSE="$1" \
     FAKE_CURL_JOBS_RESPONSE="$2" \
     FAKE_CURL_FAIL="${3:-}" \
-    "$proof_script" burin-labs/harn ci.yml "$sha" 2>/dev/null
+    "$proof_script" burin-labs/harn ci.yml "$sha" "${@:4}" 2>/dev/null
 }
 
 write_response() {
@@ -52,6 +52,23 @@ write_response "$success_response" "[{\"id\":123,\"head_sha\":\"$sha\",\"path\":
 [[ "$(run_proof "$success_response" "$successful_jobs")" == "true" ]] \
   || { echo "exact successful merge-group proof was not accepted" >&2; exit 1; }
 
+native_jobs="$tmp_root/native-jobs.json"
+jq '.jobs += [{"name":"Rust on Windows (build + smoke test)","status":"completed","conclusion":"success"}] | .total_count = 12' \
+  "$successful_jobs" > "$native_jobs"
+[[ "$(run_proof "$success_response" "$native_jobs" "" --require-job "Rust on Windows (build + smoke test)")" == "true" ]] \
+  || { echo "exact successful native Windows proof was not accepted" >&2; exit 1; }
+[[ "$(run_proof "$success_response" "$successful_jobs" "" --require-job "Rust on Windows (build + smoke test)")" == "false" ]] \
+  || { echo "missing native Windows proof did not fail closed" >&2; exit 1; }
+
+for conclusion in skipped failure cancelled; do
+  incomplete_native_jobs="$tmp_root/native-${conclusion}-jobs.json"
+  jq --arg conclusion "$conclusion" \
+    '(.jobs[] | select(.name == "Rust on Windows (build + smoke test)") | .conclusion) = $conclusion' \
+    "$native_jobs" > "$incomplete_native_jobs"
+  [[ "$(run_proof "$success_response" "$incomplete_native_jobs" "" --require-job "Rust on Windows (build + smoke test)")" == "false" ]] \
+    || { echo "$conclusion native Windows proof did not fail closed" >&2; exit 1; }
+done
+
 missing_harn_jobs="$tmp_root/missing-harn-jobs.json"
 jq 'del(.jobs[] | select(.name == "Run Harn conformance tests")) | .total_count = 10' \
   "$successful_jobs" > "$missing_harn_jobs"
@@ -62,6 +79,12 @@ invalid_contract="$tmp_root/invalid-contract.json"
 printf '%s\n' '{}' > "$invalid_contract"
 [[ "$(RELEASE_AUDIT_CONTRACT_PATH="$invalid_contract" run_proof "$success_response" "$successful_jobs")" == "false" ]] \
   || { echo "merge-group proof accepted an invalid owning contract" >&2; exit 1; }
+
+changed_policy="$tmp_root/changed-policy.json"
+jq '.merge_group_jobs += [{"name":"Changed admission policy"}]' \
+  "$repo_root/scripts/release_audit_contract.json" > "$changed_policy"
+[[ "$(RELEASE_AUDIT_CONTRACT_PATH="$changed_policy" run_proof "$success_response" "$native_jobs" "" --require-job "Rust on Windows (build + smoke test)")" == "false" ]] \
+  || { echo "merge-group proof accepted a run missing the changed policy gate" >&2; exit 1; }
 
 pruned_jobs="$tmp_root/pruned-jobs.json"
 printf '%s\n' '{"total_count":2,"jobs":[{"name":"Format check","status":"completed","conclusion":"success"},{"name":"Windows cross-compile check","status":"completed","conclusion":"success"}]}' > "$pruned_jobs"
@@ -77,6 +100,11 @@ mismatch_response="$tmp_root/mismatch.json"
 write_response "$mismatch_response" '[{"head_sha":"0000000000000000000000000000000000000000","path":".github/workflows/ci.yml","event":"merge_group","status":"completed","conclusion":"success"}]'
 [[ "$(run_proof "$mismatch_response" "$successful_jobs")" == "false" ]] \
   || { echo "mismatched SHA did not fail closed" >&2; exit 1; }
+
+fork_response="$tmp_root/fork.json"
+write_response "$fork_response" "[{\"id\":123,\"head_sha\":\"$sha\",\"path\":\".github/workflows/ci.yml\",\"event\":\"pull_request\",\"status\":\"completed\",\"conclusion\":\"success\"}]"
+[[ "$(run_proof "$fork_response" "$native_jobs" "" --require-job "Rust on Windows (build + smoke test)")" == "false" ]] \
+  || { echo "pull-request/fork proof was accepted as merge-group admission" >&2; exit 1; }
 
 wrong_workflow_response="$tmp_root/wrong-workflow.json"
 write_response "$wrong_workflow_response" "[{\"head_sha\":\"$sha\",\"path\":\".github/workflows/release.yml\",\"event\":\"merge_group\",\"status\":\"completed\",\"conclusion\":\"success\"}]"

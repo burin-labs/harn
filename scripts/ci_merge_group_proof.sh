@@ -2,7 +2,7 @@
 set -euo pipefail
 
 usage() {
-  echo "usage: $0 <owner/repository> <workflow-file> <commit-sha>" >&2
+  echo "usage: $0 <owner/repository> <workflow-file> <commit-sha> [--require-job <job-name>]" >&2
 }
 
 fail_closed() {
@@ -11,7 +11,7 @@ fail_closed() {
   exit 0
 }
 
-if [[ $# -ne 3 ]]; then
+if [[ $# -ne 3 && $# -ne 5 ]]; then
   usage
   exit 2
 fi
@@ -19,6 +19,14 @@ fi
 repository=$1
 workflow_file=$2
 commit_sha=$3
+required_job=""
+if [[ $# -eq 5 ]]; then
+  if [[ "$4" != "--require-job" || -z "$5" || "$5" == *$'\n'* ]]; then
+    usage
+    exit 2
+  fi
+  required_job=$5
+fi
 
 if [[ ! "$repository" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
   fail_closed "invalid repository identifier"
@@ -120,10 +128,11 @@ while IFS= read -r run_id; do
   # tails intentionally skip the expensive lanes. Reuse proof only when every
   # lane this push plans to prune actually completed successfully for this run.
   # shellcheck disable=SC2016 # $response, $required, and $name are jq variables.
-  if "$jq_bin" -e --slurpfile contract "$contract_path" '
+  if "$jq_bin" -e --slurpfile contract "$contract_path" --arg required_job "$required_job" '
     . as $response
     | (($contract[0].merge_group_jobs | map(.name))
-        + ["Check repository policies", "Windows cross-compile check", "Write CI timing report"])
+        + ["Check repository policies", "Windows cross-compile check", "Write CI timing report"]
+        + (if $required_job == "" then [] else [$required_job] end))
       as $required
     | all(
         $required[];

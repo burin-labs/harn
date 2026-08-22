@@ -28,13 +28,13 @@ fn gha_expression(body: string) -> string {
 
 fn windows_runner_expression() -> string {
   return gha_expression(
-    "vars.HARN_CI_DISABLE_BLACKSMITH_WINDOWS == 'true' && 'windows-latest' || ((github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'blacksmith-8vcpu-windows-2025' || 'windows-latest')",
+    "vars.HARN_CI_DISABLE_BLACKSMITH_WINDOWS == 'true' && 'windows-latest' || 'blacksmith-8vcpu-windows-2025'",
   )
 }
 
 fn windows_tier_expression() -> string {
   return gha_expression(
-    "vars.HARN_CI_DISABLE_BLACKSMITH_WINDOWS == 'true' && 'github-hosted' || ((github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'blacksmith' || 'github-hosted')",
+    "vars.HARN_CI_DISABLE_BLACKSMITH_WINDOWS == 'true' && 'github-hosted' || 'blacksmith'",
   )
 }
 
@@ -971,10 +971,7 @@ pipeline test_windows_shared_cache_targets_dev_drive_with_one_stable_restore_own
   assert_eq(actions_cache_capacity_errors(policy()), [])
 }
 
-pipeline test_windows_pr_runner_requires_internal_blacksmith_with_safe_fallbacks(
-  harness: Harness,
-  task,
-) {
+pipeline test_windows_native_runner_requires_blacksmith_with_safe_fallback(harness: Harness, task) {
   const declared = workflows()
   const windows = declared["ci.yml"].jobs.windows
   const hosted_only = {
@@ -984,7 +981,7 @@ pipeline test_windows_pr_runner_requires_internal_blacksmith_with_safe_fallbacks
   assert(
     windows_pr_native_feedback_errors(policy(), hosted_only, declared["windows-nightly.yml"])
       .contains(
-        "ci.yml:windows must route merge_group and same-repository pull_request to blacksmith-8vcpu-windows-2025, with HARN_CI_DISABLE_BLACKSMITH_WINDOWS=true and external events falling back to windows-latest",
+        "ci.yml:windows must use blacksmith-8vcpu-windows-2025 for candidate and main fallback proof, with HARN_CI_DISABLE_BLACKSMITH_WINDOWS=true falling back to windows-latest",
       ),
   )
   const wrong_tier = {
