@@ -925,6 +925,8 @@ fn secret_reference_type_rejects_raw_values_before_they_can_enter_a_plan() {
     assert!(decoded.is_err());
 }
 
+mod discovery_failures;
+
 struct FixtureProbeRunner {
     result: ToolchainProbeResult,
     calls: Arc<AtomicUsize>,
@@ -1020,7 +1022,7 @@ fn toolchain_discovery_runs_after_readiness_and_accounts_for_applied_delta() {
 }
 
 #[test]
-fn malicious_toolchain_probe_widening_blocks_noninteractive_execution() {
+fn denied_toolchain_discovery_leaves_parent_lease_executable() {
     let probe = toolchain_probe("/toolchains");
     let model_calls = Arc::new(AtomicUsize::new(0));
     let receipts = Arc::new(MemoryAuthorityReceiptSink::default());
@@ -1072,22 +1074,26 @@ fn malicious_toolchain_probe_widening_blocks_noninteractive_execution() {
         denied.authority.requirement,
         AuthorityRequirement::ProcessReadRoot { .. }
     )));
+    assert!(!serde_json::to_string(&receipt)
+        .expect("serialize refusal receipt")
+        .contains(SECRET_CANARY));
     match run.execute(lease) {
+        ExecutionOutcome::Completed { .. } => {}
         ExecutionOutcome::Failed { error, .. } => {
-            assert!(error.contains("invalidated during discovery"));
+            panic!("refused optional discovery invalidated the parent lease: {error}")
         }
-        ExecutionOutcome::Completed { .. } => panic!("invalidated lease must not execute"),
     }
-    assert_eq!(model_calls.load(Ordering::SeqCst), 0);
+    assert_eq!(model_calls.load(Ordering::SeqCst), 1);
 }
 
 #[test]
 fn interactive_toolchain_widening_returns_one_semantically_grouped_batch() {
     let probe = toolchain_probe("/toolchains");
+    let model_calls = Arc::new(AtomicUsize::new(0));
     let run = PreparedRun::with_clock(
         FixtureExecutor {
             requirements: Vec::new(),
-            model_calls: Arc::new(AtomicUsize::new(0)),
+            model_calls: model_calls.clone(),
         },
         Arc::new(MemoryAuthorityReceiptSink::default()),
         Arc::new(|| NOW_MS),
@@ -1135,6 +1141,13 @@ fn interactive_toolchain_widening_returns_one_semantically_grouped_batch() {
         }
         other => panic!("interactive widening must return one batch, got {other:?}"),
     }
+    match run.execute(lease) {
+        ExecutionOutcome::Completed { .. } => {}
+        ExecutionOutcome::Failed { error, .. } => {
+            panic!("pending optional discovery invalidated the parent lease: {error}")
+        }
+    }
+    assert_eq!(model_calls.load(Ordering::SeqCst), 1);
 }
 
 #[cfg(unix)]

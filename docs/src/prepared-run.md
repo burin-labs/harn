@@ -56,8 +56,14 @@ that receipt exists may a host `ToolchainProbeRunner` spawn the command. Harn
 turns every observed root or attempted operation into a typed lease delta. A
 narrower process-read root is applied atomically and remains unused until
 dispatch authorizes it. A wider path, network access, secret access, process
-write, or budget change invalidates the lease; interactive hosts receive one
-new grouped decision and non-interactive hosts receive an actionable block.
+write, or budget change is refused and receipted without invalidating the
+already reviewed parent lease. Interactive hosts receive one new grouped
+decision and non-interactive hosts receive an actionable block; in either case,
+the caller decides whether the unavailable discovery was optional or a startup
+precondition. Missing toolchains, malformed probe output, and probe policy
+denials likewise leave the parent lease executable. Integrity failures still
+invalidate it: an expired lease, a probe outside the fingerprinted lease, or a
+discovery receipt that cannot be persisted.
 
 `request_delta` remains the general typed attenuation interface. An identical
 requirement is already covered. A narrower filesystem root produces a delta
