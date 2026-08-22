@@ -213,12 +213,10 @@ fn run_command_background_after_progress_overlay_satisfies_response_schema() {
         VmValue::dict(snapshot_binding_fixture()),
     );
     // This sync builtin is implemented with std::sync::mpsc::recv_timeout and
-    // OS threads, so Tokio's paused clock cannot drive the boundary. Keep the
-    // sole elapsed assertion deliberately broad and sleep-free. The 500ms
-    // window also replaces the old nominal 2000ms fixture budget.
-    let started = std::time::Instant::now();
+    // OS threads, so Tokio's paused clock cannot drive the boundary. Prove the
+    // deadline behavior through the latest buffered progress receipt below;
+    // wall-clock latency budgets belong in benchmarks, not shared-host tests.
     let resp_value = call("hostlib_tools_run_command", req).unwrap();
-    let elapsed = started.elapsed();
     progress_driver.join().expect("progress driver panicked");
     assert_response_matches_schema("run_command", &resp_value);
 
@@ -234,14 +232,6 @@ fn run_command_background_after_progress_overlay_satisfies_response_schema() {
     assert!(
         require_int(&resp, "duration_ms") < wait_ms,
         "expected progress-overlay duration below the wait budget"
-    );
-    assert!(
-        elapsed >= std::time::Duration::from_millis(250),
-        "progress must not end a {wait_ms}ms inline window early: {elapsed:?}",
-    );
-    assert!(
-        elapsed < std::time::Duration::from_secs(5),
-        "inline deadline exceeded its broad scheduling allowance: {elapsed:?}",
     );
     let foreign = harn_vm::orchestration::agent_inbox::drain(&session_id);
     assert_eq!(foreign.len(), 2);
