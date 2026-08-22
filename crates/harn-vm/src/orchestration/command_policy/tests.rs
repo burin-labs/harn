@@ -2,6 +2,7 @@ use super::*;
 
 mod process_result;
 mod sealed_dispatch;
+mod windows_shell;
 
 fn ctx(argv: &[&str]) -> JsonValue {
     serde_json::json!({
@@ -164,7 +165,7 @@ fn deterministic_scan_marks_dynamic_dispatch_dialects_and_malformed_argv_unresol
         );
     }
 
-    let unsupported_dialect = serde_json::json!({
+    let supported_windows_dialect = serde_json::json!({
         "request": {
             "mode": "shell",
             "command": "Remove-Item -Recurse .",
@@ -173,8 +174,9 @@ fn deterministic_scan_marks_dynamic_dispatch_dialects_and_malformed_argv_unresol
         },
         "workspace_roots": ["/tmp/work"],
     });
-    assert!(labels(&command_risk_scan_json(&unsupported_dialect, None))
-        .contains(&EXECUTION_SEMANTICS_UNRESOLVED_LABEL.to_string()));
+    let windows_scan = command_risk_scan_json(&supported_windows_dialect, None);
+    assert!(!labels(&windows_scan).contains(&EXECUTION_SEMANTICS_UNRESOLVED_LABEL.to_string()));
+    assert!(labels(&windows_scan).contains(&"destructive".to_string()));
 
     let malformed_argv = serde_json::json!({
         "request": {
@@ -645,10 +647,6 @@ fn cwd_wipe_deletes_are_flagged_destructive() {
 fn scoped_and_named_deletes_are_not_over_flagged() {
     // Deliberate boundary: a recursive delete of a *named* subdirectory is a
     // normal clean, not a workspace wipe. These must NOT be flagged.
-    assert!(
-        !shell_c_payload_is_workspace_wipe(&["--norc", "script.sh"]),
-        "bash --norc is not a shell -c payload"
-    );
     for cmd in [
         "rm -rf build/",
         "rm -rf node_modules",

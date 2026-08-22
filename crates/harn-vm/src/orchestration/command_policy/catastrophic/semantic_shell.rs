@@ -5,7 +5,13 @@
 //! included) cross the parser seam. The parser is a classification aid, not the
 //! security boundary; child processes remain confined by the operating system.
 
+use std::path::PathBuf;
+use std::process::{Command, Stdio};
+use std::time::Duration;
+
+use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use tree_sitter::Node;
+use wait_timeout::ChildExt;
 
 use super::{
     command_basename, parse_env_invocation, shell_c_script, unwrapped_command_index,
@@ -28,6 +34,14 @@ pub(crate) struct ShellAnalysis {
     /// An invoked self-recursive colon function was identified structurally.
     pub(crate) fork_bomb: bool,
     pub(crate) unresolved: bool,
+}
+
+/// Shell grammars owned by the command-safety parser registry.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ShellDialect {
+    Posix,
+    PowerShell,
+    Cmd,
 }
 
 #[derive(Debug)]
@@ -70,6 +84,15 @@ pub(crate) fn analyze_shell(command: &str) -> ShellAnalysis {
     analysis
 }
 
+/// Parse shell text through the single dialect registry.
+pub(crate) fn analyze_shell_dialect(dialect: ShellDialect, command: &str) -> ShellAnalysis {
+    match dialect {
+        ShellDialect::Posix => analyze_shell(command),
+        ShellDialect::PowerShell => analyze_powershell(command),
+        ShellDialect::Cmd => analyze_cmd(command),
+    }
+}
+
 fn collect_argv(argv: &[String], depth: usize, analysis: &mut ShellAnalysis) {
     if depth > MAX_DEPTH {
         analysis.unresolved = true;
@@ -84,7 +107,8 @@ fn collect_argv(argv: &[String], depth: usize, analysis: &mut ShellAnalysis) {
         return;
     }
     let effective = &argv[index..];
-    if matches!(command_basename(&effective[0]), "bash" | "sh" | "zsh") {
+    let executable = command_basename(&effective[0]);
+    if matches!(executable, "bash" | "sh" | "zsh") {
         if let Some(script) = shell_c_script(&effective[1..]) {
             collect_shell(script, depth + 1, analysis);
             return;
@@ -92,12 +116,416 @@ fn collect_argv(argv: &[String], depth: usize, analysis: &mut ShellAnalysis) {
         if !shell_is_introspection_only(&effective[1..]) {
             analysis.unresolved = true;
         }
+    } else if matches!(
+        executable,
+        "powershell" | "powershell.exe" | "pwsh" | "pwsh.exe"
+    ) {
+        match powershell_payload(&effective[1..]) {
+            Some(Ok(script)) => collect_powershell(&script, depth + 1, analysis),
+            Some(Err(())) => analysis.unresolved = true,
+            None if !shell_is_introspection_only(&effective[1..]) => analysis.unresolved = true,
+            None => {}
+        }
+        return;
+    } else if matches!(executable, "cmd" | "cmd.exe") {
+        if let Some(script) = cmd_payload(&effective[1..]) {
+            collect_cmd(&script, depth + 1, analysis);
+        } else if !shell_is_introspection_only(&effective[1..]) {
+            analysis.unresolved = true;
+        }
+        return;
     }
     collect_argument_execution(effective, &vec![false; effective.len()], depth, analysis);
     analysis.stages.push(ShellCommandStage {
         text: effective.join(" "),
         argv: effective.to_vec(),
+        dynamic: vec![false; effective.len()],
     });
+}
+
+fn analyze_powershell(command: &str) -> ShellAnalysis {
+    let mut analysis = ShellAnalysis::default();
+    collect_powershell(command, 0, &mut analysis);
+    analysis
+}
+
+fn collect_powershell(command: &str, depth: usize, analysis: &mut ShellAnalysis) {
+    if depth > MAX_DEPTH {
+        analysis.unresolved = true;
+        return;
+    }
+
+    // Windows PowerShell ships its authoritative parser with the platform. It
+    // is used as the syntax oracle when available; tree-sitter remains the
+    // deterministic typed extractor for offline/cross-compiled builds.
+    if depth == 0 && cfg!(windows) {
+        if let Some(parsed) = native_powershell_accepts(command) {
+            analysis.unresolved |= !parsed;
+        }
+    }
+
+    let mut parser = tree_sitter::Parser::new();
+    if parser
+        .set_language(&tree_sitter_powershell::LANGUAGE.into())
+        .is_err()
+    {
+        analysis.unresolved = true;
+        return;
+    }
+    let Some(tree) = parser.parse(command, None) else {
+        analysis.unresolved = true;
+        return;
+    };
+    let root = tree.root_node();
+    analysis.unresolved |= root.has_error();
+    visit_powershell_tree(root, command.as_bytes(), depth, analysis);
+}
+
+fn visit_powershell_tree(
+    root: Node<'_>,
+    source: &[u8],
+    depth: usize,
+    analysis: &mut ShellAnalysis,
+) {
+    let mut stack = vec![root];
+    while let Some(node) = stack.pop() {
+        if node.kind() == "command" {
+            visit_powershell_command(node, source, depth, analysis);
+        }
+        if matches!(
+            node.kind(),
+            "assignment_expression"
+                | "function_statement"
+                | "class_statement"
+                | "data_statement"
+                | "inlinescript_statement"
+                | "variable"
+                | "sub_expression"
+                | "script_block_expression"
+                | "invokation_expression"
+                | "stop_parsing"
+        ) {
+            analysis.unresolved = true;
+        }
+        let mut cursor = node.walk();
+        let children = node.named_children(&mut cursor).collect::<Vec<_>>();
+        stack.extend(children.into_iter().rev());
+    }
+}
+
+fn visit_powershell_command(
+    command: Node<'_>,
+    source: &[u8],
+    depth: usize,
+    analysis: &mut ShellAnalysis,
+) {
+    let Some(text) = node_text(command, source) else {
+        analysis.unresolved = true;
+        return;
+    };
+    let (argv, word_dynamic, unresolved) = lex_powershell_words(text);
+    analysis.unresolved |= unresolved;
+    if argv.is_empty() {
+        analysis.unresolved = true;
+        return;
+    }
+    analysis.unresolved |= word_dynamic[0];
+    for word in &argv {
+        push_unique(&mut analysis.argument_words, word);
+    }
+
+    let index = unwrapped_command_index(&argv, 0, argv.len());
+    if index >= argv.len() {
+        return;
+    }
+    let effective = &argv[index..];
+    let executable = command_basename(&effective[0]);
+    if matches!(
+        executable,
+        "powershell" | "powershell.exe" | "pwsh" | "pwsh.exe"
+    ) {
+        match powershell_payload(&effective[1..]) {
+            Some(Ok(script)) => collect_powershell(&script, depth + 1, analysis),
+            Some(Err(())) => analysis.unresolved = true,
+            None => analysis.unresolved = true,
+        }
+        return;
+    }
+    collect_argument_execution(effective, &word_dynamic[index..], depth, analysis);
+    analysis.stages.push(ShellCommandStage {
+        text: node_text(command, source).unwrap_or_default().to_string(),
+        argv: effective.to_vec(),
+        dynamic: word_dynamic[index..].to_vec(),
+    });
+}
+
+fn lex_powershell_words(command: &str) -> (Vec<String>, Vec<bool>, bool) {
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum Quote {
+        None,
+        Single,
+        Double,
+    }
+
+    let mut words = Vec::new();
+    let mut dynamics = Vec::new();
+    let mut word = String::new();
+    let mut dynamic = false;
+    let mut quote = Quote::None;
+    let mut unresolved = false;
+    let mut chars = command.chars().peekable();
+    while let Some(ch) = chars.next() {
+        match (quote, ch) {
+            (Quote::None, '\'') => quote = Quote::Single,
+            (Quote::Single, '\'') if chars.peek() == Some(&'\'') => {
+                chars.next();
+                word.push('\'');
+            }
+            (Quote::Single, '\'') => quote = Quote::None,
+            (Quote::None, '"') => quote = Quote::Double,
+            (Quote::Double, '"') => quote = Quote::None,
+            (Quote::Single, _) => word.push(ch),
+            (_, '`') => match chars.next() {
+                Some(escaped) => word.push(escaped),
+                None => unresolved = true,
+            },
+            (Quote::None | Quote::Double, '$') => {
+                dynamic = true;
+                word.push(ch);
+            }
+            (Quote::None, '@' | '{' | '}' | '(' | ')') => {
+                unresolved = true;
+                word.push(ch);
+            }
+            (Quote::None, ch) if ch.is_whitespace() => {
+                push_typed_word(&mut words, &mut dynamics, &mut word, &mut dynamic);
+            }
+            _ => word.push(ch),
+        }
+    }
+    unresolved |= quote != Quote::None;
+    push_typed_word(&mut words, &mut dynamics, &mut word, &mut dynamic);
+    (words, dynamics, unresolved)
+}
+
+fn push_typed_word(
+    words: &mut Vec<String>,
+    dynamics: &mut Vec<bool>,
+    word: &mut String,
+    dynamic: &mut bool,
+) {
+    if !word.is_empty() {
+        words.push(std::mem::take(word));
+        dynamics.push(std::mem::take(dynamic));
+    }
+}
+
+fn analyze_cmd(command: &str) -> ShellAnalysis {
+    let mut analysis = ShellAnalysis::default();
+    collect_cmd(command, 0, &mut analysis);
+    analysis
+}
+
+fn collect_cmd(command: &str, depth: usize, analysis: &mut ShellAnalysis) {
+    if depth > MAX_DEPTH {
+        analysis.unresolved = true;
+        return;
+    }
+    for stage in lex_cmd_stages(command, analysis) {
+        for word in &stage {
+            push_unique(&mut analysis.argument_words, word);
+        }
+        let index = unwrapped_command_index(&stage, 0, stage.len());
+        if index >= stage.len() {
+            continue;
+        }
+        let effective = &stage[index..];
+        if matches!(command_basename(&effective[0]), "cmd" | "cmd.exe") {
+            if let Some(payload) = cmd_payload(&effective[1..]) {
+                collect_cmd(&payload, depth + 1, analysis);
+            } else {
+                analysis.unresolved = true;
+            }
+            continue;
+        }
+        analysis.stages.push(ShellCommandStage {
+            text: effective.join(" "),
+            argv: effective.to_vec(),
+            dynamic: vec![false; effective.len()],
+        });
+    }
+}
+
+fn lex_cmd_stages(command: &str, analysis: &mut ShellAnalysis) -> Vec<Vec<String>> {
+    let mut stages = Vec::new();
+    let mut stage = Vec::new();
+    let mut word = String::new();
+    let mut quoted = false;
+    let mut chars = command.chars().peekable();
+    while let Some(ch) = chars.next() {
+        match ch {
+            '^' => match chars.next() {
+                Some(escaped) => word.push(escaped),
+                None => analysis.unresolved = true,
+            },
+            '"' => quoted = !quoted,
+            '%' | '!' => {
+                analysis.unresolved = true;
+                word.push(ch);
+            }
+            '&' | '|' | '\n' | '\r' if !quoted => {
+                push_cmd_word(&mut stage, &mut word);
+                push_cmd_stage(&mut stages, &mut stage);
+                if chars.peek() == Some(&ch) {
+                    chars.next();
+                }
+            }
+            '(' | ')' if !quoted => {
+                analysis.unresolved = true;
+                push_cmd_word(&mut stage, &mut word);
+            }
+            ch if ch.is_whitespace() && !quoted => push_cmd_word(&mut stage, &mut word),
+            _ => word.push(ch),
+        }
+    }
+    if quoted {
+        analysis.unresolved = true;
+    }
+    push_cmd_word(&mut stage, &mut word);
+    push_cmd_stage(&mut stages, &mut stage);
+    stages
+}
+
+fn push_cmd_word(stage: &mut Vec<String>, word: &mut String) {
+    if !word.is_empty() {
+        stage.push(std::mem::take(word));
+    }
+}
+
+fn push_cmd_stage(stages: &mut Vec<Vec<String>>, stage: &mut Vec<String>) {
+    if !stage.is_empty() {
+        stages.push(std::mem::take(stage));
+    }
+}
+
+fn powershell_payload(args: &[String]) -> Option<Result<String, ()>> {
+    let mut index = 0;
+    while index < args.len() {
+        let flag = args[index].to_ascii_lowercase();
+        if is_powershell_command_flag(&flag) {
+            return Some(
+                (index + 1 < args.len())
+                    .then(|| args[index + 1..].join(" "))
+                    .ok_or(()),
+            );
+        }
+        if is_powershell_encoded_flag(&flag) {
+            return Some(
+                args.get(index + 1)
+                    .ok_or(())
+                    .and_then(|value| decode_powershell_encoded(value).ok_or(())),
+            );
+        }
+        index += 1;
+    }
+    None
+}
+
+fn is_powershell_command_flag(flag: &str) -> bool {
+    matches!(flag, "/c" | "/command") || (flag.starts_with('-') && "-command".starts_with(flag))
+}
+
+fn is_powershell_encoded_flag(flag: &str) -> bool {
+    flag == "/encodedcommand" || (flag.starts_with('-') && "-encodedcommand".starts_with(flag))
+}
+
+fn decode_powershell_encoded(value: &str) -> Option<String> {
+    let bytes = BASE64_STANDARD.decode(value.trim()).ok()?;
+    if bytes.len() % 2 != 0 {
+        return None;
+    }
+    let utf16 = bytes
+        .chunks_exact(2)
+        .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
+        .collect::<Vec<_>>();
+    String::from_utf16(&utf16)
+        .ok()
+        .map(|text| text.trim_start_matches('\u{feff}').to_string())
+}
+
+fn cmd_payload(args: &[String]) -> Option<String> {
+    args.iter()
+        .position(|arg| arg.eq_ignore_ascii_case("/c"))
+        .and_then(|index| (index + 1 < args.len()).then(|| args[index + 1..].join(" ")))
+}
+
+/// Ask PowerShell's parser whether input is syntactically complete without
+/// evaluating the input. The command itself is base64 data passed through the
+/// child environment to a fixed parser program; it is never interpolated into
+/// `-Command`.
+fn native_powershell_accepts(command: &str) -> Option<bool> {
+    const PARSER: &str = "$s=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:HARN_POWERSHELL_PARSE_PAYLOAD));$t=$null;$e=$null;[System.Management.Automation.Language.Parser]::ParseInput($s,[ref]$t,[ref]$e)>$null;if($e.Count){exit 2}";
+    let payload = BASE64_STANDARD.encode(command.as_bytes());
+    for executable in native_powershell_candidates() {
+        let mut parser = Command::new(&executable);
+        if let Some(parent) = executable
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+        {
+            parser.current_dir(parent);
+        }
+        match parser
+            .args([
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                PARSER,
+            ])
+            .env("HARN_POWERSHELL_PARSE_PAYLOAD", &payload)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+        {
+            Ok(mut child) => match child.wait_timeout(Duration::from_secs(2)) {
+                Ok(Some(status)) => return Some(status.success()),
+                Ok(None) => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return None;
+                }
+                Err(_) => return None,
+            },
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(_) => return None,
+        }
+    }
+    None
+}
+
+#[cfg(windows)]
+fn native_powershell_candidates() -> Vec<PathBuf> {
+    // Do not search PATH or the request cwd at this pre-launch safety seam: on
+    // Windows that could execute an attacker-controlled `pwsh.exe`. The inbox
+    // parser is addressed through its absolute system installation instead.
+    std::env::var_os("SystemRoot")
+        .map(PathBuf::from)
+        .filter(|root| root.is_absolute())
+        .map(|root| {
+            vec![root
+                .join("System32")
+                .join("WindowsPowerShell")
+                .join("v1.0")
+                .join("powershell.exe")]
+        })
+        .unwrap_or_default()
+}
+
+#[cfg(not(windows))]
+fn native_powershell_candidates() -> Vec<PathBuf> {
+    // Non-Windows candidates are used only by the differential test.
+    vec![PathBuf::from("pwsh")]
 }
 
 fn collect_shell(command: &str, depth: usize, analysis: &mut ShellAnalysis) {
@@ -240,7 +668,8 @@ fn visit_command(command: Node<'_>, source: &[u8], depth: usize, analysis: &mut 
         analysis.unresolved = true;
     }
     let effective = &argv[index..];
-    if matches!(command_basename(&effective[0]), "bash" | "sh" | "zsh") {
+    let executable = command_basename(&effective[0]);
+    if matches!(executable, "bash" | "sh" | "zsh") {
         if let Some(script_index) = shell_c_script_index(&effective[1..]) {
             let argument_index = index + 1 + script_index;
             if word_dynamic.get(argument_index).copied().unwrap_or(true) {
@@ -253,11 +682,29 @@ fn visit_command(command: Node<'_>, source: &[u8], depth: usize, analysis: &mut 
         if !shell_is_introspection_only(&effective[1..]) {
             analysis.unresolved = true;
         }
+    } else if matches!(
+        executable,
+        "powershell" | "powershell.exe" | "pwsh" | "pwsh.exe"
+    ) {
+        match powershell_payload(&effective[1..]) {
+            Some(Ok(script)) => collect_powershell(&script, depth + 1, analysis),
+            Some(Err(())) => analysis.unresolved = true,
+            None => analysis.unresolved = true,
+        }
+        return;
+    } else if matches!(executable, "cmd" | "cmd.exe") {
+        if let Some(script) = cmd_payload(&effective[1..]) {
+            collect_cmd(&script, depth + 1, analysis);
+        } else {
+            analysis.unresolved = true;
+        }
+        return;
     }
     collect_argument_execution(effective, &word_dynamic[index..], depth, analysis);
     analysis.stages.push(ShellCommandStage {
         text: node_text(command, source).unwrap_or_default().to_string(),
         argv: effective.to_vec(),
+        dynamic: word_dynamic[index..].to_vec(),
     });
 }
 
@@ -303,7 +750,8 @@ fn shell_word(node: Node<'_>, source: &[u8]) -> (Option<String>, bool) {
     let Some(raw) = node_text(node, source) else {
         return (None, true);
     };
-    let dynamic = contains_dynamic_expansion(node);
+    let dynamic =
+        !(raw.starts_with('\'') && raw.ends_with('\'')) && contains_dynamic_expansion(node);
     match shell_words::split(raw) {
         Ok(words) if words.len() == 1 => (words.into_iter().next(), dynamic),
         _ => (None, dynamic),
@@ -572,5 +1020,46 @@ fn node_text<'a>(node: Node<'_>, source: &'a [u8]) -> Option<&'a str> {
 fn push_unique(values: &mut Vec<String>, value: &str) {
     if !value.is_empty() && !values.iter().any(|existing| existing == value) {
         values.push(value.to_string());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn powershell_fallback_agrees_with_native_parser_when_available() {
+        let cases = [
+            "Write-Output 'literal value'",
+            "Remove-Item -Recurse -LiteralPath .",
+            "Write-Output before; Get-ChildItem | Select-Object Name",
+            "Write-Output \"unterminated",
+        ];
+        if native_powershell_accepts(cases[0]).is_none() {
+            return;
+        }
+        for command in cases {
+            let native_accepts = native_powershell_accepts(command).expect("native parser present");
+            let fallback_accepts = !analyze_powershell(command).unresolved;
+            assert_eq!(
+                fallback_accepts, native_accepts,
+                "fallback/native syntax disagreement for {command:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn native_powershell_adapter_parses_input_without_executing_it() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let marker = dir.path().join("parser-must-not-execute.txt");
+        let command = format!("Set-Content -Path '{}' -Value owned", marker.display());
+        let Some(accepted) = native_powershell_accepts(&command) else {
+            return;
+        };
+        assert!(accepted, "fixture should be valid PowerShell");
+        assert!(
+            !marker.exists(),
+            "native parser adapter must never evaluate classified input"
+        );
     }
 }

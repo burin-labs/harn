@@ -19,13 +19,17 @@ mod shell;
 mod tracked_writes;
 
 use project_delete::argv_deletes_project;
-pub(super) use semantic_shell::{analyze_argv, analyze_shell, ShellAnalysis};
+pub(super) use semantic_shell::{
+    analyze_argv, analyze_shell, analyze_shell_dialect, ShellAnalysis, ShellDialect,
+};
 use shell::*;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct ShellCommandStage {
     pub(super) text: String,
     pub(super) argv: Vec<String>,
+    /// Expansion marker for each argv element.
+    pub(super) dynamic: Vec<bool>,
 }
 
 /// Maximum `bash -c` recursion depth. Each level strips a shell wrapper, so
@@ -81,6 +85,7 @@ pub(super) fn shell_command_groups(command: &str) -> Vec<Vec<ShellCommandStage>>
                     (index < tokens.len()).then(|| ShellCommandStage {
                         text: text.trim().to_string(),
                         argv: tokens[index..].to_vec(),
+                        dynamic: vec![false; tokens.len() - index],
                     })
                 })
                 .collect::<Vec<_>>();

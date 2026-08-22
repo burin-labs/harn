@@ -21,10 +21,10 @@ set -euo pipefail
 } >> "$FAKE_CARGO_RECORD"
 case "$*" in
   tree\ *--no-default-features*)
-    printf 'harn-serve\nlean-dep\ntree-sitter\ntree-sitter-bash\ntree-sitter-language\n'
+    printf 'harn-serve\nlean-dep\ntree-sitter\ntree-sitter-bash\ntree-sitter-language\ntree-sitter-powershell\n'
     ;;
   tree\ *--features\ hostlib*)
-    printf 'harn-serve\nlean-dep\nhostlib-dep\ntree-sitter\ntree-sitter-bash\ntree-sitter-language\n'
+    printf 'harn-serve\nlean-dep\nhostlib-dep\ntree-sitter\ntree-sitter-bash\ntree-sitter-language\ntree-sitter-powershell\n'
     ;;
   tree\ *--features\ full*)
     printf 'harn-serve\nfull-dep\nsqlx-core\ntree-sitter-a\ntree-sitter-b\ntree-sitter-c\ntree-sitter-d\ntree-sitter-e\ntree-sitter-f\ntree-sitter-g\ntree-sitter-h\ntree-sitter-i\ntree-sitter-j\ntree-sitter-k\ntree-sitter-l\ntree-sitter-m\ntree-sitter-n\ntree-sitter-o\ntree-sitter-p\ntree-sitter-q\ntree-sitter-r\ntree-sitter-s\ntree-sitter-t\ntree-sitter-u\ntree-sitter-v\ntree-sitter-w\ntree-sitter-x\ntree-sitter-y\ntree-sitter-z\ntree-sitter-aa\n'
