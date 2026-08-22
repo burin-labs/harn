@@ -39,6 +39,7 @@ use harn_vm::orchestration::agent_inbox;
 use harn_vm::value::VmError;
 
 const TERMINAL_JSON: &str = r#"{"handle_id":"hto-1","status":"completed","exit_code":0,"duration_ms":90000,"stdout":"done","output_path":"/tmp/o.log"}"#;
+const FAILED_JSON: &str = r#"{"handle_id":"hto-1","status":"completed","exit_code":1,"duration_ms":90000,"stderr":"failed"}"#;
 
 /// A harn snippet that ingests one awaited running handle and calls
 /// `command_ledger_hold` once, logging the outcome, whether a digest came back,
@@ -71,6 +72,7 @@ pipeline main(harness: Harness) {{
   harness.stdio.log("OUTCOME=" + r.outcome)
   harness.stdio.log("HAS_DIGEST=" + to_string(r?.digest != nil))
   harness.stdio.log("LEDGER_LEN=" + to_string(len(r.ledger)))
+  harness.stdio.log("TERMINAL_SUCCEEDED=" + to_string(r?.terminal_succeeded ?? false))
   if r?.digest != nil {{
     harness.stdio.log("DIGEST=" + r.digest)
   }}
@@ -223,6 +225,31 @@ fn park_wakes_on_terminal_then_returns_digest() {
     assert!(
         digest.contains("command_status") && digest.contains("completed"),
         "digest must carry the completed handle: {digest}"
+    );
+    assert_eq!(
+        line_value(&lines, "TERMINAL_SUCCEEDED"),
+        Some("true"),
+        "an exit-zero terminal batch is completion evidence: {lines:?}"
+    );
+}
+
+#[test]
+fn failed_terminal_digest_requires_model_reentry() {
+    let session = "hold-failed-terminal-sess";
+    let lines = run_scenario(
+        hold_snippet(session, 0, 900_000),
+        |_paused, task| async move {
+            yield_times(8).await;
+            assert!(!task.is_finished(), "hold must park while the handle runs");
+            agent_inbox::push(session, "tool_result", FAILED_JSON, "test");
+            task.await.expect("join").expect("snippet ok")
+        },
+    );
+    assert_eq!(line_value(&lines, "OUTCOME"), Some("digest"));
+    assert_eq!(
+        line_value(&lines, "TERMINAL_SUCCEEDED"),
+        Some("false"),
+        "a failed terminal must not authorize same-turn completion: {lines:?}"
     );
 }
 
