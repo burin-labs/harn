@@ -46,6 +46,21 @@ Release and audit gates that call `make test` must have nextest installed
 (they do after `make setup`); failing loudly is preferred to silently changing
 what "the tests pass" means (#6145).
 
+For a native nextest filter expression, use the shell-opaque focused target:
+
+```bash
+HARN_NEXTEST_FILTER='test(check_cli::check_accepts_runtime_backed_llm_usage_telemetry) or test(check_cli::check_reports_unknown_struct_type_with_precise_location)' \
+  HARN_NEXTEST_PACKAGE=harn-cli \
+  HARN_NEXTEST_BINARY=harn_cli_fast \
+  make test-focused
+```
+
+`HARN_NEXTEST_FILTER` is required. The package and integration-test binary are
+optional; setting a binary requires a package. The wrapper constructs argv
+directly, so parentheses, spaces, and other expression syntax do not need an
+extra shell-escaping layer. Keep using `ARGS` with `make test` for general Cargo
+selection that is already safe to express at the Make command line.
+
 Make targets run Harn scripts through `scripts/harn_bin.sh`. The runner exports
 the exact validated executable as `HARN_BIN` to the child process. A Harn script
 that starts a nested Harn check should reuse that path instead of starting a
