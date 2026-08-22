@@ -18,12 +18,14 @@ pub type WindowsWorkspaceWarmPolicy = {
   job: string,
   retention_days: int,
   max_bytes: int,
+  build_headroom_bytes: int,
   dev_drive_size_default: string,
+  dev_drive_size_full_workspace: string,
   dev_drive_size_release_certify: string,
 }
 
 pub type CiCachePolicy = {
-  schema_version: 4,
+  schema_version: 5,
   rust_cache_action: "./.github/actions/rust-cache",
   node_cache_action: "./.github/actions/node-cache",
   persistent_ref: "refs/heads/main",
@@ -297,10 +299,23 @@ const WINDOWS_WARM_RESTORE_STEP = "Restore Windows workspace warm artifact"
 
 const WINDOWS_WARM_REPORT_STEP = "Report Windows warm restore outcome"
 
+const WINDOWS_STORAGE_REPORT_MARKER = "windows_storage_budget.sh report"
+
+const WINDOWS_STORAGE_INITIAL_STEP = "Report Windows storage (initial)"
+
+const WINDOWS_STORAGE_INITIAL_STEP_ID = "windows-storage-initial"
+
+const WINDOWS_STORAGE_AFTER_RESTORE_STEP = "Report Windows storage (after restore)"
+
+const WINDOWS_STORAGE_TERMINAL_STEP = "Report Windows storage (terminal)"
+
+const WINDOWS_NIGHTLY_STORAGE_BEFORE_STEP = "Report Windows storage (before build)"
+
 const WINDOWS_WARM_RESTORE_STEP_ID = "windows-warm-restore"
 
 const WINDOWS_CACHE_FALLBACK_GUARD =
-  "steps.windows-warm-restore.outputs.windows_warm_restore != 'hit'"
+  "steps.windows-warm-restore.outputs.windows_warm_restore != 'hit' && "
+  + "steps.windows-warm-restore.outputs.windows_warm_restore_reason != 'insufficient_space'"
 
 const WINDOWS_TEST_STEP = "Compile Windows tests and run unit slice"
 
@@ -341,7 +356,9 @@ fn windows_workspace_warm_schema() {
       job: schema_string() + {pattern: "^[a-z0-9-]+$"},
       retention_days: schema_int() + {minimum: 1, maximum: 90},
       max_bytes: schema_int() + {minimum: 1},
+      build_headroom_bytes: schema_int() + {minimum: 8589934592},
       dev_drive_size_default: drive_size_schema(),
+      dev_drive_size_full_workspace: drive_size_schema(),
       dev_drive_size_release_certify: drive_size_schema(),
     },
   )
@@ -350,7 +367,7 @@ fn windows_workspace_warm_schema() {
 fn policy_schema() {
   return schema_closed_object(
     {
-      schema_version: schema_literal(4),
+      schema_version: schema_literal(5),
       rust_cache_action: schema_literal("./.github/actions/rust-cache"),
       node_cache_action: schema_literal("./.github/actions/node-cache"),
       persistent_ref: schema_literal("refs/heads/main"),
@@ -377,6 +394,15 @@ fn windows_release_certify_dev_drive_size(warm: WindowsWorkspaceWarmPolicy) -> s
     + warm.dev_drive_size_release_certify
     + "' || '"
     + warm.dev_drive_size_default
+    + "' }}"
+}
+
+fn windows_ci_dev_drive_size(warm: WindowsWorkspaceWarmPolicy) -> string {
+  return "$"
+    + "{{ github.event_name == 'pull_request' && '"
+    + warm.dev_drive_size_default
+    + "' || '"
+    + warm.dev_drive_size_full_workspace
     + "' }}"
 }
 
@@ -655,7 +681,7 @@ pub fn release_warm_cache_prune_errors(workflow) -> list<string> {
 fn policy_from_validated(value) -> CiCachePolicy {
   const warm = value.windows_workspace_warm
   return {
-    schema_version: 4,
+    schema_version: 5,
     rust_cache_action: "./.github/actions/rust-cache",
     node_cache_action: "./.github/actions/node-cache",
     persistent_ref: "refs/heads/main",
@@ -669,7 +695,9 @@ fn policy_from_validated(value) -> CiCachePolicy {
       job: warm.job,
       retention_days: warm.retention_days,
       max_bytes: warm.max_bytes,
+      build_headroom_bytes: warm.build_headroom_bytes,
       dev_drive_size_default: warm.dev_drive_size_default,
+      dev_drive_size_full_workspace: warm.dev_drive_size_full_workspace,
       dev_drive_size_release_certify: warm.dev_drive_size_release_certify,
     },
     writers: value.writers.map(
@@ -1313,7 +1341,7 @@ pub fn windows_shared_cache_errors(ci_workflow, nightly_workflow) -> list<string
     "windows",
     WINDOWS_CACHE_KEY,
     "",
-    [WINDOWS_WARM_RESTORE_STEP_ID],
+    [WINDOWS_STORAGE_INITIAL_STEP_ID, WINDOWS_WARM_RESTORE_STEP_ID],
   )
   const consumer_caches = matching_steps(ci_workflow?.jobs?.windows, "./.github/actions/rust-cache")
   const producer_caches = matching_steps(
@@ -1430,7 +1458,7 @@ pub fn windows_release_certify_warm_errors(
       "${warm.workflow}:${warm.job} must install nextest@${policy.nextest_version} from cache-policy.json",
     ]
   }
-  return errors
+  return errors + windows_nightly_storage_budget_errors(job)
 }
 
 fn windows_blacksmith_runner_expression() -> string {
@@ -1496,6 +1524,16 @@ fn windows_pr_runner_errors(policy: CiCachePolicy, job, producer) -> list<string
       "ci.yml:windows must skip Hyper-V Dev Drive setup on Blacksmith and retain it for the github-hosted fallback",
     ]
   }
+  if len(pr_dev_drives) == 1
+    && trim(to_string(pr_dev_drives[0]?.with?.["drive-size"] ?? ""))
+    != windows_ci_dev_drive_size(
+    policy.windows_workspace_warm,
+  ) {
+    errors = errors
+      + [
+      "ci.yml:windows Dev Drive must reserve the full-workspace ceiling outside pull requests",
+    ]
+  }
   const producer_dev_drives = matching_named_steps(producer, "Set up Dev Drive")
   if len(producer_dev_drives) != 1
     || trim(to_string(producer_dev_drives[0]?.if ?? ""))
@@ -1516,6 +1554,74 @@ fn windows_pr_runner_errors(policy: CiCachePolicy, job, producer) -> list<string
       + [
       "ci.yml:windows must grant only contents: read and actions: read for artifact discovery",
     ]
+  }
+  return errors
+}
+
+fn windows_storage_budget_errors(job) -> list<string> {
+  let errors: list<string> = []
+  const expected = [
+    {name: WINDOWS_STORAGE_INITIAL_STEP, phase: "initial"},
+    {name: WINDOWS_STORAGE_AFTER_RESTORE_STEP, phase: "after_restore"},
+    {name: WINDOWS_STORAGE_TERMINAL_STEP, phase: "terminal"},
+  ]
+  for receipt in expected {
+    const steps = matching_named_steps(job, receipt.name)
+    if len(steps) != 1
+      || trim(steps[0]?.if ?? "")
+      != "always()"
+      || !contains(trim(steps[0]?.run ?? ""), WINDOWS_STORAGE_REPORT_MARKER)
+      || !contains(
+      trim(steps[0]?.run ?? ""),
+      "report ${receipt.phase}",
+    ) {
+      errors = errors
+        + [
+        "ci.yml:windows must always emit the ${receipt.phase} storage receipt through the shared budget owner",
+      ]
+    }
+  }
+  const initial = step_by_name(job?.steps ?? [], WINDOWS_STORAGE_INITIAL_STEP)
+  if trim(initial?.id ?? "") != WINDOWS_STORAGE_INITIAL_STEP_ID {
+    errors = errors
+      + [
+      "ci.yml:windows must give the pre-cache storage receipt its cache-parity exclusion id",
+    ]
+  }
+  const test_step = step_by_name(job?.steps ?? [], WINDOWS_TEST_STEP)
+  if test_step == nil
+    || !contains(
+    trim(test_step?.run ?? ""),
+    "cargo build --locked --profile test -p harn-cli",
+  ) {
+    errors = errors
+      + [
+      "ci.yml:windows must build freshness binaries in Cargo test profile before nextest",
+    ]
+  }
+  return errors
+}
+
+fn windows_nightly_storage_budget_errors(job) -> list<string> {
+  let errors: list<string> = []
+  for receipt in [
+    {name: WINDOWS_NIGHTLY_STORAGE_BEFORE_STEP, phase: "before_build"},
+    {name: WINDOWS_STORAGE_TERMINAL_STEP, phase: "terminal"},
+  ] {
+    const steps = matching_named_steps(job, receipt.name)
+    if len(steps) != 1
+      || trim(steps[0]?.if ?? "")
+      != "always()"
+      || !contains(trim(steps[0]?.run ?? ""), WINDOWS_STORAGE_REPORT_MARKER)
+      || !contains(
+      trim(steps[0]?.run ?? ""),
+      "report ${receipt.phase}",
+    ) {
+      errors = errors
+        + [
+        "windows-nightly.yml:nextest must always emit the ${receipt.phase} storage receipt through the shared budget owner",
+      ]
+    }
   }
   return errors
 }
@@ -1629,6 +1735,7 @@ pub fn windows_pr_native_feedback_errors(
   }
   return windows_pr_runner_errors(policy, job, producer)
     + windows_pr_warm_restore_errors(policy, job)
+    + windows_storage_budget_errors(job)
     + windows_test_runtime_errors(
     ci_workflow,
     nightly_workflow,
@@ -1675,9 +1782,12 @@ pub fn actions_cache_capacity_errors(policy: CiCachePolicy) -> list<string> {
       "cache-policy.json windows_workspace_warm.max_bytes must stay below storage_limit_bytes so warm artifacts cannot pretend to replace the Actions cache pool",
     ]
   }
-  if warm.dev_drive_size_release_certify == warm.dev_drive_size_default {
+  if warm.dev_drive_size_full_workspace == warm.dev_drive_size_default
+    || warm
+    .dev_drive_size_release_certify
+    == warm.dev_drive_size_default {
     return [
-      "cache-policy.json windows_workspace_warm must give release-certify a larger Dev Drive ceiling than the default",
+      "cache-policy.json windows_workspace_warm must give full-workspace and release-certify runs larger Dev Drive ceilings than the default",
     ]
   }
   return []

@@ -114,14 +114,10 @@ jobs:
           else
             echo "Windows release certification falling cold; no compatible warm artifact."
           fi
-      - name: Report Windows build storage
-        shell: pwsh
-        run: |
-          $target = $env:CARGO_TARGET_DIR
-          if (-not $target) { $target = Join-Path $env:GITHUB_WORKSPACE "target" }
-          $root = [System.IO.Path]::GetPathRoot($target)
-          $drive = Get-PSDrive -Name $root.TrimEnd('\').TrimEnd(':')
-          "target=$target target_present=$(Test-Path $target) drive_free_bytes=$($drive.Free) drive_used_bytes=$($drive.Used)"
+      - name: Report Windows storage (before build)
+        if: always()
+        shell: bash
+        run: ./scripts/ci/windows_storage_budget.sh report before_build
       - name: Install cargo-nextest
         uses: taiki-e/install-action@7f4eb899022d8fe70b20c4f3de697aa85c309026 # v2.85.11
         with:
@@ -161,3 +157,7 @@ jobs:
           if-no-files-found: error
           retention-days: 3
           compression-level: 6
+      - name: Report Windows storage (terminal)
+        if: always()
+        shell: bash
+        run: ./scripts/ci/windows_storage_budget.sh report terminal

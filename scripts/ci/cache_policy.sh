@@ -6,7 +6,7 @@
 
 _HARN_CACHE_POLICY_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 _HARN_CACHE_POLICY_REPO_ROOT="$(cd "${_HARN_CACHE_POLICY_SCRIPT_DIR}/../.." && pwd -P)"
-readonly HARN_CACHE_POLICY_SCHEMA_VERSION=4
+readonly HARN_CACHE_POLICY_SCHEMA_VERSION=5
 
 harn_cache_policy_path() {
   printf '%s\n' "${HARN_CACHE_POLICY_PATH:-$_HARN_CACHE_POLICY_REPO_ROOT/.github/cache-policy.json}"

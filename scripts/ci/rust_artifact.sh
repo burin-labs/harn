@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 # shellcheck source=scripts/ci/cache_policy.sh
 source "${SCRIPT_DIR}/cache_policy.sh"
 
-# Owned by .github/cache-policy.json nextest_version (schema v4).
+# Owned by .github/cache-policy.json nextest_version (schema v5).
 NEXTEST_VERSION="$(harn_cache_policy_jq '.nextest_version')"
 readonly NEXTEST_VERSION
 readonly NEUTRAL_FILTER='all()'

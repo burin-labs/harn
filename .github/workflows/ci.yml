@@ -1387,12 +1387,21 @@ jobs:
         if: ${{ vars.HARN_WINDOWS_DEVDRIVE == 'on' && env.HARN_RUNNER_TIER == 'github-hosted' }}
         uses: samypr100/setup-dev-drive@562171fe8df7401fdf582d766cd3b6ab80d5b1a0 # v4.1.0
         with:
-          drive-size: 25GB
+          # A warm target occupies about 15 GB before a changed workspace is
+          # linked. Pull requests use an affected package set; main/push is the
+          # full-workspace backstop and needs the same 50 GB ceiling already
+          # proven by release certification (harn#6485 / harn#6964).
+          drive-size: ${{ github.event_name == 'pull_request' && '25GB' || '50GB' }}
           drive-format: ReFS
           env-mapping: |
             CARGO_HOME,{{ DEV_DRIVE }}/.cargo
             CARGO_TARGET_DIR,{{ DEV_DRIVE }}/target
       - uses: ./.github/actions/rust-toolchain
+      - name: Report Windows storage (initial)
+        id: windows-storage-initial
+        if: always()
+        shell: bash
+        run: ./scripts/ci/windows_storage_budget.sh report initial
       # A short-retention artifact produced by the main Windows nightly is the
       # provider-neutral warm path. It is attempted before rust-cache so an
       # internal Blacksmith run can reuse GitHub-hosted build output without
@@ -1414,7 +1423,7 @@ jobs:
           status=$?
           set -e
           cat "${receipt}"
-          grep -E '^windows_warm_restore_(run_id|producer_commit)=' "${receipt}" >> "$GITHUB_OUTPUT" || true
+          grep -E '^windows_warm_restore_(run_id|producer_commit|reason|target_bytes|headroom_bytes|free_bytes|existing_target_bytes|available_after_replace_bytes)=' "${receipt}" >> "$GITHUB_OUTPUT" || true
           if [[ "${status}" -eq 0 ]]; then
             grep -E '^windows_warm_restore=hit$' "${receipt}" >> "$GITHUB_OUTPUT"
           else
@@ -1423,7 +1432,7 @@ jobs:
           fi
           exit "${status}"
       - uses: ./.github/actions/rust-cache
-        if: steps.windows-warm-restore.outputs.windows_warm_restore != 'hit'
+        if: steps.windows-warm-restore.outputs.windows_warm_restore != 'hit' && steps.windows-warm-restore.outputs.windows_warm_restore_reason != 'insufficient_space'
         continue-on-error: true
         with:
           # Restore the latest full-suite nightly cache. PR refs stay
@@ -1441,18 +1450,26 @@ jobs:
         env:
           RESTORE_OUTCOME: ${{ steps.windows-warm-restore.outcome }}
           RESTORE_RESULT: ${{ steps.windows-warm-restore.outputs.windows_warm_restore || 'miss' }}
+          RESTORE_REASON: ${{ steps.windows-warm-restore.outputs.windows_warm_restore_reason || 'unavailable' }}
           RESTORE_PRODUCER_COMMIT: ${{ steps.windows-warm-restore.outputs.windows_warm_restore_producer_commit || 'unavailable' }}
           RESTORE_RUN_ID: ${{ steps.windows-warm-restore.outputs.windows_warm_restore_run_id || 'unavailable' }}
         run: |
           echo "windows_warm_restore_outcome=${RESTORE_OUTCOME}"
           echo "windows_warm_restore=${RESTORE_RESULT}"
+          echo "windows_warm_restore_reason=${RESTORE_REASON}"
           echo "windows_warm_restore_producer_commit=${RESTORE_PRODUCER_COMMIT}"
           echo "windows_warm_restore_run_id=${RESTORE_RUN_ID}"
           if [[ "${RESTORE_RESULT}" == "hit" ]]; then
             echo "Windows PR feedback restored a compatible main warm artifact."
+          elif [[ "${RESTORE_REASON}" == "insufficient_space" ]]; then
+            echo "Windows PR feedback rejected the warm target's capacity budget and will compile cold."
           else
             echo "Windows PR feedback is continuing through the provider-local rust-cache/cold fallback."
           fi
+      - name: Report Windows storage (after restore)
+        if: always()
+        shell: bash
+        run: ./scripts/ci/windows_storage_budget.sh report after_restore
       - name: Install cargo-nextest
         uses: taiki-e/install-action@7f4eb899022d8fe70b20c4f3de697aa85c309026 # v2.85.11
         continue-on-error: true
@@ -1524,7 +1541,12 @@ jobs:
           # Let Cargo resolve the exact graph the canonical resolver uses;
           # never infer freshness from harn.exe existence.
           jq --version
-          cargo build --locked -p harn-cli \
+          # The warm producer and nextest compile the test profile. Building
+          # the CLI in Cargo's default dev profile first creates a second
+          # dependency/artifact family and exhausted the hosted 25 GB target.
+          # Keep exact freshness proof in the same profile as the native test
+          # graph so Cargo can reuse one generation.
+          cargo build --locked --profile test -p harn-cli \
             --bin harn --bin harn-freshness-check \
             --features internal-freshness-checker
           # Cargo metadata and current_exe() both return an absolute native
@@ -1578,6 +1600,10 @@ jobs:
         run: |
           echo 'fn main(harness: Harness) { harness.stdio.println("ok") }' > smoke.harn
           "${CARGO_TARGET_DIR:-target}/debug/harn.exe" run smoke.harn
+      - name: Report Windows storage (terminal)
+        if: always()
+        shell: bash
+        run: ./scripts/ci/windows_storage_budget.sh report terminal
 
   # Deterministic, always-on Windows *compile* gate. Unlike the path-gated
   # `windows` job above (which skips on routine PRs + the whole merge queue and

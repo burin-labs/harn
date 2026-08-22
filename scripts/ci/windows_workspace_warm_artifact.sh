@@ -17,6 +17,7 @@ load_warm_policy() {
   SCHEMA="$(harn_cache_policy_jq '.windows_workspace_warm.manifest_schema')"
   WORKFLOW_FILE="$(harn_cache_policy_jq '.windows_workspace_warm.workflow')"
   DEFAULT_MAX_BYTES="$(harn_cache_policy_jq '.windows_workspace_warm.max_bytes')"
+  DEFAULT_BUILD_HEADROOM_BYTES="$(harn_cache_policy_jq '.windows_workspace_warm.build_headroom_bytes')"
   NEXTEST_VERSION="$(harn_cache_policy_jq '.nextest_version')"
   PRODUCER_REF="$(harn_cache_policy_jq '.persistent_ref')"
   PRODUCER_BRANCH="${PRODUCER_REF#refs/heads/}"
@@ -99,9 +100,41 @@ max_bundle_bytes() {
   printf '%s\n' "$value"
 }
 
+build_headroom_bytes() {
+  local value="${HARN_WINDOWS_WARM_BUILD_HEADROOM_BYTES:-$DEFAULT_BUILD_HEADROOM_BYTES}"
+  if [[ ! "$value" =~ ^[1-9][0-9]*$ ]]; then
+    echo "error: HARN_WINDOWS_WARM_BUILD_HEADROOM_BYTES must be a positive integer" >&2
+    exit 2
+  fi
+  printf '%s\n' "$value"
+}
+
+directory_bytes() {
+  local path=$1
+  local kib
+  kib="$(du -sk "$path" | awk '{ print $1 }')"
+  if [[ ! "$kib" =~ ^[0-9]+$ ]]; then
+    echo "error: could not measure directory bytes for $path" >&2
+    exit 1
+  fi
+  printf '%s\n' "$((kib * 1024))"
+}
+
+filesystem_free_bytes() {
+  local path=$1
+  local kib
+  kib="$(df -Pk "$path" | awk 'NR > 1 { value = $4 } END { print value }')"
+  if [[ ! "$kib" =~ ^[0-9]+$ ]]; then
+    echo "error: could not measure filesystem free bytes for $path" >&2
+    exit 1
+  fi
+  printf '%s\n' "$((kib * 1024))"
+}
+
 write_manifest() {
   local destination=$1
   local producer_commit=$2
+  local target_bytes=$3
   cat > "$destination/manifest" <<EOF
 schema=${SCHEMA}
 artifact=${ARTIFACT_NAME}
@@ -112,6 +145,7 @@ rustc_sha256=$(rustc_identity_sha256)
 rust_toolchain_sha256=$(sha256 rust-toolchain.toml)
 rustflags_sha256=$(sha256_string "${RUSTFLAGS:-}")
 cargo_incremental=${CARGO_INCREMENTAL:-}
+target_bytes=${target_bytes}
 EOF
 }
 
@@ -134,6 +168,12 @@ verify_compat_manifest() {
   require_manifest_value "$manifest" rust_toolchain_sha256 "$(sha256 rust-toolchain.toml)"
   require_manifest_value "$manifest" rustflags_sha256 "$(sha256_string "${RUSTFLAGS:-}")"
   require_manifest_value "$manifest" cargo_incremental "${CARGO_INCREMENTAL:-}"
+  local target_bytes
+  target_bytes="$(sed -n 's/^target_bytes=//p' "$manifest")"
+  if [[ ! "$target_bytes" =~ ^[1-9][0-9]*$ ]]; then
+    echo "error: warm artifact manifest target_bytes must be a positive integer" >&2
+    exit 1
+  fi
 }
 
 strip_workspace_member_artifacts() {
@@ -159,7 +199,7 @@ strip_workspace_member_artifacts() {
 
 pack() {
   local staging=$1
-  local target_dir producer_commit archive bytes limit
+  local target_dir producer_commit archive bytes limit target_bytes
   if [[ -z "$staging" ]]; then
     usage >&2
     exit 2
@@ -176,9 +216,10 @@ pack() {
   fi
 
   strip_workspace_member_artifacts "$target_dir"
+  target_bytes="$(directory_bytes "$target_dir")"
   rm -rf "$staging"
   mkdir -p "$staging"
-  write_manifest "$staging" "$producer_commit"
+  write_manifest "$staging" "$producer_commit" "$target_bytes"
   archive="$staging/target.tar.gz"
   # Write the archive via a basename so Git Bash tar does not treat Windows
   # drive-letter staging paths (D:\a\_temp\...) as remote hosts.
@@ -193,6 +234,7 @@ pack() {
     exit 1
   fi
   printf 'windows_warm_artifact_bytes=%s\n' "$bytes"
+  printf 'windows_warm_artifact_target_bytes=%s\n' "$target_bytes"
   printf 'windows_warm_artifact_producer_commit=%s\n' "$producer_commit"
   if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
     {
@@ -200,6 +242,7 @@ pack() {
       echo
       echo "- Producer commit: \`${producer_commit}\`"
       echo "- Compressed bytes: ${bytes}"
+      echo "- Restored target bytes: ${target_bytes}"
       echo "- Artifact name: \`${ARTIFACT_NAME}\`"
     } >> "$GITHUB_STEP_SUMMARY"
   fi
@@ -208,7 +251,8 @@ pack() {
 restore() {
   local staging=$1
   local target_dir=$2
-  local archive manifest
+  local archive manifest target_bytes headroom_bytes free_bytes current_target_bytes
+  local available_after_replace_bytes required_bytes
   if [[ -z "$staging" || -z "$target_dir" ]]; then
     usage >&2
     exit 2
@@ -225,6 +269,22 @@ restore() {
   # it before entering the artifact staging directory so tar restores into the
   # workspace target rather than looking for a sibling under staging.
   target_dir="$(cd "$target_dir" && pwd -P)"
+  target_bytes="$(sed -n 's/^target_bytes=//p' "$manifest")"
+  headroom_bytes="$(build_headroom_bytes)"
+  free_bytes="$(filesystem_free_bytes "$target_dir")"
+  current_target_bytes="$(directory_bytes "$target_dir")"
+  available_after_replace_bytes="$((free_bytes + current_target_bytes))"
+  required_bytes="$((target_bytes + headroom_bytes))"
+  if (( available_after_replace_bytes < required_bytes )); then
+    printf 'windows_warm_restore_reason=insufficient_space\n'
+    printf 'windows_warm_restore_target_bytes=%s\n' "$target_bytes"
+    printf 'windows_warm_restore_headroom_bytes=%s\n' "$headroom_bytes"
+    printf 'windows_warm_restore_free_bytes=%s\n' "$free_bytes"
+    printf 'windows_warm_restore_existing_target_bytes=%s\n' "$current_target_bytes"
+    printf 'windows_warm_restore_available_after_replace_bytes=%s\n' "$available_after_replace_bytes"
+    echo "error: warm artifact needs ${target_bytes} target bytes plus ${headroom_bytes} build-headroom bytes, but replacing the existing target would make only ${available_after_replace_bytes} bytes available" >&2
+    exit 1
+  fi
   # Replace any partial target so restored deps own the tree.
   find "$target_dir" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
   (
@@ -232,6 +292,11 @@ restore() {
     tar -xzf "$(basename "$archive")" -C "$target_dir"
   )
   printf 'windows_warm_restore=hit\n'
+  printf 'windows_warm_restore_target_bytes=%s\n' "$target_bytes"
+  printf 'windows_warm_restore_headroom_bytes=%s\n' "$headroom_bytes"
+  printf 'windows_warm_restore_free_bytes_before=%s\n' "$free_bytes"
+  printf 'windows_warm_restore_existing_target_bytes=%s\n' "$current_target_bytes"
+  printf 'windows_warm_restore_available_after_replace_bytes=%s\n' "$available_after_replace_bytes"
   printf 'windows_warm_restore_producer_commit=%s\n' \
     "$(sed -n 's/^producer_commit=//p' "$manifest")"
   if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then

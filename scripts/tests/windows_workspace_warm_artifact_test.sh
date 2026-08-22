@@ -160,8 +160,9 @@ printf 'inc\n' > "$tmpdir/target/debug/incremental/foo/x"
     "$script" pack "$drive_staging"
 )
 test -f "$drive_staging/target.tar.gz"
-grep -qx "schema=harn.windows_workspace_warm.v1" "$tmpdir/out/staging/manifest"
+grep -qx "schema=harn.windows_workspace_warm.v2" "$tmpdir/out/staging/manifest"
 grep -qx "producer_commit=${commit}" "$tmpdir/out/staging/manifest"
+grep -Eq '^target_bytes=[1-9][0-9]*$' "$tmpdir/out/staging/manifest"
 if [[ -e "$tmpdir/target/debug/deps/libharn_vm-def456.rlib" ]]; then
   echo "workspace member artifact was not stripped" >&2
   exit 1
@@ -181,6 +182,37 @@ if [[ -e "$tmpdir/restored/debug/deps/libharn_vm-def456.rlib" ]]; then
   echo "restore unexpectedly reintroduced workspace artifacts" >&2
   exit 1
 fi
+
+echo "restore rejects insufficient build headroom before replacing a target"
+rm -rf "$tmpdir/restored-tight"
+mkdir -p "$tmpdir/restored-tight"
+printf 'preserve\n' > "$tmpdir/restored-tight/sentinel"
+if HARN_WINDOWS_WARM_BUILD_HEADROOM_BYTES=9000000000000000000 \
+  run_restore "$tmpdir/out/staging" "$tmpdir/restored-tight" \
+  >"$tmpdir/tight.out" 2>"$tmpdir/tight.err"; then
+  echo "expected insufficient-space admission to fail" >&2
+  exit 1
+fi
+grep -Fxq 'windows_warm_restore_reason=insufficient_space' "$tmpdir/tight.out"
+grep -q '^windows_warm_restore_existing_target_bytes=' "$tmpdir/tight.out"
+grep -q '^windows_warm_restore_available_after_replace_bytes=' "$tmpdir/tight.out"
+grep -Eq '^windows_warm_restore_target_bytes=[1-9][0-9]*$' "$tmpdir/tight.out"
+grep -Eq '^windows_warm_restore_headroom_bytes=[1-9][0-9]*$' "$tmpdir/tight.out"
+grep -Fq 'warm artifact needs' "$tmpdir/tight.err"
+test -f "$tmpdir/restored-tight/sentinel"
+
+echo "restore rejects manifests without a typed target footprint"
+rm -rf "$tmpdir/out/missing-footprint"
+cp -R "$tmpdir/out/staging" "$tmpdir/out/missing-footprint"
+sed -i.bak '/^target_bytes=/d' "$tmpdir/out/missing-footprint/manifest"
+rm -f "$tmpdir/out/missing-footprint/manifest.bak"
+if run_restore "$tmpdir/out/missing-footprint" "$tmpdir/restored-missing-footprint" \
+  >"$tmpdir/missing-footprint.out" 2>"$tmpdir/missing-footprint.err"; then
+  echo "expected missing target footprint to fail" >&2
+  exit 1
+fi
+grep -Fq 'target_bytes must be a positive integer' "$tmpdir/missing-footprint.err"
+test ! -e "$tmpdir/restored-missing-footprint"
 
 echo "restore resolves a workspace-relative target before entering staging"
 rm -rf "$tmpdir/work/relative-target"
