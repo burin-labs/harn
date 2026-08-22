@@ -235,14 +235,10 @@ make_all = true
 
 [[artifact]]
 id = "tree-sitter-parser"
-description = "Compiled tree-sitter Harn parser tables and metadata generated from grammar.js and its modules by the CLI pinned in tree-sitter-harn/package-lock.json."
+description = "Compiled tree-sitter Harn parser source tree generated from grammar.js and its modules by the CLI pinned in tree-sitter-harn/package-lock.json, with the hand-written external scanner seeded into the structurally compared tree."
 gen = "gen-tree-sitter-parser"
 check = "check-tree-sitter-parser"
-outputs = [
-  "tree-sitter-harn/src/parser.c",
-  "tree-sitter-harn/src/grammar.json",
-  "tree-sitter-harn/src/node-types.json",
-]
+outputs = ["tree-sitter-harn/src/"]
 sources = [
   "tree-sitter-harn/grammar.js",
   "tree-sitter-harn/grammar/",

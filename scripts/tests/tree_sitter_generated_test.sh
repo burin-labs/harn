@@ -5,7 +5,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 tmp_root="$(mktemp -d)"
 trap 'rm -rf "$tmp_root"' EXIT
 grammar="$tmp_root/tree-sitter-harn"
-mkdir -p "$grammar/grammar" "$grammar/scripts" \
+mkdir -p "$grammar/grammar" "$grammar/scripts" "$grammar/src" \
   "$grammar/node_modules/.bin"
 
 cp "$repo_root/tree-sitter-harn/scripts/tree-sitter-cli.sh" "$grammar/scripts/"
@@ -13,6 +13,7 @@ printf 'module.exports = grammar({name: "fixture", rules: {source_file: $ => "ok
   > "$grammar/grammar.js"
 printf '{}\n' > "$grammar/package.json"
 printf '{}\n' > "$grammar/tree-sitter.json"
+printf 'hand-written scanner\n' > "$grammar/src/scanner.c"
 cat > "$grammar/package-lock.json" <<'JSON'
 {
   "packages": {
@@ -36,6 +37,8 @@ source_text="$(cat grammar.js)"
 printf 'parser:%s\n' "$source_text" > src/parser.c
 printf 'grammar:%s\n' "$source_text" > src/grammar.json
 printf 'nodes:%s\n' "$source_text" > src/node-types.json
+mkdir -p src/tree_sitter
+printf 'array:%s\n' "$source_text" > src/tree_sitter/array.h
 SH
 chmod +x "$grammar/node_modules/.bin/tree-sitter"
 
@@ -46,7 +49,7 @@ run_guard() {
 run_guard --write
 run_guard --check >/dev/null
 
-outputs=(src/parser.c src/grammar.json src/node-types.json)
+outputs=(src/parser.c src/grammar.json src/node-types.json src/tree_sitter/array.h)
 for output in "${outputs[@]}"; do
   printf 'stale\n' >> "$grammar/$output"
 done
@@ -79,6 +82,20 @@ after="$(digest_outputs)"
   echo "drift check mutated committed outputs" >&2
   exit 1
 }
+
+# The compared set comes from the generated directory, so an output retired by
+# a future CLI release cannot survive silently outside a maintained file list.
+retired="src/tree_sitter/retired.h"
+printf 'retired generated output\n' > "$grammar/$retired"
+if run_guard --check >"$check_output" 2>&1; then
+  echo "retired generated output unexpectedly passed" >&2
+  exit 1
+fi
+grep -Fq "tree-sitter-harn/$retired" "$check_output" || {
+  echo "failure did not name retired generated output $retired" >&2
+  exit 1
+}
+rm "$grammar/$retired"
 
 run_guard --write
 run_guard --check >/dev/null
