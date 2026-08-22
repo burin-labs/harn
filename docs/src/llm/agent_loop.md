@@ -373,6 +373,46 @@ Same as `llm_call`, plus additional options:
 | `working_files` | list\|string | `[]` | Paths that feed `paths:` glob auto-trigger in the metadata matcher and ride along as a hint to host-delegated matchers |
 | `mcp_servers` | list | nil | MCP servers to connect for this loop. Harn calls `tools/list` once per server, adds discovered tools as `<server>__<tool>`, and dispatches matching tool calls through `tools/call` |
 
+### Rendering host completion guidance
+
+Use `agent_completion_prompt_bindings` when a host-authored prompt fragment
+describes how the model should finish a turn. The function resolves the same
+tool-format and sentinel contract that `agent_loop` uses:
+
+```harn
+import { agent_completion_prompt_bindings } from "std/agent/preflight"
+
+fn main(harness: Harness) {
+  const options = {tool_format: "json", done_sentinel: "##DONE##"}
+  const bindings = agent_completion_prompt_bindings(harness.llm, options)
+  const guidance = harness.fs.render_template(
+    "Give the final user-facing answer {{ final_answer }}.",
+    bindings,
+  )
+  harness.stdio.println(guidance)
+}
+```
+
+This prints `Give the final user-facing answer as plain text.`. Pass the same
+record to `harness.fs.render_prompt` when the fragment lives in a
+`.harn.prompt` file.
+
+The returned `AgentCompletionPromptBindings` record has these fields:
+
+| Binding | Type | Meaning |
+|---|---|---|
+| `tool_format` | `"native" \| "json" \| "text"` | Resolved tool grammar. |
+| `final_answer` | string | Phrase that completes “give the final user-facing answer …”. |
+| `done_sentinel` | string\|nil | Configured sentinel, or `nil` when none is active. |
+| `done_sentinel_form` | `"none" \| "plain_text" \| "done_block"` | Where the sentinel belongs. |
+| `done_sentinel_rendered` | string | Exact sentinel bytes the model should emit; empty when no sentinel is active. |
+
+A template can use `Give the final answer {{ final_answer }}` and conditionally
+quote `done_sentinel_rendered` when `done_sentinel` is present. Invalid
+`tool_format` and `done_sentinel` values fail with the same errors as
+`agent_loop`; capability policy can also reject a format the selected model
+cannot use.
+
 ### Environment-unchanged futility
 
 `stall_diagnostics` observes the loop's transcript, but some callers have a

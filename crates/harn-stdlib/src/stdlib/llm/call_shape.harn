@@ -34,7 +34,7 @@ import { call_block, prose_block } from "std/llm/tool_parse_result"
  *   code-bearing field", which is where weak models lose calls to escaping.
  */
 pub type ToolCallShape = {
-  kind: string,
+  kind: "native" | "json" | "text",
   call_open: string,
   call_close: string,
   body_open: string,
