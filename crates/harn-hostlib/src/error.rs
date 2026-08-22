@@ -55,6 +55,19 @@ pub enum HostlibError {
         message: String,
     },
 
+    /// The requested native secret-store backend is unavailable in the current
+    /// host session. `reason` is a stable machine-readable classifier;
+    /// `message` retains the platform detail for diagnostics.
+    #[error("hostlib: {builtin}: backend unavailable ({reason}): {message}")]
+    NativeSecretStoreUnavailable {
+        /// Fully-qualified builtin name.
+        builtin: &'static str,
+        /// Stable, typed capability classifier.
+        reason: harn_vm::secrets::NativeKeyringUnavailable,
+        /// Human-readable platform detail.
+        message: String,
+    },
+
     /// The OS could not start a requested process. `kind` is the canonical
     /// `io::ErrorKind` spelling retained for script-side classification.
     #[error("hostlib: {builtin}: process spawn failed: {message}")]
@@ -124,6 +137,7 @@ impl HostlibError {
             | HostlibError::MissingParameter { builtin, .. }
             | HostlibError::InvalidParameter { builtin, .. }
             | HostlibError::Backend { builtin, .. }
+            | HostlibError::NativeSecretStoreUnavailable { builtin, .. }
             | HostlibError::ProcessSpawn { builtin, .. }
             | HostlibError::SandboxViolation { builtin, .. }
             | HostlibError::SandboxUnsupported { builtin, .. }
@@ -142,6 +156,7 @@ impl From<HostlibError> for VmError {
             HostlibError::MissingParameter { .. } => "missing_parameter",
             HostlibError::InvalidParameter { .. } => "invalid_parameter",
             HostlibError::Backend { .. } => "backend_error",
+            HostlibError::NativeSecretStoreUnavailable { .. } => "backend_unavailable",
             HostlibError::ProcessSpawn { kind, .. } => *kind,
             HostlibError::SandboxViolation { .. } => "tool_rejected",
             HostlibError::SandboxUnsupported { .. } => "sandbox_unsupported",
@@ -155,6 +170,10 @@ impl From<HostlibError> for VmError {
         };
         let profile = match &err {
             HostlibError::SandboxUnsupported { profile, .. } => Some(profile.clone()),
+            _ => None,
+        };
+        let unavailable_reason = match &err {
+            HostlibError::NativeSecretStoreUnavailable { reason, .. } => Some(*reason),
             _ => None,
         };
         let builtin = err.builtin();
@@ -190,6 +209,9 @@ impl From<HostlibError> for VmError {
         }
         if let Some(profile) = profile {
             dict.put_str("profile", profile);
+        }
+        if let Some(reason) = unavailable_reason {
+            dict.put_str("reason", reason.as_str());
         }
         VmError::Thrown(VmValue::dict(dict))
     }

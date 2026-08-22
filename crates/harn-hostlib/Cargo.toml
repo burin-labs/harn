@@ -29,7 +29,12 @@ default = ["full"]
 # family. Grammar families used to ride on `ast`; they live on `full` now so
 # lean embedders can enable `ast` (and pick families) without compiling ~27
 # C grammars (#6416 / burin-code#4067).
-full = ["ast", "terminal-session", "grammars-all"]
+full = ["ast", "native-secret-store", "terminal-session", "grammars-all"]
+
+# Operating-system credential-store adapters. The secret-store contract and
+# portable file backend stay available to lean embedders; the default/full
+# product surface opts into the platform implementation explicitly.
+native-secret-store = ["harn-vm/native-keyring"]
 
 # Typed pseudo-terminal sessions. The implementation is linked into full
 # embedders; script authority is carried by the `HarnessTerminalSession`

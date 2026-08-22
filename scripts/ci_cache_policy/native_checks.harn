@@ -211,17 +211,13 @@ pub fn windows_release_certify_warm_errors(
 }
 
 fn windows_blacksmith_runner_expression() -> string {
-  const eligible_event =
-    "(github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))"
   return "$"
-    + "{{ vars.${WINDOWS_BLACKSMITH_DISABLE_VAR} == 'true' && '${HOSTED_WINDOWS_RUNNER}' || (${eligible_event} && '${BLACKSMITH_8CPU_WINDOWS_RUNNER}' || '${HOSTED_WINDOWS_RUNNER}') }}"
+    + "{{ vars.${WINDOWS_BLACKSMITH_DISABLE_VAR} == 'true' && '${HOSTED_WINDOWS_RUNNER}' || '${BLACKSMITH_8CPU_WINDOWS_RUNNER}' }}"
 }
 
 fn windows_blacksmith_tier_expression() -> string {
-  const eligible_event =
-    "(github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))"
   return "$"
-    + "{{ vars.${WINDOWS_BLACKSMITH_DISABLE_VAR} == 'true' && '${HOSTED_RUNNER_TIER}' || (${eligible_event} && '${BLACKSMITH_RUNNER_TIER}' || '${HOSTED_RUNNER_TIER}') }}"
+    + "{{ vars.${WINDOWS_BLACKSMITH_DISABLE_VAR} == 'true' && '${HOSTED_RUNNER_TIER}' || '${BLACKSMITH_RUNNER_TIER}' }}"
 }
 
 fn windows_pr_dev_drive_guard() -> string {
@@ -249,7 +245,7 @@ fn windows_pr_runner_errors(policy: CiCachePolicy, job, producer) -> list<string
   if trim(job?.["runs-on"] ?? "") != windows_blacksmith_runner_expression() {
     errors = errors
       + [
-        "ci.yml:windows must route merge_group and same-repository pull_request to ${BLACKSMITH_8CPU_WINDOWS_RUNNER}, with ${WINDOWS_BLACKSMITH_DISABLE_VAR}=true and external events falling back to ${HOSTED_WINDOWS_RUNNER}",
+        "ci.yml:windows must use ${BLACKSMITH_8CPU_WINDOWS_RUNNER} for candidate and main fallback proof, with ${WINDOWS_BLACKSMITH_DISABLE_VAR}=true falling back to ${HOSTED_WINDOWS_RUNNER}",
       ]
   }
   if trim(job?.env?.[RUNNER_TIER_ENV] ?? "") != windows_blacksmith_tier_expression() {
@@ -321,11 +317,61 @@ fn windows_storage_budget_errors(job) -> list<string> {
     errors = errors
       + ["ci.yml:windows must give the pre-cache storage receipt its cache-parity exclusion id"]
   }
-  const test_step = step_by_name(job?.steps ?? [], WINDOWS_TEST_STEP)
-  if test_step == nil
-    || !contains(trim(test_step?.run ?? ""), "cargo build --locked --profile test -p harn-cli") {
+  const steps = job?.steps ?? []
+  const producer_step = step_by_name(steps, WINDOWS_BINARY_PRODUCER_STEP)
+  const test_step = step_by_name(steps, WINDOWS_TEST_STEP)
+  if producer_step == nil
+    || !contains(
+      trim(producer_step?.run ?? ""),
+      "HARN_BIN='' ./scripts/ci_warm_harn_bin.sh --profile test --github-env \"$GITHUB_ENV\"",
+    )
+    || step_index_by_name(steps, WINDOWS_BINARY_PRODUCER_STEP)
+      <= step_index_by_name(steps, WINDOWS_TEST_STEP)
+    || step_index_by_name(steps, WINDOWS_BINARY_PRODUCER_STEP)
+      >= step_index_by_name(steps, WINDOWS_SMOKE_STEP) {
     errors = errors
-      + ["ci.yml:windows must build freshness binaries in Cargo test profile before nextest"]
+      + [
+        "ci.yml:windows must publish its test-profile freshness receipt after native Cargo and before smoke",
+      ]
+  }
+  const test_body = trim(test_step?.run ?? "")
+  if trim(test_step?.id ?? "") != WINDOWS_TEST_STEP_ID
+    || !contains(test_body, "completed_epoch=%s")
+    || !contains(test_body, "GITHUB_OUTPUT")
+    || contains(test_body, WINDOWS_LEGACY_HARN_TELEMETRY)
+    || contains(test_body, "GITHUB_ENV") {
+    errors = errors
+      + [
+        "ci.yml:windows native completion telemetry must use its typed step output, not Harn's reserved environment namespace",
+      ]
+  }
+  if contains(test_body, "./scripts/harn_bin.sh")
+    || !contains(test_body, "--features internal-freshness-checker") {
+    errors = errors
+      + [
+        "ci.yml:windows native tests must keep the producer feature graph aligned without resolving Harn",
+      ]
+  }
+  const smoke_step = step_by_name(job?.steps ?? [], WINDOWS_SMOKE_STEP)
+  const smoke_body = trim(smoke_step?.run ?? "")
+  const smoke_completion_epoch = exact_step_env(
+    job,
+    WINDOWS_SMOKE_STEP,
+    "WINDOWS_NATIVE_TEST_COMPLETED_EPOCH",
+  )
+  if smoke_step == nil
+    || !contains(smoke_body, "HARN_BIN_NO_BUILD=1 ./scripts/harn_bin.sh --no-build --print")
+    || contains(smoke_body, "/debug/harn.exe\" run") {
+    errors = errors
+      + ["ci.yml:windows smoke must fail closed through receipt-validated no-build Harn resolution"]
+  }
+  if smoke_completion_epoch != WINDOWS_TEST_COMPLETED_EXPRESSION
+    || !contains(smoke_body, "WINDOWS_NATIVE_TEST_COMPLETED_EPOCH")
+    || contains(to_string(smoke_step?.env ?? {}), WINDOWS_LEGACY_HARN_TELEMETRY) {
+    errors = errors
+      + [
+        "ci.yml:windows smoke must consume native completion telemetry through the typed step output without ambient Harn variables",
+      ]
   }
   return errors
 }

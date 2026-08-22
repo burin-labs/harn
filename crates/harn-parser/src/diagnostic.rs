@@ -568,7 +568,7 @@ fn render_diagnostic_inner(input: RenderDiagnostic<'_>) -> String {
 
         if let Some(label_text) = label {
             // Span width must use char count, not byte offsets, so carets align with the source text.
-            let span_len = diagnostic_span_char_len(source, span);
+            let span_len = diagnostic_span_char_len(source, source_line, span);
             let col_num = col_num.max(1);
             let padding = " ".repeat(col_num - 1);
             let carets = style_fragment(&"^".repeat(span_len), severity_color, true);
@@ -742,7 +742,7 @@ fn render_related_span(
             line_num,
             width = gutter_width + 1,
         ));
-        let span_len = diagnostic_span_char_len(source, span);
+        let span_len = diagnostic_span_char_len(source, source_line, span);
         let padding = " ".repeat(col_num.max(1) - 1);
         let carets = style_fragment(&"^".repeat(span_len), severity_color, true);
         out.push_str(&format!(
@@ -753,7 +753,7 @@ fn render_related_span(
     }
 }
 
-fn diagnostic_span_char_len(source: &str, span: &Span) -> usize {
+fn diagnostic_span_char_len(source: &str, source_line: &str, span: &Span) -> usize {
     if span.end <= span.start || span.start >= source.len() {
         return 1;
     }
@@ -765,10 +765,16 @@ fn diagnostic_span_char_len(source: &str, span: &Span) -> usize {
     while end < source.len() && !source.is_char_boundary(end) {
         end += 1;
     }
-    source
+    let span_len = source
         .get(start..end)
-        .map(|text| text.chars().count().max(1))
-        .unwrap_or(1)
+        .map(|text| text.lines().next().unwrap_or(text).chars().count().max(1))
+        .unwrap_or(1);
+    let visible_line_len = source_line
+        .chars()
+        .count()
+        .saturating_sub(span.column.saturating_sub(1))
+        .max(1);
+    span_len.min(visible_line_len)
 }
 
 fn severity_color(severity: &str) -> Color {
@@ -966,6 +972,60 @@ mod tests {
         );
         assert!(result.contains("line2"));
         assert!(result.contains("^^^^^"));
+    }
+
+    #[test]
+    fn multiline_span_underline_stops_at_rendered_source_line() {
+        disable_colors();
+        let source =
+            "fn make() -> Config {\n  return {\n    first: true,\n    second: false,\n  }\n}";
+        let start = source.find("return {").expect("return record") + "return ".len();
+        let end = source.rfind('}').expect("record end") + 1;
+        let span = Span {
+            start,
+            end,
+            line: 2,
+            column: 10,
+            end_line: 5,
+        };
+
+        let output = render_diagnostic(
+            source,
+            "test.harn",
+            &span,
+            "error",
+            "return value has the wrong type",
+            Some("found this type"),
+            None,
+        );
+
+        assert!(
+            output.contains(" 2 |   return {\n   |          ^ found this type\n"),
+            "{output}"
+        );
+
+        let primary = Span::with_offsets(13, 19, 1, 14);
+        let related = [RelatedSpanLabel {
+            span: &span,
+            label: "return type declared here",
+        }];
+        let output = render_diagnostic_with_related(
+            source,
+            "test.harn",
+            &primary,
+            "error",
+            "return value has the wrong type",
+            Some("expected type"),
+            None,
+            &related,
+        );
+
+        assert!(
+            output.contains(
+                "  = note: return type declared here\n  --> test.harn:2:10\n   |\n 2 |   return {\n   |          ^ return type declared here\n"
+            ),
+            "{output}"
+        );
     }
 
     #[test]

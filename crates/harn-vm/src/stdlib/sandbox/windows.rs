@@ -125,6 +125,12 @@ pub(super) fn sandboxed_output(
     config: &ProcessCommandConfig,
     policy: &CapabilityPolicy,
 ) -> io::Result<Output> {
+    if policy.process_network_proxy.is_some() {
+        return Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "managed child-process egress requires a proxy-only Windows network boundary; this build cannot enforce it",
+        ));
+    }
     sandbox_trace(
         "pending",
         format!("start program={program:?} argc={}", args.len()),

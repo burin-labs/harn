@@ -10,13 +10,13 @@ pub fn gha_expression(body: string) -> string {
 
 pub fn windows_runner_expression() -> string {
   return gha_expression(
-    "vars.HARN_CI_DISABLE_BLACKSMITH_WINDOWS == 'true' && 'windows-latest' || ((github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'blacksmith-8vcpu-windows-2025' || 'windows-latest')",
+    "vars.HARN_CI_DISABLE_BLACKSMITH_WINDOWS == 'true' && 'windows-latest' || 'blacksmith-8vcpu-windows-2025'",
   )
 }
 
 pub fn windows_tier_expression() -> string {
   return gha_expression(
-    "vars.HARN_CI_DISABLE_BLACKSMITH_WINDOWS == 'true' && 'github-hosted' || ((github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'blacksmith' || 'github-hosted')",
+    "vars.HARN_CI_DISABLE_BLACKSMITH_WINDOWS == 'true' && 'github-hosted' || 'blacksmith'",
   )
 }
 
@@ -449,8 +449,25 @@ pub fn workflows() {
             },
             {
               name: "Compile Windows tests and run unit slice",
+              id: "windows-native-tests",
               env: {RUST_MIN_STACK: "16777216"},
-              run: "cargo build --locked --profile test -p harn-cli",
+              run:
+                "cargo nextest run --features internal-freshness-checker\nprintf 'completed_epoch=%s\\n' \"$(date +%s)\" >> \"$GITHUB_OUTPUT\"",
+            },
+            {
+              name: "Produce exact Windows Harn binary",
+              run:
+                "HARN_BIN='' ./scripts/ci_warm_harn_bin.sh --profile test --github-env \"$GITHUB_ENV\"",
+            },
+            {
+              name: "Smoke test harn run",
+              env: {
+                WINDOWS_NATIVE_TEST_COMPLETED_EPOCH: gha_expression(
+                  "steps.windows-native-tests.outputs.completed_epoch",
+                ),
+              },
+              run:
+                "harn_bin=\"$(HARN_BIN='' HARN_BIN_NO_BUILD=1 ./scripts/harn_bin.sh --no-build --print)\"\n\"$harn_bin\" run smoke.harn\necho \"$WINDOWS_NATIVE_TEST_COMPLETED_EPOCH\"",
             },
             {
               name: "Report Windows storage (terminal)",

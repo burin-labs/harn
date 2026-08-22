@@ -418,7 +418,7 @@ fn emit_get_not_found(name: &str, json: bool, corpus: &SkillCorpus) {
 /// project, manifest, user, package, and host layers the same way the
 /// VM does, and reports collisions and shadowing.
 pub(crate) fn run_resolved(args: &SkillsResolvedArgs) {
-    let (discovery, _package_snapshot) = build_discovery(&args.skill_dir, args.from.as_deref());
+    let discovery = build_discovery(&args.skill_dir, args.from.as_deref());
     let report = discovery.build_report();
 
     if args.json {
@@ -510,7 +510,7 @@ pub(crate) fn run_resolved(args: &SkillsResolvedArgs) {
 }
 
 pub(crate) fn run_inspect(args: &SkillsInspectArgs) {
-    let (discovery, _package_snapshot) = build_discovery(&args.skill_dir, args.from.as_deref());
+    let discovery = build_discovery(&args.skill_dir, args.from.as_deref());
     let skill = match discovery.fetch(&args.name) {
         Ok(skill) => skill,
         Err(err) => {
@@ -585,7 +585,7 @@ pub(crate) fn run_inspect(args: &SkillsInspectArgs) {
 }
 
 pub(crate) fn run_match(args: &SkillsMatchArgs) {
-    let (discovery, _package_snapshot) = build_discovery(&args.skill_dir, args.from.as_deref());
+    let discovery = build_discovery(&args.skill_dir, args.from.as_deref());
     let report = discovery.build_report();
     let mut skills: Vec<Skill> = Vec::new();
     for winner in &report.winners {
@@ -913,13 +913,20 @@ struct RankedSkill {
     reason: String,
 }
 
-fn build_discovery(
-    cli_dirs: &[String],
-    from: Option<&str>,
-) -> (
-    LayeredDiscovery,
-    Option<harn_modules::package_snapshot::PackageSnapshot>,
-) {
+struct LeasedSkillDiscovery {
+    discovery: LayeredDiscovery,
+    _package_snapshot: Option<harn_modules::package_snapshot::PackageSnapshot>,
+}
+
+impl std::ops::Deref for LeasedSkillDiscovery {
+    type Target = LayeredDiscovery;
+
+    fn deref(&self) -> &Self::Target {
+        &self.discovery
+    }
+}
+
+fn build_discovery(cli_dirs: &[String], from: Option<&str>) -> LeasedSkillDiscovery {
     let anchor = from
         .map(PathBuf::from)
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
@@ -985,7 +992,10 @@ fn build_discovery(
         }
     }
 
-    (build_fs_discovery(&cfg, options), package_snapshot)
+    LeasedSkillDiscovery {
+        discovery: build_fs_discovery(&cfg, options),
+        _package_snapshot: package_snapshot,
+    }
 }
 
 fn manifest_source_to_vm(entry: &SkillSourceEntry) -> Option<ManifestSource> {
@@ -1287,6 +1297,8 @@ fn _types(_: SkillManifestRef) {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::env_guard::ScopedEnvVar;
+    use crate::tests::common::harn_state_lock::lock_harn_state;
 
     #[test]
     fn derive_name_extracts_repo_segment() {
@@ -1318,5 +1330,50 @@ mod tests {
         assert!(glob_match("src/*.rs", "src/main.rs"));
         assert!(!glob_match("src/*.rs", "src/sub/main.rs"));
         assert!(glob_match("infra/**", "infra/terraform/main.tf"));
+    }
+
+    #[test]
+    fn command_discovery_owns_the_package_generation_it_reads() {
+        let _env = lock_harn_state();
+        let temp = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let _home = ScopedEnvVar::set("HOME", home.path().to_str().unwrap());
+        let _skills_path = ScopedEnvVar::unset("HARN_SKILLS_PATH");
+        fs::write(temp.path().join("harn.toml"), "[package]\nname = \"app\"\n").unwrap();
+        let anchor = temp.path().join("main.harn");
+        fs::write(&anchor, "fn main() {}\n").unwrap();
+        let packages_root =
+            crate::package::test_support::create_test_package_generation(temp.path());
+        crate::package::test_support::write_test_generation_lock(
+            temp.path(),
+            "version = 4\n\n[[package]]\nname = \"pack\"\nsource = \"path+fixture\"\n",
+        );
+        let skill_dir = packages_root.join("pack/skills/review");
+        fs::create_dir_all(&skill_dir).unwrap();
+        fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\nname: review\nshort: review code\n---\nReview the project",
+        )
+        .unwrap();
+
+        let discovery = build_discovery(&[], anchor.to_str());
+        let lease = fs::File::open(
+            packages_root
+                .parent()
+                .unwrap()
+                .join(harn_modules::package_snapshot::GENERATION_LEASE_FILE),
+        )
+        .unwrap();
+        assert!(
+            lease.try_lock().is_err(),
+            "command discovery must retain the generation backing its paths"
+        );
+        assert_eq!(
+            discovery.fetch("review").unwrap().body,
+            "Review the project"
+        );
+
+        drop(discovery);
+        lease.try_lock().unwrap();
     }
 }

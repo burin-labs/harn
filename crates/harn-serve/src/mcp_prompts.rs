@@ -695,6 +695,37 @@ pack = { path = "../pack" }
     }
 
     #[test]
+    fn package_prompt_catalog_holds_its_generation_lease() {
+        let temp = TempDir::new().unwrap();
+        write(
+            temp.path().join("harn.toml").as_path(),
+            "[package]\nname = \"root\"\n",
+        );
+        let packages_root = package_fixture(temp.path());
+        write(
+            &packages_root.join("pack/prompts/helper.harn.prompt"),
+            "Use {{ topic }}",
+        );
+
+        let catalog = FilePromptCatalog::discover(temp.path());
+        let lease_path = packages_root
+            .parent()
+            .unwrap()
+            .join(harn_modules::package_snapshot::GENERATION_LEASE_FILE);
+        let lease = fs::File::open(lease_path).unwrap();
+        assert!(
+            lease.try_lock().is_err(),
+            "the prompt catalog must retain the generation it discovered"
+        );
+        catalog
+            .get("pack/prompts/helper", &json!({ "topic": "leases" }))
+            .unwrap();
+
+        drop(catalog);
+        lease.try_lock().unwrap();
+    }
+
+    #[test]
     fn infers_arguments_from_template_expressions() {
         let args =
             infer_arguments("{{ if enabled }}{{ user.name }}{{ for item in items }}x{{ end }}");

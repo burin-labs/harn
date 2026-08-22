@@ -683,6 +683,24 @@ fn resolved_ip_in_allow_cidr_permits_hostname_under_default_deny() {
 }
 
 #[test]
+fn mixed_resolved_addresses_block_hostname_under_default_deny() {
+    let pol = policy(&[
+        ("allow", strings(&["203.0.113.0/24"])),
+        ("default", VmValue::String(arcstr::ArcStr::from("deny"))),
+    ]);
+    let blocked = evaluate_resolved_addrs(
+        Some(&pol),
+        "test",
+        "https://mixed.example/",
+        &target("https://mixed.example/"),
+        &ips(&["203.0.113.7", "198.51.100.9"]),
+        true,
+    )
+    .expect("one unlisted address blocks the entire resolved answer set");
+    assert_eq!(blocked.reason, "no allow rule matched");
+}
+
+#[test]
 fn resolved_ip_outside_allow_cidr_blocks_hostname_under_default_deny() {
     let pol = policy(&[
         ("allow", strings(&["10.0.0.0/8"])),

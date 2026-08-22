@@ -427,8 +427,14 @@ async fn run_tests_with_session_impl(
             .map(|result| result.duration_ms)
             .collect::<Vec<_>>(),
     );
-    if let Some(path) = timings_path.as_deref() {
-        update_timings_cache(path, timings, &execution.cases);
+    // Every sibling shard must select from the same timing snapshot. Writing
+    // partial observations here would make later invocations repartition the
+    // suite, so sharded runs consume timing feedback but only complete,
+    // unsharded runs produce it.
+    if options.shard.is_none() {
+        if let Some(path) = timings_path.as_deref() {
+            update_timings_cache(path, timings, &execution.cases);
+        }
     }
     all_results.extend(execution.cases);
     all_results.extend(execution.infrastructure_errors);

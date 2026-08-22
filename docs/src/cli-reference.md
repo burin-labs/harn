@@ -49,7 +49,7 @@ harn run --resume .harn/workers/worker_...json
 | `--eager-project-handlers` | Load every project trigger and hook handler module during startup |
 | `--approve-risky <operation>` | Explicitly authorize one exact risky stdlib operation for this invocation; repeatable (for example `git.push`) |
 | `--no-sandbox` | Disable the default worktree filesystem/process sandbox and network side-effect ceiling |
-| `--allow-process-network` | Allow network access for the Harn run and its child processes. Filesystem and process confinement remain active. See [Network grants](./sandboxing.md#network-grants-are-coarser-than-they-look). |
+| `--allow-process-network` | Allow policy-managed child network while retaining filesystem/process confinement. Child traffic remains denied until `HARN_EGRESS_*` or `harness.net.egress_policy(...)` configures an allow decision on supported local sandboxes. See [Managed child-process egress](./sandboxing.md#managed-child-process-egress). |
 | `--write-root <path>` | Write to an extra filesystem root while keeping sandboxing enabled |
 | `--read-only-root <path>` | Read from an extra filesystem root while keeping sandboxing enabled |
 | `--sandbox-write-root <path>` | Let spawned subprocesses write an extra root without granting Harn filesystem builtins access |

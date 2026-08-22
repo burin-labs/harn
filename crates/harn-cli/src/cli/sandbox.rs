@@ -23,8 +23,9 @@ pub(crate) struct SandboxArgs {
     /// network egress fail-closed guard for this run.
     #[arg(long = "no-sandbox", action = clap::ArgAction::SetTrue)]
     pub no_sandbox: bool,
-    /// Permit commands spawned by this run to open network sockets while
-    /// retaining the worktree filesystem and process sandbox.
+    /// Permit policy-managed child network while retaining the worktree
+    /// sandbox. Child traffic remains denied until HARN_EGRESS_* or
+    /// harness.net.egress_policy configures an allow decision.
     #[arg(
         long = "allow-process-network",
         action = clap::ArgAction::SetTrue,

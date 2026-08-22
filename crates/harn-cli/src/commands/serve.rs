@@ -240,12 +240,7 @@ pub(crate) async fn run_api_server(args: &ApiServeArgs) -> Result<(), String> {
     let tls = build_tls_config(args.tls, args.cert.as_ref(), args.key.as_ref())?;
     guard_serve_bind_auth("api", args.bind, &auth_policy, &tls)?;
 
-    let config = ApiServerConfig::for_pipeline(args.file.clone())
-        .with_auth_policy(auth_policy)
-        .with_profile(AcpProfileConfig {
-            text: args.trace || args.profile.text,
-            json_path: args.profile.json_path.clone(),
-        });
+    let config = api_server_config(args, auth_policy);
     let server = Arc::new(ApiServer::new(config));
     server
         .run_http(ApiHttpServeOptions {
@@ -254,6 +249,18 @@ pub(crate) async fn run_api_server(args: &ApiServeArgs) -> Result<(), String> {
             tls,
         })
         .await
+}
+
+fn api_server_config(args: &ApiServeArgs, auth_policy: AuthPolicy) -> ApiServerConfig {
+    let profile = AcpProfileConfig {
+        text: args.trace || args.profile.text,
+        json_path: args.profile.json_path.clone(),
+    };
+    let acp = crate::acp::server_config(Some(args.file.clone()), AuthPolicy::allow_all())
+        .with_profile(profile);
+    let mut config = ApiServerConfig::for_pipeline(args.file.clone()).with_auth_policy(auth_policy);
+    config.acp = acp;
+    config
 }
 
 pub(crate) async fn run_site_server(args: &SiteServeArgs) -> Result<(), String> {
@@ -700,6 +707,72 @@ mod tests {
     use crate::cli::{Cli, Command};
 
     use super::*;
+
+    async fn api_resolves_manifest_privileged_trigger(declared: bool) -> Result<(), String> {
+        harn_vm::reset_thread_local_state();
+        crate::compiler_context::ensure_builtin_signatures_installed();
+        let project = tempfile::tempdir().expect("temp project");
+        let script =
+            crate::tests::common::host_dispatch_project::write_host_dispatch_trigger_project(
+                project.path(),
+                declared,
+                r#"
+pub fn on_tick(_event) -> nil {
+  const _ = host_call("runtime.pipeline_input", {})
+  return nil
+}
+"#,
+            );
+        let ServeCommand::Api(args) = parse_serve_command(&[
+            "harn",
+            "serve",
+            "api",
+            script.to_str().expect("UTF-8 fixture path"),
+        ]) else {
+            panic!("expected serve api");
+        };
+        let config = api_server_config(&args, AuthPolicy::allow_all());
+        let mut vm = harn_vm::Vm::new();
+        harn_vm::register_vm_stdlib(&mut vm);
+        let result = async {
+            config
+                .acp
+                .runtime_configurator
+                .configure(&mut vm, Some(&script))
+                .await?;
+            let extensions = crate::package::load_runtime_extensions(&script);
+            let collected = crate::package::collect_manifest_triggers(&mut vm, &extensions)
+                .await
+                .map_err(|error| error.to_string())?;
+            let crate::package::CollectedTriggerHandler::Local { callable, .. } =
+                &collected[0].handler
+            else {
+                return Err("fixture trigger must use a local handler".to_string());
+            };
+            vm.resolve_callable(callable)
+                .await
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        .await;
+        harn_vm::reset_thread_local_state();
+        result
+    }
+
+    #[tokio::test]
+    async fn api_uses_manifest_authority_before_loading_the_pipeline_graph() {
+        api_resolves_manifest_privileged_trigger(true)
+            .await
+            .expect("declared API project resolves its privileged trigger on dispatch");
+
+        let error = api_resolves_manifest_privileged_trigger(false)
+            .await
+            .expect_err("undeclared API project remains unprivileged on dispatch");
+        assert!(
+            error.contains("host_call") && error.contains("not callable source API"),
+            "unexpected refusal: {error}"
+        );
+    }
 
     fn parse_serve_command(args: &[&str]) -> ServeCommand {
         let cli = Cli::try_parse_from(args).expect("parse serve command");

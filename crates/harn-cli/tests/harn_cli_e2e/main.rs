@@ -49,6 +49,7 @@ mod eval_skill_gate_cli;
 mod explain_dispatch;
 mod graph_cli;
 mod harn_script_lint_rules_dispatch;
+mod harn_serve_api_cli;
 mod harn_serve_mcp_cli;
 mod host_lease_cli;
 #[cfg(unix)]

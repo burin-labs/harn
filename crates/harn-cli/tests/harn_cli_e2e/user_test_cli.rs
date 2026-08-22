@@ -4,6 +4,8 @@ use std::process::Command;
 
 #[path = "user_test_cli/operator_grants.rs"]
 mod operator_grants;
+#[path = "user_test_cli/process_egress.rs"]
+mod process_egress;
 
 fn binary_path() -> std::path::PathBuf {
     std::path::PathBuf::from(env!("CARGO_BIN_EXE_harn"))

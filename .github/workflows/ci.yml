@@ -1233,42 +1233,66 @@ jobs:
   windows-plan:
     name: Windows CI routing
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
     outputs:
       run_windows: ${{ steps.detect.outputs.run_windows }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # Full history on PR and push so the diff base (PR base SHA / pushed
-          # `before` SHA) is reachable for the path detection below. merge_group
-          # keeps the shallow checkout (it never diffs — run stays false).
-          fetch-depth: ${{ (github.event_name == 'pull_request' || github.event_name == 'push') && '0' || '1' }}
+          # Full history makes each event's owning diff base reachable: PR base,
+          # merge-group base, or the pushed ref's previous tip.
+          fetch-depth: 0
       - name: Detect Windows-relevant changes
         id: detect
         shell: bash
         env:
           EVENT_NAME: ${{ github.event_name }}
           BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
+          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha || '' }}
           PR_HEAD_REF: ${{ github.event.pull_request.head.ref || '' }}
           # Previous tip of the pushed ref — the diff base for `push` events.
           # Routed through env (never inlined into the script) to avoid a
           # template-injection sink, matching how BASE_SHA is handled.
           BEFORE_SHA: ${{ github.event.before || '' }}
+          GITHUB_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          COMMIT_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
           run_windows=false
 
-          # Pick the diff base per event. push diffs against the previous tip;
-          # pull_request diffs against the PR base. merge_group leaves
-          # run_windows=false (the merge queue never path-gates the platform
-          # plan jobs — unchanged behavior).
+          # A successful native job on the exact merge-group candidate is the
+          # admission proof for the identical main SHA. Any missing, skipped,
+          # failed, cancelled, or ambiguous proof falls through to the normal
+          # main-push backstop.
+          if [[ "$EVENT_NAME" == "push" ]]; then
+            if proven="$(
+              ./scripts/ci_merge_group_proof.sh \
+                "$REPOSITORY" ci.yml "$COMMIT_SHA" \
+                --require-job "Rust on Windows (build + smoke test)"
+            )" && [[ "$proven" == "true" ]]; then
+              echo "::notice::windows: exact merge-group candidate already passed native Windows; skipping duplicate main proof."
+              echo "run_windows=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "::notice::windows: exact native merge-group proof unavailable; retaining the main fallback."
+          fi
+
+          # Pick the canonical diff base per event. Internal PR heads do not
+          # run native Windows: the merge-group candidate is the sole pre-merge
+          # admission owner and exercises the queued tree, not a nearby head.
           diff_base=""
           if [[ "$EVENT_NAME" == "push" ]]; then
             diff_base="$BEFORE_SHA"
           elif [[ "$EVENT_NAME" == "pull_request" ]]; then
             diff_base="$BASE_SHA"
+          elif [[ "$EVENT_NAME" == "merge_group" ]]; then
+            diff_base="$MERGE_GROUP_BASE_SHA"
           fi
 
-          if [[ "$EVENT_NAME" == "push" || "$EVENT_NAME" == "pull_request" ]]; then
+          if [[ "$EVENT_NAME" == "push" || "$EVENT_NAME" == "pull_request" || "$EVENT_NAME" == "merge_group" ]]; then
             if [[ -z "$diff_base" || "$diff_base" == "0000000000000000000000000000000000000000" ]]; then
               # New branch / first push / force-push / missing PR base — the diff
               # base is invalid, so run the full build defensively.
@@ -1320,20 +1344,19 @@ jobs:
 
   windows:
     name: Rust on Windows (build + smoke test)
-    runs-on: ${{ vars.HARN_CI_DISABLE_BLACKSMITH_WINDOWS == 'true' && 'windows-latest' || ((github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'blacksmith-8vcpu-windows-2025' || 'windows-latest') }}
+    runs-on: ${{ vars.HARN_CI_DISABLE_BLACKSMITH_WINDOWS == 'true' && 'windows-latest' || 'blacksmith-8vcpu-windows-2025' }}
     permissions:
       contents: read
       actions: read
     timeout-minutes: 60
     needs: windows-plan
-    # Windows coverage stays off the default PR / merge-queue path, but runs
-    # before merge for Windows-sensitive process, sandbox, workflow, and release
-    # smoke changes. Other PRs still rely on the non-metadata main-push
-    # backstop plus the full windows-nightly.yml surface so routine edits avoid
-    # the 15-25 minute Windows compile long pole.
+    # Windows-sensitive candidates run once at merge-group admission. An exact
+    # successful candidate proof suppresses the identical main-push run; every
+    # uncertain or non-identical case retains the main backstop. Nightly keeps
+    # its independent full Windows surface.
     if: needs.windows-plan.outputs.run_windows == 'true'
     env:
-      HARN_RUNNER_TIER: ${{ vars.HARN_CI_DISABLE_BLACKSMITH_WINDOWS == 'true' && 'github-hosted' || ((github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'blacksmith' || 'github-hosted') }}
+      HARN_RUNNER_TIER: ${{ vars.HARN_CI_DISABLE_BLACKSMITH_WINDOWS == 'true' && 'github-hosted' || 'blacksmith' }}
       # EXPERIMENT (toggle via the HARN_WINDOWS_LLD repo variable): drive rustc
       # at the toolchain-bundled rust-lld instead of MSVC link.exe — the Windows
       # analog of the `-Clink-arg=-fuse-ld=mold` the Linux rust-checks lane uses.
@@ -1489,6 +1512,7 @@ jobs:
       # compile coverage focused while the filter limits the tests that
       # actually execute.
       - name: Compile Windows tests and run unit slice
+        id: windows-native-tests
         shell: bash
         env:
           # Hosted Windows runners can return transient misses from the live
@@ -1534,72 +1558,55 @@ jobs:
           fi
 
           echo "windows: cargo package args: ${package_args[*]}"
-          target_dir="${CARGO_TARGET_DIR:-target}"
-          # A transported executable is not proof of a current Cargo target:
-          # the provider-neutral warm artifact may come from an older main and
-          # intentionally does not carry the top-level dep-info/receipt pair.
-          # Let Cargo resolve the exact graph the canonical resolver uses;
-          # never infer freshness from harn.exe existence.
-          jq --version
-          # The warm producer and nextest compile the test profile. Building
-          # the CLI in Cargo's default dev profile first creates a second
-          # dependency/artifact family and exhausted the hosted 25 GB target.
-          # Keep exact freshness proof in the same profile as the native test
-          # graph so Cargo can reuse one generation.
-          cargo build --locked --profile test -p harn-cli \
-            --bin harn --bin harn-freshness-check \
-            --features internal-freshness-checker
-          # Cargo metadata and current_exe() both return an absolute native
-          # target path. Normalize the shell-owned expectation once so this
-          # proof compares identities rather than relative/absolute spellings.
-          target_dir="$(cd "$target_dir" && pwd -P)"
-          # Fail before the expensive test graph when the exact top-level
-          # artifact/dep-info pair the canonical resolver will consume cannot
-          # produce typed freshness evidence. Repeat this proof immediately
-          # before resolution below: intervening Cargo test commands may
-          # legitimately update shared package artifacts.
-          source ./scripts/lib/harn_bin.sh
-          harn_build_freshness_id "$target_dir/debug/harn.exe" 1 >/dev/null
           if command -v cargo-nextest >/dev/null 2>&1; then
             # Some affected crate sets compile Windows-only surfaces but have
             # no tests matching the core unit filter; the compile itself is
             # still the smoke gate for those PRs.
-            cargo nextest run --locked "${package_args[@]}" --profile ci -E "$windows_filter" --no-tests=warn
+            cargo nextest run --locked "${package_args[@]}" \
+              --features internal-freshness-checker \
+              --profile ci -E "$windows_filter" --no-tests=warn
           else
-            cargo test --locked "${package_args[@]}" --no-run
+            cargo test --locked "${package_args[@]}" \
+              --features internal-freshness-checker --no-run
             cargo test --locked -p harn-lexer -p harn-parser -p harn-stdlib -p harn-vm -p harn-hostlib -p harn-terminal -p harn-fmt -p harn-lint -p harn-modules
           fi
           # Exercise the typed Cargo depfile owner and native Windows artifact
           # identity APIs, including drive-colon/backslash/space fixtures.
           cargo test --locked -p harn-cli --lib \
+            --features internal-freshness-checker \
             bootstrap::freshness -- --nocapture
           cargo test --locked -p harn-cli --bin harn-freshness-check \
             --features internal-freshness-checker -- --nocapture
-          harn_build_freshness_id "$target_dir/debug/harn.exe" 1 >/dev/null
-          # The build above intentionally does not manufacture a receipt. The
-          # canonical resolver must converge compiled provenance, publish one,
-          # and then prove buildless reuse on the native Git-Bash path.
-          resolved="$(HARN_BIN='' HARN_BIN_NO_BUILD=0 ./scripts/harn_bin.sh --print)"
-          reused="$(HARN_BIN='' HARN_BIN_NO_BUILD=1 ./scripts/harn_bin.sh --no-build --print)"
-          if ! [[ "$resolved" == "$reused" && "$resolved" == "$target_dir/debug/harn.exe" ]]; then
-            printf 'Windows resolver mismatch: resolved=%q reused=%q expected=%q\n' \
-              "$resolved" "$reused" "$target_dir/debug/harn.exe" >&2
-            exit 1
-          fi
+          printf 'completed_epoch=%s\n' "$(date +%s)" >> "$GITHUB_OUTPUT"
+      # Cargo owns every top-level target artifact until the last native test
+      # command returns. Publish the one receipt only after that mutation
+      # boundary; smoke then has no legal path that can relink the artifact.
+      - name: Produce exact Windows Harn binary
+        shell: bash
+        run: HARN_BIN='' ./scripts/ci_warm_harn_bin.sh --profile test --github-env "$GITHUB_ENV"
+      - name: Smoke test harn run
+        shell: bash
+        env:
+          WINDOWS_NATIVE_TEST_COMPLETED_EPOCH: ${{ steps.windows-native-tests.outputs.completed_epoch }}
+        run: |
+          smoke_started="$(date +%s)"
+          harn_bin="$(HARN_BIN='' HARN_BIN_NO_BUILD=1 ./scripts/harn_bin.sh --no-build --print)"
+          target_dir="$(cd "${CARGO_TARGET_DIR:-target}" && pwd -P)"
           hook_resolved="$(
             CARGO_TARGET_DIR="$target_dir" sh -c \
               '. .githooks/lib.sh; hook_find_fresh_worktree_harn_bin'
           )"
-          if [[ "$hook_resolved" != "$target_dir/debug/harn.exe" ]]; then
-            printf 'Windows hook mismatch: resolved=%q expected=%q\n' \
-              "$hook_resolved" "$target_dir/debug/harn.exe" >&2
+          if [[ "$harn_bin" != "$target_dir/debug/harn.exe" \
+            || "$hook_resolved" != "$harn_bin" ]]; then
+            printf 'Windows proof mismatch: resolved=%q hook=%q expected=%q\n' \
+              "$harn_bin" "$hook_resolved" "$target_dir/debug/harn.exe" >&2
             exit 1
           fi
-      - name: Smoke test harn run
-        shell: bash
-        run: |
           echo 'fn main(harness: Harness) { harness.stdio.println("ok") }' > smoke.harn
-          "${CARGO_TARGET_DIR:-target}/debug/harn.exe" run smoke.harn
+          "$harn_bin" run smoke.harn
+          printf 'windows_native_test_to_smoke_seconds=%s\n' \
+            "$(( $(date +%s) - WINDOWS_NATIVE_TEST_COMPLETED_EPOCH ))"
+          printf 'windows_smoke_seconds=%s\n' "$(( $(date +%s) - smoke_started ))"
       - name: Report Windows storage (terminal)
         if: always()
         shell: bash
@@ -2218,10 +2225,10 @@ jobs:
             fi
           fi
 
-          # The Windows job runs on `push` to main and on pull requests whose
-          # diff touches Windows-sensitive process/sandbox/workflow paths. It
-          # skips on routine PRs and merge_group events. Treat `skipped` as
-          # passing here; only an actual failure should fail the gate.
+          # Native Windows runs once on a Windows-sensitive merge-group
+          # candidate. Its exact successful proof suppresses the identical
+          # main push; missing or unsafe proof retains the main fallback.
+          # Treat a planned skip as passing; only an actual failure fails.
           windows_result="${{ needs.windows.result }}"
           echo "Rust on Windows (build + smoke test): $windows_result"
           if [ "$windows_result" != "success" ] && [ "$windows_result" != "skipped" ]; then

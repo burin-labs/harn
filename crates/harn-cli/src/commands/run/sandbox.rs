@@ -153,6 +153,7 @@ pub(super) struct RunSandboxScope {
     _execution_policy: Option<ExecutionPolicyGuard>,
     _egress_policy: Option<harn_vm::egress::ExplicitEgressPolicyGuard>,
     _ssrf_guard: Option<harn_vm::egress::SsrfGuardScope>,
+    _process_proxy: Option<harn_vm::egress::ProcessEgressProxy>,
 }
 
 impl RunSandboxScope {
@@ -161,6 +162,7 @@ impl RunSandboxScope {
             _execution_policy: None,
             _egress_policy: None,
             _ssrf_guard: None,
+            _process_proxy: None,
         }
     }
 }
@@ -177,24 +179,49 @@ pub(super) fn install_run_sandbox_scope(
         return RunSandboxScope::disabled();
     }
 
-    let execution_policy = if harn_vm::orchestration::current_execution_policy().is_none() {
-        harn_vm::orchestration::push_execution_policy(default_run_capability_policy(
+    let egress_policy = Some(harn_vm::egress::require_explicit_egress_policy_for_host());
+    let ssrf_guard = Some(harn_vm::egress::require_ssrf_guard_for_host());
+    let active_execution_policy = harn_vm::orchestration::current_execution_policy();
+    let active_allows_process_network = active_execution_policy.as_ref().is_none_or(|policy| {
+        let level = policy.side_effect_level.as_deref().unwrap_or("none");
+        harn_vm::tool_annotations::SideEffectLevel::rank_str(level)
+            >= harn_vm::tool_annotations::SideEffectLevel::Network.rank()
+    });
+    let process_proxy = if options.allow_process_network
+        && active_allows_process_network
+        && active_execution_policy
+            .as_ref()
+            .is_none_or(|policy| policy.process_network_proxy.is_none())
+    {
+        harn_vm::egress::ProcessEgressProxy::start_from_current_policy(true)
+            .unwrap_or_else(|error| crate::command_error(&error))
+    } else {
+        None
+    };
+    let execution_policy = if let Some(mut policy) = active_execution_policy {
+        if let Some(proxy) = process_proxy.as_ref() {
+            // The existing outer policy remains the capability ceiling. The
+            // CLI only attaches transport state after binding that endpoint;
+            // it never raises the outer side-effect level.
+            policy.process_network_proxy = Some(proxy.endpoints());
+            harn_vm::orchestration::push_execution_policy(policy);
+            Some(ExecutionPolicyGuard)
+        } else {
+            None
+        }
+    } else {
+        let mut policy = default_run_capability_policy(
             workspace_root,
             &options.write_roots,
             &options.read_only_roots,
             &options.process_read_roots,
             &options.process_write_roots,
             options.allow_process_network,
-        ));
+        );
+        policy.process_network_proxy = process_proxy.as_ref().map(|proxy| proxy.endpoints());
+        harn_vm::orchestration::push_execution_policy(policy);
         Some(ExecutionPolicyGuard)
-    } else {
-        None
     };
-    let egress_policy = Some(harn_vm::egress::require_explicit_egress_policy_for_host());
-    // Default-on the SSRF private-address guard for outbound HTTP. Callers can
-    // opt out with `harness.net.egress_policy({block_private:"off"})` /
-    // `HARN_EGRESS_BLOCK_PRIVATE=off`.
-    let ssrf_guard = Some(harn_vm::egress::require_ssrf_guard_for_host());
 
     // Disclose caller-declared grants that widened the default sandbox. This is
     // the narrow-scope counterpart to the `--no-sandbox` banner: a routine run
@@ -209,6 +236,7 @@ pub(super) fn install_run_sandbox_scope(
         _execution_policy: execution_policy,
         _egress_policy: egress_policy,
         _ssrf_guard: ssrf_guard,
+        _process_proxy: process_proxy,
     }
 }
 
@@ -419,6 +447,21 @@ pub(super) fn run_sandbox_attestation(sandbox: &RunSandboxOptions) -> serde_json
     let process_network_enabled =
         harn_vm::tool_annotations::SideEffectLevel::rank_str(side_effect_level)
             >= harn_vm::tool_annotations::SideEffectLevel::Network.rank();
+    let process_network_mode = if process_network_enabled {
+        active_policy
+            .as_ref()
+            .and_then(|policy| policy.process_network_proxy)
+            .map(|_| {
+                if cfg!(target_os = "macos") {
+                    "managed"
+                } else {
+                    "unsupported_fail_closed"
+                }
+            })
+            .unwrap_or("unrestricted")
+    } else {
+        "denied"
+    };
     let egress = if sandbox.enabled {
         "explicit_policy_required"
     } else if active {
@@ -451,6 +494,7 @@ pub(super) fn run_sandbox_attestation(sandbox: &RunSandboxOptions) -> serde_json
         "profile": profile,
         "process_network_requested": sandbox.allow_process_network,
         "process_network_enabled": process_network_enabled,
+        "process_network_mode": process_network_mode,
         "side_effect_level": side_effect_level,
         "egress": egress,
     })

@@ -2,9 +2,11 @@
 
 #[path = "../bootstrap/freshness_manifest.rs"]
 mod freshness_manifest;
+#[path = "../path_policy.rs"]
+mod path_policy;
 
 use freshness_manifest::{
-    artifact_stat_id, canonical_path_id, manifest_hash, platform_build_id, verify_manifest,
+    artifact_stat_id, canonical_path_id, file_content_hash, platform_build_id, verify_manifest,
     Verification,
 };
 use std::{
@@ -15,9 +17,9 @@ use std::{
     process::ExitCode,
 };
 
-const RECEIPT_FORMAT: &str = "harn-bin-freshness-v4";
+const RECEIPT_FORMAT: &str = "harn-bin-freshness-v6";
 const EVIDENCE_FORMAT: &str = "harn-artifact-evidence-v5-cargo-output-dep-info-v1-manifest-3";
-const CHECKER_FORMAT: &str = "harn-freshness-check-v2";
+const CHECKER_FORMAT: &str = "harn-freshness-check-v4";
 
 fn main() -> ExitCode {
     let arguments = env::args().collect::<Vec<_>>();
@@ -77,13 +79,14 @@ fn record_evidence(binary: &Path, manifest: &Path, repo_root: &Path) -> Result<S
     }
     let executable = env::current_exe()
         .map_err(|error| format!("cannot resolve running freshness checker: {error}"))?;
+    // The checker is deliberately tiny, so exact bytes are both cheaper and
+    // stronger than Windows ChangeTime, which may settle after process exit.
     Ok(format!(
-        "{CHECKER_FORMAT}\nrepo-path={}\nchecker-build-id={}\nchecker-stat={}\nchecker-path={}\nmanifest={}\n",
+        "{CHECKER_FORMAT}\nrepo-path={}\nchecker-build-id={}\nchecker-content={}\nmanifest={}\n",
         canonical_path_id(repo_root)?,
         platform_build_id()?,
-        artifact_stat_id(&executable)?,
-        canonical_path_id(&executable)?,
-        manifest_hash(manifest)?,
+        file_content_hash(&executable)?,
+        file_content_hash(manifest)?,
     ))
 }
 
@@ -95,7 +98,7 @@ fn verify(receipt: &Path, manifest: &Path, binary: &Path, repo_root: &Path) -> R
         )
     })?;
     let lines = receipt_text.lines().collect::<Vec<_>>();
-    if lines.len() != 14
+    if lines.len() != 13
         || lines[0] != RECEIPT_FORMAT
         || !valid_keyed_hash(lines[1], "worktree", &[40, 64])
         || lines[2] != EVIDENCE_FORMAT
@@ -107,9 +110,8 @@ fn verify(receipt: &Path, manifest: &Path, binary: &Path, repo_root: &Path) -> R
         || lines[8] != CHECKER_FORMAT
         || !valid_keyed_hash(lines[9], "repo-path", &[64])
         || !valid_keyed_hex_range(lines[10], "checker-build-id", 2, 128)
-        || !valid_keyed_hash(lines[11], "checker-stat", &[64])
-        || !valid_keyed_hash(lines[12], "checker-path", &[64])
-        || !valid_keyed_hash(lines[13], "manifest", &[64])
+        || !valid_keyed_hash(lines[11], "checker-content", &[64])
+        || !valid_keyed_hash(lines[12], "manifest", &[64])
     {
         return Err(format!(
             "malformed Harn freshness receipt at {}",
@@ -120,7 +122,11 @@ fn verify(receipt: &Path, manifest: &Path, binary: &Path, repo_root: &Path) -> R
     let current_evidence = record_evidence(binary, manifest, repo_root)?;
     let recorded_evidence = format!("{}\n", lines[8..].join("\n"));
     if current_evidence != recorded_evidence {
-        return Err("freshness checker or manifest changed after the build receipt".into());
+        let mismatch = evidence_mismatch_detail(&recorded_evidence, &current_evidence)
+            .unwrap_or_else(|| "evidence-shape changed".into());
+        return Err(format!(
+            "freshness checker or manifest changed after the build receipt: {mismatch}"
+        ));
     }
     let recorded_binary_stat = lines[5]
         .strip_prefix("artifact-stat=")
@@ -129,6 +135,18 @@ fn verify(receipt: &Path, manifest: &Path, binary: &Path, repo_root: &Path) -> R
         return Err("worktree Harn executable changed after the build receipt".into());
     }
     Ok(())
+}
+
+fn evidence_mismatch_detail(recorded: &str, current: &str) -> Option<String> {
+    recorded
+        .lines()
+        .zip(current.lines())
+        .find(|(recorded, current)| recorded != current)
+        .map(|(recorded, current)| {
+            let (field, recorded_value) = recorded.split_once('=').unwrap_or((recorded, recorded));
+            let current_value = current.split_once('=').map_or(current, |(_, value)| value);
+            format!("{field} recorded={recorded_value} current={current_value}")
+        })
 }
 
 fn valid_keyed_hex_range(line: &str, key: &str, minimum: usize, maximum: usize) -> bool {
@@ -170,6 +188,16 @@ mod tests {
             &[16]
         ));
         assert!(!valid_keyed_hash("manifest=xyz", "manifest", &[3]));
+    }
+
+    #[test]
+    fn evidence_mismatch_names_the_exact_hash_field_without_source_bytes() {
+        let recorded = "harn-freshness-check-v4\nchecker-content=aa\nmanifest=bb\n";
+        let current = "harn-freshness-check-v4\nchecker-content=cc\nmanifest=bb\n";
+        assert_eq!(
+            evidence_mismatch_detail(recorded, current).as_deref(),
+            Some("checker-content recorded=aa current=cc")
+        );
     }
 
     #[test]

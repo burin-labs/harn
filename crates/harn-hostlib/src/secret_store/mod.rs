@@ -170,6 +170,26 @@ fn require_nonempty_string(
 }
 
 fn backend_err(builtin: &'static str, err: io::Error) -> HostlibError {
+    #[cfg(any(
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "windows",
+        all(
+            unix,
+            not(any(target_os = "macos", target_os = "ios", target_os = "android"))
+        )
+    ))]
+    if let Some(reason) = err
+        .get_ref()
+        .and_then(|error| error.downcast_ref::<harn_vm::secrets::NativeKeyringError>())
+        .and_then(harn_vm::secrets::NativeKeyringError::unavailable_reason)
+    {
+        return HostlibError::NativeSecretStoreUnavailable {
+            builtin,
+            reason,
+            message: err.to_string(),
+        };
+    }
     HostlibError::Backend {
         builtin,
         message: err.to_string(),

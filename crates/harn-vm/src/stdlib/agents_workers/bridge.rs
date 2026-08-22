@@ -247,7 +247,10 @@ pub(in super::super) fn worker_event_snapshot(state: &WorkerState) -> WorkerEven
 fn worker_state_dir() -> PathBuf {
     std::env::var("HARN_WORKER_STATE_DIR")
         .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from(".harn/workers"))
+        .unwrap_or_else(|_| {
+            let base = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+            crate::runtime_paths::state_root_reference(&base).join("workers")
+        })
 }
 
 pub(in super::super) fn worker_snapshot_path(worker_id: &str) -> String {

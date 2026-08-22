@@ -66,9 +66,9 @@ pub(crate) use tool_enforcement::enforce_current_policy_for_tool_with_annotation
 pub use types::{
     enforce_tool_arg_constraints, AutoCompactPolicy, BranchSemantics, CapabilityPolicy,
     ContextPolicy, EqIgnored, EscalationPolicy, FeedbackBounds, FeedbackPolicy, JoinPolicy,
-    MapPolicy, ModelPolicy, NativeToolFallbackPolicy, ProcessSandboxPolicy, ProcessSandboxPreset,
-    ReducePolicy, RequiredSuccessfulTool, RetryPolicy, SandboxProfile, StageContract,
-    ToolArgConstraint, TurnPolicy,
+    MapPolicy, ModelPolicy, NativeToolFallbackPolicy, ProcessNetworkProxy, ProcessSandboxPolicy,
+    ProcessSandboxPreset, ReducePolicy, RequiredSuccessfulTool, RetryPolicy, SandboxProfile,
+    StageContract, ToolArgConstraint, TurnPolicy,
 };
 
 thread_local! {
@@ -802,6 +802,7 @@ pub fn builtin_ceiling() -> CapabilityPolicy {
         tool_annotations: BTreeMap::new(),
         sandbox_profile: SandboxProfile::Worktree,
         process_sandbox: Default::default(),
+        process_network_proxy: None,
     }
 }
 

@@ -4,9 +4,10 @@
 //! kernel-level confinement (Landlock/seccomp on Linux, `sandbox-exec`
 //! on macOS, Job Objects on Windows, `pledge`/`unveil` on OpenBSD) is
 //! reused rather than reimplemented. Filesystem scope comes from the
-//! session's mounts; network egress is limited to deny-all or
-//! allow-all, since per-host egress filtering for a local process is a
-//! remote-backend capability (see [`SandboxCapabilities::network_policy`]).
+//! session's mounts. On macOS, limited network policy is projected through
+//! Harn's host-side egress proxy and a Seatbelt proxy-only rule; platforms
+//! without an equivalent kernel boundary reject non-empty allowlists rather
+//! than treating proxy environment variables as enforcement.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
@@ -88,7 +89,7 @@ impl SandboxBackend for LocalSandbox {
     fn capabilities(&self) -> SandboxCapabilities {
         SandboxCapabilities {
             local_process_sandbox: true,
-            network_policy: false,
+            network_policy: cfg!(target_os = "macos"),
             snapshot: true,
             resume: true,
             suspend_on_idle: false,
@@ -130,11 +131,15 @@ impl SandboxBackend for LocalSandbox {
             mounts.push(resolve_local_mount(&root, mount)?);
         }
 
+        let network_proxy = local_network_proxy(&spec.network_policy)?;
         let session = Arc::new(LocalSession {
             id: id.clone(),
             tempdir,
             mounts: Mutex::new(mounts),
-            network_policy: Mutex::new(spec.network_policy),
+            network: Mutex::new(LocalNetworkState {
+                policy: spec.network_policy,
+                proxy: network_proxy,
+            }),
             limits: spec.limits,
             state: Mutex::new(SandboxState::Running),
             sandbox_profile: self.config.sandbox_profile,
@@ -168,20 +173,13 @@ impl SandboxBackend for LocalSandbox {
         session_id: &SandboxSessionId,
         policy: NetworkPolicy,
     ) -> SandboxResult<SandboxSession> {
-        if let NetworkPolicy::Limited { allowed_hosts } = &policy {
-            if !allowed_hosts.is_empty() {
-                return Err(SandboxError::Unsupported {
-                    backend: "local",
-                    operation: "limited network allow-lists",
-                });
-            }
-        }
         let session = self.session(session_id)?;
+        let proxy = local_network_proxy(&policy)?;
         *session
-            .network_policy
+            .network
             .lock()
             .map_err(|_| SandboxError::Lifecycle("local network lock poisoned".to_string()))? =
-            policy;
+            LocalNetworkState { policy, proxy };
         session.to_public()
     }
 
@@ -238,10 +236,16 @@ struct LocalSession {
     id: SandboxSessionId,
     tempdir: TempDir,
     mounts: Mutex<Vec<ResolvedMount>>,
-    network_policy: Mutex<NetworkPolicy>,
+    network: Mutex<LocalNetworkState>,
     limits: ResourceLimits,
     state: Mutex<SandboxState>,
     sandbox_profile: SandboxProfile,
+}
+
+#[derive(Debug)]
+struct LocalNetworkState {
+    policy: NetworkPolicy,
+    proxy: Option<Arc<harn_vm::egress::ProcessEgressProxy>>,
 }
 
 impl LocalSession {
@@ -275,9 +279,12 @@ impl LocalSession {
             ));
         }
         let source = self.harn_exec_source(&request)?;
-        let policy = self.execution_policy()?;
+        let (policy, proxy_guard) = self.execution_policy_with_proxy()?;
 
-        let task = tokio::task::spawn_blocking(move || run_harn_shell(source, policy));
+        let task = tokio::task::spawn_blocking(move || {
+            let _proxy_guard = proxy_guard;
+            run_harn_shell(source, policy)
+        });
         task.await?
     }
 
@@ -307,7 +314,17 @@ impl LocalSession {
         ))
     }
 
+    #[cfg(test)]
     fn execution_policy(&self) -> SandboxResult<CapabilityPolicy> {
+        self.execution_policy_with_proxy().map(|(policy, _)| policy)
+    }
+
+    fn execution_policy_with_proxy(
+        &self,
+    ) -> SandboxResult<(
+        CapabilityPolicy,
+        Option<Arc<harn_vm::egress::ProcessEgressProxy>>,
+    )> {
         // The session root is always writable; declared mounts split by
         // their access so a `ReadOnly` mount lowers to a read-only root
         // the VM and OS sandbox both refuse to write.
@@ -334,14 +351,34 @@ impl LocalSession {
             ],
         );
 
-        Ok(CapabilityPolicy {
+        let network = self
+            .network
+            .lock()
+            .map_err(|_| SandboxError::Lifecycle("local network lock poisoned".to_string()))?;
+        let proxy_guard = network.proxy.clone();
+        let process_network_proxy = proxy_guard.as_ref().map(|proxy| proxy.endpoints());
+        let network_enabled = !matches!(
+            &network.policy,
+            NetworkPolicy::Limited { allowed_hosts } if allowed_hosts.is_empty()
+        );
+
+        let policy = CapabilityPolicy {
             capabilities,
             workspace_roots: roots,
             read_only_roots,
-            side_effect_level: Some("process_exec".to_string()),
+            side_effect_level: Some(
+                if network_enabled {
+                    "network"
+                } else {
+                    "process_exec"
+                }
+                .to_string(),
+            ),
+            process_network_proxy,
             sandbox_profile: self.sandbox_profile,
             ..Default::default()
-        })
+        };
+        Ok((policy, proxy_guard))
     }
 
     fn resolve_cwd(&self, cwd: Option<&str>) -> SandboxResult<PathBuf> {
@@ -386,6 +423,32 @@ impl LocalSession {
             .lock()
             .map_err(|_| SandboxError::Lifecycle("local mount lock poisoned".to_string()))?
             .clone())
+    }
+}
+
+fn local_network_proxy(
+    policy: &NetworkPolicy,
+) -> SandboxResult<Option<Arc<harn_vm::egress::ProcessEgressProxy>>> {
+    match policy {
+        NetworkPolicy::Unrestricted => Ok(None),
+        NetworkPolicy::Limited { allowed_hosts } if allowed_hosts.is_empty() => Ok(None),
+        NetworkPolicy::Limited { allowed_hosts } => {
+            #[cfg(target_os = "macos")]
+            {
+                harn_vm::egress::ProcessEgressProxy::start_allowlist(allowed_hosts)
+                    .map(Arc::new)
+                    .map(Some)
+                    .map_err(SandboxError::NetworkPolicy)
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                let _ = allowed_hosts;
+                Err(SandboxError::Unsupported {
+                    backend: "local",
+                    operation: "limited network allow-lists on this platform",
+                })
+            }
+        }
     }
 }
 
@@ -624,7 +687,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn local_backend_rejects_limited_network_policy() {
+    async fn local_backend_applies_limited_network_policy_at_platform_boundary() {
         let backend = LocalSandbox::default();
         let session = backend.provision(SandboxSpec::default()).await.unwrap();
         let deny_all = backend
@@ -638,17 +701,52 @@ mod tests {
             .expect("deny-all egress policy is enforceable locally");
         assert_eq!(deny_all.id, session.id);
 
-        let err = backend
+        let result = backend
             .apply_network_policy(
                 &session.id,
                 NetworkPolicy::Limited {
                     allowed_hosts: vec!["example.com".to_string()],
                 },
             )
-            .await
-            .unwrap_err();
+            .await;
 
-        assert!(matches!(err, SandboxError::Unsupported { .. }));
+        #[cfg(target_os = "macos")]
+        {
+            result.expect("macOS Seatbelt can enforce proxy-only loopback access");
+            let local = backend.session(&session.id).unwrap();
+            let policy = local.execution_policy().unwrap();
+            assert!(policy.process_network_proxy.is_some());
+            assert_eq!(policy.side_effect_level.as_deref(), Some("network"));
+        }
+        #[cfg(not(target_os = "macos"))]
+        assert!(matches!(
+            result.unwrap_err(),
+            SandboxError::Unsupported { .. }
+        ));
+    }
+
+    #[tokio::test]
+    async fn malformed_limited_network_policy_fails_before_session_provision() {
+        let backend = LocalSandbox::default();
+        let result = backend
+            .provision(SandboxSpec {
+                network_policy: NetworkPolicy::Limited {
+                    allowed_hosts: vec!["[broken".to_string()],
+                },
+                ..Default::default()
+            })
+            .await;
+
+        #[cfg(target_os = "macos")]
+        assert!(matches!(
+            result.unwrap_err(),
+            SandboxError::NetworkPolicy(_)
+        ));
+        #[cfg(not(target_os = "macos"))]
+        assert!(matches!(
+            result.unwrap_err(),
+            SandboxError::Unsupported { .. }
+        ));
     }
 
     #[tokio::test]

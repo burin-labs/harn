@@ -21,6 +21,64 @@ fn equivalent_failover_excludes_internal_simulators() {
 }
 
 #[test]
+fn equivalent_failover_does_not_substitute_unprobed_local_models() {
+    let overlay = crate::llm_config::parse_config_toml(concat!(
+        "[models.\"gemma4:12b-mlx\"]\n",
+        "name = \"Gemma 4 12B MLX\"\n",
+        "provider = \"ollama\"\n",
+        "context_window = 131072\n",
+        "logical_model = \"gemma-4-12b-it\"\n",
+        "equivalence_group = \"gemma-4-12b-it\"\n",
+        "\n",
+        "[models.\"gemma4:12b-mxfp8\"]\n",
+        "name = \"Gemma 4 12B MXFP8\"\n",
+        "provider = \"ollama\"\n",
+        "context_window = 131072\n",
+        "logical_model = \"gemma-4-12b-it\"\n",
+        "equivalence_group = \"gemma-4-12b-it\"\n",
+    ))
+    .expect("test catalog overlay parses");
+    let previous = crate::llm_config::swap_user_overrides(Some(overlay));
+    let policy = build_equivalent_failover_policy(
+        "ollama",
+        "gemma4:12b-mlx",
+        3,
+        true,
+        crate::llm_config::EquivalentModelRequirements::default(),
+    );
+    crate::llm_config::swap_user_overrides(previous);
+
+    assert!(
+        policy.is_none(),
+        "catalog equivalence cannot prove that another local model is installed"
+    );
+}
+
+#[test]
+fn explicit_transport_fallback_can_select_a_local_model() {
+    let policy = build_transport_failover_policy(
+        "ollama",
+        "gemma4:12b-mlx",
+        &[crate::llm::api::LlmRouteFallback {
+            provider: "ollama".to_string(),
+            model: "gemma4:12b-mxfp8".to_string(),
+        }],
+        &[],
+    )
+    .expect("explicit local fallback creates a routing policy");
+
+    let routes: Vec<(&str, &str)> = policy
+        .chain
+        .iter()
+        .map(|link| (link.provider.as_str(), link.model.as_str()))
+        .collect();
+    assert_eq!(
+        routes,
+        vec![("ollama", "gemma4:12b-mlx"), ("ollama", "gemma4:12b-mxfp8")]
+    );
+}
+
+#[test]
 fn transport_fallbacks_lower_to_one_routing_chain() {
     let policy = build_transport_failover_policy(
         "mock",

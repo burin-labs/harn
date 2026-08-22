@@ -20,6 +20,12 @@ registered by the host adapter and exposed only through the nominal
 
 The active backend is resolved on every call (selection is essentially
 free) so an env-var override takes effect without a process restart.
+The default `harn-hostlib` feature set includes `native-secret-store`, which
+links the platform adapters. Lean embedders that disable default features can
+enable that feature explicitly or force the portable file backend.
+When a native adapter is present but the current session cannot access it
+(for example, a headless macOS session that cannot display an unlock prompt),
+host calls fail with the typed `backend_unavailable` kind and a stable `reason`.
 
 | OS               | Default backend                                      |
 |------------------|------------------------------------------------------|

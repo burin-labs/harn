@@ -104,6 +104,12 @@ fn profile_setup(
     policy: &CapabilityPolicy,
     profile: SandboxProfile,
 ) -> Result<ProcessProfile, VmError> {
+    if policy.process_network_proxy.is_some() {
+        return Err(sandbox_rejection(
+            "managed child-process egress requires a proxy-only Linux network namespace; this build cannot enforce that boundary"
+                .to_string(),
+        ));
+    }
     // landlock_profile() returns Err under OsHardened when Landlock is
     // unavailable (effective_fallback resolves to Enforce), so the
     // OsHardened "must engage" contract is enforced before fork rather
@@ -894,7 +900,29 @@ mod tests {
             tool_annotations: std::collections::BTreeMap::new(),
             sandbox_profile: SandboxProfile::Worktree,
             process_sandbox: Default::default(),
+            process_network_proxy: None,
         }
+    }
+
+    #[test]
+    fn managed_proxy_fails_closed_without_proxy_only_network_namespace() {
+        let mut policy = linux_policy_with_workspace_ops(&["read_text"]);
+        policy.side_effect_level = Some("network".to_string());
+        policy.process_network_proxy = Some(crate::orchestration::ProcessNetworkProxy {
+            http_port: 3128,
+            socks_port: 1080,
+        });
+
+        let error = match profile_setup("ignored", &policy, SandboxProfile::Worktree) {
+            Ok(_) => panic!("managed proxy must not widen to unrestricted Linux sockets"),
+            Err(error) => error,
+        };
+        assert!(
+            error
+                .to_string()
+                .contains("requires a proxy-only Linux network namespace"),
+            "{error}"
+        );
     }
 
     #[test]

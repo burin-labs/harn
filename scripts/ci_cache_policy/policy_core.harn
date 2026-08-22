@@ -317,6 +317,19 @@ pub const WINDOWS_CACHE_FALLBACK_GUARD =
 
 pub const WINDOWS_TEST_STEP = "Compile Windows tests and run unit slice"
 
+pub const WINDOWS_TEST_STEP_ID = "windows-native-tests"
+
+pub const WINDOWS_TEST_COMPLETED_EXPRESSION = "$"
+  + "{{ steps.${WINDOWS_TEST_STEP_ID}.outputs.completed_epoch }}"
+
+// This checker rejects the old CI telemetry key; it does not declare a
+// Harn-owned environment variable, so keep the forbidden spelling non-contiguous.
+pub const WINDOWS_LEGACY_HARN_TELEMETRY = "HARN_" + "NATIVE_TEST_COMPLETED_EPOCH"
+
+pub const WINDOWS_BINARY_PRODUCER_STEP = "Produce exact Windows Harn binary"
+
+pub const WINDOWS_SMOKE_STEP = "Smoke test harn run"
+
 pub const WINDOWS_NIGHTLY_TEST_STEP = "Run workspace nextest"
 
 pub const WINDOWS_TEST_STACK_BYTES = "16777216"

@@ -355,13 +355,11 @@ pub(super) fn prepare_workflow_state(
     let persist_path = optional_string_option(options, "persist_path")
         .or_else(|| optional_string_option(options, "resume_path"))
         .unwrap_or_else(|| {
-            match std::env::var(crate::runtime_paths::HARN_RUN_DIR_ENV) {
-                Ok(value) if !value.trim().is_empty() => crate::orchestration::default_run_dir(),
-                _ => std::path::PathBuf::from(".harn-runs"),
-            }
-            .join(format!("{}.json", uuid::Uuid::now_v7()))
-            .display()
-            .to_string()
+            let base = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+            crate::runtime_paths::run_root_reference(&base)
+                .join(format!("{}.json", uuid::Uuid::now_v7()))
+                .display()
+                .to_string()
         });
     let execution = parse_execution_record(options.get("execution"))?;
     let parent_run_id = optional_string_option(options, "parent_run_id");
