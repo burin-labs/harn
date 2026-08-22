@@ -1375,10 +1375,12 @@ jobs:
       # steps so CARGO_HOME / CARGO_TARGET_DIR are already redirected when rustup
       # and Swatinem/rust-cache run. The cache invocation below passes the
       # redirected target explicitly; rust-cache otherwise ignores
-      # CARGO_TARGET_DIR. Kept byte-identical to the windows-nightly.yml writer so
-      # the shared-cache policy's pre-cache step-sequence comparison keeps matching.
+      # CARGO_TARGET_DIR. Blacksmith's Windows image does not expose the Hyper-V
+      # New-VHD command required by this action, so the paid lane uses the native
+      # filesystem and only the GitHub-hosted fallback creates the same ReFS Dev
+      # Drive as the windows-nightly.yml writer.
       - name: Set up Dev Drive
-        if: ${{ vars.HARN_WINDOWS_DEVDRIVE == 'on' }}
+        if: ${{ vars.HARN_WINDOWS_DEVDRIVE == 'on' && env.HARN_RUNNER_TIER == 'github-hosted' }}
         uses: samypr100/setup-dev-drive@562171fe8df7401fdf582d766cd3b6ab80d5b1a0 # v4.1.0
         with:
           drive-size: 25GB

@@ -1439,6 +1439,15 @@ fn windows_blacksmith_tier_expression() -> string {
     + "{{ vars.${WINDOWS_BLACKSMITH_DISABLE_VAR} == 'true' && '${HOSTED_RUNNER_TIER}' || (${eligible_event} && '${BLACKSMITH_RUNNER_TIER}' || '${HOSTED_RUNNER_TIER}') }}"
 }
 
+fn windows_pr_dev_drive_guard() -> string {
+  return "$"
+    + "{{ vars.HARN_WINDOWS_DEVDRIVE == 'on' && env.${RUNNER_TIER_ENV} == '${HOSTED_RUNNER_TIER}' }}"
+}
+
+fn windows_nightly_dev_drive_guard() -> string {
+  return "$" + "{{ vars.HARN_WINDOWS_DEVDRIVE == 'on' }}"
+}
+
 fn exact_step_env(job, step_name: string, key: string) -> string {
   const step = step_by_name(job?.steps ?? [], step_name)
   return trim(to_string(step?.env?.[key] ?? "<unset>"))
@@ -1468,6 +1477,24 @@ fn windows_pr_runner_errors(policy: CiCachePolicy, job, producer) -> list<string
     errors = errors
       + [
       "${policy.windows_workspace_warm.workflow}:${policy.windows_workspace_warm.job} must remain on ${HOSTED_WINDOWS_RUNNER}",
+    ]
+  }
+  const pr_dev_drives = matching_named_steps(job, "Set up Dev Drive")
+  if len(pr_dev_drives) != 1
+    || trim(to_string(pr_dev_drives[0]?.if ?? ""))
+    != windows_pr_dev_drive_guard() {
+    errors = errors
+      + [
+      "ci.yml:windows must skip Hyper-V Dev Drive setup on Blacksmith and retain it for the github-hosted fallback",
+    ]
+  }
+  const producer_dev_drives = matching_named_steps(producer, "Set up Dev Drive")
+  if len(producer_dev_drives) != 1
+    || trim(to_string(producer_dev_drives[0]?.if ?? ""))
+    != windows_nightly_dev_drive_guard() {
+    errors = errors
+      + [
+      "${policy.windows_workspace_warm.workflow}:${policy.windows_workspace_warm.job} must retain variable-gated Dev Drive setup on its hosted runner",
     ]
   }
   if trim(to_string(job?.permissions?.actions ?? "")) != "read"

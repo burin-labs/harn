@@ -469,7 +469,13 @@ fn workflows() {
           env: {HARN_RUNNER_TIER: windows_tier_expression()},
           steps: [
             {uses: "actions/checkout@exact-pin"},
-            {uses: "samypr100/setup-dev-drive@exact-pin"},
+            {
+              name: "Set up Dev Drive",
+              if: gha_expression(
+                "vars.HARN_WINDOWS_DEVDRIVE == 'on' && env.HARN_RUNNER_TIER == 'github-hosted'",
+              ),
+              uses: "samypr100/setup-dev-drive@exact-pin",
+            },
             {uses: "./.github/actions/rust-toolchain"},
             windows_warm_restore_step(),
             {
@@ -503,6 +509,7 @@ fn workflows() {
             {uses: "actions/checkout@exact-pin"},
             {
               name: "Set up Dev Drive",
+              if: gha_expression("vars.HARN_WINDOWS_DEVDRIVE == 'on'"),
               uses: "samypr100/setup-dev-drive@exact-pin",
               with: {
                 "drive-size": gha_expression(
@@ -917,6 +924,34 @@ pipeline test_windows_pr_runner_requires_internal_blacksmith_with_safe_fallbacks
     )
       .contains(
         "ci.yml:windows must grant only contents: read and actions: read for artifact discovery",
+      ),
+  )
+  const dev_drive_on_blacksmith = {
+    ...declared["ci.yml"],
+    jobs: {
+      ...declared["ci.yml"].jobs,
+      windows: {
+        ...windows,
+        steps: windows.steps.map(
+          { step ->
+            if trim(step?.name ?? "") != "Set up Dev Drive" {
+              return step
+            }
+            return {...step, if: gha_expression("vars.HARN_WINDOWS_DEVDRIVE == 'on'")}
+          },
+        )
+          .to_list(),
+      },
+    },
+  }
+  assert(
+    windows_pr_native_feedback_errors(
+      policy(),
+      dev_drive_on_blacksmith,
+      declared["windows-nightly.yml"],
+    )
+      .contains(
+        "ci.yml:windows must skip Hyper-V Dev Drive setup on Blacksmith and retain it for the github-hosted fallback",
       ),
   )
 }
