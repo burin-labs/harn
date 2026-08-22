@@ -1,4 +1,5 @@
 use super::*;
+use crate::value::{VmDictExt, VmValue};
 
 /// A native escalated call must retain producer facts when its result is
 /// recorded, even though the session's primary tool channel is text.
@@ -208,6 +209,52 @@ fn dispatched_dynamic_result_projects_nested_mutation_facts_into_typed_receipt()
             "verified_paths": ["workers/payment.rivet", "src/payment.rv"]
         })
     );
+}
+
+/// Harn type aliases cross the VM boundary as struct instances, not free-form
+/// dictionaries. The canonical typed handler path must preserve the same data
+/// that JSON-backed and dynamic dispatch adapters do.
+#[test]
+fn dispatched_typed_handler_result_preserves_typed_data() {
+    reset_agent_session_host_state();
+    let session_id =
+        crate::agent_sessions::open_or_create(Some("record-typed-handler-data".to_string()));
+    crate::agent_sessions::claim_tool_format(&session_id, "text").expect("text lock claims");
+    seed_host_session_provider_model(&session_id, "mock", "fixture-fast");
+
+    let mut outcome_fields = crate::value::DictMap::new();
+    outcome_fields.put_int("exit_code", 0);
+    let run_outcome = VmValue::struct_instance_from_map("RunOutcome", outcome_fields);
+
+    let mut data_fields = crate::value::DictMap::new();
+    data_fields.put_str("command_status", "succeeded");
+    data_fields.put("run_outcome", run_outcome);
+    let data = VmValue::struct_instance_from_map("HandlerEvidence", data_fields);
+
+    let mut handler_fields = crate::value::DictMap::new();
+    handler_fields.put_str("schema", "harn.agent_tool_handler_result.v1");
+    handler_fields.put_str("text", "verification passed");
+    handler_fields.put("data", data);
+    let handler = VmValue::struct_instance_from_map("AgentToolHandlerResult", handler_fields);
+
+    let mut result_fields = crate::value::DictMap::new();
+    result_fields.put_str("tool_name", "run");
+    result_fields.put_str("tool_call_id", "tc_typed");
+    result_fields.put_bool("ok", true);
+    result_fields.put_str("observation", "verification passed");
+    result_fields.put("result", handler);
+    let dispatch = VmValue::List(std::sync::Arc::new(vec![VmValue::dict(result_fields)]));
+    crate::llm::agent_session_host::record_tool_results_for_test(&session_id, dispatch);
+
+    let transcript = crate::agent_sessions::transcript(&session_id).expect("transcript");
+    let messages = list_items(
+        &dict_get(&transcript, "messages")
+            .cloned()
+            .unwrap_or(crate::value::VmValue::Nil),
+    );
+    let last = vm_to_json(messages.last().expect("a recorded result message"));
+    assert_eq!(last["_harn"]["data"]["command_status"], "succeeded");
+    assert_eq!(last["_harn"]["data"]["run_outcome"]["exit_code"], 0);
 }
 
 #[test]

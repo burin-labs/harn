@@ -309,6 +309,7 @@ pub(crate) fn list_items(value: &VmValue) -> Vec<VmValue> {
 pub(crate) fn dict_get<'a>(value: &'a VmValue, key: &str) -> Option<&'a VmValue> {
     match value {
         VmValue::Dict(d) => d.get(key),
+        VmValue::StructInstance(_) => value.struct_field(key),
         _ => None,
     }
 }

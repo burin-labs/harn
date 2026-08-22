@@ -13,7 +13,18 @@
 //! has to close them first.
 
 use super::{dict_get, list_items, vm_to_json};
-use crate::value::{VmDictExt, VmValue};
+use crate::value::{DictMap, VmDictExt, VmValue};
+
+/// Normalize either structural Harn record representation at this host seam.
+/// Public Harn `type` contracts arrive as `StructInstance`; dynamic tools and
+/// JSON-backed adapters arrive as `Dict`. Both carry the same named fields.
+fn record_fields(value: &VmValue) -> Option<DictMap> {
+    match value {
+        VmValue::Dict(fields) => Some((**fields).clone()),
+        VmValue::StructInstance(_) => value.struct_fields_map(),
+        _ => None,
+    }
+}
 
 /// Preserve typed producer facts on the durable tool-result message. Dispatch
 /// keeps mutation facts beside `data` so every consumer can inspect them
@@ -27,12 +38,11 @@ pub(super) fn transcript_tool_result_data(result: &VmValue) -> Option<VmValue> {
     // typed mutation facts that first-party tools preserve.
     let handler_result = dict_get(result, "result").unwrap_or(result);
     let mut data = dict_get(handler_result, "data")
-        .and_then(VmValue::as_dict)
-        .cloned()
+        .and_then(record_fields)
         .unwrap_or_default();
-    if let Some(envelope_data) = dict_get(result, "data").and_then(VmValue::as_dict) {
+    if let Some(envelope_data) = dict_get(result, "data").and_then(record_fields) {
         for (key, value) in envelope_data {
-            data.insert(key.clone(), value.clone());
+            data.insert(key, value);
         }
     }
     let mutation_status =
