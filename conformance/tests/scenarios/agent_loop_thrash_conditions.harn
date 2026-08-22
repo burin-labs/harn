@@ -8,13 +8,13 @@ import { agent_loop } from "std/agent/loop"
 import { agent_stall_initial_state, agent_stall_observe_tool_calls } from "std/agent/stall"
 import { with_llm_script } from "std/testing"
 
-/** A dispatch result envelope shaped like agent_dispatch_tool_batch output. */
+/** A canonical dispatch result list shaped like agent_dispatch_tool_batch output. */
 fn ok_dispatch(name: string, payload) {
-  return {results: [{tool_name: name, ok: true, status: "ok", result: payload}]}
+  return [{tool_name: name, ok: true, status: "ok", result: payload}]
 }
 
 fn err_dispatch(name: string, error_text: string) {
-  return {results: [{tool_name: name, ok: false, status: "error", error: error_text}]}
+  return [{tool_name: name, ok: false, status: "error", error: error_text}]
 }
 
 fn call(name: string, args) {

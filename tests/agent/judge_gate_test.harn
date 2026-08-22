@@ -1,12 +1,12 @@
 // Run: harn test tests/agent/judge_gate_test.harn
 //
-// Config-time validation fixtures for `agent_completion_gate` (std/agent/judge).
+// Config-time validation fixtures for `agent_completion_gate`.
 // Pins the LOUD guards that keep a mistyped seam from blowing up deep inside an
 // agent_loop run (a non-callable host-fact callback), a silently-dead knob (a
 // `classify_write` without `facts`, or a typo'd `judge_seam`), while preserving
 // the graceful judge-only degradation for a facts-free config. Everything here is
 // PURE — building the bundle runs no LLM and no host.
-import { agent_completion_gate, agent_completion_gate_veto_counts } from "std/agent/judge"
+import { agent_completion_gate, agent_completion_gate_veto_counts } from "std/agent/completion_gate"
 
 fn __facts(_ctx) {
   return {source_write_count: 1}

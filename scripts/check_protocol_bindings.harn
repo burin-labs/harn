@@ -52,6 +52,7 @@ def main() -> int:
         ("ACPResponse (error)", envelopes["errorResponse"], hp.ACPResponse),
         ("ACPSessionUpdateNotification", envelopes["sessionUpdateNotification"], hp.ACPSessionUpdateNotification),
         ("HarnAgentEventNotification", envelopes["agentEventNotification"], hp.HarnAgentEventNotification),
+        ("HarnToolAnnotations", fixture["harnToolAnnotations"], hp.HarnToolAnnotations),
         ("A2ATask", fixture["a2aTask"], hp.A2ATask),
         ("MCPTool", fixture["mcpTool"], hp.MCPTool),
         ("MCPDiscoverResult", fixture["mcpDiscoverResult"], hp.MCPDiscoverResult),

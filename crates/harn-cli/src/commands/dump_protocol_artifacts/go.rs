@@ -168,6 +168,11 @@ pub(super) fn generate_go_for_version(artifact_version: &str) -> String {
         &side_effect_level_values(),
     ));
     out.push_str(&go_typed_array_owned(
+        "HarnCompletionEvidenceRole",
+        "HarnCompletionEvidenceRoles",
+        &completion_evidence_role_values(),
+    ));
+    out.push_str(&go_typed_array_owned(
         "HarnWorkerStatus",
         "HarnWorkerStatuses",
         &worker_status_values(),
@@ -751,13 +756,14 @@ type HarnToolArgSchema struct {
 
 // HarnToolAnnotations describes Harn-side metadata for a tool.
 type HarnToolAnnotations struct {
-	Kind            string              `json:"kind"`
-	SideEffectLevel string              `json:"side_effect_level"`
-	ArgSchema       HarnToolArgSchema   `json:"arg_schema"`
-	Capabilities    map[string][]string `json:"capabilities"`
-	EmitsArtifacts  bool                `json:"emits_artifacts"`
-	ResultReaders   []string            `json:"result_readers"`
-	InlineResult    bool                `json:"inline_result"`
+	Kind                   ACPToolKind                 `json:"kind"`
+	SideEffectLevel        HarnSideEffectLevel         `json:"side_effect_level"`
+	CompletionEvidenceRole *HarnCompletionEvidenceRole `json:"completion_evidence_role,omitempty"`
+	ArgSchema              HarnToolArgSchema           `json:"arg_schema"`
+	Capabilities           map[string][]string         `json:"capabilities"`
+	EmitsArtifacts         bool                        `json:"emits_artifacts"`
+	ResultReaders          []string                    `json:"result_readers"`
+	InlineResult           bool                        `json:"inline_result"`
 }
 
 // A2AMessage is one message inside an A2A task history.
@@ -959,8 +965,8 @@ pub(super) fn go_typed_array(type_name: &str, slice_name: &str, values: &[&str])
 
 pub(super) fn go_typed_array_owned(type_name: &str, slice_name: &str, values: &[String]) -> String {
     let mut out =
-        format!("// {type_name} is the typed alias for the {slice_name} wire vocabulary.\n");
-    out.push_str(&format!("type {type_name} = string\n\n"));
+        format!("// {type_name} is the named string type for the {slice_name} wire vocabulary.\n");
+    out.push_str(&format!("type {type_name} string\n\n"));
     out.push_str(&format!(
         "// {slice_name} enumerates every wire value Harn currently emits for {type_name}.\n"
     ));

@@ -215,6 +215,10 @@ pub(super) fn generate_python_for_version(artifact_version: &str) -> String {
         &side_effect_level_values(),
     ));
     out.push_str(&py_str_enum_owned(
+        "HarnCompletionEvidenceRole",
+        &completion_evidence_role_values(),
+    ));
+    out.push_str(&py_str_enum_owned(
         "HarnWorkerStatus",
         &worker_status_values(),
     ));
@@ -723,6 +727,7 @@ class HarnToolAnnotations(_HarnDataclass):
     kind: str
     side_effect_level: str
     arg_schema: HarnToolArgSchema
+    completion_evidence_role: Optional[HarnCompletionEvidenceRole] = None
     capabilities: Dict[str, List[str]] = field(default_factory=dict)
     emits_artifacts: bool = False
     result_readers: List[str] = field(default_factory=list)
@@ -898,6 +903,7 @@ pub(super) fn python_public_names() -> Vec<String> {
         "ACPToolCallStatus",
         "HarnToolCallErrorCategory",
         "HarnSideEffectLevel",
+        "HarnCompletionEvidenceRole",
         "HarnWorkerStatus",
         "HarnAgentLifecycleState",
         "HarnAgentLifecycleEvent",

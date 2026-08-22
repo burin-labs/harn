@@ -119,6 +119,7 @@ pub const LLM_CALL_OPTION_FIELDS: &[ShapeFieldDescriptor] = &[
     ShapeFieldDescriptor::optional("prompt_cache_ttl", TY_STRING),
     ShapeFieldDescriptor::optional("budget", TY_NUM_OR_DICT),
     ShapeFieldDescriptor::optional("timeout_ms", TY_INT),
+    ShapeFieldDescriptor::optional("operation_timeout_ms", TY_INT),
     ShapeFieldDescriptor::optional("idle_timeout_ms", TY_INT),
     ShapeFieldDescriptor::optional("stream", TY_BOOL),
     ShapeFieldDescriptor::optional("speed", TY_STRING),
@@ -148,6 +149,7 @@ pub const LLM_WRAPPER_ONLY_KEYS: &[&str] = &[
     "retries",
     "schema_recover",
     "repair",
+    "operation_timeout_ms",
     "metadata",
 ];
 

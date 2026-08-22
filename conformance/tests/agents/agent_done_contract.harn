@@ -15,13 +15,13 @@ pipeline default(harness: Harness) {
         "Implemented two page-cache tests.\n\nDone claim:\n- requested work: add five page-cache tests\n- evidence: fetch and cached-fetch tests pass\n- files changed: tests/unit/page_cache_extra_test.cpp\n- not done: none\n##DONE##",
       ),
       llm_text(
-        "{\"verdict\":\"continue\",\"reasoning\":\"the claim omits visible required cases\",\"next_step\":\"keep working until all requested tests exist\",\"specific_gaps\":[\"add an LRU eviction test\",\"add a dirty flush test\",\"add a pinned-page prevention test\"]}",
+        "{\"action\":\"continue\",\"reason\":\"the claim omits visible required cases\",\"repair\":\"keep working until all requested tests exist\",\"specific_gaps\":[\"add an LRU eviction test\",\"add a dirty flush test\",\"add a pinned-page prevention test\"],\"accepted_evidence\":[]}",
       ),
       llm_text(
         "Added the LRU eviction, dirty flush, and pinned-page prevention cases.\n\nDone claim:\n- requested work: add five page-cache tests\n- evidence: all five page-cache test cases pass in the target suite\n- files changed: tests/unit/page_cache_extra_test.cpp\n- not done: none\n##DONE##",
       ),
       llm_text(
-        "{\"verdict\":\"done\",\"reasoning\":\"the claim covers all visible cases and cites passing evidence\",\"accepted_evidence\":[\"all five requested cases are named\",\"target suite passes\"]}",
+        "{\"action\":\"accept\",\"reason\":\"the claim covers all visible cases and cites passing evidence\",\"repair\":\"\",\"specific_gaps\":[],\"accepted_evidence\":[\"all five requested cases are named\",\"target suite passes\"]}",
       ),
     ],
     { ->

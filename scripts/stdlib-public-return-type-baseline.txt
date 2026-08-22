@@ -15,26 +15,25 @@
 # count    2  crates/harn-stdlib/src/stdlib/agent/daemon.harn
 # count   13  crates/harn-stdlib/src/stdlib/agent/events.harn
 # count    2  crates/harn-stdlib/src/stdlib/agent/fact.harn
-# count    9  crates/harn-stdlib/src/stdlib/agent/goal.harn
+# count    8  crates/harn-stdlib/src/stdlib/agent/goal.harn
 # count    2  crates/harn-stdlib/src/stdlib/agent/governors.harn
 # count    4  crates/harn-stdlib/src/stdlib/agent/guardrails.harn
 # count    5  crates/harn-stdlib/src/stdlib/agent/host_tools.harn
 # count    1  crates/harn-stdlib/src/stdlib/agent/introspection.harn
-# count    6  crates/harn-stdlib/src/stdlib/agent/judge.harn
-# count   10  crates/harn-stdlib/src/stdlib/agent/judge_internals.harn
+# count    8  crates/harn-stdlib/src/stdlib/agent/judge_internals.harn
 # count   11  crates/harn-stdlib/src/stdlib/agent/lanes.harn
 # count    1  crates/harn-stdlib/src/stdlib/agent/loop.harn
 # count    4  crates/harn-stdlib/src/stdlib/agent/loop_call_resolution.harn
 # count   11  crates/harn-stdlib/src/stdlib/agent/loop_foundation.harn
-# count   37  crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn
-# count    3  crates/harn-stdlib/src/stdlib/agent/loop_result_status.harn
+# count   36  crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn
+# count    1  crates/harn-stdlib/src/stdlib/agent/loop_result_status.harn
 # count    1  crates/harn-stdlib/src/stdlib/agent/loop_run.harn
 # count   12  crates/harn-stdlib/src/stdlib/agent/loop_support.harn
 # count   29  crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn
 # count   25  crates/harn-stdlib/src/stdlib/agent/loop_turn_options.harn
 # count   32  crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn
 # count    3  crates/harn-stdlib/src/stdlib/agent/mcp.harn
-# count   11  crates/harn-stdlib/src/stdlib/agent/options_formats.harn
+# count    9  crates/harn-stdlib/src/stdlib/agent/options_formats.harn
 # count   24  crates/harn-stdlib/src/stdlib/agent/options_public.harn
 # count   49  crates/harn-stdlib/src/stdlib/agent/options_validation.harn
 # count    5  crates/harn-stdlib/src/stdlib/agent/overlays.harn
@@ -65,7 +64,7 @@
 # count    3  crates/harn-stdlib/src/stdlib/agent/tool_annotations.harn
 # count    3  crates/harn-stdlib/src/stdlib/agent/tool_search.harn
 # count    4  crates/harn-stdlib/src/stdlib/agent/tool_surface.harn
-# count    7  crates/harn-stdlib/src/stdlib/agent/transcript.harn
+# count    6  crates/harn-stdlib/src/stdlib/agent/transcript.harn
 # count    8  crates/harn-stdlib/src/stdlib/agent/user.harn
 # count   15  crates/harn-stdlib/src/stdlib/agent/workers.harn
 # count    4  crates/harn-stdlib/src/stdlib/artifact/web.harn
@@ -209,7 +208,6 @@ crates/harn-stdlib/src/stdlib/agent/fact.harn::store_fact
 crates/harn-stdlib/src/stdlib/agent/goal.harn::goal
 crates/harn-stdlib/src/stdlib/agent/goal.harn::goal_check
 crates/harn-stdlib/src/stdlib/agent/goal.harn::goal_context_fragment
-crates/harn-stdlib/src/stdlib/agent/goal.harn::goal_judge
 crates/harn-stdlib/src/stdlib/agent/goal.harn::goal_pin
 crates/harn-stdlib/src/stdlib/agent/goal.harn::goal_prompt_part
 crates/harn-stdlib/src/stdlib/agent/goal.harn::goal_reloop
@@ -227,21 +225,13 @@ crates/harn-stdlib/src/stdlib/agent/host_tools.harn::agent_edit_tools
 crates/harn-stdlib/src/stdlib/agent/host_tools.harn::agent_host_tools
 crates/harn-stdlib/src/stdlib/agent/host_tools.harn::agent_read_tools
 crates/harn-stdlib/src/stdlib/agent/introspection.harn::runtime_introspection_tools
-crates/harn-stdlib/src/stdlib/agent/judge.harn::agent_completion_gate
-crates/harn-stdlib/src/stdlib/agent/judge.harn::agent_completion_gate_veto_counts
-crates/harn-stdlib/src/stdlib/agent/judge.harn::agent_done_contract
-crates/harn-stdlib/src/stdlib/agent/judge.harn::agent_done_judge_cap
-crates/harn-stdlib/src/stdlib/agent/judge.harn::agent_verify_completion_judge_cap
-crates/harn-stdlib/src/stdlib/agent/judge.harn::agent_verify_or_continue
 crates/harn-stdlib/src/stdlib/agent/judge_internals.harn::__completion_gate_apply_budget
 crates/harn-stdlib/src/stdlib/agent/judge_internals.harn::__completion_gate_classify_writes
 crates/harn-stdlib/src/stdlib/agent/judge_internals.harn::__completion_gate_combine_verify
 crates/harn-stdlib/src/stdlib/agent/judge_internals.harn::__completion_gate_feedback_keys
 crates/harn-stdlib/src/stdlib/agent/judge_internals.harn::__completion_gate_ladder
-crates/harn-stdlib/src/stdlib/agent/judge_internals.harn::__judge_apply_llm_overrides
 crates/harn-stdlib/src/stdlib/agent/judge_internals.harn::__judge_classify_verdict
 crates/harn-stdlib/src/stdlib/agent/judge_internals.harn::__judge_leading_word
-crates/harn-stdlib/src/stdlib/agent/judge_internals.harn::__judge_run_checkpoint
 crates/harn-stdlib/src/stdlib/agent/judge_internals.harn::__judge_verdict_token
 crates/harn-stdlib/src/stdlib/agent/lanes.harn::agent_lane_classify
 crates/harn-stdlib/src/stdlib/agent/lanes.harn::agent_lane_explicit_target_paths
@@ -305,10 +295,7 @@ crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn::__invoke_tool_w
 crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn::__resolve_intra_turn_failure_fanout_cap
 crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn::__resolve_max_concurrent_tools
 crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn::__spawn_audit_flushes
-crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn::__strip_internal_dispatch
 crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn::__strip_internal_tool_result
-crates/harn-stdlib/src/stdlib/agent/loop_result_status.harn::__dispatch_results_list
-crates/harn-stdlib/src/stdlib/agent/loop_result_status.harn::__tool_names_by_status
 crates/harn-stdlib/src/stdlib/agent/loop_result_status.harn::__tool_result_name
 crates/harn-stdlib/src/stdlib/agent/loop_run.harn::__agent_loop_run
 crates/harn-stdlib/src/stdlib/agent/loop_support.harn::__agent_loop_build_turn_prompt
@@ -413,11 +400,9 @@ crates/harn-stdlib/src/stdlib/agent/mcp.harn::agent_mcp_admit_bootstrap
 crates/harn-stdlib/src/stdlib/agent/mcp.harn::agent_mcp_bootstrap_if_needed
 crates/harn-stdlib/src/stdlib/agent/mcp.harn::agent_mcp_mount_additional
 crates/harn-stdlib/src/stdlib/agent/options_formats.harn::__client_tool_search_requested
-crates/harn-stdlib/src/stdlib/agent/options_formats.harn::__completion_judge_defaults
 crates/harn-stdlib/src/stdlib/agent/options_formats.harn::__explicit_tool_format
 crates/harn-stdlib/src/stdlib/agent/options_formats.harn::__fallback_tool_format
 crates/harn-stdlib/src/stdlib/agent/options_formats.harn::__has_key
-crates/harn-stdlib/src/stdlib/agent/options_formats.harn::__judge_enabled
 crates/harn-stdlib/src/stdlib/agent/options_formats.harn::__profile_defaults
 crates/harn-stdlib/src/stdlib/agent/options_formats.harn::agent_first_tool_format_override_warning_text
 crates/harn-stdlib/src/stdlib/agent/options_formats.harn::agent_tool_format
@@ -645,7 +630,6 @@ crates/harn-stdlib/src/stdlib/agent/tool_surface.harn::agent_reset_tool_surface_
 crates/harn-stdlib/src/stdlib/agent/transcript.harn::agent_transcript_issue_schema
 crates/harn-stdlib/src/stdlib/agent/transcript.harn::agent_transcript_report_schema
 crates/harn-stdlib/src/stdlib/agent/transcript.harn::agent_transcript_row_schema
-crates/harn-stdlib/src/stdlib/agent/transcript.harn::agent_transcript_tool_call
 crates/harn-stdlib/src/stdlib/agent/transcript.harn::agent_transcript_tool_call_args
 crates/harn-stdlib/src/stdlib/agent/transcript.harn::agent_transcript_tool_call_schema
 crates/harn-stdlib/src/stdlib/agent/transcript.harn::agent_transcript_tool_event_schema

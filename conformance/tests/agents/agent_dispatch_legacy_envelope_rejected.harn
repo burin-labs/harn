@@ -1,0 +1,17 @@
+import { agent_stall_initial_state, agent_stall_observe_completed_dispatch } from "std/agent/stall"
+
+pipeline default(harness: Harness) {
+  // Dispatch is one canonical result list. The retired `{results: [...]}`
+  // envelope must fail at this public boundary instead of looking like an
+  // empty turn and silently discarding tool evidence.
+  agent_stall_observe_completed_dispatch(
+    harness.agent,
+    "legacy-dispatch-envelope",
+    [],
+    {results: []},
+    0,
+    {enabled: true},
+    agent_stall_initial_state(),
+    {tools: []},
+  )
+}

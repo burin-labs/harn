@@ -14,6 +14,12 @@ pipeline default(harness: Harness) {
   )
   harness.stdio.println(judged.done_sentinel)
   harness.stdio.println(type_of(judged.done_judge))
+  const disabled_judges = agent_loop_options(
+    harness,
+    {provider: "mock", done_judge: false, verify_completion_judge: false},
+  )
+  require disabled_judges.done_judge == nil, "false disables done_judge"
+  require disabled_judges.verify_completion_judge == nil, "false disables completion judge"
   const client_search = agent_loop_options(
     harness,
     {provider: "mock", tools: tool_registry(), tool_search: {mode: "client"}},
@@ -93,6 +99,46 @@ pipeline default(harness: Harness) {
     to_string(unwrap_err(invalid_transport)),
     "agent_loop: `llm_caller_transport` must be a dict or nil; got bool",
   )
+  for case in [
+    {
+      options: {provider: "mock", done_judge: {fail_open: true}},
+      removed: "done_judge.fail_open",
+      replacement: "fail_open_on_error",
+    },
+    {
+      options: {provider: "mock", done_judge: {max_feedback: 2}},
+      removed: "done_judge.max_feedback",
+      replacement: "max_invocations",
+    },
+    {
+      options: {provider: "mock", verify_completion_judge: {fail_open: true}},
+      removed: "verify_completion_judge.fail_open",
+      replacement: "fail_open_on_error",
+    },
+    {
+      options: {provider: "mock", verify_completion_judge: {max_feedback: 2}},
+      removed: "verify_completion_judge.max_feedback",
+      replacement: "max_invocations",
+    },
+    {
+      options: {provider: "mock", done_judge: {enabled: false}},
+      removed: "done_judge.enabled",
+      replacement: "done_judge` to false",
+    },
+    {
+      options: {provider: "mock", verify_completion_judge: {enabled: false}},
+      removed: "verify_completion_judge.enabled",
+      replacement: "verify_completion_judge` to false",
+    },
+  ] {
+    const rejected = try {
+      agent_loop_options(harness, case.options)
+    }
+    require is_err(rejected), "removed judge option must fail"
+    const message = to_string(unwrap_err(rejected))
+    require contains(message, case.removed), "error names removed judge option"
+    require contains(message, case.replacement), "error names replacement judge option"
+  }
   const invalid_expose_decisions = try {
     agent_loop_options(
       harness,

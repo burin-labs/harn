@@ -41,7 +41,7 @@ pipeline default(harness: Harness) {
       {text: "", tool_calls: [{id: "noop2", name: "noop", arguments: {}}]},
       {text: "", tool_calls: [{id: "noop3", name: "noop", arguments: {}}]},
       llm_text(
-        "{\"verdict\":\"continue\",\"reasoning\":\"needs one more turn\",\"next_step\":\"change approach\"}",
+        "{\"action\":\"continue\",\"reason\":\"needs one more turn\",\"repair\":\"change approach\",\"specific_gaps\":[],\"accepted_evidence\":[]}",
       ),
       llm_text("still working"),
     ],
@@ -69,6 +69,18 @@ pipeline default(harness: Harness) {
       )
       const stalls = events_of(captured.events, "agent_loop_stall_warning")
       const judges = events_of(captured.events, "judge_decision")
+      const receipts = captured.events.filter(
+        { event ->
+          event.type == "typed_checkpoint"
+            && event?.checkpoint?.schema
+              == "harn.completion_directive_receipt.v1"
+        },
+      )
+        .to_list()
+      const feedback = events_of(captured.events, "feedback_injected").filter(
+        { event -> event?.kind == "verify_completion" },
+      )
+        .to_list()
       const messages = json_stringify(agent_session_visible_messages(harness.agent, session))
       harness.stdio.println(captured.result.status)
       harness.stdio.println(len(stalls))
@@ -92,6 +104,8 @@ pipeline default(harness: Harness) {
       harness.stdio.println(dispatches)
       harness.stdio.println(contains(messages, "Stall diagnostic"))
       harness.stdio.println(contains(messages, "change approach"))
+      harness.stdio.println(receipts[0].checkpoint.feedback_delivery)
+      harness.stdio.println(len(feedback))
       harness.stdio.println(len(harness.llm.mock_calls()))
     },
   )

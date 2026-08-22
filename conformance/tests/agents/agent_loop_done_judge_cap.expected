@@ -1,4 +1,4 @@
-capped.status=verify_capped
+capped.status=completion_unverified
 capped.stop_reason=done_judge_cap_reached
 capped.invocations=2
 capped.vetoes=2

@@ -30,7 +30,17 @@ pipeline default(harness: Harness) {
         ],
       },
       llm_text("<user_response>Progress reported.</user_response>"),
-      llm_text("{\"verdict\":\"done\",\"reasoning\":\"progress event was emitted\"}"),
+      llm_text(
+        json_stringify(
+          {
+            action: "accept",
+            reason: "progress event was emitted",
+            repair: "",
+            specific_gaps: [],
+            accepted_evidence: ["one structured progress event"],
+          },
+        ),
+      ),
     ],
     { ->
       const captured = agent_capture_events(

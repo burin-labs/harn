@@ -7,6 +7,7 @@
 // pins the behavior-identical swap of `__goal_without_control_keys` onto the
 // `__dict_omit` builtin. Everything here is PURE — no LLM, no host.
 import { goal, goal_check, goal_reloop } from "std/agent/goal"
+import { agent_loop_options } from "std/agent/options"
 
 fn __manual_omit(o, drop) {
   let out = {}
@@ -83,4 +84,12 @@ pipeline test_goal_reloop_strips_control_keys(harness: Harness, task) {
   assert_eq(opts?.facts_fn, nil)
   assert_eq(opts?.max_attempts, nil)
   assert_eq(opts?.max_iterations, 2)
+}
+
+pipeline test_goal_reloop_judge_passes_agent_loop_validation(harness: Harness, task) {
+  const g = goal({objective: "ship it", success_criteria: ["works end to end"]})
+  const options = agent_loop_options(harness, goal_reloop(g, {judge: true, provider: "mock"}))
+  assert_eq(type_of(options.done_judge), "dict")
+  assert(contains(options.done_judge.system, "ship it"))
+  assert(!contains(options.done_judge.keys(), "enabled"))
 }

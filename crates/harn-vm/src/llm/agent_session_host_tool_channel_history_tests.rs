@@ -35,6 +35,9 @@ fn text_only_route_repairs_stale_native_history_format() {
         message.get("tool_calls").is_none(),
         "a stale requested format must not leak native calls onto a text-only route"
     );
+    assert_eq!(message["_harn"]["kind"], "assistant");
+    assert_eq!(message["_harn"]["tool_calls"][0]["name"], "look");
+    assert_eq!(message["_harn"]["tool_calls"][0]["id"], "call_1");
 }
 
 #[test]
@@ -108,6 +111,10 @@ fn dispatch_receipt_overrides_stale_supported_text_grammar() {
     );
     assert_eq!(result["role"], "user");
     assert!(result.get("tool_call_id").is_none());
+    assert_eq!(assistant["_harn"]["tool_calls"][0]["name"], "look");
+    assert_eq!(result["_harn"]["tool_call_id"], "call_1");
+    assert_eq!(result["_harn"]["tool_name"], "look");
+    assert_eq!(result["_harn"]["outcome"], "ok");
 }
 
 #[test]
@@ -136,6 +143,8 @@ fn json_text_route_reserializes_native_surprise_in_its_own_grammar() {
     assert!(content.contains("\"name\": \"look\""));
     assert!(content.contains("\"args\""));
     assert!(message.get("tool_calls").is_none());
+    assert_eq!(message["_harn"]["tool_calls"][0]["name"], "look");
+    assert_eq!(message["_harn"]["tool_calls"][0]["id"], "call_1");
 }
 
 #[test]
@@ -197,4 +206,7 @@ fn fireworks_stale_native_turn_records_text_channel_result_end_to_end() {
     assert!(assistant.get("tool_calls").is_none());
     assert_eq!(result["role"], "user");
     assert!(result.get("tool_call_id").is_none());
+    assert_eq!(assistant["_harn"]["tool_calls"][0]["name"], "look");
+    assert_eq!(result["_harn"]["tool_call_id"], "call_1");
+    assert_eq!(result["_harn"]["outcome"], "ok");
 }

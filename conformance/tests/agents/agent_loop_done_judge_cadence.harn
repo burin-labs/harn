@@ -13,11 +13,13 @@ pipeline default(harness: Harness) {
       llm_text("<user_response>candidate one</user_response>\n<done>##DONE##</done>"),
       llm_text("<user_response>candidate two</user_response>\n<done>##DONE##</done>"),
       llm_text(
-        "{\"verdict\":\"continue\",\"reasoning\":\"wait for another candidate\",\"next_step\":\"try again\"}",
+        "{\"action\":\"continue\",\"reason\":\"wait for another candidate\",\"repair\":\"try again\",\"specific_gaps\":[],\"accepted_evidence\":[]}",
       ),
       llm_text("<user_response>candidate three</user_response>\n<done>##DONE##</done>"),
       llm_text("<user_response>candidate four</user_response>\n<done>##DONE##</done>"),
-      llm_text("{\"verdict\":\"done\",\"reasoning\":\"fourth candidate is complete\"}"),
+      llm_text(
+        "{\"action\":\"accept\",\"reason\":\"fourth candidate is complete\",\"repair\":\"\",\"specific_gaps\":[],\"accepted_evidence\":[]}",
+      ),
     ],
     { ->
       const session = "done-judge-cadence-" + harness.random.uuid()

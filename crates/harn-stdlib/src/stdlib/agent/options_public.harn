@@ -247,31 +247,28 @@ pub fn agent_loop_options(harness: Harness, options = nil) {
         },
       }
   }
-  if __has_key(opts, "done_judge") && __judge_enabled(opts?.done_judge)
+  const has_verify_completion_judge = __has_key(opts, "verify_completion_judge")
+  const verify_completion_judge = if has_verify_completion_judge {
+    __normalize_completion_judge_config(harness.fs, opts?.verify_completion_judge, opts)
+  } else {
+    nil
+  }
+  const has_done_judge = __has_key(opts, "done_judge")
+  const done_judge = if has_done_judge {
+    __normalize_completion_judge_config(harness.fs, opts?.done_judge, opts)
+  } else {
+    nil
+  }
+  if done_judge != nil
     && !__has_key(opts, "done_sentinel")
     && !__native_tools_complete_naturally(opts) {
     opts = opts + {done_sentinel: "##DONE##"}
   }
-  if __has_key(opts, "verify_completion_judge") {
-    if __judge_enabled(opts?.verify_completion_judge) {
-      opts = opts
-        + {
-          verify_completion_judge: __completion_judge_defaults(
-            harness.fs,
-            opts?.verify_completion_judge,
-            opts,
-          ),
-        }
-    } else {
-      opts = opts + {verify_completion_judge: nil}
-    }
+  if has_verify_completion_judge {
+    opts = opts + {verify_completion_judge: verify_completion_judge}
   }
-  if __has_key(opts, "done_judge") {
-    if __judge_enabled(opts?.done_judge) {
-      opts = opts + {done_judge: __completion_judge_defaults(harness.fs, opts?.done_judge, opts)}
-    } else {
-      opts = opts + {done_judge: nil}
-    }
+  if has_done_judge {
+    opts = opts + {done_judge: done_judge}
   }
   opts = __with_task_ledger_shorthand(opts)
   const budget = __normalize_iteration_budget(opts)

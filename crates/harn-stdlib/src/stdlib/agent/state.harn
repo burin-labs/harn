@@ -112,7 +112,7 @@ pub fn agent_session_record_assistant(agent: HarnessAgent, session_id, llm_resul
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_session_record_tool_results(agent: HarnessAgent, session_id, dispatch) {
+pub fn agent_session_record_tool_results(agent: HarnessAgent, session_id, dispatch: list) {
   return agent.session_record_tool_results(session_id, dispatch)
 }
 

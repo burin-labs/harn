@@ -539,6 +539,33 @@ fn envelope_from_arg_error(err: &VmError) -> VmValue {
     envelope_from_transport_error(err, "", "")
 }
 
+fn envelope_from_operation_timeout(timeout_ms: u64) -> VmValue {
+    let message = format!("structured operation exceeded {timeout_ms}ms total deadline");
+    let mut env = crate::value::DictMap::new();
+    env.insert(crate::value::intern_key("ok"), VmValue::Bool(false));
+    env.insert(crate::value::intern_key("data"), VmValue::Nil);
+    env.put_str("raw_text", "");
+    env.put_str("error", message.as_str());
+    env.put_str("error_category", "timeout");
+    env.insert(crate::value::intern_key("attempts"), VmValue::Int(0));
+    env.insert(crate::value::intern_key("repaired"), VmValue::Bool(false));
+    env.insert(
+        crate::value::intern_key("extracted_json"),
+        VmValue::Bool(false),
+    );
+    env.insert(
+        crate::value::intern_key("usage"),
+        VmValue::dict(empty_usage_dict()),
+    );
+    env.put_str("model", "");
+    env.put_str("provider", "");
+    env.insert(
+        crate::value::intern_key("operation_timeout_ms"),
+        VmValue::Int(timeout_ms as i64),
+    );
+    VmValue::dict(env)
+}
+
 fn empty_usage_dict() -> crate::value::DictMap {
     crate::llm::usage::LlmUsage::empty_vm_dict()
 }
@@ -631,10 +658,52 @@ fn detect_extracted_json(outcome: &SchemaLoopOutcome) -> bool {
 /// for the bridge path. Single entry point keeps both registrations
 /// behavior-identical.
 pub(crate) async fn llm_call_structured_result_impl(
-    args: Vec<VmValue>,
+    mut args: Vec<VmValue>,
     bridge: Option<&Arc<crate::bridge::HostBridge>>,
 ) -> Result<VmValue, VmError> {
-    run_structured_envelope(args, bridge).await
+    let operation_timeout_ms = take_operation_timeout_ms(&mut args)?;
+    await_with_operation_timeout(operation_timeout_ms, run_structured_envelope(args, bridge)).await
+}
+
+async fn await_with_operation_timeout<F>(
+    operation_timeout_ms: Option<u64>,
+    operation: F,
+) -> Result<VmValue, VmError>
+where
+    F: std::future::Future<Output = Result<VmValue, VmError>>,
+{
+    let Some(timeout_ms) = operation_timeout_ms else {
+        return operation.await;
+    };
+    match tokio::time::timeout(std::time::Duration::from_millis(timeout_ms), operation).await {
+        Ok(result) => result,
+        Err(_) => Ok(envelope_from_operation_timeout(timeout_ms)),
+    }
+}
+
+fn take_operation_timeout_ms(args: &mut [VmValue]) -> Result<Option<u64>, VmError> {
+    let Some(options) = args.get_mut(2) else {
+        return Ok(None);
+    };
+    let Some(existing) = options.as_dict() else {
+        return Ok(None);
+    };
+    let mut cleaned = existing.clone();
+    let Some(raw) = cleaned.remove("operation_timeout_ms") else {
+        return Ok(None);
+    };
+    *options = VmValue::dict(cleaned);
+    match raw {
+        VmValue::Nil => Ok(None),
+        VmValue::Int(value) if value > 0 => Ok(Some(value as u64)),
+        VmValue::Int(_) => Err(VmError::Runtime(
+            "llm_call_structured_result: `operation_timeout_ms` must be >= 1".to_string(),
+        )),
+        other => Err(VmError::Runtime(format!(
+            "llm_call_structured_result: `operation_timeout_ms` must be an integer or nil, got {}",
+            other.type_name()
+        ))),
+    }
 }
 
 #[cfg(test)]
@@ -652,6 +721,46 @@ mod tests {
             output_validation_mode: String::from("error"),
             usages: Vec::new(),
         }
+    }
+
+    #[test]
+    fn operation_timeout_is_removed_before_provider_option_extraction() {
+        let mut opts = crate::value::DictMap::new();
+        opts.insert(
+            crate::value::intern_key("operation_timeout_ms"),
+            VmValue::Int(65_000),
+        );
+        opts.put_str("provider", "mock");
+        let mut args = vec![VmValue::Nil, VmValue::Nil, VmValue::dict(opts)];
+        assert_eq!(take_operation_timeout_ms(&mut args).unwrap(), Some(65_000));
+        let cleaned = args[2].as_dict().unwrap();
+        assert!(!cleaned.contains_key("operation_timeout_ms"));
+        assert_eq!(cleaned.get("provider").unwrap().display(), "mock");
+    }
+
+    #[test]
+    fn operation_timeout_envelope_is_typed_and_fail_closed() {
+        let envelope = envelope_from_operation_timeout(1234);
+        let dict = envelope.as_dict().unwrap();
+        assert!(matches!(dict.get("ok"), Some(VmValue::Bool(false))));
+        assert_eq!(dict.get("error_category").unwrap().display(), "timeout");
+        assert_eq!(
+            dict.get("operation_timeout_ms").and_then(VmValue::as_int),
+            Some(1234)
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn operation_timeout_bounds_the_whole_future() {
+        let result = await_with_operation_timeout(Some(1), async {
+            tokio::time::sleep(std::time::Duration::from_mins(1)).await;
+            Ok(VmValue::Bool(true))
+        })
+        .await
+        .unwrap();
+        let dict = result.as_dict().unwrap();
+        assert!(matches!(dict.get("ok"), Some(VmValue::Bool(false))));
+        assert_eq!(dict.get("error_category").unwrap().display(), "timeout");
     }
 
     fn priced_outcome(errors: Vec<&str>) -> SchemaLoopOutcome {

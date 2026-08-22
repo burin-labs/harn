@@ -210,6 +210,25 @@ func TestRoundTripFixture(t *testing.T) {
 		assertRoundTrip(t, "HarnAgentEventNotification", envelopes["agentEventNotification"], out)
 	})
 
+	t.Run("HarnToolAnnotations", func(t *testing.T) {
+		raw, ok := fixture["harnToolAnnotations"]
+		if !ok {
+			t.Fatal("fixture missing harnToolAnnotations")
+		}
+		var annotations HarnToolAnnotations
+		if err := json.Unmarshal(raw, &annotations); err != nil {
+			t.Fatalf("decode Harn tool annotations: %v", err)
+		}
+		if annotations.CompletionEvidenceRole == nil || *annotations.CompletionEvidenceRole != HarnCompletionEvidenceRole("verification") {
+			t.Fatalf("expected completion evidence role verification, got %#v", annotations.CompletionEvidenceRole)
+		}
+		out, err := json.Marshal(annotations)
+		if err != nil {
+			t.Fatalf("encode Harn tool annotations: %v", err)
+		}
+		assertRoundTrip(t, "HarnToolAnnotations", raw, out)
+	})
+
 	t.Run("A2ATask", func(t *testing.T) {
 		raw, ok := fixture["a2aTask"]
 		if !ok {
@@ -397,33 +416,31 @@ func TestJSONRPCIDEncoding(t *testing.T) {
 	}
 }
 
-// Regression guard: ensure typed string aliases are populated and stay
+// Regression guard: ensure typed string vocabularies are populated and stay
 // non-empty. A drop to zero would mean the generator silently emitted an empty
 // vocabulary for a downstream binding consumer.
+func assertVocabularyPopulated[T ~string](t *testing.T, name string, values []T) {
+	t.Helper()
+	if len(values) == 0 {
+		t.Errorf("%s is empty", name)
+	}
+}
+
 func TestVocabulariesArePopulated(t *testing.T) {
-	checks := []struct {
-		name   string
-		values []string
-	}{
-		{"ACPAgentMethods", ACPAgentMethods},
-		{"ACPClientMethods", ACPClientMethods},
-		{"ACPSessionUpdates", ACPSessionUpdates},
-		{"ACPToolKinds", ACPToolKinds},
-		{"ACPToolCallStatuses", ACPToolCallStatuses},
-		{"HarnToolCallErrorCategories", HarnToolCallErrorCategories},
-		{"HarnSideEffectLevels", HarnSideEffectLevels},
-		{"ToolCallReceiptStatuses", ToolCallReceiptStatuses},
-		{"ToolCallReceiptExecutors", ToolCallReceiptExecutors},
-		{"A2ATaskStates", A2ATaskStates},
-		{"A2ATaskEventTypes", A2ATaskEventTypes},
-		{"MCPProtocolVersions", MCPProtocolVersions},
-		{"MCPMethods", MCPMethods},
-		{"MCPCacheScopes", MCPCacheScopes},
-		{"MCPResultTypes", MCPResultTypes},
-	}
-	for _, check := range checks {
-		if len(check.values) == 0 {
-			t.Errorf("%s is empty", check.name)
-		}
-	}
+	assertVocabularyPopulated(t, "ACPAgentMethods", ACPAgentMethods)
+	assertVocabularyPopulated(t, "ACPClientMethods", ACPClientMethods)
+	assertVocabularyPopulated(t, "ACPSessionUpdates", ACPSessionUpdates)
+	assertVocabularyPopulated(t, "ACPToolKinds", ACPToolKinds)
+	assertVocabularyPopulated(t, "ACPToolCallStatuses", ACPToolCallStatuses)
+	assertVocabularyPopulated(t, "HarnToolCallErrorCategories", HarnToolCallErrorCategories)
+	assertVocabularyPopulated(t, "HarnSideEffectLevels", HarnSideEffectLevels)
+	assertVocabularyPopulated(t, "HarnCompletionEvidenceRoles", HarnCompletionEvidenceRoles)
+	assertVocabularyPopulated(t, "ToolCallReceiptStatuses", ToolCallReceiptStatuses)
+	assertVocabularyPopulated(t, "ToolCallReceiptExecutors", ToolCallReceiptExecutors)
+	assertVocabularyPopulated(t, "A2ATaskStates", A2ATaskStates)
+	assertVocabularyPopulated(t, "A2ATaskEventTypes", A2ATaskEventTypes)
+	assertVocabularyPopulated(t, "MCPProtocolVersions", MCPProtocolVersions)
+	assertVocabularyPopulated(t, "MCPMethods", MCPMethods)
+	assertVocabularyPopulated(t, "MCPCacheScopes", MCPCacheScopes)
+	assertVocabularyPopulated(t, "MCPResultTypes", MCPResultTypes)
 }

@@ -27,9 +27,10 @@ second normalizer.
 Rust `AgentTerminalKind` owner and checked against it in the VM test suite. ACP
 metadata, CLI protocol artifacts, A2A task status/metadata, replay run records,
 and Harn callers consume that projection instead of classifying `final_status`
-or `stop_reason` themselves. A2A suspension remains wire-compatible as
-`working` plus `metadata.harn.pause` until the proposed paused state is
-standardized.
+or `stop_reason` themselves. A completion judge that cannot accept before its
+deadline or policy limit produces `completion_unverified`; A2A projects that to
+`failed`. A2A suspension remains wire-compatible as `working` plus
+`metadata.harn.pause` until the proposed paused state is standardized.
 
 ## Tool registries
 
@@ -52,16 +53,37 @@ small typed interface inside `harn-vm`: capability data selects one dialect,
 `AgentResult` reports its terminal state. Generated catalog artifacts and drift
 checks keep external projections aligned with the same release.
 
-## Completion judge isolation
+## Completion checkpoints
 
-`done_judge` and `verify_completion_judge` run on a transcript projection. The
-judge prompt includes the worker transcript, but the judge's own LLM request and
-structured response are not appended to `harness.agent.messages(session_id)`.
-Only legitimate worker turns and explicit runtime feedback injections mutate the
-worker session transcript.
+Built-in completion judges are terminal checkpoints, not worker turns. Harn
+projects the immutable worker transcript into bounded effect and verification
+evidence. Judge requests exclude callable tool schemas and raw transcript
+replay. The judge request and response are not appended to
+`harness.agent.messages(session_id)`.
 
-This keeps replay and follow-up turns deterministic: a judge veto may inject a
-feedback message because that message is intended to steer the worker, while an
-accepted judge decision only emits `judge_decision` and `typed_checkpoint`
-events. Tests should assert transcript equality around accepted judge calls
+The task, rubric, and output schema occupy the stable start of the request. The
+changing user message carries the latest mutation, verification, problem, and
+transcript-integrity evidence. This placement lets a provider reuse the stable
+prompt prefix, but cache behavior is only a performance detail.
+
+The `harn.completion_judge_cache.v1` checkpoint records cache eligibility, a
+hash of the static prefix, and provider-reported cache reads and writes. These
+fields are telemetry. They do not prove equivalent evidence and never reuse a
+prior verdict.
+
+Deadline admission uses monotonic remaining time, the configured operation
+budget, and the terminal reserve. `prompt_token_estimate` is a rough
+character-count estimate, not a provider tokenizer result, and does not decide
+admission. The VM bounds the complete checkpoint operation, including local
+setup and response parsing.
+
+`harn.completion_judge_evidence_projection.v1` records what evidence entered
+the request. `harn.completion_directive_receipt.v1` records the final action,
+reason, admission result, and whether repair feedback reached the next turn.
+`evidence_id` and transcript digests correlate these records and reveal changed
+input; they never substitute for a new judgment.
+
+A `continue` result injects repair feedback because it is meant to steer the
+worker. An `accept` or `stop_unverified` result changes only events and terminal
+state. Tests should assert the worker transcript around accepted judge calls
 instead of inferring isolation from event counts.

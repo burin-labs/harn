@@ -21,7 +21,7 @@ pub type AgentLoopBudget = {
   consecutive_failures: dict?,
 }
 
-type AgentLoopBudgetDecision = {
+pub type AgentLoopBudgetDecision = {
   iteration: int,
   action: string,
   old_limit: int,
@@ -300,11 +300,11 @@ fn __agent_progress_summary_text(
  */
 pub fn agent_loop_snapshot_state(args) -> AgentLoopState {
   const verdict = args.verdict
-  const completion_vetoed = verdict != nil && verdict?.vetoed
+  const completion_vetoed = verdict?.action == "continue"
   const completion_verdict = if verdict == nil {
     nil
   } else {
-    verdict?.verdict
+    verdict?.receipt?.outcome ?? verdict?.action
   }
   const completion_feedback = if verdict == nil {
     nil

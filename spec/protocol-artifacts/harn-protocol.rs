@@ -1052,6 +1052,51 @@ impl HarnSideEffectLevel {
     }
 }
 
+/// Closed completion-evidence roles owned by Harn's tool annotation registry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum HarnCompletionEvidenceRole {
+    #[serde(rename = "observation")]
+    Observation,
+    #[serde(rename = "mutation")]
+    Mutation,
+    #[serde(rename = "verification")]
+    Verification,
+}
+
+impl HarnCompletionEvidenceRole {
+    pub const ALL: &'static [Self] = &[Self::Observation, Self::Mutation, Self::Verification];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Observation => "observation",
+            Self::Mutation => "mutation",
+            Self::Verification => "verification",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnToolArgSchema {
+    pub path_params: Vec<String>,
+    pub dependency_key_params: Vec<String>,
+    pub dependency_range_params: Vec<std::collections::BTreeMap<String, String>>,
+    pub arg_aliases: std::collections::BTreeMap<String, String>,
+    pub required: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnToolAnnotations {
+    pub kind: HarnACPToolKind,
+    pub side_effect_level: HarnSideEffectLevel,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub completion_evidence_role: Option<HarnCompletionEvidenceRole>,
+    pub arg_schema: HarnToolArgSchema,
+    pub capabilities: std::collections::BTreeMap<String, Vec<String>>,
+    pub emits_artifacts: bool,
+    pub result_readers: Vec<String>,
+    pub inline_result: bool,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HarnToolPermissionScope {
     pub tool_kind: HarnACPToolKind,
@@ -2461,6 +2506,7 @@ pub const AGENT_TERMINAL_CLASSES: &[&str] = &[
 pub const AGENT_TERMINAL_KIND_NATURAL: &str = "natural";
 pub const AGENT_TERMINAL_KIND_USER_CANCELLED: &str = "user_cancelled";
 pub const AGENT_TERMINAL_KIND_POLICY_BUDGET: &str = "policy_budget";
+pub const AGENT_TERMINAL_KIND_COMPLETION_UNVERIFIED: &str = "completion_unverified";
 pub const AGENT_TERMINAL_KIND_POLICY_NO_PROGRESS: &str = "policy_no_progress";
 pub const AGENT_TERMINAL_KIND_POLICY_GUARDRAIL: &str = "policy_guardrail";
 pub const AGENT_TERMINAL_KIND_POLICY_STOP: &str = "policy_stop";
@@ -2474,6 +2520,7 @@ pub const AGENT_TERMINAL_KINDS: &[&str] = &[
     "natural",
     "user_cancelled",
     "policy_budget",
+    "completion_unverified",
     "policy_no_progress",
     "policy_guardrail",
     "policy_stop",

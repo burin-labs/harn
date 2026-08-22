@@ -7,10 +7,12 @@ pipeline default(harness: Harness) {
     [
       llm_text("<user_response>Too thin.</user_response>\n<done>##DONE##</done>"),
       llm_text(
-        "{\"verdict\":\"continue\",\"reasoning\":\"answer lacks detail\",\"next_step\":\"Answer with the concrete result.\"}",
+        "{\"action\":\"continue\",\"reason\":\"answer lacks detail\",\"repair\":\"Answer with the concrete result.\",\"specific_gaps\":[],\"accepted_evidence\":[]}",
       ),
       llm_text("<user_response>The concrete result is 4.</user_response>\n<done>##DONE##</done>"),
-      llm_text("{\"verdict\":\"done\",\"reasoning\":\"the result is explicit\"}"),
+      llm_text(
+        "{\"action\":\"accept\",\"reason\":\"the result is explicit\",\"repair\":\"\",\"specific_gaps\":[],\"accepted_evidence\":[]}",
+      ),
     ],
     { ->
       const result = agent_loop(

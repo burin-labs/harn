@@ -1179,31 +1179,12 @@ pub fn __strip_internal_tool_result(result) {
   return clean
 }
 
-pub fn __strip_internal_dispatch(dispatch) {
-  if type_of(dispatch) == "list" {
-    let clean_results = []
-    for result in dispatch {
-      clean_results = clean_results.appending(__strip_internal_tool_result(result))
-    }
-    return clean_results
+pub fn __strip_internal_dispatch(dispatch: list) -> list {
+  let clean_results = []
+  for result in dispatch {
+    clean_results = clean_results.appending(__strip_internal_tool_result(result))
   }
-  if type_of(dispatch) != "dict" {
-    return dispatch
-  }
-  let clean_dispatch = {}
-  for key in dispatch.keys() {
-    if !starts_with(key, "_") {
-      clean_dispatch = clean_dispatch + {[key]: dispatch[key]}
-    }
-  }
-  if type_of(dispatch?.results) == "list" {
-    let clean_results = []
-    for result in dispatch.results {
-      clean_results = clean_results.appending(__strip_internal_tool_result(result))
-    }
-    clean_dispatch = clean_dispatch + {results: clean_results}
-  }
-  return clean_dispatch
+  return clean_results
 }
 
 pub fn __spawn_audit_flushes(tasks, flushes) {

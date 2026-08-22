@@ -71,6 +71,7 @@ __all__ = [
     "ACPToolCallStatus",
     "HarnToolCallErrorCategory",
     "HarnSideEffectLevel",
+    "HarnCompletionEvidenceRole",
     "HarnWorkerStatus",
     "HarnAgentLifecycleState",
     "HarnAgentLifecycleEvent",
@@ -596,6 +597,7 @@ class AgentTerminalKind(str, Enum):
     NATURAL = "natural"
     USER_CANCELLED = "user_cancelled"
     POLICY_BUDGET = "policy_budget"
+    COMPLETION_UNVERIFIED = "completion_unverified"
     POLICY_NO_PROGRESS = "policy_no_progress"
     POLICY_GUARDRAIL = "policy_guardrail"
     POLICY_STOP = "policy_stop"
@@ -668,6 +670,12 @@ class HarnSideEffectLevel(str, Enum):
     PROCESS_EXEC = "process_exec"
     NETWORK = "network"
     DESKTOP_CONTROL = "desktop_control"
+
+
+class HarnCompletionEvidenceRole(str, Enum):
+    OBSERVATION = "observation"
+    MUTATION = "mutation"
+    VERIFICATION = "verification"
 
 
 class HarnWorkerStatus(str, Enum):
@@ -1237,6 +1245,7 @@ class HarnToolAnnotations(_HarnDataclass):
     kind: str
     side_effect_level: str
     arg_schema: HarnToolArgSchema
+    completion_evidence_role: Optional[HarnCompletionEvidenceRole] = None
     capabilities: Dict[str, List[str]] = field(default_factory=dict)
     emits_artifacts: bool = False
     result_readers: List[str] = field(default_factory=list)

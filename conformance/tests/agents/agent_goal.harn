@@ -51,8 +51,14 @@ pipeline test(harness: Harness) {
   assert(goal_check(g_named, {ci_green: true}).checkable == 1, "named fn counts as checkable")
   // Done-judge composition through the core done_judge agent_loop seam.
   const judge = goal_judge(g)
-  assert(judge.enabled, "judge enabled")
-  assert(judge.system.contains("Fix the flaky login test"), "judge system embeds the goal")
+  const judge_system = judge.system ?? ""
+  assert(!contains(judge.keys(), "enabled"), "judge uses the outer false value to disable")
+  assert(judge_system.contains("Fix the flaky login test"), "judge system embeds the goal")
+  assert(
+    judge_system.contains("action: \"accept\""),
+    "judge system uses the completion action contract",
+  )
+  assert(!(judge.fail_open_on_error ?? true), "goal judge fails closed by default")
   assert(judge.max_invocations == 3, "bounded done-judge veto cap")
   // Rendering + pin bridge.
   assert(goal_text(g).contains("## Goal"), "renders the goal block")

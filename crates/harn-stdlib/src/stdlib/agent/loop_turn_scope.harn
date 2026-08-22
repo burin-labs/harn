@@ -548,7 +548,7 @@ pub fn __agent_loop_render_wrapup_context(context) {
  */
 pub fn __agent_loop_wrapup_eligible_status(final_status) {
   return final_status == "budget_exhausted"
-    || final_status == "verify_capped"
+    || final_status == "completion_unverified"
     || final_status == "verify_exhausted"
     || final_status == "stuck"
 }

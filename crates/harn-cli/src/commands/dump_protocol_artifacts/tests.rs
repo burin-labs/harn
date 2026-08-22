@@ -37,6 +37,8 @@ use super::*;
 #[path = "../../../../../spec/protocol-artifacts/harn-protocol.rs"]
 mod generated_rust_binding;
 
+mod external_action_roundtrip;
+
 fn protocol_source() -> ProtocolArtifactSource {
     ProtocolArtifactSource::from_anchor(std::path::Path::new(env!("CARGO_MANIFEST_DIR")))
         .expect("harn-cli is compiled from the Harn workspace")
@@ -74,6 +76,58 @@ fn typescript_artifact_has_no_dangling_type_references() {
              ACP/Harn/A2A/MCP-prefixed type used in the bindings must be declared in the same \
              artifact; this guard shift-lefts the downstream `tsc` failure into harn's build."
     );
+}
+
+#[test]
+fn tool_annotations_project_typed_completion_evidence_roles_to_every_binding() {
+    assert_eq!(
+        completion_evidence_role_values(),
+        vec![
+            "observation".to_string(),
+            "mutation".to_string(),
+            "verification".to_string(),
+        ]
+    );
+
+    for (binding, type_declaration, field_declaration) in [
+        (
+            generate_typescript(),
+            "export type HarnCompletionEvidenceRole =",
+            "completion_evidence_role?: HarnCompletionEvidenceRole",
+        ),
+        (
+            generate_swift(),
+            "public enum HarnCompletionEvidenceRole:",
+            "public var completionEvidenceRole: HarnCompletionEvidenceRole?",
+        ),
+        (
+            generate_python(),
+            "class HarnCompletionEvidenceRole(str, Enum):",
+            "completion_evidence_role: Optional[HarnCompletionEvidenceRole] = None",
+        ),
+        (
+            generate_go(),
+            "type HarnCompletionEvidenceRole string",
+            "CompletionEvidenceRole *HarnCompletionEvidenceRole `json:\"completion_evidence_role,omitempty\"`",
+        ),
+        (
+            generate_rust(),
+            "pub enum HarnCompletionEvidenceRole {",
+            "pub completion_evidence_role: Option<HarnCompletionEvidenceRole>",
+        ),
+    ] {
+        assert!(
+            binding.contains(type_declaration),
+            "binding omitted typed completion-evidence vocabulary: {type_declaration}"
+        );
+        assert!(
+            binding.contains(field_declaration),
+            "binding omitted optional typed annotation field: {field_declaration}"
+        );
+        for role in completion_evidence_role_values() {
+            assert!(binding.contains(&role), "binding omitted role `{role}`");
+        }
+    }
 }
 
 #[test]
@@ -503,146 +557,6 @@ fn generated_external_action_progress_is_monotonic() {
 }
 
 #[test]
-fn generated_rust_external_action_activity_round_trips() {
-    use generated_rust_binding::{
-        HarnActivityKind, HarnExternalActionActivityRecord, HarnExternalActionActivityStatus,
-        HarnExternalActionDecider, HarnExternalActionDecisionOutcome,
-        HarnExternalActionProtectedFieldClass,
-    };
-
-    let fixture = json!({
-        "schema": "harn.external_action_activity.v1",
-        "kind": "external_action",
-        "id": "activity_abc123",
-        "action_id": "action_abc123",
-        "effect_fingerprint": "sha256:effect123",
-        "intent_fingerprint": "sha256:abc123",
-        "provider": "duffel",
-        "capability": "flights",
-        "operation": "create_order",
-        "environment": "test",
-        "summary": "Create one test flight order",
-        "external_spend": {"currency": "USD", "amount_minor": 28381},
-        "status": "confirmed",
-        "updated_at_ms": 1_788_000_000_000_i64,
-        "requester": {
-            "actor": {"kind": "user", "id": "local-user"},
-            "agent_id": "assistant",
-            "model_provider": "openai",
-            "model_id": "test-model",
-            "session_id": "session-1",
-            "run_id": "run-1"
-        },
-        "policy_evaluations": [{
-            "layer": "managed_policy",
-            "outcome": "allowed",
-            "reason_code": "test_mode_allowed",
-            "policy_id": "managed-default"
-        }],
-        "decision": {
-            "outcome": "approved",
-            "decider": "person",
-            "decided_at_ms": 1_788_000_000_000_i64,
-            "reason_code": "approved_exact_action",
-            "actor": {"kind": "user", "id": "local-user"}
-        },
-        "authorization": {
-            "method": "manual",
-            "authentication_assurance": "session",
-            "issued_at_ms": 1_788_000_000_000_i64,
-            "expires_at_ms": 1_788_000_300_000_i64
-        },
-        "disclosure": {
-            "recipient": "Duffel test mode",
-            "purpose": "Create one test flight order",
-            "field_classes": ["legal_identity", "birth_date"],
-            "source": "fictional_test_fixture",
-            "authentication_assurance": "session"
-        },
-        "dispatch": {"attempted": true, "adapter_id": "duffel-test-v1"},
-        "reconciliation": {"attempted": false, "status": "not_needed"},
-        "retry": {
-            "schema": "harn.external_action_retry_link.v1",
-            "previous_action_id": "action_denied",
-            "previous_receipt_id": "receipt_denied"
-        },
-        "receipt": {
-            "schema": "harn.external_action_receipt.v1",
-            "id": "receipt-1",
-            "action_id": "action_abc123",
-            "effect_fingerprint": "sha256:effect123",
-            "intent_fingerprint": "sha256:abc123",
-            "idempotency_key": "idempotency-1",
-            "provider": "duffel",
-            "capability": "flights",
-            "operation": "create_order",
-            "environment": "test",
-            "adapter_id": "duffel-test-v1",
-            "outcome": "confirmed",
-            "status": "confirmed",
-            "next_action": "none",
-            "dispatch_attempted": true,
-            "recorded_at_ms": 1_788_000_000_000_i64,
-            "provider_action_id": "ord_test_1",
-            "evidence_refs": ["provider:order:ord_test_1"],
-            "retry": {
-                "schema": "harn.external_action_retry_link.v1",
-                "previous_action_id": "action_denied",
-                "previous_receipt_id": "receipt_denied"
-            },
-            "disclosure": {
-                "recipient": "Duffel test mode",
-                "purpose": "Create one test flight order",
-                "field_classes": ["legal_identity", "birth_date"],
-                "source": "fictional_test_fixture",
-                "authentication_assurance": "session"
-            }
-        }
-    });
-
-    let decoded: HarnExternalActionActivityRecord =
-        serde_json::from_value(fixture.clone()).expect("generated activity DTO decodes");
-    assert_eq!(decoded.kind, HarnActivityKind::ExternalAction);
-    assert_eq!(decoded.status, HarnExternalActionActivityStatus::Confirmed);
-    assert_eq!(
-        decoded.retry.as_ref().expect("retry").previous_receipt_id,
-        "receipt_denied"
-    );
-    assert_eq!(
-        decoded
-            .receipt
-            .as_ref()
-            .expect("receipt")
-            .effect_fingerprint
-            .as_deref(),
-        Some("sha256:effect123")
-    );
-    assert_eq!(
-        decoded.decision.as_ref().expect("decision").outcome,
-        HarnExternalActionDecisionOutcome::Approved
-    );
-    assert_eq!(
-        decoded.decision.as_ref().expect("decision").decider,
-        HarnExternalActionDecider::Person
-    );
-    assert_eq!(
-        decoded
-            .disclosure
-            .as_ref()
-            .expect("disclosure")
-            .field_classes,
-        [
-            HarnExternalActionProtectedFieldClass::LegalIdentity,
-            HarnExternalActionProtectedFieldClass::BirthDate,
-        ]
-    );
-    assert_eq!(
-        serde_json::to_value(decoded).expect("generated activity DTO encodes"),
-        fixture
-    );
-}
-
-#[test]
 fn swift_case_name_emits_valid_identifiers() {
     // Bare `case private = ...` / `case public = ...` won't compile in
     // Swift — both are reserved keywords. The wire vocabulary uses these
@@ -1063,12 +977,12 @@ fn generated_go_includes_harn_wire_vocabularies() {
     assert!(go.contains("type MCPInputRequiredResult struct"));
     assert!(go.contains("MCPUnsupportedProtocolVersionErrorCode"));
     assert!(go.contains("type JSONRPCID struct"));
-    assert!(go.contains("type HarnToolMutationStatus = string"));
+    assert!(go.contains("type HarnToolMutationStatus string"));
     assert!(go.contains("ChangedPaths"));
     assert!(go.contains("MutationStatus"));
     assert!(go.contains("type ACPSessionUpdateNotification struct"));
     assert!(go.contains("func IsRequest(envelope map[string]json.RawMessage)"));
-    assert!(go.contains("type HarnWorkerStatus = string"));
+    assert!(go.contains("type HarnWorkerStatus string"));
     assert!(go.contains("var HarnWorkerStatuses = []HarnWorkerStatus"));
     assert!(go.contains("type ToolCallReceipt struct"));
     assert!(go.contains("var ToolCallReceiptStatuses = []ToolCallReceiptStatus"));
@@ -1221,6 +1135,10 @@ fn round_trip_fixture_matches_python_and_go_field_set() {
         json!("composition_child_call")
     );
     assert_eq!(fixture["a2aTask"]["status"]["state"], json!("working"));
+    assert_eq!(
+        fixture["harnToolAnnotations"]["completion_evidence_role"],
+        json!("verification")
+    );
     assert_eq!(
         fixture["mcpDiscoverResult"]["supportedVersions"][0],
         json!(MCP_PROTOCOL_VERSION)

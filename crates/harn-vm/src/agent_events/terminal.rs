@@ -33,8 +33,11 @@ pub enum AgentTerminalKind {
     /// A user or host explicitly cancelled the in-flight turn.
     UserCancelled,
     /// A budget/cap policy stopped the loop: max iterations, a token/cost
-    /// budget, a circuit breaker, or an exhausted verification cap.
+    /// budget, or a circuit breaker.
     PolicyBudget,
+    /// Completion was proposed but could not be verified before a judge
+    /// deadline or policy limit. This is a failed completion, not a cancel.
+    CompletionUnverified,
     /// A no-progress policy stopped the loop: a thrash/stall hard stop or the
     /// text-only nudge budget.
     PolicyNoProgress,
@@ -59,10 +62,11 @@ pub enum AgentTerminalKind {
 }
 
 impl AgentTerminalKind {
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 11] = [
         Self::Natural,
         Self::UserCancelled,
         Self::PolicyBudget,
+        Self::CompletionUnverified,
         Self::PolicyNoProgress,
         Self::PolicyGuardrail,
         Self::PolicyStop,
@@ -77,6 +81,7 @@ impl AgentTerminalKind {
             Self::Natural => "natural",
             Self::UserCancelled => "user_cancelled",
             Self::PolicyBudget => "policy_budget",
+            Self::CompletionUnverified => "completion_unverified",
             Self::PolicyNoProgress => "policy_no_progress",
             Self::PolicyGuardrail => "policy_guardrail",
             Self::PolicyStop => "policy_stop",
@@ -105,9 +110,10 @@ impl AgentTerminalKind {
             | Self::PolicyNoProgress
             | Self::PolicyGuardrail
             | Self::PolicyStop => super::AgentLifecycleState::Stopped,
-            Self::ProviderError | Self::RuntimeError | Self::Unknown => {
-                super::AgentLifecycleState::Failed
-            }
+            Self::CompletionUnverified
+            | Self::ProviderError
+            | Self::RuntimeError
+            | Self::Unknown => super::AgentLifecycleState::Failed,
             Self::Suspended => super::AgentLifecycleState::Suspended,
         }
     }
@@ -120,6 +126,7 @@ impl AgentTerminalKind {
             Self::Natural | Self::Suspended => "agent",
             Self::UserCancelled => "user",
             Self::PolicyBudget
+            | Self::CompletionUnverified
             | Self::PolicyNoProgress
             | Self::PolicyGuardrail
             | Self::PolicyStop => "policy",
@@ -301,9 +308,8 @@ pub fn classify_agent_terminal_with_class(
         "error" | "failed" => classify_error(terminal_class),
         // A verification cap/budget was exhausted before `done` could be
         // confirmed — a budget policy stop, not a hard error.
-        "budget_exhausted" | "verify_capped" | "verify_exhausted" => {
-            AgentTerminalKind::PolicyBudget
-        }
+        "budget_exhausted" | "verify_exhausted" => AgentTerminalKind::PolicyBudget,
+        "completion_unverified" => AgentTerminalKind::CompletionUnverified,
         "stuck" => AgentTerminalKind::PolicyNoProgress,
         // `input_guardrail`/`scope_alert` come from the loop's guardrail arms;
         // `blocked` is the UserPromptSubmit-hook block result. All three are a
@@ -364,6 +370,10 @@ mod tests {
             (AgentTerminalKind::Natural, "natural"),
             (AgentTerminalKind::UserCancelled, "user_cancelled"),
             (AgentTerminalKind::PolicyBudget, "policy_budget"),
+            (
+                AgentTerminalKind::CompletionUnverified,
+                "completion_unverified",
+            ),
             (AgentTerminalKind::PolicyNoProgress, "policy_no_progress"),
             (AgentTerminalKind::PolicyGuardrail, "policy_guardrail"),
             (AgentTerminalKind::PolicyStop, "policy_stop"),
@@ -409,6 +419,7 @@ mod tests {
             assert_eq!(kind.lifecycle_state(), AgentLifecycleState::Stopped);
         }
         for kind in [
+            AgentTerminalKind::CompletionUnverified,
             AgentTerminalKind::ProviderError,
             AgentTerminalKind::RuntimeError,
             AgentTerminalKind::Unknown,
@@ -433,6 +444,7 @@ mod tests {
         assert_eq!(AgentTerminalKind::ProviderError.owner(), "provider");
         assert_eq!(AgentTerminalKind::RuntimeError.owner(), "harness");
         assert_eq!(AgentTerminalKind::PolicyStop.owner(), "policy");
+        assert_eq!(AgentTerminalKind::CompletionUnverified.owner(), "policy");
     }
 
     #[test]
@@ -478,6 +490,15 @@ mod tests {
         assert_eq!(
             classify_agent_terminal("verify_exhausted", "done_judge_cap_reached", false, None),
             AgentTerminalKind::PolicyBudget,
+        );
+        assert_eq!(
+            classify_agent_terminal(
+                "completion_unverified",
+                "done_judge_cap_reached",
+                false,
+                None,
+            ),
+            AgentTerminalKind::CompletionUnverified,
         );
         assert_eq!(
             classify_agent_terminal("stuck", "thrash_hard_stop", false, None),

@@ -74,18 +74,20 @@ fn __invoke(harness: Harness, judge_cfg, opts, payload) {
   const schema = __step_judge_schema()
   const ran = __judge_run_checkpoint(
     harness,
-    judge_cfg,
-    opts,
-    payload,
-    "agent.step_judge",
-    system,
-    user,
-    schema,
+    {
+      judge_cfg: judge_cfg,
+      opts: opts,
+      payload: payload,
+      checkpoint_name: "agent.step_judge",
+      system: system,
+      user: user,
+      schema: schema,
+    },
   )
   const checkpoint = ran.checkpoint
   const duration_ms = ran.duration_ms
   if !checkpoint.ok {
-    const fail_open = judge_cfg?.fail_open_on_error ?? judge_cfg?.fail_open ?? true
+    const fail_open = judge_cfg?.fail_open_on_error ?? true
     if fail_open {
       // Fail-open: the turn PROCEEDS (we deliberately do not block on the
       // judge's own flakiness). But the swallow must be OBSERVABLE — a
@@ -187,7 +189,7 @@ fn __emit_decision(agent: HarnessAgent, session_id, iteration, on_veto, verdict)
 
 /**
  * agent_step_judge — per-turn critique hook. Sibling of
- * `agent_verify_or_continue` but fires AFTER each assistant turn and
+ * `agent_evaluate_completion` but fires AFTER each assistant turn and
  * BEFORE tool dispatch. Returns
  * `{vetoed, verdict, critique, reasoning, confidence, judge_duration_ms, ...}`.
  * The loop is responsible for acting on `vetoed`: inject feedback,

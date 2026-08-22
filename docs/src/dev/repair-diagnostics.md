@@ -34,7 +34,7 @@ inert and the detector behaves exactly as before — verified by
    the failure is resolved. When `post_edit_reverify` is set and a turn makes a
    successful edit on top of a live failure, `agent_loop` forces a verification
    through the **existing** `verify_completion` / `verify_completion_judge`
-   entrypoint (`agent_verify_or_continue`) — even when the model proposed
+   entrypoint (`agent_evaluate_completion`) — even when the model proposed
    `continue`, and before allowing it to stop `done`. It routes through the
    existing `max_verify_attempts` cap; there is no new verify engine.
 

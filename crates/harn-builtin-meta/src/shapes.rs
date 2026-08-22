@@ -186,6 +186,7 @@ pub const SUB_AGENT_OPTIONS: Ty = Ty::Shape(&[
     ShapeFieldDescriptor::optional("transcript", TY_ANY),
     ShapeFieldDescriptor::optional("budget", TY_INT_OR_FLOAT_OR_DICT),
     ShapeFieldDescriptor::optional("timeout_ms", TY_INT),
+    ShapeFieldDescriptor::optional("operation_timeout_ms", TY_INT),
     ShapeFieldDescriptor::optional("idle_timeout_ms", TY_INT),
     ShapeFieldDescriptor::optional("speed", TY_STRING),
     ShapeFieldDescriptor::optional("provider_options", TY_DICT),

@@ -141,13 +141,15 @@ pub type CompactionPolicy = {
  * Rust twin: none — judges are stdlib-owned.
  */
 pub type JudgeConfig = {
-  enabled?: bool,
   provider?: string,
   model?: string,
   system?: string,
   feedback_fallback?: string,
+  fail_open_on_error?: bool,
   max_invocations?: int,
-  max_feedback?: int,
+  timeout_ms?: int,
+  operation_timeout_ms?: int,
+  deadline_reserve_ms?: int,
   cadence?: {every?: int, when?: any, max_invocations?: int, min_iterations_before_first?: int},
 }
 
@@ -238,6 +240,7 @@ pub type AgentModelSpec = {
   speed?: "standard" | "fast",
   stream?: bool,
   timeout_ms?: int,
+  operation_timeout_ms?: int,
   idle_timeout_ms?: int,
   messages?: list,
   history?: list,

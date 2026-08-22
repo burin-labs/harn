@@ -116,6 +116,7 @@
   - [LLM handler helpers](./llm/handlers.md)
   - [LLM reranking](./llm/rerank.md)
   - [Agent loops](./llm/agent_loop.md)
+  - [Completion control](./llm/completion-control.md)
   - [Prompt optimization](./llm/optimize.md)
   - [Composable callers and middleware](./stdlib/llm-handlers.md)
   - [Composable tool middleware](./stdlib/tool-middleware.md)

@@ -186,6 +186,9 @@ pipeline main(harness: Harness, task) {
   const thrash = captured.events.filter(
     { event -> event?.reason == "thrash_hard_stop" || event?.checkpoint?.receipt_kind == "thrash_hard_stop_recovery" },
   )
+  const holds = captured.events.filter(
+    { event -> event.type == "typed_checkpoint" && event?.checkpoint?.kind == "command_hold" },
+  )
   harness.stdio.log(captured.result.status)
   harness.stdio.log(captured.result.stop_reason)
   harness.stdio.log(harness.runtime.shared_get(llm_calls))
@@ -193,6 +196,7 @@ pipeline main(harness: Harness, task) {
   harness.stdio.log(harness.runtime.shared_get(replays))
   harness.stdio.log(len(terminals))
   harness.stdio.log(len(thrash))
+  harness.stdio.log(len(holds))
 }
 "###,
     )
@@ -219,5 +223,9 @@ pipeline main(harness: Harness, task) {
     assert_eq!(
         lines[6], "0",
         "terminal replay must not trigger thrash; lines: {lines:?}"
+    );
+    assert_eq!(
+        lines[7], "1",
+        "the command hold must fire exactly once; lines: {lines:?}"
     );
 }

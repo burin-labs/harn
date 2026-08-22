@@ -222,6 +222,22 @@ pub struct ToolArgSchema {
     pub required: Vec<String>,
 }
 
+/// How a tool's completed result participates in a bounded completion check.
+/// This is orthogonal to ACP `ToolKind`: two execute tools can have different
+/// completion roles (for example, a verifier versus a release mutation).
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CompletionEvidenceRole {
+    Observation,
+    Mutation,
+    Verification,
+}
+
+impl CompletionEvidenceRole {
+    /// Exhaustive wire vocabulary used by generated host bindings.
+    pub const ALL: [Self; 3] = [Self::Observation, Self::Mutation, Self::Verification];
+}
+
 /// Full annotations for one tool. Pipelines populate one of these per
 /// tool in the capability-policy registry; the VM consults the registry
 /// on every tool call.
@@ -232,6 +248,11 @@ pub struct ToolAnnotations {
     pub kind: ToolKind,
     /// Required side-effect level for the capability ceiling check.
     pub side_effect_level: SideEffectLevel,
+    /// Explicit completion-evidence role. Absent means the tool does not claim
+    /// a specialized role; consumers may still recognize canonical read/edit
+    /// semantics, but must not guess that an arbitrary execute tool verifies.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub completion_evidence_role: Option<CompletionEvidenceRole>,
     /// Argument shape declarations.
     pub arg_schema: ToolArgSchema,
     /// Capability operations requested by this tool (e.g.
@@ -404,6 +425,17 @@ mod tests {
         assert!(!annotations.emits_artifacts);
         assert!(annotations.result_readers.is_empty());
         assert!(!annotations.inline_result);
+        assert_eq!(annotations.completion_evidence_role, None);
+    }
+
+    #[test]
+    fn completion_evidence_roles_round_trip() {
+        for role in CompletionEvidenceRole::ALL {
+            let encoded = serde_json::to_value(role).expect("serialize evidence role");
+            let decoded: CompletionEvidenceRole =
+                serde_json::from_value(encoded).expect("deserialize evidence role");
+            assert_eq!(decoded, role);
+        }
     }
 
     #[test]

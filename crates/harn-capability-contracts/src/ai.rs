@@ -648,7 +648,7 @@ capability_method!(
     // runtime-owned, not model-facing state effects. Inflated contracts
     // reject under agent-loop execution policy and abort turns mid-flight.
     [],
-    "__cap_agent_session_record_tool_results(session_id: string, dispatch: dict) -> nil",
+    "__cap_agent_session_record_tool_results(session_id: string, dispatch: list) -> nil",
     "Record dispatched tool results."
 );
 capability_method!(

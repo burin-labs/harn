@@ -34,7 +34,7 @@ fn _observe(agent: HarnessAgent, state, iteration, query, result) {
     agent,
     "unit-observation-recurrence",
     [{id: call_id, name: "search", arguments: {query: query}}],
-    {results: [{tool_call_id: call_id, tool_name: "search", ok: true, result: result}]},
+    [{tool_call_id: call_id, tool_name: "search", ok: true, result: result}],
     iteration,
     CONFIG,
     state,
@@ -106,22 +106,20 @@ pipeline test_mixed_turn_requires_every_observation_to_be_repeated(harness: Harn
       {id: repeated_id, name: "search", arguments: {query: "dead"}},
       {id: novel_id, name: "search", arguments: {query: "novel"}},
     ],
-    {
-      results: [
-        {
-          tool_call_id: repeated_id,
-          tool_name: "search",
-          ok: true,
-          result: {status: "no_matches", matches: []},
-        },
-        {
-          tool_call_id: novel_id,
-          tool_name: "search",
-          ok: true,
-          result: {status: "matches", matches: ["novel"]},
-        },
-      ],
-    },
+    [
+      {
+        tool_call_id: repeated_id,
+        tool_name: "search",
+        ok: true,
+        result: {status: "no_matches", matches: []},
+      },
+      {
+        tool_call_id: novel_id,
+        tool_name: "search",
+        ok: true,
+        result: {status: "matches", matches: ["novel"]},
+      },
+    ],
     2,
     CONFIG,
     first.state,
@@ -133,9 +131,7 @@ pipeline test_mixed_turn_requires_every_observation_to_be_repeated(harness: Harn
 pipeline test_unknown_or_failed_call_fails_closed_to_progress_credit(harness: Harness, task) {
   const state = agent_stall_initial_state()
   const call = {id: "unknown", name: "search", arguments: {query: "dead"}}
-  const result = {
-    results: [{tool_call_id: "unknown", tool_name: "search", ok: true, result: {matches: []}}],
-  }
+  const result = [{tool_call_id: "unknown", tool_name: "search", ok: true, result: {matches: []}}]
   const unknown = agent_stall_observe_completed_dispatch(
     harness.agent,
     "unit-observation-recurrence",
@@ -151,7 +147,7 @@ pipeline test_unknown_or_failed_call_fails_closed_to_progress_credit(harness: Ha
     harness.agent,
     "unit-observation-recurrence",
     [call],
-    {results: [{tool_call_id: "unknown", tool_name: "search", ok: false, error: "temporary"}]},
+    [{tool_call_id: "unknown", tool_name: "search", ok: false, error: "temporary"}],
     2,
     CONFIG,
     unknown.state,

@@ -8,11 +8,58 @@ import "std/agent/loop_support"
  * @errors: []
  */
 pub fn __agent_loop_clock_now_ms(clock: HarnessClock) {
-  return clock.now_ms()
+  return clock.monotonic_ms()
 }
 
 pub fn __agent_loop_clock_sleep_ms(clock: HarnessClock, delay_ms) {
   clock.sleep_ms(delay_ms)
+}
+
+pub type AgentLoopDeadlineContract = {
+  deadline_at_ms: int,
+  duration_ms: int,
+  source: "deadline_ms" | "iteration_budget.wall_clock_ms",
+}
+
+/**
+ * Resolve the earliest configured loop deadline in the caller's monotonic clock domain.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn __agent_loop_deadline_contract(
+  now_ms: int,
+  deadline_ms: int?,
+  wall_clock_ms: int?,
+) -> AgentLoopDeadlineContract? {
+  const configured = to_int(deadline_ms)
+  const budget = to_int(wall_clock_ms)
+  const configured_valid = configured != nil && configured > 0
+  const budget_valid = budget != nil && budget > 0
+  if !configured_valid && !budget_valid {
+    return nil
+  }
+  const budget_is_earliest = budget_valid && (!configured_valid || budget < configured)
+  const duration_ms = if budget_is_earliest {
+    budget
+  } else {
+    configured
+  }
+  const source = if budget_is_earliest {
+    "iteration_budget.wall_clock_ms"
+  } else {
+    "deadline_ms"
+  }
+  return {deadline_at_ms: to_int(now_ms) + duration_ms, duration_ms: duration_ms, source: source}
+}
+
+pub fn __agent_loop_apply_deadline(opts: dict, budget: dict, now_ms: int) -> dict {
+  const contract = __agent_loop_deadline_contract(now_ms, opts?.deadline_ms, budget?.wall_clock_ms)
+  return if contract == nil {
+    opts
+  } else {
+    opts + {_deadline_at_ms: contract.deadline_at_ms, _deadline_source: contract.source}
+  }
 }
 
 pub const __AGENT_LOOP_CHECKPOINT_ITERATION_START = "iteration_start"
@@ -134,7 +181,7 @@ pub fn __autocontinue_should_continue(agent: HarnessAgent, call, turn_opts) {
   }
   const raw_text = llm_result?.raw_text ?? llm_result?.text ?? ""
   const parsed = agent_parse_tool_calls(agent, raw_text, turn_opts?.tools, turn_opts?.tool_format)
-  let tool_calls = __resolve_tool_calls(llm_result, parsed)
+  const tool_calls = __resolve_tool_calls(llm_result, parsed)
   const has_parse_errors = len(parsed?.tool_parse_errors ?? []) > 0
   if __host_agent_truncated_tool_call(
     llm_result?.stop_reason,

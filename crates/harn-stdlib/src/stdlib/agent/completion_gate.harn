@@ -1,0 +1,382 @@
+import { COMPLETION_JUDGE_DEFAULT_CAP } from "std/agent/judge"
+// std/agent/completion_gate — a configured done-time gate built by composing
+// `verify_completion` (deterministic) with `verify_completion_judge` or
+// `done_judge` (bounded LLM). Domain facts remain host callbacks; this module
+// owns their validation, evaluation, persistent veto budget, and option bundle.
+import {
+  __completion_gate_apply_budget,
+  __completion_gate_classify_writes,
+  __completion_gate_combine_verify,
+  __completion_gate_feedback_keys,
+  __completion_gate_ladder,
+} from "std/agent/judge_internals"
+import { JudgeConfig } from "std/agent/options_types"
+
+/**
+ * A host write-classification label. `"source"` and `"cosmetic"` are load-bearing; other kinds are treated as non-source.
+ */
+pub type WriteKind = string
+
+/** One host-supplied write fact. */
+pub type CompletionWriteFact = {path?: string, diff?: string, kind?: WriteKind}
+
+/** A host-supplied verifier verdict. `findings` is optional red-detail text. */
+pub type CompletionVerifyVerdict = {ok?: bool, findings?: string}
+
+/**
+ * Facts a host supplies (via the `facts` callback) for one gate evaluation.
+ * All fields optional: absent write facts disable the evidence gate for that
+ * turn (never a fabricated pass), absent `verify` falls back to the
+ * `verify_command` callback. Rust twin: none — stdlib-owned.
+ */
+pub type CompletionFacts = {
+  consecutive_failed_after_write?: int,
+  source_write_count?: int,
+  cosmetic_write_count?: int,
+  writes?: list<CompletionWriteFact>,
+  verify?: CompletionVerifyVerdict | list<CompletionVerifyVerdict>,
+  verification_failures_converging?: bool,
+  requires_write?: bool,
+}
+
+/** Typed facts-callback input for one proposed completion. */
+pub type CompletionGateContext = {
+  session_id: string,
+  task: string,
+  stop_reason: string,
+  text: string,
+  messages: list,
+}
+
+/** Structured gate verdict delivered to a feedback decorator. */
+pub type CompletionGateVerdict = {
+  ok?: bool,
+  reason?: string,
+  feedback?: string,
+  strict?: bool,
+  converted_from?: string,
+  escalation_recommended?: bool,
+  escalation_target?: string,
+}
+
+pub type CompletionFactsProvider = fn(CompletionGateContext) -> CompletionFacts?
+
+pub type CompletionWriteClassifier = fn(string, string?) -> WriteKind
+
+pub type CompletionVerifier = fn() -> CompletionVerifyVerdict?
+
+pub type CompletionFeedbackDecorator = fn(string, string, CompletionGateVerdict) -> string
+
+pub type CompletionVetoCombiner = fn(list<CompletionVerifyVerdict>) -> CompletionVerifyVerdict
+
+/**
+ * Options for `completion_gate`. Domain facts enter as callbacks; policy knobs
+ * are plain data. Rust twin: none — stdlib-owned.
+ *
+ * Host-fact callbacks (all optional):
+ * - `facts(ctx) -> CompletionFacts` — the primary fact supplier. `ctx` carries
+ *   `{session_id, task, stop_reason, text, messages}`.
+ * - `classify_write(path, diff?) -> WriteKind` — classifies a single write when
+ *   `facts` returns a `writes` list without counts.
+ * - `verify_command() -> CompletionVerifyVerdict` — runs the verifier oracle when
+ *   `facts` does not carry a `verify` verdict.
+ * - `feedback_decorator(reason, feedback, verdict) -> string` — decorates a
+ *   veto message after the ladder and budget resolve it. `reason` is the stable
+ *   ladder key; `verdict` carries the structured escalation fields.
+ *
+ * Policy knobs:
+ * - `require_source_write` (default true) — enforce the evidence gate ⛔#5.
+ * - `requires_write` — override the per-task "needs a source change" fact.
+ * - `max_vetoes` (default 3, burin `COMPLETION_GATE_MAX_VETOES`) — per-session
+ *   soft-veto budget; 0 disables.
+ * - `veto_combine(verdicts) -> CompletionVerifyVerdict` — override the default
+ *   AND-of-oracles arithmetic for combining multiple verifier verdicts.
+ * - `judge` (default off) — attach a bounded LLM completion judge (`true` or a
+ *   JudgeConfig-shaped dict); defaults its cap to burin's 5.
+ * - `judge_seam` (default `"verify_completion_judge"`) — which capped LLM seam
+ *   the judge rides (`"verify_completion_judge"` or `"done_judge"`).
+ * - `feedback_templates` (optional) — a dict overriding the rendered veto feedback
+ *   strings per ladder rule (the coding-domain prose is host content, not
+ *   mechanism). Keys are the recognized rules (`__completion_gate_feedback_keys`):
+ *   `no_source_write_cosmetic`, `no_source_write_absent`,
+ *   `verification_after_write_red` and `failed_verification` (support a
+ *   `{findings}` token), `repeated_verification_failures` (supports `{attempts}`
+ *   and `{findings}`), and `missing_verification`. Values must be strings.
+ *   Absent keys keep the defaults.
+ * - `escalation_threshold` (default 3) — consecutive failed verifications needed
+ *   before the streak-aware ladder recommends escalation.
+ * - `escalation_target` (optional) — a host routing channel copied onto an
+ *   escalated verdict and its `judge_decision` event.
+ */
+pub type CompletionGateOptions = {
+  facts?: CompletionFactsProvider,
+  classify_write?: CompletionWriteClassifier,
+  verify_command?: CompletionVerifier,
+  feedback_decorator?: CompletionFeedbackDecorator,
+  require_source_write?: bool,
+  requires_write?: bool,
+  max_vetoes?: int,
+  veto_combine?: CompletionVetoCombiner,
+  judge?: bool | JudgeConfig,
+  judge_seam?: string,
+  feedback_templates?: dict,
+  escalation_threshold?: int,
+  escalation_target?: string,
+}
+
+/**
+ * A host-fact callback may be an anonymous closure or a named `fn`; the runtime
+ * reports these as "closure", "function", or "fn" (mirrors std/agent/goal's
+ * `__goal_callable`). Gating on "closure" alone would reject named-fn callbacks.
+ */
+fn __completion_gate_callable(value) -> bool {
+  const kind = type_of(value)
+  return kind == "closure" || kind == "function" || kind == "fn"
+}
+
+/** Validate a CompletionGateOptions at config time. */
+fn __completion_gate_validate_options(opts) {
+  for field in ["facts", "classify_write", "verify_command", "veto_combine", "feedback_decorator"] {
+    const value = opts[field]
+    if value != nil && !__completion_gate_callable(value) {
+      throw "agent_completion_gate: `" + field + "` must be a callable or nil; got "
+        + type_of(value)
+    }
+  }
+  if opts?.classify_write != nil && opts?.facts == nil {
+    throw "agent_completion_gate: `classify_write` only classifies the writes `facts` returns, so it does nothing without `facts` — set `facts` too or remove `classify_write`."
+  }
+  if opts?.escalation_threshold != nil
+    && (type_of(opts.escalation_threshold) != "int"
+      || opts.escalation_threshold
+        < 1) {
+    throw "agent_completion_gate: `escalation_threshold` must be a positive int; got "
+      + to_string(opts.escalation_threshold)
+  }
+  if opts?.escalation_target != nil
+    && (type_of(opts.escalation_target) != "string"
+      || trim(opts.escalation_target)
+        == "") {
+    throw "agent_completion_gate: `escalation_target` must be a non-empty string; got "
+      + to_string(opts.escalation_target)
+  }
+  if opts?.judge_seam != nil
+    && opts.judge_seam != "verify_completion_judge"
+    && opts.judge_seam != "done_judge" {
+    throw "agent_completion_gate: `judge_seam` must be \"verify_completion_judge\" or \"done_judge\"; got "
+      + to_string(opts.judge_seam)
+  }
+  const templates = opts?.feedback_templates
+  if templates != nil {
+    if type_of(templates) != "dict" {
+      throw "agent_completion_gate: `feedback_templates` must be a dict; got " + type_of(templates)
+    }
+    const known = __completion_gate_feedback_keys()
+    for key in keys(templates) {
+      if !contains(known, key) {
+        throw "agent_completion_gate: unknown `feedback_templates` key `" + key
+          + "`; expected one of "
+          + join(known, ", ")
+      }
+      if type_of(templates[key]) != "string" {
+        throw "agent_completion_gate: `feedback_templates." + key + "` must be a string; got "
+          + type_of(templates[key])
+      }
+    }
+  }
+}
+
+/** Run the host feedback decorator only for a veto that will be delivered. */
+fn __completion_gate_decorate_feedback(verdict, decorator) {
+  if decorator == nil || (verdict?.ok ?? false) {
+    return verdict
+  }
+  const decorated = decorator(
+    to_string(verdict?.reason ?? ""),
+    to_string(verdict?.feedback ?? ""),
+    verdict,
+  )
+  if type_of(decorated) != "string" {
+    throw "agent_completion_gate: `feedback_decorator` must return a string; got "
+      + type_of(decorated)
+  }
+  return verdict + {feedback: decorated}
+}
+
+fn __completion_gate_veto_key(session_id) {
+  return "harn.completion_gate." + session_id + ".veto_count"
+}
+
+fn __completion_gate_veto_class_key(session_id, reason) {
+  return "harn.completion_gate." + session_id + ".veto_count." + reason
+}
+
+const __COMPLETION_GATE_VETO_CLASSES = [
+  "failed_verification",
+  "missing_verification",
+  "no_source_write",
+  "repeated_verification_failures",
+  "verification_after_write_red",
+]
+
+fn __completion_gate_vetoes_used(runtime: HarnessRuntime, session_id) {
+  if session_id == "" {
+    return 0
+  }
+  return to_int(runtime.store_get(__completion_gate_veto_key(session_id)) ?? 0) ?? 0
+}
+
+fn __completion_gate_class_vetoes_used(runtime: HarnessRuntime, session_id, reason) {
+  if session_id == "" {
+    return 0
+  }
+  return to_int(runtime.store_get(__completion_gate_veto_class_key(session_id, reason)) ?? 0) ?? 0
+}
+
+/**
+ * Read the completion-gate veto counters for a session.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_completion_gate_veto_counts(session_id).by_class.no_source_write
+ */
+pub fn agent_completion_gate_veto_counts(runtime: HarnessRuntime, session_id) -> dict {
+  const sid = to_string(session_id ?? "")
+  let by_class = {}
+  for reason in __COMPLETION_GATE_VETO_CLASSES {
+    by_class = by_class + {[reason]: __completion_gate_class_vetoes_used(runtime, sid, reason)}
+  }
+  return {by_class: by_class, total: __completion_gate_vetoes_used(runtime, sid)}
+}
+
+fn __completion_gate_write_counts(raw, classify_write) {
+  if raw?.source_write_count != nil {
+    return {
+      source_write_count: to_int(raw.source_write_count) ?? 0,
+      cosmetic_write_count: to_int(raw?.cosmetic_write_count ?? 0) ?? 0,
+      source_known: true,
+    }
+  }
+  if raw?.writes != nil {
+    const counts = __completion_gate_classify_writes(raw.writes, classify_write)
+    return counts + {source_known: true}
+  }
+  return {source_write_count: 0, cosmetic_write_count: 0, source_known: false}
+}
+
+fn __completion_gate_evaluate(runtime: HarnessRuntime, payload, opts, facts_available) {
+  const session_id = to_string(payload?.session_id ?? "")
+  const classify_write = opts?.classify_write
+  const verify_command = opts?.verify_command
+  const facts = opts?.facts
+  const max_vetoes = to_int(opts?.max_vetoes ?? 3) ?? 3
+  if !facts_available {
+    return {confirm: true, reason: "facts_unavailable"}
+  }
+  const messages = json_parse(to_string(payload?.transcript ?? "[]")) ?? []
+  const ctx = {
+    session_id: session_id,
+    task: to_string(payload?.task ?? ""),
+    stop_reason: to_string(payload?.stop_reason ?? ""),
+    text: to_string(payload?.text ?? ""),
+    messages: messages,
+  }
+  const raw = if facts != nil {
+    facts(ctx) ?? {}
+  } else {
+    {}
+  }
+  const counts = __completion_gate_write_counts(raw, classify_write)
+  const verify_raw = if raw?.verify != nil {
+    raw.verify
+  } else if verify_command != nil {
+    verify_command()
+  } else {
+    nil
+  }
+  const verify = __completion_gate_combine_verify(verify_raw, opts?.veto_combine)
+  const requires_write = if opts?.requires_write != nil {
+    opts.requires_write
+  } else if raw?.requires_write != nil {
+    raw.requires_write
+  } else {
+    opts?.require_source_write ?? true
+  }
+  const derived = {
+    consecutive_failed_after_write: raw?.consecutive_failed_after_write,
+    source_known: counts.source_known,
+    source_write_count: counts.source_write_count,
+    cosmetic_write_count: counts.cosmetic_write_count,
+    requires_write: requires_write,
+    verify: verify,
+    verification_failures_converging: raw?.verification_failures_converging ?? false,
+    oracle_expected: verify_command != nil || raw?.verify != nil,
+    escalation_threshold: opts?.escalation_threshold ?? 3,
+    escalation_target: opts?.escalation_target,
+  }
+  const verdict = __completion_gate_ladder(derived, opts?.feedback_templates)
+  const vetoes_used = __completion_gate_vetoes_used(runtime, session_id)
+  const budgeted = __completion_gate_apply_budget(verdict, vetoes_used, max_vetoes)
+  if budgeted.charge && session_id != "" {
+    runtime.store_set(__completion_gate_veto_key(session_id), vetoes_used + 1)
+    const reason = to_string(verdict?.reason ?? "")
+    if reason != "" {
+      const class_used = __completion_gate_class_vetoes_used(runtime, session_id, reason)
+      runtime.store_set(__completion_gate_veto_class_key(session_id, reason), class_used + 1)
+    }
+  }
+  const resolved = __completion_gate_decorate_feedback(budgeted.verdict, opts?.feedback_decorator)
+  if resolved?.ok ?? false {
+    return {
+      confirm: true,
+      reason: resolved?.reason ?? "",
+      converted_from: resolved?.converted_from,
+      escalation_recommended: resolved?.escalation_recommended,
+      escalation_target: resolved?.escalation_target,
+    }
+  }
+  return {
+    confirm: false,
+    message: to_string(resolved?.feedback ?? ""),
+    reason: resolved?.reason ?? "",
+    escalation_recommended: resolved?.escalation_recommended,
+    escalation_target: resolved?.escalation_target,
+  }
+}
+
+/**
+ * Build a completion-gate option bundle to spread into `agent_loop` options.
+ *
+ * @effects: [store]
+ * @errors: [runtime]
+ * @api_stability: experimental
+ * @example: agent_completion_gate(harness.runtime, {facts: host_facts, verify_command: host_verify})
+ */
+pub fn agent_completion_gate(runtime: HarnessRuntime, options: CompletionGateOptions = {}) -> dict {
+  const opts = options ?? {}
+  __completion_gate_validate_options(opts)
+  const facts_available = opts.facts != nil || opts.verify_command != nil
+  const gate =
+    fn(payload) { return __completion_gate_evaluate(runtime, payload, opts, facts_available) }
+  let out = {
+    verify_completion: gate,
+    _completion_gate: {
+      facts_available: facts_available,
+      max_vetoes: to_int(opts.max_vetoes ?? 3) ?? 3,
+      require_source_write: opts.require_source_write ?? true,
+    },
+  }
+  const judge = opts.judge
+  if judge != nil && judge {
+    const judge_cfg = if type_of(judge) == "dict" {
+      judge
+    } else {
+      {}
+    }
+    const seam = opts.judge_seam ?? "verify_completion_judge"
+    const cap = judge_cfg?.max_invocations ?? COMPLETION_JUDGE_DEFAULT_CAP
+    out = out + {[seam]: judge_cfg + {max_invocations: cap}}
+  }
+  return out
+}
