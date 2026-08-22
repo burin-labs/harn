@@ -11,6 +11,7 @@ import {
 import { __with_prompt_fragment } from "std/agent/preflight"
 import { completion_judge_user_prompt } from "std/agent/prompts"
 import { agent_emit_event, agent_session_messages } from "std/agent/state"
+import { agent_tool_annotations, agent_tool_is_read_only } from "std/agent/tool_annotations"
 
 // Conservative default cap on how many times the completion-judge LLM may
 // veto a proposed completion within one session. Each veto is a paid model
@@ -20,6 +21,13 @@ import { agent_emit_event, agent_session_messages } from "std/agent/state"
 // `verify_completion_judge.max_invocations` (or `max_feedback`), or disable the
 // cap entirely with `0`.
 const __VERIFY_COMPLETION_JUDGE_DEFAULT_CAP = 5
+
+// The completion judge is a terminal checkpoint, not a second agent loop. Give
+// it the latest effect-bearing actions and their observations without replaying
+// an unbounded session or the full callable schemas it cannot use.
+const __JUDGE_EVIDENCE_ACTION_LIMIT = 3
+
+const __JUDGE_EVIDENCE_FIELD_CHAR_LIMIT = 4500
 
 fn __unique_names(names) {
   let unique = []
@@ -41,32 +49,209 @@ fn __session_tool_names(messages) {
   return __unique_names(names)
 }
 
-fn __judge_tool_schemas(opts) {
+fn __judge_tool_entries(opts) {
   const registry = opts?.tools
-  const entries = if type_of(registry) == "dict" {
+  return if type_of(registry) == "dict" {
     registry?.tools ?? []
   } else if type_of(registry) == "list" {
     registry
   } else {
     []
   }
+}
+
+fn __judge_tool_name(entry) -> string {
+  return to_string(entry?.name ?? entry?.function?.name ?? "")
+}
+
+fn __judge_tool_entry(opts, name) {
+  for entry in __judge_tool_entries(opts) {
+    if __judge_tool_name(entry) == name {
+      return entry
+    }
+  }
+  return nil
+}
+
+fn __judge_tool_descriptor(opts, name) {
+  const entry = __judge_tool_entry(opts, name)
+  const annotations = agent_tool_annotations(entry, opts?.policy, name)
+  return {
+    name: name,
+    kind: to_string(annotations?.kind ?? annotations?.tool_kind ?? annotations?.toolKind ?? ""),
+    side_effect_level: to_string(
+      annotations?.side_effect_level ?? annotations?.sideEffectLevel ?? annotations?.side_effect
+        ?? annotations
+        ?.sideEffect
+        ?? "",
+    ),
+    read_only: entry != nil && agent_tool_is_read_only(entry, opts?.policy, name),
+  }
+}
+
+fn __judge_tool_schemas(opts) {
   let schemas = []
-  for entry in entries {
+  for entry in __judge_tool_entries(opts) {
     const function = entry?.function
     const name = to_string(entry?.name ?? function?.name ?? "")
     if name == "" {
       continue
     }
-    schemas = schemas.appending(
+    schemas = schemas.appending(__judge_tool_descriptor(opts, name))
+  }
+  return schemas
+}
+
+fn __judge_clip_evidence(value, limit) -> string {
+  const text = if type_of(value) == "string" {
+    value
+  } else {
+    json_stringify(value ?? "")
+  }
+  if len(text) <= limit {
+    return text
+  }
+  const tail_chars = limit / 3
+  const head_chars = limit - tail_chars
+  const omitted = len(text) - limit
+  return substring(text, 0, head_chars)
+    + "\n…["
+    + to_string(omitted)
+    + " chars elided — middle of evidence]…\n"
+    + substring(text, len(text) - tail_chars, len(text))
+}
+
+fn __judge_call_name(call) -> string {
+  return to_string(call?.name ?? call?.tool_name ?? call?.function?.name ?? "")
+}
+
+fn __judge_call_id(call) -> string {
+  return to_string(call?.id ?? call?.tool_call_id ?? "")
+}
+
+fn __judge_call_arguments(call) {
+  return call?.arguments ?? call?.tool_args ?? call?.function?.arguments ?? {}
+}
+
+fn __judge_message_calls(message) {
+  return message?.tool_calls ?? message?.message?.tool_calls ?? []
+}
+
+/**
+ * Build the bounded evidence packet sent to the completion-judge LLM. The raw
+ * transcript remains on the canonical payload for deterministic gates, replay,
+ * and audit. Selection is structural: explicitly read-only calls are omitted;
+ * workspace writes, process execution/verification, and unknown effects are
+ * retained. Unknown annotations therefore fail closed into judge evidence.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ */
+pub fn __judge_evidence_projection(messages, opts, raw_transcript_digest = nil) -> dict {
+  let calls = {}
+  let relevant_call_count = 0
+  let omitted_read_only_call_count = 0
+  for message in messages {
+    for call in __judge_message_calls(message) {
+      const name = __judge_call_name(call)
+      const descriptor = __judge_tool_descriptor(opts, name)
+      if descriptor.read_only {
+        omitted_read_only_call_count = omitted_read_only_call_count + 1
+        continue
+      }
+      relevant_call_count = relevant_call_count + 1
+      const call_id = __judge_call_id(call)
+      if call_id != "" {
+        calls = calls
+          + {
+          [call_id]: {
+            name: name,
+            semantics: descriptor,
+            arguments: __judge_clip_evidence(
+              __judge_call_arguments(call),
+              __JUDGE_EVIDENCE_FIELD_CHAR_LIMIT,
+            ),
+          },
+        }
+      }
+    }
+  }
+  let actions = []
+  let read_observations = []
+  for message in messages {
+    if message?.role != "tool" {
+      continue
+    }
+    const call_id = to_string(message?.tool_call_id ?? message?.call_id ?? "")
+    const call = calls[call_id]
+    const name = to_string(message?.name ?? call?.name ?? "")
+    const descriptor = call?.semantics ?? __judge_tool_descriptor(opts, name)
+    if descriptor.read_only {
+      read_observations = read_observations.appending(
+        {
+          name: name,
+          semantics: descriptor,
+          observation: __judge_clip_evidence(
+            message?.content ?? "",
+            __JUDGE_EVIDENCE_FIELD_CHAR_LIMIT,
+          ),
+        },
+      )
+      continue
+    }
+    actions = actions.appending(
       {
+        tool_call_id: call_id,
         name: name,
-        description: to_string(entry?.description ?? function?.description ?? ""),
-        parameters: entry?.parameters ?? function?.parameters ?? {},
-        returns: entry?.returns ?? entry?.output_schema ?? {},
+        semantics: descriptor,
+        arguments: call?.arguments ?? "",
+        observation: __judge_clip_evidence(
+          message?.content ?? "",
+          __JUDGE_EVIDENCE_FIELD_CHAR_LIMIT,
+        ),
       },
     )
   }
-  return schemas
+  const start = max(len(actions) - __JUDGE_EVIDENCE_ACTION_LIMIT, 0)
+  const selected = actions.slice(start, len(actions))
+  // Answer/research loops may have no side effects at all. Preserve the latest
+  // bounded observation for that case instead of presenting the judge with an
+  // empty evidence packet; mutation-bearing loops stay focused on their effect
+  // and verification spine.
+  const selected_observations = if len(selected) == 0 && len(read_observations) > 0 {
+    read_observations.slice(len(read_observations) - 1, len(read_observations))
+  } else {
+    []
+  }
+  const raw_digest = raw_transcript_digest
+    ?? ("sha256:" + sha256(json_stringify(messages)))
+  const packet = {
+    schema: "harn.completion_judge_evidence.v1",
+    raw_message_count: len(messages),
+    raw_transcript_digest: raw_digest,
+    relevant_action_count: len(actions),
+    omitted_read_only_call_count: omitted_read_only_call_count,
+    omitted_older_action_count: len(actions) - len(selected),
+    actions: selected,
+    fallback_observations: selected_observations,
+  }
+  const serialized = json_stringify(packet)
+  return {
+    packet: packet,
+    serialized: serialized,
+    stats: {
+      schema: "harn.completion_judge_evidence_projection.v1",
+      raw_message_count: len(messages),
+      relevant_call_count: relevant_call_count,
+      included_action_count: len(selected),
+      included_fallback_observation_count: len(selected_observations),
+      omitted_read_only_call_count: omitted_read_only_call_count,
+      omitted_older_action_count: len(actions) - len(selected),
+      serialized_chars: len(serialized),
+      raw_transcript_digest: packet.raw_transcript_digest,
+    },
+  }
 }
 
 fn __judge_knowledge_state(messages, text) -> string {
@@ -137,6 +322,8 @@ fn __judge_recovery_feedback(next_step, specific_gaps, recovery_details, fallbac
 fn __judge_payload(agent: HarnessAgent, session, opts, stop_reason, text, iteration) {
   const messages = agent_session_messages(agent, session.session_id)
   const tool_names = __session_tool_names(messages)
+  const transcript = json_stringify(messages)
+  const evidence = __judge_evidence_projection(messages, opts, "sha256:" + sha256(transcript))
   return {
     session_id: session.session_id,
     task: session?.task ?? "",
@@ -144,7 +331,9 @@ fn __judge_payload(agent: HarnessAgent, session, opts, stop_reason, text, iterat
     text: text,
     visible_text: text,
     last_text: text,
-    transcript: json_stringify(messages),
+    transcript: transcript,
+    judge_evidence: evidence.serialized,
+    judge_evidence_projection: evidence.stats,
     all_tools_used: join(tool_names, ", "),
     successful_tools_used: join(tool_names, ", "),
     iteration: iteration,
@@ -163,8 +352,10 @@ fn __judge_stable_prefix(judge_cfg, opts, payload, system, schema) -> string {
     + "\n\nStable completion goal:\n"
     + payload.task
     + rubric_block
-    + "\n\nAvailable tool schemas:\n"
-    + json_stringify(__judge_tool_schemas(opts))
+    + "\n\nAvailable tool semantics (the judge cannot call these tools):\n"
+    + json_stringify(
+    __judge_tool_schemas(opts),
+  )
     + "\n\nRequired verdict schema:\n"
     + json_stringify(schema)
 }
@@ -233,6 +424,12 @@ fn __judge_invoke_structured(harness: Harness, judge_cfg, opts, payload) {
     },
     required: ["verdict"],
   }
+  agent_emit_event(
+    harness.agent,
+    payload.session_id,
+    "typed_checkpoint",
+    payload.judge_evidence_projection,
+  )
   const stable_prefix = __judge_stable_prefix(judge_cfg, opts, payload, system, schema)
   const user = completion_judge_user_prompt(harness.fs, payload)
   const ran = __judge_run_checkpoint(

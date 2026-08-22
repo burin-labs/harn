@@ -4,6 +4,7 @@
 // owns extraction and schema validation; the judge consumes its typed data
 // without reparsing provider text.
 import { agent_capture_events } from "std/agent/events"
+import { __judge_evidence_projection } from "std/agent/judge"
 import { agent_loop } from "std/agent/loop"
 import { AgentSpec } from "std/agent/options"
 import { llm_done, llm_text, with_llm_script } from "std/testing"
@@ -16,6 +17,165 @@ fn __feedback_contents(captured, kind: string) -> list<string> {
     }
   }
   return contents
+}
+
+pipeline test_completion_judge_projects_bounded_structural_evidence(harness: Harness, task) {
+  const huge_read = "READ_ONLY_TRANSCRIPT_BULK".repeat(1000)
+  const huge_edit = "EDIT_HEAD\n" + "implementation body\n".repeat(700)
+    + "assert not hasattr(service, 'delete_experiment')\nEDIT_TAIL"
+  const huge_failure = "VERIFY_FAILURE_HEAD\n" + "trace line\n".repeat(900)
+    + "VERIFY_FAILURE_TAIL"
+  const huge_success = "VERIFY_SUCCESS_HEAD\n" + "passing output\n".repeat(900)
+    + "VERIFY_SUCCESS_TAIL"
+  const messages = [
+    {
+      role: "assistant",
+      content: "Inspect first.",
+      tool_calls: [{id: "read-1", function: {name: "look", arguments: {file: "large.txt"}}}],
+    },
+    {role: "tool", name: "look", tool_call_id: "read-1", content: huge_read},
+    {
+      role: "assistant",
+      content: "Write the focused test.",
+      tool_calls: [{id: "edit-1", function: {name: "edit", arguments: {content: huge_edit}}}],
+    },
+    {role: "tool", name: "edit", tool_call_id: "edit-1", content: "write applied"},
+    {
+      role: "assistant",
+      content: "Verify.",
+      tool_calls: [{id: "verify-1", function: {name: "verify", arguments: {}}}],
+    },
+    {role: "tool", name: "verify", tool_call_id: "verify-1", content: huge_failure},
+    {
+      role: "assistant",
+      content: "Verify the repair.",
+      tool_calls: [{id: "verify-2", function: {name: "verify", arguments: {}}}],
+    },
+    {role: "tool", name: "verify", tool_call_id: "verify-2", content: huge_success},
+  ]
+  const opts = {
+    tools: [
+      {name: "look", annotations: {kind: "read", side_effect_level: "read_only"}},
+      {name: "edit", annotations: {kind: "edit", side_effect_level: "workspace_write"}},
+      {name: "verify", annotations: {kind: "verification", side_effect_level: "process"}},
+    ],
+  }
+  const projected = __judge_evidence_projection(messages, opts)
+  assert_eq(projected.packet.schema, "harn.completion_judge_evidence.v1")
+  assert_eq(projected.packet.raw_message_count, 8)
+  assert_eq(projected.packet.omitted_read_only_call_count, 1)
+  assert_eq(projected.packet.relevant_action_count, 3)
+  assert_eq(
+    projected.packet.actions.map({ action -> action.name }).to_list(),
+    ["edit", "verify", "verify"],
+  )
+  assert(!contains(projected.serialized, "READ_ONLY_TRANSCRIPT_BULK"))
+  assert(contains(projected.serialized, "EDIT_HEAD"))
+  assert(contains(projected.serialized, "assert not hasattr"))
+  assert(contains(projected.serialized, "VERIFY_FAILURE_HEAD"))
+  assert(contains(projected.serialized, "VERIFY_FAILURE_TAIL"))
+  assert(contains(projected.serialized, "VERIFY_SUCCESS_HEAD"))
+  assert(contains(projected.serialized, "VERIFY_SUCCESS_TAIL"))
+  assert(
+    projected.stats.serialized_chars < 20000,
+    "three pathological fields must remain below the fixed evidence envelope",
+  )
+}
+
+pipeline test_completion_judge_keeps_one_observation_for_read_only_answer(harness: Harness, task) {
+  const projected = __judge_evidence_projection(
+    [
+      {
+        role: "assistant",
+        tool_calls: [{id: "read-1", function: {name: "look", arguments: {file: "fact.txt"}}}],
+      },
+      {role: "tool", name: "look", tool_call_id: "read-1", content: "decisive observed fact"},
+    ],
+    {tools: [{name: "look", annotations: {kind: "read", side_effect_level: "read_only"}}]},
+  )
+  assert_eq(projected.stats.included_action_count, 0)
+  assert_eq(projected.stats.included_fallback_observation_count, 1)
+  assert(contains(projected.serialized, "decisive observed fact"))
+}
+
+pipeline test_completion_judge_prompt_uses_projection_not_callable_schema(harness: Harness, task) {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "look",
+    "UNUSED_READ_SCHEMA_BULK ".repeat(600),
+    {
+      handler: { _args -> "READ_ONLY_RESULT_BULK ".repeat(600) },
+      parameters: {path: {type: "string", required: true}},
+      annotations: {kind: "read", side_effect_level: "read_only"},
+    },
+  )
+  tools = tool_define(
+    tools,
+    "edit",
+    "UNUSED_EDIT_SCHEMA_BULK ".repeat(600),
+    {
+      handler: { _args -> "WRITE_RESULT_MARKER" },
+      parameters: {content: {type: "string", required: true}},
+      annotations: {kind: "edit", side_effect_level: "workspace_write"},
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [
+      {text: "", tool_calls: [{id: "read-1", name: "look", arguments: {path: "fact.txt"}}]},
+      {
+        text: "",
+        tool_calls: [{id: "edit-1", name: "edit", arguments: {content: "WRITE_ARG_MARKER"}}],
+      },
+      llm_done(),
+      {text: "{\"verdict\":\"done\",\"reasoning\":\"write and verification are sufficient\"}"},
+    ],
+    { ->
+      const session = "judge-projection-prompt-" + harness.random.uuid()
+      const opts: AgentSpec = {
+        provider: "mock",
+        session_id: session,
+        tools: tools,
+        tool_format: "native",
+        loop_until_done: true,
+        done_sentinel: "##DONE##",
+        max_iterations: 4,
+        verify_completion_judge: {provider: "mock", max_invocations: 1},
+      }
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(harness, "Apply the requested change.", nil, opts) },
+      )
+      assert_eq(captured.result.status, "done")
+      const calls = harness.llm.mock_calls()
+      assert_eq(len(calls), 4)
+      const judge = calls[3]
+      assert(!contains(judge.system, "UNUSED_READ_SCHEMA_BULK"))
+      assert(!contains(judge.system, "UNUSED_EDIT_SCHEMA_BULK"))
+      assert(contains(judge.system, "workspace_write"))
+      const user = judge.messages[0].content
+      assert(contains(user, "WRITE_ARG_MARKER"))
+      assert(contains(user, "WRITE_RESULT_MARKER"))
+      assert(!contains(user, "READ_ONLY_RESULT_BULK"))
+      assert(
+        contains(json_stringify(harness.agent.snapshot(session).messages), "READ_ONLY_RESULT_BULK"),
+        "bounded judge context must not mutate durable replay evidence",
+      )
+      const projection = captured.events.filter(
+        { event ->
+          event.type == "typed_checkpoint"
+            && event?.checkpoint?.schema
+            == "harn.completion_judge_evidence_projection.v1"
+        },
+      )
+        .to_list()
+      assert_eq(len(projection), 1)
+      assert_eq(projection[0].checkpoint.included_action_count, 1)
+      assert_eq(projection[0].checkpoint.omitted_read_only_call_count, 1)
+    },
+  )
 }
 
 pipeline test_fenced_completion_judge_uses_typed_checkpoint(harness: Harness, task) {

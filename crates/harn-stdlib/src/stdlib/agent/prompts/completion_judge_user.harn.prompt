@@ -1,13 +1,13 @@
 Stop reason: {{ stop_reason }}
 Iteration: {{ iteration }}
 
-Per-turn transcript evidence:
-{{ transcript }}
+Bounded effect and verification evidence:
+{{ judge_evidence }}
 
 Latest assistant text:
 {{ last_text }}
 
-Decide whether this agent loop may yield to the user now. Consider the original request, recent assistant prose, tool calls, and tool result outputs together. If the latest assistant message included a tool call, do not require an extra prose-only turn when the assistant text plus tool result already form a clear final answer.
+Decide whether this agent loop may yield to the user now. Consider the original request, latest assistant prose, and the bounded action evidence together. The packet retains the latest effect-bearing and verification actions, omits read-only exploration, and reports any older actions it omitted. If the latest assistant message included a tool call, do not require an extra prose-only turn when the assistant text plus tool result already form a clear final answer.
 
 Return JSON with `verdict`, `reasoning`, and `next_step`.
 - Set `verdict` to `"done"` only when the current visible answer satisfies the request and does not leave required verification or high-risk authorization unresolved.
