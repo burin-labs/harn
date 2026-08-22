@@ -14,7 +14,8 @@ use wait_timeout::ChildExt;
 use super::{
     acquire_initialization_lock, current_journal_mode, initialization_lock_path, initialize_file,
     initialize_transient, require_file_initialized, require_file_initialized_impl,
-    sqlite_contention, InitializationError, SchemaVersion, SqliteContention,
+    require_snapshot_initialized, sqlite_contention, InitializationError, SchemaVersion,
+    SqliteContention,
 };
 
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
@@ -273,6 +274,26 @@ fn initialized_read_only_fast_path_does_not_open_initialization_lock() {
         .expect("open reader");
     require_file_initialized::<rusqlite::Error>(&reader, BUSY_TIMEOUT, TEST_SCHEMA)
         .expect("ready reader must stay lock-free");
+}
+
+#[test]
+fn initialized_snapshot_requires_only_the_owned_schema_marker() {
+    let connection = Connection::open_in_memory().expect("open snapshot fixture");
+    initialize_transient(&connection, BUSY_TIMEOUT, TEST_SCHEMA, |transaction| {
+        transaction.execute_batch(TEST_SCHEMA_SQL)
+    })
+    .expect("initialize snapshot fixture");
+
+    require_snapshot_initialized::<rusqlite::Error>(&connection, TEST_SCHEMA)
+        .expect("exact marker is sufficient for an inert snapshot");
+    let stale_schema = SchemaVersion::new("process_rows", 2);
+    assert!(matches!(
+        require_snapshot_initialized::<rusqlite::Error>(&connection, stale_schema),
+        Err(InitializationError::SchemaNotInitialized {
+            name: "process_rows",
+            version: 2
+        })
+    ));
 }
 
 #[test]

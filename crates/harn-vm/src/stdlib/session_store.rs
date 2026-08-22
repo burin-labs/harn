@@ -159,12 +159,11 @@ async fn session_store_events_impl(
         "options",
         ErrorKind::Runtime,
     )?;
-    let state_dir = store_state_dir(options)?;
-    let store = open_store(&state_dir)?;
     let tenant_id = option_string(options, "tenant_id")?;
-    if !ensure_session(&store, &state_dir, &session_id, false, tenant_id).await? {
+    let state_dir = store_state_dir(options)?;
+    let Some(store) = open_read_session(&state_dir, &session_id, tenant_id).await? else {
         return Ok(VmValue::List(Arc::new(Vec::new())));
-    }
+    };
     let events = read_all_events(&store, &session_id).await?;
     let values = events
         .into_iter()
@@ -232,7 +231,7 @@ async fn session_store_list_impl(
             )));
         }
     };
-    let store = open_store(&store_state_dir(options)?)?;
+    let store = open_read_or_empty_store(&store_state_dir(options)?)?;
     let sessions = store
         .list(ListFilter {
             tenant_id: option_string(options, "tenant_id")?,
@@ -282,10 +281,9 @@ async fn session_store_verify_impl(
         "options",
         ErrorKind::Runtime,
     )?;
-    let state_dir = store_state_dir(options)?;
-    let store = open_store(&state_dir)?;
     let tenant_id = option_string(options, "tenant_id")?;
-    if !ensure_session(&store, &state_dir, &session_id, false, tenant_id).await? {
+    let state_dir = store_state_dir(options)?;
+    let Some(store) = open_read_session(&state_dir, &session_id, tenant_id).await? else {
         return Ok(json_to_vm_value(&json!({
             "_type": "session_store_verify",
             "session_id": session_id,
@@ -293,7 +291,7 @@ async fn session_store_verify_impl(
             "count": 0,
             "signed_event_count": 0,
         })));
-    }
+    };
     let report = store.verify(&session_id).await.map_err(store_error)?;
     let broken_at = if let Some(failure) = report.failures.first() {
         read_all_events(&store, &session_id)
@@ -343,7 +341,7 @@ async fn session_store_search_impl(
         }
     };
     let limit = option_positive_usize(options, "limit")?;
-    let store = open_store(&store_state_dir(options)?)?;
+    let store = open_read_or_empty_store(&store_state_dir(options)?)?;
     let response = store
         .search(SearchQuery {
             query,
@@ -426,11 +424,62 @@ async fn session_store_database_path_impl(
 }
 
 fn open_store(state_dir: &SessionStoreDir) -> Result<SqliteSessionStore, VmError> {
-    let hooks = StoreHooks {
+    SqliteSessionStore::open_with_hooks(store_path(state_dir), store_hooks()).map_err(store_error)
+}
+
+fn store_hooks() -> StoreHooks {
+    StoreHooks {
         redaction: Some(Arc::new(crate::redact::current_policy())),
         ..StoreHooks::default()
-    };
-    SqliteSessionStore::open_with_hooks(store_path(state_dir), hooks).map_err(store_error)
+    }
+}
+
+fn open_read_store(state_dir: &SessionStoreDir) -> Result<Option<SqliteSessionStore>, VmError> {
+    let path = store_path(state_dir);
+    if !path.is_file() {
+        return Ok(None);
+    }
+    SqliteSessionStore::open_read_only_with_hooks(path, store_hooks())
+        .map(Some)
+        .map_err(store_error)
+}
+
+fn open_read_or_empty_store(state_dir: &SessionStoreDir) -> Result<SqliteSessionStore, VmError> {
+    match open_read_store(state_dir)? {
+        Some(store) => Ok(store),
+        None => SqliteSessionStore::open_in_memory_with_hooks(store_hooks()).map_err(store_error),
+    }
+}
+
+async fn open_read_session(
+    state_dir: &SessionStoreDir,
+    session_id: &str,
+    tenant_id: Option<String>,
+) -> Result<Option<SqliteSessionStore>, VmError> {
+    validate_session_id(session_id)?;
+    if let Some(store) = open_read_store(state_dir)? {
+        match store.describe(session_id).await {
+            Ok(meta) => {
+                validate_tenant(session_id, &meta.tenant_id, tenant_id.as_deref())?;
+                return Ok(Some(store));
+            }
+            Err(StoreError::NotFound(_)) => {}
+            Err(error) => return Err(store_error(error)),
+        }
+    }
+
+    let legacy_path = legacy_session_path(state_dir, session_id)?;
+    if !legacy_path.is_file() {
+        return Ok(None);
+    }
+    let source = read_legacy_events(state_dir, session_id)?;
+    if source.events.is_empty() {
+        return Ok(None);
+    }
+    let store =
+        SqliteSessionStore::open_in_memory_with_hooks(store_hooks()).map_err(store_error)?;
+    import_legacy_events(&store, session_id, source, tenant_id.as_deref()).await?;
+    Ok(Some(store))
 }
 
 fn store_path(state_dir: &SessionStoreDir) -> PathBuf {
@@ -440,11 +489,7 @@ fn store_path(state_dir: &SessionStoreDir) -> PathBuf {
 pub(crate) fn open_existing_canonical_store(
     root: &Path,
 ) -> Result<Option<SqliteSessionStore>, VmError> {
-    let state_dir = SessionStoreDir::under_root(root);
-    if !store_path(&state_dir).is_file() {
-        return Ok(None);
-    }
-    open_store(&state_dir).map(Some)
+    open_read_store(&SessionStoreDir::under_root(root))
 }
 
 async fn ensure_session(
@@ -1050,6 +1095,10 @@ mod error_tests;
 #[cfg(test)]
 #[path = "session_store_execution_env_tests.rs"]
 mod execution_env_tests;
+
+#[cfg(test)]
+#[path = "session_store_read_only_tests.rs"]
+mod read_only_tests;
 
 #[cfg(test)]
 mod tests {

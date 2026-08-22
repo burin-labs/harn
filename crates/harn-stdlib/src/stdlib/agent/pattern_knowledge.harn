@@ -120,7 +120,6 @@ fn pl_significant_words(text: string) -> list {
  * @api_stability: experimental
  */
 pub fn pattern_learning_state(harness: Harness, options = nil) -> dict {
-  pattern_learning_ensure_migrated(harness, options)
   let best = nil
   for value in pl_record_values(harness.fs, harness.memory, "state", options) {
     if best == nil || pl_text(value?.updated_at) >= pl_text(best?.updated_at) {
@@ -138,6 +137,7 @@ pub fn pattern_learning_state(harness: Harness, options = nil) -> dict {
  * @api_stability: experimental
  */
 pub fn pattern_learning_set_enabled(harness: Harness, enabled: bool, options = nil) -> dict {
+  pattern_learning_ensure_migrated(harness, options)
   const state = pattern_learning_state(harness, options)
   return pl_replace_state(harness, state + {enabled: enabled}, options)
 }
@@ -368,7 +368,6 @@ pub fn pattern_learning_import_session_records(harness: Harness, options = nil) 
  * @api_stability: experimental
  */
 pub fn pattern_learning_observations(harness: Harness, options = nil) -> list {
-  pattern_learning_ensure_migrated(harness, options)
   return pl_record_values(harness.fs, harness.memory, "observation", options).sorted_by(
     { item -> pl_text(item?.observed_at) },
   )
@@ -857,7 +856,6 @@ pub fn pattern_learning_refresh(harness: Harness, options = nil) -> list {
  * @api_stability: experimental
  */
 pub fn pattern_learning_pending(harness: Harness, options = nil) -> list {
-  pattern_learning_ensure_migrated(harness, options)
   return pl_record_values(harness.fs, harness.memory, "pending", options).sorted_by(
     { item -> to_string(999999 - (item?.support ?? 0)) + ":" + item.id },
   )
@@ -878,6 +876,7 @@ pub fn pattern_learning_record_curated_batch(
   evidence: list,
   options = nil,
 ) -> dict {
+  pattern_learning_ensure_migrated(harness, options)
   const raw = batch?.proposals ?? []
   if type_of(raw) != "list" || len(raw) > 3 {
     throw "HARN-PATTERN-003: curator batch must contain between zero and three proposals"
@@ -1263,6 +1262,7 @@ fn pl_find_pending(harness: Harness, id: string, options = nil) -> dict {
  * @api_stability: experimental
  */
 pub fn pattern_learning_accept(harness: Harness, id: string, options = nil) -> dict {
+  pattern_learning_ensure_migrated(harness, options)
   const proposal = pl_find_pending(harness, pl_text(id), options)
   if proposal?.id == nil {
     return {accepted: false, is_error: true, error: "proposal not found: " + pl_text(id)}
@@ -1294,6 +1294,7 @@ fn pl_add_days_iso(now: string, days: int) -> string {
  * @api_stability: experimental
  */
 pub fn pattern_learning_reject(harness: Harness, id: string, options = nil) -> dict {
+  pattern_learning_ensure_migrated(harness, options)
   const clean = pl_text(id)
   const proposal = pl_find_pending(harness, clean, options)
   if proposal?.id == nil {

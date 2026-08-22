@@ -4,7 +4,9 @@ import {
   pattern_learning_import_session_records,
   pattern_learning_observations,
   pattern_learning_observe,
+  pattern_learning_pending,
   pattern_learning_set_enabled,
+  pattern_learning_state,
   pattern_learning_status,
 } from "std/agent/pattern_knowledge"
 import { session_store_append, session_store_events, session_store_list } from "std/session-store"
@@ -209,6 +211,41 @@ pipeline test_pattern_learning_set_enabled_returns_the_persisted_state(harness: 
         observed?.observation?.id != "",
         "observation capture must return the persisted observation record",
       )
+      return nil
+    },
+  )
+}
+
+pipeline test_pattern_learning_read_surfaces_do_not_create_memory_state(harness: Harness, _task) {
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      const options = {project_root: root}
+      const events = path_join(
+        root,
+        ".harn",
+        "memory",
+        "project",
+        "pattern-learning",
+        "events.jsonl",
+      )
+      const marker = path_join(
+        root,
+        ".harn",
+        "memory",
+        "project",
+        "pattern-learning",
+        ".burin-session-store-migrated-v1.json",
+      )
+      assert(!harness.fs.exists(events), "fixture must start without pattern events")
+      assert(!harness.fs.exists(marker), "fixture must start without a migration marker")
+      assert(pattern_learning_state(harness, options)?.enabled == true)
+      assert(len(pattern_learning_observations(harness, options)) == 0)
+      assert(len(pattern_learning_pending(harness, options)) == 0)
+      assert(pattern_learning_status(harness, options)?.pending_count == 0)
+      assert(len(pattern_learning_pending(harness, options)) == 0)
+      assert(!harness.fs.exists(events), "read surfaces must not append pattern events")
+      assert(!harness.fs.exists(marker), "read surfaces must not claim a migration")
       return nil
     },
   )

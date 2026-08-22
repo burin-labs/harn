@@ -461,7 +461,7 @@ harn session schema --check
 
 | Subcommand | Description |
 |---|---|
-| `list` | Lists the agent sessions persisted in `.harn/session-store.sqlite`, newest first, with status, event count, cost, and title. These ids are the input to `--from-session` on every `harn runs` subcommand (`inspect`, `view`, `report`, `review`, `export-training`). |
+| `list` | Read-only. Lists the agent sessions already persisted in `.harn/session-store.sqlite`, newest first, with status, event count, cost, and title. It does not create or initialize a store. These ids are the input to `--from-session` on every `harn runs` subcommand (`inspect`, `view`, `report`, `review`, `export-training`). |
 | `export <run-record>` | Writes a `harn_session_bundle` envelope. Default output is sanitized; `--local` preserves local-only content; `--replay-only` withholds prompt/tool payload fields. |
 | `validate <bundle>` | Validates required fields, schema version, bundle type, and high-confidence secret markers without writing a run record. |
 | `import <bundle>` | Validates the bundle and materializes a local run record from `replay.run_record` or replay metadata. |

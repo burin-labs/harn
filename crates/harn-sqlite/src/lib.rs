@@ -332,6 +332,28 @@ pub fn require_file_initialized<E>(
     require_file_initialized_impl(connection, busy_timeout, schema, || {})
 }
 
+/// Require the exact schema marker on an inert SQLite snapshot.
+///
+/// Unlike [`require_file_initialized`], this does not inspect journal mode,
+/// configure the connection, or acquire the initialization lock. Callers must
+/// first isolate the source from SQLite's durable bookkeeping (for example,
+/// by opening an `immutable=1` URI or a disposable copy). Such snapshots may
+/// not expose the source's live journal mode, so the owned marker is their
+/// authoritative readiness boundary.
+pub fn require_snapshot_initialized<E>(
+    connection: &Connection,
+    schema: SchemaVersion,
+) -> Result<(), InitializationError<E>> {
+    if schema_is_ready(connection, schema)? {
+        Ok(())
+    } else {
+        Err(InitializationError::SchemaNotInitialized {
+            name: schema.name,
+            version: schema.version,
+        })
+    }
+}
+
 fn require_file_initialized_impl<E>(
     connection: &Connection,
     busy_timeout: Duration,
