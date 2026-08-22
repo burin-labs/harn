@@ -161,3 +161,50 @@ pub(crate) fn compiler_with_imported_enum_candidates(
 ) -> harn_vm::Compiler {
     harn_vm::Compiler::new().with_imported_enum_candidates(candidates)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn authority_fixture(manifest: Option<&str>) -> (tempfile::TempDir, std::path::PathBuf) {
+        let project = tempfile::tempdir().expect("temp project");
+        std::fs::create_dir(project.path().join(".git")).expect("project boundary");
+        if let Some(manifest) = manifest {
+            std::fs::write(project.path().join("harn.toml"), manifest).expect("manifest fixture");
+        }
+        let source = project.path().join("main.harn");
+        std::fs::write(&source, "pipeline main(harness: Harness) {}\n").expect("source fixture");
+        (project, source)
+    }
+
+    #[test]
+    fn manifest_authority_boundary_allows_only_an_explicit_valid_declaration() {
+        let cases = [
+            (
+                "allowed",
+                Some("[check]\ntrusted_host_dispatch = true\n"),
+                true,
+            ),
+            (
+                "denied",
+                Some("[check]\ntrusted_host_dispatch = false\n"),
+                false,
+            ),
+            ("missing", None, false),
+            (
+                "malformed",
+                Some("[check\ntrusted_host_dispatch = true\n"),
+                false,
+            ),
+        ];
+
+        for (case, manifest, expected) in cases {
+            let (_project, source) = authority_fixture(manifest);
+            assert_eq!(
+                trusted_host_dispatch_for_source(&source),
+                expected,
+                "{case} manifest authority decision"
+            );
+        }
+    }
+}
