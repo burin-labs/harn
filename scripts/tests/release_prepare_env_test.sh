@@ -428,10 +428,14 @@ target_dir="$tmp_root/target"
 run_ship_prepare() {
   local label="$1"
   shift
+  local -a harn_bin_env=(-u HARN_BIN)
+  if [[ -n "${SHIP_TEST_HARN_BIN:-}" ]]; then
+    harn_bin_env=("HARN_BIN=$SHIP_TEST_HARN_BIN")
+  fi
   git -C "$release_root" reset --hard --quiet HEAD
   : > "$record_make"
   : > "$record_ship"
-  env -u HARN_BIN \
+  env "${harn_bin_env[@]}" \
   HARN_RELEASE_ROOT="$release_root" \
   HARN_RELEASE_HARNESS=1 \
   HARN_RELEASE_GATE_SCRIPT="$ship_gate" \
@@ -465,9 +469,8 @@ receipt="$tmp_root/audit-receipt.json"
 printf '{}\n' > "$receipt"
 run_ship_prepare full --audit-receipt "$receipt"
 
-expected_harn="$target_dir/debug/harn"
-if ! grep -Fxq "prepare HARN_BIN=$expected_harn" "$record_ship"; then
-  echo "release_ship did not pass warmed HARN_BIN into release_gate prepare" >&2
+if ! grep -Fxq "prepare HARN_BIN=__unset__" "$record_ship"; then
+  echo "release_ship trusted an unproven target/debug Harn binary" >&2
   cat "$record_ship" >&2
   exit 1
 fi
@@ -498,6 +501,16 @@ assert_ordered_ship_events full \
 
 full_candidate_diff="$tmp_root/full-candidate.diff"
 git -C "$release_root" diff --binary HEAD -- > "$full_candidate_diff"
+
+# Auto-resolution above must reject the fake audit's existence-only binary,
+# which has no exact-source freshness receipt. An explicit HARN_BIN remains a
+# caller-owned pin and must still flow through the release transaction.
+SHIP_TEST_HARN_BIN="$fake_bin/harn" run_ship_prepare explicit --materialize-candidate
+if ! grep -Fxq "prepare HARN_BIN=$fake_bin/harn" "$record_ship"; then
+  echo "release_ship did not preserve an explicit caller-owned HARN_BIN" >&2
+  cat "$record_ship" >&2
+  exit 1
+fi
 
 run_ship_prepare materialized --materialize-candidate
 assert_ordered_ship_events materialized \

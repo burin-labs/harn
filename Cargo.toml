@@ -59,6 +59,15 @@ categories = ["compilers", "command-line-utilities"]
 [profile.dev]
 debug = "line-tables-only"
 
+# Worktree freshness is an exact content proof over the whole Git/Cargo input
+# inventory. Keep BLAKE3 optimized in developer builds so the private checker
+# can verify those bytes on every shell-hook boundary without replacing exact
+# hashing with metadata heuristics. This also accelerates existing dev-mode
+# artifact/cache hashing without optimizing or slowing compilation of Harn's
+# own large crates.
+[profile.dev.package.blake3]
+opt-level = 3
+
 # Tests rarely need debuginfo; dropping it shaves seconds off linking.
 [profile.test]
 debug = 0

@@ -44,9 +44,9 @@ if [[ -n "${HARN_BIN:-}" ]]; then
   harn_require_executable_bin "$HARN_BIN"
 else
   echo "=== Warming Harn CLI binary ==="
-  harn_export_cargo_build_dir_for_target "${CARGO_TARGET_DIR:-}" || true
-  HARN_BIN="$(cargo run --quiet --bin harn -- "$(harn_internal_executable_path_command)")"
-  harn_require_executable_bin "$HARN_BIN"
+  # Resolve through the owning wrapper so the build receives and converges the
+  # exact compiled provenance identity before a receipt is published.
+  HARN_BIN="$(harn_resolve_binary build)"
 fi
 
 export HARN_BIN

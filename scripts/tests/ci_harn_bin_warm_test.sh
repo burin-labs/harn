@@ -21,15 +21,33 @@ set -euo pipefail
   printf 'CARGO_BUILD_BUILD_DIR=%s\n' "${CARGO_BUILD_BUILD_DIR-__unset__}"
 } >> "$FAKE_CARGO_RECORD"
 case "$*" in
-  "run --quiet --bin harn -- __internal-executable-path")
+  "build --quiet --bin harn --bin harn-freshness-check --features internal-freshness-checker")
     mkdir -p "${CARGO_TARGET_DIR:?}/debug"
     cat > "$CARGO_TARGET_DIR/debug/harn" <<'BIN'
 #!/usr/bin/env bash
 set -euo pipefail
+if [[ "${1:-}" = "__internal-freshness-evidence-v5" ]]; then
+  if [[ -n "${7:-}" ]]; then printf "harn-freshness-manifest-v3\n" >"$7"; fi
+  binary_hash="$(git hash-object --no-filters -- "$3")000000000000000000000000"
+  dep_hash="$(git hash-object --no-filters -- "$2")000000000000000000000000"
+  printf 'harn-artifact-evidence-v5-cargo-output-dep-info-v1-manifest-3\nbuild-freshness=%s\nbuild-id=%s\nartifact-stat=%s\ndep-info=%s\ndependencies=%s\n' \
+    "$(cat "$3.build-freshness")" "$binary_hash" "$binary_hash" \
+    "$dep_hash" "$dep_hash"
+  exit 0
+fi
+if [[ "${1:-}" = "__internal-executable-path" ]]; then
+  printf '%s\n' "$0"
+  exit 0
+fi
 printf 'fake harn\n'
 BIN
     chmod +x "$CARGO_TARGET_DIR/debug/harn"
-    printf '%s\n' "$CARGO_TARGET_DIR/debug/harn"
+    cp "$FAKE_FRESHNESS_CHECKER" "$CARGO_TARGET_DIR/debug/harn-freshness-check"
+    chmod +x "$CARGO_TARGET_DIR/debug/harn-freshness-check"
+    printf '%s\n' "${HARN_BUILD_FRESHNESS_ID:?}" \
+      > "$CARGO_TARGET_DIR/debug/harn.build-freshness"
+    escaped_harn="${CARGO_TARGET_DIR// /\\ }/debug/harn"
+    printf '%s:\n' "$escaped_harn" > "$CARGO_TARGET_DIR/debug/harn.d"
     ;;
   *)
     echo "unexpected cargo invocation: $*" >&2
@@ -38,8 +56,10 @@ BIN
 esac
 SH
 chmod +x "$fake_bin/cargo"
+export FAKE_FRESHNESS_CHECKER="$repo_root/scripts/tests/fixtures/harn_bin/fake_freshness_checker.sh"
 
 unset HARN_BIN HARN_BIN_NO_BUILD
+export HARN_CARGO_LEASE_MODE=off
 
 env -u CARGO_TARGET_DIR -u CARGO_BUILD_BUILD_DIR \
   CARGO_TARGET_DIR="$target_dir" \
@@ -49,8 +69,8 @@ env -u CARGO_TARGET_DIR -u CARGO_BUILD_BUILD_DIR \
   "$repo_root/scripts/ci_warm_harn_bin.sh" > "$tmp_root/warm.out"
 
 expected_bin="$target_dir/debug/harn"
-if ! grep -Fxq "args=run --quiet --bin harn -- __internal-executable-path" "$record"; then
-  echo "ci_warm_harn_bin did not resolve harn through cargo run" >&2
+if ! grep -Fxq "args=build --quiet --bin harn --bin harn-freshness-check --features internal-freshness-checker" "$record"; then
+  echo "ci_warm_harn_bin did not resolve harn through Cargo" >&2
   cat "$record" >&2
   exit 1
 fi

@@ -61,8 +61,17 @@ package_verify_prepare_tools() {
       -p harn-cli --bin harn \
       -p harn-cli-aot-gen --bin harn-cli-aot-gen)
   fi
-  resolved="$(cd "$root_dir" && HARN_BIN_NO_BUILD=1 \
-    "$root_dir/scripts/harn_bin.sh" --print)"
+  if [[ -n "$explicit_harn" ]]; then
+    resolved="$(cd "$root_dir" && HARN_BIN="$explicit_harn" HARN_BIN_NO_BUILD=1 \
+      "$root_dir/scripts/harn_bin.sh" --print)"
+  else
+    # A direct Cargo build produces the executable but intentionally does not
+    # claim exact worktree freshness. Let the owning resolver converge its
+    # embedded provenance and atomically publish the receipt before package
+    # verification pins that binary for the remainder of the run.
+    resolved="$(cd "$root_dir" && HARN_BIN='' HARN_BIN_NO_BUILD=0 \
+      "$root_dir/scripts/harn_bin.sh" --print)"
+  fi
   if [[ ! -x "$resolved" ]]; then
     echo "error: package verification Harn binary is not executable: $resolved" >&2
     return 1

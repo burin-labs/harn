@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# This suite owns fake Cargo behavior, not shared rust-heavy scheduling.
+export HARN_CARGO_LEASE_MODE=off
+
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 # shellcheck source=scripts/lib/package_verify_bootstrap.sh
 source "$repo_root/scripts/lib/package_verify_bootstrap.sh"
@@ -18,6 +21,7 @@ harn_cargo_metadata_target_dir() {
 SH
 
 cp "$repo_root/scripts/lib/harn_bin.sh" "$fixture/scripts/lib/harn_bin.sh"
+cp "$repo_root/scripts/lib/harn_bin_freshness.sh" "$fixture/scripts/lib/harn_bin_freshness.sh"
 
 fake_harn="$fixture/target/debug/harn"
 printf '#!/usr/bin/env bash\nexit 0\n' > "$fake_harn"
@@ -84,7 +88,7 @@ package_verify_prepare_tools "$fixture" "$tool_dir"
 [[ "$HARN_BIN" == "$fake_harn" ]]
 
 expected="cargo cwd=$fixture args=build -p harn-cli --bin harn -p harn-cli-aot-gen --bin harn-cli-aot-gen
-resolve cwd=$fixture no_build=1 explicit= args=--print
+resolve cwd=$fixture no_build=0 explicit= args=--print
 aot --workspace-root $fixture
 aot --workspace-root $fixture --check"
 actual="$(<"$CALLS_FILE")"
@@ -153,7 +157,7 @@ export AOT_GENERATOR_TEMPLATE="$AOT_GENERATOR_TEMPLATE.template"
 unset HARN_BIN HARN_BIN_NO_BUILD
 OS=Windows_NT FAKE_CARGO_WINDOWS=1 package_verify_prepare_tools "$fixture" "$tool_dir"
 expected="cargo cwd=$fixture args=build -p harn-cli --bin harn -p harn-cli-aot-gen --bin harn-cli-aot-gen
-resolve cwd=$fixture no_build=1 explicit= args=--print
+resolve cwd=$fixture no_build=0 explicit= args=--print
 aot --workspace-root $fixture --check"
 actual="$(<"$CALLS_FILE")"
 if [[ "$actual" != "$expected" ]]; then

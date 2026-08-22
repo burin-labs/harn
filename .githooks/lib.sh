@@ -270,16 +270,47 @@ hook_export_cargo_target_dir() {
 }
 
 hook_build_harn_bin() {
-  RUSTC_WRAPPER= CARGO_BUILD_RUSTC_WRAPPER= cargo build --quiet --bin harn
+  repo_root=$(git rev-parse --show-toplevel 2>/dev/null || pwd -P)
+  HARN_BIN='' HARN_BIN_NO_BUILD=0 \
+    RUSTC_WRAPPER='' RUSTC_WORKSPACE_WRAPPER='' \
+    CARGO_BUILD_RUSTC_WRAPPER='' CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER='' \
+    "$repo_root/scripts/harn_bin.sh" --print
 }
 
-# Build the workspace `harn` binary and re-apply the local codesign so
-# the freshly re-linked binary keeps its ad-hoc signature — otherwise
-# Gatekeeper shows a multi-second "Verifying 'harn'..." popup the first
-# time the hook execs it. Echoes the path to the signed binary on
-# stdout so hooks can invoke it directly (or via `xargs`); progress
-# output is routed to stderr so command substitution stays clean.
-# Idempotent; safe to call once per hook invocation.
+hook_select_fresh_worktree_harn_bin() {
+  # Git executes non-bare hooks from the worktree root. Keep the unchanged hot
+  # path in-process instead of spawning Git merely to echo the current PWD.
+  hook_fresh_repo_root=$PWD
+  hook_fresh_target_dir=${CARGO_TARGET_DIR:-$(hook_target_dir)}
+  hook_fresh_target_dir=${hook_fresh_target_dir:-target}
+  hook_fresh_platform=${OS:-$(uname -s)}
+  case "$hook_fresh_platform" in
+    Windows_NT | MINGW* | MSYS* | CYGWIN*) hook_fresh_suffix=.exe ;;
+    *) hook_fresh_suffix= ;;
+  esac
+  # Select the platform artifact structurally. Git Bash treats an existing
+  # `harn.exe` as executable through the extensionless path `harn`, so probing
+  # the suffixless name first loses the real filename and makes the checker
+  # seek `harn.freshness` instead of the produced `harn.exe.freshness`.
+  hook_fresh_bin="$hook_fresh_target_dir/debug/harn$hook_fresh_suffix"
+  hook_fresh_checker="$hook_fresh_target_dir/debug/harn-freshness-check$hook_fresh_suffix"
+  [ -x "$hook_fresh_bin" ] && [ -x "$hook_fresh_checker" ] || return 1
+  "$hook_fresh_checker" verify-worktree \
+    "$hook_fresh_bin" "$hook_fresh_repo_root" || return $?
+  HARN_FRESH_WORKTREE_BIN=$hook_fresh_bin
+}
+
+hook_find_fresh_worktree_harn_bin() {
+  hook_select_fresh_worktree_harn_bin || return $?
+  printf '%s\n' "$HARN_FRESH_WORKTREE_BIN"
+}
+
+# Reuse an exactly proven worktree `harn`, or build and re-apply the local
+# codesign so a freshly re-linked binary keeps its ad-hoc signature — otherwise
+# Gatekeeper shows a multi-second "Verifying 'harn'..." popup the first time the
+# hook execs it. Echoes the path on stdout so hooks can invoke it directly (or
+# via `xargs`); progress output is routed to stderr so command substitution
+# stays clean.
 hook_ensure_harn() {
   if [ -n "${HARN_BIN:-}" ]; then
     if [ ! -x "$HARN_BIN" ]; then
@@ -291,13 +322,19 @@ hook_ensure_harn() {
   fi
 
   hook_export_cargo_target_dir
-  hook_build_harn_bin >&2
+  # Exact receipt validation is the unchanged hook fast path. Only a missing or
+  # stale proof falls through to Cargo; signing and receipt production belong
+  # exclusively to that mutating build path.
+  if hook_select_fresh_worktree_harn_bin 2>/dev/null; then
+    printf '%s\n' "$HARN_FRESH_WORKTREE_BIN"
+    return
+  fi
+  resolved_harn=$(hook_build_harn_bin)
   if [ "$(uname)" = "Darwin" ] && [ -x "scripts/sign_local_macos.sh" ]; then
     HARN_LOCAL_SIGN_QUIET=1 ./scripts/sign_local_macos.sh >&2
+    HARN_BIN='' ./scripts/harn_bin.sh --record-receipt >&2
   fi
-  target_dir=$(hook_target_dir)
-  target_dir=${target_dir:-target}
-  printf '%s\n' "$target_dir/debug/harn"
+  printf '%s\n' "$resolved_harn"
 }
 
 hook_export_harn_bin() {
@@ -349,6 +386,11 @@ hook_find_existing_harn_bin() {
   fi
 
   repo_root=$(git rev-parse --show-toplevel 2>/dev/null || pwd -P)
+  resolved=$(hook_find_fresh_worktree_harn_bin 2>/dev/null || true)
+  if [ -n "$resolved" ] && [ -x "$resolved" ]; then
+    printf '%s\n' "$resolved"
+    return 0
+  fi
   resolver="$repo_root/scripts/harn_bin.sh"
   if [ -x "$resolver" ]; then
     resolved=$(HARN_BIN_NO_BUILD=1 "$resolver" --no-build --print 2>/dev/null || true)

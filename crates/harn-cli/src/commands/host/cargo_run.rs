@@ -492,9 +492,16 @@ fn path_into_string(path: PathBuf) -> Result<String, std::io::Error> {
 }
 
 fn path_argument(path: &Path) -> Result<String, String> {
-    path.to_str()
-        .map(ToOwned::to_owned)
-        .ok_or_else(|| format!("path {} is not valid UTF-8", path.display()))
+    let text = path
+        .to_str()
+        .ok_or_else(|| format!("path {} is not valid UTF-8", path.display()))?;
+    // Canonical paths remain authoritative for lease identity and equality,
+    // but Windows canonicalization adds a `\\?\` prefix that child tools do
+    // not uniformly accept in argv or environment values. In particular,
+    // cc-rs forwards Cargo's verbatim OUT_DIR to cl.exe, which can reinterpret
+    // the source path as rooted at `\\`. Normalize only at the external
+    // process boundary through the shared Windows-path owner.
+    Ok(harn_vm::windows_path::strip_windows_verbatim_prefix(text).into_owned())
 }
 
 fn require_matching_cargo_environment(name: &str, expected: &Path) -> Result<(), String> {
@@ -748,4 +755,33 @@ fn process_exit(status: &harn_hostlib::process::ExitStatus) -> harn_hostlib::Hos
 
 fn status_code(status: harn_hostlib::process::ExitStatus) -> i32 {
     status.code.unwrap_or(1)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::path_argument;
+    use std::path::Path;
+
+    #[test]
+    fn child_process_paths_strip_windows_drive_verbatim_prefixes() {
+        assert_eq!(
+            path_argument(Path::new(r"\\?\E:\target\debug")).unwrap(),
+            r"E:\target\debug"
+        );
+    }
+
+    #[test]
+    fn child_process_paths_strip_windows_unc_verbatim_prefixes() {
+        assert_eq!(
+            path_argument(Path::new(r"\\?\UNC\server\share\target")).unwrap(),
+            r"\\server\share\target"
+        );
+    }
+
+    #[test]
+    fn child_process_paths_preserve_non_verbatim_spelling() {
+        for path in [r"E:\target\debug", r"\\server\share\target", "/tmp/target"] {
+            assert_eq!(path_argument(Path::new(path)).unwrap(), path);
+        }
+    }
 }

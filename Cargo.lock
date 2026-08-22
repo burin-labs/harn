@@ -1300,6 +1300,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "buildid"
+version = "1.0.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4b8e278b5bdc31756d01d65c17662e23692e0dbaa19e65adae9b58fc4683bc09"
+dependencies = [
+ "cfg-if",
+ "libc",
+ "log",
+ "winapi",
+]
+
+[[package]]
 name = "built"
 version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3416,6 +3428,7 @@ dependencies = [
  "axum-server",
  "base64 0.23.1",
  "blake3",
+ "buildid",
  "chrono-tz",
  "clap",
  "clap_complete",
@@ -3488,6 +3501,7 @@ dependencies = [
  "wat",
  "webbrowser",
  "which",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

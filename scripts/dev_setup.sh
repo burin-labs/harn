@@ -556,6 +556,11 @@ if [[ "${SETUP_PROFILE}" != "bootstrap" ]]; then
     "${SETUP_STATE_DIR}/cargo-build-harn-${cargo_fp}.stamp" \
     "executable:${harn_binary_path}" \
     -- "${cargo_builder[@]}" build --locked -p harn-cli --bin harn
+  HARN_BIN='' HARN_BIN_NO_BUILD=0 ./scripts/harn_bin.sh --print >/dev/null
+  # Signing mutates the canonical artifact identity, so refresh the receipt
+  # only after the final bytes are in place and before publishing a target seed.
+  ./scripts/sign_local_macos.sh
+  HARN_BIN='' ./scripts/harn_bin.sh --record-receipt
   if [[ -x ./scripts/cargo_target_seed.sh ]] \
     && grep -Fxq "target-dir = \"${cargo_target_root}\" # ${MANAGED_CARGO_CONFIG_MARKER}" \
       .cargo/config.toml; then
@@ -564,13 +569,6 @@ if [[ "${SETUP_PROFILE}" != "bootstrap" ]]; then
 else
   echo "Bootstrap profile configured the worktree; deferring compilation to the final task lane."
 fi
-
-# macOS-only: sign any locally-built harn binaries with the team Developer
-# ID Application identity so Gatekeeper doesn't pop up "Verifying harn..."
-# when agents in fresh worktrees launch them. No-op on non-macOS or when
-# the cert isn't in the user's login keychain (the script self-skips with
-# a hint pointing at the team .p12 in 1Password).
-./scripts/sign_local_macos.sh
 
 echo ""
 echo "Dev setup complete."

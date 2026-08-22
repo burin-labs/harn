@@ -1513,6 +1513,27 @@ jobs:
           fi
 
           echo "windows: cargo package args: ${package_args[*]}"
+          target_dir="${CARGO_TARGET_DIR:-target}"
+          # A transported executable is not proof of a current Cargo target:
+          # the provider-neutral warm artifact may come from an older main and
+          # intentionally does not carry the top-level dep-info/receipt pair.
+          # Let Cargo resolve the exact graph the canonical resolver uses;
+          # never infer freshness from harn.exe existence.
+          jq --version
+          cargo build --locked -p harn-cli \
+            --bin harn --bin harn-freshness-check \
+            --features internal-freshness-checker
+          # Cargo metadata and current_exe() both return an absolute native
+          # target path. Normalize the shell-owned expectation once so this
+          # proof compares identities rather than relative/absolute spellings.
+          target_dir="$(cd "$target_dir" && pwd -P)"
+          # Fail before the expensive test graph when the exact top-level
+          # artifact/dep-info pair the canonical resolver will consume cannot
+          # produce typed freshness evidence. Repeat this proof immediately
+          # before resolution below: intervening Cargo test commands may
+          # legitimately update shared package artifacts.
+          source ./scripts/lib/harn_bin.sh
+          harn_build_freshness_id "$target_dir/debug/harn.exe" 1 >/dev/null
           if command -v cargo-nextest >/dev/null 2>&1; then
             # Some affected crate sets compile Windows-only surfaces but have
             # no tests matching the core unit filter; the compile itself is
@@ -1522,9 +1543,31 @@ jobs:
             cargo test --locked "${package_args[@]}" --no-run
             cargo test --locked -p harn-lexer -p harn-parser -p harn-stdlib -p harn-vm -p harn-hostlib -p harn-terminal -p harn-fmt -p harn-lint -p harn-modules
           fi
-          target_dir="${CARGO_TARGET_DIR:-target}"
-          if [[ ! -f "$target_dir/debug/harn.exe" ]]; then
-            cargo build --locked -p harn-cli --bin harn
+          # Exercise the typed Cargo depfile owner and native Windows artifact
+          # identity APIs, including drive-colon/backslash/space fixtures.
+          cargo test --locked -p harn-cli --lib \
+            bootstrap::freshness -- --nocapture
+          cargo test --locked -p harn-cli --bin harn-freshness-check \
+            --features internal-freshness-checker -- --nocapture
+          harn_build_freshness_id "$target_dir/debug/harn.exe" 1 >/dev/null
+          # The build above intentionally does not manufacture a receipt. The
+          # canonical resolver must converge compiled provenance, publish one,
+          # and then prove buildless reuse on the native Git-Bash path.
+          resolved="$(HARN_BIN='' HARN_BIN_NO_BUILD=0 ./scripts/harn_bin.sh --print)"
+          reused="$(HARN_BIN='' HARN_BIN_NO_BUILD=1 ./scripts/harn_bin.sh --no-build --print)"
+          if ! [[ "$resolved" == "$reused" && "$resolved" == "$target_dir/debug/harn.exe" ]]; then
+            printf 'Windows resolver mismatch: resolved=%q reused=%q expected=%q\n' \
+              "$resolved" "$reused" "$target_dir/debug/harn.exe" >&2
+            exit 1
+          fi
+          hook_resolved="$(
+            CARGO_TARGET_DIR="$target_dir" sh -c \
+              '. .githooks/lib.sh; hook_find_fresh_worktree_harn_bin'
+          )"
+          if [[ "$hook_resolved" != "$target_dir/debug/harn.exe" ]]; then
+            printf 'Windows hook mismatch: resolved=%q expected=%q\n' \
+              "$hook_resolved" "$target_dir/debug/harn.exe" >&2
+            exit 1
           fi
       - name: Smoke test harn run
         shell: bash

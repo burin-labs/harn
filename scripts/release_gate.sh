@@ -759,7 +759,7 @@ cmd_audit() {
     if ! release_gate_warm_prebuild; then
       exit 1
     fi
-    cargo_harn_bin="$("$SCRIPT_DIR/harn_bin.sh" --no-build --print)"
+    cargo_harn_bin="$(HARN_BIN='' HARN_BIN_NO_BUILD=0 "$SCRIPT_DIR/harn_bin.sh" --print)"
   fi
   prebuild_elapsed=$(( $(date +%s) - prebuild_started ))
   printf 'ok: %-15s (%ss)\n' "warm-prebuild" "$prebuild_elapsed"

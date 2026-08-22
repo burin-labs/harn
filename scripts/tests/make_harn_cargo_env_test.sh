@@ -38,6 +38,23 @@ esac
 SH
 chmod +x "$fake_bin/cargo"
 
+cat > "$fake_bin/cygpath" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$#" -ne 2 || "$1" != "-u" ]]; then
+  echo "unexpected cygpath invocation: $*" >&2
+  exit 2
+fi
+case "$2" in
+  'C:\cargo target\nested') printf '/c/cargo target/nested\n' ;;
+  *)
+    echo "unexpected native Windows path: $2" >&2
+    exit 2
+    ;;
+esac
+SH
+chmod +x "$fake_bin/cygpath"
+
 cat > "$fake_bin/harn-lease" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -205,8 +222,69 @@ env -u HARN_CARGO_LEASE_MODE -u CI \
   CARGO_TARGET_DIR="$target_dir" \
   FAKE_HARN_LEASE_RECORD="$lease_record" \
   "$repo_root/scripts/cargo_with_worktree_build_dir.sh" test -p harn-vm
-if ! diff -u "$tmp_root/expected-auto-harn-lease-record.txt" "$lease_record"; then
+cat > "$tmp_root/expected-windows-harn-lease-record.txt" <<EOF
+CARGO_HARN_HOST_LEASE_ACTIVE=1
+host
+lease
+run
+cargo
+--owner
+cargo-wrapper
+--workspace
+$repo_root
+--target-dir
+$target_dir
+--wait-ms
+3600000
+--priority-class
+interactive
+--
+test
+-p
+harn-vm
+EOF
+if ! diff -u "$tmp_root/expected-windows-harn-lease-record.txt" "$lease_record"; then
   echo "Windows wrapper did not use the independently installed Harn runner" >&2
+  exit 1
+fi
+if grep -Fq -- '--build-dir' "$lease_record"; then
+  echo "Windows wrapper synthesized a Cargo build-dir with unsafe verbatim paths" >&2
+  exit 1
+fi
+
+: > "$lease_record"
+env -u HARN_CARGO_LEASE_MODE -u CI \
+  OS=Windows_NT \
+  PATH="$fake_bin:$PATH" \
+  CARGO_TARGET_DIR="$target_dir" \
+  CARGO_BUILD_BUILD_DIR="$custom_build_dir" \
+  FAKE_HARN_LEASE_RECORD="$lease_record" \
+  "$repo_root/scripts/cargo_with_worktree_build_dir.sh" test -p harn-vm
+cat > "$tmp_root/expected-windows-custom-build-dir-record.txt" <<EOF
+CARGO_HARN_HOST_LEASE_ACTIVE=1
+host
+lease
+run
+cargo
+--owner
+cargo-wrapper
+--workspace
+$repo_root
+--target-dir
+$target_dir
+--build-dir
+$custom_build_dir
+--wait-ms
+3600000
+--priority-class
+interactive
+--
+test
+-p
+harn-vm
+EOF
+if ! diff -u "$tmp_root/expected-windows-custom-build-dir-record.txt" "$lease_record"; then
+  echo "Windows wrapper did not preserve an explicit caller-owned Cargo build-dir" >&2
   exit 1
 fi
 rm -f "$fake_bin/harn" "$target_dir/debug/harn.exe"
@@ -402,30 +480,61 @@ if [[ -d "$configured_target/debug/.fingerprint" ]]; then
 fi
 
 : > "$record"
-set +e
 PATH="$fake_bin:$PATH" \
+  OS=Windows_NT \
   FAKE_CARGO_RECORD="$record" \
-  FAKE_METADATA_JSON='{"packages":[]}' \
-  "$repo_root/scripts/cargo_with_worktree_build_dir.sh" run --quiet --bin harn -- fmt --check \
-  > "$tmp_root/missing-target-stdout.txt" \
-  2> "$tmp_root/missing-target-stderr.txt"
-missing_target_status=$?
-set -e
-if [[ "$missing_target_status" -eq 0 ]]; then
-  echo "wrapper accepted cargo metadata without target_directory" >&2
+  FAKE_METADATA_JSON='{"target_directory":"C:\\cargo target\\nested"}' \
+  "$repo_root/scripts/cargo_with_worktree_build_dir.sh" \
+    run --quiet --bin harn -- fmt --check
+if ! grep -Fxq 'CARGO_TARGET_DIR=/c/cargo target/nested' "$record"; then
+  echo "wrapper did not JSON-decode and normalize Cargo's native Windows target_directory" >&2
   cat "$record" >&2
   exit 1
 fi
-if ! grep -Fq "cargo metadata did not report a simple target_directory" "$tmp_root/missing-target-stderr.txt"; then
-  echo "wrapper did not explain missing target_directory" >&2
-  cat "$tmp_root/missing-target-stderr.txt" >&2
-  exit 1
-fi
-if grep -Fxq "args=run --quiet --bin harn -- fmt --check" "$record"; then
-  echo "wrapper ran cargo after malformed metadata" >&2
+if grep -Fq 'CARGO_BUILD_BUILD_DIR=/c/cargo target/nested' "$record"; then
+  echo "wrapper synthesized a Windows build-dir after metadata target normalization" >&2
   cat "$record" >&2
   exit 1
 fi
+
+assert_invalid_metadata_fails_closed() {
+  local name="$1"
+  local metadata_json="$2"
+  local status=0
+
+  : > "$record"
+  set +e
+  PATH="$fake_bin:$PATH" \
+    FAKE_CARGO_RECORD="$record" \
+    FAKE_METADATA_JSON="$metadata_json" \
+    "$repo_root/scripts/cargo_with_worktree_build_dir.sh" \
+      run --quiet --bin harn -- fmt --check \
+    > "$tmp_root/$name-stdout.txt" \
+    2> "$tmp_root/$name-stderr.txt"
+  status=$?
+  set -e
+  if [[ "$status" -eq 0 ]]; then
+    echo "wrapper accepted $name cargo metadata" >&2
+    cat "$record" >&2
+    exit 1
+  fi
+  if ! grep -Fq "cargo metadata did not report a supported nonempty target_directory" \
+      "$tmp_root/$name-stderr.txt"; then
+    echo "wrapper did not explain $name cargo metadata" >&2
+    cat "$tmp_root/$name-stderr.txt" >&2
+    exit 1
+  fi
+  if grep -Fxq "args=run --quiet --bin harn -- fmt --check" "$record"; then
+    echo "wrapper ran cargo after $name metadata" >&2
+    cat "$record" >&2
+    exit 1
+  fi
+}
+
+assert_invalid_metadata_fails_closed missing-target '{"packages":[]}'
+assert_invalid_metadata_fails_closed malformed-json '{"target_directory":'
+assert_invalid_metadata_fails_closed non-string-target '{"target_directory":42}'
+assert_invalid_metadata_fails_closed newline-target '{"target_directory":"first\nsecond"}'
 
 : > "$record"
 printf 'example.harn\0' \
