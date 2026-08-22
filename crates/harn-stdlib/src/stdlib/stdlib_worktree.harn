@@ -18,6 +18,9 @@ import { process_run, process_shell, runtime_state_paths_under } from "std/runti
 
 const WORKTREE_PRUNE_DEFAULT_MIN_AGE_SECONDS = 60 * 60
 
+// Includes state/cache directories created by supported legacy hosts so a
+// disposable worktree does not appear user-dirty. This list classifies cleanup
+// output; it does not choose a state path for new runtime data.
 const WORKTREE_PRUNE_DEFAULT_DISPOSABLE_PATHS = [
   "target",
   ".target",

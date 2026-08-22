@@ -388,7 +388,7 @@ pub fn context_artifact(input = nil, options = nil) -> ContextArtifact {
 }
 
 /**
- * Adapt a legacy `.burin/context-digests` markdown body into a context artifact.
+ * Adapt legacy `.burin/context-digests` as compatibility until consumers have a declared migration.
  *
  * @effects: []
  * @errors: []

@@ -1,4 +1,5 @@
-// Compaction pins as DATA: a typed pin taxonomy that generalizes Burin's
+// Compaction pins as DATA: a typed pin taxonomy that generalizes a legacy
+// host's
 // structural working-set. A pin is a small typed value `{kind, content, ...}`
 // that (a) survives compaction by construction — it lowers to a
 // `preserve_on_compact` system reminder AND a compaction `preserve` directive —
@@ -6,7 +7,7 @@
 // references is never garbage-collected. Pins are plain data the caller threads
 // through the existing seams (`transcript`/`agent_session_*` reminders,
 // `compaction_policy`, `transcript_project`); this module adds NO new host
-// surface. Burin's legacy `[no-compact]` heading marker is supported as a
+// surface. The legacy `[no-compact]` heading marker is supported as a
 // documented ingestion format via `recognize_no_compact`.
 import { compaction_policy } from "std/agent/autocompact"
 import { agent_session_inject_reminder } from "std/agent/state"
@@ -14,12 +15,13 @@ import { agent_report_truncation } from "std/agent/truncation"
 
 // -------------------------------------------------------------------------------------------------
 
-// Pin taxonomy (alphabetical). Generalized from Burin's structural working-set
+// Pin taxonomy (alphabetical). Generalized from a structural working-set
 // categories: `goal` (session objective), `constraint` (guardrails / open
 // task-contract clauses), `decision` (a durable choice the agent must not
 // relitigate), `artifact_ref` (a live file-view / path the work hinges on), and
 // `no_compact` (a raw block the caller marked keep-verbatim — the generalization
-// of the `[no-compact]` marker). `role_hint` mirrors Burin: binding context is
+// of the `[no-compact]` marker). `role_hint` preserves the compatibility rule:
+// binding context is
 // "system", live evidence is "developer".
 
 // -------------------------------------------------------------------------------------------------
@@ -58,7 +60,7 @@ pub fn pin_kinds() {
 
 // kind -> reminder lane, as data. Binding context (goal/constraint/no_compact)
 // rides the "system" lane so the model treats it as governing; live evidence
-// (artifact_ref/decision) rides the "developer" lane. Mirrors Burin's
+// (artifact_ref/decision) rides the "developer" lane. Mirrors the legacy
 // structural working-set role_hints.
 const __PIN_ROLE_HINTS = {
   artifact_ref: "developer",
@@ -73,7 +75,7 @@ fn __pin_role_hint(kind) {
 }
 
 // Taxonomy-registration seam (ADDITIVE, default-off). The fixed 5 kinds are the
-// generic taxonomy; a caller (e.g. burin's structural working-set with
+// generic taxonomy; a caller (for example a structural working-set with
 // guardrails/task_contract/file_view/remaining_failures/verification_hud) may
 // widen the accepted set for a single `pin(harness, ...)` call via `opts.register_kinds`
 // instead of `pin(harness)` throwing on its domain kinds. When `register_kinds` is
@@ -368,7 +370,7 @@ fn __pin_reminder_tags(base_tags, options) {
  * `propagate` key so the reminder re-injects across a whole session;
  * `max_body` clamps an over-long body to a char budget with a truncation
  * marker; `tag_namespace` leads the `tags` list with a caller namespace tag
- * (e.g. `"burin_structural_working_set"`) ahead of `["pin", <kind>]`.
+ * (e.g. `"host_structural_working_set"`) ahead of `["pin", <kind>]`.
  *
  * @effects: []
  * @errors: [runtime]
@@ -410,9 +412,9 @@ pub fn agent_pin(agent: HarnessAgent, session_id, pin) {
 }
 
 /**
- * strip_no_compact(text) removes Burin's `[no-compact]` heading marker and the
+ * strip_no_compact(text) removes the legacy `[no-compact]` heading marker and the
  * double-space it leaves at end-of-line. Documented ingestion adapter, mirrors
- * Burin's `strip_no_compact_marker`.
+ * source `strip_no_compact_marker`.
  *
  * @effects: []
  * @errors: []
@@ -423,7 +425,7 @@ pub fn strip_no_compact(text) {
 }
 
 /**
- * recognize_no_compact(harness, text, opts?) is an input adapter for Burin's `[no-compact]`
+ * recognize_no_compact(harness, text, opts?) is an input adapter for the legacy `[no-compact]`
  * message-text marker: if `text` carries the marker it returns a `no_compact`
  * pin whose content is the marker-stripped text, else nil. This is an ingestion
  * FORMAT recognizer (not a back-compat shim for a removed API).

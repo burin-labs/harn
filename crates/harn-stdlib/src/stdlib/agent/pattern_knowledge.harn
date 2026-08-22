@@ -619,6 +619,10 @@ fn pl_make_tool_proposal(
 fn pl_skill_roots(fs: HarnessFs, options = nil) -> list {
   const root = pl_project_root(fs, options)
   const namespace = pl_namespace(options)
+  // `.burin/skills` is a read-only compatibility root for skills installed by
+  // the legacy host. New accepted skills are written by
+  // `pattern_learning_skill_root`; remove this fallback only after downstream
+  // migration support is retired.
   if namespace == PATTERN_NAMESPACE {
     return [path_join(root, ".claude", "skills"), path_join(root, ".burin", "skills")]
   }
@@ -1194,7 +1198,7 @@ fn pl_write_candidate(
 ) -> dict {
   const project = pl_project_root(capabilities.fs, options)
   const candidate_dir = path_join(
-    path_join(project, ".burin", "crystallization"),
+    path_join(project, ".harn", "crystallization"),
     pl_text(proposal.id),
   )
   const artifact = proposal?.artifact ?? {}
@@ -1403,6 +1407,8 @@ fn pl_migrate_state(harness: Harness, options = nil) -> nil {
 
 /**
  * Lazily import legacy Burin session-store pattern-learning records into memory.
+ * This is the supported read-once compatibility adapter; current records live
+ * in Harn memory and new hosts must not write the legacy filenames.
  *
  * @effects: [store.read, store.write, fs.read, fs.write]
  * @errors: []

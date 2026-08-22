@@ -121,7 +121,8 @@ fn __agent_loop_state(args) -> AgentLoopState {
  * 24->32->...->72 on a run that should have been cut). `no_net_advance` is set
  * ONLY on the verify-bearing failing path when the verification OUTCOME is not
  * advancing (the same failure signature has recurred past a threshold, i.e. the
- * stall detector's same-diagnostic streak). It is the harn-side twin of burin's
+ * stall detector's same-diagnostic streak). It is the runtime-side twin of the
+ * source policy's
  * no-net-progress ripcord. Crucially it is OUTCOME-AWARE, not a second activity
  * notion: a productive edit changes the error signature (streak resets => still
  * progress) or a test passes (failure model clears => still progress), and

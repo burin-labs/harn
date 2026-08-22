@@ -16,7 +16,7 @@ import {
 //
 // This module owns cadence/orchestration/transcript semantics (Harn's layer);
 // thresholds and user-visible wording are normalized here from host-supplied
-// overrides (a Burin product concern passed in via `command_wait` options —
+// overrides (a host concern passed in via `command_wait` options —
 // harn#4456: the owning boundary normalizes defaults once, callers pass only
 // overrides). No per-language logic; the ledger is language-agnostic.
 //
@@ -97,7 +97,7 @@ fn __cl_pos_int(value, fallback: int) -> int {
  * option, so a missing/blank/non-positive value resolves to its default in
  * exactly one place. `auto_resolve` is the per-surface ceiling fork: `"kill"`
  * (headless/eval — deterministic verdicts) or `"release"` (interactive —
- * release-to-service + receipt). Defaults to `"kill"`; Burin overrides for
+ * release-to-service + receipt). Defaults to `"kill"`; hosts may override for
  * interactive surfaces.
  *
  * @effects: []

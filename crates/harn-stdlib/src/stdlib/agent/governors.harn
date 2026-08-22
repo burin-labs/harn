@@ -4,8 +4,8 @@ import { agent_session_totals } from "std/agent/state"
 
 // std/agent/governors.harn
 //
-// Pace / budget GOVERNORS for `agent_loop`, generalized from burin-code's
-// hand-rolled `lib/runtime/pace-governor.harn`. A governor is a VALUE you
+// Pace / budget GOVERNORS for `agent_loop`, generalized from a downstream
+// host's earlier hand-rolled `lib/runtime/pace-governor.harn` policy. A governor is a VALUE you
 // compose into the EXISTING `post_turn_callback` seam — it is NEVER a new hook
 // on `agent_loop`. (Institutional constraint, harness-techniques-ledger:2633:
 // do not reintroduce `context_callback` / `on_tool_call` / `on_tool_result`
@@ -15,20 +15,21 @@ import { agent_session_totals } from "std/agent/state"
 // `std/agent/stall`, collapsed onto the three actions the live post-turn seam
 // can actually take:
 //
-//   "proceed" — do nothing (burin `proceed` / `extend`: keep the run going).
-//   "warn"    — inject a wrap-up reminder and continue (burin `pace_check`).
-//   "abort"   — stop the run before overrun (burin `cut`).
+//   "proceed" — do nothing and keep the run going.
+//   "warn"    — inject a wrap-up reminder and continue.
+//   "abort"   — stop the run before overrun.
 //
 // The verdict this produces is the ordinary `post_turn_callback` rich dict
 // (`{message, stop, stop_reason}`) that `agent_compute_post_turn` already
 // interprets: `message` is injected as feedback, `stop:true` breaks the loop.
 //
 // CAVEAT: `governor_pace_decision` is the ONE exception to this vocabulary — it
-// keeps burin's native wall-clock ACTUATION verbs (proceed/extend/pace_check/cut)
+// keeps the source policy's wall-clock ACTUATION verbs
+// (proceed/extend/pace_check/cut)
 // because `extend` (re-stamp the wall budget) has no proceed/warn/abort analog. Map
 // it onto the shared vocabulary with `pace_action_of` when you need one switch.
 //
-// GENERALIZATION over burin: burin's pace governor is wall-clock + write
+// The generalized pace governor is wall-clock + write
 // progress with injection-count caps (PACE_CHECK_MAX_INJECTIONS=2,
 // PACE_EXTEND_MAX=6). The post-turn seam cannot extend the loop's iteration
 // budget and there is no per-session scratch store in the stdlib, so this is a
@@ -36,11 +37,11 @@ import { agent_session_totals } from "std/agent/state"
 // `hard` consumption ceiling. It reads a monotone consumption signal
 // (iterations / tokens / cost) against a budget ceiling, and the write-progress
 // veto is preserved verbatim (progress vetoes the soft stop up to `hard`).
-// This is deliberately NOT bit-for-bit parity with burin's stateful
+// This is deliberately NOT bit-for-bit parity with the stateful source
 // per-injection / per-extend counters — it is behavioral parity on the fractions
 // at which the run slows and stops, with the counts collapsed into the
 // thresholds. A host that needs the exact counters keeps them host-side.
-// Burin pace-governor.harn parity constants, exposed for fixtures / callers.
+// Legacy pace-governor parity constants, exposed for fixtures / callers.
 // (In this stateless generalization they bound the DEFAULT `hard`/`over_estimate`
 // fractions rather than an injection counter.)
 const GOVERNOR_PACE_CHECK_MAX_INJECTIONS = 2
@@ -48,7 +49,7 @@ const GOVERNOR_PACE_CHECK_MAX_INJECTIONS = 2
 const GOVERNOR_PACE_EXTEND_MAX = 6
 
 // Default consumption fractions (relative to the budget ceiling). `checkpoint`
-// is burin's armed-budget boundary, `over_estimate` its expected-total+checkpoint
+// is the armed-budget boundary; `over_estimate` is the expected-total+checkpoint
 // boundary, `hard` the exhausted-extend cut.
 const GOVERNOR_DEFAULT_CHECKPOINT = 1.0
 
@@ -57,11 +58,11 @@ const GOVERNOR_DEFAULT_OVER_ESTIMATE = 2.0
 const GOVERNOR_DEFAULT_HARD = 3.0
 
 /**
- * governor_pace_check_max_injections / governor_pace_extend_max expose burin's
- * pace-governor caps as parity accessors (mirroring burin's `pace_extend_max()`
+ * governor_pace_check_max_injections / governor_pace_extend_max expose the
+ * legacy pace-governor caps as parity accessors (mirroring `pace_extend_max()`
  * accessor discipline). In this stateless generalization they are advisory — the
  * caps collapse into the `hard` consumption fraction — but callers building a
- * burin-faithful policy can reference them instead of hardcoding 2 / 6.
+ * compatibility policy can reference them instead of hardcoding 2 / 6.
  *
  * @effects: []
  * @errors: []
@@ -92,7 +93,7 @@ pub fn governor_pace_extend_max() -> int {
  *   - progress_tools: optional allowlist of tool names that count as progress.
  *     When absent, ANY successful tool this turn counts as progress.
  *   - extend_max / pace_check_max: smart-timeout pace caps used only by
- *     `governor_pace_decision` (#burin-cutover seam 2) — the silent-extend and
+ *     `governor_pace_decision` — the silent-extend and
  *     recalibration-check-in budgets; default to GOVERNOR_PACE_EXTEND_MAX /
  *     GOVERNOR_PACE_CHECK_MAX_INJECTIONS.
  */
@@ -375,18 +376,19 @@ fn __governor_proceed(reason: string, signal: string, fraction: float) -> dict {
 }
 
 /**
- * governor_decision is the PURE pace/budget core (no I/O). It mirrors burin's
+ * governor_decision is the PURE pace/budget core (no I/O). It preserves the
+ * source policy's
  * `pace_decision` structure, generalized over the consumption signal and
  * collapsed onto proceed/warn/abort:
  *
  *   fraction >= hard                      -> abort  "budget_hard_stop"
- *                                            (burin: extend/check budget exhausted -> cut)
+ *                                            (extend/check budget exhausted -> cut)
  *   fraction >= checkpoint && !progress   -> abort  "no_progress_at_checkpoint"
- *                                            (burin: no progress at checkpoint -> cut)
+ *                                            (no progress at checkpoint -> cut)
  *   fraction >= over_estimate (progress)  -> warn   "over_estimate_while_progressing"
- *                                            (burin: over estimate while progressing -> pace_check)
+ *                                            (over estimate while progressing -> pace_check)
  *   otherwise                             -> proceed
- *                                            (burin: below checkpoint, or progressing
+ *                                            (below checkpoint, or progressing
  *                                             within estimate -> extend)
  *
  * `obs` is `{ceiling, consumed, made_progress, signal}`. Returns
@@ -439,8 +441,8 @@ fn __governor_pace_expected_total_ms(obs: dict, armed: int) -> int {
 }
 
 /**
- * governor_pace_decision is the SMART-TIMEOUT pace governor (#burin-cutover seam
- * 2) — a PURE decision core ported verbatim from burin's
+ * governor_pace_decision is the SMART-TIMEOUT pace governor — a PURE decision
+ * core ported from the source policy's
  * `lib/runtime/pace-governor.harn::pace_decision`. It replaces a blind static
  * wall-clock kill with progress-based *extend-inside-a-time-bound*: given a
  * snapshot of the run's pace signals it returns ONE of four actions. It does NO
@@ -451,7 +453,7 @@ fn __governor_pace_expected_total_ms(obs: dict, armed: int) -> int {
  * agent_loop never owns the host's wall deadline).
  *
  * `policy` (a GovernorPolicy) carries only the bounded caps; both default to the
- * burin parity constants:
+ * compatibility constants:
  *   - extend_max      (default GOVERNOR_PACE_EXTEND_MAX = 6): hard cap on silent
  *     extends so a slowly-progressing run cannot extend forever.
  *   - pace_check_max  (default GOVERNOR_PACE_CHECK_MAX_INJECTIONS = 2): bounded

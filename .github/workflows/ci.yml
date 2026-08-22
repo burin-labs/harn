@@ -1179,6 +1179,9 @@ jobs:
       # against the committed JSON fixture.
       - run: make check-bindings
       - run: make lint-diagnostic-codes
+      # Generic embedded stdlib behavior must not acquire product-host naming;
+      # reviewed compatibility/provenance literals are held to an exact baseline.
+      - run: make check-stdlib-host-neutral
       # Strict-types ratchet: no unvalidated boundary access (HARN-OWN-004) in
       # the gated stdlib. Runs the in-repo checker through the warm HARN_BIN.
       - run: make check-stdlib-strict-types

@@ -10,7 +10,7 @@ import { memory_store } from "std/memory"
  * decision and record a separate `harn.profile_bulletin_decision.v1` envelope
  * for each accept, reject, expire, or supersede outcome.
  *
- * The same envelope is consumable by Burin local review surfaces and Harn
+ * The same envelope is consumable by local review surfaces and Harn
  * Cloud sync without per-host translation. Receipts retain the proposal and
  * decision history so replay tooling can audit how persona context evolved.
  */

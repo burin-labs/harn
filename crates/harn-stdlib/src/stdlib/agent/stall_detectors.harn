@@ -20,10 +20,10 @@ import {
 // Unified detector subsystem (#rearch R2). The detector conditions above
 // (repeated-observation / ping-pong loops, no-progress monologue, same-error /
 // stuck-diagnostic, context-window, no-net-progress) are the LOOP, NO-PROGRESS
-// and STUCK-TOOL detectors of burin-code's hand-rolled runtime, already native
-// here and riding the `agent_loop_stall_warning` event. The FOURTH burin
+// and STUCK-TOOL detectors of a hand-rolled host runtime, already native
+// here and riding the `agent_loop_stall_warning` event. The FOURTH
 // detector — token-runaway (output growing past a task's typical size without
-// landing progress, burin `lib/runtime/token-runaway-guard.harn`) — is not
+// landing progress) — is not
 // budget-native, so it is added below as a `post_turn_callback` overlay that
 // emits the SAME `agent_loop_stall_warning` event and speaks the SAME
 // proceed/warn/abort vocabulary. `DetectorSpec` is the ONE typed surface that
@@ -32,7 +32,7 @@ import {
 
 // -------------------------------------------------------------------------------------------------
 
-// burin token-runaway-guard.harn parity constants.
+// Legacy token-runaway guard compatibility constants.
 pub const TOKEN_RUNAWAY_DEFAULT_SIGMA = 2.0
 
 pub const TOKEN_RUNAWAY_THIN_HISTORY_MARGIN = 0.6
@@ -66,7 +66,7 @@ pub type DetectorSpec = {
 
 /**
  * token_runaway_resolve_cap computes the per-task input-token ceiling exactly as
- * burin's `token_runaway_resolve_cap`: `median + sigma*stddev` when a stddev is
+ * the source `token_runaway_resolve_cap`: `median + sigma*stddev` when a stddev is
  * known, else a thin-history relative margin over the median; never below the
  * absolute `fallback` floor; `fallback` when there is no median history.
  *
@@ -96,7 +96,7 @@ pub fn token_runaway_resolve_cap(
 }
 
 /**
- * token_runaway_decision is the PURE token-runaway core, mirroring burin's
+ * token_runaway_decision is the PURE token-runaway core, mirroring the source
  * `token_runaway_decision`. `config` carries `{median, stddev, sigma?,
  * fallback?, hard_multiple?}`; `obs` carries `{tokens, making_progress}`.
  *   - no resolvable cap                         -> proceed "no_cap"
@@ -154,7 +154,7 @@ pub fn __token_runaway_is_verification_result(result) -> bool {
 
 /**
  * token_runaway_made_progress classifies whether THIS turn advanced
- * verification — the progress signal burin's token-runaway guard vetoes on. It
+ * verification — the progress signal the token-runaway guard vetoes on. It
  * is deliberately NOT "any tool succeeded": token-runaway exists precisely for
  * the `edit_applied_but_wrong` thrash where edit/read storms keep succeeding
  * while verification never passes, so "any successful tool" would let the soft
@@ -189,7 +189,7 @@ pub fn token_runaway_made_progress(agent: HarnessAgent, payload) -> bool {
 /**
  * token_runaway_post_turn(harness.agent, config) returns a `post_turn_callback` closure. It
  * reads the session's cumulative INPUT tokens (`agent_session_totals(harness.agent).input_tokens`
- * — the re-sent ballooning context burin's guard keys on, NOT the input+output
+ * — the re-sent ballooning context the guard keys on, NOT the input+output
  * `tokens_used` sum), classifies progress as a passing verification this turn
  * (`token_runaway_made_progress`, NOT "any tool succeeded"), and on an abort
  * emits the SAME `agent_loop_stall_warning` event native trips use (pattern

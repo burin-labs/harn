@@ -223,6 +223,16 @@ fn verdict_for(verdicts: list, id: string) {
   return nil
 }
 
+// Historical ledgers used a downstream-host-specific E1 id. Keep those rows
+// readable while making the public default neutral for every new caller.
+fn verdict_for_with_legacy_mechanical_gate(verdicts: list, id: string) {
+  const verdict = verdict_for(verdicts, id)
+  if verdict != nil || id != "mechanical_gate" {
+    return verdict
+  }
+  return verdict_for(verdicts, "burin_mechanical_gate")
+}
+
 /**
  * Cohen's kappa between two judges, over the cases they BOTH gave a verdict on
  * (neither abstained). Cohen's kappa is a standard statistic for how much two
@@ -243,7 +253,7 @@ fn verdict_for(verdicts: list, id: string) {
  */
 pub fn cohen_kappa(
   cases: list,
-  id_a: string = "burin_mechanical_gate",
+  id_a: string = "mechanical_gate",
   id_b: string = "reexec_verify",
 ) -> dict {
   let n = 0
@@ -253,7 +263,7 @@ pub fn cohen_kappa(
   let both_pass = 0
   let both_fail = 0
   for verdicts in cases {
-    const va = verdict_for(verdicts, id_a)
+    const va = verdict_for_with_legacy_mechanical_gate(verdicts, id_a)
     const vb = verdict_for(verdicts, id_b)
     const a_decided = va == verdict_pass() || va == verdict_fail()
     const b_decided = vb == verdict_pass() || vb == verdict_fail()

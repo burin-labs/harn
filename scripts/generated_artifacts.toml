@@ -61,6 +61,7 @@ exempt_checks = [
   "check-protocol-symbol-removals", # declares removals from the published protocol bindings, not a mirror
   "check-dependabot-groups",        # validates Cargo compatibility-family update policy, not a mirror
   "check-grammar-keywords",         # validates spec grammar keyword literals vs the lexer, not a mirror
+  "check-stdlib-host-neutral",      # host-neutral stdlib naming ratchet, not a generated mirror
   "check-stdlib-strict-types",      # strict-types boundary ratchet over the stdlib, not a mirror
   "check-stdlib-public-return-types", # public stdlib return-type ratchet, not a mirror
   "check-schema-strict",             # zero-baseline strict gate for the std/schema facade, not a mirror
@@ -585,6 +586,7 @@ make_all = false  # excluded from `make all` for the same reason (no sibling che
 "lint-no-xfail-regression" = "source"
 "lint-no-rust-prompt-prose" = "source"
 "lint-agent-path-normalization" = "source"
+"check-stdlib-host-neutral" = "source"
 # --- binary: verdict depends on current executable semantics (check-drift-binary) ---
 "check-highlight" = "binary"
 "check-portable-benchmark-schema" = "binary"

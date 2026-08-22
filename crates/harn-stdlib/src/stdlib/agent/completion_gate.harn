@@ -87,12 +87,12 @@ pub type CompletionVetoCombiner = fn(list<CompletionVerifyVerdict>) -> Completio
  * Policy knobs:
  * - `require_source_write` (default true) — enforce the evidence gate ⛔#5.
  * - `requires_write` — override the per-task "needs a source change" fact.
- * - `max_vetoes` (default 3, burin `COMPLETION_GATE_MAX_VETOES`) — per-session
+ * - `max_vetoes` (default 3) — per-session
  *   soft-veto budget; 0 disables.
  * - `veto_combine(verdicts) -> CompletionVerifyVerdict` — override the default
  *   AND-of-oracles arithmetic for combining multiple verifier verdicts.
  * - `judge` (default off) — attach a bounded LLM completion judge (`true` or a
- *   JudgeConfig-shaped dict); defaults its cap to burin's 5.
+ *   JudgeConfig-shaped dict); defaults its cap to the compatibility value 5.
  * - `judge_seam` (default `"verify_completion_judge"`) — which capped LLM seam
  *   the judge rides (`"verify_completion_judge"` or `"done_judge"`).
  * - `feedback_templates` (optional) — a dict overriding the rendered veto feedback

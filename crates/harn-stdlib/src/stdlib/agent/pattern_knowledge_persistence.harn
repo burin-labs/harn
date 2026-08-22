@@ -11,6 +11,10 @@ import {
 import { memory_forget, memory_store, memory_summarize } from "std/memory"
 import { runtime_state_paths_under } from "std/runtime"
 
+// These filenames belong only to the legacy session-store import path used by
+// `pattern_learning_ensure_migrated`. Current pattern memory has Harn-owned
+// paths. Keep this compatibility reader until that migration contract is
+// deliberately removed; new hosts must not write these names.
 pub fn pl_project_root(fs: HarnessFs, options = nil) -> string {
   return pl_text(options?.project_root ?? fs.project_root() ?? fs.cwd() ?? ".")
 }

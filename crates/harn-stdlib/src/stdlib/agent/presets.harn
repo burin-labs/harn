@@ -483,9 +483,9 @@ fn __tool_using_defaults(kind) {
       no_net_progress_hard_cap_after: 16,
     },
     // Discovery surface (#repair-diagnostics). Mirrors the repair knobs above
-    // so consumers (e.g. Burin, via a feature flag) can find and opt into the
+    // so consumers can find and opt into the
     // evidence-aware repair loop without spelunking `stall_diagnostics`.
-    // Subsumes Burin's futile-retry-guard.harn.
+    // Subsumes the legacy futile-retry guard.
     repair_diagnostics: {
       repair_aware: false,
       stuck_same_diagnostic_after: 3,

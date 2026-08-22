@@ -623,7 +623,8 @@ fn __agent_primary_system_text(agent: HarnessAgent, session, opts) {
  * injects the format contract — so a tool caller that bypasses `agent_loop`
  * and drives tools through a bare `llm_call` at `tool_format` json/text would
  * have the model guess the format and parse 0 calls. That is acceptable
- * because nothing does: `agent_loop` is the only tool driver in Harn and Burin
+ * because nothing does: `agent_loop` is Harn's only tool driver, and embedding
+ * hosts project that same driver
  * (the lone bare-`llm_call`-with-tools seam, `std/agents::run_stage` with
  * `mode: "llm"` / `loop_until_done: false`, is a public stdlib entrypoint with
  * no in-tree consumer that passes `tools`). If a future caller needs format-

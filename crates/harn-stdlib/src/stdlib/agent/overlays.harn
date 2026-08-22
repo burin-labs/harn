@@ -1,9 +1,9 @@
 // Overlays: a flag-free, data-driven prompt-nudge overlay generalizing
-// burin-code's `mode_overlay_lines` (`lib/runtime/agent-loop.harn`) —
+// the legacy host's `mode_overlay_lines` compatibility input —
 // mode-specific (and optionally lane-specific) guidance lines appended to
 // the outbound system prompt.
 //
-// Burin's real mechanism is a `match active_mode` returning a base line list
+// The source mechanism is a `match active_mode` returning a base line list
 // with independently-gated extra lines APPENDED after it — never replacing
 // or removing base content. This module reuses that same "append, never
 // override" shape but expresses it through the EXISTING per-turn
@@ -38,7 +38,7 @@ import { __with_prompt_fragment } from "std/agent/preflight"
 pub type OverlayRow = {mode: string, lane?: string, lines: list<string>, enabled?: bool}
 
 /**
- * default_overlay_rows() — a small starter table generalizing burin's
+ * default_overlay_rows() — a small starter table for
  * per-mode nudge lines: a base `agent`-mode economy nudge, a narrower
  * reminder for the `explicit_patch` lane (see `std/agent/lanes`), and a
  * `plan`-mode nudge to produce a concrete plan before editing.
