@@ -6,6 +6,8 @@ use serde::{Deserialize, Serialize};
 
 use super::Vm;
 
+type ModuleProgressObserver = Arc<dyn Fn(ModulePhaseStats) + Send + Sync>;
+
 /// VM-scoped cumulative work-time and cardinality for module preparation and loading.
 ///
 /// Concurrent child-VM spans are additive, so durations can exceed enclosing
@@ -46,9 +48,20 @@ struct ModulePhaseAccumulator {
 }
 
 /// Opt-in recorder shared by a root VM and the child VMs it creates.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct ModulePhaseRecorder {
     inner: Arc<Mutex<ModulePhaseAccumulator>>,
+    progress_observer: Arc<Mutex<Option<ModuleProgressObserver>>>,
+}
+
+impl std::fmt::Debug for ModulePhaseRecorder {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ModulePhaseRecorder")
+            .field("stats", &self.snapshot())
+            .field("observed", &self.progress_observer.lock().is_some())
+            .finish()
+    }
 }
 
 impl ModulePhaseRecorder {
@@ -68,6 +81,24 @@ impl ModulePhaseRecorder {
         }
     }
 
+    /// Observe successful module preparation and load transitions.
+    ///
+    /// The observer is called outside recorder locks. Merely starting a phase,
+    /// or dropping an unsuccessful compilation span, never produces progress.
+    pub fn set_progress_observer(
+        &self,
+        observer: impl Fn(ModulePhaseStats) + Send + Sync + 'static,
+    ) {
+        *self.progress_observer.lock() = Some(Arc::new(observer));
+    }
+
+    fn notify_progress(&self) {
+        let observer = self.progress_observer.lock().clone();
+        if let Some(observer) = observer {
+            observer(self.snapshot());
+        }
+    }
+
     pub(crate) fn compile_span(&self) -> ModulePhaseSpan {
         ModulePhaseSpan::new(self.clone(), ModulePhase::Compile)
     }
@@ -77,8 +108,11 @@ impl ModulePhaseRecorder {
     }
 
     pub(crate) fn record_module_loaded(&self) {
-        let mut stats = self.inner.lock();
-        stats.modules_loaded = stats.modules_loaded.saturating_add(1);
+        {
+            let mut stats = self.inner.lock();
+            stats.modules_loaded = stats.modules_loaded.saturating_add(1);
+        }
+        self.notify_progress();
     }
 }
 
@@ -114,15 +148,20 @@ impl ModulePhaseSpan {
 impl Drop for ModulePhaseSpan {
     fn drop(&mut self) {
         let elapsed = self.started.elapsed();
-        let mut stats = self.recorder.inner.lock();
-        match self.phase {
-            ModulePhase::Compile => {
-                stats.compile = stats.compile.saturating_add(elapsed);
-                if self.successful_compile {
-                    stats.modules_compiled = stats.modules_compiled.saturating_add(1);
+        {
+            let mut stats = self.recorder.inner.lock();
+            match self.phase {
+                ModulePhase::Compile => {
+                    stats.compile = stats.compile.saturating_add(elapsed);
+                    if self.successful_compile {
+                        stats.modules_compiled = stats.modules_compiled.saturating_add(1);
+                    }
                 }
+                ModulePhase::Load => stats.load = stats.load.saturating_add(elapsed),
             }
-            ModulePhase::Load => stats.load = stats.load.saturating_add(elapsed),
+        }
+        if matches!(self.phase, ModulePhase::Compile) && self.successful_compile {
+            self.recorder.notify_progress();
         }
     }
 }
@@ -227,6 +266,35 @@ mod tests {
         });
 
         assert_eq!(Arc::strong_count(&recorder.inner), 1);
+    }
+
+    #[test]
+    fn observer_only_sees_successful_module_transitions_and_can_reenter_snapshot() {
+        let recorder = ModulePhaseRecorder::new();
+        let observed = Arc::new(Mutex::new(Vec::new()));
+        let callback_observed = observed.clone();
+        let callback_recorder = recorder.clone();
+        recorder.set_progress_observer(move |stats| {
+            assert_eq!(stats, callback_recorder.snapshot());
+            callback_observed.lock().push(stats);
+        });
+
+        drop(recorder.compile_span());
+        assert!(
+            observed.lock().is_empty(),
+            "failed compilation is not progress"
+        );
+
+        let mut compile = recorder.compile_span();
+        compile.mark_compile_succeeded();
+        drop(compile);
+        recorder.record_module_loaded();
+
+        let observed = observed.lock();
+        assert_eq!(observed.len(), 2);
+        assert_eq!(observed[0].modules_compiled, 1);
+        assert_eq!(observed[0].modules_loaded, 0);
+        assert_eq!(observed[1].modules_loaded, 1);
     }
 
     #[test]
