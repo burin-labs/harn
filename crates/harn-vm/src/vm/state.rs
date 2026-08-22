@@ -212,9 +212,8 @@ pub(crate) struct CallFrame {
     pub(crate) initial_local_slots: Option<Vec<LocalSlot>>,
     /// Iterator stack depth to restore when this frame unwinds.
     pub(crate) saved_iterator_depth: usize,
-    /// Function name for stack traces (empty for top-level pipeline).
-    /// Shared with the owning [`CompiledFunction`], so populating it per call
-    /// is a refcount bump.
+    /// Function name for stack traces (empty for top-level pipeline); a
+    /// refcount-bump share of [`CompiledFunction::name`].
     pub(crate) fn_name: crate::value::HarnStr,
     /// Number of arguments actually passed by the caller (for default arg support).
     pub(crate) argc: usize,
@@ -323,9 +322,6 @@ pub(crate) enum IterState {
     },
     Dict {
         entries: Arc<crate::value::DictMap>,
-        /// Key snapshot for stable iteration. `HarnStr` clones of the map's
-        /// own keys, so building it is a refcount bump per key rather than a
-        /// `String` allocation.
         keys: Vec<crate::value::HarnStr>,
         idx: usize,
     },
