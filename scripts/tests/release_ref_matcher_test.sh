@@ -66,8 +66,10 @@ grep -q "startsWith(github.ref_name, 'release/v')" <<<"$cold_start_if" \
 grep -q "startsWith(github.ref_name, 'release-attempt/v')" <<<"$cold_start_if" \
   || fail "cold-start if: does not exclude release-attempt/v refs — the exclusion never fires"
 
-policy_if=$(grep -A1 'const CLI_COLD_START_JOB_IF' "$repo_root/scripts/check_ci_cache_policy.harn" \
-  | tail -1 | sed -E 's/^[[:space:]]*"//; s/"[[:space:]]*$//')
+policy_if=$(grep -A1 'const CLI_COLD_START_JOB_IF' \
+  "$repo_root/scripts/ci_cache_policy/policy_core.harn" \
+  | tail -1 | sed -E 's/^[[:space:]]*"//; s/"[[:space:]]*$//') \
+  || fail "could not read CLI_COLD_START_JOB_IF from its policy owner"
 [[ "$cold_start_if" == "$policy_if" ]] \
   || fail "workflow if: and check_ci_cache_policy.harn disagree:
   workflow: $cold_start_if
