@@ -1087,8 +1087,8 @@ check-tree-sitter-keywords:
 gen-tree-sitter-parser:
 	@./scripts/tree_sitter_generated.sh --write
 
-# Regenerate in an isolated temporary grammar checkout and compare every
-# committed parser output byte-for-byte without mutating the worktree.
+# Regenerate in an isolated temporary grammar checkout and compare the complete
+# parser source tree byte-for-byte without mutating the worktree.
 check-tree-sitter-parser:
 	@echo "=== Checking tree-sitter parser generated artifacts ==="
 	@./scripts/tree_sitter_generated.sh --check

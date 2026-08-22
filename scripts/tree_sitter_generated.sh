@@ -4,11 +4,6 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 grammar_dir="${TREE_SITTER_HARN_DIR:-$repo_root/tree-sitter-harn}"
 cli="$grammar_dir/node_modules/.bin/tree-sitter"
-outputs=(
-  "src/parser.c"
-  "src/grammar.json"
-  "src/node-types.json"
-)
 
 usage() {
   echo "usage: $0 --write|--check" >&2
@@ -42,6 +37,30 @@ generate() {
   )
 }
 
+prepare_isolated_grammar() {
+  local isolated="$1"
+  mkdir -p "$isolated/src"
+
+  cp "$grammar_dir/grammar.js" \
+    "$grammar_dir/package.json" \
+    "$grammar_dir/package-lock.json" \
+    "$grammar_dir/tree-sitter.json" \
+    "$isolated/"
+  cp -R "$grammar_dir/grammar" "$grammar_dir/scripts" "$isolated/"
+
+  # scanner.c is hand-written, but shares src/ with the CLI's generated tree.
+  # Seed it so the complete src/ directories can be compared structurally.
+  cp "$grammar_dir/src/scanner.c" "$isolated/src/"
+  ln -s "$grammar_dir/node_modules" "$isolated/node_modules"
+}
+
+find_src_files() {
+  (
+    cd "$1"
+    find src -type f -print
+  )
+}
+
 [[ $# -eq 1 ]] || usage
 verify_pinned_cli
 
@@ -53,24 +72,22 @@ case "$1" in
     tmp_root="$(mktemp -d "${TMPDIR:-/tmp}/harn-tree-sitter-generated.XXXXXX")"
     trap 'rm -rf "$tmp_root"' EXIT
     isolated="$tmp_root/tree-sitter-harn"
-    mkdir -p "$isolated"
-
-    cp "$grammar_dir/grammar.js" \
-      "$grammar_dir/package.json" \
-      "$grammar_dir/package-lock.json" \
-      "$grammar_dir/tree-sitter.json" \
-      "$isolated/"
-    cp -R "$grammar_dir/grammar" "$grammar_dir/scripts" "$isolated/"
-    ln -s "$grammar_dir/node_modules" "$isolated/node_modules"
+    prepare_isolated_grammar "$isolated"
 
     generate "$isolated"
 
+    candidates="$tmp_root/src-files"
+    {
+      find_src_files "$grammar_dir"
+      find_src_files "$isolated"
+    } | LC_ALL=C sort -u >"$candidates"
+
     stale=()
-    for output in "${outputs[@]}"; do
+    while IFS= read -r output; do
       if ! cmp -s "$grammar_dir/$output" "$isolated/$output"; then
         stale+=("$output")
       fi
-    done
+    done <"$candidates"
 
     if [[ ${#stale[@]} -ne 0 ]]; then
       echo "tree-sitter parser generated artifacts are stale:" >&2
