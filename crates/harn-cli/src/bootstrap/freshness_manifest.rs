@@ -317,9 +317,27 @@ fn directory_inventory_identity(path: &Path) -> Result<blake3::Hash, String> {
                     entry.path().display()
                 ));
             };
-            Ok((os_bytes(&entry.file_name()), kind))
+            let name = entry.file_name();
+            // Harn-owned runtime directories are not compiler inputs. Git-owned
+            // paths beneath one are added and hashed separately by
+            // `add_git_path`, so ignoring an untracked sibling here cannot hide
+            // a tracked source change.
+            if name.to_str().is_some_and(|name| {
+                crate::path_policy::is_harn_internal_entry(
+                    name,
+                    crate::path_policy::PathEntryKind::from_is_directory(
+                        kind == EntryKind::Directory,
+                    ),
+                )
+            }) {
+                return Ok(None);
+            }
+            Ok(Some((os_bytes(&name), kind)))
         })
-        .collect::<Result<Vec<_>, String>>()?;
+        .collect::<Result<Vec<_>, String>>()?
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
     children.sort_by(|(left, _), (right, _)| left.cmp(right));
 
     let mut hasher = blake3::Hasher::new();
@@ -809,6 +827,51 @@ mod tests {
             ),
             "unexpected verification result: {verification:?}"
         );
+    }
+
+    #[test]
+    fn harn_internal_directory_churn_is_not_source_inventory() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = &temp.path().join("repo");
+        fs::create_dir(root).unwrap();
+        let input = root.join("input.harn");
+        fs::write(&input, b"source").unwrap();
+        let covered = BTreeSet::from([PathBuf::from("input.harn")]);
+        let dep_info = temp.path().join("harn.d");
+        fs::write(&dep_info, b"target:\n").unwrap();
+        let authorities = temp.path().join("authorities");
+        fs::write(&authorities, []).unwrap();
+        let manifest = temp.path().join("manifest");
+        write_manifest(&manifest, root, &covered, &dep_info, &[], &authorities).unwrap();
+
+        for name in [".harn", ".harn-runs", ".harn-toolchain-cache"] {
+            let internal = root.join(name);
+            fs::create_dir(&internal).unwrap();
+            fs::write(internal.join("runtime-artifact"), b"mutable").unwrap();
+        }
+
+        assert_eq!(verify_manifest(&manifest).unwrap(), Verification::Fresh);
+    }
+
+    #[test]
+    fn tracked_input_beneath_harn_internal_directory_remains_exact() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = &temp.path().join("repo");
+        let internal = root.join(".harn/fixtures");
+        fs::create_dir_all(&internal).unwrap();
+        let input = internal.join("input.harn");
+        fs::write(&input, b"before").unwrap();
+        let covered = BTreeSet::from([PathBuf::from(".harn/fixtures/input.harn")]);
+        let dep_info = temp.path().join("harn.d");
+        fs::write(&dep_info, b"target:\n").unwrap();
+        let authorities = temp.path().join("authorities");
+        fs::write(&authorities, []).unwrap();
+        let manifest = temp.path().join("manifest");
+        write_manifest(&manifest, root, &covered, &dep_info, &[], &authorities).unwrap();
+
+        fs::write(&input, b"after!").unwrap();
+        let error = verify_manifest(&manifest).unwrap_err();
+        assert!(error.contains("content changed"));
     }
 
     #[test]

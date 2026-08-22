@@ -2,6 +2,8 @@
 
 #[path = "../bootstrap/freshness_manifest.rs"]
 mod freshness_manifest;
+#[path = "../path_policy.rs"]
+mod path_policy;
 
 use freshness_manifest::{
     artifact_stat_id, canonical_path_id, manifest_hash, platform_build_id, verify_manifest,
