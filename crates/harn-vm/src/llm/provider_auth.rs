@@ -32,6 +32,23 @@ pub struct ProviderAuthStatus {
     pub credential_status: ProviderCredentialStatus,
 }
 
+/// The authority that selected a provider for a single-route dispatch.
+///
+/// This is deliberately separate from credential state: selection explains
+/// why Harn is asking for a particular credential, while credential probing
+/// decides whether that route can run. Keeping the two concepts separate
+/// prevents a missing key from rewriting an explicit selection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ProviderSelectionSource {
+    CallOption,
+    Environment,
+    DefaultEnvironment,
+    ConfiguredDefault,
+    ModelSelection,
+    RoutingPolicy,
+    Automatic,
+}
+
 #[derive(Debug)]
 pub(crate) struct ResolvedProviderAuth {
     pub status: ProviderAuthStatus,
@@ -151,23 +168,23 @@ fn resolved_credential_from_probe(
 
 /// Resolve the provider credential used by dispatch.
 pub fn resolve_api_key(provider: &str) -> Result<String, VmError> {
+    resolve_api_key_for_selection(provider, inferred_provider_selection_source(provider))
+}
+
+pub(crate) fn resolve_api_key_for_selection(
+    provider: &str,
+    source: ProviderSelectionSource,
+) -> Result<String, VmError> {
     let definition = llm_config::provider_config(provider);
-    resolve_api_key_with_definition(provider, definition.as_ref())
+    resolve_api_key_with_definition(provider, definition.as_ref(), source)
 }
 
 fn resolve_api_key_with_definition(
     provider: &str,
     definition: Option<&ProviderDef>,
+    source: ProviderSelectionSource,
 ) -> Result<String, VmError> {
-    let selection_hint = {
-        let config_path = llm_config::loaded_config_path()
-            .map(|path| path.display().to_string())
-            .unwrap_or_else(|| "<built-in defaults>".to_string());
-        format!(
-            " (provider '{provider}' comes from HARN_LLM_PROVIDER or the provider catalog at \
-             {config_path}; set HARN_LLM_PROVIDER=mock to run without a provider)"
-        )
-    };
+    let selection_hint = provider_selection_hint(provider, source);
 
     match resolve_provider_auth_with_definition(provider, definition).credential {
         ResolvedProviderCredential::Key(api_key) => Ok(api_key),
@@ -198,6 +215,56 @@ fn resolve_api_key_with_definition(
             }
         }
     }
+}
+
+pub(crate) fn inferred_provider_selection_source(provider: &str) -> ProviderSelectionSource {
+    if crate::stdlib::process::session_env_value("HARN_LLM_PROVIDER")
+        .is_some_and(|selected| selected == provider)
+    {
+        ProviderSelectionSource::Environment
+    } else if crate::stdlib::process::session_env_value("HARN_DEFAULT_PROVIDER")
+        .is_some_and(|selected| selected.trim() == provider)
+    {
+        ProviderSelectionSource::DefaultEnvironment
+    } else if llm_config::load_config()
+        .default_provider
+        .as_deref()
+        .is_some_and(|selected| selected.trim() == provider)
+    {
+        ProviderSelectionSource::ConfiguredDefault
+    } else {
+        ProviderSelectionSource::Automatic
+    }
+}
+
+fn provider_selection_hint(provider: &str, source: ProviderSelectionSource) -> String {
+    let selected_via = match source {
+        ProviderSelectionSource::CallOption => "the llm_call `provider` option".to_string(),
+        ProviderSelectionSource::Environment => "HARN_LLM_PROVIDER".to_string(),
+        ProviderSelectionSource::DefaultEnvironment => "HARN_DEFAULT_PROVIDER".to_string(),
+        ProviderSelectionSource::ConfiguredDefault => {
+            let paths = llm_config::loaded_config_paths();
+            if paths.is_empty() {
+                "the built-in configured default".to_string()
+            } else {
+                format!(
+                    "the configured default (provider config loaded from {})",
+                    paths
+                        .iter()
+                        .map(|path| path.display().to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            }
+        }
+        ProviderSelectionSource::ModelSelection => "the selected model".to_string(),
+        ProviderSelectionSource::RoutingPolicy => "the routing policy".to_string(),
+        ProviderSelectionSource::Automatic => "the automatic provider preference order".to_string(),
+    };
+    format!(
+        " (provider '{provider}' selected via {selected_via}; set HARN_LLM_PROVIDER=mock to run \
+         without a provider)"
+    )
 }
 
 #[derive(Debug)]
@@ -430,6 +497,85 @@ mod tests {
         assert_eq!(resolve_api_key("bedrock").unwrap(), "");
         assert_eq!(resolve_api_key("vertex").unwrap(), "");
         assert!(resolve_api_key("azure_openai").is_err());
+    }
+
+    #[test]
+    fn missing_credential_diagnostic_names_the_actual_selection_authority() {
+        let _guard = crate::llm::env_guard();
+        let env = crate::test_env::test_env_guard();
+        env.set("HARN_LLM_PROVIDER", "anthropic");
+        let _missing_key = ScopedEnv::unset("ANTHROPIC_API_KEY");
+
+        let message = match resolve_api_key("anthropic").unwrap_err() {
+            VmError::Thrown(VmValue::String(message)) => message.to_string(),
+            other => format!("{other:?}"),
+        };
+        assert!(
+            message.contains("provider 'anthropic' selected via HARN_LLM_PROVIDER"),
+            "got: {message}"
+        );
+        assert!(!message.contains(" or the provider catalog"));
+        assert!(!message.contains("<built-in defaults>"));
+    }
+
+    #[test]
+    fn selection_hints_name_only_the_authority_that_fired() {
+        let explicit = provider_selection_hint("openai", ProviderSelectionSource::CallOption);
+        assert!(explicit.contains("selected via the llm_call `provider` option"));
+        assert!(!explicit.contains("config loaded from"));
+
+        let automatic = provider_selection_hint("openai", ProviderSelectionSource::Automatic);
+        assert!(automatic.contains("selected via the automatic provider preference order"));
+        assert!(!automatic.contains("config loaded from"));
+
+        let configured =
+            provider_selection_hint("anthropic", ProviderSelectionSource::ConfiguredDefault);
+        if llm_config::loaded_config_paths().is_empty() {
+            assert!(configured.contains("selected via the built-in configured default"));
+            assert!(!configured.contains("config loaded from"));
+        } else {
+            assert!(configured.contains("configured default (provider config loaded from"));
+        }
+    }
+
+    #[test]
+    fn credential_authority_matrix_is_fail_closed_and_secret_free() {
+        let _guard = crate::llm::env_guard();
+        const SECRET: &str = "sk-authority-matrix-sentinel";
+
+        let allowed_key = ScopedEnv::set("ANTHROPIC_API_KEY", SECRET);
+        assert_eq!(resolve_api_key("anthropic").unwrap(), SECRET, "allowed");
+        assert_eq!(
+            provider_auth_status("anthropic").credential_status,
+            ProviderCredentialStatus::Ok
+        );
+
+        {
+            let _environment =
+                ScopedEnvironment::install(crate::security::SessionEnvironment::isolated());
+            let error = resolve_api_key("anthropic").unwrap_err().to_string();
+            assert!(error.contains("Missing API key"), "denied: {error}");
+            assert!(!error.contains(SECRET), "denied diagnostic leaked the key");
+        }
+
+        drop(allowed_key);
+        let missing_key = ScopedEnv::unset("ANTHROPIC_API_KEY");
+        let missing = resolve_api_key("anthropic").unwrap_err().to_string();
+        assert!(missing.contains("Missing API key"), "missing: {missing}");
+        assert!(!missing.contains(SECRET));
+
+        drop(missing_key);
+        let _malformed_key = ScopedEnv::set("ANTHROPIC_API_KEY", "harn-secret://malformed");
+        let malformed = resolve_api_key("anthropic").unwrap_err().to_string();
+        assert!(
+            malformed.contains("Failed to resolve API key secret reference"),
+            "malformed: {malformed}"
+        );
+        assert!(!malformed.contains(SECRET));
+        assert_eq!(
+            provider_auth_status("anthropic").credential_status,
+            ProviderCredentialStatus::Missing
+        );
     }
 
     #[test]

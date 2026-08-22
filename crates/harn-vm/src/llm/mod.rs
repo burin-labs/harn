@@ -417,6 +417,9 @@ pub use self::provider_auth::{
     available_provider_names, no_credentials_message, provider_auth_status, provider_auth_statuses,
     resolve_api_key, ProviderAuthStatus, ProviderCredentialStatus, PROVIDER_SETUP_DOCS_URL,
 };
+pub(crate) use self::provider_auth::{
+    inferred_provider_selection_source, resolve_api_key_for_selection, ProviderSelectionSource,
+};
 pub use self::readiness::{selected_model_for_provider, supports_model_readiness_probe};
 pub use self::trace::{
     agent_trace_summary, enable_tracing, peek_agent_trace, peek_trace, peek_trace_summary,
