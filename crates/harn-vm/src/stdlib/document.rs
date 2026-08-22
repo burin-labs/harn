@@ -10,8 +10,8 @@ use std::sync::Arc;
 
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
+use crate::stdlib::args::Args;
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
-use crate::stdlib::options::{optional_dict_arg, ErrorKind, OptionsParser};
 use crate::value::{VmDictExt, VmError, VmValue};
 use crate::vm::Vm;
 
@@ -84,10 +84,10 @@ impl PdfRenderOptions {
         let Some(dict) = value else {
             return Ok(Self::default_for(source, None));
         };
-        let mut parser = OptionsParser::new(BUILTIN_RENDER_PDF, dict, ErrorKind::Runtime);
+        let mut parser = Args::runtime_options(BUILTIN_RENDER_PDF, Some(dict));
         let renderer = parser
-            .optional_string(OPTION_RENDERER)?
-            .unwrap_or_else(|| BUILTIN_RENDERER_ID.to_string());
+            .opt_non_empty_string(OPTION_RENDERER)?
+            .unwrap_or(BUILTIN_RENDERER_ID);
         if renderer != "auto" && renderer != BUILTIN_RENDERER_ID {
             return Err(VmError::Runtime(format!(
                 "{BUILTIN_RENDER_PDF}: unsupported {OPTION_RENDERER} {renderer:?}; available renderer is {BUILTIN_RENDERER_ID:?}"
@@ -95,34 +95,31 @@ impl PdfRenderOptions {
         }
         let source_format = TextSourceFormat::parse(
             BUILTIN_RENDER_PDF,
-            parser.optional_string(OPTION_SOURCE_FORMAT)?.as_deref(),
+            parser.opt_non_empty_string(OPTION_SOURCE_FORMAT)?,
             source,
         )?;
         let title = parser
-            .optional_string_raw(OPTION_TITLE)?
-            .unwrap_or_else(|| DEFAULT_TITLE.to_string());
+            .opt_string(OPTION_TITLE)?
+            .unwrap_or(DEFAULT_TITLE)
+            .to_string();
         let page_width_pt = positive_usize(
-            parser.optional_usize(OPTION_PAGE_WIDTH_PT)?,
+            parser.opt_usize(OPTION_PAGE_WIDTH_PT)?,
             DEFAULT_PAGE_WIDTH_PT,
         );
         let page_height_pt = positive_usize(
-            parser.optional_usize(OPTION_PAGE_HEIGHT_PT)?,
+            parser.opt_usize(OPTION_PAGE_HEIGHT_PT)?,
             DEFAULT_PAGE_HEIGHT_PT,
         );
-        let margin_pt = positive_usize(parser.optional_usize(OPTION_MARGIN_PT)?, DEFAULT_MARGIN_PT);
-        let font_size_pt = positive_usize(
-            parser.optional_usize(OPTION_FONT_SIZE_PT)?,
-            DEFAULT_FONT_SIZE_PT,
-        );
-        let line_height_pt = positive_usize(
-            parser.optional_usize(OPTION_LINE_HEIGHT_PT)?,
-            font_size_pt + 4,
-        );
-        let max_line_chars = parser.optional_usize(OPTION_MAX_LINE_CHARS)?;
+        let margin_pt = positive_usize(parser.opt_usize(OPTION_MARGIN_PT)?, DEFAULT_MARGIN_PT);
+        let font_size_pt =
+            positive_usize(parser.opt_usize(OPTION_FONT_SIZE_PT)?, DEFAULT_FONT_SIZE_PT);
+        let line_height_pt =
+            positive_usize(parser.opt_usize(OPTION_LINE_HEIGHT_PT)?, font_size_pt + 4);
+        let max_line_chars = parser.opt_usize(OPTION_MAX_LINE_CHARS)?;
         parser.allow(OPTION_METADATA);
         parser.allow(OPTION_PROVIDER_OPTIONS);
         parser.allow(OPTION_RENDERER_OPTIONS);
-        parser.finish_strict(&[])?;
+        parser.finish(&[])?;
         Ok(Self {
             source_format,
             title,
@@ -196,7 +193,7 @@ fn document_render_pdf_impl(args: &[VmValue], _out: &mut String) -> Result<VmVal
     let source = document_source_arg(args.first());
     let options = PdfRenderOptions::parse(
         &source,
-        optional_dict_arg(args, 1, BUILTIN_RENDER_PDF, "options", ErrorKind::Runtime)?,
+        Args::runtime(BUILTIN_RENDER_PDF, args).opt_dict(1, "options")?,
     )?;
     let text = extract_text_for_format(&source, options.source_format);
     let pdf = render_text_pdf(&text, &options);
@@ -211,15 +208,11 @@ fn document_render_pdf_impl(args: &[VmValue], _out: &mut String) -> Result<VmVal
     doc = "Extract normalized text from text, HTML, Markdown, or PDF byte input."
 )]
 fn document_extract_text_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    let options = optional_dict_arg(args, 1, BUILTIN_EXTRACT_TEXT, "options", ErrorKind::Runtime)?;
-    let requested_format = if let Some(dict) = options {
-        let mut parser = OptionsParser::new(BUILTIN_EXTRACT_TEXT, dict, ErrorKind::Runtime);
-        let format = parser.optional_string(OPTION_SOURCE_FORMAT)?;
-        parser.finish_strict(&[])?;
-        format
-    } else {
-        None
-    };
+    let mut parser = Args::runtime(BUILTIN_EXTRACT_TEXT, args).options(1, "options")?;
+    let requested_format = parser
+        .opt_non_empty_string(OPTION_SOURCE_FORMAT)?
+        .map(str::to_string);
+    parser.finish(&[])?;
     if matches!(
         requested_format.as_deref(),
         Some(SOURCE_FORMAT_PDF | "application/pdf")

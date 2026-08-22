@@ -989,7 +989,7 @@ fn numeric_i64_field(
         Some(VmValue::Int(value)) => Ok(Some(*value)),
         Some(VmValue::Float(value)) if value.fract() == 0.0 => Ok(Some(*value as i64)),
         Some(other) => Err(vm_error(format!(
-            "{builtin}: {field} must be an integer, got {}",
+            "{builtin}: {field} must be an int, got {}",
             other.type_name()
         ))),
         None => Ok(None),
@@ -1608,7 +1608,7 @@ fn int_arg(value: Option<&VmValue>, builtin: &str, label: &str) -> Result<i64, V
         Some(VmValue::Int(value)) => Ok(*value),
         Some(VmValue::Float(value)) if value.fract() == 0.0 => Ok(*value as i64),
         Some(other) => Err(vm_error(format!(
-            "{builtin}: {label} must be an integer, got {}",
+            "{builtin}: {label} must be an int, got {}",
             other.type_name()
         ))),
         None => Err(vm_error(format!("{builtin}: missing {label}"))),

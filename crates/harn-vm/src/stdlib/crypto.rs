@@ -6,6 +6,7 @@ use jsonwebtoken::{Algorithm, EncodingKey, Header};
 use url::Url;
 use zeroize::Zeroizing;
 
+use crate::stdlib::args::Args;
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::url_encoding::percent_encode_component;
 use crate::value::{VmError, VmValue};
@@ -113,80 +114,21 @@ fn verify_signed_url_error(message: impl Into<String>) -> VmError {
     VmError::Runtime(format!("verify_signed_url: {}", message.into()))
 }
 
-fn string_arg<'a>(args: &'a [VmValue], index: usize, name: &str) -> Result<&'a str, VmError> {
-    match args.get(index) {
-        Some(VmValue::String(value)) => Ok(value.as_ref()),
-        Some(other) => Err(signed_url_error(format!(
-            "{name} must be a string, got {}",
-            other.type_name()
-        ))),
-        None => Err(signed_url_error(format!("{name} is required"))),
-    }
-}
-
-fn int_arg(args: &[VmValue], index: usize, name: &str) -> Result<i64, VmError> {
-    match args.get(index) {
-        Some(VmValue::Int(value)) => Ok(*value),
-        Some(other) => Err(signed_url_error(format!(
-            "{name} must be an int, got {}",
-            other.type_name()
-        ))),
-        None => Err(signed_url_error(format!("{name} is required"))),
-    }
-}
-
-fn option_string(
-    options: &crate::value::DictMap,
-    key: &str,
-    builtin: &str,
-) -> Result<Option<String>, VmError> {
-    match options.get(key) {
-        Some(VmValue::String(value)) => Ok(Some(value.to_string())),
-        Some(VmValue::Nil) | None => Ok(None),
-        Some(other) => Err(VmError::Runtime(format!(
-            "{builtin}: option `{key}` must be a string, got {}",
-            other.type_name()
-        ))),
-    }
-}
-
-fn option_int(
-    options: &crate::value::DictMap,
-    key: &str,
-    builtin: &str,
-) -> Result<Option<i64>, VmError> {
-    match options.get(key) {
-        Some(VmValue::Int(value)) => Ok(Some(*value)),
-        Some(VmValue::Nil) | None => Ok(None),
-        Some(other) => Err(VmError::Runtime(format!(
-            "{builtin}: option `{key}` must be an int, got {}",
-            other.type_name()
-        ))),
-    }
-}
-
-fn signed_url_options(value: Option<&VmValue>, builtin: &str) -> Result<SignedUrlOptions, VmError> {
+fn signed_url_options(args: &Args<'_>, index: usize) -> Result<SignedUrlOptions, VmError> {
+    let builtin = args.fn_name();
     let mut options = SignedUrlOptions::default();
-    let Some(value) = value else {
-        return Ok(options);
-    };
-    let dict = value.as_dict().ok_or_else(|| {
-        VmError::Runtime(format!(
-            "{builtin}: options must be a dict, got {}",
-            value.type_name()
-        ))
-    })?;
-    if let Some(signature_param) = option_string(dict, "signature_param", builtin)? {
-        options.signature_param = signature_param;
+    let mut bag = args.options(index, "options")?;
+    if let Some(signature_param) = bag.opt_string("signature_param")? {
+        options.signature_param = signature_param.to_string();
     }
-    if let Some(expires_param) = option_string(dict, "expires_param", builtin)? {
-        options.expires_param = expires_param;
+    if let Some(expires_param) = bag.opt_string("expires_param")? {
+        options.expires_param = expires_param.to_string();
     }
-    if let Some(kid_param) = option_string(dict, "kid_param", builtin)? {
-        options.kid_param = kid_param;
+    if let Some(kid_param) = bag.opt_string("kid_param")? {
+        options.kid_param = kid_param.to_string();
     }
-    options.kid = option_string(dict, "kid", builtin)?;
-    options.skew_seconds = option_int(dict, "skew_seconds", builtin)?.unwrap_or(0);
+    options.kid = bag.opt_string("kid")?.map(str::to_string);
+    options.skew_seconds = bag.opt_int("skew_seconds")?.unwrap_or(0);
     validate_param_name(&options.signature_param, builtin, "signature_param")?;
     validate_param_name(&options.expires_param, builtin, "expires_param")?;
     validate_param_name(&options.kid_param, builtin, "kid_param")?;
@@ -326,23 +268,18 @@ fn append_query(prefix: &str, query: &str) -> String {
 }
 
 fn claims_arg<'a>(
-    args: &'a [VmValue],
+    args: &Args<'a>,
     options: &SignedUrlOptions,
 ) -> Result<&'a crate::value::DictMap, VmError> {
-    let Some(value) = args.get(1) else {
-        return Err(signed_url_error("claims is required"));
-    };
-    let dict = value.as_dict().ok_or_else(|| {
-        signed_url_error(format!("claims must be a dict, got {}", value.type_name()))
-    })?;
+    let dict = args.dict(1, "claims")?;
     for reserved in [
         &options.signature_param,
         &options.expires_param,
         &options.kid_param,
     ] {
         if dict.contains_key(reserved.as_str()) {
-            return Err(signed_url_error(format!(
-                "claims cannot contain reserved parameter `{reserved}`"
+            return Err(args.err(format_args!(
+                "`claims` cannot contain reserved parameter `{reserved}`"
             )));
         }
     }
@@ -355,11 +292,12 @@ fn signed_url_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
             "requires 4 or 5 arguments: base, claims, secret, expires_at, options?",
         ));
     }
-    let options = signed_url_options(args.get(4), "signed_url")?;
-    let base = string_arg(args, 0, "base")?;
-    let claims = claims_arg(args, &options)?;
-    let secret = string_arg(args, 2, "secret")?;
-    let expires_at = int_arg(args, 3, "expires_at")?;
+    let sign = Args::runtime("signed_url", args);
+    let options = signed_url_options(&sign, 4)?;
+    let base = sign.string(0, "base")?;
+    let claims = claims_arg(&sign, &options)?;
+    let secret = sign.string(2, "secret")?;
+    let expires_at = sign.int(3, "expires_at")?;
     let mut parts = parse_url_parts(base, "signed_url")?;
 
     parts.query_pairs.retain(|(key, _)| {
@@ -443,27 +381,10 @@ fn verify_signed_url_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
             "requires 3 or 4 arguments: url, secret_or_keys, now, options?",
         ));
     }
-    let options = signed_url_options(args.get(3), "verify_signed_url")?;
-    let raw_url = match args.first() {
-        Some(VmValue::String(value)) => value.as_ref(),
-        Some(other) => {
-            return Err(verify_signed_url_error(format!(
-                "url must be a string, got {}",
-                other.type_name()
-            )));
-        }
-        None => return Err(verify_signed_url_error("url is required")),
-    };
-    let now = match args.get(2) {
-        Some(VmValue::Int(value)) => *value,
-        Some(other) => {
-            return Err(verify_signed_url_error(format!(
-                "now must be an int, got {}",
-                other.type_name()
-            )));
-        }
-        None => return Err(verify_signed_url_error("now is required")),
-    };
+    let verify = Args::runtime("verify_signed_url", args);
+    let options = signed_url_options(&verify, 3)?;
+    let raw_url = verify.string(0, "url")?;
+    let now = verify.int(2, "now")?;
     let mut parts = parse_url_parts(raw_url, "verify_signed_url")?;
 
     let signatures: Vec<String> = parts

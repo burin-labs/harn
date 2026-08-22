@@ -9,8 +9,8 @@ use std::sync::Arc;
 use crate::bridge::HostBridge;
 use crate::llm::daemon::{load_snapshot, DaemonSnapshot};
 use crate::orchestration::DaemonEventKindRecord;
+use crate::stdlib::args::Args;
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
-use crate::stdlib::options::{self, ErrorKind};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
@@ -121,7 +121,7 @@ async fn daemon_spawn_builtin(
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let child_vm = ctx.child_vm();
-    let config = options::dict_arg(&args, 0, "daemon_spawn", "config", ErrorKind::Runtime)?;
+    let config = Args::runtime("daemon_spawn", &args).dict(0, "config")?;
     let spec = parse_spawn_spec(config, None, None)?;
     if find_daemon_by_root(&spec.persist_root).is_some_and(|state| state.lock().status == "running")
     {
@@ -400,8 +400,9 @@ async fn daemon_resume_builtin(
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let child_vm = ctx.child_vm();
-    let persist_root =
-        options::required_string_arg(&args, 0, "daemon_resume", "path", ErrorKind::Runtime)?;
+    let persist_root = Args::runtime("daemon_resume", &args)
+        .non_empty_string(0, "path")?
+        .to_string();
     let paths = daemon_paths(&persist_root);
     let snapshot = load_snapshot(&paths.snapshot_path)?;
     let meta = read_meta(&paths.meta_path)?;

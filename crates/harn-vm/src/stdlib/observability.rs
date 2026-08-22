@@ -3,9 +3,9 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::sync::atomic::Ordering;
 
+use crate::stdlib::args::Args;
 use crate::stdlib::json_to_vm_value;
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
-use crate::stdlib::options::{json_object_from_value, string_from_value, ErrorKind};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
@@ -162,9 +162,10 @@ fn obs_reset_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
     category = "observability"
 )]
 fn obs_start_span_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    let name = string_from_value(args.first(), "__obs_start_span", "name", ErrorKind::Runtime)?;
-    let attrs =
-        json_object_from_value(args.get(1), "__obs_start_span", "attrs", ErrorKind::Runtime)?;
+    let name = Args::runtime("__obs_start_span", args)
+        .string(0, "name")?
+        .to_string();
+    let attrs = Args::runtime("__obs_start_span", args).json_object(1, "attrs")?;
     let span = OBS_STATE.with(|state| {
         let mut state = state.borrow_mut();
         state.next_span_id += 1;
@@ -422,7 +423,9 @@ fn emit_instrument_from_args(
     instrument: MetricInstrument,
     args: &[VmValue],
 ) -> Result<VmValue, VmError> {
-    let name = string_from_value(args.first(), "__obs_metric", "name", ErrorKind::Runtime)?;
+    let name = Args::runtime("__obs_metric", args)
+        .string(0, "name")?
+        .to_string();
     let value_arg = args.get(1).cloned().unwrap_or(VmValue::Nil);
     let value_json = vm_value_to_json(&value_arg);
     if !matches!(
@@ -430,12 +433,12 @@ fn emit_instrument_from_args(
         serde_json::Value::Number(_) | serde_json::Value::Null
     ) {
         return Err(VmError::Runtime(format!(
-            "__obs_{}: value must be a number, got {}",
+            "__obs_{}: value must be an int or a float, got {}",
             instrument.as_str(),
             value_arg.type_name()
         )));
     }
-    let attrs = json_object_from_value(args.get(2), "__obs_metric", "attrs", ErrorKind::Runtime)?;
+    let attrs = Args::runtime("__obs_metric", args).json_object(2, "attrs")?;
     let emitted = emit_instrument(instrument, name, value_json, attrs)?;
     Ok(json_to_vm_value(&emitted))
 }

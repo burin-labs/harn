@@ -196,7 +196,7 @@ async fn invoke_ranker_callback(
             VmValue::Nil => 0.0,
             other => {
                 return Err(VmError::Runtime(format!(
-                    "assemble_context: ranker_callback score must be a number (got {})",
+                    "assemble_context: ranker_callback score must be an int or a float, got {}",
                     other.type_name()
                 )));
             }

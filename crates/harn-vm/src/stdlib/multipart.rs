@@ -4,8 +4,8 @@ use std::collections::BTreeMap;
 
 use sha2::{Digest, Sha256};
 
+use crate::stdlib::args::Args;
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
-use crate::stdlib::options::{expect_bytes_or_string_arg, expect_string_arg, ErrorKind};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
@@ -424,13 +424,14 @@ fn parsed_field_value(field: ParsedField) -> VmValue {
     category = "multipart"
 )]
 fn multipart_parse_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    let body = expect_bytes_or_string_arg(args, 0, "multipart_parse", ErrorKind::Runtime)?;
-    let content_type = expect_string_arg(args, 1, "multipart_parse", ErrorKind::Runtime)?;
+    let parse = Args::runtime("multipart_parse", args);
+    let body = parse.bytes_or_string(0, "body")?;
+    let content_type = parse.string(1, "content_type")?;
     let opts = optional_options(args, 2, "multipart_parse")?;
     let limits = parse_limits(opts, "multipart_parse")?;
     let boundary = boundary_from_content_type(content_type, "multipart_parse")?;
     let total_bytes = body.len() as i64;
-    let fields = parse_multipart_body(&body, &boundary, &limits, "multipart_parse")?;
+    let fields = parse_multipart_body(body, &boundary, &limits, "multipart_parse")?;
     let field_count = fields.len() as i64;
 
     let mut result = crate::value::DictMap::new();

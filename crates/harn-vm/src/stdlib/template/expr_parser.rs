@@ -408,7 +408,7 @@ impl<'a> ExprParser<'a> {
                             self.pos += 1;
                             segs.push(PathSeg::Key(s));
                         }
-                        _ => return Err(self.err("expected integer or string inside `[...]`")),
+                        _ => return Err(self.err("expected an int or a string inside `[...]`")),
                     }
                     if !self.eat(&EToken::RBracket) {
                         return Err(self.err("expected `]`"));

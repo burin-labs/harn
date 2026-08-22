@@ -7,6 +7,7 @@ use crate::connectors::{
     JwtVerificationOptions,
 };
 use crate::llm::vm_value_to_json;
+use crate::stdlib::args::Args;
 use crate::stdlib::macros::{harn_builtin, BuiltinSignature, Param, VmBuiltinDef, TY_ANY};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
@@ -34,17 +35,10 @@ async fn connector_call_impl(
     _ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
-    let provider = required_string_arg(&args, 0, "connector_call", "provider")?;
-    let method = required_string_arg(&args, 1, "connector_call", "method")?;
-    let params = match args.get(2) {
-        Some(VmValue::Dict(dict)) => vm_value_to_json(&VmValue::Dict(dict.clone())),
-        Some(value) if !matches!(value, VmValue::Nil) => {
-            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                "connector_call: params must be a dict when provided",
-            ))));
-        }
-        _ => vm_value_to_json(&VmValue::dict_map(Default::default())),
-    };
+    let call = Args::thrown("connector_call", &args);
+    let provider = call.non_empty_string(0, "provider")?.to_string();
+    let method = call.non_empty_string(1, "method")?.to_string();
+    let params = optional_json_arg(&call, 2, "params")?;
 
     let client = active_connector_client(&provider).ok_or_else(|| {
         VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
@@ -71,7 +65,9 @@ async fn metrics_inc_impl(
     _ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
-    let name = required_string_arg(&args, 0, "metrics_inc", "name")?;
+    let name = Args::thrown("metrics_inc", &args)
+        .non_empty_string(0, "name")?
+        .to_string();
     let amount = match args.get(1) {
         Some(VmValue::Int(value)) => *value,
         Some(VmValue::Float(value)) => *value as i64,
@@ -106,9 +102,10 @@ async fn connector_shared_verify_jwt_inline_impl(
     _ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
-    let token = required_string_arg(&args, 0, "connector_shared_verify_jwt_inline", "token")?;
-    let jwks = required_json_arg(&args, 1, "connector_shared_verify_jwt_inline", "jwks")?;
-    let options = optional_json_arg(&args, 2, "connector_shared_verify_jwt_inline")?;
+    let verify = Args::thrown("connector_shared_verify_jwt_inline", &args);
+    let token = verify.non_empty_string(0, "token")?.to_string();
+    let jwks = required_json_arg(&verify, 1, "jwks")?;
+    let options = optional_json_arg(&verify, 2, "options")?;
     let jwks: JwkSet = serde_json::from_value(jwks).map_err(|error| {
         VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
             "connector_shared_verify_jwt_inline: invalid JWKS: {error}"
@@ -138,21 +135,6 @@ async fn connector_shared_verify_jwt_inline_impl(
     Ok(json_result_to_vm_value(&value))
 }
 
-fn required_string_arg(
-    args: &[VmValue],
-    index: usize,
-    builtin: &str,
-    label: &str,
-) -> Result<String, VmError> {
-    let value = args.get(index).map(VmValue::display).unwrap_or_default();
-    if value.trim().is_empty() {
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-            format!("{builtin}: {label} is required"),
-        ))));
-    }
-    Ok(value)
-}
-
 fn client_error_to_vm(error: ClientError) -> VmError {
     match error {
         ClientError::EgressBlocked(blocked) => blocked.to_vm_error(),
@@ -160,36 +142,20 @@ fn client_error_to_vm(error: ClientError) -> VmError {
     }
 }
 
-fn required_json_arg(
-    args: &[VmValue],
-    index: usize,
-    builtin: &str,
-    label: &str,
-) -> Result<JsonValue, VmError> {
-    match args.get(index) {
-        Some(VmValue::Dict(_)) => Ok(vm_value_to_json(&args[index])),
-        Some(value) if !matches!(value, VmValue::Nil) => Err(VmError::Thrown(VmValue::String(
-            arcstr::ArcStr::from(format!(
-                "{builtin}: {label} must be a dict, got {}",
-                value.type_name()
-            )),
-        ))),
-        _ => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-            format!("{builtin}: {label} is required"),
-        )))),
-    }
+/// A required dict argument, as JSON.
+///
+/// The dict is type-checked through the shared contract first; only then is
+/// the original value handed to the JSON converter.
+fn required_json_arg(args: &Args<'_>, index: usize, label: &str) -> Result<JsonValue, VmError> {
+    args.dict(index, label)?;
+    Ok(vm_value_to_json(args.raw(index).expect("checked above")))
 }
 
-fn optional_json_arg(args: &[VmValue], index: usize, builtin: &str) -> Result<JsonValue, VmError> {
-    match args.get(index) {
-        Some(VmValue::Dict(_)) => Ok(vm_value_to_json(&args[index])),
-        Some(VmValue::Nil) | None => Ok(JsonValue::Object(Default::default())),
-        Some(value) => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-            format!(
-                "{builtin}: options must be a dict, got {}",
-                value.type_name()
-            ),
-        )))),
+/// An optional dict argument, as JSON. Missing or `nil` yields `{}`.
+fn optional_json_arg(args: &Args<'_>, index: usize, label: &str) -> Result<JsonValue, VmError> {
+    match args.opt_dict(index, label)? {
+        None => Ok(JsonValue::Object(Default::default())),
+        Some(_) => Ok(vm_value_to_json(args.raw(index).expect("checked above"))),
     }
 }
 

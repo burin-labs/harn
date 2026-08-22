@@ -81,7 +81,7 @@ fn positive_option(
         return Ok(default);
     };
     let Some(value) = value.as_int() else {
-        return Err(invalid(format!("{key} must be an integer")));
+        return Err(invalid(format!("{key} must be an int")));
     };
     let value = usize::try_from(value)
         .ok()

@@ -13,8 +13,8 @@ use crate::event_log::{
 };
 use crate::llm::vm_value_to_json;
 use crate::runtime_limits::RuntimeLimits;
+use crate::stdlib::args::{Args, ErrorKind};
 use crate::stdlib::macros::{harn_builtin, BuiltinSignature, Param, VmBuiltinDef, TY_ANY};
-use crate::stdlib::options::{duration_from_value, ErrorKind};
 use crate::triggers::dispatcher::{current_dispatch_context, current_dispatch_wait_lease};
 use crate::triggers::TRIGGER_INBOX_ENVELOPES_TOPIC;
 use crate::value::{VmClosure, VmError, VmValue};
@@ -455,12 +455,7 @@ fn parse_required_duration(value: Option<&VmValue>, field: &str) -> Result<StdDu
 }
 
 fn parse_duration_value(value: &VmValue) -> Result<StdDuration, VmError> {
-    duration_from_value(
-        value,
-        "monitor_wait_for_native",
-        "timeout",
-        ErrorKind::Runtime,
-    )
+    Args::single("monitor_wait_for_native", ErrorKind::Runtime, value).duration(0, "timeout")
 }
 
 fn string_field(map: &crate::value::DictMap, field: &str) -> Result<Option<String>, VmError> {

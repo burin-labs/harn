@@ -489,7 +489,7 @@ fn discover_sqlx_migrations(dir: &Path) -> Result<Vec<SqlxMigration>, VmError> {
         let version: i64 = parts[0].parse().map_err(|_| {
             runtime_error(format!(
                 "pg_migrate: error parsing migration filename {name:?}; \
-                 expected integer version prefix (e.g. `01_foo.sql`)"
+                 expected integer version prefix (e.g. `01_foo.sql`)" // not-a-harn-type: a file name prefix, not a value
             ))
         })?;
 

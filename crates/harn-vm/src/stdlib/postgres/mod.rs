@@ -22,11 +22,11 @@ use sqlx_postgres::{
 use tokio::sync::Mutex;
 
 use crate::llm::vm_value_to_json;
+use crate::stdlib::args::{Args, ErrorKind};
 use crate::stdlib::macros::{
     harn_builtin, BuiltinSignature, Param, VmBuiltinDef, TY_ANY, TY_BOOL, TY_DICT, TY_LIST,
     TY_RESOURCE,
 };
-use crate::stdlib::options::{non_negative_millis_from_value, ErrorKind};
 use crate::value::{VmError, VmResourceHandle, VmValue};
 use crate::vm::Vm;
 
@@ -2271,9 +2271,8 @@ fn option_int(options: Option<&crate::value::DictMap>, key: &str) -> Option<i64>
 }
 
 fn option_duration_ms(options: Option<&crate::value::DictMap>, key: &str) -> Option<u64> {
-    options.and_then(|opts| opts.get(key)).and_then(|value| {
-        non_negative_millis_from_value(value, "postgres", key, ErrorKind::Runtime).ok()
-    })
+    let reader = Args::single("postgres", ErrorKind::Runtime, options?.get(key)?);
+    reader.millis(0, key).ok()
 }
 
 pub(super) fn runtime_error(message: impl Into<String>) -> VmError {

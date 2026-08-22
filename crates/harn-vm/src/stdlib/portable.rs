@@ -259,7 +259,7 @@ fn grant_set(value: Option<&VmValue>, builtin: &str) -> Result<GrantSet, VmError
         other => {
             return Err(builtin_error(
                 builtin,
-                format!("grants must be a record, got {}", other.type_name()),
+                format!("grants must be a dict, got {}", other.type_name()),
             ));
         }
     };
@@ -366,9 +366,7 @@ mod tests {
             &mut String::new(),
         )
         .expect_err("bare grant lists are rejected");
-        assert!(invalid_grants
-            .to_string()
-            .contains("grants must be a record"));
+        assert!(invalid_grants.to_string().contains("grants must be a dict"));
         let execution = portable_start_impl(
             &[
                 artifact,

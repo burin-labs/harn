@@ -11,6 +11,7 @@ use crate::event_log::{
     active_event_log, install_memory_for_current_thread, EventLog, LogEvent, Topic,
 };
 use crate::runtime_limits::RuntimeLimits;
+use crate::stdlib::args::Args;
 use crate::trust_graph::{AutonomyTier, TrustOutcome, TrustRecord};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
@@ -83,7 +84,9 @@ pub(crate) fn register_git_builtins(vm: &mut Vm) {
         harn_builtin_meta::CapabilityId::Process,
         "git_repo_discover",
         |ctx, args| async move {
-            let path = required_path_arg(&args, 0, "git.repo.discover")?;
+            let path = PathBuf::from(
+                Args::runtime("git.repo.discover", &args).non_empty_string(0, "path")?,
+            );
             run_git_command(
                 Some(&ctx),
                 GitCommand {
@@ -114,8 +117,12 @@ pub(crate) fn register_git_builtins(vm: &mut Vm) {
         "git_worktree_create",
         |ctx, args| async move {
             let repo = repo_path_arg(&args, 0, "git.worktree.create")?;
-            let branch = required_string_arg(&args, 1, "git.worktree.create", "branch")?;
-            let path = required_string_arg(&args, 2, "git.worktree.create", "path")?;
+            let branch = Args::runtime("git.worktree.create", &args)
+                .non_empty_string(1, "branch")?
+                .to_string();
+            let path = Args::runtime("git.worktree.create", &args)
+                .non_empty_string(2, "path")?
+                .to_string();
             let options = optional_dict_arg(&args, 3);
             let force = bool_option(options, "force").unwrap_or(false);
             let detach = bool_option(options, "detach").unwrap_or(false);
@@ -156,7 +163,9 @@ pub(crate) fn register_git_builtins(vm: &mut Vm) {
         harn_builtin_meta::CapabilityId::Process,
         "git_worktree_remove",
         |ctx, args| async move {
-            let path = required_string_arg(&args, 0, "git.worktree.remove", "path")?;
+            let path = Args::runtime("git.worktree.remove", &args)
+                .non_empty_string(0, "path")?
+                .to_string();
             let options = optional_dict_arg(&args, 1);
             let force = bool_option(options, "force").unwrap_or(false);
             let path_buf = PathBuf::from(&path);
@@ -215,8 +224,15 @@ pub(crate) fn register_git_builtins(vm: &mut Vm) {
         "git_fetch",
         |ctx, args| async move {
             let repo = repo_path_arg(&args, 0, "git.fetch")?;
-            let remote = required_string_arg(&args, 1, "git.fetch", "remote")?;
-            let refspecs = string_list_arg(&args, 2, "git.fetch", "refspecs")?.unwrap_or_default();
+            let remote = Args::runtime("git.fetch", &args)
+                .non_empty_string(1, "remote")?
+                .to_string();
+            let refspecs: Vec<String> = Args::runtime("git.fetch", &args)
+                .opt_string_list(2, "refspecs")?
+                .unwrap_or_default()
+                .into_iter()
+                .map(str::to_string)
+                .collect();
             let mut argv = vec!["git".to_string(), "fetch".to_string(), remote.clone()];
             argv.extend(refspecs);
             run_git_command(
@@ -240,7 +256,9 @@ pub(crate) fn register_git_builtins(vm: &mut Vm) {
         "git_rebase",
         |ctx, args| async move {
             let repo = repo_path_arg(&args, 0, "git.rebase")?;
-            let base_ref = required_string_arg(&args, 1, "git.rebase", "base_ref")?;
+            let base_ref = Args::runtime("git.rebase", &args)
+                .non_empty_string(1, "base_ref")?
+                .to_string();
             run_git_command(
                 Some(&ctx),
                 GitCommand {
@@ -315,8 +333,12 @@ pub(crate) fn register_git_builtins(vm: &mut Vm) {
         "git_push",
         |ctx, args| async move {
             let repo = repo_path_arg(&args, 0, "git.push")?;
-            let remote = required_string_arg(&args, 1, "git.push", "remote")?;
-            let refspec = required_string_arg(&args, 2, "git.push", "refspec")?;
+            let remote = Args::runtime("git.push", &args)
+                .non_empty_string(1, "remote")?
+                .to_string();
+            let refspec = Args::runtime("git.push", &args)
+                .non_empty_string(2, "refspec")?
+                .to_string();
             let lease = args.get(3).filter(|value| !matches!(value, VmValue::Nil));
             // Ref plumbing — deleting a ref, or republishing an OID the remote
             // already holds — pushes nothing the remote has not already
@@ -442,8 +464,12 @@ pub(crate) fn register_git_builtins(vm: &mut Vm) {
         "git_merge_base",
         |ctx, args| async move {
             let repo = repo_path_arg(&args, 0, "git.merge_base")?;
-            let left = required_string_arg(&args, 1, "git.merge_base", "left")?;
-            let right = required_string_arg(&args, 2, "git.merge_base", "right")?;
+            let left = Args::runtime("git.merge_base", &args)
+                .non_empty_string(1, "left")?
+                .to_string();
+            let right = Args::runtime("git.merge_base", &args)
+                .non_empty_string(2, "right")?
+                .to_string();
             run_git_command(
                 Some(&ctx),
                 GitCommand {
@@ -509,7 +535,9 @@ pub(crate) fn register_git_builtins(vm: &mut Vm) {
         "git_ls_remote",
         |ctx, args| async move {
             let repo = repo_path_arg(&args, 0, "git.ls_remote")?;
-            let remote = required_string_arg(&args, 1, "git.ls_remote", "remote")?;
+            let remote = Args::runtime("git.ls_remote", &args)
+                .non_empty_string(1, "remote")?
+                .to_string();
             let options = optional_dict_arg(&args, 2);
             let argv = ls_remote_argv(&remote, options)?;
             run_git_command(
@@ -1320,26 +1348,6 @@ fn repo_path_from_map(map: &crate::value::DictMap, builtin: &str) -> Result<Path
     )))
 }
 
-fn required_path_arg(args: &[VmValue], index: usize, builtin: &str) -> Result<PathBuf, VmError> {
-    required_string_arg(args, index, builtin, "path").map(PathBuf::from)
-}
-
-fn required_string_arg(
-    args: &[VmValue],
-    index: usize,
-    builtin: &str,
-    name: &str,
-) -> Result<String, VmError> {
-    match args.get(index) {
-        Some(VmValue::String(value)) if !value.is_empty() => Ok(value.to_string()),
-        Some(other) => Err(VmError::TypeError(format!(
-            "{builtin}: {name} must be a non-empty string, got {}",
-            other.type_name()
-        ))),
-        None => Err(VmError::Runtime(format!("{builtin}: missing {name}"))),
-    }
-}
-
 fn optional_dict_arg(args: &[VmValue], index: usize) -> Option<&crate::value::DictMap> {
     args.get(index).and_then(|value| match value {
         VmValue::Dict(map) => Some(map.as_ref()),
@@ -1361,22 +1369,6 @@ fn bool_option(map: Option<&crate::value::DictMap>, key: &str) -> Option<bool> {
             VmValue::Bool(value) => Some(*value),
             _ => None,
         })
-}
-
-fn string_list_arg(
-    args: &[VmValue],
-    index: usize,
-    builtin: &str,
-    name: &str,
-) -> Result<Option<Vec<String>>, VmError> {
-    match args.get(index) {
-        None | Some(VmValue::Nil) => Ok(None),
-        Some(VmValue::List(values)) => string_list_value(values, builtin, name).map(Some),
-        Some(other) => Err(VmError::TypeError(format!(
-            "{builtin}: {name} must be a list<string>, got {}",
-            other.type_name()
-        ))),
-    }
 }
 
 fn string_list_option(

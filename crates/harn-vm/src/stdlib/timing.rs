@@ -29,9 +29,9 @@ use std::collections::BTreeMap;
 use std::sync::OnceLock;
 use std::time::Instant;
 
+use crate::stdlib::args::Args;
 use crate::stdlib::json_to_vm_value;
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
-use crate::stdlib::options::{json_object_from_value, string_from_value, ErrorKind};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
@@ -83,13 +83,10 @@ pub(crate) fn register_timing_builtins(vm: &mut Vm) {
     category = "timing"
 )]
 fn timing_start_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    let name = string_from_value(args.first(), "__timing_start", "name", ErrorKind::Runtime)?;
-    let attrs = json_object_from_value(
-        args.get(1),
-        "__timing_start",
-        "attributes",
-        ErrorKind::Runtime,
-    )?;
+    let name = Args::runtime("__timing_start", args)
+        .string(0, "name")?
+        .to_string();
+    let attrs = Args::runtime("__timing_start", args).json_object(1, "attributes")?;
     let attrs_btree = json_map_to_btree(&attrs);
     let (span_id, trace_id, parent_id, start_unix_ms) =
         crate::tracing::span_start_user_timing(name.clone(), attrs_btree);
@@ -138,13 +135,10 @@ fn timing_now_monotonic_ms_impl(_args: &[VmValue], _out: &mut String) -> Result<
 )]
 fn timing_event_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let span_id = handle_span_id(args.first(), "__timing_event")?;
-    let name = string_from_value(args.get(1), "__timing_event", "name", ErrorKind::Runtime)?;
-    let attrs = json_object_from_value(
-        args.get(2),
-        "__timing_event",
-        "attributes",
-        ErrorKind::Runtime,
-    )?;
+    let name = Args::runtime("__timing_event", args)
+        .string(1, "name")?
+        .to_string();
+    let attrs = Args::runtime("__timing_event", args).json_object(2, "attributes")?;
     let attached = crate::tracing::span_record_event(span_id, name, json_map_to_btree(&attrs));
     Ok(VmValue::Bool(attached))
 }
@@ -158,12 +152,7 @@ fn timing_event_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 fn timing_end_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let span_id = handle_span_id(args.first(), "__timing_end")?;
     let handle_trace_id = handle_trace_id(args.first());
-    let final_attrs = json_object_from_value(
-        args.get(1),
-        "__timing_end",
-        "final_attributes",
-        ErrorKind::Runtime,
-    )?;
+    let final_attrs = Args::runtime("__timing_end", args).json_object(1, "final_attributes")?;
 
     // Idempotency: if this handle was already closed under the same
     // trace, return the cached result instead of mutating the span

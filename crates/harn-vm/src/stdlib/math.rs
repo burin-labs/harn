@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use crate::stdlib::args::Args;
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmError, VmRange, VmRngHandle, VmValue};
 use crate::vm::Vm;
@@ -101,16 +102,7 @@ fn ceil_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     category = "math"
 )]
 fn round_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    let digits = match args.get(1) {
-        None | Some(VmValue::Nil) => None,
-        Some(VmValue::Int(d)) => Some(*d),
-        Some(other) => {
-            return Err(VmError::TypeError(format!(
-                "round(value, digits): digits must be an integer, got {}",
-                other.type_name()
-            )))
-        }
-    };
+    let digits = Args::new("round", args).opt_int(1, "digits")?;
     match (args.first().unwrap_or(&VmValue::Nil), digits) {
         // 1-arg form: nearest integer, halves away from zero.
         (VmValue::Float(n), None) => finite_float_to_i64(n.round()).map(VmValue::Int),
@@ -272,10 +264,7 @@ fn pow_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
 )]
 fn rng_seed_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     use rand::SeedableRng;
-    let seed = args
-        .first()
-        .and_then(|arg| arg.as_int())
-        .ok_or_else(|| VmError::TypeError("rng_seed(seed): seed must be an integer".to_string()))?;
+    let seed = Args::new("rng_seed", args).int(0, "seed")?;
     Ok(VmValue::rng(VmRngHandle {
         rng: Arc::new(Mutex::new(rand::rngs::StdRng::seed_from_u64(seed as u64))),
     }))
@@ -308,12 +297,9 @@ fn random_int_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
         _ => (None, 0),
     };
     if args.len() >= min_idx + 2 {
-        let min = args[min_idx]
-            .as_int()
-            .ok_or_else(|| VmError::TypeError("random_int: min must be an integer".to_string()))?;
-        let max = args[min_idx + 1]
-            .as_int()
-            .ok_or_else(|| VmError::TypeError("random_int: max must be an integer".to_string()))?;
+        let bounds = Args::new("random_int", args);
+        let min = bounds.int(min_idx, "min")?;
+        let max = bounds.int(min_idx + 1, "max")?;
         if min > max {
             return Ok(VmValue::Nil);
         }
@@ -673,26 +659,13 @@ fn range_internal_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
     sig = "range(...args: any) -> list", category = "math"
 )]
 fn range_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let bounds = Args::new("range", args);
     let (start, end) = match args.len() {
-        1 => {
-            let n = args[0].as_int().ok_or_else(|| {
-                VmError::TypeError("range(n): expected integer argument".to_string())
-            })?;
-            (0, n)
-        }
-        2 => {
-            let a = args[0].as_int().ok_or_else(|| {
-                VmError::TypeError("range(a, b): expected integer arguments".to_string())
-            })?;
-            let b = args[1].as_int().ok_or_else(|| {
-                VmError::TypeError("range(a, b): expected integer arguments".to_string())
-            })?;
-            (a, b)
-        }
-        n => {
-            return Err(VmError::TypeError(format!(
-                "range expects 1 or 2 integer arguments, got {n}"
-            )));
+        1 => (0, bounds.int(0, "end")?),
+        2 => (bounds.int(0, "start")?, bounds.int(1, "end")?),
+        _ => {
+            bounds.arity(1, 2)?;
+            unreachable!("arity rejects every length outside 1..=2");
         }
     };
     Ok(VmValue::range(VmRange {

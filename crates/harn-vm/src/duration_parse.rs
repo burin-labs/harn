@@ -22,9 +22,9 @@
 //! [`DurationParseError`]; each caller maps that onto its own error type and
 //! wording, which stays the caller's business.
 //!
-//! The float/long-form cache-TTL parser (`llm::cache`) and the
-//! `OptionsParser` millis path (`stdlib::options`, which rejects unit strings
-//! outright) are deliberate outliers and do not use this module.
+//! The float/long-form cache-TTL parser (`llm::cache`) and the millisecond
+//! path in the builtin argument contract (`stdlib::args`, which rejects unit
+//! strings outright) are deliberate outliers and do not use this module.
 
 /// Split `raw` into its leading ASCII-digit run and the trimmed, lowercased
 /// unit suffix. Returns `None` when `raw` is blank or has no digit prefix.
