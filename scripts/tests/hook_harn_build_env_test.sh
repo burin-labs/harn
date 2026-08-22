@@ -105,6 +105,35 @@ git -C "$hook_repo" config user.email 'harn-hook-test@example.invalid'
 git -C "$hook_repo" add .githooks scripts
 git -C "$hook_repo" commit -qm fixture
 
+# Git Bash resolves `harn` to `harn.exe` for executable tests. Reproduce that
+# ambiguous surface with both spellings present: Windows selection must be
+# structural so receipt suffixes remain bound to the exact artifact filename.
+windows_target="$tmp_root/windows target"
+mkdir -p "$windows_target/debug"
+for name in harn harn.exe; do
+  cp "$fake_bin/cargo" "$windows_target/debug/$name"
+  chmod +x "$windows_target/debug/$name"
+  : > "$windows_target/debug/$name.freshness"
+  : > "$windows_target/debug/$name.freshness.manifest"
+done
+for name in harn-freshness-check harn-freshness-check.exe; do
+  cp "$FAKE_FRESHNESS_CHECKER" "$windows_target/debug/$name"
+  chmod +x "$windows_target/debug/$name"
+done
+windows_hook_bin="$(
+  cd "$hook_repo"
+  # shellcheck source=/dev/null
+  . ./.githooks/lib.sh
+  OS=Windows_NT CARGO_TARGET_DIR="$windows_target" \
+    hook_find_fresh_worktree_harn_bin
+)"
+if [[ "$windows_hook_bin" != "$windows_target/debug/harn.exe" ]]; then
+  echo "Windows hook selection did not preserve the native executable suffix" >&2
+  printf 'selected=%q expected=%q\n' \
+    "$windows_hook_bin" "$windows_target/debug/harn.exe" >&2
+  exit 1
+fi
+
 (
   cd "$hook_repo"
   # shellcheck source=/dev/null

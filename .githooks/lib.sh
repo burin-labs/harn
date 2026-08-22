@@ -283,12 +283,17 @@ hook_select_fresh_worktree_harn_bin() {
   hook_fresh_repo_root=$PWD
   hook_fresh_target_dir=${CARGO_TARGET_DIR:-$(hook_target_dir)}
   hook_fresh_target_dir=${hook_fresh_target_dir:-target}
-  hook_fresh_bin="$hook_fresh_target_dir/debug/harn"
-  hook_fresh_checker="$hook_fresh_target_dir/debug/harn-freshness-check"
-  if [ ! -x "$hook_fresh_bin" ] || [ ! -x "$hook_fresh_checker" ]; then
-    hook_fresh_bin="$hook_fresh_bin.exe"
-    hook_fresh_checker="$hook_fresh_checker.exe"
-  fi
+  hook_fresh_platform=${OS:-$(uname -s)}
+  case "$hook_fresh_platform" in
+    Windows_NT | MINGW* | MSYS* | CYGWIN*) hook_fresh_suffix=.exe ;;
+    *) hook_fresh_suffix= ;;
+  esac
+  # Select the platform artifact structurally. Git Bash treats an existing
+  # `harn.exe` as executable through the extensionless path `harn`, so probing
+  # the suffixless name first loses the real filename and makes the checker
+  # seek `harn.freshness` instead of the produced `harn.exe.freshness`.
+  hook_fresh_bin="$hook_fresh_target_dir/debug/harn$hook_fresh_suffix"
+  hook_fresh_checker="$hook_fresh_target_dir/debug/harn-freshness-check$hook_fresh_suffix"
   [ -x "$hook_fresh_bin" ] && [ -x "$hook_fresh_checker" ] || return 1
   "$hook_fresh_checker" verify-worktree \
     "$hook_fresh_bin" "$hook_fresh_repo_root" || return $?
