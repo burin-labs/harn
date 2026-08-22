@@ -32,28 +32,29 @@ fn resolve_root_value(base_dir: &Path, env_value: Option<&str>, default_relative
     }
 }
 
-fn resolve_root(base_dir: &Path, env_key: &str, default_relative: &str) -> PathBuf {
-    let env_value = std::env::var(env_key).ok();
-    resolve_root_value(base_dir, env_value.as_deref(), default_relative)
-}
-
 pub fn state_root(base_dir: &Path) -> PathBuf {
     let state_env_value = std::env::var(HARN_STATE_DIR_ENV).ok();
     state_root_value(
         base_dir,
         state_env_value.as_deref(),
-        nextest_state_root().as_deref(),
+        nextest_attempt_root().as_deref(),
     )
 }
 
 pub fn run_root(base_dir: &Path) -> PathBuf {
-    resolve_root(base_dir, HARN_RUN_DIR_ENV, ".harn-runs")
+    let run_env_value = std::env::var(HARN_RUN_DIR_ENV).ok();
+    run_root_value(
+        base_dir,
+        run_env_value.as_deref(),
+        nextest_attempt_root().as_deref(),
+    )
 }
 
 fn worktree_root_value(
     base_dir: &Path,
     state_env_value: Option<&str>,
     worktree_env_value: Option<&str>,
+    nextest_root: Option<&Path>,
 ) -> PathBuf {
     match worktree_env_value {
         Some(value) if !value.trim().is_empty() => {
@@ -64,7 +65,7 @@ fn worktree_root_value(
                 base_dir.join(candidate)
             }
         }
-        _ => resolve_root_value(base_dir, state_env_value, ".harn").join("worktrees"),
+        _ => state_root_value(base_dir, state_env_value, nextest_root).join("worktrees"),
     }
 }
 
@@ -75,6 +76,7 @@ pub fn worktree_root(base_dir: &Path) -> PathBuf {
         base_dir,
         state_env_value.as_deref(),
         worktree_env_value.as_deref(),
+        nextest_attempt_root().as_deref(),
     )
 }
 
@@ -124,22 +126,44 @@ fn state_root_value(
     state_env_value: Option<&str>,
     nextest_root: Option<&Path>,
 ) -> PathBuf {
-    match state_env_value {
-        Some(value) if !value.trim().is_empty() => {
-            resolve_root_value(base_dir, Some(value), ".harn")
-        }
-        _ => nextest_root
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| base_dir.join(".harn")),
+    attempt_scoped_root_value(base_dir, state_env_value, ".harn", nextest_root, None)
+}
+
+fn run_root_value(
+    base_dir: &Path,
+    run_env_value: Option<&str>,
+    nextest_root: Option<&Path>,
+) -> PathBuf {
+    attempt_scoped_root_value(
+        base_dir,
+        run_env_value,
+        ".harn-runs",
+        nextest_root,
+        Some("runs"),
+    )
+}
+
+fn attempt_scoped_root_value(
+    base_dir: &Path,
+    explicit_value: Option<&str>,
+    default_relative: &str,
+    nextest_root: Option<&Path>,
+    nextest_child: Option<&str>,
+) -> PathBuf {
+    if explicit_value.is_some_and(|value| !value.trim().is_empty()) {
+        return resolve_root_value(base_dir, explicit_value, default_relative);
     }
+    nextest_root
+        .map(|root| nextest_child.map_or_else(|| root.to_path_buf(), |child| root.join(child)))
+        .unwrap_or_else(|| base_dir.join(default_relative))
 }
 
 /// Nextest runs each test attempt in its own process and identifies that
-/// attempt in the environment. Keep default runtime state inside the attempt
-/// instead of letting concurrent tests persist transcripts into the checkout's
-/// shared `.harn` database. Explicit `HARN_STATE_DIR` still wins in
-/// [`state_root`], and child processes inherit the same Nextest identity.
-fn nextest_state_root() -> Option<PathBuf> {
+/// attempt in the environment. Keep every default runtime root inside the
+/// attempt instead of letting concurrent tests persist state, runs, or
+/// worktrees into the checkout. Explicit root variables still win, and child
+/// processes inherit the same Nextest identity.
+fn nextest_attempt_root() -> Option<PathBuf> {
     std::env::var_os(NEXTEST_ENV)?;
     let identity = [
         std::env::var(NEXTEST_RUN_ID_ENV).ok()?,
@@ -147,13 +171,13 @@ fn nextest_state_root() -> Option<PathBuf> {
         std::env::var(NEXTEST_TEST_NAME_ENV).ok()?,
         std::env::var(NEXTEST_ATTEMPT_ID_ENV).ok()?,
     ];
-    Some(nextest_state_root_for_identity(
+    Some(nextest_attempt_root_for_identity(
         &std::env::temp_dir(),
         identity.iter().map(String::as_str),
     ))
 }
 
-fn nextest_state_root_for_identity<'a>(
+fn nextest_attempt_root_for_identity<'a>(
     temp_dir: &Path,
     identity: impl IntoIterator<Item = &'a str>,
 ) -> PathBuf {
@@ -181,7 +205,7 @@ mod tests {
             base.join(".harn-runs")
         );
         assert_eq!(
-            worktree_root_value(base, None, None),
+            worktree_root_value(base, None, None, None),
             base.join(".harn").join("worktrees")
         );
         assert_eq!(
@@ -199,19 +223,24 @@ mod tests {
     }
 
     #[test]
-    fn nextest_default_state_is_attempt_scoped_but_explicit_state_still_wins() {
+    fn nextest_default_roots_are_attempt_scoped_but_explicit_roots_still_win() {
         let base = Path::new("/workspace");
         let temp = Path::new("/tmp");
         let first =
-            nextest_state_root_for_identity(temp, ["run-1", "harn-vm", "test-a", "attempt-1"]);
+            nextest_attempt_root_for_identity(temp, ["run-1", "harn-vm", "test-a", "attempt-1"]);
         let same =
-            nextest_state_root_for_identity(temp, ["run-1", "harn-vm", "test-a", "attempt-1"]);
+            nextest_attempt_root_for_identity(temp, ["run-1", "harn-vm", "test-a", "attempt-1"]);
         let other =
-            nextest_state_root_for_identity(temp, ["run-1", "harn-vm", "test-b", "attempt-1"]);
+            nextest_attempt_root_for_identity(temp, ["run-1", "harn-vm", "test-b", "attempt-1"]);
 
         assert_eq!(first, same);
         assert_ne!(first, other);
         assert_eq!(state_root_value(base, None, Some(&first)), first);
+        assert_eq!(run_root_value(base, None, Some(&first)), first.join("runs"));
+        assert_eq!(
+            worktree_root_value(base, None, None, Some(&first)),
+            first.join("worktrees")
+        );
         assert_eq!(
             state_root_value(base, Some("/operator/state"), Some(&other)),
             PathBuf::from("/operator/state")
@@ -219,6 +248,22 @@ mod tests {
         assert_eq!(
             state_root_value(base, Some("relative-state"), Some(&other)),
             base.join("relative-state")
+        );
+        assert_eq!(
+            run_root_value(base, Some("/operator/runs"), Some(&other)),
+            PathBuf::from("/operator/runs")
+        );
+        assert_eq!(
+            run_root_value(base, Some("relative-runs"), Some(&other)),
+            base.join("relative-runs")
+        );
+        assert_eq!(
+            worktree_root_value(base, Some("/operator/state"), None, Some(&other)),
+            PathBuf::from("/operator/state/worktrees")
+        );
+        assert_eq!(
+            worktree_root_value(base, None, Some("relative-worktrees"), Some(&other)),
+            base.join("relative-worktrees")
         );
     }
 }
