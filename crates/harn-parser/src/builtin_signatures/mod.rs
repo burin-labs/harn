@@ -156,6 +156,7 @@ mod ambient_prefixed_lookup_tests {
         // Ensure contracts are visible the same way the CLI installs them.
         let _ = harn_capability_contracts::manifest();
         std::env::set_var("HARN_LEGACY_AMBIENT_CAPABILITIES", "1");
+        crate::refresh_legacy_ambient_capabilities();
         assert!(
             lookup("runtime_context_set").is_some(),
             "ambient must resolve declared global name runtime_context_set"
@@ -165,6 +166,7 @@ mod ambient_prefixed_lookup_tests {
             "ambient must still resolve unique short method context_set"
         );
         std::env::remove_var("HARN_LEGACY_AMBIENT_CAPABILITIES");
+        crate::refresh_legacy_ambient_capabilities();
         assert!(lookup("runtime_context_set").is_none());
     }
 }

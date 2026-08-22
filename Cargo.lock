@@ -3801,6 +3801,7 @@ dependencies = [
  "harn-builtin-registry",
  "harn-capability-contracts",
  "harn-lexer",
+ "imbl",
  "serde",
  "serde_json",
  "strsim",
