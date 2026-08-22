@@ -244,6 +244,32 @@ impl<'src> Lexer<'src> {
         self.base + self.pos
     }
 
+    /// Slice of the source between two recorded scan positions.
+    ///
+    /// Every recorded position is a char boundary by construction: the
+    /// scanner only advances by whole ASCII bytes or by `char::len_utf8`
+    /// of a decoded char, so slicing between two of them cannot split a
+    /// UTF-8 sequence.
+    #[inline]
+    #[expect(
+        clippy::string_slice,
+        reason = "scan positions only ever advance by whole chars, so they are char boundaries"
+    )]
+    fn src_slice(&self, start: usize, end: usize) -> &'src str {
+        &self.src[start..end]
+    }
+
+    /// Source suffix starting at a recorded scan position (see
+    /// [`Lexer::src_slice`] for the boundary argument).
+    #[inline]
+    #[expect(
+        clippy::string_slice,
+        reason = "scan positions only ever advance by whole chars, so they are char boundaries"
+    )]
+    fn src_from(&self, start: usize) -> &'src str {
+        &self.src[start..]
+    }
+
     #[inline]
     fn byte_at(&self, index: usize) -> Option<u8> {
         self.src.as_bytes().get(index).copied()
@@ -252,14 +278,19 @@ impl<'src> Lexer<'src> {
     /// Decode the char starting at byte `index` (must be a char boundary).
     #[inline]
     fn char_at(&self, index: usize) -> Option<char> {
-        self.src[index..].chars().next()
+        self.src_from(index).chars().next()
     }
 
     /// The source text from the scan position to (excluding) the next `\n`.
     #[inline]
     fn rest_of_line(&self) -> &'src str {
-        let rest = &self.src[self.pos..];
+        let rest = self.src_from(self.pos);
         match rest.as_bytes().iter().position(|&b| b == b'\n') {
+            // A byte index left of `\n` in valid UTF-8 is a char boundary.
+            #[expect(
+                clippy::string_slice,
+                reason = "the byte before an ASCII newline is a char boundary in valid UTF-8"
+            )]
             Some(len) => &rest[..len],
             None => rest,
         }
@@ -378,7 +409,7 @@ impl<'src> Lexer<'src> {
         span.end_line = self.line;
         Ok(Token::with_span(
             TokenKind::BlockComment {
-                text: self.src[text_start..text_end].to_string(),
+                text: self.src_slice(text_start, text_end).to_string(),
                 is_doc,
             },
             span,
@@ -472,7 +503,7 @@ impl<'src> Lexer<'src> {
                 self.bump_char();
             }
         }
-        let expr = &self.src[expr_start..self.pos];
+        let expr = self.src_slice(expr_start, self.pos);
         if expr.trim().is_empty() {
             return Err(LexerError::UnexpectedCharacter(
                 '}',
@@ -498,7 +529,7 @@ impl<'src> Lexer<'src> {
         if len == 0 {
             return false;
         }
-        let run = &self.src[self.pos..self.pos + len];
+        let run = self.src_slice(self.pos, self.pos + len);
         value.push_str(run);
         self.consume_str(run);
         true
@@ -520,7 +551,7 @@ impl<'src> Lexer<'src> {
         let mut has_interpolation = false;
 
         loop {
-            self.take_plain_run(&mut value, &[b'"', b'$']);
+            self.take_plain_run(&mut value, b"\"$");
             let Some(byte) = self.byte_at(self.pos) else {
                 return Err(LexerError::UnterminatedString(start));
             };
@@ -599,7 +630,7 @@ impl<'src> Lexer<'src> {
         let mut has_interpolation = false;
 
         loop {
-            self.take_plain_run(&mut value, &[b'"', b'$']);
+            self.take_plain_run(&mut value, b"\"$");
             let Some(byte) = self.byte_at(self.pos) else {
                 return Err(LexerError::UnterminatedString(start));
             };
@@ -726,7 +757,7 @@ impl<'src> Lexer<'src> {
                     // matching `#` run; otherwise it is a literal quote.
                     let closed = (1..=hashes).all(|k| self.byte_at(self.pos + k) == Some(b'#'));
                     if closed {
-                        let body = &self.src[body_start..self.pos];
+                        let body = self.src_slice(body_start, self.pos);
                         self.pos += 1 + hashes; // closing quote + `#` run
                         self.column += 1 + hashes;
                         return Ok(Token::with_span(
@@ -762,7 +793,7 @@ impl<'src> Lexer<'src> {
         while let Some(byte) = self.byte_at(self.pos) {
             match byte {
                 b'"' => {
-                    let body = &self.src[body_start..self.pos];
+                    let body = self.src_slice(body_start, self.pos);
                     self.pos += 1;
                     self.column += 1;
                     return Ok(Token::with_span(
@@ -808,7 +839,7 @@ impl<'src> Lexer<'src> {
             self.column += 1;
         }
 
-        let num_str = &self.src[num_start..self.pos];
+        let num_str = self.src_slice(num_start, self.pos);
 
         if !is_float {
             if let Some(ms) = self.try_duration_suffix(num_str) {
@@ -905,7 +936,7 @@ impl<'src> Lexer<'src> {
             }
         }
 
-        let ident = &self.src[ident_start..self.pos];
+        let ident = self.src_slice(ident_start, self.pos);
         let kind =
             keyword_token_kind(ident).unwrap_or_else(|| TokenKind::Identifier(ident.to_string()));
 
