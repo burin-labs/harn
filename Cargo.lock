@@ -3560,6 +3560,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "harn-frontend-perf"
+version = "0.0.0"
+dependencies = [
+ "criterion",
+ "harn-kernel",
+ "harn-lexer",
+ "harn-parser",
+]
+
+[[package]]
 name = "harn-glob"
 version = "0.10.111"
 dependencies = [

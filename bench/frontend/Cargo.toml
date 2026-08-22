@@ -1,0 +1,21 @@
+[package]
+name = "harn-frontend-perf"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+harn-lexer = { path = "../../crates/harn-lexer" }
+harn-parser = { path = "../../crates/harn-parser" }
+harn-kernel = { path = "../../crates/harn-kernel" }
+
+[dev-dependencies]
+criterion = "0.8"
+
+[[bench]]
+name = "bench_frontend_phases"
+path = "bench_frontend_phases.rs"
+harness = false
+
+[lints]
+workspace = true
