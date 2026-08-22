@@ -8,14 +8,15 @@ set -euo pipefail
 # Background: Burin's Rust TUI links Harn in-process through
 # `harn-serve` + `harn-hostlib` + `harn-vm`. Before the feature split, even
 # a tiny smoke eval compiled all ~27 tree-sitter grammar crates and the
-# full sqlx-postgres tree. The one Bash grammar that owns command-policy
-# semantics is security-critical VM infrastructure and deliberately remains in
-# every configuration. This script is the regression guard for issue #2781 —
-# it keeps every unrelated grammar out of lean builds and documents the delta.
+# full sqlx-postgres tree. The Bash and PowerShell grammars that own
+# command-policy semantics are security-critical VM infrastructure and
+# deliberately remain in every configuration. This script is the regression
+# guard for issue #2781 — it keeps every unrelated grammar out of lean builds
+# and documents the delta.
 #
 # Configurations (all on `harn-serve`):
 #   - lean        : --no-default-features   (no hostlib, no Postgres)
-#   - lean+tools  : --features hostlib       (tools, only the policy grammar)
+#   - lean+tools  : --features hostlib       (tools, only policy grammars)
 #   - full        : --features full          (CLI parity: grammars + Postgres)
 #
 # Dependency count is used as the comparison metric (cheap, deterministic,
@@ -73,15 +74,15 @@ assert() {
     fi
 }
 
-# Lean retains exactly tree-sitter core + Bash for structural command policy;
-# every code-intelligence grammar remains full-only. A regression in either
-# direction (another unconditional grammar creeping in, or the full set
-# silently shrinking) trips the gate.
+# Lean retains exactly tree-sitter core + Bash and PowerShell for structural
+# command policy; every code-intelligence grammar remains full-only. A
+# regression in either direction (another unconditional grammar creeping in,
+# or the full set silently shrinking) trips the gate.
 lean_parser_set="$(printf '%s\n' "$LEAN" | grep '^tree-sitter' || true)"
 lean_tools_parser_set="$(printf '%s\n' "$LEAN_TOOLS" | grep '^tree-sitter' || true)"
-expected_policy_parsers=$'tree-sitter\ntree-sitter-bash\ntree-sitter-language'
-assert "lean build links only the command-policy parser" "$([[ "$lean_parser_set" == "$expected_policy_parsers" ]] && echo ok)"
-assert "lean+tools links only the command-policy parser" "$([[ "$lean_tools_parser_set" == "$expected_policy_parsers" ]] && echo ok)"
+expected_policy_parsers=$'tree-sitter\ntree-sitter-bash\ntree-sitter-language\ntree-sitter-powershell'
+assert "lean build links only the command-policy parsers" "$([[ "$lean_parser_set" == "$expected_policy_parsers" ]] && echo ok)"
+assert "lean+tools links only the command-policy parsers" "$([[ "$lean_tools_parser_set" == "$expected_policy_parsers" ]] && echo ok)"
 assert "lean build links no sqlx crate" "$([[ "$s_lean" -eq 0 ]] && echo ok)"
 assert "full build links the grammar set" "$([[ "$g_full" -ge 27 ]] && echo ok)"
 assert "full build links sqlx" "$([[ "$s_full" -ge 1 ]] && echo ok)"
