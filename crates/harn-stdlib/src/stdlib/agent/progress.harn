@@ -304,7 +304,7 @@ fn __agent_progress_normalize_tool_config(config) {
 
 fn __agent_progress_tool_nudge(config) {
   const nudge = (config?.system_prompt_nudge
-    ?? "When useful, call ")
+      ?? "When useful, call ")
     + config.name
     + " to report concise progress. Use message for narration, entries for task-list state, and replace=true unless the update should append."
   if nudge == nil {

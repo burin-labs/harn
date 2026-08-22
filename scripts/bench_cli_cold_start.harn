@@ -117,11 +117,11 @@ pub fn load_budgets_text(text: string) {
     const entry = commands_table[key] ?? {}
     resolved = resolved
       + {
-      [key]: {
-        cold_ms: number_or(entry?.cold_ms, default_cold),
-        regression_x: number_or(entry?.regression_x, default_ratio),
-      },
-    }
+        [key]: {
+          cold_ms: number_or(entry?.cold_ms, default_cold),
+          regression_x: number_or(entry?.regression_x, default_ratio),
+        },
+      }
   }
   return resolved
 }
@@ -173,12 +173,7 @@ fn harn_version(process: HarnessProcess, harn_bin: string) -> string {
 
 fn host_label(process: HarnessProcess) -> string {
   return command_stdout_or(process, "uname", ["-s"], "unknown") + " "
-    + command_stdout_or(
-    process,
-    "uname",
-    ["-m"],
-    "unknown",
-  )
+    + command_stdout_or(process, "uname", ["-m"], "unknown")
 }
 
 pub fn most_recent_baseline_for(payload, key: string, exclude_sha: string) {
@@ -224,9 +219,7 @@ pub fn build_invocation(
   let rendered: list<string> = []
   for piece in args_template {
     rendered = rendered
-      + [
-      piece.replace("{trace_input}", trace_input).replace("{trace_output}", trace_output),
-    ]
+      + [piece.replace("{trace_input}", trace_input).replace("{trace_output}", trace_output)]
   }
   return rendered
 }
@@ -456,14 +449,14 @@ pub fn failure_reasons(cold_ms: float, budget, baseline) -> list<string> {
     }
     reasons = reasons
       + [
-      "exceeds "
-        + fixed(ratio, 2)
-        + "x baseline ("
-        + fixed(number_or(baseline_ms, 0.0), 1)
-        + " ms from "
-        + shown_sha
-        + ")",
-    ]
+        "exceeds "
+          + fixed(ratio, 2)
+          + "x baseline ("
+          + fixed(number_or(baseline_ms, 0.0), 1)
+          + " ms from "
+          + shown_sha
+          + ")",
+      ]
   }
   return reasons
 }
@@ -557,13 +550,13 @@ pub fn merge_baseline(request: MergeBaselineRequest) {
   }
   return payload
     + {
-    [sha]: {
-      host: existing_entry?.host ?? host,
-      harn_version: existing_entry?.harn_version ?? version,
-      captured_at: captured_at,
-      commands: merged_commands,
-    },
-  }
+      [sha]: {
+        host: existing_entry?.host ?? host,
+        harn_version: existing_entry?.harn_version ?? version,
+        captured_at: captured_at,
+        commands: merged_commands,
+      },
+    }
 }
 
 fn main(harness: Harness) -> int {

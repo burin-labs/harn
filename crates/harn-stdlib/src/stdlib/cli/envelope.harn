@@ -448,9 +448,8 @@ pub fn decode_lint_envelope(value: unknown, options: LintDecodeOptions? = nil) -
     const failure = unwrap_err(validated)
     if type_of(value) == "dict" && value.schemaVersion != nil
       && value.schemaVersion
-      != (opts
-      .expected_schema_version
-      ?? LINT_SCHEMA_VERSION) {
+        != (opts.expected_schema_version
+          ?? LINT_SCHEMA_VERSION) {
       return Err(
         __failure(
           "unsupported_schema_version",
@@ -492,9 +491,8 @@ pub fn decode_lint_json(text: string, options: LintDecodeOptions? = nil) -> Lint
       const value = unwrap(parsed)
       if type_of(value) == "dict" && value.schemaVersion != nil
         && value.schemaVersion
-        != (opts
-        .expected_schema_version
-        ?? LINT_SCHEMA_VERSION) {
+          != (opts.expected_schema_version
+            ?? LINT_SCHEMA_VERSION) {
         return Err(
           __failure(
             "unsupported_schema_version",

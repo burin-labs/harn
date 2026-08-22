@@ -20,17 +20,11 @@ pipeline test(harness: Harness, task) {
   )
   assert(
     stream_providers.any({ provider -> provider.provider == "kafka" })
-      && stream_providers.any(
-      { provider -> provider.provider == "nats" },
-    )
+      && stream_providers.any({ provider -> provider.provider == "nats" })
       && stream_providers.any({ provider -> provider.provider == "pulsar" })
-      && stream_providers.any(
-      { provider -> provider.provider == "postgres-cdc" },
-    )
+      && stream_providers.any({ provider -> provider.provider == "postgres-cdc" })
       && stream_providers.any({ provider -> provider.provider == "email" })
-      && stream_providers.any(
-      { provider -> provider.provider == "websocket" },
-    ),
+      && stream_providers.any({ provider -> provider.provider == "websocket" }),
     "catalog should include every STREAM-01 provider",
   )
   const cron = builtin.find({ provider -> provider.provider == "cron" })

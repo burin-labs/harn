@@ -112,13 +112,9 @@ pub fn rust_sites(grep_output: string, wire_strings: dict<string, string>) -> li
       // The trailing delimiter keeps `BoundaryId::Chat` from matching a line
       // that only mentions `BoundaryId::ChatTurnCap`.
       if body.contains("BoundaryId::" + variant + ",")
-        || body.contains(
-        "BoundaryId::" + variant + ")",
-      )
+        || body.contains("BoundaryId::" + variant + ")")
         || body.contains("BoundaryId::" + variant + ";")
-        || body.contains(
-        "BoundaryId::" + variant + " ",
-      )
+        || body.contains("BoundaryId::" + variant + " ")
         || body.ends_with("BoundaryId::" + variant) {
         sites = sites.appending({path: path, id: to_string(wire_strings[variant] ?? "")})
       }
@@ -364,12 +360,7 @@ pub fn evaluate(
     }
     findings = findings
       + entry_anchor_findings(id, entry?.anchors ?? [], sites, existing_paths)
-      + entry_test_findings(
-      id,
-      to_string(entry?.test ?? ""),
-      existing_paths,
-      contents,
-    )
+      + entry_test_findings(id, to_string(entry?.test ?? ""), existing_paths, contents)
   }
   // Rule 4: a site naming an id nobody registered — usually a typo in a `.harn`
   // payload, which would otherwise report into the void.

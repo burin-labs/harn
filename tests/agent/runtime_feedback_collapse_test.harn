@@ -53,10 +53,7 @@ pipeline test_feedback_and_reminders_share_one_provider_bound_envelope(harness: 
       assert(contains(last.content, "emit valid JSON"))
       assert(
         index_of(last.content, "authority=\"contract\"")
-          < index_of(
-          last.content,
-          "authority=\"corrective\"",
-        ),
+          < index_of(last.content, "authority=\"corrective\""),
       )
       assert(!contains(last.content, "runtime_feedback"))
       assert(!contains(last.content, "step_judge"))

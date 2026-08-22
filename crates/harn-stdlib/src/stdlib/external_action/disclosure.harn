@@ -254,10 +254,7 @@ fn __protected_identity_is_valid(identity: ExternalActionLegalIdentity?) -> bool
     return true
   }
   if !__protected_text_is_valid(identity.given_name, 200)
-    || !__protected_text_is_valid(
-    identity.family_name,
-    200,
-  ) {
+    || !__protected_text_is_valid(identity.family_name, 200) {
     return false
   }
   for middle_name in identity.middle_names ?? [] {
@@ -277,19 +274,13 @@ fn __protected_address_is_valid(address: ExternalActionPostalAddress?) -> bool {
   }
   if !__protected_text_is_valid(address.line1, 300)
     || !__protected_text_is_valid(address.city, 200)
-    || !__protected_text_is_valid(
-    address.postal_code,
-    40,
-  )
+    || !__protected_text_is_valid(address.postal_code, 40)
     || !__protected_country_is_valid(address.country_code) {
     return false
   }
   return (address.line2 == nil || __protected_text_is_valid(address.line2, 300))
     && (address.region == nil
-    || __protected_text_is_valid(
-    address.region,
-    200,
-  ))
+      || __protected_text_is_valid(address.region, 200))
 }
 
 fn __protected_contact_is_valid(contact: ExternalActionContactDetails?) -> bool {
@@ -297,10 +288,7 @@ fn __protected_contact_is_valid(contact: ExternalActionContactDetails?) -> bool 
     return true
   }
   return __protected_text_is_valid(contact.email, 320) && contact.email.contains("@")
-    && __protected_text_is_valid(
-    contact.phone,
-    80,
-  )
+    && __protected_text_is_valid(contact.phone, 80)
     && __protected_address_is_valid(contact.address)
 }
 
@@ -308,10 +296,7 @@ fn __protected_needs_are_valid(needs: list<ExternalActionAccessibilityNeed>?) ->
   for need in needs ?? [] {
     if regex_match("^[A-Za-z0-9._-]{1,128}$", need.kind) == nil
       || (need.details != nil
-      && !__protected_text_is_valid(
-      need.details,
-      1000,
-    )) {
+        && !__protected_text_is_valid(need.details, 1000)) {
       return false
     }
   }
@@ -321,10 +306,7 @@ fn __protected_needs_are_valid(needs: list<ExternalActionAccessibilityNeed>?) ->
 fn __protected_accounts_are_valid(accounts: list<ExternalActionLoyaltyAccount>?) -> bool {
   for account in accounts ?? [] {
     if !__protected_text_is_valid(account.program, 200)
-      || !__protected_text_is_valid(
-      account.member_number,
-      200,
-    ) {
+      || !__protected_text_is_valid(account.member_number, 200) {
       return false
     }
   }
@@ -334,15 +316,10 @@ fn __protected_accounts_are_valid(accounts: list<ExternalActionLoyaltyAccount>?)
 fn __protected_documents_are_valid(documents: list<ExternalActionTravelDocument>?) -> bool {
   for document in documents ?? [] {
     if !__protected_country_is_valid(document.issuing_country)
-      || !__protected_text_is_valid(
-      document.number,
-      200,
-    )
+      || !__protected_text_is_valid(document.number, 200)
       || !__protected_date_is_valid(document.expiry_date)
       || (document.nationality != nil
-      && !__protected_country_is_valid(
-      document.nationality,
-    )) {
+        && !__protected_country_is_valid(document.nationality)) {
       return false
     }
   }
@@ -352,17 +329,11 @@ fn __protected_documents_are_valid(documents: list<ExternalActionTravelDocument>
 fn __protected_values_are_valid(values: ExternalActionProtectedValues) -> bool {
   return __protected_identity_is_valid(values.legal_identity)
     && (values.birth_date == nil
-    || __protected_date_is_valid(
-    values.birth_date,
-  ))
+      || __protected_date_is_valid(values.birth_date))
     && __protected_contact_is_valid(values.contact_details)
-    && __protected_needs_are_valid(
-    values.accessibility_needs,
-  )
+    && __protected_needs_are_valid(values.accessibility_needs)
     && __protected_accounts_are_valid(values.loyalty_accounts)
-    && __protected_documents_are_valid(
-    values.travel_documents,
-  )
+    && __protected_documents_are_valid(values.travel_documents)
 }
 
 fn __disclosure_assurance_is_valid(

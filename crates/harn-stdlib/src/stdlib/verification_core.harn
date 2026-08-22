@@ -324,9 +324,8 @@ pub fn __verification_warm_state_probe_options(row, opts) {
     ?? {}
   return (opts?.command_options ?? {})
     + (probe?.command_options ?? mode?.command_options
-    ?? row
-    ?.command_options
-    ?? {})
+      ?? row?.command_options
+      ?? {})
 }
 
 pub fn __verification_warm_state_start_options(row, opts) {
@@ -343,9 +342,8 @@ pub fn __verification_warm_state_start_options(row, opts) {
     ?? {}
   return (opts?.command_options ?? {})
     + (start?.command_options ?? mode?.command_options
-    ?? row
-    ?.command_options
-    ?? {})
+      ?? row?.command_options
+      ?? {})
 }
 
 pub fn __verification_warm_state_teardown_options(row, opts) {
@@ -361,9 +359,8 @@ pub fn __verification_warm_state_teardown_options(row, opts) {
     ?? {}
   return (opts?.command_options ?? {})
     + (stop?.command_options ?? mode?.command_options
-    ?? row
-    ?.command_options
-    ?? {})
+      ?? row?.command_options
+      ?? {})
 }
 
 pub fn __verification_warm_state_cache_identity(row, opts) -> dict {
@@ -371,7 +368,7 @@ pub fn __verification_warm_state_cache_identity(row, opts) -> dict {
   return (opts?.cache_identity ?? {})
     + (row?.cacheIdentity ?? row?.cache_identity ?? {})
     + (mode?.cacheIdentity ?? mode?.cache_identity
-    ?? {})
+      ?? {})
 }
 
 pub fn __verification_warm_state_expected_delta_ms(row, mode) {
@@ -515,21 +512,13 @@ pub fn __verification_delta_normalization(options) -> dict {
     strip_patterns: [],
   }
     + __verification_delta_config_dict(row?.signatureNormalization)
-    + __verification_delta_config_dict(
-    row?.signature_normalization,
-  )
+    + __verification_delta_config_dict(row?.signature_normalization)
     + __verification_delta_config_dict(row?.diagnosticDelta)
-    + __verification_delta_config_dict(
-    row?.diagnostic_delta,
-  )
+    + __verification_delta_config_dict(row?.diagnostic_delta)
     + __verification_delta_config_dict(check?.signatureNormalization)
-    + __verification_delta_config_dict(
-    check?.signature_normalization,
-  )
+    + __verification_delta_config_dict(check?.signature_normalization)
     + __verification_delta_config_dict(check?.diagnosticDelta)
-    + __verification_delta_config_dict(
-    check?.diagnostic_delta,
-  )
+    + __verification_delta_config_dict(check?.diagnostic_delta)
     + direct
 }
 
@@ -964,11 +953,11 @@ pub fn __verification_gate_delta_value(value, classification: dict) -> dict {
   const feeds_gates = classification?.feedsGates ? true : false
   return base
     + {
-    classification: classification,
-    feedsGates: feeds_gates,
-    feeds_gates: feeds_gates,
-    advisory: !feeds_gates,
-  }
+      classification: classification,
+      feedsGates: feeds_gates,
+      feeds_gates: feeds_gates,
+      advisory: !feeds_gates,
+    }
 }
 
 pub fn __verification_gate_status(delta: dict, classification: dict) -> string {
@@ -1015,22 +1004,22 @@ pub fn verification_warm_state_facts(
     const timings = __verification_warm_state_timings(row, mode ?? {})
     facts = facts
       + [
-      {
-        id: id,
-        name: name,
-        configured: configured,
-        available: probe_ready,
-        ready: ready,
-        warm: ready,
-        timing_kind: ready ? "warm" : "cold",
-        mode: __verification_warm_state_mode_name(mode ?? {}),
-        expected_warm_delta_ms: __verification_warm_state_expected_delta_ms(row, mode ?? {}),
-        warm_ms: timings.warm_ms,
-        cold_ms: timings.cold_ms,
-        cache_identity: __verification_warm_state_cache_identity(row, opts),
-        probe: __verification_warm_state_probe_receipt(result),
-      },
-    ]
+        {
+          id: id,
+          name: name,
+          configured: configured,
+          available: probe_ready,
+          ready: ready,
+          warm: ready,
+          timing_kind: ready ? "warm" : "cold",
+          mode: __verification_warm_state_mode_name(mode ?? {}),
+          expected_warm_delta_ms: __verification_warm_state_expected_delta_ms(row, mode ?? {}),
+          warm_ms: timings.warm_ms,
+          cold_ms: timings.cold_ms,
+          cache_identity: __verification_warm_state_cache_identity(row, opts),
+          probe: __verification_warm_state_probe_receipt(result),
+        },
+      ]
     index = index + 1
   }
   return facts

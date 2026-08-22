@@ -232,9 +232,7 @@ fn __sv_annotation_enabled(value) -> bool {
 fn __sv_tool_entry_is_structural(entry) -> bool {
   const annotations = __sv_tool_annotations(entry)
   return __sv_annotation_enabled(annotations?.structural)
-    || __sv_annotation_enabled(
-    annotations?.agent_lifecycle,
-  )
+    || __sv_annotation_enabled(annotations?.agent_lifecycle)
 }
 
 fn __sv_tool_entry_has_write_capability(entry) -> bool {
@@ -306,9 +304,7 @@ fn __sv_registry_tool_entry(registry, name) {
 fn __sv_any_prior_write_tools(payload) -> bool {
   const tools = payload?.tools
   const prior = __sv_string_list(payload?.prior_successful_tools)
-    + __sv_string_list(
-    payload?.prior_rejected_tools,
-  )
+    + __sv_string_list(payload?.prior_rejected_tools)
   for name in prior {
     const entry = __sv_registry_tool_entry(tools, name)
     if entry != nil && __sv_tool_entry_has_write_capability(entry) {

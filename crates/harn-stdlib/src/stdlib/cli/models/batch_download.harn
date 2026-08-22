@@ -40,15 +40,15 @@ import {
 fn __download_status(job: dict, dry_run: bool) -> dict {
   return __batch_lifecycle_job_base(job, dry_run)
     + {
-    provider_status: job["provider_status"],
-    responses_file: job["responses_file"],
-    input_dataset_id: job["input_dataset_id"],
-    input_dataset_resource: job["input_dataset_resource"],
-    output_dataset_id: job["output_dataset_id"],
-    output_dataset_resource: job["output_dataset_resource"],
-    job_progress: job["job_progress"],
-    source_status: safe_string(job["status"], ""),
-  }
+      provider_status: job["provider_status"],
+      responses_file: job["responses_file"],
+      input_dataset_id: job["input_dataset_id"],
+      input_dataset_resource: job["input_dataset_resource"],
+      output_dataset_id: job["output_dataset_id"],
+      output_dataset_resource: job["output_dataset_resource"],
+      job_progress: job["job_progress"],
+      source_status: safe_string(job["status"], ""),
+    }
 }
 
 fn __download_slug(value: string) -> string {
@@ -126,10 +126,7 @@ fn __download_text_file(
     return {
       ok: false,
       artifact: __download_artifact_record(label, handle, out_path, operation, "", false)
-        + {
-        response_status: response["status"],
-        response: response["body"],
-      },
+        + {response_status: response["status"], response: response["body"]},
       errors: [provider + " batch result download failed for " + label + " handle " + handle],
     }
   }
@@ -138,9 +135,7 @@ fn __download_text_file(
   return {
     ok: true,
     artifact: __download_artifact_record(label, handle, out_path, operation, body_text, false)
-      + {
-      response_status: response["status"],
-    },
+      + {response_status: response["status"]},
     errors: [],
   }
 }
@@ -339,9 +334,7 @@ fn __download_bedrock_results(
   const url = __s3_request_url(harness.env, output_s3_uri, region)
   const out_path = __download_artifact_path(out_dir, job, "output")
   const operation = __download_operation("bedrock", "GET", url, "", out_path)
-    + {
-    auth: "aws_sdk_default_chain",
-  }
+    + {auth: "aws_sdk_default_chain"}
   if url == "" {
     return {ok: false, artifact: nil, errors: ["invalid Bedrock output_s3_uri"]}
   }
@@ -368,9 +361,7 @@ fn __download_bedrock_results(
     return {
       ok: false,
       artifact: __download_artifact_record("output", output_s3_uri, out_path, operation, "", false)
-        + {
-        response_status: response["status"],
-      },
+        + {response_status: response["status"]},
       errors: ["Bedrock batch result download failed for " + output_s3_uri],
     }
   }
@@ -731,17 +722,17 @@ fn __download_one_job(
     ok: len(safe_list(state["errors"])) == 0,
     job: job_report
       + {
-      status: if len(safe_list(state["errors"])) == 0 {
-        if dry_run {
-          "ready"
+        status: if len(safe_list(state["errors"])) == 0 {
+          if dry_run {
+            "ready"
+          } else {
+            "downloaded"
+          }
         } else {
-          "downloaded"
-        }
-      } else {
-        "failed"
+          "failed"
+        },
+        artifacts: safe_list(state["artifacts"]),
       },
-      artifacts: safe_list(state["artifacts"]),
-    },
     errors: safe_list(state["errors"]),
   }
 }
@@ -869,10 +860,7 @@ pub fn __run_download(harness: Harness) -> int {
     downloadedCount: __count_jobs_with_status(jobs, "downloaded"),
     readyCount: __count_jobs_with_status(jobs, "ready"),
     failedCount: __count_jobs_with_status(jobs, "failed")
-      + __count_jobs_with_status(
-      jobs,
-      "not_ready",
-    ),
+      + __count_jobs_with_status(jobs, "not_ready"),
     artifactCount: __artifact_count(jobs),
     jobs: jobs,
     status: status,
@@ -893,10 +881,7 @@ pub fn __run_download(harness: Harness) -> int {
     downloaded_count: __count_jobs_with_status(jobs, "downloaded"),
     ready_count: __count_jobs_with_status(jobs, "ready"),
     failed_count: __count_jobs_with_status(jobs, "failed")
-      + __count_jobs_with_status(
-      jobs,
-      "not_ready",
-    ),
+      + __count_jobs_with_status(jobs, "not_ready"),
     artifact_count: __artifact_count(jobs),
     jobs: jobs,
     lifecycle: __batch_receipt_lifecycle(status, jobs, dry_run, "download"),

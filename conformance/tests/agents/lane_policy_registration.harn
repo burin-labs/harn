@@ -180,9 +180,7 @@ pipeline default(harness: Harness) {
       harness.stdio.println("D.verdict_count=" + to_string(len(verdict_events)))
       harness.stdio.println(
         "D.evidence_names_lane="
-          + to_string(
-          contains(verdict_events[0].evidence, "lane=explicit_patch"),
-        ),
+          + to_string(contains(verdict_events[0].evidence, "lane=explicit_patch")),
       )
       harness.stdio.println("D.label=" + verdict_events[0].label)
     },

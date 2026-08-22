@@ -212,15 +212,9 @@ fn __workflow_stage_label(label) {
 pub fn workflow_prepare_stage_prompt(fs: HarnessFs, config = nil) {
   const opts = config ?? {}
   const rendered_context = opts?.rendered_context
-    ?? workflow_render_artifacts_context(
-    opts?.artifacts ?? [],
-    opts?.context_policy ?? {},
-  )
+    ?? workflow_render_artifacts_context(opts?.artifacts ?? [], opts?.context_policy ?? {})
   const rendered_verification = opts?.rendered_verification
-    ?? workflow_render_verification_context(
-    fs,
-    opts?.verification_contracts ?? [],
-  )
+    ?? workflow_render_verification_context(fs, opts?.verification_contracts ?? [])
   const prompt = workflow_stage_prompt(
     fs,
     {

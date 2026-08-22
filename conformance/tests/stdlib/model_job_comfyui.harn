@@ -100,12 +100,7 @@ pipeline test(harness: Harness, task) {
   )
   const edit_task: ModelTask = "image.edit"
   const edit_request: ModelJobRequest = request
-    + {
-    id: "request-edit",
-    task: edit_task,
-    prompt: "Polish the sketch",
-    inputs: [sketch],
-  }
+    + {id: "request-edit", task: edit_task, prompt: "Polish the sketch", inputs: [sketch]}
   const edit_build: ComfyWorkflowBuilder =
     fn(edit_job: ModelJobRequest) { return comfyui_flux2_klein_edit_workflow(
     edit_job,

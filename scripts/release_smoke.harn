@@ -141,10 +141,7 @@ fn watch_step(config: ReleaseSmokeConfig, adapters) {
   const target = config.watch_target
   if target == nil {
     return command_result_fail(2, "release-smoke: watch_target is required")
-      + {
-      name: "harn watch boot",
-      timed_out: false,
-    }
+      + {name: "harn watch boot", timed_out: false}
   }
   const started = adapters.start(
     [config.candidate, "watch", target],
@@ -152,10 +149,7 @@ fn watch_step(config: ReleaseSmokeConfig, adapters) {
   )
   if started?.handle_id == nil {
     return command_result_fail(started?.exit_code ?? 1, result_output(started))
-      + {
-      name: "harn watch boot",
-      timed_out: started?.timed_out ?? false,
-    }
+      + {name: "harn watch boot", timed_out: started?.timed_out ?? false}
   }
   const waited = adapters.wait(started, {timeout_ms: config.watch_timeout_ms})
   const cancelled = adapters.cancel(
@@ -188,13 +182,13 @@ fn watch_step(config: ReleaseSmokeConfig, adapters) {
   }
   return command_result_fail(final_result?.exit_code ?? 1, reason + "\n" + output)
     + {
-    name: "harn watch boot",
-    status: !ready && waited?.status == "running" ? "timed_out" : "failed",
-    timed_out: !ready && waited?.status == "running",
-    started: started,
-    waited: waited,
-    cancel: cancelled,
-  }
+      name: "harn watch boot",
+      status: !ready && waited?.status == "running" ? "timed_out" : "failed",
+      timed_out: !ready && waited?.status == "running",
+      started: started,
+      waited: waited,
+      cancel: cancelled,
+    }
 }
 
 /** Execute every release capability and retain an attributable result for each one. */

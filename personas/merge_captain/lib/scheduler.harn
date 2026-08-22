@@ -48,17 +48,11 @@ fn _gen_sweep_id() {
  */
 pub fn repair_worker_kind_for(policy, classification) {
   if classification.action == "run_local_verification"
-    && handles_kind(
-    policy.repair_worker,
-    "ci_failure",
-  ) {
+    && handles_kind(policy.repair_worker, "ci_failure") {
     return "ci_failure"
   }
   if classification.state == "dirty" && classification.action == "comment"
-    && handles_kind(
-    policy.repair_worker,
-    "merge_conflict",
-  ) {
+    && handles_kind(policy.repair_worker, "merge_conflict") {
     return "merge_conflict"
   }
   return nil

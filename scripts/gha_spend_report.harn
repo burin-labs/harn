@@ -108,20 +108,15 @@ pub fn billing_usage_rows(data, include_repos: list<string> = []) -> list {
       continue
     }
     const prior = totals[repo]
-      ?? {
-      label: "repo:" + repo,
-      minutes: 0.0,
-      usd: 0.0,
-      source: "billing-usage",
-    }
+      ?? {label: "repo:" + repo, minutes: 0.0, usd: 0.0, source: "billing-usage"}
     totals = totals
       + {
-      [repo]: prior
-        + {
-        minutes: number_value(prior.minutes) + number_value(item?.quantity),
-        usd: number_value(prior.usd) + number_value(item?.netAmount),
-      },
-    }
+        [repo]: prior
+          + {
+            minutes: number_value(prior.minutes) + number_value(item?.quantity),
+            usd: number_value(prior.usd) + number_value(item?.netAmount),
+          },
+      }
   }
   let rows = []
   for key in keys(totals).sorted() {
@@ -162,12 +157,9 @@ pub fn run_timing_rows(samples: list) -> list {
     }
     totals = totals
       + {
-      [key]: prior
-        + {
-        minutes: number_value(prior.minutes) + minutes,
-        usd: number_value(prior.usd) + usd,
-      },
-    }
+        [key]: prior
+          + {minutes: number_value(prior.minutes) + minutes, usd: number_value(prior.usd) + usd},
+      }
   }
   let rows = []
   for key in keys(totals).sorted() {

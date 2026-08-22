@@ -191,14 +191,12 @@ fn __sim_user_preflight(runtime: HarnessRuntime, answerer) {
   if state?.stopped ?? false {
     if answerer?.max_replies != nil
       && __sim_user_state_int(runtime, answerer, "replies", 0)
-      >= answerer
-      .max_replies {
+        >= answerer.max_replies {
       return __sim_user_stop("max_replies")
     }
     if answerer?.max_llm_calls != nil
       && __sim_user_state_int(runtime, answerer, "llm_calls", 0)
-      >= answerer
-      .max_llm_calls {
+        >= answerer.max_llm_calls {
       return __sim_user_stop("max_llm_calls")
     }
     return __sim_user_stop("stopped")
@@ -206,13 +204,13 @@ fn __sim_user_preflight(runtime: HarnessRuntime, answerer) {
   const max_replies = answerer?.max_replies
   if max_replies != nil
     && __sim_user_state_int(runtime, answerer, "replies", 0)
-    >= max_replies {
+      >= max_replies {
     return __sim_user_budget_stop(runtime, answerer, "max_replies")
   }
   const max_llm_calls = answerer?.max_llm_calls
   if max_llm_calls != nil
     && __sim_user_state_int(runtime, answerer, "llm_calls", 0)
-    >= max_llm_calls {
+      >= max_llm_calls {
     return __sim_user_budget_stop(runtime, answerer, "max_llm_calls")
   }
   return nil
@@ -253,9 +251,7 @@ fn __sim_user_emit(
     return nil
   }
   const audit = __sim_user_event_payload(runtime, answerer, payload, decision)
-    + {
-    event_type: event_type,
-  }
+    + {event_type: event_type}
   const result = try {
     agent_emit_event(
       agent,
@@ -440,7 +436,7 @@ fn __scripted_user_respond(agent: HarnessAgent, runtime: HarnessRuntime, answere
 fn __sim_user_config(task_or_config, behavior, tools, model, options) {
   if type_of(task_or_config) == "dict" && behavior == nil && tools == nil && model == nil
     && options
-    == nil {
+      == nil {
     return task_or_config
   }
   const opts = options ?? {}
@@ -515,17 +511,9 @@ fn __agentic_user_bindings(agent: HarnessAgent, runtime: HarnessRuntime, answere
 fn __agentic_user_prompt(harness: Harness, answerer, payload) {
   const bindings = __agentic_user_bindings(harness.agent, harness.runtime, answerer, payload)
   const system = answerer?.system_prompt
-    ?? render_agent_prompt(
-    harness.fs,
-    "agentic_user_system.harn.prompt",
-    bindings,
-  )
+    ?? render_agent_prompt(harness.fs, "agentic_user_system.harn.prompt", bindings)
   const prompt = answerer?.prompt
-    ?? render_agent_prompt(
-    harness.fs,
-    "agentic_user_user.harn.prompt",
-    bindings,
-  )
+    ?? render_agent_prompt(harness.fs, "agentic_user_user.harn.prompt", bindings)
   return {system: system, prompt: prompt}
 }
 
@@ -563,14 +551,14 @@ fn __agentic_user_call_loop(harness: Harness, answerer, prompts) {
   }
   const opts = __agentic_user_base_llm_options(answerer)
     + {
-    tools: answerer.tools,
-    tool_format: answerer?.tool_format ?? "native",
-    loop_until_done: true,
-    max_iterations: iteration_limit,
-    max_nudges: answerer?.max_nudges ?? 2,
-    done_judge: answerer?.done_judge ?? false,
-    session_id: answerer?.session_id,
-  }
+      tools: answerer.tools,
+      tool_format: answerer?.tool_format ?? "native",
+      loop_until_done: true,
+      max_iterations: iteration_limit,
+      max_nudges: answerer?.max_nudges ?? 2,
+      done_judge: answerer?.done_judge ?? false,
+      session_id: answerer?.session_id,
+    }
   const result = agent_loop(harness, prompts.prompt, prompts.system, opts)
   __sim_user_increment(harness.runtime, answerer, "llm_calls", result?.llm?.iterations ?? 1)
   return result?.visible_text ?? result?.text ?? result?.raw_text ?? json_stringify(result)

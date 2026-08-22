@@ -229,9 +229,7 @@ fn platform_proof_schema() {
                 status: schema_literal("completed"),
                 conclusion: schema_literal("success"),
                 url: schema_string()
-                  + {
-                  pattern: "^https://github[.]com/.+/actions/runs/[0-9]+/job/[0-9]+$",
-                },
+                  + {pattern: "^https://github[.]com/.+/actions/runs/[0-9]+/job/[0-9]+$"},
               },
             ),
           ),
@@ -310,24 +308,24 @@ fn contract_from_validated(value) -> ReleaseAuditContract {
     for step in job.steps {
       steps = steps
         + [
-        {
-          id: step.id,
-          condition: step.condition,
-          run: step.run,
-          required_env: step.required_env ?? {},
-        },
-      ]
+          {
+            id: step.id,
+            condition: step.condition,
+            run: step.run,
+            required_env: step.required_env ?? {},
+          },
+        ]
     }
     jobs = jobs
       + [
-      {
-        name: job.name,
-        job_id: job.job_id,
-        matrix_kind: job.matrix_kind,
-        proofs: job.proofs,
-        steps: steps,
-      },
-    ]
+        {
+          name: job.name,
+          job_id: job.job_id,
+          matrix_kind: job.matrix_kind,
+          proofs: job.proofs,
+          steps: steps,
+        },
+      ]
   }
   return {schema_version: "harn.release_audit_contract.v1", lanes: lanes, merge_group_jobs: jobs}
 }
@@ -345,9 +343,7 @@ pub fn release_audit_contract_parse(value) -> ReleaseAuditContract? {
   const job_keys = contract.merge_group_jobs.map({ job -> job.job_id + ":" + job.matrix_kind })
     .to_list()
   if !unique_strings(lane_names) || !unique_strings(lane_runners) || !unique_strings(job_names)
-    || !unique_strings(
-    job_keys,
-  ) {
+    || !unique_strings(job_keys) {
     return nil
   }
   if count_where(contract.lanes, { lane -> lane.proof == "residual" }) == 0 {
@@ -356,9 +352,7 @@ pub fn release_audit_contract_parse(value) -> ReleaseAuditContract? {
   for job in contract.merge_group_jobs {
     const step_ids = job.steps.map({ step -> step.id }).to_list()
     if len(job.proofs) == 0 || !unique_strings(job.proofs) || len(job.steps) == 0
-      || !unique_strings(
-      step_ids,
-    ) {
+      || !unique_strings(step_ids) {
       return nil
     }
     for proof in job.proofs {
@@ -389,9 +383,7 @@ fn exact_rows(observed: list<string>, required: list<string>) -> dict {
   const unknown = observed.filter({ name -> !required.contains(name) }).to_list()
   return {
     ok: len(observed) == len(required) && len(missing) == 0 && len(unknown) == 0
-      && unique_strings(
-      observed,
-    ),
+      && unique_strings(observed),
     missing: missing,
     unknown: unknown,
   }
@@ -479,9 +471,8 @@ pub fn release_audit_receipt_plan(
   // explicit pin, remote_sha_after may advance while every proof stays bound
   // to the requested source SHA.
   if receipt.source.sha != expected || receipt.local_source.head_sha != expected
-    || receipt.warm
-    .head_sha
-    != expected {
+    || receipt.warm.head_sha
+      != expected {
     return release_audit_full_plan(contract, "head_sha_mismatch", expected)
   }
   if receipt.warm.binary_sha256 != lowercase(trim(observed_warm_binary_sha256)) {
@@ -511,8 +502,7 @@ pub fn release_audit_receipt_plan(
   for platform in receipt.platforms {
     if platform.workflow_path != expected_workflows[platform.platform]
       || platform.required_job
-      != expected_jobs[platform
-      .platform] {
+        != expected_jobs[platform.platform] {
       return release_audit_full_plan(contract, "platform_identity_mismatch", expected)
     }
     if platform.completed_at_ms - platform.started_at_ms != platform.duration_ms {
@@ -539,8 +529,7 @@ pub fn release_audit_receipt_plan(
     }
   }
   if receipt.local_source.completed_at_ms - receipt.local_source.started_at_ms
-    != receipt.local_source
-    .duration_ms {
+    != receipt.local_source.duration_ms {
     return release_audit_full_plan(contract, "local_source_timing_mismatch", expected)
   }
   if receipt.local_source.duration_ms > longest {
@@ -548,9 +537,8 @@ pub fn release_audit_receipt_plan(
     slowest = "local_source"
   }
   if receipt.join.completed_at_ms - receipt.join.started_at_ms != receipt.join.duration_ms
-    || receipt
-    .join.critical_path
-    != slowest
+    || receipt.join.critical_path
+      != slowest
     || receipt.join.duration_ms < longest {
     return release_audit_full_plan(contract, "join_timing_mismatch", expected)
   }

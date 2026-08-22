@@ -122,31 +122,31 @@ fn workflow() {
         env: {...producer.env, RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"},
         steps: producer.steps
           + [
-          {
-            name: "Build portable Harn CLI",
-            run: "./scripts/ci/rust_artifact.sh build-cli cli-bundle sha",
-          },
-          {name: "Upload portable Harn CLI", uses: "actions/upload-artifact@pinned"},
-          {
-            name: "Build security test archive",
-            run: "./scripts/ci/rust_artifact.sh build-security security-bundle sha",
-          },
-          {name: "Upload security test archive", uses: "actions/upload-artifact@pinned"},
-          {
-            name: "Build portable workspace test archive",
-            if: "vars.HARN_CI_DISABLE_COLOCATED_TESTS == 'true'",
-            env: {CARGO_BUILD_JOBS: "4"},
-            run: "./scripts/ci/rust_artifact.sh build-tests bundle sha",
-          },
-          {
-            name: "Run Rust workspace tests",
-            id: "release-audit-rust-test",
-            if: "vars.HARN_CI_DISABLE_COLOCATED_TESTS != 'true'",
-            env: {HARN_LLM_CALLS_DISABLED: "1"},
-            run:
-              "scripts/ci/run_rust_test_lane.sh cargo nextest run --locked --workspace --profile ci -E 'not (${host_bound_filter})'",
-          },
-        ],
+            {
+              name: "Build portable Harn CLI",
+              run: "./scripts/ci/rust_artifact.sh build-cli cli-bundle sha",
+            },
+            {name: "Upload portable Harn CLI", uses: "actions/upload-artifact@pinned"},
+            {
+              name: "Build security test archive",
+              run: "./scripts/ci/rust_artifact.sh build-security security-bundle sha",
+            },
+            {name: "Upload security test archive", uses: "actions/upload-artifact@pinned"},
+            {
+              name: "Build portable workspace test archive",
+              if: "vars.HARN_CI_DISABLE_COLOCATED_TESTS == 'true'",
+              env: {CARGO_BUILD_JOBS: "4"},
+              run: "./scripts/ci/rust_artifact.sh build-tests bundle sha",
+            },
+            {
+              name: "Run Rust workspace tests",
+              id: "release-audit-rust-test",
+              if: "vars.HARN_CI_DISABLE_COLOCATED_TESTS != 'true'",
+              env: {HARN_LLM_CALLS_DISABLED: "1"},
+              run:
+                "scripts/ci/run_rust_test_lane.sh cargo nextest run --locked --workspace --profile ci -E 'not (${host_bound_filter})'",
+            },
+          ],
       },
       "rust-artifacts-ready": {
         "runs-on": "ubuntu-latest",
@@ -164,9 +164,7 @@ fn workflow() {
         ...lint,
         env: {...lint.env, RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"},
         steps: lint.steps
-          + [
-          {name: "Check Rust code with Clippy", run: "./scripts/ci/run_rust_lint_lane.sh"},
-        ],
+          + [{name: "Check Rust code with Clippy", run: "./scripts/ci/run_rust_lint_lane.sh"}],
       },
       "rust-cache-refresh": {
         "runs-on": "ubuntu-latest",
@@ -297,17 +295,11 @@ fn workflow() {
             name: "Verify required CI jobs",
             env: {COLOCATED_TESTS_DISABLED: gha_expression("vars.HARN_CI_DISABLE_COLOCATED_TESTS")},
             run: "rust_artifacts_ready_result=\""
-              + gha_expression(
-              "needs['rust-artifacts-ready'].result",
-            )
+              + gha_expression("needs['rust-artifacts-ready'].result")
               + "\nsecurity_tests_ready_result=\""
-              + gha_expression(
-              "needs['security-tests-ready'].result",
-            )
+              + gha_expression("needs['security-tests-ready'].result")
               + "\"\nci_walltime_report_result=\""
-              + gha_expression(
-              "needs['ci-walltime-report'].result",
-            )
+              + gha_expression("needs['ci-walltime-report'].result")
               + "\"\nif [ \"$rust_artifacts_ready_result\" != success ]; then echo 'Rust artifact handoff failed or skipped'; fi\nif [ \"$security_tests_ready_result\" != success ]; then echo 'Linux security test input handoff failed or skipped'; fi\nif [ \"$ci_walltime_report_result\" != success ]; then echo 'CI timing report failed or skipped'; fi\nif [ \"$rust_test_result\" = skipped ] && [ \"$COLOCATED_TESTS_DISABLED\" != true ]; then :; fi",
           },
         ],
@@ -540,9 +532,7 @@ pipeline test_rejects_serialized_live_artifact_handoff(harness: Harness, task) {
       "rust-check-inputs": {
         ...producer,
         steps: producer.steps.filter({ step -> step?.name != "Upload portable Harn CLI" }).to_list()
-          + [
-          producer.steps[4],
-        ],
+          + [producer.steps[4]],
       },
       "rust-security": {
         ...valid.jobs["rust-security"],
@@ -709,9 +699,7 @@ pipeline test_rejects_late_or_duplicated_flaky_test_pattern_policy(harness: Harn
       "audit-scripts": {
         ...policy_job,
         steps: without_early_policy
-          + [
-          {name: "Reject flaky test patterns", run: "make lint-test-patterns"},
-        ],
+          + [{name: "Reject flaky test patterns", run: "make lint-test-patterns"}],
       },
     },
   }

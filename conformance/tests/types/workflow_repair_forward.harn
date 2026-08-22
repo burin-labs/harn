@@ -59,8 +59,6 @@ pipeline test(harness: Harness, task) {
   assert(!boom.ok, "execution-error variant representable")
   harness.stdio.log(
     "workflow_repair_forward " + summary + " | " + to_string(len(exhausted.attempts)) + " | "
-      + to_string(
-      len(boom.attempts),
-    ),
+      + to_string(len(boom.attempts)),
   )
 }

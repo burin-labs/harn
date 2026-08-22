@@ -363,9 +363,7 @@ pub fn propose_instructions(llm: HarnessLlm, base_prompt, options = nil) {
     required: ["instructions"],
   }
   const call_opts = __llm_options(opts)
-    + {
-    system: opts?.system ?? "You improve prompts for reliable task execution.",
-  }
+    + {system: opts?.system ?? "You improve prompts for reliable task execution."}
   const result = llm.call_structured_result(
     __proposal_prompt(base_prompt, count),
     schema,

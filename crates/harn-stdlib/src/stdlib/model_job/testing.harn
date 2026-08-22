@@ -63,16 +63,16 @@ pub fn model_job_replay_backend(receipt: ModelJobReceipt) -> ModelBackend {
       for asset in receipt.assets {
         outputs = outputs
           + [
-          {
-            name: asset.id,
-            mime_type: asset.mime_type,
-            path: asset.path,
-            width: asset.width,
-            height: asset.height,
-            duration_ms: asset.duration_ms,
-            metadata: {replayed_from: receipt.job.id},
-          },
-        ]
+            {
+              name: asset.id,
+              mime_type: asset.mime_type,
+              path: asset.path,
+              width: asset.width,
+              height: asset.height,
+              duration_ms: asset.duration_ms,
+              metadata: {replayed_from: receipt.job.id},
+            },
+          ]
       }
       observation.outputs = outputs
     }

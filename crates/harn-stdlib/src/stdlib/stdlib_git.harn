@@ -405,23 +405,23 @@ fn __git_result(result, argv, cwd) -> GitCommandResult {
   }
   return raw
     + {
-    ok: success,
-    success: success,
-    status: status,
-    exit_code: raw?.exit_code,
-    timed_out: raw?.timed_out ?? (raw?.status == "timed_out"),
-    command_id: raw?.command_id,
-    handle_id: raw?.handle_id,
-    argv: argv,
-    command_args: argv,
-    cwd: cwd,
-    stdout: raw?.stdout ?? "",
-    stderr: raw?.stderr ?? "",
-    combined: process_result_text(raw),
-    output_path: raw?.output_path,
-    stdout_path: raw?.stdout_path,
-    stderr_path: raw?.stderr_path,
-  }
+      ok: success,
+      success: success,
+      status: status,
+      exit_code: raw?.exit_code,
+      timed_out: raw?.timed_out ?? (raw?.status == "timed_out"),
+      command_id: raw?.command_id,
+      handle_id: raw?.handle_id,
+      argv: argv,
+      command_args: argv,
+      cwd: cwd,
+      stdout: raw?.stdout ?? "",
+      stderr: raw?.stderr ?? "",
+      combined: process_result_text(raw),
+      output_path: raw?.output_path,
+      stdout_path: raw?.stdout_path,
+      stderr_path: raw?.stderr_path,
+    }
 }
 
 /**
@@ -1044,10 +1044,7 @@ pub fn git_tool_catalog(options: GitToolCatalogOptions = {}) -> list<GitToolCata
       continue
     }
     if enabled != nil && !__git_list_contains(enabled, "all")
-      && !__git_list_contains(
-      enabled,
-      entry.operation,
-    )
+      && !__git_list_contains(enabled, entry.operation)
       && !__git_list_contains(enabled, entry.group) {
       continue
     }
@@ -1238,22 +1235,19 @@ fn __git_tool_enabled(options, key, group) -> bool {
   const opts = options ?? {}
   const enabled = opts?.enabled_tools
     ?? [
-    "git_status",
-    "git_current_branch",
-    "git_log",
-    "git_diff",
-    "git_branch_list",
-    "git_remote_list",
-  ]
+      "git_status",
+      "git_current_branch",
+      "git_log",
+      "git_diff",
+      "git_branch_list",
+      "git_remote_list",
+    ]
   const disabled = opts?.disabled_tools ?? []
   if __git_list_contains(disabled, key) || __git_list_contains(disabled, group) {
     return false
   }
   return __git_list_contains(enabled, "all") || __git_list_contains(enabled, key)
-    || __git_list_contains(
-    enabled,
-    group,
-  )
+    || __git_list_contains(enabled, group)
 }
 
 fn __git_tool_name(options, key) -> string {
@@ -1361,10 +1355,7 @@ fn __git_toolbox_enabled(options, key) -> bool {
     return false
   }
   return __git_list_contains(enabled, "all") || __git_list_contains(enabled, "toolbox")
-    || __git_list_contains(
-    enabled,
-    key,
-  )
+    || __git_list_contains(enabled, key)
 }
 
 fn __git_toolbox_find_options(opts, args) {

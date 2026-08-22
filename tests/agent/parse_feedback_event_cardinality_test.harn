@@ -73,9 +73,8 @@ pipeline test_parse_feedback_is_counted_once(harness: Harness, task) {
         .filter(
           { event ->
             event?.reminder?.dedupe_key == "runtime_feedback/parse_guidance"
-              && event?.reminder
-              ?.authority
-              == "corrective"
+              && event?.reminder?.authority
+                == "corrective"
           },
         )
         .to_list()
@@ -124,7 +123,7 @@ pipeline test_repeated_full_parse_rejection_enters_bounded_recovery(harness: Har
         { event ->
           event.type == "agent_loop_stall_warning"
             && event?.warning?.pattern
-            == "repeated_parse_rejection"
+              == "repeated_parse_rejection"
         },
       )
       assert_eq(len(warnings), 1)

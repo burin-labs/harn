@@ -170,9 +170,7 @@ fn __connector_http_headers(options) {
   }
   const idempotency_key = opts.idempotency_key
   if idempotency_key != nil && trim(to_string(idempotency_key)) != ""
-    && !__connector_http_has_idempotency_key(
-    headers,
-  ) {
+    && !__connector_http_has_idempotency_key(headers) {
     headers["Idempotency-Key"] = to_string(idempotency_key)
   }
   return headers

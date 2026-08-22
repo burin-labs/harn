@@ -56,14 +56,14 @@ pub fn verification_affected_targets(
     if spec == nil {
       adapter_facts = adapter_facts
         + [
-        {
-          id: adapter_id,
-          parser_id: parser_id,
-          status: "not_configured",
-          ok: false,
-          target_count: 0,
-        },
-      ]
+          {
+            id: adapter_id,
+            parser_id: parser_id,
+            status: "not_configured",
+            ok: false,
+            target_count: 0,
+          },
+        ]
       index = index + 1
       continue
     }
@@ -80,16 +80,16 @@ pub fn verification_affected_targets(
       }
       adapter_facts = adapter_facts
         + [
-        {
-          id: adapter_id,
-          parser_id: parser_id,
-          status: result?.status ?? "failed",
-          ok: false,
-          exit: __verification_exit(result, {}),
-          target_count: 0,
-          error: to_string(e),
-        },
-      ]
+          {
+            id: adapter_id,
+            parser_id: parser_id,
+            status: result?.status ?? "failed",
+            ok: false,
+            exit: __verification_exit(result, {}),
+            target_count: 0,
+            error: to_string(e),
+          },
+        ]
       []
     }
     for target in parsed {
@@ -98,15 +98,15 @@ pub fn verification_affected_targets(
     if len(parsed) > 0 || len(adapter_facts) == index {
       adapter_facts = adapter_facts
         + [
-        {
-          id: adapter_id,
-          parser_id: parser_id,
-          status: result?.status ?? "completed",
-          ok: __verification_result_ok(result),
-          exit: __verification_exit(result, {}),
-          target_count: len(parsed),
-        },
-      ]
+          {
+            id: adapter_id,
+            parser_id: parser_id,
+            status: result?.status ?? "completed",
+            ok: __verification_result_ok(result),
+            exit: __verification_exit(result, {}),
+            target_count: len(parsed),
+          },
+        ]
     }
     index = index + 1
   }
@@ -230,18 +230,16 @@ pub fn verification_hud_model(
     query,
     plan_options + {limit: to_int(opts?.next_limit ?? 1) ?? 1},
   )
-  const next_check =
-    len(next_plan.selected) > 0 ? __verification_hud_entry(next_plan.selected[0]) : nil
+  const next_check = len(next_plan.selected) > 0 ? __verification_hud_entry(
+    next_plan.selected[0],
+  ) : nil
   const full_options = plan_options
-    + {
-    min_rung: opts?.full_min_rung ?? "R4",
-    max_rung: opts?.full_max_rung ?? "R5",
-    limit: 1,
-  }
+    + {min_rung: opts?.full_min_rung ?? "R4", max_rung: opts?.full_max_rung ?? "R5", limit: 1}
     + (opts?.full_plan_options ?? {})
   const full_plan = verification_ladder_plan(runtime, query, full_options)
-  const full_check =
-    len(full_plan.selected) > 0 ? __verification_hud_entry(full_plan.selected[0]) : nil
+  const full_check = len(full_plan.selected) > 0 ? __verification_hud_entry(
+    full_plan.selected[0],
+  ) : nil
   const current_hashes = __verification_snapshot_map(
     opts?.current_hashes ?? opts?.current_snapshot ?? state?.current_hashes
       ?? state?.current_snapshot
@@ -360,8 +358,8 @@ pub fn verification_diagnostic_delta(
   }
   const current_clear = current_info.explicit_success
     || (current_info.has_collection
-    && current_info.count
-    == 0)
+      && current_info.count
+        == 0)
   if current_clear {
     return __verification_delta_result(
       "cleared",
@@ -521,7 +519,7 @@ pub fn verification_gate_input(
   const feeds_gates = current_classification?.feedsGates ? true : false
   const gate_bearing_failure = feeds_gates && len(delta?.current?.signatures ?? []) > 0
     && status
-    != "cleared"
+      != "cleared"
   return {
     schema: "harn.verification.gate_input.v1",
     status: status,
@@ -777,16 +775,16 @@ pub fn verification_toolchain_facts(
     }
     facts = facts
       + [
-      {
-        id: id,
-        name: name,
-        available: ok,
-        version: version,
-        raw_version: raw_version,
-        cache_identity: __verification_toolchain_cache_identity(row, opts),
-        probe: probe,
-      },
-    ]
+        {
+          id: id,
+          name: name,
+          available: ok,
+          version: version,
+          raw_version: raw_version,
+          cache_identity: __verification_toolchain_cache_identity(row, opts),
+          probe: probe,
+        },
+      ]
     index = index + 1
   }
   return facts
@@ -910,8 +908,11 @@ pub fn verification_teardown_warm_state(
   if spec != nil {
     teardown = command_run(tools, spec, __verification_warm_state_teardown_options(row, opts))
   }
-  const fact =
-    opts?.probe_after == true ? __verification_warm_state_first_fact(tools, row, opts) : nil
+  const fact = opts?.probe_after == true ? __verification_warm_state_first_fact(
+    tools,
+    row,
+    opts,
+  ) : nil
   return {
     id: id,
     name: name,

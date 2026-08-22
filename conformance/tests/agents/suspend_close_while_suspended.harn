@@ -41,9 +41,7 @@ pipeline main(harness: Harness) {
       harness.stdio.println("resume_failed=" + to_string(is_err(resume_attempt)))
       harness.stdio.println(
         "resume_err_has_code="
-          + to_string(
-          contains(to_string(unwrap_err(resume_attempt)), "HARN-SUS-010"),
-        ),
+          + to_string(contains(to_string(unwrap_err(resume_attempt)), "HARN-SUS-010")),
       )
       const closed_again = close_agent(harness.agent, handle)
       harness.stdio.println("reclose_status=" + closed_again.status)

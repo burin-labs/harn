@@ -118,10 +118,7 @@ fn __diff_color_line(line, options) {
     return ansi_info(line, color_opts)
   }
   if starts_with(line, "+++") || starts_with(line, "---") || starts_with(line, "diff ")
-    || starts_with(
-    line,
-    "index ",
-  ) {
+    || starts_with(line, "index ") {
     return ansi_dim(line, color_opts)
   }
   if starts_with(line, "+") {
@@ -168,10 +165,7 @@ fn __render_unified_diff(body, changed, options) -> string {
     return ""
   }
   const lines = ["--- " + old_label, "+++ " + new_label]
-    + split(
-    __diff_without_final_newline(body),
-    "\n",
-  )
+    + split(__diff_without_final_newline(body), "\n")
   return join(lines.map({ line -> __diff_color_line(line, opts) }), "\n")
 }
 

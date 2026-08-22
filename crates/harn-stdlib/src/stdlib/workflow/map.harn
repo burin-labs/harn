@@ -242,12 +242,7 @@ pub fn workflow_map_stage_plan(config = nil) {
     runs_stage: true,
     output_kind: output_kind,
     stage_node: node
-      + {
-      kind: "stage",
-      map_policy: {},
-      join_policy: {},
-      output_contract: output_contract,
-    },
+      + {kind: "stage", map_policy: {}, join_policy: {}, output_contract: output_contract},
   }
 }
 

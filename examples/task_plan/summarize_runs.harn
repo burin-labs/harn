@@ -134,20 +134,20 @@ fn __strategy_summary(records, strategy) {
     const mean_nodes = __mean_int(scoped, "total_nodes")
     rows = rows
       + [
-      {
-        task_id: task_id,
-        n: len(scoped),
-        pass_rate: pass_rate,
-        parse_rate: parse_rate,
-        validate_rate: validate_rate,
-        mean_in: mean_in,
-        mean_out: mean_out,
-        mean_wall: mean_wall,
-        mean_struct: mean_struct,
-        mean_det: mean_det,
-        mean_nodes: mean_nodes,
-      },
-    ]
+        {
+          task_id: task_id,
+          n: len(scoped),
+          pass_rate: pass_rate,
+          parse_rate: parse_rate,
+          validate_rate: validate_rate,
+          mean_in: mean_in,
+          mean_out: mean_out,
+          mean_wall: mean_wall,
+          mean_struct: mean_struct,
+          mean_det: mean_det,
+          mean_nodes: mean_nodes,
+        },
+      ]
     pass_total = pass_total + pass_rate * 1000.0
     pass_count = pass_count + 1
     struct_total = struct_total + mean_struct
@@ -226,26 +226,24 @@ fn __render_per_task_table(summary) {
   for row in summary.rows {
     lines = lines
       + [
-      "| `" + row.task_id + "` | " + to_string(row.n) + " | " + __pct(row.pass_rate) + " | "
-        + __pct(
-        row.parse_rate,
-      )
-        + " | "
-        + __pct(row.validate_rate)
-        + " | "
-        + to_string(row.mean_in)
-        + " | "
-        + to_string(row.mean_out)
-        + " | "
-        + to_string(row.mean_wall)
-        + " | "
-        + to_string(row.mean_struct)
-        + " | "
-        + to_string(row.mean_det)
-        + " | "
-        + to_string(row.mean_nodes)
-        + " |",
-    ]
+        "| `" + row.task_id + "` | " + to_string(row.n) + " | " + __pct(row.pass_rate) + " | "
+          + __pct(row.parse_rate)
+          + " | "
+          + __pct(row.validate_rate)
+          + " | "
+          + to_string(row.mean_in)
+          + " | "
+          + to_string(row.mean_out)
+          + " | "
+          + to_string(row.mean_wall)
+          + " | "
+          + to_string(row.mean_struct)
+          + " | "
+          + to_string(row.mean_det)
+          + " | "
+          + to_string(row.mean_nodes)
+          + " |",
+      ]
   }
   lines = lines + [""]
   return lines
@@ -262,24 +260,22 @@ fn __render_overall_table(summaries) {
     const o = s.overall
     lines = lines
       + [
-      "| `" + s.strategy + "` | " + to_string(o.trials) + " | " + __pct(o.pass) + " | "
-        + __pct(
-        o.validate,
-      )
-        + " | "
-        + __pct(o.workflow)
-        + " | "
-        + to_string(o.mean_in)
-        + " | "
-        + to_string(o.mean_out)
-        + " | "
-        + to_string(o.mean_wall)
-        + " | "
-        + to_string(o.mean_struct)
-        + " | "
-        + to_string(o.mean_det)
-        + " |",
-    ]
+        "| `" + s.strategy + "` | " + to_string(o.trials) + " | " + __pct(o.pass) + " | "
+          + __pct(o.validate)
+          + " | "
+          + __pct(o.workflow)
+          + " | "
+          + to_string(o.mean_in)
+          + " | "
+          + to_string(o.mean_out)
+          + " | "
+          + to_string(o.mean_wall)
+          + " | "
+          + to_string(o.mean_struct)
+          + " | "
+          + to_string(o.mean_det)
+          + " |",
+      ]
   }
   lines = lines + [""]
   return lines
@@ -306,18 +302,16 @@ fn __render_per_model_table(model, label, summaries) {
     const o = s.overall
     lines = lines
       + [
-      "| `" + s.strategy + "` | " + to_string(o.trials) + " | " + __pct(o.pass) + " | "
-        + __pct(
-        o.validate,
-      )
-        + " | "
-        + __pct(o.workflow)
-        + " | "
-        + to_string(o.mean_out)
-        + " | "
-        + to_string(o.mean_wall)
-        + " |",
-    ]
+        "| `" + s.strategy + "` | " + to_string(o.trials) + " | " + __pct(o.pass) + " | "
+          + __pct(o.validate)
+          + " | "
+          + __pct(o.workflow)
+          + " | "
+          + to_string(o.mean_out)
+          + " | "
+          + to_string(o.mean_wall)
+          + " |",
+      ]
   }
   lines = lines + [""]
   return lines

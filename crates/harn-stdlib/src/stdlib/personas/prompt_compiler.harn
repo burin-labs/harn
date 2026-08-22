@@ -158,9 +158,7 @@ fn __persona_prompt_candidate_blueprint(
       + {cron: {cron: candidate.source.cron, timezone: candidate.source.timezone}}
   } else {
     blueprint = blueprint
-      + {
-      external: {provider: candidate.source.provider, event: candidate.source.event},
-    }
+      + {external: {provider: candidate.source.provider, event: candidate.source.event}}
   }
   if options.name_override != nil {
     return blueprint + {name: options.name_override}
@@ -246,11 +244,7 @@ fn __persona_prompt_validation_error(
 ) -> PersonaBlueprintDiagnostic {
   if len(report.errors) > 0 {
     return report.errors[0]
-      ?? {
-      code: "blueprint_invalid",
-      path: "",
-      message: "persona blueprint failed validation",
-    }
+      ?? {code: "blueprint_invalid", path: "", message: "persona blueprint failed validation"}
   }
   return {code: "blueprint_invalid", path: "", message: "persona blueprint failed validation"}
 }

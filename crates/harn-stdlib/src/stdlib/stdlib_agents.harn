@@ -31,24 +31,24 @@ pub fn workflow_options(llm: HarnessLlm, config) {
   const spec = workflow_model_spec(llm, config)
   const option_keys = __llm_call_option_registry().keys
     + [
-    "loop_until_done",
-    "max_iterations",
-    "max_nudges",
-    "nudge",
-    "turn_policy",
-    "stop_after_successful_tools",
-    "require_successful_tools",
-    "tool_retries",
-    "tool_backoff_ms",
-    "native_tool_fallback",
-  ]
+      "loop_until_done",
+      "max_iterations",
+      "max_nudges",
+      "nudge",
+      "turn_policy",
+      "stop_after_successful_tools",
+      "require_successful_tools",
+      "tool_retries",
+      "tool_backoff_ms",
+      "native_tool_fallback",
+    ]
   return filter_nil(
     pick_keys(config ?? {}, option_keys)
       + {
-      provider: config?.provider ?? spec?.provider,
-      model: config?.model ?? spec?.id,
-      context_callback: config?.context_callback ?? config?.context_filter,
-    },
+        provider: config?.provider ?? spec?.provider,
+        model: config?.model ?? spec?.id,
+        context_callback: config?.context_callback ?? config?.context_filter,
+      },
   )
 }
 
@@ -281,18 +281,18 @@ fn __workflow_result_artifacts(existing, text: string, workflow_name) {
     if !has_visible_result_artifact {
       run_artifacts = run_artifacts
         + [
-        artifact(
-          {
-            kind: "summary",
-            title: "Visible result",
-            text: text,
-            source: workflow_name,
-            freshness: "fresh",
-            relevance: 1.0,
-            metadata: {visibility: "public"},
-          },
-        ),
-      ]
+          artifact(
+            {
+              kind: "summary",
+              title: "Visible result",
+              text: text,
+              source: workflow_name,
+              freshness: "fresh",
+              relevance: 1.0,
+              metadata: {visibility: "public"},
+            },
+          ),
+        ]
     }
   }
   return run_artifacts
@@ -346,15 +346,15 @@ pub fn workflow_result_run(obs: HarnessObs, task, workflow_name, result, artifac
   return run_record(
     base_run
       + {
-      workflow_id: base_run?.workflow_id ?? workflow_name,
-      workflow_name: base_run?.workflow_name ?? workflow_name,
-      task: task,
-      status: options?.status ?? base_run?.status ?? "completed",
-      transcript: transcript,
-      artifacts: run_artifacts,
-      trace_spans: obs.trace_spans(),
-      metadata: metadata,
-    },
+        workflow_id: base_run?.workflow_id ?? workflow_name,
+        workflow_name: base_run?.workflow_name ?? workflow_name,
+        task: task,
+        status: options?.status ?? base_run?.status ?? "completed",
+        transcript: transcript,
+        artifacts: run_artifacts,
+        trace_spans: obs.trace_spans(),
+        metadata: metadata,
+      },
   )
 }
 
@@ -393,15 +393,15 @@ pub fn workflow_result_persist(
   const run = run_record(
     base_run
       + {
-      workflow_id: base_run?.workflow_id ?? workflow_name,
-      workflow_name: base_run?.workflow_name ?? workflow_name,
-      task: task,
-      status: options?.status ?? base_run?.status ?? "completed",
-      transcript: transcript,
-      artifacts: run_artifacts,
-      trace_spans: obs.trace_spans(),
-      metadata: metadata,
-    },
+        workflow_id: base_run?.workflow_id ?? workflow_name,
+        workflow_name: base_run?.workflow_name ?? workflow_name,
+        task: task,
+        status: options?.status ?? base_run?.status ?? "completed",
+        transcript: transcript,
+        artifacts: run_artifacts,
+        trace_spans: obs.trace_spans(),
+        metadata: metadata,
+      },
   )
   const persisted = fs.run_record_save(run, options?.path)
   return {

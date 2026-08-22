@@ -39,9 +39,7 @@ fn receipt_contract(expected_version: int) -> SchemaContract<Receipt> {
       }
       if value.payload.count <= 0 {
         issues = issues
-          + [
-          validation_issue("receipt.count", "count must be positive", "payload.count"),
-        ]
+          + [validation_issue("receipt.count", "count must be positive", "payload.count")]
       }
       return issues
     },

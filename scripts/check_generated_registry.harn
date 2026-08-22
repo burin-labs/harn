@@ -48,8 +48,7 @@ const AUDIT_GATE_RUNNER = "scripts/audit_gates.sh"
  */
 fn is_word_or_hyphen(c: string) -> bool {
   return c == "-" || c == "_"
-    || "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
-    .contains(c)
+    || "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789".contains(c)
 }
 
 /**
@@ -193,10 +192,7 @@ pub fn expand_make_target_references(make_text: string, invocation_text: string)
     }
     seen = seen + [target]
     const dependencies = target_references(targets, prerequisites[target] ?? "")
-      + make_invocation_targets(
-      targets,
-      recipes[target] ?? "",
-    )
+      + make_invocation_targets(targets, recipes[target] ?? "")
     for dependency in dependencies {
       if !seen.contains(dependency) && !queue.contains(dependency) {
         queue = queue + [dependency]
@@ -249,23 +245,23 @@ pub fn artifact_flag_errors(
   if art?.ci && check != "" && !whole_target_search(check, workflow_text) {
     errors = errors
       + [
-      "[${aid}] ci = true but `${check}` is not reachable from any .github/workflows/*.yml through the Make dependency graph — drift here would not fail a PR. Add it to a CI-invoked Make target or set ci = false (with a note).",
-    ]
+        "[${aid}] ci = true but `${check}` is not reachable from any .github/workflows/*.yml through the Make dependency graph — drift here would not fail a PR. Add it to a CI-invoked Make target or set ci = false (with a note).",
+      ]
   }
   // Defensive: only an explicit false, not a missing key, means "should not be
   // in CI".
   if art?.ci != nil && !art?.ci && check != "" && whole_target_search(check, workflow_text) {
     errors = errors
       + [
-      "[${aid}] ci = false but `${check}` IS referenced in a workflow. Flip ci = true in the registry to reflect reality.",
-    ]
+        "[${aid}] ci = false but `${check}` IS referenced in a workflow. Flip ci = true in the registry to reflect reality.",
+      ]
   }
   // make_all flag must be honoured by the all: recipe.
   if art?.make_all && check != "" && !whole_target_search(check, all_recipe) {
     errors = errors
       + [
-      "[${aid}] make_all = true but `${check}` is missing from the `all:` recipe in the Makefile.",
-    ]
+        "[${aid}] make_all = true but `${check}` is missing from the `all:` recipe in the Makefile.",
+      ]
   }
   // Source-owned outputs must exist in the checkout. Release/package payloads
   // are intentionally absent until their serial producer runs.
@@ -295,14 +291,14 @@ pub fn artifact_lifecycle_errors(art) -> list {
     if art?.ci != true {
       errors = errors
         + [
-        "[${aid}] release-package artifacts must set ci = true for their serialized producer/check.",
-      ]
+          "[${aid}] release-package artifacts must set ci = true for their serialized producer/check.",
+        ]
     }
     if art?.make_all != false {
       errors = errors
         + [
-        "[${aid}] release-package artifacts must set make_all = false; a source checkout has no payload to check.",
-      ]
+          "[${aid}] release-package artifacts must set make_all = false; a source checkout has no payload to check.",
+        ]
     }
     return errors
   }
@@ -331,15 +327,15 @@ pub fn completeness_errors(request: GeneratedRegistryCompletenessRequest) -> lis
       if !registered_gens.contains(target) {
         errors = errors
           + [
-          "Makefile target `${target}` generates an artifact but is not registered in scripts/generated_artifacts.toml (add an [[artifact]] block with gen = \"${target}\").",
-        ]
+            "Makefile target `${target}` generates an artifact but is not registered in scripts/generated_artifacts.toml (add an [[artifact]] block with gen = \"${target}\").",
+          ]
       }
     } else if target.starts_with("check-") && !registered_checks.contains(target)
       && !exempt.contains(target) {
       errors = errors
         + [
-        "Makefile target `${target}` is a check but is neither registered as an [[artifact]].check nor listed in [meta].exempt_checks in scripts/generated_artifacts.toml.",
-      ]
+          "Makefile target `${target}` is a check but is neither registered as an [[artifact]].check nor listed in [meta].exempt_checks in scripts/generated_artifacts.toml.",
+        ]
     }
   }
   return errors
@@ -360,8 +356,8 @@ pub fn exempt_hygiene_errors(exempt: list, registered_checks: list) -> list {
   for ex in both {
     errors = errors
       + [
-      "`${ex}` is both registered as an artifact check and listed in [meta].exempt_checks — remove it from exempt_checks.",
-    ]
+        "`${ex}` is both registered as an artifact check and listed in [meta].exempt_checks — remove it from exempt_checks.",
+      ]
   }
   return errors
 }
@@ -384,8 +380,8 @@ pub fn preflight_dispatch_errors(targets: list, dispatch: dict) -> list {
     if target.starts_with("check-") && !classified.contains(target) {
       errors = errors
         + [
-        "Makefile target `${target}` is not classified in [preflight.dispatch] in scripts/generated_artifacts.toml (add it with tier source|binary|excluded).",
-      ]
+          "Makefile target `${target}` is not classified in [preflight.dispatch] in scripts/generated_artifacts.toml (add it with tier source|binary|excluded).",
+        ]
     }
   }
   // Hygiene: every classified name must be a real target with a valid tier.
@@ -393,14 +389,14 @@ pub fn preflight_dispatch_errors(targets: list, dispatch: dict) -> list {
     if !targets.contains(name) {
       errors = errors
         + [
-        "[preflight.dispatch] classifies `${name}` but no such Makefile target exists — remove it or fix the name.",
-      ]
+          "[preflight.dispatch] classifies `${name}` but no such Makefile target exists — remove it or fix the name.",
+        ]
     }
     if !valid_tiers.contains(dispatch[name]) {
       errors = errors
         + [
-        "[preflight.dispatch] `${name}` has invalid tier `${dispatch[name]}` (expected source|binary|excluded).",
-      ]
+          "[preflight.dispatch] `${name}` has invalid tier `${dispatch[name]}` (expected source|binary|excluded).",
+        ]
     }
   }
   return errors
@@ -466,13 +462,13 @@ pub fn validate(request: GeneratedRegistryValidationRequest) -> list {
   }
   errors = errors
     + completeness_errors(
-    {
-      targets: targets,
-      registered_gens: registered_gens,
-      registered_checks: registered_checks,
-      exempt: exempt,
-    },
-  )
+      {
+        targets: targets,
+        registered_gens: registered_gens,
+        registered_checks: registered_checks,
+        exempt: exempt,
+      },
+    )
   errors = errors + exempt_hygiene_errors(exempt, registered_checks)
   return errors
 }

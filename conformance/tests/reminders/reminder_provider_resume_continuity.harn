@@ -29,9 +29,9 @@ pipeline main(harness: Harness) {
     "worker_resumed",
     payload
       + {
-      input_rendered: "approved again",
-      resume: payload.resume + {input_rendered: "approved again"},
-    },
+        input_rendered: "approved again",
+        resume: payload.resume + {input_rendered: "approved again"},
+      },
     {},
   )
   const reminders = transcript_events_by_kind(harness.agent.snapshot(session), "system_reminder")

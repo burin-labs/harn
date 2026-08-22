@@ -331,13 +331,9 @@ pub fn design_document_svg_result(
       }
       const resolved = unwrap(asset)
       const href = "data:" + resolved.mime_type + ";base64,"
-        + bytes_to_base64(
-        fs.read_bytes(resolved.path),
-      )
+        + bytes_to_base64(fs.read_bytes(resolved.path))
       body = body + "<image id=\"" + __design_escape(layer.id) + "\" href=\"" + href + "\" x=\""
-        + to_string(
-        layer.x,
-      )
+        + to_string(layer.x)
         + "\" y=\""
         + to_string(layer.y)
         + "\" width=\""
@@ -368,9 +364,7 @@ pub fn design_document_svg_result(
   }
   return Ok(
     "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<svg xmlns=\"http://www.w3.org/2000/svg\" width=\""
-      + to_string(
-      design.width,
-    )
+      + to_string(design.width)
       + "\" height=\""
       + to_string(design.height)
       + "\" viewBox=\"0 0 "

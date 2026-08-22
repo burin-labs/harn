@@ -190,10 +190,10 @@ fn wrapped_binary_operand_uses_its_actual_nested_layout() {
 /// must not trade stale-column over-wrapping for a final-line overflow.
 #[test]
 fn reflowed_expression_reserves_its_parent_suffix() {
-    let source = r#"fn validate(passed, diagnostics, artifact, normalized_source, normalized_test) {
+    let source = r"fn validate(passed, diagnostics, artifact, normalized_source, normalized_test) {
   return passed ? diagnostics + {artifact: artifact + {source: normalized_source, test_source: normalized_test}} : diagnostics
 }
-"#;
+";
 
     let once = formatted(source);
     assert!(

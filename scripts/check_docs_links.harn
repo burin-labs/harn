@@ -456,9 +456,7 @@ pipeline main(harness: Harness, task) {
         expected = expected_abs.substring(repo_root.len() + 1, expected_abs.len())
       }
       failures = failures
-        + [
-        {source: source, line: link.line, target: link.target, expected: expected},
-      ]
+        + [{source: source, line: link.line, target: link.target, expected: expected}]
     }
   }
   if failures.count > 0 {

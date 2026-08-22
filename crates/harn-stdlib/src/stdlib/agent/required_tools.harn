@@ -197,13 +197,13 @@ pub fn agent_required_tools_enforce(
   __agent_required_tools_emit_friction(agent, obs, result, opts, missing)
   return result
     + {
-    status: "failed",
-    final_status: "failed",
-    stop_reason: "missing_required_tools",
-    missing_required_tools: missing,
-    error: "Required tools did not succeed: " + join(missing, ", "),
-    error_envelope: envelope,
-  }
+      status: "failed",
+      final_status: "failed",
+      stop_reason: "missing_required_tools",
+      missing_required_tools: missing,
+      error: "Required tools did not succeed: " + join(missing, ", "),
+      error_envelope: envelope,
+    }
 }
 
 /**

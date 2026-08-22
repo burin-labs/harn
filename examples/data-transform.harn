@@ -19,8 +19,6 @@ pipeline default(harness: Harness, task) {
   const has_senior = users.any({ u -> u.age > 30 })
   harness.stdio.log("Has someone over 30: ${has_senior}")
   const result = users |> { list -> list.filter({ u -> u.age >= 28 }) }
-    |> { list ->
-    list.map({ u -> u.name })
-  }
+    |> { list -> list.map({ u -> u.name }) }
   harness.stdio.log("28+ names: ${result}")
 }

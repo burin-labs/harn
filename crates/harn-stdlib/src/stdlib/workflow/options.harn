@@ -319,9 +319,7 @@ fn __workflow_llm_options(
 ) -> dict {
   const model_option_keys = __llm_call_option_registry().keys
   let options = pick_keys(model_policy, model_option_keys, {drop_nil: true})
-    + {
-    tool_format: tool_format,
-  }
+    + {tool_format: tool_format}
   if __workflow_non_empty_string(config.session_id) != nil {
     options = options + {session_id: __workflow_non_empty_string(config.session_id)}
   }

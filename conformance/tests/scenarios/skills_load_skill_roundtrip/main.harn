@@ -56,10 +56,7 @@ pipeline test(harness: Harness, task) {
       assert(contains(second_messages, "Args: []"), "$ARGUMENTS is substituted")
       assert(
         contains(second_messages, ".harn/skills/rust-scripting")
-          || contains(
-          second_messages,
-          ".harn\\\\skills\\\\rust-scripting",
-        ),
+          || contains(second_messages, ".harn\\\\skills\\\\rust-scripting"),
         "skill dir is substituted",
       )
       const second_tools = json_stringify(calls[1].tools)

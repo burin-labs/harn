@@ -361,24 +361,22 @@ pub fn read_typed_events_page_result(
   for issue in page.issues {
     issues = issues
       + [
-      {
-        kind: issue.kind,
-        detail: issue.detail,
-        path: path,
-        line: issue.line,
-        offset: issue.offset,
-        raw: issue.raw,
-      },
-    ]
+        {
+          kind: issue.kind,
+          detail: issue.detail,
+          path: path,
+          line: issue.line,
+          offset: issue.offset,
+          raw: issue.raw,
+        },
+      ]
   }
   for record in page.records {
     const decoded = decode_event(record.value, spec)
     if !is_ok(decoded) {
       const failure = unwrap_err(decoded)
       issues = issues
-        + [
-        failure + {path: path, line: record.line, offset: record.offset, raw: record.raw},
-      ]
+        + [failure + {path: path, line: record.line, offset: record.offset, raw: record.raw}]
       continue
     }
     events = events

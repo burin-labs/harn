@@ -62,8 +62,7 @@ pipeline main(harness: Harness) {
           harness.stdio.println(
             included_bytes
               + manifest.join_separator_bytes * manifest.join_separator_count
-              == manifest
-              .system_prompt_bytes,
+              == manifest.system_prompt_bytes,
           )
           harness.stdio.println(requests[0].call_role == "agent.main")
           harness.stdio.println(requests[0].actor_chain == manifest.actor_chain)

@@ -135,9 +135,9 @@ fn __consume_value(args: list, cursor: int, entry, errors_in) -> dict {
   if parsed == nil && entry?.parse != "string" && entry?.parse != nil {
     errors = errors
       + [
-      "std/cli: '" + entry.name + "' could not parse '" + raw + "' as "
-        + (entry?.parse ?? "string"),
-    ]
+        "std/cli: '" + entry.name + "' could not parse '" + raw + "' as "
+          + (entry?.parse ?? "string"),
+      ]
   }
   return {value: parsed, cursor: next, errors: errors}
 }
@@ -167,10 +167,10 @@ fn __apply_long_eq(arg: string, flag_index, current, errors_in) -> dict {
   if parsed == nil && entry?.parse != "string" && entry?.parse != nil {
     errors = errors
       + [
-      "std/cli: '" + entry.name + "' could not parse '" + raw_value + "' as "
-        + (entry?.parse
-        ?? "string"),
-    ]
+        "std/cli: '" + entry.name + "' could not parse '" + raw_value + "' as "
+          + (entry?.parse
+            ?? "string"),
+      ]
   }
   if entry?.multi {
     const prior = current[entry.name] ?? []
@@ -211,10 +211,10 @@ fn __step_positional(arg, positional_specs, state) {
     const parsed = __parse_typed(arg, pspec?.parse ?? "string", pspec?.separator ?? ",")
     return state
       + {
-      current: state.current + {[pspec.name]: parsed},
-      positional_cursor: state.positional_cursor + 1,
-      advance: 1,
-    }
+        current: state.current + {[pspec.name]: parsed},
+        positional_cursor: state.positional_cursor + 1,
+        advance: 1,
+      }
   }
   return state + {positional: state.positional + [arg], advance: 1}
 }
@@ -294,12 +294,12 @@ pub fn parse_args(argv: list<string>, spec: list) -> dict {
   }
   return resolved
     + {
-    _positional: state.positional,
-    _extras: state.extras,
-    _raw: raw_argv,
-    _help: state.help,
-    _errors: final_errors,
-  }
+      _positional: state.positional,
+      _extras: state.extras,
+      _raw: raw_argv,
+      _help: state.help,
+      _errors: final_errors,
+    }
 }
 
 /**
@@ -322,13 +322,13 @@ pub fn help_text(spec: list, program: string = "harn run script.harn") -> string
       }
       lines = lines
         + [
-        "  <" + entry.name + ">" + req
-          + if help == "" {
-          ""
-        } else {
-          "  — " + help
-        },
-      ]
+          "  <" + entry.name + ">" + req
+            + if help == "" {
+              ""
+            } else {
+              "  — " + help
+            },
+        ]
     } else {
       const flags = entry?.flags ?? []
       const display = join(flags, ", ")
@@ -340,13 +340,13 @@ pub fn help_text(spec: list, program: string = "harn run script.harn") -> string
       }
       lines = lines
         + [
-        "  " + display + trailing
-          + if help == "" {
-          ""
-        } else {
-          "  — " + help
-        },
-      ]
+          "  " + display + trailing
+            + if help == "" {
+              ""
+            } else {
+              "  — " + help
+            },
+        ]
     }
   }
   return join(lines, "\n")

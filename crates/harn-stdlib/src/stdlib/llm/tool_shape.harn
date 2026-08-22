@@ -227,10 +227,8 @@ fn __tool_shape_call_markup(text: string) -> int {
     // Claiming it here would silently move a stable shape identifier, so only
     // the unclosed form — the one nothing else can see — is taken.
     if to_string(groups[1] ?? "") == ""
-      && body.index_of(
-      "</" + lowercase(to_string(groups[0] ?? "")) + ">",
-    )
-      >= 0 {
+      && body.index_of("</" + lowercase(to_string(groups[0] ?? "")) + ">")
+        >= 0 {
       continue
     }
     if __tool_shape_body_has_arguments(body)
@@ -245,11 +243,8 @@ fn __tool_shape_call_markup(text: string) -> int {
     }
     const body = text.slice(framed?.end ?? len(text), len(text))
     if __tool_shape_body_has_arguments(body)
-      || regex_match(
-      "(?i)\"(?:arguments|args|parameters|input|params)\"\\s*:",
-      body,
-    )
-      != nil {
+      || regex_match("(?i)\"(?:arguments|args|parameters|input|params)\"\\s*:", body)
+        != nil {
       return at
     }
   }

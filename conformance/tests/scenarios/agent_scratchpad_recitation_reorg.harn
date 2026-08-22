@@ -53,21 +53,17 @@ pipeline default(harness: Harness) {
       )
       harness.stdio.println(
         "first_tail:"
-          + to_string(
-          ends_with(calls[0].system, "user:initial (user_input): Initial task"),
-        ),
+          + to_string(ends_with(calls[0].system, "user:initial (user_input): Initial task")),
       )
       harness.stdio.println(
         "reorg_prompt:"
           + to_string(
-          contains(calls[1].messages[0].content, "Reorganize the live agent scratchpad"),
-        ),
+            contains(calls[1].messages[0].content, "Reorganize the live agent scratchpad"),
+          ),
       )
       harness.stdio.println(
         "second_has_fact:"
-          + to_string(
-          contains(calls[2].system, "observe returned observed-value-42"),
-        ),
+          + to_string(contains(calls[2].system, "observe returned observed-value-42")),
       )
       harness.stdio.println(
         "second_has_source:" + to_string(contains(calls[2].system, "[source_ref: turn:3]")),

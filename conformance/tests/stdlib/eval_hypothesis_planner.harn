@@ -7,9 +7,7 @@ import {
 
 pipeline default(harness: Harness, _task) {
   const invalid = hypothesis_fixture_intent_v2()
-    + {
-    intervention: {adapter_id: "prompt", variant_id: "invented"},
-  }
+    + {intervention: {adapter_id: "prompt", variant_id: "invented"}}
   const valid = hypothesis_fixture_intent_v2()
   with_llm_script(
     harness.llm,

@@ -511,22 +511,22 @@ pub fn canon_resolve_packs(env: HarnessEnv, fs: HarnessFs, options = nil) -> lis
   const needs_manifest = len(requested) == 0 || __canon_requested_needs_manifest(requested)
   const manifest = opts?.manifest
     ?? if needs_manifest && canon_root != nil
-    && __canon_text(canon_root)
-    != "" {
-    const root_manifest = canon_load_manifest(fs, canon_root)
-    if configured_root {
-      root_manifest
+      && __canon_text(canon_root)
+        != "" {
+      const root_manifest = canon_load_manifest(fs, canon_root)
+      if configured_root {
+        root_manifest
+      } else {
+        __canon_merge_manifest_packs(
+          root_manifest,
+          __canon_manifest_from_installed_packages(fs, project),
+        )
+      }
+    } else if needs_manifest {
+      __canon_manifest_from_installed_packages(fs, project)
     } else {
-      __canon_merge_manifest_packs(
-        root_manifest,
-        __canon_manifest_from_installed_packages(fs, project),
-      )
+      nil
     }
-  } else if needs_manifest {
-    __canon_manifest_from_installed_packages(fs, project)
-  } else {
-    nil
-  }
   if len(requested) == 0 {
     requested = canon_pack_ids_for_files(opts?.files ?? opts?.slice?.files ?? [], manifest)
   }
@@ -638,23 +638,23 @@ pub fn canon_inject_feedback(harness: Harness, session_id: string, slice, option
   } else if feedback != "" && mode == "reminder" {
     const reminder = (opts?.reminder ?? {})
       + {
-      body: feedback,
-      tags: opts?.reminder?.tags ?? ["harn-canon"],
-      dedupe_key: opts?.reminder?.dedupe_key
-        ?? ("harn-canon/" + join(result.selected_pack_ids, ",")),
-      ttl_turns: opts?.reminder?.ttl_turns ?? 1,
-      preserve_on_compact: opts?.reminder?.preserve_on_compact ?? true,
-    }
+        body: feedback,
+        tags: opts?.reminder?.tags ?? ["harn-canon"],
+        dedupe_key: opts?.reminder?.dedupe_key
+          ?? ("harn-canon/" + join(result.selected_pack_ids, ",")),
+        ttl_turns: opts?.reminder?.ttl_turns ?? 1,
+        preserve_on_compact: opts?.reminder?.preserve_on_compact ?? true,
+      }
     reminder_id = agent_session_inject_reminder(harness.agent, session_id, reminder)
   } else if mode != "none" && mode != "feedback" && mode != "reminder" {
     throw "canon_inject_feedback: inject must be feedback|reminder|none"
   }
   return result
     + {
-    feedback_text: feedback,
-    injected: feedback != "" && mode != "none",
-    reminder_id: reminder_id,
-  }
+      feedback_text: feedback,
+      injected: feedback != "" && mode != "none",
+      reminder_id: reminder_id,
+    }
 }
 
 /**
@@ -725,18 +725,12 @@ fn __canon_event_push_path_bucket(items, bucket) {
 fn __canon_event_strip_path_token(raw) -> string {
   let token = __canon_text(raw)
   while starts_with(token, "`") || starts_with(token, "'") || starts_with(token, "\"")
-    || starts_with(
-    token,
-    "(",
-  )
+    || starts_with(token, "(")
     || starts_with(token, "[") {
     token = substring(token, 1)
   }
   while ends_with(token, "`") || ends_with(token, "'") || ends_with(token, "\"")
-    || ends_with(
-    token,
-    ")",
-  )
+    || ends_with(token, ")")
     || ends_with(token, "]")
     || ends_with(token, ":")
     || ends_with(token, ",")
@@ -834,9 +828,7 @@ fn __canon_event_push_tool_result_paths(items, result) {
   }
   const tool_name = lowercase(__canon_text(result?.tool_name ?? result?.name))
   if contains(["edit", "scaffold", "run_codemod", "write", "write_file"], tool_name)
-    && __canon_event_result_ok(
-    result,
-  ) {
+    && __canon_event_result_ok(result) {
     out = __canon_event_push_path(out, canon_event_write_path_from_result(result))
   }
   return out
@@ -1065,8 +1057,7 @@ fn __canon_event_provider_paths(provider) {
 fn __canon_event_fallback_paths(options = nil) -> list {
   const opts = options ?? {}
   const provider = opts?.changed_paths_provider ?? opts?.changedPathsProvider ?? opts?.changed_paths
-    ?? opts
-    ?.changedPaths
+    ?? opts?.changedPaths
   let paths = []
   for item in __canon_event_provider_paths(provider) ?? [] {
     paths = __canon_event_push_path(paths, item)
@@ -1140,11 +1131,7 @@ pub fn canon_event_router(harness: Harness, session_id: string, event, options =
       ?? harness.fs.cwd(),
   )
   const inject_options = __canon_event_options_with_ctx(opts, observed_symbols)
-    + {
-    root: workspace_root,
-    project_root: workspace_root,
-    inject: opts?.inject ?? "reminder",
-  }
+    + {root: workspace_root, project_root: workspace_root, inject: opts?.inject ?? "reminder"}
   const injected = try {
     canon_inject_paths_feedback(harness, session_id, paths, inject_options)
   }

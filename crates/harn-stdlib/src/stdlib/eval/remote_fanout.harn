@@ -303,21 +303,21 @@ pub fn remote_eval_fanout_plan(
       ids = ids + [id]
       shards = shards
         + [
-        {
-          id: id,
-          cell: cell,
-          trial_index: trial_index,
-          seed: seed,
-          runner_argv: __render_argv(
-            options.runner_argv_template,
-            cell,
-            options.model,
-            options.split,
-            trial_index,
-            seed,
-          ),
-        },
-      ]
+          {
+            id: id,
+            cell: cell,
+            trial_index: trial_index,
+            seed: seed,
+            runner_argv: __render_argv(
+              options.runner_argv_template,
+              cell,
+              options.model,
+              options.split,
+              trial_index,
+              seed,
+            ),
+          },
+        ]
     }
   }
   const body = __plan_body(options, cells, shards)
@@ -436,12 +436,12 @@ pub fn remote_eval_fanout_artifact_manifest(
   for shard in plan.shards {
     rewrites = rewrites
       + [
-      {
-        shard_id: shard.id,
-        remote_prefix: __slash_join(remote_root, shard.id),
-        local_prefix: __slash_join(local_root, shard.id),
-      },
-    ]
+        {
+          shard_id: shard.id,
+          remote_prefix: __slash_join(remote_root, shard.id),
+          local_prefix: __slash_join(local_root, shard.id),
+        },
+      ]
   }
   const path_rewrite_checksum = __checksum(rewrites)
   const body = {
@@ -473,7 +473,7 @@ fn __trial_contract_matches(
   return receipt["schema"] == "harn.eval.remote_fanout.trial.v1"
     && receipt["schema_version"] == 1
     && receipt["producer"]
-    == "harn_remote_eval_fanout_trial_receipt_v1"
+      == "harn_remote_eval_fanout_trial_receipt_v1"
     && receipt["plan_checksum"] == plan.plan_checksum
     && receipt["cell"] == shard.cell
     && receipt["trial_index"] == shard.trial_index

@@ -195,7 +195,7 @@ pub fn validate_paired_observation(
   }
   if observation.trial_index < 0
     || observation.trial_index
-    >= registration.budget.max_trials_per_case {
+      >= registration.budget.max_trials_per_case {
     throw "std/eval/experiment: observation exceeds the trial ceiling"
   }
   const cell = paired_observation_cell_key(observation)
@@ -345,16 +345,16 @@ fn __guardrail_outcomes(
       const interval = bounded_cs(values, cell_delta, bounds.lo, bounds.hi)
       outcomes = outcomes
         + [
-        {
-          arm_id: arm.id,
-          metric_id: guardrail.id,
-          mean_excess_harm: interval.mean,
-          lo: interval.lo,
-          hi: interval.hi,
-          breached: interval.lo > 0.0,
-          n: interval.n,
-        },
-      ]
+          {
+            arm_id: arm.id,
+            metric_id: guardrail.id,
+            mean_excess_harm: interval.mean,
+            lo: interval.lo,
+            hi: interval.hi,
+            breached: interval.lo > 0.0,
+            n: interval.n,
+          },
+        ]
     }
   }
   return outcomes
@@ -498,9 +498,7 @@ pub fn decide_experiment(
     || spend >= registration.budget.max_spend_usd
     || depth >= registration.budget.max_trials_per_case
   const primary_delta = registration.decision.delta
-    / to_float(
-    1 + len(registration.metrics.guardrails),
-  )
+    / to_float(1 + len(registration.metrics.guardrails))
   const preliminary = arm_decision(
     all_primary,
     len(registration.candidates),

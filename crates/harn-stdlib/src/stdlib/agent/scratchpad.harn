@@ -145,16 +145,16 @@ fn __scratchpad_normalize(pad, task) {
   const goals = __scratchpad_list(pad?.goals)
   return pad
     + {
-    schema: pad?.schema ?? "harn.agent_scratchpad.v1",
-    goals: if len(goals) > 0 {
-      goals
-    } else {
-      __scratchpad_initial_goal(task)
-    },
-    open_items: __scratchpad_list(pad?.open_items),
-    facts: __scratchpad_list(pad?.facts),
-    refs: normalized_refs,
-  }
+      schema: pad?.schema ?? "harn.agent_scratchpad.v1",
+      goals: if len(goals) > 0 {
+        goals
+      } else {
+        __scratchpad_initial_goal(task)
+      },
+      open_items: __scratchpad_list(pad?.open_items),
+      facts: __scratchpad_list(pad?.facts),
+      refs: normalized_refs,
+    }
 }
 
 fn __scratchpad_empty(task) {

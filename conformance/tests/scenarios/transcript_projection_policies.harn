@@ -199,8 +199,8 @@ pipeline default(harness: Harness) {
   harness.stdio.println(
     "long_gc_live_preserved:"
       + to_string(
-      long_gc.messages[long_case.live_result_index].content.contains("IMPORTANT_LIVE_VALUE"),
-    ),
+        long_gc.messages[long_case.live_result_index].content.contains("IMPORTANT_LIVE_VALUE"),
+      ),
   )
   harness.stdio.println("long_barrier_gc_redacted:" + to_string(long_barrier_gc.redacted_count))
 }

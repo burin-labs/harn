@@ -24,15 +24,15 @@ pub fn __agent_loop_finalize_session(harness: Harness, message, session, state) 
       state.loop_start_ms,
     )
       + {
-      exhausted: true,
-      // Naming a default ceiling here would invent a cause: a break that left
-      // `stop_reason` unset reached this seam without one, and guessing
-      // "max_iterations" reads as a spent iteration budget even at iteration 1
-      // of 8. Say the reason is missing and let the reader go look.
-      kind: stop_reason ?? "unattributed",
-      iteration: state.iteration,
-      max_iterations: state.current_max,
-    }
+        exhausted: true,
+        // Naming a default ceiling here would invent a cause: a break that left
+        // `stop_reason` unset reached this seam without one, and guessing
+        // "max_iterations" reads as a spent iteration budget even at iteration 1
+        // of 8. Say the reason is missing and let the reader go look.
+        kind: stop_reason ?? "unattributed",
+        iteration: state.iteration,
+        max_iterations: state.current_max,
+      }
     __agent_loop_emit_budget_exhausted(harness.agent, session.session_id, terminal_exhaustion)
     budget_exhausted_emitted = true
     budget_decisions = __agent_loop_record_budget_stop(
@@ -126,39 +126,39 @@ pub fn __agent_loop_project_final_result(
   if opts?.verify_completion_judge != nil {
     final_result = final_result
       + {
-      completion_judge: {
-        invocations: state.verify_completion_judge_invocations,
-        vetoes: state.verify_completion_judge_vetoes,
-        max_invocations: agent_verify_completion_judge_cap(opts?.verify_completion_judge),
-        cap_reached: final_status == "verify_capped"
-          && stop_reason == "completion_judge_cap_reached",
-      },
-    }
+        completion_judge: {
+          invocations: state.verify_completion_judge_invocations,
+          vetoes: state.verify_completion_judge_vetoes,
+          max_invocations: agent_verify_completion_judge_cap(opts?.verify_completion_judge),
+          cap_reached: final_status == "verify_capped"
+            && stop_reason == "completion_judge_cap_reached",
+        },
+      }
   }
   if agent_has_done_judge(opts?.done_judge) {
     final_result = final_result
       + {
-      done_judge: {
-        invocations: state.done_judge_invocations,
-        vetoes: state.done_judge_vetoes,
-        max_invocations: agent_done_judge_cap(opts?.done_judge),
-        cap_reached: final_status == "verify_capped" && stop_reason == "done_judge_cap_reached",
-      },
-    }
+        done_judge: {
+          invocations: state.done_judge_invocations,
+          vetoes: state.done_judge_vetoes,
+          max_invocations: agent_done_judge_cap(opts?.done_judge),
+          cap_reached: final_status == "verify_capped" && stop_reason == "done_judge_cap_reached",
+        },
+      }
   }
   const budget = state.budget
   if budget.expose_decisions {
     final_result = final_result
       + {
-      adaptive_budget: {
-        mode: budget.mode,
-        initial: budget.initial,
-        max: budget.max,
-        final_limit: state.current_max,
-        extensions_used: state.extensions_used,
-        decisions: state.budget_decisions,
-      },
-    }
+        adaptive_budget: {
+          mode: budget.mode,
+          initial: budget.initial,
+          max: budget.max,
+          final_limit: state.current_max,
+          extensions_used: state.extensions_used,
+          decisions: state.budget_decisions,
+        },
+      }
   }
   if suspend_result != nil {
     final_result = final_result + suspend_result

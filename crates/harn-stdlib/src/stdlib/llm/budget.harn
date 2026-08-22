@@ -17,10 +17,7 @@ fn __llm_budget_heuristic_tokens(text) {
   const divisor = if regex_match("[\\p{Han}\\p{Hiragana}\\p{Katakana}\\p{Hangul}]", text) {
     1.0
   } else if contains(text, "```") || contains(text, "=>") || contains(text, "->")
-    || contains(
-    text,
-    "{",
-  )
+    || contains(text, "{")
     || contains(text, "}")
     || contains(text, ";") {
     3.5

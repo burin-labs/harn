@@ -297,13 +297,13 @@ fn detailed_run_samples_from_api(data, topology_epoch: string) -> list<CiDetaile
     }
     samples = samples
       + [
-      {
-        id: id,
-        duration_ms: duration_ms,
-        url: to_string(raw?.html_url ?? ""),
-        created_at: created_at,
-      },
-    ]
+        {
+          id: id,
+          duration_ms: duration_ms,
+          url: to_string(raw?.html_url ?? ""),
+          created_at: created_at,
+        },
+      ]
   }
   return samples
 }
@@ -333,16 +333,12 @@ fn detailed_job_samples_from_api(
     const runner_name = to_string(raw?.runner_name ?? "")
     const labels = raw?.labels ?? []
     const runner = if runner_name.starts_with("blacksmith-")
-      || labels.any(
-      { label -> to_string(label).starts_with("blacksmith-") },
-    ) {
+      || labels.any({ label -> to_string(label).starts_with("blacksmith-") }) {
       "blacksmith"
     } else if labels.contains("self-hosted") {
       "self-hosted"
     } else if runner_name.starts_with("GitHub Actions ")
-      || labels.contains(
-      "ubuntu-latest",
-    )
+      || labels.contains("ubuntu-latest")
       || labels.contains("macos-latest")
       || labels.contains("windows-latest") {
       "github-hosted"
@@ -351,16 +347,16 @@ fn detailed_job_samples_from_api(
     }
     samples = samples
       + [
-      {
-        run_id: run_id,
-        name: name,
-        conclusion: to_string(raw?.conclusion ?? ""),
-        duration_ms: duration_ms,
-        start_delay_ms: start_delay_ms,
-        runner: runner,
-        steps: steps,
-      },
-    ]
+        {
+          run_id: run_id,
+          name: name,
+          conclusion: to_string(raw?.conclusion ?? ""),
+          duration_ms: duration_ms,
+          start_delay_ms: start_delay_ms,
+          runner: runner,
+          steps: steps,
+        },
+      ]
   }
   return samples
 }
@@ -458,9 +454,9 @@ fn build_latency_report(
   for job in jobs {
     step_samples = step_samples
       + job.steps.map(
-      { step -> {name: "${step.job} / ${step.name}", duration_ms: step.duration_ms} },
-    )
-      .to_list()
+        { step -> {name: "${step.job} / ${step.name}", duration_ms: step.duration_ms} },
+      )
+        .to_list()
     runners = runners + {[job.runner]: (runners[job.runner] ?? 0) + 1}
   }
   return {
@@ -526,10 +522,7 @@ fn render_latency_report(report: CiLatencyReport) -> string {
     + "\n\nCritical job duration\n"
     + render_groups(report.jobs, "No qualifying jobs found.")
     + "\n\nStart delay (dependencies plus runner queue)\n"
-    + render_groups(
-    report.start_delay,
-    "No start-delay observations found.",
-  )
+    + render_groups(report.start_delay, "No start-delay observations found.")
     + "\n\nSlowest steps\n"
     + render_groups(report.steps, "No step observations found.")
 }
@@ -567,13 +560,13 @@ pipeline main(harness: Harness, task) {
     for run in runs {
       jobs = jobs
         + job_samples_from_api(
-        run.id,
-        github_api_json(
-          harness.process,
-          harness.clock,
-          "/repos/${repository}/actions/runs/${run.id}/jobs?per_page=100",
-        ),
-      )
+          run.id,
+          github_api_json(
+            harness.process,
+            harness.clock,
+            "/repos/${repository}/actions/runs/${run.id}/jobs?per_page=100",
+          ),
+        )
     }
     const report = build_report(repository, workflow, event, runs, jobs)
     if parsed.json {
@@ -588,14 +581,14 @@ pipeline main(harness: Harness, task) {
   for run in candidates {
     detailed_jobs = detailed_jobs
       + detailed_job_samples_from_api(
-      run.id,
-      run.created_at,
-      github_api_json(
-        harness.process,
-        harness.clock,
-        "/repos/${repository}/actions/runs/${run.id}/jobs?per_page=100",
-      ),
-    )
+        run.id,
+        run.created_at,
+        github_api_json(
+          harness.process,
+          harness.clock,
+          "/repos/${repository}/actions/runs/${run.id}/jobs?per_page=100",
+        ),
+      )
   }
   const report = build_latency_report(policy, candidates, detailed_jobs)
   if parsed.json {

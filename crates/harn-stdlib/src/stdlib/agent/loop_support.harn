@@ -237,25 +237,23 @@ pub fn __agent_loop_effective_llm_options(llm: HarnessLlm, opts) {
   if claim_schema != nil {
     merged = merged
       + {
-      output: {schema: claim_schema},
-      _next_tool_claim_applied: true,
-      // JSON Schema constrains a text response to the canonical bare call
-      // envelope regardless of the ambient tool dialect. Result projection
-      // consumes this marker so parser and contract cannot diverge.
-      _next_tool_claim_parser_format: "json",
-    }
+        output: {schema: claim_schema},
+        _next_tool_claim_applied: true,
+        // JSON Schema constrains a text response to the canonical bare call
+        // envelope regardless of the ambient tool dialect. Result projection
+        // consumes this marker so parser and contract cannot diverge.
+        _next_tool_claim_parser_format: "json",
+      }
   }
   const call_opts = if (merged?._next_tool_claim_applied ?? false)
     || (merged?._output_contract_repair
-    ?? false) {
+      ?? false) {
     merged
   } else {
     __agent_loop_ordinary_turn_llm_options(merged)
   }
   return agent_sanitize_model_options(llm, agent_refresh_tool_format_for_route(llm, call_opts))
-    + {
-    mock_scope: call_opts?.mock_scope ?? call_opts?.call_role ?? "agent.main",
-  }
+    + {mock_scope: call_opts?.mock_scope ?? call_opts?.call_role ?? "agent.main"}
 }
 
 pub fn __agent_loop_route_options(provider, model, tool_format) {
@@ -277,13 +275,12 @@ pub fn __agent_loop_enable_equivalent_failover(
   const has_primary = primary_provider != "" || primary_model != ""
   const has_current = provider != "" || model != ""
   const partial_route_patch = (loop_opts?._agent_loop_last_llm_route_patch_seen ?? false)
-    && !(loop_opts
-    ?._agent_loop_last_llm_route_patch_complete
-    ?? false)
+    && !(loop_opts?._agent_loop_last_llm_route_patch_complete
+      ?? false)
   const changed_partial_route = has_primary && has_current
     && (provider != primary_provider
-    || model
-    != primary_model)
+      || model
+        != primary_model)
     && partial_route_patch
   return llm_enable_equivalent_failover(llm_opts, changed_partial_route)
 }

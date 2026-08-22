@@ -552,9 +552,7 @@ pub fn check_source_file_lengths(harness: Harness, root: string = "") -> SourceL
         kind: "reconciliation_unavailable",
         path: resolved_root,
         message: "git could not list tracked sources, so the walk was not reconciled against it: "
-          + to_string(
-          tracked?.error ?? "",
-        ),
+          + to_string(tracked?.error ?? ""),
       },
     )
   }
@@ -586,10 +584,10 @@ fn render_report(report: SourceLengthReport) -> string {
   }
   lines = lines
     + [
-    "",
-    "Split oversized files. After a shrink, run `make update-source-file-length-baseline`.",
-    "New oversized files never automatically become existing entries; an intentional baseline increase must be reviewed directly.",
-  ]
+      "",
+      "Split oversized files. After a shrink, run `make update-source-file-length-baseline`.",
+      "New oversized files never automatically become existing entries; an intentional baseline increase must be reviewed directly.",
+    ]
   return join(lines, "\n")
 }
 

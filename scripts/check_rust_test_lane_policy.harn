@@ -106,14 +106,14 @@ pub fn step_violations(
     }
     violations = violations
       + [
-      {
-        workflow: workflow,
-        job: job,
-        command: command,
-        reason:
-          "runs Rust tests without ${LANE_WRAPPER} and without ${STACK_ENV}=${REQUIRED_STACK}",
-      },
-    ]
+        {
+          workflow: workflow,
+          job: job,
+          command: command,
+          reason:
+            "runs Rust tests without ${LANE_WRAPPER} and without ${STACK_ENV}=${REQUIRED_STACK}",
+        },
+      ]
   }
   return violations
 }

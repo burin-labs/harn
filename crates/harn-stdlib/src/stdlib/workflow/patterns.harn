@@ -326,10 +326,10 @@ pub fn workflow_stages(spec = nil) {
   }
   const entry = __patterns_non_empty_string(cfg?.entry)
     ?? if len(order) > 0 {
-    order[0]
-  } else {
-    nil
-  }
+      order[0]
+    } else {
+      nil
+    }
   return workflow_graph({name: cfg?.name ?? "stages", entry: entry, nodes: nodes, edges: edges})
 }
 

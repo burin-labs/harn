@@ -173,9 +173,7 @@ pipeline test(harness: Harness, task) {
       compact_callback: { archived, _reminders, policy ->
         {
           summary: "request compact " + policy.mode + " " + policy.author + " "
-            + to_string(
-            len(archived),
-          ),
+            + to_string(len(archived)),
         }
       },
     },
@@ -197,7 +195,7 @@ pipeline test(harness: Harness, task) {
       post_turn_callback: { info ->
         if (info?.tool_results?.count ?? 0) > 0
           && info?.tool_results[0]?.tool_name
-          == "list_directory"
+            == "list_directory"
           && info?.tool_results[0]?.status == "ok" {
           return {message: "handoff now", stop: true}
         }

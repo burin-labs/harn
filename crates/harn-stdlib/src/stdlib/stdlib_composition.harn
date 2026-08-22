@@ -22,16 +22,15 @@ fn __composition_mcp_tool(entry) {
     return false
   }
   if entry?.executor == "mcp_server" || entry?._mcp_server != nil || entry?.mcp_server != nil
-    || entry
-    ?._mcp_tool_name
-    != nil {
+    || entry?._mcp_tool_name
+      != nil {
     return true
   }
   const function = entry?.function
   if type_of(function) == "dict" {
     return function?.executor == "mcp_server" || function?._mcp_server != nil
       || function?.mcp_server
-      != nil
+        != nil
       || function?._mcp_tool_name != nil
   }
   return false
@@ -194,10 +193,7 @@ pub fn composition_mcp_execute(harness: Harness, snippet, tools = nil, options =
   const source_tools = opts?.tools ?? tools
   const registry = __composition_mcp_registry(harness, source_tools)
   const manifest = opts?.manifest
-    ?? composition_binding_manifest(
-    registry,
-    opts?.manifest_options ?? opts,
-  )
+    ?? composition_binding_manifest(registry, opts?.manifest_options ?? opts)
   const dispatch_opts = opts?.dispatch_options ?? opts
   const dispatch = { name, input ->
     let result = agent_dispatch_tool_call(

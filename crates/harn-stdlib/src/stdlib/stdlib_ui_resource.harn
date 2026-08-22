@@ -621,11 +621,7 @@ pub fn ui_tool_call_envelope(
     throw "std/ui_resource: tool name is required"
   }
   const id = (options?.id ?? "ui_call_")
-    + substring(
-    sha256(tool_name + json_stringify(params ?? {})),
-    0,
-    16,
-  )
+    + substring(sha256(tool_name + json_stringify(params ?? {})), 0, 16)
   return {
     schema: UI_TOOL_CALL_SCHEMA,
     jsonrpc: "2.0",
@@ -687,10 +683,7 @@ pub fn ui_tool_result_validate(result: UiToolResult) -> UiToolResult {
     }
     if !resource.validation.ok {
       throw "std/ui_resource: ui_resource failed validation (codes: "
-        + join(
-        resource.validation.error_codes,
-        ",",
-      )
+        + join(resource.validation.error_codes, ",")
         + ")"
     }
   }
@@ -698,9 +691,7 @@ pub fn ui_tool_result_validate(result: UiToolResult) -> UiToolResult {
     const structured = result.structured_fallback
     if structured.schema != UI_STRUCTURED_FALLBACK_SCHEMA {
       throw "std/ui_resource: structured_fallback has unsupported schema "
-        + __ui_text(
-        structured.schema,
-      )
+        + __ui_text(structured.schema)
     }
   }
   return result

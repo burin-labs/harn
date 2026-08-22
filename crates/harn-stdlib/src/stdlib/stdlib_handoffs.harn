@@ -65,7 +65,7 @@ fn __handoff_budget_exhausted(handoff, context) -> bool {
   const budget = handoff?.budget_remaining
   return (budget?.tokens != nil && budget.tokens <= 0)
     || (budget?.tool_calls != nil
-    && budget.tool_calls <= 0)
+      && budget.tool_calls <= 0)
     || (budget?.dollars != nil && budget.dollars <= 0.0)
 }
 
@@ -191,10 +191,10 @@ pub fn handoff_routed(clock: HarnessClock, payload, routes = nil, context = nil)
   return handoff(
     (payload ?? {})
       + {
-      target_persona_or_human: decision.target_persona_or_human,
-      route_decision: decision,
-      metadata: metadata,
-    },
+        target_persona_or_human: decision.target_persona_or_human,
+        route_decision: decision,
+        metadata: metadata,
+      },
   )
 }
 
@@ -288,10 +288,7 @@ pub fn handoff_dispatch(harness: Harness, handoff_payload, decision = nil, optio
   )
   const dispatcher = __handoff_dispatcher(options, selected)
   const invocation_envelope = payload
-    + {
-    decision_event_id: decision_event_id,
-    enqueue_event_id: enqueue_event_id,
-  }
+    + {decision_event_id: decision_event_id, enqueue_event_id: enqueue_event_id}
   const invocation_result = if dispatcher == nil {
     nil
   } else {
@@ -299,13 +296,13 @@ pub fn handoff_dispatch(harness: Harness, handoff_payload, decision = nil, optio
   }
   return dispatch
     + {
-    audit: payload.audit,
-    dispatch_receipt: {
-      decision_event_id: decision_event_id,
-      enqueue_event_id: enqueue_event_id,
-      topic: __handoff_dispatch_topic(selected),
       audit: payload.audit,
-      invocation_result: invocation_result,
-    },
-  }
+      dispatch_receipt: {
+        decision_event_id: decision_event_id,
+        enqueue_event_id: enqueue_event_id,
+        topic: __handoff_dispatch_topic(selected),
+        audit: payload.audit,
+        invocation_result: invocation_result,
+      },
+    }
 }

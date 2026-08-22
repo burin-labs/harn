@@ -494,9 +494,7 @@ fn __validation_messages(report, wf_report, compiled) {
   let messages = []
   for error in report?.errors ?? [] {
     messages = messages
-      + [
-      to_string(error?.code ?? "validate_error") + ": " + to_string(error?.message ?? error),
-    ]
+      + [to_string(error?.code ?? "validate_error") + ": " + to_string(error?.message ?? error)]
   }
   if !compiled?.ok {
     for error in compiled?.errors ?? [] {
@@ -642,30 +640,30 @@ fn __is_length_finish(reason) {
 fn __merge_calls(first, second, text, retry_history) {
   return first
     + {
-    text: text,
-    input_tokens: first.input_tokens + second.input_tokens,
-    output_tokens: first.output_tokens + second.output_tokens,
-    wall_ms: first.wall_ms + second.wall_ms,
-    server_load_ms: first.server_load_ms + second.server_load_ms,
-    finish_reason: second.finish_reason ?? first.finish_reason,
-    cost_usd: if first.cost_usd == nil || second.cost_usd == nil {
-      nil
-    } else {
-      first.cost_usd + second.cost_usd
-    },
-    input_cost_usd: if first.input_cost_usd == nil || second.input_cost_usd == nil {
-      nil
-    } else {
-      first.input_cost_usd + second.input_cost_usd
-    },
-    output_cost_usd: if first.output_cost_usd == nil || second.output_cost_usd == nil {
-      nil
-    } else {
-      first.output_cost_usd + second.output_cost_usd
-    },
-    pricing_known: first.pricing_known && second.pricing_known,
-    retry_history: retry_history,
-  }
+      text: text,
+      input_tokens: first.input_tokens + second.input_tokens,
+      output_tokens: first.output_tokens + second.output_tokens,
+      wall_ms: first.wall_ms + second.wall_ms,
+      server_load_ms: first.server_load_ms + second.server_load_ms,
+      finish_reason: second.finish_reason ?? first.finish_reason,
+      cost_usd: if first.cost_usd == nil || second.cost_usd == nil {
+        nil
+      } else {
+        first.cost_usd + second.cost_usd
+      },
+      input_cost_usd: if first.input_cost_usd == nil || second.input_cost_usd == nil {
+        nil
+      } else {
+        first.input_cost_usd + second.input_cost_usd
+      },
+      output_cost_usd: if first.output_cost_usd == nil || second.output_cost_usd == nil {
+        nil
+      } else {
+        first.output_cost_usd + second.output_cost_usd
+      },
+      pricing_known: first.pricing_known && second.pricing_known,
+      retry_history: retry_history,
+    }
 }
 
 fn __maybe_continue_length(
@@ -683,8 +681,7 @@ fn __maybe_continue_length(
   const continuation_prompt = "Original task:\n"
     + prompt
     + "\n\nThe previous response stopped because it reached the output budget. Previous response prefix:\n"
-    + call
-    .text
+    + call.text
     + "\n\nContinue exactly where you left off. Do not add preamble, markdown fences, or a fresh opening object."
   const continuation = __call_model_once(
     llm,
@@ -706,9 +703,7 @@ fn __maybe_continue_length(
 fn __strategy_call(llm: HarnessLlm, strategy, task, model, max_tokens, opts) {
   const schema = __schema_for_strategy(strategy)
   const use_structured = opts.structured_output && strategy != "baseline"
-    && __structured_output_supported(
-    opts.capabilities,
-  )
+    && __structured_output_supported(opts.capabilities)
   let call = nil
   if strategy == "baseline" {
     call = __call_model_once(

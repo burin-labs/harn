@@ -451,9 +451,7 @@ pipeline test_json_adapter_parses_payload(harness: Harness, task) {
       let entries = []
       for record in payload?.data ?? [] {
         entries = entries
-          + [
-          {model_id: record.id, name: record?.name, context_window: record?.context_length},
-        ]
+          + [{model_id: record.id, name: record?.name, context_window: record?.context_length}]
       }
       return entries
     },

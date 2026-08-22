@@ -390,9 +390,7 @@ fn _next_action_errors(output) {
     errors = errors + ["non-wait actions must cite deterministic_inputs"]
   }
   if output.approval_required
-    && !["run_repair_worker", "escalate_human", "comment"].contains(
-    output.action,
-  ) {
+    && !["run_repair_worker", "escalate_human", "comment"].contains(output.action) {
     errors = errors + ["approval_required is only valid for mutating or human-escalation actions"]
   }
   return errors
@@ -402,10 +400,8 @@ fn _ci_category_errors(context, output) {
   let errors = []
   const allowed_spans = _ids(context.selected_log_spans)
   if ["deterministic_failure", "flaky_test", "infra_failure"].contains(output.category)
-    && len(
-    output.selected_log_span_ids ?? [],
-  )
-    == 0 {
+    && len(output.selected_log_span_ids ?? [])
+      == 0 {
     errors = errors + ["CI diagnoses must cite selected_log_span_ids unless context is missing"]
   }
   for span_id in output.selected_log_span_ids ?? [] {
@@ -498,9 +494,7 @@ fn _checkpoint_validator(id, context, extra_validator) {
       } else if type_of(extra) == "dict" {
         if !(extra?.ok ?? false) {
           const extra_errors = extra?.errors ?? extra?.validation_errors
-            ?? [
-            extra?.message ?? "custom validator rejected output",
-          ]
+            ?? [extra?.message ?? "custom validator rejected output"]
           errors = errors + extra_errors
         }
       } else if type_of(extra) == "list" {
@@ -564,9 +558,9 @@ pub fn typed_prompt_checkpoint(
     schema,
     opts
       + {
-      output: {schema: schema, strict: true, validation: "error"},
-      validator_retries: opts?.validator_retries ?? 1,
-    },
+        output: {schema: schema, strict: true, validation: "error"},
+        validator_retries: opts?.validator_retries ?? 1,
+      },
     _checkpoint_validator(id, context, validator),
   )
   return checkpoint + {prompt_id: id, context: context}
@@ -769,16 +763,16 @@ pub fn value_model_eval_fixture() {
     const validation = validate_output(id, example.output)
     cases = cases
       + [
-      {
-        prompt_id: id,
-        route: "local/gemma-value",
-        provider: "llama.cpp",
-        model: "gemma",
-        prompt_version: "merge-captain-value-pack-v1",
-        pass: validation.ok,
-        failure_modes: validation.errors,
-      },
-    ]
+        {
+          prompt_id: id,
+          route: "local/gemma-value",
+          provider: "llama.cpp",
+          model: "gemma",
+          prompt_version: "merge-captain-value-pack-v1",
+          pass: validation.ok,
+          failure_modes: validation.errors,
+        },
+      ]
   }
   return {
     _type: "merge_captain.prompt_pack_eval",
@@ -814,14 +808,14 @@ pub fn pack_manifest() {
   for id in prompt_ids() {
     prompts = prompts
       + [
-      {
-        id: id,
-        prompt: prompt_text(id),
-        schema: schema_for(id),
-        context_budget: context_budget_for(id),
-        golden_examples: golden_examples_for(id),
-      },
-    ]
+        {
+          id: id,
+          prompt: prompt_text(id),
+          schema: schema_for(id),
+          context_budget: context_budget_for(id),
+          golden_examples: golden_examples_for(id),
+        },
+      ]
   }
   return {
     _type: "merge_captain.prompt_pack",

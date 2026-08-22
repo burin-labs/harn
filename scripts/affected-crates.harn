@@ -311,18 +311,15 @@ fn main(harness: Harness) {
     harness.stdio.eprintln(
       "affected-crates: pruned (not selected): "
         + if pruned.count == 0 {
-        "(none)"
-      } else {
-        pruned.sorted().join(", ")
-      },
+          "(none)"
+        } else {
+          pruned.sorted().join(", ")
+        },
     )
     if (selection.unowned ?? []).count > 0 {
       harness.stdio.eprintln(
         "affected-crates: note: non-crate files also changed (not test-relevant at the crate level): "
-          + preview(
-          selection.unowned,
-          8,
-        ),
+          + preview(selection.unowned, 8),
       )
     }
   }

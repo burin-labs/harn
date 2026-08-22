@@ -125,11 +125,7 @@ pub fn rewrite_cross_chapter_links(
 /** Render one split chapter with cross-chapter anchors made page-aware. */
 pub fn render_page_mirror(fs: HarnessFs, path: string) -> string {
   return HEADER
-    + rewrite_cross_chapter_links(
-    fs.read_text(path),
-    page_slug(path),
-    chapter_anchor_owners(fs),
-  )
+    + rewrite_cross_chapter_links(fs.read_text(path), page_slug(path), chapter_anchor_owners(fs))
 }
 
 /** All chapter source paths in `NN-` order. */

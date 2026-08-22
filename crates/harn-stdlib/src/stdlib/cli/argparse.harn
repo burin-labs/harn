@@ -188,8 +188,8 @@ fn __validate_arg_default(arg: ArgSpec) {
   const decoder = arg.parse ?? "string"
   const repeated = (arg.kind == "flag" && (arg.multi ?? false))
     || (arg.kind == "positional"
-    && (arg.variadic
-    ?? false))
+      && (arg.variadic
+        ?? false))
   const valid = if arg.kind == "switch" {
     type_of(arg.default) == "bool"
   } else if repeated {
@@ -230,10 +230,7 @@ fn __append_arg_aliases(arg: ArgSpec, aliases: list<string>) -> list<string> {
   }
   if arg.long != nil {
     if !starts_with(arg.long, "--") || starts_with(arg.long, "---") || len(arg.long) <= 2
-      || contains(
-      arg.long,
-      "=",
-    )
+      || contains(arg.long, "=")
       || regex_match("\\s", arg.long) != nil {
       throw "std/cli/argparse: long alias for arg '" + arg.name + "' must have form '--name'"
     }

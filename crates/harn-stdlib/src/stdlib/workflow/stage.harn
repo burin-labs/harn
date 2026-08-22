@@ -223,21 +223,21 @@ fn __stage_command_options(node) {
   if type_of(args) == "dict" {
     options = options
       + pick_keys(
-      args,
-      [
-        "cwd",
-        "env",
-        "env_mode",
-        "stdin",
-        "timeout_ms",
-        "background",
-        "background_after_ms",
-        "capture",
-        "max_inline_bytes",
-        "policy_context",
-      ],
-      {drop_nil: true},
-    )
+        args,
+        [
+          "cwd",
+          "env",
+          "env_mode",
+          "stdin",
+          "timeout_ms",
+          "background",
+          "background_after_ms",
+          "capture",
+          "max_inline_bytes",
+          "policy_context",
+        ],
+        {drop_nil: true},
+      )
   }
   return options
 }
@@ -367,10 +367,7 @@ fn __stage_prepare_manual_gate(interaction: HarnessInteraction, node_id, node, a
     const branch = if skipped {
       "skipped"
     } else if category == "approval_denied"
-      || contains(
-      __stage_error_message(error),
-      "denied",
-    ) {
+      || contains(__stage_error_message(error), "denied") {
       "denied"
     } else {
       "failed"
@@ -474,12 +471,7 @@ fn __stage_prepare_command(tools: HarnessTools, node_id, node, consumed_artifact
     "failed"
   }
   const result = command_result
-    + {
-    status: status,
-    text: text,
-    visible_text: text,
-    exit_status: command_result?.exit_code,
-  }
+    + {status: status, text: text, visible_text: text, exit_status: command_result?.exit_code}
   return {
     handled: true,
     result: result,
@@ -1330,14 +1322,14 @@ pub fn workflow_flatten_agent_loop_options(config = nil) {
   // 7. Session + tool format.
   options = options
     + {
-    session_id: __stage_string(cfg?.session_id, ""),
-    tool_format: __stage_string(cfg?.tool_format, ""),
-  }
+      session_id: __stage_string(cfg?.session_id, ""),
+      tool_format: __stage_string(cfg?.tool_format, ""),
+    }
   // 8. Nested-execution attribution.
   options = options
     + {
-    _nested_kind: __stage_string(cfg?.nested_kind, ""),
-    _nested_label: __stage_string(cfg?.nested_label, ""),
-  }
+      _nested_kind: __stage_string(cfg?.nested_kind, ""),
+      _nested_label: __stage_string(cfg?.nested_label, ""),
+    }
   return options
 }

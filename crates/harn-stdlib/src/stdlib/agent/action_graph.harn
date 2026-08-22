@@ -333,16 +333,16 @@ fn __action_graph_batch_prompt(batch) {
     "Tool class: " + batch.tool_class,
     "Available tools this batch: "
       + if len(available_tools) > 0 {
-      join(available_tools, ", ")
-    } else {
-      "(none declared)"
-    },
+        join(available_tools, ", ")
+      } else {
+        "(none declared)"
+      },
     "Target paths this batch: "
       + if len(target_paths) > 0 {
-      join(target_paths, ", ")
-    } else {
-      "(none declared)"
-    },
+        join(target_paths, ", ")
+      } else {
+        "(none declared)"
+      },
     "",
     "Authority order: obey the current batch action list and the injected verifier contract before any broader workflow context.",
     "Complete every action in this batch before finishing.",
@@ -363,22 +363,22 @@ fn __action_graph_batch_prompt(batch) {
   if create_direct_write {
     lines = lines
       + [
-      "If an action explicitly says to create a target file, write that file directly instead of reading unrelated files first.",
-      "After a successful write creates the target file, do not reread or rewrite that file unless a tool result exposes a concrete problem or this batch explicitly requires validation.",
-    ]
+        "If an action explicitly says to create a target file, write that file directly instead of reading unrelated files first.",
+        "After a successful write creates the target file, do not reread or rewrite that file unless a tool result exposes a concrete problem or this batch explicitly requires validation.",
+      ]
   }
   if has_exact_command {
     lines = lines
       + [
-      "If an action includes an exact command string, run that exact command before trying alternatives or discovery commands.",
-    ]
+        "If an action includes an exact command string, run that exact command before trying alternatives or discovery commands.",
+      ]
     if batch.phase == "verify" && len(available_tools) == 1 && available_tools[0] == "run" {
       lines = lines
         + [
-        "This verify batch is observation-only.",
-        "After the exact command returns, report whether it passed or failed and stop.",
-        "Do not attempt repairs, shell edits, fallback commands, or extra discovery in this batch.",
-      ]
+          "This verify batch is observation-only.",
+          "After the exact command returns, report whether it passed or failed and stop.",
+          "Do not attempt repairs, shell edits, fallback commands, or extra discovery in this batch.",
+        ]
     }
   }
   for action in batch.actions {
@@ -526,9 +526,7 @@ fn __action_graph_batch_node(batch, template) {
   const output_contract = (template?.output_contract ?? {}) + {output_kinds: [output_kind]}
   const target_paths = __action_graph_batch_target_paths(batch)
   const context_policy = (template?.context_policy ?? {})
-    + {
-    include_kinds: __action_graph_batch_context_kinds(batch, template),
-  }
+    + {include_kinds: __action_graph_batch_context_kinds(batch, template)}
   let metadata = template?.metadata ?? {}
   if local_verification != nil {
     metadata = metadata + {workflow_verification_scope: "local_only"}
@@ -540,21 +538,21 @@ fn __action_graph_batch_node(batch, template) {
   }
   return (template ?? {})
     + {
-    kind: "stage",
-    task_label: format("{} batch {}", uppercase(batch.phase), batch.id),
-    system: __action_graph_node_system(template?.system, batch.prompt),
-    tools: __action_graph_batch_tools(batch, template),
-    model_policy: model_policy,
-    approval_policy: approval_policy,
-    verify: if local_verification != nil {
-      local_verification
-    } else {
-      template?.verify
-    },
-    output_contract: output_contract,
-    context_policy: context_policy,
-    metadata: metadata,
-  }
+      kind: "stage",
+      task_label: format("{} batch {}", uppercase(batch.phase), batch.id),
+      system: __action_graph_node_system(template?.system, batch.prompt),
+      tools: __action_graph_batch_tools(batch, template),
+      model_policy: model_policy,
+      approval_policy: approval_policy,
+      verify: if local_verification != nil {
+        local_verification
+      } else {
+        template?.verify
+      },
+      output_contract: output_contract,
+      context_policy: context_policy,
+      metadata: metadata,
+    }
 }
 
 fn __action_graph_terminal_prompt(plan, phase) {
@@ -575,41 +573,34 @@ fn __action_graph_terminal_node(plan, phase, template) {
   if node_kind == "verify" {
     verify_payload = template?.verify
       ?? filter_nil(
-      {
-        command: template?.command,
-        assert_text: template?.assert_text,
-        expect_status: template?.expect_status,
-      },
-    )
+        {
+          command: template?.command,
+          assert_text: template?.assert_text,
+          expect_status: template?.expect_status,
+        },
+      )
   }
   const output_contract = (template?.output_contract ?? {})
-    + {
-    output_kinds: [__action_graph_output_kind(template, default_output)],
-  }
+    + {output_kinds: [__action_graph_output_kind(template, default_output)]}
   const context_policy = (template?.context_policy ?? {})
     + {
-    include_kinds: template?.context_policy?.include_kinds
-      ?? [
-      "plan",
-      "summary",
-      "artifact",
-      "verification_result",
-    ],
-  }
+      include_kinds: template?.context_policy?.include_kinds
+        ?? ["plan", "summary", "artifact", "verification_result"],
+    }
   return (template ?? {})
     + filter_nil(
-    {
-      kind: node_kind,
-      task_label: uppercase(phase),
-      system: __action_graph_node_system(
-        template?.system,
-        __action_graph_terminal_prompt(plan, phase),
-      ),
-      verify: verify_payload,
-      output_contract: output_contract,
-      context_policy: context_policy,
-    },
-  )
+      {
+        kind: node_kind,
+        task_label: uppercase(phase),
+        system: __action_graph_node_system(
+          template?.system,
+          __action_graph_terminal_prompt(plan, phase),
+        ),
+        verify: verify_payload,
+        output_contract: output_contract,
+        context_policy: context_policy,
+      },
+    )
 }
 
 /**
@@ -663,20 +654,20 @@ pub fn action_graph(raw, options = nil) {
     const canonical_id = format("action-{}", index + 1)
     staged = staged
       + [
-      {
-        _type: "action_item",
-        id: canonical_id,
-        title: title,
-        instruction: instruction,
-        phase: phase,
-        depends_on: __action_graph_dependency_refs(dict),
-        tools: tools,
-        tool_class: dict?.tool_class ?? __action_graph_tool_class(tools, phase),
-        metadata: filter_nil(
-          {source_id: source_id, source_phase: dict?.phase ?? dict?.kind ?? dict?.type},
-        ),
-      },
-    ]
+        {
+          _type: "action_item",
+          id: canonical_id,
+          title: title,
+          instruction: instruction,
+          phase: phase,
+          depends_on: __action_graph_dependency_refs(dict),
+          tools: tools,
+          tool_class: dict?.tool_class ?? __action_graph_tool_class(tools, phase),
+          metadata: filter_nil(
+            {source_id: source_id, source_phase: dict?.phase ?? dict?.kind ?? dict?.type},
+          ),
+        },
+      ]
     aliases = __action_graph_merge_aliases(
       aliases,
       __action_graph_aliases_for(canonical_id, source_id, title, index),
@@ -775,7 +766,7 @@ pub fn action_graph_batches(graph, completed = nil) {
     }
     const phase = if ready[0]?.phase == "research" || ready[0]?.phase == "execute"
       || ready[0]?.phase
-      == "verify" {
+        == "verify" {
       ready[0].phase
     } else {
       "execute"
@@ -845,9 +836,7 @@ pub fn action_graph_render(graph) {
       }
       const label = action?.title ?? action?.instruction ?? action.id
       phase_lines = phase_lines
-        + [
-        "- [" + action.id + "] " + label + " [" + action.tool_class + "]" + deps,
-      ]
+        + ["- [" + action.id + "] " + label + " [" + action.tool_class + "]" + deps]
     }
     if len(phase_lines) > 0 {
       lines = lines + ["", "## " + uppercase(phase)]

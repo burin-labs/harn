@@ -42,8 +42,6 @@ pipeline default(harness: Harness) {
   agent_session_finalize(harness.agent, invalid_session.session_id, "done")
   harness.stdio.println(
     "validation_error="
-      + to_string(
-      contains(to_string(unwrap_err(invalid)), "message or entries is required"),
-    ),
+      + to_string(contains(to_string(unwrap_err(invalid)), "message or entries is required")),
   )
 }

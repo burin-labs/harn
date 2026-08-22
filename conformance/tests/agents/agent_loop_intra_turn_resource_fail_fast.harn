@@ -56,9 +56,7 @@ fn edit_tools(
       handler: { args ->
         if args?.fail_noop ?? false {
           return "Error: [Edit rejected] old_string not found. Your edit was NOT applied to "
-            + to_string(
-            args?.path ?? "",
-          )
+            + to_string(args?.path ?? "")
             + " "
             + to_string(args?.marker ?? "")
         }
@@ -466,7 +464,7 @@ fn run_scripted(harness: Harness, calls, opts = {}) {
                 "not_applied"
               } else if (args?.fail_applied ?? false)
                 || (args?.diagnostics
-                ?? false) {
+                  ?? false) {
                 "applied"
               } else if result?.ok ?? result?.success ?? false {
                 "applied"
@@ -497,10 +495,7 @@ fn has_tool_update(events, status: string, category: string, text: string) -> bo
         && to_string(event.tool_call_id ?? "") != ""
         && event.status == status
         && event.error_category == category
-        && contains(
-        to_string(event.error ?? event.raw_output ?? ""),
-        text,
-      )
+        && contains(to_string(event.error ?? event.raw_output ?? ""), text)
     },
   )
     != nil

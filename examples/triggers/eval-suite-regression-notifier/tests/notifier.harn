@@ -97,11 +97,11 @@ fn notifier_event(config, base) -> dict {
       raw: {
         config: config
           + {
-          slack_channel: "C111",
-          bot_token: "xoxb-test-token",
-          api_base_url: base,
-          dashboard_url: "https://harn.example/evals/nightly",
-        },
+            slack_channel: "C111",
+            bot_token: "xoxb-test-token",
+            api_base_url: base,
+            dashboard_url: "https://harn.example/evals/nightly",
+          },
       },
     },
     signature_status: {state: "verified"},
@@ -130,27 +130,27 @@ fn baseline_rows(manifest, harness_fingerprint, commit) -> list {
   for case in manifest.cases {
     rows = rows
       + [
-      {
-        suite: DEFAULT_SUITE,
-        model: DEFAULT_MODEL,
-        split: case.split,
-        commit: commit,
-        branch: "main",
-        case_name: case.id,
-        name: case.id,
-        case_fingerprint: case.case_fingerprint,
-        harness_config_fingerprint: harness_fingerprint,
-        trial: 0,
-        trials: 1,
-        passes: 1,
-        fails: 0,
-        skips: 0,
-        timeouts: 0,
-        pass_rate: 1.0,
-        status: "PASS",
-        verification: "PASS",
-      },
-    ]
+        {
+          suite: DEFAULT_SUITE,
+          model: DEFAULT_MODEL,
+          split: case.split,
+          commit: commit,
+          branch: "main",
+          case_name: case.id,
+          name: case.id,
+          case_fingerprint: case.case_fingerprint,
+          harness_config_fingerprint: harness_fingerprint,
+          trial: 0,
+          trials: 1,
+          passes: 1,
+          fails: 0,
+          skips: 0,
+          timeouts: 0,
+          pass_rate: 1.0,
+          status: "PASS",
+          verification: "PASS",
+        },
+      ]
   }
   return rows
 }

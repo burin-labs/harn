@@ -770,8 +770,7 @@ pub fn edit_change_return_type(fs: HarnessFs, random: HarnessRandom, ast: Harnes
     p?.session_id
   }
   const query = "(" + spec.fn_node + " name: (identifier) @__n " + spec.ret_field + ": "
-    + spec
-    .ret_node
+    + spec.ret_node
     + " @target (#eq? @__n \""
     + fn_name
     + "\"))"
@@ -1183,21 +1182,21 @@ pub fn edit_inline(fs: HarnessFs, random: HarnessRandom, ast: HarnessAst, params
   if calls.count > 0 {
     ops = ops
       + [
-      {
-        kind: "node_apply",
-        path: path,
-        params: {path: path, query: call_target, replacement: "(" + expr + ")", select: "all"},
-      },
-    ]
+        {
+          kind: "node_apply",
+          path: path,
+          params: {path: path, query: call_target, replacement: "(" + expr + ")", select: "all"},
+        },
+      ]
   }
   ops = ops
     + [
-    {
-      kind: "node_apply",
-      path: path,
-      params: {path: path, query: def_target, replacement: "", select: "unique"},
-    },
-  ]
+      {
+        kind: "node_apply",
+        path: path,
+        params: {path: path, query: def_target, replacement: "", select: "unique"},
+      },
+    ]
   return __refactor_run(fs, random, ast, "inline", language, ops, p, [])
 }
 

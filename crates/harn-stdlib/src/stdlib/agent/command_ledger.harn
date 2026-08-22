@@ -312,11 +312,9 @@ fn __cl_parse_snapshot(entry) {
 
 fn __cl_apply_one(row, snapshot, now_ms, cw) {
   const is_terminal = to_string(snapshot?.__cl_kind ?? "") == "tool_result"
-    || (to_string(
-    snapshot?.status ?? "",
-  )
-    != "running"
-    && snapshot?.status != nil)
+    || (to_string(snapshot?.status ?? "")
+      != "running"
+      && snapshot?.status != nil)
   const offset = __cl_pos_int(snapshot?.output_offset ?? snapshot?.byte_count, row.output_offset)
   const stderr_bytes = __cl_pos_int(snapshot?.stderr_byte_count, row.stderr_byte_count)
   const silence = __cl_pos_int(snapshot?.silence_ms, row.silence_ms)
@@ -333,27 +331,27 @@ fn __cl_apply_one(row, snapshot, now_ms, cw) {
   const just_saw_stderr = !row.saw_stderr && stderr_bytes > 0
   return row
     + {
-    status: if is_terminal {
-      to_string(snapshot?.status ?? "completed")
-    } else {
-      "running"
-    },
-    terminal_snapshot: if is_terminal {
-      snapshot
-    } else {
-      row?.terminal_snapshot
-    },
-    output_offset: offset,
-    stderr_byte_count: stderr_bytes,
-    silence_ms: silence,
-    new_output: delta_text,
-    saw_stderr: row.saw_stderr || stderr_bytes > 0,
-    first_stderr_edge: just_saw_stderr,
-    last_elapsed_ms: __cl_pos_int(
-      snapshot?.elapsed_ms ?? snapshot?.duration_ms,
-      now_ms - row.started_at_ms,
-    ),
-  }
+      status: if is_terminal {
+        to_string(snapshot?.status ?? "completed")
+      } else {
+        "running"
+      },
+      terminal_snapshot: if is_terminal {
+        snapshot
+      } else {
+        row?.terminal_snapshot
+      },
+      output_offset: offset,
+      stderr_byte_count: stderr_bytes,
+      silence_ms: silence,
+      new_output: delta_text,
+      saw_stderr: row.saw_stderr || stderr_bytes > 0,
+      first_stderr_edge: just_saw_stderr,
+      last_elapsed_ms: __cl_pos_int(
+        snapshot?.elapsed_ms ?? snapshot?.duration_ms,
+        now_ms - row.started_at_ms,
+      ),
+    }
 }
 
 /**
@@ -400,8 +398,7 @@ fn __cl_row_fires(row, now_ms, cw) -> bool {
   if now_ms >= row.next_decision_at_ms {
     const has_new_output = row.output_offset > row.last_digest_offset
     const silence_floor_hit = now_ms - (row?.last_digest_at_ms ?? row.started_at_ms)
-      >= cw
-      .silence_floor_ms
+      >= cw.silence_floor_ms
     return has_new_output || silence_floor_hit
   }
   return false
@@ -575,15 +572,15 @@ pub fn command_ledger_after_digest(ledger, now_ms, cw) -> list {
       out = out.appending(
         row
           + {
-          last_digest_offset: row.output_offset,
-          last_digest_at_ms: now_ms,
-          new_output: "",
-          first_stderr_edge: false,
-          stall_fired: row.silence_ms >= cw.stall_after_ms || row?.stall_fired,
-          reentries: row.reentries + 1,
-          decision_interval_ms: next_interval,
-          next_decision_at_ms: now_ms + next_interval,
-        },
+            last_digest_offset: row.output_offset,
+            last_digest_at_ms: now_ms,
+            new_output: "",
+            first_stderr_edge: false,
+            stall_fired: row.silence_ms >= cw.stall_after_ms || row?.stall_fired,
+            reentries: row.reentries + 1,
+            decision_interval_ms: next_interval,
+            next_decision_at_ms: now_ms + next_interval,
+          },
       )
     }
     // A terminal awaited row is dropped here: its completion was surfaced in

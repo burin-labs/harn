@@ -59,13 +59,9 @@ pipeline test(harness: Harness, task) {
   harness.stdio.println(
     inspect.success
       && inspect.stdout.contains("cron-heartbeat provider=cron kind=cron state=active")
-      && inspect
-      .stdout
-      .contains("manual-replay provider=a2a-push kind=a2a-push state=active")
-      && inspect.stdout
-      .contains("manual-discard provider=a2a-push kind=a2a-push state=active")
-      && inspect.stdout
-      .contains("cron bindings=1")
+      && inspect.stdout.contains("manual-replay provider=a2a-push kind=a2a-push state=active")
+      && inspect.stdout.contains("manual-discard provider=a2a-push kind=a2a-push state=active")
+      && inspect.stdout.contains("cron bindings=1")
       && inspect.stdout.contains("a2a-push bindings=2"),
   )
   const inspect_json = harness.process.exec(
@@ -84,10 +80,7 @@ pipeline test(harness: Harness, task) {
       && len(inspect_data.triggers ?? []) == 3
       && inspect_data.snapshot?.status == "stopped"
       && inspect_data.snapshot?.bind != nil
-      && contains(
-      json_stringify(inspect_data.triggers ?? []),
-      "\"id\":\"manual-replay\"",
-    )
+      && contains(json_stringify(inspect_data.triggers ?? []), "\"id\":\"manual-replay\"")
       && contains(json_stringify(inspect_data.activations ?? []), "\"provider\":\"cron\""),
   )
   const fire_replay = harness.process.exec(
@@ -135,9 +128,7 @@ pipeline test(harness: Harness, task) {
   harness.stdio.println(
     dlq_list.success
       && dlq_list.stdout.contains("binding=manual-replay")
-      && dlq_list.stdout.contains(
-      "binding=manual-discard",
-    ),
+      && dlq_list.stdout.contains("binding=manual-discard"),
   )
   const dlq_list_json = harness.process.exec(
     harn_bin,
@@ -155,10 +146,7 @@ pipeline test(harness: Harness, task) {
     dlq_list_json.success
       && dlq_data.pending_entries == 2
       && len(dlq_data.entries ?? []) == 2
-      && contains(
-      json_stringify(dlq_data.entries ?? []),
-      "\"binding_id\":\"manual-replay\"",
-    )
+      && contains(json_stringify(dlq_data.entries ?? []), "\"binding_id\":\"manual-replay\"")
       && contains(json_stringify(dlq_data.entries ?? []), "\"binding_id\":\"manual-discard\""),
   )
   const inspect_after = harness.process.exec(
@@ -173,8 +161,7 @@ pipeline test(harness: Harness, task) {
   harness.stdio.println(
     inspect_after.success
       && inspect_after.stdout.contains("dispatch_failed trigger=manual-replay")
-      && inspect_after.stdout
-      .contains("dispatch_failed trigger=manual-discard"),
+      && inspect_after.stdout.contains("dispatch_failed trigger=manual-discard"),
   )
   harness.fs.write_text(replay_marker, "ready")
   const dlq_replay = harness.process.exec(
@@ -205,7 +192,7 @@ pipeline test(harness: Harness, task) {
     direct_replay.success
       && direct_replay_data.status == "dispatched"
       && direct_replay_data.replay_of_event_id
-      == replay_event_id
+        == replay_event_id
       && direct_replay_data.binding_id == "manual-replay",
   )
   const discard = harness.process.exec(
@@ -243,9 +230,7 @@ pipeline test(harness: Harness, task) {
   harness.stdio.println(
     queue.success
       && queue.stdout.contains("dispatcher_in_flight=0")
-      && queue.stdout.contains(
-      "inferred_pending_retries=0",
-    ),
+      && queue.stdout.contains("inferred_pending_retries=0"),
   )
   harness.stdio.println(
     len(regex_captures("inbox_claims_written=([1-9][0-9]*)", queue.stdout)) == 1,

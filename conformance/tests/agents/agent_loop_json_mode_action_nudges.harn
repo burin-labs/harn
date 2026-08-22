@@ -121,9 +121,7 @@ pipeline default(harness: Harness) {
       )
       harness.stdio.println(
         "fenced.vocab_json="
-          + to_string(
-          injected_in(calls, 1, "Emit the call as a ```tool JSON block"),
-        ),
+          + to_string(injected_in(calls, 1, "Emit the call as a ```tool JSON block")),
       )
       harness.stdio.println(
         "fenced.no_tag=" + to_string(!injected_in(calls, 1, "bare inside <tool_call>")),

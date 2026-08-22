@@ -7,9 +7,7 @@ fn in_range(stdio: HarnessStdio, name, actual, low, high) {
   if actual < low || actual > high {
     stdio.println(
       name + " out of range: " + to_string(actual) + " not in [" + to_string(low) + ", "
-        + to_string(
-        high,
-      )
+        + to_string(high)
         + "]",
     )
     return false

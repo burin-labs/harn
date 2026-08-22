@@ -126,9 +126,7 @@ fn __media_magic_matches(content: bytes, mime_type: string) -> bool {
   if mime == "image/webp" {
     return bytes_slice(content, 0, 4) == bytes_from_string("RIFF")
       && bytes_slice(content, 8, 12)
-      == bytes_from_string(
-      "WEBP",
-    )
+        == bytes_from_string("WEBP")
   }
   if mime == "image/svg+xml" {
     const prefix = lowercase(trim(bytes_to_string_lossy(bytes_slice(content, 0, 512))))
@@ -140,9 +138,7 @@ fn __media_magic_matches(content: bytes, mime_type: string) -> bool {
   if mime == "audio/wav" {
     return bytes_slice(content, 0, 4) == bytes_from_string("RIFF")
       && bytes_slice(content, 8, 12)
-      == bytes_from_string(
-      "WAVE",
-    )
+        == bytes_from_string("WAVE")
   }
   if mime == "video/mp4" {
     return bytes_slice(content, 4, 8) == bytes_from_string("ftyp")
@@ -325,8 +321,8 @@ pub fn media_asset_verify_result(
   const digest = sha256(content)
   if digest != asset.sha256 || asset.id != "sha256:" + digest
     || asset.uri
-    != "asset://sha256/"
-    + digest {
+      != "asset://sha256/"
+        + digest {
     return Err(
       __media_failure(
         "digest_mismatch",

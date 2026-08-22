@@ -232,15 +232,15 @@ pub fn agent_futility_verdict(
       compared = compared + [before_surface.name]
       evidence = evidence
         + [
-        {
-          surface: before_surface.name,
-          before_fingerprint: before_surface.fingerprint,
-          after_fingerprint: after_surface.fingerprint,
-          changed: surface_changed,
-          before_evidence: before_surface?.evidence,
-          after_evidence: after_surface?.evidence,
-        },
-      ]
+          {
+            surface: before_surface.name,
+            before_fingerprint: before_surface.fingerprint,
+            after_fingerprint: after_surface.fingerprint,
+            changed: surface_changed,
+            before_evidence: before_surface?.evidence,
+            after_evidence: after_surface?.evidence,
+          },
+        ]
     }
   }
   const kind = if changed {

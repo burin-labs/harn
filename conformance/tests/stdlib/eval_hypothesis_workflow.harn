@@ -22,11 +22,11 @@ pipeline default(harness: Harness, _task) {
   require before.integrity.scope == "retained_topic_chain"
     && before.integrity.verified
     && before.integrity.scanned_event_count
-    == 0
+      == 0
     && before.integrity.last_hash
-    == nil
+      == nil
     && before.snapshot.event_count
-    == 0,
+      == 0,
     "the typed snapshot reports the empty retained chain and aggregate"
   const current = before.snapshot
   const legacy_v1_snapshot = {
@@ -61,9 +61,9 @@ pipeline default(harness: Harness, _task) {
   )
   require started.kind == "adapter_unavailable"
     && started.required_adapter
-    == "hypothesis.operation"
+      == "hypothesis.operation"
     && started.state
-    == "unregistered",
+      == "unregistered",
     "start returns the typed native-adapter blocker"
   const inspected = hypothesis_workflow(
     harness.obs,
@@ -71,9 +71,9 @@ pipeline default(harness: Harness, _task) {
   )
   require inspected.kind == "inspection"
     && inspected.state
-    == "unregistered"
+      == "unregistered"
     && inspected.ledger.snapshot.event_count
-    == 0,
+      == 0,
     "inspect returns the same single-pass empty read model"
   const resumed = hypothesis_workflow(
     harness.obs,
@@ -106,14 +106,14 @@ pipeline default(harness: Harness, _task) {
   const observe_only = compile_experiment_intent(
     hypothesis_fixture_intent()
       + {
-      requested_lane: "non_experimental_research",
-      requested_evidence: "observational",
-      intervention: nil,
-      comparator: nil,
-      assignment_unit: nil,
-      population_id: nil,
-      outcome_ids: [],
-    },
+        requested_lane: "non_experimental_research",
+        requested_evidence: "observational",
+        intervention: nil,
+        comparator: nil,
+        assignment_unit: nil,
+        population_id: nil,
+        outcome_ids: [],
+      },
     hypothesis_fixture_context(),
   )
   if observe_only.plan == nil || observe_only.plan.kind != "observe_only" {

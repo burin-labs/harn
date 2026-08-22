@@ -163,14 +163,14 @@ fn __operation_id(
 ) -> string {
   return "hypop-"
     + sha256(
-    plan_fingerprint
-      + "\\u0000"
-      + run_id
-      + "\\u0000"
-      + to_string(action)
-      + "\\u0000"
-      + qualifier,
-  )
+      plan_fingerprint
+        + "\\u0000"
+        + run_id
+        + "\\u0000"
+        + to_string(action)
+        + "\\u0000"
+        + qualifier,
+    )
 }
 
 fn __cell_key(arm_id: string, case_id: string, trial_index: int) -> string {
@@ -202,11 +202,11 @@ fn __validate_native_arm(
 ) {
   if result.spend_delta_usd < 0.0
     || result.compute_delta_ms
-    < 0
+      < 0
     || result.token_delta
-    < 0
+      < 0
     || result.api_call_delta
-    < 0 {
+      < 0 {
     throw "hypothesis workflow: native block returned a negative resource delta"
   }
   const metric_ids = __metric_ids(registration)
@@ -229,7 +229,7 @@ fn __frozen_blocking_values(
   for observation in observations {
     if observation.case_id == case_id
       && observation.trial_index
-      == trial_index {
+        == trial_index {
       return observation.baseline_assignment.blocking_values
     }
   }
@@ -263,9 +263,9 @@ fn __next_block(
         for observation in observations {
           if observation.case_id == case_id
             && observation.trial_index
-            == trial_index
+              == trial_index
             && observation.baseline_assignment.plan_id
-            != planned.plan_id {
+              != planned.plan_id {
             throw "hypothesis workflow: a partial block differs from its frozen assignment plan"
           }
         }
@@ -308,12 +308,12 @@ fn __telemetry_status(
 ) -> "observed" | "unavailable" | "not_observable" {
   if baseline.telemetry_status == "not_observable"
     || candidate.telemetry_status
-    == "not_observable" {
+      == "not_observable" {
     return "not_observable"
   }
   if baseline.telemetry_status == "unavailable"
     || candidate.telemetry_status
-    == "unavailable" {
+      == "unavailable" {
     return "unavailable"
   }
   return "observed"
@@ -366,7 +366,7 @@ fn __native_operation(
   const native: HypothesisNativeOperationResult = unwrap(checked).value
   if native.action != request.action
     || native.operation_receipt_id
-    != request.operation_receipt_id {
+      != request.operation_receipt_id {
     throw "hypothesis workflow: native operation result does not match its request"
   }
   __non_empty(native.operation_receipt_id, "operation_receipt_id")
@@ -463,7 +463,7 @@ fn __start(
   const state = __state(read)
   if read.snapshot.active_run_id != nil
     && read.snapshot.active_run_id
-    != request.run_id {
+      != request.run_id {
     throw "hypothesis workflow: start run_id differs from the active run"
   }
   if read.snapshot.approval_status == "denied" {
@@ -496,9 +496,9 @@ fn __start(
   const native = __accepted_native_result(native_result, "start")
   if plan.design.approval_required
     && read.snapshot.approval_status
-    == nil
+      == nil
     && native.approval
-    == nil {
+      == nil {
     throw "hypothesis workflow: native start omitted the required approval result"
   }
   if !plan.design.approval_required && native.approval != nil {
@@ -598,9 +598,9 @@ fn __advance(
   const initial_state = __state(read)
   const recovering_decision = initial_state == "completed"
     && read.snapshot.completion
-    != nil
+      != nil
     && read.snapshot.decision
-    == nil
+      == nil
   if initial_state != "running" && !recovering_decision {
     return __not_actionable("advance", hypothesis_id, "not_running", read)
   }
@@ -700,11 +700,11 @@ fn __advance(
   const native: HypothesisNativeOperationAccepted = native_result
   if native.assignment_plan_id == nil
     || native.observed_blocking_values
-    == nil
+      == nil
     || native.arm_observations
-    == nil
+      == nil
     || native.elapsed_ms
-    == nil {
+      == nil {
     throw "hypothesis workflow: native advance omitted its block result"
   }
   const assignment_plan_id = native.assignment_plan_id
@@ -713,7 +713,7 @@ fn __advance(
   const elapsed_ms = native.elapsed_ms
   if assignment_plan_id != next.plan.plan_id
     || len(arm_observations)
-    != len(next.plan.assignments) {
+      != len(next.plan.assignments) {
     throw "hypothesis workflow: native block does not match the frozen assignment plan"
   }
   if elapsed_ms < 0 || elapsed_ms > plan.design.budget.max_wall_clock_ms {
@@ -733,17 +733,13 @@ fn __advance(
     __validate_native_arm(plan.registration, result)
     arm_results = arm_results + {[result.arm_id]: result}
     realized = realized
-      + {
-      [result.arm_id]: realize_assignment(next.plan, result.arm_id, observed_blocking_values),
-    }
+      + {[result.arm_id]: realize_assignment(next.plan, result.arm_id, observed_blocking_values)}
   }
   let telemetry_degradations: list<string> = []
   for result in arm_observations {
     if result.telemetry_status != "observed" {
       telemetry_degradations = telemetry_degradations
-        + [
-        "native adapter returned " + result.telemetry_status + " telemetry",
-      ]
+        + ["native adapter returned " + result.telemetry_status + " telemetry"]
     }
     telemetry_degradations = telemetry_degradations + result.capability_degradations
   }
@@ -824,16 +820,15 @@ fn __advance(
     }
   }
   if read.snapshot.total_spend_usd + pending_spend > plan.design.budget.max_spend_usd
-    || read.snapshot
-    .total_compute_ms
-    + pending_compute
-    > plan.design.budget.max_compute_ms
+    || read.snapshot.total_compute_ms
+      + pending_compute
+      > plan.design.budget.max_compute_ms
     || read.snapshot.total_tokens
-    + pending_tokens
-    > plan.design.budget.max_tokens
+      + pending_tokens
+      > plan.design.budget.max_tokens
     || read.snapshot.total_api_calls
-    + pending_api_calls
-    > plan.design.budget.max_api_calls {
+      + pending_api_calls
+      > plan.design.budget.max_api_calls {
     throw "hypothesis workflow: native block exceeds the registered resource budget"
   }
   let predecessor = read.snapshot.latest_event_fingerprint
@@ -1100,7 +1095,7 @@ pub fn hypothesis_workflow(
     const read = hypothesis_ledger_snapshot(obs, request.plan.hypothesis_id)
     if read.snapshot.plan != nil
       && read.snapshot.plan.fingerprint
-      != request.plan.fingerprint {
+        != request.plan.fingerprint {
       throw "hypothesis workflow: the aggregate already owns a different plan"
     }
     if request.plan.kind == "observe_only" {

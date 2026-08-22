@@ -487,10 +487,10 @@ pub fn fleet_finding(harness: Harness, scope, room, premise, options = nil) {
         trim(
           opts?.recommended_action
             ?? if normalized == "overturned" {
-            "pause"
-          } else {
-            "continue"
-          },
+              "pause"
+            } else {
+              "continue"
+            },
         ),
       ),
       requires_ack: opts?.requires_ack ?? (normalized == "overturned"),
@@ -654,10 +654,7 @@ fn __fleet_claim_state(claim, ack, done, heartbeat, now_ms) {
   if heartbeat != nil
     && __fleet_contains(heartbeat.message.data.current_claim_ids, claim.message.id) {
     const heartbeat_expiry = heartbeat.at_ms
-      + max(
-      heartbeat.message.data.lease_ms,
-      heartbeat.message.data.expected_silence_ms,
-    )
+      + max(heartbeat.message.data.lease_ms, heartbeat.message.data.expected_silence_ms)
     if heartbeat_expiry > expires_at_ms {
       expires_at_ms = heartbeat_expiry
     }
@@ -726,10 +723,10 @@ pub fn fleet_project(messages, options = nil) {
     if !__fleet_known_data(message) {
       unknown_messages = unknown_messages
         + [
-        filter_nil(
-          {id: message?.id, kind: message?.kind, subject: message?.subject, actor_id: actor_id},
-        ),
-      ]
+          filter_nil(
+            {id: message?.id, kind: message?.kind, subject: message?.subject, actor_id: actor_id},
+          ),
+        ]
     } else if message.kind == "claim" {
       claims[message.id] = row + {actor_id: actor_id}
     } else if message.kind == "ack" {
@@ -798,28 +795,28 @@ pub fn fleet_project(messages, options = nil) {
     }
     projected_actors = projected_actors
       + [
-      (actors[actor_id] ?? {})
-        + {
-        liveness: __fleet_liveness(heartbeats[actor_id], now_ms, grace_ms),
-        current_claim_ids: actor_claim_ids,
-      },
-    ]
+        (actors[actor_id] ?? {})
+          + {
+            liveness: __fleet_liveness(heartbeats[actor_id], now_ms, grace_ms),
+            current_claim_ids: actor_claim_ids,
+          },
+      ]
   }
   let pending_findings = []
   for finding in findings {
     if (finding.message.data.requires_ack ?? false) && acks[finding.message.id] == nil {
       pending_findings = pending_findings
         + [
-        {
-          id: finding.message.id,
-          actor_id: finding.actor_id,
-          subject: finding.message.subject,
-          premise: finding.message.data.premise,
-          recommended_action: finding.message.data.recommended_action,
-          at_ms: finding.at_ms,
-          refs: finding.message.refs ?? [],
-        },
-      ]
+          {
+            id: finding.message.id,
+            actor_id: finding.actor_id,
+            subject: finding.message.subject,
+            premise: finding.message.data.premise,
+            recommended_action: finding.message.data.recommended_action,
+            at_ms: finding.at_ms,
+            refs: finding.message.refs ?? [],
+          },
+        ]
     }
   }
   let latest_checkins = []
@@ -827,15 +824,15 @@ pub fn fleet_project(messages, options = nil) {
     const checkin = checkins[actor_id] ?? {}
     latest_checkins = latest_checkins
       + [
-      {
-        id: checkin.message.id,
-        actor_id: actor_id,
-        at_ms: checkin.at_ms,
-        sections: checkin.message.data,
-        refs: checkin.message.refs ?? [],
-        verification: "unverified",
-      },
-    ]
+        {
+          id: checkin.message.id,
+          actor_id: actor_id,
+          at_ms: checkin.at_ms,
+          sections: checkin.message.data,
+          refs: checkin.message.refs ?? [],
+          verification: "unverified",
+        },
+      ]
   }
   const snapshot = {
     schema: __FLEET_SNAPSHOT_SCHEMA,

@@ -199,5 +199,5 @@ pub fn llm_failure_exhausted_request_deadline(envelope) -> bool {
   }
   return to_string(error?.source ?? "") == "provider_stream"
     && to_string(error?.deadline ?? "")
-    == "total"
+      == "total"
 }

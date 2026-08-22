@@ -178,7 +178,7 @@ pub fn bump_options(overrides: dict = {}) -> BumpOptions {
 pub fn bump_is_current(previous: string, target: string) -> bool {
   return strip_v(trim(previous ?? "")) == strip_v(trim(target ?? ""))
     && strip_v(trim(target ?? ""))
-    != ""
+      != ""
 }
 
 /**
@@ -263,11 +263,7 @@ pub fn run_bump(options: BumpOptions, adapter: BumpAdapter) -> BumpReceipt {
   // assets is not an error; the scheduled rerun will pick it up.
   if !readiness.ready {
     return receipt
-      + {
-      outcome: "not_ready",
-      ok: true,
-      notes: ["target release is not fully published yet"],
-    }
+      + {outcome: "not_ready", ok: true, notes: ["target release is not fully published yet"]}
   }
   // Phase 2 — idempotent no-op. Concurrent/scheduled reruns land here once the
   // pin already matches, so the common steady state does zero mutation.
@@ -281,31 +277,27 @@ pub fn run_bump(options: BumpOptions, adapter: BumpAdapter) -> BumpReceipt {
   if relation == "ahead" {
     return receipt
       + {
-      outcome: "already_current",
-      ok: true,
-      notes: ["pin ${previous} is newer than requested target ${target}; no downgrade applied"],
-    }
+        outcome: "already_current",
+        ok: true,
+        notes: ["pin ${previous} is newer than requested target ${target}; no downgrade applied"],
+      }
   }
   // Phase 3 — write the pin and regenerate derived sources (lockfile, codegen).
   const apply = adapter.apply_version(target)
   receipt = receipt
     + {
-    changed: apply.changed,
-    refreshed: apply.refreshed,
-    refresh_ok: apply.ok,
-    refresh_detail: apply.detail,
-  }
+      changed: apply.changed,
+      refreshed: apply.refreshed,
+      refresh_ok: apply.ok,
+      refresh_detail: apply.detail,
+    }
   if !apply.ok && (!options.publish_failure_for_repair || !apply.changed) {
     return receipt
       + {outcome: "refresh_failed", ok: false, notes: ["refresh failed: ${apply.detail}"]}
   }
   if !apply.changed {
     return receipt
-      + {
-      outcome: "already_current",
-      ok: true,
-      notes: ["writing ${target} produced no change"],
-    }
+      + {outcome: "already_current", ok: true, notes: ["writing ${target} produced no change"]}
   }
   // Phase 4 — the caller's single declared validation entrypoint. By default,
   // any failed mutation stops before publication. Fleet controllers may opt
@@ -324,10 +316,10 @@ pub fn run_bump(options: BumpOptions, adapter: BumpAdapter) -> BumpReceipt {
     if !validation.ok && !options.publish_failure_for_repair {
       return receipt
         + {
-        outcome: "validation_failed",
-        ok: false,
-        notes: ["validation failed: ${validation.detail}"],
-      }
+          outcome: "validation_failed",
+          ok: false,
+          notes: ["validation failed: ${validation.detail}"],
+        }
     }
     if !validation.ok {
       repair_outcome = "validation_failed"
@@ -344,10 +336,10 @@ pub fn run_bump(options: BumpOptions, adapter: BumpAdapter) -> BumpReceipt {
     if repair_publication {
       return receipt
         + {
-        outcome: repair_failure,
-        ok: false,
-        notes: ["${repair_failure} without a repairable file delta: ${repair_detail}"],
-      }
+          outcome: repair_failure,
+          ok: false,
+          notes: ["${repair_failure} without a repairable file delta: ${repair_detail}"],
+        }
     }
     return receipt
       + {outcome: "no_changes", ok: true, notes: ["no file changes after refresh"]}
@@ -385,42 +377,40 @@ pub fn run_bump(options: BumpOptions, adapter: BumpAdapter) -> BumpReceipt {
       if repair_publication {
         return receipt
           + {
-          outcome: repair_failure,
-          ok: false,
-          pr_action: "closed",
-          pr_number: existing.number,
-          notes: notes
-            + [
-            "${repair_failure} and the published tree matched ${options.base}; closed #${existing.number}",
-          ],
-        }
+            outcome: repair_failure,
+            ok: false,
+            pr_action: "closed",
+            pr_number: existing.number,
+            notes: notes
+              + [
+                "${repair_failure} and the published tree matched ${options.base}; closed #${existing.number}",
+              ],
+          }
       }
       return receipt
         + {
-        outcome: "closed_noop",
-        ok: true,
-        pr_action: "closed",
-        pr_number: existing.number,
-        notes: notes + ["branch tree matches ${options.base}; closed #${existing.number}"],
-      }
+          outcome: "closed_noop",
+          ok: true,
+          pr_action: "closed",
+          pr_number: existing.number,
+          notes: notes + ["branch tree matches ${options.base}; closed #${existing.number}"],
+        }
     }
     if repair_publication {
       return receipt
         + {
-        outcome: repair_failure,
-        ok: false,
-        notes: notes
-          + [
-          "${repair_failure} and the published tree matched ${options.base}; no PR needed",
-        ],
-      }
+          outcome: repair_failure,
+          ok: false,
+          notes: notes
+            + ["${repair_failure} and the published tree matched ${options.base}; no PR needed"],
+        }
     }
     return receipt
       + {
-      outcome: "no_changes",
-      ok: true,
-      notes: notes + ["branch tree matches ${options.base}; no PR needed"],
-    }
+        outcome: "no_changes",
+        ok: true,
+        notes: notes + ["branch tree matches ${options.base}; no PR needed"],
+      }
   }
   // Phase 9 — create or refresh the PR.
   const upsert = adapter.upsert_pr(existing, commit.oid)
@@ -433,14 +423,14 @@ pub fn run_bump(options: BumpOptions, adapter: BumpAdapter) -> BumpReceipt {
   if repair_publication {
     return receipt
       + {
-      outcome: repair_failure,
-      ok: false,
-      notes: notes
-        + [
-        "${repair_failure}: ${repair_detail}",
-        "published #${upsert.number} for bounded repair with auto-merge disabled",
-      ],
-    }
+        outcome: repair_failure,
+        ok: false,
+        notes: notes
+          + [
+            "${repair_failure}: ${repair_detail}",
+            "published #${upsert.number} for bounded repair with auto-merge disabled",
+          ],
+      }
   }
   // Phase 10 — arm auto-merge so the merge queue owns the final landing.
   let auto_merge = nil
@@ -448,12 +438,12 @@ pub fn run_bump(options: BumpOptions, adapter: BumpAdapter) -> BumpReceipt {
     auto_merge = adapter.enable_auto_merge(upsert.number, upsert.head_oid)
     notes = notes
       + [
-      if auto_merge.enabled {
-        "auto-merge armed on #${upsert.number}"
-      } else {
-        "auto-merge not enabled: ${auto_merge.detail}"
-      },
-    ]
+        if auto_merge.enabled {
+          "auto-merge armed on #${upsert.number}"
+        } else {
+          "auto-merge not enabled: ${auto_merge.detail}"
+        },
+      ]
   }
   return receipt + {outcome: "committed", ok: true, auto_merge: auto_merge, notes: notes}
 }

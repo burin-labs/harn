@@ -54,7 +54,7 @@ pipeline test_post_turn_policy_stop_bypasses_completion_verify(harness: Harness,
           { event ->
             event?.reminder?.body == "Run stopped by host policy."
               && event?.reminder?.authority
-              == "corrective"
+                == "corrective"
           },
         )
         .to_list()

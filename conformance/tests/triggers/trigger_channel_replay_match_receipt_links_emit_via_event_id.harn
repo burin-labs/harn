@@ -7,9 +7,7 @@ fn handle_channel(harness: Harness, event) {
 pipeline default(harness: Harness) {
   const audit = harness.obs.event_log_subscribe({topic: "lifecycle.channel.audit"})
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
-    + to_string(
-    harness.random.range(100000, 999999),
-  )
+    + to_string(harness.random.range(100000, 999999))
   const _ = harness.runtime.trigger_register(
     {
       id: "channel-replay-match-" + unique,

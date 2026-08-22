@@ -121,9 +121,7 @@ pipeline default(harness: Harness) {
   )
   harness.stdio.println(
     "receipt_uri_in_receipt="
-      + to_string(
-      to_string(receipt?.audit?.receipt_uri ?? "") == expected_receipt_uri,
-    ),
+      + to_string(to_string(receipt?.audit?.receipt_uri ?? "") == expected_receipt_uri),
   )
   harness.stdio.println(
     "receipt_uri_in_audit_event=" + to_string(local_audit_uri == expected_receipt_uri),
@@ -154,9 +152,7 @@ pipeline default(harness: Harness) {
   )
   harness.stdio.println(
     "cloud_reminder_audit="
-      + to_string(
-      receipt_events[0]?.receipt?.audit?.reminders?.origin == "tool_hook",
-    ),
+      + to_string(receipt_events[0]?.receipt?.audit?.reminders?.origin == "tool_hook"),
   )
   harness.tools.clear_hooks()
 }

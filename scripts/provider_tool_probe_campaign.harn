@@ -230,10 +230,10 @@ fn main(harness: Harness) {
   const summary = report.summary
   if live
     && ((summary.fail ?? 0) > 0 || (summary.error ?? 0) > 0
-    || report.spend?.budget_status
-    == "stopped_unpriced"
-    || report.artifacts?.scorecard_status
-    != "complete") {
+      || report.spend?.budget_status
+        == "stopped_unpriced"
+      || report.artifacts?.scorecard_status
+        != "complete") {
     harness.runtime.exit(1)
   }
   return nil

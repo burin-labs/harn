@@ -318,12 +318,12 @@ fn __model_matches_identity_filters(model, opts) {
   }
   if want_equivalence != nil
     && to_string(model?.equivalence_group ?? "")
-    != to_string(want_equivalence) {
+      != to_string(want_equivalence) {
     return false
   }
   if want_logical_model != nil
     && to_string(model?.logical_model ?? "")
-    != to_string(want_logical_model) {
+      != to_string(want_logical_model) {
     return false
   }
   if want_api_dialect != nil && to_string(model?.api_dialect ?? "") != to_string(want_api_dialect) {

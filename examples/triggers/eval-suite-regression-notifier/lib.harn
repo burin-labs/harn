@@ -170,8 +170,8 @@ fn post_eval_verdict(clock: HarnessClock, net: HarnessNet, verdict, options) {
     return Err(
       "Slack chat.postMessage failed: "
         + to_string(
-        response.error?.message ?? response.error?.category ?? response.status ?? "unknown",
-      ),
+          response.error?.message ?? response.error?.category ?? response.status ?? "unknown",
+        ),
     )
   }
   const body = response.json ?? {}
@@ -242,9 +242,9 @@ fn slack_regressed_cases_text(verdict) -> string {
     if count < 5 {
       lines = lines
         + [
-        "- " + to_string(item?.name ?? "unknown") + " (" + slack_signed_rate_delta(item?.delta)
-          + " pp)",
-      ]
+          "- " + to_string(item?.name ?? "unknown") + " (" + slack_signed_rate_delta(item?.delta)
+            + " pp)",
+        ]
       count = count + 1
     }
   }
@@ -295,7 +295,7 @@ fn should_notify(decision, config) -> bool {
   const notify_inconclusive = config.notify_inconclusive ?? false
   return decision == "regression" || decision == "improved"
     || (decision == "inconclusive"
-    && notify_inconclusive)
+      && notify_inconclusive)
 }
 
 fn top_regressed_cases(baseline_rows, current_rows) -> list {

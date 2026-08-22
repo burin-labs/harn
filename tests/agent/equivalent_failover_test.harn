@@ -14,13 +14,13 @@ fn run_with_options(harness: Harness, key, options) {
     nil,
     options
       + {
-      provider: "mock",
-      model: "model",
-      llm_caller: caller,
-      loop_until_done: true,
-      done_sentinel: "DONE",
-      max_iterations: 1,
-    },
+        provider: "mock",
+        model: "model",
+        llm_caller: caller,
+        loop_until_done: true,
+        done_sentinel: "DONE",
+        max_iterations: 1,
+      },
   )
   return omit(harness.runtime.shared_get(observed), ["messages"])
 }

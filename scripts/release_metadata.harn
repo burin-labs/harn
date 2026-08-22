@@ -290,9 +290,7 @@ pub fn apply_release_metadata(
 ) -> ReleaseMetadataPlan {
   const current = current_version(fs, root)
   const plan = release_metadata_plan(fs, root, bump ?? "patch", prerelease_identifier)
-    + {
-    next_version: version,
-  }
+    + {next_version: version}
   if semver.parse_release(version) == nil {
     throw "release version is not release SemVer: " + version
   }
@@ -307,8 +305,7 @@ pub fn apply_release_metadata(
   }
   const root_manifest = cargo_path(root)
   const all_manifests = [root_manifest]
-    + plan.manifests.map({ path -> path_join(root, path) })
-    .to_list()
+    + plan.manifests.map({ path -> path_join(root, path) }).to_list()
   for manifest in all_manifests.unique() {
     let text = fs.read_text(manifest)
     if path_normalize(manifest) == path_normalize(root_manifest) {
@@ -403,8 +400,9 @@ fn main(harness: Harness) -> int {
       const bump = to_string(parsed.options?.bump ?? "")
       const preid = to_string(parsed.options?.preid ?? "")
       if bump != ""
-        && !["major", "minor", "patch", "premajor", "preminor", "prepatch", "prerelease"]
-        .contains(bump) {
+        && !["major", "minor", "patch", "premajor", "preminor", "prepatch", "prerelease"].contains(
+          bump,
+        ) {
         throw "--bump must name a supported release bump"
       }
       if bump == "" {

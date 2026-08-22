@@ -149,13 +149,13 @@ fn __comfy_outputs(endpoint: string, history) -> list<ModelJobOutput> {
     for image in node?.images ?? [] {
       outputs = outputs
         + [
-        {
-          name: to_string(image?.filename ?? "output.png"),
-          mime_type: "image/png",
-          url: __comfy_output_url(endpoint, image),
-          metadata: {filename: image?.filename, subfolder: image?.subfolder, type: image?.type},
-        },
-      ]
+          {
+            name: to_string(image?.filename ?? "output.png"),
+            mime_type: "image/png",
+            url: __comfy_output_url(endpoint, image),
+            metadata: {filename: image?.filename, subfolder: image?.subfolder, type: image?.type},
+          },
+        ]
     }
   }
   return outputs
@@ -183,10 +183,10 @@ fn __comfy_history_observation(
   const status = history?.status ?? {}
   const raw_state = status?.status_str
     ?? if status?.completed ?? false {
-    "success"
-  } else {
-    "running"
-  }
+      "success"
+    } else {
+      "running"
+    }
   const checked_state = model_job_state_result(raw_state, backend, job.id)
   if !is_ok(checked_state) {
     return Err(unwrap_err(checked_state))

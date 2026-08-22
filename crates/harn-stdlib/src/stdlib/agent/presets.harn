@@ -111,23 +111,17 @@ fn __validate_pin_policy(kind, pin_policy) {
   }
   if type_of(pin_policy) != "dict" {
     throw "agent_preset_register(\"" + kind + "\"): spec.pack.pin_policy must be a dict; got "
-      + type_of(
-      pin_policy,
-    )
+      + type_of(pin_policy)
   }
   if pin_policy?.kinds != nil {
     if type_of(pin_policy.kinds) != "list" {
       throw "agent_preset_register(\"" + kind + "\"): pin_policy.kinds must be a list; got "
-        + type_of(
-        pin_policy.kinds,
-      )
+        + type_of(pin_policy.kinds)
     }
     for k in pin_policy.kinds {
       if !contains(pin_kinds(), k) {
         throw "agent_preset_register(\"" + kind + "\"): pin_policy.kinds has unknown pin kind \""
-          + to_string(
-          k,
-        )
+          + to_string(k)
           + "\"; allowed: "
           + join(pin_kinds(), ", ")
       }
@@ -347,10 +341,7 @@ fn __caller_set_low_level_reasoning(opts) {
   const llm_overrides = opts?.llm_options
   return type_of(llm_overrides) == "dict"
     && (contains(llm_overrides.keys(), "thinking")
-    || contains(
-    llm_overrides.keys(),
-    "effort",
-  ))
+      || contains(llm_overrides.keys(), "effort"))
 }
 
 fn __caller_set_reasoning_policy(opts) {
@@ -587,7 +578,7 @@ fn __captain_consent_default(kind) {
       const kind_label = to_string(hints?.kind ?? "")
       if kind_label == "read" || kind_label == "search" || kind_label == "fetch"
         || kind_label
-        == "think" {
+          == "think" {
         return {decision: "approved", decided_by: "merge_captain.read_default"}
       }
       return {

@@ -100,15 +100,15 @@ fn write_valid_fixture(fs: HarnessFs, task_dir: string) -> nil {
     )
       + "\n"
       + json_stringify(
-      {
-        input_tokens: 140,
-        messages: [
-          {role: "system", content: "## Question-at-a-time planner\nUse tools."},
-          {role: "user", content: "Use Redis."},
-        ],
-        tool_calls: [{name: "exit_plan_mode", args: {plan: "{}"}}],
-      },
-    )
+        {
+          input_tokens: 140,
+          messages: [
+            {role: "system", content: "## Question-at-a-time planner\nUse tools."},
+            {role: "user", content: "Use Redis."},
+          ],
+          tool_calls: [{name: "exit_plan_mode", args: {plan: "{}"}}],
+        },
+      )
       + "\n",
   )
   write_json(fs, path_join(task_dir, "step.json"), {tool_calls: [{name: "exit_plan_mode"}]})

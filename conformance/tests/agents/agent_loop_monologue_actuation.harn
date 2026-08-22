@@ -253,14 +253,14 @@ pipeline default(harness: Harness) {
         if count < 4 {
           return base
             + {
-            result: {
-              configured: true,
-              vetoed: true,
-              on_failure: "regenerate_with_feedback",
-              feedback: "retry the read",
-              rule: "fixture_veto",
-            },
-          }
+              result: {
+                configured: true,
+                vetoed: true,
+                on_failure: "regenerate_with_feedback",
+                feedback: "retry the read",
+                rule: "fixture_veto",
+              },
+            }
         }
         return base
       },

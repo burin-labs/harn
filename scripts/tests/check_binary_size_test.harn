@@ -486,15 +486,15 @@ pipeline test_accepted_growth_must_name_the_current_baseline(harness: Harness, t
     release_binary_size_policy_errors(
       valid_policy()
         + {
-        targets: [
-          target
-            + {
-            accepted_growth: [
-              current + {against_baseline_sha: "0000000000000000000000000000000000000000"},
-            ],
-          },
-        ],
-      },
+          targets: [
+            target
+              + {
+                accepted_growth: [
+                  current + {against_baseline_sha: "0000000000000000000000000000000000000000"},
+                ],
+              },
+          ],
+        },
     ),
     [
       "x86_64-unknown-linux-gnu: accepted_growth.against_baseline_sha must be the current baseline 1347f161a30aaaaa7c36546f2101c65aed2154a7, got 0000000000000000000000000000000000000000",
@@ -547,60 +547,56 @@ pipeline test_bootstrap_query_matches_typed_policy_contract(harness: Harness, ta
           + {targets: [valid_target_policy() + {distribution_fuse_bytes: 263142476}]},
         valid_policy()
           + {
-          targets: [
-            valid_target_policy()
-              + {
-              accepted_growth: [
-                {
-                  against_baseline_sha: "0000000000000000000000000000000000000000",
-                  bytes: 1,
-                  reason: "stale",
-                },
-              ],
-            },
-          ],
-        },
-        valid_policy()
-          + {
-          targets: [
-            valid_target_policy()
-              + {
-              baseline: valid_target_policy().baseline
+            targets: [
+              valid_target_policy()
                 + {
-                build_identity: valid_build_identity() + {codegen_units: 0},
-              },
-            },
-          ],
-        },
+                  accepted_growth: [
+                    {
+                      against_baseline_sha: "0000000000000000000000000000000000000000",
+                      bytes: 1,
+                      reason: "stale",
+                    },
+                  ],
+                },
+            ],
+          },
         valid_policy()
           + {
-          targets: [
-            valid_target_policy()
-              + {baseline: valid_target_policy().baseline + {version: "next"}},
-          ],
-        },
+            targets: [
+              valid_target_policy()
+                + {
+                  baseline: valid_target_policy().baseline
+                    + {build_identity: valid_build_identity() + {codegen_units: 0}},
+                },
+            ],
+          },
         valid_policy()
           + {
-          targets: [
-            valid_target_policy()
-              + {baseline: valid_target_policy().baseline + {source_sha: "short"}},
-          ],
-        },
+            targets: [
+              valid_target_policy()
+                + {baseline: valid_target_policy().baseline + {version: "next"}},
+            ],
+          },
         valid_policy()
           + {
-          targets: [
-            valid_target_policy()
-              + {
-              baseline: valid_target_policy().baseline + {observed_at: "today"},
-            },
-          ],
-        },
+            targets: [
+              valid_target_policy()
+                + {baseline: valid_target_policy().baseline + {source_sha: "short"}},
+            ],
+          },
         valid_policy()
           + {
-          targets: [
-            valid_target_policy() + {baseline: valid_target_policy().baseline + {bytes: 0}},
-          ],
-        },
+            targets: [
+              valid_target_policy()
+                + {baseline: valid_target_policy().baseline + {observed_at: "today"}},
+            ],
+          },
+        valid_policy()
+          + {
+            targets: [
+              valid_target_policy() + {baseline: valid_target_policy().baseline + {bytes: 0}},
+            ],
+          },
         valid_policy() + {targets: [valid_target_policy() + {target: ""}]},
       ]
       let index = 0
@@ -871,9 +867,9 @@ pipeline test_the_growth_signal_needs_both_thresholds(harness: Harness, task) {
   // A ratio crossing under the byte floor cannot fire on its own.
   const tiny = entry
     + {
-    baseline: entry.baseline + {bytes: 1000000},
-    growth: {warn_bytes: 4194304, warn_percent_hundredths: 200},
-  }
+      baseline: entry.baseline + {bytes: 1000000},
+      growth: {warn_bytes: 4194304, warn_percent_hundredths: 200},
+    }
   assert_eq(evaluate_release_binary_size(tiny, measurement(1500000)).growth, "ok")
   assert_eq(evaluate_release_binary_size(entry, measurement(baseline)).growth, "ok")
   assert_eq(evaluate_release_binary_size(entry, measurement(baseline - 5000000)).growth, "ok")
@@ -904,13 +900,9 @@ pipeline test_the_growth_signal_is_withheld_when_the_build_is_not_comparable(
     entry,
     grown
       + {
-      build_identity: valid_build_identity()
-        + {
-        rustc: "1.96.0",
-        strip: "debuginfo",
-        aot_embedded: false,
+        build_identity: valid_build_identity()
+          + {rustc: "1.96.0", strip: "debuginfo", aot_embedded: false},
       },
-    },
   )
   assert_eq(rebuilt.divergent_identity_fields, ["strip", "rustc", "aot_embedded"])
 }
@@ -923,14 +915,14 @@ pipeline test_an_accepted_growth_clears_the_signal_and_names_its_reason(harness:
   assert_eq(evaluate_release_binary_size(entry, grown).growth, "warn")
   const accepted = entry
     + {
-    accepted_growth: [
-      {
-        against_baseline_sha: entry.baseline.source_sha,
-        bytes: 8000000,
-        reason: "embed the CLI AOT payload for offline start",
-      },
-    ],
-  }
+      accepted_growth: [
+        {
+          against_baseline_sha: entry.baseline.source_sha,
+          bytes: 8000000,
+          reason: "embed the CLI AOT payload for offline start",
+        },
+      ],
+    }
   const verdict = evaluate_release_binary_size(accepted, grown)
   assert_eq(verdict.growth, "accepted")
   assert_eq(verdict.accepted_reason, "embed the CLI AOT payload for offline start")

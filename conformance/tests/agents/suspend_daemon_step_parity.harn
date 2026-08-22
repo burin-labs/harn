@@ -15,9 +15,7 @@ import { agent_loop } from "std/agent/loop"
  */
 pipeline main(harness: Harness) {
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
-    + to_string(
-    harness.random.range(100000, 999999),
-  )
+    + to_string(harness.random.range(100000, 999999))
   const dir = path_join(harness.fs.workspace_temp_dir(), "harn-daemon-parity-" + unique)
   harness.fs.mkdir(dir)
   const snapshot_path = path_join(dir, "daemon.json")
@@ -55,9 +53,7 @@ pipeline main(harness: Harness) {
   harness.stdio.println("snap_has_iterations=" + to_string(saved.total_iterations >= 1))
   harness.stdio.println(
     "snap_summary_seeded="
-      + to_string(
-      contains(saved.transcript_summary ?? "", "daemon parity summary"),
-    ),
+      + to_string(contains(saved.transcript_summary ?? "", "daemon parity summary")),
   )
   harness.stdio.println("snap_has_summary_field=" + to_string(saved.transcript_summary != nil))
   harness.fs.delete(dir)

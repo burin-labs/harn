@@ -18,9 +18,9 @@ pipeline default(harness: Harness, _task) {
   const inspected = hypothesis_inspect_projection(harness.obs, plan.hypothesis_id)
   require inspected.kind == "inspection"
     && inspected.state
-    == "unregistered"
+      == "unregistered"
     && inspected.ledger.snapshot.event_count
-    == 0,
+      == 0,
     "the projection reaches the verified empty ledger"
   const rendered = hypothesis_report_projection(harness.obs, plan.hypothesis_id)
   require rendered.hypothesis_id == plan.hypothesis_id,

@@ -141,18 +141,18 @@ pub fn failure_report(base: string, findings: list<dict>) -> string {
   }
   lines = lines
     + [
-    "",
-    "These names are a downstream contract: integrators generate against these",
-    "bindings and compile against the exported names, so removing one breaks",
-    "their build at their next repin, not here.",
-    "",
-    "If the removal is intended, declare it on a commit in this branch:",
-    "",
-    "    " + REMOVAL_TRAILER + " <symbol> [<symbol> ...]",
-    "",
-    "and say what replaces it in the changelog fragment. The trailer is what an",
-    "integrator bisecting a broken build will find.",
-  ]
+      "",
+      "These names are a downstream contract: integrators generate against these",
+      "bindings and compile against the exported names, so removing one breaks",
+      "their build at their next repin, not here.",
+      "",
+      "If the removal is intended, declare it on a commit in this branch:",
+      "",
+      "    " + REMOVAL_TRAILER + " <symbol> [<symbol> ...]",
+      "",
+      "and say what replaces it in the changelog fragment. The trailer is what an",
+      "integrator bisecting a broken build will find.",
+    ]
   return lines.join("\n")
 }
 
@@ -172,10 +172,10 @@ fn scope_line(
   return "check_protocol_symbol_removals: base=" + base
     + " resolved="
     + if resolved == "" {
-    "none"
-  } else {
-    resolved.substring(0, 12)
-  }
+      "none"
+    } else {
+      resolved.substring(0, 12)
+    }
     + " watched="
     + to_string(WATCHED.count)
     + " readable_at_head="

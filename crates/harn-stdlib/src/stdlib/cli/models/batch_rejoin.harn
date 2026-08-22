@@ -133,9 +133,7 @@ fn __read_line_rows(text: string, path: string) -> BatchRejoinParsed {
       json_parse(raw)
     } catch (failure) {
       errors = errors
-        + [
-        "malformed_result: " + path + ":" + to_string(line_no) + ": " + failure.message,
-      ]
+        + ["malformed_result: " + path + ":" + to_string(line_no) + ": " + failure.message]
       continue
     }
     if type_of(parsed) != "dict" {
@@ -248,15 +246,13 @@ fn __terminal_state(row: dict) -> string {
   const result_type = lowercase(safe_string(result["type"], ""))
   const status = lowercase(safe_string(row["status"], ""))
   if ["errored", "failed", "error"].contains(result_type)
-    || ["errored", "failed", "error"].contains(
-    status,
-  ) {
+    || ["errored", "failed", "error"].contains(status) {
     return "failed"
   }
   if result_type == "succeeded"
     || ["succeeded", "completed", "complete", "success"].contains(status)
     || type_of(row["response"])
-    == "dict"
+      == "dict"
     || type_of(row["modelOutput"]) == "dict"
     || type_of(result["message"]) == "dict" {
     return "succeeded"
@@ -356,15 +352,15 @@ fn __manifest_index(manifest: dict, execution_id: string) -> dict {
       ids = ids + [custom_id]
       by_id = by_id
         + {
-        [custom_id]: {
-          execution_id: execution_id,
-          group_id: safe_string(group["id"], ""),
-          provider: safe_string(group["provider"], ""),
-          model: safe_string(group["model"], ""),
-          endpoint: safe_string(group["endpoint"], ""),
-          request: request,
-        },
-      }
+          [custom_id]: {
+            execution_id: execution_id,
+            group_id: safe_string(group["id"], ""),
+            provider: safe_string(group["provider"], ""),
+            model: safe_string(group["model"], ""),
+            endpoint: safe_string(group["endpoint"], ""),
+            request: request,
+          },
+        }
     }
   }
   return {ids: ids, by_id: by_id, errors: errors}
@@ -423,11 +419,7 @@ fn __validate_lineage(
   const download = download_loaded.value
   errors = errors
     + __expect_kind(execution, "harn.model_batch_execution_receipt", "batch execution")
-    + __expect_kind(
-    manifest,
-    "harn.model_batch_manifest",
-    "batch manifest",
-  )
+    + __expect_kind(manifest, "harn.model_batch_manifest", "batch manifest")
     + __expect_kind(download, "harn.model_batch_results_receipt", "batch download receipt")
   if safe_string(safe_dict(execution["paths"])["manifest"], "") != manifest_path {
     errors = errors.appending("wrong_execution_manifest")
@@ -444,49 +436,45 @@ fn __validate_lineage(
   const status_loaded = __load_object(fs, status_path, "batch status receipt")
   errors = errors
     + status_loaded.errors
-    + __expect_kind(
-    status_loaded.value,
-    "harn.model_batch_status_receipt",
-    "batch status receipt",
-  )
+    + __expect_kind(status_loaded.value, "harn.model_batch_status_receipt", "batch status receipt")
     + __verify_source(fs, safe_dict(download["source"]), status_path, "download status source")
   const submission_path = safe_string(safe_dict(status_loaded.value["source"])["path"], "")
   const submission_loaded = __load_object(fs, submission_path, "batch submission receipt")
   errors = errors
     + submission_loaded.errors
     + __expect_kind(
-    submission_loaded.value,
-    "harn.model_batch_submission_receipt",
-    "batch submission receipt",
-  )
+      submission_loaded.value,
+      "harn.model_batch_submission_receipt",
+      "batch submission receipt",
+    )
     + __verify_source(
-    fs,
-    safe_dict(status_loaded.value["source"]),
-    submission_path,
-    "status submission source",
-  )
+      fs,
+      safe_dict(status_loaded.value["source"]),
+      submission_path,
+      "status submission source",
+    )
   const prepare_path = safe_string(safe_dict(submission_loaded.value["source"])["path"], "")
   const prepare_loaded = __load_object(fs, prepare_path, "batch prepare receipt")
   errors = errors
     + prepare_loaded.errors
     + __expect_kind(
-    prepare_loaded.value,
-    "harn.model_batch_prepare_receipt",
-    "batch prepare receipt",
-  )
+      prepare_loaded.value,
+      "harn.model_batch_prepare_receipt",
+      "batch prepare receipt",
+    )
     + __verify_source(
-    fs,
-    safe_dict(submission_loaded.value["source"]),
-    prepare_path,
-    "submission prepare source",
-  )
+      fs,
+      safe_dict(submission_loaded.value["source"]),
+      prepare_path,
+      "submission prepare source",
+    )
   errors = errors
     + __verify_source(
-    fs,
-    safe_dict(prepare_loaded.value["manifest"]),
-    manifest_path,
-    "prepare manifest source",
-  )
+      fs,
+      safe_dict(prepare_loaded.value["manifest"]),
+      manifest_path,
+      "prepare manifest source",
+    )
   const expected_jobs = __job_ids(prepare_loaded.value)
   if !__same_strings(expected_jobs, safe_list(execution["jobIds"])) {
     errors = errors.appending("execution_job_identity_changed")
@@ -570,16 +558,16 @@ pub fn batch_rejoin(fs: HarnessFs, input: BatchRejoinInput) -> BatchRejoinRun {
       row_count = row_count + len(parsed.rows)
       raw_artifacts = raw_artifacts
         + [
-        {
-          label: label,
-          path: path,
-          sha256: safe_string(artifact["sha256"], ""),
-          job_id: safe_string(job["id"], ""),
-          provider_batch_id: safe_string(job["provider_batch_id"], ""),
-          provider: safe_string(job["provider"], ""),
-          row_count: len(parsed.rows),
-        },
-      ]
+          {
+            label: label,
+            path: path,
+            sha256: safe_string(artifact["sha256"], ""),
+            job_id: safe_string(job["id"], ""),
+            provider_batch_id: safe_string(job["provider_batch_id"], ""),
+            provider: safe_string(job["provider"], ""),
+            row_count: len(parsed.rows),
+          },
+        ]
       for row in parsed.rows {
         const custom_id = __result_id(row)
         if custom_id == "" {
@@ -730,17 +718,15 @@ pub fn __run_rejoin(harness: Harness) -> int {
   if out_dir == "" {
     receipt = receipt
       + {
-      status: "quarantined",
-      consumable: false,
-      errors: safe_list(receipt["errors"]) + ["--out-dir is required"],
-      quarantine: {
-        active: true,
-        reasons: safe_list(safe_dict(receipt["quarantine"])["reasons"])
-          + [
-          "lineage_or_artifact_errors",
-        ],
-      },
-    }
+        status: "quarantined",
+        consumable: false,
+        errors: safe_list(receipt["errors"]) + ["--out-dir is required"],
+        quarantine: {
+          active: true,
+          reasons: safe_list(safe_dict(receipt["quarantine"])["reasons"])
+            + ["lineage_or_artifact_errors"],
+        },
+      }
   } else {
     ensure_parent_dir(harness.fs, path_join(out_dir, "normalized.jsonl"))
     const normalized = safe_dict(receipt["normalized"])

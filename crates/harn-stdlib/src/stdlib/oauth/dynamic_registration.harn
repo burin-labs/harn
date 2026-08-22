@@ -163,11 +163,11 @@ pub fn dynamic_registration_store(auth: HarnessAuth, channels: HarnessChannels) 
   const inner = auth.oauth_registration_store()
   return inner
     + {
-    _namespace: "oauth_dynreg",
-    register: { metadata -> register_client(auth, channels, inner, metadata) },
-    get: { client_id -> get_client(auth, inner, client_id) },
-    list: { -> list_clients(auth, inner) },
-  }
+      _namespace: "oauth_dynreg",
+      register: { metadata -> register_client(auth, channels, inner, metadata) },
+      get: { client_id -> get_client(auth, inner, client_id) },
+      list: { -> list_clients(auth, inner) },
+    }
 }
 
 fn __redact_shape(metadata, response) {

@@ -208,16 +208,10 @@ fn __cat_pred_rm_rf_root(command, _context) -> bool {
   // Recursive flag: short -r / -R / bundled with other letters, or
   // long --recursive.
   const recursive = __cat_re("(?:^|\\s)-[a-zA-Z]*[rR][a-zA-Z]*\\b", command)
-    || __cat_re(
-    "--recursive\\b",
-    command,
-  )
+    || __cat_re("--recursive\\b", command)
   // Force flag: short -f / bundled, or long --force.
   const forced = __cat_re("(?:^|\\s)-[a-zA-Z]*f[a-zA-Z]*\\b", command)
-    || __cat_re(
-    "--force\\b",
-    command,
-  )
+    || __cat_re("--force\\b", command)
   if !(recursive && forced) {
     return false
   }

@@ -51,8 +51,7 @@ pipeline test(harness: Harness, _task) {
   assert(manifest.cases[0].case_fingerprint != "", "case fingerprint is stamped")
   assert(
     manifest.cases[0].case_fingerprint
-      == eval_pack_manifest(pack("completed")).cases[0]
-      .case_fingerprint,
+      == eval_pack_manifest(pack("completed")).cases[0].case_fingerprint,
   )
   assert(
     manifest.cases[0].case_fingerprint

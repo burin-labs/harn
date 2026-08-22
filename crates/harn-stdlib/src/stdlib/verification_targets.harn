@@ -71,11 +71,11 @@ pub fn __verification_adapter_spec(fs: HarnessFs, row, changed_paths, opts) {
   const ctx = (opts?.template_context ?? {})
     + (row?.template_context ?? {})
     + {
-    changed_paths: changed_paths,
-    changed_paths_json: json_stringify(changed_paths),
-    changed_paths_space: __verification_shell_join(changed_paths),
-    root: opts?.root ?? opts?.workspace_root ?? "",
-  }
+      changed_paths: changed_paths,
+      changed_paths_json: json_stringify(changed_paths),
+      changed_paths_space: __verification_shell_join(changed_paths),
+      root: opts?.root ?? opts?.workspace_root ?? "",
+    }
   return __verification_render_adapter_value(fs, spec, ctx)
 }
 

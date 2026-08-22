@@ -116,7 +116,7 @@ fn _run_bare_envelope_turn(
     }
     if event.type == "typed_checkpoint"
       && event?.checkpoint?.schema
-      == "harn.agent_next_tool_claim_receipt.v1" {
+        == "harn.agent_next_tool_claim_receipt.v1" {
       repair_receipts = repair_receipts + 1
     }
   }

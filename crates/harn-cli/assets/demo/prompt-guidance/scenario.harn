@@ -60,8 +60,7 @@ pipeline default(harness: Harness, _task) {
   for frag in with_todo.fragments {
     harness.stdio.println(
       "    - " + frag.id + " [" + frag.bucket + "] included=" + to_string(frag.included) + " — "
-        + frag
-        .reason,
+        + frag.reason,
     )
   }
   harness.stdio.println("")

@@ -77,27 +77,27 @@ pub fn __agent_stall_fold_verify_state(
   if raw == nil {
     return state
       + {
-      verify_turns_since_advance: state.verify_turns_since_advance + 1,
-      verify_wrote_since_advance: state.verify_wrote_since_advance || turn_made_edit,
-    }
+        verify_turns_since_advance: state.verify_turns_since_advance + 1,
+        verify_wrote_since_advance: state.verify_wrote_since_advance || turn_made_edit,
+      }
   }
   const scalar = to_float(raw)
   const advanced = !state.verify_state_seen || scalar > state.verify_state_high
   if advanced {
     return state
       + {
-      verify_state_seen: true,
-      verify_state_high: scalar,
-      verify_turns_since_advance: 0,
-      verify_wrote_since_advance: false,
-    }
+        verify_state_seen: true,
+        verify_state_high: scalar,
+        verify_turns_since_advance: 0,
+        verify_wrote_since_advance: false,
+      }
   }
   return state
     + {
-    verify_state_seen: true,
-    verify_turns_since_advance: state.verify_turns_since_advance + 1,
-    verify_wrote_since_advance: state.verify_wrote_since_advance || turn_made_edit,
-  }
+      verify_state_seen: true,
+      verify_turns_since_advance: state.verify_turns_since_advance + 1,
+      verify_wrote_since_advance: state.verify_wrote_since_advance || turn_made_edit,
+    }
 }
 
 /**
@@ -143,8 +143,7 @@ pub fn agent_stall_no_net_progress(raw_config, stall_state: AgentStallState) -> 
     const long_stall = predicates.long_stall
       && streak >= config.verify_state_streak
       && stall_state.verify_turns_since_advance
-      >= config
-      .verify_state_stall_turns
+        >= config.verify_state_stall_turns
     // Hard-recurrence trips on EITHER a consecutive same-diagnostic streak OR the
     // TOTAL (non-consecutive) occurrences of the CURRENT failure signature across
     // the run. The total counter catches interleaved churn (the same dead API /
@@ -157,13 +156,11 @@ pub fn agent_stall_no_net_progress(raw_config, stall_state: AgentStallState) -> 
       ?? 0
     const hard_recurrence = predicates.hard_recurrence
       && (streak >= config.verify_state_recurrence_hard
-      || sig_total
-      >= config
-      .verify_state_recurrence_hard)
+        || sig_total
+          >= config.verify_state_recurrence_hard)
     const write_axis = predicates.write_axis
       && stall_state.verify_turns_since_advance
-      >= config
-      .no_verifier_progress_limit
+        >= config.no_verifier_progress_limit
       && stall_state.verify_wrote_since_advance
     return long_stall || hard_recurrence || write_axis
   }
@@ -174,9 +171,8 @@ pub fn agent_stall_no_net_progress(raw_config, stall_state: AgentStallState) -> 
     return false
   }
   return stall_state.same_diagnostic_streak >= config.no_net_progress_extend_after
-    || stall_state
-    .failing_verify_turns
-    >= config.no_net_progress_hard_cap_after
+    || stall_state.failing_verify_turns
+      >= config.no_net_progress_hard_cap_after
 }
 
 /**
@@ -206,7 +202,7 @@ pub fn agent_stall_verified_write_satisfied(raw_config, stall_state: AgentStallS
 pub fn agent_stall_repeated_verified_pass(raw_config, stall_state: AgentStallState) -> bool {
   return agent_stall_verified_write_satisfied(raw_config, stall_state)
     && stall_state.last_outcome_kind
-    == "ok"
+      == "ok"
     && stall_state.same_observation_streak >= 2
 }
 
@@ -249,15 +245,15 @@ pub fn agent_stall_current_failure(stall_state: AgentStallState) {
 pub fn agent_stall_clear_current_failure(stall_state: AgentStallState) -> AgentStallState {
   return stall_state
     + {
-    last_diagnostic_class: "pass",
-    last_diagnostic_delta_current: {},
-    last_diagnostic_delta_status: "cleared",
-    last_diagnostic_delta_reason: "terminal_success",
-    same_diagnostic_streak: 0,
-    failing_verify_turns: 0,
-    reverify_owed: false,
-    verified_write_epoch: stall_state.write_epoch,
-  }
+      last_diagnostic_class: "pass",
+      last_diagnostic_delta_current: {},
+      last_diagnostic_delta_status: "cleared",
+      last_diagnostic_delta_reason: "terminal_success",
+      same_diagnostic_streak: 0,
+      failing_verify_turns: 0,
+      reverify_owed: false,
+      verified_write_epoch: stall_state.write_epoch,
+    }
 }
 
 /**
@@ -279,10 +275,10 @@ pub fn agent_stall_apply_result(
   }
   const base = result
     + {
-    repeated_tool_calls: stall_state.repeated_tool_calls,
-    stall_warnings: stall_state.warnings,
-    suspected_loop: len(stall_state.warnings) > 0,
-  }
+      repeated_tool_calls: stall_state.repeated_tool_calls,
+      stall_warnings: stall_state.warnings,
+      suspected_loop: len(stall_state.warnings) > 0,
+    }
   const current_failure = agent_stall_current_failure(stall_state)
   if current_failure == nil {
     return base

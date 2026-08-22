@@ -49,8 +49,7 @@ pub fn ort_download_tls_violations(path: string, dep: any) -> list<string> {
     return [
       path
         + ": ort enables download-binaries with default-features=false but no TLS feature; add exactly one of "
-        + ORT_TLS_FEATURES
-        .join(", "),
+        + ORT_TLS_FEATURES.join(", "),
     ]
   }
   return [
@@ -86,9 +85,7 @@ pub fn optional_dep_feature_contract_violations_from_text(
       || defaults.count != 1
       || defaults[0] != "full" {
       violations = violations
-        + [
-        path + ": default VM capabilities must be owned by the single `full` feature",
-      ]
+        + [path + ": default VM capabilities must be owned by the single `full` feature"]
     }
     const required = [
       "postgres",
@@ -101,16 +98,12 @@ pub fn optional_dep_feature_contract_violations_from_text(
     ]
     if type_of(full) != "list" || full.count != required.count {
       violations = violations
-        + [
-        path + ": `full` must enumerate the canonical distributed VM capability families",
-      ]
+        + [path + ": `full` must enumerate the canonical distributed VM capability families"]
     } else {
       for feature in required {
         if !full.contains(feature) {
           violations = violations
-            + [
-            path + ": `full` is missing VM capability family `" + feature + "`",
-          ]
+            + [path + ": `full` is missing VM capability family `" + feature + "`"]
         }
       }
     }
@@ -126,9 +119,9 @@ pub fn optional_dep_feature_contract_violations_from_text(
       || !vm_features.contains("otel") {
       violations = violations
         + [
-        path
-          + ": distributed CLI must explicitly select the canonical `full` VM surface plus `otel`",
-      ]
+          path
+            + ": distributed CLI must explicitly select the canonical `full` VM surface plus `otel`",
+        ]
     }
   }
   if path == "crates/harn-test-runner/Cargo.toml" {
@@ -137,9 +130,7 @@ pub fn optional_dep_feature_contract_violations_from_text(
       || vm.get("default-features")
       || vm.get("features") != nil {
       violations = violations
-        + [
-        path + ": test engine must keep the VM capability closure lean and explicit",
-      ]
+        + [path + ": test engine must keep the VM capability closure lean and explicit"]
     }
   }
   return violations
@@ -160,10 +151,7 @@ pipeline main(harness: Harness, task) {
   let violations: list<string> = []
   for path in paths {
     violations = violations
-      + optional_dep_feature_contract_violations_from_text(
-      path,
-      harness.fs.read_text(path),
-    )
+      + optional_dep_feature_contract_violations_from_text(path, harness.fs.read_text(path))
   }
   if violations.count > 0 {
     harness.stdio.eprintln("optional dependency feature contract violations:")

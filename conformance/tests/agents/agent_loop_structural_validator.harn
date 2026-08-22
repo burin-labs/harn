@@ -187,9 +187,7 @@ pipeline default(harness: Harness) {
     ],
     { ->
       const post_write_non_empty_session = "structural-validator-post-write-non-empty-"
-        + harness
-        .random
-        .uuid()
+        + harness.random.uuid()
       const post_write_non_empty = agent_capture_events(
         harness.agent,
         post_write_non_empty_session,

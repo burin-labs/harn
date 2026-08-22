@@ -56,9 +56,7 @@ fn __callback_feedback_kind(verdict) -> string? {
   }
   if type_of(feedback_kind) != "string" {
     throw "agent_loop: callback verdict `feedback_kind` must be a string or nil; got "
-      + type_of(
-      feedback_kind,
-    )
+      + type_of(feedback_kind)
   }
   const normalized = trim(feedback_kind)
   if normalized == "" {
@@ -74,9 +72,7 @@ fn __next_tool_claim(verdict, opts) -> AgentNextToolClaim? {
   }
   if type_of(raw) != "dict" {
     throw "agent_loop: callback verdict `next_tool_claim` must be a {tool_name: string} record or nil; got "
-      + type_of(
-      raw,
-    )
+      + type_of(raw)
   }
   const raw_name = raw?.tool_name
   if type_of(raw_name) != "string" || trim(raw_name) == "" {
@@ -85,11 +81,8 @@ fn __next_tool_claim(verdict, opts) -> AgentNextToolClaim? {
   const tool_name = trim(raw_name)
   const authority = __tool_surface_claim_authority(opts)
   if !__tool_surface_tool_allowed(authority?.tools, authority?.policy, tool_name)
-    || exact_tool_call_output_schema(
-    authority?.tools,
-    tool_name,
-  )
-    == nil {
+    || exact_tool_call_output_schema(authority?.tools, tool_name)
+      == nil {
     throw "agent_loop: callback verdict `next_tool_claim.tool_name` names unavailable tool `"
       + tool_name
       + "`"
@@ -506,10 +499,7 @@ fn __classify_missing_tool_call(
   )
   const tool_name = result?.tool_name ?? ""
   if result?.action == "tool_call_intended" && tool_name != ""
-    && __tool_name_in_list(
-    tool_name,
-    names,
-  ) {
+    && __tool_name_in_list(tool_name, names) {
     return result
   }
   return nil
@@ -723,9 +713,9 @@ fn __maybe_inject_action_nudge(
         + agent_render_tool_call_exemplar(llm, to_string(tool_name), [], opts)
         + " Fill in the argument values this call needs and leave out the ones it does not."
         + __required_argument_sentence(
-        to_string(tool_name),
-        tool_required_argument_names(opts?.tools, tool_name),
-      )
+          to_string(tool_name),
+          tool_required_argument_names(opts?.tools, tool_name),
+        )
         + " Do not describe the action again."
     }
     agent_session_inject_feedback(

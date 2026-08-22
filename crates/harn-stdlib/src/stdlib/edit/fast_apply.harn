@@ -364,9 +364,7 @@ pub fn edit_fast_apply(
         result: "dry_run_rejected",
         dry_run_bundle: preview,
         errors: preview.errors
-          ?? [
-          {code: "dry_run_rejected", message: "edit_dry_run rejected the proposed content"},
-        ],
+          ?? [{code: "dry_run_rejected", message: "edit_dry_run rejected the proposed content"}],
         llm: {
           provider: response?.provider,
           model: response?.model,

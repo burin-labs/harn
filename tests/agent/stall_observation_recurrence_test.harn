@@ -218,7 +218,7 @@ fn _assert_agent_loop_budget_guard(harness: Harness, stall_diagnostics, expected
         { event ->
           event.type == "agent_loop_stall_warning"
             && event?.warning?.pattern
-            == "repeated_observation_recurrence"
+              == "repeated_observation_recurrence"
         },
       )
       assert_eq(len(recurrence), expected_warnings)
@@ -226,9 +226,9 @@ fn _assert_agent_loop_budget_guard(harness: Harness, stall_diagnostics, expected
         { event ->
           event.type == "loop_control_decision"
             && event.action
-            == "extend"
+              == "extend"
             && event.reason
-            == "recent turn made progress"
+              == "recent turn made progress"
         },
       )
       assert_eq(len(extensions), 0, "the repeated-only turn must not buy an extension")

@@ -329,11 +329,11 @@ pub fn plan_notice(
         "provider is not supported by the current catalog",
       )
         + {
-        model_id: candidate.model_id,
-        change_kind: candidate.kind,
-        effective_date: candidate.effective_date,
-        evidence: candidate.evidence,
-      },
+          model_id: candidate.model_id,
+          change_kind: candidate.kind,
+          effective_date: candidate.effective_date,
+          evidence: candidate.evidence,
+        },
       candidate: candidate,
     }
   }
@@ -350,17 +350,17 @@ pub fn plan_notice(
         "new model on a supported provider requires verification before catalog insertion",
       )
         + {
-        model_id: candidate.model_id,
-        change_kind: candidate.kind,
-        effective_date: candidate.effective_date,
-        evidence: candidate.evidence,
-        unresolved_verification: [
-          "context window and canonical provider model id",
-          "complete pricing and capability row",
-          "provider capability-matrix behavior",
-          "replacement/default routing impact",
-        ],
-      },
+          model_id: candidate.model_id,
+          change_kind: candidate.kind,
+          effective_date: candidate.effective_date,
+          evidence: candidate.evidence,
+          unresolved_verification: [
+            "context window and canonical provider model id",
+            "complete pricing and capability row",
+            "provider capability-matrix behavior",
+            "replacement/default routing impact",
+          ],
+        },
       candidate: candidate,
     }
   }
@@ -377,11 +377,11 @@ pub fn plan_notice(
         "candidate old_value conflicts with the current catalog row",
       )
         + {
-        model_id: candidate.model_id,
-        change_kind: candidate.kind,
-        effective_date: candidate.effective_date,
-        evidence: candidate.evidence,
-      },
+          model_id: candidate.model_id,
+          change_kind: candidate.kind,
+          effective_date: candidate.effective_date,
+          evidence: candidate.evidence,
+        },
       candidate: candidate,
     }
   }
@@ -394,22 +394,22 @@ pub fn plan_notice(
         "current catalog already contains the proposed value",
       )
         + {
-        model_id: candidate.model_id,
-        change_kind: candidate.kind,
-        effective_date: candidate.effective_date,
-        evidence: candidate.evidence,
-      },
+          model_id: candidate.model_id,
+          change_kind: candidate.kind,
+          effective_date: candidate.effective_date,
+          evidence: candidate.evidence,
+        },
       candidate: candidate,
     }
   }
   return {
     receipt: __base_receipt(harness, notice, "patch", "validated against one current catalog row")
       + {
-      model_id: candidate.model_id,
-      change_kind: candidate.kind,
-      effective_date: candidate.effective_date,
-      evidence: candidate.evidence,
-    },
+        model_id: candidate.model_id,
+        change_kind: candidate.kind,
+        effective_date: candidate.effective_date,
+        evidence: candidate.evidence,
+      },
     candidate: candidate,
     patch: __patch_descriptor(candidate),
   }
@@ -462,12 +462,12 @@ fn __replace_line(lines: list<string>, index: int, replacement: string) -> list<
   for line in lines {
     out = out
       + [
-      if cursor == index {
-        replacement
-      } else {
-        line
-      },
-    ]
+        if cursor == index {
+          replacement
+        } else {
+          line
+        },
+      ]
     cursor = cursor + 1
   }
   return out

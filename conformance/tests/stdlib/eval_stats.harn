@@ -127,9 +127,7 @@ pipeline test(harness: Harness, task) {
   )
   const mixed_fingerprints = eval_fingerprint_integrity(
     fingerprint_rows
-      + [
-      {case_name: "case-a", case_fingerprint: "a-v2", harness_config_fingerprint: "cfg-2"},
-    ],
+      + [{case_name: "case-a", case_fingerprint: "a-v2", harness_config_fingerprint: "cfg-2"}],
   )
   assert_eq(mixed_fingerprints.complete, true)
   assert_eq(mixed_fingerprints.consistent, false)
@@ -156,17 +154,11 @@ pipeline test(harness: Harness, task) {
   assert_eq(paired_case_deltas(baseline, current), [1.0, 0.5])
   const harness_baseline = [
     row("case-a", "python", 0, 4, 0, 0, 1.0)
-      + {
-      case_fingerprint: "a",
-      harness_config_fingerprint: "cfg-a",
-    },
+      + {case_fingerprint: "a", harness_config_fingerprint: "cfg-a"},
   ]
   const harness_current = [
     row("case-a", "python", 4, 4, 0, 0, 1.0)
-      + {
-      case_fingerprint: "a",
-      harness_config_fingerprint: "cfg-b",
-    },
+      + {case_fingerprint: "a", harness_config_fingerprint: "cfg-b"},
   ]
   assert_eq(paired_case_deltas(harness_baseline, harness_current), [])
   const delta = paired_delta_report(baseline, current, 200, 99)

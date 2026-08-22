@@ -181,10 +181,7 @@ pub fn issue_state_source(net: HarnessNet, issue_id, target_state = nil, options
       return event?.provider == "linear"
         && event?.kind == "issue"
         && __linear_issue_matches(payload, issue_id)
-        && __linear_state_matches(
-        payload?.issue,
-        target_state,
-      )
+        && __linear_state_matches(payload?.issue, target_state)
     },
   }
 }

@@ -56,9 +56,7 @@ pipeline default(harness: Harness, task) {
         const r = harness.llm.call_safe("probe", nil, {provider: "mock", model: model})
         harness.stdio.println(
           category + " safe=" + r.error.category + " msg=" + r.error.message + " ok="
-            + to_string(
-            r.ok,
-          ),
+            + to_string(r.ok),
         )
       },
     )

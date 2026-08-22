@@ -355,32 +355,32 @@ pub fn external_action_intent_result(
   const payload = raw?.payload
   const effect_fingerprint = "sha256:"
     + sha256(
-    json_stringify(
-      __external_action_fingerprint_payload(
-        normalized_actor,
-        normalized_provider,
-        normalized_capability,
-        normalized_operation,
-        normalized_environment,
-        payload,
-        normalized_disclosure,
-        normalized_money,
+      json_stringify(
+        __external_action_fingerprint_payload(
+          normalized_actor,
+          normalized_provider,
+          normalized_capability,
+          normalized_operation,
+          normalized_environment,
+          payload,
+          normalized_disclosure,
+          normalized_money,
+        ),
       ),
-    ),
-  )
+    )
   const fingerprint = if normalized_retry == nil {
     effect_fingerprint
   } else {
     "sha256:"
       + sha256(
-      json_stringify(
-        {
-          schema: "harn.external_action_attempt_fingerprint.v1",
-          effect_fingerprint: effect_fingerprint,
-          retry: normalized_retry,
-        },
-      ),
-    )
+        json_stringify(
+          {
+            schema: "harn.external_action_attempt_fingerprint.v1",
+            effect_fingerprint: effect_fingerprint,
+            retry: normalized_retry,
+          },
+        ),
+      )
   }
   let intent: ExternalActionIntent = {
     schema: "harn.external_action_intent.v1",
@@ -435,13 +435,12 @@ pub fn external_action_intent_is_exact(intent: ExternalActionIntent) -> bool {
 
 fn __external_action_receipt_is_terminal(receipt: ExternalActionReceipt) -> bool {
   const outcome_matches = (receipt.status == "confirmed" && receipt.outcome == "confirmed")
-    || (receipt
-    .status
-    == "denied"
-    && receipt.outcome == "denied")
+    || (receipt.status
+      == "denied"
+      && receipt.outcome == "denied")
     || (receipt.status == "failed_before_dispatch"
-    && receipt.outcome
-    == "failed_before_dispatch")
+      && receipt.outcome
+        == "failed_before_dispatch")
     || (receipt.status == "rejected" && receipt.outcome == "rejected")
   const dispatch_matches = if receipt.outcome == "confirmed" || receipt.outcome == "rejected" {
     receipt.dispatch_attempted
@@ -471,17 +470,15 @@ pub fn external_action_retry_check(
     || !external_action_intent_is_exact(intent)
     || link.previous_action_id != previous_receipt.action_id
     || link.previous_receipt_id
-    != previous_receipt
-    .id
+      != previous_receipt.id
     || !__external_action_receipt_is_terminal(previous_receipt)
     || previous_receipt.intent_fingerprint
-    == intent
-    .fingerprint
+      == intent.fingerprint
     || previous_effect != intent.effect_fingerprint
     || previous_receipt.provider != intent.provider
     || previous_receipt.capability != intent.capability
     || previous_receipt.operation
-    != intent.operation
+      != intent.operation
     || previous_receipt.environment != intent.environment {
     return Err(
       external_action_error(
@@ -513,12 +510,9 @@ pub fn external_action_retry_intent(
     ?? previous_receipt.intent_fingerprint
   require previous_receipt.action_id == intent.id
     && previous_receipt.intent_fingerprint
-    == intent
-    .fingerprint
+      == intent.fingerprint
     && previous_effect == intent.effect_fingerprint
-    && __external_action_receipt_is_terminal(
-    previous_receipt,
-  ),
+    && __external_action_receipt_is_terminal(previous_receipt),
     "external_action_retry_intent: receipt is not the intent's terminal receipt"
   return external_action_intent(
     {
@@ -570,7 +564,7 @@ pub fn external_action_grant_result(
   const method = lowercase(trim(to_string(raw?.authorization_method ?? "")))
   if method != "manual" && method != "policy" && method != "adversarial_auto"
     && method
-    != "managed_policy"
+      != "managed_policy"
     && method != "test_fixture" {
     return Err(
       external_action_error(
@@ -583,7 +577,7 @@ pub fn external_action_grant_result(
   const assurance = lowercase(trim(to_string(raw?.authentication_assurance ?? "none")))
   if assurance != "none" && assurance != "session" && assurance != "biometric"
     && assurance
-    != "managed" {
+      != "managed" {
     return Err(
       external_action_error(
         "invalid_grant",
@@ -594,8 +588,7 @@ pub fn external_action_grant_result(
   }
   if type_of(raw?.issued_at_ms) != "int" || type_of(raw?.expires_at_ms) != "int"
     || raw.expires_at_ms
-    <= raw
-    .issued_at_ms {
+      <= raw.issued_at_ms {
     return Err(
       external_action_error(
         "invalid_grant",
@@ -735,8 +728,7 @@ pub fn external_action_grant_check(
     const ceiling = grant.max_external_spend
     if ceiling == nil || ceiling.currency != intent.external_spend.currency
       || ceiling.amount_minor
-      < intent
-      .external_spend.amount_minor {
+        < intent.external_spend.amount_minor {
       return Err(
         external_action_error(
           "invalid_grant",

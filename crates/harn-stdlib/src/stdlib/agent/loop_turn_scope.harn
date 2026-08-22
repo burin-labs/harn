@@ -87,19 +87,19 @@ pub fn __scope_classifier_normalize(raw, session_id, iteration) {
   const evidence = trim(to_string(raw?.evidence ?? raw?.reason ?? raw?.reasoning ?? ""))
   return raw
     + {
-    label: label,
-    original_label: original_label,
-    confidence: confidence,
-    confidence_threshold: threshold,
-    evidence: if evidence == "" {
-      "no evidence provided"
-    } else {
-      evidence
-    },
-    session_id: session_id,
-    iteration: iteration,
-    skip_main_turn: raw?.skip_main_turn ?? true,
-  }
+      label: label,
+      original_label: original_label,
+      confidence: confidence,
+      confidence_threshold: threshold,
+      evidence: if evidence == "" {
+        "no evidence provided"
+      } else {
+        evidence
+      },
+      session_id: session_id,
+      iteration: iteration,
+      skip_main_turn: raw?.skip_main_turn ?? true,
+    }
 }
 
 pub fn __scope_classifier_fail_open(session_id, iteration, err) {
@@ -212,10 +212,10 @@ pub fn __input_guardrail_record_skip_turn(
         text,
       )
         + {
-        dispatch_skipped: true,
-        skip_reason: "input_guardrail_tripwire",
-        input_guardrail_verdict: verdict,
-      },
+          dispatch_skipped: true,
+          skip_reason: "input_guardrail_tripwire",
+          input_guardrail_verdict: verdict,
+        },
     },
   )
   let _ = agent_stage(
@@ -300,9 +300,7 @@ pub fn __scope_classifier_alert_body(agent: HarnessAgent, verdict, session) {
   const anchor = verdict?.workspace_anchor ?? agent.workspace_anchor(session.session_id)
   const primary = to_string(anchor?.primary ?? "(none)")
   return "<scope-alert>\nThe latest user turn appears outside the current workspace anchor. "
-    + to_string(
-    verdict?.evidence ?? "",
-  )
+    + to_string(verdict?.evidence ?? "")
     + "\n\nCurrent anchor: "
     + primary
     + "\nMounted roots:\n"
@@ -383,10 +381,10 @@ pub fn __scope_classifier_record_skip_turn(
         text,
       )
         + {
-        dispatch_skipped: true,
-        skip_reason: "scope_classifier_out_of_scope",
-        scope_classifier_verdict: verdict,
-      },
+          dispatch_skipped: true,
+          skip_reason: "scope_classifier_out_of_scope",
+          scope_classifier_verdict: verdict,
+        },
     },
   )
   let _ = agent_stage(
@@ -510,11 +508,7 @@ pub fn __agent_loop_effective_wrapup_context(opts, final_status, stop_reason) {
     {}
   }
   return host_context
-    + {
-    terminal_kind: final_status,
-    final_status: final_status,
-    stop_reason: stop_reason ?? "",
-  }
+    + {terminal_kind: final_status, final_status: final_status, stop_reason: stop_reason ?? ""}
 }
 
 /**
@@ -748,12 +742,12 @@ pub fn __agent_loop_final_wrapup(
   // on this run.
   const wrapup_opts = opts
     + {
-    tools: nil,
-    active_skills: nil,
-    skill_catalog_prompt: "",
-    _progress_tool_system_prompt_nudge: "",
-    transcript_projection: opts?.transcript_projection,
-  }
+      tools: nil,
+      active_skills: nil,
+      skill_catalog_prompt: "",
+      _progress_tool_system_prompt_nudge: "",
+      transcript_projection: opts?.transcript_projection,
+    }
   const turn_prompt = __agent_loop_build_turn_prompt(harness, session, wrapup_opts, iteration)
   const host_wrapup = __agent_loop_has_host_wrapup_directive(wrapup_opts)
   // System prompt + message array. A host-supplied directive is delivered as a
@@ -791,13 +785,13 @@ pub fn __agent_loop_final_wrapup(
   }
   const llm_opts = __agent_loop_effective_llm_options(harness.llm, wrapup_opts)
     + {
-    messages: turn_messages,
-    session_id: session.session_id,
-    tool_format: wrapup_opts?.tool_format,
-    tools: nil,
-    _iteration: iteration + 1,
-    _final_wrapup: true,
-  }
+      messages: turn_messages,
+      session_id: session.session_id,
+      tool_format: wrapup_opts?.tool_format,
+      tools: nil,
+      _iteration: iteration + 1,
+      _final_wrapup: true,
+    }
   let call = agent_invoke_llm(harness, message, turn_system, llm_opts)
   if !call.ok {
     return false
@@ -817,9 +811,7 @@ pub fn __agent_loop_final_wrapup(
     violation_reports_lost_call,
   )
   const wrapup_tool_diagnostics = (parsed?.tool_parse_errors ?? [])
-    + protocol_violation_messages(
-    lost_call_violations,
-  )
+    + protocol_violation_messages(lost_call_violations)
   const has_unconsumed_tool_call = len(wrapup_tool_calls) > 0
     || len(wrapup_tool_diagnostics) > 0
   const wrapup_tool_parse_status = if !has_unconsumed_tool_call {
@@ -968,9 +960,7 @@ pub fn __agent_loop_output_contract_repair_prompt(schema, text) -> string {
   }
   return "Your previous final answer did not satisfy the required output schema.\n"
     + "Reply with ONLY a JSON value that validates against this JSON Schema:\n\n"
-    + json_stringify_pretty(
-    schema,
-  )
+    + json_stringify_pretty(schema)
     + "\n\nYour previous final answer was:\n\n"
     + text
 }
@@ -1002,13 +992,13 @@ pub fn __agent_loop_apply_output_contract(
     opts + {_output_contract_repair: true},
   )
     + {
-    session_id: session.session_id,
-    tools: nil,
-    tool_choice: nil,
-    tool_format: opts?.tool_format,
-    _iteration: iteration + 1,
-    _output_contract_repair: true,
-  }
+      session_id: session.session_id,
+      tools: nil,
+      tool_choice: nil,
+      tool_format: opts?.tool_format,
+      _iteration: iteration + 1,
+      _output_contract_repair: true,
+    }
   const repair = try {
     agent_invoke_llm(
       harness,
@@ -1028,9 +1018,9 @@ pub fn __agent_loop_apply_output_contract(
   const second = __agent_loop_output_contract_value(repaired_text, schema)
   return final_result
     + {
-    text: repaired_text,
-    visible_text: repaired_text,
-    output: second.value,
-    output_valid: second.ok,
-  }
+      text: repaired_text,
+      visible_text: repaired_text,
+      output: second.value,
+      output_valid: second.ok,
+    }
 }

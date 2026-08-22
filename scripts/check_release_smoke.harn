@@ -71,12 +71,7 @@ pub fn select_release_smoke_run(runs: list, tag: string, log_loader) {
     const candidates = runs.filter(
       { run ->
         to_string(run?.conclusion ?? "") == "success"
-          && [
-          "workflow_run",
-          "workflow_dispatch",
-          "release",
-        ]
-          .contains(to_string(run?.event ?? ""))
+          && ["workflow_run", "workflow_dispatch", "release"].contains(to_string(run?.event ?? ""))
       },
     )
       .sort_by({ run -> to_string(run?.createdAt ?? "") })
@@ -151,9 +146,7 @@ fn main(harness: Harness) -> int {
       )
       if is_err(repo_result) {
         throw "gh repo view returned no usable nameWithOwner: "
-          + to_string(
-          unwrap_err(repo_result).message,
-        )
+          + to_string(unwrap_err(repo_result).message)
       }
       repo = unwrap(repo_result).nameWithOwner
       if repo == "" {

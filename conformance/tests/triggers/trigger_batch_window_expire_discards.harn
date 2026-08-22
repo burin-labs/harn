@@ -12,9 +12,7 @@ fn handle_batch(harness: Harness, event) {
 pipeline test(harness: Harness, task) {
   harness.testing.clock_set(2000000)
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
-    + to_string(
-    harness.random.range(100000, 999999),
-  )
+    + to_string(harness.random.range(100000, 999999))
   const _ = harness.runtime.trigger_register(
     {
       id: "batch-discard-" + unique,

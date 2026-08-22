@@ -280,10 +280,10 @@ pub fn render_kv_table(data: dict, options: TableOptions = {}) -> string {
   const base = options ?? {}
   const opts = base
     + {
-    columns: [
-      {key: "key", header: base?.key_header ?? "Key"},
-      {key: "value", header: base?.value_header ?? "Value"},
-    ],
-  }
+      columns: [
+        {key: "key", header: base?.key_header ?? "Key"},
+        {key: "value", header: base?.value_header ?? "Value"},
+      ],
+    }
   return render_table(rows, opts)
 }

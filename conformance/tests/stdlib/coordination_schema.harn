@@ -109,11 +109,11 @@ pipeline default(harness: Harness) {
     request,
     opts
       + {
-      response_kind: "decision",
-      response_subject: "schema reply",
-      response_from: "agent-A",
-      timeout_ms: 0,
-    },
+        response_kind: "decision",
+        response_subject: "schema reply",
+        response_from: "agent-A",
+        timeout_ms: 0,
+      },
   )
   harness.stdio.println(is_type(wait, coord_wait_reply_schema()))
   harness.stdio.println(coord_wait_reply_report(wait).ok)

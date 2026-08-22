@@ -189,20 +189,16 @@ fn run_diagnosis_recovery(harness: Harness) {
       harness.stdio.println(
         "diagnosis.injected="
           + to_string(
-          recovery_prompt.contains("assistant is stuck in a loop sending malformed tool calls"),
-        ),
+            recovery_prompt.contains("assistant is stuck in a loop sending malformed tool calls"),
+          ),
       )
       harness.stdio.println(
         "diagnosis.next_step_injected="
-          + to_string(
-          recovery_prompt.contains("use a different tool-call shape"),
-        ),
+          + to_string(recovery_prompt.contains("use a different tool-call shape")),
       )
       harness.stdio.println(
         "diagnosis.reasoning_observable="
-          + to_string(
-          judges[0].reasoning.contains("task remains incomplete"),
-        ),
+          + to_string(judges[0].reasoning.contains("task remains incomplete")),
       )
     },
   )

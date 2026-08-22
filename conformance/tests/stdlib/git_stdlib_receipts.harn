@@ -62,10 +62,7 @@ pipeline default(harness: Harness) {
   }
   harness.stdio.println(
     is_err(invalid_sort)
-      && contains(
-      to_string(unwrap_err(invalid_sort)),
-      "sort must not contain newlines",
-    ),
+      && contains(to_string(unwrap_err(invalid_sort)), "sort must not contain newlines"),
   )
   const described: GitDescribeReceipt = git_describe(
     harness.process,
@@ -101,9 +98,7 @@ pipeline default(harness: Harness) {
     remote_refs.success
       && remote_refs.data.remote == "origin"
       && remote_ref.name == "refs/tags/v1.0.0"
-      && remote_refs.data.refs.any(
-      { row -> row.ref == "refs/tags/v1.0.0" },
-    ),
+      && remote_refs.data.refs.any({ row -> row.ref == "refs/tags/v1.0.0" }),
   )
   const pull = git_pull_ff_only(harness.process, root, "origin", "main", {quiet: true})
   harness.stdio.println(pull.success)

@@ -114,47 +114,47 @@ fn __runner_pool_children(runtime: HarnessRuntime, handle, size: int) -> list<di
     const child_name = "runner-" + to_string(slot_index)
     children = children
       + [
-      {
-        name: child_name,
-        kind: "ephemeral_runner",
-        restart: handle.restart,
-        task: { ctx ->
-          __runner_pool_status(runtime, handle.statuses, slot_index, true, false, "online")
-          const mark_busy = { busy ->
-            __runner_pool_status(
-              runtime,
-              handle.statuses,
-              slot_index,
-              true,
-              busy,
-              if busy {
-                "busy"
-              } else {
-                "online"
-              },
-            )
-          }
-          try {
-            const result = handle.run(
-              {
-                pool_id: handle.id,
-                slot: slot_index,
-                supervisor_id: ctx.supervisor_id,
-                child_name: ctx.child_name,
-                attempt: ctx.attempt,
-                restart_count: ctx.restart_count,
-                mark_busy: mark_busy,
-              },
-            )
-            __runner_pool_status(runtime, handle.statuses, slot_index, false, false, "exited")
-            result
-          } catch (error) {
-            __runner_pool_status(runtime, handle.statuses, slot_index, false, false, "failed")
-            throw error
-          }
+        {
+          name: child_name,
+          kind: "ephemeral_runner",
+          restart: handle.restart,
+          task: { ctx ->
+            __runner_pool_status(runtime, handle.statuses, slot_index, true, false, "online")
+            const mark_busy = { busy ->
+              __runner_pool_status(
+                runtime,
+                handle.statuses,
+                slot_index,
+                true,
+                busy,
+                if busy {
+                  "busy"
+                } else {
+                  "online"
+                },
+              )
+            }
+            try {
+              const result = handle.run(
+                {
+                  pool_id: handle.id,
+                  slot: slot_index,
+                  supervisor_id: ctx.supervisor_id,
+                  child_name: ctx.child_name,
+                  attempt: ctx.attempt,
+                  restart_count: ctx.restart_count,
+                  mark_busy: mark_busy,
+                },
+              )
+              __runner_pool_status(runtime, handle.statuses, slot_index, false, false, "exited")
+              result
+            } catch (error) {
+              __runner_pool_status(runtime, handle.statuses, slot_index, false, false, "failed")
+              throw error
+            }
+          },
         },
-      },
-    ]
+      ]
   }
   return children
 }
@@ -213,15 +213,15 @@ pub fn runner_pool_start(
       run: spec.run,
       restart: spec.restart
         ?? {
-        mode: "always",
-        max_restarts: 100,
-        window_ms: 300000,
-        backoff_ms: 250,
-        max_backoff_ms: 30000,
-        factor: 2.0,
-        jitter_ms: 100,
-        circuit_open_ms: 60000,
-      },
+          mode: "always",
+          max_restarts: 100,
+          window_ms: 300000,
+          backoff_ms: 250,
+          max_backoff_ms: 30000,
+          factor: 2.0,
+          jitter_ms: 100,
+          circuit_open_ms: 60000,
+        },
     },
     initial_size,
   )
@@ -270,16 +270,16 @@ pub fn runner_pool_state(runtime: HarnessRuntime, handle: RunnerPoolHandle) -> R
     }
     slots = slots
       + [
-      {
-        slot: slot,
-        name: child.name,
-        online: is_online,
-        busy: is_busy,
-        lifecycle: reported?.lifecycle ?? child.status,
-        restart_count: child.restart_count,
-        last_error: child.last_error,
-      },
-    ]
+        {
+          slot: slot,
+          name: child.name,
+          online: is_online,
+          busy: is_busy,
+          lifecycle: reported?.lifecycle ?? child.status,
+          restart_count: child.restart_count,
+          last_error: child.last_error,
+        },
+      ]
   }
   return {
     id: handle.id,

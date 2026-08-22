@@ -319,22 +319,22 @@ fn __keyed_models_spec(
         env,
         config
           + {
-          adapter: { adapter_harness, adapter_env ->
-            json_api_adapter(
-              adapter_harness,
-              adapter_env,
-              {
-                id: config.id,
-                provider: config.provider,
-                source_url: config.source_url,
-                source_owner: config.source_owner,
-                confidence: config.confidence,
-                terms_notes: config.terms_notes,
-                mapper: config.mapper,
-              },
-            )
+            adapter: { adapter_harness, adapter_env ->
+              json_api_adapter(
+                adapter_harness,
+                adapter_env,
+                {
+                  id: config.id,
+                  provider: config.provider,
+                  source_url: config.source_url,
+                  source_owner: config.source_owner,
+                  confidence: config.confidence,
+                  terms_notes: config.terms_notes,
+                  mapper: config.mapper,
+                },
+              )
+            },
           },
-        },
       )
     },
   }

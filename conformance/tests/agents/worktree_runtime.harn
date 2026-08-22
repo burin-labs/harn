@@ -2,9 +2,7 @@ import "std/worktree"
 
 pipeline main(harness: Harness) {
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
-    + to_string(
-    harness.random.range(100000, 999999),
-  )
+    + to_string(harness.random.range(100000, 999999))
   const base = path_join(harness.fs.workspace_temp_dir(), "harn-worktree-runtime-" + unique)
   harness.fs.mkdir(base)
   const repo = path_join(base, "repo")

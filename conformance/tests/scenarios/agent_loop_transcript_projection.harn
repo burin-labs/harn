@@ -178,21 +178,15 @@ pipeline default(harness: Harness) {
       )
       harness.stdio.println(
         "gc_has_scratchpad_root:"
-          + to_string(
-          gc_projection.metadata.roots_consulted.contains("scratchpad"),
-        ),
+          + to_string(gc_projection.metadata.roots_consulted.contains("scratchpad")),
       )
       harness.stdio.println(
         "gc_has_write_barrier:"
-          + to_string(
-          gc_projection.metadata.roots_consulted.contains("write_barrier"),
-        ),
+          + to_string(gc_projection.metadata.roots_consulted.contains("write_barrier")),
       )
       harness.stdio.println(
         "gc_projected_reclaimed:"
-          + to_string(
-          contains(projected_stale_body, "reclaimed by reachability_gc"),
-        ),
+          + to_string(contains(projected_stale_body, "reclaimed by reachability_gc")),
       )
       harness.stdio.println(
         "gc_live_preserved:" + to_string(contains(projected_live_body, "LIVE_SENTINEL")),

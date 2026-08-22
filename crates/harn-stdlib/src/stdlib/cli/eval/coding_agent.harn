@@ -292,9 +292,9 @@ fn __render_runs_table(runs) -> string {
       + __format_float_6(rd["cost_usd"] ?? 0.0)
       + " | "
       + __markdown_link(
-      to_string(rd["transcript_event_count"] ?? 0),
-      __safe_string(rd["transcript_events_path"], ""),
-    )
+        to_string(rd["transcript_event_count"] ?? 0),
+        __safe_string(rd["transcript_events_path"], ""),
+      )
       + " | `"
       + __safe_string(rd["output_dir"], "")
       + "` |\n"

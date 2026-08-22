@@ -98,8 +98,7 @@ pub fn agent_tool_is_read_only(entry, policy = nil, tool_name = "") -> bool {
   const level = lowercase(
     to_string(
       annotations?.side_effect_level ?? annotations?.sideEffectLevel ?? annotations?.side_effect
-        ?? annotations
-        ?.sideEffect
+        ?? annotations?.sideEffect
         ?? "",
     ),
   )

@@ -53,7 +53,7 @@ pipeline test(harness: Harness, task) {
         if ev.kind == "tool_search_result" {
           promoted_run = len(ev.metadata?.promoted ?? []) > 0
             && ev.metadata.promoted[0]
-            == "run_command"
+              == "run_command"
         }
       }
       assert(saw_hybrid, "query event records hybrid strategy")

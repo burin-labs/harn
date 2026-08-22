@@ -49,9 +49,7 @@ pipeline main(harness: Harness) {
       const err_text = to_string(unwrap_err(second))
       harness.stdio.println(
         "second_err_has_sus_code="
-          + to_string(
-          contains(err_text, "HARN-SUS-003") || contains(err_text, "HARN-SUS-006"),
-        ),
+          + to_string(contains(err_text, "HARN-SUS-003") || contains(err_text, "HARN-SUS-006")),
       )
       harness.stdio.println(
         "second_err_mentions_not_suspended="

@@ -55,7 +55,7 @@ fn __validate_content(content: HypothesisEventContent) {
     }
     if content.payload.telemetry_status != "observed"
       || len(content.payload.capability_degradations)
-      > 0 {
+        > 0 {
       throw "hypothesis ledger: degraded observations cannot enter canonical evidence; record drift or invalidation instead"
     }
   }
@@ -64,15 +64,13 @@ fn __validate_content(content: HypothesisEventContent) {
       throw "hypothesis ledger: decision elapsed time must be non-negative"
     }
     if (content.payload.belief_before != nil
-      && (content.payload.belief_before < 0.0
-      || content.payload
-      .belief_before
-      > 1.0))
+        && (content.payload.belief_before < 0.0
+          || content.payload.belief_before
+            > 1.0))
       || (content.payload.belief_after != nil
-      && (content.payload.belief_after < 0.0
-      || content.payload
-      .belief_after
-      > 1.0)) {
+        && (content.payload.belief_after < 0.0
+          || content.payload.belief_after
+            > 1.0)) {
       throw "hypothesis ledger: recorded belief probabilities must be in [0, 1]"
     }
   }
@@ -118,14 +116,12 @@ fn __validate_observation_admission(
   const spend = snapshot.total_spend_usd + observation.spend_delta_usd
   if spend > plan.design.budget.max_spend_usd
     || snapshot.total_compute_ms
-    + observation.compute_delta_ms
-    > plan.design.budget.max_compute_ms
+      + observation.compute_delta_ms
+      > plan.design.budget.max_compute_ms
     || snapshot.total_tokens + observation.token_delta
-    > plan.design
-    .budget.max_tokens
+      > plan.design.budget.max_tokens
     || snapshot.total_api_calls + observation.api_call_delta
-    > plan.design.budget
-    .max_api_calls {
+      > plan.design.budget.max_api_calls {
     throw "hypothesis ledger: observation exceeds the registered resource budget"
   }
   const _ = validate_paired_observation(plan.registration, observation.observation, observed_cells)
@@ -147,8 +143,7 @@ fn __validate_decision_admission(
   if completion.kind == "wall_clock" {
     if decision.elapsed_ms != completion.elapsed_ms
       || completion.elapsed_ms
-      < plan.design.budget
-      .max_wall_clock_ms {
+        < plan.design.budget.max_wall_clock_ms {
       throw "hypothesis ledger: wall-clock exhaustion does not match the registered ceiling"
     }
   } else if decision.elapsed_ms > plan.design.budget.max_wall_clock_ms {
@@ -215,7 +210,7 @@ fn __validate_completion(
   }
   if completion.kind == "wall_clock"
     && completion.elapsed_ms
-    < plan.design.budget.max_wall_clock_ms {
+      < plan.design.budget.max_wall_clock_ms {
     throw "hypothesis ledger: wall-clock completion precedes the registered ceiling"
   }
 }
@@ -225,8 +220,7 @@ fn __validate_plan_registration(event_count: int, content: HypothesisEventConten
   if event_count != 0
     || content.plan_id != content.payload.plan.plan_id
     || content.hypothesis_id
-    != content.payload.plan
-    .hypothesis_id
+      != content.payload.plan.hypothesis_id
     || content.run_id != nil {
     throw "hypothesis ledger: plan registration must be the first matching aggregate event"
   }
@@ -464,9 +458,9 @@ fn __decode_record(raw) -> HypothesisLedgerRecord {
   const authority_plan_fingerprint = raw?.headers?.["harn.hypothesis.plan_fingerprint"]
   if authority_schema != "harn.hypothesis-event-authority.v1"
     || !contains(
-    ["plan_admission", "native_approval", "native_observation", "lifecycle_audit"],
-    authority_kind,
-  )
+      ["plan_admission", "native_approval", "native_observation", "lifecycle_audit"],
+      authority_kind,
+    )
     || type_of(authority_plan_fingerprint) != "string"
     || trim(authority_plan_fingerprint) == "" {
     throw "hypothesis ledger: persisted event is missing native authority provenance"
@@ -541,10 +535,7 @@ fn __read_verified_snapshot(obs: HarnessObs, hypothesis_id: string) {
   const retained = obs.hypothesis_event_snapshot(hypothesis_id)
   if !retained.verified {
     throw "hypothesis ledger: persisted event-log integrity verification failed: "
-      + join(
-      retained.errors,
-      "; ",
-    )
+      + join(retained.errors, "; ")
   }
   let records: list<HypothesisLedgerRecord> = []
   for raw in retained.records {
@@ -553,10 +544,10 @@ fn __read_verified_snapshot(obs: HarnessObs, hypothesis_id: string) {
   const folded = __fold_records(records, hypothesis_id)
   return folded
     + {
-    records: records,
-    last_hash: retained.last_hash,
-    scanned_event_count: retained.scanned_event_count,
-  }
+      records: records,
+      last_hash: retained.last_hash,
+      scanned_event_count: retained.scanned_event_count,
+    }
 }
 
 fn __empty_snapshot(hypothesis_id: string) -> HypothesisLedgerSnapshot {
@@ -595,10 +586,10 @@ fn __apply_record(
   const payload = record.event.content.payload
   const updated = snapshot
     + {
-    event_count: snapshot.event_count + 1,
-    latest_cursor: record.cursor,
-    latest_event_fingerprint: record.event.fingerprint,
-  }
+      event_count: snapshot.event_count + 1,
+      latest_cursor: record.cursor,
+      latest_event_fingerprint: record.event.fingerprint,
+    }
   if payload.kind == "plan_registered" {
     const registered: HypothesisPlanRegistered = payload
     return updated + {plan: registered.plan}
@@ -611,21 +602,21 @@ fn __apply_record(
     const transition: HypothesisRunTransition = payload
     return updated
       + {
-      active_run_id: snapshot.active_run_id ?? record.event.content.run_id,
-      run_state: transition.state,
-      completion: transition.completion,
-    }
+        active_run_id: snapshot.active_run_id ?? record.event.content.run_id,
+        run_state: transition.state,
+        completion: transition.completion,
+      }
   }
   if payload.kind == "observation_recorded" {
     const evidence: HypothesisObservationRecorded = payload
     return updated
       + {
-      observation_count: snapshot.observation_count + 1,
-      total_spend_usd: snapshot.total_spend_usd + evidence.spend_delta_usd,
-      total_compute_ms: snapshot.total_compute_ms + evidence.compute_delta_ms,
-      total_tokens: snapshot.total_tokens + evidence.token_delta,
-      total_api_calls: snapshot.total_api_calls + evidence.api_call_delta,
-    }
+        observation_count: snapshot.observation_count + 1,
+        total_spend_usd: snapshot.total_spend_usd + evidence.spend_delta_usd,
+        total_compute_ms: snapshot.total_compute_ms + evidence.compute_delta_ms,
+        total_tokens: snapshot.total_tokens + evidence.token_delta,
+        total_api_calls: snapshot.total_api_calls + evidence.api_call_delta,
+      }
   }
   if payload.kind == "decision_recorded" {
     const decision: HypothesisDecisionRecorded = payload
@@ -639,23 +630,23 @@ fn __apply_record(
     const drift: HypothesisExecutionDrift = payload
     return updated
       + {
-      drift: snapshot.drift + [drift],
-      telemetry_degradations: if drift.path == "telemetry" {
-        unique(snapshot.telemetry_degradations + [drift.reason])
-      } else {
-        snapshot.telemetry_degradations
-      },
-    }
+        drift: snapshot.drift + [drift],
+        telemetry_degradations: if drift.path == "telemetry" {
+          unique(snapshot.telemetry_degradations + [drift.reason])
+        } else {
+          snapshot.telemetry_degradations
+        },
+      }
   }
   if payload.kind == "invalidated" {
     const invalidated: HypothesisInvalidated = payload
     return updated
       + {
-      invalidations: snapshot.invalidations + [invalidated],
-      run_state: "invalid",
-      completion: nil,
-      decision: nil,
-    }
+        invalidations: snapshot.invalidations + [invalidated],
+        run_state: "invalid",
+        completion: nil,
+        decision: nil,
+      }
   }
   const regression: HypothesisRegressionObserved = payload
   return updated + {regressions: snapshot.regressions + [regression]}
@@ -676,8 +667,8 @@ fn __fold_records(records: list<HypothesisLedgerRecord>, hypothesis_id: string) 
     __validate_content(record.event.content)
     if record.event.content.hypothesis_id != hypothesis_id
       || (previous_cursor != nil
-      && record.cursor
-      <= previous_cursor) {
+        && record.cursor
+          <= previous_cursor) {
       throw "hypothesis ledger: aggregate event order or identity is invalid"
     }
     if record.event.fingerprint != __fingerprint(record.event.content) {
@@ -728,7 +719,7 @@ fn __fold_records(records: list<HypothesisLedgerRecord>, hypothesis_id: string) 
       }
       if evidence.operation_receipt_id != nil
         && !(receipt_id_set[evidence.operation_receipt_id]
-        ?? false) {
+          ?? false) {
         receipt_ids = receipt_ids + [evidence.operation_receipt_id]
         receipt_id_set = receipt_id_set + {[evidence.operation_receipt_id]: true}
       }

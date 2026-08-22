@@ -93,11 +93,11 @@ fn test_manifest_contract() {
   expect_invalid(
     manifest()
       + {
-      candidates: [
-        {id: "same", config: {}, complexity: 0},
-        {id: "same", config: {}, complexity: 1},
-      ],
-    },
+        candidates: [
+          {id: "same", config: {}, complexity: 0},
+          {id: "same", config: {}, complexity: 1},
+        ],
+      },
     "duplicate arms are rejected",
   )
   expect_invalid(
@@ -112,31 +112,29 @@ fn test_manifest_contract() {
   expect_invalid(
     manifest()
       + {
-      metrics: manifest().metrics
-        + {primary: manifest().metrics.primary + {direction: "sideways"}},
-    },
+        metrics: manifest().metrics
+          + {primary: manifest().metrics.primary + {direction: "sideways"}},
+      },
     "unknown metric directions are rejected structurally",
   )
   expect_invalid(
     manifest()
       + {
-      metrics: manifest().metrics
-        + {
-        guardrails: [guardrail + {alarm: {kind: "absolute", threshold: 0.0}}],
+        metrics: manifest().metrics
+          + {guardrails: [guardrail + {alarm: {kind: "absolute", threshold: 0.0}}]},
       },
-    },
     "malformed alarms are rejected",
   )
   expect_invalid(manifest() + {splits: nil}, "missing split policy is rejected")
   expect_invalid(
     manifest()
       + {
-      splits: manifest().splits
-        + {
-        gate: manifest().splits.gate
-          + {digest: "other-digest", cases: ["case-a"]},
+        splits: manifest().splits
+          + {
+            gate: manifest().splits.gate
+              + {digest: "other-digest", cases: ["case-a"]},
+          },
       },
-    },
     "iterate and frozen gate case sets must be disjoint",
   )
   expect_invalid(
@@ -226,9 +224,9 @@ fn winner_input(registration) -> ExperimentDecisionInput {
     while trial < 80 {
       observations = observations
         + [
-        observation(registration, "simple", case_id, trial, 0.0, 1.0, 1.0, 1.0),
-        observation(registration, "replicate", case_id, trial, 1.0, 0.0, 1.0, 1.0),
-      ]
+          observation(registration, "simple", case_id, trial, 0.0, 1.0, 1.0, 1.0),
+          observation(registration, "replicate", case_id, trial, 1.0, 0.0, 1.0, 1.0),
+        ]
       trial = trial + 1
     }
   }
@@ -297,9 +295,7 @@ fn test_guardrail_veto() {
     let trial = 0
     while trial < 80 {
       observations = observations
-        + [
-        observation(registration, "simple", case_id, trial, 0.0, 1.0, 1.0, 2.0),
-      ]
+        + [observation(registration, "simple", case_id, trial, 0.0, 1.0, 1.0, 2.0)]
       trial = trial + 1
     }
   }
@@ -324,9 +320,7 @@ fn test_baseline_beats_a_known_bad_candidate() {
     let trial = 0
     while trial < 80 {
       observations = observations
-        + [
-        observation(registration, "simple", case_id, trial, 1.0, 0.0, 1.0, 1.0),
-      ]
+        + [observation(registration, "simple", case_id, trial, 1.0, 0.0, 1.0, 1.0)]
       trial = trial + 1
     }
   }
@@ -353,9 +347,9 @@ fn test_identical_arms_do_not_manufacture_a_winner() {
     while trial < 80 {
       observations = observations
         + [
-        observation(registration, "simple", case_id, trial, 0.0, 0.0, 1.0, 1.0),
-        observation(registration, "replicate", case_id, trial, 0.0, 0.0, 1.0, 1.0),
-      ]
+          observation(registration, "simple", case_id, trial, 0.0, 0.0, 1.0, 1.0),
+          observation(registration, "replicate", case_id, trial, 0.0, 0.0, 1.0, 1.0),
+        ]
       trial = trial + 1
     }
   }

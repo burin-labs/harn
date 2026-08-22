@@ -148,13 +148,9 @@ pub fn aggregate_runs(runs: list<dict>) -> dict {
     major_faults = major_faults + int_number(run.time.major_faults)
     minor_faults = minor_faults + int_number(run.time.minor_faults)
     voluntary_context_switches = voluntary_context_switches
-      + int_number(
-      run.time.voluntary_context_switches,
-    )
+      + int_number(run.time.voluntary_context_switches)
     involuntary_context_switches = involuntary_context_switches
-      + int_number(
-      run.time.involuntary_context_switches,
-    )
+      + int_number(run.time.involuntary_context_switches)
     fs_inputs = fs_inputs + int_number(run.time.fs_inputs)
     fs_outputs = fs_outputs + int_number(run.time.fs_outputs)
     for sample in run.diagnose.samples {
@@ -261,9 +257,7 @@ pub fn evaluate_metrics(metrics: dict, baseline: dict) -> dict {
     const actual = number(metrics.telemetry[name])
     if reference > 0.0 && actual > reference * telemetry_factor {
       warnings = warnings
-        + [
-        "telemetry ${name}=${actual} exceeded ${telemetry_factor}x reference ${reference}",
-      ]
+        + ["telemetry ${name}=${actual} exceeded ${telemetry_factor}x reference ${reference}"]
     }
   }
   return {ok: failures.count == 0, failures: failures, warnings: warnings, limits: limits}
@@ -451,16 +445,7 @@ fn run_parallel(
     const stderr_path = path_join(run_root, "stderr.txt")
     const status_path = path_join(run_root, "status.txt")
     const argv = prefix
-      + [
-      "test",
-      "--parallel",
-      "--jobs",
-      "4",
-      "--diagnose",
-      "--timeout",
-      "5000",
-      test_files[index],
-    ]
+      + ["test", "--parallel", "--jobs", "4", "--diagnose", "--timeout", "5000", test_files[index]]
     script = script
       + "(HOME="
       + shell_quote(home)
@@ -501,9 +486,7 @@ fn run_parallel(
     }
     if diagnose.samples.count != CASES_PER_SUITE {
       errors = errors
-        + [
-        "run ${index} emitted ${diagnose.samples.count}/${CASES_PER_SUITE} diagnostic samples",
-      ]
+        + ["run ${index} emitted ${diagnose.samples.count}/${CASES_PER_SUITE} diagnostic samples"]
     }
     if diagnose.failures.count > 0 {
       errors = errors + ["run ${index} reported failing tests: ${diagnose.failures.join(", ")}"]

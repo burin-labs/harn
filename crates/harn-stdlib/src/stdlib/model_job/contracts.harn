@@ -215,8 +215,8 @@ pub fn model_job_transition_result(
   }
   if previous == "queued"
     && (next == "running" || next == "succeeded" || next == "failed"
-    || next
-    == "canceled") {
+      || next
+        == "canceled") {
     return Ok(next)
   }
   if previous == "running" && (next == "succeeded" || next == "failed" || next == "canceled") {

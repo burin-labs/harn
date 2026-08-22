@@ -122,7 +122,7 @@ pub fn json_call(value, allow_flat_argument_string: bool) -> dict {
   }
   if type_of(arguments) == "string"
     && (allow_flat_argument_string
-    || type_of(value?.function) == "dict") {
+      || type_of(value?.function) == "dict") {
     arguments = try {
       json_parse(arguments)
     } catch (error) {

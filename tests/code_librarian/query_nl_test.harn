@@ -186,9 +186,7 @@ pipeline test_query_nl_recall_at_least_80_percent(harness: Harness, task) {
   const recall_pct = to_float(total_found) / to_float(total_expected)
   harness.stdio.println(
     "[query_nl] recall=" + to_string(recall_pct) + " (" + to_string(total_found) + "/"
-      + to_string(
-      total_expected,
-    )
+      + to_string(total_expected)
       + ")",
   )
   if len(failures) > 0 {

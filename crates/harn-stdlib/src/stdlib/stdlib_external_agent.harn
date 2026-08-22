@@ -46,12 +46,12 @@ pub fn external_agent_approve(agent: HarnessAgent, envelope, options = nil) {
     envelope?.task,
     opts
       + {
-      target: envelope?.target,
-      allow_cleartext: allow_cleartext,
-      idempotency_key: envelope?.idempotency_key,
-      budget: envelope?.budget,
-      expected_scope: envelope?.checkpoint?.expected_scope ?? [],
-      checkpoint: checkpoint,
-    },
+        target: envelope?.target,
+        allow_cleartext: allow_cleartext,
+        idempotency_key: envelope?.idempotency_key,
+        budget: envelope?.budget,
+        expected_scope: envelope?.checkpoint?.expected_scope ?? [],
+        checkpoint: checkpoint,
+      },
   )
 }

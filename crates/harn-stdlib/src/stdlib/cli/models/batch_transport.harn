@@ -588,13 +588,13 @@ pub fn __dry_run_submission(env: HarnessEnv, job: dict, payload: dict) -> dict {
     ok: true,
     job: __submission_job_base(env, job, payload, true)
       + {
-      status: "ready",
-      provider_batch_id: nil,
-      region: policy["region"],
-      input_s3_uri: policy["input_s3_uri"],
-      output_s3_uri: policy["output_s3_uri"],
-      response: nil,
-    },
+        status: "ready",
+        provider_batch_id: nil,
+        region: policy["region"],
+        input_s3_uri: policy["input_s3_uri"],
+        output_s3_uri: policy["output_s3_uri"],
+        response: nil,
+      },
     errors: [],
   }
 }

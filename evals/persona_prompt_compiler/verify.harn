@@ -48,8 +48,7 @@ fn main(harness: Harness) -> int {
     "harn.toml",
   )
   const materialized = if artifact.materialization.manifest_path == expected_manifest_path
-    && artifact
-    .materialization.result.success
+    && artifact.materialization.result.success
     && harness.fs.exists(expected_manifest_path) {
     persona_prompt_materialized_verdict(
       toml_parse(harness.fs.read_text(expected_manifest_path)),

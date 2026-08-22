@@ -100,9 +100,7 @@ fn __validate_agent_loop_retry(opts: AgentRetryOptionBag) {
       && type_of(requested_retry) != "bool"
       && type_of(requested_retry) != "dict" {
       throw "agent_loop: `retry` must be false, a retry config dict, or nil; got "
-        + type_of(
-        requested_retry,
-      )
+        + type_of(requested_retry)
     }
   }
   if __retry_has_key(opts, "llm_retry")
@@ -162,10 +160,7 @@ pub fn agent_loop_default_retry_predicate(envelope) -> bool {
   const kind = __agent_retry_text(err?.kind)
   if category == "generic"
     || __agent_retry_contains(__AGENT_NEVER_RETRY_ERROR_TAGS, category)
-    || __agent_retry_contains(
-    __AGENT_NEVER_RETRY_ERROR_TAGS,
-    reason,
-  )
+    || __agent_retry_contains(__AGENT_NEVER_RETRY_ERROR_TAGS, reason)
     || __agent_retry_contains(__AGENT_NEVER_RETRY_ERROR_TAGS, kind) {
     return false
   }
@@ -173,10 +168,7 @@ pub fn agent_loop_default_retry_predicate(envelope) -> bool {
     return true
   }
   if __agent_retry_contains(__AGENT_RETRYABLE_CATEGORIES, category)
-    || __agent_retry_contains(
-    __AGENT_RETRYABLE_REASONS,
-    reason,
-  )
+    || __agent_retry_contains(__AGENT_RETRYABLE_REASONS, reason)
     || __agent_retry_contains(__AGENT_RETRYABLE_KINDS, kind) {
     return true
   }

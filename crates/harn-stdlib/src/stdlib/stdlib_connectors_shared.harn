@@ -388,15 +388,9 @@ fn __git_forge_delivery_id(raw) {
   return __git_forge_text(
     raw?.delivery_id
       ?? connector_http_header(headers, "X-GitHub-Delivery")
-      ?? connector_http_header(
-      headers,
-      "X-Gitlab-Event-UUID",
-    )
+      ?? connector_http_header(headers, "X-Gitlab-Event-UUID")
       ?? connector_http_header(headers, "X-Gitlab-Delivery")
-      ?? connector_http_header(
-      headers,
-      "X-Gitea-Delivery",
-    ),
+      ?? connector_http_header(headers, "X-Gitea-Delivery"),
   )
 }
 

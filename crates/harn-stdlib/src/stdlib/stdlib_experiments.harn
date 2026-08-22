@@ -93,12 +93,12 @@ pub fn replace_message(messages, index, message) {
   while idx < len(messages) {
     out = out
       + [
-      if idx == index {
-        message
-      } else {
-        messages[idx]
-      },
-    ]
+        if idx == index {
+          message
+        } else {
+          messages[idx]
+        },
+      ]
     idx = idx + 1
   }
   return out

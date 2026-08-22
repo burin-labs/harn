@@ -40,9 +40,7 @@ pub fn collect_surface(spec_text: string) -> string {
       }
       const method_match = regex_captures(r"^    ([a-z]+):$", line)
       if current_path != nil && method_match.count > 0
-        && HTTP_METHODS.contains(
-        method_match[0].groups[0],
-      ) {
+        && HTTP_METHODS.contains(method_match[0].groups[0]) {
         paths = paths + ["${method_match[0].groups[0].uppercase()} ${current_path}"]
         continue
       }

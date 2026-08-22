@@ -158,9 +158,7 @@ fn __now_seconds(clock: HarnessClock) {
 fn __default_on_user_code(stdio: HarnessStdio, user_code, verification_uri) {
   const _ = stdio.eprint(
     "To authorize this device, open " + to_string(verification_uri) + " and enter code: "
-      + to_string(
-      user_code,
-    )
+      + to_string(user_code)
       + "\n",
   )
   return nil
@@ -251,7 +249,7 @@ fn __request_device_code(net: HarnessNet, cfg) {
       {}
     }
     const detail = (error_body?.error_description ?? error_body?.error
-      ?? "device authorization endpoint returned status ")
+        ?? "device authorization endpoint returned status ")
       + to_string(response?.status ?? 0)
     throw "std/oauth/device_flow: device authorization request failed: " + to_string(detail)
   }
@@ -260,9 +258,7 @@ fn __request_device_code(net: HarnessNet, cfg) {
   }
   if is_err(parsed) {
     throw "std/oauth/device_flow: device authorization endpoint did not return valid JSON: "
-      + unwrap_err(
-      parsed,
-    ).message
+      + unwrap_err(parsed).message
   }
   const body = unwrap(parsed)
   if type_of(body) != "dict" {
@@ -328,9 +324,7 @@ fn __poll_once(net: HarnessNet, cfg, device_code) {
     throw "std/oauth/device_flow: user denied the device authorization request"
   }
   const detail = (body?.error_description ?? error_code ?? "token endpoint returned status ")
-    + to_string(
-    status,
-  )
+    + to_string(status)
   const prefix = error_code == "" ? "token endpoint error: " : "token endpoint error `" + error_code
     + "`: "
   throw "std/oauth/device_flow: " + prefix + to_string(detail)

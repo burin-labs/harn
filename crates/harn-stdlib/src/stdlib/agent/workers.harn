@@ -23,18 +23,18 @@ type AgentAwaitResumptionRequest = {
 fn __agent_option_keys() {
   return __llm_call_option_registry().keys
     + [
-    "subagents",
-    "subagent_tools",
-    "max_iterations",
-    "max_nudges",
-    "nudge",
-    "turn_policy",
-    "native_tool_fallback",
-    "context_callback",
-    "context_filter",
-    "tool_retries",
-    "tool_backoff_ms",
-  ]
+      "subagents",
+      "subagent_tools",
+      "max_iterations",
+      "max_nudges",
+      "nudge",
+      "turn_policy",
+      "native_tool_fallback",
+      "context_callback",
+      "context_filter",
+      "tool_retries",
+      "tool_backoff_ms",
+    ]
 }
 
 /**
@@ -245,10 +245,7 @@ fn __agent_lifecycle_has_subagent_capability(registry, opts) {
     return true
   }
   return __agent_tool_registry_has(registry, "sub_agent_run")
-    || __agent_tool_registry_has(
-    registry,
-    "spawn_agent",
-  )
+    || __agent_tool_registry_has(registry, "spawn_agent")
 }
 
 fn __agent_lifecycle_await_enabled(opts) {
@@ -402,10 +399,10 @@ fn __worker_workflow_config(agents: HarnessAgent, config) {
   return filter_nil(
     config
       + {
-      graph: workflow_graph(config.graph),
-      artifacts: __worker_list(config?.artifacts),
-      options: options,
-    },
+        graph: workflow_graph(config.graph),
+        artifacts: __worker_list(config?.artifacts),
+        options: options,
+      },
   )
 }
 
@@ -413,9 +410,9 @@ fn __worker_stage_config(agents: HarnessAgent, config) {
   return filter_nil(
     config
       + {
-      artifacts: __worker_list(config?.artifacts),
-      options: __worker_resume_options(agents, __worker_dict(config?.options)),
-    },
+        artifacts: __worker_list(config?.artifacts),
+        options: __worker_resume_options(agents, __worker_dict(config?.options)),
+      },
   )
 }
 

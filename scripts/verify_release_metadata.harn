@@ -373,10 +373,7 @@ fn verify_tag_state(
   if !tag_rev.success {
     throw "error: cannot verify release tag state — " + tag
       + " resolves but git could not read its commit: "
-      + git_error_detail(
-      tag_rev.stderr,
-      tag_rev.exit_code,
-    )
+      + git_error_detail(tag_rev.stderr, tag_rev.exit_code)
   }
   const tag_commit = tag_rev.stdout.trim()
   if head == tag_commit {

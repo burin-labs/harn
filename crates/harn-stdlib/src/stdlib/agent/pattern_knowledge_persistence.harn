@@ -179,10 +179,10 @@ pub fn pl_store_record(
     pl_tags(kind, options?.tags),
     opts
       + {
-      id: id == "" ? key.replace(":", "_") : id,
-      now: now,
-      provenance: options?.provenance ?? {source: "harn.pattern_learning"},
-    },
+        id: id == "" ? key.replace(":", "_") : id,
+        now: now,
+        provenance: options?.provenance ?? {source: "harn.pattern_learning"},
+      },
   )
 }
 

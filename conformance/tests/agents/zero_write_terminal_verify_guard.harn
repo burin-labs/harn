@@ -53,7 +53,7 @@ fn build_tools() {
 fn is_zero_write_event(event) -> bool {
   return event.type == "reserved_terminal_verify"
     && (event?.payload?.kind ?? "")
-    == "zero_write_terminal_verify"
+      == "zero_write_terminal_verify"
 }
 
 fn count_zero_write_events(events) {

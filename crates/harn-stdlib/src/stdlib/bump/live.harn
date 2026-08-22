@@ -110,10 +110,7 @@ fn __working_changes(tools: HarnessTools, repo_dir: string) -> BumpChangeSet {
   )
   return {
     additions: tracked_additions
-      + untracked_additions.filter(
-      { name -> !contains(tracked_additions, name) },
-    )
-      .to_list(),
+      + untracked_additions.filter({ name -> !contains(tracked_additions, name) }).to_list(),
     deletions: __lines(
       __git(tools, repo_dir, ["diff", "--name-only", "--diff-filter=D", "HEAD"]).stdout,
     ),

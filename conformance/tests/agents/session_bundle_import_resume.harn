@@ -137,24 +137,18 @@ pipeline main(harness: Harness) {
   const imported_snapshot_value = json_parse(harness.fs.read_text(imported_snapshot))
   harness.stdio.println(
     "snapshot_self_ref_rewritten="
-      + to_string(
-      imported_snapshot_value.snapshot_path == imported_snapshot,
-    ),
+      + to_string(imported_snapshot_value.snapshot_path == imported_snapshot),
   )
   harness.stdio.println(
     "suspension_ref_rewritten="
-      + to_string(
-      imported_snapshot_value.suspension?.snapshot_ref == imported_snapshot,
-    ),
+      + to_string(imported_snapshot_value.suspension?.snapshot_ref == imported_snapshot),
   )
   harness.stdio.println(
     "transcript_prefix_preserved="
       + to_string(
-      json_stringify(imported_snapshot_value.transcript?.messages ?? [])
-        == json_stringify(
-        snapshot_value.transcript?.messages ?? [],
+        json_stringify(imported_snapshot_value.transcript?.messages ?? [])
+          == json_stringify(snapshot_value.transcript?.messages ?? []),
       ),
-    ),
   )
   const source_transcript = json_stringify(snapshot_value.transcript)
   const imported_transcript = json_stringify(imported_snapshot_value.transcript)
@@ -166,44 +160,35 @@ pipeline main(harness: Harness) {
   harness.stdio.println(
     "reasoning_fact_preserved="
       + to_string(
-      contains(source_transcript, "bundle reasoning checkpoint")
-        && contains(
-        imported_transcript,
-        "bundle reasoning checkpoint",
+        contains(source_transcript, "bundle reasoning checkpoint")
+          && contains(imported_transcript, "bundle reasoning checkpoint"),
       ),
-    ),
   )
   harness.stdio.println(
     "usage_facts_preserved="
       + to_string(
-      source_llm_call.input_tokens == 7
-        && source_llm_call.output_tokens == 3
-        && json_stringify(imported_llm_call)
-        == json_stringify(
-        source_llm_call,
+        source_llm_call.input_tokens == 7
+          && source_llm_call.output_tokens == 3
+          && json_stringify(imported_llm_call)
+            == json_stringify(source_llm_call),
       ),
-    ),
   )
   harness.stdio.println(
     "outcome_fact_preserved="
       + to_string(
-      source_llm_call.provider_stop_reason == "tool_use"
-        && imported_llm_call.provider_stop_reason
-        == "tool_use",
-    ),
+        source_llm_call.provider_stop_reason == "tool_use"
+          && imported_llm_call.provider_stop_reason
+            == "tool_use",
+      ),
   )
   harness.stdio.println(
     "resume_command_points_to_snapshot="
-      + to_string(
-      import_report.worker_snapshots[0].resume_command[3] == imported_snapshot,
-    ),
+      + to_string(import_report.worker_snapshots[0].resume_command[3] == imported_snapshot),
   )
   const imported_run = json_parse(harness.fs.read_text(imported_run_path))
   harness.stdio.println(
     "imported_run_metadata_rewritten="
-      + to_string(
-      imported_run.metadata.worker_snapshot_path == imported_snapshot,
-    ),
+      + to_string(imported_run.metadata.worker_snapshot_path == imported_snapshot),
   )
   const source_resumed = harness.process.exec_at(
     source_root,
@@ -231,9 +216,7 @@ pipeline main(harness: Harness) {
   const imported_signature = resume_signature(final)
   harness.stdio.println(
     "resume_signature_matches_source="
-      + to_string(
-      json_stringify(imported_signature) == json_stringify(source_signature),
-    ),
+      + to_string(json_stringify(imported_signature) == json_stringify(source_signature)),
   )
   harness.stdio.println("event_type=" + to_string(final.data.event_type))
   harness.stdio.println("resumed_status=" + to_string(final.data.value.status))

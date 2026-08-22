@@ -97,11 +97,11 @@ fn semantic_eval_with_llm(harness: Harness, report, run, reference, heuristic, t
   }
   return data
     + {
-    method: "semantic_llm",
-    objective_summary: heuristic?.summary ?? "",
-    objective_gating_failures: heuristic?.gating_failures ?? [],
-    overall_verdict: gated_verdict,
-  }
+      method: "semantic_llm",
+      objective_summary: heuristic?.summary ?? "",
+      objective_gating_failures: heuristic?.gating_failures ?? [],
+      overall_verdict: gated_verdict,
+    }
 }
 
 fn load_run_record(fs: HarnessFs, report, task_root) {

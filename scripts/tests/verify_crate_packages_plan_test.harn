@@ -83,22 +83,22 @@ pipeline test_plan_rows_are_shell_readable(harness: Harness, task) {
 pipeline test_plan_fails_closed_for_duplicate_package_names(harness: Harness, task) {
   const meta = META
     + {
-    workspace_members: ["id-cli", "id-duplicate"],
-    packages: [
-      {
-        id: "id-cli",
-        name: "harn-cli",
-        version: "1.2.3",
-        manifest_path: "/repo/crates/harn-cli/Cargo.toml",
-      },
-      {
-        id: "id-duplicate",
-        name: "harn-cli",
-        version: "1.2.4",
-        manifest_path: "/repo/crates/harn-cli-copy/Cargo.toml",
-      },
-    ],
-  }
+      workspace_members: ["id-cli", "id-duplicate"],
+      packages: [
+        {
+          id: "id-cli",
+          name: "harn-cli",
+          version: "1.2.3",
+          manifest_path: "/repo/crates/harn-cli/Cargo.toml",
+        },
+        {
+          id: "id-duplicate",
+          name: "harn-cli",
+          version: "1.2.4",
+          manifest_path: "/repo/crates/harn-cli-copy/Cargo.toml",
+        },
+      ],
+    }
   assert_throws_contains(
     { -> publishable_workspace_packages_from_metadata(meta, "/repo") },
     "duplicate workspace package name",

@@ -240,12 +240,12 @@ pub fn estimate_session_cost(usage) {
     const key = __aggregate_key(row.provider, row.model)
     const prior = aggregated[key]
       ?? {
-      provider: row.provider,
-      model: row.model,
-      calls: 0,
-      cost_usd: 0.0,
-      pricing_known: row.pricing_known,
-    }
+        provider: row.provider,
+        model: row.model,
+        calls: 0,
+        cost_usd: 0.0,
+        pricing_known: row.pricing_known,
+      }
     const row_cost = row.cost_usd ?? 0.0
     const updated = {
       provider: prior.provider,

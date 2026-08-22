@@ -251,16 +251,16 @@ fn __agent_loop_contract_prompt(fs: HarnessFs, llm: HarnessLlm, opts) {
     fs,
     completion
       + {
-      loop_until_done: loop_until_done,
-      exit_when_verified: opts?.exit_when_verified ?? false,
-      has_tools: agent_has_tools(opts),
-      calls_label: paradigm.call_noun + "s",
-      sentinel_active: sentinel != nil,
-      // Compatibility for prompt overrides written before the stable
-      // `done_sentinel_form` binding. The decision still comes from the one
-      // completion projection above.
-      plain_text_done: completion.done_sentinel_form != "done_block",
-    },
+        loop_until_done: loop_until_done,
+        exit_when_verified: opts?.exit_when_verified ?? false,
+        has_tools: agent_has_tools(opts),
+        calls_label: paradigm.call_noun + "s",
+        sentinel_active: sentinel != nil,
+        // Compatibility for prompt overrides written before the stable
+        // `done_sentinel_form` binding. The decision still comes from the one
+        // completion projection above.
+        plain_text_done: completion.done_sentinel_form != "done_block",
+      },
     opts,
   )
 }
@@ -520,7 +520,7 @@ fn __agent_system_prompt_option_present(value) {
 fn __agent_has_system_prompt_options(opts) {
   return __agent_system_prompt_option_present(opts?._primary_system)
     || type_of(opts?.system)
-    == "string"
+      == "string"
 }
 
 fn __agent_push_system_fragment(fragments, id, body) {
@@ -747,13 +747,13 @@ fn __agent_projection_with_scratchpad_barrier(
   const version = snapshot?.scratchpad_version ?? 0
   return projection_opts
     + {
-    scratchpad: [projection_opts?.scratchpad, scratchpad],
-    write_barrier_refs: [
-      projection_opts?.write_barrier_refs,
-      projection_opts?.barrier_refs,
-      "agent_scratchpad:v" + to_string(version),
-    ],
-  }
+      scratchpad: [projection_opts?.scratchpad, scratchpad],
+      write_barrier_refs: [
+        projection_opts?.write_barrier_refs,
+        projection_opts?.barrier_refs,
+        "agent_scratchpad:v" + to_string(version),
+      ],
+    }
 }
 
 fn __agent_apply_projection(agent: HarnessAgent, session_id, messages, opts) {
