@@ -207,6 +207,10 @@ fn anthropic_effort_value(level: ReasoningEffort) -> Option<&'static str> {
 }
 
 fn set_output_config_effort(body: &mut serde_json::Value, effort: &str) {
+    set_output_config_field(body, "effort", serde_json::json!(effort));
+}
+
+fn set_output_config_field(body: &mut serde_json::Value, key: &str, value: serde_json::Value) {
     let Some(body_object) = body.as_object_mut() else {
         return;
     };
@@ -216,7 +220,7 @@ fn set_output_config_effort(body: &mut serde_json::Value, effort: &str) {
     if !output_config.is_object() {
         *output_config = serde_json::json!({});
     }
-    output_config["effort"] = serde_json::json!(effort);
+    output_config[key] = value;
 }
 
 fn model_supports_anthropic_prefill(model: &str) -> bool {
@@ -621,7 +625,11 @@ impl AnthropicProvider {
                 );
             }
             crate::llm::api::OutputFormat::JsonSchema { schema, .. } => {
-                force_json_via_tool_use(&mut body, schema, &opts.model);
+                if caps.structured_output.as_deref() == Some("native") {
+                    set_native_json_schema_output(&mut body, schema, &opts.model);
+                } else {
+                    force_json_via_tool_use(&mut body, schema, &opts.model);
+                }
             }
         }
         match &opts.thinking {
@@ -1105,6 +1113,28 @@ fn force_json_via_tool_use(body: &mut serde_json::Value, schema: &serde_json::Va
         serde_json::json!(tools)
     };
     body["tool_choice"] = serde_json::json!({"type": "tool", "name": "json_response"});
+}
+
+/// Lower Harn's provider-neutral schema contract to Anthropic's native JSON
+/// output grammar. Unlike the legacy synthetic-tool fallback, this keeps both
+/// thinking and the caller's tool surface available on the same turn.
+fn set_native_json_schema_output(
+    body: &mut serde_json::Value,
+    schema: &serde_json::Value,
+    model: &str,
+) {
+    let schema = sanitize_schema_for_provider(
+        "anthropic",
+        model,
+        SchemaCompatProfile::AnthropicStrict,
+        SchemaSurface::StructuredOutput,
+        schema,
+    );
+    set_output_config_field(
+        body,
+        "format",
+        serde_json::json!({"type": "json_schema", "schema": schema}),
+    );
 }
 
 fn warn_forced_json_overrides_tools(model: &str) {
