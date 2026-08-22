@@ -116,9 +116,7 @@ pub fn __normalize_iteration_budget(opts) {
   )
   if initial > max_cap {
     throw "agent_loop: `iteration_budget.initial` must be less than or equal to `iteration_budget.max`; got initial="
-      + to_string(
-      initial,
-    )
+      + to_string(initial)
       + ", max="
       + to_string(max_cap)
   }
@@ -130,9 +128,7 @@ pub fn __normalize_iteration_budget(opts) {
   const expose_decisions = if user_budget?.expose_decisions != nil {
     if type_of(user_budget.expose_decisions) != "bool" {
       throw "agent_loop: `iteration_budget.expose_decisions` must be a bool; got "
-        + type_of(
-        user_budget.expose_decisions,
-      )
+        + type_of(user_budget.expose_decisions)
     }
     user_budget.expose_decisions
   } else {
@@ -238,20 +234,18 @@ pub fn agent_loop_options(harness: Harness, options = nil) {
   opts = agent_refresh_tool_format_for_route(harness.llm, opts)
   if !__has_key(opts, "tool_format")
     && (opts?.tools == nil
-    || __client_tool_search_requested(
-    opts?.tool_search,
-  )) {
+      || __client_tool_search_requested(opts?.tool_search)) {
     opts = opts + {tool_format: __fallback_tool_format(), _tool_format_source: "fallback"}
   }
   if (opts?.loop_until_done ?? false) && !__has_key(opts, "done_sentinel") {
     opts = opts
       + {
-      done_sentinel: if __native_tools_complete_naturally(opts) {
-        nil
-      } else {
-        "##DONE##"
-      },
-    }
+        done_sentinel: if __native_tools_complete_naturally(opts) {
+          nil
+        } else {
+          "##DONE##"
+        },
+      }
   }
   const has_verify_completion_judge = __has_key(opts, "verify_completion_judge")
   const verify_completion_judge = if has_verify_completion_judge {
@@ -280,24 +274,24 @@ pub fn agent_loop_options(harness: Harness, options = nil) {
   const budget = __normalize_iteration_budget(opts)
   opts = opts
     + {
-    iteration_budget: budget,
-    max_iterations: budget.max,
-    tool_surface_narrowing: __normalize_tool_surface_narrowing(opts?.tool_surface_narrowing),
-    read_only_stance: __normalize_read_only_stance(opts?.read_only_stance),
-  }
+      iteration_budget: budget,
+      max_iterations: budget.max,
+      tool_surface_narrowing: __normalize_tool_surface_narrowing(opts?.tool_surface_narrowing),
+      read_only_stance: __normalize_read_only_stance(opts?.read_only_stance),
+    }
   opts = agent_reasoning_apply(harness.llm, opts)
   opts = __normalize_reminder_provider_options(opts)
   opts = opts
     + {
-    _llm_caller: llm_caller,
-    _llm_caller_transport: llm_caller_transport,
-    _llm_retry: llm_retry,
-    _on_delta: on_delta,
-    _tool_caller: tool_caller,
-    _structural_validator: structural_validator,
-    _input_guardrail: input_guardrail,
-    _pre_turn_scope_classifier: pre_turn_scope_classifier,
-  }
+      _llm_caller: llm_caller,
+      _llm_caller_transport: llm_caller_transport,
+      _llm_retry: llm_retry,
+      _on_delta: on_delta,
+      _tool_caller: tool_caller,
+      _structural_validator: structural_validator,
+      _input_guardrail: input_guardrail,
+      _pre_turn_scope_classifier: pre_turn_scope_classifier,
+    }
   return opts
 }
 

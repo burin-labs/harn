@@ -464,26 +464,26 @@ fn __tool_call_record_issues(record, index: int) -> list {
     if type_of(call) != "dict" {
       issues = issues
         + [
-        __issue(
-          "tool_call_not_object",
-          "tool call must be an object",
-          index,
-          {call_index: call_index},
-        ),
-      ]
+          __issue(
+            "tool_call_not_object",
+            "tool call must be an object",
+            index,
+            {call_index: call_index},
+          ),
+        ]
       call_index = call_index + 1
       continue
     }
     if agent_transcript_tool_call_name(call) == "" {
       issues = issues
         + [
-        __issue(
-          "tool_call_missing_name",
-          "tool call is missing a canonical name",
-          index,
-          {call_index: call_index},
-        ),
-      ]
+          __issue(
+            "tool_call_missing_name",
+            "tool call is missing a canonical name",
+            index,
+            {call_index: call_index},
+          ),
+        ]
     }
     const raw_args = __tool_call_raw_args(call)
     const args = agent_transcript_tool_call_args(call)
@@ -494,6 +494,27 @@ fn __tool_call_record_issues(record, index: int) -> list {
       if is_ok(parsed) {
         issues = issues
           + [
+            __issue(
+              "tool_call_args_not_object",
+              "tool call arguments did not normalize to an object",
+              index,
+              {call_index: call_index},
+            ),
+          ]
+      } else {
+        issues = issues
+          + [
+            __issue(
+              "tool_call_args_unparsed",
+              "tool call arguments are not valid JSON",
+              index,
+              {call_index: call_index},
+            ),
+          ]
+      }
+    } else if args?._raw != nil {
+      issues = issues
+        + [
           __issue(
             "tool_call_args_not_object",
             "tool call arguments did not normalize to an object",
@@ -501,27 +522,6 @@ fn __tool_call_record_issues(record, index: int) -> list {
             {call_index: call_index},
           ),
         ]
-      } else {
-        issues = issues
-          + [
-          __issue(
-            "tool_call_args_unparsed",
-            "tool call arguments are not valid JSON",
-            index,
-            {call_index: call_index},
-          ),
-        ]
-      }
-    } else if args?._raw != nil {
-      issues = issues
-        + [
-        __issue(
-          "tool_call_args_not_object",
-          "tool call arguments did not normalize to an object",
-          index,
-          {call_index: call_index},
-        ),
-      ]
     }
     call_index = call_index + 1
   }
@@ -550,8 +550,7 @@ fn __assistant_row(record, index: int, iteration: int) -> dict {
         ?? record?.llm?.input_tokens
         ?? 0,
       output_tokens: record?.output_tokens ?? record?.usage?.output_tokens
-        ?? record?.llm
-        ?.output_tokens
+        ?? record?.llm?.output_tokens
         ?? 0,
       cache_read_tokens: record?.cache_read_tokens ?? record?.usage?.cache_read_tokens ?? 0,
       cache_write_tokens: record?.cache_write_tokens ?? record?.usage?.cache_write_tokens ?? 0,
@@ -613,7 +612,7 @@ fn __tool_result_row(
       record._harn.data
     } else if record?.schema == TRANSCRIPT_ROW_SCHEMA
       && record?.kind
-      == "tool_result"
+        == "tool_result"
       && type_of(record?.data) == "dict" {
       record.data
     } else {
@@ -687,12 +686,12 @@ pub fn agent_transcript_tool_result_blocks(text: string) -> list {
     }
     out = out
       + [
-      {
-        name: attrs?.name ?? "unknown",
-        tool_call_id: attrs?.id ?? attrs?.tool_call_id ?? "",
-        text: body,
-      },
-    ]
+        {
+          name: attrs?.name ?? "unknown",
+          tool_call_id: attrs?.id ?? attrs?.tool_call_id ?? "",
+          text: body,
+        },
+      ]
   }
   return out
 }
@@ -713,15 +712,15 @@ fn __legacy_request_tool_result_rows(record, index: int, previous_count: int) ->
   for result in fresh {
     rows = rows
       + [
-      __tool_result_row(
-        result?.name ?? "unknown",
-        result?.text ?? "",
-        result?.tool_call_id ?? "",
-        record,
-        index,
-        max(0, (to_int(record?.iteration) ?? 0) - 1),
-      ),
-    ]
+        __tool_result_row(
+          result?.name ?? "unknown",
+          result?.text ?? "",
+          result?.tool_call_id ?? "",
+          record,
+          index,
+          max(0, (to_int(record?.iteration) ?? 0) - 1),
+        ),
+      ]
   }
   return {rows: rows, count: len(all)}
 }
@@ -796,13 +795,13 @@ pub fn agent_transcript_normalize_report(records) -> AgentTranscriptReport {
     if records != nil {
       issues = issues
         + [
-        __issue(
-          "input_not_list",
-          "transcript records must be a list",
-          -1,
-          {actual_type: type_of(records)},
-        ),
-      ]
+          __issue(
+            "input_not_list",
+            "transcript records must be a list",
+            -1,
+            {actual_type: type_of(records)},
+          ),
+        ]
     }
     []
   }
@@ -811,26 +810,26 @@ pub fn agent_transcript_normalize_report(records) -> AgentTranscriptReport {
     if type_of(record) != "dict" {
       issues = issues
         + [
-        __issue(
-          "record_not_object",
-          "transcript record must be an object",
-          record_index,
-          {actual_type: type_of(record)},
-        ),
-      ]
+          __issue(
+            "record_not_object",
+            "transcript record must be an object",
+            record_index,
+            {actual_type: type_of(record)},
+          ),
+        ]
       record_index = record_index + 1
       continue
     }
     if !__known_record_shape(record) {
       issues = issues
         + [
-        __issue(
-          "unrecognized_record",
-          "transcript record shape is not recognized",
-          record_index,
-          {record_type: record?.type, role: __role(record)},
-        ),
-      ]
+          __issue(
+            "unrecognized_record",
+            "transcript record shape is not recognized",
+            record_index,
+            {record_type: record?.type, role: __role(record)},
+          ),
+        ]
     }
     issues = issues + __tool_call_record_issues(record, record_index)
     record_index = record_index + 1
@@ -843,13 +842,13 @@ pub fn agent_transcript_normalize_report(records) -> AgentTranscriptReport {
     if !report.ok {
       issues = issues
         + [
-        __issue(
-          "row_schema_invalid",
-          report.message ?? "normalized transcript row failed schema validation",
-          row.index,
-          {row_index: row_index, schema_issues: report.issues ?? []},
-        ),
-      ]
+          __issue(
+            "row_schema_invalid",
+            report.message ?? "normalized transcript row failed schema validation",
+            row.index,
+            {row_index: row_index, schema_issues: report.issues ?? []},
+          ),
+        ]
       errors = errors + (report.errors ?? [])
     }
     row_index = row_index + 1
@@ -901,9 +900,7 @@ fn __transcript_lifecycle_index(rows: list<AgentTranscriptRow>) -> AgentTranscri
       }
     } else if row.kind == "tool_result" && row.tool_call_id != "" {
       result_rows_by_id = result_rows_by_id
-        + {
-        [row.tool_call_id]: (result_rows_by_id[row.tool_call_id] ?? []) + [row],
-      }
+        + {[row.tool_call_id]: (result_rows_by_id[row.tool_call_id] ?? []) + [row]}
     }
   }
   return {call_counts: call_counts, result_rows_by_id: result_rows_by_id}
@@ -938,59 +935,59 @@ fn __transcript_lifecycle_calls(
       if call_id == "" {
         issues = issues
           + [
-          __transcript_lifecycle_issue(
-            "tool_call_missing_id",
-            "tool call cannot be paired because it has no id",
-            row.index,
-            {call_ordinal: ordinal, name: name},
-          ),
-        ]
+            __transcript_lifecycle_issue(
+              "tool_call_missing_id",
+              "tool call cannot be paired because it has no id",
+              row.index,
+              {call_ordinal: ordinal, name: name},
+            ),
+          ]
       } else if duplicate_call_count > 1 && !(seen_duplicate_ids[call_id] ?? false) {
         seen_duplicate_ids = seen_duplicate_ids + {[call_id]: true}
         issues = issues
           + [
-          __transcript_lifecycle_issue(
-            "duplicate_tool_call_id",
-            "multiple tool calls share one id",
-            row.index,
-            {tool_call_id: call_id, call_count: duplicate_call_count},
-          ),
-        ]
+            __transcript_lifecycle_issue(
+              "duplicate_tool_call_id",
+              "multiple tool calls share one id",
+              row.index,
+              {tool_call_id: call_id, call_count: duplicate_call_count},
+            ),
+          ]
       }
       if call_id != "" && len(matching_results) == 0 {
         issues = issues
           + [
-          __transcript_lifecycle_issue(
-            "tool_call_result_missing",
-            "tool call has no matching result",
-            row.index,
-            {tool_call_id: call_id, name: name},
-          ),
-        ]
+            __transcript_lifecycle_issue(
+              "tool_call_result_missing",
+              "tool call has no matching result",
+              row.index,
+              {tool_call_id: call_id, name: name},
+            ),
+          ]
       } else if len(matching_results) > 1 {
         issues = issues
           + [
-          __transcript_lifecycle_issue(
-            "duplicate_tool_result",
-            "tool call has multiple matching results",
-            row.index,
-            {tool_call_id: call_id, result_count: len(matching_results)},
-          ),
-        ]
+            __transcript_lifecycle_issue(
+              "duplicate_tool_result",
+              "tool call has multiple matching results",
+              row.index,
+              {tool_call_id: call_id, result_count: len(matching_results)},
+            ),
+          ]
       }
       if len(matching_results) == 1 && matching_results[0].name != "unknown"
         && name != ""
         && matching_results[0].name
-        != name {
+          != name {
         issues = issues
           + [
-          __transcript_lifecycle_issue(
-            "tool_result_name_mismatch",
-            "tool result name does not match its call",
-            matching_results[0].index,
-            {tool_call_id: call_id, call_name: name, result_name: matching_results[0].name},
-          ),
-        ]
+            __transcript_lifecycle_issue(
+              "tool_result_name_mismatch",
+              "tool result name does not match its call",
+              matching_results[0].index,
+              {tool_call_id: call_id, call_name: name, result_name: matching_results[0].name},
+            ),
+          ]
       }
       const status = if call_id == "" || duplicate_call_count > 1 || len(matching_results) > 1 {
         "ambiguous"
@@ -1006,25 +1003,25 @@ fn __transcript_lifecycle_calls(
       }
       calls = calls
         + [
-        {
-          schema: "harn.agent.transcript.tool_lifecycle.v1",
-          ordinal: ordinal,
-          iteration: row.iteration,
-          row_index: row.index,
-          tool_call_id: call_id,
-          name: name,
-          args: call.args,
-          status: status,
-          result_count: len(matching_results),
-          results: matching_results,
-          evidence_index: latest_result?.index ?? row.index,
-          result: if len(matching_results) == 1 {
-            matching_results[0]
-          } else {
-            nil
+          {
+            schema: "harn.agent.transcript.tool_lifecycle.v1",
+            ordinal: ordinal,
+            iteration: row.iteration,
+            row_index: row.index,
+            tool_call_id: call_id,
+            name: name,
+            args: call.args,
+            status: status,
+            result_count: len(matching_results),
+            results: matching_results,
+            evidence_index: latest_result?.index ?? row.index,
+            result: if len(matching_results) == 1 {
+              matching_results[0]
+            } else {
+              nil
+            },
           },
-        },
-      ]
+        ]
       ordinal = ordinal + 1
     }
   }
@@ -1045,13 +1042,13 @@ fn __transcript_lifecycle_orphans(
     unmatched_results = unmatched_results + [row]
     issues = issues
       + [
-      __transcript_lifecycle_issue(
-        "orphan_tool_result",
-        "tool result has no matching call",
-        row.index,
-        {tool_call_id: row.tool_call_id, name: row.name},
-      ),
-    ]
+        __transcript_lifecycle_issue(
+          "orphan_tool_result",
+          "tool result has no matching call",
+          row.index,
+          {tool_call_id: row.tool_call_id, name: row.name},
+        ),
+      ]
   }
   return {unmatched_results: unmatched_results, issues: issues}
 }
@@ -1134,18 +1131,18 @@ pub fn agent_transcript_tool_events(records) -> list {
     for call in row.tool_calls {
       out = out
         + [
-        {
-          schema: "harn.agent.transcript.tool_event.v1",
-          kind: "tool_call",
-          iteration: row.iteration,
-          row_index: row.index,
-          call_index: call_index,
-          id: call.id ?? "",
-          name: call.name,
-          args: call.args,
-          call: call,
-        },
-      ]
+          {
+            schema: "harn.agent.transcript.tool_event.v1",
+            kind: "tool_call",
+            iteration: row.iteration,
+            row_index: row.index,
+            call_index: call_index,
+            id: call.id ?? "",
+            name: call.name,
+            args: call.args,
+            call: call,
+          },
+        ]
       call_index = call_index + 1
     }
   }

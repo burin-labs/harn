@@ -73,7 +73,7 @@ pipeline default(harness: Harness) {
         { event ->
           event.type == "typed_checkpoint"
             && event?.checkpoint?.schema
-            == "harn.completion_directive_receipt.v1"
+              == "harn.completion_directive_receipt.v1"
         },
       )
         .to_list()

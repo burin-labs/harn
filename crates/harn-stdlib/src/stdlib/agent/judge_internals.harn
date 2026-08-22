@@ -63,7 +63,7 @@ pub fn __judge_completion_admission(
   }
   const admitted = remaining_ms == nil
     || remaining_ms
-    >= to_int(operation_budget_ms) + to_int(reserve_ms)
+      >= to_int(operation_budget_ms) + to_int(reserve_ms)
   return {
     admitted: admitted,
     remaining_ms: remaining_ms,
@@ -170,13 +170,13 @@ pub fn __judge_run_checkpoint(
   const admitted = deadline_admission.admitted
   const admission = deadline_admission
     + {
-    schema: "harn.completion_judge_admission.v1",
-    checkpoint_name: checkpoint_name,
-    admitted: admitted,
-    provider_timeout_ms: provider_timeout_ms,
-    prompt_chars: len(system) + len(user),
-    prompt_token_estimate: ceil((len(system) + len(user)) / 4.0),
-  }
+      schema: "harn.completion_judge_admission.v1",
+      checkpoint_name: checkpoint_name,
+      admitted: admitted,
+      provider_timeout_ms: provider_timeout_ms,
+      prompt_chars: len(system) + len(user),
+      prompt_token_estimate: ceil((len(system) + len(user)) / 4.0),
+    }
   if checkpoint_name == "agent.completion_judge" {
     agent_emit_event(harness.agent, payload.session_id, "typed_checkpoint", admission)
   }
@@ -201,13 +201,13 @@ pub fn __judge_run_checkpoint(
   const llm_opts = __judge_apply_llm_overrides(
     base
       + {
-      model: judge_cfg?.model ?? opts?.model,
-      provider: judge_cfg?.provider ?? opts?.provider,
-      output: {schema: schema, strict: true, validation: "error"},
-      session_id: payload.session_id,
-      system: system,
-      mock_scope: base?.mock_scope ?? mock_scope,
-    }
+        model: judge_cfg?.model ?? opts?.model,
+        provider: judge_cfg?.provider ?? opts?.provider,
+        output: {schema: schema, strict: true, validation: "error"},
+        session_id: payload.session_id,
+        system: system,
+        mock_scope: base?.mock_scope ?? mock_scope,
+      }
       + completion_timeout_opts,
     judge_cfg,
   )
@@ -245,13 +245,13 @@ pub fn __judge_run_checkpoint(
       "typed_checkpoint",
       admission
         + {
-        outcome: if checkpoint?.ok ?? false {
-          "completed"
-        } else {
-          to_string(checkpoint?.status ?? "error")
+          outcome: if checkpoint?.ok ?? false {
+            "completed"
+          } else {
+            to_string(checkpoint?.status ?? "error")
+          },
+          duration_ms: duration_ms,
         },
-        duration_ms: duration_ms,
-      },
     )
   }
   return {checkpoint: checkpoint, duration_ms: duration_ms, admission: admission}

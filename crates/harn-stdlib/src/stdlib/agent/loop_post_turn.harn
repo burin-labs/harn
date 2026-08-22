@@ -248,9 +248,9 @@ pub fn agent_loop_post_turn_transition(
   const tool_count = len(context.tool_calls)
   next = next
     + {
-    consecutive_text_only: __next_text_only_count(tool_count, next.consecutive_text_only),
-    last_tool_count: tool_count,
-  }
+      consecutive_text_only: __next_text_only_count(tool_count, next.consecutive_text_only),
+      last_tool_count: tool_count,
+    }
   const turn_successful = __tool_names_by_status(context.dispatch, true)
   const turn_rejected = __tool_names_by_status(context.dispatch, false)
   const made_progress = len(turn_successful) > 0
@@ -283,26 +283,25 @@ pub fn agent_loop_post_turn_transition(
       verdict: nil,
     }
       + __agent_loop_state_budget_fields(
-      harness.agent,
-      harness.clock,
-      session.session_id,
-      context.totals,
-      context.loop_start_ms,
-      context.budget,
-      context.consecutive_failure_count,
-    ),
+        harness.agent,
+        harness.clock,
+        session.session_id,
+        context.totals,
+        context.loop_start_ms,
+        context.budget,
+        context.consecutive_failure_count,
+      ),
   )
   const post_turn_opts = __sync_tool_search_state(context.turn_opts, context.dispatched_turn_opts)
     + {
-    _session_successful_tools: context.successful_tools_seen,
-    _session_rejected_tools: context.rejected_tools_seen,
-    _consecutive_text_only: next.consecutive_text_only,
-    _done_judge_invocations: next.done_judge_invocations,
-    _done_judge_loop_state: cadence_loop_state,
-    _turn_tool_call_feedback: (context.fallback_triggered && !context.fallback_accepted)
-      || context
-      .had_parse_errors,
-  }
+      _session_successful_tools: context.successful_tools_seen,
+      _session_rejected_tools: context.rejected_tools_seen,
+      _consecutive_text_only: next.consecutive_text_only,
+      _done_judge_invocations: next.done_judge_invocations,
+      _done_judge_loop_state: cadence_loop_state,
+      _turn_tool_call_feedback: (context.fallback_triggered && !context.fallback_accepted)
+        || context.had_parse_errors,
+    }
   const outcome = __agent_loop_with_llm_render_context(
     harness,
     context.turn_llm_opts,
@@ -312,10 +311,7 @@ pub fn agent_loop_post_turn_transition(
         render_harness.llm,
         session,
         context.normalized
-          + {
-          raw_text: context.raw_text,
-          parsed_done_marker: context.parsed_done_marker,
-        },
+          + {raw_text: context.raw_text, parsed_done_marker: context.parsed_done_marker},
         context.dispatch,
         post_turn_opts,
         context.iteration_index,
@@ -345,11 +341,11 @@ pub fn agent_loop_post_turn_transition(
       session,
       context.turn_opts
         + {
-        _done_judge_due: false,
-        _done_judge_invocations: next.done_judge_invocations,
-        _verify_completion_judge_invocations: next.verify_completion_judge_invocations,
-        _feedback_history: next.feedback_history,
-      },
+          _done_judge_due: false,
+          _done_judge_invocations: next.done_judge_invocations,
+          _verify_completion_judge_invocations: next.verify_completion_judge_invocations,
+          _feedback_history: next.feedback_history,
+        },
       "post_edit_reverify",
       context.llm_result.text,
       context.iteration_index,
@@ -357,36 +353,29 @@ pub fn agent_loop_post_turn_transition(
     verdict_record = reverdict
     next = next
       + {
-      feedback_history: reverdict.feedback_history ?? next.feedback_history,
-      verify_completion_judge_invocations: next.verify_completion_judge_invocations
-        + __completion_judge_hit(
-        reverdict,
-      ),
-    }
+        feedback_history: reverdict.feedback_history ?? next.feedback_history,
+        verify_completion_judge_invocations: next.verify_completion_judge_invocations
+          + __completion_judge_hit(reverdict),
+      }
     if reverdict.action == "stop_unverified" {
       return {
         action: "break",
         state: next
           + {
-          final_status: "completion_unverified",
-          stop_reason: __completion_stop_reason(reverdict),
-        },
+            final_status: "completion_unverified",
+            stop_reason: __completion_stop_reason(reverdict),
+          },
       }
     } else if reverdict.action == "continue" {
       next = next
         + {
-        verify_attempts: next.verify_attempts + 1,
-        verify_completion_judge_vetoes: next.verify_completion_judge_vetoes
-          + __completion_judge_hit(
-          reverdict,
-        ),
-      }
+          verify_attempts: next.verify_attempts + 1,
+          verify_completion_judge_vetoes: next.verify_completion_judge_vetoes
+            + __completion_judge_hit(reverdict),
+        }
     } else {
       next = next
-        + {
-        stall_state: next.stall_state + {reverify_owed: false},
-        terminal_write_unverified: false,
-      }
+        + {stall_state: next.stall_state + {reverify_owed: false}, terminal_write_unverified: false}
       post_edit_reverify_confirmed = true
     }
   }
@@ -408,11 +397,11 @@ pub fn agent_loop_post_turn_transition(
         session,
         context.turn_opts
           + {
-          _done_judge_due: outcome?.done_judge_due ?? true,
-          _done_judge_invocations: next.done_judge_invocations,
-          _verify_completion_judge_invocations: next.verify_completion_judge_invocations,
-          _feedback_history: next.feedback_history,
-        },
+            _done_judge_due: outcome?.done_judge_due ?? true,
+            _done_judge_invocations: next.done_judge_invocations,
+            _verify_completion_judge_invocations: next.verify_completion_judge_invocations,
+            _feedback_history: next.feedback_history,
+          },
         outcome.stop_reason,
         context.llm_result.text,
         context.iteration_index,
@@ -420,39 +409,35 @@ pub fn agent_loop_post_turn_transition(
       verdict_record = verdict
       next = next
         + {
-        feedback_history: verdict.feedback_history ?? next.feedback_history,
-        done_judge_invocations: next.done_judge_invocations + __done_judge_hit(verdict),
-        verify_completion_judge_invocations: next.verify_completion_judge_invocations
-          + __completion_judge_hit(
-          verdict,
-        ),
-      }
+          feedback_history: verdict.feedback_history ?? next.feedback_history,
+          done_judge_invocations: next.done_judge_invocations + __done_judge_hit(verdict),
+          verify_completion_judge_invocations: next.verify_completion_judge_invocations
+            + __completion_judge_hit(verdict),
+        }
       if verdict.action == "stop_unverified" {
         return {
           action: "break",
           state: next
             + {
-            final_status: "completion_unverified",
-            stop_reason: __completion_stop_reason(verdict),
-          },
+              final_status: "completion_unverified",
+              stop_reason: __completion_stop_reason(verdict),
+            },
         }
       } else if verdict.action == "continue" {
         should_continue = true
         next = next
           + {
-          verify_attempts: next.verify_attempts + 1,
-          done_judge_vetoes: next.done_judge_vetoes + __done_judge_hit(verdict),
-          verify_completion_judge_vetoes: next.verify_completion_judge_vetoes
-            + __completion_judge_hit(
-            verdict,
-          ),
-        }
+            verify_attempts: next.verify_attempts + 1,
+            done_judge_vetoes: next.done_judge_vetoes + __done_judge_hit(verdict),
+            verify_completion_judge_vetoes: next.verify_completion_judge_vetoes
+              + __completion_judge_hit(verdict),
+          }
       } else {
         next = next
           + {
-          stall_state: next.stall_state + {reverify_owed: false},
-          terminal_write_unverified: false,
-        }
+            stall_state: next.stall_state + {reverify_owed: false},
+            terminal_write_unverified: false,
+          }
         if reverify_mandated {
           post_edit_reverify_confirmed = true
         }
@@ -574,14 +559,14 @@ pub fn agent_loop_post_turn_transition(
       progress_no_information_gain: context.completed_no_information_gain,
     }
       + __agent_loop_state_budget_fields(
-      harness.agent,
-      harness.clock,
-      session.session_id,
-      context.totals,
-      context.loop_start_ms,
-      context.budget,
-      context.consecutive_failure_count,
-    ),
+        harness.agent,
+        harness.clock,
+        session.session_id,
+        context.totals,
+        context.loop_start_ms,
+        context.budget,
+        context.consecutive_failure_count,
+      ),
   )
   const command = agent_loop_control_invoke(next.opts, context.budget, loop_state)
   const applied = agent_loop_apply_command(
@@ -598,10 +583,10 @@ pub fn agent_loop_post_turn_transition(
   )
   next = next
     + {
-    current_max: applied.current_max,
-    extensions_used: applied.extensions_used,
-    budget_decisions: applied.decisions,
-  }
+      current_max: applied.current_max,
+      extensions_used: applied.extensions_used,
+      budget_decisions: applied.decisions,
+    }
   if applied.stop {
     return {
       action: "break",

@@ -75,14 +75,14 @@ pub fn __agent_loop_terminal_boundary(harness: Harness, session, state) -> dict 
     if terminal_verdict.action == "stop_unverified" {
       return state
         + {
-        action: "break",
-        final_status: "completion_unverified",
-        stop_reason: __completion_stop_reason(terminal_verdict),
-        terminal_write_unverified: terminal_write_unverified,
-        stall_state: stall_state,
-        verify_completion_judge_invocations: verify_completion_judge_invocations,
-        feedback_history: feedback_history,
-      }
+          action: "break",
+          final_status: "completion_unverified",
+          stop_reason: __completion_stop_reason(terminal_verdict),
+          terminal_write_unverified: terminal_write_unverified,
+          stall_state: stall_state,
+          verify_completion_judge_invocations: verify_completion_judge_invocations,
+          feedback_history: feedback_history,
+        }
     }
     if terminal_verdict.action == "accept" {
       terminal_write_unverified = false

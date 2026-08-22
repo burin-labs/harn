@@ -26,7 +26,7 @@ fn __completion_receipts(events) {
     { event ->
       event.type == "typed_checkpoint"
         && event?.checkpoint?.schema
-        == "harn.completion_directive_receipt.v1"
+          == "harn.completion_directive_receipt.v1"
     },
   )
     .map({ event -> event.checkpoint })
@@ -299,7 +299,7 @@ pipeline test_completion_judge_prompt_uses_projection_not_callable_schema(harnes
         { event ->
           event.type == "typed_checkpoint"
             && event?.checkpoint?.schema
-            == "harn.completion_judge_evidence_projection.v1"
+              == "harn.completion_judge_evidence_projection.v1"
         },
       )
         .to_list()
@@ -326,9 +326,9 @@ pipeline test_completion_judge_keeps_mutation_and_lifecycle_anomaly_after_many_v
     const id = "verify-" + to_string(index)
     messages = messages
       + [
-      __assistant_facts("", [{id: id, name: "verify", arguments: {}}]),
-      __result_facts("verify", id, "verification passed", "ok"),
-    ]
+        __assistant_facts("", [{id: id, name: "verify", arguments: {}}]),
+        __result_facts("verify", id, "verification passed", "ok"),
+      ]
     index = index + 1
   }
   messages = messages
@@ -349,11 +349,11 @@ pipeline test_completion_judge_keeps_mutation_and_lifecycle_anomaly_after_many_v
   while tool_index < 500 {
     registry = registry
       + [
-      {
-        name: "unused-" + to_string(tool_index) + "-" + "x".repeat(300),
-        description: "UNBOUNDED_REGISTRY_BULK".repeat(100),
-      },
-    ]
+        {
+          name: "unused-" + to_string(tool_index) + "-" + "x".repeat(300),
+          description: "UNBOUNDED_REGISTRY_BULK".repeat(100),
+        },
+      ]
     tool_index = tool_index + 1
   }
   const projected = __judge_evidence_projection(messages, {tools: registry})
@@ -502,7 +502,7 @@ pipeline test_completion_judge_refuses_request_that_cannot_fit_terminal_deadline
         { event ->
           event.type == "typed_checkpoint"
             && event?.checkpoint?.schema
-            == "harn.completion_judge_admission.v1"
+              == "harn.completion_judge_admission.v1"
         },
       )
         .to_list()
@@ -514,7 +514,7 @@ pipeline test_completion_judge_refuses_request_that_cannot_fit_terminal_deadline
           event.type == "judge_decision"
             && event?.verdict == "unavailable"
             && event?.reason
-            == "completion_judge_deadline_admission_refused"
+              == "completion_judge_deadline_admission_refused"
         },
       )
         .to_list()

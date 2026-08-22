@@ -55,9 +55,9 @@ pub fn __normalize_completion_judge_config(fs: HarnessFs, value, opts) -> JudgeC
   return if type_of(value) == "bool" {
     config
       + {
-      system: completion_judge_system_prompt(fs, opts),
-      feedback_fallback: completion_judge_feedback_prompt(fs, opts),
-    }
+        system: completion_judge_system_prompt(fs, opts),
+        feedback_fallback: completion_judge_feedback_prompt(fs, opts),
+      }
   } else {
     config
   }

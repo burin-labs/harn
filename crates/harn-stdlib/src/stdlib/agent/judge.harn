@@ -291,8 +291,7 @@ fn __judge_tool_descriptor(opts, name) -> CompletionToolSemantics {
     ),
     side_effect_level: __judge_clip_evidence(
       annotations?.side_effect_level ?? annotations?.sideEffectLevel ?? annotations?.side_effect
-        ?? annotations
-        ?.sideEffect
+        ?? annotations?.sideEffect
         ?? "",
       __JUDGE_EVIDENCE_LABEL_CHAR_LIMIT,
     ),
@@ -598,17 +597,17 @@ fn __judge_payload(
   )
   const evidence_id = "sha256:"
     + sha256(
-    json_stringify(
-      {
-        task: session?.task ?? "",
-        trigger: stop_reason,
-        candidate_text: text,
-        actions: evidence.packet.actions,
-        fallback_observations: evidence.packet.fallback_observations,
-        lifecycle_issues: evidence.packet.lifecycle_issues,
-      },
-    ),
-  )
+      json_stringify(
+        {
+          task: session?.task ?? "",
+          trigger: stop_reason,
+          candidate_text: text,
+          actions: evidence.packet.actions,
+          fallback_observations: evidence.packet.fallback_observations,
+          lifecycle_issues: evidence.packet.lifecycle_issues,
+        },
+      ),
+    )
   return {
     schema: "harn.completion_evidence_snapshot.v1",
     evidence_id: evidence_id,
@@ -951,10 +950,10 @@ fn __emit_judge_decision(agent: HarnessAgent, session_id, iteration, verdict) {
       iteration: iteration,
       verdict: verdict?.verdict
         ?? if verdict.vetoed {
-        "continue"
-      } else {
-        "done"
-      },
+          "continue"
+        } else {
+          "done"
+        },
       reasoning: verdict?.reasoning ?? "",
       next_step: verdict?.next_step ?? "",
       judge_duration_ms: verdict?.judge_duration_ms ?? 0,
@@ -1034,15 +1033,15 @@ pub fn agent_done_contract(options = {}) -> dict {
   const bundle = {
     done_judge: judge
       + {
-      fail_open_on_error: opts?.fail_open_on_error ?? judge?.fail_open_on_error ?? false,
-      feedback_fallback: opts?.feedback_fallback
-        ?? judge?.feedback_fallback
-        ?? "The done claim is not yet justified; address the specific gaps before finishing.",
-      max_invocations: max_invocations,
-      model: opts?.model ?? judge?.model,
-      provider: opts?.provider ?? judge?.provider,
-      system: opts?.system ?? judge?.system ?? __done_contract_judge_system(opts),
-    },
+        fail_open_on_error: opts?.fail_open_on_error ?? judge?.fail_open_on_error ?? false,
+        feedback_fallback: opts?.feedback_fallback
+          ?? judge?.feedback_fallback
+          ?? "The done claim is not yet justified; address the specific gaps before finishing.",
+        max_invocations: max_invocations,
+        model: opts?.model ?? judge?.model,
+        provider: opts?.provider ?? judge?.provider,
+        system: opts?.system ?? judge?.system ?? __done_contract_judge_system(opts),
+      },
     loop_until_done: opts?.loop_until_done ?? true,
   }
   return __with_prompt_fragment(
@@ -1130,31 +1129,28 @@ fn __completion_policy_plan(opts, stop_reason: string) -> list<CompletionPolicyS
   if verification_config != nil {
     stages = stages
       + [
-      CompletionPolicyStage.ModelJudge(
-        CompletionJudgeSlot.Verification(),
-        verification_config,
-        opts?._verify_completion_judge_trigger,
-        opts?._verify_completion_judge_invocations ?? 0,
-        __verify_completion_judge_cap(verification_config),
-      ),
-    ]
+        CompletionPolicyStage.ModelJudge(
+          CompletionJudgeSlot.Verification(),
+          verification_config,
+          opts?._verify_completion_judge_trigger,
+          opts?._verify_completion_judge_invocations ?? 0,
+          __verify_completion_judge_cap(verification_config),
+        ),
+      ]
   }
   const completion_config = agent_judge_config(opts?.done_judge)
   if completion_config != nil
-    && __completion_judge_applies(
-    stop_reason,
-    opts?._done_judge_due ?? true,
-  ) {
+    && __completion_judge_applies(stop_reason, opts?._done_judge_due ?? true) {
     stages = stages
       + [
-      CompletionPolicyStage.ModelJudge(
-        CompletionJudgeSlot.Completion(),
-        completion_config,
-        opts?._done_judge_trigger,
-        opts?._done_judge_invocations ?? 0,
-        __done_judge_cap(completion_config),
-      ),
-    ]
+        CompletionPolicyStage.ModelJudge(
+          CompletionJudgeSlot.Completion(),
+          completion_config,
+          opts?._done_judge_trigger,
+          opts?._done_judge_invocations ?? 0,
+          __done_judge_cap(completion_config),
+        ),
+      ]
   }
   return stages
 }
@@ -1171,7 +1167,7 @@ fn __completion_policy_initial_evaluation() -> CompletionPolicyEvaluation {
 fn __completion_policy_can_advance(evaluation: CompletionPolicyEvaluation) -> bool {
   return !evaluation.verdict.vetoed
     && trim(to_string(evaluation.verdict.terminal_judge_reason ?? ""))
-    == ""
+      == ""
     && !evaluation.verification_judge_cap_reached
     && !evaluation.completion_judge_cap_reached
 }

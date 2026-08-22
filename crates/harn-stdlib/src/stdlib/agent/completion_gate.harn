@@ -148,32 +148,23 @@ fn __completion_gate_validate_options(opts) {
   }
   if opts?.escalation_threshold != nil
     && (type_of(opts.escalation_threshold) != "int"
-    || opts
-    .escalation_threshold
-    < 1) {
+      || opts.escalation_threshold
+        < 1) {
     throw "agent_completion_gate: `escalation_threshold` must be a positive int; got "
-      + to_string(
-      opts.escalation_threshold,
-    )
+      + to_string(opts.escalation_threshold)
   }
   if opts?.escalation_target != nil
     && (type_of(opts.escalation_target) != "string"
-    || trim(
-    opts.escalation_target,
-  )
-    == "") {
+      || trim(opts.escalation_target)
+        == "") {
     throw "agent_completion_gate: `escalation_target` must be a non-empty string; got "
-      + to_string(
-      opts.escalation_target,
-    )
+      + to_string(opts.escalation_target)
   }
   if opts?.judge_seam != nil
     && opts.judge_seam != "verify_completion_judge"
     && opts.judge_seam != "done_judge" {
     throw "agent_completion_gate: `judge_seam` must be \"verify_completion_judge\" or \"done_judge\"; got "
-      + to_string(
-      opts.judge_seam,
-    )
+      + to_string(opts.judge_seam)
   }
   const templates = opts?.feedback_templates
   if templates != nil {
@@ -189,9 +180,7 @@ fn __completion_gate_validate_options(opts) {
       }
       if type_of(templates[key]) != "string" {
         throw "agent_completion_gate: `feedback_templates." + key + "` must be a string; got "
-          + type_of(
-          templates[key],
-        )
+          + type_of(templates[key])
       }
     }
   }
