@@ -288,12 +288,9 @@ fn host_agent_session_inject_feedback_builtin(
     let content = args.get(2).map(|v| v.display()).unwrap_or_default();
     crate::llm::agent_config::inject_agent_feedback(&session_id, &kind, &content)
         .map_err(VmError::Runtime)?;
-    crate::llm::agent_runtime::emit_agent_event_sync(&AgentEvent::FeedbackInjected {
-        session_id,
-        kind,
-        content,
-        streak: None,
-    });
+    crate::llm::agent_runtime::emit_agent_event_sync(&AgentEvent::feedback_injected(
+        session_id, kind, content,
+    ));
     Ok(VmValue::Nil)
 }
 

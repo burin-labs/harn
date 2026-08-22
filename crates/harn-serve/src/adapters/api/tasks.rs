@@ -322,6 +322,20 @@ pub(super) async fn cancel_task(
             let Some(task) = inner.tasks.get_mut(&task_id) else {
                 return api_error(StatusCode::NOT_FOUND, "not_found", "task not found");
             };
+            let status = task
+                .get("status")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            if status == "CANCELED" {
+                return Json(task.clone()).into_response();
+            }
+            if matches!(status, "COMPLETED" | "FAILED") {
+                return api_error(
+                    StatusCode::CONFLICT,
+                    "task_not_cancelable",
+                    &format!("task is already terminal with status {status}"),
+                );
+            }
             let session_id = task
                 .get("session_id")
                 .and_then(Value::as_str)

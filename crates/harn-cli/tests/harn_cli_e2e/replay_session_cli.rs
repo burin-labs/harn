@@ -8,6 +8,68 @@ fn binary_path() -> std::path::PathBuf {
     std::path::PathBuf::from(env!("CARGO_BIN_EXE_harn"))
 }
 
+#[test]
+fn session_import_records_source_and_result_in_fresh_project_event_log() {
+    let project = tempfile::tempdir().expect("project tempdir");
+    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../spec/session-bundles/fixtures/sample-local.bundle.json");
+
+    let output = Command::new(binary_path())
+        .current_dir(project.path())
+        .args(["session", "import"])
+        .arg(&fixture)
+        .arg("--json")
+        .output()
+        .expect("run session import");
+    assert!(
+        output.status.success(),
+        "session import failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let run_record = project
+        .path()
+        .join(".harn-runs/imported/run_fixture_session_bundle.json");
+    assert!(
+        run_record.is_file(),
+        "import must materialize the run record"
+    );
+    let event_db = project.path().join(".harn/events.sqlite");
+    assert!(
+        event_db.is_file(),
+        "import must create the project event store"
+    );
+    let log = SqliteEventLog::open_read_only(event_db, 8).expect("open import event log");
+    let events = futures::executor::block_on(log.read_range(
+        &Topic::new("session.imports").expect("import topic"),
+        None,
+        8,
+    ))
+    .expect("read import events");
+
+    assert_eq!(events.len(), 1);
+    let event = &events[0].1;
+    assert_eq!(event.kind, "session.imported");
+    assert_eq!(event.payload["bundle_id"], "bundle_fixture_session_bundle");
+    assert_eq!(event.payload["run_record_id"], "run_fixture_session_bundle");
+    assert_eq!(
+        event.payload["run_record_path"],
+        "./.harn-runs/imported/run_fixture_session_bundle.json"
+    );
+    assert_eq!(
+        event.payload["source_bundle_path"],
+        fixture.to_string_lossy().as_ref()
+    );
+    assert_eq!(
+        event.payload["source_bundle_sha256"]
+            .as_str()
+            .expect("source digest")
+            .len(),
+        64
+    );
+}
+
 fn stdout_json(output: &std::process::Output) -> serde_json::Value {
     let stdout = String::from_utf8_lossy(&output.stdout);
     serde_json::from_str(stdout.trim()).unwrap_or_else(|error| {

@@ -88,11 +88,26 @@ pub(super) fn handle(sink: &AcpAgentEventSink, event: &AgentEvent) {
             kind,
             content,
             streak,
+            iteration,
+            tool_name,
+            turn_claimed_for_repair,
         } => {
             let mut payload = serde_json::json!({"feedbackKind": kind, "content": content});
-            if let Some(streak) = streak {
-                if let Some(object) = payload.as_object_mut() {
+            if let Some(object) = payload.as_object_mut() {
+                if let Some(streak) = streak {
                     object.insert("streak".to_string(), serde_json::json!(streak));
+                }
+                if let Some(iteration) = iteration {
+                    object.insert("iteration".to_string(), serde_json::json!(iteration));
+                }
+                if let Some(tool_name) = tool_name {
+                    object.insert("toolName".to_string(), serde_json::json!(tool_name));
+                }
+                if let Some(claimed) = turn_claimed_for_repair {
+                    object.insert(
+                        "turnClaimedForRepair".to_string(),
+                        serde_json::json!(claimed),
+                    );
                 }
             }
             sink.emit_agent_event_ext("feedback_injected", session_id, payload);

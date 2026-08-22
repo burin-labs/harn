@@ -538,6 +538,20 @@ pub enum AgentEvent {
         content: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         streak: Option<usize>,
+        /// Iteration whose toolless output caused this feedback. Present for
+        /// content-specific repair claims so durable observers can correlate
+        /// the claim with the turn without parsing feedback prose.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        iteration: Option<usize>,
+        /// Tool named by the repair classifier. Absent for structural claims
+        /// such as fenced or malformed call markup that name no single tool.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tool_name: Option<String>,
+        /// Typed indication that this feedback claimed the turn for one repair
+        /// attempt. `None` keeps pre-claim feedback and historical events
+        /// distinct from an explicit `false` claim.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        turn_claimed_for_repair: Option<bool>,
     },
     HostToolResult {
         session_id: String,
@@ -1237,6 +1251,22 @@ fn is_false(value: &bool) -> bool {
 }
 
 impl AgentEvent {
+    pub fn feedback_injected(
+        session_id: impl Into<String>,
+        kind: impl Into<String>,
+        content: impl Into<String>,
+    ) -> Self {
+        Self::FeedbackInjected {
+            session_id: session_id.into(),
+            kind: kind.into(),
+            content: content.into(),
+            streak: None,
+            iteration: None,
+            tool_name: None,
+            turn_claimed_for_repair: None,
+        }
+    }
+
     pub fn session_id(&self) -> &str {
         match self {
             Self::AgentMessageChunk { session_id, .. }

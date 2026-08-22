@@ -204,6 +204,9 @@ fn from_host_special(session_id: &str, event_type: &str, payload: &Value) -> Opt
         kind: kind.to_string(),
         content,
         streak: None,
+        iteration: None,
+        tool_name: None,
+        turn_claimed_for_repair: None,
     };
     let feedback_with_streak =
         |kind: &str, content: String, streak: Option<usize>| AgentEvent::FeedbackInjected {
@@ -211,6 +214,19 @@ fn from_host_special(session_id: &str, event_type: &str, payload: &Value) -> Opt
             kind: kind.to_string(),
             content,
             streak,
+            iteration: None,
+            tool_name: None,
+            turn_claimed_for_repair: None,
+        };
+    let repair_feedback =
+        |kind: &str, content: String, tool_name: Option<String>| AgentEvent::FeedbackInjected {
+            session_id: sid(),
+            kind: kind.to_string(),
+            content,
+            streak: None,
+            iteration: Some(obj_usize(payload, "iteration")),
+            tool_name,
+            turn_claimed_for_repair: Some(true),
         };
     let feedback_content = |fallback: String| {
         first_non_empty_string(payload, &["content", "message", "text"]).unwrap_or(fallback)
@@ -347,17 +363,20 @@ fn from_host_special(session_id: &str, event_type: &str, payload: &Value) -> Opt
             "completion_confirmation_nudge",
             feedback_content(obj_string(payload, "visible_text_prefix")),
         ),
-        "fenced_call_attempt_nudge" => feedback(
+        "fenced_call_attempt_nudge" => repair_feedback(
             "fenced_call_attempt_nudge",
             feedback_content(obj_string(payload, "fence")),
+            None,
         ),
-        "malformed_call_markup_nudge" => feedback(
+        "malformed_call_markup_nudge" => repair_feedback(
             "malformed_call_markup_nudge",
             feedback_content(obj_string(payload, "marker")),
+            None,
         ),
-        "missing_tool_call_nudge" => feedback(
+        "missing_tool_call_nudge" => repair_feedback(
             "missing_tool_call_nudge",
             feedback_content(obj_string(payload, "tool")),
+            first_non_empty_string(payload, &["tool"]),
         ),
         "no_progress_streak_nudge" => feedback_with_streak(
             "no_progress_streak_nudge",

@@ -21,6 +21,7 @@ use harn_vm::tool_annotations::{SideEffectLevel, ToolAnnotations, ToolKind};
 use tokio::sync::mpsc;
 mod plan_document;
 mod registration_fixtures;
+mod repair_claim;
 mod schema_contract;
 mod subagent_stop;
 mod tool_data;
@@ -610,6 +611,9 @@ fn agent_event_ext_fixture_events() -> Vec<AgentEvent> {
             kind: "protocol_violation".to_string(),
             content: "missed required tool call; reissuing".to_string(),
             streak: None,
+            iteration: None,
+            tool_name: None,
+            turn_claimed_for_repair: None,
         },
         AgentEvent::BudgetExhausted {
             session_id: "session-1".to_string(),
@@ -758,28 +762,6 @@ async fn compass_routing_decision_reaches_acp_as_ext_event() {
         HARN_AGENT_EVENT_KINDS.contains(&"compass_routing_decision"),
         "compass_routing_decision must be advertised so clients can subscribe"
     );
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn feedback_injected_streak_reaches_acp_payload() {
-    let actual = collect_notifications(vec![AgentEvent::FeedbackInjected {
-        session_id: "session-1".to_string(),
-        kind: "no_progress_streak_nudge".to_string(),
-        content: "No progress last turn. Emit exactly one tool call now.".to_string(),
-        streak: Some(2),
-    }])
-    .await;
-
-    assert_eq!(actual.len(), 1);
-    assert_eq!(actual[0]["method"], HARN_AGENT_EVENT_METHOD);
-    let params = &actual[0]["params"];
-    assert_eq!(params["kind"], "feedback_injected");
-    assert_eq!(params["feedbackKind"], "no_progress_streak_nudge");
-    assert_eq!(
-        params["content"],
-        "No progress last turn. Emit exactly one tool call now."
-    );
-    assert_eq!(params["streak"], 2);
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -2391,6 +2373,9 @@ fn internal_agent_events_never_emit_session_updates() {
         kind: "user".to_string(),
         content: "continue".to_string(),
         streak: None,
+        iteration: None,
+        tool_name: None,
+        turn_claimed_for_repair: None,
     });
     sink.handle_event(&AgentEvent::LoopStuck {
         session_id: "session-1".to_string(),

@@ -141,10 +141,8 @@ struct ApiState {
     inner: Arc<Mutex<ApiStateInner>>,
     events_tx: broadcast::Sender<ApiEvent>,
     auth_policy: AuthPolicy,
-    /// The permission primitive every adapter delegates to. Lives at
-    /// the state level so the REST routes, the ACP-suspend-respond
-    /// path, and (eventually) the `harness.permissions.*` host calls
-    /// all read and write the same store.
+    /// The permission primitive shared by REST, ACP suspend/respond, and
+    /// eventual `harness.permissions.*` host calls.
     permissions: Arc<InMemoryPermissionStore>,
     provider_catalog: ProviderCatalogRuntime,
     event_log: Option<Arc<AnyEventLog>>,
@@ -996,6 +994,7 @@ mod tests {
     use tower::ServiceExt;
     mod live_controls;
     mod session_model_policy;
+    mod task_cancellation;
 
     fn write_test_pipeline(path: &Path) {
         std::fs::write(
