@@ -1311,9 +1311,8 @@ fn invalidate_facts_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue
     Ok(VmValue::Nil)
 }
 
-/// Reads metadata for an exact path. Files are addressed directly without
-/// inheritance from parent directories. Pass `{kind: "dir"}` to fall back
-/// to hierarchical directory resolution.
+/// Reads metadata for an exact path.
+/// Files do not inherit; `{kind: "dir"}` enables hierarchical resolution.
 #[harn_builtin(
     exposure = "runtime_internal",
     effects = [],
@@ -1413,6 +1412,7 @@ fn path_metadata_set_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue
                 st.set_namespace(&path, &namespace, data);
             }
         }
+        st.save().map_err(VmError::Runtime)?;
         Ok(VmValue::Nil)
     })
 }
