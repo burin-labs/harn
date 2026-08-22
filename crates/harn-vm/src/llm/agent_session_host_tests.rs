@@ -5,10 +5,12 @@ use crate::agent_events::AgentEvent;
 use super::run_identity::agent_init_control;
 use super::{
     assistant_message_from_llm_result, canonical_acp_stop_reason, canonical_provider_stop_reason,
-    dict_get, initial_user_content, is_length_truncation, json_to_vm, list_items,
-    pair_orphaned_tool_use, reset_agent_session_host_state, screenshots_from_tool_result,
-    seed_host_session_provider_model, synthesize_orphan_tool_results, text_has_tool_call_prefix,
-    tool_result_message_for_provider, truncated_tool_call_should_continue, vm_to_json,
+    dict_get, host_agent_session_drain_command_updates_builtin,
+    host_agent_session_drain_feedback_builtin, initial_user_content, is_length_truncation,
+    json_to_vm, list_items, pair_orphaned_tool_use, reset_agent_session_host_state,
+    screenshots_from_tool_result, seed_host_session_provider_model, synthesize_orphan_tool_results,
+    text_has_tool_call_prefix, tool_result_message_for_provider,
+    truncated_tool_call_should_continue, vm_to_json, ToolResultMessageInput,
 };
 
 #[path = "agent_session_host_mock_dispatch_tests.rs"]
@@ -17,6 +19,45 @@ mod mock_dispatch;
 mod record_tool_data;
 #[path = "agent_session_host_tool_channel_history_tests.rs"]
 mod tool_channel_history;
+
+#[test]
+fn command_updates_have_one_dedicated_inbox_consumer() {
+    let session_id = format!("command-inbox-owner-{}", uuid::Uuid::new_v4());
+    crate::orchestration::agent_inbox::push(
+        &session_id,
+        "tool_result",
+        r#"{"handle_id":"verify-1","status":"completed","exit_code":0}"#,
+        "test.command",
+    );
+    crate::orchestration::agent_inbox::push(
+        &session_id,
+        "peer_message",
+        "continue with the review",
+        "test.peer",
+    );
+    let args = [json_to_vm(&json!(session_id))];
+    let mut output = String::new();
+
+    let feedback = host_agent_session_drain_feedback_builtin(&args, &mut output)
+        .expect("generic feedback drain");
+    assert_eq!(list_items(&feedback).len(), 1);
+    assert_eq!(
+        dict_get(&list_items(&feedback)[0], "kind")
+            .expect("feedback kind")
+            .display(),
+        "peer_message"
+    );
+
+    let command = host_agent_session_drain_command_updates_builtin(&args, &mut output)
+        .expect("command update drain");
+    assert_eq!(list_items(&command).len(), 1);
+    assert_eq!(
+        dict_get(&list_items(&command)[0], "kind")
+            .expect("command kind")
+            .display(),
+        "tool_result"
+    );
+}
 
 #[test]
 fn agent_init_control_has_the_declared_runtime_shape() {
@@ -721,21 +762,21 @@ fn tool_results_replay_with_provider_appropriate_ids() {
             false,
         ),
     ] {
-        let message = vm_to_json(&tool_result_message_for_provider(
+        let message = vm_to_json(&tool_result_message_for_provider(ToolResultMessageInput {
             provider,
             model,
-            format,
-            "release_run",
-            id,
-            if ok {
+            tool_format: format,
+            name: "release_run",
+            tool_call_id: id,
+            observation: if ok {
                 "0 errors, 0 failed"
             } else {
                 "command completed"
             },
             ok,
-            &[],
-            None,
-        ));
+            screenshots: &[],
+            data: None,
+        }));
         assert_eq!(message["role"], expected_role);
         assert_eq!(message["_harn"]["kind"], "tool_result");
         assert_eq!(message["_harn"]["tool_call_id"], id);
@@ -776,17 +817,17 @@ fn computer_tool_result_carries_screenshot_as_block_list() {
 
     // On a native channel the message content is a `[text, screenshot]` list so
     // the provider content mapper can project the screenshot to an image block.
-    let anthropic = vm_to_json(&tool_result_message_for_provider(
-        "anthropic",
-        "claude-opus-4-8",
-        "native",
-        "computer",
-        "call_shot",
-        "Captured screenshot 1024x768.",
-        true,
-        &screenshots,
-        None,
-    ));
+    let anthropic = vm_to_json(&tool_result_message_for_provider(ToolResultMessageInput {
+        provider: "anthropic",
+        model: "claude-opus-4-8",
+        tool_format: "native",
+        name: "computer",
+        tool_call_id: "call_shot",
+        observation: "Captured screenshot 1024x768.",
+        ok: true,
+        screenshots: &screenshots,
+        data: None,
+    }));
     assert_eq!(anthropic["role"], "tool_result");
     let content = anthropic["content"].as_array().expect("block list");
     assert_eq!(content[0]["type"], "text");
@@ -818,17 +859,17 @@ fn multi_screenshot_tool_result_delivers_every_frame() {
     let screenshots = screenshots_from_tool_result(&dispatch_result);
     assert_eq!(screenshots.len(), 2, "both frames extracted");
 
-    let anthropic = vm_to_json(&tool_result_message_for_provider(
-        "anthropic",
-        "claude-opus-4-8",
-        "native",
-        "computer",
-        "call_multi",
-        "Captured two frames.",
-        true,
-        &screenshots,
-        None,
-    ));
+    let anthropic = vm_to_json(&tool_result_message_for_provider(ToolResultMessageInput {
+        provider: "anthropic",
+        model: "claude-opus-4-8",
+        tool_format: "native",
+        name: "computer",
+        tool_call_id: "call_multi",
+        observation: "Captured two frames.",
+        ok: true,
+        screenshots: &screenshots,
+        data: None,
+    }));
     let content = anthropic["content"].as_array().expect("block list");
     assert_eq!(content.len(), 3, "text + two images");
     assert_eq!(content[0]["type"], "text");

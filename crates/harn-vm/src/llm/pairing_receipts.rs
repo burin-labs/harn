@@ -77,7 +77,7 @@ fn attach_session_message_facts(message: VmValue, facts: &SessionMessageFacts) -
 pub(crate) fn attach_assistant_facts(message: VmValue, llm_result: &VmValue) -> VmValue {
     let tool_calls = ["tool_calls", "native_tool_calls"]
         .iter()
-        .filter_map(|key| {
+        .find_map(|key| {
             llm_result
                 .as_dict()
                 .and_then(|result| result.get(*key))
@@ -91,7 +91,6 @@ pub(crate) fn attach_assistant_facts(message: VmValue, llm_result: &VmValue) -> 
                     _ => None,
                 })
         })
-        .next()
         .unwrap_or_default();
     attach_session_message_facts(message, &SessionMessageFacts::Assistant { tool_calls })
 }

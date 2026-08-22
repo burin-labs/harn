@@ -753,7 +753,7 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn operation_timeout_bounds_the_whole_future() {
         let result = await_with_operation_timeout(Some(1), async {
-            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+            tokio::time::sleep(std::time::Duration::from_mins(1)).await;
             Ok(VmValue::Bool(true))
         })
         .await

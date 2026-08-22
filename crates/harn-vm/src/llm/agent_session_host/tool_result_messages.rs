@@ -67,35 +67,41 @@ pub(crate) fn record_tool_results_for_test(session_id: &str, dispatch: VmValue) 
         .expect("record_tool_results builtin succeeds");
 }
 
-pub(super) fn tool_result_message_for_provider(
-    provider: &str,
-    model: &str,
-    tool_format: &str,
-    name: &str,
-    tool_call_id: &str,
-    observation: &str,
-    ok: bool,
-    screenshots: &[VmValue],
-    data: Option<&VmValue>,
-) -> VmValue {
+/// Provider route plus the durable facts for one completed tool call.
+///
+/// Keeping this as one named input prevents provider projection, transcript
+/// identity, and evidence metadata from drifting through positional arguments.
+pub(super) struct ToolResultMessageInput<'a> {
+    pub(super) provider: &'a str,
+    pub(super) model: &'a str,
+    pub(super) tool_format: &'a str,
+    pub(super) name: &'a str,
+    pub(super) tool_call_id: &'a str,
+    pub(super) observation: &'a str,
+    pub(super) ok: bool,
+    pub(super) screenshots: &'a [VmValue],
+    pub(super) data: Option<&'a VmValue>,
+}
+
+pub(super) fn tool_result_message_for_provider(input: ToolResultMessageInput<'_>) -> VmValue {
     let mut msg = crate::value::DictMap::new();
     // A text-channel tool_format (`text` or `json`) carries tool results back
     // as an ordinary `user` message — there is no provider tool-result role on
     // the text channel. `native` uses the provider's tool_result/tool role.
     let is_text_channel = matches!(
-        crate::llm_config::tool_format_channel(tool_format),
+        crate::llm_config::tool_format_channel(input.tool_format),
         Some(crate::llm_config::ToolFormatChannel::Text)
     );
     if is_text_channel {
         msg.put_str("role", "user");
-    } else if crate::llm::provider::provider_uses_anthropic_messages(provider, model) {
+    } else if crate::llm::provider::provider_uses_anthropic_messages(input.provider, input.model) {
         msg.put_str("role", "tool_result");
-        msg.put_str("tool_use_id", tool_call_id);
+        msg.put_str("tool_use_id", input.tool_call_id);
     } else {
         msg.put_str("role", "tool");
-        msg.put_str("name", name);
-        if !tool_call_id.is_empty() {
-            msg.put_str("tool_call_id", tool_call_id);
+        msg.put_str("name", input.name);
+        if !input.tool_call_id.is_empty() {
+            msg.put_str("tool_call_id", input.tool_call_id);
         }
     }
     // A tool that returned a screenshot (the computer tool) carries the image
@@ -116,32 +122,35 @@ pub(super) fn tool_result_message_for_provider(
     // observation is ~800 KB of base64 (the display-string of the ScreenImage),
     // which would bloat every subsequent turn and is redundant once the image
     // itself rides along. A result with no screenshot is byte-identical to before.
-    if screenshots.is_empty() {
-        msg.put_str("content", observation);
+    if input.screenshots.is_empty() {
+        msg.put_str("content", input.observation);
     } else {
         // `[text, image, image, ...]` — a tool that returns more than one frame
         // (rare today; one-per-action) delivers every image, not just the first.
-        let summary = screenshot_result_summary(observation);
+        let summary = screenshot_result_summary(input.observation);
         let mut text_block = crate::value::DictMap::new();
         text_block.put_str("type", "text");
         text_block.put_str("text", &summary);
-        let mut content = Vec::with_capacity(1 + screenshots.len());
+        let mut content = Vec::with_capacity(1 + input.screenshots.len());
         content.push(VmValue::dict(text_block));
-        content.extend(screenshots.iter().cloned());
+        content.extend(input.screenshots.iter().cloned());
         msg.put("content", VmValue::List(std::sync::Arc::new(content)));
     }
     // Native provider adapters consume this exact outcome when their wire
     // protocol supports error-marked tool results. Other adapters strip it.
-    msg.insert(crate::value::intern_key("is_error"), VmValue::Bool(!ok));
+    msg.insert(
+        crate::value::intern_key("is_error"),
+        VmValue::Bool(!input.ok),
+    );
     // Provider adapters strip the storage-only `_harn` envelope before egress.
     // Keep result identity, outcome, and declared producer facts together in
     // that one typed contract instead of adding parallel top-level metadata.
     crate::llm::pairing_receipts::attach_tool_result_facts(
         VmValue::dict(msg),
-        tool_call_id,
-        name,
-        ok,
-        data,
+        input.tool_call_id,
+        input.name,
+        input.ok,
+        input.data,
     )
 }
 
@@ -336,22 +345,22 @@ pub(super) fn synthesize_orphan_tool_results(
         if !block.id.is_empty() && already_paired.contains(&block.id) {
             continue;
         }
-        out.push(tool_result_message_for_provider(
+        out.push(tool_result_message_for_provider(ToolResultMessageInput {
             provider,
             model,
             // The orphaned block is a structured native tool_use; its result
             // must ride the provider's native tool-result role, not the
             // session-locked (possibly `text`) channel.
-            "native",
-            &block.name,
-            &block.id,
-            feedback,
-            false,
+            tool_format: "native",
+            name: &block.name,
+            tool_call_id: &block.id,
+            observation: feedback,
+            ok: false,
             // A synthesized orphan-repair result is plain feedback text — never
             // an image.
-            &[],
-            None,
-        ));
+            screenshots: &[],
+            data: None,
+        }));
     }
     out
 }
