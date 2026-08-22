@@ -1,13 +1,13 @@
 import { agent_tool_annotations } from "std/agent/tool_annotations"
 // Lanes: tool-surface narrowing keyed off a data-driven classification of
-// the task, generalizing burin-code's `agent_lane_for_task`
-// (`lib/runtime/agent-loop.harn`). Burin classifies a task ONCE, before the
+// the task, generalizing a legacy host's `agent_lane_for_task`. A host
+// classifies a task ONCE, before the
 // run starts, into a named lane (`"general"` vs a narrow `"explicit_patch"`
 // lane keyed off detected target-file mentions) and hands that lane's tool
 // allowlist to the whole agent_loop call — deliberately NOT reclassifying
 // mid-transcript, because narrowing tool NAMES turn-to-turn risks the model
 // hallucinating a call to a tool it remembers offering but that has since
-// been hidden (burin's own design rationale). `lane_policy` ports that
+// been hidden. `lane_policy` ports that
 // same one-shot-per-task shape.
 //
 // Enforcement reuses the EXISTING tool-surface-narrowing primitives shared
@@ -39,7 +39,8 @@ import { __tool_surface_filter_registry, __tool_surface_policy_tools } from "std
  * lookup `std/agent/stance` uses). `match` declares which classification
  * strategies apply — `keywords` (case-insensitive substring OR-match against
  * the task) and/or `explicit_target_paths` (`{min?, max?}` bounds on the
- * count of detected file-path-like tokens in the task, mirroring burin's
+ * count of detected file-path-like tokens in the task, preserving the source
+ * policy's
  * target-count ladder). Exactly one row must set `default: true`; it is the
  * fallback used when no other row matches (and it never itself needs a
  * `match`).
@@ -53,14 +54,15 @@ pub type LaneRow = {
 }
 
 /**
- * default_lane_rows() — the built-in two-lane table ported from burin's
+ * default_lane_rows() — the built-in two-lane table ported from the source
+ * policy's
  * `agent_lane_for_task`: `explicit_patch` (narrow: look/search/edit/run/
  * poll_command/wait_command/kill_command/read_command_output) when the task
  * names 1-4 explicit file targets, `general` (unrestricted) otherwise.
  *
  * NOTE: the `explicit_patch` `tool_names` here are a REFERENCE/example set drawn
- * from burin-code's product tool surface (`poll_command`/`wait_command`/
- * `kill_command`/`read_command_output` are burin tool names, not stdlib
+ * from a legacy host tool surface (`poll_command`/`wait_command`/
+ * `kill_command`/`read_command_output` are host tool names, not stdlib
  * primitives). A host with a different tool registry should NOT rely on these
  * exact names — supply your own rows to `lane_policy` (see `LaneRow`) naming the
  * tools your registry actually exposes. These defaults are retained as a
@@ -125,7 +127,7 @@ fn __lane_validate_rows(rows) {
 /**
  * agent_lane_explicit_target_paths(task) — detect file-path-like tokens in
  * `task` (a word containing a dot-extension, optionally with slashes), the
- * same signal burin's `explicit_lane_targets_for_task_with_options` uses to
+ * same signal the source `explicit_lane_targets_for_task_with_options` uses to
  * decide whether a task is a bounded, single-area patch. Exposed for tests
  * and custom classifiers.
  *
@@ -303,7 +305,7 @@ fn __lane_own_tool_names(row, registry, policy) {
  * lane from `rows` (DATA, see `LaneRow`), then narrow
  * `agent_options.tools`/`agent_options.policy` down to that lane's allowed
  * tool set for the WHOLE `agent_loop` run — a one-shot decision, matching
- * burin's `agent_lane_for_task` (see module docs for why lanes are not
+ * the source `agent_lane_for_task` (see module docs for why lanes are not
  * reclassified per turn).
  *
  * A row with neither `tool_names` nor `tool_kinds` performs no narrowing —
@@ -400,7 +402,7 @@ pub fn lane_scope_classifier(rows, options = nil) {
 // -------------------------------------------------------------------------------------------------
 
 // Per-stage tool-gate (ADDITIVE, default-off). Absorbs the generic core of
-// burin-code's `tool-gating.harn`. Where `lane_policy` above is a per-TASK
+// the source `tool-gating.harn`. Where `lane_policy` above is a per-TASK
 // one-shot ceiling that HIDES tools silently at loop start (#2506) and never
 // reclassifies mid-transcript, this seam is a per-(lane, STAGE) gate whose
 // scope rides a machine-readable marker in the workflow node's task LABEL, is
@@ -409,7 +411,7 @@ pub fn lane_scope_classifier(rows, options = nil) {
 // hiding it. It is wholly separate from `lane_policy` and the classifier: a
 // caller that never renders a gate marker sees byte-identical behavior.
 //
-// Division of labor with burin: the lane×stage capability TABLE (which kinds a
+// Division of labor with the host: the lane×stage capability TABLE (which kinds a
 // `grounded_patch:implement` stage may run) and the tool->kind resolver stay in
 // the harness — they are its domain. This module owns the generic mechanism:
 // marker ENCODE (`stage_gate_label`), marker DECODE (`stage_gate_parse` /
@@ -472,8 +474,8 @@ fn __stage_gate_parse_token_list(raw) {
 
 /**
  * Resolve and validate the marker prefix for a stage-gate op. Defaults to the
- * built-in `__STAGE_GATE_PREFIX`. A host may inject its own (e.g. burin-code's
- * `"[burin_gate "`) via the `prefix` option so its existing markers round-trip
+ * built-in `__STAGE_GATE_PREFIX`. A host may inject its own legacy prefix via
+ * the `prefix` option so existing markers round-trip
  * without an adapter. A custom prefix must be a well-formed marker opener: it must
  * start with `"["` and end with a space, and must not contain any of the structural
  * delimiters the parser splits on (`"="`, `","`, `"]"`), which would corrupt the

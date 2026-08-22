@@ -22,7 +22,7 @@ import { agent_tool_is_read_only } from "std/agent/tool_annotations"
 // stay legible.
 //
 // This is the Harn-side mechanism for the tool-surface program's
-// "task-intent mount" (burin-code docs/design/tool-surface-program.md,
+// "task-intent mount" design,
 // phases 2-3): the window is derived from intent, mounting derives policy
 // from annotations, and elevation is verified, evidenced, and traced.
 // Ships default-OFF and experimental.

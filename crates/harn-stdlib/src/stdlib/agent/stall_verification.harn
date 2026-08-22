@@ -46,7 +46,7 @@ pub fn agent_stall_repair_config(raw_config) -> dict {
 
 /**
  * __agent_stall_fold_verify_state folds the host's verify-state fact for one
- * turn (#burin-cutover seam 1). It is inert unless a `progress_signal` callback
+ * turn. It is inert unless a `progress_signal` callback
  * is configured. The callback receives the FULL post-turn payload and returns
  * the turn's monotone best verify-state scalar (e.g. tests-passing count, or 1
  * when the build is clean else 0); nil means "no verification evidence this
@@ -103,12 +103,12 @@ pub fn __agent_stall_fold_verify_state(
 /**
  * agent_stall_no_net_progress reports whether THIS turn is a no-net-advancement
  * thrash for the purpose of the loop's budget-extension decision. It is the
- * harn-side twin of burin's no-net-progress ripcord: the default extension
+ * runtime-side no-net-progress ripcord: the default extension
  * policy treats any tool-calling turn as "progress" and keeps extending the
  * iteration budget, so a model re-hitting the SAME compile/test failure every
  * turn (no error draining toward a green build) buys unbounded runway.
  *
- * VERIFY-STATE AXIS (#burin-cutover seam 1): when the host supplies a
+ * VERIFY-STATE AXIS: when the host supplies a
  * `progress_signal` callback the decision keys on whether the VERIFIER moved,
  * not on edit/tool signatures ("writes are not progress"). Two cut predicates:
  *   (A) long-stall: the same failure diagnostic recurred for at least
@@ -135,7 +135,7 @@ pub fn __agent_stall_fold_verify_state(
 pub fn agent_stall_no_net_progress(raw_config, stall_state: AgentStallState) -> bool {
   const config = __agent_stall_config(raw_config)
   if config.progress_signal != nil {
-    // Each predicate is independently armable (#burin-cutover): a disarmed
+    // Each predicate is independently armable: a disarmed
     // predicate contributes false to the OR regardless of its evidence, so a host
     // can turn a single branch off (default: all armed = the fixed OR, byte-identical).
     const predicates = config.no_net_progress_predicates

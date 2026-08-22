@@ -39,7 +39,7 @@ pub fn __agent_stall_feedback_text(warning: AgentStallWarning) -> string {
       + "about the root cause, or gather different evidence before editing again. If you "
       + "cannot make progress, report this specific blocker instead of repeating."
   }
-  // Delivered-fix trigger (#burin-cutover seam 3): a repair WAS delivered for
+  // Delivered-fix trigger: a repair WAS delivered for
   // this exact failure and it STILL did not land — a stronger stuck signal than
   // an untouched same-failure repeat, so the nudge is blunter.
   if pattern == "delivered_fix_not_landing" {
@@ -57,7 +57,7 @@ pub fn __agent_stall_feedback_text(warning: AgentStallWarning) -> string {
       + " root cause from scratch, form a materially different hypothesis, or report this"
       + " specific blocker instead of repeating."
   }
-  // Per-turn action-signal intake (#burin-cutover seam 4): the host flagged THIS
+  // Per-turn action-signal intake: the host flagged THIS
   // turn as a flailing action (desperation write / truncated read / oscillating
   // edit) — a strong single-turn stuck signal, so the nudge is direct.
   if pattern == "flailing_action" {

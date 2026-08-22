@@ -320,7 +320,7 @@ fn __parity_conflicts_with_requested(parity, requested) {
  * and the Rust `validate_tool_format` — therefore wave an explicit `json`
  * through on a `text`-pinned route, the prompt teaches the requested grammar,
  * the wire uses the pinned one, and every call the model makes is discarded
- * with no result, no parse error and no nudge (burin-code#6388).
+ * with no result, no parse error and no nudge.
  *
  * DELIBERATELY ONE-WAY. The mirror case — an explicit `text` on a `json`-pinned
  * route — is NOT steered, because heredoc is the escape-free body channel and

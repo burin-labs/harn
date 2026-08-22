@@ -560,7 +560,7 @@ fn __tool_parse_stray_fast(unit, candidates, state: dict) -> dict {
  * set depend on unit ordering.
  *
  * Either way the fence is REPORTED. Declining to dispatch is not licence to go
- * quiet: a silent drop is the defect this exists to remove (burin-code#6388),
+ * quiet: a silent drop is the defect this exists to remove,
  * and a conservative gate that reintroduced one would be worse than no gate.
  */
 fn __tool_parse_recover_fenced_calls(blocks: list<string>, tools, state: dict) -> dict {
@@ -682,7 +682,7 @@ fn __tool_parse_tagged(text: string, tools, tool_format = "") -> dict {
   // Stray text carrying a ```tool fence. Held aside rather than dropped as
   // narration: if the turn produces no call in the taught grammar, a call
   // written in the fenced-JSON grammar is still a call the model meant to make,
-  // and discarding it silently is the burin-code#6388 failure. The fence label
+  // and discarding it silently is the failure. The fence label
   // is what makes this unambiguous — prose *about* a tool is not written inside
   // a fence that announces itself as a tool block.
   let fenced_call_blocks: list<string> = []
@@ -1175,7 +1175,7 @@ pub fn parse_tool_calls(payload: dict) -> dict {
   const format = to_string(payload?.tool_format ?? "")
   // `adaptive` was an opt-in union parser (#5272) deleted in the dialect
   // cutover (#5700). Keep failing closed so an explicit pin cannot silently
-  // demote to tagged text and hide teach/accept drift (burin-code#4809).
+  // demote to tagged text and hide teach/accept drift.
   if format == "adaptive" {
     return empty_parse()
       + {

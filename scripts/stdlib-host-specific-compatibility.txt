@@ -1,0 +1,33 @@
+# Exact source-line baseline for scripts/check_stdlib_host_neutral.sh.
+#
+# Every retained occurrence has one of two ownership decisions:
+#
+# COMPATIBILITY ADAPTER — `.burin` context digests, skill roots, session-store
+# files, metadata, worktree cache classification, and the historical mechanical
+# gate id remain readable so existing consumers migrate without data loss. New
+# Harn-owned state and defaults use neutral names. Remove these entries only
+# with an explicit compatibility migration.
+#
+# PUBLIC PROVENANCE — `burin-labs/harn` and the pinned `burin-labs/.github`
+# reusable workflow are public repository coordinates, not runtime host policy.
+# They remain until repository/workflow ownership moves, at which point the
+# coordinate and this baseline change together.
+
+./agent/pattern_knowledge.harn:    path_join(root, ".burin", "skills", namespace_dir),
+./agent/pattern_knowledge.harn:    return [path_join(root, ".claude", "skills"), path_join(root, ".burin", "skills")]
+./agent/pattern_knowledge.harn:  // `.burin/skills` is a read-only compatibility root for skills installed by
+./agent/pattern_knowledge.harn: * Lazily import legacy Burin session-store pattern-learning records into memory.
+./agent/pattern_knowledge_persistence.harn:    ".burin-session-store-migrated-v1.json",
+./agent/pattern_knowledge_persistence.harn:    "burin.agent_context.pattern_learning.observations.jsonl",
+./agent/pattern_knowledge_persistence.harn:    "burin.agent_context.pattern_learning.pending.jsonl",
+./agent/pattern_knowledge_persistence.harn:    "burin.agent_context.pattern_learning.state.jsonl",
+./bump/live.harn:    release_repo: to_string(o.release_repo ?? "burin-labs/harn"),
+./cli/scaffold/init.harn:    + "    uses: burin-labs/.github/.github/workflows/harn-package.yml@bcdcf64e5c7021f649432b77fe2e1f9f489c4824\n"
+./cli/scaffold/tool_new.harn:    + "    uses: burin-labs/.github/.github/workflows/harn-package.yml@bcdcf64e5c7021f649432b77fe2e1f9f489c4824\n"
+./stdlib_context.harn:        explanation: opts?.explanation ?? "Legacy Burin generated context digest.",
+./stdlib_context.harn:        source: opts?.source ?? ".burin/context-digests",
+./stdlib_context.harn:  const metadata = metadata_base + {burin_legacy_context_digest: true}
+./stdlib_context.harn: * Adapt legacy `.burin/context-digests` as compatibility until consumers have a declared migration.
+./stdlib_context.harn:pub fn context_artifact_from_burin_digest(
+./stdlib_eval_agreement.harn:  return verdict_for(verdicts, "burin_mechanical_gate")
+./stdlib_worktree.harn:  ".burin",

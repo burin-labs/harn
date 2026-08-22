@@ -6,14 +6,16 @@ import { JudgeConfig } from "std/agent/options_types"
 // composes a done-judge via the core `done_judge` agent_loop seam
 // (`std/agent/judge`), and re-loops on "not yet met" by reusing agent_loop's own
 // bounded completion loop (`verify_completion` veto -> feedback -> re-run),
-// never a hand-written loop. Generalizes Burin's `session_goal` + `goal-judge`
+// never a hand-written loop. Generalizes the legacy `session_goal` +
+// `goal-judge`
 // (design-only there; built here).
 import { pin } from "std/agent/pins"
 import { __with_prompt_fragment } from "std/agent/preflight"
 import { system_prompt_part } from "std/llm/prompts"
 
 // Bounded re-loop cap: if the goal is not met at loop end, re-enter with
-// findings at most this many times before stopping honestly. Mirrors Burin's
+// findings at most this many times before stopping honestly. Mirrors the
+// legacy policy's
 // GOAL_JUDGE_MAX_RELOOPS.
 const __GOAL_MAX_RELOOPS = 3
 

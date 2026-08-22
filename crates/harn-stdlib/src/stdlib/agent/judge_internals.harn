@@ -378,9 +378,9 @@ pub fn __judge_classify_verdict(raw_verdict, pass_tokens, feedback_candidates, f
 // Completion-gate policy (pure). These implement the deterministic veto
 // arithmetic that `std/agent/judge::completion_gate` rides on `verify_completion`.
 // They are PURE (no store / no LLM / no host calls) so the parity fixtures can
-// pin burin-code's decisions on synthetic verdict sets. All host facts
+// pin the source policy's decisions on synthetic verdict sets. All host facts
 // (source-vs-cosmetic write classification, verifier verdict) enter as data —
-// the split from burin-code's harn#3817 principle "Harn owns orchestration
+// the split from the ownership principle "Harn owns orchestration
 // policy; hosts supply facts". NEVER key any decision on a done-sentinel string
 // (ledger ⛔#3): the gate reads only write/verify facts.
 
@@ -464,7 +464,7 @@ pub fn __completion_gate_combine_verify(verify, veto_combine) {
 /**
  * Default rendered feedback strings for each vetoing ladder rule. The MECHANISM
  * (evidence gate + post-write-verify gate) is generic; these strings are host
- * DOMAIN content (burin-editorial coding prose), so `completion_gate`'s
+ * DOMAIN content (host-authored coding prose), so `completion_gate`'s
  * `feedback_templates` option lets a host override any of them by key. Keys:
  *   - `no_source_write_cosmetic` — evidence gate tripped, only cosmetic writes seen.
  *   - `no_source_write_absent`   — evidence gate tripped, no writes seen.
@@ -556,7 +556,7 @@ fn __completion_gate_red_verdict(derived, templates, detail) {
 
 /**
  * The default completion-gate veto arithmetic: an ordered precedence ladder over
- * derived facts, ported from burin-code `completion_gate_uncapped_status`. First
+ * derived facts, ported from the source `completion_gate_uncapped_status`. First
  * matching rule wins.
  *
  * `derived` fields: `source_known` (whether write facts were supplied),
@@ -569,7 +569,7 @@ fn __completion_gate_red_verdict(derived, templates, detail) {
  * Returns `{ok, reason, strict?, feedback?}`. `strict: true` marks a veto that the
  * per-session veto budget may NEVER convert to an allow — every post-write-not-green
  * class (a red verifier, or a source write whose expected verifier has not produced a
- * green verdict yet). This matches burin's carve-out: its budget-exhaustion refuses to
+ * green verdict yet). This matches the source carve-out: budget exhaustion refuses to
  * release the whole `saw_write && !verification_after_last_write` set, because a source
  * write always needs a fresh green verifier before completion.
  *
@@ -627,7 +627,7 @@ pub fn __completion_gate_ladder(derived, feedback_templates = nil) {
     }
   }
   // 4. Source written, a verifier is configured, but it has not run yet. Strict:
-  // burin never budget-releases a post-write state without a fresh green verifier
+  // Never budget-release a post-write state without a fresh green verifier
   // (`saw_write && !verification_after_last_write`), so this class — like the red
   // one above — is never converted to an allow. Only a green verifier ends it.
   if saw_source && oracle_expected && !verify_known {

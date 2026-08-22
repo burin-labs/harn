@@ -6,7 +6,11 @@ fn near(value, expected: float) -> bool {
 }
 
 fn e1(verdict: string) -> dict {
-  return evaluator_verdict("burin_mechanical_gate", verdict, true, "in-loop gate")
+  return evaluator_verdict("mechanical_gate", verdict, true, "in-loop gate")
+}
+
+fn legacy_e1(verdict: string) -> dict {
+  return evaluator_verdict("burin_mechanical_gate", verdict, true, "legacy in-loop gate")
 }
 
 fn e2(verdict: string) -> dict {
@@ -78,6 +82,14 @@ pipeline test(harness: Harness, task) {
   const kp = cohen_kappa(perfect)
   assert_eq(kp.n, 4)
   assert(near(kp.kappa, 1.0), "perfect agreement -> kappa 1.0")
+  const legacy = cohen_kappa(
+    [
+      [legacy_e1(verdict_pass()), e2(verdict_pass())],
+      [legacy_e1(verdict_fail()), e2(verdict_fail())],
+    ],
+  )
+  assert_eq(legacy.n, 2)
+  assert(near(legacy.kappa, 1.0), "the neutral default reads legacy E1 ids")
   const with_abstain = perfect + [[e1(verdict_pass()), e2(verdict_abstain())]]
   const ka = cohen_kappa(with_abstain)
   assert_eq(ka.n, 4)

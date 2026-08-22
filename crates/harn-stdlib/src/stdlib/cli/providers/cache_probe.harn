@@ -3,7 +3,7 @@
  *
  * The classifier (support resolution + per-run normalization + verdict) stays
  * in Rust (`crates/harn-vm/src/llm/cache_conformance.rs`) because it is the
- * stable contract Burin dogfood (#3532) and Harn Cloud receipts (#1106)
+ * stable contract local dogfood (#3532) and Harn Cloud receipts (#1106)
  * consume. The Rust shim classifies the saved usage fixture and hands the JSON
  * `CacheConformanceReport` here for rendering only.
  *

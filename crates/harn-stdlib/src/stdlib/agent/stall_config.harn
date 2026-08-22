@@ -92,7 +92,7 @@ pub const STALL_RESERVED_TERMINAL_VERIFY_ITERATIONS = 2
 // nudging forever.
 pub const STALL_HARD_STOP_AFTER_TRIPS = 3
 
-// Verify-state progress axis (#burin-cutover seam 1, default OFF — active only
+// Verify-state progress axis (default OFF — active only
 // when a `progress_signal` callback is supplied). Two cut predicates:
 //   (A) long-stall: the same failure diagnostic has recurred for at least
 //       `verify_state_streak` turns AND the host's monotone best verify-state
@@ -111,7 +111,7 @@ pub const STALL_VERIFY_STATE_RECURRENCE_HARD = 4
 
 pub const STALL_NO_VERIFIER_PROGRESS_LIMIT = 3
 
-// Delivered-fix trigger (#burin-cutover seam 3, default OFF — active only when a
+// Delivered-fix trigger (default OFF — active only when a
 // `remediation_delivered` callback is supplied): the same-diagnostic streak at
 // which a delivered-but-not-landing fix escalates to `delivered_fix_not_landing`.
 // Deliberately LOWER than the plain-repeat `stuck_same_diagnostic_after` (3): a
@@ -119,9 +119,9 @@ pub const STALL_NO_VERIFIER_PROGRESS_LIMIT = 3
 // signal than an untouched same-failure repeat, so it fires one turn sooner.
 pub const STALL_DELIVERED_FIX_AFTER = 2
 
-// Per-turn action-signal intake (#burin-cutover seam 4, default OFF — active only
+// Per-turn action-signal intake (default OFF — active only
 // when an `action_signal` callback is supplied): the host reports a boolean "this
-// turn performed a flailing action" fact (e.g. burin's desperation_shell_write /
+// turn performed a flailing action" fact (for example a desperate shell write /
 // truncated_read / edit_oscillation verdicts) that is stuck on a SINGLE occurrence
 // with no streak. harn owns only the TRIGGER (the distinct `flailing_action`
 // pattern on the existing `agent_loop_stall_warning` event + the standard
@@ -129,7 +129,7 @@ pub const STALL_DELIVERED_FIX_AFTER = 2
 // callback is invoked ONLY when configured, so an absent callback leaves behavior
 // byte-identical.
 //
-// Hard no-progress floor by ELAPSED TURNS (#burin-cutover seam 5, default OFF —
+// Hard no-progress floor by ELAPSED TURNS (default OFF —
 // active only when `turns_since_clean_verify` is set): a slow-draining run can
 // dodge both the consecutive `same_diagnostic_streak` AND the failing-verify
 // `no_net_progress_hard_cap_after` (16) counter by rarely producing a FAILING
@@ -138,7 +138,7 @@ pub const STALL_DELIVERED_FIX_AFTER = 2
 // the last clean passing verification (not just failing-verify turns) and forces a
 // terminal stuck stop once it crosses the caller-set floor. It resets ONLY on a
 // clean non-edit verification pass. Distinct from the failing-verify hard cap: this
-// is the total-elapsed axis (burin's 60-turn slow-drain floor), shipped as a
+// is the total-elapsed axis (the legacy 60-turn slow-drain floor), shipped as a
 // caller-set knob with NO default (nil = off) so today's behavior is unchanged.
 // Tools that report progress without changing task state. A turn whose only
 // tool call is one of these is "narrating progress without making it": it is
@@ -209,7 +209,7 @@ pub fn __agent_stall_repair_value(flat, nested, key: string) {
 }
 
 /**
- * Fact-intake seams (#burin-cutover): `progress_signal` / `remediation_delivered`
+ * Fact-intake seams: `progress_signal` / `remediation_delivered`
  * / `action_signal` are host-supplied CALLBACKS the mechanism invokes — the host
  * owns the coding-specific fact, harn owns the loop/escalation decision. All are
  * optional and validated here so a mistyped value fails loudly at config time
@@ -230,12 +230,12 @@ pub fn __agent_stall_closure(value, field: string) {
 }
 
 /**
- * Independently-armable no-net-progress predicates (#burin-cutover). The
+ * Independently-armable no-net-progress predicates. The
  * verify-state no-net-progress trip (`agent_stall_no_net_progress`, active only
  * under a `progress_signal` callback) is an OR of three predicates —
  * `long_stall`, `hard_recurrence`, `write_axis`. A host may disarm any of them so
  * it can adopt the seam directly instead of clamping the fed streak to route
- * around one branch (burin's "capped_streak" workaround, which existed solely to
+ * around one branch (the legacy "capped_streak" workaround existed solely to
  * make the hard-recurrence branch unreachable). Unset / absent keys = armed, so
  * the default is byte-identical to the fixed OR. Unknown predicate keys throw
  * loudly at config time.
@@ -263,7 +263,7 @@ pub fn __agent_stall_predicates(value, field: string) -> dict {
 }
 
 /**
- * Optional positive-int knob (#burin-cutover): `turns_since_clean_verify` is an
+ * Optional positive-int knob: `turns_since_clean_verify` is an
  * off-by-default caller-set floor. nil = off; any set value must be a positive int
  * and fails loudly at config time, matching the `__agent_stall_closure` contract.
  *

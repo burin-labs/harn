@@ -99,6 +99,10 @@ pipeline default(harness: Harness) {
             },
           )
           harness.stdio.println(accepted.staged)
+          harness.stdio.println(
+            accepted.candidate_dir
+              == path_join(path_join(root, ".harn", "crystallization"), result.proposals[0].id),
+          )
           harness.stdio.println(harness.fs.exists(accepted.entrypoint))
           harness.stdio.println(harness.fs.exists(accepted.test_path))
           harness.stdio.println(

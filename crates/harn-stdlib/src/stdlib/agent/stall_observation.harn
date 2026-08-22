@@ -198,7 +198,7 @@ pub fn __agent_stall_fold_diagnostic(
   } else {
     state.write_epoch
   }
-  // Elapsed-turns floor (#burin-cutover seam 5): count EVERY folded turn since the
+  // Elapsed-turns floor: count EVERY folded turn since the
   // last clean verification. Every branch below carries this +1 forward EXCEPT the
   // clean-pass branch, which resets it to 0. Always maintained (cheap, and never
   // surfaced in any warning/result projection); the floor is consulted only when a
@@ -292,7 +292,7 @@ pub fn __agent_stall_fold_diagnostic(
     1
   }
   const failing_turns = state.failing_verify_turns + 1
-  // Total (non-consecutive) recurrence per signature (#burin-cutover seam 1). The
+  // Total (non-consecutive) recurrence per signature. The
   // consecutive `same_diagnostic_streak` above RESETS whenever an off-signature
   // failure interposes, so it misses interleaved churn: a dead API / wrong error
   // re-proposed N times with different failures churning between recurrences
@@ -903,10 +903,10 @@ pub fn agent_stall_observe_completed_dispatch(
  * and only fold the model (we do not stack two warnings in one turn).
  */
 /**
- * Delivered-fix intake (#burin-cutover seam 3). The `remediation_delivered`
+ * Delivered-fix intake. The `remediation_delivered`
  * callback may return either a bool (the ORIGINAL per-turn form, unchanged) or an
  * int CUMULATIVE count of remediations delivered for the active failure signature
- * (burin's `injections_now` fact — cumulative "since this signature became
+ * (`injections_now` is cumulative "since this signature became
  * active"). For the int form harn derives the per-turn "a fix was delivered"
  * event by diffing the returned count against the count last SEEN for that
  * signature (`state.remediation_delivered_*`), resetting the baseline to 0 on a
@@ -958,7 +958,7 @@ pub fn __agent_stall_apply_repair(
   defer_feedback: bool,
 ) -> AgentStallObservation {
   const should_fold_current_failure = config.post_edit_reverify || config.repair_aware
-  // The elapsed-turns clean-verify floor (#burin-cutover seam 5) is an INDEPENDENT
+  // The elapsed-turns clean-verify floor is an INDEPENDENT
   // axis: its counter is maintained inside `fold_diagnostic`, so the fold must run
   // whenever the `turns_since_clean_verify` knob is set — even with neither repair
   // mode on. Without this the knob validates at config time but the floor never
@@ -996,7 +996,7 @@ pub fn __agent_stall_apply_repair(
       defer_feedback,
     )
   }
-  // Elapsed-turns hard floor (#burin-cutover seam 5, default OFF). Distinct from the
+  // Elapsed-turns hard floor (default OFF). Distinct from the
   // failing-verify `no_net_progress_hard_cap_after` above: this counts EVERY folded
   // turn since the last clean verify (edit/read storms included), so a slow-draining
   // run that rarely produces a FAILING verification — never building the failing-verify
@@ -1022,7 +1022,7 @@ pub fn __agent_stall_apply_repair(
       defer_feedback,
     )
   }
-  // Delivered-fix trigger (#burin-cutover seam 3, HIGHEST precedence). When the
+  // Delivered-fix trigger (HIGHEST precedence). When the
   // host supplies a `remediation_delivered` fact callback and reports that a
   // repair WAS delivered for the ACTIVE failure signature yet that SAME failure
   // is still landing, escalate one turn sooner than the plain-repeat stuck nudge
@@ -1114,7 +1114,7 @@ pub fn __agent_stall_apply_repair(
 }
 
 /**
- * Per-turn action-signal intake (#burin-cutover seam 4, default OFF). When the
+ * Per-turn action-signal intake (default OFF). When the
  * host supplies an `action_signal` fact callback and it returns truthy for THIS
  * turn's payload, a single flailing action (a desperation shell write / truncated
  * read / edit-oscillation verdict) trips IMMEDIATELY — no streak needed — riding
@@ -1249,7 +1249,7 @@ pub fn agent_stall_observe_tool_calls(
     turn_made_edit,
     defer_feedback,
   )
-  // Per-turn action-signal intake (#burin-cutover seam 4). Inert (returns `repaired`
+  // Per-turn action-signal intake. Inert (returns `repaired`
   // unchanged) unless an `action_signal` callback is configured, so the default is
   // byte-identical. Applied after the repair overlay so it respects the one-warning-
   // per-turn discipline.
