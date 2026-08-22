@@ -6,7 +6,7 @@ mod freshness_manifest;
 mod path_policy;
 
 use freshness_manifest::{
-    artifact_stat_id, canonical_path_id, manifest_hash, platform_build_id, verify_manifest,
+    artifact_stat_id, canonical_path_id, file_content_hash, platform_build_id, verify_manifest,
     Verification,
 };
 use std::{
@@ -17,9 +17,9 @@ use std::{
     process::ExitCode,
 };
 
-const RECEIPT_FORMAT: &str = "harn-bin-freshness-v4";
+const RECEIPT_FORMAT: &str = "harn-bin-freshness-v5";
 const EVIDENCE_FORMAT: &str = "harn-artifact-evidence-v5-cargo-output-dep-info-v1-manifest-3";
-const CHECKER_FORMAT: &str = "harn-freshness-check-v2";
+const CHECKER_FORMAT: &str = "harn-freshness-check-v3";
 
 fn main() -> ExitCode {
     let arguments = env::args().collect::<Vec<_>>();
@@ -79,13 +79,15 @@ fn record_evidence(binary: &Path, manifest: &Path, repo_root: &Path) -> Result<S
     }
     let executable = env::current_exe()
         .map_err(|error| format!("cannot resolve running freshness checker: {error}"))?;
+    // The checker is deliberately tiny, so exact bytes are both cheaper and
+    // stronger than Windows ChangeTime, which may settle after process exit.
     Ok(format!(
-        "{CHECKER_FORMAT}\nrepo-path={}\nchecker-build-id={}\nchecker-stat={}\nchecker-path={}\nmanifest={}\n",
+        "{CHECKER_FORMAT}\nrepo-path={}\nchecker-build-id={}\nchecker-content={}\nchecker-path={}\nmanifest={}\n",
         canonical_path_id(repo_root)?,
         platform_build_id()?,
-        artifact_stat_id(&executable)?,
+        file_content_hash(&executable)?,
         canonical_path_id(&executable)?,
-        manifest_hash(manifest)?,
+        file_content_hash(manifest)?,
     ))
 }
 
@@ -109,7 +111,7 @@ fn verify(receipt: &Path, manifest: &Path, binary: &Path, repo_root: &Path) -> R
         || lines[8] != CHECKER_FORMAT
         || !valid_keyed_hash(lines[9], "repo-path", &[64])
         || !valid_keyed_hex_range(lines[10], "checker-build-id", 2, 128)
-        || !valid_keyed_hash(lines[11], "checker-stat", &[64])
+        || !valid_keyed_hash(lines[11], "checker-content", &[64])
         || !valid_keyed_hash(lines[12], "checker-path", &[64])
         || !valid_keyed_hash(lines[13], "manifest", &[64])
     {

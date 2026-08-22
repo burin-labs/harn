@@ -491,10 +491,10 @@ fn read_hash(input: &mut &[u8], kind: &str) -> Result<blake3::Hash, String> {
     Ok(blake3::Hash::from_bytes(bytes))
 }
 
-pub(super) fn manifest_hash(path: &Path) -> Result<blake3::Hash, String> {
+pub(super) fn file_content_hash(path: &Path) -> Result<blake3::Hash, String> {
     fs::read(path)
         .map(|bytes| blake3::hash(&bytes))
-        .map_err(|error| format!("cannot read freshness manifest {}: {error}", path.display()))
+        .map_err(|error| format!("cannot read freshness input {}: {error}", path.display()))
 }
 
 // Platform identity catches ordinary mutation/replacement without re-reading a
@@ -768,6 +768,25 @@ fn path_from_os_bytes(bytes: Vec<u8>) -> Result<PathBuf, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn file_content_hash_ignores_metadata_churn_but_rejects_changed_bytes() {
+        let temp = tempfile::tempdir().unwrap();
+        let input = temp.path().join("proof-checker");
+        fs::write(&input, b"exact-proof").unwrap();
+        let recorded = file_content_hash(&input).unwrap();
+
+        File::options()
+            .write(true)
+            .open(&input)
+            .unwrap()
+            .set_times(fs::FileTimes::new().set_modified(std::time::SystemTime::UNIX_EPOCH))
+            .unwrap();
+        assert_eq!(file_content_hash(&input).unwrap(), recorded);
+
+        fs::write(&input, b"other-proof").unwrap();
+        assert_ne!(file_content_hash(&input).unwrap(), recorded);
+    }
 
     #[test]
     fn changed_content_with_recorded_mtime_and_size_is_not_fresh() {
