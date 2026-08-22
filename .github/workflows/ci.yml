@@ -1758,9 +1758,7 @@ jobs:
         shell: bash
         run: |
           version="$(cargo metadata --locked --no-deps --format-version 1 \
-            | jq -er '[.packages[] | select(.name == "harn-cli") | .version] \
-              | unique | if length == 1 then .[0] \
-              else error("expected one harn-cli version") end')"
+            | jq -er '[.packages[] | select(.name == "harn-cli") | .version] | unique | if length == 1 then .[0] else error("expected one harn-cli version") end')"
           echo "version=$version" >> "$GITHUB_OUTPUT"
       - name: Install pinned Harn release
         id: harn
