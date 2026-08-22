@@ -122,7 +122,7 @@
 # count    7  crates/harn-stdlib/src/stdlib/stdlib_connectors_shared.harn
 # count   13  crates/harn-stdlib/src/stdlib/stdlib_connectors_slack.harn
 # count   19  crates/harn-stdlib/src/stdlib/stdlib_context.harn
-# count   27  crates/harn-stdlib/src/stdlib/stdlib_coordination.harn
+# count   14  crates/harn-stdlib/src/stdlib/stdlib_coordination.harn
 # count    8  crates/harn-stdlib/src/stdlib/stdlib_edit.harn
 # count   10  crates/harn-stdlib/src/stdlib/stdlib_experiments.harn
 # count    2  crates/harn-stdlib/src/stdlib/stdlib_external_agent.harn
@@ -1020,21 +1020,10 @@ crates/harn-stdlib/src/stdlib/stdlib_context.harn::render_section
 crates/harn-stdlib/src/stdlib/stdlib_context.harn::section
 crates/harn-stdlib/src/stdlib/stdlib_coordination.harn::coord_ack
 crates/harn-stdlib/src/stdlib/stdlib_coordination.harn::coord_acquire_dir_lock
-crates/harn-stdlib/src/stdlib/stdlib_coordination.harn::coord_actor_schema
 crates/harn-stdlib/src/stdlib/stdlib_coordination.harn::coord_cursor
-crates/harn-stdlib/src/stdlib/stdlib_coordination.harn::coord_event_message_schema
 crates/harn-stdlib/src/stdlib/stdlib_coordination.harn::coord_inbox
-crates/harn-stdlib/src/stdlib/stdlib_coordination.harn::coord_inbox_report
-crates/harn-stdlib/src/stdlib/stdlib_coordination.harn::coord_inbox_schema
-crates/harn-stdlib/src/stdlib/stdlib_coordination.harn::coord_message_report
-crates/harn-stdlib/src/stdlib/stdlib_coordination.harn::coord_message_schema
-crates/harn-stdlib/src/stdlib/stdlib_coordination.harn::coord_message_value
 crates/harn-stdlib/src/stdlib/stdlib_coordination.harn::coord_post
 crates/harn-stdlib/src/stdlib/stdlib_coordination.harn::coord_read
-crates/harn-stdlib/src/stdlib/stdlib_coordination.harn::coord_receipt_report
-crates/harn-stdlib/src/stdlib/stdlib_coordination.harn::coord_receipt_schema
-crates/harn-stdlib/src/stdlib/stdlib_coordination.harn::coord_receipt_value
-crates/harn-stdlib/src/stdlib/stdlib_coordination.harn::coord_ref_schema
 crates/harn-stdlib/src/stdlib/stdlib_coordination.harn::coord_release_dir_lock
 crates/harn-stdlib/src/stdlib/stdlib_coordination.harn::coord_remember
 crates/harn-stdlib/src/stdlib/stdlib_coordination.harn::coord_reply
@@ -1042,8 +1031,6 @@ crates/harn-stdlib/src/stdlib/stdlib_coordination.harn::coord_request
 crates/harn-stdlib/src/stdlib/stdlib_coordination.harn::coord_send
 crates/harn-stdlib/src/stdlib/stdlib_coordination.harn::coord_subscribe
 crates/harn-stdlib/src/stdlib/stdlib_coordination.harn::coord_wait_reply
-crates/harn-stdlib/src/stdlib/stdlib_coordination.harn::coord_wait_reply_report
-crates/harn-stdlib/src/stdlib/stdlib_coordination.harn::coord_wait_reply_schema
 crates/harn-stdlib/src/stdlib/stdlib_coordination.harn::coord_with_dir_lock
 crates/harn-stdlib/src/stdlib/stdlib_edit.harn::edit_add_parameter
 crates/harn-stdlib/src/stdlib/stdlib_edit.harn::edit_change_return_type
