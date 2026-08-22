@@ -1316,7 +1316,10 @@ jobs:
 
   windows:
     name: Rust on Windows (build + smoke test)
-    runs-on: windows-latest
+    runs-on: ${{ vars.HARN_CI_DISABLE_BLACKSMITH_WINDOWS == 'true' && 'windows-latest' || ((github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'blacksmith-8vcpu-windows-2025' || 'windows-latest') }}
+    permissions:
+      contents: read
+      actions: read
     timeout-minutes: 60
     needs: windows-plan
     # Windows coverage stays off the default PR / merge-queue path, but runs
@@ -1326,6 +1329,7 @@ jobs:
     # the 15-25 minute Windows compile long pole.
     if: needs.windows-plan.outputs.run_windows == 'true'
     env:
+      HARN_RUNNER_TIER: ${{ vars.HARN_CI_DISABLE_BLACKSMITH_WINDOWS == 'true' && 'github-hosted' || ((github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'blacksmith' || 'github-hosted') }}
       # EXPERIMENT (toggle via the HARN_WINDOWS_LLD repo variable): drive rustc
       # at the toolchain-bundled rust-lld instead of MSVC link.exe — the Windows
       # analog of the `-Clink-arg=-fuse-ld=mold` the Linux rust-checks lane uses.
@@ -1371,10 +1375,12 @@ jobs:
       # steps so CARGO_HOME / CARGO_TARGET_DIR are already redirected when rustup
       # and Swatinem/rust-cache run. The cache invocation below passes the
       # redirected target explicitly; rust-cache otherwise ignores
-      # CARGO_TARGET_DIR. Kept byte-identical to the windows-nightly.yml writer so
-      # the shared-cache policy's pre-cache step-sequence comparison keeps matching.
+      # CARGO_TARGET_DIR. Blacksmith's Windows image does not expose the Hyper-V
+      # New-VHD command required by this action, so the paid lane uses the native
+      # filesystem and only the GitHub-hosted fallback creates the same ReFS Dev
+      # Drive as the windows-nightly.yml writer.
       - name: Set up Dev Drive
-        if: ${{ vars.HARN_WINDOWS_DEVDRIVE == 'on' }}
+        if: ${{ vars.HARN_WINDOWS_DEVDRIVE == 'on' && env.HARN_RUNNER_TIER == 'github-hosted' }}
         uses: samypr100/setup-dev-drive@562171fe8df7401fdf582d766cd3b6ab80d5b1a0 # v4.1.0
         with:
           drive-size: 25GB
@@ -1383,7 +1389,37 @@ jobs:
             CARGO_HOME,{{ DEV_DRIVE }}/.cargo
             CARGO_TARGET_DIR,{{ DEV_DRIVE }}/target
       - uses: ./.github/actions/rust-toolchain
+      # A short-retention artifact produced by the main Windows nightly is the
+      # provider-neutral warm path. It is attempted before rust-cache so an
+      # internal Blacksmith run can reuse GitHub-hosted build output without
+      # requiring compatible cache backends. A missing, stale, or incompatible
+      # generation fails this step but not the job; rust-cache remains the cold
+      # hosted/provider-local fallback.
+      - name: Restore Windows workspace warm artifact
+        id: windows-warm-restore
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          receipt="${RUNNER_TEMP}/windows-warm-restore.txt"
+          set +e
+          ./scripts/ci/windows_workspace_warm_artifact.sh download-and-restore \
+            --repo "${{ github.repository }}" \
+            --target-dir "${CARGO_TARGET_DIR:-target}" >"${receipt}" 2>&1
+          status=$?
+          set -e
+          cat "${receipt}"
+          grep -E '^windows_warm_restore_(run_id|producer_commit)=' "${receipt}" >> "$GITHUB_OUTPUT" || true
+          if [[ "${status}" -eq 0 ]]; then
+            grep -E '^windows_warm_restore=hit$' "${receipt}" >> "$GITHUB_OUTPUT"
+          else
+            echo "windows_warm_restore=miss" >> "$GITHUB_OUTPUT"
+            echo "windows_warm_restore_status=${status}" >> "$GITHUB_OUTPUT"
+          fi
+          exit "${status}"
       - uses: ./.github/actions/rust-cache
+        if: steps.windows-warm-restore.outputs.windows_warm_restore != 'hit'
         continue-on-error: true
         with:
           # Restore the latest full-suite nightly cache. PR refs stay
@@ -1395,6 +1431,24 @@ jobs:
           target-dir: ${{ env.CARGO_TARGET_DIR }}
           cache-on-failure: true
           cache-bin: false
+      - name: Report Windows warm restore outcome
+        if: always()
+        shell: bash
+        env:
+          RESTORE_OUTCOME: ${{ steps.windows-warm-restore.outcome }}
+          RESTORE_RESULT: ${{ steps.windows-warm-restore.outputs.windows_warm_restore || 'miss' }}
+          RESTORE_PRODUCER_COMMIT: ${{ steps.windows-warm-restore.outputs.windows_warm_restore_producer_commit || 'unavailable' }}
+          RESTORE_RUN_ID: ${{ steps.windows-warm-restore.outputs.windows_warm_restore_run_id || 'unavailable' }}
+        run: |
+          echo "windows_warm_restore_outcome=${RESTORE_OUTCOME}"
+          echo "windows_warm_restore=${RESTORE_RESULT}"
+          echo "windows_warm_restore_producer_commit=${RESTORE_PRODUCER_COMMIT}"
+          echo "windows_warm_restore_run_id=${RESTORE_RUN_ID}"
+          if [[ "${RESTORE_RESULT}" == "hit" ]]; then
+            echo "Windows PR feedback restored a compatible main warm artifact."
+          else
+            echo "Windows PR feedback is continuing through the provider-local rust-cache/cold fallback."
+          fi
       - name: Install cargo-nextest
         uses: taiki-e/install-action@7f4eb899022d8fe70b20c4f3de697aa85c309026 # v2.85.11
         continue-on-error: true

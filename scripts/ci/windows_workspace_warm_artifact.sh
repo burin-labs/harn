@@ -221,6 +221,10 @@ restore() {
   fi
   verify_compat_manifest "$manifest"
   mkdir -p "$target_dir"
+  # The caller may use Cargo's workspace-relative default (`target`). Resolve
+  # it before entering the artifact staging directory so tar restores into the
+  # workspace target rather than looking for a sibling under staging.
+  target_dir="$(cd "$target_dir" && pwd -P)"
   # Replace any partial target so restored deps own the tree.
   find "$target_dir" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
   (
