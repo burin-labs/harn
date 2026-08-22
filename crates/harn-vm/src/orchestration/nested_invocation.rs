@@ -243,6 +243,7 @@ fn scan_harn_script_ceiling(source: &str) -> CapabilityPolicy {
         tool_annotations: std::collections::BTreeMap::new(),
         sandbox_profile: crate::orchestration::SandboxProfile::default(),
         process_sandbox: Default::default(),
+        process_network_proxy: None,
     }
 }
 
@@ -274,6 +275,7 @@ fn scan_burin_manifest_ceiling(manifest: &serde_json::Value) -> CapabilityPolicy
         tool_annotations: std::collections::BTreeMap::new(),
         sandbox_profile: crate::orchestration::SandboxProfile::default(),
         process_sandbox: Default::default(),
+        process_network_proxy: None,
     }
 }
 
@@ -494,6 +496,7 @@ mod tests {
             tool_annotations: BTreeMap::new(),
             sandbox_profile: crate::orchestration::SandboxProfile::default(),
             process_sandbox: Default::default(),
+            process_network_proxy: None,
         }
     }
 
@@ -518,6 +521,7 @@ mod tests {
             tool_annotations: BTreeMap::new(),
             sandbox_profile: crate::orchestration::SandboxProfile::default(),
             process_sandbox: Default::default(),
+            process_network_proxy: None,
         }
     }
 

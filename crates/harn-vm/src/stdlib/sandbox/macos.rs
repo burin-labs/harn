@@ -66,7 +66,7 @@ impl SandboxBackend for Backend {
         profile: SandboxProfile,
     ) -> Result<Output, VmError> {
         let mut command = super::build_std_command::<Self>(program, args, policy, profile)?;
-        super::apply_process_config(&mut command, config);
+        super::apply_process_config(&mut command, config, Some(policy));
         let output = crate::op_interrupt::capture_output_interruptible(&mut command)
             .map_err(|error| process_spawn_error(&error).unwrap_or_else(|| spawn_error(error)))?;
         match crate::process_sandbox::macos_wrapped_spawn_io_error(
@@ -329,7 +329,15 @@ fn render_profile_with_extra_read_roots(
         profile.push_str(standard_device_profile_rules());
     }
     if policy_allows_network(policy) {
-        profile.push_str("(allow network*)\n");
+        if let Some(proxy) = policy.process_network_proxy {
+            for port in [proxy.http_port, proxy.socks_port] {
+                profile.push_str(&format!(
+                    "(allow network-outbound (remote ip \"localhost:{port}\"))\n"
+                ));
+            }
+        } else {
+            profile.push_str("(allow network*)\n");
+        }
     }
     profile
 }
@@ -745,6 +753,7 @@ mod tests {
             tool_annotations: std::collections::BTreeMap::new(),
             sandbox_profile: SandboxProfile::Worktree,
             process_sandbox: Default::default(),
+            process_network_proxy: None,
         }
     }
 
@@ -1019,6 +1028,43 @@ mod tests {
         allowed.side_effect_level = Some("network".to_string());
         let allowed_profile = render_profile(&allowed);
         assert!(allowed_profile.contains("(allow network*)"));
+    }
+
+    #[test]
+    fn managed_process_proxy_replaces_wildcard_network_grant() {
+        let mut policy = macos_policy_with_workspace_ops(&["read_text"]);
+        policy.side_effect_level = Some("network".to_string());
+        policy.process_network_proxy = Some(crate::orchestration::ProcessNetworkProxy {
+            http_port: 3128,
+            socks_port: 1080,
+        });
+
+        let profile = render_profile(&policy);
+
+        assert!(!profile.contains("(allow network*)"), "{profile}");
+        assert!(
+            profile.contains("(allow network-outbound (remote ip \"localhost:3128\"))"),
+            "{profile}"
+        );
+        assert!(
+            profile.contains("(allow network-outbound (remote ip \"localhost:1080\"))"),
+            "{profile}"
+        );
+    }
+
+    #[test]
+    fn managed_proxy_metadata_cannot_raise_the_network_ceiling() {
+        let mut policy = macos_policy_with_workspace_ops(&["read_text"]);
+        assert_eq!(policy.side_effect_level.as_deref(), Some("read_only"));
+        policy.process_network_proxy = Some(crate::orchestration::ProcessNetworkProxy {
+            http_port: 3128,
+            socks_port: 1080,
+        });
+
+        let profile = render_profile(&policy);
+
+        assert!(!profile.contains("network-outbound"), "{profile}");
+        assert!(!profile.contains("(allow network*)"), "{profile}");
     }
 
     #[test]

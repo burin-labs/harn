@@ -15,11 +15,13 @@ use crate::event_log::{active_event_log, EventLog, LogEvent, Topic};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
+mod process_proxy;
 mod provider_allow;
 pub mod ssrf;
 #[cfg(test)]
 pub(crate) mod test_support;
 
+pub use process_proxy::{ProcessEgressAudit, ProcessEgressProxy};
 pub use provider_allow::{
     configured_provider_private_allow_host, install_ssrf_guard_with_private_host_allowlist,
     ssrf_client_cache_key,
@@ -960,16 +962,18 @@ fn evaluate_resolved_addrs(
 
     // (3) Allowlist gating: when a default-deny allowlist is in effect and the
     //     host was NOT already granted at the URL layer (`resolution_required`),
-    //     the host is allowed only if a resolved address matches an allow
-    //     IP/CIDR rule (port-aware). Without one, reject.
+    //     the host is allowed only if EVERY resolved address matches an allow
+    //     IP/CIDR rule (port-aware). Allowing on an existential match would
+    //     leave an unchecked address in the resolver's answer set for the
+    //     connector to select.
     if resolution_required && allow_active {
         let permitted = configured.is_some_and(|c| {
-            c.policy.allow.iter().any(|rule| {
-                rule.is_ip_matcher()
-                    && addrs
-                        .iter()
-                        .any(|ip| rule.matches_resolved_ip(*ip, target.port))
-            })
+            !addrs.is_empty()
+                && addrs.iter().all(|ip| {
+                    c.policy.allow.iter().any(|rule| {
+                        rule.is_ip_matcher() && rule.matches_resolved_ip(*ip, target.port)
+                    })
+                })
         });
         if !permitted {
             return Some(blocked(

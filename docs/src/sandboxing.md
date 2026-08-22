@@ -60,7 +60,11 @@ So a script can read and write inside its own project and nowhere else, and
 neither it nor anything it spawns can open a socket.
 
 Pass `--allow-process-network` to allow network access for the Harn run and its
-child processes. Filesystem and process confinement remain active.
+child processes under the run's egress policy. Filesystem and process
+confinement remain active. Supported local sandboxes route child HTTP, HTTPS,
+and SOCKS5 traffic through Harn's managed forwarding proxy and restrict the
+child itself to that proxy. Child traffic stays denied until `HARN_EGRESS_*` or
+`harness.net.egress_policy(...)` configures an allow decision.
 
 `harness.net.egress_policy(...)` does not grant network access. It restricts
 the destinations available to a run that already has network access, so a
@@ -109,17 +113,30 @@ nothing prints nothing.
 CLI warns when you use it. Prefer a scoped root whenever you can name the
 path you actually need.
 
-## Network grants are coarser than they look
+## Managed child-process egress
 
 `--allow-process-network` grants socket access to the Harn runtime and its
 child processes. `HARN_EGRESS_ALLOW` and `harness.net.egress_policy(...)`
 restrict calls made by Harn, including HTTP, provider, and connector calls.
-The child-process sandbox can allow or deny sockets, but it cannot enforce
-hostname rules for an arbitrary child process.
+The same live policy state also configures a host-side HTTP/SOCKS5 proxy for
+child traffic, whether it came from `HARN_EGRESS_*` at startup or
+`harness.net.egress_policy(...)` during the run. Until either source configures
+a policy, the proxy denies every destination. The OS sandbox grants the child
+only the proxy's ephemeral loopback ports, so clearing `HTTP_PROXY` or opening a
+raw socket cannot bypass the host decision. DNS is resolved by the proxy and
+each connection is pinned to the addresses checked by the existing CIDR, deny,
+and private-address rules.
 
-Once you pass `--allow-process-network`, that child can talk to anything.
-Use it only for a command whose network behavior you already trust and have
-scoped some other way.
+The native managed boundary is currently available on macOS. On another local
+platform, a `harn run` child launch that would require the managed boundary
+fails closed; the local backend advertises no `network_policy` capability and
+rejects a non-empty limited policy instead of treating proxy environment
+variables as enforcement. Remote sandbox backends continue to advertise their
+own `network_policy` capability. An empty allowlist is deny-all everywhere.
+
+The managed proxy records only protocol, normalized host, port, decision, and
+reason. It never records request paths, query strings, headers, bodies, proxy
+credentials, or environment values.
 
 ## Environment variables are a separate boundary
 
