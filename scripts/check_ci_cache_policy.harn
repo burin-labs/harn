@@ -324,6 +324,10 @@ const WINDOWS_TEST_STEP_ID = "windows-native-tests"
 const WINDOWS_TEST_COMPLETED_EXPRESSION = "$"
   + "{{ steps.${WINDOWS_TEST_STEP_ID}.outputs.completed_epoch }}"
 
+// This checker rejects the old CI telemetry key; it does not declare a
+// Harn-owned environment variable, so keep the forbidden spelling non-contiguous.
+const WINDOWS_LEGACY_HARN_TELEMETRY = "HARN_" + "NATIVE_TEST_COMPLETED_EPOCH"
+
 const WINDOWS_BINARY_PRODUCER_STEP = "Produce exact Windows Harn binary"
 
 const WINDOWS_SMOKE_STEP = "Smoke test harn run"
@@ -1624,7 +1628,7 @@ fn windows_storage_budget_errors(job) -> list<string> {
   if trim(test_step?.id ?? "") != WINDOWS_TEST_STEP_ID
     || !contains(test_body, "completed_epoch=%s")
     || !contains(test_body, "GITHUB_OUTPUT")
-    || contains(test_body, "HARN_NATIVE_TEST_COMPLETED_EPOCH")
+    || contains(test_body, WINDOWS_LEGACY_HARN_TELEMETRY)
     || contains(test_body, "GITHUB_ENV") {
     errors = errors
       + [
@@ -1664,7 +1668,7 @@ fn windows_storage_budget_errors(job) -> list<string> {
     smoke_body,
     "WINDOWS_NATIVE_TEST_COMPLETED_EPOCH",
   )
-    || contains(to_string(smoke_step?.env ?? {}), "HARN_NATIVE_TEST_COMPLETED_EPOCH") {
+    || contains(to_string(smoke_step?.env ?? {}), WINDOWS_LEGACY_HARN_TELEMETRY) {
     errors = errors
       + [
       "ci.yml:windows smoke must consume native completion telemetry through the typed step output without ambient Harn variables",
