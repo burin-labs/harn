@@ -1143,6 +1143,11 @@ jobs:
       - name: Check prompts are not embedded in Rust
         if: needs.changes.outputs.prompt_prose == 'true'
         run: make lint-no-rust-prompt-prose
+      # This source-only Harn ratchet needs only the exact portable CLI above.
+      # Keep it ahead of Node setup and both integration sweeps so a flaky-test
+      # pattern fails the head before minutes of unrelated work have elapsed.
+      - name: Reject flaky test patterns
+        run: make lint-test-patterns
       # `make spec-lint` must run the repository's declared Redocly CLI, not
       # let npx fall back to an unrelated registry package. Keep this install
       # in the already-required audit lane, where the snapshot check can reuse
@@ -1170,7 +1175,6 @@ jobs:
       - run: make test-pr-gate-post-warm-integrations
       - name: Check OpenAPI contract
         run: make spec-lint
-      - run: make lint-test-patterns
       # check-bindings also runs the published Python and Go protocol bindings
       # against the committed JSON fixture.
       - run: make check-bindings

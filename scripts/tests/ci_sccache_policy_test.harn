@@ -284,6 +284,10 @@ fn workflow() {
             if: "needs.changes.outputs.prompt_prose == 'true'",
             run: "make lint-no-rust-prompt-prose",
           },
+          {name: "Reject flaky test patterns", run: "make lint-test-patterns"},
+          {uses: "./.github/actions/node-cache"},
+          {name: "Run pre-warm shell gates without Cargo"},
+          {run: "make test-pr-gate-post-warm-integrations"},
         ],
       },
       "ci-status": {
@@ -686,6 +690,50 @@ pipeline test_rejects_prompt_prose_check_in_compile_lane(harness: Harness, task)
   assert(
     errors.contains(
       "ci.yml:audit-scripts must run the prompt-prose policy with the shared Harn binary",
+    ),
+  )
+}
+
+@test
+pipeline test_rejects_late_or_duplicated_flaky_test_pattern_policy(harness: Harness, task) {
+  const valid = workflow()
+  const policy_job = valid.jobs["audit-scripts"]
+  const without_early_policy = policy_job.steps.filter(
+    { step -> trim(step?.run ?? "") != "make lint-test-patterns" },
+  )
+    .to_list()
+  const late = {
+    ...valid,
+    jobs: {
+      ...valid.jobs,
+      "audit-scripts": {
+        ...policy_job,
+        steps: without_early_policy
+          + [
+          {name: "Reject flaky test patterns", run: "make lint-test-patterns"},
+        ],
+      },
+    },
+  }
+  const late_errors = ci_linux_lane_policy_errors(late)
+  assert(
+    late_errors.contains(
+      "ci.yml:audit-scripts must reject flaky test patterns immediately after exact CLI source policies and before setup or integration sweeps",
+    ),
+  )
+  const duplicated = {
+    ...valid,
+    jobs: {
+      ...valid.jobs,
+      "audit-scripts": {
+        ...policy_job,
+        steps: policy_job.steps + [{run: "make lint-test-patterns"}],
+      },
+    },
+  }
+  assert(
+    ci_linux_lane_policy_errors(duplicated).contains(
+      "ci.yml:audit-scripts must own exactly one make lint-test-patterns invocation",
     ),
   )
 }

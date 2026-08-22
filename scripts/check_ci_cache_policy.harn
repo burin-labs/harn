@@ -2381,21 +2381,69 @@ fn strict_clippy_entrypoint_errors(rust_job) -> list<string> {
   return ["ci.yml:rust-checks must route strict Clippy through the cache-safe Rust lint entrypoint"]
 }
 
-fn prompt_prose_owner_errors(workflow) -> list<string> {
+fn early_source_policy_errors(workflow) -> list<string> {
   const policy_steps = workflow?.jobs?.["audit-scripts"]?.steps ?? []
   const prompt_step = step_by_name(policy_steps, "Check prompts are not embedded in Rust")
   const verify_index = step_index_by_name(policy_steps, "Verify portable Harn CLI")
   const prompt_index = step_index_by_name(policy_steps, "Check prompts are not embedded in Rust")
-  if trim(prompt_step?.if ?? "") == "needs.changes.outputs.prompt_prose == 'true'"
-    && trim(
+  const test_pattern_index = step_index_by_name(policy_steps, "Reject flaky test patterns")
+  const pre_warm_index = step_index_by_name(policy_steps, "Run pre-warm shell gates without Cargo")
+  let node_setup_count = 0
+  let node_setup_index = -1
+  let post_warm_count = 0
+  let post_warm_index = -1
+  let test_pattern_command_count = 0
+  let test_pattern_command_index = -1
+  let test_pattern_name_count = 0
+  for {index, value: step} in policy_steps.enumerate() {
+    const command = trim(step?.run ?? "")
+    if trim(step?.uses ?? "") == "./.github/actions/node-cache" {
+      node_setup_count = node_setup_count + 1
+      node_setup_index = index
+    }
+    if command == "make test-pr-gate-post-warm-integrations" {
+      post_warm_count = post_warm_count + 1
+      post_warm_index = index
+    }
+    if command == "make lint-test-patterns" {
+      test_pattern_command_count = test_pattern_command_count + 1
+      test_pattern_command_index = index
+    }
+    if trim(step?.name ?? "") == "Reject flaky test patterns" {
+      test_pattern_name_count = test_pattern_name_count + 1
+    }
+  }
+  let errors: list<string> = []
+  if trim(prompt_step?.if ?? "") != "needs.changes.outputs.prompt_prose == 'true'"
+    || trim(
     prompt_step?.run ?? "",
   )
-    == "make lint-no-rust-prompt-prose"
-    && verify_index >= 0
-    && verify_index < prompt_index {
-    return []
+    != "make lint-no-rust-prompt-prose"
+    || verify_index < 0
+    || prompt_index != verify_index + 1 {
+    errors = errors
+      + [
+      "ci.yml:audit-scripts must run the prompt-prose policy with the shared Harn binary",
+    ]
   }
-  return ["ci.yml:audit-scripts must run the prompt-prose policy with the shared Harn binary"]
+  if test_pattern_command_count != 1 || test_pattern_name_count != 1 {
+    errors = errors
+      + ["ci.yml:audit-scripts must own exactly one make lint-test-patterns invocation"]
+  }
+  if test_pattern_index != prompt_index + 1
+    || test_pattern_command_index != test_pattern_index
+    || node_setup_count != 1
+    || test_pattern_index >= node_setup_index
+    || pre_warm_index < 0
+    || test_pattern_index >= pre_warm_index
+    || post_warm_count != 1
+    || test_pattern_index >= post_warm_index {
+    errors = errors
+      + [
+      "ci.yml:audit-scripts must reject flaky test patterns immediately after exact CLI source policies and before setup or integration sweeps",
+    ]
+  }
+  return errors
 }
 
 /** Keep one persistent producer, one lint lane, and one package lane. */
@@ -2420,7 +2468,7 @@ pub fn ci_linux_lane_policy_errors(workflow) -> list<string> {
       + ["ci.yml:rust-checks must remain one fixed lint lane, not a compile matrix"]
   }
   errors = errors + strict_clippy_entrypoint_errors(rust_job)
-  errors = errors + prompt_prose_owner_errors(workflow)
+  errors = errors + early_source_policy_errors(workflow)
   const producer = workflow?.jobs?.["rust-check-inputs"]
   const build_step = step_by_name(producer?.steps ?? [], "Build portable workspace test archive")
   if trim(build_step?.if ?? "")
