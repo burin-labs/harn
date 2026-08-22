@@ -26,6 +26,7 @@ mod integrations;
 mod io;
 mod live_clients;
 mod modes;
+mod module_progress;
 mod plan_documents;
 mod prompt;
 mod schema;

@@ -8,7 +8,9 @@ use std::time::Instant;
 
 use harn_parser::acp_ambient_globals::AcpAmbientGlobal;
 
-use super::{builtins, AcpBridge, AcpRuntimeConfigurator};
+use super::{
+    builtins, module_progress::ModuleProgressProjector, AcpBridge, AcpRuntimeConfigurator,
+};
 
 #[derive(Debug)]
 pub(super) struct PromptExecutionError {
@@ -347,6 +349,9 @@ pub(super) async fn execute_chunk(
     // indistinguishable from one doing real work — the recorder exists in
     // harn-vm but nothing in production had ever switched it on.
     let module_phases = vm.enable_module_phase_timing();
+    let module_progress = ModuleProgressProjector::start(bridge.clone());
+    let observed_progress = module_progress.clone();
+    module_phases.set_progress_observer(move |stats| observed_progress.advance(stats));
     let execute_started = Instant::now();
     let result = harn_vm::secrets::with_active_secret_provider(execution_secret_provider, async {
         match vm.execute_arc(std::sync::Arc::new(chunk)).await {
@@ -357,6 +362,7 @@ pub(super) async fn execute_chunk(
     .await;
     let execute_ms = execute_started.elapsed().as_millis() as u64;
     let modules = module_phases.snapshot();
+    module_progress.finish(modules);
     bridge.send_log(
         "info",
         &format!(
@@ -582,6 +588,192 @@ mod tests {
             "the VM's cancel token must observe the same flag the ACP session \
              already shares with HostBridge, so is_cancelled() (and, by the \
              same wiring, in-flight process.exec children) see a session/cancel"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn execute_chunk_projects_lazy_module_preparation_progress() {
+        use std::sync::atomic::AtomicU64;
+        use tokio::sync::Mutex as TokioMutex;
+
+        let cwd = tempfile::tempdir().expect("cwd");
+        std::fs::write(
+            cwd.path().join("dependency.harn"),
+            "pub fn value() { return 7 }\n",
+        )
+        .expect("write imported module");
+        let source = "import { value } from \"./dependency\"\n\
+                      pipeline main(harness: Harness) {\n\
+                        harness.stdio.println(string(value()))\n\
+                      }\n"
+        .to_string();
+        let chunk = harn_vm::compile_source(&source).expect("compile importing pipeline");
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+        let cancellation = super::super::SessionCancellation::default();
+        let client_pending: Arc<
+            TokioMutex<
+                std::collections::HashMap<u64, tokio::sync::oneshot::Sender<serde_json::Value>>,
+            >,
+        > = Arc::new(TokioMutex::new(std::collections::HashMap::new()));
+        let response_client_pending = client_pending.clone();
+        let captured_updates = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let client_updates = captured_updates.clone();
+        let client = tokio::spawn(async move {
+            while let Some(line) = rx.recv().await {
+                let message: serde_json::Value =
+                    serde_json::from_str(&line).expect("ACP client message JSON");
+                if let Some(id) = message["id"].as_u64() {
+                    let sender = response_client_pending
+                        .lock()
+                        .await
+                        .remove(&id)
+                        .expect("pending ACP client request");
+                    let _ = sender.send(serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "id": id,
+                        "result": {}
+                    }));
+                } else {
+                    client_updates
+                        .lock()
+                        .unwrap_or_else(|error| error.into_inner())
+                        .push(line);
+                }
+            }
+        });
+        let bridge = Arc::new(AcpBridge {
+            session_id: "module-progress-test".to_string(),
+            output: super::super::AcpOutput::Channel(tx),
+            pending: client_pending,
+            next_id_counter: AtomicU64::new(1),
+            cancellation: cancellation.clone(),
+            script_name: std::sync::Mutex::new(String::new()),
+            assistant_state: std::sync::Mutex::new(
+                harn_vm::visible_text::VisibleTextState::default(),
+            ),
+        });
+        let host_pending: Arc<
+            TokioMutex<
+                std::collections::HashMap<u64, tokio::sync::oneshot::Sender<serde_json::Value>>,
+            >,
+        > = Arc::new(TokioMutex::new(std::collections::HashMap::new()));
+        let response_pending = host_pending.clone();
+        let (host_tx, mut host_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+        let responder = tokio::spawn(async move {
+            while let Some(line) = host_rx.recv().await {
+                let request: serde_json::Value =
+                    serde_json::from_str(&line).expect("host request JSON");
+                let Some(id) = request["id"].as_u64() else {
+                    continue;
+                };
+                let sender = response_pending
+                    .lock()
+                    .await
+                    .remove(&id)
+                    .expect("pending host request");
+                let _ = sender.send(serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "result": {}
+                }));
+            }
+        });
+        let host_bridge = Arc::new(
+            harn_vm::bridge::HostBridge::from_parts_with_writer_and_cancel_notify(
+                host_pending,
+                cancellation.cancelled.clone(),
+                cancellation.notify.clone(),
+                Arc::new(move |line: &str| {
+                    host_tx.send(line.to_string()).map_err(|e| e.to_string())
+                }),
+                1,
+            ),
+        );
+
+        let execution = execute_chunk(
+            chunk,
+            bridge.clone(),
+            host_bridge,
+            PromptGlobals {
+                text: "",
+                content: &[],
+                messages: &[],
+            },
+            VmSetup {
+                source: &source,
+                baseline: None,
+                baseline_cache_hit: None,
+                baseline_prepare_ms: 0,
+                source_path: None,
+                cwd: cwd.path(),
+                project_root: None,
+                runtime_configurator: Arc::new(super::super::NoopAcpRuntimeConfigurator),
+                session_environment: harn_vm::security::SessionEnvironment::inherited(),
+            },
+        );
+        tokio::time::timeout(std::time::Duration::from_secs(10), execution)
+            .await
+            .expect("importing turn completes within the test bound")
+            .expect("importing turn executes");
+        responder.abort();
+        drop(bridge);
+        tokio::task::yield_now().await;
+        client.abort();
+
+        let updates: Vec<serde_json::Value> = captured_updates
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .iter()
+            .map(|line| serde_json::from_str(line).expect("JSON-RPC update"))
+            .collect();
+        let module_progress: Vec<_> = updates
+            .iter()
+            .filter_map(|update| {
+                update.pointer("/params/update/_meta/harn").filter(|meta| {
+                    meta.get("phase").and_then(|v| v.as_str()) == Some("module_preparation")
+                })
+            })
+            .collect();
+        assert_eq!(
+            module_progress
+                .first()
+                .and_then(|meta| meta.pointer("/data/state"))
+                .and_then(|value| value.as_str()),
+            Some("started"),
+            "the start frame must precede lazy module work: {updates:?}"
+        );
+        assert!(
+            module_progress.iter().any(|meta| {
+                meta.pointer("/data/modules_loaded")
+                    .and_then(|value| value.as_u64())
+                    .is_some_and(|loaded| loaded > 0)
+            }),
+            "lazy module preparation must advance a typed live ACP frame: {updates:?}"
+        );
+        let counts: Vec<u64> = module_progress
+            .iter()
+            .map(|meta| {
+                meta.pointer("/data/modules_compiled")
+                    .and_then(|value| value.as_u64())
+                    .unwrap_or(0)
+                    .saturating_add(
+                        meta.pointer("/data/modules_loaded")
+                            .and_then(|value| value.as_u64())
+                            .unwrap_or(0),
+                    )
+            })
+            .collect();
+        assert!(
+            counts.windows(2).all(|window| window[0] <= window[1]),
+            "module progress must be monotonic: {module_progress:?}"
+        );
+        assert_eq!(
+            module_progress
+                .last()
+                .and_then(|meta| meta.pointer("/data/state"))
+                .and_then(|value| value.as_str()),
+            Some("completed"),
+            "the terminal live frame must preserve the final timing receipt"
         );
     }
 }
