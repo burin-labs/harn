@@ -1,4 +1,6 @@
 import { filter_nil } from "std/collections"
+pub import { github_repo, github_slug_from_remote } from "std/connectors/github/repository"
+import { github_repo_or_throw } from "std/connectors/github/repository"
 import {
   git_forge_pull_request_event,
   git_forge_writeback_comment,
@@ -47,8 +49,6 @@ type GitHubConnectorConfig = GitHubOptions
 type GitHubCallOptions = GitHubOptions
 
 type GitHubWaitOptions = GitHubOptions
-
-type GitHubRepoRef = {owner: string, name: string, full_name: string}
 
 /** Authentication and retry controls for GitHub Actions transport. */
 pub type GitHubActionsTransportOptions = {
@@ -423,103 +423,6 @@ pub fn release_view(
   return __call(net, "github.release.view", merge(options, {repo: repo, tag: tag}))
 }
 
-fn __github_strip_git_suffix(value) {
-  const text = trim(to_string(value ?? ""))
-  if ends_with(text, ".git") {
-    return substring(text, 0, len(text) - len(".git"))
-  }
-  return text
-}
-
-fn __github_slug_match(pattern, text) {
-  const captures = regex_captures(pattern, text)
-  if len(captures) == 0 {
-    return nil
-  }
-  const groups = captures[0].groups
-  if len(groups) < 2 {
-    return nil
-  }
-  const owner = trim(to_string(groups[0]))
-  const repo = __github_strip_git_suffix(groups[1])
-  if owner == "" || repo == "" || contains(owner, "/") || contains(repo, "/") {
-    return nil
-  }
-  return owner + "/" + repo
-}
-
-/**
- * github_slug_from_remote returns `owner/repo` for common GitHub SSH and HTTPS remote URLs.
- *
- * @effects: []
- * @errors: []
- */
-pub fn github_slug_from_remote(url: string) -> string? {
-  const text = trim(to_string(url ?? ""))
-  if text == "" {
-    return nil
-  }
-  const url_slug = __github_slug_match(
-    "^(?:git\\+)?(?:https?|ssh|git)://(?:[^@/]+@)?github\\.com(?::[0-9]+)?/([^/]+)/([^/#?]+)(?:[?#].*)?$",
-    text,
-  )
-  if url_slug != nil {
-    return url_slug
-  }
-  return __github_slug_match("^(?:[^@/]+@)?github\\.com:([^/]+)/([^/#?]+)(?:[?#].*)?$", text)
-}
-
-/**
- * github_repo normalizes an `owner/repo` slug, GitHub remote URL, or owner+repo pair.
- *
- * @effects: []
- * @errors: []
- */
-pub fn github_repo(repo: any, name: string? = nil) -> GitHubRepoRef? {
-  if name != nil {
-    const owner = trim(to_string(repo ?? ""))
-    const repo_name = __github_strip_git_suffix(name)
-    if owner == "" || repo_name == "" {
-      return nil
-    }
-    return {owner: owner, name: repo_name, full_name: owner + "/" + repo_name}
-  }
-  if type_of(repo) == "dict" {
-    const full_name = repo?.full_name
-    if full_name != nil {
-      return github_repo(full_name)
-    }
-    const owner = repo?.owner ?? repo?.owner_login
-    const repo_name = repo?.name ?? repo?.repo
-    if owner != nil && repo_name != nil {
-      return github_repo(owner, repo_name)
-    }
-    return nil
-  }
-  const raw = trim(to_string(repo ?? ""))
-  const slug = if contains(raw, "github.com") || contains(raw, "://") {
-    github_slug_from_remote(raw)
-  } else {
-    raw
-  }
-  if slug == nil || !contains(slug, "/") {
-    return nil
-  }
-  const parts = split(slug, "/")
-  if len(parts) != 2 {
-    return nil
-  }
-  return github_repo(parts[0], parts[1])
-}
-
-fn __github_repo_or_throw(repo, name = nil) {
-  const parsed = github_repo(repo, name)
-  if parsed == nil {
-    throw "std/connectors/github: expected repo as owner/repo, GitHub remote URL, or owner + repo"
-  }
-  return parsed
-}
-
 /**
  * comment posts a comment on a GitHub issue or PR.
  *
@@ -645,7 +548,7 @@ pub fn workflow_dispatch(
   inputs: dict? = nil,
   options: GitHubActionsTransportOptions = {},
 ) -> GitHubWorkflowDispatchResponse {
-  const r = __github_repo_or_throw(repo)
+  const r = github_repo_or_throw(repo)
   return call(
     net,
     "github.actions.workflow_dispatch",
@@ -666,7 +569,7 @@ pub fn workflow_runs(
   query: GitHubWorkflowRunsQuery = {},
   options: GitHubActionsTransportOptions = {},
 ) -> GitHubActionsRunsResponse {
-  const r = __github_repo_or_throw(repo)
+  const r = github_repo_or_throw(repo)
   return call(net, "github.actions.runs", merge(query, {repo: r.full_name}), options)
 }
 
@@ -682,7 +585,7 @@ pub fn workflow_run(
   run_id: int | string,
   options: GitHubActionsTransportOptions = {},
 ) -> GitHubActionsRunResponse {
-  const r = __github_repo_or_throw(repo)
+  const r = github_repo_or_throw(repo)
   return call(net, "github.actions.run", {repo: r.full_name, run_id: run_id}, options)
 }
 
@@ -699,7 +602,7 @@ pub fn workflow_run_jobs(
   query: GitHubWorkflowJobsQuery = {},
   options: GitHubActionsTransportOptions = {},
 ) -> GitHubActionsJobsResponse {
-  const r = __github_repo_or_throw(repo)
+  const r = github_repo_or_throw(repo)
   return call(
     net,
     "github.actions.run_jobs",
@@ -720,7 +623,7 @@ pub fn workflow_run_cancel(
   run_id: int | string,
   options: GitHubActionsTransportOptions = {},
 ) -> GitHubWorkflowCancelResponse {
-  const r = __github_repo_or_throw(repo)
+  const r = github_repo_or_throw(repo)
   return call(net, "github.actions.run_cancel", {repo: r.full_name, run_id: run_id}, options)
 }
 
@@ -847,10 +750,8 @@ fn __actions_exact_runs(request: GitHubActionsExactProofRequest, runs, expected_
   return runs.filter(
     { run ->
       run.workflow_path == request.workflow_path && run.event == request.event
-        && lowercase(
-        run.head_sha,
-      )
-        == expected_sha
+        && lowercase(run.head_sha)
+          == expected_sha
         && (request.run_id == nil || run.id == request.run_id)
     },
   )
@@ -872,9 +773,8 @@ fn __actions_run_rejection(run, expected_url: string) -> string {
 
 fn __actions_jobs_check(jobs_page, repo: string, run_id: int, required_name: string) {
   if jobs_page == nil || jobs_page?.run_id != run_id || jobs_page?.repo != repo
-    || jobs_page
-    ?.total_count
-    == nil
+    || jobs_page?.total_count
+      == nil
     || jobs_page?.jobs == nil
     || type_of(jobs_page.jobs) != "list"
     || jobs_page.total_count != len(jobs_page.jobs) {
@@ -991,7 +891,7 @@ pub fn read_file_at_ref(
   ref: string? = nil,
   options: GitHubCallOptions = {},
 ) {
-  const r = __github_repo_or_throw(repo)
+  const r = github_repo_or_throw(repo)
   return call(
     net,
     "repos.get_text",
@@ -1024,7 +924,7 @@ pub fn repos_get_text(
  * @errors: []
  */
 pub fn latest_release(net: HarnessNet, repo: string | dict, options: GitHubCallOptions = {}) {
-  const r = __github_repo_or_throw(repo)
+  const r = github_repo_or_throw(repo)
   return call(net, "github.release.latest", {repo: r.full_name}, options)
 }
 
@@ -1040,7 +940,7 @@ pub fn release_assets(
   release_id: any = nil,
   options: GitHubCallOptions = {},
 ) {
-  const r = __github_repo_or_throw(repo)
+  const r = github_repo_or_throw(repo)
   return call(
     net,
     "github.release.assets",
@@ -1128,7 +1028,7 @@ pub fn enable_auto_merge(
   pull_number: int | string,
   options: GitHubCallOptions = {},
 ) -> GitHubAutoMergeResult {
-  const r = __github_repo_or_throw(repo)
+  const r = github_repo_or_throw(repo)
   const requested_method = uppercase(to_string(options.method ?? options.merge_method ?? "merge"))
   const result = try {
     call(
@@ -1189,7 +1089,7 @@ pub fn close_pr(
   comment: string? = nil,
   options: GitHubCallOptions = {},
 ) -> GitHubClosePrResult {
-  const r = __github_repo_or_throw(repo)
+  const r = github_repo_or_throw(repo)
   let comment_posted = false
   if comment != nil && trim(to_string(comment)) != "" {
     const posted = try {
@@ -1299,8 +1199,7 @@ fn __github_auto_merge_success(
 ) -> GitHubAutoMergeResult {
   const state = result?.state ?? "enabled"
   const merge_method = result?.requested_method ?? result?.auto_merge?.merge_method
-    ?? result
-    ?.pull_request?.autoMergeRequest?.mergeMethod
+    ?? result?.pull_request?.autoMergeRequest?.mergeMethod
     ?? requested_method
   return {
     ok: true,

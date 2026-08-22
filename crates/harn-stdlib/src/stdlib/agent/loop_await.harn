@@ -1,0 +1,187 @@
+import "std/agent/loop_tool_calls"
+import "std/agent/loop_turn_options"
+import "std/agent/state"
+
+pub type AgentLoopAwaitState = {
+  budget: dict,
+  iteration: int,
+  iteration_index: int,
+  opts: dict,
+  visible_text: string,
+  loop_start_ms: int,
+  current_max: int,
+  budget_exhausted_emitted: bool,
+  budget_decisions: list,
+}
+
+pub type AgentLoopAwaitOutcome = {
+  action: "continue" | "break",
+  suspend_result: any,
+  final_status: string,
+  stop_reason: string,
+  budget_exhausted_emitted: bool,
+  budget_decisions: list,
+}
+
+pub type AgentLoopAwaitTurn = {
+  session: dict,
+  call: dict,
+  tool_calls: list,
+  llm_result: dict,
+  llm_options: dict,
+}
+
+/**
+ * Resolve an `agent_await_resumption` call and record its complete turn evidence.
+ *
+ * @effects: [agent]
+ * @errors: [runtime]
+ */
+pub fn agent_loop_await(
+  agent: HarnessAgent,
+  runtime: HarnessRuntime,
+  clock: HarnessClock,
+  turn: AgentLoopAwaitTurn,
+  state: AgentLoopAwaitState,
+) -> AgentLoopAwaitOutcome {
+  const session = turn.session
+  const await_call = turn.call
+  const tool_calls = turn.tool_calls
+  const llm_result = turn.llm_result
+  const turn_llm_opts = turn.llm_options
+  const await_parsed = try {
+    __agent_await_resumption_args(agent, await_call)
+  }
+  if !is_err(await_parsed) {
+    __agent_loop_record_await_tool_results(
+      agent,
+      session,
+      await_call,
+      tool_calls,
+      unwrap(await_parsed).reason,
+    )
+  }
+  // The await helper snapshots the session before it returns a suspended
+  // result. Record the provider turn first so the portable checkpoint carries
+  // its usage and outcome facts with the messages.
+  const await_totals = agent_session_record_usage(
+    agent,
+    session.session_id,
+    llm_result,
+    turn_llm_opts,
+    state.iteration_index + 1,
+  )
+  const await_result = if is_err(await_parsed) {
+    await_parsed
+  } else {
+    try {
+      __agent_loop_await_resumption(
+        agent,
+        runtime,
+        session,
+        state.iteration,
+        await_call,
+        unwrap(await_parsed),
+        state.opts,
+      )
+    }
+  }
+  if is_err(await_result) {
+    const await_error = unwrap_err(await_result)
+    if is_err(await_parsed) {
+      agent_session_record_undispatched_tool_results(
+        agent,
+        session.session_id,
+        tool_calls,
+        "skipped",
+        "not dispatched: the agent_await_resumption call in this turn was invalid",
+      )
+    }
+    __inject_feedback_with_tool_repair(
+      agent,
+      session.session_id,
+      "agent_await_resumption",
+      __agent_loop_invalid_await_resumption_feedback(await_error),
+    )
+    agent_emit_event(
+      agent,
+      session.session_id,
+      "iteration_end",
+      {
+        iteration: state.iteration_index + 1,
+        iteration_info: __agent_loop_iteration_info(
+          agent,
+          clock,
+          session.session_id,
+          llm_result,
+          len(tool_calls),
+          state.visible_text,
+          await_totals,
+          state.loop_start_ms,
+        )
+          + {dispatch_skipped: true, skip_reason: "invalid_agent_await_resumption"},
+      },
+    )
+    const await_exhaustion = __agent_loop_budget_exhaustion(
+      agent,
+      clock,
+      session.session_id,
+      state.budget,
+      state.iteration,
+      await_totals,
+      state.loop_start_ms,
+      state.current_max,
+    )
+    if await_exhaustion.exhausted {
+      __agent_loop_emit_budget_exhausted(agent, session.session_id, await_exhaustion)
+      return {
+        action: "break",
+        suspend_result: nil,
+        final_status: "budget_exhausted",
+        stop_reason: await_exhaustion.kind,
+        budget_exhausted_emitted: true,
+        budget_decisions: __agent_loop_record_budget_stop(
+          state.budget_decisions,
+          state.iteration,
+          state.current_max,
+          await_exhaustion.kind,
+        ),
+      }
+    }
+    return {
+      action: "continue",
+      suspend_result: nil,
+      final_status: "",
+      stop_reason: "",
+      budget_exhausted_emitted: state.budget_exhausted_emitted,
+      budget_decisions: state.budget_decisions,
+    }
+  }
+  const suspend_result = unwrap(await_result)
+  agent_emit_event(
+    agent,
+    session.session_id,
+    "iteration_end",
+    {
+      iteration: state.iteration_index + 1,
+      iteration_info: __agent_loop_iteration_info(
+        agent,
+        clock,
+        session.session_id,
+        llm_result,
+        len(tool_calls),
+        state.visible_text,
+        await_totals,
+        state.loop_start_ms,
+      ),
+    },
+  )
+  return {
+    action: "break",
+    suspend_result: suspend_result,
+    final_status: "suspended",
+    stop_reason: "suspended",
+    budget_exhausted_emitted: state.budget_exhausted_emitted,
+    budget_decisions: state.budget_decisions,
+  }
+}

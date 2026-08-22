@@ -1,0 +1,520 @@
+import "./policy_core.harn"
+
+fn native_shared_cache_errors(
+  ci_workflow,
+  nightly_workflow,
+  platform: string,
+  cache_key: string,
+  expected_source_key: string,
+  consumer_ignored_step_ids: list<string> = [],
+) -> list<string> {
+  const consumer = ci_workflow?.jobs?.[platform]
+  const producer = nightly_workflow?.jobs?.nextest
+  if consumer == nil || producer == nil {
+    return ["${cache_key} must pair ci.yml:${platform} with ${platform}-nightly.yml:nextest"]
+  }
+  let errors: list<string> = []
+  const consumer_caches = matching_steps(consumer, "./.github/actions/rust-cache")
+  const producer_caches = matching_steps(producer, "./.github/actions/rust-cache")
+  const wrapper_steps = ((consumer?.steps ?? []) + (producer?.steps ?? [])).map(
+    { step -> return step_uses(step) },
+  )
+    .filter(
+      { uses ->
+        return uses.starts_with(NATIVE_SCCACHE_ACTION_PREFIX)
+          || uses
+            == CONFIGURE_CARGO_SCCACHE_ACTION
+      },
+    )
+    .to_list()
+  if len(wrapper_steps) > 0 {
+    errors = errors
+      + [
+        "${cache_key} producer and consumer must use plain rustc: "
+          + json_stringify(wrapper_steps),
+      ]
+  }
+  if len(consumer_caches) != 1
+    || trim(consumer_caches[0]?.with?.["shared-key"] ?? "")
+      != cache_key
+    || save_requested(consumer_caches[0]) {
+    errors = errors
+      + ["ci.yml:${platform} must restore ${cache_key} exactly once without saving"]
+  }
+  if len(producer_caches) != 1
+    || trim(producer_caches[0]?.with?.["shared-key"] ?? "")
+      != cache_key
+    || !save_requested(producer_caches[0]) {
+    errors = errors
+      + ["${platform}-nightly.yml:nextest must write ${cache_key} exactly once"]
+  }
+  const consumer_source_key = trim(consumer_caches[0]?.with?.["source-key"] ?? "")
+  const producer_source_key = trim(producer_caches[0]?.with?.["source-key"] ?? "")
+  if expected_source_key != ""
+    && (consumer_source_key != expected_source_key
+      || producer_source_key
+        != expected_source_key) {
+    errors = errors
+      + ["${cache_key} producer and consumer must use the canonical source fingerprint"]
+  }
+  const consumer_inputs = cache_key_inputs(ci_workflow, consumer, consumer_ignored_step_ids)
+  const producer_inputs = cache_key_inputs(nightly_workflow, producer)
+  if consumer_inputs != producer_inputs {
+    errors = errors
+      + [
+        "${cache_key} cache-key inputs drift: consumer="
+          + json_stringify(consumer_inputs)
+          + " producer="
+          + json_stringify(producer_inputs),
+      ]
+  }
+  return errors
+}
+
+fn step_run_contains(step, marker: string) -> bool {
+  return contains(trim(step?.run ?? ""), marker)
+}
+
+fn matching_run_steps(job, marker: string) -> list {
+  return (job?.steps ?? []).filter({ step -> return step_run_contains(step, marker) }).to_list()
+}
+
+fn matching_named_steps(job, name: string) -> list {
+  return (job?.steps ?? []).filter({ step -> return trim(step?.name ?? "") == name }).to_list()
+}
+
+fn matching_upload_steps(job, artifact_name: string) -> list {
+  return (job?.steps ?? []).filter(
+    { step ->
+      return step_uses(step).starts_with("actions/upload-artifact@")
+        && trim(step?.with?.name ?? "")
+          == artifact_name
+    },
+  )
+    .to_list()
+}
+
+/** Keep the sole native-Windows cache writer byte-compatible with its restore-only PR consumer. */
+pub fn windows_shared_cache_errors(ci_workflow, nightly_workflow) -> list<string> {
+  let errors = native_shared_cache_errors(
+    ci_workflow,
+    nightly_workflow,
+    "windows",
+    WINDOWS_CACHE_KEY,
+    "",
+    [WINDOWS_STORAGE_INITIAL_STEP_ID, WINDOWS_WARM_RESTORE_STEP_ID],
+  )
+  const consumer_caches = matching_steps(ci_workflow?.jobs?.windows, "./.github/actions/rust-cache")
+  const producer_caches = matching_steps(
+    nightly_workflow?.jobs?.nextest,
+    "./.github/actions/rust-cache",
+  )
+  if len(consumer_caches) == 1 && len(producer_caches) == 1 {
+    const caches = consumer_caches + producer_caches
+    if caches.any(
+      { cache -> return trim(cache?.with?.["target-dir"] ?? "") != WINDOWS_CACHE_TARGET_DIR },
+    ) {
+      errors = errors
+        + ["${WINDOWS_CACHE_KEY} producer and consumer must cache CARGO_TARGET_DIR explicitly"]
+    }
+    if caches.any(
+      { cache ->
+        return trim(cache?.with?.["source-key"] ?? "") != ""
+          || trim(cache?.with?.["broad-restore-prefix"] ?? "")
+            != ""
+      },
+    ) {
+      errors = errors
+        + [
+          "${WINDOWS_CACHE_KEY} producer and consumer must use one stable native restore namespace",
+        ]
+    }
+    if trim(producer_caches[0]?.if ?? "") != WINDOWS_RELEASE_CERTIFY_CACHE_GUARD {
+      errors = errors
+        + ["windows-nightly.yml:nextest must skip the shared target cache for release-certify refs"]
+    }
+  }
+  return errors
+}
+
+/** Exact candidates warm from a main-produced artifact outside the Actions cache pool. */
+pub fn windows_release_certify_warm_errors(
+  policy: CiCachePolicy,
+  nightly_workflow,
+) -> list<string> {
+  const warm = policy.windows_workspace_warm
+  const job = nightly_workflow?.jobs?.[warm.job]
+  if job == nil {
+    return ["${warm.workflow}:${warm.job} must own the Windows workspace warm artifact path"]
+  }
+  let errors: list<string> = []
+  if warm.workflow != "windows-nightly.yml" || warm.job != "nextest" {
+    errors = errors
+      + ["cache-policy.json windows_workspace_warm must stay owned by windows-nightly.yml:nextest"]
+  }
+  const permissions = nightly_workflow?.permissions ?? {}
+  if trim(to_string(permissions?.actions ?? "")) != "write" {
+    errors = errors
+      + ["${warm.workflow} must grant actions: write for warm artifact upload/download"]
+  }
+  const expected_drive_size = windows_release_certify_dev_drive_size(warm)
+  const dev_drives = matching_named_steps(job, "Set up Dev Drive")
+  if len(dev_drives) != 1
+    || trim(to_string(dev_drives[0]?.with?.["drive-size"] ?? ""))
+      != expected_drive_size {
+    errors = errors
+      + [
+        "${warm.workflow}:${warm.job} Dev Drive size must follow cache-policy.json windows_workspace_warm ceilings",
+      ]
+  }
+  const restore_steps = matching_run_steps(job, WINDOWS_WARM_RESTORE_MARKER)
+  if len(restore_steps) != 1
+    || trim(restore_steps[0]?.if ?? "") != WINDOWS_WARM_RELEASE_CERTIFY_GUARD
+    || restore_steps[0]?.["continue-on-error"]
+      != true {
+    errors = errors
+      + [
+        "${warm.workflow}:${warm.job} must restore-only the main warm artifact on release-certify refs with cold fallback",
+      ]
+  }
+  const pack_steps = matching_run_steps(job, WINDOWS_WARM_PACK_MARKER)
+  if len(pack_steps) != 1 || trim(pack_steps[0]?.if ?? "") != WINDOWS_WARM_MAIN_GUARD {
+    errors = errors
+      + ["${warm.workflow}:${warm.job} must pack the Windows warm artifact only on main"]
+  }
+  const upload_steps = matching_upload_steps(job, warm.artifact_name)
+  if len(upload_steps) != 1
+    || trim(upload_steps[0]?.if ?? "") != WINDOWS_WARM_MAIN_GUARD
+    || upload_steps[0]?.with?.["retention-days"]
+      != warm.retention_days
+    || trim(to_string(upload_steps[0]?.with?.["if-no-files-found"] ?? ""))
+      != "error" {
+    errors = errors
+      + [
+        "${warm.workflow}:${warm.job} must upload ${warm.artifact_name} from main with ${warm.retention_days}-day retention",
+      ]
+  }
+  const nextest_installs = (job?.steps ?? []).filter(
+    { step ->
+      return step_uses(step).starts_with("taiki-e/install-action@")
+        && contains(trim(to_string(step?.with?.tool ?? "")), "nextest@${policy.nextest_version}")
+    },
+  )
+    .to_list()
+  if len(nextest_installs) != 1 {
+    errors = errors
+      + [
+        "${warm.workflow}:${warm.job} must install nextest@${policy.nextest_version} from cache-policy.json",
+      ]
+  }
+  return errors + windows_nightly_storage_budget_errors(job)
+}
+
+fn windows_blacksmith_runner_expression() -> string {
+  const eligible_event =
+    "(github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))"
+  return "$"
+    + "{{ vars.${WINDOWS_BLACKSMITH_DISABLE_VAR} == 'true' && '${HOSTED_WINDOWS_RUNNER}' || (${eligible_event} && '${BLACKSMITH_8CPU_WINDOWS_RUNNER}' || '${HOSTED_WINDOWS_RUNNER}') }}"
+}
+
+fn windows_blacksmith_tier_expression() -> string {
+  const eligible_event =
+    "(github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))"
+  return "$"
+    + "{{ vars.${WINDOWS_BLACKSMITH_DISABLE_VAR} == 'true' && '${HOSTED_RUNNER_TIER}' || (${eligible_event} && '${BLACKSMITH_RUNNER_TIER}' || '${HOSTED_RUNNER_TIER}') }}"
+}
+
+fn windows_pr_dev_drive_guard() -> string {
+  return "$"
+    + "{{ vars.HARN_WINDOWS_DEVDRIVE == 'on' && env.${RUNNER_TIER_ENV} == '${HOSTED_RUNNER_TIER}' }}"
+}
+
+fn windows_nightly_dev_drive_guard() -> string {
+  return "$" + "{{ vars.HARN_WINDOWS_DEVDRIVE == 'on' }}"
+}
+
+fn exact_step_env(job, step_name: string, key: string) -> string {
+  const step = step_by_name(job?.steps ?? [], step_name)
+  return trim(to_string(step?.env?.[key] ?? "<unset>"))
+}
+
+fn windows_pr_runner_errors(policy: CiCachePolicy, job, producer) -> list<string> {
+  let errors: list<string> = []
+  if policy.windows_workspace_warm.workflow != "windows-nightly.yml"
+    || policy.windows_workspace_warm.job
+      != "nextest" {
+    errors = errors
+      + ["native Windows feedback must consume the cache-policy.json main warm-artifact owner"]
+  }
+  if trim(job?.["runs-on"] ?? "") != windows_blacksmith_runner_expression() {
+    errors = errors
+      + [
+        "ci.yml:windows must route merge_group and same-repository pull_request to ${BLACKSMITH_8CPU_WINDOWS_RUNNER}, with ${WINDOWS_BLACKSMITH_DISABLE_VAR}=true and external events falling back to ${HOSTED_WINDOWS_RUNNER}",
+      ]
+  }
+  if trim(job?.env?.[RUNNER_TIER_ENV] ?? "") != windows_blacksmith_tier_expression() {
+    errors = errors + ["ci.yml:windows must mirror its Blacksmith/hosted runner tier"]
+  }
+  if trim(producer?.["runs-on"] ?? "") != HOSTED_WINDOWS_RUNNER {
+    errors = errors
+      + [
+        "${policy.windows_workspace_warm.workflow}:${policy.windows_workspace_warm.job} must remain on ${HOSTED_WINDOWS_RUNNER}",
+      ]
+  }
+  const pr_dev_drives = matching_named_steps(job, "Set up Dev Drive")
+  if len(pr_dev_drives) != 1
+    || trim(to_string(pr_dev_drives[0]?.if ?? ""))
+      != windows_pr_dev_drive_guard() {
+    errors = errors
+      + [
+        "ci.yml:windows must skip Hyper-V Dev Drive setup on Blacksmith and retain it for the github-hosted fallback",
+      ]
+  }
+  if len(pr_dev_drives) == 1
+    && trim(to_string(pr_dev_drives[0]?.with?.["drive-size"] ?? ""))
+      != windows_ci_dev_drive_size(policy.windows_workspace_warm) {
+    errors = errors
+      + ["ci.yml:windows Dev Drive must reserve the full-workspace ceiling outside pull requests"]
+  }
+  const producer_dev_drives = matching_named_steps(producer, "Set up Dev Drive")
+  if len(producer_dev_drives) != 1
+    || trim(to_string(producer_dev_drives[0]?.if ?? ""))
+      != windows_nightly_dev_drive_guard() {
+    errors = errors
+      + [
+        "${policy.windows_workspace_warm.workflow}:${policy.windows_workspace_warm.job} must retain variable-gated Dev Drive setup on its hosted runner",
+      ]
+  }
+  if trim(to_string(job?.permissions?.actions ?? "")) != "read"
+    || trim(to_string(job?.permissions?.contents ?? ""))
+      != "read"
+    || len((job?.permissions ?? {}).keys())
+      != 2 {
+    errors = errors
+      + ["ci.yml:windows must grant only contents: read and actions: read for artifact discovery"]
+  }
+  return errors
+}
+
+fn windows_storage_budget_errors(job) -> list<string> {
+  let errors: list<string> = []
+  const expected = [
+    {name: WINDOWS_STORAGE_INITIAL_STEP, phase: "initial"},
+    {name: WINDOWS_STORAGE_AFTER_RESTORE_STEP, phase: "after_restore"},
+    {name: WINDOWS_STORAGE_TERMINAL_STEP, phase: "terminal"},
+  ]
+  for receipt in expected {
+    const steps = matching_named_steps(job, receipt.name)
+    if len(steps) != 1
+      || trim(steps[0]?.if ?? "")
+        != "always()"
+      || !contains(trim(steps[0]?.run ?? ""), WINDOWS_STORAGE_REPORT_MARKER)
+      || !contains(trim(steps[0]?.run ?? ""), "report ${receipt.phase}") {
+      errors = errors
+        + [
+          "ci.yml:windows must always emit the ${receipt.phase} storage receipt through the shared budget owner",
+        ]
+    }
+  }
+  const initial = step_by_name(job?.steps ?? [], WINDOWS_STORAGE_INITIAL_STEP)
+  if trim(initial?.id ?? "") != WINDOWS_STORAGE_INITIAL_STEP_ID {
+    errors = errors
+      + ["ci.yml:windows must give the pre-cache storage receipt its cache-parity exclusion id"]
+  }
+  const test_step = step_by_name(job?.steps ?? [], WINDOWS_TEST_STEP)
+  if test_step == nil
+    || !contains(trim(test_step?.run ?? ""), "cargo build --locked --profile test -p harn-cli") {
+    errors = errors
+      + ["ci.yml:windows must build freshness binaries in Cargo test profile before nextest"]
+  }
+  return errors
+}
+
+fn windows_nightly_storage_budget_errors(job) -> list<string> {
+  let errors: list<string> = []
+  for receipt in [
+    {name: WINDOWS_NIGHTLY_STORAGE_BEFORE_STEP, phase: "before_build"},
+    {name: WINDOWS_STORAGE_TERMINAL_STEP, phase: "terminal"},
+  ] {
+    const steps = matching_named_steps(job, receipt.name)
+    if len(steps) != 1
+      || trim(steps[0]?.if ?? "")
+        != "always()"
+      || !contains(trim(steps[0]?.run ?? ""), WINDOWS_STORAGE_REPORT_MARKER)
+      || !contains(trim(steps[0]?.run ?? ""), "report ${receipt.phase}") {
+      errors = errors
+        + [
+          "windows-nightly.yml:nextest must always emit the ${receipt.phase} storage receipt through the shared budget owner",
+        ]
+    }
+  }
+  return errors
+}
+
+fn windows_pr_warm_restore_errors(policy: CiCachePolicy, job) -> list<string> {
+  let errors: list<string> = []
+  const steps = job?.steps ?? []
+  const restore = step_by_name(steps, WINDOWS_WARM_RESTORE_STEP)
+  const restore_index = step_index_by_name(steps, WINDOWS_WARM_RESTORE_STEP)
+  const cache_index = steps.enumerate().filter(
+    { entry -> return step_uses(entry.value) == RUST_CACHE_ACTION },
+  )
+    .map({ entry -> return entry.index })
+    .first()
+    ?? -1
+  const caches = matching_steps(job, RUST_CACHE_ACTION)
+  if restore == nil
+    || trim(restore?.id ?? "") != WINDOWS_WARM_RESTORE_STEP_ID
+    || !step_run_contains(restore, WINDOWS_WARM_RESTORE_MARKER)
+    || restore?.["continue-on-error"]
+      != true
+    || trim(restore?.env?.GH_TOKEN ?? "")
+      != "$"
+        + "{{ github.token }}"
+    || !contains(trim(restore?.run ?? ""), "GITHUB_OUTPUT")
+    || !contains(trim(restore?.run ?? ""), "windows_warm_restore=miss") {
+    errors = errors
+      + [
+        "ci.yml:windows must fail-open through one output-producing ${policy.windows_workspace_warm.artifact_name} restore",
+      ]
+  }
+  if restore_index < 0 || cache_index < 0 || restore_index >= cache_index {
+    errors = errors
+      + [
+        "ci.yml:windows must try the main warm artifact before its provider-local rust-cache fallback",
+      ]
+  }
+  if len(caches) != 1 || trim(caches[0]?.if ?? "") != WINDOWS_CACHE_FALLBACK_GUARD {
+    errors = errors
+      + ["ci.yml:windows must use rust-cache only when the provider-neutral warm artifact misses"]
+  }
+  const report = step_by_name(steps, WINDOWS_WARM_REPORT_STEP)
+  if report == nil
+    || trim(report?.if ?? "")
+      != "always()"
+    || !contains(
+      trim(to_string(report?.env?.RESTORE_RESULT ?? "")),
+      "steps.${WINDOWS_WARM_RESTORE_STEP_ID}.outputs.windows_warm_restore",
+    )
+    || !contains(
+      trim(to_string(report?.env?.RESTORE_PRODUCER_COMMIT ?? "")),
+      "windows_warm_restore_producer_commit",
+    )
+    || !contains(trim(to_string(report?.env?.RESTORE_RUN_ID ?? "")), "windows_warm_restore_run_id") {
+    errors = errors
+      + ["ci.yml:windows must always report warm-artifact outcome, producer commit, and source run"]
+  }
+  return errors
+}
+
+fn windows_test_runtime_errors(ci_workflow, nightly_workflow, job, producer) -> list<string> {
+  let errors: list<string> = []
+  if effective_job_env(ci_workflow, job, "RUST_MIN_STACK") != "<unset>"
+    || effective_job_env(nightly_workflow, producer, "RUST_MIN_STACK")
+      != "<unset>" {
+    errors = errors
+      + [
+        "Windows RUST_MIN_STACK is test-runtime-only and must not enter producer or consumer cache-action environments",
+      ]
+  }
+  const consumer_stack = exact_step_env(job, WINDOWS_TEST_STEP, "RUST_MIN_STACK")
+  const producer_stack = exact_step_env(producer, WINDOWS_NIGHTLY_TEST_STEP, "RUST_MIN_STACK")
+  if consumer_stack != WINDOWS_TEST_STACK_BYTES || producer_stack != WINDOWS_TEST_STACK_BYTES {
+    errors = errors
+      + [
+        "Windows test steps must set identical RUST_MIN_STACK=${WINDOWS_TEST_STACK_BYTES} runtime stacks",
+      ]
+  }
+  return errors
+}
+
+/**
+ * Keep path-gated native Windows feedback fast without coupling its warm path
+ * to one runner provider's cache backend.
+ */
+pub fn windows_pr_native_feedback_errors(
+  policy: CiCachePolicy,
+  ci_workflow,
+  nightly_workflow,
+) -> list<string> {
+  const job = ci_workflow?.jobs?.windows
+  const producer = nightly_workflow?.jobs?.[policy.windows_workspace_warm.job]
+  if job == nil || producer == nil {
+    return [
+      "native Windows feedback must pair ci.yml:windows with ${policy.windows_workspace_warm.workflow}:${policy.windows_workspace_warm.job}",
+    ]
+  }
+  return windows_pr_runner_errors(policy, job, producer)
+    + windows_pr_warm_restore_errors(policy, job)
+    + windows_storage_budget_errors(job)
+    + windows_test_runtime_errors(ci_workflow, nightly_workflow, job, producer)
+}
+
+/** Every workflow nextest@ pin must match the single cache-policy owner. */
+pub fn nextest_version_errors(policy: CiCachePolicy, workflows: dict) -> list<string> {
+  const expected = "nextest@${policy.nextest_version}"
+  let errors: list<string> = []
+  let installs = 0
+  for workflow in workflows.keys().sorted() {
+    const jobs = workflows[workflow]?.jobs ?? {}
+    for job in jobs.keys().sorted() {
+      for step in jobs[job]?.steps ?? [] {
+        if !step_uses(step).starts_with("taiki-e/install-action@") {
+          continue
+        }
+        const install_tool = trim(to_string(step?.with?.tool ?? ""))
+        if !contains(install_tool, "nextest@") {
+          continue
+        }
+        installs = installs + 1
+        if !contains(install_tool, expected) {
+          errors = errors
+            + ["${workflow}:${job} must install ${expected} from cache-policy.json"]
+        }
+      }
+    }
+  }
+  if installs == 0 {
+    errors = errors
+      + ["at least one workflow must install ${expected} from cache-policy.json"]
+  }
+  return errors
+}
+
+pub fn actions_cache_capacity_errors(policy: CiCachePolicy) -> list<string> {
+  const warm = policy.windows_workspace_warm
+  if warm.max_bytes >= policy.storage_limit_bytes {
+    return [
+      "cache-policy.json windows_workspace_warm.max_bytes must stay below storage_limit_bytes so warm artifacts cannot pretend to replace the Actions cache pool",
+    ]
+  }
+  if warm.dev_drive_size_full_workspace == warm.dev_drive_size_default
+    || warm.dev_drive_size_release_certify
+      == warm.dev_drive_size_default {
+    return [
+      "cache-policy.json windows_workspace_warm must give full-workspace and release-certify runs larger Dev Drive ceilings than the default",
+    ]
+  }
+  return []
+}
+
+/** Keep the sole native-macOS cache writer byte-compatible with its restore-only PR consumer. */
+pub fn macos_shared_cache_errors(ci_workflow, nightly_workflow) -> list<string> {
+  const source_key = "$" + "{{ " + NATIVE_SOURCE_FINGERPRINT_BODY + " }}"
+  let errors = native_shared_cache_errors(
+    ci_workflow,
+    nightly_workflow,
+    "macos",
+    MACOS_CACHE_KEY,
+    source_key,
+  )
+  const lint_steps = (ci_workflow?.jobs?.macos?.steps ?? []).filter(
+    { step -> trim(step?.run ?? "") == "./scripts/ci/run_rust_lint_lane.sh" },
+  )
+    .to_list()
+  if len(lint_steps) != 1 {
+    errors = errors
+      + ["ci.yml:macos must route strict Clippy through the cache-safe Rust lint entrypoint"]
+  }
+  return errors
+}

@@ -1,0 +1,89 @@
+import "std/agent/loop_call_resolution"
+import "std/agent/loop_tool_calls"
+import "std/agent/tool_annotations"
+
+pub type AgentLoopTurnProjection = {
+  raw_text: string,
+  parsed: any,
+  visible_text: string,
+  normalized: dict,
+  fallback_index: int,
+  native_fallback_used: bool,
+  native_fallback_rejected: bool,
+  tool_calls: list,
+  parse_dropped: bool,
+  had_parse_errors: bool,
+  had_full_parse_rejection: bool,
+}
+
+/**
+ * Normalize one provider result and record structural tool-call parse feedback.
+ *
+ * @effects: [agent]
+ * @errors: []
+ */
+pub fn agent_loop_turn_projection(
+  harness: Harness,
+  llm_result: dict,
+  turn_llm_opts: dict,
+  turn_opts: dict,
+  fallback_index: int,
+  session_id: string,
+  iteration_index: int,
+) -> AgentLoopTurnProjection {
+  const projected = __agent_loop_project_result(
+    harness.agent,
+    llm_result,
+    {llm_options: turn_llm_opts, turn_options: turn_opts},
+  )
+  const fallback_outcome = __detect_native_fallback(
+    harness.agent,
+    harness.fs,
+    llm_result,
+    projected.parsed,
+    projected.tool_options,
+    fallback_index,
+    session_id,
+    iteration_index,
+  )
+  let tool_calls = if fallback_outcome.triggered {
+    fallback_outcome.calls ?? []
+  } else {
+    __resolve_tool_calls(llm_result, projected.parsed)
+  }
+  const recovered_batch_drop = __drop_unsafe_recovered_text_batch(
+    harness.llm,
+    projected.parsed,
+    tool_calls,
+    projected.tool_options,
+  )
+  tool_calls = agent_collapse_duplicate_read_calls(
+    recovered_batch_drop.tool_calls,
+    turn_opts?.tools,
+    turn_opts,
+  )
+  const parse_feedback = __agent_loop_record_parse_feedback(
+    harness,
+    session_id,
+    projected.normalized,
+    fallback_outcome,
+    tool_calls,
+    projected.parsed,
+    recovered_batch_drop.feedback,
+    llm_result,
+    projected.tool_options,
+  )
+  return {
+    raw_text: projected.raw_text,
+    parsed: projected.parsed,
+    visible_text: projected.visible_text,
+    normalized: projected.normalized,
+    fallback_index: fallback_outcome.fallback_index,
+    native_fallback_used: fallback_outcome.triggered && fallback_outcome.accepted,
+    native_fallback_rejected: fallback_outcome.triggered && !fallback_outcome.accepted,
+    tool_calls: tool_calls,
+    parse_dropped: parse_feedback.parse_dropped,
+    had_parse_errors: parse_feedback.had_parse_errors,
+    had_full_parse_rejection: parse_feedback.had_full_parse_rejection,
+  }
+}

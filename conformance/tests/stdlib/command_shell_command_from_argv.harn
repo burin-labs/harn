@@ -1,6 +1,13 @@
 import { shell_command_from_argv, shell_command_from_value } from "std/command"
+import { shell_command_from_argv_impl, shell_command_from_value_impl } from "std/command/shell"
 
 pipeline default(harness: Harness) {
+  require shell_command_from_argv(["bash", "-lc", "ls -R"])
+    == shell_command_from_argv_impl(["bash", "-lc", "ls -R"]),
+    "std/command argv facade must match its implementation"
+  require shell_command_from_value({command: ["bash", "-lc", "zig build test"]})
+    == shell_command_from_value_impl({command: ["bash", "-lc", "zig build test"]}),
+    "std/command value facade must match its implementation"
   harness.stdio.println(shell_command_from_argv(["bash", "-lc", "ls -R"]))
   harness.stdio.println(shell_command_from_argv(["bash", "lc", "go test ./..."]))
   harness.stdio.println(shell_command_from_argv(["python", "-c", "print('a b')"]))

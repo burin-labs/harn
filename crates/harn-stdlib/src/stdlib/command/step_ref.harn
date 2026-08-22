@@ -1,0 +1,39 @@
+fn __command_suffix(value, limit) {
+  if value == nil {
+    return nil
+  }
+  const text = to_string(value)
+  if limit == nil || len(text) <= limit {
+    return text
+  }
+  return substring(text, len(text) - limit)
+}
+
+/**
+ * command_step_ref returns compact context for agents or recovery reports.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn command_step_ref_impl(step, options = nil) -> dict {
+  const opts = options ?? {}
+  const tail_bytes = opts?.tail_bytes ?? 4000
+  return {
+    name: step?.name,
+    argv: step?.argv,
+    command: step?.command,
+    cwd: step?.cwd,
+    success: step?.success,
+    ok: step?.ok,
+    status: step?.status,
+    exit_code: step?.exit_code,
+    timed_out: step?.timed_out,
+    classification: step?.classification,
+    recovery_hint: step?.recovery_hint,
+    live_log: step?.live_log,
+    output_path: step?.output_path,
+    stdout_path: step?.stdout_path,
+    stderr_path: step?.stderr_path,
+    tail: __command_suffix(step?.failure_tail ?? step?.tail ?? step?.combined, tail_bytes),
+  }
+}
