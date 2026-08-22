@@ -202,16 +202,17 @@ harn_run_cargo_probe_with_deadline() (
   local state_dir=""
   local cargo_wrapper="$harn_bin_scripts_dir/cargo_with_worktree_build_dir.sh"
   local build_freshness_id="${HARN_BUILD_FRESHNESS_ID:-}"
-  local -a cargo_config_args=()
+  # Bash 3.2 treats an empty `"${array[@]}"` expansion as unbound under
+  # `set -u`. Keep every optional Cargo switch in one argv that is guaranteed
+  # nonempty before expansion instead of expanding parallel optional arrays.
+  local -a cargo_args=()
   local clear_freshness_environment=0
   local lease_mode=""
-  local -a cargo_profile_args=()
-  local -a cargo_lock_args=()
 
   timeout_seconds="$(harn_cargo_probe_timeout_seconds)" || return $?
   case "$cargo_profile" in
     dev) ;;
-    test) cargo_profile_args+=(--profile test) ;;
+    test) ;;
     *)
       echo "error: Harn binary Cargo profile must be dev or test" >&2
       return 2
@@ -219,7 +220,7 @@ harn_run_cargo_probe_with_deadline() (
   esac
   case "$cargo_lock_mode" in
     unlocked) ;;
-    locked) cargo_lock_args+=(--locked) ;;
+    locked) ;;
     *)
       echo "error: Harn binary Cargo lock mode must be locked or unlocked" >&2
       return 2
@@ -232,8 +233,20 @@ harn_run_cargo_probe_with_deadline() (
   lease_mode="$(harn_effective_cargo_lease_mode)" || return $?
   if [[ "$lease_mode" != "off" ]]; then
     clear_freshness_environment=1
-    cargo_config_args+=(--config "env.HARN_BUILD_FRESHNESS_ID='$build_freshness_id'")
+    cargo_args+=(--config "env.HARN_BUILD_FRESHNESS_ID='$build_freshness_id'")
   fi
+  cargo_args+=(build --quiet)
+  if [[ "$cargo_lock_mode" == "locked" ]]; then
+    cargo_args+=(--locked)
+  fi
+  if [[ "$cargo_profile" == "test" ]]; then
+    cargo_args+=(--profile test)
+  fi
+  cargo_args+=(
+    --bin harn
+    --bin harn-freshness-check
+    --features internal-freshness-checker
+  )
   state_dir="$(mktemp -d "${TMPDIR:-/tmp}/harn-bin-probe.XXXXXX")"
 
   # Invoked by the EXIT trap below.
@@ -273,10 +286,7 @@ harn_run_cargo_probe_with_deadline() (
         unset HARN_BUILD_FRESHNESS_ID
       fi
       HARN_CARGO_LEASE_WORKSPACE="$(harn_repo_root)" \
-      "$cargo_wrapper" "${cargo_config_args[@]}" build --quiet \
-        "${cargo_lock_args[@]}" "${cargo_profile_args[@]}" \
-        --bin harn --bin harn-freshness-check \
-        --features internal-freshness-checker &&
+      "$cargo_wrapper" "${cargo_args[@]}" &&
         "$predicted_bin" "$(harn_internal_executable_path_command)"
     ) >"$state_dir/stdout" 2>"$state_dir/stderr" &
     probe_pid=$!

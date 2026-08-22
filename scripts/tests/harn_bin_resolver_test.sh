@@ -3,6 +3,12 @@ set -euo pipefail
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 real_sleep=$(command -v sleep)
+minimum_bash=$(command -v bash)
+if [[ -x /bin/bash ]]; then
+  # macOS still ships Bash 3.2. Run the production resolver through that
+  # supported floor even when Homebrew Bash appears earlier in PATH.
+  minimum_bash=/bin/bash
+fi
 allow_cargo_integration="${HARN_BIN_RESOLVER_TEST_ALLOW_CARGO:-0}"
 case "$allow_cargo_integration" in
   0 | 1) ;;
@@ -354,7 +360,7 @@ env -u CARGO_TARGET_DIR -u CARGO_BUILD_BUILD_DIR \
   HARN_CARGO_LEASE_RUNNER="$fake_lease_runner" \
   HARN_CARGO_LEASE_MODE=required \
   PATH="$fake_cargo_bin:$PATH" \
-  "$repo_root/scripts/harn_bin.sh" --print > "$tmp_root/cargo-run.out" &
+  "$minimum_bash" "$repo_root/scripts/harn_bin.sh" --print > "$tmp_root/cargo-run.out" &
 resolver_pid=$!
 for _ in {1..6000}; do
   [[ -e "$fake_lease_waiting" ]] && break
@@ -410,7 +416,7 @@ env -u HARN_CARGO_LEASE_MODE -u HARN_CARGO_LEASE_RUNNER \
   CARGO_TARGET_DIR="$ci_target_dir" \
   FAKE_CARGO_RECORD="$record" \
   PATH="$fake_cargo_bin:$PATH" \
-  "$repo_root/scripts/harn_bin.sh" --print > "$tmp_root/ci-cargo-run.out"
+  "$minimum_bash" "$repo_root/scripts/harn_bin.sh" --print > "$tmp_root/ci-cargo-run.out"
 if grep -Fq 'args=--config env.HARN_BUILD_FRESHNESS_ID=' "$record"; then
   echo "CI-off resolver transported freshness through global Cargo config" >&2
   cat "$record" >&2
