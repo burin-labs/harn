@@ -9,6 +9,65 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.110
+
+### Added
+
+- Add append-safe filesystem and JSONL page cursors with file identity, caller
+  generation, retained partial tails, and typed replacement or truncation resets.
+
+### Changed
+
+- **Optional on-device models now share a purpose-tagged registry (#6818).**
+  Catalog lookup, installed-model listing, and resolution require a typed model
+  purpose, preventing an injection classifier from being selected as an
+  embedding model while preserving the dependency-light management layer,
+  integrity checks, license gates, and missing-model fallback.
+- Repeated project-metadata reads within one agent turn now share Harn's
+  canonical host-call memo. Metadata writes invalidate the memo before and after
+  dispatch, preserving inherited read-after-write behavior while reducing
+  editor/headless bridge traffic and trace volume.
+- Deduplicate repeated LLM capability snapshots in prompt-render transcripts
+  through content-addressed references, preserving portal reconstruction while
+  substantially reducing eval JSONL size and scan overhead.
+
+### Fixed
+
+- Generate complete ACP dispatched, transport-control, and handled method enums
+  in the Swift protocol artifact so embedders can address workflow and other
+  routed methods without local wire constants.
+- Terminal wrap-up records now surface parsed or malformed unconsumed tool calls,
+  including a plain evidence line, without dispatching work past a hard stop.
+- Background command handles now retain recent terminal receipts in a bounded,
+  session-cleaned ledger, so repeated wait, poll, or cancel observations remain
+  truthful after the normal completion event has been consumed.
+- Repair turns now constrain the claimed tool call, preserve the active tool dialect
+  in history, stop retrying an expired total request deadline, and finish simulated
+  loops with the completion spelling their prompt taught.
+- Post-turn policies can now claim one exact tool for the next model turn. Harn
+  validates the typed claim against canonical pre-usage-narrow authority capped
+  by explicit tool policy, constrains that one request to the tool's canonical
+  argument schema, records an applied receipt, and automatically restores the
+  ordinary tool surface afterward.
+- **MCP file-backed prompt refreshes now preserve the newest complete snapshot
+  (#6913).** Concurrent filesystem and in-process reloads can no longer let an
+  older prompt discovery overwrite newer manifest and prompt state.
+- A rejected mutation now blocks its dependent tool batch exactly once instead of
+  poisoning every later process and completion proposal in the agent loop.
+- Made entry bytecode produced by directory precompile remain reusable when the
+  complete source tree moves to another checkout or machine path, with a
+  machine-readable artifact contract for exact cache negotiation.
+- **Durable streaming tool arguments now use deterministic geometric
+  checkpoints (#6930).** Live clients still receive every cumulative update,
+  while both agent-event persistence backends retain bounded prefix-growth
+  snapshots plus every settled or anomalous transition.
+
+### Security
+
+- Parse shell command substitutions, process substitutions, pipelines, and compound commands structurally for command
+  policy. Dynamic or malformed shell semantics now require approval instead of silently appearing safe; exact argv remains
+  lossless, and operating-system confinement remains the child-process security boundary.
+
 ## v0.10.109
 
 ### Added
