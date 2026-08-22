@@ -498,6 +498,44 @@ if [[ -s "$record" ]]; then
   exit 1
 fi
 
+# NUL-delimited authority entries are data, not MSYS command-line arguments.
+# The shell must serialize native paths for the Rust consumer on Windows while
+# retaining POSIX paths for its own existence checks.
+authority_repo="$tmp_root/windows authority repo"
+authority_bin="$tmp_root/windows-authority-bin"
+authority_list="$tmp_root/windows-authorities"
+mkdir -p "$authority_repo/.cargo" "$authority_bin"
+git -C "$authority_repo" init -q
+printf '[build]\n' > "$authority_repo/.cargo/config.toml"
+cat > "$authority_bin/cygpath" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$#" -ne 2 || "$1" != "-w" || "$2" != /* ]]; then
+  echo "unexpected authority cygpath invocation: $*" >&2
+  exit 2
+fi
+path="${2//\//\\}"
+printf 'C:%s\n' "$path"
+SH
+chmod +x "$authority_bin/cygpath"
+(
+  harn_repo_root() { printf '%s\n' "$authority_repo"; }
+  OS=Windows_NT PATH="$authority_bin:$PATH" \
+    harn_write_freshness_authority_list "$authority_list"
+)
+seen_cargo_authority=0
+while IFS= read -r -d '' authority; do
+  if [[ "$authority" != C:\\* ]]; then
+    echo "Windows manifest authority was not projected to a native path: $authority" >&2
+    exit 1
+  fi
+  [[ "$authority" == *".cargo" ]] && seen_cargo_authority=1
+done < "$authority_list"
+if [[ "$seen_cargo_authority" != 1 ]]; then
+  echo "Windows manifest authority projection omitted the existing .cargo directory" >&2
+  exit 1
+fi
+
 # Canonical falsifier: let Cargo build a tiny CLI that embeds tracked and
 # ignored .harn inputs, then use the production resolver and Cargo's real
 # top-level dep-info. The target and source paths contain spaces so the typed

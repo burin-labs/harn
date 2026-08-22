@@ -54,6 +54,27 @@ harn_collect_artifact_freshness_evidence() {
   fi
 }
 
+harn_write_freshness_authority_path() {
+  local output="$1"
+  local path="$2"
+  local projected="$path"
+
+  # Authority-list entries cross a data boundary: unlike command-line
+  # arguments, NUL-delimited file contents are not rewritten by MSYS before a
+  # native Windows Harn process reads them. Preserve POSIX paths for shell
+  # identity/existence checks, then project only the serialized consumer path.
+  case "${OS:-$(uname -s)}" in
+    Windows_NT | MINGW* | MSYS* | CYGWIN*)
+      if ! command -v cygpath >/dev/null 2>&1; then
+        echo "error: cannot project Harn manifest authority to a native Windows path without cygpath" >&2
+        return 1
+      fi
+      projected="$(cygpath -w "$path")" || return $?
+      ;;
+  esac
+  printf '%s\0' "$projected" >>"$output"
+}
+
 harn_write_freshness_authority_list() {
   local output="$1"
   local repo_root=""
@@ -63,15 +84,19 @@ harn_write_freshness_authority_list() {
   repo_root="$(harn_repo_root)" || return $?
   : >"$output" || return $?
   path="$(git -C "$repo_root" rev-parse --path-format=absolute --git-path HEAD)" || return $?
-  [[ -f "$path" ]] && printf '%s\0' "$path" >>"$output"
+  if [[ -f "$path" ]]; then
+    harn_write_freshness_authority_path "$output" "$path" || return $?
+  fi
   head_ref="$(git -C "$repo_root" symbolic-ref -q HEAD 2>/dev/null || true)"
   if [[ -n "$head_ref" ]]; then
     path="$(git -C "$repo_root" rev-parse --path-format=absolute --git-path "$head_ref")" || return $?
     if [[ -f "$path" ]]; then
-      printf '%s\0' "$path" >>"$output"
+      harn_write_freshness_authority_path "$output" "$path" || return $?
     else
       path="$(git -C "$repo_root" rev-parse --path-format=absolute --git-path packed-refs)" || return $?
-      [[ -f "$path" ]] && printf '%s\0' "$path" >>"$output"
+      if [[ -f "$path" ]]; then
+        harn_write_freshness_authority_path "$output" "$path" || return $?
+      fi
     fi
   fi
   for path in \
@@ -79,7 +104,9 @@ harn_write_freshness_authority_list() {
     "$repo_root/.cargo/config.toml" \
     "$(git -C "$repo_root" rev-parse --path-format=absolute --git-path config)" \
     "$(git -C "$repo_root" rev-parse --path-format=absolute --git-path info/exclude)"; do
-    [[ -e "$path" ]] && printf '%s\0' "$path" >>"$output"
+    if [[ -e "$path" ]]; then
+      harn_write_freshness_authority_path "$output" "$path" || return $?
+    fi
   done
 }
 
