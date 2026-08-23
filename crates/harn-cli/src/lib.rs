@@ -11,7 +11,7 @@ pub mod dispatch;
 mod entrypoint;
 pub mod env_guard;
 mod eval_cli;
-mod exit;
+pub mod exit;
 pub mod format;
 pub mod json_envelope;
 pub use commands::check::{

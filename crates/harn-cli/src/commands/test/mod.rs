@@ -785,6 +785,7 @@ pub(crate) async fn run_user_tests(
             process::exit(1);
         }
     }
+    preflight_dependencies_or_exit(&paths);
     if let Some(reports) = report_config.reports() {
         if let Some(p) = reports.junit_path {
             preflight_report_path(p);
@@ -822,7 +823,39 @@ pub(crate) async fn run_user_tests(
     }
 
     if summary.failed > 0 {
-        process::exit(1);
+        process::exit(crate::exit::PROGRAM_FAILURE);
+    }
+}
+
+/// Materialize the suite's locked dependencies once, before any case runs.
+///
+/// Every case loads the same project's runtime extensions, so a lock that
+/// cannot be materialized fails all of them identically. Left to the per-case
+/// path that reads as N failed assertions, which is both the wrong count and
+/// the wrong category — the suite never ran. Doing it here reports the real
+/// failure once and exits with the status reserved for a run Harn could not
+/// prepare, so a caller can tell it from a suite that ran and failed.
+fn preflight_dependencies_or_exit(paths: &[PathBuf]) {
+    let mut anchored = std::collections::BTreeSet::new();
+    for path in paths {
+        // One materialization per owning project, not per target path.
+        let anchor = if path.is_dir() {
+            path.join("harn.toml")
+        } else {
+            path.clone()
+        };
+        let Some(project) = harn_vm::stdlib::process::find_project_root(
+            anchor.parent().unwrap_or(std::path::Path::new(".")),
+        ) else {
+            continue;
+        };
+        if !anchored.insert(project) {
+            continue;
+        }
+        if let Err(error) = crate::package::ensure_dependencies_materialized(&anchor) {
+            eprintln!("error: failed to prepare test dependencies: {error}");
+            process::exit(crate::exit::RUN_SETUP_FAILURE);
+        }
     }
 }
 

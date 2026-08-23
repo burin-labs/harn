@@ -65,14 +65,16 @@ pub(crate) async fn run_file_mcp_serve(
     use super::{compile_or_load_chunk_for_run, entry_source_dir, LoadedChunk};
 
     let mut diagnostics = String::new();
-    let Some(LoadedChunk {
+    let LoadedChunk {
         source,
         chunk,
         link_table,
-    }) = compile_or_load_chunk_for_run(path, &mut diagnostics)
-    else {
-        eprint!("{diagnostics}");
-        process::exit(1);
+    } = match compile_or_load_chunk_for_run(path, &mut diagnostics) {
+        Ok(loaded) => loaded,
+        Err(failure) => {
+            eprint!("{diagnostics}");
+            process::exit(failure.classification().exit_code());
+        }
     };
     if !diagnostics.is_empty() {
         eprint!("{diagnostics}");

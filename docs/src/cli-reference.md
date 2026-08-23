@@ -194,6 +194,41 @@ Terminology:
 - **Approval**: permission for a risky operation; it does not add environment
   values.
 
+### Exit codes
+
+A Harn program chooses its own exit status — `return 42` and
+`harness.runtime.exit(42)` both produce `42`, clamped to `0..=255`. So no status
+is unreachable by a program that insists on returning it. Two are nonetheless
+reserved: Harn documents them, never produces them for a program outcome, and a
+caller may branch on them.
+
+| Status | Meaning |
+|---|---|
+| `0` | The program ran and succeeded. |
+| `1` | The program ran and failed, or did not compile. |
+| `124` | **Reserved.** The run was interrupted or hit a deadline. |
+| `125` | **Reserved.** Harn could not prepare the run. The program never started. |
+
+`125` covers everything Harn does on the program's behalf before handing it
+control: materializing locked dependencies, installing manifest triggers and
+hooks, loading provider connectors, launching the session's environment policy,
+and verifying a `.harnpack`. Without it, a harness that shells out to Harn cannot
+tell "your dependencies could not be prepared" from "your code returned a
+failure" — a distinction that decides whether to retry, to report an
+infrastructure fault, or to surface a real result.
+
+A compile error is *not* a setup failure. The program's own content failing is
+the program failing, and it keeps status `1`.
+
+`harn test` uses the same reserved statuses. It materializes the suite's
+dependencies once before any case runs, so a lock that cannot be prepared exits
+`125` instead of reporting every case as a failed assertion.
+
+Under `--json` the terminal `error` event's `code` names the phase
+(`package_materialization`, `manifest_triggers`, `manifest_hooks`,
+`manifest_connectors`, `entry_unreadable`, `compile_error`, …), so a consumer
+that wants more than the status does not have to parse prose for it.
+
 ### `--json` event stream
 
 `harn run --json <file>` writes one `JsonEnvelope` per line to stdout,

@@ -4,6 +4,11 @@ use std::path::Path;
 use crate::commands::mcp::{self, AuthResolution};
 use crate::package;
 
+/// A failure while installing what the entry package declares, before the
+/// program runs.
+///
+/// `phase` is the machine-readable code a `--json` consumer reads; `label`
+/// completes the "failed to …" line a person reads.
 pub(crate) struct ManifestRuntimeSetupError {
     phase: &'static str,
     label: &'static str,
@@ -11,10 +16,18 @@ pub(crate) struct ManifestRuntimeSetupError {
 }
 
 impl ManifestRuntimeSetupError {
+    fn packages(error: impl fmt::Display) -> Self {
+        Self {
+            phase: "package_materialization",
+            label: "prepare the project's packages",
+            message: error.to_string(),
+        }
+    }
+
     fn connectors(error: impl fmt::Display) -> Self {
         Self {
             phase: "manifest_connectors",
-            label: "manifest connectors",
+            label: "install manifest connectors",
             message: error.to_string(),
         }
     }
@@ -22,7 +35,7 @@ impl ManifestRuntimeSetupError {
     fn triggers(error: impl fmt::Display) -> Self {
         Self {
             phase: "manifest_triggers",
-            label: "manifest triggers",
+            label: "install manifest triggers",
             message: error.to_string(),
         }
     }
@@ -30,7 +43,7 @@ impl ManifestRuntimeSetupError {
     fn hooks(error: impl fmt::Display) -> Self {
         Self {
             phase: "manifest_hooks",
-            label: "manifest hooks",
+            label: "install manifest hooks",
             message: error.to_string(),
         }
     }
@@ -60,7 +73,12 @@ pub(crate) async fn install_manifest_runtime(
     vm: &mut harn_vm::Vm,
     handler_initialization: package::ManifestHandlerInitialization,
 ) -> Result<crate::ActiveConnectorClientsGuard, ManifestRuntimeSetupError> {
-    let extensions = package::load_runtime_extensions(path);
+    // Report rather than leave. `load_runtime_extensions` exits the process on
+    // failure, which on this path would cut a `--json` stream off before its
+    // terminal event and skip the run's own summary and timing output. The
+    // failure is the same one; only who gets to describe it changes.
+    let extensions =
+        package::try_load_runtime_extensions(path).map_err(ManifestRuntimeSetupError::packages)?;
     package::install_runtime_extensions(&extensions);
     let connector_clients = crate::install_connector_clients(&extensions.provider_connectors)
         .await

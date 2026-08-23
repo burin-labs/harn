@@ -188,12 +188,20 @@ pub async fn load_provider_connector(
     }
 }
 
+/// Load the project's runtime extensions, or leave the process.
+///
+/// The exit status is the one reserved for a run Harn could not prepare.
+/// Everything this loads — locked dependencies, manifest triggers and hooks,
+/// provider connectors, personas — is set up on the program's behalf before it
+/// starts, so reporting it with the status the program itself fails with leaves
+/// a caller unable to tell the two apart. Callers that need to report the
+/// failure rather than leave should use [`try_load_runtime_extensions`].
 pub fn load_runtime_extensions(anchor: &Path) -> RuntimeExtensions {
     match try_load_runtime_extensions(anchor) {
         Ok(extensions) => extensions,
         Err(error) => {
             eprintln!("error: {error}");
-            process::exit(1);
+            process::exit(crate::exit::RUN_SETUP_FAILURE);
         }
     }
 }

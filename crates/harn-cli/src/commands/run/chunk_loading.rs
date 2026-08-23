@@ -16,9 +16,47 @@ use harn_parser::DiagnosticSeverity;
 use crate::commands::time::RunTiming;
 use crate::package;
 
+/// Why an entry path did not become a runnable chunk.
+///
+/// The diagnostic text still carries the detail; this carries the one bit a
+/// caller has to branch on. Preparing a run's dependencies is work Harn does on
+/// the program's behalf, while a parse, type, or compile error is the program's
+/// own content failing — and reporting both as "did not load" is what made a run
+/// that could not materialize its packages indistinguishable from a run whose
+/// program was broken.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ChunkLoadFailure {
+    /// The entry file could not be read.
+    EntryUnreadable,
+    /// The run's locked dependencies could not be materialized.
+    PackageMaterialization,
+    /// The program did not parse, typecheck, or compile.
+    Program,
+}
+
+impl ChunkLoadFailure {
+    /// The `--json` error event's `code`. Program failures keep reporting
+    /// `compile_error`; the preparation codes are new because there was
+    /// previously nothing to name.
+    pub(crate) fn diagnostic_code(self) -> &'static str {
+        match self {
+            Self::EntryUnreadable => "entry_unreadable",
+            Self::PackageMaterialization => "package_materialization",
+            Self::Program => "compile_error",
+        }
+    }
+
+    pub(crate) fn classification(self) -> crate::exit::RunFailure {
+        match self {
+            Self::EntryUnreadable | Self::PackageMaterialization => crate::exit::RunFailure::Setup,
+            Self::Program => crate::exit::RunFailure::Program,
+        }
+    }
+}
+
 /// Result of [`compile_or_load_chunk_for_run`]. Failures propagate as
-/// diagnostic text on the run path so callers map them straight to a
-/// non-zero exit code without bespoke error types.
+/// diagnostic text on the run path plus a [`ChunkLoadFailure`] the caller
+/// turns into an exit status.
 pub(crate) struct LoadedChunk {
     pub(crate) source: String,
     pub(crate) chunk: harn_vm::Chunk,
@@ -36,13 +74,13 @@ pub(crate) struct LoadedChunk {
 /// and the key includes every transitively-imported user file so any
 /// change re-runs the full path.
 ///
-/// `stderr` receives any diagnostic output. Returns `None` when a fatal
-/// type or compile error blocks execution; the caller maps that to
-/// exit-code 1.
+/// `stderr` receives any diagnostic output. Returns the failure's
+/// classification when execution is blocked; the caller maps that to an exit
+/// status.
 pub(crate) fn compile_or_load_chunk_for_run(
     path: &str,
     stderr: &mut String,
-) -> Option<LoadedChunk> {
+) -> Result<LoadedChunk, ChunkLoadFailure> {
     compile_or_load_chunk_with_timing(path, stderr, None)
 }
 
@@ -60,12 +98,12 @@ pub(crate) fn compile_or_load_chunk_with_timing(
     path: &str,
     stderr: &mut String,
     mut timing: Option<&mut RunTiming>,
-) -> Option<LoadedChunk> {
+) -> Result<LoadedChunk, ChunkLoadFailure> {
     let source = match fs::read_to_string(path) {
         Ok(s) => s,
         Err(e) => {
             stderr.push_str(&format!("Error reading {path}: {e}\n"));
-            return None;
+            return Err(ChunkLoadFailure::EntryUnreadable);
         }
     };
     if let Some(t) = timing.as_deref_mut() {
@@ -79,7 +117,7 @@ pub(crate) fn compile_or_load_chunk_with_timing(
             t.cache_hit = true;
             t.bytecode_compile = compile_phase_start.elapsed();
         }
-        return Some(LoadedChunk {
+        return Ok(LoadedChunk {
             source,
             chunk,
             link_table: lookup.link_table,
@@ -90,18 +128,23 @@ pub(crate) fn compile_or_load_chunk_with_timing(
     }
 
     let parse_start = Instant::now();
-    let program = parse_source_for_run(path, &source, stderr)?;
+    let Some(program) = parse_source_for_run(path, &source, stderr) else {
+        return Err(ChunkLoadFailure::Program);
+    };
     if let Some(t) = timing.as_deref_mut() {
         t.parse = parse_start.elapsed();
     }
 
     let typecheck_start = Instant::now();
     let mut had_type_error = false;
+    // Materializing the import graph's packages happens inside the type check,
+    // so a dependency that could not be prepared surfaces here rather than as a
+    // diagnostic about the program's own text.
     let type_diagnostics = match typecheck_with_imports(&program, Path::new(path), &source) {
         Ok(diagnostics) => diagnostics,
         Err(error) => {
             stderr.push_str(&format!("error: {error}\n"));
-            return None;
+            return Err(ChunkLoadFailure::PackageMaterialization);
         }
     };
     for diag in &type_diagnostics {
@@ -115,7 +158,7 @@ pub(crate) fn compile_or_load_chunk_with_timing(
         t.typecheck = typecheck_start.elapsed();
     }
     if had_type_error {
-        return None;
+        return Err(ChunkLoadFailure::Program);
     }
 
     let compile_step_start = Instant::now();
@@ -123,7 +166,7 @@ pub(crate) fn compile_or_load_chunk_with_timing(
         Ok(c) => c,
         Err(e) => {
             stderr.push_str(&format!("error: compile error: {e}\n"));
-            return None;
+            return Err(ChunkLoadFailure::Program);
         }
     };
 
@@ -140,7 +183,7 @@ pub(crate) fn compile_or_load_chunk_with_timing(
         t.bytecode_compile = compile_step_start.elapsed();
     }
 
-    Some(LoadedChunk {
+    Ok(LoadedChunk {
         source,
         chunk,
         link_table: lookup.link_table,
@@ -229,11 +272,17 @@ fn error_span_from_parse(error: &harn_parser::ParserError) -> harn_lexer::Span {
 /// import-aware call resolution when the file's imports all resolve. Used
 /// by `run_file` and the MCP server entry so `harn run` catches undefined
 /// cross-module calls before the VM starts.
+///
+/// The error type is deliberately narrow: the only way this fails outright is
+/// that the entry's locked dependencies could not be materialized. Type
+/// diagnostics about the program itself come back in the `Ok` payload, so a
+/// caller can classify a failure here as a preparation failure without
+/// inspecting the message.
 pub(super) fn typecheck_with_imports(
     program: &[harn_parser::SNode],
     path: &Path,
     source: &str,
-) -> Result<Vec<harn_parser::TypeDiagnostic>, String> {
+) -> Result<Vec<harn_parser::TypeDiagnostic>, package::PackageError> {
     package::ensure_dependencies_materialized(path)?;
     let checker = crate::typecheck_imports::checker_with_resolved_imports(
         harn_parser::TypeChecker::new(),
