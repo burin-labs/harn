@@ -21,6 +21,10 @@ pub struct McpToolDef {
     pub icons: Option<serde_json::Value>,
     /// Protocol extension metadata projected as the MCP `_meta` field.
     pub meta: Option<serde_json::Value>,
+    /// Whether the client may invoke this tool as an MCP task, declared in the
+    /// registry as `execution: {taskSupport: "optional"}`. Defaults to
+    /// `Forbidden`, so the tasks extension never changes an existing tool.
+    pub task_support: crate::mcp_tasks::McpTaskSupport,
     pub handler: VmClosure,
 }
 

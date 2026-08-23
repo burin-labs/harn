@@ -98,6 +98,7 @@ pub mod mcp_protocol;
 pub mod mcp_registry;
 pub mod mcp_sampling;
 pub mod mcp_server;
+pub mod mcp_tasks;
 pub mod metadata;
 pub mod module_artifact;
 pub mod module_source;

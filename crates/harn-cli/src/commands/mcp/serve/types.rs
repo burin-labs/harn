@@ -4,8 +4,8 @@ use std::sync::{Arc, Mutex};
 
 use harn_vm::mcp_protocol;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value as JsonValue};
-use tokio::sync::{mpsc, oneshot, Notify};
+use serde_json::Value as JsonValue;
+use tokio::sync::{mpsc, oneshot};
 
 use crate::commands::orchestrator::listener::ListenerAuth;
 
@@ -28,69 +28,11 @@ pub(crate) struct McpOrchestratorService {
     /// stdlib registration, manifest compile, trigger registration — and
     /// discarding all of it.
     pub(super) orchestrator_event_log: std::sync::OnceLock<Arc<harn_vm::event_log::AnyEventLog>>,
-    pub(super) tasks: Arc<Mutex<BTreeMap<String, McpTaskRecord>>>,
+    /// Every in-flight `tools/call` this server turned into an MCP task.
+    /// The lifecycle is `harn_vm::mcp_tasks`, shared with the script-driven
+    /// server so both answer `tasks/get` the same way.
+    pub(super) tasks: Arc<harn_vm::mcp_tasks::McpTaskStore>,
     pub(super) _list_watcher: Arc<Mutex<Option<notify::RecommendedWatcher>>>,
-}
-
-#[derive(Clone, Debug)]
-pub(super) struct McpTaskRecord {
-    pub(super) task: McpTaskState,
-    pub(super) result: Option<JsonValue>,
-    pub(super) notify: Arc<Notify>,
-}
-
-impl McpTaskRecord {
-    pub(super) fn to_detailed_json(&self) -> JsonValue {
-        let mut value = self.task.to_json();
-        value["resultType"] = json!(mcp_protocol::RESULT_TYPE_COMPLETE);
-        match self.task.status {
-            mcp_protocol::McpTaskStatus::Completed => {
-                value["result"] = self.result.clone().unwrap_or_else(|| json!({}));
-            }
-            mcp_protocol::McpTaskStatus::Failed => {
-                value["error"] = json!({
-                    "code": -32603,
-                    "message": self.task.status_message.as_deref().unwrap_or("Task failed"),
-                });
-            }
-            mcp_protocol::McpTaskStatus::Working
-            | mcp_protocol::McpTaskStatus::InputRequired
-            | mcp_protocol::McpTaskStatus::Cancelled => {}
-            _ => unreachable!("Harn only creates MCP task statuses it handles"),
-        }
-        value
-    }
-}
-
-#[derive(Clone, Debug)]
-pub(super) struct McpTaskState {
-    pub(super) task_id: String,
-    pub(super) owner: String,
-    pub(super) status: mcp_protocol::McpTaskStatus,
-    pub(super) status_message: Option<String>,
-    pub(super) created_at: String,
-    pub(super) last_updated_at: String,
-    pub(super) ttl: Option<u64>,
-    pub(super) poll_interval: Option<u64>,
-}
-
-impl McpTaskState {
-    pub(super) fn to_json(&self) -> JsonValue {
-        let mut value = json!({
-            "taskId": self.task_id,
-            "status": mcp_protocol::mcp_task_status_wire_name(self.status),
-            "createdAt": self.created_at,
-            "lastUpdatedAt": self.last_updated_at,
-            "ttlMs": self.ttl,
-        });
-        if let Some(message) = &self.status_message {
-            value["statusMessage"] = json!(message);
-        }
-        if let Some(poll_interval) = self.poll_interval {
-            value["pollIntervalMs"] = json!(poll_interval);
-        }
-        value
-    }
 }
 
 #[derive(Clone, Debug, Default)]

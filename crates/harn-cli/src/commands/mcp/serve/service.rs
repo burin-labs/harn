@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -43,7 +42,7 @@ impl McpOrchestratorService {
             auth,
             oauth,
             orchestrator_event_log: std::sync::OnceLock::new(),
-            tasks: Arc::new(Mutex::new(BTreeMap::new())),
+            tasks: Arc::new(harn_vm::mcp_tasks::McpTaskStore::new()),
             _list_watcher: Arc::new(Mutex::new(cache_watcher)),
         })
     }

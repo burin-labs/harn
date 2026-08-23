@@ -25,10 +25,6 @@ pub(super) fn parse_trust_query_timestamp(raw: &str) -> Result<OffsetDateTime, S
     ))
 }
 
-pub(super) fn now_rfc3339() -> String {
-    harn_vm::clock::system_now_rfc3339()
-}
-
 /// Emit a `notifications/progress` update from a built-in tool when the
 /// caller opted in via `_meta.progressToken`. Silently no-ops otherwise,
 /// so call sites can sprinkle milestones without conditional logic.

@@ -35,6 +35,10 @@ pub struct McpServer {
     server_card: Option<serde_json::Value>,
     instructions: Option<String>,
     connection: Mutex<mcp_protocol::McpServerSession>,
+    /// Tasks this server has handed out. Shared lifecycle with the
+    /// orchestrator server (`harn_vm::mcp_tasks`), so `tasks/get` answers the
+    /// same way on both.
+    tasks: crate::mcp_tasks::McpTaskStore,
 }
 
 impl McpServer {
@@ -55,6 +59,7 @@ impl McpServer {
             server_card: None,
             instructions: None,
             connection: Mutex::new(mcp_protocol::McpServerSession::default()),
+            tasks: crate::mcp_tasks::McpTaskStore::new(),
         }
     }
 
@@ -184,9 +189,18 @@ impl McpServer {
             "harn.hitl.respond" => self.handle_hitl_respond(&id, &params).await,
             "tools/list" => self.handle_tools_list(&id, &params),
             "tools/call" => self.handle_tools_call(&id, &params, vm).await,
-            mcp_protocol::METHOD_TASKS_GET => self.handle_task_lookup(&id, &params),
-            mcp_protocol::METHOD_TASKS_UPDATE => self.handle_task_lookup(&id, &params),
-            mcp_protocol::METHOD_TASKS_CANCEL => self.handle_task_lookup(&id, &params),
+            mcp_protocol::METHOD_TASKS_GET => {
+                self.tasks
+                    .handle_get(id.clone(), &self.client_identity(), &params)
+            }
+            mcp_protocol::METHOD_TASKS_UPDATE => {
+                self.tasks
+                    .handle_update(id.clone(), &self.client_identity(), &params)
+            }
+            mcp_protocol::METHOD_TASKS_CANCEL => {
+                self.tasks
+                    .handle_cancel(id.clone(), &self.client_identity(), &params)
+            }
             "resources/list" => self.handle_resources_list(&id, &params),
             "resources/read" => self.handle_resources_read(&id, &params, vm).await,
             "resources/templates/list" => self.handle_resource_templates_list(&id, &params),
@@ -292,6 +306,11 @@ impl McpServer {
                 if let Some(ref meta) = t.meta {
                     entry["_meta"] = meta.clone();
                 }
+                if t.task_support.allows_task() {
+                    entry["execution"] = serde_json::json!({
+                        "taskSupport": t.task_support.wire_name(),
+                    });
+                }
                 entry
             })
             .collect();
@@ -326,6 +345,18 @@ impl McpServer {
             }
         };
 
+        // A tool that declares `required` refuses a plain call outright, so a
+        // client cannot get the work done by simply not asking for a task.
+        let wants_task = mcp_protocol::client_supports_tasks(params);
+        let as_task = tool.task_support.allows_task() && wants_task;
+        if tool.task_support == crate::mcp_tasks::McpTaskSupport::Required && !wants_task {
+            return crate::jsonrpc::error_response(
+                id.clone(),
+                -32602,
+                &format!("Tool '{tool_name}' must be invoked as a task"),
+            );
+        }
+
         let arguments = params
             .get("arguments")
             .cloned()
@@ -358,6 +389,35 @@ impl McpServer {
             Err(error) => return crate::jsonrpc::error_response(id.clone(), -32602, &error),
         };
 
+        // A task call still ran to completion above. This server holds one VM
+        // and drives it from the request thread, so it has nowhere to put
+        // in-flight work; what the extension buys a client here is the
+        // lifecycle, not concurrency. That is worth serving honestly: the
+        // client's poll loop, reconnect-and-collect, and cancel-before-read all
+        // behave, whereas the previous stub advertised the capability and told
+        // every `tasks/get` its task did not exist.
+        if as_task {
+            let task = self.tasks.create(
+                &self.client_identity(),
+                Some(crate::mcp_tasks::DEFAULT_TASK_TTL_MS),
+            );
+            self.tasks.complete(
+                &task.task_id,
+                match &result {
+                    Ok(value) => Ok(vm_value_to_json(value)),
+                    Err(VmError::McpInputRequired(_)) => {
+                        Err("Tool requested client input, which a task cannot carry".to_string())
+                    }
+                    Err(error) => Err(tool_error_text(error)),
+                },
+            );
+            return crate::mcp_tasks::task_created_response(
+                id.clone(),
+                &task,
+                "The requested Harn tool ran and its result is available via tasks/get.",
+            );
+        }
+
         match result {
             Ok(value) => {
                 let content = vm_value_to_content(&value);
@@ -388,23 +448,16 @@ impl McpServer {
         }
     }
 
-    fn handle_task_lookup(
-        &self,
-        id: &serde_json::Value,
-        params: &serde_json::Value,
-    ) -> serde_json::Value {
-        let task_id = params
-            .get("taskId")
-            .and_then(|value| value.as_str())
-            .unwrap_or_default();
-        serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": id,
-            "error": {
-                "code": -32602,
-                "message": format!("Failed to retrieve task: task not found '{task_id}'")
-            }
-        })
+    /// Who the current connection is, for task ownership.
+    ///
+    /// This server holds one connection at a time, so the identity is a
+    /// property of the session rather than of the request.
+    fn client_identity(&self) -> String {
+        self.connection
+            .lock()
+            .expect("MCP session lock poisoned")
+            .client_identity()
+            .to_string()
     }
 
     async fn handle_hitl_respond(

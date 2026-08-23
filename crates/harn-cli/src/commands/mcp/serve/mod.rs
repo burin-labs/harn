@@ -57,7 +57,7 @@ pub(super) use harn_vm::mcp_protocol::{
 };
 pub(super) const ACTION_GRAPH_TOPIC: &str = "observability.action_graph";
 pub(super) const TRIGGER_EVENTS_TOPIC: &str = "triggers.events";
-pub(super) const DEFAULT_TASK_TTL_MS: u64 = 10 * 60 * 1000;
+pub(super) use harn_vm::mcp_tasks::DEFAULT_TASK_TTL_MS;
 
 pub(crate) async fn run(args: &McpServeArgs) -> Result<(), String> {
     let service = Arc::new(McpOrchestratorService::new(args)?);
