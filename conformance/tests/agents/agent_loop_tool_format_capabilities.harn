@@ -1,5 +1,8 @@
 import { agent_capture_events } from "std/agent/events"
 import { agent_loop } from "std/agent/loop"
+import { agent_tool_format_resolution } from "std/agent/options"
+import { agent_tool_call_paradigm } from "std/agent/preflight"
+import { agent_parse_tool_calls } from "std/agent/primitives"
 
 fn sample_tools() {
   const tools = tool_registry()
@@ -121,6 +124,31 @@ tool_mode_parity = "native_unreliable"
   harness.stdio.println(gaps[0].model)
   harness.stdio.println(gaps[0].capability)
   harness.stdio.println(gaps[0].fallback_tool_format)
+  const missing_model_session = "tool-format-missing-model-" + harness.random.uuid()
+  const missing_model = agent_capture_events(
+    harness.agent,
+    missing_model_session,
+    fn() { return run_format(harness, {provider: "testcatalog", session_id: missing_model_session}) },
+  )
+  const missing_model_gaps = events_of(missing_model.events, "capability_gap")
+  harness.stdio.println(missing_model.result.text)
+  harness.stdio.println(len(missing_model_gaps))
+  harness.stdio.println(missing_model_gaps[0].resolution)
+  harness.stdio.println(missing_model_gaps[0].reason)
+  harness.stdio.println(missing_model_gaps[0].fallback_tool_format)
+  const missing_model_opts = {provider: "testcatalog", tools: sample_tools()}
+  const missing_model_resolution = agent_tool_format_resolution(harness.llm, missing_model_opts)
+  const missing_model_paradigm = agent_tool_call_paradigm(harness.llm, missing_model_opts)
+  const missing_model_call = "```tool\n{\"name\":\"noop\",\"args\":{}}\n```"
+  const missing_model_parsed = agent_parse_tool_calls(
+    harness.agent,
+    missing_model_call,
+    nil,
+    missing_model_resolution.tool_format,
+  )
+  harness.stdio.println(missing_model_paradigm.call_open)
+  harness.stdio.println(len(missing_model_parsed.tool_calls))
+  harness.stdio.println(len(missing_model_parsed.tool_parse_errors ?? []))
   const override_session = "tool-format-override-" + harness.random.uuid()
   const override_capture = agent_capture_events(
     harness.agent,

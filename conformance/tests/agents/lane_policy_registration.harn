@@ -62,6 +62,9 @@ fn tool_names(tools) {
 }
 
 pipeline default(harness: Harness) {
+  // This fixture inspects provider-native tool schemas on the outbound call,
+  // so every registration case pins the native channel explicitly. Route-free
+  // text fallback behavior is covered by agent_loop_tool_format_capabilities.
   // --- A. explicit_patch lane narrows the FIRST outbound call ---
   with_llm_script(
     harness.llm,
@@ -75,6 +78,7 @@ pipeline default(harness: Harness) {
           loop_until_done: true,
           max_iterations: 3,
           provider: "mock",
+          tool_format: "native",
           tools: lane_test_tools(),
         },
       )
@@ -102,6 +106,7 @@ pipeline default(harness: Harness) {
           loop_until_done: true,
           max_iterations: 3,
           provider: "mock",
+          tool_format: "native",
           tools: lane_test_tools(),
         },
       )
@@ -164,6 +169,7 @@ pipeline default(harness: Harness) {
           max_iterations: 3,
           provider: "mock",
           session_id: session,
+          tool_format: "native",
           tools: lane_test_tools(),
         },
       )

@@ -124,28 +124,37 @@ fn __resolved_model_id(llm: HarnessLlm, model) -> string {
   return to_string(unwrap(resolved)?.id ?? model)
 }
 
-fn __tool_format_pair(llm: HarnessLlm, opts) -> {provider: string, model: string}? {
+fn __tool_format_route(
+  llm: HarnessLlm,
+  opts,
+) -> {pair: {provider: string, model: string}?, unresolved_reason: string?} {
   const raw_model = opts?.model
   if raw_model == nil || trim(to_string(raw_model)) == "" {
-    return nil
+    return {pair: nil, unresolved_reason: "missing_model"}
   }
   const provider = __explicit_provider(opts)
   if provider != nil {
-    return {provider: provider, model: __resolved_model_id(llm, raw_model)}
+    return {
+      pair: {provider: provider, model: __resolved_model_id(llm, raw_model)},
+      unresolved_reason: nil,
+    }
   }
   const resolved = try {
     llm.resolve_model(raw_model)
   }
   if is_err(resolved) {
-    return nil
+    return {pair: nil, unresolved_reason: "model_resolution_failed"}
   }
   const info = unwrap(resolved)
   const inferred_provider = trim(to_string(info?.provider ?? ""))
   const model = trim(to_string(info?.id ?? ""))
-  if inferred_provider == "" || model == "" {
-    return nil
+  if inferred_provider == "" {
+    return {pair: nil, unresolved_reason: "missing_provider"}
   }
-  return {provider: inferred_provider, model: model}
+  if model == "" {
+    return {pair: nil, unresolved_reason: "missing_model"}
+  }
+  return {pair: {provider: inferred_provider, model: model}, unresolved_reason: nil}
 }
 
 fn __valid_tool_format(value) {
@@ -426,16 +435,32 @@ pub fn agent_first_tool_format_override_warning_text(events) {
   return nil
 }
 
-fn __capability_gap_event(pair, requested, fallback) {
+fn __capability_gap_event(pair, opts, fallback, reason) {
+  const provider = pair?.provider ?? __explicit_provider(opts) ?? "unknown"
+  const model = trim(to_string(pair?.model ?? opts?.model ?? ""))
+  const message = if reason == "missing_model" {
+    "Tool format route is unresolved because no model was provided; using fallback tool_format."
+  } else if reason == "missing_provider" {
+    "Tool format route is unresolved because no provider could be resolved; using fallback tool_format."
+  } else if reason == "model_resolution_failed" {
+    "Tool format route is unresolved because model resolution failed; using fallback tool_format."
+  } else {
+    "Tool format route is unresolved because the provider/model has no preferred_tool_format; using fallback tool_format."
+  }
   return {
     level: "warning",
     capability: "preferred_tool_format",
-    provider: pair.provider,
-    model: pair.model,
-    requested_tool_format: requested,
+    resolution: "unresolved",
+    reason: reason,
+    provider: provider,
+    model: if model == "" {
+      "unknown"
+    } else {
+      model
+    },
+    requested_tool_format: opts?.tool_format,
     fallback_tool_format: fallback,
-    message:
-      "No preferred_tool_format recommendation for provider/model; using fallback tool_format.",
+    message: message,
   }
 }
 
@@ -453,7 +478,7 @@ pub fn agent_tool_format_resolution(llm: HarnessLlm, options = nil) {
   const explicit = __explicit_tool_format(opts)
   if explicit != nil {
     __validate_explicit_tool_format(explicit)
-    const pair = __tool_format_pair(llm, opts)
+    const pair = __tool_format_route(llm, opts).pair
     let preferred = nil
     let parity = nil
     if pair != nil {
@@ -518,7 +543,8 @@ pub fn agent_tool_format_resolution(llm: HarnessLlm, options = nil) {
       tool_format_override_event: override_event,
     }
   }
-  const pair = __tool_format_pair(llm, opts)
+  const route = __tool_format_route(llm, opts)
+  const pair = route.pair
   if pair != nil {
     const caps = try {
       llm.provider_capabilities(pair.provider, pair.model)
@@ -542,22 +568,20 @@ pub fn agent_tool_format_resolution(llm: HarnessLlm, options = nil) {
       source: "fallback",
       provider: pair.provider,
       model: pair.model,
-      capability_gap_event: __capability_gap_event(pair, opts?.tool_format, fallback),
+      capability_gap_event: __capability_gap_event(pair, opts, fallback, "unknown_route"),
       tool_format_override_event: nil,
     }
   }
-  if __has_key(opts, "tool_format") {
-    return {
-      tool_format: __fallback_tool_format(),
-      source: "fallback",
-      capability_gap_event: nil,
-      tool_format_override_event: nil,
-    }
-  }
+  const fallback = __fallback_tool_format()
   return {
-    tool_format: nil,
+    tool_format: fallback,
     source: "unresolved",
-    capability_gap_event: nil,
+    capability_gap_event: __capability_gap_event(
+      nil,
+      opts,
+      fallback,
+      route.unresolved_reason ?? "unknown_route",
+    ),
     tool_format_override_event: nil,
   }
 }

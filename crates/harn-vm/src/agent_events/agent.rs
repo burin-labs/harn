@@ -953,14 +953,19 @@ pub enum AgentEvent {
         session_id: String,
         warning: serde_json::Value,
     },
-    /// Emitted when a concrete provider/model pair lacks a catalog
-    /// recommendation for a capability and the runtime chooses a fallback.
+    /// Emitted when the runtime cannot resolve a capability recommendation and
+    /// chooses a fallback. `resolution` and `reason` preserve whether the
+    /// route itself was absent or merely uncatalogued.
     CapabilityGap {
         session_id: String,
         level: String,
         capability: String,
         provider: String,
         model: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        resolution: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
         fallback_tool_format: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         requested_tool_format: Option<String>,
