@@ -164,7 +164,20 @@ guard deploy != nil else {
 
 const rendered = skill_render(deploy, ["prod", "us-east-1"])
 // rendered now has $1 and $2 replaced with "prod" and "us-east-1".
+const with_session = skill_render(
+  r"Session: ${HARN_SESSION_ID}",
+  [],
+  {session_id: "sess-123"},
+)
+// with_session is "Session: sess-123" even when `HARN_SESSION_ID` is unset.
 ```
+
+`skill_render` takes an optional third argument: a session-id string or
+`{session_id: ...}`. That explicit id wins over the process environment, so
+in-process and headless embedders can substitute without exporting
+`HARN_SESSION_ID`. `agent_loop` threads the live session id through this
+argument when a host-supplied registry entry is rendered after lazy
+`load_skill` fails.
 
 ## Progressive disclosure with `load_skill`
 

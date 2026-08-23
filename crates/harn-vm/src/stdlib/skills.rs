@@ -333,9 +333,11 @@ fn skill_define_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
                     ))));
                 }
             } else if rendered.contains(':') {
-                return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-                    "skill_define: 'allowed_tools' entry '{rendered}' contains ':' — only the `namespace:<tag>` prefix is recognized"
-                )))));
+                return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+                    format!(
+                        "skill_define: 'allowed_tools' entry '{rendered}' contains ':' — only the `namespace:<tag>` prefix is recognized"
+                    ),
+                ))));
             }
         }
     }
@@ -933,16 +935,18 @@ fn skill_remove_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
     Ok(VmValue::dict(new_registry))
 }
 
-// `skill_render(skill, args_list)` — substitute `$ARGUMENTS`, `$N`,
+// `skill_render(skill, args_list, options?)` — substitute `$ARGUMENTS`, `$N`,
 // `${HARN_SKILL_DIR}`, `${HARN_SESSION_ID}` in the skill body.
 //
 // Accepts a skill entry (as returned by `skill_find`) or a raw
 // string body. Args is an optional list of strings; missing values
 // pass through unchanged so authors can spot under-supplied calls.
+// Session id comes from `options.session_id`, a bare string third
+// argument, or `HARN_SESSION_ID` in the process environment.
 #[harn_builtin(
     exposure = "harness.agent.skill_render",
     effects = ["state.read@dynamic", "env.read@const=HARN_SESSION_ID"],
-    sig = "skill_render(skill: dict | string, arguments?: list) -> string",
+    sig = "skill_render(skill: dict | string, arguments?: list, options?: dict | string) -> string",
     category = "skills"
 )]
 fn skill_render_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -954,7 +958,16 @@ fn skill_render_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
     let (body, skill_dir) = match &args[0] {
         VmValue::String(s) => (s.to_string(), None),
         VmValue::Dict(map) => {
-            let body = map.get("body").map(|v| v.display()).unwrap_or_default();
+            let body = map
+                .get("body")
+                .map(|v| v.display())
+                .filter(|value| !value.is_empty())
+                .or_else(|| {
+                    map.get("prompt")
+                        .map(|v| v.display())
+                        .filter(|value| !value.is_empty())
+                })
+                .unwrap_or_default();
             if !body.is_empty() {
                 let dir = map
                     .get("skill_dir")
@@ -991,7 +1004,8 @@ fn skill_render_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
     let ctx = crate::skills::SubstitutionContext {
         arguments,
         skill_dir,
-        session_id: std::env::var("HARN_SESSION_ID").ok(),
+        session_id: parse_skill_render_session_id(args.get(2))?
+            .or_else(|| std::env::var("HARN_SESSION_ID").ok()),
         extra_env: Default::default(),
     };
     let rendered = crate::skills::substitute_skill_body(&body, &ctx);
@@ -1128,11 +1142,38 @@ fn parse_load_skill_options(
     Ok(options)
 }
 
+fn parse_skill_render_session_id(value: Option<&VmValue>) -> Result<Option<String>, VmError> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    match value {
+        VmValue::Nil => Ok(None),
+        VmValue::String(session_id) if !session_id.is_empty() => Ok(Some(session_id.to_string())),
+        VmValue::String(_) => Ok(None),
+        VmValue::Dict(map) => match map.get("session_id") {
+            Some(VmValue::String(session_id)) if !session_id.is_empty() => {
+                Ok(Some(session_id.to_string()))
+            }
+            Some(VmValue::String(_)) | Some(VmValue::Nil) | None => Ok(None),
+            Some(_) => Err(crate::skills::skill_vm_error(
+                "skill_render: session_id must be a string",
+            )),
+        },
+        _ => Err(crate::skills::skill_vm_error(
+            "skill_render: third argument must be a session id string or options dict",
+        )),
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{render_catalog, vm_skill_catalog_entries, vm_skill_who_signed};
+    use super::{
+        parse_skill_render_session_id, render_catalog, skill_render_impl, vm_skill_catalog_entries,
+        vm_skill_who_signed,
+    };
     use crate::value::VmValue;
     use std::collections::BTreeMap;
+    use std::sync::Arc;
 
     fn who_signed_skill(name: &str, source: Option<&str>, author: &str) -> VmValue {
         let mut entry = BTreeMap::from([
@@ -1251,5 +1292,78 @@ mod tests {
         assert!(once.contains("- `alpha`: First skill"));
         let small = render_catalog(&entries, 160);
         assert!(small.contains("omitted to stay within budget"));
+    }
+
+    fn skill_entry(body: &str) -> VmValue {
+        VmValue::dict(BTreeMap::from([
+            (
+                "name".to_string(),
+                VmValue::String(arcstr::ArcStr::from("session-card")),
+            ),
+            (
+                "body".to_string(),
+                VmValue::String(arcstr::ArcStr::from(body)),
+            ),
+        ]))
+    }
+
+    fn render(args: Vec<VmValue>) -> String {
+        match skill_render_impl(&args, &mut String::new()) {
+            Ok(value) => value.display(),
+            Err(error) => panic!("skill_render failed: {error}"),
+        }
+    }
+
+    #[test]
+    fn skill_render_uses_explicit_session_id_without_process_env() {
+        let previous = std::env::var("HARN_SESSION_ID").ok();
+        // SAFETY: this test process is isolated by nextest; restore after.
+        unsafe {
+            std::env::remove_var("HARN_SESSION_ID");
+        }
+        let rendered = render(vec![
+            skill_entry("Session: ${HARN_SESSION_ID}"),
+            VmValue::List(Arc::new(Vec::new())),
+            VmValue::dict(BTreeMap::from([(
+                "session_id".to_string(),
+                VmValue::String(arcstr::ArcStr::from("sess-explicit")),
+            )])),
+        ]);
+        match previous {
+            Some(value) => unsafe { std::env::set_var("HARN_SESSION_ID", value) },
+            None => unsafe { std::env::remove_var("HARN_SESSION_ID") },
+        }
+        assert_eq!(rendered, "Session: sess-explicit");
+    }
+
+    #[test]
+    fn skill_render_accepts_a_bare_session_id_string() {
+        let rendered = render(vec![
+            skill_entry("Session: ${HARN_SESSION_ID}"),
+            VmValue::Nil,
+            VmValue::String(arcstr::ArcStr::from("sess-string")),
+        ]);
+        assert_eq!(rendered, "Session: sess-string");
+        assert_eq!(
+            parse_skill_render_session_id(Some(&VmValue::String(arcstr::ArcStr::from(
+                "sess-string"
+            ))))
+            .expect("bare session id parses"),
+            Some("sess-string".to_string())
+        );
+    }
+
+    #[test]
+    fn skill_render_leaves_the_placeholder_when_no_session_id_is_supplied() {
+        let previous = std::env::var("HARN_SESSION_ID").ok();
+        unsafe {
+            std::env::remove_var("HARN_SESSION_ID");
+        }
+        let rendered = render(vec![skill_entry("Session: ${HARN_SESSION_ID}")]);
+        match previous {
+            Some(value) => unsafe { std::env::set_var("HARN_SESSION_ID", value) },
+            None => unsafe { std::env::remove_var("HARN_SESSION_ID") },
+        }
+        assert_eq!(rendered, "Session: ${HARN_SESSION_ID}");
     }
 }

@@ -1,0 +1,56 @@
+import { agent_loop } from "std/agent/loop"
+import { llm_text, with_llm_script } from "std/testing"
+
+/**
+ * Host-provided manual skills that already carry a body fall back to
+ * `skill_render` when lazy `load_skill` cannot hydrate them. That fallback
+ * must receive the live `agent_loop` session id so `${HARN_SESSION_ID}`
+ * does not reach the next model turn as a literal.
+ */
+pipeline test(harness: Harness, task) {
+  const registry = [
+    {
+      name: "host-session-card",
+      description: "Reports the live session id",
+      when_to_use: "when the session id is needed",
+      body: r"Session: ${HARN_SESSION_ID}",
+    },
+  ]
+  with_llm_script(
+    harness.llm,
+    [
+      {tool_calls: [{id: "load-card", name: "load_skill", arguments: {name: "host-session-card"}}]},
+      llm_text("Session card loaded."),
+    ],
+    { ->
+      const result = agent_loop(
+        harness,
+        "load the session card",
+        "Host-rendered cards mention `host-session-card`.",
+        {
+          provider: "mock",
+          tool_format: "native",
+          max_iterations: 2,
+          skills: registry,
+          skill_match: {strategy: "manual"},
+        },
+      )
+      assert(result?.status == "done", "manual skill loop completes")
+      const session_id = result.session_id
+      assert(session_id != "", "agent_loop has a session id")
+      const calls = harness.llm.mock_calls()
+      assert(len(calls) == 2, "load_skill creates a second model turn")
+      const second = json_stringify(calls[1])
+      assert(contains(second, session_id), "second model turn contains the resolved session id")
+      assert(
+        contains(second, "Session: " + session_id),
+        "second model turn contains the substituted session line",
+      )
+      assert(
+        !contains(second, r"${HARN_SESSION_ID}"),
+        "second model turn does not contain the unsubstituted placeholder",
+      )
+      harness.stdio.log("skill_lifecycle_manual_session tests passed")
+    },
+  )
+}

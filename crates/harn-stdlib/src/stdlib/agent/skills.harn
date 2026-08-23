@@ -56,9 +56,9 @@ fn __tool_registry_has(registry, name) {
   return false
 }
 
-fn __render_loaded_skill(agent: HarnessAgent, entry, request) {
+fn __render_loaded_skill(agent: HarnessAgent, entry, request, session_id) {
   const rendered = try {
-    agent.skill_render(entry, request?.arguments ?? request?.args ?? [])
+    agent.skill_render(entry, request?.arguments ?? request?.args ?? [], {session_id: session_id})
   }
   if !is_err(rendered) {
     const body = trim(unwrap(rendered))
@@ -107,7 +107,7 @@ fn __load_skill_for_session(agent: HarnessAgent, session, opts, args) {
     agent.load_skill(request + {session_id: session.session_id})
   }
   const body = if is_err(loaded) {
-    __render_loaded_skill(agent, entry, request)
+    __render_loaded_skill(agent, entry, request, session.session_id)
   } else {
     unwrap(loaded)
   }
