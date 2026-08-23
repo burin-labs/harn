@@ -132,7 +132,8 @@ with_overlay(opts, rows, "agent", {overrides: {agent: ["Custom nudge instead of 
 
 `agent_preset`/`agent_preset_register` accept `lane_policy` and
 `overlay_policy` pack keys (alongside `budget`, `models`,
-`completion_gate`, ...) via the existing fill-nil pack mechanism
+`completion_gate`, `stall_diagnostics`, `iteration_budget`, ...) via the
+existing fill-nil pack mechanism
 (`std/agent/presets`): a pack row fills the option only when the caller left
 it nil, and a consumer explicitly lowers it —
 
