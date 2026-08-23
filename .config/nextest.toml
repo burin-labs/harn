@@ -268,6 +268,33 @@ slow-timeout = { period = "60s", terminate-after = 3, grace-period = "10s" }
 filter = 'package(harn-cli) and binary(harn_cli_fast) and test(/burin_mini_playground::burin_mini_rate_limit_(overresearch_planner_commits_final_action_graph|weak_verify_plan_normalizes_to_single_verify_action)/)'
 slow-timeout = { period = "60s", terminate-after = 3, grace-period = "10s" }
 
+# The two heavy burin-mini playground cases are not wall-clock budget tests,
+# but they have the same relationship to their neighbours: their cost is
+# dominated by whoever else is running, and they were failing because of it.
+#
+# Profiled on harn#7084. Steady-state work is ~3.3s (22 replayed turns at
+# ~0.15s each) on top of a ~2s one-time per-process warmup, which is the VM
+# parsing the embedded Harn stdlib from source — `load_stdlib_module_from_source`
+# recursing through the import graph with harn_lexer/harn_parser leaves. That
+# warmup is a floor every VM-touching test in this binary pays, and reducing it
+# is a separate structural change tracked with the module-cache work.
+#
+# What is left is pure contention. Measured on the same machine, same 8-thread
+# run of this binary: 13.8s and 13.4s sharing the runner, 4.0s and 3.7s with it
+# reserved — a 3.4x multiplier that is nothing to do with the tests. On CI that
+# multiplier is what took them from work that fits comfortably to 55s and 58s
+# against a 60s ceiling.
+#
+# Nothing about these cases needs to run beside 12K siblings, so stop making
+# them. The cost is total suite wall time: locally +1.3s across this binary,
+# and roughly two exclusive ~17s slots on a CI worker.
+#
+# The slow-timeout budget above is the tourniquet from the same investigation
+# and stays until scheduled runs show this partition holds.
+[[profile.default.overrides]]
+filter = 'package(harn-cli) and binary(harn_cli_fast) and test(/burin_mini_playground::burin_mini_rate_limit_(overresearch_planner_commits_final_action_graph|weak_verify_plan_normalizes_to_single_verify_action)/)'
+threads-required = "num-cpus"
+
 # ---------------------------------------------------------------------------
 # Wall-clock budget tests: reserve the runner while they measure
 # ---------------------------------------------------------------------------
