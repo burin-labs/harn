@@ -340,13 +340,25 @@ pub fn __agent_stall_warning_record(
   config: AgentStallConfig,
 ) -> AgentStallWarning {
   const args_text = json_stringify(input.args)
+  // A digest is evidence that something was digested. The monologue patterns
+  // carry no signature at all — the turn made no tool call to fingerprint — and
+  // hashing that empty string manufactures one constant every such record
+  // shares. A reader comparing signature digests across them finds them
+  // identical and concludes the same call repeated, which is the opposite of
+  // what happened. Report the absence as an absence, the way the token-runaway
+  // detector already writes it.
+  const signature_digest = if input.signature != "" {
+    "sha256:" + sha256(input.signature)
+  } else {
+    ""
+  }
   let record = {
     iteration: input.iteration,
     tool_name: input.tool_name,
     repeat_count: input.count,
     threshold: input.threshold,
     arguments_digest: "sha256:" + sha256(args_text),
-    signature_digest: "sha256:" + sha256(input.signature),
+    signature_digest: signature_digest,
     pattern: input.pattern,
     signature: input.signature,
     count: input.count,
