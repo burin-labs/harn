@@ -438,8 +438,8 @@
         "text_tools": true,
         "preferred_tool_format": "native",
         "tool_mode_parity": "unknown",
-        "structured_output_transport": "tool_use",
-        "structured_output_mode": "xml_tagged",
+        "structured_output_transport": "native",
+        "structured_output_mode": "native_json",
         "streaming": true,
         "reasoning_knobs": [
           "enabled"

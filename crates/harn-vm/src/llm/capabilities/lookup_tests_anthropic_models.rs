@@ -18,14 +18,9 @@ fn assert_openrouter_anthropic_runtime_parity(model: &str) {
         routed.preferred_tool_format, direct.preferred_tool_format,
         "{model}: preferred tool format should match direct Anthropic"
     );
-    assert_eq!(
-        routed.structured_output, direct.structured_output,
-        "{model}: structured output transport should match direct Anthropic"
-    );
-    assert_eq!(
-        routed.structured_output_mode, direct.structured_output_mode,
-        "{model}: structured output mode should match direct Anthropic"
-    );
+    // Structured-output lowering is deliberately route-specific. Direct
+    // Anthropic uses output_config.format; OpenRouter's OpenAI-compatible
+    // transport retains its synthetic-tool strategy.
     assert_eq!(
         routed.thinking_modes,
         Vec::<String>::new(),
@@ -95,7 +90,8 @@ fn anthropic_opus_47_gets_full_capabilities() {
     assert_eq!(caps.max_tools, Some(10000));
     assert!(caps.prefers_xml_scaffolding);
     assert!(!caps.prefers_markdown_scaffolding);
-    assert_eq!(caps.structured_output_mode, "xml_tagged");
+    assert_eq!(caps.structured_output.as_deref(), Some("native"));
+    assert_eq!(caps.structured_output_mode, "native_json");
     assert!(!caps.supports_assistant_prefill);
     assert!(!caps.prefers_role_developer);
     assert!(caps.prefers_xml_tools);
@@ -155,6 +151,47 @@ fn anthropic_opus_45_does_not_support_interleaved_thinking() {
     assert_eq!(caps.thinking_modes, vec!["enabled"]);
     assert!(!caps.interleaved_thinking_supported);
     assert!(caps.supports_assistant_prefill);
+}
+
+#[test]
+fn native_schema_output_tracks_supported_direct_anthropic_generations() {
+    reset();
+    for model in [
+        "claude-fable-5",
+        "claude-mythos-preview",
+        "claude-mythos-5",
+        "claude-haiku-4-5",
+        "claude-opus-4-5",
+        "claude-opus-4-6",
+        "claude-sonnet-4-5",
+        "claude-sonnet-4-6",
+        "claude-sonnet-5",
+        "anthropic/claude-haiku-4-5",
+        "anthropic/claude-opus-4-5",
+        "anthropic/claude-sonnet-4-5",
+    ] {
+        let caps = lookup("anthropic", model);
+        assert_eq!(
+            caps.structured_output.as_deref(),
+            Some("native"),
+            "{model}: supported direct Anthropic models use output_config.format",
+        );
+        assert_eq!(caps.structured_output_mode, "native_json", "{model}");
+    }
+}
+
+#[test]
+fn older_anthropic_generations_keep_synthetic_tool_fallback() {
+    reset();
+    for model in ["claude-opus-4-0", "claude-sonnet-4-0", "claude-opus-3-5"] {
+        let caps = lookup("anthropic", model);
+        assert_eq!(
+            caps.structured_output.as_deref(),
+            Some("tool_use"),
+            "{model}: unsupported generations retain the compatibility fallback",
+        );
+        assert_eq!(caps.structured_output_mode, "xml_tagged", "{model}");
+    }
 }
 
 #[test]
@@ -252,7 +289,7 @@ fn openrouter_anthropic_claude_models_support_native_tools() {
         assert_eq!(
             caps.structured_output.as_deref(),
             Some("tool_use"),
-            "{model} via openrouter should structured_output=tool_use (matches direct anthropic)",
+            "{model} via OpenRouter retains the route-specific synthetic-tool strategy",
         );
     }
 }

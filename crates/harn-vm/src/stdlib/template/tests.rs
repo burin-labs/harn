@@ -303,8 +303,10 @@ fn logical_section_tools_and_output_format_use_section_args() {
     let b = dict(&[("tools", list(vec![tool])), ("schema", schema)]);
 
     {
-        let _guard =
-            LlmRenderContextGuard::enter(LlmRenderContext::resolve("anthropic", "claude-opus-4-7"));
+        let _guard = LlmRenderContextGuard::enter(LlmRenderContext::resolve(
+            "openrouter",
+            "anthropic/claude-opus-4-7",
+        ));
         let out = render(
             "{{ section \"tools\" tools=tools }}{{ endsection }}\n{{ section \"output_format\" schema=schema }}{{ endsection }}",
             &b,
@@ -313,6 +315,19 @@ fn logical_section_tools_and_output_format_use_section_args() {
         assert!(out.contains("\"name\": \"read_file\""));
         assert!(out.contains("<output_format>"));
         assert!(out.contains("\"answer\": \"string\""));
+    }
+
+    {
+        let _guard =
+            LlmRenderContextGuard::enter(LlmRenderContext::resolve("anthropic", "claude-opus-4-7"));
+        let out = render(
+            "{{ section \"tools\" tools=tools }}{{ endsection }}\n{{ section \"output_format\" schema=schema }}{{ endsection }}",
+            &b,
+        );
+        assert!(out.contains("<tools>"));
+        assert!(out.contains("\"name\": \"read_file\""));
+        assert!(!out.contains("<output_format>"));
+        assert!(!out.contains("\"answer\": \"string\""));
     }
 
     {

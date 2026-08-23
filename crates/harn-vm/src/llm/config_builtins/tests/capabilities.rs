@@ -320,6 +320,6 @@ fn test_provider_capabilities_exposes_prompt_format_preferences() {
     expect_bool("prefers_xml_scaffolding", true);
     expect_bool("prefers_xml_tools", true);
     expect_bool("supports_assistant_prefill", false);
-    expect_string("structured_output_mode", "xml_tagged");
+    expect_string("structured_output_mode", "native_json");
     expect_string("thinking_block_style", "thinking_blocks");
 }
