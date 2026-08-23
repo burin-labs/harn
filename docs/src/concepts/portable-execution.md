@@ -6,6 +6,8 @@ language.
 
 ```mermaid
 flowchart TD
+    accTitle: From Harn source to a host-owned capability
+    accDescr: Harn source and imports go through the canonical front end, which emits a versioned program artifact. The portable execution kernel runs that artifact on a native host, a browser Web Worker, or a future adapter, and every one of them reaches the same host-owned typed capabilities.
     source[Harn source and imports] --> frontend[Canonical lexer, parser, type checker, compiler]
     frontend --> artifact[Versioned program artifact]
     artifact --> kernel[Portable execution kernel]
@@ -26,6 +28,8 @@ source import after compilation:
 
 ```mermaid
 flowchart LR
+    accTitle: One artifact byte stream for every adapter
+    accDescr: The root module and its imports are resolved into a closed, sorted module closure, which becomes one artifact byte stream. The native, browser worker, and Burin host adapters all consume that same byte stream.
     root[Root Harn module] --> resolve[Canonical module graph resolver]
     dep[Imported Harn module] --> resolve
     resolve --> closure[Closed, sorted module closure]
@@ -65,6 +69,8 @@ Execution advances until one of three transitions occurs:
 
 ```mermaid
 stateDiagram-v2
+    accTitle: Kernel run states
+    accDescr: A run starts in Running. It reaches Completed when pure computation finishes, Failed on a diagnostic or denied authority, or Suspended when a granted host capability is required. A suspended run returns to Running when it is resumed with a typed result.
     [*] --> Running: start(program, input, grants)
     Running --> Completed: pure computation finishes
     Running --> Failed: diagnostic or denied authority

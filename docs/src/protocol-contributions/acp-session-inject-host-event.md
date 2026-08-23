@@ -1,6 +1,8 @@
 # Typed host-event injection
 
-Status: Harn extension
+- **Status:** Shipped as a Harn ACP extension. Not filed upstream; unlike the
+  other documents here it records a live `_meta` surface rather than a proposal.
+- **Last verified:** 2026-08-22
 
 Harn advertises `session/inject_host_event` under
 `agentCapabilities.session.injectHostEvent`. The request carries a session ID

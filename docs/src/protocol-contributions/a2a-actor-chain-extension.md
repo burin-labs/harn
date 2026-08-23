@@ -1,21 +1,28 @@
 # A2A RFC: actor-chain extension for delegated authority
 
-**Upstream repo:** [a2aproject/A2A][a2a]
-**Status:** Filed upstream 2026-07-03 as
-[a2aproject/A2A#2028](https://github.com/a2aproject/A2A/issues/2028),
-awaiting first response. Verified non-duplicate on
-2026-07-03; anchor threads are [A2A #1937][a2a-1937] (context-binding
-profile for delegated authority) and [A2A #153][a2a-153] (confused
-deputy). Written against A2A v1.0 conventions (`a2a.proto` normative,
-PascalCase operations, ProtoJSON enums).
-**Authors:** Burin Labs
-**Reference impl:** `harn_vm::actor_chain::ActorChain`
-([`crates/harn-vm/src/actor_chain.rs`][actor-chain-rs]) carried through
-the `harn-serve` A2A adapter
-([`crates/harn-serve/src/adapters/a2a/schema.rs`][a2a-schema-rs]) under
-task/message `metadata` today.
+- **Upstream repo:** [a2aproject/A2A][a2a]
+- **Issue:** [A2A #2028 — actor-chain extension][a2a-2028]
+- **Status:** Open and by far the most active of our filings — 24 comments, no
+  maintainer verdict. The thread converged on two properties that must not be
+  conflated (well-formedness versus proven authority), then on
+  `scopes` being *derived from* a validated credential rather than
+  authorization-bearing. Two independent implementations now agree on an
+  executable vector set. See [Thread state](#thread-state).
+- **Last verified:** 2026-08-22
+- **Authors:** Burin Labs
+- **Reference impl:** `harn_vm::actor_chain::ActorChain`
+  ([`crates/harn-vm/src/actor_chain.rs`][actor-chain-rs]), carried through the
+  `harn-serve` A2A adapter
+  ([`crates/harn-serve/src/adapters/a2a/schema.rs`][a2a-schema-rs]) under
+  task and message `metadata`
+- **Anchor threads:** [A2A #1937][a2a-1937] (context-binding profile for
+  delegated authority) and [A2A #153][a2a-153] (confused deputy)
+
+Written against A2A v1.0 conventions: `a2a.proto` is normative, operations are
+PascalCase, and enum values are SCREAMING_SNAKE_CASE ProtoJSON strings.
 
 [a2a]: https://github.com/a2aproject/A2A
+[a2a-2028]: https://github.com/a2aproject/A2A/issues/2028
 [a2a-1937]: https://github.com/a2aproject/A2A/issues/1937
 [a2a-153]: https://github.com/a2aproject/A2A/issues/153
 [actor-chain-rs]: https://github.com/burin-labs/harn/blob/main/crates/harn-vm/src/actor_chain.rs
@@ -116,6 +123,37 @@ The reference implementation ships this today under
 `metadata.actor_chain` / `metadata.harn.actor_chain` with the same
 entry shape (`sub` + `scopes`), validated on ingest and appended per
 hop. Migration to a ratified extension URI and member name is a rename.
+
+## Thread state
+
+The discussion has moved further than the original filing. Four things are
+settled enough in-thread to treat as the current shape:
+
+1. **Two properties, never conflated.** *Well-formedness* is checkable from the
+   payload alone: each hop's `scopes` must be a subset of its predecessor's, and
+   a violation is exactly the confused-deputy shape from [#153][a2a-153].
+   *Authority* is not, because `actorChain` is caller-supplied and a fabricated
+   chain can narrow perfectly at every hop. Proving a grant needs a per-hop
+   `proof_ref` that an outside verifier resolves without trusting the payload.
+2. **Scopes are derived, not authoritative.** Per-hop `scopes` render what a
+   validated credential already granted; they never carry authority themselves.
+   A malformed or missing chain therefore degrades attribution, never access.
+   This came from a 2026-08-20 review mapping OAuth token exchange onto the
+   shape, and it is the correction to fold into the extension text.
+3. **Missing is not absent.** No `proof_ref` means no reconciliation aid was
+   supplied. It must not be read as evidence that no grant occurred. Present but
+   unresolvable, and present but invalidly signed, are further distinct states.
+4. **An `originAnchor` slot is reserved and inert.** Named, unpopulated, and
+   pinned by two negative cases: a populated anchor must verify identically to
+   an unpopulated one, and an anchor can never substitute for scope a
+   predecessor actually held.
+
+Two independent implementations have since checked each other against a shared
+executable vector set covering those cases, agreeing on the negatives and on one
+documented limit: a hop that rewrites its predecessor's scopes upward narrows
+perfectly in the forwarded chain, so that case is only catchable receiver-side.
+
+No maintainer or TSC verdict has been posted.
 
 ## Open questions for upstream maintainers
 

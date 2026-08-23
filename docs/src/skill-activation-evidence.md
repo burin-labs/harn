@@ -22,6 +22,8 @@ disagree with the catalog the model actually saw.
 
 ```mermaid
 flowchart LR
+  accTitle: How skill activation evidence reaches a host
+  accDescr: The merged skill registry feeds a budget fit, which produces both the always-on catalog prompt text and the activation evidence payload. Completing a skill load emits a skill.loaded event. Hosts and reports consume the evidence payload and the lifecycle event.
   registry[Merged skill registry] --> fit[fit_catalog budget fit]
   fit --> render[render_always_on_catalog prompt text]
   fit --> evidence[skills_activation_evidence payload]

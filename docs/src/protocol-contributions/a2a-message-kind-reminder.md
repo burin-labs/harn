@@ -1,26 +1,29 @@
 # A2A RFC: ambient reminder injection for peer agents
 
-**Upstream repo:** [a2aproject/A2A][a2a]
-**Status:** Filed upstream 2026-07-03 as
-[a2aproject/A2A discussion #2027](https://github.com/a2aproject/A2A/discussions/2027),
-awaiting first response. Revised 2026-07-03 to A2A
-v1.0 conventions: `a2a.proto` is now the normative source of truth,
-the proposed operation uses PascalCase (`InjectTaskReminder`),
-streamed reminder lifecycle uses a member-typed `TaskReminderEvent`
-on the `SubscribeToTask` stream (v1.0 removed `kind`-discriminated
-notifications), and enum values use SCREAMING_SNAKE_CASE ProtoJSON
-strings. v1.0's removal of the `Message.kind` discriminator directly
-affects Option A below (see that section).
-**Authors:** Burin Labs
-**Reference impl:** `harn-serve` A2A adapter
-([`crates/harn-serve/src/adapters/a2a/`][a2a-dir]) + typed
-`SystemReminder` envelope
-([`crates/harn-vm/src/llm/helpers/transcript.rs`][reminder-rs]).
-**Sibling discussions:** [A2A #1857 — idempotency on the send
-operation (`SendMessage` in v1.0)][a2a-1857] covers a different
-concern (request idempotency); reminder injection is still open.
+- **Upstream repo:** [a2aproject/A2A][a2a]
+- **Discussion:** [A2A #2027 — `InjectTaskReminder`][a2a-2027]
+- **Status:** Open, filed 2026-07-03, still zero comments. Of the three
+  reminder-injection filings this is the coldest; nobody has pushed back, and
+  nobody has engaged.
+- **Last verified:** 2026-08-22
+- **Authors:** Burin Labs
+- **Reference impl:** `harn-serve` A2A adapter
+  ([`crates/harn-serve/src/adapters/a2a/`][a2a-dir]) and the typed
+  `SystemReminder` envelope
+  ([`crates/harn-vm/src/llm/helpers/transcript.rs`][reminder-rs])
+- **Sibling discussions:** [A2A #1857 — idempotency on the send operation
+  (`SendMessage` in v1.0)][a2a-1857] covers request idempotency, a different
+  concern.
+
+Revised 2026-07-03 to A2A v1.0 conventions: `a2a.proto` is the normative source
+of truth, the proposed operation is PascalCase (`InjectTaskReminder`), the
+streamed reminder lifecycle uses a member-typed `TaskReminderEvent` on the
+`SubscribeToTask` stream, and enum values are SCREAMING_SNAKE_CASE ProtoJSON
+strings. v1.0 also removed the `Message.kind` discriminator, which directly
+affects Option A below.
 
 [a2a]: https://github.com/a2aproject/A2A
+[a2a-2027]: https://github.com/a2aproject/A2A/discussions/2027
 [a2a-1857]: https://github.com/a2aproject/A2A/discussions/1857
 [a2a-dir]: https://github.com/burin-labs/harn/tree/main/crates/harn-serve/src/adapters/a2a
 [reminder-rs]: https://github.com/burin-labs/harn/blob/main/crates/harn-vm/src/llm/helpers/transcript.rs

@@ -1,12 +1,21 @@
 # Positioning note: actor chains in MCP enterprise auth (ID-JAG)
 
-**Status:** Feedback posted 2026-07-03 on
-[oauth-wg #73](https://github.com/oauth-wg/oauth-identity-assertion-authz-grant/issues/73#issuecomment-4878092226).
-Verified 2026-07-03. Unlike
-the other documents in this directory, there is no new proposal to
-file: the substance already lives in active upstream threads, and the
-right contribution is implementer feedback there.
-**Authors:** Burin Labs
+- **Upstream thread:** [oauth-wg #73 — workload/agent identity SSO and
+  delegated access][oauth-73]
+- **Status:** Open, and the ball is with us. A draft author replied on
+  2026-07-25 pointing the actor-chain half of the conversation at
+  [`draft-mcguinness-oauth-actor-profile`][actor-profile] and its companion
+  receipts, proofs, and authority-bounds drafts. That move has not been
+  answered yet.
+- **Last verified:** 2026-08-22
+- **Authors:** Burin Labs
+
+Unlike the other documents here there is no new proposal to file. The substance
+already lives in active upstream drafts, so the useful contribution is
+implementer feedback in those threads.
+
+[oauth-73]: https://github.com/oauth-wg/oauth-identity-assertion-authz-grant/issues/73
+[actor-profile]: https://github.com/mcguinness/draft-mcguinness-oauth-actor-profile
 
 ## The gap
 

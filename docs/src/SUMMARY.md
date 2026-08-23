@@ -315,15 +315,15 @@
 - [Protocol contribution RFCs](./protocol-contributions/README.md)
   - [Filing status ledger](./protocol-contributions/status-ledger.md)
   - [ACP: `session/inject_reminder`](./protocol-contributions/acp-session-inject-reminder.md)
+  - [ACP: `session/suspend`](./protocol-contributions/acp-session-suspend.md)
   - [ACP: typed host-event injection](./protocol-contributions/acp-session-inject-host-event.md)
   - [A2A: `InjectTaskReminder`](./protocol-contributions/a2a-message-kind-reminder.md)
-  - [MCP: `notifications/reminder`](./protocol-contributions/mcp-notifications-reminder.md)
-  - [ACP: `session/suspend`](./protocol-contributions/acp-session-suspend.md)
   - [A2A: `TASK_STATE_PAUSED`](./protocol-contributions/a2a-paused-state.md)
   - [A2A: actor-chain extension](./protocol-contributions/a2a-actor-chain-extension.md)
+  - [MCP: `notifications/reminder`](./protocol-contributions/mcp-notifications-reminder.md)
   - [MCP: `authenticatedIdentity`](./protocol-contributions/mcp-authenticated-identity.md)
-  - [MCP/OAuth: actor-token positioning](./protocol-contributions/oauth-actor-chain-positioning.md)
   - [MCP: sampling budget caps](./protocol-contributions/mcp-sampling-budget-caps.md)
+  - [OAuth: actor-token positioning](./protocol-contributions/oauth-actor-chain-positioning.md)
 
 ## Architecture decisions
 

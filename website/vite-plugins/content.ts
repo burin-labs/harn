@@ -10,6 +10,11 @@
 // parser or a syntax highlighter. Harn code blocks are highlighted with the
 // grammar ported from docs/theme/harn-hljs.js, fed by the Rust-generated keyword
 // table docs/theme/harn-keywords.js.
+//
+// The one thing this stage cannot finish is a Mermaid diagram: laying one out
+// needs real text metrics, so ```mermaid fences become a figure here and the
+// browser renders the SVG into it (src/lib/mermaid.ts) on the handful of pages
+// that have one.
 import { readFileSync, readdirSync, statSync } from "node:fs"
 import { join, dirname, relative, posix } from "node:path"
 import matter from "gray-matter"
@@ -21,8 +26,15 @@ import rehypeRaw from "rehype-raw"
 import rehypeSlug from "rehype-slug"
 import rehypeHighlight from "rehype-highlight"
 import rehypeStringify from "rehype-stringify"
+import { all as allLanguages } from "lowlight"
 import { visit, SKIP } from "unist-util-visit"
 import { toText } from "hast-util-to-text"
+import {
+  DIAGRAM_CANVAS_CLASS,
+  DIAGRAM_FIGURE_CLASS,
+  DIAGRAM_SOURCE_CLASS,
+  DIAGRAM_SOURCE_LABEL,
+} from "../src/lib/diagram-markup.ts"
 
 export interface Heading {
   depth: number
@@ -113,6 +125,13 @@ function textFromHtml(html: string): string {
     .replace(/&([a-z]+|#\d+|#x[0-9a-f]+);/gi, (_, entity: string) => decodeEntity(entity))
     .replace(/\s+/g, " ")
     .trim()
+}
+
+// Diagram sources are markup, not prose: their node ids and arrow syntax would
+// otherwise land in the search index as noise.
+function stripDiagramSources(html: string): string {
+  const figure = new RegExp(`<figure class="${DIAGRAM_FIGURE_CLASS}">[\\s\\S]*?</figure>`, "gi")
+  return html.replace(figure, " ")
 }
 
 function truncateDescription(text: string): string {
@@ -233,6 +252,69 @@ function makeHarnLanguage(keywords: {
 }
 
 // ---------------------------------------------------------------------------
+// Prompt-template highlight grammar
+// ---------------------------------------------------------------------------
+
+// `harn-prompt` fences hold prompt-template source, whose vocabulary lives in
+// crates/harn-vm/src/stdlib/template/vocabulary.rs and is projected by
+// `make gen-prompt-grammar` into the VS Code TextMate grammar. Read the
+// keyword/filter matchers straight out of that generated grammar instead of
+// restating them here, so the editor and the docs site cannot drift apart.
+interface TmMatcher {
+  match?: string
+}
+
+function tmAlternation(matcher: TmMatcher | undefined): string[] {
+  const source = matcher?.match ?? ""
+  const group = /\(([A-Za-z_|]+)\)/.exec(source)
+  if (!group) return []
+  return group[1].split("|").filter(Boolean)
+}
+
+function makeHarnPromptLanguage(repoRoot: string) {
+  const file = join(repoRoot, "editors/vscode/syntaxes/harn-prompt.tmLanguage.json")
+  const grammar = JSON.parse(readFileSync(file, "utf8")) as {
+    repository: Record<string, TmMatcher | undefined>
+  }
+  const keywords = tmAlternation(grammar.repository["keyword"])
+  const literals = tmAlternation(grammar.repository["literal-keyword"])
+  const filters = tmAlternation(grammar.repository["filter"])
+  if (keywords.length === 0 || literals.length === 0 || filters.length === 0) {
+    throw new Error(
+      "harn-prompt.tmLanguage.json no longer exposes keyword/literal/filter alternations; " +
+        "update makeHarnPromptLanguage to match the regenerated grammar",
+    )
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return function harnPrompt(_hljs: any) {
+    const DIRECTIVE = {
+      className: "template-variable",
+      begin: /\{\{-?/,
+      end: /-?\}\}/,
+      keywords: {
+        keyword: keywords.join(" "),
+        literal: literals.join(" "),
+        built_in: filters.join(" "),
+      },
+      contains: [
+        { className: "string", begin: '"', end: '"', contains: [{ begin: /\\./ }] },
+        { className: "string", begin: "'", end: "'", contains: [{ begin: /\\./ }] },
+        { className: "number", begin: /\b\d+(?:\.\d+)?/, relevance: 0 },
+      ],
+    }
+    return {
+      name: "Harn prompt template",
+      aliases: ["harn-prompt"],
+      contains: [
+        { className: "comment", begin: /\{\{#/, end: /#\}\}/ },
+        DIRECTIVE,
+      ],
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // mdBook {{#include}} resolution
 // ---------------------------------------------------------------------------
 
@@ -281,6 +363,90 @@ function rehypeNormalizeCodeLang() {
         }
         return c
       })
+    })
+  }
+}
+
+// ```mermaid fences are diagrams, not code. Rewrite them into a figure the
+// client turns into an SVG (see src/lib/mermaid.ts), keeping the source in a
+// collapsed <details> so the diagram always has a text alternative — one that
+// also stands in when JavaScript never runs. The source lives only in that
+// <details>; the renderer reads it back from the DOM rather than from a
+// duplicated data attribute.
+function rehypeMermaid() {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return (tree: any) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    visit(tree, "element", (node: any, index: number | undefined, parent: any) => {
+      if (node.tagName !== "pre" || parent == null || index == null) return
+      const code = (node.children ?? []).find(
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (c: any) => c.type === "element" && c.tagName === "code",
+      )
+      const classes = code?.properties?.className
+      if (!Array.isArray(classes) || !classes.includes("language-mermaid")) return
+
+      parent.children[index] = {
+        type: "element",
+        tagName: "figure",
+        properties: { className: [DIAGRAM_FIGURE_CLASS] },
+        children: [
+          {
+            type: "element",
+            tagName: "div",
+            // Focusable so a diagram wider than the column can be scrolled
+            // from the keyboard. It is `display: none` until a render lands,
+            // so it never becomes an empty tab stop.
+            properties: { className: [DIAGRAM_CANVAS_CLASS], tabIndex: 0 },
+            children: [],
+          },
+          {
+            type: "element",
+            tagName: "details",
+            properties: { className: [DIAGRAM_SOURCE_CLASS] },
+            children: [
+              {
+                type: "element",
+                tagName: "summary",
+                properties: {},
+                children: [{ type: "text", value: DIAGRAM_SOURCE_LABEL }],
+              },
+              node,
+            ],
+          },
+        ],
+      }
+      return SKIP
+    })
+  }
+}
+
+// A container that scrolls sideways has to be reachable without a mouse
+// (WCAG 2.1.1), which means it needs to be focusable. Wide tables get a
+// focusable wrapper — putting `display: block` on the <table> itself would win
+// the scrolling and lose the row/column semantics screen readers announce — and
+// code blocks become focusable in place.
+function rehypeScrollableRegions() {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return (tree: any) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const wrapped = new WeakSet<any>()
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    visit(tree, "element", (node: any, index: number | undefined, parent: any) => {
+      if (node.tagName === "pre") {
+        node.properties = { ...node.properties, tabIndex: 0 }
+        return SKIP
+      }
+      if (node.tagName !== "table" || parent == null || index == null) return
+      if (wrapped.has(node)) return SKIP
+      wrapped.add(node)
+      parent.children[index] = {
+        type: "element",
+        tagName: "div",
+        properties: { className: ["table-scroll"], tabIndex: 0 },
+        children: [node],
+      }
+      return SKIP
     })
   }
 }
@@ -478,7 +644,7 @@ function buildProcessor(
   links: InternalLink[],
   titleRef: { title: string | null },
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  harnLanguage: any,
+  languages: Record<string, any>,
 ) {
   return unified()
     .use(remarkParse)
@@ -487,10 +653,14 @@ function buildProcessor(
     .use(rehypeRaw)
     .use(rehypeGithubAlerts)
     .use(rehypeNormalizeCodeLang)
+    .use(rehypeMermaid)
     .use(rehypeHighlight, {
       detect: false,
-      languages: { harn: harnLanguage },
+      languages,
+      // JSON Lines is JSON per line; highlight.js has no separate grammar.
+      aliases: { json: ["jsonl"] },
     })
+    .use(rehypeScrollableRegions)
     .use(rehypeSlug)
     .use(rehypeCollectHeadings, headings)
     .use(rehypeCollectAnchors, anchors)
@@ -656,7 +826,15 @@ function validateContentContract(
 export function loadAllDocs(repoRoot: string): LoadedDocs {
   const srcRoot = join(repoRoot, "docs/src")
   const keywords = loadHarnKeywords(repoRoot)
-  const harnLanguage = makeHarnLanguage(keywords)
+  // Every highlight.js grammar lowlight ships, plus the two Harn grammars. This
+  // is build-time only — no highlighter reaches the browser — so registering the
+  // full set costs nothing at runtime and keeps `bash`, `json`, `toml`, `rust`,
+  // `powershell`, `protobuf`, and friends highlighted wherever docs use them.
+  const languages = {
+    ...allLanguages,
+    harn: makeHarnLanguage(keywords),
+    "harn-prompt": makeHarnPromptLanguage(repoRoot),
+  }
   const { parts, order } = parseSummary(repoRoot)
 
   // navTitle by slug (from SUMMARY link text), and section assignment.
@@ -703,7 +881,7 @@ export function loadAllDocs(repoRoot: string): LoadedDocs {
       anchors,
       links,
       titleRef,
-      harnLanguage,
+      languages,
     )
     const html = String(processor.processSync(included))
     anchorsBySlug.set(slug, anchors)
@@ -739,7 +917,7 @@ export function loadAllDocs(repoRoot: string): LoadedDocs {
       next: null,
     })
 
-    const plain = textFromHtml(html)
+    const plain = textFromHtml(stripDiagramSources(html))
     search.push({
       slug,
       url,

@@ -1,22 +1,25 @@
 # MCP RFC: `authenticatedIdentity` on `InitializeResult`
 
-**Upstream repo:** [modelcontextprotocol/modelcontextprotocol][mcp]
-**Status:** Filed upstream 2026-07-03 as pre-SEP
-[MCP discussion #3008](https://github.com/modelcontextprotocol/modelcontextprotocol/discussions/3008),
-awaiting first response. Verified non-duplicate on
-2026-07-03: [SEP-1299][sep-1299] is unrelated (server-side OAuth flow
-management, closed 2025-09-02) and [discussion #1827][mcp-1827]
-(`upstream_identity`) runs the opposite direction (client→server
-propagation). No SEP or discussion claims a server→client identity
-surface. Filing path is a core SEP (Standards Track, sponsor-gated).
-**Authors:** Burin Labs
-**Reference impl:** MCP authenticated-identity registry and
-"connected as" display tracked under
-[harn#3331](https://github.com/burin-labs/harn/issues/3331) (Epic F);
-per-server `whoami`-style probing ships in the Burin Code connector
-surface today.
+- **Upstream repo:** [modelcontextprotocol/modelcontextprotocol][mcp]
+- **Discussion:** [MCP #3008 — `authenticatedIdentity`][mcp-3008] (pre-SEP)
+- **Status:** Open, filed 2026-07-03. One independent implementer confirmed the
+  gap on 2026-07-12; no maintainer reply. Progress needs a sponsor: the filing
+  path is a core SEP, and SEP progression is sponsor-gated.
+- **Last verified:** 2026-08-22
+- **Authors:** Burin Labs
+- **Reference impl:** the MCP authenticated-identity registry and "connected as"
+  display tracked under [harn#3331](https://github.com/burin-labs/harn/issues/3331)
+  (Epic F). Per-server `whoami`-style probing ships in the Burin Code connector
+  surface today.
+
+Verified non-duplicate on 2026-07-03: [SEP-1299][sep-1299] is unrelated
+(server-side OAuth flow management, closed 2025-09-02) and
+[discussion #1827][mcp-1827] (`upstream_identity`) runs the opposite direction,
+client to server. No SEP or discussion claims a server-to-client identity
+surface.
 
 [mcp]: https://github.com/modelcontextprotocol/modelcontextprotocol
+[mcp-3008]: https://github.com/modelcontextprotocol/modelcontextprotocol/discussions/3008
 [sep-1299]: https://github.com/modelcontextprotocol/modelcontextprotocol/issues/1299
 [mcp-1827]: https://github.com/modelcontextprotocol/modelcontextprotocol/discussions/1827
 

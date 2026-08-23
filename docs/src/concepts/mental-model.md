@@ -5,6 +5,8 @@ recorded run. Add a loop or a workflow only when the task needs it.
 
 ```mermaid
 flowchart TD
+  accTitle: How work moves through a Harn program
+  accDescr: A Harn program optionally enters a workflow, then an agent loop. The loop makes a model call; if a tool is needed the model runs a Harn capability and the loop repeats, otherwise the loop produces a result. Every model call also records a transcript and usage.
   P[Harn program] --> W[Optional workflow]
   W --> L[Agent loop]
   L --> C[Model call]

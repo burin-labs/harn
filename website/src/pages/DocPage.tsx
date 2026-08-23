@@ -1,9 +1,10 @@
-import { useEffect, useState, type MouseEvent as ReactMouseEvent } from "react"
+import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from "react"
 import { Link, useLocation, useNavigate } from "react-router"
 import { nav, meta } from "virtual:harn-docs"
 import type { PageData } from "../../vite-plugins/content"
 import { pageMetaForDoc } from "../lib/metadata"
 import { fetchPage, getCachedPage } from "../lib/page-store"
+import { useMermaid } from "../hooks/useMermaid"
 import { useMessages } from "../i18n"
 import { RichTitle } from "../components/docs/RichTitle"
 import { SectionTabs } from "../components/docs/SectionTabs"
@@ -17,6 +18,9 @@ export function DocPage({ slug }: { slug: string }) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const navigate = useNavigate()
   const location = useLocation()
+  const contentRef = useRef<HTMLDivElement>(null)
+
+  useMermaid(contentRef, page?.slug ?? null)
 
   useEffect(() => {
     document.title = pageMetaForDoc(docMeta).title
@@ -94,11 +98,14 @@ export function DocPage({ slug }: { slug: string }) {
               {section.title}
             </button>
 
-            <nav className="mb-4 flex items-center gap-1.5 text-xs text-foreground-muted">
+            <nav
+              className="mb-4 flex items-center gap-1.5 text-xs text-foreground-muted"
+              aria-label={t.docs.breadcrumbAria}
+            >
               <Link to={section.url} className="hover:text-foreground-secondary">
                 {section.title}
               </Link>
-              <span>/</span>
+              <span aria-hidden="true">/</span>
               <span className="text-foreground-secondary">
                 <RichTitle text={docMeta.navTitle} />
               </span>
@@ -106,6 +113,7 @@ export function DocPage({ slug }: { slug: string }) {
 
             {page ? (
               <div
+                ref={contentRef}
                 className="prose max-w-none"
                 onClick={onContentClick}
                 dangerouslySetInnerHTML={{ __html: page.html }}
