@@ -71,6 +71,7 @@ export const en = {
   docs: {
     previous: "Previous",
     next: "Next",
+    pagerAria: "Previous and next page",
     onThisPage: "On this page",
     editOnGitHub: "Edit this page on GitHub",
     sectionsAria: "Documentation sections",

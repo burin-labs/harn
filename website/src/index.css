@@ -202,6 +202,24 @@ body {
    -------------------------------------------------------------------------- */
 .prose {
   color: var(--color-foreground-secondary);
+  font-size: 0.9375rem;
+  line-height: 1.65;
+  /* The comfortable reading measure, ~70 characters at the body size. Kept in
+     rem rather than ch: `ch` resolves against each element's own font-size, so
+     a ch-based cap silently stops binding on headings. Text-level blocks are
+     capped here; code, tables, and diagrams are deliberately left uncapped
+     below so the wider shell buys density rather than a longer line. */
+  --prose-measure: 34.5rem;
+}
+.prose > p,
+.prose > ul,
+.prose > ol,
+.prose > blockquote,
+.prose > h1,
+.prose > h2,
+.prose > h3,
+.prose > h4 {
+  max-width: var(--prose-measure);
 }
 .prose > :first-child {
   margin-top: 0;
@@ -241,8 +259,8 @@ body {
   scroll-margin-top: 6rem;
 }
 .prose p {
-  margin-bottom: 1rem;
-  line-height: 1.75;
+  margin-bottom: 0.9rem;
+  line-height: 1.65;
 }
 .prose ul,
 .prose ol {
@@ -256,8 +274,8 @@ body {
   list-style-type: decimal;
 }
 .prose li {
-  margin-bottom: 0.3rem;
-  line-height: 1.7;
+  margin-bottom: 0.25rem;
+  line-height: 1.6;
 }
 .prose li > ul,
 .prose li > ol {
