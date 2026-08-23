@@ -213,6 +213,9 @@ export interface HarnCatalogModel {
   strengths?: string[]
   benchmarks?: Record<string, number>
   serving_tiers?: HarnModelServingTier[]
+  released?: string
+  row_kind?: "snapshot" | "selector"
+  current_snapshot?: string
 }
 
 export interface HarnModelBatchSupport {
@@ -689,6 +692,12 @@ public struct HarnCatalogModel: Codable, Sendable, Equatable {
     public let benchmarks: [String: Double]
     /// Non-default synchronous serving tiers such as fast, priority, or flex.
     public let servingTiers: [HarnModelServingTier]
+    /// ISO 8601 date (`YYYY-MM-DD`) when the provider published this snapshot.
+    public let released: String?
+    /// `"snapshot"` for a pinned dated id, `"selector"` for an undated moving target.
+    public let rowKind: String?
+    /// Catalog id of the snapshot a selector currently points at.
+    public let currentSnapshot: String?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -730,6 +739,9 @@ public struct HarnCatalogModel: Codable, Sendable, Equatable {
         case strengths
         case benchmarks
         case servingTiers = "serving_tiers"
+        case released
+        case rowKind = "row_kind"
+        case currentSnapshot = "current_snapshot"
     }
 
     public init(from decoder: Decoder) throws {
@@ -773,6 +785,9 @@ public struct HarnCatalogModel: Codable, Sendable, Equatable {
         strengths = try container.decodeIfPresent([String].self, forKey: .strengths) ?? []
         benchmarks = try container.decodeIfPresent([String: Double].self, forKey: .benchmarks) ?? [:]
         servingTiers = try container.decodeIfPresent([HarnModelServingTier].self, forKey: .servingTiers) ?? []
+        released = try container.decodeIfPresent(String.self, forKey: .released)
+        rowKind = try container.decodeIfPresent(String.self, forKey: .rowKind)
+        currentSnapshot = try container.decodeIfPresent(String.self, forKey: .currentSnapshot)
     }
 }
 

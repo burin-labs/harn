@@ -184,6 +184,9 @@ export interface HarnCatalogModel {
   strengths?: string[]
   benchmarks?: Record<string, number>
   serving_tiers?: HarnModelServingTier[]
+  released?: string
+  row_kind?: "snapshot" | "selector"
+  current_snapshot?: string
 }
 
 export interface HarnModelBatchSupport {

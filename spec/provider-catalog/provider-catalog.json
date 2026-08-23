@@ -1746,7 +1746,9 @@
         "reasoning",
         "tool_use",
         "long_context"
-      ]
+      ],
+      "released": "2024-06-20",
+      "row_kind": "snapshot"
     },
     {
       "id": "claude-3-5-sonnet-20241022",
@@ -1852,7 +1854,9 @@
         "reasoning",
         "tool_use",
         "long_context"
-      ]
+      ],
+      "released": "2024-10-22",
+      "row_kind": "snapshot"
     },
     {
       "id": "claude-3-opus-20240229",
@@ -3346,7 +3350,9 @@
       ],
       "benchmarks": {
         "swe_bench_verified": 77.2
-      }
+      },
+      "row_kind": "selector",
+      "current_snapshot": "claude-sonnet-4-5-20250929"
     },
     {
       "id": "claude-sonnet-4-5-20250929",
@@ -3459,7 +3465,9 @@
       ],
       "benchmarks": {
         "swe_bench_verified": 77.2
-      }
+      },
+      "released": "2025-09-29",
+      "row_kind": "snapshot"
     },
     {
       "id": "claude-sonnet-4-6",

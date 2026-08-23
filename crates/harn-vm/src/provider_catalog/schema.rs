@@ -254,7 +254,10 @@ pub fn schema_value() -> Value {
                     "serving_tiers": {
                         "type": "array",
                         "items": {"$ref": "#/$defs/serving_tier"}
-                    }
+                    },
+                    "released": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"},
+                    "row_kind": {"enum": ["snapshot", "selector"]},
+                    "current_snapshot": {"type": "string", "minLength": 1}
                 },
                 "additionalProperties": false
             },

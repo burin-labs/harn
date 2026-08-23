@@ -351,6 +351,9 @@ fn model_patch_schema() -> &'static PatchSchema {
             "lineage",
             "complementary_with",
             "avoid_as_reviewer_for",
+            "released",
+            "row_kind",
+            "current_snapshot",
         ],
         freeform: &["benchmarks"],
         nested: &[

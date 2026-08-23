@@ -325,40 +325,53 @@ fn cli_mock_native_tool_calls_reach_the_live_result() {
 /// shared fixture declares a tool, which would take the auto-tool-call branch
 /// instead and never reach the prose the sentinel is written into.
 fn request_with_system(system: &str) -> LlmRequestPayload {
+    request_with_completion(system, None, None)
+}
+
+fn request_with_completion(
+    system: &str,
+    sentinel: Option<&str>,
+    form: Option<&str>,
+) -> LlmRequestPayload {
     let mut opts = crate::llm::api::options::base_opts("mock");
     opts.messages = vec![serde_json::json!({"role": "user", "content": "do the thing"})];
     opts.system = Some(system.to_string());
     opts.tools = None;
     opts.native_tools = None;
+    opts.done_sentinel = sentinel.map(str::to_string);
+    opts.done_sentinel_form = form.map(str::to_string);
     LlmRequestPayload::from(&opts)
 }
 
-/// The simulator has to finish a run in whichever spelling of the sentinel the
-/// prompt taught. Keyed on the `<done>` block alone it agreed with exactly one
-/// tool grammar, so when a route moved to the bare spelling its fixtures
-/// stopped completing and ran out their iteration budget instead — with no
-/// change to the fixtures, only to the prompt they were answering.
+/// The simulator finishes a run from structured turn state, not from the
+/// wording of the system prompt. Keying completion on `<done>` in the prompt
+/// made a correct grammar change look like an agent-loop regression: the
+/// fixtures did not change, only the prompt they were answering.
 #[test]
-fn generated_prose_completes_in_the_spelling_the_prompt_taught() {
+fn generated_prose_completes_from_structured_turn_state_not_prompt_text() {
     reset_llm_mock_state();
 
-    let tagged = mock_llm_response(&request_with_system(
-        "Emit `<done>##DONE##</done>` as its own top-level block.",
+    let tagged = mock_llm_response(&request_with_completion(
+        "No sentinel spelling appears in this prompt at all.",
+        Some("##DONE##"),
+        Some("done_block"),
     ))
     .expect("tagged response");
     assert!(
         tagged.text.contains("<done>##DONE##</done>"),
-        "tagged prompt gets the block spelling: {}",
+        "structured done_block emits the tagged spelling: {}",
         tagged.text
     );
 
-    let plain = mock_llm_response(&request_with_system(
-        "Include `##DONE##` exactly once in assistant text.",
+    let plain = mock_llm_response(&request_with_completion(
+        "Emit `<done>##DONE##</done>` as its own top-level block.",
+        Some("##DONE##"),
+        Some("plain_text"),
     ))
     .expect("plain response");
     assert!(
         plain.text.contains("##DONE##"),
-        "bare-sentinel prompt still completes: {}",
+        "structured plain_text still completes: {}",
         plain.text
     );
     assert!(
@@ -367,14 +380,21 @@ fn generated_prose_completes_in_the_spelling_the_prompt_taught() {
         plain.text
     );
 
-    // A prompt that never asks for a sentinel must still exhaust its budget.
-    // Completing those would change loop semantics for every fixture that
-    // means to run out.
+    let prompt_only = mock_llm_response(&request_with_system(
+        "Emit `<done>##DONE##</done>` as its own top-level block. Include `##DONE##`.",
+    ))
+    .expect("prompt-only response");
+    assert!(
+        !prompt_only.text.contains("##DONE##"),
+        "a prompt that mentions a sentinel without structured turn state must not finish the run: {}",
+        prompt_only.text
+    );
+
     let silent =
         mock_llm_response(&request_with_system("Answer the user.")).expect("silent response");
     assert!(
         !silent.text.contains("##DONE##"),
-        "a prompt with no sentinel gets no sentinel: {}",
+        "a turn with no sentinel still exhausts its budget: {}",
         silent.text
     );
 }

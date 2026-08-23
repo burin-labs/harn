@@ -228,6 +228,36 @@ pub fn validate_artifact(artifact: &ProviderCatalogArtifact) -> ProviderCatalogV
         }
     }
 
+    for model in &artifact.models {
+        if let Some(released) = &model.released {
+            if chrono::NaiveDate::parse_from_str(released, "%Y-%m-%d").is_err() {
+                result.errors.push(format!(
+                    "model {} released must be an ISO 8601 date (YYYY-MM-DD)",
+                    model.id
+                ));
+            }
+        }
+        if let Some(snapshot) = &model.current_snapshot {
+            if snapshot.trim().is_empty() {
+                result.errors.push(format!(
+                    "model {} current_snapshot cannot be empty",
+                    model.id
+                ));
+            } else if !model_ids.contains(snapshot.as_str()) {
+                result.errors.push(format!(
+                    "model {} current_snapshot references unknown model {snapshot}",
+                    model.id
+                ));
+            }
+            if model.row_kind == Some(crate::llm_config::ModelRowKind::Snapshot) {
+                result.errors.push(format!(
+                    "model {} is a snapshot and cannot name a current_snapshot",
+                    model.id
+                ));
+            }
+        }
+    }
+
     let mut route_pairs = BTreeSet::new();
     for route in &artifact.routing_routes {
         if route.provider.trim().is_empty() {

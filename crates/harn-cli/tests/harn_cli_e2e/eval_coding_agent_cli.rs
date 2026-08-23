@@ -422,6 +422,37 @@ fn read_only_audit_verifier_accepts_repeated_read_file_calls() {
 }
 
 #[test]
+fn no_tool_diagnosis_verifier_grades_substance_not_phrasing() {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let fixture = manifest_dir.join("tests/fixtures/no_tool_diagnosis_verifier.harn");
+    let outcome: RunOutcome = run_in_harn_runtime(move || async move {
+        let _env_guard = harn_state_lock::lock_harn_state_async().await;
+        harn_vm::reset_thread_local_state();
+        execute_run_with_sandbox_options(
+            &fixture.to_string_lossy(),
+            false,
+            HashSet::new(),
+            Vec::new(),
+            Vec::new(),
+            CliLlmMockMode::Off,
+            None,
+            RunProfileOptions::default(),
+            RunSandboxOptions::default().with_workspace_root(manifest_dir),
+        )
+        .await
+    });
+    assert_eq!(
+        outcome.exit_code, 0,
+        "fixture failed\nstdout={}\nstderr={}",
+        outcome.stdout, outcome.stderr
+    );
+    assert_eq!(
+        outcome.stdout,
+        "reported=true\nverbatim_line=true\nhint_only=false\nused_a_tool=false\nwrong_operator=false\n"
+    );
+}
+
+#[test]
 fn coding_agent_suite_default_structural_validator_vetoes_phantom_completion() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let workspace = tmp.path().join("workspace");

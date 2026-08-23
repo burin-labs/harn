@@ -44,6 +44,8 @@ mod local_runtime;
 mod local_runtime_tests;
 #[cfg(test)]
 mod pricing_tests;
+#[cfg(test)]
+mod released_row_kind_tests;
 mod remote;
 mod schema;
 #[cfg(test)]
@@ -483,6 +485,9 @@ fn catalog_model(
         strengths: model.strengths.clone(),
         benchmarks: model.benchmarks.clone(),
         serving_tiers: model.serving_tiers.clone(),
+        released: model.released.clone(),
+        row_kind: model.row_kind,
+        current_snapshot: model.current_snapshot.clone(),
         id,
         name: model.name,
         display_name,

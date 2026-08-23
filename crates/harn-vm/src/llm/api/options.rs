@@ -388,6 +388,11 @@ pub(crate) struct LlmCallOptions {
     /// serves it; ignored by real providers. `None` resolves to the default
     /// shared bucket.
     pub mock_scope: Option<String>,
+    /// Simulator-only completion sentinel copied from the agent loop.
+    /// Real providers ignore it.
+    pub done_sentinel: Option<String>,
+    /// Simulator-only completion form: `done_block`, `plain_text`, or `none`.
+    pub done_sentinel_form: Option<String>,
     /// Where each resolved dispatch field (provider/model/wire_format/
     /// thinking/tool_format) came from. Populated by the pipeline resolver
     /// (via an internal `_dispatch_provenance` entry in the agent-loop options dict) and
@@ -559,6 +564,8 @@ impl Default for LlmCallOptions {
             rate_limit_consumer_id: None,
             rate_limit_reroute_on_timeout: false,
             mock_scope: None,
+            done_sentinel: None,
+            done_sentinel_form: None,
             dispatch_provenance: None,
             reminders: None,
             reminder_lifecycle: Vec::new(),
@@ -804,6 +811,17 @@ pub(crate) struct LlmRequestPayload {
     /// snapshots because it is an in-process test-harness routing hint.
     #[serde(skip_serializing)]
     pub mock_scope: Option<String>,
+    /// Agent-loop completion sentinel for the mock provider. Real providers
+    /// ignore it. The simulator finishes generated prose from this field
+    /// rather than scanning the rendered system prompt. Skipped in serialized
+    /// transport snapshots because it is in-process harness state.
+    #[serde(skip_serializing)]
+    pub done_sentinel: Option<String>,
+    /// How to emit [`Self::done_sentinel`]: `done_block`, `plain_text`, or
+    /// `none`. Comes from `agent_completion_prompt_bindings`, not from prompt
+    /// substring matching.
+    #[serde(skip_serializing)]
+    pub done_sentinel_form: Option<String>,
 }
 
 impl LlmRequestPayload {
@@ -867,6 +885,8 @@ impl From<&LlmCallOptions> for LlmRequestPayload {
             reminder_lifecycle: opts.reminder_lifecycle.clone(),
             cli_llm_mock_scope: crate::llm::mock::current_cli_llm_mock_scope(),
             mock_scope: opts.mock_scope.clone(),
+            done_sentinel: opts.done_sentinel.clone(),
+            done_sentinel_form: opts.done_sentinel_form.clone(),
         };
         if opts.system_prompt_root == crate::llm::prompt::PromptRoot::Replacement {
             // A replacement is the entire system channel. Drop every

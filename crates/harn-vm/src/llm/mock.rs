@@ -10,10 +10,29 @@ use super::mock_store::{MockQueue, QueueMatch};
 use crate::orchestration::ToolCallRecord;
 use crate::value::{VmError, VmValue};
 
-/// The completion sentinel the simulator knows how to answer with. Fixtures
-/// that pin a different one script their own responses; this is the default
-/// the agent loop teaches, and the only spelling worth recognizing here.
-const MOCK_DONE_SENTINEL: &str = "##DONE##";
+/// Finish generated prose from structured turn state, not from prompt text.
+///
+/// `done_sentinel` / `done_sentinel_form` are the same facts the agent loop
+/// already used to render the prompt. Scanning the prompt for `<done>` or
+/// `##DONE##` made fixtures silently depend on wording they never mentioned:
+/// a correct prompt change that dropped one spelling stopped runs completing.
+fn generated_prose_with_completion(
+    request: &super::api::LlmRequestPayload,
+    prose_body: String,
+) -> String {
+    let sentinel = request
+        .done_sentinel
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    match (sentinel, request.done_sentinel_form.as_deref()) {
+        (None, _) | (_, Some("none")) => prose_body,
+        (Some(sentinel), Some("done_block")) => {
+            format!("<assistant_prose>{prose_body}</assistant_prose>\n<done>{sentinel}</done>")
+        }
+        (Some(sentinel), _) => format!("{prose_body} {sentinel}"),
+    }
+}
 
 /// LLM replay mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1320,19 +1339,9 @@ pub(crate) fn mock_llm_response(
         }
     }
 
-    // Finish a run only when the prompt asked for a completion sentinel, and
-    // finish it in the spelling that prompt taught. A prompt that never
-    // mentions one still exhausts its budget: auto-completing those would
-    // change loop semantics for every fixture that means to run out.
-    //
-    // Keying this on the `<done>` block alone made the simulator agree with
-    // exactly one tool grammar. The tagged text grammar teaches the block and
-    // the others teach the bare sentinel, so when a route moved to the bare
-    // spelling its runs silently stopped completing — the fixtures did not
-    // change, the prompt they were answering did.
-    let tagged_done = system.is_some_and(|s| s.contains("<done>"));
-    let plain_done = !tagged_done && system.is_some_and(|s| s.contains(MOCK_DONE_SENTINEL));
-
+    // Finish a run only from structured turn state. A prompt that happens to
+    // mention a sentinel is not a request to finish; auto-completing those
+    // would change loop semantics for every fixture that means to run out.
     let prose_body = if prompt_text.is_empty() {
         "Mock LLM response".to_string()
     } else {
@@ -1342,15 +1351,7 @@ pub(crate) fn mock_llm_response(
             prompt_text.chars().take(100).collect::<String>()
         )
     };
-    let response = if tagged_done {
-        format!(
-            "<assistant_prose>{prose_body}</assistant_prose>\n<done>{MOCK_DONE_SENTINEL}</done>"
-        )
-    } else if plain_done {
-        format!("{prose_body} {MOCK_DONE_SENTINEL}")
-    } else {
-        prose_body
-    };
+    let response = generated_prose_with_completion(request, prose_body);
 
     let mut result = LlmResult {
         attempts: Default::default(),

@@ -190,6 +190,15 @@ pub struct CatalogModel {
     /// Non-default synchronous serving tiers such as fast, priority, or flex.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub serving_tiers: Vec<llm_config::ServingTierDef>,
+    /// ISO 8601 date (`YYYY-MM-DD`) when the provider published this snapshot.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub released: Option<String>,
+    /// Pinned snapshot versus undated selector. Absent when unauthored.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub row_kind: Option<llm_config::ModelRowKind>,
+    /// Catalog id of the snapshot a selector currently points at.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current_snapshot: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
