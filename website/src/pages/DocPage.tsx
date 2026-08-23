@@ -6,7 +6,7 @@ import { pageMetaForDoc } from "../lib/metadata"
 import { fetchPage, getCachedPage } from "../lib/page-store"
 import { useMermaid } from "../hooks/useMermaid"
 import { useMessages } from "../i18n"
-import { RichTitle } from "../components/docs/RichTitle"
+import { plainTitle, RichTitle } from "../components/docs/RichTitle"
 import { SectionTabs } from "../components/docs/SectionTabs"
 import { SidebarNav } from "../components/docs/SidebarNav"
 import { Toc } from "../components/docs/Toc"
@@ -64,12 +64,12 @@ export function DocPage({ slug }: { slug: string }) {
     <>
       {/* Full-width section tabs (the top-level Diataxis switcher). */}
       <div className="sticky top-14 z-20 border-b border-border bg-nav-bg backdrop-blur-lg">
-        <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
+        <div className="mx-auto max-w-[84rem] px-4 sm:px-6 lg:px-8">
           <SectionTabs sections={nav} activeId={section.id} />
         </div>
       </div>
 
-      <div className="mx-auto flex max-w-6xl gap-0 px-0 sm:px-4 lg:px-8">
+      <div className="mx-auto flex max-w-[84rem] gap-0 px-0 sm:px-4 lg:px-8">
         {/* Sidebar */}
         <aside
           className={`fixed inset-0 z-30 bg-black/40 backdrop-blur-sm lg:static lg:z-auto lg:block lg:bg-transparent lg:backdrop-blur-none ${
@@ -126,16 +126,25 @@ export function DocPage({ slug }: { slug: string }) {
             )}
 
             {page && (page.prev || page.next) && (
-              <div className="mt-12 grid gap-4 border-t border-border pt-6 sm:grid-cols-2">
+              /* Two text links on one rule. The direction is carried by the
+                 arrow for sighted readers and by the label for everyone else,
+                 so neither needs a card around it. */
+              <nav
+                aria-label={t.docs.pagerAria}
+                className="mt-12 flex items-start justify-between gap-8 border-t border-border pt-4 text-sm"
+              >
                 {page.prev ? (
                   <Link
                     to={page.prev.url}
-                    className="group rounded-xl border border-card-border bg-card-bg p-4 transition-colors hover:border-accent-400"
+                    aria-label={`${t.docs.previous}: ${plainTitle(page.prev.title)}`}
+                    className="group inline-flex max-w-[46%] items-baseline gap-1.5 text-foreground-secondary transition-colors hover:text-accent-700 dark:hover:text-accent-300"
                   >
-                    <div className="text-xs text-foreground-muted">{t.docs.previous}</div>
-                    <div className="mt-1 font-medium text-foreground group-hover:text-accent-600 dark:group-hover:text-accent-300">
+                    <span aria-hidden="true" className="text-foreground-muted transition-transform group-hover:-translate-x-0.5">
+                      &larr;
+                    </span>
+                    <span>
                       <RichTitle text={page.prev.title} />
-                    </div>
+                    </span>
                   </Link>
                 ) : (
                   <span />
@@ -143,15 +152,18 @@ export function DocPage({ slug }: { slug: string }) {
                 {page.next && (
                   <Link
                     to={page.next.url}
-                    className="group rounded-xl border border-card-border bg-card-bg p-4 text-right transition-colors hover:border-accent-400 sm:col-start-2"
+                    aria-label={`${t.docs.next}: ${plainTitle(page.next.title)}`}
+                    className="group inline-flex max-w-[46%] items-baseline gap-1.5 text-right text-foreground-secondary transition-colors hover:text-accent-700 dark:hover:text-accent-300"
                   >
-                    <div className="text-xs text-foreground-muted">{t.docs.next}</div>
-                    <div className="mt-1 font-medium text-foreground group-hover:text-accent-600 dark:group-hover:text-accent-300">
+                    <span>
                       <RichTitle text={page.next.title} />
-                    </div>
+                    </span>
+                    <span aria-hidden="true" className="text-foreground-muted transition-transform group-hover:translate-x-0.5">
+                      &rarr;
+                    </span>
                   </Link>
                 )}
-              </div>
+              </nav>
             )}
 
             <div className="mt-10 border-t border-border pt-6 text-sm">

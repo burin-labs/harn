@@ -16,3 +16,9 @@ export function RichTitle({ text }: { text: string }) {
     </>
   )
 }
+
+// The same string as plain text, for attributes (aria-label, title) that cannot
+// carry the markup RichTitle renders.
+export function plainTitle(text: string): string {
+  return text.replace(/`/g, "")
+}
