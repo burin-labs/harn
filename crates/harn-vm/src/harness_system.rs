@@ -529,6 +529,11 @@ mod tests {
         );
     }
 
+    /// On Unix the passwd fallback makes this unconditional. Elsewhere
+    /// `username` still rests on `$USERNAME` — the blind spot this change
+    /// deliberately leaves open — so the claim is Unix-only, and the test
+    /// says so rather than asserting more than the code guarantees.
+    #[cfg(unix)]
     #[test]
     fn the_identity_snapshot_names_a_user() {
         let identity = identity_snapshot();
