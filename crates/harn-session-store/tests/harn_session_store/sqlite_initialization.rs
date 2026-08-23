@@ -108,7 +108,13 @@ fn sqlite_read_only_open_reads_without_a_durable_delta() {
     });
     let lock = initialization_lock_path(&path);
     std::fs::remove_file(&lock).expect("remove initializer lock before inventory");
-    let before = file_inventory(dir.path());
+    let before = durable_file_digests(dir.path());
+    assert!(
+        before
+            .iter()
+            .any(|(relative_path, _)| relative_path == Path::new("read-only.sqlite-wal")),
+        "fixture must exercise committed WAL-backed state"
+    );
 
     let reader = SqliteSessionStore::open_read_only(&path).expect("open read-only store");
     let sessions = runtime
@@ -118,7 +124,7 @@ fn sqlite_read_only_open_reads_without_a_durable_delta() {
     assert_eq!(sessions[0].id, "inspect-me");
     drop(reader);
 
-    assert_eq!(file_inventory(dir.path()), before);
+    assert_eq!(durable_file_digests(dir.path()), before);
     assert!(!lock.exists(), "inspection must not recreate the init lock");
     drop(store);
 }
@@ -130,7 +136,7 @@ fn sqlite_read_only_handle_denies_mutations_without_a_durable_delta() {
     drop(SqliteSessionStore::open(&path).expect("initialize store"));
     let lock = initialization_lock_path(&path);
     std::fs::remove_file(&lock).expect("remove initializer lock before inventory");
-    let before = file_inventory(dir.path());
+    let before = durable_file_digests(dir.path());
     let reader = SqliteSessionStore::open_read_only(&path).expect("open read-only store");
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -146,7 +152,7 @@ fn sqlite_read_only_handle_denies_mutations_without_a_durable_delta() {
     assert!(error.to_string().to_ascii_lowercase().contains("readonly"));
     drop(reader);
 
-    assert_eq!(file_inventory(dir.path()), before);
+    assert_eq!(durable_file_digests(dir.path()), before);
     assert!(
         !lock.exists(),
         "denied mutation must not recreate the init lock"
@@ -163,9 +169,9 @@ fn sqlite_read_only_open_rejects_missing_and_malformed_inputs_without_writes() {
 
     let malformed = dir.path().join("malformed.sqlite");
     std::fs::write(&malformed, b"not a sqlite database").expect("write malformed fixture");
-    let before = file_inventory(dir.path());
+    let before = durable_file_digests(dir.path());
     assert!(SqliteSessionStore::open_read_only(&malformed).is_err());
-    assert_eq!(file_inventory(dir.path()), before);
+    assert_eq!(durable_file_digests(dir.path()), before);
     assert!(!initialization_lock_path(&malformed).exists());
 }
 
@@ -175,20 +181,21 @@ fn initialization_lock_path(database: &Path) -> PathBuf {
     PathBuf::from(path)
 }
 
-fn file_inventory(root: &Path) -> Vec<(PathBuf, u64, String)> {
+fn durable_file_digests(root: &Path) -> Vec<(PathBuf, String)> {
     let mut inventory = std::fs::read_dir(root)
         .expect("read inventory root")
         .map(|entry| {
             let entry = entry.expect("read inventory entry");
             let path = entry.path();
-            let metadata = entry.metadata().expect("inventory metadata");
-            assert!(metadata.is_file(), "fixture inventory contains only files");
+            assert!(
+                entry.file_type().expect("inventory file type").is_file(),
+                "fixture inventory contains only files"
+            );
             let bytes = std::fs::read(&path).expect("read inventory bytes");
             (
                 path.strip_prefix(root)
                     .expect("relative inventory path")
                     .to_path_buf(),
-                metadata.len(),
                 hex::encode(Sha256::digest(bytes)),
             )
         })
