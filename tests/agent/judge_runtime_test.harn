@@ -257,10 +257,7 @@ pipeline test_completion_judge_prompt_uses_projection_not_callable_schema(harnes
         tool_calls: [{id: "edit-1", name: "edit", arguments: {content: "WRITE_ARG_MARKER"}}],
       },
       llm_done(),
-      {
-        text:
-          "{\"action\":\"accept\",\"reason\":\"write and verification are sufficient\",\"repair\":\"\",\"specific_gaps\":[],\"accepted_evidence\":[\"write and verification\"]}",
-      },
+      {text: "{\"verdict\":\"done\",\"detail\":\"The write and verification are sufficient.\"}"},
     ],
     { ->
       const session = "judge-projection-prompt-" + harness.random.uuid()
@@ -415,11 +412,9 @@ pipeline test_completion_judge_transports_veto_and_repair_from_compact_packet(
       {
         text: json_stringify(
           {
-            action: "continue",
-            reason: "The assertion only proves absence and never exercises deletion behavior.",
-            repair: "Replace the hollow negative with a behavior-sensitive test.",
-            specific_gaps: ["Deletion behavior is not exercised."],
-            accepted_evidence: [],
+            verdict: "continue",
+            detail:
+              "Deletion behavior is not exercised; replace the hollow negative with a behavior-sensitive test.",
           },
         ),
       },
@@ -531,7 +526,7 @@ pipeline test_completion_judge_refuses_request_that_cannot_fit_terminal_deadline
 pipeline test_fenced_completion_judge_uses_typed_checkpoint(harness: Harness, task) {
   const judge_response = {
     text:
-      "```json\n{\"action\":\"continue\",\"reason\":\"The verifier has not run.\",\"repair\":\"Run `harn test tests/agent/judge_runtime_test.harn` now.\",\"specific_gaps\":[\"Run the narrow verifier.\"],\"accepted_evidence\":[]}\n```",
+      "```json\n{\"verdict\":\"continue\",\"detail\":\"Run `harn test tests/agent/judge_runtime_test.harn` now because verification is missing.\"}\n```",
   }
   with_llm_script(
     harness.llm,
@@ -555,7 +550,7 @@ pipeline test_fenced_completion_judge_uses_typed_checkpoint(harness: Harness, ta
       assert_eq(
         feedback,
         [
-          "Run `harn test tests/agent/judge_runtime_test.harn` now.\n\nAddress these specific gaps before finishing:\n- Run the narrow verifier.\n\nThe verifier has not run.",
+          "Run `harn test tests/agent/judge_runtime_test.harn` now because verification is missing.",
         ],
       )
       assert_eq(captured.result.status, "completion_unverified")

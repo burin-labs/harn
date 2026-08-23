@@ -256,7 +256,6 @@
       "jsonrpc": "2.0",
       "method": "_harn/agentEvent",
       "params": {
-        "acceptedEvidence": [],
         "confirm": false,
         "convertedFrom": "cosmetic_only",
         "escalationRecommended": true,
@@ -269,10 +268,6 @@
         "reasoning": "needs one more concrete action",
         "sessionId": "session-1",
         "source": "deterministic",
-        "specificGaps": [
-          "rerun the verifier",
-          "cite the changed source file"
-        ],
         "trigger": "stalled",
         "verdict": "continue"
       }

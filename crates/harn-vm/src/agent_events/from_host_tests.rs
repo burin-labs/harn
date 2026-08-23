@@ -402,8 +402,10 @@ fn from_host_judge_decision_preserves_source() {
             "reason": "repeated_verification_failures",
             "escalation_recommended": true,
             "escalation_target": "frontier",
-            "specific_gaps": [],
-            "accepted_evidence": [],
+            // Retired verdict fields a host built against an older contract
+            // may still send. They must decode away, not fail the event.
+            "specific_gaps": ["rerun the verifier"],
+            "accepted_evidence": ["targeted verifier passed"],
         }),
     )
     .expect("judge_decision");

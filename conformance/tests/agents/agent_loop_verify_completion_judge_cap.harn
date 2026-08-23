@@ -29,13 +29,9 @@ fn run_capped(harness: Harness) {
     harness.llm,
     [
       llm_text("Round one. ##DONE##"),
-      llm_text(
-        "{\"action\":\"continue\",\"reason\":\"veto one\",\"repair\":\"keep going\",\"specific_gaps\":[],\"accepted_evidence\":[]}",
-      ),
+      llm_text("{\"verdict\":\"continue\",\"detail\":\"Keep going after veto one.\"}"),
       llm_text("Round two. ##DONE##"),
-      llm_text(
-        "{\"action\":\"continue\",\"reason\":\"veto two\",\"repair\":\"keep going\",\"specific_gaps\":[],\"accepted_evidence\":[]}",
-      ),
+      llm_text("{\"verdict\":\"continue\",\"detail\":\"Keep going after veto two.\"}"),
       llm_text("Round three. ##DONE##"),
     ],
     { ->
@@ -81,9 +77,7 @@ fn run_approved(harness: Harness) {
     harness.llm,
     [
       llm_text("Final answer. ##DONE##"),
-      llm_text(
-        "{\"action\":\"accept\",\"reason\":\"looks complete\",\"repair\":\"\",\"specific_gaps\":[],\"accepted_evidence\":[]}",
-      ),
+      llm_text("{\"verdict\":\"done\",\"detail\":\"The task looks complete.\"}"),
     ],
     { ->
       const session_id = "verify-judge-approve-" + harness.random.uuid()
@@ -116,13 +110,9 @@ fn run_cap_disabled(harness: Harness) {
     harness.llm,
     [
       llm_text("Try one. ##DONE##"),
-      llm_text(
-        "{\"action\":\"continue\",\"reason\":\"veto one\",\"repair\":\"keep going\",\"specific_gaps\":[],\"accepted_evidence\":[]}",
-      ),
+      llm_text("{\"verdict\":\"continue\",\"detail\":\"Keep going after veto one.\"}"),
       llm_text("Try two. ##DONE##"),
-      llm_text(
-        "{\"action\":\"continue\",\"reason\":\"veto two\",\"repair\":\"keep going\",\"specific_gaps\":[],\"accepted_evidence\":[]}",
-      ),
+      llm_text("{\"verdict\":\"continue\",\"detail\":\"Keep going after veto two.\"}"),
       llm_text("Try three. ##DONE##"),
     ],
     { ->
@@ -164,12 +154,10 @@ fn run_diagnosis_recovery(harness: Harness) {
     [
       llm_text("Malformed tool-call loop. ##DONE##"),
       llm_text(
-        "{\"action\":\"continue\",\"reason\":\"task remains incomplete: assistant is stuck in a loop sending malformed tool calls\",\"repair\":\"use a different tool-call shape\",\"specific_gaps\":[\"assistant is stuck in a loop sending malformed tool calls\"],\"accepted_evidence\":[]}",
+        "{\"verdict\":\"continue\",\"detail\":\"The tool-call shape is malformed; use a different valid shape next.\"}",
       ),
       llm_text("Recovered after applying the diagnosis. ##DONE##"),
-      llm_text(
-        "{\"action\":\"accept\",\"reason\":\"recovery succeeded\",\"repair\":\"\",\"specific_gaps\":[],\"accepted_evidence\":[]}",
-      ),
+      llm_text("{\"verdict\":\"done\",\"detail\":\"The recovery succeeded.\"}"),
     ],
     { ->
       const session_id = "verify-judge-diagnosis-" + harness.random.uuid()
@@ -194,19 +182,17 @@ fn run_diagnosis_recovery(harness: Harness) {
       const judges = events_of(captured.events, "judge_decision")
       const recovery_prompt = json_stringify(calls[2].messages)
       harness.stdio.println("diagnosis.status=" + captured.result.status)
+      const diagnosis = "The tool-call shape is malformed; use a different valid shape next."
+      // The compact verdict carries one detail, so the gap and its next action
+      // are the same sentence. Pin it verbatim rather than probing two
+      // substrings of a schema that no longer has two fields.
+      harness.stdio.println("diagnosis.injected=" + to_string(recovery_prompt.contains(diagnosis)))
       harness.stdio.println(
-        "diagnosis.injected="
-          + to_string(
-            recovery_prompt.contains("assistant is stuck in a loop sending malformed tool calls"),
-          ),
-      )
-      harness.stdio.println(
-        "diagnosis.next_step_injected="
-          + to_string(recovery_prompt.contains("use a different tool-call shape")),
+        "diagnosis.next_step_recorded=" + to_string(judges[0].next_step == diagnosis),
       )
       harness.stdio.println(
         "diagnosis.reasoning_observable="
-          + to_string(judges[0].reasoning.contains("task remains incomplete")),
+          + to_string(judges[0].reasoning.contains("tool-call shape is malformed")),
       )
     },
   )

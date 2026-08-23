@@ -1055,8 +1055,6 @@ impl AgentEventSink for AcpAgentEventSink {
                 converted_from,
                 escalation_recommended,
                 escalation_target,
-                specific_gaps,
-                accepted_evidence,
             } => {
                 self.emit_agent_event_ext(
                     "judge_decision",
@@ -1074,8 +1072,6 @@ impl AgentEventSink for AcpAgentEventSink {
                         "convertedFrom": converted_from,
                         "escalationRecommended": escalation_recommended,
                         "escalationTarget": escalation_target,
-                        "specificGaps": specific_gaps,
-                        "acceptedEvidence": accepted_evidence,
                     }),
                 );
             }

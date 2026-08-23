@@ -199,9 +199,10 @@ explain why a tool did or did not remain visible.
 closure hook. `verify_completion_judge` runs the built-in structured judge for
 any natural stop. `done_judge` runs after a native-tool loop naturally
 completes or after the model emits the configured done sentinel. The structured
-judge returns exactly `{action: "accept" | "continue", reason, repair,
-specific_gaps, accepted_evidence}`. A `continue` action injects the repair before
-the next worker turn. Harn produces the runtime-only action `stop_unverified`
+judge returns exactly `{verdict: "done" | "continue", detail}`. On `done`,
+`detail` states the strongest supporting evidence. On `continue`, it states the
+single most important gap and next action, which Harn injects before the next
+worker turn. Harn produces the runtime-only action `stop_unverified`
 when a deadline or policy limit prevents a judgment and ends with
 `status: "completion_unverified"`.
 
@@ -211,7 +212,7 @@ Each built-in judge call and deterministic `verify_completion` decision emits a
 the completion directive receipt remains the authoritative action contract. The
 optional `trigger` is `"stalled"` when a
 `done_judge.cadence.when: "stalled"` judge fires from an
-`agent_loop_stall_warning`; an `accept` action stops the loop with
+`agent_loop_stall_warning`; a `done` verdict stops the loop with
 `stalled_done_judge` before the repeated tool call dispatches, and a
 `continue` action leaves the stall feedback path in place.
 

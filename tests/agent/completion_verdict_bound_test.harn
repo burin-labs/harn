@@ -1,0 +1,228 @@
+// Run: harn test tests/agent/completion_verdict_bound_test.harn
+//
+// The completion judge decides one thing — finish or keep going — but it has
+// to say so inside whatever output envelope the judge model actually has.
+// Small and cheap models have a reliable output budget of only a few hundred
+// tokens, and a verdict schema with unbounded prose fields plus two unbounded
+// string arrays invites the model to spend that entire budget describing a
+// decision it already made. When it does, the response is cut off mid-array,
+// the structured call fails, and the whole judge round trip is spent for no
+// decision. Retrying reproduces the same overrun, because the schema, not the
+// sampling, is what asked for the long answer.
+//
+// So the contract is bounded by construction: one discriminant and one
+// bounded detail. These tests hold that bound structurally rather than by
+// eyeballing a sample response — any future field that can grow without a
+// ceiling re-opens the same failure and must fail here first.
+//
+// The verdict also has to be about the right thing. The judge decides whether
+// the work is complete and honestly reported; whether the response carries a
+// done marker is wire protocol, and the deterministic layer already owns it.
+// A judge free to veto on protocol will eventually do so, and it did: observed
+// live, a judge returned `continue` four times running against work whose
+// typed verification was green and whose deterministic gate was satisfied,
+// each time asking only that the agent repeat a done marker. The agent never
+// parroted it, the harness thrash-stopped, and verified-passing work was
+// recorded as incomplete. The loop cannot satisfy such a veto — its only
+// repair is to ask again for a token the model has already declined to emit.
+// So the prompts must not teach the judge to want a marker, and a `continue`
+// must name work, not formatting.
+import {
+  __done_contract_judge_system,
+  __judge_completion_verdict_read,
+  __judge_completion_verdict_schema,
+} from "std/agent/judge"
+import { completion_judge_system_prompt, completion_judge_user_prompt } from "std/agent/prompts"
+
+// Output envelope a cheap judge model can be relied on to produce in full.
+// The schema's worst case has to fit here with room for the model's own
+// framing, so the assertions below budget well under it.
+const RELIABLE_OUTPUT_TOKENS = 640
+
+// Deliberately pessimistic: real JSON averages closer to four characters per
+// token, so charging two makes the bound hold even on a tokenizer that splits
+// the detail text badly.
+const CHARS_PER_TOKEN = 2
+
+/**
+ * Worst-case serialized size the schema admits, in characters. Returns nil
+ * for an unbounded schema — the condition this file exists to reject.
+ */
+fn _max_serialized_chars(schema) -> int? {
+  const kind = to_string(schema?.type ?? "")
+  if kind == "object" {
+    const properties = schema?.properties ?? {}
+    // Braces, plus `"key":` and a separator for each property.
+    let total = 2
+    for key in properties.keys() {
+      const inner = _max_serialized_chars(properties[key])
+      if inner == nil {
+        return nil
+      }
+      total = total + len(key) + 4 + inner
+    }
+    return total
+  }
+  if kind == "string" {
+    const choices = schema?.enum
+    if choices != nil {
+      let widest = 0
+      for choice in choices {
+        const width = len(to_string(choice))
+        if width > widest {
+          widest = width
+        }
+      }
+      return widest + 2
+    }
+    const cap = schema?.maxLength
+    if cap == nil {
+      return nil
+    }
+    return cap + 2
+  }
+  // Arrays, numbers without a stated range, and anything unrecognized are all
+  // unbounded as far as an output envelope is concerned.
+  return nil
+}
+
+pipeline test_verdict_schema_admits_no_unbounded_field(harness: Harness, task) {
+  const schema = __judge_completion_verdict_schema()
+  const properties = schema?.properties ?? {}
+  assert_eq(len(properties.keys()) > 0, true)
+  for key in properties.keys() {
+    // Named individually so a regression says which field lost its ceiling.
+    assert_eq([key, _max_serialized_chars(properties[key]) != nil], [key, true])
+  }
+  // An open object could carry any extra field the model invents, which would
+  // make every per-field ceiling above meaningless.
+  assert_eq(schema?.additionalProperties, false)
+}
+
+pipeline test_verdict_schema_worst_case_fits_the_output_envelope(harness: Harness, task) {
+  const worst_case = _max_serialized_chars(__judge_completion_verdict_schema())
+  assert_eq(worst_case != nil, true)
+  const budget = RELIABLE_OUTPUT_TOKENS * CHARS_PER_TOKEN
+  // Compared as a pair so a failure prints the size that broke the bound
+  // rather than just `false`.
+  assert_eq(["worst_case_within_budget", worst_case <= budget], ["worst_case_within_budget", true])
+}
+
+pipeline test_verdict_schema_carries_one_discriminant_and_one_detail(harness: Harness, task) {
+  const schema = __judge_completion_verdict_schema()
+  assert_eq(schema.required.sorted(), ["detail", "verdict"])
+  assert_eq(schema.properties.verdict.enum.sorted(), ["continue", "done"])
+  assert_eq(schema.properties.detail.type, "string")
+  // A judge that returns an empty detail records a decision with no audit
+  // basis, which is the failure the old evidence arrays were there to prevent.
+  assert_eq(schema.properties.detail.minLength, 1)
+}
+
+pipeline test_detail_carries_the_audit_basis_on_both_branches(harness: Harness, task) {
+  const approved = __judge_completion_verdict_read(
+    {verdict: "done", detail: "The targeted verifier ran and passed on the changed file."},
+  )
+  assert_eq(approved.verdict, "done")
+  assert_eq(approved.detail, "The targeted verifier ran and passed on the changed file.")
+  const vetoed = __judge_completion_verdict_read(
+    {
+      verdict: "continue",
+      detail: "Deletion behavior is never exercised; add a test that removes a row.",
+    },
+  )
+  assert_eq(vetoed.verdict, "continue")
+  assert_eq(vetoed.detail, "Deletion behavior is never exercised; add a test that removes a row.")
+}
+
+pipeline test_superseded_verdict_shape_keeps_its_decision(harness: Harness, task) {
+  // Cached and replayed judge responses outlive the schema that produced
+  // them. A veto that decoded as an absent verdict would read as a non-veto
+  // and let an unfinished task finish, so the old shape has to keep meaning
+  // what it meant.
+  const vetoed = __judge_completion_verdict_read(
+    {
+      action: "continue",
+      reason: "The assertion only proves absence.",
+      repair: "Replace the hollow negative with a behavior-sensitive test.",
+      specific_gaps: ["Deletion behavior is not exercised."],
+      accepted_evidence: [],
+    },
+  )
+  assert_eq(vetoed.verdict, "continue")
+  assert_eq(vetoed.detail, "Replace the hollow negative with a behavior-sensitive test.")
+  const approved = __judge_completion_verdict_read(
+    {action: "accept", reason: "Write and verification are sufficient.", repair: ""},
+  )
+  assert_eq(approved.verdict, "done")
+  assert_eq(approved.detail, "Write and verification are sufficient.")
+}
+
+pipeline test_decoded_detail_is_clamped_to_the_contract(harness: Harness, task) {
+  const schema = __judge_completion_verdict_schema()
+  const limit = schema.properties.detail.maxLength
+  // A response that arrived before the ceiling existed, or from a provider
+  // that ignores `maxLength`, must not carry an unbounded string past the
+  // decode boundary into feedback and telemetry.
+  const overlong = __judge_completion_verdict_read(
+    {verdict: "continue", detail: "gap. ".repeat(limit)},
+  )
+  assert_eq(len(overlong.detail), limit)
+}
+
+// The phrase every completion-judge prompt uses to hand wire format back to
+// the deterministic layer. Pinning it is a prose check, not a behavioral one:
+// it cannot prove a model obeys the disclaimer, only that no edit silently
+// drops it. The contract check below is the structural half.
+const PROTOCOL_DISCLAIMER = "enforced elsewhere"
+
+fn _judge_prompt_surface(harness: Harness) -> list<string> {
+  return [
+    completion_judge_system_prompt(harness.fs),
+    completion_judge_user_prompt(
+      harness.fs,
+      {
+        stop_reason: "natural",
+        iteration: 3,
+        judge_evidence: "wrote src/cache.rs; the targeted test passed",
+        last_text: "Added the eviction path and ran the focused test.",
+      },
+    ),
+    __done_contract_judge_system({}),
+  ]
+}
+
+pipeline test_completion_judge_prompts_disclaim_wire_format(harness: Harness, task) {
+  const surface = _judge_prompt_surface(harness)
+  assert_eq(len(surface), 3)
+  for prompt in surface {
+    // Indexed by the prompt's own opening words so a failure says which of the
+    // three prompt surfaces lost the disclaimer.
+    const label = substring(trim(prompt), 0, 24)
+    assert_eq([label, contains(prompt, PROTOCOL_DISCLAIMER)], [label, true])
+  }
+}
+
+pipeline test_completion_judge_prompts_teach_the_compact_contract(harness: Harness, task) {
+  const schema = __judge_completion_verdict_schema()
+  const user = completion_judge_user_prompt(
+    harness.fs,
+    {stop_reason: "natural", iteration: 1, judge_evidence: "none", last_text: "Done."},
+  )
+  // The stable prefix ships the schema, so a prompt naming the superseded
+  // fields would contradict it and invite exactly the long answer the bound
+  // above exists to prevent.
+  for field in ["action", "repair", "specific_gaps", "accepted_evidence"] {
+    assert_eq([field, contains(user, "`" + field + "`")], [field, false])
+  }
+  for key in schema.properties.keys() {
+    assert_eq([key, contains(user, "`" + key + "`")], [key, true])
+  }
+}
+
+pipeline test_out_of_contract_verdict_is_preserved_verbatim(harness: Harness, task) {
+  // The caller treats anything that is not `continue` as a non-veto. Keeping
+  // the raw token is what lets telemetry show a judge that went off contract
+  // instead of showing a clean approval.
+  const decoded = __judge_completion_verdict_read({verdict: "maybe", detail: "unsure"})
+  assert_eq(decoded.verdict, "maybe")
+}

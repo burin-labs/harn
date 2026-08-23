@@ -59,8 +59,6 @@ fn judge_decision_round_trips_through_jsonl_sink() {
         converted_from: None,
         escalation_recommended: Some(true),
         escalation_target: Some("frontier".into()),
-        specific_gaps: vec!["rerun the verifier".into(), "cite the changed file".into()],
-        accepted_evidence: Vec::new(),
     });
     sink.flush().unwrap();
 
@@ -82,8 +80,6 @@ fn judge_decision_round_trips_through_jsonl_sink() {
             converted_from,
             escalation_recommended,
             escalation_target,
-            specific_gaps,
-            accepted_evidence,
         } => {
             assert_eq!(session_id, "s");
             assert_eq!(iteration, 2);
@@ -98,24 +94,12 @@ fn judge_decision_round_trips_through_jsonl_sink() {
             assert_eq!(converted_from, None);
             assert_eq!(escalation_recommended, Some(true));
             assert_eq!(escalation_target.as_deref(), Some("frontier"));
-            assert_eq!(
-                specific_gaps,
-                vec![
-                    "rerun the verifier".to_string(),
-                    "cite the changed file".to_string()
-                ]
-            );
-            assert!(accepted_evidence.is_empty());
         }
         other => panic!("expected JudgeDecision, got {other:?}"),
     }
     let value: serde_json::Value = serde_json::from_str(&line).unwrap();
     assert_eq!(value["type"], "judge_decision");
     assert_eq!(value["source"], "llm");
-    assert_eq!(
-        value["specific_gaps"],
-        serde_json::json!(["rerun the verifier", "cite the changed file"])
-    );
     let _ = std::fs::remove_file(&path);
     let _ = std::fs::remove_dir(&dir);
 }
@@ -150,8 +134,6 @@ fn jsonl_sink_lines_are_durable_without_drop_or_explicit_flush() {
         converted_from: None,
         escalation_recommended: None,
         escalation_target: None,
-        specific_gaps: Vec::new(),
-        accepted_evidence: vec!["targeted verifier passed".into()],
     });
 
     let text = std::fs::read_to_string(&path).unwrap();

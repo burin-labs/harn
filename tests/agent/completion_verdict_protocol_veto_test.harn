@@ -1,0 +1,130 @@
+// Run: harn test tests/agent/completion_verdict_protocol_veto_test.harn
+//
+// Observed live: against work whose typed verification was green and whose
+// deterministic completion gate was satisfied, the completion judge returned
+// `continue` four times running, each time asking only that the agent repeat a
+// done marker on its own line. The agent never parroted it, the harness
+// thrash-stopped, and verified-passing work was recorded as incomplete.
+//
+// The contract fix is that the judge decides content and the deterministic
+// layer owns wire format. That fix lives in the judge's prompts, and a mock
+// judge does not read prompts — so these tests deliberately do NOT claim the
+// judge stops issuing formatting vetoes. They script one and pin what the LOOP
+// does with it, which is the half a test can actually falsify:
+//
+//   1. Completion is not keyed on the model parroting a marker. A loop can
+//      reach `done` while every assistant turn omits the token the judge
+//      demanded.
+//   2. A judge that never relents is bounded and terminates with a stop reason
+//      that names the judge, so the failure is diagnosable rather than silently
+//      reported as incomplete work.
+//   3. The feedback injected from a veto is the judge's own bounded detail and
+//      nothing the harness appended.
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
+import { AgentSpec } from "std/agent/options"
+import { llm_text, with_llm_script } from "std/testing"
+
+// A veto that asks only for wire format. Nothing about it names work.
+const FORMATTING_VETO =
+  "{\"verdict\":\"continue\",\"detail\":\"Return a final response with the done marker on its own line.\"}"
+
+const APPROVAL =
+  "{\"verdict\":\"done\",\"detail\":\"The report names the changed file and the passing verifier.\"}"
+
+// The substantive answer, repeated verbatim. It never carries a marker.
+const FINAL_TEXT = "Added the eviction path in src/cache.rs; the focused test passes."
+
+fn _completion_feedback(captured) -> list<string> {
+  let out = []
+  for event in captured.events {
+    if event.type == "feedback_injected" && to_string(event?.kind ?? "") == "verify_completion" {
+      out = out.appending(trim(to_string(event?.content ?? "")))
+    }
+  }
+  return out
+}
+
+pipeline test_loop_finishes_without_the_model_parroting_the_marker(harness: Harness, task) {
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text(FINAL_TEXT),
+      llm_text(FORMATTING_VETO),
+      // The agent restates its answer and still declines the marker.
+      llm_text(FINAL_TEXT),
+      llm_text(APPROVAL),
+    ],
+    { ->
+      const opts: AgentSpec = {
+        provider: "mock",
+        loop_until_done: true,
+        done_judge: {provider: "mock", max_invocations: 4},
+        max_iterations: 4,
+      }
+      const result = agent_loop(harness, "Add the eviction path and verify it.", nil, opts)
+      assert_eq(result.status, "done")
+      // The load-bearing assertion: the loop reached done even though no
+      // assistant turn ever carried the marker the judge asked for.
+      for call in harness.llm.mock_calls() {
+        assert_eq(contains(json_stringify(call.messages), "##DONE##"), false)
+      }
+      assert_eq(contains(result.text, FINAL_TEXT), true)
+    },
+  )
+}
+
+pipeline test_unrelenting_formatting_veto_stops_and_names_the_judge(harness: Harness, task) {
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text(FINAL_TEXT),
+      llm_text(FORMATTING_VETO),
+      llm_text(FINAL_TEXT),
+      llm_text(FORMATTING_VETO),
+      llm_text(FINAL_TEXT),
+    ],
+    { ->
+      const opts: AgentSpec = {
+        provider: "mock",
+        loop_until_done: true,
+        done_judge: {provider: "mock", max_invocations: 2},
+        max_iterations: 5,
+      }
+      const result = agent_loop(harness, "Add the eviction path and verify it.", nil, opts)
+      // A judge that never relents must not spin forever, and the terminal
+      // record must say the judge is why. A bare "incomplete" would blame the
+      // work for a disagreement about formatting.
+      assert_eq(result.status, "completion_unverified")
+      assert_eq(result.stop_reason, "done_judge_cap_reached")
+      assert_eq(result.done_judge.cap_reached, true)
+    },
+  )
+}
+
+pipeline test_injected_feedback_is_the_judges_own_detail(harness: Harness, task) {
+  with_llm_script(
+    harness.llm,
+    [llm_text(FINAL_TEXT), llm_text(FORMATTING_VETO), llm_text(FINAL_TEXT), llm_text(APPROVAL)],
+    { ->
+      const session = "protocol-veto-" + harness.random.uuid()
+      const opts: AgentSpec = {
+        provider: "mock",
+        session_id: session,
+        loop_until_done: true,
+        done_judge: {provider: "mock", max_invocations: 4},
+        max_iterations: 4,
+      }
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(harness, "Add the eviction path and verify it.", nil, opts) },
+      )
+      const feedback = _completion_feedback(captured)
+      // Exactly the judge's detail, once: the compact contract carries one
+      // field, so there is nothing for the harness to compose it with and no
+      // second copy for it to append.
+      assert_eq(feedback, ["Return a final response with the done marker on its own line."])
+    },
+  )
+}

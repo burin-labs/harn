@@ -148,6 +148,13 @@ pub type CompletionDirective = {
   feedback_history: dict,
 }
 
+/**
+ * Decoded completion decision. The schema admits `done` and `continue` only;
+ * an out-of-contract value is preserved verbatim so telemetry can show what
+ * the judge actually said, and is treated as a non-veto by the caller.
+ */
+pub type CompletionJudgeVerdict = {verdict: string, detail: string}
+
 /** Normalized result from either a deterministic or model completion check. */
 type CompletionStageVerdict = {
   vetoed: bool,
@@ -162,8 +169,6 @@ type CompletionStageVerdict = {
   converted_from?: string?,
   escalation_recommended?: bool?,
   escalation_target?: string?,
-  specific_gaps?: list<string>,
-  accepted_evidence?: list<string>,
   judge_duration_ms?: int | float,
   judge_outcome?: string?,
   terminal_judge_reason?: string?,
@@ -522,60 +527,6 @@ fn __judge_knowledge_state(lifecycle: AgentTranscriptToolLifecycleReport, text: 
   return "sha256:" + sha256(json_stringify({latest_text: text, tool_evidence: tool_evidence}))
 }
 
-fn __judge_string_list(value) -> list<string> {
-  if value == nil {
-    return []
-  }
-  if type_of(value) == "list" {
-    let out = []
-    for item in value {
-      const text = trim(to_string(item ?? ""))
-      if text != "" {
-        out = out.appending(text)
-      }
-    }
-    return out
-  }
-  const text = trim(to_string(value))
-  if text == "" {
-    return []
-  }
-  return [text]
-}
-
-fn __judge_gap_feedback(gaps: list<string>) -> string {
-  if len(gaps) == 0 {
-    return ""
-  }
-  return "Address these specific gaps before finishing:\n- " + join(gaps, "\n- ")
-}
-
-fn __judge_recovery_feedback(
-  repair,
-  specific_gaps: list<string>,
-  recovery_details,
-  fallback,
-) -> string {
-  let parts = []
-  const step = trim(to_string(repair ?? ""))
-  if step != "" {
-    parts = parts.appending(step)
-  }
-  const gap_feedback = __judge_gap_feedback(specific_gaps)
-  if gap_feedback != "" && !contains(parts, gap_feedback) {
-    parts = parts.appending(gap_feedback)
-  }
-  for detail in __judge_string_list(recovery_details) {
-    if !contains(parts, detail) {
-      parts = parts.appending(detail)
-    }
-  }
-  if len(parts) == 0 {
-    return fallback
-  }
-  return join(parts, "\n\n")
-}
-
 fn __judge_payload(
   agent: HarnessAgent,
   session,
@@ -625,6 +576,69 @@ fn __judge_payload(
     iteration: iteration,
     knowledge_state: __judge_knowledge_state(lifecycle, text),
   }
+}
+
+const __COMPLETION_JUDGE_DETAIL_CHAR_LIMIT: int = 240
+
+/**
+ * __judge_completion_verdict_schema.
+ *
+ * One discriminant and one dual-purpose detail keep completion decisions
+ * inside small-model output budgets. `detail` is the evidence basis for
+ * `done`, or the single concrete gap and next action for `continue`.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ * @example: __judge_completion_verdict_schema()
+ */
+pub fn __judge_completion_verdict_schema() -> dict {
+  return {
+    type: "object",
+    properties: {
+      verdict: {type: "string", enum: ["done", "continue"]},
+      detail: {type: "string", minLength: 1, maxLength: __COMPLETION_JUDGE_DETAIL_CHAR_LIMIT},
+    },
+    required: ["verdict", "detail"],
+    additionalProperties: false,
+  }
+}
+
+/**
+ * __judge_completion_verdict_read.
+ *
+ * Decode a judge response into the compact verdict. The superseded shape
+ * `{action, reason, repair, ...}` still decodes, because cached and replayed
+ * judge responses outlive the schema that produced them and a decision read
+ * as absent would silently become an approval.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ * @example: __judge_completion_verdict_read({verdict: "done", detail: "tests pass"})
+ */
+pub fn __judge_completion_verdict_read(result) -> CompletionJudgeVerdict {
+  const raw = trim(to_string(result?.verdict ?? result?.action ?? ""))
+  const verdict = if raw == "accept" {
+    "done"
+  } else {
+    raw
+  }
+  // First non-blank wins rather than first non-nil: the superseded shape
+  // carried an empty `repair` on approval, which would otherwise shadow the
+  // `reason` that holds the audit basis.
+  let detail = ""
+  for candidate in [result?.detail, result?.repair, result?.reason] {
+    if detail == "" {
+      detail = trim(to_string(candidate ?? ""))
+    }
+  }
+  const clamped = if len(detail) > __COMPLETION_JUDGE_DETAIL_CHAR_LIMIT {
+    substring(detail, 0, __COMPLETION_JUDGE_DETAIL_CHAR_LIMIT)
+  } else {
+    detail
+  }
+  return {verdict: verdict, detail: clamped}
 }
 
 fn __judge_stable_prefix(judge_cfg, opts, payload, system, schema) -> string {
@@ -711,26 +725,7 @@ fn __judge_invoke_structured(
   payload: CompletionEvidenceSnapshot,
 ) -> CompletionStageVerdict {
   const system = judge_cfg.system ?? ""
-  const schema = {
-    type: "object",
-    properties: {
-      action: {type: "string", enum: ["accept", "continue"]},
-      reason: {type: "string"},
-      repair: {type: "string"},
-      specific_gaps: {
-        type: "list",
-        items: {type: "string"},
-        description: "Concrete gaps to repair when action is `continue`.",
-      },
-      accepted_evidence: {
-        type: "list",
-        items: {type: "string"},
-        description: "Evidence accepted when action is `accept`.",
-      },
-    },
-    required: ["action", "reason", "repair", "specific_gaps", "accepted_evidence"],
-    additionalProperties: false,
-  }
+  const schema = __judge_completion_verdict_schema()
   agent_emit_event(
     harness.agent,
     payload.session_id,
@@ -809,33 +804,31 @@ fn __judge_invoke_structured(
       typed_checkpoint: checkpoint,
     }
   }
-  const result = checkpoint.data
-  const action = to_string(result.action)
-  const reasoning = to_string(result.reason)
-  const next_step = to_string(result.repair)
-  const specific_gaps = __judge_string_list(result.specific_gaps)
-  const accepted_evidence = __judge_string_list(result.accepted_evidence)
+  const decoded = __judge_completion_verdict_read(checkpoint.data)
+  const verdict = decoded.verdict
+  const detail = decoded.detail
   const feedback_default = judge_cfg.feedback_fallback ?? ""
-  const feedback = __judge_recovery_feedback(
-    next_step,
-    specific_gaps,
-    [reasoning],
-    feedback_default,
-  )
+  const feedback = if detail == "" {
+    feedback_default
+  } else {
+    detail
+  }
   return {
-    vetoed: action == "continue",
-    verdict: action,
-    feedback: if action == "continue" {
+    vetoed: verdict == "continue",
+    verdict: verdict,
+    feedback: if verdict == "continue" {
       feedback
     } else {
       nil
     },
-    accepted_evidence: accepted_evidence,
-    reasoning: reasoning,
-    next_step: next_step,
+    reasoning: detail,
+    next_step: if verdict == "continue" {
+      detail
+    } else {
+      ""
+    },
     judge_duration_ms: duration_ms,
     source: "llm",
-    specific_gaps: specific_gaps,
     admission: ran.admission,
     typed_checkpoint: checkpoint,
   }
@@ -964,8 +957,6 @@ fn __emit_judge_decision(agent: HarnessAgent, session_id, iteration, verdict) {
       converted_from: verdict?.converted_from,
       escalation_recommended: verdict?.escalation_recommended,
       escalation_target: verdict?.escalation_target,
-      specific_gaps: verdict?.specific_gaps ?? [],
-      accepted_evidence: verdict?.accepted_evidence ?? [],
       judge_outcome: verdict?.judge_outcome,
       terminal_evidence_preserved: verdict?.terminal_evidence_preserved ?? false,
     },
@@ -984,15 +975,17 @@ fn __done_contract_primary_prompt(opts) {
   )
 }
 
-fn __done_contract_judge_system(opts) {
+pub fn __done_contract_judge_system(opts) -> string {
   const extra = trim(to_string(opts?.rubric ?? ""))
   let lines = [
     "You are a strict done-contract judge for an autonomous agent.",
     "Decide whether the latest completion claim is justified by the task, transcript, tool results, and changed artifacts.",
-    "Return `accept` only when the claim covers the visible request and names adequate evidence.",
+    "Return `done` only when the claim covers the visible request and names adequate evidence.",
     "Return `continue` when evidence is missing, self-authored tests are too weak, or visible requirements are unaddressed.",
-    "On `accept`, provide `reason` and `accepted_evidence`.",
-    "On `continue`, provide `reason`, `repair`, and `specific_gaps`; each gap must be concrete enough to inject as repair feedback.",
+    "Judge the substance of the claim, never its wire format. Response markers, sentinels, and layout are enforced elsewhere, and their absence is never a reason to continue.",
+    "Return only `verdict` and one concise `detail`.",
+    "On `done`, use `detail` for the strongest evidence that every requirement is met.",
+    "On `continue`, use `detail` for the single most important gap and the substantive next action that closes it, never a restatement or formatting instruction.",
   ]
   if extra != "" {
     lines = lines.appending("Additional rubric:\n" + extra)
@@ -1005,8 +998,8 @@ fn __done_contract_judge_system(opts) {
  *
  * Build an agent_loop option bundle for a bidirectional done contract:
  * the primary agent must state a concise completion claim before yielding, and
- * the done judge must return rationale plus `specific_gaps[]` on veto or
- * `accepted_evidence[]` on approval. The helper rides the existing `done_judge`
+ * the done judge must return one bounded evidence detail on approval or one
+ * bounded gap-and-action detail on veto. The helper rides the existing `done_judge`
  * seam and context-profile prompt-fragment channel; it does not add a new loop
  * hook. Compose it with base options:
  *
