@@ -11,8 +11,8 @@ use super::Linter;
 use crate::decls::{FnDeclaration, ImportInfo, TypeDeclaration};
 use crate::diagnostic::{LintDiagnostic, LintSeverity};
 use crate::fixes::{
-    contains_optional_chaining, empty_statement_removal_fix, is_nan_free, is_pure_expression,
-    nil_fallback_ternary_parts, unnecessary_cast_fix,
+    empty_statement_removal_fix, is_nan_free, is_pure_expression, nil_fallback_ternary_parts,
+    unnecessary_cast_fix,
 };
 use crate::harndoc::extract_harndoc;
 use crate::naming::simplify_bool_comparison;
@@ -581,17 +581,18 @@ impl<'a> Linter<'a> {
                 if (op == "==" || op == "!=") && !is_self_comparison {
                     let is_bool_left = matches!(left.node, Node::BoolLiteral(_));
                     let is_bool_right = matches!(right.node, Node::BoolLiteral(_));
-                    // `x?.y == false` is a presence test, not redundancy:
-                    // a nil receiver makes the comparison `false` while the
-                    // "simplified" `!x?.y` would be `true`. Skip the lint
-                    // (and its behavior-changing autofix) for operands that
-                    // can be nil via optional chaining.
-                    let other_can_be_nil = if is_bool_left {
-                        contains_optional_chaining(&right.node)
+                    let compared_expression = if is_bool_left {
+                        right.as_ref()
                     } else {
-                        contains_optional_chaining(&left.node)
+                        left.as_ref()
                     };
-                    if (is_bool_left || is_bool_right) && !other_can_be_nil {
+                    // Equality with a Boolean literal is redundant only when
+                    // the other expression is proven to be exactly `bool`.
+                    // Optional and gradual values have distinct nil behavior,
+                    // so syntax alone is not enough to classify this repair.
+                    if (is_bool_left || is_bool_right)
+                        && self.expression_is_non_optional_bool(compared_expression)
+                    {
                         let (suggestion, msg) = if op == "==" {
                             if matches!(right.node, Node::BoolLiteral(true))
                                 || matches!(left.node, Node::BoolLiteral(true))

@@ -75,6 +75,71 @@ fn test_no_comparison_to_bool_for_optional_chaining() {
 }
 
 #[test]
+fn optional_bool_comparisons_have_no_behavior_preserving_fix() {
+    let source = r#"
+fn optional(kind: string) -> bool? {
+  if kind == "true" { return true }
+  if kind == "false" { return false }
+  return nil
+}
+
+fn main(harness: Harness) {
+  for kind in ["true", "false", "nil"] {
+    assert_eq(optional(kind) == true, kind == "true")
+    assert_eq(optional(kind) == false, kind == "false")
+    assert_eq(optional(kind) != false, kind != "false")
+  }
+  harness.stdio.println("pass")
+}
+"#;
+    let diagnostics = lint_source(source);
+    assert!(
+        !has_rule(&diagnostics, "comparison-to-bool"),
+        "optional comparisons are not redundant: {diagnostics:?}"
+    );
+    assert_eq!(execute_strict_source(source), "pass");
+    let fixed = apply_fixes(source, &diagnostics);
+    assert_eq!(
+        fixed, source,
+        "safe fixes must leave optional comparisons intact"
+    );
+    assert_eq!(execute_strict_source(&fixed), "pass");
+    assert!(!has_rule(&lint_source(&fixed), "comparison-to-bool"));
+}
+
+#[test]
+fn inferred_non_optional_bool_comparisons_remain_fixable() {
+    let source = r#"
+fn main(harness: Harness) {
+  const yes = true
+  const no = false
+  assert(yes == true)
+  assert(no == false)
+  assert(yes != false)
+  harness.stdio.println("pass")
+}
+"#;
+    let diagnostics = lint_source(source);
+    assert_eq!(
+        count_rule(&diagnostics, "comparison-to-bool"),
+        3,
+        "all proven Boolean comparisons should remain fixable: {diagnostics:?}"
+    );
+    assert!(
+        diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.rule == "comparison-to-bool")
+            .all(|diagnostic| diagnostic.fix.is_some()),
+        "every emitted comparison-to-bool diagnostic must carry its safe fix"
+    );
+    assert_eq!(execute_strict_source(source), "pass");
+    assert_eq!(
+        execute_strict_source(&apply_fixes(source, &diagnostics)),
+        "pass"
+    );
+}
+
+#[test]
 fn test_constant_logical_operand_autofix() {
     let source = "pipeline default(task) {\n  const x = true\n  const a = x || true\n  const b = x && false\n  log(a)\n  log(b)\n}";
     let diags = lint_source(source);

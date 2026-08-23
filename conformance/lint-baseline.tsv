@@ -9,7 +9,6 @@
 17	agents/agent_loop_monologue_actuation.harn	HARN-LNT-025
 1	agents/agent_loop_native_missing_tool_call_recovery.harn	HARN-LNT-018
 6	agents/agent_loop_options.harn	HARN-LNT-025
-2	agents/agent_loop_step_judge_unavailable.harn	HARN-LNT-032
 4	agents/agent_path_scope_guard.harn	HARN-LNT-025
 16	agents/agent_path_scope_permissions.harn	HARN-LNT-025
 5	agents/agent_session_current_id.harn	HARN-LNT-025
@@ -35,7 +34,6 @@
 5	agents/thrash_hard_stop_recovery.harn	HARN-LNT-018
 1	agents/tool_call_paradigm.harn	HARN-LNT-049
 7	agents/tool_precheck.harn	HARN-LNT-025
-1	agents/tool_precheck.harn	HARN-LNT-032
 2	agents/tool_precheck.harn	HARN-LNT-049
 1	agents/worker_retriggerable.harn	HARN-LNT-014
 1	agents/worker_retriggerable.harn	HARN-LNT-018

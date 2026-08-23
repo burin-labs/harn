@@ -249,6 +249,10 @@ fn lint_full(
         return Vec::new();
     }
     let mut linter = Linter::new(source);
+    if let Some(source) = source {
+        let facts = harn_parser::TypeChecker::new().check_with_facts(program, source);
+        linter.install_binding_types(facts.binding_types);
+    }
     // Append project rule-engine rules to the registry. They run in the
     // whole-program phase over the source; a malformed one is skipped.
     for engine_source in options.engine_rules {

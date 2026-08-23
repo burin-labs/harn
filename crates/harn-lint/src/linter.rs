@@ -25,6 +25,7 @@ mod discarded_result;
 mod execution_safety;
 mod program;
 mod public_api_types;
+mod type_facts;
 mod unused_parameters;
 mod walk;
 
@@ -34,6 +35,12 @@ use discarded_result::BlockKind;
 pub(crate) struct Linter<'a> {
     pub(super) diagnostics: Vec<LintDiagnostic>,
     pub(super) scopes: Vec<HashSet<String>>,
+    /// Semantic types for bindings visible at the current lexical position.
+    /// Kept parallel to `scopes` so shadowing cannot make a codemod consult a
+    /// same-named binding from another scope.
+    pub(super) typed_scopes: Vec<HashMap<String, TypeExpr>>,
+    /// Type-checker facts indexed by the declaration span used by the AST.
+    pub(super) binding_types: HashMap<(usize, usize), TypeExpr>,
     pub(super) declarations: Vec<Declaration>,
     pub(super) param_declarations: Vec<ParamDeclaration>,
     pub(super) references: HashSet<String>,
@@ -158,6 +165,8 @@ impl<'a> Linter<'a> {
         Self {
             diagnostics: Vec::new(),
             scopes: vec![HashSet::new()],
+            typed_scopes: vec![HashMap::new()],
+            binding_types: HashMap::new(),
             declarations: Vec::new(),
             param_declarations: Vec::new(),
             references: HashSet::new(),
@@ -262,14 +271,6 @@ impl<'a> Linter<'a> {
         harn_vm::stdlib::stdlib_builtin_names()
             .into_iter()
             .collect()
-    }
-
-    pub(super) fn push_scope(&mut self) {
-        self.scopes.push(HashSet::new());
-    }
-
-    pub(super) fn pop_scope(&mut self) {
-        self.scopes.pop();
     }
 
     pub(super) fn in_test_pipeline(&self) -> bool {
@@ -967,6 +968,14 @@ impl<'a> Linter<'a> {
                 is_simple_ident,
                 is_externally_reachable,
             );
+        }
+        if let BindingPattern::Identifier(name) = pattern {
+            let key = (span.start, span.end);
+            if let Some(type_expr) = self.binding_types.get(&key).cloned() {
+                if let Some(scope) = self.typed_scopes.last_mut() {
+                    scope.insert(name.clone(), type_expr);
+                }
+            }
         }
     }
 
