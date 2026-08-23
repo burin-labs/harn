@@ -578,6 +578,10 @@
           "minimum": 1,
           "type": "integer"
         },
+        "current_snapshot": {
+          "minLength": 1,
+          "type": "string"
+        },
         "deprecation": {
           "$ref": "#/$defs/deprecation"
         },
@@ -645,6 +649,16 @@
         },
         "reasoning": {
           "$ref": "#/$defs/reasoning"
+        },
+        "released": {
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+          "type": "string"
+        },
+        "row_kind": {
+          "enum": [
+            "snapshot",
+            "selector"
+          ]
         },
         "runtime_context_window": {
           "minimum": 1,

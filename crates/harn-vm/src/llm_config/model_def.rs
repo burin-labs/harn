@@ -938,10 +938,29 @@ pub struct ModelDef {
     /// this row should not review.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub avoid_as_reviewer_for: Vec<String>,
+    /// ISO 8601 date (`YYYY-MM-DD`) when the provider published this snapshot.
+    /// Absent for undated selectors and rows whose publish date is unknown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub released: Option<String>,
+    /// Whether this row is a pinned snapshot or an undated selector that
+    /// follows a moving target. Absent when the distinction is not authored.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub row_kind: Option<ModelRowKind>,
+    /// Catalog id of the snapshot a selector currently points at. Meaningful
+    /// only when `row_kind` is `selector`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current_snapshot: Option<String>,
 }
 
 fn is_false(value: &bool) -> bool {
     !*value
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelRowKind {
+    Snapshot,
+    Selector,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Default)]

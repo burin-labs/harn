@@ -153,6 +153,9 @@ fn test_user_catalog_overlay_re_homes_model_provider() {
             lineage: None,
             complementary_with: Vec::new(),
             avoid_as_reviewer_for: Vec::new(),
+            released: None,
+            row_kind: None,
+            current_snapshot: None,
         },
     );
     set_user_overrides(Some(overlay));
@@ -570,6 +573,9 @@ fn test_user_overrides_add_model_catalog_pricing_and_qc_defaults() {
             lineage: None,
             complementary_with: Vec::new(),
             avoid_as_reviewer_for: Vec::new(),
+            released: None,
+            row_kind: None,
+            current_snapshot: None,
         },
     );
     overlay

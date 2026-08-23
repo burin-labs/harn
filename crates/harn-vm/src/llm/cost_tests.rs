@@ -45,6 +45,9 @@ fn calculate_cost_uses_catalog_model_pricing() {
             lineage: None,
             complementary_with: Vec::new(),
             avoid_as_reviewer_for: Vec::new(),
+            released: None,
+            row_kind: None,
+            current_snapshot: None,
         },
     );
     crate::llm_config::set_user_overrides(Some(overlay));
@@ -143,6 +146,9 @@ fn calculate_cost_decimal_is_exact_for_inexact_catalog_rates() {
             lineage: None,
             complementary_with: Vec::new(),
             avoid_as_reviewer_for: Vec::new(),
+            released: None,
+            row_kind: None,
+            current_snapshot: None,
         },
     );
     crate::llm_config::set_user_overrides(Some(overlay));

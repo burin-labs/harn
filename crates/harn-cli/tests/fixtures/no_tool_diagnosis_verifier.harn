@@ -1,0 +1,45 @@
+import {
+  coding_agent_no_tool_diagnosis_verification_success,
+} from "../../assets/evals/coding_agent_suite.harn"
+
+const REPORTED_ANSWER =
+  "The function `add` currently subtracts `b` from `a` (`a - b`), but the expectation is that it adds them. The smallest change is to replace the minus operator with a plus operator.\n\nPATCH_HINT: Replace `-` with `+` in the return statement."
+
+fn result(calls, text: string) {
+  return {visible_text: text, tools: {calls: calls}}
+}
+
+pipeline main(harness: Harness) {
+  harness.stdio.println(
+    "reported="
+      + to_string(coding_agent_no_tool_diagnosis_verification_success(result([], REPORTED_ANSWER))),
+  )
+  harness.stdio.println(
+    "verbatim_line="
+      + to_string(
+        coding_agent_no_tool_diagnosis_verification_success(
+          result([], "PATCH_HINT: change `return a - b` to `return a + b`."),
+        ),
+      ),
+  )
+  harness.stdio.println(
+    "hint_only="
+      + to_string(coding_agent_no_tool_diagnosis_verification_success(result([], "PATCH_HINT"))),
+  )
+  harness.stdio.println(
+    "used_a_tool="
+      + to_string(
+        coding_agent_no_tool_diagnosis_verification_success(
+          result([{name: "read_file", arguments: {path: "math.py"}}], REPORTED_ANSWER),
+        ),
+      ),
+  )
+  harness.stdio.println(
+    "wrong_operator="
+      + to_string(
+        coding_agent_no_tool_diagnosis_verification_success(
+          result([], "PATCH_HINT: keep the subtraction; the tests are wrong."),
+        ),
+      ),
+  )
+}

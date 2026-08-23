@@ -58,5 +58,7 @@ pub(super) fn gemini_payload(model: &str, thinking: ThinkingConfig) -> LlmReques
         reminder_lifecycle: Vec::new(),
         cli_llm_mock_scope: None,
         mock_scope: None,
+        done_sentinel: None,
+        done_sentinel_form: None,
     }
 }

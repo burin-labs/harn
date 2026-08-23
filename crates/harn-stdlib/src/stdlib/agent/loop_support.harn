@@ -47,6 +47,7 @@ pub import { agent_take_one_shot_prefill } from "std/agent/prefill"
 pub import {
   agent_build_turn_messages,
   agent_build_turn_system_fragments,
+  agent_completion_prompt_bindings,
   agent_tool_call_paradigm,
 } from "std/agent/preflight"
 pub import { agent_dispatch_tool_call, agent_parse_tool_calls } from "std/agent/primitives"
@@ -252,8 +253,17 @@ pub fn __agent_loop_effective_llm_options(llm: HarnessLlm, opts) {
   } else {
     __agent_loop_ordinary_turn_llm_options(merged)
   }
-  return agent_sanitize_model_options(llm, agent_refresh_tool_format_for_route(llm, call_opts))
-    + {mock_scope: call_opts?.mock_scope ?? call_opts?.call_role ?? "agent.main"}
+  const routed = agent_sanitize_model_options(
+    llm,
+    agent_refresh_tool_format_for_route(llm, call_opts),
+  )
+  const completion = agent_completion_prompt_bindings(llm, call_opts)
+  return routed
+    + {
+      mock_scope: call_opts?.mock_scope ?? call_opts?.call_role ?? "agent.main",
+      _done_sentinel: completion.done_sentinel,
+      _done_sentinel_form: completion.done_sentinel_form,
+    }
 }
 
 pub fn __agent_loop_route_options(provider, model, tool_format) {

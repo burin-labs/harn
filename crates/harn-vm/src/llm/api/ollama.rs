@@ -877,6 +877,9 @@ mod tests {
                 lineage: None,
                 complementary_with: Vec::new(),
                 avoid_as_reviewer_for: Vec::new(),
+                released: None,
+                row_kind: None,
+                current_snapshot: None,
             },
         );
         crate::llm_config::set_user_overrides(Some(overlay));
@@ -991,6 +994,9 @@ mod tests {
                 lineage: None,
                 complementary_with: Vec::new(),
                 avoid_as_reviewer_for: Vec::new(),
+                released: None,
+                row_kind: None,
+                current_snapshot: None,
             },
         );
         crate::llm_config::set_user_overrides(Some(overlay));
@@ -1254,6 +1260,9 @@ mod tests {
                 lineage: None,
                 complementary_with: Vec::new(),
                 avoid_as_reviewer_for: Vec::new(),
+                released: None,
+                row_kind: None,
+                current_snapshot: None,
             },
         );
         crate::llm_config::set_user_overrides(Some(overlay));

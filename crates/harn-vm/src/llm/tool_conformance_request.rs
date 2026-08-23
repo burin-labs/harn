@@ -240,6 +240,8 @@ pub(super) fn probe_request_payload_for_format(
         reminder_lifecycle: Vec::new(),
         cli_llm_mock_scope: None,
         mock_scope: None,
+        done_sentinel: None,
+        done_sentinel_form: None,
     };
     payload.messages = probe_messages(provider, tool_format, probe_case, marker);
     apply_request_profile(&mut payload, request_profile);

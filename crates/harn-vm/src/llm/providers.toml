@@ -2133,6 +2133,9 @@ superseded_by = "claude-sonnet-4-6"
 tier = "frontier"
 open_weight = false
 strengths = ["coding", "reasoning", "tool_use", "long_context"]
+released = "2024-06-20"
+row_kind = "snapshot"
+
 [models."claude-3-5-sonnet-20241022"]
 name = "Claude Sonnet 3.5 (2024-10-22)"
 provider = "anthropic"
@@ -2145,6 +2148,9 @@ superseded_by = "claude-sonnet-4-6"
 tier = "frontier"
 open_weight = false
 strengths = ["coding", "reasoning", "tool_use", "long_context"]
+released = "2024-10-22"
+row_kind = "snapshot"
+
 [models."claude-sonnet-4-20250514"]
 name = "Claude Sonnet 4"
 provider = "anthropic"
@@ -2170,6 +2176,9 @@ tier = "frontier"
 open_weight = false
 strengths = ["coding", "reasoning", "tool_use", "long_context", "agentic"]
 benchmarks = { swe_bench_verified = 77.2 }
+row_kind = "selector"
+current_snapshot = "claude-sonnet-4-5-20250929"
+
 [models."claude-sonnet-4-5-20250929"]
 name = "Claude Sonnet 4.5"
 provider = "anthropic"
@@ -2180,6 +2189,9 @@ tier = "frontier"
 open_weight = false
 strengths = ["coding", "reasoning", "tool_use", "long_context", "agentic"]
 benchmarks = { swe_bench_verified = 77.2 }
+released = "2025-09-29"
+row_kind = "snapshot"
+
 [models."claude-sonnet-4-6"]
 name = "Claude Sonnet 4.6"
 provider = "anthropic"

@@ -534,11 +534,15 @@ fn __seed_read_only_audit_json_mock(llm: HarnessLlm) {
   llm.mock_enqueue({text: "AUDIT_OK"})
 }
 
+const __NO_TOOL_DIAGNOSIS_REPORTED_ANSWER =
+  "The function `add` currently subtracts `b` from `a` (`a - b`), but the expectation is that it adds them. The smallest change is to replace the minus operator with a plus operator.\n\nPATCH_HINT: Replace `-` with `+` in the return statement."
+
 fn __seed_no_tool_native_mock(llm: HarnessLlm) {
   llm.mock_enqueue(
     {
-      text:
-        "<user_response>PATCH_HINT: change `return a - b` to `return a + b`.</user_response>\n<done>##DONE##</done>",
+      text: "<user_response>"
+        + __NO_TOOL_DIAGNOSIS_REPORTED_ANSWER
+        + "</user_response>\n<done>##DONE##</done>",
     },
   )
 }
@@ -546,8 +550,9 @@ fn __seed_no_tool_native_mock(llm: HarnessLlm) {
 fn __seed_no_tool_text_mock(llm: HarnessLlm) {
   llm.mock_enqueue(
     {
-      text:
-        "<user_response>PATCH_HINT: change `return a - b` to `return a + b`.</user_response>\n<done>##DONE##</done>",
+      text: "<user_response>"
+        + __NO_TOOL_DIAGNOSIS_REPORTED_ANSWER
+        + "</user_response>\n<done>##DONE##</done>",
     },
   )
 }
@@ -660,10 +665,7 @@ fn __verify_cli_help_flag(fs: HarnessFs, tools: HarnessTools, root: string, pyth
   const readme = fs.read_text(path_join(root, "README.md"))
   return __command_verification(
     help.success && shout.success && contains(help.stdout, "--shout")
-      && contains(
-      shout.stdout,
-      "HELLO, ADA!",
-    )
+      && contains(shout.stdout, "HELLO, ADA!")
       && contains(readme, "--shout"),
     if shout.success {
       help.exit_code
@@ -796,18 +798,34 @@ fn __verify_read_only_audit(fs: HarnessFs, root: string, result) {
   )
 }
 
-fn __verify_no_tool_diagnosis(result) {
+/**
+ * Grade a no-tool diagnosis on the defect and the repair, not on one
+ * preferred phrasing. The fixture asks for the smallest change and the
+ * token PATCH_HINT; a correct answer may say "subtracts"/"plus operator"
+ * instead of "subtraction"/"addition", or name `a - b` / `a + b`.
+ */
+pub fn coding_agent_no_tool_diagnosis_verification_success(result) -> bool {
   const final_text = __final_text(result)
   const normalized = lowercase(final_text)
+  const names_defect = contains(normalized, "subtract")
+    || contains(normalized, "minus")
+    || contains(final_text, "a - b")
+    || contains(final_text, "a-b")
+  const names_fix = contains(final_text, "return a + b")
+    || contains(final_text, "a + b")
+    || contains(final_text, "a+b")
+    || contains(normalized, "addition")
+    || contains(normalized, "plus")
   const describes_change = contains(final_text, "return a + b")
-    || (contains(normalized, "subtraction")
-    && contains(
-    normalized,
-    "addition",
-  ))
-  const success = __tool_call_count(result) == 0
+    || (names_defect && names_fix)
+  return __tool_call_count(result) == 0
     && contains(final_text, "PATCH_HINT")
     && describes_change
+}
+
+fn __verify_no_tool_diagnosis(result) {
+  const final_text = __final_text(result)
+  const success = coding_agent_no_tool_diagnosis_verification_success(result)
   return __command_verification(
     success,
     if success {
@@ -948,8 +966,8 @@ fn __run_fixture_agent(
   if structural_validator_config != nil {
     options = options
       + {
-      structural_validator: with_structural_validator(harness.agent, structural_validator_config),
-    }
+        structural_validator: with_structural_validator(harness.agent, structural_validator_config),
+      }
   }
   if fixture == "read-only-audit" {
     return __run_preset_agent(
@@ -965,10 +983,7 @@ fn __run_fixture_agent(
       "summary",
       task,
       options
-        + {
-        max_iterations: 1,
-        iteration_budget: {mode: "fixed", initial: 1, max: 1, extend_by: 0},
-      },
+        + {max_iterations: 1, iteration_budget: {mode: "fixed", initial: 1, max: 1, extend_by: 0}},
     )
   }
   return __run_preset_agent(harness, "repair", task, options)

@@ -818,6 +818,11 @@ pub(crate) fn extract_llm_options(
         rate_limit_consumer_id,
         rate_limit_reroute_on_timeout: false,
         mock_scope,
+        done_sentinel: opt_str(&options, "_done_sentinel")
+            .or_else(|| opt_str(&options, "done_sentinel"))
+            .filter(|value| !value.trim().is_empty()),
+        done_sentinel_form: opt_str(&options, "_done_sentinel_form")
+            .filter(|value| !value.trim().is_empty()),
         dispatch_provenance,
         reminders,
         reminder_lifecycle,

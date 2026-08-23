@@ -50,6 +50,8 @@ pub(super) fn base_request_payload() -> LlmRequestPayload {
         reminder_lifecycle: Vec::new(),
         cli_llm_mock_scope: None,
         mock_scope: None,
+        done_sentinel: None,
+        done_sentinel_form: None,
     }
 }
 

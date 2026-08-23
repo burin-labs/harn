@@ -186,6 +186,9 @@ fn model_def_from_catalog(model: &CatalogModel) -> llm_config::ModelDef {
         lineage: Some(model.lineage.clone()),
         complementary_with: model.complementary_with.clone(),
         avoid_as_reviewer_for: model.avoid_as_reviewer_for.clone(),
+        released: model.released.clone(),
+        row_kind: model.row_kind,
+        current_snapshot: model.current_snapshot.clone(),
     }
 }
 
