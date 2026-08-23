@@ -35,7 +35,6 @@ fn run_case(harness: Harness, label: string, emission: string) {
   for key in [post_projected, post_raw, judge_projected, judge_raw] {
     harness.runtime.store_set(key, "")
   }
-
   harness.agent.clear_session_hooks()
   harness.agent.register_session_hook(
     "post_turn",
@@ -45,7 +44,6 @@ fn run_case(harness: Harness, label: string, emission: string) {
       return nil
     },
   )
-
   with_llm_script(
     harness.llm,
     [llm_text(emission)],
@@ -71,7 +69,6 @@ fn run_case(harness: Harness, label: string, emission: string) {
       const seen_post_raw = to_string(harness.runtime.store_get(post_raw) ?? "")
       const seen_judge_projected = to_string(harness.runtime.store_get(judge_projected) ?? "")
       const seen_judge_raw = to_string(harness.runtime.store_get(judge_raw) ?? "")
-
       // The judge is the seam completion policies read, and the seam the
       // projection actually blinds.
       assert(
@@ -83,12 +80,9 @@ fn run_case(harness: Harness, label: string, emission: string) {
         contains(seen_post_raw, "##DONE##"),
         label + ": post-turn raw_text keeps the completion marker",
       )
-
       harness.stdio.println(result.status)
       harness.stdio.println(marker_report(label + " post_turn", seen_post_projected, seen_post_raw))
-      harness.stdio.println(
-        marker_report(label + " judge", seen_judge_projected, seen_judge_raw),
-      )
+      harness.stdio.println(marker_report(label + " judge", seen_judge_projected, seen_judge_raw))
       harness.agent.clear_session_hooks()
     },
   )
