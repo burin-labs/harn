@@ -9,6 +9,7 @@ import {
   DIAGRAM_SOURCE_CLASS,
   DIAGRAM_SOURCE_LABEL,
 } from "../src/lib/diagram-markup.ts"
+import { CODE_FIGURE_CLASS, CODE_FILENAME_CLASS } from "../src/lib/code-markup.ts"
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..")
 
@@ -66,6 +67,50 @@ describe("diagram rendering", () => {
     expect(entry).toBeDefined()
     expect(entry!.text).not.toContain("flowchart TD")
     expect(entry!.text).toContain("Harn program")
+  })
+})
+
+describe("code block filenames", () => {
+  const introduction = () => {
+    const page = docs.pages.get("introduction")
+    if (!page) throw new Error("introduction page missing")
+    return page.html
+  }
+
+  it("renders a titled fence as a figure captioned with the filename", () => {
+    const html = introduction()
+    expect(html).toContain(`class="${CODE_FIGURE_CLASS}"`)
+    expect(html).toMatch(
+      new RegExp(`<figcaption class="${CODE_FILENAME_CLASS}">example\\.harn</figcaption>`),
+    )
+  })
+
+  it("keeps the caption before the block it names", () => {
+    const figure = introduction().match(
+      new RegExp(`<figure class="${CODE_FIGURE_CLASS}">([\\s\\S]*?)</figure>`),
+    )
+    expect(figure).not.toBeNull()
+    const inner = figure![1]
+    expect(inner.indexOf("<figcaption")).toBeLessThan(inner.indexOf("<pre"))
+  })
+
+  it("does not leak the title into the rendered code or the language class", () => {
+    const html = introduction()
+    // The fence reads ```harn,check title="example.harn". None of the metadata
+    // may survive as text, and the language class stays the bare language.
+    expect(html).not.toContain('title="example.harn"</')
+    expect(html).not.toContain("language-harn,check")
+    expect(html).toContain("language-harn")
+    expect(html).not.toContain("data-file")
+  })
+
+  it("leaves an untitled fence as a bare pre", () => {
+    // Some page other than the introduction still has plain blocks; none of
+    // them should have picked up a figure wrapper.
+    const bare = [...docs.pages.values()].filter(
+      (p) => p.html.includes("<pre") && !p.html.includes(CODE_FIGURE_CLASS),
+    )
+    expect(bare.length).toBeGreaterThan(0)
   })
 })
 

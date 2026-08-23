@@ -328,16 +328,55 @@ body {
   padding: 0.12rem 0.36rem;
   border-radius: 0.3rem;
 }
+/* The block is bounded by an even hairline on all four sides rather than a
+   heavy accent rail down one edge. The accent moves to the filename header,
+   where it identifies something, instead of decorating the container. */
 .prose pre {
   background-color: var(--color-surface-tertiary);
   border: 1px solid var(--color-border);
-  border-left: 3px solid var(--color-accent-500);
   padding: 0.9rem 1rem;
   border-radius: 0.5rem;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.04);
   overflow-x: auto;
   margin-bottom: 1rem;
   font-size: 0.85rem;
   line-height: 1.6;
+}
+
+/* A fence that names its file: ```harn title="example.harn". The caption and
+   the block are one object, so they share a border and the seam between them
+   is a single hairline. */
+.prose .code-figure {
+  margin-bottom: 1rem;
+}
+.prose .code-figure pre {
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+  border-top: 0;
+  margin-bottom: 0;
+}
+.prose .code-filename {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  border: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
+  border-radius: 0.5rem 0.5rem 0 0;
+  background-color: var(--color-surface-secondary);
+  padding: 0.4rem 0.85rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.75rem;
+  color: var(--color-foreground-secondary);
+}
+/* The one accent mark on the block: a small square that reads as a file chip
+   rather than as a decorative stripe. */
+.prose .code-filename::before {
+  content: "";
+  width: 0.4rem;
+  height: 0.4rem;
+  border-radius: 0.1rem;
+  background-color: var(--color-accent-500);
+  flex: none;
 }
 .prose pre code {
   background: none;
