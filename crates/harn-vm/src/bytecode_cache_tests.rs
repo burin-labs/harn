@@ -1317,6 +1317,7 @@ fn cached_artifacts_are_owner_only() {
     let module_key = CacheKey::from_module_source(
         &ModuleSource::from_text(module_source),
         &ModuleCompilationContext::default(),
+        ModuleProvenance::User,
     );
     let module_target = tmp.path().join("module.harnmod");
     store_module_at(&module_target, &module_key, &artifact).expect("write module artifact");
