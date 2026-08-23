@@ -100,7 +100,18 @@ fn qwen37_routes_record_prompt_cache_vision_and_streaming_quirks() {
     );
     let or_glm = lookup("openrouter", "z-ai/glm-5.2");
     assert!(or_glm.reasoning_effort_supported);
-    assert_eq!(or_glm.reasoning_effort_levels, vec!["high", "xhigh", "max"]);
+    assert!(or_glm.thinking_modes.iter().any(|mode| mode == "effort"));
+    // Family ladder is unknown/all: glm-5 and glm-5.2 accepted every rung
+    // including `none` when probed, and the previous
+    // `["high", "xhigh", "max"]` was asserted rather than measured.
+    assert!(or_glm.reasoning_effort_levels.is_empty());
+    let or_glm53 = lookup("openrouter", "z-ai/glm-5.3");
+    assert!(or_glm53.reasoning_effort_supported);
+    assert_eq!(or_glm53.thinking_modes, vec!["effort"]);
+    assert_eq!(
+        or_glm53.reasoning_effort_levels,
+        vec!["minimal", "low", "medium", "high", "xhigh", "max"]
+    );
     for (provider, model, fmt) in [
         ("together", "zai-org/GLM-5.1", "native"),
         ("openrouter", "z-ai/glm-5.2", "native"),

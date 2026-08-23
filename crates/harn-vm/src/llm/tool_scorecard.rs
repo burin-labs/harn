@@ -766,9 +766,9 @@ fn tool_surface_requirement(
 
 pub(crate) fn signed_thinking_tool_history_supported(provider: &str, model: &str) -> bool {
     let caps = crate::llm::capabilities::lookup(provider, model);
-    let thinking_capable = !caps.thinking_modes.is_empty()
-        || caps.interleaved_thinking_supported
-        || caps.reasoning_effort_supported;
+    // `reasoning_effort_supported` implies `effort` in `thinking_modes`, so a
+    // separate disjunct for it can no longer add a route.
+    let thinking_capable = !caps.thinking_modes.is_empty() || caps.interleaved_thinking_supported;
     thinking_capable
         && (matches!(
             caps.message_wire_format,

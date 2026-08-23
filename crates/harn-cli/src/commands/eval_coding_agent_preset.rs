@@ -139,6 +139,7 @@ mod tests {
             max_runs: None,
             replicates: 1,
             max_iterations: 8,
+            reasoning_effort: None,
             python: "python3".to_string(),
             fail_on_unauthorized: false,
             json: false,

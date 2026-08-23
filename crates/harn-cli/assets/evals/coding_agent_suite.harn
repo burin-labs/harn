@@ -907,11 +907,22 @@ fn __run_fixture_agent(
   step_judge_config,
   override_reason = nil,
   structural_validator_config = nil,
+  reasoning_effort = nil,
 ) {
   const done_sentinel = if tool_format == "text" || tool_format == "json" {
     "##DONE##"
   } else {
     nil
+  }
+  // `effort` is a caller-owned reasoning key, so setting it suppresses the
+  // task/scale reasoning policy for every call this run makes. That is exactly
+  // what an effort A/B needs: without it all three rungs would resolve to
+  // whatever the policy picks for agent work and the cells would be identical.
+  const effort = trim(to_string(reasoning_effort ?? ""))
+  const llm_options = if effort == "" {
+    {temperature: 0, max_tokens: 2048}
+  } else {
+    {temperature: 0, max_tokens: 2048, effort: effort}
   }
   let options = {
     provider: provider,
@@ -926,7 +937,7 @@ fn __run_fixture_agent(
       allow_done_sentinel: tool_format == "text" || tool_format == "json",
       max_prose_chars: 30000,
     },
-    llm_options: {temperature: 0, max_tokens: 2048},
+    llm_options: llm_options,
   }
   if step_judge_config != nil {
     options = options + {step_judge: step_judge_config}
@@ -1065,6 +1076,7 @@ fn main(harness: Harness) {
             long: "--structural-validator-json",
             default: "",
           },
+          {kind: "flag", name: "reasoning_effort", long: "--reasoning-effort", default: ""},
         ],
       },
     ),
@@ -1113,6 +1125,7 @@ fn main(harness: Harness) {
     step_judge_config,
     args.override_reason,
     structural_validator_config,
+    args.reasoning_effort,
   )
   const override_warning = agent_first_tool_format_override_warning_text(
     transcript_events(result?.transcript),

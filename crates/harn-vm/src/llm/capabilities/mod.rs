@@ -32,6 +32,7 @@ pub(super) const BUILTIN_PROVIDERS_TOML: &str = include_str!("../providers.toml"
 
 mod admission;
 mod audit;
+mod effort;
 mod lookup;
 #[cfg(test)]
 mod lookup_tests_anthropic_cache;

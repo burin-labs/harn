@@ -1909,9 +1909,36 @@ temperature = 1.0
 [model_defaults."moonshot/kimi-k3"]
 reasoning_effort = "max"
 
-# GLM-5.3 rejects disabled reasoning. Low is its least expensive valid mode.
+# GLM-5.3 always reasons; Z.AI accepts `low`, `high`, and `max` and defaults
+# to `max`. Harn defaults it to `high` instead, and that is a deliberate
+# cost/quality choice rather than a claim about the provider -- the previous
+# `low` pin's mistake was disguising exactly such a choice as a compatibility
+# note, so this one is stated plainly.
+#
+# The ladder is not evenly spaced in cost. Measured 2026-08-23 over 24
+# short-answer CS/Python tasks x 3 trials x 3 levels (two independent sets,
+# ~70 samples per level), against the live `glm-5.3` route:
+#
+#   level   accuracy [95% CI]     output tokens   $/100 correct
+#   low     85.1% [76.1, 92.5]        1.0x            $0.057
+#   high    90.3% [83.3, 97.2]        1.4x            $0.060
+#   max     95.7% [90.0, 100.0]      13.4x            $0.224
+#
+# Only `max` - `low` (+10.6 pts) clears the noise floor at that sample size;
+# the adjacent steps do not. But `high` costs 40% more output than `low` while
+# `max` costs 13x, so `high` sits on the cheap side of the cliff and captures
+# roughly half the total gain for 3% more spend per correct answer. `max`
+# remains one option away for callers that want it.
+#
+# This also makes Harn's two entry points agree. Since the ladder snap landed,
+# the reasoning policy resolves `high` for an agent or code task at the default
+# scale, and the policy outranks this default -- which applies only to a bare
+# `llm_call` that sets neither an explicit effort nor a policy. Pinning `max`
+# here would have made "GLM-5.3 with no special instruction" mean two different
+# things depending on the entry point, with the expensive reading attached to
+# the less deliberate one.
 [model_defaults."zai/glm-5.3"]
-reasoning_effort = "low"
+reasoning_effort = "high"
 
 # --- source: 40-defaults/qc.toml ---
 # ── QC defaults ──────────────────────────────────────────────────────────────

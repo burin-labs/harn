@@ -280,7 +280,9 @@ pub(crate) fn reconcile_request_body(
     thinking: &ThinkingConfig,
 ) {
     strip_unsupported_sampling_params(body, model, thinking);
-    clamp_effort_for_disabled_thinking(body, model);
+    if crate::llm::catalog_may_shape_requested_reasoning() {
+        clamp_effort_for_disabled_thinking(body, model);
+    }
 }
 
 /// Remove Anthropic sampling parameters when the resolved Claude request
@@ -658,7 +660,9 @@ impl AnthropicProvider {
             }
             ThinkingConfig::Effort { level } => {
                 if let Some(effort) = anthropic_effort_value(*level) {
-                    if model_supports_anthropic_effort(&opts.model) {
+                    if model_supports_anthropic_effort(&opts.model)
+                        || !crate::llm::catalog_may_shape_requested_reasoning()
+                    {
                         set_output_config_effort(&mut body, effort);
                     }
                     if !model_defaults_to_adaptive_thinking(&opts.model) {

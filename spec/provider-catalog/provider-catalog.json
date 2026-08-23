@@ -7652,7 +7652,7 @@
           "adaptive",
           "effort"
         ],
-        "effort_supported": false,
+        "effort_supported": true,
         "effort_levels": [],
         "none_supported": false,
         "interleaved_supported": false,
@@ -7801,7 +7801,7 @@
           "adaptive",
           "effort"
         ],
-        "effort_supported": false,
+        "effort_supported": true,
         "effort_levels": [],
         "none_supported": false,
         "interleaved_supported": false,
@@ -7944,7 +7944,7 @@
           "adaptive",
           "effort"
         ],
-        "effort_supported": false,
+        "effort_supported": true,
         "effort_levels": [],
         "none_supported": false,
         "interleaved_supported": false,
@@ -8544,7 +8544,7 @@
           "adaptive",
           "effort"
         ],
-        "effort_supported": false,
+        "effort_supported": true,
         "effort_levels": [],
         "none_supported": false,
         "interleaved_supported": false,
@@ -8687,9 +8687,9 @@
           "adaptive",
           "effort"
         ],
-        "effort_supported": false,
+        "effort_supported": true,
         "effort_levels": [],
-        "none_supported": false,
+        "none_supported": true,
         "interleaved_supported": false,
         "preserve_thinking": false
       },
@@ -17055,7 +17055,7 @@
           "enabled",
           "effort"
         ],
-        "effort_supported": false,
+        "effort_supported": true,
         "effort_levels": [],
         "none_supported": false,
         "interleaved_supported": false,
@@ -17136,7 +17136,7 @@
           "enabled",
           "effort"
         ],
-        "effort_supported": false,
+        "effort_supported": true,
         "effort_levels": [],
         "none_supported": false,
         "interleaved_supported": false,
@@ -17214,7 +17214,7 @@
           "enabled",
           "effort"
         ],
-        "effort_supported": false,
+        "effort_supported": true,
         "effort_levels": [],
         "none_supported": false,
         "interleaved_supported": false,
@@ -17290,7 +17290,7 @@
           "enabled",
           "effort"
         ],
-        "effort_supported": false,
+        "effort_supported": true,
         "effort_levels": [],
         "none_supported": false,
         "interleaved_supported": false,
@@ -17367,7 +17367,7 @@
           "enabled",
           "effort"
         ],
-        "effort_supported": false,
+        "effort_supported": true,
         "effort_levels": [],
         "none_supported": false,
         "interleaved_supported": false,
@@ -17445,7 +17445,7 @@
           "enabled",
           "effort"
         ],
-        "effort_supported": false,
+        "effort_supported": true,
         "effort_levels": [],
         "none_supported": false,
         "interleaved_supported": false,
@@ -17624,7 +17624,7 @@
           "adaptive",
           "effort"
         ],
-        "effort_supported": false,
+        "effort_supported": true,
         "effort_levels": [],
         "none_supported": false,
         "interleaved_supported": false,
@@ -17715,7 +17715,7 @@
           "adaptive",
           "effort"
         ],
-        "effort_supported": false,
+        "effort_supported": true,
         "effort_levels": [],
         "none_supported": false,
         "interleaved_supported": false,
@@ -17817,7 +17817,7 @@
           "adaptive",
           "effort"
         ],
-        "effort_supported": false,
+        "effort_supported": true,
         "effort_levels": [],
         "none_supported": false,
         "interleaved_supported": false,
@@ -21025,14 +21025,11 @@
       },
       "reasoning": {
         "modes": [
-          "enabled"
+          "enabled",
+          "effort"
         ],
         "effort_supported": true,
-        "effort_levels": [
-          "high",
-          "xhigh",
-          "max"
-        ],
+        "effort_levels": [],
         "none_supported": false,
         "interleaved_supported": false,
         "preserve_thinking": false
@@ -21054,6 +21051,7 @@
         "tools",
         "prompt_caching",
         "thinking",
+        "extended_thinking",
         "structured_output"
       ],
       "family": "glm",
@@ -21102,14 +21100,11 @@
       },
       "reasoning": {
         "modes": [
-          "enabled"
+          "enabled",
+          "effort"
         ],
         "effort_supported": true,
-        "effort_levels": [
-          "high",
-          "xhigh",
-          "max"
-        ],
+        "effort_levels": [],
         "none_supported": false,
         "interleaved_supported": false,
         "preserve_thinking": false
@@ -21131,6 +21126,7 @@
         "tools",
         "prompt_caching",
         "thinking",
+        "extended_thinking",
         "structured_output"
       ],
       "family": "glm",
@@ -21184,14 +21180,11 @@
       },
       "reasoning": {
         "modes": [
-          "enabled"
+          "enabled",
+          "effort"
         ],
         "effort_supported": true,
-        "effort_levels": [
-          "high",
-          "xhigh",
-          "max"
-        ],
+        "effort_levels": [],
         "none_supported": false,
         "interleaved_supported": false,
         "preserve_thinking": false
@@ -21213,6 +21206,7 @@
         "tools",
         "prompt_caching",
         "thinking",
+        "extended_thinking",
         "structured_output"
       ],
       "family": "glm",
@@ -21266,10 +21260,13 @@
       },
       "reasoning": {
         "modes": [
-          "enabled"
+          "effort"
         ],
         "effort_supported": true,
         "effort_levels": [
+          "minimal",
+          "low",
+          "medium",
           "high",
           "xhigh",
           "max"
@@ -21295,6 +21292,7 @@
         "tools",
         "prompt_caching",
         "thinking",
+        "extended_thinking",
         "structured_output"
       ],
       "family": "glm",
@@ -21345,14 +21343,11 @@
       },
       "reasoning": {
         "modes": [
-          "enabled"
+          "enabled",
+          "effort"
         ],
         "effort_supported": true,
-        "effort_levels": [
-          "high",
-          "xhigh",
-          "max"
-        ],
+        "effort_levels": [],
         "none_supported": false,
         "interleaved_supported": false,
         "preserve_thinking": false
@@ -21374,6 +21369,7 @@
         "tools",
         "prompt_caching",
         "thinking",
+        "extended_thinking",
         "structured_output"
       ],
       "family": "glm",
@@ -26833,6 +26829,7 @@
         "pdf",
         "prefers_markdown_scaffolding",
         "prefers_xml_scaffolding",
+        "reasoning_effort",
         "streaming",
         "structured_output",
         "structured_output_mode:native_json",
@@ -26858,6 +26855,7 @@
         "pdf",
         "prefers_markdown_scaffolding",
         "prefers_xml_scaffolding",
+        "reasoning_effort",
         "streaming",
         "structured_output",
         "structured_output_mode:native_json",
@@ -26962,6 +26960,7 @@
         "prefers_markdown_scaffolding",
         "prefers_xml_scaffolding",
         "prompt_caching",
+        "reasoning_effort",
         "streaming",
         "structured_output",
         "structured_output_mode:native_json",
@@ -26988,6 +26987,7 @@
         "prefers_markdown_scaffolding",
         "prefers_xml_scaffolding",
         "prompt_caching",
+        "reasoning_effort",
         "streaming",
         "structured_output",
         "structured_output_mode:native_json",
@@ -28539,6 +28539,7 @@
         "native_tools",
         "prefers_markdown_scaffolding",
         "prompt_caching",
+        "reasoning_effort",
         "streaming",
         "structured_output",
         "structured_output_mode:native_json",
@@ -28559,6 +28560,7 @@
         "native_tools",
         "prefers_markdown_scaffolding",
         "prompt_caching",
+        "reasoning_effort",
         "streaming",
         "structured_output",
         "structured_output_mode:native_json",
@@ -28579,6 +28581,7 @@
         "native_tools",
         "prefers_markdown_scaffolding",
         "prompt_caching",
+        "reasoning_effort",
         "streaming",
         "structured_output",
         "structured_output_mode:native_json",
@@ -28599,6 +28602,7 @@
         "native_tools",
         "prefers_markdown_scaffolding",
         "prompt_caching",
+        "reasoning_effort",
         "streaming",
         "structured_output",
         "structured_output_mode:native_json",
@@ -28619,6 +28623,7 @@
         "native_tools",
         "prefers_markdown_scaffolding",
         "prompt_caching",
+        "reasoning_effort",
         "streaming",
         "structured_output",
         "structured_output_mode:native_json",
@@ -28641,6 +28646,7 @@
         "pdf",
         "prefers_markdown_scaffolding",
         "prompt_caching",
+        "reasoning_effort",
         "streaming",
         "structured_output",
         "structured_output_mode:native_json",
@@ -28687,6 +28693,7 @@
         "pdf",
         "prefers_markdown_scaffolding",
         "prompt_caching",
+        "reasoning_effort",
         "streaming",
         "structured_output",
         "structured_output_mode:native_json",
@@ -28710,6 +28717,7 @@
         "pdf",
         "prefers_markdown_scaffolding",
         "prompt_caching",
+        "reasoning_effort",
         "streaming",
         "structured_output",
         "structured_output_mode:native_json",
@@ -28733,6 +28741,7 @@
         "pdf",
         "prefers_markdown_scaffolding",
         "prompt_caching",
+        "reasoning_effort",
         "streaming",
         "structured_output",
         "structured_output_mode:native_json",
@@ -29487,6 +29496,7 @@
       "label": "GLM 5 (via OpenRouter)",
       "family": "glm",
       "capabilities": [
+        "extended_thinking",
         "native_tools",
         "prefers_markdown_scaffolding",
         "prompt_caching",
@@ -29507,6 +29517,7 @@
       "label": "GLM 5.1 (via OpenRouter)",
       "family": "glm",
       "capabilities": [
+        "extended_thinking",
         "native_tools",
         "prefers_markdown_scaffolding",
         "prompt_caching",
@@ -29527,6 +29538,7 @@
       "label": "GLM 5.2 (via OpenRouter)",
       "family": "glm",
       "capabilities": [
+        "extended_thinking",
         "native_tools",
         "prefers_markdown_scaffolding",
         "prompt_caching",
@@ -29547,6 +29559,7 @@
       "label": "GLM 5.3 (via OpenRouter)",
       "family": "glm",
       "capabilities": [
+        "extended_thinking",
         "native_tools",
         "prefers_markdown_scaffolding",
         "prompt_caching",
@@ -29567,6 +29580,7 @@
       "label": "GLM 5V Turbo (via OpenRouter)",
       "family": "glm",
       "capabilities": [
+        "extended_thinking",
         "native_tools",
         "prefers_markdown_scaffolding",
         "prompt_caching",

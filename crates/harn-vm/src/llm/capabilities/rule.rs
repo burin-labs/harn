@@ -17,6 +17,8 @@ use super::model::{
 };
 use super::pattern::{rule_matches, ModelPatterns};
 
+pub(super) use super::effort::{rule_reasoning_effort_supported, rule_thinking_modes};
+
 /// One row of the capability matrix.
 #[derive(Debug, Clone, Deserialize)]
 pub struct ProviderRule {
@@ -303,13 +305,24 @@ pub struct ProviderRule {
     /// neutral `stream` preferences.
     #[serde(default)]
     pub requires_streaming: Option<bool>,
-    /// Whether this route accepts Harn's provider-neutral reasoning effort
-    /// control. Providers project this to their native field (for example
-    /// OpenAI `reasoning_effort` or Anthropic `output_config.effort`).
+    /// Legacy spelling of "this route accepts Harn's provider-neutral reasoning
+    /// effort control". Prefer `thinking_modes = [..., "effort"]`, which owns
+    /// the answer; `true` here is absorbed into the modes by
+    /// `rule_thinking_modes`, and `false` is not a way to remove `effort` that
+    /// the modes declare. Providers project the capability to their native
+    /// field (for example OpenAI `reasoning_effort` or Anthropic
+    /// `output_config.effort`).
     #[serde(default)]
     pub reasoning_effort_supported: Option<bool>,
     /// Accepted effort values for routes that expose a narrower subset than
-    /// Harn's provider-neutral enum. Empty means "unknown/all".
+    /// Harn's provider-neutral enum. Empty means "unknown/all". A non-empty
+    /// ladder also asserts that the route takes effort at all, so it is
+    /// absorbed into `thinking_modes` the same way the legacy flag is --
+    /// declaring rungs a route is not allowed to be asked for was the original
+    /// contradiction this absorption removes.
+    ///
+    /// Verify a ladder with `harn provider effort-probe` rather than asserting
+    /// it; the rungs are a claim about a live route, not a schema choice.
     #[serde(default)]
     pub reasoning_effort_levels: Option<Vec<String>>,
     /// Whether this route accepts effort "none" as a true reasoning-off
@@ -992,16 +1005,6 @@ pub(super) fn first_matching_rule(
         .into_matched()
 }
 
-pub(super) fn rule_thinking_modes(rule: &ProviderRule) -> Vec<String> {
-    rule.thinking_modes.clone().unwrap_or_else(|| {
-        if rule.thinking.unwrap_or(false) {
-            vec!["enabled".to_string()]
-        } else {
-            Vec::new()
-        }
-    })
-}
-
 pub(super) fn rule_vision(rule: &ProviderRule) -> bool {
     rule.vision.or(rule.vision_supported).unwrap_or(false)
 }
@@ -1178,6 +1181,7 @@ fn defaults_to_caps(defaults: &ProviderDefaults) -> Capabilities {
 fn rule_to_caps(rule: &ProviderRule, defaults: &ProviderDefaults) -> Capabilities {
     let (parity_verdict, parity_source) = rule_tool_mode_parity(rule);
     let thinking_modes = rule_thinking_modes(rule);
+    let reasoning_effort_supported = thinking_modes.iter().any(|mode| mode == "effort");
     let thinking_block_style = rule_thinking_block_style(rule);
     let prompt_caching = rule.prompt_caching.unwrap_or(false);
     // A route that represents reasoning as inline `<think>` blocks in prompt
@@ -1338,7 +1342,7 @@ fn rule_to_caps(rule: &ProviderRule, defaults: &ProviderDefaults) -> Capabilitie
         chat_completions_unsupported: rule.chat_completions_unsupported.unwrap_or(false),
         reasoning_tools_require_responses: rule.reasoning_tools_require_responses.unwrap_or(false),
         requires_streaming: rule.requires_streaming.unwrap_or(false),
-        reasoning_effort_supported: rule.reasoning_effort_supported.unwrap_or(false),
+        reasoning_effort_supported,
         reasoning_effort_levels: rule.reasoning_effort_levels.clone().unwrap_or_default(),
         reasoning_none_supported: rule.reasoning_none_supported.unwrap_or(false),
         max_thinking_budget: rule.max_thinking_budget,
@@ -1458,8 +1462,7 @@ pub(super) fn rule_structured_output_mode(rule: &ProviderRule) -> String {
 
 pub(super) fn rule_thinking_block_style(rule: &ProviderRule) -> String {
     rule.thinking_block_style.clone().unwrap_or_else(|| {
-        if rule.reasoning_effort_supported.unwrap_or(false)
-            || rule.requires_completion_tokens.unwrap_or(false)
+        if rule_reasoning_effort_supported(rule) || rule.requires_completion_tokens.unwrap_or(false)
         {
             "reasoning_summary".to_string()
         } else {

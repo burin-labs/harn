@@ -34,6 +34,13 @@ pub(crate) enum ProviderCommand {
     ToolProbeAudit(ProviderToolProbeAuditArgs),
     /// Aggregate saved tool-probe reports into a provider/model scorecard.
     ToolScorecard(ProviderToolScorecardArgs),
+    /// Probe which reasoning-effort rungs a route actually accepts and diff
+    /// that against the ladder the catalog declares. Makes
+    /// `reasoning_effort_levels` a measured fact instead of an asserted one.
+    /// Sends one small live call per rung, so it costs money and needs
+    /// credentials.
+    #[command(name = "effort-probe")]
+    EffortProbe(ProviderEffortProbeArgs),
     /// Classify prompt-cache conformance from a saved repeat-run usage fixture:
     /// resolve capability support, normalize each run's usage, and emit one
     /// cache verdict. Live repeat probing is not yet wired; pass
@@ -668,5 +675,74 @@ pub(crate) struct ProviderCacheProbeArgs {
         default_missing_value = "true",
         action = ArgAction::Set
     )]
+    pub json: bool,
+}
+
+/// Discover a route's real reasoning-effort ladder by calling it.
+///
+/// Effort ladders are the one capability row nothing verifies: they are
+/// hand-written in catalog fragments and hand-asserted in unit tests, so a
+/// wrong rung only surfaces when a caller takes a provider error. This command
+/// closes that loop by sending one tiny call per rung and reporting both drift
+/// directions — rungs the catalog promises but the route refuses, and rungs the
+/// route serves but the catalog omits.
+#[derive(Debug, Args)]
+pub(crate) struct ProviderEffortProbeArgs {
+    /// Route to probe: alias, `provider:model`, or `provider=...,model=...`.
+    /// Repeat or comma-separate for several routes.
+    #[arg(
+        long = "model",
+        value_delimiter = ',',
+        required_unless_present = "all_declared"
+    )]
+    pub models: Vec<String>,
+    /// Probe every catalog route that declares a reasoning-effort ladder.
+    /// This calls every such route once per rung — check the cost first.
+    #[arg(long = "all-declared", conflicts_with = "models")]
+    pub all_declared: bool,
+    /// Effort rungs to try.
+    #[arg(
+        long = "effort",
+        value_delimiter = ',',
+        default_value = "none,minimal,low,medium,high,xhigh,max"
+    )]
+    pub efforts: Vec<String>,
+    /// Response cap for each probe call. Small, because the probe only needs to
+    /// learn whether the request was accepted -- but not as small as that
+    /// implies: a reasoning route spends this budget on reasoning first, and a
+    /// cap tight enough to leave no visible content makes every accepted rung
+    /// come back as a served-but-empty completion.
+    #[arg(long = "max-tokens", default_value_t = 256)]
+    pub max_tokens: i64,
+    /// Prompt sent with each probe call.
+    #[arg(long, default_value = "Reply with the single word: ok")]
+    pub prompt: String,
+    /// Probe one representative route per distinct (provider, declared ladder)
+    /// claim instead of every route. Catalog ladders are rules matching many
+    /// models, so this covers every distinct claim once rather than paying to
+    /// re-measure the same rule dozens of times. Each result names the routes
+    /// it stands for.
+    #[arg(long = "one-per-claim")]
+    pub one_per_claim: bool,
+    /// List the routes and rungs that would be probed, with the resulting call
+    /// count, and make no calls. Every probed rung is a paid request and
+    /// `--all-declared` can select many routes, so this prices a run first.
+    #[arg(long)]
+    pub plan: bool,
+    /// Print a corrected `reasoning_effort_levels` row for each drifting route.
+    #[arg(long = "suggest-fragment")]
+    pub suggest_fragment: bool,
+    /// Exit non-zero when any probed route drifts from the catalog.
+    #[arg(long = "fail-on-drift")]
+    pub fail_on_drift: bool,
+    /// Keep Harn's declared-ladder check on. The check refuses an out-of-ladder
+    /// effort before the request leaves the process, so a gated run can confirm
+    /// the catalog but never correct it — every unmeasured rung is reported as
+    /// `gated_locally` rather than counted as a provider verdict. Off by
+    /// default because a probe that cannot find drift has no reason to run.
+    #[arg(long = "gated")]
+    pub gated: bool,
+    /// Emit the JSON envelope instead of human-readable output.
+    #[arg(long)]
     pub json: bool,
 }

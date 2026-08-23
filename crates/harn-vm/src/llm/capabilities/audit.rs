@@ -358,6 +358,51 @@ mod tests {
         clear_user_overrides();
     }
 
+    /// Effort capability is spelled three ways in a fragment
+    /// (`thinking_modes` containing `effort`, the legacy
+    /// `reasoning_effort_supported` flag, and a non-empty
+    /// `reasoning_effort_levels` ladder). `rule_thinking_modes` absorbs the
+    /// latter two into the first so they cannot contradict each other, and this
+    /// asserts the absorption holds for every route the catalog ships.
+    ///
+    /// The contradiction it forecloses was live: `openrouter:z-ai/glm-5*`
+    /// declared a three-rung ladder with `effort` absent from its modes, and
+    /// `gemini:gemini-2.5-pro` declared the `effort` mode with the flag false.
+    /// Both routes refused effort locally with the same message a route that
+    /// genuinely has no effort control produces, so neither was visible as a
+    /// catalog defect until a probe measured the live route.
+    #[test]
+    fn effort_capability_agrees_across_every_catalogued_route() {
+        reset();
+        let catalog = crate::llm_config::parse_config_toml(BUILTIN_PROVIDERS_TOML)
+            .expect("providers.toml must parse at build time");
+        let mut disagreements = Vec::new();
+        for (model_id, model) in catalog.models {
+            let capability_model_id =
+                crate::llm_config::capability_model_id(&model.provider, &model_id);
+            let caps = crate::llm::capabilities::lookup(&model.provider, &capability_model_id);
+            let declares_effort_mode = caps.thinking_modes.iter().any(|mode| mode == "effort");
+            if caps.reasoning_effort_supported != declares_effort_mode {
+                disagreements.push(format!(
+                    "{}:{model_id}: reasoning_effort_supported={} but thinking_modes={:?}",
+                    model.provider, caps.reasoning_effort_supported, caps.thinking_modes
+                ));
+            }
+            if !caps.reasoning_effort_levels.is_empty() && !declares_effort_mode {
+                disagreements.push(format!(
+                    "{}:{model_id}: declares ladder {:?} but thinking_modes={:?} has no `effort`",
+                    model.provider, caps.reasoning_effort_levels, caps.thinking_modes
+                ));
+            }
+        }
+        assert!(
+            disagreements.is_empty(),
+            "effort capability disagrees with itself on {} route(s):\n  {}",
+            disagreements.len(),
+            disagreements.join("\n  ")
+        );
+    }
+
     #[test]
     fn every_catalogued_chat_model_has_explicit_tool_capabilities() {
         reset();

@@ -1,0 +1,792 @@
+/**
+ * `harn provider effort-probe` — discover, empirically, which reasoning-effort
+ * rungs a route actually accepts, and diff that against the ladder the catalog
+ * declares in `reasoning_effort_levels`.
+ *
+ * Every other fact in the capability catalog is either generated or checked by
+ * something. Effort ladders were the exception: they were hand-written and
+ * hand-asserted in unit tests, so a wrong rung stayed invisible until a caller
+ * took a 400 from the provider in production. This command is the missing
+ * falsifier. It sends one tiny call per rung down the canonical `llm_call`
+ * path and reports what came back.
+ *
+ * Two drift directions matter, and they fail differently:
+ *
+ *   * `declared_but_rejected` — the catalog promises a rung the route refuses.
+ *     Callers asking for it get a provider error. This is the dangerous one.
+ *   * `accepted_but_undeclared` — the route serves a rung the catalog omits.
+ *     Harn's ladder snap silently redirects callers away from a working rung,
+ *     so nothing breaks, but the route is quietly less capable than it is.
+ *
+ * ## What `accepted` does and does not mean
+ *
+ * `accepted` means the route took the request. It does not prove the route
+ * honoured the rung: an OpenAI-compatible endpoint that ignores unknown
+ * parameters answers 200 for every rung it has never heard of. That still
+ * catches the failure this command exists for -- a declared rung that errors --
+ * but a ladder widened purely on `accepted_but_undeclared` evidence deserves a
+ * second look. Each accepted attempt records `output_tokens` and
+ * `reasoning_tokens` when the provider reports them; usage that does not move
+ * across rungs is the cheap tell that a parameter is being swallowed. At the
+ * default 16-token cap those counts are too small to read, so raise
+ * `--max-tokens` when that is the question being asked.
+ *
+ * ## Why the probe bypasses Harn's own gate
+ *
+ * `llm_call` refuses an effort outside the declared ladder before any network
+ * call, which is right for callers and useless for a probe: it would only ever
+ * re-measure the catalog against itself and could never find either drift
+ * direction. The dispatch shim therefore sets `HARN_EFFORT_PROBE_UNGATED=1`,
+ * which suspends exactly that one check for this process. Suspending it is the
+ * probe's defining authority, not a workaround — but it also means an
+ * `accepted` verdict here is a claim about the provider, so the rung genuinely
+ * reached the wire. When the variable is absent the probe still runs and
+ * reports `gated_locally` for out-of-ladder rungs, which is honest but can only
+ * confirm the catalog, never correct it.
+ *
+ * ## argv
+ *
+ *   --model <selector>       Route to probe. Repeatable, comma-separated.
+ *   --all-declared           Probe every catalog route that declares a ladder.
+ *   --effort <list>          Rungs to try. Default: the full canonical ladder.
+ *   --max-tokens <int>       Response cap per probe call. Default 256.
+ *   --prompt <text>          Probe prompt. Default is a one-word reply.
+ *   --one-per-claim          Probe one representative route per distinct
+ *                            (provider, declared ladder) claim instead of every
+ *                            route. A catalog ladder is a rule matching many
+ *                            models, so this covers every distinct claim once
+ *                            rather than re-measuring the same rule dozens of
+ *                            times. Each result names the routes it stands for.
+ *   --plan                   List the routes and rungs that would be probed,
+ *                            with the resulting call count, and make no calls.
+ *   --suggest-fragment       Print a corrected `reasoning_effort_levels` row
+ *                            for each drifting route, ready to paste into the
+ *                            owning capability source fragment.
+ *   --fail-on-drift          Exit non-zero when any route drifts.
+ *
+ * Env:
+ *   HARN_OUTPUT_JSON         "1" for the JSON envelope, else human text.
+ *   HARN_EFFORT_PROBE_UNGATED "1" to suspend the declared-ladder check.
+ */
+import { parse, parser } from "std/cli/argparse"
+
+// The canonical rung order, ascending. This mirrors `EFFORT_LADDER` in
+// `crates/harn-vm/src/llm/reasoning_policy.rs`; `none` leads because it is the
+// absence of reasoning rather than a weaker amount of it, and a route that
+// accepts it is meaningfully different from one that does not.
+const __CANONICAL_LADDER = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+
+fn __ladder_order(rung: string) -> int {
+  let index = 0
+  for known in __CANONICAL_LADDER {
+    if known == rung {
+      return index
+    }
+    index = index + 1
+  }
+  // Unknown rungs sort after every known one instead of colliding at 0, so a
+  // future provider-specific name stays visible in report order.
+  return len(__CANONICAL_LADDER)
+}
+
+fn __sort_by_ladder(rungs: list) -> list {
+  let sorted = []
+  for known in __CANONICAL_LADDER {
+    if contains(rungs, known) {
+      sorted = sorted.appending(known)
+    }
+  }
+  for rung in rungs {
+    if !contains(__CANONICAL_LADDER, rung) {
+      sorted = sorted.appending(rung)
+    }
+  }
+  return sorted
+}
+
+fn __difference(left: list, right: list) -> list {
+  let out = []
+  for item in left {
+    if !contains(right, item) && !contains(out, item) {
+      out = out.appending(item)
+    }
+  }
+  return out
+}
+
+fn __split_csv(raw) -> list {
+  let out = []
+  for piece in split(to_string(raw ?? ""), ",") {
+    const trimmed = trim(piece)
+    if trimmed != "" && !contains(out, trimmed) {
+      out = out.appending(trimmed)
+    }
+  }
+  return out
+}
+
+/**
+ * Decide what one failed call says about the rung, using the runtime's own
+ * error taxonomy rather than a second one.
+ *
+ * `harness.llm.call` failures already carry `kind` ("transient" | "terminal")
+ * and `reason` (`rate_limit`, `auth_failure`, `invalid_request`, ...). Those
+ * are the owning classification; re-deriving it from message substrings here
+ * would be a parallel taxonomy that drifts from the real one and mis-reads
+ * ordinary text — a message mentioning `max_tokens 500` is not a 500.
+ *
+ * Only a terminal refusal of the request itself is evidence about the rung. A
+ * rate limit, a timeout, a bad key, or a model that is not served answer a
+ * different question, and counting them as refusals is how a probe invents
+ * drift it never observed.
+ */
+fn __failure_class(error) -> string {
+  // Provenance first. Harn's own pre-dispatch option checks and a provider's
+  // HTTP 400 are both `terminal`/`invalid_request`, so `kind` and `reason`
+  // cannot separate them; only `origin` can. Reading a local refusal as a
+  // provider verdict is how a probe invents drift the route never expressed.
+  // A non-dict error never reached the envelope at all, which likewise only
+  // happens to a request Harn refused before dispatch.
+  if type_of(error) != "dict" {
+    return "local"
+  }
+  if to_string(error?.origin ?? "") == "local" {
+    return "local"
+  }
+  const kind = to_string(error?.kind ?? "")
+  const reason = to_string(error?.reason ?? "")
+  if reason == "auth_failure" {
+    return "unauthorized"
+  }
+  if kind == "transient" {
+    return "transient"
+  }
+  // Terminal, but about something other than the parameter under test.
+  if contains(["model_unavailable", "context_overflow", "invalid_response"], reason) {
+    return "unrelated"
+  }
+  if kind == "terminal" {
+    return "rejected"
+  }
+  // Enveloped, non-terminal, and not one of the named unrelated reasons. Not
+  // evidence about the rung either way.
+  return "unrelated"
+}
+
+/**
+ * Classify one probe attempt.
+ *
+ * Four outcomes, because they mean different things to the catalog and
+ * collapsing any two of them makes the probe lie:
+ *
+ *   * `accepted`      — the route served this rung.
+ *   * `rejected`      — the route refused this rung. Only this counts as
+ *                       evidence against a declared ladder.
+ *   * `gated_locally` — Harn's own check blocked it; never measured.
+ *   * `inconclusive`  — the call failed for a reason unrelated to the rung
+ *                       (auth, rate limit, timeout, provider 5xx).
+ */
+fn __classify(rung: string, outcome, ungated: bool) -> dict {
+  if !is_err(outcome) {
+    // Token counts are recorded, not judged. A route that accepts a rung and
+    // silently ignores it looks identical to one that honours it, and the only
+    // cheap tell is usage that does not move across rungs. Turning that into an
+    // automatic verdict would be guesswork at this budget -- the probe reports
+    // the numbers and leaves the reading to whoever runs it.
+    const usage = unwrap(outcome)?.usage
+    return {
+      effort: rung,
+      verdict: "accepted",
+      output_tokens: usage?.output_tokens,
+      reasoning_tokens: usage?.reasoning_tokens,
+      error: nil,
+    }
+  }
+  const raw_error = unwrap_err(outcome)
+  // A served-but-empty completion still answers the probe's question. The
+  // provider took the request and produced tokens; it just spent them all on
+  // reasoning and returned no visible content, which is what a reasoning route
+  // does when the response cap is small. That is a fact about `max_tokens`, not
+  // about whether the rung is valid, and reading it as a refusal produced
+  // ladders with holes in the middle (`medium` and `high` "rejected" while
+  // `xhigh` passed) that no provider actually implements.
+  if type_of(raw_error) == "dict" && to_string(raw_error?.reason ?? "") == "empty_generation" {
+    return {
+      effort: rung,
+      verdict: "accepted",
+      served_empty: true,
+      output_tokens: nil,
+      reasoning_tokens: nil,
+      error: nil,
+    }
+  }
+  // A thrown string and a structured error both reach here; `?.message` on a
+  // bare string is not something to rely on, so branch on the shape instead.
+  const message = if type_of(raw_error) == "dict" {
+    to_string(raw_error?.message ?? raw_error)
+  } else {
+    to_string(raw_error)
+  }
+  // Harn's own option validator refused before any request left the process.
+  // Only reachable when the bypass is off; treating it as a provider verdict
+  // would let the catalog confirm itself.
+  const gated = !ungated && contains(message, "reasoning_effort")
+  if gated {
+    return {effort: rung, verdict: "gated_locally", error: message}
+  }
+  const failure = __failure_class(raw_error)
+  if failure == "local" {
+    return {effort: rung, verdict: "gated_locally", failure_class: "local", error: message}
+  }
+  return {
+    effort: rung,
+    verdict: if failure == "rejected" {
+      "rejected"
+    } else {
+      "inconclusive"
+    },
+    failure_class: if failure == "rejected" {
+      nil
+    } else {
+      failure
+    },
+    reason: to_string(raw_error?.reason ?? ""),
+    error: message,
+  }
+}
+
+/**
+ * One probe call at one rung.
+ *
+ * The request carries only the parameter under test and a small cap. An extra
+ * option is a second way for the call to fail: `temperature` is refused
+ * outright by some routes, and every rung then failed for a reason that had
+ * nothing to do with effort while still looking like a refusal of effort.
+ */
+fn __attempt(
+  llm: HarnessLlm,
+  provider: string,
+  model: string,
+  rung: string,
+  prompt: string,
+  max_tokens: int,
+) {
+  return try {
+    llm.call(prompt, nil, {provider: provider, model: model, effort: rung, max_tokens: max_tokens})
+  }
+}
+
+fn __probe_route(
+  llm: HarnessLlm,
+  provider: string,
+  model: string,
+  declared: list,
+  rungs: list,
+  prompt: string,
+  max_tokens: int,
+  ungated: bool,
+  covers: list,
+) -> dict {
+  let attempts = []
+  let accepted = []
+  let gated = []
+  let inconclusive = []
+  for rung in rungs {
+    let classified = __classify(
+      rung,
+      __attempt(llm, provider, model, rung, prompt, max_tokens),
+      ungated,
+    )
+    // One retry for a transient failure. A rate limit or a provider blip is not
+    // an answer about the rung, and retrying once is much cheaper than a report
+    // that quietly downgrades a healthy route to "inconclusive".
+    if classified?.failure_class == "transient" {
+      classified = __classify(
+        rung,
+        __attempt(llm, provider, model, rung, prompt, max_tokens),
+        ungated,
+      )
+    }
+    attempts = attempts.appending(classified)
+    if classified.verdict == "accepted" {
+      accepted = accepted.appending(rung)
+    }
+    if classified.verdict == "gated_locally" {
+      gated = gated.appending(rung)
+    }
+    if classified.verdict == "inconclusive" {
+      inconclusive = inconclusive.appending(rung)
+    }
+  }
+  // Only a rung that was actually measured can be evidence against the catalog.
+  // A rung the local gate blocked never reached the wire, and a rung whose call
+  // died on auth or a rate limit answered a different question — counting
+  // either as a refusal is how a probe manufactures drift it never observed.
+  const unmeasured = gated + inconclusive
+  const measured_declared = __difference(declared, unmeasured)
+  return {
+    provider: provider,
+    model: model,
+    // The routes this one verdict stands for. Always at least the probed route
+    // itself, so a reader never has to guess whether coverage was narrowed.
+    covers: if len(covers) == 0 {
+      [model]
+    } else {
+      covers
+    },
+    declared: __sort_by_ladder(declared),
+    accepted: __sort_by_ladder(accepted),
+    gated_locally: __sort_by_ladder(gated),
+    inconclusive: __sort_by_ladder(inconclusive),
+    // Nothing was measured at all: no rung produced either an acceptance or a
+    // refusal, so the route said nothing about its ladder. Defined from what
+    // WAS measured rather than from any one failure bucket, so it stays correct
+    // however the unmeasured rungs are distributed between local gating and
+    // inconclusive calls.
+    unusable: len(accepted) == 0 && len(__difference(rungs, gated + inconclusive)) == 0,
+    // Token counts that do not move across several accepted rungs are the
+    // cheap tell that the provider ignored the parameter. Recorded as a
+    // flag, not as drift: a swallowed rung is not a catalog contradiction.
+    usage_unmoved: __usage_unmoved(attempts),
+    // An empty `reasoning_effort_levels` means "unknown/all": Harn snaps no
+    // caller and refuses no rung, so an accepted rung contradicts nothing.
+    // Reporting those as drift made every unladdered route fail `--fail-on-drift`
+    // while telling the operator that Harn was restricting a route it was not.
+    no_declared_ladder: len(declared) == 0,
+    declared_but_rejected: __sort_by_ladder(__difference(measured_declared, accepted)),
+    accepted_but_undeclared: if len(declared) == 0 {
+      []
+    } else {
+      __sort_by_ladder(__difference(accepted, declared))
+    },
+    attempts: attempts,
+  }
+}
+
+fn __usage_unmoved(attempts: list) -> bool {
+  let values = []
+  let accepted_with_tokens = 0
+  for attempt in attempts {
+    if attempt.verdict != "accepted" {
+      continue
+    }
+    const tokens = attempt.output_tokens
+    if tokens == nil {
+      continue
+    }
+    accepted_with_tokens = accepted_with_tokens + 1
+    if !contains(values, tokens) {
+      values = values.appending(tokens)
+    }
+  }
+  return accepted_with_tokens >= 3 && len(values) <= 1
+}
+
+fn __unusable_routes(routes: list) -> int {
+  let total = 0
+  for route in routes {
+    if route.unusable {
+      total = total + 1
+    }
+  }
+  return total
+}
+
+fn __route_drifts(route: dict) -> bool {
+  if route.unusable {
+    return false
+  }
+  return len(route.declared_but_rejected) > 0 || len(route.accepted_but_undeclared) > 0
+}
+
+/**
+ * Collapse targets to one representative per distinct (provider, declared
+ * ladder) claim.
+ *
+ * Catalog ladders are rules with a `model_match` pattern, so one claim can back
+ * dozens of routes. Probing all of them re-measures the same rule and bills for
+ * it every time. Each representative carries `covers`, the routes its verdict
+ * stands for, so a narrowed run never reads as if it had probed everything.
+ */
+fn __one_per_claim(targets: list) -> list {
+  // Two passes so the group members can be collected without rewriting entries
+  // in place: first record each claim's representative and members in first-seen
+  // order, then emit the representatives with their member lists attached.
+  let order = []
+  let representative = {}
+  let members = {}
+  for target in targets {
+    const key = target.provider + "\t" + join(target.declared, ",")
+    if representative[key] == nil {
+      order = order.appending(key)
+      representative = representative + {[key]: target}
+      members = members + {[key]: [target.model]}
+    } else {
+      members = members + {[key]: members[key].appending(target.model)}
+    }
+  }
+  let out = []
+  for key in order {
+    out = out.appending(representative[key] + {covers: members[key]})
+  }
+  return out
+}
+
+fn __declared_ladder(catalog: list, provider: string, model: string) -> list {
+  for row in catalog {
+    if type_of(row) == "dict" && to_string(row?.id ?? "") == model
+      && to_string(row?.provider ?? "") == provider {
+      return row?.reasoning_effort_levels ?? []
+    }
+  }
+  // An uncatalogued route has no declared ladder to drift from; the probe still
+  // reports everything it accepts, which is what makes it useful for a model
+  // that is not in the catalog yet.
+  return []
+}
+
+fn __resolve_targets(llm: HarnessLlm, requested: list, all_declared: bool) -> list {
+  const catalog = llm.catalog()
+  let targets = []
+  if all_declared {
+    for row in catalog {
+      if type_of(row) != "dict" {
+        continue
+      }
+      const levels = row?.reasoning_effort_levels ?? []
+      if len(levels) == 0 {
+        continue
+      }
+      targets = targets.appending(
+        {
+          provider: to_string(row?.provider ?? ""),
+          model: to_string(row?.id ?? ""),
+          declared: levels,
+        },
+      )
+    }
+    return targets
+  }
+  for selector in requested {
+    const info = llm.model_info(selector)
+    const provider = to_string(info?.provider ?? "")
+    const model = to_string(info?.id ?? selector)
+    if provider == "" || model == "" {
+      throw "effort-probe: could not resolve a provider/model route for " + selector
+    }
+    // `model_info` is used only to resolve an alias to its route. The declared
+    // ladder is then read from the catalog row itself, so an alias and its
+    // target can never report different ladders for the same route.
+    targets = targets.appending(
+      {provider: provider, model: model, declared: __declared_ladder(catalog, provider, model)},
+    )
+  }
+  return targets
+}
+
+/**
+ * A suggested ladder is only as good as its coverage. Narrowing the catalog to
+ * the rungs that happened to answer, when most of them were never measured,
+ * turns one bad run into a permanent catalog regression -- the exact failure
+ * this command exists to prevent, inverted. When any rung went unmeasured the
+ * probe says so and suggests nothing.
+ */
+fn __fragment_blocked_reason(route: dict) -> string? {
+  const unmeasured = len(route.gated_locally) + len(route.inconclusive)
+  if unmeasured == 0 {
+    return nil
+  }
+  return "no fragment suggested: "
+    + to_string(unmeasured)
+    + " of "
+    + to_string(unmeasured + len(route.accepted) + len(route.declared_but_rejected))
+    + " rungs were never measured, so the accepted set is not a ladder"
+}
+
+fn __fragment_for(route: dict) -> string {
+  const rungs = route.accepted
+  let quoted = []
+  for rung in rungs {
+    quoted = quoted.appending("\"" + rung + "\"")
+  }
+  return "# Measured by `harn provider effort-probe` against the live route.\n"
+    + "# Declared was ["
+    + join(route.declared, ", ")
+    + "]; the route accepted ["
+    + join(route.accepted, ", ")
+    + "].\n"
+    + "reasoning_effort_levels = ["
+    + join(quoted, ", ")
+    + "]"
+}
+
+/**
+ * What `accepted` is and is not evidence of.
+ *
+ * A rung is accepted when the route served the request Harn built for it. On a
+ * provider that takes an effort string natively (the OpenAI-compatible
+ * dialects) that request carries the rung verbatim, so acceptance is a fact
+ * about the route. On a provider where Harn TRANSLATES effort into a native
+ * control it is not: Gemini maps effort to a thinking budget and `high`,
+ * `xhigh`, and `max` all resolve to the same budget, so all three are served
+ * and none of them distinguishes a provider-side level. Acceptance there
+ * describes Harn's projection, not a ladder the provider implements.
+ */
+fn __translation_caveat(routes: list) -> list {
+  let providers = []
+  for route in routes {
+    if contains(["gemini", "anthropic"], route.provider) && !contains(providers, route.provider) {
+      providers = providers.appending(route.provider)
+    }
+  }
+  if len(providers) == 0 {
+    return []
+  }
+  return [
+    "",
+    "note: effort is translated to a native control, not sent verbatim, on: "
+      + join(providers, ", "),
+    "      Several rungs can resolve to the same wire value there, so an accepted",
+    "      rung describes Harn's projection rather than a provider ladder.",
+  ]
+}
+
+fn __render_human(report: dict, suggest_fragment: bool) -> string {
+  let lines = []
+  for route in report.routes {
+    const label = route.provider + ":" + route.model
+    lines = lines.appending(label)
+    if len(route.covers) > 1 {
+      lines = lines.appending(
+        "  stands for "
+          + to_string(len(route.covers))
+          + " routes sharing this claim: "
+          + join(route.covers, ", "),
+      )
+    }
+    lines = lines.appending("  declared: [" + join(route.declared, ", ") + "]")
+    lines = lines.appending("  accepted: [" + join(route.accepted, ", ") + "]")
+    if len(route.gated_locally) > 0 {
+      lines = lines.appending(
+        "  not measured (blocked by the declared ladder; rerun ungated): ["
+          + join(route.gated_locally, ", ")
+          + "]",
+      )
+    }
+    if len(route.declared_but_rejected) > 0 {
+      lines = lines.appending(
+        "  DRIFT declared but rejected: ["
+          + join(route.declared_but_rejected, ", ")
+          + "] — callers asking for these take a provider error",
+      )
+    }
+    if len(route.accepted_but_undeclared) > 0 {
+      lines = lines.appending(
+        "  DRIFT accepted but undeclared: ["
+          + join(route.accepted_but_undeclared, ", ")
+          + "] — Harn snaps callers away from rungs this route serves",
+      )
+    }
+    if route.unusable {
+      lines = lines.appending(
+        "  NOT MEASURED — every rung failed for a reason unrelated to effort "
+          + "(auth, rate limit, or provider error); this route reports no verdict",
+      )
+    } else if len(route.inconclusive) > 0 {
+      lines = lines.appending(
+        "  inconclusive (excluded from the diff): [" + join(route.inconclusive, ", ") + "]",
+      )
+    }
+    if route.no_declared_ladder && !route.unusable && len(route.accepted) > 0 {
+      lines = lines.appending(
+        "  no declared ladder (unknown/all) — measured: [" + join(route.accepted, ", ") + "]",
+      )
+    } else if !__route_drifts(route) && !route.unusable {
+      lines = lines.appending("  ok — declared ladder matches the route")
+    }
+    if route.usage_unmoved {
+      lines = lines.appending(
+        "  note: output tokens did not move across accepted rungs; the parameter may have been ignored",
+      )
+    }
+    // Every non-accepted rung prints its reason. Hiding the inconclusive ones
+    // meant a run could only be diagnosed by re-running it for JSON.
+    for attempt in route.attempts {
+      if attempt.verdict != "accepted" && attempt.error != nil {
+        lines = lines.appending(
+          "    " + attempt.effort + " [" + attempt.verdict + "]: " + attempt.error,
+        )
+      }
+    }
+    // Offered for a drifting route and for one that declares no ladder at all:
+    // in the second case it is a proposed tightening, not a correction.
+    if suggest_fragment
+      && (__route_drifts(route) || (route.no_declared_ladder && len(route.accepted) > 0)) {
+      const blocked = __fragment_blocked_reason(route)
+      if blocked != nil {
+        lines = lines.appending("  " + blocked)
+      } else {
+        lines = lines.appending("  suggested fragment:")
+        for fragment_line in split(__fragment_for(route), "\n") {
+          lines = lines.appending("    " + fragment_line)
+        }
+      }
+    }
+  }
+  lines = lines.appending(
+    "effort-probe: "
+      + to_string(report.drifting_routes)
+      + "/"
+      + to_string(len(report.routes))
+      + " routes drift from the catalog",
+  )
+  if !report.ungated {
+    lines = lines.appending(
+      "note: run was gated by the declared ladder, so it can confirm the catalog but not correct it",
+    )
+  }
+  lines = lines + __translation_caveat(report.routes)
+  return join(lines, "\n")
+}
+
+fn main(harness: Harness) {
+  const parsed = parse(
+    parser(
+      {
+        name: "provider_effort_probe",
+        args: [
+          {kind: "flag", name: "model", long: "--model", multi: true},
+          {kind: "switch", name: "all_declared", long: "--all-declared"},
+          {
+            kind: "flag",
+            name: "effort",
+            long: "--effort",
+            default: "none,minimal,low,medium,high,xhigh,max",
+          },
+          {kind: "flag", name: "max_tokens", long: "--max-tokens", parse: "int", default: 256},
+          {
+            kind: "flag",
+            name: "prompt",
+            long: "--prompt",
+            default: "Reply with the single word: ok",
+          },
+          {kind: "switch", name: "one_per_claim", long: "--one-per-claim"},
+          {kind: "switch", name: "plan", long: "--plan"},
+          {kind: "switch", name: "suggest_fragment", long: "--suggest-fragment"},
+          {kind: "switch", name: "fail_on_drift", long: "--fail-on-drift"},
+        ],
+      },
+    ),
+    argv,
+  )
+  if is_err(parsed) {
+    throw unwrap_err(parsed).message
+  }
+  const args = unwrap(parsed).options
+  const json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"
+  const ungated = harness.env.get_or("HARN_EFFORT_PROBE_UNGATED", "0") == "1"
+  // `--model` is a multi flag, so argparse always hands back a list. Each entry
+  // is still split on commas so `--model a,b` works the way every other list
+  // flag in the CLI does.
+  let requested = []
+  for raw in args.model ?? [] {
+    for selector in __split_csv(raw) {
+      requested = requested.appending(selector)
+    }
+  }
+  if len(requested) == 0 && !args.all_declared {
+    throw "effort-probe: pass --model <selector> at least once, or --all-declared"
+  }
+  const rungs = __split_csv(args.effort)
+  if len(rungs) == 0 {
+    throw "effort-probe: --effort resolved to no rungs"
+  }
+  let targets = __resolve_targets(harness.llm, requested, args.all_declared)
+  if args.one_per_claim {
+    targets = __one_per_claim(targets)
+  }
+  // Every probed rung is a paid call, and `--all-declared` can select a lot of
+  // routes. `--plan` prices the run before it happens rather than after.
+  if args.plan {
+    let plan_lines = []
+    for target in targets {
+      plan_lines = plan_lines.appending(
+        "  " + target.provider + ":" + target.model + "  declared=[" + join(target.declared, ", ")
+          + "]",
+      )
+    }
+    const total = len(targets) * len(rungs)
+    if json_mode {
+      harness.stdio.println(
+        json_stringify_pretty({plan: targets, probed_efforts: rungs, total_calls: total}),
+      )
+    } else {
+      harness.stdio.println(
+        join(
+          [
+            "effort-probe plan: "
+              + to_string(len(targets))
+              + " routes x "
+              + to_string(len(rungs))
+              + " rungs = "
+              + to_string(total)
+              + " live calls",
+          ]
+            + plan_lines,
+          "\n",
+        ),
+      )
+    }
+    return
+  }
+  let routes = []
+  let drifting = 0
+  for target in targets {
+    const route = __probe_route(
+      harness.llm,
+      target.provider,
+      target.model,
+      target.declared,
+      rungs,
+      args.prompt,
+      args.max_tokens,
+      ungated,
+      target?.covers ?? [],
+    )
+    routes = routes.appending(route)
+    if __route_drifts(route) {
+      drifting = drifting + 1
+    }
+  }
+  const report = {
+    ungated: ungated,
+    probed_efforts: __sort_by_ladder(rungs),
+    routes: routes,
+    drifting_routes: drifting,
+  }
+  if json_mode {
+    harness.stdio.println(json_stringify_pretty(report))
+  } else {
+    harness.stdio.println(__render_human(report, args.suggest_fragment))
+  }
+  if args.fail_on_drift {
+    if drifting > 0 {
+      harness.runtime.exit(1)
+    }
+    // A gate that measured nothing must not report success. Exiting 0 here
+    // would turn an expired key into a green catalog check -- the run would
+    // look identical to a clean one. Distinct code so CI can tell "the catalog
+    // is wrong" from "the probe never got to ask".
+    const unusable = __unusable_routes(routes)
+    if unusable > 0 {
+      harness.stdio.eprintln(
+        "effort-probe: "
+          + to_string(unusable)
+          + "/"
+          + to_string(len(routes))
+          + " routes could not be measured at all; no catalog conclusion is available",
+      )
+      harness.runtime.exit(2)
+    }
+  }
+}

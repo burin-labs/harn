@@ -1450,35 +1450,6 @@ fn standalone_reasoning_effort_none_disables_thinking_without_effort_capability(
 }
 
 #[test]
-fn standalone_reasoning_effort_uses_dedicated_capability_gate() {
-    crate::llm::capabilities::set_user_overrides_toml(
-        r#"
-[[provider.local]]
-model_match = "thinking-effort-only"
-thinking_modes = ["effort"]
-"#,
-    )
-    .expect("capability override");
-
-    let err = unsupported_local_options(vec![
-        (
-            "model",
-            VmValue::String(arcstr::ArcStr::from("thinking-effort-only".to_string())),
-        ),
-        (
-            "effort",
-            VmValue::String(arcstr::ArcStr::from("high".to_string())),
-        ),
-    ]);
-
-    assert!(
-        err.to_string().contains("option `effort` is not supported"),
-        "unexpected error: {err}"
-    );
-    crate::llm::capabilities::clear_user_overrides();
-}
-
-#[test]
 fn image_content_sets_vision_and_requires_capability() {
     let image_block = VmValue::dict(crate::value::DictMap::from_iter([
         (

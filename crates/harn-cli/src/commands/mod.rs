@@ -75,6 +75,7 @@ pub mod precompile;
 pub(crate) mod protocol_conformance;
 pub(crate) mod provider;
 pub(crate) mod provider_capabilities;
+pub(crate) mod provider_effort_probe;
 pub(crate) mod provider_limits;
 pub(crate) mod provider_report;
 pub(crate) mod provider_support;

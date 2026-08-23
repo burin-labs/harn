@@ -4807,6 +4807,17 @@ thinking_block_style = "inline"
 # caps at 32768 and CANNOT disable. Flash rows are listed first (first match
 # wins). Effort levels map to budgets in the provider: minimal/low -> 1024,
 # medium -> 8192, high/xhigh -> this ceiling.
+# Live effort-probe 2026-08-23: `gemini-3.6-flash` honors a disable.
+# Sending `effort: none` (thinkingBudget 0) was accepted and produced 1
+# output token, against 62/87/83 at low/medium/high on the same prompt.
+# The family row below claims disable is unsupported because that is the
+# 3.7 Pro-class contract; Flash is the 2.5-flash pattern, not the Pro one.
+[[provider.gemini]]
+model_match = ["gemini-3.6-flash*", "models/gemini-3.6-flash*"]
+extends = true
+reasoning_disable_supported = true
+reasoning_none_supported = true
+
 [[provider.gemini]]
 model_match = ["gemini-3.7*", "models/gemini-3.7*"]
 extends = true
@@ -5991,6 +6002,21 @@ requires_tool_result_adjacency = true
 # shape in Harn's capability matrix via provider_defaults.zai instead of making
 # each host or Burin learn that quirk.
 
+# GLM-5.3's rung list is empirical, not inferred from the docs prose. Live
+# probe 2026-08-23, api.z.ai `/api/paas/v4/chat/completions`, one request per
+# rung:
+#
+#   low / high / max          -> HTTP 200
+#   none / minimal / medium   -> HTTP 400, error 1210
+#   xhigh                     -> HTTP 400, error 1210
+#     "This model always engages in thinking and cannot be disabled;
+#      please use low, high, or max"
+#
+# The ladder is therefore genuinely gapped: `medium` -- the level Harn's auto
+# policy resolves for an agent or code task at the default scale -- is a hard
+# 400 on this route, not a soft coercion. `reasoning_policy` snaps a resolved
+# level onto this list for exactly that reason; an explicit caller `effort`
+# still fails against it loudly.
 [[provider.zai]]
 model_match = "glm-5.3*"
 native_tools = true
@@ -6121,6 +6147,25 @@ preferred_tool_format = "native"
 text_tool_wire_format_supported = true
 structured_output = "delimited"
 
+# GLM-5.3 through OpenRouter always reasons: `reasoning.enabled = false` and
+# `effort: none` both return HTTP 400 "Reasoning is mandatory for this endpoint
+# and cannot be disabled". Omitting "enabled" from `thinking_modes` is what
+# encodes that, exactly as the direct Z.AI rule for `glm-5.3*` does -- with
+# "enabled" present, the auto reasoning policy resolved `off` for agent/verify/
+# code tasks to a disable directive and every such call took that 400.
+#
+# Ladder measured 2026-08-23 with `harn provider effort-probe`: `minimal`,
+# `low`, `medium`, `high`, `xhigh`, and `max` all served; only `none` refused.
+# OpenRouter normalizes effort itself, so this is a wider ladder than the direct
+# Z.AI route (`low`/`high`/`max`) for the same model.
+[[provider.openrouter]]
+model_match = "z-ai/glm-5.3*"
+extends = true
+thinking_modes = ["effort"]
+reasoning_effort_levels = ["minimal", "low", "medium", "high", "xhigh", "max"]
+reasoning_none_supported = false
+reasoning_disable_supported = false
+
 [[provider.openrouter]]
 model_match = "z-ai/glm-5*"
 native_tools = true
@@ -6128,9 +6173,14 @@ preferred_tool_format = "native"
 tool_mode_parity_notes = "2026-08-15 cross-host native re-probe: single clean `message.tool_calls`, empty content, no `<tool_call>` markup. OpenRouter z-ai/glm-5.2 verified on tool_choice=auto and required, sync and streaming."
 text_tool_wire_format_supported = true
 structured_output = "native"
-thinking_modes = ["enabled"]
-reasoning_effort_supported = true
-reasoning_effort_levels = ["high", "xhigh", "max"]
+# `effort` belongs in `thinking_modes`; the legacy `reasoning_effort_supported`
+# flag said the same thing in a second place and the two disagreed here.
+# No ladder is declared: `z-ai/glm-5` and `z-ai/glm-5.2` were measured accepting
+# every rung including `none`, and `glm-5.1`/`glm-5v-turbo` have not been
+# measured, so "unknown/all" is the honest claim for the family. The previous
+# `["high", "xhigh", "max"]` was asserted, not measured, and snapped callers
+# away from four rungs these routes serve.
+thinking_modes = ["enabled", "effort"]
 auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
 prompt_caching = true
 prefers_xml_scaffolding = false

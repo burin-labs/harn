@@ -239,6 +239,7 @@ impl OpenAiCompatibleProvider {
         if let Some(pp) = opts.presence_penalty {
             body["presence_penalty"] = serde_json::json!(pp);
         }
+        let may_shape = crate::llm::catalog_may_shape_requested_reasoning();
         match caps.reasoning_wire_format.as_deref() {
             Some("openrouter") => {
                 if let Some(reasoning) = openrouter_reasoning_config(&opts.thinking) {
@@ -253,7 +254,10 @@ impl OpenAiCompatibleProvider {
                     // support reasoning but reject explicit disable directives;
                     // omit the field there and let the endpoint's mandatory
                     // reasoning default apply.
-                    let skip_disable = is_openrouter_reasoning_disable(&reasoning)
+                    //
+                    // That skip is a catalog claim, so the probe stands it down.
+                    let skip_disable = may_shape
+                        && is_openrouter_reasoning_disable(&reasoning)
                         && (!model_declares_reasoning(&caps) || !caps.reasoning_disable_supported);
                     if !skip_disable {
                         body["reasoning"] = reasoning;
@@ -282,9 +286,23 @@ impl OpenAiCompatibleProvider {
             }
             _ => {}
         }
-        if caps.reasoning_effort_supported {
+        // Both conditions are catalog claims, so an effort probe suspends them
+        // and sends the rung it was asked to measure. Otherwise a route whose
+        // row says `none` is unsupported answers 200 to a request that carried
+        // no effort at all, and the probe reads that as the route accepting
+        // `none`.
+        //
+        // OpenRouter already encodes the rung as nested `reasoning.effort`
+        // (or `reasoning.enabled = false` for `none`). The top-level
+        // OpenAI-style field is a different dialect; emitting it here would
+        // change the wire shape of every OpenRouter route whose modes contain
+        // `effort`, including rows that never set the legacy flag.
+        let openrouter_owns_effort = caps.reasoning_wire_format.as_deref() == Some("openrouter");
+        if !openrouter_owns_effort && (caps.reasoning_effort_supported || !may_shape) {
             if let ThinkingConfig::Effort { level } = &opts.thinking {
-                if *level != crate::llm::api::ReasoningEffort::None || caps.reasoning_none_supported
+                if *level != crate::llm::api::ReasoningEffort::None
+                    || caps.reasoning_none_supported
+                    || !may_shape
                 {
                     body["reasoning_effort"] = serde_json::json!(level.as_str());
                 }

@@ -194,6 +194,121 @@ Atlas Cloud. For NVIDIA, set `NVIDIA_API_KEY`; set `NVIDIA_NIM_BASE_URL`
 only when you need a self-hosted NIM or gateway URL. The built-in NVIDIA
 default is `https://integrate.api.nvidia.com/v1`.
 
+## Reasoning-effort ladders
+
+`reasoning_effort_levels` is the one capability row nothing else verifies.
+Tool formats have `provider tool-probe`, dispatch has `provider
+dispatch-audit`, pricing has the rate card — but effort ladders were written by
+hand into capability fragments and re-asserted by hand in unit tests, so a wrong
+rung stayed invisible until a caller took a provider error in production. Harn
+shipped `glm-5.3` declaring a `medium` rung that Z.AI rejects with HTTP 400
+until a probe caught it.
+
+`harn provider effort-probe` closes that loop by sending one small live call per
+rung and reporting both drift directions:
+
+```bash
+harn provider effort-probe --model glm-5.3 --suggest-fragment
+harn provider effort-probe --all-declared --one-per-claim --plan
+harn provider effort-probe --all-declared --one-per-claim --fail-on-drift --json
+```
+
+Every probed rung is a paid request and `--all-declared` selects every route
+that declares a ladder, so `--plan` lists the routes and the resulting call
+count without calling anything.
+
+Catalog ladders are rules with a `model_match` pattern, so one claim can back
+dozens of routes and probing all of them re-measures the same rule and bills for
+it each time. `--one-per-claim` probes one representative per distinct
+(provider, ladder) claim, which covers the whole claim space for a fraction of
+the calls. Each result carries `covers`, the routes its verdict stands for, so a
+narrowed run never reads as though it had probed everything.
+
+- `declared_but_rejected` — the catalog promises a rung the route refuses.
+  Callers asking for it take a provider error. This is the dangerous direction.
+- `accepted_but_undeclared` — the route serves a rung the catalog omits. Harn's
+  ladder snap silently redirects callers away from a working rung, so nothing
+  breaks but the route is quietly less capable than it is.
+
+The probe stands down every catalog-derived rewrite of the requested effort,
+not just the declared-ladder check. Each dialect used to grow its own
+`|| probe_ungated` hedge around one omit site; leaving any one of them on
+lets the catalog confirm itself. The dropped-parameter case is the worst:
+the request succeeds without the rung reaching the wire and the probe
+records an acceptance the route never gave. That is how `none` on
+OpenRouter GLM-5.3 came back accepted — the top-level field was ungated,
+the nested `enabled: false` skip was not. One policy
+(`catalog_may_shape_requested_reasoning`) is consulted at every omit
+across OpenAI-compatible, Gemini, and Anthropic, so that class of lie is
+unrepresentable. Pass `--gated` to keep the checks on for a confirm-only
+run; rungs they block are reported as `gated_locally` rather than counted
+as provider verdicts, so a gated run never invents drift it did not observe.
+
+`accepted` means the route served the request Harn built for that rung, not that
+it honoured the rung. Three limits follow, and the probe is explicit about each
+rather than hiding them:
+
+- An OpenAI-compatible endpoint that ignores unknown parameters answers 200 for
+  every rung it has never heard of. Each accepted attempt records
+  `output_tokens` and `reasoning_tokens` when the provider reports them; usage
+  that does not move across three or more accepted rungs is reported on the
+  route as `usage_unmoved` rather than left for a human to notice. That is a
+  warning, not drift: a swallowed parameter is not a catalog contradiction.
+- On a provider where Harn *translates* effort instead of sending it verbatim,
+  acceptance describes Harn's projection rather than a provider ladder. Gemini
+  maps effort to a thinking budget and resolves `high`, `xhigh`, and `max` to
+  the same budget, so all three are served and none of them distinguishes a
+  provider-side level. Runs that touch such a route print a note saying so.
+- An empty `reasoning_effort_levels` means "unknown/all", not "nothing allowed".
+  Harn snaps no caller and refuses no rung for such a route, so an accepted rung
+  contradicts nothing and is reported as a measurement rather than as drift.
+
+A served-but-empty completion counts as accepted. A reasoning route spends the
+response cap on reasoning first, so a cap tight enough to leave no visible
+content makes every accepted rung come back as `empty_generation` — a fact about
+`--max-tokens`, not about whether the rung is valid. Reading it as a refusal
+produced ladders with holes in the middle that no provider implements.
+
+`--suggest-fragment` prints a corrected `reasoning_effort_levels` row for each
+drifting route. Like the tool-probe campaign, it is review-only: the probe
+never edits catalog TOML.
+
+Effort ladders are route-specific, not model-specific. The same weights served
+through two providers can expose different rungs: Z.AI's `glm-5.3` accepts
+`low`/`high`/`max`, while the OpenRouter mirror of the same model accepts
+`minimal` through `max` because OpenRouter normalizes effort itself. Both
+refuse `none` — GLM-5.3 always reasons. Probe each route you catalog rather
+than copying a ladder across a mirror.
+
+### One claim, not three
+
+A fragment can say "this route takes an effort ladder" three ways:
+`thinking_modes` containing `effort`, the legacy `reasoning_effort_supported`
+flag, and a non-empty `reasoning_effort_levels`. `thinking_modes` owns the
+answer, and the other two are absorbed into it — each can only ADD `effort`,
+never remove it. Setting `reasoning_effort_supported = false` is therefore not
+a way to remove an `effort` mode the row declares; leave `effort` out of
+`thinking_modes` and make no claim elsewhere.
+
+Absorbing rather than comparing makes the contradiction unrepresentable instead
+of merely detectable, which is why there is no separate lint for it. Nineteen
+shipped routes had been contradicting themselves, and the failure was invisible
+because both halves of Harn read different fields: the reasoning policy read the
+flag and produced an effort request, and the option validator read the modes and
+refused the request the policy had just built — with the same message a route
+that genuinely has no effort control produces.
+
+The one residual invariant, that a declared ladder implies the `effort` mode, is
+asserted for every catalogued route by
+`effort_capability_agrees_across_every_catalogued_route`.
+
+Prefer the canonical spelling in new fragments:
+
+```toml
+thinking_modes = ["enabled", "effort"]
+reasoning_effort_levels = ["low", "high", "max"]  # measured, not asserted
+```
+
 ## Catalog source and generated artifacts
 
 Harn authors edit small TOML fragments under

@@ -286,6 +286,25 @@ fn openrouter_effort_maps_to_nested_reasoning_effort() {
 }
 
 #[test]
+fn openrouter_mandatory_reasoning_omits_disable_in_production() {
+    // `z-ai/glm-5.3` answers HTTP 400 to `reasoning.enabled = false`.
+    // Production therefore omits the disable and lets the route reason.
+    // The effort probe suspends this skip (see `effort_probe_ungated`);
+    // without that, a silent request comes back 200 and the probe reports
+    // that the route accepts `none`.
+    let mut payload = base_request_payload();
+    payload.provider = "openrouter".to_string();
+    payload.model = "z-ai/glm-5.3".to_string();
+    payload.thinking = ThinkingConfig::Effort {
+        level: ReasoningEffort::None,
+    };
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
+
+    assert!(body.get("reasoning").is_none());
+    assert!(body.get("reasoning_effort").is_none());
+}
+
+#[test]
 fn openrouter_disabled_thinking_emits_reasoning_enabled_false() {
     // Qwen3 thinking variants honor explicit `{enabled: false}` but may
     // otherwise use their trained-default thinking budget.
