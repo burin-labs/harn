@@ -12,6 +12,9 @@ impl AcpServer {
     /// unless the host already owns the compatible current-thread runtime and
     /// wants to drive incoming JSON-RPC messages directly.
     pub fn new_with_output(config: AcpServerConfig, output: AcpOutput) -> Self {
+        let notifier_output = output.clone();
+        let known_sessions = super::session_watch::KnownSessions::default();
+        let notifier_sessions = known_sessions.clone();
         let llm_config_overrides = config.llm_config_overrides.clone();
         let runtime_provider_endpoint_overrides = config
             .runtime_configurator
@@ -51,7 +54,22 @@ impl AcpServer {
             default_budget: config.budget,
             sandbox: config.sandbox,
             active_bulk_auth: std::sync::Mutex::new(None),
+            known_sessions,
+            _session_change_subscription: harn_vm::subscribe_session_changes(Arc::new(
+                super::session_watch::SessionInfoNotifier::new(notifier_output, notifier_sessions),
+            )),
         }
+    }
+
+    /// Record a session this client now has, so the session-change notifier
+    /// forwards its metadata changes. Paired with every `sessions.insert`; a
+    /// session missing here is simply never pushed, never mis-pushed.
+    pub(super) fn track_known_session(&self, session_id: &str) {
+        let mut known = self
+            .known_sessions
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        known.insert(session_id.to_string());
     }
 
     /// Dispatch an ACP request with this server's LLM routing context.

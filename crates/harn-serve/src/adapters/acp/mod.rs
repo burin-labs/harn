@@ -32,6 +32,7 @@ mod prompt;
 mod schema;
 mod session;
 mod session_state;
+mod session_watch;
 mod sessions;
 mod setup;
 mod staged_writes;
@@ -946,6 +947,12 @@ pub struct AcpServer {
     /// single-URL completion path. `None` until the first batch is begun;
     /// replaced wholesale by each new batch.
     active_bulk_auth: std::sync::Mutex<Option<Arc<harn_vm::mcp_bulk_auth::McpBulkAuth>>>,
+    /// Sessions this server has opened. Shared with the session-change
+    /// notifier so it forwards only what this client actually has.
+    known_sessions: session_watch::KnownSessions,
+    /// Keeps this server subscribed to committed session-metadata changes for
+    /// as long as it is alive; dropping it unregisters the notifier.
+    _session_change_subscription: harn_vm::SessionChangeSubscription,
 }
 
 impl Drop for AcpServer {

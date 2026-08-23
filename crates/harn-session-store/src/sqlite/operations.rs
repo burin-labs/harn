@@ -145,6 +145,11 @@ impl SessionStore for SqliteSessionStore {
             insert_search_rows(&tx, &self.hooks, &meta, event)?;
         }
         tx.commit().map_err(map_sql)?;
+        // Publish only after the commit lands and the writer lock is gone, so
+        // an observer that reads the session back sees the row it was told
+        // about instead of racing the transaction that produced it.
+        drop(conn);
+        self.hooks.notify_session_changed(&meta);
         Ok(meta)
     }
 

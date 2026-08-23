@@ -357,21 +357,9 @@ impl AcpServer {
     }
 
     pub(super) fn emit_session_info_update(&self, session_id: &str, info: &SessionInfo) {
-        let mut update = serde_json::json!({
-            "sessionUpdate": "session_info_update",
-        });
-        if let Some(title) = &info.title {
-            update["title"] = serde_json::json!(title);
-        }
-        if !info.meta.is_empty() {
-            update["_meta"] = serde_json::Value::Object(info.meta.clone());
-        }
         self.send_notification(
             "session/update",
-            serde_json::json!({
-                "sessionId": session_id,
-                "update": update,
-            }),
+            session_info_update_params(session_id, info.title.as_deref(), &info.meta),
         );
     }
 
@@ -540,6 +528,7 @@ impl AcpServer {
             .map(|anchor| anchor.primary)
             .unwrap_or(src_cwd);
         let project_root = session_project_root_for_cwd(&fork_cwd);
+        self.track_known_session(&new_session_id);
         self.sessions.insert(
             new_session_id.clone(),
             Session {
@@ -648,4 +637,29 @@ impl AcpServer {
             }),
         );
     }
+}
+
+/// Build the `session_info_update` notification body.
+///
+/// Free-standing so the fork path and the store-change observer emit the same
+/// frame. A second construction site is how a client ends up handling two
+/// shapes for one update kind.
+pub(super) fn session_info_update_params(
+    session_id: &str,
+    title: Option<&str>,
+    meta: &serde_json::Map<String, serde_json::Value>,
+) -> serde_json::Value {
+    let mut update = serde_json::json!({
+        "sessionUpdate": "session_info_update",
+    });
+    if let Some(title) = title {
+        update["title"] = serde_json::json!(title);
+    }
+    if !meta.is_empty() {
+        update["_meta"] = serde_json::Value::Object(meta.clone());
+    }
+    serde_json::json!({
+        "sessionId": session_id,
+        "update": update,
+    })
 }

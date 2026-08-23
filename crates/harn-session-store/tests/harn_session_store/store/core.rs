@@ -1309,3 +1309,110 @@ async fn sqlite_database_without_the_pin_column_migrates_to_unpinned() {
         (Some("Renamed after upgrade"), true)
     );
 }
+
+/// Records every committed metadata change it is told about.
+#[derive(Default)]
+struct RecordingObserver {
+    seen: std::sync::Mutex<Vec<(String, Option<String>, bool)>>,
+}
+
+impl harn_session_store::SessionChangeObserver for RecordingObserver {
+    fn session_updated(&self, meta: &SessionMeta) {
+        self.seen.lock().expect("observer lock").push((
+            meta.id.clone(),
+            meta.title.clone(),
+            meta.title_pinned,
+        ));
+    }
+}
+
+/// A surface that already showed a session's name only learns the name moved
+/// if `update` publishes the committed row. Both backends must publish, or the
+/// notification silently depends on which one a deployment happens to run.
+///
+/// This also pins *what* is published: the row as resolved by
+/// `resolve_title_update`, not the caller's request. A derived write that lost
+/// to a pinned title must report the title that actually stands, otherwise a
+/// live surface renders a name the store does not hold.
+#[tokio::test]
+async fn committed_metadata_change_is_published_by_both_backends() {
+    let observer = Arc::new(RecordingObserver::default());
+    let hooks = StoreHooks {
+        change_observer: Some(observer.clone()),
+        ..StoreHooks::default()
+    };
+    run_with_hooks(hooks, |store| {
+        let observer = observer.clone();
+        async move {
+            let before = observer.seen.lock().expect("observer lock").len();
+            store
+                .create(CreateSession {
+                    id: Some("observed".into()),
+                    ..CreateSession::default()
+                })
+                .await
+                .expect("create session");
+            assert_eq!(
+                observer.seen.lock().expect("observer lock").len(),
+                before,
+                "create is not a metadata change and must not publish"
+            );
+
+            store
+                .update(
+                    "observed",
+                    UpdateSession {
+                        title: Some("derived name".into()),
+                        ..UpdateSession::default()
+                    },
+                )
+                .await
+                .expect("derived update");
+            store
+                .update(
+                    "observed",
+                    UpdateSession {
+                        title: Some("a name a person chose".into()),
+                        title_pinned: Some(true),
+                        ..UpdateSession::default()
+                    },
+                )
+                .await
+                .expect("pinning rename");
+            store
+                .update(
+                    "observed",
+                    UpdateSession {
+                        title: Some("a later derived name".into()),
+                        ..UpdateSession::default()
+                    },
+                )
+                .await
+                .expect("derived update after pin");
+
+            let seen = observer.seen.lock().expect("observer lock");
+            assert_eq!(
+                seen[before..],
+                [
+                    (
+                        "observed".to_string(),
+                        Some("derived name".to_string()),
+                        false
+                    ),
+                    (
+                        "observed".to_string(),
+                        Some("a name a person chose".to_string()),
+                        true
+                    ),
+                    (
+                        "observed".to_string(),
+                        Some("a name a person chose".to_string()),
+                        true
+                    ),
+                ],
+                "each committed update publishes the title that stands, not the one requested"
+            );
+        }
+    })
+    .await;
+}

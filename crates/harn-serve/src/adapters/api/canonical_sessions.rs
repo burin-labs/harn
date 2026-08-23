@@ -3,16 +3,19 @@ use std::sync::Arc;
 
 use axum::Router;
 
-use crate::sessions::{SharedSessionStore, SqliteSessionStore};
+use crate::sessions::SharedSessionStore;
 
 pub(super) fn open(workspace_root: &Path) -> Option<SharedSessionStore> {
-    let path = workspace_root.join(".harn").join("session-store.sqlite");
-    match SqliteSessionStore::open(&path) {
+    // Go through the VM's opener rather than `SqliteSessionStore::open`: a
+    // hand-opened store carries no redaction and no change notification, so
+    // this route would persist unredacted payloads and its writes would reach
+    // no live surface.
+    match harn_vm::open_canonical_store(workspace_root) {
         Ok(store) => Some(Arc::new(store) as SharedSessionStore),
         Err(error) => {
             eprintln!(
-                "[harn] canonical session store unavailable at {}: {error}",
-                path.display()
+                "[harn] canonical session store unavailable under {}: {error}",
+                workspace_root.display()
             );
             None
         }

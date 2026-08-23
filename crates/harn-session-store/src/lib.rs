@@ -19,6 +19,7 @@
 //! - [`sqlite`] - persistent SQLite backend for local/self-hosted use
 //! - [`retention`] - declarative per-tenant retention policy
 
+pub mod change;
 pub mod event;
 pub mod identity;
 pub mod memory;
@@ -30,6 +31,7 @@ pub mod signing;
 pub mod sqlite;
 pub mod store;
 
+pub use change::{SessionChangeObserver, SharedSessionChangeObserver};
 pub use event::{
     canonical_event_bytes, canonical_json_bytes, AppendEvent, EventId, EventSignature,
     SessionEventKind, StoredEvent,

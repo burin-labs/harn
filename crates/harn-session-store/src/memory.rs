@@ -242,7 +242,12 @@ impl SessionStore for MemorySessionStore {
         let (updated_at_ms, updated_at) = crate::event::now_ms_and_rfc3339();
         record.meta.updated_at_ms = updated_at_ms;
         record.meta.updated_at = updated_at;
-        Ok(record.meta.clone())
+        let meta = record.meta.clone();
+        // Release the store lock before publishing: an observer is free to
+        // read this session back, and would deadlock against our own guard.
+        drop(guard);
+        self.hooks.notify_session_changed(&meta);
+        Ok(meta)
     }
 
     async fn list(&self, filter: ListFilter) -> StoreResult<Vec<SessionMeta>> {
