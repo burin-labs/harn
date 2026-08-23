@@ -73,6 +73,7 @@
 - [Runtime context](./runtime-context.md)
 - [Filesystem host capabilities](./host-capabilities/fs.md)
 - [Language specification](./language-spec.md)
+- [Platform support](./platform-support.md)
   <!-- BEGIN generated: language-spec chapters (scripts/sync_language_spec.harn) -->
   - [Lexical rules](./spec/language/01-lexical-rules.md)
   - [Grammar](./spec/language/02-grammar.md)
