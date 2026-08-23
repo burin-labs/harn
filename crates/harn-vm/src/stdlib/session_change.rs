@@ -3,11 +3,19 @@
 //! Split out of `session_store` rather than living beside the store opener: it
 //! is a notification concern, not a storage one, and the two have no shared
 //! state beyond the hook the opener attaches.
+//!
+//! Writes in this process still publish immediately through the store hook.
+//! Writes from another process reach the same SQLite file; [`super::session_wal_watch`]
+//! notices those via WAL + `PRAGMA data_version` and publishes through the
+//! same fanout.
 
+use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock, RwLockWriteGuard};
 
-use harn_session_store::SharedSessionChangeObserver;
+use harn_session_store::{SessionMeta, SharedSessionChangeObserver};
+
+use super::session_wal_watch;
 
 /// Process-wide observers notified when session metadata is committed.
 ///
@@ -23,9 +31,18 @@ use harn_session_store::SharedSessionChangeObserver;
 /// evict the first.
 static OBSERVERS: RwLock<Vec<(u64, SharedSessionChangeObserver)>> = RwLock::new(Vec::new());
 static NEXT_SUBSCRIPTION: AtomicU64 = AtomicU64::new(1);
+type TitleFingerprint = (Option<String>, bool);
+type RememberedTitles = Vec<(String, TitleFingerprint)>;
+static TITLES: RwLock<RememberedTitles> = RwLock::new(Vec::new());
 
 fn observers() -> RwLockWriteGuard<'static, Vec<(u64, SharedSessionChangeObserver)>> {
     OBSERVERS
+        .write()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+fn titles() -> RwLockWriteGuard<'static, RememberedTitles> {
+    TITLES
         .write()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
@@ -41,47 +58,95 @@ pub struct SessionChangeSubscription {
 impl Drop for SessionChangeSubscription {
     fn drop(&mut self) {
         observers().retain(|(id, _)| *id != self.id);
+        let live = subscriber_count() > 0;
+        if !live {
+            titles().clear();
+        }
+        session_wal_watch::sync_watchers(live);
     }
 }
 
 /// Register an observer notified after any session metadata update commits
-/// through a store this VM opens.
+/// through a store this VM opens, or after a WAL watcher sees another
+/// process rename a session in the same file.
 ///
 /// Every canonical store opened here carries the registered observers, so a
 /// surface does not have to be handed the specific handle a writer happened to
-/// use. Scope is this process only: a write from another process reaches the
-/// same database file but no in-process sink.
+/// use.
 pub fn subscribe(observer: SharedSessionChangeObserver) -> SessionChangeSubscription {
     let id = NEXT_SUBSCRIPTION.fetch_add(1, Ordering::Relaxed);
     observers().push((id, observer));
+    session_wal_watch::sync_watchers(true);
     SessionChangeSubscription { id }
 }
 
+/// Remember a canonical store file so a live subscription can watch it.
+pub(crate) fn watch_store(path: &Path) {
+    session_wal_watch::register_store_path(path);
+    if subscriber_count() > 0 {
+        session_wal_watch::sync_watchers(true);
+    }
+}
+
+fn subscriber_count() -> usize {
+    OBSERVERS
+        .read()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .len()
+}
+
+/// Whether a title/pin pair is new to this process, unchanged, or moved.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum TitleMemory {
+    New,
+    Unchanged,
+    Changed,
+}
+
+pub(super) fn remember_title(
+    session_id: &str,
+    title: Option<&str>,
+    title_pinned: bool,
+) -> TitleMemory {
+    let next = (title.map(str::to_string), title_pinned);
+    let mut titles = titles();
+    if let Some((_, previous)) = titles.iter_mut().find(|(id, _)| id == session_id) {
+        if *previous == next {
+            return TitleMemory::Unchanged;
+        }
+        *previous = next;
+        return TitleMemory::Changed;
+    }
+    titles.push((session_id.to_string(), next));
+    TitleMemory::New
+}
+
 /// Fans one committed change out to every live subscriber.
+pub(super) fn dispatch(meta: &SessionMeta) {
+    let observers: Vec<SharedSessionChangeObserver> = OBSERVERS
+        .read()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .iter()
+        .map(|(_, observer)| Arc::clone(observer))
+        .collect();
+    // Copy out before dispatching: an observer is allowed to subscribe or
+    // unsubscribe in response, which would deadlock against a held guard.
+    for observer in observers {
+        observer.session_updated(meta);
+    }
+}
+
 struct SessionChangeFanout;
 
 impl harn_session_store::SessionChangeObserver for SessionChangeFanout {
-    fn session_updated(&self, meta: &harn_session_store::SessionMeta) {
-        let observers: Vec<SharedSessionChangeObserver> = OBSERVERS
-            .read()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .iter()
-            .map(|(_, observer)| Arc::clone(observer))
-            .collect();
-        // Copy out before dispatching: an observer is allowed to subscribe or
-        // unsubscribe in response, which would deadlock against a held guard.
-        for observer in observers {
-            observer.session_updated(meta);
-        }
+    fn session_updated(&self, meta: &SessionMeta) {
+        remember_title(&meta.id, meta.title.as_deref(), meta.title_pinned);
+        dispatch(meta);
     }
 }
 
 pub(crate) fn current_observer() -> Option<SharedSessionChangeObserver> {
-    let empty = OBSERVERS
-        .read()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .is_empty();
-    if empty {
+    if subscriber_count() == 0 {
         return None;
     }
     Some(Arc::new(SessionChangeFanout))

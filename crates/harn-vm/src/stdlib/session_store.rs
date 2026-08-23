@@ -352,7 +352,10 @@ async fn session_store_database_path_impl(
 }
 
 fn open_store(state_dir: &SessionStoreDir) -> Result<SqliteSessionStore, VmError> {
-    SqliteSessionStore::open_with_hooks(store_path(state_dir), store_hooks()).map_err(store_error)
+    let store = SqliteSessionStore::open_with_hooks(store_path(state_dir), store_hooks())
+        .map_err(store_error)?;
+    super::session_change::watch_store(store.path());
+    Ok(store)
 }
 
 fn store_hooks() -> StoreHooks {
