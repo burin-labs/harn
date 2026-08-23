@@ -476,10 +476,12 @@ async fn absent_worktree_remove_is_idempotent_receipt() {
 
 #[test]
 fn string_list_value_rejects_non_string_entries() {
-    let err = string_list_value(&[VmValue::Int(1)], "git.diff", "paths")
+    let paths = VmValue::List(std::sync::Arc::new(vec![VmValue::Int(1)]));
+    let err = crate::stdlib::args::Args::new("git.diff", std::slice::from_ref(&paths))
+        .string_list(0, "paths")
         .expect_err("non-string path should be rejected");
     assert!(
-        matches!(err, VmError::TypeError(message) if message.contains("paths entries must be strings"))
+        matches!(err, VmError::TypeError(message) if message.contains("`paths` must be a list<string>, got int"))
     );
 }
 

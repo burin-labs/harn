@@ -17,7 +17,7 @@ use crate::event_log::{
 };
 use crate::runtime_limits::RuntimeLimits;
 use crate::schema::schema_expect_value;
-use crate::stdlib::args::{Args, ErrorKind};
+use crate::stdlib::args::{ArgError, Args, ErrorKind};
 use crate::stdlib::macros::{harn_builtin, BuiltinSignature, Param, VmBuiltinDef, TY_ANY, TY_DICT};
 use crate::stdlib::waitpoint::{
     cancel_waitpoint_on, complete_waitpoint_on, create_waitpoint_on, inspect_waitpoint_on,
@@ -450,7 +450,9 @@ async fn ask_user_impl(
     ctx: Option<&AsyncBuiltinCtx>,
     args: &[VmValue],
 ) -> Result<VmValue, VmError> {
-    let prompt = required_string_arg(args, 0, "ask_user")?;
+    let prompt = Args::runtime("ask_user", args)
+        .non_empty_string(0, "prompt")?
+        .to_string();
     let options = parse_ask_user_options(args.get(1))?;
     let keys = current_dispatch_keys();
     let request_id = next_request_id(HitlRequestKind::Question, keys.as_ref());
@@ -535,7 +537,9 @@ async fn request_approval_impl(
     harness: Option<&crate::harness::VmHarness>,
     args: &[VmValue],
 ) -> Result<VmValue, VmError> {
-    let action = required_string_arg(args, 0, "request_approval")?;
+    let action = Args::runtime("request_approval", args)
+        .non_empty_string(0, "action")?
+        .to_string();
     let options = parse_approval_options(args.get(1), "request_approval")?;
     let keys = current_dispatch_keys();
     let request_id = next_request_id(HitlRequestKind::Approval, keys.as_ref());
@@ -680,8 +684,9 @@ pub(crate) async fn request_approval_for_side_effect(
 }
 
 async fn dual_control_impl(ctx: &AsyncBuiltinCtx, args: &[VmValue]) -> Result<VmValue, VmError> {
-    let n = required_positive_int_arg(args, 0, "dual_control")?;
-    let m = required_positive_int_arg(args, 1, "dual_control")?;
+    let control = Args::runtime("dual_control", args);
+    let n = quorum_arg(&control, 0, "n")?;
+    let m = quorum_arg(&control, 1, "m")?;
     if n > m {
         return Err(VmError::Runtime(
             "dual_control: n must be less than or equal to m".to_string(),
@@ -820,8 +825,9 @@ async fn escalate_to_impl(
     ctx: Option<&AsyncBuiltinCtx>,
     args: &[VmValue],
 ) -> Result<VmValue, VmError> {
-    let role = required_string_arg(args, 0, "escalate_to")?;
-    let reason = required_string_arg(args, 1, "escalate_to")?;
+    let escalate = Args::runtime("escalate_to", args);
+    let role = escalate.non_empty_string(0, "role")?.to_string();
+    let reason = escalate.non_empty_string(1, "reason")?.to_string();
     let keys = current_dispatch_keys();
     let request_id = next_request_id(HitlRequestKind::Escalation, keys.as_ref());
     let trace_id = keys
@@ -1614,24 +1620,17 @@ fn parse_approval_options(
     })
 }
 
-fn required_string_arg(args: &[VmValue], idx: usize, builtin: &str) -> Result<String, VmError> {
-    args.get(idx)
-        .map(VmValue::display)
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| VmError::Runtime(format!("{builtin}: expected string argument at {idx}")))
-}
-
-fn required_positive_int_arg(args: &[VmValue], idx: usize, builtin: &str) -> Result<i64, VmError> {
-    let value = args
-        .get(idx)
-        .and_then(VmValue::as_int)
-        .ok_or_else(|| VmError::Runtime(format!("{builtin}: expected int argument at {idx}")))?;
-    if value <= 0 {
-        return Err(VmError::Runtime(format!(
-            "{builtin}: expected a positive int at {idx}"
-        )));
+/// A quorum bound: an int that has to be at least one.
+fn quorum_arg(args: &Args<'_, '_>, idx: usize, name: &str) -> Result<i64, VmError> {
+    match args.int(idx, name)? {
+        value if value > 0 => Ok(value),
+        _ => Err(ArgError::constraint(
+            args.fn_name(),
+            args.kind(),
+            name,
+            "must be > 0",
+        )),
     }
-    Ok(value)
 }
 
 fn optional_string_list(value: Option<&VmValue>, builtin: &str) -> Result<Vec<String>, VmError> {
@@ -1647,7 +1646,7 @@ fn optional_string_list(value: Option<&VmValue>, builtin: &str) -> Result<Vec<St
 }
 
 fn parse_duration_value(value: &VmValue) -> Result<StdDuration, VmError> {
-    Args::single("hitl", ErrorKind::Runtime, value).duration(0, "timeout")
+    Args::single("hitl", ErrorKind::Runtime, Some(value)).duration(0, "timeout")
 }
 
 fn ensure_hitl_event_log() -> Arc<AnyEventLog> {

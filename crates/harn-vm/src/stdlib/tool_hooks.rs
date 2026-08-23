@@ -42,6 +42,7 @@ use std::collections::BTreeMap;
 
 use regex::Regex;
 
+use crate::stdlib::args::{ErrorKind, Options};
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
@@ -88,81 +89,49 @@ fn require_tagged<'a>(
     }
 }
 
+/// Hook payloads arrive as tagged dicts, so their fields are read with the
+/// shared option contract rather than a per-field match.
+fn fields<'a>(dict: &'a crate::value::DictMap, builtin: &'a str) -> Options<'a, 'a> {
+    Options::new(builtin, ErrorKind::Thrown, Some(dict))
+}
+
 fn required_string_field(
     dict: &crate::value::DictMap,
-    key: &str,
+    key: &'static str,
     builtin: &str,
 ) -> Result<String, VmError> {
-    match dict.get(key) {
-        Some(VmValue::String(s)) if !s.is_empty() => Ok(s.to_string()),
-        Some(VmValue::String(_)) => Err(err(format!(
-            "{builtin}: field `{key}` must be a non-empty string"
-        ))),
-        Some(other) => Err(err(format!(
-            "{builtin}: field `{key}` must be a string, got {}",
-            other.type_name()
-        ))),
-        None => Err(err(format!("{builtin}: missing required field `{key}`"))),
-    }
+    fields(dict, builtin)
+        .non_empty_string(key)
+        .map(str::to_string)
 }
 
 fn optional_string_field(
     dict: &crate::value::DictMap,
-    key: &str,
+    key: &'static str,
     builtin: &str,
 ) -> Result<Option<String>, VmError> {
-    match dict.get(key) {
-        Some(VmValue::String(s)) => Ok(Some(s.to_string())),
-        Some(VmValue::Nil) | None => Ok(None),
-        Some(other) => Err(err(format!(
-            "{builtin}: field `{key}` must be a string, got {}",
-            other.type_name()
-        ))),
-    }
+    Ok(fields(dict, builtin).opt_string(key)?.map(str::to_string))
 }
 
 fn optional_int_field(
     dict: &crate::value::DictMap,
-    key: &str,
+    key: &'static str,
     builtin: &str,
 ) -> Result<Option<i64>, VmError> {
-    match dict.get(key) {
-        Some(VmValue::Int(n)) => Ok(Some(*n)),
-        Some(VmValue::Nil) | None => Ok(None),
-        Some(other) => Err(err(format!(
-            "{builtin}: field `{key}` must be an int, got {}",
-            other.type_name()
-        ))),
-    }
+    fields(dict, builtin).opt_int(key)
 }
 
 fn optional_string_list(
     dict: &crate::value::DictMap,
-    key: &str,
+    key: &'static str,
     builtin: &str,
 ) -> Result<Vec<String>, VmError> {
-    match dict.get(key) {
-        Some(VmValue::List(items)) => {
-            let mut out = Vec::with_capacity(items.len());
-            for item in items.iter() {
-                match item {
-                    VmValue::String(s) => out.push(s.to_string()),
-                    other => {
-                        return Err(err(format!(
-                            "{builtin}: field `{key}` entries must be strings, got {}",
-                            other.type_name()
-                        )));
-                    }
-                }
-            }
-            Ok(out)
-        }
-        Some(VmValue::Nil) | None => Ok(Vec::new()),
-        Some(other) => Err(err(format!(
-            "{builtin}: field `{key}` must be a list of strings, got {}",
-            other.type_name()
-        ))),
-    }
+    Ok(fields(dict, builtin)
+        .opt_string_list(key)?
+        .unwrap_or_default()
+        .into_iter()
+        .map(str::to_string)
+        .collect())
 }
 
 fn validate_pattern(value: &VmValue, builtin: &str) -> Result<(), VmError> {

@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::shared_state::ScopedKey;
-use crate::stdlib::args::{Args, ErrorKind};
+use crate::stdlib::args::{ArgError, Args, ErrorKind};
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{
     DeadlockError, VmAtomicHandle, VmChannelCloseState, VmChannelHandle, VmError, VmValue,
@@ -211,7 +211,7 @@ fn optional_timeout_ms(value: Option<&VmValue>) -> Option<u64> {
 }
 
 fn optional_timeout_scalar_ms(value: &VmValue) -> Option<u64> {
-    match Args::single("channel_select", ErrorKind::Runtime, value).millis(0, "timeout_ms") {
+    match Args::single("channel_select", ErrorKind::Runtime, Some(value)).millis(0, "timeout_ms") {
         Ok(ms) => Some(ms),
         Err(_) if is_negative_millis_value(value) => Some(0),
         Err(_) => None,
@@ -230,17 +230,17 @@ fn positive_u32_arg(
     args: &[VmValue],
     idx: usize,
     default: u32,
+    builtin: &str,
     name: &str,
 ) -> Result<u32, VmError> {
-    let value = args
-        .get(idx)
-        .and_then(|v| v.as_int())
+    let bad = |what| ArgError::constraint(builtin, ErrorKind::Runtime, name, what);
+    let raw = Args::runtime(builtin, args)
+        .opt_int(idx, name)?
         .unwrap_or(default as i64);
-    if value <= 0 {
-        return Err(VmError::Runtime(format!("{name}: value must be positive")));
+    if raw <= 0 {
+        return Err(bad("must be > 0".to_string()));
     }
-    u32::try_from(value)
-        .map_err(|_| VmError::Runtime(format!("{name}: value {value} exceeds u32::MAX")))
+    u32::try_from(raw).map_err(|_| bad(format!("must fit in a u32; got {raw}")))
 }
 
 fn dict_string(dict: &crate::value::DictMap, key: &str) -> Option<String> {
@@ -451,8 +451,8 @@ async fn sync_semaphore_acquire_builtin(
         .first()
         .map(|a| a.display())
         .unwrap_or_else(|| "default".to_string());
-    let capacity = positive_u32_arg(&args, 1, 1, "sync_semaphore_acquire")?;
-    let permits = positive_u32_arg(&args, 2, 1, "sync_semaphore_acquire")?;
+    let capacity = positive_u32_arg(&args, 1, 1, "sync_semaphore_acquire", "capacity")?;
+    let permits = positive_u32_arg(&args, 2, 1, "sync_semaphore_acquire", "permits")?;
     let timeout_ms = optional_timeout_ms(args.get(3));
     guard_sync_self_deadlock(&vm, "semaphore", &key, capacity, permits, timeout_ms)?;
     Ok(vm
@@ -487,7 +487,7 @@ async fn sync_gate_acquire_builtin(
         .first()
         .map(|a| a.display())
         .unwrap_or_else(|| "default".to_string());
-    let limit = positive_u32_arg(&args, 1, 1, "sync_gate_acquire")?;
+    let limit = positive_u32_arg(&args, 1, 1, "sync_gate_acquire", "limit")?;
     let timeout_ms = optional_timeout_ms(args.get(2));
     guard_sync_self_deadlock(&vm, "gate", &key, limit, 1, timeout_ms)?;
     Ok(vm
@@ -1312,7 +1312,7 @@ async fn sleep_builtin(
 ) -> Result<VmValue, VmError> {
     let ms = match args.first() {
         Some(value) if is_negative_millis_value(value) => 0,
-        Some(value) => Args::single("sleep", ErrorKind::Runtime, value).millis(0, "ms")?,
+        Some(value) => Args::single("sleep", ErrorKind::Runtime, Some(value)).millis(0, "ms")?,
         _ => 0,
     };
     if ms == 0 {
@@ -1752,15 +1752,14 @@ fn optional_positive_usize_arg(
     builtin: &str,
     key: &str,
 ) -> Result<usize, VmError> {
-    match value {
-        None | Some(VmValue::Nil) => Ok(default),
-        Some(VmValue::Int(n)) if *n >= 1 => Ok(*n as usize),
-        Some(VmValue::Int(_)) => Err(VmError::Runtime(format!("{builtin}: {key} must be >= 1"))),
-        Some(other) => Err(VmError::Runtime(format!(
-            "{builtin}: {key} must be an int, got {}",
-            other.type_name()
-        ))),
-    }
+    let reader = Args::single(builtin, ErrorKind::Runtime, value);
+    let Some(raw) = reader.opt_int(0, key)? else {
+        return Ok(default);
+    };
+    usize::try_from(raw)
+        .ok()
+        .filter(|value| *value >= 1)
+        .ok_or_else(|| ArgError::constraint(builtin, ErrorKind::Runtime, key, "must be >= 1"))
 }
 
 fn optional_non_negative_u64_arg(
@@ -1769,15 +1768,12 @@ fn optional_non_negative_u64_arg(
     builtin: &str,
     key: &str,
 ) -> Result<u64, VmError> {
-    match value {
-        None | Some(VmValue::Nil) => Ok(default),
-        Some(VmValue::Int(n)) if *n >= 0 => Ok(*n as u64),
-        Some(VmValue::Int(_)) => Err(VmError::Runtime(format!("{builtin}: {key} must be >= 0"))),
-        Some(other) => Err(VmError::Runtime(format!(
-            "{builtin}: {key} must be an int, got {}",
-            other.type_name()
-        ))),
-    }
+    let reader = Args::single(builtin, ErrorKind::Runtime, value);
+    let Some(raw) = reader.opt_int(0, key)? else {
+        return Ok(default);
+    };
+    u64::try_from(raw)
+        .map_err(|_| ArgError::constraint(builtin, ErrorKind::Runtime, key, "must be >= 0"))
 }
 
 #[harn_builtin(

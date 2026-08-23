@@ -12,8 +12,7 @@ use crate::value::{VmError, VmValue};
 
 use super::ignore_policy::{self, IgnorePolicy};
 use super::{
-    bool_option, ignore_policy_option, int_option, reject_retired_long_running_option,
-    resolve_fs_path, string_list_option, string_option, u64_option,
+    fs_options, ignore_policy_option, reject_retired_long_running_option, resolve_fs_path,
 };
 
 const DEFAULT_MATCH_BUDGET: usize = 1_000;
@@ -235,55 +234,55 @@ fn parse_options(args: &[VmValue], root_count: usize) -> Result<EvidenceOptions,
         return Ok(options);
     };
     reject_retired_long_running_option(raw, "find_evidence")?;
-    match string_option(raw, "preset").as_deref() {
-        Some("source") | Some("sources") => {
-            options.exclude_globs = source_excludes();
-            options.max_filesize = Some(1_048_576);
-        }
-        Some("default") | None => {}
-        Some(other) => {
-            return Err(evidence_error(format!(
-                "find_evidence: unknown preset `{other}`"
-            )));
-        }
+    let mut reader = fs_options(raw, "find_evidence");
+    if let Some("source" | "sources") =
+        reader.opt_enum_string("preset", &["source", "sources", "default"])?
+    {
+        options.exclude_globs = source_excludes();
+        options.max_filesize = Some(1_048_576);
     }
-    options.max_depth = int_option(raw, "max_depth")
-        .filter(|value| *value >= 0)
-        .and_then(|value| usize::try_from(value).ok());
-    options.max_filesize = u64_option(raw, "max_filesize")
-        .or_else(|| u64_option(raw, "max_file_size"))
+    options.max_depth = reader.opt_usize("max_depth")?;
+    options.max_filesize = reader
+        .opt_int_any(&["max_filesize", "max_file_size"])?
+        .and_then(|value| u64::try_from(value).ok())
         .or(options.max_filesize);
-    options.follow_symlinks = bool_option(raw, "follow_symlinks").unwrap_or(false);
-    options.include_hidden = bool_option(raw, "include_hidden")
-        .or_else(|| bool_option(raw, "hidden"))
+    options.follow_symlinks = reader.bool_or("follow_symlinks", false)?;
+    options.include_hidden = reader
+        .opt_bool_any(&["include_hidden", "hidden"])?
         .unwrap_or(options.include_hidden);
     options.ignore_policy = ignore_policy_option(raw, "find_evidence")?;
-    options.case_insensitive = bool_option(raw, "case_insensitive")
-        .unwrap_or_else(|| !bool_option(raw, "case_sensitive").unwrap_or(true));
-    options.include_globs = string_list_option(raw, "include")
+    options.case_insensitive = match reader.opt_bool("case_insensitive")? {
+        Some(value) => value,
+        None => !reader.bool_or("case_sensitive", true)?,
+    };
+    options.include_globs = reader
+        .opt_string_or_list("include")?
         .into_iter()
-        .chain(string_list_option(raw, "include_globs"))
+        .chain(reader.opt_string_or_list("include_globs")?)
+        .map(str::to_string)
         .collect();
-    options
-        .exclude_globs
-        .extend(string_list_option(raw, "exclude"));
-    options
-        .exclude_globs
-        .extend(string_list_option(raw, "exclude_globs"));
-    if let Some(value) = int_option(raw, "max_matches") {
+    for key in ["exclude", "exclude_globs"] {
+        options.exclude_globs.extend(
+            reader
+                .opt_string_or_list(key)?
+                .into_iter()
+                .map(str::to_string),
+        );
+    }
+    if let Some(value) = reader.opt_int("max_matches")? {
         options.max_matches = usize::try_from(value.max(1)).unwrap_or(usize::MAX);
     }
-    options.max_matches_per_root = int_option(raw, "max_matches_per_root")
-        .or_else(|| int_option(raw, "per_root_max_matches"))
+    options.max_matches_per_root = reader
+        .opt_int_any(&["max_matches_per_root", "per_root_max_matches"])?
         .map_or(options.max_matches, |value| {
             usize::try_from(value.max(1)).unwrap_or(usize::MAX)
         });
-    if let Some(value) = int_option(raw, "threads") {
+    if let Some(value) = reader.opt_int("threads")? {
         options.threads = usize::try_from(value.max(1))
             .unwrap_or(usize::MAX)
             .min(root_count.max(1));
     }
-    options.background = bool_option(raw, "background").unwrap_or(false);
+    options.background = reader.bool_or("background", false)?;
     Ok(options)
 }
 

@@ -6,6 +6,7 @@ use std::time::{Duration, SystemTime};
 use std::{cell::RefCell, thread_local};
 
 use crate::runtime_limits::RuntimeLimits;
+use crate::stdlib::args::{Args, ErrorKind, Options};
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::testbench::overlay_fs::helpers as overlay;
 #[cfg(test)]
@@ -176,52 +177,16 @@ fn io_error_thrown(message: impl AsRef<str>, error: &std::io::Error) -> VmError 
     crate::value::io_error_thrown(error, message, None)
 }
 
-fn bool_option(opts: &crate::value::DictMap, key: &str) -> Option<bool> {
-    match opts.get(key) {
-        Some(VmValue::Bool(value)) => Some(*value),
-        _ => None,
-    }
-}
-
-fn string_option(opts: &crate::value::DictMap, key: &str) -> Option<String> {
-    match opts.get(key) {
-        Some(VmValue::String(value)) => Some(value.to_string()),
-        _ => None,
-    }
-}
-
-fn usize_option(opts: &crate::value::DictMap, key: &str) -> Option<usize> {
-    opts.get(key)
-        .and_then(VmValue::as_int)
-        .and_then(|value| usize::try_from(value).ok())
-}
-
-fn u64_option(opts: &crate::value::DictMap, key: &str) -> Option<u64> {
-    opts.get(key)
-        .and_then(VmValue::as_int)
-        .and_then(|value| u64::try_from(value).ok())
-}
-
-fn int_option(opts: &crate::value::DictMap, key: &str) -> Option<i64> {
-    opts.get(key).and_then(VmValue::as_int)
-}
-
-fn duration_ms_option(opts: &crate::value::DictMap, key: &str) -> Option<Duration> {
-    u64_option(opts, key).map(Duration::from_millis)
-}
-
-fn string_list_option(opts: &crate::value::DictMap, key: &str) -> Vec<String> {
-    match opts.get(key) {
-        Some(VmValue::String(value)) => vec![value.to_string()],
-        Some(VmValue::List(values)) => values
-            .iter()
-            .filter_map(|value| match value {
-                VmValue::String(text) => Some(text.to_string()),
-                _ => None,
-            })
-            .collect(),
-        _ => Vec::new(),
-    }
+/// Read an fs option bag through the shared contract.
+///
+/// These readers used to return `Option<T>` and swallow a wrong type, so
+/// `{ atomic: "yes" }` or `{ max_depth: -1 }` silently fell back to the
+/// default instead of telling the author the option was ignored.
+fn fs_options<'name, 'a>(
+    opts: &'a crate::value::DictMap,
+    builtin: &'name str,
+) -> Options<'name, 'a> {
+    Options::new(builtin, ErrorKind::Thrown, Some(opts))
 }
 
 fn reject_retired_long_running_option(
@@ -245,8 +210,8 @@ fn ignore_policy_option(
     opts: &crate::value::DictMap,
     builtin: &str,
 ) -> Result<IgnorePolicy, VmError> {
-    match string_option(opts, IgnorePolicy::OPTION_KEY) {
-        Some(raw) => IgnorePolicy::parse_for(builtin, &raw)
+    match fs_options(opts, builtin).opt_string(IgnorePolicy::OPTION_KEY)? {
+        Some(raw) => IgnorePolicy::parse_for(builtin, raw)
             .map_err(|message| VmError::Thrown(VmValue::String(arcstr::ArcStr::from(message)))),
         None => Ok(IgnorePolicy::default()),
     }
@@ -265,13 +230,10 @@ fn parse_walk_dir_options(args: &[VmValue]) -> Result<WalkDirOptions, VmError> {
     };
     if let Some(VmValue::Dict(opts)) = args.get(1) {
         reject_retired_long_running_option(opts, "walk_dir")?;
-        if let Some(v) = opts.get("max_depth").and_then(|v| v.as_int()) {
-            if v >= 0 {
-                options.max_depth = Some(v as usize);
-            }
-        }
-        options.follow_symlinks = bool_option(opts, "follow_symlinks").unwrap_or(false);
-        options.background = bool_option(opts, "background").unwrap_or(false);
+        let mut reader = fs_options(opts, "walk_dir");
+        options.max_depth = reader.opt_usize("max_depth")?;
+        options.follow_symlinks = reader.bool_or("follow_symlinks", false)?;
+        options.background = reader.bool_or("background", false)?;
         options.ignore_policy = ignore_policy_option(opts, "walk_dir")?;
     }
     Ok(options)
@@ -345,8 +307,9 @@ fn parse_glob_options(args: &[VmValue]) -> Result<GlobOptions, VmError> {
     match args.get(1) {
         Some(VmValue::Dict(opts)) => {
             reject_retired_long_running_option(opts, "glob")?;
-            options.base = string_option(opts, "base").unwrap_or_else(|| ".".to_string());
-            options.background = bool_option(opts, "background").unwrap_or(false);
+            let mut reader = fs_options(opts, "glob");
+            options.base = reader.opt_string("base")?.unwrap_or(".").to_string();
+            options.background = reader.bool_or("background", false)?;
             options.ignore_policy = ignore_policy_option(opts, "glob")?;
         }
         Some(value) => {
@@ -356,7 +319,7 @@ fn parse_glob_options(args: &[VmValue]) -> Result<GlobOptions, VmError> {
             }
             if let Some(VmValue::Dict(opts)) = args.get(2) {
                 reject_retired_long_running_option(opts, "glob")?;
-                options.background = bool_option(opts, "background").unwrap_or(false);
+                options.background = fs_options(opts, "glob").bool_or("background", false)?;
                 options.ignore_policy = ignore_policy_option(opts, "glob")?;
             }
         }
@@ -365,18 +328,19 @@ fn parse_glob_options(args: &[VmValue]) -> Result<GlobOptions, VmError> {
     Ok(options)
 }
 
-fn parse_append_locked_options(args: &[VmValue]) -> AppendLockBuiltinOptions {
+fn parse_append_locked_options(args: &[VmValue]) -> Result<AppendLockBuiltinOptions, VmError> {
     let mut options = AppendLockBuiltinOptions {
         timeout: Duration::from_millis(APPEND_FILE_LOCKED_DEFAULT_TIMEOUT_MS),
         sync_data: false,
     };
     if let Some(VmValue::Dict(opts)) = args.get(2) {
-        if let Some(timeout) = duration_ms_option(opts, "timeout_ms") {
+        let mut reader = fs_options(opts, "append_file_locked");
+        if let Some(timeout) = reader.opt_duration("timeout_ms")? {
             options.timeout = timeout;
         }
-        options.sync_data = bool_option(opts, "sync_data").unwrap_or(false);
+        options.sync_data = reader.bool_or("sync_data", false)?;
     }
-    options
+    Ok(options)
 }
 
 fn glob_matches(
@@ -953,7 +917,7 @@ fn append_file_locked_builtin(args: &[VmValue], _out: &mut String) -> Result<VmV
             &resolved,
             crate::stdlib::sandbox::FsAccess::Write,
         )?;
-        let options = parse_append_locked_options(args);
+        let options = parse_append_locked_options(args)?;
         let lock_options = crate::stdlib::sandbox::AppendLockOptions {
             timeout: options.timeout,
             sync_data: options.sync_data,
@@ -1026,8 +990,9 @@ fn list_dir_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     doc = "Create a directory. By default missing parents are created; pass recursive=false for single-directory creation that fails if the target already exists."
 )]
 fn mkdir_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    let path = args.first().map(|a| a.display()).unwrap_or_default();
-    let recursive = !matches!(args.get(1), Some(VmValue::Bool(false)));
+    let mkdir = Args::thrown("mkdir", args);
+    let path = mkdir.string(0, "path")?.to_string();
+    let recursive = mkdir.bool_or(1, "recursive", true)?;
     let resolved = resolve_fs_path(&path);
     if recursive {
         // Recursive mkdir is an idempotent read when the overlay-visible target

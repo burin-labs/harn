@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use parking_lot::Mutex;
 
+use crate::stdlib::args::{ArgError, Args, ErrorKind};
 use crate::stdlib::macros::{harn_builtin, BuiltinSignature, Param, VmBuiltinDef, TY_ANY, TY_LIST};
 use crate::value::{VmError, VmValue};
 use crate::vm::iter::{
@@ -38,59 +39,48 @@ fn require_non_negative_usize(
     args: &[VmValue],
     index: usize,
     builtin: &str,
+    name: &str,
 ) -> Result<usize, VmError> {
-    match args.get(index) {
-        Some(VmValue::Int(n)) if *n >= 0 => Ok(*n as usize),
-        Some(other) => Err(type_error(format!(
-            "{builtin}: argument {} must be a non-negative int, got {}",
-            index + 1,
-            other.type_name()
-        ))),
-        None => Err(type_error(format!(
-            "{builtin}: missing argument {}",
-            index + 1
-        ))),
+    let reader = Args::new(builtin, args);
+    usize::try_from(reader.int(index, name)?)
+        .map_err(|_| ArgError::constraint(builtin, reader.kind(), name, "must be >= 0"))
+}
+
+fn require_positive_usize(
+    args: &[VmValue],
+    index: usize,
+    builtin: &str,
+    name: &str,
+) -> Result<usize, VmError> {
+    match require_non_negative_usize(args, index, builtin, name)? {
+        0 => Err(ArgError::constraint(
+            builtin,
+            ErrorKind::TypeError,
+            name,
+            "must be > 0",
+        )),
+        value => Ok(value),
     }
 }
 
-fn require_positive_usize(args: &[VmValue], index: usize, builtin: &str) -> Result<usize, VmError> {
-    match args.get(index) {
-        Some(VmValue::Int(n)) if *n > 0 => Ok(*n as usize),
-        Some(other) => Err(type_error(format!(
-            "{builtin}: argument {} must be a positive int, got {}",
-            index + 1,
-            other.type_name()
-        ))),
-        None => Err(type_error(format!(
-            "{builtin}: missing argument {}",
-            index + 1
-        ))),
-    }
-}
-
-fn require_positive_f64(args: &[VmValue], index: usize, builtin: &str) -> Result<f64, VmError> {
-    let value = match args.get(index) {
-        Some(VmValue::Int(n)) => *n as f64,
-        Some(VmValue::Float(n)) => *n,
-        Some(other) => {
-            return Err(type_error(format!(
-                "{builtin}: argument {} must be a positive number, got {}",
-                index + 1,
-                other.type_name()
-            )))
-        }
-        None => {
-            return Err(type_error(format!(
-                "{builtin}: missing argument {}",
-                index + 1
-            )))
-        }
+fn require_positive_f64(
+    args: &[VmValue],
+    index: usize,
+    builtin: &str,
+    name: &str,
+) -> Result<f64, VmError> {
+    let reader = Args::new(builtin, args);
+    let value = match reader.raw(index) {
+        Some(VmValue::Int(number)) => *number as f64,
+        _ => reader.float(index, name)?,
     };
     if value <= 0.0 || !value.is_finite() {
-        return Err(type_error(format!(
-            "{builtin}: argument {} must be a positive finite number",
-            index + 1
-        )));
+        return Err(ArgError::constraint(
+            builtin,
+            reader.kind(),
+            name,
+            "must be a finite value > 0",
+        ));
     }
     Ok(value)
 }
@@ -100,14 +90,15 @@ fn collect_max_arg(args: &[VmValue]) -> Result<usize, VmError> {
     match args.get(1) {
         None | Some(VmValue::Nil) => Ok(DEFAULT_MAX),
         Some(VmValue::Int(n)) if *n >= 0 => Ok(*n as usize),
-        Some(VmValue::Dict(options)) => match options.get("max") {
-            Some(VmValue::Int(n)) if *n >= 0 => Ok(*n as usize),
-            Some(other) => Err(type_error(format!(
-                "stream.collect: max must be a non-negative int, got {}",
-                other.type_name()
-            ))),
-            None => Ok(DEFAULT_MAX),
-        },
+        Some(VmValue::Dict(_)) => {
+            match Args::new("stream.collect", args)
+                .options(1, "options")?
+                .opt_usize("max")?
+            {
+                Some(max) => Ok(max),
+                None => Ok(DEFAULT_MAX),
+            }
+        }
         Some(other) => Err(type_error(format!(
             "stream.collect: second argument must be max int or options dict, got {}",
             other.type_name()
@@ -272,7 +263,7 @@ fn stream_scan_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 )]
 fn stream_take_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let inner = iter_handle_from_value(require_arg(args, 0, "stream.take")?)?;
-    let remaining = require_non_negative_usize(args, 1, "stream.take")?;
+    let remaining = require_non_negative_usize(args, 1, "stream.take", "count")?;
     Ok(VmValue::Iter(Arc::new(Mutex::new(VmIter::Take {
         inner,
         remaining,
@@ -375,7 +366,7 @@ fn stream_zip_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 )]
 fn stream_broadcast_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let source = iter_handle_from_value(require_arg(args, 0, "stream.broadcast")?)?;
-    let n = require_positive_usize(args, 1, "stream.broadcast")?;
+    let n = require_positive_usize(args, 1, "stream.broadcast", "count")?;
     Ok(VmValue::List(std::sync::Arc::new(broadcast_branches(
         source, n,
     ))))
@@ -415,7 +406,7 @@ fn stream_race_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 )]
 fn stream_throttle_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let inner = iter_handle_from_value(require_arg(args, 0, "stream.throttle")?)?;
-    let per_sec = require_positive_f64(args, 1, "stream.throttle")?;
+    let per_sec = require_positive_f64(args, 1, "stream.throttle", "per_sec")?;
     let interval_ms = (1000.0 / per_sec).ceil().max(1.0) as u64;
     Ok(VmValue::Iter(Arc::new(Mutex::new(VmIter::Throttle {
         inner,
@@ -433,7 +424,7 @@ fn stream_throttle_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
 )]
 fn stream_debounce_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let inner = iter_handle_from_value(require_arg(args, 0, "stream.debounce")?)?;
-    let window_ms = require_non_negative_usize(args, 1, "stream.debounce")? as u64;
+    let window_ms = require_non_negative_usize(args, 1, "stream.debounce", "window_ms")? as u64;
     Ok(VmValue::Iter(Arc::new(Mutex::new(VmIter::Debounce {
         inner,
         window_ms,

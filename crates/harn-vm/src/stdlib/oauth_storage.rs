@@ -51,8 +51,9 @@ use sha2::{Digest, Sha256};
 use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard};
 
 use crate::llm::vm_value_to_json;
+use crate::stdlib::args::Args;
 use crate::stdlib::host::dispatch_host_operation;
-use crate::value::{VmClosure, VmError, VmValue};
+use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
 const HANDLE_KEY_KIND: &str = "kind";
@@ -138,7 +139,9 @@ fn oauth_storage_memory_handle_impl(
     category = "oauth_storage"
 )]
 fn oauth_storage_file_handle_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    let path = required_string_arg(args, 0, "__oauth_storage_file_handle", "path")?;
+    let path = Args::runtime("__oauth_storage_file_handle", args)
+        .string(0, "path")?
+        .to_string();
     let secret = required_bytes_or_string(args, 1, "__oauth_storage_file_handle")?;
     Ok(file_handle(&path, &secret))
 }
@@ -153,7 +156,9 @@ fn oauth_storage_cloud_handle_impl(
     args: &[VmValue],
     _out: &mut String,
 ) -> Result<VmValue, VmError> {
-    let scope = required_string_arg(args, 0, "__oauth_storage_cloud_handle", "scope")?;
+    let scope = Args::runtime("__oauth_storage_cloud_handle", args)
+        .string(0, "scope")?
+        .to_string();
     let kind = match scope.as_str() {
         "session" => KIND_HARN_CLOUD_SESSION,
         "org" => KIND_HARN_CLOUD_ORG,
@@ -178,7 +183,9 @@ async fn oauth_storage_get_impl(
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let handle = require_handle(&args, 0, "__oauth_storage_get")?;
-    let key = required_string_arg(&args, 1, "__oauth_storage_get", "key")?;
+    let key = Args::runtime("__oauth_storage_get", &args)
+        .string(1, "key")?
+        .to_string();
     backend_get(&handle, &key).await
 }
 
@@ -194,9 +201,10 @@ async fn oauth_storage_set_impl(
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let handle = require_handle(&args, 0, "__oauth_storage_set")?;
-    let key = required_string_arg(&args, 1, "__oauth_storage_set", "key")?;
-    let token_dict = require_dict_arg(&args, 2, "__oauth_storage_set", "token_set")?;
-    let ttl = optional_int_arg(&args, 3, "__oauth_storage_set", "ttl_seconds")?;
+    let set = Args::runtime("__oauth_storage_set", &args);
+    let key = set.string(1, "key")?.to_string();
+    let token_dict = set.dict(2, "token_set")?.clone();
+    let ttl = optional_ttl_seconds_arg(&set, 3, "ttl_seconds")?;
     backend_set(&handle, &key, &token_dict, ttl).await?;
     Ok(VmValue::Nil)
 }
@@ -213,7 +221,9 @@ async fn oauth_storage_delete_impl(
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let handle = require_handle(&args, 0, "__oauth_storage_delete")?;
-    let key = required_string_arg(&args, 1, "__oauth_storage_delete", "key")?;
+    let key = Args::runtime("__oauth_storage_delete", &args)
+        .string(1, "key")?
+        .to_string();
     backend_delete(&handle, &key).await?;
     Ok(VmValue::Nil)
 }
@@ -230,8 +240,9 @@ async fn oauth_storage_with_refresh_lock_impl(
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let handle = require_handle(&args, 0, "__oauth_storage_with_refresh_lock")?;
-    let key = required_string_arg(&args, 1, "__oauth_storage_with_refresh_lock", "key")?;
-    let body = required_closure_arg(&args, 2, "__oauth_storage_with_refresh_lock")?;
+    let lock = Args::runtime("__oauth_storage_with_refresh_lock", &args);
+    let key = lock.string(1, "key")?.to_string();
+    let body = Arc::new(lock.closure(2, "body")?.clone());
     let mut guard = acquire_refresh_lock(&handle, &key).await?;
     let mut child_vm = ctx.child_vm();
     let result = child_vm.call_closure_pub(&body, &[]).await;
@@ -934,41 +945,6 @@ fn require_handle(
     }
 }
 
-fn required_closure_arg(
-    args: &[VmValue],
-    index: usize,
-    fn_name: &str,
-) -> Result<Arc<VmClosure>, VmError> {
-    match args.get(index) {
-        Some(VmValue::Closure(closure)) => Ok(closure.clone()),
-        Some(other) => Err(VmError::Runtime(format!(
-            "{fn_name}: body argument must be a closure, got {}",
-            other.type_name()
-        ))),
-        None => Err(VmError::Runtime(format!(
-            "{fn_name}: missing body argument"
-        ))),
-    }
-}
-
-fn required_string_arg(
-    args: &[VmValue],
-    index: usize,
-    fn_name: &str,
-    arg_name: &str,
-) -> Result<String, VmError> {
-    match args.get(index) {
-        Some(VmValue::String(s)) => Ok(s.to_string()),
-        Some(other) => Err(VmError::Runtime(format!(
-            "{fn_name}: `{arg_name}` must be a string, got {}",
-            other.type_name()
-        ))),
-        None => Err(VmError::Runtime(format!(
-            "{fn_name}: `{arg_name}` argument is required"
-        ))),
-    }
-}
-
 fn required_bytes_or_string(
     args: &[VmValue],
     index: usize,
@@ -1003,38 +979,16 @@ fn required_bytes_or_string(
     }
 }
 
-fn require_dict_arg(
-    args: &[VmValue],
+/// A TTL in seconds, also accepting a `duration` (which is milliseconds).
+fn optional_ttl_seconds_arg(
+    args: &Args<'_, '_>,
     index: usize,
-    fn_name: &str,
-    arg_name: &str,
-) -> Result<crate::value::DictMap, VmError> {
-    match args.get(index) {
-        Some(VmValue::Dict(dict)) => Ok(dict.as_ref().clone()),
-        Some(other) => Err(VmError::Runtime(format!(
-            "{fn_name}: `{arg_name}` must be a dict, got {}",
-            other.type_name()
-        ))),
-        None => Err(VmError::Runtime(format!(
-            "{fn_name}: `{arg_name}` argument is required"
-        ))),
-    }
-}
-
-fn optional_int_arg(
-    args: &[VmValue],
-    index: usize,
-    fn_name: &str,
     arg_name: &str,
 ) -> Result<Option<i64>, VmError> {
     match args.get(index) {
-        Some(VmValue::Nil) | None => Ok(None),
-        Some(VmValue::Int(value)) => Ok(Some(*value)),
-        Some(VmValue::Duration(value)) => Ok(Some(*value / 1000)),
-        Some(other) => Err(VmError::Runtime(format!(
-            "{fn_name}: `{arg_name}` must be int or duration, got {}",
-            other.type_name()
-        ))),
+        None => Ok(None),
+        Some(VmValue::Duration(millis)) => Ok(Some(millis / 1000)),
+        _ => args.opt_int(index, arg_name),
     }
 }
 

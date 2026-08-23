@@ -455,36 +455,20 @@ fn parse_required_duration(value: Option<&VmValue>, field: &str) -> Result<StdDu
 }
 
 fn parse_duration_value(value: &VmValue) -> Result<StdDuration, VmError> {
-    Args::single("monitor_wait_for_native", ErrorKind::Runtime, value).duration(0, "timeout")
+    Args::single("monitor_wait_for_native", ErrorKind::Runtime, Some(value)).duration(0, "timeout")
 }
 
-fn string_field(map: &crate::value::DictMap, field: &str) -> Result<Option<String>, VmError> {
-    let Some(value) = map.get(field) else {
-        return Ok(None);
-    };
-    match value {
-        VmValue::Nil => Ok(None),
-        VmValue::String(text) if text.trim().is_empty() => Ok(None),
-        VmValue::String(text) => Ok(Some(text.to_string())),
-        other => Err(VmError::Runtime(format!(
-            "monitor_wait_for_native: {field} must be a string, got {}",
-            other.type_name()
-        ))),
-    }
+fn string_field(
+    map: &crate::value::DictMap,
+    field: &'static str,
+) -> Result<Option<String>, VmError> {
+    Ok(Args::runtime_options("monitor_wait_for_native", Some(map))
+        .opt_non_empty_string(field)?
+        .map(str::to_string))
 }
 
-fn bool_field(map: &crate::value::DictMap, field: &str) -> Result<Option<bool>, VmError> {
-    let Some(value) = map.get(field) else {
-        return Ok(None);
-    };
-    match value {
-        VmValue::Nil => Ok(None),
-        VmValue::Bool(flag) => Ok(Some(*flag)),
-        other => Err(VmError::Runtime(format!(
-            "monitor_wait_for_native: {field} must be a bool, got {}",
-            other.type_name()
-        ))),
-    }
+fn bool_field(map: &crate::value::DictMap, field: &'static str) -> Result<Option<bool>, VmError> {
+    Args::runtime_options("monitor_wait_for_native", Some(map)).opt_bool(field)
 }
 
 async fn call_closure(

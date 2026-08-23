@@ -9,6 +9,7 @@ use backend::{
     WriterIdentity,
 };
 
+use crate::stdlib::args::Args;
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmError, VmResourceHandle, VmValue};
 use crate::vm::Vm;
@@ -205,13 +206,9 @@ fn required_arg_string(
     fn_name: &str,
     arg_name: &str,
 ) -> Result<String, VmError> {
-    match args.get(idx) {
-        Some(VmValue::String(value)) => Ok(value.to_string()),
-        Some(value) if !value.display().is_empty() => Ok(value.display()),
-        _ => Err(VmError::Runtime(format!(
-            "{fn_name}: `{arg_name}` must be a non-empty string"
-        ))),
-    }
+    Args::runtime(fn_name, args)
+        .non_empty_string(idx, arg_name)
+        .map(str::to_string)
 }
 
 fn parse_init_request(

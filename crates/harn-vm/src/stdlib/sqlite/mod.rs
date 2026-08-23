@@ -987,7 +987,7 @@ fn ensure_db_open(record: &DbRecord, builtin: &str) -> Result<(), VmError> {
 }
 
 /// Positional `params` list, defaulting to empty.
-fn params_arg(args: &Args<'_>, index: usize) -> Result<Vec<VmValue>, VmError> {
+fn params_arg(args: &Args<'_, '_>, index: usize) -> Result<Vec<VmValue>, VmError> {
     Ok(args.opt_list(index, "params")?.unwrap_or_default().to_vec())
 }
 

@@ -509,7 +509,7 @@ pub(crate) fn datetime_from_arg(
             .ok_or_else(|| vm_error(format!("{builtin}: timestamp out of range"))),
         VmValue::Float(seconds) => datetime_from_float(*seconds, builtin),
         other => Err(vm_error(format!(
-            "{builtin}: expected timestamp number or date dict, got {}",
+            "{builtin}: `timestamp` must be an int, a float, or a date dict; got {}",
             other.type_name()
         ))),
     }

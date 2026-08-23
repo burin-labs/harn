@@ -575,6 +575,7 @@ fn validate_file_ref_with_options(
     if let Some(size) = object.get("size_bytes") {
         let size = size
             .as_u64()
+            // not-a-harn-type: the file spec is a JSON document.
             .ok_or_else(|| err("file spec `size_bytes` must be a non-negative integer"))?;
         normalized.insert("size_bytes".to_string(), JsonValue::Number(size.into()));
     }
@@ -758,6 +759,7 @@ fn optional_u64(
         return Ok(None);
     };
     value.as_u64().map(Some).ok_or_else(|| {
+        // not-a-harn-type: the manifest is a JSON document.
         err(format!(
             "artifact_manifest `{key}` must be a non-negative integer"
         ))

@@ -114,7 +114,7 @@ fn verify_signed_url_error(message: impl Into<String>) -> VmError {
     VmError::Runtime(format!("verify_signed_url: {}", message.into()))
 }
 
-fn signed_url_options(args: &Args<'_>, index: usize) -> Result<SignedUrlOptions, VmError> {
+fn signed_url_options(args: &Args<'_, '_>, index: usize) -> Result<SignedUrlOptions, VmError> {
     let builtin = args.fn_name();
     let mut options = SignedUrlOptions::default();
     let mut bag = args.options(index, "options")?;
@@ -268,7 +268,7 @@ fn append_query(prefix: &str, query: &str) -> String {
 }
 
 fn claims_arg<'a>(
-    args: &Args<'a>,
+    args: &Args<'_, 'a>,
     options: &SignedUrlOptions,
 ) -> Result<&'a crate::value::DictMap, VmError> {
     let dict = args.dict(1, "claims")?;
@@ -782,7 +782,7 @@ fn crypto_random_bytes_impl(args: &[VmValue], _out: &mut String) -> Result<VmVal
         Some(VmValue::Int(value)) if *value > 0 => *value as usize,
         Some(other) => {
             return Err(VmError::Runtime(format!(
-                "crypto_random_bytes: n must be a positive integer, got {}",
+                "crypto_random_bytes: `n` must be a positive int, got {}",
                 other.type_name()
             )));
         }

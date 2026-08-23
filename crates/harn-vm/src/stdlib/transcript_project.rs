@@ -296,13 +296,13 @@ fn optional_usize_alias(
             Some(value) => {
                 let Some(number) = value.as_int() else {
                     return Err(VmError::Runtime(format!(
-                        "{builtin}: `{key}` must be a non-negative integer, got {}",
+                        "{builtin}: `{key}` must be a non-negative int, got {}",
                         value.type_name()
                     )));
                 };
                 if number < 0 {
                     return Err(VmError::Runtime(format!(
-                        "{builtin}: `{key}` must be a non-negative integer"
+                        "{builtin}: `{key}` must be a non-negative int"
                     )));
                 }
                 return Ok(number as usize);

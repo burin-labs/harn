@@ -24,11 +24,13 @@ pub(crate) enum TypeTag {
     String,
     Bytes,
     Int,
+    Float,
     Bool,
     List,
     Dict,
     Closure,
     Duration,
+    Set,
 }
 
 impl TypeTag {
@@ -38,11 +40,13 @@ impl TypeTag {
             Self::String => "string",
             Self::Bytes => "bytes",
             Self::Int => "int",
+            Self::Float => "float",
             Self::Bool => "bool",
             Self::List => "list",
             Self::Dict => "dict",
             Self::Closure => "closure",
             Self::Duration => "duration",
+            Self::Set => "set",
         }
     }
 
@@ -52,11 +56,13 @@ impl TypeTag {
         Self::String,
         Self::Bytes,
         Self::Int,
+        Self::Float,
         Self::Bool,
         Self::List,
         Self::Dict,
         Self::Closure,
         Self::Duration,
+        Self::Set,
     ];
 }
 
@@ -91,10 +97,13 @@ impl Expected {
     pub(crate) const BYTES: Self = Self::One(TypeTag::Bytes);
     pub(crate) const INT: Self = Self::One(TypeTag::Int);
     pub(crate) const BOOL: Self = Self::One(TypeTag::Bool);
+    pub(crate) const FLOAT: Self = Self::One(TypeTag::Float);
     pub(crate) const LIST: Self = Self::One(TypeTag::List);
     pub(crate) const DICT: Self = Self::One(TypeTag::Dict);
     pub(crate) const CLOSURE: Self = Self::One(TypeTag::Closure);
+    pub(crate) const INT_OR_FLOAT: Self = Self::Either(TypeTag::Int, TypeTag::Float);
     pub(crate) const STRING_LIST: Self = Self::ListOf(TypeTag::String);
+    pub(crate) const LIST_OR_SET: Self = Self::Either(TypeTag::List, TypeTag::Set);
     pub(crate) const BYTES_OR_STRING: Self = Self::Either(TypeTag::Bytes, TypeTag::String);
     pub(crate) const DURATION_OR_INT: Self = Self::Either(TypeTag::Duration, TypeTag::Int);
 }

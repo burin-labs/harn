@@ -20,7 +20,7 @@ use serde_json::{json, Value as JsonValue};
 use sha2::{Digest, Sha256};
 
 use crate::llm::vm_value_to_json;
-use crate::stdlib::args::Args;
+use crate::stdlib::args::{ArgError, Args, ErrorKind, Expected, Options};
 use crate::stdlib::json_to_vm_value;
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{categorized_error, DictMap, ErrorCategory, VmError, VmValue};
@@ -795,29 +795,28 @@ fn validate_session_id(session_id: &str) -> Result<(), VmError> {
     Ok(())
 }
 
-fn option_string(options: Option<&DictMap>, key: &str) -> Result<Option<String>, VmError> {
-    match options.and_then(|options| options.get(key)) {
-        None | Some(VmValue::Nil) => Ok(None),
-        Some(VmValue::String(value)) if value.trim().is_empty() => Ok(None),
-        Some(VmValue::String(value)) => Ok(Some(value.to_string())),
-        Some(_) => Err(VmError::Runtime(format!(
-            "session_store: options.{key} must be a string"
-        ))),
-    }
+fn session_options(options: Option<&DictMap>) -> Options<'static, '_> {
+    Args::runtime_options("session_store", options)
 }
 
-fn option_positive_usize(options: Option<&DictMap>, key: &str) -> Result<Option<usize>, VmError> {
-    match options.and_then(|options| options.get(key)) {
-        None | Some(VmValue::Nil) => Ok(None),
-        Some(VmValue::Int(value)) if *value > 0 => usize::try_from(*value)
-            .map(Some)
-            .map_err(|_| VmError::Runtime(format!("session_store: options.{key} is too large"))),
-        Some(VmValue::Int(_)) => Err(VmError::Runtime(format!(
-            "session_store: options.{key} must be positive"
-        ))),
-        Some(_) => Err(VmError::Runtime(format!(
-            "session_store: options.{key} must be an int"
-        ))),
+fn option_string(options: Option<&DictMap>, key: &'static str) -> Result<Option<String>, VmError> {
+    Ok(session_options(options)
+        .opt_non_empty_string(key)?
+        .map(str::to_string))
+}
+
+fn option_positive_usize(
+    options: Option<&DictMap>,
+    key: &'static str,
+) -> Result<Option<usize>, VmError> {
+    match session_options(options).opt_usize(key)? {
+        Some(0) => Err(ArgError::constraint(
+            "session_store",
+            ErrorKind::Runtime,
+            key,
+            "must be > 0",
+        )),
+        value => Ok(value),
     }
 }
 
@@ -832,39 +831,31 @@ fn reject_retired_now(options: Option<&DictMap>) -> Result<(), VmError> {
 }
 
 fn option_tags(options: Option<&DictMap>) -> Result<Vec<String>, VmError> {
-    match options.and_then(|options| options.get("tags")) {
-        None | Some(VmValue::Nil) => Ok(Vec::new()),
-        Some(VmValue::List(items)) => items
-            .iter()
-            .map(|item| match item {
-                VmValue::String(value) => Ok(value.to_string()),
-                _ => Err(VmError::Runtime(
-                    "session_store: options.tags must contain only strings".to_string(),
-                )),
-            })
-            .collect(),
-        Some(_) => Err(VmError::Runtime(
-            "session_store: options.tags must be a list".to_string(),
-        )),
-    }
+    Ok(session_options(options)
+        .opt_string_list("tags")?
+        .unwrap_or_default()
+        .into_iter()
+        .map(str::to_string)
+        .collect())
 }
 
 fn option_headers(options: Option<&DictMap>) -> Result<BTreeMap<String, String>, VmError> {
-    match options.and_then(|options| options.get("headers")) {
-        None | Some(VmValue::Nil) => Ok(BTreeMap::new()),
-        Some(VmValue::Dict(headers)) => headers
-            .iter()
-            .map(|(key, value)| match value {
-                VmValue::String(value) => Ok((key.to_string(), value.to_string())),
-                _ => Err(VmError::Runtime(
-                    "session_store: options.headers values must be strings".to_string(),
-                )),
-            })
-            .collect(),
-        Some(_) => Err(VmError::Runtime(
-            "session_store: options.headers must be a dict".to_string(),
-        )),
-    }
+    let Some(headers) = session_options(options).opt_dict("headers")? else {
+        return Ok(BTreeMap::new());
+    };
+    headers
+        .iter()
+        .map(|(key, value)| match value {
+            VmValue::String(value) => Ok((key.to_string(), value.to_string())),
+            other => Err(ArgError::wrong_type(
+                "session_store",
+                ErrorKind::Runtime,
+                &format!("headers.{key}"),
+                Expected::STRING,
+                other,
+            )),
+        })
+        .collect()
 }
 
 fn json_scalar_string(value: &JsonValue) -> Option<String> {

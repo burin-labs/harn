@@ -23,6 +23,7 @@ use crate::flow::{
     PredicateRunner, Remediation, SemanticFallbackPolicy, Slice, SliceId, SliceStatus, Verdict,
 };
 use crate::llm::helpers::vm_value_to_json;
+use crate::stdlib::args::{ArgError, Args, ErrorKind};
 use crate::stdlib::json_to_vm_value;
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmClosure, VmError, VmValue};
@@ -805,16 +806,7 @@ fn require_list_arg<'a>(
     builtin: &str,
     name: &str,
 ) -> Result<&'a [VmValue], VmError> {
-    match args.get(index) {
-        Some(VmValue::List(items)) => Ok(items.as_slice()),
-        Some(other) => Err(VmError::Runtime(format!(
-            "{builtin}: argument `{name}` must be a list, got {}",
-            other.type_name()
-        ))),
-        None => Err(VmError::Runtime(format!(
-            "{builtin}: missing required list argument `{name}`"
-        ))),
-    }
+    Args::runtime(builtin, args).list(index, name)
 }
 
 fn require_invariant(
@@ -930,33 +922,28 @@ impl FlowFeedbackOptions {
     }
 }
 
-fn feedback_bool_option(opts: &crate::value::DictMap, key: &str) -> Result<Option<bool>, VmError> {
-    match opts.get(key) {
-        None | Some(VmValue::Nil) => Ok(None),
-        Some(VmValue::Bool(value)) => Ok(Some(*value)),
-        Some(other) => Err(VmError::Runtime(format!(
-            "flow_invariant_feedback: option `{key}` must be bool, got {}",
-            other.type_name()
-        ))),
-    }
+fn feedback_bool_option(
+    opts: &crate::value::DictMap,
+    key: &'static str,
+) -> Result<Option<bool>, VmError> {
+    Args::runtime_options("flow_invariant_feedback", Some(opts)).opt_bool(key)
 }
 
 fn feedback_usize_option(
     opts: &crate::value::DictMap,
-    key: &str,
+    key: &'static str,
     default: usize,
     hard_max: usize,
 ) -> Result<usize, VmError> {
-    match opts.get(key) {
-        None | Some(VmValue::Nil) => Ok(default),
-        Some(VmValue::Int(value)) if *value > 0 => Ok((*value as usize).min(hard_max)),
-        Some(VmValue::Int(value)) => Err(VmError::Runtime(format!(
-            "flow_invariant_feedback: option `{key}` must be > 0, got {value}"
-        ))),
-        Some(other) => Err(VmError::Runtime(format!(
-            "flow_invariant_feedback: option `{key}` must be an int, got {}",
-            other.type_name()
-        ))),
+    match Args::runtime_options("flow_invariant_feedback", Some(opts)).opt_int(key)? {
+        None => Ok(default),
+        Some(value) if value > 0 => Ok((value as usize).min(hard_max)),
+        Some(value) => Err(ArgError::constraint(
+            "flow_invariant_feedback",
+            ErrorKind::Runtime,
+            key,
+            format_args!("must be > 0; got {value}"),
+        )),
     }
 }
 

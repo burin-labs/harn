@@ -4,6 +4,7 @@ use base64::Engine;
 use cookie::time::{Duration, OffsetDateTime};
 use cookie::{Cookie, CookieJar, Key, SameSite};
 
+use crate::stdlib::args::{Args, ErrorKind, Options};
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
@@ -33,64 +34,25 @@ fn nil() -> VmValue {
 }
 
 fn require_args(args: &[VmValue], count: usize, name: &str) -> Result<(), VmError> {
-    if args.len() < count {
-        return Err(cookie_error(format!("{name} requires {count} arguments")));
-    }
-    Ok(())
+    Args::thrown(name, args).min_arity(count)
 }
 
 fn option_map<'a>(
     args: &'a [VmValue],
     index: usize,
-    name: &str,
+    name: &'a str,
 ) -> Result<Option<&'a crate::value::DictMap>, VmError> {
-    match args.get(index) {
-        Some(VmValue::Dict(map)) => Ok(Some(map)),
-        Some(VmValue::Nil) | None => Ok(None),
-        Some(other) => Err(cookie_error(format!(
-            "{name}: options must be a dict, got {}",
-            other.type_name()
-        ))),
-    }
+    Args::thrown(name, args).opt_dict(index, "options")
 }
 
-fn option_value<'a>(
-    options: Option<&'a crate::value::DictMap>,
-    names: &[&str],
-) -> Option<&'a VmValue> {
-    let options = options?;
-    for name in names {
-        if let Some(value) = options.get(*name) {
-            return Some(value);
-        }
-    }
-    None
-}
-
-fn option_bool(options: Option<&crate::value::DictMap>, names: &[&str], default: bool) -> bool {
-    option_value(options, names).map_or(default, VmValue::is_truthy)
-}
-
-fn option_string(options: Option<&crate::value::DictMap>, names: &[&str]) -> Option<String> {
-    option_value(options, names).and_then(|value| match value {
-        VmValue::Nil => None,
-        other => Some(other.display()),
-    })
-}
-
-fn option_i64(
-    options: Option<&crate::value::DictMap>,
-    names: &[&str],
-) -> Result<Option<i64>, VmError> {
-    match option_value(options, names) {
-        Some(VmValue::Int(value)) => Ok(Some(*value)),
-        Some(VmValue::Nil) | None => Ok(None),
-        Some(other) => Err(cookie_error(format!(
-            "option {} must be an int, got {}",
-            names[0],
-            other.type_name()
-        ))),
-    }
+/// Cookie attributes are spelled either the Harn way (`http_only`) or the
+/// header way (`HttpOnly`), so each attribute declares its alternatives.
+///
+/// These used to read `secure` through `is_truthy` and everything else
+/// through `display()`, which meant `{ secure: "false" }` set the flag and a
+/// dict passed as `path` became its own rendering.
+fn cookie_options(options: Option<&crate::value::DictMap>) -> Options<'static, '_> {
+    Options::new("cookie", ErrorKind::Thrown, options)
 }
 
 fn parse_same_site(raw: &str) -> Result<SameSite, VmError> {
@@ -321,8 +283,11 @@ fn serialize_cookie_with_defaults(
         ));
     }
 
-    let path =
-        option_string(options, &["path", "Path"]).or_else(|| defaults.path.map(str::to_string));
+    let mut reader = cookie_options(options);
+    let path = reader
+        .opt_string_any(&["path", "Path"])?
+        .map(str::to_string)
+        .or_else(|| defaults.path.map(str::to_string));
     if let Some(path) = path {
         if !valid_attribute_value(&path) {
             return Err(cookie_error("Path contains forbidden characters"));
@@ -330,20 +295,22 @@ fn serialize_cookie_with_defaults(
         cookie.set_path(path);
     }
 
-    if let Some(domain) = option_string(options, &["domain", "Domain"]) {
-        if !valid_attribute_value(&domain) {
+    if let Some(domain) = reader.opt_string_any(&["domain", "Domain"])? {
+        if !valid_attribute_value(domain) {
             return Err(cookie_error("Domain contains forbidden characters"));
         }
-        cookie.set_domain(domain);
+        cookie.set_domain(domain.to_string());
     }
 
-    if let Some(max_age) = option_i64(options, &["max_age", "Max-Age", "maxAge"])? {
+    if let Some(max_age) = reader.opt_int_any(&["max_age", "Max-Age", "maxAge"])? {
         cookie.set_max_age(Duration::seconds(max_age));
     } else if let Some(max_age) = defaults.max_age {
         cookie.set_max_age(Duration::seconds(max_age));
     }
 
-    let expires = option_string(options, &["expires", "Expires"])
+    let expires = reader
+        .opt_string_any(&["expires", "Expires"])?
+        .map(str::to_string)
         .or_else(|| defaults.expires.map(str::to_string));
     if let Some(expires) = expires {
         let parsed = Cookie::parse(format!("harn={}; Expires={expires}", cookie.value()))
@@ -354,13 +321,15 @@ fn serialize_cookie_with_defaults(
         cookie.set_expires(expires);
     }
 
-    let http_only = option_bool(
-        options,
-        &["http_only", "HttpOnly", "httponly"],
-        defaults.http_only,
-    );
-    let mut secure = option_bool(options, &["secure", "Secure"], defaults.secure);
-    let same_site = option_string(options, &["same_site", "SameSite", "sameSite"])
+    let http_only = reader
+        .opt_bool_any(&["http_only", "HttpOnly", "httponly"])?
+        .unwrap_or(defaults.http_only);
+    let mut secure = reader
+        .opt_bool_any(&["secure", "Secure"])?
+        .unwrap_or(defaults.secure);
+    let same_site = reader
+        .opt_string_any(&["same_site", "SameSite", "sameSite"])?
+        .map(str::to_string)
         .or_else(|| defaults.same_site.map(str::to_string));
     let same_site = same_site.as_deref().map(parse_same_site).transpose()?;
     if same_site == Some(SameSite::None) {

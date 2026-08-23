@@ -8,6 +8,7 @@ use chrono::{
 };
 use chrono_tz::Tz;
 
+use crate::stdlib::args::{ArgError, Args, ErrorKind};
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
@@ -964,36 +965,30 @@ fn naive_datetime_from_parts(
 
 fn required_i64_field(
     parts: &crate::value::DictMap,
-    field: &str,
+    field: &'static str,
     builtin: &str,
 ) -> Result<i64, VmError> {
-    numeric_i64_field(parts.get(field), field, builtin)
-        .and_then(|value| value.ok_or_else(|| vm_error(format!("{builtin}: missing {field}"))))
+    numeric_i64_field(parts, field, builtin)?
+        .ok_or_else(|| ArgError::required(builtin, ErrorKind::Runtime, field))
 }
 
 fn optional_i64_field(
     parts: &crate::value::DictMap,
-    field: &str,
+    field: &'static str,
     default: i64,
     builtin: &str,
 ) -> Result<i64, VmError> {
-    numeric_i64_field(parts.get(field), field, builtin).map(|value| value.unwrap_or(default))
+    Ok(numeric_i64_field(parts, field, builtin)?.unwrap_or(default))
 }
 
+/// Date parts arrive as dicts, often decoded from JSON, so a whole-valued
+/// float stands in for an int here.
 fn numeric_i64_field(
-    value: Option<&VmValue>,
-    field: &str,
+    parts: &crate::value::DictMap,
+    field: &'static str,
     builtin: &str,
 ) -> Result<Option<i64>, VmError> {
-    match value {
-        Some(VmValue::Int(value)) => Ok(Some(*value)),
-        Some(VmValue::Float(value)) if value.fract() == 0.0 => Ok(Some(*value as i64)),
-        Some(other) => Err(vm_error(format!(
-            "{builtin}: {field} must be an int, got {}",
-            other.type_name()
-        ))),
-        None => Ok(None),
-    }
+    Args::runtime_options(builtin, Some(parts)).opt_whole_int(field)
 }
 
 fn quarter_for_month(month: u32) -> u32 {
@@ -1486,29 +1481,32 @@ fn timezone_arg(
     }
 }
 
+const CALENDAR_UNITS: &[&str] = &[
+    "day", "days", "week", "weeks", "month", "months", "quarter", "quarters", "year", "years",
+];
+
 fn calendar_unit_arg(value: Option<&VmValue>, builtin: &str) -> Result<CalendarUnit, VmError> {
-    let raw = string_arg(value, "", builtin, "unit")?;
-    match raw.as_str() {
-        "day" | "days" => Ok(CalendarUnit::Day),
-        "week" | "weeks" => Ok(CalendarUnit::Week),
-        "month" | "months" => Ok(CalendarUnit::Month),
-        "quarter" | "quarters" => Ok(CalendarUnit::Quarter),
-        "year" | "years" => Ok(CalendarUnit::Year),
-        _ => Err(vm_error(format!(
-            "{builtin}: unit must be day, week, month, quarter, or year"
-        ))),
-    }
+    let unit = one(builtin, value).enum_string(0, "unit", CALENDAR_UNITS)?;
+    Ok(match unit {
+        "day" | "days" => CalendarUnit::Day,
+        "week" | "weeks" => CalendarUnit::Week,
+        "month" | "months" => CalendarUnit::Month,
+        "quarter" | "quarters" => CalendarUnit::Quarter,
+        _ => CalendarUnit::Year,
+    })
 }
 
 fn boundary_edge_arg(value: Option<&VmValue>, builtin: &str) -> Result<BoundaryEdge, VmError> {
-    let raw = string_arg(value, "start", builtin, "edge")?;
-    match raw.as_str() {
-        "start" => Ok(BoundaryEdge::Start),
-        "end" => Ok(BoundaryEdge::End),
-        _ => Err(vm_error(format!(
-            "{builtin}: edge must be 'start' or 'end'"
-        ))),
+    let value = value.filter(|value| !matches!(value, VmValue::Nil));
+    if value.is_none() {
+        return Ok(BoundaryEdge::Start);
     }
+    Ok(
+        match one(builtin, value).enum_string(0, "edge", &["start", "end"])? {
+            "end" => BoundaryEdge::End,
+            _ => BoundaryEdge::Start,
+        },
+    )
 }
 
 fn disambiguation_arg(
@@ -1590,45 +1588,37 @@ fn holiday_calendar_name_arg(
     }
 }
 
+/// One calendar argument, read through the shared contract. Calendar values
+/// arrive both positionally and out of option dicts, so the readers below
+/// take the value rather than the whole argument slice.
+fn one<'name, 'a>(builtin: &'name str, value: Option<&'a VmValue>) -> Args<'name, 'a> {
+    Args::single(builtin, ErrorKind::Runtime, value)
+}
+
 fn string_arg(
     value: Option<&VmValue>,
     default: &str,
     builtin: &str,
     label: &str,
 ) -> Result<String, VmError> {
-    match value {
-        Some(VmValue::Nil) | None if !default.is_empty() => Ok(default.to_string()),
-        Some(VmValue::Nil) | None => Err(vm_error(format!("{builtin}: missing {label}"))),
-        Some(value) => Ok(value.display()),
+    let value = value.filter(|value| !matches!(value, VmValue::Nil));
+    if value.is_none() && !default.is_empty() {
+        return Ok(default.to_string());
     }
+    one(builtin, value).string(0, label).map(str::to_string)
 }
 
 fn int_arg(value: Option<&VmValue>, builtin: &str, label: &str) -> Result<i64, VmError> {
-    match value {
-        Some(VmValue::Int(value)) => Ok(*value),
-        Some(VmValue::Float(value)) if value.fract() == 0.0 => Ok(*value as i64),
-        Some(other) => Err(vm_error(format!(
-            "{builtin}: {label} must be an int, got {}",
-            other.type_name()
-        ))),
-        None => Err(vm_error(format!("{builtin}: missing {label}"))),
-    }
+    one(builtin, value).whole_int(0, label)
 }
 
 fn usize_arg(value: Option<&VmValue>, builtin: &str, label: &str) -> Result<usize, VmError> {
-    let value = int_arg(value, builtin, label)?;
-    usize::try_from(value).map_err(|_| vm_error(format!("{builtin}: {label} must be non-negative")))
+    usize::try_from(int_arg(value, builtin, label)?)
+        .map_err(|_| ArgError::constraint(builtin, ErrorKind::Runtime, label, "must be >= 0"))
 }
 
 fn bool_arg(value: Option<&VmValue>, builtin: &str, label: &str) -> Result<Option<bool>, VmError> {
-    match value {
-        Some(VmValue::Bool(value)) => Ok(Some(*value)),
-        Some(VmValue::Nil) | None => Ok(None),
-        Some(other) => Err(vm_error(format!(
-            "{builtin}: {label} must be a bool, got {}",
-            other.type_name()
-        ))),
-    }
+    one(builtin, value).opt_bool(0, label)
 }
 
 fn string_list_value<'a>(items: impl IntoIterator<Item = &'a str>) -> VmValue {

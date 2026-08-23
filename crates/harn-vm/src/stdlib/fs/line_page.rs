@@ -114,7 +114,7 @@ fn parse_options(args: &[VmValue]) -> Result<PageOptions, VmValue> {
         Some(value) => value
             .as_int()
             .and_then(|value| u64::try_from(value).ok())
-            .ok_or_else(|| invalid("offset must be a non-negative integer"))?,
+            .ok_or_else(|| invalid("offset must be a non-negative int"))?,
         None => 0,
     };
     let line = match values.get("line") {
@@ -122,7 +122,7 @@ fn parse_options(args: &[VmValue]) -> Result<PageOptions, VmValue> {
             .as_int()
             .and_then(|value| u64::try_from(value).ok())
             .filter(|value| *value > 0)
-            .ok_or_else(|| invalid("line must be a positive integer"))?,
+            .ok_or_else(|| invalid("line must be a positive int"))?,
         None => 1,
     };
     Ok(PageOptions {
@@ -138,14 +138,14 @@ fn non_negative_int(values: &crate::value::DictMap, key: &str) -> Result<u64, Vm
         .get(key)
         .and_then(VmValue::as_int)
         .and_then(|value| u64::try_from(value).ok())
-        .ok_or_else(|| invalid(format!("{key} must be a non-negative integer")))
+        .ok_or_else(|| invalid(format!("{key} must be a non-negative int")))
 }
 
 fn positive_int(values: &crate::value::DictMap, key: &str) -> Result<u64, VmValue> {
     non_negative_int(values, key).and_then(|value| {
         (value > 0)
             .then_some(value)
-            .ok_or_else(|| invalid(format!("{key} must be a positive integer")))
+            .ok_or_else(|| invalid(format!("{key} must be a positive int")))
     })
 }
 
