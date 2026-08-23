@@ -1887,9 +1887,18 @@ jobs:
     if: >-
       needs.changes.outputs.docs_checks == 'true'
       && needs.changes.outputs.rust != 'true'
+      && needs.changes.outputs.merge_group_proven != 'true'
     # Docs-only changes use the pinned, checksum-verified release instead of
     # compiling Harn. Source changes still run this exact Make target in the
     # heavy audit lane with a binary built from the candidate commit.
+    #
+    # `merge_group_proven` has to be excluded explicitly. On a push whose exact
+    # SHA already passed on merge_group, the `force` step reports `rust=false`
+    # to suppress the duplicate heavy lanes; that output answers "should the
+    # heavy lanes run", not "did Rust change". Without this clause a source
+    # change reads as docs-only on that push and runs here against a released
+    # binary older than the commit — the substitution the note above rules out,
+    # on the one event where the exact-commit lane has already proven the tree.
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -2301,7 +2310,13 @@ jobs:
           docs_checks_expected="${{ needs.changes.outputs.docs_checks }}"
           rust_expected="${{ needs.changes.outputs.rust }}"
           echo "Documentation checks: $docs_checks_result"
-          if [ "$docs_checks_expected" = "true" ] && [ "$rust_expected" != "true" ]; then
+          # Same predicate as the job's own `if`, including the
+          # `merge_group_proven` clause. `rust_expected` is false on a
+          # proof-reusing push even when the commit changed Rust, so without
+          # that clause this branch would demand a success from a job the same
+          # condition just told to skip.
+          if [ "$docs_checks_expected" = "true" ] && [ "$rust_expected" != "true" ] \
+            && [ "$merge_group_proven" != "true" ]; then
             if [ "$docs_checks_result" != "success" ]; then
               echo "::error::Documentation checks failed or skipped for a docs-only change."
               exit 1
