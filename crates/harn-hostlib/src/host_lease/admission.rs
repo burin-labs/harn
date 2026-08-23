@@ -58,6 +58,58 @@ impl HostLeaseStore {
         Ok(())
     }
 
+    /// Point an active lease's liveness at a new live local process.
+    ///
+    /// Supervised Cargo acquires as the worker wrapper, then transfers
+    /// ownership to the workload PID so crash recovery tracks Cargo rather
+    /// than the wrapper that is waiting on it.
+    pub fn rebind_owner_pid(
+        &self,
+        host: &str,
+        resource_class: HostLeaseResourceClass,
+        domain: &str,
+        lease_id: &str,
+        owner_pid: u32,
+    ) -> Result<HostLeaseHandle, HostLeaseError> {
+        let resource = HostLeaseResourceKey::normalize(host, resource_class, domain)?;
+        let lease_id = normalize_component("lease_id", lease_id)?;
+        let owner_process_identity = match self.process_inspector.observe(owner_pid) {
+            ProcessObservation::Alive { identity } => identity,
+            ProcessObservation::Dead => {
+                return Err(HostLeaseError::InvalidRequest(
+                    "rebind owner_pid is not a live local process".to_string(),
+                ));
+            }
+            ProcessObservation::Unknown => {
+                return Err(HostLeaseError::InvalidRequest(
+                    "rebind owner_pid liveness could not be verified".to_string(),
+                ));
+            }
+        };
+        let mut conn = self.connection(SQLITE_MUTATION_BUSY_TIMEOUT)?;
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let now = unix_now_ms()?;
+        let (active, _) = active_handle(
+            &tx,
+            &resource.machine,
+            resource.resource_class,
+            &resource.domain,
+            now,
+            self.process_inspector.as_ref(),
+        )?;
+        let Some(mut handle) = active.filter(|handle| handle.lease_id == lease_id) else {
+            return Err(HostLeaseError::InvalidRequest(
+                "rebind requires the active lease token".to_string(),
+            ));
+        };
+        handle.updated_at_ms = now;
+        handle.owner_pid = Some(owner_pid);
+        handle.owner_process_identity = Some(owner_process_identity);
+        write_handle(&tx, &handle)?;
+        tx.commit()?;
+        Ok(handle)
+    }
+
     pub(super) fn try_acquire_once(
         &self,
         request: HostLeaseRequest,
