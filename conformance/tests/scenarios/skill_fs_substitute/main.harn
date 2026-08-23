@@ -22,5 +22,11 @@ pipeline test(harness: Harness, task) {
   // Accepts a raw string body too — handy for quick templating.
   const raw = harness.agent.skill_render("hi $1!", ["world"])
   assert(raw == "hi world!", "string body works")
+  const with_session = harness.agent.skill_render(
+    r"Session: ${HARN_SESSION_ID}",
+    [],
+    {session_id: "sess-render"},
+  )
+  assert(with_session == "Session: sess-render", "explicit session_id substitutes")
   harness.stdio.log("skill_fs_substitute passed")
 }
