@@ -35,6 +35,18 @@
 //!
 //! Accessors borrow from the argument slice instead of allocating, so the
 //! success path of a builtin costs no `String` per argument.
+//!
+//! The vocabulary is deliberately complete: a reader exists for every shape a
+//! builtin may demand, independent of which builtin families a given build
+//! compiles. A feature-sliced build (`default-features = false`, as
+//! `harn-lsp` and other focused embedders take it) drops the builtins behind
+//! `content`, `sqlite`, and the rest, and the readers only those builtins
+//! call then have no caller — the contract working as designed, not rot.
+//! Gating each reader on its callers' feature families would couple this
+//! module to every slice and break again on the next one, so `dead_code` is
+//! silenced outside `full` instead. A `full` build still lints normally, so a
+//! reader that no builtin calls in any configuration is still a hard error.
+#![cfg_attr(not(feature = "full"), allow(dead_code))]
 
 mod options;
 mod tag;
