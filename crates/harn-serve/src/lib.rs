@@ -88,7 +88,7 @@ pub use error::{forbidden_data_payload, forbidden_message, DispatchError};
 pub use exports::{
     emit_export_diagnostics, ExportCatalog, ExportDiagnostic, ExportedCallableKind,
     ExportedFunction, ExportedParam, JobSpec, RetryBackoff, RetrySpec, RoutePolicy, RouteSpec,
-    ScheduleSpec,
+    ScheduleSpec, ToolAnnotations,
 };
 /// Install the process-lifetime shared Postgres pool registry.
 ///

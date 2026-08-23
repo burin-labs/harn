@@ -7,7 +7,18 @@ use harn_parser::{Attribute, AttributeArg, Node, TypeExpr};
 use crate::limits::{limits_and_budget_from_attributes, BudgetSpec, RouteLimits};
 use crate::DispatchError;
 
+mod diagnostics;
+mod mcp_metadata;
 mod schema_projection;
+
+pub use diagnostics::{
+    emit_export_diagnostics, ExportDiagnostic, ANNOTATIONS_BAD_ARGS, JOB_BAD_NAME,
+    JOB_MODIFIER_WITHOUT_JOB, POLICY_BAD_ARGS, QUEUE_BAD_NAME, RAW_BAD_ARGS,
+    RAW_CONFLICTS_WITH_STREAM, RAW_WITHOUT_ROUTE, RETRY_BAD_ARGS, ROUTE_ARG_NOT_STRING,
+    ROUTE_BAD_ARITY, SCHEDULE_BAD_ARGS, SCOPES_ARG_NOT_STRING, STREAM_BAD_ARGS,
+    STREAM_WITHOUT_ROUTE, WS_BAD_ARGS, WS_CONFLICTS_WITH_STREAM_OR_RAW, WS_WITHOUT_ROUTE,
+};
+pub use mcp_metadata::ToolAnnotations;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ExportedParam {
@@ -233,83 +244,6 @@ pub struct JobSpec {
     pub retry: Option<RetrySpec>,
 }
 
-/// Behavior hints declared with `@annotations(...)`, in MCP's vocabulary.
-///
-/// Every field is optional and stays `None` unless the script says. An omitted
-/// hint is not the same as a false one: MCP defines its own defaults for a
-/// missing hint (a tool is assumed destructive and open-world), and asserting
-/// otherwise on a script's behalf would be a safety claim nobody made.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct ToolAnnotations {
-    /// The tool does not modify its environment.
-    pub read_only: Option<bool>,
-    /// The tool may perform destructive updates. Meaningful only when the tool
-    /// is not read-only.
-    pub destructive: Option<bool>,
-    /// Repeated calls with the same arguments have no additional effect.
-    pub idempotent: Option<bool>,
-    /// The tool interacts with entities outside its own closed world.
-    pub open_world: Option<bool>,
-}
-
-impl ToolAnnotations {
-    fn is_empty(self) -> bool {
-        self == Self::default()
-    }
-}
-
-/// Read `@annotations(readOnly: true, idempotent: true, openWorld: false)`.
-///
-/// Named-argument spellings are camelCase to match the wire field they become
-/// (`readOnlyHint`), so an author writing the attribute and an author reading
-/// the protocol see the same word.
-fn annotations_from_attributes(
-    attrs: &[Attribute],
-    fn_name: &str,
-    diagnostics: &mut Vec<ExportDiagnostic>,
-) -> Option<ToolAnnotations> {
-    let attr = attrs.iter().find(|attr| attr.name == "annotations")?;
-    let mut annotations = ToolAnnotations::default();
-    for arg in &attr.args {
-        let Some(key) = arg.name.as_deref() else {
-            diagnostics.push(ExportDiagnostic {
-                code: ANNOTATIONS_BAD_ARGS,
-                line: arg.span.line,
-                message: format!(
-                    "`@annotations` on `{fn_name}` takes named boolean arguments \
-                     (`@annotations(readOnly: true)`); positional argument ignored"
-                ),
-            });
-            continue;
-        };
-        let Node::BoolLiteral(value) = arg.value.node else {
-            diagnostics.push(ExportDiagnostic {
-                code: ANNOTATIONS_BAD_ARGS,
-                line: arg.span.line,
-                message: format!(
-                    "`@annotations({key}:)` on `{fn_name}` requires a boolean literal; hint ignored"
-                ),
-            });
-            continue;
-        };
-        match key {
-            "readOnly" => annotations.read_only = Some(value),
-            "destructive" => annotations.destructive = Some(value),
-            "idempotent" => annotations.idempotent = Some(value),
-            "openWorld" => annotations.open_world = Some(value),
-            _ => diagnostics.push(ExportDiagnostic {
-                code: ANNOTATIONS_BAD_ARGS,
-                line: arg.span.line,
-                message: format!(
-                    "`@annotations` on `{fn_name}` does not define `{key}`; expected one of \
-                     `readOnly`, `destructive`, `idempotent`, `openWorld`. Hint ignored"
-                ),
-            }),
-        }
-    }
-    (!annotations.is_empty()).then_some(annotations)
-}
-
 /// Cron schedule declared via `@schedule("expr", "tz")`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ScheduleSpec {
@@ -359,112 +293,6 @@ pub struct RouteSpec {
     pub path: String,
 }
 
-/// A `HARN-SRV-*` diagnostic raised while building the export catalog.
-///
-/// These flag the malformed `@route(...)` / `@scopes(...)` attribute
-/// forms that the collector would otherwise drop silently — leaving a
-/// handler mis-routed, unmounted, or less scope-restricted than the
-/// author intended. They are surfaced by the serve adapters at startup
-/// (see [`emit_export_diagnostics`]) rather than aborting catalog
-/// construction, so one bad attribute doesn't take down a script whose
-/// other handlers are fine.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ExportDiagnostic {
-    /// Stable code so log scanners and editors can key on the condition.
-    pub code: &'static str,
-    /// 1-based source line of the offending attribute (0 when unknown).
-    pub line: usize,
-    pub message: String,
-}
-
-/// `@route` carries an argument that is not a string literal, so the
-/// method/path positions are ambiguous and the handler is not mounted.
-pub const ROUTE_ARG_NOT_STRING: &str = "HARN-SRV-001";
-/// `@route` has the wrong number of arguments — it takes a path, or a
-/// method and a path. The handler is not mounted.
-pub const ROUTE_BAD_ARITY: &str = "HARN-SRV-002";
-/// `@scopes` carries an argument that is not a string literal; that
-/// scope requirement is dropped, leaving the route less restricted.
-pub const SCOPES_ARG_NOT_STRING: &str = "HARN-SRV-003";
-/// `@job` carries a non-string name, or more than one positional
-/// argument. The function is not registered as a job.
-pub const JOB_BAD_NAME: &str = "HARN-SRV-004";
-/// `@schedule` is malformed — it takes a cron expression and an optional
-/// timezone, both string literals. The schedule is dropped.
-pub const SCHEDULE_BAD_ARGS: &str = "HARN-SRV-005";
-/// `@queue` carries a non-string queue name, or the wrong number of
-/// arguments. The queue binding is dropped.
-pub const QUEUE_BAD_NAME: &str = "HARN-SRV-006";
-/// `@retry(max:, backoff:)` carries an unrecognised argument shape — a
-/// positional argument, non-integer `max`, or an unknown `backoff`
-/// keyword. The offending field is dropped (the rest of the policy still
-/// applies).
-pub const RETRY_BAD_ARGS: &str = "HARN-SRV-007";
-/// `@schedule` / `@queue` / `@retry` appears without a `@job` attribute.
-/// Those modifiers only mean something on a job, so they are ignored.
-pub const JOB_MODIFIER_WITHOUT_JOB: &str = "HARN-SRV-008";
-/// `@stream` carries arguments — it is a bare marker. The marker is
-/// dropped, so the route dispatches into the VM like any other handler.
-pub const STREAM_BAD_ARGS: &str = "HARN-SRV-009";
-/// `@stream` appears on a declaration without an HTTP route (no
-/// `@route(...)`, no `handler_*` convention, or a pipeline). Streaming
-/// only means something on a routed `pub fn`, so it is ignored.
-pub const STREAM_WITHOUT_ROUTE: &str = "HARN-SRV-010";
-/// `@raw` carries arguments — it is a bare marker. The marker is
-/// dropped, so the route dispatches into the VM like any other handler.
-pub const RAW_BAD_ARGS: &str = "HARN-SRV-011";
-/// `@raw` appears on a declaration without an HTTP route. Raw-body
-/// hand-off only means something on a routed `pub fn`, so it is ignored.
-pub const RAW_WITHOUT_ROUTE: &str = "HARN-SRV-012";
-/// `@raw` and `@stream` appear on the same declaration. They contradict
-/// on body handling (`@stream` never reads the request body, `@raw`
-/// buffers it for the provider), so `@raw` is dropped and the route
-/// behaves as `@stream`.
-pub const RAW_CONFLICTS_WITH_STREAM: &str = "HARN-SRV-013";
-/// `@ws` carries arguments — it is a bare marker. The marker is dropped,
-/// so the route dispatches into the VM like any other handler.
-pub const WS_BAD_ARGS: &str = "HARN-SRV-014";
-/// `@ws` appears on a declaration without an HTTP route. A WebSocket
-/// upgrade only means something on a routed `pub fn`, so it is ignored.
-pub const WS_WITHOUT_ROUTE: &str = "HARN-SRV-015";
-/// `@ws` and `@raw` appear on the same declaration. A WebSocket
-/// handshake carries no request body, but `@raw` exists to buffer one, so
-/// they contradict; `@ws` is dropped and the route behaves as `@raw`.
-/// (`@ws` + `@stream` is *not* a conflict — it is the combined route that
-/// upgrades a genuine handshake and falls through to the stream otherwise.)
-pub const WS_CONFLICTS_WITH_STREAM_OR_RAW: &str = "HARN-SRV-016";
-/// `@policy(...)` carries an argument that is not the supported
-/// `kinds: "..."` string form (an unknown key, a positional argument, or a
-/// non-string value). The offending argument is dropped, leaving the
-/// route's principal-kind guard incomplete; any host-side defense-in-depth
-/// check still applies.
-pub const POLICY_BAD_ARGS: &str = "HARN-SRV-017";
-/// `@annotations(...)` carries something other than named boolean arguments, or
-/// names a hint MCP does not define. The offending hint is dropped; the rest of
-/// the declaration still applies.
-pub const ANNOTATIONS_BAD_ARGS: &str = "HARN-SRV-018";
-
-impl std::fmt::Display for ExportDiagnostic {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if self.line > 0 {
-            write!(f, "{}: {} (line {})", self.code, self.message, self.line)
-        } else {
-            write!(f, "{}: {}", self.code, self.message)
-        }
-    }
-}
-
-/// Print catalog diagnostics to stderr at server startup, matching the
-/// `[harn] …` banner the adapters already emit. Standalone serve
-/// commands call this so authors see malformed attributes immediately;
-/// embedders that build a router directly can read
-/// [`ExportCatalog::diagnostics`] and render them in their own UI.
-pub fn emit_export_diagnostics(diagnostics: &[ExportDiagnostic]) {
-    for diagnostic in diagnostics {
-        eprintln!("[harn] warning: {diagnostic}");
-    }
-}
-
 #[derive(Clone, Debug)]
 pub struct ExportCatalog {
     pub script_path: PathBuf,
@@ -476,105 +304,6 @@ pub struct ExportCatalog {
     /// Non-fatal `HARN-SRV-*` diagnostics gathered while collecting the
     /// route/scope attributes. Empty for a well-formed script.
     pub diagnostics: Vec<ExportDiagnostic>,
-}
-
-/// Strip the comment markers off one doc-comment body.
-fn doc_line_text(line: &str) -> Option<&str> {
-    let trimmed = line.trim();
-    if trimmed == "*/" || trimmed == "/**" {
-        return Some("");
-    }
-    for prefix in ["///", "/**", "*"] {
-        if let Some(rest) = trimmed.strip_prefix(prefix) {
-            let rest = rest.strip_suffix("*/").unwrap_or(rest);
-            return Some(rest.trim());
-        }
-    }
-    None
-}
-
-/// The doc comment immediately above the declaration starting at `decl_line`.
-///
-/// Anchored on the parser's own span rather than matched out of the file, so a
-/// `pub fn` mentioned inside a string or a nested block cannot pick up the
-/// wrong comment. Attribute lines sit between the comment and the declaration
-/// and are skipped; a blank line between them ends the association, because a
-/// comment separated from a declaration is a comment about something else.
-fn doc_comment_above(lines: &[&str], decl_line: usize) -> Option<String> {
-    if decl_line == 0 {
-        return None;
-    }
-    let mut index = decl_line - 1;
-    while index > 0 {
-        let trimmed = lines[index - 1].trim();
-        if trimmed.starts_with('@') {
-            index -= 1;
-            continue;
-        }
-        break;
-    }
-    let mut body: Vec<String> = Vec::new();
-    while index > 0 {
-        let Some(text) = doc_line_text(lines[index - 1]) else {
-            break;
-        };
-        body.push(text.to_string());
-        let opened_block = lines[index - 1].trim().starts_with("/**");
-        index -= 1;
-        if opened_block {
-            break;
-        }
-    }
-    body.reverse();
-    let joined = body.join("\n");
-    let trimmed = joined.trim();
-    (!trimmed.is_empty()).then(|| trimmed.to_string())
-}
-
-/// The script's own leading doc comment, if it opens with one.
-///
-/// Only a comment before every declaration counts: this becomes the server's
-/// `instructions`, and a comment that actually belongs to the first function
-/// would describe one tool while claiming to describe the server.
-fn module_doc_comment(lines: &[&str]) -> Option<String> {
-    let mut body: Vec<String> = Vec::new();
-    let mut started = false;
-    for line in lines {
-        let trimmed = line.trim();
-        if !started {
-            if trimmed.is_empty() || trimmed.starts_with("#!") {
-                continue;
-            }
-            if !trimmed.starts_with("/**") && !trimmed.starts_with("///") {
-                return None;
-            }
-            started = true;
-        }
-        match doc_line_text(line) {
-            Some(text) => body.push(text.to_string()),
-            None => break,
-        }
-        if trimmed.ends_with("*/") && trimmed != "/**" {
-            break;
-        }
-    }
-    let joined = body.join("\n");
-    let trimmed = joined.trim();
-    (!trimmed.is_empty()).then(|| trimmed.to_string())
-}
-
-/// Split a doc comment into a short title (first line) and the full body.
-fn title_and_description(doc: Option<String>) -> (Option<String>, Option<String>) {
-    let Some(doc) = doc else {
-        return (None, None);
-    };
-    let first = doc.lines().next().unwrap_or("").trim();
-    let title = if !first.is_empty() && first.chars().count() <= 80 {
-        Some(first.to_string())
-    } else {
-        None
-    };
-    (title, Some(doc))
 }
 
 impl ExportCatalog {
@@ -617,8 +346,9 @@ impl ExportCatalog {
             let raw = raw_from_attributes(attrs, name, route.as_ref(), stream, &mut diagnostics);
             let ws = ws_from_attributes(attrs, name, route.as_ref(), raw, &mut diagnostics);
             let public_params = schema_projection::public_params(params);
-            let (title, description) =
-                title_and_description(doc_comment_above(&source_lines, inner.span.line));
+            let (title, description) = mcp_metadata::title_and_description(
+                mcp_metadata::doc_comment_above(&source_lines, inner.span.line),
+            );
             functions.insert(
                 name.clone(),
                 ExportedFunction {
@@ -626,7 +356,11 @@ impl ExportCatalog {
                     kind: ExportedCallableKind::Function,
                     title,
                     description,
-                    annotations: annotations_from_attributes(attrs, name, &mut diagnostics),
+                    annotations: mcp_metadata::annotations_from_attributes(
+                        attrs,
+                        name,
+                        &mut diagnostics,
+                    ),
                     params: schema_projection::exported_params(public_params, &schema_resolver),
                     return_type: return_type.clone(),
                     input_schema: schema_resolver.json_schema_for_typed_params(public_params),
@@ -672,8 +406,9 @@ impl ExportCatalog {
             let raw = raw_from_attributes(attrs, name, None, stream, &mut diagnostics);
             let ws = ws_from_attributes(attrs, name, None, raw, &mut diagnostics);
             let public_params = schema_projection::public_params(params);
-            let (title, description) =
-                title_and_description(doc_comment_above(&source_lines, inner.span.line));
+            let (title, description) = mcp_metadata::title_and_description(
+                mcp_metadata::doc_comment_above(&source_lines, inner.span.line),
+            );
             functions
                 .entry(name.clone())
                 .or_insert_with(|| ExportedFunction {
@@ -681,7 +416,11 @@ impl ExportCatalog {
                     kind: ExportedCallableKind::Pipeline,
                     title,
                     description,
-                    annotations: annotations_from_attributes(attrs, name, &mut diagnostics),
+                    annotations: mcp_metadata::annotations_from_attributes(
+                        attrs,
+                        name,
+                        &mut diagnostics,
+                    ),
                     params: schema_projection::exported_params(public_params, &schema_resolver),
                     return_type: return_type.clone(),
                     input_schema: schema_resolver.json_schema_for_typed_params(public_params),
@@ -707,7 +446,7 @@ impl ExportCatalog {
         Ok(Self {
             script_path: path.to_path_buf(),
             functions,
-            instructions: module_doc_comment(&source_lines),
+            instructions: mcp_metadata::module_doc_comment(&source_lines),
             diagnostics,
         })
     }
@@ -2278,68 +2017,6 @@ pub fn both(req: dict) -> dict { return http_ok({}) }
             codes.is_empty(),
             "combined @ws @stream must not be diagnosed, got {codes:?}"
         );
-    }
-
-    #[test]
-    fn export_catalog_reads_doc_comments_and_annotation_hints() {
-        let catalog = catalog_from_source(
-            r#"
-/**
- * Eval debugger
- *
- * Start with find_runs.
- */
-@annotations(readOnly: true, idempotent: true, openWorld: false)
-/// Find eval runs
-///
-/// Lists recent evals. Does not start one.
-pub fn find_runs() -> string { return "ok" }
-
-pub fn ping() -> string { return "pong" }
-"#,
-        );
-        assert_eq!(
-            catalog.instructions.as_deref(),
-            Some("Eval debugger\n\nStart with find_runs.")
-        );
-        let find_runs = catalog.function("find_runs").expect("find_runs");
-        assert_eq!(find_runs.title.as_deref(), Some("Find eval runs"));
-        assert_eq!(
-            find_runs.description.as_deref(),
-            Some("Find eval runs\n\nLists recent evals. Does not start one.")
-        );
-        let hints = find_runs.annotations.expect("declared hints");
-        assert_eq!(hints.read_only, Some(true));
-        assert_eq!(hints.idempotent, Some(true));
-        assert_eq!(hints.open_world, Some(false));
-        assert_eq!(hints.destructive, None);
-        assert!(catalog
-            .function("ping")
-            .expect("ping")
-            .annotations
-            .is_none());
-        assert!(
-            catalog.diagnostics().is_empty(),
-            "{:?}",
-            catalog.diagnostics()
-        );
-    }
-
-    #[test]
-    fn annotations_with_unknown_key_are_diagnosed() {
-        let catalog = catalog_from_source(
-            r#"
-@annotations(readOnly: true, spicy: true)
-pub fn peek() -> string { return "ok" }
-"#,
-        );
-        let peek = catalog.function("peek").expect("peek");
-        assert_eq!(
-            peek.annotations.expect("kept valid hint").read_only,
-            Some(true)
-        );
-        let codes: Vec<&str> = catalog.diagnostics().iter().map(|d| d.code).collect();
-        assert_eq!(codes, vec![ANNOTATIONS_BAD_ARGS]);
     }
 
     #[test]
