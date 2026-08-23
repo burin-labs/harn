@@ -81,8 +81,19 @@ pub fn harn_e2e_binary() -> &'static Path {
 /// Returns a `Command` builder for the warmed `harn` binary. Equivalent
 /// to `Command::new(harn_e2e_binary())` but makes the slow-suite boundary
 /// explicit at call sites.
+///
+/// Nextest identity env is stripped so spawned CLI processes write state
+/// under the test's project directory instead of
+/// `/tmp/harn-nextest-state/<hash>/`.
 pub fn harn_e2e_command() -> Command {
-    Command::new(harn_e2e_binary())
+    let mut command = Command::new(harn_e2e_binary());
+    command
+        .env_remove("NEXTEST")
+        .env_remove("NEXTEST_RUN_ID")
+        .env_remove("NEXTEST_BINARY_ID")
+        .env_remove("NEXTEST_TEST_NAME")
+        .env_remove("NEXTEST_ATTEMPT_ID");
+    command
 }
 
 /// Captured result from one real `harn` CLI invocation.

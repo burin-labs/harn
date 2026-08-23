@@ -1,12 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::process::Command;
 
 use harn_vm::event_log::{EventLog, LogEvent, SqliteEventLog, Topic};
 use serde_json::json;
 
-fn binary_path() -> std::path::PathBuf {
-    std::path::PathBuf::from(env!("CARGO_BIN_EXE_harn"))
-}
+use crate::test_util::process::harn_e2e_command;
 
 #[test]
 fn session_import_records_source_and_result_in_fresh_project_event_log() {
@@ -14,7 +11,7 @@ fn session_import_records_source_and_result_in_fresh_project_event_log() {
     let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../spec/session-bundles/fixtures/sample-local.bundle.json");
 
-    let output = Command::new(binary_path())
+    let output = harn_e2e_command()
         .current_dir(project.path())
         .args(["session", "import"])
         .arg(&fixture)
@@ -221,7 +218,7 @@ fn replay_session_id_reads_events_db_and_compares_runs() {
     let session_id = "session-2474";
     seed_session_db(&db, session_id);
 
-    let out = Command::new(binary_path())
+    let out = harn_e2e_command()
         .args([
             "replay",
             "--session-id",
@@ -257,7 +254,7 @@ fn replay_session_id_errors_when_session_absent() {
     let db = temp.path().join("events.sqlite");
     seed_session_db(&db, "session-present");
 
-    let out = Command::new(binary_path())
+    let out = harn_e2e_command()
         .args([
             "replay",
             "--session-id",
@@ -284,7 +281,7 @@ fn replay_human_runs_fail_when_embedded_fixture_fails() {
     let run_record = temp.path().join("run.json");
     write_failing_run_record(&run_record);
 
-    let out = Command::new(binary_path())
+    let out = harn_e2e_command()
         .args(["replay", run_record.to_str().unwrap(), "--runs", "2"])
         .output()
         .expect("spawn harn replay --runs");
@@ -328,7 +325,7 @@ fn replay_counterfactual_reports_diverged_files_without_touching_disk() {
     )
     .expect("write counterfactual plan");
 
-    let out = Command::new(binary_path())
+    let out = harn_e2e_command()
         .args([
             "replay",
             "--session-id",
@@ -391,7 +388,7 @@ fn replay_counterfactual_human_lists_diverged_files() {
     )
     .expect("write plan");
 
-    let out = Command::new(binary_path())
+    let out = harn_e2e_command()
         .args([
             "replay",
             "--session-id",
@@ -452,7 +449,7 @@ pipeline main(harness: Harness) {{
     )
     .expect("write plan");
 
-    let out = Command::new(binary_path())
+    let out = harn_e2e_command()
         .args([
             "replay",
             "--session-id",
@@ -515,7 +512,7 @@ fn replay_counterfactual_chains_plans_cumulatively() {
     )
     .expect("write second plan");
 
-    let out = Command::new(binary_path())
+    let out = harn_e2e_command()
         .args([
             "replay",
             "--session-id",
@@ -580,7 +577,7 @@ fn replay_counterfactual_plan_side_effects_are_isolated() {
     )
     .expect("write plan");
 
-    let out = Command::new(binary_path())
+    let out = harn_e2e_command()
         .args([
             "replay",
             "--session-id",
@@ -624,7 +621,7 @@ fn replay_counterfactual_rejects_missing_plan() {
     let session_id = "session-counterfactual-missing";
     seed_session_db(&db, session_id);
 
-    let out = Command::new(binary_path())
+    let out = harn_e2e_command()
         .args([
             "replay",
             "--session-id",
@@ -650,7 +647,7 @@ fn replay_counterfactual_does_not_evaluate_when_cutoff_is_invalid() {
     let session_id = "session-counterfactual-bad-cutoff";
     seed_session_db(&db, session_id);
 
-    let out = Command::new(binary_path())
+    let out = harn_e2e_command()
         .args([
             "replay",
             "--session-id",
@@ -678,7 +675,7 @@ fn replay_counterfactual_does_not_evaluate_when_cutoff_is_invalid() {
 fn replay_fixture_runs_use_oracle_allowlist() {
     let fixture = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../conformance/replay-oracle/fixtures/simple_trigger_local_handler.valid.json");
-    let out = Command::new(binary_path())
+    let out = harn_e2e_command()
         .args([
             "replay",
             "--fixture",

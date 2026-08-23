@@ -249,6 +249,18 @@ impl HostLeaseRunState {
                 Self::Running {
                     lease_id,
                     acquire_wait_ms,
+                    ..
+                },
+                Self::Running {
+                    lease_id: next_lease_id,
+                    acquire_wait_ms: next_wait_ms,
+                    ..
+                },
+            ) => lease_id == next_lease_id && acquire_wait_ms == next_wait_ms,
+            (
+                Self::Running {
+                    lease_id,
+                    acquire_wait_ms,
                     worker_pid,
                     ..
                 },

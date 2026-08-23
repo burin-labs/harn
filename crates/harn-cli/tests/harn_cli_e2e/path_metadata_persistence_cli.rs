@@ -1,10 +1,9 @@
 use std::fs;
-use std::process::{Command, Output};
+use std::process::Output;
 
-use crate::test_util::process::harn_e2e_binary;
-
-fn run_script(script: &std::path::Path) -> Output {
-    Command::new(harn_e2e_binary())
+fn run_script(project: &std::path::Path, script: &std::path::Path) -> Output {
+    crate::test_util::process::harn_e2e_command()
+        .current_dir(project)
         .args(["run", script.to_str().expect("UTF-8 script path")])
         .output()
         .expect("run Harn script")
@@ -61,7 +60,7 @@ fn path_metadata_set_is_visible_to_the_next_cli_process() {
     )
     .expect("write get script");
 
-    let set = run_script(&set_script);
+    let set = run_script(project.path(), &set_script);
     assert!(
         set.status.success(),
         "set failed: {}",
@@ -78,7 +77,7 @@ fn path_metadata_set_is_visible_to_the_next_cli_process() {
         shard.display()
     );
 
-    let get = run_script(&get_script);
+    let get = run_script(project.path(), &get_script);
     assert!(
         get.status.success(),
         "get failed: {}",

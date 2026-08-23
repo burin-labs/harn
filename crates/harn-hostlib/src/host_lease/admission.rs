@@ -393,7 +393,7 @@ fn cleanup_waiters(
     let mut statement = tx.prepare(
         "SELECT waiter_id, owner_pid, owner_process_identity
          FROM host_lease_waiters
-         WHERE recoverable = 0 AND owner_pid IS NOT NULL AND owner_process_identity IS NOT NULL",
+         WHERE owner_pid IS NOT NULL AND owner_process_identity IS NOT NULL",
     )?;
     let candidates = statement
         .query_map([], |row| {

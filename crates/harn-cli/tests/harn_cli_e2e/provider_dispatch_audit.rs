@@ -83,10 +83,10 @@ fn provider_dispatch_audit_explains_selected_route_variants_in_process() {
         harn.stdout
     );
     assert_eq!(harn_value["rows"][0]["wire_format"], "anthropic_native");
-    assert_eq!(harn_value["rows"][0]["structured_output"], "tool_use");
+    assert_eq!(harn_value["rows"][0]["structured_output"], "native");
     assert_eq!(
         harn_value["rows"][0]["structured_output_mode"],
-        "xml_tagged"
+        "native_json"
     );
 }
 
@@ -176,13 +176,10 @@ fn provider_dispatch_audit_can_emit_structured_tool_probe_plan() {
         plan["readiness_commands"][0]["route"],
         "anthropic:claude-sonnet-4-6"
     );
-    assert_eq!(
-        plan["readiness_commands"][0]["structured_output"],
-        "tool_use"
-    );
+    assert_eq!(plan["readiness_commands"][0]["structured_output"], "native");
     assert_eq!(
         plan["readiness_commands"][0]["structured_output_mode"],
-        "xml_tagged"
+        "native_json"
     );
     assert_eq!(
         plan["readiness_commands"][0]["secret_envs"],
@@ -223,8 +220,8 @@ fn provider_dispatch_audit_can_emit_structured_tool_probe_plan() {
     assert_eq!(plan["commands"][0]["provider"], "anthropic");
     assert_eq!(plan["commands"][0]["model"], "claude-sonnet-4-6");
     assert_eq!(plan["commands"][0]["route"], "anthropic:claude-sonnet-4-6");
-    assert_eq!(plan["commands"][0]["structured_output"], "tool_use");
-    assert_eq!(plan["commands"][0]["structured_output_mode"], "xml_tagged");
+    assert_eq!(plan["commands"][0]["structured_output"], "native");
+    assert_eq!(plan["commands"][0]["structured_output_mode"], "native_json");
     assert_eq!(
         plan["commands"][0]["secret_envs"],
         serde_json::json!(["ANTHROPIC_API_KEY"])

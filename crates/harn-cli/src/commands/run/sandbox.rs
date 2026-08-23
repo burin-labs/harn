@@ -187,7 +187,14 @@ pub(super) fn install_run_sandbox_scope(
         harn_vm::tool_annotations::SideEffectLevel::rank_str(level)
             >= harn_vm::tool_annotations::SideEffectLevel::Network.rank()
     });
-    let process_proxy = if options.allow_process_network
+    // Managed child egress is enforceable only on macOS. Starting a proxy on
+    // Linux/Windows attaches `process_network_proxy` and fail-closes every
+    // `process.exec`, including local `git_push` to a file remote. Skip the
+    // proxy off-macOS; `--allow-process-network` still raises the capability
+    // ceiling, and attestation reports `unrestricted` rather than
+    // `unsupported_fail_closed`.
+    let process_proxy = if cfg!(target_os = "macos")
+        && options.allow_process_network
         && active_allows_process_network
         && active_execution_policy
             .as_ref()
@@ -510,6 +517,25 @@ mod tests {
             sandbox_grant_disclosure(&RunSandboxOptions::default()),
             None
         );
+    }
+
+    #[test]
+    fn process_network_grant_does_not_attach_an_unenforced_proxy() {
+        if cfg!(target_os = "macos") {
+            return;
+        }
+        harn_vm::reset_thread_local_state();
+        let temp = tempfile::tempdir().expect("workspace");
+        let mut stderr = String::new();
+        let options = RunSandboxOptions::sandboxed(true);
+        let _scope = install_run_sandbox_scope(&options, temp.path(), &mut stderr);
+        let policy = harn_vm::orchestration::current_execution_policy().expect("policy");
+        assert!(
+            policy.process_network_proxy.is_none(),
+            "Linux/Windows must not fail-close child exec behind a proxy they cannot enforce"
+        );
+        drop(_scope);
+        harn_vm::reset_thread_local_state();
     }
 
     #[test]

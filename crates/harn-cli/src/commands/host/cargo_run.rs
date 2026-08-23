@@ -75,7 +75,7 @@ async fn run_cargo(store: &harn_hostlib::HostLeaseStore, args: HostLeaseRunCargo
     ) {
         Ok(run) => run,
         Err(error) => {
-            return print_error("host_lease_run_cargo_receipt", &error.to_string(), false)
+            return print_error("host_lease_run_cargo_receipt", &error.to_string(), false);
         }
     };
     let worker_args = match cargo_worker_args(&args, &cargo, &run.run_id) {
@@ -247,7 +247,7 @@ fn finalize_run(
         | harn_hostlib::HostLeaseRunState::LaunchFailed { .. } => None,
         harn_hostlib::HostLeaseRunState::Completed { .. }
         | harn_hostlib::HostLeaseRunState::Cancelled { .. } => {
-            return Err("run receipt was already finalized".to_string())
+            return Err("run receipt was already finalized".to_string());
         }
     };
     if let Some(next) = next {
@@ -561,7 +561,7 @@ fn run_cargo_workload(
                 acquisition,
                 harn_hostlib::HostLeaseRunLaunchFailure::ArgumentEncoding,
                 &error,
-            )
+            );
         }
     };
     let mut child = match harn_hostlib::process::spawn_process(spec) {
@@ -573,9 +573,13 @@ fn run_cargo_workload(
                 acquisition,
                 harn_hostlib::HostLeaseRunLaunchFailure::ProcessSpawn,
                 &format!("failed to spawn Cargo: {error}"),
-            )
+            );
         }
     };
+    if let Err(error) = adopt_workload_pid(store, run_id, acquisition, child.pid()) {
+        let _ = child.killer().kill();
+        return error;
+    }
     wait_for_cargo_workload(child.as_mut(), workload_timeout_ms)
 }
 
@@ -597,7 +601,7 @@ fn run_cargo_workload(
                 acquisition,
                 harn_hostlib::HostLeaseRunLaunchFailure::ProcessSupervision,
                 &format!("failed to supervise the Cargo process tree: {error}"),
-            )
+            );
         }
     };
     let spec = match cargo_spawn_spec(cargo, args) {
@@ -609,7 +613,7 @@ fn run_cargo_workload(
                 acquisition,
                 harn_hostlib::HostLeaseRunLaunchFailure::ArgumentEncoding,
                 &error,
-            )
+            );
         }
     };
     let mut child = match harn_hostlib::process::spawn_process(spec) {
@@ -621,9 +625,13 @@ fn run_cargo_workload(
                 acquisition,
                 harn_hostlib::HostLeaseRunLaunchFailure::ProcessSpawn,
                 &format!("failed to spawn Cargo: {error}"),
-            )
+            );
         }
     };
+    if let Err(error) = adopt_workload_pid(store, run_id, acquisition, child.pid()) {
+        let _ = child.killer().kill();
+        return error;
+    }
     let status = wait_for_cargo_workload(child.as_mut(), workload_timeout_ms);
     if let Err(error) = job.disarm() {
         eprintln!("error: failed to close Cargo process-tree supervision: {error}");
@@ -648,6 +656,92 @@ fn run_cargo_workload(
         harn_hostlib::HostLeaseRunLaunchFailure::UnsupportedPlatform,
         "supervised Cargo workloads are unavailable on this platform",
     )
+}
+
+fn adopt_workload_pid(
+    store: &harn_hostlib::HostLeaseStore,
+    run_id: &str,
+    acquisition: &harn_hostlib::HostLeaseAcquireReceipt,
+    cargo_pid: Option<u32>,
+) -> Result<(), i32> {
+    let Some(handle) = acquisition.handle.as_ref() else {
+        return Err(fail_cargo_launch(
+            store,
+            run_id,
+            acquisition,
+            harn_hostlib::HostLeaseRunLaunchFailure::ProcessSpawn,
+            "spawned Cargo omitted its PID",
+        ));
+    };
+    let Some(cargo_pid) = cargo_pid else {
+        return Err(fail_cargo_launch(
+            store,
+            run_id,
+            acquisition,
+            harn_hostlib::HostLeaseRunLaunchFailure::ProcessSpawn,
+            "spawned Cargo omitted its PID",
+        ));
+    };
+    if let Err(error) = store.rebind_owner_pid(
+        &handle.host,
+        handle.resource_class,
+        &handle.domain,
+        &handle.lease_id,
+        cargo_pid,
+    ) {
+        return Err(fail_cargo_launch(
+            store,
+            run_id,
+            acquisition,
+            harn_hostlib::HostLeaseRunLaunchFailure::ProcessSpawn,
+            &format!("failed to transfer the lease to Cargo: {error}"),
+        ));
+    }
+    let current = match store.load_run(run_id) {
+        Ok(current) => current,
+        Err(error) => {
+            return Err(fail_cargo_launch(
+                store,
+                run_id,
+                acquisition,
+                harn_hostlib::HostLeaseRunLaunchFailure::ProcessSpawn,
+                &format!("failed to load the run receipt after Cargo spawn: {error}"),
+            ));
+        }
+    };
+    let harn_hostlib::HostLeaseRunState::Running {
+        lease_id,
+        acquired_at_ms,
+        acquire_wait_ms,
+        ..
+    } = current.status
+    else {
+        return Err(fail_cargo_launch(
+            store,
+            run_id,
+            acquisition,
+            harn_hostlib::HostLeaseRunLaunchFailure::ProcessSpawn,
+            "run receipt was not running when Cargo started",
+        ));
+    };
+    if let Err(error) = store.transition_run(
+        run_id,
+        harn_hostlib::HostLeaseRunState::Running {
+            lease_id,
+            acquired_at_ms,
+            acquire_wait_ms,
+            worker_pid: cargo_pid,
+        },
+    ) {
+        return Err(fail_cargo_launch(
+            store,
+            run_id,
+            acquisition,
+            harn_hostlib::HostLeaseRunLaunchFailure::ProcessSpawn,
+            &format!("failed to record the Cargo PID on the run receipt: {error}"),
+        ));
+    }
+    Ok(())
 }
 
 fn wait_for_cargo_workload(

@@ -1224,3 +1224,82 @@ fn wait_notifications_use_a_dedicated_signal_not_sqlite_activity() {
     let after = std::fs::read(&store.wake_path).unwrap();
     assert_ne!(after, before);
 }
+
+#[cfg(unix)]
+#[test]
+fn dead_recoverable_waiters_do_not_block_the_queue() {
+    let temp = TempDir::new().unwrap();
+    let store = store(&temp);
+    let mut child = std::process::Command::new("sleep")
+        .arg("30")
+        .spawn()
+        .unwrap();
+    let pid = child.id();
+    let holder = store
+        .try_acquire(request("holder"))
+        .unwrap()
+        .handle
+        .unwrap();
+    let resource = HostLeaseResourceKey {
+        machine: holder.host.clone(),
+        resource_class: holder.resource_class,
+        domain: holder.domain.clone(),
+    };
+    let waiter = WaiterIdentity {
+        waiter_id: "dead-recoverable".to_string(),
+        requested_at_ms: 1_000,
+        recoverable: true,
+    };
+    let deadline = unix_now_ms().unwrap().saturating_add(3_600_000);
+    store
+        .enqueue_waiter(
+            &resource,
+            HostLeasePriorityClass::Interactive,
+            &waiter,
+            deadline,
+            Some(pid),
+        )
+        .unwrap();
+    child.kill().unwrap();
+    let _ = child.wait().unwrap();
+    assert!(
+        store
+            .release_for_domain(
+                &holder.host,
+                holder.resource_class,
+                &holder.domain,
+                &holder.lease_id,
+            )
+            .unwrap()
+            .released
+    );
+    let next = store.try_acquire(request("next")).unwrap();
+    assert_eq!(next.status, HostLeaseAcquireStatus::Acquired);
+}
+
+#[cfg(unix)]
+#[test]
+fn rebind_owner_pid_points_liveness_at_the_new_process() {
+    let temp = TempDir::new().unwrap();
+    let store = store(&temp);
+    let mut live = request("worker");
+    live.ttl_ms = None;
+    live.owner_pid = Some(std::process::id());
+    let handle = store.try_acquire(live).unwrap().handle.unwrap();
+    let mut child = std::process::Command::new("sleep")
+        .arg("30")
+        .spawn()
+        .unwrap();
+    let rebound = store
+        .rebind_owner_pid(
+            &handle.host,
+            handle.resource_class,
+            &handle.domain,
+            &handle.lease_id,
+            child.id(),
+        )
+        .unwrap();
+    assert_eq!(rebound.owner_pid, Some(child.id()));
+    child.kill().unwrap();
+    let _ = child.wait();
+}
