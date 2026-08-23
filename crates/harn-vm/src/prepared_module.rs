@@ -430,14 +430,14 @@ impl PreparedModuleCache {
             // Disk cache hits skip parse + compile. The scoped prepared cache
             // additionally skips deserialization and chunk hydration on later
             // fresh VMs without sharing any runtime module state.
-            // Every provenance shares one cache path. The compilation context
-            // carries the authority, so the on-disk identity already separates
-            // a trusted artifact from an ordinary one: they hash to different
-            // keys and each fails the other's header check. Before that field
-            // existed, the only thing keeping privileged bytecode out of an
-            // ordinary reader's reach was this branch skipping the cache
-            // entirely, which also meant a trusted graph recompiled from source
-            // on every process.
+            // Every provenance shares one cache path. The cache key carries the
+            // authority, so the on-disk identity already separates a trusted
+            // artifact from an ordinary one: they hash to different shared-cache
+            // filenames, and an adjacent artifact found by path fails the other
+            // authority's header check. Before the key had that field, the only
+            // thing keeping privileged bytecode out of an ordinary reader's
+            // reach was this branch skipping the cache entirely, which also
+            // meant a trusted graph recompiled from source on every process.
             let cached = {
                 let lookup = {
                     let _load_span = recorder.map(ModulePhaseRecorder::load_span);
