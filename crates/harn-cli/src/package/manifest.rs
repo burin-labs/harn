@@ -1,10 +1,12 @@
 use super::errors::PackageError;
 use super::*;
 mod check_config;
+mod connector_capabilities;
 mod connector_module;
 mod provider_setup;
 pub(crate) use check_config::absolutize_check_config_paths;
 pub use check_config::{load_check_config, CheckConfig, PreflightSeverity};
+pub use connector_capabilities::{normalize_connector_capability, ConnectorCapabilities};
 pub use connector_module::is_declared_connector_module;
 pub use harn_modules::personas::{
     PersonaAutonomyTier, PersonaManifestEntry, PersonaStageDecl, PersonaStageExit,
@@ -1028,6 +1030,7 @@ impl RuntimeExtensions {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ProviderConnectorManifest {
     #[serde(default)]
     pub harn: Option<String>,
@@ -1036,6 +1039,7 @@ pub struct ProviderConnectorManifest {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ProviderOAuthManifest {
     #[serde(default, alias = "auth_url", alias = "authorization-endpoint")]
     pub authorization_endpoint: Option<String>,
@@ -1053,104 +1057,6 @@ pub struct ProviderOAuthManifest {
     pub client_secret: Option<String>,
     #[serde(default, alias = "token_auth_method", alias = "token-auth-method")]
     pub token_endpoint_auth_method: Option<String>,
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
-pub struct ConnectorCapabilities {
-    pub webhook: bool,
-    pub oauth: bool,
-    pub rate_limit: bool,
-    pub pagination: bool,
-    pub graphql: bool,
-    pub streaming: bool,
-}
-
-impl ConnectorCapabilities {
-    pub const FEATURES: [&'static str; 6] = [
-        "webhook",
-        "oauth",
-        "rate_limit",
-        "pagination",
-        "graphql",
-        "streaming",
-    ];
-
-    fn enable(&mut self, feature: &str) -> Result<(), String> {
-        match normalize_connector_capability(feature).as_str() {
-            "webhook" => self.webhook = true,
-            "oauth" => self.oauth = true,
-            "rate_limit" => self.rate_limit = true,
-            "pagination" => self.pagination = true,
-            "graphql" => self.graphql = true,
-            "streaming" => self.streaming = true,
-            other => {
-                return Err(format!(
-                    "unknown connector capability '{feature}' (normalized as '{other}')"
-                ));
-            }
-        }
-        Ok(())
-    }
-}
-
-#[derive(Debug, Default, Deserialize)]
-struct ConnectorCapabilitiesTable {
-    #[serde(default)]
-    webhook: bool,
-    #[serde(default)]
-    oauth: bool,
-    #[serde(default, alias = "rate-limit")]
-    rate_limit: bool,
-    #[serde(default)]
-    pagination: bool,
-    #[serde(default)]
-    graphql: bool,
-    #[serde(default)]
-    streaming: bool,
-}
-
-impl From<ConnectorCapabilitiesTable> for ConnectorCapabilities {
-    fn from(value: ConnectorCapabilitiesTable) -> Self {
-        Self {
-            webhook: value.webhook,
-            oauth: value.oauth,
-            rate_limit: value.rate_limit,
-            pagination: value.pagination,
-            graphql: value.graphql,
-            streaming: value.streaming,
-        }
-    }
-}
-
-impl<'de> Deserialize<'de> for ConnectorCapabilities {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        #[derive(Deserialize)]
-        #[serde(untagged)]
-        enum RawConnectorCapabilities {
-            List(Vec<String>),
-            Table(ConnectorCapabilitiesTable),
-        }
-
-        match RawConnectorCapabilities::deserialize(deserializer)? {
-            RawConnectorCapabilities::List(features) => {
-                let mut capabilities = ConnectorCapabilities::default();
-                for feature in features {
-                    capabilities
-                        .enable(&feature)
-                        .map_err(serde::de::Error::custom)?;
-                }
-                Ok(capabilities)
-            }
-            RawConnectorCapabilities::Table(table) => Ok(table.into()),
-        }
-    }
-}
-
-pub fn normalize_connector_capability(feature: &str) -> String {
-    feature.trim().to_lowercase().replace('-', "_")
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
