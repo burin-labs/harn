@@ -102,6 +102,7 @@ mod review;
 mod runtime_scope;
 pub(crate) mod sandbox;
 pub mod secret_scan;
+pub(crate) mod session_change;
 pub(crate) mod session_store;
 mod sets;
 pub(crate) mod shapes;

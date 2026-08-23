@@ -455,10 +455,6 @@ pub(crate) const BUILTINS: &[(&str, &str)] = &[
         "transcript_compact",
         "transcript_compact(transcript, options?) -> dict",
     ),
-    (
-        "transcript_summarize",
-        "transcript_summarize(transcript, options?) -> dict",
-    ),
     ("transcript_assets", "transcript_assets(transcript) -> list"),
     (
         "transcript_add_asset",
@@ -1012,7 +1008,6 @@ pub(crate) fn builtin_doc(name: &str) -> Option<String> {
         "llm_healthcheck" => "**llm_healthcheck(provider?, options?)** → dict — Check provider health and connectivity; Ollama accepts `{model, warm}`",
         "transcript" => "**transcript(metadata?)** → dict — Create a new transcript",
         "transcript_compact" => "**transcript_compact(transcript, options?)** → dict — Compact a transcript with the runtime compaction engine",
-        "transcript_summarize" => "**transcript_summarize(transcript, options?)** → dict — Summarize and compact a transcript with an LLM",
         "transcript_auto_compact" => "**transcript_auto_compact(messages, options?)** → dict — Apply the agent-loop compaction pipeline to a message list, returning { messages, archived, summary }",
         "schema_check" => "**schema_check(data, schema)** → Result — Validate data against an extended Harn schema and return `Result.Ok(data)` without applying defaults",
         "schema_parse" => "**schema_parse(data, schema)** → Result — Validate data against an extended Harn schema and return `Result.Ok(data)` with defaults applied",

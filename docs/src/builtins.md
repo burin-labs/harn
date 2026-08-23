@@ -1974,7 +1974,6 @@ harness.llm.mock_clear()
 | `transcript_fork(transcript, options?)` | transcript: dict, options: dict | transcript | Fork transcript, optionally dropping messages or summary |
 | `transcript.inject_reminder(transcript, options)` | transcript: dict, options: dict | dict | Return `{transcript, reminder_id, deduped_count}` after appending a pending `system_reminder` event. `body` is required; `tags`, `dedupe_key`, `ttl_turns`, `preserve_on_compact`, `propagate`, and `role_hint` are optional and validated. A matching `dedupe_key` replaces older pending reminders and emits a lifecycle event when EventLog is active. |
 | `transcript.clear_reminders(transcript, selector)` | transcript: dict, selector: dict | dict | Return `{transcript, removed_count}` after removing pending reminders selected by `id`, `tag`, or `dedupe_key`; multiple selectors are combined with AND semantics. |
-| `transcript_summarize(transcript, options?)` | transcript: dict, options: dict | transcript | Summarize and compact a transcript via `llm_call` |
 | `transcript_compact(transcript, options?)` | transcript: dict, options: dict | transcript | Compact a transcript with the runtime compaction engine, preserving durable artifacts and compaction events. Pending reminders are TTL-processed and deduped before compaction; only `preserve_on_compact: true` reminders survive verbatim. `strategy: "custom"` requires `custom_compactor`, a closure called with `(messages, reminders)` that returns the replacement transcript state |
 | `transcript_auto_compact(messages, options?)` | messages: list, options: dict | dict | Apply the agent-loop compaction pipeline to a message list using `llm`, `truncate`, or `custom` strategy; returns `{ messages, archived, summary }` |
 
@@ -3199,7 +3198,6 @@ and offline analysis.
 | `transcript_abandon(transcript)` | transcript | transcript | Mark transcript abandoned and append an internal lifecycle event |
 | `transcript_resume(transcript)` | transcript | transcript | Mark transcript active again and append an internal lifecycle event |
 | `transcript_compact(transcript, options?)` | transcript, options | transcript | Compact a transcript with the runtime compaction engine, including reminder TTL/dedupe/preserve handling and `strategy: "custom"` plus `custom_compactor(messages, reminders)` |
-| `transcript_summarize(transcript, options?)` | transcript, options | transcript | Compact via LLM-generated summary |
 | `transcript_auto_compact(messages, options?)` | messages, options | dict | Apply the agent-loop compaction pipeline to a message list; returns `{ messages, archived, summary }` |
 | `transcript_render_visible(transcript)` | transcript | string | Render only public/human-visible messages |
 | `transcript_render_full(transcript)` | transcript | string | Render the full execution history |

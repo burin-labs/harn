@@ -6,6 +6,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
+use super::change::SharedSessionChangeObserver;
 use super::event::{AppendEvent, EventId, StoredEvent};
 use super::redaction::SharedEventRedactor;
 use super::retention::{RetentionPolicy, SharedArchiveSink, Tombstone};
@@ -424,6 +425,21 @@ pub struct StoreHooks {
     /// transcript rows. The default deterministic lexical floor is
     /// cross-platform and requires no model asset.
     pub embedder: Arc<dyn Embedder>,
+    /// Notified after [`SessionStore::update`] commits, so a surface that
+    /// already showed a session's name can refresh it instead of waiting
+    /// for whatever makes it re-read next. See [`SessionChangeObserver`].
+    pub change_observer: Option<SharedSessionChangeObserver>,
+}
+
+impl StoreHooks {
+    /// Publish a committed metadata change. Callers must have released the
+    /// backend's lock or transaction first, so an observer that reads the
+    /// store back sees the row it was told about and cannot deadlock.
+    pub(crate) fn notify_session_changed(&self, meta: &SessionMeta) {
+        if let Some(observer) = self.change_observer.as_ref() {
+            observer.session_updated(meta);
+        }
+    }
 }
 
 impl Default for StoreHooks {
@@ -435,6 +451,7 @@ impl Default for StoreHooks {
             retention: RetentionPolicy::default(),
             archive_sink: None,
             embedder: default_embedder(),
+            change_observer: None,
         }
     }
 }

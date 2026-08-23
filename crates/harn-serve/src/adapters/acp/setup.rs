@@ -433,6 +433,7 @@ impl AcpServer {
         self.concurrent_controls
             .register(&session_id, concurrent_control.clone());
         let project_root = session_project_root_for_cwd(&cwd);
+        self.track_known_session(&session_id);
         self.sessions.insert(
             session_id.clone(),
             Session {

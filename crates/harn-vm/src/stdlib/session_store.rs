@@ -358,6 +358,7 @@ fn open_store(state_dir: &SessionStoreDir) -> Result<SqliteSessionStore, VmError
 fn store_hooks() -> StoreHooks {
     StoreHooks {
         redaction: Some(Arc::new(crate::redact::current_policy())),
+        change_observer: super::session_change::current_observer(),
         ..StoreHooks::default()
     }
 }
@@ -412,6 +413,18 @@ async fn open_read_session(
 
 fn store_path(state_dir: &SessionStoreDir) -> PathBuf {
     state_dir.as_path().join(STORE_DB_FILE)
+}
+
+/// Open the canonical session store under a workspace root, creating it if
+/// absent, carrying the hooks every canonical store must have.
+///
+/// Opening `SqliteSessionStore` directly is not equivalent: it silently drops
+/// redaction and change notification, so a store built by hand persists
+/// unredacted payloads and tells no surface that anything moved. Callers
+/// outside this crate go through here so "what a canonical store carries" has
+/// one answer.
+pub fn open_canonical_store(root: &Path) -> Result<SqliteSessionStore, VmError> {
+    open_store(&SessionStoreDir::under_root(root))
 }
 
 pub(crate) fn open_existing_canonical_store(
