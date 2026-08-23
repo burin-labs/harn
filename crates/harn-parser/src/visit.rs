@@ -86,18 +86,16 @@ pub fn walk_program_interpolated(
 /// ordinary runtime object; callers can use the predicate to avoid resolving
 /// the full import graph for files that cannot contain that ambiguity.
 pub fn contains_identifier_receiver_access(program: &[SNode]) -> bool {
-    let mut found = false;
-    walk_program(program, &mut |node| {
+    any_node(program, &mut |node| {
         let object = match &node.node {
             Node::PropertyAccess { object, .. }
             | Node::OptionalPropertyAccess { object, .. }
             | Node::MethodCall { object, .. }
             | Node::OptionalMethodCall { object, .. } => object,
-            _ => return,
+            _ => return false,
         };
-        found |= matches!(&object.node, Node::Identifier(_));
-    });
-    found
+        matches!(&object.node, Node::Identifier(_))
+    })
 }
 
 /// Return whether a program contains an enum-shaped match pattern whose
@@ -111,16 +109,31 @@ pub fn contains_identifier_receiver_access(program: &[SNode]) -> bool {
 /// full import-graph walk on modules that merely use record or namespace
 /// property access.
 pub fn contains_identifier_enum_pattern(program: &[SNode]) -> bool {
-    let mut found = false;
-    walk_program(program, &mut |node| {
+    any_node(program, &mut |node| {
         let Node::MatchExpr { arms, .. } = &node.node else {
-            return;
+            return false;
         };
-        found |= arms
-            .iter()
-            .any(|arm| contains_identifier_enum_pattern_node(&arm.pattern));
-    });
-    found
+        arms.iter()
+            .any(|arm| contains_identifier_enum_pattern_node(&arm.pattern))
+    })
+}
+
+/// Pre-order walk that stops as soon as `predicate` returns true for a node.
+/// The existence predicates above use this so a match near the top of a large
+/// program does not pay for walking the rest of it.
+fn any_node(program: &[SNode], predicate: &mut impl FnMut(&SNode) -> bool) -> bool {
+    let mut stack = Vec::with_capacity(program.len());
+    push_nodes_reversed(program, &mut stack);
+    let mut scratch: Vec<&SNode> = Vec::new();
+    while let Some(node) = stack.pop() {
+        if predicate(node) {
+            return true;
+        }
+        scratch.clear();
+        collect_children(node, &mut |child| scratch.push(child));
+        stack.extend(scratch.iter().rev().copied());
+    }
+    false
 }
 
 fn contains_identifier_enum_pattern_node(node: &SNode) -> bool {
@@ -144,21 +157,22 @@ pub fn walk_node(node: &SNode, visitor: &mut impl FnMut(&SNode)) {
 /// continue the default traversal.
 pub fn walk_children(node: &SNode, visitor: &mut impl FnMut(&SNode)) {
     let mut stack = Vec::new();
-    push_children_reversed(node, &mut stack);
+    collect_children(node, &mut |child| stack.push(child));
+    stack.reverse();
     walk_stack(&mut stack, visitor);
 }
 
-fn walk_stack(stack: &mut Vec<&SNode>, visitor: &mut impl FnMut(&SNode)) {
+fn walk_stack<'a>(stack: &mut Vec<&'a SNode>, visitor: &mut impl FnMut(&SNode)) {
+    // One scratch buffer reused across the whole walk: collecting children
+    // into a fresh Vec per node made every walker pay one heap alloc/free
+    // per AST node, which dominated whole-module analyses.
+    let mut scratch: Vec<&'a SNode> = Vec::new();
     while let Some(node) = stack.pop() {
         visitor(node);
-        push_children_reversed(node, stack);
+        scratch.clear();
+        collect_children(node, &mut |child| scratch.push(child));
+        stack.extend(scratch.iter().rev().copied());
     }
-}
-
-fn push_children_reversed<'a>(node: &'a SNode, stack: &mut Vec<&'a SNode>) {
-    let mut children = Vec::new();
-    collect_children(node, &mut children);
-    stack.extend(children.into_iter().rev());
 }
 
 fn push_nodes_reversed<'a>(nodes: &'a [SNode], stack: &mut Vec<&'a SNode>) {
@@ -170,26 +184,33 @@ fn push_nodes_reversed<'a>(nodes: &'a [SNode], stack: &mut Vec<&'a SNode>) {
 /// this module's single source of truth for each variant's children.
 pub fn immediate_children(node: &SNode) -> Vec<&SNode> {
     let mut children = Vec::new();
-    collect_children(node, &mut children);
+    collect_children(node, &mut |child| children.push(child));
     children
 }
 
-fn collect_children<'a>(node: &'a SNode, children: &mut Vec<&'a SNode>) {
+/// Invoke `f` on each of `node`'s immediate children in source order,
+/// without materializing a `Vec`. Recursive walkers that visit children
+/// in place should prefer this over [`immediate_children`].
+pub fn for_each_immediate_child<'a>(node: &'a SNode, f: &mut impl FnMut(&'a SNode)) {
+    collect_children(node, f);
+}
+
+fn collect_children<'a>(node: &'a SNode, children: &mut impl FnMut(&'a SNode)) {
     match &node.node {
         Node::AttributedDecl { attributes, inner } => {
             for attr in attributes {
                 for arg in &attr.args {
-                    children.push(&arg.value);
+                    children(&arg.value);
                 }
             }
-            children.push(inner);
+            children(inner);
         }
         Node::Pipeline { body, .. } | Node::OverrideDecl { body, .. } => {
             collect_nodes(body, children);
         }
         Node::LetBinding { pattern, value, .. } | Node::ConstBinding { pattern, value, .. } => {
             collect_binding_pattern(pattern, children);
-            children.push(value);
+            children(value);
         }
         Node::EnumDecl { variants, .. } => {
             for variant in variants {
@@ -215,7 +236,7 @@ fn collect_children<'a>(node: &'a SNode, children: &mut Vec<&'a SNode>) {
             else_body,
             ..
         } => {
-            children.push(condition);
+            children(condition);
             collect_nodes(then_body, children);
             if let Some(body) = else_body {
                 collect_nodes(body, children);
@@ -227,21 +248,21 @@ fn collect_children<'a>(node: &'a SNode, children: &mut Vec<&'a SNode>) {
             body,
         } => {
             collect_binding_pattern(pattern, children);
-            children.push(iterable);
+            children(iterable);
             collect_nodes(body, children);
         }
         Node::MatchExpr { value, arms } => {
-            children.push(value);
+            children(value);
             for arm in arms {
                 collect_match_arm(arm, children);
             }
         }
         Node::WhileLoop { condition, body } => {
-            children.push(condition);
+            children(condition);
             collect_nodes(body, children);
         }
         Node::Retry { count, body } => {
-            children.push(count);
+            children(count);
             collect_nodes(body, children);
         }
         Node::CostRoute { options, body } => {
@@ -250,7 +271,7 @@ fn collect_children<'a>(node: &'a SNode, children: &mut Vec<&'a SNode>) {
         }
         Node::ReturnStmt { value } | Node::YieldExpr { value } => {
             if let Some(value) = value {
-                children.push(value);
+                children(value);
             }
         }
         Node::TryCatch {
@@ -277,7 +298,7 @@ fn collect_children<'a>(node: &'a SNode, children: &mut Vec<&'a SNode>) {
         }
         Node::MutexBlock { key, body } => {
             if let Some(key) = key {
-                children.push(key);
+                children(key);
             }
             collect_nodes(body, children);
         }
@@ -299,24 +320,24 @@ fn collect_children<'a>(node: &'a SNode, children: &mut Vec<&'a SNode>) {
             }
         }
         Node::RangeExpr { start, end, .. } => {
-            children.push(start);
-            children.push(end);
+            children(start);
+            children(end);
         }
         Node::GuardStmt {
             condition,
             else_body,
         } => {
-            children.push(condition);
+            children(condition);
             collect_nodes(else_body, children);
         }
         Node::RequireStmt { condition, message } => {
-            children.push(condition);
+            children(condition);
             if let Some(message) = message {
-                children.push(message);
+                children(message);
             }
         }
         Node::DeadlineBlock { duration, body } => {
-            children.push(duration);
+            children(duration);
             collect_nodes(body, children);
         }
         Node::EmitExpr { value }
@@ -325,10 +346,10 @@ fn collect_children<'a>(node: &'a SNode, children: &mut Vec<&'a SNode>) {
         | Node::TryOperator { operand: value }
         | Node::TryStar { operand: value }
         | Node::NonNullAssert { operand: value }
-        | Node::UnaryOp { operand: value, .. } => children.push(value),
+        | Node::UnaryOp { operand: value, .. } => children(value),
         Node::HitlExpr { args, .. } => {
             for arg in args {
-                children.push(&arg.value);
+                children(&arg.value);
             }
         }
         Node::Parallel {
@@ -337,7 +358,7 @@ fn collect_children<'a>(node: &'a SNode, children: &mut Vec<&'a SNode>) {
             options,
             ..
         } => {
-            children.push(expr);
+            children(expr);
             collect_option_values(options, children);
             collect_nodes(body, children);
         }
@@ -350,7 +371,7 @@ fn collect_children<'a>(node: &'a SNode, children: &mut Vec<&'a SNode>) {
                 collect_select_case(case, children);
             }
             if let Some((duration, body)) = timeout {
-                children.push(duration);
+                children(duration);
                 collect_nodes(body, children);
             }
             if let Some(body) = default_body {
@@ -361,46 +382,46 @@ fn collect_children<'a>(node: &'a SNode, children: &mut Vec<&'a SNode>) {
             collect_nodes(args, children);
         }
         Node::ValueCall { callee, args } => {
-            children.push(callee);
+            children(callee);
             collect_nodes(args, children);
         }
         Node::MethodCall { object, args, .. } | Node::OptionalMethodCall { object, args, .. } => {
-            children.push(object);
+            children(object);
             collect_nodes(args, children);
         }
         Node::PropertyAccess { object, .. } | Node::OptionalPropertyAccess { object, .. } => {
-            children.push(object);
+            children(object);
         }
         Node::SubscriptAccess { object, index }
         | Node::OptionalSubscriptAccess { object, index } => {
-            children.push(object);
-            children.push(index);
+            children(object);
+            children(index);
         }
         Node::SliceAccess { object, start, end } => {
-            children.push(object);
+            children(object);
             if let Some(start) = start {
-                children.push(start);
+                children(start);
             }
             if let Some(end) = end {
-                children.push(end);
+                children(end);
             }
         }
         Node::BinaryOp { left, right, .. } => {
-            children.push(left);
-            children.push(right);
+            children(left);
+            children(right);
         }
         Node::Ternary {
             condition,
             true_expr,
             false_expr,
         } => {
-            children.push(condition);
-            children.push(true_expr);
-            children.push(false_expr);
+            children(condition);
+            children(true_expr);
+            children(false_expr);
         }
         Node::Assignment { target, value, .. } => {
-            children.push(target);
-            children.push(value);
+            children(target);
+            children(value);
         }
         Node::StructConstruct { fields, .. } | Node::DictLiteral(fields) => {
             collect_dict_entries(fields, children);
@@ -418,64 +439,69 @@ fn collect_children<'a>(node: &'a SNode, children: &mut Vec<&'a SNode>) {
     }
 }
 
-fn collect_nodes<'a>(nodes: &'a [SNode], children: &mut Vec<&'a SNode>) {
-    children.extend(nodes.iter());
+fn collect_nodes<'a>(nodes: &'a [SNode], children: &mut impl FnMut(&'a SNode)) {
+    for node in nodes {
+        children(node);
+    }
 }
 
-fn collect_dict_entries<'a>(entries: &'a [DictEntry], children: &mut Vec<&'a SNode>) {
+fn collect_dict_entries<'a>(entries: &'a [DictEntry], children: &mut impl FnMut(&'a SNode)) {
     for entry in entries {
-        children.push(&entry.key);
-        children.push(&entry.value);
+        children(&entry.key);
+        children(&entry.value);
     }
 }
 
-fn collect_field_values<'a>(fields: &'a [(String, SNode)], children: &mut Vec<&'a SNode>) {
+fn collect_field_values<'a>(fields: &'a [(String, SNode)], children: &mut impl FnMut(&'a SNode)) {
     for (_, value) in fields {
-        children.push(value);
+        children(value);
     }
 }
 
-fn collect_option_values<'a>(options: &'a [(String, SNode)], children: &mut Vec<&'a SNode>) {
+fn collect_option_values<'a>(options: &'a [(String, SNode)], children: &mut impl FnMut(&'a SNode)) {
     for (_, value) in options {
-        children.push(value);
+        children(value);
     }
 }
 
-fn collect_typed_param_defaults<'a>(params: &'a [TypedParam], children: &mut Vec<&'a SNode>) {
+fn collect_typed_param_defaults<'a>(
+    params: &'a [TypedParam],
+    children: &mut impl FnMut(&'a SNode),
+) {
     for param in params {
         if let Some(default) = &param.default_value {
-            children.push(default);
+            children(default);
         }
     }
 }
 
-fn collect_match_arm<'a>(arm: &'a MatchArm, children: &mut Vec<&'a SNode>) {
-    children.push(&arm.pattern);
+fn collect_match_arm<'a>(arm: &'a MatchArm, children: &mut impl FnMut(&'a SNode)) {
+    children(&arm.pattern);
     if let Some(guard) = &arm.guard {
-        children.push(guard);
+        children(guard);
     }
     collect_nodes(&arm.body, children);
 }
 
-fn collect_select_case<'a>(case: &'a SelectCase, children: &mut Vec<&'a SNode>) {
-    children.push(&case.channel);
+fn collect_select_case<'a>(case: &'a SelectCase, children: &mut impl FnMut(&'a SNode)) {
+    children(&case.channel);
     collect_nodes(&case.body, children);
 }
 
-fn collect_binding_pattern<'a>(pattern: &'a BindingPattern, children: &mut Vec<&'a SNode>) {
+fn collect_binding_pattern<'a>(pattern: &'a BindingPattern, children: &mut impl FnMut(&'a SNode)) {
     match pattern {
         BindingPattern::Identifier(_) | BindingPattern::Pair(_, _) => {}
         BindingPattern::Dict(fields) => {
             for field in fields {
                 if let Some(default) = &field.default_value {
-                    children.push(default);
+                    children(default);
                 }
             }
         }
         BindingPattern::List(items) => {
             for item in items {
                 if let Some(default) = &item.default_value {
-                    children.push(default);
+                    children(default);
                 }
             }
         }

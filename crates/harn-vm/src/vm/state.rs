@@ -212,8 +212,9 @@ pub(crate) struct CallFrame {
     pub(crate) initial_local_slots: Option<Vec<LocalSlot>>,
     /// Iterator stack depth to restore when this frame unwinds.
     pub(crate) saved_iterator_depth: usize,
-    /// Function name for stack traces (empty for top-level pipeline).
-    pub(crate) fn_name: String,
+    /// Function name for stack traces (empty for top-level pipeline); a
+    /// refcount-bump share of [`CompiledFunction::name`].
+    pub(crate) fn_name: crate::value::HarnStr,
     /// Number of arguments actually passed by the caller (for default arg support).
     pub(crate) argc: usize,
     /// Saved VM_SOURCE_DIR to restore when this frame is popped.
@@ -321,7 +322,7 @@ pub(crate) enum IterState {
     },
     Dict {
         entries: Arc<crate::value::DictMap>,
-        keys: Vec<String>,
+        keys: Vec<crate::value::HarnStr>,
         idx: usize,
     },
     Channel {
@@ -1123,7 +1124,7 @@ impl Vm {
             initial_env,
             initial_local_slots,
             saved_iterator_depth: self.iterators.len(),
-            fn_name: String::new(),
+            fn_name: crate::value::HarnStr::new(),
             argc: 0,
             saved_source_dir: None,
             module_functions: None,

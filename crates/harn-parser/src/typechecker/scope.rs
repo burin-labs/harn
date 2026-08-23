@@ -6,7 +6,7 @@
 //! `ImplMethodSig` / `FnSignature`). It also re-exports the type-checker's
 //! gradual-typing alias (`InferredType`) and the variance polarity tracker.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use harn_lexer::Span;
@@ -123,37 +123,53 @@ pub(super) struct InterfaceDeclInfo {
     pub(super) methods: Vec<InterfaceMethod>,
 }
 
+/// Ordered map used for every [`TypeScope`] table.
+///
+/// The checker enters a child scope for every block-shaped node (`if` arms,
+/// loop bodies, `match` arms, closures, `try`/`catch`), and each entry
+/// snapshots the current scope level as the child's parent. With `BTreeMap`
+/// tables that snapshot deep-cloned every binding — including large `Shape`
+/// and union `TypeExpr`s — on every block entry, which dominated whole-file
+/// typecheck time. `imbl::OrdMap` is persistent and structurally shared, so
+/// the snapshot clone is O(1) per table and a later write to either copy
+/// path-copies only the touched nodes. Ordering and the read API match
+/// `BTreeMap`, so lookup semantics and iteration order are unchanged. This is
+/// the same representation the VM already uses for dict values (`DictMap`).
+pub(super) type ScopeMap<V> = imbl::OrdMap<String, V>;
+/// Ordered set counterpart of [`ScopeMap`].
+pub(super) type ScopeSet = imbl::OrdSet<String>;
+
 /// Scope for tracking variable types.
 #[derive(Debug, Clone)]
 pub(super) struct TypeScope {
     /// Variable name → inferred type.
-    pub(super) vars: BTreeMap<String, InferredType>,
+    pub(super) vars: ScopeMap<InferredType>,
     /// Function name → (param types, return type).
-    pub(super) functions: BTreeMap<String, FnSignature>,
+    pub(super) functions: ScopeMap<FnSignature>,
     /// Named type aliases. Retains the declared type parameters so that
     /// generic aliases can be expanded via substitution on `Applied`.
-    pub(super) type_aliases: BTreeMap<String, TypeAliasInfo>,
+    pub(super) type_aliases: ScopeMap<TypeAliasInfo>,
     /// Enum declarations with generic and variant metadata.
-    pub(super) enums: BTreeMap<String, EnumDeclInfo>,
+    pub(super) enums: ScopeMap<EnumDeclInfo>,
     /// Interface declarations with associated types and methods.
-    pub(super) interfaces: BTreeMap<String, InterfaceDeclInfo>,
+    pub(super) interfaces: ScopeMap<InterfaceDeclInfo>,
     /// Struct declarations with generic and field metadata.
-    pub(super) structs: BTreeMap<String, StructDeclInfo>,
+    pub(super) structs: ScopeMap<StructDeclInfo>,
     /// Impl block methods: type_name → method signatures.
-    pub(super) impl_methods: BTreeMap<String, Vec<ImplMethodSig>>,
+    pub(super) impl_methods: ScopeMap<Vec<ImplMethodSig>>,
     /// Generic type parameter names in scope (treated as compatible with any type).
-    pub(super) generic_type_params: std::collections::BTreeSet<String>,
+    pub(super) generic_type_params: ScopeSet,
     /// Where-clause constraints: type_param → interface_bounds. A single type
     /// parameter may carry multiple bounds, written either as repeated clauses
     /// (`where T: A, T: B`) or additively (`where T: A + B`); all of them apply.
     /// Used for definition-site checking of generic function bodies.
-    pub(super) where_constraints: BTreeMap<String, Vec<TypeExpr>>,
+    pub(super) where_constraints: ScopeMap<Vec<TypeExpr>>,
     /// Variables declared with `let` (mutable). Variables not in this set
     /// are immutable (`const`, function params, loop vars, etc.).
-    pub(super) mutable_vars: std::collections::BTreeSet<String>,
+    pub(super) mutable_vars: ScopeSet,
     /// Variables that have been narrowed by flow-sensitive refinement.
     /// Maps var name → pre-narrowing type (used to restore on reassignment).
-    pub(super) narrowed_vars: BTreeMap<String, InferredType>,
+    pub(super) narrowed_vars: ScopeMap<InferredType>,
     /// Flow-narrowed *reference paths* — identifier-rooted property chains
     /// like `entry.arguments` or `cfg.opts.mode`. Maps a canonical dotted key
     /// to the narrowing directive that the property-access type inference
@@ -161,22 +177,22 @@ pub(super) struct TypeScope {
     /// which can never collide with a plain variable name (identifiers never
     /// contain `.`). Optional (`?.`) and plain (`.`) links collapse to the
     /// same key — the runtime guard inspects the same value either way.
-    pub(super) narrowed_paths: BTreeMap<String, PathNarrowing>,
+    pub(super) narrowed_paths: ScopeMap<PathNarrowing>,
     /// Mutable vars declared as unannotated `let x = nil`. A local `false`
     /// entry shadows a parent widenable marker after a new declaration or
     /// after the first successful widening assignment.
-    pub(super) nil_widenable_vars: BTreeMap<String, bool>,
+    pub(super) nil_widenable_vars: ScopeMap<bool>,
     /// Schema literals bound to variables, reduced to a TypeExpr subset so
     /// `schema_is(x, some_schema)` can participate in flow refinement.
-    pub(super) schema_bindings: BTreeMap<String, InferredType>,
+    pub(super) schema_bindings: ScopeMap<InferredType>,
     /// Variables holding unvalidated values from boundary APIs (json_parse, llm_call, etc.).
     /// Maps var name → source function name (e.g. "json_parse").
     /// Empty string = explicitly cleared (shadows parent scope entry).
-    pub(super) untyped_sources: BTreeMap<String, String>,
+    pub(super) untyped_sources: ScopeMap<String>,
     /// Concrete `type_of` variants ruled out on the current flow path for each
     /// `unknown`-typed variable. Drives the exhaustive-narrowing warning at
     /// `unreachable()` / `throw` / `never`-returning calls.
-    pub(super) unknown_ruled_out: BTreeMap<String, Vec<String>>,
+    pub(super) unknown_ruled_out: ScopeMap<Vec<String>>,
     /// Variables whose type came from a user-written annotation (let/const
     /// `: T`, fn param `: T`, fn return type, struct field). Variables in
     /// this set carry an explicit contract, so a property access against a
@@ -184,7 +200,7 @@ pub(super) struct TypeScope {
     /// type was *inferred* from a dict literal stay lenient: their `Shape`
     /// type is a best-effort guess, and historical scripts treat them like
     /// loose dicts.
-    pub(super) annotated_vars: BTreeSet<String>,
+    pub(super) annotated_vars: ScopeSet,
     /// Variables reassigned inside a nested closure within the current callable.
     /// Post-#4479 closures capture by reference, so calling such a closure can
     /// reassign the variable — which makes any flow-narrowing on it unsound to
@@ -192,7 +208,7 @@ pub(super) struct TypeScope {
     /// checked) and consulted by `apply_refinements` to suppress narrowing of
     /// these variables entirely (the conservative, TypeScript-aligned "assigned
     /// in a nested function ⇒ not narrowed" rule). See `harn#4523`.
-    pub(super) closure_mutated_vars: BTreeSet<String>,
+    pub(super) closure_mutated_vars: ScopeSet,
     /// Lexical parent. Held by `Rc` so creating a child scope is an
     /// `Rc::clone` (constant time) rather than a deep clone of the entire
     /// parent chain. Lookups walk this chain by shared reference; no
@@ -230,24 +246,24 @@ pub(super) struct FnSignature {
 impl TypeScope {
     pub(super) fn new() -> Self {
         let mut scope = Self {
-            vars: BTreeMap::new(),
-            functions: BTreeMap::new(),
-            type_aliases: BTreeMap::new(),
-            enums: BTreeMap::new(),
-            interfaces: BTreeMap::new(),
-            structs: BTreeMap::new(),
-            impl_methods: BTreeMap::new(),
-            generic_type_params: std::collections::BTreeSet::new(),
-            where_constraints: BTreeMap::new(),
-            mutable_vars: std::collections::BTreeSet::new(),
-            narrowed_vars: BTreeMap::new(),
-            narrowed_paths: BTreeMap::new(),
-            nil_widenable_vars: BTreeMap::new(),
-            schema_bindings: BTreeMap::new(),
-            untyped_sources: BTreeMap::new(),
-            unknown_ruled_out: BTreeMap::new(),
-            annotated_vars: BTreeSet::new(),
-            closure_mutated_vars: BTreeSet::new(),
+            vars: ScopeMap::new(),
+            functions: ScopeMap::new(),
+            type_aliases: ScopeMap::new(),
+            enums: ScopeMap::new(),
+            interfaces: ScopeMap::new(),
+            structs: ScopeMap::new(),
+            impl_methods: ScopeMap::new(),
+            generic_type_params: ScopeSet::new(),
+            where_constraints: ScopeMap::new(),
+            mutable_vars: ScopeSet::new(),
+            narrowed_vars: ScopeMap::new(),
+            narrowed_paths: ScopeMap::new(),
+            nil_widenable_vars: ScopeMap::new(),
+            schema_bindings: ScopeMap::new(),
+            untyped_sources: ScopeMap::new(),
+            unknown_ruled_out: ScopeMap::new(),
+            annotated_vars: ScopeSet::new(),
+            closure_mutated_vars: ScopeSet::new(),
             parent: None,
         };
         scope.enums.insert(
@@ -347,24 +363,24 @@ impl TypeScope {
 
     fn child_with_parent(parent: Rc<TypeScope>) -> Self {
         Self {
-            vars: BTreeMap::new(),
-            functions: BTreeMap::new(),
-            type_aliases: BTreeMap::new(),
-            enums: BTreeMap::new(),
-            interfaces: BTreeMap::new(),
-            structs: BTreeMap::new(),
-            impl_methods: BTreeMap::new(),
-            generic_type_params: std::collections::BTreeSet::new(),
-            where_constraints: BTreeMap::new(),
-            mutable_vars: std::collections::BTreeSet::new(),
-            narrowed_vars: BTreeMap::new(),
-            narrowed_paths: BTreeMap::new(),
-            nil_widenable_vars: BTreeMap::new(),
-            schema_bindings: BTreeMap::new(),
-            untyped_sources: BTreeMap::new(),
-            unknown_ruled_out: BTreeMap::new(),
-            annotated_vars: BTreeSet::new(),
-            closure_mutated_vars: BTreeSet::new(),
+            vars: ScopeMap::new(),
+            functions: ScopeMap::new(),
+            type_aliases: ScopeMap::new(),
+            enums: ScopeMap::new(),
+            interfaces: ScopeMap::new(),
+            structs: ScopeMap::new(),
+            impl_methods: ScopeMap::new(),
+            generic_type_params: ScopeSet::new(),
+            where_constraints: ScopeMap::new(),
+            mutable_vars: ScopeSet::new(),
+            narrowed_vars: ScopeMap::new(),
+            narrowed_paths: ScopeMap::new(),
+            nil_widenable_vars: ScopeMap::new(),
+            schema_bindings: ScopeMap::new(),
+            untyped_sources: ScopeMap::new(),
+            unknown_ruled_out: ScopeMap::new(),
+            annotated_vars: ScopeSet::new(),
+            closure_mutated_vars: ScopeSet::new(),
             parent: Some(parent),
         }
     }
@@ -435,8 +451,15 @@ impl TypeScope {
     /// list (the same shadow convention as `clear_unknown_ruled_out`), since
     /// lookups walk the scope chain.
     pub(super) fn clear_unknown_ruled_out_paths_rooted_at(&mut self, base: &str) {
-        self.unknown_ruled_out
-            .retain(|key, _| key == base || !path_key_rooted_at(key, base));
+        let stale: Vec<String> = self
+            .unknown_ruled_out
+            .keys()
+            .filter(|key| *key != base && path_key_rooted_at(key, base))
+            .cloned()
+            .collect();
+        for key in stale {
+            self.unknown_ruled_out.remove(&key);
+        }
         let mut ancestor = self.parent.as_deref();
         let mut masked: Vec<String> = Vec::new();
         while let Some(scope) = ancestor {
@@ -666,8 +689,15 @@ impl TypeScope {
     /// masked with a [`PathNarrowing::Cleared`] tombstone, since path lookups
     /// walk the scope chain.
     pub(super) fn clear_narrowed_paths_rooted_at(&mut self, base: &str) {
-        self.narrowed_paths
-            .retain(|key, _| !path_key_rooted_at(key, base));
+        let stale: Vec<String> = self
+            .narrowed_paths
+            .keys()
+            .filter(|key| path_key_rooted_at(key, base))
+            .cloned()
+            .collect();
+        for key in stale {
+            self.narrowed_paths.remove(&key);
+        }
         let mut ancestor = self.parent.as_deref();
         let mut masked: Vec<String> = Vec::new();
         while let Some(scope) = ancestor {

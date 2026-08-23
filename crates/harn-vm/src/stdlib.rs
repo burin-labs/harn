@@ -1241,6 +1241,7 @@ mod ambient_host_internal_projection_tests {
         unsafe {
             std::env::set_var(harn_parser::HARN_LEGACY_AMBIENT_CAPABILITIES_ENV, "1");
         }
+        harn_parser::refresh_legacy_ambient_capabilities();
         let mut vm = Vm::new();
         register_vm_stdlib(&mut vm);
         assert!(
@@ -1259,5 +1260,6 @@ mod ambient_host_internal_projection_tests {
                 None => std::env::remove_var(harn_parser::HARN_LEGACY_AMBIENT_CAPABILITIES_ENV),
             }
         }
+        harn_parser::refresh_legacy_ambient_capabilities();
     }
 }

@@ -256,7 +256,7 @@ pub(crate) fn validate_user_call_args(
     if got < required {
         let expected = arity_expect_for(func);
         return Err(VmError::ArityMismatch(Box::new(ArityMismatchError {
-            callee: func.name.clone(),
+            callee: func.name.to_string(),
             expected,
             got,
             span,
@@ -469,7 +469,7 @@ mod tests {
     fn compiled_function(params: Vec<ParamSlot>) -> CompiledFunction {
         let has_runtime_type_checks = CompiledFunction::has_runtime_type_checks_for_params(&params);
         CompiledFunction {
-            name: "f".to_string(),
+            name: arcstr::literal!("f"),
             type_params: Vec::new(),
             nominal_type_names: Vec::new(),
             params,

@@ -6,11 +6,13 @@
 //! Unlike a timing benchmark, the *number* of allocations per call is
 //! machine-independent and stable in CI, so we pin it here.
 //!
-//! A user-function call currently performs exactly **3** heap allocations:
+//! A user-function call currently performs exactly **2** heap allocations:
 //!   1. the callee's `Vec<LocalSlot>` (fresh mutable locals — fundamental),
 //!   2. the callee's env scope-stack clone (`VmEnv::cloned_for_call`, which
-//!      also reserves the slot the call's pushed scope reuses), and
-//!   3. the frame's `fn_name` string clone.
+//!      also reserves the slot the call's pushed scope reuses).
+//!
+//! The frame's `fn_name` used to be a third (a `String` clone per call); it
+//! is now a shared `HarnStr` refcount bump off `CompiledFunction::name`.
 //!
 //! The caller-env snapshot is a move (`std::mem::replace`), not a clone, and the
 //! cloned callee env reserves room for its pushed scope, so neither shows up
@@ -96,7 +98,7 @@ fn marginal_per_iter(make: impl Fn(usize) -> String) -> f64 {
 }
 
 #[test]
-fn user_fn_call_allocates_at_most_three_times() {
+fn user_fn_call_allocates_at_most_twice() {
     let per_call = marginal_per_iter(user_fn_loop);
     let per_loop = marginal_per_iter(bare_loop);
     let attributable_to_call = per_call - per_loop;
@@ -108,12 +110,13 @@ fn user_fn_call_allocates_at_most_three_times() {
         "the measurement loop regressed to {per_loop} allocs/iter; it must be allocation-free"
     );
 
-    // Upper bound: a user-fn call must not exceed 3 heap allocations. Floats
-    // because the value is a measured ratio; 3.0001 tolerates nothing extra
+    // Upper bound: a user-fn call must not exceed 2 heap allocations. Floats
+    // because the value is a measured ratio; 2.0001 tolerates nothing extra
     // while staying robust to f64 division.
     assert!(
-        attributable_to_call <= 3.0001,
-        "user-fn call regressed to {attributable_to_call} allocs/call (was 3); \
-         a redundant env clone or clone-then-grow reallocation was likely reintroduced"
+        attributable_to_call <= 2.0001,
+        "user-fn call regressed to {attributable_to_call} allocs/call (was 2); \
+         a redundant env clone, a reintroduced per-call name clone, or a \
+         clone-then-grow reallocation is the usual cause"
     );
 }

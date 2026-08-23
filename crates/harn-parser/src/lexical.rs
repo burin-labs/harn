@@ -733,9 +733,9 @@ impl LexicalAnalysis {
         inside_nested_callable: bool,
         owner: &BindingOwner,
     ) {
-        for child in crate::visit::immediate_children(node) {
+        crate::visit::for_each_immediate_child(node, &mut |child| {
             self.walk_node(child, scopes, inside_nested_callable, owner);
-        }
+        });
     }
 
     fn record_reference(

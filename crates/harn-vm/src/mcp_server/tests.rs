@@ -17,7 +17,7 @@ use super::{McpServer, McpServerMetadata};
 fn empty_closure(name: &str) -> VmClosure {
     VmClosure {
         func: Arc::new(CompiledFunction {
-            name: name.to_string(),
+            name: crate::value::HarnStr::from(name),
             type_params: Vec::new(),
             nominal_type_names: Vec::new(),
             params: Vec::new(),

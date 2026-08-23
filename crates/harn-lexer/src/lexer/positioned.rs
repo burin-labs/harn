@@ -1,8 +1,8 @@
 use super::Lexer;
 
-impl Lexer {
+impl<'src> Lexer<'src> {
     /// Start counting at a source position when re-lexing interpolated expressions.
-    pub fn with_position(source: &str, line: usize, column: usize) -> Self {
+    pub fn with_position(source: &'src str, line: usize, column: usize) -> Self {
         Self::with_position_and_offset(source, line, column, 0)
     }
 
@@ -12,15 +12,15 @@ impl Lexer {
     /// keeps every emitted span internally consistent: byte offsets and
     /// line/column coordinates describe the same file-level location.
     pub fn with_position_and_offset(
-        source: &str,
+        source: &'src str,
         line: usize,
         column: usize,
         byte_offset: usize,
     ) -> Self {
         Self {
-            source: source.chars().collect(),
+            src: source,
             pos: 0,
-            byte_pos: byte_offset,
+            base: byte_offset,
             line,
             column,
         }

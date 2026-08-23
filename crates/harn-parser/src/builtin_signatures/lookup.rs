@@ -60,14 +60,31 @@ pub fn lookup_with_privileged_wire(
             return lookup(canonical);
         }
     }
-    for group in signatures::groups() {
-        for sig in group {
-            if sig.name == name {
-                return Some(sig);
+    static_signature_index().get(name).copied()
+}
+
+/// Name index over the hand-written static fallback tables.
+///
+/// The static groups hold several hundred signatures, and the fallback fires
+/// for *every* name the registry does not know — including every user-defined
+/// function call the type checker resolves — so a linear scan of every group
+/// per miss was a measurable slice of whole-file typechecking. The tables are
+/// `'static`, so one lazily-built index serves every lookup.
+fn static_signature_index(
+) -> &'static std::collections::HashMap<&'static str, &'static BuiltinSignature> {
+    static INDEX: std::sync::OnceLock<
+        std::collections::HashMap<&'static str, &'static BuiltinSignature>,
+    > = std::sync::OnceLock::new();
+    INDEX.get_or_init(|| {
+        let mut index = std::collections::HashMap::new();
+        for group in signatures::groups() {
+            for sig in group {
+                // First writer wins, matching the previous scan order.
+                index.entry(sig.name).or_insert(sig);
             }
         }
-    }
-    None
+        index
+    })
 }
 
 /// Resolve an unqualified legacy method name only when the typed manifest has
@@ -350,7 +367,12 @@ mod ambient_install_regression {
 
     #[test]
     fn installed_manifest_does_not_shadow_ambient_capability_methods() {
+        // Process-global env; restore afterwards so later tests in this
+        // process do not inherit the legacy bridge (it previously leaked and
+        // made strict-mode typechecker tests order-dependent).
+        let previous = std::env::var_os("HARN_LEGACY_AMBIENT_CAPABILITIES");
         std::env::set_var("HARN_LEGACY_AMBIENT_CAPABILITIES", "1");
+        crate::refresh_legacy_ambient_capabilities();
         assert!(
             is_builtin("store_set"),
             "capability-contracts fallback must resolve ambient store_set"
@@ -372,5 +394,11 @@ mod ambient_install_regression {
             legacy_capability_method_entry("store_set").is_some(),
             "legacy_capability_method_entry must stay unique after install"
         );
+
+        match previous {
+            Some(value) => std::env::set_var("HARN_LEGACY_AMBIENT_CAPABILITIES", value),
+            None => std::env::remove_var("HARN_LEGACY_AMBIENT_CAPABILITIES"),
+        }
+        crate::refresh_legacy_ambient_capabilities();
     }
 }

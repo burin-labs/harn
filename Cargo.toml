@@ -36,6 +36,7 @@ members = [
     "crates/harn-rules-hostlib",
     "crates/harn-mcp-compat",
     "tree-sitter-harn",
+    "bench/frontend",
     "bench/llm",
     "bench/vm",
     "bench/orchestration",

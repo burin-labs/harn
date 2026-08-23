@@ -308,7 +308,7 @@ impl Vm {
                     format!("fn_{i}")
                 }
             } else {
-                frame.fn_name.clone()
+                frame.fn_name.to_string()
             };
             frames.push((name, line, frame.chunk.source_file.clone()));
         }
@@ -634,7 +634,7 @@ impl Vm {
             initial_env: None,
             initial_local_slots: None,
             saved_iterator_depth: saved_iter_depth,
-            fn_name: "<eval>".to_string(),
+            fn_name: arcstr::literal!("<eval>"),
             argc: 0,
             saved_source_dir: self.source_dir.clone(),
             module_functions: None,

@@ -41,13 +41,45 @@ pub use builtin_signatures::install_builtin_manifest;
 /// enforcement in place.
 pub const HARN_LEGACY_AMBIENT_CAPABILITIES_ENV: &str = "HARN_LEGACY_AMBIENT_CAPABILITIES";
 
+/// Cached parse of [`HARN_LEGACY_AMBIENT_CAPABILITIES_ENV`].
+///
+/// `0` = not read yet, `1` = disabled, `2` = enabled. The bridge flag is
+/// consulted on every builtin-name lookup the type checker performs, and
+/// `getenv` rescans the whole process environment per call — measurably hot
+/// on whole-file typechecks. A process cannot have its environment changed
+/// from outside once started, so one read is authoritative; the only writers
+/// are tests, which go through [`refresh_legacy_ambient_capabilities`].
+static LEGACY_AMBIENT_CAPABILITIES: std::sync::atomic::AtomicU8 =
+    std::sync::atomic::AtomicU8::new(0);
+
 pub fn legacy_ambient_capabilities_enabled() -> bool {
-    std::env::var(HARN_LEGACY_AMBIENT_CAPABILITIES_ENV).is_ok_and(|value| {
-        matches!(
-            value.trim().to_ascii_lowercase().as_str(),
-            "1" | "true" | "yes" | "on"
-        )
-    })
+    match LEGACY_AMBIENT_CAPABILITIES.load(std::sync::atomic::Ordering::Relaxed) {
+        1 => false,
+        2 => true,
+        _ => refresh_legacy_ambient_capabilities(),
+    }
+}
+
+/// Re-read the legacy-bridge flag from the process environment and update the
+/// cached value, returning the fresh result.
+///
+/// Only needed by code that mutates `HARN_LEGACY_AMBIENT_CAPABILITIES` inside
+/// the running process — in practice, tests. Call it after every
+/// `set_var`/`remove_var` of the flag so later reads observe the change.
+pub fn refresh_legacy_ambient_capabilities() -> bool {
+    let enabled = std::env::var_os(HARN_LEGACY_AMBIENT_CAPABILITIES_ENV).is_some_and(|value| {
+        value.to_str().is_some_and(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+    });
+    LEGACY_AMBIENT_CAPABILITIES.store(
+        if enabled { 2 } else { 1 },
+        std::sync::atomic::Ordering::Relaxed,
+    );
+    enabled
 }
 
 /// Whether an old hostlib wire name projects a method from the authoritative
