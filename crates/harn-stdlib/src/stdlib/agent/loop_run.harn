@@ -652,6 +652,7 @@ pub fn __agent_loop_run(harness: Harness, message, session, initial_opts) {
             "stalled",
             visible_text,
             iteration_index + 1,
+            raw_text,
           )
           done_judge_invocations += __done_judge_hit(stall_verdict)
           verify_completion_judge_invocations += __completion_judge_hit(stall_verdict)
