@@ -277,7 +277,12 @@ fn stdlib_module_artifact(
         let compilation_context = module_compilation_context_for_source(synthetic, source)?;
         let lookup = {
             let _load_span = recorder.map(super::ModulePhaseRecorder::load_span);
-            bytecode_cache::load_module(synthetic, &embedded, &compilation_context)
+            bytecode_cache::load_module(
+                synthetic,
+                &embedded,
+                &compilation_context,
+                ModuleProvenance::User,
+            )
         };
         let artifact = if let Some(artifact) = lookup.artifact {
             artifact
@@ -1250,8 +1255,14 @@ impl Vm {
         ) {
             return Some(prepared);
         }
-        let key =
-            bytecode_cache::CacheKey::from_module_content_hash(content_hash, compilation_context);
+        // `User` matches the in-memory probe just above: the link table is
+        // an ordinary-VM fast path, and `enable_trusted_host_dispatch` clears
+        // it outright, so a trusted graph never reaches here.
+        let key = bytecode_cache::CacheKey::from_module_content_hash(
+            content_hash,
+            compilation_context,
+            ModuleProvenance::User,
+        );
         let artifact = bytecode_cache::load_module_for_key(file_path, key).artifact?;
         Some(self.prepared_module_cache.insert_with_context(
             canonical.to_path_buf(),

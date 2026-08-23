@@ -6,6 +6,7 @@
 
 use super::*;
 use crate::compile_source;
+use crate::module_artifact::ModuleProvenance;
 
 #[test]
 fn header_round_trips_chunk() {
@@ -55,6 +56,7 @@ fn header_mismatch_returns_none() {
     let path = tmp.path().join("a.harnbc");
     store_at(&path, &key, &chunk).expect("write");
     let other = CacheKey {
+        provenance: ModuleProvenance::User,
         source_hash: [0xAB; 32],
         context_hash: key.context_hash,
         harn_version: std::borrow::Cow::Borrowed(HARN_VERSION),
@@ -86,6 +88,7 @@ fn compiler_tag_mismatch_returns_none() {
     let path = tmp.path().join("b.harnbc");
     store_at(&path, &key, &chunk).expect("write");
     let other = CacheKey {
+        provenance: ModuleProvenance::User,
         compiler_tag: key.compiler_tag ^ 0xFF,
         ..key
     };
@@ -170,13 +173,13 @@ fn module_key_tracks_canonical_imported_interface_not_dependency_bodies() {
         "set order and duplicates are not semantics"
     );
     assert_eq!(
-        CacheKey::from_module_source(&source, &first),
-        CacheKey::from_module_source(&source, &reordered),
+        CacheKey::from_module_source(&source, &first, ModuleProvenance::User),
+        CacheKey::from_module_source(&source, &reordered, ModuleProvenance::User),
         "one imported interface must have one key"
     );
     assert_ne!(
-        CacheKey::from_module_source(&source, &first),
-        CacheKey::from_module_source(&source, &changed),
+        CacheKey::from_module_source(&source, &first, ModuleProvenance::User),
+        CacheKey::from_module_source(&source, &changed, ModuleProvenance::User),
         "changing an imported name consulted by lowering must miss"
     );
 }
@@ -194,10 +197,12 @@ fn module_key_excludes_dependency_bodies_while_entry_key_tracks_them() {
     let module_before = CacheKey::from_module_source(
         &ModuleSource::from_text(importer_source),
         &ModuleCompilationContext::default(),
+        ModuleProvenance::User,
     );
     let dependency_before = CacheKey::from_module_source(
         &ModuleSource::from_text(std::fs::read_to_string(&dependency).unwrap()),
         &ModuleCompilationContext::default(),
+        ModuleProvenance::User,
     );
 
     std::fs::write(&dependency, "pub fn value() { return 2 }\n").unwrap();
@@ -214,10 +219,12 @@ fn module_key_excludes_dependency_bodies_while_entry_key_tracks_them() {
     let module_after = CacheKey::from_module_source(
         &ModuleSource::from_text(importer_source),
         &ModuleCompilationContext::default(),
+        ModuleProvenance::User,
     );
     let dependency_after = CacheKey::from_module_source(
         &ModuleSource::from_text(std::fs::read_to_string(&dependency).unwrap()),
         &ModuleCompilationContext::default(),
+        ModuleProvenance::User,
     );
 
     assert_ne!(
@@ -322,12 +329,14 @@ fn packaged_module_artifact_with_another_sources_key_fails_closed() {
     let first_key = CacheKey::from_module_source(
         &ModuleSource::from_text(first_source),
         &ModuleCompilationContext::default(),
+        ModuleProvenance::User,
     );
     store_module_at(&target, &first_key, &artifact).expect("store swapped artifact");
 
     let second_key = CacheKey::from_module_source(
         &ModuleSource::from_text(second_source),
         &ModuleCompilationContext::default(),
+        ModuleProvenance::User,
     );
     assert!(
         read_module_if_matches(&target, &second_key, &second_path)
@@ -345,6 +354,7 @@ fn module_artifact_is_relocatable_and_rebinds_exact_source_path() {
     let key = CacheKey::from_module_source(
         &ModuleSource::from_text(source),
         &ModuleCompilationContext::default(),
+        ModuleProvenance::User,
     );
 
     let artifact = crate::module_artifact::compile_module_artifact_from_source(first_path, source)
@@ -400,6 +410,7 @@ fn source_local_module_artifact_round_trips() {
     let key = CacheKey::from_module_source(
         &ModuleSource::from_text(source),
         &ModuleCompilationContext::default(),
+        ModuleProvenance::User,
     );
     let tmp = tempfile::tempdir().unwrap();
     let path = tmp.path().join("source-local-module.harnmod");
@@ -632,6 +643,7 @@ fn seed_entry(tmp: &Path, dep_body: &str, settle: Settle) -> (PathBuf, String) {
         "a graph of ordinary readable files must produce a manifest"
     );
     let key = CacheKey {
+        provenance: ModuleProvenance::User,
         source_hash: sha256(entry_source.as_bytes()),
         context_hash,
         harn_version: std::borrow::Cow::Borrowed(HARN_VERSION),
@@ -769,6 +781,7 @@ fn stored_manifest(entry: &Path, entry_source: &str) -> ContextManifest {
     read_entry_candidate(
         &adjacent_cache_path(entry).unwrap(),
         &CacheKey {
+            provenance: ModuleProvenance::User,
             source_hash: sha256(entry_source.as_bytes()),
             context_hash: [0u8; 32],
             harn_version: std::borrow::Cow::Borrowed(HARN_VERSION),
@@ -948,6 +961,7 @@ fn a_touched_dependency_refreshes_the_manifest_instead_of_re_walking_forever() {
     let refreshed = read_entry_candidate(
         &adjacent_cache_path(&entry).unwrap(),
         &CacheKey {
+            provenance: ModuleProvenance::User,
             source_hash: sha256(entry_source.as_bytes()),
             context_hash: [0u8; 32],
             harn_version: std::borrow::Cow::Borrowed(HARN_VERSION),
@@ -1068,6 +1082,7 @@ fn store_beside(entry: &Path, source: &str) -> PathBuf {
     let (context_hash, manifest) = hash_transitive_user_imports_with_manifest(entry, source);
     let manifest = manifest.expect("a graph of ordinary readable files must produce a manifest");
     let key = CacheKey {
+        provenance: ModuleProvenance::User,
         source_hash: sha256(source.as_bytes()),
         context_hash,
         harn_version: std::borrow::Cow::Borrowed(HARN_VERSION),
@@ -1151,6 +1166,7 @@ fn an_artifact_from_another_build_of_this_version_is_not_served() {
     let (context_hash, manifest) = hash_transitive_user_imports_with_manifest(&entry, &source);
     let manifest = manifest.expect("a graph of ordinary readable files must produce a manifest");
     let key = CacheKey {
+        provenance: ModuleProvenance::User,
         source_hash: sha256(source.as_bytes()),
         context_hash,
         harn_version: std::borrow::Cow::Borrowed(HARN_VERSION),

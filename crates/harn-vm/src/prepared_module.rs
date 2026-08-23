@@ -430,36 +430,44 @@ impl PreparedModuleCache {
             // Disk cache hits skip parse + compile. The scoped prepared cache
             // additionally skips deserialization and chunk hydration on later
             // fresh VMs without sharing any runtime module state.
-            let cached = if provenance == ModuleProvenance::TrustedHostDispatch {
-                let mut compile_span = recorder.map(ModulePhaseRecorder::compile_span);
-                let compiled =
-                    compile_trusted_host_dispatch_module_artifact_from_source_with_context(
-                        source_path,
-                        source.as_str(),
-                        &compilation_context,
-                    )?;
-                if let Some(span) = &mut compile_span {
-                    span.mark_compile_succeeded();
-                }
-                drop(compile_span);
-                compiled
-            } else {
-                // Only ordinary user bytecode enters the process-wide disk cache.
-                // Trusted host-dispatch artifacts remain in this explicitly scoped,
-                // provenance-keyed in-memory cache.
+            // Every provenance shares one cache path. The compilation context
+            // carries the authority, so the on-disk identity already separates
+            // a trusted artifact from an ordinary one: they hash to different
+            // keys and each fails the other's header check. Before that field
+            // existed, the only thing keeping privileged bytecode out of an
+            // ordinary reader's reach was this branch skipping the cache
+            // entirely, which also meant a trusted graph recompiled from source
+            // on every process.
+            let cached = {
                 let lookup = {
                     let _load_span = recorder.map(ModulePhaseRecorder::load_span);
-                    crate::bytecode_cache::load_module(source_path, source, &compilation_context)
+                    crate::bytecode_cache::load_module(
+                        source_path,
+                        source,
+                        &compilation_context,
+                        provenance,
+                    )
                 };
                 if let Some(artifact) = lookup.artifact {
                     artifact
                 } else {
                     let mut compile_span = recorder.map(ModulePhaseRecorder::compile_span);
-                    let compiled = compile_module_artifact_from_source_with_context(
-                        source_path,
-                        source.as_str(),
-                        &compilation_context,
-                    )?;
+                    // Same `provenance` that keyed the lookup above, so the
+                    // artifact stored on a miss can only be found by a reader
+                    // asking for the authority it was compiled under.
+                    let compiled = if provenance == ModuleProvenance::TrustedHostDispatch {
+                        compile_trusted_host_dispatch_module_artifact_from_source_with_context(
+                            source_path,
+                            source.as_str(),
+                            &compilation_context,
+                        )?
+                    } else {
+                        compile_module_artifact_from_source_with_context(
+                            source_path,
+                            source.as_str(),
+                            &compilation_context,
+                        )?
+                    };
                     if let Some(span) = &mut compile_span {
                         span.mark_compile_succeeded();
                     }

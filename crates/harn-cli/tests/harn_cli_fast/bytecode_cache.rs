@@ -95,6 +95,7 @@ fn expected_module_artifact(cache_dir: &Path, source_path: &Path) -> PathBuf {
     let key = harn_vm::bytecode_cache::CacheKey::from_module_source(
         &harn_vm::module_source::ModuleSource::from_text(source),
         &compilation_context,
+        harn_vm::module_artifact::ModuleProvenance::User,
     );
     cache_dir.join(key.module_filename())
 }

@@ -26,6 +26,7 @@
 //! codegen_fp   : [u8; fp_len]   CODEGEN_FINGERPRINT of the producing build
 //! compiler_tag : u8        bitmask of active CompilerOptions
 //! kind         : u8        1 = entry chunk, 2 = module artifact
+//! provenance   : u8        authority the artifact was compiled under
 //! source_hash  : [u8; 32]
 //! context_hash : [u8; 32]
 //! payload      : postcard-serialized payload for `kind`
@@ -56,7 +57,7 @@ use crate::context_manifest::{
     ContextManifest, GraphLinkTable, ManifestCheck, ManifestFile, ManifestUnreadable,
     ManifestUnresolved,
 };
-use crate::module_artifact::{ModuleArtifact, ModuleCompilationContext};
+use crate::module_artifact::{ModuleArtifact, ModuleCompilationContext, ModuleProvenance};
 use crate::module_source::{self, ModuleSource};
 
 /// Header magic for all bytecode-cache artifact families.
@@ -82,7 +83,11 @@ pub const MAGIC: &[u8; 8] = b"HARNBC\0\0";
 /// v10: module namespace imports carry conservative static member demand.
 /// v11: manifest link entries carry the typed imported interface needed to
 /// reconstruct an exact module compilation key.
-pub const SCHEMA_VERSION: u32 = 11;
+/// v12: the header carries the authority the artifact was compiled under, so an
+/// ordinary lookup cannot accept an adjacent artifact compiled with privileged
+/// authority. `compiler_tag` could not express this: it folds the optimization
+/// and legacy-ambient bits only, never `privileged_wire_authority`.
+pub const SCHEMA_VERSION: u32 = 12;
 
 /// Compile-time Harn release. Cache files written by a different release
 /// are rejected on load.
@@ -179,6 +184,17 @@ pub struct CacheKey {
     /// `HARN_DISABLE_OPTIMIZATIONS` between runs would otherwise reuse a
     /// chunk compiled under the wrong setting.
     pub compiler_tag: u8,
+    /// The authority the artifact was compiled under.
+    ///
+    /// Part of the identity because it selects what the emitted bytecode is
+    /// permitted to do: the same source compiled as
+    /// [`ModuleProvenance::TrustedHostDispatch`] may call privileged builtins
+    /// that the same source compiled as [`ModuleProvenance::User`] may not.
+    /// Two compiles that differ in that are not one artifact, and `compiler_tag`
+    /// cannot express the difference — it folds only the optimization and
+    /// legacy-ambient bits, never `privileged_wire_authority`. Without this
+    /// field they collide on one key and one filename.
+    pub provenance: ModuleProvenance,
 }
 
 impl CacheKey {
@@ -193,6 +209,10 @@ impl CacheKey {
             context_hash,
             harn_version: Cow::Borrowed(HARN_VERSION),
             compiler_tag: compiler_options_tag(CompilerOptions::from_env()),
+            // Entry chunks are always compiled ordinary. The trusted
+            // latch governs `module_provenance`, i.e. the graph a VM
+            // imports, not the entry it was handed.
+            provenance: ModuleProvenance::User,
         }
     }
 
@@ -212,6 +232,10 @@ impl CacheKey {
             context_hash,
             harn_version: Cow::Borrowed(HARN_VERSION),
             compiler_tag: compiler_options_tag(CompilerOptions::from_env()),
+            // Entry chunks are always compiled ordinary. The trusted
+            // latch governs `module_provenance`, i.e. the graph a VM
+            // imports, not the entry it was handed.
+            provenance: ModuleProvenance::User,
         }
     }
 
@@ -235,8 +259,9 @@ impl CacheKey {
     pub fn from_module_source(
         source: &ModuleSource,
         compilation_context: &ModuleCompilationContext,
+        provenance: ModuleProvenance,
     ) -> Self {
-        Self::from_module_content_hash(source.sha256(), compilation_context)
+        Self::from_module_content_hash(source.sha256(), compilation_context, provenance)
     }
 
     /// As [`from_module_source`](Self::from_module_source), but from a digest
@@ -248,12 +273,14 @@ impl CacheKey {
     pub fn from_module_content_hash(
         content_hash: [u8; 32],
         compilation_context: &ModuleCompilationContext,
+        provenance: ModuleProvenance,
     ) -> Self {
         Self {
             source_hash: content_hash,
             context_hash: module_compilation_context_hash(compilation_context),
             harn_version: Cow::Borrowed(HARN_VERSION),
             compiler_tag: compiler_options_tag(CompilerOptions::from_env()),
+            provenance,
         }
     }
 
@@ -274,6 +301,10 @@ impl CacheKey {
         hasher.update(self.context_hash);
         hasher.update(self.harn_version.as_bytes());
         hasher.update([self.compiler_tag]);
+        // Authority is part of the filename, not only of the header check, so a
+        // trusted and an ordinary artifact for one source cannot occupy the same
+        // path and overwrite each other.
+        hasher.update([provenance_tag(self.provenance)]);
         let identity: [u8; 32] = hasher.finalize().into();
         format!("{}.{}", hex(&identity), MODULE_CACHE_EXTENSION)
     }
@@ -345,6 +376,10 @@ pub fn load(source_path: &Path, source: &str) -> LookupOutcome {
         context_hash: [0u8; 32],
         harn_version: Cow::Borrowed(HARN_VERSION),
         compiler_tag: compiler_options_tag(CompilerOptions::from_env()),
+        // Entry chunks are always compiled ordinary. The trusted
+        // latch governs `module_provenance`, i.e. the graph a VM
+        // imports, not the entry it was handed.
+        provenance: ModuleProvenance::User,
     };
     let mut walk = GraphWalk::new(source_path, source);
 
@@ -522,10 +557,11 @@ pub fn load_module(
     source_path: &Path,
     source: &ModuleSource,
     compilation_context: &ModuleCompilationContext,
+    provenance: ModuleProvenance,
 ) -> ModuleLookupOutcome {
     load_module_for_key(
         source_path,
-        CacheKey::from_module_source(source, compilation_context),
+        CacheKey::from_module_source(source, compilation_context, provenance),
     )
 }
 
@@ -726,10 +762,24 @@ fn encode_artifact_fingerprinted(
     buf.extend_from_slice(fingerprint_bytes);
     buf.push(key.compiler_tag);
     buf.push(kind);
+    buf.push(provenance_tag(key.provenance));
     buf.extend_from_slice(&key.source_hash);
     buf.extend_from_slice(&key.context_hash);
     buf.extend_from_slice(payload);
     buf
+}
+
+/// Stable on-disk byte for an authority.
+///
+/// Written out rather than derived from the enum's discriminant so that
+/// reordering [`ModuleProvenance`]'s variants cannot silently repoint existing
+/// artifacts at a different authority.
+fn provenance_tag(provenance: ModuleProvenance) -> u8 {
+    match provenance {
+        ModuleProvenance::User => 0,
+        ModuleProvenance::PrivilegedWire => 1,
+        ModuleProvenance::TrustedHostDispatch => 2,
+    }
 }
 
 /// Reads `len` bytes and reports whether they equal `expected`.
@@ -796,14 +846,24 @@ fn read_header_if_matches(
     if !read_length_prefixed_match(&mut file, fingerprint_len, CODEGEN_FINGERPRINT.as_bytes()) {
         return Ok(None);
     }
-    let mut compiler_and_kind = [0u8; 2];
-    if file.read_exact(&mut compiler_and_kind).is_err() {
+    let mut compiler_kind_provenance = [0u8; 3];
+    if file.read_exact(&mut compiler_kind_provenance).is_err() {
         return Ok(None);
     }
-    if compiler_and_kind[0] != key.compiler_tag {
+    if compiler_kind_provenance[0] != key.compiler_tag {
         return Ok(None);
     }
-    let kind = compiler_and_kind[1];
+    let kind = compiler_kind_provenance[1];
+    // The authority assertion, and the reason it is a header field rather than
+    // only a key field. Shared-cache entries are found by a key-derived
+    // filename, so the key alone separates them. An ADJACENT artifact is found
+    // by path: `dep.harnmod` beside `dep.harn` is offered to whoever imports
+    // that file. Without this comparison an ordinary import accepts an
+    // artifact compiled under a privileged authority, because every other
+    // header field is identical for the same source and context.
+    if compiler_kind_provenance[2] != provenance_tag(key.provenance) {
+        return Ok(None);
+    }
     let mut hashes = [0u8; 64];
     if file.read_exact(&mut hashes).is_err() {
         return Ok(None);
