@@ -106,8 +106,14 @@ pub(super) fn finalize_run_error(
 }
 
 /// Translate a `.harnpack` preflight failure into either the `--json` error
-/// event stream or a plain stderr message. Verifying and unpacking a bundle is
-/// preparation, not the program, so it reports as a setup failure.
+/// event stream or a plain stderr message plus the program-failure status.
+///
+/// Deliberately not a setup failure, even though it happens before the program
+/// runs. Most of what this rejects is a refusal about the bundle itself — an
+/// absent signature, a signature that does not cover the bytes on disk — and
+/// those are verdicts on the artifact, not faults in the host that was asked to
+/// run it. A caller that reads the setup status as "infrastructure, retry it"
+/// would retry a tampered bundle forever.
 pub(super) fn finalize_harnpack_error(
     mut stderr: String,
     json_session: Option<JsonRunSession>,
@@ -132,7 +138,7 @@ pub(super) fn finalize_harnpack_error(
         None,
         0,
         None,
-        crate::exit::RunFailure::Setup,
+        crate::exit::RunFailure::Program,
         code,
         message,
     )

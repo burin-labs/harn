@@ -211,14 +211,20 @@ caller may branch on them.
 
 `125` covers everything Harn does on the program's behalf before handing it
 control: materializing locked dependencies, installing manifest triggers and
-hooks, loading provider connectors, launching the session's environment policy,
-and verifying a `.harnpack`. Without it, a harness that shells out to Harn cannot
-tell "your dependencies could not be prepared" from "your code returned a
-failure" — a distinction that decides whether to retry, to report an
-infrastructure fault, or to surface a real result.
+hooks, loading provider connectors, and launching the session's environment
+policy. Without it, a harness that shells out to Harn cannot tell "your
+dependencies could not be prepared" from "your code returned a failure" — a
+distinction that decides whether to retry, to report an infrastructure fault, or
+to surface a real result.
 
-A compile error is *not* a setup failure. The program's own content failing is
-the program failing, and it keeps status `1`.
+Two things that happen before the program runs are deliberately *not* setup
+failures, and keep status `1`:
+
+- A **compile error**. The program's own content failing is the program failing.
+- A **`.harnpack` verification refusal** — an absent signature, or one that does
+  not cover the bytes on disk. That is a verdict on the artifact, not a fault in
+  the host that was asked to run it, and a caller reading `125` as "retry the
+  infrastructure" would retry a tampered bundle forever.
 
 `harn test` uses the same reserved statuses. It materializes the suite's
 dependencies once before any case runs, so a lock that cannot be prepared exits
