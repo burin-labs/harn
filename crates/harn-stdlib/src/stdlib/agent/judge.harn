@@ -153,10 +153,7 @@ pub type CompletionDirective = {
  * an out-of-contract value is preserved verbatim so telemetry can show what
  * the judge actually said, and is treated as a non-veto by the caller.
  */
-pub type CompletionJudgeVerdict = {
-  verdict: string,
-  detail: string,
-}
+pub type CompletionJudgeVerdict = {verdict: string, detail: string}
 
 /** Normalized result from either a deterministic or model completion check. */
 type CompletionStageVerdict = {
@@ -593,11 +590,7 @@ pub fn __judge_completion_verdict_schema() -> dict {
     type: "object",
     properties: {
       verdict: {type: "string", enum: ["done", "continue"]},
-      detail: {
-        type: "string",
-        minLength: 1,
-        maxLength: __COMPLETION_JUDGE_DETAIL_CHAR_LIMIT,
-      },
+      detail: {type: "string", minLength: 1, maxLength: __COMPLETION_JUDGE_DETAIL_CHAR_LIMIT},
     },
     required: ["verdict", "detail"],
     additionalProperties: false,
@@ -612,7 +605,11 @@ pub fn __judge_completion_verdict_schema() -> dict {
  */
 pub fn __judge_completion_verdict_read(result) -> CompletionJudgeVerdict {
   const raw = trim(to_string(result?.verdict ?? result?.action ?? ""))
-  const verdict = if raw == "accept" { "done" } else { raw }
+  const verdict = if raw == "accept" {
+    "done"
+  } else {
+    raw
+  }
   // First non-blank wins rather than first non-nil: the superseded shape
   // carried an empty `repair` on approval, which would otherwise shadow the
   // `reason` that holds the audit basis.
@@ -797,7 +794,11 @@ fn __judge_invoke_structured(
   const verdict = decoded.verdict
   const detail = decoded.detail
   const feedback_default = judge_cfg.feedback_fallback ?? ""
-  const feedback = if detail == "" { feedback_default } else { detail }
+  const feedback = if detail == "" {
+    feedback_default
+  } else {
+    detail
+  }
   return {
     vetoed: verdict == "continue",
     verdict: verdict,
@@ -807,7 +808,11 @@ fn __judge_invoke_structured(
       nil
     },
     reasoning: detail,
-    next_step: if verdict == "continue" { detail } else { "" },
+    next_step: if verdict == "continue" {
+      detail
+    } else {
+      ""
+    },
     judge_duration_ms: duration_ms,
     source: "llm",
     admission: ran.admission,
@@ -956,7 +961,7 @@ fn __done_contract_primary_prompt(opts) {
   )
 }
 
-pub fn __done_contract_judge_system(opts) {
+pub fn __done_contract_judge_system(opts) -> string {
   const extra = trim(to_string(opts?.rubric ?? ""))
   let lines = [
     "You are a strict done-contract judge for an autonomous agent.",

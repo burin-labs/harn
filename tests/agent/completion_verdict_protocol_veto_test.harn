@@ -31,11 +31,11 @@ const APPROVAL = "{\"verdict\":\"done\",\"detail\":\"The report names the change
 // The substantive answer, repeated verbatim. It never carries a marker.
 const FINAL_TEXT = "Added the eviction path in src/cache.rs; the focused test passes."
 
-fn _feedback_texts(captured) -> list<string> {
+fn _completion_feedback(captured) -> list<string> {
   let out = []
   for event in captured.events {
-    if event.type == "feedback_injected" {
-      out = out.appending(trim(to_string(event?.text ?? event?.feedback ?? "")))
+    if event.type == "feedback_injected" && to_string(event?.kind ?? "") == "verify_completion" {
+      out = out.appending(trim(to_string(event?.content ?? "")))
     }
   }
   return out
@@ -116,13 +116,13 @@ pipeline test_injected_feedback_is_the_judges_own_detail(harness: Harness, task)
         session,
         fn() { return agent_loop(harness, "Add the eviction path and verify it.", nil, opts) },
       )
-      const feedback = _feedback_texts(captured)
-      assert_eq(len(feedback) > 0, true)
-      // Exactly the judge's detail: the compact contract carries one field, so
-      // there is nothing for the harness to compose it with.
+      const feedback = _completion_feedback(captured)
+      // Exactly the judge's detail, once: the compact contract carries one
+      // field, so there is nothing for the harness to compose it with and no
+      // second copy for it to append.
       assert_eq(
-        feedback[0],
-        "Return a final response with the done marker on its own line.",
+        feedback,
+        ["Return a final response with the done marker on its own line."],
       )
     },
   )
