@@ -1430,15 +1430,7 @@ mod tests {
         };
         let events = vec![
             iteration_start(1, "s", 1),
-            env(
-                2,
-                AgentEvent::FeedbackInjected {
-                    session_id: "s".into(),
-                    kind: "approval".into(),
-                    content: "ok".into(),
-                    streak: None,
-                },
-            ),
+            env(2, AgentEvent::feedback_injected("s", "approval", "ok")),
             tool_call(3, "s", "merge_pull_request", json!({"number": 1})),
             iteration_end(4, "s", 1),
         ];
@@ -1557,15 +1549,7 @@ mod tests {
         // Approve up front so unsafe-action rule doesn't double-fire.
         let events = vec![
             iteration_start(1, "s", 1),
-            env(
-                2,
-                AgentEvent::FeedbackInjected {
-                    session_id: "s".into(),
-                    kind: "approval".into(),
-                    content: "ok".into(),
-                    streak: None,
-                },
-            ),
+            env(2, AgentEvent::feedback_injected("s", "approval", "ok")),
             tool_call(3, "s", "force_push", json!({"branch": "main"})),
             iteration_end(4, "s", 1),
         ];

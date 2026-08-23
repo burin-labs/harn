@@ -116,6 +116,13 @@ authority ordering, and normalized-content deduplication used by structural
 reminders. Feedback kinds remain available in `feedback_injected` events and
 directive tags but are not exposed to the model.
 
+When the missing-tool-call, fenced-call, or malformed-call corrective claims a
+turn for repair, its `feedback_injected` event includes
+`turn_claimed_for_repair: true` and the claimed `iteration`. A classifier-backed
+missing-tool-call claim also includes `tool_name`. The ACP extension projection
+uses `turnClaimedForRepair` and `toolName`. Event-log, replay, and evaluation
+consumers can use these fields without matching the injected feedback text.
+
 Nested `llm` fields:
 
 | Field | Type | Description |
@@ -1117,6 +1124,8 @@ The callback receives:
   rejected_tool_names: list,
   session_successful_tools: list,
   session_rejected_tools: list,
+  prior_turn_claimed_for_repair: bool,
+  prior_turn_next_tool_claim: dict | nil,
   text: string,
   visible_text: string,
 }

@@ -70,6 +70,34 @@ fn redacts_tool_payloads_before_append() {
 }
 
 #[test]
+fn persists_typed_repair_claim_without_feedback_prose_matching() {
+    let session_id = "repair-claim";
+    let log = Arc::new(AnyEventLog::Memory(MemoryEventLog::new(8)));
+    let sink = EventLogSink::new(log.clone(), session_id);
+    let event = AgentEvent::from_host_payload(
+        session_id,
+        "missing_tool_call_nudge",
+        &serde_json::json!({
+            "iteration": 7,
+            "tool": "edit",
+            "visible_text_prefix": "prose may change independently",
+        }),
+    )
+    .expect("typed repair feedback");
+
+    sink.handle_event(&event);
+
+    let topic = Topic::new("observability.agent_events.repair-claim").unwrap();
+    let events = futures::executor::block_on(log.read_range(&topic, None, 8)).unwrap();
+    assert_eq!(events.len(), 1);
+    let persisted = &events[0].1;
+    assert_eq!(persisted.kind, "feedback_injected");
+    assert_eq!(persisted.payload["event"]["iteration"], 7);
+    assert_eq!(persisted.payload["event"]["tool_name"], "edit");
+    assert_eq!(persisted.payload["event"]["turn_claimed_for_repair"], true);
+}
+
+#[test]
 fn persists_text_parsing_candidates() {
     let log = Arc::new(AnyEventLog::Memory(MemoryEventLog::new(8)));
     let sink = EventLogSink::new(log.clone(), "s");

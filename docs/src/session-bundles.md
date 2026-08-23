@@ -75,6 +75,12 @@ Use `harn session import` to materialize a local run record:
 harn session import run.bundle.json --out imported-run.json
 ```
 
+On success, import appends `session.imported` to the `session.imports` topic in
+the configured event log (`.harn/events.sqlite` by default). The event records
+the bundle ID and SHA-256 digest, source path, resulting run-record ID and path,
+and materialized worker-snapshot count and directory. If Harn cannot open the
+event log, it exits before writing the run record.
+
 Import prefers the embedded `replay.run_record` because that preserves
 the complete run record. If a bundle has no embedded run record but does
 carry a replay fixture and transcript sections, import reconstructs a

@@ -3,6 +3,9 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process;
 
+use harn_vm::event_log::{EventLog, EventLogConfig, LogEvent, Topic};
+use sha2::{Digest, Sha256};
+
 use crate::cli::{
     SessionArgs, SessionCheckpointArgs, SessionCommand, SessionExportArgs, SessionImportArgs,
     SessionListArgs, SessionSchemaArgs, SessionValidateArgs, SessionViewFixturesArgs,
@@ -15,7 +18,7 @@ pub(crate) async fn run(args: SessionArgs) {
         SessionCommand::List(list) => run_list(list).await,
         SessionCommand::Export(export) => run_export(export),
         SessionCommand::Checkpoint(checkpoint) => run_checkpoint(checkpoint),
-        SessionCommand::Import(import) => run_import(import),
+        SessionCommand::Import(import) => run_import(import).await,
         SessionCommand::Validate(validate) => run_validate(validate),
         SessionCommand::Schema(schema) => run_schema(schema),
         SessionCommand::ViewFixtures(fixtures) => run_view_fixtures(fixtures),
@@ -174,8 +177,8 @@ fn run_checkpoint(args: SessionCheckpointArgs) {
     }
 }
 
-fn run_import(args: SessionImportArgs) {
-    let bundle = read_validated_bundle(
+async fn run_import(args: SessionImportArgs) {
+    let (bundle, source_content) = read_validated_bundle_with_content(
         &args.bundle,
         args.allow_unsafe_secret_markers,
         "invalid session bundle",
@@ -215,7 +218,30 @@ fn run_import(args: SessionImportArgs) {
             process::exit(1);
         }
     };
+    let event_log = match EventLogConfig::for_base_dir(Path::new("."))
+        .and_then(|config| harn_vm::event_log::open_event_log(&config))
+    {
+        Ok(log) => log,
+        Err(error) => {
+            eprintln!("error: failed to open session import event log: {error}");
+            process::exit(1);
+        }
+    };
     write_text(&out, &rendered);
+    if let Err(error) = record_session_import(
+        event_log.as_ref(),
+        Path::new(&args.bundle),
+        &hex::encode(Sha256::digest(source_content.as_bytes())),
+        &bundle,
+        &out,
+        &snapshot_dir,
+        &materialized,
+    )
+    .await
+    {
+        eprintln!("error: failed to record session import: {error}");
+        process::exit(1);
+    }
     if args.json {
         write_json_stdout(&session_import_report(&out, &snapshot_dir, &materialized));
     } else {
@@ -228,6 +254,37 @@ fn run_import(args: SessionImportArgs) {
         }
         println!("{}", out.display());
     }
+}
+
+async fn record_session_import(
+    event_log: &harn_vm::event_log::AnyEventLog,
+    bundle_path: &Path,
+    source_sha256: &str,
+    bundle: &harn_vm::session_bundle::SessionBundle,
+    run_record_path: &Path,
+    worker_snapshot_dir: &Path,
+    materialized: &[harn_vm::session_bundle::MaterializedWorkerSnapshot],
+) -> Result<(), String> {
+    let topic = Topic::new("session.imports").map_err(|error| error.to_string())?;
+    event_log
+        .append(
+            &topic,
+            LogEvent::new(
+                "session.imported",
+                serde_json::json!({
+                    "bundle_id": bundle.bundle_id,
+                    "source_bundle_path": bundle_path,
+                    "source_bundle_sha256": source_sha256,
+                    "run_record_id": bundle.source.run_record_id,
+                    "run_record_path": run_record_path,
+                    "worker_snapshot_count": materialized.len(),
+                    "worker_snapshot_dir": worker_snapshot_dir,
+                }),
+            ),
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+    event_log.flush().await.map_err(|error| error.to_string())
 }
 
 fn run_validate(args: SessionValidateArgs) {
@@ -330,6 +387,14 @@ fn read_validated_bundle(
     allow_unsafe_secret_markers: bool,
     context: &str,
 ) -> harn_vm::session_bundle::SessionBundle {
+    read_validated_bundle_with_content(path, allow_unsafe_secret_markers, context).0
+}
+
+fn read_validated_bundle_with_content(
+    path: &str,
+    allow_unsafe_secret_markers: bool,
+    context: &str,
+) -> (harn_vm::session_bundle::SessionBundle, String) {
     let content = match fs::read_to_string(path) {
         Ok(content) => content,
         Err(error) => {
@@ -338,7 +403,7 @@ fn read_validated_bundle(
         }
     };
     match validated_bundle_from_str(&content, allow_unsafe_secret_markers) {
-        Ok(bundle) => bundle,
+        Ok(bundle) => (bundle, content),
         Err(error) => {
             eprintln!("error: {context}: {error}");
             process::exit(1);

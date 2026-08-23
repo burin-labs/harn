@@ -943,11 +943,17 @@ paths:
               $ref: "#/components/schemas/CancelTaskRequest"
       responses:
         "200":
-          description: Updated Task.
+          description: Updated Task. Repeated cancellation returns the existing canceled Task unchanged.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Task"
+        "409":
+          description: The Task already completed or failed and its terminal outcome is preserved.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         default:
           $ref: "#/components/responses/Error"
 
