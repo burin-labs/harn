@@ -543,8 +543,10 @@ provider = "minimax"
 # native and these aliases carry no tool_format override — they inherit the
 # capability matrix instead of hard-coding a channel that has to be kept in
 # sync by hand.
+# `glm` tracks the current GLM flagship. GLM-5.3 supersedes GLM-5.2 at the
+# same tariff and the same wire shape, so the bare name follows it.
 [aliases.glm]
-id = "glm-5.2"
+id = "glm-5.3"
 provider = "zai"
 
 [aliases."glm-5"]
@@ -559,8 +561,16 @@ provider = "zai"
 id = "glm-5.2"
 provider = "zai"
 
+[aliases."glm-5.3"]
+id = "glm-5.3"
+provider = "zai"
+
 [aliases."openrouter-glm-5.2"]
 id = "z-ai/glm-5.2"
+provider = "openrouter"
+
+[aliases."openrouter-glm-5.3"]
+id = "z-ai/glm-5.3"
 provider = "openrouter"
 
 # DeepSeek V4 direct API aliases.

@@ -319,6 +319,7 @@ fn thinking_for_reasoning_level(
     }
     if caps_supports(caps, "effort") || caps.reasoning_effort_supported {
         return reasoning_effort_from_level(level)
+            .map(|level| snap_effort_to_declared_ladder(level, caps))
             .map(|level| (ThinkingConfig::Effort { level }, level.as_str().to_string()));
     }
     if caps_supports(caps, "enabled") {
@@ -353,16 +354,59 @@ fn reasoning_effort_from_level(level: &str) -> Option<ReasoningEffort> {
     })
 }
 
+/// Effort rungs in ascending strength, and the one place that order is
+/// written down. `none` is not a rung: it is the absence of reasoning, which
+/// the "off" branch resolves, not a weaker amount of it.
+const EFFORT_LADDER: [&str; 6] = ["minimal", "low", "medium", "high", "xhigh", "max"];
+
+fn declares_effort(caps: &Capabilities, rung: &str) -> bool {
+    caps.reasoning_effort_levels
+        .iter()
+        .any(|supported| supported == rung)
+}
+
 fn lowest_supported_effort(caps: &Capabilities) -> Option<ReasoningEffort> {
-    ["minimal", "low", "medium", "high", "xhigh", "max"]
-        .into_iter()
-        .find_map(|candidate| {
-            caps.reasoning_effort_levels
-                .iter()
-                .any(|supported| supported == candidate)
-                .then(|| reasoning_effort_from_level(candidate))
-                .flatten()
-        })
+    EFFORT_LADDER.into_iter().find_map(|candidate| {
+        declares_effort(caps, candidate)
+            .then(|| reasoning_effort_from_level(candidate))
+            .flatten()
+    })
+}
+
+/// Snap a policy-resolved effort onto the rungs the route actually declares.
+///
+/// `reasoning_effort_levels` is not always a contiguous run. Z.AI's GLM-5.3
+/// accepts `low`, `high`, and `max` only, and the auto policy's resolution for
+/// an agent or code task at the default medium scale is exactly the missing
+/// `medium` rung. Emitting it throws in the supported-level gate, so the
+/// canonical `std/llm/safe` and `std/agent/reasoning` paths fail before the
+/// request is ever built.
+///
+/// A policy level is a coarse intent -- "about this much thinking" -- not a
+/// wire value, so the nearest declared rung is its faithful translation. Ties
+/// resolve upward: on a frontier coding route under-thinking is the worse
+/// mistake, and it matches the "off" branch, which already floors up to the
+/// lowest declared rung rather than giving up.
+///
+/// An explicit caller `effort` IS a wire value. It does not pass through here
+/// and still fails loudly against the same declared list.
+fn snap_effort_to_declared_ladder(level: ReasoningEffort, caps: &Capabilities) -> ReasoningEffort {
+    if caps.reasoning_effort_levels.is_empty() || declares_effort(caps, level.as_str()) {
+        return level;
+    }
+    let Some(requested) = EFFORT_LADDER
+        .iter()
+        .position(|rung| *rung == level.as_str())
+    else {
+        return level;
+    };
+    EFFORT_LADDER
+        .iter()
+        .enumerate()
+        .filter(|(_, rung)| declares_effort(caps, rung))
+        .min_by_key(|(index, _)| (index.abs_diff(requested), std::cmp::Reverse(*index)))
+        .and_then(|(_, rung)| reasoning_effort_from_level(rung))
+        .unwrap_or(level)
 }
 
 /// Lowest reasoning level to use when a route requires reasoning for tool
@@ -371,16 +415,11 @@ fn lowest_supported_effort(caps: &Capabilities) -> Option<ReasoningEffort> {
 /// Cerebras gpt-oss, which rejects "minimal"/"none", floors to its accepted
 /// "low"); fall back to "low" otherwise.
 fn lowest_tool_reasoning_level(caps: &Capabilities) -> String {
-    for candidate in ["minimal", "low", "medium", "high", "xhigh", "max"] {
-        if caps
-            .reasoning_effort_levels
-            .iter()
-            .any(|supported| supported == candidate)
-        {
-            return candidate.to_string();
-        }
-    }
-    "low".to_string()
+    EFFORT_LADDER
+        .into_iter()
+        .find(|candidate| declares_effort(caps, candidate))
+        .unwrap_or("low")
+        .to_string()
 }
 
 /// Canonical reasoning-channel output budget (tokens) Harn's reasoning policy
@@ -822,6 +861,144 @@ auto_reasoning_overrides = { agent = "off" }
         assert_eq!(
             thinking.get("level").map(VmValue::display).as_deref(),
             Some("low")
+        );
+    }
+
+    fn policy_opts(provider: &str, model: &str, task: &str, scale: &str) -> crate::value::DictMap {
+        crate::value::DictMap::from_iter([
+            (
+                crate::value::intern_key("provider"),
+                VmValue::String(arcstr::ArcStr::from(provider)),
+            ),
+            (
+                crate::value::intern_key("model"),
+                VmValue::String(arcstr::ArcStr::from(model)),
+            ),
+            (
+                crate::value::intern_key("reasoning_policy"),
+                VmValue::String(arcstr::ArcStr::from("auto")),
+            ),
+            (
+                crate::value::intern_key("reasoning_task"),
+                VmValue::String(arcstr::ArcStr::from(task)),
+            ),
+            (
+                crate::value::intern_key("reasoning_scale"),
+                VmValue::String(arcstr::ArcStr::from(scale)),
+            ),
+        ])
+    }
+
+    #[test]
+    fn glm_5_3_agent_work_snaps_the_missing_medium_rung_upward() {
+        // GLM-5.3 declares low/high/max. The default agent and code
+        // resolution is "medium", which the route rejects outright, so the
+        // policy must hand back the nearest declared rung -- upward on a tie.
+        for task in ["agent", "code"] {
+            let out = apply(policy_opts("zai", "glm-5.3", task, "medium"));
+            let thinking = out
+                .get("thinking")
+                .and_then(VmValue::as_dict)
+                .unwrap_or_else(|| panic!("glm-5.3 task={task} produced no thinking"));
+            assert_eq!(
+                thinking.get("level").map(VmValue::display).as_deref(),
+                Some("high"),
+                "glm-5.3 task={task} must not resolve the missing `medium` rung"
+            );
+        }
+        // The rungs GLM-5.3 does declare are passed through untouched, and
+        // "off" still floors to the cheapest one it accepts.
+        assert_eq!(
+            apply(policy_opts("zai", "glm-5.3", "code", "large"))
+                .get("thinking")
+                .and_then(VmValue::as_dict)
+                .and_then(|thinking| thinking.get("level").map(VmValue::display))
+                .as_deref(),
+            Some("high")
+        );
+        assert_eq!(
+            apply(policy_opts("zai", "glm-5.3", "chat", "medium"))
+                .get("thinking")
+                .and_then(VmValue::as_dict)
+                .and_then(|thinking| thinking.get("level").map(VmValue::display))
+                .as_deref(),
+            Some("low")
+        );
+    }
+
+    #[test]
+    fn single_rung_ladders_resolve_to_the_only_effort_they_accept() {
+        // Kimi K3 always reasons and declares `max` alone, so there is no
+        // bracketing rung to interpolate between: every task and scale has to
+        // land on it. This is the same defect as GLM-5.3's missing `medium`
+        // with the ladder collapsed to one entry.
+        for task in ["agent", "code", "verify", "chat"] {
+            for scale in ["small", "medium", "large"] {
+                let out = apply(policy_opts("moonshot", "moonshot/kimi-k3", task, scale));
+                let Some(thinking) = out.get("thinking").and_then(VmValue::as_dict) else {
+                    continue;
+                };
+                assert_eq!(
+                    thinking.get("level").map(VmValue::display).as_deref(),
+                    Some("max"),
+                    "kimi-k3 task={task} scale={scale} must resolve its only declared rung"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn auto_policy_never_resolves_an_effort_the_route_rejects() {
+        // `reasoning_effort_levels` is not always a contiguous run. Z.AI's
+        // GLM-5.3 accepts `low`, `high`, and `max` only, and the auto policy's
+        // default resolution for an agent or code task at medium scale is
+        // exactly the missing `medium` rung. Emitting it makes
+        // `validate_reasoning_effort_level_supported` throw on the canonical
+        // `std/llm/safe` and `std/agent/reasoning` paths, so the whole shipped
+        // catalog is asserted here rather than one route.
+        let catalog =
+            crate::llm_config::parse_config_toml(crate::llm::capabilities::BUILTIN_PROVIDERS_TOML)
+                .expect("providers.toml must parse");
+        let mut offenders = Vec::new();
+        for (model_id, model) in catalog.models {
+            for task in ["chat", "agent", "code", "verify", "summarize"] {
+                for scale in ["small", "medium", "large"] {
+                    let opts = policy_opts(&model.provider, &model_id, task, scale);
+                    let Some((provider, resolved)) = resolved_route_from_options(&opts) else {
+                        continue;
+                    };
+                    let caps = crate::llm::capabilities::lookup(&provider, &resolved);
+                    if caps.reasoning_effort_levels.is_empty() {
+                        continue;
+                    }
+                    let out = apply(opts);
+                    let Some(thinking) = out.get("thinking").and_then(VmValue::as_dict) else {
+                        continue;
+                    };
+                    if thinking.get("mode").map(VmValue::display).as_deref() != Some("effort") {
+                        continue;
+                    }
+                    let level = thinking
+                        .get("level")
+                        .map(VmValue::display)
+                        .unwrap_or_default();
+                    if level == "none" {
+                        continue;
+                    }
+                    if !caps.reasoning_effort_levels.contains(&level) {
+                        offenders.push(format!(
+                            "{provider}/{model_id} task={task} scale={scale} resolved `{level}`; \
+                             route declares: {}",
+                            caps.reasoning_effort_levels.join(", ")
+                        ));
+                    }
+                }
+            }
+        }
+        assert!(
+            offenders.is_empty(),
+            "auto reasoning policy resolved efforts these routes reject:\n{}",
+            offenders.join("\n")
         );
     }
 

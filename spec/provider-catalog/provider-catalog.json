@@ -21198,9 +21198,9 @@
       },
       "prompt_cache": true,
       "pricing": {
-        "input_per_mtok": 0.91,
-        "output_per_mtok": 2.86,
-        "cache_read_per_mtok": 0.169,
+        "input_per_mtok": 0.966,
+        "output_per_mtok": 3.036,
+        "cache_read_per_mtok": 0.1932,
         "cache_write_per_mtok": null
       },
       "deprecation": {
@@ -21232,7 +21232,9 @@
       "name": "GLM 5.3 (via OpenRouter)",
       "display_name": "GLM 5.3",
       "provider": "openrouter",
-      "aliases": [],
+      "aliases": [
+        "openrouter-glm-5.3"
+      ],
       "context_window": 1048576,
       "equivalence_group": "frontier-agent-coding",
       "modalities": {
@@ -24535,9 +24537,9 @@
       },
       "prompt_cache": false,
       "pricing": {
-        "input_per_mtok": 0.6,
-        "output_per_mtok": 2.0,
-        "cache_read_per_mtok": 0.11,
+        "input_per_mtok": 1.2,
+        "output_per_mtok": 4.0,
+        "cache_read_per_mtok": 0.24,
         "cache_write_per_mtok": null
       },
       "deprecation": {
@@ -24649,7 +24651,6 @@
       "display_name": "GLM 5.2",
       "provider": "zai",
       "aliases": [
-        "glm",
         "glm-5.2"
       ],
       "context_window": 1048576,
@@ -24739,7 +24740,10 @@
       "name": "GLM 5.3",
       "display_name": "GLM 5.3",
       "provider": "zai",
-      "aliases": [],
+      "aliases": [
+        "glm",
+        "glm-5.3"
+      ],
       "context_window": 1048576,
       "equivalence_group": "frontier-agent-coding",
       "modalities": {
@@ -24783,6 +24787,12 @@
         "preserve_thinking": false
       },
       "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 1.4,
+        "output_per_mtok": 4.4,
+        "cache_read_per_mtok": 0.26,
+        "cache_write_per_mtok": null
+      },
       "deprecation": {
         "status": "active"
       },
@@ -24984,7 +24994,7 @@
     },
     {
       "name": "glm",
-      "model_id": "glm-5.2",
+      "model_id": "glm-5.3",
       "provider": "zai"
     },
     {
@@ -25005,6 +25015,11 @@
     {
       "name": "glm-5.2",
       "model_id": "glm-5.2",
+      "provider": "zai"
+    },
+    {
+      "name": "glm-5.3",
+      "model_id": "glm-5.3",
       "provider": "zai"
     },
     {
@@ -25383,6 +25398,11 @@
     {
       "name": "openrouter-glm-5.2",
       "model_id": "z-ai/glm-5.2",
+      "provider": "openrouter"
+    },
+    {
+      "name": "openrouter-glm-5.3",
+      "model_id": "z-ai/glm-5.3",
       "provider": "openrouter"
     },
     {
