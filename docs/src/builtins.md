@@ -701,7 +701,7 @@ builtins were deleted.
 | `harness.term.width()` | none | int | Current terminal column count |
 | `harness.term.height()` | none | int | Current terminal row count |
 | `harness.runtime.exit(code)` | code: int (default 0) | never | Terminate the process |
-| `harness.system.identity()` | none | dict | Host identity projection with `username`, `hostname`, and `pid` fields |
+| `harness.system.identity()` | none | dict | Host identity projection with `username`, `hostname`, and `pid` fields. `username` reads `$USER`, `$LOGNAME`, then `$USERNAME`, and falls back to the passwd entry for the real uid, so it is set even under a container, a systemd unit, or a cron job where none of those variables exist. |
 | `harness.system.platform()` | none | dict | Platform projection with `os` (`"darwin"`, `"linux"`, or `"windows"`) and `arch` fields |
 | `harness.random.uuid()` | none | string | Generate a random v4 UUID |
 | `uuid_parse(str)` | str: string | string or nil | Parse and canonicalize a UUID string, or return nil if invalid |

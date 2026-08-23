@@ -258,12 +258,71 @@ fn canonical_os() -> &'static str {
 /// Minimal identity exposed to explicitly authorized scripts.
 pub fn identity_snapshot() -> Value {
     json!({
-        "username": std::env::var("USER")
-            .or_else(|_| std::env::var("USERNAME"))
-            .unwrap_or_default(),
+        "username": login_name(),
         "hostname": System::host_name(),
         "pid": std::process::id(),
     })
+}
+
+/// The login name for the current user.
+///
+/// `$USER` is the usual answer, but it is set by login shells: a container, a
+/// systemd unit, and a cron job routinely have none of `USER`, `LOGNAME`, or
+/// `USERNAME`, and `identity().username` came back empty in all three. The
+/// passwd entry for the real uid is the answer the OS always has.
+fn login_name() -> String {
+    for key in ["USER", "LOGNAME", "USERNAME"] {
+        if let Ok(value) = std::env::var(key) {
+            let value = value.trim();
+            if !value.is_empty() {
+                return value.to_string();
+            }
+        }
+    }
+    passwd_name().unwrap_or_default()
+}
+
+/// The `pw_name` of the passwd entry for the real uid, or `None` when the
+/// platform has no passwd database or the lookup fails.
+#[cfg(unix)]
+fn passwd_name() -> Option<String> {
+    use std::mem::MaybeUninit;
+
+    // `getpwuid_r` fills a caller-owned buffer, so unlike `getpwuid` it is
+    // safe to call from Harn's worker threads. A name longer than the buffer
+    // reports ERANGE, which lands in the same `None` as any other failure —
+    // the caller already handles an unknown user.
+    let mut entry = MaybeUninit::<libc::passwd>::uninit();
+    let mut buffer = vec![0 as libc::c_char; 1024];
+    let mut found: *mut libc::passwd = std::ptr::null_mut();
+    // SAFETY: `entry` and `buffer` outlive the call, `buffer.len()` is its
+    // real length, and `found` is only read after a zero return says the
+    // lookup succeeded.
+    let status = unsafe {
+        libc::getpwuid_r(
+            libc::getuid(),
+            entry.as_mut_ptr(),
+            buffer.as_mut_ptr(),
+            buffer.len(),
+            std::ptr::addr_of_mut!(found),
+        )
+    };
+    if status != 0 || found.is_null() {
+        return None;
+    }
+    // SAFETY: a zero return with a non-null `found` means `pw_name` points at
+    // a NUL-terminated string inside `buffer`, which is still alive here.
+    let name = unsafe { std::ffi::CStr::from_ptr((*found).pw_name) };
+    name.to_str()
+        .ok()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(str::to_string)
+}
+
+#[cfg(not(unix))]
+fn passwd_name() -> Option<String> {
+    None
 }
 
 /// Snapshot of currently visible processes. The current Harn process is
@@ -455,6 +514,31 @@ mod tests {
     #[test]
     fn linux_peak_rss_reports_self() {
         assert!(linux_peak_rss().is_some_and(|bytes| bytes > 0));
+    }
+
+    /// Containers, systemd units, and cron jobs run with no `USER`,
+    /// `LOGNAME`, or `USERNAME`. The identity snapshot has to name the user
+    /// anyway — this test asserts the environment-independent path, since the
+    /// suite itself usually runs with `USER` set.
+    #[cfg(unix)]
+    #[test]
+    fn the_login_name_survives_an_environment_with_no_user_variables() {
+        assert!(
+            passwd_name().is_some_and(|name| !name.is_empty()),
+            "the passwd entry for the real uid should name the current user"
+        );
+    }
+
+    /// On Unix the passwd fallback makes this unconditional. Elsewhere
+    /// `username` still rests on `$USERNAME` — the blind spot this change
+    /// deliberately leaves open — so the claim is Unix-only, and the test
+    /// says so rather than asserting more than the code guarantees.
+    #[cfg(unix)]
+    #[test]
+    fn the_identity_snapshot_names_a_user() {
+        let identity = identity_snapshot();
+        let username = identity["username"].as_str().unwrap_or_default();
+        assert!(!username.is_empty(), "identity: {identity}");
     }
 
     #[test]
