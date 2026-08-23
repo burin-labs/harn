@@ -273,7 +273,7 @@ fn provider_dispatch_audit_tool_probe_plan_honors_custom_output_dir() {
             "provider",
             "dispatch-audit",
             "--route",
-            "openrouter:anthropic/claude-sonnet-4-6",
+            "anthropic:claude-sonnet-4-6",
             "--include-tool-probe-plan",
             "--tool-probe-case",
             "single_tool_call",
@@ -301,14 +301,14 @@ fn provider_dispatch_audit_tool_probe_plan_honors_custom_output_dir() {
     assert_eq!(
         plan["readiness_commands"][0]["output_path"],
         format!(
-            ".harn-runs/provider-live-probes/custom-run/{readiness_id_prefix}-openrouter-anthropic_claude-sonnet-4-6-readiness.json"
+            ".harn-runs/provider-live-probes/custom-run/{readiness_id_prefix}-anthropic-claude-sonnet-4-6-readiness.json"
         )
     );
     let command_id_prefix = &plan["commands"][0]["id"].as_str().expect("command id")[..12];
     assert_eq!(
         plan["commands"][0]["output_path"],
         format!(
-            ".harn-runs/provider-live-probes/custom-run/{command_id_prefix}-openrouter-anthropic_claude-sonnet-4-6-single_tool_call-catalog_default-streaming.json"
+            ".harn-runs/provider-live-probes/custom-run/{command_id_prefix}-anthropic-claude-sonnet-4-6-single_tool_call-catalog_default-streaming.json"
         )
     );
 }

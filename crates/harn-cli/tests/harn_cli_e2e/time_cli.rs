@@ -212,7 +212,7 @@ handler = "handlers::missing"
     let run_setup = phase("run_setup");
     let module_load = phase("module_load");
 
-    assert_eq!(data["exit_code"], 1);
+    assert_eq!(data["exit_code"], harn_cli::exit::RUN_SETUP_FAILURE);
     assert_eq!(run_setup["kind"], "top_level", "{run_setup}");
     // Setup validation fails before the lazy handler module is reached.
     assert_eq!(module_load["events"], 0, "{module_load}");
