@@ -8,8 +8,8 @@ use super::json::{
     task_ledger_summary_from_value,
 };
 use super::persistence::{
-    compaction_events_from_transcript, daemon_events_from_sidecar, llm_transcript_sidecar_path,
-    replay_of_event_id_from_run, run_trace_id, signature_status_label, trigger_event_from_run,
+    compaction_events_from_transcript, daemon_events_from_sidecar, replay_of_event_id_from_run,
+    run_trace_id, signature_status_label, trigger_event_from_run,
 };
 use super::transcript_descriptor::pointer_for_llm_transcript_sidecar;
 use super::types::{
@@ -135,6 +135,16 @@ pub(super) fn publish_action_graph_event(
 pub fn derive_run_observability(
     run: &RunRecord,
     persisted_path: Option<&Path>,
+) -> RunObservabilityRecord {
+    let transcript_path = persisted_path
+        .and_then(|path| super::transcript_descriptor::discover_llm_transcript_sidecar(run, path));
+    derive_run_observability_with_transcript(run, persisted_path, transcript_path.as_deref())
+}
+
+pub(super) fn derive_run_observability_with_transcript(
+    run: &RunRecord,
+    persisted_path: Option<&Path>,
+    llm_transcript_path: Option<&Path>,
 ) -> RunObservabilityRecord {
     let mut action_graph_nodes = Vec::new();
     let mut action_graph_edges = Vec::new();
@@ -533,8 +543,10 @@ pub fn derive_run_observability(
     }
 
     if let Some(path) = persisted_path {
-        if let Some(sidecar_path) = llm_transcript_sidecar_path(path) {
-            transcript_pointers.push(pointer_for_llm_transcript_sidecar(run, path, &sidecar_path));
+        if let Some(sidecar_path) = llm_transcript_path {
+            if let Some(pointer) = pointer_for_llm_transcript_sidecar(run, path, sidecar_path) {
+                transcript_pointers.push(pointer);
+            }
         }
         daemon_events.extend(daemon_events_from_sidecar(path));
     }
@@ -553,6 +565,14 @@ pub fn derive_run_observability(
     }
 }
 
-pub(super) fn refresh_run_observability(run: &mut RunRecord, persisted_path: Option<&Path>) {
-    run.observability = Some(derive_run_observability(run, persisted_path));
+pub(super) fn refresh_run_observability(
+    run: &mut RunRecord,
+    persisted_path: Option<&Path>,
+    llm_transcript_path: Option<&Path>,
+) {
+    run.observability = Some(derive_run_observability_with_transcript(
+        run,
+        persisted_path,
+        llm_transcript_path,
+    ));
 }

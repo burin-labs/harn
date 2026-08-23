@@ -364,6 +364,8 @@ pub(crate) fn append_observability_sidecar_entry(
     agent_observe::append_llm_observability_entry(event_type, fields);
 }
 
+pub(crate) use self::agent_observe::current_transcript_path as current_llm_transcript_path;
+
 pub(crate) use self::agent_config::agent_loop_result_from_llm;
 pub use self::agent_config::{
     register_agent_loop_with_bridge, register_llm_call_structured_with_bridge,

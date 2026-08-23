@@ -34,6 +34,8 @@ pub use from_session::{
     project_run_record_from_session, SessionRunSummary, AGENT_SESSION_WORKFLOW_ID,
     PROJECTION_SOURCE, UNRECOVERABLE_FIELDS,
 };
+#[cfg(test)]
+pub(crate) use persistence::save_run_record_with_transcript;
 pub use persistence::{
     load_agent_session_replay_events, load_agent_session_replay_events_from_log, load_run_record,
     normalize_run_record, save_run_record, AgentSessionReplayEvent,

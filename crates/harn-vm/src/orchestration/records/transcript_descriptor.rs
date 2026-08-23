@@ -87,9 +87,10 @@ pub fn pointer_for_llm_transcript_sidecar(
     run: &RunRecord,
     run_record_path: &Path,
     transcript_path: &Path,
-) -> RunTranscriptPointerRecord {
-    match describe_llm_transcript_sidecar(run, run_record_path, transcript_path) {
-        Ok(descriptor) => RunTranscriptPointerRecord {
+) -> Option<RunTranscriptPointerRecord> {
+    describe_llm_transcript_sidecar(run, run_record_path, transcript_path)
+        .ok()
+        .map(|descriptor| RunTranscriptPointerRecord {
             id: "run:llm_transcript".to_string(),
             label: "LLM transcript sidecar".to_string(),
             kind: ARTIFACT_KIND.to_string(),
@@ -103,19 +104,79 @@ pub fn pointer_for_llm_transcript_sidecar(
             },
             verification_error: None,
             descriptor: Some(descriptor),
-        },
-        Err(error) => RunTranscriptPointerRecord {
-            id: "run:llm_transcript".to_string(),
-            label: "LLM transcript sidecar".to_string(),
-            kind: ARTIFACT_KIND.to_string(),
-            location: "run sidecar".to_string(),
-            path: Some(transcript_path.to_string_lossy().into_owned()),
-            available: false,
-            verification_status: error.kind.to_string(),
-            verification_error: Some(error.message),
-            descriptor: None,
-        },
+        })
+}
+
+pub(super) fn discover_llm_transcript_sidecar(
+    run: &RunRecord,
+    run_record_path: &Path,
+) -> Option<PathBuf> {
+    verified_llm_transcript_pointer_path(run, run_record_path)
+        .ok()
+        .or_else(|| {
+            let canonical = super::persistence::llm_transcript_sidecar_path(run_record_path)?;
+            describe_llm_transcript_sidecar(run, run_record_path, &canonical)
+                .is_ok()
+                .then_some(canonical)
+        })
+}
+
+pub(super) fn materialize_llm_transcript_sidecar(
+    run: &RunRecord,
+    run_record_path: &Path,
+    active_transcript_path: Option<&Path>,
+) -> Option<PathBuf> {
+    materialize_llm_transcript_sidecar_checked(run, run_record_path, active_transcript_path)
+        .ok()
+        .flatten()
+}
+
+fn materialize_llm_transcript_sidecar_checked(
+    run: &RunRecord,
+    run_record_path: &Path,
+    active_transcript_path: Option<&Path>,
+) -> Result<Option<PathBuf>, LlmTranscriptDescriptorError> {
+    let canonical =
+        super::persistence::llm_transcript_sidecar_path(run_record_path).ok_or_else(|| {
+            LlmTranscriptDescriptorError::new(
+                "invalid_run_path",
+                "run record path has no file stem",
+            )
+        })?;
+
+    if let Some(active) = active_transcript_path.filter(|path| path.exists()) {
+        describe_llm_transcript_sidecar(run, run_record_path, active)?;
+        if active != canonical {
+            let bytes = std::fs::read(active).map_err(|error| {
+                LlmTranscriptDescriptorError::new(
+                    "unavailable",
+                    format!("failed to read {}: {error}", active.display()),
+                )
+            })?;
+            let parent = canonical.parent().ok_or_else(|| {
+                LlmTranscriptDescriptorError::new(
+                    "invalid_run_path",
+                    "canonical transcript path has no parent",
+                )
+            })?;
+            std::fs::create_dir_all(parent).map_err(|error| {
+                LlmTranscriptDescriptorError::new(
+                    "unavailable",
+                    format!("failed to create {}: {error}", parent.display()),
+                )
+            })?;
+            crate::atomic_io::atomic_write(&canonical, &bytes).map_err(|error| {
+                LlmTranscriptDescriptorError::new(
+                    "unavailable",
+                    format!("failed to persist {}: {error}", canonical.display()),
+                )
+            })?;
+        }
+        describe_llm_transcript_sidecar(run, run_record_path, &canonical)?;
+        return Ok(Some(canonical));
     }
+
+    Ok(discover_llm_transcript_sidecar(run, run_record_path))
 }
 
 pub fn verified_llm_transcript_pointer_path(
