@@ -80,6 +80,16 @@ export const en = {
     skipToContent: "Skip to content",
   },
 
+  diagram: {
+    expand: "Expand diagram",
+    overlayAria: "Diagram viewer",
+    zoomIn: "Zoom in",
+    zoomOut: "Zoom out",
+    resetZoom: "Fit diagram to the screen",
+    resetZoomLabel: "Fit",
+    close: "Close the diagram viewer",
+  },
+
   mockup: {
     aria: "A Harn pipeline definition running as a live agent",
     fileLabel: "review.harn",

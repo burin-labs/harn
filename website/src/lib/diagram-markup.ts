@@ -7,6 +7,10 @@ export const DIAGRAM_FIGURE_CLASS = "mermaid-figure"
 export const DIAGRAM_CANVAS_CLASS = "mermaid-canvas"
 export const DIAGRAM_SOURCE_CLASS = "mermaid-source"
 
+// Added by the renderer once a diagram exists to open: the button that puts the
+// SVG in the zoom overlay (src/lib/diagram-zoom.ts).
+export const DIAGRAM_EXPAND_CLASS = "mermaid-expand"
+
 // Label on the <details> that holds the diagram source. It is the diagram's
 // text alternative, and the whole diagram when JavaScript never runs.
 export const DIAGRAM_SOURCE_LABEL = "Diagram source"
