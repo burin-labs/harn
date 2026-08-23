@@ -621,6 +621,14 @@ fn ensure_parent_dir(path: &Path) -> io::Result<()> {
     Ok(())
 }
 
+/// Permissions for a cached artifact.
+///
+/// These files hold compiled bytecode for whatever source a run loaded, in a
+/// shared per-user cache directory, so they get the same owner-only treatment
+/// as the rest of this user's state rather than whatever the process umask
+/// happens to allow.
+const ARTIFACT_MODE: u32 = 0o600;
+
 fn write_atomic_chunk(
     target: &Path,
     key: &CacheKey,
@@ -628,12 +636,12 @@ fn write_atomic_chunk(
     manifest: Option<&ContextManifest>,
 ) -> io::Result<()> {
     let buf = serialize_chunk_artifact_with_manifest(key, chunk, manifest)?;
-    crate::atomic_io::atomic_write(target, &buf)
+    crate::atomic_io::atomic_write_with_mode(target, &buf, ARTIFACT_MODE)
 }
 
 fn write_atomic_module(target: &Path, key: &CacheKey, artifact: &ModuleArtifact) -> io::Result<()> {
     let buf = serialize_module_artifact(key, artifact)?;
-    crate::atomic_io::atomic_write(target, &buf)
+    crate::atomic_io::atomic_write_with_mode(target, &buf, ARTIFACT_MODE)
 }
 
 /// Serialize an entry-chunk artifact (header + payload) to bytes. The

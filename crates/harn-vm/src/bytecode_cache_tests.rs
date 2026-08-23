@@ -1217,3 +1217,61 @@ fn artifact_header_stamps_the_key_version_not_the_build_version() {
     assert!(read_entry_candidate(&path, &shipped_as).unwrap().is_some());
     assert!(read_entry_candidate(&path, &built_at).unwrap().is_none());
 }
+
+/// Cached artifacts are owner-only, not whatever the umask allows.
+///
+/// The assertion that carries the security property is `mode & 0o077 == 0`:
+/// under the common `022` umask the mode-less writer produced `0o644`, so this
+/// fails without the explicit mode. (A process already running under a `077`
+/// umask would satisfy it either way — the exact-`0o600` check below is what
+/// pins the intent regardless of the ambient umask.)
+#[cfg(unix)]
+#[test]
+fn cached_artifacts_are_owner_only() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let mode_of = |path: &Path| {
+        std::fs::metadata(path)
+            .expect("artifact exists")
+            .permissions()
+            .mode()
+            & 0o777
+    };
+
+    let tmp = tempfile::tempdir().unwrap();
+
+    let source = "fn main(harness: Harness) { harness.stdio.println(\"hello\") }";
+    let chunk = compile_source(source).expect("compile");
+    let key = CacheKey::from_source(Path::new("/tmp/perms.harn"), source);
+    let chunk_path = tmp.path().join("entry.harnbc");
+    store_at(&chunk_path, &key, &chunk).expect("write chunk artifact");
+
+    let chunk_mode = mode_of(&chunk_path);
+    assert_eq!(
+        chunk_mode & 0o077,
+        0,
+        "chunk artifact must not be group- or world-accessible, got {chunk_mode:o}"
+    );
+    assert_eq!(chunk_mode, 0o600, "chunk artifact mode");
+
+    let module_source = "pub fn helper() -> int { 1 }";
+    let module_path = tmp.path().join("module.harn");
+    std::fs::write(&module_path, module_source).expect("write module source");
+    let artifact =
+        crate::module_artifact::compile_module_artifact_from_source(&module_path, module_source)
+            .expect("compile module");
+    let module_key = CacheKey::from_module_source(
+        &ModuleSource::from_text(module_source),
+        &ModuleCompilationContext::default(),
+    );
+    let module_target = tmp.path().join("module.harnmod");
+    store_module_at(&module_target, &module_key, &artifact).expect("write module artifact");
+
+    let module_mode = mode_of(&module_target);
+    assert_eq!(
+        module_mode & 0o077,
+        0,
+        "module artifact must not be group- or world-accessible, got {module_mode:o}"
+    );
+    assert_eq!(module_mode, 0o600, "module artifact mode");
+}
