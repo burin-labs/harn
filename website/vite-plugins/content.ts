@@ -60,6 +60,9 @@ export interface PageData extends DocMeta {
   headings: Heading[]
   prev: { title: string; url: string } | null
   next: { title: string; url: string } | null
+  // Include-resolved Markdown used only to emit the agent `.md` projection.
+  // Stripped from the client `_content/*.json` payload in prerender.
+  markdownSource: string
 }
 
 export interface NavItem {
@@ -95,6 +98,8 @@ export interface LoadedDocs {
   meta: Record<string, DocMeta>
   pages: Map<string, PageData>
   search: SearchDoc[]
+  // SUMMARY.md page order, excluding missing files. Used by the agent index.
+  order: string[]
 }
 
 const GITHUB_EDIT_BASE = "https://github.com/burin-labs/harn/edit/main/docs/src/"
@@ -978,6 +983,7 @@ export function loadAllDocs(repoRoot: string): LoadedDocs {
       headings,
       prev: null,
       next: null,
+      markdownSource: included,
     })
 
     const plain = textFromHtml(stripDiagramSources(html))
@@ -1035,5 +1041,5 @@ export function loadAllDocs(repoRoot: string): LoadedDocs {
     }
   }).filter((s) => s.groups.length > 0)
 
-  return { nav, meta, pages, search }
+  return { nav, meta, pages, search, order: orderedExisting }
 }

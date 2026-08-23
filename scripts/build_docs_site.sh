@@ -67,20 +67,13 @@ else
 fi
 
 # tsc + vite client build + vite ssr build + prerender → docs/dist.
+# prerender also writes /llms.txt, /llms-full.txt, and per-page agent .md.
 (cd "$site_dir" && npm run build)
 
-# Mirror the raw Markdown sources next to the rendered HTML so agents and tools
-# can fetch the canonical .md for any page at the same path (preserved contract
-# from the mdBook build).
-while IFS= read -r -d '' src; do
-  rel="${src#"$repo_root/docs/src/"}"
-  dest="$dist_dir/$rel"
-  mkdir -p "$(dirname "$dest")"
-  cp "$src" "$dest"
-done < <(find "$repo_root/docs/src" -type f -name '*.md' -print0)
-
-# SUMMARY.md is the nav definition, not a page — drop it from the output.
-rm -f "$dist_dir/SUMMARY.md"
+# Per-page agent Markdown and llms.txt are written by prerender.mjs from the
+# include-resolved sources. Do not copy raw docs/src/*.md over those files:
+# the agent projection adds the version contract and Read-next links, and the
+# raw dump would strip them.
 
 # LLM quick-reference files agents fetch directly (generated artifacts).
 mkdir -p "$dist_dir/docs/llm"

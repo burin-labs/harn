@@ -1,4 +1,5 @@
 # https://harnlang.com — the Harn language site.
+# Machine-readable docs: https://harnlang.com/llms.txt
 User-agent: *
 Allow: /
 
