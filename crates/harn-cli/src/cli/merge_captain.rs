@@ -8,7 +8,7 @@ pub(crate) struct MergeCaptainArgs {
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum MergeCaptainCommand {
-    /// Run a Merge Captain sweep against a live, mock, or replay backend.
+    /// Run a Merge Captain sweep against a mock or replay backend.
     Run(MergeCaptainRunArgs),
     /// Run a route/timeout ladder and write per-tier eval artifacts.
     Ladder(MergeCaptainLadderArgs),
@@ -160,7 +160,8 @@ pub(crate) struct MergeCaptainMockCleanupArgs {
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
 pub(crate) enum MergeCaptainBackendKind {
-    /// Production connectors and real worktrees.
+    /// Reserved for a production connector runtime; unavailable in this build.
+    #[value(hide = true)]
     Live,
     /// Scenario manifest plus fake backend/playground directory.
     Mock,

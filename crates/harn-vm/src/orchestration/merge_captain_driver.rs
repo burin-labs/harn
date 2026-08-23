@@ -624,6 +624,36 @@ mod tests {
     }
 
     #[test]
+    fn live_backend_fails_before_creating_run_artifacts() {
+        let temp = tempfile::tempdir().unwrap();
+        let run_root = temp.path().join("runs");
+        let error = run_merge_captain_driver(MergeCaptainDriverOptions {
+            backend: MergeCaptainDriverBackend::Live,
+            mode: MergeCaptainDriverMode::Once,
+            model_route: None,
+            timeout_tier: None,
+            transcript_out: None,
+            receipt_out: None,
+            run_root: run_root.clone(),
+            max_sweeps: 1,
+            watch_backoff_ms: 0,
+            stream_stdout: false,
+        })
+        .expect_err("the reserved live backend must fail loudly");
+
+        assert!(
+            error
+                .to_string()
+                .contains("live backend requires the production connector runtime"),
+            "unexpected error: {error}"
+        );
+        assert!(
+            !run_root.exists(),
+            "live backend must fail before creating run artifacts"
+        );
+    }
+
+    #[test]
     fn mock_backend_resolves_manifest_and_builds_receipt() {
         let temp = tempfile::tempdir().unwrap();
         let output = run_merge_captain_driver(MergeCaptainDriverOptions {
