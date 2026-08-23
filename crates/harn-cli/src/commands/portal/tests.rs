@@ -1319,7 +1319,7 @@ async fn api_compare_returns_stage_diffs() {
     assert_eq!(diff.right_status, "failed");
     assert!(!diff.stage_diffs.is_empty());
     assert!(diff.tool_diffs.is_empty());
-    assert!(!diff.observability_diffs.is_empty());
+    assert!(diff.observability_diffs.is_empty());
     assert_eq!(diff.transition_count_delta, 1);
     assert_eq!(diff.artifact_count_delta, 1);
     assert_eq!(diff.checkpoint_count_delta, 1);

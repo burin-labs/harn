@@ -10,6 +10,9 @@ use super::super::{
 use super::action_graph::{publish_action_graph_event, refresh_run_observability};
 use super::eval_pack::replay_fixture_from_run;
 use super::json::json_usize;
+use super::transcript_descriptor::{
+    discover_llm_transcript_sidecar, materialize_llm_transcript_sidecar,
+};
 use super::types::{
     run_child_record_from_worker_metadata, CompactionEventRecord, DaemonEventRecord,
     RunChildRecord, RunHitlQuestionRecord, RunRecord, RunStageRecord,
@@ -511,12 +514,26 @@ pub fn normalize_run_record(value: &VmValue) -> Result<RunRecord, VmError> {
     if run.observability.is_none() {
         let persisted_path = run.persisted_path.clone();
         let persisted = persisted_path.as_deref().map(Path::new);
-        refresh_run_observability(&mut run, persisted);
+        let transcript_path =
+            persisted.and_then(|path| discover_llm_transcript_sidecar(&run, path));
+        refresh_run_observability(&mut run, persisted, transcript_path.as_deref());
     }
     Ok(run)
 }
 
 pub fn save_run_record(run: &RunRecord, path: Option<&str>) -> Result<String, VmError> {
+    save_run_record_with_transcript(
+        run,
+        path,
+        crate::llm::current_llm_transcript_path().as_deref(),
+    )
+}
+
+pub(crate) fn save_run_record_with_transcript(
+    run: &RunRecord,
+    path: Option<&str>,
+    active_transcript_path: Option<&Path>,
+) -> Result<String, VmError> {
     let path = path
         .map(PathBuf::from)
         .unwrap_or_else(|| default_run_dir().join(format!("{}.json", run.id)));
@@ -528,7 +545,9 @@ pub fn save_run_record(run: &RunRecord, path: Option<&str>) -> Result<String, Vm
     }
     materialized.persisted_path = Some(path.to_string_lossy().into_owned());
     sync_run_handoffs(&mut materialized);
-    refresh_run_observability(&mut materialized, Some(&path));
+    let transcript_path =
+        materialize_llm_transcript_sidecar(&materialized, &path, active_transcript_path);
+    refresh_run_observability(&mut materialized, Some(&path), transcript_path.as_deref());
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
             .map_err(|e| VmError::Runtime(format!("failed to create run directory: {e}")))?;
@@ -548,7 +567,8 @@ pub fn save_run_record(run: &RunRecord, path: Option<&str>) -> Result<String, Vm
 
 pub fn load_run_record(path: &Path) -> Result<RunRecord, VmError> {
     let (mut run, _) = load_run_record_snapshot(path)?;
-    refresh_run_observability(&mut run, Some(path));
+    let transcript_path = discover_llm_transcript_sidecar(&run, path);
+    refresh_run_observability(&mut run, Some(path), transcript_path.as_deref());
     Ok(run)
 }
 

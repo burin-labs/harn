@@ -111,8 +111,8 @@ use transcript_ambient::{
     record_capability_snapshot_definition, system_prompt_changed, tool_schemas_changed,
 };
 pub(crate) use transcript_ambient::{
-    pop_llm_transcript_dir, push_llm_transcript_dir, swap_llm_transcript_ambient,
-    LlmTranscriptAmbient,
+    current_transcript_path, pop_llm_transcript_dir, push_llm_transcript_dir,
+    swap_llm_transcript_ambient, LlmTranscriptAmbient,
 };
 
 tokio::task_local! {

@@ -314,6 +314,96 @@ fn save_and_load_run_record_materializes_observability_summary() {
 }
 
 #[test]
+fn save_run_record_normalizes_external_transcript_into_movable_bundle() {
+    let temp = tempfile::tempdir().unwrap();
+    let source_dir = tempfile::tempdir().unwrap();
+    let original_bundle = temp.path().join("original");
+    std::fs::create_dir_all(&original_bundle).unwrap();
+    let run_path = original_bundle.join("run.json");
+    let source_path = source_dir.path().join("llm_transcript.jsonl");
+    let transcript = concat!(
+        "{\"type\":\"system_prompt\",\"session_id\":\"session-1\"}\n",
+        "{\"type\":\"agent_session_finalized\",\"terminal\":true,\"final_status\":\"done\"}\n",
+    );
+    std::fs::write(&source_path, transcript).unwrap();
+    let run = RunRecord {
+        id: "run_external_transcript".to_string(),
+        workflow_id: "wf".to_string(),
+        status: "completed".to_string(),
+        ..Default::default()
+    };
+
+    save_run_record_with_transcript(&run, Some(run_path.to_str().unwrap()), Some(&source_path))
+        .unwrap();
+
+    let canonical = original_bundle.join("run-llm/llm_transcript.jsonl");
+    assert_eq!(std::fs::read_to_string(&canonical).unwrap(), transcript);
+    let persisted = load_run_record(&run_path).unwrap();
+    let pointer_path = verified_llm_transcript_pointer_path(&persisted, &run_path).unwrap();
+    assert_eq!(pointer_path, canonical);
+
+    let moved_bundle = temp.path().join("moved");
+    std::fs::rename(&original_bundle, &moved_bundle).unwrap();
+    let moved_run_path = moved_bundle.join("run.json");
+    let moved = load_run_record(&moved_run_path).unwrap();
+    let moved_pointer = verified_llm_transcript_pointer_path(&moved, &moved_run_path).unwrap();
+    assert_eq!(
+        moved_pointer,
+        moved_bundle.join("run-llm/llm_transcript.jsonl")
+    );
+}
+
+#[test]
+fn save_run_record_omits_missing_model_transcript_pointer() {
+    let temp = tempfile::tempdir().unwrap();
+    let run_path = temp.path().join("run.json");
+    let missing = temp.path().join("elsewhere/llm_transcript.jsonl");
+    let run = RunRecord {
+        id: "run_missing_transcript".to_string(),
+        workflow_id: "wf".to_string(),
+        status: "completed".to_string(),
+        ..Default::default()
+    };
+
+    save_run_record_with_transcript(&run, Some(run_path.to_str().unwrap()), Some(&missing))
+        .unwrap();
+    let loaded = load_run_record(&run_path).unwrap();
+    assert!(
+        loaded
+            .observability
+            .unwrap()
+            .transcript_pointers
+            .iter()
+            .all(|pointer| pointer.kind != "llm_jsonl"),
+        "a missing transcript must be represented by the absence of a pointer"
+    );
+}
+
+#[test]
+fn save_run_record_survives_malformed_model_transcript_without_a_pointer() {
+    let temp = tempfile::tempdir().unwrap();
+    let run_path = temp.path().join("run.json");
+    let malformed = temp.path().join("llm_transcript.jsonl");
+    std::fs::write(&malformed, "not-json\n").unwrap();
+    let run = RunRecord {
+        id: "run_malformed_transcript".to_string(),
+        workflow_id: "wf".to_string(),
+        status: "completed".to_string(),
+        ..Default::default()
+    };
+
+    save_run_record_with_transcript(&run, Some(run_path.to_str().unwrap()), Some(&malformed))
+        .expect("transcript observability must not block the owning run record");
+    let loaded = load_run_record(&run_path).unwrap();
+    assert!(loaded
+        .observability
+        .unwrap()
+        .transcript_pointers
+        .iter()
+        .all(|pointer| pointer.kind != "llm_jsonl"));
+}
+
+#[test]
 fn save_and_load_run_record_materializes_daemon_events_from_sidecar() {
     let temp_dir = tempfile::tempdir().unwrap();
     let run_path = temp_dir.path().join("run.json");

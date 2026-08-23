@@ -117,13 +117,17 @@ pub(crate) fn pop_llm_transcript_dir() {
     reset_deduplication();
 }
 
-pub(super) fn current_transcript_dir() -> Option<String> {
+pub(crate) fn current_transcript_dir() -> Option<String> {
     let stacked = TRANSCRIPT_DIR_STACK.with(|stack| stack.borrow().last().cloned());
     stacked.or_else(|| {
         std::env::var("HARN_LLM_TRANSCRIPT_DIR")
             .ok()
             .filter(|dir| !dir.is_empty())
     })
+}
+
+pub(crate) fn current_transcript_path() -> Option<std::path::PathBuf> {
+    current_transcript_dir().map(|dir| std::path::PathBuf::from(dir).join("llm_transcript.jsonl"))
 }
 
 #[cfg(test)]
