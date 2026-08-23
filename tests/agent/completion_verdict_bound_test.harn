@@ -32,15 +32,13 @@ import {
   __judge_completion_verdict_read,
   __judge_completion_verdict_schema,
 } from "std/agent/judge"
-import {
-  completion_judge_system_prompt,
-  completion_judge_user_prompt,
-} from "std/agent/prompts"
+import { completion_judge_system_prompt, completion_judge_user_prompt } from "std/agent/prompts"
 
 // Output envelope a cheap judge model can be relied on to produce in full.
 // The schema's worst case has to fit here with room for the model's own
 // framing, so the assertions below budget well under it.
 const RELIABLE_OUTPUT_TOKENS = 640
+
 // Deliberately pessimistic: real JSON averages closer to four characters per
 // token, so charging two makes the bound hold even on a tokenizer that splits
 // the detail text badly.
@@ -107,10 +105,7 @@ pipeline test_verdict_schema_worst_case_fits_the_output_envelope(harness: Harnes
   const budget = RELIABLE_OUTPUT_TOKENS * CHARS_PER_TOKEN
   // Compared as a pair so a failure prints the size that broke the bound
   // rather than just `false`.
-  assert_eq(
-    ["worst_case_within_budget", worst_case <= budget],
-    ["worst_case_within_budget", true],
-  )
+  assert_eq(["worst_case_within_budget", worst_case <= budget], ["worst_case_within_budget", true])
 }
 
 pipeline test_verdict_schema_carries_one_discriminant_and_one_detail(harness: Harness, task) {
@@ -129,15 +124,14 @@ pipeline test_detail_carries_the_audit_basis_on_both_branches(harness: Harness, 
   )
   assert_eq(approved.verdict, "done")
   assert_eq(approved.detail, "The targeted verifier ran and passed on the changed file.")
-
   const vetoed = __judge_completion_verdict_read(
-    {verdict: "continue", detail: "Deletion behavior is never exercised; add a test that removes a row."},
+    {
+      verdict: "continue",
+      detail: "Deletion behavior is never exercised; add a test that removes a row.",
+    },
   )
   assert_eq(vetoed.verdict, "continue")
-  assert_eq(
-    vetoed.detail,
-    "Deletion behavior is never exercised; add a test that removes a row.",
-  )
+  assert_eq(vetoed.detail, "Deletion behavior is never exercised; add a test that removes a row.")
 }
 
 pipeline test_superseded_verdict_shape_keeps_its_decision(harness: Harness, task) {
@@ -156,7 +150,6 @@ pipeline test_superseded_verdict_shape_keeps_its_decision(harness: Harness, task
   )
   assert_eq(vetoed.verdict, "continue")
   assert_eq(vetoed.detail, "Replace the hollow negative with a behavior-sensitive test.")
-
   const approved = __judge_completion_verdict_read(
     {action: "accept", reason: "Write and verification are sufficient.", repair: ""},
   )
@@ -213,12 +206,7 @@ pipeline test_completion_judge_prompts_teach_the_compact_contract(harness: Harne
   const schema = __judge_completion_verdict_schema()
   const user = completion_judge_user_prompt(
     harness.fs,
-    {
-      stop_reason: "natural",
-      iteration: 1,
-      judge_evidence: "none",
-      last_text: "Done.",
-    },
+    {stop_reason: "natural", iteration: 1, judge_evidence: "none", last_text: "Done."},
   )
   // The stable prefix ships the schema, so a prompt naming the superseded
   // fields would contradict it and invite exactly the long answer the bound

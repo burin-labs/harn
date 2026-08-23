@@ -26,8 +26,12 @@ import { AgentSpec } from "std/agent/options"
 import { llm_text, with_llm_script } from "std/testing"
 
 // A veto that asks only for wire format. Nothing about it names work.
-const FORMATTING_VETO = "{\"verdict\":\"continue\",\"detail\":\"Return a final response with the done marker on its own line.\"}"
-const APPROVAL = "{\"verdict\":\"done\",\"detail\":\"The report names the changed file and the passing verifier.\"}"
+const FORMATTING_VETO =
+  "{\"verdict\":\"continue\",\"detail\":\"Return a final response with the done marker on its own line.\"}"
+
+const APPROVAL =
+  "{\"verdict\":\"done\",\"detail\":\"The report names the changed file and the passing verifier.\"}"
+
 // The substantive answer, repeated verbatim. It never carries a marker.
 const FINAL_TEXT = "Added the eviction path in src/cache.rs; the focused test passes."
 
@@ -120,10 +124,7 @@ pipeline test_injected_feedback_is_the_judges_own_detail(harness: Harness, task)
       // Exactly the judge's detail, once: the compact contract carries one
       // field, so there is nothing for the harness to compose it with and no
       // second copy for it to append.
-      assert_eq(
-        feedback,
-        ["Return a final response with the done marker on its own line."],
-      )
+      assert_eq(feedback, ["Return a final response with the done marker on its own line."])
     },
   )
 }

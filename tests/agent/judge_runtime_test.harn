@@ -257,10 +257,7 @@ pipeline test_completion_judge_prompt_uses_projection_not_callable_schema(harnes
         tool_calls: [{id: "edit-1", name: "edit", arguments: {content: "WRITE_ARG_MARKER"}}],
       },
       llm_done(),
-      {
-        text:
-          "{\"verdict\":\"done\",\"detail\":\"The write and verification are sufficient.\"}",
-      },
+      {text: "{\"verdict\":\"done\",\"detail\":\"The write and verification are sufficient.\"}"},
     ],
     { ->
       const session = "judge-projection-prompt-" + harness.random.uuid()
