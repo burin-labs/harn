@@ -17,9 +17,7 @@ pipeline default(harness: Harness) {
       ),
       llm_text("<user_response>candidate three</user_response>\n<done>##DONE##</done>"),
       llm_text("<user_response>candidate four</user_response>\n<done>##DONE##</done>"),
-      llm_text(
-        "{\"verdict\":\"done\",\"detail\":\"The fourth candidate is complete.\"}",
-      ),
+      llm_text("{\"verdict\":\"done\",\"detail\":\"The fourth candidate is complete.\"}"),
     ],
     { ->
       const session = "done-judge-cadence-" + harness.random.uuid()

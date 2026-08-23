@@ -23,9 +23,7 @@ pipeline main(harness: Harness) {
     [
       {tool_calls: [{id: "lookup_1", name: "lookup", arguments: {query: "release"}}]},
       llm_text("<user_response>Release notes are ready.</user_response>"),
-      llm_text(
-        "{\"verdict\":\"done\",\"detail\":\"The natural final text is complete.\"}",
-      ),
+      llm_text("{\"verdict\":\"done\",\"detail\":\"The natural final text is complete.\"}"),
     ],
     { ->
       const result = agent_loop(

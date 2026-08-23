@@ -19,13 +19,9 @@ fn run_capped(harness: Harness) {
     harness.llm,
     [
       llm_text("Round one. ##DONE##"),
-      llm_text(
-        "{\"verdict\":\"continue\",\"detail\":\"Keep going after veto one.\"}",
-      ),
+      llm_text("{\"verdict\":\"continue\",\"detail\":\"Keep going after veto one.\"}"),
       llm_text("Round two. ##DONE##"),
-      llm_text(
-        "{\"verdict\":\"continue\",\"detail\":\"Keep going after veto two.\"}",
-      ),
+      llm_text("{\"verdict\":\"continue\",\"detail\":\"Keep going after veto two.\"}"),
       llm_text("Round three. ##DONE##"),
     ],
     { ->
@@ -68,9 +64,7 @@ fn run_approved(harness: Harness) {
     harness.llm,
     [
       llm_text("Final answer. ##DONE##"),
-      llm_text(
-        "{\"verdict\":\"done\",\"detail\":\"The task looks complete.\"}",
-      ),
+      llm_text("{\"verdict\":\"done\",\"detail\":\"The task looks complete.\"}"),
     ],
     { ->
       const session_id = "done-judge-approve-" + harness.random.uuid()
@@ -103,13 +97,9 @@ fn run_cap_disabled(harness: Harness) {
     harness.llm,
     [
       llm_text("Try one. ##DONE##"),
-      llm_text(
-        "{\"verdict\":\"continue\",\"detail\":\"Keep going after veto one.\"}",
-      ),
+      llm_text("{\"verdict\":\"continue\",\"detail\":\"Keep going after veto one.\"}"),
       llm_text("Try two. ##DONE##"),
-      llm_text(
-        "{\"verdict\":\"continue\",\"detail\":\"Keep going after veto two.\"}",
-      ),
+      llm_text("{\"verdict\":\"continue\",\"detail\":\"Keep going after veto two.\"}"),
       llm_text("Try three. ##DONE##"),
     ],
     { ->

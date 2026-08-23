@@ -29,13 +29,9 @@ fn run_capped(harness: Harness) {
     harness.llm,
     [
       llm_text("Round one. ##DONE##"),
-      llm_text(
-        "{\"verdict\":\"continue\",\"detail\":\"Keep going after veto one.\"}",
-      ),
+      llm_text("{\"verdict\":\"continue\",\"detail\":\"Keep going after veto one.\"}"),
       llm_text("Round two. ##DONE##"),
-      llm_text(
-        "{\"verdict\":\"continue\",\"detail\":\"Keep going after veto two.\"}",
-      ),
+      llm_text("{\"verdict\":\"continue\",\"detail\":\"Keep going after veto two.\"}"),
       llm_text("Round three. ##DONE##"),
     ],
     { ->
@@ -81,9 +77,7 @@ fn run_approved(harness: Harness) {
     harness.llm,
     [
       llm_text("Final answer. ##DONE##"),
-      llm_text(
-        "{\"verdict\":\"done\",\"detail\":\"The task looks complete.\"}",
-      ),
+      llm_text("{\"verdict\":\"done\",\"detail\":\"The task looks complete.\"}"),
     ],
     { ->
       const session_id = "verify-judge-approve-" + harness.random.uuid()
@@ -116,13 +110,9 @@ fn run_cap_disabled(harness: Harness) {
     harness.llm,
     [
       llm_text("Try one. ##DONE##"),
-      llm_text(
-        "{\"verdict\":\"continue\",\"detail\":\"Keep going after veto one.\"}",
-      ),
+      llm_text("{\"verdict\":\"continue\",\"detail\":\"Keep going after veto one.\"}"),
       llm_text("Try two. ##DONE##"),
-      llm_text(
-        "{\"verdict\":\"continue\",\"detail\":\"Keep going after veto two.\"}",
-      ),
+      llm_text("{\"verdict\":\"continue\",\"detail\":\"Keep going after veto two.\"}"),
       llm_text("Try three. ##DONE##"),
     ],
     { ->
@@ -167,9 +157,7 @@ fn run_diagnosis_recovery(harness: Harness) {
         "{\"verdict\":\"continue\",\"detail\":\"The tool-call shape is malformed; use a different valid shape next.\"}",
       ),
       llm_text("Recovered after applying the diagnosis. ##DONE##"),
-      llm_text(
-        "{\"verdict\":\"done\",\"detail\":\"The recovery succeeded.\"}",
-      ),
+      llm_text("{\"verdict\":\"done\",\"detail\":\"The recovery succeeded.\"}"),
     ],
     { ->
       const session_id = "verify-judge-diagnosis-" + harness.random.uuid()
@@ -198,9 +186,7 @@ fn run_diagnosis_recovery(harness: Harness) {
       // The compact verdict carries one detail, so the gap and its next action
       // are the same sentence. Pin it verbatim rather than probing two
       // substrings of a schema that no longer has two fields.
-      harness.stdio.println(
-        "diagnosis.injected=" + to_string(recovery_prompt.contains(diagnosis)),
-      )
+      harness.stdio.println("diagnosis.injected=" + to_string(recovery_prompt.contains(diagnosis)))
       harness.stdio.println(
         "diagnosis.next_step_recorded=" + to_string(judges[0].next_step == diagnosis),
       )

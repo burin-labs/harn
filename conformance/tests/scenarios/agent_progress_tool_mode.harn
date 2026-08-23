@@ -31,9 +31,7 @@ pipeline default(harness: Harness) {
       },
       llm_text("<user_response>Progress reported.</user_response>"),
       llm_text(
-        json_stringify(
-          {verdict: "done", detail: "One structured progress event was emitted."},
-        ),
+        json_stringify({verdict: "done", detail: "One structured progress event was emitted."}),
       ),
     ],
     { ->

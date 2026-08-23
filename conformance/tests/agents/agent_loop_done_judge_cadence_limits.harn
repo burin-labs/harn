@@ -80,9 +80,7 @@ pipeline default(harness: Harness) {
     [
       llm_text("<user_response>closure one</user_response>\n<done>##DONE##</done>"),
       llm_text("<user_response>closure two</user_response>\n<done>##DONE##</done>"),
-      llm_text(
-        "{\"verdict\":\"done\",\"detail\":\"The closure is complete on turn two.\"}",
-      ),
+      llm_text("{\"verdict\":\"done\",\"detail\":\"The closure is complete on turn two.\"}"),
     ],
     { ->
       const closure_session = "done-judge-closure-" + harness.random.uuid()
