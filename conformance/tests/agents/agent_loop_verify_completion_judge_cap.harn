@@ -194,15 +194,15 @@ fn run_diagnosis_recovery(harness: Harness) {
       const judges = events_of(captured.events, "judge_decision")
       const recovery_prompt = json_stringify(calls[2].messages)
       harness.stdio.println("diagnosis.status=" + captured.result.status)
+      const diagnosis = "The tool-call shape is malformed; use a different valid shape next."
+      // The compact verdict carries one detail, so the gap and its next action
+      // are the same sentence. Pin it verbatim rather than probing two
+      // substrings of a schema that no longer has two fields.
       harness.stdio.println(
-        "diagnosis.injected="
-          + to_string(
-            recovery_prompt.contains("assistant is stuck in a loop sending malformed tool calls"),
-          ),
+        "diagnosis.injected=" + to_string(recovery_prompt.contains(diagnosis)),
       )
       harness.stdio.println(
-        "diagnosis.next_step_injected="
-          + to_string(recovery_prompt.contains("use a different tool-call shape")),
+        "diagnosis.next_step_recorded=" + to_string(judges[0].next_step == diagnosis),
       )
       harness.stdio.println(
         "diagnosis.reasoning_observable="

@@ -103,7 +103,9 @@ pipeline default(harness: Harness) {
       harness.stdio.println(tool_message_count(harness.agent, session))
       harness.stdio.println(dispatches)
       harness.stdio.println(contains(messages, "Stall diagnostic"))
-      harness.stdio.println(contains(messages, "change approach"))
+      // The whole detail, verbatim: the compact verdict carries one field, so
+      // what the judge said is exactly what the next turn must receive.
+      harness.stdio.println(contains(messages, "Change approach on the next turn."))
       harness.stdio.println(receipts[0].checkpoint.feedback_delivery)
       harness.stdio.println(len(feedback))
       harness.stdio.println(len(harness.llm.mock_calls()))

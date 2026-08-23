@@ -581,9 +581,16 @@ fn __judge_payload(
 const __COMPLETION_JUDGE_DETAIL_CHAR_LIMIT: int = 240
 
 /**
+ * __judge_completion_verdict_schema.
+ *
  * One discriminant and one dual-purpose detail keep completion decisions
  * inside small-model output budgets. `detail` is the evidence basis for
  * `done`, or the single concrete gap and next action for `continue`.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ * @example: __judge_completion_verdict_schema()
  */
 pub fn __judge_completion_verdict_schema() -> dict {
   return {
@@ -598,10 +605,17 @@ pub fn __judge_completion_verdict_schema() -> dict {
 }
 
 /**
+ * __judge_completion_verdict_read.
+ *
  * Decode a judge response into the compact verdict. The superseded shape
  * `{action, reason, repair, ...}` still decodes, because cached and replayed
  * judge responses outlive the schema that produced them and a decision read
  * as absent would silently become an approval.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ * @example: __judge_completion_verdict_read({verdict: "done", detail: "tests pass"})
  */
 pub fn __judge_completion_verdict_read(result) -> CompletionJudgeVerdict {
   const raw = trim(to_string(result?.verdict ?? result?.action ?? ""))
