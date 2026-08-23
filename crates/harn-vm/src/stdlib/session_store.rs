@@ -7,15 +7,13 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, RwLock, RwLockWriteGuard};
+use std::sync::Arc;
 
 use harn_session_store::{
     AppendEvent, CreateSession, EventId, EventIdentity, EventIdentityField, ImportSession,
     ListFilter, ListOrder, ListSortKey, ReadRange, SearchFilter, SearchMode, SearchQuery,
     SessionEventKind, SessionImporter, SessionStatus, SessionStore, SessionType,
-    SharedSessionChangeObserver, SqliteSessionStore, StoreError, StoreHooks, StoredEvent,
-    VerifyReport, MAX_READ_BATCH,
+    SqliteSessionStore, StoreError, StoreHooks, StoredEvent, VerifyReport, MAX_READ_BATCH,
 };
 use serde::Deserialize;
 use serde_json::{json, Value as JsonValue};
@@ -357,92 +355,10 @@ fn open_store(state_dir: &SessionStoreDir) -> Result<SqliteSessionStore, VmError
     SqliteSessionStore::open_with_hooks(store_path(state_dir), store_hooks()).map_err(store_error)
 }
 
-/// Process-wide observers notified when session metadata is committed.
-///
-/// Deliberately process-scoped, not thread-local like the redaction policy
-/// beside it: a store handle is opened on whatever thread needs it, and an
-/// update commits on whatever executor thread the caller happens to be on. A
-/// thread-local sink would be installed on one thread and silently miss every
-/// write made from another, which reads as "notifications do not work" rather
-/// than as a wiring mistake.
-///
-/// A list rather than one slot, because more than one surface can care about
-/// the same store and a single slot makes the second registration silently
-/// evict the first.
-static SESSION_CHANGE_OBSERVERS: RwLock<Vec<(u64, SharedSessionChangeObserver)>> =
-    RwLock::new(Vec::new());
-static NEXT_SESSION_CHANGE_SUBSCRIPTION: AtomicU64 = AtomicU64::new(1);
-
-fn session_change_observers() -> RwLockWriteGuard<'static, Vec<(u64, SharedSessionChangeObserver)>>
-{
-    SESSION_CHANGE_OBSERVERS
-        .write()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-}
-
-/// Live registration for [`subscribe_session_changes`]. Unregisters on drop so
-/// a surface that goes away cannot keep receiving, and so a test cannot leak a
-/// sink into the next one sharing the process.
-#[must_use = "dropping the subscription immediately unregisters the observer"]
-pub struct SessionChangeSubscription {
-    id: u64,
-}
-
-impl Drop for SessionChangeSubscription {
-    fn drop(&mut self) {
-        session_change_observers().retain(|(id, _)| *id != self.id);
-    }
-}
-
-/// Register an observer notified after any session metadata update commits
-/// through a store this VM opens.
-///
-/// Every canonical store opened here carries the registered observers, so a
-/// surface does not have to be handed the specific handle a writer happened to
-/// use. Scope is this process only: a write from another process reaches the
-/// same database file but no in-process sink.
-pub fn subscribe_session_changes(
-    observer: SharedSessionChangeObserver,
-) -> SessionChangeSubscription {
-    let id = NEXT_SESSION_CHANGE_SUBSCRIPTION.fetch_add(1, Ordering::Relaxed);
-    session_change_observers().push((id, observer));
-    SessionChangeSubscription { id }
-}
-
-/// Fans one committed change out to every live subscriber.
-struct SessionChangeFanout;
-
-impl harn_session_store::SessionChangeObserver for SessionChangeFanout {
-    fn session_updated(&self, meta: &harn_session_store::SessionMeta) {
-        let observers: Vec<SharedSessionChangeObserver> = SESSION_CHANGE_OBSERVERS
-            .read()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .iter()
-            .map(|(_, observer)| Arc::clone(observer))
-            .collect();
-        // Copy out before dispatching: an observer is allowed to subscribe or
-        // unsubscribe in response, which would deadlock against a held guard.
-        for observer in observers {
-            observer.session_updated(meta);
-        }
-    }
-}
-
-fn current_session_change_observer() -> Option<SharedSessionChangeObserver> {
-    let empty = SESSION_CHANGE_OBSERVERS
-        .read()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .is_empty();
-    if empty {
-        return None;
-    }
-    Some(Arc::new(SessionChangeFanout))
-}
-
 fn store_hooks() -> StoreHooks {
     StoreHooks {
         redaction: Some(Arc::new(crate::redact::current_policy())),
-        change_observer: current_session_change_observer(),
+        change_observer: super::session_change::current_observer(),
         ..StoreHooks::default()
     }
 }

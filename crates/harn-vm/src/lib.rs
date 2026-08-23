@@ -134,9 +134,10 @@ pub mod shells;
 pub mod skills;
 pub mod stdlib;
 /// Session-metadata change notification for surfaces that project a session.
-pub use stdlib::session_store::{
-    open_canonical_store, subscribe_session_changes, SessionChangeSubscription,
+pub use stdlib::session_change::{
+    subscribe as subscribe_session_changes, SessionChangeSubscription,
 };
+pub use stdlib::session_store::open_canonical_store;
 pub mod stdlib_modules;
 pub mod step_runtime;
 pub mod store;
