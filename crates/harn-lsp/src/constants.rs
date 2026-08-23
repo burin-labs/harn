@@ -455,7 +455,6 @@ pub(crate) const BUILTINS: &[(&str, &str)] = &[
         "transcript_compact",
         "transcript_compact(transcript, options?) -> dict",
     ),
-    (),
     ("transcript_assets", "transcript_assets(transcript) -> list"),
     (
         "transcript_add_asset",
