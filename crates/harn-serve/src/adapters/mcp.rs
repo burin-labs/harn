@@ -103,6 +103,9 @@ pub struct McpServer {
     context: McpContextCatalog,
     auth_policy: AuthPolicy,
     executor: DispatchRuntime,
+    /// Tasks handed out for `@job` exports. Same lifecycle as the orchestrator
+    /// and script servers (`harn_vm::mcp_tasks`).
+    tasks: Arc<harn_vm::mcp_tasks::McpTaskStore>,
 }
 
 #[derive(Clone)]
@@ -185,6 +188,14 @@ enum ImmediateResult {
     Response(JsonValue),
     Accepted,
     Stream(Box<StreamJob>),
+    /// The client already has its `tools/call` answer -- a task id -- and the
+    /// work still has to run. The transport writes `immediate` now and drives
+    /// `job` in the background; the job files its own terminal response against
+    /// the task rather than writing it to the wire.
+    TaskStream {
+        immediate: JsonValue,
+        job: Box<StreamJob>,
+    },
 }
 
 struct StreamJob {
@@ -195,6 +206,10 @@ struct StreamJob {
     progress_token: Option<JsonValue>,
     request_profile: mcp_protocol::McpRequestProfile,
     context: RequestContext,
+    /// Set when the client asked for a task. The terminal response is then
+    /// filed against this id instead of written to the wire, because the client
+    /// already has its `tools/call` answer and is polling `tasks/get`.
+    task_id: Option<String>,
 }
 
 impl McpServer {
@@ -207,6 +222,7 @@ impl McpServer {
         let context = McpContextCatalog::discover(&catalog.script_path);
         let auth_policy = core.auth_policy().clone();
         Self {
+            tasks: Arc::new(harn_vm::mcp_tasks::McpTaskStore::new()),
             descriptor: AdapterDescriptor {
                 id: "mcp".to_string(),
                 caller_shape: "tool".to_string(),
@@ -322,6 +338,15 @@ impl McpServer {
                     self.execute_streaming_job(*job, notifier).await;
                 });
             }
+            ImmediateResult::TaskStream { immediate, job } => {
+                let _ = tx.send(immediate);
+                tokio::spawn(async move {
+                    let notifier = notify_channel(move |message| {
+                        let _ = tx.send(message);
+                    });
+                    self.execute_streaming_job(*job, notifier).await;
+                });
+            }
         }
     }
 
@@ -398,9 +423,27 @@ impl McpServer {
                 connection,
                 auth,
             ) {
-                Ok(job) => return ImmediateResult::Stream(Box::new(job)),
+                Ok((job, Some(immediate))) => {
+                    return ImmediateResult::TaskStream {
+                        immediate,
+                        job: Box::new(job),
+                    }
+                }
+                Ok((job, None)) => return ImmediateResult::Stream(Box::new(job)),
                 Err(response) => return ImmediateResult::Response(response),
             },
+            mcp_protocol::METHOD_TASKS_GET => {
+                self.tasks
+                    .handle_get(id, connection.client_identity(), &params)
+            }
+            mcp_protocol::METHOD_TASKS_UPDATE => {
+                self.tasks
+                    .handle_update(id, connection.client_identity(), &params)
+            }
+            mcp_protocol::METHOD_TASKS_CANCEL => {
+                self.tasks
+                    .handle_cancel(id, connection.client_identity(), &params)
+            }
             "resources/list" => harn_vm::jsonrpc::response(id, self.resources_list_result(&params)),
             "resources/read" => self.handle_resources_read(id, &params),
             "resources/templates/list" => {
@@ -448,7 +491,22 @@ impl McpServer {
                 mcp_protocol::completions_capability(),
             );
         }
+        // Advertised only when at least one export declares `@job`. A server
+        // whose script has no long-running entrypoint has nothing to serve as a
+        // task, and telling a client otherwise would leave it unable to
+        // distinguish "no tasks here" from "your task is gone".
+        if self.has_task_capable_export() {
+            capabilities.insert("extensions".to_string(), mcp_protocol::tasks_capability());
+        }
         capabilities
+    }
+
+    /// Whether any export declares `@job`, and so could be run as a task.
+    fn has_task_capable_export(&self) -> bool {
+        self.catalog
+            .functions
+            .values()
+            .any(|function| function.job.is_some())
     }
 
     fn server_info(&self) -> JsonValue {
@@ -513,7 +571,7 @@ impl McpServer {
         session: SharedSession,
         connection: mcp_protocol::McpServerSession,
         auth: AuthRequest,
-    ) -> Result<StreamJob, JsonValue> {
+    ) -> Result<(StreamJob, Option<JsonValue>), JsonValue> {
         let tool_name = params
             .get("name")
             .and_then(JsonValue::as_str)
@@ -534,8 +592,30 @@ impl McpServer {
             .pointer("/_meta/progressToken")
             .cloned()
             .filter(harn_vm::mcp_progress::is_valid_progress_token);
+        // `@job` is the declaration; the client capability is the request. Both
+        // have to be present, so neither side can force the other into a
+        // lifecycle it did not ask for.
+        let task = (self
+            .catalog
+            .function(&tool_name)
+            .is_some_and(|function| function.job.is_some())
+            && mcp_protocol::client_supports_tasks(&params))
+        .then(|| {
+            self.tasks.create(
+                connection.client_identity(),
+                Some(harn_vm::mcp_tasks::DEFAULT_TASK_TTL_MS),
+            )
+        });
+        let task_response = task.as_ref().map(|task| {
+            harn_vm::mcp_tasks::task_created_response(
+                request_id.clone(),
+                task,
+                "The requested Harn job is running as an MCP task.",
+            )
+        });
+        let task_id = task.map(|task| task.task_id);
         let request_key = request_key(&request_id);
-        Ok(StreamJob {
+        let job = StreamJob {
             request_id,
             request_key,
             tool_name,
@@ -547,7 +627,9 @@ impl McpServer {
                 connection,
                 auth,
             },
-        })
+            task_id,
+        };
+        Ok((job, task_response))
     }
 
     async fn execute_streaming_job(
@@ -636,6 +718,16 @@ impl McpServer {
         } else {
             response
         };
+        // A task call's client is polling `tasks/get`, not reading this stream,
+        // so the terminal response is filed rather than written. Progress
+        // notifications above still went to the wire: those are addressed by
+        // `progressToken`, which is a property of the request and independent
+        // of how the result comes back.
+        if let Some(task_id) = job.task_id {
+            self.tasks
+                .complete_with_tool_result(&task_id, task_outcome(response));
+            return;
+        }
         notify(response);
     }
 
@@ -840,6 +932,28 @@ fn forbidden_jsonrpc_error_response(
     })
 }
 
+/// Reduce a finished JSON-RPC response to the MCP result the task store files.
+///
+/// A JSON-RPC `error` and a `result` with `isError` are the two ways this
+/// transport reports a failure; a client reading `tasks/get` should not have to
+/// know which one the tool hit, so the error shape is normalized into the
+/// `isError` result the store already understands.
+fn task_outcome(response: JsonValue) -> JsonValue {
+    if let Some(error) = response.get("error") {
+        return json!({
+            "content": [{
+                "type": "text",
+                "text": error
+                    .get("message")
+                    .and_then(JsonValue::as_str)
+                    .unwrap_or("Tool execution failed"),
+            }],
+            "isError": true,
+        });
+    }
+    response.get("result").cloned().unwrap_or(json!({}))
+}
+
 fn requires_protocol_auth(method: &str) -> bool {
     matches!(
         method,
@@ -851,6 +965,9 @@ fn requires_protocol_auth(method: &str) -> bool {
             | "prompts/list"
             | "prompts/get"
             | mcp_protocol::METHOD_COMPLETION_COMPLETE
+            | mcp_protocol::METHOD_TASKS_GET
+            | mcp_protocol::METHOD_TASKS_UPDATE
+            | mcp_protocol::METHOD_TASKS_CANCEL
     )
 }
 

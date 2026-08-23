@@ -95,6 +95,17 @@ pub(super) fn tool_entry(function: &crate::ExportedFunction) -> JsonValue {
     if let Some(output_schema) = function.output_schema.clone() {
         entry["outputSchema"] = output_schema;
     }
+    // `@job` already means "this entrypoint is long-running" everywhere else in
+    // Harn -- it is what routes a function through the trigger dispatcher. An
+    // MCP client asking the same question deserves the same answer from the
+    // same declaration rather than a second attribute that could disagree with
+    // it. `optional`, not `required`: a plain `tools/call` on a job export still
+    // works, so a client without the extension is not locked out.
+    if function.job.is_some() {
+        entry["execution"] = json!({
+            "taskSupport": harn_vm::mcp_tasks::McpTaskSupport::Optional.wire_name(),
+        });
+    }
     entry
 }
 

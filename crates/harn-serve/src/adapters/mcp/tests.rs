@@ -138,7 +138,9 @@ pub fn greet(name: string) -> string {
         .await
     {
         ImmediateResult::Response(response) => response,
-        ImmediateResult::Accepted | ImmediateResult::Stream(_) => {
+        ImmediateResult::Accepted
+        | ImmediateResult::Stream(_)
+        | ImmediateResult::TaskStream { .. } => {
             panic!("initialize must return a response")
         }
     };
@@ -160,7 +162,9 @@ pub fn greet(name: string) -> string {
         .await
     {
         ImmediateResult::Response(response) => response,
-        ImmediateResult::Accepted | ImmediateResult::Stream(_) => {
+        ImmediateResult::Accepted
+        | ImmediateResult::Stream(_)
+        | ImmediateResult::TaskStream { .. } => {
             panic!("tools/list must return a response")
         }
     };
@@ -361,7 +365,9 @@ pub fn greet(name: string) -> string {
         .await
     {
         ImmediateResult::Response(response) => response,
-        ImmediateResult::Accepted | ImmediateResult::Stream(_) => {
+        ImmediateResult::Accepted
+        | ImmediateResult::Stream(_)
+        | ImmediateResult::TaskStream { .. } => {
             panic!("expected auth response")
         }
     };
@@ -406,7 +412,9 @@ async fn mcp_response(server: &McpServer, request: JsonValue, session: SharedSes
         .await
     {
         ImmediateResult::Response(response) => response,
-        ImmediateResult::Accepted | ImmediateResult::Stream(_) => {
+        ImmediateResult::Accepted
+        | ImmediateResult::Stream(_)
+        | ImmediateResult::TaskStream { .. } => {
             panic!("expected MCP JSON-RPC response")
         }
     }
@@ -422,7 +430,9 @@ async fn mcp_tool_response(
         .await
     {
         ImmediateResult::Stream(job) => job,
-        ImmediateResult::Response(_) | ImmediateResult::Accepted => {
+        ImmediateResult::Response(_)
+        | ImmediateResult::Accepted
+        | ImmediateResult::TaskStream { .. } => {
             panic!("expected MCP tool stream job")
         }
     };
@@ -603,4 +613,162 @@ fn streamable_http_accept_negotiation_uses_sse_only_when_json_is_absent() {
         HeaderValue::from_static("application/json, text/event-stream"),
     );
     assert!(!should_stream_post_response(&headers));
+}
+
+/// A script with one `@job` export and one ordinary export.
+fn job_export_server(dir: &tempfile::TempDir) -> McpServer {
+    let script = dir.path().join("server.harn");
+    std::fs::write(
+        &script,
+        r#"
+@job("nightly_rollup")
+pub fn rollup(day: string) -> string {
+  return day
+}
+
+pub fn greet(name: string) -> string {
+  return name
+}
+"#,
+    )
+    .expect("write script");
+    let core = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");
+    McpServer::new(McpServerConfig::new(core))
+}
+
+/// A `_meta` block for a client that carries the tasks extension.
+fn task_client_request(request: JsonValue) -> JsonValue {
+    let mut request = stable_request(request);
+    request["params"]["_meta"][mcp_protocol::MCP_META_KEY_CLIENT_CAPABILITIES] = json!({
+        "extensions": {mcp_protocol::TASKS_EXTENSION_ID: {}}
+    });
+    request
+}
+
+/// `@job` already means "long-running" everywhere else in Harn. A client asking
+/// the same question over MCP gets the answer from that one declaration rather
+/// than from a second attribute that could disagree with it.
+#[tokio::test]
+async fn tools_list_marks_job_exports_as_task_capable() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let tools = job_export_server(&dir).tools_list_result(&json!({}));
+    let by_name: std::collections::BTreeMap<&str, &JsonValue> = tools["tools"]
+        .as_array()
+        .expect("tools array")
+        .iter()
+        .map(|tool| (tool["name"].as_str().expect("tool name"), tool))
+        .collect();
+    assert_eq!(
+        by_name["rollup"]["execution"],
+        json!({"taskSupport": "optional"})
+    );
+    assert!(
+        by_name["greet"].get("execution").is_none(),
+        "an ordinary export must not claim task support",
+    );
+}
+
+/// The capability is advertised only when something can actually be served that
+/// way. A server whose script has no `@job` export has nothing to run as a
+/// task, and saying otherwise would leave a client unable to tell "no tasks
+/// here" from "your task is gone".
+#[tokio::test]
+async fn tasks_capability_tracks_whether_any_export_declares_a_job() {
+    let with_job = tempfile::tempdir().expect("tempdir");
+    let discover = job_export_server(&with_job).handle_server_discover(json!(1));
+    assert!(
+        discover["result"]["capabilities"]["extensions"][mcp_protocol::TASKS_EXTENSION_ID]
+            .is_object()
+    );
+
+    let without = tempfile::tempdir().expect("tempdir");
+    let script = without.path().join("server.harn");
+    std::fs::write(
+        &script,
+        "pub fn greet(name: string) -> string {\n  return name\n}\n",
+    )
+    .expect("write script");
+    let core = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");
+    let plain = McpServer::new(McpServerConfig::new(core)).handle_server_discover(json!(1));
+    assert!(
+        plain["result"]["capabilities"].get("extensions").is_none(),
+        "a server with no job export must not advertise tasks: {plain}",
+    );
+}
+
+/// The whole round trip: ask for a task, get an id back instead of a result,
+/// and collect the result from `tasks/get` once the job lands.
+#[tokio::test]
+async fn a_job_export_runs_as_a_task_the_client_can_collect() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let server = Arc::new(job_export_server(&dir));
+    let session = SharedSession::new();
+
+    let (immediate, job) = match server
+        .process_message(
+            task_client_request(harn_vm::jsonrpc::request(
+                1,
+                "tools/call",
+                json!({"name": "rollup", "arguments": {"day": "2026-08-23"}}),
+            )),
+            session.clone(),
+            AuthRequest::default(),
+        )
+        .await
+    {
+        ImmediateResult::TaskStream { immediate, job } => (immediate, job),
+        other => panic!(
+            "a task-capable client calling a job export must get a task, got {:?}",
+            matches!(other, ImmediateResult::Stream(_))
+        ),
+    };
+    assert_eq!(immediate["result"]["resultType"], json!("task"));
+    assert_eq!(immediate["result"]["status"], json!("working"));
+    let task_id = immediate["result"]["taskId"]
+        .as_str()
+        .expect("a created task carries an id")
+        .to_string();
+
+    server
+        .execute_streaming_job(*job, notify_channel(|_| {}))
+        .await;
+
+    let read = mcp_response(
+        &server,
+        harn_vm::jsonrpc::request(2, "tasks/get", json!({"taskId": task_id})),
+        session,
+    )
+    .await;
+    assert_eq!(read["result"]["status"], json!("completed"));
+    assert_eq!(read["result"]["result"]["isError"], json!(false));
+    assert_eq!(
+        read["result"]["result"]["content"][0]["text"],
+        json!("2026-08-23"),
+    );
+}
+
+/// Opting in is per client as well as per export: a client that never declared
+/// the extension keeps getting its result on the wire.
+#[tokio::test]
+async fn a_client_without_the_extension_still_calls_a_job_export_inline() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let server = job_export_server(&dir);
+    let response = mcp_tool_response(
+        &server,
+        harn_vm::jsonrpc::request(
+            1,
+            "tools/call",
+            json!({"name": "rollup", "arguments": {"day": "2026-08-23"}}),
+        ),
+        SharedSession::new(),
+    )
+    .await;
+    assert!(
+        response["result"].get("taskId").is_none(),
+        "an opted-out client must not be handed a task: {response}",
+    );
+    assert_eq!(
+        response["result"]["content"][0]["text"],
+        json!("2026-08-23")
+    );
 }

@@ -238,6 +238,50 @@ impl McpTaskStore {
         wake.notify_waiters();
     }
 
+    /// Record a finished task whose result is already an MCP `tools/call`
+    /// result rather than a bare tool return value.
+    ///
+    /// A server that projects its own result -- the export adapter builds MCP
+    /// content blocks before it knows whether the call was a task -- has
+    /// nothing left for [`McpTaskStore::complete`] to wrap, and wrapping it
+    /// again nests `content` inside `content`. Handing the projection over
+    /// intact is also lossless: a multi-block or non-object result survives,
+    /// where reconstructing a bare value from the blocks would not.
+    pub fn complete_with_tool_result(&self, task_id: &str, result: JsonValue) {
+        let failed = result
+            .get("isError")
+            .and_then(JsonValue::as_bool)
+            .unwrap_or(false);
+        let Some(wake) = ({
+            let mut tasks = self.tasks.lock().expect("MCP tasks poisoned");
+            let Some(record) = tasks.get_mut(task_id) else {
+                return;
+            };
+            if record.task.status == mcp_protocol::McpTaskStatus::Cancelled {
+                return;
+            }
+            record.task.last_updated_at = now_rfc3339();
+            if failed {
+                record.task.status = mcp_protocol::McpTaskStatus::Failed;
+                record.task.status_message = Some(format!(
+                    "Tool execution failed: {}",
+                    result
+                        .pointer("/content/0/text")
+                        .and_then(JsonValue::as_str)
+                        .unwrap_or("Tool execution failed")
+                ));
+            } else {
+                record.task.status = mcp_protocol::McpTaskStatus::Completed;
+                record.task.status_message = Some("The task completed successfully.".to_string());
+            }
+            record.result = Some(result);
+            Some(record.notify.clone())
+        }) else {
+            return;
+        };
+        wake.notify_waiters();
+    }
+
     /// A handle that fires when the named task reaches a terminal status.
     ///
     /// A caller that wants the result rather than a poll loop takes this

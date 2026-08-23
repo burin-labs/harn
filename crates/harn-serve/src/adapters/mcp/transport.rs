@@ -59,6 +59,15 @@ pub(super) async fn http_post_request(
             attach_http_headers(&mut http, response_protocol);
             http
         }
+        // The task id is the response; progress notifications still arrive on
+        // the stream, and the terminal result is filed against the task rather
+        // than written here, so the client collects it with `tasks/get`.
+        ImmediateResult::TaskStream { immediate, job } => {
+            let stream = spawn_http_stream_with_prelude(state.server.clone(), *job, immediate);
+            let mut http = stream.into_response();
+            attach_http_headers(&mut http, response_protocol);
+            http
+        }
     }
 }
 
@@ -81,7 +90,32 @@ pub(super) fn spawn_http_stream(
     server: Arc<McpServer>,
     job: StreamJob,
 ) -> Sse<impl futures::Stream<Item = Result<Event, Infallible>>> {
+    spawn_http_stream_inner(server, job, None)
+}
+
+/// Like [`spawn_http_stream`], but writes `prelude` before the job starts.
+///
+/// A task call's `tools/call` answer has to reach the client immediately -- it
+/// carries the id everything else is addressed by -- so it is queued onto the
+/// stream before the work begins rather than raced against the job's own
+/// notifications.
+pub(super) fn spawn_http_stream_with_prelude(
+    server: Arc<McpServer>,
+    job: StreamJob,
+    prelude: JsonValue,
+) -> Sse<impl futures::Stream<Item = Result<Event, Infallible>>> {
+    spawn_http_stream_inner(server, job, Some(prelude))
+}
+
+fn spawn_http_stream_inner(
+    server: Arc<McpServer>,
+    job: StreamJob,
+    prelude: Option<JsonValue>,
+) -> Sse<impl futures::Stream<Item = Result<Event, Infallible>>> {
     let (tx, rx) = unbounded::<JsonValue>();
+    if let Some(prelude) = prelude {
+        let _ = tx.unbounded_send(prelude);
+    }
     tokio::spawn(async move {
         let notifier = notify_channel(move |message| {
             let _ = tx.unbounded_send(message);
