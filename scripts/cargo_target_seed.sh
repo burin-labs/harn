@@ -36,24 +36,60 @@ directory_is_empty() {
   [[ ! -d "$1" ]] || [[ -z "$(find "$1" -mindepth 1 -maxdepth 1 -print -quit)" ]]
 }
 
+cow_clone_supported() {
+  local sample_file="$1"
+  local probe_file="$2"
+  local status=0
+
+  case "$(uname -s)" in
+    Darwin)
+      cp -cP "${sample_file}" "${probe_file}" >/dev/null 2>&1 || status=$?
+      ;;
+    Linux)
+      cp --reflink=always -- "${sample_file}" "${probe_file}" >/dev/null 2>&1 || status=$?
+      ;;
+    *)
+      status=1
+      ;;
+  esac
+  rm -f -- "${probe_file}"
+  return "${status}"
+}
+
 copy_tree_cow() {
   local source="$1"
   local destination="$2"
+  local sample_file probe_file
 
-  mkdir -p "${destination}"
   # Unit tests need deterministic coverage on filesystems without reflinks.
   # Production has no byte-copy fallback: paying several GiB of I/O and disk
   # to make setup look warm defeats this module's resource contract.
   if [[ "${HARN_CARGO_TARGET_SEED_TEST_COPY:-0}" == "1" ]]; then
+    mkdir -p "${destination}"
     cp -R "${source}/." "${destination}"
     return
   fi
 
+  # Probe the source and destination filesystems before asking cp to walk a
+  # multi-gigabyte target. Without this check, cp reports one reflink failure
+  # per file before the caller can take the intended cold-build fallback.
+  sample_file=""
+  while IFS= read -r -d '' sample_file; do
+    break
+  done < <(find "${source}" -type f -print0)
+  [[ -n "${sample_file}" ]] || return 1
+
+  mkdir -p "$(dirname "${destination}")"
+  probe_file="$(dirname "${destination}")/.harn-cargo-seed-probe-$$-${RANDOM}"
+  cow_clone_supported "${sample_file}" "${probe_file}" || return 1
+
   case "$(uname -s)" in
     Darwin)
+      mkdir -p "${destination}"
       cp -cRp "${source}/." "${destination}"
       ;;
     Linux)
+      mkdir -p "${destination}"
       cp --reflink=always -a "${source}/." "${destination}/"
       ;;
     *)

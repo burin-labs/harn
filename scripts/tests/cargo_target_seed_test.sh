@@ -102,4 +102,26 @@ if ! grep -Fq 'exceeds the 1 KiB ceiling' <<< "${oversized_output}" \
   exit 1
 fi
 
+unavailable_bin="${tmp_root}/unavailable bin"
+mkdir -p "${unavailable_bin}"
+printf '%s\n' \
+  '#!/usr/bin/env bash' \
+  'echo "simulated reflink error" >&2' \
+  'exit 1' \
+  > "${unavailable_bin}/cp"
+chmod +x "${unavailable_bin}/cp"
+unavailable_output="$(
+  HARN_CARGO_TARGET_SEED_KEY=unavailable-toolchain \
+  PATH="${unavailable_bin}:${fake_bin}:${PATH}" \
+    "${seed_tool}" publish "${source_target}" "${storage_root}" 2>&1
+)"
+if [[ "$(wc -l <<< "${unavailable_output}" | tr -d ' ')" != "1" ]] \
+  || ! grep -Fq 'copy-on-write clones are unavailable' <<< "${unavailable_output}" \
+  || grep -Fq 'simulated reflink error' <<< "${unavailable_output}" \
+  || [[ -e "${storage_root}/cargo-target-seed/unavailable-toolchain" ]] \
+  || find "${storage_root}/cargo-target-seed" -maxdepth 1 -name '.harn-cargo-seed-stage-*' -print -quit | grep -q .; then
+  echo "unavailable copy-on-write support did not take the quiet cold-build fallback" >&2
+  exit 1
+fi
+
 echo "cargo_target_seed_test: ok"
