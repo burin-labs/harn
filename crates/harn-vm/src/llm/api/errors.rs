@@ -54,6 +54,11 @@ pub(crate) enum LlmErrorReason {
     InvalidResponse,
     ModelUnavailable,
     EmptyGeneration,
+    /// The call consumed its entire output budget and committed nothing. The
+    /// same context under the same cap exhausts the same way, so this is a
+    /// deterministic budget failure rather than a provider hiccup: recovery is
+    /// a larger cap or a smaller request, never a byte-identical replay.
+    OutputBudgetExhausted,
     Unknown,
 }
 
@@ -71,6 +76,7 @@ impl LlmErrorReason {
             Self::InvalidResponse => "invalid_response",
             Self::ModelUnavailable => "model_unavailable",
             Self::EmptyGeneration => "empty_generation",
+            Self::OutputBudgetExhausted => "output_budget_exhausted",
             Self::Unknown => "unknown",
         }
     }
@@ -88,6 +94,7 @@ impl LlmErrorReason {
             "invalid_response" => Some(Self::InvalidResponse),
             "model_unavailable" => Some(Self::ModelUnavailable),
             "empty_generation" => Some(Self::EmptyGeneration),
+            "output_budget_exhausted" => Some(Self::OutputBudgetExhausted),
             "unknown" => Some(Self::Unknown),
             _ => None,
         }
@@ -114,6 +121,7 @@ impl LlmErrorReason {
             | Self::InvalidRequest
             | Self::InvalidResponse
             | Self::ModelUnavailable
+            | Self::OutputBudgetExhausted
             | Self::Unknown => LlmErrorKind::Terminal,
         }
     }
@@ -767,6 +775,26 @@ mod tests {
         );
         assert_eq!(info.kind, LlmErrorKind::Transient);
         assert_eq!(info.reason, LlmErrorReason::EmptyGeneration);
+    }
+
+    /// An exhausted output budget is deterministic under its cap: the taxonomy
+    /// has to say terminal, or every consumer that branches on `kind` treats it
+    /// as a hiccup worth re-sending the same request for.
+    #[test]
+    fn output_budget_exhaustion_is_terminal_not_transient() {
+        assert_eq!(
+            LlmErrorReason::OutputBudgetExhausted.default_kind(),
+            LlmErrorKind::Terminal
+        );
+        assert_eq!(
+            LlmErrorReason::EmptyGeneration.default_kind(),
+            LlmErrorKind::Transient,
+            "a genuinely empty generation stays a retryable hiccup"
+        );
+        assert_eq!(
+            LlmErrorReason::parse(LlmErrorReason::OutputBudgetExhausted.as_str()),
+            Some(LlmErrorReason::OutputBudgetExhausted)
+        );
     }
 
     #[test]

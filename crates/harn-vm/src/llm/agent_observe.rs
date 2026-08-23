@@ -607,6 +607,19 @@ fn degrade_options_to_non_streaming_transport(
     degraded
 }
 
+/// Raise the output cap for one retry of a call that spent its entire budget
+/// and committed nothing. `None` when the cap already sits at the shared
+/// escalation ceiling: another attempt there would only re-prove the same
+/// exhaustion, so the call fails fast to the caller's fallback instead.
+fn escalate_options_output_budget(
+    opts: &super::api::LlmCallOptions,
+) -> Option<super::api::LlmCallOptions> {
+    let raised = super::call::escalated_max_tokens(opts.max_tokens)?;
+    let mut escalated = opts.clone();
+    escalated.max_tokens = raised;
+    Some(escalated)
+}
+
 // ---------------------------------------------------------------------------
 // observed_llm_call — shared single-LLM-call wrapper with full observability
 // ---------------------------------------------------------------------------
@@ -653,6 +666,9 @@ pub(crate) async fn observed_llm_call(
         std::borrow::Cow::Borrowed(opts);
     let mut degraded_to_text = false;
     let mut degraded_stream_transport = false;
+    // Set once this call has raised its output cap. A second escalation would
+    // walk the budget upward without bound, so the class gets exactly one.
+    let mut escalated_output_budget = false;
     let mut attempt = 0usize;
     // How many empty-completion flakes this call retried through. Distinct from
     // `attempt` (which also counts transient-error and tool-format-degrade
@@ -1128,7 +1144,7 @@ pub(crate) async fn observed_llm_call(
             Err(error) => {
                 let category = crate::value::error_to_category(&error);
                 let message = error.to_string();
-                let classified = super::api::classify_llm_error(category.clone(), &message);
+                let mut classified = super::api::classify_llm_error(category.clone(), &message);
                 // Shared cooldown: 429 Retry-After, plus 529/503 overload
                 // (with a default window when the provider sent no header) so
                 // sibling agents on the same route back off together.
@@ -1167,7 +1183,28 @@ pub(crate) async fn observed_llm_call(
                 // exhausted the loud thrown error (which names the
                 // `upstream contract violation`) is surfaced unchanged, so the
                 // eval layer can still classify it as infra, not capability.
+                //
+                // One empty completion is NOT a provider hiccup: the call that
+                // billed its entire output cap and committed nothing exhausted
+                // a budget, and the same context under the same cap exhausts
+                // the same way. That class never takes the byte-identical
+                // replay below. Escalation is its first response — raise the
+                // cap once and retry — and a call whose cap already sits at the
+                // shared ceiling fails fast to the caller's fallback rather
+                // than paying for a re-proof of what the first attempt showed.
+                // Read the cap before any recovery below can swap `working`
+                // out from under the borrow `opts` holds.
+                let attempt_max_tokens = opts.max_tokens;
+                let budget_exhausted = is_output_budget_exhausted(&error, attempt_max_tokens);
+                if budget_exhausted {
+                    // Name the deterministic class everywhere the failure is
+                    // reported: `server_error` invites exactly the transient
+                    // handling this branch exists to prevent.
+                    classified.kind = super::api::LlmErrorKind::Terminal;
+                    classified.reason = super::api::LlmErrorReason::OutputBudgetExhausted;
+                }
                 let empty_completion_retry = empty_completion_error
+                    && !budget_exhausted
                     && attempt < empty_completion_retry_budget(&opts.provider);
                 // Runtime tool_format fallback: a native-channel request whose
                 // failure fingerprint says the provider's native tool-call
@@ -1209,11 +1246,23 @@ pub(crate) async fn observed_llm_call(
                     && !native_tool_channel_degrade
                     && is_stream_transport_failure(&error)
                     && can_degrade_stream_transport(opts);
+                // The one-shot cap escalation for an exhausted output budget.
+                // A channel or transport degrade already rewrites the request,
+                // so it owns the retry when it fires; escalation covers the
+                // case where the cap is the only thing that changed.
+                let budget_escalation = (budget_exhausted
+                    && !escalated_output_budget
+                    && !native_tool_channel_degrade
+                    && !stream_transport_degrade)
+                    .then(|| escalate_options_output_budget(opts))
+                    .flatten();
                 // Transient errors are fail-fast here: retry policy is composed
                 // in Harn via `with_retry` / routing policies, never a hidden
                 // in-call budget. Only the bounded provider-hiccup recoveries
-                // (empty completion, one-shot channel/transport degrades) loop.
+                // (empty completion, one-shot cap escalation, one-shot
+                // channel/transport degrades) loop.
                 let can_retry = empty_completion_retry
+                    || budget_escalation.is_some()
                     || native_tool_channel_degrade
                     || stream_transport_degrade;
                 let status = if can_retry {
@@ -1383,6 +1432,43 @@ pub(crate) async fn observed_llm_call(
                     effective_tool_format = "json".to_string();
                     degraded_to_text = true;
                     working = std::borrow::Cow::Owned(degraded);
+                }
+                if let Some(escalated) = budget_escalation {
+                    let before = attempt_max_tokens;
+                    let raised = escalated.max_tokens;
+                    let detail = format!(
+                        "provider {} model {} spent its whole output budget \
+                         (max_tokens={before}) without committing content ({error}); raising \
+                         max_tokens -> {raised} for one retry instead of replaying the same \
+                         request under the same cap",
+                        escalated.provider, escalated.model
+                    );
+                    crate::events::log_warn("llm", &detail);
+                    append_llm_observability_entry(
+                        "output_budget_escalate",
+                        serde_json::Map::from_iter([
+                            (
+                                "iteration".to_string(),
+                                serde_json::json!(iteration.unwrap_or(0)),
+                            ),
+                            ("attempt".to_string(), serde_json::json!(attempt)),
+                            (
+                                "provider".to_string(),
+                                serde_json::json!(escalated.provider),
+                            ),
+                            ("model".to_string(), serde_json::json!(escalated.model)),
+                            ("from".to_string(), serde_json::json!(before)),
+                            ("to".to_string(), serde_json::json!(raised)),
+                            ("error".to_string(), serde_json::json!(error.to_string())),
+                        ]),
+                    );
+                    annotate_current_span(&[
+                        ("output_budget_escalate", serde_json::json!(true)),
+                        ("output_budget_escalate_from", serde_json::json!(before)),
+                        ("output_budget_escalate_to", serde_json::json!(raised)),
+                    ]);
+                    escalated_output_budget = true;
+                    working = std::borrow::Cow::Owned(escalated);
                 }
                 if let Some(degraded) = stream_degraded_options {
                     let detail = format!(

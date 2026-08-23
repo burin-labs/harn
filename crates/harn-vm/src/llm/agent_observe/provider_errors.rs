@@ -269,6 +269,52 @@ pub(super) fn empty_completion_retry_reason(err: &VmError) -> Option<Unproductiv
     None
 }
 
+/// Output tokens the provider billed for a thrown empty completion, when it
+/// reported them. `empty_generation_error` carries this field on every throw
+/// that reached a usage block.
+pub(super) fn thrown_output_tokens(err: &VmError) -> Option<i64> {
+    if let VmError::Thrown(crate::value::VmValue::Dict(fields)) = err {
+        if let Some(crate::value::VmValue::Int(tokens)) = fields.get("output_tokens") {
+            return Some(*tokens);
+        }
+    }
+    // The same failure reaches some boundaries flattened to a message, which
+    // names the count too. `empty_completion_retry_reason` already reads both
+    // shapes; the budget comparison it feeds has to read both as well, or a
+    // flattened throw silently loses the fact that decides the retry.
+    let message = match err {
+        VmError::Thrown(crate::value::VmValue::String(text)) => text.as_ref(),
+        VmError::CategorizedError { message, .. } => message.as_str(),
+        VmError::Runtime(text) => text.as_str(),
+        _ => return None,
+    };
+    let digits: String = message
+        .split("completion_tokens=")
+        .nth(1)?
+        .chars()
+        .take_while(char::is_ascii_digit)
+        .collect();
+    digits.parse().ok()
+}
+
+/// An empty completion that billed the whole output budget is a *deterministic*
+/// budget failure, not a provider hiccup. The reasoning channel consumed every
+/// token the cap allowed and the committed message came back empty; the same
+/// context under the same cap exhausts the same way, so a byte-identical replay
+/// spends a second call to learn what the first one already proved. Recovery is
+/// a larger cap or a smaller request.
+///
+/// The cap is the request's, so this predicate lives at the retry boundary —
+/// the response parser sees usage but never the cap it was measured against.
+pub(super) fn is_output_budget_exhausted(err: &VmError, max_tokens: i64) -> bool {
+    max_tokens > 0
+        && matches!(
+            empty_completion_retry_reason(err),
+            Some(UnproductiveCompletionReason::EmptyGeneration)
+        )
+        && thrown_output_tokens(err).is_some_and(|tokens| tokens >= max_tokens)
+}
+
 /// A *thrown* failure whose signature says the provider's **native tool-call
 /// channel vanished or refused a call for this route** — distinct from the
 /// generic provider stall (`delivered no content`), which is a link hiccup that

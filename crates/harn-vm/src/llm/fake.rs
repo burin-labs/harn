@@ -202,6 +202,9 @@ pub struct FakeLlmCall {
     pub messages: Vec<serde_json::Value>,
     pub native_tools: Option<Vec<serde_json::Value>>,
     pub stream: bool,
+    /// Output cap this attempt actually carried on the wire. Lets a retry test
+    /// prove the request changed rather than trusting the loop's own bookkeeping.
+    pub max_tokens: i64,
 }
 
 impl FakeLlmCall {
@@ -213,6 +216,7 @@ impl FakeLlmCall {
             messages: request.messages.clone(),
             native_tools: request.native_tools.clone(),
             stream: request.stream,
+            max_tokens: request.max_tokens,
         }
     }
 }
