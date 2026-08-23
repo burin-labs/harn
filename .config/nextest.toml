@@ -240,6 +240,34 @@ slow-timeout = { period = "60s", terminate-after = 3, grace-period = "10s" }
 filter = 'package(harn-vm) and test(/request_catalog_audit_validates_every_catalog_route_in_process/)'
 slow-timeout = { period = "60s", terminate-after = 3, grace-period = "10s" }
 
+# Two burin-mini playground cases replay a taped 22-turn fixture through the VM
+# in-process, driving roughly 80K of pipeline and library Harn source per run.
+# Like the catalog audit above, they are heavy CPU-bound tests whose wall-time
+# is dominated by the environment rather than their own work. Measured:
+# ~4s each in isolation on a warm idle developer machine, ~20s on the first run
+# after a cold build, 55s and 58s on a Linux worker under 8-thread fan-out, and
+# past 120s on the full workspace at 16 threads. A CI run is always the cold,
+# contended end of that range.
+#
+# They were passing at 92% and 97.5% of the 60s ceiling, so ordinary runner
+# noise — not a regression — was enough to tip them over and turn three
+# scheduled workflows red (harn#7084). This budget stops that noise; it does
+# not make the tests cheap.
+#
+# Scope is anchored to these two cases on purpose. Their faster playground
+# siblings in the same module keep the default ceiling, so a real slow-test
+# regression in one of them still trips immediately.
+#
+# The durable root fix is making these cases cheap, tracked on harn#7084. The
+# open question there is the gap between ~4s warm-isolated and 55-58s on CI:
+# most of it is cold-start and fan-out, not steady-state compute, so the fix may
+# be in what the case reloads per run rather than in the replay itself. This
+# override is the tourniquet until that lands, and it should be removed with it
+# rather than inherited.
+[[profile.default.overrides]]
+filter = 'package(harn-cli) and binary(harn_cli_fast) and test(/burin_mini_playground::burin_mini_rate_limit_(overresearch_planner_commits_final_action_graph|weak_verify_plan_normalizes_to_single_verify_action)/)'
+slow-timeout = { period = "60s", terminate-after = 3, grace-period = "10s" }
+
 # ---------------------------------------------------------------------------
 # Wall-clock budget tests: reserve the runner while they measure
 # ---------------------------------------------------------------------------
