@@ -14,9 +14,9 @@ use crate::llm_config::{
 };
 use chrono::{NaiveDate, Utc};
 
-pub const PROVIDER_CATALOG_SCHEMA_VERSION: u32 = 8;
+pub const PROVIDER_CATALOG_SCHEMA_VERSION: u32 = 9;
 pub const PROVIDER_CATALOG_SCHEMA_ID: &str =
-    "https://harnlang.com/schemas/provider-catalog.v8.json";
+    "https://harnlang.com/schemas/provider-catalog.v9.json";
 pub const PROVIDER_CATALOG_GENERATOR: &str = "harn provider catalog generate";
 pub const HARN_DISABLE_CATALOG_REFRESH_ENV: &str = "HARN_DISABLE_CATALOG_REFRESH";
 pub const HARN_PROVIDER_CATALOG_URL_ENV: &str = "HARN_PROVIDER_CATALOG_URL";
@@ -239,6 +239,7 @@ fn catalog_provider(id: String, provider: ProviderDef) -> CatalogProvider {
                 .collect(),
             chat_endpoint: provider.chat_endpoint.clone(),
             completion_endpoint: provider.completion_endpoint.clone(),
+            embeddings_endpoint: provider.embeddings_endpoint.clone(),
         },
         auth: ProviderAuth {
             style: provider.auth_style.clone(),
@@ -488,6 +489,8 @@ fn catalog_model(
         released: model.released.clone(),
         row_kind: model.row_kind,
         current_snapshot: model.current_snapshot.clone(),
+        embedding_dim: model.embedding_dim,
+        embedding_max_tokens: model.embedding_max_tokens,
         id,
         name: model.name,
         display_name,

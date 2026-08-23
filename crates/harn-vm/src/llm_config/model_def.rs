@@ -950,6 +950,14 @@ pub struct ModelDef {
     /// only when `row_kind` is `selector`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub current_snapshot: Option<String>,
+    /// Embedding vector length when this row describes an embeddings model.
+    /// Absent on chat/completion rows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub embedding_dim: Option<u32>,
+    /// Maximum input tokens the embeddings endpoint accepts for this row.
+    /// Absent on chat/completion rows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub embedding_max_tokens: Option<u32>,
 }
 
 fn is_false(value: &bool) -> bool {

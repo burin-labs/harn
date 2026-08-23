@@ -25,14 +25,20 @@ pub mod store;
 
 #[cfg(feature = "neural")]
 mod neural;
+#[cfg(feature = "neural")]
+mod onnx_text;
 
-pub use catalog::{CatalogFile, CatalogModel, ModelFormat, ModelPurpose, DEFAULT_MODEL};
+pub use catalog::{
+    CatalogFile, CatalogModel, ModelFormat, ModelPurpose, DEFAULT_EMBEDDING_MODEL, DEFAULT_MODEL,
+};
 pub use error::{GuardError, Result};
 pub use resolve::resolve_dir;
 pub use store::{sha256_hex, GuardStore, Manifest, ManifestFile};
 
 #[cfg(feature = "neural")]
 pub use neural::OnnxInjectionClassifier;
+#[cfg(feature = "neural")]
+pub use onnx_text::OnnxTextEmbedder;
 
 /// Load the installed model named/located by `selector` into a boxed
 /// [`InjectionClassifier`](harn_vm::security::InjectionClassifier), or `None` if

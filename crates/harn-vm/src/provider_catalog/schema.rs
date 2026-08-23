@@ -124,7 +124,8 @@ pub fn schema_value() -> Value {
                         "additionalProperties": {"$ref": "#/$defs/endpoint_region"}
                     },
                     "chat_endpoint": {"type": "string", "minLength": 1},
-                    "completion_endpoint": {"type": "string"}
+                    "completion_endpoint": {"type": "string"},
+                    "embeddings_endpoint": {"type": "string"}
                 },
                 "additionalProperties": false
             },
@@ -257,7 +258,9 @@ pub fn schema_value() -> Value {
                     },
                     "released": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"},
                     "row_kind": {"enum": ["snapshot", "selector"]},
-                    "current_snapshot": {"type": "string", "minLength": 1}
+                    "current_snapshot": {"type": "string", "minLength": 1},
+                    "embedding_dim": {"type": "integer", "minimum": 1},
+                    "embedding_max_tokens": {"type": "integer", "minimum": 1}
                 },
                 "additionalProperties": false
             },

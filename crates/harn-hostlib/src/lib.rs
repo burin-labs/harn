@@ -96,7 +96,7 @@ pub struct DefaultHostlibHandles {
 /// [`code_index::CodeIndexCapability::warm_session`]) should call
 /// [`install_default_with_handles`] instead.
 pub fn install_default(vm: &mut harn_vm::Vm) -> HostlibRegistry {
-    install_default_with_handles(vm).0
+    install_default_with_embed(vm, embed::EmbedCapability::from_env()).0
 }
 
 /// Like [`install_default`], but also returns retained capability handles.
@@ -108,8 +108,20 @@ pub fn install_default(vm: &mut harn_vm::Vm) -> HostlibRegistry {
 pub fn install_default_with_handles(
     vm: &mut harn_vm::Vm,
 ) -> (HostlibRegistry, DefaultHostlibHandles) {
+    install_default_with_embed(vm, embed::EmbedCapability::from_env())
+}
+
+/// Install the default hostlib surface with an explicit embedding backend.
+///
+/// Hosts that have already resolved a local encoder (or any other
+/// [`embed::Embedder`]) pass it here so `hostlib_embed_*` and session
+/// search share the same backend. Callers that just want environment
+/// resolution should use [`install_default`].
+pub fn install_default_with_embed(
+    vm: &mut harn_vm::Vm,
+    embed: embed::EmbedCapability,
+) -> (HostlibRegistry, DefaultHostlibHandles) {
     let mut registry = HostlibRegistry::new();
-    let embed = embed::EmbedCapability::default();
     let session = session::SessionCapability::with_embedder(embed.embedder().clone());
     // The code-intelligence capabilities (`ast` + `code_index`) are only
     // compiled when the `ast` feature is on. Lean clients that omit it get

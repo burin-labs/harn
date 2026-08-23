@@ -156,6 +156,8 @@ fn test_user_catalog_overlay_re_homes_model_provider() {
             released: None,
             row_kind: None,
             current_snapshot: None,
+            embedding_dim: None,
+            embedding_max_tokens: None,
         },
     );
     set_user_overrides(Some(overlay));
@@ -576,6 +578,8 @@ fn test_user_overrides_add_model_catalog_pricing_and_qc_defaults() {
             released: None,
             row_kind: None,
             current_snapshot: None,
+            embedding_dim: None,
+            embedding_max_tokens: None,
         },
     );
     overlay
@@ -620,6 +624,40 @@ fn test_user_overrides_prepend_inference_rules() {
     assert_eq!(infer_provider("internal-foo"), "openai");
 
     reset_overrides();
+}
+
+#[test]
+fn embeddings_endpoint_and_model_dims_parse_from_toml() {
+    let config = parse_config_toml(
+        r#"
+[providers.openai]
+base_url = "https://api.openai.com/v1"
+chat_endpoint = "/chat/completions"
+embeddings_endpoint = "/embeddings"
+features = ["embeddings"]
+
+[models."text-embedding-3-small"]
+name = "Text Embedding 3 Small"
+provider = "openai"
+context_window = 8191
+capabilities = ["embeddings"]
+embedding_dim = 1536
+embedding_max_tokens = 8191
+"#,
+    )
+    .expect("config parses");
+    let provider = config.providers.get("openai").expect("openai provider");
+    assert_eq!(provider.embeddings_endpoint.as_deref(), Some("/embeddings"));
+    assert!(provider
+        .features
+        .iter()
+        .any(|feature| feature == "embeddings"));
+    let model = config
+        .models
+        .get("text-embedding-3-small")
+        .expect("embedding model");
+    assert_eq!(model.embedding_dim, Some(1536));
+    assert_eq!(model.embedding_max_tokens, Some(8191));
 }
 
 mod diagnostics;

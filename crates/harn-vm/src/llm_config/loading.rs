@@ -354,6 +354,8 @@ fn model_patch_schema() -> &'static PatchSchema {
             "released",
             "row_kind",
             "current_snapshot",
+            "embedding_dim",
+            "embedding_max_tokens",
         ],
         freeform: &["benchmarks"],
         nested: &[

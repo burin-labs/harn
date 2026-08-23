@@ -74,6 +74,10 @@ pub struct ProviderEndpoint {
     pub chat_endpoint: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub completion_endpoint: Option<String>,
+    /// Provider embeddings route, when one exists. Absent means this
+    /// provider has no embeddings API; hosts must not invent a path.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub embeddings_endpoint: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -199,6 +203,12 @@ pub struct CatalogModel {
     /// Catalog id of the snapshot a selector currently points at.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub current_snapshot: Option<String>,
+    /// Embedding vector length when this row describes an embeddings model.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub embedding_dim: Option<u32>,
+    /// Maximum input tokens the embeddings endpoint accepts for this row.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub embedding_max_tokens: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

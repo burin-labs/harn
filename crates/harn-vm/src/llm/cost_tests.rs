@@ -48,6 +48,8 @@ fn calculate_cost_uses_catalog_model_pricing() {
             released: None,
             row_kind: None,
             current_snapshot: None,
+            embedding_dim: None,
+            embedding_max_tokens: None,
         },
     );
     crate::llm_config::set_user_overrides(Some(overlay));
@@ -149,6 +151,8 @@ fn calculate_cost_decimal_is_exact_for_inexact_catalog_rates() {
             released: None,
             row_kind: None,
             current_snapshot: None,
+            embedding_dim: None,
+            embedding_max_tokens: None,
         },
     );
     crate::llm_config::set_user_overrides(Some(overlay));

@@ -325,11 +325,11 @@ fn remote_catalog_rejects_stale_v2_schema() {
         Err(error) => error,
     };
     assert!(
-        error.contains("schema_version must be 8, got 2"),
+        error.contains("schema_version must be 9, got 2"),
         "unexpected stale-catalog rejection: {error}"
     );
     assert!(
-        error.contains("schema must be https://harnlang.com/schemas/provider-catalog.v8.json"),
+        error.contains("schema must be https://harnlang.com/schemas/provider-catalog.v9.json"),
         "unexpected stale-catalog rejection: {error}"
     );
 }
@@ -962,6 +962,31 @@ fn generated_schema_accepts_generated_artifact_shape() {
     assert!(artifact_value["families"]
         .as_array()
         .is_some_and(|families| !families.is_empty()));
+}
+
+#[test]
+fn generated_catalog_expresses_embeddings_endpoint_and_model_dims() {
+    let catalog = artifact();
+    let openai = catalog
+        .providers
+        .iter()
+        .find(|provider| provider.id == "openai")
+        .expect("openai provider");
+    assert_eq!(
+        openai.endpoint.embeddings_endpoint.as_deref(),
+        Some("/embeddings")
+    );
+    assert!(openai
+        .features
+        .iter()
+        .any(|feature| feature == "embeddings"));
+    let model = catalog
+        .models
+        .iter()
+        .find(|model| model.id == "text-embedding-3-small")
+        .expect("embedding model row");
+    assert_eq!(model.embedding_dim, Some(1536));
+    assert_eq!(model.embedding_max_tokens, Some(8191));
 }
 
 #[test]

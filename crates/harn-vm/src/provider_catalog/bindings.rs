@@ -32,7 +32,7 @@ fn generated_header(comment: &str, language: &str) -> String {
 }
 
 const TYPESCRIPT_TYPES: &str = r#"export interface HarnProviderCatalog {
-  schema_version: 8
+  schema_version: 9
   schema: string
   generated_by: string
   providers: HarnCatalogProvider[]
@@ -107,6 +107,7 @@ export interface HarnProviderEndpoint {
   regions?: Record<string, HarnProviderEndpointRegion>
   chat_endpoint: string
   completion_endpoint?: string
+  embeddings_endpoint?: string
 }
 
 export interface HarnProviderEndpointRegion {
@@ -216,6 +217,8 @@ export interface HarnCatalogModel {
   released?: string
   row_kind?: "snapshot" | "selector"
   current_snapshot?: string
+  embedding_dim?: number
+  embedding_max_tokens?: number
 }
 
 export interface HarnModelBatchSupport {
@@ -578,6 +581,7 @@ public struct HarnProviderEndpoint: Codable, Sendable, Equatable {
     public let regions: [String: HarnProviderEndpointRegion]?
     public let chatEndpoint: String
     public let completionEndpoint: String?
+    public let embeddingsEndpoint: String?
 
     enum CodingKeys: String, CodingKey {
         case baseURL = "base_url"
@@ -586,6 +590,7 @@ public struct HarnProviderEndpoint: Codable, Sendable, Equatable {
         case regions
         case chatEndpoint = "chat_endpoint"
         case completionEndpoint = "completion_endpoint"
+        case embeddingsEndpoint = "embeddings_endpoint"
     }
 }
 
@@ -698,6 +703,10 @@ public struct HarnCatalogModel: Codable, Sendable, Equatable {
     public let rowKind: String?
     /// Catalog id of the snapshot a selector currently points at.
     public let currentSnapshot: String?
+    /// Embedding vector length when this row describes an embeddings model.
+    public let embeddingDim: Int?
+    /// Maximum input tokens the embeddings endpoint accepts for this row.
+    public let embeddingMaxTokens: Int?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -742,6 +751,8 @@ public struct HarnCatalogModel: Codable, Sendable, Equatable {
         case released
         case rowKind = "row_kind"
         case currentSnapshot = "current_snapshot"
+        case embeddingDim = "embedding_dim"
+        case embeddingMaxTokens = "embedding_max_tokens"
     }
 
     public init(from decoder: Decoder) throws {
@@ -788,6 +799,8 @@ public struct HarnCatalogModel: Codable, Sendable, Equatable {
         released = try container.decodeIfPresent(String.self, forKey: .released)
         rowKind = try container.decodeIfPresent(String.self, forKey: .rowKind)
         currentSnapshot = try container.decodeIfPresent(String.self, forKey: .currentSnapshot)
+        embeddingDim = try container.decodeIfPresent(Int.self, forKey: .embeddingDim)
+        embeddingMaxTokens = try container.decodeIfPresent(Int.self, forKey: .embeddingMaxTokens)
     }
 }
 

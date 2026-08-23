@@ -74,6 +74,7 @@ pub(super) fn provider_def_to_vm_value(
     );
     dict.put_str("chat_endpoint", pdef.chat_endpoint.as_str());
     dict.put_opt_str("completion_endpoint", pdef.completion_endpoint.as_deref());
+    dict.put_opt_str("embeddings_endpoint", pdef.embeddings_endpoint.as_deref());
     dict.put_opt_str("command", pdef.command.as_deref());
     if !pdef.args.is_empty() {
         dict.insert(

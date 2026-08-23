@@ -1,6 +1,6 @@
 {
-  "schema_version": 8,
-  "schema": "https://harnlang.com/schemas/provider-catalog.v8.json",
+  "schema_version": 9,
+  "schema": "https://harnlang.com/schemas/provider-catalog.v9.json",
   "generated_by": "harn provider catalog generate",
   "providers": [
     {
@@ -819,7 +819,8 @@
         "base_url": "https://api.mistral.ai/v1",
         "base_url_env": "MISTRAL_BASE_URL",
         "chat_endpoint": "/chat/completions",
-        "completion_endpoint": "/completions"
+        "completion_endpoint": "/completions",
+        "embeddings_endpoint": "/embeddings"
       },
       "auth": {
         "style": "bearer",
@@ -838,7 +839,8 @@
       ],
       "features": [
         "native_tools",
-        "batch"
+        "batch",
+        "embeddings"
       ],
       "caveats": [],
       "latency_p50_ms": 1800
@@ -1005,7 +1007,8 @@
         "base_url": "http://localhost:11434",
         "base_url_env": "OLLAMA_HOST",
         "chat_endpoint": "/api/chat",
-        "completion_endpoint": "/api/generate"
+        "completion_endpoint": "/api/generate",
+        "embeddings_endpoint": "/api/embed"
       },
       "auth": {
         "style": "none",
@@ -1043,7 +1046,8 @@
       "endpoint": {
         "base_url": "https://api.openai.com/v1",
         "chat_endpoint": "/chat/completions",
-        "completion_endpoint": "/completions"
+        "completion_endpoint": "/completions",
+        "embeddings_endpoint": "/embeddings"
       },
       "auth": {
         "style": "bearer",
@@ -1062,7 +1066,8 @@
         "openai_chat_completions"
       ],
       "features": [
-        "batch"
+        "batch",
+        "embeddings"
       ],
       "caveats": [],
       "latency_p50_ms": 1800
@@ -16245,6 +16250,92 @@
       ]
     },
     {
+      "id": "text-embedding-3-small",
+      "name": "Text Embedding 3 Small",
+      "display_name": "Text Embedding 3 Small",
+      "provider": "openai",
+      "aliases": [],
+      "context_window": 8191,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": false,
+        "text": true,
+        "parity_source": "derived",
+        "tool_search": []
+      },
+      "structured_output": "none",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": false,
+        "structured_output_mode": "none",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "none"
+      },
+      "reasoning": {
+        "modes": [],
+        "effort_supported": false,
+        "effort_levels": [],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "batch": {
+        "wire_format": "openai",
+        "input_mode": "jsonl_file",
+        "result_ordering": "custom_id_rejoin",
+        "partial_failure": "per_request",
+        "cancellation": "supported",
+        "discount_percent": 50,
+        "turnaround_hours": 24,
+        "max_requests": 50000,
+        "max_input_bytes": 209715200,
+        "result_retention_days": 30,
+        "security_notes": [
+          "Batch rate limits use a separate provider pool from synchronous model calls.",
+          "Output and error files can use a configurable expiration between 1 hour and 30 days."
+        ],
+        "operational_notes": [
+          "Input files must group requests for one model; Harn manifests group by provider, model, wire format, and tool format.",
+          "Use stable custom_id values to rejoin unordered output and error rows."
+        ]
+      },
+      "pricing": {
+        "input_per_mtok": 0.02,
+        "output_per_mtok": 0.0,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "batch"
+      ],
+      "family": "openai-gpt",
+      "lineage": "openai-gpt",
+      "tier": "small",
+      "open_weight": false,
+      "strengths": [
+        "embeddings"
+      ],
+      "embedding_dim": 1536,
+      "embedding_max_tokens": 8191
+    },
+    {
       "id": "Qwen/Qwen3.5-9B",
       "name": "Qwen3.5 9B",
       "display_name": "Qwen3.5 9B",
@@ -28329,6 +28420,21 @@
         "thinking",
         "tools",
         "vision"
+      ]
+    },
+    {
+      "provider": "openai",
+      "model": "text-embedding-3-small",
+      "base_url": "https://api.openai.com/v1",
+      "secret_env": "OPENAI_API_KEY",
+      "label": "Text Embedding 3 Small",
+      "family": "openai-gpt",
+      "capabilities": [
+        "batch",
+        "streaming",
+        "structured_output_mode:none",
+        "text_tools",
+        "tools"
       ]
     },
     {

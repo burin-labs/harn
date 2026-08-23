@@ -510,6 +510,8 @@ preferred_tool_format = "native"
                     released: None,
                     row_kind: None,
                     current_snapshot: None,
+                    embedding_dim: None,
+                    embedding_max_tokens: None,
                 },
             )],
             &capabilities,

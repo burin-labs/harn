@@ -641,6 +641,7 @@ pub fn layer_from_providers_config(
                     "auth_style": provider.auth_style,
                     "chat_endpoint": provider.chat_endpoint,
                     "completion_endpoint": provider.completion_endpoint,
+                    "embeddings_endpoint": provider.embeddings_endpoint,
                 }
             }),
         );

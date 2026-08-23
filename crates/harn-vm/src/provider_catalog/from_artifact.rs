@@ -132,6 +132,7 @@ fn provider_def_from_catalog(provider: &CatalogProvider) -> llm_config::Provider
         extra_headers: provider.extra_headers.clone(),
         chat_endpoint: provider.endpoint.chat_endpoint.clone(),
         completion_endpoint: provider.endpoint.completion_endpoint.clone(),
+        embeddings_endpoint: provider.endpoint.embeddings_endpoint.clone(),
         healthcheck: provider
             .healthcheck
             .clone()
@@ -189,6 +190,8 @@ fn model_def_from_catalog(model: &CatalogModel) -> llm_config::ModelDef {
         released: model.released.clone(),
         row_kind: model.row_kind,
         current_snapshot: model.current_snapshot.clone(),
+        embedding_dim: model.embedding_dim,
+        embedding_max_tokens: model.embedding_max_tokens,
     }
 }
 

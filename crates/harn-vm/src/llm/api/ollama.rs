@@ -880,6 +880,8 @@ mod tests {
                 released: None,
                 row_kind: None,
                 current_snapshot: None,
+                embedding_dim: None,
+                embedding_max_tokens: None,
             },
         );
         crate::llm_config::set_user_overrides(Some(overlay));
@@ -997,6 +999,8 @@ mod tests {
                 released: None,
                 row_kind: None,
                 current_snapshot: None,
+                embedding_dim: None,
+                embedding_max_tokens: None,
             },
         );
         crate::llm_config::set_user_overrides(Some(overlay));
@@ -1263,6 +1267,8 @@ mod tests {
                 released: None,
                 row_kind: None,
                 current_snapshot: None,
+                embedding_dim: None,
+                embedding_max_tokens: None,
             },
         );
         crate::llm_config::set_user_overrides(Some(overlay));
