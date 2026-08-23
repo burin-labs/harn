@@ -27,6 +27,9 @@
 //!                   DispatchOutcome.result ──▶ report.json
 //! ```
 //!
+//! Credential resolution lives in the `secrets` submodule: one boundary that
+//! both the connector context and the job harness take their provider from.
+//!
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -53,6 +56,14 @@ use crate::{
 /// `webhook` payload variant so the request JSON rides in
 /// `provider_payload.raw`, the idiomatic place `.harn` handlers read a
 /// request body from (matching every other trigger handler).
+mod secrets;
+#[cfg(test)]
+mod secrets_tests;
+#[cfg(test)]
+mod test_support;
+
+use secrets::{worker_job_harness, worker_secret_provider};
+
 const JOB_PROVIDER: &str = "webhook";
 const CRON_PROVIDER: &str = "cron";
 const CRON_KIND: &str = "cron";
@@ -280,10 +291,7 @@ pub async fn start_worker_server(
             &mut cron_connector,
             harn_vm::ConnectorCtx {
                 event_log: prepared.event_log.clone(),
-                secrets: Arc::new(harn_vm::secrets::ChainSecretProvider::new(
-                    "harn-worker",
-                    Vec::<Arc<dyn harn_vm::secrets::SecretProvider>>::new(),
-                )),
+                secrets: worker_secret_provider()?,
                 inbox,
                 metrics,
                 rate_limiter: Arc::new(RateLimiterFactory::new(RateLimitConfig::default())),
@@ -349,7 +357,7 @@ async fn prepare_job_runtime(
     harn_vm::register_store_builtins(&mut vm, &base_dir);
     harn_vm::register_metadata_builtins(&mut vm, &base_dir);
     vm.set_source_dir(&base_dir);
-    vm.set_harness(harn_vm::Harness::real());
+    vm.set_harness(worker_job_harness()?);
     configure(&mut vm);
 
     let exports = vm
@@ -1077,37 +1085,8 @@ pub fn script_path_buf(path: &str) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
+    use super::test_support::{write_script, ScopedEnvVar, ENV_LOCK};
     use super::*;
-
-    static ENV_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
-
-    struct ScopedEnvVar {
-        key: &'static str,
-        previous: Option<String>,
-    }
-
-    impl ScopedEnvVar {
-        fn set(key: &'static str, value: &str) -> Self {
-            let previous = std::env::var(key).ok();
-            std::env::set_var(key, value);
-            Self { key, previous }
-        }
-    }
-
-    impl Drop for ScopedEnvVar {
-        fn drop(&mut self) {
-            match &self.previous {
-                Some(value) => std::env::set_var(self.key, value),
-                None => std::env::remove_var(self.key),
-            }
-        }
-    }
-
-    async fn write_script(dir: &Path, body: &str) -> PathBuf {
-        let path = dir.join("worker.harn");
-        tokio::fs::write(&path, body).await.expect("write script");
-        path
-    }
 
     async fn wait_for_log_event(
         event_log: Arc<AnyEventLog>,

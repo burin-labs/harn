@@ -45,6 +45,17 @@ pub enum DispatchError {
     Execution(String),
     Io(String),
     Cache(String),
+    /// The process has no usable secret backend, or the one it was told to
+    /// use could not be built.
+    ///
+    /// Deliberately separate from a credential that is simply absent. A
+    /// connector that cannot resolve a key because nothing is wired up and one
+    /// that cannot resolve a key because the key was never stored need
+    /// different answers — configure the host, versus store the credential —
+    /// and collapsing them sends the operator to the wrong place. This variant
+    /// only ever carries backend configuration detail; a secret's value never
+    /// reaches it.
+    SecretBackend(String),
 }
 
 impl DispatchError {
@@ -61,6 +72,9 @@ impl DispatchError {
             | Self::Execution(message)
             | Self::Io(message)
             | Self::Cache(message) => message.clone(),
+            Self::SecretBackend(message) => {
+                format!("no usable secret backend: {message}")
+            }
             Self::Forbidden { required, granted } => forbidden_message(required, granted),
             Self::ForbiddenPrincipalKind { allowed } => forbidden_principal_kind_message(allowed),
             Self::RateLimited {

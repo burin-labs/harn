@@ -626,7 +626,8 @@ impl McpServer {
                 harn_vm::jsonrpc::response(job.request_id, tool_call_error(message))
             }
             Err(error @ DispatchError::RateLimited { .. })
-            | Err(error @ DispatchError::BudgetExceeded { .. }) => {
+            | Err(error @ DispatchError::BudgetExceeded { .. })
+            | Err(error @ DispatchError::SecretBackend(_)) => {
                 harn_vm::jsonrpc::response(job.request_id, tool_call_error(error.message()))
             }
         };
