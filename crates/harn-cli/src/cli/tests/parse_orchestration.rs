@@ -1,6 +1,8 @@
 use super::*;
 use crate::cli::PersonaTemplateKind;
 
+mod merge_captain;
+
 #[test]
 fn test_parses_host_lease_acquire_contract() {
     let cli = Cli::parse_from([
