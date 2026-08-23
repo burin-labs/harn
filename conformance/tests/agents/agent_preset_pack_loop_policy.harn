@@ -1,0 +1,72 @@
+// Pack allowlist includes `stall_diagnostics` and `iteration_budget` (#7059).
+// A registered preset carrying both keys resolves them through `agent_preset`
+// (not a hand-built spec). Caller options still override. An unknown pack
+// key still rejects. A pack that omits the keys still inherits kind-family
+// defaults, which is what proves pack-vs-kind precedence rather than "the
+// keys merely parse".
+import { agent_preset, agent_preset_register } from "std/agent/presets"
+import { assert_throws } from "std/testing"
+
+pipeline test(harness: Harness) {
+  agent_preset_register(
+    "loop_tuned",
+    {
+      pack: {
+        stall_diagnostics: {enabled: true, threshold: 2, inject_feedback: false, max_feedback: 0},
+        iteration_budget: {mode: "adaptive", initial: 4, max: 12, extend_by: 2},
+      },
+    },
+  )
+  const resolved = agent_preset(harness, "loop_tuned")
+  assert_eq(resolved.stall_diagnostics.threshold, 2, "pack stall threshold reaches the spec")
+  assert_eq(
+    resolved.stall_diagnostics.inject_feedback,
+    false,
+    "pack stall inject_feedback reaches the spec",
+  )
+  assert_eq(
+    resolved.iteration_budget.mode,
+    "adaptive",
+    "pack iteration_budget.mode reaches the spec",
+  )
+  assert_eq(resolved.iteration_budget.initial, 4, "pack iteration_budget.initial reaches the spec")
+  assert_eq(resolved.iteration_budget.max, 12, "pack iteration_budget.max reaches the spec")
+  assert_eq(
+    resolved.iteration_budget.extend_by,
+    2,
+    "pack iteration_budget.extend_by reaches the spec",
+  )
+  const overridden = agent_preset(
+    harness,
+    "loop_tuned",
+    {
+      stall_diagnostics: {enabled: false},
+      iteration_budget: {mode: "fixed", initial: 3, max: 3, extend_by: 0},
+    },
+  )
+  assert_eq(overridden.stall_diagnostics.enabled, false, "caller stall_diagnostics wins over pack")
+  assert_eq(
+    overridden.iteration_budget.mode,
+    "fixed",
+    "caller iteration_budget.mode wins over pack",
+  )
+  assert_eq(overridden.iteration_budget.max, 3, "caller iteration_budget.max wins over pack")
+  agent_preset_register("loop_plain", {pack: {timeout_ms: 1000}})
+  const plain = agent_preset(harness, "loop_plain")
+  assert_eq(
+    plain.stall_diagnostics.threshold,
+    3,
+    "omitting stall_diagnostics keeps the generic tool-using default",
+  )
+  assert_eq(
+    plain.iteration_budget.max,
+    50,
+    "omitting iteration_budget keeps the generic fixed-50 default",
+  )
+  assert_eq(plain.timeout_ms, 1000, "unrelated pack keys still fill")
+  assert_throws(
+    { -> return agent_preset_register("loop_bad", {pack: {frobnicate: 1}}) },
+    "unknown pack key still rejects",
+  )
+  harness.stdio.log("agent preset pack loop policy tests passed")
+}

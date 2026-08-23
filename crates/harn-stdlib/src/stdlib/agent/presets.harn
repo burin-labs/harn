@@ -47,16 +47,24 @@ import {
 // `pin_policy` carries a preset's default compaction-pin policy (see
 // std/agent/pins) — e.g. `{kinds: [...], preserve_on_compact: true}` — filled
 // into `opts.pin_policy` for pin-aware harnesses.
+// `iteration_budget` and `stall_diagnostics` are the same fill-nil shape the
+// validator and `agent_loop` already accept; they belong on the named row so a
+// registered preset can ship loop policy instead of forcing every call site
+// to restate it. Pack rows sit under caller input and above generic
+// kind-family defaults, so a domain-tuned stall block or adaptive budget
+// actually reaches the effective spec.
 const __PRESET_PACK_KEYS = [
   "budget",
   "completion_gate",
   "fallback_chain",
+  "iteration_budget",
   "ladder",
   "lane_policy",
   "models",
   "overlay_policy",
   "pin_policy",
   "provider",
+  "stall_diagnostics",
   "timeout_ms",
 ]
 
@@ -272,9 +280,10 @@ fn __preset_registry() {
  * behavior template (captains additionally compose the opt-in tool/LLM
  * middleware layers), and `pack` supplies fill-nil option defaults
  * (`provider`, `timeout_ms`, `budget`, `fallback_chain`, `models`,
- * `completion_gate`, `lane_policy`, `overlay_policy`, `pin_policy`) that fill
- * ONLY nil/absent keys. The spec shape is validated; an invalid family or
- * unknown pack key throws. Returns the normalized kind string.
+ * `completion_gate`, `lane_policy`, `overlay_policy`, `pin_policy`,
+ * `iteration_budget`, `stall_diagnostics`) that fill ONLY nil/absent keys.
+ * The spec shape is validated; an invalid family or unknown pack key throws.
+ * Returns the normalized kind string.
  *
  * @effects: []
  * @errors: []
@@ -786,10 +795,15 @@ fn __apply_preset_route_pack(opts, pack) {
 }
 
 /**
- * Fill the kind's pack rows (provider / timeout / budget / model ladder) into
- * ONLY the nil/absent option keys. Routing rows are a single ownership group:
- * if the caller configured any route at top level or under `llm_options`, the
- * preset does not splice in a different built-in provider or ladder.
+ * Fill the kind's pack rows (provider / timeout / budget / model ladder /
+ * stall diagnostics / iteration budget) into ONLY the nil/absent option keys.
+ * Routing rows are a single ownership group: if the caller configured any
+ * route at top level or under `llm_options`, the preset does not splice in a
+ * different built-in provider or ladder.
+ *
+ * `iteration_budget` is skipped when the caller already set `max_iterations`:
+ * that key is the documented alternative spelling, and filling the pack
+ * budget on top would shadow it.
  */
 fn __apply_preset_pack(opts, kind) {
   const spec = __preset_registry()[kind]
@@ -797,6 +811,9 @@ fn __apply_preset_pack(opts, kind) {
   let resolved = opts
   for key in pack.keys() {
     if contains(__preset_pack_route_keys(), key) {
+      continue
+    }
+    if key == "iteration_budget" && __has_key(resolved, "max_iterations") {
       continue
     }
     if resolved?.[key] == nil {
@@ -830,7 +847,8 @@ fn __apply_preset_pack(opts, kind) {
  * spread it into `agent_loop(harness, ...)` directly, or merge further overrides
  * on top. Every kind additionally fills its pack rows (provider, transport
  * timeout, cost budget, model ladder, completion_gate, lane_policy,
- * overlay_policy, pin policy) into nil/absent keys, and runs the shared
+ * overlay_policy, pin policy, iteration_budget, stall_diagnostics) into
+ * nil/absent keys, and runs the shared
  * agent-loop default transport retry normalizer (opt out with `retry: false`
  * or `llm_retry: nil`). Captain presets additionally compose:
  *   - a `tool_caller` middleware stack from any of `audit_sink`,
@@ -856,13 +874,16 @@ pub fn agent_preset(harness: Harness, kind, options = nil) {
   const resolved_kind = __preset_kind(kind)
   let opts = __dict_or_empty(options)
   const caller_supplied_llm_caller = __has_key(opts, "llm_caller")
+  // Pack sits under caller input and above kind-family defaults, so a
+  // registered stall block or iteration budget is not swallowed by the
+  // generic tool-using template.
+  opts = __apply_preset_pack(opts, resolved_kind)
   opts = __apply_kind_defaults(resolved_kind, opts)
   opts = __apply_iteration_budget(opts, resolved_kind)
   opts = __apply_turn_policy(opts, resolved_kind)
   opts = __apply_reasoning_defaults(opts, resolved_kind)
   opts = __apply_captain_tool_caller(harness, opts, resolved_kind)
   opts = __apply_captain_llm_caller(harness, opts, resolved_kind)
-  opts = __apply_preset_pack(opts, resolved_kind)
   opts = agent_apply_default_retry(harness, opts, {wrap_existing: !caller_supplied_llm_caller})
   opts = __apply_tool_format(harness.llm, opts, resolved_kind)
   return opts + {_preset_kind: resolved_kind}

@@ -811,10 +811,11 @@ Every preset kind layers three things under your explicit input:
 1. **Behavior template** — profile, iteration budget, turn policy, reasoning
    defaults (and, for captains, the opt-in middleware layers below).
 2. **Fill-nil pack rows** — per-kind defaults for `timeout_ms`, `budget`
-   (session-cumulative `total_budget_usd`), and model routes. Built-in presets
-   name catalog-owned `[model_ladders.*]` rows, so model IDs change in catalog
-   data without editing preset policy. Pack rows fill **only** absent keys at
-   one lower-priority seam and never override caller input. Route fields
+   (session-cumulative `total_budget_usd`), model routes, `stall_diagnostics`,
+   and `iteration_budget`. Built-in presets name catalog-owned
+   `[model_ladders.*]` rows, so model IDs change in catalog data without
+   editing preset policy. Pack rows fill **only** absent keys at one
+   lower-priority seam and never override caller input. Route fields
    (`provider`, `model`, `models`, `ladder`,
    `routing`, and related policy keys) form one ownership group: providing any
    route at top level or under `llm_options` suppresses the entire preset route.
