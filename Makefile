@@ -1,6 +1,6 @@
 .PHONY: setup setup-rust setup-bootstrap clean-stale-targets install-hooks configure-merge-drivers build build-harn build-release sign-local check fmt fmt-app-host fmt-harn fmt-harn-fix lint lint-md lint-actions lint-actions-source lint-actions-harn lint-harn check-app-host spec-lint gen-openapi-snapshot check-openapi-snapshot test test-focused test-one test-e2e test-cargo test-fast test-harn-scripts test-agent-scripts test-pr-gate-scripts conformance mechanism-contracts protocol-conformance mcp-conformance replay-oracle replay-bench eval-tool-calls bench bench-vm bench-vm-micro bench-vm-clone check-vm-rss-soak check-test-case-performance bench-llm bench-orchestration bench-cli-cold-start loadgen-postgres all release-gate release-smoke smoke-audit portal portal-check portal-demo gen-cli-aot check-cli-aot gen-highlight check-highlight gen-prompt-grammar check-prompt-grammar gen-protocol-artifacts check-protocol-artifacts gen-connector-schemas check-connector-schemas gen-harness-migrations check-harness-migrations check-burin-protocol-artifacts check-bindings gen-session-bundle-schema check-session-bundle-schema gen-run-view-fixtures check-run-view-fixtures gen-trigger-quickref check-trigger-quickref gen-provider-matrix check-provider-matrix check-provider-support check-provider-catalog check-connector-matrix check-trigger-examples check-docs-model-refs check-docs-snippets check-docs-cli-flags check-docs-links check-site-snippets check-docs-workflow-quickstart sync-language-spec check-language-spec sync-diagnostics-catalog check-diagnostics-catalog lint-test-patterns lint-diagnostic-codes check-stdlib-host-neutral check-stdlib-strict-types check-stdlib-public-return-types check-schema-strict check-optional-dep-feature-contracts check-receipt-structs lint-no-rust-prompt-prose lint-agent-path-normalization lint-no-xfail-regression check-provider-catalog-drift check-ported-handler-loc check-source-file-lengths update-source-file-length-baseline check-python-boundary check-harn-syntax-sensitive-scans check-agent-guidance check-crate-sibling-versions check-protocol-symbol-removals check-dependabot-groups gen-tree-sitter-keywords check-tree-sitter-keywords gen-tree-sitter-parser check-tree-sitter-parser check-grammar-keywords gen-grammar-fitness check-grammar-fitness check-loud-boundaries check-generated-registry check-release-audit-contract check-ci-cache-policy check-rust-test-lane-policy check-cargo-lock-contract gen-vm-exposures check-vm-exposures check-binary-size-policy check-all-features
 .PHONY: test-pr-gate-post-warm-integrations test-rust-lint-lane-cache
-.PHONY: check-docs check-docs-cookbook-entrypoints
+.PHONY: check-docs check-docs-portable check-docs-exact check-docs-cookbook-entrypoints
 .PHONY: setup-wasm setup-wasm-tools gen-wasm-wit check-wasm-wit wasm-build gen-app-runtime check-app-runtime wasm-audit-imports wasm-test-browser wasm-check wasm-demo kernel-check kernel-test kernel-vm-parity vm-check cli-check cli-test gen-portable-benchmark-schema check-portable-benchmark-schema gen-portable-demo-package check-portable-demo-package
 
 HARN_BIN ?=
@@ -924,10 +924,37 @@ check-docs-model-refs:
 	@echo "=== Checking docs model references track provider aliases ==="
 	@$(HARN_CMD) run scripts/check_docs_model_refs.harn
 
+# Docs checks split by the parser they need.
+#
+# The invariant: a check that parses a moving schema never runs a pinned
+# parser. Everything below is sorted by which side of that line it falls on,
+# because CI runs one half against a published release.
+
+# Judgeable by any released binary. These read repository files and rule on
+# prose, links, structure, and whether documented Harn still parses. The binary
+# is an interpreter here, not the source of the answer, so a release a few
+# commits behind reaches the same verdict the commit's own binary would.
+check-docs-portable:
+	+@$(HARN_BIN_ASSIGN); \
+	case "$$harn_bin" in /*) ;; *) harn_bin="$(CURDIR)/$$harn_bin" ;; esac; \
+	$(MAKE) --no-print-directory HARN_BIN="$$harn_bin" check-language-spec check-trigger-examples check-docs-model-refs check-docs-snippets check-docs-links check-docs-cookbook-entrypoints check-site-snippets check-docs-workflow-quickstart check-generated-registry
+
+# Judgeable only by the commit's own binary. Each of these regenerates an
+# artifact from data linked into the binary — the provider catalog, the trigger
+# and connector tables, the diagnostic registry — or reads the binary's own
+# `--help`, and compares that against what is checked in. The binary is the
+# source of the expected value, so a different binary projects a different
+# expectation and reports a tree that has moved on as unknown-fielded or stale.
+# That is a fact about the two binaries, not about the tree.
+check-docs-exact:
+	+@$(HARN_BIN_ASSIGN); \
+	case "$$harn_bin" in /*) ;; *) harn_bin="$(CURDIR)/$$harn_bin" ;; esac; \
+	$(MAKE) --no-print-directory HARN_BIN="$$harn_bin" check-trigger-quickref check-provider-matrix check-provider-support check-provider-catalog check-connector-matrix check-diagnostics-catalog check-docs-cli-flags
+
 check-docs:
 	+@$(HARN_BIN_ASSIGN); \
 	case "$$harn_bin" in /*) ;; *) harn_bin="$(CURDIR)/$$harn_bin" ;; esac; \
-	$(MAKE) --no-print-directory HARN_BIN="$$harn_bin" check-language-spec check-trigger-quickref check-provider-matrix check-provider-support check-provider-catalog check-connector-matrix check-trigger-examples check-docs-model-refs check-docs-snippets check-docs-cli-flags check-docs-links check-docs-cookbook-entrypoints check-site-snippets check-docs-workflow-quickstart check-diagnostics-catalog check-generated-registry
+	$(MAKE) --no-print-directory HARN_BIN="$$harn_bin" check-docs-portable check-docs-exact
 
 check-docs-cookbook-entrypoints:
 	@echo "=== Checking cookbook entrypoints run without host-only task input ==="
