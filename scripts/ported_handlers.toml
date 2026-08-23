@@ -95,5 +95,13 @@ path = "crates/harn-cli/src/commands/provider.rs"
 max_loc = 355
 
 [[handler]]
+path = "crates/harn-cli/src/commands/provider_effort_probe.rs"
+# Thin argv shim for `harn provider effort-probe`. The probe lives in
+# `stdlib/cli/providers/effort_probe.harn`; this file only maps flags and
+# suspends the catalog gate. Keep it small so the Rust dispatch path cannot
+# grow back around the Harn owner.
+max_loc = 120
+
+[[handler]]
 path = "crates/harn-cli/src/commands/providers.rs"
 max_loc = 381

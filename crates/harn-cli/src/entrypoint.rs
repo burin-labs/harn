@@ -520,7 +520,7 @@ pub(crate) async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMo
                 commands::provider::run_provider_tool_scorecard(tool_scorecard).await;
             }
             ProviderCommand::EffortProbe(effort_probe) => {
-                let exit = commands::provider::run_provider_effort_probe(effort_probe).await;
+                let exit = commands::provider_effort_probe::run(effort_probe).await;
                 if exit != 0 {
                     process::exit(exit);
                 }

@@ -51,6 +51,8 @@ mod routing_responses_tests;
 mod routing_test_support;
 #[cfg(test)]
 mod routing_tests;
+#[cfg(test)]
+mod thinking_effort_tests;
 
 // Shared imports re-exported across the whole `options` subtree so each
 // submodule only needs `use super::*;`.
