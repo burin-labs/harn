@@ -5,8 +5,10 @@ import { PrereleaseBanner } from "../components/PrereleaseBanner"
 import { Footer } from "../components/Footer"
 import { SearchModal } from "../components/SearchModal"
 import { KeywordTooltip } from "../components/KeywordTooltip"
+import { useMessages } from "../i18n"
 
 export function RootLayout() {
+  const t = useMessages()
   const [searchOpen, setSearchOpen] = useState(false)
   const location = useLocation()
   const openSearch = useCallback(() => setSearchOpen(true), [])
@@ -38,9 +40,14 @@ export function RootLayout() {
 
   return (
     <div className="flex min-h-screen flex-col">
+      {/* First tab stop on every page: jump past the banner, navbar, section
+          tabs, and sidebar straight to the article. */}
+      <a href="#main-content" className="skip-link">
+        {t.docs.skipToContent}
+      </a>
       <PrereleaseBanner />
       <Navbar onOpenSearch={openSearch} />
-      <main className="flex-1">
+      <main id="main-content" className="flex-1">
         <Outlet />
       </main>
       <Footer />

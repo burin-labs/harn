@@ -1,11 +1,13 @@
 import { Link } from "react-router"
 import type { NavItem, NavSection } from "../../../vite-plugins/content"
+import { useMessages } from "../../i18n"
 import { RichTitle } from "./RichTitle"
 
 // The per-section sidebar: grouped, nestable page links.
 export function SidebarNav({ section, currentSlug }: { section: NavSection; currentSlug: string }) {
+  const t = useMessages()
   return (
-    <nav className="space-y-5">
+    <nav className="space-y-5" aria-label={t.docs.sidebarAria}>
       {section.groups.map((group, i) => (
         <div key={i}>
           {group.heading && (
@@ -38,6 +40,7 @@ function SidebarItem({
     <li>
       <Link
         to={item.url}
+        aria-current={active ? "page" : undefined}
         className={`block rounded-md px-2 py-1 text-sm transition-colors ${
           active
             ? "bg-accent-500/10 font-medium text-accent-700 dark:text-accent-300"

@@ -1,15 +1,17 @@
 # ACP RFC: `session/inject_reminder` + `SessionUpdate::ReminderEmitted`
 
-**Upstream repo:** [agentclientprotocol/agent-client-protocol][acp]
-**Discussion:** [ACP #1224 — `session/remind` ambient system-role
-context injection][acp-1224]
-**Status:** Open upstream discussion; this document is the
-schema-edit follow-up that #1224 anticipated.
-**Authors:** Burin Labs
-**Reference impl:** `harn-serve` ACP adapter
-([`crates/harn-serve/src/adapters/acp/mod.rs`][acp-mod-rs]) +
-typed `SystemReminder` envelope
-([`crates/harn-vm/src/llm/helpers/transcript.rs`][reminder-rs]).
+- **Upstream repo:** [agentclientprotocol/agent-client-protocol][acp]
+- **Discussion:** [ACP #1224 — `session/remind` ambient system-role context
+  injection][acp-1224]
+- **Status:** Open. A maintainer soft-parked the discussion behind v2 draft
+  triage on 2026-07-06 and asked for time, so there is nothing to chase. This
+  document is the schema-edit follow-up that #1224 anticipated.
+- **Last verified:** 2026-08-22
+- **Authors:** Burin Labs
+- **Reference impl:** `harn-serve` ACP adapter
+  ([`crates/harn-serve/src/adapters/acp/mod.rs`][acp-mod-rs]) and the typed
+  `SystemReminder` envelope
+  ([`crates/harn-vm/src/llm/helpers/transcript.rs`][reminder-rs])
 
 [acp]: https://github.com/agentclientprotocol/agent-client-protocol
 [acp-1224]: https://github.com/agentclientprotocol/agent-client-protocol/discussions/1224

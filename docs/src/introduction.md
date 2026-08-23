@@ -33,6 +33,8 @@ several host-side libraries.
 
 ```mermaid
 flowchart LR
+  accTitle: A task running through a model, tools, and a transcript
+  accDescr: A task becomes a model call. If the model needs a tool, Harn runs a capability and the model is called again; otherwise the call produces a result. Each model call also records a transcript.
   A[Task] --> B[Model call]
   B --> C{Needs a tool?}
   C -->|yes| D[Run a Harn capability]

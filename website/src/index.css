@@ -29,7 +29,9 @@
   --color-surface-elevated: #ffffff;
   --color-foreground: #0c1413;
   --color-foreground-secondary: #44524f;
-  --color-foreground-muted: #8a9a96;
+  /* Muted text still has to clear WCAG AA (4.5:1) on every surface it sits
+     on — it labels TOC entries, breadcrumbs, and code comments, not decoration. */
+  --color-foreground-muted: #5f6f6b;
   --color-border: #e2eae8;
   --color-border-strong: #ccd8d5;
   --color-nav-bg: rgba(255, 255, 255, 0.85);
@@ -49,7 +51,7 @@
   --color-surface-elevated: #0d1817;
   --color-foreground: #eef4f2;
   --color-foreground-secondary: #c2cfcc;
-  --color-foreground-muted: #6b7d79;
+  --color-foreground-muted: #7d918c;
   --color-border: #1b2a28;
   --color-border-strong: #2b3d3a;
   --color-nav-bg: rgba(7, 16, 15, 0.85);
@@ -61,6 +63,34 @@
 
 html {
   scroll-behavior: smooth;
+}
+
+/* A visible, consistent focus ring everywhere. Browsers only show :focus-visible
+   for keyboard interaction, so this costs mouse users nothing. */
+:focus-visible {
+  outline: 2px solid var(--color-accent-600);
+  outline-offset: 2px;
+  border-radius: 0.25rem;
+}
+.dark :focus-visible {
+  outline-color: var(--color-accent-300);
+}
+
+/* Skip link: off-screen until focused, then pinned to the top-left. */
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  z-index: 100;
+  padding: 0.6rem 1rem;
+  border-radius: 0 0 0.5rem 0;
+  background-color: var(--color-surface-elevated);
+  color: var(--color-foreground);
+  border: 1px solid var(--color-border-strong);
+  font-weight: 600;
+}
+.skip-link:focus {
+  left: 0;
 }
 
 body {
@@ -297,13 +327,18 @@ body {
   font-size: inherit;
   color: inherit;
 }
+/* Wide tables scroll inside their own container rather than by putting
+   `display: block` on the <table>, which drops the row/column semantics screen
+   readers announce. The wrapper is focusable so the scroll is reachable by
+   keyboard; see rehypeScrollableRegions in vite-plugins/content.ts. */
+.prose .table-scroll {
+  overflow-x: auto;
+  margin-bottom: 1.25rem;
+}
 .prose table {
   width: 100%;
   border-collapse: collapse;
-  margin-bottom: 1.25rem;
   font-size: 0.92rem;
-  display: block;
-  overflow-x: auto;
 }
 .prose th,
 .prose td {
@@ -326,6 +361,46 @@ body {
   cursor: pointer;
   font-weight: 600;
   color: var(--color-foreground);
+}
+
+/* --------------------------------------------------------------------------
+   Mermaid diagrams. The build emits `figure.mermaid-figure` with an empty
+   canvas and the source in a collapsed <details>; src/lib/mermaid.ts fills the
+   canvas in the browser. Until (or unless) that happens the canvas takes no
+   space, so a page without JavaScript shows the source toggle and nothing
+   broken. See vite-plugins/content.ts.
+   -------------------------------------------------------------------------- */
+.prose .mermaid-figure {
+  margin: 1.5rem 0;
+}
+.prose .mermaid-canvas {
+  display: none;
+}
+.prose .mermaid-figure[data-mermaid-state="ready"] .mermaid-canvas {
+  display: block;
+  overflow-x: auto;
+  border: 1px solid var(--color-border);
+  border-radius: 0.75rem;
+  background-color: var(--color-surface-secondary);
+  padding: 1.25rem;
+  text-align: center;
+}
+.prose .mermaid-canvas svg {
+  max-width: 100%;
+  height: auto;
+}
+.prose .mermaid-figure[data-mermaid-state="ready"] .mermaid-source {
+  border: 0;
+  padding: 0;
+  margin-top: 0.5rem;
+}
+.prose .mermaid-figure[data-mermaid-state="ready"] .mermaid-source summary {
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--color-foreground-muted);
+}
+.prose .mermaid-figure[data-mermaid-state="ready"] .mermaid-source summary:hover {
+  color: var(--color-foreground-secondary);
 }
 
 /* --------------------------------------------------------------------------
@@ -387,24 +462,32 @@ body {
   font-style: italic;
 }
 .hljs-keyword,
-.hljs-selector-tag {
+.hljs-selector-tag,
+.hljs-name,
+.hljs-tag {
   color: #b45309;
 }
-.hljs-built_in {
+.hljs-built_in,
+.hljs-selector-class,
+.hljs-selector-id {
   color: #0f766e;
 }
 .hljs-type,
-.hljs-class .hljs-title {
+.hljs-class .hljs-title,
+.hljs-title.class_ {
   color: #0e7490;
 }
 .hljs-title,
 .hljs-title.function_,
 .hljs-section {
-  color: #0d9488;
+  color: #115e59;
 }
 .hljs-string,
 .hljs-attr,
+.hljs-property,
 .hljs-symbol,
+.hljs-regexp,
+.hljs-doctag,
 .hljs-meta-string {
   color: #15803d;
 }
@@ -412,14 +495,30 @@ body {
 .hljs-literal {
   color: #be123c;
 }
-.hljs-subst {
+.hljs-subst,
+.hljs-params,
+.hljs-code {
   color: var(--color-foreground);
+}
+/* Structural glyphs — braces, colons, arrows, list bullets, shell prompts. They
+   carry no meaning on their own, so they recede without dropping below AA. */
+.hljs-punctuation,
+.hljs-operator,
+.hljs-bullet,
+.hljs-meta.prompt_ {
+  color: var(--color-foreground-secondary);
 }
 .hljs-attribute,
 .hljs-meta,
 .hljs-variable,
 .hljs-template-variable {
   color: #9a3412;
+}
+.hljs-emphasis {
+  font-style: italic;
+}
+.hljs-strong {
+  font-weight: 600;
 }
 .hljs-deletion {
   color: #be123c;
@@ -429,14 +528,19 @@ body {
 }
 
 .dark .hljs-keyword,
-.dark .hljs-selector-tag {
+.dark .hljs-selector-tag,
+.dark .hljs-name,
+.dark .hljs-tag {
   color: #fbbf24;
 }
-.dark .hljs-built_in {
+.dark .hljs-built_in,
+.dark .hljs-selector-class,
+.dark .hljs-selector-id {
   color: #5eead4;
 }
 .dark .hljs-type,
-.dark .hljs-class .hljs-title {
+.dark .hljs-class .hljs-title,
+.dark .hljs-title.class_ {
   color: #67e8f9;
 }
 .dark .hljs-title,
@@ -446,7 +550,10 @@ body {
 }
 .dark .hljs-string,
 .dark .hljs-attr,
+.dark .hljs-property,
 .dark .hljs-symbol,
+.dark .hljs-regexp,
+.dark .hljs-doctag,
 .dark .hljs-meta-string {
   color: #86efac;
 }
@@ -459,6 +566,9 @@ body {
 .dark .hljs-variable,
 .dark .hljs-template-variable {
   color: #fdba74;
+}
+.dark .hljs-meta.prompt_ {
+  color: var(--color-foreground-secondary);
 }
 
 /* Hide native scrollbar on the section-tab strip while keeping it scrollable. */

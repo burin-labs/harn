@@ -14,6 +14,7 @@
     "typecheck": "tsc -b --noEmit"
   },
   "dependencies": {
+    "mermaid": "^11.17.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-router": "^8.3.0"

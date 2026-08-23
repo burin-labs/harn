@@ -1,19 +1,24 @@
 # MCP RFC: `notifications/reminder` server→host ambient context
 
-**Upstream repo:** [modelcontextprotocol/specification][mcp-spec]
-**Status:** Filed upstream 2026-07-03 as
-[MCP discussion #3007](https://github.com/modelcontextprotocol/modelcontextprotocol/discussions/3007),
-awaiting first response.
-**Authors:** Burin Labs
-**Reference impl:** `harn-serve` MCP adapter
-([`crates/harn-serve/src/adapters/mcp.rs`][mcp-rs]) + typed
-`SystemReminder` envelope
-([`crates/harn-vm/src/llm/helpers/transcript.rs`][reminder-rs]).
-**Sibling discussions:** [MCP #2736 — budget caps on
-`sampling/createMessage`][mcp-2736] covers a separate concern (request
-budgeting); reminder notifications are still open.
+- **Upstream repo:** [modelcontextprotocol/modelcontextprotocol][mcp-spec]
+- **Discussion:** [MCP #3007 — `notifications/reminder`][mcp-3007]
+- **Status:** Open, filed 2026-07-03, no comments since. At risk for a reason
+  unrelated to interest: [SEP-2577][sep-2577] deprecated the adjacent Logging
+  surface, so confirm the notification path still has a future before
+  investing more here.
+- **Last verified:** 2026-08-22
+- **Authors:** Burin Labs
+- **Reference impl:** `harn-serve` MCP adapter
+  ([`crates/harn-serve/src/adapters/mcp.rs`][mcp-rs]) and the typed
+  `SystemReminder` envelope
+  ([`crates/harn-vm/src/llm/helpers/transcript.rs`][reminder-rs])
+- **Sibling discussions:** [MCP #2736 — budget caps on
+  `sampling/createMessage`][mcp-2736] covered a separate concern and is now
+  closed; see the [sampling budget caps RFC](./mcp-sampling-budget-caps.md).
 
-[mcp-spec]: https://github.com/modelcontextprotocol/specification
+[mcp-spec]: https://github.com/modelcontextprotocol/modelcontextprotocol
+[mcp-3007]: https://github.com/modelcontextprotocol/modelcontextprotocol/discussions/3007
+[sep-2577]: https://github.com/modelcontextprotocol/modelcontextprotocol/pull/2577
 [mcp-2736]: https://github.com/modelcontextprotocol/modelcontextprotocol/discussions/2736
 [mcp-rs]: https://github.com/burin-labs/harn/blob/main/crates/harn-serve/src/adapters/mcp.rs
 [reminder-rs]: https://github.com/burin-labs/harn/blob/main/crates/harn-vm/src/llm/helpers/transcript.rs

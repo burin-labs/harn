@@ -1,22 +1,25 @@
 # ACP RFC: `session/suspend` + `session/await_resumption`
 
-**Upstream repo:** [agentclientprotocol/agent-client-protocol][acp]
-**Sibling discussions:** [ACP #1220 - `session/inject`][acp-1220],
-[ACP #1224 - `session/remind`][acp-1224] (covered by the [sibling
-`session/inject_reminder` RFC](./acp-session-inject-reminder.md));
-this RFC is the suspend-side companion to the already-shipped
-`session/resume` ([ACP #1726][acp-1726]).
-**Discussion:** [ACP #1233 - `session/suspend` +
-`session/await_resumption`][acp-1233].
-**Status:** Open upstream discussion; no maintainer reply was present
-when rechecked on 2026-06-27.
-**Authors:** Burin Labs
-**Reference impl:** `harn-vm` cooperative suspend primitive
-([`crates/harn-vm/src/stdlib/agents.rs`][agents-rs] -
-`__host_worker_suspend`; [`agents_workers/mod.rs`][workers-rs] -
-`WorkerSuspension`) and `harn-serve` ACP adapter
-([`crates/harn-serve/src/adapters/acp/mod.rs`][acp-mod-rs] -
-`handle_session_resume`).
+- **Upstream repo:** [agentclientprotocol/agent-client-protocol][acp]
+- **Discussion:** [ACP #1233 - `session/suspend` +
+  `session/await_resumption`][acp-1233]
+- **Status:** Open, no maintainer reply. A peer implementer asked on
+  2026-07-20 for an acknowledged request with a
+  `requested -> quiescing -> suspended` state machine; we adopted that shape
+  in the thread on 2026-07-25 and the revision below reflects it.
+- **Last verified:** 2026-08-22
+- **Authors:** Burin Labs
+- **Reference impl:** the `harn-vm` cooperative suspend primitive
+  ([`crates/harn-vm/src/stdlib/agents.rs`][agents-rs] -
+  `__host_worker_suspend`; [`agents_workers/mod.rs`][workers-rs] -
+  `WorkerSuspension`) and the `harn-serve` ACP adapter
+  ([`crates/harn-serve/src/adapters/acp/mod.rs`][acp-mod-rs] -
+  `handle_session_resume`)
+- **Sibling discussions:** [ACP #1220 - `session/inject`][acp-1220] and
+  [ACP #1224 - `session/remind`][acp-1224] (covered by the
+  [`session/inject_reminder` RFC](./acp-session-inject-reminder.md)). This RFC
+  is the suspend-side companion to the already-shipped `session/resume`
+  ([ACP #1726][acp-1726]).
 
 [acp]: https://github.com/agentclientprotocol/agent-client-protocol
 [acp-1220]: https://github.com/agentclientprotocol/agent-client-protocol/discussions/1220

@@ -1,16 +1,30 @@
 # Protocol filing status ledger
 
-Last verified: 2026-07-25 UTC. Replies posted to oauth-wg `#73`,
-A2A `#2028`, and ACP `#1233` later the same day are recorded below.
+Last verified: 2026-08-22 UTC.
 
 This ledger records direct upstream reads for the protocol-contribution
-threads that back the RFCs in this directory. It is intentionally factual:
-only record a state here after fetching the upstream discussion, PR, or
-issue directly.
+threads that back the RFCs in this directory. It is reference material and
+intentionally factual: record a state here only after fetching the upstream
+discussion, PR, or issue directly.
 
-In [Diataxis](https://diataxis.fr/) terms, this is reference material.
-It lists current facts and links; it is not a how-to guide or a design
-explanation.
+**What changed since the 2026-07-25 read.** Two threads moved and the rest sat
+still.
+
+- **A2A `#2028` is where the work is.** Twelve new comments through 2026-08-20
+  took it from 12 to 24. Two independent implementations built executable
+  vectors for the well-formedness/authority split and diffed them against each
+  other with no divergences, an `originAnchor` slot was reserved and pinned
+  inert, and a review from the ZeroID side supplied the correction to fold into
+  the extension text: per-hop `scopes` are **derived from a validated
+  credential**, never authorization-bearing.
+- **oauth-wg `#73` handed the ball back to us.** A draft author replied on
+  2026-07-25, after our answer the same day, redirecting the actor-chain half
+  to [`draft-mcguinness-oauth-actor-profile`](https://github.com/mcguinness/draft-mcguinness-oauth-actor-profile)
+  and its receipts, proofs, and authority-bounds companions. That repository has
+  no thread from us, so the invitation is unanswered.
+- Everything else — ACP `#1220`, `#1224`, `#1233`, `#1261`; A2A `#1857`,
+  `#1858`, `#2027`; MCP `#3007`, `#3008` — is unchanged. MCP `#2736` is closed
+  from our side.
 
 ## Public follow-up posture
 
@@ -38,15 +52,16 @@ citing internal usage numbers as an argument is not.
 | [A2A #1857](https://github.com/a2aproject/A2A/discussions/1857) idempotency | 2026-05-17 | No | 1 | **Us** — posture decision |
 | [A2A #1858](https://github.com/a2aproject/A2A/discussions/1858) `PAUSED` | 2026-05-17 | No | 3 | Maintainers (process question) |
 | [A2A #2027](https://github.com/a2aproject/A2A/discussions/2027) `InjectTaskReminder` | 2026-07-03 | No | none | Nobody — cold |
-| [A2A #2028](https://github.com/a2aproject/A2A/issues/2028) actor-chain | 2026-07-03 | No | 3 | Thread — consolidating restatement posted 2026-07-25 |
-| [MCP #2736](https://github.com/modelcontextprotocol/modelcontextprotocol/discussions/2736) budget caps | 2026-05-17 | No | 2 | **Dead** — target feature deprecated by SEP-2577 |
+| [A2A #2028](https://github.com/a2aproject/A2A/issues/2028) actor-chain | 2026-07-03 | No | 5 | **Us** — fold "derived, not authoritative" into the extension text |
+| [MCP #2736](https://github.com/modelcontextprotocol/modelcontextprotocol/discussions/2736) budget caps | 2026-05-17 | No | 2 | **Closed by us** — target feature deprecated by SEP-2577 |
 | [MCP #3007](https://github.com/modelcontextprotocol/modelcontextprotocol/discussions/3007) `notifications/reminder` | 2026-07-03 | No | none | **At risk** — adjacent surface (Logging) deprecated |
 | [MCP #3008](https://github.com/modelcontextprotocol/modelcontextprotocol/discussions/3008) `authenticatedIdentity` | 2026-07-03 | No | 1 | **Us** — sponsor outreach |
-| [oauth-wg #73](https://github.com/oauth-wg/oauth-identity-assertion-authz-grant/issues/73) actor chain | 2026-07-03 | **Yes — direct question to us** | n/a | `mcguinness` — answered 2026-07-25 |
+| [oauth-wg #73](https://github.com/oauth-wg/oauth-identity-assertion-authz-grant/issues/73) actor chain | 2026-07-03 | **Yes — direct question to us** | n/a | **Us** — invited to continue in the actor-profile repo |
 
 Nothing has been rejected anywhere, and across twelve threads the pattern
 is consistent: proposals draw independent third-party support and no
-maintainer verdicts.
+maintainer verdicts. Two threads are now waiting on us rather than on anyone
+upstream.
 
 **One correction to that read, found 2026-07-25.** "Maintainer attention
 is the binding constraint" is not the diagnosis everywhere. MCP `#2736`
@@ -111,10 +126,10 @@ both have a path that does not depend on a TSC answer.
 |---|---|---|
 | [`a2aproject/A2A#1857`](https://github.com/a2aproject/A2A/discussions/1857) | Open discussion, 1 comment, **no activity since 2026-05-18** — the coldest of our filings. | Idempotency keys + post-cancel state semantics. `chopmob-cloud` endorsed from production and recommended accepting the key in both the request body and a Stripe-style `Idempotency-Key` HTTP header, key opaque to A2A with a server-chosen window. Still titled with pre-v1.0 `tasks/send`, and the only filing with **no RFC source doc in this directory**. Posture decision tracked in [harn#5540](https://github.com/burin-labs/harn/issues/5540). |
 | [`a2aproject/A2A#1858`](https://github.com/a2aproject/A2A/discussions/1858) | Open discussion, 12 comments, no maintainer/TSC reply. Unchanged since 2026-06-27. | Community feedback converged on one `PAUSED` state plus a structured `pause` object (`initiatedBy`, `pausedUntil` lease, `resumeToken`) rather than separate enum values, plus an opaque `lastSideEffectRef` whose absence must not be read as proof that no side effect occurred. The draft-PR-vs-extension ping ([`discussioncomment-17455657`](https://github.com/a2aproject/A2A/discussions/1858#discussioncomment-17455657)) is still unanswered. Given the extension mechanics above, self-publishing is an option if the thread stays cold. |
-| [`a2aproject/A2A#1937`](https://github.com/a2aproject/A2A/issues/1937) | Open issue, last updated 2026-06-19. | Context-binding profile for delegated authority — binds an already-valid delegation to a task/session/target/scope. Complement of (not substitute for) the [actor-chain extension RFC](./a2a-actor-chain-extension.md); best anchor thread for that filing. |
+| [`a2aproject/A2A#1937`](https://github.com/a2aproject/A2A/issues/1937) | Open issue, 5 comments, last updated 2026-08-14. | Context-binding profile for delegated authority — binds an already-valid delegation to a task/session/target/scope. Complement of (not substitute for) the [actor-chain extension RFC](./a2a-actor-chain-extension.md); best anchor thread for that filing. Two third-party comments arrived since the last read, both pushing on lifetime rather than shape: a delegated-commerce case for nested spend limits (2026-08-09), and the observation that a cryptographically valid delegation can become operationally invalid when policy or risk state changes after issuance (2026-08-14). |
 | [`a2aproject/A2A#153`](https://github.com/a2aproject/A2A/issues/153) | Open issue (since 2025-06). | Confused-deputy framing for A2A; canonical motivation citation for payload-visible principals. |
 | [`a2aproject/A2A#2027`](https://github.com/a2aproject/A2A/discussions/2027) | Filed 2026-07-03 (Ideas category). **Zero comments after 22 days.** | `InjectTaskReminder` ambient-context discussion, from the [reminder RFC](./a2a-message-kind-reminder.md) with A2A v1.0 naming. Dupe-checked before filing. Cold-start with no venue warming; see [harn#1829](https://github.com/burin-labs/harn/issues/1829). |
-| [`a2aproject/A2A#2028`](https://github.com/a2aproject/A2A/issues/2028) | Filed 2026-07-03. Open issue, 4 comments, active through 2026-07-22, no maintainer. **The thread has converged on a sharper model than we filed.** | Actor-chain extension, anchored to `#1937` / `#153`. `0xbrainkid` wants each hop to carry `sub` + session/nonce binding + `scopes`, not a bare subject. `giskard09` added **monotonic narrowing** — each hop's scopes a subset of its predecessor's — as a mechanically checkable invariant that makes the confused-deputy case from `#153` detectable without a cross-hop log join. `aeoess` then supplied the necessary correction: since `actorChain` is caller-supplied, a fabricated chain can narrow perfectly, so narrowing is a **well-formedness** property only; proof of grant requires a per-hop `proof_ref` an outside verifier resolves without trusting the caller's payload. `giskard09` agreed these are two separate properties that the extension text should state separately. This split matches what the IETF drafts leave unstandardized (see below): independent convergence, worth adopting verbatim rather than re-deriving. **Consolidating restatement posted 2026-07-25** ([`issuecomment-5079449815`](https://github.com/a2aproject/A2A/issues/2028#issuecomment-5079449815)): the two properties stated separately, the scoping argument that the token layer declines both, `(iss, sub)` proposed as per-hop identity so the payload stays projectable onto nested `act`, and the self-publish fallback named explicitly. |
+| [`a2aproject/A2A#2028`](https://github.com/a2aproject/A2A/issues/2028) | Filed 2026-07-03. Open issue, **24 comments**, active through 2026-08-20, still no maintainer. | Actor-chain extension, anchored to `#1937` / `#153`. Through 2026-07-25 the thread converged on two properties that must be stated separately: **well-formedness** (each hop's `scopes` a subset of its predecessor's, checkable from the payload alone, making `#153`'s confused deputy detectable without a cross-hop log join) and **authority** (unprovable from a caller-supplied payload, so it needs a per-hop `proof_ref` an outside verifier resolves). Our consolidating restatement is [`issuecomment-5079449815`](https://github.com/a2aproject/A2A/issues/2028#issuecomment-5079449815). Since then: `navigatorbuilds` published executable vectors for both properties including negatives, `giskard09` ran an independent implementation against them with zero divergences (and reproduced the same documented limit — a hop that rewrites its predecessor's scopes upward narrows perfectly in the forwarded chain, so it is only catchable receiver-side), and an `originAnchor` slot was reserved and pinned inert by forward-compat and no-privilege-via-anchor vectors. On 2026-08-20 `rsharath` ([ZeroID](https://github.com/highflame-ai/zeroid)) mapped OAuth token exchange onto the shape and supplied the correction now owed to the extension text: per-hop `scopes` are **derived from the validated credential**, not literal RFC 8693 `act` contents and never authorization-bearing. **Next action is ours.** |
 
 ## MCP and OAuth Identity
 
@@ -182,12 +197,12 @@ experience in.
 
 | Item | Verified state | Notes |
 |---|---|---|
-| [`modelcontextprotocol/modelcontextprotocol#2736`](https://github.com/modelcontextprotocol/modelcontextprotocol/discussions/2736) | Open discussion, 4 comments, no maintainer response at any point. **The 2026-07-03 narrowed-scope restatement has drawn no objection in 22 days.** | Per-call sampling budget caps. `ralftpaw` separated host policy limits (hard caps enforced regardless of server request) from server-declared budget intent. `HarperZ9` endorsed the SEP path with a deliberately small first version — one host-owned limit envelope plus one typed stop/failure shape — and argued the load-bearing field is the decision basis (estimated cost, policy limit applied, meter basis) rather than `max_cost_usd`. Our restatement offered to draft the SEP unless maintainers objected. The SEP is now **drafted locally** as [an RFC source doc](./mcp-sampling-budget-caps.md) with a runnable prototype at `experiments/mcp-sampling-budget-caps/`; what remains before submitting the PR is choosing which one or two maintainers from `MAINTAINERS.md` to tag as sponsor. Tracked in [harn#5539](https://github.com/burin-labs/harn/issues/5539). |
+| [`modelcontextprotocol/modelcontextprotocol#2736`](https://github.com/modelcontextprotocol/modelcontextprotocol/discussions/2736) | Open discussion, 6 comments, **closed out from our side 2026-07-25**. No maintainer response at any point. | Per-call sampling budget caps. `ralftpaw` separated host policy limits from server-declared budget intent; `HarperZ9` endorsed a deliberately small first SEP and argued the load-bearing field is the decision basis (estimated cost, policy limit applied, meter basis) rather than `max_cost_usd`. We were drafting that SEP when we found [SEP-2577](https://github.com/modelcontextprotocol/modelcontextprotocol/pull/2577) had deprecated Sampling on 2026-05-15, and posted the reasoning rather than filing. `ralftpaw` agreed the same day: if per-call ceilings reappear on the direct-provider path they should stay host-owned rather than server-negotiated. Design record kept at [the RFC source doc](./mcp-sampling-budget-caps.md) with a runnable prototype at `experiments/mcp-sampling-budget-caps/`. Tracked in [harn#5539](https://github.com/burin-labs/harn/issues/5539). |
 | [`modelcontextprotocol/modelcontextprotocol#3007`](https://github.com/modelcontextprotocol/modelcontextprotocol/discussions/3007) | Filed 2026-07-03 (Ideas - General). **Zero comments after 22 days.** | `notifications/reminder` server→host ambient-context discussion, from the [reminder RFC](./mcp-notifications-reminder.md). Dupe-checked before filing. Same cold-start pattern as A2A `#2027`; the reminder primitive has no natural WG home, which is the likely cause. |
 | [`modelcontextprotocol/modelcontextprotocol#3008`](https://github.com/modelcontextprotocol/modelcontextprotocol/discussions/3008) | Filed 2026-07-03 (Ideas - General). One supportive third-party reply 2026-07-12; no maintainer. | `authenticatedIdentity` pre-SEP discussion, from the [identity RFC](./mcp-authenticated-identity.md). `tamish560` confirms the gap from experience: the "connected as" question is unanswerable today without per-server knowledge of which tool returns user info, and `InitializeResult` is the right slot because the server already knows who authorized the session. Progression is sponsor-gated; that outreach is unstarted. |
 | [`modelcontextprotocol/modelcontextprotocol#214`](https://github.com/modelcontextprotocol/modelcontextprotocol/issues/214) | Closed. | Maintainer guidance on 2026-01-16 pointed custom auth pieces toward [`modelcontextprotocol/ext-auth`](https://github.com/modelcontextprotocol/ext-auth). |
 | [`modelcontextprotocol/ext-auth#13`](https://github.com/modelcontextprotocol/ext-auth/issues/13) | Open, still no activity since 2026-01-31. | Maintainer response says Enterprise-Managed Authorization does not currently support distinguishing agent vs user identity and points to ID-JAG issue `#73`. |
-| [`oauth-wg/oauth-identity-assertion-authz-grant#73`](https://github.com/oauth-wg/oauth-identity-assertion-authz-grant/issues/73) | Open. **A draft author asked us a direct question on 2026-07-03; it has been unanswered for 22 days.** | The live venue for actor-chain work. Our implementer feedback was posted 2026-07-03 ([`issuecomment-4878092226`](https://github.com/oauth-wg/oauth-identity-assertion-authz-grant/issues/73#issuecomment-4878092226)) per the [positioning note](./oauth-actor-chain-positioning.md). `mcguinness` replied the same day asking whether we had reviewed [`draft-mcguinness-oauth-actor-profile`](https://datatracker.ietf.org/doc/draft-mcguinness-oauth-actor-profile/) and noting ID-JAG's rules were relaxed to allow `actor_token` on the token exchange request. **Answered 2026-07-25** ([`issuecomment-5079449594`](https://github.com/oauth-wg/oauth-identity-assertion-authz-grant/issues/73#issuecomment-5079449594)): confirmed nested `act` is the representation we wanted and that fail-closed on unpreservable chains is the right default; flagged that `(act.iss, act.sub)` being canonical is a migration hazard worth naming in security considerations, since pre-profile implementations key on `sub` alone and that works silently in a single-IdP deployment; then asked whether per-hop narrowing and per-hop evidence are meant to stay permanently deployment-specific or whether a companion profile could pin the well-formedness half, with an offer to draft it. |
+| [`oauth-wg/oauth-identity-assertion-authz-grant#73`](https://github.com/oauth-wg/oauth-identity-assertion-authz-grant/issues/73) | Open, 7 comments. **The ball is with us since 2026-07-25.** | The live venue for actor-chain work. Our implementer feedback was posted 2026-07-03 ([`issuecomment-4878092226`](https://github.com/oauth-wg/oauth-identity-assertion-authz-grant/issues/73#issuecomment-4878092226)) per the [positioning note](./oauth-actor-chain-positioning.md), and we answered the draft author's question on 2026-07-25 ([`issuecomment-5079449594`](https://github.com/oauth-wg/oauth-identity-assertion-authz-grant/issues/73#issuecomment-5079449594)): nested `act` is the representation we wanted, fail-closed on unpreservable chains is the right default, `(act.iss, act.sub)` being canonical is a migration hazard worth naming in security considerations, and we offered to draft a companion profile pinning the well-formedness half. `mcguinness` replied the same day that this belongs in [`draft-mcguinness-oauth-actor-profile`](https://github.com/mcguinness/draft-mcguinness-oauth-actor-profile) rather than in ID-JAG scope, naming the actor-receipts, actor-proofs, and (experimental) authority-bounds drafts. That repository has no thread from us. |
 | [`oauth-wg/oauth-identity-assertion-authz-grant#80`](https://github.com/oauth-wg/oauth-identity-assertion-authz-grant/issues/80) | Closed as completed and milestoned 2026-04-22. | Optional `actor_token` proposal split out from `#73`; folded into the `#73` direction rather than rejected, and now carried by the Actor Profile draft. |
 | [`modelcontextprotocol/modelcontextprotocol#1299`](https://github.com/modelcontextprotocol/modelcontextprotocol/issues/1299) | Closed as completed 2025-09-02. | SEP-1299 is server-side OAuth flow management, unrelated to a server→client identity surface; it does not claim the `authenticatedIdentity` slot. |
 | [`modelcontextprotocol/modelcontextprotocol` discussion `#1827`](https://github.com/modelcontextprotocol/modelcontextprotocol/discussions/1827) | Open discussion, unanswered (opened 2025-11-17). | `upstream_identity` propagation, client→server — the opposite direction from the [`authenticatedIdentity` RFC](./mcp-authenticated-identity.md); the two compose. |
@@ -320,9 +335,18 @@ Ordered by whether they depend on someone else moving first.
 - **MCP `#3007`**: decide whether to differentiate against the Logging
   deprecation or drop it. Do not revive it without answering the
   OpenTelemetry question.
-- **Replied 2026-07-25, now awaiting responses**: oauth-wg `#73`,
-  A2A `#2028`, ACP `#1233`. See each row above for what was said. No
-  follow-up until someone answers.
+- **A2A `#2028`**: fold "per-hop `scopes` are derived from the validated
+  credential, never authorization-bearing" into the extension text, with RFC
+  8693 `act` cited for the identity half only. Offered upstream on 2026-08-20;
+  the thread is waiting on the revision, not on a maintainer.
+- **oauth-wg `#73`**: the draft author invited the actor-chain conversation
+  into
+  [`draft-mcguinness-oauth-actor-profile`](https://github.com/mcguinness/draft-mcguinness-oauth-actor-profile)
+  on 2026-07-25. Nothing from us is there yet. Accepting that invitation is the
+  next step, and it also decides whether the companion-profile draft we offered
+  belongs in that repo.
+- **ACP `#1233`**: replied 2026-07-25 adopting the acknowledged-request shape.
+  No follow-up until someone answers.
 - **MCP `#3008`**: begin auth-area sponsor outreach via the relevant
   WG/IG rather than waiting for the discussion to attract one.
 - **`#3347`**: write the IETF draft-watch note; three of five tracked

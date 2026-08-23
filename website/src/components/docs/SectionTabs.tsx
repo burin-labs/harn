@@ -11,6 +11,7 @@ export function SectionTabs({ sections, activeId }: { sections: NavSection[]; ac
         <Link
           key={s.id}
           to={s.url}
+          aria-current={s.id === activeId ? "page" : undefined}
           className={`shrink-0 border-b-2 px-3 py-3 text-sm font-medium transition-colors ${
             s.id === activeId
               ? "border-accent-500 text-foreground"

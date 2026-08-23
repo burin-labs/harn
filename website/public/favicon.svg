@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!-- The Harn mark: three linked pipeline stages in the teal-to-amber brand
+       gradient. Kept in step with src/components/Logo.tsx. -->
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0b1413" />
+      <stop offset="100%" stop-color="#13201e" />
+    </linearGradient>
+    <linearGradient id="flow" x1="0%" y1="50%" x2="100%" y2="50%">
+      <stop offset="0%" stop-color="#5eead4" />
+      <stop offset="55%" stop-color="#14b8a6" />
+      <stop offset="100%" stop-color="#f59e0b" />
+    </linearGradient>
+  </defs>
+  <rect width="32" height="32" rx="7" fill="url(#bg)" />
+  <path d="M7 16 H25" stroke="url(#flow)" stroke-width="2.2" stroke-linecap="round" fill="none" />
+  <circle cx="7.5" cy="16" r="3" fill="url(#flow)" />
+  <circle cx="16" cy="16" r="3" fill="url(#flow)" />
+  <circle cx="24.5" cy="16" r="3" fill="url(#flow)" />
+  <path
+    d="M16 16 L11.5 10.5 M16 16 L20.5 21.5"
+    stroke="url(#flow)"
+    stroke-width="2.2"
+    stroke-linecap="round"
+    fill="none"
+    opacity="0.85"
+  />
+  <circle cx="11.2" cy="10.2" r="2.4" fill="#5eead4" />
+  <circle cx="20.8" cy="21.8" r="2.4" fill="#f59e0b" />
+</svg>

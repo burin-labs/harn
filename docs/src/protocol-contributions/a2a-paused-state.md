@@ -1,28 +1,28 @@
 # A2A RFC: explicit `TASK_STATE_PAUSED` task state + `PauseTask` / `ResumeTask`
 
-**Upstream repo:** [a2aproject/A2A][a2a]
-**Discussion:** [A2A #1858 - `TaskState.PAUSED`][a2a-1858].
-**Status:** Open upstream discussion. As of the 2026-06-27
-recheck, community feedback favored one paused state with a
-structured `pause` object over separate `PAUSED_BY_CLIENT` /
-`PAUSED_BY_AGENT` enum values; no maintainer/TSC reply was present.
-Revised 2026-07-03 to A2A v1.0 conventions: `a2a.proto` is now the
-normative source of truth, operations use PascalCase (`PauseTask`,
-`ResumeTask`, `AwaitTaskResumption`), enum values use
-SCREAMING_SNAKE_CASE ProtoJSON strings (`TASK_STATE_PAUSED`), and
-streamed lifecycle events are member-typed on the `SubscribeToTask`
-stream rather than `kind`-discriminated notifications. The linked
-upstream discussion (#1858) predates the v1.0 naming.
-**Authors:** Burin Labs
-**Reference impl:** `harn-vm` cooperative suspend primitive
-([`crates/harn-vm/src/stdlib/agents.rs`][agents-rs] -
-`__host_worker_suspend`; [`agents_workers/mod.rs`][workers-rs] -
-`WorkerSuspension`) and `harn-serve` A2A adapter
-([`crates/harn-serve/src/adapters/a2a/`][a2a-dir]).
-**Sibling discussions:** [A2A #1857 - idempotency on the send
-operation (`SendMessage` in v1.0)][a2a-1857] covers a different
-concern (request idempotency). A first-class paused state is still
-open.
+- **Upstream repo:** [a2aproject/A2A][a2a]
+- **Discussion:** [A2A #1858 - `TaskState.PAUSED`][a2a-1858]
+- **Status:** Open, no maintainer or TSC reply. Community feedback converged on
+  one paused state with a structured `pause` object, rather than separate
+  `PAUSED_BY_CLIENT` / `PAUSED_BY_AGENT` enum values. The open question we
+  asked upstream is procedural: whether that converged shape is worth a draft
+  PR or should stay an extension proposal.
+- **Last verified:** 2026-08-22
+- **Authors:** Burin Labs
+- **Reference impl:** the `harn-vm` cooperative suspend primitive
+  ([`crates/harn-vm/src/stdlib/agents.rs`][agents-rs] -
+  `__host_worker_suspend`; [`agents_workers/mod.rs`][workers-rs] -
+  `WorkerSuspension`) and the `harn-serve` A2A adapter
+  ([`crates/harn-serve/src/adapters/a2a/`][a2a-dir])
+- **Sibling discussions:** [A2A #1857 - idempotency on the send operation
+  (`SendMessage` in v1.0)][a2a-1857] covers request idempotency, a different
+  concern.
+
+Revised 2026-07-03 to A2A v1.0 conventions: `a2a.proto` is the normative source
+of truth, operations are PascalCase (`PauseTask`, `ResumeTask`,
+`AwaitTaskResumption`), enum values are SCREAMING_SNAKE_CASE ProtoJSON strings
+(`TASK_STATE_PAUSED`), and streamed lifecycle events are member-typed on the
+`SubscribeToTask` stream. Discussion #1858 predates that naming.
 
 [a2a]: https://github.com/a2aproject/A2A
 [a2a-1857]: https://github.com/a2aproject/A2A/discussions/1857

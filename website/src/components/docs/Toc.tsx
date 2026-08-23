@@ -25,7 +25,10 @@ export function Toc({ headings, pathname }: { headings: PageData["headings"]; pa
 
   return (
     <aside className="hidden w-56 shrink-0 xl:block">
-      <div className="docs-scroll sticky top-[6.75rem] max-h-[calc(100vh-8rem)] overflow-y-auto py-8">
+      <nav
+        className="docs-scroll sticky top-[6.75rem] max-h-[calc(100vh-8rem)] overflow-y-auto py-8"
+        aria-label={t.docs.onThisPageAria}
+      >
         <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-foreground-muted">
           {t.docs.onThisPage}
         </div>
@@ -34,6 +37,7 @@ export function Toc({ headings, pathname }: { headings: PageData["headings"]; pa
             <li key={h.id}>
               <a
                 href={`#${h.id}`}
+                aria-current={activeId === h.id ? "location" : undefined}
                 className={`block border-l-2 py-0.5 text-sm transition-colors ${
                   h.depth === 3 ? "pl-6" : "pl-3"
                 } ${
@@ -47,7 +51,7 @@ export function Toc({ headings, pathname }: { headings: PageData["headings"]; pa
             </li>
           ))}
         </ul>
-      </div>
+      </nav>
     </aside>
   )
 }

@@ -20,6 +20,7 @@ export const en = {
   },
 
   nav: {
+    mainNavAria: "Main",
     brandHomeAria: "Harn home",
     docs: "Docs",
     reference: "Reference",
@@ -73,6 +74,10 @@ export const en = {
     onThisPage: "On this page",
     editOnGitHub: "Edit this page on GitHub",
     sectionsAria: "Documentation sections",
+    sidebarAria: "Documentation pages",
+    breadcrumbAria: "Breadcrumb",
+    onThisPageAria: "On this page",
+    skipToContent: "Skip to content",
   },
 
   mockup: {
@@ -186,7 +191,7 @@ export const en = {
 
     paths: {
       sectionTitle: "Find your path",
-      sectionBody: "The documentation follows Diátaxis, organized around what you are trying to do.",
+      sectionBody: "The documentation is organized around what you are trying to do.",
       explore: "Explore",
       tutorials: {
         kicker: "Tutorials",

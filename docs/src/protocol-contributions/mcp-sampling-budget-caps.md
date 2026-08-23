@@ -1,20 +1,22 @@
 # MCP RFC: per-call budget caps for `sampling/createMessage`
 
-**Upstream repo:** [modelcontextprotocol/modelcontextprotocol][mcp]
-**Status:** **Obsoleted upstream. Not filed as a SEP and will not be.**
-Filed 2026-05-17 as
-[MCP discussion #2736](https://github.com/modelcontextprotocol/modelcontextprotocol/discussions/2736)
-(Ideas - General) and narrowed 2026-07-03 after community feedback. On
-2026-07-25, while preparing the SEP, we found that
-[SEP-2577][sep-2577] deprecated the entire Sampling feature on
-2026-05-15. Retained as a design record and as a process lesson; see
-[Why this was not filed](#why-this-was-not-filed).
-**Authors:** Kenneth Sinder
-**Prototype:** [`experiments/mcp-sampling-budget-caps/`](https://github.com/burin-labs/harn/tree/main/experiments/mcp-sampling-budget-caps)
-— a dependency-free Node script that still runs all four decision paths.
-**Tracker:** [harn#5539](https://github.com/burin-labs/harn/issues/5539)
+- **Upstream repo:** [modelcontextprotocol/modelcontextprotocol][mcp]
+- **Discussion:** [MCP #2736 — per-call budget caps][mcp-2736]
+- **Status:** **Closed. Obsoleted upstream, never filed as a SEP.**
+  [SEP-2577][sep-2577] deprecated the entire Sampling feature on 2026-05-15 —
+  which we only found on 2026-07-25 while preparing the SEP. We closed the
+  thread with that reasoning; a peer agreed the same day that per-call ceilings
+  belong in the direct-provider path, host-owned rather than
+  protocol-negotiated. Kept as a design record and a process lesson; see
+  [Why this was not filed](#why-this-was-not-filed).
+- **Last verified:** 2026-08-22
+- **Authors:** Kenneth Sinder
+- **Prototype:** [`experiments/mcp-sampling-budget-caps/`](https://github.com/burin-labs/harn/tree/main/experiments/mcp-sampling-budget-caps)
+  — a dependency-free Node script that still runs all four decision paths
+- **Tracker:** [harn#5539](https://github.com/burin-labs/harn/issues/5539)
 
 [mcp]: https://github.com/modelcontextprotocol/modelcontextprotocol
+[mcp-2736]: https://github.com/modelcontextprotocol/modelcontextprotocol/discussions/2736
 [sep-2577]: https://github.com/modelcontextprotocol/modelcontextprotocol/pull/2577
 
 ## Why this was not filed
