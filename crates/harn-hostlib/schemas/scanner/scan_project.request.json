@@ -18,7 +18,7 @@
       "type": "string",
       "enum": ["none", "builtin", "project"],
       "default": "project",
-      "description": "How much of the shared ignore stack applies. `none` walks everything; `builtin` applies Harn's built-in directory defaults; `project` adds `.gitignore`, `.ignore`, and `.agentignore`."
+      "description": "How much of the shared ignore stack applies. `none` walks everything; `builtin` applies Harn's built-in directory defaults; `project` adds `.gitignore` and `.agentignore`. `.ignore` is not honored."
     },
     "max_files": {
       "type": "integer",

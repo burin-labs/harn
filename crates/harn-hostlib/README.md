@@ -233,7 +233,9 @@ inject that field instead of rebuilding scanner heuristics. Two builtins:
 Every hostlib builtin that enumerates or watches files takes `ignore_policy`
 (`none` | `builtin` | `project`) with the same meaning as the in-VM fs
 builtins: `none` is a raw walk, `builtin` applies Harn's built-in directory
-defaults, and `project` adds `.gitignore`, `.ignore`, and `.agentignore`.
+defaults, and `project` adds `.gitignore` and `.agentignore`. `.ignore` is
+not honored: it is a ripgrep/fd convention git cannot evaluate, so a host
+implementing the same walk on git tooling cannot reproduce it.
 `tools/search` and the scanner builtins default to `project`; `fs_watch`
 defaults to `builtin`, because a recursive watch over dependency and build
 trees exhausts the OS watch budget while a gitignored file is still a file

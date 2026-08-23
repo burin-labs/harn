@@ -22,21 +22,24 @@
 //! Lowest to highest precedence:
 //!
 //! 1. [`BUILTIN_IGNORED_DIRS`] — Harn's own defaults, a *negatable* layer.
-//! 2. `.gitignore` — committed project rules.
-//! 3. `.ignore` — the tool-agnostic ripgrep/fd convention.
-//! 4. `.agentignore` — the cross-tool agent convention.
-//! 5. The per-call [`IgnorePolicy`] level, which selects how much of the stack
+//! 2. `.gitignore` — committed project rules. Any host can evaluate this
+//!    layer with `git check-ignore`.
+//! 3. `.agentignore` — the cross-tool agent convention.
+//! 4. The per-call [`IgnorePolicy`] level, which selects how much of the stack
 //!    runs at all.
 //!
+//! `.ignore` (the ripgrep/fd convention) is deliberately absent. It has no
+//! git evaluator, so a host implementing the same walk on git tooling cannot
+//! reproduce it, and search already declines `.rgignore` from the same tool
+//! family. The candidate set stays machine-independent and git-expressible.
+//!
 //! All matching mechanics come from the `ignore` crate; nothing here
-//! hand-rolls a matcher. The crate's own precedence chain
-//! (`m_custom_ignore.or(m_ignore).or(m_gi).or(m_gi_exclude).or(m_global)
-//! .or(m_explicit)`) already *is* this stack: a custom ignore filename ranks
-//! highest, explicit ignore files rank lowest, and `.ignore` outranks
-//! `.gitignore` natively. So `.agentignore` is registered through
-//! [`ignore::WalkBuilder::add_custom_ignore_filename`] and the built-in
-//! defaults through [`ignore::WalkBuilder::add_ignore`], and no extra
-//! precedence plumbing is needed.
+//! hand-rolls a matcher. The crate's own precedence chain already *is* this
+//! stack once `.ignore` files are switched off: a custom ignore filename
+//! (`.agentignore`) ranks highest, and `.gitignore` is the committed project
+//! layer. Built-in defaults are registered through
+//! [`ignore::WalkBuilder::add_ignore`], and no extra precedence plumbing is
+//! needed.
 //!
 //! # Hidden files are a separate axis
 //!
@@ -55,8 +58,8 @@ use sha2::{Digest, Sha256};
 /// Directory names Harn skips unless a project ignore file re-includes them.
 ///
 /// These are the lowest-precedence layer, not a hard filter: a `.gitignore`
-/// (or `.ignore`, or `.agentignore`) carrying `!dist/` re-includes `dist`
-/// because every one of those sources outranks this list.
+/// (or `.agentignore`) carrying `!dist/` re-includes `dist` because every
+/// one of those sources outranks this list.
 ///
 /// `vendor` is deliberately absent. `go mod vendor` output is committed in
 /// many Go repositories, so a built-in skip would silently drop tracked
@@ -87,9 +90,11 @@ const AGENT_IGNORE_FILENAME: &str = ".agentignore";
 
 /// Project ignore files, lowest precedence first.
 ///
-/// `.ignore` is the tool-agnostic ripgrep/fd convention; `.agentignore` is
-/// the cross-tool agent convention and outranks both.
-pub const PROJECT_IGNORE_FILENAMES: &[&str] = &[".gitignore", ".ignore", AGENT_IGNORE_FILENAME];
+/// `.gitignore` is the committed git ignore set. `.agentignore` is the
+/// cross-tool agent convention and outranks it. `.ignore` is not in this
+/// list: git cannot evaluate it, so including it would make the walk
+/// unreproducible for a host built on git tooling.
+pub const PROJECT_IGNORE_FILENAMES: &[&str] = &[".gitignore", AGENT_IGNORE_FILENAME];
 
 /// How much of the ignore stack a single call runs.
 ///
@@ -102,8 +107,7 @@ pub enum IgnorePolicy {
     None,
     /// [`BUILTIN_IGNORED_DIRS`] only. Project ignore files are not read.
     Builtin,
-    /// The full stack: built-in defaults, `.gitignore`, `.ignore`,
-    /// `.agentignore`.
+    /// The full stack: built-in defaults, `.gitignore`, `.agentignore`.
     #[default]
     Project,
 }
@@ -146,7 +150,7 @@ impl IgnorePolicy {
         })
     }
 
-    /// Whether project ignore files (`.gitignore`, `.ignore`, `.agentignore`)
+    /// Whether project ignore files (`.gitignore`, `.agentignore`)
     /// participate at this level.
     #[must_use]
     pub fn reads_project_files(self) -> bool {
@@ -187,10 +191,11 @@ pub fn configure(
     // does not start. The base's own ignore files are still read: the in-walk
     // chain is iterated separately from the absolute parents.
     //
-    // Residual, and the one honest exception: `.ignore` and `.agentignore`
-    // carry no `saw_git` gate, so one placed *above* a repository root still
-    // applies. That is a deliberate, visible act by whoever put it there,
-    // unlike the git config Harn now refuses to read.
+    // Residual, and the one honest exception: `.agentignore` carries no
+    // `saw_git` gate, so one placed *above* a repository root still applies.
+    // That is a deliberate, visible act by whoever put it there, unlike the
+    // git config Harn now refuses to read. `.ignore` files are not read at
+    // all, so they cannot leak an ancestor rule either.
     let anchored_by_vcs = matches!(
         project_root_for(&absolutize(base)),
         Some((_, ProjectAnchor::Vcs))
@@ -215,7 +220,7 @@ pub fn configure(
         }
         IgnorePolicy::Project => {
             builder
-                .ignore(true)
+                .ignore(false)
                 .git_ignore(true)
                 .add_custom_ignore_filename(AGENT_IGNORE_FILENAME);
             add_builtin_layer(builder)?;
