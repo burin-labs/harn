@@ -10,7 +10,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use harn_vm::VmValue;
 
@@ -41,11 +41,15 @@ struct WarmState {
     generation: u64,
 }
 
+/// How often a waiter emits progress while an in-flight build holds the gate.
+const WAIT_HEARTBEAT: Duration = Duration::from_secs(1);
+
 /// Single-flight coordinator shared by session warm and sync rebuild.
 #[derive(Debug)]
 pub(super) struct WarmCoordinator {
     state: Mutex<WarmState>,
     cv: Condvar,
+    builder: Mutex<Option<thread::JoinHandle<()>>>,
 }
 
 impl Default for WarmCoordinator {
@@ -56,6 +60,7 @@ impl Default for WarmCoordinator {
                 generation: 0,
             }),
             cv: Condvar::new(),
+            builder: Mutex::new(None),
         }
     }
 }
@@ -76,13 +81,59 @@ impl WarmCoordinator {
     fn wait_if_building(&self, root: &Path) {
         let canonical = canonicalize(root);
         let mut guard = self.state.lock().expect("warm coordinator poisoned");
-        while guard
+        guard = self.wait_while(guard, &canonical, |state| {
+            state
+                .in_flight_root
+                .as_ref()
+                .is_some_and(|inflight| inflight == &canonical)
+        });
+        drop(guard);
+    }
+
+    pub(super) fn wait_until_idle(&self) {
+        let mut guard = self.state.lock().expect("warm coordinator poisoned");
+        let root = guard
             .in_flight_root
-            .as_ref()
-            .is_some_and(|inflight| inflight == &canonical)
-        {
-            guard = self.cv.wait(guard).expect("warm coordinator poisoned");
+            .clone()
+            .unwrap_or_else(|| PathBuf::from("."));
+        guard = self.wait_while(guard, &root, |state| state.in_flight_root.is_some());
+        drop(guard);
+    }
+
+    pub(super) fn take_and_join_builder(&self) {
+        let handle = self
+            .builder
+            .lock()
+            .expect("warm coordinator poisoned")
+            .take();
+        if let Some(handle) = handle {
+            let _ = handle.join();
         }
+    }
+
+    fn store_builder(&self, handle: thread::JoinHandle<()>) {
+        let mut slot = self.builder.lock().expect("warm coordinator poisoned");
+        *slot = Some(handle);
+    }
+
+    fn wait_while<'a>(
+        &'a self,
+        mut guard: std::sync::MutexGuard<'a, WarmState>,
+        root: &Path,
+        mut still_waiting: impl FnMut(&WarmState) -> bool,
+    ) -> std::sync::MutexGuard<'a, WarmState> {
+        let started = Instant::now();
+        while still_waiting(&guard) {
+            let (next, wait) = self
+                .cv
+                .wait_timeout(guard, WAIT_HEARTBEAT)
+                .expect("warm coordinator poisoned");
+            guard = next;
+            if wait.timed_out() && still_waiting(&guard) {
+                emit_wait_progress(root, started.elapsed());
+            }
+        }
+        guard
     }
 
     /// Mark `root` as building. Returns `None` when another builder already
@@ -100,9 +151,7 @@ impl WarmCoordinator {
         }
         // A different root in flight is rare (one capability per workspace).
         // Wait for it to finish so two full walks never race the shared slot.
-        while guard.in_flight_root.is_some() {
-            guard = self.cv.wait(guard).expect("warm coordinator poisoned");
-        }
+        guard = self.wait_while(guard, &canonical, |state| state.in_flight_root.is_some());
         guard.in_flight_root = Some(canonical.clone());
         Some(WarmFlight {
             warm: Arc::clone(self),
@@ -119,6 +168,30 @@ impl WarmCoordinator {
             self.cv.notify_all();
         }
     }
+}
+
+fn emit_wait_progress(root: &Path, waited: Duration) {
+    let waited_ms = waited.as_millis() as u64;
+    tracing::info!(
+        target: "harn_hostlib::code_index",
+        root = %root.display(),
+        waited_ms,
+        "code-index rebuild waiting on in-flight build",
+    );
+    let Some(session_id) = harn_vm::agent_sessions::current_session_id() else {
+        return;
+    };
+    let payload = serde_json::json!({
+        "event": "code_index_rebuild_wait",
+        "root": root.display().to_string(),
+        "waited_ms": waited_ms,
+    });
+    harn_vm::orchestration::agent_inbox::push(
+        &session_id,
+        "tool_progress",
+        &payload.to_string(),
+        "hostlib.code_index.rebuild",
+    );
 }
 
 impl CodeIndexCapability {
@@ -163,7 +236,6 @@ impl CodeIndexCapability {
         };
 
         let index = self.index.clone();
-        let capability = self.clone();
         let thread_root = root.clone();
         match thread::Builder::new()
             .name("harn-code-index-warm".to_string())
@@ -179,7 +251,7 @@ impl CodeIndexCapability {
                         *guard = Some(state);
                     }
                 }
-                if let Err(error) = capability.persist_to_disk() {
+                if let Err(error) = super::persist_shared(&index) {
                     tracing::debug!(
                         target: "harn_hostlib::code_index",
                         %error,
@@ -187,7 +259,7 @@ impl CodeIndexCapability {
                         "code-index warm persist failed",
                     );
                 }
-                tracing::debug!(
+                tracing::info!(
                     target: "harn_hostlib::code_index",
                     root = %thread_root.display(),
                     files_indexed = outcome.files_indexed,
@@ -196,7 +268,10 @@ impl CodeIndexCapability {
                     "code-index background warm complete",
                 );
             }) {
-            Ok(_) => SessionWarmOutcome::Building,
+            Ok(handle) => {
+                self.warm.store_builder(handle);
+                SessionWarmOutcome::Building
+            }
             Err(error) => {
                 // `spawn` drops the closure (and thus `flight`) on failure.
                 tracing::debug!(
@@ -211,7 +286,11 @@ impl CodeIndexCapability {
     }
 }
 
-fn live_stats_for_root(index: &SharedIndex, canonical: &Path) -> Option<VmValue> {
+fn live_stats_for_root(
+    index: &SharedIndex,
+    canonical: &Path,
+    elapsed: Duration,
+) -> Option<VmValue> {
     let guard = index.lock().expect("code_index mutex poisoned");
     let state = guard.as_ref()?;
     if state.root != *canonical {
@@ -220,7 +299,7 @@ fn live_stats_for_root(index: &SharedIndex, canonical: &Path) -> Option<VmValue>
     Some(build_dict([
         ("files_indexed", VmValue::Int(state.files.len() as i64)),
         ("files_skipped", VmValue::Int(0)),
-        ("elapsed_ms", VmValue::Int(0)),
+        ("elapsed_ms", VmValue::Int(elapsed.as_millis() as i64)),
     ]))
 }
 
@@ -254,6 +333,7 @@ pub(super) fn run_rebuild_single_flight(
     }
 
     let canonical = canonicalize(&root);
+    let started = Instant::now();
 
     // Own a rebuild flight when possible. Only join (return live stats without
     // rebuilding) when another warm/rebuild already owns this root — never skip
@@ -263,20 +343,40 @@ pub(super) fn run_rebuild_single_flight(
         let Some(flight) = warm.try_begin(&canonical) else {
             // Another builder owns this root; wait for it instead of double-walking.
             warm.wait_if_building(&canonical);
-            if let Some(stats) = live_stats_for_root(index, &canonical) {
+            if let Some(stats) = live_stats_for_root(index, &canonical, started.elapsed()) {
                 return Ok(stats);
             }
             continue;
         };
 
-        let started = Instant::now();
+        tracing::info!(
+            target: "harn_hostlib::code_index",
+            root = %canonical.display(),
+            "code-index rebuild starting",
+        );
         let (state, outcome) = IndexState::build_from_root(&canonical);
-        let elapsed_ms = started.elapsed().as_millis() as i64;
         {
             let mut guard = index.lock().expect("code_index mutex poisoned");
             *guard = Some(state);
         }
+        if let Err(error) = super::persist_shared(index) {
+            tracing::debug!(
+                target: "harn_hostlib::code_index",
+                %error,
+                root = %canonical.display(),
+                "code-index rebuild persist failed",
+            );
+        }
         drop(flight);
+        let elapsed_ms = started.elapsed().as_millis() as i64;
+        tracing::info!(
+            target: "harn_hostlib::code_index",
+            root = %canonical.display(),
+            files_indexed = outcome.files_indexed,
+            files_skipped = outcome.files_skipped,
+            elapsed_ms,
+            "code-index rebuild complete",
+        );
         return Ok(build_dict([
             ("files_indexed", VmValue::Int(outcome.files_indexed as i64)),
             ("files_skipped", VmValue::Int(outcome.files_skipped as i64)),
@@ -285,13 +385,18 @@ pub(super) fn run_rebuild_single_flight(
     }
 
     // Exhausted join attempts; return whatever is live (possibly empty).
-    Ok(live_stats_for_root(index, &canonical).unwrap_or_else(|| {
-        build_dict([
-            ("files_indexed", VmValue::Int(0)),
-            ("files_skipped", VmValue::Int(0)),
-            ("elapsed_ms", VmValue::Int(0)),
-        ])
-    }))
+    Ok(
+        live_stats_for_root(index, &canonical, started.elapsed()).unwrap_or_else(|| {
+            build_dict([
+                ("files_indexed", VmValue::Int(0)),
+                ("files_skipped", VmValue::Int(0)),
+                (
+                    "elapsed_ms",
+                    VmValue::Int(started.elapsed().as_millis() as i64),
+                ),
+            ])
+        }),
+    )
 }
 
 #[cfg(test)]
@@ -355,7 +460,7 @@ mod tests {
         // before snapshot persistence, so observing the slot alone does not
         // prove that the whole flight finished. Join the owning coordinator:
         // its guard drops only after persistence has been attempted.
-        cap.warm.wait_if_building(dir.path());
+        cap.wait_until_idle();
         let shared = cap.shared();
         let guard = shared.lock().unwrap();
         assert_eq!(guard.as_ref().map(|state| state.files.len()), Some(2));
@@ -363,6 +468,54 @@ mod tests {
         assert!(
             CodeIndexSnapshot::path_for(dir.path()).exists(),
             "warm should persist a snapshot for the next session"
+        );
+    }
+
+    #[test]
+    fn sync_rebuild_persists_snapshot() {
+        let dir = fixture_tree();
+        let cap = CodeIndexCapability::new();
+        let args = [root_arg(dir.path())];
+        run_rebuild_single_flight(&cap.shared(), &cap.warm, &args).expect("rebuild");
+        assert!(
+            CodeIndexSnapshot::path_for(dir.path()).exists(),
+            "sync rebuild is the path that always completes, so it must persist"
+        );
+    }
+
+    #[test]
+    fn live_stats_for_root_reports_join_wait_elapsed() {
+        let dir = fixture_tree();
+        let cap = CodeIndexCapability::new();
+        let args = [root_arg(dir.path())];
+        run_rebuild_single_flight(&cap.shared(), &cap.warm, &args).expect("seed");
+        let canonical = canonicalize(dir.path());
+        let stats = live_stats_for_root(&cap.shared(), &canonical, Duration::from_millis(41_100))
+            .expect("live stats");
+        let dict = match stats {
+            VmValue::Dict(d) => d,
+            other => panic!("expected dict, got {other:?}"),
+        };
+        match dict.get(&harn_vm::value::intern_key("elapsed_ms")) {
+            Some(VmValue::Int(n)) => assert_eq!(*n, 41_100),
+            other => panic!("expected elapsed_ms int, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn emit_wait_progress_pushes_tool_progress_for_current_session() {
+        let session = "code-index-wait-progress";
+        let _guard = harn_vm::agent_sessions::enter_current_session(session);
+        emit_wait_progress(Path::new("/tmp/workspace"), Duration::from_millis(1500));
+        let entries = harn_vm::orchestration::agent_inbox::drain(session);
+        assert!(
+            entries.iter().any(|entry| {
+                entry.kind == "tool_progress"
+                    && entry.source == "hostlib.code_index.rebuild"
+                    && entry.content.contains("code_index_rebuild_wait")
+                    && entry.content.contains("1500")
+            }),
+            "wait progress must be visible without a tracing subscriber; entries={entries:?}"
         );
     }
 

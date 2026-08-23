@@ -65,6 +65,7 @@ mod agents;
 mod builtins;
 mod cypher;
 mod file_table;
+mod git_head;
 mod graph;
 mod imports;
 mod overlay;
@@ -162,13 +163,19 @@ impl CodeIndexCapability {
     /// locks are dropped before the daemon serves traffic.
     ///
     /// Returns `true` on a successful restore, `false` if no snapshot
-    /// existed (or the format was unrecognised). Errors propagate I/O
-    /// problems verbatim so callers can decide whether to fall back to
-    /// `rebuild`.
+    /// existed, the format was unrecognised, or the snapshot does not
+    /// describe `workspace_root` (wrong checkout or `HEAD`). Errors
+    /// propagate I/O problems verbatim so callers can decide whether to
+    /// fall back to `rebuild`.
     pub fn restore_from_disk(&self, workspace_root: &Path) -> std::io::Result<bool> {
         match CodeIndexSnapshot::load(workspace_root)? {
             Some(snap) => {
                 let mut state = IndexState::from_snapshot(snap);
+                // Always anchor at the caller root. `load` already rejected a
+                // snapshot whose recorded root/HEAD does not match; this keeps
+                // the live slot on the requested checkout rather than the
+                // stored path string.
+                state.root = state::canonicalize(workspace_root);
                 state.reap_after_recovery(state::now_unix_ms());
                 let mut guard = self.index.lock().expect("code_index mutex poisoned");
                 *guard = Some(state);
@@ -182,19 +189,35 @@ impl CodeIndexCapability {
     /// [`CodeIndexSnapshot::path_for`]. Returns `Ok(false)` when the
     /// capability is empty (nothing to save).
     pub fn persist_to_disk(&self) -> std::io::Result<bool> {
-        let snap = {
-            let guard = self.index.lock().expect("code_index mutex poisoned");
-            guard
-                .as_ref()
-                .map(|state| (state.snapshot(), state.root.clone()))
-        };
-        match snap {
-            Some((snap, root)) => {
-                snap.save(&root)?;
-                Ok(true)
-            }
-            None => Ok(false),
+        persist_shared(&self.index)
+    }
+
+    /// Block until no background warm is in flight for this capability.
+    ///
+    /// [`Self::warm_session`] returns [`SessionWarmOutcome::Building`]
+    /// without joining the worker. A process that exits in that window
+    /// discards the in-flight walk and never writes a snapshot. Short-lived
+    /// embedders should call this before exit so a started warm can finish
+    /// and persist. Returns immediately when nothing is building.
+    pub fn wait_until_idle(&self) {
+        self.warm.take_and_join_builder();
+        self.warm.wait_until_idle();
+    }
+}
+
+fn persist_shared(index: &SharedIndex) -> std::io::Result<bool> {
+    let snap = {
+        let guard = index.lock().expect("code_index mutex poisoned");
+        guard
+            .as_ref()
+            .map(|state| (state.snapshot(), state.root.clone()))
+    };
+    match snap {
+        Some((snap, root)) => {
+            snap.save(&root)?;
+            Ok(true)
         }
+        None => Ok(false),
     }
 }
 

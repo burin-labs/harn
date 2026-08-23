@@ -161,8 +161,10 @@ impl CodeIndexSnapshot {
     }
 
     /// Try to load the snapshot from `workspace_root/.burin/index/snapshot.json`.
-    /// Returns `Ok(None)` when no snapshot exists yet; returns `Err` when
-    /// one exists but couldn't be parsed (caller is expected to fall back
+    /// Returns `Ok(None)` when no snapshot exists yet, the format is
+    /// unrecognised, or the snapshot does not describe `workspace_root`
+    /// (different checkout or a different `HEAD`). Returns `Err` when one
+    /// exists but couldn't be parsed (caller is expected to fall back
     /// to `build_from_root`).
     pub fn load(workspace_root: &Path) -> std::io::Result<Option<Self>> {
         let path = Self::path_for(workspace_root);
@@ -173,9 +175,48 @@ impl CodeIndexSnapshot {
         let snap: CodeIndexSnapshot =
             serde_json::from_slice(&bytes).map_err(std::io::Error::other)?;
         if snap.meta.format_version != SNAPSHOT_FORMAT_VERSION {
+            tracing::debug!(
+                target: "harn_hostlib::code_index",
+                path = %path.display(),
+                format_version = snap.meta.format_version,
+                expected = SNAPSHOT_FORMAT_VERSION,
+                "code-index snapshot format mismatch; ignoring",
+            );
+            return Ok(None);
+        }
+        if !snapshot_matches_workspace(&snap, workspace_root) {
             return Ok(None);
         }
         Ok(Some(snap))
+    }
+}
+
+fn snapshot_matches_workspace(snap: &CodeIndexSnapshot, workspace_root: &Path) -> bool {
+    let requested = super::state::canonicalize(workspace_root);
+    let stored = super::state::canonicalize(Path::new(&snap.meta.workspace_root));
+    if stored != requested {
+        tracing::info!(
+            target: "harn_hostlib::code_index",
+            requested = %requested.display(),
+            stored = %stored.display(),
+            "code-index snapshot workspace root mismatch; ignoring",
+        );
+        return false;
+    }
+    let live_head = super::git_head::read_git_head(&requested);
+    match (snap.meta.git_head.as_deref(), live_head.as_deref()) {
+        (None, None) => true,
+        (Some(snap_head), Some(live)) if snap_head == live => true,
+        (snap_head, live) => {
+            tracing::info!(
+                target: "harn_hostlib::code_index",
+                requested = %requested.display(),
+                snapshot_git_head = snap_head,
+                live_git_head = live,
+                "code-index snapshot git HEAD mismatch; ignoring",
+            );
+            false
+        }
     }
 }
 
@@ -231,9 +272,10 @@ impl IndexState {
         }
     }
 
-    /// Restore an [`IndexState`] from a snapshot. The workspace root is
-    /// taken from the snapshot meta; callers can then call
-    /// [`Self::reap_after_recovery`] to drop stale agent records.
+    /// Restore an [`IndexState`] from a snapshot. Callers that loaded the
+    /// snapshot for a specific checkout should overwrite [`Self::root`]
+    /// with that checkout's canonical path so a stored path string cannot
+    /// redirect later persists.
     pub fn from_snapshot(snap: CodeIndexSnapshot) -> Self {
         let root = PathBuf::from(snap.meta.workspace_root);
         let mut files: HashMap<FileId, IndexedFile> = HashMap::with_capacity(snap.files.len());
@@ -288,5 +330,62 @@ impl IndexState {
     /// at startup after restoring from a snapshot.
     pub fn reap_after_recovery(&mut self, now_ms: i64) {
         self.agents.reap(now_ms);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    fn fixture_tree() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().expect("tempdir");
+        fs::create_dir_all(dir.path().join("src")).unwrap();
+        fs::write(
+            dir.path().join("src/alpha.rs"),
+            "pub fn alpha() -> i32 { 1 }\n",
+        )
+        .unwrap();
+        dir
+    }
+
+    fn snapshot_for(dir: &Path) -> CodeIndexSnapshot {
+        let (state, _) = IndexState::build_from_root(dir);
+        state.snapshot()
+    }
+
+    #[test]
+    fn load_rejects_snapshot_for_a_different_workspace_root() {
+        let dir = fixture_tree();
+        let mut snap = snapshot_for(dir.path());
+        snap.meta.workspace_root = "/some/other/checkout".to_string();
+        snap.save(dir.path()).unwrap();
+        assert!(
+            CodeIndexSnapshot::load(dir.path()).unwrap().is_none(),
+            "a snapshot copied from another checkout must be a miss, not adopted"
+        );
+    }
+
+    #[test]
+    fn load_rejects_snapshot_when_git_head_does_not_match() {
+        let dir = fixture_tree();
+        let mut snap = snapshot_for(dir.path());
+        snap.meta.git_head = Some("ffffffffffffffff".to_string());
+        snap.save(dir.path()).unwrap();
+        assert!(
+            CodeIndexSnapshot::load(dir.path()).unwrap().is_none(),
+            "a snapshot whose recorded HEAD is not the live HEAD must be a miss"
+        );
+    }
+
+    #[test]
+    fn load_accepts_snapshot_for_the_same_tree() {
+        let dir = fixture_tree();
+        let snap = snapshot_for(dir.path());
+        snap.save(dir.path()).unwrap();
+        let loaded = CodeIndexSnapshot::load(dir.path())
+            .unwrap()
+            .expect("matching snapshot should restore");
+        assert_eq!(loaded.meta.file_count, 1);
     }
 }
