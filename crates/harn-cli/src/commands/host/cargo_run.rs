@@ -14,12 +14,14 @@ use crate::cli::{
 use super::{print_error, EX_TEMPFAIL};
 
 const EX_CANCELLED: i32 = 130;
-const CARGO_LEASE_CONTROL_ENV: [&str; 5] = [
+const EX_TIMEOUT: i32 = 124;
+const CARGO_LEASE_CONTROL_ENV: [&str; 6] = [
     "HARN_CARGO_LEASE_RUNNER",
     "HARN_CARGO_LEASE_OWNER",
     "HARN_CARGO_LEASE_HOST",
     "HARN_CARGO_LEASE_WAIT_MS",
     "HARN_CARGO_LEASE_PRIORITY_CLASS",
+    "HARN_CARGO_LEASE_WORKLOAD_TIMEOUT_MS",
 ];
 
 pub(super) async fn run_supervised(
@@ -32,6 +34,13 @@ pub(super) async fn run_supervised(
 }
 
 async fn run_cargo(store: &harn_hostlib::HostLeaseStore, args: HostLeaseRunCargoArgs) -> i32 {
+    if args.workload_timeout_ms == Some(0) {
+        return print_error(
+            "host_lease_run_cargo",
+            "--workload-timeout-ms must be greater than zero",
+            false,
+        );
+    }
     let cargo = match normalized_cargo_paths(
         &args.workspace,
         &args.target_dir,
@@ -395,7 +404,14 @@ pub(super) fn run_cargo_worker(args: HostLeaseRunCargoWorkerArgs) -> i32 {
         eprintln!("error: {error}");
         return 1;
     }
-    run_cargo_workload(&cargo, &args.cargo_args, &store, &args.run_id, &acquisition)
+    run_cargo_workload(
+        &cargo,
+        &args.cargo_args,
+        args.workload_timeout_ms,
+        &store,
+        &args.run_id,
+        &acquisition,
+    )
 }
 
 struct NormalizedCargoPaths {
@@ -421,6 +437,9 @@ fn cargo_worker_args(
     if let Some(build_dir) = cargo.build_dir.as_ref() {
         worker_args.push("--build-dir".to_string());
         worker_args.push(path_argument(build_dir)?);
+    }
+    if let Some(timeout_ms) = args.workload_timeout_ms {
+        worker_args.extend(["--workload-timeout-ms".to_string(), timeout_ms.to_string()]);
     }
     worker_args.extend(["--run-id".to_string(), run_id.to_string(), "--".to_string()]);
     worker_args.extend(args.cargo_args.iter().cloned());
@@ -528,6 +547,7 @@ fn require_matching_cargo_environment(name: &str, expected: &Path) -> Result<(),
 fn run_cargo_workload(
     cargo: &NormalizedCargoPaths,
     args: &[String],
+    workload_timeout_ms: Option<u64>,
     store: &harn_hostlib::HostLeaseStore,
     run_id: &str,
     acquisition: &harn_hostlib::HostLeaseAcquireReceipt,
@@ -544,23 +564,26 @@ fn run_cargo_workload(
             )
         }
     };
-    let error = match harn_hostlib::process::replace_current_process(spec) {
-        Ok(never) => match never {},
-        Err(error) => error,
+    let mut child = match harn_hostlib::process::spawn_process(spec) {
+        Ok(child) => child,
+        Err(error) => {
+            return fail_cargo_launch(
+                store,
+                run_id,
+                acquisition,
+                harn_hostlib::HostLeaseRunLaunchFailure::ProcessSpawn,
+                &format!("failed to spawn Cargo: {error}"),
+            )
+        }
     };
-    fail_cargo_launch(
-        store,
-        run_id,
-        acquisition,
-        harn_hostlib::HostLeaseRunLaunchFailure::ProcessReplace,
-        &format!("failed to exec Cargo: {error}"),
-    )
+    wait_for_cargo_workload(child.as_mut(), workload_timeout_ms)
 }
 
 #[cfg(target_os = "windows")]
 fn run_cargo_workload(
     cargo: &NormalizedCargoPaths,
     args: &[String],
+    workload_timeout_ms: Option<u64>,
     store: &harn_hostlib::HostLeaseStore,
     run_id: &str,
     acquisition: &harn_hostlib::HostLeaseAcquireReceipt,
@@ -601,24 +624,19 @@ fn run_cargo_workload(
             )
         }
     };
-    let status = match child.wait() {
-        Ok(status) => status,
-        Err(error) => {
-            eprintln!("error: failed to wait for Cargo: {error}");
-            return 1;
-        }
-    };
+    let status = wait_for_cargo_workload(child.as_mut(), workload_timeout_ms);
     if let Err(error) = job.disarm() {
         eprintln!("error: failed to close Cargo process-tree supervision: {error}");
         return 1;
     }
-    status_code(status)
+    status
 }
 
 #[cfg(not(any(unix, target_os = "windows")))]
 fn run_cargo_workload(
     _cargo: &NormalizedCargoPaths,
     _args: &[String],
+    _workload_timeout_ms: Option<u64>,
     store: &harn_hostlib::HostLeaseStore,
     run_id: &str,
     acquisition: &harn_hostlib::HostLeaseAcquireReceipt,
@@ -630,6 +648,26 @@ fn run_cargo_workload(
         harn_hostlib::HostLeaseRunLaunchFailure::UnsupportedPlatform,
         "supervised Cargo workloads are unavailable on this platform",
     )
+}
+
+fn wait_for_cargo_workload(
+    child: &mut dyn harn_hostlib::process::ProcessHandle,
+    workload_timeout_ms: Option<u64>,
+) -> i32 {
+    let timeout = workload_timeout_ms.map(std::time::Duration::from_millis);
+    match child.wait_with_timeout(timeout, &|| false) {
+        Ok(harn_hostlib::process::WaitOutcome::Exited(status)) => status_code(status),
+        Ok(harn_hostlib::process::WaitOutcome::TimedOut(_)) => {
+            let timeout_ms = workload_timeout_ms.expect("timeout outcome requires a deadline");
+            eprintln!("error: Cargo workload timed out after {timeout_ms}ms after lease admission");
+            EX_TIMEOUT
+        }
+        Ok(harn_hostlib::process::WaitOutcome::Interrupted(_)) => EX_CANCELLED,
+        Err(error) => {
+            eprintln!("error: failed to wait for Cargo: {error}");
+            1
+        }
+    }
 }
 
 fn cargo_spawn_spec(
@@ -759,7 +797,12 @@ fn status_code(status: harn_hostlib::process::ExitStatus) -> i32 {
 
 #[cfg(test)]
 mod tests {
-    use super::path_argument;
+    use super::{path_argument, wait_for_cargo_workload, EX_TIMEOUT};
+    use harn_hostlib::process::{
+        EnvMode, MockProcessConfig, MockSpawner, OutputCapture, OwnerDeathPolicy, ProcessSpawner,
+        SpawnSpec,
+    };
+    use std::collections::BTreeMap;
     use std::path::Path;
 
     #[test]
@@ -783,5 +826,34 @@ mod tests {
         for path in [r"E:\target\debug", r"\\server\share\target", "/tmp/target"] {
             assert_eq!(path_argument(Path::new(path)).unwrap(), path);
         }
+    }
+
+    #[test]
+    fn cargo_workload_timeout_starts_at_the_worker_boundary() {
+        let spawner = MockSpawner::new();
+        spawner.enqueue(MockProcessConfig {
+            force_timeout: true,
+            ..MockProcessConfig::default()
+        });
+        let mut child = spawner
+            .spawn(SpawnSpec {
+                builtin: "test",
+                program: "cargo".to_string(),
+                args: vec!["check".to_string()],
+                cwd: None,
+                env: BTreeMap::new(),
+                env_remove: Vec::new(),
+                env_mode: EnvMode::InheritClean,
+                use_stdin: true,
+                configure_process_group: false,
+                owner_death: OwnerDeathPolicy::None,
+                output_capture: OutputCapture::Inherit,
+            })
+            .unwrap();
+
+        assert_eq!(
+            wait_for_cargo_workload(child.as_mut(), Some(600_000)),
+            EX_TIMEOUT
+        );
     }
 }

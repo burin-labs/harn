@@ -321,8 +321,16 @@ cat > "$fake_lease_runner" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
 if [[ "$*" = "host lease run cargo --help" ]]; then
+  echo '      --workload-timeout-ms <WORKLOAD_TIMEOUT_MS>'
   exit 0
 fi
+previous=""
+for arg in "$@"; do
+  if [[ "$previous" = "--workload-timeout-ms" && -n "${FAKE_CARGO_LEASE_TIMEOUT_RECORD:-}" ]]; then
+    printf '%s\n' "$arg" > "$FAKE_CARGO_LEASE_TIMEOUT_RECORD"
+  fi
+  previous="$arg"
+done
 while [[ $# -gt 0 && "$1" != "--" ]]; do shift; done
 if [[ $# -eq 0 ]]; then
   echo "fake lease runner did not receive a Cargo command" >&2
@@ -351,12 +359,14 @@ unset HARN_BIN HARN_BIN_NO_BUILD
 
 fake_lease_lock="$tmp_root/fake-rust-heavy.lock"
 fake_lease_waiting="$tmp_root/fake-rust-heavy.waiting"
+fake_lease_timeout_record="$tmp_root/fake-rust-heavy.workload-timeout-ms"
 mkdir "$fake_lease_lock"
 env -u CARGO_TARGET_DIR -u CARGO_BUILD_BUILD_DIR \
   CARGO_TARGET_DIR="$target_dir" \
   FAKE_CARGO_RECORD="$record" \
   FAKE_CARGO_LEASE_LOCK="$fake_lease_lock" \
   FAKE_CARGO_LEASE_WAITING="$fake_lease_waiting" \
+  FAKE_CARGO_LEASE_TIMEOUT_RECORD="$fake_lease_timeout_record" \
   HARN_CARGO_LEASE_RUNNER="$fake_lease_runner" \
   HARN_CARGO_LEASE_MODE=required \
   PATH="$fake_cargo_bin:$PATH" \
@@ -395,6 +405,10 @@ probe_args='args=build --quiet --bin harn --bin harn-freshness-check --features 
 if ! grep -Fxq "$leased_probe_args" "$record"; then
   echo "harn_bin resolver did not delegate binary resolution to Cargo" >&2
   cat "$record" >&2
+  exit 1
+fi
+if [[ "$(cat "$fake_lease_timeout_record")" != "600000" ]]; then
+  echo "harn_bin resolver did not give the lease runner its post-admission Cargo deadline" >&2
   exit 1
 fi
 if ! grep -Fxq "CARGO_BUILD_BUILD_DIR=$target_dir" "$record"; then
