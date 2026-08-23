@@ -144,7 +144,7 @@ fn cross_provider_tool_role_message_translated_to_anthropic_shape() {
 }
 
 #[test]
-fn cross_provider_tool_use_and_result_pair_both_translated_for_anthropic() {
+fn canonical_tool_call_and_result_pair_project_for_anthropic() {
     // Reproduces the THIRD stacked escalation 400 (downstream of the
     // role:"tool" fix): `messages.N.content.M: unexpected tool_use_id found
     // in tool_result blocks: <id>. Each tool_result block must have a
@@ -157,22 +157,19 @@ fn cross_provider_tool_use_and_result_pair_both_translated_for_anthropic() {
     let mut opts = base_payload();
     opts.messages = vec![
         serde_json::json!({"role": "user", "content": "read the file"}),
-        // OpenAI-dialect assistant turn: text content + a top-level tool_call.
+        // Provider-neutral assistant turn: text + a canonical tool call.
         serde_json::json!({
             "role": "assistant",
             "content": "I'll read it now.",
             "tool_calls": [{
                 "id": "call_R0hU",
-                "type": "function",
-                "function": {
-                    "name": "read_file",
-                    "arguments": "{\"path\":\"main.rs\"}",
-                },
+                "name": "read_file",
+                "arguments": {"path": "main.rs"},
             }],
         }),
-        // OpenAI-dialect tool result referencing that call id.
+        // Provider-neutral tool result referencing that call id.
         serde_json::json!({
-            "role": "tool",
+            "role": "tool_result",
             "tool_call_id": "call_R0hU",
             "name": "read_file",
             "content": "fn main() {}",

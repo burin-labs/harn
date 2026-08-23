@@ -3,6 +3,20 @@
 Harn is the provider-neutral execution language and runtime for durable,
 inspectable agent workflows.
 
+## Conversation history
+
+**Conversation message**:
+A provider-neutral durable turn. Native assistant calls use `tool_calls` with
+`id`, `name`, and `arguments`; native results use `tool_result` with the matching
+`tool_call_id`. Provider adapters project these facts onto their wire formats.
+_Avoid_: Provider message, Anthropic block, OpenAI message
+
+**Provider continuation**:
+Opaque provider-bound state required to continue a prior model turn. It is kept
+apart from conversation content and returned only to the provider that created
+it.
+_Avoid_: Reasoning text, message block, transcript content
+
 ## External actions
 
 **External action**:

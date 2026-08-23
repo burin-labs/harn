@@ -778,6 +778,52 @@ pub(crate) fn ollama_message(mut message: serde_json::Value) -> serde_json::Valu
     // OpenAI-like message object, so strip the storage envelope explicitly at
     // this egress boundary.
     object.remove("_harn");
+    object.remove("provider_continuation");
+    if object.get("role").and_then(serde_json::Value::as_str) == Some("tool_result") {
+        object.insert("role".to_string(), serde_json::json!("tool"));
+        if object.get("tool_call_id").is_none() {
+            if let Some(id) = object
+                .get("call_id")
+                .or_else(|| object.get("tool_use_id"))
+                .cloned()
+            {
+                object.insert("tool_call_id".to_string(), id);
+            }
+        }
+    }
+    if let Some(calls) = object
+        .get("tool_calls")
+        .and_then(serde_json::Value::as_array)
+    {
+        let projected = calls
+            .iter()
+            .enumerate()
+            .map(|(index, call)| {
+                let function = call.get("function").unwrap_or(call);
+                let arguments = function
+                    .get("arguments")
+                    .cloned()
+                    .unwrap_or_else(|| serde_json::json!({}));
+                let arguments = match arguments {
+                    serde_json::Value::String(value) => value,
+                    value => serde_json::to_string(&value).unwrap_or_else(|_| "{}".to_string()),
+                };
+                serde_json::json!({
+                    "id": call.get("id").cloned().unwrap_or(serde_json::Value::Null),
+                    "type": "function",
+                    "function": {
+                        "index": index,
+                        "name": function.get("name").cloned().unwrap_or(serde_json::Value::Null),
+                        "arguments": arguments,
+                    },
+                })
+            })
+            .collect();
+        object.insert(
+            "tool_calls".to_string(),
+            serde_json::Value::Array(projected),
+        );
+    }
     let Some(content) = object.get("content").cloned() else {
         return message;
     };

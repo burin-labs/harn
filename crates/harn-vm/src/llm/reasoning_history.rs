@@ -6,6 +6,19 @@
 
 use crate::llm::capabilities::{ReasoningHistoryWireField, ReasoningRoundTripPolicy};
 
+const PROVIDER_CONTINUATION_KEY: &str = "provider_continuation";
+
+#[derive(Debug, serde::Deserialize, serde::Serialize)]
+struct ProviderContinuation {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    anthropic: Option<AnthropicContinuation>,
+}
+
+#[derive(Debug, serde::Deserialize, serde::Serialize)]
+struct AnthropicContinuation {
+    content_blocks: Vec<serde_json::Value>,
+}
+
 pub(crate) fn capture_anthropic_block(block: &serde_json::Value) -> Option<serde_json::Value> {
     is_signed_anthropic_block(block).then(|| block.clone())
 }
@@ -78,6 +91,50 @@ pub(crate) fn prepend_signed_anthropic_blocks(
         other => combined.push(other),
     }
     *content = serde_json::Value::Array(combined);
+}
+
+/// Attach opaque provider-bound continuation state without mixing it into the
+/// provider-neutral conversation content.
+pub(crate) fn attach_anthropic_continuation(
+    message: &mut serde_json::Value,
+    blocks: &[serde_json::Value],
+) {
+    let content_blocks = blocks
+        .iter()
+        .filter_map(capture_anthropic_block)
+        .collect::<Vec<_>>();
+    if content_blocks.is_empty() {
+        return;
+    }
+    let continuation = ProviderContinuation {
+        anthropic: Some(AnthropicContinuation { content_blocks }),
+    };
+    if let Ok(value) = serde_json::to_value(continuation) {
+        message[PROVIDER_CONTINUATION_KEY] = value;
+    }
+}
+
+/// Restore exact Anthropic continuation blocks only on Anthropic egress, then
+/// remove the storage envelope before the request is serialized.
+pub(crate) fn restore_anthropic_continuation(
+    message: &mut serde_json::Value,
+    policy: ReasoningRoundTripPolicy,
+) {
+    let Some(object) = message.as_object_mut() else {
+        return;
+    };
+    let Some(raw) = object.remove(PROVIDER_CONTINUATION_KEY) else {
+        return;
+    };
+    if policy != ReasoningRoundTripPolicy::EchoSigned {
+        return;
+    }
+    let Ok(continuation) = serde_json::from_value::<ProviderContinuation>(raw) else {
+        return;
+    };
+    if let Some(anthropic) = continuation.anthropic {
+        prepend_signed_anthropic_blocks(message, &anthropic.content_blocks);
+    }
 }
 
 pub(crate) fn openai_same_key_reasoning(

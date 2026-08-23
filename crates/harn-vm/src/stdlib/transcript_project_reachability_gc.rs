@@ -108,7 +108,7 @@ fn tool_result_reachability_identifiers(
 ) -> Vec<String> {
     let mut identifiers = Vec::new();
     collect_identifiers_from_str(&candidate.content, &mut identifiers);
-    collect_identifiers_from_json(&candidate.node, &mut identifiers);
+    collect_tool_result_identifiers(&candidate.node, &mut identifiers);
     let result_call = ToolCallInfo {
         tool_call_id: candidate.tool_call_id.clone(),
         tool_name: candidate.tool_name.clone(),
@@ -150,6 +150,25 @@ fn tool_calls_correlate(call: &ToolCallInfo, result: &ToolCallInfo) -> bool {
 
 fn collect_identifiers_from_json(value: &JsonValue, out: &mut Vec<String>) {
     collect_candidate_references(value, None, out);
+}
+
+fn collect_tool_result_identifiers(value: &JsonValue, out: &mut Vec<String>) {
+    let Some(map) = value.as_object() else {
+        collect_identifiers_from_json(value, out);
+        return;
+    };
+    for (key, value) in map {
+        // `role = "tool_result"` identifies Harn's message envelope, not the
+        // result's subject. Treating it as a reachability token makes every
+        // canonical tool result keep every older result alive.
+        if key != "role" {
+            if key == "_harn" {
+                collect_harn_metadata_identifiers(value, out);
+            } else {
+                collect_candidate_references(value, Some(key), out);
+            }
+        }
+    }
 }
 
 fn collect_candidate_references(value: &JsonValue, field: Option<&str>, out: &mut Vec<String>) {

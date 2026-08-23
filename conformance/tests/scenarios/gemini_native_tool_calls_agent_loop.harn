@@ -76,16 +76,17 @@ pipeline test(harness: Harness, task) {
       const calls = harness.llm.mock_calls()
       assert(len(calls) == 2, "agent loop makes a follow-up model turn")
       const followup = json_stringify(calls[1].messages)
-      assert(contains(followup, "functionCall"), "assistant history preserves Gemini functionCall")
+      assert(contains(followup, "tool_calls"), "assistant history preserves canonical tool calls")
+      assert(!contains(followup, "functionCall"), "Gemini wire fields stay out of durable history")
       assert(
         contains(followup, "tool_call_id"),
         "tool result keeps the Gemini call id for adapter lowering",
       )
-      assert(contains(followup, "thoughtSignature"), "Gemini thought signature is preserved")
+      assert(contains(followup, "thought_signature"), "Gemini thought signature is preserved")
       assert(contains(followup, "opaque-gemini-signature"), "signature bytes are unchanged")
       harness.stdio.println(result.status)
       harness.stdio.println(harness.runtime.atomic_get(lookups))
-      harness.stdio.println(contains(followup, "functionCall"))
+      harness.stdio.println(contains(followup, "tool_calls"))
     },
   )
 }

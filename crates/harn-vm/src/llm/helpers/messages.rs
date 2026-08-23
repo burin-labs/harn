@@ -25,54 +25,46 @@ pub(crate) fn vm_messages_to_json(msg_list: &[VmValue]) -> Result<Vec<serde_json
                 other => vm_value_to_json(other),
             };
 
-            if role == "tool_result" {
-                // Anthropic tool result format. The block's `content` may be a
-                // plain string OR an array of content blocks. A computer-use
-                // result rides its screenshot back as a `[text, screenshot]`
-                // block list, and Anthropic's `tool_result.content` accepts that
-                // array natively — so preserve an array verbatim (the egress
-                // `anthropic_content` pass projects the neutral screenshot dict
-                // into a proper image block). Only a genuinely scalar,
-                // non-string content is rendered to text. Stringifying the array
-                // here (the previous behaviour) collapsed the screenshot into
-                // ~1 MB of base64 TEXT, so the model never received an image.
-                let tool_use_id = d
-                    .get("tool_use_id")
-                    .map(|v| v.display())
-                    .unwrap_or_default();
-                let rendered = match content_json {
-                    serde_json::Value::String(_) | serde_json::Value::Array(_) => content_json,
-                    other => serde_json::Value::String(other.to_string()),
-                };
-                messages.push(serde_json::json!({
-                    "role": "user",
-                    "content": [{
-                        "type": "tool_result",
-                        "tool_use_id": tool_use_id,
-                        "content": rendered,
-                    }],
-                }));
-            } else {
-                // Preserve full message dict so OpenAI-style fields
-                // (tool_call_id, tool_calls, reasoning, provider metadata)
-                // survive transcript/message round-trips.
-                let mut message = vm_value_dict_to_json(d);
-                if !message
-                    .get("content")
-                    .map(|value| !value.is_null())
-                    .unwrap_or(false)
-                {
-                    message["content"] = content_json;
-                }
-                if message
-                    .get("role")
-                    .and_then(|value| value.as_str())
-                    .is_none()
-                {
-                    message["role"] = serde_json::json!(role);
-                }
-                messages.push(message);
+            // Preserve the complete provider-neutral message. Provider wire
+            // projection belongs exclusively to the selected adapter; doing
+            // it here made a transcript valid for only the provider that wrote
+            // it and broke model/provider switching on replay.
+            let mut message = vm_value_dict_to_json(d);
+            if !message
+                .get("content")
+                .map(|value| !value.is_null())
+                .unwrap_or(false)
+            {
+                message["content"] = content_json;
             }
+            if message
+                .get("role")
+                .and_then(|value| value.as_str())
+                .is_none()
+            {
+                message["role"] = serde_json::json!(role);
+            }
+            if role == "tool" {
+                message["role"] = serde_json::json!("tool_result");
+            }
+            if matches!(role.as_str(), "tool" | "tool_result")
+                && message.get("tool_call_id").is_none()
+            {
+                if let Some(id) = message
+                    .get("tool_use_id")
+                    .or_else(|| message.get("call_id"))
+                    .cloned()
+                {
+                    message["tool_call_id"] = id;
+                }
+            }
+            if matches!(role.as_str(), "tool" | "tool_result") {
+                if let Some(object) = message.as_object_mut() {
+                    object.remove("tool_use_id");
+                    object.remove("call_id");
+                }
+            }
+            messages.push(message);
         }
     }
     Ok(messages)
@@ -98,8 +90,25 @@ pub(crate) fn json_messages_to_vm(msg_list: &[serde_json::Value]) -> Vec<VmValue
             // Preserve all fields for tool messages; strict providers
             // (Together AI and others) reject messages missing tool_calls
             // / tool_call_id.
-            if role == "tool" || msg.get("tool_calls").is_some() {
-                return Some(crate::stdlib::json_to_vm_value(msg));
+            if role == "tool" || role == "tool_result" || msg.get("tool_calls").is_some() {
+                let mut message = msg.clone();
+                if role == "tool" {
+                    message["role"] = serde_json::json!("tool_result");
+                }
+                if message.get("tool_call_id").is_none() {
+                    if let Some(id) = message
+                        .get("tool_use_id")
+                        .or_else(|| message.get("call_id"))
+                        .cloned()
+                    {
+                        message["tool_call_id"] = id;
+                    }
+                }
+                if let Some(object) = message.as_object_mut() {
+                    object.remove("tool_use_id");
+                    object.remove("call_id");
+                }
+                return Some(crate::stdlib::json_to_vm_value(&message));
             }
 
             if let Some(content) = msg.get("content").and_then(|v| v.as_str()) {
@@ -114,13 +123,13 @@ pub(crate) fn json_messages_to_vm(msg_list: &[serde_json::Value]) -> Vec<VmValue
                                 .get("content")
                                 .and_then(|v| v.as_str())
                                 .unwrap_or_default();
-                            let tool_use_id = block
+                            let tool_call_id = block
                                 .get("tool_use_id")
                                 .and_then(|v| v.as_str())
                                 .unwrap_or_default();
                             let mut result = BTreeMap::new();
                             result.put_str("role", "tool_result");
-                            result.put_str("tool_use_id", tool_use_id);
+                            result.put_str("tool_call_id", tool_call_id);
                             result.put_str("content", content);
                             return Some(VmValue::dict(result));
                         }

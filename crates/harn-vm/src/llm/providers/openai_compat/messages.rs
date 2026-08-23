@@ -370,6 +370,19 @@ pub(super) fn sanitize_openai_message_for_request(
     reasoning_round_trip: crate::llm::capabilities::ReasoningRoundTripPolicy,
     reasoning_history_wire_field: Option<crate::llm::capabilities::ReasoningHistoryWireField>,
 ) {
+    // Harn persists native results in one provider-neutral shape. Project it
+    // onto OpenAI's `tool` role only at this adapter boundary.
+    if message.get("role").and_then(serde_json::Value::as_str) == Some("tool_result") {
+        let id = message
+            .get("tool_call_id")
+            .or_else(|| message.get("call_id"))
+            .or_else(|| message.get("tool_use_id"))
+            .cloned();
+        message["role"] = serde_json::json!("tool");
+        if let Some(id) = id {
+            message["tool_call_id"] = id;
+        }
+    }
     let role = message
         .get("role")
         .and_then(serde_json::Value::as_str)

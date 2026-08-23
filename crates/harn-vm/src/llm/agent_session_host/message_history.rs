@@ -98,14 +98,7 @@ pub(super) fn assistant_message_from_llm_result(llm_result: &VmValue) -> VmValue
                 // matching a clean native-tool turn; preserve only an explicit
                 // wire reasoning field when the provider supplied one.
                 let reasoning = thinking.as_deref().filter(|t| !t.is_empty());
-                let msg = build_assistant_response_message(
-                    "",
-                    &[],
-                    &recovered_calls,
-                    reasoning,
-                    &provider,
-                    &model,
-                );
+                let msg = build_assistant_response_message("", &[], &recovered_calls, reasoning);
                 return crate::llm::pairing_receipts::attach_assistant_facts(
                     json_to_vm(&msg),
                     llm_result,
@@ -114,14 +107,8 @@ pub(super) fn assistant_message_from_llm_result(llm_result: &VmValue) -> VmValue
         }
         let mut msg = crate::value::DictMap::new();
         if !durable_blocks.is_empty() {
-            let message = build_assistant_response_message(
-                &text,
-                &durable_blocks,
-                &[],
-                thinking.as_deref(),
-                &provider,
-                &model,
-            );
+            let message =
+                build_assistant_response_message(&text, &durable_blocks, &[], thinking.as_deref());
             return crate::llm::pairing_receipts::attach_assistant_facts(
                 json_to_vm(&message),
                 llm_result,
@@ -140,8 +127,6 @@ pub(super) fn assistant_message_from_llm_result(llm_result: &VmValue) -> VmValue
         &durable_blocks,
         &native_calls_json,
         thinking.as_deref(),
-        &provider,
-        &model,
     );
     crate::llm::pairing_receipts::attach_assistant_facts(json_to_vm(&msg), llm_result)
 }
@@ -212,12 +197,10 @@ fn host_agent_session_pop_last_assistant_builtin(
 }
 
 /// True when the trailing message in the session transcript is an assistant
-/// turn carrying at least one structured provider-native `tool_use`/`tool_call`
-/// block (as opposed to a text-channel turn that keeps its calls inline in a
-/// plain-string `content`). Used by `record_tool_results` to decide whether a
-/// dispatched result must ride the provider's native tool-result role even when
-/// the session is text-locked (the escalation case), staying a no-op for
-/// homogeneous text-channel runs.
+/// turn carrying at least one canonical native tool call (as opposed to a
+/// text-channel turn that keeps calls inline in plain-string `content`). Used
+/// by `record_tool_results` to keep an escalated native turn on the native
+/// channel even when the primary session is text-locked.
 pub(super) fn trailing_assistant_has_native_tool_use(session_id: &str) -> bool {
     let Some(transcript) = crate::agent_sessions::transcript(session_id) else {
         return false;
@@ -240,9 +223,9 @@ pub(super) fn trailing_assistant_has_native_tool_use(session_id: &str) -> bool {
     !assistant_tool_use_blocks(last).is_empty()
 }
 
-/// Repair the transcript invariant that every assistant `tool_use`/`tool_call`
-/// block is immediately followed by a matching `tool_result` before the next
-/// provider request. The agent loop calls this at every inject site that
+/// Repair the transcript invariant that every assistant native tool call is
+/// followed by a matching `tool_result` before the next provider request. The
+/// agent loop calls this at every inject site that
 /// DECLINES to dispatch an assistant turn's tool calls (native-format fallback
 /// reject, all-blank-name drop, parse-error, no-progress nudge) and would
 /// otherwise append a bare user-feedback message after an orphaned `tool_use` —
@@ -276,16 +259,8 @@ pub(super) fn pair_orphaned_tool_use(session_id: &str, feedback: &str) -> usize 
     if role != "assistant" {
         return 0;
     }
-    let (provider, model) = with_session(session_id, "pair_orphaned_tool_use", |session| {
-        Ok((
-            session.last_provider.clone().unwrap_or_default(),
-            session.last_model.clone().unwrap_or_default(),
-        ))
-    })
-    .unwrap_or_default();
     let already_paired = paired_tool_result_ids(&messages);
-    let synthetic =
-        synthesize_orphan_tool_results(last, &provider, &model, feedback, &already_paired);
+    let synthetic = synthesize_orphan_tool_results(last, feedback, &already_paired);
     let mut repaired = 0;
     for message in synthetic {
         if crate::agent_sessions::inject_message(session_id, message).is_ok() {

@@ -222,9 +222,31 @@ mod tests {
         ]));
 
         let json = vm_messages_to_json(&[message]).expect("message json");
-        assert_eq!(json[0]["role"], "tool");
+        assert_eq!(json[0]["role"], "tool_result");
         assert_eq!(json[0]["tool_call_id"], "call_123");
         assert_eq!(json[0]["content"], "ok");
+    }
+
+    #[test]
+    fn message_round_trip_normalizes_native_results_once() {
+        let imported = serde_json::json!({
+            "role": "tool",
+            "call_id": "call_123",
+            "name": "verify",
+            "content": "passed",
+        });
+        let vm = json_messages_to_vm(&[imported]);
+        let json = vm_messages_to_json(&vm).expect("message json");
+
+        assert_eq!(
+            json,
+            vec![serde_json::json!({
+                "role": "tool_result",
+                "tool_call_id": "call_123",
+                "name": "verify",
+                "content": "passed",
+            })]
+        );
     }
 
     #[test]

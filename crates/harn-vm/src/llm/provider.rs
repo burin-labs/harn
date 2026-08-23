@@ -320,14 +320,6 @@ pub(crate) fn provider_uses_anthropic_messages(provider: &str, model: &str) -> b
         .is_anthropic()
 }
 
-/// Whether shared helpers should preserve Google `generateContent` message
-/// parts, including native function calls and thought signatures.
-pub(crate) fn provider_uses_gemini_messages(provider: &str, model: &str) -> bool {
-    super::capabilities::lookup(provider, model)
-        .message_wire_format
-        .is_gemini()
-}
-
 /// Whether shared helpers should use Ollama's chat message quirks.
 pub(crate) fn provider_uses_ollama_messages(provider: &str, model: &str) -> bool {
     super::capabilities::lookup(provider, model)

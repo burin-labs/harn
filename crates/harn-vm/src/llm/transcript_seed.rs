@@ -95,14 +95,14 @@ pub(crate) fn load_seeded_transcript_from_jsonl(
                     continue;
                 }
                 if is_response_record(record) {
-                    if let Some(message) = assistant_message_from_response(record, &state) {
+                    if let Some(message) = assistant_message_from_response(record) {
                         state.messages.push(message);
                     }
                 }
             }
             SeedSourceFormat::ProviderResponsesOnly => {
                 if is_response_record(record) {
-                    if let Some(message) = assistant_message_from_response(record, &state) {
+                    if let Some(message) = assistant_message_from_response(record) {
                         state.messages.push(message);
                     }
                 }
@@ -427,7 +427,7 @@ fn normalize_message(value: &Value) -> Option<Value> {
     Some(Value::Object(normalized))
 }
 
-fn assistant_message_from_response(record: &Value, state: &ImportState) -> Option<Value> {
+fn assistant_message_from_response(record: &Value) -> Option<Value> {
     let text = string_field(record, "text").unwrap_or_default();
     let blocks = record
         .get("blocks")
@@ -442,21 +442,9 @@ fn assistant_message_from_response(record: &Value, state: &ImportState) -> Optio
     if text.is_empty() && blocks.is_empty() && tool_calls.is_empty() {
         return None;
     }
-    let provider = string_field(record, "provider")
-        .or_else(|| state.provider.clone())
-        .unwrap_or_default();
-    let model = string_field(record, "model")
-        .or_else(|| state.model.clone())
-        .unwrap_or_default();
     let reasoning = string_field(record, "thinking");
-    let message = build_assistant_response_message(
-        &text,
-        &blocks,
-        &tool_calls,
-        reasoning.as_deref(),
-        &provider,
-        &model,
-    );
+    let message =
+        build_assistant_response_message(&text, &blocks, &tool_calls, reasoning.as_deref());
     normalize_message(&message)
 }
 

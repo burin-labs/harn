@@ -9,8 +9,8 @@ use super::{
     host_agent_session_drain_feedback_builtin, initial_user_content, is_length_truncation,
     json_to_vm, list_items, pair_orphaned_tool_use, reset_agent_session_host_state,
     screenshots_from_tool_result, seed_host_session_provider_model, synthesize_orphan_tool_results,
-    text_has_tool_call_prefix, tool_result_message_for_provider,
-    truncated_tool_call_should_continue, vm_to_json, ToolResultMessageInput,
+    text_has_tool_call_prefix, tool_result_message, truncated_tool_call_should_continue,
+    vm_to_json, ToolResultMessageInput,
 };
 
 #[path = "agent_session_host_mock_dispatch_tests.rs"]
@@ -561,7 +561,7 @@ fn gpt_oss_harmony_leak_persists_clean_tool_call_without_dirty_reasoning() {
         "leaked reasoning/JSON must not stay in content"
     );
     // The recovered call must be attached as a structured tool call.
-    assert_eq!(message["tool_calls"][0]["function"]["name"], "read");
+    assert_eq!(message["tool_calls"][0]["name"], "read");
     // The provider did not supply a distinct reasoning field, so the dirty
     // content blob is not promoted into reasoning either.
     assert!(message.get("reasoning").is_none());
@@ -577,7 +577,7 @@ fn gpt_oss_harmony_leak_persists_clean_tool_call_without_dirty_reasoning() {
 }
 
 #[test]
-fn anthropic_session_history_preserves_signed_reasoning_before_tool_use() {
+fn anthropic_session_history_separates_signed_continuation_from_canonical_calls() {
     let result = crate::stdlib::json_to_vm_value(&json!({
         "provider": "anthropic",
         "model": "claude-opus-4-7",
@@ -610,12 +610,17 @@ fn anthropic_session_history_preserves_signed_reasoning_before_tool_use() {
     }));
 
     let message = vm_to_json(&assistant_message_from_llm_result(&result));
-    let content = message["content"].as_array().expect("Anthropic blocks");
-
-    assert_eq!(content[0]["signature"], "signed-thinking");
-    assert_eq!(content[1]["data"], "opaque-reasoning");
-    assert_eq!(content[2]["type"], "tool_use");
-    assert_eq!(content[2]["id"], "toolu_1");
+    assert_eq!(message["content"], "");
+    assert_eq!(message["tool_calls"][0]["id"], "toolu_1");
+    assert_eq!(message["tool_calls"][0]["name"], "read");
+    assert_eq!(
+        message["provider_continuation"]["anthropic"]["content_blocks"][0]["signature"],
+        "signed-thinking"
+    );
+    assert_eq!(
+        message["provider_continuation"]["anthropic"]["content_blocks"][1]["data"],
+        "opaque-reasoning"
+    );
 }
 
 #[test]
@@ -714,58 +719,23 @@ fn initial_user_content_falls_back_to_text_message() {
 }
 
 #[test]
-fn tool_results_replay_with_provider_appropriate_ids() {
-    for (provider, model, format, id, expected_role, wire_id_key, ok) in [
+fn tool_results_use_one_durable_shape_for_every_provider() {
+    for (channel, id, expected_role, ok) in [
         (
-            "local",
-            "Qwen/Qwen3.6-35B-A3B",
-            "native",
+            crate::llm_config::ToolFormatChannel::Native,
             "call_001",
-            "tool",
-            Some("tool_call_id"),
+            "tool_result",
             true,
         ),
         (
-            "anthropic",
-            "claude-opus-4-7",
-            "native",
+            crate::llm_config::ToolFormatChannel::Text,
             "call_002",
-            "tool_result",
-            Some("tool_use_id"),
-            true,
-        ),
-        (
-            "bedrock",
-            "anthropic.claude-3-5-sonnet-20240620-v1:0",
-            "native",
-            "call_003",
-            "tool_result",
-            Some("tool_use_id"),
-            true,
-        ),
-        (
-            "gemini",
-            "gemini-2.5-flash",
-            "native",
-            "call_004",
-            "tool",
-            Some("tool_call_id"),
-            true,
-        ),
-        (
-            "ollama",
-            "devstral-small-2:24b",
-            "text",
-            "call_005",
             "user",
-            None,
             false,
         ),
     ] {
-        let message = vm_to_json(&tool_result_message_for_provider(ToolResultMessageInput {
-            provider,
-            model,
-            tool_format: format,
+        let message = vm_to_json(&tool_result_message(ToolResultMessageInput {
+            channel,
             name: "release_run",
             tool_call_id: id,
             observation: if ok {
@@ -783,12 +753,11 @@ fn tool_results_replay_with_provider_appropriate_ids() {
         assert_eq!(message["_harn"]["tool_name"], "release_run");
         assert_eq!(message["_harn"]["outcome"], if ok { "ok" } else { "error" });
         assert_eq!(message["is_error"], !ok);
-        match wire_id_key {
-            Some(key) => assert_eq!(message[key], id),
-            None => {
-                assert!(message.get("tool_call_id").is_none());
-                assert!(message.get("tool_use_id").is_none());
-            }
+        if channel == crate::llm_config::ToolFormatChannel::Native {
+            assert_eq!(message["tool_call_id"], id);
+            assert!(message.get("tool_use_id").is_none());
+        } else {
+            assert!(message.get("tool_call_id").is_none());
         }
     }
 }
@@ -817,10 +786,8 @@ fn computer_tool_result_carries_screenshot_as_block_list() {
 
     // On a native channel the message content is a `[text, screenshot]` list so
     // the provider content mapper can project the screenshot to an image block.
-    let anthropic = vm_to_json(&tool_result_message_for_provider(ToolResultMessageInput {
-        provider: "anthropic",
-        model: "claude-opus-4-8",
-        tool_format: "native",
+    let anthropic = vm_to_json(&tool_result_message(ToolResultMessageInput {
+        channel: crate::llm_config::ToolFormatChannel::Native,
         name: "computer",
         tool_call_id: "call_shot",
         observation: "Captured screenshot 1024x768.",
@@ -859,10 +826,8 @@ fn multi_screenshot_tool_result_delivers_every_frame() {
     let screenshots = screenshots_from_tool_result(&dispatch_result);
     assert_eq!(screenshots.len(), 2, "both frames extracted");
 
-    let anthropic = vm_to_json(&tool_result_message_for_provider(ToolResultMessageInput {
-        provider: "anthropic",
-        model: "claude-opus-4-8",
-        tool_format: "native",
+    let anthropic = vm_to_json(&tool_result_message(ToolResultMessageInput {
+        channel: crate::llm_config::ToolFormatChannel::Native,
         name: "computer",
         tool_call_id: "call_multi",
         observation: "Captured two frames.",
@@ -949,7 +914,7 @@ fn orphaned_tool_use_ids(messages: &[serde_json::Value]) -> Vec<String> {
 /// This test locks the session to `text`, records the escalated Anthropic turn
 /// through the real record path, then calls `pair_orphaned_tool_use`. It MUST
 /// fail on pre-fix main (synthesized `role:"user"`, still orphaned) and pass
-/// after the fix (native `tool_result` + `tool_use_id`).
+/// after the fix (canonical native `tool_result` + `tool_call_id`).
 #[test]
 fn escalation_orphaned_tool_use_repaired_via_production_path_on_text_locked_session() {
     reset_agent_session_host_state();
@@ -965,8 +930,8 @@ fn escalation_orphaned_tool_use_repaired_via_production_path_on_text_locked_sess
     // reads provider/model from the host session store.
     seed_host_session_provider_model(&session_id, "anthropic", "claude-sonnet-4-5");
 
-    // Seed the transcript: user task, then the escalated Anthropic assistant turn
-    // carrying a real native `tool_use` block, recorded exactly as the loop does.
+    // Seed the transcript: user task, then an escalated Anthropic assistant turn
+    // carrying a native call, recorded exactly as the loop does.
     crate::agent_sessions::inject_message(
         &session_id,
         crate::stdlib::json_to_vm_value(&json!({"role": "user", "content": "fix auth"})),
@@ -984,10 +949,11 @@ fn escalation_orphaned_tool_use_repaired_via_production_path_on_text_locked_sess
         }],
     }));
     let assistant = assistant_message_from_llm_result(&llm_result);
-    // Sanity: this really persisted as an Anthropic tool_use block.
+    // Sanity: this persisted as a canonical native tool call. Anthropic wire
+    // projection happens only when a request is built.
     let assistant_json = vm_to_json(&assistant);
-    assert_eq!(assistant_json["content"][1]["type"], "tool_use");
-    assert_eq!(assistant_json["content"][1]["id"], "tc_0");
+    assert_eq!(assistant_json["tool_calls"][0]["id"], "tc_0");
+    assert_eq!(assistant_json["tool_calls"][0]["name"], "edit");
     crate::agent_sessions::inject_message(&session_id, assistant).expect("assistant turn injects");
 
     // The loop declines to dispatch and is about to inject bare user feedback.
@@ -996,9 +962,9 @@ fn escalation_orphaned_tool_use_repaired_via_production_path_on_text_locked_sess
     let repaired = pair_orphaned_tool_use(&session_id, feedback);
     assert_eq!(repaired, 1, "exactly one orphan must be repaired");
 
-    // The synthesized message MUST be a native Anthropic tool_result, NOT the
-    // text-channel `role:"user"` echo — otherwise the native tool_use stays
-    // orphaned and the provider 400 fires anyway.
+    // The synthesized message must be a native canonical result, not a
+    // text-channel `role:"user"` echo. Otherwise provider projection cannot
+    // build a valid paired request.
     let transcript = crate::agent_sessions::transcript(&session_id).expect("transcript");
     let messages = list_items(
         &dict_get(&transcript, "messages")
@@ -1011,10 +977,10 @@ fn escalation_orphaned_tool_use_repaired_via_production_path_on_text_locked_sess
         "orphan repair must ride the native tool_result role, not role:\"user\" \
          (the session text-lock must NOT leak into orphan synthesis)"
     );
-    assert_eq!(last["tool_use_id"], "tc_0");
+    assert_eq!(last["tool_call_id"], "tc_0");
     assert_eq!(last["content"], feedback);
 
-    // And the transcript now has no orphaned tool_use ids -> provider-valid.
+    // The transcript now has no orphaned native call ids.
     let messages_json: Vec<serde_json::Value> = messages.iter().map(vm_to_json).collect();
     assert!(
         orphaned_tool_use_ids(&messages_json).is_empty(),
@@ -1065,10 +1031,7 @@ fn escalation_orphan_repaired_via_production_path_openai_shape() {
             .unwrap_or(crate::value::VmValue::Nil),
     );
     let last = vm_to_json(messages.last().expect("a synthesized trailing message"));
-    assert_eq!(
-        last["role"], "tool",
-        "openai-shape orphan repair must ride the native `tool` role"
-    );
+    assert_eq!(last["role"], "tool_result");
     assert_eq!(last["name"], "read");
     assert_eq!(last["tool_call_id"], "call_9");
     assert_eq!(last["content"], "nudge");
@@ -1091,16 +1054,11 @@ fn orphan_repair_covers_openai_wire_shape() {
         }],
     }));
     let assistant = assistant_message_from_llm_result(&llm_result);
-    let synthetic = synthesize_orphan_tool_results(
-        &assistant,
-        "local",
-        "Qwen/Qwen3.6-35B-A3B",
-        "nudge",
-        &std::collections::BTreeSet::new(),
-    );
+    let synthetic =
+        synthesize_orphan_tool_results(&assistant, "nudge", &std::collections::BTreeSet::new());
     assert_eq!(synthetic.len(), 1);
     let msg = vm_to_json(&synthetic[0]);
-    assert_eq!(msg["role"], "tool");
+    assert_eq!(msg["role"], "tool_result");
     assert_eq!(msg["name"], "read");
     assert_eq!(msg["tool_call_id"], "call_9");
     assert_eq!(msg["content"], "nudge");
@@ -1126,13 +1084,8 @@ fn orphan_repair_is_noop_for_text_format_runs() {
     assert!(assistant_json.get("tool_calls").is_none());
     assert!(assistant_json["content"].is_string());
 
-    let synthetic = synthesize_orphan_tool_results(
-        &assistant,
-        "moonshot",
-        "moonshot/kimi-k2.7-code-highspeed",
-        "nudge",
-        &std::collections::BTreeSet::new(),
-    );
+    let synthetic =
+        synthesize_orphan_tool_results(&assistant, "nudge", &std::collections::BTreeSet::new());
     assert!(
         synthetic.is_empty(),
         "text-format runs carry no structured tool_use; nothing to repair"
@@ -1153,13 +1106,7 @@ fn orphan_repair_skips_already_paired_blocks() {
     let assistant = assistant_message_from_llm_result(&llm_result);
     let mut paired = std::collections::BTreeSet::new();
     paired.insert("tc_0".to_string());
-    let synthetic = synthesize_orphan_tool_results(
-        &assistant,
-        "anthropic",
-        "claude-opus-4-8",
-        "nudge",
-        &paired,
-    );
+    let synthetic = synthesize_orphan_tool_results(&assistant, "nudge", &paired);
     assert!(
         synthetic.is_empty(),
         "an already-dispatched block must not be double-paired"

@@ -162,7 +162,5 @@ pub(super) fn text_channel_provider_surprise_message(
         &[],
         &[],
         thinking,
-        provider,
-        model,
     )))
 }
