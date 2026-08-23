@@ -686,6 +686,40 @@ fn search_outside_a_project_ignores_stray_project_files() {
     );
 }
 
+/// `.ignore` is not part of the search contract. A file excluded only by
+/// `.ignore` must still be searched; a file excluded by `.gitignore` must
+/// not. The gitignore case is the positive control that the project layer
+/// is live rather than that ignore files were never loaded.
+#[test]
+fn search_does_not_honor_dot_ignore() {
+    let dir = TempDir::new().unwrap();
+    fs::create_dir_all(dir.path().join(".git")).unwrap();
+    fs::write(dir.path().join(".gitignore"), "gitignored.txt\n").unwrap();
+    fs::write(dir.path().join(".ignore"), "ignored_by_ignore.txt\n").unwrap();
+    fs::write(dir.path().join("gitignored.txt"), "needle\n").unwrap();
+    fs::write(dir.path().join("ignored_by_ignore.txt"), "needle\n").unwrap();
+    fs::write(dir.path().join("kept.txt"), "needle\n").unwrap();
+
+    let reg = registry();
+    let entry = reg.find("hostlib_tools_search").unwrap();
+    let result = (entry.handler)(&dict_arg(&[
+        ("pattern", vm_string("needle")),
+        ("path", vm_string(&dir.path().to_string_lossy())),
+        ("fixed_strings", VmValue::Bool(true)),
+    ]))
+    .unwrap();
+    let paths = match_paths(&result);
+    assert!(
+        paths.iter().any(|p| p.ends_with("ignored_by_ignore.txt")),
+        "`.ignore` must not filter search, got {paths:?}"
+    );
+    assert!(paths.iter().any(|p| p.ends_with("kept.txt")), "{paths:?}");
+    assert!(
+        !paths.iter().any(|p| p.ends_with("gitignored.txt")),
+        "`.gitignore` must still filter search, got {paths:?}"
+    );
+}
+
 /// `ignore_policy: "none"` is the one spelling for a raw walk.
 #[test]
 fn search_ignore_policy_none_walks_everything() {

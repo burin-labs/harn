@@ -173,7 +173,7 @@ const tree = harness.project.scan_tree(".", {tiers: ["ambient"], depth: 3})
 
 - always includes `"."` for the requested base directory
 - walks subdirectories deterministically
-- honors `.gitignore`, `.ignore`, and `.agentignore` by default
+- honors `.gitignore` and `.agentignore` by default (not `.ignore`)
 - skips standard vendor/build directories such as `node_modules/` and `target/`
   by default
 

@@ -124,34 +124,48 @@ fn gitignore_negation_reincludes_a_builtin_directory() {
     );
 }
 
+/// `.ignore` is a ripgrep/fd convention git cannot evaluate. Honoring it
+/// would make the walk unreproducible for a host built on git tooling, so
+/// it must not participate. `.gitignore` still does — that is the positive
+/// control that the project layer is live.
 #[test]
-fn agentignore_outranks_ignore_which_outranks_gitignore() {
+fn dot_ignore_is_not_honored() {
+    let dir = repo();
+    write(dir.path(), "from_ignore.txt", "a\n");
+    write(dir.path(), "from_gitignore.txt", "b\n");
+    write(dir.path(), "kept.txt", "c\n");
+    write(dir.path(), ".gitignore", "from_gitignore.txt\n");
+    write(dir.path(), ".ignore", "from_ignore.txt\n");
+
+    let entries = walk(dir.path(), IgnorePolicy::Project);
+    assert!(
+        has(&entries, "from_ignore.txt"),
+        "`.ignore` must not filter, got {entries:?}"
+    );
+    assert!(
+        !has(&entries, "from_gitignore.txt"),
+        "`.gitignore` must still filter, got {entries:?}"
+    );
+    assert!(has(&entries, "kept.txt"), "{entries:?}");
+}
+
+#[test]
+fn agentignore_outranks_gitignore() {
     let dir = repo();
     write(dir.path(), "only_git.txt", "a\n");
-    write(dir.path(), "git_then_ignore.txt", "b\n");
-    write(dir.path(), "git_then_ignore_then_agent.txt", "c\n");
+    write(dir.path(), "git_then_agent.txt", "b\n");
     write(
         dir.path(),
         ".gitignore",
-        "only_git.txt\ngit_then_ignore.txt\ngit_then_ignore_then_agent.txt\n",
+        "only_git.txt\ngit_then_agent.txt\n!git_then_agent.txt\n",
     );
-    write(
-        dir.path(),
-        ".ignore",
-        "!git_then_ignore.txt\n!git_then_ignore_then_agent.txt\n",
-    );
-    write(
-        dir.path(),
-        ".agentignore",
-        "git_then_ignore_then_agent.txt\n",
-    );
+    write(dir.path(), ".agentignore", "git_then_agent.txt\n");
 
     let entries = walk(dir.path(), IgnorePolicy::Project);
     assert!(!has(&entries, "only_git.txt"), "{entries:?}");
-    assert!(has(&entries, "git_then_ignore.txt"), "{entries:?}");
     assert!(
-        !has(&entries, "git_then_ignore_then_agent.txt"),
-        "{entries:?}"
+        !has(&entries, "git_then_agent.txt"),
+        ".agentignore must outrank a gitignore negation: {entries:?}"
     );
 }
 

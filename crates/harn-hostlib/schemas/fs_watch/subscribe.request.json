@@ -30,7 +30,7 @@
       "type": "string",
       "enum": ["none", "builtin", "project"],
       "default": "builtin",
-      "description": "How much of the shared ignore stack applies. `none` watches everything; `builtin` (the default here) applies Harn's built-in directory defaults, keeping recursive watches out of dependency and build trees that would exhaust the OS watch budget; `project` adds `.gitignore`, `.ignore`, and `.agentignore`. Watching defaults to `builtin` rather than `project` because a gitignored file is still a file whose changes a subscriber may need."
+      "description": "How much of the shared ignore stack applies. `none` watches everything; `builtin` (the default here) applies Harn's built-in directory defaults, keeping recursive watches out of dependency and build trees that would exhaust the OS watch budget; `project` adds `.gitignore` and `.agentignore` (`.ignore` is not honored). Watching defaults to `builtin` rather than `project` because a gitignored file is still a file whose changes a subscriber may need."
     },
     "kinds": {
       "type": "array",
