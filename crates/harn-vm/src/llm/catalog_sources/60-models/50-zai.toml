@@ -5,9 +5,16 @@
 # cheap independent-bucket coding/judge routes (glm-4.6 is confirmed serving
 # 200 at paas/v4). Pricing per docs.z.ai.
 #
-# GLM-5.3 joined the public model list and OpenRouter on 2026-08-22. Z.AI has
-# not added it to the public per-token rate card, so the direct route is
-# available but unpriced.
+# GLM-5.3 joined the public model list and OpenRouter on 2026-08-22 and is now
+# on the public rate card at GLM-5.2's tariff ($1.40 / $4.40 per MTok, $0.26
+# cache hit). Z.AI's own migration note is a one-parameter swap: same base
+# model, same wire shape, `model="glm-5.2"` -> `model="glm-5.3"`. It is the
+# current GLM flagship, so the bare `glm` alias resolves to it, and the
+# retired Cerebras and NVIDIA GLM rows already name it in `superseded_by`.
+#
+# GLM-5-Turbo's price was re-read against the same rate card on 2026-08-22:
+# it is $1.20 / $4.00 / $0.24, not the $0.60 / $2.00 / $0.11 this file
+# previously carried.
 
 # GLM-4.6 — 200K-context coding model, confirmed serving at paas/v4.
 [models."glm-4.6"]
@@ -60,7 +67,9 @@ name = "GLM 5 Turbo"
 provider = "zai"
 context_window = 202752
 capabilities = ["tools", "streaming", "thinking"]
-pricing = { input_per_mtok = 0.60, output_per_mtok = 2.00, cache_read_per_mtok = 0.11 }
+# docs.z.ai rate card, 2026-08-22: $1.20 / $4.00 per MTok (cache hit $0.24).
+# OpenRouter's `z-ai/glm-5-turbo` mirror quotes the same three numbers.
+pricing = { input_per_mtok = 1.20, output_per_mtok = 4.00, cache_read_per_mtok = 0.24 }
 tier = "mid"
 open_weight = true
 strengths = ["speed", "coding", "agentic", "tool_use", "cheap"]
@@ -104,6 +113,9 @@ provider = "zai"
 context_window = 1048576
 equivalence_group = "frontier-agent-coding"
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+# docs.z.ai rate card, 2026-08-22: GLM-5.3 lists at GLM-5.2's tariff, which
+# is what Z.AI's launch note means by "available at the same price".
+pricing = { input_per_mtok = 1.40, output_per_mtok = 4.40, cache_read_per_mtok = 0.26 }
 tier = "frontier"
 open_weight = true
 strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
@@ -136,7 +148,7 @@ provider = "openrouter"
 context_window = 1048576
 equivalence_group = "frontier-agent-coding"
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 0.91, output_per_mtok = 2.86, cache_read_per_mtok = 0.169 }
+pricing = { input_per_mtok = 0.966, output_per_mtok = 3.036, cache_read_per_mtok = 0.1932 }
 tier = "frontier"
 open_weight = true
 strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
