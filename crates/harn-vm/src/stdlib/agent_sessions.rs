@@ -78,11 +78,11 @@ fn err(msg: impl Into<String>) -> VmError {
 ///
 /// The one deviation from [`Args`]'s defaults is deliberate: session ids are
 /// not trimmed, because nested-id round-trips carry whitespace-only ids.
-fn session_args<'a>(fn_name: &'a str, args: &'a [VmValue]) -> Args<'a> {
+fn session_args<'a>(fn_name: &'a str, args: &'a [VmValue]) -> Args<'a, 'a> {
     Args::thrown(fn_name, args)
 }
 
-fn session_options<'a>(fn_name: &'a str, opts: &'a crate::value::DictMap) -> Options<'a> {
+fn session_options<'a>(fn_name: &'a str, opts: &'a crate::value::DictMap) -> Options<'a, 'a> {
     Options::new(fn_name, ERR_KIND, Some(opts))
 }
 

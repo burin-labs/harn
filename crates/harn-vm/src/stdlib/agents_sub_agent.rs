@@ -170,7 +170,7 @@ pub(super) fn parse_sub_agent_request(args: &[VmValue]) -> Result<ParsedSubAgent
 }
 
 fn parse_sub_agent_workspace_anchor(
-    parser: &mut Options<'_>,
+    parser: &mut Options<'_, '_>,
 ) -> Result<Option<crate::workspace_anchor::WorkspaceAnchor>, VmError> {
     let Some(value) = parser.raw("anchor") else {
         return Ok(None);
@@ -271,7 +271,7 @@ fn invalid_sub_agent_request() -> VmError {
 
 fn resolve_sub_agent_policies(
     request: &crate::value::DictMap,
-    parser: &mut Options<'_>,
+    parser: &mut Options<'_, '_>,
 ) -> Result<SubAgentPolicyResolution, VmError> {
     let allowed_tools =
         parse_string_list(parser.raw("allowed_tools"), "sub_agent_run.allowed_tools")?;
@@ -288,7 +288,7 @@ fn resolve_sub_agent_policies(
     })
 }
 
-fn sub_agent_returns_schema(parser: &mut Options<'_>) -> Result<Option<VmValue>, VmError> {
+fn sub_agent_returns_schema(parser: &mut Options<'_, '_>) -> Result<Option<VmValue>, VmError> {
     let returns_schema_value = parser
         .raw("returns_schema")
         .filter(|value| !matches!(value, VmValue::Nil))
@@ -298,7 +298,7 @@ fn sub_agent_returns_schema(parser: &mut Options<'_>) -> Result<Option<VmValue>,
 }
 
 fn prepare_sub_agent_options(
-    parser: &mut Options<'_>,
+    parser: &mut Options<'_, '_>,
     session_id: &str,
     requested_policy: Option<&CapabilityPolicy>,
 ) -> Result<crate::value::DictMap, VmError> {

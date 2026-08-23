@@ -146,13 +146,13 @@ fn client_error_to_vm(error: ClientError) -> VmError {
 ///
 /// The dict is type-checked through the shared contract first; only then is
 /// the original value handed to the JSON converter.
-fn required_json_arg(args: &Args<'_>, index: usize, label: &str) -> Result<JsonValue, VmError> {
+fn required_json_arg(args: &Args<'_, '_>, index: usize, label: &str) -> Result<JsonValue, VmError> {
     args.dict(index, label)?;
     Ok(vm_value_to_json(args.raw(index).expect("checked above")))
 }
 
 /// An optional dict argument, as JSON. Missing or `nil` yields `{}`.
-fn optional_json_arg(args: &Args<'_>, index: usize, label: &str) -> Result<JsonValue, VmError> {
+fn optional_json_arg(args: &Args<'_, '_>, index: usize, label: &str) -> Result<JsonValue, VmError> {
     match args.opt_dict(index, label)? {
         None => Ok(JsonValue::Object(Default::default())),
         Some(_) => Ok(vm_value_to_json(args.raw(index).expect("checked above"))),

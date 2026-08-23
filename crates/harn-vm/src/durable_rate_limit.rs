@@ -342,9 +342,13 @@ fn optional_duration_ms(
 ) -> Result<Option<u64>, VmError> {
     match dict.get(key) {
         None | Some(VmValue::Nil) => Ok(None),
-        Some(value) => Args::single("durable_rate_limit_acquire", ErrorKind::Runtime, value)
-            .millis(0, key)
-            .map(Some),
+        Some(value) => Args::single(
+            "durable_rate_limit_acquire",
+            ErrorKind::Runtime,
+            Some(value),
+        )
+        .millis(0, key)
+        .map(Some),
     }
 }
 

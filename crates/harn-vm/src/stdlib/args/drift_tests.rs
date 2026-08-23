@@ -17,22 +17,32 @@ use std::path::{Path, PathBuf};
 
 use super::tag_is_canonical;
 
-/// Spellings that read as a Harn type but name none. Each maps to what the
-/// author should write instead, so the failure tells you the fix.
+/// Words that read as a Harn type but name none, with the tag to use
+/// instead.
 const NON_CANONICAL: &[(&str, &str)] = &[
-    ("must be an integer", "must be an int"),
-    ("must be a boolean", "must be a bool"),
-    ("must be a number", "must be an int or a float"),
-    ("must be a record", "must be a dict"),
-    ("must be an object", "must be a dict"),
-    ("must be an array", "must be a list"),
-    ("expected integer", "expected int"),
-    ("expected boolean", "expected bool"),
-    ("expected number", "expected int or float"),
-    ("expected object", "expected dict"),
-    ("expected array", "expected list"),
-    ("expected record", "expected dict"),
+    ("integer", "int"),
+    ("boolean", "bool"),
+    ("record", "dict"),
+    ("object", "dict"),
+    ("array", "list"),
+    ("number", "int or a float"),
 ];
+
+/// A type claim: `must be`/`expected`, an optional article, an optional
+/// adjective, then the noun. Matching the whole phrase rather than the bare
+/// word is what lets `must be a positive integer` fail while `trust.record:`
+/// and a `record.attempt` field access pass.
+fn type_claim_pattern() -> regex::Regex {
+    let nouns = NON_CANONICAL
+        .iter()
+        .map(|(bad, _)| *bad)
+        .collect::<Vec<_>>()
+        .join("|");
+    regex::Regex::new(&format!(
+        r"(?:must be|must contain|expected|requires)(?: an?| the)?(?: [a-z][a-z-]*)? ({nouns})\b"
+    ))
+    .expect("type-claim pattern compiles")
+}
 
 /// Opt-out marker for messages that describe something other than a Harn
 /// value — a JSON document, a migration file name, a template token. Honoured
@@ -44,11 +54,11 @@ fn stdlib_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("src/stdlib")
 }
 
-fn visit(dir: &Path, root: &Path, found: &mut Vec<String>) {
+fn visit(dir: &Path, root: &Path, claim: &regex::Regex, found: &mut Vec<String>) {
     for entry in std::fs::read_dir(dir).expect("read stdlib dir") {
         let path = entry.expect("stdlib dir entry").path();
         if path.is_dir() {
-            visit(&path, root, found);
+            visit(&path, root, claim, found);
             continue;
         }
         if path.extension().and_then(|extension| extension.to_str()) != Some("rs") {
@@ -66,19 +76,46 @@ fn visit(dir: &Path, root: &Path, found: &mut Vec<String>) {
         let source = std::fs::read_to_string(&path).expect("read stdlib source");
         let lines: Vec<&str> = source.lines().collect();
         for (number, line) in lines.iter().enumerate() {
-            let opted_out = line.contains(OPT_OUT)
-                || number
-                    .checked_sub(1)
-                    .and_then(|previous| lines.get(previous))
-                    .is_some_and(|previous| previous.contains(OPT_OUT));
+            // Only diagnostics are checked; a comment explaining the code can
+            // use whatever words it likes.
+            if line.trim_start().starts_with("//") {
+                continue;
+            }
+            // The opt-out sits on the message's line or up to two lines above
+            // it, since a wrapped `format!` puts the noun below the comment.
+            let opted_out = (number.saturating_sub(2)..=number)
+                .filter_map(|index| lines.get(index))
+                .any(|line| line.contains(OPT_OUT));
             if opted_out {
                 continue;
             }
-            for (bad, fix) in NON_CANONICAL {
-                if line.contains(bad) {
-                    let relative = path.strip_prefix(root).unwrap_or(&path).display();
-                    found.push(format!("{relative}:{}: `{bad}` -> `{fix}`", number + 1));
+            // A claim and its noun can land on separate wrapped lines, so read
+            // each line joined to the one before it — and report only when the
+            // noun itself is on this line, so a match is not counted twice.
+            let prior = number
+                .checked_sub(1)
+                .and_then(|index| lines.get(index))
+                .filter(|line| !line.trim_start().starts_with("//"))
+                .map(|line| line.trim_end())
+                .unwrap_or_default();
+            let offset = if prior.is_empty() { 0 } else { prior.len() + 1 };
+            let context = format!("{prior} {line}");
+            for capture in claim.captures_iter(context.trim_start()) {
+                let noun = capture.get(1).expect("group 1 is the noun");
+                if noun.start() + context.len() - context.trim_start().len() < offset {
+                    continue;
                 }
+                let fix = NON_CANONICAL
+                    .iter()
+                    .find(|(bad, _)| *bad == noun.as_str())
+                    .map(|(_, fix)| *fix)
+                    .expect("captured noun comes from NON_CANONICAL");
+                let relative = path.strip_prefix(root).unwrap_or(&path).display();
+                found.push(format!(
+                    "{relative}:{}: `{}` -> `{fix}`",
+                    number + 1,
+                    noun.as_str()
+                ));
             }
         }
     }
@@ -88,7 +125,7 @@ fn visit(dir: &Path, root: &Path, found: &mut Vec<String>) {
 fn stdlib_diagnostics_name_types_the_runtime_has() {
     let root = stdlib_root();
     let mut found = Vec::new();
-    visit(&root, &root, &mut found);
+    visit(&root, &root, &type_claim_pattern(), &mut found);
     found.sort();
     assert!(
         found.is_empty(),
@@ -103,19 +140,36 @@ fn stdlib_diagnostics_name_types_the_runtime_has() {
 /// The replacements this test recommends have to be canonical themselves.
 #[test]
 fn recommended_spellings_are_canonical() {
-    let mut recommended = BTreeSet::new();
-    for (_, fix) in NON_CANONICAL {
-        for word in fix.split_whitespace() {
-            if matches!(word, "must" | "be" | "a" | "an" | "or" | "expected") {
-                continue;
-            }
-            recommended.insert(word);
-        }
-    }
+    let recommended: BTreeSet<&str> = NON_CANONICAL
+        .iter()
+        .flat_map(|(_, fix)| fix.split(" or a "))
+        .collect();
     for word in recommended {
         assert!(
             tag_is_canonical(word),
             "recommended spelling `{word}` is not a runtime type tag"
         );
+    }
+}
+
+#[test]
+fn the_pattern_matches_claims_and_not_identifiers() {
+    let claim = type_claim_pattern();
+    for asserted in [
+        "value must be an integer",
+        "ahead must be a positive integer",
+        "`indent` requires an integer width",
+        "expected an integer millisecond timestamp",
+        "entries must contain an array",
+    ] {
+        assert!(claim.is_match(asserted), "should flag: {asserted}");
+    }
+    for innocent in [
+        "\"trust.record: expected decision dict\"",
+        "if record.attempt != expected {",
+        "/// the record crosses the boundary",
+        "let integer_like = 3;",
+    ] {
+        assert!(!claim.is_match(innocent), "should not flag: {innocent}");
     }
 }

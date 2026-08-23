@@ -14,7 +14,7 @@ use crate::event_log::{
     EventLog, LogEvent, Topic,
 };
 use crate::runtime_limits::RuntimeLimits;
-use crate::stdlib::args::Args;
+use crate::stdlib::args::{Args, ErrorKind};
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::triggers::dispatcher::{
     current_dispatch_context, current_dispatch_is_replay, DispatchContext,
@@ -1154,7 +1154,7 @@ fn optional_string(dict: &crate::value::DictMap, key: &str) -> Option<String> {
 }
 
 fn parse_duration_value(value: &VmValue) -> Result<StdDuration, VmError> {
-    Args::runtime("waitpoint.wait", std::slice::from_ref(value)).duration(0, "timeout")
+    Args::single("waitpoint.wait", ErrorKind::Runtime, Some(value)).duration(0, "timeout")
 }
 
 fn waitpoint_suspend_error(wait_id: &str) -> VmError {

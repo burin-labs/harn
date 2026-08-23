@@ -14,6 +14,7 @@ use crate::llm::helpers::{ReminderPropagate, ReminderRoleHint, ReminderSource, S
 use crate::orchestration::{
     set_singleton_pre_tool_hook, PreToolAction, PreToolHookFn, ReminderSpec,
 };
+use crate::stdlib::args::{ArgError, Args, ErrorKind};
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
@@ -59,27 +60,17 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] =
     category = "agent.path_scope_guard"
 )]
 fn register_path_scope_guard(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    let opts = match args.first() {
-        None | Some(VmValue::Nil) => crate::value::DictMap::new(),
-        Some(VmValue::Dict(map)) => map.as_ref().clone(),
-        Some(other) => {
-            return Err(VmError::Runtime(format!(
-                "register_path_scope_guard: `opts` must be a dict or nil, got {}",
-                other.type_name()
-            )));
-        }
-    };
-    for key in opts.keys() {
-        if !matches!(
-            key.as_str(),
-            "arg_keys" | "on_violation" | "mount_modes" | "enabled"
-        ) {
-            return Err(VmError::Runtime(format!(
-                "register_path_scope_guard: unknown option key '{key}' (expected one of: arg_keys, on_violation, mount_modes, enabled)"
-            )));
-        }
+    let opts = Args::runtime(GUARD, args)
+        .opt_dict(0, "opts")?
+        .cloned()
+        .unwrap_or_default();
+    let mut reader = Args::runtime_options(GUARD, Some(&opts));
+    for key in ["arg_keys", "on_violation", "mount_modes"] {
+        reader.allow(key);
     }
-    if matches!(opts.get("enabled"), Some(VmValue::Bool(false))) {
+    let enabled = reader.bool_or("enabled", true)?;
+    reader.finish(&[])?;
+    if !enabled {
         set_singleton_pre_tool_hook(None);
         return Ok(VmValue::Nil);
     }
@@ -187,70 +178,38 @@ enum Violation {
     Reminder,
 }
 
+/// The builtin name every diagnostic in this module carries.
+const GUARD: &str = "register_path_scope_guard";
+
 fn parse_arg_keys(opts: &crate::value::DictMap) -> Result<Vec<String>, VmError> {
-    match opts.get("arg_keys") {
-        None | Some(VmValue::Nil) => {
-            Ok(DEFAULT_ARG_KEYS.iter().map(|key| key.to_string()).collect())
-        }
-        Some(VmValue::List(items)) => items
-            .iter()
-            .map(|item| match item {
-                VmValue::String(value) if !value.trim().is_empty() => Ok(value.to_string()),
-                VmValue::String(_) => Err(VmError::Runtime(
-                    "register_path_scope_guard: arg_keys entries must be non-empty strings".into(),
-                )),
-                other => Err(VmError::Runtime(format!(
-                    "register_path_scope_guard: arg_keys entries must be strings, got {}",
-                    other.type_name()
-                ))),
-            })
-            .collect(),
-        Some(other) => Err(VmError::Runtime(format!(
-            "register_path_scope_guard: `arg_keys` must be a list, got {}",
-            other.type_name()
-        ))),
+    let Some(keys) = Args::runtime_options(GUARD, Some(opts)).opt_string_list("arg_keys")? else {
+        return Ok(DEFAULT_ARG_KEYS.iter().map(|key| key.to_string()).collect());
+    };
+    if keys.iter().any(|key| key.trim().is_empty()) {
+        return Err(ArgError::empty(GUARD, ErrorKind::Runtime, "arg_keys entry"));
     }
+    Ok(keys.into_iter().map(str::to_string).collect())
 }
 
 fn parse_on_violation(opts: &crate::value::DictMap) -> Result<Violation, VmError> {
-    match opts.get("on_violation") {
-        None | Some(VmValue::Nil) => Ok(Violation::Deny),
-        Some(VmValue::String(value)) => match value.as_ref() {
-            "deny" => Ok(Violation::Deny),
-            "reminder" | "reminder_only" => Ok(Violation::Reminder),
-            other => Err(VmError::Runtime(format!(
-                "register_path_scope_guard: `on_violation` must be 'deny' or 'reminder', got '{other}'"
-            ))),
-        },
-        Some(other) => Err(VmError::Runtime(format!(
-            "register_path_scope_guard: `on_violation` must be a string, got {}",
-            other.type_name()
-        ))),
-    }
+    let violation = Args::runtime_options(GUARD, Some(opts))
+        .opt_enum_string("on_violation", &["deny", "reminder", "reminder_only"])?;
+    Ok(match violation {
+        Some("reminder" | "reminder_only") => Violation::Reminder,
+        _ => Violation::Deny,
+    })
 }
 
 fn parse_mount_modes(opts: &crate::value::DictMap) -> Result<Vec<MountMode>, VmError> {
-    let raw = match opts.get("mount_modes") {
-        None | Some(VmValue::Nil) => {
-            return Ok(vec![MountMode::Extend, MountMode::Sandboxed]);
-        }
-        Some(VmValue::List(items)) => items,
-        Some(other) => {
-            return Err(VmError::Runtime(format!(
-                "register_path_scope_guard: `mount_modes` must be a list, got {}",
-                other.type_name()
-            )));
-        }
+    let Some(modes) = Args::runtime_options(GUARD, Some(opts)).opt_string_list("mount_modes")?
+    else {
+        return Ok(vec![MountMode::Extend, MountMode::Sandboxed]);
     };
-    raw.iter()
-        .map(|item| match item {
-            VmValue::String(value) => MountMode::parse(value).map_err(|message| {
-                VmError::Runtime(format!("register_path_scope_guard: {message}"))
-            }),
-            other => Err(VmError::Runtime(format!(
-                "register_path_scope_guard: mount_modes entries must be strings, got {}",
-                other.type_name()
-            ))),
+    modes
+        .into_iter()
+        .map(|mode| {
+            MountMode::parse(mode)
+                .map_err(|message| VmError::Runtime(format!("{GUARD}: {message}")))
         })
         .collect()
 }

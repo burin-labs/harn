@@ -326,7 +326,7 @@ fn json(v: &VmValue, pretty: bool) -> Result<VmValue, String> {
 
 fn indent(v: &VmValue, width: &VmValue, indent_first: bool) -> Result<VmValue, String> {
     let VmValue::Int(n) = width else {
-        return Err("`indent` requires an integer width".to_string());
+        return Err("`indent` requires an int width".to_string());
     };
     let n = (*n).max(0) as usize;
     let pad: String = " ".repeat(n);

@@ -27,6 +27,7 @@ use crate::event_log::{
     active_event_log, install_memory_for_current_thread, EventLog, LogEvent, Topic,
 };
 use crate::runtime_limits::RuntimeLimits;
+use crate::stdlib::args::{ArgError, Args, ErrorKind};
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmClosure, VmError, VmValue};
 use crate::vm::{AsyncBuiltinCtx, Vm};
@@ -569,34 +570,20 @@ fn pool_id_from_value(value: &VmValue, builtin: &str) -> Result<String, VmError>
 }
 
 fn task_handle_from_value(value: &VmValue, builtin: &str) -> Result<(String, String), VmError> {
-    let map = value.as_dict().ok_or_else(|| {
-        VmError::Runtime(format!(
-            "{builtin}: expected pool task handle (got {})",
-            value.type_name()
-        ))
-    })?;
-    let pool_id = map
-        .get("pool_id")
-        .map(|v| v.display())
-        .filter(|s| !s.is_empty())
-        .ok_or_else(|| VmError::Runtime(format!("{builtin}: task handle missing pool_id")))?;
-    let task_id = map
-        .get("id")
-        .map(|v| v.display())
-        .filter(|s| !s.is_empty())
-        .ok_or_else(|| VmError::Runtime(format!("{builtin}: task handle missing id")))?;
+    let mut handle = Args::runtime_options(
+        builtin,
+        Some(Args::single(builtin, ErrorKind::Runtime, Some(value)).dict(0, "task_handle")?),
+    );
+    let pool_id = handle.non_empty_string("pool_id")?.to_string();
+    let task_id = handle.non_empty_string("id")?.to_string();
     Ok((pool_id, task_id))
 }
 
 fn parse_options(value: Option<&VmValue>, builtin: &str) -> Result<crate::value::DictMap, VmError> {
-    match value {
-        None | Some(VmValue::Nil) => Ok(crate::value::DictMap::new()),
-        Some(VmValue::Dict(map)) => Ok((**map).clone()),
-        Some(other) => Err(VmError::Runtime(format!(
-            "{builtin}: options must be a dict (got {})",
-            other.type_name()
-        ))),
-    }
+    Ok(Args::single(builtin, ErrorKind::Runtime, value)
+        .opt_dict(0, "options")?
+        .cloned()
+        .unwrap_or_default())
 }
 
 fn parse_max_concurrent(opts: &crate::value::DictMap) -> Result<usize, VmError> {
@@ -618,58 +605,50 @@ fn parse_max_concurrent(opts: &crate::value::DictMap) -> Result<usize, VmError> 
 }
 
 fn parse_name(opts: &crate::value::DictMap) -> Option<String> {
-    opts.get("name").and_then(|value| match value {
-        VmValue::String(text) if !text.trim().is_empty() => Some(text.to_string()),
-        _ => None,
-    })
+    Args::runtime_options("pool_create", Some(opts))
+        .opt_non_empty_string("name")
+        .ok()
+        .flatten()
+        .map(str::to_string)
 }
 
 fn parse_scope(opts: &crate::value::DictMap) -> Result<PoolScope, VmError> {
-    match opts.get("scope") {
-        None | Some(VmValue::Nil) => Ok(PoolScope::Session),
-        Some(VmValue::String(text)) => PoolScope::parse(text),
-        Some(other) => Err(VmError::Runtime(format!(
-            "pool_create: scope must be a string (got {})",
-            other.type_name()
-        ))),
+    match Args::runtime_options("pool_create", Some(opts)).opt_string("scope")? {
+        None => Ok(PoolScope::Session),
+        Some(text) => PoolScope::parse(text),
     }
 }
 
 fn parse_scope_id_override(opts: &crate::value::DictMap) -> Option<String> {
-    for key in ["scope_id", "pipeline_id", "run_id"] {
-        if let Some(VmValue::String(text)) = opts.get(key) {
-            if !text.trim().is_empty() {
-                return Some(text.to_string());
-            }
-        }
-    }
-    None
+    Args::runtime_options("pool_create", Some(opts))
+        .opt_string_any(&["scope_id", "pipeline_id", "run_id"])
+        .ok()
+        .flatten()
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .map(str::to_string)
 }
 
 fn parse_stale_after_ms(opts: &crate::value::DictMap) -> Result<i64, VmError> {
-    match opts.get("stale_after_ms") {
-        None | Some(VmValue::Nil) => Ok(DEFAULT_STALE_AFTER_MS),
-        Some(VmValue::Int(n)) if *n >= 0 => Ok(*n),
-        Some(VmValue::Duration(n)) if *n >= 0 => Ok(*n),
-        Some(other) => Err(VmError::Runtime(format!(
-            "pool_create: stale_after_ms must be a non-negative int or duration (got {})",
-            other.type_name()
-        ))),
+    match Args::runtime_options("pool_create", Some(opts)).opt_millis("stale_after_ms")? {
+        None => Ok(DEFAULT_STALE_AFTER_MS),
+        Some(millis) => i64::try_from(millis).map_err(|_| {
+            ArgError::constraint(
+                "pool_create",
+                ErrorKind::Runtime,
+                "stale_after_ms",
+                "must fit in an int",
+            )
+        }),
     }
 }
 
 fn parse_idempotency_key(opts: &crate::value::DictMap) -> Result<Option<String>, VmError> {
-    match opts.get("idempotency_key").or_else(|| opts.get("id")) {
-        None | Some(VmValue::Nil) => Ok(None),
-        Some(VmValue::String(text)) if !text.trim().is_empty() => Ok(Some(text.to_string())),
-        Some(VmValue::String(_)) => Err(VmError::Runtime(
-            "pool.submit: idempotency_key cannot be empty".to_string(),
-        )),
-        Some(other) => Err(VmError::Runtime(format!(
-            "pool.submit: idempotency_key must be a string (got {})",
-            other.type_name()
-        ))),
-    }
+    Ok(Args::runtime_options("pool.submit", Some(opts))
+        .opt_string_any(&["idempotency_key", "id"])?
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .map(str::to_string))
 }
 
 /// Resolve the pipeline id for a pipeline-scope pool. Tries explicit

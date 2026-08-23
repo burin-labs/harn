@@ -487,7 +487,7 @@ async fn pg_partition_create_for_window_impl(
         Some(VmValue::Int(n)) if *n >= 1 => *n,
         _ => {
             return Err(runtime_error(format!(
-                "{builtin}: ahead must be a positive integer"
+                "{builtin}: ahead must be a positive int"
             )))
         }
     };
@@ -884,9 +884,7 @@ fn render_bounds_clause(bounds: &crate::value::DictMap) -> Result<String, VmErro
 fn expect_nonneg_int(value: &VmValue, label: &str) -> Result<i64, VmError> {
     match value {
         VmValue::Int(n) if *n >= 0 => Ok(*n),
-        _ => Err(runtime_error(format!(
-            "{label} must be a non-negative integer"
-        ))),
+        _ => Err(runtime_error(format!("{label} must be a non-negative int"))),
     }
 }
 

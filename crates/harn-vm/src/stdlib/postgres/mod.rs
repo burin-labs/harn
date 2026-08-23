@@ -2066,11 +2066,9 @@ fn required_string_arg(
     builtin: &str,
     label: &str,
 ) -> Result<String, VmError> {
-    let value = args.get(index).map(VmValue::display).unwrap_or_default();
-    if value.trim().is_empty() {
-        return Err(runtime_error(format!("{builtin}: {label} is required")));
-    }
-    Ok(value)
+    Args::runtime(builtin, args)
+        .non_empty_string(index, label)
+        .map(str::to_string)
 }
 
 /// Tenant namespace used by `pg_advisory_*lock(... {tenant_namespace: true})`
@@ -2231,20 +2229,21 @@ pub(super) fn enter_circuit(
 }
 
 pub(super) fn params_arg(value: Option<&VmValue>, builtin: &str) -> Result<Vec<VmValue>, VmError> {
-    match value {
-        None | Some(VmValue::Nil) => Ok(Vec::new()),
-        Some(VmValue::List(items)) => Ok((**items).clone()),
-        Some(_) => Err(runtime_error(format!(
-            "{builtin}: params must be a list when provided"
-        ))),
-    }
+    Ok(Args::single(builtin, ErrorKind::Runtime, value)
+        .opt_list(0, "params")?
+        .unwrap_or_default()
+        .to_vec())
 }
 
+/// A string connection option, or `None` when absent.
+///
+/// Non-string values are ignored rather than rendered: `display` would have
+/// turned a dict into its own text and put that in the connection string.
 fn option_string(options: Option<&crate::value::DictMap>, key: &str) -> Option<String> {
-    options
-        .and_then(|opts| opts.get(key))
-        .map(VmValue::display)
-        .filter(|value| !value.trim().is_empty())
+    match options?.get(key)? {
+        VmValue::String(text) if !text.trim().is_empty() => Some(text.trim().to_string()),
+        _ => None,
+    }
 }
 
 pub(super) fn option_bool(value: Option<&VmValue>) -> Option<bool> {
@@ -2271,7 +2270,7 @@ fn option_int(options: Option<&crate::value::DictMap>, key: &str) -> Option<i64>
 }
 
 fn option_duration_ms(options: Option<&crate::value::DictMap>, key: &str) -> Option<u64> {
-    let reader = Args::single("postgres", ErrorKind::Runtime, options?.get(key)?);
+    let reader = Args::single("postgres", ErrorKind::Runtime, options?.get(key));
     reader.millis(0, key).ok()
 }
 

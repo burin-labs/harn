@@ -1,22 +1,27 @@
 use serde_json::{json, Value as JsonValue};
 
+use crate::stdlib::args::Args;
 use crate::value::VmError;
 
-use super::{bool_option, string_list_option, string_option};
-
-pub(super) fn tag_list_argv(options: Option<&crate::value::DictMap>) -> Vec<String> {
+pub(super) fn tag_list_argv(
+    options: Option<&crate::value::DictMap>,
+) -> Result<Vec<String>, VmError> {
+    let mut reader = Args::runtime_options("git.tag_list", options);
     let mut argv = vec!["git".to_string(), "tag".to_string(), "--list".to_string()];
-    if let Some(sort) = string_option(options, "sort") {
+    if let Some(sort) = reader.opt_string("sort")? {
         argv.push(format!("--sort={sort}"));
     }
-    if let Some(pattern) = string_option(options, "pattern") {
+    if let Some(pattern) = reader.opt_string("pattern")? {
         argv.push("--".to_string());
-        argv.push(pattern);
+        argv.push(pattern.to_string());
     }
-    argv
+    Ok(argv)
 }
 
-pub(super) fn describe_argv(options: Option<&crate::value::DictMap>) -> Vec<String> {
+pub(super) fn describe_argv(
+    options: Option<&crate::value::DictMap>,
+) -> Result<Vec<String>, VmError> {
+    let mut reader = Args::runtime_options("git.describe", options);
     let mut argv = vec![
         "git".to_string(),
         "describe".to_string(),
@@ -24,35 +29,36 @@ pub(super) fn describe_argv(options: Option<&crate::value::DictMap>) -> Vec<Stri
         "--always".to_string(),
         "--dirty".to_string(),
     ];
-    if bool_option(options, "tags").unwrap_or(false) {
+    if reader.bool_or("tags", false)? {
         argv.push("--tags".to_string());
     }
-    if let Some(pattern) = string_option(options, "match") {
+    if let Some(pattern) = reader.opt_string("match")? {
         argv.push("--match".to_string());
-        argv.push(pattern);
+        argv.push(pattern.to_string());
     }
-    if let Some(rev) = string_option(options, "rev") {
+    if let Some(rev) = reader.opt_string("rev")? {
         argv.push("--".to_string());
-        argv.push(rev);
+        argv.push(rev.to_string());
     }
-    argv
+    Ok(argv)
 }
 
 pub(super) fn ls_remote_argv(
     remote: &str,
     options: Option<&crate::value::DictMap>,
 ) -> Result<Vec<String>, VmError> {
+    let mut reader = Args::runtime_options("git.ls_remote", options);
     let mut argv = vec!["git".to_string(), "ls-remote".to_string()];
-    if bool_option(options, "tags").unwrap_or(false) {
+    if reader.bool_or("tags", false)? {
         argv.push("--tags".to_string());
     }
-    if bool_option(options, "heads").unwrap_or(false) {
+    if reader.bool_or("heads", false)? {
         argv.push("--heads".to_string());
     }
     argv.push("--".to_string());
     argv.push(remote.to_string());
-    if let Some(refs) = string_list_option(options, "refs", "git.ls_remote")? {
-        argv.extend(refs);
+    if let Some(refs) = reader.opt_string_list("refs")? {
+        argv.extend(refs.into_iter().map(str::to_string));
     }
     Ok(argv)
 }
@@ -170,7 +176,7 @@ mod tests {
             "sort": "-v:refname",
         }));
         assert_eq!(
-            tag_list_argv(tag_options.as_dict()),
+            tag_list_argv(tag_options.as_dict()).expect("valid tag options"),
             [
                 "git",
                 "tag",
@@ -187,7 +193,7 @@ mod tests {
             "rev": "--all",
         }));
         assert_eq!(
-            describe_argv(describe_options.as_dict()),
+            describe_argv(describe_options.as_dict()).expect("valid describe options"),
             [
                 "git", "describe", "--long", "--always", "--dirty", "--tags", "--match", "v*",
                 "--", "--all"

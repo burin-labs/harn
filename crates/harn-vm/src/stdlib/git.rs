@@ -11,7 +11,7 @@ use crate::event_log::{
     active_event_log, install_memory_for_current_thread, EventLog, LogEvent, Topic,
 };
 use crate::runtime_limits::RuntimeLimits;
-use crate::stdlib::args::Args;
+use crate::stdlib::args::{Args, Options};
 use crate::trust_graph::{AutonomyTier, TrustOutcome, TrustRecord};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
@@ -123,12 +123,12 @@ pub(crate) fn register_git_builtins(vm: &mut Vm) {
             let path = Args::runtime("git.worktree.create", &args)
                 .non_empty_string(2, "path")?
                 .to_string();
-            let options = optional_dict_arg(&args, 3);
-            let force = bool_option(options, "force").unwrap_or(false);
-            let detach = bool_option(options, "detach").unwrap_or(false);
-            let base_ref = string_option(options, "base_ref")
-                .or_else(|| string_option(options, "base"))
-                .or_else(|| string_option(options, "start_point"));
+            let mut options = git_options(&args, 3, "git.worktree.create")?;
+            let force = options.bool_or("force", false)?;
+            let detach = options.bool_or("detach", false)?;
+            let base_ref = options
+                .opt_string_any(&["base_ref", "base", "start_point"])?
+                .map(str::to_string);
             let mut argv = vec!["git".to_string(), "worktree".to_string(), "add".to_string()];
             if force {
                 argv.push("--force".to_string());
@@ -166,8 +166,7 @@ pub(crate) fn register_git_builtins(vm: &mut Vm) {
             let path = Args::runtime("git.worktree.remove", &args)
                 .non_empty_string(0, "path")?
                 .to_string();
-            let options = optional_dict_arg(&args, 1);
-            let force = bool_option(options, "force").unwrap_or(false);
+            let force = git_options(&args, 1, "git.worktree.remove")?.bool_or("force", false)?;
             let path_buf = PathBuf::from(&path);
             if !path_buf.exists() {
                 return planned_or_noop_receipt(
@@ -345,7 +344,7 @@ pub(crate) fn register_git_builtins(vm: &mut Vm) {
             // accepted, so a pre-push hook written to validate a developer's
             // own commits has no subject and only contributes its repository's
             // branch state as a failure mode.
-            let no_verify = bool_option(optional_dict_arg(&args, 4), "no_verify").unwrap_or(false);
+            let no_verify = git_options(&args, 4, "git.push")?.bool_or("no_verify", false)?;
             let mut argv = vec!["git".to_string(), "push".to_string()];
             if no_verify {
                 argv.push("--no-verify".to_string());
@@ -424,21 +423,26 @@ pub(crate) fn register_git_builtins(vm: &mut Vm) {
         "git_diff",
         |ctx, args| async move {
             let repo = repo_path_arg(&args, 0, "git.diff")?;
-            let selector = args.get(1);
+            let diff = Args::runtime("git.diff", &args);
             let mut argv = vec!["git".to_string(), "diff".to_string()];
-            match selector {
+            match args.get(1) {
                 Some(VmValue::String(range)) if !range.is_empty() => argv.push(range.to_string()),
-                Some(VmValue::List(paths)) => {
+                Some(VmValue::List(_)) => {
                     argv.push("--".to_string());
-                    argv.extend(string_list_value(paths, "git.diff", "paths")?);
+                    argv.extend(
+                        diff.string_list(1, "paths")?
+                            .into_iter()
+                            .map(str::to_string),
+                    );
                 }
-                Some(VmValue::Dict(options)) => {
-                    if let Some(range) = string_option(Some(options), "range") {
-                        argv.push(range);
+                Some(VmValue::Dict(_)) => {
+                    let mut options = diff.options(1, "options")?;
+                    if let Some(range) = options.opt_string("range")? {
+                        argv.push(range.to_string());
                     }
-                    if let Some(paths) = string_list_option(Some(options), "paths", "git.diff")? {
+                    if let Some(paths) = options.opt_string_list("paths")? {
                         argv.push("--".to_string());
-                        argv.extend(paths);
+                        argv.extend(paths.into_iter().map(str::to_string));
                     }
                 }
                 _ => {}
@@ -491,14 +495,14 @@ pub(crate) fn register_git_builtins(vm: &mut Vm) {
         "git_tag_list",
         |ctx, args| async move {
             let repo = repo_path_arg(&args, 0, "git.tag_list")?;
-            let options = optional_dict_arg(&args, 1);
+            let options = Args::runtime("git.tag_list", &args).opt_dict(1, "options")?;
             run_git_command(
                 Some(&ctx),
                 GitCommand {
                     operation: "git.tag_list",
                     action: "git.tag_list",
                     cwd: repo,
-                    argv: tag_list_argv(options),
+                    argv: tag_list_argv(options)?,
                     mutation: GitMutation::Read,
                     affected_paths: Vec::new(),
                     data_parser: GitDataParser::TagList,
@@ -513,14 +517,14 @@ pub(crate) fn register_git_builtins(vm: &mut Vm) {
         "git_describe",
         |ctx, args| async move {
             let repo = repo_path_arg(&args, 0, "git.describe")?;
-            let options = optional_dict_arg(&args, 1);
+            let options = Args::runtime("git.describe", &args).opt_dict(1, "options")?;
             run_git_command(
                 Some(&ctx),
                 GitCommand {
                     operation: "git.describe",
                     action: "git.describe",
                     cwd: repo,
-                    argv: describe_argv(options),
+                    argv: describe_argv(options)?,
                     mutation: GitMutation::Read,
                     affected_paths: Vec::new(),
                     data_parser: GitDataParser::Describe,
@@ -538,7 +542,7 @@ pub(crate) fn register_git_builtins(vm: &mut Vm) {
             let remote = Args::runtime("git.ls_remote", &args)
                 .non_empty_string(1, "remote")?
                 .to_string();
-            let options = optional_dict_arg(&args, 2);
+            let options = Args::runtime("git.ls_remote", &args).opt_dict(2, "options")?;
             let argv = ls_remote_argv(&remote, options)?;
             run_git_command(
                 Some(&ctx),
@@ -904,14 +908,16 @@ fn parse_lease(value: &VmValue, refspec: &str) -> Result<Lease, VmError> {
         .to_string();
     match value {
         VmValue::Dict(map) => {
-            let expected_oid = string_option(Some(map), "expected_oid")
-                .or_else(|| string_option(Some(map), "oid"))
+            let mut lease = Args::runtime_options("git.push", Some(map));
+            let expected_oid = lease
+                .opt_string_any(&["expected_oid", "oid"])?
+                .map(str::to_string)
                 .ok_or_else(|| {
                     VmError::Runtime("git.push: force_with_lease requires expected_oid".to_string())
                 })?;
-            let ref_name = string_option(Some(map), "ref")
-                .or_else(|| string_option(Some(map), "ref_name"))
-                .unwrap_or(default_ref);
+            let ref_name = lease
+                .opt_string_any(&["ref", "ref_name"])?
+                .map_or(default_ref, str::to_string);
             Ok(Lease {
                 ref_name,
                 expected_oid,
@@ -1348,61 +1354,17 @@ fn repo_path_from_map(map: &crate::value::DictMap, builtin: &str) -> Result<Path
     )))
 }
 
-fn optional_dict_arg(args: &[VmValue], index: usize) -> Option<&crate::value::DictMap> {
-    args.get(index).and_then(|value| match value {
-        VmValue::Dict(map) => Some(map.as_ref()),
-        _ => None,
-    })
-}
-
-fn string_option(map: Option<&crate::value::DictMap>, key: &str) -> Option<String> {
-    map.and_then(|map| map.get(key))
-        .and_then(|value| match value {
-            VmValue::String(value) if !value.is_empty() => Some(value.to_string()),
-            _ => None,
-        })
-}
-
-fn bool_option(map: Option<&crate::value::DictMap>, key: &str) -> Option<bool> {
-    map.and_then(|map| map.get(key))
-        .and_then(|value| match value {
-            VmValue::Bool(value) => Some(*value),
-            _ => None,
-        })
-}
-
-fn string_list_option(
-    map: Option<&crate::value::DictMap>,
-    key: &str,
-    builtin: &str,
-) -> Result<Option<Vec<String>>, VmError> {
-    let Some(value) = map.and_then(|map| map.get(key)) else {
-        return Ok(None);
-    };
-    match value {
-        VmValue::List(values) => string_list_value(values, builtin, key).map(Some),
-        other => Err(VmError::TypeError(format!(
-            "{builtin}: {key} must be a list<string>, got {}",
-            other.type_name()
-        ))),
-    }
-}
-
-fn string_list_value(
-    values: &[VmValue],
-    builtin: &str,
-    name: &str,
-) -> Result<Vec<String>, VmError> {
-    values
-        .iter()
-        .map(|value| match value {
-            VmValue::String(value) => Ok(value.to_string()),
-            other => Err(VmError::TypeError(format!(
-                "{builtin}: {name} entries must be strings, got {}",
-                other.type_name()
-            ))),
-        })
-        .collect()
+/// Read a git option bag through the shared contract.
+///
+/// These readers used to return `Option<T>` and drop a wrong type on the
+/// floor, so `git.push(repo, remote, spec, { no_verify: "yes" })` pushed with
+/// hooks enabled and said nothing.
+fn git_options<'name, 'a>(
+    args: &'a [VmValue],
+    index: usize,
+    builtin: &'name str,
+) -> Result<Options<'name, 'a>, VmError> {
+    Args::runtime(builtin, args).options(index, "options")
 }
 
 fn display_path(path: &Path) -> String {

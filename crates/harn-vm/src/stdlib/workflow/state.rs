@@ -12,6 +12,7 @@ use crate::orchestration::{
     VerificationContract, WorkflowEdge, WorkflowGraph, WorkflowSkillContext,
     WorkflowSkillContextGuard,
 };
+use crate::stdlib::args::{Args, ErrorKind};
 use crate::value::{VmError, VmValue};
 use crate::vm::AsyncBuiltinCtx;
 
@@ -97,11 +98,15 @@ pub(super) struct WorkflowExecutedStageRecord {
     pub(super) produced_artifact_ids: Vec<String>,
 }
 
-pub(super) fn parse_options_arg(args: &[VmValue], index: usize) -> crate::value::DictMap {
-    args.get(index)
-        .and_then(|v| v.as_dict())
+pub(super) fn parse_options_arg(
+    args: &[VmValue],
+    index: usize,
+    context: &str,
+) -> Result<crate::value::DictMap, VmError> {
+    Ok(Args::runtime(context, args)
+        .opt_dict(index, "options")?
         .cloned()
-        .unwrap_or_default()
+        .unwrap_or_default())
 }
 
 pub(super) fn string_list_to_vm(values: &[String]) -> VmValue {
@@ -117,33 +122,21 @@ pub(super) fn parse_state_id_arg(
     value: Option<&VmValue>,
     context: &str,
 ) -> Result<String, VmError> {
-    value
-        .map(|value| value.display())
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| VmError::Runtime(format!("{context}: missing workflow state id")))
+    Args::single(context, ErrorKind::Runtime, value)
+        .non_empty_string(0, "state_id")
+        .map(str::to_string)
 }
 
 pub(super) fn parse_string_list_arg(
     value: Option<&VmValue>,
     context: &str,
 ) -> Result<Vec<String>, VmError> {
-    let Some(value) = value else {
-        return Ok(Vec::new());
-    };
-    match value {
-        VmValue::Nil => Ok(Vec::new()),
-        VmValue::List(values) => values
-            .iter()
-            .enumerate()
-            .map(|(index, value)| match value {
-                VmValue::String(text) => Ok(text.to_string()),
-                _ => Err(VmError::Runtime(format!(
-                    "{context}: expected string at index {index}"
-                ))),
-            })
-            .collect(),
-        _ => Err(VmError::Runtime(format!("{context}: expected list"))),
-    }
+    Ok(Args::single(context, ErrorKind::Runtime, value)
+        .opt_string_list(0, "values")?
+        .unwrap_or_default()
+        .into_iter()
+        .map(str::to_string)
+        .collect())
 }
 
 pub(super) fn parse_json_arg<T: serde::de::DeserializeOwned>(

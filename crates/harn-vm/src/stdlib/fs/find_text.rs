@@ -15,8 +15,7 @@ use crate::value::{VmError, VmValue};
 
 use super::ignore_policy::{self, IgnorePolicy};
 use super::{
-    bool_option, ignore_policy_option, int_option, reject_retired_long_running_option,
-    resolve_fs_path, string_list_option, string_option, u64_option, usize_option,
+    fs_options, ignore_policy_option, reject_retired_long_running_option, resolve_fs_path,
 };
 
 #[derive(Clone)]
@@ -91,66 +90,59 @@ fn parse_find_text_options(args: &[VmValue]) -> Result<FindTextOptions, VmError>
     };
     if let Some(VmValue::Dict(opts)) = args.get(2) {
         reject_retired_long_running_option(opts, "find_text")?;
-        options.preset = match string_option(opts, "preset").as_deref() {
-            Some("source") | Some("sources") => FindTextPreset::Source,
-            Some("default") | None => FindTextPreset::Default,
-            Some(other) => {
-                return Err(find_text_error(format!(
-                    "find_text: unknown preset `{other}`"
-                )));
-            }
-        };
+        let mut reader = fs_options(opts, "find_text");
+        options.preset =
+            match reader.opt_enum_string("preset", &["source", "sources", "default"])? {
+                Some("source" | "sources") => FindTextPreset::Source,
+                _ => FindTextPreset::Default,
+            };
         if options.preset == FindTextPreset::Source {
             options.exclude_globs = source_preset_exclude_globs();
             options.max_filesize = Some(1_048_576);
         }
-        if let Some(v) = int_option(opts, "max_depth") {
-            if v >= 0 {
-                options.max_depth = Some(v as usize);
-            }
+        options.max_depth = reader.opt_usize("max_depth")?;
+        if let Some(value) = reader.opt_int_any(&["max_filesize", "max_file_size"])? {
+            options.max_filesize = u64::try_from(value).ok();
         }
-        if let Some(v) =
-            u64_option(opts, "max_filesize").or_else(|| u64_option(opts, "max_file_size"))
-        {
-            options.max_filesize = Some(v);
-        }
-        options.follow_symlinks = bool_option(opts, "follow_symlinks").unwrap_or(false);
-        options.include_hidden = bool_option(opts, "include_hidden")
-            .or_else(|| bool_option(opts, "hidden"))
+        options.follow_symlinks = reader.bool_or("follow_symlinks", false)?;
+        options.include_hidden = reader
+            .opt_bool_any(&["include_hidden", "hidden"])?
             .unwrap_or(options.include_hidden);
         options.ignore_policy = ignore_policy_option(opts, "find_text")?;
-        options.case_insensitive = bool_option(opts, "case_insensitive")
-            .unwrap_or_else(|| !bool_option(opts, "case_sensitive").unwrap_or(true));
-        options.fixed_strings = bool_option(opts, "fixed_strings").unwrap_or(true);
-        options.include_globs = string_list_option(opts, "include")
-            .into_iter()
-            .chain(string_list_option(opts, "include_globs"))
-            .collect();
-        options
-            .exclude_globs
-            .extend(string_list_option(opts, "exclude"));
-        options
-            .exclude_globs
-            .extend(string_list_option(opts, "exclude_globs"));
-        if let Some(v) = int_option(opts, "max_matches") {
-            options.max_matches = usize::try_from(v.max(1)).unwrap_or(usize::MAX);
-        }
-        options.mode = match string_option(opts, "mode").as_deref() {
-            Some("count") => FindTextMode::Count,
-            Some("exists") | Some("any") => FindTextMode::Exists,
-            Some("hits") | Some("list") | None => FindTextMode::Hits,
-            Some(other) => {
-                return Err(find_text_error(format!(
-                    "find_text: unknown mode `{other}`"
-                )));
-            }
+        options.case_insensitive = match reader.opt_bool("case_insensitive")? {
+            Some(value) => value,
+            None => !reader.bool_or("case_sensitive", true)?,
         };
+        options.fixed_strings = reader.bool_or("fixed_strings", true)?;
+        options.include_globs = reader
+            .opt_string_or_list("include")?
+            .into_iter()
+            .chain(reader.opt_string_or_list("include_globs")?)
+            .map(str::to_string)
+            .collect();
+        for key in ["exclude", "exclude_globs"] {
+            options.exclude_globs.extend(
+                reader
+                    .opt_string_or_list(key)?
+                    .into_iter()
+                    .map(str::to_string),
+            );
+        }
+        if let Some(value) = reader.opt_int("max_matches")? {
+            options.max_matches = usize::try_from(value.max(1)).unwrap_or(usize::MAX);
+        }
+        options.mode =
+            match reader.opt_enum_string("mode", &["count", "exists", "any", "hits", "list"])? {
+                Some("count") => FindTextMode::Count,
+                Some("exists" | "any") => FindTextMode::Exists,
+                _ => FindTextMode::Hits,
+            };
         if options.mode == FindTextMode::Exists {
             options.max_matches = 1;
         }
-        options.parallel = bool_option(opts, "parallel").unwrap_or(false);
-        options.threads = usize_option(opts, "threads").filter(|threads| *threads > 0);
-        options.background = bool_option(opts, "background").unwrap_or(false);
+        options.parallel = reader.bool_or("parallel", false)?;
+        options.threads = reader.opt_usize("threads")?.filter(|threads| *threads > 0);
+        options.background = reader.bool_or("background", false)?;
     }
     Ok(options)
 }

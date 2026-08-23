@@ -258,7 +258,7 @@ async fn sleep_ms_impl(
 fn mock_time_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let Some(ms) = args.first().and_then(|a| a.as_int()) else {
         return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-            "mock_time(ms): expected an integer millisecond timestamp",
+            "mock_time(ms): expected an int millisecond timestamp",
         ))));
     };
     push_mock(ms);

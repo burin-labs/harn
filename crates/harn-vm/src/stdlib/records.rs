@@ -20,6 +20,7 @@ use crate::orchestration::{
     ContextPackSuggestionOptions, ContextPolicy, CrystallizationTrace, CrystallizeOptions,
     ReplayFixture,
 };
+use crate::stdlib::args::Args;
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
@@ -201,10 +202,9 @@ fn require_string_arg(
     builtin: &str,
     field: &str,
 ) -> Result<String, VmError> {
-    args.get(index)
-        .map(|value| value.display())
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| VmError::Runtime(format!("{builtin}: missing {field}")))
+    Args::runtime(builtin, args)
+        .non_empty_string(index, field)
+        .map(str::to_string)
 }
 
 fn require_text_arg(

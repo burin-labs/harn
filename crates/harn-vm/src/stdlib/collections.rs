@@ -1,18 +1,25 @@
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::sync::Arc;
 
+use crate::stdlib::args::{ArgError, Args, ErrorKind, Expected};
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{value_structural_hash_key, DictRetain, VmError, VmValue};
 use crate::vm::{AsyncBuiltinCtx, Vm};
 
+/// A dict argument, with `nil` read as the empty dict — the collection
+/// builtins compose, so a missing intermediate should merge as nothing
+/// rather than fail.
 fn dict_arg(value: &VmValue, builtin: &str) -> Result<Arc<crate::value::DictMap>, VmError> {
     match value {
-        VmValue::Dict(d) => Ok(Arc::clone(d)),
+        VmValue::Dict(dict) => Ok(Arc::clone(dict)),
         VmValue::Nil => Ok(Arc::new(crate::value::DictMap::new())),
-        other => Err(VmError::TypeError(format!(
-            "{builtin}: expected dict, got {}",
-            other.type_name()
-        ))),
+        other => Err(ArgError::wrong_type(
+            builtin,
+            ErrorKind::TypeError,
+            "data",
+            Expected::DICT,
+            other,
+        )),
     }
 }
 
@@ -28,10 +35,13 @@ fn key_list_arg<'a>(value: &'a VmValue, builtin: &str) -> Result<&'a [VmValue], 
     match value {
         VmValue::List(items) => Ok(items.as_slice()),
         VmValue::Set(set) => Ok(set.items()),
-        other => Err(VmError::TypeError(format!(
-            "{builtin}: keys argument must be a list or set, got {}",
-            other.type_name()
-        ))),
+        other => Err(ArgError::wrong_type(
+            builtin,
+            ErrorKind::TypeError,
+            "keys",
+            Expected::LIST_OR_SET,
+            other,
+        )),
     }
 }
 
@@ -40,23 +50,21 @@ fn current_async_vm(ctx: &AsyncBuiltinCtx, _builtin: &str) -> Vm {
 }
 
 fn list_arg<'a>(args: &'a [VmValue], builtin: &str) -> Result<&'a Arc<Vec<VmValue>>, VmError> {
-    match args.first() {
-        Some(VmValue::List(items)) => Ok(items),
-        Some(other) => Err(VmError::TypeError(format!(
-            "{builtin}: first argument must be a list, got {}",
-            other.type_name()
-        ))),
-        None => Err(VmError::Runtime(format!(
-            "{builtin}: first argument must be a list"
-        ))),
-    }
+    Args::new(builtin, args).list_shared(0, "items")
 }
 
-fn positive_usize_arg(args: &[VmValue], index: usize, default: usize, _builtin: &str) -> usize {
-    args.get(index)
-        .and_then(VmValue::as_int)
-        .unwrap_or(default as i64)
-        .max(1) as usize
+/// A size argument, clamped to at least one. Absent means the builtin's own
+/// default; a non-int is an error rather than a silent fallback to it.
+fn positive_usize_arg(
+    args: &[VmValue],
+    index: usize,
+    default: usize,
+    builtin: &str,
+) -> Result<usize, VmError> {
+    let Some(value) = Args::new(builtin, args).opt_int(index, "size")? else {
+        return Ok(default);
+    };
+    Ok(usize::try_from(value.max(1)).unwrap_or(usize::MAX))
 }
 
 /// Coerce a discriminator value (returned by a `group_by` / `count_by`
@@ -93,7 +101,7 @@ pub(crate) fn register_collection_builtins(vm: &mut Vm) {
 #[harn_builtin(exposure = "pure", effects = [], sig = "chunk(items: list, size: int) -> list", kind = "async", category = "collections")]
 async fn chunk_impl(_ctx: AsyncBuiltinCtx, args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let items = list_arg(&args, "chunk")?;
-    let size = positive_usize_arg(&args, 1, 1, "chunk");
+    let size = positive_usize_arg(&args, 1, 1, "chunk")?;
     Ok(VmValue::List(Arc::new(
         items
             .chunks(size)
@@ -105,8 +113,8 @@ async fn chunk_impl(_ctx: AsyncBuiltinCtx, args: Vec<VmValue>) -> Result<VmValue
 #[harn_builtin(exposure = "pure", effects = [], sig = "window(items: list, size?: int, step?: int) -> list", kind = "async", category = "collections")]
 async fn window_impl(_ctx: AsyncBuiltinCtx, args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let items = list_arg(&args, "window")?;
-    let size = positive_usize_arg(&args, 1, 2, "window");
-    let step = positive_usize_arg(&args, 2, 1, "window");
+    let size = positive_usize_arg(&args, 1, 2, "window")?;
+    let step = positive_usize_arg(&args, 2, 1, "window")?;
     if size > items.len() {
         return Ok(VmValue::List(Arc::new(Vec::new())));
     }

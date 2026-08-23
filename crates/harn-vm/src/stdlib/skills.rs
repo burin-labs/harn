@@ -490,7 +490,7 @@ fn render_always_on_catalog_impl(args: &[VmValue], _out: &mut String) -> Result<
         Some(VmValue::Nil) | None => 2000usize,
         Some(_) => {
             return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                "render_always_on_catalog: second argument must be a positive integer budget",
+                "render_always_on_catalog: second argument must be a positive int budget",
             ))));
         }
     };
@@ -720,7 +720,7 @@ fn skills_activation_evidence_impl(
         Some(VmValue::Nil) | None => 2000usize,
         Some(_) => {
             return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                "skills_activation_evidence: 'budget' must be a positive integer",
+                "skills_activation_evidence: 'budget' must be a positive int",
             ))));
         }
     };
@@ -729,7 +729,7 @@ fn skills_activation_evidence_impl(
         Some(VmValue::Nil) | None => None,
         Some(_) => {
             return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                "skills_activation_evidence: 'catalog_limit' must be a positive integer",
+                "skills_activation_evidence: 'catalog_limit' must be a positive int",
             ))));
         }
     };

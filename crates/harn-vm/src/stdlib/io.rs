@@ -931,21 +931,15 @@ fn unmock_stdin_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue,
     doc = "Override terminal detection for stdin, stdout, or stderr."
 )]
 fn mock_tty_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    let stream = args.first().map(|a| a.display()).unwrap_or_default();
-    let is_tty = matches!(args.get(1), Some(VmValue::Bool(true)));
+    let reader = Args::thrown("mock_tty", args);
+    let stream = reader.enum_string(0, "stream", &["stdin", "stdout", "stderr"])?;
+    let is_tty = reader.bool(1, "is_tty")?;
     TTY_MOCK.with(|t| {
         let mut mock = t.borrow_mut();
-        match stream.as_str() {
+        match stream {
             "stdin" => mock.stdin = Some(is_tty),
             "stdout" => mock.stdout = Some(is_tty),
-            "stderr" => mock.stderr = Some(is_tty),
-            other => {
-                return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                    format!(
-                    "mock_tty: invalid stream '{other}'. Expected 'stdin', 'stdout', or 'stderr'."
-                ),
-                ))));
-            }
+            _ => mock.stderr = Some(is_tty),
         }
         Ok(VmValue::Nil)
     })

@@ -62,6 +62,7 @@ use url::Url;
 
 use crate::llm::vm_value_to_json;
 use crate::schema::json_to_vm_value;
+use crate::stdlib::args::Args;
 use crate::stdlib::clock;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
@@ -167,7 +168,9 @@ fn oauth_dynreg_validate_metadata_impl(
     args: &[VmValue],
     _out: &mut String,
 ) -> Result<VmValue, VmError> {
-    let metadata = require_dict_arg(args, 0, "__oauth_dynreg_validate_metadata", "metadata")?;
+    let metadata = Args::runtime("__oauth_dynreg_validate_metadata", args)
+        .dict(0, "metadata")?
+        .clone();
     Ok(validate_metadata_value(&metadata))
 }
 
@@ -181,7 +184,9 @@ fn oauth_dynreg_build_client_metadata_impl(
     args: &[VmValue],
     _out: &mut String,
 ) -> Result<VmValue, VmError> {
-    let metadata = require_dict_arg(args, 0, "__oauth_dynreg_build_client_metadata", "metadata")?;
+    let metadata = Args::runtime("__oauth_dynreg_build_client_metadata", args)
+        .dict(0, "metadata")?
+        .clone();
     build_client_metadata_value(&metadata)
 }
 
@@ -195,18 +200,12 @@ fn oauth_dynreg_build_authorization_server_metadata_impl(
     args: &[VmValue],
     _out: &mut String,
 ) -> Result<VmValue, VmError> {
-    let provider = require_dict_arg(
-        args,
-        0,
-        "__oauth_dynreg_build_authorization_server_metadata",
-        "provider",
-    )?;
-    let overrides = optional_dict_arg(
-        args,
-        1,
-        "__oauth_dynreg_build_authorization_server_metadata",
-        "overrides",
-    )?;
+    let provider = Args::runtime("__oauth_dynreg_build_authorization_server_metadata", args)
+        .dict(0, "provider")?
+        .clone();
+    let overrides = Args::runtime("__oauth_dynreg_build_authorization_server_metadata", args)
+        .opt_dict(1, "overrides")?
+        .cloned();
     build_authorization_server_metadata_value(&provider, overrides.as_ref())
 }
 
@@ -218,7 +217,9 @@ fn oauth_dynreg_build_authorization_server_metadata_impl(
 )]
 fn oauth_dynreg_register_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let handle = require_handle(args, 0, "__oauth_dynreg_register")?;
-    let metadata = require_dict_arg(args, 1, "__oauth_dynreg_register", "metadata")?;
+    let metadata = Args::runtime("__oauth_dynreg_register", args)
+        .dict(1, "metadata")?
+        .clone();
     register_client_value(&handle, &metadata)
 }
 
@@ -230,7 +231,9 @@ fn oauth_dynreg_register_impl(args: &[VmValue], _out: &mut String) -> Result<VmV
 )]
 fn oauth_dynreg_get_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let handle = require_handle(args, 0, "__oauth_dynreg_get")?;
-    let client_id = required_string_arg(args, 1, "__oauth_dynreg_get", "client_id")?;
+    let client_id = Args::runtime("__oauth_dynreg_get", args)
+        .string(1, "client_id")?
+        .to_string();
     Ok(get_client_value(&handle, &client_id))
 }
 
@@ -852,72 +855,17 @@ fn require_handle(
     }
 }
 
-fn require_dict_arg(
-    args: &[VmValue],
-    index: usize,
-    fn_name: &str,
-    arg_name: &str,
-) -> Result<crate::value::DictMap, VmError> {
-    match args.get(index) {
-        Some(VmValue::Dict(dict)) => Ok(dict.as_ref().clone()),
-        Some(other) => Err(VmError::Runtime(format!(
-            "{fn_name}: `{arg_name}` must be a dict, got {}",
-            other.type_name()
-        ))),
-        None => Err(VmError::Runtime(format!(
-            "{fn_name}: `{arg_name}` argument is required"
-        ))),
-    }
-}
-
-fn optional_dict_arg(
-    args: &[VmValue],
-    index: usize,
-    fn_name: &str,
-    arg_name: &str,
-) -> Result<Option<crate::value::DictMap>, VmError> {
-    match args.get(index) {
-        None | Some(VmValue::Nil) => Ok(None),
-        Some(VmValue::Dict(dict)) => Ok(Some(dict.as_ref().clone())),
-        Some(other) => Err(VmError::Runtime(format!(
-            "{fn_name}: `{arg_name}` must be a dict or nil, got {}",
-            other.type_name()
-        ))),
-    }
-}
-
-fn required_string_arg(
-    args: &[VmValue],
-    index: usize,
-    fn_name: &str,
-    arg_name: &str,
-) -> Result<String, VmError> {
-    match args.get(index) {
-        Some(VmValue::String(s)) => Ok(s.to_string()),
-        Some(other) => Err(VmError::Runtime(format!(
-            "{fn_name}: `{arg_name}` must be a string, got {}",
-            other.type_name()
-        ))),
-        None => Err(VmError::Runtime(format!(
-            "{fn_name}: `{arg_name}` argument is required"
-        ))),
-    }
-}
-
 fn require_string_field(
     metadata: &crate::value::DictMap,
-    field: &str,
+    field: &'static str,
     owner: &str,
 ) -> Result<String, VmError> {
-    match metadata.get(field) {
-        Some(VmValue::String(s)) if !s.is_empty() => Ok(s.to_string()),
-        Some(VmValue::String(_)) => Err(VmError::Runtime(format!(
-            "oauth dynamic registration: {owner}.{field} must not be empty"
-        ))),
-        _ => Err(VmError::Runtime(format!(
-            "oauth dynamic registration: {owner}.{field} is required"
-        ))),
-    }
+    Args::runtime_options(
+        &format!("oauth dynamic registration: {owner}"),
+        Some(metadata),
+    )
+    .non_empty_string(field)
+    .map(str::to_string)
 }
 
 #[cfg(test)]

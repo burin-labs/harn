@@ -59,7 +59,7 @@ pub(super) fn host_workflow_prepare_run_builtin(
             .ok_or_else(|| VmError::Runtime("workflow_execute: missing workflow".to_string()))?,
     )?;
     let artifacts = parse_artifact_list(args.get(2))?;
-    let options = parse_options_arg(args, 3);
+    let options = parse_options_arg(args, 3, "__host_workflow_stage_begin")?;
     let state = prepare_workflow_state(task, graph, artifacts, &options)?;
     let control = workflow_control_to_vm(&state, true)?;
     insert_workflow_state(state);
@@ -90,7 +90,7 @@ pub(super) async fn host_workflow_stage_prepare_builtin(
         })?;
     state.ready_nodes =
         parse_string_list_arg(args.get(2), "__host_workflow_stage_prepare ready_nodes")?;
-    let options = parse_options_arg(&args, 3);
+    let options = parse_options_arg(&args, 3, "__host_workflow_stage_prepare")?;
     let (state, plan) = prepare_workflow_stage_state(&ctx, state, node_id, &options).await?;
     insert_workflow_state(state);
     Ok(plan)
@@ -266,7 +266,7 @@ pub(super) async fn host_workflow_map_execute_branch_builtin(
     let item: MapWorkItem = parse_json_arg(args.get(2), HOST_WORKFLOW_MAP_EXECUTE_BRANCH_BUILTIN)?;
     let branch_artifact: ArtifactRecord =
         parse_json_arg(args.get(3), HOST_WORKFLOW_MAP_EXECUTE_BRANCH_BUILTIN)?;
-    let options = parse_options_arg(&args, 4);
+    let options = parse_options_arg(&args, 4, "__host_workflow_map_branch_artifact")?;
     let index = map_item_index(&item);
     let branch = if let Some(stage_node) = plan.stage_node {
         let task_label = options

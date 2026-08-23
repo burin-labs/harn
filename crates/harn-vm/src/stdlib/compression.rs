@@ -5,6 +5,7 @@ use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
 use flate2::{Compression, GzBuilder};
 
+use crate::stdlib::args::{ArgError, Args, ErrorKind};
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
@@ -24,35 +25,15 @@ pub(crate) const MAX_DECOMPRESSED_BYTES: u64 = 100 * 1024 * 1024;
 /// option from the args dict at `index`, falling back to
 /// [`MAX_DECOMPRESSED_BYTES`] when absent.
 fn decompress_cap(args: &[VmValue], index: usize, builtin: &str) -> Result<u64, VmError> {
-    let Some(value) = args.get(index) else {
-        return Ok(MAX_DECOMPRESSED_BYTES);
-    };
-    let options = match value {
-        VmValue::Nil => return Ok(MAX_DECOMPRESSED_BYTES),
-        VmValue::Dict(options) => options.as_ref(),
-        other => {
-            return Err(builtin_error(
-                builtin,
-                format!("options must be a dict, got {}", other.type_name()),
-            ));
-        }
-    };
-    let raw = options
-        .get("max_decompressed_bytes")
-        .or_else(|| options.get("maxDecompressedBytes"));
-    match raw {
-        None | Some(VmValue::Nil) => Ok(MAX_DECOMPRESSED_BYTES),
-        Some(VmValue::Int(value)) if *value > 0 => Ok(*value as u64),
-        Some(VmValue::Int(_)) => Err(builtin_error(
+    let mut options = Args::runtime(builtin, args).options(index, "options")?;
+    match options.opt_int_any(&["max_decompressed_bytes", "maxDecompressedBytes"])? {
+        None => Ok(MAX_DECOMPRESSED_BYTES),
+        Some(cap) if cap > 0 => Ok(cap as u64),
+        Some(_) => Err(ArgError::constraint(
             builtin,
-            "max_decompressed_bytes must be a positive integer",
-        )),
-        Some(other) => Err(builtin_error(
-            builtin,
-            format!(
-                "max_decompressed_bytes must be a positive integer, got {}",
-                other.type_name()
-            ),
+            ErrorKind::Runtime,
+            "max_decompressed_bytes",
+            "must be > 0",
         )),
     }
 }
@@ -87,21 +68,7 @@ fn builtin_error(builtin: &str, message: impl std::fmt::Display) -> VmError {
 }
 
 fn expect_bytes<'a>(args: &'a [VmValue], index: usize, builtin: &str) -> Result<&'a [u8], VmError> {
-    match args.get(index) {
-        Some(VmValue::Bytes(bytes)) => Ok(bytes.as_slice()),
-        Some(other) => Err(builtin_error(
-            builtin,
-            format!(
-                "expected bytes at argument {}, got {}",
-                index + 1,
-                other.type_name()
-            ),
-        )),
-        None => Err(builtin_error(
-            builtin,
-            format!("missing argument {}", index + 1),
-        )),
-    }
+    Args::runtime(builtin, args).bytes(index, "input")
 }
 
 fn expect_bytes_or_string(
@@ -109,22 +76,9 @@ fn expect_bytes_or_string(
     index: usize,
     builtin: &str,
 ) -> Result<Vec<u8>, VmError> {
-    match args.get(index) {
-        Some(VmValue::Bytes(bytes)) => Ok(bytes.as_ref().clone()),
-        Some(VmValue::String(text)) => Ok(text.as_bytes().to_vec()),
-        Some(other) => Err(builtin_error(
-            builtin,
-            format!(
-                "expected bytes or string at argument {}, got {}",
-                index + 1,
-                other.type_name()
-            ),
-        )),
-        None => Err(builtin_error(
-            builtin,
-            format!("missing argument {}", index + 1),
-        )),
-    }
+    Args::runtime(builtin, args)
+        .bytes_or_string(index, "input")
+        .map(<[u8]>::to_vec)
 }
 
 fn optional_int(
@@ -134,14 +88,9 @@ fn optional_int(
     builtin: &str,
     param: &str,
 ) -> Result<i64, VmError> {
-    match args.get(index) {
-        Some(VmValue::Int(value)) => Ok(*value),
-        Some(VmValue::Nil) | None => Ok(default),
-        Some(other) => Err(builtin_error(
-            builtin,
-            format!("{param} must be an int, got {}", other.type_name()),
-        )),
-    }
+    Ok(Args::runtime(builtin, args)
+        .opt_int(index, param)?
+        .unwrap_or(default))
 }
 
 fn expect_level(
