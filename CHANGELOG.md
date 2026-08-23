@@ -9,6 +9,366 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.112
+
+### Breaking
+
+- `[providers.setup]` and every table under it now reject keys they do not
+  recognize, matching `[[providers.service.operations]]`. A misspelled or
+  unsupported setup field used to pass `harn package verify --strict` and then
+  be discarded at runtime, so a green strict verify did not prove a setup field
+  was parsed. The same treatment now applies to `[[providers]]`,
+  `[providers.connector]`, `[providers.oauth]`, and the table form of
+  `[providers.capabilities]`. A manifest carrying a stray connector key fails
+  with the offending key named and the accepted keys listed. (#6711)
+
+### Added
+
+- `harn run` and `harn test` now exit `125` when Harn could not prepare the run,
+  instead of the `1` the program itself exits with when it fails. Materializing
+  locked dependencies, installing manifest triggers and hooks, loading provider
+  connectors, and launching the session environment all happen before the program
+  starts, and a caller that shells out to Harn could not previously tell "your
+  dependencies could not be prepared" from "your code returned a failure". `125`
+  is reserved and documented alongside `124` for an interrupted run. A compile
+  error stays `1`, because a program that does not compile is the program
+  failing, and so does a `.harnpack` signature refusal, because that is a verdict
+  on the artifact rather than a fault in the host. `harn test` materializes the
+  suite's dependencies once before any case runs, so an unpreparable lock reports
+  once rather than as every case failing. Under `--json` the terminal `error`
+  event names the phase that failed. (#6719)
+- **Host-authored completion prompts can use Harn's resolved answer format.**
+  `agent_completion_prompt_bindings` exposes the active final-answer phrase and
+  exact done-sentinel form from the same typed contract used by the built-in
+  agent loop, so embedders no longer copy the `native`/`json`/`text` switch
+  into product prompt prose (#6822).
+- Publish committed session-metadata changes to a `SessionChangeObserver` store
+  hook, and push them to a connected ACP client as `session_info_update`, so a
+  surface that already rendered a session's name learns when the name moves.
+- Diagrams on harnlang.com can be opened full-screen. A diagram scaled down to fit
+  the article column is often too small to read, so clicking one — or pressing its
+  expand button, which is where keyboard and screen-reader users find it — opens
+  the same SVG in a viewer that zooms and pans. Scroll or `+`/`-` to zoom, drag to
+  pan, `0` to fit, `Escape` to close.
+- `harn serve mcp` on a `pub fn` export surface now serves the
+  `io.modelcontextprotocol/tasks` extension for entrypoints declared `@job`. The
+  job runs in the background, `tools/call` returns a task id immediately, and the
+  result is collected with `tasks/get`; progress notifications are unaffected. The
+  capability is advertised only when the script has at least one `@job` export,
+  and a client that does not declare the extension still calls those exports
+  inline.
+- Documentation code blocks can name the file they came from. A fence opts in
+  with `title`, as in ```` ```harn title="example.harn" ````, and renders as a
+  figure with the filename as its caption. The introduction's first example uses
+  it to show that Harn programs are `.harn` files. Code blocks are also bounded
+  by an even hairline on all four sides now, rather than a heavy accent rail down
+  the left edge, and the site ships `favicon.ico` and `apple-touch-icon.png`
+  alongside the existing SVG so clients that only ask for `/favicon.ico` no
+  longer get a 404.
+
+### Changed
+
+- Made the embedded standard library host-neutral, including Harn-owned
+  crystallization paths and evaluator defaults, while preserving explicit read
+  compatibility for legacy Burin state. A source-tier CI ratchet now rejects
+  unreviewed host-specific names.
+- **Focused nextest filters now have a shell-opaque Make target (#6906).**
+  `make test-focused` accepts native expressions, package selectors, and
+  integration-test binaries through typed environment variables without
+  caller-managed escaping at the Make/shell boundary.
+- Repository policy CI now reports forbidden flaky-test patterns before running its slower setup and integration sweeps.
+- Run native Windows admission once on the merge-group candidate, reuse its
+  exact successful proof on main, and keep uncertain main fallbacks on the
+  capacity-safe Blacksmith tier unless the existing kill switch is enabled.
+- Provider pricing can now carry dated promotions without losing the durable rate
+  card. Catalog refreshes also reach live sources directly and handle provider
+  model indexes more accurately. Built-in tool probes now use the same provider
+  adapters as `llm_call`, including streaming and Responses-style routes.
+- Builtin argument errors now speak one language. Every stdlib builtin reads
+  its arguments through a single contract (`stdlib::args`) instead of the
+  per-module helpers that had accumulated, so the same mistake produces the
+  same sentence wherever you hit it, and the type names in those sentences
+  are the ones `type_of` returns — `int` rather than `integer`, `bool`
+  rather than `boolean`, `dict` rather than `record` or `object`.
+
+  A wrong type and a missing argument now read differently, a bad element in
+  a `list<string>` argument names its own type, and a mistyped option bag is
+  rejected before any option is read. Several builtins — `connector_call`,
+  `metrics_inc`, `sqlite_query` and its siblings — previously rendered a
+  non-string argument through `display()` instead of rejecting it, so a dict
+  passed where a string belonged reached the connector or the database as
+  text; those now fail with a type error.
+- Stdlib builtins no longer ignore an option you spelled wrong. Every option
+  bag and positional argument is read through the shared contract, so a value
+  of the wrong type is reported instead of silently falling back to a default:
+  `{ secure: "false" }` on a cookie no longer sets the flag, `{ background:
+  "yes" }` on an `fs` walk is no longer dropped, and `mkdir({a: 1})` no longer
+  creates a directory named by the dict's own rendering.
+
+  Options that accept more than one spelling — `max_filesize` /
+  `max_file_size`, `include_hidden` / `hidden`, `http_only` / `HttpOnly` —
+  now declare their alternatives, so all of them are recognised and a wrong
+  type under any spelling still fails.
+
+  Argument errors name the offending argument and use the type names
+  `type_of` returns: `int` rather than `integer`, `bool` rather than
+  `boolean`, `dict` rather than `record` or `object`, and `an int or a float`
+  rather than `a number`.
+- The bare `glm` alias now resolves to GLM-5.3 rather than GLM-5.2. Z.AI
+  publishes GLM-5.3 as a same-price, same-wire-shape replacement built on the
+  same base model, and the retired Cerebras and NVIDIA GLM rows already name it
+  in `superseded_by`. `glm-5.2` still resolves to GLM-5.2 for pinned callers,
+  and `glm-5.3` and `openrouter-glm-5.3` are now addressable by name.
+- Tightened the documentation site's reading layout. The docs shell widens from
+  1152px to 1344px, which lets the article reach the `max-w-3xl` cap it was
+  already written for instead of being squeezed to 568px. Body text drops from
+  16px/1.75 to 15px/1.65, cutting the vertical cost of a line from 28px to
+  24.75px, and prose blocks are capped at a ~70-character measure so the extra
+  width goes to code, tables, and diagrams rather than to longer lines. The
+  previous/next links at the foot of each page are now two plain text links on a
+  single rule instead of two bordered cards.
+- The structured completion judge (`done_judge` and `verify_completion_judge`)
+  now returns one bounded object, `{verdict: "done" | "continue", detail}`, in
+  place of the previous five-field verdict. `detail` is capped at 240 characters
+  and carries the supporting evidence on `done` or the single most important gap
+  and next action on `continue`.
+
+  The old contract paired two unbounded string arrays with two unbounded prose
+  fields, so a judge model with a small output envelope could spend its entire
+  budget restating a decision it had already made and get cut off mid-array. The
+  structured call then failed and the round trip produced no verdict, and a retry
+  reproduced the same overrun because the schema, not the sampling, asked for the
+  long answer. The bounded contract makes that overrun unreachable by
+  construction.
+
+  The completion judge now also judges content only. Its prompts hand wire format
+  back to the deterministic completion layer: response markers and sentinels are
+  enforced there, their absence is never grounds for a veto, and a `continue`
+  must name a substantive next action rather than a reformat or a restatement.
+  The judge's user prompt previously still taught the superseded field names,
+  which both contradicted the schema it was sent and invited the long answer the
+  bounded contract exists to prevent.
+
+  Responses in the superseded shape still decode, so cached and replayed judge
+  responses keep their decision instead of reading as an absent verdict. The
+  `judge_decision` agent event drops the now-unreachable `specific_gaps` and
+  `accepted_evidence` fields; the same audit content reaches consumers through
+  `reasoning` and `next_step`. On that event, an approval from the model judge
+  now reports `verdict: "done"` rather than `verdict: "accept"`, matching the
+  value the fail-open path already emitted. The completion directive's own
+  `action` contract is unchanged and still reports `accept`.
+- Compiler front end is substantially faster: the lexer scans bytes and
+  slices token text instead of walking a `Vec<char>` (~1.5x tokenize
+  throughput), and the type checker shares scope tables structurally
+  instead of deep-cloning them on every block entry (~1.8x whole-file
+  typecheck), with the legacy-capability env flag cached and builtin
+  signature fallback lookups indexed. The shared AST visitor no longer
+  allocates per visited node, which also speeds the kernel compiler's
+  module-context and closure-capture passes plus every visit-based lint.
+  Cold-start compiles, `harn check`, `harn fmt`/`harn lint`, and the LSP
+  all inherit the win.
+- VM call and dispatch hot paths shed fixed overhead: entering a user
+  function no longer clones the function-name `String` (per-call
+  allocations drop from 3 to 2), steady-state inline-cache hits on
+  arithmetic/comparison and direct calls no longer rewrite the cache
+  entry, string-constant pushes are lock-free, dict `for`-loops stop
+  re-allocating keys and re-interning literal entry keys per iteration,
+  and one-part string interpolation re-shares the existing string.
+
+### Fixed
+
+- Use inferred binding types before offering HARN-LNT-032 Boolean-comparison
+  fixes, so optional values cannot receive behavior-changing rewrites.
+- Stop advertising the reserved Merge Captain `live` backend in CLI help while preserving its explicit fail-loudly contract.
+- Hosted connector workers now resolve credentials through the same configured
+  secret-provider boundary every other connector path uses. The worker built its
+  connector context with an empty provider under its own `harn-worker`
+  namespace, so a credentialed connector reported a missing key even when the
+  credential was stored correctly, and a `@job` calling `harness.secrets.read`
+  failed with no provider bound at all. A host with no usable secret backend now
+  fails at worker startup with a distinct `secret_backend_unavailable` error
+  instead of letting every read report a credential that was never there — being
+  told to configure the host and being told to store a credential are different
+  answers. (#6716)
+- Normalize active model transcripts into the canonical run-record sidecar and
+  omit model-transcript pointers unless the exact JSONL artifact is readable.
+- Automatic agent fallback no longer substitutes a different catalog-equivalent
+  model on local providers such as Ollama, where that sibling may not be
+  installed. Explicit routing policies can still opt into known local fallbacks.
+- **Unknown agent tool-format routes (#6751).** Agent loops now resolve the
+  safe JSON fallback once when route information is missing and persist a
+  `capability_gap` event that names the unresolved reason and chosen fallback,
+  keeping prompt assembly, parsing, and run evidence on the same format.
+- **Parallel test module preparation (#6753).** Workers now single-flight
+  identical compilation through one shared immutable bytecode cache, so
+  compile-heavy suites no longer rebuild the same module graph per worker.
+  Module cache identities now also carry the typed imported interface used by
+  lowering, preventing same-source artifacts with different enum or callable
+  authority from aliasing in memory, on disk, or through warm graph links.
+- Refused, unavailable, or malformed optional toolchain discovery no longer
+  invalidates an already reviewed parent authority lease. Expiry, unreviewed
+  probes, and receipt-persistence failures remain terminal. Probe-runner error
+  details are no longer copied into durable authority receipts.
+- Session imports now record source and result provenance in the project event log.
+  Task cancellation preserves completed and failed outcomes and is idempotent.
+  Repair-claimed turns expose their iteration and tool as typed agent-event fields.
+- **`harn serve api` now honors manifest-declared trusted host dispatch
+  authority (#6799).** File-backed Agents API tasks use the same runtime
+  configuration as ACP, so privileged project modules no longer fail only on
+  the HTTP transport.
+- Read-only session and pattern-learning inspection no longer creates, migrates,
+  or appends Harn state. Existing session stores are opened through SQLite's
+  read-only boundary, and legacy session events are projected in memory until a
+  writable operation performs the durable migration.
+- **One-shot path metadata persistence (#6803).**
+  `harness.project.path_metadata_set` now persists file and directory metadata
+  before returning, so later CLI processes can read the write and persistence
+  failures surface as runtime errors instead of silent data loss.
+- Sandboxed Harn processes now use the exact package-cache root selected by
+  `HARN_CACHE_DIR`, so a nested `harn run` can reuse packages installed into a
+  custom CI cache without appending an extra `harn/` directory or attempting a
+  network fetch.
+- Make the Tree-sitter parser drift gate compare the complete generated source
+  tree, including vendored runtime headers written by the pinned CLI.
+- **Missing provider credentials now name the actual selection authority
+  (#6833).** Explicit `HARN_LLM_PROVIDER` and `llm_call` selections remain
+  authoritative when their credential is unavailable, and the diagnostic now
+  distinguishes explicit, configured-default, model-derived, routing-policy,
+  and automatic selections. Config paths are named only when a provider config
+  file was loaded.
+- Restore the unused-dependency lint to a clean baseline and make it an authoritative CI check.
+- Parse PowerShell and cmd.exe commands through the typed command-safety boundary,
+  preserving exact arguments and failing closed on dynamic syntax.
+- `run_command` now honors the full `background_after_ms` inline window even when
+  progress feedback arrives first, returning fast command results without an
+  unnecessary poll turn.
+- Include the native secret-store adapter in `harn-hostlib`'s default product
+  surface so desktop keychain operations no longer depend on another crate
+  incidentally enabling the adapter, and classify inaccessible headless stores
+  as a typed capability error.
+- Keep timing-aware test shards stable across sequential invocations by making
+  sharded runs consume, but not partially rewrite, the shared timing snapshot.
+- Bound completion-judge context to recent effect and verification evidence while
+  preserving the full transcript for replay and deterministic gates.
+- Reuse the exact receipt-verified Harn CLI binary after native Windows tests instead of rebuilding it before the smoke
+  test. The receipt now carries an immutable checker snapshot, and Nextest keeps default run, worker, and worktree
+  artifacts inside each isolated test attempt instead of invalidating the proof through mutable build or runtime output.
+- `harn fmt` now indents wrapped nested expressions below the operator that owns
+  them and lays them out against their actual continuation column.
+- Give serialized Cargo probes their full compilation deadline after rust-heavy lease admission.
+- Clamp multi-line diagnostic underlines to the source line shown in terminal output.
+- Anthropic JSON Schema outputs now use the provider's native constrained-output API.
+  They work with reasoning and ordinary tools in the same request.
+- Fixed macOS setup and cleanup scripts failing when an optional Cargo or target-root list is empty.
+- **Assignment checks now catch unresolved targets before execution.** Bare
+  `_ = value`, reads from `_`, missing assignment variables, and missing names
+  inside assignment indexes now fail `harn check`; `const _ = value` and
+  `let _ = value` remain the supported discard forms.
+- Agent runs now report the exact LLM budget limit that stopped them. Budget
+  events also retain the safe pre-call cost and token projection.
+- Keep native tool-call history valid when a run switches between model providers.
+- **`tools/search` accepts a file glob spelled with the search path, and every
+  result reports how many files it searched (#7018).** Globs select against
+  each candidate's path relative to `path`, so a caller who qualified the glob
+  with the same directory they passed as `path` (`path: "src"` with
+  `glob: "src/registry.ts"`) selected zero files and read the empty result as
+  an ordinary content miss. Both spellings now reach the same file, include and
+  exclude globs normalize identically, and the response carries
+  `files_searched` so a search that examined nothing is visibly different from
+  a search that examined files and found no match.
+- **A call that exhausts its output budget is no longer retried under the same
+  cap (#7019).** A completion that billed every token its `max_tokens` allowed
+  and committed no content was classified as a transient server error and
+  re-sent with byte-identical context and the identical cap — a coin flip,
+  since the input that exhausted the budget once exhausts it again. That shape
+  is now classified `output_budget_exhausted` and treated as terminal under its
+  cap: the call raises `max_tokens` once and retries with the larger budget,
+  and a call already at the escalation ceiling fails fast to the caller's
+  fallback instead of paying for a second attempt that can only re-prove the
+  first one.
+- `harness.system.identity().username` no longer comes back empty when the
+  process has no `USER` environment variable. Containers, systemd units, and
+  cron jobs routinely have none of `USER`, `LOGNAME`, or `USERNAME` set —
+  `username` is now resolved from the passwd entry for the real uid in that
+  case, which is the answer the OS always has.
+- Priced Z.AI's GLM-5.3 route. Z.AI's rate card now lists it at GLM-5.2's
+  tariff ($1.40 in / $4.40 out / $0.26 cache hit per MTok), so cost accounting,
+  the cheapest-hosted selector, and the tool-capability audit — which skips
+  unpriced rows — all see the route.
+- Corrected two stale GLM prices read against the same sources: `glm-5-turbo`
+  is $1.20 / $4.00 / $0.24, not the GLM-4.x tariff it had been carrying, and
+  the OpenRouter GLM-5.2 mirror is $0.966 / $3.036 / $0.1932.
+- The automatic reasoning policy no longer resolves an effort level the route
+  rejects. `reasoning_effort_levels` is not always a contiguous run — GLM-5.3
+  accepts `low`, `high`, and `max` with no `medium` — and the policy's default
+  resolution for an agent or code task landed on exactly that missing rung,
+  throwing before the request was built. A policy level is a coarse intent, so
+  it now snaps to the nearest rung the route declares, resolving upward on a
+  tie. An explicit `effort` option is a wire value and still fails loudly.
+- Mermaid diagrams on harnlang.com now render as diagrams instead of printing
+  their own source. Every diagram keeps its source in a collapsed "Diagram
+  source" toggle, which is also what a reader without JavaScript sees, and pages
+  without a diagram never download the renderer.
+
+  Code blocks in every language other than Harn are highlighted again. Registering
+  the Harn grammar with `rehype-highlight` had replaced the default language set
+  rather than extending it, so `bash`, `json`, `toml`, `rust`, and the rest had
+  been rendering as plain text. `harn-prompt` blocks now highlight too, using the
+  generated prompt-template grammar.
+
+  The docs site also picks up an accessibility pass: a skip-to-content link,
+  named navigation landmarks, `aria-current` on the active page, wide tables that
+  scroll without losing their row and column semantics, keyboard-reachable code
+  blocks, and syntax and muted-text colors that hold WCAG AA contrast in both
+  themes. `/favicon.svg`, previously a 404 on every page, now exists.
+- Open the canonical session store behind `/v1/session-store` through the runtime
+  opener instead of a bare handle, restoring the event redaction that route had
+  been persisting without.
+
+  Stop advertising `transcript_summarize` in editor completion, hover, and the
+  builtin reference: it has no implementation. Use `transcript_compact` with
+  `strategy: "llm"`.
+- **Documentation checks no longer fail when a PR extends the provider catalog
+  schema (#7036).** `check-docs` is split into `check-docs-portable`, which any
+  released binary can judge, and `check-docs-exact`, which parses artifacts the
+  commit under test is allowed to move. The lightweight CI job runs only the
+  portable half; the source-built lane owns both. A check that parses a moving
+  schema no longer runs a pinned parser.
+- Completion policies now see the turn the model actually emitted. The judge
+  payload carried only the projected turn, from which the parser has already
+  removed completion markers, so a policy asking whether the model declared
+  completion read a view with the answer deleted while the sentinel detector
+  read one where it was intact. The completion evidence snapshot and the
+  post-turn payload now carry `raw_text` alongside the projected fields, with
+  the post-turn copy bound to the same string the detector reads.
+- Corrected the protocol-contribution docs' read of A2A `#2028`. The ledger and
+  the actor-chain RFC described the thread's executable vector set as agreed by
+  "two independent implementations" and said the next drafting action was ours.
+  Neither held up: the two agreeing parties wrote 15 of the thread's 24 comments
+  and have been in conversation with each other since July, no maintainer has ever
+  replied there, and a third party claimed the drafting action on 2026-08-20. The
+  pages now say who is actually in the thread and stop presenting its volume as
+  upstream traction.
+- `harn serve mcp` on a script-authored surface advertised the
+  `io.modelcontextprotocol/tasks` extension but answered every `tasks/get`,
+  `tasks/update`, and `tasks/cancel` with `task not found`, so a client that read
+  the capability and polled could not tell an unsupported feature from a lost
+  result. The lifecycle now has one owner shared with the orchestrator server, and
+  a tool opts in with `execution: {taskSupport: "optional" | "required"}` in its
+  registry entry, projected on `tools/list`. Tools that do not declare it are
+  unaffected.
+- Worktree setup now detects missing copy-on-write support before scanning the Cargo target, avoiding repeated copy errors.
+
+### Security
+
+- **Sandboxed child processes can now share Harn's per-host egress policy on
+  supported local backends (#6791).** `--allow-process-network` now routes child
+  HTTP, HTTPS, and SOCKS5 traffic through a runtime-owned proxy that follows the
+  live `HARN_EGRESS_*` or `harness.net.egress_policy(...)` state while the OS
+  sandbox blocks direct-socket bypasses. Missing, malformed, and unsupported
+  policies fail closed, and audit evidence omits request paths, headers, bodies,
+  and credentials.
+
 ## v0.10.111
 
 ### Changed
