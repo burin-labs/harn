@@ -1028,6 +1028,7 @@ impl RuntimeExtensions {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ProviderConnectorManifest {
     #[serde(default)]
     pub harn: Option<String>,
@@ -1036,6 +1037,7 @@ pub struct ProviderConnectorManifest {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ProviderOAuthManifest {
     #[serde(default, alias = "auth_url", alias = "authorization-endpoint")]
     pub authorization_endpoint: Option<String>,
@@ -1094,6 +1096,7 @@ impl ConnectorCapabilities {
 }
 
 #[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ConnectorCapabilitiesTable {
     #[serde(default)]
     webhook: bool,
@@ -1122,20 +1125,36 @@ impl From<ConnectorCapabilitiesTable> for ConnectorCapabilities {
     }
 }
 
+/// `capabilities` accepts either a list of feature names or a table of
+/// booleans, dispatched on the value's own shape.
+///
+/// A `#[serde(untagged)]` enum would also accept both, but untagged buffers the
+/// input and reports "data did not match any variant" whenever every branch
+/// fails — discarding the precise error the failing branch produced. Since both
+/// branches fail closed on an unrecognized feature, that generic message is the
+/// one an author with a typo would see. Dispatching on the shape keeps the
+/// branch's own error.
 impl<'de> Deserialize<'de> for ConnectorCapabilities {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
-        #[derive(Deserialize)]
-        #[serde(untagged)]
-        enum RawConnectorCapabilities {
-            List(Vec<String>),
-            Table(ConnectorCapabilitiesTable),
-        }
+        struct CapabilitiesVisitor;
 
-        match RawConnectorCapabilities::deserialize(deserializer)? {
-            RawConnectorCapabilities::List(features) => {
+        impl<'de> serde::de::Visitor<'de> for CapabilitiesVisitor {
+            type Value = ConnectorCapabilities;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("a list of connector capability names or a table of booleans")
+            }
+
+            fn visit_seq<A>(self, sequence: A) -> Result<Self::Value, A::Error>
+            where
+                A: serde::de::SeqAccess<'de>,
+            {
+                let features = Vec::<String>::deserialize(
+                    serde::de::value::SeqAccessDeserializer::new(sequence),
+                )?;
                 let mut capabilities = ConnectorCapabilities::default();
                 for feature in features {
                     capabilities
@@ -1144,8 +1163,19 @@ impl<'de> Deserialize<'de> for ConnectorCapabilities {
                 }
                 Ok(capabilities)
             }
-            RawConnectorCapabilities::Table(table) => Ok(table.into()),
+
+            fn visit_map<A>(self, map: A) -> Result<Self::Value, A::Error>
+            where
+                A: serde::de::MapAccess<'de>,
+            {
+                ConnectorCapabilitiesTable::deserialize(
+                    serde::de::value::MapAccessDeserializer::new(map),
+                )
+                .map(ConnectorCapabilities::from)
+            }
         }
+
+        deserializer.deserialize_any(CapabilitiesVisitor)
     }
 }
 

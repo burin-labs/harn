@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
@@ -9,6 +8,7 @@ use super::{
 };
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ProviderManifestEntry {
     pub id: harn_vm::ProviderId,
     pub connector: ProviderConnectorManifest,
@@ -381,7 +381,15 @@ fn portable_operation_id(value: &str) -> bool {
         })
 }
 
+/// How a host sets a connector up and recovers it when it breaks.
+///
+/// Like every other table in this contract, it fails closed: a key the runtime
+/// does not parse is a key that does nothing at runtime, and an author has no
+/// other signal that their field was discarded. The alternative — collecting
+/// unrecognized keys into an ignored map — made a green `harn package verify
+/// --strict` compatible with a misspelled or unsupported setup field.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ProviderSetupManifest {
     #[serde(default, alias = "auth-type")]
     pub auth_type: Option<String>,
@@ -403,8 +411,6 @@ pub struct ProviderSetupManifest {
     pub health_checks: Vec<ConnectorHealthCheckManifest>,
     #[serde(default)]
     pub recovery: ConnectorRecoveryCopy,
-    #[serde(flatten, default)]
-    pub extra: BTreeMap<String, toml::Value>,
 }
 
 /// Non-secret setup input that a connector may read from an explicit process
@@ -427,6 +433,7 @@ impl ConnectorSetupConfigurationField {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ConnectorConfigurationEnvironmentManifest {
     pub field: ConnectorSetupConfigurationField,
     #[serde(default, alias = "environment-names")]
@@ -439,6 +446,7 @@ pub struct ConnectorConfigurationEnvironmentManifest {
 /// explicit recovery and automation sources. They never authorize scanning
 /// arbitrary process variables.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ConnectorCredentialEnvironmentManifest {
     pub secret: String,
     #[serde(default, alias = "environment-names")]
@@ -446,6 +454,7 @@ pub struct ConnectorCredentialEnvironmentManifest {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ConnectorHealthCheckManifest {
     pub id: String,
     pub kind: String,
@@ -458,6 +467,7 @@ pub struct ConnectorHealthCheckManifest {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ConnectorRecoveryCopy {
     #[serde(default, alias = "missing-install")]
     pub missing_install: Option<String>,
@@ -707,5 +717,139 @@ automatic_approval = true
         )
         .expect_err("unknown policy keys must fail closed");
         assert!(error.to_string().contains("unknown field"));
+    }
+
+    /// The reported defect: `[providers.setup]` accepted any key it did not
+    /// recognize, so a misspelled or unsupported setup field passed a strict
+    /// verify and was then discarded at runtime. Two differently shaped keys,
+    /// matching the two shapes reported on the issue, so this cannot pass by
+    /// happening to reject one shape.
+    #[test]
+    fn setup_manifest_rejects_unknown_fields() {
+        for unknown in [
+            "parameters = [\"bogus\"]",
+            "totally_unknown_field = { nested = \"bogus\" }",
+            "credential_enviroment = []",
+        ] {
+            let document = format!(
+                r#"
+auth_type = "api-key"
+required_secrets = ["demo/api-token"]
+{unknown}
+"#
+            );
+            let Err(error) = toml::from_str::<ProviderSetupManifest>(&document) else {
+                panic!("unknown setup key was silently accepted: {unknown}");
+            };
+            assert!(
+                error.to_string().contains("unknown field"),
+                "{unknown}: {error}"
+            );
+        }
+    }
+
+    /// Every nested table under `[providers.setup]` fails closed too. A key
+    /// discarded one table down is exactly as invisible to its author as one
+    /// discarded at the top.
+    #[test]
+    fn setup_manifest_nested_tables_reject_unknown_fields() {
+        let cases = [
+            (
+                "recovery",
+                r#"
+[recovery]
+missing_auth = "Run the setup command."
+missing_credentials = "Not a field."
+"#,
+            ),
+            (
+                "health_checks",
+                r#"
+[[health_checks]]
+id = "ping"
+kind = "http"
+timeout_ms = 5000
+"#,
+            ),
+            (
+                "credential_environment",
+                r#"
+[[credential_environment]]
+secret = "demo/api-token"
+environment_names = ["DEMO_TOKEN"]
+fallback = "DEMO_TOKEN_OLD"
+"#,
+            ),
+            (
+                "configuration_environment",
+                r#"
+[[configuration_environment]]
+field = "oauth_client_id"
+environment_names = ["DEMO_CLIENT_ID"]
+required = true
+"#,
+            ),
+        ];
+
+        for (table, document) in cases {
+            let Err(error) = toml::from_str::<ProviderSetupManifest>(document) else {
+                panic!("unknown key under [{table}] was silently accepted");
+            };
+            assert!(
+                error.to_string().contains("unknown field"),
+                "{table}: {error}"
+            );
+        }
+    }
+
+    /// The class-killing guard. `deny_unknown_fields` was applied to this
+    /// contract one struct at a time as each was written, which is how
+    /// `[providers.setup]` ended up permissive while the operations table one
+    /// subtree over failed closed. Adding a new deserialized table here without
+    /// the attribute reopens the same hole, so require it structurally rather
+    /// than trusting the next author to remember.
+    #[test]
+    fn every_deserialized_connector_manifest_table_denies_unknown_fields() {
+        let source = include_str!("provider_setup.rs");
+        let mut attributes = Vec::new();
+        let mut permissive = Vec::new();
+
+        for line in source.lines() {
+            let line = line.trim();
+            if line.starts_with("#[") {
+                attributes.push(line.to_string());
+                continue;
+            }
+            let Some(rest) = line
+                .strip_prefix("pub struct ")
+                .or_else(|| line.strip_prefix("struct "))
+            else {
+                if !line.starts_with("///") && !line.starts_with("//") {
+                    attributes.clear();
+                }
+                continue;
+            };
+            let name = rest
+                .split(|character: char| !character.is_alphanumeric() && character != '_')
+                .next()
+                .unwrap_or_default()
+                .to_string();
+            let derives_deserialize = attributes
+                .iter()
+                .any(|attribute| attribute.contains("Deserialize"));
+            let denies = attributes
+                .iter()
+                .any(|attribute| attribute.contains("deny_unknown_fields"));
+            if derives_deserialize && !denies {
+                permissive.push(name);
+            }
+            attributes.clear();
+        }
+
+        assert!(
+            permissive.is_empty(),
+            "connector manifest tables must reject unknown keys, but these accept them: {}",
+            permissive.join(", ")
+        );
     }
 }
