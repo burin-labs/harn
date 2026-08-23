@@ -285,7 +285,18 @@ pub(super) fn sandbox_grant_disclosure(options: &RunSandboxOptions) -> Option<St
         ));
     }
     if options.allow_process_network {
-        deltas.push("subprocess network allowed".to_string());
+        if cfg!(target_os = "macos") {
+            deltas.push("subprocess network allowed".to_string());
+        } else {
+            // Off-macOS the CLI does not attach a proxy it cannot enforce, so
+            // the grant is fail-open for child sockets. Name that so a
+            // restrictive `HARN_EGRESS_*` policy is not mistaken for child
+            // confinement.
+            deltas.push(
+                "subprocess network allowed (unrestricted sockets; managed proxy is macOS-only)"
+                    .to_string(),
+            );
+        }
     }
     if deltas.is_empty() {
         return None;
@@ -534,6 +545,10 @@ mod tests {
             policy.process_network_proxy.is_none(),
             "Linux/Windows must not fail-close child exec behind a proxy they cannot enforce"
         );
+        assert!(
+            stderr.contains("unrestricted sockets; managed proxy is macOS-only"),
+            "fail-open child sockets must be disclosed: {stderr}"
+        );
         drop(_scope);
         harn_vm::reset_thread_local_state();
     }
@@ -578,9 +593,14 @@ mod tests {
         // read-only, then network), and the `, ` / `; ` joins while deriving
         // each enforced jail path from the shared renderer so the test holds on
         // Windows, where jail roots render as verbatim paths.
+        let network = if cfg!(target_os = "macos") {
+            "subprocess network allowed"
+        } else {
+            "subprocess network allowed (unrestricted sockets; managed proxy is macOS-only)"
+        };
         let expected = format!(
             "sandbox active; extra write roots: {}, {}; \
-             extra read-only root: {}; subprocess network allowed\n",
+             extra read-only root: {}; {network}\n",
             rendered_jail_root(&write_a).display(),
             rendered_jail_root(&write_b).display(),
             rendered_jail_root(&read_shared).display(),
@@ -594,9 +614,14 @@ mod tests {
     #[test]
     fn process_network_alone_is_disclosed() {
         let options = RunSandboxOptions::sandboxed(true);
+        let expected = if cfg!(target_os = "macos") {
+            "sandbox active; subprocess network allowed\n"
+        } else {
+            "sandbox active; subprocess network allowed (unrestricted sockets; managed proxy is macOS-only)\n"
+        };
         assert_eq!(
             sandbox_grant_disclosure(&options).as_deref(),
-            Some("sandbox active; subprocess network allowed\n"),
+            Some(expected),
         );
     }
 
