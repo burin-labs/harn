@@ -54,6 +54,8 @@ pub(crate) use options::{
     ToolSearchMode, ToolSearchVariant,
 };
 #[cfg(test)]
+pub(crate) use response::empty_generation_error;
+#[cfg(test)]
 pub(crate) use response::parse_llm_response as parse_llm_response_for_provider;
 pub(crate) use response::{
     extract_cache_read_tokens, extract_cache_write_tokens, parse_openai_responses_response,

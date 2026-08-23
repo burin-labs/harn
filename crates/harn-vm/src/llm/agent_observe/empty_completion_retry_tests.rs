@@ -786,3 +786,133 @@ fn errored_actionless_completion_predicate_edges() {
     // predicate.
     assert!(is_retryable_unproductive_completion(&empty_result()));
 }
+
+/// The live budget-exhaustion shape: the provider billed the entire output cap
+/// and committed nothing. The fake provider hardcodes zero-token usage, so the
+/// wire error is re-created verbatim — the same string the openai-compatible
+/// and streaming parsers raise — under a non-transient category, proving the
+/// recovery comes from the budget classification and not from
+/// `is_retryable_llm_error`.
+fn budget_exhausted_turn(completion_tokens: i64) -> FakeLlmTurn {
+    FakeLlmTurn::Error(crate::llm::fake::FakeLlmError::new(
+        crate::value::ErrorCategory::Generic,
+        format!(
+            "openai-compatible model fake:fake-stream reported \
+             completion_tokens={completion_tokens} but delivered no content, reasoning, \
+             or tool calls"
+        ),
+    ))
+}
+
+/// A call that spends its whole output budget is not retried byte-identically.
+/// The evidence is the request the provider actually received on attempt two,
+/// read off the captured wire payload rather than the loop's own bookkeeping.
+#[test]
+fn output_budget_exhaustion_retries_with_a_raised_cap() {
+    current_thread_runtime().block_on(async {
+        reset_agent_trace_state();
+        let transcript_dir = tempfile::tempdir().expect("transcript tempdir");
+        push_llm_transcript_dir(transcript_dir.path().to_str().expect("utf8 tempdir"));
+        let mut opts = fake_opts();
+        opts.max_tokens = 64;
+        let _guard = install_fake_llm_script(
+            FakeLlmScript::new()
+                .push(budget_exhausted_turn(opts.max_tokens))
+                .push(FakeLlmTurn::stream(vec![
+                    FakeLlmEvent::Token("recovered".into()),
+                    FakeLlmEvent::Done(FakeStopReason::EndTurn),
+                ])),
+        );
+        let result = observed_llm_call(&opts, None, None, None, false, false, None, None)
+            .await
+            .expect("a raised cap should recover the call");
+        pop_llm_transcript_dir();
+        assert_eq!(result.text, "recovered");
+
+        let caps: Vec<i64> = fake_llm_captured_calls()
+            .iter()
+            .map(|call| call.max_tokens)
+            .collect();
+        assert_eq!(
+            caps,
+            vec![64, 128],
+            "the retry must carry a raised cap, never the cap that already exhausted"
+        );
+        reset_agent_trace_state();
+    });
+}
+
+/// At the escalation ceiling there is no larger cap to try, so the call fails
+/// fast to the caller's fallback. Retrying here would re-prove the exhaustion
+/// the first attempt already demonstrated — the exact coin flip #7019 names.
+#[test]
+fn output_budget_exhaustion_at_the_ceiling_does_not_retry() {
+    current_thread_runtime().block_on(async {
+        reset_agent_trace_state();
+        let transcript_dir = tempfile::tempdir().expect("transcript tempdir");
+        push_llm_transcript_dir(transcript_dir.path().to_str().expect("utf8 tempdir"));
+        let mut opts = fake_opts();
+        opts.max_tokens = 32_768;
+        let _guard =
+            install_fake_llm_script(FakeLlmScript::new().push(budget_exhausted_turn(32_768)));
+        let error = observed_llm_call(&opts, None, None, None, false, false, None, None)
+            .await
+            .expect_err("an exhausted budget at the ceiling has no recovery left");
+        pop_llm_transcript_dir();
+        assert!(
+            error.to_string().contains("completion_tokens=32768"),
+            "the surfaced error names the exhaustion: {error}"
+        );
+        assert_eq!(
+            fake_llm_captured_calls().len(),
+            1,
+            "exactly one attempt: the identical request is never re-sent"
+        );
+        reset_agent_trace_state();
+    });
+}
+
+/// The budget predicate compares a response fact against a request fact, so it
+/// only fires when both are present and the usage actually reached the cap.
+#[test]
+fn output_budget_predicate_needs_usage_at_or_above_the_cap() {
+    let exhausted = budget_exhausted_error(4096);
+    assert!(is_output_budget_exhausted(&exhausted, 4096));
+    assert!(
+        is_output_budget_exhausted(&budget_exhausted_error(5000), 4096),
+        "providers may bill slightly past the cap"
+    );
+    assert!(
+        !is_output_budget_exhausted(&budget_exhausted_error(12), 4096),
+        "a short empty completion is a provider stall, not an exhausted budget"
+    );
+    assert!(
+        !is_output_budget_exhausted(&exhausted, 0),
+        "without a cap there is nothing to have exhausted"
+    );
+    assert!(
+        !is_output_budget_exhausted(&billed_noncommittal_error(), 64),
+        "a vanished tool call is a channel failure, not a budget failure"
+    );
+    assert_eq!(thrown_output_tokens(&exhausted), Some(4096));
+}
+
+fn budget_exhausted_error(completion_tokens: i64) -> crate::value::VmError {
+    crate::llm::api::empty_generation_error(
+        "fake",
+        "fake-stream",
+        Some(completion_tokens),
+        format!(
+            "openai-compatible model fake:fake-stream reported \
+             completion_tokens={completion_tokens} but delivered no content, reasoning, \
+             or tool calls"
+        ),
+    )
+}
+
+fn billed_noncommittal_error() -> crate::value::VmError {
+    crate::value::VmError::Thrown(crate::value::VmValue::String(arcstr::ArcStr::from(
+        "provider fake model fake-stream returned billed output (completion_tokens=342) \
+         with no dispatchable tool call or answer (upstream contract violation)",
+    )))
+}

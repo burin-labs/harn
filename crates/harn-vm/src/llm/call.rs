@@ -846,6 +846,25 @@ pub(crate) async fn execute_schema_retry_loop(
 /// requesting an unbounded completion when the model never converges.
 const MAX_TOKENS_RETRY_CEILING: i64 = 32_768;
 
+/// One escalation step for an output budget that a call already proved too
+/// small. `None` once the cap sits at the ceiling — at that point another
+/// attempt only re-proves the same exhaustion, so the caller fails fast.
+///
+/// Both budget-recovery paths step through here: the structured-retry loop
+/// below and the empty-completion boundary in `agent_observe`. The ceiling has
+/// one owner so a call cannot walk its cap upward twice by two different
+/// routes.
+pub(super) fn escalated_max_tokens(before: i64) -> Option<i64> {
+    if before >= MAX_TOKENS_RETRY_CEILING {
+        return None;
+    }
+    Some(
+        before
+            .saturating_mul(2)
+            .clamp(before + 1, MAX_TOKENS_RETRY_CEILING),
+    )
+}
+
 /// When a structured/schema attempt failed because the response ran out of
 /// output-token budget mid-JSON (`is_length_truncation` -> the canonical
 /// "hit the token limit" marker `structured_output_errors` appends), grow
@@ -864,13 +883,13 @@ const MAX_TOKENS_RETRY_CEILING: i64 = 32_768;
 /// the escalation.
 fn escalate_max_tokens_on_truncation(opts: &mut api::LlmCallOptions, errors: &[String]) -> bool {
     let truncated = errors.iter().any(|e| e.contains("hit the token limit"));
-    if !truncated || opts.max_tokens >= MAX_TOKENS_RETRY_CEILING {
+    if !truncated {
         return false;
     }
     let before = opts.max_tokens;
-    let grown = before
-        .saturating_mul(2)
-        .clamp(before + 1, MAX_TOKENS_RETRY_CEILING);
+    let Some(grown) = escalated_max_tokens(before) else {
+        return false;
+    };
     opts.max_tokens = grown;
     crate::events::log_info(
         "llm",
