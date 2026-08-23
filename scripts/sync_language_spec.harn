@@ -48,6 +48,14 @@ const SUMMARY_BEGIN =
 
 const SUMMARY_END = "<!-- END generated: language-spec chapters -->"
 
+// The generated block is indented, so mdBook nests it under whichever
+// top-level entry immediately precedes the BEGIN marker. `splice_summary`
+// only rewrites the lines between the markers and cannot see that entry, so
+// inserting a chapter directly above BEGIN adopts all of the generated
+// chapters as its children while leaving the file perfectly in sync. Pin the
+// intended parent so the sync check owns the nesting, not just the contents.
+const SUMMARY_PARENT = "- [Language specification](./language-spec.md)"
+
 /**
  * Assemble the canonical single-file spec text by concatenating every chapter
  * in `NN-` order. Chapter files should not need to preserve double-newline EOF
@@ -202,6 +210,25 @@ pub fn render_summary_block(fs: HarnessFs) -> string {
   return out
 }
 
+/**
+ * The hand-edited SUMMARY.md entry the generated chapter list is nested
+ * under: the last non-blank line before the BEGIN marker, trimmed. Returns
+ * `""` when the marker is absent.
+ */
+pub fn summary_block_parent(current: string) -> string {
+  let previous = ""
+  for line in current.split("\n") {
+    const trimmed = line.trim()
+    if trimmed.starts_with(SUMMARY_BEGIN) {
+      return previous
+    }
+    if trimmed != "" {
+      previous = trimmed
+    }
+  }
+  return ""
+}
+
 /** Replace the generated chapter list in `current` with `block`. */
 pub fn splice_summary(current: string, block: string) -> string {
   let out: list<string> = []
@@ -243,7 +270,16 @@ pipeline main(harness: Harness, task) {
   const spec_text = assemble_spec(harness.fs)
   const index_text = render_index(harness.fs)
   const summary_block = render_summary_block(harness.fs)
-  const summary_text = splice_summary(harness.fs.read_text(SUMMARY), summary_block)
+  const summary_current = harness.fs.read_text(SUMMARY)
+  const summary_parent = summary_block_parent(summary_current)
+  if summary_parent != SUMMARY_PARENT {
+    harness.stdio.eprintln(
+      "error: ${SUMMARY} nests the generated chapter list under '${summary_parent}'",
+    )
+    harness.stdio.eprintln("hint: the generated block must follow '${SUMMARY_PARENT}'")
+    return 1
+  }
+  const summary_text = splice_summary(summary_current, summary_block)
   const mode = if argv.count == 0 {
     "write"
   } else {
