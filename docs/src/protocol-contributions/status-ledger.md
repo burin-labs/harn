@@ -10,13 +10,15 @@ discussion, PR, or issue directly.
 **What changed since the 2026-07-25 read.** Two threads moved and the rest sat
 still.
 
-- **A2A `#2028` is where the work is.** Twelve new comments through 2026-08-20
-  took it from 12 to 24. Two independent implementations built executable
-  vectors for the well-formedness/authority split and diffed them against each
-  other with no divergences, an `originAnchor` slot was reserved and pinned
-  inert, and a review from the ZeroID side supplied the correction to fold into
-  the extension text: per-hop `scopes` are **derived from a validated
-  credential**, never authorization-bearing.
+- **A2A `#2028` is the busiest thread and the hardest to read.** Twelve new
+  comments through 2026-08-20 took it from 12 to 24. Two participants posted
+  executable vectors for the well-formedness/authority split and reported no
+  divergences between them, an `originAnchor` slot was reserved and pinned
+  inert, and a review from the ZeroID side supplied a correction to the
+  extension text: per-hop `scopes` are **derived from a validated credential**,
+  never authorization-bearing. Weigh that volume against
+  [who is in the thread](#who-is-in-2028) before treating it as demand. The
+  drafting action was claimed by a third party, not by us.
 - **oauth-wg `#73` handed the ball back to us.** A draft author replied on
   2026-07-25, after our answer the same day, redirecting the actor-chain half
   to [`draft-mcguinness-oauth-actor-profile`](https://github.com/mcguinness/draft-mcguinness-oauth-actor-profile)
@@ -52,16 +54,18 @@ citing internal usage numbers as an argument is not.
 | [A2A #1857](https://github.com/a2aproject/A2A/discussions/1857) idempotency | 2026-05-17 | No | 1 | **Us** — posture decision |
 | [A2A #1858](https://github.com/a2aproject/A2A/discussions/1858) `PAUSED` | 2026-05-17 | No | 3 | Maintainers (process question) |
 | [A2A #2027](https://github.com/a2aproject/A2A/discussions/2027) `InjectTaskReminder` | 2026-07-03 | No | none | Nobody — cold |
-| [A2A #2028](https://github.com/a2aproject/A2A/issues/2028) actor-chain | 2026-07-03 | No | 5 | **Us** — fold "derived, not authoritative" into the extension text |
+| [A2A #2028](https://github.com/a2aproject/A2A/issues/2028) actor-chain | 2026-07-03 | No | 5 — [see caveat](#who-is-in-2028) | Nobody upstream — a third party claimed the drafting action |
 | [MCP #2736](https://github.com/modelcontextprotocol/modelcontextprotocol/discussions/2736) budget caps | 2026-05-17 | No | 2 | **Closed by us** — target feature deprecated by SEP-2577 |
 | [MCP #3007](https://github.com/modelcontextprotocol/modelcontextprotocol/discussions/3007) `notifications/reminder` | 2026-07-03 | No | none | **At risk** — adjacent surface (Logging) deprecated |
 | [MCP #3008](https://github.com/modelcontextprotocol/modelcontextprotocol/discussions/3008) `authenticatedIdentity` | 2026-07-03 | No | 1 | **Us** — sponsor outreach |
 | [oauth-wg #73](https://github.com/oauth-wg/oauth-identity-assertion-authz-grant/issues/73) actor chain | 2026-07-03 | **Yes — direct question to us** | n/a | **Us** — invited to continue in the actor-profile repo |
 
 Nothing has been rejected anywhere, and across twelve threads the pattern
-is consistent: proposals draw independent third-party support and no
-maintainer verdicts. Two threads are now waiting on us rather than on anyone
-upstream.
+is consistent: proposals draw third-party comment and no maintainer verdicts.
+Read the third-party column as a count of commenters, not as a quality
+signal — track records vary sharply between threads, and `#2028` carries the
+caveat in [Who is in `#2028`](#who-is-in-2028). One thread, oauth-wg `#73`,
+is waiting on us, by direct invitation from a draft author.
 
 **One correction to that read, found 2026-07-25.** "Maintainer attention
 is the binding constraint" is not the diagnosis everywhere. MCP `#2736`
@@ -129,7 +133,38 @@ both have a path that does not depend on a TSC answer.
 | [`a2aproject/A2A#1937`](https://github.com/a2aproject/A2A/issues/1937) | Open issue, 5 comments, last updated 2026-08-14. | Context-binding profile for delegated authority — binds an already-valid delegation to a task/session/target/scope. Complement of (not substitute for) the [actor-chain extension RFC](./a2a-actor-chain-extension.md); best anchor thread for that filing. Two third-party comments arrived since the last read, both pushing on lifetime rather than shape: a delegated-commerce case for nested spend limits (2026-08-09), and the observation that a cryptographically valid delegation can become operationally invalid when policy or risk state changes after issuance (2026-08-14). |
 | [`a2aproject/A2A#153`](https://github.com/a2aproject/A2A/issues/153) | Open issue (since 2025-06). | Confused-deputy framing for A2A; canonical motivation citation for payload-visible principals. |
 | [`a2aproject/A2A#2027`](https://github.com/a2aproject/A2A/discussions/2027) | Filed 2026-07-03 (Ideas category). **Zero comments after 22 days.** | `InjectTaskReminder` ambient-context discussion, from the [reminder RFC](./a2a-message-kind-reminder.md) with A2A v1.0 naming. Dupe-checked before filing. Cold-start with no venue warming; see [harn#1829](https://github.com/burin-labs/harn/issues/1829). |
-| [`a2aproject/A2A#2028`](https://github.com/a2aproject/A2A/issues/2028) | Filed 2026-07-03. Open issue, **24 comments**, active through 2026-08-20, still no maintainer. | Actor-chain extension, anchored to `#1937` / `#153`. Through 2026-07-25 the thread converged on two properties that must be stated separately: **well-formedness** (each hop's `scopes` a subset of its predecessor's, checkable from the payload alone, making `#153`'s confused deputy detectable without a cross-hop log join) and **authority** (unprovable from a caller-supplied payload, so it needs a per-hop `proof_ref` an outside verifier resolves). Our consolidating restatement is [`issuecomment-5079449815`](https://github.com/a2aproject/A2A/issues/2028#issuecomment-5079449815). Since then: `navigatorbuilds` published executable vectors for both properties including negatives, `giskard09` ran an independent implementation against them with zero divergences (and reproduced the same documented limit — a hop that rewrites its predecessor's scopes upward narrows perfectly in the forwarded chain, so it is only catchable receiver-side), and an `originAnchor` slot was reserved and pinned inert by forward-compat and no-privilege-via-anchor vectors. On 2026-08-20 `rsharath` ([ZeroID](https://github.com/highflame-ai/zeroid)) mapped OAuth token exchange onto the shape and supplied the correction now owed to the extension text: per-hop `scopes` are **derived from the validated credential**, not literal RFC 8693 `act` contents and never authorization-bearing. **Next action is ours.** |
+| [`a2aproject/A2A#2028`](https://github.com/a2aproject/A2A/issues/2028) | Filed 2026-07-03. Open issue, **24 comments**, active through 2026-08-20, still no maintainer. | Actor-chain extension, anchored to `#1937` / `#153`. Through 2026-07-25 the thread converged on two properties that must be stated separately: **well-formedness** (each hop's `scopes` a subset of its predecessor's, checkable from the payload alone, making `#153`'s confused deputy detectable without a cross-hop log join) and **authority** (unprovable from a caller-supplied payload, so it needs a per-hop `proof_ref` an outside verifier resolves). Our consolidating restatement is [`issuecomment-5079449815`](https://github.com/a2aproject/A2A/issues/2028#issuecomment-5079449815). Since then: `navigatorbuilds` published executable vectors for both properties including negatives, `giskard09` reported running an implementation against them with zero divergences (and reproduced the same documented limit — a hop that rewrites its predecessor's scopes upward narrows perfectly in the forwarded chain, so it is only catchable receiver-side), and an `originAnchor` slot was reserved and pinned inert by forward-compat and no-privilege-via-anchor vectors. On 2026-08-20 `rsharath` ([ZeroID](https://github.com/highflame-ai/zeroid)) mapped OAuth token exchange onto the shape and supplied the correction now owed to the extension text: per-hop `scopes` are **derived from the validated credential**, not literal RFC 8693 `act` contents and never authorization-bearing. `navigatorbuilds` said in the same thread that *they* would fold that correction into the extension text, so the drafting action is not ours. Before spending further effort here, read [Who is in `#2028`](#who-is-in-2028). |
+
+### Who is in `#2028`
+
+Recorded because the comment count on this thread is the strongest-looking
+number in the ledger and it does not mean what a reader would assume.
+Verified 2026-08-23 against the GitHub API.
+
+- **All 24 comments carry `author_association: NONE`.** No maintainer, member,
+  owner, or collaborator of `a2aproject` has ever replied. The "No" in the
+  maintainer column is not "not yet" — it is fourteen months of silence on a
+  thread the ledger elsewhere calls the busiest.
+- **Two accounts wrote 15 of the 24 comments**: `navigatorbuilds` (8) and
+  `giskard09` (7). They are also the "two implementations" whose agreement the
+  ledger cited. Two parties who have been in continuous conversation since
+  2026-07 corroborating each other is weaker evidence than the phrase
+  "independent implementations" suggests, and this ledger should not have used
+  it. We authored exactly one comment (2026-07-25).
+- **Several participants have very new accounts**: `navigatorbuilds` created
+  2026-01-26 (1 follower), `0xbrainkid` 2026-01-27, `giskard09` 2026-03-23.
+  Their comments are long, uniformly formatted, and some carry AI-assistance
+  disclosures. That is not proof of anything, and none of it makes the
+  technical content wrong — the well-formedness/authority split stands on its
+  own reasoning. It does mean the thread is not evidence of ecosystem demand.
+- **The one participant with a long track record and a real project**,
+  `rsharath` (account 2013, [ZeroID](https://github.com/highflame-ai/zeroid)),
+  commented once, on 2026-08-20, and supplied the most useful correction in
+  the thread.
+
+Practical consequence: treat `#2028` as a design conversation that produced
+one good correction, not as upstream traction. Volume of agreement in a thread
+with no maintainer in it is not a signal to invest against.
 
 ## MCP and OAuth Identity
 

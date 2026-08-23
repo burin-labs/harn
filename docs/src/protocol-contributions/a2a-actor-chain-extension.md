@@ -6,8 +6,8 @@
   maintainer verdict. The thread converged on two properties that must not be
   conflated (well-formedness versus proven authority), then on
   `scopes` being *derived from* a validated credential rather than
-  authorization-bearing. Two independent implementations now agree on an
-  executable vector set. See [Thread state](#thread-state).
+  authorization-bearing. Two participants agree on an executable vector set.
+  See [Thread state](#thread-state) for who is actually in the thread.
 - **Last verified:** 2026-08-22
 - **Authors:** Burin Labs
 - **Reference impl:** `harn_vm::actor_chain::ActorChain`
@@ -148,12 +148,20 @@ settled enough in-thread to treat as the current shape:
    an unpopulated one, and an anchor can never substitute for scope a
    predecessor actually held.
 
-Two independent implementations have since checked each other against a shared
-executable vector set covering those cases, agreeing on the negatives and on one
-documented limit: a hop that rewrites its predecessor's scopes upward narrows
-perfectly in the forwarded chain, so that case is only catchable receiver-side.
+Two participants have since checked each other against a shared executable
+vector set covering those cases, agreeing on the negatives and on one documented
+limit: a hop that rewrites its predecessor's scopes upward narrows perfectly in
+the forwarded chain, so that case is only catchable receiver-side.
 
-No maintainer or TSC verdict has been posted.
+**Read that agreement carefully.** No maintainer, member, owner, or collaborator
+of `a2aproject` has replied to this issue — all 24 comments carry
+`author_association: NONE`. The two parties who agree on the vector set wrote 15
+of those 24 comments and have been in continuous conversation with each other
+since 2026-07, so their agreement is corroboration between two participants, not
+independent confirmation. The technical content above stands on its own
+reasoning; the thread's volume is not evidence of upstream demand. The
+per-participant detail is in the
+[status ledger](./status-ledger.md#who-is-in-2028).
 
 ## Open questions for upstream maintainers
 
