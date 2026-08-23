@@ -187,7 +187,14 @@ pub(super) fn install_run_sandbox_scope(
         harn_vm::tool_annotations::SideEffectLevel::rank_str(level)
             >= harn_vm::tool_annotations::SideEffectLevel::Network.rank()
     });
-    let process_proxy = if options.allow_process_network
+    // Managed child egress is enforceable only on macOS. Starting a proxy on
+    // Linux/Windows attaches `process_network_proxy` and fail-closes every
+    // `process.exec`, including local `git_push` to a file remote. Skip the
+    // proxy off-macOS; `--allow-process-network` still raises the capability
+    // ceiling, and attestation reports `unrestricted` rather than
+    // `unsupported_fail_closed`.
+    let process_proxy = if cfg!(target_os = "macos")
+        && options.allow_process_network
         && active_allows_process_network
         && active_execution_policy
             .as_ref()
@@ -278,7 +285,18 @@ pub(super) fn sandbox_grant_disclosure(options: &RunSandboxOptions) -> Option<St
         ));
     }
     if options.allow_process_network {
-        deltas.push("subprocess network allowed".to_string());
+        if cfg!(target_os = "macos") {
+            deltas.push("subprocess network allowed".to_string());
+        } else {
+            // Off-macOS the CLI does not attach a proxy it cannot enforce, so
+            // the grant is fail-open for child sockets. Name that so a
+            // restrictive `HARN_EGRESS_*` policy is not mistaken for child
+            // confinement.
+            deltas.push(
+                "subprocess network allowed (unrestricted sockets; managed proxy is macOS-only)"
+                    .to_string(),
+            );
+        }
     }
     if deltas.is_empty() {
         return None;
@@ -513,6 +531,29 @@ mod tests {
     }
 
     #[test]
+    fn process_network_grant_does_not_attach_an_unenforced_proxy() {
+        if cfg!(target_os = "macos") {
+            return;
+        }
+        harn_vm::reset_thread_local_state();
+        let temp = tempfile::tempdir().expect("workspace");
+        let mut stderr = String::new();
+        let options = RunSandboxOptions::sandboxed(true);
+        let _scope = install_run_sandbox_scope(&options, temp.path(), &mut stderr);
+        let policy = harn_vm::orchestration::current_execution_policy().expect("policy");
+        assert!(
+            policy.process_network_proxy.is_none(),
+            "Linux/Windows must not fail-close child exec behind a proxy they cannot enforce"
+        );
+        assert!(
+            stderr.contains("unrestricted sockets; managed proxy is macOS-only"),
+            "fail-open child sockets must be disclosed: {stderr}"
+        );
+        drop(_scope);
+        harn_vm::reset_thread_local_state();
+    }
+
+    #[test]
     fn disabled_sandbox_discloses_nothing() {
         // `--no-sandbox` carries its own blanket warning; the grant disclosure
         // never fires for a disabled sandbox even if fields were populated.
@@ -552,9 +593,14 @@ mod tests {
         // read-only, then network), and the `, ` / `; ` joins while deriving
         // each enforced jail path from the shared renderer so the test holds on
         // Windows, where jail roots render as verbatim paths.
+        let network = if cfg!(target_os = "macos") {
+            "subprocess network allowed"
+        } else {
+            "subprocess network allowed (unrestricted sockets; managed proxy is macOS-only)"
+        };
         let expected = format!(
             "sandbox active; extra write roots: {}, {}; \
-             extra read-only root: {}; subprocess network allowed\n",
+             extra read-only root: {}; {network}\n",
             rendered_jail_root(&write_a).display(),
             rendered_jail_root(&write_b).display(),
             rendered_jail_root(&read_shared).display(),
@@ -568,9 +614,14 @@ mod tests {
     #[test]
     fn process_network_alone_is_disclosed() {
         let options = RunSandboxOptions::sandboxed(true);
+        let expected = if cfg!(target_os = "macos") {
+            "sandbox active; subprocess network allowed\n"
+        } else {
+            "sandbox active; subprocess network allowed (unrestricted sockets; managed proxy is macOS-only)\n"
+        };
         assert_eq!(
             sandbox_grant_disclosure(&options).as_deref(),
-            Some("sandbox active; subprocess network allowed\n"),
+            Some(expected),
         );
     }
 

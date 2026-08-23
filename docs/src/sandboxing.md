@@ -128,11 +128,15 @@ each connection is pinned to the addresses checked by the existing CIDR, deny,
 and private-address rules.
 
 The native managed boundary is currently available on macOS. On another local
-platform, a `harn run` child launch that would require the managed boundary
-fails closed; the local backend advertises no `network_policy` capability and
-rejects a non-empty limited policy instead of treating proxy environment
-variables as enforcement. Remote sandbox backends continue to advertise their
-own `network_policy` capability. An empty allowlist is deny-all everywhere.
+platform, a CLI `--allow-process-network` grant still raises the capability
+ceiling to network, but Harn does not *start* a proxy it cannot enforce. Child
+processes then have unrestricted sockets; `harn run` discloses that on stderr,
+and run attestation reports `unrestricted` rather than
+`unsupported_fail_closed`. An execution policy that already carries
+`process_network_proxy` (inherited from a host or outer sandbox) is unchanged:
+Linux and Windows still fail-close `process.exec` behind that proxy. Remote
+sandbox backends continue to advertise their own `network_policy` capability.
+An empty allowlist is deny-all everywhere.
 
 The managed proxy records only protocol, normalized host, port, decision, and
 reason. It never records request paths, query strings, headers, bodies, proxy
