@@ -25,6 +25,13 @@ describe("documentation content contract", () => {
     // without throwing is the assertion.
     expect(docs.pages.size).toBeGreaterThan(0)
   })
+
+  it("keeps include-resolved Markdown on every page for the agent projection", () => {
+    expect(docs.pages.size).toBeGreaterThan(0)
+    for (const page of docs.pages.values()) {
+      expect(page.markdownSource.length, page.slug).toBeGreaterThan(0)
+    }
+  })
 })
 
 describe("diagram rendering", () => {

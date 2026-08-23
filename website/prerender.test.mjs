@@ -19,6 +19,7 @@ const doc = {
   headings: [],
   prev: null,
   next: null,
+  markdownSource: "# Getting started\n",
 }
 
 function metadata(kind, title, description, path) {

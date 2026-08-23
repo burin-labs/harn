@@ -8,6 +8,16 @@
 import { mkdirSync, writeFileSync, readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
+import {
+  LLMS_FULL_TXT_PATH,
+  LLMS_TXT_PATH,
+  agentPageFromDoc,
+  clientPagePayload,
+  markdownUrlForSlug,
+  renderAgentPage,
+  renderLlmsFullTxt,
+  renderLlmsTxt,
+} from "./vite-plugins/llms.mjs"
 
 const here = dirname(fileURLToPath(import.meta.url))
 const DIST = join(here, "../docs/dist")
@@ -184,10 +194,19 @@ export async function prerenderSite() {
   }
 
   // Per-page content JSON (fetched on client navigation) + search index.
-  for (const [slug, data] of docs.pages) {
-    writeFile(`_content/${slug}.json`, JSON.stringify(data))
+  // markdownSource stays off the client payload; it is only for the agent .md.
+  const agentPages = []
+  for (const slug of docs.order) {
+    const data = docs.pages.get(slug)
+    if (!data) continue
+    writeFile(`_content/${slug}.json`, JSON.stringify(clientPagePayload(data)))
+    const agentPage = agentPageFromDoc(data)
+    agentPages.push(agentPage)
+    writeFile(markdownUrlForSlug(slug).slice(1), renderAgentPage(agentPage))
   }
   writeFile("_content/search.json", JSON.stringify(docs.search))
+  writeFile(LLMS_TXT_PATH, renderLlmsTxt(agentPages))
+  writeFile(LLMS_FULL_TXT_PATH, renderLlmsFullTxt(agentPages))
 
   const pages = htmlPages({
     template,
@@ -239,6 +258,7 @@ export async function prerenderSite() {
 
   console.log(
     `prerender: ${docs.pages.size} doc pages + landing + 404, ${docs.pages.size} content JSON, ` +
+      `${docs.pages.size} agent markdown pages, ${LLMS_TXT_PATH}, ${LLMS_FULL_TXT_PATH}, ` +
       `${Object.keys(REDIRECTS).length} redirects, sitemap.xml (${sitemapUrls.length} urls) → docs/dist`,
   )
 }

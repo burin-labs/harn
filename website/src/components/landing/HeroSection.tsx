@@ -29,6 +29,12 @@ export function HeroSection() {
             >
               {hero.getStarted}
             </Link>
+            <a
+              href="/llms.txt"
+              className="inline-flex w-full items-center justify-center rounded-lg border border-border-strong px-6 py-2.5 text-sm font-semibold text-foreground transition-colors hover:bg-surface-tertiary sm:w-auto"
+            >
+              {hero.forAgents}
+            </a>
             <Link
               to="/introduction.html"
               className="inline-flex w-full items-center justify-center rounded-lg border border-border-strong px-6 py-2.5 text-sm font-semibold text-foreground transition-colors hover:bg-surface-tertiary sm:w-auto"

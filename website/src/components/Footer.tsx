@@ -24,6 +24,7 @@ export function Footer() {
             <FooterLink to="/getting-started.html">{t.footer.gettingStarted}</FooterLink>
             <FooterLink to="/language-basics.html">{t.footer.languageReference}</FooterLink>
             <FooterLink to="/cookbook.html">{t.footer.cookbook}</FooterLink>
+            <FooterHref href="/llms.txt">{t.footer.llmsTxt}</FooterHref>
           </FooterCol>
           <FooterCol title={t.footer.projectTitle}>
             <FooterExternal href={GITHUB}>{t.footer.github}</FooterExternal>
@@ -64,6 +65,19 @@ function FooterLink({ to, children }: { to: string; children: ReactNode }) {
       >
         {children}
       </Link>
+    </li>
+  )
+}
+
+function FooterHref({ href, children }: { href: string; children: ReactNode }) {
+  return (
+    <li>
+      <a
+        href={href}
+        className="text-sm text-foreground-secondary transition-colors hover:text-foreground"
+      >
+        {children}
+      </a>
     </li>
   )
 }
