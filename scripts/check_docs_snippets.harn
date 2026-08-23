@@ -102,21 +102,46 @@ pub fn backtick_run_len(s: string) -> int {
  * a new language means adding one arm here plus its `mode_*` arms below.
  */
 pub fn fence_mode(info: string) -> string {
-  if info == "harn" {
+  const bare = fence_strip_title(info)
+  if bare == "harn" {
     return "parse"
   }
-  if info == "harn,check" {
+  if bare == "harn,check" {
     return "check"
   }
-  if info == "harn-prompt" {
+  if bare == "harn-prompt" {
     return "prompt"
   }
   return ""
 }
 
+/**
+ * The info string with a `title="..."` segment removed.
+ *
+ * The site renders `title="example.harn"` as a filename header on the block.
+ * Without this, adding one would push the info string past the exact matches
+ * above and silently drop the block from this gate. Only `title` is stripped:
+ * any other trailing content still fails to match, which is what keeps an
+ * unrecognized fence variant from being validated by accident.
+ */
+pub fn fence_strip_title(info: string) -> string {
+  const marker = " title=\""
+  const start = info.index_of(marker)
+  if start < 0 {
+    return info
+  }
+  const rest = info.substring(start + marker.len(), info.len())
+  const close = rest.index_of("\"")
+  if close < 0 {
+    return info
+  }
+  return info.substring(0, start) + rest.substring(close + 1, rest.len())
+}
+
 /** Whether this info string opens a block the author asked to skip. */
 pub fn fence_is_ignored(info: string) -> bool {
-  return info == "harn,ignore" || info == "harn-prompt,ignore"
+  const bare = fence_strip_title(info)
+  return bare == "harn,ignore" || bare == "harn-prompt,ignore"
 }
 
 /** Whether this info string opens a block this checker tracks at all. */

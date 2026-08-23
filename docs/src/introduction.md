@@ -4,7 +4,7 @@ Harn is a programming language and runtime for building AI agents. It gives
 model calls, tools, retries, concurrency, transcripts, and workflows one
 place to run.
 
-```harn,check
+```harn,check title="example.harn"
 fn main(harness: Harness) {
   const response = harness.llm.call(
     "Explain quicksort in two sentences.",

@@ -9,6 +9,13 @@ function highlightFile(file: ExampleFile) {
   return file.lang === "prompt" ? highlightPromptTemplate(file.source) : highlightHarnSource(file.source)
 }
 
+// The last two segments of a repo path: enough to say where the file lives in
+// the demo bundle without spilling onto a second line.
+function shortPath(path: string): string {
+  const parts = path.split("/")
+  return parts.length <= 2 ? path : parts.slice(-2).join("/")
+}
+
 export function ExampleGallery() {
   const t = useMessages()
   const ex = t.landing.examples
@@ -104,9 +111,18 @@ export function ExampleGallery() {
             </a>
           </div>
           {isMultiFile && <p className="mt-5 text-xs leading-relaxed text-foreground-muted">{ex.multiFileNote}</p>}
-          <div className="mt-6 rounded-lg border border-border bg-surface-tertiary px-3 py-2 font-mono text-xs break-all text-foreground-secondary">
-            {activeFile.path}
-          </div>
+          {/* The repo path, shortened to the part that locates the file inside the
+              demo bundle. The full path is on the link itself, so nothing is
+              lost, and it no longer wraps mid-filename. */}
+          <a
+            href={activeFile.href}
+            target="_blank"
+            rel="noreferrer"
+            title={activeFile.path}
+            className="mt-6 block truncate rounded-lg border border-border bg-surface-tertiary px-3 py-2 font-mono text-xs text-foreground-secondary transition-colors hover:border-border-strong hover:text-foreground"
+          >
+            {shortPath(activeFile.path)}
+          </a>
         </div>
         <div className="min-w-0 bg-[#07100f]">
           <div className="flex items-center justify-between gap-3 border-b border-white/10 bg-[#0c1413] px-2 py-2 pl-3">

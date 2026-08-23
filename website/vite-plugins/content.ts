@@ -35,6 +35,7 @@ import {
   DIAGRAM_SOURCE_CLASS,
   DIAGRAM_SOURCE_LABEL,
 } from "../src/lib/diagram-markup.ts"
+import { CODE_FIGURE_CLASS, CODE_FILENAME_CLASS } from "../src/lib/code-markup.ts"
 
 export interface Heading {
   depth: number
@@ -367,6 +368,66 @@ function rehypeNormalizeCodeLang() {
   }
 }
 
+// A fence may name the file it came from: ```harn title="example.harn".
+// remark keeps everything after the language word in `node.meta` and
+// remark-rehype drops it, so lift it onto the element before that happens.
+// Only `title` is recognised; an unknown key is left alone rather than guessed
+// at, so a typo shows up as a missing header instead of a wrong one.
+const FENCE_TITLE = /(?:^|\s)title="([^"]+)"/
+
+function remarkCodeMeta() {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return (tree: any) => {
+    visit(tree, "code", (node: any) => {
+      const title = typeof node.meta === "string" ? FENCE_TITLE.exec(node.meta)?.[1] : undefined
+      if (!title) return
+      node.data ??= {}
+      // The hast property name, not the HTML attribute name: rehype-raw
+      // re-parses the tree, and the reparse normalizes `data-file` to
+      // `dataFile`. Writing the attribute spelling here works right up until
+      // that reparse, then silently stops matching downstream.
+      node.data.hProperties = { ...(node.data.hProperties ?? {}), dataFile: title }
+    })
+  }
+}
+
+// Wrap a titled code block in a figure with the filename as its caption. The
+// caption is a real <figcaption>, so the association with the code survives for
+// a screen reader rather than being a floating line of text above it.
+function rehypeCodeTitle() {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return (tree: any) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    visit(tree, "element", (node: any, index: number | undefined, parent: any) => {
+      if (node.tagName !== "pre" || parent == null || index == null) return
+      // remark-rehype applies a code node's hProperties to the inner <code>,
+      // not to the <pre> it wraps, so the filename arrives one level down.
+      const code = node.children?.find(
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (child: any) => child.type === "element" && child.tagName === "code",
+      )
+      const file = code?.properties?.dataFile
+      if (typeof file !== "string" || file === "") return
+      delete code.properties.dataFile
+      parent.children[index] = {
+        type: "element",
+        tagName: "figure",
+        properties: { className: [CODE_FIGURE_CLASS] },
+        children: [
+          {
+            type: "element",
+            tagName: "figcaption",
+            properties: { className: [CODE_FILENAME_CLASS] },
+            children: [{ type: "text", value: file }],
+          },
+          node,
+        ],
+      }
+      return SKIP
+    })
+  }
+}
+
 // ```mermaid fences are diagrams, not code. Rewrite them into a figure the
 // client turns into an SVG (see src/lib/mermaid.ts), keeping the source in a
 // collapsed <details> so the diagram always has a text alternative — one that
@@ -649,6 +710,7 @@ function buildProcessor(
   return unified()
     .use(remarkParse)
     .use(remarkGfm)
+    .use(remarkCodeMeta)
     .use(remarkRehype, { allowDangerousHtml: true })
     .use(rehypeRaw)
     .use(rehypeGithubAlerts)
@@ -660,6 +722,7 @@ function buildProcessor(
       // JSON Lines is JSON per line; highlight.js has no separate grammar.
       aliases: { json: ["jsonl"] },
     })
+    .use(rehypeCodeTitle)
     .use(rehypeScrollableRegions)
     .use(rehypeSlug)
     .use(rehypeCollectHeadings, headings)

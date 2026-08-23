@@ -210,6 +210,29 @@ pipeline test_fence_mode_and_ownership(harness: Harness, task) {
   assert_eq(fence_is_owned("bash"), false)
 }
 
+// The site renders `title="..."` as a filename header. A titled fence must stay
+// inside this gate: before fence_strip_title, the longer info string missed the
+// exact matches and the block was checked by nobody.
+@test
+pipeline test_fence_title_does_not_escape_the_gate(harness: Harness, task) {
+  assert_eq(fence_mode("harn title=\"example.harn\""), "parse")
+  assert_eq(fence_mode("harn,check title=\"example.harn\""), "check")
+  assert_eq(fence_mode("harn-prompt title=\"review.harn.prompt\""), "prompt")
+  assert_eq(fence_is_ignored("harn,ignore title=\"broken.harn\""), true)
+  assert_eq(fence_is_owned("harn,check title=\"a.harn\""), true)
+  // A title on a fence this checker does not own stays unowned.
+  assert_eq(fence_mode("bash title=\"run.sh\""), "")
+  // Anything other than `title` still fails to match, so an unrecognized
+  // variant is never silently validated.
+  assert_eq(fence_mode("harn,check lines=\"1-3\""), "")
+  assert_eq(fence_mode("harn,check title=unquoted.harn"), "")
+  // Stripping is exact, and leaves a fence with no title untouched.
+  assert_eq(fence_strip_title("harn,check"), "harn,check")
+  assert_eq(fence_strip_title("harn title=\"a.harn\""), "harn")
+  // An unterminated title is left alone rather than half-stripped.
+  assert_eq(fence_strip_title("harn title=\"a.harn"), "harn title=\"a.harn")
+}
+
 @test
 pipeline test_mode_extension_and_argv(harness: Harness, task) {
   // A prompt block must reach `harn lint` as a .harn.prompt file: the
