@@ -120,8 +120,12 @@ print_summary() {
   local roots
   if [ "${#walked_roots[@]}" -gt 0 ]; then
     roots="$(IFS=,; echo "${walked_roots[*]}")"
-  else
+  elif [ "${#target_roots[@]}" -gt 0 ]; then
     roots="$(IFS=,; echo "${target_roots[*]}")"
+  elif [ "${#release_target_roots[@]}" -gt 0 ]; then
+    roots="$(IFS=,; echo "${release_target_roots[*]}")"
+  else
+    roots=""
   fi
   echo "harn-target GC: kept=$kept removed=$removed (roots=$roots)$suffix"
 }
@@ -174,9 +178,14 @@ prune_root() {
   done
 }
 
-for target_root in "${target_roots[@]}"; do
-  prune_root "$target_root" "$keep_file"
-done
+# Bash 3.2 treats an empty `"${array[@]}"` expansion as unbound under
+# `set -u`. The counts are safe on every supported Bash and make the two
+# independently optional root families explicit.
+if [ "${#target_roots[@]}" -gt 0 ]; then
+  for target_root in "${target_roots[@]}"; do
+    prune_root "$target_root" "$keep_file"
+  done
+fi
 
 # The release gate keeps its Cargo cache beside the setup targets rather than
 # under `$TMPDIR`, where the OS used to reap it a file at a time (#6212). Each
@@ -197,8 +206,10 @@ done | sort -u | while read -r wt; do
   printf '%s\n' "$(printf '%s' "$(basename "$wt")" | tr -c 'A-Za-z0-9._-' '-')"
 done | sort -u > "$release_keep_file" || true
 
-for release_root in "${release_target_roots[@]}"; do
-  prune_root "$release_root" "$release_keep_file"
-done
+if [ "${#release_target_roots[@]}" -gt 0 ]; then
+  for release_root in "${release_target_roots[@]}"; do
+    prune_root "$release_root" "$release_keep_file"
+  done
+fi
 
 print_summary

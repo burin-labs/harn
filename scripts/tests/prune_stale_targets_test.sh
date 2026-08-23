@@ -11,6 +11,10 @@ set -euo pipefail
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 tmp_root=$(mktemp -d)
 trap 'rm -rf "$tmp_root"' EXIT
+minimum_bash=$(command -v bash)
+if [[ -x /bin/bash ]]; then
+  minimum_bash=/bin/bash
+fi
 
 storage="$tmp_root/storage"
 repos="$tmp_root/repos"
@@ -33,8 +37,56 @@ run_gc() {
   HARN_DEV_SETUP_STORAGE_ROOT="$storage" \
     HARN_TARGET_GC_ROOTS="$repos" \
     HARN_TARGET_GC_MIN_AGE_SECS=1 \
-    "$repo_root/scripts/prune_stale_targets.sh" "$@"
+    "$minimum_bash" "$repo_root/scripts/prune_stale_targets.sh" "$@"
 }
+
+assert_single_root_modes() {
+  local setup_only="$tmp_root/setup-only"
+  local release_only="$tmp_root/release-only"
+  local empty="$tmp_root/empty"
+
+  mkdir -p \
+    "$setup_only/harn-target/orphan-setup" \
+    "$release_only/release-gate-target/orphan-release" \
+    "$empty"
+  touch -t 202001010000 \
+    "$setup_only/harn-target/orphan-setup" \
+    "$release_only/release-gate-target/orphan-release"
+
+  HARN_DEV_SETUP_STORAGE_ROOT="$setup_only" \
+    HARN_TARGET_GC_ROOTS="$repos" \
+    HARN_TARGET_GC_MIN_AGE_SECS=1 \
+    "$minimum_bash" "$repo_root/scripts/prune_stale_targets.sh" --dry-run \
+      >"$tmp_root/setup-only.txt" 2>&1
+  if ! grep -Fq 'would remove orphan: orphan-setup' "$tmp_root/setup-only.txt"; then
+    echo "setup-only target pruning did not complete" >&2
+    cat "$tmp_root/setup-only.txt" >&2
+    exit 1
+  fi
+
+  HARN_DEV_SETUP_STORAGE_ROOT="$release_only" \
+    HARN_TARGET_GC_ROOTS="$repos" \
+    HARN_TARGET_GC_MIN_AGE_SECS=1 \
+    "$minimum_bash" "$repo_root/scripts/prune_stale_targets.sh" --dry-run \
+      >"$tmp_root/release-only.txt" 2>&1
+  if ! grep -Fq 'would remove orphan: orphan-release' "$tmp_root/release-only.txt"; then
+    echo "release-only target pruning did not complete" >&2
+    cat "$tmp_root/release-only.txt" >&2
+    exit 1
+  fi
+
+  HARN_DEV_SETUP_STORAGE_ROOT="$empty" \
+    HARN_TARGET_GC_ROOTS="$repos" \
+    "$minimum_bash" "$repo_root/scripts/prune_stale_targets.sh" --dry-run \
+      >"$tmp_root/no-roots.txt" 2>&1
+  if ! grep -Fq 'nothing to prune' "$tmp_root/no-roots.txt"; then
+    echo "empty target pruning did not return its no-op result" >&2
+    cat "$tmp_root/no-roots.txt" >&2
+    exit 1
+  fi
+}
+
+assert_single_root_modes
 
 output="$tmp_root/dry-run.txt"
 run_gc --dry-run > "$output" 2>&1
