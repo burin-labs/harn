@@ -718,9 +718,21 @@ pub fn exercise(value: any) -> string {
         const WORKERS: usize = 8;
 
         let cache = PreparedModuleCache::default();
+        // The nonce makes this source content nobody has compiled before, so
+        // the shared disk cache cannot serve it and every worker genuinely
+        // races to compile. Without it the test asserts single-flight against
+        // a key an earlier run already stored: it passes cold and reads zero
+        // compilations warm. Trusted modules used to skip the disk cache
+        // entirely, which hid this by making the test hermetic by accident.
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock after the unix epoch")
+            .as_nanos();
         let source = Arc::new(ModuleSource::from_text(
-            (0..128)
-                .map(|index| format!("pub fn value_{index}() {{ return {index} }}\n"))
+            std::iter::once(format!("// {nonce}\n"))
+                .chain(
+                    (0..128).map(|index| format!("pub fn value_{index}() {{ return {index} }}\n")),
+                )
                 .collect::<String>(),
         ));
         let source_path = Arc::new(PathBuf::from("shared-runtime-module.harn"));
