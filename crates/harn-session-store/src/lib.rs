@@ -17,6 +17,7 @@
 //! - [`store`] - public `SessionStore` trait and shared types
 //! - [`memory`] - in-memory backend for tests and headless dev
 //! - [`sqlite`] - persistent SQLite backend for local/self-hosted use
+//! - [`wal_watch`] - read-only data_version + title snapshots for cross-process watchers
 //! - [`retention`] - declarative per-tenant retention policy
 
 pub mod change;
@@ -30,6 +31,7 @@ pub mod search;
 pub mod signing;
 pub mod sqlite;
 pub mod store;
+pub mod wal_watch;
 
 pub use change::{SessionChangeObserver, SharedSessionChangeObserver};
 pub use event::{

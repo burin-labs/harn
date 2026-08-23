@@ -224,7 +224,7 @@ fn snapshot_sources(path: &Path) -> StoreResult<Vec<SnapshotSource>> {
         .collect()
 }
 
-fn sqlite_sidecar_path(path: &Path, suffix: &str) -> PathBuf {
+pub(crate) fn sqlite_sidecar_path(path: &Path, suffix: &str) -> PathBuf {
     let mut sidecar = path.as_os_str().to_os_string();
     sidecar.push(suffix);
     PathBuf::from(sidecar)
@@ -624,7 +624,10 @@ fn insert_session(
     Ok(())
 }
 
-fn read_session_meta(conn: &Connection, session_id: &str) -> StoreResult<(SessionMeta, EventId)> {
+pub(crate) fn read_session_meta(
+    conn: &Connection,
+    session_id: &str,
+) -> StoreResult<(SessionMeta, EventId)> {
     let row = conn
         .query_row(
             "SELECT tenant_id, persona, parent_session_id, title, cwd, model,

@@ -104,6 +104,7 @@ pub(crate) mod sandbox;
 pub mod secret_scan;
 pub(crate) mod session_change;
 pub(crate) mod session_store;
+pub(crate) mod session_wal_watch;
 mod sets;
 pub(crate) mod shapes;
 mod skills;

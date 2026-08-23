@@ -4027,6 +4027,7 @@ dependencies = [
  "linkme",
  "lopdf",
  "md-5",
+ "notify",
  "opentelemetry",
  "opentelemetry-otlp",
  "opentelemetry_sdk",

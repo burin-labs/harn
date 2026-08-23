@@ -6,16 +6,15 @@
 //! something else makes it re-list. Subscribing to the store's committed
 //! changes closes that gap for writes made in this process.
 //!
-//! Scope, stated plainly. Two limits, both deliberate:
+//! Scope, stated plainly:
 //!
 //! * Only sessions this client opened are forwarded. Observers are registered
 //!   process-wide, so without that filter a client connected for one workspace
 //!   would be told the titles of sessions in every other workspace open in the
 //!   same process.
-//! * Only writes through stores opened by this VM are seen. A write from a
-//!   *different* process reaches the same database file but no in-process
-//!   observer, so two surfaces running as separate processes do not yet see
-//!   each other's renames this way.
+//! * Writes in this process publish from the store hook. Writes from another
+//!   process on the same SQLite file publish from the WAL watcher
+//!   (`PRAGMA data_version`) into the same fanout.
 
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
