@@ -9,6 +9,12 @@ homepage.workspace = true
 description = "Repository generator for committed Harn CLI bytecode artifacts"
 publish = false
 
+# These crates are referenced by the shared build-support modules imported
+# through `#[path]` in `src/main.rs`; cargo-machete does not traverse those
+# nonlocal module files.
+[package.metadata.cargo-machete]
+ignored = ["serde_json", "sha2"]
+
 [dependencies]
 harn-stdlib = { path = "../harn-stdlib", version = "=0.10.111" }
 # AOT generation targets the distributed CLI surface; opt into `full` + otel

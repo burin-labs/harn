@@ -473,6 +473,10 @@ jobs:
       - uses: ./.github/actions/rust-toolchain
         with:
           components: clippy
+      - name: Install cargo-machete
+        uses: taiki-e/install-action@7f4eb899022d8fe70b20c4f3de697aa85c309026 # v2.85.11
+        with:
+          tool: cargo-machete@0.9.2
       - uses: ./.github/actions/rust-cache
         continue-on-error: true
         with:
@@ -487,6 +491,8 @@ jobs:
       - name: Check Rust code with Clippy
         id: release-audit-rust-lint
         run: ./scripts/ci/run_rust_lint_lane.sh
+      - name: Reject unused Rust dependencies
+        run: make lint-deps
       - name: Mark lint leg success
         id: lint-ok
         run: echo "ok=true" >> "$GITHUB_OUTPUT"
