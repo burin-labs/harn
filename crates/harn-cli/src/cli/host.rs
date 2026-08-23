@@ -157,6 +157,9 @@ pub(crate) struct HostLeaseRunCargoArgs {
     /// Maximum event-driven wait for the rust-heavy resource.
     #[arg(long, default_value_t = 0)]
     pub wait_ms: u64,
+    /// Maximum Cargo workload time after the lease is acquired.
+    #[arg(long)]
+    pub workload_timeout_ms: Option<u64>,
     /// Cargo workspace root.
     #[arg(long)]
     pub workspace: PathBuf,
@@ -181,6 +184,8 @@ pub(crate) struct HostLeaseRunCargoWorkerArgs {
     pub build_dir: Option<PathBuf>,
     #[arg(long)]
     pub run_id: String,
+    #[arg(long)]
+    pub workload_timeout_ms: Option<u64>,
     #[arg(last = true, required = true)]
     pub cargo_args: Vec<String>,
 }

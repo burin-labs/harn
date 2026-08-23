@@ -61,6 +61,8 @@ fn test_parses_supervised_cargo_lease_contract() {
         "build-01",
         "--wait-ms",
         "30000",
+        "--workload-timeout-ms",
+        "600000",
         "--workspace",
         "/workspace",
         "--target-dir",
@@ -88,6 +90,7 @@ fn test_parses_supervised_cargo_lease_contract() {
         HostLeasePriorityArg::CiVerify
     ));
     assert_eq!(cargo.wait_ms, 30_000);
+    assert_eq!(cargo.workload_timeout_ms, Some(600_000));
     assert_eq!(cargo.workspace, PathBuf::from("/workspace"));
     assert_eq!(cargo.target_dir, PathBuf::from("/target"));
     assert_eq!(cargo.build_dir, Some(PathBuf::from("/build")));

@@ -13,9 +13,11 @@ lease_owner="${HARN_CARGO_LEASE_OWNER:-cargo-wrapper}"
 lease_host="${HARN_CARGO_LEASE_HOST:-}"
 lease_wait_ms="${HARN_CARGO_LEASE_WAIT_MS:-3600000}"
 lease_priority_class="${HARN_CARGO_LEASE_PRIORITY_CLASS:-interactive}"
+lease_workload_timeout_ms="${HARN_CARGO_LEASE_WORKLOAD_TIMEOUT_MS:-}"
 lease_mode="$(harn_effective_cargo_lease_mode)" || exit $?
 unset HARN_CARGO_LEASE_RUNNER HARN_CARGO_LEASE_OWNER HARN_CARGO_LEASE_HOST \
   HARN_CARGO_LEASE_WAIT_MS HARN_CARGO_LEASE_PRIORITY_CLASS HARN_CARGO_LEASE_MODE
+unset HARN_CARGO_LEASE_WORKLOAD_TIMEOUT_MS
 
 cargo_subcommand() {
   local arg=""
@@ -165,6 +167,11 @@ if [[ -n "$lease_wait_ms" ]]; then
 fi
 if [[ -n "$lease_priority_class" ]]; then
   lease_args+=(--priority-class "$lease_priority_class")
+fi
+if [[ -n "$lease_workload_timeout_ms" ]] \
+  && "$lease_runner" host lease run cargo --help 2>&1 \
+    | grep -q -- '--workload-timeout-ms'; then
+  lease_args+=(--workload-timeout-ms "$lease_workload_timeout_ms")
 fi
 
 export CARGO_HARN_HOST_LEASE_ACTIVE=1

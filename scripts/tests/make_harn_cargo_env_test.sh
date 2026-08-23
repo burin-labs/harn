@@ -59,7 +59,8 @@ cat > "$fake_bin/harn-lease" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
 for name in HARN_CARGO_LEASE_RUNNER HARN_CARGO_LEASE_OWNER HARN_CARGO_LEASE_HOST \
-  HARN_CARGO_LEASE_WAIT_MS HARN_CARGO_LEASE_PRIORITY_CLASS HARN_CARGO_LEASE_MODE; do
+  HARN_CARGO_LEASE_WAIT_MS HARN_CARGO_LEASE_WORKLOAD_TIMEOUT_MS \
+  HARN_CARGO_LEASE_PRIORITY_CLASS HARN_CARGO_LEASE_MODE; do
   if [[ -v "$name" ]]; then
     echo "wrapper leaked $name into the lease runner" >&2
     exit 91

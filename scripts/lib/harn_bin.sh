@@ -208,6 +208,9 @@ harn_run_cargo_probe_with_deadline() (
   local -a cargo_args=()
   local clear_freshness_environment=0
   local lease_mode=""
+  local lease_wait_ms="${HARN_CARGO_LEASE_WAIT_MS:-3600000}"
+  local lease_wait_seconds=""
+  local workload_timeout_ms=""
 
   timeout_seconds="$(harn_cargo_probe_timeout_seconds)" || return $?
   case "$cargo_profile" in
@@ -231,6 +234,12 @@ harn_run_cargo_probe_with_deadline() (
     return 1
   fi
   lease_mode="$(harn_effective_cargo_lease_mode)" || return $?
+  if [[ ! "$lease_wait_ms" =~ ^[0-9]+$ ]]; then
+    echo "error: HARN_CARGO_LEASE_WAIT_MS must be a non-negative integer" >&2
+    return 2
+  fi
+  workload_timeout_ms="$(awk -v seconds="$timeout_seconds" 'BEGIN { printf "%.0f\n", seconds * 1000 }')"
+  lease_wait_seconds="$(awk -v millis="$lease_wait_ms" 'BEGIN { printf "%.3f\n", millis / 1000 }')"
   if [[ "$lease_mode" != "off" ]]; then
     clear_freshness_environment=1
     cargo_args+=(--config "env.HARN_BUILD_FRESHNESS_ID='$build_freshness_id'")
@@ -285,6 +294,7 @@ harn_run_cargo_probe_with_deadline() (
       if [[ "$clear_freshness_environment" == "1" ]]; then
         unset HARN_BUILD_FRESHNESS_ID
       fi
+      export HARN_CARGO_LEASE_WORKLOAD_TIMEOUT_MS="$workload_timeout_ms"
       HARN_CARGO_LEASE_WORKSPACE="$(harn_repo_root)" \
       "$cargo_wrapper" "${cargo_args[@]}" &&
         "$predicted_bin" "$(harn_internal_executable_path_command)"
@@ -300,6 +310,13 @@ harn_run_cargo_probe_with_deadline() (
     # output pipe. If a platform delays process-group teardown, an inherited
     # writer keeps the caller blocked on EOF even after the probe has returned.
     (
+      # The lease runner owns the exact post-admission workload deadline. This
+      # outer watchdog is a crash-safety envelope, so its wall clock includes
+      # both independently configured phase budgets and cannot consume Cargo's
+      # compilation allowance while the command is queued.
+      if [[ "$lease_mode" != "off" ]]; then
+        sleep "$lease_wait_seconds"
+      fi
       sleep "$timeout_seconds"
       if kill -0 "$probe_pid" 2>/dev/null; then
         printf 'timed-out\n' >"$state_dir/timed-out"

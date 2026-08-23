@@ -272,17 +272,19 @@ harn host lease run cargo \
     --host build-01 \
     --owner ci-verify \
     --priority-class ci-verify \
+    --wait-ms 3600000 \
+    --workload-timeout-ms 600000 \
     --workspace "$workspace" \
     --target-dir "$CARGO_TARGET_DIR" \
     --build-dir "$CARGO_BUILD_BUILD_DIR" \
     -- test -p harn-vm
 ```
 
-The worker acquires `rust-heavy` before Cargo starts. On Unix it replaces
-itself with Cargo, preserving the lease-owner PID. On Windows it enrolls itself
-in a kill-on-close Job Object before spawning Cargo, so losing the worker also
-terminates its descendants before the lease can be recovered. On normal
-completion the supervisor writes a redacted receipt under
+The worker acquires `rust-heavy` before Cargo starts. `--wait-ms` bounds only
+queue admission; `--workload-timeout-ms` starts after acquisition and bounds
+only the Cargo process tree. On Windows the worker also enrolls itself in a
+kill-on-close Job Object. On normal completion the supervisor writes a
+redacted receipt under
 `~/.harn/host-leases/receipts/` containing wait time, hold time, exit status,
 resource identity, queue evidence, and hashed workspace/target/build
 identities.
@@ -308,6 +310,7 @@ HARN_CARGO_LEASE_RUNNER=/path/to/prebuilt/harn \
 HARN_CARGO_LEASE_OWNER=ci-verify \
 HARN_CARGO_LEASE_PRIORITY_CLASS=ci-verify \
 HARN_CARGO_LEASE_WAIT_MS=600000 \
+HARN_CARGO_LEASE_WORKLOAD_TIMEOUT_MS=600000 \
 HARN_CARGO_LEASE_MODE=required \
 ./scripts/cargo_with_worktree_build_dir.sh test -p harn-vm
 ```
