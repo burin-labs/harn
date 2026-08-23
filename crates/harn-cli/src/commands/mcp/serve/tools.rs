@@ -1,10 +1,8 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
 use serde::Deserialize;
 use serde_json::{json, Value as JsonValue};
-use tokio::sync::Notify;
 use uuid::Uuid;
 
 use harn_vm::mcp_protocol;
@@ -12,14 +10,13 @@ use harn_vm::{append_secret_scan_audit, secret_scan_content, SecretFinding};
 
 use super::protocol::paginated_list_response;
 use super::types::{
-    ConnectionState, DlqRetryRequest, InspectPayload, McpOrchestratorService, McpTaskRecord,
-    McpTaskState, QueueSnapshot, SecretScanRequest, TopicPreview, TriggerFireRequest,
-    TriggerListEntry, TriggerReplayRequest, TrustQueryRequest,
+    ConnectionState, DlqRetryRequest, InspectPayload, McpOrchestratorService, QueueSnapshot,
+    SecretScanRequest, TopicPreview, TriggerFireRequest, TriggerListEntry, TriggerReplayRequest,
+    TrustQueryRequest,
 };
 use super::util::{
-    handler_json, inject_trace_headers, merge_json_object, now_rfc3339,
-    parse_trust_query_timestamp, preview_events, report_milestone, trigger_kind_name,
-    trigger_replay_steering_from_request,
+    handler_json, inject_trace_headers, merge_json_object, parse_trust_query_timestamp,
+    preview_events, report_milestone, trigger_kind_name, trigger_replay_steering_from_request,
 };
 use super::DEFAULT_TASK_TTL_MS;
 use crate::commands::orchestrator::common::{
@@ -333,28 +330,8 @@ impl McpOrchestratorService {
         params: JsonValue,
         ttl: Option<u64>,
     ) -> JsonValue {
-        let task_id = Uuid::now_v7().to_string();
-        let now = now_rfc3339();
-        let task = McpTaskState {
-            task_id: task_id.clone(),
-            owner: session.mcp.client_identity().to_string(),
-            status: mcp_protocol::McpTaskStatus::Working,
-            status_message: Some("The operation is now in progress.".to_string()),
-            created_at: now.clone(),
-            last_updated_at: now,
-            ttl,
-            poll_interval: Some(mcp_protocol::DEFAULT_TASK_POLL_INTERVAL_MS),
-        };
-        let notify = Arc::new(Notify::new());
-        let record = McpTaskRecord {
-            task: task.clone(),
-            result: None,
-            notify,
-        };
-        self.tasks
-            .lock()
-            .expect("MCP tasks poisoned")
-            .insert(task_id.clone(), record);
+        let task = self.tasks.create(session.mcp.client_identity(), ttl);
+        let task_id = task.task_id.clone();
         let service = self.clone();
         let task_session = session.clone();
         // The task runs a Harn tool on this thread, so it drives the VM.
@@ -374,12 +351,11 @@ impl McpOrchestratorService {
             })
             .expect("spawn MCP task thread");
 
-        let mut result = task.to_json();
-        result["resultType"] = json!("task");
-        result["_meta"] = json!({
-            "io.modelcontextprotocol/model-immediate-response": "The requested Harn tool is running as an MCP task.",
-        });
-        harn_vm::jsonrpc::response(id, result)
+        harn_vm::mcp_tasks::task_created_response(
+            id,
+            &task,
+            "The requested Harn tool is running as an MCP task.",
+        )
     }
 
     pub(super) async fn run_tool_task(
@@ -404,35 +380,7 @@ impl McpOrchestratorService {
     }
 
     pub(super) fn complete_task(&self, task_id: &str, result: Result<JsonValue, String>) {
-        let Some(wake) = ({
-            let mut tasks = self.tasks.lock().expect("MCP tasks poisoned");
-            let Some(record) = tasks.get_mut(task_id) else {
-                return;
-            };
-            if record.task.status == mcp_protocol::McpTaskStatus::Cancelled {
-                return;
-            }
-            let wake = record.notify.clone();
-            let now = now_rfc3339();
-            record.task.last_updated_at = now;
-            match result {
-                Ok(value) => {
-                    record.task.status = mcp_protocol::McpTaskStatus::Completed;
-                    record.task.status_message =
-                        Some("The task completed successfully.".to_string());
-                    record.result = Some(tool_call_result_json(value, false));
-                }
-                Err(error) => {
-                    record.task.status = mcp_protocol::McpTaskStatus::Failed;
-                    record.task.status_message = Some(format!("Tool execution failed: {error}"));
-                    record.result = Some(tool_call_result_json(json!(error), true));
-                }
-            }
-            Some(wake)
-        }) else {
-            return;
-        };
-        wake.notify_waiters();
+        self.tasks.complete(task_id, result);
     }
 
     pub(super) fn handle_tasks_get(
@@ -441,10 +389,8 @@ impl McpOrchestratorService {
         session: &ConnectionState,
         params: &JsonValue,
     ) -> JsonValue {
-        match self.task_record_for_session(session, params) {
-            Ok(record) => harn_vm::jsonrpc::response(id, record.to_detailed_json()),
-            Err(error) => harn_vm::jsonrpc::error_response(id, -32602, &error),
-        }
+        self.tasks
+            .handle_get(id, session.mcp.client_identity(), params)
     }
 
     pub(super) fn handle_tasks_update(
@@ -453,21 +399,8 @@ impl McpOrchestratorService {
         session: &ConnectionState,
         params: &JsonValue,
     ) -> JsonValue {
-        let record = match self.task_record_for_session(session, params) {
-            Ok(record) => record,
-            Err(error) => return harn_vm::jsonrpc::error_response(id, -32602, &error),
-        };
-        let supplied = params
-            .get("inputResponses")
-            .and_then(JsonValue::as_object)
-            .is_some_and(|responses| !responses.is_empty());
-        let message = if supplied {
-            "Task has no outstanding input requests"
-        } else {
-            "tasks/update requires at least one input response"
-        };
-        let _ = record;
-        harn_vm::jsonrpc::error_response(id, -32602, message)
+        self.tasks
+            .handle_update(id, session.mcp.client_identity(), params)
     }
 
     pub(super) fn handle_tasks_cancel(
@@ -476,75 +409,8 @@ impl McpOrchestratorService {
         session: &ConnectionState,
         params: &JsonValue,
     ) -> JsonValue {
-        let task_id = match params.get("taskId").and_then(JsonValue::as_str) {
-            Some(task_id) if !task_id.is_empty() => task_id,
-            _ => {
-                return harn_vm::jsonrpc::error_response(
-                    id,
-                    -32602,
-                    "Cannot cancel task: missing taskId",
-                )
-            }
-        };
-        let notify = {
-            let mut tasks = self.tasks.lock().expect("MCP tasks poisoned");
-            let Some(record) = tasks.get_mut(task_id) else {
-                return harn_vm::jsonrpc::error_response(
-                    id,
-                    -32602,
-                    "Cannot cancel task: task not found",
-                );
-            };
-            if record.task.owner != session.mcp.client_identity() {
-                return harn_vm::jsonrpc::error_response(
-                    id,
-                    -32602,
-                    "Cannot cancel task: task not found",
-                );
-            }
-            if record.task.status.is_terminal() {
-                return harn_vm::jsonrpc::error_response(
-                    id,
-                    -32602,
-                    &format!(
-                        "Cannot cancel task: already in terminal status '{}'",
-                        mcp_protocol::mcp_task_status_wire_name(record.task.status)
-                    ),
-                );
-            }
-            record.task.status = mcp_protocol::McpTaskStatus::Cancelled;
-            record.task.status_message = Some("The task was cancelled by request.".to_string());
-            record.task.last_updated_at = now_rfc3339();
-            record.result = Some(json!({
-                "content": [{
-                    "type": "text",
-                    "text": "Task was cancelled by request.",
-                }],
-                "isError": true,
-            }));
-            record.notify.clone()
-        };
-        notify.notify_waiters();
-        harn_vm::jsonrpc::response(id, json!({}))
-    }
-
-    pub(super) fn task_record_for_session(
-        &self,
-        session: &ConnectionState,
-        params: &JsonValue,
-    ) -> Result<McpTaskRecord, String> {
-        let task_id = params
-            .get("taskId")
-            .and_then(JsonValue::as_str)
-            .ok_or_else(|| "Failed to retrieve task: missing taskId".to_string())?;
-        let tasks = self.tasks.lock().expect("MCP tasks poisoned");
-        let record = tasks
-            .get(task_id)
-            .ok_or_else(|| "Failed to retrieve task: task not found".to_string())?;
-        if record.task.owner != session.mcp.client_identity() {
-            return Err("Failed to retrieve task: task not found".to_string());
-        }
-        Ok(record.clone())
+        self.tasks
+            .handle_cancel(id, session.mcp.client_identity(), params)
     }
 
     pub(super) async fn tool_secret_scan(&self, arguments: JsonValue) -> Result<JsonValue, String> {
@@ -1047,24 +913,4 @@ pub(super) fn task_policy_for_tool(name: &str) -> Option<TaskPolicy> {
         | "harn.trust.query" => Some(TaskPolicy::Inline),
         _ => None,
     }
-}
-
-pub(super) fn tool_call_result_json(value: JsonValue, is_error: bool) -> JsonValue {
-    if is_error {
-        return json!({
-            "content": [{
-                "type": "text",
-                "text": value.as_str().unwrap_or("Tool execution failed"),
-            }],
-            "isError": true,
-        });
-    }
-    json!({
-        "content": [{
-            "type": "text",
-            "text": serde_json::to_string_pretty(&value).unwrap_or_else(|_| value.to_string()),
-        }],
-        "structuredContent": value,
-        "isError": false,
-    })
 }

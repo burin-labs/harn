@@ -431,14 +431,7 @@ async fn trigger_fire_task_roundtrip_polls_and_retrieves_result() {
     assert_eq!(created["result"]["ttlMs"], json!(DEFAULT_TASK_TTL_MS));
     let task_id = created["result"]["taskId"].as_str().unwrap();
 
-    let notify = service
-        .tasks
-        .lock()
-        .expect("MCP tasks poisoned")
-        .get(task_id)
-        .expect("created task")
-        .notify
-        .clone();
+    let notify = service.tasks.notifier(task_id).expect("created task");
     let task = loop {
         let notified = notify.notified();
         tokio::pin!(notified);

@@ -71,6 +71,20 @@ pub fn tool_registry_to_mcp_tools(registry: &VmValue) -> Result<Vec<McpToolDef>,
                 }
             });
 
+            let task_support = entry
+                .get("execution")
+                .and_then(|value| match value {
+                    VmValue::Dict(fields) => fields.get("taskSupport").cloned(),
+                    _ => None,
+                })
+                .and_then(|value| match value {
+                    VmValue::String(spelling) => Some(crate::mcp_tasks::McpTaskSupport::from_wire(
+                        spelling.as_str(),
+                    )),
+                    _ => None,
+                })
+                .unwrap_or_default();
+
             mcp_tools.push(McpToolDef {
                 name,
                 title,
@@ -80,6 +94,7 @@ pub fn tool_registry_to_mcp_tools(registry: &VmValue) -> Result<Vec<McpToolDef>,
                 annotations,
                 icons,
                 meta,
+                task_support,
                 handler,
             });
         }

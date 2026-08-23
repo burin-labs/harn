@@ -229,6 +229,7 @@ async fn server_projects_extension_metadata_on_tools_and_resource_content() {
             annotations: None,
             icons: None,
             meta: Some(extension_meta.clone()),
+            task_support: crate::mcp_tasks::McpTaskSupport::Forbidden,
             handler: empty_closure("open_editor"),
         }],
         vec![McpResourceDef {
@@ -843,6 +844,7 @@ async fn script_server_initializes_released_clients_without_stable_request_metad
             annotations: None,
             icons: None,
             meta: None,
+            task_support: crate::mcp_tasks::McpTaskSupport::Forbidden,
             handler: empty_closure("render_fixture"),
         }],
         Vec::new(),
@@ -918,7 +920,7 @@ async fn server_stable_resources_read_emits_cache_hint() {
 }
 
 #[tokio::test]
-async fn server_task_endpoints_report_missing_tasks_without_inline_tasks() {
+async fn server_task_endpoints_report_a_genuinely_missing_task() {
     let server = McpServer::new(
         "test".to_string(),
         Vec::new(),
@@ -939,4 +941,183 @@ async fn server_task_endpoints_report_missing_tasks_without_inline_tasks() {
         .await
         .expect("response");
     assert_eq!(missing["error"]["code"], serde_json::json!(-32602));
+}
+
+fn task_capable_server(support: crate::mcp_tasks::McpTaskSupport) -> McpServer {
+    McpServer::new(
+        "test".to_string(),
+        vec![McpToolDef {
+            name: "slow_report".to_string(),
+            title: None,
+            description: "Build a report".to_string(),
+            input_schema: serde_json::json!({"type": "object"}),
+            output_schema: None,
+            annotations: None,
+            icons: None,
+            meta: None,
+            task_support: support,
+            handler: empty_closure("slow_report"),
+        }],
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    )
+}
+
+/// `_meta` for a client that carries the tasks extension.
+fn task_client_params(rest: serde_json::Value) -> serde_json::Value {
+    let mut params = stable_metadata_params(rest);
+    params["_meta"][crate::mcp_protocol::MCP_META_KEY_CLIENT_CAPABILITIES] = serde_json::json!({
+        "extensions": {crate::mcp_protocol::TASKS_EXTENSION_ID: {}}
+    });
+    params
+}
+
+/// The whole point of the extension from a client's side: hand back an id,
+/// then answer questions about it. The server used to advertise the capability
+/// and answer every one of these with `task not found`, which a polling client
+/// cannot distinguish from its task having been dropped.
+#[tokio::test]
+async fn a_declared_tool_hands_back_a_task_a_client_can_actually_read() {
+    let server = task_capable_server(crate::mcp_tasks::McpTaskSupport::Optional);
+    let mut vm = crate::Vm::new();
+
+    let created = server
+        .handle_json_rpc(
+            crate::jsonrpc::request(
+                1,
+                "tools/call",
+                task_client_params(serde_json::json!({"name": "slow_report", "arguments": {}})),
+            ),
+            &mut vm,
+        )
+        .await
+        .expect("response");
+    assert_eq!(created["result"]["resultType"], serde_json::json!("task"));
+    assert_eq!(created["result"]["status"], serde_json::json!("working"));
+    let task_id = created["result"]["taskId"]
+        .as_str()
+        .expect("a created task carries an id")
+        .to_string();
+
+    let read = server
+        .handle_json_rpc(
+            crate::jsonrpc::request(
+                2,
+                "tasks/get",
+                stable_metadata_params(serde_json::json!({"taskId": task_id})),
+            ),
+            &mut vm,
+        )
+        .await
+        .expect("response");
+    assert_eq!(read["result"]["taskId"], serde_json::json!(task_id));
+    assert_eq!(read["result"]["status"], serde_json::json!("completed"));
+    assert!(
+        read["result"]["result"].is_object(),
+        "a completed task must carry the tool result, got {read}",
+    );
+
+    // Cancelling something already terminal has to be refused rather than
+    // quietly accepted, or a client cannot tell whether it beat the work.
+    let cancel = server
+        .handle_json_rpc(
+            crate::jsonrpc::request(
+                3,
+                "tasks/cancel",
+                stable_metadata_params(serde_json::json!({"taskId": task_id})),
+            ),
+            &mut vm,
+        )
+        .await
+        .expect("response");
+    assert!(cancel["error"]["message"]
+        .as_str()
+        .expect("a refused cancel explains itself")
+        .contains("already in terminal status 'completed'"));
+}
+
+/// Opting in is per tool, so adding the extension cannot change how a tool that
+/// never declared it behaves — even for a client that supports tasks.
+#[tokio::test]
+async fn an_undeclared_tool_still_answers_a_task_capable_client_inline() {
+    let server = task_capable_server(crate::mcp_tasks::McpTaskSupport::Forbidden);
+    let mut vm = crate::Vm::new();
+
+    let response = server
+        .handle_json_rpc(
+            crate::jsonrpc::request(
+                1,
+                "tools/call",
+                task_client_params(serde_json::json!({"name": "slow_report", "arguments": {}})),
+            ),
+            &mut vm,
+        )
+        .await
+        .expect("response");
+    assert!(
+        response["result"]["taskId"].is_null(),
+        "a forbidden tool must not create a task, got {response}",
+    );
+    assert_eq!(response["result"]["isError"], serde_json::json!(false));
+}
+
+/// `required` is the half that has to be enforced on the call: a client that
+/// simply omits the capability must not get the work done synchronously.
+#[tokio::test]
+async fn a_required_tool_refuses_a_client_that_did_not_ask_for_a_task() {
+    let server = task_capable_server(crate::mcp_tasks::McpTaskSupport::Required);
+    let mut vm = crate::Vm::new();
+
+    let response = server
+        .handle_json_rpc(
+            crate::jsonrpc::request(
+                1,
+                "tools/call",
+                stable_metadata_params(serde_json::json!({"name": "slow_report", "arguments": {}})),
+            ),
+            &mut vm,
+        )
+        .await
+        .expect("response");
+    assert_eq!(response["error"]["code"], serde_json::json!(-32602));
+    assert!(response["error"]["message"]
+        .as_str()
+        .expect("the refusal explains itself")
+        .contains("must be invoked as a task"));
+}
+
+/// A client decides whether to poll from `tools/list`, so the declaration has
+/// to reach it there. An undeclared tool stays silent rather than saying
+/// `forbidden`, keeping the listing byte-identical for servers that never opt in.
+#[tokio::test]
+async fn tools_list_reports_which_tools_accept_a_task() {
+    let mut vm = crate::Vm::new();
+    for (support, expected) in [
+        (
+            crate::mcp_tasks::McpTaskSupport::Optional,
+            serde_json::json!({"taskSupport": "optional"}),
+        ),
+        (
+            crate::mcp_tasks::McpTaskSupport::Required,
+            serde_json::json!({"taskSupport": "required"}),
+        ),
+        (
+            crate::mcp_tasks::McpTaskSupport::Forbidden,
+            serde_json::Value::Null,
+        ),
+    ] {
+        let listed = task_capable_server(support)
+            .handle_json_rpc(
+                crate::jsonrpc::request(
+                    1,
+                    "tools/list",
+                    stable_metadata_params(serde_json::json!({})),
+                ),
+                &mut vm,
+            )
+            .await
+            .expect("response");
+        assert_eq!(listed["result"]["tools"][0]["execution"], expected);
+    }
 }
