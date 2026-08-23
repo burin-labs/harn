@@ -31,7 +31,9 @@ use super::session_wal_watch;
 /// evict the first.
 static OBSERVERS: RwLock<Vec<(u64, SharedSessionChangeObserver)>> = RwLock::new(Vec::new());
 static NEXT_SUBSCRIPTION: AtomicU64 = AtomicU64::new(1);
-static TITLES: RwLock<Vec<(String, (Option<String>, bool))>> = RwLock::new(Vec::new());
+type TitleFingerprint = (Option<String>, bool);
+type RememberedTitles = Vec<(String, TitleFingerprint)>;
+static TITLES: RwLock<RememberedTitles> = RwLock::new(Vec::new());
 
 fn observers() -> RwLockWriteGuard<'static, Vec<(u64, SharedSessionChangeObserver)>> {
     OBSERVERS
@@ -39,7 +41,7 @@ fn observers() -> RwLockWriteGuard<'static, Vec<(u64, SharedSessionChangeObserve
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-fn titles() -> RwLockWriteGuard<'static, Vec<(String, (Option<String>, bool))>> {
+fn titles() -> RwLockWriteGuard<'static, RememberedTitles> {
     TITLES
         .write()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
