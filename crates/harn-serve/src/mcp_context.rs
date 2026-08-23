@@ -43,6 +43,10 @@ impl McpContextCatalog {
             });
         }
 
+        if let Some(guide) = sibling_guide(script_path) {
+            resources.push(guide);
+        }
+
         if !manifest_source.is_empty() {
             resources.push(McpContextResource {
                 uri: "harn://package/manifest".to_string(),
@@ -199,6 +203,26 @@ impl McpContextResource {
         }
         entry
     }
+}
+
+/// A markdown guide sitting next to the served script, e.g. `foo.mcp.md`
+/// beside `foo.mcp.harn`. This is the how-to a client can read before calling
+/// any tool — the script's own instructions, not the package README.
+fn sibling_guide(script_path: &Path) -> Option<McpContextResource> {
+    let stem = script_path.file_stem()?.to_str()?;
+    let guide_path = script_path.with_file_name(format!("{stem}.md"));
+    let text = fs::read_to_string(&guide_path).ok()?;
+    if text.trim().is_empty() {
+        return None;
+    }
+    Some(McpContextResource {
+        uri: "harn://package/howto".to_string(),
+        name: "How to use this server".to_string(),
+        title: Some("How to use this server".to_string()),
+        description: Some(format!("Operator guide for {stem}")),
+        mime_type: "text/markdown".to_string(),
+        text,
+    })
 }
 
 fn project_root_for_script(script_path: &Path) -> PathBuf {

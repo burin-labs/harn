@@ -38,10 +38,97 @@ pub fn greet(name: string) -> string {
     let server = McpServer::new(McpServerConfig::new(core));
     let tools = server.tools_list_result(&json!({}));
     assert_eq!(tools["tools"][0]["name"], "greet");
-    assert_eq!(tools["tools"][0]["annotations"]["readOnlyHint"], false);
-    assert_eq!(tools["tools"][0]["annotations"]["destructiveHint"], true);
+    assert_eq!(tools["tools"][0]["title"], "greet");
+    assert_eq!(
+        tools["tools"][0]["description"],
+        "Exported Harn function 'greet'."
+    );
+    // Undeclared hints stay off the wire. MCP's own defaults apply; inventing
+    // "destructive" / "open-world" here would be a safety claim the script
+    // never made.
+    assert!(tools["tools"][0]["annotations"]
+        .get("readOnlyHint")
+        .is_none());
+    assert!(tools["tools"][0]["annotations"]
+        .get("destructiveHint")
+        .is_none());
+    assert!(tools["tools"][0]["annotations"]
+        .get("openWorldHint")
+        .is_none());
     assert_eq!(tools["tools"][0]["inputSchema"]["type"], "object");
     assert_eq!(tools["tools"][0]["outputSchema"]["type"], "string");
+}
+
+#[tokio::test]
+async fn tools_list_projects_doc_comments_and_declared_hints() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let script = dir.path().join("server.harn");
+    std::fs::write(
+        &script,
+        r#"
+/**
+ * Eval debugger
+ *
+ * Start with find_runs.
+ */
+@annotations(readOnly: true, idempotent: true, openWorld: false)
+/// Find eval runs
+///
+/// Lists recent evals. Does not start one.
+pub fn find_runs() -> string {
+  return "ok"
+}
+"#,
+    )
+    .expect("write script");
+    let core = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");
+    let server = McpServer::new(McpServerConfig::new(core));
+    let tools = server.tools_list_result(&json!({}));
+    let tool = &tools["tools"][0];
+    assert_eq!(tool["name"], "find_runs");
+    assert_eq!(tool["title"], "Find eval runs");
+    assert!(tool["description"]
+        .as_str()
+        .unwrap()
+        .contains("Lists recent evals"));
+    assert_eq!(tool["annotations"]["readOnlyHint"], true);
+    assert_eq!(tool["annotations"]["idempotentHint"], true);
+    assert_eq!(tool["annotations"]["openWorldHint"], false);
+    assert!(tool["annotations"].get("destructiveHint").is_none());
+
+    let session = SharedSession::new();
+    let initialized = match server
+        .process_message(
+            json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-11-25",
+                    "capabilities": {},
+                    "clientInfo": {"name": "codex-mcp-client", "version": "test"}
+                }
+            }),
+            session,
+            AuthRequest::default(),
+        )
+        .await
+    {
+        ImmediateResult::Response(response) => response,
+        ImmediateResult::Accepted
+        | ImmediateResult::Stream(_)
+        | ImmediateResult::TaskStream { .. } => {
+            panic!("initialize must return a response")
+        }
+    };
+    assert_eq!(
+        initialized["result"]["instructions"],
+        "Eval debugger\n\nStart with find_runs."
+    );
+    assert_eq!(
+        initialized["result"]["serverInfo"]["title"],
+        "Eval debugger"
+    );
 }
 
 #[tokio::test]
@@ -183,6 +270,11 @@ async fn package_context_resources_templates_prompts_and_completions_roundtrip()
     )
     .expect("write manifest");
     std::fs::write(dir.path().join("README.md"), "# Fixture\n").expect("write readme");
+    std::fs::write(
+        dir.path().join("server.md"),
+        "# How to use\n\nStart with greet.\n",
+    )
+    .expect("write howto");
     std::fs::create_dir_all(dir.path().join("prompts")).expect("prompt dir");
     std::fs::write(
         dir.path().join("prompts/review.harn.prompt"),
@@ -233,6 +325,7 @@ pub fn greet(name: string) -> string {
     assert!(uris.contains(&"harn://package/manifest"));
     assert!(uris.contains(&"harn://package/readme"));
     assert!(uris.contains(&"harn://package/source"));
+    assert!(uris.contains(&"harn://package/howto"));
     assert!(uris.contains(&"harn://prompt/review/source"));
 
     let source = mcp_response(

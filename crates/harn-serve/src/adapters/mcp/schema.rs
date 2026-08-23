@@ -79,17 +79,35 @@ pub(super) fn parse_cursor(params: &JsonValue) -> (usize, usize) {
 }
 
 pub(super) fn tool_entry(function: &crate::ExportedFunction) -> JsonValue {
+    let title = function
+        .title
+        .clone()
+        .unwrap_or_else(|| function.name.clone());
+    let description = function
+        .description
+        .clone()
+        .unwrap_or_else(|| format!("Exported Harn function '{}'.", function.name));
+    let mut annotations = serde_json::Map::new();
+    annotations.insert("title".to_string(), json!(title));
+    if let Some(hints) = function.annotations {
+        if let Some(value) = hints.read_only {
+            annotations.insert("readOnlyHint".to_string(), json!(value));
+        }
+        if let Some(value) = hints.destructive {
+            annotations.insert("destructiveHint".to_string(), json!(value));
+        }
+        if let Some(value) = hints.idempotent {
+            annotations.insert("idempotentHint".to_string(), json!(value));
+        }
+        if let Some(value) = hints.open_world {
+            annotations.insert("openWorldHint".to_string(), json!(value));
+        }
+    }
     let mut entry = json!({
         "name": function.name,
-        "title": function.name,
-        "description": format!("Invoke exported Harn function '{}'.", function.name),
-        "annotations": {
-            "title": function.name,
-            "readOnlyHint": false,
-            "destructiveHint": true,
-            "idempotentHint": false,
-            "openWorldHint": true,
-        },
+        "title": title,
+        "description": description,
+        "annotations": annotations,
         "inputSchema": function.input_schema,
     });
     if let Some(output_schema) = function.output_schema.clone() {
