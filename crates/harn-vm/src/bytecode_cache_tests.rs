@@ -132,21 +132,57 @@ fn codegen_fingerprint_changes_cache_key() {
 
 #[test]
 fn module_context_hash_tracks_codegen_fingerprint() {
-    let first = module_compilation_context_hash_fingerprinted("compiler-A");
-    let second = module_compilation_context_hash_fingerprinted("compiler-B");
+    let imported = ModuleCompilationContext::default().digest();
+    let first = module_compilation_context_hash_fingerprinted("compiler-A", imported);
+    let second = module_compilation_context_hash_fingerprinted("compiler-B", imported);
     assert_ne!(
         first, second,
         "module artifacts must miss when compiler code generation changes"
     );
     assert_eq!(
         first,
-        module_compilation_context_hash_fingerprinted("compiler-A"),
+        module_compilation_context_hash_fingerprinted("compiler-A", imported),
         "an unchanged module compilation context must be stable"
     );
 }
 
 #[test]
-fn module_key_excludes_dependency_graph_while_entry_key_tracks_it() {
+fn module_key_tracks_canonical_imported_interface_not_dependency_bodies() {
+    let source = ModuleSource::from_text(
+        "import \"./library\"\npub fn exercise(value: any) { return value }\n",
+    );
+    let first = ModuleCompilationContext::new(
+        ["Color".to_string(), "State".to_string()],
+        ["context".to_string()],
+    );
+    let reordered = ModuleCompilationContext::new(
+        [
+            "State".to_string(),
+            "Color".to_string(),
+            "Color".to_string(),
+        ],
+        ["context".to_string(), "context".to_string()],
+    );
+    let changed = ModuleCompilationContext::new(["Color".to_string()], ["context".to_string()]);
+
+    assert_eq!(
+        first, reordered,
+        "set order and duplicates are not semantics"
+    );
+    assert_eq!(
+        CacheKey::from_module_source(&source, &first),
+        CacheKey::from_module_source(&source, &reordered),
+        "one imported interface must have one key"
+    );
+    assert_ne!(
+        CacheKey::from_module_source(&source, &first),
+        CacheKey::from_module_source(&source, &changed),
+        "changing an imported name consulted by lowering must miss"
+    );
+}
+
+#[test]
+fn module_key_excludes_dependency_bodies_while_entry_key_tracks_them() {
     let tmp = tempfile::tempdir().unwrap();
     let dependency = tmp.path().join("value.harn");
     let importer = tmp.path().join("reader.harn");
@@ -155,10 +191,14 @@ fn module_key_excludes_dependency_graph_while_entry_key_tracks_it() {
     std::fs::write(&importer, importer_source).unwrap();
 
     let entry_before = CacheKey::from_source(&importer, importer_source);
-    let module_before = CacheKey::from_module_source(&ModuleSource::from_text(importer_source));
-    let dependency_before = CacheKey::from_module_source(&ModuleSource::from_text(
-        std::fs::read_to_string(&dependency).unwrap(),
-    ));
+    let module_before = CacheKey::from_module_source(
+        &ModuleSource::from_text(importer_source),
+        &ModuleCompilationContext::default(),
+    );
+    let dependency_before = CacheKey::from_module_source(
+        &ModuleSource::from_text(std::fs::read_to_string(&dependency).unwrap()),
+        &ModuleCompilationContext::default(),
+    );
 
     std::fs::write(&dependency, "pub fn value() { return 2 }\n").unwrap();
     let future = std::fs::metadata(&dependency).unwrap().modified().unwrap()
@@ -171,10 +211,14 @@ fn module_key_excludes_dependency_graph_while_entry_key_tracks_it() {
         .unwrap();
 
     let entry_after = CacheKey::from_source(&importer, importer_source);
-    let module_after = CacheKey::from_module_source(&ModuleSource::from_text(importer_source));
-    let dependency_after = CacheKey::from_module_source(&ModuleSource::from_text(
-        std::fs::read_to_string(&dependency).unwrap(),
-    ));
+    let module_after = CacheKey::from_module_source(
+        &ModuleSource::from_text(importer_source),
+        &ModuleCompilationContext::default(),
+    );
+    let dependency_after = CacheKey::from_module_source(
+        &ModuleSource::from_text(std::fs::read_to_string(&dependency).unwrap()),
+        &ModuleCompilationContext::default(),
+    );
 
     assert_ne!(
         entry_before, entry_after,
@@ -275,10 +319,16 @@ fn packaged_module_artifact_with_another_sources_key_fails_closed() {
     let artifact =
         crate::module_artifact::compile_module_artifact_from_source(&first_path, first_source)
             .expect("compile first module");
-    let first_key = CacheKey::from_module_source(&ModuleSource::from_text(first_source));
+    let first_key = CacheKey::from_module_source(
+        &ModuleSource::from_text(first_source),
+        &ModuleCompilationContext::default(),
+    );
     store_module_at(&target, &first_key, &artifact).expect("store swapped artifact");
 
-    let second_key = CacheKey::from_module_source(&ModuleSource::from_text(second_source));
+    let second_key = CacheKey::from_module_source(
+        &ModuleSource::from_text(second_source),
+        &ModuleCompilationContext::default(),
+    );
     assert!(
         read_module_if_matches(&target, &second_key, &second_path)
             .unwrap()
@@ -292,7 +342,10 @@ fn module_artifact_is_relocatable_and_rebinds_exact_source_path() {
     let source = "pub fn answer() { fn inner() { return 42 }; return inner() }\n";
     let first_path = Path::new("/workspace/first/module.harn");
     let second_path = Path::new("/workspace/second/module.harn");
-    let key = CacheKey::from_module_source(&ModuleSource::from_text(source));
+    let key = CacheKey::from_module_source(
+        &ModuleSource::from_text(source),
+        &ModuleCompilationContext::default(),
+    );
 
     let artifact = crate::module_artifact::compile_module_artifact_from_source(first_path, source)
         .expect("compile module");
@@ -344,7 +397,10 @@ fn source_local_module_artifact_round_trips() {
     let source_path = Path::new("/tmp/source-local-module.harn");
     let artifact = crate::module_artifact::compile_module_artifact_from_source(source_path, source)
         .expect("compile module");
-    let key = CacheKey::from_module_source(&ModuleSource::from_text(source));
+    let key = CacheKey::from_module_source(
+        &ModuleSource::from_text(source),
+        &ModuleCompilationContext::default(),
+    );
     let tmp = tempfile::tempdir().unwrap();
     let path = tmp.path().join("source-local-module.harnmod");
 
@@ -776,10 +832,47 @@ fn a_manifest_that_decided_the_lookup_hands_back_the_graphs_link_table() {
     let table = outcome
         .link_table
         .expect("a decided lookup carries a table");
+    let expected_source = module_source::read(&dep).unwrap();
     assert_eq!(
-        table.content_hash(&module_source::canonical_identity(&dep)),
-        Some(module_source::read(&dep).unwrap().sha256()),
+        table.module_identity(&module_source::canonical_identity(&dep)),
+        Some((
+            expected_source.sha256(),
+            ModuleCompilationContext::default()
+        )),
         "the table must name the dependency by the digest that keys its artifact"
+    );
+}
+
+#[test]
+fn a_manifest_link_carries_the_imported_interface_needed_by_module_keys() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        tmp.path().join("library.harn"),
+        "pub enum Color { Ready(message: string) Empty }\n",
+    )
+    .unwrap();
+    let dep_body = r#"
+import "./library"
+pub fn exercise(value: any) -> string {
+  match value {
+    Color.Ready(message) -> { return message }
+    _ -> { return "fallback" }
+  }
+}
+"#;
+    let (entry, entry_source) = seed_entry_with_manifest(tmp.path(), dep_body);
+    let dep = tmp.path().join("dep.harn");
+
+    let table = load(&entry, &entry_source)
+        .link_table
+        .expect("a decided lookup carries a table");
+    let (content_hash, context) = table
+        .module_identity(&module_source::canonical_identity(&dep))
+        .expect("dependency identity recorded");
+    assert_eq!(content_hash, module_source::read(&dep).unwrap().sha256());
+    assert!(
+        context.enum_candidates().iter().any(|name| name == "Color"),
+        "the warm link must retain the enum name that changes lowering"
     );
 }
 

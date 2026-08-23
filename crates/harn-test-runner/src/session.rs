@@ -43,6 +43,8 @@ pub struct TestRunSessionStats {
     pub hits: u64,
     pub misses: u64,
     pub insertions: u64,
+    /// Artifacts discarded by capacity, including rejected cold admissions;
+    /// this is not restricted to removal of prior residents.
     pub evictions: u64,
     pub entries: usize,
     pub test_files_compiled: usize,

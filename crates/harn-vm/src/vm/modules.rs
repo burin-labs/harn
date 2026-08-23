@@ -3,14 +3,16 @@ use std::future::Future;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, OnceLock};
 
 use harn_modules::DefKind;
+use quick_cache::sync::{Cache, GuardResult};
 
 use crate::bytecode_cache;
 use crate::module_artifact::{
-    compile_module_artifact_from_source, compile_trusted_host_dispatch_module_artifact_from_source,
-    ModuleImportBinding, ModuleProvenance,
+    compile_module_artifact_from_source, compile_module_artifact_from_source_with_context,
+    compile_trusted_host_dispatch_module_artifact_from_source,
+    module_compilation_context_for_source, ModuleImportBinding, ModuleProvenance,
 };
 use crate::module_source::{self, ModuleSource};
 use crate::prepared_module::PreparedModuleArtifact;
@@ -18,12 +20,16 @@ use crate::value::{ModuleFunctionRegistry, VmClosure, VmEnv, VmError, VmValue};
 
 use super::{ScopeSpan, Vm};
 
-static STDLIB_MODULE_ARTIFACT_CACHE: OnceLock<
-    Mutex<BTreeMap<String, Arc<PreparedModuleArtifact>>>,
-> = OnceLock::new();
+static STDLIB_MODULE_ARTIFACT_CACHE: OnceLock<Cache<String, Arc<PreparedModuleArtifact>>> =
+    OnceLock::new();
 
-fn stdlib_module_artifact_cache() -> &'static Mutex<BTreeMap<String, Arc<PreparedModuleArtifact>>> {
-    STDLIB_MODULE_ARTIFACT_CACHE.get_or_init(|| Mutex::new(BTreeMap::new()))
+fn stdlib_module_artifact_cache() -> &'static Cache<String, Arc<PreparedModuleArtifact>> {
+    STDLIB_MODULE_ARTIFACT_CACHE.get_or_init(|| {
+        // The key set is embedded in this exact binary and therefore bounded.
+        // Sizing to its authoritative catalog keeps every immutable artifact
+        // resident without a second capacity constant to drift.
+        Cache::new(harn_stdlib::STDLIB_SOURCES.len().max(1))
+    })
 }
 
 fn verified_package_source(bytes: Vec<u8>, path: &Path) -> Result<String, VmError> {
@@ -58,17 +64,30 @@ fn exported_function_closures(
 
 #[cfg(test)]
 fn reset_stdlib_module_artifact_cache() {
-    stdlib_module_artifact_cache().lock().unwrap().clear();
+    stdlib_module_artifact_cache().clear();
 }
 
 #[cfg(test)]
 fn stdlib_module_artifact_cache_ptr(module: &str, source: &str) -> Option<usize> {
     let key = stdlib_artifact_cache_key(module, source);
     stdlib_module_artifact_cache()
-        .lock()
-        .unwrap()
         .get(&key)
-        .map(|artifact| Arc::as_ptr(artifact) as usize)
+        .map(|artifact| Arc::as_ptr(&artifact) as usize)
+}
+
+fn stdlib_artifact_get_or_prepare(
+    key: String,
+    prepare: impl FnOnce() -> Result<Arc<PreparedModuleArtifact>, VmError>,
+) -> Result<Arc<PreparedModuleArtifact>, VmError> {
+    match stdlib_module_artifact_cache().get_value_or_guard(&key, None) {
+        GuardResult::Value(artifact) => Ok(artifact),
+        GuardResult::Guard(guard) => {
+            let artifact = prepare()?;
+            let _ = guard.insert(Arc::clone(&artifact));
+            Ok(artifact)
+        }
+        GuardResult::Timeout => unreachable!("an unbounded stdlib cache wait cannot time out"),
+    }
 }
 
 pub(crate) struct LoadedModule {
@@ -249,49 +268,44 @@ fn stdlib_module_artifact(
     recorder: Option<&super::ModulePhaseRecorder>,
 ) -> Result<Arc<PreparedModuleArtifact>, VmError> {
     let key = stdlib_artifact_cache_key(module, source);
-    {
-        let cache = stdlib_module_artifact_cache().lock().unwrap();
-        if let Some(cached) = cache.get(&key) {
-            return Ok(Arc::clone(cached));
-        }
-    }
-
-    // Stdlib modules are embedded in the binary so their content cannot
-    // legitimately change between processes; that means the disk cache
-    // for stdlib can use a synthetic source_path. The harn_version field
-    // of the cache key gates correctness across releases.
-    let embedded = ModuleSource::from_text(source);
-    let lookup = {
-        let _load_span = recorder.map(super::ModulePhaseRecorder::load_span);
-        bytecode_cache::load_module(synthetic, &embedded)
-    };
-    let artifact = if let Some(artifact) = lookup.artifact {
-        artifact
-    } else {
-        let mut compile_span = recorder.map(super::ModulePhaseRecorder::compile_span);
-        let compiled = compile_module_artifact_from_source(synthetic, source)?;
-        if let Some(span) = &mut compile_span {
-            span.mark_compile_succeeded();
-        }
-        drop(compile_span);
-        if let Err(err) = bytecode_cache::store_module(&lookup.key, &compiled) {
-            if std::env::var_os("HARN_BYTECODE_CACHE_DEBUG").is_some() {
-                eprintln!("[harn] stdlib module cache write skipped for {module}: {err}");
+    stdlib_artifact_get_or_prepare(key, || {
+        // Stdlib modules are embedded in the binary so their content cannot
+        // legitimately change between processes; that means the disk cache
+        // for stdlib can use a synthetic source_path. The harn_version field
+        // of the cache key gates correctness across releases.
+        let embedded = ModuleSource::from_text(source);
+        let compilation_context = module_compilation_context_for_source(synthetic, source)?;
+        let lookup = {
+            let _load_span = recorder.map(super::ModulePhaseRecorder::load_span);
+            bytecode_cache::load_module(synthetic, &embedded, &compilation_context)
+        };
+        let artifact = if let Some(artifact) = lookup.artifact {
+            artifact
+        } else {
+            let mut compile_span = recorder.map(super::ModulePhaseRecorder::compile_span);
+            let compiled = compile_module_artifact_from_source_with_context(
+                synthetic,
+                source,
+                &compilation_context,
+            )?;
+            if let Some(span) = &mut compile_span {
+                span.mark_compile_succeeded();
             }
-        }
-        compiled
-    };
+            drop(compile_span);
+            if let Err(err) = bytecode_cache::store_module(&lookup.key, &compiled) {
+                if std::env::var_os("HARN_BYTECODE_CACHE_DEBUG").is_some() {
+                    eprintln!("[harn] stdlib module cache write skipped for {module}: {err}");
+                }
+            }
+            compiled
+        };
 
-    let compiled = {
-        let _load_span = recorder.map(super::ModulePhaseRecorder::load_span);
-        Arc::new(PreparedModuleArtifact::from_cached(artifact))
-    };
-    let mut cache = stdlib_module_artifact_cache().lock().unwrap();
-    if let Some(cached) = cache.get(&key) {
-        return Ok(Arc::clone(cached));
-    }
-    cache.insert(key, Arc::clone(&compiled));
-    Ok(compiled)
+        let compiled = {
+            let _load_span = recorder.map(super::ModulePhaseRecorder::load_span);
+            Arc::new(PreparedModuleArtifact::from_cached(artifact))
+        };
+        Ok(compiled)
+    })
 }
 
 pub(crate) fn prepare_stdlib_module_artifact(
@@ -1112,12 +1126,17 @@ impl Vm {
                 && provenance == ModuleProvenance::User
                 && verified_source.is_none())
             .then(|| {
-                let content_hash = self
+                let (content_hash, compilation_context) = self
                     .graph_link_table
                     .as_ref()?
-                    .content_hash(canonical.as_path())?;
+                    .module_identity(canonical.as_path())?;
                 let _load_span = self.module_load_span();
-                self.linked_module_artifact(&file_path, &canonical, content_hash)
+                self.linked_module_artifact(
+                    &file_path,
+                    &canonical,
+                    content_hash,
+                    &compilation_context,
+                )
             })
             .flatten();
 
@@ -1157,7 +1176,6 @@ impl Vm {
                         &canonical,
                         &source,
                         None,
-                        None,
                         self.module_phase_recorder.as_ref(),
                         ModuleProvenance::TrustedHostDispatch,
                     )?,
@@ -1166,7 +1184,6 @@ impl Vm {
                             &file_path,
                             &canonical,
                             &source,
-                            None,
                             None,
                             self.module_phase_recorder.as_ref(),
                             ModuleProvenance::User,
@@ -1220,21 +1237,26 @@ impl Vm {
         file_path: &Path,
         canonical: &Path,
         content_hash: [u8; 32],
+        compilation_context: &crate::module_artifact::ModuleCompilationContext,
     ) -> Option<Arc<PreparedModuleArtifact>> {
         if !bytecode_cache::cache_enabled() {
             return None;
         }
-        if let Some(prepared) =
-            self.prepared_module_cache
-                .get(canonical, content_hash, ModuleProvenance::User)
-        {
+        if let Some(prepared) = self.prepared_module_cache.get_with_context(
+            canonical,
+            content_hash,
+            ModuleProvenance::User,
+            compilation_context,
+        ) {
             return Some(prepared);
         }
-        let key = bytecode_cache::CacheKey::from_module_content_hash(content_hash);
+        let key =
+            bytecode_cache::CacheKey::from_module_content_hash(content_hash, compilation_context);
         let artifact = bytecode_cache::load_module_for_key(file_path, key).artifact?;
-        Some(self.prepared_module_cache.insert(
+        Some(self.prepared_module_cache.insert_with_context(
             canonical.to_path_buf(),
             content_hash,
+            compilation_context,
             Arc::new(PreparedModuleArtifact::from_cached(artifact)),
         ))
     }

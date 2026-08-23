@@ -1,4 +1,5 @@
-use std::sync::{Mutex, MutexGuard, OnceLock};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{mpsc, Mutex, MutexGuard, OnceLock};
 
 use super::*;
 
@@ -630,6 +631,108 @@ fn stdlib_artifact_cache_reuses_compilation_with_fresh_vm_state() {
 }
 
 #[test]
+fn stdlib_artifact_cache_singleflights_concurrent_exact_key() {
+    const WORKERS: usize = 8;
+
+    let _guard = cache_test_guard();
+    reset_stdlib_module_artifact_cache();
+    let source_path = Path::new("<stdlib>/singleflight-fixture.harn");
+    let artifact = Arc::new(PreparedModuleArtifact::from_cached(
+        compile_module_artifact_from_source(source_path, "pub fn value() { return 1 }")
+            .expect("compile immutable fixture"),
+    ));
+    let calls = Arc::new(AtomicUsize::new(0));
+    let (owner_entered_tx, owner_entered_rx) = mpsc::sync_channel(0);
+    let (release_owner_tx, release_owner_rx) = mpsc::sync_channel(0);
+    let owner = {
+        let artifact = Arc::clone(&artifact);
+        let calls = Arc::clone(&calls);
+        std::thread::spawn(move || {
+            stdlib_artifact_get_or_prepare("singleflight-fixture".to_string(), || {
+                calls.fetch_add(1, Ordering::SeqCst);
+                owner_entered_tx
+                    .send(())
+                    .expect("test coordinator observes the preparation owner");
+                release_owner_rx
+                    .recv()
+                    .expect("test coordinator releases the preparation owner");
+                Ok(artifact)
+            })
+            .expect("exact-key preparation succeeds")
+        })
+    };
+    owner_entered_rx
+        .recv()
+        .expect("one exact-key preparation owner enters");
+
+    let (waiter_ready_tx, waiter_ready_rx) = mpsc::sync_channel(0);
+    let mut waiters = Vec::with_capacity(WORKERS - 1);
+    for _ in 1..WORKERS {
+        let artifact = Arc::clone(&artifact);
+        let calls = Arc::clone(&calls);
+        let waiter_ready_tx = waiter_ready_tx.clone();
+        waiters.push(std::thread::spawn(move || {
+            waiter_ready_tx
+                .send(())
+                .expect("test coordinator observes a ready waiter");
+            stdlib_artifact_get_or_prepare("singleflight-fixture".to_string(), || {
+                calls.fetch_add(1, Ordering::SeqCst);
+                Ok(artifact)
+            })
+            .expect("exact-key waiter succeeds")
+        }));
+    }
+    drop(waiter_ready_tx);
+    for _ in 1..WORKERS {
+        waiter_ready_rx
+            .recv()
+            .expect("every exact-key waiter reaches the cache seam");
+    }
+    release_owner_tx
+        .send(())
+        .expect("release the exact-key preparation owner");
+
+    let mut outcomes = vec![owner.join().expect("stdlib cache owner joins")];
+    outcomes.extend(
+        waiters
+            .into_iter()
+            .map(|handle| handle.join().expect("stdlib cache worker joins")),
+    );
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        1,
+        "one exact immutable stdlib key must have one preparation owner"
+    );
+    assert!(
+        outcomes
+            .iter()
+            .all(|outcome| Arc::ptr_eq(&outcomes[0], outcome)),
+        "all waiters must receive the owner's exact immutable artifact"
+    );
+}
+
+#[test]
+fn stdlib_artifact_cache_does_not_poison_a_failed_preparation() {
+    let _guard = cache_test_guard();
+    reset_stdlib_module_artifact_cache();
+    let first = stdlib_artifact_get_or_prepare("retry-fixture".to_string(), || {
+        Err(VmError::Runtime(
+            "intentional preparation failure".to_string(),
+        ))
+    });
+    assert!(first.is_err());
+
+    let source_path = Path::new("<stdlib>/retry-fixture.harn");
+    let recovered = stdlib_artifact_get_or_prepare("retry-fixture".to_string(), || {
+        Ok(Arc::new(PreparedModuleArtifact::from_cached(
+            compile_module_artifact_from_source(source_path, "pub fn value() { return 1 }")?,
+        )))
+    })
+    .expect("a later owner may retry the failed exact key");
+    assert_eq!(recovered.provenance, ModuleProvenance::User);
+}
+
+#[test]
 fn prepared_user_module_reuses_code_with_fresh_mutable_state() {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -1166,7 +1269,10 @@ fn seed_linked_module(
 
     let source = module_source::read(&dep).expect("read dep");
     let artifact = compile_module_artifact_from_source(&dep, source.as_str()).expect("compile dep");
-    let key = bytecode_cache::CacheKey::from_module_source(&source);
+    let key = bytecode_cache::CacheKey::from_module_source(
+        &source,
+        &crate::module_artifact::ModuleCompilationContext::default(),
+    );
     bytecode_cache::store_module_at(
         &bytecode_cache::adjacent_module_cache_path(&dep).expect("adjacent artifact path"),
         &key,
@@ -1265,8 +1371,10 @@ fn a_link_table_naming_an_evicted_artifact_falls_back_to_reading() {
         temp.path().display()
     );
     let (dep, table) = seed_linked_module(temp.path(), &body);
-    let key =
-        bytecode_cache::CacheKey::from_module_source(&module_source::ModuleSource::from_text(body));
+    let key = bytecode_cache::CacheKey::from_module_source(
+        &module_source::ModuleSource::from_text(body),
+        &crate::module_artifact::ModuleCompilationContext::default(),
+    );
     for path in [
         bytecode_cache::adjacent_module_cache_path(&dep).unwrap(),
         bytecode_cache::cache_dir().join(key.module_filename()),
