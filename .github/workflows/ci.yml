@@ -1888,9 +1888,22 @@ jobs:
       needs.changes.outputs.docs_checks == 'true'
       && needs.changes.outputs.rust != 'true'
       && needs.changes.outputs.merge_group_proven != 'true'
-    # Docs-only changes use the pinned, checksum-verified release instead of
-    # compiling Harn. Source changes still run this exact Make target in the
-    # heavy audit lane with a binary built from the candidate commit.
+    # A check that parses a moving schema never runs a pinned parser.
+    #
+    # This lane installs the checksum-verified published release rather than
+    # compiling Harn, which keeps a docs-only change off the heavy lane. That
+    # binary can only judge checks whose answer comes out of the repository:
+    # prose, links, structure, and whether documented Harn parses. It cannot
+    # judge a check whose expected value the binary itself generates — the
+    # provider catalog, the trigger and connector tables, the diagnostic
+    # registry, its own `--help` — because a release is by construction no
+    # newer than the last tag while the tree keeps moving, so it reports every
+    # field added since as unknown and every artifact regenerated since as
+    # stale. `check-docs-portable` is exactly the half that survives that;
+    # `check-docs-exact` is the other half and belongs to a binary built from
+    # the commit under test. The merge queue forces the heavy lanes on for
+    # every merge, so `check-docs` still runs whole, with the right binary,
+    # before anything lands.
     #
     # `merge_group_proven` has to be excluded explicitly. On a push whose exact
     # SHA already passed on merge_group, the `force` step reports `rust=false`
@@ -1920,7 +1933,7 @@ jobs:
       - name: Check documentation contracts
         env:
           HARN_BIN: ${{ steps.harn.outputs.path }}
-        run: make -j4 check-docs
+        run: make -j4 check-docs-portable
 
   actions:
     name: GitHub Actions hygiene

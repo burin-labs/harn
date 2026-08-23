@@ -50,6 +50,8 @@ exempt_checks = [
   "check-cargo-lock-contract",       # validates CI cargo invocations pin the lock, not a generated mirror
   "check-trigger-examples",         # validates example projects parse, not a mirror
   "check-docs",                     # semantic documentation-check aggregator
+  "check-docs-portable",            # the half of check-docs a published release can judge
+  "check-docs-exact",               # the half that needs the commit's own binary
   "check-docs-cookbook-entrypoints", # validates runnable public cookbook entrypoints, not a mirror
   "check-docs-model-refs",          # validates docs track provider aliases, not a mirror
   "check-docs-snippets",            # validates ```harn blocks parse, not a mirror
@@ -626,6 +628,8 @@ make_all = false  # excluded from `make all` for the same reason (no sibling che
 "check-vm-rss-soak" = "excluded"              # RSS perf soak (build + run)
 "check-test-case-performance" = "excluded"    # per-test perf ratchet (build + run)
 "check-docs" = "excluded"                     # semantic documentation-check aggregator
+"check-docs-portable" = "excluded"            # aggregator: the half a published release can judge
+"check-docs-exact" = "excluded"               # aggregator: the half needing the commit's own binary
 "check-docs-cookbook-entrypoints" = "source"   # validates public cookbook entrypoint shapes
 "check-drift" = "excluded"                    # the source-tier aggregator itself
 "check-drift-binary" = "excluded"             # the binary-tier aggregator itself

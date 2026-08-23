@@ -474,6 +474,48 @@ pub fn validate(request: GeneratedRegistryValidationRequest) -> list {
 }
 
 /**
+ * The audit runner's `GATES=( ... )` entries, rendered as one synthetic `make`
+ * invocation so they seed the dependency walk.
+ *
+ * The runner is a list of Make targets by construction, and the note at its
+ * call site already treats a target named there as CI-enforced. Appending the
+ * file's raw text only made those names *mentioned*, though: the walk seeds
+ * from `make`/`$(MAKE)` command lines, and a bare array entry is neither. So a
+ * check reachable only through an aggregate named here expanded to nothing and
+ * read as unwatched, even though the audit lane runs it on every merge.
+ */
+pub fn audit_gate_invocation(runner_text: string) -> string {
+  let inside = false
+  let names = []
+  for line in runner_text.lines() {
+    const trimmed = line.trim()
+    // Only the multi-line literal opens the list. The runner later rebinds the
+    // array on one line as `GATES=("${filtered_gates[@]}")`, and treating that
+    // as an opener leaves the scan running to end of file, sweeping ordinary
+    // shell text in as if it named Make targets.
+    if trimmed == "GATES=(" {
+      inside = true
+      continue
+    }
+    if !inside {
+      continue
+    }
+    if trimmed.starts_with(")") {
+      inside = false
+      continue
+    }
+    if trimmed == "" || trimmed.starts_with("#") {
+      continue
+    }
+    names = names + [trimmed]
+  }
+  if names.count == 0 {
+    return ""
+  }
+  return "make " + names.join(" ")
+}
+
+/**
  * Concatenate the workflow file contents in sorted repo-relative order
  * (each followed by a newline).
  */
@@ -497,6 +539,7 @@ fn read_workflows(fs: HarnessFs) -> string {
   // named there is just as CI-enforced as one named directly in a workflow.
   if fs.exists(AUDIT_GATE_RUNNER) {
     text = text + fs.read_text(AUDIT_GATE_RUNNER) + "\n"
+    text = text + audit_gate_invocation(fs.read_text(AUDIT_GATE_RUNNER)) + "\n"
   }
   return text
 }
