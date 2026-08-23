@@ -15,6 +15,7 @@ use super::EnvironmentPolicyConfig;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
+mod exit_status;
 mod network;
 
 fn write_manifest_trigger_project(root: &Path, main_source: &str) -> PathBuf {
@@ -1049,47 +1050,6 @@ fn main(harness: Harness) {
 
     assert_eq!(outcome.exit_code, 0, "stderr:\n{}", outcome.stderr);
     assert_eq!(outcome.stdout.trim(), "target-ran");
-    harn_vm::reset_thread_local_state();
-}
-
-#[tokio::test]
-async fn execute_run_defaults_to_lazy_handlers_and_supports_eager_validation() {
-    harn_vm::reset_thread_local_state();
-    let project = tempfile::tempdir().expect("temp project");
-    let script = write_manifest_trigger_project(
-        project.path(),
-        r#"
-pipeline main(harness: Harness) {
-  harness.stdio.println("target-ran")
-}
-"#,
-    );
-
-    let outcome = execute_run(
-        &script.to_string_lossy(),
-        false,
-        HashSet::new(),
-        Vec::new(),
-        Vec::new(),
-        CliLlmMockMode::Off,
-        None,
-        RunProfileOptions::default(),
-    )
-    .await;
-
-    assert_eq!(outcome.exit_code, 0, "stderr:\n{}", outcome.stderr);
-    assert_eq!(outcome.stdout.trim(), "target-ran");
-
-    let outcome = execute_run_with_eager_project_handlers(&script.to_string_lossy()).await;
-
-    assert_eq!(outcome.exit_code, 1, "stdout:\n{}", outcome.stdout);
-    assert!(
-        outcome
-            .stderr
-            .contains("failed to install manifest triggers"),
-        "stderr:\n{}",
-        outcome.stderr
-    );
     harn_vm::reset_thread_local_state();
 }
 

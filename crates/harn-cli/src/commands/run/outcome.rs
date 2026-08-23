@@ -56,6 +56,12 @@ impl JsonRunSession {
     }
 }
 
+/// End a run that failed.
+///
+/// `failure` decides the process exit status. A caller that shells out to Harn
+/// has to be able to tell "your dependencies could not be prepared" from "your
+/// code returned a failure", and the only place that distinction can be made
+/// honestly is here, where the phase that failed is still known.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn finalize_run_error(
     stdout: String,
@@ -69,6 +75,7 @@ pub(super) fn finalize_run_error(
     timing: Option<&RunTiming>,
     main_events: u64,
     cpu_ms_total: Option<u64>,
+    failure: crate::exit::RunFailure,
     code: impl Into<String>,
     message: impl Into<String>,
 ) -> RunOutcome {
@@ -77,7 +84,7 @@ pub(super) fn finalize_run_error(
         phase,
         rusage,
         started,
-        1,
+        failure.exit_code(),
         profile,
         None,
         timing,
@@ -98,10 +105,15 @@ pub(super) fn finalize_run_error(
     }
 }
 
-/// Translate a preflight failure into either the `--json` error event
-/// stream or a plain stderr message plus exit-code 1. Keeps the
-/// `.harnpack` verify path's error reporting consistent with the rest
-/// of `harn run`.
+/// Translate a `.harnpack` preflight failure into either the `--json` error
+/// event stream or a plain stderr message plus the program-failure status.
+///
+/// Deliberately not a setup failure, even though it happens before the program
+/// runs. Most of what this rejects is a refusal about the bundle itself — an
+/// absent signature, a signature that does not cover the bytes on disk — and
+/// those are verdicts on the artifact, not faults in the host that was asked to
+/// run it. A caller that reads the setup status as "infrastructure, retry it"
+/// would retry a tampered bundle forever.
 pub(super) fn finalize_harnpack_error(
     mut stderr: String,
     json_session: Option<JsonRunSession>,
@@ -126,6 +138,7 @@ pub(super) fn finalize_harnpack_error(
         None,
         0,
         None,
+        crate::exit::RunFailure::Program,
         code,
         message,
     )

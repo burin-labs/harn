@@ -282,7 +282,7 @@ pub(crate) async fn run_file_with_skill_dirs(
         .is_some_and(RunDeadlineGuard::timed_out)
         || (exit_code != 0 && interrupt_tokens.cancel_token.load(Ordering::SeqCst))
     {
-        exit_code = 124;
+        exit_code = crate::exit::RUN_INTERRUPTED;
     }
     exit_code
 }
@@ -359,7 +359,7 @@ pub fn execute_explain_cost(path: &str) -> RunOutcome {
             return RunOutcome {
                 stdout,
                 stderr,
-                exit_code: 1,
+                exit_code: crate::exit::RUN_SETUP_FAILURE,
             };
         }
     };
@@ -369,7 +369,7 @@ pub fn execute_explain_cost(path: &str) -> RunOutcome {
             return RunOutcome {
                 stdout,
                 stderr,
-                exit_code: 1,
+                exit_code: crate::exit::PROGRAM_FAILURE,
             };
         }
     };
@@ -382,7 +382,7 @@ pub fn execute_explain_cost(path: &str) -> RunOutcome {
             return RunOutcome {
                 stdout,
                 stderr,
-                exit_code: 1,
+                exit_code: crate::exit::RUN_SETUP_FAILURE,
             };
         }
     };
@@ -397,7 +397,7 @@ pub fn execute_explain_cost(path: &str) -> RunOutcome {
         return RunOutcome {
             stdout,
             stderr,
-            exit_code: 1,
+            exit_code: crate::exit::PROGRAM_FAILURE,
         };
     }
 
@@ -770,6 +770,7 @@ async fn execute_run_inner_scoped(
                     timing.as_deref(),
                     0,
                     cpu_started_ms.map(|start| time::cpu_ms().saturating_sub(start)),
+                    crate::exit::RunFailure::Setup,
                     "linked_program_source",
                     stderr,
                 );
@@ -783,7 +784,7 @@ async fn execute_run_inner_scoped(
         let runtime = linked.into_runtime(&source_root);
         let chunk = runtime.entry_chunk.clone();
         linked_runtime = Some(runtime);
-        Some(LoadedChunk {
+        Ok(LoadedChunk {
             source,
             chunk,
             link_table: None,
@@ -791,28 +792,31 @@ async fn execute_run_inner_scoped(
     } else {
         compile_or_load_chunk_with_timing(resolved_path, &mut stderr, timing.as_deref_mut())
     };
-    let Some(LoadedChunk {
+    let LoadedChunk {
         source,
         chunk,
         link_table,
-    }) = loaded
-    else {
-        let message = stderr.clone();
-        return finalize_run_error(
-            stdout,
-            stderr,
-            json_session,
-            summary.as_ref(),
-            phase.as_ref(),
-            rusage.as_ref(),
-            run_started,
-            None,
-            timing.as_deref(),
-            0,
-            cpu_started_ms.map(|start| time::cpu_ms().saturating_sub(start)),
-            "compile_error",
-            message,
-        );
+    } = match loaded {
+        Ok(loaded) => loaded,
+        Err(failure) => {
+            let message = stderr.clone();
+            return finalize_run_error(
+                stdout,
+                stderr,
+                json_session,
+                summary.as_ref(),
+                phase.as_ref(),
+                rusage.as_ref(),
+                run_started,
+                None,
+                timing.as_deref(),
+                0,
+                cpu_started_ms.map(|start| time::cpu_ms().saturating_sub(start)),
+                failure.classification(),
+                failure.diagnostic_code(),
+                message,
+            );
+        }
     };
     let path = resolved_path;
 
@@ -844,6 +848,7 @@ async fn execute_run_inner_scoped(
             timing.as_deref(),
             0,
             cpu_started_ms.map(|start| time::cpu_ms().saturating_sub(start)),
+            crate::exit::RunFailure::Setup,
             "llm_mock_install",
             error,
         );
@@ -914,6 +919,7 @@ async fn execute_run_inner_scoped(
                     timing.as_deref(),
                     0,
                     cpu_started_ms.map(|start| time::cpu_ms().saturating_sub(start)),
+                    crate::exit::RunFailure::Setup,
                     code,
                     error.to_string(),
                 );
@@ -1011,6 +1017,7 @@ async fn execute_run_inner_scoped(
                 timing.as_deref(),
                 0,
                 cpu_started_ms.map(|start| time::cpu_ms().saturating_sub(start)),
+                crate::exit::RunFailure::Setup,
                 "harness_secret_provider",
                 error,
             );
@@ -1030,10 +1037,7 @@ async fn execute_run_inner_scoped(
     {
         Ok(runtime) => runtime,
         Err(error) => {
-            stderr.push_str(&format!(
-                "error: failed to install {}: {error}\n",
-                error.label()
-            ));
+            stderr.push_str(&format!("error: failed to {}: {error}\n", error.label()));
             time::record_run_setup_elapsed(timing.as_deref_mut(), setup_start);
             return finalize_run_error(
                 stdout,
@@ -1047,6 +1051,7 @@ async fn execute_run_inner_scoped(
                 timing.as_deref(),
                 0,
                 cpu_started_ms.map(|start| time::cpu_ms().saturating_sub(start)),
+                crate::exit::RunFailure::Setup,
                 error.phase(),
                 error.to_string(),
             );
@@ -1098,6 +1103,9 @@ async fn execute_run_inner_scoped(
             timing.as_deref(),
             harn_vm::tracing::peek_spans().len() as u64,
             cpu_started_ms.map(|start| time::cpu_ms().saturating_sub(start)),
+            // The program already ran. A recording that could not be persisted
+            // is a failed run, not a run that never started.
+            crate::exit::RunFailure::Program,
             "llm_mock_record",
             error,
         );
@@ -1144,6 +1152,9 @@ async fn execute_run_inner_scoped(
                 timing.as_deref(),
                 harn_vm::tracing::peek_spans().len() as u64,
                 cpu_started_ms.map(|start| time::cpu_ms().saturating_sub(start)),
+                // Also post-execution: the receipt describes a run that
+                // happened.
+                crate::exit::RunFailure::Program,
                 "attestation",
                 error,
             );
