@@ -13,7 +13,7 @@ pipeline default(harness: Harness) {
     [
       llm_text("<user_response>isolated final answer</user_response>"),
       llm_text(
-        "{\"action\":\"accept\",\"reason\":\"complete\",\"repair\":\"\",\"specific_gaps\":[],\"accepted_evidence\":[]}",
+        "{\"verdict\":\"done\",\"detail\":\"The task is complete.\"}",
       ),
     ],
     { ->

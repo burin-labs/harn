@@ -7,11 +7,11 @@ pipeline default(harness: Harness) {
     [
       llm_text("<user_response>Too thin.</user_response>\n<done>##DONE##</done>"),
       llm_text(
-        "{\"action\":\"continue\",\"reason\":\"answer lacks detail\",\"repair\":\"Answer with the concrete result.\",\"specific_gaps\":[],\"accepted_evidence\":[]}",
+        "{\"verdict\":\"continue\",\"detail\":\"Answer with the concrete result.\"}",
       ),
       llm_text("<user_response>The concrete result is 4.</user_response>\n<done>##DONE##</done>"),
       llm_text(
-        "{\"action\":\"accept\",\"reason\":\"the result is explicit\",\"repair\":\"\",\"specific_gaps\":[],\"accepted_evidence\":[]}",
+        "{\"verdict\":\"done\",\"detail\":\"The result is explicit.\"}",
       ),
     ],
     { ->

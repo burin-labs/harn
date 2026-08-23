@@ -22,10 +22,20 @@ completion rule and requires the agent to keep working until the task is done.
 
 `done_judge` adds a second gate after completion is detected. The loop projects
 the lossless transcript into bounded effect and verification evidence, then
-expects one strict object with `action: "accept" | "continue"`, `reason`,
-`repair`, `specific_gaps`, and `accepted_evidence`. It accepts no aliases or
-additional fields. On a continuation, the loop preserves the repair, gaps, and
-reason together as recovery feedback.
+expects one strict object: `{verdict: "done" | "continue", detail}`. The
+`detail` is limited to 240 characters. It records the strongest supporting
+evidence for `done`, or the single most important gap and next action for
+`continue`. Harn injects a continuation detail as recovery feedback.
+
+The judge decides content only: whether the work is complete and honestly
+reported. Whether the response carries a done sentinel or any other marker is
+wire protocol, owned by the deterministic completion layer, and the judge
+prompts say so. A missing marker is never grounds for a veto, and a `continue`
+detail must name a substantive next action rather than a reformat or a
+restatement. A judge that could veto on formatting would stall work that is
+already verified and complete, since the loop has no way to satisfy such a
+veto except by having the model repeat a token it has already declined to
+emit.
 
 A veto injects runtime feedback and the loop continues until the judge accepts,
 `done_judge.max_invocations` is reached, or `max_verify_attempts` is exhausted.

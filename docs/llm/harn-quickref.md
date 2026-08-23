@@ -2429,9 +2429,10 @@ instead of composing with `agent_loop`.
 Pass `done_judge: true` or `done_judge: {...}` to run a structured
 completion judge after a native-tool loop naturally completes or after
 the model emits `##DONE##` in a sentinel loop.
-The judge returns exactly `{action: "accept" | "continue", reason, repair,
-specific_gaps, accepted_evidence}`. A `continue` action injects repair and the
-loop continues until the judge accepts, `done_judge.max_invocations` is
+The judge returns exactly `{verdict: "done" | "continue", detail}`. On
+`done`, `detail` names the strongest supporting evidence. On `continue`, it
+names the single most important gap and next action. The loop injects that
+detail and continues until the judge accepts, `done_judge.max_invocations` is
 reached, or `max_verify_attempts` is exhausted. Each judge call emits a
 `JudgeDecision` agent event with optional `trigger`.
 Use

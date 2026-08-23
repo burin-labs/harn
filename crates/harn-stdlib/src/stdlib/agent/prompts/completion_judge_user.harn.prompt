@@ -9,9 +9,10 @@ Latest assistant text:
 
 Decide whether this agent loop may yield to the user now. Consider the original request, latest assistant prose, and the bounded action evidence together. The packet retains the latest effect-bearing and verification actions, omits read-only exploration, and reports any older actions it omitted. If the latest assistant message included a tool call, do not require an extra prose-only turn when the assistant text plus tool result already form a clear final answer.
 
+Judge the work, not its wire format. Response markers, sentinels, envelopes, and layout are enforced elsewhere; a missing or malformed marker is never a reason to continue.
+
 Return the exact requested JSON shape.
-- Set `action` to `"accept"` only when the current visible answer satisfies the request and does not leave required verification or high-risk authorization unresolved.
-- Otherwise set `action` to `"continue"` and make `repair` a concrete instruction for the next turn.
-- Use `reason` for one short rationale, not chain-of-thought.
-- Always return both evidence lists. Use empty lists when they do not apply.
-- On `accept`, use an empty string for `repair`; on `continue`, name the smallest behavior-sensitive repair.
+- Set `verdict` to `"done"` when the visible answer satisfies the request and leaves no required verification or high-risk authorization unresolved. Use `detail` for the strongest evidence that it does.
+- Otherwise set `verdict` to `"continue"` and use `detail` for the single most important gap and the substantive next action that closes it.
+- A `continue` action must change the work. Never ask only for a restatement, a reformat, or a marker.
+- Keep `detail` to one or two sentences. It is a short rationale, not chain-of-thought.

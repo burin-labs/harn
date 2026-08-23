@@ -30,11 +30,11 @@ fn run_capped(harness: Harness) {
     [
       llm_text("Round one. ##DONE##"),
       llm_text(
-        "{\"action\":\"continue\",\"reason\":\"veto one\",\"repair\":\"keep going\",\"specific_gaps\":[],\"accepted_evidence\":[]}",
+        "{\"verdict\":\"continue\",\"detail\":\"Keep going after veto one.\"}",
       ),
       llm_text("Round two. ##DONE##"),
       llm_text(
-        "{\"action\":\"continue\",\"reason\":\"veto two\",\"repair\":\"keep going\",\"specific_gaps\":[],\"accepted_evidence\":[]}",
+        "{\"verdict\":\"continue\",\"detail\":\"Keep going after veto two.\"}",
       ),
       llm_text("Round three. ##DONE##"),
     ],
@@ -82,7 +82,7 @@ fn run_approved(harness: Harness) {
     [
       llm_text("Final answer. ##DONE##"),
       llm_text(
-        "{\"action\":\"accept\",\"reason\":\"looks complete\",\"repair\":\"\",\"specific_gaps\":[],\"accepted_evidence\":[]}",
+        "{\"verdict\":\"done\",\"detail\":\"The task looks complete.\"}",
       ),
     ],
     { ->
@@ -117,11 +117,11 @@ fn run_cap_disabled(harness: Harness) {
     [
       llm_text("Try one. ##DONE##"),
       llm_text(
-        "{\"action\":\"continue\",\"reason\":\"veto one\",\"repair\":\"keep going\",\"specific_gaps\":[],\"accepted_evidence\":[]}",
+        "{\"verdict\":\"continue\",\"detail\":\"Keep going after veto one.\"}",
       ),
       llm_text("Try two. ##DONE##"),
       llm_text(
-        "{\"action\":\"continue\",\"reason\":\"veto two\",\"repair\":\"keep going\",\"specific_gaps\":[],\"accepted_evidence\":[]}",
+        "{\"verdict\":\"continue\",\"detail\":\"Keep going after veto two.\"}",
       ),
       llm_text("Try three. ##DONE##"),
     ],
@@ -164,11 +164,11 @@ fn run_diagnosis_recovery(harness: Harness) {
     [
       llm_text("Malformed tool-call loop. ##DONE##"),
       llm_text(
-        "{\"action\":\"continue\",\"reason\":\"task remains incomplete: assistant is stuck in a loop sending malformed tool calls\",\"repair\":\"use a different tool-call shape\",\"specific_gaps\":[\"assistant is stuck in a loop sending malformed tool calls\"],\"accepted_evidence\":[]}",
+        "{\"verdict\":\"continue\",\"detail\":\"The tool-call shape is malformed; use a different valid shape next.\"}",
       ),
       llm_text("Recovered after applying the diagnosis. ##DONE##"),
       llm_text(
-        "{\"action\":\"accept\",\"reason\":\"recovery succeeded\",\"repair\":\"\",\"specific_gaps\":[],\"accepted_evidence\":[]}",
+        "{\"verdict\":\"done\",\"detail\":\"The recovery succeeded.\"}",
       ),
     ],
     { ->
@@ -206,7 +206,7 @@ fn run_diagnosis_recovery(harness: Harness) {
       )
       harness.stdio.println(
         "diagnosis.reasoning_observable="
-          + to_string(judges[0].reasoning.contains("task remains incomplete")),
+          + to_string(judges[0].reasoning.contains("tool-call shape is malformed")),
       )
     },
   )

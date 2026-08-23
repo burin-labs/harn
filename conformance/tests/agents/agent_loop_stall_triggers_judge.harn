@@ -41,7 +41,7 @@ pipeline default(harness: Harness) {
       {text: "", tool_calls: [{id: "noop2", name: "noop", arguments: {}}]},
       {text: "", tool_calls: [{id: "noop3", name: "noop", arguments: {}}]},
       llm_text(
-        "{\"action\":\"accept\",\"reason\":\"the repeated call is enough\",\"repair\":\"\",\"specific_gaps\":[],\"accepted_evidence\":[]}",
+        "{\"verdict\":\"done\",\"detail\":\"The repeated call is sufficient evidence.\"}",
       ),
     ],
     { ->

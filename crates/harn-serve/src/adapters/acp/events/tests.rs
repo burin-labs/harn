@@ -518,11 +518,6 @@ fn agent_event_ext_fixture_events() -> Vec<AgentEvent> {
             converted_from: Some("cosmetic_only".to_string()),
             escalation_recommended: Some(true),
             escalation_target: Some("frontier".to_string()),
-            specific_gaps: vec![
-                "rerun the verifier".to_string(),
-                "cite the changed source file".to_string(),
-            ],
-            accepted_evidence: Vec::new(),
         },
         AgentEvent::StructuralValidatorDecision {
             session_id: "session-1".to_string(),
@@ -679,16 +674,15 @@ async fn agent_event_ext_notifications_use_advertised_wire_contract() {
         .find(|notification| notification["params"]["kind"] == "judge_decision")
         .expect("judge_decision fixture");
     assert_eq!(
-        judge["params"]["specificGaps"],
-        serde_json::json!(["rerun the verifier", "cite the changed source file"])
-    );
-    assert_eq!(
         judge["params"]["source"],
         serde_json::json!("deterministic")
     );
     assert_eq!(judge["params"]["escalationRecommended"], true);
     assert_eq!(judge["params"]["escalationTarget"], "frontier");
-    assert_eq!(judge["params"]["acceptedEvidence"], serde_json::json!([]));
+    // The verdict's audit basis rides `reasoning` and `nextStep`. The retired
+    // evidence arrays must not reappear on the wire under any name.
+    assert!(judge["params"]["specificGaps"].is_null());
+    assert!(judge["params"]["acceptedEvidence"].is_null());
 
     for notification in actual {
         assert_eq!(
