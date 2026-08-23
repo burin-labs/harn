@@ -499,11 +499,19 @@
       "jsonrpc": "2.0",
       "method": "_harn/agentEvent",
       "params": {
-        "budgetKind": "max_iterations",
-        "costUsd": 0.12,
+        "budgetKind": "total_cost",
+        "costUsd": 0.69,
         "kind": "budget_exhausted",
+        "limit": "total_cost",
+        "limitValue": 1.25,
         "maxIterations": 8,
+        "model": "gpt-5.6-sol",
+        "projectedCostUsd": 0.75,
+        "projectedInputTokens": 12000,
+        "projectedOutputTokens": 4000,
+        "provider": "openai",
         "sessionId": "session-1",
+        "sessionCostUsd": 0.69,
         "wallClockMs": 1500
       }
     },

@@ -468,7 +468,12 @@ pub fn __agent_loop_budget_exhaustion(
     + {exhausted: false, kind: "", iteration: iteration, max_iterations: max_iterations}
 }
 
-pub fn __agent_loop_emit_budget_exhausted(agent: HarnessAgent, session_id, exhaustion) {
+pub fn __agent_loop_emit_budget_exhausted(
+  agent: HarnessAgent,
+  session_id,
+  exhaustion,
+  projection = {},
+) {
   agent_emit_event(
     agent,
     session_id,
@@ -479,8 +484,41 @@ pub fn __agent_loop_emit_budget_exhausted(agent: HarnessAgent, session_id, exhau
       iteration: exhaustion?.iteration ?? 0,
       cost_usd: exhaustion?.cost_usd ?? 0.0,
       wall_clock_ms: exhaustion?.wall_clock_ms ?? 0,
-    },
+    }
+      + projection,
   )
+}
+
+/**
+ * Keep the safe, typed pre-call budget projection attached to its terminal
+ * event. Provider prose is excluded; the full error remains on AgentResult.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn __agent_loop_budget_error_projection(error) -> dict {
+  if type_of(error) != "dict" {
+    return {}
+  }
+  const category = to_string(error?.category ?? "")
+  const reason = to_string(error?.reason ?? "")
+  if category != "budget_exceeded" && reason != "budget_exceeded" {
+    return {}
+  }
+  const limit = to_string(error?.limit ?? "")
+  if limit == "" {
+    return {}
+  }
+  return {
+    limit: limit,
+    limit_value: error?.limit_value,
+    projected_cost_usd: error?.projected_cost_usd,
+    session_cost_usd: error?.session_cost_usd,
+    projected_input_tokens: error?.projected_input_tokens,
+    projected_output_tokens: error?.projected_output_tokens,
+    provider: error?.provider,
+    model: error?.model,
+  }
 }
 
 pub fn __agent_loop_record_budget_stop(decisions, iteration, current_max, reason) {

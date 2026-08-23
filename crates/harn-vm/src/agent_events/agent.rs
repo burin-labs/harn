@@ -597,9 +597,8 @@ pub enum AgentEvent {
         provenance: HostInjectionProvenance,
         sanitization: SanitizationVerdict,
     },
-    /// Emitted when the agent loop exhausts `max_iterations` without any
-    /// explicit break condition firing. Distinct from a natural "done" or
-    /// a "stuck" nudge-exhaustion: this is strictly a budget cap.
+    /// Emitted when the agent loop reaches a hard budget ceiling. `limit`
+    /// identifies the exact pre-call LLM ceiling when one rejected the turn.
     BudgetExhausted {
         session_id: String,
         max_iterations: usize,
@@ -609,6 +608,22 @@ pub enum AgentEvent {
         cost_usd: Option<f64>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         wall_clock_ms: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        limit: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        limit_value: Option<serde_json::Number>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        projected_cost_usd: Option<f64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        session_cost_usd: Option<f64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        projected_input_tokens: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        projected_output_tokens: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        provider: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        model: Option<String>,
     },
     /// Emitted when a loop-level budget circuit breaker trips after N
     /// consecutive retryable failures. `paused_for_ms` is the mock-time-aware

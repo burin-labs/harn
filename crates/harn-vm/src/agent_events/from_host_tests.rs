@@ -460,17 +460,50 @@ fn from_host_deserializes_budget_events() {
     match AgentEvent::from_host_payload(
         "s1",
         "budget_exhausted",
-        &json!({ "kind": "budget", "max_iterations": 12, "iteration": 12, "cost_usd": 0.0, "wall_clock_ms": 0 }),
+        &json!({
+            "kind": "total_cost",
+            "max_iterations": 12,
+            "iteration": 12,
+            "cost_usd": 0.69,
+            "wall_clock_ms": 0,
+            "limit": "total_cost",
+            "limit_value": 1.25,
+            "projected_cost_usd": 0.75,
+            "session_cost_usd": 0.69,
+            "projected_input_tokens": 12000,
+            "projected_output_tokens": 4000,
+            "provider": "openai",
+            "model": "gpt-5.6-sol",
+        }),
     )
     .expect("budget_exhausted")
     {
         AgentEvent::BudgetExhausted {
             max_iterations,
             kind,
+            limit,
+            limit_value,
+            projected_cost_usd,
+            session_cost_usd,
+            projected_input_tokens,
+            projected_output_tokens,
+            provider,
+            model,
             ..
         } => {
             assert_eq!(max_iterations, 12);
-            assert_eq!(kind.as_deref(), Some("budget"));
+            assert_eq!(kind.as_deref(), Some("total_cost"));
+            assert_eq!(limit.as_deref(), Some("total_cost"));
+            assert_eq!(
+                limit_value.as_ref().and_then(serde_json::Number::as_f64),
+                Some(1.25)
+            );
+            assert_eq!(projected_cost_usd, Some(0.75));
+            assert_eq!(session_cost_usd, Some(0.69));
+            assert_eq!(projected_input_tokens, Some(12000));
+            assert_eq!(projected_output_tokens, Some(4000));
+            assert_eq!(provider.as_deref(), Some("openai"));
+            assert_eq!(model.as_deref(), Some("gpt-5.6-sol"));
         }
         other => panic!("expected BudgetExhausted, got {other:?}"),
     }

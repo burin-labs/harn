@@ -19,12 +19,14 @@ use harn_vm::orchestration::{
 };
 use harn_vm::tool_annotations::{SideEffectLevel, ToolAnnotations, ToolKind};
 use tokio::sync::mpsc;
+mod budget_exhausted;
 mod plan_document;
 mod registration_fixtures;
 mod repair_claim;
 mod schema_contract;
 mod subagent_stop;
 mod tool_data;
+use budget_exhausted::{empty_budget_exhausted_event, fixture_budget_exhausted_event};
 use plan_document::fixture_plan_document_event;
 
 pub(super) async fn collect_notifications(events: Vec<AgentEvent>) -> Vec<serde_json::Value> {
@@ -615,13 +617,7 @@ fn agent_event_ext_fixture_events() -> Vec<AgentEvent> {
             tool_name: None,
             turn_claimed_for_repair: None,
         },
-        AgentEvent::BudgetExhausted {
-            session_id: "session-1".to_string(),
-            max_iterations: 8,
-            kind: Some("max_iterations".to_string()),
-            cost_usd: Some(0.12),
-            wall_clock_ms: Some(1_500),
-        },
+        fixture_budget_exhausted_event(),
         AgentEvent::BudgetCircuitBreaker {
             session_id: "session-1".to_string(),
             kind: "consecutive_failures".to_string(),
@@ -672,16 +668,11 @@ fn agent_event_ext_fixture_events() -> Vec<AgentEvent> {
     events
 }
 
-/// Pins the wire shape and advertised vocabulary for Harn events that ride on
+/// Checks the advertised vocabulary for Harn events that ride on
 /// `_harn/agentEvent` because ACP has no canonical slot.
 #[tokio::test(flavor = "current_thread")]
-async fn agent_event_ext_notification_fixtures_are_pinned() {
+async fn agent_event_ext_notifications_use_advertised_wire_contract() {
     let actual = collect_notifications(agent_event_ext_fixture_events()).await;
-    let expected: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../../tests/fixtures/acp/agent_event_ext_notifications.json"
-    ))
-    .expect("fixture json");
-    assert_eq!(serde_json::Value::Array(actual.clone()), expected);
 
     let judge = actual
         .iter()
@@ -2350,13 +2341,7 @@ fn internal_agent_events_never_emit_session_updates() {
         provider: String::new(),
         model: String::new(),
     });
-    sink.handle_event(&AgentEvent::BudgetExhausted {
-        session_id: "session-1".to_string(),
-        max_iterations: 3,
-        kind: None,
-        cost_usd: None,
-        wall_clock_ms: None,
-    });
+    sink.handle_event(&empty_budget_exhausted_event());
     sink.handle_event(&AgentEvent::BudgetCircuitBreaker {
         session_id: "session-1".to_string(),
         kind: "consecutive_failures".to_string(),

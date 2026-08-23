@@ -118,26 +118,34 @@ pub(super) fn handle(sink: &AcpAgentEventSink, event: &AgentEvent) {
             kind,
             cost_usd,
             wall_clock_ms,
+            limit,
+            limit_value,
+            projected_cost_usd,
+            session_cost_usd,
+            projected_input_tokens,
+            projected_output_tokens,
+            provider,
+            model,
         } => {
-            let mut payload = serde_json::Map::new();
-            payload.insert(
-                "maxIterations".to_string(),
-                serde_json::json!(max_iterations),
-            );
-            if let Some(kind) = kind {
-                payload.insert("budgetKind".to_string(), serde_json::json!(kind));
-            }
-            if let Some(cost_usd) = cost_usd {
-                payload.insert("costUsd".to_string(), serde_json::json!(cost_usd));
-            }
-            if let Some(wall_clock_ms) = wall_clock_ms {
-                payload.insert("wallClockMs".to_string(), serde_json::json!(wall_clock_ms));
-            }
-            sink.emit_agent_event_ext(
-                "budget_exhausted",
-                session_id,
-                serde_json::Value::Object(payload),
-            );
+            let mut payload = serde_json::json!({
+                "maxIterations": max_iterations,
+                "budgetKind": kind,
+                "costUsd": cost_usd,
+                "wallClockMs": wall_clock_ms,
+                "limit": limit,
+                "limitValue": limit_value,
+                "projectedCostUsd": projected_cost_usd,
+                "sessionCostUsd": session_cost_usd,
+                "projectedInputTokens": projected_input_tokens,
+                "projectedOutputTokens": projected_output_tokens,
+                "provider": provider,
+                "model": model,
+            });
+            payload
+                .as_object_mut()
+                .expect("budget payload is an object")
+                .retain(|_, value| !value.is_null());
+            sink.emit_agent_event_ext("budget_exhausted", session_id, payload);
         }
         AgentEvent::BudgetCircuitBreaker {
             session_id,

@@ -16,6 +16,7 @@ pub fn __agent_loop_finalize_session(harness: Harness, message, session, state) 
   let budget_exhausted_emitted = state.budget_exhausted_emitted
   let budget_decisions = state.budget_decisions
   if final_status == "budget_exhausted" && !budget_exhausted_emitted {
+    const projection = __agent_loop_budget_error_projection(state.terminal_error)
     const terminal_exhaustion = __agent_loop_budget_aggregates(
       harness.agent,
       harness.clock,
@@ -33,7 +34,12 @@ pub fn __agent_loop_finalize_session(harness: Harness, message, session, state) 
         iteration: state.iteration,
         max_iterations: state.current_max,
       }
-    __agent_loop_emit_budget_exhausted(harness.agent, session.session_id, terminal_exhaustion)
+    __agent_loop_emit_budget_exhausted(
+      harness.agent,
+      session.session_id,
+      terminal_exhaustion,
+      projection,
+    )
     budget_exhausted_emitted = true
     budget_decisions = __agent_loop_record_budget_stop(
       budget_decisions,
