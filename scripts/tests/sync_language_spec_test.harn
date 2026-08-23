@@ -41,3 +41,45 @@ pipeline test_cross_chapter_links_follow_anchor_owner(harness: Harness, task) {
     "[local](#local), [ambiguous](#ambiguous), and [remote](./02-second.md#shared-target)",
   )
 }
+
+const SUMMARY_MARKER =
+  "  <!-- BEGIN generated: language-spec chapters (scripts/sync_language_spec.harn) -->"
+
+const SPEC_ENTRY = "- [Language specification](./language-spec.md)"
+
+const PLATFORM_ENTRY = "- [Platform support](./platform-support.md)"
+
+const GENERATED_BLOCK_LINES = [
+  SUMMARY_MARKER,
+  "  - [Grammar](./spec/language/02-grammar.md)",
+  "  <!-- END generated: language-spec chapters -->",
+]
+
+@test
+pipeline test_summary_block_parent_is_the_preceding_entry(harness: Harness, task) {
+  const lines = ["- [Runtime context](./runtime-context.md)", SPEC_ENTRY]
+  const summary = (lines + GENERATED_BLOCK_LINES).join("\n")
+  assert_eq(summary_block_parent(summary), SPEC_ENTRY)
+}
+
+// The nesting regression this guard exists to catch: a hand-edited entry
+// inserted directly above the marker adopts every generated chapter as its
+// child, and the spliced text stays byte-identical, so the staleness check
+// alone reports a clean file.
+@test
+pipeline test_summary_block_parent_sees_an_entry_above_the_marker(harness: Harness, task) {
+  const lines = [SPEC_ENTRY, PLATFORM_ENTRY]
+  const summary = (lines + GENERATED_BLOCK_LINES).join("\n")
+  assert_eq(summary_block_parent(summary), PLATFORM_ENTRY)
+}
+
+@test
+pipeline test_summary_block_parent_skips_blank_lines(harness: Harness, task) {
+  const summary = ([SPEC_ENTRY, ""] + GENERATED_BLOCK_LINES).join("\n")
+  assert_eq(summary_block_parent(summary), SPEC_ENTRY)
+}
+
+@test
+pipeline test_summary_block_parent_is_empty_without_the_marker(harness: Harness, task) {
+  assert_eq(summary_block_parent(SPEC_ENTRY), "")
+}

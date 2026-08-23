@@ -73,7 +73,6 @@
 - [Runtime context](./runtime-context.md)
 - [Filesystem host capabilities](./host-capabilities/fs.md)
 - [Language specification](./language-spec.md)
-- [Platform support](./platform-support.md)
   <!-- BEGIN generated: language-spec chapters (scripts/sync_language_spec.harn) -->
   - [Lexical rules](./spec/language/01-lexical-rules.md)
   - [Grammar](./spec/language/02-grammar.md)
@@ -109,6 +108,7 @@
   - [Environment variables](./spec/language/32-environment-variables.md)
   - [Known limitations and future work](./spec/language/33-known-limitations-and-future-work.md)
   <!-- END generated: language-spec chapters -->
+- [Platform support](./platform-support.md)
 
 ## Agent runtime
 
