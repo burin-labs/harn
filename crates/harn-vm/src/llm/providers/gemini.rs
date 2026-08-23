@@ -1063,6 +1063,58 @@ mod tests {
         );
     }
 
+    /// Span the producer/consumer seam in one test.
+    ///
+    /// The sibling lowering tests hand-write the durable shape, so they agree
+    /// with the builder only by inspection. This one builds history through
+    /// `build_assistant_tool_message` and lowers that exact value, with
+    /// assistant text present so the native call lands at `parts[1]` the way
+    /// it does in a real continuation turn.
+    #[test]
+    fn gemini_lowers_producer_built_history_with_text_and_signature() {
+        let calls = [json!({
+            "id": "call_1",
+            "name": "lookup",
+            "arguments": {"query": "harn"},
+            "thought_signature": "opaque-gemini-signature",
+        })];
+        let message = crate::llm::tools::build_assistant_tool_message("checking", &calls);
+
+        let mut payload = text_payload("gemini-2.5-flash", ThinkingConfig::Disabled);
+        payload.messages = vec![message];
+
+        let body = GeminiProvider::build_request_body(&payload);
+        let parts = body["contents"][0]["parts"]
+            .as_array()
+            .expect("assistant content lowers to a parts array");
+
+        assert_eq!(
+            parts.len(),
+            2,
+            "assistant text and the native call both lower: {parts:?}"
+        );
+        assert_eq!(parts[0]["text"], "checking");
+        assert!(
+            parts[0].get("functionCall").is_none(),
+            "assistant text keeps its own part: {parts:?}"
+        );
+        assert_eq!(
+            parts[1]["functionCall"],
+            json!({"id": "call_1", "name": "lookup", "args": {"query": "harn"}})
+        );
+        assert_eq!(parts[1]["thoughtSignature"], "opaque-gemini-signature");
+
+        let wire = body.to_string();
+        assert!(
+            !wire.contains("provider_metadata"),
+            "neutral continuation envelope leaked to the wire: {wire}"
+        );
+        assert!(
+            !wire.contains("thought_signature"),
+            "neutral signature spelling leaked to the wire: {wire}"
+        );
+    }
+
     #[test]
     fn gemini_tool_response_filters_private_reasoning_blocks() {
         let mut payload = text_payload("gemini-2.5-flash", ThinkingConfig::Disabled);
