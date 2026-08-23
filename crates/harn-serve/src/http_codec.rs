@@ -580,6 +580,15 @@ pub fn dispatch_error_payload(error: DispatchError, request_id: &str) -> (Status
             message,
             Value::Null,
         ),
+        // Its own code, not a generic execution error: a caller reading
+        // `secret_backend_unavailable` knows the host is misconfigured, where
+        // a missing credential would tell them to store one.
+        error @ DispatchError::SecretBackend(_) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "secret_backend_unavailable",
+            error.message(),
+            Value::Null,
+        ),
     };
     let mut body = json!({
         "code": code,
