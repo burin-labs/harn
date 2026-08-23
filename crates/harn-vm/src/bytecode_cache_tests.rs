@@ -316,6 +316,44 @@ fn adjacent_relocatable_entry_loads_and_dependency_edits_fail_closed() {
 }
 
 #[test]
+fn an_adjacent_artifact_is_offered_only_to_the_authority_that_compiled_it() {
+    // Paired on purpose. The negative arm alone passes vacuously for any
+    // reason a read can fail — wrong path, unreadable payload, disabled
+    // cache — so the positive arm reads the SAME artifact at the SAME path
+    // with the SAME source and context, differing only in provenance. A miss
+    // in one arm and a hit in the other is attributable to provenance and to
+    // nothing else.
+    let tmp = tempfile::tempdir().unwrap();
+    let source_text = "pub fn value() -> int { return 1 }\n";
+    let source_path = tmp.path().join("dependency.harn");
+    let adjacent = tmp.path().join("dependency.harnmod");
+    let source = ModuleSource::from_text(source_text);
+    let context = ModuleCompilationContext::default();
+    let artifact =
+        crate::module_artifact::compile_module_artifact_from_source(&source_path, source_text)
+            .expect("compile module");
+
+    let trusted_key =
+        CacheKey::from_module_source(&source, &context, ModuleProvenance::TrustedHostDispatch);
+    store_module_at(&adjacent, &trusted_key, &artifact).expect("store trusted artifact");
+
+    let ordinary_key = CacheKey::from_module_source(&source, &context, ModuleProvenance::User);
+    assert!(
+        read_module_if_matches(&adjacent, &ordinary_key, &source_path)
+            .unwrap()
+            .is_none(),
+        "an ordinary import must not accept bytecode compiled under trusted host dispatch"
+    );
+    assert!(
+        read_module_if_matches(&adjacent, &trusted_key, &source_path)
+            .unwrap()
+            .is_some(),
+        "the authority that wrote the artifact must still hit it, or the negative arm \
+         proves nothing about provenance"
+    );
+}
+
+#[test]
 fn packaged_module_artifact_with_another_sources_key_fails_closed() {
     let tmp = tempfile::tempdir().unwrap();
     let first_source = "pub fn value() -> int { return 1 }\n";
