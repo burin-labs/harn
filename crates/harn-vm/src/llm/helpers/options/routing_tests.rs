@@ -1450,7 +1450,7 @@ fn standalone_reasoning_effort_none_disables_thinking_without_effort_capability(
 }
 
 #[test]
-fn standalone_reasoning_effort_uses_dedicated_capability_gate() {
+fn thinking_modes_effort_is_the_capability_gate() {
     crate::llm::capabilities::set_user_overrides_toml(
         r#"
 [[provider.local]]
@@ -1460,10 +1460,50 @@ thinking_modes = ["effort"]
     )
     .expect("capability override");
 
+    let options = crate::value::DictMap::from_iter([
+        (
+            crate::value::intern_key("provider"),
+            VmValue::String(arcstr::ArcStr::from("local".to_string())),
+        ),
+        (
+            crate::value::intern_key("model"),
+            VmValue::String(arcstr::ArcStr::from("thinking-effort-only".to_string())),
+        ),
+        (
+            crate::value::intern_key("effort"),
+            VmValue::String(arcstr::ArcStr::from("high".to_string())),
+        ),
+    ]);
+    let opts = extract_llm_options(&[
+        VmValue::String(arcstr::ArcStr::from("hello".to_string())),
+        VmValue::Nil,
+        VmValue::dict(options),
+    ])
+    .expect("thinking_modes containing effort is sufficient");
+    assert_eq!(
+        opts.thinking,
+        crate::llm::api::ThinkingConfig::Effort {
+            level: crate::llm::api::ReasoningEffort::High
+        }
+    );
+    crate::llm::capabilities::clear_user_overrides();
+}
+
+#[test]
+fn effort_option_rejected_when_thinking_modes_omit_effort() {
+    crate::llm::capabilities::set_user_overrides_toml(
+        r#"
+[[provider.local]]
+model_match = "thinking-enabled-only"
+thinking_modes = ["enabled"]
+"#,
+    )
+    .expect("capability override");
+
     let err = unsupported_local_options(vec![
         (
             "model",
-            VmValue::String(arcstr::ArcStr::from("thinking-effort-only".to_string())),
+            VmValue::String(arcstr::ArcStr::from("thinking-enabled-only".to_string())),
         ),
         (
             "effort",

@@ -80,7 +80,7 @@ A star marks the short list Harn names first in setup messages and pickers. The 
 | `Fireworks` | OpenAI-compatible chat completions | `fireworks:accounts/fireworks/models/gpt-oss-120b` | `text` | no | yes | `none` / `native_json` | `effort,reasoning_effort` | no | Yes (50%) | none | `high` | `not_recorded` |
 | `Flexai` | OpenAI-compatible chat completions | `flexai` | `text` | no | yes | `none` / `none` | none | no | No | none | `provider_default` | `not_recorded` |
 | `Friendli` | OpenAI-compatible chat completions | `friendli` | `text` | no | yes | `none` / `none` | none | no | No | none | `provider_default` | `not_recorded` |
-| `Gemini API` | Gemini generateContent | `gemini:gemini-2.5-flash` | `native` | yes | yes | `native` / `native_json` | `adaptive,effort,enabled` | yes | Yes (50%) | `flex:discounted`, `priority:premium` | `medium` | `not_recorded` |
+| `Gemini API` | Gemini generateContent | `gemini:gemini-2.5-flash` | `native` | yes | yes | `native` / `native_json` | `adaptive,effort,enabled,reasoning_effort` | yes | Yes (50%) | `flex:discounted`, `priority:premium` | `medium` | `not_recorded` |
 | `Github Models` | OpenAI-compatible chat completions | `github_models` | `text` | no | yes | `none` / `none` | none | no | No | none | `provider_default` | `not_recorded` |
 | `Groq` | OpenAI-compatible chat completions | `groq:qwen/qwen3.6-27b` | `native` | yes | yes | `native` / `native_json` | none | yes | Yes (50%) | none | `high` | `not_recorded` |
 | `Hugging Face Inference Providers` | OpenAI-compatible chat completions through the HF router | `huggingface-qwen3-coder` | `native` | yes | yes | `native` / `delimited` | none | no | No | none | `medium` | `not_recorded` |
@@ -97,7 +97,7 @@ A star marks the short list Harn names first in setup messages and pickers. The 
 | `Nvidia` | OpenAI-compatible chat completions | `nvidia:nvidia/minimax-m3` | `native` | yes | yes | `delimited` / `delimited` | `adaptive` | yes | No | none | `high` | `not_recorded` |
 | `Ollama` | Ollama native chat API | `devstral-small-2` | `text` | no | yes | `format_kw` / `delimited` | none | no | No | none | `high` | `not_recorded` |
 | `OpenAI` | OpenAI chat completions / Responses-compatible routes | `openai:gpt-5.4-mini` | `native` | yes | yes | `native` / `native_json` | `effort,reasoning_effort,reasoning_none` | yes | Yes (50%) | `fast:premium`, `flex:discounted` | `high` | `not_recorded` |
-| `OpenRouter` | OpenAI-compatible chat completions | `openrouter:google/gemini-2.5-flash` | `native` | yes | yes | `native` / `native_json` | `effort,enabled` | yes | No | none | `high` | `not_recorded` |
+| `OpenRouter` | OpenAI-compatible chat completions | `openrouter:google/gemini-2.5-flash` | `native` | yes | yes | `native` / `native_json` | `effort,enabled,reasoning_effort` | yes | No | none | `high` | `not_recorded` |
 | `Parasail` | OpenAI-compatible chat completions | `parasail` | `text` | no | yes | `none` / `none` | none | no | Yes | none | `provider_default` | `not_recorded` |
 | `Qianfan` | OpenAI-compatible chat completions | `qianfan` | `text` | no | yes | `none` / `none` | none | no | No | none | `provider_default` | `not_recorded` |
 | `Sambanova` | OpenAI-compatible chat completions | `sambanova:sambanova/gpt-oss-120b` | `text` | no | yes | `native` / `native_json` | `effort,reasoning_effort` | no | No | none | `high` | `not_recorded` |

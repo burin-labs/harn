@@ -496,6 +496,7 @@ pub const STDLIB_CLI_SCRIPTS: &[StdlibCliScript] = embedded_catalog!(StdlibCliSc
     "precompile" => "stdlib/cli/precompile.harn",
     "providers/cache_probe" => "stdlib/cli/providers/cache_probe.harn",
     "providers/catalog" => "stdlib/cli/providers/catalog.harn",
+    "providers/effort_probe" => "stdlib/cli/providers/effort_probe.harn",
     "providers/probe" => "stdlib/cli/providers/probe.harn",
     "providers/recommend" => "stdlib/cli/providers/recommend.harn",
     "providers/tool_probe" => "stdlib/cli/providers/tool_probe.harn",

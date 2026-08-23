@@ -303,7 +303,7 @@ fn thinking_for_reasoning_level(
         {
             return Some((ThinkingConfig::Disabled, "off".to_string()));
         }
-        if caps_supports(caps, "effort") || caps.reasoning_effort_supported {
+        if caps_supports(caps, "effort") {
             if caps.reasoning_none_supported {
                 return Some((
                     ThinkingConfig::Effort {
@@ -317,7 +317,7 @@ fn thinking_for_reasoning_level(
         }
         return Some((ThinkingConfig::Disabled, "off".to_string()));
     }
-    if caps_supports(caps, "effort") || caps.reasoning_effort_supported {
+    if caps_supports(caps, "effort") {
         return reasoning_effort_from_level(level)
             .map(|level| snap_effort_to_declared_ladder(level, caps))
             .map(|level| (ThinkingConfig::Effort { level }, level.as_str().to_string()));

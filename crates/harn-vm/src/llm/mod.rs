@@ -87,6 +87,45 @@ pub use protocol_violation::{ProtocolViolation, ProtocolViolationKind};
 pub mod readiness;
 pub(crate) mod reasoning_history;
 pub mod reasoning_policy;
+
+/// Env var that suspends the declared reasoning-effort ladder check for the
+/// current process.
+///
+/// Set only by the `harn provider effort-probe` dispatch shim. The check exists
+/// to stop a caller sending an effort the route rejects; a probe's entire job is
+/// to find out which efforts the route rejects, so for that one command the
+/// check would make the catalog measure itself and no drift could ever be
+/// found. It never widens what a route can do — it only lets the request reach
+/// the provider so the provider can give the answer.
+pub const EFFORT_LADDER_UNGATED_ENV: &str = "HARN_EFFORT_PROBE_UNGATED";
+
+/// Whether this process is a `harn provider effort-probe` run.
+///
+/// Single owner for the check; call sites must not re-read the variable.
+/// Dialects that want to drop or rewrite a caller-requested reasoning
+/// directive should ask [`catalog_may_shape_requested_reasoning`] rather
+/// than inventing another `|| effort_probe_ungated()` hedge.
+pub(crate) fn effort_probe_ungated() -> bool {
+    std::env::var(EFFORT_LADDER_UNGATED_ENV).is_ok_and(|value| value == "1")
+}
+
+/// Whether a dialect may omit or rewrite an explicit reasoning directive
+/// because the catalog predicts the provider will reject it.
+///
+/// Production: yes. The catalog exists so callers do not take provider 400s
+/// for rungs a route has already been measured to refuse.
+///
+/// Effort-probe: no. The probe's job is to find out whether that prediction
+/// is still true, so every dialect must put the requested directive on the
+/// wire. The previous shape -- each omit site growing its own
+/// `|| probe_ungated` hedge -- is how `none` on OpenRouter GLM-5.3 came back
+/// accepted: the top-level field was ungated, the nested `enabled: false`
+/// skip was not, the request left silent, and the provider reasoned by
+/// default. One policy, consulted at every omit, makes that class of lie
+/// unrepresentable.
+pub(crate) fn catalog_may_shape_requested_reasoning() -> bool {
+    !effort_probe_ungated()
+}
 pub(crate) mod reminder_iteration;
 pub(crate) mod reminder_providers;
 mod rerank;

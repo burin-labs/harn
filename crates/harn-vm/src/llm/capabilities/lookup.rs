@@ -311,6 +311,11 @@ mod tests {
         let flash_resource = lookup("gemini", "models/gemini-2.5-flash");
         assert_eq!(flash_resource.max_thinking_budget, Some(24_576));
         assert!(flash_resource.reasoning_disable_supported);
+        // 3.6 Flash was measured 2026-08-23 honoring a disable; the 3.6/3.7
+        // family row still claims the Pro-class "cannot disable" contract.
+        let flash_36 = lookup("gemini", "gemini-3.6-flash");
+        assert!(flash_36.reasoning_disable_supported);
+        assert!(flash_36.reasoning_none_supported);
         // Non-2.5 gemini has no effort thinking support -> provider sends no
         // thinkingConfig (unchanged behavior).
         let legacy = lookup("gemini", "gemini-1.5-pro");

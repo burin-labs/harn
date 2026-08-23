@@ -476,6 +476,10 @@ fn script_argv(
         argv.push("--structural-validator-json".to_string());
         argv.push(json);
     }
+    if let Some(effort) = args.reasoning_effort.as_deref() {
+        argv.push("--reasoning-effort".to_string());
+        argv.push(effort.to_string());
+    }
     argv
 }
 

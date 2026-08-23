@@ -118,6 +118,17 @@ thinking_block_style = "inline"
 # caps at 32768 and CANNOT disable. Flash rows are listed first (first match
 # wins). Effort levels map to budgets in the provider: minimal/low -> 1024,
 # medium -> 8192, high/xhigh -> this ceiling.
+# Live effort-probe 2026-08-23: `gemini-3.6-flash` honors a disable.
+# Sending `effort: none` (thinkingBudget 0) was accepted and produced 1
+# output token, against 62/87/83 at low/medium/high on the same prompt.
+# The family row below claims disable is unsupported because that is the
+# 3.7 Pro-class contract; Flash is the 2.5-flash pattern, not the Pro one.
+[[provider.gemini]]
+model_match = ["gemini-3.6-flash*", "models/gemini-3.6-flash*"]
+extends = true
+reasoning_disable_supported = true
+reasoning_none_supported = true
+
 [[provider.gemini]]
 model_match = ["gemini-3.7*", "models/gemini-3.7*"]
 extends = true

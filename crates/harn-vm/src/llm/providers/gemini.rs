@@ -66,7 +66,9 @@ fn gemini_max_thinking_budget(caps: &crate::llm::capabilities::Capabilities) -> 
 }
 
 fn gemini_can_disable_thinking(caps: &crate::llm::capabilities::Capabilities) -> bool {
-    caps.reasoning_disable_supported
+    // Production omits a disable the catalog says the route will 400.
+    // The probe sends it anyway so that prediction can be falsified.
+    caps.reasoning_disable_supported || !crate::llm::catalog_may_shape_requested_reasoning()
 }
 
 fn gemini_thinking_budget(

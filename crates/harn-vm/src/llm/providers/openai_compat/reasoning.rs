@@ -19,14 +19,14 @@ pub(super) fn is_openrouter_reasoning_disable(reasoning: &serde_json::Value) -> 
 }
 
 /// True when the (provider, model) capability row advertises ANY reasoning
-/// support: a non-empty `thinking_modes` list, `reasoning_effort_supported`,
-/// or `reasoning_none_supported`. When all three are absent the model declares
-/// no reasoning capability and the `reasoning` request param must be omitted on
-/// OpenRouter to avoid the empty-endpoint 404.
+/// support: a non-empty `thinking_modes` list or `reasoning_none_supported`.
+/// When both are absent the model declares no reasoning capability and the
+/// `reasoning` request param must be omitted on OpenRouter to avoid the
+/// empty-endpoint 404. `reasoning_effort_supported` needs no separate disjunct:
+/// it is derived from `thinking_modes` containing `effort`, so it can never be
+/// true for a row with empty modes.
 pub(super) fn model_declares_reasoning(caps: &crate::llm::capabilities::Capabilities) -> bool {
-    !caps.thinking_modes.is_empty()
-        || caps.reasoning_effort_supported
-        || caps.reasoning_none_supported
+    !caps.thinking_modes.is_empty() || caps.reasoning_none_supported
 }
 
 pub(super) fn openrouter_reasoning_config(thinking: &ThinkingConfig) -> Option<serde_json::Value> {

@@ -388,10 +388,16 @@ pub(super) async fn llm_call_impl(
     }
 }
 
-/// Build the `{kind, reason, category, message, retry_after_ms?, provider, model}`
-/// dict that `llm_call` throws on failure. `retry_after_ms` is only
+/// Build the `{kind, reason, category, message, origin, retry_after_ms?, provider,
+/// model}` dict that `llm_call` throws on failure. `retry_after_ms` is only
 /// set when the underlying error carries a parseable `retry-after:`
-/// hint, so callers can pattern-match on its presence:
+/// hint, so callers can pattern-match on its presence.
+///
+/// `origin` is `"provider"` when the failure came back over the wire and
+/// `"local"` when Harn refused the request before dispatch. The rest of the
+/// taxonomy cannot separate those: an unsupported option and a provider's HTTP
+/// 400 are both `terminal`/`invalid_request`, so a caller deciding whether to
+/// retry, fall back, or correct its own request needs to know which happened:
 ///
 /// ```harn
 /// try { harness.llm.call(prompt, nil, opts) } catch (e) {
@@ -414,6 +420,14 @@ pub(crate) fn build_llm_error_dict(err: &VmError, provider: &str, model: &str) -
             .or_insert_with(|| VmValue::String(arcstr::ArcStr::from(llm_error.reason.as_str())));
         dict.entry(crate::value::intern_key("message"))
             .or_insert_with(|| VmValue::String(arcstr::ArcStr::from(message.as_str())));
+        // `origin` answers a question the rest of the taxonomy cannot: did this
+        // request ever leave the process? A route that refuses `effort` and a
+        // Harn option check that refuses to send `effort` are both
+        // `terminal`/`invalid_request`, so without this a caller cannot tell a
+        // provider's verdict from Harn's own. Anything reaching here that did
+        // not already claim `local` came back from the provider.
+        dict.entry(crate::value::intern_key("origin"))
+            .or_insert_with(|| VmValue::String(arcstr::ArcStr::from("provider")));
         // Fill provider/model only when the routing failure did not already
         // record the route that actually failed. A fallback/ladder that failed
         // on a different provider/model owns its own route here; overwriting it
@@ -457,6 +471,7 @@ pub(crate) fn build_llm_error_dict(err: &VmError, provider: &str, model: &str) -
         );
         dict.insert("partial".to_string(), VmValue::Bool(failure.partial));
     }
+    dict.put_str("origin", "provider");
     dict.put_str("provider", provider);
     dict.put_str("model", model);
     VmValue::dict(dict)
@@ -475,6 +490,8 @@ pub(crate) fn invalid_request_error(
     fields.put_str("kind", "terminal");
     fields.put_str("reason", "invalid_request");
     fields.put_str("message", message);
+    // Set before the envelope fills defaults, so this survives as `local`.
+    fields.put_str("origin", "local");
     fields.put_str("provider", provider);
     fields.put_str("model", model);
     let structured = VmError::Thrown(VmValue::dict(fields));

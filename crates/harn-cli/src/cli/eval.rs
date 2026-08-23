@@ -192,6 +192,19 @@ pub struct EvalCodingAgentArgs {
     /// literal JSON object passed to `with_structural_validator(...)`.
     #[arg(long = "structural-validator")]
     pub structural_validator: Option<String>,
+    /// Pin the reasoning effort every run in this invocation asks for, instead
+    /// of letting the reasoning policy pick one from task and scale. Set this
+    /// to A/B effort rungs on the agentic suite; the value reaches the model as
+    /// an explicit `llm_options.effort`, which suppresses the policy. Routes
+    /// that declare a narrower ladder still snap the request to a rung they
+    /// accept, so a sweep over all seven names can resolve to fewer than seven
+    /// distinct efforts — read the resolved value off the run record rather
+    /// than assuming the requested one was sent.
+    #[arg(
+        long = "reasoning-effort",
+        value_parser = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+    )]
+    pub reasoning_effort: Option<String>,
     /// Free-form label persisted in summary.json for grouping repeat runs
     /// (e.g. "replicate-1", "probe-judge-arch-gpt"). Defaults to empty.
     #[arg(long = "run-label", default_value = "")]

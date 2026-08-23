@@ -1767,6 +1767,40 @@ harn provider capabilities audit --json
 harn provider capabilities promote-from-eval .harn-runs/coding-agent-bench/latest/tool_mode_parity_overlay.toml
 ```
 
+## harn provider effort-probe
+
+Discover which reasoning-effort rungs a route actually accepts and diff that
+against the ladder the catalog declares in `reasoning_effort_levels`. Effort
+ladders are otherwise the one capability row nothing verifies — they are
+hand-written in capability fragments and hand-asserted in unit tests — so this
+command turns them into a measured fact. It sends one small live call per rung,
+so it costs money and needs credentials.
+
+Two drift directions are reported. `declared_but_rejected` means the catalog
+promises a rung the route refuses, so callers asking for it take a provider
+error. `accepted_but_undeclared` means the route serves a rung the catalog
+omits, so Harn's ladder snap quietly redirects callers away from a working rung.
+
+The probe suspends Harn's own declared-ladder check for its process, because
+that check refuses an out-of-ladder effort before the request leaves the
+process — with it on, the probe could only re-measure the catalog against itself
+and neither drift direction would be findable. `--gated` keeps the check on for
+a confirm-only run; rungs it blocks are reported as `gated_locally` rather than
+counted as provider verdicts.
+
+```bash
+harn provider effort-probe --model glm-5.3
+harn provider effort-probe --model glm-5.3 --suggest-fragment
+harn provider effort-probe --all-declared --one-per-claim --plan
+harn provider effort-probe --all-declared --one-per-claim --fail-on-drift --json
+```
+
+`--plan` lists the routes and the resulting call count without calling anything.
+`--one-per-claim` probes one representative per distinct (provider, ladder)
+claim, since a catalog ladder is a rule matching many models; each result names
+the routes it stands for. `--suggest-fragment` prints a corrected capability row
+for review — the probe never edits catalog TOML.
+
 ## harn provider dispatch-explain
 
 Explain the resolved provider dispatch configuration for one provider/model

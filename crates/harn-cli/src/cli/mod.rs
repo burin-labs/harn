@@ -208,9 +208,9 @@ pub(crate) use provider::{
     refresh_provider_catalog_if_requested, ProviderArgs, ProviderCacheProbeArgs,
     ProviderCapabilitiesArgs, ProviderCapabilitiesCommand, ProviderCapabilitiesPromoteFromEvalArgs,
     ProviderCommand, ProviderDispatchAuditArgs, ProviderDispatchAuditVariantArg,
-    ProviderDispatchExplainArgs, ProviderLimitsArgs, ProviderProbeArgs, ProviderToolCalibrateArgs,
-    ProviderToolProbeArgs, ProviderToolProbeAuditArgs, ProviderToolProbeCaseArg,
-    ProviderToolScorecardArgs,
+    ProviderDispatchExplainArgs, ProviderEffortProbeArgs, ProviderLimitsArgs, ProviderProbeArgs,
+    ProviderToolCalibrateArgs, ProviderToolProbeArgs, ProviderToolProbeAuditArgs,
+    ProviderToolProbeCaseArg, ProviderToolScorecardArgs,
 };
 pub(crate) use providers::{
     ProviderCatalogCommand, ProvidersExportArgs, ProvidersGenerateArgs, ProvidersMatrixArgs,

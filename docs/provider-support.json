@@ -1228,7 +1228,8 @@
         "reasoning_knobs": [
           "adaptive",
           "effort",
-          "enabled"
+          "enabled",
+          "reasoning_effort"
         ],
         "prompt_or_context_cache": true,
         "batch_api": true,
@@ -2273,7 +2274,8 @@
         "streaming": true,
         "reasoning_knobs": [
           "effort",
-          "enabled"
+          "enabled",
+          "reasoning_effort"
         ],
         "prompt_or_context_cache": true,
         "batch_api": false,

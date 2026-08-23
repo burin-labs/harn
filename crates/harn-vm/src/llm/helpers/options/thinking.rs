@@ -167,10 +167,14 @@ fn resolve_thinking_config_with_policy(
         crate::llm::api::ThinkingConfig::Effort { level }
             if level != crate::llm::api::ReasoningEffort::None
     );
+    // The probe suspends both effort gates, not just the ladder. A route
+    // declaring no effort support at all is exactly as much a catalog claim as
+    // a route declaring three rungs, and "is that true?" is the same question.
     if enforce_capability_gates
         && matches!(source, ThinkingSource::Effort)
         && effort_requires_provider_support
         && !caps.reasoning_effort_supported
+        && !effort_ladder_check_suspended()
     {
         return Err(unsupported_option_error(
             source.option_name(),
@@ -314,12 +318,21 @@ pub(super) fn validate_thinking_supported(
         // providers/anthropic.rs rewrites it to adaptive thinking.
         ThinkingConfig::Enabled { .. } => supports("enabled") || supports("adaptive"),
         ThinkingConfig::Adaptive => supports("adaptive"),
-        ThinkingConfig::Effort { .. } => supports("effort"),
+        // The probe suspends this arm too. "Does this route accept effort at
+        // all?" is the same catalog claim as "which rungs does it accept?",
+        // and a gate that answers from `thinking_modes` can only ever confirm
+        // what the catalog already says. The other arms stay enforced: the
+        // probe varies effort, not thinking shape.
+        ThinkingConfig::Effort { .. } => supports("effort") || effort_ladder_check_suspended(),
     };
     if supported {
         return Ok(());
     }
     Err(unsupported_option_error(option_name, provider, model))
+}
+
+fn effort_ladder_check_suspended() -> bool {
+    !crate::llm::catalog_may_shape_requested_reasoning()
 }
 
 pub(super) fn validate_reasoning_effort_level_supported(
@@ -332,7 +345,7 @@ pub(super) fn validate_reasoning_effort_level_supported(
     let crate::llm::api::ThinkingConfig::Effort { level } = thinking else {
         return Ok(());
     };
-    if caps.reasoning_effort_levels.is_empty() {
+    if caps.reasoning_effort_levels.is_empty() || effort_ladder_check_suspended() {
         return Ok(());
     }
     let raw = level.as_str();

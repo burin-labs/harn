@@ -35,6 +35,21 @@
 # shape in Harn's capability matrix via provider_defaults.zai instead of making
 # each host or Burin learn that quirk.
 
+# GLM-5.3's rung list is empirical, not inferred from the docs prose. Live
+# probe 2026-08-23, api.z.ai `/api/paas/v4/chat/completions`, one request per
+# rung:
+#
+#   low / high / max          -> HTTP 200
+#   none / minimal / medium   -> HTTP 400, error 1210
+#   xhigh                     -> HTTP 400, error 1210
+#     "This model always engages in thinking and cannot be disabled;
+#      please use low, high, or max"
+#
+# The ladder is therefore genuinely gapped: `medium` -- the level Harn's auto
+# policy resolves for an agent or code task at the default scale -- is a hard
+# 400 on this route, not a soft coercion. `reasoning_policy` snaps a resolved
+# level onto this list for exactly that reason; an explicit caller `effort`
+# still fails against it loudly.
 [[provider.zai]]
 model_match = "glm-5.3*"
 native_tools = true
