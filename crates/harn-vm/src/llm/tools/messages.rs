@@ -1,100 +1,68 @@
 use super::handle_local::coerce_integer_like_tool_args;
 
-/// Build an assistant message with tool_calls for the conversation history.
-/// Format varies by API style (OpenAI-compatible vs Anthropic).
+/// Durable native call shared by every provider adapter.
+///
+/// Provider-specific continuation data has one explicit extension envelope;
+/// arbitrary provider wire fields never become conversation fields.
+#[derive(Debug, serde::Serialize)]
+struct ConversationToolCall {
+    id: String,
+    name: String,
+    arguments: serde_json::Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    provider_metadata: Option<serde_json::Value>,
+}
+
+impl ConversationToolCall {
+    fn from_result(value: &serde_json::Value) -> Self {
+        let id = value
+            .get("id")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        let name = value
+            .get("name")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        let arguments = value
+            .get("arguments")
+            .cloned()
+            .unwrap_or_else(|| serde_json::json!({}));
+        let mut provider_metadata = value
+            .get("provider_metadata")
+            .filter(|metadata| metadata.is_object())
+            .cloned();
+        if let Some(signature) = crate::llm::providers::gemini_tool_call_thought_signature(value) {
+            let metadata = provider_metadata.get_or_insert_with(|| serde_json::json!({}));
+            metadata["gemini"]["thought_signature"] = serde_json::json!(signature);
+        }
+        Self {
+            id,
+            name,
+            arguments,
+            provider_metadata,
+        }
+    }
+}
+
+/// Build Harn's provider-neutral assistant tool-call message.
+///
+/// Durable conversation history never stores a provider wire shape. Every
+/// provider adapter projects this `{id, name, arguments}` contract at egress.
 pub(crate) fn build_assistant_tool_message(
     text: &str,
     tool_calls: &[serde_json::Value],
-    provider: &str,
-    model: &str,
 ) -> serde_json::Value {
-    let is_anthropic = super::super::provider::provider_uses_anthropic_messages(provider, model);
-    let is_gemini = super::super::provider::provider_uses_gemini_messages(provider, model);
-    let is_ollama = super::super::provider::provider_uses_ollama_messages(provider, model);
-    if is_anthropic {
-        // Anthropic format: content blocks with text and tool_use
-        let mut content = Vec::new();
-        if !text.is_empty() {
-            content.push(serde_json::json!({"type": "text", "text": text}));
-        }
-        for tc in tool_calls {
-            content.push(serde_json::json!({
-                "type": "tool_use",
-                "id": tc["id"],
-                "name": tc["name"],
-                "input": tc["arguments"],
-            }));
-        }
-        serde_json::json!({"role": "assistant", "content": content})
-    } else if is_gemini {
-        let mut parts = Vec::new();
-        if !text.is_empty() {
-            parts.push(serde_json::json!({"text": text}));
-        }
-        for tc in tool_calls {
-            let mut function_call = serde_json::json!({
-                "name": tc["name"],
-                "args": tc["arguments"],
-            });
-            if let Some(id) = tc.get("id").and_then(|value| value.as_str()) {
-                if !id.is_empty() {
-                    function_call["id"] = serde_json::json!(id);
-                }
-            }
-            let mut part = serde_json::json!({ "functionCall": function_call });
-            if let Some(signature) = crate::llm::providers::gemini_tool_call_thought_signature(tc) {
-                part["thoughtSignature"] = serde_json::json!(signature);
-            }
-            parts.push(part);
-        }
-        serde_json::json!({"role": "assistant", "content": parts})
-    } else if is_ollama {
-        // Ollama's chat API uses the OpenAI-style `function` envelope but
-        // its request schema expects `function.arguments` to be a string.
-        let calls: Vec<serde_json::Value> = tool_calls
-            .iter()
-            .enumerate()
-            .map(|(idx, tc)| {
-                serde_json::json!({
-                    "id": tc["id"],
-                    "type": "function",
-                    "function": {
-                        "index": idx,
-                        "name": tc["name"],
-                        "arguments": serde_json::to_string(&tc["arguments"]).unwrap_or_default(),
-                    }
-                })
-            })
-            .collect();
-        let mut msg = serde_json::json!({
-            "role": "assistant",
-            "tool_calls": calls,
-        });
-        if !text.is_empty() {
-            msg["content"] = serde_json::json!(text);
-        }
-        msg
-    } else {
-        // OpenAI-compatible format: assistant message with tool_calls array
-        let calls: Vec<serde_json::Value> = tool_calls
-            .iter()
-            .map(|tc| {
-                serde_json::json!({
-                    "id": tc["id"],
-                    "type": "function",
-                    "function": {
-                        "name": tc["name"],
-                        "arguments": serde_json::to_string(&tc["arguments"]).unwrap_or_default(),
-                    }
-                })
-            })
-            .collect();
-        serde_json::json!({
-            "role": "assistant",
-            "content": if text.is_empty() { serde_json::Value::String(String::new()) } else { serde_json::json!(text) },
-            "tool_calls": calls,
-        })
-    }
+    let tool_calls = tool_calls
+        .iter()
+        .map(ConversationToolCall::from_result)
+        .collect::<Vec<_>>();
+    serde_json::json!({
+        "role": "assistant",
+        "content": text,
+        "tool_calls": tool_calls,
+    })
 }
 
 /// Build a durable assistant message for transcript/run-record storage.
@@ -105,45 +73,18 @@ pub(crate) fn build_assistant_response_message(
     blocks: &[serde_json::Value],
     tool_calls: &[serde_json::Value],
     reasoning: Option<&str>,
-    provider: &str,
-    model: &str,
 ) -> serde_json::Value {
+    let portable_blocks = blocks
+        .iter()
+        .filter(|block| !crate::llm::reasoning_history::is_signed_anthropic_block(block))
+        .cloned()
+        .collect::<Vec<_>>();
     let mut message = if !tool_calls.is_empty() {
-        if super::super::provider::provider_uses_anthropic_messages(provider, model) {
-            let mut message = build_assistant_tool_message(text, tool_calls, provider, model);
-            crate::llm::reasoning_history::prepend_signed_anthropic_blocks(&mut message, blocks);
-            message
-        } else if super::super::provider::provider_uses_gemini_messages(provider, model)
-            && !blocks.is_empty()
-        {
-            let content =
-                crate::llm::content::gemini_parts(&serde_json::Value::Array(blocks.to_vec()));
-            if content
-                .iter()
-                .any(|part| part.get("functionCall").is_some())
-            {
-                serde_json::json!({"role": "assistant", "content": content})
-            } else {
-                build_assistant_tool_message(text, tool_calls, provider, model)
-            }
-        } else {
-            build_assistant_tool_message(text, tool_calls, provider, model)
-        }
-    } else if super::super::provider::provider_uses_anthropic_messages(provider, model)
-        && blocks
-            .iter()
-            .any(crate::llm::reasoning_history::is_signed_anthropic_block)
-    {
-        let mut message = serde_json::json!({
-            "role": "assistant",
-            "content": text,
-        });
-        crate::llm::reasoning_history::prepend_signed_anthropic_blocks(&mut message, blocks);
-        message
-    } else if !blocks.is_empty() {
+        build_assistant_tool_message(text, tool_calls)
+    } else if !portable_blocks.is_empty() {
         serde_json::json!({
             "role": "assistant",
-            "content": blocks,
+            "content": portable_blocks,
         })
     } else {
         serde_json::json!({
@@ -151,6 +92,7 @@ pub(crate) fn build_assistant_response_message(
             "content": text,
         })
     };
+    crate::llm::reasoning_history::attach_anthropic_continuation(&mut message, blocks);
     if let Some(reasoning) = reasoning.filter(|value| !value.is_empty()) {
         message["reasoning"] = serde_json::json!(reasoning);
     }

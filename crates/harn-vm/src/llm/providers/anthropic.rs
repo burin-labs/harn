@@ -463,6 +463,13 @@ impl AnthropicProvider {
             .messages
             .iter()
             .cloned()
+            .map(|mut message| {
+                crate::llm::reasoning_history::restore_anthropic_continuation(
+                    &mut message,
+                    caps.reasoning_round_trip,
+                );
+                message
+            })
             // Cross-provider escalation choke point: a cheap OpenAI/Ollama-dialect
             // primary records tool results as top-level `role:"tool"` messages
             // (`{role:"tool", tool_call_id, content}`). When escalation switches
@@ -759,6 +766,7 @@ fn anthropic_translate_tool_role_message(message: serde_json::Value) -> serde_js
     let tool_use_id = message
         .get("tool_call_id")
         .or_else(|| message.get("tool_use_id"))
+        .or_else(|| message.get("call_id"))
         .and_then(|value| value.as_str())
         .unwrap_or_default()
         .to_string();
@@ -851,7 +859,10 @@ fn anthropic_translate_assistant_tool_calls(message: serde_json::Value) -> serde
         // to an empty object on non-JSON so a malformed primary call still
         // produces a valid (if empty-input) tool_use rather than dropping the
         // pairing.
-        let input = match function.and_then(|f| f.get("arguments")) {
+        let input = match function
+            .and_then(|f| f.get("arguments"))
+            .or_else(|| call.get("arguments"))
+        {
             Some(serde_json::Value::String(raw)) => serde_json::from_str::<serde_json::Value>(raw)
                 .unwrap_or_else(|_| serde_json::json!({})),
             Some(other) if other.is_object() => other.clone(),

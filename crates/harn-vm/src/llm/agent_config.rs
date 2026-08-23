@@ -82,8 +82,6 @@ pub(crate) fn agent_loop_result_from_llm(
         &result.blocks,
         &result.tool_calls,
         result.thinking.as_deref(),
-        &result.provider,
-        &result.model,
     ));
     let transcript_metadata = system_prompt_transcript_metadata(opts.system.as_ref());
     let prefix_events = system_prompt_transcript_events(opts.system.as_ref());
@@ -177,8 +175,6 @@ pub(crate) async fn build_llm_call_result(
         &result.blocks,
         &result.tool_calls,
         result.thinking.as_deref(),
-        &result.provider,
-        &result.model,
     ));
     let transcript_metadata = system_prompt_transcript_metadata(opts.system.as_ref());
     let prefix_events = system_prompt_transcript_events(opts.system.as_ref());

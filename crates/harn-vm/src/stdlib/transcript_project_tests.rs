@@ -50,7 +50,7 @@ async fn clean_tool_repair_drops_failed_then_success_pair() {
                 "tool_calls": [{"id": "call_1", "name": "run", "arguments": {}}],
             }),
             serde_json::json!({
-                "role": "tool",
+                "role": "tool_result",
                 "tool_call_id": "call_1",
                 "name": "run",
                 "content": "Error: missing arg",
@@ -62,7 +62,7 @@ async fn clean_tool_repair_drops_failed_then_success_pair() {
                 "tool_calls": [{"id": "call_2", "name": "run", "arguments": {"arg": "x"}}],
             }),
             serde_json::json!({
-                "role": "tool",
+                "role": "tool_result",
                 "tool_call_id": "call_2",
                 "name": "run",
                 "content": "ok",
@@ -254,7 +254,7 @@ async fn reachability_gc_redacts_only_unrooted_stale_tool_results() {
                 "tool_calls": [{"id": "old_call", "name": "read", "arguments": {"path": "src/old.rs"}}],
             }),
             serde_json::json!({
-                "role": "tool",
+                "role": "tool_result",
                 "tool_call_id": "old_call",
                 "name": "read",
                 "content": stale_body,
@@ -270,7 +270,7 @@ async fn reachability_gc_redacts_only_unrooted_stale_tool_results() {
                 "tool_calls": [{"id": "live_call", "name": "read", "arguments": {"path": "src/live.rs"}}],
             }),
             serde_json::json!({
-                "role": "tool",
+                "role": "tool_result",
                 "tool_call_id": "live_call",
                 "name": "read",
                 "content": rooted_body,

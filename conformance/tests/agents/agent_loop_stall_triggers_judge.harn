@@ -10,7 +10,7 @@ fn events_of(events, kind) {
 fn tool_message_count(agent: HarnessAgent, session_id) {
   let count = 0
   for message in agent_session_messages(agent, session_id) {
-    if message?.role == "tool" && message?.name == "noop" {
+    if message?.role == "tool_result" && message?.name == "noop" {
       count = count + 1
     }
   }

@@ -13,6 +13,10 @@ fn assert_no_storage_metadata(value: &Value, path: &str) {
                 !object.contains_key("_harn"),
                 "storage-only _harn metadata leaked at {path}: {value}"
             );
+            assert!(
+                !object.contains_key("provider_continuation"),
+                "provider continuation leaked at {path}: {value}"
+            );
             for (key, child) in object {
                 assert_no_storage_metadata(child, &format!("{path}.{key}"));
             }
@@ -33,6 +37,15 @@ fn storage_only_message_facts_never_cross_provider_egress() {
         json!({
             "role": "assistant",
             "content": "checking",
+            "provider_continuation": {
+                "anthropic": {
+                    "content_blocks": [{
+                        "type": "thinking",
+                        "thinking": "private",
+                        "signature": "signed"
+                    }]
+                }
+            },
             "_harn": {
                 "kind": "assistant",
                 "tool_calls": [{"id": "call_1", "name": "verify", "arguments": {}}]

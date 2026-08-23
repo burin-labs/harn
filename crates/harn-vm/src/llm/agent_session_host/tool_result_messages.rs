@@ -1,11 +1,11 @@
-//! Building the tool-result message a provider will accept, and repairing the
-//! transcript when a turn's tool calls were never dispatched.
+//! Building provider-neutral tool-result history, and repairing the transcript
+//! when a turn's tool calls were never dispatched.
 //!
 //! The shape a result takes is not the caller's choice: it follows the channel
 //! the run is on. On the text channel a result rides back as an ordinary
 //! `user` message, because there is no provider tool-result role there. On the
-//! native channel it takes the provider's own role — Anthropic
-//! `tool_result`/`tool_use_id`, OpenAI `tool`/`tool_call_id`.
+//! native channel it uses Harn's durable `tool_result`/`tool_call_id` contract.
+//! Provider adapters project that contract onto their wire protocols.
 //!
 //! The repair half exists because Anthropic rejects an assistant `tool_use`
 //! block that is not immediately followed by its `tool_result` with a
@@ -77,14 +77,12 @@ pub(crate) fn record_tool_results_for_test(session_id: &str, dispatch: VmValue) 
         .expect("record_tool_results builtin succeeds");
 }
 
-/// Provider route plus the durable facts for one completed tool call.
+/// Durable facts for one completed tool call.
 ///
 /// Keeping this as one named input prevents provider projection, transcript
 /// identity, and evidence metadata from drifting through positional arguments.
 pub(super) struct ToolResultMessageInput<'a> {
-    pub(super) provider: &'a str,
-    pub(super) model: &'a str,
-    pub(super) tool_format: &'a str,
+    pub(super) channel: crate::llm_config::ToolFormatChannel,
     pub(super) name: &'a str,
     pub(super) tool_call_id: &'a str,
     pub(super) observation: &'a str,
@@ -93,22 +91,16 @@ pub(super) struct ToolResultMessageInput<'a> {
     pub(super) data: Option<&'a VmValue>,
 }
 
-pub(super) fn tool_result_message_for_provider(input: ToolResultMessageInput<'_>) -> VmValue {
+pub(super) fn tool_result_message(input: ToolResultMessageInput<'_>) -> VmValue {
     let mut msg = crate::value::DictMap::new();
     // A text-channel tool_format (`text` or `json`) carries tool results back
     // as an ordinary `user` message — there is no provider tool-result role on
-    // the text channel. `native` uses the provider's tool_result/tool role.
-    let is_text_channel = matches!(
-        crate::llm_config::tool_format_channel(input.tool_format),
-        Some(crate::llm_config::ToolFormatChannel::Text)
-    );
+    // the text channel. `native` uses Harn's canonical tool-result role.
+    let is_text_channel = input.channel == crate::llm_config::ToolFormatChannel::Text;
     if is_text_channel {
         msg.put_str("role", "user");
-    } else if crate::llm::provider::provider_uses_anthropic_messages(input.provider, input.model) {
-        msg.put_str("role", "tool_result");
-        msg.put_str("tool_use_id", input.tool_call_id);
     } else {
-        msg.put_str("role", "tool");
+        msg.put_str("role", "tool_result");
         msg.put_str("name", input.name);
         if !input.tool_call_id.is_empty() {
             msg.put_str("tool_call_id", input.tool_call_id);
@@ -298,13 +290,9 @@ pub(super) fn assistant_tool_use_blocks(message: &VmValue) -> Vec<AssistantToolU
     blocks
 }
 
-/// The set of `tool_use`/`tool_call` ids that ALREADY have a paired tool-result
-/// message somewhere in the transcript. Used so the repair only synthesizes a
-/// result for a genuinely orphaned block and stays a no-op when the loop already
-/// dispatched (and recorded) the call. Covers both provider tool-result roles
-/// (`tool_result`/`tool_use_id`, `tool`/`tool_call_id`) and the text-channel
-/// `user` echo (which carries no id, so it never satisfies a native id — correct,
-/// since a native tool_use ALWAYS needs a real tool-result role).
+/// The set of native call ids that already have a paired tool-result message.
+/// Provider aliases are accepted at this ingestion boundary; production
+/// history writes the canonical `tool_result`/`tool_call_id` shape.
 pub(super) fn paired_tool_result_ids(messages: &[VmValue]) -> std::collections::BTreeSet<String> {
     let mut ids = std::collections::BTreeSet::new();
     for message in messages {
@@ -314,8 +302,9 @@ pub(super) fn paired_tool_result_ids(messages: &[VmValue]) -> std::collections::
         if role != "tool_result" && role != "tool" {
             continue;
         }
-        let id = dict_get(message, "tool_use_id")
-            .or_else(|| dict_get(message, "tool_call_id"))
+        let id = dict_get(message, "tool_call_id")
+            .or_else(|| dict_get(message, "tool_use_id"))
+            .or_else(|| dict_get(message, "call_id"))
             .map(|v| v.display())
             .unwrap_or_default();
         if !id.is_empty() {
@@ -325,28 +314,18 @@ pub(super) fn paired_tool_result_ids(messages: &[VmValue]) -> std::collections::
     ids
 }
 
-/// Synthesize a provider-valid tool-result message for each orphaned
-/// `tool_use`/`tool_call` block on `last_assistant`, carrying `feedback` as the
+/// Synthesize a canonical tool-result message for each orphaned native call on
+/// `last_assistant`, carrying `feedback` as the
 /// observation. Blocks whose id already has a paired result (`already_paired`)
 /// are skipped. Returns the messages to append, in block order. Pure over its
 /// inputs so the invariant is unit-testable without a live session.
 ///
-/// A block reaching this function came from `assistant_tool_use_blocks`, which
-/// only yields provider-native `tool_use`/`tool_call` structures — text/json
-/// channels carry their calls inline in `content` and produce NO structured
-/// blocks. So an orphaned block here is native *by definition*, and its result
-/// MUST be synthesized in the provider's native shape (anthropic
-/// `tool_result`+`tool_use_id`, openai `tool`+`tool_call_id`) regardless of the
-/// session's tool_format lock. That lock is pinned to the PRIMARY model's format
-/// at session init (`claim_tool_format`) and never re-claimed on escalation, so
-/// on a text-primary run it stays `"text"` for the whole run — passing it here
-/// would (mis)route the synthesis through the text-channel `role:"user"` echo,
-/// leaving the native `tool_use` block orphaned and re-triggering the exact
-/// Anthropic 400 this repair exists to prevent. Force `"native"` instead.
+/// `assistant_tool_use_blocks` yields only structured calls; text/json channels
+/// keep calls inline in `content`. An orphan here is therefore native by
+/// definition. Its result must stay native even when the primary session's
+/// format lock is text; the active provider lowers the canonical pair later.
 pub(super) fn synthesize_orphan_tool_results(
     last_assistant: &VmValue,
-    provider: &str,
-    model: &str,
     feedback: &str,
     already_paired: &std::collections::BTreeSet<String>,
 ) -> Vec<VmValue> {
@@ -355,13 +334,11 @@ pub(super) fn synthesize_orphan_tool_results(
         if !block.id.is_empty() && already_paired.contains(&block.id) {
             continue;
         }
-        out.push(tool_result_message_for_provider(ToolResultMessageInput {
-            provider,
-            model,
+        out.push(tool_result_message(ToolResultMessageInput {
             // The orphaned block is a structured native tool_use; its result
             // must ride the provider's native tool-result role, not the
             // session-locked (possibly `text`) channel.
-            tool_format: "native",
+            channel: crate::llm_config::ToolFormatChannel::Native,
             name: &block.name,
             tool_call_id: &block.id,
             observation: feedback,

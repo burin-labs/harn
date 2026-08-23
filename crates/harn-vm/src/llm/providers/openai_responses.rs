@@ -322,7 +322,10 @@ fn responses_input_items(opts: &LlmRequestPayload) -> Vec<serde_json::Value> {
     // `function_call_output` items in a parallel tool-call batch.
     let mut pending_images: Vec<serde_json::Value> = Vec::new();
     for message in &opts.messages {
-        let is_tool = message.get("role").and_then(serde_json::Value::as_str) == Some("tool");
+        let is_tool = matches!(
+            message.get("role").and_then(serde_json::Value::as_str),
+            Some("tool" | "tool_result")
+        );
         if !is_tool {
             flush_responses_pending_images(&mut items, &mut pending_images);
         }
@@ -365,10 +368,11 @@ fn append_responses_message_items(
         .get("role")
         .and_then(serde_json::Value::as_str)
         .unwrap_or("user");
-    if role == "tool" {
+    if matches!(role, "tool" | "tool_result") {
         let call_id = message
             .get("tool_call_id")
             .or_else(|| message.get("call_id"))
+            .or_else(|| message.get("tool_use_id"))
             .and_then(serde_json::Value::as_str)
             .unwrap_or("");
         // The Responses API `function_call_output.output` is a string, and it
@@ -418,10 +422,19 @@ fn append_responses_message_items(
     }
 
     if let Some(content) = message.get("content") {
-        items.push(serde_json::json!({
-            "role": role,
-            "content": responses_message_content(role, content),
-        }));
+        let content = responses_message_content(role, content);
+        let is_empty = match &content {
+            serde_json::Value::String(text) => text.is_empty(),
+            serde_json::Value::Array(parts) => parts.is_empty(),
+            serde_json::Value::Null => true,
+            _ => false,
+        };
+        if !is_empty {
+            items.push(serde_json::json!({
+                "role": role,
+                "content": content,
+            }));
+        }
     }
 
     if let Some(tool_calls) = message
@@ -544,7 +557,10 @@ fn responses_content_item(role: &str, item: &serde_json::Value) -> Option<serde_
             let file_data = item.get("base64").and_then(serde_json::Value::as_str)?;
             Some(serde_json::json!({"type": "input_file", "file_data": file_data}))
         }
-        _ => Some(item.clone()),
+        // Durable messages may carry private continuation blocks for another
+        // provider. Responses accepts a closed content-item vocabulary, so an
+        // unknown block is storage metadata, not a wire item to pass through.
+        _ => None,
     }
 }
 
@@ -651,6 +667,55 @@ mod tests {
         assert!(!serialized.contains("hidden tool trace"));
         assert!(serialized.contains("visible answer"));
         assert!(serialized.contains("tool output"));
+    }
+
+    #[test]
+    fn responses_projects_canonical_native_tool_history_without_wire_leakage() {
+        let mut opts = crate::llm::api::options::base_opts("openai");
+        opts.messages = vec![
+            serde_json::json!({
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{
+                    "id": "toolu_1",
+                    "name": "verify",
+                    "arguments": {"scope": "tests"},
+                }],
+            }),
+            serde_json::json!({
+                "role": "tool_result",
+                "tool_call_id": "toolu_1",
+                "content": "8 checks passed",
+            }),
+        ];
+
+        let body = OpenAiResponsesProvider::build_request_body(&LlmRequestPayload::from(&opts));
+
+        assert_eq!(
+            body["input"],
+            serde_json::json!([
+                {
+                    "type": "function_call",
+                    "call_id": "toolu_1",
+                    "name": "verify",
+                    "arguments": "{\"scope\":\"tests\"}",
+                },
+                {
+                    "type": "function_call_output",
+                    "call_id": "toolu_1",
+                    "output": "8 checks passed",
+                },
+            ])
+        );
+        let serialized = serde_json::to_string(&body).expect("request serializes");
+        assert!(
+            !serialized.contains("tool_use"),
+            "Anthropic block leaked: {body}"
+        );
+        assert!(
+            !serialized.contains("tool_result"),
+            "Anthropic block leaked: {body}"
+        );
     }
 
     #[test]

@@ -103,7 +103,7 @@ pipeline default(harness: Harness) {
       let failed_tool_results = 0
       for message in raw_messages {
         const role = to_string(message?.role ?? "")
-        if role == "tool" || role == "tool_result" {
+        if role == "tool_result" {
           if contains(to_string(message?.content ?? ""), "tool error: first try") {
             failed_tool_results = failed_tool_results + 1
           }

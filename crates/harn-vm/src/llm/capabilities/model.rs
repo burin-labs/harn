@@ -369,11 +369,6 @@ impl WireDialect {
     pub fn is_ollama(self) -> bool {
         matches!(self, WireDialect::Ollama)
     }
-
-    /// Whether this route speaks Google Gemini's `generateContent` shape.
-    pub fn is_gemini(self) -> bool {
-        matches!(self, WireDialect::Gemini)
-    }
 }
 
 /// Which synchronous ("live") endpoint family a route dispatches to.

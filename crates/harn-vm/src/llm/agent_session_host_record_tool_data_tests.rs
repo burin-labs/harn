@@ -51,7 +51,7 @@ fn dispatched_escalation_result_records_native_role_and_facts_on_text_locked_ses
     );
     let last = vm_to_json(messages.last().expect("a recorded result message"));
     assert_eq!(last["role"], "tool_result");
-    assert_eq!(last["tool_use_id"], "tc_0");
+    assert_eq!(last["tool_call_id"], "tc_0");
     assert_eq!(last["_harn"]["data"]["command_status"], "succeeded");
     assert_eq!(last["_harn"]["data"]["run_outcome"]["exit_code"], 0);
 

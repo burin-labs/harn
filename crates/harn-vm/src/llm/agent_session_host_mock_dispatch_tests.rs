@@ -9,7 +9,7 @@ use serde_json::json;
 use super::super::{assistant_message_from_llm_result, vm_to_json};
 
 #[test]
-fn native_tool_calls_replay_with_openai_wire_shape() {
+fn native_tool_calls_replay_with_canonical_durable_shape() {
     let result = crate::stdlib::json_to_vm_value(&json!({
         "provider": "local",
         "text": "",
@@ -23,11 +23,11 @@ fn native_tool_calls_replay_with_openai_wire_shape() {
 
     assert_eq!(message["role"], "assistant");
     assert_eq!(message["tool_calls"][0]["id"], "call_001");
-    assert_eq!(message["tool_calls"][0]["type"], "function");
-    assert_eq!(message["tool_calls"][0]["function"]["name"], "release_run");
+    assert!(message["tool_calls"][0].get("type").is_none());
+    assert_eq!(message["tool_calls"][0]["name"], "release_run");
     assert_eq!(
-        message["tool_calls"][0]["function"]["arguments"],
-        r#"{"command":"git status --short"}"#
+        message["tool_calls"][0]["arguments"],
+        json!({"command": "git status --short"})
     );
 }
 

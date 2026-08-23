@@ -47,7 +47,7 @@ pipeline main(harness: Harness) {
             pending_ids = pending_ids.appending(to_string(call?.id ?? ""))
           }
         }
-        if (message?.role ?? "") == "tool" {
+        if (message?.role ?? "") == "tool_result" {
           const call_id = to_string(message?.tool_call_id ?? "")
           closed_ids = closed_ids.appending(call_id)
           const content = to_string(message?.content ?? "")

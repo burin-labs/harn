@@ -140,40 +140,27 @@ fn normalize_tool_args_unwraps_only_complete_heredoc_values() {
 }
 
 #[test]
-fn assistant_messages_preserve_provider_specific_shapes() {
+fn assistant_messages_use_one_provider_neutral_shape() {
     let calls = [json!({
         "id": "call_001",
         "name": "read",
         "arguments": {"path": "main.rs"},
         "thought_signature": "tool-signature",
     })];
-    let openai = build_assistant_tool_message("", &calls, "together", "moonshotai/Kimi-K2.5");
-    assert_eq!(openai["content"], "");
-    assert_eq!(openai["tool_calls"][0]["id"], "call_001");
-
-    let ollama = build_assistant_tool_message("", &calls, "ollama", "devstral-small-2:24b");
-    let arguments = ollama["tool_calls"][0]["function"]["arguments"]
-        .as_str()
-        .expect("Ollama arguments are JSON text");
+    let message = build_assistant_tool_message("checking", &calls);
+    assert_eq!(message["role"], "assistant");
+    assert_eq!(message["content"], "checking");
     assert_eq!(
-        serde_json::from_str::<serde_json::Value>(arguments).expect("valid JSON")["path"],
-        "main.rs"
+        message["tool_calls"],
+        json!([{
+            "id": "call_001",
+            "name": "read",
+            "arguments": {"path": "main.rs"},
+            "provider_metadata": {"gemini": {"thought_signature": "tool-signature"}},
+        }])
     );
-
-    let gemini = build_assistant_tool_message("checking", &calls, "gemini", "gemini-2.5-flash");
-    assert_eq!(
-        gemini["content"][1]["functionCall"],
-        json!({"id": "call_001", "name": "read", "args": {"path": "main.rs"}})
-    );
-    assert_eq!(gemini["content"][1]["thoughtSignature"], "tool-signature");
-
-    let bedrock = build_assistant_tool_message(
-        "using a tool",
-        &calls,
-        "bedrock",
-        "anthropic.claude-3-5-sonnet-20240620-v1:0",
-    );
-    assert_eq!(bedrock["content"][1]["type"], "tool_use");
+    assert!(!message.to_string().contains("functionCall"));
+    assert!(!message.to_string().contains("tool_use"));
 }
 
 #[test]
@@ -184,14 +171,7 @@ fn assistant_response_message_preserves_reasoning_and_gemini_signatures() {
         "arguments": {"path": "main.rs"},
         "thought_signature": "tool-signature",
     })];
-    let reasoning = build_assistant_response_message(
-        "",
-        &[],
-        &calls,
-        Some("inspect first"),
-        "together",
-        "moonshotai/Kimi-K2.5",
-    );
+    let reasoning = build_assistant_response_message("", &[], &calls, Some("inspect first"));
     assert_eq!(reasoning["reasoning"], "inspect first");
 
     let gemini = build_assistant_response_message(
@@ -212,11 +192,12 @@ fn assistant_response_message_preserves_reasoning_and_gemini_signatures() {
         ],
         &calls,
         None,
-        "gemini",
-        "gemini-2.5-flash",
     );
-    assert_eq!(gemini["content"][0]["thoughtSignature"], "text-signature");
-    assert_eq!(gemini["content"][1]["thoughtSignature"], "tool-signature");
+    assert_eq!(gemini["content"], "checking");
+    assert_eq!(
+        gemini["tool_calls"][0]["provider_metadata"]["gemini"]["thought_signature"],
+        "tool-signature"
+    );
 }
 
 #[test]

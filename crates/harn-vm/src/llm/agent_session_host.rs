@@ -94,7 +94,7 @@ use usage_accounting::{resolve_call_accounting, SessionUsageTotals};
 pub(crate) use tool_result_messages::record_tool_results_for_test;
 use tool_result_messages::{
     assistant_tool_use_blocks, paired_tool_result_ids, screenshots_from_tool_result,
-    synthesize_orphan_tool_results, tool_result_message_for_provider, ToolResultMessageInput,
+    synthesize_orphan_tool_results, tool_result_message, ToolResultMessageInput,
 };
 
 /// Session-keyed record for Harn-driven agent loops. The Harn loop owns
@@ -537,6 +537,21 @@ fn host_agent_session_record_tool_results_builtin(
     } else {
         assistant_messages::effective_session_tool_format(&provider, &model, &session_tool_format)
     };
+    // A host can record a result before a live dispatch receipt exists (for
+    // example, replay and host-driven tools). Resolve that absence through the
+    // same provider/model catalog that owns live admission. A non-empty unknown
+    // value remains an error: only missing metadata receives a default.
+    let default_tool_format = tool_format
+        .trim()
+        .is_empty()
+        .then(|| crate::llm_config::default_tool_format(&model, &provider));
+    let resolved_tool_format = default_tool_format.as_deref().unwrap_or(&tool_format);
+    let tool_channel =
+        crate::llm_config::tool_format_channel(resolved_tool_format).ok_or_else(|| {
+            VmError::Runtime(format!(
+                "unknown effective tool format `{resolved_tool_format}`"
+            ))
+        })?;
     let results_value = dispatch;
     let security_policy = crate::security::current_policy();
     let mut successful = Vec::new();
@@ -713,10 +728,8 @@ fn host_agent_session_record_tool_results_builtin(
         let transcript_data = tool_result_messages::transcript_tool_result_data(result);
         let message_index = crate::agent_sessions::inject_message(
             &session_id,
-            tool_result_message_for_provider(ToolResultMessageInput {
-                provider: &provider,
-                model: &model,
-                tool_format: &tool_format,
+            tool_result_message(ToolResultMessageInput {
+                channel: tool_channel,
                 name: &name,
                 tool_call_id: &tool_call_id,
                 observation: &observation,
