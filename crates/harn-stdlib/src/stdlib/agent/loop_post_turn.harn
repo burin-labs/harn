@@ -352,6 +352,7 @@ pub fn agent_loop_post_turn_transition(
       "post_edit_reverify",
       context.llm_result.text,
       context.iteration_index,
+      context.raw_text,
     )
     verdict_record = reverdict
     next = next
@@ -408,6 +409,7 @@ pub fn agent_loop_post_turn_transition(
         outcome.stop_reason,
         context.llm_result.text,
         context.iteration_index,
+        context.raw_text,
       )
       verdict_record = verdict
       next = next

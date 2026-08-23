@@ -107,6 +107,13 @@ pub type CompletionEvidenceSnapshot = {
   text: string,
   visible_text: string,
   last_text: string,
+  // `text`, `visible_text`, and `last_text` are all the same PROJECTION of the
+  // candidate turn: completion markers and structural tags are already gone.
+  // `raw_text` is the unprojected emission for that same turn. A policy asking
+  // "did the model declare completion?" must read `raw_text`; the projected
+  // fields answer "what should a reader be shown?" and cannot answer the first
+  // question at all.
+  raw_text: string,
   transcript: string,
   judge_evidence: string,
   judge_evidence_projection: CompletionEvidenceProjectionStats,
@@ -534,6 +541,7 @@ fn __judge_payload(
   stop_reason: string,
   text: string,
   iteration: int,
+  raw_text: string = "",
 ) -> CompletionEvidenceSnapshot {
   const messages = agent_session_messages(agent, session.session_id)
   const lifecycle = agent_transcript_tool_lifecycle_report(messages)
@@ -568,6 +576,7 @@ fn __judge_payload(
     text: text,
     visible_text: text,
     last_text: text,
+    raw_text: raw_text == "" ? text : raw_text,
     transcript: transcript,
     judge_evidence: evidence.serialized,
     judge_evidence_projection: evidence.stats,
@@ -1240,6 +1249,13 @@ fn __completion_policy_evaluate(
 /**
  * Evaluate one verification/completion boundary and return one typed directive.
  *
+ * `text` is the projected candidate turn — what a reader should be shown.
+ * `raw_text` is that same turn before projection, and is the field a policy
+ * must read to decide whether the model declared completion: the parser has
+ * already stripped completion markers out of `text`. Callers with the
+ * unprojected turn in hand should pass it; omitting it leaves `raw_text`
+ * equal to `text`, which preserves the pre-existing behavior.
+ *
  * @effects: [agent, host, llm.call]
  * @errors: []
  */
@@ -1250,8 +1266,17 @@ pub fn agent_evaluate_completion(
   stop_reason: string,
   text: string,
   iteration: int = 0,
+  raw_text: string = "",
 ) -> CompletionDirective {
-  const payload = __judge_payload(harness.agent, session, opts, stop_reason, text, iteration)
+  const payload = __judge_payload(
+    harness.agent,
+    session,
+    opts,
+    stop_reason,
+    text,
+    iteration,
+    raw_text,
+  )
   const stages = __completion_policy_plan(opts, stop_reason)
   const evaluation = __completion_policy_evaluate(harness, opts, payload, iteration, stages)
   const verdict = evaluation.verdict

@@ -1,0 +1,117 @@
+import { agent_loop } from "std/agent/loop"
+import { llm_text, with_llm_script } from "std/testing"
+
+/**
+ * The completion judge must see the turn the model actually emitted.
+ *
+ * The judge payload carries a PROJECTED candidate turn: structural tags and
+ * the completion marker have been removed from it. A policy asking "did the
+ * model declare completion?" therefore read a view with the answer already
+ * stripped out, while the loop's own sentinel detector — reading the raw
+ * emission — said it was there. `raw_text` closes that split.
+ *
+ * Both directions are asserted on the judge seam. Checking only that
+ * `raw_text` carries the marker would pass vacuously if the two views were
+ * identical; asserting that the projected view LACKS it is what proves the
+ * views genuinely differ, which is the whole reason the field exists.
+ *
+ * The post-turn payload is reported rather than asserted on the projected
+ * side: its `text` is not projected on this path, so `raw_text` there is a
+ * consistency guarantee (host view == detector view) rather than a repair.
+ */
+fn marker_report(label: string, projected: string, raw: string) -> string {
+  return label
+    + " projected_has_marker="
+    + to_string(contains(projected, "##DONE##"))
+    + " raw_has_marker="
+    + to_string(contains(raw, "##DONE##"))
+}
+
+/**
+ * Drive one emission shape through the loop and collect what each seam saw.
+ * Collection only — the assertions live in the test pipeline, which is the
+ * lexical scope the assert builtins are reserved for.
+ */
+fn run_case(harness: Harness, label: string, emission: string) -> dict {
+  const post_projected = "rt-post-projected-" + harness.random.uuid()
+  const post_raw = "rt-post-raw-" + harness.random.uuid()
+  const judge_projected = "rt-judge-projected-" + harness.random.uuid()
+  const judge_raw = "rt-judge-raw-" + harness.random.uuid()
+  for key in [post_projected, post_raw, judge_projected, judge_raw] {
+    harness.runtime.store_set(key, "")
+  }
+  harness.agent.clear_session_hooks()
+  harness.agent.register_session_hook(
+    "post_turn",
+    { _hook_harness, event ->
+      harness.runtime.store_set(post_projected, to_string(event?.text ?? ""))
+      harness.runtime.store_set(post_raw, to_string(event?.raw_text ?? ""))
+      return nil
+    },
+  )
+  const run_status = "rt-status-" + harness.random.uuid()
+  with_llm_script(
+    harness.llm,
+    [llm_text(emission)],
+    { ->
+      const result = agent_loop(
+        harness,
+        "finish cleanly",
+        nil,
+        {
+          provider: "mock",
+          loop_until_done: true,
+          max_iterations: 3,
+          done_sentinel: "##DONE##",
+          session_id: "rt-" + label + "-" + harness.random.uuid(),
+          verify_completion: { payload ->
+            harness.runtime.store_set(judge_projected, to_string(payload?.text ?? ""))
+            harness.runtime.store_set(judge_raw, to_string(payload?.raw_text ?? ""))
+            return nil
+          },
+        },
+      )
+      harness.runtime.store_set(run_status, to_string(result.status))
+      harness.agent.clear_session_hooks()
+    },
+  )
+  return {
+    status: to_string(harness.runtime.store_get(run_status) ?? ""),
+    post_projected: to_string(harness.runtime.store_get(post_projected) ?? ""),
+    post_raw: to_string(harness.runtime.store_get(post_raw) ?? ""),
+    judge_projected: to_string(harness.runtime.store_get(judge_projected) ?? ""),
+    judge_raw: to_string(harness.runtime.store_get(judge_raw) ?? ""),
+  }
+}
+
+pipeline test(harness: Harness) {
+  const cases = [
+    // Wrapped form: the shape every teaching surface asks for.
+    {label: "wrapped", emission: "<user_response>All set.</user_response>\n<done>##DONE##</done>"},
+    // Bare form: a different parser branch, recorded so the asymmetry between
+    // the two marker shapes is observed rather than assumed.
+    {label: "bare", emission: "All set.\n##DONE##"},
+  ]
+  for case in cases {
+    const label = to_string(case.label)
+    const seen = run_case(harness, label, to_string(case.emission))
+    // The judge is the seam completion policies read, and the seam the
+    // projection actually blinds.
+    assert(
+      contains(to_string(seen.judge_raw), "##DONE##"),
+      label + ": judge raw_text keeps the completion marker",
+    )
+    // The post-turn payload must agree with the detector byte for byte.
+    assert(
+      contains(to_string(seen.post_raw), "##DONE##"),
+      label + ": post-turn raw_text keeps the completion marker",
+    )
+    harness.stdio.println(seen.status)
+    harness.stdio.println(
+      marker_report(label + " post_turn", to_string(seen.post_projected), to_string(seen.post_raw)),
+    )
+    harness.stdio.println(
+      marker_report(label + " judge", to_string(seen.judge_projected), to_string(seen.judge_raw)),
+    )
+  }
+}

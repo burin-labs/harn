@@ -1120,6 +1120,14 @@ pub fn agent_compute_post_turn(
     prior_turn_next_tool_claim: opts?._next_tool_claim,
     text: text,
     visible_text: text,
+    // `text`/`visible_text` are the PROJECTION: the parser has already removed
+    // completion markers and structural tags from them. Anything deciding
+    // whether the model declared completion must read `raw_text` instead —
+    // it is the same string the sentinel detector below reads, so host
+    // completion checks and the loop's own detector cannot disagree about
+    // what the turn said. Projection is for display; raw is for semantics.
+    raw_text: sentinel_text,
+    parsed_done_marker: parsed_done_marker,
   }
   __host_fire_session_hook("post_turn", payload)
   agent_session_apply_reminder_post_turn(agent, session.session_id, iteration)

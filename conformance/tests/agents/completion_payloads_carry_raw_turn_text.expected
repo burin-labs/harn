@@ -1,0 +1,6 @@
+done
+wrapped post_turn projected_has_marker=true raw_has_marker=true
+wrapped judge projected_has_marker=false raw_has_marker=true
+done
+bare post_turn projected_has_marker=true raw_has_marker=true
+bare judge projected_has_marker=true raw_has_marker=true
