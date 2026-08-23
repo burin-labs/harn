@@ -388,7 +388,7 @@ fn portable_operation_id(value: &str) -> bool {
 /// other signal that their field was discarded. The alternative — collecting
 /// unrecognized keys into an ignored map — made a green `harn package verify
 /// --strict` compatible with a misspelled or unsupported setup field.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProviderSetupManifest {
     #[serde(default, alias = "auth-type")]
