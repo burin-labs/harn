@@ -1,0 +1,63 @@
+// Run: harn test tests/agent/budget_failure_attribution_test.harn
+//
+// The LLM boundary already knows which hard ceiling rejected a call. The agent
+// terminal and event must preserve that cause without reading provider prose.
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
+import { AgentSpec } from "std/agent/options"
+
+fn run_budget_limit(harness: Harness, limit) {
+  const session = "budget-failure-" + limit + "-" + harness.random.uuid()
+  const caller = { _call ->
+    return {
+      ok: false,
+      status: "budget_exhausted",
+      stop_reason: "budget_exhausted",
+      error: {
+        kind: "terminal",
+        category: "budget_exceeded",
+        reason: "budget_exceeded",
+        limit: limit,
+        limit_value: 1.25,
+        projected_cost_usd: 0.75,
+        session_cost_usd: 0.69,
+        projected_input_tokens: 12000,
+        projected_output_tokens: 4000,
+        provider: "mock",
+        model: "budget-fixture",
+      },
+    }
+  }
+  const opts: AgentSpec = {
+    provider: "mock",
+    model: "budget-fixture",
+    llm_caller: caller,
+    session_id: session,
+    max_iterations: 2,
+    final_wrapup: false,
+  }
+  return agent_capture_events(
+    harness.agent,
+    session,
+    fn() { return agent_loop(harness, "Exercise the budget boundary.", nil, opts) },
+  )
+}
+
+pipeline test_preserves_each_llm_budget_limit(harness: Harness, task) {
+  for limit in ["total_cost", "per_call_cost", "input_tokens", "output_tokens"] {
+    const captured = run_budget_limit(harness, limit)
+    assert_eq(captured.result.status, "budget_exhausted")
+    assert_eq(captured.result.stop_reason, limit)
+    assert_eq(captured.result.error.limit, limit)
+    const events = captured.events.filter({ event -> event.type == "budget_exhausted" })
+    assert_eq(len(events), 1)
+    assert_eq(events[0].kind, limit)
+    assert_eq(events[0].limit_value, 1.25)
+    assert_eq(events[0].projected_cost_usd, 0.75)
+    assert_eq(events[0].session_cost_usd, 0.69)
+    assert_eq(events[0].projected_input_tokens, 12000)
+    assert_eq(events[0].projected_output_tokens, 4000)
+    assert_eq(events[0].provider, "mock")
+    assert_eq(events[0].model, "budget-fixture")
+  }
+}

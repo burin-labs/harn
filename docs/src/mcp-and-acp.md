@@ -1184,6 +1184,28 @@ budget, or a compact JSON object with any of `llm_cost_usd`, `llm_tokens`,
 agent-event path, so hosts that already render `_harn/agentEvent`
 `budget_exhausted` updates do not need a new event type.
 
+The terminal event reports the exact ceiling and the safe estimate that rejected
+the next model call:
+
+```json
+{
+  "kind": "budget_exhausted",
+  "budgetKind": "total_cost",
+  "limit": "total_cost",
+  "limitValue": 1.25,
+  "projectedCostUsd": 0.75,
+  "sessionCostUsd": 0.69,
+  "projectedInputTokens": 12000,
+  "projectedOutputTokens": 4000,
+  "provider": "openai",
+  "model": "gpt-5.6-sol"
+}
+```
+
+`limit` is the machine-readable stop reason. Cost and token projections describe
+the rejected call; `sessionCostUsd` is the spend already recorded for the
+session. Fields that do not apply are omitted.
+
 ### Queued user messages and reminders during agent execution
 
 ACP hosts can inject user follow-up messages while an agent is running.

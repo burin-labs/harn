@@ -2,6 +2,7 @@ import { __agent_loop_clock_sleep_ms } from "std/agent/loop_foundation"
 import { __agent_loop_route_options } from "std/agent/loop_support"
 import {
   __agent_loop_budget_aggregates,
+  __agent_loop_budget_error_projection,
   __agent_loop_consecutive_failure_config,
   __agent_loop_emit_budget_exhausted,
   __agent_loop_emit_provider_error,
@@ -39,6 +40,23 @@ pub type AgentLoopProviderFailureOutcome = {
   final_status: string,
   stop_reason: string,
   terminal_error: any,
+}
+
+/**
+ * Return the exact LLM budget ceiling that rejected a provider call.
+ *
+ * The VM owns this vocabulary in its structured budget error. Keep unknown or
+ * caller-authored failures on the existing status path instead of promoting an
+ * arbitrary string into a terminal kind.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn agent_loop_budget_failure_kind(call: dict) -> string {
+  if call?.status != "budget_exhausted" {
+    return ""
+  }
+  return to_string(__agent_loop_budget_error_projection(call?.error)?.limit ?? "")
 }
 
 fn __provider_failure_outcome(
@@ -221,12 +239,17 @@ pub fn agent_loop_provider_failure(
       },
     )
   }
+  const budget_failure_kind = agent_loop_budget_failure_kind(call)
   return __provider_failure_outcome(
     state,
     {
       action: "break",
       final_status: call.status,
-      stop_reason: call?.stop_reason ?? call.status,
+      stop_reason: if budget_failure_kind != "" {
+        budget_failure_kind
+      } else {
+        call?.stop_reason ?? call.status
+      },
       terminal_error: call?.error,
     },
   )

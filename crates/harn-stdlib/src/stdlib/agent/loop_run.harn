@@ -12,6 +12,7 @@ import {
   agent_loop_command_hold_transition,
   agent_loop_post_turn_transition,
 } from "std/agent/loop_post_turn"
+import { agent_loop_provider_failure } from "std/agent/loop_provider_failure"
 import "std/agent/loop_resource_dispatch"
 import "std/agent/loop_result_status"
 import "std/agent/loop_support"
@@ -301,129 +302,40 @@ pub fn __agent_loop_run(harness: Harness, message, session, initial_opts) {
           )
         }
         if !call.ok {
-          const failed_provider = to_string(turn_llm_opts?.provider ?? "")
-          const failed_model = to_string(turn_llm_opts?.model ?? "")
-          const was_escalated = (primary_provider != "" || primary_model != "")
-            && (failed_provider
-              != primary_provider
-              || failed_model != primary_model)
-          const failure_config = __agent_loop_consecutive_failure_config(budget)
-          if was_escalated
-            && __agent_loop_tracks_failure(call?.error, failure_config)
-            && __agent_loop_is_escalation_transport_failure(call?.error) {
-            iteration = iteration + 1
-            __agent_loop_emit_provider_error(
-              harness.agent,
-              harness.clock,
-              session.session_id,
-              iteration_index,
-              call,
-              turn_llm_opts,
-              loop_start_ms,
-              false,
-              "escalation_aborted_provider_transport",
-            )
-            final_status = "provider_error"
-            stop_reason = "escalation_aborted_provider_transport"
-            terminal_error = __agent_loop_transport_abort_error(call?.error)
-            break
-          }
-          if __agent_loop_tracks_failure(call?.error, failure_config) {
-            iteration = iteration + 1
-            consecutive_failure_count = consecutive_failure_count + 1
-            const failure_aggregates = __agent_loop_budget_aggregates(
-              harness.agent,
-              harness.clock,
-              session.session_id,
-              nil,
-              loop_start_ms,
-            )
-            agent_emit_event(
-              harness.agent,
-              session.session_id,
-              "iteration_end",
-              {
-                iteration: iteration_index + 1,
-                iteration_info: failure_aggregates
-                  + {
-                    dispatch_skipped: true,
-                    skip_reason: "provider_failure",
-                    provider_error: call?.error ?? {},
-                    consecutive_failures: consecutive_failure_count,
-                  },
-              },
-            )
-            if consecutive_failure_count >= failure_config.max {
-              const paused_for_ms = failure_config?.paused_for_ms ?? 0
-              agent_emit_event(
-                harness.agent,
-                session.session_id,
-                "budget_circuit_breaker",
-                {
-                  kind: "consecutive_failures",
-                  consecutive_count: consecutive_failure_count,
-                  paused_for_ms: paused_for_ms,
-                },
-              )
-              if paused_for_ms > 0 {
-                __agent_loop_clock_sleep_ms(harness.clock, paused_for_ms)
-              }
-              const exhaustion = __agent_loop_budget_aggregates(
-                harness.agent,
-                harness.clock,
-                session.session_id,
-                nil,
-                loop_start_ms,
-              )
-                + {
-                  exhausted: true,
-                  kind: "consecutive_failures",
-                  iteration: iteration,
-                  max_iterations: current_max,
-                }
-              __agent_loop_emit_budget_exhausted(harness.agent, session.session_id, exhaustion)
-              budget_exhausted_emitted = true
-              budget_decisions = __agent_loop_record_budget_stop(
-                budget_decisions,
-                iteration,
-                current_max,
-                exhaustion.kind,
-              )
-              final_status = "budget_exhausted"
-              stop_reason = "circuit_breaker"
-              terminal_error = call?.error
-              break
-            }
-            continue
-          }
-          const can_retry_primary = was_escalated && !escalation_retry_pending
-          __agent_loop_emit_provider_error(
+          const provider_failure = agent_loop_provider_failure(
             harness.agent,
             harness.clock,
             session.session_id,
-            iteration_index,
             call,
             turn_llm_opts,
-            loop_start_ms,
-            can_retry_primary,
-            "",
+            {
+              primary_provider: primary_provider,
+              primary_model: primary_model,
+              primary_tool_format: primary_tool_format,
+              opts: opts,
+              budget: budget,
+              iteration: iteration,
+              iteration_index: iteration_index,
+              consecutive_failure_count: consecutive_failure_count,
+              loop_start_ms: loop_start_ms,
+              current_max: current_max,
+              escalation_retry_pending: escalation_retry_pending,
+              budget_exhausted_emitted: budget_exhausted_emitted,
+              budget_decisions: budget_decisions,
+            },
           )
-          if can_retry_primary {
-            const primary_route = __agent_loop_route_options(
-              primary_provider,
-              primary_model,
-              primary_tool_format,
-            )
-            opts = opts
-              + primary_route
-              + {llm_options: (opts?.llm_options ?? {}) + primary_route}
-            escalation_retry_pending = true
-            iteration = iteration + 1
+          opts = provider_failure.opts
+          iteration = provider_failure.iteration
+          consecutive_failure_count = provider_failure.consecutive_failure_count
+          escalation_retry_pending = provider_failure.escalation_retry_pending
+          budget_exhausted_emitted = provider_failure.budget_exhausted_emitted
+          budget_decisions = provider_failure.budget_decisions
+          if provider_failure.action == "continue" {
             continue
           }
-          final_status = call.status
-          stop_reason = call?.stop_reason ?? call.status
-          terminal_error = call?.error
+          final_status = provider_failure.final_status
+          stop_reason = provider_failure.stop_reason
+          terminal_error = provider_failure.terminal_error
           break
         }
         escalation_retry_pending = false
