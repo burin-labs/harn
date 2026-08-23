@@ -527,6 +527,9 @@ impl McpServer {
         if let Some(card) = &self.server_card {
             server_info["card"] = card.clone();
         }
+        if let Some(icons) = self.context.server_icons() {
+            server_info["icons"] = icons;
+        }
         server_info
     }
 

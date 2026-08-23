@@ -498,6 +498,9 @@ through `pub fn` exports or through the `harness.tools.mcp_tools(...)` /
 `harness.tools.mcp_resource(...)` / `harness.tools.mcp_prompt(...)` methods shown
 above and serves the appropriate one over stdio or Streamable HTTP. All
 `print`/`println` output goes to stderr when stdio is the MCP transport.
+A sibling `<script>.md` is `harn://package/howto`. A sibling
+`<script>.icon.svg` is advertised as `serverInfo.icons` (data URI) and
+`harn://package/icon`.
 On stdio, the server accepts `initialize` from released MCP clients and
 `server/discover` from 2026-07-28 clients. Streamable HTTP uses the session-free
 2026-07-28 flow.

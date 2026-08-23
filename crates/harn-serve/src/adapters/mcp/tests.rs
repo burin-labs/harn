@@ -415,6 +415,87 @@ pub fn greet(name: string) -> string {
 }
 
 #[tokio::test]
+async fn sibling_icon_is_served_on_initialize_and_as_a_resource() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let script = dir.path().join("server.harn");
+    std::fs::write(
+        &script,
+        r"
+pub fn greet(name: string) -> string {
+  return name
+}
+",
+    )
+    .expect("write script");
+    std::fs::write(
+        dir.path().join("server.icon.svg"),
+        r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32"/></svg>"#,
+    )
+    .expect("write icon");
+    let core = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");
+    let server = McpServer::new(McpServerConfig::new(core));
+    let session = SharedSession::new();
+
+    let initialized = match server
+        .process_message(
+            json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-11-25",
+                    "capabilities": {},
+                    "clientInfo": {"name": "codex-mcp-client", "version": "test"}
+                }
+            }),
+            session.clone(),
+            AuthRequest::default(),
+        )
+        .await
+    {
+        ImmediateResult::Response(response) => response,
+        ImmediateResult::Accepted
+        | ImmediateResult::Stream(_)
+        | ImmediateResult::TaskStream { .. } => {
+            panic!("initialize must return a response")
+        }
+    };
+    let icon = &initialized["result"]["serverInfo"]["icons"][0];
+    assert_eq!(icon["mimeType"], "image/svg+xml");
+    assert_eq!(icon["sizes"], json!(["any"]));
+    let src = icon["src"].as_str().expect("data URI");
+    assert!(
+        src.starts_with("data:image/svg+xml;base64,"),
+        "server icon should be a data URI so a stdio client can draw it: {src}"
+    );
+
+    let resources = mcp_response(
+        &server,
+        harn_vm::jsonrpc::request(2, "resources/list", json!({})),
+        session.clone(),
+    )
+    .await;
+    let uris = resources["result"]["resources"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|resource| resource["uri"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert!(uris.contains(&"harn://package/icon"));
+
+    let read = mcp_response(
+        &server,
+        harn_vm::jsonrpc::request(3, "resources/read", json!({"uri": "harn://package/icon"})),
+        session,
+    )
+    .await;
+    assert!(read["result"]["contents"][0]["text"]
+        .as_str()
+        .unwrap()
+        .contains("<svg"));
+}
+
+#[tokio::test]
 async fn protocol_context_requires_configured_auth() {
     let dir = tempfile::tempdir().expect("tempdir");
     let script = dir.path().join("server.harn");
