@@ -46,6 +46,16 @@ fn bool_field(result: &VmValue, key: &str) -> bool {
     }
 }
 
+fn int_field(result: &VmValue, key: &str) -> i64 {
+    match result {
+        VmValue::Dict(d) => match d.get(key) {
+            Some(VmValue::Int(value)) => *value,
+            other => panic!("expected `{key}` int, got {other:?}"),
+        },
+        other => panic!("expected dict result, got {other:?}"),
+    }
+}
+
 fn string_field<'a>(result: &'a VmValue, key: &str) -> &'a str {
     match result {
         VmValue::Dict(d) => match d.get(key) {
@@ -183,6 +193,117 @@ fn search_star_glob_matches_files_at_any_depth() {
     ]))
     .unwrap();
     assert_eq!(matches_in(&result).len(), 2);
+}
+
+/// Globs select against each candidate's path relative to `path`, so a caller
+/// who qualifies the glob with the same directory they passed as `path` used to
+/// select zero files and read the result as a plain content miss. Both
+/// spellings must reach the same file.
+#[test]
+fn search_accepts_a_glob_qualified_with_the_search_path() {
+    let dir = TempDir::new().unwrap();
+    fs::create_dir_all(dir.path().join("src")).unwrap();
+    fs::write(
+        dir.path().join("src/registry.ts"),
+        "export const target = 1;\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join("src/other.ts"),
+        "export const target = 2;\n",
+    )
+    .unwrap();
+    let root = dir.path().join("src").to_string_lossy().into_owned();
+
+    for glob in ["registry.ts", "src/registry.ts", "./src/registry.ts"] {
+        let reg = registry();
+        let entry = reg.find("hostlib_tools_search").unwrap();
+        let result = (entry.handler)(&dict_arg(&[
+            ("pattern", vm_string("target")),
+            ("path", vm_string(&root)),
+            ("glob", vm_string(glob)),
+            ("fixed_strings", VmValue::Bool(true)),
+        ]))
+        .unwrap();
+        let paths = match_paths(&result);
+        assert_eq!(paths.len(), 1, "glob `{glob}` selected {paths:?}");
+        assert!(
+            paths[0].ends_with("src/registry.ts"),
+            "glob `{glob}` selected {paths:?}"
+        );
+    }
+}
+
+/// Exclusion reads the same normalized spelling, so a path-qualified exclude
+/// drops the same files as its root-relative form.
+#[test]
+fn search_exclude_globs_accept_the_search_path_spelling() {
+    let dir = TempDir::new().unwrap();
+    fs::create_dir_all(dir.path().join("src/generated")).unwrap();
+    fs::write(dir.path().join("src/keep.ts"), "const target = 1;\n").unwrap();
+    fs::write(
+        dir.path().join("src/generated/drop.ts"),
+        "const target = 2;\n",
+    )
+    .unwrap();
+    let root = dir.path().join("src").to_string_lossy().into_owned();
+
+    let reg = registry();
+    let entry = reg.find("hostlib_tools_search").unwrap();
+    let result = (entry.handler)(&dict_arg(&[
+        ("pattern", vm_string("target")),
+        ("path", vm_string(&root)),
+        ("fixed_strings", VmValue::Bool(true)),
+        (
+            "exclude_globs",
+            VmValue::List(Arc::new(vec![vm_string("src/generated/**")])),
+        ),
+    ]))
+    .unwrap();
+    let paths = match_paths(&result);
+    assert_eq!(paths.len(), 1, "{paths:?}");
+    assert!(paths[0].ends_with("src/keep.ts"), "{paths:?}");
+}
+
+/// "Nothing was searched" and "nothing matched" are different failures. The
+/// candidate count is what lets a caller tell them apart without guessing.
+#[test]
+fn search_reports_the_files_searched_count() {
+    let dir = TempDir::new().unwrap();
+    fs::write(dir.path().join("a.rs"), "fn present() {}\n").unwrap();
+    fs::write(dir.path().join("b.rs"), "fn present() {}\n").unwrap();
+    let root = dir.path().to_string_lossy().into_owned();
+
+    let reg = registry();
+    let entry = reg.find("hostlib_tools_search").unwrap();
+
+    let matched = (entry.handler)(&dict_arg(&[
+        ("pattern", vm_string("present")),
+        ("path", vm_string(&root)),
+        ("fixed_strings", VmValue::Bool(true)),
+    ]))
+    .unwrap();
+    assert_eq!(matches_in(&matched).len(), 2);
+    assert_eq!(int_field(&matched, "files_searched"), 2);
+
+    let zero_match = (entry.handler)(&dict_arg(&[
+        ("pattern", vm_string("absent")),
+        ("path", vm_string(&root)),
+        ("fixed_strings", VmValue::Bool(true)),
+    ]))
+    .unwrap();
+    assert!(matches_in(&zero_match).is_empty());
+    assert_eq!(int_field(&zero_match, "files_searched"), 2);
+
+    let zero_candidate = (entry.handler)(&dict_arg(&[
+        ("pattern", vm_string("present")),
+        ("path", vm_string(&root)),
+        ("glob", vm_string("*.py")),
+        ("fixed_strings", VmValue::Bool(true)),
+    ]))
+    .unwrap();
+    assert!(matches_in(&zero_candidate).is_empty());
+    assert_eq!(int_field(&zero_candidate, "files_searched"), 0);
 }
 
 #[test]

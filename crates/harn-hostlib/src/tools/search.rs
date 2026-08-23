@@ -46,7 +46,9 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         });
     }
 
-    let path = optional_string(BUILTIN, dict, "path")?
+    let raw_path = optional_string(BUILTIN, dict, "path")?;
+    let path = raw_path
+        .as_deref()
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."));
     // The walk descends from `path`; workspace-root scope is a prefix
@@ -104,8 +106,13 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let context_after = context_after as usize;
 
     let matcher = build_matcher(&pattern, case_insensitive, fixed_strings)?;
-    let include_set = build_include_glob(glob)?;
-    let exclude_set = build_exclude_globs(exclude_globs)?;
+    // Globs select against each candidate's path *relative to the search
+    // root*, so the root's own spelling is what tells a path-qualified glob
+    // apart from a root-relative one. Both glob parameters normalize through
+    // it; nothing downstream re-decides the question.
+    let root = root_components(raw_path.as_deref().unwrap_or("."));
+    let include_set = build_include_glob(glob, &root)?;
+    let exclude_set = build_exclude_globs(exclude_globs, &root)?;
 
     let mut walker = WalkBuilder::new(&path);
     walker.sort_by_file_name(|left, right| left.cmp(right));
@@ -121,6 +128,11 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
 
     let mut all_rows: Vec<RowWithPath> = Vec::new();
     let mut truncated = false;
+    // Candidates actually opened and scanned. Reported so a caller can tell
+    // "searched nothing" from "searched N files and found nothing" — the two
+    // read identically in the matches list, and only one of them means the
+    // request selected the wrong files.
+    let mut files_searched: usize = 0;
 
     'outer: for entry in walker.build() {
         let entry = match entry {
@@ -137,6 +149,7 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         if excluded_by_globs(&path, &file_path, exclude_set.as_ref()) {
             continue;
         }
+        files_searched += 1;
         let mut sink = CollectorSink {
             matcher: &matcher,
             rows: Vec::new(),
@@ -176,6 +189,7 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
 
     Ok(build_dict([
         ("matches", VmValue::List(Arc::new(matches))),
+        ("files_searched", VmValue::Int(files_searched as i64)),
         ("truncated", VmValue::Bool(truncated)),
     ]))
 }
@@ -208,27 +222,34 @@ fn build_matcher(
         })
 }
 
-fn build_include_glob(pattern: Option<String>) -> Result<Option<GlobSet>, HostlibError> {
+fn build_include_glob(
+    pattern: Option<String>,
+    root: &[&str],
+) -> Result<Option<GlobSet>, HostlibError> {
     let Some(pattern) = pattern else {
         return Ok(None);
     };
-    build_glob_set([pattern], "glob")
+    build_glob_set([pattern], "glob", root)
 }
 
-fn build_exclude_globs(patterns: Vec<String>) -> Result<Option<GlobSet>, HostlibError> {
+fn build_exclude_globs(
+    patterns: Vec<String>,
+    root: &[&str],
+) -> Result<Option<GlobSet>, HostlibError> {
     if patterns.is_empty() {
         return Ok(None);
     }
-    build_glob_set(patterns, "exclude_globs")
+    build_glob_set(patterns, "exclude_globs", root)
 }
 
 fn build_glob_set(
     patterns: impl IntoIterator<Item = String>,
     param: &'static str,
+    root: &[&str],
 ) -> Result<Option<GlobSet>, HostlibError> {
     let mut builder = GlobSetBuilder::new();
     for pattern in patterns {
-        for normalized in normalize_glob_variants(&pattern) {
+        for normalized in normalize_glob_variants(&pattern, root) {
             let glob = Glob::new(&normalized).map_err(|err| HostlibError::InvalidParameter {
                 builtin: BUILTIN,
                 param,
@@ -247,19 +268,62 @@ fn build_glob_set(
         })
 }
 
+/// Components of the search root as the caller spelled it, most-significant
+/// first. `.` segments and the empty segments an absolute or trailing-slash
+/// path produces carry no directory name, so they drop out.
+fn root_components(path: &str) -> Vec<&str> {
+    path.split(['/', '\\'])
+        .filter(|part| !part.is_empty() && *part != ".")
+        .collect()
+}
+
+/// The root-relative spelling of a glob the caller qualified with the
+/// directory they also passed as `path` — `path: "src"` with
+/// `glob: "src/registry.ts"` means `registry.ts` under the search root.
+/// `None` when the glob is not so qualified.
+///
+/// `path` is often absolute by the time it reaches here (hosts resolve agent
+/// paths against a workspace root) while the glob stays relative, so the match
+/// runs against a *trailing run* of the root's components rather than the whole
+/// spelling. The longest run wins, and at least one glob component always
+/// survives — a glob that names only the root directory is a filename pattern,
+/// not a prefix.
+fn root_relative_glob(glob: &str, root: &[&str]) -> Option<String> {
+    let parts: Vec<&str> = glob.split('/').collect();
+    let overlap = (1..=root.len().min(parts.len().saturating_sub(1)))
+        .rev()
+        .find(|depth| root[root.len() - depth..] == parts[..*depth])?;
+    Some(parts[overlap..].join("/"))
+}
+
 /// Normalize user-supplied globs so `*.rs` and `internal/*.go` behave like
 /// ripgrep-style path filters at any depth while still matching root files.
-fn normalize_glob_variants(glob: &str) -> Vec<String> {
+///
+/// Globs select against each candidate's path relative to the search root, so
+/// a caller who qualified the glob with the same directory they passed as
+/// `path` was testing a pattern no candidate could ever carry — zero files
+/// selected, reported as an ordinary content miss (#7018). Both spellings are
+/// accepted here, the single boundary that owns the question. Accepting rather
+/// than rewriting keeps a genuine `src/src/...` layout reachable; the cost is
+/// that a path-qualified exclude also drops the nested spelling, which is the
+/// reading a caller who wrote it that way intended.
+fn normalize_glob_variants(glob: &str, root: &[&str]) -> Vec<String> {
     let glob = glob.replace('\\', "/");
-    if glob == "*" || glob.starts_with("**/") {
-        return vec![glob];
+    let glob = glob.strip_prefix("./").unwrap_or(&glob).to_string();
+    let mut spellings = vec![glob.clone()];
+    spellings.extend(root_relative_glob(&glob, root));
+
+    let mut variants = Vec::with_capacity(spellings.len() * 2);
+    for spelling in spellings {
+        if spelling == "*" || spelling.starts_with("**/") {
+            variants.push(spelling);
+            continue;
+        }
+        let at_any_depth = format!("**/{spelling}");
+        variants.push(spelling);
+        variants.push(at_any_depth);
     }
-    let normalized = format!("**/{glob}");
-    if normalized == glob {
-        vec![glob]
-    } else {
-        vec![glob, normalized]
-    }
+    variants
 }
 
 fn included_by_globs(

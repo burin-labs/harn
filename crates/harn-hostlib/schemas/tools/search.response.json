@@ -8,12 +8,17 @@
       "type": "array",
       "items": { "$ref": "#/$defs/Match" }
     },
+    "files_searched": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Files the walk actually opened and scanned, after the ignore stack and the include/exclude globs. Zero means the request selected no candidates at all, which is a different failure from zero matches across a real candidate set."
+    },
     "truncated": {
       "type": "boolean",
       "description": "True when `max_matches` dropped additional matches or `max_line_bytes` clipped any returned match/context line."
     }
   },
-  "required": ["matches", "truncated"],
+  "required": ["matches", "files_searched", "truncated"],
   "additionalProperties": false,
   "$defs": {
     "Match": {
