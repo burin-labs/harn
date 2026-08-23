@@ -1,40 +1,43 @@
-// Harn mark — a pipeline glyph: three linked stages flowing left to right,
-// rendered in the teal→amber brand gradient.
+// Harn mark — a lowercase h read as a pipeline: the stem is the program, the
+// shoulder is the branch that spends a model call, and the joint at its foot is
+// what the branch hands back.
+//
+// The gradient is declared in userSpaceOnUse, not the default objectBoundingBox.
+// The stem is a straight vertical line, so its bounding box has zero width, and
+// an objectBoundingBox paint server on a zero-area box does not render at all.
+// The previous mark hit exactly that: its horizontal rail never painted, which
+// is why its nodes looked unconnected.
+//
+// The stops are a teal-to-amber ramp interpolated in OKLCH rather than sRGB.
+// A straight sRGB line between two hues this far apart passes near the
+// achromatic axis and goes olive in the middle; OKLCH keeps chroma up across
+// the ramp. Kept in step with public/favicon.svg, which carries the same
+// silhouette flattened for small sizes.
 export function Logo({ className = "h-8 w-8" }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
       <defs>
-        <linearGradient id="harn-bg" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stopColor="#0b1413" />
-          <stop offset="100%" stopColor="#13201e" />
-        </linearGradient>
-        <linearGradient id="harn-flow" x1="0%" y1="50%" x2="100%" y2="50%">
-          <stop offset="0%" stopColor="#5eead4" />
-          <stop offset="55%" stopColor="#14b8a6" />
+        <linearGradient id="harn-flow" gradientUnits="userSpaceOnUse" x1="8" y1="6" x2="24" y2="26">
+          <stop offset="0%" stopColor="#14b8a6" />
+          <stop offset="17%" stopColor="#40bc8d" />
+          <stop offset="33%" stopColor="#6bbd6f" />
+          <stop offset="50%" stopColor="#92ba4d" />
+          <stop offset="67%" stopColor="#b8b325" />
+          <stop offset="83%" stopColor="#d9a900" />
           <stop offset="100%" stopColor="#f59e0b" />
         </linearGradient>
       </defs>
-      <rect width="32" height="32" rx="7" fill="url(#harn-bg)" />
-      <path
-        d="M7 16 H25"
-        stroke="url(#harn-flow)"
-        strokeWidth="2.2"
-        strokeLinecap="round"
+      <g
         fill="none"
-      />
-      <circle cx="7.5" cy="16" r="3" fill="url(#harn-flow)" />
-      <circle cx="16" cy="16" r="3" fill="url(#harn-flow)" />
-      <circle cx="24.5" cy="16" r="3" fill="url(#harn-flow)" />
-      <path
-        d="M16 16 L11.5 10.5 M16 16 L20.5 21.5"
         stroke="url(#harn-flow)"
-        strokeWidth="2.2"
+        strokeWidth="2.9"
         strokeLinecap="round"
-        fill="none"
-        opacity="0.85"
-      />
-      <circle cx="11.2" cy="10.2" r="2.4" fill="#5eead4" />
-      <circle cx="20.8" cy="21.8" r="2.4" fill="#f59e0b" />
+        strokeLinejoin="round"
+      >
+        <path d="M9.5 6 V25.5" />
+        <path d="M9.5 18 Q9.5 12.4 16 12.4 Q22.5 12.4 22.5 18 V25.5" />
+      </g>
+      <circle cx="22.5" cy="25.5" r="2" fill="#f59e0b" />
     </svg>
   )
 }

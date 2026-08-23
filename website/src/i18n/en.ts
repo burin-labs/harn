@@ -123,9 +123,9 @@ export const en = {
     },
 
     examples: {
-      sectionTitle: "Runnable examples with real receipts",
+      sectionTitle: "Complete programs, not snippets",
       sectionBody:
-        "The same checked scenario files ship in the CLI demo bundle and run locally with deterministic fixtures.",
+        "Read these for the shape rather than the subject. In each one the deterministic work is ordinary code, and the program decides when a step is worth a model call. They ship in the CLI demo bundle and run offline against recorded fixtures.",
       tablistAria: "Runnable Harn examples",
       filesAria: "Scenario files",
       multiFileNote:
@@ -135,31 +135,43 @@ export const en = {
       copyAria: "Copy file source",
       viewSource: "View source",
       readDocs: "Read the docs",
-      // Keyed by scenario slug (see examples/gallery.ts).
+      extendLabel: "Make it yours",
+      // Keyed by scenario slug (see examples/gallery.ts). `title` names the
+      // pattern rather than the fixture, because a title that describes the
+      // sample data reads as a program that can only do the sample data.
+      // `extend` is the answer to "how would this ever be my problem?".
       scenarios: {
         "review-captain": {
           tab: "Code review agent",
-          title: "Review a pull request and return a verdict.",
+          title: "Spend the model only on the judgment call.",
           outcome:
-            "A reviewer persona scans the diff, asks one clarifying question, then returns a structured verdict with reasoning and a cost rollup. It runs fully offline against a recorded tape.",
+            "Gathering the diff, counting the changed lines, and assembling the receipt are plain code. Two steps need an opinion, so only those two become model calls. The prompts live in separate template files.",
+          extend:
+            "Swap the hard-coded diff for a call to your forge and it reviews real pull requests. Edit the prompts without touching the program, or add a third stage that blocks the merge when the verdict comes back negative.",
         },
         "merge-captain": {
           tab: "PR triage",
-          title: "Triage a queue of pull requests.",
+          title: "Turn a queue into decisions you can act on.",
           outcome:
-            "Three mocked PRs become a structured merge, handoff, or block receipt using the bundled LLM tape.",
+            "Each pull request is classified into merge, handoff, or block, and comes back as structured data rather than prose, so the next step is code and not another prompt.",
+          extend:
+            "Point it at your real queue and widen the verdict set. Because every decision is typed, you can route on it: auto-merge the safe ones and escalate the rest.",
         },
         "mcp-host": {
           tab: "MCP server",
-          title: "Host supervised MCP servers.",
+          title: "Supervise tool servers as part of the program.",
           outcome:
-            "Lazy registration, status snapshots, and graceful stop paths stay runnable without a live server in the fixture set.",
+            "Registration, status snapshots, and shutdown are ordinary statements. The lifecycle of a tool server is something the program owns rather than something the deployment does.",
+          extend:
+            "Register your own servers and gate them behind capability policy, so an autonomous loop cannot reach a tool you did not hand it.",
         },
         "stdlib-toolkit": {
           tab: "Prompt toolkit",
-          title: "Build a prompt context from stdlib primitives.",
+          title: "Build the context deterministically, then ask once.",
           outcome:
-            "Clone, merge, dedupe, XML round-trip, wrap, and indent steps compose into a checked prompt receipt.",
+            "Clone, merge, dedupe, XML round-trip, wrap, and indent are library calls. The expensive part of a prompt is usually assembling it, and none of that assembly needs a model.",
+          extend:
+            "Feed it your own sources and keep the assembly in code. The less of the context you ask a model to reconstruct, the cheaper and more repeatable the run.",
         },
       },
     },

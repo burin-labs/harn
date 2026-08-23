@@ -408,6 +408,55 @@ body {
   font-weight: 600;
   color: var(--color-foreground);
 }
+/* The "at a glance" fact panel on the introduction page: paradigm, typing,
+   platforms, license. No official language docs site ships one of these, so it
+   sits below the first-success path rather than beside the title, and reads as
+   an affordance for someone evaluating Harn rather than as the lead. A two
+   column grid rather than a table because the pairs are definitions, not rows,
+   and because a table here would inherit the scroll wrapper. */
+.prose .fact-panel {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0 1.25rem;
+  margin: 0 0 1rem;
+  border: 1px solid var(--color-border);
+  border-radius: 0.5rem;
+  padding: 0.85rem 1.1rem;
+  background-color: var(--color-surface-secondary);
+  font-size: 0.9rem;
+}
+.prose .fact-panel dt {
+  color: var(--color-foreground-muted);
+  font-weight: 600;
+  padding: 0.3rem 0;
+}
+.prose .fact-panel dd {
+  color: var(--color-foreground-secondary);
+  margin: 0;
+  padding: 0.3rem 0;
+}
+.prose .fact-panel dt + dd {
+  border-top: 0;
+}
+/* Every pair after the first gets a hairline, so the panel reads as a list of
+   facts without drawing a full grid. */
+.prose .fact-panel dt:not(:first-of-type),
+.prose .fact-panel dt:not(:first-of-type) + dd {
+  border-top: 1px solid var(--color-border);
+}
+@media (max-width: 30rem) {
+  .prose .fact-panel {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+  .prose .fact-panel dt:not(:first-of-type) + dd {
+    border-top: 0;
+  }
+  .prose .fact-panel dd {
+    padding-top: 0;
+    padding-bottom: 0.5rem;
+  }
+}
 .prose details {
   border: 1px solid var(--color-border);
   border-radius: 0.5rem;

@@ -111,6 +111,14 @@ export function ExampleGallery() {
             </a>
           </div>
           {isMultiFile && <p className="mt-5 text-xs leading-relaxed text-foreground-muted">{ex.multiFileNote}</p>}
+
+          {/* Each scenario runs against a fixture, which makes it easy to read
+              it as a program that only does the fixture. This says what changes
+              when the subject is yours. */}
+          <div className="mt-5 rounded-lg border border-border bg-surface-tertiary px-3 py-3">
+            <p className="text-[11px] font-semibold tracking-wide text-foreground-muted uppercase">{ex.extendLabel}</p>
+            <p className="mt-1.5 text-xs leading-relaxed text-foreground-secondary">{copy.extend}</p>
+          </div>
           {/* The repo path, shortened to the part that locates the file inside the
               demo bundle. The full path is on the link itself, so nothing is
               lost, and it no longer wraps mid-filename. */}
