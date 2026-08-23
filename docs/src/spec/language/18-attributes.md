@@ -95,6 +95,20 @@ accepted for generated metadata that already mirrors trigger configs.
 `@schedule`, `@queue`, and `@retry` are inert without `@job` and produce
 a serve diagnostic.
 
+#### `@annotations`
+
+```harn,ignore
+@annotations(readOnly: true, idempotent: true, openWorld: false)
+pub fn find_runs() -> dict { return {} }
+```
+
+Behavior hints for MCP clients, using the protocol's own names
+(`readOnly`, `destructive`, `idempotent`, `openWorld`). Each argument is
+optional and must be a boolean literal. `harn serve mcp` projects only
+the hints the script declared; it does not invent "destructive" or
+"open-world" for a function that said nothing. The tool title and
+description still come from the function's doc comment.
+
 #### Durable persona annotations
 
 Durable persona metadata can be declared directly on a function, tool, or

@@ -562,3 +562,19 @@ pub fn dispatch(harness: Harness) -> int { return 1 }
         "expected a no-arguments warning, got {warns:?}"
     );
 }
+
+#[test]
+fn test_annotations_attribute_is_recognized_on_functions() {
+    let warns = warnings(
+        r#"
+@annotations(readOnly: true, idempotent: true, openWorld: false)
+pub fn find_runs() -> string { return "ok" }
+"#,
+    );
+    assert!(
+        warns
+            .iter()
+            .all(|warning| !warning.contains("unknown attribute")),
+        "`@annotations` should not warn as unknown: {warns:?}"
+    );
+}

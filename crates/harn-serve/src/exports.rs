@@ -7,7 +7,18 @@ use harn_parser::{Attribute, AttributeArg, Node, TypeExpr};
 use crate::limits::{limits_and_budget_from_attributes, BudgetSpec, RouteLimits};
 use crate::DispatchError;
 
+mod diagnostics;
+mod mcp_metadata;
 mod schema_projection;
+
+pub use diagnostics::{
+    emit_export_diagnostics, ExportDiagnostic, ANNOTATIONS_BAD_ARGS, JOB_BAD_NAME,
+    JOB_MODIFIER_WITHOUT_JOB, POLICY_BAD_ARGS, QUEUE_BAD_NAME, RAW_BAD_ARGS,
+    RAW_CONFLICTS_WITH_STREAM, RAW_WITHOUT_ROUTE, RETRY_BAD_ARGS, ROUTE_ARG_NOT_STRING,
+    ROUTE_BAD_ARITY, SCHEDULE_BAD_ARGS, SCOPES_ARG_NOT_STRING, STREAM_BAD_ARGS,
+    STREAM_WITHOUT_ROUTE, WS_BAD_ARGS, WS_CONFLICTS_WITH_STREAM_OR_RAW, WS_WITHOUT_ROUTE,
+};
+pub use mcp_metadata::ToolAnnotations;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ExportedParam {
@@ -92,6 +103,21 @@ impl RoutePolicy {
 pub struct ExportedFunction {
     pub name: String,
     pub kind: ExportedCallableKind,
+    /// Short label taken from the first line of the declaration's doc comment.
+    /// MCP clients show this next to the programmatic `name`.
+    pub title: Option<String>,
+    /// The declaration's own doc comment, verbatim.
+    ///
+    /// This is what an MCP client is shown when it asks what the tool does. It
+    /// comes from the doc comment rather than a separate attribute because a
+    /// description that lives anywhere but next to the code is a description
+    /// that goes stale: the author already writes one, and duplicating it into
+    /// an attribute creates two answers that can disagree.
+    pub description: Option<String>,
+    /// Behavior hints declared with `@annotations(...)`, projected onto the MCP
+    /// tool. `None` leaves the client on the protocol's own conservative
+    /// defaults, which is the honest answer when a script has not said.
+    pub annotations: Option<ToolAnnotations>,
     pub params: Vec<ExportedParam>,
     pub return_type: Option<TypeExpr>,
     pub input_schema: serde_json::Value,
@@ -267,112 +293,14 @@ pub struct RouteSpec {
     pub path: String,
 }
 
-/// A `HARN-SRV-*` diagnostic raised while building the export catalog.
-///
-/// These flag the malformed `@route(...)` / `@scopes(...)` attribute
-/// forms that the collector would otherwise drop silently — leaving a
-/// handler mis-routed, unmounted, or less scope-restricted than the
-/// author intended. They are surfaced by the serve adapters at startup
-/// (see [`emit_export_diagnostics`]) rather than aborting catalog
-/// construction, so one bad attribute doesn't take down a script whose
-/// other handlers are fine.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ExportDiagnostic {
-    /// Stable code so log scanners and editors can key on the condition.
-    pub code: &'static str,
-    /// 1-based source line of the offending attribute (0 when unknown).
-    pub line: usize,
-    pub message: String,
-}
-
-/// `@route` carries an argument that is not a string literal, so the
-/// method/path positions are ambiguous and the handler is not mounted.
-pub const ROUTE_ARG_NOT_STRING: &str = "HARN-SRV-001";
-/// `@route` has the wrong number of arguments — it takes a path, or a
-/// method and a path. The handler is not mounted.
-pub const ROUTE_BAD_ARITY: &str = "HARN-SRV-002";
-/// `@scopes` carries an argument that is not a string literal; that
-/// scope requirement is dropped, leaving the route less restricted.
-pub const SCOPES_ARG_NOT_STRING: &str = "HARN-SRV-003";
-/// `@job` carries a non-string name, or more than one positional
-/// argument. The function is not registered as a job.
-pub const JOB_BAD_NAME: &str = "HARN-SRV-004";
-/// `@schedule` is malformed — it takes a cron expression and an optional
-/// timezone, both string literals. The schedule is dropped.
-pub const SCHEDULE_BAD_ARGS: &str = "HARN-SRV-005";
-/// `@queue` carries a non-string queue name, or the wrong number of
-/// arguments. The queue binding is dropped.
-pub const QUEUE_BAD_NAME: &str = "HARN-SRV-006";
-/// `@retry(max:, backoff:)` carries an unrecognised argument shape — a
-/// positional argument, non-integer `max`, or an unknown `backoff`
-/// keyword. The offending field is dropped (the rest of the policy still
-/// applies).
-pub const RETRY_BAD_ARGS: &str = "HARN-SRV-007";
-/// `@schedule` / `@queue` / `@retry` appears without a `@job` attribute.
-/// Those modifiers only mean something on a job, so they are ignored.
-pub const JOB_MODIFIER_WITHOUT_JOB: &str = "HARN-SRV-008";
-/// `@stream` carries arguments — it is a bare marker. The marker is
-/// dropped, so the route dispatches into the VM like any other handler.
-pub const STREAM_BAD_ARGS: &str = "HARN-SRV-009";
-/// `@stream` appears on a declaration without an HTTP route (no
-/// `@route(...)`, no `handler_*` convention, or a pipeline). Streaming
-/// only means something on a routed `pub fn`, so it is ignored.
-pub const STREAM_WITHOUT_ROUTE: &str = "HARN-SRV-010";
-/// `@raw` carries arguments — it is a bare marker. The marker is
-/// dropped, so the route dispatches into the VM like any other handler.
-pub const RAW_BAD_ARGS: &str = "HARN-SRV-011";
-/// `@raw` appears on a declaration without an HTTP route. Raw-body
-/// hand-off only means something on a routed `pub fn`, so it is ignored.
-pub const RAW_WITHOUT_ROUTE: &str = "HARN-SRV-012";
-/// `@raw` and `@stream` appear on the same declaration. They contradict
-/// on body handling (`@stream` never reads the request body, `@raw`
-/// buffers it for the provider), so `@raw` is dropped and the route
-/// behaves as `@stream`.
-pub const RAW_CONFLICTS_WITH_STREAM: &str = "HARN-SRV-013";
-/// `@ws` carries arguments — it is a bare marker. The marker is dropped,
-/// so the route dispatches into the VM like any other handler.
-pub const WS_BAD_ARGS: &str = "HARN-SRV-014";
-/// `@ws` appears on a declaration without an HTTP route. A WebSocket
-/// upgrade only means something on a routed `pub fn`, so it is ignored.
-pub const WS_WITHOUT_ROUTE: &str = "HARN-SRV-015";
-/// `@ws` and `@raw` appear on the same declaration. A WebSocket
-/// handshake carries no request body, but `@raw` exists to buffer one, so
-/// they contradict; `@ws` is dropped and the route behaves as `@raw`.
-/// (`@ws` + `@stream` is *not* a conflict — it is the combined route that
-/// upgrades a genuine handshake and falls through to the stream otherwise.)
-pub const WS_CONFLICTS_WITH_STREAM_OR_RAW: &str = "HARN-SRV-016";
-/// `@policy(...)` carries an argument that is not the supported
-/// `kinds: "..."` string form (an unknown key, a positional argument, or a
-/// non-string value). The offending argument is dropped, leaving the
-/// route's principal-kind guard incomplete; any host-side defense-in-depth
-/// check still applies.
-pub const POLICY_BAD_ARGS: &str = "HARN-SRV-017";
-
-impl std::fmt::Display for ExportDiagnostic {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if self.line > 0 {
-            write!(f, "{}: {} (line {})", self.code, self.message, self.line)
-        } else {
-            write!(f, "{}: {}", self.code, self.message)
-        }
-    }
-}
-
-/// Print catalog diagnostics to stderr at server startup, matching the
-/// `[harn] …` banner the adapters already emit. Standalone serve
-/// commands call this so authors see malformed attributes immediately;
-/// embedders that build a router directly can read
-/// [`ExportCatalog::diagnostics`] and render them in their own UI.
-pub fn emit_export_diagnostics(diagnostics: &[ExportDiagnostic]) {
-    for diagnostic in diagnostics {
-        eprintln!("[harn] warning: {diagnostic}");
-    }
-}
-
 #[derive(Clone, Debug)]
 pub struct ExportCatalog {
     pub script_path: PathBuf,
     pub functions: BTreeMap<String, ExportedFunction>,
+    /// The script's leading doc comment, served as the MCP server's
+    /// `instructions` -- the one place a server can tell a client how its tools
+    /// fit together before the client has called any of them.
+    pub instructions: Option<String>,
     /// Non-fatal `HARN-SRV-*` diagnostics gathered while collecting the
     /// route/scope attributes. Empty for a well-formed script.
     pub diagnostics: Vec<ExportDiagnostic>,
@@ -391,6 +319,7 @@ impl ExportCatalog {
         // as the checker so served JSON schemas stay structural without a
         // second import resolver.
         let schema_resolver = schema_projection::resolver_for_module(path, &program);
+        let source_lines: Vec<&str> = source.lines().collect();
         let mut functions = BTreeMap::new();
         let mut diagnostics = Vec::new();
         for node in &program {
@@ -417,11 +346,21 @@ impl ExportCatalog {
             let raw = raw_from_attributes(attrs, name, route.as_ref(), stream, &mut diagnostics);
             let ws = ws_from_attributes(attrs, name, route.as_ref(), raw, &mut diagnostics);
             let public_params = schema_projection::public_params(params);
+            let (title, description) = mcp_metadata::title_and_description(
+                mcp_metadata::doc_comment_above(&source_lines, inner.span.line),
+            );
             functions.insert(
                 name.clone(),
                 ExportedFunction {
                     name: name.clone(),
                     kind: ExportedCallableKind::Function,
+                    title,
+                    description,
+                    annotations: mcp_metadata::annotations_from_attributes(
+                        attrs,
+                        name,
+                        &mut diagnostics,
+                    ),
                     params: schema_projection::exported_params(public_params, &schema_resolver),
                     return_type: return_type.clone(),
                     input_schema: schema_resolver.json_schema_for_typed_params(public_params),
@@ -467,11 +406,21 @@ impl ExportCatalog {
             let raw = raw_from_attributes(attrs, name, None, stream, &mut diagnostics);
             let ws = ws_from_attributes(attrs, name, None, raw, &mut diagnostics);
             let public_params = schema_projection::public_params(params);
+            let (title, description) = mcp_metadata::title_and_description(
+                mcp_metadata::doc_comment_above(&source_lines, inner.span.line),
+            );
             functions
                 .entry(name.clone())
                 .or_insert_with(|| ExportedFunction {
                     name: name.clone(),
                     kind: ExportedCallableKind::Pipeline,
+                    title,
+                    description,
+                    annotations: mcp_metadata::annotations_from_attributes(
+                        attrs,
+                        name,
+                        &mut diagnostics,
+                    ),
                     params: schema_projection::exported_params(public_params, &schema_resolver),
                     return_type: return_type.clone(),
                     input_schema: schema_resolver.json_schema_for_typed_params(public_params),
@@ -497,6 +446,7 @@ impl ExportCatalog {
         Ok(Self {
             script_path: path.to_path_buf(),
             functions,
+            instructions: mcp_metadata::module_doc_comment(&source_lines),
             diagnostics,
         })
     }

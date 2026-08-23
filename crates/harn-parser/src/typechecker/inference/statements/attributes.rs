@@ -36,7 +36,8 @@ impl TypeChecker {
                 | "acp_skill" | "invariant" | "deterministic" | "semantic" | "archivist"
                 | "retroactive" | "persona" | "step" | "trigger" | "handoff" | "budget"
                 | "command" | "serial" | "heavy" | "scopes" | "policy" | "route" | "stream"
-                | "raw" | "job" | "schedule" | "queue" | "retry" | "host_entry" => {}
+                | "raw" | "job" | "schedule" | "queue" | "retry" | "host_entry" | "annotations" => {
+                }
                 other => {
                     self.warning_at(
                         Code::UnknownAttribute,

@@ -666,6 +666,7 @@ pub fn compute(x: int) -> int { return x + 1 }
 | `@serial(group: "name")` | Test-scheduler hint: tests sharing the group are run serially under `--parallel`. Bare `@serial` shares a default group. |
 | `@heavy(threads: N)` | Test-scheduler hint: the test reserves `N` worker permits under `--parallel` so it never oversubscribes the pool. |
 | `@job("name")` | Marks a `pub fn` as a trigger-dispatched job. `harn run --as-job file.harn --job name --request req.json` runs it once; `harn serve worker file.harn` runs schedules and queue consumers. |
+| `@annotations(readOnly: true, destructive: false, idempotent: true, openWorld: false)` | MCP behavior hints on a `pub fn`. Only declared hints are projected; omitted hints stay off the wire. |
 | `@schedule("cron", "UTC")` | Job modifier: activates the job from `harn serve worker` through the cron connector. |
 | `@queue("name")` | Job modifier: makes `harn serve worker` consume durable jobs from the named worker queue. |
 | `@retry(max: N, backoff: "svix" \| "linear" \| "exponential")` | Job modifier: maps to dispatcher retry/DLQ policy. `@job(..., retry: {...})` remains accepted for generated trigger-style metadata. |

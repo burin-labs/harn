@@ -43,6 +43,14 @@ impl McpContextCatalog {
             });
         }
 
+        if let Some(guide) = sibling_guide(script_path) {
+            resources.push(guide);
+        }
+
+        if let Some(icon) = sibling_icon(script_path) {
+            resources.push(icon);
+        }
+
         if !manifest_source.is_empty() {
             resources.push(McpContextResource {
                 uri: "harn://package/manifest".to_string(),
@@ -87,6 +95,28 @@ impl McpContextCatalog {
 
     pub(crate) fn has_resources(&self) -> bool {
         !self.resources.is_empty()
+    }
+
+    /// MCP `serverInfo.icons` for a sibling `<script>.icon.svg`.
+    ///
+    /// The `src` is a data URI so a stdio client can draw the logo without a
+    /// second `resources/read`. The same bytes are also a package resource.
+    pub(crate) fn server_icons(&self) -> Option<JsonValue> {
+        let icon = self
+            .resources
+            .iter()
+            .find(|resource| resource.uri == "harn://package/icon")?;
+        use base64::Engine;
+        let src = format!(
+            "data:{};base64,{}",
+            icon.mime_type,
+            base64::engine::general_purpose::STANDARD.encode(icon.text.as_bytes())
+        );
+        Some(json!([{
+            "src": src,
+            "mimeType": icon.mime_type,
+            "sizes": ["any"],
+        }]))
     }
 
     pub(crate) fn has_prompts(&self) -> bool {
@@ -199,6 +229,45 @@ impl McpContextResource {
         }
         entry
     }
+}
+
+/// A markdown guide sitting next to the served script, e.g. `foo.mcp.md`
+/// beside `foo.mcp.harn`. This is the how-to a client can read before calling
+/// any tool — the script's own instructions, not the package README.
+/// A square SVG logo sitting next to the served script, e.g.
+/// `foo.mcp.icon.svg` beside `foo.mcp.harn`.
+fn sibling_icon(script_path: &Path) -> Option<McpContextResource> {
+    let stem = script_path.file_stem()?.to_str()?;
+    let icon_path = script_path.with_file_name(format!("{stem}.icon.svg"));
+    let text = fs::read_to_string(&icon_path).ok()?;
+    if text.trim().is_empty() {
+        return None;
+    }
+    Some(McpContextResource {
+        uri: "harn://package/icon".to_string(),
+        name: "Server icon".to_string(),
+        title: Some("Server icon".to_string()),
+        description: Some(format!("Logo for {stem}")),
+        mime_type: "image/svg+xml".to_string(),
+        text,
+    })
+}
+
+fn sibling_guide(script_path: &Path) -> Option<McpContextResource> {
+    let stem = script_path.file_stem()?.to_str()?;
+    let guide_path = script_path.with_file_name(format!("{stem}.md"));
+    let text = fs::read_to_string(&guide_path).ok()?;
+    if text.trim().is_empty() {
+        return None;
+    }
+    Some(McpContextResource {
+        uri: "harn://package/howto".to_string(),
+        name: "How to use this server".to_string(),
+        title: Some("How to use this server".to_string()),
+        description: Some(format!("Operator guide for {stem}")),
+        mime_type: "text/markdown".to_string(),
+        text,
+    })
 }
 
 fn project_root_for_script(script_path: &Path) -> PathBuf {

@@ -369,7 +369,7 @@ impl McpServer {
                     &params,
                     JsonValue::Object(self.server_capabilities()),
                     self.server_info(),
-                    None,
+                    self.catalog.instructions.as_deref(),
                 )
             });
             return match result {
@@ -469,7 +469,7 @@ impl McpServer {
         let result = server_discover_result(
             JsonValue::Object(self.server_capabilities()),
             self.server_info(),
-            None,
+            self.catalog.instructions.as_deref(),
         );
         harn_vm::jsonrpc::response(id, result)
     }
@@ -514,8 +514,21 @@ impl McpServer {
             "name": self.server_name,
             "version": env!("CARGO_PKG_VERSION"),
         });
+        if let Some(title) = self
+            .catalog
+            .instructions
+            .as_deref()
+            .and_then(|text| text.lines().next())
+            .map(str::trim)
+            .filter(|line| !line.is_empty() && line.chars().count() <= 80)
+        {
+            server_info["title"] = json!(title);
+        }
         if let Some(card) = &self.server_card {
             server_info["card"] = card.clone();
+        }
+        if let Some(icons) = self.context.server_icons() {
+            server_info["icons"] = icons;
         }
         server_info
     }
