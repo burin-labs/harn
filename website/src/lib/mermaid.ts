@@ -10,10 +10,13 @@
 
 import {
   DIAGRAM_CANVAS_CLASS,
+  DIAGRAM_EXPAND_CLASS,
   DIAGRAM_FIGURE_CLASS,
   DIAGRAM_SOURCE_CLASS,
   type DiagramState,
 } from "./diagram-markup"
+import { openDiagram } from "./diagram-zoom"
+import { getMessages } from "../i18n"
 
 let counter = 0
 
@@ -81,6 +84,35 @@ function themeVariables(dark: boolean) {
   }
 }
 
+// A diagram that fits the article column is often too small to read. Give every
+// rendered diagram a way into the zoom overlay: the canvas itself for a pointer,
+// and a real button so the same thing is reachable by keyboard and named for
+// assistive tech.
+function addZoomAffordance(figure: HTMLElement, canvas: HTMLElement) {
+  const open = () => {
+    const svg = canvas.querySelector("svg")
+    if (svg) openDiagram(svg)
+  }
+
+  canvas.addEventListener("click", open)
+
+  if (figure.querySelector(`.${DIAGRAM_EXPAND_CLASS}`)) return
+  const button = document.createElement("button")
+  button.type = "button"
+  button.className = DIAGRAM_EXPAND_CLASS
+  button.setAttribute("aria-label", getMessages().diagram.expand)
+  button.innerHTML =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
+    'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>'
+  button.addEventListener("click", (event) => {
+    // The canvas handler would otherwise fire for the same click.
+    event.stopPropagation()
+    open()
+  })
+  canvas.append(button)
+}
+
 /**
  * Render every not-yet-rendered diagram inside `root`, or re-render all of them
  * when `force` is set (the theme changed). Resolves once the pass is done; a
@@ -126,6 +158,7 @@ export async function renderDiagrams(root: ParentNode, force = false): Promise<v
     try {
       const { svg } = await mermaid.render(`mermaid-${++counter}`, source)
       canvas.innerHTML = svg
+      addZoomAffordance(figure, canvas)
       setState(figure, "ready")
     } catch (error) {
       // A diagram that will not parse should be loud in development and
