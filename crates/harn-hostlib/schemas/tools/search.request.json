@@ -7,7 +7,10 @@
   "properties": {
     "pattern": { "type": "string", "minLength": 1 },
     "path": { "type": "string" },
-    "glob": { "type": "string" },
+    "glob": {
+      "type": "string",
+      "description": "Include only files matching this glob. Matched against each candidate's path relative to `path`, at any depth; a glob spelled with the `path` prefix (`path: \"src\"` with `\"src/foo.ts\"`) selects the same files as its relative form."
+    },
     "case_insensitive": { "type": "boolean", "default": false },
     "fixed_strings": {
       "type": "boolean",
