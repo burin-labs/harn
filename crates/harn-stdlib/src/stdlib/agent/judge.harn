@@ -1157,6 +1157,28 @@ fn __completion_policy_plan(opts, stop_reason: string) -> list<CompletionPolicyS
   return stages
 }
 
+/**
+ * Whether this run declares anything that could adjudicate a completion at
+ * `stop_reason`.
+ *
+ * A caller that is about to end the run and wants the turn adjudicated first
+ * needs to know whether asking is worth a provider call — and, more importantly,
+ * whether an answer it gets back means anything. An evaluation with no stages is
+ * not vetoed, so the directive seals `accept`: silence read as approval. Ask
+ * this before evaluating, and treat a false as "nobody was asked".
+ *
+ * The plan is the single owner of what counts as an adjudicator; this only
+ * reports whether it produced any stages.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_completion_adjudicator_declared(opts, "stalled")
+ */
+pub fn agent_completion_adjudicator_declared(opts, stop_reason: string) -> bool {
+  return len(__completion_policy_plan(opts, stop_reason)) > 0
+}
+
 fn __completion_policy_initial_evaluation() -> CompletionPolicyEvaluation {
   return {
     verdict: {vetoed: false},

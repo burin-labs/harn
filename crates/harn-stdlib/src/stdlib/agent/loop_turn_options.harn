@@ -560,6 +560,30 @@ pub fn __completion_judge_hit(verdict) -> int {
   return 0
 }
 
+/**
+ * Whether a completion directive was decided by an adjudicator that actually
+ * ran, rather than by the absence of one.
+ *
+ * `agent_evaluate_completion` plans zero stages when a run configures no
+ * `verify_completion` callback and no judge, and a zero-stage evaluation is not
+ * vetoed, so `__judge_directive` seals `accept`. That accept is vacuous: it
+ * reports that nothing objected, not that anything approved. A caller that
+ * converts a terminal on the strength of it would promote every unadjudicated
+ * stop to a completion. The receipt's `invoked` map is the honest signal —
+ * consult it before treating `accept` as an approval.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ * @example: __completion_directive_adjudicated(verdict)
+ */
+pub fn __completion_directive_adjudicated(verdict) -> bool {
+  const invoked = verdict?.receipt?.invoked
+  return (invoked?.deterministic ?? false)
+    || (invoked?.verify_completion_judge ?? false)
+    || (invoked?.done_judge ?? false)
+}
+
 pub fn __completion_stop_reason(verdict) -> string {
   if verdict?.action == "stop_unverified" {
     return to_string(verdict?.receipt?.reason ?? "completion_unverified")
