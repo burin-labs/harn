@@ -311,3 +311,10 @@ reduce it.
   changelog:
   <https://cursor.com/changelog/03-05-26> and
   <https://cursor.com/changelog/03-25-26>.
+- Cursor documents per-agent Firecracker microVM isolation and a separate AWS
+  account for cloud agent execution:
+  <https://cursor.com/docs/cloud-agent/security>.
+- Temporal documents that its Python workflow sandbox isolates global state and
+  restricts non-deterministic calls, and states directly that it is not
+  completely isolated:
+  <https://docs.temporal.io/develop/python/python-sdk-sandbox>.

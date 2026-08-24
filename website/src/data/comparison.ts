@@ -339,10 +339,10 @@ export const RATINGS: Record<string, Record<string, Cell>> = {
   "sandboxed-by-default": {
     harn: { rating: "yes", note: "`harn run` confines a script to its project directory before the VM starts, and the OS confines any subprocess it spawns. Opting out is an explicit --no-sandbox flag that warns." },
     inngest: { rating: "no", note: "Functions run in your own process with your own permissions." },
-    temporal: { rating: "no", note: "Workers run your code with your permissions. The Python SDK's workflow sandbox enforces determinism, not filesystem or process confinement." },
+    temporal: { rating: "no", note: "Workers run your code with your permissions. The Python SDK's workflow sandbox isolates global state and restricts non-deterministic calls; its own documentation says it is not completely isolated, and it does not confine the filesystem, network, or process." },
     langgraph: { rating: "no", note: "A library in your process, with your permissions." },
     baml: { rating: "no", note: "The generated client runs in your process, with your permissions." },
-    cursor: { rating: "partial", note: "Cloud agents run in isolated remote environments, which the vendor operates rather than the program declaring." },
+    cursor: { rating: "partial", note: "Each cloud agent gets its own Firecracker microVM in a separate AWS account, which is strong isolation. It is operated by the vendor for its own hosted agents, rather than a boundary your program declares and carries anywhere it runs." },
     flue: { rating: "unknown" },
   },
 
