@@ -27,7 +27,9 @@ scripting API for code that runs *inside* a Harn pipeline.
 ```harn,ignore
 import { providers } from "std/oauth/providers"
 import { memory } from "std/oauth/storage"
-import { client, exchange_code, request, start_authorization, token, token_exchange } from "std/oauth/client"
+import {
+  client, exchange_code, request, start_authorization, token, token_exchange,
+} from "std/oauth/client"
 
 const cli = client(
   providers().github,
@@ -64,7 +66,8 @@ const gh = github()                                              // public githu
 const ghe = github_enterprise("https://ghe.example.com")         // enterprise server
 const conf = atlassian({default_scopes: ["read:jira-work", "offline_access"]})
 
-const all = providers()                                          // {github, slack, ..., custom, github_enterprise}
+// {github, slack, ..., custom, github_enterprise}
+const all = providers()
 ```
 
 Built-ins: `github`, `github_enterprise`, `slack`, `linear`, `notion`,
@@ -151,11 +154,11 @@ const cli = client(provider, {
   client_id:          string,
   storage:            <storage handle>,
   client_secret?:     string,                       // confidential clients only
-  scopes?:            list<string>,                 // defaults to provider.default_scopes
+  scopes?:            list<string>,                 // default: provider.default_scopes
   redirect_uri?:      string,                       // required for start_authorization
   storage_key?:       string,                       // defaults to provider.id
   token_auth_method?: "none" | "client_secret_post" | "client_secret_basic",
-  audience?:          string,                       // appended to /authorize and /device
+  audience?:          string,                       // appended to /authorize, /device
   extra_auth_params?: dict,                         // raw passthrough on /authorize
 })
 ```
@@ -346,12 +349,14 @@ import {
 } from "std/oauth/dynamic_registration"
 import { providers } from "std/oauth/providers"
 
-const paths = well_known_paths()                              // {client_metadata, authorization_server_metadata, registration}
+// {client_metadata, authorization_server_metadata, registration}
+const paths = well_known_paths()
 const oas = authorization_server_metadata(
   providers().github,
   {registration_endpoint: paths.registration},
 )
-const oas_response = well_known_response(oas)                 // {status, content_type, headers, body}
+// {status, content_type, headers, body}
+const oas_response = well_known_response(oas)
 
 const store = dynamic_registration_store()
 const body = register_client(store, {
@@ -525,7 +530,7 @@ const cli = client(
     client_secret: harness.env.get("NOTION_CLIENT_SECRET"),
     redirect_uri: "https://app.example/oauth/notion/callback",
     storage: harn_cloud_session(),
-    extra_auth_params: {owner: "user"},                       // user-owned public connection
+    extra_auth_params: {owner: "user"},        // user-owned public connection
   },
 )
 const pages = request(
@@ -549,7 +554,9 @@ Two Notion-specific things to remember:
 ### Google
 
 ```harn,ignore
-import { client, exchange_code, refresh, request, start_authorization } from "std/oauth/client"
+import {
+  client, exchange_code, refresh, request, start_authorization,
+} from "std/oauth/client"
 import { providers } from "std/oauth/providers"
 import { file } from "std/oauth/storage"
 
@@ -558,7 +565,10 @@ const cli = client(
   {
     client_id: harness.env.get("GOOGLE_CLIENT_ID"),
     client_secret: harness.env.get("GOOGLE_CLIENT_SECRET"),
-    scopes: ["openid", "email", "profile", "https://www.googleapis.com/auth/drive.readonly"],
+    scopes: [
+      "openid", "email", "profile",
+      "https://www.googleapis.com/auth/drive.readonly",
+    ],
     redirect_uri: "http://127.0.0.1:8765/callback",
     storage: file("/var/lib/harn/google.bin", harness.env.get("HARN_OAUTH_KEY")),
     extra_auth_params: {access_type: "offline", prompt: "consent"},
@@ -643,7 +653,9 @@ const cli = client(
   },
 )
 // 1) Resolve accessible cloud sites (one token covers Jira AND Confluence on each).
-const sites = request(cli, "GET", "https://api.atlassian.com/oauth/token/accessible-resources")
+const sites = request(
+  cli, "GET", "https://api.atlassian.com/oauth/token/accessible-resources",
+)
 // 2) Use the returned cloudid for product calls:
 //    https://api.atlassian.com/ex/jira/<cloudid>/rest/api/3/myself
 //    https://api.atlassian.com/ex/confluence/<cloudid>/wiki/rest/api/user/current
@@ -787,9 +799,12 @@ const token_set = device_flow(
     storage: store,
     on_user_code: { user_code, verification_uri ->
       // Surface to the CI log + a chat webhook so an operator can complete the dance.
-      const _ = harness.stdio.log("Visit " + verification_uri + " and enter " + user_code)
+      const _ = harness.stdio.log(
+        "Visit " + verification_uri + " and enter " + user_code,
+      )
       const _ = harness.net.post(harness.env.get("SLACK_WEBHOOK_URL"), json_stringify({
-        text: "CI auth pending: open " + verification_uri + " and enter `" + user_code + "`",
+        text: "CI auth pending: open " + verification_uri
+          + " and enter `" + user_code + "`",
       }), {headers: {"Content-Type": "application/json"}})
       nil
     },

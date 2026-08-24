@@ -224,7 +224,11 @@ const opts: LlmCallOptions = llm_options({
   model: "gpt-5.4",
   system: [system_before("Return a compact result.")],
   output: {
-    schema: {type: "object", properties: {answer: {type: "string"}}, required: ["answer"]},
+    schema: {
+      type: "object",
+      properties: {answer: {type: "string"}},
+      required: ["answer"],
+    },
     strict: true,
     validation: "error",
   },
@@ -488,7 +492,12 @@ const opts: LlmCallOptions = {
   output: {schema: summary_schema, strict: true, validation: "error"},
   provider_tools: [
     {type: "web_search"},
-    {type: "mcp", server_label: "docs", server_url: "https://mcp.example.com", require_approval: "always"},
+    {
+      type: "mcp",
+      server_label: "docs",
+      server_url: "https://mcp.example.com",
+      require_approval: "always",
+    },
   ],
   truncation: "auto",
   max_tool_calls: 4,
@@ -540,7 +549,9 @@ const schema = {
     age: {type: "integer"},
   },
 }
-const structured_opts: LlmCallOptions = {provider: "anthropic", system: "You are precise."}
+const structured_opts: LlmCallOptions = {
+  provider: "anthropic", system: "You are precise.",
+}
 const person = harness.llm.call_structured(
   "Extract the speaker's name and age from the transcript.",
   schema,
@@ -858,7 +869,9 @@ harness.llm.mock_enqueue({
 })
 
 // Queue token logprobs for confidence/reranking tests
-harness.llm.mock_enqueue({text: "certain", logprobs: [{token: "certain", logprob: 0.0}]})
+harness.llm.mock_enqueue({
+  text: "certain", logprobs: [{token: "certain", logprob: 0.0}],
+})
 
 // Pattern-matched mocks (reusable by default, matched in declaration order)
 harness.llm.mock_enqueue({text: "I don't know.", match: "*unknown*"})
@@ -867,7 +880,9 @@ harness.llm.mock_enqueue({text: "step 2", match: "*planner*", consume_match: tru
 
 // Provider-style error envelopes exercise the same catch/safe-call paths
 // as live provider failures.
-harness.llm.mock_enqueue({error: {status: 503, kind: "transient", reason: "upstream_unavailable"}})
+harness.llm.mock_enqueue({
+  error: {status: 503, kind: "transient", reason: "upstream_unavailable"},
+})
 
 // Inspect what was sent to the mock provider
 const calls = harness.llm.mock_calls()

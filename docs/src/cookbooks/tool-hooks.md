@@ -66,7 +66,9 @@ pipeline default(harness: Harness, task) {
     stacks: ["python"],
     inner: { args -> harness.process.shell(args.command) },
   })
-  agent_loop(harness, task, nil, {tools: {tools: [{name: "run_command", handler: run_command}]}})
+  agent_loop(harness, task, nil, {
+    tools: {tools: [{name: "run_command", handler: run_command}]},
+  })
 }
 ```
 
@@ -77,7 +79,9 @@ informational by default (warning severity, no rewrite). For a
 strict-CI agent you can promote it to a deny by switching the mode:
 
 ```harn,ignore
-import { preset_run_command, tool_hooks_mode_deny_with_explanation } from "std/tool_hooks"
+import {
+  preset_run_command, tool_hooks_mode_deny_with_explanation,
+} from "std/tool_hooks"
 
 pipeline default(harness: Harness, task) {
   const run_command = preset_run_command({
@@ -85,7 +89,9 @@ pipeline default(harness: Harness, task) {
     mode: tool_hooks_mode_deny_with_explanation,
     inner: { args -> harness.process.shell(args.command) },
   })
-  agent_loop(harness, task, nil, {tools: {tools: [{name: "run_command", handler: run_command}]}})
+  agent_loop(harness, task, nil, {
+    tools: {tools: [{name: "run_command", handler: run_command}]},
+  })
 }
 ```
 
@@ -111,8 +117,11 @@ pipeline default(harness: Harness, task) {
     },
     applies_to: ["swift"],
     severity: "warning",
-    explanation: "Run `xcodebuild` with `-destination` so the simulator/device target is explicit.",
-    references: ["https://developer.apple.com/library/archive/technotes/tn2339/_index.html"],
+    explanation: "Run `xcodebuild` with `-destination` so the simulator or"
+      + " device target is explicit.",
+    references: [
+      "https://developer.apple.com/library/archive/technotes/tn2339/_index.html",
+    ],
   })
 
   const run_command = preset_run_command({
@@ -120,7 +129,9 @@ pipeline default(harness: Harness, task) {
     custom_rules: [xcodebuild_no_destination],
     inner: { args -> harness.process.shell(args.command) },
   })
-  agent_loop(harness, task, nil, {tools: {tools: [{name: "run_command", handler: run_command}]}})
+  agent_loop(harness, task, nil, {
+    tools: {tools: [{name: "run_command", handler: run_command}]},
+  })
 }
 ```
 
@@ -132,7 +143,9 @@ make it block for an autonomous reporting agent, promote it with a
 priority override in a custom rule that matches first:
 
 ```harn,ignore
-import { preset_run_command, tool_hooks_mode_deny_with_explanation } from "std/tool_hooks"
+import {
+  preset_run_command, tool_hooks_mode_deny_with_explanation,
+} from "std/tool_hooks"
 
 pipeline default(harness: Harness, task) {
   const deny_unbounded_select_star = tool_rule({
@@ -144,7 +157,8 @@ pipeline default(harness: Harness, task) {
     },
     applies_to: [],
     severity: "error",
-    explanation: "Unbounded `SELECT *` scans entire tables. Add a WHERE / LIMIT clause.",
+    explanation: "Unbounded `SELECT *` scans entire tables. Add a WHERE or"
+      + " LIMIT clause.",
   })
 
   const run_command = preset_run_command({
@@ -153,7 +167,9 @@ pipeline default(harness: Harness, task) {
     mode: tool_hooks_mode_deny_with_explanation,
     inner: { args -> harness.process.shell(args.command) },
   })
-  agent_loop(harness, task, nil, {tools: {tools: [{name: "run_command", handler: run_command}]}})
+  agent_loop(harness, task, nil, {
+    tools: {tools: [{name: "run_command", handler: run_command}]},
+  })
 }
 ```
 
@@ -174,7 +190,9 @@ pipeline default(harness: Harness, task) {
     stacks: ["harn"],
     inner: { args -> harness.process.shell(args.command) },
   })
-  agent_loop(harness, task, nil, {tools: {tools: [{name: "run_command", handler: run_command}]}})
+  agent_loop(harness, task, nil, {
+    tools: {tools: [{name: "run_command", handler: run_command}]},
+  })
 }
 ```
 
@@ -202,7 +220,9 @@ pipeline default(harness: Harness, task) {
     },
     inner: { args -> harness.process.shell(args.command) },
   })
-  agent_loop(harness, task, nil, {tools: {tools: [{name: "run_command", handler: run_command}]}})
+  agent_loop(harness, task, nil, {
+    tools: {tools: [{name: "run_command", handler: run_command}]},
+  })
 }
 ```
 
@@ -229,7 +249,9 @@ mode first; collect the `tool_rule_warning` audit entries; once the
 false-positive rate is acceptable, switch to the default mode.
 
 ```harn,ignore
-import { preset_run_command, tool_hooks_mode_passthrough_only_audit } from "std/tool_hooks"
+import {
+  preset_run_command, tool_hooks_mode_passthrough_only_audit,
+} from "std/tool_hooks"
 
 pipeline default(harness: Harness, task) {
   const run_command = preset_run_command({
@@ -237,7 +259,9 @@ pipeline default(harness: Harness, task) {
     mode: tool_hooks_mode_passthrough_only_audit,
     inner: { args -> harness.process.shell(args.command) },
   })
-  const result = agent_loop(harness, task, nil, {tools: {tools: [{name: "run_command", handler: run_command}]}})
+  const result = agent_loop(harness, task, nil, {
+    tools: {tools: [{name: "run_command", handler: run_command}]},
+  })
   const audits = harness.obs.pipeline_lifecycle_audit_log_take()
   const warnings = audits |> filter({ a -> a.kind == "tool_rule_warning" })
   harness.stdio.log("matched (audit-only): " + to_string(len(warnings)))
@@ -261,7 +285,8 @@ pipeline default(harness: Harness) {
   const preview = preset_run_command({stacks: ["rust"]})
   const envelope = preview("cargo build --release")
   harness.stdio.log(envelope.action)        // "rewrite"
-  harness.stdio.log(envelope.command)       // "cargo build --release --target-dir target-shared"
+  // "cargo build --release --target-dir target-shared"
+  harness.stdio.log(envelope.command)
   harness.stdio.log(envelope.rule_id)       // "rust.cargo.target_dir_conflict"
   harness.stdio.log(envelope.severity)      // "warning"
 }
@@ -291,7 +316,9 @@ pipeline default(harness: Harness, task) {
     stacks: ["rust"],
     inner: { args -> harness.process.shell(args.command) },
   })
-  agent_loop(harness, task, nil, {tools: {tools: [{name: "run_command", handler: run_command}]}})
+  agent_loop(harness, task, nil, {
+    tools: {tools: [{name: "run_command", handler: run_command}]},
+  })
 }
 ```
 

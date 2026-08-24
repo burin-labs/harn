@@ -163,7 +163,8 @@ cache behavior, without touching the loop:
 ```harn
 import {default_llm_caller, with_retry, compose} from "std/llm/handlers"
 
-const caller = compose([with_retry({max_attempts: 4, backoff: "exponential"})])(default_llm_caller())
+const retrying = with_retry({max_attempts: 4, backoff: "exponential"})
+const caller = compose([retrying])(default_llm_caller())
 agent_loop(harness, task, system, {loop_until_done: true, llm_caller: caller})
 ```
 
@@ -256,7 +257,11 @@ const graph = workflow_graph({
     },
     verify: {
       kind: "verify",
-      verify: {command: "cargo test --workspace --quiet", expect_status: 0, assert_text: "test result: ok"}
+      verify: {
+        command: "cargo test --workspace --quiet",
+        expect_status: 0,
+        assert_text: "test result: ok"
+      }
     }
   },
   edges: [
@@ -266,7 +271,8 @@ const graph = workflow_graph({
   ]
 })
 
-const run = workflow_execute("Refactor the parser error message and verify it.", graph, [], {max_steps: 8})
+const task = "Refactor the parser error message and verify it."
+const run = workflow_execute(task, graph, [], {max_steps: 8})
 harness.stdio.log(run.status)
 harness.stdio.log(run.path)
 ```

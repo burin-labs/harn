@@ -392,7 +392,8 @@ const caps = harness.llm.provider_capabilities("anthropic", "claude-opus-4-7")
 // {
 //   provider, model, native_tools, text_tool_wire_format_supported,
 //   preferred_tool_format: "native" | "text",
-//   tool_mode_parity: "interchangeable" | "unknown" | "native_unreliable" | "text_unreliable" | "native_only" | "text_only" | "unsupported",
+//   tool_mode_parity: "interchangeable" | "unknown" | "native_unreliable"
+//     | "text_unreliable" | "native_only" | "text_only" | "unsupported",
 //   tool_mode_parity_notes: string | nil,
 //   tools, defer_loading,
 //   tool_search: [string], max_tools: int | nil,

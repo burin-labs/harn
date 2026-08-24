@@ -55,6 +55,12 @@ const DOCS_GLOBS = [
 
 const DIAGNOSTIC_EXAMPLES_PATH = "docs/diagnostic-examples.json"
 
+// The reading budget for published Harn code, in columns. Chosen from the
+// rendered page rather than taste: docs body text wraps at a 34.5rem measure
+// and code blocks break out past it, so a line beyond this starts costing a
+// horizontal scroll on an ordinary laptop viewport.
+const MAX_SNIPPET_COLUMNS = 88
+
 /** Count of leading space/tab characters in `line`. */
 pub fn leading_ws_len(line: string) -> int {
   let i = 0
@@ -306,11 +312,44 @@ pub fn duplicate_leading_args(content: string) -> list {
 }
 
 /**
+ * Return every line in `content` wider than `limit` columns, as
+ * `[{line, width, text}]` in source order. `text` is the trimmed line, so the
+ * failure can show the offender instead of only naming its coordinates.
+ *
+ * The published column is narrower than the editor one. Docs render inside a
+ * reading measure, so a line the formatter is happy with at its own 100-column
+ * budget can still force a reader to drag a scrollbar. This is a *reading*
+ * budget, not a second formatter: it says a line is too wide and leaves where
+ * to break it to whoever wrote the example.
+ *
+ * That distinction is deliberate and was measured. `harn fmt` at its default
+ * width collapses readable multi-line calls onto single long lines; at
+ * `--line-width 72` it expands them to one argument per line. Across docs/src
+ * neither shape beat the hand-authored original for a reader, so the gate
+ * constrains the outcome and not the form.
+ */
+pub fn overlong_lines(content: string, limit: int) -> list {
+  let out: list = []
+  let line_no = 0
+  for line in content.split("\n") {
+    line_no = line_no + 1
+    const trimmed = line.trim_end()
+    if trimmed.len() > limit {
+      out = out + [{line: line_no, width: trimmed.len(), text: trimmed}]
+    }
+  }
+  return out
+}
+
+/**
  * Walk `text` with the fence state machine and return the block events in
  * source order:
  *   {kind: "unclosed", open_line}      — a ```harn fence that never closed
  *                                        before the next fence / EOF;
- *   {kind: "skip", idx}                — a ```harn,ignore block;
+ *   {kind: "skip", idx, mode, content} — a ```harn,ignore block. Its body is
+ *                                        carried anyway: it is not checked,
+ *                                        but it is still rendered, so the
+ *                                        reading-width budget still applies;
  *   {kind: "block", idx, mode, content}
  *                                      — a parseable/checkable Harn block
  *                                        body (lines joined, trailing
@@ -355,22 +394,22 @@ pub fn extract_blocks(text: string) -> list {
       indent = ws
       open_ticks = ticks
       body = []
-      if skip {
-        events = events + [{kind: "skip", idx: idx}]
-      }
       continue
     }
     // A fence closes the open block only when it is at least as long as the
     // one that opened it, so a ```` block may contain ``` lines verbatim.
     if is_fence && in_block && ticks >= open_ticks {
       in_block = false
-      if !skip {
-        events = events
-          + [{kind: "block", idx: idx, mode: block_mode, content: body.join("\n") + "\n"}]
+      const kind = if skip {
+        "skip"
+      } else {
+        "block"
       }
+      events = events
+        + [{kind: kind, idx: idx, mode: block_mode, content: body.join("\n") + "\n"}]
       continue
     }
-    if in_block && !skip {
+    if in_block {
       body = body + [strip_indent(line, indent)]
     }
   }
@@ -483,6 +522,7 @@ pipeline main(harness: Harness, task) {
   let checked = 0
   let skipped = 0
   let failures = 0
+  let width_counts: dict = {}
   let diagnostic_examples: list = []
   let file_no = 0
   for md_file in md_files {
@@ -499,6 +539,15 @@ pipeline main(harness: Harness, task) {
         )
         harness.stdio.println("      hint: the next fenced block opens before this one closes.")
         continue
+      }
+      // Width is a property of the rendered page, not of the type checker,
+      // so an ignored block is measured like any other.
+      for wide in overlong_lines(event.content, MAX_SNIPPET_COLUMNS) {
+        width_counts[md_file] = (width_counts[md_file] ?? 0) + 1
+        harness.stdio.println(
+          "WIDE: ${md_file} (${mode_label(event.mode)} block #${event.idx}, line ${wide.line}) ${wide.width} cols",
+        )
+        harness.stdio.println("      ${wide.text}")
       }
       if event.kind == "skip" {
         skipped = skipped + 1
@@ -597,6 +646,21 @@ pipeline main(harness: Harness, task) {
         harness.stdio.println("      hint: run `make sync-docs-diagnostics`")
       }
     }
+  }
+  // Every over-budget line was reported above as WIDE. The tree is at zero, so
+  // the budget is a plain limit with no allowance list to keep in sync.
+  for path in width_counts.keys().sorted() {
+    failures = failures + 1
+    harness.stdio.println("")
+    harness.stdio.println(
+      "FAIL: ${path} has ${width_counts[path]} line(s) over ${MAX_SNIPPET_COLUMNS} columns",
+    )
+    harness.stdio.println(
+      "      Docs render in a reading measure, so a longer line costs a horizontal scroll.",
+    )
+    harness.stdio.println(
+      "      Break the arguments across lines, or move a trailing comment above the code.",
+    )
   }
   harness.stdio.println("")
   harness.stdio.println(

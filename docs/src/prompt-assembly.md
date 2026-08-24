@@ -99,7 +99,8 @@ a fragment gated on that tool's own presence:
 tool_define(registry, "todo", "Add, update, and complete plan items", {
   parameters: { /* … */ },
   handler: todo_handler,
-  guidance: "When working from a plan or task list, always update the TODO tracker after each item.",
+  guidance: "When working from a plan or task list, always update the TODO"
+    + " tracker after each item.",
 })
 ```
 
@@ -137,7 +138,11 @@ byte count:
 const explained = prompt_explain({
   system: "You are a pragmatic engineering partner.",
   tools: [
-    { name: "todo", description: "Track plan items", guidance: "Always update the TODO tracker." },
+    {
+      name: "todo",
+      description: "Track plan items",
+      guidance: "Always update the TODO tracker.",
+    },
     { name: "read", description: "Read a file" },
   ],
 })

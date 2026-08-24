@@ -344,7 +344,11 @@ Harn source may also declare an eval pack directly:
 eval_pack regression "slack-connector" {
   baseline: "fixtures/baseline.run.json"
   fixtures: [{id: "candidate", kind: "run-record", path: "fixtures/candidate.run.json"}]
-  rubrics: [{id: "status", kind: "deterministic", assertions: [{kind: "run-status", expected: "completed"}]}]
+  rubrics: [{
+    id: "status",
+    kind: "deterministic",
+    assertions: [{kind: "run-status", expected: "completed"}],
+  }]
   cases: [{id: "url-verification", run: "candidate", rubrics: ["status"]}]
 }
 ```

@@ -78,9 +78,12 @@ the transcript and the next prompt sees it.
 Plugin authors observe seams through one canonical builtin:
 
 ```harn,ignore
-harness.agent.register_checkpoint_hook(["pre_tool_dispatch", "iteration_end"], { event ->
-  harness.stdio.log("seam fired:", event.kind, "delivered:", event.delivered)
-})
+harness.agent.register_checkpoint_hook(
+  ["pre_tool_dispatch", "iteration_end"],
+  { event ->
+    harness.stdio.log("seam fired:", event.kind, "delivered:", event.delivered)
+  },
+)
 ```
 
 `kinds` accepts a single seam name, a list of seam names, or `nil` / `"*"` for

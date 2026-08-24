@@ -17,7 +17,8 @@ pipeline default(harness: Harness) {
 
   const rows = pg_query(
     db,
-    "select id, payload, created_at from receipts where tenant_id = $1 order by created_at desc",
+    "select id, payload, created_at from receipts"
+      + " where tenant_id = $1 order by created_at desc",
     ["tenant-123"],
   )
 
@@ -149,7 +150,8 @@ first parameter index. Use `{{` and `}}` for literal braces:
 
 ```harn,ignore
 const q = sql(
-  "SELECT '{{}}' AS empty_json, {tenant_id}::uuid AS tenant_id, {tenant_id}::uuid AS again",
+  "SELECT '{{}}' AS empty_json, {tenant_id}::uuid AS tenant_id,"
+    + " {tenant_id}::uuid AS again",
   {tenant_id: tenant_id},
 )
 // q.sql    == "SELECT '{}' AS empty_json, $1::uuid AS tenant_id, $1::uuid AS again"
@@ -165,10 +167,11 @@ positional — write `$1`, `$2`, ... yourself and pass the matching list:
 
 ```harn,ignore
 const q = raw_sql(
-  "SELECT data#>>'{}' AS data FROM events WHERE tags && '{a,b}'::text[] AND tenant_id = $1::uuid",
+  "SELECT data#>>'{}' AS data FROM events"
+    + " WHERE tags && '{a,b}'::text[] AND tenant_id = $1::uuid",
   [tenant_id],
 )
-// q.sql    == "SELECT data#>>'{}' AS data FROM events WHERE tags && '{a,b}'::text[] AND tenant_id = $1::uuid"
+// q.sql    == that string verbatim; raw_sql never rewrites it
 // q.params == [tenant_id]
 ```
 
@@ -184,7 +187,11 @@ covers:
 ```harn,ignore
 const q = sql(
   "SELECT {column} FROM {table} WHERE tenant_id = {tenant_id}",
-  {column: ident("created_at"), table: ident_path(["app", "receipts"]), tenant_id: tenant_id},
+  {
+    column: ident("created_at"),
+    table: ident_path(["app", "receipts"]),
+    tenant_id: tenant_id,
+  },
 )
 ```
 
@@ -270,7 +277,9 @@ transaction handle is only valid inside the callback.
 pg_transaction(
   db,
   { tx ->
-    pg_execute(tx, "insert into event_log(tenant_id, kind, payload) values ($1, $2, $3)", [
+    const insert = "insert into event_log(tenant_id, kind, payload)"
+      + " values ($1, $2, $3)"
+    pg_execute(tx, insert, [
       tenant_id,
       "receipt.created",
       {receipt_id: receipt_id},
@@ -324,7 +333,10 @@ let Harn only apply the ups.
 ```harn
 const pool = harness.postgres.pool("env:DATABASE_URL", {max_connections: 1})
 const result = pg_migrate(pool, {dir: "./migrations"})
-harness.stdio.log("applied " + to_string(len(result.applied)) + " of " + to_string(len(result.available)))
+harness.stdio.log(
+  "applied " + to_string(len(result.applied))
+    + " of " + to_string(len(result.available)),
+)
 ```
 
 The result dict carries `applied`, `skipped`, `available`, `dry_run`,
@@ -400,7 +412,9 @@ database is required — this is build-time codegen.
 ```harn,ignore
 import { ReceiptsRow } from "./db_types.harn"
 
-const receipt: ReceiptsRow = pg_query_one(pool, "select * from receipts where id = $1", [id])
+const receipt: ReceiptsRow = pg_query_one(
+  pool, "select * from receipts where id = $1", [id],
+)
 harness.stdio.log(receipt.kind)   // type-checked against the column set
 ```
 
@@ -630,10 +644,14 @@ const db = pg_mock_pool([
   },
 ])
 
-const rows = pg_query(db, "select id, payload from receipts where tenant_id = $1", ["tenant-123"])
+const rows = pg_query(
+  db, "select id, payload from receipts where tenant_id = $1", ["tenant-123"],
+)
 assert_eq(rows[0].payload.ok, true)
 
-const result = pg_execute(db, "insert into audit_records(tenant_id, action) values ($1, $2)", [
+const insert_audit = "insert into audit_records(tenant_id, action)"
+  + " values ($1, $2)"
+const result = pg_execute(db, insert_audit, [
   "tenant-123",
   "receipt.read",
 ])

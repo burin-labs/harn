@@ -160,8 +160,12 @@ const route = agent_model_options({
   role: "planner",
   defaults: {provider: "anthropic", model: "claude-sonnet-5", reasoning_task: "agent"},
 })
-const caller = compose([with_retry({max_attempts: 3}), with_logging({})])(default_llm_caller())
-const result = agent_loop(harness, task, system, route.options + {loop_until_done: true, llm_caller: caller})
+const middleware = [with_retry({max_attempts: 3}), with_logging({})]
+const caller = compose(middleware)(default_llm_caller())
+const result = agent_loop(
+  harness, task, system,
+  route.options + {loop_until_done: true, llm_caller: caller},
+)
 ```
 
 `agent_model_options(config?)` resolves explicit options first, then role
@@ -180,7 +184,10 @@ per persona, and receipt-grade structured logs for every model call.
 
 ```harn,ignore
 import {default_llm_caller} from "std/llm/caller"
-import {with_retry, with_logging, with_budget, with_routing, with_fallback, with_circuit_breaker, compose} from "std/llm/handlers"
+import {
+  with_retry, with_logging, with_budget, with_routing, with_fallback,
+  with_circuit_breaker, compose,
+} from "std/llm/handlers"
 
 // Cheap default: a fast / inexpensive model on a tight retry budget.
 const cheap = with_circuit_breaker(
@@ -209,7 +216,9 @@ const router = with_routing({
   default: cheap,
   routes: [
     {name: "frontier",
-     when: { call -> call?.opts?.reasoning_task == "judge" || (call?.opts?.escalate ?? false) },
+     when: { call ->
+       call?.opts?.reasoning_task == "judge" || (call?.opts?.escalate ?? false)
+     },
      caller: frontier},
   ],
 })
@@ -554,7 +563,9 @@ shadow the builtins.
 ### Example
 
 ```harn,ignore
-import {complementary_reviewer, family_of, has_capability, named_model_ladder} from "std/llm/catalog"
+import {
+  complementary_reviewer, family_of, has_capability, named_model_ladder,
+} from "std/llm/catalog"
 
 if has_capability(model, "thinking") {
   // This route can honor a provider-neutral reasoning policy.

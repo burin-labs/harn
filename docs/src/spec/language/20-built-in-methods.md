@@ -248,7 +248,8 @@ const results = regex_captures("(\\w+)@(\\w+)", "alice@example bob@test")
 // ]
 
 const named = regex_captures("(?P<user>\\w+):(?P<role>\\w+)", "alice:admin")
-// named == [{match: "alice:admin", groups: ["alice", "admin"], user: "alice", role: "admin"}]
+// named == [{match: "alice:admin", groups: ["alice", "admin"],
+//            user: "alice", role: "admin"}]
 
 const body = regex_captures("(?is)<body\\b[^>]*>(.*?)</body>", html)
 const also_body = regex_captures("<body\\b[^>]*>(.*?)</body>", html, "is")

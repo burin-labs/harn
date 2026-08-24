@@ -64,10 +64,18 @@ progress unless `progress_tools` restricts it.
 import { governor_decision } from "std/agent/governors"
 
 fn budget_action(consumed: float, made_progress: bool) -> string {
-  const policy = {budget: 10.0, checkpoint: 1.0, over_estimate: 2.0, hard: 3.0, signal: "iterations"}
+  const policy = {
+    budget: 10.0, checkpoint: 1.0, over_estimate: 2.0, hard: 3.0,
+    signal: "iterations",
+  }
   const decision = governor_decision(
     policy,
-    {ceiling: 10.0, consumed: consumed, made_progress: made_progress, signal: "iterations"},
+    {
+      ceiling: 10.0,
+      consumed: consumed,
+      made_progress: made_progress,
+      signal: "iterations",
+    },
   )
   return decision.action
 }

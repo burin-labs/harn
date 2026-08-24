@@ -303,7 +303,10 @@ Catch denials explicitly:
 
 ```harn
 const result = try {
-  harness.interaction.request_approval("deploy production", {quorum: 2, reviewers: ["alice", "bob"]})
+  harness.interaction.request_approval(
+    "deploy production",
+    {quorum: 2, reviewers: ["alice", "bob"]},
+  )
 }
 if is_err(result) && unwrap_err(result).name == "ApprovalDeniedError" {
   harness.stdio.log("deployment denied")

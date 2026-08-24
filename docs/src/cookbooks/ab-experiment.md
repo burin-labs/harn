@@ -72,7 +72,10 @@ the manifest — asking to block on a factor the host cannot observe is rejected
 at validation rather than producing a quietly meaningless result:
 
 ```harn,ignore
-const CONTEXT = {supported_blocking_factors: ["host", "time_slot"], host_identity_available: true}
+const CONTEXT = {
+  supported_blocking_factors: ["host", "time_slot"],
+  host_identity_available: true,
+}
 ```
 
 ### Register and assign

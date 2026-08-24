@@ -154,7 +154,9 @@ fixture, unedited:
  * Capabilities: cargo.package, fs.write, git.write
  * Required secrets: none
  */
-pipeline crystallized_version_bump(harness: Harness, branch_name, path, release_target, repo_path, version) {
+pipeline crystallized_version_bump(
+  harness: Harness, branch_name, path, release_target, repo_path, version,
+) {
   let review_warnings = []
   // Step 1: tool_call git.checkout_branch
   // side_effect: git_ref release-branch
@@ -164,7 +166,11 @@ pipeline crystallized_version_bump(harness: Harness, branch_name, path, release_
   harness.obs.log("crystallized step 2: update_manifest_version")
   // Step 3: tool_call cargo.package_dry_run
   harness.obs.log("crystallized step 3: cargo.package_dry_run")
-  return {status: "shadow_ready", candidate_id: "candidate_92144cef9e215de6", review_warnings: review_warnings}
+  return {
+    status: "shadow_ready",
+    candidate_id: "candidate_92144cef9e215de6",
+    review_warnings: review_warnings,
+  }
 }
 ```
 
@@ -180,7 +186,8 @@ run:
 ```harn,ignore
   // Step 15: agent_review agent_review[release_audit]
   // approval_required: release_audit_review
-  // review_required: fuzzy segment still needs LLM/reviewer handling before deterministic promotion.
+  // review_required: fuzzy segment still needs LLM/reviewer handling before
+  // deterministic promotion.
   review_warnings = review_warnings.appending("fuzzy step: agent_review[release_audit]")
   harness.obs.log("crystallized step 15: agent_review[release_audit]")
 ```

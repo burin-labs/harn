@@ -89,7 +89,9 @@ shape that silently drops unrecognized fields. Enforcement is
 session, spread in alongside it:
 
 ```harn,ignore
-agent_loop(harness, task, nil, lane_policy(rows, task, opts) + lane_scope_classifier(rows))
+agent_loop(
+  harness, task, nil, lane_policy(rows, task, opts) + lane_scope_classifier(rows),
+)
 ```
 
 ## Overlays: data-driven prompt nudges
@@ -125,7 +127,9 @@ over that slot's row default — the row only fills the slot when the caller
 left it nil:
 
 ```harn,ignore
-with_overlay(opts, rows, "agent", {overrides: {agent: ["Custom nudge instead of the row default."]}})
+with_overlay(opts, rows, "agent", {
+  overrides: {agent: ["Custom nudge instead of the row default."]},
+})
 ```
 
 ## Preset packs

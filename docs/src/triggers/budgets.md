@@ -107,7 +107,12 @@ const result = agent_loop(harness,
   system,
   {
     provider: "anthropic",
-    autonomy_budget: {per_hour: 10, per_day: 100, key: "captain.persona", reviewer: "oncall"},
+    autonomy_budget: {
+      per_hour: 10,
+      per_day: 100,
+      key: "captain.persona",
+      reviewer: "oncall",
+    },
   },
 )
 ```

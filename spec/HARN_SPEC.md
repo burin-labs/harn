@@ -3462,7 +3462,8 @@ const caps = harness.llm.provider_capabilities("anthropic", "claude-opus-4-7")
 // {
 //   provider, model, native_tools, text_tool_wire_format_supported,
 //   preferred_tool_format: "native" | "text",
-//   tool_mode_parity: "interchangeable" | "unknown" | "native_unreliable" | "text_unreliable" | "native_only" | "text_only" | "unsupported",
+//   tool_mode_parity: "interchangeable" | "unknown" | "native_unreliable"
+//     | "text_unreliable" | "native_only" | "text_only" | "unsupported",
 //   tool_mode_parity_notes: string | nil,
 //   tools, defer_loading,
 //   tool_search: [string], max_tools: int | nil,
@@ -4085,10 +4086,12 @@ substitute.
 
 ```harn,ignore
 const wide = fn(x: float) { return 0 }
-const cb: fn(int) -> int = wide   // OK: float-accepting closure stands in for int-accepting
+// OK: float-accepting closure stands in for int-accepting
+const cb: fn(int) -> int = wide
 
 const narrow = fn(x: int) { return 0 }
-const bad: fn(float) -> int = narrow   // ERROR: narrow cannot accept the float a caller may pass
+// ERROR: narrow cannot accept the float a caller may pass
+const bad: fn(float) -> int = narrow
 ```
 
 #### Declaration-site checking
@@ -5120,7 +5123,9 @@ primitive accepts either named arguments or the legacy positional form;
 both lower to the same runtime.
 
 ```harn,ignore
-const answer = harness.interaction.ask_user(prompt: "deploy now?", schema: schema_of(Choice))
+const answer = harness.interaction.ask_user(
+  prompt: "deploy now?", schema: schema_of(Choice),
+)
 const record = harness.interaction.request_approval(action: "merge_pr", quorum: 2,
                               reviewers: ["alice", "bob", "carol"])
 const merged = harness.interaction.dual_control(n: 2, m: 3, action: destructive_step,
@@ -5670,8 +5675,10 @@ fn process(user: {name: string, age: int}) {
 }
 
 process({name: "Alice", age: 30})     // OK
-process({name: "Alice"})              // Error: parameter 'user': missing field 'age' (int)
-process({name: "Alice", age: "old"})  // Error: parameter 'user': field 'age' expected int, got string
+// Error: parameter 'user': missing field 'age' (int)
+process({name: "Alice"})
+// Error: parameter 'user': field 'age' expected int, got string
+process({name: "Alice", age: "old"})
 ```
 
 Shape validation works with both plain dicts and struct instances. Extra
@@ -5926,7 +5933,8 @@ const results = regex_captures("(\\w+)@(\\w+)", "alice@example bob@test")
 // ]
 
 const named = regex_captures("(?P<user>\\w+):(?P<role>\\w+)", "alice:admin")
-// named == [{match: "alice:admin", groups: ["alice", "admin"], user: "alice", role: "admin"}]
+// named == [{match: "alice:admin", groups: ["alice", "admin"],
+//            user: "alice", role: "admin"}]
 
 const body = regex_captures("(?is)<body\\b[^>]*>(.*?)</body>", html)
 const also_body = regex_captures("<body\\b[^>]*>(.*?)</body>", html, "is")
@@ -7197,7 +7205,11 @@ Harn source may also declare an eval pack directly:
 eval_pack regression "slack-connector" {
   baseline: "fixtures/baseline.run.json"
   fixtures: [{id: "candidate", kind: "run-record", path: "fixtures/candidate.run.json"}]
-  rubrics: [{id: "status", kind: "deterministic", assertions: [{kind: "run-status", expected: "completed"}]}]
+  rubrics: [{
+    id: "status",
+    kind: "deterministic",
+    assertions: [{kind: "run-status", expected: "completed"}],
+  }]
   cases: [{id: "url-verification", run: "candidate", rubrics: ["status"]}]
 }
 ```

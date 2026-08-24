@@ -15,7 +15,9 @@ import { verification_file_hash_snapshot } from "std/verification"
 
 pipeline default(harness: Harness) {
   const _ = harness.code_index.rebuild({root: "."})
-  const snap = verification_file_hash_snapshot(harness.code_index, ["src/main.zig", "build.zig"])
+  const snap = verification_file_hash_snapshot(
+    harness.code_index, ["src/main.zig", "build.zig"],
+  )
   const verdict = verification_diagnostic_classify(
     {rung: "R2", rowId: "zig/file", at: snap.captured_at_ms, snapshot: snap.snapshot},
     snap.snapshot,
@@ -54,8 +56,19 @@ pipeline default(harness: Harness) {
   const affected = verification_affected_targets(
     ["crates/app/src/lib.rs", "apps/web/src/index.ts"],
     [
-      {id: "cargo", parser_id: "cargo.metadata.v1", spec: {mode: "shell", command: "cargo metadata --format-version=1 --no-deps"}},
-      {id: "web", parser_id: "js.workspace_graph.v1", spec: {mode: "shell", command: "pnpm nx graph --file=/dev/stdout"}},
+      {
+        id: "cargo",
+        parser_id: "cargo.metadata.v1",
+        spec: {
+          mode: "shell",
+          command: "cargo metadata --format-version=1 --no-deps",
+        },
+      },
+      {
+        id: "web",
+        parser_id: "js.workspace_graph.v1",
+        spec: {mode: "shell", command: "pnpm nx graph --file=/dev/stdout"},
+      },
     ],
   )
   return affected.targets
@@ -187,7 +200,9 @@ and expected warm-vs-cold delta. Harn does not hardcode sbt, Gradle, Cargo,
 Zig, or any other stack.
 
 ```harn
-import { verification_ladder_plan, verification_warm_state_facts } from "std/verification"
+import {
+  verification_ladder_plan, verification_warm_state_facts,
+} from "std/verification"
 
 pipeline default(harness: Harness) {
   const warm = verification_warm_state_facts([

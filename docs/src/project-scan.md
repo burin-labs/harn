@@ -199,7 +199,9 @@ import "std/project"
 const base = harness.project.scan(".", {tiers: ["ambient", "config"]})
 const enriched = harness.project.enrich(".", {
   base_evidence: base,
-  prompt: "Project: {{package_name}}\n{{ for file in files }}FILE {{file.path}}\n{{file.content}}\n{{ end }}\nReturn JSON.",
+  prompt: "Project: {{package_name}}\n"
+    + "{{ for file in files }}FILE {{file.path}}\n{{file.content}}\n{{ end }}\n"
+    + "Return JSON.",
   schema: {
     type: "object",
     required: ["framework", "indent_style"],

@@ -178,7 +178,8 @@ register_tool_hook({
     if ctx.result.truncated {
       return {
         reminder: {
-          body: "The file read was truncated; inspect the specific range before editing.",
+          body: "The file read was truncated; inspect the specific range"
+            + " before editing.",
           tags: ["truncation"],
           dedupe_key: "read_file:truncated",
           ttl_turns: 1,
@@ -426,7 +427,10 @@ const compacted = transcript_compact(snapshot, {
   custom_compactor: { messages, reminders ->
     return transcript({
       messages: [
-        {role: "system", content: "Summary plus " + str(len(reminders)) + " active reminders."},
+        {
+          role: "system",
+          content: "Summary plus " + str(len(reminders)) + " active reminders.",
+        },
       ],
     })
   },

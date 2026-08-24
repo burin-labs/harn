@@ -432,7 +432,8 @@ honors project overrides:
 
 ```harn
 const caps = harness.llm.provider_capabilities("gemini", "gemini-3.5-flash")
-harness.stdio.println(to_string(caps.live_endpoint_family ?? "nil"))   // gemini_interactions
+// gemini_interactions
+harness.stdio.println(to_string(caps.live_endpoint_family ?? "nil"))
 ```
 
 `harn provider dispatch-explain gemini <model>` also prints `live_endpoint`, but

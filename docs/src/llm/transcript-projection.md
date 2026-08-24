@@ -34,10 +34,10 @@ harness.stdio.log(view.dropped_count)   // messages hidden from the next request
 harness.stdio.log(view.redacted_count)  // tool-result bodies replaced by audit pointers
 harness.stdio.log(view.reclaimed_tokens)// estimated prompt tokens reclaimed
 harness.stdio.log(view.prefix_hash)     // "sha256:..." of the projected prefix
-harness.stdio.log(view.event.kind)      // "transcript.projection" — ready to append to a session
+harness.stdio.log(view.event.kind)      // "transcript.projection" — appendable
 harness.stdio.log(view.messages)        // the model-visible prefix
-harness.stdio.log(view.provider_safety_blocked) // true when a signed reasoning block was
-                                  // protected from removal
+// true when a signed reasoning block was protected from removal
+harness.stdio.log(view.provider_safety_blocked)
 ```
 
 `options` accepts either a string shorthand (`"clean_tool_repair"`) or a dict:
@@ -174,11 +174,11 @@ const events = transcript_events_by_kind(result.transcript, "transcript.projecti
 harness.stdio.log(len(events))                                  // one per turn
 harness.stdio.log(events[0].metadata.policy)                    // "clean_tool_repair"
 harness.stdio.log(events[0].metadata.prefix_hash)               // "sha256:..."
-harness.stdio.log(events[0].metadata.kept_indices)              // indices kept from raw messages
-harness.stdio.log(events[0].metadata.dropped_indices)           // indices hidden from the prefix
-harness.stdio.log(events[0].metadata.redacted_indices)          // bodies reclaimed in place
-harness.stdio.log(events[0].metadata.reclaimed_tokens)          // estimated prompt-token savings
-harness.stdio.log(events[0].metadata.provider_safety_blocked)   // signed-reasoning guardrail state
+harness.stdio.log(events[0].metadata.kept_indices)      // kept from raw messages
+harness.stdio.log(events[0].metadata.dropped_indices)   // hidden from the prefix
+harness.stdio.log(events[0].metadata.redacted_indices)  // reclaimed in place
+harness.stdio.log(events[0].metadata.reclaimed_tokens)  // est. token savings
+harness.stdio.log(events[0].metadata.provider_safety_blocked) // guardrail state
 ```
 
 Projection composes with compaction: compaction rewrites the persistent
