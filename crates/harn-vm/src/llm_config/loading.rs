@@ -351,6 +351,7 @@ fn model_patch_schema() -> &'static PatchSchema {
             "lineage",
             "complementary_with",
             "avoid_as_reviewer_for",
+            "completion_review",
             "released",
             "row_kind",
             "current_snapshot",
@@ -362,6 +363,7 @@ fn model_patch_schema() -> &'static PatchSchema {
             ("performance", performance_patch_schema()),
             ("architecture", architecture_patch_schema()),
             ("local_memory", local_memory_patch_schema()),
+            ("completion_review", completion_review_patch_schema()),
         ],
     };
     &MODEL_PATCH_SCHEMA
@@ -456,6 +458,14 @@ const fn local_memory_patch_schema() -> PatchSchema {
             "notes",
         ],
         freeform: &["cache_type_multipliers"],
+        nested: &[],
+    }
+}
+
+const fn completion_review_patch_schema() -> PatchSchema {
+    PatchSchema {
+        fields: &["scrutiny", "max_judge_calls", "evidence"],
+        freeform: &[],
         nested: &[],
     }
 }

@@ -112,14 +112,19 @@ invocation cap. The judge uses `verify_completion_judge` by default; set
 `judge_seam: "done_judge"` to use that completion trigger instead. The default
 cap is 5 calls per session. Past the cap, the loop ends with status
 `completion_unverified`. Set `max_invocations: 0` to disable the cap. Two
-helpers expose the resolved cap:
+helpers expose the catalog review and the resolved cap:
 
 ```text
-agent_verify_completion_judge_cap(judge_cfg) -> int | nil
+agent_completion_review(llm, opts) -> dict
+agent_verify_completion_judge_cap(judge_cfg, review?) -> int | nil
 agent_done_judge_cap(judge_cfg) -> int | nil
 ```
 
-Both return `nil` when the cap is disabled.
+`agent_completion_review` reads the session model's catalog row and returns
+`{scrutiny: "standard"}` when the row omits `completion_review`. The
+verification-judge cap prefers an explicit `max_invocations`, then catalog
+`max_judge_calls`, then 5. Both cap helpers return `nil` when the cap is
+disabled.
 
 ### What the judge is shown, and what it may refuse on
 
