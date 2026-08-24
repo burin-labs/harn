@@ -10,6 +10,12 @@ import {
   DIAGRAM_SOURCE_LABEL,
 } from "../src/lib/diagram-markup.ts"
 import { CODE_FIGURE_CLASS, CODE_FILENAME_CLASS } from "../src/lib/code-markup.ts"
+import {
+  DIAGNOSTIC_DETAIL_CLASS,
+  DIAGNOSTIC_FIGURE_CLASS,
+  DIAGNOSTIC_REPAIR_CLASS,
+  DIAGNOSTIC_SPAN_CLASS,
+} from "../src/lib/diagnostic-markup.ts"
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..")
 
@@ -128,6 +134,33 @@ describe("code block filenames", () => {
       (p) => p.html.includes("<pre") && !p.html.includes(CODE_FIGURE_CLASS),
     )
     expect(bare.length).toBeGreaterThan(0)
+  })
+})
+
+describe("checked diagnostic examples", () => {
+  const languageBasics = () => {
+    const page = docs.pages.get("language-basics")
+    if (!page) throw new Error("language-basics page missing")
+    return page.html
+  }
+
+  it("renders compiler and linter spans from the checked projection", () => {
+    const html = languageBasics()
+    expect(html.match(new RegExp(`class="[^"]*${DIAGNOSTIC_FIGURE_CLASS}`, "g"))).toHaveLength(2)
+    expect(html).toContain(`${DIAGNOSTIC_SPAN_CLASS}-error`)
+    expect(html).toContain(`${DIAGNOSTIC_SPAN_CLASS}-warning`)
+    expect(html).toContain("HARN-TYP-007")
+    expect(html).toContain("HARN-LNT-018")
+  })
+
+  it("keeps help and registry repair text visible without hover", () => {
+    const html = languageBasics()
+    expect(html).toContain(`class="${DIAGNOSTIC_DETAIL_CLASS}`)
+    expect(html).toContain("Help:")
+    expect(html).toContain(`class="${DIAGNOSTIC_REPAIR_CLASS}"`)
+    expect(html).toContain("casts/insert-explicit-conversion")
+    expect(html).toContain("bindings/make-immutable")
+    expect(html).toMatch(/aria-describedby="diagnostic-/)
   })
 })
 

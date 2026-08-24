@@ -200,6 +200,8 @@ pipeline test_backtick_run_len(harness: Harness, task) {
 pipeline test_fence_mode_and_ownership(harness: Harness, task) {
   assert_eq(fence_mode("harn"), "parse")
   assert_eq(fence_mode("harn,check"), "check")
+  assert_eq(fence_mode("harn,diagnostic-check"), "diagnostic-check")
+  assert_eq(fence_mode("harn,diagnostic-lint"), "diagnostic-lint")
   assert_eq(fence_mode("harn-prompt"), "prompt")
   assert_eq(fence_mode("text"), "")
   assert_eq(fence_mode("harn,ignore"), "")
@@ -243,9 +245,105 @@ pipeline test_mode_extension_and_argv(harness: Harness, task) {
   assert_eq(mode_extension("check"), ".harn")
   assert_eq(mode_argv("prompt", "/t/b.harn.prompt"), ["lint", "/t/b.harn.prompt"])
   assert_eq(mode_argv("check", "/t/b.harn"), ["check", "/t/b.harn"])
+  assert_eq(mode_argv("diagnostic-check", "/t/b.harn"), ["check", "--json", "/t/b.harn"])
+  assert_eq(mode_argv("diagnostic-lint", "/t/b.harn"), ["lint", "--json", "/t/b.harn"])
   assert_eq(mode_argv("parse", "/t/b.harn"), ["parse", "--json", "/t/b.harn"])
   assert_eq(mode_label("prompt"), "harn-prompt")
   assert_eq(mode_label("parse"), "harn")
+  assert_eq(mode_is_diagnostic("diagnostic-check"), true)
+  assert_eq(mode_is_diagnostic("check"), false)
+}
+
+// --- generated diagnostic projection --------------------------------------
+@test
+pipeline test_decode_example_diagnostic_requires_one_bounded_finding(harness: Harness, task) {
+  const source = "const value: string = 42\n"
+  const envelope = json_stringify(
+    {
+      data: {
+        files: [
+          {
+            diagnostics: [
+              {
+                source: "type",
+                severity: "error",
+                code: "HARN-TYP-007",
+                message: "expected string, found int",
+                span: {start: 22, end: 24},
+                help: "did you mean `to_string(42)`?",
+              },
+            ],
+          },
+        ],
+      },
+    },
+  )
+  const decoded = decode_example_diagnostic(envelope, source)
+  assert_eq(decoded.ok, true)
+  assert_eq(decoded.diagnostic.code, "HARN-TYP-007")
+  assert_eq(decoded.diagnostic.span, {start: 22, end: 24})
+  const none = json_stringify({data: {files: [{diagnostics: []}]}})
+  assert_eq(decode_example_diagnostic(none, source).ok, false)
+  const outside = json_stringify(
+    {
+      data: {
+        files: [
+          {
+            diagnostics: [
+              {
+                source: "type",
+                severity: "error",
+                code: "HARN-TYP-007",
+                message: "bad span",
+                span: {start: 1, end: 999},
+              },
+            ],
+          },
+        ],
+      },
+    },
+  )
+  assert_eq(decode_example_diagnostic(outside, source).ok, false)
+  const unicode_source = "é\n"
+  const unicode = json_stringify(
+    {
+      data: {
+        files: [
+          {
+            diagnostics: [
+              {
+                source: "parser",
+                severity: "error",
+                code: "HARN-PAR-001",
+                message: "unexpected token",
+                span: {start: 0, end: 2},
+              },
+            ],
+          },
+        ],
+      },
+    },
+  )
+  assert_eq(decode_example_diagnostic(unicode, unicode_source).ok, true)
+}
+
+@test
+pipeline test_decode_example_repairs_projects_registry_contract(harness: Harness, task) {
+  const explanation = json_stringify(
+    {
+      repairs: [
+        {
+          id: "casts/insert-explicit-conversion",
+          safety: "scope-local",
+          summary: "Insert an explicit conversion",
+        },
+      ],
+    },
+  )
+  const decoded = decode_example_repairs(explanation)
+  assert_eq(decoded.ok, true)
+  assert_eq(decoded.repairs[0].id, "casts/insert-explicit-conversion")
+  assert_eq(decode_example_repairs(json_stringify({repairs: []})).ok, false)
 }
 
 // --- leading_ws_len / strip_indent ------------------------------------------

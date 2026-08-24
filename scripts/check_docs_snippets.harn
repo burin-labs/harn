@@ -7,6 +7,10 @@
 //                without requiring each fragment to declare every surrounding
 //                variable from the prose.
 // ```harn,check  opts into full `harn check` for complete copy/paste examples.
+// ```harn,diagnostic-check expects one `harn check --json` diagnostic and
+//                projects its real span, severity, code, message, help, and
+//                registry-owned repair into docs/diagnostic-examples.json.
+// ```harn,diagnostic-lint does the same through `harn lint --json`.
 // ```harn-prompt lints via `harn lint` on a `.harn.prompt` file, which runs the
 //                prompt-template engine's own parser. Catches the traps a
 //                reader cannot see, notably that `{{ endif }}` is not a closing
@@ -48,6 +52,8 @@ const DOCS_GLOBS = [
   "CONTRIBUTING.md",
   "website/*.md",
 ]
+
+const DIAGNOSTIC_EXAMPLES_PATH = "docs/diagnostic-examples.json"
 
 /** Count of leading space/tab characters in `line`. */
 pub fn leading_ws_len(line: string) -> int {
@@ -109,6 +115,12 @@ pub fn fence_mode(info: string) -> string {
   if bare == "harn,check" {
     return "check"
   }
+  if bare == "harn,diagnostic-check" {
+    return "diagnostic-check"
+  }
+  if bare == "harn,diagnostic-lint" {
+    return "diagnostic-lint"
+  }
   if bare == "harn-prompt" {
     return "prompt"
   }
@@ -162,6 +174,12 @@ pub fn mode_argv(mode: string, path: string) -> list<string> {
   if mode == "check" {
     return ["check", path]
   }
+  if mode == "diagnostic-check" {
+    return ["check", "--json", path]
+  }
+  if mode == "diagnostic-lint" {
+    return ["lint", "--json", path]
+  }
   if mode == "prompt" {
     return ["lint", path]
   }
@@ -174,6 +192,93 @@ pub fn mode_label(mode: string) -> string {
     return "harn-prompt"
   }
   return "harn"
+}
+
+/** Whether `mode` expects a diagnostic rather than a successful source file. */
+pub fn mode_is_diagnostic(mode: string) -> bool {
+  return mode == "diagnostic-check" || mode == "diagnostic-lint"
+}
+
+/** Stable command label stored in the generated website projection. */
+pub fn diagnostic_command(mode: string) -> string {
+  if mode == "diagnostic-lint" {
+    return "lint"
+  }
+  return "check"
+}
+
+/**
+ * Decode the single diagnostic required by a diagnostic example. This is
+ * deliberately fail-closed: publishing a cascade would make the highlighted
+ * span ambiguous, while accepting zero findings would let a repaired example
+ * keep displaying a stale error.
+ */
+pub fn decode_example_diagnostic(stdout: string, content: string) -> dict {
+  const envelope = try {
+    json_parse(stdout)
+  } catch (err) {
+    return {ok: false, error: "command did not emit valid JSON: ${err}"}
+  }
+  const files = envelope?.data?.files
+  if files == nil || files.count() != 1 {
+    return {ok: false, error: "expected one file report"}
+  }
+  const diagnostics = files[0]?.diagnostics
+  if diagnostics == nil || diagnostics.count() != 1 {
+    const count = diagnostics?.count() ?? 0
+    return {ok: false, error: "expected exactly one diagnostic, found ${count}"}
+  }
+  const diagnostic = diagnostics[0]
+  const code = diagnostic?.code
+  const severity = diagnostic?.severity
+  const message = diagnostic?.message
+  const span = diagnostic?.span
+  if code == nil || !code.starts_with("HARN-") {
+    return {ok: false, error: "diagnostic is missing a stable HARN-* code"}
+  }
+  if severity != "error" && severity != "warning" {
+    return {ok: false, error: "diagnostic has unsupported severity ${severity}"}
+  }
+  if message == nil || message == "" {
+    return {ok: false, error: "diagnostic message is empty"}
+  }
+  const content_bytes = bytes_len(bytes_from_string(content))
+  if span == nil || span.start < 0 || span.end <= span.start || span.end > content_bytes {
+    return {ok: false, error: "diagnostic span is missing or outside the fixture"}
+  }
+  return {
+    ok: true,
+    diagnostic: {
+      source: diagnostic.source,
+      severity: severity,
+      code: code,
+      message: message,
+      span: {start: span.start, end: span.end},
+      help: diagnostic?.help,
+    },
+  }
+}
+
+/** Resolve repair prose from `harn explain`, the diagnostic registry projection. */
+pub fn decode_example_repairs(stdout: string) -> dict {
+  const explanation = try {
+    json_parse(stdout)
+  } catch (err) {
+    return {ok: false, error: "harn explain did not emit valid JSON: ${err}"}
+  }
+  const repairs = explanation?.repairs
+  if repairs == nil || repairs.count() == 0 {
+    return {ok: false, error: "diagnostic registry exposes no repair"}
+  }
+  let projected: list = []
+  for repair in repairs {
+    if repair?.id == nil || repair?.safety == nil || repair?.summary == nil {
+      return {ok: false, error: "diagnostic registry repair is incomplete"}
+    }
+    projected = projected
+      + [{id: repair.id, safety: repair.safety, summary: repair.summary}]
+  }
+  return {ok: true, repairs: projected}
 }
 
 // A call whose first two positional arguments are the same bare identifier —
@@ -378,6 +483,7 @@ pipeline main(harness: Harness, task) {
   let checked = 0
   let skipped = 0
   let failures = 0
+  let diagnostic_examples: list = []
   let file_no = 0
   for md_file in md_files {
     file_no = file_no + 1
@@ -414,7 +520,48 @@ pipeline main(harness: Harness, task) {
       const block_path = "${prefix}_${event.idx}${mode_extension(event.mode)}"
       harness.fs.write_text(block_path, event.content)
       const res = harness.process.run({program: harn_bin, args: mode_argv(event.mode, block_path)})
-      if !res.success {
+      if mode_is_diagnostic(event.mode) {
+        const decoded = decode_example_diagnostic(res.stdout, event.content)
+        if !decoded.ok {
+          failures = failures + 1
+          harness.stdio.println("")
+          harness.stdio.println(
+            "FAIL: ${md_file} (${mode_label(event.mode)} diagnostic block #${event.idx})",
+          )
+          harness.stdio.println("      ${decoded.error}")
+          for line in indent_output(res.stdout + res.stderr) {
+            harness.stdio.println(line)
+          }
+          continue
+        }
+        const explain = harness.process.run(
+          {program: harn_bin, args: ["explain", decoded.diagnostic.code, "--json"]},
+        )
+        const repairs = if explain.success {
+          decode_example_repairs(explain.stdout)
+        } else {
+          {ok: false, error: "harn explain failed for ${decoded.diagnostic.code}"}
+        }
+        if !repairs.ok {
+          failures = failures + 1
+          harness.stdio.println("")
+          harness.stdio.println(
+            "FAIL: ${md_file} (${mode_label(event.mode)} diagnostic block #${event.idx})",
+          )
+          harness.stdio.println("      ${repairs.error}")
+          continue
+        }
+        diagnostic_examples = diagnostic_examples
+          + [
+            {
+              sourcePath: md_file,
+              blockIndex: event.idx,
+              command: diagnostic_command(event.mode),
+              source: event.content,
+              diagnostic: decoded.diagnostic + {repairs: repairs.repairs},
+            },
+          ]
+      } else if !res.success {
         failures = failures + 1
         harness.stdio.println("")
         harness.stdio.println("FAIL: ${md_file} (${mode_label(event.mode)} block #${event.idx})")
@@ -422,6 +569,32 @@ pipeline main(harness: Harness, task) {
         for line in indent_output(res.stdout + res.stderr) {
           harness.stdio.println(line)
         }
+      }
+    }
+  }
+  const diagnostic_projection = json_stringify_pretty(
+    {schemaVersion: 1, examples: diagnostic_examples},
+  )
+    + "\n"
+  if failures == 0 {
+    if argv.contains("--write-diagnostics") {
+      harness.fs.write_text(DIAGNOSTIC_EXAMPLES_PATH, diagnostic_projection)
+      harness.stdio.println(
+        "updated ${DIAGNOSTIC_EXAMPLES_PATH} (${diagnostic_examples.count()} examples)",
+      )
+    } else {
+      const committed = if harness.fs.exists(DIAGNOSTIC_EXAMPLES_PATH) {
+        harness.fs.read_text(DIAGNOSTIC_EXAMPLES_PATH)
+      } else {
+        ""
+      }
+      if committed != diagnostic_projection {
+        failures = failures + 1
+        harness.stdio.println("")
+        harness.stdio.println(
+          "FAIL: ${DIAGNOSTIC_EXAMPLES_PATH} is stale relative to diagnostic fences",
+        )
+        harness.stdio.println("      hint: run `make sync-docs-diagnostics`")
       }
     }
   }

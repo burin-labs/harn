@@ -36,6 +36,12 @@ import {
   DIAGRAM_SOURCE_LABEL,
 } from "../src/lib/diagram-markup.ts"
 import { CODE_FIGURE_CLASS, CODE_FILENAME_CLASS } from "../src/lib/code-markup.ts"
+import {
+  loadDiagnosticExamples,
+  remarkCheckedDiagnostics,
+  rehypeCheckedDiagnostics,
+  type DiagnosticExample,
+} from "./diagnostics.ts"
 
 export interface Heading {
   depth: number
@@ -720,11 +726,14 @@ function buildProcessor(
   titleRef: { title: string | null },
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   languages: Record<string, any>,
+  diagnosticExamples: Map<string, DiagnosticExample>,
+  seenDiagnosticExamples: Set<string>,
 ) {
   return unified()
     .use(remarkParse)
     .use(remarkGfm)
     .use(remarkCodeMeta)
+    .use(remarkCheckedDiagnostics, sourceRel, diagnosticExamples, seenDiagnosticExamples)
     .use(remarkRehype, { allowDangerousHtml: true })
     .use(rehypeRaw)
     .use(rehypeGithubAlerts)
@@ -736,6 +745,7 @@ function buildProcessor(
       // JSON Lines is JSON per line; highlight.js has no separate grammar.
       aliases: { json: ["jsonl"] },
     })
+    .use(rehypeCheckedDiagnostics, diagnosticExamples)
     .use(rehypeCodeTitle)
     .use(rehypeScrollableRegions)
     .use(rehypeSlug)
@@ -913,6 +923,8 @@ export function loadAllDocs(repoRoot: string): LoadedDocs {
     "harn-prompt": makeHarnPromptLanguage(repoRoot),
   }
   const { parts, order } = parseSummary(repoRoot)
+  const diagnosticExamples = loadDiagnosticExamples(repoRoot)
+  const seenDiagnosticExamples = new Set<string>()
 
   // navTitle by slug (from SUMMARY link text), and section assignment.
   const navTitleBySlug = new Map<string, string>()
@@ -959,6 +971,8 @@ export function loadAllDocs(repoRoot: string): LoadedDocs {
       links,
       titleRef,
       languages,
+      diagnosticExamples,
+      seenDiagnosticExamples,
     )
     const html = String(processor.processSync(included))
     anchorsBySlug.set(slug, anchors)
@@ -1004,6 +1018,12 @@ export function loadAllDocs(repoRoot: string): LoadedDocs {
       headings: headings.map((h) => h.text),
       text: plain.slice(0, 1800),
     })
+  }
+
+  for (const key of diagnosticExamples.keys()) {
+    if (!seenDiagnosticExamples.has(key)) {
+      throw new Error(`checked diagnostic projection is not rendered by the site: ${key}`)
+    }
   }
 
   validateContentContract(pages, order, anchorsBySlug, links)

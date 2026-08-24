@@ -383,6 +383,63 @@ body {
   background-color: var(--color-accent-500);
   flex: none;
 }
+
+/* Compiler-backed diagnostic examples keep syntax highlighting in the source
+   while underlining the exact byte span. The caption is the non-hover form:
+   screen readers and touch users receive the same code, message, help, and
+   registry repair as pointer users see in the span title. */
+.prose .diagnostic-example {
+  margin: 0 0 1rem;
+}
+.prose .diagnostic-example pre {
+  margin-bottom: 0;
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.prose .diagnostic-span {
+  text-decoration-line: underline;
+  text-decoration-style: wavy;
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 0.22em;
+}
+.prose .diagnostic-span-error {
+  text-decoration-color: #dc2626;
+  background: color-mix(in srgb, #dc2626 8%, transparent);
+}
+.prose .diagnostic-span-warning {
+  text-decoration-color: #b45309;
+  background: color-mix(in srgb, #b45309 9%, transparent);
+}
+.prose .diagnostic-detail {
+  border: 1px solid var(--color-border);
+  border-top: 0;
+  border-radius: 0 0 0.5rem 0.5rem;
+  background: var(--color-surface-secondary);
+  padding: 0.7rem 0.9rem;
+  color: var(--color-foreground-secondary);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+.prose .diagnostic-detail p {
+  margin: 0;
+}
+.prose .diagnostic-detail p + p {
+  margin-top: 0.3rem;
+}
+.prose .diagnostic-detail-summary strong {
+  color: var(--color-foreground);
+}
+.prose .diagnostic-repair code {
+  font-size: 0.78rem;
+}
+.dark .prose .diagnostic-span-error {
+  text-decoration-color: #f87171;
+  background: color-mix(in srgb, #f87171 11%, transparent);
+}
+.dark .prose .diagnostic-span-warning {
+  text-decoration-color: #fbbf24;
+  background: color-mix(in srgb, #fbbf24 10%, transparent);
+}
 .prose pre code {
   background: none;
   padding: 0;

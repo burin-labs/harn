@@ -54,7 +54,6 @@ exempt_checks = [
   "check-docs-exact",               # the half that needs the commit's own binary
   "check-docs-cookbook-entrypoints", # validates runnable public cookbook entrypoints, not a mirror
   "check-docs-model-refs",          # validates docs track provider aliases, not a mirror
-  "check-docs-snippets",            # validates ```harn blocks parse, not a mirror
   "check-docs-cli-flags",           # validates docs bash/sh harn flags, not a mirror
   "check-docs-links",               # validates docs/src local links resolve, not a mirror
   "check-site-snippets",            # validates website Harn fixtures parse, not a mirror
@@ -223,6 +222,16 @@ gen = "sync-diagnostics-catalog"
 check = "check-diagnostics-catalog"
 outputs = ["docs/src/diagnostics.md", "docs/diagnostics-catalog.json"]
 sources = ["crates/harn-parser/src/diagnostic_codes.rs", "crates/harn-parser/src/diagnostic_codes/"]
+ci = true
+make_all = true
+
+[[artifact]]
+id = "docs-diagnostic-examples"
+description = "Checked documentation diagnostic examples projected from real compiler/linter output and the diagnostic repair registry."
+gen = "sync-docs-diagnostics"
+check = "check-docs-snippets"
+outputs = ["docs/diagnostic-examples.json"]
+sources = ["docs/src/**/*.md", "scripts/check_docs_snippets.harn", "crates/harn-parser/src/diagnostic_codes.rs", "crates/harn-parser/src/diagnostic_codes/"]
 ci = true
 make_all = true
 

@@ -119,6 +119,32 @@ If you want to update an outer binding from inside a block, declare it with
 
 Harn is dynamically typed with optional type annotations.
 
+### Read diagnostics at the source
+
+The checked examples below are rendered from Harn's own diagnostics. The
+underline marks the exact source span; the visible detail names the severity,
+stable code, message, suggested help, and registry-owned repair. If the
+compiler, linter, or repair registry changes, the documentation check requires
+this projection to be regenerated before the site can ship.
+
+An annotation makes a mismatched initializer a type error:
+
+```harn,diagnostic-check
+fn main(harness: Harness) {
+  const value: string = 42
+  harness.stdio.println(value)
+}
+```
+
+The linter also explains code that is valid but says more than it needs to:
+
+```harn,diagnostic-lint
+fn main(harness: Harness) {
+  let total = 2
+  harness.stdio.println(total)
+}
+```
+
 | Type | Example | Notes |
 |---|---|---|
 | `int` | `42` | Platform-width integer |
