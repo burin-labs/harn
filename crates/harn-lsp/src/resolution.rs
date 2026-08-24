@@ -218,10 +218,7 @@ mod tests {
             "opened files match disk after parse, so the answer is not an unsaved overlay"
         );
 
-        let disk = harn_modules::build_for_reference_index(
-            &[exported.clone(), importer.clone(), local.clone()],
-            None,
-        );
+        let disk = harn_modules::build_for_reference_index(&[exported, importer, local], None);
         let disk_index =
             harn_modules::index_references(&disk.graph, &disk.parsed_sources, &HashSet::new());
         assert_eq!(
