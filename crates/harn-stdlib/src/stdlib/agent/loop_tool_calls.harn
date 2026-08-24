@@ -569,6 +569,76 @@ pub fn __maybe_emit_tool_audit(agent: HarnessAgent, session_id, envelope, audit,
   }
 }
 
+pub fn __callable(value) {
+  const kind = type_of(value)
+  return kind == "closure" || kind == "function" || kind == "fn"
+}
+
+pub fn __audit_flushes_from_result(result) {
+  let flushes = []
+  const single = result?._audit_flush
+  if __callable(single) {
+    flushes = flushes.appending(single)
+  }
+  const many = result?._audit_flushes
+  if type_of(many) == "list" {
+    for flush in many {
+      if __callable(flush) {
+        flushes = flushes.appending(flush)
+      }
+    }
+  }
+  return flushes
+}
+
+pub fn __collect_audit_flushes(dispatch) {
+  let flushes = []
+  for result in __dispatch_results_list(dispatch) {
+    for flush in __audit_flushes_from_result(result) {
+      flushes = flushes.appending(flush)
+    }
+  }
+  return flushes
+}
+
+pub fn __strip_internal_tool_result(result) {
+  if type_of(result) != "dict" {
+    return result
+  }
+  let clean = {}
+  for key in result.keys() {
+    if !starts_with(key, "_") {
+      clean = clean + {[key]: result[key]}
+    }
+  }
+  return clean
+}
+
+pub fn __strip_internal_dispatch(dispatch: list) -> list {
+  let clean_results = []
+  for result in dispatch {
+    clean_results = clean_results.appending(__strip_internal_tool_result(result))
+  }
+  return clean_results
+}
+
+pub fn __spawn_audit_flushes(tasks, flushes) {
+  let out = tasks
+  for flush in flushes {
+    const task = spawn {
+      flush()
+    }
+    out = out.appending(task)
+  }
+  return out
+}
+
+pub fn __drain_audit_flushes(tasks) {
+  for task in tasks {
+    await(task)
+  }
+}
+
 pub fn __visible_text(parsed, raw_text) {
   let text = raw_text
   if parsed?.user_response != nil && parsed.user_response != "" {
