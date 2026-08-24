@@ -246,6 +246,7 @@ forget_child() {
   done
 }
 trap cleanup_files EXIT
+trap 'terminate_children 129' HUP
 trap 'terminate_children 130' INT
 trap 'terminate_children 143' TERM
 
@@ -308,6 +309,7 @@ if [ "$phase" != "conformance" ]; then
 fi
 
 conformance_status=0
+conformance_pid=""
 if [ "$phase" != "audit" ]; then
   conformance_started="$(date +%s)"
   echo "=== conformance ($conformance_jobs process-isolated workers, HARN_BIN warm) ==="
@@ -319,19 +321,6 @@ if [ "$phase" != "audit" ]; then
   ) >"$conformance_log" 2>&1 &
   conformance_pid=$!
   child_pids+=("$conformance_pid")
-  if wait "$conformance_pid"; then
-    conformance_status=0
-  else
-    conformance_status=$?
-  fi
-  forget_child "$conformance_pid"
-  cat "$conformance_log"
-
-  if [ "$conformance_status" -eq 0 ]; then
-    echo "ok: conformance ($conformance_jobs workers, $(( $(date +%s) - conformance_started ))s)"
-  else
-    echo "FAIL: conformance runner exited $conformance_status ($(( $(date +%s) - conformance_started ))s)" >&2
-  fi
 fi
 
 if [ -n "$audit_pid" ]; then
@@ -351,11 +340,42 @@ if [ -n "$script_test_pid" ]; then
   forget_child "$script_test_pid"
 fi
 
+# The audit workers own the shared runner budget. Observe them before waiting
+# for conformance so an early fanout failure can cancel the still-running test
+# process instead of leaving it (or its descendants) blocked after the caller
+# exits. `harn_test_env.sh` forwards that cancellation to the actual Harn child.
+if [ -n "$conformance_pid" ]; then
+  if [ "$audit_status" -ne 0 ] || [ "$script_test_status" -ne 0 ]; then
+    kill -TERM "$conformance_pid" 2>/dev/null || true
+  fi
+  if wait "$conformance_pid"; then
+    conformance_status=0
+  else
+    conformance_status=$?
+  fi
+  forget_child "$conformance_pid"
+  cat "$conformance_log"
+
+  if [ "$conformance_status" -eq 0 ]; then
+    echo "ok: conformance ($conformance_jobs workers, $(( $(date +%s) - conformance_started ))s)"
+  elif [ "$audit_status" -ne 0 ] || [ "$script_test_status" -ne 0 ]; then
+    echo "cancelled: conformance after audit failure ($(( $(date +%s) - conformance_started ))s)" >&2
+    # The owning audit failure is reported below; cancellation is not an
+    # independent conformance regression.
+    conformance_status=0
+  else
+    echo "FAIL: conformance runner exited $conformance_status ($(( $(date +%s) - conformance_started ))s)" >&2
+  fi
+fi
+
 # The performance gate is a benchmark, not a source or artifact consistency
 # check. Run it only after the conformance workers and audit fanout have settled
 # so its resource measurements are comparable to the platform baseline.
 performance_status=0
-if [ "$phase" != "audit" ]; then
+if [ "$phase" != "audit" ] \
+  && [ "$conformance_status" -eq 0 ] \
+  && [ "$audit_status" -eq 0 ] \
+  && [ "$script_test_status" -eq 0 ]; then
   performance_started="$(date +%s)"
   echo "=== test-case performance (isolated, HARN_BIN warm) ==="
   if make check-test-case-performance 2>&1 | tee "$performance_log"; then
