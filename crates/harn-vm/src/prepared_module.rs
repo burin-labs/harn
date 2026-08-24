@@ -591,6 +591,52 @@ mod tests {
     }
 
     #[test]
+    fn repeated_preparation_derives_one_modules_interface_once() {
+        // Every VM that imports a module asks this cache for it, and the
+        // interface is needed to form the key it asks with. Deriving one costs
+        // a full lex and parse, so re-deriving it per VM put the cache's own
+        // cost back in front of every hit it served.
+        let dir = tempfile::tempdir().expect("temp module dir");
+        let module = dir.path().join("library.harn");
+        std::fs::write(&module, "pub fn value() { return 1 }\n").expect("write module");
+        let source = crate::module_source::read(&module).expect("read module");
+        let canonical = harn_modules::canonical_path(&module);
+        let cache = PreparedModuleCache::default();
+
+        let resolutions = |prepare: &dyn Fn()| {
+            let before = crate::module_artifact::INTERFACE_RESOLUTIONS.with(std::cell::Cell::get);
+            prepare();
+            crate::module_artifact::INTERFACE_RESOLUTIONS.with(std::cell::Cell::get) - before
+        };
+        let prepare = || {
+            cache
+                .prepare(
+                    &module,
+                    &canonical,
+                    &source,
+                    None,
+                    None,
+                    ModuleProvenance::User,
+                )
+                .expect("module prepares");
+        };
+
+        // The first caller has nothing to reuse. This arm is the counter's
+        // positive control: without it, a seam that never increments would
+        // satisfy the assertion below vacuously.
+        assert_eq!(
+            resolutions(&prepare),
+            1,
+            "the first preparation of a module must derive its interface"
+        );
+        assert_eq!(
+            resolutions(&prepare),
+            0,
+            "the same bytes must not be re-parsed to re-derive the same interface"
+        );
+    }
+
+    #[test]
     fn ordinary_lookup_cannot_reuse_privileged_wire_bytecode() {
         let cache = PreparedModuleCache::default();
         let source = ModuleSource::from_text("const value = 1");
