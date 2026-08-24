@@ -486,7 +486,7 @@ fn build_check_contexts_with(
         let mut config = package::load_check_config(Some(file));
         super::apply_harn_lint_config(file, &mut config);
         if let Some(path) = overrides.host_capabilities.as_ref() {
-            config.host_capabilities_path = Some(path.clone());
+            config.host.host_capabilities_path = Some(path.clone());
         }
         if let Some(path) = overrides.bundle_root.as_ref() {
             config.bundle_root = Some(path.clone());

@@ -51,6 +51,59 @@ impl HostCapabilitySurface {
             .is_some_and(|operations| operations.contains(operation))
     }
 
+    /// Read the declaration shapes accepted by Harn's host-operation files.
+    #[must_use]
+    pub fn from_value(value: &serde_json::Value) -> Self {
+        let root = value.get("capabilities").unwrap_or(value);
+        let Some(capabilities) = root.as_object() else {
+            return Self::default();
+        };
+        let mut pairs = Vec::new();
+        for (capability, entry) in capabilities {
+            if let Some(operations) = entry.as_array() {
+                pairs.extend(
+                    operations
+                        .iter()
+                        .filter_map(serde_json::Value::as_str)
+                        .map(|operation| (capability.as_str(), operation)),
+                );
+                continue;
+            }
+            let Some(entry) = entry.as_object() else {
+                continue;
+            };
+            let operations = entry
+                .get("operations")
+                .or_else(|| entry.get("ops"))
+                .unwrap_or(&serde_json::Value::Null);
+            if let Some(list) = operations.as_array() {
+                pairs.extend(
+                    list.iter()
+                        .filter_map(serde_json::Value::as_str)
+                        .map(|operation| (capability.as_str(), operation)),
+                );
+                continue;
+            }
+            let operation_map = operations.as_object().unwrap_or(entry);
+            pairs.extend(operation_map.iter().filter_map(|(operation, metadata)| {
+                metadata
+                    .as_bool()
+                    .unwrap_or(true)
+                    .then_some((capability.as_str(), operation.as_str()))
+            }));
+        }
+        Self::from_pairs(pairs)
+    }
+
+    pub fn extend(&mut self, other: Self) {
+        for (capability, operations) in other.operations {
+            self.operations
+                .entry(capability)
+                .or_default()
+                .extend(operations);
+        }
+    }
+
     pub fn operation_pairs(&self) -> impl Iterator<Item = (&str, &str)> {
         self.operations.iter().flat_map(|(capability, operations)| {
             operations
@@ -78,6 +131,24 @@ impl HostCapabilitySurface {
             })
             .collect()
     }
+}
+
+/// Parse a JSON or TOML host-operation document once for all consumers.
+pub fn parse_host_capability_document(
+    content: &str,
+    path: &str,
+    kind: &str,
+) -> Result<serde_json::Value, String> {
+    serde_json::from_str::<serde_json::Value>(content)
+        .ok()
+        .or_else(|| {
+            toml::from_str::<toml::Value>(content)
+                .ok()
+                .and_then(|value| serde_json::to_value(value).ok())
+        })
+        .ok_or_else(|| {
+            format!("failed to parse {kind} host operations in `{path}` as JSON or TOML")
+        })
 }
 
 /// Exact operations whose handlers are added at runtime.
@@ -145,5 +216,20 @@ mod tests {
         for value in ["workspace", "workspace.*", "*.read_text", "a.b.c"] {
             assert!(HostCapabilityExemptions::parse([value]).is_err(), "{value}");
         }
+    }
+
+    #[test]
+    fn document_shapes_project_to_one_surface() {
+        let value = parse_host_capability_document(
+            r#"{"capabilities":{"workspace":{"operations":{"read_text":true,"old":false}},"project":["scan"]}}"#,
+            "caps.json",
+            "declared",
+        )
+        .unwrap();
+        let surface = HostCapabilitySurface::from_value(&value);
+
+        assert!(surface.contains("workspace", "read_text"));
+        assert!(surface.contains("project", "scan"));
+        assert!(!surface.contains("workspace", "old"));
     }
 }
