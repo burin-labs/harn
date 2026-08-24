@@ -24,6 +24,11 @@ use super::{
 };
 pub(crate) use crate::cli::runs::RunsCommand;
 
+#[test]
+fn clap_definition_is_valid() {
+    Cli::command().debug_assert();
+}
+
 mod parse_cmds;
 mod parse_core;
 mod parse_models;
