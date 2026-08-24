@@ -49,11 +49,16 @@ the fast path cannot make.
 
 Resolution order:
 
-1. `$HARN_CACHE_DIR` (explicit override; used by tests + CI).
-2. `$XDG_CACHE_HOME/harn/bytecode`.
+1. `$HARN_CACHE_DIR` (explicit override; used by tests + CI). The value
+   must be a non-empty absolute path. An empty or relative override is a
+   startup error — Harn will not silently write compiled bytecode next to
+   the working directory.
+2. `$XDG_CACHE_HOME/harn/bytecode` when `$XDG_CACHE_HOME` is a non-empty
+   absolute path. An empty or relative XDG value is ignored (XDG spec).
 3. `$HOME/.cache/harn/bytecode`.
-4. `./.harn-cache/bytecode` (fallback for hermetic environments with no
-   `$HOME`).
+
+When none of those resolve, the cache is off for that process. There is
+no working-directory-relative fallback.
 
 The directory is created lazily on the first cache write. The cache is
 process-local; there is no IPC, no shared lock file, and no need for
@@ -237,7 +242,8 @@ relocatability from a Harn version string.
 
 ## Toggles and environment
 
-- `HARN_CACHE_DIR=<path>` — relocate the cache directory.
+- `HARN_CACHE_DIR=<absolute-path>` — relocate the cache directory. Empty
+  and relative values are rejected at startup.
 - `HARN_BYTECODE_CACHE=0` — disable both reads and writes (compiler
   debugging, deterministic eval reruns).
 - `HARN_BYTECODE_CACHE_DEBUG=1` — surface cache write failures.

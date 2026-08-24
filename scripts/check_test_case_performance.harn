@@ -446,10 +446,14 @@ fn run_parallel(
     const status_path = path_join(run_root, "status.txt")
     const argv = prefix
       + ["test", "--parallel", "--jobs", "4", "--diagnose", "--timeout", "5000", test_files[index]]
+    // `root` is workspace-relative, and both of these must reach the child as
+    // absolute paths. A relative HARN_CACHE_DIR is refused at startup because
+    // it makes the cache location follow the working directory; anchoring on
+    // $PWD keeps every run pointed at the one directory this harness made.
     script = script
-      + "(HOME="
+      + "(HOME=\"$PWD\"/"
       + shell_quote(home)
-      + " HARN_CACHE_DIR="
+      + " HARN_CACHE_DIR=\"$PWD\"/"
       + shell_quote(cache)
       + " HARN_BYTECODE_CACHE=0 "
       + invocation(["/usr/bin/time"] + time_args(platform) + argv)

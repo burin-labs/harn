@@ -27,9 +27,14 @@ fn main() {
     if harn_hostlib::process::owner_death::run_if_requested() {
         unreachable!("owner-death guardian execution does not return");
     }
-    if let Err(error) = harn_vm::initialize_runtime() {
-        eprintln!("{error}");
-        std::process::exit(2);
+    match harn_vm::initialize_runtime() {
+        Err(error) => {
+            eprintln!("{error}");
+            std::process::exit(2);
+        }
+        // Exactly one line, once, naming why caching is off for this run.
+        Ok(Some(warning)) => eprintln!("warning: {warning}"),
+        Ok(None) => {}
     }
     match invoked_as().as_deref() {
         Some("harn-lsp") => run_sidecar("harn-lsp", harn_lsp::run),
