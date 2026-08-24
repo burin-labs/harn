@@ -30,7 +30,7 @@ pipeline main(harness: Harness, task) {
   progress_finish(harness, p, "ok")
   // --- exactly one terminal message ----------------------------------------
   harness.testing.clock_set(0)
-  let q = progress_start(harness, "publish")
+  const q = progress_start(harness, "publish")
   harness.testing.clock_advance(5000)
   const finished = progress_finish(harness, q, "failed", "registry rejected the tag")
   // A second close prints nothing, so a `defer` that closes an already-closed
