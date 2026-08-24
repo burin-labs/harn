@@ -24,6 +24,11 @@ use crate::module_artifact::{
 use crate::module_source::ModuleSource;
 use crate::{ModulePhaseRecorder, ModulePhaseStats, VmError};
 const DEFAULT_MAX_ENTRIES: usize = 512;
+/// Ceiling on remembered imported interfaces. Independent of the artifact
+/// capacity above: an interface is a small projection of names, and one is
+/// worth keeping for every module a tree contains, not just for the artifacts
+/// that fit in the bounded cache.
+const MAX_REMEMBERED_INTERFACES: usize = 8192;
 
 /// Immutable runtime form of one compiled module artifact.
 pub(crate) struct PreparedModuleArtifact {
@@ -245,10 +250,20 @@ impl PreparedModuleCache {
     }
 
     fn remember_interface(&self, key: InterfaceMemoKey, context: &ModuleCompilationContext) {
-        self.interfaces
+        let mut interfaces = self
+            .interfaces
             .lock()
-            .expect("interface memo lock poisoned")
-            .insert(key, context.clone());
+            .expect("interface memo lock poisoned");
+        // A handle held across many generations of an edited tree would
+        // otherwise accumulate one entry per version of every module ever
+        // prepared. Start over rather than grow without bound: the entries are
+        // derivable, so the cost of dropping them is bounded by re-deriving the
+        // ones still in use. The bound is far above the module count of a real
+        // tree, so an ordinary run never reaches it.
+        if interfaces.len() >= MAX_REMEMBERED_INTERFACES {
+            interfaces.clear();
+        }
+        interfaces.insert(key, context.clone());
     }
 
     pub fn stats(&self) -> PreparedModuleCacheStats {
