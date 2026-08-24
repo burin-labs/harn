@@ -10,6 +10,10 @@ import {
   DIAGRAM_SOURCE_LABEL,
 } from "../src/lib/diagram-markup.ts"
 import { CODE_FIGURE_CLASS, CODE_FILENAME_CLASS } from "../src/lib/code-markup.ts"
+import {
+  HEADING_ANCHOR_CLASS,
+  HEADING_LINKED_CLASS,
+} from "../src/lib/heading-markup.ts"
 import { SYSTEMS, CAPABILITIES, RATINGS } from "../src/data/comparison.ts"
 import {
   DIAGNOSTIC_DETAIL_CLASS,
@@ -293,5 +297,52 @@ describe("syntax highlighting", () => {
 
   it("highlights jsonl blocks through the json alias", () => {
     expect(highlightedSample("jsonl")).not.toBeNull()
+  })
+})
+
+describe("heading permalinks", () => {
+  const languageBasics = () => docs.pages.get("language-basics")!
+
+  it("gives every collected heading a permalink to its own id", () => {
+    // The table of contents is built from `headings`, so anything listed there
+    // is something a reader can be pointed at and must be linkable.
+    const page = languageBasics()
+    for (const heading of page.headings) {
+      expect(
+        page.html,
+        `heading "${heading.id}" has no permalink`,
+      ).toContain(`href="#${heading.id}"`)
+    }
+    expect(page.headings.length).toBeGreaterThan(0)
+    expect(page.html).toContain(`class="${HEADING_ANCHOR_CLASS}"`)
+    expect(page.html).toContain(HEADING_LINKED_CLASS)
+  })
+
+  it("keeps the anchor glyph out of heading text and the search index", () => {
+    // The anchor is appended after headings and the title are collected. If it
+    // ran earlier, every table-of-contents entry and every indexed heading
+    // would carry a trailing "#".
+    const page = languageBasics()
+    for (const heading of page.headings) {
+      expect(heading.text.endsWith("#"), `heading "${heading.id}" text`).toBe(false)
+    }
+    const entry = docs.search.find((d) => d.slug === "language-basics")
+    expect(entry).toBeDefined()
+    for (const h of entry!.headings) expect(h.endsWith("#")).toBe(false)
+    // The page title is captured from h1, which never gets an anchor.
+    expect(page.title.endsWith("#")).toBe(false)
+  })
+
+  it("names the anchor for a screen reader rather than announcing a hash", () => {
+    expect(languageBasics().html).toMatch(/aria-label="Permalink to [^"]+"/)
+  })
+
+  it("does not put a permalink on the page title", () => {
+    // h1 is the page, not a section within it; a permalink there points at the
+    // page a reader is already on.
+    const html = languageBasics().html
+    const h1 = /<h1[^>]*>[\s\S]*?<\/h1>/.exec(html)?.[0]
+    expect(h1).toBeDefined()
+    expect(h1).not.toContain(HEADING_ANCHOR_CLASS)
   })
 })
