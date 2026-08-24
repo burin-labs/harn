@@ -11,10 +11,11 @@
 # serial conformance-then-audit tail:
 #   1. Build the harn CLI ONCE up front.
 #   2. Export HARN_BIN so conformance and every downstream gate reuse it.
-#   3. Run the process-isolated conformance worker pool and independent `make -j`
-#      audit gates in parallel. GNU make already IS a bounded worker pool with
-#      failure collection; `-k` keeps going after a failing gate so the run
-#      reports EVERY gate's verdict, not just the first.
+#   3. Run the process-isolated conformance worker pool and independent audit
+#      gates in parallel. The Harn script suite is itself a worker pool, so the
+#      audit budget is partitioned between it and GNU make rather than nesting
+#      an automatic Harn pool inside an already-full `make -j` pool. `-k` keeps
+#      going after a failing ordinary gate so the run reports every verdict.
 #   4. Run the per-test performance ratchet after that fanout. Its workload is
 #      intentionally parallel, but its wall/user-time measurements must not be
 #      contaminated by the unrelated audit processes running beside it.
@@ -91,7 +92,6 @@ GATES=(
   # Was in `make all` but in no workflow, so nothing watched it: the suite sat
   # red on main for a source-scope regression until someone ran it by hand. A
   # gate that only fires locally is not a gate.
-  test-harn-scripts
   protocol-conformance
   lint-no-xfail-regression
   lint-actions-harn
@@ -121,6 +121,7 @@ GATES=(
   check-release-audit-contract
   check-vm-rss-soak
 )
+SCRIPT_TEST_GATE="test-harn-scripts"
 if [ "$tree_sitter_parser_preflighted" = "true" ]; then
   filtered_gates=()
   for gate in "${GATES[@]}"; do
@@ -250,11 +251,34 @@ trap 'terminate_children 143' TERM
 
 audit_status=0
 audit_pid=""
+script_test_status=0
+script_test_pid=""
 if [ "$phase" != "conformance" ]; then
+  # `test-harn-scripts` recursively starts a Harn worker pool. Letting its
+  # automatic pool run as one opaque job inside `make -j$concurrency` expands a
+  # four-worker CI budget to as many as eleven processes (eight Harn workers
+  # plus three sibling gates). That production-only oversubscription starved a
+  # rustfmt child until its honest 30s execute rail fired, even though isolated
+  # full-suite runs completed the same case in well under one second.
+  #
+  # Partition one total audit budget instead: half for the nested script suite,
+  # half for ordinary gates. With a one-worker budget, keep the gate in the
+  # ordinary serial fanout so even that boundary remains total.
+  audit_gates=("${GATES[@]}")
+  ordinary_concurrency="$concurrency"
+  script_test_jobs=0
+  if [ "$concurrency" -gt 1 ]; then
+    script_test_jobs=$((concurrency / 2))
+    ordinary_concurrency=$((concurrency - script_test_jobs))
+  else
+    audit_gates=("$SCRIPT_TEST_GATE" "${audit_gates[@]}")
+  fi
+  : > "$audit_log"
+
   (
-    echo "=== audit gates (make -j$concurrency -k${output_sync:+ $output_sync}, HARN_BIN warm) ==="
+    echo "=== audit gates (make -j$ordinary_concurrency -k${output_sync:+ $output_sync}, HARN_BIN warm) ==="
     gate_started="$(date +%s)"
-    if make -j"$concurrency" -k ${output_sync} "${GATES[@]}" 2>&1 | tee "$audit_log"; then
+    if make -j"$ordinary_concurrency" -k ${output_sync} "${audit_gates[@]}" 2>&1 | tee -a "$audit_log"; then
       echo "ok: audit gates ($(( $(date +%s) - gate_started ))s)"
       echo "=== all audit gates passed ==="
     else
@@ -265,6 +289,22 @@ if [ "$phase" != "conformance" ]; then
   ) &
   audit_pid=$!
   child_pids+=("$audit_pid")
+
+  if [ "$script_test_jobs" -gt 0 ]; then
+    (
+      echo "=== Harn script tests ($script_test_jobs reserved workers, HARN_BIN warm) ==="
+      gate_started="$(date +%s)"
+      if HARN_TEST_JOBS="$script_test_jobs" make "$SCRIPT_TEST_GATE" 2>&1 | tee -a "$audit_log"; then
+        echo "ok: Harn script tests ($(( $(date +%s) - gate_started ))s)"
+      else
+        status=$?
+        echo "FAIL: Harn script tests failed ($(( $(date +%s) - gate_started ))s)" >&2
+        exit "$status"
+      fi
+    ) &
+    script_test_pid=$!
+    child_pids+=("$script_test_pid")
+  fi
 fi
 
 conformance_status=0
@@ -301,6 +341,14 @@ if [ -n "$audit_pid" ]; then
     audit_status=$?
   fi
   forget_child "$audit_pid"
+fi
+if [ -n "$script_test_pid" ]; then
+  if wait "$script_test_pid"; then
+    script_test_status=0
+  else
+    script_test_status=$?
+  fi
+  forget_child "$script_test_pid"
 fi
 
 # The performance gate is a benchmark, not a source or artifact consistency
@@ -362,7 +410,7 @@ if [ "$conformance_status" -ne 0 ]; then
   failure_summary "conformance"
   exit "$conformance_status"
 fi
-if [ "$audit_status" -ne 0 ]; then
+if [ "$audit_status" -ne 0 ] || [ "$script_test_status" -ne 0 ]; then
   failure_summary "audit gates"
 fi
 if [ "$performance_status" -ne 0 ]; then
@@ -370,6 +418,9 @@ if [ "$performance_status" -ne 0 ]; then
 fi
 if [ "$audit_status" -ne 0 ]; then
   exit "$audit_status"
+fi
+if [ "$script_test_status" -ne 0 ]; then
+  exit "$script_test_status"
 fi
 if [ "$performance_status" -ne 0 ]; then
   exit "$performance_status"
