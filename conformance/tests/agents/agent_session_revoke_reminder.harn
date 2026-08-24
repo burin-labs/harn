@@ -15,7 +15,6 @@ import {
 pipeline main(harness: Harness, task) {
   const s = harness.agent.open()
   harness.agent.reset(s)
-
   // A reminder with room left on its TTL: delivered once, still carried.
   const live = agent_session_inject_reminder(
     harness.agent,
@@ -25,7 +24,6 @@ pipeline main(harness: Harness, task) {
   require live != nil && live != "", "inject returns a reminder id"
   const delivered = agent_session_apply_reminder_post_turn(harness.agent, s, 1)
   require delivered.remaining_count == 1, "the reminder survives its first turn"
-
   const revoked = agent_session_revoke_reminder(harness.agent, s, live)
   require revoked.status == "revoked", "revoking a carried reminder reports revoked"
   require revoked.reminderId == live, "the response echoes the reminder id"
@@ -35,11 +33,9 @@ pipeline main(harness: Harness, task) {
   require after.remaining_count == 0, "a revoked reminder is not carried forward"
   const events = transcript_events_by_kind(harness.agent.snapshot(s), "system_reminder")
   require len(events) == 0, "and it is gone from the event stream"
-
   // Revoking twice is not an error, and does not report the id as unknown.
   const again = agent_session_revoke_reminder(harness.agent, s, live)
   require again.status == "already_revoked", "a second revoke reports already_revoked"
-
   // A reminder whose TTL ran out has already had its full life. Revoke must say
   // so rather than reporting it as an id it has never heard of.
   const expiring = agent_session_inject_reminder(
@@ -50,13 +46,12 @@ pipeline main(harness: Harness, task) {
   const expiry = agent_session_apply_reminder_post_turn(harness.agent, s, 3)
   require expiry.expired_count == 1, "the ttl=1 reminder expires after one turn"
   const late = agent_session_revoke_reminder(harness.agent, s, expiring)
-  require late.status == "already_delivered", "revoking an expired reminder reports already_delivered"
-
+  require late.status == "already_delivered",
+    "revoking an expired reminder reports already_delivered"
   // Negative control. Without this the three assertions above would also pass
   // if revoke reported the same status for every input.
   const bogus = agent_session_revoke_reminder(harness.agent, s, "no-such-reminder-id")
   require bogus.status == "unknown_reminder_id", "an id that was never issued is still unknown"
-
   harness.agent.close(s)
   harness.stdio.log("agent_session_revoke_reminder stops re-projection and reports why")
 }
