@@ -51,6 +51,7 @@ harn-parser = { path = "../harn-parser", version = "=0.10.115-dev" }
 harn-ir = { path = "../harn-ir", version = "=0.10.115-dev" }
 harn-kernel = { path = "../harn-kernel", version = "=0.10.115-dev" }
 harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.115-dev" }
+harn-clock = { path = "../harn-clock", version = "=0.10.115-dev" }
 harn-test-runner = { path = "../harn-test-runner", version = "=0.10.115-dev" }
 # testbench-wasi (wasmtime + the cranelift JIT, ~36 crates, ~8.6 MB of the
 # stripped binary plus real compile time) is NOT enabled by default — it only

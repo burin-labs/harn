@@ -14,6 +14,7 @@ import {
   ensureVerifiedArchive,
   extractionCommand,
   fetchWithRetry,
+  installMulticallAliases,
   main,
   normalizeVersion,
   parseChecksums,
@@ -181,6 +182,30 @@ test("archive extraction follows the published archive format", () => {
     command: "tar",
     args: ["-xf", "../downloads/harn.tar.gz"],
   });
+});
+
+test("Windows command aliases share one installed binary", (context) => {
+  const root = temporaryRoot(context);
+  const binaryPath = path.join(root, "harn.exe");
+  const aliases = ["harn-lsp.exe", "harn-dap.exe"].map((name) =>
+    path.join(root, name),
+  );
+  fs.writeFileSync(binaryPath, "new binary\n");
+  for (const alias of aliases) fs.writeFileSync(alias, "old archive copy\n");
+
+  assert.deepEqual(
+    installMulticallAliases(binaryPath, "x86_64-pc-windows-msvc"),
+    aliases,
+  );
+
+  const binary = fs.statSync(binaryPath);
+  for (const alias of aliases) {
+    const linked = fs.statSync(alias);
+    assert.equal(linked.dev, binary.dev);
+    assert.equal(linked.ino, binary.ino);
+    assert.equal(fs.readFileSync(alias, "utf8"), "new binary\n");
+  }
+  assert.equal(binary.nlink, 3);
 });
 
 test("versions are exact, canonical, and file-derived", (context) => {

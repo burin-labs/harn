@@ -267,12 +267,18 @@ fn fold_config(
         strict_types,
         trusted_host_dispatch,
         disable_rules,
-        host_capabilities,
-        host_capabilities_path,
+        host,
         bundle_root,
         preflight_severity,
         preflight_allow,
     } = config;
+    let harn_modules::host_capability_config::HostCapabilityConfig {
+        host_capabilities,
+        host_capabilities_path,
+        host_served_capabilities_path,
+        runtime_installed_host_operations,
+        require_declared_operations_served,
+    } = host;
     fold("strict", &[u8::from(*strict)]);
     fold("strict-types", &[u8::from(*strict_types)]);
     fold("trusted-host-dispatch", &[u8::from(*trusted_host_dispatch)]);
@@ -301,6 +307,18 @@ fn fold_config(
             host_capabilities_content.unwrap_or_default().as_bytes(),
         );
     }
+    if let Some(path) = host_served_capabilities_path {
+        fold("host-served-capabilities-path", path.as_bytes());
+    }
+    let mut runtime_installed: Vec<&String> = runtime_installed_host_operations.iter().collect();
+    runtime_installed.sort();
+    for operation in runtime_installed {
+        fold("runtime-installed-host-operation", operation.as_bytes());
+    }
+    fold(
+        "require-declared-operations-served",
+        &[u8::from(*require_declared_operations_served)],
+    );
     if let Some(root) = bundle_root {
         fold("bundle-root", root.as_bytes());
     }
@@ -496,7 +514,10 @@ mod tests {
         let second_snapshot = r#"{"capabilities":{"second":{"operations":["read"]}}}"#;
         std::fs::write(&manifest, first_snapshot).unwrap();
         let config = CheckConfig {
-            host_capabilities_path: Some(manifest.display().to_string()),
+            host: harn_modules::host_capability_config::HostCapabilityConfig {
+                host_capabilities_path: Some(manifest.display().to_string()),
+                ..Default::default()
+            },
             ..CheckConfig::default()
         };
 

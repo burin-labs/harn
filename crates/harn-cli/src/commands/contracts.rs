@@ -38,7 +38,7 @@ fn effective_config_for_targets(
         .map(|path| package::load_check_config(Some(path)))
         .unwrap_or_default();
     if let Some(path) = host_capabilities {
-        config.host_capabilities_path = Some(path.clone());
+        config.host.host_capabilities_path = Some(path.clone());
     }
     if let Some(path) = bundle_root {
         config.bundle_root = Some(path.clone());
@@ -189,7 +189,7 @@ fn resource_selector_json(selector: &ResourceSelector) -> serde_json::Value {
 fn host_capabilities_value(args: &ContractsHostCapabilitiesArgs) -> serde_json::Value {
     let mut config = CheckConfig::default();
     if let Some(path) = args.host_capabilities.as_ref() {
-        config.host_capabilities_path = Some(path.clone());
+        config.host.host_capabilities_path = Some(path.clone());
     }
     let capabilities = check::load_host_capabilities(&config);
     json!({
@@ -220,7 +220,7 @@ fn bundle_contract_value(args: &ContractsBundleArgs) -> (serde_json::Value, bool
         for file in &files {
             let mut file_config = package::load_check_config(Some(file));
             if let Some(path) = args.host_capabilities.as_ref() {
-                file_config.host_capabilities_path = Some(path.clone());
+                file_config.host.host_capabilities_path = Some(path.clone());
             }
             if let Some(path) = args.bundle_root.as_ref() {
                 file_config.bundle_root = Some(path.clone());

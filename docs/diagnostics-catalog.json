@@ -19,7 +19,7 @@
     {
       "id": "CAP",
       "title": "Capabilities",
-      "count": 9
+      "count": 10
     },
     {
       "id": "LLM",
@@ -769,6 +769,15 @@
           "summary": "Review the capability binding; the fix is not mechanical"
         }
       ],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-CAP-008",
+      "category": "CAP",
+      "summary": "declared host capability operation is not served",
+      "repairs": [],
       "related": [],
       "explanationPresent": true,
       "apiStability": "stable"
