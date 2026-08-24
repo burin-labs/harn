@@ -19,11 +19,15 @@ cat > "$fake_harn" <<'SH'
 set -euo pipefail
 invocation="$*"
 printf '%s\t%s\tSESSION_STORE=%s\n' "$invocation" "HARN_BIN=$0" "$HARN_SESSION_STORE_ROOT" >> "$FAKE_CONFORMANCE_RECORD"
+trap 'if [[ -n "${FAKE_CHILD_TERMINATED_RECORD-}" ]]; then printf "terminated\n" >> "$FAKE_CHILD_TERMINATED_RECORD"; fi; exit 143' TERM
 if [[ -z "${HARN_SESSION_STORE_ROOT-}" || ! -d "$HARN_SESSION_STORE_ROOT" ]]; then
   echo "conformance runner did not receive an isolated session store" >&2
   exit 46
 fi
 if [[ "${FAKE_SPLIT_PHASE-0}" != "1" ]]; then
+  if [[ -n "${FAKE_CONFORMANCE_READY_FIFO-}" ]]; then
+    printf 'ready\n' > "$FAKE_CONFORMANCE_READY_FIFO"
+  fi
   # Opening the FIFO blocks until the audit fanout has reached its own barrier;
   # this proves ordering without a wall-clock polling loop.
   printf 'conformance-started\n' > "$FAKE_CONFORMANCE_START_FIFO_DIR/runner"
@@ -49,9 +53,18 @@ if [[ "${1-}" == "--help" ]]; then
   exit 0
 fi
 
-printf 'invocation\t%s\tHARN_BIN=%s\n' "$*" "${HARN_BIN-__unset__}" >> "$FAKE_AUDIT_RECORD"
+printf 'invocation\t%s\tHARN_BIN=%s\tHARN_TEST_JOBS=%s\n' \
+  "$*" "${HARN_BIN-__unset__}" "${HARN_TEST_JOBS-__unset__}" >> "$FAKE_AUDIT_RECORD"
 
 case "$*" in
+  test-harn-scripts)
+    if [[ "${FAKE_SCRIPT_TEST_FAIL-0}" == "1" ]]; then
+      echo "make: *** [Makefile:552: test-harn-scripts] Error 48" >&2
+      exit 48
+    fi
+    printf 'fake Harn script suite ok\n'
+    exit 0
+    ;;
   check-test-case-performance)
     if [[ "$(wc -l < "$FAKE_CONFORMANCE_RECORD" | tr -d ' ')" != "1" ]]; then
       echo "performance gate started before conformance completed" >&2
@@ -64,7 +77,14 @@ case "$*" in
     printf 'fake performance gate ok\n'
     exit 0
     ;;
-  -j3\ -k\ -Otarget\ *|-j1\ -k\ -Otarget\ *)
+  -j2\ -k\ -Otarget\ *|-j1\ -k\ -Otarget\ *)
+    if [[ "${FAKE_AUDIT_FAIL_BEFORE_BARRIER-0}" == "1" ]]; then
+      exec 4< "$FAKE_CONFORMANCE_READY_FIFO"
+      IFS= read -r <&4
+      exec 4<&-
+      echo "make: *** [Makefile:314: fmt-harn] Error 49" >&2
+      exit 49
+    fi
     touch "$FAKE_AUDIT_ROOT/audit.started"
     if [[ "${FAKE_SPLIT_PHASE-0}" != "1" ]]; then
       exec 3< "$FAKE_CONFORMANCE_START_FIFO_DIR/runner"
@@ -90,7 +110,7 @@ esac
 SH
 chmod +x "$fake_bin/make"
 
-AUDIT_GATES_CONCURRENCY=3 \
+AUDIT_GATES_CONCURRENCY=4 \
   HARN_CONFORMANCE_JOBS=3 \
   HARN_BIN="$fake_harn" \
   FAKE_AUDIT_RECORD="$record" \
@@ -128,8 +148,14 @@ if ! grep -Fq "$expected" "$tmp_root/conformance-record.txt"; then
   cat "$tmp_root/conformance-record.txt" >&2
   exit 1
 fi
-if ! grep -Fq $'\t-j3 -k -Otarget ' "$record"; then
-  echo "audit gates did not use the configured make fanout" >&2
+if ! grep -Fq $'\t-j2 -k -Otarget ' "$record"; then
+  echo "audit gates did not reserve a worker for the nested script suite" >&2
+  cat "$record" >&2
+  exit 1
+fi
+if ! grep -Fq $'invocation\ttest-harn-scripts\t' "$record" \
+  || ! grep -Fq $'HARN_TEST_JOBS=2' "$record"; then
+  echo "Harn script suite did not receive its reserved share of the audit budget" >&2
   cat "$record" >&2
   exit 1
 fi
@@ -193,7 +219,7 @@ split_audit_record="$tmp_root/split-audit-record.txt"
 split_audit_conformance_record="$tmp_root/split-audit-conformance-record.txt"
 : > "$split_audit_conformance_record"
 FAKE_SPLIT_PHASE=1 \
-  AUDIT_GATES_CONCURRENCY=3 \
+  AUDIT_GATES_CONCURRENCY=4 \
   HARN_CONFORMANCE_JOBS=3 \
   HARN_BIN="$fake_harn" \
   FAKE_AUDIT_RECORD="$split_audit_record" \
@@ -206,8 +232,13 @@ if [[ -s "$split_audit_conformance_record" ]]; then
   echo "audit worker also ran conformance" >&2
   exit 1
 fi
-if ! grep -Fq $'\t-j3 -k -Otarget ' "$split_audit_record"; then
-  echo "audit worker omitted its independent fanout" >&2
+if ! grep -Fq $'\t-j2 -k -Otarget ' "$split_audit_record"; then
+  echo "audit worker omitted its bounded ordinary-gate fanout" >&2
+  exit 1
+fi
+if ! grep -Fq $'invocation\ttest-harn-scripts\t' "$split_audit_record" \
+  || ! grep -Fq $'HARN_TEST_JOBS=2' "$split_audit_record"; then
+  echo "split audit worker omitted the bounded script-test pool" >&2
   exit 1
 fi
 if grep -Fq $'invocation\tcheck-test-case-performance' "$split_audit_record"; then
@@ -360,6 +391,36 @@ for gate in fmt-harn check-source-file-lengths; do
 done
 if ! grep -Fq "does NOT mean this job passed" <<<"$tail_out"; then
   echo "the tail does not warn that a passing conformance line is not a passing job" >&2
+  exit 1
+fi
+
+# If the ordinary fanout fails before the conformance-side barrier is opened,
+# the runner must cancel and reap the Harn child. This is the exact shape that
+# previously left a FIFO-blocked child reparented to PID 1 after the wrapper's
+# temporary directory had already been removed.
+early_failure_termination="$tmp_root/early-failure-termination.txt"
+early_failure_ready_fifo="$tmp_root/early-failure-ready"
+: > "$early_failure_termination"
+: > "$tmp_root/early-failure-conformance-record.txt"
+mkfifo "$early_failure_ready_fifo"
+if AUDIT_GATES_CONCURRENCY=3 \
+  HARN_CONFORMANCE_JOBS=3 \
+  HARN_BIN="$fake_harn" \
+  FAKE_AUDIT_RECORD="$tmp_root/early-failure-audit-record.txt" \
+  FAKE_CONFORMANCE_RECORD="$tmp_root/early-failure-conformance-record.txt" \
+  FAKE_CHILD_TERMINATED_RECORD="$early_failure_termination" \
+  FAKE_CONFORMANCE_READY_FIFO="$early_failure_ready_fifo" \
+  FAKE_AUDIT_ROOT="$tmp_root" \
+  FAKE_CONFORMANCE_START_FIFO_DIR="$conformance_start_fifo_dir" \
+  FAKE_AUDIT_FAIL_BEFORE_BARRIER=1 \
+  PATH="$fake_bin:$PATH" \
+  "$repo_root/scripts/audit_gates.sh" > "$tmp_root/early-failure.out" 2>&1; then
+  echo "audit_gates masked an early ordinary-gate failure" >&2
+  exit 1
+fi
+if ! grep -Fxq "terminated" "$early_failure_termination"; then
+  echo "audit_gates did not cancel and reap the blocked conformance child" >&2
+  cat "$tmp_root/early-failure.out" >&2
   exit 1
 fi
 

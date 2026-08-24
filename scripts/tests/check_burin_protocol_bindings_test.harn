@@ -52,6 +52,7 @@ pipeline test_normalize_protocol_text_line_endings(harness: Harness, task) {
 }
 
 @test
+@heavy(threads: 2)
 pipeline test_matching_bindings_pass_after_consumer_normalization(harness: Harness, task) {
   with_temp_dir(
     harness.fs,
