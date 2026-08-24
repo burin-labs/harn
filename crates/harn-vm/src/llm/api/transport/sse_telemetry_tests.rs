@@ -198,8 +198,15 @@ async fn first_frame_latency_measures_the_wait_before_the_first_frame() {
     let (reader, mut writer) = tokio::io::duplex(4096);
     let (delta_tx, _delta_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
     let request_origin = tokio::time::Instant::now();
-    let first = format!("data: {}\n", terminal_content_chunk());
-    let rest = format!("data: {}\ndata: [DONE]\n", usage_chunk(None));
+    // The opening frame must NOT be terminal. A `finish_reason` on it ends the
+    // read loop, the reader drops its half of the duplex, and the second write
+    // fails with `BrokenPipe` instead of measuring anything.
+    let first = format!("data: {}\n", content_chunk(None));
+    let rest = format!(
+        "data: {}\ndata: {}\ndata: [DONE]\n",
+        terminal_content_chunk(),
+        usage_chunk(None)
+    );
 
     let (result, ()) = tokio::join!(
         consume_sse_lines_with_policy(
@@ -211,10 +218,12 @@ async fn first_frame_latency_measures_the_wait_before_the_first_frame() {
             None,
             None,
             false,
+            // Effectively no deadline: this test advances virtual time by
+            // seconds and must not race the liveness policy.
             StreamDeadlinePolicy::for_test(
-                Duration::from_secs(600),
-                Duration::from_secs(600),
-                Duration::from_secs(600),
+                Duration::from_hours(1),
+                Duration::from_hours(1),
+                Duration::from_hours(1),
             ),
             None,
             request_origin,
