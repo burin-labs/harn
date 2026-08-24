@@ -194,11 +194,13 @@ fn __strip_absent(report: dict) -> dict {
   let cleaned_references = []
   for reference in references {
     const r = __safe_dict(reference)
-    cleaned_references = cleaned_references.appending({
-      from: __safe_string(r["from"], ""),
-      to: __safe_string(r["to"], ""),
-      name: __safe_string(r["name"], ""),
-    })
+    cleaned_references = cleaned_references.appending(
+      {
+        from: __safe_string(r["from"], ""),
+        to: __safe_string(r["to"], ""),
+        name: __safe_string(r["name"], ""),
+      },
+    )
   }
   const indexed_in = __safe_dict(report["indexed"])
   const indexed = {
