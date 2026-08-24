@@ -165,7 +165,7 @@ where
     let mut audited_models = 0;
 
     for (model_id, model) in models {
-        if model.pricing.is_none() {
+        if model.pricing.is_none() || model.is_embedding_model() {
             continue;
         }
         audited_models += 1;

@@ -16261,13 +16261,12 @@
           "text"
         ],
         "output": [
-          "text"
+          "embedding"
         ]
       },
       "tool_support": {
         "native": false,
-        "text": true,
-        "parity_source": "derived",
+        "text": false,
         "tool_search": []
       },
       "structured_output": "none",
@@ -28433,7 +28432,6 @@
         "batch",
         "streaming",
         "structured_output_mode:none",
-        "text_tools",
         "tools"
       ]
     },

@@ -987,6 +987,15 @@ fn generated_catalog_expresses_embeddings_endpoint_and_model_dims() {
         .expect("embedding model row");
     assert_eq!(model.embedding_dim, Some(1536));
     assert_eq!(model.embedding_max_tokens, Some(8191));
+    assert_eq!(model.modalities.output, vec!["embedding"]);
+    assert!(!model.tool_support.native);
+    assert!(!model.tool_support.text);
+    assert_eq!(model.tool_support.preferred_format, None);
+    assert_eq!(model.tool_support.parity, None);
+    assert_eq!(model.tool_support.parity_source, None);
+    assert_eq!(model.tool_support.parity_notes, None);
+    assert!(model.tool_support.tool_search.is_empty());
+    assert_eq!(model.tool_support.max_tools, None);
 }
 
 #[test]

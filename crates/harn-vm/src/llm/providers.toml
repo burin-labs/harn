@@ -2699,6 +2699,7 @@ pricing = { input_per_mtok = 0.02, output_per_mtok = 0.00 }
 tier = "small"
 open_weight = false
 strengths = ["embeddings"]
+
 [models."gpt-4-turbo"]
 name = "GPT-4 Turbo"
 provider = "openai"

@@ -435,6 +435,7 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `openai` | `o3` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openai` | `o3-mini` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openai` | `o4-mini` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `openai` | `text-embedding-3-small` | `not supported` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `Qwen/Qwen3.5-9B` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `anthropic/claude-fable-5` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `anthropic/claude-haiku-4-5` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
