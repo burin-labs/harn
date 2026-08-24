@@ -721,7 +721,9 @@ keys bare and keeps non-identifier string keys quoted (for example,
 
 ## Operator precedence table
 
-From lowest to highest binding:
+The table runs from lowest to highest binding. Operators with higher binding
+group first. For example, `a && b || c` parses as `(a && b) || c` because `&&`
+binds more tightly than `||`.
 
 | Precedence | Operators | Associativity | Description |
 |---|---|---|---|
