@@ -242,7 +242,7 @@ pub(super) fn boundary_failure(event: &AgentEvent) -> serde_json::Value {
     };
     let mut payload = serde_json::json!({
         "boundary": boundary.as_str(),
-        "kind": kind.as_str(),
+        "failureKind": kind.as_str(),
         "owner": owner,
         "detail": detail,
         "droppedCount": dropped_count,

@@ -328,7 +328,7 @@ pub(super) fn handle(sink: &AcpAgentEventSink, event: &AgentEvent) {
         } => {
             let mut payload = serde_json::json!({
                 "iteration": iteration,
-                "kind": kind,
+                "checkpointKind": kind,
                 "delivered": delivered,
             });
             if *inbox_delivered > 0 {

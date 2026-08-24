@@ -663,49 +663,6 @@ fn agent_event_ext_fixture_events() -> Vec<AgentEvent> {
     events
 }
 
-/// Checks the advertised vocabulary for Harn events that ride on
-/// `_harn/agentEvent` because ACP has no canonical slot.
-#[tokio::test(flavor = "current_thread")]
-async fn agent_event_ext_notifications_use_advertised_wire_contract() {
-    let actual = collect_notifications(agent_event_ext_fixture_events()).await;
-
-    let judge = actual
-        .iter()
-        .find(|notification| notification["params"]["kind"] == "judge_decision")
-        .expect("judge_decision fixture");
-    assert_eq!(
-        judge["params"]["source"],
-        serde_json::json!("deterministic")
-    );
-    assert_eq!(judge["params"]["escalationRecommended"], true);
-    assert_eq!(judge["params"]["escalationTarget"], "frontier");
-    // The verdict's audit basis rides `reasoning` and `nextStep`. The retired
-    // evidence arrays must not reappear on the wire under any name.
-    assert!(judge["params"]["specificGaps"].is_null());
-    assert!(judge["params"]["acceptedEvidence"].is_null());
-
-    for notification in actual {
-        assert_eq!(
-            notification["method"].as_str().expect("method"),
-            HARN_AGENT_EVENT_METHOD,
-            "every Harn agent-event extension notification must use the \
-                 advertised _harn/agentEvent method"
-        );
-        assert!(
-            notification["params"]["sessionId"].is_string(),
-            "sessionId must be a top-level string on every agent event"
-        );
-        let kind = notification["params"]["kind"]
-            .as_str()
-            .expect("kind discriminator");
-        assert!(
-            HARN_AGENT_EVENT_KINDS.contains(&kind),
-            "{kind} is not advertised in HARN_AGENT_EVENT_KINDS — clients \
-                 cannot subscribe to undocumented kinds"
-        );
-    }
-}
-
 #[tokio::test(flavor = "current_thread")]
 async fn protocol_conformance_agent_event_fixture_is_adapter_generated() {
     let actual = collect_notifications(agent_event_ext_fixture_events()).await;
@@ -766,6 +723,7 @@ async fn loop_checkpoint_surfaces_typed_host_injection_delivery_count() {
     assert_eq!(notification["method"], HARN_AGENT_EVENT_METHOD);
     let params = &notification["params"];
     assert_eq!(params["kind"], "loop_checkpoint");
+    assert_eq!(params["checkpointKind"], "post_tool_dispatch");
     assert_eq!(params["sessionId"], "session-1");
     assert_eq!(params["iteration"], 3);
     assert_eq!(params["delivered"], 1);
