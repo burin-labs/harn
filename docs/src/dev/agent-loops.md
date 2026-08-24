@@ -29,7 +29,9 @@ metadata, CLI protocol artifacts, A2A task status/metadata, replay run records,
 and Harn callers consume that projection instead of classifying `final_status`
 or `stop_reason` themselves. A completion judge that cannot accept before its
 deadline or policy limit produces `completion_unverified`; A2A projects that to
-`failed`. A2A suspension remains wire-compatible as `working` plus
+`failed`. Text-only nudge exhaustion produces `policy_no_progress`, while a
+stall-governor hard stop after repeated equivalent actions or observations
+produces `policy_thrash`. A2A suspension remains wire-compatible as `working` plus
 `metadata.harn.pause` until the proposed paused state is standardized.
 
 ## Tool registries

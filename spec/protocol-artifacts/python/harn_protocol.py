@@ -600,6 +600,7 @@ class AgentTerminalKind(str, Enum):
     POLICY_BUDGET = "policy_budget"
     COMPLETION_UNVERIFIED = "completion_unverified"
     POLICY_NO_PROGRESS = "policy_no_progress"
+    POLICY_THRASH = "policy_thrash"
     POLICY_GUARDRAIL = "policy_guardrail"
     POLICY_STOP = "policy_stop"
     PROVIDER_ERROR = "provider_error"

@@ -38,9 +38,11 @@ pub enum AgentTerminalKind {
     /// Completion was proposed but could not be verified before a judge
     /// deadline or policy limit. This is a failed completion, not a cancel.
     CompletionUnverified,
-    /// A no-progress policy stopped the loop: a thrash/stall hard stop or the
-    /// text-only nudge budget.
+    /// The text-only nudge budget stopped a loop that did not issue actions.
     PolicyNoProgress,
+    /// The stall governor stopped a loop after repeated equivalent actions or
+    /// observations crossed its hard-stop threshold.
+    PolicyThrash,
     /// A guardrail policy stopped the loop: an input tripwire or an
     /// out-of-scope alert.
     PolicyGuardrail,
@@ -62,12 +64,13 @@ pub enum AgentTerminalKind {
 }
 
 impl AgentTerminalKind {
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 12] = [
         Self::Natural,
         Self::UserCancelled,
         Self::PolicyBudget,
         Self::CompletionUnverified,
         Self::PolicyNoProgress,
+        Self::PolicyThrash,
         Self::PolicyGuardrail,
         Self::PolicyStop,
         Self::ProviderError,
@@ -83,6 +86,7 @@ impl AgentTerminalKind {
             Self::PolicyBudget => "policy_budget",
             Self::CompletionUnverified => "completion_unverified",
             Self::PolicyNoProgress => "policy_no_progress",
+            Self::PolicyThrash => "policy_thrash",
             Self::PolicyGuardrail => "policy_guardrail",
             Self::PolicyStop => "policy_stop",
             Self::ProviderError => "provider_error",
@@ -108,6 +112,7 @@ impl AgentTerminalKind {
             Self::UserCancelled => super::AgentLifecycleState::Cancelled,
             Self::PolicyBudget
             | Self::PolicyNoProgress
+            | Self::PolicyThrash
             | Self::PolicyGuardrail
             | Self::PolicyStop => super::AgentLifecycleState::Stopped,
             Self::CompletionUnverified
@@ -128,6 +133,7 @@ impl AgentTerminalKind {
             Self::PolicyBudget
             | Self::CompletionUnverified
             | Self::PolicyNoProgress
+            | Self::PolicyThrash
             | Self::PolicyGuardrail
             | Self::PolicyStop => "policy",
             Self::ProviderError => "provider",
@@ -310,6 +316,7 @@ pub fn classify_agent_terminal_with_class(
         // confirmed — a budget policy stop, not a hard error.
         "budget_exhausted" | "verify_exhausted" => AgentTerminalKind::PolicyBudget,
         "completion_unverified" => AgentTerminalKind::CompletionUnverified,
+        "stuck" if stop_reason == "thrash_hard_stop" => AgentTerminalKind::PolicyThrash,
         "stuck" => AgentTerminalKind::PolicyNoProgress,
         // `input_guardrail`/`scope_alert` come from the loop's guardrail arms;
         // `blocked` is the UserPromptSubmit-hook block result. All three are a
@@ -375,6 +382,7 @@ mod tests {
                 "completion_unverified",
             ),
             (AgentTerminalKind::PolicyNoProgress, "policy_no_progress"),
+            (AgentTerminalKind::PolicyThrash, "policy_thrash"),
             (AgentTerminalKind::PolicyGuardrail, "policy_guardrail"),
             (AgentTerminalKind::PolicyStop, "policy_stop"),
             (AgentTerminalKind::ProviderError, "provider_error"),
@@ -413,6 +421,7 @@ mod tests {
         for kind in [
             AgentTerminalKind::PolicyBudget,
             AgentTerminalKind::PolicyNoProgress,
+            AgentTerminalKind::PolicyThrash,
             AgentTerminalKind::PolicyGuardrail,
             AgentTerminalKind::PolicyStop,
         ] {
@@ -445,6 +454,7 @@ mod tests {
         assert_eq!(AgentTerminalKind::RuntimeError.owner(), "harness");
         assert_eq!(AgentTerminalKind::PolicyStop.owner(), "policy");
         assert_eq!(AgentTerminalKind::CompletionUnverified.owner(), "policy");
+        assert_eq!(AgentTerminalKind::PolicyThrash.owner(), "policy");
     }
 
     #[test]
@@ -502,6 +512,10 @@ mod tests {
         );
         assert_eq!(
             classify_agent_terminal("stuck", "thrash_hard_stop", false, None),
+            AgentTerminalKind::PolicyThrash,
+        );
+        assert_eq!(
+            classify_agent_terminal("stuck", "max_nudges", false, None),
             AgentTerminalKind::PolicyNoProgress,
         );
         assert_eq!(

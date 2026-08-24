@@ -1046,6 +1046,7 @@ fn final_status_projects_onto_the_run_record_vocabulary() {
         ("policy_stop", "stopped"),
         ("policy_budget", "stopped"),
         ("policy_no_progress", "stopped"),
+        ("policy_thrash", "stopped"),
         ("policy_guardrail", "stopped"),
         ("completion_unverified", "failed"),
         ("provider_error", "failed"),

@@ -2513,6 +2513,7 @@ pub const AGENT_TERMINAL_KIND_USER_CANCELLED: &str = "user_cancelled";
 pub const AGENT_TERMINAL_KIND_POLICY_BUDGET: &str = "policy_budget";
 pub const AGENT_TERMINAL_KIND_COMPLETION_UNVERIFIED: &str = "completion_unverified";
 pub const AGENT_TERMINAL_KIND_POLICY_NO_PROGRESS: &str = "policy_no_progress";
+pub const AGENT_TERMINAL_KIND_POLICY_THRASH: &str = "policy_thrash";
 pub const AGENT_TERMINAL_KIND_POLICY_GUARDRAIL: &str = "policy_guardrail";
 pub const AGENT_TERMINAL_KIND_POLICY_STOP: &str = "policy_stop";
 pub const AGENT_TERMINAL_KIND_PROVIDER_ERROR: &str = "provider_error";
@@ -2527,6 +2528,7 @@ pub const AGENT_TERMINAL_KINDS: &[&str] = &[
     "policy_budget",
     "completion_unverified",
     "policy_no_progress",
+    "policy_thrash",
     "policy_guardrail",
     "policy_stop",
     "provider_error",

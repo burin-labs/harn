@@ -158,6 +158,7 @@ export const AGENT_TERMINAL_KINDS = [
   "policy_budget",
   "completion_unverified",
   "policy_no_progress",
+  "policy_thrash",
   "policy_guardrail",
   "policy_stop",
   "provider_error",
