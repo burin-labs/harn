@@ -1235,7 +1235,7 @@ fn compile_synthesized_tool_closure(id: &str) -> Result<VmValue, VmError> {
             "tool_synthesize: internal closure source had no function".to_string(),
         ));
     };
-    let mut compiler = crate::Compiler::new();
+    let mut compiler = crate::Compiler::new_runtime_owned_source();
     let func = compiler
         .compile_fn_body(
             fn_node.0,

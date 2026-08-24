@@ -355,7 +355,10 @@ where
     T: DeserializeOwned,
 {
     let source = format!("pipeline default(harness: Harness) {{\n  return {expr}\n}}\n");
-    let chunk = harn_vm::compile_source(&source)?;
+    let program = harn_parser::check_source_strict(&source).map_err(|error| error.to_string())?;
+    let chunk = harn_vm::Compiler::new_runtime_owned_source()
+        .compile(&program)
+        .map_err(|error| error.to_string())?;
     let value = vm
         .execute(&chunk)
         .await

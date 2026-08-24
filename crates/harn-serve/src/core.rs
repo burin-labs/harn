@@ -1489,8 +1489,8 @@ pub fn whoami(harness: Harness) -> string {
         std::fs::write(
             &script,
             r"
-pub fn actor_chain() -> any {
-  return agent_session_actor_chain()
+pub fn actor_chain(harness: Harness) -> any {
+  return harness.agent.actor_chain()
 }
 ",
         )
