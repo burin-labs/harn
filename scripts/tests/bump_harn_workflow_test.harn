@@ -142,18 +142,16 @@ fn bump_workflow_errors(workflow, text: string) -> list<string> {
   }
   errors = errors
     + refresh_order_errors(
-    command,
-    migration,
-    safe_repairs,
-    caller_refresh,
-    format_migration,
-    refresh_sentinel,
-  )
+      command,
+      migration,
+      safe_repairs,
+      caller_refresh,
+      format_migration,
+      refresh_sentinel,
+    )
   if !command.contains(refresh_pipeline) {
     errors = errors
-      + [
-      "format migration must remain outside the optional behavior-preserving repair pass",
-    ]
+      + ["format migration must remain outside the optional behavior-preserving repair pass"]
   }
   if text.contains("HARN_BUMP_REFRESH: $" + "{{ inputs.refresh-command }}") {
     errors = errors + ["refresh-command must not bypass the fail-closed sentinel wrapper"]
