@@ -238,6 +238,7 @@ mod tests {
                 Duration::from_secs(10),
                 Duration::from_secs(10),
             ),
+            tokio::time::Instant::now(),
         );
         tokio::time::advance(Duration::from_secs(2)).await;
 

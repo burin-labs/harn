@@ -19,6 +19,7 @@ use super::sse::{consume_sse_lines, consume_sse_lines_with_policy};
 use crate::llm::api::DialectContract;
 use crate::llm::api::LlmResult;
 use crate::llm::capabilities::WireDialect;
+use std::time::Duration;
 
 const OBSERVED_BUILD: &str = "b9994-14d3ba45f";
 const OTHER_BUILD: &str = "b10360-48d22e295";

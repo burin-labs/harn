@@ -52,5 +52,9 @@ pipeline test_iteration_info_omits_an_unmeasured_first_frame(harness: Harness, t
     "",
   )
   assert_eq(info.response_ms, 2000)
+  // Positive control: prove the absence check can see a key that is there,
+  // so the assertion below fails for the right reason rather than because
+  // `keys().contains` never reports true.
+  assert_eq(info.keys().contains("response_ms"), true)
   assert_eq(info.keys().contains("client_first_frame_ms"), false)
 }

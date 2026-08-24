@@ -174,6 +174,7 @@ async fn openrouter_preserves_generation_id_from_response_header() {
             idle: Duration::from_hours(1),
         },
         Some("gen-from-header"),
+        tokio::time::Instant::now(),
     )
     .await
     .expect("header generation id must survive streaming parse");
