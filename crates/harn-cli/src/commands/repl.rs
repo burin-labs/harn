@@ -14,7 +14,7 @@ impl reedline::Completer for HarnCompleter {
         clippy::string_slice,
         reason = "pos is reedline's char-boundary cursor; word_start is a char start plus len_utf8"
     )]
-    fn complete(&mut self, line: &str, pos: usize) -> Vec<reedline::Suggestion> {
+    fn complete(&mut self, line: &str, pos: usize) -> reedline::CompletionResult {
         let text = &line[..pos];
         let word_start = text
             .char_indices()
@@ -23,22 +23,24 @@ impl reedline::Completer for HarnCompleter {
             .unwrap_or(0);
         let prefix = &text[word_start..];
         if prefix.is_empty() {
-            return Vec::new();
+            return reedline::CompletionResult::fresh(Vec::new());
         }
 
-        self.keywords
-            .iter()
-            .filter(|kw| kw.starts_with(prefix) && kw.as_str() != prefix)
-            .map(|kw| reedline::Suggestion {
-                value: kw.clone(),
-                description: None,
-                style: None,
-                extra: None,
-                span: reedline::Span::new(word_start, pos),
-                append_whitespace: true,
-                ..Default::default()
-            })
-            .collect()
+        reedline::CompletionResult::fresh(
+            self.keywords
+                .iter()
+                .filter(|kw| kw.starts_with(prefix) && kw.as_str() != prefix)
+                .map(|kw| reedline::Suggestion {
+                    value: kw.clone(),
+                    description: None,
+                    style: None,
+                    extra: None,
+                    span: reedline::Span::new(word_start, pos),
+                    append_whitespace: true,
+                    ..Default::default()
+                })
+                .collect::<Vec<_>>(),
+        )
     }
 }
 
@@ -475,7 +477,21 @@ async fn run_repl_interactive() {
 
 #[cfg(test)]
 mod tests {
-    use super::{repl_builtin_names, scan_input_state, HarnValidator};
+    use super::{repl_builtin_names, scan_input_state, HarnCompleter, HarnValidator};
+
+    #[test]
+    fn completer_returns_fresh_keyword_suggestions() {
+        let mut completer = HarnCompleter {
+            keywords: vec!["return".to_string()],
+        };
+
+        let result = reedline::Completer::complete(&mut completer, "ret", 3);
+
+        assert!(!result.is_provisional());
+        assert_eq!(result.suggestions().len(), 1);
+        assert_eq!(result.suggestions()[0].value, "return");
+        assert_eq!(result.suggestions()[0].span, reedline::Span::new(0, 3));
+    }
 
     #[test]
     fn validator_marks_unclosed_delimiters_incomplete() {
