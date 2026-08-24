@@ -49,6 +49,22 @@ silent on a question of usage, the
 [Microsoft writing style guide](https://learn.microsoft.com/en-us/style-guide/welcome/)
 is the second opinion. Neither overrides a rule below.
 
+Harn does not write in
+[ASD-STE100 Simplified Technical English](https://asd-ste100.org/). That
+standard is built around a roughly 900-word approved dictionary aimed at
+aerospace procedures read by non-native speakers, and it is ASD-copyrighted
+rather than openly licensed, so it cannot be vendored here. Four of its rules
+are worth keeping anyway, because they are checkable rather than a matter of
+taste:
+
+- Cap noun clusters at three words. “Provider capability matrix generation
+  policy” is five; name the thing instead.
+- Keep instructions under about 20 words per sentence, and descriptive prose
+  under about 25.
+- Use active voice in tutorials and how-to guides. Passive is fine in
+  explanation when the actor is genuinely irrelevant.
+- Give a word one meaning across the page, and one part of speech.
+
 - Use plain verbs: “is,” “has,” “runs,” and “writes.”
 - Use common contractions: “it's,” “you're,” “that's,” “doesn't,” “can't.”
   Contract negations especially — a reader scanning a page skips over “not”
