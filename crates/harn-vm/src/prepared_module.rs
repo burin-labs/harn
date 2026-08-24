@@ -724,10 +724,19 @@ pub fn exercise(value: any) -> string {
         // a key an earlier run already stored: it passes cold and reads zero
         // compilations warm. Trusted modules used to skip the disk cache
         // entirely, which hid this by making the test hermetic by accident.
-        let nonce = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("system clock after the unix epoch")
-            .as_nanos();
+        //
+        // What this needs is uniqueness, not time, so it takes the randomness
+        // `tempfile` already uses to name a directory no other process holds.
+        // A clock would be a flaky-test pattern, and a pid plus a counter can
+        // repeat once the OS recycles that pid against a cache that outlives
+        // the run.
+        let nonce_dir = tempfile::tempdir().expect("temp dir for a unique module identity");
+        let nonce = nonce_dir
+            .path()
+            .file_name()
+            .expect("temp dir has a final component")
+            .to_string_lossy()
+            .into_owned();
         let source = Arc::new(ModuleSource::from_text(
             std::iter::once(format!("// {nonce}\n"))
                 .chain(
