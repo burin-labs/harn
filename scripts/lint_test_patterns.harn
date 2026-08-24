@@ -380,6 +380,10 @@ const NON_TEST_WALL_CLOCK_ALLOWLIST: list<string> = [
   "crates/harn-vm/src/http/client.rs",
   "crates/harn-vm/src/http/streaming/websocket.rs",
   "crates/harn-vm/src/llm/agent_observe.rs",
+  // HTTP-date Retry-After values are defined against the provider's real wall
+  // clock. The parser converts that absolute date into a host-relative delay;
+  // an injected VM clock would make provider throttling incorrect.
+  "crates/harn-vm/src/llm/api/errors.rs",
   // Split children preserve the parent observability contracts: transcript
   // timestamps and streamed tool-call coalescing use host time as the source
   // of truth, rather than VM-scheduled time.
