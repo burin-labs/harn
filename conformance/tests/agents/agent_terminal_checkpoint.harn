@@ -1,5 +1,6 @@
 import { agent_capture_events } from "std/agent/events"
 import { agent_loop } from "std/agent/loop"
+import { llm_text, with_llm_script } from "std/testing"
 
 fn terminal_checkpoint(events: list) -> dict {
   for event in events {
@@ -47,6 +48,26 @@ fn run_sentinel_case(harness: Harness, session_id: string) -> dict {
   )
 }
 
+fn failing_tools() {
+  return tool_define(
+    tool_registry(),
+    "fail",
+    "Return the same read error.",
+    {
+      handler: { _args ->
+        throw "same read error"
+      },
+      parameters: {path: {type: "string"}},
+      returns: {type: "string"},
+      annotations: {kind: "read"},
+    },
+  )
+}
+
+fn failing_call(id: string) {
+  return {text: "", tool_calls: [{id: id, name: "fail", arguments: {path: "missing.txt"}}]}
+}
+
 pipeline default(harness: Harness) {
   const natural = run_case(harness, "terminal-natural-" + harness.random.uuid(), nil)
   const natural_checkpoint = terminal_checkpoint(natural.events)
@@ -68,4 +89,66 @@ pipeline default(harness: Harness) {
   harness.stdio.println("policy=" + policy_checkpoint.terminal.kind)
   harness.stdio.println("policy_owner=" + policy_checkpoint.terminal.owner)
   harness.stdio.println("policy_reason=" + policy_checkpoint.terminal.reason)
+  with_llm_script(
+    harness.llm,
+    [llm_text("I will keep thinking about the next step.")],
+    { ->
+      const session = "terminal-no-progress-" + harness.random.uuid()
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(
+          harness,
+          "Take an action.",
+          nil,
+          {
+            provider: "mock",
+            session_id: session,
+            loop_until_done: true,
+            max_iterations: 3,
+            max_nudges: 0,
+            final_wrapup: false,
+          },
+        ) },
+      )
+      const checkpoint = terminal_checkpoint(captured.events)
+      harness.stdio.println("no_progress=" + checkpoint.terminal.kind)
+      harness.stdio.println("no_progress_reason=" + checkpoint.terminal.reason)
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [failing_call("fail-1"), failing_call("fail-2"), failing_call("fail-3")],
+    { ->
+      const session = "terminal-thrash-" + harness.random.uuid()
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(
+          harness,
+          "Read the missing file.",
+          nil,
+          {
+            provider: "mock",
+            session_id: session,
+            tools: failing_tools(),
+            tool_format: "native",
+            loop_until_done: true,
+            max_iterations: 5,
+            final_wrapup: false,
+            stall_diagnostics: {
+              enabled: true,
+              repeat_same_error: 2,
+              hard_stop_after_trips: 1,
+              inject_feedback: true,
+              max_feedback: 1,
+            },
+          },
+        ) },
+      )
+      const checkpoint = terminal_checkpoint(captured.events)
+      harness.stdio.println("thrash=" + checkpoint.terminal.kind)
+      harness.stdio.println("thrash_reason=" + checkpoint.terminal.reason)
+    },
+  )
 }

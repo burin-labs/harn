@@ -13,6 +13,8 @@ pub type ReleaseMetadataPlan = {
   package_names: list<string>,
 }
 
+const DEVELOPMENT_PRERELEASE = "dev"
+
 type PackageManifestProjection = {package: {name: string}}
 
 type AgentArchiveProjection = {archive: string}
@@ -90,6 +92,34 @@ pub fn current_version(fs: HarnessFs, root: string) -> string {
     throw "missing workspace manifest: " + path
   }
   return workspace_version_from_doc(toml_parse(fs.read_text(path)))
+}
+
+/** Project a stable release into the next patch's development identity. */
+pub fn development_version_from_stable(version: string) -> string {
+  const parsed = semver.parse(version)
+  if parsed == nil {
+    throw "development version requires stable release SemVer: " + version
+  }
+  return to_string(parsed.major)
+    + "."
+    + to_string(parsed.minor)
+    + "."
+    + to_string(parsed.patch + 1)
+    + "-"
+    + DEVELOPMENT_PRERELEASE
+}
+
+/** Strip the one prerelease identity admitted at the stable-release boundary. */
+pub fn stable_version_from_development(version: string) -> string {
+  const parsed = semver.parse_release(version)
+  if parsed == nil || parsed.prerelease != DEVELOPMENT_PRERELEASE {
+    throw "release requires an exact X.Y.Z-dev workspace version: " + version
+  }
+  return to_string(parsed.major)
+    + "."
+    + to_string(parsed.minor)
+    + "."
+    + to_string(parsed.patch)
 }
 
 fn workspace_entries(doc, key: string) -> list<string> {
@@ -196,7 +226,12 @@ fn replace_workspace_version(text: string, current: string, next: string) -> str
   return regex_replace(pattern, "version = \"" + next + "\"", text)
 }
 
-fn rewrite_agent_manifest(fs: HarnessFs, root: string, current: string, next: string) -> nil {
+fn rewrite_agent_manifest(
+  fs: HarnessFs,
+  root: string,
+  expected_current: string?,
+  next: string,
+) -> nil {
   const path = path_join(root, "spec/acp-registry/harn/agent.json")
   if !fs.exists(path) {
     return nil
@@ -206,8 +241,12 @@ fn rewrite_agent_manifest(fs: HarnessFs, root: string, current: string, next: st
     json_parse(original),
     agent_manifest_projection_schema(),
   )
-  if doc.version != current {
+  if expected_current != nil && doc.version != expected_current {
     throw "agent manifest version does not match workspace version"
+  }
+  const current = doc.version
+  if semver.parse(current) == nil {
+    throw "agent manifest distribution version must be stable SemVer"
   }
   const binary = doc.distribution.binary
   if binary.entries().count == 0 {
@@ -273,12 +312,45 @@ pub fn release_metadata_plan(
   const current = current_version(fs, root)
   const manifests = workspace_package_manifests(fs, root)
   const names = package_names_for_manifests(fs, manifests)
+  const next = if current.ends_with("-" + DEVELOPMENT_PRERELEASE) {
+    if bump != "patch" || prerelease_identifier != "" {
+      throw "development release can only strip -dev with a patch bump"
+    }
+    stable_version_from_development(current)
+  } else {
+    semver.next(current, bump, prerelease_identifier)
+  }
   return {
     current_version: current,
-    next_version: semver.next(current, bump, prerelease_identifier),
+    next_version: next,
     manifests: manifests.map({ path -> normalized_rel(path, root) }).to_list(),
     package_names: names,
   }
+}
+
+/** Advance a just-released stable workspace to its next patch development identity. */
+pub fn apply_development_metadata(fs: HarnessFs, root: string) -> ReleaseMetadataPlan {
+  const current = current_version(fs, root)
+  const next = development_version_from_stable(current)
+  const manifests = workspace_package_manifests(fs, root)
+  const names = package_names_for_manifests(fs, manifests)
+  const plan: ReleaseMetadataPlan = {
+    current_version: current,
+    next_version: next,
+    manifests: manifests.map({ path -> normalized_rel(path, root) }).to_list(),
+    package_names: names,
+  }
+  const root_manifest = cargo_path(root)
+  const all_manifests = [root_manifest] + manifests
+  for manifest in all_manifests.unique() {
+    let text = fs.read_text(manifest)
+    if path_normalize(manifest) == path_normalize(root_manifest) {
+      text = replace_workspace_version(text, current, next)
+    }
+    text = rewrite_local_dependency_versions(text, names, next)
+    fs.write_text(manifest, text)
+  }
+  return plan
 }
 
 pub fn apply_release_metadata(
@@ -314,7 +386,11 @@ pub fn apply_release_metadata(
     text = rewrite_local_dependency_versions(text, plan.package_names, version)
     fs.write_text(manifest, text)
   }
-  const current_distribution = distribution_version(fs, root, current)
+  const current_distribution = if current.ends_with("-" + DEVELOPMENT_PRERELEASE) {
+    nil
+  } else {
+    distribution_version(fs, root, current)
+  }
   const next_distribution = distribution_version(fs, root, version)
   rewrite_agent_manifest(fs, root, current_distribution, next_distribution)
   rewrite_embedding_tags(fs, root, next_distribution)
@@ -382,6 +458,10 @@ fn main(harness: Harness) -> int {
   try {
     if action == "current" {
       harness.stdio.println(current_version(harness.fs, root))
+    } else if action == "development-target" {
+      harness.stdio.println(development_version_from_stable(current_version(harness.fs, root)))
+    } else if action == "release-target" {
+      harness.stdio.println(stable_version_from_development(current_version(harness.fs, root)))
     } else if action == "next" {
       const bump = to_string(parsed.options?.bump ?? "")
       const preid = to_string(parsed.options?.preid ?? "")
@@ -410,6 +490,8 @@ fn main(harness: Harness) -> int {
       } else {
         apply_release_metadata(harness.fs, root, version, bump, preid)
       }
+    } else if action == "develop" {
+      apply_development_metadata(harness.fs, root)
     } else if action == "verify-changelog" {
       const version = to_string(parsed.options?.version ?? "")
       verify_changelog_top(harness.fs.read_text(path_join(root, "CHANGELOG.md")), version)

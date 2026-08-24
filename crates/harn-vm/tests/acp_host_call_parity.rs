@@ -104,7 +104,7 @@ pub const HOST_CALL_CROSS_CUTTING: &[CrossCuttingBehaviour] = &[
                     sessions share that registry through canonical dispatch.",
     },
     CrossCuttingBehaviour {
-        callee: "async_builtin_cancel_token",
+        callee: "process_exec::async_builtin_cancel_token",
         owner: SemanticsOwner::Runtime,
         acp_observes: true,
         tracked_by: None,
@@ -112,21 +112,15 @@ pub const HOST_CALL_CROSS_CUTTING: &[CrossCuttingBehaviour] = &[
                     through the entry above, so it shares its disposition.",
     },
     CrossCuttingBehaviour {
-        callee: "turn_cache::cached_or",
+        callee: "bridge::dispatch_cached",
         owner: SemanticsOwner::Runtime,
         acp_observes: true,
         tracked_by: None,
-        rationale: "Turn boundaries are harn's; the memo lives inside canonical dispatch. \
-                    ACP observes it by keeping the stdlib builtin (harn#5523). Backed by \
+        rationale: "Harn owns turn-cache admission and canonical request projection; the \
+                    helper then delegates the resulting operation to the embedder-owned \
+                    HostCallBridge. ACP observes both through the shared stdlib builtin \
+                    (harn#5523, harn#7172). Backed by \
                     `harn-serve/src/adapters/acp/tests/host_call_turn_cache.rs`.",
-    },
-    CrossCuttingBehaviour {
-        callee: "bridge.dispatch",
-        owner: SemanticsOwner::Host,
-        acp_observes: true,
-        tracked_by: None,
-        rationale: "The embedder's own hook. ACP's AcpHostCallBridge issues `host/call` \
-                    JSON-RPC from this seam — same ownership, one dispatch path.",
     },
     CrossCuttingBehaviour {
         callee: "dispatch_builtin_host_operation",
@@ -334,7 +328,7 @@ fn runtime_owned_divergences_carry_a_tracking_issue() {
 fn the_per_turn_memo_is_observed_over_acp() {
     let memo = HOST_CALL_CROSS_CUTTING
         .iter()
-        .find(|entry| entry.callee == "turn_cache::cached_or")
+        .find(|entry| entry.callee == "bridge::dispatch_cached")
         .expect("the per-turn memo must stay in the census");
     assert_eq!(memo.owner, SemanticsOwner::Runtime);
     assert!(

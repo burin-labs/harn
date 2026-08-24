@@ -321,10 +321,10 @@ usage() {
   cat <<'EOF'
 Usage:
   ./scripts/release_gate.sh audit [--receipt path] [--source-only] [--validate-only]
-  ./scripts/release_gate.sh prepare --bump KIND [--preid ID]
+  ./scripts/release_gate.sh prepare --bump patch
   ./scripts/release_gate.sh publish [--dry-run]
   ./scripts/release_gate.sh notes [--version vX.Y.Z] [--output file]
-  ./scripts/release_gate.sh full --bump KIND [--preid ID] [--dry-run]
+  ./scripts/release_gate.sh full --bump patch [--dry-run]
 
 Commands:
   audit    Run the full audit, source-only lanes, or receipt-authorized residual lanes.
@@ -360,11 +360,11 @@ release_metadata() {
 next_version() {
   local bump="$1"
   local preid="${2:-}"
-  if [[ -n "$preid" ]]; then
-    release_metadata next --bump "$bump" --preid "$preid"
-  else
-    release_metadata next --bump "$bump"
+  if [[ "$bump" != "patch" || -n "$preid" ]]; then
+    echo "error: stable releases strip the declared X.Y.Z-dev target; use --bump patch without --preid" >&2
+    return 1
   fi
+  release_metadata release-target
 }
 
 bump_version() {
@@ -1187,11 +1187,10 @@ cmd_prepare() {
     echo "error: prepare requires --bump KIND"
     exit 1
   fi
-  case "$bump" in
-    patch|minor|major) [[ -z "$preid" ]] || { echo "error: --preid is only valid for prerelease bumps"; exit 1; } ;;
-    premajor|preminor|prepatch|prerelease) [[ -n "$preid" ]] || { echo "error: --preid is required for prerelease bumps"; exit 1; } ;;
-    *) echo "error: unsupported release bump: $bump"; exit 1 ;;
-  esac
+  if [[ "$bump" != "patch" || -n "$preid" ]]; then
+    echo "error: stable releases strip the declared X.Y.Z-dev target; use --bump patch without --preid"
+    exit 1
+  fi
   if [[ "$allow_dirty" -eq 0 ]]; then
     require_clean_tree
   fi
@@ -1211,7 +1210,7 @@ cmd_prepare() {
     unset HARN_RELEASE_CLI_AOT_GEN_BIN
     # Same reasoning, for every prepare-time `.harn` tool: snapshot one
     # exact-source CLI while the tree still matches the audited candidate, so
-    # `release_metadata current/next/apply`, protocol-fixture syncing, and
+    # `release_metadata current/release-target/apply`, protocol-fixture syncing, and
     # artifact dumping all run on one binary instead of recompiling the runtime
     # graph after each metadata mutation.
     release_gate_snapshot_prepare_tools_cli "$stable_tool_dir"
@@ -1247,8 +1246,8 @@ cmd_prepare() {
     echo "Next steps:"
     echo "  1. Review docs/release notes diff"
     echo "  2. Commit on a release/v$next branch: git commit -am 'Release v$next'"
-    echo "  3. Push the signed v$next tag at the pinned release commit"
-    echo "  4. Open the Release v$next PR and enable auto-merge"
+    echo "  3. Open the Release v$next PR and enable auto-merge"
+    echo "  4. After merge, let the watcher tag the exact main squash commit"
     echo "  5. Let the tag-triggered publish and binary workflows finish"
     echo "  6. Require Release smoke against the published artifacts:"
     echo "       ./scripts/check_release_smoke.sh v$next"

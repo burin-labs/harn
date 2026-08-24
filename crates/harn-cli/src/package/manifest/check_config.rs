@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
@@ -38,10 +37,8 @@ pub struct CheckConfig {
     pub trusted_host_dispatch: bool,
     #[serde(default)]
     pub disable_rules: Vec<String>,
-    #[serde(default)]
-    pub host_capabilities: HashMap<String, Vec<String>>,
-    #[serde(default, alias = "host_capabilities_file")]
-    pub host_capabilities_path: Option<String>,
+    #[serde(flatten)]
+    pub host: harn_modules::host_capability_config::HostCapabilityConfig,
     #[serde(default)]
     pub bundle_root: Option<String>,
     /// Downgrade or suppress preflight diagnostics. See
@@ -59,13 +56,7 @@ pub(crate) fn absolutize_check_config_paths(
     mut config: CheckConfig,
     manifest_dir: &Path,
 ) -> CheckConfig {
-    if let Some(path) = config.host_capabilities_path.clone() {
-        let candidate = PathBuf::from(&path);
-        if !candidate.is_absolute() {
-            config.host_capabilities_path =
-                Some(manifest_dir.join(candidate).display().to_string());
-        }
-    }
+    config.host = config.host.with_paths_from(manifest_dir);
     if let Some(path) = config.bundle_root.clone() {
         let candidate = PathBuf::from(&path);
         if !candidate.is_absolute() {

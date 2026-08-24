@@ -396,10 +396,11 @@ fn print_user_test_timing(summary: &test_runner::TestSummary) {
     let aggregate = summary.aggregate;
     println!();
     println!(
-        "Phase totals: collection={} ms  setup={} ms  compile={} ms  execute={} ms  teardown={} ms",
+        "Phase totals: collection={} ms  setup={} ms  compile={} ms  admission={} ms  execute={} ms  teardown={} ms",
         aggregate.collection_ms,
         aggregate.setup_ms,
         aggregate.compile_ms,
+        aggregate.admission_ms,
         aggregate.execute_ms,
         aggregate.teardown_ms,
     );

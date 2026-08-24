@@ -110,7 +110,7 @@ pub(crate) fn check_files(
     // particular, an external host-capability manifest is read and parsed once
     // per source directory instead of once per checked file.
     let config_by_dir = build_check_contexts(files, overrides);
-    run_ordered_checks(
+    let mut checked = run_ordered_checks(
         files,
         workers,
         want_text,
@@ -127,7 +127,9 @@ pub(crate) fn check_files(
                 want_text,
             )
         },
-    )
+    );
+    attach_host_reconciliation_diagnostics(files, &mut checked, &config_by_dir, want_text);
+    checked
 }
 
 /// Check a source corpus with one-file module-resolution semantics while
@@ -147,7 +149,7 @@ pub(crate) fn check_files_independently(
 ) -> Vec<CheckedFile> {
     let workers = worker_count(files.len());
     let config_by_dir = build_check_contexts(files, overrides);
-    run_ordered_checks(
+    let mut checked = run_ordered_checks(
         files,
         workers,
         want_text,
@@ -169,7 +171,85 @@ pub(crate) fn check_files_independently(
                 want_text,
             )
         },
-    )
+    );
+    attach_host_reconciliation_diagnostics(files, &mut checked, &config_by_dir, want_text);
+    checked
+}
+
+/// Report each missing host operation once per project config.
+///
+/// Attach the report to the first file so a workspace check does not repeat it
+/// for every file.
+fn attach_host_reconciliation_diagnostics(
+    files: &[PathBuf],
+    checked: &mut [CheckedFile],
+    config_by_dir: &HashMap<PathBuf, EffectiveCheckConfig>,
+    want_text: bool,
+) {
+    let mut reported = HashSet::new();
+    for (index, file) in files.iter().enumerate() {
+        let key = check_config_key(file);
+        let Some(reconciliation) = config_by_dir
+            .get(&key)
+            .and_then(|context| context.host_capabilities.reconciliation.as_ref())
+        else {
+            continue;
+        };
+        let checked_file = &mut checked[index];
+        if let Some(error) = reconciliation.error.as_ref() {
+            let report_key = format!("{}:error:{error}", reconciliation.served_path);
+            if reported.insert(report_key) {
+                attach_host_reconciliation_diagnostic(
+                    checked_file,
+                    error,
+                    "check the served operations file and each runtime-installed operation name",
+                    want_text,
+                );
+            }
+        }
+        for missing in &reconciliation.missing_operations {
+            let qualified = missing.qualified_name();
+            if !reported.insert(format!(
+                "{}:operation:{qualified}",
+                reconciliation.served_path
+            )) {
+                continue;
+            }
+            attach_host_reconciliation_diagnostic(
+                checked_file,
+                &format!(
+                    "declared host operation `{qualified}` is missing from `{}`",
+                    reconciliation.served_path
+                ),
+                "add the operation to the host, remove the declaration, or list its exact name in `runtime_installed_host_operations`",
+                want_text,
+            );
+        }
+    }
+}
+
+fn attach_host_reconciliation_diagnostic(
+    checked: &mut CheckedFile,
+    message: &str,
+    help: &str,
+    want_text: bool,
+) {
+    let code = harn_parser::diagnostic_codes::Code::CapabilityOperationUnserved;
+    checked.report.status = CheckFileStatus::Error;
+    checked.report.diagnostics.push(CheckDiagnostic {
+        source: "host-capabilities",
+        severity: "error",
+        code: Some(code.to_string()),
+        message: message.to_string(),
+        span: None,
+        help: Some(help.to_string()),
+    });
+    if want_text {
+        checked.text.rendered.push_str(&format!(
+            "{}: error[{code}]: {message}\n  help: {help}\n",
+            checked.report.path
+        ));
+    }
 }
 
 fn run_ordered_checks<State>(
@@ -406,7 +486,7 @@ fn build_check_contexts_with(
         let mut config = package::load_check_config(Some(file));
         super::apply_harn_lint_config(file, &mut config);
         if let Some(path) = overrides.host_capabilities.as_ref() {
-            config.host_capabilities_path = Some(path.clone());
+            config.host.host_capabilities_path = Some(path.clone());
         }
         if let Some(path) = overrides.bundle_root.as_ref() {
             config.bundle_root = Some(path.clone());
@@ -548,6 +628,52 @@ mod tests {
             strict: false,
             text: CheckTextOutput::default(),
         }
+    }
+
+    #[test]
+    fn shared_host_surface_reports_each_missing_operation_once() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("a")).unwrap();
+        std::fs::create_dir_all(dir.path().join("b")).unwrap();
+        std::fs::create_dir_all(dir.path().join(".git")).unwrap();
+        std::fs::write(
+            dir.path().join("harn.toml"),
+            r#"
+[check]
+host_capabilities_path = "declared.json"
+host_served_capabilities_path = "served.json"
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("declared.json"),
+            r#"{"workspace":["read_text"]}"#,
+        )
+        .unwrap();
+        std::fs::write(dir.path().join("served.json"), "{}").unwrap();
+        let files = [
+            dir.path().join("a/first.harn"),
+            dir.path().join("b/second.harn"),
+        ];
+        for file in &files {
+            std::fs::write(file, "pipeline main() {}\n").unwrap();
+        }
+
+        let contexts = build_check_contexts(&files, &CheckCliOverrides::default());
+        let mut checked = files
+            .iter()
+            .map(|file| successful_file(file))
+            .collect::<Vec<_>>();
+        attach_host_reconciliation_diagnostics(&files, &mut checked, &contexts, false);
+
+        assert_eq!(
+            checked
+                .iter()
+                .flat_map(|file| &file.report.diagnostics)
+                .filter(|diagnostic| diagnostic.code.as_deref() == Some("HARN-CAP-008"))
+                .count(),
+            1
+        );
     }
 
     #[test]

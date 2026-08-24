@@ -1613,6 +1613,12 @@ jobs:
           fi
           echo 'fn main(harness: Harness) { harness.stdio.println("ok") }' > smoke.harn
           "$harn_bin" run smoke.harn
+          node --input-type=module - "$harn_bin" <<'NODE'
+          import { installMulticallAliases } from "./scripts/bootstrap_harn.mjs";
+          installMulticallAliases(process.argv[2], "x86_64-pc-windows-msvc");
+          NODE
+          "$target_dir/debug/harn-lsp.exe" --version | grep '^harn-lsp '
+          "$target_dir/debug/harn-dap.exe" --version | grep '^harn-dap '
           printf 'windows_native_test_to_smoke_seconds=%s\n' \
             "$(( $(date +%s) - WINDOWS_NATIVE_TEST_COMPLETED_EPOCH ))"
           printf 'windows_smoke_seconds=%s\n' "$(( $(date +%s) - smoke_started ))"
@@ -1922,8 +1928,13 @@ jobs:
         id: harn-version
         shell: bash
         run: |
-          version="$(cargo metadata --locked --no-deps --format-version 1 \
+          source scripts/lib/release_version.sh
+          workspace_version="$(cargo metadata --locked --no-deps --format-version 1 \
             | jq -er '[.packages[] | select(.name == "harn-cli") | .version] | unique | if length == 1 then .[0] else error("expected one harn-cli version") end')"
+          version="$(release_published_version_for_workspace "$workspace_version")" || {
+            echo "::error::Workspace version $workspace_version has no stable published projection"
+            exit 1
+          }
           echo "version=$version" >> "$GITHUB_OUTPUT"
       - name: Install pinned Harn release
         id: harn

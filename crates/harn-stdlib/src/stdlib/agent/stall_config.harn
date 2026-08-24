@@ -506,6 +506,8 @@ pub fn agent_stall_initial_state() -> AgentStallState {
     context_window_error_streak: 0,
     parse_rejection_streak: 0,
     no_progress_streak: 0,
+    last_no_progress_signature: "",
+    last_no_progress_tokens: [],
     ping_pong_a: "",
     ping_pong_b: "",
     ping_pong_alternations: 0,

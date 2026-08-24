@@ -784,27 +784,42 @@ impl crate::vm::Vm {
             CancelTimedOut,
         }
 
-        let (deadline, deadline_kind) = next_deadline(
-            self.execution_deadline.current(),
-            self.deadlines.last().map(|(deadline, _)| *deadline),
-            self.interrupt_handler_deadline,
-        );
+        let execution_deadline = Arc::clone(&self.execution_deadline);
+        let scope_deadline = self.deadlines.last().map(|(deadline, _)| *deadline);
+        let interrupt_handler_deadline = self.interrupt_handler_deadline;
         let cancel_token = self.cancel_token.clone();
 
-        if deadline.is_none() && cancel_token.is_none() {
+        let has_deadline = execution_deadline.is_active()
+            || scope_deadline.is_some()
+            || interrupt_handler_deadline.is_some();
+        if !has_deadline && cancel_token.is_none() {
             return self.execute_op(op).await;
         }
 
-        let has_deadline = deadline.is_some();
         let cancel_requested_at_start = cancel_token
             .as_ref()
             .is_some_and(|token| token.load(std::sync::atomic::Ordering::SeqCst));
         let has_cancel = cancel_token.is_some() && !cancel_requested_at_start;
         let deadline_sleep = async move {
-            if let Some(deadline) = deadline {
-                tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)).await;
-            } else {
-                std::future::pending::<()>().await;
+            loop {
+                // Register before reading state so a pause/resume between the
+                // read and await cannot strand the deadline waiter.
+                let changed = execution_deadline.changed();
+                let (deadline, kind) = next_deadline(
+                    execution_deadline.current(),
+                    scope_deadline,
+                    interrupt_handler_deadline,
+                );
+                if let Some(deadline) = deadline {
+                    tokio::select! {
+                        _ = tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)) => {
+                            return kind.unwrap_or(DeadlineKind::Scope);
+                        }
+                        _ = changed => {}
+                    }
+                } else {
+                    changed.await;
+                }
             }
         };
         let cancel_sleep = async move {
@@ -822,8 +837,8 @@ impl crate::vm::Vm {
             tokio::pin!(op_future);
             tokio::select! {
                 result = &mut op_future => ScopeInterruptResult::Op(result),
-                _ = deadline_sleep, if has_deadline => {
-                    ScopeInterruptResult::Deadline(deadline_kind.unwrap_or(DeadlineKind::Scope))
+                kind = deadline_sleep, if has_deadline => {
+                    ScopeInterruptResult::Deadline(kind)
                 },
                 _ = cancel_sleep, if has_cancel => {
                     let grace = tokio::time::sleep(CANCEL_GRACE_ASYNC_OP);
@@ -1279,6 +1294,43 @@ fn cancelled_step(agent: HarnessAgent) {
                 ));
             })
             .await;
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn host_admission_extends_execution_deadline_by_injected_clock_delta() {
+        let chunk = compile_harn(
+            r"
+pipeline default(harness: Harness) {
+  wait_for_admission()
+  return 42
+}
+",
+        );
+        let mut vm = Vm::new();
+        register_vm_stdlib(&mut vm);
+        let clock = harn_clock::PausedClock::new(time::OffsetDateTime::UNIX_EPOCH);
+        let admission_clock: Arc<dyn harn_clock::Clock> = clock.clone();
+        vm.register_async_builtin("wait_for_admission", move |ctx, _args| {
+            let clock = Arc::clone(&clock);
+            let admission_clock = Arc::clone(&admission_clock);
+            async move {
+                let before = ctx.execution_deadline_offset_for_test();
+                let pause = ctx
+                    .pause_execution_deadline(admission_clock)
+                    .expect("timed execution exposes its outer deadline to inline host work");
+                clock.advance(Duration::from_millis(25));
+                drop(pause);
+                let after = ctx.execution_deadline_offset_for_test();
+                assert_eq!(after.saturating_sub(before), 25_000_000);
+                Ok(VmValue::Nil)
+            }
+        });
+
+        let value = vm
+            .execute_with_timeout(&chunk, Duration::from_secs(5))
+            .await
+            .expect("host admission extends rather than spends the execution budget");
+        assert!(matches!(value, VmValue::Int(42)));
     }
 
     #[tokio::test(flavor = "current_thread")]

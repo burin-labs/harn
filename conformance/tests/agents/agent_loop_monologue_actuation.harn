@@ -150,7 +150,7 @@ pipeline default(harness: Harness) {
     harness,
     [
       llm_text("I should inspect app.txt before editing."),
-      llm_text("I still need to inspect app.txt, but I am only narrating."),
+      llm_text("I should inspect APP txt before editing!"),
       lookup_call(),
       llm_text("Inspection complete. ##DONE##"),
     ],
@@ -273,7 +273,7 @@ pipeline default(harness: Harness) {
     harness,
     [
       llm_text("I should inspect app.txt before editing."),
-      llm_text("I still need to inspect app.txt, but I am only narrating."),
+      llm_text("I should inspect APP txt before editing!"),
       lookup_call("json"),
       llm_text("Inspection complete. ##DONE##"),
     ],
@@ -288,7 +288,7 @@ pipeline default(harness: Harness) {
     harness,
     [
       llm_text("I should inspect app.txt before editing."),
-      llm_text("I still need to inspect app.txt, but I am only narrating."),
+      llm_text("I should inspect APP txt before editing!"),
       lookup_call("native"),
       llm_text("Inspection complete. ##DONE##"),
     ],
@@ -319,7 +319,7 @@ pipeline default(harness: Harness) {
     harness,
     [
       llm_text("I should inspect app.txt before editing."),
-      llm_text("I still need to inspect app.txt, but I am only narrating."),
+      llm_text("I should inspect APP txt before editing!"),
       lookup_call(),
       llm_text("Inspection complete. ##DONE##"),
     ],
@@ -337,7 +337,7 @@ pipeline default(harness: Harness) {
     harness,
     [
       llm_text("I should inspect app.txt before editing."),
-      llm_text("I still need to inspect app.txt, but I am only narrating."),
+      llm_text("I should inspect APP txt before editing!"),
       lookup_call("json"),
       llm_text("Inspection complete. ##DONE##"),
     ],
@@ -355,7 +355,7 @@ pipeline default(harness: Harness) {
     harness,
     [
       llm_text("I should inspect app.txt before editing."),
-      llm_text("I still need to inspect app.txt, but I am only narrating."),
+      llm_text("I should inspect APP txt before editing!"),
       lookup_call(),
       llm_text("Inspection complete. ##DONE##"),
     ],
@@ -374,7 +374,7 @@ pipeline default(harness: Harness) {
     harness,
     [
       llm_text("I should inspect app.txt before editing."),
-      llm_text("I still need to inspect app.txt, but I am only narrating."),
+      llm_text("I should inspect APP txt before editing!"),
       lookup_call(),
       llm_text("Inspection complete. ##DONE##"),
     ],
@@ -390,10 +390,10 @@ pipeline default(harness: Harness) {
     harness,
     [
       llm_text("I should inspect app.txt before editing."),
-      llm_text("I still need to inspect app.txt, but I am only narrating."),
+      llm_text("I should inspect APP txt before editing!"),
       lookup_call(),
       llm_text("I should inspect app.txt again."),
-      llm_text("I still need another inspection, but I am only narrating."),
+      llm_text("I should inspect APP txt again!"),
       lookup_call(),
       llm_text("Inspection complete. ##DONE##"),
     ],

@@ -16,7 +16,7 @@
           "transport": "JSONRPC"
         }
       ],
-      "version": "0.10.114",
+      "version": "0.10.115-dev",
       "provider": {
         "organization": "Harn"
       },
