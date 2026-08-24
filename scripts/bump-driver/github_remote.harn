@@ -12,7 +12,17 @@ import {
   pulls_disable_auto_merge,
   pulls_enable_auto_merge,
 } from "harn-github-connector/default"
-import { GithubWorktreeCommitRequest, github_commit_worktree } from "harn-github-connector/worktree"
+import {
+  GithubConnectorError,
+  GithubWorktreeCommitRequest,
+  github_commit_worktree,
+} from "harn-github-connector/worktree"
+
+/** A publication replay reuses the same exact worktree and base lease. */
+const WORKTREE_PUBLICATION_MAX_ATTEMPTS = 3
+
+/** Short bounded delays keep a transient GitHub outage from rerunning the bump. */
+const WORKTREE_PUBLICATION_RETRY_DELAYS_MS = [250, 1000]
 
 /** Closed configuration for one repository-bound GitHub bump driver. */
 pub type GithubBumpRemoteConfig = {
@@ -21,6 +31,7 @@ pub type GithubBumpRemoteConfig = {
   token: string,
   branch: string,
   base: string,
+  repo_dir?: string,
 }
 
 type GithubRepo = {owner: string, name: string}
@@ -38,6 +49,34 @@ fn __must(result, operation: string) {
     throw "bump-driver: " + operation + " failed: " + json_stringify(unwrap_err(result))
   }
   return unwrap(result)
+}
+
+fn __retryable_publication_failure(failure: GithubConnectorError) -> bool {
+  const status = failure.http_status ?? 0
+  return failure.category == "network" && status >= 500 && status < 600
+}
+
+/**
+ * Replay only the leased worktree publication after a transient GitHub 5xx.
+ *
+ * Refresh, formatting, validation, and signed-worktree assembly all precede
+ * this adapter. Re-entering the connector derives the same delta from the same
+ * worktree and reconciles it under the same base lease; it never reruns those
+ * expensive or mutating preparation stages.
+ */
+fn __publish_worktree(harness: Harness, publication: GithubWorktreeCommitRequest) {
+  let attempt = 1
+  let result = github_commit_worktree(harness, publication)
+  while is_err(result) && attempt < WORKTREE_PUBLICATION_MAX_ATTEMPTS {
+    const failure: GithubConnectorError = unwrap_err(result)
+    if !__retryable_publication_failure(failure) {
+      return result
+    }
+    harness.clock.sleep_ms(WORKTREE_PUBLICATION_RETRY_DELAYS_MS[attempt - 1] ?? 0)
+    attempt = attempt + 1
+    result = github_commit_worktree(harness, publication)
+  }
+  return result
 }
 
 /** Bind the GitHub connector package to std/bump/live's provider boundary. */
@@ -144,7 +183,7 @@ pub fn github_bump_remote(harness: Harness, config: GithubBumpRemoteConfig) -> L
         repo: repo.name,
         branch: request.branch,
         headline: request.headline,
-        repo_dir: ".",
+        repo_dir: config.repo_dir ?? ".",
         source: "worktree",
         base_oid: request.base_sha,
         create_branch: true,
@@ -152,7 +191,7 @@ pub fn github_bump_remote(harness: Harness, config: GithubBumpRemoteConfig) -> L
         options: options,
       }
       const receipt = __must(
-        github_commit_worktree(harness, publication),
+        __publish_worktree(harness, publication),
         "leased signed worktree publication",
       )
       if !receipt.committed {

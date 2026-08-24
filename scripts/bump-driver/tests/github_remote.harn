@@ -3,7 +3,7 @@ import { github_bump_remote } from "../github_remote"
 
 const API = "https://api.github.com"
 
-fn remote(harness: Harness) {
+fn remote(harness: Harness, repo_dir = ".") {
   return github_bump_remote(
     harness,
     {
@@ -12,6 +12,55 @@ fn remote(harness: Harness) {
       token: "github-app-installation-token",
       branch: "automation/bump-harn-runtime",
       base: "main",
+      repo_dir: repo_dir,
+    },
+  )
+}
+
+fn run_ok(process: HarnessProcess, spec: dict) -> dict {
+  const result = process.run(spec)
+  if !result.success {
+    throw "fixture command failed with exit " + to_string(result.exit_code) + ": "
+      + to_string(result.stderr)
+  }
+  return result
+}
+
+fn git_ok(process: HarnessProcess, dir: string, args: list<string>) -> dict {
+  return run_ok(
+    process,
+    {program: "git", args: args, cwd: dir, env: {}, stdin: "", timeout_ms: 120000},
+  )
+}
+
+fn publication_repo(capabilities: {fs: HarnessFs, process: HarnessProcess}) -> dict {
+  const dir = capabilities.fs.mkdtemp_in_workspace("harn-bump-publication-")
+  git_ok(capabilities.process, dir, ["init", "-q", "-b", "main", "."])
+  git_ok(capabilities.process, dir, ["config", "user.email", "harn-bump-test@example.test"])
+  git_ok(capabilities.process, dir, ["config", "user.name", "Harn Bump Test"])
+  git_ok(capabilities.process, dir, ["config", "commit.gpgsign", "false"])
+  git_ok(capabilities.process, dir, ["config", "core.hooksPath", ".git/harn-absent-hooks"])
+  capabilities.fs.write_text(dir + "/runtime.lock", "version = 0.10.113\n")
+  git_ok(capabilities.process, dir, ["add", "runtime.lock"])
+  git_ok(capabilities.process, dir, ["commit", "-q", "--no-verify", "-m", "base"])
+  const base = trim(to_string(git_ok(capabilities.process, dir, ["rev-parse", "HEAD"]).stdout))
+  capabilities.fs.write_text(dir + "/runtime.lock", "version = 0.10.114\n")
+  return {dir: dir, base: base}
+}
+
+fn signed_commit_body(oid: string) -> string {
+  return json_stringify(
+    {
+      data: {
+        createCommitOnBranch: {
+          commit: {
+            oid: oid,
+            url: "https://github.com/octo-org/octo-repo/commit/" + oid,
+            signature: {isValid: true, state: "VALID", wasSignedByGitHub: true},
+          },
+          ref: {name: "automation/bump-harn-runtime", target: {oid: oid}},
+        },
+      },
     },
   )
 }
@@ -174,6 +223,46 @@ pipeline test_pull_upsert_waits_for_published_head_before_mutation(harness: Harn
       {method: "GET", url: list_url},
       {method: "GET", url: list_url},
       {method: "PATCH", url: pull_url},
+    ],
+  )
+  harness.testing.http_mock_clear()
+}
+
+pipeline test_signed_worktree_publication_retries_one_github_502_in_place(harness: Harness, task) {
+  harness.testing.http_mock_clear()
+  const fixture = publication_repo({fs: harness.fs, process: harness.process})
+  const ref_url = API
+    + "/repos/octo-org/octo-repo/git/ref/heads/automation/bump-harn-runtime"
+  const reference = {
+    status: 200,
+    body: json_stringify(
+      {ref: "refs/heads/automation/bump-harn-runtime", object: {sha: fixture.base, type: "commit"}},
+    ),
+  }
+  harness.testing.http_mock("GET", ref_url, {responses: [reference, reference]})
+  const commit_oid = "cccccccccccccccccccccccccccccccccccccccc"
+  harness.testing.http_mock(
+    "POST",
+    API + "/graphql",
+    {
+      responses: [
+        {status: 502, body: json_stringify({message: "Bad Gateway"})},
+        {status: 200, body: signed_commit_body(commit_oid)},
+      ],
+    },
+  )
+  const receipt = remote(harness, fixture.dir).publish_commit(
+    {branch: "automation/bump-harn-runtime", headline: "Bump Harn runtime", base_sha: fixture.base},
+  )
+  assert_eq(receipt.oid, commit_oid)
+  assert_eq(
+    harness.testing.http_mock_calls().map({ call -> {method: call.method, url: call.url} })
+      .to_list(),
+    [
+      {method: "GET", url: ref_url},
+      {method: "POST", url: API + "/graphql"},
+      {method: "GET", url: ref_url},
+      {method: "POST", url: API + "/graphql"},
     ],
   )
   harness.testing.http_mock_clear()

@@ -26,6 +26,10 @@
     // Isolated toolchain builds are generated output, including vendored crate
     // READMEs copied by build scripts.
     ".harn-toolchain-cache/**",
+    // Package installation materializes immutable dependency generations under
+    // nested `.harn/` directories. Their vendored docs are build output, while
+    // the owning package sources remain linted at their normal paths.
+    "**/.harn*/**",
     "docs/dist",
     ".worktrees",
     ".burin",
