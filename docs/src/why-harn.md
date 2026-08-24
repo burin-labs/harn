@@ -41,8 +41,10 @@ and call a model:
 const answer = harness.llm.call("Summarize this code", "You are a code reviewer.")
 ```
 
-Harn ships with built-in configs for Anthropic, OpenAI, OpenRouter,
-HuggingFace, Ollama, and local OpenAI-compatible servers. Switching
+Harn ships with built-in configs for 44 providers, including Anthropic,
+OpenAI, Google Gemini, OpenRouter, Groq, DeepSeek, Ollama, and local
+OpenAI-compatible servers. The
+[provider capability matrix](provider-matrix.md) has the full list. Switching
 providers is a one-field change in the options dict.
 
 ### Pipeline composition

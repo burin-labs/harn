@@ -240,7 +240,7 @@ export const RATINGS: Record<string, Record<string, Cell>> = {
   // --- Rows Harn does not win ---------------------------------------------
 
   "callable-from-an-existing-codebase": {
-    harn: { rating: "partial", note: "Reachable over MCP, ACP, and A2A, or by embedding the runtime in Rust. There's no generated client for your language." },
+    harn: { rating: "partial", note: "The Python and TypeScript SDKs are REST clients for a running Harn server, not in-process bindings. In-process means embedding the runtime in Rust." },
     inngest: { rating: "yes", note: "An SDK you import into the application you already have." },
     temporal: { rating: "yes", note: "SDKs for Go, Java, Python, TypeScript, .NET, and PHP." },
     langgraph: { rating: "yes", note: "A library you import." },

@@ -129,10 +129,13 @@ better.
 
 ### Callable from an existing codebase
 
-Harn runs a program. It doesn't generate a typed client you import into the
-service you already have. You can reach a Harn program over MCP, ACP, or A2A,
-or embed the runtime in Rust, but that's a heavier boundary than a library
-call.
+Harn runs a program. The
+[Python](https://github.com/burin-labs/harn-sdk-python) and
+[TypeScript](https://github.com/burin-labs/harn-sdk-typescript) SDKs are REST
+clients for the Harn Agents API, so they need a running server rather than
+linking Harn into your process. In-process means embedding the runtime in Rust,
+and the other way in is over MCP, ACP, or A2A. All of those are heavier
+boundaries than a library call.
 
 BAML sits at the other end of this: its primary path is generating a typed
 client for Python, TypeScript, Go, Java, C#, or Rust so an existing codebase
